@@ -7,7 +7,7 @@ import {
 } from '@roomote/types';
 
 import { TaskCommandName } from '../lib/harness';
-import { publicProcedure } from '../trpc';
+import { publicProcedure, type Context } from '../trpc';
 import {
   clearLatestUserMessageForSlackThreadQuote,
   suppressNextSlackThreadReplyQuote,
@@ -19,6 +19,17 @@ const requestUserInputAnswersSchema = z.record(
     answers: z.array(z.string()),
   }),
 );
+
+const answerUserInputRequestInputSchema = z.object({
+  requestId: z.string().min(1),
+  answers: requestUserInputAnswersSchema,
+  userName: z.string().optional(),
+  suppressSlackReplyQuote: z.boolean().optional(),
+});
+
+type AnswerUserInputRequestInput = z.infer<
+  typeof answerUserInputRequestInputSchema
+>;
 
 const RESTORED_REQUEST_WAIT_MS = 1_000;
 const RESTORED_REQUEST_POLL_MS = 25;
@@ -65,93 +76,91 @@ function getRequestUserInputResponseResolution(
     : 'cancelled';
 }
 
-export const answerUserInputRequest = publicProcedure
-  .input(
-    z.object({
-      requestId: z.string().min(1),
-      answers: requestUserInputAnswersSchema,
-      userName: z.string().optional(),
-      suppressSlackReplyQuote: z.boolean().optional(),
-    }),
-  )
-  .mutation(async ({ input, ctx }) => {
-    const userId =
-      // Deployment-principal run tokens have a null userId; treat them as no
-      // acting user rather than fabricating one.
-      ctx.auth && 'userId' in ctx.auth
-        ? (ctx.auth.userId ?? undefined)
-        : undefined;
+export async function answerUserInputRequestFromWorker(
+  input: AnswerUserInputRequestInput,
+  ctx: Context,
+) {
+  const userId =
+    // Deployment-principal run tokens have a null userId; treat them as no
+    // acting user rather than fabricating one.
+    ctx.auth && 'userId' in ctx.auth
+      ? (ctx.auth.userId ?? undefined)
+      : undefined;
 
-    const canDeliver = (await ctx.prepareActorScopedTurn?.(userId)) !== false;
+  const canDeliver = (await ctx.prepareActorScopedTurn?.(userId)) !== false;
 
-    if (!canDeliver) {
-      throw new TRPCError({
-        code: 'PRECONDITION_FAILED',
-        message:
-          'Failed to prepare actor-scoped credentials for this response. Please retry.',
-      });
-    }
+  if (!canDeliver) {
+    throw new TRPCError({
+      code: 'PRECONDITION_FAILED',
+      message:
+        'Failed to prepare actor-scoped credentials for this response. Please retry.',
+    });
+  }
 
-    if (!ctx.harness.isConnected) {
-      throw new TRPCError({
-        code: 'PRECONDITION_FAILED',
-        message: 'Sandbox harness is not connected',
-      });
-    }
+  if (!ctx.harness.isConnected) {
+    throw new TRPCError({
+      code: 'PRECONDITION_FAILED',
+      message: 'Sandbox harness is not connected',
+    });
+  }
 
-    await waitForPendingRequestRestore(ctx.harness, input.requestId);
+  await waitForPendingRequestRestore(ctx.harness, input.requestId);
 
-    const pendingRequest = ctx.harness
-      .getPendingUserInputRequests?.()
-      .find((request) => request.requestId === input.requestId);
+  const pendingRequest = ctx.harness
+    .getPendingUserInputRequests?.()
+    .find((request) => request.requestId === input.requestId);
 
-    let trackedSlackQuote: { quoteId?: string } | null = null;
+  let trackedSlackQuote: { quoteId?: string } | null = null;
 
-    try {
-      trackedSlackQuote = input.suppressSlackReplyQuote
-        ? await suppressNextSlackThreadReplyQuote({
-            runId: ctx.runId,
-            logPrefix: 'answerUserInputRequest',
-            warn: (message) => ctx.harnessLogger?.warn(message),
-          })
-        : await trackLatestUserMessageForSlackThreadQuote({
-            runId: ctx.runId,
-            text: formatRequestUserInputResponseText(pendingRequest ?? null, {
-              resolution: getRequestUserInputResponseResolution(input.answers),
-              answers: input.answers,
-            }),
-            userName: input.userName,
-            logPrefix: 'answerUserInputRequest',
-            warn: (message) => ctx.harnessLogger?.warn(message),
-          });
-
-      const sent = ctx.harness.sendCommand({
-        commandName: TaskCommandName.AnswerUserInputRequest,
-        data: {
-          requestId: input.requestId,
-          answers: input.answers,
-          ...(userId ? { userId } : {}),
-        },
-      });
-
-      if (!sent) {
-        throw new TRPCError({
-          code: 'NOT_FOUND',
-          message: 'Pending user input request not found',
-        });
-      }
-    } catch (error) {
-      if (trackedSlackQuote) {
-        await clearLatestUserMessageForSlackThreadQuote({
+  try {
+    trackedSlackQuote = input.suppressSlackReplyQuote
+      ? await suppressNextSlackThreadReplyQuote({
           runId: ctx.runId,
-          quoteId: trackedSlackQuote.quoteId,
+          logPrefix: 'answerUserInputRequest',
+          warn: (message) => ctx.harnessLogger?.warn(message),
+        })
+      : await trackLatestUserMessageForSlackThreadQuote({
+          runId: ctx.runId,
+          text: formatRequestUserInputResponseText(pendingRequest ?? null, {
+            resolution: getRequestUserInputResponseResolution(input.answers),
+            answers: input.answers,
+          }),
+          userName: input.userName,
           logPrefix: 'answerUserInputRequest',
           warn: (message) => ctx.harnessLogger?.warn(message),
         });
-      }
 
-      throw error;
+    const sent = ctx.harness.sendCommand({
+      commandName: TaskCommandName.AnswerUserInputRequest,
+      data: {
+        requestId: input.requestId,
+        answers: input.answers,
+        ...(userId ? { userId } : {}),
+      },
+    });
+
+    if (!sent) {
+      throw new TRPCError({
+        code: 'NOT_FOUND',
+        message: 'Pending user input request not found',
+      });
+    }
+  } catch (error) {
+    if (trackedSlackQuote) {
+      await clearLatestUserMessageForSlackThreadQuote({
+        runId: ctx.runId,
+        quoteId: trackedSlackQuote.quoteId,
+        logPrefix: 'answerUserInputRequest',
+        warn: (message) => ctx.harnessLogger?.warn(message),
+      });
     }
 
-    return { success: true };
-  });
+    throw error;
+  }
+
+  return { success: true };
+}
+
+export const answerUserInputRequest = publicProcedure
+  .input(answerUserInputRequestInputSchema)
+  .mutation(({ input, ctx }) => answerUserInputRequestFromWorker(input, ctx));

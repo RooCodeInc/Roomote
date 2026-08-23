@@ -1,6 +1,9 @@
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
-import { TASK_GOAL_STATUSES } from '@roomote/types';
+import {
+  parseAcpRequestUserInputAnswerReply,
+  TASK_GOAL_STATUSES,
+} from '@roomote/types';
 import { isActiveTaskPhase } from '../lib/harness-manager';
 import { publicProcedure } from '../trpc';
 import { getFollowUpWorkflowPhase } from '../../run-task/workflow-phase';
@@ -10,6 +13,7 @@ import {
   trackLatestUserMessageForSlackThreadQuote,
 } from './slackQuoteTracking';
 import { recordSandboxPromptSlackTurnStart } from './slackReplyTurnTracking';
+import { answerUserInputRequestFromWorker } from './answerUserInputRequest';
 
 /**
  * Interrupt the current turn and immediately send a steering prompt in the
@@ -24,6 +28,7 @@ export const steerTask = publicProcedure
         images: z.array(z.string()).optional(),
         userName: z.string().optional(),
         suppressSlackReplyQuote: z.boolean().optional(),
+        answerPendingInput: z.boolean().optional(),
         goalContext: z
           .object({
             objective: z.string().max(10_000),
@@ -47,6 +52,32 @@ export const steerTask = publicProcedure
       ),
   )
   .mutation(async ({ input, ctx }) => {
+    if (input.answerPendingInput) {
+      const pendingRequests = ctx.harness.getPendingUserInputRequests?.() ?? [];
+      const [pendingRequest] = pendingRequests;
+
+      if (pendingRequest && pendingRequests.length === 1) {
+        const answer = parseAcpRequestUserInputAnswerReply(
+          pendingRequest.questions,
+          input.prompt,
+        );
+
+        if (answer) {
+          return answerUserInputRequestFromWorker(
+            {
+              requestId: pendingRequest.requestId,
+              answers: answer.answers,
+              ...(input.userName ? { userName: input.userName } : {}),
+              ...(input.suppressSlackReplyQuote !== undefined
+                ? { suppressSlackReplyQuote: input.suppressSlackReplyQuote }
+                : {}),
+            },
+            ctx,
+          );
+        }
+      }
+    }
+
     const workflowPhase = getFollowUpWorkflowPhase(input.prompt);
 
     if (!ctx.harnessManager) {
