@@ -219,7 +219,17 @@ describe('buildOpenCodeCliEnv', () => {
           manage_tasks: true,
         },
       });
-      expect(agent.prompt).toEqual(expect.stringContaining('Use only'));
+      expect(agent.prompt).toEqual(
+        expect.stringContaining(
+          'deployment integrations and read-only task inspection',
+        ),
+      );
+      expect(agent.prompt).toEqual(
+        expect.stringContaining('Do not attempt to inspect local files'),
+      );
+      expect(agent.prompt).not.toEqual(
+        expect.stringContaining('instead of attempting to inspect files'),
+      );
       expect(agent.prompt).not.toEqual(
         expect.stringContaining('read those images'),
       );
