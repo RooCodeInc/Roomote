@@ -63,13 +63,21 @@ describe('Fast native OpenCode tool bridge', () => {
       'Use launch_task, send_task_message, or cancel_task for task changes',
     );
     expect(messageContextSource).toContain('invoke("get_chat_message_context"');
-    expect(messageContextSource).toContain('messageId: z.string().min(1)');
+    expect(messageContextSource).toContain(
+      'messageId: z.string().min(1).optional()',
+    );
+    expect(messageContextSource).toContain(
+      'messageLink: z.string().url().optional()',
+    );
     expect(messageContextSource).not.toContain('channel:');
     expect(channelMessagesSource).toContain(
       'invoke("get_chat_channel_messages"',
     );
     expect(channelMessagesSource).toContain(
       'defaults Slack history to the previous 24 hours',
+    );
+    expect(channelMessagesSource).toContain(
+      'channelLink: z.string().url().optional()',
     );
     expect(channelMessagesSource).not.toContain('channel:');
     expect(bridgeSource).toContain('context.sessionID');

@@ -349,6 +349,37 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     });
   });
 
+  it('passes cross-channel permalinks through to the conversation adapter', async () => {
+    const messageLink =
+      'https://acme.slack.com/archives/COTHER/p1710000000000100';
+    const channelLink = 'https://acme.slack.com/archives/COTHER';
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        await invokeTool(nativeToolNames.getChatMessageContext, {
+          messageLink,
+        });
+        await invokeTool(nativeToolNames.getChatChannelMessages, {
+          channelLink,
+        });
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'closeout',
+          message: 'I found the cross-channel context.',
+        });
+        return '';
+      },
+    );
+    const adapter = callbacks();
+
+    await answerFastAgentQuestion({ ...baseParams, adapter });
+
+    expect(adapter.getChatMessageContext).toHaveBeenCalledWith({ messageLink });
+    expect(adapter.getChatChannelMessages).toHaveBeenCalledWith({
+      channelLink,
+      oldest: expect.any(String),
+    });
+  });
+
   it('defaults unbounded Slack history reads to the previous 24 hours', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-08-24T12:00:00.000Z'));

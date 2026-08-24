@@ -84,10 +84,16 @@ const chatReactionArgsSchema = z.object({
   name: z.string().trim().min(1),
   purpose: z.enum(['ack', 'closeout']),
 });
-const chatMessageContextArgsSchema = z.object({
-  messageId: z.string().trim().min(1),
-});
+const chatMessageContextArgsSchema = z
+  .object({
+    messageId: z.string().trim().min(1).optional(),
+    messageLink: z.string().trim().min(1).optional(),
+  })
+  .refine((args) => args.messageId || args.messageLink, {
+    message: 'messageId or messageLink is required',
+  });
 const chatChannelMessagesArgsSchema = z.object({
+  channelLink: z.string().trim().min(1).optional(),
   oldest: z.string().trim().min(1).optional(),
   latest: z.string().trim().min(1).optional(),
 });

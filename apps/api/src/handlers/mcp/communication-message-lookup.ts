@@ -155,14 +155,28 @@ export async function lookupCommunicationMessageContext(options: {
 
 export async function lookupCommunicationChannelMessages(options: {
   channel?: string;
+  channelLink?: string;
   oldest?: string;
   latest?: string;
   provider?: SupportedCommunicationLookupProvider;
   taskRun?: CommunicationLookupTaskRun | null;
   actingUserId?: string | null;
 }): Promise<CommunicationChannelMessagesPayload> {
+  const channelLink = options.channelLink?.trim();
+  const parsedChannelLink = channelLink ? parseReference(channelLink) : null;
+  if (channelLink && !parsedChannelLink) {
+    throw new McpProxyError(
+      400,
+      'channelLink must be a Slack or Discord channel/message link',
+    );
+  }
+
   const channel = options.channel?.trim();
-  const reference = channel ? parseReference(channel) : null;
+  const parsedChannel = channel ? parseReference(channel) : null;
+  if (parsedChannelLink && parsedChannel) {
+    assertMatchingReferences(parsedChannelLink, parsedChannel);
+  }
+  const reference = parsedChannelLink ?? parsedChannel;
   const provider = resolveLookupProvider({
     reference,
     provider: options.provider,

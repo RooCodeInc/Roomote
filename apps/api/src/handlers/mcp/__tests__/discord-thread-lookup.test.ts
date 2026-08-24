@@ -1,5 +1,4 @@
 import {
-  assertDiscordChannelAccess,
   lookupDiscordThread,
   normalizeDiscordChannelTarget,
 } from '../discord-thread-lookup';
@@ -141,7 +140,7 @@ describe('lookupDiscordThread', () => {
     );
   });
 
-  it('rejects an explicit channel the linked Discord user cannot view', async () => {
+  it('rejects a cross-channel permalink the linked Discord user cannot view', async () => {
     getChannelMock.mockResolvedValue({
       id: '999000000000000001',
       name: 'private',
@@ -154,14 +153,16 @@ describe('lookupDiscordThread', () => {
     canUserAccessChannelMock.mockResolvedValueOnce(false);
 
     await expect(
-      assertDiscordChannelAccess({
-        provider: {
-          getChannel: getChannelMock,
-          canUserAccessChannel: canUserAccessChannelMock,
-        } as never,
-        channelId: '999000000000000001',
-        isExplicitChannel: true,
-        actingUserId: 'user-1',
+      lookupDiscordThread({
+        messageLink:
+          'https://discord.com/channels/123/999000000000000001/789000000000000001',
+        taskRun: {
+          actingUserId: 'user-1',
+          payload: {
+            communicationProvider: 'discord',
+            communicationChannelId: '456000000000000001',
+          },
+        },
       }),
     ).rejects.toThrow(
       'Linked Discord user cannot access channel 999000000000000001',
@@ -171,5 +172,6 @@ describe('lookupDiscordThread', () => {
       channelId: '999000000000000001',
       userId: 'discord-user-1',
     });
+    expect(fetchThreadMessagesMock).not.toHaveBeenCalled();
   });
 });

@@ -228,6 +228,38 @@ describe('lookupCommunicationChannelMessages', () => {
     });
   });
 
+  it('accepts a permalink-only channelLink and forwards the parsed channel', async () => {
+    lookupDiscordChannelMessagesMock.mockResolvedValueOnce({
+      channelId: '456',
+      messageCount: 0,
+      messages: [],
+    });
+
+    await lookupCommunicationChannelMessages({
+      actingUserId: 'user-1',
+      channelLink: 'https://discord.com/channels/123/456',
+      provider: 'discord',
+    });
+
+    expect(lookupDiscordChannelMessagesMock).toHaveBeenCalledWith({
+      actingDiscordMembershipUserId: 'user-1',
+      channel: '456',
+    });
+  });
+
+  it('rejects a raw channel ID supplied as channelLink', async () => {
+    await expect(
+      lookupCommunicationChannelMessages({
+        actingUserId: 'user-1',
+        channelLink: '456',
+        provider: 'discord',
+      }),
+    ).rejects.toThrow(
+      'channelLink must be a Slack or Discord channel/message link',
+    );
+    expect(lookupDiscordChannelMessagesMock).not.toHaveBeenCalled();
+  });
+
   it('uses an explicit Discord provider for a raw authorized channel id', async () => {
     lookupDiscordChannelMessagesMock.mockResolvedValueOnce({
       channelId: '456',

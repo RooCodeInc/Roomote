@@ -69,8 +69,12 @@ export type RetryFastAgentTaskStart = () => Promise<
 /** Surface adapter for side effects available during one Fast turn. */
 export type FastAgentTurnAdapter = {
   launchTask: LaunchFastAgentTask;
-  getChatMessageContext?: (input: { messageId: string }) => Promise<unknown>;
+  getChatMessageContext?: (input: {
+    messageId?: string;
+    messageLink?: string;
+  }) => Promise<unknown>;
   getChatChannelMessages?: (input: {
+    channelLink?: string;
     oldest?: string;
     latest?: string;
   }) => Promise<unknown>;

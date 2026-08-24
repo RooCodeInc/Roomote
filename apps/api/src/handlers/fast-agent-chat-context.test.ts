@@ -72,4 +72,83 @@ describe('createFastAgentChatContextAdapter', () => {
       provider: 'discord',
     });
   });
+
+  it('uses Slack permalinks instead of the conversation channel for cross-channel lookups', async () => {
+    const adapter = createFastAgentChatContextAdapter({
+      actingUserId: 'user-1',
+      conversation: {
+        surface: 'slack',
+        workspaceId: 'team-1',
+        conversationId: '100.1',
+        replyTarget: { channelId: 'channel-1', threadId: '100.1' },
+      },
+    });
+    const messageLink =
+      'https://acme.slack.com/archives/COTHER/p1710000000000100';
+    const channelLink = 'https://acme.slack.com/archives/COTHER';
+
+    await adapter.getChatMessageContext({ messageLink });
+    await adapter.getChatChannelMessages({ channelLink });
+
+    expect(mocks.lookupMessageContext).toHaveBeenCalledWith({
+      actingUserId: 'user-1',
+      messageLink,
+      provider: 'slack',
+    });
+    expect(mocks.lookupChannelMessages).toHaveBeenCalledWith({
+      actingUserId: 'user-1',
+      channelLink,
+      provider: 'slack',
+    });
+  });
+
+  it('uses Discord permalinks instead of the active thread for cross-channel lookups', async () => {
+    const adapter = createFastAgentChatContextAdapter({
+      actingUserId: 'user-2',
+      conversation: {
+        surface: 'discord',
+        workspaceId: 'guild-1',
+        conversationId: 'thread-1',
+        replyTarget: { channelId: 'parent-1', threadId: 'thread-1' },
+      },
+    });
+    const messageLink = 'https://discord.com/channels/123/456/789';
+    const channelLink = 'https://discord.com/channels/123/456';
+
+    await adapter.getChatMessageContext({ messageLink });
+    await adapter.getChatChannelMessages({ channelLink });
+
+    expect(mocks.lookupMessageContext).toHaveBeenCalledWith({
+      actingUserId: 'user-2',
+      messageLink,
+      provider: 'discord',
+    });
+    expect(mocks.lookupChannelMessages).toHaveBeenCalledWith({
+      actingUserId: 'user-2',
+      channelLink,
+      provider: 'discord',
+    });
+  });
+
+  it('propagates cross-channel access denials from the shared lookup', async () => {
+    mocks.lookupMessageContext.mockRejectedValueOnce(
+      new Error('Linked Slack user is not a member of channel CPRIVATE.'),
+    );
+    const adapter = createFastAgentChatContextAdapter({
+      actingUserId: 'user-1',
+      conversation: {
+        surface: 'slack',
+        workspaceId: 'team-1',
+        conversationId: '100.1',
+        replyTarget: { channelId: 'channel-1', threadId: '100.1' },
+      },
+    });
+
+    await expect(
+      adapter.getChatMessageContext({
+        messageLink:
+          'https://acme.slack.com/archives/CPRIVATE/p1710000000000100',
+      }),
+    ).rejects.toThrow('Linked Slack user is not a member of channel CPRIVATE.');
+  });
 });

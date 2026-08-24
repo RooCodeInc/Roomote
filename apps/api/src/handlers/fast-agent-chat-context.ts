@@ -16,18 +16,29 @@ export function createFastAgentChatContextAdapter(options: {
       : options.conversation.replyTarget.channelId;
 
   return {
-    getChatMessageContext: (input: { messageId: string }) =>
+    getChatMessageContext: (input: {
+      messageId?: string;
+      messageLink?: string;
+    }) =>
       lookupCommunicationMessageContext({
         actingUserId: options.actingUserId,
-        channel,
-        messageId: input.messageId,
         provider: options.conversation.surface,
+        ...(input.messageLink
+          ? { messageLink: input.messageLink }
+          : { channel }),
+        ...(input.messageId ? { messageId: input.messageId } : {}),
       }),
-    getChatChannelMessages: (input: { oldest?: string; latest?: string }) =>
+    getChatChannelMessages: (input: {
+      channelLink?: string;
+      oldest?: string;
+      latest?: string;
+    }) =>
       lookupCommunicationChannelMessages({
         actingUserId: options.actingUserId,
-        channel,
         provider: options.conversation.surface,
+        ...(input.channelLink
+          ? { channelLink: input.channelLink }
+          : { channel }),
         ...(input.oldest ? { oldest: input.oldest } : {}),
         ...(input.latest ? { latest: input.latest } : {}),
       }),

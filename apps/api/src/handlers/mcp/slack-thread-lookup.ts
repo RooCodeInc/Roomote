@@ -439,7 +439,7 @@ export async function lookupSlackThread(options: {
   if (!message) {
     throw new McpProxyError(
       404,
-      `Slack message ${requestedMessageTs} was not found in the originating channel`,
+      `Slack message ${requestedMessageTs} was not found in channel ${lookupChannel}`,
     );
   }
 
@@ -451,7 +451,7 @@ export async function lookupSlackThread(options: {
   if (threadMessages.length === 0) {
     throw new McpProxyError(
       502,
-      `Slack thread for message ${requestedMessageTs} could not be fetched from the originating channel`,
+      `Slack thread for message ${requestedMessageTs} could not be fetched from channel ${lookupChannel}`,
     );
   }
 
@@ -463,7 +463,7 @@ export async function lookupSlackThread(options: {
   if (matchedMessageIndex === -1) {
     throw new McpProxyError(
       404,
-      `Slack thread for message ${requestedMessageTs} could not be resolved`,
+      `Slack thread for message ${requestedMessageTs} could not be resolved in channel ${lookupChannel}`,
     );
   }
 

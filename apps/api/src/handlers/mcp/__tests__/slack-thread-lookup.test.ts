@@ -600,21 +600,22 @@ describe('slack thread lookup MCP endpoint', () => {
 
     expect(response.status).toBe(502);
     expect(body.error).toBe(
-      'Slack thread for message 222.333 could not be fetched from the originating channel',
+      'Slack thread for message 222.333 could not be fetched from channel C123',
     );
   });
 
-  it('returns 404 when the message cannot be found', async () => {
+  it('names the attempted cross-channel target when the message cannot be found', async () => {
     getMessageMock.mockResolvedValue(null);
 
     const response = await postThreadLookup(runToken, {
+      channel: 'eng',
       messageTs: '999.999',
     });
     const body = (await response.json()) as JsonBody;
 
     expect(response.status).toBe(404);
     expect(body.error).toBe(
-      'Slack message 999.999 was not found in the originating channel',
+      'Slack message 999.999 was not found in channel CENG',
     );
   });
 
