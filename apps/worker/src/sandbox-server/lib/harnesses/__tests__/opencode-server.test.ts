@@ -16,6 +16,7 @@ import {
 
 import { SLACK_STOP_HOOK_SCRIPT } from '../../../../run-task/slack-stop-hook-script';
 import { resolveOpenCodeModelSelection } from '../../../../run-task/opencode-model';
+import { recordChatReplySatisfaction } from '../../../../mcp/roomote-mcp-server/chat-reply-satisfaction';
 import { TaskCommandName } from '../../harness';
 import type { HarnessInferenceUsageEvent } from '../../harness';
 import type { OpenCodeServerClient } from '../opencode-server/client';
@@ -2291,6 +2292,120 @@ describe('OpenCodeServerHarness', () => {
           missingChatCloseout: { reminderCount: 3 },
         }),
       );
+    } finally {
+      harness.dispose();
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('does not request platform fallback when a timed-out closeout succeeds late', async () => {
+    const tempDir = fs.mkdtempSync(
+      path.join(os.tmpdir(), 'roomote-opencode-closeout-late-success-'),
+    );
+    const stateFilePath = path.join(tempDir, 'slack-state.json');
+    const stopHookPath = path.join(tempDir, 'stop-hook.cjs');
+
+    fs.writeFileSync(
+      stateFilePath,
+      JSON.stringify({
+        currentTurnMessageTs: '111.222',
+        currentTurnStartedAtMs: Date.now() - 1_000,
+        parentThreadId: 'ses_1',
+      }),
+      'utf8',
+    );
+    fs.writeFileSync(stopHookPath, SLACK_STOP_HOOK_SCRIPT, 'utf8');
+
+    const client = new FakeOpenCodeServerClient();
+    const { harness } = createHarness(client, {
+      commandEnv: {
+        ROOMOTE_SLACK_REPLY_SATISFACTION_STATE_FILE: stateFilePath,
+        ROOMOTE_OPENCODE_SLACK_STOP_HOOK_SCRIPT: stopHookPath,
+      },
+      mcpServerNames: ['roomote'],
+    });
+    const taskEvents: TaskEvent[] = [];
+    harness.subscribe((event) => taskEvents.push(event));
+
+    try {
+      await connectHarness(harness, client);
+      expect(
+        harness.sendCommand({
+          commandName: TaskCommandName.StartNewTask,
+          data: { text: 'Do work.', visibleInTranscript: true },
+        }),
+      ).toBe(true);
+
+      await vi.waitFor(() => {
+        expect(client.promptAsync).toHaveBeenCalledTimes(1);
+      });
+
+      for (let attempt = 1; attempt <= 3; attempt += 1) {
+        await client.emit({
+          type: 'message.part.updated',
+          properties: {
+            part: {
+              id: `part_late_closeout_${attempt}`,
+              sessionID: 'ses_1',
+              messageID: 'msg_late_closeout',
+              type: 'tool',
+              tool: 'roomote_send_chat_reply',
+              callID: `call_late_closeout_${attempt}`,
+              state: {
+                status: 'error',
+                input: { message: 'Finished.', purpose: 'closeout' },
+                error: 'MCP error -32001: Request timed out',
+              },
+            },
+          },
+        });
+      }
+
+      recordChatReplySatisfaction({
+        stateFilePath,
+        messageTs: '333.444',
+        tool: 'send_chat_reply',
+        replyPurpose: 'closeout',
+        sessionId: 'ses_1',
+      });
+
+      client.message.mockResolvedValueOnce(
+        createFinalAssistantMessage({
+          messageId: 'msg_late_closeout',
+          text: 'The final assistant answer.',
+        }),
+      );
+      await client.emit({
+        type: 'message.updated',
+        properties: {
+          info: {
+            id: 'msg_late_closeout',
+            sessionID: 'ses_1',
+            role: 'assistant',
+            time: { completed: 1 },
+          },
+        },
+      });
+      await client.emit({
+        type: 'session.idle',
+        properties: { sessionID: 'ses_1' },
+      });
+
+      await vi.waitFor(() => {
+        expect(
+          taskEvents.some(
+            (event) => event.eventName === TaskEventName.TaskCompleted,
+          ),
+        ).toBe(true);
+      });
+      expect(client.promptAsync).toHaveBeenCalledTimes(1);
+      const completionMetadata = taskEvents.find(
+        (event) => event.eventName === TaskEventName.TaskCompleted,
+      )?.payload[3];
+      expect(completionMetadata).toEqual(
+        expect.objectContaining({ isSubtask: false }),
+      );
+      expect(completionMetadata).not.toHaveProperty('missingChatCloseout');
     } finally {
       harness.dispose();
       fs.rmSync(tempDir, { recursive: true, force: true });

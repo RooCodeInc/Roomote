@@ -48,6 +48,7 @@ import type {
 } from '../../harness';
 import { buildTaskGoalContext } from '../../../../run-task/task-goal';
 import {
+  hasTerminalChatReplyDeliveryFailure,
   MAX_RETRYABLE_DELIVERY_FAILURES_BEFORE_TERMINAL,
   recordChatReplyDeliveryFailure,
 } from '../../../../mcp/roomote-mcp-server/chat-reply-satisfaction';
@@ -4923,10 +4924,14 @@ export class OpenCodeServerHarness
 
     if (sessionId) {
       const stopDecision = this.evaluateSlackStopHook(sessionId);
-      let missingChatCloseoutReminderCount = this
-        .terminalChatReplyDeliveryFailed
-        ? MAX_RETRYABLE_DELIVERY_FAILURES_BEFORE_TERMINAL
-        : null;
+      let missingChatCloseoutReminderCount =
+        this.terminalChatReplyDeliveryFailed &&
+        hasTerminalChatReplyDeliveryFailure({
+          stateFilePath:
+            this.commandEnv?.ROOMOTE_SLACK_REPLY_SATISFACTION_STATE_FILE,
+        })
+          ? MAX_RETRYABLE_DELIVERY_FAILURES_BEFORE_TERMINAL
+          : null;
 
       if (stopDecision.blocked) {
         const reason =

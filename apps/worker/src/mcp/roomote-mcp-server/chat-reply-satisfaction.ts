@@ -177,6 +177,20 @@ export function recordChatTurnStart(input: {
  */
 export const MAX_RETRYABLE_DELIVERY_FAILURES_BEFORE_TERMINAL = 3;
 
+export function hasTerminalChatReplyDeliveryFailure(
+  input: {
+    stateFilePath?: string;
+  } = {},
+): boolean {
+  const stateFilePath = getStateFilePath(input.stateFilePath);
+  if (!stateFilePath) {
+    return false;
+  }
+
+  const terminalAtMs = readState(stateFilePath).terminalDeliveryFailureAtMs;
+  return typeof terminalAtMs === 'number' && Number.isFinite(terminalAtMs);
+}
+
 /**
  * Records a failed chat delivery attempt. When the failure is non-retryable,
  * or the bounded attempt budget is spent, stamps `terminalDeliveryFailureAtMs`
