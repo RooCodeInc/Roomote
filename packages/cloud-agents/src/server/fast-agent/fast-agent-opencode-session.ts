@@ -27,7 +27,7 @@ type FastAgentOpenCodeSessionRunInput<T> = {
   onPathSelected?: (path: FastAgentOpenCodeSessionPath) => void;
 };
 
-export type FastAgentOpenCodeSessionPath =
+type FastAgentOpenCodeSessionPath =
   | 'warm'
   | 'cold_resume'
   | 'cold_rebuild'
