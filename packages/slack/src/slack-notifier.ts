@@ -83,6 +83,13 @@ type SlackUsersListResponse = {
   };
 };
 
+/** Status values accepted by a Slack `task_card` block. */
+export type SlackTaskStreamStatus =
+  | 'pending'
+  | 'in_progress'
+  | 'complete'
+  | 'error';
+
 const SLACK_USERS_LIST_LIMIT = 999;
 const MAX_SLACK_CONVERSATIONS_REPLIES_RATE_LIMIT_RETRIES = 3;
 const MAX_SLACK_UPDATE_RETRIES = 2;

@@ -34,6 +34,7 @@ import {
   brainOutboxDrainJob,
   brainCollectorsJob,
   brainMaintenanceJob,
+  providerUsageLimitCheckJob,
 } from './scheduled-jobs';
 
 const QUEUE_NAME = 'scheduled-jobs';
@@ -173,7 +174,9 @@ async function createJobs(queue: Queue): Promise<void> {
 
   await queue.upsertJobScheduler(
     ScheduledJobName.PrReviewNotificationDispatch,
-    { every: 10 * 1000 },
+    // Terminal Roomote summaries wake the durable drain immediately. This
+    // minute-level repair cadence is only for delayed and recovered work.
+    { every: 60 * 1000 },
   );
 
   await queue.upsertJobScheduler(
@@ -215,12 +218,18 @@ async function createJobs(queue: Queue): Promise<void> {
     { pattern: '0 7 * * *' },
   );
 
+  await queue.upsertJobScheduler(ScheduledJobName.ProviderUsageLimitCheck, {
+    every: 15 * 60 * 1000,
+  });
+
   const schedulers = await queue.getJobSchedulers();
   console.log('[createJobs] getJobSchedulers ->', schedulers);
 }
 
 const runJobs = async (job: ScheduledJob): Promise<void> => {
-  console.log(`[runJobs] processing job ${job.id} of type ${job.name}`);
+  if (job.name !== ScheduledJobName.PrReviewNotificationDispatch) {
+    console.log(`[runJobs] processing job ${job.id} of type ${job.name}`);
+  }
 
   if (isAutomationJobName(job.name)) {
     await AUTOMATION_JOBS[job.name]();
@@ -254,6 +263,8 @@ const runJobs = async (job: ScheduledJob): Promise<void> => {
       return brainCollectorsJob();
     case ScheduledJobName.BrainMaintenance:
       return brainMaintenanceJob();
+    case ScheduledJobName.ProviderUsageLimitCheck:
+      return providerUsageLimitCheckJob();
     case ScheduledJobName.CustomAutomations:
       await customAutomationsJob();
       return;
@@ -294,9 +305,13 @@ export async function startScheduler() {
     autorun: true,
   });
 
-  worker.on('completed', (job) =>
-    console.log(`[Worker#on(completed)] job ${job.id} completed successfully`),
-  );
+  worker.on('completed', (job) => {
+    if (job.name !== ScheduledJobName.PrReviewNotificationDispatch) {
+      console.log(
+        `[Worker#on(completed)] job ${job.id} completed successfully`,
+      );
+    }
+  });
 
   worker.on('failed', (job, err) =>
     console.error(`[Worker#on(failed)] job ${job?.id} failed:`, err),
@@ -307,10 +322,6 @@ export async function startScheduler() {
   );
 
   const queueEvents = new QueueEvents(QUEUE_NAME, { connection });
-
-  queueEvents.on('completed', ({ jobId }) =>
-    console.log(`[QueueEvents#on(completed)] job ${jobId} completed`),
-  );
 
   queueEvents.on('failed', ({ jobId, failedReason }) =>
     console.error(

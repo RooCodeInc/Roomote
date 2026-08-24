@@ -478,6 +478,7 @@ describe('handleAdoPullRequest', () => {
       pullRequest: {
         number: 42,
         title: 'Update backend',
+        body: null,
         url: 'https://dev.azure.com/acme/Platform/_git/backend/pullrequest/42',
         authorLogin: 'roomote-bot@acme.example',
         state: 'merged',

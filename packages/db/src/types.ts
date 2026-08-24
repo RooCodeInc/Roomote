@@ -516,6 +516,7 @@ export type BackgroundAgentSettings = StoredBackgroundAgentSettings & {
   announcerDiscordChannelId: string | null;
   announcerInstructions: string | null;
   announcerLastRunAt: Date | null;
+  platformIssueAlertsEnabled: boolean;
   platformIssueSlackChannelId: string | null;
   platformIssueDiscordChannelId: string | null;
   managerStatsFrequency: ManagerStatsFrequency;

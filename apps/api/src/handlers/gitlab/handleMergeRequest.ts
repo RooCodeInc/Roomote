@@ -117,6 +117,7 @@ export async function handleGitLabMergeRequest(
         number: mergeRequest.iid,
         externalId: mergeRequest.id ?? null,
         title: mergeRequest.title,
+        body: mergeRequest.description ?? null,
         url: mergeRequest.url,
         // The merge-request webhook carries the acting user, not the MR
         // author; the scheduled sync backfills authorLogin.

@@ -1,6 +1,9 @@
 import { TRPCClientError } from '@trpc/client';
 import { enqueueTask } from '@roomote/cloud-agents/server';
-import { withSandboxServerRpcClient } from '@roomote/sdk/server';
+import {
+  notifyFastAgentParentOnPrFeedback,
+  withSandboxServerRpcClient,
+} from '@roomote/sdk/server';
 import {
   and,
   db,
@@ -21,7 +24,9 @@ import type {
 import { trackLatestUserMessageForReplyQuote } from '@roomote/communication/messages';
 import {
   TaskPayloadKind,
+  buildFastAgentChildTaskMetadata,
   EXPIRED_SNAPSHOT_RESUME_ERROR,
+  getFastAgentParentFromPayload,
   getCommunicationChannelFromTaskPayload,
   getCommunicationProviderFromTaskPayload,
   isLinkedReviewResultsMessage,
@@ -56,6 +61,7 @@ const REVIEW_HANDOFF_TASK_TYPES = new Set<TaskPayloadKind>([
 type SendMessageErrorStatus = 404 | 409 | 500 | 502;
 export type SendMessageSenderMode =
   | 'authenticated_user'
+  | 'fast_agent'
   | 'linked_review_handoff'
   | 'github_pr_follow_up';
 
@@ -73,6 +79,7 @@ const ACTOR_PRESERVING_MODES = new Set<SendMessageSenderMode>([
 ]);
 
 const SLACK_REPLY_QUOTE_SUPPRESSING_MODES = new Set<SendMessageSenderMode>([
+  'fast_agent',
   'linked_review_handoff',
   'github_pr_follow_up',
 ]);
@@ -121,6 +128,32 @@ type LatestTaskRun = {
   payload: Record<string, unknown> | null;
   port: number | null;
   result: unknown;
+};
+
+type LinkedReviewFastHandoff = {
+  fastParentRequired: boolean;
+  reviewRunId: number;
+  reviewTaskId: string;
+  reviewHeadSha?: string;
+  pullRequest: {
+    provider: 'github';
+    host: string | null;
+    repository: string;
+    number: number;
+    title: string | null;
+    url: string;
+    status: PullRequestStatus | null;
+  };
+  summary: string;
+  suggestedActionQuestion?: string;
+  suggestedActionPrompt?: string;
+  reviewResult: {
+    reviewKind: 'initial' | 'sync' | null;
+    outcome: string | null;
+    findingCount: number | null;
+    approvalStatus: 'approved' | 'skipped' | null;
+    headSha: string | null;
+  };
 };
 
 type TaskChannelBindingsRow = {
@@ -496,6 +529,10 @@ async function resumeTaskFromSnapshot({
   }
 
   const sourcePayload = sourceRun.payload ?? {};
+  const fastAgentParent =
+    senderMode === 'fast_agent'
+      ? getFastAgentParentFromPayload(sourcePayload)
+      : null;
   const repo =
     typeof sourcePayload.repo === 'string' ? sourcePayload.repo : undefined;
   const environmentId =
@@ -534,6 +571,9 @@ async function resumeTaskFromSnapshot({
     ...(images?.length ? { resumePromptImages: images } : {}),
     ...(normalizedClientMessageId
       ? { resumePromptClientMessageId: normalizedClientMessageId }
+      : {}),
+    ...(fastAgentParent
+      ? buildFastAgentChildTaskMetadata(fastAgentParent)
       : {}),
   };
   populateSnapshotResumeSlackMetadata(payload, {
@@ -596,11 +636,16 @@ async function getLinkedReviewHandoffTarget({
   targetTaskId,
 }: {
   sourceRun: {
+    taskId: string;
     type: TaskPayloadKind | string | null;
     payload: Record<string, unknown>;
   };
   targetTaskId: string;
-}): Promise<{ status: PullRequestStatus | null }> {
+}): Promise<{
+  status: PullRequestStatus | null;
+  currentHeadSha: string | null;
+  pullRequest: LinkedReviewFastHandoff['pullRequest'];
+}> {
   const repo =
     typeof sourceRun.payload.repo === 'string' ? sourceRun.payload.repo : null;
   const prNumber =
@@ -643,16 +688,43 @@ async function getLinkedReviewHandoffTarget({
 
   const prLink = await db.query.taskPullRequests.findFirst({
     where: and(
-      eq(taskPullRequests.taskId, targetTaskId),
+      // PR synchronize refreshes the review task linkage to the pushed head;
+      // the implementation owner's association can still contain its initial SHA.
+      eq(taskPullRequests.taskId, sourceRun.taskId),
       eq(taskPullRequests.repository, repo),
       eq(taskPullRequests.prNumber, prNumber),
     ),
     columns: {
+      host: true,
+      prTitle: true,
+      prUrl: true,
       status: true,
+      prSha: true,
     },
   });
 
-  return { status: prLink?.status ?? null };
+  const prUrl =
+    prLink?.prUrl ??
+    (typeof sourceRun.payload.prUrl === 'string'
+      ? sourceRun.payload.prUrl
+      : null);
+  if (!prUrl) {
+    throw new Error('Linked review handoff requires a pull request URL.');
+  }
+
+  return {
+    status: prLink?.status ?? null,
+    currentHeadSha: prLink?.prSha ?? null,
+    pullRequest: {
+      provider: 'github',
+      host: prLink?.host ?? null,
+      repository: repo,
+      number: prNumber,
+      title: prLink?.prTitle ?? null,
+      url: prUrl,
+      status: prLink?.status ?? null,
+    },
+  };
 }
 
 async function resolveLinkedReviewHandoff({
@@ -672,7 +744,12 @@ async function resolveLinkedReviewHandoff({
   targetTaskId: string;
   fallbackUserId: string;
 }): Promise<
-  { kind: 'send'; senderUserId: string } | { kind: 'skip'; reason: string }
+  | {
+      kind: 'send';
+      senderUserId: string;
+      fastHandoff?: LinkedReviewFastHandoff;
+    }
+  | { kind: 'skip'; reason: string }
 > {
   if (senderMode !== 'linked_review_handoff') {
     return { kind: 'send', senderUserId: fallbackUserId };
@@ -696,11 +773,14 @@ async function resolveLinkedReviewHandoff({
   ) {
     throw new Error('Linked review handoff requires an active PR review run.');
   }
+  const sourcePayload =
+    (sourceRun.payload as Record<string, unknown> | null) ?? {};
 
   const handoffTarget = await getLinkedReviewHandoffTarget({
     sourceRun: {
+      taskId: sourceRun.taskId,
       type: sourceRun.payloadKind,
-      payload: (sourceRun.payload as Record<string, unknown> | null) ?? {},
+      payload: sourcePayload,
     },
     targetTaskId,
   });
@@ -713,9 +793,67 @@ async function resolveLinkedReviewHandoff({
     };
   }
 
+  const parsedReview = parseLinkedReviewResults(message);
+  const reviewHeadSha =
+    parsedReview?.currentHeadSha ??
+    (typeof sourcePayload.headSha === 'string'
+      ? sourcePayload.headSha
+      : undefined);
+  // `latestObservedHeadSha` is stamped by the synchronize handler the moment a
+  // push supersedes a running review, while the linkage `prSha` only advances
+  // once the debounced follow-up has been relayed. Prefer the former so a
+  // review that finishes inside that window is still recognized as stale.
+  const currentHeadSha =
+    (typeof sourcePayload.latestObservedHeadSha === 'string'
+      ? sourcePayload.latestObservedHeadSha
+      : null) ?? handoffTarget.currentHeadSha;
+  if (reviewHeadSha && currentHeadSha && reviewHeadSha !== currentHeadSha) {
+    return {
+      kind: 'skip',
+      reason:
+        'Linked review handoff skipped because the review targets an older pull request head.',
+    };
+  }
+  const summary =
+    getLinkedReviewHandoffQuoteText(message) ??
+    (parsedReview?.outcome === 'clean'
+      ? 'Review completed with no outstanding findings.'
+      : (parsedReview?.findingCount ?? 0) > 0
+        ? `Review completed with ${parsedReview?.findingCount} outstanding ${parsedReview?.findingCount === 1 ? 'finding' : 'findings'}.`
+        : 'Review completed.');
+  const hasActionableFindings =
+    parsedReview?.outcome === 'findings_remain' ||
+    (parsedReview?.findingCount ?? 0) > 0;
+  const configuredHandoffTarget =
+    sourcePayload.linkedReviewHandoffTarget === 'fast_parent'
+      ? 'fast_parent'
+      : 'implementation_task';
+
   return {
     kind: 'send',
     senderUserId: run.actingUserId ?? fallbackUserId,
+    fastHandoff: {
+      fastParentRequired: configuredHandoffTarget === 'fast_parent',
+      reviewRunId: sourceRun.id,
+      reviewTaskId: sourceRun.taskId,
+      ...(reviewHeadSha ? { reviewHeadSha } : {}),
+      pullRequest: handoffTarget.pullRequest,
+      summary,
+      reviewResult: {
+        reviewKind: parsedReview?.reviewKind ?? null,
+        outcome: parsedReview?.outcome ?? null,
+        findingCount: parsedReview?.findingCount ?? null,
+        approvalStatus: parsedReview?.approvalStatus ?? null,
+        headSha: reviewHeadSha ?? null,
+      },
+      ...(hasActionableFindings
+        ? {
+            suggestedActionQuestion:
+              'Would you like me to resolve this feedback?',
+            suggestedActionPrompt: `Address the review feedback on ${handoffTarget.pullRequest.repository}#${handoffTarget.pullRequest.number}.`,
+          }
+        : {}),
+    },
   };
 }
 
@@ -786,6 +924,49 @@ export async function sendMessageToTask({
         result: {
           skipped: true,
           reason: linkedReviewHandoff.reason,
+        },
+      };
+    }
+
+    if (
+      linkedReviewHandoff.fastHandoff &&
+      getFastAgentParentFromPayload(run.payload)
+    ) {
+      const fastHandoff = linkedReviewHandoff.fastHandoff;
+      const feedbackSourceId = `linked-review:${fastHandoff.reviewTaskId}:${fastHandoff.reviewHeadSha ?? fastHandoff.reviewRunId}`;
+      await notifyFastAgentParentOnPrFeedback({
+        run: {
+          id: run.id,
+          taskId,
+          payload: run.payload,
+        },
+        feedbackSourceIds: [feedbackSourceId],
+        reviewTaskId: fastHandoff.reviewTaskId,
+        ...(fastHandoff.reviewHeadSha
+          ? { reviewHeadSha: fastHandoff.reviewHeadSha }
+          : {}),
+        pullRequest: fastHandoff.pullRequest,
+        summary: fastHandoff.summary,
+        reviewResult: fastHandoff.reviewResult,
+        ...(fastHandoff.suggestedActionQuestion
+          ? { suggestedActionQuestion: fastHandoff.suggestedActionQuestion }
+          : {}),
+        ...(fastHandoff.suggestedActionPrompt
+          ? { suggestedActionPrompt: fastHandoff.suggestedActionPrompt }
+          : {}),
+      });
+      return {
+        success: true,
+        result: { sent: true, deliveredToFastParent: true },
+      };
+    }
+    if (linkedReviewHandoff.fastHandoff?.fastParentRequired) {
+      return {
+        success: true,
+        result: {
+          skipped: true,
+          reason:
+            'Linked review handoff skipped because the Fast parent is no longer available.',
         },
       };
     }
@@ -1059,8 +1240,14 @@ export async function steerMessageToTask({
           return client.commands.steerTask.mutate({
             prompt: message,
             quoteText,
+            ...(getFastAgentParentFromPayload(run.payload)
+              ? { answerPendingInput: true }
+              : {}),
             ...(resolvedQuoteUserName
               ? { userName: resolvedQuoteUserName }
+              : {}),
+            ...(senderMode === 'fast_agent'
+              ? { suppressSlackReplyQuote: true }
               : {}),
             ...(images?.length ? { images } : {}),
             ...(goal?.status === 'active' ? { goalContext: goal } : {}),

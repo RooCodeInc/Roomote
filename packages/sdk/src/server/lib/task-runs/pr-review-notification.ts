@@ -68,8 +68,16 @@ const prReviewCycleStateSchema = z.object({
 });
 
 export const prReviewActivityEventSchema = z.object({
-  kind: z.enum(['issue_comment', 'review', 'review_comment', 'review_summary']),
+  kind: z.enum([
+    'ci_failure',
+    'issue_comment',
+    'review',
+    'review_comment',
+    'review_summary',
+  ]),
   authorLogin: z.string(),
+  /** Name of a failed CI check when this event was raised by CI. */
+  checkName: z.string().optional(),
   /** Stable provider identity for a non-Roomote automated reviewer. */
   automatedAuthorId: z.string().optional(),
   /** Provider ID of the parent comment when this event is a thread reply. */
@@ -78,6 +86,18 @@ export const prReviewActivityEventSchema = z.object({
   body: z.string().max(10_000).optional(),
   /** Commit SHA reviewed by this event. */
   reviewHeadSha: z.string().optional(),
+  /** Roomote review task linked from the canonical review summary. */
+  reviewTaskId: z.string().optional(),
+  /** Structured terminal result parsed from a Roomote review summary. */
+  reviewResult: z
+    .object({
+      reviewKind: z.enum(['initial', 'sync']).nullable(),
+      outcome: z.string().nullable(),
+      findingCount: z.number().int().nonnegative().nullable(),
+      approvalStatus: z.enum(['approved', 'skipped']).nullable(),
+      headSha: z.string().nullable(),
+    })
+    .optional(),
   /**
    * Stable feedback-batch identity. Human review events use GitHub's review
    * id; Roomote events use the explicit lifecycle opened by its in-progress
@@ -391,9 +411,11 @@ export async function resolvePrReviewNotificationRoute(
 export async function schedulePrReviewNotificationJob({
   request,
   delayMs,
+  countDeferral = true,
 }: {
   request: PrReviewNotificationRequest;
   delayMs: number;
+  countDeferral?: boolean;
 }): Promise<void> {
   if (!request.deliveryIds || !request.leaseToken) {
     throw new Error('Cannot defer a PR review notification without a lease');
@@ -402,6 +424,7 @@ export async function schedulePrReviewNotificationJob({
   await deferPrReviewDeliveries(
     { deliveryIds: request.deliveryIds, leaseToken: request.leaseToken },
     new Date(Date.now() + delayMs),
+    { incrementDeferrals: countDeferral },
   );
 }
 
@@ -619,6 +642,7 @@ export async function enqueuePrReviewNotification(
 export async function dispatchDuePrReviewNotifications(): Promise<number> {
   const claims = await claimDuePrReviewDeliveries();
   let enqueued = 0;
+  let enqueueFailures = 0;
 
   for (const claim of claims) {
     try {
@@ -640,11 +664,30 @@ export async function dispatchDuePrReviewNotifications(): Promise<number> {
       });
       enqueued += 1;
     } catch (error) {
+      enqueueFailures += 1;
       await releasePrReviewDeliveries(claim);
       console.warn(
         `[dispatchDuePrReviewNotifications] Failed to wake ${claim.repository}#${claim.prNumber}: ${error instanceof Error ? error.message : String(error)}`,
       );
     }
+  }
+
+  if (claims.length > 0) {
+    console.log(
+      JSON.stringify({
+        event: 'pr_review_notification_dispatch',
+        instanceId: process.env.R_INSTANCE_ID ?? null,
+        prGroupsClaimed: claims.length,
+        eventsClaimed: claims.reduce(
+          (total, claim) => total + claim.events.length,
+          0,
+        ),
+        jobsEnqueued: enqueued,
+        enqueueFailures,
+        githubApiCalls: 0,
+        triageInvoked: false,
+      }),
+    );
   }
 
   return enqueued;
@@ -677,7 +720,7 @@ function getPrReviewLinkFormatter(
 ): (label: string, url: string) => string {
   switch (provider) {
     case 'slack':
-      return (label, url) => `<${url}|${label}>`;
+      return (label, url) => `[${label}](${url})`;
     case 'teams':
       return (label, url) => `[${label}](${url})`;
     case 'telegram':
@@ -687,15 +730,16 @@ function getPrReviewLinkFormatter(
   }
 }
 
-const MARKDOWN_LINK_SOURCE = String.raw`\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)`;
+const MARKDOWN_LINK_SOURCE = String.raw`\[([^\]]+)\]\((?:<(https?:\/\/[^)\s>]+)>|(https?:\/\/[^)\s]+))\)`;
 
 /**
  * Formats the notification text for aggregated PR review activity. The
  * summary (an LLM-written message that weaves markdown links to the pull
  * request or specific comments inline) is the entire message body; its
- * markdown links are converted to each provider's link syntax (Slack mrkdwn,
- * Teams Markdown, Telegram plain text). When the summary carries no link at
- * all, a link to the pull request is appended so the target stays reachable.
+ * markdown links are normalized and converted to each provider's link syntax
+ * (Slack and Teams Markdown, Telegram plain text). When the summary carries no
+ * link at all, a link to the pull request is appended so the target stays
+ * reachable.
  */
 export function formatPrReviewActivityMessage({
   repository,
@@ -714,13 +758,10 @@ export function formatPrReviewActivityMessage({
   const trimmedSummary = summary.trim();
   const hasInlineLink = new RegExp(MARKDOWN_LINK_SOURCE).test(trimmedSummary);
 
-  const text =
-    provider === 'teams'
-      ? trimmedSummary
-      : trimmedSummary.replace(
-          new RegExp(MARKDOWN_LINK_SOURCE, 'g'),
-          (_match, label, url) => formatLink(label, url),
-        );
+  const text = trimmedSummary.replace(
+    new RegExp(MARKDOWN_LINK_SOURCE, 'g'),
+    (_match, label, wrappedUrl, url) => formatLink(label, wrappedUrl ?? url),
+  );
 
   if (hasInlineLink) {
     return text;

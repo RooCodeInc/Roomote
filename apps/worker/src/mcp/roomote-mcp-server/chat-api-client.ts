@@ -250,6 +250,18 @@ export async function trackSlackReplyQuote(
   );
 }
 
+export async function suppressSlackReplyQuote(
+  config: RoomoteConfig,
+  input: { runId: number },
+): Promise<SlackMutationResponse> {
+  return postToChatEndpoint<SlackMutationResponse>(
+    config,
+    'suppress_reply_quote',
+    input,
+    'Failed to suppress Slack reply quote',
+  );
+}
+
 export async function clearSlackReplyQuote(
   config: RoomoteConfig,
   input: {

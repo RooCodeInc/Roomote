@@ -15,6 +15,9 @@ import type { SourceControlProvider } from '@roomote/types';
 
 export type PullRequestFactSnapshot = {
   authorLogin: string | null;
+  /** Null or absent means "not known to this writer", never "empty". */
+  body?: string | null;
+  labels?: string[] | null;
   closedAt: string | null;
   createdAt: string;
   externalPullRequestId: number;
@@ -63,6 +66,8 @@ export async function upsertPullRequestFacts(params: {
         title: pullRequest.title,
         htmlUrl: pullRequest.url,
         authorLogin: pullRequest.authorLogin,
+        body: pullRequest.body ?? null,
+        labels: pullRequest.labels ?? null,
         state: pullRequest.state,
         createdAtRemote: new Date(pullRequest.createdAt),
         updatedAtRemote: new Date(pullRequest.updatedAt),
@@ -85,6 +90,10 @@ export async function upsertPullRequestFacts(params: {
         title: sql`excluded.title`,
         htmlUrl: sql`excluded.html_url`,
         authorLogin: sql`excluded.author_login`,
+        // A writer that does not know the body or labels (a webhook carrying
+        // only its event's fields) must not erase what the list sync stored.
+        body: sql`COALESCE(excluded.body, ${pullRequestFacts.body})`,
+        labels: sql`COALESCE(excluded.labels, ${pullRequestFacts.labels})`,
         state: sql`excluded.state`,
         createdAtRemote: sql`excluded.created_at_remote`,
         updatedAtRemote: sql`excluded.updated_at_remote`,

@@ -329,7 +329,7 @@ describe('review-code GitHub workflow paths', () => {
       'resolve that thread as part of this sync review closeout',
     );
     expect(skillContent).toContain(
-      'Treat Roomote-managed logins as ineligible for approval, including the configured app slug in `[bot]` or `app/...` form, `roomote[bot]`, `app/roomote`, `roomote-dev[bot]`, `app/roomote-dev`, and any login starting with `roomote-` or `app/roomote-`.',
+      'Treat the configured GitHub App slug and any explicitly configured additional trusted app slugs in `[bot]` or `app/...` form as the only Roomote-managed logins ineligible for approval.',
     );
     expect(skillContent).not.toContain(
       'End the comment with the configured footer line (task link).',

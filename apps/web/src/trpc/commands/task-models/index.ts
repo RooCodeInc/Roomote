@@ -15,6 +15,8 @@ import {
   OPENAI_COMPATIBLE_PROVIDER_ID,
   XAI_SUBSCRIPTION_PROVIDER_ID,
   TASK_MODEL_CATALOG,
+  TASK_MODEL_ROLE_DESCRIPTORS,
+  TASK_MODEL_ROLES,
   SETUP_MODEL_PROVIDER_CATALOG,
   buildOpenAiCompatibleProviderId,
   buildOpenAiCompatibleProviderInstance,
@@ -47,6 +49,7 @@ import type {
   TaskModelInputType,
   TaskModelMetadata,
   TaskModelOption,
+  TaskModelRole,
 } from '@roomote/types';
 
 import {
@@ -109,12 +112,7 @@ type RuntimeModelFieldStatus = {
 };
 
 type TaskModelSettingsRuntimeStatus = {
-  codingModel: RuntimeModelFieldStatus;
-  helperModel: RuntimeModelFieldStatus;
-  visionModel: RuntimeModelFieldStatus;
-  codeReviewModel: RuntimeModelFieldStatus;
-  exploreModel: RuntimeModelFieldStatus;
-  planningModel: RuntimeModelFieldStatus;
+  [Role in TaskModelRole as (typeof TASK_MODEL_ROLE_DESCRIPTORS)[Role]['runtimeStatusKey']]: RuntimeModelFieldStatus;
 };
 
 type TaskModelSettingsResult = {
@@ -171,133 +169,41 @@ function resolveRuntimeModelStatus(options: {
   settingsDefaultModelId: string;
   persisted: DeploymentModelConfig;
 }): TaskModelSettingsRuntimeStatus {
-  const envCodingModel = isConfiguredEnvValue(process.env.R_MODEL)
-    ? process.env.R_MODEL!.trim()
-    : null;
-  const envHelperModel = isConfiguredEnvValue(process.env.R_SMALL_MODEL)
-    ? process.env.R_SMALL_MODEL!.trim()
-    : null;
-  const envVisionModel = isConfiguredEnvValue(process.env.R_VISION_MODEL)
-    ? process.env.R_VISION_MODEL!.trim()
-    : null;
-  const envCodeReviewModel = isConfiguredEnvValue(
-    process.env.R_CODE_REVIEW_MODEL,
-  )
-    ? process.env.R_CODE_REVIEW_MODEL!.trim()
-    : null;
-  const envExploreModel = isConfiguredEnvValue(process.env.R_EXPLORE_MODEL)
-    ? process.env.R_EXPLORE_MODEL!.trim()
-    : null;
-  const envPlanningModel = isConfiguredEnvValue(process.env.R_PLANNING_MODEL)
-    ? process.env.R_PLANNING_MODEL!.trim()
-    : null;
-  const persistedCodingModel = options.persisted.roomoteModel;
-  const persistedHelperModel = options.persisted.roomoteSmallModel;
-  const persistedVisionModel = options.persisted.roomoteVisionModel;
-  const persistedCodeReviewModel = options.persisted.roomoteCodeReviewModel;
-  const persistedExploreModel = options.persisted.roomoteExploreModel;
-  const persistedPlanningModel = options.persisted.roomotePlanningModel;
+  return Object.fromEntries(
+    TASK_MODEL_ROLES.map((role) => {
+      const descriptor = TASK_MODEL_ROLE_DESCRIPTORS[role];
+      const envModel = isConfiguredEnvValue(process.env[descriptor.modelEnvVar])
+        ? process.env[descriptor.modelEnvVar]!.trim()
+        : null;
+      const persistedModel = options.persisted[descriptor.modelConfigKey];
+      const effectiveModel = envModel ?? persistedModel;
+      const source: RuntimeModelFieldStatus['source'] = envModel
+        ? 'env'
+        : persistedModel
+          ? 'database'
+          : descriptor.modelFallback === 'deployment-default'
+            ? 'default'
+            : 'same-as-coding';
 
-  const codingEffective = envCodingModel ?? persistedCodingModel;
-  const codingSource: RuntimeModelFieldStatus['source'] = envCodingModel
-    ? 'env'
-    : persistedCodingModel
-      ? 'database'
-      : 'default';
-  const helperEffective = envHelperModel ?? persistedHelperModel;
-  const helperSource: RuntimeModelFieldStatus['source'] = envHelperModel
-    ? 'env'
-    : persistedHelperModel
-      ? 'database'
-      : 'same-as-coding';
-  const visionEffective = envVisionModel ?? persistedVisionModel;
-  const visionSource: RuntimeModelFieldStatus['source'] = envVisionModel
-    ? 'env'
-    : persistedVisionModel
-      ? 'database'
-      : 'same-as-coding';
-  const codeReviewEffective = envCodeReviewModel ?? persistedCodeReviewModel;
-  const codeReviewSource: RuntimeModelFieldStatus['source'] = envCodeReviewModel
-    ? 'env'
-    : persistedCodeReviewModel
-      ? 'database'
-      : 'same-as-coding';
-  const exploreEffective = envExploreModel ?? persistedExploreModel;
-  const exploreSource: RuntimeModelFieldStatus['source'] = envExploreModel
-    ? 'env'
-    : persistedExploreModel
-      ? 'database'
-      : 'same-as-coding';
-  const planningEffective = envPlanningModel ?? persistedPlanningModel;
-  const planningSource: RuntimeModelFieldStatus['source'] = envPlanningModel
-    ? 'env'
-    : persistedPlanningModel
-      ? 'database'
-      : 'same-as-coding';
-
-  return {
-    codingModel: {
-      effectiveModelId:
-        codingEffective ?? options.settingsDefaultModelId ?? null,
-      persistedModelId: persistedCodingModel,
-      source: codingSource,
-      managedByEnv: envCodingModel !== null,
-      ...resolveRuntimeReasoningStatus(
-        'R_MODEL_REASONING_EFFORT',
-        options.persisted.roomoteModelReasoningEffort,
-      ),
-    },
-    helperModel: {
-      effectiveModelId: helperEffective,
-      persistedModelId: persistedHelperModel,
-      source: helperSource,
-      managedByEnv: envHelperModel !== null,
-      ...resolveRuntimeReasoningStatus(
-        'R_SMALL_MODEL_REASONING_EFFORT',
-        options.persisted.roomoteSmallModelReasoningEffort,
-      ),
-    },
-    visionModel: {
-      effectiveModelId: visionEffective,
-      persistedModelId: persistedVisionModel,
-      source: visionSource,
-      managedByEnv: envVisionModel !== null,
-      ...resolveRuntimeReasoningStatus(
-        'R_VISION_MODEL_REASONING_EFFORT',
-        options.persisted.roomoteVisionModelReasoningEffort,
-      ),
-    },
-    codeReviewModel: {
-      effectiveModelId: codeReviewEffective,
-      persistedModelId: persistedCodeReviewModel,
-      source: codeReviewSource,
-      managedByEnv: envCodeReviewModel !== null,
-      ...resolveRuntimeReasoningStatus(
-        'R_CODE_REVIEW_MODEL_REASONING_EFFORT',
-        options.persisted.roomoteCodeReviewModelReasoningEffort,
-      ),
-    },
-    exploreModel: {
-      effectiveModelId: exploreEffective,
-      persistedModelId: persistedExploreModel,
-      source: exploreSource,
-      managedByEnv: envExploreModel !== null,
-      ...resolveRuntimeReasoningStatus(
-        'R_EXPLORE_MODEL_REASONING_EFFORT',
-        options.persisted.roomoteExploreModelReasoningEffort,
-      ),
-    },
-    planningModel: {
-      effectiveModelId: planningEffective,
-      persistedModelId: persistedPlanningModel,
-      source: planningSource,
-      managedByEnv: envPlanningModel !== null,
-      ...resolveRuntimeReasoningStatus(
-        'R_PLANNING_MODEL_REASONING_EFFORT',
-        options.persisted.roomotePlanningModelReasoningEffort,
-      ),
-    },
-  };
+      return [
+        descriptor.runtimeStatusKey,
+        {
+          effectiveModelId:
+            effectiveModel ??
+            (descriptor.modelFallback === 'deployment-default'
+              ? options.settingsDefaultModelId
+              : null),
+          persistedModelId: persistedModel,
+          source,
+          managedByEnv: envModel !== null,
+          ...resolveRuntimeReasoningStatus(
+            descriptor.reasoningEnvVar,
+            options.persisted[descriptor.reasoningConfigKey],
+          ),
+        } satisfies RuntimeModelFieldStatus,
+      ];
+    }),
+  ) as TaskModelSettingsRuntimeStatus;
 }
 
 export async function getTaskModelSettingsCommand(
@@ -337,12 +243,12 @@ export async function getTaskModelSettingsCommand(
   const selectedModelIds = new Set(
     [
       settings.defaultModelId,
-      persistedRuntimeModelConfig.roomoteModel,
-      persistedRuntimeModelConfig.roomoteSmallModel,
-      persistedRuntimeModelConfig.roomoteVisionModel,
-      persistedRuntimeModelConfig.roomoteCodeReviewModel,
-      persistedRuntimeModelConfig.roomoteExploreModel,
-      persistedRuntimeModelConfig.roomotePlanningModel,
+      ...TASK_MODEL_ROLES.map(
+        (role) =>
+          persistedRuntimeModelConfig[
+            TASK_MODEL_ROLE_DESCRIPTORS[role].modelConfigKey
+          ],
+      ),
     ]
       .filter((modelId): modelId is string => Boolean(modelId))
       .map(normalizeTaskModelId),
@@ -399,10 +305,7 @@ export async function getTaskModelRoleDefaultsCommand(
   _auth: UserAuthSuccess,
 ): Promise<{
   defaultModelId: string;
-  roles: Record<
-    'coding' | 'helper' | 'vision' | 'codeReview' | 'explore' | 'planning',
-    TaskModelRoleDefault
-  >;
+  roles: Record<TaskModelRole, TaskModelRoleDefault>;
 }> {
   const [settings, persistedRuntimeModelConfig] = await Promise.all([
     getDeploymentTaskModelSettings(),
@@ -419,14 +322,12 @@ export async function getTaskModelRoleDefaultsCommand(
 
   return {
     defaultModelId: settings.defaultModelId,
-    roles: {
-      coding: pick(runtimeModels.codingModel),
-      helper: pick(runtimeModels.helperModel),
-      vision: pick(runtimeModels.visionModel),
-      codeReview: pick(runtimeModels.codeReviewModel),
-      explore: pick(runtimeModels.exploreModel),
-      planning: pick(runtimeModels.planningModel),
-    },
+    roles: Object.fromEntries(
+      TASK_MODEL_ROLES.map((role) => [
+        role,
+        pick(runtimeModels[TASK_MODEL_ROLE_DESCRIPTORS[role].runtimeStatusKey]),
+      ]),
+    ) as Record<TaskModelRole, TaskModelRoleDefault>,
   };
 }
 
@@ -983,33 +884,21 @@ function removeTaskModelsForProvider({
     catalogSyncedModelIds: settings.catalogSyncedModelIds,
   });
 
-  const nextRuntimeModelConfig: DeploymentModelConfig = {
+  const nextRuntimeModelConfig = {
     ...runtimeModelConfig,
-    roomoteModel: clearRuntimeModelForProvider(
-      runtimeModelConfig.roomoteModel,
-      providerId,
+    ...Object.fromEntries(
+      TASK_MODEL_ROLES.map((role) => {
+        const modelConfigKey = TASK_MODEL_ROLE_DESCRIPTORS[role].modelConfigKey;
+        return [
+          modelConfigKey,
+          clearRuntimeModelForProvider(
+            runtimeModelConfig[modelConfigKey],
+            providerId,
+          ),
+        ];
+      }),
     ),
-    roomoteSmallModel: clearRuntimeModelForProvider(
-      runtimeModelConfig.roomoteSmallModel,
-      providerId,
-    ),
-    roomoteVisionModel: clearRuntimeModelForProvider(
-      runtimeModelConfig.roomoteVisionModel,
-      providerId,
-    ),
-    roomoteCodeReviewModel: clearRuntimeModelForProvider(
-      runtimeModelConfig.roomoteCodeReviewModel,
-      providerId,
-    ),
-    roomoteExploreModel: clearRuntimeModelForProvider(
-      runtimeModelConfig.roomoteExploreModel,
-      providerId,
-    ),
-    roomotePlanningModel: clearRuntimeModelForProvider(
-      runtimeModelConfig.roomotePlanningModel,
-      providerId,
-    ),
-  };
+  } as DeploymentModelConfig;
 
   return { taskModelSettings, runtimeModelConfig: nextRuntimeModelConfig };
 }
@@ -1197,12 +1086,14 @@ export async function updateTaskModelSettingsCommand(
     }>;
     allowedModelIds: string[];
     defaultModelId: string;
+    orchestrationModelId?: string | null;
     helperModelId: string | null;
     visionModelId: string | null;
     codeReviewModelId: string | null;
     exploreModelId?: string | null;
     planningModelId: string | null;
     codingModelReasoningEffort: ReasoningEffort | null;
+    orchestrationModelReasoningEffort?: ReasoningEffort | null;
     helperModelReasoningEffort: ReasoningEffort | null;
     visionModelReasoningEffort: ReasoningEffort | null;
     codeReviewModelReasoningEffort: ReasoningEffort | null;
@@ -1220,6 +1111,7 @@ export async function updateTaskModelSettingsCommand(
         models?: string;
         allowedModelIds?: string;
         defaultModelId?: string;
+        orchestrationModelId?: string;
         helperModelId?: string;
         visionModelId?: string;
         codeReviewModelId?: string;
@@ -1234,6 +1126,7 @@ export async function updateTaskModelSettingsCommand(
     models?: string;
     allowedModelIds?: string;
     defaultModelId?: string;
+    orchestrationModelId?: string;
     helperModelId?: string;
     visionModelId?: string;
     codeReviewModelId?: string;
@@ -1254,32 +1147,38 @@ export async function updateTaskModelSettingsCommand(
     ...new Set(input.allowedModelIds.map(normalizeTaskModelId)),
   ].filter(Boolean);
   const normalizedDefaultModelId = normalizeTaskModelId(input.defaultModelId);
-  const normalizedHelperModelId =
-    input.helperModelId === null
-      ? null
-      : normalizeTaskModelId(input.helperModelId);
-  const normalizedVisionModelId =
-    input.visionModelId === null
-      ? null
-      : normalizeTaskModelId(input.visionModelId);
-  const normalizedCodeReviewModelId =
-    input.codeReviewModelId === null
-      ? null
-      : normalizeTaskModelId(input.codeReviewModelId);
-  const normalizedExploreModelId =
-    input.exploreModelId === undefined
-      ? undefined
-      : input.exploreModelId === null
-        ? null
-        : normalizeTaskModelId(input.exploreModelId);
-  const normalizedExploreModelReasoningEffort =
-    input.exploreModelReasoningEffort === undefined
-      ? undefined
-      : normalizeOptionalReasoningEffort(input.exploreModelReasoningEffort);
-  const normalizedPlanningModelId =
-    input.planningModelId === null
-      ? null
-      : normalizeTaskModelId(input.planningModelId);
+  const normalizedRoleModelIds = Object.fromEntries(
+    TASK_MODEL_ROLES.map((role) => {
+      const descriptor = TASK_MODEL_ROLE_DESCRIPTORS[role];
+      const value = input[descriptor.settingsModelInputKey];
+
+      return [
+        role,
+        role === 'coding'
+          ? normalizedDefaultModelId
+          : value === undefined
+            ? descriptor.settingsModelInputOptional
+              ? undefined
+              : null
+            : value === null
+              ? null
+              : normalizeTaskModelId(value),
+      ];
+    }),
+  ) as Record<TaskModelRole, string | null | undefined>;
+  const normalizedRoleReasoningEfforts = Object.fromEntries(
+    TASK_MODEL_ROLES.map((role) => {
+      const descriptor = TASK_MODEL_ROLE_DESCRIPTORS[role];
+      const value = input[descriptor.settingsReasoningInputKey];
+
+      return [
+        role,
+        value === undefined && descriptor.settingsModelInputOptional
+          ? undefined
+          : normalizeOptionalReasoningEffort(value),
+      ];
+    }),
+  ) as Record<TaskModelRole, ReasoningEffort | null | undefined>;
 
   if (models.length === 0) {
     fieldErrors.models = 'Add at least one model.';
@@ -1301,64 +1200,38 @@ export async function updateTaskModelSettingsCommand(
     fieldErrors.defaultModelId = 'The default model must be enabled.';
   }
 
-  if (
-    normalizedHelperModelId !== null &&
-    !knownModelIds.has(normalizedHelperModelId)
-  ) {
-    fieldErrors.helperModelId = 'Choose a valid helper model.';
+  for (const role of TASK_MODEL_ROLES) {
+    if (role === 'coding') {
+      continue;
+    }
+
+    const descriptor = TASK_MODEL_ROLE_DESCRIPTORS[role];
+    const modelId = normalizedRoleModelIds[role];
+    if (
+      modelId !== undefined &&
+      modelId !== null &&
+      !knownModelIds.has(modelId)
+    ) {
+      fieldErrors[descriptor.settingsModelInputKey] =
+        descriptor.invalidModelMessage;
+    }
   }
 
-  if (
-    normalizedVisionModelId !== null &&
-    !knownModelIds.has(normalizedVisionModelId)
-  ) {
-    fieldErrors.visionModelId = 'Choose a valid vision model.';
-  }
-
-  if (
-    normalizedCodeReviewModelId !== null &&
-    !knownModelIds.has(normalizedCodeReviewModelId)
-  ) {
-    fieldErrors.codeReviewModelId = 'Choose a valid code review model.';
-  }
-
-  if (
-    normalizedExploreModelId !== undefined &&
-    normalizedExploreModelId !== null &&
-    !knownModelIds.has(normalizedExploreModelId)
-  ) {
-    fieldErrors.exploreModelId = 'Choose a valid explore model.';
-  }
-
-  if (
-    normalizedPlanningModelId !== null &&
-    !knownModelIds.has(normalizedPlanningModelId)
-  ) {
-    fieldErrors.planningModelId = 'Choose a valid advisor model.';
-  }
-
-  const codingManagedByEnv = isConfiguredEnvValue(process.env.R_MODEL);
-  const helperManagedByEnv = isConfiguredEnvValue(process.env.R_SMALL_MODEL);
-  const visionManagedByEnv = isConfiguredEnvValue(process.env.R_VISION_MODEL);
-  const codeReviewManagedByEnv = isConfiguredEnvValue(
-    process.env.R_CODE_REVIEW_MODEL,
-  );
-  const exploreManagedByEnv = isConfiguredEnvValue(process.env.R_EXPLORE_MODEL);
-  const planningManagedByEnv = isConfiguredEnvValue(
-    process.env.R_PLANNING_MODEL,
-  );
-  const codingReasoningManagedByEnv =
-    resolveEnvReasoningEffort('R_MODEL_REASONING_EFFORT') !== null;
-  const helperReasoningManagedByEnv =
-    resolveEnvReasoningEffort('R_SMALL_MODEL_REASONING_EFFORT') !== null;
-  const visionReasoningManagedByEnv =
-    resolveEnvReasoningEffort('R_VISION_MODEL_REASONING_EFFORT') !== null;
-  const codeReviewReasoningManagedByEnv =
-    resolveEnvReasoningEffort('R_CODE_REVIEW_MODEL_REASONING_EFFORT') !== null;
-  const exploreReasoningManagedByEnv =
-    resolveEnvReasoningEffort('R_EXPLORE_MODEL_REASONING_EFFORT') !== null;
-  const planningReasoningManagedByEnv =
-    resolveEnvReasoningEffort('R_PLANNING_MODEL_REASONING_EFFORT') !== null;
+  const modelManagedByEnv = Object.fromEntries(
+    TASK_MODEL_ROLES.map((role) => {
+      const descriptor = TASK_MODEL_ROLE_DESCRIPTORS[role];
+      return [role, isConfiguredEnvValue(process.env[descriptor.modelEnvVar])];
+    }),
+  ) as Record<TaskModelRole, boolean>;
+  const reasoningManagedByEnv = Object.fromEntries(
+    TASK_MODEL_ROLES.map((role) => {
+      const descriptor = TASK_MODEL_ROLE_DESCRIPTORS[role];
+      return [
+        role,
+        resolveEnvReasoningEffort(descriptor.reasoningEnvVar) !== null,
+      ];
+    }),
+  ) as Record<TaskModelRole, boolean>;
 
   if (Object.keys(fieldErrors).length > 0) {
     return {
@@ -1368,48 +1241,28 @@ export async function updateTaskModelSettingsCommand(
   }
 
   const persistedRuntimeModelConfig = await getDeploymentRuntimeModelConfig();
-  const nextRuntimeModelConfig: DeploymentModelConfig = {
-    roomoteModel: codingManagedByEnv
-      ? persistedRuntimeModelConfig.roomoteModel
-      : normalizedDefaultModelId,
-    roomoteSmallModel: helperManagedByEnv
-      ? persistedRuntimeModelConfig.roomoteSmallModel
-      : normalizedHelperModelId,
-    roomoteVisionModel: visionManagedByEnv
-      ? persistedRuntimeModelConfig.roomoteVisionModel
-      : normalizedVisionModelId,
-    roomoteCodeReviewModel: codeReviewManagedByEnv
-      ? persistedRuntimeModelConfig.roomoteCodeReviewModel
-      : normalizedCodeReviewModelId,
-    roomoteExploreModel: exploreManagedByEnv
-      ? persistedRuntimeModelConfig.roomoteExploreModel
-      : normalizedExploreModelId === undefined
-        ? persistedRuntimeModelConfig.roomoteExploreModel
-        : normalizedExploreModelId,
-    roomotePlanningModel: planningManagedByEnv
-      ? persistedRuntimeModelConfig.roomotePlanningModel
-      : normalizedPlanningModelId,
-    roomoteModelReasoningEffort: codingReasoningManagedByEnv
-      ? persistedRuntimeModelConfig.roomoteModelReasoningEffort
-      : normalizeOptionalReasoningEffort(input.codingModelReasoningEffort),
-    roomoteSmallModelReasoningEffort: helperReasoningManagedByEnv
-      ? persistedRuntimeModelConfig.roomoteSmallModelReasoningEffort
-      : normalizeOptionalReasoningEffort(input.helperModelReasoningEffort),
-    roomoteVisionModelReasoningEffort: visionReasoningManagedByEnv
-      ? persistedRuntimeModelConfig.roomoteVisionModelReasoningEffort
-      : normalizeOptionalReasoningEffort(input.visionModelReasoningEffort),
-    roomoteCodeReviewModelReasoningEffort: codeReviewReasoningManagedByEnv
-      ? persistedRuntimeModelConfig.roomoteCodeReviewModelReasoningEffort
-      : normalizeOptionalReasoningEffort(input.codeReviewModelReasoningEffort),
-    roomoteExploreModelReasoningEffort: exploreReasoningManagedByEnv
-      ? persistedRuntimeModelConfig.roomoteExploreModelReasoningEffort
-      : normalizedExploreModelReasoningEffort === undefined
-        ? persistedRuntimeModelConfig.roomoteExploreModelReasoningEffort
-        : normalizedExploreModelReasoningEffort,
-    roomotePlanningModelReasoningEffort: planningReasoningManagedByEnv
-      ? persistedRuntimeModelConfig.roomotePlanningModelReasoningEffort
-      : normalizeOptionalReasoningEffort(input.planningModelReasoningEffort),
-  };
+  const nextRuntimeModelConfig = Object.fromEntries(
+    TASK_MODEL_ROLES.flatMap((role) => {
+      const descriptor = TASK_MODEL_ROLE_DESCRIPTORS[role];
+      const modelId = normalizedRoleModelIds[role];
+      const reasoningEffort = normalizedRoleReasoningEfforts[role];
+
+      return [
+        [
+          descriptor.modelConfigKey,
+          modelManagedByEnv[role] || modelId === undefined
+            ? persistedRuntimeModelConfig[descriptor.modelConfigKey]
+            : modelId,
+        ],
+        [
+          descriptor.reasoningConfigKey,
+          reasoningManagedByEnv[role] || reasoningEffort === undefined
+            ? persistedRuntimeModelConfig[descriptor.reasoningConfigKey]
+            : reasoningEffort,
+        ],
+      ];
+    }),
+  ) as DeploymentModelConfig;
 
   await db.transaction(async (tx) => {
     // Lock the row for the read-modify-write: the admin save payload carries

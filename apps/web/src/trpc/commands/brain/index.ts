@@ -14,11 +14,12 @@ import {
 } from '@roomote/db/server';
 import {
   describeBrainModels,
-  readBrainCorpusSample,
+  readBrainCorpus,
   readBrainPage,
   readBrainStats,
   resolveBrainSourceRequirements,
   resolveBrainInferenceProvider,
+  type BrainCorpusSnapshot,
   type BrainModelSummary,
 } from '@roomote/sdk/server';
 import {
@@ -54,7 +55,8 @@ const EMPTY_MEMORY_SUMMARY: Awaited<
   byStatus: { pending: 0, processing: 0, done: 0, skipped: 0, failed: 0 },
   lastProcessedAt: null,
   lastError: null,
-  completedRunsWithoutEvent: 0,
+  historicalCompletedRunsWithoutEvent: 0,
+  recentCompletedRunsWithoutEvent: 0,
 };
 
 /**
@@ -103,21 +105,17 @@ export type BrainNamespaceSummary = {
 
 export type BrainCorpusSummary = {
   reachable: boolean;
-  /** Pages in the sample, which is the whole corpus unless `truncated`. */
-  sampledPages: number;
-  truncated: boolean;
+  /** Pages in the exhaustive cached corpus listing. */
+  listedPages: number;
   /**
    * The corpus's exact page count from gbrain's admin census, or null when
-   * the admin API did not answer. The sample above stays authoritative for
-   * composition; this keeps the total honest past the sample bound.
+   * the admin API did not answer.
    */
   totalPages: number | null;
   namespaces: BrainNamespaceSummary[];
   /**
    * Pages written per UTC day over the trailing window, oldest first,
-   * zero-filled. Computed from the same recency-sorted sample as the rest of
-   * the summary, so on a `truncated` corpus it undercounts the oldest days
-   * rather than the newest.
+   * zero-filled. Computed from the exhaustive corpus listing.
    */
   activityByDay: Array<{ date: string; pages: number }>;
   recentPages: Array<{
@@ -163,7 +161,8 @@ export type BrainSettings = {
     total: number;
     lastProcessedAt: Date | null;
     lastError: string | null;
-    completedRunsWithoutEvent: number;
+    historicalCompletedRunsWithoutEvent: number;
+    recentCompletedRunsWithoutEvent: number;
   };
 };
 
@@ -201,13 +200,12 @@ function buildActivityByDay(
 }
 
 function summarizeCorpus(
-  snapshot: Awaited<ReturnType<typeof readBrainCorpusSample>>,
+  snapshot: Awaited<ReturnType<typeof readBrainCorpus>>,
 ): BrainCorpusSummary {
   if (!snapshot) {
     return {
       reachable: false,
-      sampledPages: 0,
-      truncated: false,
+      listedPages: 0,
       totalPages: null,
       namespaces: [],
       activityByDay: [],
@@ -248,8 +246,7 @@ function summarizeCorpus(
 
   return {
     reachable: true,
-    sampledPages: snapshot.pages.length,
-    truncated: snapshot.truncated,
+    listedPages: snapshot.pages.length,
     totalPages: null,
     namespaces,
     activityByDay: buildActivityByDay(snapshot.pages),
@@ -428,7 +425,7 @@ export async function getBrainSettingsCommand(
     requirements,
   ] = await Promise.all([
     resolveBrainInferenceProvider(),
-    configured ? readBrainCorpusSample() : null,
+    configured ? readBrainCorpus() : null,
     configured ? readBrainStats() : null,
     configured ? listBrainSyncStates(db) : [],
     configured ? countBrainCollectorItemsByCollector(db) : [],
@@ -542,7 +539,9 @@ export async function getBrainSettingsCommand(
       total: memoryTotal,
       lastProcessedAt: memories.lastProcessedAt,
       lastError: memories.lastError,
-      completedRunsWithoutEvent: memories.completedRunsWithoutEvent,
+      historicalCompletedRunsWithoutEvent:
+        memories.historicalCompletedRunsWithoutEvent,
+      recentCompletedRunsWithoutEvent: memories.recentCompletedRunsWithoutEvent,
     },
   };
 }
@@ -570,7 +569,8 @@ export async function retryFailedBrainTaskMemoriesCommand(
 
 export type BrainPageListing = {
   reachable: boolean;
-  truncated: boolean;
+  total: number;
+  nextOffset: number | null;
   pages: Array<{
     slug: string;
     title: string;
@@ -596,30 +596,64 @@ function toListedPage(page: {
   };
 }
 
+/** Exported for focused command tests; the command below owns auth and I/O. */
+export function paginateBrainCorpus(
+  snapshot: BrainCorpusSnapshot,
+  input: {
+    search?: string;
+    namespaceId?: string;
+    offset: number;
+    limit: number;
+  },
+): Omit<BrainPageListing, 'reachable'> {
+  const needle = input.search?.trim().toLowerCase() ?? '';
+  const filtered = snapshot.pages.filter((page) => {
+    const namespaceId = resolveBrainNamespaceId(page.slug);
+
+    return (
+      (!input.namespaceId || namespaceId === input.namespaceId) &&
+      (!needle ||
+        page.slug.toLowerCase().includes(needle) ||
+        page.title?.toLowerCase().includes(needle))
+    );
+  });
+  const pages = filtered
+    .slice(input.offset, input.offset + input.limit)
+    .map(toListedPage);
+
+  return {
+    total: filtered.length,
+    nextOffset:
+      input.offset + pages.length < filtered.length
+        ? input.offset + pages.length
+        : null,
+    pages,
+  };
+}
+
 /**
- * The recency-sorted page sample for the browse dialog. Same cached read and
- * same bound as the composition chart, so the two agree about what the Brain
- * holds; the dialog filters and searches it client-side.
+ * One server-filtered page from the exhaustive cached corpus. The browser only
+ * renders this bounded result, so searching a large Brain does not ship or
+ * repeatedly filter the full listing on every keystroke.
  */
 export async function listBrainPagesCommand(
   auth: UserAuthSuccess,
+  input: {
+    search?: string;
+    namespaceId?: string;
+    offset: number;
+    limit: number;
+  },
 ): Promise<BrainPageListing> {
   assertAdmin(auth);
 
-  const snapshot = await readBrainCorpusSample();
+  const snapshot = await readBrainCorpus();
 
   if (!snapshot) {
-    return { reachable: false, truncated: false, pages: [] };
+    return { reachable: false, total: 0, nextOffset: null, pages: [] };
   }
 
-  const pages = [...snapshot.pages]
-    .sort(
-      (left, right) =>
-        (right.updatedAt?.getTime() ?? 0) - (left.updatedAt?.getTime() ?? 0),
-    )
-    .map(toListedPage);
-
-  return { reachable: true, truncated: snapshot.truncated, pages };
+  return { reachable: true, ...paginateBrainCorpus(snapshot, input) };
 }
 
 /**

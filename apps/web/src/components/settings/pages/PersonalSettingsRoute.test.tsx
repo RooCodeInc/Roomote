@@ -4,12 +4,10 @@ let accountCapabilities:
   | {
       canChangePassword: boolean;
       canSetPassword: boolean;
-      communicationsFastModeDefaultAvailable: boolean;
     }
   | undefined = {
   canChangePassword: true,
   canSetPassword: false,
-  communicationsFastModeDefaultAvailable: true,
 };
 
 const { personalSettingsPageMock } = vi.hoisted(() => ({
@@ -49,7 +47,6 @@ describe('PersonalSettingsRoute', () => {
     accountCapabilities = {
       canChangePassword: true,
       canSetPassword: false,
-      communicationsFastModeDefaultAvailable: true,
     };
     personalSettingsPageMock.mockClear();
   });
@@ -61,7 +58,6 @@ describe('PersonalSettingsRoute', () => {
       {
         canChangePassword: true,
         canSetPassword: false,
-        communicationsFastModeDefaultAvailable: true,
         profile: {
           email: 'ada@example.com',
           imageUrl: 'https://example.com/ada.png',

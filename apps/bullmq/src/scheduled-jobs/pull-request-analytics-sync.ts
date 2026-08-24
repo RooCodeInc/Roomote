@@ -1,4 +1,5 @@
 import {
+  enrichPullRequestFacts,
   syncGitHubPullRequestFactsForAllOrgs,
   syncSourceControlPullRequestFacts,
 } from '@roomote/sdk/server';
@@ -39,4 +40,16 @@ export async function pullRequestAnalyticsSyncJob(
   console.log(
     `${LOG_PREFIX} Completed: ${totals.processedRepositories}/${totals.eligibleRepositories} processed, ${totals.failedRepositories} failed, ${totals.cooledDownRepositories} cooled down`,
   );
+
+  // Files touched and reviews need per-PR requests the list sync above
+  // does not make; a bounded batch per pass keeps that traffic predictable.
+  try {
+    await enrichPullRequestFacts();
+  } catch (error) {
+    console.warn(
+      `${LOG_PREFIX} enrichment pass failed: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
 }

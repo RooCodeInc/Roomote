@@ -1,10 +1,12 @@
 const {
   mockCreateDiscordProvider,
   mockDiscordPostMessage,
+  mockSlackOpenConversation,
   mockSlackPostMessage,
 } = vi.hoisted(() => ({
   mockCreateDiscordProvider: vi.fn(),
   mockDiscordPostMessage: vi.fn(),
+  mockSlackOpenConversation: vi.fn(),
   mockSlackPostMessage: vi.fn(),
 }));
 
@@ -24,6 +26,10 @@ vi.mock('@roomote/slack', async (importOriginal) => {
     postMessage(...args: unknown[]) {
       return mockSlackPostMessage(...args);
     }
+
+    openConversation(...args: unknown[]) {
+      return mockSlackOpenConversation(...args);
+    }
   }
 
   return { ...actual, SlackNotifier: MockSlackNotifier };
@@ -35,6 +41,7 @@ import {
   eq,
   findBackgroundAutomationSlackThread,
   slackInstallations,
+  slackUserMappings,
   taskFactory,
   taskPlatformIssueReports,
   taskRuns,
@@ -117,6 +124,7 @@ describe('platform issue alert delivery', () => {
     mockCreateDiscordProvider.mockReset();
     mockDiscordPostMessage.mockReset();
     mockSlackPostMessage.mockReset();
+    mockSlackOpenConversation.mockReset();
     mockCreateDiscordProvider.mockResolvedValue({
       postMessage: mockDiscordPostMessage,
     });
@@ -126,9 +134,11 @@ describe('platform issue alert delivery', () => {
       messageId: 'm1',
     });
     mockSlackPostMessage.mockResolvedValue('1727000000.000100');
+    mockSlackOpenConversation.mockResolvedValue('DADMIN');
 
     await db.delete(taskPlatformIssueReports);
     await db.delete(deploymentSettings);
+    await db.delete(slackUserMappings);
     await db.delete(slackInstallations);
   });
 
@@ -404,6 +414,169 @@ describe('platform issue alert delivery', () => {
 
     const reportRow = await findReportRow(taskId);
     expect(reportRow?.slackPostedAt).not.toBeNull();
+  });
+
+  it('direct-messages deployment admins when no channel is configured', async () => {
+    const taskId = 'task-platform-issue-admin-dm';
+    const runId = await seedTaskRun(taskId);
+
+    await upsertAutomation(db, {
+      key: 'platform_issue_alerts',
+      // Legacy rows used false to mean "no channel". Without an explicit
+      // opt-out setting, alerts remain enabled by default.
+      enabled: false,
+      settings: {},
+      targets: [],
+    });
+    await db
+      .insert(users)
+      .values({
+        id: 'user-platform-admin',
+        name: 'Platform Admin',
+        email: 'platform-admin@example.com',
+        imageUrl: '',
+        entity: {},
+        role: 'admin',
+      })
+      .onConflictDoUpdate({
+        target: users.id,
+        set: { role: 'admin', deletedAt: null },
+      });
+    await db.insert(slackInstallations).values({
+      teamId: 'T123',
+      teamName: 'Acme',
+      appId: 'A123',
+      botUserId: 'B123',
+      botAccessToken: 'xoxb-test',
+      scopes: { bot: ['chat:write'] },
+      installedByUserId: 'user-platform-admin',
+      isActive: true,
+    });
+    await db.insert(slackUserMappings).values({
+      userId: 'user-platform-admin',
+      slackTeamId: 'T123',
+      slackUserId: 'UADMIN',
+    });
+
+    await recordTaskMessageEnvelope({
+      runId,
+      taskId,
+      envelope: buildReportEnvelope(),
+    });
+
+    expect(mockSlackOpenConversation).toHaveBeenCalledWith('UADMIN');
+    expect(mockSlackPostMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channel: 'DADMIN',
+        text: expect.stringContaining(REPORT.title),
+      }),
+    );
+    expect((await findReportRow(taskId))?.slackPostedAt).not.toBeNull();
+  });
+
+  it('leaves the report pending when any linked admin DM fails', async () => {
+    const taskId = 'task-platform-issue-partial-admin-dm';
+    const runId = await seedTaskRun(taskId);
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    await upsertAutomation(db, {
+      key: 'platform_issue_alerts',
+      enabled: true,
+      settings: {},
+      targets: [],
+    });
+    await db
+      .insert(users)
+      .values([
+        {
+          id: 'user-platform-admin-fail',
+          name: 'Failing Admin',
+          email: 'failing-platform-admin@example.com',
+          imageUrl: '',
+          entity: {},
+          role: 'admin',
+        },
+        {
+          id: 'user-platform-admin-success',
+          name: 'Successful Admin',
+          email: 'successful-platform-admin@example.com',
+          imageUrl: '',
+          entity: {},
+          role: 'admin',
+        },
+      ])
+      .onConflictDoNothing();
+    await db.insert(slackInstallations).values({
+      teamId: 'T123',
+      teamName: 'Acme',
+      appId: 'A123',
+      botUserId: 'B123',
+      botAccessToken: 'xoxb-test',
+      scopes: { bot: ['chat:write'] },
+      installedByUserId: 'user-platform-admin-success',
+      isActive: true,
+    });
+    await db.insert(slackUserMappings).values([
+      {
+        userId: 'user-platform-admin-fail',
+        slackTeamId: 'T123',
+        slackUserId: 'UFAIL',
+      },
+      {
+        userId: 'user-platform-admin-success',
+        slackTeamId: 'T123',
+        slackUserId: 'USUCCESS',
+      },
+    ]);
+    mockSlackOpenConversation.mockImplementation((userId: string) =>
+      Promise.resolve(userId === 'UFAIL' ? 'DFAIL' : 'DSUCCESS'),
+    );
+    mockSlackPostMessage.mockImplementation(
+      ({ channel }: { channel: string }) =>
+        channel === 'DFAIL'
+          ? Promise.reject(new Error('temporary Slack failure'))
+          : Promise.resolve('1727000000.000200'),
+    );
+
+    await recordTaskMessageEnvelope({
+      runId,
+      taskId,
+      envelope: buildReportEnvelope(),
+    });
+
+    expect(mockSlackPostMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ channel: 'DFAIL' }),
+    );
+    expect(mockSlackPostMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ channel: 'DSUCCESS' }),
+    );
+    expect((await findReportRow(taskId))?.slackPostedAt).toBeNull();
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('leaving it pending for retry'),
+    );
+    warnSpy.mockRestore();
+  });
+
+  it('does not deliver after an admin explicitly opts out', async () => {
+    const taskId = 'task-platform-issue-opted-out';
+    const runId = await seedTaskRun(taskId);
+
+    await upsertAutomation(db, {
+      key: 'platform_issue_alerts',
+      enabled: false,
+      settings: { optedOut: true },
+      targets: [],
+    });
+
+    await recordTaskMessageEnvelope({
+      runId,
+      taskId,
+      envelope: buildReportEnvelope(),
+    });
+
+    expect(mockSlackOpenConversation).not.toHaveBeenCalled();
+    expect(mockSlackPostMessage).not.toHaveBeenCalled();
+    expect((await findReportRow(taskId))?.slackPostedAt).toBeNull();
   });
 
   it('leaves the report unposted when the Discord destination has no runtime credentials', async () => {

@@ -314,10 +314,8 @@ export async function callFastAgentIntegration(
   // Fail closed: an integration tool never executes unless its durable audit
   // record exists first.
   const audit = await beginSlackFastIntegrationCall({
-    slackQuickAnswerId: context.sessionId,
+    fastAgentConversationId: context.sessionId,
     userId: context.userId,
-    // The persisted audit schema is legacy Slack-shaped; the broker boundary
-    // remains provider-neutral while a later N-1-safe migration renames it.
     slackTeamId: getFastAgentConversationStorageWorkspaceId(
       context.conversation,
     ),

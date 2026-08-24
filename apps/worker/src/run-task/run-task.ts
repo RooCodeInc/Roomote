@@ -23,9 +23,12 @@ import {
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
+import packageJson from '../../../../package.json';
+
 import { validateToken } from '@roomote/auth/client';
 import {
-  ROOMOTE_SYSTEM_PROMPT,
+  buildRoomoteSystemPrompt,
+  resolveRoomoteReleaseVersion,
   stripLeadingSlackProductMention,
   wrapSlackMessage,
 } from '@roomote/cloud-agents';
@@ -650,6 +653,7 @@ function getQueuedSnapshotResumeLinearMessages(
 
 export const runTask = async ({
   taskRun,
+  sourceControlToken,
   envVars,
   userEnvVars,
   workspacePath,
@@ -678,6 +682,7 @@ export const runTask = async ({
     id: taskRun.id,
     status: RunStatus.Spawning,
   });
+  await callbacks.onStatus?.(taskRun, RunStatus.Spawning, context);
 
   // Register the process-level crash listeners (at most once per process) and
   // point them at this run via the module-level context slot. The `finally` at
@@ -1035,7 +1040,17 @@ export const runTask = async ({
     // OpenCode consumes Roomote's identity, workflow, and runtime guidance
     // through its developer-instructions layer.
     const harnessDeveloperInstructions =
-      [ROOMOTE_SYSTEM_PROMPT, harnessInstructions, environmentInstructions]
+      [
+        buildRoomoteSystemPrompt(
+          resolveRoomoteReleaseVersion(
+            process.env.RELEASE_PRODUCT_VERSION,
+            process.env.RELEASE_VERSION,
+            packageJson.version,
+          ),
+        ),
+        harnessInstructions,
+        environmentInstructions,
+      ]
         .filter((value): value is string => Boolean(value))
         .join('\n\n') || undefined;
 
@@ -1057,6 +1072,7 @@ export const runTask = async ({
       id: taskRun.id,
       status: RunStatus.Connecting,
     });
+    await callbacks.onStatus?.(taskRun, RunStatus.Connecting, context);
 
     const recordWorkerRuntimeEvent = createWorkerRuntimeEventRecorder({
       runId: taskRun.id,
@@ -1329,6 +1345,7 @@ export const runTask = async ({
       harness,
       getSubprocess,
       unsubscribe: unsubscribeHarness,
+      flushPendingCompletionEvents,
     } = await createHarness({
       harnessType,
       workspacePath,
@@ -1515,10 +1532,12 @@ export const runTask = async ({
             eventType: 'decision',
             message: `Worker onExit finished runtime-state flush for task run #${taskRun.id}.`,
           });
+          await flushPendingCompletionEvents();
           await sdk.taskRuns.done({
             id: taskRun.id,
             status: RunStatus.Idle,
           });
+          await callbacks.onStatus?.(taskRun, RunStatus.Idle, context);
         },
       },
     });
@@ -2137,6 +2156,7 @@ export const runTask = async ({
       id: taskRun.id,
       status: RunStatus.Running,
     });
+    await callbacks.onStatus?.(taskRun, RunStatus.Running, context);
 
     // Subscribe to HarnessManager state changes BEFORE starting/resuming a task
     // so we capture the initial stateChange event (which carries sessionId).
@@ -2272,6 +2292,7 @@ export const runTask = async ({
     // (syncPollingState was already called above, before task start/resume.)
     startPolling({
       taskRun,
+      sourceControlTokenExpiresAt: sourceControlToken?.expiresAt,
       task,
       state: pollingState,
       logger,

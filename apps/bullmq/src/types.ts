@@ -18,6 +18,7 @@ export enum ScheduledJobName {
   BrainOutboxDrain = 'BrainOutboxDrain',
   BrainCollectors = 'BrainCollectors',
   BrainMaintenance = 'BrainMaintenance',
+  ProviderUsageLimitCheck = 'ProviderUsageLimitCheck',
 }
 
 /**

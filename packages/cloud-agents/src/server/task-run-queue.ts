@@ -233,7 +233,24 @@ end
 return 0
 `;
 
-const ACTIVATE_DELAYED_ENTRY_SCRIPT = `
+const PREPARE_DELAYED_ENTRY_ACTIVATION_SCRIPT = `
+local entryId = ARGV[1]
+local holdMs = tonumber(ARGV[2])
+local entryScope = redis.call('HGET', KEYS[2], entryId)
+
+if not entryScope or redis.call('HGET', KEYS[1], entryScope) ~= entryId then
+  return 0
+end
+
+if redis.call('GET', entryScope) ~= ('delay:' .. entryId) then
+  return 0
+end
+
+redis.call('PEXPIRE', entryScope, holdMs)
+return 1
+`;
+
+const COMMIT_DELAYED_ENTRY_SCRIPT = `
 local entryId = ARGV[1]
 local remainingDelayMs = tonumber(ARGV[2]) or 0
 local entryScope = redis.call('HGET', KEYS[2], entryId)
@@ -581,13 +598,27 @@ export class TaskRunQueue {
     return evictedEntries;
   }
 
-  public async activateDelayedEntry(
+  public async prepareDelayedEntryActivation(
+    entryId: number,
+  ): Promise<boolean> {
+    const result = await this.redis.eval(
+      PREPARE_DELAYED_ENTRY_ACTIVATION_SCRIPT,
+      2,
+      TaskRunQueueKeys.Scopes,
+      TaskRunQueueKeys.EntryScopes,
+      entryId.toString(),
+      SIGNAL_GUARDED_QUEUE_HOLD_MS.toString(),
+    );
+    return result === 1;
+  }
+
+  public async commitDelayedEntry(
     entryId: number,
     availableAt?: number,
   ): Promise<boolean> {
     const remainingDelayMs = Math.max(0, (availableAt ?? 0) - Date.now());
     const result = await this.redis.eval(
-      ACTIVATE_DELAYED_ENTRY_SCRIPT,
+      COMMIT_DELAYED_ENTRY_SCRIPT,
       2,
       TaskRunQueueKeys.Scopes,
       TaskRunQueueKeys.EntryScopes,
@@ -1332,17 +1363,25 @@ async function pushRunOntoQueue(params: {
       delayedEntryQueued = true;
       try {
         options.signal.throwIfAborted();
-        if (
-          !(await queue.activateDelayedEntry(
-            taskRun.id,
-            queueEntry.availableAt,
-          ))
-        ) {
+        if (!(await queue.prepareDelayedEntryActivation(taskRun.id))) {
           throw new Error(
-            `Failed to activate signal-guarded task run ${taskRun.id}.`,
+            `Failed to prepare signal-guarded task run ${taskRun.id} for activation.`,
           );
         }
         options.signal.throwIfAborted();
+
+        // Dispatching this atomic Redis script is the queue commit point. Keep
+        // the final ownership check and dispatch in one synchronous turn so an
+        // abort either wins while the entry is still held or follows commit.
+        const commit = queue.commitDelayedEntry(
+          taskRun.id,
+          queueEntry.availableAt,
+        );
+        if (!(await commit)) {
+          throw new Error(
+            `Failed to commit signal-guarded task run ${taskRun.id}.`,
+          );
+        }
         delayedEntryQueued = false;
       } finally {
         if (delayedEntryQueued) {
@@ -2471,6 +2510,17 @@ function inheritSnapshotResumeCommunicationContext(
       true
   ) {
     payload.communicationContextInherited = true;
+  }
+
+  if (
+    sourcePayload &&
+    typeof sourcePayload === 'object' &&
+    !Array.isArray(sourcePayload) &&
+    (sourcePayload as Record<string, unknown>).liveTaskStream === true
+  ) {
+    // The card in the Slack thread belongs to the task; every resumed run
+    // must keep updating it.
+    payload.liveTaskStream = true;
   }
 }
 

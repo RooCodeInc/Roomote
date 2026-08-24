@@ -12,7 +12,10 @@ export {
   optionalAuthProcedure,
 } from './trpc';
 
-export { finishRun } from './lib/task-runs/finish-run';
+export {
+  finishRun,
+  maybeEnqueueBrainMemoryForCompletedRun,
+} from './lib/task-runs/finish-run';
 export {
   AUTOMATION_RECOMMENDATIONS_QUEUE_NAME,
   AUTOMATION_RECOMMENDATION_INITIAL_RUN_QUEUE_NAME,
@@ -195,6 +198,8 @@ export {
 export {
   findSlackUserDirectMessageDestination,
   findUserDirectMessageDestination,
+  hasUserDirectMessageIdentity,
+  sendUserDirectMessage,
   sendUserDirectMessageBestEffort,
   type UserDirectMessageDestination,
   type UserDirectMessageProvider,
@@ -245,7 +250,9 @@ export {
   type StartPrReviewNotificationCycleInput,
 } from './lib/task-runs/pr-review-notification';
 export {
+  createPrReviewNotificationTelemetry,
   gatherPrReviewTriageContext,
+  PrReviewNotificationRateLimitError,
   preparePrReviewNotificationDelivery,
   recordPrReviewNotificationDeliveryBestEffort,
   triagePrReviewActivity,
@@ -323,6 +330,16 @@ export {
   upsertSourceControlPullRequestFactFromWebhook,
 } from './lib/pull-requests/source-control-pull-request-facts';
 export { type PullRequestFactSnapshot } from './lib/pull-requests/pull-request-facts-store';
+export {
+  enrichPullRequestFacts,
+  STORED_CHANGED_FILE_CAP,
+} from './lib/pull-requests/pull-request-facts-enrichment';
+export {
+  readSourceControlPullRequestEnrichment,
+  totalPullRequestLineChanges,
+  type PullRequestEnrichment,
+  type PullRequestReviewSummary,
+} from './lib/pull-requests/source-control-pull-request-enrichment';
 
 export * from './lib/auth';
 export * from './lib/safe-fetch';

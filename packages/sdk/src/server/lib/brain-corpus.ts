@@ -6,33 +6,23 @@
  * in it so an admin can see the thing instead of inferring it from Roomote's
  * ingestion checkpoints, which describe what was sent rather than what landed.
  *
- * It deliberately reports a *sample*, not a census. `list_pages` sorts by
- * recency and answers with a bounded window, so a deployment large enough to
- * exceed that window would have its composition chart quietly describe only
- * the newest slice. Rather than present that as a total, the snapshot carries
- * `truncated` and the UI says which it is.
+ * The listing is an exhaustive census. gbrain caps each `list_pages` response
+ * at 100 rows, so this module keyset-pages the whole corpus and caches the
+ * result. Settings reads then aggregate and filter one stable snapshot instead
+ * of repeatedly walking the Brain.
  */
+
+import { getRedis } from '@roomote/redis';
 
 import { resolveBrainConnection } from './brain-clients';
 import { callBrainTool } from './brain-mcp';
 
-/** Upper bound requested from the Brain in one listing. */
-const CORPUS_SAMPLE_LIMIT = 500;
-
 /**
- * A settings page must not hold a request open on an unreachable service.
- * Short enough that an admin gets the rest of the page promptly; the corpus
- * section degrades to "unavailable" on its own. This bounds the WHOLE
- * listing, not each paged window: five windows must not multiply it.
+ * A single unreachable listing window must not hold Settings open forever.
+ * Successful exhaustive walks can take longer because large corpora require
+ * many calls, but each call remains independently bounded.
  */
 const CORPUS_REQUEST_TIMEOUT_MS = 8_000;
-
-/**
- * Below this remaining budget a further window is not attempted, and it is
- * also the floor passed to a window that still runs, so a request always
- * gets a workable timeout even at the very edge of the deadline.
- */
-const CORPUS_MIN_WINDOW_BUDGET_MS = 500;
 
 export type BrainCorpusPage = {
   slug: string;
@@ -42,8 +32,6 @@ export type BrainCorpusPage = {
 
 export type BrainCorpusSnapshot = {
   pages: BrainCorpusPage[];
-  /** The listing filled the requested window, so more pages exist. */
-  truncated: boolean;
 };
 
 function toDate(value: unknown): Date | null {
@@ -139,125 +127,150 @@ export function extractBrainCorpusPages(
 }
 
 /**
- * Whether a listing failure could be the tool rejecting our arguments, as
- * opposed to the Brain being unreachable. Timeouts, aborts, and network
- * errors must not trigger the argument-shape fallback: retrying those doubles
- * the page's latency bound and masks the real failure.
+ * A full walk can be expensive, so keep it for ten minutes. Once stale, the
+ * previous complete snapshot is served immediately while one shared refresh
+ * runs. A failed refresh never replaces known-complete data.
  */
-function isRetryableToolError(error: unknown): boolean {
-  return (
-    error instanceof Error &&
-    !(error instanceof TypeError) &&
-    error.name !== 'TimeoutError' &&
-    error.name !== 'AbortError'
-  );
-}
-
-/**
- * One settings-page view issues this read from both `brain.get` and the
- * browse dialog's listing, and React Query refocus refetches add more. The
- * sample is already a bounded snapshot, so serving the same snapshot for a
- * few seconds costs nothing and keeps the composition chart and the dialog
- * agreeing with each other. Failures are cached only briefly so a Brain
- * coming back is noticed on the next interaction.
- */
-const CORPUS_CACHE_TTL_MS = 30_000;
-const CORPUS_FAILURE_CACHE_TTL_MS = 5_000;
+const CORPUS_CACHE_TTL_MS = 10 * 60_000;
+const CORPUS_FAILURE_CACHE_TTL_MS = 30_000;
 
 let corpusCache: {
-  value: Promise<BrainCorpusSnapshot | null>;
+  snapshot: BrainCorpusSnapshot | null;
   expiresAtMs: number;
-} | null = null;
+  load: Promise<BrainCorpusSnapshot | null> | null;
+  refresh: Promise<BrainCorpusSnapshot | null> | null;
+} = { snapshot: null, expiresAtMs: 0, load: null, refresh: null };
 
-/** Drop the cached sample, so the next call re-reads the corpus. */
-export function resetBrainCorpusSampleCache(): void {
-  corpusCache = null;
+/** Drop the cached census, so the next call re-reads the corpus. */
+export function resetBrainCorpusCache(): void {
+  corpusCache = {
+    snapshot: null,
+    expiresAtMs: 0,
+    load: null,
+    refresh: null,
+  };
 }
 
 /**
- * The most pages one `list_pages` call returns. gbrain caps `limit` at 100
- * regardless of what is requested (verified empirically: `limit: 500`
- * answers 100), so the sample must page with `offset` to see past the
- * newest window — otherwise the composition chart lurches to whichever
- * source backfilled most recently and presents that batch as the corpus.
+ * The most pages one `list_pages` call returns. gbrain caps `limit` at 100.
  */
 const CORPUS_LISTING_WINDOW = 100;
 
-async function fetchBrainCorpusSample(): Promise<BrainCorpusSnapshot | null> {
-  const connection = await resolveBrainConnection('agent');
+type CorpusCursor = {
+  after: string | null;
+  offset: number;
+  lastSlug: string | null;
+};
 
-  if (!connection) {
+type BrainConnection = NonNullable<
+  Awaited<ReturnType<typeof resolveBrainConnection>>
+>;
+
+type StoredBrainCorpus = {
+  generatedAt: string;
+  pages: Array<
+    Omit<BrainCorpusPage, 'updatedAt'> & { updatedAt: string | null }
+  >;
+};
+
+function corpusRedisKey(connection: BrainConnection): string {
+  return `brain:settings:corpus:v1:${encodeURIComponent(connection.baseUrl)}`;
+}
+
+async function readStoredCorpus(
+  connection: BrainConnection,
+): Promise<{ snapshot: BrainCorpusSnapshot; generatedAtMs: number } | null> {
+  try {
+    const raw = await getRedis().get(corpusRedisKey(connection));
+
+    if (!raw) {
+      return null;
+    }
+
+    const stored = JSON.parse(raw) as StoredBrainCorpus;
+    const generatedAtMs = new Date(stored.generatedAt).getTime();
+
+    if (!Array.isArray(stored.pages) || Number.isNaN(generatedAtMs)) {
+      return null;
+    }
+
+    return {
+      generatedAtMs,
+      snapshot: {
+        pages: stored.pages.map((page) => ({
+          ...page,
+          updatedAt: toDate(page.updatedAt),
+        })),
+      },
+    };
+  } catch (error) {
+    console.warn(
+      `[brain] stored corpus read failed: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
     return null;
   }
+}
+
+async function storeCorpus(
+  connection: BrainConnection,
+  snapshot: BrainCorpusSnapshot,
+): Promise<void> {
+  const stored: StoredBrainCorpus = {
+    generatedAt: new Date().toISOString(),
+    pages: snapshot.pages.map((page) => ({
+      ...page,
+      updatedAt: page.updatedAt?.toISOString() ?? null,
+    })),
+  };
 
   try {
+    // No Redis expiry: an old complete census is preferable to a cold full
+    // walk after every process restart. generatedAt controls refresh timing.
+    await getRedis().set(corpusRedisKey(connection), JSON.stringify(stored));
+  } catch (error) {
+    console.warn(
+      `[brain] stored corpus write failed: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
+}
+
+async function fetchBrainCorpus(
+  connection: BrainConnection,
+): Promise<BrainCorpusSnapshot | null> {
+  try {
     const pages = new Map<string, BrainCorpusPage>();
-    let truncated = false;
-    // One deadline across every window, so paging cannot multiply the
-    // page's latency bound: each window gets whatever budget remains.
-    const deadlineAtMs = Date.now() + CORPUS_REQUEST_TIMEOUT_MS;
+    let cursor: CorpusCursor = { after: null, offset: 0, lastSlug: null };
 
-    for (let offset = 0; offset < CORPUS_SAMPLE_LIMIT;) {
-      const remainingMs = deadlineAtMs - Date.now();
+    for (;;) {
+      const overlapping = cursor.offset > 0 && cursor.lastSlug !== null;
+      const requestOffset = overlapping ? cursor.offset - 1 : cursor.offset;
+      const payloads = await callBrainTool(
+        connection,
+        'list_pages',
+        {
+          limit: CORPUS_LISTING_WINDOW,
+          sort: 'updated_asc',
+          ...(cursor.after ? { updated_after: cursor.after } : {}),
+          ...(requestOffset > 0 ? { offset: requestOffset } : {}),
+        },
+        { timeoutMs: CORPUS_REQUEST_TIMEOUT_MS },
+      );
+      let window = extractBrainCorpusPages(payloads);
+      const windowFull = window.length >= CORPUS_LISTING_WINDOW;
 
-      if (offset > 0 && remainingMs < CORPUS_MIN_WINDOW_BUDGET_MS) {
-        // Firing a window that would be aborted almost immediately only adds
-        // a doomed round trip to a listing already reported as truncated.
-        truncated = true;
-        break;
-      }
-
-      let payloads: unknown[];
-
-      try {
-        payloads = await callBrainTool(
-          connection,
-          'list_pages',
-          { limit: CORPUS_LISTING_WINDOW, offset },
-          { timeoutMs: Math.max(remainingMs, CORPUS_MIN_WINDOW_BUDGET_MS) },
-        );
-      } catch (error) {
-        if (offset > 0 || !isRetryableToolError(error)) {
-          // A later window failing (an offset the tool does not accept, or a
-          // mid-listing hiccup) does not invalidate what already came back:
-          // report it as a truncated sample rather than an unreachable Brain.
-          if (offset > 0) {
-            truncated = true;
-            break;
-          }
-
-          throw error;
+      if (overlapping) {
+        if (window[0]?.slug !== cursor.lastSlug) {
+          throw new Error(
+            'list_pages ignored or invalidated the offset cursor',
+          );
         }
 
-        // The listing tool's arguments have changed shape between gbrain
-        // versions. A default-window listing still describes the corpus, so
-        // fall back to it rather than reporting the Brain as unreachable —
-        // presented as a sample, since the default window's size is unknown.
-        // The fallback draws on the same listing deadline: if the failed
-        // probe already consumed it, retrying would push the page past its
-        // stated bound for a listing that failed once, so give up instead.
-        const fallbackBudgetMs = deadlineAtMs - Date.now();
-
-        if (fallbackBudgetMs < CORPUS_MIN_WINDOW_BUDGET_MS) {
-          throw error;
-        }
-
-        payloads = await callBrainTool(
-          connection,
-          'list_pages',
-          {},
-          { timeoutMs: fallbackBudgetMs },
-        );
-        const fallbackPages = extractBrainCorpusPages(payloads);
-
-        return {
-          pages: fallbackPages,
-          truncated: fallbackPages.length > 0,
-        };
+        window = window.slice(1);
       }
-
-      const window = extractBrainCorpusPages(payloads);
-      const before = pages.size;
 
       for (const page of window) {
         if (!pages.has(page.slug)) {
@@ -265,28 +278,60 @@ async function fetchBrainCorpusSample(): Promise<BrainCorpusSnapshot | null> {
         }
       }
 
-      // A short window is the end of the corpus. A window of nothing new is
-      // a server that ignored `offset` and answered the first window again;
-      // paging further would loop forever on the same pages, so stop and be
-      // honest that only the newest window was seen.
-      if (window.length < CORPUS_LISTING_WINDOW) {
+      if (!windowFull) {
         break;
       }
 
-      if (pages.size === before) {
-        truncated = true;
-        break;
+      const lastAt = window.at(-1)?.updatedAt ?? null;
+      const earlier = lastAt
+        ? window.filter((page) => page.updatedAt && page.updatedAt < lastAt)
+        : [];
+      const someEarlier = Boolean(
+        lastAt &&
+        window.some(
+          (page) =>
+            !page.updatedAt || page.updatedAt.getTime() !== lastAt.getTime(),
+        ),
+      );
+
+      if (!lastAt || (someEarlier && earlier.length === 0)) {
+        throw new Error('list_pages is not walkable in updated_at order');
       }
 
-      offset += CORPUS_LISTING_WINDOW;
+      let next: CorpusCursor;
 
-      if (offset >= CORPUS_SAMPLE_LIMIT) {
-        // Every window filled up to the cap, so more pages likely exist.
-        truncated = true;
+      if (someEarlier) {
+        const boundary = earlier.reduce((latest, page) =>
+          page.updatedAt! > latest.updatedAt! ? page : latest,
+        );
+        next = {
+          after: boundary.updatedAt!.toISOString(),
+          offset: 0,
+          lastSlug: null,
+        };
+      } else {
+        next = {
+          after: cursor.after,
+          offset: cursor.offset + window.length,
+          lastSlug: window.at(-1)!.slug,
+        };
       }
+
+      if (next.after === cursor.after && next.offset === cursor.offset) {
+        throw new Error('list_pages ignored the pagination cursor');
+      }
+
+      cursor = next;
     }
 
-    return { pages: [...pages.values()], truncated };
+    return {
+      pages: [...pages.values()].sort(
+        (left, right) =>
+          (right.updatedAt?.getTime() ?? 0) -
+            (left.updatedAt?.getTime() ?? 0) ||
+          left.slug.localeCompare(right.slug),
+      ),
+    };
   } catch (error) {
     console.warn(
       `[brain] corpus listing failed: ${
@@ -299,31 +344,103 @@ async function fetchBrainCorpusSample(): Promise<BrainCorpusSnapshot | null> {
 }
 
 /**
- * Sample the corpus with the read-only agent credential, or return null when
+ * Read the full corpus with the read-only agent credential, or return null when
  * the Brain is unconfigured or unreachable. Never throws: an unreachable Brain
  * is a state the page renders, not an error that takes the page down with it.
  */
-export async function readBrainCorpusSample(): Promise<BrainCorpusSnapshot | null> {
-  const cached = corpusCache;
-
-  if (cached && cached.expiresAtMs > Date.now()) {
-    return cached.value;
+export async function readBrainCorpus(): Promise<BrainCorpusSnapshot | null> {
+  if (corpusCache.expiresAtMs > Date.now()) {
+    return corpusCache.snapshot;
   }
 
-  const value = fetchBrainCorpusSample().then((snapshot) => {
-    if (snapshot === null && corpusCache?.value === value) {
-      corpusCache = {
-        value,
-        expiresAtMs: Date.now() + CORPUS_FAILURE_CACHE_TTL_MS,
-      };
+  const refresh = (connection?: BrainConnection) => {
+    if (corpusCache.refresh) {
+      return corpusCache.refresh;
     }
 
-    return snapshot;
-  });
+    corpusCache.refresh = (async () => {
+      const resolved = connection ?? (await resolveBrainConnection('agent'));
 
-  corpusCache = { value, expiresAtMs: Date.now() + CORPUS_CACHE_TTL_MS };
+      if (!resolved) {
+        corpusCache.expiresAtMs = Date.now() + CORPUS_FAILURE_CACHE_TTL_MS;
+        return null;
+      }
 
-  return value;
+      const snapshot = await fetchBrainCorpus(resolved);
+
+      if (snapshot) {
+        corpusCache.snapshot = snapshot;
+        corpusCache.expiresAtMs = Date.now() + CORPUS_CACHE_TTL_MS;
+        await storeCorpus(resolved, snapshot);
+      } else {
+        corpusCache.expiresAtMs = Date.now() + CORPUS_FAILURE_CACHE_TTL_MS;
+      }
+
+      return snapshot;
+    })()
+      .catch((error) => {
+        console.warn(
+          `[brain] corpus refresh failed: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+        corpusCache.expiresAtMs = Date.now() + CORPUS_FAILURE_CACHE_TTL_MS;
+        return null;
+      })
+      .finally(() => {
+        corpusCache.refresh = null;
+      });
+
+    return corpusCache.refresh;
+  };
+
+  if (corpusCache.snapshot) {
+    void refresh();
+    return corpusCache.snapshot;
+  }
+
+  if (!corpusCache.load) {
+    corpusCache.load = (async () => {
+      const connection = await resolveBrainConnection('agent');
+
+      if (!connection) {
+        corpusCache.expiresAtMs = Date.now() + CORPUS_FAILURE_CACHE_TTL_MS;
+        return null;
+      }
+
+      const stored = await readStoredCorpus(connection);
+
+      if (!stored) {
+        return refresh(connection);
+      }
+
+      corpusCache.snapshot = stored.snapshot;
+      corpusCache.expiresAtMs = Math.max(
+        stored.generatedAtMs + CORPUS_CACHE_TTL_MS,
+        Date.now() + CORPUS_FAILURE_CACHE_TTL_MS,
+      );
+
+      if (stored.generatedAtMs + CORPUS_CACHE_TTL_MS <= Date.now()) {
+        void refresh(connection);
+      }
+
+      return stored.snapshot;
+    })()
+      .catch((error) => {
+        console.warn(
+          `[brain] corpus cache load failed: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+        corpusCache.expiresAtMs = Date.now() + CORPUS_FAILURE_CACHE_TTL_MS;
+        return null;
+      })
+      .finally(() => {
+        corpusCache.load = null;
+      });
+  }
+
+  return corpusCache.load;
 }
 
 export type BrainCorpusPageContent = BrainCorpusPage & {

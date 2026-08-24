@@ -6,6 +6,7 @@ import {
   bindFastAgentNativeToolExecutor,
   FAST_AGENT_NATIVE_TOOL_FILTER,
   FAST_AGENT_NATIVE_TOOL_NAMES,
+  FAST_AGENT_SUBAGENT_TOOL_FILTER,
   getFastAgentNativeToolRuntime,
 } from '../fast-agent-native-tool-bridge';
 
@@ -22,8 +23,20 @@ describe('Fast native OpenCode tool bridge', () => {
       join(toolsDirectory, 'integration_call.js'),
       'utf8',
     );
+    const launchTaskSource = await readFile(
+      join(toolsDirectory, 'launch_task.js'),
+      'utf8',
+    );
     const manageTasksSource = await readFile(
       join(toolsDirectory, 'manage_tasks.js'),
+      'utf8',
+    );
+    const messageContextSource = await readFile(
+      join(toolsDirectory, 'get_chat_message_context.js'),
+      'utf8',
+    );
+    const channelMessagesSource = await readFile(
+      join(toolsDirectory, 'get_chat_channel_messages.js'),
       'utf8',
     );
     const bridgeSource = await readFile(
@@ -40,6 +53,8 @@ describe('Fast native OpenCode tool bridge', () => {
     expect(replySource).toContain('invoke("send_chat_reply"');
     expect(integrationSource).toContain('export default {');
     expect(integrationSource).toContain('invoke("integration_call"');
+    expect(launchTaskSource).toContain('model: z.string().min(1)');
+    expect(launchTaskSource).toContain('deployment-enabled model ID');
     expect(manageTasksSource).toContain('invoke("manage_tasks"');
     expect(manageTasksSource).toContain(
       `z.enum(${JSON.stringify(ROOMOTE_TASK_INSPECTION_ACTIONS)})`,
@@ -47,19 +62,52 @@ describe('Fast native OpenCode tool bridge', () => {
     expect(manageTasksSource).toContain(
       'Use launch_task, send_task_message, or cancel_task for task changes',
     );
+    expect(messageContextSource).toContain('invoke("get_chat_message_context"');
+    expect(messageContextSource).toContain('messageId: z.string().min(1)');
+    expect(messageContextSource).not.toContain('channel:');
+    expect(channelMessagesSource).toContain(
+      'invoke("get_chat_channel_messages"',
+    );
+    expect(channelMessagesSource).toContain(
+      'defaults Slack history to the previous 24 hours',
+    );
+    expect(channelMessagesSource).not.toContain('channel:');
     expect(bridgeSource).toContain('context.sessionID');
+    expect(bridgeSource).toContain('agent: context.agent');
     expect(bridgeSource).toContain('metadata: { roomoteResult:');
     expect(FAST_AGENT_NATIVE_TOOL_FILTER).toMatchObject({
       '*': false,
+      task: true,
       [FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReply]: true,
       [FAST_AGENT_NATIVE_TOOL_NAMES.integrationCall]: true,
       [FAST_AGENT_NATIVE_TOOL_NAMES.manageTasks]: true,
+      [FAST_AGENT_NATIVE_TOOL_NAMES.getChatMessageContext]: true,
+      [FAST_AGENT_NATIVE_TOOL_NAMES.getChatChannelMessages]: true,
     });
+    expect(FAST_AGENT_SUBAGENT_TOOL_FILTER).toEqual({
+      '*': false,
+      [FAST_AGENT_NATIVE_TOOL_NAMES.integrationCall]: true,
+      [FAST_AGENT_NATIVE_TOOL_NAMES.manageTasks]: true,
+    });
+    for (const parentOnlyTool of [
+      FAST_AGENT_NATIVE_TOOL_NAMES.cancelTask,
+      FAST_AGENT_NATIVE_TOOL_NAMES.ignoreEvent,
+      FAST_AGENT_NATIVE_TOOL_NAMES.getChatMessageContext,
+      FAST_AGENT_NATIVE_TOOL_NAMES.getChatChannelMessages,
+      FAST_AGENT_NATIVE_TOOL_NAMES.launchTask,
+      FAST_AGENT_NATIVE_TOOL_NAMES.retryTaskStart,
+      FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReaction,
+      FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReply,
+      FAST_AGENT_NATIVE_TOOL_NAMES.sendTaskMessage,
+    ]) {
+      expect(FAST_AGENT_SUBAGENT_TOOL_FILTER[parentOnlyTool]).not.toBe(true);
+    }
   });
 
   it('routes raw JSON arguments and results by OpenCode session id', async () => {
     const runtime = await getFastAgentNativeToolRuntime();
-    const executor = vi.fn(async ({ name, args }) => ({
+    const executor = vi.fn(async ({ agent, name, args }) => ({
+      agent,
       name,
       echoed: args,
       nestedResult: { values: [1, 2, 3] },
@@ -78,6 +126,7 @@ describe('Fast native OpenCode tool bridge', () => {
         },
         body: JSON.stringify({
           sessionID: 'opencode-session-1',
+          agent: 'judge',
           tool: FAST_AGENT_NATIVE_TOOL_NAMES.integrationCall,
           args: {
             integrationId: 'github',
@@ -91,6 +140,7 @@ describe('Fast native OpenCode tool bridge', () => {
       await expect(response.json()).resolves.toEqual({
         ok: true,
         result: {
+          agent: 'judge',
           name: FAST_AGENT_NATIVE_TOOL_NAMES.integrationCall,
           echoed: {
             integrationId: 'github',
@@ -100,6 +150,9 @@ describe('Fast native OpenCode tool bridge', () => {
           nestedResult: { values: [1, 2, 3] },
         },
       });
+      expect(executor).toHaveBeenCalledWith(
+        expect.objectContaining({ agent: 'judge' }),
+      );
     } finally {
       unbind();
     }

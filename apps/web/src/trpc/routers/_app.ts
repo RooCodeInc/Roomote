@@ -689,6 +689,7 @@ const automationsRouter = createRouter({
           .nullable()
           .optional(),
         announcerInstructions: z.string().max(8_000).nullable(),
+        platformIssueAlertsEnabled: z.boolean().optional(),
         platformIssueSlackChannel: z.string().trim().min(1).max(160).nullable(),
         platformIssueDiscordChannel: z
           .string()
@@ -2321,6 +2322,7 @@ export const appRouter = createRouter({
           ),
           allowedModelIds: z.array(z.string().trim().min(1)),
           defaultModelId: z.string().trim().min(1),
+          orchestrationModelId: z.string().trim().min(1).nullable().optional(),
           helperModelId: z.string().trim().min(1).nullable(),
           visionModelId: z.string().trim().min(1).nullable(),
           codeReviewModelId: z.string().trim().min(1).nullable(),
@@ -2329,6 +2331,10 @@ export const appRouter = createRouter({
           codingModelReasoningEffort: z
             .enum(REASONING_EFFORT_VALUES)
             .nullable(),
+          orchestrationModelReasoningEffort: z
+            .enum(REASONING_EFFORT_VALUES)
+            .nullable()
+            .optional(),
           helperModelReasoningEffort: z
             .enum(REASONING_EFFORT_VALUES)
             .nullable(),
@@ -2972,9 +2978,16 @@ export const appRouter = createRouter({
       getBrainSettingsCommand(auth),
     ),
 
-    listPages: protectedProcedure.query(({ ctx: { auth } }) =>
-      listBrainPagesCommand(auth),
-    ),
+    listPages: protectedProcedure
+      .input(
+        z.object({
+          search: z.string().max(200).optional(),
+          namespaceId: z.string().max(100).optional(),
+          offset: z.number().int().min(0).default(0),
+          limit: z.number().int().min(1).max(100).default(100),
+        }),
+      )
+      .query(({ ctx: { auth }, input }) => listBrainPagesCommand(auth, input)),
 
     getPage: protectedProcedure
       .input(z.object({ slug: z.string().min(1).max(512) }))

@@ -27,7 +27,7 @@ This repository is open source. Treat GitHub and other public surfaces as fully 
 
 ## Build
 
-- `pnpm lint` — oxfmt format check + oxlint + residual ESLint across workspaces
+- `pnpm lint` — oxfmt format check + monorepo oxlint + residual ESLint in web and worker
 - `pnpm check-types` — TypeScript type checking
 - `pnpm format` — oxfmt formatting
 
@@ -40,7 +40,7 @@ This repository is open source. Treat GitHub and other public surfaces as fully 
 - `pnpm lint:fast && pnpm check-types:fast && pnpm knip` — Matches the full pre-push suite (pre-push runs the same gates in parallel after oxlint)
 - `pnpm check` — Runs lint + check-types + test + knip
 - If `pnpm lint` fails because of formatting, run `pnpm format` and rerun `pnpm lint`
-- Pre-commit hooks: `lint-staged` (oxfmt on staged files). Pre-push: `node scripts/pre-push-checks.mjs` (oxlint, then residual ESLint + `check-types:fast` + knip in parallel).
+- Pre-commit hooks: `lint-staged` (oxfmt on staged files). Pre-push: `node scripts/pre-push-checks.mjs` (oxlint, then web/worker residual ESLint + `check-types:fast` + knip in parallel).
 
 ## Working notes
 

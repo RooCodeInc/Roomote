@@ -96,18 +96,140 @@ export type SetupModelProviderId =
  */
 export type SetupModelProviderAuthKind = 'api-key' | 'endpoint' | 'oauth';
 
+type TaskModelRoleDescriptor = {
+  modelConfigKey: string;
+  reasoningConfigKey: string;
+  modelEnvVar: string;
+  reasoningEnvVar: string;
+  defaultReasoningEffort: ReasoningEffort;
+  modelFallback: 'deployment-default' | 'coding';
+  reasoningModelFallback: 'configured' | 'coding';
+  runtimeStatusKey: string;
+  settingsModelInputKey: string;
+  settingsReasoningInputKey: string;
+  settingsModelInputOptional: boolean;
+  invalidModelMessage: string;
+  includeInSandbox: boolean;
+};
+
 /**
- * The default-model roles a deployment configures: one model per kind of
- * work. `coding` drives new task launches; every other role falls back to
- * the coding model at runtime when unset.
+ * Canonical persistence, environment, fallback, and Settings metadata for
+ * every deployment model role. Public configuration remains flat; consumers
+ * iterate this table instead of maintaining parallel role switches.
  */
-export type TaskModelRole =
-  | 'coding'
-  | 'helper'
-  | 'vision'
-  | 'codeReview'
-  | 'explore'
-  | 'planning';
+export const TASK_MODEL_ROLE_DESCRIPTORS = {
+  coding: {
+    modelConfigKey: 'roomoteModel',
+    reasoningConfigKey: 'roomoteModelReasoningEffort',
+    modelEnvVar: 'R_MODEL',
+    reasoningEnvVar: 'R_MODEL_REASONING_EFFORT',
+    defaultReasoningEffort: 'medium',
+    modelFallback: 'deployment-default',
+    reasoningModelFallback: 'configured',
+    runtimeStatusKey: 'codingModel',
+    settingsModelInputKey: 'defaultModelId',
+    settingsReasoningInputKey: 'codingModelReasoningEffort',
+    settingsModelInputOptional: false,
+    invalidModelMessage: 'Choose a valid default model.',
+    includeInSandbox: true,
+  },
+  orchestration: {
+    modelConfigKey: 'roomoteOrchestrationModel',
+    reasoningConfigKey: 'roomoteOrchestrationModelReasoningEffort',
+    modelEnvVar: 'R_ORCHESTRATION_MODEL',
+    reasoningEnvVar: 'R_ORCHESTRATION_MODEL_REASONING_EFFORT',
+    defaultReasoningEffort: 'low',
+    modelFallback: 'coding',
+    reasoningModelFallback: 'configured',
+    runtimeStatusKey: 'orchestrationModel',
+    settingsModelInputKey: 'orchestrationModelId',
+    settingsReasoningInputKey: 'orchestrationModelReasoningEffort',
+    settingsModelInputOptional: true,
+    invalidModelMessage: 'Choose a valid orchestration model.',
+    includeInSandbox: false,
+  },
+  helper: {
+    modelConfigKey: 'roomoteSmallModel',
+    reasoningConfigKey: 'roomoteSmallModelReasoningEffort',
+    modelEnvVar: 'R_SMALL_MODEL',
+    reasoningEnvVar: 'R_SMALL_MODEL_REASONING_EFFORT',
+    defaultReasoningEffort: 'low',
+    modelFallback: 'coding',
+    reasoningModelFallback: 'coding',
+    runtimeStatusKey: 'helperModel',
+    settingsModelInputKey: 'helperModelId',
+    settingsReasoningInputKey: 'helperModelReasoningEffort',
+    settingsModelInputOptional: false,
+    invalidModelMessage: 'Choose a valid helper model.',
+    includeInSandbox: true,
+  },
+  vision: {
+    modelConfigKey: 'roomoteVisionModel',
+    reasoningConfigKey: 'roomoteVisionModelReasoningEffort',
+    modelEnvVar: 'R_VISION_MODEL',
+    reasoningEnvVar: 'R_VISION_MODEL_REASONING_EFFORT',
+    defaultReasoningEffort: 'low',
+    modelFallback: 'coding',
+    reasoningModelFallback: 'configured',
+    runtimeStatusKey: 'visionModel',
+    settingsModelInputKey: 'visionModelId',
+    settingsReasoningInputKey: 'visionModelReasoningEffort',
+    settingsModelInputOptional: false,
+    invalidModelMessage: 'Choose a valid vision model.',
+    includeInSandbox: true,
+  },
+  codeReview: {
+    modelConfigKey: 'roomoteCodeReviewModel',
+    reasoningConfigKey: 'roomoteCodeReviewModelReasoningEffort',
+    modelEnvVar: 'R_CODE_REVIEW_MODEL',
+    reasoningEnvVar: 'R_CODE_REVIEW_MODEL_REASONING_EFFORT',
+    defaultReasoningEffort: 'high',
+    modelFallback: 'coding',
+    reasoningModelFallback: 'coding',
+    runtimeStatusKey: 'codeReviewModel',
+    settingsModelInputKey: 'codeReviewModelId',
+    settingsReasoningInputKey: 'codeReviewModelReasoningEffort',
+    settingsModelInputOptional: false,
+    invalidModelMessage: 'Choose a valid code review model.',
+    includeInSandbox: true,
+  },
+  explore: {
+    modelConfigKey: 'roomoteExploreModel',
+    reasoningConfigKey: 'roomoteExploreModelReasoningEffort',
+    modelEnvVar: 'R_EXPLORE_MODEL',
+    reasoningEnvVar: 'R_EXPLORE_MODEL_REASONING_EFFORT',
+    defaultReasoningEffort: 'low',
+    modelFallback: 'coding',
+    reasoningModelFallback: 'coding',
+    runtimeStatusKey: 'exploreModel',
+    settingsModelInputKey: 'exploreModelId',
+    settingsReasoningInputKey: 'exploreModelReasoningEffort',
+    settingsModelInputOptional: true,
+    invalidModelMessage: 'Choose a valid explore model.',
+    includeInSandbox: true,
+  },
+  planning: {
+    modelConfigKey: 'roomotePlanningModel',
+    reasoningConfigKey: 'roomotePlanningModelReasoningEffort',
+    modelEnvVar: 'R_PLANNING_MODEL',
+    reasoningEnvVar: 'R_PLANNING_MODEL_REASONING_EFFORT',
+    defaultReasoningEffort: 'high',
+    modelFallback: 'coding',
+    reasoningModelFallback: 'coding',
+    runtimeStatusKey: 'planningModel',
+    settingsModelInputKey: 'planningModelId',
+    settingsReasoningInputKey: 'planningModelReasoningEffort',
+    settingsModelInputOptional: false,
+    invalidModelMessage: 'Choose a valid advisor model.',
+    includeInSandbox: true,
+  },
+} as const satisfies Record<string, TaskModelRoleDescriptor>;
+
+export type TaskModelRole = keyof typeof TASK_MODEL_ROLE_DESCRIPTORS;
+
+export const TASK_MODEL_ROLES = Object.freeze(
+  Object.keys(TASK_MODEL_ROLE_DESCRIPTORS) as TaskModelRole[],
+);
 
 /**
  * A provider's recommended default models for the non-coding roles. The
@@ -1101,20 +1223,18 @@ export function isSetupModelProviderId(
   return isOpenAiCompatibleProviderId(value);
 }
 
-export type DeploymentModelConfig = {
-  roomoteModel: string | null;
-  roomoteSmallModel: string | null;
-  roomoteVisionModel: string | null;
-  roomoteCodeReviewModel: string | null;
-  roomoteExploreModel: string | null;
-  roomotePlanningModel: string | null;
-  roomoteModelReasoningEffort: ReasoningEffort | null;
-  roomoteSmallModelReasoningEffort: ReasoningEffort | null;
-  roomoteVisionModelReasoningEffort: ReasoningEffort | null;
-  roomoteCodeReviewModelReasoningEffort: ReasoningEffort | null;
-  roomoteExploreModelReasoningEffort: ReasoningEffort | null;
-  roomotePlanningModelReasoningEffort: ReasoningEffort | null;
+type DeploymentModelFields = {
+  [Role in TaskModelRole as (typeof TASK_MODEL_ROLE_DESCRIPTORS)[Role]['modelConfigKey']]:
+    | string
+    | null;
 };
+
+type DeploymentReasoningFields = {
+  [Role in TaskModelRole as (typeof TASK_MODEL_ROLE_DESCRIPTORS)[Role]['reasoningConfigKey']]: ReasoningEffort | null;
+};
+
+export type DeploymentModelConfig = DeploymentModelFields &
+  DeploymentReasoningFields;
 
 /**
  * Roomote's default reasoning level per default-model role. Applied at
@@ -1122,14 +1242,12 @@ export type DeploymentModelConfig = {
  * role, and skipped for models whose metadata reports that they do not
  * support configurable reasoning.
  */
-export const DEFAULT_MODEL_ROLE_REASONING_EFFORTS = {
-  coding: 'medium',
-  helper: 'low',
-  vision: 'low',
-  codeReview: 'high',
-  explore: 'low',
-  planning: 'high',
-} as const satisfies Record<TaskModelRole, ReasoningEffort>;
+export const DEFAULT_MODEL_ROLE_REASONING_EFFORTS = Object.fromEntries(
+  TASK_MODEL_ROLES.map((role) => [
+    role,
+    TASK_MODEL_ROLE_DESCRIPTORS[role].defaultReasoningEffort,
+  ]),
+) as Record<TaskModelRole, ReasoningEffort>;
 
 /**
  * Runtime env var names carrying each overridable non-coding role's model and
@@ -1137,31 +1255,18 @@ export const DEFAULT_MODEL_ROLE_REASONING_EFFORTS = {
  * emitted by `resolveModelRuntimeEnv` in packages/db and consumed by the
  * worker's OpenCode config generation.
  */
-export const TASK_MODEL_OVERRIDE_ROLE_ENV_VARS = {
-  helper: {
-    model: 'R_SMALL_MODEL',
-    reasoningEffort: 'R_SMALL_MODEL_REASONING_EFFORT',
-  },
-  vision: {
-    model: 'R_VISION_MODEL',
-    reasoningEffort: 'R_VISION_MODEL_REASONING_EFFORT',
-  },
-  codeReview: {
-    model: 'R_CODE_REVIEW_MODEL',
-    reasoningEffort: 'R_CODE_REVIEW_MODEL_REASONING_EFFORT',
-  },
-  explore: {
-    model: 'R_EXPLORE_MODEL',
-    reasoningEffort: 'R_EXPLORE_MODEL_REASONING_EFFORT',
-  },
-  planning: {
-    model: 'R_PLANNING_MODEL',
-    reasoningEffort: 'R_PLANNING_MODEL_REASONING_EFFORT',
-  },
-} as const satisfies Record<
-  TaskModelOverrideRole,
-  { model: string; reasoningEffort: string }
->;
+export const TASK_MODEL_OVERRIDE_ROLE_ENV_VARS = Object.fromEntries(
+  TASK_MODEL_OVERRIDE_ROLES.map((role) => {
+    const descriptor = TASK_MODEL_ROLE_DESCRIPTORS[role];
+    return [
+      role,
+      {
+        model: descriptor.modelEnvVar,
+        reasoningEffort: descriptor.reasoningEnvVar,
+      },
+    ];
+  }),
+) as Record<TaskModelOverrideRole, { model: string; reasoningEffort: string }>;
 
 /**
  * Materializes a task's per-role overrides into the runtime env var overlay
@@ -1302,20 +1407,15 @@ export type SetupModelStatus = {
 };
 
 export function createEmptyDeploymentModelConfig(): DeploymentModelConfig {
-  return {
-    roomoteModel: null,
-    roomoteSmallModel: null,
-    roomoteVisionModel: null,
-    roomoteCodeReviewModel: null,
-    roomoteExploreModel: null,
-    roomotePlanningModel: null,
-    roomoteModelReasoningEffort: null,
-    roomoteSmallModelReasoningEffort: null,
-    roomoteVisionModelReasoningEffort: null,
-    roomoteCodeReviewModelReasoningEffort: null,
-    roomoteExploreModelReasoningEffort: null,
-    roomotePlanningModelReasoningEffort: null,
-  };
+  return Object.fromEntries(
+    TASK_MODEL_ROLES.flatMap((role) => {
+      const descriptor = TASK_MODEL_ROLE_DESCRIPTORS[role];
+      return [
+        [descriptor.modelConfigKey, null],
+        [descriptor.reasoningConfigKey, null],
+      ];
+    }),
+  ) as DeploymentModelConfig;
 }
 
 export function normalizeDeploymentModelConfig(
@@ -1334,34 +1434,23 @@ export function normalizeDeploymentModelConfig(
       : null;
   };
 
-  return {
-    roomoteModel: normalizeEnabledModel(value?.roomoteModel),
-    roomoteSmallModel: normalizeEnabledModel(value?.roomoteSmallModel),
-    roomoteVisionModel: normalizeEnabledModel(value?.roomoteVisionModel),
-    roomoteCodeReviewModel: normalizeEnabledModel(
-      value?.roomoteCodeReviewModel,
-    ),
-    roomoteExploreModel: normalizeEnabledModel(value?.roomoteExploreModel),
-    roomotePlanningModel: normalizeEnabledModel(value?.roomotePlanningModel),
-    roomoteModelReasoningEffort: normalizeOptionalReasoningEffort(
-      value?.roomoteModelReasoningEffort,
-    ),
-    roomoteSmallModelReasoningEffort: normalizeOptionalReasoningEffort(
-      value?.roomoteSmallModelReasoningEffort,
-    ),
-    roomoteVisionModelReasoningEffort: normalizeOptionalReasoningEffort(
-      value?.roomoteVisionModelReasoningEffort,
-    ),
-    roomoteCodeReviewModelReasoningEffort: normalizeOptionalReasoningEffort(
-      value?.roomoteCodeReviewModelReasoningEffort,
-    ),
-    roomoteExploreModelReasoningEffort: normalizeOptionalReasoningEffort(
-      value?.roomoteExploreModelReasoningEffort,
-    ),
-    roomotePlanningModelReasoningEffort: normalizeOptionalReasoningEffort(
-      value?.roomotePlanningModelReasoningEffort,
-    ),
-  };
+  return Object.fromEntries(
+    TASK_MODEL_ROLES.flatMap((role) => {
+      const descriptor = TASK_MODEL_ROLE_DESCRIPTORS[role];
+      return [
+        [
+          descriptor.modelConfigKey,
+          normalizeEnabledModel(value?.[descriptor.modelConfigKey]),
+        ],
+        [
+          descriptor.reasoningConfigKey,
+          normalizeOptionalReasoningEffort(
+            value?.[descriptor.reasoningConfigKey],
+          ),
+        ],
+      ];
+    }),
+  ) as DeploymentModelConfig;
 }
 
 /**
@@ -1389,20 +1478,23 @@ export function buildRecommendedDeploymentModelConfig(
     : getDefaultRecommendedModelPreset(provider);
   const roles = preset?.roles ?? {};
 
-  return normalizeDeploymentModelConfig({
-    roomoteModel: roles.coding?.modelId ?? provider.defaultRoomoteModel,
-    roomoteSmallModel: roles.helper?.modelId,
-    roomoteVisionModel: roles.vision?.modelId,
-    roomoteCodeReviewModel: roles.codeReview?.modelId,
-    roomoteExploreModel: roles.explore?.modelId,
-    roomotePlanningModel: roles.planning?.modelId,
-    roomoteModelReasoningEffort: roles.coding?.reasoningEffort,
-    roomoteSmallModelReasoningEffort: roles.helper?.reasoningEffort,
-    roomoteVisionModelReasoningEffort: roles.vision?.reasoningEffort,
-    roomoteCodeReviewModelReasoningEffort: roles.codeReview?.reasoningEffort,
-    roomoteExploreModelReasoningEffort: roles.explore?.reasoningEffort,
-    roomotePlanningModelReasoningEffort: roles.planning?.reasoningEffort,
-  });
+  return normalizeDeploymentModelConfig(
+    Object.fromEntries(
+      TASK_MODEL_ROLES.flatMap((role) => {
+        const descriptor = TASK_MODEL_ROLE_DESCRIPTORS[role];
+        const recommended = roles[role];
+        const modelId =
+          role === 'coding'
+            ? (recommended?.modelId ?? provider.defaultRoomoteModel)
+            : recommended?.modelId;
+
+        return [
+          [descriptor.modelConfigKey, modelId],
+          [descriptor.reasoningConfigKey, recommended?.reasoningEffort],
+        ];
+      }),
+    ),
+  );
 }
 
 export function normalizeOptionalReasoningEffort(

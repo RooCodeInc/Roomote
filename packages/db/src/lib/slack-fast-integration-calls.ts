@@ -6,7 +6,7 @@ import {
 import { eq } from 'drizzle-orm';
 
 export async function beginSlackFastIntegrationCall(input: {
-  slackQuickAnswerId: string;
+  fastAgentConversationId: string;
   userId: string;
   slackTeamId: string;
   slackChannel: string;

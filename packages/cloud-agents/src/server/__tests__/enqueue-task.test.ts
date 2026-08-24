@@ -1852,22 +1852,25 @@ describe('enqueue-failure cancel task state', () => {
     }
   });
 
-  it('removes an activated queue entry when ownership aborts during activation', async () => {
+  it('keeps a staged entry held when ownership aborts during activation preparation', async () => {
     const userId = await createUser();
     const controller = new AbortController();
     const previousQueue = TaskRunQueue.queue;
     const queueRedis = new Redis();
     const queue = new TaskRunQueue({ redis: queueRedis, timeout: 1 });
-    const activateDelayedEntry = queue.activateDelayedEntry.bind(queue);
+    const prepareDelayedEntryActivation =
+      queue.prepareDelayedEntryActivation.bind(queue);
     let capturedTaskId: string | undefined;
+    let competingDequeue: Promise<unknown> | undefined;
     TaskRunQueue.queue = queue;
-    vi.spyOn(queue, 'activateDelayedEntry').mockImplementation(
-      async (entryId, availableAt) => {
-        const activated = await activateDelayedEntry(entryId, availableAt);
+    vi.spyOn(queue, 'prepareDelayedEntryActivation').mockImplementation(
+      async (entryId) => {
+        const prepared = await prepareDelayedEntryActivation(entryId);
         controller.abort(
           new Error('Fast conversation lock ownership was lost.'),
         );
-        return activated;
+        competingDequeue = queue.dequeue(false);
+        return prepared;
       },
     );
 
@@ -1893,6 +1896,7 @@ describe('enqueue-failure cancel task state', () => {
 
       expect(capturedTaskId).toBeDefined();
       createdTaskIds.push(capturedTaskId!);
+      await expect(competingDequeue).resolves.toBeNull();
       expect(await queue.dequeue(false)).toBeNull();
       const runs = await db.query.taskRuns.findMany({
         where: eq(taskRuns.taskId, capturedTaskId!),

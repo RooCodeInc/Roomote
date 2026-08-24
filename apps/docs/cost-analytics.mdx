@@ -1,13 +1,13 @@
 ---
 title: Cost Analytics
 icon: circle-dollar-sign
-description: Review Roomote inference spend by task type, environment, provider, model, or user.
+description: Review Roomote inference spend by task type, source, environment, provider, model, or user.
 ---
 
 Cost Analytics helps deployment teams understand how Roomote uses inference
-across tasks and automations. It reports the cost of recorded model usage in
-US dollars, so you can spot the environments, models, and work types that
-drive spend.
+across tasks, Fast-mode conversations, and automations. It reports the cost of
+recorded model usage in US dollars, so you can spot the environments, models,
+and work types that drive spend.
 
 Any signed-in deployment user can open **Analytics** from the dashboard, then
 select **Costs**.
@@ -18,13 +18,21 @@ The Costs view includes summary cards, a chart, and a detailed breakdown of
 recorded inference usage. Use it to answer questions such as:
 
 - which task types account for the most spend
+- how much non-task inference, including Fast mode, contributes to spend
+- which product features or runtime sources account for inference spend
 - whether a particular environment or model is driving costs
 - how usage differs between people and automations
 - how a provider's cost changes over time
 
 The view starts grouped by **Task Type**. You can instead group or filter the
-data by user, environment, provider, or model. Choose a time range before
-comparing periods so the chart and breakdown use the same window.
+data by source, user, environment, provider, or model. **Source** preserves the
+usage event that recorded the inference, so it can separate work such as task
+routing, title generation, and the main agent runtime even when those requests
+use the same model and provider. The source also appears in the detail drilldown.
+Choose a time range before comparing periods so the chart and breakdown use the
+same window.
+Fast-mode inference that runs outside a launched task appears as **Non-task
+inference** in the task-type breakdown.
 
 ## Exporting data
 

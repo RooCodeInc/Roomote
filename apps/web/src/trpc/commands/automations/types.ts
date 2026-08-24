@@ -137,9 +137,8 @@ export interface SlackChannelDisplayNames {
 /**
  * Automations whose reports flow through the manager-channel destination
  * waterfall (own target -> Manager Channel -> primary conversation).
- * platform_issue_alerts delivery only walks the first two levels (own
- * target -> Manager Channel); it is included so the settings page can show
- * its "Reports to" line.
+ * platform_issue_alerts uses deployment-admin DMs after the first two levels;
+ * it is included so the settings page can show its "Reports to" line.
  */
 export const MANAGER_REPORTING_AUTOMATION_KEYS = [
   'manager_stats',
@@ -291,6 +290,7 @@ export interface UpdateBackgroundAgentSettingsInput extends ScheduleOnlyAutomati
   announcerSlackChannel: string | null;
   announcerDiscordChannel?: string | null;
   announcerInstructions: string | null;
+  platformIssueAlertsEnabled?: boolean;
   platformIssueSlackChannel: string | null;
   platformIssueDiscordChannel?: string | null;
   securityAuditorSlackChannel?: string | null;

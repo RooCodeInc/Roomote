@@ -1,7 +1,7 @@
 'use client';
 
-import { memo, useCallback, useMemo, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { memo, useCallback, useEffect, useMemo, useState } from 'react';
+import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { BRAIN_NAMESPACES } from '@roomote/types';
 
 import {
@@ -22,18 +22,16 @@ import { cn } from '@/lib/utils';
 import { formatDistanceToNowCompact, formatNumber } from '@/lib/formatters';
 import { useTRPC } from '@/trpc/client';
 
-import type { BrainPageListing } from '@/trpc/commands/brain';
+import type {
+  BrainCorpusSummary,
+  BrainPageListing,
+} from '@/trpc/commands/brain';
 import { brainNamespaceColor } from './brain-presentation';
 
 type ListedPage = BrainPageListing['pages'][number];
 
-/**
- * Rows rendered at once. The sample caps at 500 pages and every keystroke
- * re-filters, so an unbounded list re-renders hundreds of rows to show the
- * eight that fit the viewport; past this bound the footer says to narrow the
- * search instead.
- */
-const RENDERED_PAGE_LIMIT = 150;
+const PAGE_SIZE = 100;
+const SEARCH_DEBOUNCE_MS = 200;
 
 /** Registry position, so the filter chips keep a stable, meaningful order. */
 function namespaceRank(id: string): number {
@@ -42,11 +40,16 @@ function namespaceRank(id: string): number {
   return index === -1 ? BRAIN_NAMESPACES.length : index;
 }
 
-function matchesSearch(page: ListedPage, needle: string): boolean {
-  return (
-    page.slug.toLowerCase().includes(needle) ||
-    page.title.toLowerCase().includes(needle)
-  );
+function useDebouncedValue<T>(value: T, delayMs: number): T {
+  const [debouncedValue, setDebouncedValue] = useState(value);
+
+  useEffect(() => {
+    const timeout = window.setTimeout(() => setDebouncedValue(value), delayMs);
+
+    return () => window.clearTimeout(timeout);
+  }, [delayMs, value]);
+
+  return debouncedValue;
 }
 
 const PageListRow = memo(function PageListRow({
@@ -135,56 +138,51 @@ function PagePreview({ slug }: { slug: string }) {
 export function BrainBrowseDialog({
   open,
   onOpenChange,
+  corpus,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  corpus: BrainCorpusSummary;
 }) {
   const trpc = useTRPC();
   const [search, setSearch] = useState('');
   const [namespaceId, setNamespaceId] = useState<string | null>(null);
   const [selectedSlug, setSelectedSlug] = useState<string | null>(null);
+  const [offset, setOffset] = useState(0);
+  const debouncedSearch = useDebouncedValue(search.trim(), SEARCH_DEBOUNCE_MS);
 
   const { data, isPending } = useQuery(
-    trpc.brain.listPages.queryOptions(undefined, { enabled: open }),
+    trpc.brain.listPages.queryOptions(
+      {
+        search: debouncedSearch || undefined,
+        namespaceId: namespaceId ?? undefined,
+        offset,
+        limit: PAGE_SIZE,
+      },
+      { enabled: open, placeholderData: keepPreviousData },
+    ),
   );
   const pages = data?.pages ?? [];
 
-  const namespaces = useMemo(() => {
-    const counts = new Map<string, { label: string; pages: number }>();
+  const namespaces = useMemo(
+    () =>
+      [...corpus.namespaces].sort(
+        (left, right) => namespaceRank(left.id) - namespaceRank(right.id),
+      ),
+    [corpus.namespaces],
+  );
 
-    for (const page of data?.pages ?? []) {
-      const existing = counts.get(page.namespaceId);
-
-      if (existing) {
-        existing.pages += 1;
-      } else {
-        counts.set(page.namespaceId, { label: page.namespaceLabel, pages: 1 });
-      }
-    }
-
-    return [...counts.entries()]
-      .map(([id, entry]) => ({ id, ...entry }))
-      .sort((left, right) => namespaceRank(left.id) - namespaceRank(right.id));
-  }, [data?.pages]);
-
-  const filtered = useMemo(() => {
-    const needle = search.trim().toLowerCase();
-
-    return (data?.pages ?? []).filter(
-      (page) =>
-        (namespaceId === null || page.namespaceId === namespaceId) &&
-        (needle === '' || matchesSearch(page, needle)),
-    );
-  }, [data?.pages, namespaceId, search]);
-
-  // Explicit clicks only: auto-selecting the head of the filtered list would
-  // issue a page read per keystroke as the first match changes.
-  const selected =
-    selectedSlug !== null && filtered.some((page) => page.slug === selectedSlug)
-      ? selectedSlug
-      : null;
+  useEffect(() => {
+    setOffset(0);
+    setSelectedSlug(null);
+  }, [debouncedSearch]);
 
   const handleSelect = useCallback((slug: string) => setSelectedSlug(slug), []);
+  const selectNamespace = useCallback((nextNamespaceId: string | null) => {
+    setNamespaceId(nextNamespaceId);
+    setOffset(0);
+    setSelectedSlug(null);
+  }, []);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -193,9 +191,6 @@ export function BrainBrowseDialog({
           <DialogTitle>Browse memory</DialogTitle>
           <DialogDescription>
             What the Brain has stored, page by page.
-            {data?.truncated
-              ? ' The Brain lists its most recent pages, so older ones are not shown here.'
-              : ''}
           </DialogDescription>
         </DialogHeader>
 
@@ -222,9 +217,9 @@ export function BrainBrowseDialog({
               <button
                 type="button"
                 className="cursor-pointer"
-                onClick={() => setNamespaceId(null)}
+                onClick={() => selectNamespace(null)}
               >
-                All {formatNumber(pages.length)}
+                All {formatNumber(corpus.listedPages)}
               </button>
             </Badge>
             {namespaces.map((namespace) => (
@@ -237,7 +232,7 @@ export function BrainBrowseDialog({
                   type="button"
                   className="cursor-pointer"
                   onClick={() =>
-                    setNamespaceId(
+                    selectNamespace(
                       namespaceId === namespace.id ? null : namespace.id,
                     )
                   }
@@ -266,7 +261,7 @@ export function BrainBrowseDialog({
               title="Corpus unavailable"
               description="The Brain did not answer, so its pages cannot be listed right now."
             />
-          ) : filtered.length === 0 ? (
+          ) : data?.pages.length === 0 ? (
             <EmptyState
               title="No matching pages"
               description="Nothing in the Brain matches this search."
@@ -281,32 +276,57 @@ export function BrainBrowseDialog({
               <div
                 className={cn(
                   'flex min-h-0 flex-col',
-                  selected !== null && 'hidden sm:flex',
+                  selectedSlug !== null && 'hidden sm:flex',
                 )}
               >
                 <div className="min-h-0 flex-1 space-y-0.5 overflow-y-auto scroll-thin pr-1">
-                  {filtered.slice(0, RENDERED_PAGE_LIMIT).map((page) => (
+                  {pages.map((page) => (
                     <PageListRow
                       key={page.slug}
                       page={page}
-                      selected={page.slug === selected}
+                      selected={page.slug === selectedSlug}
                       onSelect={handleSelect}
                     />
                   ))}
                 </div>
-                <p className="pt-2 text-xs text-muted-foreground">
-                  {filtered.length > RENDERED_PAGE_LIMIT
-                    ? `Showing ${formatNumber(RENDERED_PAGE_LIMIT)} of ${formatNumber(filtered.length)} pages, newest first. Search to narrow further.`
-                    : `${formatNumber(filtered.length)} pages, newest first`}
-                </p>
+                <div className="flex items-center justify-between gap-2 pt-2">
+                  <p className="text-xs text-muted-foreground">
+                    {data && data.total > 0
+                      ? `${formatNumber(offset + 1)}-${formatNumber(offset + pages.length)} of ${formatNumber(data.total)}`
+                      : '0 pages'}
+                  </p>
+                  <div className="flex gap-1">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      disabled={offset === 0}
+                      onClick={() =>
+                        setOffset((current) => Math.max(0, current - PAGE_SIZE))
+                      }
+                    >
+                      Previous
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      disabled={data?.nextOffset === null}
+                      onClick={() =>
+                        data?.nextOffset !== null &&
+                        setOffset(data?.nextOffset ?? 0)
+                      }
+                    >
+                      Next
+                    </Button>
+                  </div>
+                </div>
               </div>
               <div
                 className={cn(
                   'flex min-h-0 flex-col rounded-lg border',
-                  selected === null && 'hidden sm:flex',
+                  selectedSlug === null && 'hidden sm:flex',
                 )}
               >
-                {selected ? (
+                {selectedSlug ? (
                   <>
                     <div className="border-b p-2 sm:hidden">
                       <Button
@@ -319,7 +339,7 @@ export function BrainBrowseDialog({
                       </Button>
                     </div>
                     <div className="min-h-0 flex-1">
-                      <PagePreview slug={selected} />
+                      <PagePreview slug={selectedSlug} />
                     </div>
                   </>
                 ) : (

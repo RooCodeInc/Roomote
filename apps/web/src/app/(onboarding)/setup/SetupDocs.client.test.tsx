@@ -32,6 +32,7 @@ describe('SetupDocs', () => {
     expect(getSetupDocsPath('env-vars', { modelProvider: 'vllm' })).toBe(
       'providers/inference/vllm',
     );
+    expect(getSetupDocsPath('environment-explainer')).toBe('environments');
     expect(getSetupDocsPath('repo-selection')).toBe('environments');
     expect(getSetupDocsPath('welcome')).toBeNull();
     expect(getSetupDocsStep('email-account')).toBe('email-account');

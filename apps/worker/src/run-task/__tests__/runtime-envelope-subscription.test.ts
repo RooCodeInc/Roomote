@@ -181,6 +181,43 @@ describe('subscribeHarnessCallbacks', () => {
     await unsubscribe();
   });
 
+  it('forwards task starts as callback turn events', async () => {
+    const { harness, emitTaskEvent } = createRuntimeHarness();
+    const callbacks = { onMessage: vi.fn().mockResolvedValue(undefined) };
+
+    const unsubscribe = subscribeHarnessCallbacks({
+      harness: harness as never,
+      taskRun: { id: 46, taskId: 'task-live-turn' } as never,
+      callbacks,
+      context: {},
+      logger: {
+        runId: 46,
+        filePath: '/tmp/test.log',
+        info: vi.fn(),
+        warn: vi.fn(),
+        error: vi.fn(),
+        log: vi.fn(),
+      },
+    });
+
+    emitTaskEvent({
+      eventName: TaskEventName.TaskStarted,
+      payload: ['runtime-session-follow-up'],
+    });
+
+    expect(callbacks.onMessage).toHaveBeenCalledWith(
+      { id: 46, taskId: 'task-live-turn' },
+      'runtime-session-follow-up',
+      {
+        type: 'turn_started',
+        ts: expect.any(Number),
+      },
+      {},
+    );
+
+    await unsubscribe();
+  });
+
   it('delivers a returned show_widget fallback after persistence', async () => {
     const { harness, emitEnvelope } = createRuntimeHarness();
     const fallback = {
@@ -384,6 +421,108 @@ describe('subscribeHarnessCallbacks', () => {
       taskId: 'task-fallback',
       envelope: pendingEnvelope,
     });
+
+    await unsubscribe();
+  });
+
+  it('emits the latest finalized assistant message before idle settlement', async () => {
+    const { harness, emitEnvelope } = createRuntimeHarness();
+    const callbacks = { onMessage: vi.fn().mockResolvedValue(undefined) };
+    const unsubscribe = subscribeHarnessCallbacks({
+      harness: harness as never,
+      taskRun: { id: 47, taskId: 'task-idle-completion' } as never,
+      callbacks,
+      context: {},
+      logger: {
+        runId: 47,
+        filePath: '/tmp/test.log',
+        info: vi.fn(),
+        warn: vi.fn(),
+        error: vi.fn(),
+        log: vi.fn(),
+      },
+    });
+
+    emitEnvelope({
+      ts: 1772823377100,
+      eventType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+      role: 'assistant',
+      protocol: 'roomote_runtime',
+      contentBlocks: [{ type: 'text', text: 'Ready for review.' }],
+      metadata: {
+        source: 'assistant_message',
+        sessionId: 'runtime-session-idle',
+      },
+      payload: {},
+    });
+
+    await unsubscribe.flushPendingCompletionEvents();
+
+    expect(callbacks.onMessage).toHaveBeenLastCalledWith(
+      { id: 47, taskId: 'task-idle-completion' },
+      'runtime-session-idle',
+      {
+        type: 'completion',
+        text: 'Ready for review.',
+        ts: 1772823377100,
+        provisional: true,
+      },
+      {},
+    );
+
+    await unsubscribe();
+  });
+
+  it('settles filtered transient assistant output with a safe idle fallback', async () => {
+    const { harness, emitEnvelope } = createRuntimeHarness();
+    const callbacks = { onMessage: vi.fn().mockResolvedValue(undefined) };
+    const unsubscribe = subscribeHarnessCallbacks({
+      harness: harness as never,
+      taskRun: { id: 147, taskId: 'task-transient-idle' } as never,
+      callbacks,
+      context: {},
+      logger: {
+        runId: 147,
+        filePath: '/tmp/test.log',
+        info: vi.fn(),
+        warn: vi.fn(),
+        error: vi.fn(),
+        log: vi.fn(),
+      },
+    });
+
+    emitEnvelope({
+      ts: 1772823377200,
+      eventType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+      role: 'assistant',
+      protocol: 'roomote_runtime',
+      contentBlocks: [{ type: 'text', text: 'Preparing the result.' }],
+      metadata: { sessionId: 'runtime-session-transient' },
+      payload: {},
+    });
+    emitEnvelope({
+      ts: 1772823377201,
+      eventType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+      role: 'assistant',
+      protocol: 'roomote_runtime',
+      contentBlocks: [{ type: 'text', text: 'Provider error: retrying.' }],
+      metadata: { sessionId: 'runtime-session-transient' },
+      payload: {},
+    });
+
+    await unsubscribe.flushPendingCompletionEvents();
+
+    expect(callbacks.onMessage).toHaveBeenLastCalledWith(
+      { id: 147, taskId: 'task-transient-idle' },
+      'runtime-session-transient',
+      {
+        type: 'completion',
+        text: 'Task completed.',
+        ts: expect.any(Number),
+        provisional: true,
+      },
+      {},
+    );
 
     await unsubscribe();
   });

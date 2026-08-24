@@ -25,7 +25,7 @@ import {
 import {
   buildPullRequestUrl,
   getSourceControlProviderLabel,
-  findPrBodyAttributionLine,
+  findPrBodyAttributionMarkers,
   preservePrBodyAttribution,
   getCommunicationProviderFromTaskPayload,
   getCommunicationGuildIdFromTaskPayload,
@@ -555,7 +555,7 @@ async function createOrUpdateGitHubPullRequest({
     type: 'installationId',
     installationId: repository.installationId,
   });
-  const octokit = getOctokit(token);
+  const octokit = getOctokit(token, { retryRateLimits: true });
 
   const { data: existingPullRequests } = await octokit.rest.pulls.list({
     owner,
@@ -666,22 +666,31 @@ function buildPrAttributionTaskUrl(taskRun: TaskRun): string {
 }
 
 function prependCanonicalPrAttribution(body: string, line: string): string {
-  const firstLineEnd = body.indexOf('\n');
-  const firstLine = body.slice(
+  let remainingBody = body.trimStart();
+
+  while (remainingBody) {
+    const markers = findPrBodyAttributionMarkers(remainingBody);
+    if (!markers || remainingBody.slice(0, markers.lineStart).trim()) {
+      break;
+    }
+
+    remainingBody = remainingBody.slice(markers.lineEnd).trimStart();
+  }
+
+  const firstLineEnd = remainingBody.indexOf('\n');
+  const firstLine = remainingBody.slice(
     0,
-    firstLineEnd === -1 ? body.length : firstLineEnd,
+    firstLineEnd === -1 ? remainingBody.length : firstLineEnd,
   );
-  const normalizedFirstLine = firstLine.trimStart();
-  const hasLeadingAttribution =
-    findPrBodyAttributionLine(firstLine) !== null ||
+  if (
     /^> (?:Opened on behalf of .+\.|Created by Roomote\.) (?:Follow up by mentioning @|\[View the task\]\().+$/u.test(
-      normalizedFirstLine,
-    );
-  const remainingBody = hasLeadingAttribution
-    ? body
-        .slice(firstLineEnd === -1 ? body.length : firstLineEnd + 1)
-        .trimStart()
-    : body.trimStart();
+      firstLine.trimStart(),
+    )
+  ) {
+    remainingBody = remainingBody
+      .slice(firstLineEnd === -1 ? remainingBody.length : firstLineEnd + 1)
+      .trimStart();
+  }
 
   return remainingBody ? `${line}\n\n${remainingBody}` : line;
 }

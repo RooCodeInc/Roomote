@@ -6,7 +6,10 @@ import {
   createOpencodeClient,
   type PermissionRuleset,
 } from '@opencode-ai/sdk/v2/client';
-import { resolveEffectiveModelRuntimeEnv } from '@roomote/db/server';
+import {
+  recordLlmUsage,
+  resolveEffectiveModelRuntimeEnv,
+} from '@roomote/db/server';
 import { toBedrockMantleRuntimeModelId } from '@roomote/types';
 import type { z } from 'zod';
 import zodToJsonSchema from 'zod-to-json-schema';
@@ -19,6 +22,8 @@ import {
 } from './opencode-runtime';
 
 const DEFAULT_OPENCODE_STRUCTURED_OUTPUT_RETRY_COUNT = 2;
+const NON_TASK_SESSION_ABORT_TIMEOUT_MS = 5_000;
+type NonTaskModelRuntimeEnv = Partial<Record<string, string | undefined>>;
 
 /**
  * Ordinary non-task sessions produce text or structured output only; no tool
@@ -36,6 +41,14 @@ const DEFAULT_OPENCODE_STRUCTURED_OUTPUT_RETRY_COUNT = 2;
 const NON_TASK_SESSION_PERMISSIONS: PermissionRuleset = Object.keys(
   NON_TASK_TOOL_PERMISSION_DENIALS,
 ).map((permission) => ({ permission, pattern: '*', action: 'deny' }));
+
+export const FAST_AGENT_SESSION_PERMISSIONS: PermissionRuleset = Object.keys(
+  NON_TASK_TOOL_PERMISSION_DENIALS,
+).map((permission) => ({
+  permission,
+  pattern: '*',
+  action: permission === 'task' ? 'allow' : 'deny',
+}));
 
 /**
  * Default per-prompt tool filter: disable every registered tool — including MCP or
@@ -81,7 +94,7 @@ export const NON_TASK_INFERENCE_SURFACES = {
   chatVideoDescription: 'chat_video_description',
   customAutomationScheduleResolution: 'custom_automation_schedule_resolution',
   fastAgentOnboardingSuggestions: 'fast_agent_onboarding_suggestions',
-  fastAgentQuestionAnswering: 'fast_agent_question_answering',
+  fastAgentQuestionAnswering: 'fast_agent',
   inferenceValidation: 'inference_validation',
   prReviewNotificationTriage: 'pr_review_notification_triage',
   routerChannelLaunchGate: 'router_channel_launch_gate',
@@ -98,6 +111,7 @@ export const NON_TASK_INFERENCE_SURFACES = {
 const NON_TASK_INFERENCE_VALIDATION_TIMEOUT_MS = 15_000;
 
 export type NonTaskInferenceValidationFailureReason =
+  | 'content_filter'
   | 'endpoint_unreachable'
   | 'gateway_blocked'
   | 'insufficient_credits'
@@ -128,7 +142,7 @@ interface GenerateTrackedNonTaskBaseParams extends NonTaskInferenceTrackingInput
   prompt: string;
   system?: string;
   model?: string;
-  modelRole?: 'primary' | 'small';
+  modelRole?: 'primary' | 'small' | 'orchestration';
   maxOutputTokens?: number;
   /** null lets OpenCode own the prompt lifecycle without a Roomote deadline. */
   timeoutMs?: number | null;
@@ -139,6 +153,8 @@ interface GenerateTrackedNonTaskBaseParams extends NonTaskInferenceTrackingInput
    * outer timeout fires.
    */
   onProviderRetry?: (event: NonTaskProviderRetryEvent) => void | Promise<void>;
+  /** Stop OpenCode's own provider retry loop at this attempt count. */
+  maxProviderRetryAttempts?: number;
 }
 
 export type NonTaskProviderRetryEvent = {
@@ -188,7 +204,9 @@ export type NonTaskOpenCodeNativeSessionOptions = {
   onModelResolved?: (model: string) => void;
   onPromptStarted?: () => void;
   onSessionReady?: (sessionID: string) => Promise<void> | void;
+  onSubagentSessionReady?: (sessionID: string) => Promise<void> | void;
   permission?: PermissionRuleset;
+  promptOnlySubagents?: boolean;
   signal?: AbortSignal;
   tools: Record<string, boolean>;
 };
@@ -233,6 +251,112 @@ export function isNonTaskOpenCodeSessionNotFoundError(
 
 function asString(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+}
+
+function asFiniteNumber(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value;
+  }
+
+  if (typeof value === 'string' && value.trim().length > 0) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : undefined;
+  }
+
+  return undefined;
+}
+
+function openCodeTimestampToDate(value: unknown): Date | undefined {
+  const timestamp = asFiniteNumber(value);
+  if (timestamp === undefined) return undefined;
+
+  const date = new Date(timestamp);
+  return Number.isNaN(date.getTime()) ? undefined : date;
+}
+
+type NonTaskOpenCodeMessageInfo = {
+  id?: unknown;
+  sessionID?: unknown;
+  providerID?: unknown;
+  modelID?: unknown;
+  agent?: unknown;
+  mode?: unknown;
+  cost?: unknown;
+  error?: unknown;
+  structured?: unknown;
+  time?: {
+    created?: unknown;
+    completed?: unknown;
+  };
+  tokens?: {
+    input?: unknown;
+    output?: unknown;
+    reasoning?: unknown;
+    cache?: {
+      read?: unknown;
+      write?: unknown;
+    };
+  };
+};
+
+async function recordNonTaskOpenCodeUsage(
+  params: GenerateTrackedNonTaskBaseParams,
+  resolvedModel: string,
+  info: NonTaskOpenCodeMessageInfo,
+): Promise<void> {
+  const harnessSessionId = asString(info.sessionID);
+  const messageId = asString(info.id);
+  if (!harnessSessionId || !messageId) return;
+
+  const inputTokens = asFiniteNumber(info.tokens?.input) ?? 0;
+  const outputTokens = asFiniteNumber(info.tokens?.output) ?? 0;
+  const reasoningTokens = asFiniteNumber(info.tokens?.reasoning) ?? 0;
+  const cacheReadTokens = asFiniteNumber(info.tokens?.cache?.read) ?? 0;
+  const cacheWriteTokens = asFiniteNumber(info.tokens?.cache?.write) ?? 0;
+  const costUsd = asFiniteNumber(info.cost);
+  const fallbackModel = splitOpenCodeModelId(resolvedModel);
+
+  try {
+    await recordLlmUsage({
+      source: params.surface,
+      usageType: 'inference',
+      eventKey: `non-task:${params.surface}:${harnessSessionId}:${messageId}`,
+      taskId: params.taskId ?? null,
+      userId: params.userId ?? null,
+      harnessSessionId,
+      messageId,
+      providerId:
+        asString(info.providerID) ??
+        asString(params.provider) ??
+        fallbackModel.providerID,
+      modelId: asString(info.modelID) ?? fallbackModel.modelID,
+      agent: asString(info.agent) ?? asString(info.mode) ?? null,
+      inputTokens,
+      outputTokens,
+      reasoningTokens,
+      cacheReadTokens,
+      cacheWriteTokens,
+      totalTokens:
+        inputTokens +
+        outputTokens +
+        reasoningTokens +
+        cacheReadTokens +
+        cacheWriteTokens,
+      contextTokens: inputTokens + cacheReadTokens,
+      costMicroUsd:
+        costUsd === undefined
+          ? 0
+          : Math.max(0, Math.round(costUsd * 1_000_000)),
+      costSource: costUsd === undefined ? 'missing' : 'opencode_message',
+      messageCreatedAt: openCodeTimestampToDate(info.time?.created),
+      messageCompletedAt: openCodeTimestampToDate(info.time?.completed),
+      details: { surface: params.surface },
+    });
+  } catch (error) {
+    console.warn(
+      `[NonTaskProviderUsage] Failed to record usage for ${params.surface}: ${formatOpenCodeSdkError(error)}`,
+    );
+  }
 }
 
 function parseOpenCodeConfigJson(value: string): Record<string, unknown> {
@@ -381,13 +505,13 @@ function isOpenCodeSessionMissing(error: unknown): boolean {
 
 async function resolveNonTaskModelRuntime(
   model?: string,
-  modelRole: 'primary' | 'small' = 'small',
+  modelRole: 'primary' | 'small' | 'orchestration' = 'small',
 ): Promise<{
   model: string;
-  resolvedModelRuntimeEnv: Partial<Record<string, string>>;
+  resolvedModelRuntimeEnv: NonTaskModelRuntimeEnv;
 }> {
   const requestedModel = model?.trim();
-  let resolvedModelRuntimeEnv: Partial<Record<string, string>> = {};
+  let resolvedModelRuntimeEnv: NonTaskModelRuntimeEnv = {};
 
   try {
     resolvedModelRuntimeEnv = await resolveEffectiveModelRuntimeEnv();
@@ -405,11 +529,14 @@ async function resolveNonTaskModelRuntime(
 
   const resolvedModel =
     requestedModel ||
-    (modelRole === 'primary'
-      ? resolvedModelRuntimeEnv.R_MODEL
-      : resolvedModelRuntimeEnv.R_SMALL_MODEL ||
-        resolvedModelRuntimeEnv.R_MODEL) ||
-    (modelRole === 'primary'
+    (modelRole === 'orchestration'
+      ? resolvedModelRuntimeEnv.R_ORCHESTRATION_MODEL ||
+        resolvedModelRuntimeEnv.R_MODEL
+      : modelRole === 'primary'
+        ? resolvedModelRuntimeEnv.R_MODEL
+        : resolvedModelRuntimeEnv.R_SMALL_MODEL ||
+          resolvedModelRuntimeEnv.R_MODEL) ||
+    (modelRole === 'primary' || modelRole === 'orchestration'
       ? asString(parseOpenCodeConfigJson(readOpenCodeDebugConfig()).model)
       : resolveOpenCodeSmallModel());
 
@@ -417,6 +544,32 @@ async function resolveNonTaskModelRuntime(
     throw new Error(
       'Model configuration is required for non-task model calls. Set R_MODEL to a provider/model ID.',
     );
+  }
+
+  let selectedRuntimeEnv = resolvedModelRuntimeEnv;
+
+  if (
+    requestedModel ||
+    (modelRole === 'orchestration' &&
+      (resolvedModelRuntimeEnv.R_ORCHESTRATION_MODEL ||
+        resolvedModelRuntimeEnv.R_ORCHESTRATION_MODEL_REASONING_EFFORT))
+  ) {
+    selectedRuntimeEnv = {
+      ...resolvedModelRuntimeEnv,
+      R_MODEL: resolvedModel,
+    };
+
+    if (modelRole === 'orchestration') {
+      const orchestrationReasoningEffort =
+        resolvedModelRuntimeEnv.R_ORCHESTRATION_MODEL_REASONING_EFFORT;
+
+      if (orchestrationReasoningEffort) {
+        selectedRuntimeEnv.R_MODEL_REASONING_EFFORT =
+          orchestrationReasoningEffort;
+      } else {
+        selectedRuntimeEnv.R_MODEL_REASONING_EFFORT = undefined;
+      }
+    }
   }
 
   return {
@@ -430,9 +583,7 @@ async function resolveNonTaskModelRuntime(
     // OpenAI-compatible) id fails with ProviderModelNotFoundError before any
     // request is made. The lease cache keys on env, so distinct explicit
     // models get their own servers instead of colliding.
-    resolvedModelRuntimeEnv: requestedModel
-      ? { ...resolvedModelRuntimeEnv, R_MODEL: requestedModel }
-      : resolvedModelRuntimeEnv,
+    resolvedModelRuntimeEnv: selectedRuntimeEnv,
   };
 }
 
@@ -465,7 +616,7 @@ async function resolveModelForInputModality(
   params: GenerateTrackedNonTaskTextParams,
   runtime: {
     model: string;
-    resolvedModelRuntimeEnv: Partial<Record<string, string>>;
+    resolvedModelRuntimeEnv: NonTaskModelRuntimeEnv;
   },
 ): Promise<string> {
   const modality = params.requiredInputModality;
@@ -552,7 +703,7 @@ async function runNonTaskSdkPrompt(
   params: GenerateTrackedNonTaskBaseParams,
   runtime: {
     model: string;
-    resolvedModelRuntimeEnv: Partial<Record<string, string>>;
+    resolvedModelRuntimeEnv: NonTaskModelRuntimeEnv;
   },
   promptOptions: NonTaskSdkPromptOptions,
   options: {
@@ -561,14 +712,17 @@ async function runNonTaskSdkPrompt(
     env?: Partial<Record<string, string>>;
     onPromptStarted?: () => void;
     onSessionReady?: (sessionID: string) => Promise<void> | void;
+    onSubagentSessionReady?: (sessionID: string) => Promise<void> | void;
     permission?: PermissionRuleset;
+    preserveReasoning?: boolean;
+    promptOnlySubagents?: boolean;
     promptErrorLabel?: string;
     session?: NonTaskOpenCodeSession;
     signal?: AbortSignal;
     useConfiguredServer?: boolean;
   } = {},
 ): Promise<{
-  info: { error?: unknown };
+  info: NonTaskOpenCodeMessageInfo;
   parts: Array<{ type?: unknown; text?: unknown }>;
 }> {
   const { model, resolvedModelRuntimeEnv } = runtime;
@@ -581,6 +735,8 @@ async function runNonTaskSdkPrompt(
   const server = await leaseOpenCodeSdkServer({
     env: { ...resolvedModelRuntimeEnv, ...options.env },
     ephemeral: options.ephemeral,
+    preserveReasoning: options.preserveReasoning,
+    promptOnlySubagents: options.promptOnlySubagents,
     startTimeoutMs:
       timeoutMs === null
         ? DEFAULT_OPENCODE_SDK_SERVER_START_TIMEOUT_MS
@@ -657,7 +813,7 @@ async function runNonTaskSdkPrompt(
     });
     let eventMonitor: Promise<void> | undefined;
 
-    if (params.onProviderRetry) {
+    if (params.onProviderRetry || options.onSubagentSessionReady) {
       try {
         const subscription = await client.event.subscribe(
           { directory: sessionDirectory },
@@ -667,6 +823,19 @@ async function runNonTaskSdkPrompt(
           try {
             for await (const event of subscription.stream) {
               if (
+                (event.type === 'session.created' ||
+                  event.type === 'session.updated') &&
+                event.properties.info.parentID === sessionId
+              ) {
+                try {
+                  await options.onSubagentSessionReady?.(
+                    event.properties.sessionID,
+                  );
+                } catch (error) {
+                  rejectSessionError(error);
+                  return;
+                }
+              } else if (
                 event.type === 'session.status' &&
                 event.properties.sessionID === sessionId &&
                 event.properties.status.type === 'retry'
@@ -686,6 +855,25 @@ async function runNonTaskSdkPrompt(
                   console.warn(
                     `[NonTaskProviderUsage] OpenCode provider retry reporter failed: ${formatOpenCodeSdkError(error)}`,
                   );
+                }
+                if (
+                  params.maxProviderRetryAttempts !== undefined &&
+                  event.properties.status.attempt >=
+                    params.maxProviderRetryAttempts
+                ) {
+                  rejectSessionError(
+                    new NonTaskOpenCodePromptError(
+                      {
+                        name: 'APIError',
+                        data: {
+                          message: event.properties.status.message,
+                          isRetryable: false,
+                        },
+                      },
+                      promptErrorLabel,
+                    ),
+                  );
+                  return;
                 }
               } else if (
                 event.type === 'session.error' &&
@@ -712,7 +900,12 @@ async function runNonTaskSdkPrompt(
           }
         })();
       } catch (error) {
-        // Event reporting is additive. Keep the prompt path available if an
+        if (options.onSubagentSessionReady) {
+          throw new Error(
+            `OpenCode subagent session discovery is unavailable: ${formatOpenCodeSdkError(error)}`,
+          );
+        }
+        // Retry reporting is additive. Keep the prompt path available if an
         // older externally configured OpenCode server cannot stream events.
         if (!eventAbortController.signal.aborted) {
           console.warn(
@@ -734,9 +927,10 @@ async function runNonTaskSdkPrompt(
         },
         { signal: abortController.signal },
       );
-      const promptResult = params.onProviderRetry
-        ? await Promise.race([promptRequest, sessionError])
-        : await promptRequest;
+      const promptResult =
+        params.onProviderRetry || options.onSubagentSessionReady
+          ? await Promise.race([promptRequest, sessionError])
+          : await promptRequest;
 
       if (promptResult.error || !promptResult.data) {
         if (isOpenCodeSessionMissing(promptResult.error)) {
@@ -756,14 +950,28 @@ async function runNonTaskSdkPrompt(
         );
       }
 
+      await recordNonTaskOpenCodeUsage(params, model, promptResult.data.info);
+
       return promptResult.data;
     } catch (error) {
       // Aborting the HTTP request does not guarantee that an OpenCode server
       // stopped its model turn. Explicitly cancel it before the session or a
       // leased server is reused for a bounded retry.
-      await client.session
-        .abort({ sessionID: sessionId, directory: sessionDirectory })
-        .catch(() => undefined);
+      const sessionAbortController = new AbortController();
+      const sessionAbortTimeout = setTimeout(() => {
+        sessionAbortController.abort();
+      }, NON_TASK_SESSION_ABORT_TIMEOUT_MS);
+      sessionAbortTimeout.unref();
+      try {
+        await client.session
+          .abort(
+            { sessionID: sessionId, directory: sessionDirectory },
+            { signal: sessionAbortController.signal },
+          )
+          .catch(() => undefined);
+      } finally {
+        clearTimeout(sessionAbortTimeout);
+      }
       throw error;
     } finally {
       abortController.signal.removeEventListener('abort', abortEventMonitor);
@@ -864,7 +1072,10 @@ export async function generateTrackedNonTaskTextInOpenCodeSession(
       env: options.env,
       onPromptStarted: options.onPromptStarted,
       onSessionReady: options.onSessionReady,
+      onSubagentSessionReady: options.onSubagentSessionReady,
       permission: options.permission,
+      preserveReasoning: true,
+      promptOnlySubagents: options.promptOnlySubagents,
       promptErrorLabel: 'OpenCode native Fast prompt failed',
       session,
       signal: options.signal,
@@ -997,6 +1208,83 @@ function findInferenceErrorStatusCode(error: unknown): number | undefined {
   return undefined;
 }
 
+function isInferenceErrorExplicitlyNonRetryable(error: unknown): boolean {
+  const pending: Array<{ value: unknown; depth: number }> = [
+    { value: error, depth: 0 },
+  ];
+  const seen = new Set<object>();
+
+  while (pending.length > 0) {
+    const current = pending.shift();
+    if (!current || current.depth > 4) continue;
+
+    const { value, depth } = current;
+    if (typeof value === 'string') {
+      try {
+        pending.push({ value: JSON.parse(value), depth: depth + 1 });
+      } catch {
+        // Provider prose is classified separately below.
+      }
+      continue;
+    }
+    if (!value || typeof value !== 'object' || seen.has(value)) continue;
+
+    seen.add(value);
+    const record = value as Record<string, unknown>;
+    if (record.isRetryable === false) return true;
+    for (const nested of Object.values(record)) {
+      pending.push({ value: nested, depth: depth + 1 });
+    }
+  }
+
+  return false;
+}
+
+function isContentFilterInferenceError(error: unknown): boolean {
+  const pending: Array<{ value: unknown; depth: number }> = [
+    { value: error, depth: 0 },
+  ];
+  const seen = new Set<object>();
+
+  while (pending.length > 0) {
+    const current = pending.shift();
+    if (!current || current.depth > 4) continue;
+
+    const { value, depth } = current;
+    if (typeof value === 'string') {
+      const normalized = value.toLowerCase();
+      if (
+        normalized.includes('contentfiltererror') ||
+        normalized.includes('content_filter') ||
+        (normalized.includes('content filter') &&
+          (normalized.includes('blocked') || normalized.includes('filtered')))
+      ) {
+        return true;
+      }
+
+      try {
+        pending.push({ value: JSON.parse(value), depth: depth + 1 });
+      } catch {
+        // The recognized provider message signatures above are sufficient.
+      }
+      continue;
+    }
+    if (!value || typeof value !== 'object' || seen.has(value)) continue;
+
+    seen.add(value);
+    const record = value as Record<string, unknown>;
+    pending.push(
+      { value: record.name, depth: depth + 1 },
+      { value: record.message, depth: depth + 1 },
+    );
+    for (const nested of Object.values(value)) {
+      pending.push({ value: nested, depth: depth + 1 });
+    }
+  }
+
+  return false;
+}
+
 export function classifyNonTaskInferenceError(
   error: unknown,
 ): Pick<
@@ -1027,6 +1315,23 @@ export function classifyNonTaskInferenceError(
     (statusCode === 403 && /^\s*(?:<!doctype|<html)/iu.test(responseBody)) ||
     (detail.includes('forbidden:') &&
       detail.includes('request was blocked by a gateway or proxy'));
+
+  if (isContentFilterInferenceError(inferenceError)) {
+    return {
+      message:
+        'The inference provider blocked the response with its content filter.',
+      reason: 'content_filter',
+      retryable: false,
+    };
+  }
+
+  if (isInferenceErrorExplicitlyNonRetryable(inferenceError)) {
+    return {
+      message: 'The inference provider rejected the request.',
+      reason: 'provider_error',
+      retryable: false,
+    };
+  }
 
   // Failures inside Roomote's own validation helper (the managed OpenCode
   // server) must not read as provider failures — the candidate credentials
@@ -1082,7 +1387,6 @@ export function classifyNonTaskInferenceError(
 
   if (
     errorName === 'ContextOverflowError' ||
-    errorName === 'ContentFilterError' ||
     errorName === 'MessageOutputLengthError' ||
     errorName === 'StructuredOutputError'
   ) {

@@ -91,4 +91,29 @@ describe('createGitHubTokenRefreshInterval', () => {
     expect(mockEnsureFiles).not.toHaveBeenCalled();
     expect(mockApplyMetadata).not.toHaveBeenCalled();
   });
+
+  it('defers the first refresh when the bootstrap token expiry is known', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-08-24T12:00:00.000Z'));
+
+    try {
+      const interval = createGitHubTokenRefreshInterval({
+        runId: 7,
+        logger: createLogger(),
+        initialExpiresAt: new Date('2026-08-24T13:00:00.000Z'),
+      });
+
+      await flushAsync();
+      expect(mockRefreshGitHubTokenWithMetadata).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(45 * 60 * 1000);
+      await flushAsync();
+      clearInterval(interval);
+
+      expect(mockRefreshGitHubTokenWithMetadata).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.clearAllTimers();
+      vi.useRealTimers();
+    }
+  });
 });

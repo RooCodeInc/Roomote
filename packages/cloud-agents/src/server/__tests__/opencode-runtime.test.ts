@@ -161,6 +161,82 @@ describe('buildOpenCodeCliEnv', () => {
     });
   });
 
+  it('preserves reasoning options for Fast native sessions', () => {
+    const env = buildOpenCodeCliEnv(
+      {
+        R_MODEL: 'openrouter/z-ai/glm-5.2',
+        R_MODEL_REASONING_EFFORT: 'low',
+      },
+      { preserveReasoning: true },
+    );
+
+    expect(JSON.parse(env.OPENCODE_CONFIG_CONTENT ?? '{}')).toEqual({
+      model: 'openrouter/z-ai/glm-5.2',
+      small_model: 'openrouter/z-ai/glm-5.2',
+      permission: NON_TASK_TOOL_PERMISSION_DENIALS,
+      provider: {
+        openrouter: {
+          models: {
+            'z-ai/glm-5.2': {
+              options: { reasoning: { effort: 'low' } },
+            },
+          },
+        },
+      },
+    });
+  });
+
+  it('exposes only prompt-only advisor and judge subagents to Fast sessions', () => {
+    const env = buildOpenCodeCliEnv(
+      {
+        R_MODEL: 'openrouter/openai/gpt-5.4',
+        OPENCODE_CONFIG_CONTENT: JSON.stringify({
+          model: 'openrouter/openai/gpt-5.4',
+          agent: {
+            unsafe: { mode: 'subagent', tools: { bash: true } },
+          },
+        }),
+      },
+      { preserveReasoning: true, promptOnlySubagents: true },
+    );
+    const config = JSON.parse(env.OPENCODE_CONFIG_CONTENT ?? '{}');
+
+    expect(config.permission).toEqual({
+      ...NON_TASK_TOOL_PERMISSION_DENIALS,
+      task: 'allow',
+    });
+    expect(Object.keys(config.agent)).toEqual(['advisor', 'judge']);
+
+    for (const agent of Object.values(config.agent) as Array<
+      Record<string, unknown>
+    >) {
+      expect(agent).toMatchObject({
+        mode: 'subagent',
+        permission: NON_TASK_TOOL_PERMISSION_DENIALS,
+        tools: {
+          '*': false,
+          integration_call: true,
+          manage_tasks: true,
+        },
+      });
+      expect(agent.prompt).toEqual(
+        expect.stringContaining(
+          'deployment integrations and read-only task inspection',
+        ),
+      );
+      expect(agent.prompt).toEqual(
+        expect.stringContaining('Do not attempt to inspect local files'),
+      );
+      expect(agent.prompt).not.toEqual(
+        expect.stringContaining('instead of attempting to inspect files'),
+      );
+      expect(agent.prompt).not.toEqual(
+        expect.stringContaining('read those images'),
+      );
+    }
+    expect(config.agent).not.toHaveProperty('unsafe');
+  });
+
   it('rewrites Mantle GPT ids and registers their OpenAI-compatible provider', () => {
     // A helper model saved as `bedrock-mantle/openai.*` is served by Mantle's
     // OpenAI Responses endpoint under the dedicated runtime provider — the

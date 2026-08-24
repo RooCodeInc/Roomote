@@ -220,10 +220,15 @@ async function resolveAutomationDestinations(params: {
   const entries = await Promise.all(
     MANAGER_REPORTING_AUTOMATION_KEYS.map(async (key) => {
       const runtime = runtimes[key];
-      const destination = await resolveAutomationRuntimeDestination({
-        runtime,
-        slackConnected: params.slackConnected,
-      });
+      // Platform issue alerts use deployment-admin DMs as their final tail;
+      // unlike scheduled automations, they never post to a primary channel.
+      const destination =
+        key === 'platform_issue_alerts'
+          ? runtime.destination
+          : await resolveAutomationRuntimeDestination({
+              runtime,
+              slackConnected: params.slackConnected,
+            });
 
       if (!destination) {
         return [key, null] as const;

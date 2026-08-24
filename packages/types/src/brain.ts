@@ -111,6 +111,63 @@ export const BRAIN_COLLECTOR_IDS = {
   granolaMeetings: 'granola-meetings:entity-timeline-v3',
 } as const;
 
+/**
+ * Page types Roomote writes into the Brain. gbrain treats `type` as an open
+ * string (schema packs may add more), defaults a page without one to
+ * `concept`, and its lint requires the field; these are the values that make
+ * a Roomote-written page recognisable as what it is. `slack`, `meeting`,
+ * `person`, and `person-alias` are gbrain's own base types.
+ */
+export const BRAIN_PAGE_TYPES = {
+  taskMemory: 'task-memory',
+  pullRequest: 'pull-request',
+  githubIssue: 'github-issue',
+  slackDay: 'slack',
+  meeting: 'meeting',
+  notionPage: 'notion-page',
+  person: 'person',
+  personAlias: 'person-alias',
+  dailyDigest: 'daily',
+  weeklySynthesis: 'weekly',
+} as const;
+
+export type BrainPageType =
+  (typeof BRAIN_PAGE_TYPES)[keyof typeof BRAIN_PAGE_TYPES];
+
+/**
+ * The YAML frontmatter block for a Brain page, as a list of lines. Every
+ * page carries the three fields gbrain's lint requires (`type`, `title`,
+ * `created`) ahead of whatever the writer adds. `created` should be the
+ * page's own stable date (the Slack day, the run's completion, the merge),
+ * never the ingestion clock: collectors re-put pages idempotently, and a
+ * timestamp that moves per write would turn every replay into a content
+ * change. Pages without an honest date simply omit it.
+ */
+export function renderBrainFrontmatter(input: {
+  type: BrainPageType;
+  title: string;
+  created?: Date | string | null;
+  fields?: ReadonlyArray<string | false | null | undefined>;
+}): string[] {
+  const created =
+    input.created instanceof Date
+      ? input.created.toISOString()
+      : (input.created ?? null);
+
+  return [
+    '---',
+    `type: ${input.type}`,
+    // JSON string syntax is valid YAML and survives colons, hashes, quotes,
+    // and dashes that a bare scalar would not.
+    `title: ${JSON.stringify(input.title)}`,
+    ...(created ? [`created: ${created}`] : []),
+    ...(input.fields ?? []).filter(
+      (field): field is string => typeof field === 'string',
+    ),
+    '---',
+  ];
+}
+
 export const BRAIN_SOURCES = [
   {
     id: 'task-memories',
