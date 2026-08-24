@@ -9,7 +9,11 @@ export function createFastAgentChatContextAdapter(options: {
   actingUserId: string;
   conversation: FastAgentConversation;
 }) {
-  const channel = options.conversation.replyTarget.channelId;
+  const channel =
+    options.conversation.surface === 'discord'
+      ? (options.conversation.replyTarget.threadId ??
+        options.conversation.replyTarget.channelId)
+      : options.conversation.replyTarget.channelId;
 
   return {
     getChatMessageContext: (input: { messageId: string }) =>

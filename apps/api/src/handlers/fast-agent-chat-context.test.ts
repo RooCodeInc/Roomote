@@ -46,19 +46,26 @@ describe('createFastAgentChatContextAdapter', () => {
     });
   });
 
-  it('scopes Discord lookups to the routable conversation channel', async () => {
+  it('scopes Discord lookups to the active thread instead of its parent channel', async () => {
     const adapter = createFastAgentChatContextAdapter({
       actingUserId: 'user-2',
       conversation: {
         surface: 'discord',
         workspaceId: 'guild-1',
         conversationId: 'thread-1',
-        replyTarget: { channelId: 'thread-1' },
+        replyTarget: { channelId: 'parent-1', threadId: 'thread-1' },
       },
     });
 
+    await adapter.getChatMessageContext({ messageId: 'message-1' });
     await adapter.getChatChannelMessages({});
 
+    expect(mocks.lookupMessageContext).toHaveBeenCalledWith({
+      actingUserId: 'user-2',
+      channel: 'thread-1',
+      messageId: 'message-1',
+      provider: 'discord',
+    });
     expect(mocks.lookupChannelMessages).toHaveBeenCalledWith({
       actingUserId: 'user-2',
       channel: 'thread-1',

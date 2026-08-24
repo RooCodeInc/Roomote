@@ -343,6 +343,57 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     });
   });
 
+  it('defaults unbounded Slack history reads to the previous 24 hours', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-08-24T12:00:00.000Z'));
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        await invokeTool(nativeToolNames.getChatChannelMessages, {});
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'closeout',
+          message: 'I found the context.',
+        });
+        return '';
+      },
+    );
+    const adapter = callbacks();
+
+    try {
+      await answerFastAgentQuestion({ ...baseParams, adapter });
+    } finally {
+      vi.useRealTimers();
+    }
+
+    expect(adapter.getChatChannelMessages).toHaveBeenCalledWith({
+      oldest: '2026-08-23T12:00:00.000Z',
+    });
+  });
+
+  it('bounds Slack history relative to an explicit latest timestamp', async () => {
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        await invokeTool(nativeToolNames.getChatChannelMessages, {
+          latest: '1710000000.000000',
+        });
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'closeout',
+          message: 'I found the context.',
+        });
+        return '';
+      },
+    );
+    const adapter = callbacks();
+
+    await answerFastAgentQuestion({ ...baseParams, adapter });
+
+    expect(adapter.getChatChannelMessages).toHaveBeenCalledWith({
+      latest: '1710000000.000000',
+      oldest: '2024-03-08T16:00:00.000Z',
+    });
+  });
+
   it('binds only integration and task inspection tools for subagent sessions', async () => {
     const adapter = callbacks();
     mocks.listIntegrations.mockResolvedValue([

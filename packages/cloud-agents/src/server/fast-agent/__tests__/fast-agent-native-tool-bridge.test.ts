@@ -68,6 +68,9 @@ describe('Fast native OpenCode tool bridge', () => {
     expect(channelMessagesSource).toContain(
       'invoke("get_chat_channel_messages"',
     );
+    expect(channelMessagesSource).toContain(
+      'defaults Slack history to the previous 24 hours',
+    );
     expect(channelMessagesSource).not.toContain('channel:');
     expect(bridgeSource).toContain('context.sessionID');
     expect(bridgeSource).toContain('agent: context.agent');

@@ -86,6 +86,21 @@ const chatChannelMessagesArgsSchema = z.object({
   oldest: z.string().trim().min(1).optional(),
   latest: z.string().trim().min(1).optional(),
 });
+const FAST_AGENT_DEFAULT_SLACK_HISTORY_LOOKBACK_MS = 24 * 60 * 60 * 1000;
+
+function getFastAgentDefaultSlackHistoryOldest(latest?: string): string {
+  const numericLatest = latest ? Number.parseFloat(latest) : Number.NaN;
+  const latestMs = Number.isFinite(numericLatest)
+    ? numericLatest * 1000
+    : latest
+      ? Date.parse(latest)
+      : Date.now();
+
+  return new Date(
+    (Number.isFinite(latestMs) ? latestMs : Date.now()) -
+      FAST_AGENT_DEFAULT_SLACK_HISTORY_LOOKBACK_MS,
+  ).toISOString();
+}
 const launchTaskArgsSchema = z.object({
   prompt: z.string().trim().min(1),
   environmentId: z.string().trim().min(1).nullable().optional(),
@@ -883,7 +898,14 @@ export async function answerFastAgentQuestion({
               };
             }
             throwIfTurnCancelled();
-            return await adapter.getChatChannelMessages(args);
+            return await adapter.getChatChannelMessages({
+              ...args,
+              ...(conversation.surface === 'slack' && !args.oldest
+                ? {
+                    oldest: getFastAgentDefaultSlackHistoryOldest(args.latest),
+                  }
+                : {}),
+            });
           }
 
           case FAST_AGENT_NATIVE_TOOL_NAMES.integrationCall: {
