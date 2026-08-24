@@ -66,13 +66,25 @@ function syncPrStatus(
   );
 }
 
+function mapGitHubLabels(
+  labels: readonly { name?: string | null }[] | null | undefined,
+): string[] | null {
+  if (!labels) {
+    return null;
+  }
+
+  return labels
+    .map((label) => label.name)
+    .filter((name): name is string => Boolean(name));
+}
+
 function syncPullRequestFact(params: {
   githubRepoId: number;
   repositoryFullName: string;
   pullRequest: {
     authorLogin: string | null;
     body: string | null;
-    labels: string[];
+    labels: string[] | null;
     closedAt: string | null;
     createdAt: string;
     draft: boolean;
@@ -299,9 +311,7 @@ github.post('/', async (c) => {
           pullRequest: {
             authorLogin: payload.pull_request.user?.login ?? null,
             body: payload.pull_request.body ?? null,
-            labels: (payload.pull_request.labels ?? []).map(
-              (label) => label.name,
-            ),
+            labels: mapGitHubLabels(payload.pull_request.labels),
             closedAt: payload.pull_request.closed_at,
             createdAt: payload.pull_request.created_at,
             draft: Boolean(payload.pull_request.draft),
@@ -339,9 +349,7 @@ github.post('/', async (c) => {
           pullRequest: {
             authorLogin: payload.pull_request.user?.login ?? null,
             body: payload.pull_request.body ?? null,
-            labels: (payload.pull_request.labels ?? []).map(
-              (label) => label.name,
-            ),
+            labels: mapGitHubLabels(payload.pull_request.labels),
             closedAt: payload.pull_request.closed_at,
             createdAt: payload.pull_request.created_at,
             draft: Boolean(payload.pull_request.draft),
@@ -374,9 +382,7 @@ github.post('/', async (c) => {
           pullRequest: {
             authorLogin: payload.pull_request.user?.login ?? null,
             body: payload.pull_request.body ?? null,
-            labels: (payload.pull_request.labels ?? []).map(
-              (label) => label.name,
-            ),
+            labels: mapGitHubLabels(payload.pull_request.labels),
             closedAt: payload.pull_request.closed_at,
             createdAt: payload.pull_request.created_at,
             draft: Boolean(payload.pull_request.draft),
@@ -414,9 +420,7 @@ github.post('/', async (c) => {
           pullRequest: {
             authorLogin: payload.pull_request.user?.login ?? null,
             body: payload.pull_request.body ?? null,
-            labels: (payload.pull_request.labels ?? []).map(
-              (label) => label.name,
-            ),
+            labels: mapGitHubLabels(payload.pull_request.labels),
             closedAt: payload.pull_request.closed_at,
             createdAt: payload.pull_request.created_at,
             draft: Boolean(payload.pull_request.draft),
@@ -454,9 +458,7 @@ github.post('/', async (c) => {
           pullRequest: {
             authorLogin: payload.pull_request.user?.login ?? null,
             body: payload.pull_request.body ?? null,
-            labels: (payload.pull_request.labels ?? []).map(
-              (label) => label.name,
-            ),
+            labels: mapGitHubLabels(payload.pull_request.labels),
             closedAt: payload.pull_request.closed_at,
             createdAt: payload.pull_request.created_at,
             draft: Boolean(payload.pull_request.draft),
@@ -589,9 +591,7 @@ github.post('/', async (c) => {
           pullRequest: {
             authorLogin: payload.pull_request.user?.login ?? null,
             body: payload.pull_request.body ?? null,
-            labels: (payload.pull_request.labels ?? []).map(
-              (label) => label.name,
-            ),
+            labels: mapGitHubLabels(payload.pull_request.labels),
             closedAt: payload.pull_request.closed_at,
             createdAt: payload.pull_request.created_at,
             draft: Boolean(payload.pull_request.draft),

@@ -264,6 +264,137 @@ describe('github webhook router', () => {
     app.route('/api/webhooks/github', github);
   });
 
+  it('forwards pull request descriptions and labels from webhook payloads', async () => {
+    mockUpdateTaskPrStatus.mockResolvedValue(undefined);
+    mockUpsertGitHubPullRequestFactFromWebhook.mockResolvedValue(undefined);
+    const payload = {
+      action: 'opened',
+      installation: { id: 1 },
+      repository: { id: 10, full_name: 'test-org/test-repo' },
+      pull_request: {
+        id: 100,
+        number: 42,
+        title: 'Test PR',
+        body: 'Why: the old path raced.',
+        labels: [{ name: 'bug' }, { name: 'p1' }],
+        html_url: 'https://github.com/test-org/test-repo/pull/42',
+        state: 'open',
+        draft: false,
+        merged_at: null,
+        closed_at: null,
+        created_at: '2026-08-06T11:00:00Z',
+        updated_at: '2026-08-06T12:00:00Z',
+        user: { login: 'author' },
+      },
+    };
+
+    const response = await app.request('http://localhost/api/webhooks/github', {
+      method: 'POST',
+      headers: {
+        'x-github-delivery': 'delivery-pr-fact-fields',
+        'x-github-event': 'pull_request',
+        'x-hub-signature-256': 'sha256=test',
+      },
+      body: JSON.stringify(payload),
+    });
+
+    expect(response.status).toBe(200);
+    expect(mockUpsertGitHubPullRequestFactFromWebhook).toHaveBeenCalledWith(
+      expect.objectContaining({
+        pullRequest: expect.objectContaining({
+          body: 'Why: the old path raced.',
+          labels: ['bug', 'p1'],
+        }),
+      }),
+    );
+  });
+
+  it('keeps omitted webhook labels unknown instead of clearing stored labels', async () => {
+    mockUpdateTaskPrStatus.mockResolvedValue(undefined);
+    mockUpsertGitHubPullRequestFactFromWebhook.mockResolvedValue(undefined);
+    const payload = {
+      action: 'opened',
+      installation: { id: 1 },
+      repository: { id: 10, full_name: 'test-org/test-repo' },
+      pull_request: {
+        id: 100,
+        number: 42,
+        title: 'Test PR',
+        body: null,
+        html_url: 'https://github.com/test-org/test-repo/pull/42',
+        state: 'open',
+        draft: false,
+        merged_at: null,
+        closed_at: null,
+        created_at: '2026-08-06T11:00:00Z',
+        updated_at: '2026-08-06T12:00:00Z',
+        user: { login: 'author' },
+      },
+    };
+
+    const response = await app.request('http://localhost/api/webhooks/github', {
+      method: 'POST',
+      headers: {
+        'x-github-delivery': 'delivery-pr-fact-unknown-labels',
+        'x-github-event': 'pull_request',
+        'x-hub-signature-256': 'sha256=test',
+      },
+      body: JSON.stringify(payload),
+    });
+
+    expect(response.status).toBe(200);
+    expect(mockUpsertGitHubPullRequestFactFromWebhook).toHaveBeenCalledWith(
+      expect.objectContaining({
+        pullRequest: expect.objectContaining({
+          body: null,
+          labels: null,
+        }),
+      }),
+    );
+  });
+
+  it('forwards an explicit empty webhook label list as a clear', async () => {
+    mockUpdateTaskPrStatus.mockResolvedValue(undefined);
+    mockUpsertGitHubPullRequestFactFromWebhook.mockResolvedValue(undefined);
+    const payload = {
+      action: 'opened',
+      installation: { id: 1 },
+      repository: { id: 10, full_name: 'test-org/test-repo' },
+      pull_request: {
+        id: 100,
+        number: 42,
+        title: 'Test PR',
+        body: null,
+        labels: [],
+        html_url: 'https://github.com/test-org/test-repo/pull/42',
+        state: 'open',
+        draft: false,
+        merged_at: null,
+        closed_at: null,
+        created_at: '2026-08-06T11:00:00Z',
+        updated_at: '2026-08-06T12:00:00Z',
+        user: { login: 'author' },
+      },
+    };
+
+    const response = await app.request('http://localhost/api/webhooks/github', {
+      method: 'POST',
+      headers: {
+        'x-github-delivery': 'delivery-pr-fact-clear-labels',
+        'x-github-event': 'pull_request',
+        'x-hub-signature-256': 'sha256=test',
+      },
+      body: JSON.stringify(payload),
+    });
+
+    expect(response.status).toBe(200);
+    expect(mockUpsertGitHubPullRequestFactFromWebhook).toHaveBeenCalledWith(
+      expect.objectContaining({
+        pullRequest: expect.objectContaining({ labels: [] }),
+      }),
+    );
+  });
+
   it('routes submitted pull request reviews through handlePrComment', async () => {
     const payload = {
       action: 'submitted',

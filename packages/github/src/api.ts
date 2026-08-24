@@ -1689,9 +1689,11 @@ function mapPullRequestToAnalyticsItem(
   return {
     authorLogin: pullRequest.user?.login ?? null,
     body: pullRequest.body ?? null,
-    labels: (pullRequest.labels ?? [])
-      .map((label) => label.name)
-      .filter((name): name is string => Boolean(name)),
+    labels: pullRequest.labels
+      ? pullRequest.labels
+          .map((label) => label.name)
+          .filter((name): name is string => Boolean(name))
+      : null,
     createdAt: pullRequest.created_at,
     externalPullRequestId: pullRequest.id,
     updatedAt: pullRequest.updated_at,
