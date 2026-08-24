@@ -606,6 +606,12 @@ EOF
 
 cmd_sync_unit() {
   [ "$#" -eq 0 ] || die "usage: roomote sync-unit"
+  # The unit delegates to this CLI, which resolves Docker from .env because
+  # systemd's minimal PATH misses snap/manual installs. Record the path before
+  # a boot depends on it: managed deploys and upgrades call sync-unit without
+  # the installer, so this is where the guarantee must live.
+  [ -n "$(read_env_value ROOMOTE_DOCKER_BIN)" ] ||
+    set_env_value ROOMOTE_DOCKER_BIN "$(command -v docker || printf 'docker')"
   sync_systemd_unit
   log "Wrote $systemd_dir/roomote-compose.service (ExecStart=$cli_path up)"
 }

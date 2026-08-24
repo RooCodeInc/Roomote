@@ -57,4 +57,23 @@ env PATH='/usr/bin:/bin' \
   "$roomote_cli" compose ps -aq redis
 grep -Fq -- "compose --env-file $install_root/.env -f $install_root/docker-compose.prod.yml ps -aq redis" "$docker_log"
 
+# 4. sync-unit records the resolved Docker path when .env lacks one, so a
+# systemd boot (minimal PATH) can start the stack on snap/manual installs.
+# Managed deploys call sync-unit without the installer, so the guarantee
+# must hold from the CLI alone.
+systemd_dir="$work_dir/systemd"
+docker_dir="$work_dir/path-docker"
+mkdir -p "$systemd_dir" "$docker_dir"
+printf '#!/usr/bin/env bash\nexit 0\n' >"$docker_dir/docker"
+chmod +x "$docker_dir/docker"
+grep -v '^ROOMOTE_DOCKER_BIN=' "$install_root/.env" >"$install_root/.env.tmp"
+mv "$install_root/.env.tmp" "$install_root/.env"
+env PATH="$docker_dir:/usr/bin:/bin" \
+  ROOMOTE_INSTALL_ROOT="$install_root" \
+  ROOMOTE_SYSTEMD_DIR="$systemd_dir" \
+  ROOMOTE_TEST_MODE=true \
+  "$roomote_cli" sync-unit >/dev/null
+grep -Fq "ROOMOTE_DOCKER_BIN=$docker_dir/docker" "$install_root/.env"
+grep -Fq 'ExecStart=/usr/local/bin/roomote up' "$systemd_dir/roomote-compose.service"
+
 printf 'Host CLI used the recorded Docker binary for every invocation.\n'
