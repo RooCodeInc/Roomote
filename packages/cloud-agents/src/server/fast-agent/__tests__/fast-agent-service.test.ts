@@ -67,6 +67,12 @@ vi.mock('../../non-task-provider-usage', () => ({
   },
   classifyNonTaskInferenceError: mocks.classifyInferenceError,
   generateTrackedNonTaskTextInOpenCodeSession: mocks.generateText,
+  NonTaskOpenCodePromptTimeoutError: class extends Error {
+    constructor(timeoutMs: number) {
+      super(`Timed out waiting for OpenCode output after ${timeoutMs}ms.`);
+      this.name = 'NonTaskOpenCodePromptTimeoutError';
+    }
+  },
   isNonTaskOpenCodePromptTimeoutError: (error: unknown) =>
     error instanceof Error &&
     error.name === 'NonTaskOpenCodePromptTimeoutError',
@@ -652,9 +658,12 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     const lockLost = new Error('Fast conversation lock ownership was lost.');
     mocks.generateText.mockImplementationOnce(
       async (_params, _session, options) => {
-        expect(options.signal).toBe(controller.signal);
+        expect(options.signal).toBeInstanceOf(AbortSignal);
+        expect(options.signal.aborted).toBe(false);
         await options.onSessionReady('opencode-session-1');
         controller.abort(lockLost);
+        expect(options.signal.aborted).toBe(true);
+        expect(options.signal.reason).toBe(lockLost);
         await expect(
           invokeTool(nativeToolNames.sendChatReply, {
             purpose: 'closeout',
@@ -1610,6 +1619,56 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       message:
         'The inference provider is rate limiting requests. Retrying automatically…',
     });
+  });
+
+  it('bounds an initial prompt after OpenCode enters provider recovery', async () => {
+    vi.useFakeTimers();
+    try {
+      mocks.generateText.mockImplementationOnce(
+        async (params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          options.onPromptStarted?.();
+          await params.onProviderRetry?.({
+            attempt: 1,
+            message: 'Provider temporarily unavailable',
+          });
+          await new Promise((resolve) => setTimeout(resolve, 240_000));
+          await params.onProviderRetry?.({
+            attempt: 2,
+            message: 'Provider still unavailable',
+          });
+          await new Promise((_resolve, reject) => {
+            if (options.signal.aborted) {
+              reject(options.signal.reason);
+              return;
+            }
+            options.signal.addEventListener(
+              'abort',
+              () => reject(options.signal.reason),
+              { once: true },
+            );
+          });
+          return '';
+        },
+      );
+      const adapter = callbacks();
+
+      const resultPromise = answerFastAgentQuestion({ ...baseParams, adapter });
+      await vi.advanceTimersByTimeAsync(300_000);
+
+      await expect(resultPromise).resolves.toBe(
+        'The inference provider did not respond after retrying. Any delegated tasks can keep running; please try again in a moment.',
+      );
+      expect(mocks.generateText).toHaveBeenCalledOnce();
+      expect(mocks.invalidateSession).toHaveBeenCalledWith('conversation-1');
+      expect(adapter.postReply).toHaveBeenLastCalledWith({
+        purpose: 'closeout',
+        message:
+          'The inference provider did not respond after retrying. Any delegated tasks can keep running; please try again in a moment.',
+      });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('reports the classified provider failure after retries are exhausted', async () => {
