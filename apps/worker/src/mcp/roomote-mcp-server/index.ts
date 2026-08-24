@@ -7,11 +7,10 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { z } from 'zod';
 import {
   ALL_REPOSITORIES,
-  FAST_EXECUTION,
   CHAT_CHANNELS_TOOL,
   CHAT_CHANNEL_MESSAGES_TOOL,
   CHAT_MESSAGE_CONTEXT_TOOL,
-  SCHEDULE_ONLY_BACKGROUND_AUTOMATION_FREQUENCIES,
+  MANAGE_CUSTOM_AUTOMATIONS_TOOL,
   TaskPayloadKind,
   createTaskEnvVarRequestBaseSchema,
   PRODUCT_NAME,
@@ -104,73 +103,12 @@ const uuidStringSchema = z
   });
 
 roomoteMcpServer.registerTool(
-  'manage_custom_automations',
+  MANAGE_CUSTOM_AUTOMATIONS_TOOL.name,
   {
-    title: 'Manage Custom Automations',
-    description: `Admin-only management of deployment custom automations. List existing automations or enabled task models, resolve a cron or natural-language schedule, create or update an automation, delete an automation by exact ID, or run an enabled automation now. Pass environmentId "${FAST_EXECUTION}" to run the automation in Fast mode without starting a sandbox; Fast may still delegate a task when repository or workspace execution is required. Use list_models before setting a model override; create and update accept only exact model IDs returned by that action. Model IDs encode the inference route: for example, openrouter/... targets OpenRouter, while openai/... uses the deployment OpenAI route, including a connected ChatGPT subscription when configured. When the user asks an automation to DM them, set their preferred connected targetProvider and targetMode to direct_message; no targetChannelId is needed. Natural-language schedules are converted to validated five-field cron in the deployment scheduling timezone. Keep cadence only in the schedule field; do not repeat it in the stored prompt. When a user asks an automation to offer help, suggest tasks, make follow-ups actionable or launchable, or turn findings or action items into tasks, encode that intent in product language by instructing the automation to post concrete actions as launchable suggested tasks alongside its report. Do not expose runtime tool names or parameter syntax in the stored prompt. A request only to summarize or list action items is not suggested-task intent. Only promise launchable suggested tasks when the automation has both a configured chat report destination and a repository or environment for executable work; otherwise keep actions as report text and explain the missing capability. After successfully creating an automation in response to a conversational request, ask the user whether they want to run it now to test it.`,
-    inputSchema: {
-      action: z.enum([
-        'list',
-        'list_models',
-        'resolve_schedule',
-        'create',
-        'update',
-        'delete',
-        'run_now',
-      ]),
-      automationId: z
-        .string()
-        .optional()
-        .describe('Required for update, delete, and run_now.'),
-      name: z.string().optional(),
-      prompt: z
-        .string()
-        .optional()
-        .describe(
-          'Automation instructions written in product language. Do not include the automation cadence; keep it only in the schedule field. When the user intends actionable or launchable follow-up tasks and the automation has both a chat report destination and an executable workspace, instruct it to post qualifying actions as launchable suggested tasks alongside the report; otherwise keep actions as report text. Do not mention internal tool names or parameters.',
-        ),
-      enabled: z.boolean().optional(),
-      schedule: z
-        .string()
-        .optional()
-        .describe(
-          `A five-field cron expression, natural-language recurring schedule, or one of these built-in presets: ${SCHEDULE_ONLY_BACKGROUND_AUTOMATION_FREQUENCIES.join(', ')}. Prefer a built-in preset when it matches the requested cadence.`,
-        ),
-      model: z
-        .string()
-        .nullable()
-        .describe(
-          'Optional provider/model launch override. Call list_models first and pass an exact returned model ID. The ID prefix selects the configured inference route; openai/... includes connected ChatGPT subscription routing. Omit to keep the deployment default; pass null on update to clear an existing override.',
-        )
-        .optional(),
-      environmentId: z
-        .string()
-        .describe(
-          `Environment UUID, "${ALL_REPOSITORIES}", or "${FAST_EXECUTION}" for Fast mode without an initial sandbox task.`,
-        )
-        .optional(),
-      targetProvider: z
-        .enum(['slack', 'discord', 'teams', 'telegram'])
-        .nullable()
-        .describe(
-          'Destination provider. Pass null on update to clear the report destination.',
-        )
-        .optional(),
-      targetMode: z
-        .enum(['channel', 'direct_message'])
-        .describe(
-          'Destination mode. Use direct_message to send reports privately to the automation owner through the selected connected provider.',
-        )
-        .optional(),
-      targetChannelId: z.string().optional(),
-      targetServiceUrl: z.string().optional(),
-    },
-    annotations: {
-      readOnlyHint: false,
-      destructiveHint: true,
-      idempotentHint: false,
-      openWorldHint: false,
-    },
+    title: MANAGE_CUSTOM_AUTOMATIONS_TOOL.title,
+    description: MANAGE_CUSTOM_AUTOMATIONS_TOOL.description,
+    inputSchema: MANAGE_CUSTOM_AUTOMATIONS_TOOL.inputSchema,
+    annotations: MANAGE_CUSTOM_AUTOMATIONS_TOOL.annotations,
   },
   async (params): Promise<ToolResult> => {
     const config = getRoomoteConfig();

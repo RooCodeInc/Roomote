@@ -55,6 +55,7 @@ export * from './mcp-oauth';
 export * from './mcp-response-parsing';
 export * from './mcp-tool-policy';
 export * from './managed-access';
+export * from './manage-custom-automations-tool';
 export * from './mcp-service-detection';
 export * from './platform-issue-reports';
 export * from './preview-proxy';

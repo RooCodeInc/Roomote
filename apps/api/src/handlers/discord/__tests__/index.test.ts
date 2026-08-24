@@ -174,6 +174,7 @@ vi.mock('../callback-actions.js', () => ({
 vi.mock('@roomote/cloud-agents/server', () => ({
   acquireFastAgentTurnLock: mocks.acquireFastTurnLock,
   answerFastAgentQuestion: mocks.answerFast,
+  resolveApiBaseUrl: () => 'https://roomote.example.com',
   getTaskUrl: mocks.getTaskUrl,
   hasFastAgentSession: mocks.hasFastSession,
 }));

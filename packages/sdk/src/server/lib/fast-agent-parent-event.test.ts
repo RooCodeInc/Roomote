@@ -20,11 +20,13 @@ const mocks = vi.hoisted(() => ({
   setPendingPrReviewAction: vi.fn(),
   attachPendingPrReviewActionMessage: vi.fn(),
   buildSlackPrReviewActionBlocks: vi.fn(),
+  resolveUserMcpServerConfigs: vi.fn(),
 }));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
   acquireFastAgentTurnLock: mocks.acquireTurnLock,
   answerFastAgentQuestion: mocks.answerQuestion,
+  resolveApiBaseUrl: () => 'https://roomote.example.com',
   fastAgentConversationRepository: { findById: mocks.findSession },
   createFastAgentTaskLauncher:
     ({
@@ -108,6 +110,10 @@ vi.mock('./discord-communication', () => ({
     mocks.createDiscordProvider,
 }));
 
+vi.mock('../routers/mcp-connections', () => ({
+  resolveUserMcpServerConfigs: mocks.resolveUserMcpServerConfigs,
+}));
+
 import { deliverFastAgentParentEvent } from './fast-agent-parent-event';
 
 const parent = {
@@ -170,6 +176,7 @@ describe('deliverFastAgentParentEvent', () => {
       ackEmoji: 'eyes',
       completionEmoji: 'white_check_mark',
     });
+    mocks.resolveUserMcpServerConfigs.mockResolvedValue({});
     mocks.setPendingPrReviewAction.mockResolvedValue(undefined);
     mocks.attachPendingPrReviewActionMessage.mockResolvedValue(undefined);
     mocks.buildSlackPrReviewActionBlocks.mockImplementation(
@@ -408,14 +415,19 @@ describe('deliverFastAgentParentEvent', () => {
       async ({
         adapter,
       }: {
-        adapter: { launchTask: typeof mocks.launchTask };
-      }) =>
-        adapter.launchTask({
+        adapter: {
+          launchTask: typeof mocks.launchTask;
+          resolveMcpServerConfigs: () => Promise<unknown>;
+        };
+      }) => {
+        await adapter.resolveMcpServerConfigs();
+        return adapter.launchTask({
           prompt: 'Inspect the repository.',
           environmentId: null,
           parentSessionId: automationParent.sessionId,
           postKickoff: vi.fn(),
-        }),
+        });
+      },
     );
 
     await deliverFastAgentParentEvent({
@@ -427,14 +439,23 @@ describe('deliverFastAgentParentEvent', () => {
         automationName: 'Weekly scan',
         prompt: 'Find actionable regressions.',
         trigger: 'schedule',
+        defaultTaskModel: 'openai/gpt-5.6-luna',
       },
     });
 
+    expect(mocks.resolveUserMcpServerConfigs).toHaveBeenCalledWith({
+      userId: 'u1',
+      apiBaseUrl: 'https://roomote.example.com',
+      includeRoomote: true,
+    });
     expect(mocks.enqueueTask).toHaveBeenCalledWith({
       task: expect.objectContaining({
         payload: expect.objectContaining({
           fastAgentSessionId: automationParent.sessionId,
           fastAgentParent: automationParent,
+          harnessModelOverrides: {
+            'opencode-server': 'openai/gpt-5.6-luna',
+          },
         }),
       }),
     });

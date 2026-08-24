@@ -3,6 +3,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { z } from 'zod';
+import { MANAGE_CUSTOM_AUTOMATIONS_TOOL } from '@roomote/types';
 
 const thisFilePath = fileURLToPath(import.meta.url);
 const thisDirPath = path.dirname(thisFilePath);
@@ -11,6 +12,7 @@ const originalEnv = { ...process.env };
 type RegisteredTool = {
   name: string;
   config: {
+    title?: string;
     description: string;
     inputSchema: Record<string, { description?: string; options?: string[] }>;
     annotations?: {
@@ -158,6 +160,36 @@ describe('roomote MCP tool descriptions', () => {
     expect(scheduleDescription).toContain(
       'Prefer a built-in preset when it matches the requested cadence.',
     );
+  });
+
+  it('registers the shared custom automation descriptor unchanged', async () => {
+    const { registeredTools } = await importRoomoteMcpServer();
+    const automationsTool = getRegisteredTool(
+      registeredTools,
+      MANAGE_CUSTOM_AUTOMATIONS_TOOL.name,
+    );
+
+    expect(automationsTool.config.description).toBe(
+      MANAGE_CUSTOM_AUTOMATIONS_TOOL.description,
+    );
+    expect(automationsTool.config.title).toBe(
+      MANAGE_CUSTOM_AUTOMATIONS_TOOL.title,
+    );
+    expect(automationsTool.config.annotations).toEqual(
+      MANAGE_CUSTOM_AUTOMATIONS_TOOL.annotations,
+    );
+    expect(Object.keys(automationsTool.config.inputSchema)).toEqual(
+      Object.keys(MANAGE_CUSTOM_AUTOMATIONS_TOOL.inputSchema),
+    );
+    for (const fieldName of Object.keys(
+      MANAGE_CUSTOM_AUTOMATIONS_TOOL.inputSchema,
+    )) {
+      expect(automationsTool.config.inputSchema[fieldName]?.description).toBe(
+        MANAGE_CUSTOM_AUTOMATIONS_TOOL.inputSchema[
+          fieldName as keyof typeof MANAGE_CUSTOM_AUTOMATIONS_TOOL.inputSchema
+        ].description,
+      );
+    }
   });
 
   it('keeps cadence out of generated custom automation prompts', async () => {

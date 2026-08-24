@@ -68,6 +68,12 @@ export type RetryFastAgentTaskStart = () => Promise<
   { success: true; runId: number } | { success: false; error: string }
 >;
 
+export type FastAgentMcpServerConfig = {
+  url: string;
+  headers: Record<string, string>;
+  disabledTools?: string[];
+};
+
 /** Surface adapter for side effects available during one Fast turn. */
 export type FastAgentTurnAdapter = {
   launchTask: LaunchFastAgentTask;
@@ -83,4 +89,7 @@ export type FastAgentTurnAdapter = {
   ) => Promise<FastAgentReplyHandle | void>;
   postReaction?: (reaction: FastAgentReaction) => Promise<void>;
   retryTaskStart?: RetryFastAgentTaskStart;
+  resolveMcpServerConfigs?: () => Promise<
+    Record<string, FastAgentMcpServerConfig>
+  >;
 };
