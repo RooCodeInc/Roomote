@@ -56,6 +56,9 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain('send_chat_reply');
     expect(prompt).toContain('send_chat_reaction');
     expect(prompt).toContain('`advisor` and `judge` subagents');
+    expect(prompt).toContain('`spill_analysis` subagent');
+    expect(prompt).toContain('opaque spill handle');
+    expect(prompt).toContain('generic filesystem access');
     expect(prompt).toContain(
       'deployment MCP servers and read-only task inspection',
     );

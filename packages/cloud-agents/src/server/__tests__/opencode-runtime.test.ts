@@ -205,11 +205,14 @@ describe('buildOpenCodeCliEnv', () => {
       ...NON_TASK_TOOL_PERMISSION_DENIALS,
       task: 'allow',
     });
-    expect(Object.keys(config.agent)).toEqual(['advisor', 'judge']);
+    expect(Object.keys(config.agent)).toEqual([
+      'advisor',
+      'judge',
+      'spill_analysis',
+    ]);
 
-    for (const agent of Object.values(config.agent) as Array<
-      Record<string, unknown>
-    >) {
+    for (const agentName of ['advisor', 'judge']) {
+      const agent = config.agent[agentName] as Record<string, unknown>;
       expect(agent).toMatchObject({
         mode: 'subagent',
         permission: NON_TASK_TOOL_PERMISSION_DENIALS,
@@ -234,6 +237,20 @@ describe('buildOpenCodeCliEnv', () => {
         expect.stringContaining('read those images'),
       );
     }
+    expect(config.agent.spill_analysis).toMatchObject({
+      mode: 'subagent',
+      permission: NON_TASK_TOOL_PERMISSION_DENIALS,
+      tools: {
+        '*': false,
+        spill_grep: true,
+        spill_read: true,
+      },
+      prompt: expect.stringContaining(
+        'These tools accept handles, never filesystem paths.',
+      ),
+    });
+    expect(config.agent.spill_analysis.tools).not.toHaveProperty('read');
+    expect(config.agent.spill_analysis.tools).not.toHaveProperty('bash');
     expect(config.agent).not.toHaveProperty('unsafe');
   });
 

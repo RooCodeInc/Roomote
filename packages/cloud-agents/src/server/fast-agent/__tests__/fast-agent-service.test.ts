@@ -175,12 +175,14 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         ) => Promise<unknown>;
       }) => execute({ id: 'opencode-session-1' }, prompt),
     );
-    mocks.bindExecutor.mockImplementation((_sessionID, executor) => {
-      mocks.nativeExecutor = executor;
-      return () => {
-        mocks.nativeExecutor = undefined;
-      };
-    });
+    mocks.bindExecutor.mockImplementation(
+      (_sessionID, _conversationId, executor) => {
+        mocks.nativeExecutor = executor;
+        return () => {
+          mocks.nativeExecutor = undefined;
+        };
+      },
+    );
     mocks.getSession.mockResolvedValue({
       id: 'conversation-1',
       compatibilityMessages: [],
@@ -449,10 +451,10 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
 
         const parentExecutor = mocks.bindExecutor.mock.calls.find(
           ([sessionID]) => sessionID === 'opencode-session-1',
-        )?.[1];
+        )?.[2];
         const subagentExecutor = mocks.bindExecutor.mock.calls.find(
           ([sessionID]) => sessionID === 'opencode-subagent-1',
-        )?.[1];
+        )?.[2];
         if (!parentExecutor || !subagentExecutor) {
           throw new Error('Expected parent and subagent executors to bind.');
         }

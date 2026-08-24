@@ -5,7 +5,9 @@ import { ROOMOTE_TASK_INSPECTION_ACTIONS } from '@roomote/types';
 import {
   bindFastAgentNativeToolExecutor,
   FAST_AGENT_NATIVE_TOOL_FILTER,
+  FAST_AGENT_NATIVE_TOOL_OUTPUT_LIMIT_BYTES,
   FAST_AGENT_NATIVE_TOOL_NAMES,
+  FAST_AGENT_SPILL_SUBAGENT_TOOL_FILTER,
   FAST_AGENT_SUBAGENT_TOOL_FILTER,
   getFastAgentNativeToolRuntime,
 } from '../fast-agent-native-tool-bridge';
@@ -43,6 +45,10 @@ describe('Fast native OpenCode tool bridge', () => {
       join(runtime.directory, '.opencode', 'roomote-fast-tool-bridge.js'),
       'utf8',
     );
+    const spillReadSource = await readFile(
+      join(toolsDirectory, 'spill_read.js'),
+      'utf8',
+    );
 
     expect(installedToolFiles.sort()).toEqual(
       Object.values(FAST_AGENT_NATIVE_TOOL_NAMES)
@@ -74,7 +80,8 @@ describe('Fast native OpenCode tool bridge', () => {
     expect(channelMessagesSource).not.toContain('channel:');
     expect(bridgeSource).toContain('context.sessionID');
     expect(bridgeSource).toContain('agent: context.agent');
-    expect(bridgeSource).toContain('metadata: { roomoteResult:');
+    expect(bridgeSource).toContain('metadata: payload.metadata ?? {}');
+    expect(spillReadSource).toContain('Never accepts filesystem paths');
     expect(FAST_AGENT_NATIVE_TOOL_FILTER).toMatchObject({
       '*': false,
       task: true,
@@ -83,11 +90,18 @@ describe('Fast native OpenCode tool bridge', () => {
       [FAST_AGENT_NATIVE_TOOL_NAMES.manageTasks]: true,
       [FAST_AGENT_NATIVE_TOOL_NAMES.getChatMessageContext]: true,
       [FAST_AGENT_NATIVE_TOOL_NAMES.getChatChannelMessages]: true,
+      [FAST_AGENT_NATIVE_TOOL_NAMES.spillGrep]: false,
+      [FAST_AGENT_NATIVE_TOOL_NAMES.spillRead]: false,
     });
     expect(FAST_AGENT_SUBAGENT_TOOL_FILTER).toEqual({
       '*': false,
       [FAST_AGENT_NATIVE_TOOL_NAMES.integrationCall]: true,
       [FAST_AGENT_NATIVE_TOOL_NAMES.manageTasks]: true,
+    });
+    expect(FAST_AGENT_SPILL_SUBAGENT_TOOL_FILTER).toEqual({
+      '*': false,
+      [FAST_AGENT_NATIVE_TOOL_NAMES.spillGrep]: true,
+      [FAST_AGENT_NATIVE_TOOL_NAMES.spillRead]: true,
     });
     for (const parentOnlyTool of [
       FAST_AGENT_NATIVE_TOOL_NAMES.cancelTask,
@@ -99,6 +113,8 @@ describe('Fast native OpenCode tool bridge', () => {
       FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReaction,
       FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReply,
       FAST_AGENT_NATIVE_TOOL_NAMES.sendTaskMessage,
+      FAST_AGENT_NATIVE_TOOL_NAMES.spillGrep,
+      FAST_AGENT_NATIVE_TOOL_NAMES.spillRead,
     ]) {
       expect(FAST_AGENT_SUBAGENT_TOOL_FILTER[parentOnlyTool]).not.toBe(true);
     }
@@ -114,6 +130,7 @@ describe('Fast native OpenCode tool bridge', () => {
     }));
     const unbind = bindFastAgentNativeToolExecutor(
       'opencode-session-1',
+      'conversation-1',
       executor,
     );
 
@@ -137,18 +154,25 @@ describe('Fast native OpenCode tool bridge', () => {
       });
 
       expect(response.status).toBe(200);
-      await expect(response.json()).resolves.toEqual({
+      const payload = await response.json();
+      expect(payload).toMatchObject({
         ok: true,
-        result: {
-          agent: 'judge',
-          name: FAST_AGENT_NATIVE_TOOL_NAMES.integrationCall,
-          echoed: {
-            integrationId: 'github',
-            toolName: 'search_code',
-            arguments: { query: 'Fast', nested: { exact: true } },
+        metadata: {
+          roomoteResult: {
+            agent: 'judge',
+            name: FAST_AGENT_NATIVE_TOOL_NAMES.integrationCall,
           },
-          nestedResult: { values: [1, 2, 3] },
         },
+      });
+      expect(JSON.parse(payload.output)).toEqual({
+        agent: 'judge',
+        name: FAST_AGENT_NATIVE_TOOL_NAMES.integrationCall,
+        echoed: {
+          integrationId: 'github',
+          toolName: 'search_code',
+          arguments: { query: 'Fast', nested: { exact: true } },
+        },
+        nestedResult: { values: [1, 2, 3] },
       });
       expect(executor).toHaveBeenCalledWith(
         expect.objectContaining({ agent: 'judge' }),
@@ -162,6 +186,7 @@ describe('Fast native OpenCode tool bridge', () => {
     const runtime = await getFastAgentNativeToolRuntime();
     const unbind = bindFastAgentNativeToolExecutor(
       'opencode-session-sensitive-error',
+      'conversation-sensitive-error',
       async () => {
         throw new Error('database password appeared in a downstream stack');
       },
@@ -196,6 +221,86 @@ describe('Fast native OpenCode tool bridge', () => {
     } finally {
       consoleError.mockRestore();
       unbind();
+    }
+  });
+
+  it('spills oversized output before OpenCode can invoke its native spill writer', async () => {
+    const runtime = await getFastAgentNativeToolRuntime();
+    const parentSession = 'opencode-parent-spill';
+    const childSession = 'opencode-child-spill';
+    const otherSession = 'opencode-other-spill';
+    const unbindParent = bindFastAgentNativeToolExecutor(
+      parentSession,
+      'conversation-spill',
+      async () => ({ text: '😀'.repeat(20_000) }),
+    );
+    const unbindChild = bindFastAgentNativeToolExecutor(
+      childSession,
+      'conversation-spill',
+      async () => null,
+    );
+    const unbindOther = bindFastAgentNativeToolExecutor(
+      otherSession,
+      'other-conversation',
+      async () => null,
+    );
+    const callBridge = (body: Record<string, unknown>) =>
+      fetch(runtime.env.ROOMOTE_FAST_TOOL_BRIDGE_URL!, {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${runtime.env.ROOMOTE_FAST_TOOL_BRIDGE_TOKEN}`,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify(body),
+      }).then((response) => response.json());
+
+    try {
+      const oversized = await callBridge({
+        sessionID: parentSession,
+        tool: FAST_AGENT_NATIVE_TOOL_NAMES.integrationCall,
+        args: {},
+      });
+      expect(Buffer.byteLength(oversized.output, 'utf8')).toBeLessThanOrEqual(
+        FAST_AGENT_NATIVE_TOOL_OUTPUT_LIMIT_BYTES,
+      );
+      expect(oversized.output.split('\n')).toHaveLength(1);
+      expect(oversized.metadata).toMatchObject({ truncated: true });
+      const descriptor = JSON.parse(oversized.output);
+      expect(descriptor).toMatchObject({
+        truncated: true,
+        spill: { byteLength: expect.any(Number), handle: expect.any(String) },
+      });
+      expect(descriptor.preview).not.toContain('�');
+
+      const childRead = await callBridge({
+        sessionID: childSession,
+        agent: 'spill_analysis',
+        tool: FAST_AGENT_NATIVE_TOOL_NAMES.spillRead,
+        args: { handle: descriptor.spill.handle, limit: 64 },
+      });
+      expect(Buffer.byteLength(childRead.output, 'utf8')).toBeLessThanOrEqual(
+        FAST_AGENT_NATIVE_TOOL_OUTPUT_LIMIT_BYTES,
+      );
+      expect(JSON.parse(childRead.output)).toMatchObject({
+        success: true,
+        result: { handle: descriptor.spill.handle },
+      });
+
+      const crossSessionRead = await callBridge({
+        sessionID: otherSession,
+        agent: 'spill_analysis',
+        tool: FAST_AGENT_NATIVE_TOOL_NAMES.spillRead,
+        args: { handle: descriptor.spill.handle },
+      });
+      expect(JSON.parse(crossSessionRead.output)).toEqual({
+        success: false,
+        error:
+          'The spill handle is unavailable for this conversation or has expired.',
+      });
+    } finally {
+      unbindOther();
+      unbindChild();
+      unbindParent();
     }
   });
 

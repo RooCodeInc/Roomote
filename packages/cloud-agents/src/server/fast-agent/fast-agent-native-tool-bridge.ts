@@ -15,20 +15,27 @@ import {
 } from '@roomote/types';
 import { z } from 'zod';
 
+import { ROOMOTE_OPENCODE_SPILL_ANALYSIS_AGENT_NAME } from '../../opencode-prompt-subagents';
+
 import {
   FAST_AGENT_NATIVE_TOOL_NAMES,
+  isFastAgentSpillSubagentTool,
   type FastAgentNativeToolName,
 } from './fast-agent-tool-policy';
+import { fastAgentSpillStore } from './fast-agent-spill-store';
 
 export {
   FAST_AGENT_NATIVE_TOOL_FILTER,
   FAST_AGENT_NATIVE_TOOL_NAMES,
+  FAST_AGENT_SPILL_SUBAGENT_TOOL_FILTER,
   FAST_AGENT_SUBAGENT_TOOL_FILTER,
 } from './fast-agent-tool-policy';
 export type { FastAgentNativeToolName } from './fast-agent-tool-policy';
 
 const FAST_AGENT_TOOL_BRIDGE_BODY_LIMIT_BYTES = 1_000_000;
 const FAST_AGENT_TOOL_BRIDGE_ERROR = 'Fast tool execution failed.';
+export const FAST_AGENT_NATIVE_TOOL_OUTPUT_LIMIT_BYTES = 40_000;
+const FAST_AGENT_NATIVE_TOOL_PREVIEW_LIMIT_BYTES = 8_000;
 
 export type FastAgentNativeToolCall = {
   agent?: string;
@@ -45,6 +52,16 @@ type FastAgentNativeToolRuntime = {
   env: Record<string, string>;
 };
 
+type ActiveExecutor = {
+  conversationId: string;
+  executor: FastAgentNativeToolExecutor;
+};
+
+type FastAgentBridgeOutput = {
+  metadata: Record<string, unknown>;
+  output: string;
+};
+
 const bridgeRequestSchema = z.object({
   sessionID: z.string().min(1),
   tool: z.enum(
@@ -55,6 +72,18 @@ const bridgeRequestSchema = z.object({
   ),
   args: z.record(z.unknown()),
   agent: z.string().min(1).optional(),
+});
+
+const spillReadArgsSchema = z.object({
+  handle: z.string().min(1),
+  limit: z.number().int().positive().optional(),
+  offset: z.number().int().nonnegative().optional(),
+});
+
+const spillGrepArgsSchema = z.object({
+  handle: z.string().min(1),
+  maxMatches: z.number().int().positive().optional(),
+  query: z.string().min(1),
 });
 
 const FAST_AGENT_NATIVE_TOOL_BRIDGE_SOURCE = String.raw`
@@ -77,8 +106,8 @@ export const invoke = async (name, args, context) => {
   }
   return {
     title: name,
-    output: JSON.stringify(payload.result ?? null),
-    metadata: { roomoteResult: payload.result ?? null },
+    output: payload.output,
+    metadata: payload.metadata ?? {},
   }
 }
 `;
@@ -237,9 +266,39 @@ export default {
   execute: (args, context) => invoke("ignore_event", args, context),
 }
 `,
+
+    [FAST_AGENT_NATIVE_TOOL_NAMES.spillRead]: String.raw`
+import { z } from "zod"
+import { invoke } from "../roomote-fast-tool-bridge.js"
+
+export default {
+  description: "Read a bounded UTF-8 byte window from an opaque Fast spill handle owned by this conversation. Never accepts filesystem paths.",
+  args: {
+    handle: z.string().min(1),
+    offset: z.number().int().nonnegative().optional(),
+    limit: z.number().int().positive().optional(),
+  },
+  execute: (args, context) => invoke("spill_read", args, context),
+}
+`,
+
+    [FAST_AGENT_NATIVE_TOOL_NAMES.spillGrep]: String.raw`
+import { z } from "zod"
+import { invoke } from "../roomote-fast-tool-bridge.js"
+
+export default {
+  description: "Search for a literal string inside an opaque Fast spill handle owned by this conversation. Returns bounded previews and byte offsets; never accepts filesystem paths.",
+  args: {
+    handle: z.string().min(1),
+    query: z.string().min(1),
+    maxMatches: z.number().int().positive().optional(),
+  },
+  execute: (args, context) => invoke("spill_grep", args, context),
+}
+`,
   };
 
-const activeExecutors = new Map<string, FastAgentNativeToolExecutor>();
+const activeExecutors = new Map<string, ActiveExecutor>();
 let runtimePromise: Promise<FastAgentNativeToolRuntime> | undefined;
 const require = createRequire(import.meta.url);
 
@@ -260,6 +319,115 @@ function tokenMatches(header: string | undefined, expected: string): boolean {
     actualBuffer.length === expectedBuffer.length &&
     timingSafeEqual(actualBuffer, expectedBuffer)
   );
+}
+
+function utf8Prefix(value: string, maxBytes: number): string {
+  const buffer = Buffer.from(value, 'utf8');
+  if (buffer.length <= maxBytes) return value;
+  let end = maxBytes;
+  while (end > 0 && (buffer[end]! & 0xc0) === 0x80) end -= 1;
+  return buffer.subarray(0, end).toString('utf8');
+}
+
+function serializeWithinOutputBudget(value: unknown): string {
+  const serialized = JSON.stringify(value ?? null);
+  if (
+    Buffer.byteLength(serialized, 'utf8') <=
+    FAST_AGENT_NATIVE_TOOL_OUTPUT_LIMIT_BYTES
+  ) {
+    return serialized;
+  }
+
+  let previewBytes = FAST_AGENT_NATIVE_TOOL_PREVIEW_LIMIT_BYTES;
+  while (previewBytes > 0) {
+    const output = JSON.stringify({
+      truncated: true,
+      preview: utf8Prefix(serialized, previewBytes),
+    });
+    if (
+      Buffer.byteLength(output, 'utf8') <=
+      FAST_AGENT_NATIVE_TOOL_OUTPUT_LIMIT_BYTES
+    ) {
+      return output;
+    }
+    previewBytes = Math.floor(previewBytes / 2);
+  }
+  return JSON.stringify({ truncated: true, preview: '' });
+}
+
+function buildSpillOutput(
+  sessionId: string,
+  serialized: string,
+): FastAgentBridgeOutput {
+  const spill = fastAgentSpillStore.write(sessionId, serialized);
+  let previewBytes = FAST_AGENT_NATIVE_TOOL_PREVIEW_LIMIT_BYTES;
+
+  while (previewBytes >= 0) {
+    const descriptor = spill.stored
+      ? {
+          truncated: true,
+          preview: utf8Prefix(serialized, previewBytes),
+          spill: {
+            handle: spill.handle,
+            byteLength: spill.byteLength,
+            expiresAt: new Date(spill.expiresAt).toISOString(),
+            guidance:
+              'Delegate this handle to the spill_analysis subagent. Use spill_read or spill_grep; do not use filesystem paths.',
+          },
+        }
+      : {
+          truncated: true,
+          preview: utf8Prefix(serialized, previewBytes),
+          spill: {
+            stored: false,
+            byteLength: spill.byteLength,
+            reason: spill.reason,
+          },
+        };
+    const output = JSON.stringify(descriptor);
+    if (
+      Buffer.byteLength(output, 'utf8') <=
+      FAST_AGENT_NATIVE_TOOL_OUTPUT_LIMIT_BYTES
+    ) {
+      return {
+        output,
+        metadata: {
+          truncated: true,
+          ...(spill.stored
+            ? { spillHandle: spill.handle, spillByteLength: spill.byteLength }
+            : { spillStored: false, spillReason: spill.reason }),
+        },
+      };
+    }
+    if (previewBytes === 0) break;
+    previewBytes = Math.floor(previewBytes / 2);
+  }
+
+  throw new Error('Fast spill metadata exceeded the bridge output budget.');
+}
+
+export function formatFastAgentNativeToolResult(
+  sessionId: string,
+  result: unknown,
+  options: { allowSpill?: boolean } = {},
+): FastAgentBridgeOutput {
+  const serialized = JSON.stringify(result ?? null);
+  if (
+    Buffer.byteLength(serialized, 'utf8') <=
+    FAST_AGENT_NATIVE_TOOL_OUTPUT_LIMIT_BYTES
+  ) {
+    return {
+      output: serialized,
+      metadata: { roomoteResult: result ?? null },
+    };
+  }
+  if (options.allowSpill === false) {
+    return {
+      output: serializeWithinOutputBudget(result),
+      metadata: { truncated: true },
+    };
+  }
+  return buildSpillOutput(sessionId, serialized);
 }
 
 async function readRequestBody(request: IncomingMessage): Promise<unknown> {
@@ -340,8 +508,8 @@ async function startRuntime(): Promise<FastAgentNativeToolRuntime> {
 
     try {
       const parsed = bridgeRequestSchema.parse(await readRequestBody(request));
-      const executor = activeExecutors.get(parsed.sessionID);
-      if (!executor) {
+      const activeExecutor = activeExecutors.get(parsed.sessionID);
+      if (!activeExecutor) {
         writeJson(response, 409, {
           ok: false,
           error: 'The Fast turn is no longer active.',
@@ -349,12 +517,64 @@ async function startRuntime(): Promise<FastAgentNativeToolRuntime> {
         return;
       }
 
-      const result = await executor({
+      const call = {
         name: parsed.tool,
         args: parsed.args,
         ...(parsed.agent ? { agent: parsed.agent } : {}),
+      };
+      if (isFastAgentSpillSubagentTool(parsed.tool)) {
+        const result =
+          parsed.agent === ROOMOTE_OPENCODE_SPILL_ANALYSIS_AGENT_NAME
+            ? (() => {
+                try {
+                  if (parsed.tool === FAST_AGENT_NATIVE_TOOL_NAMES.spillRead) {
+                    const args = spillReadArgsSchema.parse(parsed.args);
+                    return {
+                      success: true,
+                      result: fastAgentSpillStore.read(
+                        parsed.sessionID,
+                        args.handle,
+                        args.offset,
+                        args.limit,
+                      ),
+                    };
+                  }
+                  const args = spillGrepArgsSchema.parse(parsed.args);
+                  return {
+                    success: true,
+                    result: fastAgentSpillStore.grep(
+                      parsed.sessionID,
+                      args.handle,
+                      args.query,
+                      args.maxMatches,
+                    ),
+                  };
+                } catch {
+                  return {
+                    success: false,
+                    error:
+                      'The spill handle is unavailable for this conversation or has expired.',
+                  };
+                }
+              })()
+            : {
+                success: false,
+                error: 'Spill tools are reserved for the spill_analysis agent.',
+              };
+        writeJson(response, 200, {
+          ok: true,
+          ...formatFastAgentNativeToolResult(parsed.sessionID, result, {
+            allowSpill: false,
+          }),
+        });
+        return;
+      }
+
+      const result = await activeExecutor.executor(call);
+      writeJson(response, 200, {
+        ok: true,
+        ...formatFastAgentNativeToolResult(parsed.sessionID, result),
       });
-      writeJson(response, 200, { ok: true, result: result ?? null });
     } catch (error) {
       console.error('[Fast Agent] Native tool bridge request failed.', error);
       writeJson(response, 400, {
@@ -395,17 +615,28 @@ export function getFastAgentNativeToolRuntime(): Promise<FastAgentNativeToolRunt
 
 export function bindFastAgentNativeToolExecutor(
   sessionID: string,
+  conversationId: string,
   executor: FastAgentNativeToolExecutor,
 ): () => void {
   const existing = activeExecutors.get(sessionID);
-  if (existing && existing !== executor) {
+  if (
+    existing &&
+    (existing.executor !== executor ||
+      existing.conversationId !== conversationId)
+  ) {
     throw new Error('The OpenCode session already has an active Fast turn.');
   }
-  activeExecutors.set(sessionID, executor);
+  fastAgentSpillStore.bindSession(sessionID, conversationId);
+  activeExecutors.set(sessionID, { conversationId, executor });
 
   return () => {
-    if (activeExecutors.get(sessionID) === executor) {
+    const active = activeExecutors.get(sessionID);
+    if (
+      active?.executor === executor &&
+      active.conversationId === conversationId
+    ) {
       activeExecutors.delete(sessionID);
+      fastAgentSpillStore.unbindSession(sessionID, conversationId);
     }
   };
 }

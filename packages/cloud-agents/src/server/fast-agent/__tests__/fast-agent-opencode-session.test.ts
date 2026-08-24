@@ -210,4 +210,40 @@ describe('FastAgentOpenCodeSessionManager', () => {
     await run('a', 'a3');
     expect(prompts.at(-1)).toBe('bootstrap a3');
   });
+
+  it('cleans conversation spills on invalidation, eviction, and clear', async () => {
+    let now = 0;
+    const onConversationEnd = vi.fn();
+    const manager = new FastAgentOpenCodeSessionManager({
+      idleTtlMs: 10,
+      maxEntries: 1,
+      now: () => now,
+      onConversationEnd,
+    });
+    const execute = vi.fn(async (session) => {
+      session.id ??= 'session';
+    });
+    const run = (conversationId: string) =>
+      manager.run({
+        conversationId,
+        prompt: 'delta',
+        bootstrapPrompt: 'bootstrap',
+        execute,
+      });
+
+    await run('invalidated');
+    manager.invalidate('invalidated');
+    expect(onConversationEnd).toHaveBeenCalledWith('invalidated');
+
+    await run('evicted-a');
+    await run('evicted-b');
+    expect(onConversationEnd).toHaveBeenCalledWith('evicted-a');
+
+    now = 20;
+    await run('after-idle');
+    expect(onConversationEnd).toHaveBeenCalledWith('evicted-b');
+
+    manager.clear();
+    expect(onConversationEnd).toHaveBeenCalledWith('after-idle');
+  });
 });

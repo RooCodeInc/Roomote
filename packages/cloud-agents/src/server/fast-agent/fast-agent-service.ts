@@ -1254,6 +1254,7 @@ export async function answerFastAgentQuestion({
                       unbindExecutors.add(
                         bindFastAgentNativeToolExecutor(
                           openCodeSessionID,
+                          session.id,
                           executeNativeTool,
                         ),
                       );
@@ -1265,6 +1266,7 @@ export async function answerFastAgentQuestion({
                       unbindExecutors.add(
                         bindFastAgentNativeToolExecutor(
                           subagentSessionID,
+                          session.id,
                           (call) =>
                             (call.agent ===
                               ROOMOTE_OPENCODE_ADVISOR_AGENT_NAME ||

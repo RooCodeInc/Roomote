@@ -23,12 +23,18 @@ import {
 import {
   createRoomoteAdvisorAgentPrompt,
   createRoomoteJudgeAgentPrompt,
+  createRoomoteSpillAnalysisAgentPrompt,
   ROOMOTE_OPENCODE_ADVISOR_AGENT_DESCRIPTION,
   ROOMOTE_OPENCODE_ADVISOR_AGENT_NAME,
   ROOMOTE_OPENCODE_JUDGE_AGENT_DESCRIPTION,
   ROOMOTE_OPENCODE_JUDGE_AGENT_NAME,
+  ROOMOTE_OPENCODE_SPILL_ANALYSIS_AGENT_DESCRIPTION,
+  ROOMOTE_OPENCODE_SPILL_ANALYSIS_AGENT_NAME,
 } from '../opencode-prompt-subagents';
-import { FAST_AGENT_SUBAGENT_TOOL_FILTER } from './fast-agent/fast-agent-tool-policy';
+import {
+  FAST_AGENT_SPILL_SUBAGENT_TOOL_FILTER,
+  FAST_AGENT_SUBAGENT_TOOL_FILTER,
+} from './fast-agent/fast-agent-tool-policy';
 
 const ESCAPE_CHARACTER = String.fromCharCode(27);
 const BELL_CHARACTER = String.fromCharCode(7);
@@ -213,6 +219,13 @@ const PROMPT_ONLY_SUBAGENTS = {
     prompt: createRoomoteJudgeAgentPrompt({ contextOnly: true }),
     permission: NON_TASK_TOOL_PERMISSION_DENIALS,
     tools: FAST_AGENT_SUBAGENT_TOOL_FILTER,
+  },
+  [ROOMOTE_OPENCODE_SPILL_ANALYSIS_AGENT_NAME]: {
+    description: ROOMOTE_OPENCODE_SPILL_ANALYSIS_AGENT_DESCRIPTION,
+    mode: 'subagent',
+    prompt: createRoomoteSpillAnalysisAgentPrompt(),
+    permission: NON_TASK_TOOL_PERMISSION_DENIALS,
+    tools: FAST_AGENT_SPILL_SUBAGENT_TOOL_FILTER,
   },
 } as const;
 

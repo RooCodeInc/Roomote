@@ -3,6 +3,7 @@ import {
   type NonTaskOpenCodeSession,
 } from '../non-task-provider-usage';
 import { getOpenCodeSdkServerIdleTtlMs } from '../opencode-runtime';
+import { fastAgentSpillStore } from './fast-agent-spill-store';
 
 const DEFAULT_FAST_AGENT_OPENCODE_SESSION_LIMIT = 250;
 
@@ -27,6 +28,7 @@ type FastAgentOpenCodeSessionManagerOptions = {
   idleTtlMs?: number;
   maxEntries?: number;
   now?: () => number;
+  onConversationEnd?: (conversationId: string) => void;
 };
 
 /**
@@ -39,12 +41,17 @@ export class FastAgentOpenCodeSessionManager {
   private readonly idleTtlMs: number;
   private readonly maxEntries: number;
   private readonly now: () => number;
+  private readonly onConversationEnd: (conversationId: string) => void;
 
   constructor(options: FastAgentOpenCodeSessionManagerOptions = {}) {
     this.idleTtlMs = options.idleTtlMs ?? getOpenCodeSdkServerIdleTtlMs();
     this.maxEntries =
       options.maxEntries ?? DEFAULT_FAST_AGENT_OPENCODE_SESSION_LIMIT;
     this.now = options.now ?? Date.now;
+    this.onConversationEnd =
+      options.onConversationEnd ??
+      ((conversationId) =>
+        fastAgentSpillStore.cleanupConversation(conversationId));
   }
 
   async run<T>({
@@ -75,6 +82,7 @@ export class FastAgentOpenCodeSessionManager {
           // session before releasing queued work so the next turn cannot send
           // a delta into a poisoned transcript.
           entry.session.id = undefined;
+          this.onConversationEnd(conversationId);
           throw error;
         }
       };
@@ -98,6 +106,9 @@ export class FastAgentOpenCodeSessionManager {
   }
 
   clear(): void {
+    for (const conversationId of this.entries.keys()) {
+      this.onConversationEnd(conversationId);
+    }
     this.entries.clear();
   }
 
@@ -109,6 +120,7 @@ export class FastAgentOpenCodeSessionManager {
     const entry = this.entries.get(conversationId);
     if (entry) {
       entry.session.id = undefined;
+      this.onConversationEnd(conversationId);
     }
   }
 
@@ -148,6 +160,7 @@ export class FastAgentOpenCodeSessionManager {
     for (const [key, entry] of this.entries) {
       if (entry.pending === 0 && now - entry.lastUsedAt >= this.idleTtlMs) {
         this.entries.delete(key);
+        this.onConversationEnd(key);
       }
     }
 
@@ -161,6 +174,7 @@ export class FastAgentOpenCodeSessionManager {
       }
       if (entry.pending === 0) {
         this.entries.delete(key);
+        this.onConversationEnd(key);
       }
     }
   }
