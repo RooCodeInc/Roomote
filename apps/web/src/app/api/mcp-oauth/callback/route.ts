@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { type NextRequest, NextResponse } from 'next/server';
 
 import {
+  and,
   db,
   mcpConnections,
   deploymentMcpEnablements,
@@ -375,30 +376,42 @@ export async function GET(request: NextRequest) {
 
     // Custom servers carry their own enablement on the server row; only
     // catalog integrations write deploymentMcpEnablements.
+    let integrationBecameEnabled = false;
     if (requiresOrgAdmin && integration) {
       failureStage = 'deployment_enablement';
       const defaultDisabledTools =
         getMcpIntegrationDefaultDisabledTools(integration);
-      await db
-        .insert(deploymentMcpEnablements)
-        .values({
-          mcpId: integration.id,
+      const [reenabled] = await db
+        .update(deploymentMcpEnablements)
+        .set({
           enabled: true,
           enabledByUserId: userId,
-          ...(defaultDisabledTools.length > 0
-            ? {
-                disabledTools: [...defaultDisabledTools],
-              }
-            : {}),
+          updatedAt: new Date(),
         })
-        .onConflictDoUpdate({
-          target: deploymentMcpEnablements.mcpId,
-          set: {
-            enabled: true,
-            enabledByUserId: userId,
-            updatedAt: new Date(),
-          },
-        });
+        .where(
+          and(
+            eq(deploymentMcpEnablements.mcpId, integration.id),
+            eq(deploymentMcpEnablements.enabled, false),
+          ),
+        )
+        .returning({ mcpId: deploymentMcpEnablements.mcpId });
+      const [inserted] = reenabled
+        ? []
+        : await db
+            .insert(deploymentMcpEnablements)
+            .values({
+              mcpId: integration.id,
+              enabled: true,
+              enabledByUserId: userId,
+              ...(defaultDisabledTools.length > 0
+                ? {
+                    disabledTools: [...defaultDisabledTools],
+                  }
+                : {}),
+            })
+            .onConflictDoNothing({ target: deploymentMcpEnablements.mcpId })
+            .returning({ mcpId: deploymentMcpEnablements.mcpId });
+      integrationBecameEnabled = Boolean(reenabled || inserted);
     }
 
     captureIntegrationLifecycleEvent(
@@ -406,7 +419,7 @@ export async function GET(request: NextRequest) {
       connection.mcpId,
       userId,
     );
-    if (requiresOrgAdmin && integration) {
+    if (integrationBecameEnabled && integration) {
       captureIntegrationLifecycleEvent(
         'integration_enabled',
         integration.id,

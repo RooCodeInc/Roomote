@@ -16,7 +16,9 @@ const {
   loggerErrorMock,
   loggerWarnMock,
   mcpConnectionsFindFirstMock,
+  deploymentEnablementInsertReturningMock,
   deploymentEnablementOnConflictMock,
+  deploymentEnablementUpdateReturningMock,
   deploymentEnablementValuesMock,
   storeTokensMock,
   updateAuthStatusMock,
@@ -37,7 +39,9 @@ const {
   loggerErrorMock: vi.fn(),
   loggerWarnMock: vi.fn(),
   mcpConnectionsFindFirstMock: vi.fn(),
-  deploymentEnablementOnConflictMock: vi.fn().mockResolvedValue(undefined),
+  deploymentEnablementInsertReturningMock: vi.fn(),
+  deploymentEnablementOnConflictMock: vi.fn(),
+  deploymentEnablementUpdateReturningMock: vi.fn(),
   deploymentEnablementValuesMock: vi.fn(),
   storeTokensMock: vi.fn(),
   updateAuthStatusMock: vi.fn(),
@@ -76,13 +80,21 @@ vi.mock('@roomote/db/server', () => ({
         findFirst: mcpConnectionsFindFirstMock,
       },
     },
+    update: vi.fn(() => ({
+      set: vi.fn(() => ({
+        where: vi.fn(() => ({
+          returning: deploymentEnablementUpdateReturningMock,
+        })),
+      })),
+    })),
     insert: vi.fn(() => ({
       values: deploymentEnablementValuesMock,
     })),
   },
   mcpConnections: { id: 'mcp_connections.id' },
   deploymentMcpEnablements: { mcpId: 'deployment_mcp_enablements.mcp_id' },
-  eq: vi.fn((column: string, value: string) => ({ column, value })),
+  and: vi.fn((...conditions: unknown[]) => conditions),
+  eq: vi.fn((column: string, value: string | boolean) => ({ column, value })),
 }));
 
 vi.mock('@roomote/sdk/server', () => ({
@@ -123,8 +135,15 @@ function buildRequest(query: string) {
 describe('GET /api/mcp-oauth/callback', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    deploymentEnablementUpdateReturningMock.mockResolvedValue([]);
+    deploymentEnablementInsertReturningMock.mockResolvedValue([
+      { mcpId: 'resend' },
+    ]);
+    deploymentEnablementOnConflictMock.mockReturnValue({
+      returning: deploymentEnablementInsertReturningMock,
+    });
     deploymentEnablementValuesMock.mockReturnValue({
-      onConflictDoUpdate: deploymentEnablementOnConflictMock,
+      onConflictDoNothing: deploymentEnablementOnConflictMock,
     });
     authorizeMock.mockResolvedValue({
       success: true,
@@ -348,15 +367,66 @@ describe('GET /api/mcp-oauth/callback', () => {
       enabledByUserId: 'user-1',
       disabledTools: ['send-email', 'create-contact'],
     });
-    expect(deploymentEnablementOnConflictMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        set: expect.not.objectContaining({ disabledTools: expect.anything() }),
-      }),
-    );
+    expect(deploymentEnablementOnConflictMock).toHaveBeenCalledWith({
+      target: 'deployment_mcp_enablements.mcp_id',
+    });
     expect(captureEventMock).toHaveBeenCalledWith('integration_connected', {
       userId: 'user-1',
       properties: { integration_id: 'resend' },
     });
+    expect(captureEventMock).toHaveBeenCalledWith('integration_enabled', {
+      userId: 'user-1',
+      properties: { integration_id: 'resend' },
+    });
+  });
+
+  it('does not capture enablement when reconnecting an enabled deployment integration', async () => {
+    mcpConnectionsFindFirstMock.mockResolvedValue({
+      id: CONNECTION_ID,
+      mcpId: 'resend',
+      userId: null,
+      connectionRole: 'default',
+    });
+    getMcpIntegrationMock.mockReturnValue({
+      id: 'resend',
+      name: 'Resend',
+      url: 'https://mcp.resend.com/mcp',
+    });
+    isDeploymentScopedMcpIntegrationMock.mockReturnValue(true);
+    deploymentEnablementInsertReturningMock.mockResolvedValue([]);
+
+    await GET(buildRequest('?code=auth-code&state=state-1'));
+
+    expect(captureEventMock).toHaveBeenCalledWith('integration_connected', {
+      userId: 'user-1',
+      properties: { integration_id: 'resend' },
+    });
+    expect(captureEventMock).not.toHaveBeenCalledWith(
+      'integration_enabled',
+      expect.anything(),
+    );
+  });
+
+  it('captures enablement when reconnecting a disabled deployment integration', async () => {
+    mcpConnectionsFindFirstMock.mockResolvedValue({
+      id: CONNECTION_ID,
+      mcpId: 'resend',
+      userId: null,
+      connectionRole: 'default',
+    });
+    getMcpIntegrationMock.mockReturnValue({
+      id: 'resend',
+      name: 'Resend',
+      url: 'https://mcp.resend.com/mcp',
+    });
+    isDeploymentScopedMcpIntegrationMock.mockReturnValue(true);
+    deploymentEnablementUpdateReturningMock.mockResolvedValue([
+      { mcpId: 'resend' },
+    ]);
+
+    await GET(buildRequest('?code=auth-code&state=state-1'));
+
+    expect(deploymentEnablementOnConflictMock).not.toHaveBeenCalled();
     expect(captureEventMock).toHaveBeenCalledWith('integration_enabled', {
       userId: 'user-1',
       properties: { integration_id: 'resend' },
