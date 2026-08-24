@@ -1,5 +1,6 @@
 const mocks = vi.hoisted(() => ({
   appendVisibleMessages: vi.fn(),
+  setOpenCodeSessionId: vi.fn(),
   getActiveTasks: vi.fn(),
   getSession: vi.fn(),
   getEnvironments: vi.fn(),
@@ -46,6 +47,7 @@ vi.mock('../fast-agent-session', () => ({
   appendFastAgentVisibleMessages: mocks.appendVisibleMessages,
   getActiveFastAgentTasks: mocks.getActiveTasks,
   getOrCreateFastAgentSession: mocks.getSession,
+  setFastAgentOpenCodeSessionId: mocks.setOpenCodeSessionId,
 }));
 
 vi.mock('../../router', () => ({
@@ -160,8 +162,13 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         execute: (
           session: { id?: string },
           selectedPrompt: string,
+          context: { path: 'warm'; validateSession: false },
         ) => Promise<unknown>;
-      }) => execute({ id: 'opencode-session-1' }, prompt),
+      }) =>
+        execute({ id: 'opencode-session-1' }, prompt, {
+          path: 'warm',
+          validateSession: false,
+        }),
     );
     mocks.bindExecutor.mockImplementation((_sessionID, executor) => {
       mocks.nativeExecutor = executor;
@@ -172,6 +179,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     mocks.getSession.mockResolvedValue({
       id: 'conversation-1',
       compatibilityMessages: [],
+      openCodeSessionId: 'opencode-session-1',
     });
     mocks.getActiveTasks.mockResolvedValue([]);
     mocks.getEnvironments.mockResolvedValue([
@@ -299,6 +307,21 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     });
   });
 
+  it('persists a newly created OpenCode session before prompting', async () => {
+    mocks.getSession.mockResolvedValue({
+      id: 'conversation-1',
+      compatibilityMessages: [],
+      openCodeSessionId: null,
+    });
+
+    await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+
+    expect(mocks.setOpenCodeSessionId).toHaveBeenCalledWith({
+      sessionId: 'conversation-1',
+      openCodeSessionId: 'opencode-session-1',
+    });
+  });
+
   it('binds only integration and task inspection tools for subagent sessions', async () => {
     const adapter = callbacks();
     mocks.listIntegrations.mockResolvedValue([
@@ -411,7 +434,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     expect(mocks.bindExecutor).toHaveBeenCalledTimes(2);
   });
 
-  it('rebuilds an invalidated OpenCode session from canonical compatibility history', async () => {
+  it('resumes durable OpenCode state after process-local invalidation', async () => {
     const { FastAgentOpenCodeSessionManager } = await vi.importActual<
       typeof import('../fast-agent-opencode-session')
     >('../fast-agent-opencode-session');
@@ -422,6 +445,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       .mockResolvedValueOnce({
         id: 'conversation-1',
         compatibilityMessages: [],
+        openCodeSessionId: 'opencode-session-1',
       })
       .mockResolvedValue({
         id: 'conversation-1',
@@ -429,6 +453,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
           { role: 'user', content: 'Earlier question' },
           { role: 'assistant', content: 'Earlier answer' },
         ],
+        openCodeSessionId: 'opencode-session-1',
       });
     mocks.generateText.mockImplementation(async (params, session, options) => {
       prompts.push(params.prompt);
@@ -446,7 +471,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
 
     expect(prompts[0]).not.toContain('Earlier answer');
-    expect(prompts[1]).toContain('Earlier answer');
+    expect(prompts[1]).not.toContain('Earlier answer');
   });
 
   it('logs successful turns with model, duration, and native tool diagnostics', async () => {
@@ -498,10 +523,14 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         execute: (
           session: { id?: string },
           selectedPrompt: string,
+          context: { path: 'warm'; validateSession: false },
         ) => Promise<unknown>;
       }) => {
         await new Promise((resolve) => setTimeout(resolve, 50));
-        return execute({ id: 'opencode-session-1' }, prompt);
+        return execute({ id: 'opencode-session-1' }, prompt, {
+          path: 'warm',
+          validateSession: false,
+        });
       },
     );
 
@@ -1124,10 +1153,10 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     expect(adapter.postReply).toHaveBeenCalledWith(
       expect.objectContaining({ purpose: 'closeout' }),
     );
-    expect(mocks.invalidateSession).toHaveBeenCalledWith('conversation-1');
+    expect(mocks.invalidateSession).not.toHaveBeenCalled();
   });
 
-  it('retries a gateway block from a clean compatibility bootstrap', async () => {
+  it('retries a gateway block in the existing native session', async () => {
     vi.useFakeTimers();
     try {
       mocks.getSession.mockResolvedValue({
@@ -1136,6 +1165,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
           { role: 'user', content: 'Earlier question' },
           { role: 'assistant', content: 'Earlier answer' },
         ],
+        openCodeSessionId: 'opencode-session-1',
       });
       mocks.generateText
         .mockRejectedValueOnce(
@@ -1160,8 +1190,11 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         'Earlier answer',
       );
       expect(mocks.generateText.mock.calls[1]?.[0].prompt).toContain(
-        'Earlier answer',
+        'Resume from where you left off',
       );
+      expect(mocks.generateText.mock.calls[1]?.[1]).toEqual({
+        id: 'opencode-session-1',
+      });
       expect(adapter.postReply).toHaveBeenNthCalledWith(1, {
         purpose: 'progress',
         message:
@@ -1197,7 +1230,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       }),
     );
     expect(replaceReply).not.toHaveBeenCalled();
-    expect(mocks.invalidateSession).toHaveBeenCalledWith('conversation-1');
+    expect(mocks.invalidateSession).not.toHaveBeenCalled();
   });
 
   it('uses the extended retry budget for provider timeouts', async () => {
@@ -1250,7 +1283,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
 
       expect(mocks.generateText).toHaveBeenCalledOnce();
-      expect(mocks.invalidateSession).toHaveBeenCalledWith('conversation-1');
+      expect(mocks.invalidateSession).not.toHaveBeenCalled();
       expect(consoleError).toHaveBeenCalledWith(
         expect.stringContaining(
           '[Fast Agent] Turn finished. surface="slack" workspaceId="team-1" conversationId="100.1" messageId="100.2" canonicalConversationId="conversation-1" turnSource="human" modelRole="orchestration"',

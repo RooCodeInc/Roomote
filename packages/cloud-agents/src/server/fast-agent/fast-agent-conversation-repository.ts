@@ -16,10 +16,11 @@ export type FastAgentConversationRecord = {
   userId: string;
   conversation: FastAgentConversation;
   /**
-   * Durable visible history for cold starts and provider retries. OpenCode,
-   * not this field, owns the live warm transcript.
+   * Durable visible history for the last-resort reconstruction path. OpenCode,
+   * not this field, owns the native transcript.
    */
   compatibilityMessages: ModelMessage[];
+  openCodeSessionId: string | null;
 };
 
 export interface FastAgentConversationRepository {
@@ -36,6 +37,10 @@ export interface FastAgentConversationRepository {
   appendVisibleMessages(input: {
     conversationId: string;
     messages: ModelMessage[];
+  }): Promise<void>;
+  setOpenCodeSessionId(input: {
+    conversationId: string;
+    openCodeSessionId: string;
   }): Promise<void>;
 }
 
@@ -119,6 +124,7 @@ async function loadConversationRecord(
     userId: record.userId,
     conversation,
     compatibilityMessages: record.compatibilityMessages as ModelMessage[],
+    openCodeSessionId: record.openCodeSessionId,
   };
 }
 
@@ -248,5 +254,20 @@ export const fastAgentConversationRepository: FastAgentConversationRepository =
           throw new Error('Fast conversation was not found.');
         }
       });
+    },
+
+    async setOpenCodeSessionId({
+      conversationId: requestedId,
+      openCodeSessionId,
+    }) {
+      const conversationId = await resolveCanonicalId(db, requestedId);
+      const [updated] = await db
+        .update(fastAgentConversations)
+        .set({ openCodeSessionId, updatedAt: sql`now()` })
+        .where(eq(fastAgentConversations.id, conversationId))
+        .returning({ id: fastAgentConversations.id });
+      if (!updated) {
+        throw new Error('Fast conversation was not found.');
+      }
     },
   };

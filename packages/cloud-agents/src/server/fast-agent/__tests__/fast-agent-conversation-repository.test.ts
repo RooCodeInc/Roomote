@@ -198,6 +198,23 @@ describe('Fast conversation repository', () => {
     ).resolves.toMatchObject({ compatibilityMessages: visibleHistory });
   });
 
+  it('persists the OpenCode session used by a Fast conversation', async () => {
+    const user = await createUser();
+    const session = await fastAgentConversationRepository.getOrCreate({
+      userId: user.id,
+      conversation: slackConversation,
+    });
+
+    await fastAgentConversationRepository.setOpenCodeSessionId({
+      conversationId: session.id,
+      openCodeSessionId: 'opencode-session-1',
+    });
+
+    await expect(
+      fastAgentConversationRepository.findById({ id: session.id }),
+    ).resolves.toMatchObject({ openCodeSessionId: 'opencode-session-1' });
+  });
+
   it('resolves retained legacy IDs without consulting the alias table', async () => {
     const user = await createUser();
     const canonical = await fastAgentConversationRepository.getOrCreate({

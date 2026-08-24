@@ -3,7 +3,7 @@ import {
   type IncomingMessage,
   type ServerResponse,
 } from 'node:http';
-import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { randomBytes, timingSafeEqual } from 'node:crypto';
@@ -273,7 +273,10 @@ function resolveZodDirectoryForTools(): string {
 
 async function startRuntime(): Promise<FastAgentNativeToolRuntime> {
   const token = randomBytes(32).toString('hex');
-  const directory = mkdtempSync(join(tmpdir(), 'roomote-fast-opencode-'));
+  // OpenCode scopes sessions to their workspace directory. Keep this identity
+  // stable across service-process restarts so a durably stored session id can
+  // be resumed when the deployment preserves OpenCode's local storage.
+  const directory = join(tmpdir(), 'roomote-fast-opencode');
   const toolsDirectory = join(directory, '.opencode', 'tools');
   mkdirSync(toolsDirectory, { recursive: true });
   writeFileSync(
@@ -283,6 +286,7 @@ async function startRuntime(): Promise<FastAgentNativeToolRuntime> {
   );
   const toolNodeModules = join(directory, '.opencode', 'node_modules');
   mkdirSync(toolNodeModules, { recursive: true });
+  rmSync(join(toolNodeModules, 'zod'), { recursive: true, force: true });
   symlinkSync(
     resolveZodDirectoryForTools(),
     join(toolNodeModules, 'zod'),

@@ -26,6 +26,7 @@ import {
   appendFastAgentVisibleMessages,
   getActiveFastAgentTasks,
   getOrCreateFastAgentSession,
+  setFastAgentOpenCodeSessionId,
   type FastAgentActiveTask,
 } from './fast-agent-session';
 import {
@@ -1074,9 +1075,13 @@ export async function answerFastAgentQuestion({
     diagnostics.markInferenceQueued();
     const promptTextPromise = fastAgentOpenCodeSessionManager.run({
       conversationId: session.id,
+      persistedSessionId: session.openCodeSessionId,
       prompt: serializedTurnPrompt,
       bootstrapPrompt: serializedBootstrapPrompt,
-      execute: async (openCodeSession, selectedPrompt) => {
+      onPathSelected: (path) => {
+        console.info(`[Fast Agent] OpenCode session path=${path}.`);
+      },
+      execute: async (openCodeSession, selectedPrompt, { validateSession }) => {
         diagnostics.markInferenceSetupStarted();
         const unbindExecutors = new Set<() => void>();
         const boundSubagentSessionIDs = new Set<string>();
@@ -1115,13 +1120,14 @@ export async function answerFastAgentQuestion({
                   signal,
                   promptOnlySubagents: true,
                   tools: FAST_AGENT_NATIVE_TOOL_FILTER,
+                  validateSession,
                   onModelResolved: (model) => {
                     diagnostics.recordModelResolved(model);
                   },
                   onPromptStarted: () => {
                     diagnostics.markInferenceStarted();
                   },
-                  onSessionReady: (openCodeSessionID) => {
+                  onSessionReady: async (openCodeSessionID) => {
                     unbindAllExecutors();
                     unbindExecutors.add(
                       bindFastAgentNativeToolExecutor(
@@ -1129,6 +1135,13 @@ export async function answerFastAgentQuestion({
                         executeNativeTool,
                       ),
                     );
+                    if (session.openCodeSessionId !== openCodeSessionID) {
+                      await setFastAgentOpenCodeSessionId({
+                        sessionId: session.id,
+                        openCodeSessionId: openCodeSessionID,
+                      });
+                      session.openCodeSessionId = openCodeSessionID;
+                    }
                   },
                   onSubagentSessionReady: (subagentSessionID) => {
                     if (boundSubagentSessionIDs.has(subagentSessionID)) return;
@@ -1164,12 +1177,11 @@ export async function answerFastAgentQuestion({
                 !nativeToolInvoked &&
                 !isNonTaskOpenCodePromptTimeoutError(error),
               prepareRetry: () => {
-                // OpenCode persists the user message before inference starts,
-                // and abort does not roll it back. Discard the failed session
-                // and rebuild from visible compatibility history instead of
-                // appending the same turn to a poisoned transcript.
-                openCodeSession.id = undefined;
-                promptForAttempt = serializedBootstrapPrompt;
+                // Provider errors invalidate a model turn, not the OpenCode
+                // transcript. Resume natively instead of replaying visible
+                // compatibility history into a replacement session.
+                promptForAttempt =
+                  'Continue. The previous model request failed due to a provider error and was automatically retried. Resume from where you left off without restating the provider error.';
               },
             },
           );
@@ -1215,12 +1227,6 @@ export async function answerFastAgentQuestion({
         fastAgentOpenCodeSessionManager.invalidate(canonicalConversationId);
       }
       throw signal.reason instanceof Error ? signal.reason : error;
-    }
-    if (canonicalConversationId) {
-      // The system-posted closeout below is mirrored to compatibility history,
-      // not to OpenCode's live transcript. Force the next turn to bootstrap so
-      // the model can see the failure the user saw in Slack or Discord.
-      fastAgentOpenCodeSessionManager.invalidate(canonicalConversationId);
     }
     if (platformEvent) throw error;
 

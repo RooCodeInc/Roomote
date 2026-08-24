@@ -30,6 +30,84 @@ describe('FastAgentOpenCodeSessionManager', () => {
     ]);
   });
 
+  it('validates and resumes a persisted session with only the new turn', async () => {
+    const manager = new FastAgentOpenCodeSessionManager();
+    const execute = vi.fn(async (_session, prompt, context) => ({
+      prompt,
+      context,
+    }));
+
+    await expect(
+      manager.run({
+        conversationId: 'conversation-1',
+        persistedSessionId: 'persisted-session',
+        prompt: 'turn delta',
+        bootstrapPrompt: 'flattened compatibility history',
+        execute,
+      }),
+    ).resolves.toEqual({
+      prompt: 'turn delta',
+      context: { path: 'cold_resume', validateSession: true },
+    });
+    expect(execute.mock.calls[0]?.[0]).toEqual({ id: 'persisted-session' });
+  });
+
+  it('rebuilds from compatibility history when persisted session validation fails', async () => {
+    const manager = new FastAgentOpenCodeSessionManager();
+    const paths: string[] = [];
+    const execute = vi
+      .fn()
+      .mockRejectedValueOnce(new NonTaskOpenCodeSessionNotFoundError())
+      .mockImplementationOnce(async (session, prompt, context) => {
+        expect(session.id).toBeUndefined();
+        return { prompt, context };
+      });
+
+    await expect(
+      manager.run({
+        conversationId: 'conversation-1',
+        persistedSessionId: 'missing-session',
+        prompt: 'turn delta',
+        bootstrapPrompt: 'flattened compatibility history',
+        execute,
+        onPathSelected: (path) => paths.push(path),
+      }),
+    ).resolves.toEqual({
+      prompt: 'flattened compatibility history',
+      context: { path: 'fallback_rebuild', validateSession: false },
+    });
+    expect(paths).toEqual(['cold_resume', 'fallback_rebuild']);
+  });
+
+  it('adopts a newer durable session instead of reusing stale process-local state', async () => {
+    const manager = new FastAgentOpenCodeSessionManager();
+    const execute = vi.fn(async (session, prompt, context) => {
+      session.id ??= 'stale-local-session';
+      return { sessionId: session.id, prompt, context };
+    });
+
+    await manager.run({
+      conversationId: 'conversation-1',
+      prompt: 'first turn',
+      bootstrapPrompt: 'first bootstrap',
+      execute,
+    });
+
+    await expect(
+      manager.run({
+        conversationId: 'conversation-1',
+        persistedSessionId: 'newer-durable-session',
+        prompt: 'next turn',
+        bootstrapPrompt: 'flattened compatibility history',
+        execute,
+      }),
+    ).resolves.toEqual({
+      sessionId: 'newer-durable-session',
+      prompt: 'next turn',
+      context: { path: 'cold_resume', validateSession: true },
+    });
+  });
+
   it('serializes concurrent prompts for one conversation', async () => {
     const manager = new FastAgentOpenCodeSessionManager();
     let releaseFirst!: () => void;
@@ -67,7 +145,7 @@ describe('FastAgentOpenCodeSessionManager', () => {
     expect(started).toEqual(['bootstrap one', 'delta two']);
   });
 
-  it('invalidates a failed session before a queued turn resumes', async () => {
+  it('keeps a failed native session available for a queued turn', async () => {
     const manager = new FastAgentOpenCodeSessionManager();
     let releaseFailure!: () => void;
     const failureGate = new Promise<void>((resolve) => {
@@ -103,12 +181,12 @@ describe('FastAgentOpenCodeSessionManager', () => {
     releaseFailure();
 
     await firstFailure;
-    await expect(second).resolves.toBe('bootstrap two with visible error');
+    await expect(second).resolves.toBe('delta two');
     expect(calls).toEqual([
       { prompt: 'bootstrap one', sessionId: undefined },
       {
-        prompt: 'bootstrap two with visible error',
-        sessionId: undefined,
+        prompt: 'delta two',
+        sessionId: 'failed-session',
       },
     ]);
   });
@@ -145,7 +223,7 @@ describe('FastAgentOpenCodeSessionManager', () => {
     expect(execute).toHaveBeenCalledTimes(3);
   });
 
-  it('rebuilds an invalidated conversation from compatibility history', async () => {
+  it('revalidates durable state after process-local invalidation', async () => {
     const manager = new FastAgentOpenCodeSessionManager();
     const prompts: Array<{ prompt: string; sessionId?: string }> = [];
     const execute = vi.fn(async (session, prompt: string) => {
@@ -163,6 +241,7 @@ describe('FastAgentOpenCodeSessionManager', () => {
     manager.invalidate('conversation-1');
     await manager.run({
       conversationId: 'conversation-1',
+      persistedSessionId: 'session-1',
       prompt: 'turn two only',
       bootstrapPrompt: 'visible history including the failure and turn two',
       execute,
@@ -171,8 +250,8 @@ describe('FastAgentOpenCodeSessionManager', () => {
     expect(prompts).toEqual([
       { prompt: 'bootstrap turn one', sessionId: undefined },
       {
-        prompt: 'visible history including the failure and turn two',
-        sessionId: undefined,
+        prompt: 'turn two only',
+        sessionId: 'session-1',
       },
     ]);
   });

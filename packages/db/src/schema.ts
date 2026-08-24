@@ -2826,9 +2826,9 @@ export const slackAuthTokensRelations = relations(slackAuthTokens, () => ({}));
  *
  * Provider-neutral persistence for runless Fast conversations. The unique
  * identity intentionally excludes the mutable reply destination so moving a
- * conversation's delivery address never forks its memory. Visible messages
- * persist here so cold starts and provider retries do not depend on the
- * legacy Slack-shaped compatibility table.
+ * conversation's delivery address never forks its memory. The OpenCode
+ * session id preserves native transcripts across cold starts when OpenCode's
+ * own storage survives; visible messages remain the last-resort fallback.
  */
 export const fastAgentConversations = pgTable(
   'fast_agent_conversations',
@@ -2849,6 +2849,7 @@ export const fastAgentConversations = pgTable(
       .notNull()
       .default(sql`'[]'::jsonb`)
       .$type<Record<string, unknown>[]>(),
+    openCodeSessionId: text('opencode_session_id'),
     legacyConversationIds: uuid('legacy_conversation_ids')
       .array()
       .notNull()

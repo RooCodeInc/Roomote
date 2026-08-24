@@ -8,6 +8,7 @@ const DEFAULT_FAST_AGENT_OPENCODE_SESSION_LIMIT = 250;
 
 type SessionEntry = {
   session: NonTaskOpenCodeSession;
+  resumeValidationPending: boolean;
   lastUsedAt: number;
   pending: number;
   tail: Promise<void>;
@@ -15,13 +16,22 @@ type SessionEntry = {
 
 type FastAgentOpenCodeSessionRunInput<T> = {
   conversationId: string;
+  persistedSessionId?: string | null;
   prompt: string;
   bootstrapPrompt: string;
   execute: (
     session: NonTaskOpenCodeSession,
     selectedPrompt: string,
+    context: { path: FastAgentOpenCodeSessionPath; validateSession: boolean },
   ) => Promise<T>;
+  onPathSelected?: (path: FastAgentOpenCodeSessionPath) => void;
 };
+
+export type FastAgentOpenCodeSessionPath =
+  | 'warm'
+  | 'cold_resume'
+  | 'cold_rebuild'
+  | 'fallback_rebuild';
 
 type FastAgentOpenCodeSessionManagerOptions = {
   idleTtlMs?: number;
@@ -31,8 +41,8 @@ type FastAgentOpenCodeSessionManagerOptions = {
 
 /**
  * Process-local ownership for warm Fast OpenCode conversations. The map is
- * deliberately disposable: Roomote persists only stable conversation identity
- * and routing, while OpenCode owns the live transcript behind each session id.
+ * deliberately disposable: Roomote durably persists the OpenCode session id,
+ * while OpenCode owns the native transcript behind it.
  */
 export class FastAgentOpenCodeSessionManager {
   private readonly entries = new Map<string, SessionEntry>();
@@ -49,11 +59,13 @@ export class FastAgentOpenCodeSessionManager {
 
   async run<T>({
     conversationId,
+    persistedSessionId,
     prompt,
     bootstrapPrompt,
     execute,
+    onPathSelected,
   }: FastAgentOpenCodeSessionRunInput<T>): Promise<T> {
-    const entry = this.acquire(conversationId);
+    const entry = this.acquire(conversationId, persistedSessionId);
     const previous = entry.tail;
     let release!: () => void;
     entry.tail = new Promise<void>((resolve) => {
@@ -64,29 +76,36 @@ export class FastAgentOpenCodeSessionManager {
     await previous;
 
     try {
-      const selectedPrompt = entry.session.id ? prompt : bootstrapPrompt;
-      const executeAndInvalidateOnFailure = async (
-        nextPrompt: string,
-      ): Promise<T> => {
-        try {
-          return await execute(entry.session, nextPrompt);
-        } catch (error) {
-          // OpenCode persists the user turn before inference. Clear the failed
-          // session before releasing queued work so the next turn cannot send
-          // a delta into a poisoned transcript.
-          entry.session.id = undefined;
-          throw error;
-        }
-      };
+      if (persistedSessionId && persistedSessionId !== entry.session.id) {
+        entry.session.id = persistedSessionId;
+        entry.resumeValidationPending = true;
+      }
+      const validateSession = entry.resumeValidationPending;
+      const path: FastAgentOpenCodeSessionPath = entry.session.id
+        ? validateSession
+          ? 'cold_resume'
+          : 'warm'
+        : 'cold_rebuild';
+      entry.resumeValidationPending = false;
+      onPathSelected?.(path);
 
       try {
-        return await executeAndInvalidateOnFailure(selectedPrompt);
+        return await execute(
+          entry.session,
+          entry.session.id ? prompt : bootstrapPrompt,
+          { path, validateSession },
+        );
       } catch (error) {
         if (!isNonTaskOpenCodeSessionNotFoundError(error)) {
           throw error;
         }
 
-        return await executeAndInvalidateOnFailure(bootstrapPrompt);
+        entry.session.id = undefined;
+        onPathSelected?.('fallback_rebuild');
+        return await execute(entry.session, bootstrapPrompt, {
+          path: 'fallback_rebuild',
+          validateSession: false,
+        });
       }
     } finally {
       entry.pending -= 1;
@@ -102,13 +121,13 @@ export class FastAgentOpenCodeSessionManager {
   }
 
   /**
-   * Discard a failed live transcript without disturbing queued turns. The next
-   * run will rebuild the conversation from Roomote's compatibility history.
+   * Drop process-local ownership without deleting the durable session id. The
+   * next run validates that id before deciding whether to resume or rebuild.
    */
   invalidate(conversationId: string): void {
     const entry = this.entries.get(conversationId);
-    if (entry) {
-      entry.session.id = undefined;
+    if (entry?.session.id) {
+      entry.resumeValidationPending = true;
     }
   }
 
@@ -116,7 +135,10 @@ export class FastAgentOpenCodeSessionManager {
     return this.entries.size;
   }
 
-  private acquire(conversationId: string): SessionEntry {
+  private acquire(
+    conversationId: string,
+    persistedSessionId?: string | null,
+  ): SessionEntry {
     this.evict();
     const existing = this.entries.get(conversationId);
     if (existing) {
@@ -124,7 +146,8 @@ export class FastAgentOpenCodeSessionManager {
     }
 
     const entry: SessionEntry = {
-      session: {},
+      session: { id: persistedSessionId ?? undefined },
+      resumeValidationPending: Boolean(persistedSessionId),
       lastUsedAt: this.now(),
       pending: 0,
       tail: Promise.resolve(),

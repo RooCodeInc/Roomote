@@ -208,6 +208,7 @@ export type NonTaskOpenCodeNativeSessionOptions = {
   promptOnlySubagents?: boolean;
   signal?: AbortSignal;
   tools: Record<string, boolean>;
+  validateSession?: boolean;
 };
 
 export class NonTaskOpenCodeSessionNotFoundError extends Error {
@@ -719,6 +720,7 @@ async function runNonTaskSdkPrompt(
     session?: NonTaskOpenCodeSession;
     signal?: AbortSignal;
     useConfiguredServer?: boolean;
+    validateSession?: boolean;
   } = {},
 ): Promise<{
   info: NonTaskOpenCodeMessageInfo;
@@ -772,6 +774,19 @@ async function runNonTaskSdkPrompt(
       fetch: openCodeSdkFetch,
     });
     let sessionId = options.session?.id;
+    if (sessionId && options.validateSession) {
+      const validationResult = await client.session.messages(
+        {
+          sessionID: sessionId,
+          directory: sessionDirectory,
+          limit: 1,
+        },
+        { signal: abortController.signal },
+      );
+      if (validationResult.error || !validationResult.data) {
+        throw new NonTaskOpenCodeSessionNotFoundError();
+      }
+    }
     if (!sessionId) {
       const sessionResult = await client.session.create(
         {
@@ -1067,6 +1082,7 @@ export async function generateTrackedNonTaskTextInOpenCodeSession(
       session,
       signal: options.signal,
       useConfiguredServer: false,
+      validateSession: options.validateSession,
     },
   );
 

@@ -15,6 +15,7 @@ const {
   sessionAbortMock,
   spawnMock,
   sessionCreateMock,
+  sessionMessagesMock,
   sessionPromptMock,
 } = vi.hoisted(() => ({
   createOpencodeClientMock: vi.fn(),
@@ -28,6 +29,7 @@ const {
   sessionAbortMock: vi.fn(),
   spawnMock: vi.fn(),
   sessionCreateMock: vi.fn(),
+  sessionMessagesMock: vi.fn(),
   sessionPromptMock: vi.fn(),
 }));
 
@@ -139,6 +141,7 @@ describe('resolveOpenCodeSmallModel', () => {
       session: {
         abort: sessionAbortMock,
         create: sessionCreateMock,
+        messages: sessionMessagesMock,
         prompt: sessionPromptMock,
       },
     });
@@ -147,6 +150,7 @@ describe('resolveOpenCodeSmallModel', () => {
       data: { id: 'session-1' },
       error: undefined,
     });
+    sessionMessagesMock.mockResolvedValue({ data: [], error: undefined });
     configProvidersMock.mockResolvedValue({
       data: { providers: [], default: {} },
       error: undefined,
@@ -444,6 +448,73 @@ describe('resolveOpenCodeSmallModel', () => {
       messageCompletedAt: new Date('2026-08-21T10:00:02.000Z'),
       details: { surface: 'fast_agent' },
     });
+  });
+
+  it('validates a resumed Fast OpenCode session before prompting', async () => {
+    mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
+      R_MODEL: 'openrouter/openai/gpt-5.4',
+    });
+    sessionPromptMock.mockResolvedValue({
+      data: {
+        info: {},
+        parts: [{ type: 'text', text: 'resumed answer' }],
+      },
+      error: undefined,
+    });
+    const { generateTrackedNonTaskTextInOpenCodeSession } =
+      await import('../non-task-provider-usage.js');
+
+    await expect(
+      generateTrackedNonTaskTextInOpenCodeSession(
+        { surface: 'fast_agent', prompt: 'New turn.' },
+        { id: 'persisted-session' },
+        {
+          directory: '/tmp/roomote-fast-native-test',
+          tools: { '*': false, send_chat_reply: true },
+          validateSession: true,
+        },
+      ),
+    ).resolves.toBe('resumed answer');
+
+    expect(sessionMessagesMock).toHaveBeenCalledWith(
+      {
+        sessionID: 'persisted-session',
+        directory: '/tmp/roomote-fast-native-test',
+        limit: 1,
+      },
+      expect.any(Object),
+    );
+    expect(sessionMessagesMock.mock.invocationCallOrder[0]!).toBeLessThan(
+      sessionPromptMock.mock.invocationCallOrder[0]!,
+    );
+    expect(sessionCreateMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects an unavailable resumed session before appending a prompt', async () => {
+    mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
+      R_MODEL: 'openrouter/openai/gpt-5.4',
+    });
+    sessionMessagesMock.mockResolvedValue({
+      data: undefined,
+      error: { name: 'NotFoundError' },
+    });
+    const {
+      generateTrackedNonTaskTextInOpenCodeSession,
+      NonTaskOpenCodeSessionNotFoundError,
+    } = await import('../non-task-provider-usage.js');
+
+    await expect(
+      generateTrackedNonTaskTextInOpenCodeSession(
+        { surface: 'fast_agent', prompt: 'New turn.' },
+        { id: 'missing-session' },
+        {
+          directory: '/tmp/roomote-fast-native-test',
+          tools: { '*': false, send_chat_reply: true },
+          validateSession: true,
+        },
+      ),
+    ).rejects.toBeInstanceOf(NonTaskOpenCodeSessionNotFoundError);
+    expect(sessionPromptMock).not.toHaveBeenCalled();
   });
 
   it('lets OpenCode own a Fast prompt lifecycle when the deadline is disabled', async () => {
