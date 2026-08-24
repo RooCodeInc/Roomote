@@ -365,6 +365,7 @@ function summary(
     externalId: null,
     url: 'https://example.com/pr/1',
     title: 'A change',
+    body: null,
     state: 'open',
     draft: false,
     sourceBranch: 'feature',

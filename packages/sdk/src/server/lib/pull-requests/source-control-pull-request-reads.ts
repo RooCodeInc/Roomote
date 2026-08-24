@@ -174,6 +174,8 @@ export type SourceControlPullRequestSummary = {
   externalId: number | null;
   url: string;
   title: string;
+  /** The description as the list payload carries it; null when the provider's list omits it. */
+  body: string | null;
   state: 'open' | 'closed' | 'merged';
   draft: boolean;
   sourceBranch: string;
@@ -186,7 +188,12 @@ export type SourceControlPullRequestSummary = {
   mergedAt: string | null;
   /** Null for open PRs and when the provider exposes no close timestamp (Bitbucket). */
   closedAt: string | null;
-  labels: string[];
+  /**
+   * Null when the provider's list payload carries no labels at all (Azure
+   * DevOps), which is distinct from an explicitly empty label set: a writer
+   * that does not know the labels must not erase stored ones.
+   */
+  labels: string[] | null;
   headSha: string | null;
   baseSha: string | null;
   /** Null when the provider's list payload carries no mergeability signal. */
@@ -555,6 +562,7 @@ const gitLabMergeRequestListItemSchema = z
     id: z.number().int().optional(),
     iid: z.number().int(),
     title: z.string(),
+    description: z.string().nullable().optional(),
     state: z.string(),
     merged_at: z.string().nullable().optional(),
     closed_at: z.string().nullable().optional(),
@@ -2103,6 +2111,7 @@ async function listGitHubPullRequests({
       externalId: pull.id ?? null,
       url: pull.html_url,
       title: pull.title,
+      body: pull.body ?? null,
       state: mapProviderPullRequestState({
         merged: Boolean(pull.merged_at),
         closed: pull.state === 'closed',
@@ -2208,6 +2217,7 @@ async function listGitLabMergeRequests({
           number: mergeRequest.iid,
         }),
       title: mergeRequest.title,
+      body: mergeRequest.description ?? null,
       state: mapProviderPullRequestState({
         merged: mergeRequest.state === 'merged',
         closed: mergeRequest.state === 'closed',
@@ -2330,6 +2340,7 @@ async function listGiteaPullRequests({
             number,
           }),
         title,
+        body: pullRequest.body ?? null,
         state: mapProviderPullRequestState({
           merged: Boolean(pullRequest.merged),
           closed: pullRequest.state === 'closed',
@@ -2461,6 +2472,7 @@ async function listBitbucketPullRequests({
             number: pullRequest.id,
           }),
         title,
+        body: pullRequest.description ?? null,
         state: mapProviderPullRequestState({
           merged: state === 'MERGED',
           closed: state === 'DECLINED' || state === 'SUPERSEDED',
@@ -2482,7 +2494,9 @@ async function listBitbucketPullRequests({
         createdAt: pullRequest.created_on ?? null,
         mergedAt: null,
         closedAt: null,
-        labels: [],
+        // Bitbucket's pull request list carries no labels; null says "not
+        // known" so a stored label set is preserved rather than cleared.
+        labels: null,
         headSha: pullRequest.source?.commit?.hash ?? null,
         baseSha: pullRequest.destination?.commit?.hash ?? null,
         mergeable: null,
@@ -2574,6 +2588,7 @@ async function listAdoPullRequests({
         number: pullRequest.pullRequestId,
       }),
       title: pullRequest.title,
+      body: pullRequest.description ?? null,
       state: mapProviderPullRequestState({
         merged: pullRequest.status === 'completed',
         closed: pullRequest.status === 'abandoned',
@@ -2598,9 +2613,13 @@ async function listAdoPullRequests({
           ? (pullRequest.closedDate ?? null)
           : null,
       closedAt: pullRequest.closedDate ?? null,
-      labels: (pullRequest.labels ?? [])
-        .map((label) => label.name)
-        .filter((name): name is string => Boolean(name)),
+      // Azure DevOps omits labels from some list responses (see the warning
+      // this listing emits); an omission is unknown, not an empty set.
+      labels: pullRequest.labels
+        ? pullRequest.labels
+            .map((label) => label.name)
+            .filter((name): name is string => Boolean(name))
+        : null,
       headSha: pullRequest.lastMergeSourceCommit?.commitId ?? null,
       baseSha: pullRequest.lastMergeTargetCommit?.commitId ?? null,
       mergeable:

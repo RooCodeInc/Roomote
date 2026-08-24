@@ -151,6 +151,44 @@ describe('processFastAgentMessage', () => {
     );
   });
 
+  it('resolves pending reply tasks only after acquiring the Fast turn lock', async () => {
+    const resolveActiveTasks = vi
+      .fn()
+      .mockResolvedValue([{ taskId: 'review-task' }]);
+    const slack = {
+      addReaction: vi.fn().mockResolvedValue(true),
+      removeReaction: vi.fn().mockResolvedValue(true),
+      normalizeIncomingText: vi.fn(async (text: string) => text),
+      fetchThreadMessages: vi.fn(async () => []),
+    };
+
+    await processFastAgentMessage({
+      event: {
+        type: 'message',
+        channel: 'C123',
+        user: 'U123',
+        text: 'resolve this issue',
+        thread_ts: '100.001',
+        ts: '100.002',
+      } as never,
+      slack: slack as never,
+      userId: 'user-1',
+      teamId: 'T123',
+      continuation: true,
+      resolveActiveTasks,
+    });
+
+    expect(mocks.acquireLock.mock.invocationCallOrder[0]).toBeLessThan(
+      resolveActiveTasks.mock.invocationCallOrder[0] as number,
+    );
+    expect(mocks.answerQuestion).toHaveBeenCalledWith(
+      expect.objectContaining({
+        question: 'resolve this issue',
+        activeTasks: [{ taskId: 'review-task' }],
+      }),
+    );
+  });
+
   it('passes an image from the initial Slack message to the Fast model', async () => {
     const image = 'data:image/png;base64,aW5pdGlhbA==';
     const files = [

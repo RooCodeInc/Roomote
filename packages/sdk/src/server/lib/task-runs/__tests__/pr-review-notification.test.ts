@@ -163,6 +163,33 @@ describe('durable PR review notification ownership', () => {
     expect(mockQueueAdd).not.toHaveBeenCalled();
   });
 
+  it('debounces CI failures through the same durable notification batch', async () => {
+    await enqueuePrReviewNotification({
+      ...baseInput,
+      event: {
+        kind: 'ci_failure',
+        providerEventId: 'github-check-run:9001',
+        authorLogin: 'github-actions',
+        checkName: 'CI / Tests',
+        reviewHeadSha: 'abc123',
+        url: 'https://github.com/owner/repo/actions/runs/7/job/8',
+        observedAt: 100,
+      },
+    });
+
+    expect(mockPersistPrReviewEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        batchKind: 'human',
+        batchId: null,
+        dueAt: new Date(1_000 + PR_REVIEW_NOTIFICATION_DEBOUNCE_MS),
+        event: expect.objectContaining({
+          kind: 'ci_failure',
+          checkName: 'CI / Tests',
+        }),
+      }),
+    );
+  });
+
   it('groups one external automated reviewer under a stable database batch', async () => {
     const automatedAuthorId = 'github:9001';
     for (const [index, kind] of [

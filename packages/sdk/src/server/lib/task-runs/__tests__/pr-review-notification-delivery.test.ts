@@ -224,6 +224,25 @@ describe('preparePrReviewNotificationDelivery', () => {
     mockGreenCiChecks();
   });
 
+  it('suppresses CI failures from an outdated PR head', async () => {
+    await expect(
+      preparePrReviewNotificationDelivery({
+        taskRun,
+        request,
+        events: [
+          {
+            kind: 'ci_failure',
+            authorLogin: 'github-actions',
+            checkName: 'CI / Tests',
+            reviewHeadSha: 'old-head',
+          },
+        ],
+      }),
+    ).resolves.toEqual({ post: false, reason: 'not_worth_notifying' });
+
+    expect(mockGenerateObject).not.toHaveBeenCalled();
+  });
+
   it('propagates GitHub rate limits so durable delivery can defer', async () => {
     const rateLimitError = Object.assign(new Error('API rate limit exceeded'), {
       status: 403,
@@ -1154,6 +1173,43 @@ describe('triagePrReviewActivity', () => {
     await expect(
       triagePrReviewActivity({ ...request, events: eventsWithoutSelfReview }),
     ).resolves.toEqual({ post: false, reason: 'not_worth_notifying' });
+  });
+
+  it('always treats a CI failure event as actionable', async () => {
+    mockGenerateObject.mockResolvedValue({
+      object: {
+        worthNotifying: false,
+        actionableFeedback: false,
+        summary: '',
+        followUpQuestion: '',
+        followUpPrompt: '',
+      },
+    });
+
+    await expect(
+      triagePrReviewActivity({
+        ...request,
+        events: [
+          {
+            kind: 'ci_failure',
+            authorLogin: 'github-actions',
+            checkName: 'CI / Tests',
+            url: 'https://github.com/owner/repo/actions/runs/7/job/8',
+          },
+        ],
+      }),
+    ).resolves.toEqual({
+      post: true,
+      summary:
+        'CI failed on [owner/repo#42](https://github.com/owner/repo/pull/42).',
+      followUpQuestion: 'Would you like me to resolve this CI failure?',
+      followUpPrompt:
+        'Investigate and resolve the failed CI checks on [owner/repo#42](https://github.com/owner/repo/pull/42). Review [the failed check](https://github.com/owner/repo/actions/runs/7/job/8).',
+    });
+
+    expect(mockGenerateObject.mock.calls[0]?.[0]?.prompt).toContain(
+      '- CI check CI / Tests failed (URL: https://github.com/owner/repo/actions/runs/7/job/8)',
+    );
   });
 
   it('always passes along self-review results even when the model says they are not worth notifying', async () => {

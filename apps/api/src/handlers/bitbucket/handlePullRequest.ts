@@ -120,6 +120,7 @@ export async function handleBitbucketPullRequest(
       pullRequest: {
         number: prNumber,
         title: pullRequest.title,
+        body: pullRequest.description ?? null,
         url: getBitbucketPullRequestUrl(payload),
         authorLogin: getBitbucketUsername(pullRequest.author) ?? null,
         state: status,

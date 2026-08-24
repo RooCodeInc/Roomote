@@ -24,6 +24,7 @@ import type {
 import { trackLatestUserMessageForReplyQuote } from '@roomote/communication/messages';
 import {
   TaskPayloadKind,
+  buildFastAgentChildTaskMetadata,
   EXPIRED_SNAPSHOT_RESUME_ERROR,
   getFastAgentParentFromPayload,
   getCommunicationChannelFromTaskPayload,
@@ -528,6 +529,10 @@ async function resumeTaskFromSnapshot({
   }
 
   const sourcePayload = sourceRun.payload ?? {};
+  const fastAgentParent =
+    senderMode === 'fast_agent'
+      ? getFastAgentParentFromPayload(sourcePayload)
+      : null;
   const repo =
     typeof sourcePayload.repo === 'string' ? sourcePayload.repo : undefined;
   const environmentId =
@@ -566,6 +571,9 @@ async function resumeTaskFromSnapshot({
     ...(images?.length ? { resumePromptImages: images } : {}),
     ...(normalizedClientMessageId
       ? { resumePromptClientMessageId: normalizedClientMessageId }
+      : {}),
+    ...(fastAgentParent
+      ? buildFastAgentChildTaskMetadata(fastAgentParent)
       : {}),
   };
   populateSnapshotResumeSlackMetadata(payload, {

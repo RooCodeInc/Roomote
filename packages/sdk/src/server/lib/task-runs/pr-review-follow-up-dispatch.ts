@@ -25,7 +25,9 @@ import {
 } from '@roomote/slack';
 import {
   ALL_REPOSITORIES,
+  activeRunStatuses,
   buildFastAgentChildTaskMetadata,
+  type FastAgentParent,
   getFastAgentParentFromPayload,
   RunStatus,
   SANDBOX_SNAPSHOT_EXPIRY_MS,
@@ -47,12 +49,62 @@ export type PrReviewFollowUpDispatchResult =
   | { outcome: 'resumed'; runId: number }
   | { outcome: 'unavailable' };
 
-async function findCompletedFastAgentSlackTaskRunWithSnapshot(input: {
+type FastAgentSlackLookup = {
   taskId: string;
   slackTeamId: string;
   channelId: string;
   threadId: string;
-}) {
+};
+
+function getMatchingFastAgentSlackParent(
+  payload: unknown,
+  input: FastAgentSlackLookup,
+): FastAgentParent | null {
+  const parent = getFastAgentParentFromPayload(payload);
+  if (
+    parent?.conversation.surface !== 'slack' ||
+    parent.conversation.workspaceId !== input.slackTeamId ||
+    parent.conversation.replyTarget.channelId !== input.channelId ||
+    parent.conversation.replyTarget.threadId !== input.threadId
+  ) {
+    return null;
+  }
+
+  return parent;
+}
+
+async function findActiveFastAgentSlackTaskRun(input: FastAgentSlackLookup) {
+  const [activeRun] = await db
+    .select({
+      id: taskRuns.id,
+      taskId: taskRuns.taskId,
+      payload: taskRuns.payload,
+    })
+    .from(taskRuns)
+    .innerJoin(tasks, eq(tasks.id, taskRuns.taskId))
+    .where(
+      and(
+        eq(taskRuns.taskId, input.taskId),
+        inArray(taskRuns.status, [...activeRunStatuses]),
+        isNull(taskRuns.canceledAt),
+        isNull(tasks.deletedAt),
+      ),
+    )
+    .orderBy(desc(taskRuns.createdAt))
+    .limit(1);
+
+  if (!activeRun) {
+    return null;
+  }
+
+  return getMatchingFastAgentSlackParent(activeRun.payload, input)
+    ? activeRun
+    : null;
+}
+
+async function findCompletedFastAgentSlackTaskRunWithSnapshot(
+  input: FastAgentSlackLookup,
+) {
   const snapshotCutoff = new Date(Date.now() - SANDBOX_SNAPSHOT_EXPIRY_MS);
   const [completedRun] = await db
     .select({
@@ -82,13 +134,8 @@ async function findCompletedFastAgentSlackTaskRunWithSnapshot(input: {
     return null;
   }
 
-  const parent = getFastAgentParentFromPayload(completedRun.payload);
-  if (
-    parent?.conversation.surface !== 'slack' ||
-    parent.conversation.workspaceId !== input.slackTeamId ||
-    parent.conversation.replyTarget.channelId !== input.channelId ||
-    parent.conversation.replyTarget.threadId !== input.threadId
-  ) {
+  const parent = getMatchingFastAgentSlackParent(completedRun.payload, input);
+  if (!parent) {
     return null;
   }
 
@@ -149,7 +196,20 @@ async function dispatchSlackFollowUp(input: {
   const lookupScope = input.slackTeamId
     ? { taskId: input.taskId, slackTeamId: input.slackTeamId }
     : { taskId: input.taskId };
-  const activeRun = await findActiveSlackTaskRun(threadTs, lookupScope);
+  const threadBoundActiveRun = await findActiveSlackTaskRun(
+    threadTs,
+    lookupScope,
+  );
+  const fastAgentActiveRun =
+    !threadBoundActiveRun && input.slackTeamId
+      ? await findActiveFastAgentSlackTaskRun({
+          taskId: input.taskId,
+          slackTeamId: input.slackTeamId,
+          channelId: input.channelId,
+          threadId: threadTs,
+        })
+      : null;
+  const activeRun = threadBoundActiveRun ?? fastAgentActiveRun;
 
   if (activeRun) {
     await setTrustedRunActingUser({
@@ -243,7 +303,7 @@ async function dispatchSlackFollowUp(input: {
         // instead of dropping the follow-up. The task predicate prevents a
         // sibling task in the same thread from receiving the action.
         const [recent] = await db
-          .select({ id: taskRuns.id })
+          .select({ id: taskRuns.id, payload: taskRuns.payload })
           .from(taskRuns)
           .innerJoin(tasks, eq(tasks.id, taskRuns.taskId))
           .where(
@@ -252,7 +312,7 @@ async function dispatchSlackFollowUp(input: {
                 ? []
                 : [eq(tasks.slackThreadTs, threadTs)]),
               eq(taskRuns.taskId, input.taskId),
-              ...(input.slackTeamId
+              ...(input.slackTeamId && !fastAgentCompletedRun
                 ? [getSlackTaskRunWorkspacePredicate(input.slackTeamId)]
                 : []),
               eq(taskRuns.kind, 'resume'),
@@ -261,6 +321,19 @@ async function dispatchSlackFollowUp(input: {
           )
           .orderBy(desc(taskRuns.createdAt))
           .limit(1);
+
+        if (
+          fastAgentCompletedRun &&
+          recent &&
+          !getMatchingFastAgentSlackParent(recent.payload, {
+            taskId: input.taskId,
+            slackTeamId: input.slackTeamId!,
+            channelId: input.channelId,
+            threadId: threadTs,
+          })
+        ) {
+          return undefined;
+        }
 
         return recent?.id;
       },

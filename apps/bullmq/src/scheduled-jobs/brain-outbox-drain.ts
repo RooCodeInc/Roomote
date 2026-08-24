@@ -634,12 +634,22 @@ export function getPullRequestFactsResumeCursor(
   return { updatedAt, id: cursor?.id ?? null };
 }
 
+/**
+ * Bound on the description excerpt a pull-request page carries. Long enough
+ * for the "why" and the summary of changes most descriptions lead with,
+ * short enough that a template-heavy description cannot dominate the page's
+ * embedding or the nightly digest's evidence budget.
+ */
+const PR_BODY_CHAR_CAP = 4_000;
+
 export function buildPullRequestFactPage(fact: {
   repositoryFullName: string;
   prNumber: number;
   title: string;
   htmlUrl: string;
   authorLogin: string | null;
+  body?: string | null;
+  labels?: string[] | null;
   state: string;
   createdAtRemote: Date;
   closedAtRemote: Date | null;
@@ -648,6 +658,12 @@ export function buildPullRequestFactPage(fact: {
   const merged = fact.mergedAtRemote?.toISOString();
   const occurredAt =
     fact.mergedAtRemote ?? fact.closedAtRemote ?? fact.createdAtRemote;
+  const labels = fact.labels ?? [];
+  const body = fact.body?.trim() ?? '';
+  const description =
+    body.length > PR_BODY_CHAR_CAP
+      ? `${body.slice(0, PR_BODY_CHAR_CAP)}\n\n_Description truncated; open the pull request for the rest._`
+      : body;
   const content = [
     ...renderBrainFrontmatter({
       type: BRAIN_PAGE_TYPES.pullRequest,
@@ -660,6 +676,7 @@ export function buildPullRequestFactPage(fact: {
         `state: ${fact.state}`,
         fact.authorLogin && `author: ${fact.authorLogin}`,
         merged && `merged_at: ${merged}`,
+        labels.length > 0 && `labels: ${JSON.stringify(labels)}`,
         'provenance: roomote-pull-requests',
       ],
     }),
@@ -667,6 +684,11 @@ export function buildPullRequestFactPage(fact: {
     `# ${fact.repositoryFullName}#${fact.prNumber}: ${fact.title}`,
     '',
     `${fact.state === 'merged' || merged ? 'Merged' : 'State: ' + fact.state}${merged ? ` at ${merged}` : ''}${fact.authorLogin ? ` by ${fact.authorLogin}` : ''}.`,
+    ...(labels.length > 0 ? ['', `Labels: ${labels.join(', ')}`] : []),
+    // The description is the author's own account of what changed and why:
+    // the part of a pull request the diff cannot say. Treated as evidence
+    // like every other ingested text, never as instructions.
+    ...(description ? ['', '## Description', '', description] : []),
     '',
     fact.htmlUrl,
   ].join('\n');
@@ -709,6 +731,8 @@ async function syncPullRequestFacts(
       title: pullRequestFacts.title,
       htmlUrl: pullRequestFacts.htmlUrl,
       authorLogin: pullRequestFacts.authorLogin,
+      body: pullRequestFacts.body,
+      labels: pullRequestFacts.labels,
       state: pullRequestFacts.state,
       createdAtRemote: pullRequestFacts.createdAtRemote,
       closedAtRemote: pullRequestFacts.closedAtRemote,

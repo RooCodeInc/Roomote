@@ -11,7 +11,10 @@ vi.mock('@roomote/sdk/server', () => ({
 
 import type { SlackNotifier } from '@roomote/slack';
 
-import { retireSlackPrReviewOffersBestEffort } from '../pr-review-retire.js';
+import {
+  resolveFastAgentReplyTasks,
+  retireSlackPrReviewOffersBestEffort,
+} from '../pr-review-retire.js';
 
 const slack = {
   getMessageBlocks: getMessageBlocksMock,
@@ -102,5 +105,41 @@ describe('retireSlackPrReviewOffersBestEffort', () => {
 
     expect(getMessageBlocksMock).not.toHaveBeenCalled();
     expect(updateMessageMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('resolveFastAgentReplyTasks', () => {
+  it('makes the completed review task available to a Fast typed reply', async () => {
+    claimForThreadMock.mockResolvedValue([
+      { nonce: 'n1', taskId: 'review-task', messageId: '111.111' },
+    ]);
+
+    await expect(
+      resolveFastAgentReplyTasks({
+        slack,
+        slackTeamId: 'T1',
+        channelId: 'C123',
+        threadTs: '100.000',
+      }),
+    ).resolves.toEqual([{ taskId: 'review-task' }]);
+    await flushAsync();
+
+    expect(updateMessageMock).toHaveBeenCalledOnce();
+  });
+
+  it('deduplicates an active task that also owns the pending review offer', async () => {
+    claimForThreadMock.mockResolvedValue([
+      { nonce: 'n1', taskId: 'task-1', messageId: null },
+    ]);
+
+    await expect(
+      resolveFastAgentReplyTasks({
+        slack,
+        slackTeamId: 'T1',
+        channelId: 'C123',
+        threadTs: '100.000',
+        activeTaskId: 'task-1',
+      }),
+    ).resolves.toEqual([{ taskId: 'task-1' }]);
   });
 });

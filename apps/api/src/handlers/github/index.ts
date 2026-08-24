@@ -35,6 +35,7 @@ import {
   queuePrReviewActivityNotification,
   queuePrReviewSummaryNotification,
 } from './notifyPrReviewActivity';
+import { queuePrCiFailureNotification } from './notifyPrCiFailure';
 
 // Conflict Resolution:
 import { handlePushConflictCheck } from './handlePushConflictCheck';
@@ -70,6 +71,8 @@ function syncPullRequestFact(params: {
   repositoryFullName: string;
   pullRequest: {
     authorLogin: string | null;
+    body: string | null;
+    labels: string[];
     closedAt: string | null;
     createdAt: string;
     draft: boolean;
@@ -95,6 +98,8 @@ function syncPullRequestFact(params: {
     repositoryFullName: params.repositoryFullName,
     pullRequest: {
       authorLogin: params.pullRequest.authorLogin,
+      body: params.pullRequest.body,
+      labels: params.pullRequest.labels,
       closedAt: params.pullRequest.closedAt,
       createdAt: params.pullRequest.createdAt,
       externalPullRequestId: params.pullRequest.externalPullRequestId,
@@ -293,6 +298,10 @@ github.post('/', async (c) => {
           repositoryFullName: payload.repository.full_name,
           pullRequest: {
             authorLogin: payload.pull_request.user?.login ?? null,
+            body: payload.pull_request.body ?? null,
+            labels: (payload.pull_request.labels ?? []).map(
+              (label) => label.name,
+            ),
             closedAt: payload.pull_request.closed_at,
             createdAt: payload.pull_request.created_at,
             draft: Boolean(payload.pull_request.draft),
@@ -329,6 +338,10 @@ github.post('/', async (c) => {
           repositoryFullName: payload.repository.full_name,
           pullRequest: {
             authorLogin: payload.pull_request.user?.login ?? null,
+            body: payload.pull_request.body ?? null,
+            labels: (payload.pull_request.labels ?? []).map(
+              (label) => label.name,
+            ),
             closedAt: payload.pull_request.closed_at,
             createdAt: payload.pull_request.created_at,
             draft: Boolean(payload.pull_request.draft),
@@ -360,6 +373,10 @@ github.post('/', async (c) => {
           repositoryFullName: payload.repository.full_name,
           pullRequest: {
             authorLogin: payload.pull_request.user?.login ?? null,
+            body: payload.pull_request.body ?? null,
+            labels: (payload.pull_request.labels ?? []).map(
+              (label) => label.name,
+            ),
             closedAt: payload.pull_request.closed_at,
             createdAt: payload.pull_request.created_at,
             draft: Boolean(payload.pull_request.draft),
@@ -396,6 +413,10 @@ github.post('/', async (c) => {
           repositoryFullName: payload.repository.full_name,
           pullRequest: {
             authorLogin: payload.pull_request.user?.login ?? null,
+            body: payload.pull_request.body ?? null,
+            labels: (payload.pull_request.labels ?? []).map(
+              (label) => label.name,
+            ),
             closedAt: payload.pull_request.closed_at,
             createdAt: payload.pull_request.created_at,
             draft: Boolean(payload.pull_request.draft),
@@ -432,6 +453,10 @@ github.post('/', async (c) => {
           repositoryFullName: payload.repository.full_name,
           pullRequest: {
             authorLogin: payload.pull_request.user?.login ?? null,
+            body: payload.pull_request.body ?? null,
+            labels: (payload.pull_request.labels ?? []).map(
+              (label) => label.name,
+            ),
             closedAt: payload.pull_request.closed_at,
             createdAt: payload.pull_request.created_at,
             draft: Boolean(payload.pull_request.draft),
@@ -538,6 +563,17 @@ github.post('/', async (c) => {
       }),
     );
 
+    webhooks.on('check_run.completed', async ({ id, name, payload }) => {
+      await queuePrCiFailureNotification(payload);
+
+      return recordWebhook(
+        id,
+        `${name}.${payload.action}`,
+        payload,
+        async () => ({ status: 'ok' as const }),
+      );
+    });
+
     webhooks.on('pull_request.closed', ({ id, name, payload }) =>
       recordWebhook(id, `${name}.${payload.action}`, payload, async () => {
         const status = payload.pull_request.merged ? 'merged' : 'closed';
@@ -552,6 +588,10 @@ github.post('/', async (c) => {
           repositoryFullName: payload.repository.full_name,
           pullRequest: {
             authorLogin: payload.pull_request.user?.login ?? null,
+            body: payload.pull_request.body ?? null,
+            labels: (payload.pull_request.labels ?? []).map(
+              (label) => label.name,
+            ),
             closedAt: payload.pull_request.closed_at,
             createdAt: payload.pull_request.created_at,
             draft: Boolean(payload.pull_request.draft),

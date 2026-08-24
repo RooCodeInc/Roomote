@@ -809,6 +809,53 @@ describe('sendMessageToTask', () => {
     );
   });
 
+  it('preserves Fast parent routing when a typed reply resumes a completed child', async () => {
+    const fastAgentParent = {
+      sessionId: '11111111-1111-4111-8111-111111111111',
+      conversation: {
+        surface: 'slack',
+        workspaceId: 'T123',
+        conversationId: '111.222',
+        replyTarget: { channelId: 'C123', threadId: '111.222' },
+      },
+    };
+    mockFindLatestTaskRun.mockResolvedValue(
+      createActiveRun({
+        status: 'completed',
+        sandboxServerUrl: null,
+        snapshotId: 'snap-fast',
+        payload: {
+          repo: 'acme/app',
+          fastAgentParent,
+        },
+      }),
+    );
+
+    const result = await steerMessageToTask({
+      taskId: 'task-1',
+      userId: 'user-1',
+      message: 'Address the review feedback.',
+      senderMode: 'fast_agent',
+    });
+
+    expect(result).toEqual({
+      success: true,
+      result: { resumed: true, runId: 77, taskId: 'task-1' },
+    });
+    expect(mockEnqueueTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        task: expect.objectContaining({
+          payload: expect.objectContaining({
+            communicationContextInherited: true,
+            fastAgentSessionId: fastAgentParent.sessionId,
+            fastAgentParent,
+          }),
+        }),
+      }),
+      expect.any(Object),
+    );
+  });
+
   it('returns a clear error when a sleeping task snapshot has expired', async () => {
     mockFindLatestTaskRun.mockResolvedValue(
       createActiveRun({
