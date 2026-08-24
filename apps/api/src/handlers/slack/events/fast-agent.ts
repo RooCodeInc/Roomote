@@ -58,6 +58,7 @@ export async function processFastAgentMessage(params: {
   usageText?: string;
   continuation?: boolean;
   activeTasks?: FastAgentActiveTask[];
+  resolveActiveTasks?: () => Promise<FastAgentActiveTask[]>;
   launchTask: LaunchFastAgentTask;
   processingReactionName?: string;
   isExistingConversation?: boolean;
@@ -71,6 +72,7 @@ export async function processFastAgentMessage(params: {
     usageText = `Use \`!fast <question>\` after mentioning ${PRODUCT_NAME}.`,
     continuation = false,
     activeTasks = [],
+    resolveActiveTasks,
     launchTask,
     processingReactionName = 'eyes',
     isExistingConversation = false,
@@ -174,6 +176,9 @@ export async function processFastAgentMessage(params: {
         bot_id: message.bot_id,
       }));
 
+    const resolvedActiveTasks = resolveActiveTasks
+      ? await resolveActiveTasks()
+      : activeTasks;
     const responseText = await answerFastAgentQuestion({
       question,
       images,
@@ -189,7 +194,7 @@ export async function processFastAgentMessage(params: {
         currentMessage?.user === event.user
           ? currentMessage.username
           : undefined,
-      activeTasks,
+      activeTasks: resolvedActiveTasks,
       adapter: {
         launchTask,
         postReply: async ({ message, kickoff }) => {
