@@ -12,6 +12,8 @@ export const llmUsageRouter = router({
   record: userOnlyProcedure
     .input(
       z.object({
+        // Keep this optional for deployed clients; the in-repo SDK helper
+        // requires new callers to identify their usage surface explicitly.
         source: z.string().optional(),
         usageType: z
           .enum(['inference', 'embedding', 'rerank', 'other'])
