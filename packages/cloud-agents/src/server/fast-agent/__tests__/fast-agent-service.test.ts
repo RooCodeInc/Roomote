@@ -376,6 +376,33 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     });
   });
 
+  it('passes bounded history pagination arguments to the conversation adapter', async () => {
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        await invokeTool(nativeToolNames.getChatChannelMessages, {
+          oldest: '99.1',
+          cursor: '100.1',
+          limit: 20,
+        });
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'closeout',
+          message: 'I found the context.',
+        });
+        return '';
+      },
+    );
+    const adapter = callbacks();
+
+    await answerFastAgentQuestion({ ...baseParams, adapter });
+
+    expect(adapter.getChatChannelMessages).toHaveBeenCalledWith({
+      oldest: '99.1',
+      cursor: '100.1',
+      limit: 20,
+    });
+  });
+
   it('bounds Slack history relative to an explicit latest timestamp', async () => {
     mocks.generateText.mockImplementation(
       async (_params, _session, options) => {

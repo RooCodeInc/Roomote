@@ -90,6 +90,8 @@ const chatMessageContextArgsSchema = z.object({
 const chatChannelMessagesArgsSchema = z.object({
   oldest: z.string().trim().min(1).optional(),
   latest: z.string().trim().min(1).optional(),
+  cursor: z.string().trim().min(1).optional(),
+  limit: z.number().int().min(1).max(50).optional(),
 });
 const FAST_AGENT_DEFAULT_SLACK_HISTORY_LOOKBACK_MS = 24 * 60 * 60 * 1000;
 
@@ -932,7 +934,9 @@ export async function answerFastAgentQuestion({
               ...args,
               ...(conversation.surface === 'slack' && !args.oldest
                 ? {
-                    oldest: getFastAgentDefaultSlackHistoryOldest(args.latest),
+                    oldest: getFastAgentDefaultSlackHistoryOldest(
+                      args.cursor ?? args.latest,
+                    ),
                   }
                 : {}),
             });

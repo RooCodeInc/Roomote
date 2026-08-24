@@ -72,6 +72,10 @@ describe('Fast native OpenCode tool bridge', () => {
     expect(channelMessagesSource).toContain(
       'defaults Slack history to the previous 24 hours',
     );
+    expect(channelMessagesSource).toContain('Pass nextCursor back as cursor');
+    expect(channelMessagesSource).toContain(
+      'limit: z.number().int().min(1).max(50)',
+    );
     expect(channelMessagesSource).not.toContain('channel:');
     expect(bridgeSource).toContain('context.sessionID');
     expect(bridgeSource).toContain('agent: context.agent');

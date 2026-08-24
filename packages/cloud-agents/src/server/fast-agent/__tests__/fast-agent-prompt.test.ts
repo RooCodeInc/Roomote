@@ -68,6 +68,12 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain('manage_tasks');
     expect(prompt).toContain('integration_call');
     expect(prompt).toContain(
+      'pass that value as cursor to continue with older messages',
+    );
+    expect(prompt).toContain(
+      "Fast subagents cannot access the parent's local files",
+    );
+    expect(prompt).toContain(
       'These reads use the same deployment authorization semantics as delegated Roomote tasks.',
     );
     expect(prompt).toContain(
