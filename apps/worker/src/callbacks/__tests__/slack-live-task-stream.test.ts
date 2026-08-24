@@ -103,6 +103,37 @@ describe('Slack live task card', () => {
     expect(renderedCard(1)).toMatchObject({ status: 'in_progress' });
   });
 
+  it('keeps updating after a startup status re-opens a settled card', async () => {
+    const taskRun = createTaskRun();
+    const context = {};
+
+    await updateSlackLiveTaskStream(
+      taskRun,
+      { type: 'completion', ts: 1000, text: 'First result.' },
+      context,
+    );
+    await reportSlackLiveTaskStatus(taskRun, RunStatus.Running, context);
+    await updateSlackLiveTaskStream(
+      taskRun,
+      { type: 'text', ts: 1001, text: 'Working again.' },
+      context,
+    );
+    await finishSlackLiveTaskStream(taskRun, RunStatus.Completed, context);
+
+    expect(renderedCard(2)).toEqual({
+      status: 'in_progress',
+      output: 'Agent started, getting to work…',
+    });
+    expect(renderedCard(3)).toEqual({
+      status: 'in_progress',
+      output: 'Working again.',
+    });
+    expect(renderedCard(4)).toEqual({
+      status: 'complete',
+      output: 'Task completed.',
+    });
+  });
+
   it('updates the card for resumed runs through the same run-scoped lookup', async () => {
     const resumed = createTaskRun({
       payloadKind: TaskPayloadKind.SnapshotResume,

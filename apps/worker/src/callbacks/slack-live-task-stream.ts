@@ -235,6 +235,9 @@ export async function reportSlackLiveTaskStatus(
 
   const state = getCardState(context);
   state.status = 'in_progress';
+  state.finalMessage = undefined;
+  state.awaitingInput = false;
+  state.settled = false;
   state.message = message;
   await renderCard(taskRun, context);
 }
