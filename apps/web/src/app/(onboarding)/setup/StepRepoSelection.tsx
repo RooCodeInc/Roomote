@@ -123,6 +123,8 @@ export function StepRepoSelection({
   );
   const [repositoryFilter, setRepositoryFilter] = useState('');
   const [createRepoDialogOpen, setCreateRepoDialogOpen] = useState(false);
+  const [showMissingRepositoryOptions, setShowMissingRepositoryOptions] =
+    useState(false);
   const [setupGuidance, setSetupGuidance] = useState(initialSetupGuidance);
   const [isRefreshPending, setIsRefreshPending] = useState(false);
   const refreshPromiseRef = useRef<Promise<unknown> | null>(null);
@@ -194,7 +196,7 @@ export function StepRepoSelection({
     prefetchRecommendationSignals.mutate({ repositoryIds });
   }, [prefetchRecommendationSignals, sortedRepositories]);
 
-  const showRepositoryFilter = sortedRepositories.length > 5;
+  const showRepositoryFilter = sortedRepositories.length > 7;
 
   useEffect(() => {
     if (!showRepositoryFilter && repositoryFilter) {
@@ -431,23 +433,8 @@ export function StepRepoSelection({
           <StepTitle text={REPO_SELECTION_STEP.title} />
         </div>
         <div className="space-y-3 text-foreground">
-          {!showForm && (
-            <div className="space-y-2 flex gap-2 items-start">
-              <Info className="size-4 shrink-0 mt-1" />
-              <p>
-                <span className="font-semibold">
-                  {PRODUCT_NAME} needs environments to verify its work.
-                </span>
-                <br />
-                That lets it run your app locally, click around, make API calls,
-                take screenshots.
-              </p>
-            </div>
-          )}
-          <p className={`text-foreground ${!showForm && 'ml-6'}`}>
-            Pick the repo(s) needed for the first env to set up.
-            <br />
-            Roomote will install dependencies and figure it all out on its own.
+          <p className="text-foreground">
+            Pick the repo(s) needed for your first env.
           </p>
         </div>
 
@@ -533,7 +520,7 @@ export function StepRepoSelection({
                 onToggleRepository={toggleRepository}
                 onCreateRepository={() => setCreateRepoDialogOpen(true)}
                 inputPrefix="setup-repository"
-                heightClassName="max-h-[calc(var(--effective-viewport-height)-40rem)] md:h-[18.75rem]"
+                heightClassName="max-h-[calc(var(--effective-viewport-height)-26.75rem)] md:max-h-[calc(var(--effective-viewport-height)-30rem)]"
               />
               {filteredRepositories.length === 0 ? (
                 <div className="rounded-md border border-dashed px-4 py-6 text-sm text-muted-foreground">
@@ -595,11 +582,7 @@ export function StepRepoSelection({
                     ENVIRONMENT_DEFINITION_SETUP_GUIDANCE_MAX_LENGTH * 0.8 &&
                     charCounter}
                 </p>
-                <SetupFooter
-                  onBack={onBack}
-                  backDisabled={isBusy}
-                  className="w-full flex-wrap"
-                >
+                <SetupFooter className="w-full flex-wrap">
                   <ModelSelect
                     value={effectiveSelectedModelId}
                     onValueChange={setSelectedModelId}
@@ -615,59 +598,68 @@ export function StepRepoSelection({
                     Continue
                     <ArrowRight />
                   </Button>
-                  <p className="text-sm text-muted-foreground ml-auto">
-                    Or, if you must,
-                  </p>
                   <Button
                     type="button"
                     variant="link"
                     size="sm"
-                    className="p-0! -ml-1"
+                    className="p-0!"
                     onClick={onSkip}
                   >
-                    do this later
+                    Or do this later
                   </Button>
                 </SetupFooter>
               </div>
             ) : null}
           </CardContent>
         </Card>
+
+        <div className="space-y-2">
+          {!showForm &&
+            (!showMissingRepositoryOptions ? (
+              <button
+                type="button"
+                className="cursor-pointer text-sm text-muted-foreground underline underline-offset-4 hover:text-foreground"
+                aria-expanded={showMissingRepositoryOptions}
+                aria-controls="missing-repository-options"
+                onClick={() =>
+                  setShowMissingRepositoryOptions((current) => !current)
+                }
+              >
+                Missing a repo?
+              </button>
+            ) : (
+              <div
+                id="missing-repository-options"
+                className="flex flex-wrap gap-2"
+              >
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => void refreshRepositories()}
+                  disabled={connectGitHub.isPending || isRefreshingRepositories}
+                >
+                  {isRefreshingRepositories ? <Spinner /> : <RotateCw />}
+                  Refresh list
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={handleManageGitHubAccess}
+                  disabled={connectGitHub.isPending}
+                >
+                  {connectGitHub.isPending ? <Spinner /> : <Github />}
+                  Edit GitHub Access
+                </Button>
+              </div>
+            ))}
+        </div>
         {!showForm ? (
           <SetupFooter onBack={onBack} className="flex-wrap">
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              onClick={() => void refreshRepositories()}
-              disabled={connectGitHub.isPending || isRefreshingRepositories}
-            >
-              {isRefreshingRepositories ? (
-                <Loader2 className="animate-spin" />
-              ) : (
-                <RotateCw />
-              )}
-              Refresh list
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={handleManageGitHubAccess}
-              disabled={connectGitHub.isPending}
-            >
-              {connectGitHub.isPending ? (
-                <Loader2 className="animate-spin" />
-              ) : (
-                <Github />
-              )}
-              Edit GitHub Access
-            </Button>
-            <Button type="button" variant="outline" size="sm" onClick={onSkip}>
+            <Button type="button" variant="outline" onClick={onSkip}>
               Skip
             </Button>
-            <p className="self-center text-sm text-muted-foreground">
-              Not recommended
-            </p>
           </SetupFooter>
         ) : null}
       </div>

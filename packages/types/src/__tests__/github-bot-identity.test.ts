@@ -1,4 +1,5 @@
 import {
+  findPrBodyAttributionLine,
   formatPrBodyAttribution,
   matchesRoomoteGitHubLogin,
   normalizePrBodyAttributionAppMention,
@@ -17,6 +18,15 @@ describe('Roomote GitHub bot identity helpers', () => {
         '> &#8203;<!-- roomote:pr-attribution:start -->Opened on behalf of @octocat.<!-- roomote:pr-attribution:end --> Follow up in [the web UI](https://example.com/task/1).',
       );
     });
+
+    it.each(['&#8203;', '&amp;#8203;', '\u200B'])(
+      'finds marker-wrapped attribution with the %s prefix',
+      (prefix) => {
+        const body = `\n\n> ${prefix}<!-- roomote:pr-attribution:start -->Created by Roomote.<!-- roomote:pr-attribution:end --> Follow up by mentioning @roomote.`;
+
+        expect(findPrBodyAttributionLine(body)).toBe('> Created by Roomote.');
+      },
+    );
   });
 
   describe('matchesRoomoteGitHubLogin', () => {

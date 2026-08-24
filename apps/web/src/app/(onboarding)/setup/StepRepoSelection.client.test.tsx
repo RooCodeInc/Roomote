@@ -343,6 +343,10 @@ async function renderStepRepoSelection(
   };
 }
 
+function showMissingRepositoryOptions() {
+  fireEvent.click(screen.getByRole('button', { name: 'Missing a repo?' }));
+}
+
 describe('StepRepoSelection', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -398,6 +402,8 @@ describe('StepRepoSelection', () => {
   it('restarts GitHub access management from the edit access action', async () => {
     await renderStepRepoSelection();
 
+    showMissingRepositoryOptions();
+
     fireEvent.click(
       screen.getByRole('button', { name: /^edit github access$/i }),
     );
@@ -428,7 +434,7 @@ describe('StepRepoSelection', () => {
     });
   });
 
-  it('keeps the repository filter hidden when there are five repositories or fewer', async () => {
+  it('keeps the repository filter hidden when there are seven repositories or fewer', async () => {
     mockRepositories.splice(
       0,
       mockRepositories.length,
@@ -470,7 +476,7 @@ describe('StepRepoSelection', () => {
     ).not.toBeInTheDocument();
   });
 
-  it('shows a repository filter once more than five repositories are available', async () => {
+  it('shows a repository filter once more than seven repositories are available', async () => {
     mockRepositories.splice(
       0,
       mockRepositories.length,
@@ -507,6 +513,18 @@ describe('StepRepoSelection', () => {
       {
         id: 'repo-6',
         fullName: 'acme/admin',
+        private: false,
+        defaultBranch: 'main',
+      },
+      {
+        id: 'repo-7',
+        fullName: 'acme/platform',
+        private: false,
+        defaultBranch: 'main',
+      },
+      {
+        id: 'repo-8',
+        fullName: 'acme/worker',
         private: false,
         defaultBranch: 'main',
       },
@@ -575,6 +593,18 @@ describe('StepRepoSelection', () => {
         private: false,
         defaultBranch: 'main',
       },
+      {
+        id: 'repo-7',
+        fullName: 'acme/platform',
+        private: false,
+        defaultBranch: 'main',
+      },
+      {
+        id: 'repo-8',
+        fullName: 'acme/worker',
+        private: false,
+        defaultBranch: 'main',
+      },
     );
     await renderStepRepoSelection();
 
@@ -633,6 +663,18 @@ describe('StepRepoSelection', () => {
       {
         id: 'repo-6',
         fullName: 'acme/admin',
+        private: false,
+        defaultBranch: 'main',
+      },
+      {
+        id: 'repo-7',
+        fullName: 'acme/platform',
+        private: false,
+        defaultBranch: 'main',
+      },
+      {
+        id: 'repo-8',
+        fullName: 'acme/worker',
         private: false,
         defaultBranch: 'main',
       },
@@ -810,7 +852,7 @@ describe('StepRepoSelection', () => {
 
   it('keeps the create-repository item visible when the list is filtered to no matches', async () => {
     mockRepositories.push(
-      ...Array.from({ length: 4 }, (_, index) => ({
+      ...Array.from({ length: 6 }, (_, index) => ({
         id: `repo-extra-${index}`,
         fullName: `acme/extra-${index}`,
         private: true,
@@ -871,6 +913,12 @@ describe('StepRepoSelection', () => {
   it('refreshes the repository list from the existing refresh action', async () => {
     await renderStepRepoSelection();
     mockRefetchRepositories.mockClear();
+
+    expect(
+      screen.queryByRole('button', { name: /refresh list/i }),
+    ).not.toBeInTheDocument();
+
+    showMissingRepositoryOptions();
 
     fireEvent.click(screen.getByRole('button', { name: /refresh list/i }));
 
@@ -1146,7 +1194,7 @@ describe('StepRepoSelection', () => {
     });
   });
 
-  it('shows a skip action with a not recommended hint and calls onSkip', async () => {
+  it('shows a skip action and calls onSkip', async () => {
     const onSkip = vi.fn();
 
     await renderStepRepoSelection({ onSkip });
@@ -1156,8 +1204,6 @@ describe('StepRepoSelection', () => {
         name: 'Continue',
       }),
     ).not.toBeInTheDocument();
-    expect(screen.getByText('Not recommended')).toBeInTheDocument();
-
     fireEvent.click(screen.getByRole('button', { name: 'Skip' }));
 
     expect(onSkip).toHaveBeenCalledTimes(1);

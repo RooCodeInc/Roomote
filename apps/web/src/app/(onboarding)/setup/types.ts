@@ -24,7 +24,7 @@ const SETUP_STEP_DEFINITIONS = [
   },
   {
     id: 'env-vars',
-    title: 'Configure inference',
+    title: 'Configure inference provider',
   },
   {
     id: 'source-control-provider',
@@ -49,6 +49,10 @@ const SETUP_STEP_DEFINITIONS = [
   {
     id: 'compute-config',
     title: 'Configure sandboxes',
+  },
+  {
+    id: 'environment-explainer',
+    title: 'Roomote Environments',
   },
   {
     id: 'repo-selection',

@@ -28,11 +28,7 @@ const COLOR_THEME_OPTIONS: ReadonlyArray<{
   { label: 'Auto', value: 'system' },
 ];
 
-export function UserPreferencesSection({
-  communicationsFastModeDefaultAvailable = false,
-}: {
-  communicationsFastModeDefaultAvailable?: boolean;
-}) {
+export function UserPreferencesSection() {
   const {
     colorTheme,
     isLoading: isThemeLoading,
@@ -57,7 +53,6 @@ export function UserPreferencesSection({
     isUpdating: isCommunicationsFastModeDefaultUpdating,
     setPreferences,
   } = usePersonalPreferences({
-    enabled: communicationsFastModeDefaultAvailable,
     errorMessage: 'Failed to update the communications fast mode default.',
   });
   const isThemeDisabled = isThemeLoading || isThemeUpdating;
@@ -128,29 +123,27 @@ export function UserPreferencesSection({
           </div>
         </div>
 
-        {communicationsFastModeDefaultAvailable ? (
-          <div className="flex gap-3">
-            <Switch
-              aria-label="Toggle communications fast mode default"
-              checked={preferences.communicationsFastModeDefault}
-              disabled={
-                isCommunicationsFastModeDefaultLoading ||
-                isCommunicationsFastModeDefaultUpdating
-              }
-              onCheckedChange={(enabled) =>
-                setPreferences({ communicationsFastModeDefault: enabled })
-              }
-            />
-            <div className="space-y-1">
-              <p className="text-sm font-semibold text-foreground">
-                Default messages to fast mode
-              </p>
-              <p className="text-sm text-foreground">
-                Use fast mode by default for supported communications messages.
-              </p>
-            </div>
+        <div className="flex gap-3">
+          <Switch
+            aria-label="Toggle fast response mode"
+            checked={preferences.communicationsFastModeDefault}
+            disabled={
+              isCommunicationsFastModeDefaultLoading ||
+              isCommunicationsFastModeDefaultUpdating
+            }
+            onCheckedChange={(enabled) =>
+              setPreferences({ communicationsFastModeDefault: enabled })
+            }
+          />
+          <div className="space-y-1">
+            <p className="text-sm font-semibold text-foreground">
+              Fast response mode
+            </p>
+            <p className="text-sm text-foreground">
+              Respond to prompts quickly, only spinning up sandboxes if needed
+            </p>
           </div>
-        ) : null}
+        </div>
       </div>
     </Section>
   );

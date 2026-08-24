@@ -111,6 +111,7 @@ vi.mock('@/components/system', () => ({
     </button>
   ),
   Check: (props: SVGProps<SVGSVGElement>) => <svg {...props} />,
+  Lock: (props: SVGProps<SVGSVGElement>) => <svg {...props} />,
   Input: ({
     secret: _secret,
     ...props
@@ -368,7 +369,7 @@ describe('StepInferenceProvider configured API key display', () => {
     expect(screen.getByRole('button', { name: /continue/i })).toBeDisabled();
     expect(
       screen.getByText(
-        'Popular choices are ChatGPT subscriptions and OpenRouter.',
+        /popular choices are chatgpt subscriptions and openrouter/i,
       ),
     ).toBeInTheDocument();
 

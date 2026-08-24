@@ -2241,6 +2241,37 @@ export const pullRequestFacts = pgTable(
     // has, and must not erase what the list sync stored.
     body: text('body'),
     labels: jsonb('labels').$type<string[]>(),
+    // Per-PR enrichment that list payloads cannot carry (one to three extra
+    // provider requests each): the files touched and who reviewed it. Filled
+    // by a budgeted pass; null means not enriched yet. `enrichedForUpdatedAt`
+    // is the remote update time the enrichment reflects, so a PR that
+    // changed since is picked up again; `enrichmentAttemptedAt` spaces out
+    // retries after a failed read.
+    changedFiles: jsonb('changed_files').$type<string[]>(),
+    // How many files the enrichment READ. A lower bound rather than the
+    // total when `filesCapped` is set (the provider listing hit the fetch
+    // cap), which the page discloses instead of implying completeness.
+    changedFileCount: integer('changed_file_count'),
+    filesCapped: boolean('files_capped'),
+    reviewsCapped: boolean('reviews_capped'),
+    additions: integer('additions'),
+    deletions: integer('deletions'),
+    reviews: jsonb('reviews').$type<
+      Array<{
+        login: string | null;
+        state:
+          | 'approved'
+          | 'changes_requested'
+          | 'commented'
+          | 'dismissed'
+          | 'pending';
+      }>
+    >(),
+    enrichedAt: timestamp('enriched_at'),
+    enrichedForUpdatedAt: timestamp('enriched_for_updated_at'),
+    // Set only when a read FAILED, so the retry hold cannot park a row whose
+    // remote update time moved during a successful pass.
+    enrichmentFailedAt: timestamp('enrichment_failed_at'),
     createdAtRemote: timestamp('created_at_remote').notNull(),
     updatedAtRemote: timestamp('updated_at_remote').notNull(),
     closedAtRemote: timestamp('closed_at_remote'),
@@ -2840,6 +2871,40 @@ export const fastAgentConversations = pgTable(
 );
 
 /**
+ * fast_agent_pr_feedback_deliveries
+ *
+ * Durable conversation-scoped claims for PR feedback presented by Fast.
+ * Task-level PR event deliveries intentionally fan out to every linked task;
+ * this table prevents those projections from posting the same review result
+ * more than once to a shared Fast conversation.
+ */
+export const fastAgentPrFeedbackDeliveries = pgTable(
+  'fast_agent_pr_feedback_deliveries',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    conversationId: uuid('conversation_id')
+      .notNull()
+      .references(() => fastAgentConversations.id, { onDelete: 'cascade' }),
+    feedbackId: text('feedback_id').notNull(),
+    taskId: text('task_id').references(() => tasks.id, {
+      onDelete: 'set null',
+    }),
+    leaseToken: uuid('lease_token'),
+    leaseExpiresAt: timestamp('lease_expires_at'),
+    deliveredAt: timestamp('delivered_at'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('fast_agent_pr_feedback_deliveries_identity_unique').on(
+      table.conversationId,
+      table.feedbackId,
+    ),
+    index('fast_agent_pr_feedback_deliveries_task_idx').on(table.taskId),
+  ],
+);
+
+/**
  * N-1 compatibility aliases for legacy Fast session UUIDs. Multiple legacy
  * rows can collapse to one provider-neutral identity when a reply destination
  * moved before this migration. Keep every UUID addressable while the legacy
@@ -2872,6 +2937,21 @@ export const fastAgentConversationsRelations = relations(
       references: [users.id],
     }),
     aliases: many(fastAgentConversationAliases),
+    prFeedbackDeliveries: many(fastAgentPrFeedbackDeliveries),
+  }),
+);
+
+export const fastAgentPrFeedbackDeliveriesRelations = relations(
+  fastAgentPrFeedbackDeliveries,
+  ({ one }) => ({
+    conversation: one(fastAgentConversations, {
+      fields: [fastAgentPrFeedbackDeliveries.conversationId],
+      references: [fastAgentConversations.id],
+    }),
+    task: one(tasks, {
+      fields: [fastAgentPrFeedbackDeliveries.taskId],
+      references: [tasks.id],
+    }),
   }),
 );
 

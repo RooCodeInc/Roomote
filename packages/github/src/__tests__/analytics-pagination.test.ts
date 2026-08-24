@@ -49,6 +49,30 @@ describe('listRepositoryPullRequestsForAnalytics', () => {
     });
   });
 
+  it('distinguishes omitted labels from an explicit empty label list', async () => {
+    const list = vi.fn().mockResolvedValueOnce({
+      data: [
+        buildPullRequest(1, '2026-03-16T12:00:00Z'),
+        {
+          ...buildPullRequest(2, '2026-03-16T12:00:00Z'),
+          labels: [],
+        },
+      ],
+    });
+    const octokit = {
+      rest: { pulls: { list } },
+    } as unknown as Pick<import('@octokit/rest').Octokit, 'rest'>;
+
+    const results = await listRepositoryPullRequestsForAnalytics({
+      fullName: 'owner/repo',
+      octokit,
+      maxPages: 1,
+      perPage: 10,
+    });
+
+    expect(results.map((result) => result.labels)).toEqual([null, []]);
+  });
+
   it('caps all-time pagination by max pages', async () => {
     const list = vi
       .fn()

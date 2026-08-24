@@ -271,20 +271,43 @@ describe('resolveOpenCodeSmallModel', () => {
     mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
       R_MODEL: 'openrouter/openai/gpt-5.4',
     });
-    sessionPromptMock.mockResolvedValue({
-      data: {
-        info: {},
-        parts: [{ type: 'text', text: 'native tool turn complete' }],
-      },
-      error: undefined,
+    let markSubagentReady!: () => void;
+    const subagentReady = new Promise<void>((resolve) => {
+      markSubagentReady = resolve;
+    });
+    eventSubscribeMock.mockResolvedValue({
+      stream: (async function* () {
+        yield {
+          type: 'session.created',
+          properties: {
+            sessionID: 'subagent-session-1',
+            info: {
+              id: 'subagent-session-1',
+              parentID: 'session-1',
+            },
+          },
+        };
+      })(),
+    });
+    sessionPromptMock.mockImplementation(async () => {
+      await subagentReady;
+      return {
+        data: {
+          info: {},
+          parts: [{ type: 'text', text: 'native tool turn complete' }],
+        },
+        error: undefined,
+      };
     });
     const {
+      FAST_AGENT_SESSION_PERMISSIONS,
       generateTrackedNonTaskTextInOpenCodeSession,
       NON_TASK_INFERENCE_SURFACES,
     } = await import('../non-task-provider-usage.js');
     const onSessionReady = vi.fn();
     const onModelResolved = vi.fn();
     const onPromptStarted = vi.fn();
+    const onSubagentSessionReady = vi.fn(() => markSubagentReady());
     const session: { id?: string } = {};
 
     await expect(
@@ -308,6 +331,9 @@ describe('resolveOpenCodeSmallModel', () => {
           onModelResolved,
           onPromptStarted,
           onSessionReady,
+          onSubagentSessionReady,
+          permission: FAST_AGENT_SESSION_PERMISSIONS,
+          promptOnlySubagents: true,
         },
       ),
     ).resolves.toBe('native tool turn complete');
@@ -316,6 +342,7 @@ describe('resolveOpenCodeSmallModel', () => {
     expect(onModelResolved).toHaveBeenCalledWith('openrouter/openai/gpt-5.4');
     expect(onPromptStarted).toHaveBeenCalledOnce();
     expect(onSessionReady).toHaveBeenCalledWith('session-1');
+    expect(onSubagentSessionReady).toHaveBeenCalledWith('subagent-session-1');
     expect(onModelResolved.mock.invocationCallOrder[0]!).toBeLessThan(
       onPromptStarted.mock.invocationCallOrder[0]!,
     );
@@ -330,6 +357,12 @@ describe('resolveOpenCodeSmallModel', () => {
       ROOMOTE_FAST_TOOL_BRIDGE_URL: 'http://127.0.0.1:4321/tool',
       ROOMOTE_FAST_TOOL_BRIDGE_TOKEN: 'bridge-token',
     });
+    expect(sessionCreateMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        permission: FAST_AGENT_SESSION_PERMISSIONS,
+      }),
+      expect.any(Object),
+    );
     expect(sessionPromptMock).toHaveBeenCalledWith(
       expect.objectContaining({
         directory: '/tmp/roomote-fast-native-test',
@@ -1151,7 +1184,7 @@ describe('resolveOpenCodeSmallModel', () => {
           name: 'ContentFilterError',
           data: { message: 'The response was blocked' },
         },
-        'provider_error',
+        'content_filter',
       ],
       [
         {
@@ -1163,6 +1196,34 @@ describe('resolveOpenCodeSmallModel', () => {
     ] as const) {
       expect(classifyNonTaskInferenceError(providerError)).toMatchObject({
         reason: expectedReason,
+        retryable: false,
+      });
+    }
+  });
+
+  it('recognizes content filter errors across provider SDK shapes', async () => {
+    const { classifyNonTaskInferenceError } =
+      await import('../non-task-provider-usage.js');
+
+    for (const providerError of [
+      {
+        type: 'ContentFilterError',
+        message: 'The response was blocked',
+      },
+      {
+        name: 'APIError',
+        data: {
+          message: "The response was blocked by the provider's content filter",
+        },
+      },
+      new Error(
+        "ContentFilterError: The response was blocked by the provider's content filter",
+      ),
+    ]) {
+      expect(classifyNonTaskInferenceError(providerError)).toEqual({
+        message:
+          'The inference provider blocked the response with its content filter.',
+        reason: 'content_filter',
         retryable: false,
       });
     }

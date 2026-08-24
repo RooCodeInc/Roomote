@@ -781,6 +781,25 @@ describe('preparePrReviewNotificationDelivery', () => {
     expect(mockGenerateObject).not.toHaveBeenCalled();
   });
 
+  it('drops a review summary for an older PR head before triage', async () => {
+    await expect(
+      preparePrReviewNotificationDelivery({
+        taskRun,
+        request,
+        events: [
+          {
+            kind: 'review_summary',
+            authorLogin: 'roomote[bot]',
+            roomoteAuthored: true,
+            reviewHeadSha: 'older-head',
+            summary: 'One issue needs attention.',
+          },
+        ],
+      }),
+    ).resolves.toEqual({ post: false, reason: 'not_worth_notifying' });
+    expect(mockGenerateObject).not.toHaveBeenCalled();
+  });
+
   it.each([
     { resolved: true, outdated: false },
     { resolved: false, outdated: true },
