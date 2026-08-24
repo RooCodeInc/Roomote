@@ -1051,6 +1051,7 @@ describe('launchDiscordTask', () => {
         workspaceDisplayName: 'Acme',
       },
       forceNewThread: true,
+      model: 'anthropic/claude-sonnet-5',
       fastAgentSessionId: '11111111-1111-4111-8111-111111111111',
       fastAgentParent: {
         sessionId: '11111111-1111-4111-8111-111111111111',
@@ -1071,6 +1072,9 @@ describe('launchDiscordTask', () => {
         task: expect.objectContaining({
           payload: expect.objectContaining({
             communicationThreadId: 'new-thread',
+            harnessModelOverrides: {
+              'opencode-server': 'anthropic/claude-sonnet-5',
+            },
             communicationContextInherited: true,
             fastAgentSessionId: '11111111-1111-4111-8111-111111111111',
             fastAgentParent: {

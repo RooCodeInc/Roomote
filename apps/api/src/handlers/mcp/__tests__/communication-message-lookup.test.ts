@@ -145,6 +145,30 @@ describe('lookupCommunicationMessageContext', () => {
     });
   });
 
+  it('uses an explicit Slack provider for a raw authorized channel id', async () => {
+    lookupSlackThreadMock.mockResolvedValueOnce({
+      channelId: 'C123',
+      requestedMessageTs: '1710000000.000100',
+      threadTs: '1710000000.000000',
+      matchedMessageIndex: 0,
+      messageCount: 0,
+      messages: [],
+    });
+
+    await lookupCommunicationMessageContext({
+      actingUserId: 'user-1',
+      channel: 'C123',
+      messageId: '1710000000.000100',
+      provider: 'slack',
+    });
+
+    expect(lookupSlackThreadMock).toHaveBeenCalledWith({
+      actingSlackMembershipUserId: 'user-1',
+      channel: 'C123',
+      messageTs: '1710000000.000100',
+    });
+  });
+
   it('does not guess a provider from a raw id when the task has no channel', async () => {
     await expect(
       lookupCommunicationMessageContext({
@@ -201,6 +225,25 @@ describe('lookupCommunicationChannelMessages', () => {
     expect(lookupSlackChannelMessagesMock).toHaveBeenCalledWith({
       channel: 'C123',
       taskRun: { ...taskRun, slackThreadTs: null },
+    });
+  });
+
+  it('uses an explicit Discord provider for a raw authorized channel id', async () => {
+    lookupDiscordChannelMessagesMock.mockResolvedValueOnce({
+      channelId: '456',
+      messageCount: 0,
+      messages: [],
+    });
+
+    await lookupCommunicationChannelMessages({
+      actingUserId: 'user-1',
+      channel: '456',
+      provider: 'discord',
+    });
+
+    expect(lookupDiscordChannelMessagesMock).toHaveBeenCalledWith({
+      actingDiscordMembershipUserId: 'user-1',
+      channel: '456',
     });
   });
 

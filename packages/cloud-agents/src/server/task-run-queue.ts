@@ -2472,6 +2472,17 @@ function inheritSnapshotResumeCommunicationContext(
   ) {
     payload.communicationContextInherited = true;
   }
+
+  if (
+    sourcePayload &&
+    typeof sourcePayload === 'object' &&
+    !Array.isArray(sourcePayload) &&
+    (sourcePayload as Record<string, unknown>).liveTaskStream === true
+  ) {
+    // The card in the Slack thread belongs to the task; every resumed run
+    // must keep updating it.
+    payload.liveTaskStream = true;
+  }
 }
 
 async function enqueueSnapshotResume(

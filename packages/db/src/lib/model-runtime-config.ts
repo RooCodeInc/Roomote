@@ -3,7 +3,6 @@ import {
   applyImplicitLiteLlmModelPrefix,
   CHATGPT_FAST_MODE_ENV_VAR_NAME,
   CHATGPT_OPENCODE_PROVIDER_ID,
-  DEFAULT_MODEL_ROLE_REASONING_EFFORTS,
   DISABLED_MODEL_PROVIDER_ENV_VAR_NAMES,
   getDefaultTaskModelId,
   getEnabledTaskModels,
@@ -19,8 +18,11 @@ import {
   normalizeOptionalReasoningEffort,
   parseModelProviderEnvKeys,
   resolveSetupModelProviderIdFromModel,
+  TASK_MODEL_ROLE_DESCRIPTORS,
+  TASK_MODEL_ROLES,
   TASK_MODEL_CONTEXT_WINDOWS_ENV_VAR_NAME,
   XAI_OPENCODE_PROVIDER_ID,
+  type TaskModelRole,
   type TaskModelOption,
 } from '@roomote/types';
 
@@ -311,14 +313,14 @@ async function resolveModelRuntimeEnv(
     loadPersistedRuntimeModelConfig(executor),
   ]);
   const persistedRuntimeModelConfig = runtimeModelConfig;
-  const runtimeOverrideModelConfig = normalizeDeploymentModelConfig({
-    roomoteModel: runtimeEnv.R_MODEL,
-    roomoteSmallModel: runtimeEnv.R_SMALL_MODEL,
-    roomoteVisionModel: runtimeEnv.R_VISION_MODEL,
-    roomoteCodeReviewModel: runtimeEnv.R_CODE_REVIEW_MODEL,
-    roomoteExploreModel: runtimeEnv.R_EXPLORE_MODEL,
-    roomotePlanningModel: runtimeEnv.R_PLANNING_MODEL,
-  });
+  const runtimeOverrideModelConfig = normalizeDeploymentModelConfig(
+    Object.fromEntries(
+      TASK_MODEL_ROLES.map((role) => {
+        const descriptor = TASK_MODEL_ROLE_DESCRIPTORS[role];
+        return [descriptor.modelConfigKey, runtimeEnv[descriptor.modelEnvVar]];
+      }),
+    ),
+  );
   // Bare R_MODEL values are valid LiteLLM route names when a LiteLLM endpoint
   // is configured; rewrite them to OpenCode's litellm/<name> form before key
   // resolution so provider credentials and sandbox validation stay aligned.
@@ -330,34 +332,20 @@ async function resolveModelRuntimeEnv(
     modelId
       ? applyImplicitLiteLlmModelPrefix(modelId, isLiteLlmConfigured)
       : undefined;
-  const resolvedRoomoteModel = withLiteLlmPrefix(
-    runtimeOverrideModelConfig.roomoteModel ??
-      normalizeConfiguredValue(persistedRuntimeModelConfig.roomoteModel),
-  );
-  const resolvedRoomoteSmallModel = withLiteLlmPrefix(
-    runtimeOverrideModelConfig.roomoteSmallModel ??
-      normalizeConfiguredValue(persistedRuntimeModelConfig.roomoteSmallModel),
-  );
-  const resolvedRoomoteVisionModel = withLiteLlmPrefix(
-    runtimeOverrideModelConfig.roomoteVisionModel ??
-      normalizeConfiguredValue(persistedRuntimeModelConfig.roomoteVisionModel),
-  );
-  const resolvedRoomoteCodeReviewModel = withLiteLlmPrefix(
-    runtimeOverrideModelConfig.roomoteCodeReviewModel ??
-      normalizeConfiguredValue(
-        persistedRuntimeModelConfig.roomoteCodeReviewModel,
-      ),
-  );
-  const resolvedRoomoteExploreModel = withLiteLlmPrefix(
-    runtimeOverrideModelConfig.roomoteExploreModel ??
-      normalizeConfiguredValue(persistedRuntimeModelConfig.roomoteExploreModel),
-  );
-  const resolvedRoomotePlanningModel = withLiteLlmPrefix(
-    runtimeOverrideModelConfig.roomotePlanningModel ??
-      normalizeConfiguredValue(
-        persistedRuntimeModelConfig.roomotePlanningModel,
-      ),
-  );
+  const resolvedModels = Object.fromEntries(
+    TASK_MODEL_ROLES.map((role) => {
+      const descriptor = TASK_MODEL_ROLE_DESCRIPTORS[role];
+      return [
+        role,
+        withLiteLlmPrefix(
+          runtimeOverrideModelConfig[descriptor.modelConfigKey] ??
+            normalizeConfiguredValue(
+              persistedRuntimeModelConfig[descriptor.modelConfigKey],
+            ),
+        ),
+      ];
+    }),
+  ) as Record<TaskModelRole, string | undefined>;
   // Roomote applies per-role reasoning defaults when no explicit level is
   // configured, but only for models that are not known to lack configurable
   // reasoning support (unknown support keeps the default, matching the UI).
@@ -372,67 +360,34 @@ async function resolveModelRuntimeEnv(
 
     return catalogModel?.metadata?.supportsReasoning !== false;
   };
-  const resolvedRoomoteModelReasoningEffort =
-    normalizeConfiguredReasoningEffort(runtimeEnv.R_MODEL_REASONING_EFFORT) ??
-    persistedRuntimeModelConfig.roomoteModelReasoningEffort ??
-    (modelSupportsReasoning(resolvedRoomoteModel)
-      ? DEFAULT_MODEL_ROLE_REASONING_EFFORTS.coding
-      : undefined);
-  const resolvedRoomoteSmallModelReasoningEffort =
-    normalizeConfiguredReasoningEffort(
-      runtimeEnv.R_SMALL_MODEL_REASONING_EFFORT,
-    ) ??
-    persistedRuntimeModelConfig.roomoteSmallModelReasoningEffort ??
-    (modelSupportsReasoning(resolvedRoomoteSmallModel ?? resolvedRoomoteModel)
-      ? DEFAULT_MODEL_ROLE_REASONING_EFFORTS.helper
-      : undefined);
-  const resolvedRoomoteVisionModelReasoningEffort =
-    normalizeConfiguredReasoningEffort(
-      runtimeEnv.R_VISION_MODEL_REASONING_EFFORT,
-    ) ??
-    persistedRuntimeModelConfig.roomoteVisionModelReasoningEffort ??
-    (resolvedRoomoteVisionModel &&
-    modelSupportsReasoning(resolvedRoomoteVisionModel)
-      ? DEFAULT_MODEL_ROLE_REASONING_EFFORTS.vision
-      : undefined);
-  const resolvedRoomoteCodeReviewModelReasoningEffort =
-    normalizeConfiguredReasoningEffort(
-      runtimeEnv.R_CODE_REVIEW_MODEL_REASONING_EFFORT,
-    ) ??
-    persistedRuntimeModelConfig.roomoteCodeReviewModelReasoningEffort ??
-    (modelSupportsReasoning(
-      resolvedRoomoteCodeReviewModel ?? resolvedRoomoteModel,
-    )
-      ? DEFAULT_MODEL_ROLE_REASONING_EFFORTS.codeReview
-      : undefined);
-  const resolvedRoomoteExploreModelReasoningEffort =
-    normalizeConfiguredReasoningEffort(
-      runtimeEnv.R_EXPLORE_MODEL_REASONING_EFFORT,
-    ) ??
-    persistedRuntimeModelConfig.roomoteExploreModelReasoningEffort ??
-    (modelSupportsReasoning(resolvedRoomoteExploreModel ?? resolvedRoomoteModel)
-      ? DEFAULT_MODEL_ROLE_REASONING_EFFORTS.explore
-      : undefined);
-  const resolvedRoomotePlanningModelReasoningEffort =
-    normalizeConfiguredReasoningEffort(
-      runtimeEnv.R_PLANNING_MODEL_REASONING_EFFORT,
-    ) ??
-    persistedRuntimeModelConfig.roomotePlanningModelReasoningEffort ??
-    (modelSupportsReasoning(
-      resolvedRoomotePlanningModel ?? resolvedRoomoteModel,
-    )
-      ? DEFAULT_MODEL_ROLE_REASONING_EFFORTS.planning
-      : undefined);
+  const resolvedReasoningEfforts = Object.fromEntries(
+    TASK_MODEL_ROLES.map((role) => {
+      const descriptor = TASK_MODEL_ROLE_DESCRIPTORS[role];
+      const reasoningModel =
+        descriptor.reasoningModelFallback === 'coding'
+          ? (resolvedModels[role] ?? resolvedModels.coding)
+          : resolvedModels[role];
+
+      return [
+        role,
+        normalizeConfiguredReasoningEffort(
+          runtimeEnv[descriptor.reasoningEnvVar],
+        ) ??
+          persistedRuntimeModelConfig[descriptor.reasoningConfigKey] ??
+          (modelSupportsReasoning(reasoningModel)
+            ? descriptor.defaultReasoningEffort
+            : undefined),
+      ];
+    }),
+  ) as Record<TaskModelRole, string | undefined>;
   const configuredRoomoteModelEnvKeys =
     normalizeConfiguredValue(runtimeEnv.R_MODEL_ENV_KEYS) ??
     normalizeConfiguredValue(persistedEnvVars.R_MODEL_ENV_KEYS);
   const resolvedRoleModels = [
-    resolvedRoomoteModel,
-    resolvedRoomoteSmallModel,
-    resolvedRoomoteVisionModel,
-    resolvedRoomoteCodeReviewModel,
-    resolvedRoomoteExploreModel,
-    resolvedRoomotePlanningModel,
+    ...TASK_MODEL_ROLES.filter(
+      (role) =>
+        !inferenceGateway || TASK_MODEL_ROLE_DESCRIPTORS[role].includeInSandbox,
+    ).map((role) => resolvedModels[role]),
   ];
   const providerKeyNames = resolveProviderKeyNames({
     runtimeRoomoteModelEnvKeys: configuredRoomoteModelEnvKeys,
@@ -578,45 +533,26 @@ async function resolveModelRuntimeEnv(
       ? [...gatewayServedKeyNames, 'XAI_API_KEY']
       : gatewayServedKeyNames;
 
+  const resolvedRoleEnv = Object.fromEntries(
+    TASK_MODEL_ROLES.flatMap((role) => {
+      const descriptor = TASK_MODEL_ROLE_DESCRIPTORS[role];
+      if (inferenceGateway && !descriptor.includeInSandbox) {
+        return [];
+      }
+
+      return [
+        ...(resolvedModels[role]
+          ? [[descriptor.modelEnvVar, resolvedModels[role]]]
+          : []),
+        ...(resolvedReasoningEfforts[role]
+          ? [[descriptor.reasoningEnvVar, resolvedReasoningEfforts[role]]]
+          : []),
+      ];
+    }),
+  );
+
   return {
-    ...(resolvedRoomoteModel && { R_MODEL: resolvedRoomoteModel }),
-    ...(resolvedRoomoteSmallModel && {
-      R_SMALL_MODEL: resolvedRoomoteSmallModel,
-    }),
-    ...(resolvedRoomoteVisionModel && {
-      R_VISION_MODEL: resolvedRoomoteVisionModel,
-    }),
-    ...(resolvedRoomoteCodeReviewModel && {
-      R_CODE_REVIEW_MODEL: resolvedRoomoteCodeReviewModel,
-    }),
-    ...(resolvedRoomoteExploreModel && {
-      R_EXPLORE_MODEL: resolvedRoomoteExploreModel,
-    }),
-    ...(resolvedRoomotePlanningModel && {
-      R_PLANNING_MODEL: resolvedRoomotePlanningModel,
-    }),
-    ...(resolvedRoomoteModelReasoningEffort && {
-      R_MODEL_REASONING_EFFORT: resolvedRoomoteModelReasoningEffort,
-    }),
-    ...(resolvedRoomoteSmallModelReasoningEffort && {
-      R_SMALL_MODEL_REASONING_EFFORT: resolvedRoomoteSmallModelReasoningEffort,
-    }),
-    ...(resolvedRoomoteVisionModelReasoningEffort && {
-      R_VISION_MODEL_REASONING_EFFORT:
-        resolvedRoomoteVisionModelReasoningEffort,
-    }),
-    ...(resolvedRoomoteCodeReviewModelReasoningEffort && {
-      R_CODE_REVIEW_MODEL_REASONING_EFFORT:
-        resolvedRoomoteCodeReviewModelReasoningEffort,
-    }),
-    ...(resolvedRoomoteExploreModelReasoningEffort && {
-      R_EXPLORE_MODEL_REASONING_EFFORT:
-        resolvedRoomoteExploreModelReasoningEffort,
-    }),
-    ...(resolvedRoomotePlanningModelReasoningEffort && {
-      R_PLANNING_MODEL_REASONING_EFFORT:
-        resolvedRoomotePlanningModelReasoningEffort,
-    }),
+    ...resolvedRoleEnv,
     ...(providerKeyNames.length > 0 && {
       R_MODEL_ENV_KEYS: providerKeyNames.join(','),
     }),

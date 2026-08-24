@@ -2,6 +2,7 @@ import { PRODUCT_NAME } from '@roomote/types';
 import {
   acquireFastAgentTurnLock,
   answerFastAgentQuestion,
+  hasFastAgentSession,
   type FastAgentActiveTask,
   type LaunchFastAgentTask,
 } from '@roomote/cloud-agents/server';
@@ -14,6 +15,7 @@ import { stripLeadingSlackProductMention } from '@roomote/cloud-agents';
 
 import { LEADING_FAST_COMMAND_MENTION_PATTERN } from '../constants.js';
 import { postSlackThreadMarkdownMessage } from '../helpers/thread-posting.js';
+import { createFastAgentChatContextAdapter } from '../../fast-agent-chat-context.js';
 
 export function stripLeadingFastCommandMention(text: string): string {
   return text.replace(LEADING_FAST_COMMAND_MENTION_PATTERN, '').trimStart();
@@ -57,8 +59,10 @@ export async function processFastAgentMessage(params: {
   usageText?: string;
   continuation?: boolean;
   activeTasks?: FastAgentActiveTask[];
+  resolveActiveTasks?: () => Promise<FastAgentActiveTask[]>;
   launchTask: LaunchFastAgentTask;
   processingReactionName?: string;
+  isExistingConversation?: boolean;
 }): Promise<void> {
   const {
     event,
@@ -69,8 +73,10 @@ export async function processFastAgentMessage(params: {
     usageText = `Use \`!fast <question>\` after mentioning ${PRODUCT_NAME}.`,
     continuation = false,
     activeTasks = [],
+    resolveActiveTasks,
     launchTask,
     processingReactionName = 'eyes',
+    isExistingConversation = false,
   } = params;
   const threadId = event.thread_ts || event.ts;
   const conversation = {
@@ -103,11 +109,16 @@ export async function processFastAgentMessage(params: {
   let didAddProcessingReaction = false;
 
   try {
-    didAddProcessingReaction = await slack.addReaction({
-      channel: event.channel,
-      timestamp: event.ts,
-      name: processingReactionName,
-    });
+    // A false routing result can become stale while waiting for the turn lock.
+    const hasExistingConversation =
+      isExistingConversation || (await hasFastAgentSession(conversation));
+    if (!hasExistingConversation) {
+      didAddProcessingReaction = await slack.addReaction({
+        channel: event.channel,
+        timestamp: event.ts,
+        name: processingReactionName,
+      });
+    }
 
     if (!question) {
       await postSlackThreadMarkdownMessage({
@@ -166,6 +177,9 @@ export async function processFastAgentMessage(params: {
         bot_id: message.bot_id,
       }));
 
+    const resolvedActiveTasks = resolveActiveTasks
+      ? await resolveActiveTasks()
+      : activeTasks;
     const responseText = await answerFastAgentQuestion({
       question,
       images,
@@ -181,8 +195,12 @@ export async function processFastAgentMessage(params: {
         currentMessage?.user === event.user
           ? currentMessage.username
           : undefined,
-      activeTasks,
+      activeTasks: resolvedActiveTasks,
       adapter: {
+        ...createFastAgentChatContextAdapter({
+          actingUserId: userId,
+          conversation,
+        }),
         launchTask,
         postReply: async ({ message, kickoff }) => {
           const posted = await postSlackThreadMarkdownMessage({
@@ -212,6 +230,24 @@ export async function processFastAgentMessage(params: {
           // message was deleted); treat it as delivered so the turn is not
           // aborted mid-flight.
           didSendVisibleResponse = true;
+          return typeof posted === 'object'
+            ? { messageId: posted.messageId }
+            : undefined;
+        },
+        replaceReply: async ({ messageId }, { message }) => {
+          const updated = await slack.updateMessage({
+            channel: event.channel,
+            ts: messageId,
+            message: {
+              text: message,
+              blocks: [{ type: 'markdown', text: message }],
+            },
+          });
+          if (!updated) {
+            throw new Error('Slack did not update the Fast parent reply.');
+          }
+          didSendVisibleResponse = true;
+          return { messageId };
         },
         postReaction: async ({ name, purpose, messageId }) => {
           if (

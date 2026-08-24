@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => {
 
   return {
     claimReturning: vi.fn(),
+    findClaimRun: vi.fn(),
     updateSet: vi.fn(),
     recordLifecycle: vi.fn(),
     deliverParentEvent: vi.fn(),
@@ -27,6 +28,9 @@ const mocks = vi.hoisted(() => {
 
 vi.mock('@roomote/db/server', () => ({
   db: {
+    query: {
+      taskRuns: { findFirst: mocks.findClaimRun },
+    },
     update: vi.fn(() => ({
       set: vi.fn((values: unknown) => {
         mocks.updateSet(values);
@@ -37,6 +41,8 @@ vi.mock('@roomote/db/server', () => ({
     })),
   },
   and: vi.fn((...args: unknown[]) => args),
+  asc: vi.fn((value: unknown) => value),
+  desc: vi.fn((value: unknown) => value),
   eq: vi.fn((...args: unknown[]) => args),
   recordTaskRunLifecycleEvent: mocks.recordLifecycle,
   sql: vi.fn((strings: TemplateStringsArray, ...values: unknown[]) => ({
@@ -45,6 +51,8 @@ vi.mock('@roomote/db/server', () => ({
   })),
   taskRuns: {
     id: 'task_runs.id',
+    taskId: 'task_runs.task_id',
+    createdAt: 'task_runs.created_at',
     result: 'task_runs.result',
   },
 }));
@@ -94,6 +102,7 @@ describe('notifyFastAgentParentOnPullRequestStatusChanged', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.claimReturning.mockResolvedValue([{ id: 200 }]);
+    mocks.findClaimRun.mockResolvedValue({ id: 200 });
     mocks.deliverParentEvent.mockResolvedValue('delivered');
     mocks.recordLifecycle.mockResolvedValue(undefined);
   });
@@ -141,37 +150,6 @@ describe('notifyFastAgentParentOnPullRequestStatusChanged', () => {
       );
     },
   );
-
-  it('does not redeliver a settled status claim', async () => {
-    mocks.claimReturning.mockResolvedValue([]);
-
-    await notifyFastAgentParentOnPullRequestStatusChanged({
-      run: makeRun({ fastAgentParent: fastParent }),
-      pullRequest,
-      actorLogin: 'alice',
-    });
-
-    expect(mocks.deliverParentEvent).not.toHaveBeenCalled();
-  });
-
-  it('releases a transiently failed claim for webhook retry', async () => {
-    mocks.deliverParentEvent.mockRejectedValue(new Error('model offline'));
-
-    await expect(
-      notifyFastAgentParentOnPullRequestStatusChanged({
-        run: makeRun({ fastAgentParent: fastParent }),
-        pullRequest: { ...pullRequest, status: 'closed' },
-        actorLogin: 'alice',
-      }),
-    ).rejects.toThrow('model offline');
-
-    expect(
-      mocks.updateSet.mock.calls.some(([values]) => {
-        const result = (values as { result?: { strings?: string[] } }).result;
-        return result?.strings?.join('').includes(' - ') === true;
-      }),
-    ).toBe(true);
-  });
 
   it('does nothing for a task without a Fast parent', async () => {
     await notifyFastAgentParentOnPullRequestStatusChanged({

@@ -22,13 +22,11 @@ vi.mock('@roomote/env', () => ({
   Env: {
     TRPC_URL: null,
     R_APP_URL: 'http://localhost:3000',
-    R_COMMUNICATIONS_FAST_MODE_SETTING_ENABLED: true,
   },
 }));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
   ROUTING_AUTO_CONFIRM_TIMEOUT_MS: 0,
-  createFastAgentSlackTaskLauncher: vi.fn(() => vi.fn()),
 }));
 
 vi.mock('@roomote/cloud-agents', () => ({
@@ -44,6 +42,7 @@ vi.mock('../helpers/event-normalization.js', () => ({
 
 vi.mock('@roomote/slack', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@roomote/slack')>()),
+  createFastAgentSlackLiveTaskLauncher: vi.fn(() => vi.fn()),
   resolveSlackReactionNames: vi.fn().mockResolvedValue({
     ackEmoji: 'eyes',
     completionEmoji: 'white_check_mark',

@@ -772,7 +772,12 @@ describe('generateOpenCodeConfig provider support', () => {
     });
     const config = JSON.parse(result.configContent) as {
       agent: Record<string, { tools?: Record<string, boolean> }>;
+      mcp: Record<string, { timeout?: number }>;
     };
+
+    expect(config.mcp.roomote?.timeout).toBe(600_000);
+    expect(config.mcp.pylon?.timeout).toBeUndefined();
+    expect(config.mcp['custom-tools']?.timeout).toBeUndefined();
 
     expect(config.agent.visual?.tools).toMatchObject({
       'roomote_*': false,

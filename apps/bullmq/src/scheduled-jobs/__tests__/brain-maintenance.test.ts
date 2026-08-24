@@ -260,6 +260,42 @@ describe('brainMaintenanceJob', () => {
     );
   });
 
+  it('does not queue a second maintenance cycle on the same day', async () => {
+    // Synthesis failures are rethrown after the submission so they stay
+    // visible, and the scheduler retries the job; without the day marker
+    // each retry queued another full cycle over the whole corpus.
+    mockResolveProvider.mockResolvedValue(TEST_PROVIDER);
+    mockResolveConnection.mockImplementation(async (credential: string) => ({
+      baseUrl: 'http://gbrain.test',
+      token: `${credential}-token`,
+    }));
+    mockGetBrainSyncState.mockImplementation(
+      async (_db: unknown, collectorId: string) =>
+        collectorId === 'roomote-autopilot-cycle'
+          ? {
+              id: collectorId,
+              collectorId,
+              watermark: new Date('2026-08-17T07:00:00.000Z'),
+              backfillCursor: null,
+              backfillCompletedAt: null,
+              createdAt: new Date(),
+              updatedAt: new Date(),
+            }
+          : null,
+    );
+    const fetchSpy = mockDigestFetch([searchResponse()], [synthesisResponse()]);
+
+    await brainMaintenanceJob();
+
+    // Four searches and one synthesis; no submit_job.
+    expect(fetchSpy).toHaveBeenCalledTimes(5);
+    expect(mockUpsertBrainSyncState).not.toHaveBeenCalledWith(
+      expect.anything(),
+      'roomote-autopilot-cycle',
+      expect.anything(),
+    );
+  });
+
   it('fails the scheduler job when gbrain rejects the submission', async () => {
     mockResolveProvider.mockResolvedValue(TEST_PROVIDER);
     mockResolveConnection.mockResolvedValue({
@@ -268,12 +304,125 @@ describe('brainMaintenanceJob', () => {
     });
     mockDigestFetch(
       [searchResponse()],
-      [synthesisResponse(), new Response('{"error":"nope"}', { status: 500 })],
+      [synthesisResponse(), new Response('{"error":"nope"}', { status: 400 })],
     );
 
     await expect(brainMaintenanceJob()).rejects.toThrow(
-      'gbrain submit_job failed: 500',
+      'gbrain submit_job failed: 400',
     );
+    // A 4xx is a definitive refusal: the day was claimed before the
+    // submission and released after it, so the scheduler's retry can submit
+    // again.
+    const autopilotWrites = mockUpsertBrainSyncState.mock.calls
+      .filter((call) => call[1] === 'roomote-autopilot-cycle')
+      .map((call) => call[2]);
+    expect(autopilotWrites).toEqual([
+      { watermark: new Date('2026-08-17T07:00:00.000Z') },
+      { watermark: null },
+    ]);
+  });
+
+  it('keeps the claim on a 5xx, which can follow an accepted submission', async () => {
+    // A gateway can answer 5xx after gbrain already queued the job, so the
+    // claim must stand and the retry must not resubmit.
+    mockResolveProvider.mockResolvedValue(TEST_PROVIDER);
+    mockResolveConnection.mockResolvedValue({
+      baseUrl: 'http://gbrain.test',
+      token: 'maintenance-token',
+    });
+    mockDigestFetch(
+      [searchResponse()],
+      [synthesisResponse(), new Response('bad gateway', { status: 502 })],
+    );
+
+    await expect(brainMaintenanceJob()).rejects.toThrow(
+      'gbrain submit_job failed: 502',
+    );
+    const autopilotWrites = mockUpsertBrainSyncState.mock.calls
+      .filter((call) => call[1] === 'roomote-autopilot-cycle')
+      .map((call) => call[2]);
+    expect(autopilotWrites).toEqual([
+      { watermark: new Date('2026-08-17T07:00:00.000Z') },
+    ]);
+  });
+
+  it('releases the claim when gbrain answers with a tool error', async () => {
+    mockResolveProvider.mockResolvedValue(TEST_PROVIDER);
+    mockResolveConnection.mockResolvedValue({
+      baseUrl: 'http://gbrain.test',
+      token: 'maintenance-token',
+    });
+    mockDigestFetch(
+      [searchResponse()],
+      [
+        synthesisResponse(),
+        new Response(
+          '{"jsonrpc":"2.0","id":1,"result":{"isError":true,"content":[{"type":"text","text":"unknown job"}]}}',
+          { status: 200 },
+        ),
+      ],
+    );
+
+    await expect(brainMaintenanceJob()).rejects.toThrow(
+      'gbrain submit_job failed: 200',
+    );
+    const autopilotWrites = mockUpsertBrainSyncState.mock.calls
+      .filter((call) => call[1] === 'roomote-autopilot-cycle')
+      .map((call) => call[2]);
+    expect(autopilotWrites).toEqual([
+      { watermark: new Date('2026-08-17T07:00:00.000Z') },
+      { watermark: null },
+    ]);
+  });
+
+  it('keeps the claim when the submission fails in transport', async () => {
+    // No HTTP answer means gbrain may already have queued the job; releasing
+    // the claim would let the retry queue a second corpus-wide cycle.
+    mockResolveProvider.mockResolvedValue(TEST_PROVIDER);
+    mockResolveConnection.mockResolvedValue({
+      baseUrl: 'http://gbrain.test',
+      token: 'maintenance-token',
+    });
+    const fetchSpy = mockDigestFetch([searchResponse()], [synthesisResponse()]);
+    fetchSpy.mockRejectedValueOnce(new TypeError('fetch failed'));
+
+    await expect(brainMaintenanceJob()).rejects.toThrow('fetch failed');
+
+    const autopilotWrites = mockUpsertBrainSyncState.mock.calls
+      .filter((call) => call[1] === 'roomote-autopilot-cycle')
+      .map((call) => call[2]);
+    expect(autopilotWrites).toEqual([
+      { watermark: new Date('2026-08-17T07:00:00.000Z') },
+    ]);
+  });
+
+  it('claims the day before submitting the maintenance cycle', async () => {
+    // A crash between the submission and a marker written afterwards would
+    // let the retry queue a second corpus-wide cycle; the claim has to land
+    // first.
+    mockResolveProvider.mockResolvedValue(TEST_PROVIDER);
+    mockResolveConnection.mockResolvedValue({
+      baseUrl: 'http://gbrain.test',
+      token: 'maintenance-token',
+    });
+    const order: string[] = [];
+    mockUpsertBrainSyncState.mockImplementation(
+      async (_db: unknown, collectorId: string) => {
+        if (collectorId === 'roomote-autopilot-cycle') order.push('claim');
+      },
+    );
+    // Queued responses cover the searches and the synthesis; the submission
+    // falls through to the implementation so its ordering can be observed.
+    const fetchSpy = mockDigestFetch([searchResponse()], [synthesisResponse()]);
+    fetchSpy.mockImplementation(async (...args) => {
+      const body = String((args[1] as RequestInit | undefined)?.body ?? '');
+      if (body.includes('submit_job')) order.push('submit');
+      return submitResponse();
+    });
+
+    await brainMaintenanceJob();
+
+    expect(order).toEqual(['claim', 'submit']);
   });
 
   it('still submits maintenance when daily synthesis fails', async () => {
@@ -460,49 +609,85 @@ describe('runBrainDailyDigest', () => {
     expect(mockUpsertBrainSyncState).not.toHaveBeenCalled();
   });
 
-  it('rejects synthesis that cites a page outside the bounded evidence', async () => {
+  it('repairs a citation outside the bounded evidence with one corrective pass', async () => {
+    // The model cites a neighbour of the page it was given. Failing the job
+    // here used to cost a full scheduler retry (every search re-run and the
+    // maintenance cycle re-queued); one corrective call that names the
+    // violation is enough.
     mockGetBrainSyncState.mockResolvedValue(null);
-    mockDigestFetch(
+    const fetchSpy = mockDigestFetch(
       [searchResponse()],
       [
         synthesisResponse({
-          answer: 'An older item was important.',
+          answer: 'An older item was important [notion/older-page].',
           sources: ['notion/older-page'],
         }),
-      ],
-    );
-
-    await expect(
-      runBrainDailyDigest(
-        { baseUrl: 'http://gbrain.test', token: 'read-token' },
-        { baseUrl: 'http://gbrain.test', token: 'write-token' },
-        new Date('2026-08-16T07:00:00.000Z'),
-      ),
-    ).rejects.toThrow('outside its evidence window');
-    expect(mockPostToBrain).not.toHaveBeenCalled();
-    expect(mockUpsertBrainSyncState).not.toHaveBeenCalled();
-  });
-
-  it('rejects an out-of-window inline citation omitted from sources', async () => {
-    mockGetBrainSyncState.mockResolvedValue(null);
-    mockDigestFetch(
-      [searchResponse()],
-      [
         synthesisResponse({
-          answer:
-            'Current context [slack/general/2026-08-16], plus an older item [notion/older-page].',
+          answer: 'An older item was important [slack/general/2026-08-16].',
           sources: ['slack/general/2026-08-16'],
         }),
       ],
     );
 
+    await runBrainDailyDigest(
+      { baseUrl: 'http://gbrain.test', token: 'read-token' },
+      { baseUrl: 'http://gbrain.test', token: 'write-token' },
+      new Date('2026-08-16T07:00:00.000Z'),
+    );
+
+    const correction = JSON.parse(
+      String((fetchSpy.mock.calls[5]?.[1] as RequestInit).body),
+    ) as { messages: Array<{ content: string }> };
+    expect(correction.messages[1]?.content).toContain('<citation_correction>');
+    expect(correction.messages[1]?.content).toContain('notion/older-page');
+    expect(mockPostToBrain).toHaveBeenCalledWith(
+      expect.objectContaining({
+        content: expect.stringContaining('[[slack/general/2026-08-16]]'),
+      }),
+      expect.anything(),
+    );
+    expect(mockPostToBrain.mock.calls[0]?.[0].content).not.toContain(
+      'notion/older-page',
+    );
+  });
+
+  it('drops a citation the corrective pass still gets wrong and keeps the digest', async () => {
+    mockGetBrainSyncState.mockResolvedValue(null);
+    const strayed = synthesisResponse({
+      answer:
+        'Current context [slack/general/2026-08-16], plus an older item [notion/older-page].',
+      sources: ['slack/general/2026-08-16'],
+    });
+    mockDigestFetch([searchResponse()], [strayed, strayed.clone()]);
+
+    await runBrainDailyDigest(
+      { baseUrl: 'http://gbrain.test', token: 'read-token' },
+      { baseUrl: 'http://gbrain.test', token: 'write-token' },
+      new Date('2026-08-16T07:00:00.000Z'),
+    );
+
+    const content = mockPostToBrain.mock.calls[0]?.[0].content as string;
+    expect(content).toContain('plus an older item.');
+    expect(content).not.toContain('notion/older-page');
+    expect(content).toContain('[[slack/general/2026-08-16]]');
+    expect(mockUpsertBrainSyncState).toHaveBeenCalled();
+  });
+
+  it('fails only when no citation survives the corrective pass', async () => {
+    mockGetBrainSyncState.mockResolvedValue(null);
+    const uncitable = synthesisResponse({
+      answer: 'An older item was important.',
+      sources: ['notion/older-page'],
+    });
+    mockDigestFetch([searchResponse()], [uncitable, uncitable.clone()]);
+
     await expect(
       runBrainDailyDigest(
         { baseUrl: 'http://gbrain.test', token: 'read-token' },
         { baseUrl: 'http://gbrain.test', token: 'write-token' },
         new Date('2026-08-16T07:00:00.000Z'),
       ),
-    ).rejects.toThrow('outside its evidence window: notion/older-page');
+    ).rejects.toThrow('Brain daily digest returned no source citations');
     expect(mockPostToBrain).not.toHaveBeenCalled();
     expect(mockUpsertBrainSyncState).not.toHaveBeenCalled();
   });
@@ -822,14 +1007,14 @@ describe('runBrainWeeklySynthesis', () => {
   });
 
   it('rejects citations outside the current week evidence', async () => {
+    const outside = synthesisResponse({
+      answer: 'An older conclusion was important.',
+      sources: ['daily/digests/2026-08-10'],
+    });
     vi.spyOn(globalThis, 'fetch')
       .mockResolvedValueOnce(pageResponse({ slug: 'daily/digests/2026-08-17' }))
-      .mockResolvedValueOnce(
-        synthesisResponse({
-          answer: 'An older conclusion was important.',
-          sources: ['daily/digests/2026-08-10'],
-        }),
-      );
+      .mockResolvedValueOnce(outside)
+      .mockResolvedValueOnce(outside.clone());
 
     await expect(
       runBrainWeeklySynthesis(
@@ -842,8 +1027,42 @@ describe('runBrainWeeklySynthesis', () => {
         },
         new Date('2026-08-18T06:00:00.000Z'),
       ),
-    ).rejects.toThrow('outside its evidence window');
+    ).rejects.toThrow('Brain weekly synthesis returned no source citations');
     expect(mockPostToBrain).not.toHaveBeenCalled();
+  });
+
+  it('accepts a source cited inside one of the digests it was given', async () => {
+    // Digests are full of citations to the pages they drew on; a model that
+    // re-cites one is citing evidence it was handed, not inventing a page.
+    vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(
+        pageResponse({
+          slug: 'daily/digests/2026-08-17',
+          content:
+            '# Monday\n\nA blocker appeared [slack/general/2026-08-17].\n\n## Sources\n\n- [[slack/general/2026-08-17]]',
+        }),
+      )
+      .mockResolvedValueOnce(
+        synthesisResponse({
+          answer:
+            'The blocker persisted [daily/digests/2026-08-18] [slack/general/2026-08-17].',
+          sources: ['daily/digests/2026-08-18', 'slack/general/2026-08-17'],
+        }),
+      );
+
+    const page = await runBrainWeeklySynthesis(
+      { baseUrl: 'http://gbrain.test', token: 'read-token' },
+      { baseUrl: 'http://gbrain.test', token: 'write-token' },
+      {
+        slug: 'daily/digests/2026-08-18',
+        title: 'Daily digest — 2026-08-18',
+        content: '# Daily digest — 2026-08-18',
+      },
+      new Date('2026-08-18T06:00:00.000Z'),
+    );
+
+    expect(page?.content).toContain('[[slack/general/2026-08-17]]');
+    expect(mockPostToBrain).toHaveBeenCalledTimes(1);
   });
 
   it('does not synthesize when only the current daily digest exists', async () => {

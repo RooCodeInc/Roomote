@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { type NextRequest, NextResponse } from 'next/server';
 
 import {
+  and,
   db,
   mcpConnections,
   deploymentMcpEnablements,
@@ -29,6 +30,7 @@ import { authorize } from '@/lib/server';
 import { bootstrapWebRuntimeEnv } from '@/lib/server/bootstrap-runtime-env';
 import { getPublicAppUrl } from '@/lib/server/get-public-app-url';
 import { logger } from '@/lib/server/logger';
+import { captureIntegrationLifecycleEvent } from '@/lib/server/integration-telemetry';
 import {
   hydrateLinearMcpConnectionAfterOauth,
   LinearReplayIdentityMismatchError,
@@ -374,30 +376,55 @@ export async function GET(request: NextRequest) {
 
     // Custom servers carry their own enablement on the server row; only
     // catalog integrations write deploymentMcpEnablements.
+    let integrationBecameEnabled = false;
     if (requiresOrgAdmin && integration) {
       failureStage = 'deployment_enablement';
       const defaultDisabledTools =
         getMcpIntegrationDefaultDisabledTools(integration);
-      await db
-        .insert(deploymentMcpEnablements)
-        .values({
-          mcpId: integration.id,
+      const [reenabled] = await db
+        .update(deploymentMcpEnablements)
+        .set({
           enabled: true,
           enabledByUserId: userId,
-          ...(defaultDisabledTools.length > 0
-            ? {
-                disabledTools: [...defaultDisabledTools],
-              }
-            : {}),
+          updatedAt: new Date(),
         })
-        .onConflictDoUpdate({
-          target: deploymentMcpEnablements.mcpId,
-          set: {
-            enabled: true,
-            enabledByUserId: userId,
-            updatedAt: new Date(),
-          },
-        });
+        .where(
+          and(
+            eq(deploymentMcpEnablements.mcpId, integration.id),
+            eq(deploymentMcpEnablements.enabled, false),
+          ),
+        )
+        .returning({ mcpId: deploymentMcpEnablements.mcpId });
+      const [inserted] = reenabled
+        ? []
+        : await db
+            .insert(deploymentMcpEnablements)
+            .values({
+              mcpId: integration.id,
+              enabled: true,
+              enabledByUserId: userId,
+              ...(defaultDisabledTools.length > 0
+                ? {
+                    disabledTools: [...defaultDisabledTools],
+                  }
+                : {}),
+            })
+            .onConflictDoNothing({ target: deploymentMcpEnablements.mcpId })
+            .returning({ mcpId: deploymentMcpEnablements.mcpId });
+      integrationBecameEnabled = Boolean(reenabled || inserted);
+    }
+
+    captureIntegrationLifecycleEvent(
+      'integration_connected',
+      connection.mcpId,
+      userId,
+    );
+    if (integrationBecameEnabled && integration) {
+      captureIntegrationLifecycleEvent(
+        'integration_enabled',
+        integration.id,
+        userId,
+      );
     }
 
     return redirectToResult({ status: 'connected' });

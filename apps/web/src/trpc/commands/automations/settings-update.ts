@@ -145,9 +145,7 @@ function getAutomationActivations(
     },
     {
       automation: 'platform_issue_alerts',
-      enabled:
-        settings.platformIssueSlackChannelId !== null ||
-        settings.platformIssueDiscordChannelId !== null,
+      enabled: settings.platformIssueAlertsEnabled,
     },
   ];
 }
@@ -313,6 +311,11 @@ export async function updateBackgroundAgentSettingsCommand(
   assertAdmin(auth);
   const fieldErrors: BackgroundAgentFieldErrors = {};
   const existingSettings = await getBackgroundAgentSettingsForDeployment();
+  const platformIssueAlertsEnabled =
+    input.savingAutomation === 'platformIssueAlerts'
+      ? (input.platformIssueAlertsEnabled ??
+        existingSettings.platformIssueAlertsEnabled)
+      : existingSettings.platformIssueAlertsEnabled;
   const shouldUpdateCallRoomoteViaEmoji =
     input.savingAutomation === 'callRoomoteViaEmoji';
   const callRoomoteViaEmojiEnabled = shouldUpdateCallRoomoteViaEmoji
@@ -599,8 +602,6 @@ export async function updateBackgroundAgentSettingsCommand(
     destinationResults.ciFailureTriage.discord;
   const suggesterDiscordResult = destinationResults.suggester.discord;
   const announcerDiscordResult = destinationResults.announcer.discord;
-  const platformIssueDiscordResult =
-    destinationResults.platformIssueAlerts.discord;
 
   // Suggest Ideas may target Telegram (sticky topic) or Teams (primary
   // conversation) as one-of destinations alongside Slack/Discord channels.
@@ -1341,9 +1342,8 @@ export async function updateBackgroundAgentSettingsCommand(
 
     await upsertAutomation(tx, {
       key: 'platform_issue_alerts',
-      enabled:
-        platformIssueChannelResult.channelId != null ||
-        platformIssueDiscordResult.channelId != null,
+      enabled: platformIssueAlertsEnabled,
+      settings: { optedOut: !platformIssueAlertsEnabled },
       ...destinationUpsertFields('platformIssueAlerts'),
       updatedAt: now,
     });

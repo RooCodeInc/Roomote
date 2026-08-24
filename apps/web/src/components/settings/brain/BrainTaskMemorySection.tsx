@@ -65,7 +65,7 @@ export function BrainTaskMemorySection({
       action={
         <span className="text-sm text-muted-foreground">
           {taskMemories.lastProcessedAt
-            ? `Last recorded ${formatDistanceToNowCompact(
+            ? `Last processed ${formatDistanceToNowCompact(
                 taskMemories.lastProcessedAt,
                 { addSuffix: true },
               )}`
@@ -117,11 +117,11 @@ export function BrainTaskMemorySection({
         </div>
       ) : null}
 
-      {taskMemories.completedRunsWithoutEvent > 0 ? (
+      {taskMemories.historicalCompletedRunsWithoutEvent > 0 ? (
         <div className="flex flex-col items-start gap-3 rounded-lg border bg-background/50 p-3 text-sm sm:flex-row sm:items-center sm:justify-between">
           <span>
-            {formatNumber(taskMemories.completedRunsWithoutEvent)}
-            {taskMemories.completedRunsWithoutEvent >=
+            {formatNumber(taskMemories.historicalCompletedRunsWithoutEvent)}
+            {taskMemories.historicalCompletedRunsWithoutEvent >=
             MISSING_MEMORY_EVENT_COUNT_CAP
               ? '+'
               : ''}{' '}
@@ -136,6 +136,29 @@ export function BrainTaskMemorySection({
           >
             {backfill.isPending ? <Loader2 className="animate-spin" /> : null}
             Ingest task history
+          </Button>
+        </div>
+      ) : null}
+
+      {taskMemories.recentCompletedRunsWithoutEvent > 0 ? (
+        <div className="flex flex-col items-start gap-3 rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm sm:flex-row sm:items-center sm:justify-between">
+          <span className="flex items-center gap-2">
+            <CircleAlert className="size-4 text-destructive" />
+            {formatNumber(taskMemories.recentCompletedRunsWithoutEvent)}
+            {taskMemories.recentCompletedRunsWithoutEvent >=
+            MISSING_MEMORY_EVENT_COUNT_CAP
+              ? '+'
+              : ''}{' '}
+            recent completed tasks were not queued for Brain memory.
+          </span>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={backfill.isPending}
+            onClick={() => backfill.mutate()}
+          >
+            {backfill.isPending ? <Loader2 className="animate-spin" /> : null}
+            Queue missing memories
           </Button>
         </div>
       ) : null}

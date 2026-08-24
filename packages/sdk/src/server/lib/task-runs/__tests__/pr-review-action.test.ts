@@ -1,7 +1,24 @@
-const mockEval = vi.fn();
-const mockGet = vi.fn();
-const mockSrem = vi.fn();
-const mockFindManySlackInstallations = vi.fn();
+const {
+  mockEval,
+  mockGet,
+  mockSrem,
+  mockFindManySlackInstallations,
+  mockUpdateReturning,
+  mockUpdate,
+} = vi.hoisted(() => {
+  const mockUpdateReturning = vi.fn();
+  const mockUpdateWhere = vi.fn(() => ({ returning: mockUpdateReturning }));
+  const mockUpdateSet = vi.fn(() => ({ where: mockUpdateWhere }));
+
+  return {
+    mockEval: vi.fn(),
+    mockGet: vi.fn(),
+    mockSrem: vi.fn(),
+    mockFindManySlackInstallations: vi.fn(),
+    mockUpdateReturning,
+    mockUpdate: vi.fn(() => ({ set: mockUpdateSet })),
+  };
+});
 
 vi.mock('@roomote/redis', () => ({
   getRedis: () => ({ eval: mockEval, get: mockGet, srem: mockSrem }),
@@ -16,6 +33,7 @@ vi.mock('@roomote/db/server', async () => {
   return {
     ...actual,
     db: {
+      update: mockUpdate,
       query: {
         slackInstallations: {
           findMany: (...args: unknown[]) =>
@@ -30,6 +48,7 @@ import {
   attachPendingPrReviewActionMessage,
   claimPendingPrReviewAction,
   claimPendingPrReviewActionsForThread,
+  enableAutoHandlePrReviewFeedback,
 } from '../pr-review-action';
 
 describe('PR review action state', () => {
@@ -38,6 +57,7 @@ describe('PR review action state', () => {
     mockGet.mockResolvedValue(null);
     mockSrem.mockResolvedValue(1);
     mockFindManySlackInstallations.mockResolvedValue([{ teamId: 'T1' }]);
+    mockUpdateReturning.mockResolvedValue([{ id: 'link-1' }]);
   });
 
   it('does not consume an offer from another Slack workspace', async () => {
@@ -165,5 +185,18 @@ describe('PR review action state', () => {
       'pr-review-action:thread:slack:T2:C-shared:111.222',
       'pr-review-action:',
     );
+  });
+
+  it('fails when auto-handling cannot be persisted to the linked PR', async () => {
+    mockUpdateReturning.mockResolvedValue([]);
+
+    await expect(
+      enableAutoHandlePrReviewFeedback({
+        taskId: 'task-1',
+        repository: 'owner/repo',
+        prNumber: 42,
+        userId: 'user-1',
+      }),
+    ).rejects.toThrow('linked pull request was not found');
   });
 });

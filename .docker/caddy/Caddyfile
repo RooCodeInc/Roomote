@@ -1,6 +1,7 @@
 # Local development edge that mirrors the production Caddy routing in
-# deploy/caddy/Caddyfile: a single origin serves the web app, and the
-# reserved /_roomote-api/* prefix is stripped and proxied to the API.
+# deploy/caddy/Caddyfile: a single origin serves the web app, public webhook
+# paths go directly to the API, and the reserved /_roomote-api/* prefix is
+# stripped and proxied to the API.
 #
 # `pnpm dev` points the ngrok web tunnel at this listener instead of the
 # web app, and derives TRPC_URL as <public-url>/_roomote-api — the same
@@ -26,6 +27,20 @@
 		reverse_proxy minio:9000 {
 			# Presigned S3 URLs sign the bucket path and Host header.
 			header_up Host {http.request.host}
+		}
+	}
+
+	# Webhook URLs are public integration contracts. Send them directly to the
+	# API so a missing or stale web-app proxy route cannot acknowledge an event
+	# with the Next.js HTML fallback without actually processing it.
+	@api_webhooks {
+		path /api/webhooks /api/webhooks/*
+	}
+
+	handle @api_webhooks {
+		reverse_proxy host.docker.internal:13001 {
+			lb_try_duration 10s
+			lb_try_interval 250ms
 		}
 	}
 

@@ -34,12 +34,14 @@ describe('linearAgentCallbacks', () => {
   );
   const emitActionMock = vi.mocked(sdk.linearSessions.emitAction);
   const emitElicitationMock = vi.mocked(sdk.linearSessions.emitElicitation);
+  const emitResponseMock = vi.mocked(sdk.linearSessions.emitResponse);
   const updateSessionPlanMock = vi.mocked(sdk.linearSessions.updateSessionPlan);
 
   beforeEach(() => {
     setPendingLinearRequestUserInputMock.mockClear();
     emitActionMock.mockClear();
     emitElicitationMock.mockClear();
+    emitResponseMock.mockClear();
     updateSessionPlanMock.mockClear();
   });
 
@@ -96,6 +98,26 @@ describe('linearAgentCallbacks', () => {
     await linearAgentCallbacks.onMessage?.(taskRun, 'task_123', event, context);
 
     expect(updateSessionPlanMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not let a synthetic turn start suppress earlier persisted events', async () => {
+    const context = {};
+    const taskRun = createTaskRun();
+
+    await linearAgentCallbacks.onMessage?.(
+      taskRun,
+      'task_123',
+      { type: 'turn_started', ts: 2000 },
+      context,
+    );
+    await linearAgentCallbacks.onMessage?.(
+      taskRun,
+      'task_123',
+      { type: 'completion', text: 'Completed.', ts: 1000 },
+      context,
+    );
+
+    expect(emitResponseMock).toHaveBeenCalledWith('session_123', 'Completed.');
   });
 
   it('stores pending request_user_input via sdk.taskRuns before emitting the elicitation', async () => {

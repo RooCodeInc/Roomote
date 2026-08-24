@@ -340,6 +340,7 @@ describe('handleGiteaPullRequest', () => {
         number: 42,
         externalId: 900,
         title: 'Update backend',
+        body: null,
         url: 'https://git.example.com/acme/backend/pulls/42',
         authorLogin: 'gitea-user',
         state: 'merged',

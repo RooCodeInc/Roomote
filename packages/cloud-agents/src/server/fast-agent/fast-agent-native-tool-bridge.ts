@@ -8,35 +8,30 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { createRequire } from 'node:module';
-import { ROOMOTE_TASK_INSPECTION_ACTIONS } from '@roomote/types';
+import {
+  CHAT_CHANNEL_MESSAGES_TOOL,
+  CHAT_MESSAGE_CONTEXT_TOOL,
+  ROOMOTE_TASK_INSPECTION_ACTIONS,
+} from '@roomote/types';
 import { z } from 'zod';
+
+import {
+  FAST_AGENT_NATIVE_TOOL_NAMES,
+  type FastAgentNativeToolName,
+} from './fast-agent-tool-policy';
+
+export {
+  FAST_AGENT_NATIVE_TOOL_FILTER,
+  FAST_AGENT_NATIVE_TOOL_NAMES,
+  FAST_AGENT_SUBAGENT_TOOL_FILTER,
+} from './fast-agent-tool-policy';
+export type { FastAgentNativeToolName } from './fast-agent-tool-policy';
 
 const FAST_AGENT_TOOL_BRIDGE_BODY_LIMIT_BYTES = 1_000_000;
 const FAST_AGENT_TOOL_BRIDGE_ERROR = 'Fast tool execution failed.';
 
-export const FAST_AGENT_NATIVE_TOOL_NAMES = {
-  cancelTask: 'cancel_task',
-  ignoreEvent: 'ignore_event',
-  integrationCall: 'integration_call',
-  launchTask: 'launch_task',
-  manageTasks: 'manage_tasks',
-  retryTaskStart: 'retry_task_start',
-  sendChatReaction: 'send_chat_reaction',
-  sendChatReply: 'send_chat_reply',
-  sendTaskMessage: 'send_task_message',
-} as const;
-
-export type FastAgentNativeToolName =
-  (typeof FAST_AGENT_NATIVE_TOOL_NAMES)[keyof typeof FAST_AGENT_NATIVE_TOOL_NAMES];
-
-export const FAST_AGENT_NATIVE_TOOL_FILTER: Record<string, boolean> = {
-  '*': false,
-  ...Object.fromEntries(
-    Object.values(FAST_AGENT_NATIVE_TOOL_NAMES).map((name) => [name, true]),
-  ),
-};
-
 export type FastAgentNativeToolCall = {
+  agent?: string;
   name: FastAgentNativeToolName;
   args: Record<string, unknown>;
 };
@@ -59,6 +54,7 @@ const bridgeRequestSchema = z.object({
     ],
   ),
   args: z.record(z.unknown()),
+  agent: z.string().min(1).optional(),
 });
 
 const FAST_AGENT_NATIVE_TOOL_BRIDGE_SOURCE = String.raw`
@@ -73,7 +69,7 @@ export const invoke = async (name, args, context) => {
       authorization: "Bearer " + token,
       "content-type": "application/json",
     },
-    body: JSON.stringify({ sessionID: context.sessionID, tool: name, args }),
+    body: JSON.stringify({ sessionID: context.sessionID, agent: context.agent, tool: name, args }),
   })
   const payload = await response.json().catch(() => null)
   if (!response.ok || !payload?.ok) {
@@ -118,15 +114,43 @@ export default {
 }
 `,
 
+    [FAST_AGENT_NATIVE_TOOL_NAMES.getChatMessageContext]: String.raw`
+import { z } from "zod"
+import { invoke } from "../roomote-fast-tool-bridge.js"
+
+export default {
+  description: ${JSON.stringify(`${CHAT_MESSAGE_CONTEXT_TOOL.description} Fast mode restricts this lookup to the current conversation channel.`)},
+  args: {
+    messageId: z.string().min(1).describe("Provider message ID or timestamp in the current conversation channel."),
+  },
+  execute: (args, context) => invoke(${JSON.stringify(CHAT_MESSAGE_CONTEXT_TOOL.name)}, args, context),
+}
+`,
+
+    [FAST_AGENT_NATIVE_TOOL_NAMES.getChatChannelMessages]: String.raw`
+import { z } from "zod"
+import { invoke } from "../roomote-fast-tool-bridge.js"
+
+export default {
+  description: ${JSON.stringify(`${CHAT_CHANNEL_MESSAGES_TOOL.description} Fast mode restricts this lookup to the current conversation channel and defaults Slack history to the previous 24 hours when oldest is omitted.`)},
+  args: {
+    oldest: z.string().min(1).optional().describe(${JSON.stringify(CHAT_CHANNEL_MESSAGES_TOOL.inputDescriptions.oldest)}),
+    latest: z.string().min(1).optional().describe(${JSON.stringify(CHAT_CHANNEL_MESSAGES_TOOL.inputDescriptions.latest)}),
+  },
+  execute: (args, context) => invoke(${JSON.stringify(CHAT_CHANNEL_MESSAGES_TOOL.name)}, args, context),
+}
+`,
+
     [FAST_AGENT_NATIVE_TOOL_NAMES.launchTask]: String.raw`
 import { z } from "zod"
 import { invoke } from "../roomote-fast-tool-bridge.js"
 
 export default {
-  description: "Delegate new repository or workspace execution work to a Roomote task.",
+  description: "Delegate new repository or workspace execution work to a Roomote task, optionally using an exact deployment-enabled model ID from the system prompt.",
   args: {
     prompt: z.string().min(1).describe("Complete task instruction"),
     environmentId: z.string().nullable().optional(),
+    model: z.string().min(1).nullable().optional().describe("Exact deployment-enabled model ID; omit or pass null to use the deployment default"),
     kickoffMessage: z.string().min(1).describe("Specific user-visible explanation of what is being delegated"),
   },
   execute: (args, context) => invoke("launch_task", args, context),
@@ -258,10 +282,10 @@ async function readRequestBody(request: IncomingMessage): Promise<unknown> {
  * The generated tool sources import zod, and OpenCode's own runtime loads
  * them from the tool directory — so a real zod package must exist on disk to
  * symlink there. In development that's the workspace install; in the app
- * image, where the api bundle inlines zod, it's the runtime-deps tree that
- * ships next to the dist (the same mechanism as snowflake-sdk, asserted at
- * image build). This wrapper exists so a packaging regression names the
- * requirement instead of surfacing as a bare module-not-found mid-turn.
+ * image, where service bundles inline zod, it's the service runtime-deps tree
+ * that ships next to the dist (asserted at image build). This wrapper exists
+ * so a packaging regression names the requirement instead of surfacing as a
+ * bare module-not-found mid-turn.
  */
 function resolveZodDirectoryForTools(): string {
   try {
@@ -270,9 +294,9 @@ function resolveZodDirectoryForTools(): string {
     throw new Error(
       'Fast native tools need the zod package on disk to link into the ' +
         'OpenCode tool directory, and none is resolvable from this process. ' +
-        'In the app image zod ships via .docker/app/runtime-deps/api ' +
+        'In the app image zod ships in each service runtime-deps tree ' +
         '(asserted at image build); if this error reaches production, that ' +
-        'packaging step regressed. ' +
+        'service packaging step regressed. ' +
         `${error instanceof Error ? error.message : String(error)}`,
     );
   }
@@ -325,7 +349,11 @@ async function startRuntime(): Promise<FastAgentNativeToolRuntime> {
         return;
       }
 
-      const result = await executor({ name: parsed.tool, args: parsed.args });
+      const result = await executor({
+        name: parsed.tool,
+        args: parsed.args,
+        ...(parsed.agent ? { agent: parsed.agent } : {}),
+      });
       writeJson(response, 200, { ok: true, result: result ?? null });
     } catch (error) {
       console.error('[Fast Agent] Native tool bridge request failed.', error);

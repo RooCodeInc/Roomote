@@ -18,15 +18,18 @@ import {
   renameBrainSyncStateFamilyPrefix,
 } from '@roomote/db/server';
 import {
+  parseBrainToolPayloads,
   postBrainToolCall,
   resolveBrainInferenceProvider,
   resolveBrainConnection,
 } from '@roomote/sdk/server';
 import {
   BRAIN_COLLECTOR_IDS,
+  BRAIN_PAGE_TYPES,
+  RunStatus,
   brainNamespacePrefix,
   getLinkedEnvironmentIdFromPayload,
-  RunStatus,
+  renderBrainFrontmatter,
 } from '@roomote/types';
 
 import { runBrainCollectors } from './brain-collectors';
@@ -137,16 +140,29 @@ export async function callBrainWriteTool(
     );
   }
 
-  const failed = !ok || body.includes('"isError":true');
+  // Detect tool-level failure through the shared JSON-RPC parser rather than
+  // a substring match: the parser owns the envelope shape (including
+  // whitespace-tolerant isError detection) and error prose from the page body
+  // must never masquerade as failure classification.
+  let toolError: string | null = null;
 
-  if (failed && /embed\(|embedding/i.test(body)) {
+  try {
+    parseBrainToolPayloads(body, name);
+  } catch (error) {
+    toolError = error instanceof Error ? error.message : String(error);
+  }
+
+  const failed = !ok || toolError !== null;
+  const failureText = `${toolError ?? ''} ${body.slice(0, 300)}`;
+
+  if (failed && /embed\(|embedding/i.test(failureText)) {
     throw new BrainNotReadyError(
-      `gbrain ${name} could not embed: ${body.slice(0, 300)}`,
+      `gbrain ${name} could not embed: ${failureText.slice(0, 300)}`,
     );
   }
 
   if (failed) {
-    throw new Error(`gbrain ${name} failed: ${status} ${body.slice(0, 300)}`);
+    throw new Error(`gbrain ${name} failed: ${failureText.slice(0, 300)}`);
   }
 
   return body;
@@ -200,19 +216,28 @@ export function buildMemoryPage(input: {
   });
 
   const content = [
-    '---',
-    `roomote_task_id: ${input.taskId}`,
-    `roomote_run_id: ${input.runId}`,
-    // GBrain derives effective_date from this conventional field. Keep the
-    // full timestamp below as provenance, but make backfilled pages sort and
-    // filter by when the task completed rather than when it was ingested.
-    ...(completedDate ? [`date: ${completedDate}`] : []),
-    `completed_at: ${completed}`,
-    // Environment stamp: costs nothing now, enables environment-scoped
-    // retrieval (gbrain sources) or admin triage later without re-ingesting.
-    ...(input.environmentName ? [`environment: ${input.environmentName}`] : []),
-    'provenance: roomote-task-memory',
-    '---',
+    ...renderBrainFrontmatter({
+      type: BRAIN_PAGE_TYPES.taskMemory,
+      title: input.taskTitle,
+      // Legacy completed runs can lack a completion time; `completed` is the
+      // literal "unknown" then, which is no date at all.
+      created: completedAtIso ?? null,
+      fields: [
+        `roomote_task_id: ${input.taskId}`,
+        `roomote_run_id: ${input.runId}`,
+        // GBrain derives effective_date from this conventional field. Keep
+        // the full timestamp below as provenance, but make backfilled pages
+        // sort and filter by when the task completed rather than when it
+        // was ingested.
+        completedDate && `date: ${completedDate}`,
+        `completed_at: ${completed}`,
+        // Environment stamp: costs nothing now, enables environment-scoped
+        // retrieval (gbrain sources) or admin triage later without
+        // re-ingesting.
+        input.environmentName && `environment: ${input.environmentName}`,
+        'provenance: roomote-task-memory',
+      ],
+    }),
     '',
     `# ${input.taskTitle}`,
     '',
@@ -609,12 +634,29 @@ export function getPullRequestFactsResumeCursor(
   return { updatedAt, id: cursor?.id ?? null };
 }
 
+/**
+ * Bound on the description excerpt a pull-request page carries. Long enough
+ * for the "why" and the summary of changes most descriptions lead with,
+ * short enough that a template-heavy description cannot dominate the page's
+ * embedding or the nightly digest's evidence budget.
+ */
+const PR_BODY_CHAR_CAP = 4_000;
+
 export function buildPullRequestFactPage(fact: {
   repositoryFullName: string;
   prNumber: number;
   title: string;
   htmlUrl: string;
   authorLogin: string | null;
+  body?: string | null;
+  labels?: string[] | null;
+  changedFiles?: string[] | null;
+  changedFileCount?: number | null;
+  filesCapped?: boolean | null;
+  reviewsCapped?: boolean | null;
+  additions?: number | null;
+  deletions?: number | null;
+  reviews?: Array<{ login: string | null; state: string }> | null;
   state: string;
   createdAtRemote: Date;
   closedAtRemote: Date | null;
@@ -623,20 +665,115 @@ export function buildPullRequestFactPage(fact: {
   const merged = fact.mergedAtRemote?.toISOString();
   const occurredAt =
     fact.mergedAtRemote ?? fact.closedAtRemote ?? fact.createdAtRemote;
+  const labels = fact.labels ?? [];
+  const body = fact.body?.trim() ?? '';
+  const changedFiles = fact.changedFiles ?? [];
+  // The distinct leading directories are what a question about "the
+  // collectors" or "the web app" matches on; the path list is the detail.
+  const areas = [
+    ...new Set(
+      changedFiles.map((path) => {
+        const segments = path.split('/');
+        return segments.length > 1 ? segments.slice(0, 2).join('/') : '.';
+      }),
+    ),
+  ].sort();
+  const fileCount = fact.changedFileCount ?? changedFiles.length;
+  // When the provider listing was capped, every number here describes the
+  // files that were read, not the pull request. Say so rather than
+  // publishing a lower bound as a total.
+  const filesCapped = fact.filesCapped === true;
+  const fileCountLabel = filesCapped
+    ? `At least ${fileCount} files changed`
+    : `${fileCount} file${fileCount === 1 ? '' : 's'} changed`;
+  const lineTotals =
+    fact.additions !== null && fact.additions !== undefined
+      ? ` (+${fact.additions} / -${fact.deletions ?? 0}${filesCapped ? ' so far' : ''})`
+      : '';
+  const reviewsByState = new Map<string, string[]>();
+  for (const review of fact.reviews ?? []) {
+    const logins = reviewsByState.get(review.state) ?? [];
+    const login = review.login ?? 'unknown';
+    if (!logins.includes(login)) {
+      logins.push(login);
+    }
+    reviewsByState.set(review.state, logins);
+  }
+  const approvedBy = reviewsByState.get('approved') ?? [];
+  const changesRequestedBy = reviewsByState.get('changes_requested') ?? [];
+  const description =
+    body.length > PR_BODY_CHAR_CAP
+      ? `${body.slice(0, PR_BODY_CHAR_CAP)}\n\n_Description truncated; open the pull request for the rest._`
+      : body;
   const content = [
-    '---',
-    `event_date: ${occurredAt.toISOString().slice(0, 10)}`,
-    `repository: ${fact.repositoryFullName}`,
-    `pr_number: ${fact.prNumber}`,
-    `state: ${fact.state}`,
-    ...(fact.authorLogin ? [`author: ${fact.authorLogin}`] : []),
-    ...(merged ? [`merged_at: ${merged}`] : []),
-    'provenance: roomote-pull-requests',
-    '---',
+    ...renderBrainFrontmatter({
+      type: BRAIN_PAGE_TYPES.pullRequest,
+      title: `${fact.repositoryFullName}#${fact.prNumber}: ${fact.title}`,
+      created: fact.createdAtRemote,
+      fields: [
+        `event_date: ${occurredAt.toISOString().slice(0, 10)}`,
+        `repository: ${fact.repositoryFullName}`,
+        `pr_number: ${fact.prNumber}`,
+        `state: ${fact.state}`,
+        fact.authorLogin && `author: ${fact.authorLogin}`,
+        merged && `merged_at: ${merged}`,
+        labels.length > 0 && `labels: ${JSON.stringify(labels)}`,
+        changedFiles.length > 0 &&
+          `changed_files: ${fileCount}${filesCapped ? '+' : ''}`,
+        areas.length > 0 && `areas: ${JSON.stringify(areas)}`,
+        approvedBy.length > 0 && `approved_by: ${JSON.stringify(approvedBy)}`,
+        'provenance: roomote-pull-requests',
+      ],
+    }),
     '',
     `# ${fact.repositoryFullName}#${fact.prNumber}: ${fact.title}`,
     '',
     `${fact.state === 'merged' || merged ? 'Merged' : 'State: ' + fact.state}${merged ? ` at ${merged}` : ''}${fact.authorLogin ? ` by ${fact.authorLogin}` : ''}.`,
+    ...(labels.length > 0 ? ['', `Labels: ${labels.join(', ')}`] : []),
+    // The description is the author's own account of what changed and why:
+    // the part of a pull request the diff cannot say. Treated as evidence
+    // like every other ingested text, never as instructions.
+    ...(description ? ['', '## Description', '', description] : []),
+    ...(changedFiles.length > 0
+      ? [
+          '',
+          `## Changes`,
+          '',
+          `${fileCountLabel}${lineTotals}${areas.length > 0 ? ` across ${areas.join(', ')}` : ''}.`,
+          '',
+          ...changedFiles.map((path) => `- ${path}`),
+          ...(fileCount > changedFiles.length
+            ? [
+                `- … and ${fileCount - changedFiles.length}${filesCapped ? ' or more' : ''} more`,
+              ]
+            : []),
+          ...(filesCapped
+            ? [
+                '',
+                '_The provider file listing was capped; this covers the files read._',
+              ]
+            : []),
+        ]
+      : []),
+    ...(approvedBy.length > 0 || changesRequestedBy.length > 0
+      ? [
+          '',
+          '## Reviews',
+          '',
+          ...(approvedBy.length > 0
+            ? [`- Approved by ${approvedBy.join(', ')}`]
+            : []),
+          ...(changesRequestedBy.length > 0
+            ? [`- Changes requested by ${changesRequestedBy.join(', ')}`]
+            : []),
+          ...(fact.reviewsCapped === true
+            ? [
+                '',
+                '_The provider review listing was capped; later reviewers may be missing._',
+              ]
+            : []),
+        ]
+      : []),
     '',
     fact.htmlUrl,
   ].join('\n');
@@ -679,6 +816,15 @@ async function syncPullRequestFacts(
       title: pullRequestFacts.title,
       htmlUrl: pullRequestFacts.htmlUrl,
       authorLogin: pullRequestFacts.authorLogin,
+      body: pullRequestFacts.body,
+      labels: pullRequestFacts.labels,
+      changedFiles: pullRequestFacts.changedFiles,
+      changedFileCount: pullRequestFacts.changedFileCount,
+      filesCapped: pullRequestFacts.filesCapped,
+      reviewsCapped: pullRequestFacts.reviewsCapped,
+      additions: pullRequestFacts.additions,
+      deletions: pullRequestFacts.deletions,
+      reviews: pullRequestFacts.reviews,
       state: pullRequestFacts.state,
       createdAtRemote: pullRequestFacts.createdAtRemote,
       closedAtRemote: pullRequestFacts.closedAtRemote,

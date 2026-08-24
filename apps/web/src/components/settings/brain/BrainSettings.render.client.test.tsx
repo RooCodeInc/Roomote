@@ -21,6 +21,7 @@ vi.mock('sonner', () => ({
 }));
 
 vi.mock('@tanstack/react-query', () => ({
+  keepPreviousData: (previousData: unknown) => previousData,
   // The browse dialog issues its own queries; those stay idle here so the
   // page-level fixtures never leak into the dialog's typed results.
   useQuery: (options: { queryKey?: unknown[] }) =>
@@ -77,8 +78,7 @@ function buildSettings(
     },
     corpus: {
       reachable: true,
-      sampledPages: 30,
-      truncated: false,
+      listedPages: 30,
       totalPages: null,
       namespaces: [
         { id: 'slack', label: 'Slack', pages: 20 },
@@ -126,7 +126,8 @@ function buildSettings(
       total: 11,
       lastProcessedAt: new Date('2026-01-02T00:00:00Z'),
       lastError: null,
-      completedRunsWithoutEvent: 0,
+      historicalCompletedRunsWithoutEvent: 0,
+      recentCompletedRunsWithoutEvent: 0,
     },
     ...overrides,
   };
@@ -142,8 +143,9 @@ describe('BrainSettings', () => {
   it('shows what the Brain holds, where it learns from, and what it recorded', () => {
     render(<BrainSettings />);
 
-    expect(screen.getByText('Connected')).toBeInTheDocument();
-    expect(screen.getByText('http://gbrain:8080')).toBeInTheDocument();
+    expect(screen.getAllByText('Connected')).toHaveLength(2);
+    expect(screen.queryByText('Endpoint')).not.toBeInTheDocument();
+    expect(screen.queryByText('http://gbrain:8080')).not.toBeInTheDocument();
     expect(screen.getByText('OpenRouter')).toBeInTheDocument();
     expect(screen.getByText('Semantic + keyword')).toBeInTheDocument();
 
@@ -162,27 +164,15 @@ describe('BrainSettings', () => {
     expect(screen.getByText('Pages written, last 30 days')).toBeInTheDocument();
     expect(screen.getByText('Reworked the outbox drainer')).toBeInTheDocument();
 
-    expect(screen.getByText('1 of 2 connected')).toBeInTheDocument();
-    expect(screen.getByText('Ingesting')).toBeInTheDocument();
-    expect(screen.getByText('Not connected')).toBeInTheDocument();
+    expect(screen.queryByText('Sources')).not.toBeInTheDocument();
+    expect(screen.queryByText('1 of 2 connected')).not.toBeInTheDocument();
+    expect(screen.queryByText('Ingesting')).not.toBeInTheDocument();
+    expect(screen.queryByText('Not connected')).not.toBeInTheDocument();
+    expect(screen.queryByText('Notion')).not.toBeInTheDocument();
 
     expect(screen.getByText('Recorded')).toBeInTheDocument();
     expect(screen.getByText('Queued')).toBeInTheDocument();
-  });
-
-  it('says the corpus is a recent sample rather than a total when it is', () => {
-    const settings = buildSettings();
-    state.query.data = {
-      ...settings,
-      corpus: { ...settings.corpus, truncated: true },
-    };
-
-    render(<BrainSettings />);
-
-    expect(screen.getByText('30 most recent pages')).toBeInTheDocument();
-    expect(
-      screen.getByText(/describes what it has learned lately/),
-    ).toBeInTheDocument();
+    expect(screen.getAllByText(/last processed/i)).toHaveLength(2);
   });
 
   it('offers to ingest history only when completed tasks are missing a memory', () => {
@@ -192,12 +182,37 @@ describe('BrainSettings', () => {
     const settings = buildSettings();
     state.query.data = {
       ...settings,
-      taskMemories: { ...settings.taskMemories, completedRunsWithoutEvent: 12 },
+      taskMemories: {
+        ...settings.taskMemories,
+        historicalCompletedRunsWithoutEvent: 12,
+      },
     };
 
     render(<BrainSettings />);
 
     fireEvent.click(screen.getByText('Ingest task history'));
+    expect(mutations.backfill).toHaveBeenCalled();
+  });
+
+  it('reports recent missing events as a recording gap, not task history', () => {
+    const settings = buildSettings();
+    state.query.data = {
+      ...settings,
+      taskMemories: {
+        ...settings.taskMemories,
+        recentCompletedRunsWithoutEvent: 3,
+      },
+    };
+
+    render(<BrainSettings />);
+
+    expect(
+      screen.getByText(/recent completed tasks were not queued/),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText(/finished before the Brain was watching/),
+    ).not.toBeInTheDocument();
+    fireEvent.click(screen.getByText('Queue missing memories'));
     expect(mutations.backfill).toHaveBeenCalled();
   });
 
@@ -228,8 +243,7 @@ describe('BrainSettings', () => {
       statusDetail: 'The Brain did not answer.',
       corpus: {
         reachable: false,
-        sampledPages: 0,
-        truncated: false,
+        listedPages: 0,
         totalPages: null,
         namespaces: [],
         activityByDay: [],
@@ -249,7 +263,7 @@ describe('BrainSettings', () => {
     state.query.data = {
       ...settings,
       recall: { mode: 'keyword-only', embeddedCount: 0, chunkCount: 771 },
-      corpus: { ...settings.corpus, totalPages: 625, truncated: true },
+      corpus: { ...settings.corpus, totalPages: 625 },
     };
 
     render(<BrainSettings />);
@@ -268,9 +282,8 @@ describe('BrainSettings', () => {
     // "Slack public channels" carries its "Slack" namespace badge (the other
     // "Slack" is the composition legend's namespace entry)...
     expect(screen.getAllByText('Slack')).toHaveLength(2);
-    // ...while a source whose namespace repeats its own name gets no badge:
-    // exactly one "Notion" (the row title), not a second badge copy.
-    expect(screen.getAllByText('Notion')).toHaveLength(1);
+    // Disconnected sources are omitted from the list entirely.
+    expect(screen.queryByText('Notion')).not.toBeInTheDocument();
   });
 
   it('stops at the explanation on a deployment with no Brain', () => {

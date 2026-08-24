@@ -43,8 +43,7 @@ export function BrainStatusSection({ settings }: { settings: BrainSettings }) {
       </p>
 
       {settings.status !== 'not_configured' ? (
-        <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
-          <Fact label="Endpoint" value={settings.url ?? 'Not set'} />
+        <div className="grid grid-cols-2 gap-4">
           <Fact
             label="Recall"
             value={

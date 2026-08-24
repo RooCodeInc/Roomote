@@ -275,7 +275,7 @@ export async function enableAutoHandlePrReviewFeedback(input: {
   prNumber: number;
   userId: string;
 }): Promise<void> {
-  await db
+  const updated = await db
     .update(taskPullRequests)
     .set({ autoHandleFeedbackByUserId: input.userId })
     .where(
@@ -284,5 +284,12 @@ export async function enableAutoHandlePrReviewFeedback(input: {
         eq(taskPullRequests.repository, input.repository),
         eq(taskPullRequests.prNumber, input.prNumber),
       ),
+    )
+    .returning({ id: taskPullRequests.id });
+
+  if (updated.length === 0) {
+    throw new Error(
+      `Cannot enable automatic review handling because the linked pull request was not found for task ${input.taskId}`,
     );
+  }
 }

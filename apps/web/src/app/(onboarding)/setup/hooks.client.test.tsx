@@ -470,7 +470,7 @@ describe('useSetupFlow', () => {
     expect(result.current.step).toBe('compute-provider');
   });
 
-  it('moves from automation recommendations to environment setup when compute is already configured', async () => {
+  it('moves from automation recommendations to the environment explainer when compute is already configured', async () => {
     mockReadyForRepository({
       automationRecommendations: null,
     });
@@ -485,7 +485,7 @@ describe('useSetupFlow', () => {
       result.current.goToNextStep();
     });
 
-    expect(result.current.step).toBe('repo-selection');
+    expect(result.current.step).toBe('environment-explainer');
   });
 
   it('requires a new choice when the saved compute provider is excluded', async () => {
@@ -1284,7 +1284,7 @@ describe('useSetupFlow', () => {
     const { result } = renderHook(() => useSetupFlow());
 
     await waitFor(() => {
-      expect(result.current.step).toBe('repo-selection');
+      expect(result.current.step).toBe('environment-explainer');
     });
   });
 

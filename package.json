@@ -1,6 +1,6 @@
 {
   "name": "roomote",
-  "version": "0.40.1",
+  "version": "0.41.0",
   "license": "FCL-1.0-ALv2",
   "packageManager": "pnpm@10.29.3",
   "engines": {
@@ -11,8 +11,8 @@
     "prepare": "[ -d .git ] && husky || true",
     "format": "oxfmt \"**/*.{js,jsx,ts,tsx,json,css}\"",
     "format:check": "oxfmt --check \"**/*.{js,jsx,ts,tsx,json,css}\"",
-    "lint": "pnpm format:check && pnpm exec oxlint --deny-warnings && pnpm exec turbo lint --filter=@roomote/web --filter=@roomote/worker --log-order grouped --output-logs new-only",
-    "lint:fast": "pnpm exec oxlint --deny-warnings && pnpm exec turbo lint --filter=@roomote/web --filter=@roomote/worker --log-order grouped --output-logs new-only",
+    "lint": "pnpm format:check && pnpm exec oxlint --deny-warnings && pnpm exec turbo lint --log-order grouped --output-logs new-only",
+    "lint:fast": "pnpm exec oxlint --deny-warnings && pnpm exec turbo lint --log-order grouped --output-logs new-only",
     "lint:pre-push": "node scripts/pre-push-checks.mjs",
     "check-types": "turbo check-types --log-order grouped --output-logs new-only",
     "check-types:fast": "turbo check-types:fast --log-order grouped --output-logs new-only",

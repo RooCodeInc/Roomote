@@ -3,7 +3,12 @@ import {
   findBrainSourceConnectionConfig,
   isBrainSourceAvailable,
 } from '@roomote/sdk/server';
-import { BRAIN_COLLECTOR_IDS, brainNamespacePrefix } from '@roomote/types';
+import {
+  BRAIN_COLLECTOR_IDS,
+  BRAIN_PAGE_TYPES,
+  brainNamespacePrefix,
+  renderBrainFrontmatter,
+} from '@roomote/types';
 
 import type { BrainCollector, CollectorPage } from './contracts';
 import {
@@ -131,14 +136,20 @@ export function buildGranolaMeetingPage(
   const excerpt = body.slice(0, GRANOLA_NOTE_EXCERPT_MAX_CHARS);
 
   const content = [
-    '---',
-    ...(id ? [`granola_note_id: ${id}`] : []),
-    `date: ${day}`,
-    'provenance: roomote-granola-meetings',
-    ...(attendeeSlugs.length > 0
-      ? [`attendees: ${JSON.stringify(attendeeSlugs)}`]
-      : []),
-    '---',
+    ...renderBrainFrontmatter({
+      type: BRAIN_PAGE_TYPES.meeting,
+      title,
+      // `day` is the literal "undated" when Granola omits the timestamp;
+      // only a real date may stand as `created`.
+      created: createdAt ? day : null,
+      fields: [
+        id && `granola_note_id: ${id}`,
+        `date: ${day}`,
+        'provenance: roomote-granola-meetings',
+        attendeeSlugs.length > 0 &&
+          `attendees: ${JSON.stringify(attendeeSlugs)}`,
+      ],
+    }),
     '',
     `# ${title}`,
     '',

@@ -74,6 +74,24 @@ describe('Env', () => {
     }
   });
 
+  it('accepts optional additional GitHub App slugs, including an empty value', () => {
+    expect(
+      createRoomoteEnv(productionCoreEnv).R_GITHUB_ADDITIONAL_APP_SLUGS,
+    ).toBeUndefined();
+    expect(
+      createRoomoteEnv({
+        ...productionCoreEnv,
+        R_GITHUB_ADDITIONAL_APP_SLUGS: ' roomote-dev, acme ',
+      }).R_GITHUB_ADDITIONAL_APP_SLUGS,
+    ).toBe(' roomote-dev, acme ');
+    expect(
+      createRoomoteEnv({
+        ...productionCoreEnv,
+        R_GITHUB_ADDITIONAL_APP_SLUGS: '',
+      }).R_GITHUB_ADDITIONAL_APP_SLUGS,
+    ).toBe('');
+  });
+
   it('preserves optional and defaulted values when creating env from a custom source', () => {
     const previousSkipEnvValidation = process.env.SKIP_ENV_VALIDATION;
     const runtimeEnv = { ...process.env };
@@ -85,12 +103,14 @@ describe('Env', () => {
     delete runtimeEnv.SKIP_ENV_VALIDATION;
     for (const key of [
       'R_MODEL',
+      'R_ORCHESTRATION_MODEL',
       'R_SMALL_MODEL',
       'R_VISION_MODEL',
       'R_CODE_REVIEW_MODEL',
       'R_EXPLORE_MODEL',
       'R_PLANNING_MODEL',
       'R_MODEL_REASONING_EFFORT',
+      'R_ORCHESTRATION_MODEL_REASONING_EFFORT',
       'R_SMALL_MODEL_REASONING_EFFORT',
       'R_VISION_MODEL_REASONING_EFFORT',
       'R_CODE_REVIEW_MODEL_REASONING_EFFORT',
@@ -135,12 +155,14 @@ describe('Env', () => {
       expect(env.BOX_STANDBY_MAX_COUNT).toBeUndefined();
       expect(env.BOX_STANDBY_MAX_AGE_HOURS).toBeUndefined();
       expect(env.R_MODEL).toBeUndefined();
+      expect(env.R_ORCHESTRATION_MODEL).toBeUndefined();
       expect(env.R_SMALL_MODEL).toBeUndefined();
       expect(env.R_VISION_MODEL).toBeUndefined();
       expect(env.R_CODE_REVIEW_MODEL).toBeUndefined();
       expect(env.R_EXPLORE_MODEL).toBeUndefined();
       expect(env.R_PLANNING_MODEL).toBeUndefined();
       expect(env.R_MODEL_REASONING_EFFORT).toBeUndefined();
+      expect(env.R_ORCHESTRATION_MODEL_REASONING_EFFORT).toBeUndefined();
       expect(env.R_SMALL_MODEL_REASONING_EFFORT).toBeUndefined();
       expect(env.R_VISION_MODEL_REASONING_EFFORT).toBeUndefined();
       expect(env.R_CODE_REVIEW_MODEL_REASONING_EFFORT).toBeUndefined();
@@ -224,22 +246,6 @@ describe('Env', () => {
     expect(areCuratedIntegrationsDisabled(undefined)).toBe(false);
     expect(areCuratedIntegrationsDisabled('1')).toBe(true);
     expect(areCuratedIntegrationsDisabled('0')).toBe(false);
-  });
-
-  it('keeps the communications fast mode setting opt-in', () => {
-    const runtimeEnv = { ...process.env };
-    delete runtimeEnv.SKIP_ENV_VALIDATION;
-    delete runtimeEnv.R_COMMUNICATIONS_FAST_MODE_SETTING_ENABLED;
-
-    expect(
-      createRoomoteEnv(runtimeEnv).R_COMMUNICATIONS_FAST_MODE_SETTING_ENABLED,
-    ).toBe(false);
-    expect(
-      createRoomoteEnv({
-        ...runtimeEnv,
-        R_COMMUNICATIONS_FAST_MODE_SETTING_ENABLED: 'true',
-      }).R_COMMUNICATIONS_FAST_MODE_SETTING_ENABLED,
-    ).toBe(true);
   });
 
   it('accepts valid Ping instance IDs and rejects invalid ones', () => {
@@ -406,12 +412,14 @@ describe('Env', () => {
     const env = createRoomoteEnv({
       ...process.env,
       R_MODEL: 'openrouter/openai/gpt-5.4',
+      R_ORCHESTRATION_MODEL: 'openrouter/anthropic/claude-sonnet-4',
       R_SMALL_MODEL: 'openrouter/openai/gpt-5.4-mini',
       R_VISION_MODEL: 'openrouter/openai/gpt-5.5',
       R_CODE_REVIEW_MODEL: 'openrouter/openai/gpt-5.5',
       R_EXPLORE_MODEL: 'openrouter/openai/gpt-5.4-mini',
       R_PLANNING_MODEL: 'openrouter/anthropic/claude-opus-4.7',
       R_MODEL_REASONING_EFFORT: 'medium',
+      R_ORCHESTRATION_MODEL_REASONING_EFFORT: 'high',
       R_SMALL_MODEL_REASONING_EFFORT: 'low',
       R_VISION_MODEL_REASONING_EFFORT: 'low',
       R_CODE_REVIEW_MODEL_REASONING_EFFORT: 'high',
@@ -421,12 +429,16 @@ describe('Env', () => {
     });
 
     expect(env.R_MODEL).toBe('openrouter/openai/gpt-5.4');
+    expect(env.R_ORCHESTRATION_MODEL).toBe(
+      'openrouter/anthropic/claude-sonnet-4',
+    );
     expect(env.R_SMALL_MODEL).toBe('openrouter/openai/gpt-5.4-mini');
     expect(env.R_VISION_MODEL).toBe('openrouter/openai/gpt-5.5');
     expect(env.R_CODE_REVIEW_MODEL).toBe('openrouter/openai/gpt-5.5');
     expect(env.R_EXPLORE_MODEL).toBe('openrouter/openai/gpt-5.4-mini');
     expect(env.R_PLANNING_MODEL).toBe('openrouter/anthropic/claude-opus-4.7');
     expect(env.R_MODEL_REASONING_EFFORT).toBe('medium');
+    expect(env.R_ORCHESTRATION_MODEL_REASONING_EFFORT).toBe('high');
     expect(env.R_SMALL_MODEL_REASONING_EFFORT).toBe('low');
     expect(env.R_VISION_MODEL_REASONING_EFFORT).toBe('low');
     expect(env.R_CODE_REVIEW_MODEL_REASONING_EFFORT).toBe('high');
@@ -1188,11 +1200,20 @@ describe('isBrainConfigured', () => {
     );
   });
 
+  it('counts a file-backed gateway token as Brain wiring', () => {
+    expect(
+      isBrainConfigured({
+        R_BRAIN_GATEWAY_TOKEN_FILE: '/gbrain-data/gateway-token',
+      }),
+    ).toBe(true);
+  });
+
   it('stays off with no key, and treats whitespace as no key', () => {
     expect(isBrainConfigured({})).toBe(false);
     expect(
       isBrainConfigured({
         R_BRAIN_GATEWAY_TOKEN: '',
+        R_BRAIN_GATEWAY_TOKEN_FILE: '   ',
         R_BRAIN_OPENROUTER_API_KEY: '   ',
         R_BRAIN_OPENAI_API_KEY: '',
       }),

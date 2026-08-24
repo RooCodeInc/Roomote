@@ -17,7 +17,7 @@ const PASSWORD_STRENGTH_CLASSES = [
   'bg-chart-6',
   'bg-chart-7',
   'bg-chart-2',
-  'bg-accent-bright-foreground',
+  'bg-chart-2',
 ] as const;
 
 const CREDENTIAL_AUTOCOMPLETE_TOKENS = new Set([

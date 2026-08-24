@@ -132,6 +132,7 @@ const state = vi.hoisted(() => ({
         announcerInstructions: null,
         platformIssueSlackChannelId: null,
         platformIssueDiscordChannelId: null,
+        platformIssueAlertsEnabled: true,
       },
       slackChannelDisplayNames: {
         channelAutoStartSlackChannels: {
@@ -790,6 +791,26 @@ describe('AutomationsSettings', () => {
     expect(
       screen.getByText('#automation-reports (Discord)'),
     ).toBeInTheDocument();
+    expect(
+      screen.getByRole('switch', { name: 'Alert on Config Errors enabled' }),
+    ).toBeChecked();
+  });
+
+  it('shows the deployment-admin DM fallback for unconfigured platform issue alerts', async () => {
+    state.settingsQuery.data.resolvedDestinations.platform_issue_alerts = null;
+    render(<AutomationsSettings />);
+
+    fireEvent.click(
+      await screen.findByRole('button', {
+        name: /(?:Set up|Configure) Alert on Config Errors/,
+      }),
+    );
+
+    expect(
+      screen.getByText(
+        'Reports to deployment admins via direct message (automatic).',
+      ),
+    ).toBeInTheDocument();
   });
 
   it('hides the launch mode picker when decision mode is disabled', async () => {
@@ -943,7 +964,7 @@ describe('AutomationsSettings', () => {
     ).toHaveLength(17);
   });
 
-  it('uses plain text empty states for built-in and custom automations', async () => {
+  it('keeps platform issue alerts enabled by default while showing the custom empty state', async () => {
     state.settingsQuery.data.settings.channelAutoStartSlackChannels = [];
     state.settingsQuery.data.settings.managerSlackChannelId = null as never;
     state.settingsQuery.data.slackChannelDisplayNames.managerSlackChannel =
@@ -951,11 +972,14 @@ describe('AutomationsSettings', () => {
 
     render(<AutomationsSettings />);
 
-    const builtInEmptyState = await screen.findByText(
-      'No built-in automations enabled yet.',
-    );
-    expect(builtInEmptyState.tagName).toBe('P');
-    expect(builtInEmptyState).toHaveClass('text-sm', 'text-muted-foreground');
+    expect(
+      screen.queryByText('No built-in automations enabled yet.'),
+    ).not.toBeInTheDocument();
+    expect(
+      await screen.findByRole('button', {
+        name: 'Configure Alert on Config Errors',
+      }),
+    ).toBeInTheDocument();
     const customEmptyState = screen.getByText(
       'No custom automations created yet.',
     );

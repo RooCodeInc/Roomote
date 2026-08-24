@@ -20,6 +20,16 @@ import {
   type OpenRouterVariantModelAlias,
 } from '@roomote/types';
 
+import {
+  createRoomoteAdvisorAgentPrompt,
+  createRoomoteJudgeAgentPrompt,
+  ROOMOTE_OPENCODE_ADVISOR_AGENT_DESCRIPTION,
+  ROOMOTE_OPENCODE_ADVISOR_AGENT_NAME,
+  ROOMOTE_OPENCODE_JUDGE_AGENT_DESCRIPTION,
+  ROOMOTE_OPENCODE_JUDGE_AGENT_NAME,
+} from '../opencode-prompt-subagents';
+import { FAST_AGENT_SUBAGENT_TOOL_FILTER } from './fast-agent/fast-agent-tool-policy';
+
 const ESCAPE_CHARACTER = String.fromCharCode(27);
 const BELL_CHARACTER = String.fromCharCode(7);
 const ANSI_CSI_PATTERN = new RegExp(
@@ -189,6 +199,41 @@ export const NON_TASK_TOOL_PERMISSION_DENIALS = {
   skill: 'deny',
 } as const;
 
+const PROMPT_ONLY_SUBAGENTS = {
+  [ROOMOTE_OPENCODE_ADVISOR_AGENT_NAME]: {
+    description: ROOMOTE_OPENCODE_ADVISOR_AGENT_DESCRIPTION,
+    mode: 'subagent',
+    prompt: createRoomoteAdvisorAgentPrompt({ contextOnly: true }),
+    permission: NON_TASK_TOOL_PERMISSION_DENIALS,
+    tools: FAST_AGENT_SUBAGENT_TOOL_FILTER,
+  },
+  [ROOMOTE_OPENCODE_JUDGE_AGENT_NAME]: {
+    description: ROOMOTE_OPENCODE_JUDGE_AGENT_DESCRIPTION,
+    mode: 'subagent',
+    prompt: createRoomoteJudgeAgentPrompt({ contextOnly: true }),
+    permission: NON_TASK_TOOL_PERMISSION_DENIALS,
+    tools: FAST_AGENT_SUBAGENT_TOOL_FILTER,
+  },
+} as const;
+
+type NonTaskOpenCodeRuntimeOptions = {
+  preserveReasoning?: boolean;
+  promptOnlySubagents?: boolean;
+};
+
+function buildRestrictedNonTaskConfig(
+  options: NonTaskOpenCodeRuntimeOptions,
+): Record<string, unknown> {
+  if (!options.promptOnlySubagents) {
+    return { permission: NON_TASK_TOOL_PERMISSION_DENIALS };
+  }
+
+  return {
+    agent: PROMPT_ONLY_SUBAGENTS,
+    permission: { ...NON_TASK_TOOL_PERMISSION_DENIALS, task: 'allow' },
+  };
+}
+
 /**
  * Config keys forwarded to non-task helper servers. Everything else is
  * dropped: OpenCode config can introduce or re-enable tools through several
@@ -211,8 +256,9 @@ const NON_TASK_CONFIG_ALLOWED_KEYS = [
  * non-task tool denials.
  *
  * The servers this module spawns exist only for non-task inference — task
- * titles, routing, fast-agent answers — which is plain text or structured
- * output and must never run tools. Without this, OpenCode's default `build`
+ * titles, routing, and Fast answers — and deny tools by default. Fast may opt
+ * into controlled prompt-only subagents, but their own configs retain the full
+ * denial set. Without this, OpenCode's default `build`
  * agent auto-approves edit/bash in server mode, and an instruction-shaped
  * prompt (a task description saying "add some dinosaurs") can cause the
  * control plane to edit its own working directory.
@@ -226,10 +272,10 @@ const NON_TASK_CONFIG_ALLOWED_KEYS = [
  */
 function toRestrictedNonTaskConfigContent(
   configContent: string | undefined,
+  options: NonTaskOpenCodeRuntimeOptions = {},
 ): string {
-  const permissionOnly = JSON.stringify({
-    permission: NON_TASK_TOOL_PERMISSION_DENIALS,
-  });
+  const restrictedRuntimeConfig = buildRestrictedNonTaskConfig(options);
+  const permissionOnly = JSON.stringify(restrictedRuntimeConfig);
 
   if (!configContent?.trim()) {
     return permissionOnly;
@@ -255,15 +301,14 @@ function toRestrictedNonTaskConfigContent(
       }
     }
 
-    // Non-task calls must never run with thinking enabled: structured output
-    // (`format: json_schema`) forces tool choice, and Amazon Bedrock rejects
-    // thinking combined with forced tool use — a helper-model reasoning
-    // effort would fail every routing call on such deployments. Reasoning is
-    // a coding-harness setting; title/summary/routing inference never needs
-    // it, so strip it for every provider rather than special-casing Bedrock.
-    // Applied to the merged config so operator-supplied
-    // OPENCODE_CONFIG_CONTENT cannot reintroduce thinking either.
+    // Structured non-task output (`format: json_schema`) forces tool choice,
+    // and Amazon Bedrock rejects thinking combined with forced tool use, so
+    // title/summary/routing helpers strip reasoning. Fast native sessions use
+    // plain text with their own tool bridge and retain the explicitly selected
+    // orchestration reasoning level. Apply this to the merged config so an
+    // operator-supplied OPENCODE_CONFIG_CONTENT follows the same policy.
     if (
+      !options.preserveReasoning &&
       restricted.provider &&
       typeof restricted.provider === 'object' &&
       !Array.isArray(restricted.provider)
@@ -279,7 +324,7 @@ function toRestrictedNonTaskConfigContent(
       }
     }
 
-    restricted.permission = NON_TASK_TOOL_PERMISSION_DENIALS;
+    Object.assign(restricted, restrictedRuntimeConfig);
 
     return JSON.stringify(restricted);
   } catch {
@@ -352,14 +397,72 @@ function mergeBedrockRegistrationsIntoConfigContent(
   }
 }
 
+function mergeReasoningIntoConfigContent(
+  configContent: string,
+  env: NodeJS.ProcessEnv,
+): string {
+  const rawModel = env.R_MODEL?.trim();
+  const reasoningEffort = normalizeOptionalReasoningEffort(
+    env.R_MODEL_REASONING_EFFORT?.trim(),
+  );
+
+  if (!rawModel || !reasoningEffort || isTaskModelIdDisabled(rawModel)) {
+    return configContent;
+  }
+
+  try {
+    const parsed: unknown = JSON.parse(configContent);
+
+    if (
+      typeof parsed !== 'object' ||
+      parsed === null ||
+      Array.isArray(parsed)
+    ) {
+      return configContent;
+    }
+
+    const config = parsed as Record<string, unknown>;
+    const existingProvider =
+      config.provider &&
+      typeof config.provider === 'object' &&
+      !Array.isArray(config.provider)
+        ? (config.provider as Record<string, unknown>)
+        : {};
+    const variantAliases = new Map<string, OpenRouterVariantModelAlias>();
+    const model = collectOpenRouterVariantModelAlias(
+      variantAliases,
+      toBedrockMantleRuntimeModelId(rawModel),
+    );
+    const provider = mergeOpenRouterVariantAliasModels(
+      mergeOpenCodeModelReasoningOptions(
+        existingProvider,
+        model,
+        reasoningEffort,
+      ),
+      variantAliases,
+    );
+
+    return JSON.stringify({ ...config, provider });
+  } catch {
+    return configContent;
+  }
+}
+
 export function buildOpenCodeCliEnv(
-  extraEnv?: Partial<Record<string, string>>,
+  extraEnv?: Partial<Record<string, string | undefined>>,
+  options: NonTaskOpenCodeRuntimeOptions = {},
 ): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {
     ...process.env,
     ...extraEnv,
     NO_COLOR: process.env.NO_COLOR ?? '1',
   };
+
+  for (const [envVarName, value] of Object.entries(extraEnv ?? {})) {
+    if (value === undefined) {
+      delete env[envVarName];
+    }
+  }
 
   for (const modelEnvVarName of [
     'R_MODEL',
@@ -388,6 +491,13 @@ export function buildOpenCodeCliEnv(
       env.OPENCODE_CONFIG_CONTENT,
       env,
     );
+
+    if (options.preserveReasoning) {
+      env.OPENCODE_CONFIG_CONTENT = mergeReasoningIntoConfigContent(
+        env.OPENCODE_CONFIG_CONTENT,
+        env,
+      );
+    }
   }
 
   // Applied unconditionally, after any operator-supplied config content is
@@ -395,6 +505,7 @@ export function buildOpenCodeCliEnv(
   // (mcp/plugin/agent config) or re-enable built-in ones.
   env.OPENCODE_CONFIG_CONTENT = toRestrictedNonTaskConfigContent(
     env.OPENCODE_CONFIG_CONTENT,
+    options,
   );
 
   // Do not inherit or accept disabled-provider credentials in helper model
@@ -545,19 +656,21 @@ function resolveConfiguredOpenCodeSdkServerUrl(): string | undefined {
 }
 
 function stableStringifyRecord(
-  value: Partial<Record<string, string>> | undefined,
+  value: Partial<Record<string, string | undefined>> | undefined,
 ): string {
   return JSON.stringify(
     Object.fromEntries(
       Object.entries(value ?? {})
-        .filter((entry): entry is [string, string] => Boolean(entry[1]))
-        .sort(([left], [right]) => left.localeCompare(right)),
+        .filter(([, entryValue]) => entryValue !== '')
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([key, entryValue]) => [key, entryValue ?? null]),
     ),
   );
 }
 
 function buildOpenCodeSdkServerCacheKey(
-  extraEnv?: Partial<Record<string, string>>,
+  extraEnv?: Partial<Record<string, string | undefined>>,
+  options: NonTaskOpenCodeRuntimeOptions = {},
 ): string {
   const command = resolveOpenCodeCommand([
     'serve',
@@ -570,6 +683,7 @@ function buildOpenCodeSdkServerCacheKey(
       JSON.stringify({
         command,
         extraEnv: stableStringifyRecord(extraEnv),
+        options,
         opencodeConfigContent:
           process.env.OPENCODE_CONFIG_CONTENT?.trim() || null,
       }),
@@ -662,7 +776,8 @@ async function waitForOpenCodeSdkServerReady(
 
 async function startManagedOpenCodeSdkServer(
   timeoutMs: number,
-  extraEnv?: Partial<Record<string, string>>,
+  extraEnv?: Partial<Record<string, string | undefined>>,
+  options: NonTaskOpenCodeRuntimeOptions = {},
 ): Promise<ManagedOpenCodeSdkServer> {
   const port = await reserveTcpPort(OPENCODE_SDK_SERVER_HOSTNAME);
   const url = `http://${OPENCODE_SDK_SERVER_HOSTNAME}:${port}`;
@@ -672,7 +787,7 @@ async function startManagedOpenCodeSdkServer(
     `--port=${port}`,
   ]);
   const proc = spawn(command.command, command.args, {
-    env: buildOpenCodeCliEnv(extraEnv),
+    env: buildOpenCodeCliEnv(extraEnv, options),
     stdio: ['ignore', 'pipe', 'pipe'],
     // Own process group, so shutdown can signal the entire tree (shell
     // wrappers included) via the negative pid.
@@ -763,8 +878,10 @@ class OpenCodeSdkServerPool {
   >();
 
   async lease(params: {
-    env?: Partial<Record<string, string>>;
+    env?: Partial<Record<string, string | undefined>>;
     ephemeral?: boolean;
+    preserveReasoning?: boolean;
+    promptOnlySubagents?: boolean;
     startTimeoutMs: number;
     useConfiguredServer?: boolean;
   }): Promise<OpenCodeSdkServerLease> {
@@ -782,7 +899,10 @@ class OpenCodeSdkServerPool {
 
     this.registerShutdown();
 
-    const cacheKey = buildOpenCodeSdkServerCacheKey(params.env);
+    const cacheKey = buildOpenCodeSdkServerCacheKey(params.env, {
+      preserveReasoning: params.preserveReasoning,
+      promptOnlySubagents: params.promptOnlySubagents,
+    });
     const cached = this.cache.get(cacheKey);
 
     if (cached) {
@@ -795,6 +915,10 @@ class OpenCodeSdkServerPool {
       startPromise = startManagedOpenCodeSdkServer(
         params.startTimeoutMs,
         params.env,
+        {
+          preserveReasoning: params.preserveReasoning,
+          promptOnlySubagents: params.promptOnlySubagents,
+        },
       )
         .then((server) => this.cacheStartedServer(cacheKey, server))
         .finally(() => {
@@ -922,13 +1046,17 @@ class OpenCodeSdkServerPool {
 const sharedOpenCodeSdkServerPool = new OpenCodeSdkServerPool();
 
 export function leaseOpenCodeSdkServer(params: {
-  env?: Partial<Record<string, string>>;
+  env?: Partial<Record<string, string | undefined>>;
   /**
    * Close the managed server as soon as the last lease is released instead
    * of caching it for the idle TTL. For one-shot calls whose env carries
    * candidate secrets that must not outlive the request.
    */
   ephemeral?: boolean;
+  /** Preserve configured model reasoning for plain-text Fast native sessions. */
+  preserveReasoning?: boolean;
+  /** Expose Roomote's controlled prompt-only subagents to Fast sessions. */
+  promptOnlySubagents?: boolean;
   startTimeoutMs: number;
   /**
    * Whether an operator-supplied OpenCode server may serve the request.

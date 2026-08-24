@@ -1,4 +1,8 @@
-import { BRAIN_COLLECTOR_IDS } from '@roomote/types';
+import {
+  BRAIN_COLLECTOR_IDS,
+  BRAIN_PAGE_TYPES,
+  renderBrainFrontmatter,
+} from '@roomote/types';
 
 import {
   db,
@@ -105,14 +109,18 @@ export function buildPersonIdentityPage(
     slug: personIdentitySlug(record.userId),
     title: name,
     content: [
-      '---',
-      'type: person',
-      `aliases: ${JSON.stringify(aliases)}`,
-      `status: ${deleted ? 'deleted' : 'active'}`,
-      `event_date: ${formatUtcDay(record.createdAt)}`,
-      ...(jobTitle ? [`job_title: ${JSON.stringify(jobTitle)}`] : []),
-      'provenance: roomote-person-identities',
-      '---',
+      ...renderBrainFrontmatter({
+        type: BRAIN_PAGE_TYPES.person,
+        title: name,
+        created: record.createdAt,
+        fields: [
+          `aliases: ${JSON.stringify(aliases)}`,
+          `status: ${deleted ? 'deleted' : 'active'}`,
+          `event_date: ${formatUtcDay(record.createdAt)}`,
+          jobTitle && `job_title: ${JSON.stringify(jobTitle)}`,
+          'provenance: roomote-person-identities',
+        ],
+      }),
       '',
       `# ${name}`,
       '',

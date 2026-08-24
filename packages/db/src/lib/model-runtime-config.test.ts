@@ -76,6 +76,7 @@ import {
   resolveEffectiveModelRuntimeEnv,
   resolveSandboxModelRuntimeEnv,
 } from './model-runtime-config';
+import { TASK_MODEL_ROLE_DESCRIPTORS, TASK_MODEL_ROLES } from '@roomote/types';
 
 describe('resolveEffectiveModelRuntimeEnv', () => {
   beforeEach(() => {
@@ -120,6 +121,47 @@ describe('resolveEffectiveModelRuntimeEnv', () => {
       R_MODEL_ENV_KEYS: 'OPENAI_API_KEY',
       OPENAI_API_KEY: 'sk-runtime',
     });
+  });
+
+  it('resolves model and reasoning env overrides for every role descriptor', async () => {
+    mockDeploymentSettingsFindFirst.mockResolvedValue({
+      runtimeModelConfig: {},
+    });
+    const runtimeEnv = Object.fromEntries(
+      TASK_MODEL_ROLES.flatMap((role) => {
+        const descriptor = TASK_MODEL_ROLE_DESCRIPTORS[role];
+        return [
+          [descriptor.modelEnvVar, `openrouter/test/${role}`],
+          [descriptor.reasoningEnvVar, 'xhigh'],
+        ];
+      }),
+    );
+
+    const env = await resolveEffectiveModelRuntimeEnv({
+      runtimeEnv,
+      deploymentEnvVars: { OPENROUTER_API_KEY: 'sk-openrouter' },
+    });
+
+    for (const role of TASK_MODEL_ROLES) {
+      const descriptor = TASK_MODEL_ROLE_DESCRIPTORS[role];
+      expect(env[descriptor.modelEnvVar]).toBe(`openrouter/test/${role}`);
+      expect(env[descriptor.reasoningEnvVar]).toBe('xhigh');
+    }
+
+    const sandboxEnv = await resolveSandboxModelRuntimeEnv({
+      runtimeEnv,
+      deploymentEnvVars: { OPENROUTER_API_KEY: 'sk-openrouter' },
+    });
+
+    for (const role of TASK_MODEL_ROLES) {
+      const descriptor = TASK_MODEL_ROLE_DESCRIPTORS[role];
+      expect(sandboxEnv[descriptor.modelEnvVar]).toBe(
+        descriptor.includeInSandbox ? `openrouter/test/${role}` : undefined,
+      );
+      expect(sandboxEnv[descriptor.reasoningEnvVar]).toBe(
+        descriptor.includeInSandbox ? 'xhigh' : undefined,
+      );
+    }
   });
 
   it('falls back to persisted model config and saved encrypted env vars', async () => {
@@ -203,6 +245,53 @@ describe('resolveEffectiveModelRuntimeEnv', () => {
       R_PLANNING_MODEL_REASONING_EFFORT: 'high',
       R_MODEL_ENV_KEYS: 'OPENROUTER_API_KEY',
       OPENROUTER_API_KEY: 'sk-openrouter',
+    });
+  });
+
+  it('resolves an orchestration model independently from the coding model', async () => {
+    mockDeploymentSettingsFindFirst.mockResolvedValue({
+      runtimeModelConfig: {
+        roomoteModel: 'openrouter/openai/gpt-5.4',
+        roomoteOrchestrationModel: 'anthropic/claude-sonnet-4',
+        roomoteOrchestrationModelReasoningEffort: 'high',
+      },
+    });
+
+    const env = await resolveEffectiveModelRuntimeEnv({
+      runtimeEnv: {},
+      deploymentEnvVars: {
+        OPENROUTER_API_KEY: 'sk-openrouter',
+        ANTHROPIC_API_KEY: 'sk-anthropic',
+      },
+    });
+
+    expect(env).toMatchObject({
+      R_MODEL: 'openrouter/openai/gpt-5.4',
+      R_ORCHESTRATION_MODEL: 'anthropic/claude-sonnet-4',
+      R_ORCHESTRATION_MODEL_REASONING_EFFORT: 'high',
+      R_MODEL_ENV_KEYS: 'OPENROUTER_API_KEY,ANTHROPIC_API_KEY',
+    });
+  });
+
+  it('defaults orchestration reasoning to low when no choice is persisted', async () => {
+    mockDeploymentSettingsFindFirst.mockResolvedValue({
+      runtimeModelConfig: {
+        roomoteModel: 'openrouter/openai/gpt-5.4',
+        roomoteOrchestrationModel: 'anthropic/claude-sonnet-4',
+      },
+    });
+
+    const env = await resolveEffectiveModelRuntimeEnv({
+      runtimeEnv: {},
+      deploymentEnvVars: {
+        OPENROUTER_API_KEY: 'sk-openrouter',
+        ANTHROPIC_API_KEY: 'sk-anthropic',
+      },
+    });
+
+    expect(env).toMatchObject({
+      R_ORCHESTRATION_MODEL: 'anthropic/claude-sonnet-4',
+      R_ORCHESTRATION_MODEL_REASONING_EFFORT: 'low',
     });
   });
 

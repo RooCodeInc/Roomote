@@ -44,6 +44,7 @@ import { getDeploymentStaticOauthReadiness } from '@/lib/server/deployment-stati
 import { Env, areCuratedIntegrationsDisabled } from '@/lib/server/env';
 import { assertCuratedIntegrationsEnabled } from '@/lib/server/curated-integrations';
 import { MCP_TOOL_CATALOG_REQUIRES_PERSONAL_CONNECTION } from '@/lib/mcp-tool-errors';
+import { captureIntegrationLifecycleEvent } from '@/lib/server/integration-telemetry';
 import type {
   SaveAsanaConnectionInput,
   SaveNotionConnectionInput,
@@ -695,6 +696,12 @@ export async function setDeploymentMcpEnabledCommand(
       .where(eq(mcpConnections.mcpId, input.mcpId));
   }
 
+  captureIntegrationLifecycleEvent(
+    input.enabled ? 'integration_enabled' : 'integration_disabled',
+    input.mcpId,
+    auth.userId,
+  );
+
   return result!;
 }
 
@@ -1106,6 +1113,19 @@ export async function saveSnowflakeConnectionCommand(
       },
     });
 
+  if (!existingConnection) {
+    captureIntegrationLifecycleEvent(
+      'integration_connected',
+      'snowflake',
+      auth.userId,
+    );
+    captureIntegrationLifecycleEvent(
+      'integration_enabled',
+      'snowflake',
+      auth.userId,
+    );
+  }
+
   return {
     authMethod: nextEncryptedPrivateKey
       ? ('key_pair' as const)
@@ -1197,6 +1217,19 @@ export async function saveAsanaConnectionCommand(
       },
     });
 
+  if (!existingConnection) {
+    captureIntegrationLifecycleEvent(
+      'integration_connected',
+      'asana',
+      auth.userId,
+    );
+    captureIntegrationLifecycleEvent(
+      'integration_enabled',
+      'asana',
+      auth.userId,
+    );
+  }
+
   return {
     authStatus: 'authenticated' as const,
   };
@@ -1282,6 +1315,19 @@ export async function saveNotionConnectionCommand(
         updatedAt: new Date(),
       },
     });
+
+  if (!existingConnection) {
+    captureIntegrationLifecycleEvent(
+      'integration_connected',
+      'notion',
+      auth.userId,
+    );
+    captureIntegrationLifecycleEvent(
+      'integration_enabled',
+      'notion',
+      auth.userId,
+    );
+  }
 
   return { authStatus: 'authenticated' as const };
 }
@@ -1369,6 +1415,19 @@ export async function saveRipplingConnectionCommand(
       },
     });
 
+  if (!existingConnection) {
+    captureIntegrationLifecycleEvent(
+      'integration_connected',
+      'rippling',
+      auth.userId,
+    );
+    captureIntegrationLifecycleEvent(
+      'integration_enabled',
+      'rippling',
+      auth.userId,
+    );
+  }
+
   return { authStatus: 'authenticated' as const };
 }
 
@@ -1450,6 +1509,19 @@ export async function saveGranolaConnectionCommand(
         updatedAt: new Date(),
       },
     });
+
+  if (!existingConnection) {
+    captureIntegrationLifecycleEvent(
+      'integration_connected',
+      'granola',
+      auth.userId,
+    );
+    captureIntegrationLifecycleEvent(
+      'integration_enabled',
+      'granola',
+      auth.userId,
+    );
+  }
 
   return {
     authStatus: 'authenticated' as const,
@@ -1536,6 +1608,19 @@ export async function saveElevenLabsConnectionCommand(
       },
     });
 
+  if (!existingConnection) {
+    captureIntegrationLifecycleEvent(
+      'integration_connected',
+      'elevenlabs',
+      auth.userId,
+    );
+    captureIntegrationLifecycleEvent(
+      'integration_enabled',
+      'elevenlabs',
+      auth.userId,
+    );
+  }
+
   return {
     authStatus: 'authenticated' as const,
   };
@@ -1614,6 +1699,11 @@ export async function saveXConnectionCommand(
         updatedAt: new Date(),
       },
     });
+
+  if (!existingConnection) {
+    captureIntegrationLifecycleEvent('integration_connected', 'x', auth.userId);
+    captureIntegrationLifecycleEvent('integration_enabled', 'x', auth.userId);
+  }
 
   return {
     authStatus: 'authenticated' as const,
@@ -1702,6 +1792,19 @@ export async function saveVercelConnectionCommand(
       },
     });
 
+  if (!existingConnection) {
+    captureIntegrationLifecycleEvent(
+      'integration_connected',
+      'vercel',
+      auth.userId,
+    );
+    captureIntegrationLifecycleEvent(
+      'integration_enabled',
+      'vercel',
+      auth.userId,
+    );
+  }
+
   return {
     authStatus: 'authenticated' as const,
     defaultTeamIdOrSlug: authConfig.defaultTeamIdOrSlug,
@@ -1787,6 +1890,19 @@ export async function saveGrafanaConnectionCommand(
         updatedAt: new Date(),
       },
     });
+
+  if (!existingConnection) {
+    captureIntegrationLifecycleEvent(
+      'integration_connected',
+      'grafana',
+      auth.userId,
+    );
+    captureIntegrationLifecycleEvent(
+      'integration_enabled',
+      'grafana',
+      auth.userId,
+    );
+  }
 
   return {
     authStatus: 'authenticated' as const,
@@ -2007,6 +2123,19 @@ export async function disconnectMcpCommand(
           updatedAt: new Date(),
         },
       });
+  }
+
+  captureIntegrationLifecycleEvent(
+    'integration_removed',
+    input.mcpId,
+    auth.userId,
+  );
+  if (connectionScope === 'deployment') {
+    captureIntegrationLifecycleEvent(
+      'integration_disabled',
+      input.mcpId,
+      auth.userId,
+    );
   }
 
   return { success: true };
