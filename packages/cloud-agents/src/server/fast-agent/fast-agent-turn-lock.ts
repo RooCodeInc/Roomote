@@ -82,13 +82,12 @@ export async function acquireFastAgentTurnLock(params: {
       const renewalTimer = setInterval(() => {
         if (renewalPending) return;
         renewalPending = true;
-        const renewalStartedAt = Date.now();
         void release
           .renewDetailed()
           .then((result) => {
             if (released || ownership.signal.aborted) return;
             if (result === 'renewed') {
-              scheduleLeaseDeadline(renewalStartedAt);
+              scheduleLeaseDeadline(Date.now());
             } else if (result === 'lost') {
               abortOwnership(new FastAgentTurnLockLostError());
             }
