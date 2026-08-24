@@ -1,5 +1,9 @@
 import type { ModelMessage } from 'ai';
 import {
+  ROOMOTE_OPENCODE_ADVISOR_AGENT_NAME,
+  ROOMOTE_OPENCODE_JUDGE_AGENT_NAME,
+} from '../../opencode-prompt-subagents';
+import {
   BRAIN_MCP_ID,
   INFERENCE_PROVIDER_MAX_RETRIES,
   formatErrorForLog,
@@ -26,6 +30,7 @@ import {
 } from './fast-agent-session';
 import {
   classifyNonTaskInferenceError,
+  FAST_AGENT_SESSION_PERMISSIONS,
   generateTrackedNonTaskTextInOpenCodeSession,
   isNonTaskOpenCodePromptTimeoutError,
   isNonTaskOpenCodeSessionNotFoundError,
@@ -41,6 +46,7 @@ import {
   getFastAgentNativeToolRuntime,
   type FastAgentNativeToolCall,
 } from './fast-agent-native-tool-bridge';
+import { isFastAgentSubagentTool } from './fast-agent-tool-policy';
 import {
   callFastAgentIntegration,
   listFastAgentIntegrations,
@@ -1060,7 +1066,13 @@ export async function answerFastAgentQuestion({
       bootstrapPrompt: serializedBootstrapPrompt,
       execute: async (openCodeSession, selectedPrompt) => {
         diagnostics.markInferenceSetupStarted();
-        let unbind: (() => void) | undefined;
+        const unbindExecutors = new Set<() => void>();
+        const boundSubagentSessionIDs = new Set<string>();
+        const unbindAllExecutors = () => {
+          for (const unbind of unbindExecutors) unbind();
+          unbindExecutors.clear();
+          boundSubagentSessionIDs.clear();
+        };
         let promptForAttempt = selectedPrompt;
         try {
           return await runFastAgentInferenceWithRetries(
@@ -1087,7 +1099,9 @@ export async function answerFastAgentQuestion({
                 {
                   directory: nativeRuntime.directory,
                   env: nativeRuntime.env,
+                  permission: FAST_AGENT_SESSION_PERMISSIONS,
                   signal,
+                  promptOnlySubagents: true,
                   tools: FAST_AGENT_NATIVE_TOOL_FILTER,
                   onModelResolved: (model) => {
                     diagnostics.recordModelResolved(model);
@@ -1096,10 +1110,31 @@ export async function answerFastAgentQuestion({
                     diagnostics.markInferenceStarted();
                   },
                   onSessionReady: (openCodeSessionID) => {
-                    unbind?.();
-                    unbind = bindFastAgentNativeToolExecutor(
-                      openCodeSessionID,
-                      executeNativeTool,
+                    unbindAllExecutors();
+                    unbindExecutors.add(
+                      bindFastAgentNativeToolExecutor(
+                        openCodeSessionID,
+                        executeNativeTool,
+                      ),
+                    );
+                  },
+                  onSubagentSessionReady: (subagentSessionID) => {
+                    if (boundSubagentSessionIDs.has(subagentSessionID)) return;
+                    boundSubagentSessionIDs.add(subagentSessionID);
+                    unbindExecutors.add(
+                      bindFastAgentNativeToolExecutor(
+                        subagentSessionID,
+                        (call) =>
+                          (call.agent === ROOMOTE_OPENCODE_ADVISOR_AGENT_NAME ||
+                            call.agent === ROOMOTE_OPENCODE_JUDGE_AGENT_NAME) &&
+                          isFastAgentSubagentTool(call.name)
+                            ? executeNativeTool(call)
+                            : Promise.resolve({
+                                success: false,
+                                error:
+                                  'That tool is reserved for the Fast parent agent.',
+                              }),
+                      ),
                     );
                   },
                 },
@@ -1127,7 +1162,7 @@ export async function answerFastAgentQuestion({
             },
           );
         } finally {
-          unbind?.();
+          unbindAllExecutors();
         }
       },
     });

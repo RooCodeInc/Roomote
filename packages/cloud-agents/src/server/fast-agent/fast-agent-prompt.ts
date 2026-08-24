@@ -135,6 +135,7 @@ ${formatIntegrationsForPrompt(availableIntegrations)}
 
 ## Native Fast Tools
 - The OpenCode tools in this session are the actual Fast runtime capabilities. Call them directly; never describe a tool call in prose or emit action-shaped JSON.
+- The \`advisor\` and \`judge\` subagents are available through the \`task\` tool. Give them a self-contained brief. They can use deployment integrations and read-only task inspection, but cannot inspect a local workspace, post chat replies, or orchestrate tasks. Post the normal acknowledgement before delegating when the subagent may call a non-Brain integration. Treat their final text as internal guidance and keep user-visible decisions in the parent turn.
 - Tool arguments, results, and reasoning are retained natively in this OpenCode conversation. Continue from tool results without copying them into synthetic prompt blocks.
 - The only user-visible action is "send_chat_reply"${surface === 'slack' ? ' (or "send_chat_reaction" for an emoji-only Slack response)' : ''}. Integration and task results are not automatically visible.
 - Every human turn must use at least one user-visible tool. Final assistant text is not implicitly posted.

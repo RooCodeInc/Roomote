@@ -6,6 +6,7 @@ import {
   bindFastAgentNativeToolExecutor,
   FAST_AGENT_NATIVE_TOOL_FILTER,
   FAST_AGENT_NATIVE_TOOL_NAMES,
+  FAST_AGENT_SUBAGENT_TOOL_FILTER,
   getFastAgentNativeToolRuntime,
 } from '../fast-agent-native-tool-bridge';
 
@@ -54,13 +55,31 @@ describe('Fast native OpenCode tool bridge', () => {
       'Use launch_task, send_task_message, or cancel_task for task changes',
     );
     expect(bridgeSource).toContain('context.sessionID');
+    expect(bridgeSource).toContain('agent: context.agent');
     expect(bridgeSource).toContain('metadata: { roomoteResult:');
     expect(FAST_AGENT_NATIVE_TOOL_FILTER).toMatchObject({
       '*': false,
+      task: true,
       [FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReply]: true,
       [FAST_AGENT_NATIVE_TOOL_NAMES.integrationCall]: true,
       [FAST_AGENT_NATIVE_TOOL_NAMES.manageTasks]: true,
     });
+    expect(FAST_AGENT_SUBAGENT_TOOL_FILTER).toEqual({
+      '*': false,
+      [FAST_AGENT_NATIVE_TOOL_NAMES.integrationCall]: true,
+      [FAST_AGENT_NATIVE_TOOL_NAMES.manageTasks]: true,
+    });
+    for (const parentOnlyTool of [
+      FAST_AGENT_NATIVE_TOOL_NAMES.cancelTask,
+      FAST_AGENT_NATIVE_TOOL_NAMES.ignoreEvent,
+      FAST_AGENT_NATIVE_TOOL_NAMES.launchTask,
+      FAST_AGENT_NATIVE_TOOL_NAMES.retryTaskStart,
+      FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReaction,
+      FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReply,
+      FAST_AGENT_NATIVE_TOOL_NAMES.sendTaskMessage,
+    ]) {
+      expect(FAST_AGENT_SUBAGENT_TOOL_FILTER[parentOnlyTool]).not.toBe(true);
+    }
   });
 
   it('routes raw JSON arguments and results by OpenCode session id', async () => {

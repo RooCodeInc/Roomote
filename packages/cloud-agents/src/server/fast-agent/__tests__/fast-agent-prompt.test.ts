@@ -38,6 +38,10 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain('Existing active tasks do not block');
     expect(prompt).toContain('send_chat_reply');
     expect(prompt).toContain('send_chat_reaction');
+    expect(prompt).toContain('`advisor` and `judge` subagents');
+    expect(prompt).toContain(
+      'deployment integrations and read-only task inspection',
+    );
     expect(prompt).toContain('launch_task');
     expect(prompt).toContain(
       'GPT-5.6 [id: openai/gpt-5.6] (deployment default)',

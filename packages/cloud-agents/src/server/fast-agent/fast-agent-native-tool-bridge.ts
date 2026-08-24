@@ -11,32 +11,23 @@ import { createRequire } from 'node:module';
 import { ROOMOTE_TASK_INSPECTION_ACTIONS } from '@roomote/types';
 import { z } from 'zod';
 
+import {
+  FAST_AGENT_NATIVE_TOOL_NAMES,
+  type FastAgentNativeToolName,
+} from './fast-agent-tool-policy';
+
+export {
+  FAST_AGENT_NATIVE_TOOL_FILTER,
+  FAST_AGENT_NATIVE_TOOL_NAMES,
+  FAST_AGENT_SUBAGENT_TOOL_FILTER,
+} from './fast-agent-tool-policy';
+export type { FastAgentNativeToolName } from './fast-agent-tool-policy';
+
 const FAST_AGENT_TOOL_BRIDGE_BODY_LIMIT_BYTES = 1_000_000;
 const FAST_AGENT_TOOL_BRIDGE_ERROR = 'Fast tool execution failed.';
 
-export const FAST_AGENT_NATIVE_TOOL_NAMES = {
-  cancelTask: 'cancel_task',
-  ignoreEvent: 'ignore_event',
-  integrationCall: 'integration_call',
-  launchTask: 'launch_task',
-  manageTasks: 'manage_tasks',
-  retryTaskStart: 'retry_task_start',
-  sendChatReaction: 'send_chat_reaction',
-  sendChatReply: 'send_chat_reply',
-  sendTaskMessage: 'send_task_message',
-} as const;
-
-export type FastAgentNativeToolName =
-  (typeof FAST_AGENT_NATIVE_TOOL_NAMES)[keyof typeof FAST_AGENT_NATIVE_TOOL_NAMES];
-
-export const FAST_AGENT_NATIVE_TOOL_FILTER: Record<string, boolean> = {
-  '*': false,
-  ...Object.fromEntries(
-    Object.values(FAST_AGENT_NATIVE_TOOL_NAMES).map((name) => [name, true]),
-  ),
-};
-
 export type FastAgentNativeToolCall = {
+  agent?: string;
   name: FastAgentNativeToolName;
   args: Record<string, unknown>;
 };
@@ -59,6 +50,7 @@ const bridgeRequestSchema = z.object({
     ],
   ),
   args: z.record(z.unknown()),
+  agent: z.string().min(1).optional(),
 });
 
 const FAST_AGENT_NATIVE_TOOL_BRIDGE_SOURCE = String.raw`
@@ -73,7 +65,7 @@ export const invoke = async (name, args, context) => {
       authorization: "Bearer " + token,
       "content-type": "application/json",
     },
-    body: JSON.stringify({ sessionID: context.sessionID, tool: name, args }),
+    body: JSON.stringify({ sessionID: context.sessionID, agent: context.agent, tool: name, args }),
   })
   const payload = await response.json().catch(() => null)
   if (!response.ok || !payload?.ok) {
@@ -326,7 +318,11 @@ async function startRuntime(): Promise<FastAgentNativeToolRuntime> {
         return;
       }
 
-      const result = await executor({ name: parsed.tool, args: parsed.args });
+      const result = await executor({
+        name: parsed.tool,
+        args: parsed.args,
+        ...(parsed.agent ? { agent: parsed.agent } : {}),
+      });
       writeJson(response, 200, { ok: true, result: result ?? null });
     } catch (error) {
       console.error('[Fast Agent] Native tool bridge request failed.', error);

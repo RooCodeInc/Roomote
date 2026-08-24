@@ -41,6 +41,14 @@ const NON_TASK_SESSION_PERMISSIONS: PermissionRuleset = Object.keys(
   NON_TASK_TOOL_PERMISSION_DENIALS,
 ).map((permission) => ({ permission, pattern: '*', action: 'deny' }));
 
+export const FAST_AGENT_SESSION_PERMISSIONS: PermissionRuleset = Object.keys(
+  NON_TASK_TOOL_PERMISSION_DENIALS,
+).map((permission) => ({
+  permission,
+  pattern: '*',
+  action: permission === 'task' ? 'allow' : 'deny',
+}));
+
 /**
  * Default per-prompt tool filter: disable every registered tool — including MCP or
  * plugin tools an externally configured server (`OPENCODE_SDK_SERVER_URL`)
@@ -195,7 +203,9 @@ export type NonTaskOpenCodeNativeSessionOptions = {
   onModelResolved?: (model: string) => void;
   onPromptStarted?: () => void;
   onSessionReady?: (sessionID: string) => Promise<void> | void;
+  onSubagentSessionReady?: (sessionID: string) => Promise<void> | void;
   permission?: PermissionRuleset;
+  promptOnlySubagents?: boolean;
   signal?: AbortSignal;
   tools: Record<string, boolean>;
 };
@@ -701,8 +711,10 @@ async function runNonTaskSdkPrompt(
     env?: Partial<Record<string, string>>;
     onPromptStarted?: () => void;
     onSessionReady?: (sessionID: string) => Promise<void> | void;
+    onSubagentSessionReady?: (sessionID: string) => Promise<void> | void;
     permission?: PermissionRuleset;
     preserveReasoning?: boolean;
+    promptOnlySubagents?: boolean;
     promptErrorLabel?: string;
     session?: NonTaskOpenCodeSession;
     signal?: AbortSignal;
@@ -723,6 +735,7 @@ async function runNonTaskSdkPrompt(
     env: { ...resolvedModelRuntimeEnv, ...options.env },
     ephemeral: options.ephemeral,
     preserveReasoning: options.preserveReasoning,
+    promptOnlySubagents: options.promptOnlySubagents,
     startTimeoutMs:
       timeoutMs === null
         ? DEFAULT_OPENCODE_SDK_SERVER_START_TIMEOUT_MS
@@ -799,7 +812,7 @@ async function runNonTaskSdkPrompt(
     });
     let eventMonitor: Promise<void> | undefined;
 
-    if (params.onProviderRetry) {
+    if (params.onProviderRetry || options.onSubagentSessionReady) {
       try {
         const subscription = await client.event.subscribe(
           { directory: sessionDirectory },
@@ -809,6 +822,19 @@ async function runNonTaskSdkPrompt(
           try {
             for await (const event of subscription.stream) {
               if (
+                (event.type === 'session.created' ||
+                  event.type === 'session.updated') &&
+                event.properties.info.parentID === sessionId
+              ) {
+                try {
+                  await options.onSubagentSessionReady?.(
+                    event.properties.sessionID,
+                  );
+                } catch (error) {
+                  rejectSessionError(error);
+                  return;
+                }
+              } else if (
                 event.type === 'session.status' &&
                 event.properties.sessionID === sessionId &&
                 event.properties.status.type === 'retry'
@@ -873,7 +899,12 @@ async function runNonTaskSdkPrompt(
           }
         })();
       } catch (error) {
-        // Event reporting is additive. Keep the prompt path available if an
+        if (options.onSubagentSessionReady) {
+          throw new Error(
+            `OpenCode subagent session discovery is unavailable: ${formatOpenCodeSdkError(error)}`,
+          );
+        }
+        // Retry reporting is additive. Keep the prompt path available if an
         // older externally configured OpenCode server cannot stream events.
         if (!eventAbortController.signal.aborted) {
           console.warn(
@@ -895,9 +926,10 @@ async function runNonTaskSdkPrompt(
         },
         { signal: abortController.signal },
       );
-      const promptResult = params.onProviderRetry
-        ? await Promise.race([promptRequest, sessionError])
-        : await promptRequest;
+      const promptResult =
+        params.onProviderRetry || options.onSubagentSessionReady
+          ? await Promise.race([promptRequest, sessionError])
+          : await promptRequest;
 
       if (promptResult.error || !promptResult.data) {
         if (isOpenCodeSessionMissing(promptResult.error)) {
@@ -1027,8 +1059,10 @@ export async function generateTrackedNonTaskTextInOpenCodeSession(
       env: options.env,
       onPromptStarted: options.onPromptStarted,
       onSessionReady: options.onSessionReady,
+      onSubagentSessionReady: options.onSubagentSessionReady,
       permission: options.permission,
       preserveReasoning: true,
+      promptOnlySubagents: options.promptOnlySubagents,
       promptErrorLabel: 'OpenCode native Fast prompt failed',
       session,
       signal: options.signal,
