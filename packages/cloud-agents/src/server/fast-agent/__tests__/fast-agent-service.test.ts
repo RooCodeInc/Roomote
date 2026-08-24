@@ -688,6 +688,85 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     expect(mocks.invalidateSession).toHaveBeenCalledWith('conversation-1');
   });
 
+  it('closes a retry notice when conversation lock loss cancels backoff', async () => {
+    vi.useFakeTimers();
+    const controller = new AbortController();
+    const lockLost = new Error('Fast conversation lock ownership was lost.');
+    const postReply = vi.fn().mockImplementation(async () => {
+      controller.abort(lockLost);
+      return { messageId: 'retry-1' };
+    });
+    const replaceReply = vi.fn().mockResolvedValue({ messageId: 'retry-1' });
+    mocks.generateText.mockRejectedValue(new Error('TypeError: fetch failed'));
+
+    try {
+      const resultPromise = answerFastAgentQuestion({
+        ...baseParams,
+        adapter: callbacks({ postReply, replaceReply }),
+        signal: controller.signal,
+      });
+      const rejection = expect(resultPromise).rejects.toBe(lockLost);
+      await vi.runAllTimersAsync();
+
+      await rejection;
+      expect(mocks.generateText).toHaveBeenCalledOnce();
+      expect(postReply).toHaveBeenCalledWith({
+        purpose: 'progress',
+        message: expect.stringContaining('attempt 1/6'),
+      });
+      expect(replaceReply).toHaveBeenCalledWith(
+        { messageId: 'retry-1' },
+        {
+          purpose: 'closeout',
+          message:
+            'The inference retry was interrupted before it completed. Please send the request again.',
+        },
+      );
+      expect(mocks.invalidateSession).toHaveBeenCalledWith('conversation-1');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not start another attempt when lock loss follows backoff expiry', async () => {
+    const controller = new AbortController();
+    const lockLost = new Error('Fast conversation lock ownership was lost.');
+    const postReply = vi.fn().mockResolvedValue({ messageId: 'retry-1' });
+    const replaceReply = vi.fn().mockResolvedValue({ messageId: 'retry-1' });
+    const originalSetTimeout = globalThis.setTimeout;
+    let shouldAbort = true;
+    const timeout = vi.spyOn(globalThis, 'setTimeout').mockImplementation(((
+      callback: () => void,
+    ) => {
+      return originalSetTimeout(() => {
+        callback();
+        if (shouldAbort) {
+          shouldAbort = false;
+          controller.abort(lockLost);
+        }
+      }, 0);
+    }) as typeof setTimeout);
+    mocks.generateText.mockRejectedValue(new Error('TypeError: fetch failed'));
+
+    try {
+      await expect(
+        answerFastAgentQuestion({
+          ...baseParams,
+          adapter: callbacks({ postReply, replaceReply }),
+          signal: controller.signal,
+        }),
+      ).rejects.toBe(lockLost);
+
+      expect(mocks.generateText).toHaveBeenCalledOnce();
+      expect(replaceReply).toHaveBeenCalledWith(
+        { messageId: 'retry-1' },
+        expect.objectContaining({ purpose: 'closeout' }),
+      );
+    } finally {
+      timeout.mockRestore();
+    }
+  });
+
   it('passes image data URLs to the Fast model as image-capable file input', async () => {
     await answerFastAgentQuestion({
       ...baseParams,
