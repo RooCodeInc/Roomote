@@ -1852,22 +1852,79 @@ describe('enqueue-failure cancel task state', () => {
     }
   });
 
-  it('removes an activated queue entry when ownership aborts during activation', async () => {
+  it('keeps a staged entry held when ownership aborts during activation preparation', async () => {
     const userId = await createUser();
     const controller = new AbortController();
     const previousQueue = TaskRunQueue.queue;
     const queueRedis = new Redis();
     const queue = new TaskRunQueue({ redis: queueRedis, timeout: 1 });
-    const activateDelayedEntry = queue.activateDelayedEntry.bind(queue);
+    const prepareDelayedEntryActivation =
+      queue.prepareDelayedEntryActivation.bind(queue);
     let capturedTaskId: string | undefined;
+    let competingDequeue: Promise<unknown> | undefined;
     TaskRunQueue.queue = queue;
-    vi.spyOn(queue, 'activateDelayedEntry').mockImplementation(
-      async (entryId, availableAt) => {
-        const activated = await activateDelayedEntry(entryId, availableAt);
+    vi.spyOn(queue, 'prepareDelayedEntryActivation').mockImplementation(
+      async (entryId) => {
+        const prepared = await prepareDelayedEntryActivation(entryId);
         controller.abort(
           new Error('Fast conversation lock ownership was lost.'),
         );
-        return activated;
+        competingDequeue = queue.dequeue(false);
+        return prepared;
+      },
+    );
+
+    try {
+      await expect(
+        enqueueTask(
+          {
+            task: standardTaskInput(),
+            initiator: { kind: 'user', userId },
+            workflow: 'standard',
+            surface: 'slack',
+            trigger: 'message',
+          },
+          {
+            skipEarlyTitleGeneration: true,
+            signal: controller.signal,
+            beforeEnqueue: async (taskRun) => {
+              capturedTaskId = taskRun.taskId;
+            },
+          },
+        ),
+      ).rejects.toThrow('Fast conversation lock ownership was lost.');
+
+      expect(capturedTaskId).toBeDefined();
+      createdTaskIds.push(capturedTaskId!);
+      await expect(competingDequeue).resolves.toBeNull();
+      expect(await queue.dequeue(false)).toBeNull();
+      const runs = await db.query.taskRuns.findMany({
+        where: eq(taskRuns.taskId, capturedTaskId!),
+      });
+      expect(runs).toHaveLength(1);
+      expect(runs[0]!.status).toBe(RunStatus.Canceled);
+    } finally {
+      TaskRunQueue.queue = previousQueue;
+      await queueRedis.quit();
+    }
+  });
+
+  it('removes a committed entry when cancellation wins before dequeue', async () => {
+    const userId = await createUser();
+    const controller = new AbortController();
+    const previousQueue = TaskRunQueue.queue;
+    const queueRedis = new Redis();
+    const queue = new TaskRunQueue({ redis: queueRedis, timeout: 1 });
+    const commitDelayedEntry = queue.commitDelayedEntry.bind(queue);
+    let capturedTaskId: string | undefined;
+    TaskRunQueue.queue = queue;
+    vi.spyOn(queue, 'commitDelayedEntry').mockImplementation(
+      async (entryId, availableAt) => {
+        const committed = await commitDelayedEntry(entryId, availableAt);
+        controller.abort(
+          new Error('Fast conversation lock ownership was lost.'),
+        );
+        return committed;
       },
     );
 
@@ -1911,17 +1968,17 @@ describe('enqueue-failure cancel task state', () => {
     const previousQueue = TaskRunQueue.queue;
     const queueRedis = new Redis();
     const queue = new TaskRunQueue({ redis: queueRedis, timeout: 1 });
-    const activateDelayedEntry = queue.activateDelayedEntry.bind(queue);
+    const commitDelayedEntry = queue.commitDelayedEntry.bind(queue);
     let dequeuedEntry: Awaited<ReturnType<typeof queue.dequeue>> = null;
     TaskRunQueue.queue = queue;
-    vi.spyOn(queue, 'activateDelayedEntry').mockImplementation(
+    vi.spyOn(queue, 'commitDelayedEntry').mockImplementation(
       async (entryId, availableAt) => {
-        const activated = await activateDelayedEntry(entryId, availableAt);
+        const committed = await commitDelayedEntry(entryId, availableAt);
         dequeuedEntry = await queue.dequeue(false);
         controller.abort(
           new Error('Fast conversation lock ownership was lost.'),
         );
-        return activated;
+        return committed;
       },
     );
 

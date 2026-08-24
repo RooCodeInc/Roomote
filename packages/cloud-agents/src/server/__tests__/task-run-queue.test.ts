@@ -192,7 +192,9 @@ describe('TaskRunQueue - Basic Operations', () => {
       await queue.enqueue(entry);
 
       await expect(queue.removeDelayedEntry(entry.id)).resolves.toBe(true);
-      await expect(queue.activateDelayedEntry(entry.id)).resolves.toBe(false);
+      await expect(queue.prepareDelayedEntryActivation(entry.id)).resolves.toBe(
+        false,
+      );
       await expect(queue.dequeue(false)).resolves.toBeNull();
     });
 
@@ -203,7 +205,10 @@ describe('TaskRunQueue - Basic Operations', () => {
       };
       await queue.enqueue(entry);
 
-      await expect(queue.activateDelayedEntry(entry.id)).resolves.toBe(true);
+      await expect(queue.prepareDelayedEntryActivation(entry.id)).resolves.toBe(
+        true,
+      );
+      await expect(queue.commitDelayedEntry(entry.id)).resolves.toBe(true);
       await expect(queue.dequeue(false)).resolves.toEqual(entry);
       await expect(queue.removeDelayedEntry(entry.id)).resolves.toBe(false);
     });
