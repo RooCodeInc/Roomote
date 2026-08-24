@@ -343,6 +343,10 @@ async function renderStepRepoSelection(
   };
 }
 
+function showMissingRepositoryOptions() {
+  fireEvent.click(screen.getByRole('button', { name: 'Missing something?' }));
+}
+
 describe('StepRepoSelection', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -397,6 +401,8 @@ describe('StepRepoSelection', () => {
 
   it('restarts GitHub access management from the edit access action', async () => {
     await renderStepRepoSelection();
+
+    showMissingRepositoryOptions();
 
     fireEvent.click(
       screen.getByRole('button', { name: /^edit github access$/i }),
@@ -872,6 +878,12 @@ describe('StepRepoSelection', () => {
     await renderStepRepoSelection();
     mockRefetchRepositories.mockClear();
 
+    expect(
+      screen.queryByRole('button', { name: /refresh list/i }),
+    ).not.toBeInTheDocument();
+
+    showMissingRepositoryOptions();
+
     fireEvent.click(screen.getByRole('button', { name: /refresh list/i }));
 
     await waitFor(() => {
@@ -1146,7 +1158,7 @@ describe('StepRepoSelection', () => {
     });
   });
 
-  it('shows a skip action with a not recommended hint and calls onSkip', async () => {
+  it('shows a skip action and calls onSkip', async () => {
     const onSkip = vi.fn();
 
     await renderStepRepoSelection({ onSkip });
@@ -1156,8 +1168,6 @@ describe('StepRepoSelection', () => {
         name: 'Continue',
       }),
     ).not.toBeInTheDocument();
-    expect(screen.getByText('Not recommended')).toBeInTheDocument();
-
     fireEvent.click(screen.getByRole('button', { name: 'Skip' }));
 
     expect(onSkip).toHaveBeenCalledTimes(1);

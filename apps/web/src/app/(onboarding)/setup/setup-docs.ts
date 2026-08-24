@@ -24,6 +24,7 @@ const SETUP_DOC_PATHS: Record<SetupDocsStep, string | null> = {
   'source-control-connect': 'source-control',
   'compute-provider': 'compute',
   'compute-config': 'compute',
+  'environment-explainer': 'environments',
   'repo-selection': 'environments',
   'automation-recommendations': 'automations',
   invoke: 'how-roomote-works',

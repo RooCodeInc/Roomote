@@ -51,6 +51,10 @@ const SETUP_STEP_DEFINITIONS = [
     title: 'Configure sandboxes',
   },
   {
+    id: 'environment-explainer',
+    title: 'Roomote Environments',
+  },
+  {
     id: 'repo-selection',
     title: 'Set up environment',
   },
