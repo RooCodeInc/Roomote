@@ -6,8 +6,16 @@ import type { Task } from '@/lib/server';
 
 vi.mock('@/components/sandbox', () => ({
   WorkspaceBadge: ({ repo }: { repo?: string }) => <span>{repo}</span>,
-  PullRequestBadge: ({ prNumber }: { prNumber: number }) => (
-    <span>PR #{prNumber}</span>
+  PullRequestBadge: ({
+    prNumber,
+    className,
+  }: {
+    prNumber: number;
+    className?: string;
+  }) => (
+    <a href={`https://example.test/pull/${prNumber}`} className={className}>
+      PR #{prNumber}
+    </a>
   ),
 }));
 
@@ -58,6 +66,29 @@ function createTask(overrides: Partial<Task> = {}): Task {
 }
 
 describe('TaskBoard', () => {
+  it('keeps pull request badges independently clickable', () => {
+    render(
+      <TaskBoard
+        tasks={[
+          createTask({
+            taskRun: {
+              status: RunStatus.Running,
+              taskPhase: 'running',
+              payload: {},
+              prRepo: 'RooCodeInc/Roomote',
+              prNumber: 42,
+            } as Task['taskRun'],
+          }),
+        ]}
+      />,
+    );
+
+    expect(screen.getByRole('link', { name: 'PR #42' })).toHaveAttribute(
+      'href',
+      'https://example.test/pull/42',
+    );
+  });
+
   it('groups tasks and keeps completed work bounded', () => {
     const doneTasks = Array.from({ length: 8 }, (_, index) =>
       createTask({
@@ -110,6 +141,9 @@ describe('TaskBoard', () => {
     ).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: /^Done/ })).toBeInTheDocument();
     expect(screen.getByText('Active task')).toBeInTheDocument();
+    expect(
+      screen.getByRole('link', { name: 'Open task: Active task' }),
+    ).toHaveAttribute('href', '/task/task-1');
     expect(screen.queryByText('Code')).not.toBeInTheDocument();
     expect(screen.queryByText('Discord')).not.toBeInTheDocument();
     expect(

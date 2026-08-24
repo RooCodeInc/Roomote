@@ -71,12 +71,20 @@ function BoardTaskCard({ task }: { task: Task }) {
   const hiddenPeopleCount = Math.max(people.length - visiblePeople.length, 0);
 
   return (
-    <div className="ph-no-capture p-4 space-y-1.5 bg-card gap-4 transition-colors hover:bg-muted/50 cursor-pointer">
+    <div className="ph-no-capture relative cursor-pointer space-y-1.5 bg-card p-4 transition-colors hover:bg-muted/50">
+      <Link
+        href={`/task/${task.id}`}
+        aria-label={`Open task: ${stripMarkdown(stripHtmlTags(task.title))}`}
+        className="absolute inset-0 z-10 focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-ring"
+      />
       <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground/75">
         <span className="truncate">Started by {actorName}</span>
         <Tooltip>
           <TooltipTrigger asChild>
-            <time dateTime={activityDate.toISOString()} className="shrink-0">
+            <time
+              dateTime={activityDate.toISOString()}
+              className="relative z-20 shrink-0"
+            >
               {formatDistanceToNow(activityDate, { addSuffix: true })}
             </time>
           </TooltipTrigger>
@@ -84,12 +92,7 @@ function BoardTaskCard({ task }: { task: Task }) {
         </Tooltip>
       </div>
       <div className="text-base font-semibold leading-snug -mt-1">
-        <Link
-          href={`/task/${task.id}`}
-          className="line-clamp-2 hover:underline"
-        >
-          {stripMarkdown(stripHtmlTags(task.title))}
-        </Link>
+        {stripMarkdown(stripHtmlTags(task.title))}
       </div>
       {getTaskBoardColumn(task) === 'blocked' && task.goalBlockedReason && (
         <p className="line-clamp-2 text-xs text-destructive">
@@ -114,13 +117,14 @@ function BoardTaskCard({ task }: { task: Task }) {
               <PullRequestBadge
                 repo={task.taskRun.prRepo}
                 prNumber={task.taskRun.prNumber}
+                className="relative z-20"
                 iconClassName="size-3"
               />
             )}
           </div>
         )}
         <div
-          className="ml-auto flex shrink-0 items-center -space-x-2"
+          className="relative z-20 ml-auto flex shrink-0 items-center -space-x-2"
           aria-label={`${people.length || 1} task participant${people.length === 1 ? '' : 's'}`}
         >
           {visiblePeople.map((person) => {
