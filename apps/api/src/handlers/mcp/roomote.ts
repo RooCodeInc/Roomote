@@ -52,6 +52,7 @@ import { requireCommunicationLookupTaskRun } from './communication-lookup-run-co
 import type { McpAuth } from './middleware';
 import { resolveAboutMeVersion } from './about-me-version';
 import { registerRoomoteMemberTools } from './roomote-member-tools';
+import { registerRoomoteCustomAutomationsTool } from './roomote-custom-automations-tool';
 
 const ROOMOTE_MCP_SERVER_INFO = {
   name: 'roomote-router-mcp',
@@ -379,6 +380,7 @@ function createRoomoteTransport() {
 function createRoomoteMcpServer(
   auth: McpAuthContext,
   actingUserId: string | null,
+  customAutomationsAuth: McpAuth,
   memberAuth?: McpAuth,
 ) {
   const server = new McpServer(ROOMOTE_MCP_SERVER_INFO, {
@@ -388,6 +390,7 @@ function createRoomoteMcpServer(
   if (memberAuth) {
     registerRoomoteMemberTools(server, memberAuth);
   }
+  registerRoomoteCustomAutomationsTool(server, customAutomationsAuth);
 
   server.registerTool(
     'get_about_me',
@@ -526,26 +529,35 @@ function createRoomoteMcpRouter(options: {
 
     try {
       const rawAuth = c.get('authContext');
+      if (!rawAuth) {
+        throw new McpProxyError(
+          401,
+          'Unauthorized: missing or invalid bearer token',
+        );
+      }
       const auth = await resolveRoomoteMcpAuth(rawAuth, options);
       // Null means the job runs as the deployment service principal; the
       // context tools are informational and support that case. Member tools
       // are only mounted on the public endpoint and retain the resolved user.
       const actingUserId = await resolveActingUserIdOrNull(auth);
-      const memberAuth =
-        options.memberTools && rawAuth
-          ? {
-              userId: actingUserId ?? undefined,
-              authContext:
-                rawAuth.tokenType === 'mcp'
-                  ? {
-                      userId: rawAuth.userId,
-                      tokenType: 'auth' as const,
-                      version: rawAuth.version,
-                    }
-                  : rawAuth,
-            }
-          : undefined;
-      const server = createRoomoteMcpServer(auth, actingUserId, memberAuth);
+      const toolAuth = {
+        userId: actingUserId ?? undefined,
+        authContext:
+          rawAuth.tokenType === 'mcp'
+            ? {
+                userId: rawAuth.userId,
+                tokenType: 'auth' as const,
+                version: rawAuth.version,
+              }
+            : rawAuth,
+      };
+      const memberAuth = options.memberTools ? toolAuth : undefined;
+      const server = createRoomoteMcpServer(
+        auth,
+        actingUserId,
+        toolAuth,
+        memberAuth,
+      );
 
       await server.connect(transport);
       return await transport.handleRequest(c.req.raw);

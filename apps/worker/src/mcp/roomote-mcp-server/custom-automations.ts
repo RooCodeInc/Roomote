@@ -1,3 +1,5 @@
+import type { ManageCustomAutomationsInput } from '@roomote/types';
+
 import type { RoomoteConfig, ToolResult } from './types.js';
 import {
   buildApiHeaders,
@@ -6,30 +8,8 @@ import {
 } from './api-client.js';
 import { errorResult } from './tool-result.js';
 
-type ManageCustomAutomationsParams = {
-  action:
-    | 'list'
-    | 'list_models'
-    | 'resolve_schedule'
-    | 'create'
-    | 'update'
-    | 'delete'
-    | 'run_now';
-  automationId?: string;
-  name?: string;
-  prompt?: string;
-  enabled?: boolean;
-  schedule?: string;
-  model?: string | null;
-  environmentId?: string;
-  targetProvider?: 'slack' | 'discord' | 'teams' | 'telegram' | null;
-  targetMode?: 'channel' | 'direct_message';
-  targetChannelId?: string;
-  targetServiceUrl?: string;
-};
-
 export async function handleManageCustomAutomations(
-  params: ManageCustomAutomationsParams,
+  params: ManageCustomAutomationsInput,
   config: RoomoteConfig,
 ): Promise<ToolResult> {
   let path = '/api/mcp/custom-automations';
