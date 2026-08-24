@@ -1088,6 +1088,7 @@ export async function answerFastAgentQuestion({
                   directory: nativeRuntime.directory,
                   env: nativeRuntime.env,
                   signal,
+                  promptOnlySubagents: true,
                   tools: FAST_AGENT_NATIVE_TOOL_FILTER,
                   onModelResolved: (model) => {
                     diagnostics.recordModelResolved(model);

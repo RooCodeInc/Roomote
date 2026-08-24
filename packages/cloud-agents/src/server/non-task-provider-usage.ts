@@ -196,6 +196,7 @@ export type NonTaskOpenCodeNativeSessionOptions = {
   onPromptStarted?: () => void;
   onSessionReady?: (sessionID: string) => Promise<void> | void;
   permission?: PermissionRuleset;
+  promptOnlySubagents?: boolean;
   signal?: AbortSignal;
   tools: Record<string, boolean>;
 };
@@ -703,6 +704,7 @@ async function runNonTaskSdkPrompt(
     onSessionReady?: (sessionID: string) => Promise<void> | void;
     permission?: PermissionRuleset;
     preserveReasoning?: boolean;
+    promptOnlySubagents?: boolean;
     promptErrorLabel?: string;
     session?: NonTaskOpenCodeSession;
     signal?: AbortSignal;
@@ -723,6 +725,7 @@ async function runNonTaskSdkPrompt(
     env: { ...resolvedModelRuntimeEnv, ...options.env },
     ephemeral: options.ephemeral,
     preserveReasoning: options.preserveReasoning,
+    promptOnlySubagents: options.promptOnlySubagents,
     startTimeoutMs:
       timeoutMs === null
         ? DEFAULT_OPENCODE_SDK_SERVER_START_TIMEOUT_MS
@@ -1029,6 +1032,7 @@ export async function generateTrackedNonTaskTextInOpenCodeSession(
       onSessionReady: options.onSessionReady,
       permission: options.permission,
       preserveReasoning: true,
+      promptOnlySubagents: options.promptOnlySubagents,
       promptErrorLabel: 'OpenCode native Fast prompt failed',
       session,
       signal: options.signal,

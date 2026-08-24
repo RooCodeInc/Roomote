@@ -31,6 +31,7 @@ export type FastAgentNativeToolName =
 
 export const FAST_AGENT_NATIVE_TOOL_FILTER: Record<string, boolean> = {
   '*': false,
+  task: true,
   ...Object.fromEntries(
     Object.values(FAST_AGENT_NATIVE_TOOL_NAMES).map((name) => [name, true]),
   ),

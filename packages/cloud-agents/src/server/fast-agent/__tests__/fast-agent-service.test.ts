@@ -78,6 +78,7 @@ vi.mock('../fast-agent-native-tool-bridge', () => ({
   FAST_AGENT_NATIVE_TOOL_FILTER: {
     '*': false,
     send_chat_reply: true,
+    task: true,
   },
   getFastAgentNativeToolRuntime: vi.fn(async () => ({
     directory: '/tmp/fast-native-tools',
@@ -276,8 +277,10 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       { id: 'opencode-session-1' },
       expect.objectContaining({
         directory: '/tmp/fast-native-tools',
+        promptOnlySubagents: true,
         tools: expect.objectContaining({
           send_chat_reply: true,
+          task: true,
         }),
       }),
     );

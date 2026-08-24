@@ -57,6 +57,7 @@ describe('Fast native OpenCode tool bridge', () => {
     expect(bridgeSource).toContain('metadata: { roomoteResult:');
     expect(FAST_AGENT_NATIVE_TOOL_FILTER).toMatchObject({
       '*': false,
+      task: true,
       [FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReply]: true,
       [FAST_AGENT_NATIVE_TOOL_NAMES.integrationCall]: true,
       [FAST_AGENT_NATIVE_TOOL_NAMES.manageTasks]: true,
