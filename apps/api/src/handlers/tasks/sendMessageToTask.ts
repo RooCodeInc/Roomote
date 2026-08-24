@@ -636,6 +636,7 @@ async function getLinkedReviewHandoffTarget({
   targetTaskId,
 }: {
   sourceRun: {
+    taskId: string;
     type: TaskPayloadKind | string | null;
     payload: Record<string, unknown>;
   };
@@ -687,7 +688,9 @@ async function getLinkedReviewHandoffTarget({
 
   const prLink = await db.query.taskPullRequests.findFirst({
     where: and(
-      eq(taskPullRequests.taskId, targetTaskId),
+      // PR synchronize refreshes the review task linkage to the pushed head;
+      // the implementation owner's association can still contain its initial SHA.
+      eq(taskPullRequests.taskId, sourceRun.taskId),
       eq(taskPullRequests.repository, repo),
       eq(taskPullRequests.prNumber, prNumber),
     ),
@@ -775,6 +778,7 @@ async function resolveLinkedReviewHandoff({
 
   const handoffTarget = await getLinkedReviewHandoffTarget({
     sourceRun: {
+      taskId: sourceRun.taskId,
       type: sourceRun.payloadKind,
       payload: sourcePayload,
     },

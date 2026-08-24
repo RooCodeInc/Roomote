@@ -17,6 +17,8 @@ const {
   mockUserFindFirst,
   mockTaskPullRequestFindFirst,
   mockTaskRunFindFirst,
+  mockAnd,
+  mockEq,
 } = vi.hoisted(() => ({
   mockCreateRunToken: vi.fn(),
   mockCreateTRPCProxyClient: vi.fn(),
@@ -36,6 +38,8 @@ const {
   mockUserFindFirst: vi.fn(),
   mockTaskPullRequestFindFirst: vi.fn(),
   mockTaskRunFindFirst: vi.fn(),
+  mockAnd: vi.fn((...conditions: unknown[]) => conditions),
+  mockEq: vi.fn((left: unknown, right: unknown) => ({ left, right })),
 }));
 
 vi.mock('../acting-user-sync', () => ({
@@ -117,6 +121,8 @@ vi.mock('@roomote/db/server', async (importOriginal) => {
     ...actual,
     findReusableGitHubPrFollowUpOwner: mockFindReusableGitHubPrFollowUpOwner,
     getTaskGoalForRun: mockGetTaskGoalForRun,
+    and: mockAnd,
+    eq: mockEq,
     db: {
       query: {
         users: {
@@ -510,6 +516,76 @@ describe('sendMessageToTask', () => {
     });
     expect(mockNotifyFastAgentParentOnPrFeedback).not.toHaveBeenCalled();
     expect(mockSendPromptMutate).not.toHaveBeenCalled();
+  });
+
+  it('delivers a current sync review after the implementation task PR link becomes stale', async () => {
+    mockFindLatestTaskRun.mockResolvedValue(
+      createActiveRun({
+        payload: {
+          fastAgentParent: {
+            sessionId: '11111111-1111-4111-8111-111111111111',
+            conversation: {
+              surface: 'slack',
+              workspaceId: 'T123',
+              conversationId: '100.001',
+              replyTarget: { channelId: 'C123', threadId: '100.001' },
+            },
+          },
+        },
+      }),
+    );
+    mockTaskRunFindFirst.mockResolvedValue({
+      id: 201,
+      taskId: 'review-task',
+      payloadKind: 'github_pr_review_sync',
+      payload: {
+        repo: 'acme/app',
+        prNumber: 42,
+        prUrl: 'https://github.com/acme/app/pull/42',
+        headSha: 'new-head',
+      },
+    });
+    mockFindReusableGitHubPrFollowUpOwner.mockResolvedValue({
+      taskId: 'task-1',
+    });
+    // This row is resolved through the review task, whose linkage is refreshed
+    // on pull_request.synchronize; the implementation task may still hold old-head.
+    mockTaskPullRequestFindFirst.mockResolvedValue({
+      host: 'github.com',
+      prTitle: 'Fix the thing',
+      prUrl: 'https://github.com/acme/app/pull/42',
+      status: 'open',
+      prSha: 'new-head',
+    });
+
+    const result = await sendMessageToTask({
+      taskId: 'task-1',
+      userId: 'reviewer-user',
+      authContext: {
+        tokenType: 'run',
+        runId: 201,
+        userId: 'reviewer-user',
+        principal: 'user',
+        version: 1,
+      } as RunTokenContext,
+      senderMode: 'linked_review_handoff',
+      message:
+        '<review_result><review_kind>sync</review_kind><outcome>clean</outcome><finding_count>0</finding_count><current_head_sha>new-head</current_head_sha></review_result>',
+    });
+
+    expect(result).toEqual({
+      success: true,
+      result: { sent: true, deliveredToFastParent: true },
+    });
+    expect(mockNotifyFastAgentParentOnPrFeedback).toHaveBeenCalledWith(
+      expect.objectContaining({
+        reviewTaskId: 'review-task',
+        reviewHeadSha: 'new-head',
+      }),
+    );
+    expect(mockEq.mock.calls.some(([, value]) => value === 'review-task')).toBe(
+      true,
+    );
   });
 
   it('does not wake the implementation task when its Fast parent is gone', async () => {
