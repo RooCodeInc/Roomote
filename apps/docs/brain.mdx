@@ -36,6 +36,20 @@ Roomote fills the Brain from what it can already see:
   those identities to matching Roomote members; users without a visible,
   verified email remain separate identities rather than being matched by name
 
+Pull-request memories retain the context agents need to answer more than whether
+a change merged. Pages include the PR description and labels, the files and
+leading code areas it changed, available line totals, and review outcomes. That
+lets searches connect a decision to why it was made, which part of the codebase
+it affected, and who reviewed it. Descriptions are bounded and treated as
+source evidence rather than agent instructions; large file lists are summarized
+with a count and truncation marker so the page stays useful without becoming
+unbounded.
+
+Descriptions and labels come from the normal provider sync. File and review
+details require additional provider requests, so Roomote enriches a bounded set
+of pull requests during each hourly analytics pass, prioritizing merged work.
+Older pages gain this context progressively as the sync reaches them.
+
 Turning the Brain on also backfills history rather than starting from the
 moment you enabled it. Completed tasks are enqueued immediately, and each
 source drains its own deeper history in bounded background passes that resume

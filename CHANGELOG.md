@@ -2,6 +2,34 @@
 
 This file tracks product releases for Roomote (single monorepo version). Automated release entries are prepended by `pnpm run version`.
 
+## 0.41.0 (2026-08-24)
+
+This release adds smarter Fast delegation, actionable pull-request CI updates, proactive operator alerts, clearer cost attribution, and richer Brain context.
+
+### Highlights
+
+- Let Fast choose delegated coding models and consult focused reasoning subagents.
+- Send actionable GitHub check failures back to linked tasks and their originating conversations.
+- Warn operators about provider usage limits and deliver configuration issues to admins even without a configured channel.
+- Attribute inference spend by usage source and give the Brain richer pull-request context.
+
+### Minor changes
+
+- Break down, filter, and inspect inference costs by usage source so operators can attribute spend to features such as task routing and title generation.
+- Let Fast choose an enabled coding model for each delegated task and consult advisor or judge subagents for focused reasoning without launching another workspace-backed task.
+- Notify linked Roomote tasks and their originating conversations when checks fail on a GitHub pull request, consolidating related failures and ignoring results from outdated commits.
+- Warn operators before supported inference-provider usage limits are exhausted, and deliver platform configuration issues to linked deployment admins by direct message when no alert or Manager Channel is configured.
+
+### Patch changes
+
+- Give Brain pull-request pages the PR description and labels from GitHub, GitLab, Gitea, Bitbucket, and Azure DevOps so agents can recall why a change was made, not only its title.
+- Enrich Brain pull-request pages with files changed, code areas, line totals, and review outcomes across supported source-control providers so agents can find the changes that affected a part of the codebase.
+- Keep Brain task-memory history accurate by recording completed tasks reliably, distinguishing real ingestion gaps from completed backfills, and preventing the history-ingestion banner from returning after completion.
+- Keep Fast conversations moving with clearer delegated replies, Slack task cards that resume after follow-ups, recovery from missing runtime dependencies and transient provider outages, and accurate guidance when a provider blocks a response.
+- Make pull-request feedback in Fast conversations reliable by delivering review activity consistently, keeping Slack review actions usable after delegated tasks settle, suppressing duplicate or stale results, and reducing notification pressure on provider quotas.
+- Trust only explicitly configured Roomote GitHub App slugs for managed pull-request activity, and keep Roomote attribution in pull-request descriptions to one canonical entry.
+- Make onboarding easier to follow with clearer account, inference-provider, source-control, and environment guidance throughout the setup flow.
+
 ## 0.40.2 (2026-08-22)
 
 This patch improves Fast coordination, Slack task visibility, pull request review reliability, task feedback, and Brain preview operations.
