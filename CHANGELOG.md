@@ -33,6 +33,7 @@ This release adds a shared task board, expands Fast delegation and preferences, 
 - Make pull-request feedback in Fast conversations reliable by delivering review activity consistently, keeping Slack review actions usable after delegated tasks settle, suppressing duplicate or stale results, and reducing notification pressure on provider quotas.
 - Keep Brain task-memory history accurate by recording completed tasks reliably, distinguishing real ingestion gaps from completed backfills, and preventing the history-ingestion banner from returning after completion.
 - Finish Slack task cards with the delegated agent's real result after Fast work settles, preserve actionable input requests, and keep terminal error cards stable while delivery retries.
+- Give Fast and normal Roomote agents the semantic product release in their core prompt context while omitting channel tags and unavailable versions.
 
 ## 0.40.2 (2026-08-22)
 
