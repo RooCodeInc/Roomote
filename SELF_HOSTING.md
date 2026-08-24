@@ -147,6 +147,31 @@ mode only when you know public DNS is not ready yet. The selected mode is
 retained in `/opt/roomote/.env`, so installer reruns and `roomote upgrade`
 preserve it.
 
+### Compose overrides
+
+To customize the stack beyond what `.env` covers (for example a Caddy image
+built with a DNS-provider plugin), put your changes in a Compose override file
+next to the managed base file and register it:
+
+```sh
+sudo roomote override add docker-compose.caddy-dns.yml
+```
+
+The file must already exist in `/opt/roomote` as a plain `.yml`/`.yaml` file
+name. Registered overrides are recorded in `COMPOSE_FILE` in
+`/opt/roomote/.env` and layered after `docker-compose.prod.yml` in the listed
+order, for every `roomote` command, systemd start, and boot. They are included
+in backup bundles, restored by `roomote restore`, and preserved across
+`roomote upgrade` (which refreshes only the managed base file and Caddyfile).
+`roomote override list` shows the merge order and `roomote override remove`
+unregisters a file without deleting it.
+
+Never edit `docker-compose.prod.yml` or the managed Caddyfile directly: both
+are replaced on every upgrade. One caveat for overrides that swap in custom
+images: backup bundles record image identities for the managed stack only, so
+a locally built override image must be rebuilt or re-pulled by you after a
+fresh-host restore.
+
 ### Cloudflare Tunnel
 
 Cloudflare Tunnel works with the supported `internal` TLS mode: Cloudflare

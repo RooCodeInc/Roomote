@@ -342,6 +342,11 @@ printf 'Copying Compose, Caddy, and env files to %s\n' "$target"
 ssh "${ssh_args[@]}" "$target" 'install -d -m 0700 /opt/roomote /opt/roomote/caddy /opt/roomote/backups'
 scp "${scp_args[@]}" "$deploy_root/compose/docker-compose.prod.yml" "$target:/opt/roomote/docker-compose.prod.yml"
 scp "${scp_args[@]}" "$deploy_root/caddy/Caddyfile" "$target:/opt/roomote/caddy/Caddyfile"
+# The host CLI owns the Compose invocation (base file plus operator overrides
+# from COMPOSE_FILE in .env) and the systemd unit; ship it with every deploy
+# so this path can never diverge from `roomote up`.
+scp "${scp_args[@]}" "$deploy_root/host/roomote" "$target:/usr/local/bin/roomote"
+ssh "${ssh_args[@]}" "$target" 'chmod 0755 /usr/local/bin/roomote'
 scp "${scp_args[@]}" "$tmp_env" "$target:/tmp/roomote.env"
 ssh "${ssh_args[@]}" "$target" 'mv /tmp/roomote.env /opt/roomote/.env && chown root:root /opt/roomote/.env && chmod 600 /opt/roomote/.env'
 
@@ -350,17 +355,15 @@ ssh "${ssh_args[@]}" "$target" "ROOMOTE_WORKER_IMAGE=$(shell_quote "$worker_imag
 set -euo pipefail
 : "${ROOMOTE_WORKER_IMAGE:?ROOMOTE_WORKER_IMAGE is required}"
 cd /opt/roomote
-if [ -f /etc/systemd/system/roomote-compose.service ]; then
-  sed -i '/^EnvironmentFile=-\/opt\/roomote\/deployment.env$/d' /etc/systemd/system/roomote-compose.service
-  systemctl daemon-reload
-fi
-docker compose --env-file .env -f docker-compose.prod.yml config >/dev/null
+# sync-unit rewrites the whole unit (CLI-owned, override-aware ExecStart),
+# which also drops the obsolete EnvironmentFile line older units carried.
+/usr/local/bin/roomote sync-unit
+/usr/local/bin/roomote compose config >/dev/null
 echo "Stopping controller before image pull so new tasks remain queued during deploy"
-docker compose --env-file .env -f docker-compose.prod.yml stop controller || true
+/usr/local/bin/roomote compose stop controller || true
 docker pull "$ROOMOTE_WORKER_IMAGE"
-docker compose --env-file .env -f docker-compose.prod.yml pull
-docker compose --env-file .env -f docker-compose.prod.yml up -d --wait --wait-timeout 600
-systemctl enable roomote-compose.service
+/usr/local/bin/roomote compose pull
+/usr/local/bin/roomote up
 REMOTE
 
 printf 'Pruning old Roomote images on %s; keeping %s release tag(s)\n' "$target" "$image_retention_releases"

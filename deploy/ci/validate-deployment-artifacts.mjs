@@ -17,6 +17,8 @@ const read = (path) => readFileSync(join(root, path), 'utf8');
 const catalog = JSON.parse(read('deploy/deployment-catalog.json'));
 const installer = read('deploy/install.sh');
 const deployer = read('deploy/scripts/deploy.sh');
+const upgrader = read('deploy/scripts/upgrade.sh');
+const hostCli = read('deploy/host/roomote');
 const productionEnvExample = read('.env.production.example');
 
 function fail(message) {
@@ -26,6 +28,43 @@ function fail(message) {
 function assert(condition, message) {
   if (!condition) fail(message);
 }
+
+// The host CLI is the single owner of the Compose invocation (COMPOSE_FILE
+// registry in .env) and of the systemd unit. Every other surface must route
+// through it so operator overrides can never be dropped by a sibling path.
+assert(
+  hostCli.includes('read_env_value COMPOSE_FILE') &&
+    hostCli.includes('compose_args+=(-f "$install_root/$entry")'),
+  'host CLI: compose invocations must be built from the COMPOSE_FILE registry',
+);
+assert(
+  hostCli.includes('ExecStart=$cli_path up') &&
+    hostCli.includes('ExecStop=$cli_path down') &&
+    hostCli.includes('refresh_host_cli "$repo" "$fetch_ref"'),
+  'host CLI: it must own the systemd unit and refresh itself during upgrades',
+);
+assert(
+  installer.includes('/usr/local/bin/roomote sync-unit') &&
+    installer.includes('/usr/local/bin/roomote up') &&
+    !installer.includes('docker compose --env-file'),
+  'installer: systemd unit and stack start must go through the host CLI',
+);
+for (const [name, script] of [
+  ['deploy.sh', deployer],
+  ['upgrade.sh', upgrader],
+]) {
+  assert(
+    script.includes('/usr/local/bin/roomote sync-unit') &&
+      script.includes('/usr/local/bin/roomote up') &&
+      !script.includes('docker compose --env-file'),
+    `managed ${name}: remote compose operations must go through the host CLI`,
+  );
+}
+assert(
+  hostCli.includes('compose-overrides') &&
+    hostCli.includes("backup_services_stopped='false'"),
+  'host CLI: backups must stage override files and keep trap state global',
+);
 
 assert(
   installer.includes('preview_domain="$domain"') &&
@@ -610,7 +649,12 @@ for (const script of [
   'deploy/ci/deployment-smoke.sh',
   'deploy/ci/upgrade-compatibility.sh',
   'deploy/host/tests/backup-restore.integration.sh',
+  'deploy/host/tests/backup-failed-restart.sh',
+  'deploy/host/tests/compose-docker-path.sh',
+  'deploy/host/tests/compose-overrides.sh',
+  'deploy/host/tests/restore-failed-cleanup.sh',
   'deploy/host/tests/upgrade-failed-pull.sh',
+  'deploy/host/tests/upgrade-refresh.sh',
   '.docker/gbrain/entrypoint.sh',
 ]) {
   execFileSync('bash', ['-n', join(root, script)], { stdio: 'pipe' });

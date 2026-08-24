@@ -8,6 +8,9 @@ set -euo pipefail
 install_root="${ROOMOTE_INSTALL_ROOT:-/opt/roomote}"
 env_file="$install_root/.env"
 compose_file="$install_root/docker-compose.prod.yml"
+compose_base_name="docker-compose.prod.yml"
+cli_path="${ROOMOTE_CLI_PATH:-/usr/local/bin/roomote}"
+systemd_dir="${ROOMOTE_SYSTEMD_DIR:-/etc/systemd/system}"
 
 usage() {
   cat <<'EOF'
@@ -31,6 +34,15 @@ Commands:
   restart [service...]   Restart services (default: all)
   down                   Stop the stack
   up                     Start the stack
+  override <add|remove|list> [file]
+                         Manage operator Compose override files. Overrides are
+                         recorded in COMPOSE_FILE in /opt/roomote/.env, layered
+                         after the managed base file in the listed order, and
+                         preserved across upgrades, backups, and restarts
+  compose [args...]      Run docker compose against the full deployment file
+                         list (base file plus registered overrides)
+  sync-unit              (Re)write the roomote-compose systemd unit so boots
+                         and systemd restarts go through this CLI
 EOF
 }
 
@@ -49,8 +61,62 @@ fi
 [ -f "$env_file" ] || die "$env_file not found; is Roomote installed on this host?"
 [ -f "$compose_file" ] || die "$compose_file not found; re-run the installer"
 
+# All Docker invocations go through docker_cmd so nonstandard Docker installs
+# (snap, manual binary) recorded in .env as ROOMOTE_DOCKER_BIN work everywhere,
+# including under systemd's minimal PATH. docker_bin is resolved after the
+# function definitions, right before command dispatch.
+docker_cmd() {
+  "$docker_bin" "$@"
+}
+
+# The deployment's Compose file list is COMPOSE_FILE in .env (colon-separated,
+# relative to $install_root, base file first) -- the same variable docker
+# compose itself honors, so a bare `docker compose` run from /opt/roomote sees
+# the same stack. Managed by `roomote override`; absent means base file only.
+# Populates compose_files_list, validating each entry. Runs in the calling
+# shell (not a pipeline) so `die` on a bad entry stops the command.
+compose_files_list=()
+load_compose_files() {
+  local raw entry
+  local -a parts=()
+
+  compose_files_list=()
+  raw="$(read_env_value COMPOSE_FILE)"
+  [ -n "$raw" ] || raw="$compose_base_name"
+  IFS=':' read -r -a parts <<<"$raw"
+
+  for entry in "${parts[@]}"; do
+    [ -n "$entry" ] || continue
+    case "$entry" in
+      /* | *..* | */*) die "COMPOSE_FILE entry '$entry' in $env_file must be a plain file name inside $install_root" ;;
+    esac
+    compose_files_list+=("$entry")
+  done
+
+  [ "${#compose_files_list[@]}" -gt 0 ] || die "COMPOSE_FILE in $env_file is empty"
+  [ "${compose_files_list[0]}" = "$compose_base_name" ] ||
+    die "COMPOSE_FILE in $env_file must list the managed base file $compose_base_name first (found '${compose_files_list[0]}')"
+}
+
 compose() {
-  docker compose --env-file "$env_file" -f "$compose_file" "$@"
+  local entry
+  local -a compose_args=(compose --env-file "$env_file")
+
+  load_compose_files
+  for entry in "${compose_files_list[@]}"; do
+    [ -f "$install_root/$entry" ] ||
+      die "Compose file $install_root/$entry (from COMPOSE_FILE in $env_file) not found; restore it or run 'roomote override remove $entry'"
+    compose_args+=(-f "$install_root/$entry")
+  done
+
+  docker_cmd "${compose_args[@]}" "$@"
+}
+
+# Base-file-only variant for the pieces of the deployment Roomote itself
+# manages (e.g. backup image-identity collection, where operator override
+# images are the operator's recovery responsibility).
+compose_base() {
+  docker_cmd compose --env-file "$env_file" -f "$compose_file" "$@"
 }
 
 backup_usage() {
@@ -175,7 +241,7 @@ container_volume_name() {
 
   container_id="$(compose ps -aq "$service")"
   [ -n "$container_id" ] || die "could not find the $service container"
-  volume="$(docker inspect --format "{{range .Mounts}}{{if eq .Destination \"$destination\"}}{{.Name}}{{end}}{{end}}" "$container_id")"
+  volume="$(docker_cmd inspect --format "{{range .Mounts}}{{if eq .Destination \"$destination\"}}{{.Name}}{{end}}{{end}}" "$container_id")"
   [ -n "$volume" ] || die "could not find the $service volume mounted at $destination"
   printf '%s' "$volume"
 }
@@ -185,7 +251,7 @@ archive_volume() {
   local staging_dir="$2"
   local archive_name="$3"
 
-  docker run --rm \
+  docker_cmd run --rm \
     --volume "$volume:/source:ro" \
     --volume "$staging_dir:/backup" \
     --env "ARCHIVE_NAME=$archive_name" \
@@ -201,12 +267,12 @@ restore_volume() {
   local archive_name="${3:-}"
 
   if [ -n "$archive_name" ]; then
-    docker run --rm \
+    docker_cmd run --rm \
       --volume "$volume:/target" \
       --volume "$staging_dir:/backup:ro" \
       redis:7-alpine sh -c "rm -rf /target/* /target/.[!.]* /target/..?*; tar -C /target -xf /backup/$archive_name"
   else
-    docker run --rm \
+    docker_cmd run --rm \
       --volume "$volume:/target" \
       redis:7-alpine sh -c 'rm -rf /target/* /target/.[!.]* /target/..?*'
   fi
@@ -217,10 +283,10 @@ postgres_command() {
   shift || true
 
   if [ -n "$input_file" ]; then
-    docker run --rm --network "$(compose_network_name)" --env-file "$env_file" -i \
+    docker_cmd run --rm --network "$(compose_network_name)" --env-file "$env_file" -i \
       pgvector/pgvector:0.8.1-pg17-trixie@sha256:137f044b0efe3d57f39b972b9b53641b1f2045b99d879e298bbf514a25787dcf sh -c "$*" <"$input_file"
   else
-    docker run --rm --network "$(compose_network_name)" --env-file "$env_file" \
+    docker_cmd run --rm --network "$(compose_network_name)" --env-file "$env_file" \
       pgvector/pgvector:0.8.1-pg17-trixie@sha256:137f044b0efe3d57f39b972b9b53641b1f2045b99d879e298bbf514a25787dcf sh -c "$*"
   fi
 }
@@ -325,7 +391,7 @@ prune_roomote_images() {
   keep_file="$(mktemp)" || return
   images_file="$(mktemp)" || return
 
-  docker image ls --format '{{.CreatedAt}}|{{.Repository}}|{{.Tag}}' |
+  docker_cmd image ls --format '{{.CreatedAt}}|{{.Repository}}|{{.Tag}}' |
     awk -F'|' -v prefix="$repo_prefix" 'index($2, prefix) == 1 && $3 != "<none>" { print $1 "|" $3 }' |
     sort -t'|' -k1,1r |
     awk -F'|' '!seen[$2]++ { print $2 }' >"$tags_file" || return
@@ -354,7 +420,7 @@ prune_roomote_images() {
   cat "${keep_file}.dedup" >"$keep_file" || return
   rm -f "${keep_file}.dedup"
 
-  docker image ls --format '{{.Repository}}:{{.Tag}}|{{.Repository}}|{{.Tag}}' |
+  docker_cmd image ls --format '{{.Repository}}:{{.Tag}}|{{.Repository}}|{{.Tag}}' |
     awk -F'|' -v prefix="$repo_prefix" 'index($2, prefix) == 1 && $3 != "<none>" { print }' >"$images_file" || return
 
   while IFS='|' read -r image repo tag; do
@@ -363,7 +429,7 @@ prune_roomote_images() {
       continue
     fi
 
-    if docker image rm "$image" >/dev/null 2>&1; then
+    if docker_cmd image rm "$image" >/dev/null 2>&1; then
       removed=$((removed + 1))
       printf 'Removed old Roomote image %s\n' "$image"
     else
@@ -372,7 +438,7 @@ prune_roomote_images() {
     fi
   done <"$images_file"
 
-  docker image prune -f >/dev/null 2>&1 || true
+  docker_cmd image prune -f >/dev/null 2>&1 || true
 
   kept_count="$(awk 'NF { count++ } END { print count + 0 }' "$keep_file")" || return
   kept_tags="$(tr '\n' ' ' <"$keep_file" | sed 's/[[:space:]]*$//')" || return
@@ -402,6 +468,146 @@ cmd_setup_url() {
   else
     printf 'https://%s/setup\n' "$domain"
   fi
+}
+
+override_usage() {
+  cat <<'EOF'
+usage: roomote override <add|remove|list> [file]
+
+  add <file>     Register an operator Compose override. The file must already
+                 exist in /opt/roomote as a plain .yml/.yaml file name (for
+                 example docker-compose.caddy-dns.yml). The merged
+                 configuration is validated before the override is recorded.
+  remove <file>  Unregister an override (the file itself is left in place)
+  list           Print the deployment's Compose file list in merge order
+
+Overrides are stored in COMPOSE_FILE in /opt/roomote/.env, layered after the
+managed base file in the listed order, included in backup bundles, and
+preserved across upgrades and systemd restarts. Images referenced only by
+override files stay operator-managed: they are not covered by backup image
+identities, so make them pullable (or rebuildable) on a restored host.
+EOF
+}
+
+serialize_compose_files() {
+  local IFS=':'
+  printf '%s' "${compose_files_list[*]}"
+}
+
+cmd_override() {
+  local action="${1:-}"
+  local name="${2:-}"
+  local entry
+  local -a candidate=()
+
+  case "$action" in
+    list)
+      load_compose_files
+      for entry in "${compose_files_list[@]}"; do
+        if [ "$entry" = "$compose_base_name" ]; then
+          printf '%s (managed base file)\n' "$entry"
+        else
+          printf '%s\n' "$entry"
+        fi
+      done
+      return
+      ;;
+    add)
+      [ -n "$name" ] || { override_usage >&2; die "usage: roomote override add <file>"; }
+      name="${name##*/}"
+      case "$name" in
+        *.yml | *.yaml) ;;
+        *) die "override file name must end in .yml or .yaml: $name" ;;
+      esac
+      case "$name" in
+        *:* | *..*) die "override file name must be a plain file name: $name" ;;
+      esac
+      [ "$name" != "$compose_base_name" ] || die "$compose_base_name is the managed base file, not an override"
+      [ -f "$install_root/$name" ] || die "$install_root/$name not found; place the override file there first"
+
+      load_compose_files
+      for entry in "${compose_files_list[@]}"; do
+        [ "$entry" != "$name" ] || die "$name is already registered"
+      done
+
+      # Validate the merged configuration before recording anything.
+      candidate=(compose --env-file "$env_file")
+      for entry in "${compose_files_list[@]}"; do
+        candidate+=(-f "$install_root/$entry")
+      done
+      candidate+=(-f "$install_root/$name")
+      docker_cmd "${candidate[@]}" config >/dev/null ||
+        die "the merged Compose configuration with $name is invalid; fix the override and retry"
+
+      compose_files_list+=("$name")
+      set_env_value COMPOSE_FILE "$(serialize_compose_files)"
+      log "Registered Compose override $name (COMPOSE_FILE=$(serialize_compose_files))"
+      log "The override now applies to every roomote up/upgrade/backup and to systemd starts"
+      ;;
+    remove)
+      [ -n "$name" ] || { override_usage >&2; die "usage: roomote override remove <file>"; }
+      name="${name##*/}"
+      [ "$name" != "$compose_base_name" ] || die "the managed base file cannot be removed"
+
+      load_compose_files
+      local -a remaining=()
+      local found='false'
+      for entry in "${compose_files_list[@]}"; do
+        if [ "$entry" = "$name" ]; then
+          found='true'
+        else
+          remaining+=("$entry")
+        fi
+      done
+      [ "$found" = 'true' ] || die "$name is not a registered override (see roomote override list)"
+      compose_files_list=("${remaining[@]}")
+      set_env_value COMPOSE_FILE "$(serialize_compose_files)"
+      log "Unregistered Compose override $name; the file itself was left in $install_root"
+      ;;
+    --help | -h | help | '')
+      override_usage
+      ;;
+    *)
+      override_usage >&2
+      die "unknown override action: $action"
+      ;;
+  esac
+}
+
+# The systemd unit delegates to this CLI so boots and `systemctl restart`
+# use the same override-aware Compose invocation as every other operation.
+# Rewritten by install.sh and by every `roomote upgrade` (sync-unit), so unit
+# fixes reach existing deployments without an installer rerun.
+sync_systemd_unit() {
+  cat >"$systemd_dir/roomote-compose.service" <<EOF
+[Unit]
+Description=Roomote Docker Compose stack
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=$install_root
+RemainAfterExit=yes
+Environment="ROOMOTE_INSTALL_ROOT=$install_root"
+ExecStart=$cli_path up
+ExecStop=$cli_path down
+TimeoutStartSec=0
+
+[Install]
+WantedBy=multi-user.target
+EOF
+  if command -v systemctl >/dev/null 2>&1; then
+    systemctl daemon-reload >/dev/null 2>&1 || true
+    systemctl enable roomote-compose.service >/dev/null 2>&1 || true
+  fi
+}
+
+cmd_sync_unit() {
+  [ "$#" -eq 0 ] || die "usage: roomote sync-unit"
+  sync_systemd_unit
+  log "Wrote $systemd_dir/roomote-compose.service (ExecStart=$cli_path up)"
 }
 
 resolve_latest_version() {
@@ -475,12 +681,38 @@ cleanup_upgrade() {
     else
       rm -f "$install_root/caddy/Caddyfile"
     fi
+    if [ -f "$upgrade_rollback_dir/roomote-cli" ]; then
+      install -m 755 "$upgrade_rollback_dir/roomote-cli" "$cli_path"
+    fi
+    if [ -f "$upgrade_rollback_dir/roomote-compose.service" ]; then
+      install -m 644 "$upgrade_rollback_dir/roomote-compose.service" "$systemd_dir/roomote-compose.service"
+      if command -v systemctl >/dev/null 2>&1; then
+        systemctl daemon-reload >/dev/null 2>&1 || true
+      fi
+    fi
     if [ "${upgrade_controller_stopped:-false}" = 'true' ]; then
       compose start controller || true
     fi
   fi
   rm -rf "${upgrade_rollback_dir:-}"
   exit "$status"
+}
+
+# Refreshes /usr/local/bin/roomote from the release being upgraded to, so CLI
+# and systemd-unit fixes reach existing deployments through `roomote upgrade`
+# rather than only through installer reruns. The download lands in a temp file
+# and moves into place atomically: the running bash keeps executing the old
+# inode, and a truncated download is rejected before it can replace the CLI.
+refresh_host_cli() {
+  local repo="$1"
+  local fetch_ref="$2"
+  local tmp_cli
+
+  tmp_cli="$(mktemp "$cli_path.XXXXXX")"
+  fetch_deploy_file "$repo" "$fetch_ref" deploy/host/roomote "$tmp_cli"
+  bash -n "$tmp_cli" || { rm -f "$tmp_cli"; die "downloaded host CLI failed a syntax check; keeping the current CLI"; }
+  chmod 755 "$tmp_cli"
+  mv -f "$tmp_cli" "$cli_path"
 }
 
 cmd_upgrade() {
@@ -546,6 +778,12 @@ cmd_upgrade() {
   if [ -f "$install_root/caddy/Caddyfile" ]; then
     install -m 600 "$install_root/caddy/Caddyfile" "$upgrade_rollback_dir/Caddyfile"
   fi
+  if [ -f "$cli_path" ]; then
+    install -m 755 "$cli_path" "$upgrade_rollback_dir/roomote-cli"
+  fi
+  if [ -f "$systemd_dir/roomote-compose.service" ]; then
+    install -m 644 "$systemd_dir/roomote-compose.service" "$upgrade_rollback_dir/roomote-compose.service"
+  fi
 
   image_registry="$(read_env_value IMAGE_REGISTRY)"
   image_namespace="$(read_env_value IMAGE_NAMESPACE)"
@@ -565,6 +803,17 @@ cmd_upgrade() {
   log "Refreshing deployment files for $version"
   fetch_deploy_file "$repo" "$fetch_ref" deploy/compose/docker-compose.prod.yml "$compose_file"
   fetch_deploy_file "$repo" "$fetch_ref" deploy/caddy/Caddyfile "$install_root/caddy/Caddyfile"
+  log "Refreshing the roomote host CLI and systemd unit for $version"
+  refresh_host_cli "$repo" "$fetch_ref"
+  # Run sync-unit from the freshly installed CLI so the unit matches the new
+  # release even when its format changed after this (still-running) version.
+  "$cli_path" sync-unit >/dev/null
+
+  # Older installs predate the COMPOSE_FILE registry and the persisted Docker
+  # path; seed both so the rest of this upgrade and the rewritten systemd unit
+  # behave identically on upgraded and freshly installed hosts.
+  [ -n "$(read_env_value COMPOSE_FILE)" ] || set_env_value COMPOSE_FILE "$compose_base_name"
+  [ -n "$(read_env_value ROOMOTE_DOCKER_BIN)" ] || set_env_value ROOMOTE_DOCKER_BIN "$(command -v docker || printf 'docker')"
 
   set_env_value ROOMOTE_VERSION "$version"
   # Recorded for `roomote rollback`; skipped for same-version re-runs so a
@@ -603,7 +852,7 @@ cmd_upgrade() {
   compose stop controller || true
   upgrade_controller_stopped='true'
   log "Pulling images for $version"
-  docker pull "$worker_image"
+  docker_cmd pull "$worker_image"
   compose pull
   # Migrations run before any running service is replaced. Drizzle applies
   # all pending migrations in a single transaction, so a failure here rolls
@@ -616,7 +865,6 @@ cmd_upgrade() {
   trap - EXIT
   log "Starting Roomote $version"
   compose up -d --wait --wait-timeout 600
-  systemctl enable roomote-compose.service >/dev/null 2>&1 || true
   log "Pruning old Roomote images"
   if ! prune_roomote_images; then
     log "Warning: image retention failed; upgrade is still healthy"
@@ -641,11 +889,11 @@ stop_task_workers() {
   local worker_ids worker_network
   worker_network="$(read_env_value DOCKER_WORKER_NETWORK)"
   worker_network="${worker_network:-roomote_worker}"
-  worker_ids="$(docker ps --filter "network=$worker_network" --format '{{.ID}} {{.Names}}' | awk '$2 ~ /^roomote-worker-/ { print $1 }')"
+  worker_ids="$(docker_cmd ps --filter "network=$worker_network" --format '{{.ID}} {{.Names}}' | awk '$2 ~ /^roomote-worker-/ { print $1 }')"
   if [ -n "$worker_ids" ]; then
     log "Stopping active task worker containers for a consistent backup"
     # shellcheck disable=SC2086
-    docker stop --timeout 30 $worker_ids
+    docker_cmd stop --timeout 30 $worker_ids
   fi
 }
 
@@ -654,16 +902,20 @@ collect_image_identities() {
   local references_file ref digest image_id worker_image
   references_file="$(mktemp)"
 
-  compose config --images >"$references_file"
+  # Base file only, on purpose: images referenced solely by operator override
+  # files are operator-managed and may be locally built with no repository
+  # digest, which must not block backups. `roomote override add` documents
+  # that override images are the operator's recovery responsibility.
+  compose_base config --images >"$references_file"
   worker_image="$(read_env_value DOCKER_WORKER_IMAGE)"
   [ -z "$worker_image" ] || printf '%s\n' "$worker_image" >>"$references_file"
 
   : >"$output_file"
   while IFS= read -r ref; do
     [ -n "$ref" ] || continue
-    docker image inspect "$ref" >/dev/null 2>&1 || die "image $ref is not present; pull it before creating a recovery backup"
-    digest="$(docker image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' "$ref" | head -n 1)"
-    image_id="$(docker image inspect --format '{{.Id}}' "$ref")"
+    docker_cmd image inspect "$ref" >/dev/null 2>&1 || die "image $ref is not present; pull it before creating a recovery backup"
+    digest="$(docker_cmd image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' "$ref" | head -n 1)"
+    image_id="$(docker_cmd image inspect --format '{{.Id}}' "$ref")"
     [ -n "$digest" ] || die "image $ref has no repository digest and cannot be recovered on a fresh host"
     printf '%s|%s|%s\n' "$ref" "$digest" "$image_id" >>"$output_file"
   done < <(sort -u "$references_file")
@@ -678,23 +930,36 @@ restore_image_identities() {
     [ -n "$ref" ] || continue
     [ -n "$digest" ] || die "backup has no restorable digest for image $ref ($image_id)"
     log "Restoring image identity $digest"
-    docker pull "$digest"
+    docker_cmd pull "$digest"
     case "$ref" in
       *@*) ;;
-      *) docker tag "$digest" "$ref" ;;
+      *) docker_cmd tag "$digest" "$ref" ;;
     esac
   done <"$identities_file"
+}
+
+# Runs from the EXIT trap. Reads only backup_* globals: EXIT traps fire after
+# bash pops function locals on a set -e failure inside cmd_backup, so any
+# function-local state would be unbound here under set -u.
+cleanup_backup() {
+  if [ "$backup_services_stopped" = 'true' ]; then
+    log "Restarting Roomote after interrupted backup"
+    compose up -d --wait --wait-timeout 600 || true
+  fi
+  rm -rf "$backup_staging_dir"
+  if [ "$backup_generated_passphrase" = 'true' ]; then
+    rm -f "$backup_passphrase_file"
+  fi
 }
 
 cmd_backup() {
   local include_redis='false'
   local passphrase_arg=''
   local output_file=''
-  local generated_passphrase='false'
-  local passphrase_file staging_dir schema_version roomote_version
+  local entry
+  local schema_version roomote_version
   local storage_mode storage_included s3_endpoint s3_bucket
   local minio_volume redis_volume created_at
-  local services_stopped='false'
 
   while [ "$#" -gt 0 ]; do
     case "$1" in
@@ -732,44 +997,49 @@ cmd_backup() {
   mkdir -p "$(dirname -- "$output_file")"
   [ ! -e "$output_file" ] || die "backup output already exists: $output_file"
 
+  # Cleanup state for the EXIT trap. Deliberately not locals (see
+  # cleanup_backup); assigned before the trap is installed so the trap can
+  # always read them.
+  backup_generated_passphrase='false'
   if [ -z "$passphrase_arg" ]; then
-    generated_passphrase='true'
+    backup_generated_passphrase='true'
   fi
-  passphrase_file="$(make_passphrase_file "$passphrase_arg" confirm)"
-  staging_dir="$(mktemp -d "$install_root/backups/.backup-staging.XXXXXX")"
-  chmod 700 "$staging_dir"
-
-  cleanup_backup() {
-    if [ "$services_stopped" = 'true' ]; then
-      log "Restarting Roomote after interrupted backup"
-      compose up -d --wait --wait-timeout 600 || true
-    fi
-    rm -rf "$staging_dir"
-    if [ "$generated_passphrase" = 'true' ]; then
-      rm -f "$passphrase_file"
-    fi
-  }
+  backup_services_stopped='false'
+  backup_passphrase_file="$(make_passphrase_file "$passphrase_arg" confirm)"
+  backup_staging_dir="$(mktemp -d "$install_root/backups/.backup-staging.XXXXXX")"
+  chmod 700 "$backup_staging_dir"
   trap cleanup_backup EXIT
 
-  mkdir -p "$staging_dir/config/caddy"
-  install -m 600 "$env_file" "$staging_dir/config/.env"
-  install -m 600 "$compose_file" "$staging_dir/config/docker-compose.prod.yml"
+  mkdir -p "$backup_staging_dir/config/caddy"
+  install -m 600 "$env_file" "$backup_staging_dir/config/.env"
+  install -m 600 "$compose_file" "$backup_staging_dir/config/docker-compose.prod.yml"
+  # Operator Compose overrides are part of the deployment configuration:
+  # without them a disaster-recovery restore would come up with the base
+  # stack only (e.g. Caddy missing its DNS-challenge config).
+  load_compose_files
+  for entry in "${compose_files_list[@]}"; do
+    [ "$entry" != "$compose_base_name" ] || continue
+    [ -f "$install_root/$entry" ] ||
+      die "Compose override $install_root/$entry (from COMPOSE_FILE in $env_file) not found; restore it or run 'roomote override remove $entry'"
+    mkdir -p "$backup_staging_dir/config/compose-overrides"
+    install -m 600 "$install_root/$entry" "$backup_staging_dir/config/compose-overrides/$entry"
+  done
   if [ -f "$install_root/caddy/Caddyfile" ]; then
-    install -m 600 "$install_root/caddy/Caddyfile" "$staging_dir/config/caddy/Caddyfile"
+    install -m 600 "$install_root/caddy/Caddyfile" "$backup_staging_dir/config/caddy/Caddyfile"
   fi
   if [ -f "$install_root/deployment.env" ]; then
-    install -m 600 "$install_root/deployment.env" "$staging_dir/config/deployment.env"
+    install -m 600 "$install_root/deployment.env" "$backup_staging_dir/config/deployment.env"
   fi
-  collect_image_identities "$staging_dir/images.txt"
+  collect_image_identities "$backup_staging_dir/images.txt"
 
   log "Quiescing Roomote application writers"
   compose stop web api controller bullmq preview-proxy
   stop_task_workers
-  services_stopped='true'
+  backup_services_stopped='true'
 
   log "Dumping PostgreSQL"
   postgres_command '' 'pg_dump --clean --if-exists --no-owner --no-privileges "$DATABASE_URL"' \
-    >"$staging_dir/postgres.sql"
+    >"$backup_staging_dir/postgres.sql"
   schema_version="$(postgres_command '' 'psql "$DATABASE_URL" -Atqc "SELECT hash FROM drizzle.__drizzle_migrations ORDER BY created_at DESC LIMIT 1"' 2>/dev/null || true)"
   schema_version="${schema_version:-unknown}"
 
@@ -783,7 +1053,7 @@ cmd_backup() {
     log "Snapshotting the local MinIO volume"
     compose stop minio
     minio_volume="$(container_volume_name minio /data)"
-    archive_volume "$minio_volume" "$staging_dir" minio-data.tar
+    archive_volume "$minio_volume" "$backup_staging_dir" minio-data.tar
   else
     storage_mode='external-bucket'
     storage_included='false'
@@ -795,12 +1065,12 @@ cmd_backup() {
     compose exec -T redis redis-cli SAVE >/dev/null
     compose stop redis
     redis_volume="$(container_volume_name redis /data)"
-    archive_volume "$redis_volume" "$staging_dir" redis-data.tar
+    archive_volume "$redis_volume" "$backup_staging_dir" redis-data.tar
   fi
 
   roomote_version="$(read_env_value ROOMOTE_VERSION)"
   created_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-  cat >"$staging_dir/manifest.json" <<EOF
+  cat >"$backup_staging_dir/manifest.json" <<EOF
 {
   "format": "roomote-backup",
   "formatVersion": 1,
@@ -825,24 +1095,21 @@ EOF
 
   (
     trap - EXIT
-    cd "$staging_dir"
+    cd "$backup_staging_dir"
     find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum >SHA256SUMS
   )
 
   log "Encrypting backup bundle"
-  tar -C "$staging_dir" -czf - . |
+  tar -C "$backup_staging_dir" -czf - . |
     openssl enc -aes-256-cbc -salt -pbkdf2 -iter 200000 -md sha256 \
-      -pass "file:$passphrase_file" -out "$output_file"
+      -pass "file:$backup_passphrase_file" -out "$output_file"
   chmod 600 "$output_file"
 
   log "Restarting Roomote"
   compose up -d --wait --wait-timeout 600
-  services_stopped='false'
-  rm -rf "$staging_dir"
-  if [ "$generated_passphrase" = 'true' ]; then
-    rm -f "$passphrase_file"
-  fi
+  backup_services_stopped='false'
   trap - EXIT
+  cleanup_backup
   log "Encrypted deployment backup written to $output_file"
 }
 
@@ -878,12 +1145,20 @@ validate_volume_archive() {
   die "volume snapshot contains unsupported links or special files"
 }
 
+# Runs from the EXIT trap. Reads only restore_* globals for the same
+# function-scope reason as cleanup_backup.
+cleanup_restore() {
+  rm -rf "$restore_staging_dir"
+  if [ "$restore_generated_passphrase" = 'true' ]; then
+    rm -f "$restore_passphrase_file"
+  fi
+}
+
 cmd_restore() {
   local backup_file=''
   local confirmed='false'
   local passphrase_arg=''
-  local generated_passphrase='false'
-  local passphrase_file staging_dir encrypted_tar
+  local encrypted_tar entry
   local redis_included='false'
   local local_minio_included='false'
   local redis_volume minio_volume
@@ -920,93 +1195,98 @@ cmd_restore() {
   command -v openssl >/dev/null 2>&1 || die "openssl is required"
   command -v sha256sum >/dev/null 2>&1 || die "sha256sum is required"
 
+  # Cleanup state for the EXIT trap. Deliberately not locals (see
+  # cleanup_restore); assigned before the trap is installed.
+  restore_generated_passphrase='false'
   if [ -z "$passphrase_arg" ]; then
-    generated_passphrase='true'
+    restore_generated_passphrase='true'
   fi
-  passphrase_file="$(make_passphrase_file "$passphrase_arg" read)"
-  staging_dir="$(mktemp -d "$install_root/backups/.restore-staging.XXXXXX")"
-  chmod 700 "$staging_dir"
-  encrypted_tar="$staging_dir/bundle.tar.gz"
-
-  cleanup_restore() {
-    rm -rf "$staging_dir"
-    if [ "$generated_passphrase" = 'true' ]; then
-      rm -f "$passphrase_file"
-    fi
-  }
+  restore_passphrase_file="$(make_passphrase_file "$passphrase_arg" read)"
+  restore_staging_dir="$(mktemp -d "$install_root/backups/.restore-staging.XXXXXX")"
+  chmod 700 "$restore_staging_dir"
+  encrypted_tar="$restore_staging_dir/bundle.tar.gz"
   trap cleanup_restore EXIT
 
   log "Decrypting and validating backup before changing the deployment"
   if ! openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -md sha256 \
-    -pass "file:$passphrase_file" -in "$backup_file" -out "$encrypted_tar"; then
+    -pass "file:$restore_passphrase_file" -in "$backup_file" -out "$encrypted_tar"; then
     die "could not decrypt backup (wrong passphrase or damaged bundle)"
   fi
   validate_archive_paths "$encrypted_tar"
-  tar -xzf "$encrypted_tar" --no-same-owner --no-same-permissions -C "$staging_dir"
+  tar -xzf "$encrypted_tar" --no-same-owner --no-same-permissions -C "$restore_staging_dir"
   rm -f "$encrypted_tar"
 
-  [ -f "$staging_dir/manifest.json" ] || die "backup manifest is missing"
-  [ -f "$staging_dir/SHA256SUMS" ] || die "backup checksums are missing"
-  [ -f "$staging_dir/postgres.sql" ] || die "PostgreSQL dump is missing"
-  [ -f "$staging_dir/config/.env" ] || die "deployment configuration is missing"
-  [ -f "$staging_dir/config/docker-compose.prod.yml" ] || die "deployment Compose file is missing"
-  [ -f "$staging_dir/images.txt" ] || die "image identities are missing"
-  grep -Eq '"format"[[:space:]]*:[[:space:]]*"roomote-backup"' "$staging_dir/manifest.json" || die "not a Roomote backup bundle"
-  grep -Eq '"formatVersion"[[:space:]]*:[[:space:]]*1([,[:space:]]|$)' "$staging_dir/manifest.json" || die "unsupported Roomote backup format version"
-  (trap - EXIT; cd "$staging_dir" && sha256sum -c SHA256SUMS)
+  [ -f "$restore_staging_dir/manifest.json" ] || die "backup manifest is missing"
+  [ -f "$restore_staging_dir/SHA256SUMS" ] || die "backup checksums are missing"
+  [ -f "$restore_staging_dir/postgres.sql" ] || die "PostgreSQL dump is missing"
+  [ -f "$restore_staging_dir/config/.env" ] || die "deployment configuration is missing"
+  [ -f "$restore_staging_dir/config/docker-compose.prod.yml" ] || die "deployment Compose file is missing"
+  [ -f "$restore_staging_dir/images.txt" ] || die "image identities are missing"
+  grep -Eq '"format"[[:space:]]*:[[:space:]]*"roomote-backup"' "$restore_staging_dir/manifest.json" || die "not a Roomote backup bundle"
+  grep -Eq '"formatVersion"[[:space:]]*:[[:space:]]*1([,[:space:]]|$)' "$restore_staging_dir/manifest.json" || die "unsupported Roomote backup format version"
+  (trap - EXIT; cd "$restore_staging_dir" && sha256sum -c SHA256SUMS)
 
   if awk '
     /"redis"[[:space:]]*:/ { in_redis = 1; next }
     in_redis && /"included"[[:space:]]*:[[:space:]]*true/ { found = 1; exit }
     in_redis && /}/ { exit }
     END { exit !found }
-  ' "$staging_dir/manifest.json"; then
-    [ -f "$staging_dir/redis-data.tar" ] || die "Redis is marked as included but its snapshot is missing"
-    validate_volume_archive "$staging_dir/redis-data.tar"
+  ' "$restore_staging_dir/manifest.json"; then
+    [ -f "$restore_staging_dir/redis-data.tar" ] || die "Redis is marked as included but its snapshot is missing"
+    validate_volume_archive "$restore_staging_dir/redis-data.tar"
     redis_included='true'
   fi
-  if grep -Eq '"mode"[[:space:]]*:[[:space:]]*"local-minio"' "$staging_dir/manifest.json"; then
-    [ -f "$staging_dir/minio-data.tar" ] || die "local MinIO data is missing"
-    validate_volume_archive "$staging_dir/minio-data.tar"
+  if grep -Eq '"mode"[[:space:]]*:[[:space:]]*"local-minio"' "$restore_staging_dir/manifest.json"; then
+    [ -f "$restore_staging_dir/minio-data.tar" ] || die "local MinIO data is missing"
+    validate_volume_archive "$restore_staging_dir/minio-data.tar"
     local_minio_included='true'
-  elif grep -Eq '"mode"[[:space:]]*:[[:space:]]*"external-bucket"' "$staging_dir/manifest.json"; then
+  elif grep -Eq '"mode"[[:space:]]*:[[:space:]]*"external-bucket"' "$restore_staging_dir/manifest.json"; then
     log "This backup references external object storage; ensure its bucket is available before continuing"
   else
     die "backup has an unsupported object storage mode"
   fi
 
   log "Restoring recorded container image identities"
-  restore_image_identities "$staging_dir/images.txt"
+  restore_image_identities "$restore_staging_dir/images.txt"
 
   log "Stopping the existing deployment"
   stop_task_workers
   compose down
 
   log "Restoring deployment configuration and release metadata"
-  install -m 600 "$staging_dir/config/.env" "$env_file"
-  install -m 600 "$staging_dir/config/docker-compose.prod.yml" "$compose_file"
-  if [ -f "$staging_dir/config/caddy/Caddyfile" ]; then
-    mkdir -p "$install_root/caddy"
-    install -m 600 "$staging_dir/config/caddy/Caddyfile" "$install_root/caddy/Caddyfile"
+  install -m 600 "$restore_staging_dir/config/.env" "$env_file"
+  install -m 600 "$restore_staging_dir/config/docker-compose.prod.yml" "$compose_file"
+  # Put bundled overrides back before the first compose call against the
+  # restored .env: its COMPOSE_FILE may reference them. Bundles from before
+  # the override registry simply have no compose-overrides directory.
+  if [ -d "$restore_staging_dir/config/compose-overrides" ]; then
+    for entry in "$restore_staging_dir/config/compose-overrides"/*; do
+      [ -f "$entry" ] || continue
+      install -m 600 "$entry" "$install_root/${entry##*/}"
+    done
   fi
-  if [ -f "$staging_dir/config/deployment.env" ]; then
-    install -m 600 "$staging_dir/config/deployment.env" "$install_root/deployment.env"
+  if [ -f "$restore_staging_dir/config/caddy/Caddyfile" ]; then
+    mkdir -p "$install_root/caddy"
+    install -m 600 "$restore_staging_dir/config/caddy/Caddyfile" "$install_root/caddy/Caddyfile"
+  fi
+  if [ -f "$restore_staging_dir/config/deployment.env" ]; then
+    install -m 600 "$restore_staging_dir/config/deployment.env" "$install_root/deployment.env"
   fi
 
   compose create redis minio >/dev/null
   redis_volume="$(container_volume_name redis /data)"
   if [ "$redis_included" = 'true' ]; then
     log "Restoring Redis snapshot"
-    restore_volume "$redis_volume" "$staging_dir" redis-data.tar
+    restore_volume "$redis_volume" "$restore_staging_dir" redis-data.tar
   else
     log "Redis was not included; clearing transient queue and session state"
-    restore_volume "$redis_volume" "$staging_dir"
+    restore_volume "$redis_volume" "$restore_staging_dir"
   fi
 
   if [ "$local_minio_included" = 'true' ]; then
     minio_volume="$(container_volume_name minio /data)"
     log "Restoring local MinIO artifacts"
-    restore_volume "$minio_volume" "$staging_dir" minio-data.tar
+    restore_volume "$minio_volume" "$restore_staging_dir" minio-data.tar
   fi
 
   log "Starting deployment infrastructure"
@@ -1018,17 +1298,21 @@ cmd_restore() {
 
   log "Restoring PostgreSQL"
   postgres_command '' 'psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c "DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public;"'
-  postgres_command "$staging_dir/postgres.sql" 'psql "$DATABASE_URL" -v ON_ERROR_STOP=1'
+  postgres_command "$restore_staging_dir/postgres.sql" 'psql "$DATABASE_URL" -v ON_ERROR_STOP=1'
 
   log "Starting the restored Roomote release"
   compose up -d --wait --wait-timeout 600
-  rm -rf "$staging_dir"
-  if [ "$generated_passphrase" = 'true' ]; then
-    rm -f "$passphrase_file"
-  fi
   trap - EXIT
+  cleanup_restore
   log "Restore complete"
 }
+
+# The Docker binary recorded by the installer (snap and manual installs live
+# outside systemd's minimal PATH). Resolved here, after read_env_value is
+# defined; the ROOMOTE_DOCKER_BIN environment variable wins for tests and
+# one-off invocations.
+docker_bin="${ROOMOTE_DOCKER_BIN:-$(read_env_value ROOMOTE_DOCKER_BIN)}"
+docker_bin="${docker_bin:-docker}"
 
 command="${1:-help}"
 shift || true
@@ -1044,6 +1328,9 @@ case "$command" in
   restart) compose restart "$@" ;;
   down) compose down ;;
   up) compose up -d --wait --wait-timeout 600 ;;
+  override) cmd_override "$@" ;;
+  compose) compose "$@" ;;
+  sync-unit) cmd_sync_unit "$@" ;;
   help | --help | -h) usage ;;
   *)
     usage >&2
