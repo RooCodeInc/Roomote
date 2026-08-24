@@ -291,6 +291,11 @@ before launch, so Fast can correct the selection without consuming its launch
 attempt. The chosen model applies to the delegated task just as if it had been
 selected when starting a task from the web app.
 
+A single Fast turn can launch multiple independent tasks, so one request can
+delegate separate workstreams without waiting for each task to finish first.
+Fast still posts a kickoff for every task and keeps repeated identical launch
+requests from creating duplicate work.
+
 Fast can also consult the advisor and judge roles for focused planning or
 completion checks without launching a workspace-backed task. These consultations
 can read deployment integrations and task status for context, but they cannot
