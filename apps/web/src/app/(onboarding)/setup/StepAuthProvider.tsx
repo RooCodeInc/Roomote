@@ -9,7 +9,6 @@ import { ArrowRight, BrandIcon, Button } from '@/components/system';
 import { cn } from '@/lib/utils';
 
 import { StepTitle } from './StepTitle';
-import { SetupFooter } from './SetupFooter';
 import { getSetupStepDefinition } from './types';
 
 const AUTH_PROVIDER_STEP = getSetupStepDefinition('auth-provider');
@@ -28,7 +27,6 @@ const ADDITIONAL_COMMUNICATION_PROVIDERS: Record<
 
 export function StepAuthProvider({
   onContinue,
-  onBack,
   onSkip,
   additionalProviders = [],
   disabled = false,

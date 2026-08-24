@@ -44,7 +44,7 @@ export function StepWelcome({
           </>
         ) : (
           <>
-            <p className="font-semibold">For setup, we'll:</p>
+            <p className="font-semibold">For setup, we&apos;ll:</p>
             <ol className="list-decimal pl-5 space-y-1">
               <li>Create your admin account for this deployment</li>
               <li>Connect to your inference provider</li>

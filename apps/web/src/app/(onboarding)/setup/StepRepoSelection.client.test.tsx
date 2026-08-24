@@ -344,7 +344,7 @@ async function renderStepRepoSelection(
 }
 
 function showMissingRepositoryOptions() {
-  fireEvent.click(screen.getByRole('button', { name: 'Missing something?' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Missing a repo?' }));
 }
 
 describe('StepRepoSelection', () => {
@@ -434,7 +434,7 @@ describe('StepRepoSelection', () => {
     });
   });
 
-  it('keeps the repository filter hidden when there are five repositories or fewer', async () => {
+  it('keeps the repository filter hidden when there are seven repositories or fewer', async () => {
     mockRepositories.splice(
       0,
       mockRepositories.length,
@@ -476,7 +476,7 @@ describe('StepRepoSelection', () => {
     ).not.toBeInTheDocument();
   });
 
-  it('shows a repository filter once more than five repositories are available', async () => {
+  it('shows a repository filter once more than seven repositories are available', async () => {
     mockRepositories.splice(
       0,
       mockRepositories.length,
@@ -513,6 +513,18 @@ describe('StepRepoSelection', () => {
       {
         id: 'repo-6',
         fullName: 'acme/admin',
+        private: false,
+        defaultBranch: 'main',
+      },
+      {
+        id: 'repo-7',
+        fullName: 'acme/platform',
+        private: false,
+        defaultBranch: 'main',
+      },
+      {
+        id: 'repo-8',
+        fullName: 'acme/worker',
         private: false,
         defaultBranch: 'main',
       },
@@ -581,6 +593,18 @@ describe('StepRepoSelection', () => {
         private: false,
         defaultBranch: 'main',
       },
+      {
+        id: 'repo-7',
+        fullName: 'acme/platform',
+        private: false,
+        defaultBranch: 'main',
+      },
+      {
+        id: 'repo-8',
+        fullName: 'acme/worker',
+        private: false,
+        defaultBranch: 'main',
+      },
     );
     await renderStepRepoSelection();
 
@@ -639,6 +663,18 @@ describe('StepRepoSelection', () => {
       {
         id: 'repo-6',
         fullName: 'acme/admin',
+        private: false,
+        defaultBranch: 'main',
+      },
+      {
+        id: 'repo-7',
+        fullName: 'acme/platform',
+        private: false,
+        defaultBranch: 'main',
+      },
+      {
+        id: 'repo-8',
+        fullName: 'acme/worker',
         private: false,
         defaultBranch: 'main',
       },
@@ -816,7 +852,7 @@ describe('StepRepoSelection', () => {
 
   it('keeps the create-repository item visible when the list is filtered to no matches', async () => {
     mockRepositories.push(
-      ...Array.from({ length: 4 }, (_, index) => ({
+      ...Array.from({ length: 6 }, (_, index) => ({
         id: `repo-extra-${index}`,
         fullName: `acme/extra-${index}`,
         private: true,

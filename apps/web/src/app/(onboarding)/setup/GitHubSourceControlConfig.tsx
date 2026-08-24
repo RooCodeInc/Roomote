@@ -45,7 +45,7 @@ export function GitHubSourceControlConfig({ onBack }: { onBack?: () => void }) {
           Because Roomote is self-hosted, we can&apos;t offer you an
           out-of-the-box GitHub app - you need to create your own.
         </p>
-        <p>But it's super easy. step.</p>
+        <p>But it&apos;s super easy.</p>
       </div>
 
       <div className="space-y-2 max-w-xl mt-6">
