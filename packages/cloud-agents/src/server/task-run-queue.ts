@@ -1342,6 +1342,7 @@ async function pushRunOntoQueue(params: {
             `Failed to activate signal-guarded task run ${taskRun.id}.`,
           );
         }
+        options.signal.throwIfAborted();
         delayedEntryQueued = false;
       } finally {
         if (delayedEntryQueued) {
