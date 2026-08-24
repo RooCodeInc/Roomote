@@ -616,6 +616,10 @@ chmod 600 "$env_file"
 
 # --- systemd unit ------------------------------------------------------------
 
+# Preserve nonstandard Docker installations such as Snap when systemd starts
+# the host CLI without the installer's interactive shell PATH.
+docker_bin="$(command -v docker)"
+
 cat >/etc/systemd/system/roomote-compose.service <<EOF
 [Unit]
 Description=Roomote Docker Compose stack
@@ -627,6 +631,7 @@ Wants=network-online.target
 Type=oneshot
 WorkingDirectory=$install_root
 RemainAfterExit=yes
+Environment="ROOMOTE_DOCKER_BIN=$docker_bin"
 ExecStart=/usr/local/bin/roomote up
 ExecStop=/usr/local/bin/roomote down
 TimeoutStartSec=0

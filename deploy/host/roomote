@@ -8,6 +8,7 @@ set -euo pipefail
 install_root="${ROOMOTE_INSTALL_ROOT:-/opt/roomote}"
 env_file="$install_root/.env"
 compose_file="$install_root/docker-compose.prod.yml"
+docker_bin="${ROOMOTE_DOCKER_BIN:-docker}"
 
 usage() {
   cat <<'EOF'
@@ -59,7 +60,7 @@ compose() {
     compose_args+=(-f "$candidate")
   done
 
-  docker "${compose_args[@]}" "$@"
+  "$docker_bin" "${compose_args[@]}" "$@"
 }
 
 backup_usage() {

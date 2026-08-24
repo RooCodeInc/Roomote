@@ -99,7 +99,9 @@ assert(
 );
 assert(
   installer.includes('ExecStart=/usr/local/bin/roomote up') &&
-    installer.includes('ExecStop=/usr/local/bin/roomote down'),
+    installer.includes('ExecStop=/usr/local/bin/roomote down') &&
+    installer.includes('Environment="ROOMOTE_DOCKER_BIN=$docker_bin"') &&
+    hostCli.includes('docker_bin="${ROOMOTE_DOCKER_BIN:-docker}"'),
   'installer: systemd must use the override-aware host CLI',
 );
 assert(
@@ -620,6 +622,7 @@ for (const script of [
   'deploy/ci/upgrade-compatibility.sh',
   'deploy/host/tests/backup-restore.integration.sh',
   'deploy/host/tests/backup-failed-restart.sh',
+  'deploy/host/tests/compose-docker-path.sh',
   'deploy/host/tests/upgrade-failed-pull.sh',
   '.docker/gbrain/entrypoint.sh',
 ]) {
