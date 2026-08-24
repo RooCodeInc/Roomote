@@ -280,6 +280,39 @@ describe('prReviewNotificationJob', () => {
     expect(mockRecordDelivery).not.toHaveBeenCalled();
   });
 
+  it('defers when a replacement Fix all run finishes during preparation', async () => {
+    mockFindFirstTaskRun
+      .mockResolvedValueOnce({
+        id: 1,
+        payload: { channel: 'C123' },
+        slackThreadTs: '111.222',
+        sourceRunId: null,
+        status: RunStatus.Idle,
+        taskPhase: 'waiting_for_prompt',
+        workerHeartbeatAt: new Date(),
+      })
+      .mockResolvedValueOnce({
+        id: 2,
+        payload: { channel: 'C123' },
+        slackThreadTs: '111.222',
+        sourceRunId: 1,
+        status: RunStatus.Completed,
+        taskPhase: 'waiting_for_prompt',
+        workerHeartbeatAt: new Date(),
+      });
+
+    await prReviewNotificationJob(makeJob() as never);
+
+    expect(mockPrepareDelivery).toHaveBeenCalled();
+    expect(mockSchedule).toHaveBeenCalledWith({
+      request: expect.objectContaining({ deferrals: 1 }),
+      delayMs: 5000,
+    });
+    expect(mockNotifyFastAgentParent).not.toHaveBeenCalled();
+    expect(mockStickyFooterPost).not.toHaveBeenCalled();
+    expect(mockRecordDelivery).not.toHaveBeenCalled();
+  });
+
   it('posts the aggregated notification to the originating Slack thread when the task is idle', async () => {
     await prReviewNotificationJob(makeJob() as never);
 
@@ -1002,13 +1035,14 @@ describe('prReviewNotificationJob', () => {
       taskPhase: 'running',
       workerHeartbeatAt: new Date(),
     };
+    const settledReplacementRun = {
+      ...replacementRun,
+      status: RunStatus.Idle,
+      taskPhase: 'waiting_for_prompt',
+    };
     mockFindFirstTaskRun
       .mockResolvedValueOnce(replacementRun)
-      .mockResolvedValueOnce({
-        ...replacementRun,
-        status: RunStatus.Idle,
-        taskPhase: 'waiting_for_prompt',
-      });
+      .mockResolvedValue(settledReplacementRun);
 
     await prReviewNotificationJob(makeJob() as never);
     await prReviewNotificationJob(makeJob({ deferrals: 1 }) as never);

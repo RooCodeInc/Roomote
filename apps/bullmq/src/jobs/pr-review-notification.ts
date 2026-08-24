@@ -430,20 +430,25 @@ export const prReviewNotificationJob = async (
       where: eq(taskRuns.taskId, data.taskId),
       orderBy: [desc(taskRuns.createdAt)],
     });
-    if (latestBeforeDelivery && isLiveTaskTurn(latestBeforeDelivery)) {
+    const taskChangedDuringPreparation =
+      latestBeforeDelivery?.id !== latestJob.id;
+    if (
+      latestBeforeDelivery &&
+      (taskChangedDuringPreparation || isLiveTaskTurn(latestBeforeDelivery))
+    ) {
       if (data.deferrals < PR_REVIEW_NOTIFICATION_MAX_DEFERRALS) {
         await schedulePrReviewNotificationJob({
           request: { ...data, deferrals: data.deferrals + 1 },
           delayMs: PR_REVIEW_NOTIFICATION_DEFER_MS,
         });
         console.log(
-          `[PrReviewNotification] Task ${data.taskId} resumed while preparing review feedback for ${data.repository}#${data.prNumber}; deferred delivery (deferral ${data.deferrals + 1})`,
+          `[PrReviewNotification] Task ${data.taskId} changed or resumed while preparing review feedback for ${data.repository}#${data.prNumber}; deferred delivery (deferral ${data.deferrals + 1})`,
         );
         return;
       }
 
       console.warn(
-        `[PrReviewNotification] Task ${data.taskId} resumed while preparing review feedback for ${data.repository}#${data.prNumber}; dropping pending activity after ${data.deferrals} deferrals`,
+        `[PrReviewNotification] Task ${data.taskId} changed or resumed while preparing review feedback for ${data.repository}#${data.prNumber}; dropping pending activity after ${data.deferrals} deferrals`,
       );
       await finalizePrReviewNotificationRequest(data, 'suppressed');
       return;
