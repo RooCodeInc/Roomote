@@ -16,7 +16,11 @@ import { createTeamsCommunicationProviderFromRuntimeCredentials } from './teams-
 import { createTelegramCommunicationProviderFromRuntimeCredentials } from './telegram-communication';
 import { findTeamsPrimaryConversation } from './teams-primary-conversation';
 
-export type UserDirectMessageProvider = 'slack' | 'teams' | 'telegram';
+export type UserDirectMessageProvider =
+  | 'slack'
+  | 'teams'
+  | 'telegram'
+  | 'discord';
 
 export type UserDirectMessageDestination = {
   channelId: string;
@@ -371,15 +375,17 @@ export async function sendUserDirectMessageBestEffort({
   text: string;
   logContext: string;
 }): Promise<UserDirectMessageProvider[]> {
-  const [slack, teams, telegram] = await Promise.all([
+  const [slack, teams, telegram, discord] = await Promise.all([
     sendSlackUserDirectMessage(userId, text, logContext),
     sendTeamsUserDirectMessage(userId, text, logContext),
     sendTelegramUserDirectMessage(userId, text, logContext),
+    sendDiscordUserDirectMessage(userId, text, logContext),
   ]);
 
   return [
     ...(slack ? (['slack'] as const) : []),
     ...(teams ? (['teams'] as const) : []),
     ...(telegram ? (['telegram'] as const) : []),
+    ...(discord ? (['discord'] as const) : []),
   ];
 }
