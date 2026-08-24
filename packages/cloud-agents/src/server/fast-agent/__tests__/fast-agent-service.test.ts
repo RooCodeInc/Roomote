@@ -12,9 +12,6 @@ const mocks = vi.hoisted(() => ({
   callIntegration: vi.fn(),
   sendTaskMessage: vi.fn(),
   cancelTask: vi.fn(),
-  inspectTasks: vi.fn(),
-  getChatMessageContext: vi.fn(),
-  getChatChannelMessages: vi.fn(),
   getUserIdentity: vi.fn(),
   bindExecutor: vi.fn(),
   nativeExecutor: undefined as
@@ -29,12 +26,9 @@ const nativeToolNames = vi.hoisted(
   () =>
     ({
       cancelTask: 'cancel_task',
-      getChatChannelMessages: 'get_chat_channel_messages',
-      getChatMessageContext: 'get_chat_message_context',
       ignoreEvent: 'ignore_event',
       integrationCall: 'integration_call',
       launchTask: 'launch_task',
-      manageTasks: 'manage_tasks',
       retryTaskStart: 'retry_task_start',
       sendChatReaction: 'send_chat_reaction',
       sendChatReply: 'send_chat_reply',
@@ -113,7 +107,6 @@ vi.mock('../fast-agent-integration-broker', () => ({
 vi.mock('../fast-agent-tasks', () => ({
   sendFastAgentTaskMessage: mocks.sendTaskMessage,
   cancelFastAgentTask: mocks.cancelTask,
-  inspectFastAgentTasks: mocks.inspectTasks,
 }));
 
 vi.mock('../fast-agent-user-identity', () => ({
@@ -146,8 +139,6 @@ function callbacks(
 ): FastAgentTurnAdapter {
   return {
     launchTask: vi.fn<LaunchFastAgentTask>(),
-    getChatMessageContext: mocks.getChatMessageContext,
-    getChatChannelMessages: mocks.getChatChannelMessages,
     postReply: vi.fn().mockResolvedValue(undefined),
     postReaction: vi.fn().mockResolvedValue(undefined),
     ...overrides,
@@ -204,17 +195,6 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     mocks.callIntegration.mockResolvedValue({ matches: ['fast-agent.ts'] });
     mocks.sendTaskMessage.mockResolvedValue({ success: true });
     mocks.cancelTask.mockResolvedValue({ success: true });
-    mocks.inspectTasks.mockResolvedValue({
-      id: 'task-1',
-      taskRunStatus: 'running',
-    });
-    mocks.getChatMessageContext.mockResolvedValue({
-      requestedMessageId: '100.1',
-      messages: [{ id: '100.1', text: 'Context' }],
-    });
-    mocks.getChatChannelMessages.mockResolvedValue({
-      messages: [{ id: '100.1', text: 'History' }],
-    });
     mocks.getUserIdentity.mockResolvedValue({
       displayName: 'Matt Rubens',
       githubLogin: 'mrubens',
@@ -318,113 +298,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     });
   });
 
-  it('reads message context and history through the conversation adapter', async () => {
-    mocks.generateText.mockImplementation(
-      async (_params, _session, options) => {
-        await options.onSessionReady('opencode-session-1');
-        await invokeTool(nativeToolNames.getChatMessageContext, {
-          messageId: '100.1',
-        });
-        await invokeTool(nativeToolNames.getChatChannelMessages, {
-          oldest: '99.1',
-          latest: '101.1',
-        });
-        await invokeTool(nativeToolNames.sendChatReply, {
-          purpose: 'closeout',
-          message: 'I found the context.',
-        });
-        return '';
-      },
-    );
-    const adapter = callbacks();
-
-    await answerFastAgentQuestion({ ...baseParams, adapter });
-
-    expect(adapter.getChatMessageContext).toHaveBeenCalledWith({
-      messageId: '100.1',
-    });
-    expect(adapter.getChatChannelMessages).toHaveBeenCalledWith({
-      oldest: '99.1',
-      latest: '101.1',
-    });
-  });
-
-  it('defaults unbounded Slack history reads to the previous 24 hours', async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date('2026-08-24T12:00:00.000Z'));
-    mocks.generateText.mockImplementation(
-      async (_params, _session, options) => {
-        await options.onSessionReady('opencode-session-1');
-        await invokeTool(nativeToolNames.getChatChannelMessages, {});
-        await invokeTool(nativeToolNames.sendChatReply, {
-          purpose: 'closeout',
-          message: 'I found the context.',
-        });
-        return '';
-      },
-    );
-    const adapter = callbacks();
-
-    try {
-      await answerFastAgentQuestion({ ...baseParams, adapter });
-    } finally {
-      vi.useRealTimers();
-    }
-
-    expect(adapter.getChatChannelMessages).toHaveBeenCalledWith({
-      oldest: '2026-08-23T12:00:00.000Z',
-    });
-  });
-
-  it('bounds Slack history relative to an explicit latest timestamp', async () => {
-    mocks.generateText.mockImplementation(
-      async (_params, _session, options) => {
-        await options.onSessionReady('opencode-session-1');
-        await invokeTool(nativeToolNames.getChatChannelMessages, {
-          latest: '1710000000.000000',
-        });
-        await invokeTool(nativeToolNames.sendChatReply, {
-          purpose: 'closeout',
-          message: 'I found the context.',
-        });
-        return '';
-      },
-    );
-    const adapter = callbacks();
-
-    await answerFastAgentQuestion({ ...baseParams, adapter });
-
-    expect(adapter.getChatChannelMessages).toHaveBeenCalledWith({
-      latest: '1710000000.000000',
-      oldest: '2024-03-08T16:00:00.000Z',
-    });
-  });
-
-  it('bounds Slack history relative to an explicit ISO latest date', async () => {
-    mocks.generateText.mockImplementation(
-      async (_params, _session, options) => {
-        await options.onSessionReady('opencode-session-1');
-        await invokeTool(nativeToolNames.getChatChannelMessages, {
-          latest: '2026-08-24T12:00:00.000Z',
-        });
-        await invokeTool(nativeToolNames.sendChatReply, {
-          purpose: 'closeout',
-          message: 'I found the context.',
-        });
-        return '';
-      },
-    );
-    const adapter = callbacks();
-
-    await answerFastAgentQuestion({ ...baseParams, adapter });
-
-    expect(adapter.getChatChannelMessages).toHaveBeenCalledWith({
-      latest: '2026-08-24T12:00:00.000Z',
-      oldest: '2026-08-23T12:00:00.000Z',
-    });
-  });
-
-  it('binds only integration and task inspection tools for subagent sessions', async () => {
+  it('binds only integration tools for subagent sessions', async () => {
     const adapter = callbacks();
     mocks.listIntegrations.mockResolvedValue([
       {
@@ -437,9 +311,18 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         id: 'roomote',
         name: 'Roomote',
         description: 'Deployment management',
-        tools: [{ name: 'manage_custom_automations' }],
+        tools: [
+          { name: 'manage_custom_automations' },
+          { name: 'manage_tasks' },
+        ],
       },
     ]);
+    mocks.callIntegration.mockImplementation(
+      async (_context, _integrations, request) =>
+        request.toolName === 'manage_tasks'
+          ? { id: request.args.taskId, taskRunStatus: 'running' }
+          : { matches: ['fast-agent.ts'] },
+    );
 
     mocks.generateText.mockImplementation(
       async (_params, _session, options) => {
@@ -465,12 +348,19 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
           await expect(
             subagentExecutor({
               agent,
-              name: nativeToolNames.manageTasks,
-              args: { action: 'get_summary', taskId: 'task-1' },
+              name: nativeToolNames.integrationCall,
+              args: {
+                integrationId: 'roomote',
+                toolName: 'manage_tasks',
+                arguments: {
+                  action: 'get_summary',
+                  taskId: `task-${agent}`,
+                },
+              },
             }),
           ).resolves.toEqual({
-            id: 'task-1',
-            taskRunStatus: 'running',
+            success: true,
+            result: { id: `task-${agent}`, taskRunStatus: 'running' },
           });
           await expect(
             subagentExecutor({
@@ -515,8 +405,12 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         await expect(
           subagentExecutor({
             agent: 'general',
-            name: nativeToolNames.manageTasks,
-            args: { action: 'get_summary', taskId: 'task-1' },
+            name: nativeToolNames.integrationCall,
+            args: {
+              integrationId: 'roomote',
+              toolName: 'manage_tasks',
+              arguments: { action: 'get_summary', taskId: 'task-1' },
+            },
           }),
         ).resolves.toEqual({
           success: false,
@@ -536,12 +430,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     await expect(
       answerFastAgentQuestion({ ...baseParams, adapter }),
     ).resolves.toBe('Subagent review completed.');
-    expect(mocks.inspectTasks).toHaveBeenCalledTimes(2);
-    expect(mocks.inspectTasks).toHaveBeenCalledWith(
-      expect.objectContaining({ userId: 'user-1' }),
-      { action: 'get_summary', taskId: 'task-1' },
-    );
-    expect(mocks.callIntegration).toHaveBeenCalledTimes(2);
+    expect(mocks.callIntegration).toHaveBeenCalledTimes(4);
     expect(mocks.callIntegration).toHaveBeenCalledWith(
       expect.objectContaining({ userId: 'user-1' }),
       expect.arrayContaining([expect.objectContaining({ id: 'github' })]),
@@ -551,6 +440,18 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         args: expect.objectContaining({
           query: expect.stringMatching(/^Fast Agent/),
         }),
+      },
+    );
+    expect(mocks.callIntegration).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: 'user-1' }),
+      expect.arrayContaining([expect.objectContaining({ id: 'roomote' })]),
+      {
+        integrationId: 'roomote',
+        toolName: 'manage_tasks',
+        args: {
+          action: 'get_summary',
+          taskId: expect.stringMatching(/^task-/),
+        },
       },
     );
     expect(adapter.postReply).toHaveBeenCalledTimes(2);
@@ -894,6 +795,127 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       },
     );
   });
+
+  it('routes task inspection and chat context through the Roomote MCP', async () => {
+    mocks.listIntegrations.mockResolvedValue([
+      {
+        id: 'roomote',
+        name: 'Roomote',
+        description: 'Manage Roomote',
+        tools: [{ name: 'manage_tasks' }, { name: 'get_chat_message_context' }],
+      },
+    ]);
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'ack',
+          message: 'I’ll inspect that.',
+        });
+        await invokeTool(nativeToolNames.integrationCall, {
+          integrationId: 'roomote',
+          toolName: 'manage_tasks',
+          arguments: { action: 'get_summary', taskId: 'task-1' },
+        });
+        await invokeTool(nativeToolNames.integrationCall, {
+          integrationId: 'roomote',
+          toolName: 'get_chat_message_context',
+          arguments: {
+            channel: 'C123',
+            messageId: '1710000000.000100',
+          },
+        });
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'closeout',
+          message: 'I found the context.',
+        });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+
+    expect(mocks.callIntegration).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: 'user-1' }),
+      expect.arrayContaining([expect.objectContaining({ id: 'roomote' })]),
+      {
+        integrationId: 'roomote',
+        toolName: 'manage_tasks',
+        args: { action: 'get_summary', taskId: 'task-1' },
+      },
+    );
+    expect(mocks.callIntegration).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: 'user-1' }),
+      expect.any(Array),
+      {
+        integrationId: 'roomote',
+        toolName: 'get_chat_message_context',
+        args: { channel: 'C123', messageId: '1710000000.000100' },
+      },
+    );
+  });
+
+  it.each([
+    [undefined, '2026-08-23T12:00:00.000Z'],
+    ['1710000000.000000', '2024-03-08T16:00:00.000Z'],
+    ['2026-08-24T12:00:00.000Z', '2026-08-23T12:00:00.000Z'],
+  ])(
+    'defaults Slack Roomote MCP history from latest %s to the previous 24 hours',
+    async (latest, expectedOldest) => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date('2026-08-24T12:00:00.000Z'));
+      mocks.listIntegrations.mockResolvedValue([
+        {
+          id: 'roomote',
+          name: 'Roomote',
+          description: 'Manage Roomote',
+          tools: [{ name: 'get_chat_channel_messages' }],
+        },
+      ]);
+      mocks.generateText.mockImplementation(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          await invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'ack',
+            message: 'I’ll inspect that.',
+          });
+          await invokeTool(nativeToolNames.integrationCall, {
+            integrationId: 'roomote',
+            toolName: 'get_chat_channel_messages',
+            arguments: {
+              channel: 'C123',
+              ...(latest ? { latest } : {}),
+            },
+          });
+          await invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'closeout',
+            message: 'I found the history.',
+          });
+          return '';
+        },
+      );
+
+      try {
+        await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+      } finally {
+        vi.useRealTimers();
+      }
+
+      expect(mocks.callIntegration).toHaveBeenCalledWith(
+        expect.any(Object),
+        expect.any(Array),
+        {
+          integrationId: 'roomote',
+          toolName: 'get_chat_channel_messages',
+          args: {
+            channel: 'C123',
+            ...(latest ? { latest } : {}),
+            oldest: expectedOldest,
+          },
+        },
+      );
+    },
+  );
 
   it('runs Roomote custom automation mutations without an acknowledgement gate', async () => {
     const resolveMcpServerConfigs = vi.fn(async () => ({}));
@@ -1249,30 +1271,6 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     );
   });
 
-  it('uses deployment-wide task inspection without a conversation allow-list', async () => {
-    mocks.generateText.mockImplementation(
-      async (_params, _session, options) => {
-        await options.onSessionReady('opencode-session-1');
-        const result = await invokeTool(nativeToolNames.manageTasks, {
-          action: 'get_summary',
-          taskId: 'task-completed',
-        });
-        await invokeTool(nativeToolNames.sendChatReply, {
-          purpose: 'closeout',
-          message: 'The task completed.',
-        });
-        return JSON.stringify(result);
-      },
-    );
-
-    await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
-
-    expect(mocks.inspectTasks).toHaveBeenCalledWith(
-      expect.objectContaining({ userId: 'user-1' }),
-      { action: 'get_summary', taskId: 'task-completed' },
-    );
-  });
-
   it('ignores a platform event through a native terminal tool', async () => {
     mocks.generateText.mockImplementation(
       async (_params, _session, options) => {
@@ -1584,15 +1582,24 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     const toolResult = new Promise<Record<string, unknown>>((resolve) => {
       releaseTool = () => resolve({ success: true });
     });
-    mocks.inspectTasks.mockReturnValueOnce(toolResult);
+    mocks.listIntegrations.mockResolvedValue([
+      {
+        id: 'roomote',
+        name: 'Roomote',
+        description: 'Manage Roomote',
+        tools: [{ name: 'manage_custom_automations' }],
+      },
+    ]);
+    mocks.callIntegration.mockReturnValueOnce(toolResult);
     let pendingTool: Promise<unknown> | undefined;
     mocks.generateText.mockImplementation(
       async (_params, _session, options) => {
         await options.onSessionReady('opencode-session-1');
         options.onPromptStarted?.();
-        pendingTool = invokeTool(nativeToolNames.manageTasks, {
-          action: 'get_summary',
-          taskId: 'task-completed',
+        pendingTool = invokeTool(nativeToolNames.integrationCall, {
+          integrationId: 'roomote',
+          toolName: 'manage_custom_automations',
+          arguments: { action: 'list' },
         });
         await Promise.resolve();
         throw timeout;
@@ -1606,7 +1613,9 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
 
       expect(consoleError).toHaveBeenCalledWith(
-        expect.stringContaining('activeNativeToolCounts={"manage_tasks":1}'),
+        expect.stringContaining(
+          'activeNativeToolCounts={"integration_call":1}',
+        ),
       );
       expect(consoleError).toHaveBeenCalledWith(
         expect.stringContaining(

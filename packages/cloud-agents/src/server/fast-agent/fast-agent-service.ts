@@ -5,12 +5,12 @@ import {
 } from '../../opencode-prompt-subagents';
 import {
   BRAIN_MCP_ID,
+  CHAT_CHANNEL_MESSAGES_TOOL,
   INFERENCE_PROVIDER_MAX_RETRIES,
   MANAGE_CUSTOM_AUTOMATIONS_TOOL,
   ROOMOTE_MCP_ID,
   formatErrorForLog,
   resolveInferenceProviderRetryDelayMs,
-  roomoteTaskInspectionArgsSchema,
 } from '@roomote/types';
 import { getDeploymentTaskModelOptions } from '@roomote/db/server';
 import { Env } from '@roomote/env';
@@ -60,7 +60,6 @@ import {
 } from './fast-agent-integration-broker';
 import {
   cancelFastAgentTask,
-  inspectFastAgentTasks,
   sendFastAgentTaskMessage,
 } from './fast-agent-tasks';
 import { getFastAgentUserIdentity } from './fast-agent-user-identity';
@@ -85,13 +84,6 @@ const chatReplyArgsSchema = z.object({
 const chatReactionArgsSchema = z.object({
   name: z.string().trim().min(1),
   purpose: z.enum(['ack', 'closeout']),
-});
-const chatMessageContextArgsSchema = z.object({
-  messageId: z.string().trim().min(1),
-});
-const chatChannelMessagesArgsSchema = z.object({
-  oldest: z.string().trim().min(1).optional(),
-  latest: z.string().trim().min(1).optional(),
 });
 const FAST_AGENT_DEFAULT_SLACK_HISTORY_LOOKBACK_MS = 24 * 60 * 60 * 1000;
 
@@ -912,39 +904,23 @@ export async function answerFastAgentQuestion({
             return { success: true, delivered: true, closed };
           }
 
-          case FAST_AGENT_NATIVE_TOOL_NAMES.getChatMessageContext: {
-            const args = chatMessageContextArgsSchema.parse(call.args);
-            if (!adapter.getChatMessageContext) {
-              return {
-                success: false,
-                error: 'Chat message context is unavailable for this turn.',
-              };
-            }
-            throwIfTurnCancelled();
-            return await adapter.getChatMessageContext(args);
-          }
-
-          case FAST_AGENT_NATIVE_TOOL_NAMES.getChatChannelMessages: {
-            const args = chatChannelMessagesArgsSchema.parse(call.args);
-            if (!adapter.getChatChannelMessages) {
-              return {
-                success: false,
-                error: 'Chat channel history is unavailable for this turn.',
-              };
-            }
-            throwIfTurnCancelled();
-            return await adapter.getChatChannelMessages({
-              ...args,
-              ...(conversation.surface === 'slack' && !args.oldest
-                ? {
-                    oldest: getFastAgentDefaultSlackHistoryOldest(args.latest),
-                  }
-                : {}),
-            });
-          }
-
           case FAST_AGENT_NATIVE_TOOL_NAMES.integrationCall: {
             const args = integrationCallArgsSchema.parse(call.args);
+            const integrationArguments =
+              args.integrationId === ROOMOTE_MCP_ID &&
+              args.toolName === CHAT_CHANNEL_MESSAGES_TOOL.name &&
+              conversation.surface === 'slack' &&
+              (typeof args.arguments.oldest !== 'string' ||
+                args.arguments.oldest.trim().length === 0)
+                ? {
+                    ...args.arguments,
+                    oldest: getFastAgentDefaultSlackHistoryOldest(
+                      typeof args.arguments.latest === 'string'
+                        ? args.arguments.latest
+                        : undefined,
+                    ),
+                  }
+                : args.arguments;
             const managesCustomAutomations =
               args.integrationId === ROOMOTE_MCP_ID &&
               args.toolName === MANAGE_CUSTOM_AUTOMATIONS_TOOL.name;
@@ -965,7 +941,7 @@ export async function answerFastAgentQuestion({
             const signature = buildIntegrationCallSignature({
               integrationId: args.integrationId,
               toolName: args.toolName,
-              args: args.arguments,
+              args: integrationArguments,
             });
             if (integrationCallSignatures.has(signature)) {
               return {
@@ -987,7 +963,7 @@ export async function answerFastAgentQuestion({
               {
                 integrationId: args.integrationId,
                 toolName: args.toolName,
-                args: args.arguments,
+                args: integrationArguments,
               },
             );
             return { success: true, result };
@@ -1070,15 +1046,6 @@ export async function answerFastAgentQuestion({
                 await deliverKickoff(result);
               }
             }
-            return result;
-          }
-
-          case FAST_AGENT_NATIVE_TOOL_NAMES.manageTasks: {
-            const args = roomoteTaskInspectionArgsSchema.parse(call.args);
-            const result = await inspectFastAgentTasks(
-              { userId, apiBaseUrl },
-              args,
-            );
             return result;
           }
 
