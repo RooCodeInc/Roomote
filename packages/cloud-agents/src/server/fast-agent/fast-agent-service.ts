@@ -11,7 +11,10 @@ import {
   roomoteTaskInspectionArgsSchema,
 } from '@roomote/types';
 import { getDeploymentTaskModelOptions } from '@roomote/db/server';
+import { Env } from '@roomote/env';
 import { z } from 'zod';
+
+import packageJson from '../../../../../package.json';
 
 import {
   buildSlackThreadPromptBlocks,
@@ -19,6 +22,7 @@ import {
   wrapSlackThreadContext,
   type SlackThreadPromptMessage,
 } from '../../utils';
+import { resolveRoomoteReleaseVersion } from '../../release-version';
 import { getAvailableEnvironments, type RoutableEnvironment } from '../router';
 import { FAST_AGENT_MODEL_ROLE } from './fast-agent-constants';
 import { buildFastAgentSystemPrompt } from './fast-agent-prompt';
@@ -657,6 +661,11 @@ export async function answerFastAgentQuestion({
       platformEventHandling,
       platformEventVisibility,
       retryTaskStartAvailable: Boolean(adapter.retryTaskStart),
+      releaseVersion: resolveRoomoteReleaseVersion(
+        Env.RELEASE_PRODUCT_VERSION,
+        Env.RELEASE_VERSION,
+        packageJson.version,
+      ),
     });
     const integrationCallSignatures = new Set<string>();
     const completedTaskActions = new Set<string>();

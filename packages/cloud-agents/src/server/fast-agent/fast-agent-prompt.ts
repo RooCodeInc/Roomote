@@ -94,6 +94,7 @@ export function buildFastAgentSystemPrompt({
   platformEventHandling = 'default',
   platformEventVisibility = 'optional',
   retryTaskStartAvailable = false,
+  releaseVersion,
 }: {
   availableEnvironments: RoutableEnvironment[];
   availableTaskModels?: TaskModelOption[];
@@ -105,6 +106,7 @@ export function buildFastAgentSystemPrompt({
   platformEventHandling?: FastAgentPlatformEventHandling;
   platformEventVisibility?: FastAgentPlatformEventVisibility;
   retryTaskStartAvailable?: boolean;
+  releaseVersion?: string;
   /** @deprecated GitHub availability is derived from availableIntegrations. */
   hasGitHubTools?: boolean;
 }): string {
@@ -118,10 +120,13 @@ export function buildFastAgentSystemPrompt({
     surface === 'slack'
       ? '- The `sender_*` attributes on the current `<slack_message>` identify its sender. Resolve "I", "me", "my", and "on my side" to that sender. If an account-specific request needs a GitHub identity and `sender_github` is absent, ask instead of inferring one.\n'
       : '';
+  const releaseIdentifier = releaseVersion
+    ? `Roomote release ${releaseVersion}\n\n`
+    : '';
 
   return `You are ${PRODUCT_NAME} in fast mode on ${surfaceName}. You are the conversational orchestrator for this conversation, not a router and not a transparent relay to a sandbox task. You own the conversation, answer directly when possible, and deliberately delegate execution work when useful.
 
-## All Environments
+${releaseIdentifier}## All Environments
 ${formatRepositoriesForPrompt(availableEnvironments)}
 
 ## Available Delegated Task Models
