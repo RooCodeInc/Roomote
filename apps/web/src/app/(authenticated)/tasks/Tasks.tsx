@@ -31,7 +31,6 @@ import {
   ListChecks,
   Columns3,
   List,
-  ToggleButton,
   X,
   FunnelX,
   Button,
@@ -515,39 +514,6 @@ export const Tasks = () => {
           />
 
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className="flex items-center rounded-md border border-border p-0.5">
-              <ToggleButton
-                pressed={!isBoardView}
-                size="xs"
-                variant="ghost"
-                pressedVariant="secondary"
-                onPressedChange={(pressed) => {
-                  if (pressed) {
-                    handleViewChange('list');
-                  }
-                }}
-                title="List view"
-              >
-                <List />
-                <span className="hidden sm:inline">List</span>
-              </ToggleButton>
-              <ToggleButton
-                pressed={isBoardView}
-                size="xs"
-                variant="ghost"
-                pressedVariant="secondary"
-                onPressedChange={(pressed) => {
-                  if (pressed) {
-                    handleViewChange('board');
-                  }
-                }}
-                title="Board view"
-              >
-                <Columns3 />
-                <span className="hidden sm:inline">Board</span>
-              </ToggleButton>
-            </div>
-
             {!isSelectionMode ? (
               <>
                 {isFiltering && (
@@ -618,6 +584,28 @@ export const Tasks = () => {
                 </Button>
               </div>
             )}
+            <div className="flex items-center rounded-lg border border-border p-0.5">
+              <Button
+                variant={isBoardView ? 'ghost' : 'default'}
+                size="sm"
+                onClick={() => handleViewChange('list')}
+                aria-pressed={!isBoardView}
+                title="List view"
+                className="rounded-r-none"
+              >
+                <List />
+              </Button>
+              <Button
+                variant={isBoardView ? 'default' : 'ghost'}
+                size="sm"
+                onClick={() => handleViewChange('board')}
+                aria-pressed={isBoardView}
+                title="Board view"
+                className="rounded-l-none"
+              >
+                <Columns3 />
+              </Button>
+            </div>
           </div>
         </div>
       </div>

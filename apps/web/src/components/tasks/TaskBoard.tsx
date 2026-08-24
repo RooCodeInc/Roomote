@@ -7,11 +7,6 @@ import type { Task } from '@/lib/server';
 import { getUserDisplayName, stripHtmlTags, stripMarkdown } from '@/lib';
 import {
   Avatar,
-  Badge,
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
   MessageSquareText,
   Skeleton,
   Tooltip,
