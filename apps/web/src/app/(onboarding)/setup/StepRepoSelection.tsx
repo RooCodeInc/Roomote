@@ -445,9 +445,8 @@ export function StepRepoSelection({
             </div>
           )}
           <p className={`text-foreground ${!showForm && 'ml-6'}`}>
-            Pick the repo(s) needed for the first env to set up.
-            <br />
-            Roomote will install dependencies and figure it all out on its own.
+            Pick the repo(s) needed for the first env to set up. Roomote will
+            install dependencies and figure it all out on its own.
           </p>
         </div>
 
