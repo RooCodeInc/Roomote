@@ -1330,23 +1330,39 @@ async function pushRunOntoQueue(params: {
 
     if (options.signal) {
       delayedEntryQueued = true;
+      let abortCleanup: Promise<boolean> | undefined;
+      const removeEntryOnAbort = () => {
+        abortCleanup ??= queue.removeDelayedEntry(taskRun.id);
+      };
+      options.signal.addEventListener('abort', removeEntryOnAbort, {
+        once: true,
+      });
       try {
         options.signal.throwIfAborted();
-        if (
-          !(await queue.activateDelayedEntry(
-            taskRun.id,
-            queueEntry.availableAt,
-          ))
-        ) {
+        const activated = await queue.activateDelayedEntry(
+          taskRun.id,
+          queueEntry.availableAt,
+        );
+        if (!activated) {
+          if (options.signal.aborted && (await abortCleanup)) {
+            options.signal.throwIfAborted();
+          }
           throw new Error(
             `Failed to activate signal-guarded task run ${taskRun.id}.`,
           );
         }
-        options.signal.throwIfAborted();
+
+        if (options.signal.aborted) {
+          abortCleanup ??= queue.removeDelayedEntry(taskRun.id);
+          if (await abortCleanup) {
+            options.signal.throwIfAborted();
+          }
+        }
         delayedEntryQueued = false;
       } finally {
+        options.signal.removeEventListener('abort', removeEntryOnAbort);
         if (delayedEntryQueued) {
-          await queue.removeDelayedEntry(taskRun.id);
+          await (abortCleanup ?? queue.removeDelayedEntry(taskRun.id));
         }
       }
     }

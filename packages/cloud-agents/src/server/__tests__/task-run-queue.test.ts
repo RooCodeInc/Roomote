@@ -184,6 +184,30 @@ describe('TaskRunQueue - Basic Operations', () => {
       await expect(queue.dequeue(false)).resolves.toEqual(nowReady);
     });
 
+    it('does not activate a delayed entry after cancellation wins', async () => {
+      const entry = {
+        ...createTestEntry(1, 'cancel-wins-scope'),
+        availableAt: Date.now() + 60_000,
+      };
+      await queue.enqueue(entry);
+
+      await expect(queue.removeDelayedEntry(entry.id)).resolves.toBe(true);
+      await expect(queue.activateDelayedEntry(entry.id)).resolves.toBe(false);
+      await expect(queue.dequeue(false)).resolves.toBeNull();
+    });
+
+    it('does not cancel a delayed entry after dequeue wins', async () => {
+      const entry = {
+        ...createTestEntry(1, 'dequeue-wins-scope'),
+        availableAt: Date.now() + 60_000,
+      };
+      await queue.enqueue(entry);
+
+      await expect(queue.activateDelayedEntry(entry.id)).resolves.toBe(true);
+      await expect(queue.dequeue(false)).resolves.toEqual(entry);
+      await expect(queue.removeDelayedEntry(entry.id)).resolves.toBe(false);
+    });
+
     it('resets a delayed scope to the newest debounce deadline', async () => {
       const scope = 'debounced-scope';
       const older = {

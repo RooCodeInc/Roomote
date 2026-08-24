@@ -1905,6 +1905,55 @@ describe('enqueue-failure cancel task state', () => {
     }
   });
 
+  it('keeps an activated queue entry when dequeue wins the ownership race', async () => {
+    const userId = await createUser();
+    const controller = new AbortController();
+    const previousQueue = TaskRunQueue.queue;
+    const queueRedis = new Redis();
+    const queue = new TaskRunQueue({ redis: queueRedis, timeout: 1 });
+    const activateDelayedEntry = queue.activateDelayedEntry.bind(queue);
+    let dequeuedEntry: Awaited<ReturnType<typeof queue.dequeue>> = null;
+    TaskRunQueue.queue = queue;
+    vi.spyOn(queue, 'activateDelayedEntry').mockImplementation(
+      async (entryId, availableAt) => {
+        const activated = await activateDelayedEntry(entryId, availableAt);
+        dequeuedEntry = await queue.dequeue(false);
+        controller.abort(
+          new Error('Fast conversation lock ownership was lost.'),
+        );
+        return activated;
+      },
+    );
+
+    try {
+      const run = await enqueueTask(
+        {
+          task: standardTaskInput(),
+          initiator: { kind: 'user', userId },
+          workflow: 'standard',
+          surface: 'slack',
+          trigger: 'message',
+        },
+        {
+          skipEarlyTitleGeneration: true,
+          signal: controller.signal,
+          beforeEnqueue: async () => undefined,
+        },
+      );
+      createdTaskIds.push(run.taskId);
+
+      expect(dequeuedEntry).toMatchObject({ id: run.id });
+      const persistedRun = await db.query.taskRuns.findFirst({
+        where: eq(taskRuns.id, run.id),
+      });
+      expect(persistedRun!.status).toBe(RunStatus.Pending);
+      expect(persistedRun!.canceledAt).toBeNull();
+    } finally {
+      TaskRunQueue.queue = previousQueue;
+      await queueRedis.quit();
+    }
+  });
+
   it('activates a staged queue entry while ownership remains valid', async () => {
     const userId = await createUser();
     const controller = new AbortController();
