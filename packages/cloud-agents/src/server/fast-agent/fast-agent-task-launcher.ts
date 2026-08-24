@@ -2,8 +2,10 @@ import {
   ALL_REPOSITORIES,
   buildFastAgentChildTaskMetadata,
   TaskPayloadKind,
-  type FastAgentSurface,
   type StandardTask,
+  type TaskInitiator,
+  type TaskSurface,
+  type TaskTrigger,
 } from '@roomote/types';
 
 import { enqueueTask } from '../task-run-queue';
@@ -29,7 +31,9 @@ export type FastAgentTaskLaunchHooks = {
 export function createFastAgentTaskLauncher(
   params: {
     userId: string;
-    surface: FastAgentSurface;
+    surface: TaskSurface;
+    initiator?: TaskInitiator;
+    trigger?: TaskTrigger;
     taskUrlCampaign: string;
     buildTask: (input: {
       prompt: string;
@@ -58,10 +62,10 @@ export function createFastAgentTaskLauncher(
     const launch = await enqueueTask(
       {
         task,
-        initiator: { kind: 'user', userId: params.userId },
+        initiator: params.initiator ?? { kind: 'user', userId: params.userId },
         workflow: 'standard',
         surface: params.surface,
-        trigger: 'message',
+        trigger: params.trigger ?? 'message',
       },
       {
         beforeEnqueue: async (taskRun) => {

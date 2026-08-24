@@ -68,6 +68,7 @@ import { FastAgentTurnDiagnostics } from './fast-agent-turn-diagnostics';
 import {
   type FastAgentConversation,
   type FastAgentPlatformEventHandling,
+  type FastAgentPlatformEventKind,
   type FastAgentPlatformEventVisibility,
   type FastAgentReply,
   type FastAgentReplyHandle,
@@ -573,6 +574,7 @@ export async function answerFastAgentQuestion({
   turnSource = 'human',
   platformEventHandling = 'default',
   platformEventVisibility = 'optional',
+  platformEventKind = 'delegated_task',
 }: {
   question: string;
   images?: string[];
@@ -590,6 +592,7 @@ export async function answerFastAgentQuestion({
   turnSource?: FastAgentTurnSource;
   platformEventHandling?: FastAgentPlatformEventHandling;
   platformEventVisibility?: FastAgentPlatformEventVisibility;
+  platformEventKind?: FastAgentPlatformEventKind;
 }): Promise<string> {
   const diagnostics = new FastAgentTurnDiagnostics({
     conversation,
@@ -708,6 +711,7 @@ export async function answerFastAgentQuestion({
       turnSource,
       platformEventHandling,
       platformEventVisibility,
+      platformEventKind,
       retryTaskStartAvailable: Boolean(adapter.retryTaskStart),
       releaseVersion: resolveRoomoteReleaseVersion(
         Env.RELEASE_PRODUCT_VERSION,

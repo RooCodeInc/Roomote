@@ -7,6 +7,7 @@ import { FeatureFlag } from '@roomote/feature-flags';
 
 import {
   ALL_REPOSITORIES,
+  FAST_EXECUTION,
   CONFLICT_RESOLUTION_MAX_PR_AGE_DAYS_OPTIONS,
   launchCodingHarnesses,
   computeProviders,
@@ -782,6 +783,7 @@ const automationsRouter = createRouter({
         environmentId: z.union([
           z.string().uuid(),
           z.literal(ALL_REPOSITORIES),
+          z.literal(FAST_EXECUTION),
         ]),
         targetProvider: z
           .enum(['slack', 'discord', 'teams', 'telegram'])
@@ -828,6 +830,7 @@ const automationsRouter = createRouter({
         environmentId: z.union([
           z.string().uuid(),
           z.literal(ALL_REPOSITORIES),
+          z.literal(FAST_EXECUTION),
         ]),
         targetProvider: z
           .enum(['slack', 'discord', 'teams', 'telegram'])

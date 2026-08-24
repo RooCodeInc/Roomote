@@ -1,8 +1,14 @@
 import {
   createCustomAutomation,
+  and,
+  db,
   deleteCustomAutomation,
+  desc,
+  eq,
+  fastAgentConversations,
   getCustomAutomationById,
   listCustomAutomations,
+  inArray,
   updateCustomAutomation,
   type CustomAutomation,
 } from '@roomote/db/server';
@@ -16,6 +22,7 @@ import {
 } from '@roomote/sdk/server';
 import {
   ALL_REPOSITORIES,
+  FAST_EXECUTION,
   isScheduleOnlyBackgroundAutomationFrequency,
   type AutomationTarget,
   type BackgroundAutomationProvider,
@@ -38,6 +45,7 @@ export type CustomAutomationListItem = {
   scheduleMode: CustomAutomationScheduleMode;
   cronExpression: string | null;
   model: string | null;
+  executionMode: 'sandbox_task' | 'fast';
   environmentId: string | null;
   target: OptionalAutomationTarget;
   lastRunAt: Date | null;
@@ -48,7 +56,33 @@ export type CustomAutomationListItem = {
   createdByName: string | null;
   createdAt: Date;
   updatedAt: Date;
+  latestFastResult: string | null;
 };
+
+function latestAssistantText(
+  messages: Record<string, unknown>[],
+): string | null {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message?.role !== 'assistant') continue;
+    if (typeof message.content === 'string') return message.content;
+    if (Array.isArray(message.content)) {
+      const text = message.content
+        .map((part) =>
+          part &&
+          typeof part === 'object' &&
+          'text' in part &&
+          typeof part.text === 'string'
+            ? part.text
+            : '',
+        )
+        .filter(Boolean)
+        .join('\n');
+      if (text) return text;
+    }
+  }
+  return null;
+}
 
 export type CustomAutomationWriteInput = {
   name: string;
@@ -70,6 +104,7 @@ function toListItem(
   row: CustomAutomation & {
     createdByUser?: { name: string; email: string } | null;
   },
+  latestFastResult: string | null = null,
 ): CustomAutomationListItem {
   const scheduleMode =
     row.scheduleMode === 'cron'
@@ -86,7 +121,13 @@ function toListItem(
     scheduleMode,
     cronExpression: row.cronExpression,
     model: row.model,
-    environmentId: row.allRepositories ? ALL_REPOSITORIES : row.environmentId,
+    executionMode: row.executionMode,
+    environmentId:
+      row.executionMode === 'fast'
+        ? FAST_EXECUTION
+        : row.allRepositories
+          ? ALL_REPOSITORIES
+          : row.environmentId,
     target: row.target,
     lastRunAt: row.lastRunAt,
     lastSucceededAt: row.lastSucceededAt,
@@ -96,6 +137,7 @@ function toListItem(
     createdByName: row.createdByUser?.name || row.createdByUser?.email || null,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
+    latestFastResult,
   };
 }
 
@@ -177,7 +219,36 @@ export async function listCustomAutomationsCommand(
 ): Promise<CustomAutomationListItem[]> {
   assertAdmin(auth);
   const rows = await listCustomAutomations();
-  return rows.map(toListItem);
+  const automationIds = rows.map((row) => row.id);
+  const conversations = automationIds.length
+    ? await db
+        .selectDistinctOn([fastAgentConversations.workspaceId], {
+          workspaceId: fastAgentConversations.workspaceId,
+          compatibilityMessages: fastAgentConversations.compatibilityMessages,
+        })
+        .from(fastAgentConversations)
+        .where(
+          and(
+            eq(fastAgentConversations.surface, 'automation'),
+            inArray(fastAgentConversations.workspaceId, automationIds),
+          ),
+        )
+        .orderBy(
+          fastAgentConversations.workspaceId,
+          desc(fastAgentConversations.createdAt),
+        )
+    : [];
+  const latestByAutomation = new Map<string, string | null>();
+  for (const conversation of conversations) {
+    if (latestByAutomation.has(conversation.workspaceId)) continue;
+    latestByAutomation.set(
+      conversation.workspaceId,
+      latestAssistantText(conversation.compatibilityMessages),
+    );
+  }
+  return rows.map((row) =>
+    toListItem(row, latestByAutomation.get(row.id) ?? null),
+  );
 }
 
 export async function createCustomAutomationCommand(

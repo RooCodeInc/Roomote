@@ -22,6 +22,12 @@ describe('manage custom automations tool contract', () => {
     expect(MANAGE_CUSTOM_AUTOMATIONS_TOOL.description).toContain(
       'Admin-only management of deployment custom automations.',
     );
+    expect(MANAGE_CUSTOM_AUTOMATIONS_TOOL.description).toContain(
+      'run the automation in Fast mode',
+    );
+    expect(
+      MANAGE_CUSTOM_AUTOMATIONS_TOOL.inputSchema.environmentId.description,
+    ).toContain('Fast mode without an initial sandbox task');
     expect(
       MANAGE_CUSTOM_AUTOMATIONS_TOOL.inputSchema.schedule.description,
     ).toContain('off, every_hour, every_6_hours, daily, weekly');
