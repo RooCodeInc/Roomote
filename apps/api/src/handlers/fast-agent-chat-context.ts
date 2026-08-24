@@ -21,6 +21,7 @@ export function createFastAgentChatContextAdapter(options: {
 
   return {
     getChatMessageContext: (input: {
+      channel?: string;
       messageId?: string;
       messageLink?: string;
     }) =>
@@ -28,23 +29,24 @@ export function createFastAgentChatContextAdapter(options: {
         actingUserId: options.actingUserId,
         provider: options.conversation.surface,
         ...(slackTeamId ? { slackTeamId } : {}),
-        ...(input.messageLink
-          ? { messageLink: input.messageLink }
-          : { channel }),
+        ...(input.channel
+          ? { channel: input.channel }
+          : input.messageLink
+            ? {}
+            : { channel }),
         ...(input.messageId ? { messageId: input.messageId } : {}),
+        ...(input.messageLink ? { messageLink: input.messageLink } : {}),
       }),
     getChatChannelMessages: (input: {
-      channelLink?: string;
+      channel?: string;
       oldest?: string;
       latest?: string;
     }) =>
       lookupCommunicationChannelMessages({
         actingUserId: options.actingUserId,
+        channel: input.channel ?? channel,
         provider: options.conversation.surface,
         ...(slackTeamId ? { slackTeamId } : {}),
-        ...(input.channelLink
-          ? { channelLink: input.channelLink }
-          : { channel }),
         ...(input.oldest ? { oldest: input.oldest } : {}),
         ...(input.latest ? { latest: input.latest } : {}),
       }),

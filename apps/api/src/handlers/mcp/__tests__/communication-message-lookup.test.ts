@@ -230,7 +230,7 @@ describe('lookupCommunicationChannelMessages', () => {
     });
   });
 
-  it('accepts a permalink-only channelLink and forwards the parsed channel', async () => {
+  it('accepts a channel permalink and forwards the parsed channel', async () => {
     lookupSlackChannelMessagesMock.mockResolvedValueOnce({
       channelId: 'C123',
       messageCount: 0,
@@ -239,7 +239,7 @@ describe('lookupCommunicationChannelMessages', () => {
 
     await lookupCommunicationChannelMessages({
       actingUserId: 'user-1',
-      channelLink: 'https://acme.slack.com/archives/C123',
+      channel: 'https://acme.slack.com/archives/C123',
       provider: 'slack',
       slackTeamId: 'T123',
     });
@@ -249,19 +249,6 @@ describe('lookupCommunicationChannelMessages', () => {
       channel: 'C123',
       slackTeamId: 'T123',
     });
-  });
-
-  it('rejects a raw channel ID supplied as channelLink', async () => {
-    await expect(
-      lookupCommunicationChannelMessages({
-        actingUserId: 'user-1',
-        channelLink: '456',
-        provider: 'discord',
-      }),
-    ).rejects.toThrow(
-      'channelLink must be a Slack or Discord channel/message link',
-    );
-    expect(lookupDiscordChannelMessagesMock).not.toHaveBeenCalled();
   });
 
   it('uses an explicit Discord provider for a raw authorized channel id', async () => {

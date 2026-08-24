@@ -644,7 +644,7 @@ describe('roomote MCP tool descriptions', () => {
     const messageLinkField = getInputSchemaField(lookupTool, 'messageLink');
 
     expect(lookupTool.config.description).toBe(
-      'Look up a message in the task communication channel and return its surrounding conversation context. When the task has no communication channel, provide a Slack or Discord message link. Explicit cross-channel lookups require the acting user to have access.',
+      'Look up a message in the task communication channel and return its surrounding conversation context. Provide a channel reference or Slack/Discord message link when another channel is needed. Explicit cross-channel lookups require the acting user to have access.',
     );
     expect(channelField.description).toBe(
       'Optional channel ID, name, mention, or message link. Omit it to use the task communication channel.',
@@ -686,7 +686,7 @@ describe('roomote MCP tool descriptions', () => {
     const latestField = getInputSchemaField(lookupTool, 'latest');
 
     expect(lookupTool.config.description).toBe(
-      'Fetch readable history from the task communication channel. When the task has no communication channel, or when another channel is needed, provide a Slack or Discord channel/message link. Provider-specific access checks still apply.',
+      'Fetch readable history from the task communication channel. When another channel is needed, provide its ID, name, mention, or Slack/Discord channel/message link. Provider-specific access checks still apply.',
     );
     expect(channelField.description).toBe(
       'Optional channel ID, name, mention, or Slack/Discord channel/message link. Omit it to use the task communication channel.',

@@ -70,11 +70,12 @@ export type RetryFastAgentTaskStart = () => Promise<
 export type FastAgentTurnAdapter = {
   launchTask: LaunchFastAgentTask;
   getChatMessageContext?: (input: {
+    channel?: string;
     messageId?: string;
     messageLink?: string;
   }) => Promise<unknown>;
   getChatChannelMessages?: (input: {
-    channelLink?: string;
+    channel?: string;
     oldest?: string;
     latest?: string;
   }) => Promise<unknown>;

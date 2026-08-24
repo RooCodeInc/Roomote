@@ -86,14 +86,15 @@ const chatReactionArgsSchema = z.object({
 });
 const chatMessageContextArgsSchema = z
   .object({
+    channel: z.string().trim().min(1).optional(),
     messageId: z.string().trim().min(1).optional(),
     messageLink: z.string().trim().min(1).optional(),
   })
-  .refine((args) => args.messageId || args.messageLink, {
-    message: 'messageId or messageLink is required',
+  .refine((args) => args.channel || args.messageId || args.messageLink, {
+    message: 'messageId, messageLink, or a message link in channel is required',
   });
 const chatChannelMessagesArgsSchema = z.object({
-  channelLink: z.string().trim().min(1).optional(),
+  channel: z.string().trim().min(1).optional(),
   oldest: z.string().trim().min(1).optional(),
   latest: z.string().trim().min(1).optional(),
 });

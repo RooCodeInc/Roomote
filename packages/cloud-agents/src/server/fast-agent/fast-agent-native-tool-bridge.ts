@@ -119,10 +119,11 @@ import { z } from "zod"
 import { invoke } from "../roomote-fast-tool-bridge.js"
 
 export default {
-  description: ${JSON.stringify(`${CHAT_MESSAGE_CONTEXT_TOOL.description} Fast mode uses the current conversation channel unless a full Slack or Discord message permalink is provided.`)},
+  description: ${JSON.stringify(`${CHAT_MESSAGE_CONTEXT_TOOL.description} Fast mode uses the current conversation channel when channel and messageLink are omitted.`)},
   args: {
-    messageId: z.string().min(1).optional().describe("Provider message ID or timestamp in the current conversation channel. Optional when messageLink includes it."),
-    messageLink: z.string().url().optional().describe("Full Slack or Discord message permalink. Use this for an authorized cross-channel lookup."),
+    channel: z.string().min(1).optional().describe(${JSON.stringify(CHAT_MESSAGE_CONTEXT_TOOL.inputDescriptions.channel)}),
+    messageId: z.string().min(1).optional().describe(${JSON.stringify(CHAT_MESSAGE_CONTEXT_TOOL.inputDescriptions.messageId)}),
+    messageLink: z.string().url().optional().describe(${JSON.stringify(CHAT_MESSAGE_CONTEXT_TOOL.inputDescriptions.messageLink)}),
   },
   execute: (args, context) => invoke(${JSON.stringify(CHAT_MESSAGE_CONTEXT_TOOL.name)}, args, context),
 }
@@ -133,9 +134,9 @@ import { z } from "zod"
 import { invoke } from "../roomote-fast-tool-bridge.js"
 
 export default {
-  description: ${JSON.stringify(`${CHAT_CHANNEL_MESSAGES_TOOL.description} Fast mode uses the current conversation channel unless channelLink is provided, and defaults Slack history to the previous 24 hours when oldest is omitted.`)},
+  description: ${JSON.stringify(`${CHAT_CHANNEL_MESSAGES_TOOL.description} Fast mode uses the current conversation channel when channel is omitted, and defaults Slack history to the previous 24 hours when oldest is omitted.`)},
   args: {
-    channelLink: z.string().url().optional().describe("Full Slack or Discord channel or message permalink. Use this for an authorized cross-channel lookup; raw channel IDs are not accepted."),
+    channel: z.string().min(1).optional().describe(${JSON.stringify(CHAT_CHANNEL_MESSAGES_TOOL.inputDescriptions.channel)}),
     oldest: z.string().min(1).optional().describe(${JSON.stringify(CHAT_CHANNEL_MESSAGES_TOOL.inputDescriptions.oldest)}),
     latest: z.string().min(1).optional().describe(${JSON.stringify(CHAT_CHANNEL_MESSAGES_TOOL.inputDescriptions.latest)}),
   },

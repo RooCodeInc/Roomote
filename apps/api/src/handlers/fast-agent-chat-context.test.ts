@@ -75,7 +75,7 @@ describe('createFastAgentChatContextAdapter', () => {
     });
   });
 
-  it('uses Slack permalinks instead of the conversation channel for cross-channel lookups', async () => {
+  it('uses Slack channel references instead of the conversation channel for cross-channel lookups', async () => {
     const adapter = createFastAgentChatContextAdapter({
       actingUserId: 'user-1',
       conversation: {
@@ -85,22 +85,22 @@ describe('createFastAgentChatContextAdapter', () => {
         replyTarget: { channelId: 'channel-1', threadId: '100.1' },
       },
     });
-    const messageLink =
-      'https://acme.slack.com/archives/COTHER/p1710000000000100';
-    const channelLink = 'https://acme.slack.com/archives/COTHER';
-
-    await adapter.getChatMessageContext({ messageLink });
-    await adapter.getChatChannelMessages({ channelLink });
+    await adapter.getChatMessageContext({
+      channel: 'COTHER',
+      messageId: '1710000000.000100',
+    });
+    await adapter.getChatChannelMessages({ channel: '#other' });
 
     expect(mocks.lookupMessageContext).toHaveBeenCalledWith({
       actingUserId: 'user-1',
-      messageLink,
+      channel: 'COTHER',
+      messageId: '1710000000.000100',
       provider: 'slack',
       slackTeamId: 'team-1',
     });
     expect(mocks.lookupChannelMessages).toHaveBeenCalledWith({
       actingUserId: 'user-1',
-      channelLink,
+      channel: '#other',
       provider: 'slack',
       slackTeamId: 'team-1',
     });
@@ -117,10 +117,10 @@ describe('createFastAgentChatContextAdapter', () => {
       },
     });
     const messageLink = 'https://discord.com/channels/123/456/789';
-    const channelLink = 'https://discord.com/channels/123/456';
+    const channelReference = 'https://discord.com/channels/123/456';
 
     await adapter.getChatMessageContext({ messageLink });
-    await adapter.getChatChannelMessages({ channelLink });
+    await adapter.getChatChannelMessages({ channel: channelReference });
 
     expect(mocks.lookupMessageContext).toHaveBeenCalledWith({
       actingUserId: 'user-2',
@@ -129,7 +129,7 @@ describe('createFastAgentChatContextAdapter', () => {
     });
     expect(mocks.lookupChannelMessages).toHaveBeenCalledWith({
       actingUserId: 'user-2',
-      channelLink,
+      channel: channelReference,
       provider: 'discord',
     });
   });
@@ -150,8 +150,8 @@ describe('createFastAgentChatContextAdapter', () => {
 
     await expect(
       adapter.getChatMessageContext({
-        messageLink:
-          'https://acme.slack.com/archives/CPRIVATE/p1710000000000100',
+        channel: 'CPRIVATE',
+        messageId: '1710000000.000100',
       }),
     ).rejects.toThrow('Linked Slack user is not a member of channel CPRIVATE.');
   });

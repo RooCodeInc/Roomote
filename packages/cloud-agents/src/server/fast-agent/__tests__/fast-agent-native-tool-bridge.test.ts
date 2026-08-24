@@ -69,7 +69,7 @@ describe('Fast native OpenCode tool bridge', () => {
     expect(messageContextSource).toContain(
       'messageLink: z.string().url().optional()',
     );
-    expect(messageContextSource).not.toContain('channel:');
+    expect(messageContextSource).toContain('channel: z.string().min(1)');
     expect(channelMessagesSource).toContain(
       'invoke("get_chat_channel_messages"',
     );
@@ -77,9 +77,8 @@ describe('Fast native OpenCode tool bridge', () => {
       'defaults Slack history to the previous 24 hours',
     );
     expect(channelMessagesSource).toContain(
-      'channelLink: z.string().url().optional()',
+      'channel: z.string().min(1).optional()',
     );
-    expect(channelMessagesSource).not.toContain('channel:');
     expect(bridgeSource).toContain('context.sessionID');
     expect(bridgeSource).toContain('agent: context.agent');
     expect(bridgeSource).toContain('metadata: { roomoteResult:');

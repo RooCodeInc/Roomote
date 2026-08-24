@@ -22,14 +22,14 @@ export const CHAT_MESSAGE_CONTEXT_TOOL = {
   name: 'get_chat_message_context',
   title: 'Get Chat Message Context',
   description:
-    'Look up a message in the task communication channel and return its surrounding conversation context. When the task has no communication channel, provide a Slack or Discord message link. Explicit cross-channel lookups require the acting user to have access.',
+    'Look up a message in the task communication channel and return its surrounding conversation context. Provide a channel reference or Slack/Discord message link when another channel is needed. Explicit cross-channel lookups require the acting user to have access.',
   inputDescriptions: {
     channel:
       'Optional channel ID, name, mention, or message link. Omit it to use the task communication channel.',
     messageId:
       'Provider message ID or timestamp. Optional when messageLink, or channel as a message link, includes it.',
     messageLink:
-      'Optional full Slack or Discord message link. Required when the task has no communication channel.',
+      'Optional full Slack or Discord message link that supplies the target channel and message ID.',
   },
 } as const;
 
@@ -37,7 +37,7 @@ export const CHAT_CHANNEL_MESSAGES_TOOL = {
   name: 'get_chat_channel_messages',
   title: 'Get Chat Channel Messages',
   description:
-    'Fetch readable history from the task communication channel. When the task has no communication channel, or when another channel is needed, provide a Slack or Discord channel/message link. Provider-specific access checks still apply.',
+    'Fetch readable history from the task communication channel. When another channel is needed, provide its ID, name, mention, or Slack/Discord channel/message link. Provider-specific access checks still apply.',
   inputDescriptions: {
     channel:
       'Optional channel ID, name, mention, or Slack/Discord channel/message link. Omit it to use the task communication channel.',

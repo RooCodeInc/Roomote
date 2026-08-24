@@ -349,18 +349,18 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     });
   });
 
-  it('passes cross-channel permalinks through to the conversation adapter', async () => {
-    const messageLink =
+  it('passes cross-channel references through to the conversation adapter', async () => {
+    const messageReference =
       'https://acme.slack.com/archives/COTHER/p1710000000000100';
-    const channelLink = 'https://acme.slack.com/archives/COTHER';
+    const channel = 'COTHER';
     mocks.generateText.mockImplementation(
       async (_params, _session, options) => {
         await options.onSessionReady('opencode-session-1');
         await invokeTool(nativeToolNames.getChatMessageContext, {
-          messageLink,
+          channel: messageReference,
         });
         await invokeTool(nativeToolNames.getChatChannelMessages, {
-          channelLink,
+          channel,
         });
         await invokeTool(nativeToolNames.sendChatReply, {
           purpose: 'closeout',
@@ -373,9 +373,11 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
 
     await answerFastAgentQuestion({ ...baseParams, adapter });
 
-    expect(adapter.getChatMessageContext).toHaveBeenCalledWith({ messageLink });
+    expect(adapter.getChatMessageContext).toHaveBeenCalledWith({
+      channel: messageReference,
+    });
     expect(adapter.getChatChannelMessages).toHaveBeenCalledWith({
-      channelLink,
+      channel,
       oldest: expect.any(String),
     });
   });
