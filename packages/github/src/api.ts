@@ -4,7 +4,13 @@ import jwt from 'jsonwebtoken';
 import { z } from 'zod';
 import pMap from 'p-map';
 
-import { createGitHubToken, resolveGitHubAppCredentials } from '@roomote/auth';
+import {
+  type CreateGitHubTokenOptions,
+  type CreateGitHubTokenRuntimeOptions,
+  type GitHubTokenMetadata,
+  createGitHubTokenWithMetadata,
+  resolveGitHubAppCredentials,
+} from '@roomote/auth';
 import {
   DEFAULT_SOURCE_CONTROL_PROVIDER,
   filterRepositoryNamesForSourceControlProvider,
@@ -33,7 +39,7 @@ const ANALYTICS_CONCURRENCY = 4;
 const ANALYTICS_PULL_REQUESTS_PER_PAGE = 100;
 const ANALYTICS_MAX_ALL_TIME_PULL_REQUEST_PAGES = 50;
 
-async function createTokenForRepositoryNames({
+async function resolveTokenOptionsForRepositoryNames({
   taskRun,
   repositoryNames,
   missingMessagePrefix,
@@ -43,7 +49,7 @@ async function createTokenForRepositoryNames({
   repositoryNames: string[];
   missingMessagePrefix: string;
   spanningMessagePrefix: string;
-}): Promise<string> {
+}): Promise<CreateGitHubTokenOptions> {
   const uniqueRepositoryNames = [
     ...new Set(
       filterRepositoryNamesForSourceControlProvider(
@@ -99,11 +105,11 @@ async function createTokenForRepositoryNames({
       );
     }
 
-    return createGitHubToken({
+    return {
       type: 'installationId',
       installationId: installationIds[0],
       repositoryIds,
-    });
+    };
   }
 
   throw new Error(
@@ -178,9 +184,9 @@ type Checks = RestEndpointMethodTypes['checks'];
  * Authentication
  */
 
-export const createTaskRunGitHubToken = async (
+async function resolveTaskRunGitHubTokenOptions(
   taskRun: TaskRun,
-): Promise<string> => {
+): Promise<CreateGitHubTokenOptions> {
   if (taskRun.payload.environmentId) {
     const environment = await db.query.environments.findFirst({
       where: eq(environments.id, taskRun.payload.environmentId),
@@ -197,7 +203,7 @@ export const createTaskRunGitHubToken = async (
     );
 
     if (environmentRepositories.length > 0) {
-      return createTokenForRepositoryNames({
+      return resolveTokenOptionsForRepositoryNames({
         taskRun,
         repositoryNames: environmentRepositories,
         missingMessagePrefix: 'Environment repositories not found',
@@ -213,7 +219,7 @@ export const createTaskRunGitHubToken = async (
     : [];
 
   if (selectedRepositories.length > 0) {
-    return createTokenForRepositoryNames({
+    return resolveTokenOptionsForRepositoryNames({
       taskRun,
       repositoryNames: selectedRepositories,
       missingMessagePrefix: 'Selected repositories not found',
@@ -237,11 +243,28 @@ export const createTaskRunGitHubToken = async (
 
   const installationId = repo?.installationId;
 
-  const gitHubToken = installationId
-    ? await createGitHubToken({ type: 'installationId', installationId })
-    : await createGitHubToken({ type: 'activeInstallation' });
+  return installationId
+    ? { type: 'installationId', installationId }
+    : { type: 'activeInstallation' };
+}
 
-  return gitHubToken;
+export async function createTaskRunGitHubTokenWithMetadata(
+  taskRun: TaskRun,
+  runtimeOptions?: CreateGitHubTokenRuntimeOptions,
+): Promise<GitHubTokenMetadata> {
+  const options = await resolveTaskRunGitHubTokenOptions(taskRun);
+  return createGitHubTokenWithMetadata(options, undefined, runtimeOptions);
+}
+
+export const createTaskRunGitHubToken = async (
+  taskRun: TaskRun,
+  runtimeOptions?: CreateGitHubTokenRuntimeOptions,
+): Promise<string> => {
+  const metadata = await createTaskRunGitHubTokenWithMetadata(
+    taskRun,
+    runtimeOptions,
+  );
+  return metadata.token;
 };
 
 export type TaskRunWorkerGitHubToken = {
@@ -265,10 +288,11 @@ export type TaskRunWorkerGitHubToken = {
 export async function createTaskRunWorkerGitHubTokenWithMetadata(
   taskRun: TaskRun,
 ): Promise<TaskRunWorkerGitHubToken> {
+  const metadata = await createTaskRunGitHubTokenWithMetadata(taskRun);
   return {
-    token: await createTaskRunGitHubToken(taskRun),
+    token: metadata.token,
     source: 'app',
-    expiresAt: null,
+    expiresAt: metadata.expiresAt,
   };
 }
 
@@ -466,15 +490,26 @@ export function getGitHubRateLimitRetryAfterMs(
 
   const status = 'status' in error ? Number(error.status) : null;
   const graphQlRateLimited = isGraphQlRateLimitError(error);
-  if (status !== 403 && status !== 429 && !graphQlRateLimited) {
-    return null;
-  }
-
   const retryAfter = getErrorHeader(error, 'retry-after');
   const remaining = getErrorHeader(error, 'x-ratelimit-remaining');
   const message = error instanceof Error ? error.message.toLowerCase() : '';
+  const endpointSpammed =
+    status === 422 &&
+    (message.includes('endpoint has been spammed') ||
+      message.includes('abuse detection'));
+
+  if (
+    status !== 403 &&
+    status !== 429 &&
+    !graphQlRateLimited &&
+    !endpointSpammed
+  ) {
+    return null;
+  }
+
   const isRateLimit =
     graphQlRateLimited ||
+    endpointSpammed ||
     status === 429 ||
     retryAfter !== null ||
     remaining === '0' ||

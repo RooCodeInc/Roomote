@@ -4,7 +4,8 @@ import type { TaskRun } from '@roomote/db/server';
 const {
   mockDecryptSecrets,
   mockEnvironmentVariablesFindMany,
-  mockCreateTaskRunWorkerGitHubToken,
+  mockCreateTaskRunWorkerGitHubTokenWithMetadata,
+  mockGetGitHubRateLimitRetryAfterMs,
   mockCreateTaskRunScopedGitLabTokens,
   mockCreateTaskRunGiteaCredentials,
   mockCreateTaskRunAdoCredentials,
@@ -16,7 +17,8 @@ const {
 } = vi.hoisted(() => ({
   mockDecryptSecrets: vi.fn(),
   mockEnvironmentVariablesFindMany: vi.fn(),
-  mockCreateTaskRunWorkerGitHubToken: vi.fn(),
+  mockCreateTaskRunWorkerGitHubTokenWithMetadata: vi.fn(),
+  mockGetGitHubRateLimitRetryAfterMs: vi.fn(),
   mockCreateTaskRunScopedGitLabTokens: vi.fn(),
   mockCreateTaskRunGiteaCredentials: vi.fn(),
   mockCreateTaskRunAdoCredentials: vi.fn(),
@@ -69,8 +71,10 @@ vi.mock('@roomote/db/server', () => ({
 }));
 
 vi.mock('@roomote/github', () => ({
-  createTaskRunWorkerGitHubToken: (...args: unknown[]) =>
-    mockCreateTaskRunWorkerGitHubToken(...args),
+  createTaskRunWorkerGitHubTokenWithMetadata: (...args: unknown[]) =>
+    mockCreateTaskRunWorkerGitHubTokenWithMetadata(...args),
+  getGitHubRateLimitRetryAfterMs: (...args: unknown[]) =>
+    mockGetGitHubRateLimitRetryAfterMs(...args),
 }));
 
 vi.mock('@roomote/gitlab', () => ({
@@ -143,7 +147,12 @@ describe('createSourceControlTokenForTaskRun', () => {
     );
     mockDecryptSecrets.mockImplementation(async (value) => value);
     mockEnvironmentVariablesFindMany.mockResolvedValue([]);
-    mockCreateTaskRunWorkerGitHubToken.mockResolvedValue('ghs_app_token');
+    mockCreateTaskRunWorkerGitHubTokenWithMetadata.mockResolvedValue({
+      token: 'ghs_app_token',
+      source: 'app',
+      expiresAt: new Date('2030-01-01T01:00:00.000Z'),
+    });
+    mockGetGitHubRateLimitRetryAfterMs.mockReturnValue(null);
     mockCreateTaskRunScopedGitLabTokens.mockResolvedValue({
       credentials: [
         {
@@ -211,9 +220,11 @@ describe('createSourceControlTokenForTaskRun', () => {
       envVar: 'GH_TOKEN',
       envVars: { GH_TOKEN: 'ghs_app_token' },
       source: 'app',
-      expiresAt: null,
+      expiresAt: new Date('2030-01-01T01:00:00.000Z'),
     });
-    expect(mockCreateTaskRunWorkerGitHubToken).toHaveBeenCalledWith(taskRun);
+    expect(mockCreateTaskRunWorkerGitHubTokenWithMetadata).toHaveBeenCalledWith(
+      taskRun,
+    );
   });
 
   it('creates GitLab token metadata from repo-scoped credentials', async () => {
@@ -252,7 +263,9 @@ describe('createSourceControlTokenForTaskRun', () => {
         ],
       },
     });
-    expect(mockCreateTaskRunWorkerGitHubToken).not.toHaveBeenCalled();
+    expect(
+      mockCreateTaskRunWorkerGitHubTokenWithMetadata,
+    ).not.toHaveBeenCalled();
     expect(mockCreateTaskRunScopedGitLabTokens).toHaveBeenCalledWith(
       expect.objectContaining({
         id: 123,
@@ -377,7 +390,9 @@ describe('createSourceControlTokenForTaskRun', () => {
       source: 'app',
       expiresAt: new Date('2026-08-10T15:00:00.000Z'),
     });
-    expect(mockCreateTaskRunWorkerGitHubToken).not.toHaveBeenCalled();
+    expect(
+      mockCreateTaskRunWorkerGitHubTokenWithMetadata,
+    ).not.toHaveBeenCalled();
     expect(mockCreateTaskRunGiteaCredentials).toHaveBeenCalledWith(
       expect.objectContaining({
         id: 123,
@@ -417,7 +432,9 @@ describe('createSourceControlTokenForTaskRun', () => {
       source: 'app',
       expiresAt: new Date('2026-08-10T14:00:00.000Z'),
     });
-    expect(mockCreateTaskRunWorkerGitHubToken).not.toHaveBeenCalled();
+    expect(
+      mockCreateTaskRunWorkerGitHubTokenWithMetadata,
+    ).not.toHaveBeenCalled();
     expect(mockCreateTaskRunAdoCredentials).toHaveBeenCalledWith(
       expect.objectContaining({
         id: 123,
@@ -467,7 +484,9 @@ describe('createSourceControlTokenForTaskRun', () => {
     );
 
     expect(result).toMatchObject({ provider: 'gitlab' });
-    expect(mockCreateTaskRunWorkerGitHubToken).not.toHaveBeenCalled();
+    expect(
+      mockCreateTaskRunWorkerGitHubTokenWithMetadata,
+    ).not.toHaveBeenCalled();
     expect(mockCreateTaskRunScopedGitLabTokens).toHaveBeenCalled();
   });
 
@@ -538,7 +557,8 @@ describe('createSourceControlTokenForTaskRun', () => {
       },
     });
     expect(
-      mockCreateTaskRunWorkerGitHubToken.mock.invocationCallOrder[0],
+      mockCreateTaskRunWorkerGitHubTokenWithMetadata.mock
+        .invocationCallOrder[0],
     ).toBeLessThan(
       mockCreateTaskRunScopedGitLabTokens.mock.invocationCallOrder[0]!,
     );
@@ -588,7 +608,9 @@ describe('createSourceControlTokenForTaskRun', () => {
       );
 
       expect(result).toBeNull();
-      expect(mockCreateTaskRunWorkerGitHubToken).toHaveBeenCalledTimes(1);
+      expect(
+        mockCreateTaskRunWorkerGitHubTokenWithMetadata,
+      ).toHaveBeenCalledTimes(1);
       expect(mockCreateTaskRunScopedGitLabTokens).toHaveBeenCalledTimes(2);
     } finally {
       consoleWarnSpy.mockRestore();
@@ -627,6 +649,41 @@ describe('createSourceControlTokenForTaskRun', () => {
       expect(mockCreateTaskRunScopedGitLabTokens).not.toHaveBeenCalled();
     } finally {
       consoleWarnSpy.mockRestore();
+      consoleErrorSpy.mockRestore();
+    }
+  });
+
+  it('does not retry GitHub token creation before a provider reset', async () => {
+    const rateLimitError = Object.assign(
+      new Error('API rate limit exceeded for installation ID'),
+      { status: 403 },
+    );
+    mockCreateTaskRunWorkerGitHubTokenWithMetadata.mockRejectedValue(
+      rateLimitError,
+    );
+    mockGetGitHubRateLimitRetryAfterMs.mockReturnValue(15 * 60 * 1000);
+    const consoleErrorSpy = vi
+      .spyOn(console, 'error')
+      .mockImplementation(() => undefined);
+
+    try {
+      const result = await createSourceControlTokenForTaskRun(
+        makeTaskRun({
+          repo: 'owner/repo',
+          description: 'Work on GitHub',
+        }),
+        '[test]',
+        { maxRetries: 3, baseDelayMs: 0 },
+      );
+
+      expect(result).toBeNull();
+      expect(
+        mockCreateTaskRunWorkerGitHubTokenWithMetadata,
+      ).toHaveBeenCalledTimes(1);
+      expect(consoleErrorSpy).toHaveBeenCalledWith(
+        expect.stringContaining('source_control_token_creation_rate_limited'),
+      );
+    } finally {
       consoleErrorSpy.mockRestore();
     }
   });

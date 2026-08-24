@@ -51,6 +51,7 @@ const PR_REVIEW_TRIAGE_CACHE_MAX_ENTRIES = 500;
 
 type PrReviewNotificationTelemetry = {
   githubApiCalls: number;
+  githubTokenMintRequests: number;
   eventsReceived: number;
   eventsTriaged: number;
   triageInvoked: boolean;
@@ -81,6 +82,7 @@ export function createPrReviewNotificationTelemetry(
 ): PrReviewNotificationTelemetry {
   return {
     githubApiCalls: 0,
+    githubTokenMintRequests: 0,
     eventsReceived,
     eventsTriaged: 0,
     triageInvoked: false,
@@ -430,12 +432,14 @@ async function fetchPrReviewLiveHeadState({
   prNumber,
   sourceControlProvider,
   telemetry,
+  githubToken,
 }: {
   taskRun: TaskRun;
   repository: string;
   prNumber: number;
   sourceControlProvider?: SourceControlProvider;
   telemetry: PrReviewNotificationTelemetry;
+  githubToken?: string;
 }): Promise<PrReviewLiveHeadState> {
   const provider = normalizeSourceControlProvider(sourceControlProvider);
 
@@ -450,7 +454,7 @@ async function fetchPrReviewLiveHeadState({
   }
 
   try {
-    const token = await createTaskRunGitHubToken(taskRun);
+    const token = githubToken ?? (await createTaskRunGitHubToken(taskRun));
     const octokit = getOctokit(token);
 
     const { data: pullRequest } =
@@ -861,11 +865,13 @@ async function fetchPrDiscussionSignals({
   repository,
   prNumber,
   telemetry,
+  githubToken,
 }: {
   taskRun: TaskRun;
   repository: string;
   prNumber: number;
   telemetry: PrReviewNotificationTelemetry;
+  githubToken?: string;
 }): Promise<Omit<PrReviewTriageContext, 'ciStatus' | 'mergeable'>> {
   const result = await readSourceControlPullRequestForTaskRun({
     taskRun,
@@ -878,6 +884,7 @@ async function fetchPrDiscussionSignals({
     onGitHubApiRequest: () => {
       telemetry.githubApiCalls += 1;
     },
+    githubToken,
   });
 
   if (!('threads' in result)) {
@@ -972,6 +979,37 @@ export async function gatherPrReviewTriageContext({
   sourceControlProvider?: SourceControlProvider;
   telemetry?: PrReviewNotificationTelemetry;
 }): Promise<PrReviewTriageContext> {
+  const provider = normalizeSourceControlProvider(sourceControlProvider);
+  let githubToken: string | undefined;
+
+  if (provider === 'github') {
+    try {
+      githubToken = await createTaskRunGitHubToken(taskRun, {
+        onTokenMintRequest: () => {
+          telemetry.githubTokenMintRequests += 1;
+        },
+      });
+    } catch (error) {
+      rethrowGitHubRateLimit(error, telemetry);
+      console.warn(
+        `[PrReviewNotification] Could not create task-scoped GitHub client for ${repository}#${prNumber}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      return {
+        resolvedThreadCount: null,
+        unresolvedThreadCount: null,
+        latestReviewStatus: null,
+        latestReviewSummaryComment: null,
+        latestTerminalReviewSummaryHeadSha: null,
+        currentHeadSha: null,
+        reviewThreads: [],
+        ciStatus: null,
+        mergeable: null,
+      };
+    }
+  }
+
   let discussionResult: Omit<PrReviewTriageContext, 'ciStatus' | 'mergeable'>;
   try {
     discussionResult = await fetchPrDiscussionSignals({
@@ -979,9 +1017,10 @@ export async function gatherPrReviewTriageContext({
       repository,
       prNumber,
       telemetry,
+      githubToken,
     });
   } catch (error) {
-    if (normalizeSourceControlProvider(sourceControlProvider) === 'github') {
+    if (provider === 'github') {
       rethrowGitHubRateLimit(error, telemetry);
     }
     console.warn(
@@ -1009,6 +1048,7 @@ export async function gatherPrReviewTriageContext({
     prNumber,
     sourceControlProvider,
     telemetry,
+    githubToken,
   });
 
   return {

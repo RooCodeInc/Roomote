@@ -33,7 +33,10 @@ import {
 } from '@roomote/db/server';
 import { captureTaskSettled } from '@roomote/telemetry/server';
 import { decryptSecrets } from '@roomote/db/encryption';
-import { createTaskRunWorkerGitHubToken } from '@roomote/github';
+import {
+  createTaskRunWorkerGitHubTokenWithMetadata,
+  getGitHubRateLimitRetryAfterMs,
+} from '@roomote/github';
 import { createTaskRunScopedGitLabTokens } from '@roomote/gitlab';
 import { createTaskRunBitbucketCredentials } from '@roomote/bitbucket';
 import { createTaskRunGiteaCredentials } from '@roomote/gitea';
@@ -511,11 +514,12 @@ async function createProviderToken(
 ): Promise<SourceControlRuntimeToken> {
   switch (provider) {
     case 'github': {
-      const token = await createTaskRunWorkerGitHubToken(taskRun);
+      const metadata =
+        await createTaskRunWorkerGitHubTokenWithMetadata(taskRun);
       return {
-        ...buildSourceControlTokenMetadata(provider, token),
-        source: 'app',
-        expiresAt: null,
+        ...buildSourceControlTokenMetadata(provider, metadata.token),
+        source: metadata.source,
+        expiresAt: metadata.expiresAt,
       };
     }
     case 'gitlab': {
@@ -646,6 +650,25 @@ async function createProviderTokenWithRetry(
       return await createProviderToken(taskRun, provider);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      const githubRetryAfterMs =
+        provider === 'github' ? getGitHubRateLimitRetryAfterMs(error) : null;
+
+      if (githubRetryAfterMs !== null) {
+        console.error(
+          JSON.stringify({
+            event: 'source_control_token_creation_rate_limited',
+            provider,
+            taskRunId: taskRun.id,
+            attempt,
+            maxRetries,
+            retryAfterMs: githubRetryAfterMs,
+          }),
+        );
+        // A dequeue cannot safely hold a run claim for a provider-directed
+        // delay that may last minutes. Stop immediately instead of converting
+        // one rate-limited POST into two more premature retries.
+        return null;
+      }
 
       if (attempt < maxRetries) {
         const delayMs = baseDelayMs * 2 ** (attempt - 1);

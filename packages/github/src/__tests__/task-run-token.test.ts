@@ -1,17 +1,17 @@
 const {
-  mockCreateGitHubToken,
+  mockCreateGitHubTokenWithMetadata,
   mockFindMany,
   mockFindFirst,
   mockFindEnvironmentFirst,
 } = vi.hoisted(() => ({
-  mockCreateGitHubToken: vi.fn(),
+  mockCreateGitHubTokenWithMetadata: vi.fn(),
   mockFindMany: vi.fn(),
   mockFindFirst: vi.fn(),
   mockFindEnvironmentFirst: vi.fn(),
 }));
 
 vi.mock('@roomote/auth', () => ({
-  createGitHubToken: mockCreateGitHubToken,
+  createGitHubTokenWithMetadata: mockCreateGitHubTokenWithMetadata,
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -48,7 +48,10 @@ vi.mock('@roomote/db/server', () => ({
 
 import type { TaskRun } from '@roomote/db/server';
 
-import { createTaskRunGitHubToken } from '../api';
+import {
+  createTaskRunGitHubToken,
+  createTaskRunWorkerGitHubTokenWithMetadata,
+} from '../api';
 
 function buildTaskRun(payload: TaskRun['payload']): TaskRun {
   return {
@@ -87,7 +90,10 @@ function buildEnvironmentConfig(repositories: string[]) {
 describe('createTaskRunGitHubToken', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockCreateGitHubToken.mockResolvedValue('ghs_test_token');
+    mockCreateGitHubTokenWithMetadata.mockResolvedValue({
+      token: 'ghs_test_token',
+      expiresAt: new Date('2030-01-01T01:00:00.000Z'),
+    });
   });
 
   it('uses the selected repositories installation for scoped multi-repo tasks', async () => {
@@ -117,11 +123,15 @@ describe('createTaskRunGitHubToken', () => {
     ).resolves.toBe('ghs_test_token');
 
     expect(mockFindFirst).not.toHaveBeenCalled();
-    expect(mockCreateGitHubToken).toHaveBeenCalledWith({
-      type: 'installationId',
-      installationId: 'install-exampleorg',
-      repositoryIds: [101, 102],
-    });
+    expect(mockCreateGitHubTokenWithMetadata).toHaveBeenCalledWith(
+      {
+        type: 'installationId',
+        installationId: 'install-exampleorg',
+        repositoryIds: [101, 102],
+      },
+      undefined,
+      undefined,
+    );
   });
 
   it('ignores selected repositories mapped to another provider', async () => {
@@ -146,11 +156,15 @@ describe('createTaskRunGitHubToken', () => {
       ),
     ).resolves.toBe('ghs_test_token');
 
-    expect(mockCreateGitHubToken).toHaveBeenCalledWith({
-      type: 'installationId',
-      installationId: 'install-exampleorg',
-      repositoryIds: [101],
-    });
+    expect(mockCreateGitHubTokenWithMetadata).toHaveBeenCalledWith(
+      {
+        type: 'installationId',
+        installationId: 'install-exampleorg',
+        repositoryIds: [101],
+      },
+      undefined,
+      undefined,
+    );
   });
 
   it('ignores selected repository names omitted from a provider map', async () => {
@@ -203,11 +217,15 @@ describe('createTaskRunGitHubToken', () => {
     ).resolves.toBe('ghs_test_token');
 
     expect(mockFindFirst).not.toHaveBeenCalled();
-    expect(mockCreateGitHubToken).toHaveBeenCalledWith({
-      type: 'installationId',
-      installationId: 'install-roomote',
-      repositoryIds: [201],
-    });
+    expect(mockCreateGitHubTokenWithMetadata).toHaveBeenCalledWith(
+      {
+        type: 'installationId',
+        installationId: 'install-roomote',
+        repositoryIds: [201],
+      },
+      undefined,
+      undefined,
+    );
   });
 
   it('rejects environment repository sets that span multiple installations', async () => {
@@ -237,7 +255,7 @@ describe('createTaskRunGitHubToken', () => {
       'Environment repositories for task run 123 span multiple GitHub installations',
     );
 
-    expect(mockCreateGitHubToken).not.toHaveBeenCalled();
+    expect(mockCreateGitHubTokenWithMetadata).not.toHaveBeenCalled();
   });
 
   it('rejects selected repository sets that span multiple installations', async () => {
@@ -263,7 +281,7 @@ describe('createTaskRunGitHubToken', () => {
       'Selected repositories for task run 123 span multiple GitHub installations',
     );
 
-    expect(mockCreateGitHubToken).not.toHaveBeenCalled();
+    expect(mockCreateGitHubTokenWithMetadata).not.toHaveBeenCalled();
   });
 
   it('fails closed when selected repositories resolve no GitHub repo ids', async () => {
@@ -286,7 +304,7 @@ describe('createTaskRunGitHubToken', () => {
       'Selected repositories for task run 123 resolved no GitHub repository ids',
     );
 
-    expect(mockCreateGitHubToken).not.toHaveBeenCalled();
+    expect(mockCreateGitHubTokenWithMetadata).not.toHaveBeenCalled();
   });
 
   it('falls back to the active installation for true all-repository tasks', async () => {
@@ -298,8 +316,22 @@ describe('createTaskRunGitHubToken', () => {
 
     expect(mockFindMany).not.toHaveBeenCalled();
     expect(mockFindFirst).not.toHaveBeenCalled();
-    expect(mockCreateGitHubToken).toHaveBeenCalledWith({
-      type: 'activeInstallation',
+    expect(mockCreateGitHubTokenWithMetadata).toHaveBeenCalledWith(
+      { type: 'activeInstallation' },
+      undefined,
+      undefined,
+    );
+  });
+
+  it('preserves the installation token expiry for worker refresh scheduling', async () => {
+    await expect(
+      createTaskRunWorkerGitHubTokenWithMetadata(
+        buildTaskRun({ repo: '__all_repositories__' } as TaskRun['payload']),
+      ),
+    ).resolves.toEqual({
+      token: 'ghs_test_token',
+      source: 'app',
+      expiresAt: new Date('2030-01-01T01:00:00.000Z'),
     });
   });
 });
