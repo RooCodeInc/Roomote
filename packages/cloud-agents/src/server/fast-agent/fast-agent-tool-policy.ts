@@ -1,7 +1,6 @@
 export const FAST_AGENT_NATIVE_TOOL_NAMES = {
   cancelTask: 'cancel_task',
   ignoreEvent: 'ignore_event',
-  integrationCall: 'integration_call',
   launchTask: 'launch_task',
   retryTaskStart: 'retry_task_start',
   sendChatReaction: 'send_chat_reaction',
@@ -21,16 +20,19 @@ export const FAST_AGENT_NATIVE_TOOL_FILTER: Record<string, boolean> = {
 };
 
 export const FAST_AGENT_SUBAGENT_TOOL_FILTER: Record<string, boolean> = {
-  '*': false,
-  [FAST_AGENT_NATIVE_TOOL_NAMES.integrationCall]: true,
+  '*': true,
+  task: false,
+  roomote_manage_custom_automations: false,
+  ...Object.fromEntries(
+    Object.values(FAST_AGENT_NATIVE_TOOL_NAMES).map((name) => [name, false]),
+  ),
 };
 
-const FAST_AGENT_SUBAGENT_TOOL_NAMES = new Set<FastAgentNativeToolName>([
-  FAST_AGENT_NATIVE_TOOL_NAMES.integrationCall,
-]);
-
-export function isFastAgentSubagentTool(
-  name: FastAgentNativeToolName,
-): boolean {
-  return FAST_AGENT_SUBAGENT_TOOL_NAMES.has(name);
+export function buildFastAgentToolFilter(
+  integrationIds: string[],
+): Record<string, boolean> {
+  return {
+    ...FAST_AGENT_NATIVE_TOOL_FILTER,
+    ...Object.fromEntries(integrationIds.map((id) => [`${id}_*`, true])),
+  };
 }

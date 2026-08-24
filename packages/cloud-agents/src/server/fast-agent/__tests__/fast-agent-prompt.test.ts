@@ -69,8 +69,8 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain('get_chat_message_context');
     expect(prompt).toContain('get_chat_channel_messages');
     expect(prompt).toContain('manage_custom_automations');
-    expect(prompt).toContain('integration_call');
-    expect(prompt).toContain('integrationId: "roomote"');
+    expect(prompt).not.toContain('integration_call');
+    expect(prompt).toContain('roomote_manage_tasks');
     expect(prompt).toContain("current user's deployment authorization");
     expect(prompt).toContain('use "run_now" rather than "launch_task"');
     expect(prompt).toContain('same actor-authorized remote');
@@ -86,7 +86,7 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain(
       'Tool arguments, results, and reasoning are retained natively',
     );
-    expect(prompt).toContain('never encode it as a string');
+    expect(prompt).toContain('native JSON schema');
     expect(prompt).toContain(
       'The runtime rejects those calls until an acknowledgement',
     );
@@ -117,8 +117,8 @@ describe('buildFastAgentSystemPrompt', () => {
       ],
     });
 
-    expect(prompt).toContain('Brain [integrationId: gbrain]');
-    expect(prompt).toContain('narrowest native integration call');
+    expect(prompt).toContain('Brain [tool prefix: gbrain_]');
+    expect(prompt).toContain('narrowest native Brain tool call');
     expect(prompt).toContain('one useful Brain result is usually enough');
     expect(prompt).toContain(
       "Never expose Brain's `source` field, architecture, or other internal provenance metadata",

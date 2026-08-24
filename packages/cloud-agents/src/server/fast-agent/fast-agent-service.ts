@@ -1,9 +1,5 @@
 import type { ModelMessage } from 'ai';
 import {
-  ROOMOTE_OPENCODE_ADVISOR_AGENT_NAME,
-  ROOMOTE_OPENCODE_JUDGE_AGENT_NAME,
-} from '../../opencode-prompt-subagents';
-import {
   BRAIN_MCP_ID,
   CHAT_CHANNEL_MESSAGES_TOOL,
   INFERENCE_PROVIDER_MAX_RETRIES,
@@ -48,12 +44,13 @@ import {
 import { fastAgentOpenCodeSessionManager } from './fast-agent-opencode-session';
 import {
   bindFastAgentNativeToolExecutor,
-  FAST_AGENT_NATIVE_TOOL_FILTER,
+  bindFastAgentMcpToolExecutor,
   FAST_AGENT_NATIVE_TOOL_NAMES,
   getFastAgentNativeToolRuntime,
+  type FastAgentMcpToolCall,
   type FastAgentNativeToolCall,
 } from './fast-agent-native-tool-bridge';
-import { isFastAgentSubagentTool } from './fast-agent-tool-policy';
+import { buildFastAgentToolFilter } from './fast-agent-tool-policy';
 import {
   callFastAgentIntegration,
   listFastAgentIntegrations,
@@ -113,11 +110,6 @@ const taskMessageArgsSchema = z.object({
 });
 const taskIdArgsSchema = z.object({
   taskId: z.string().trim().min(1).nullable().optional(),
-});
-const integrationCallArgsSchema = z.object({
-  integrationId: z.string().trim().min(1),
-  toolName: z.string().trim().min(1),
-  arguments: z.record(z.unknown()),
 });
 const ignoreEventArgsSchema = z.object({ reason: z.string().trim().min(1) });
 
@@ -821,6 +813,80 @@ export async function answerFastAgentQuestion({
           }
         : null;
 
+    const executeMcpTool = async (
+      call: FastAgentMcpToolCall,
+    ): Promise<unknown> => {
+      try {
+        const closedError = requireOpen();
+        if (closedError) return closedError;
+        const ownershipError = requireLockOwnership();
+        if (ownershipError) return ownershipError;
+        nativeToolInvoked = true;
+
+        if (platformEventHandling === 'present_only') {
+          return {
+            success: false,
+            error:
+              'This platform event may only be presented to the user with a closeout.',
+          };
+        }
+
+        const integrationArguments =
+          call.integrationId === ROOMOTE_MCP_ID &&
+          call.toolName === CHAT_CHANNEL_MESSAGES_TOOL.name &&
+          conversation.surface === 'slack' &&
+          (typeof call.args.oldest !== 'string' ||
+            call.args.oldest.trim().length === 0)
+            ? {
+                ...call.args,
+                oldest: getFastAgentDefaultSlackHistoryOldest(
+                  typeof call.args.latest === 'string'
+                    ? call.args.latest
+                    : undefined,
+                ),
+              }
+            : call.args;
+        const managesCustomAutomations =
+          call.integrationId === ROOMOTE_MCP_ID &&
+          call.toolName === MANAGE_CUSTOM_AUTOMATIONS_TOOL.name;
+        if (call.integrationId !== BRAIN_MCP_ID && !managesCustomAutomations) {
+          const ackError = requireAcknowledgement();
+          if (ackError) return ackError;
+        }
+        const signature = buildIntegrationCallSignature({
+          integrationId: call.integrationId,
+          toolName: call.toolName,
+          args: integrationArguments,
+        });
+        if (integrationCallSignatures.has(signature)) {
+          return {
+            success: false,
+            error: 'The same integration call already ran in this turn.',
+          };
+        }
+        integrationCallSignatures.add(signature);
+        throwIfTurnCancelled();
+        const result = await callFastAgentIntegration(
+          {
+            userId,
+            apiBaseUrl,
+            sessionId: session.id,
+            conversation,
+            messageId: currentMessageId ?? conversation.conversationId,
+          },
+          availableIntegrations,
+          {
+            integrationId: call.integrationId,
+            toolName: call.toolName,
+            args: integrationArguments,
+          },
+        );
+        return { success: true, result };
+      } catch (error) {
+        return toolFailure(error);
+      }
+    };
+
     const executeNativeTool = async (
       call: FastAgentNativeToolCall,
     ): Promise<unknown> => {
@@ -902,71 +968,6 @@ export async function answerFastAgentQuestion({
             visibleUpdatePosted = true;
             if (args.purpose === 'closeout') closed = true;
             return { success: true, delivered: true, closed };
-          }
-
-          case FAST_AGENT_NATIVE_TOOL_NAMES.integrationCall: {
-            const args = integrationCallArgsSchema.parse(call.args);
-            const integrationArguments =
-              args.integrationId === ROOMOTE_MCP_ID &&
-              args.toolName === CHAT_CHANNEL_MESSAGES_TOOL.name &&
-              conversation.surface === 'slack' &&
-              (typeof args.arguments.oldest !== 'string' ||
-                args.arguments.oldest.trim().length === 0)
-                ? {
-                    ...args.arguments,
-                    oldest: getFastAgentDefaultSlackHistoryOldest(
-                      typeof args.arguments.latest === 'string'
-                        ? args.arguments.latest
-                        : undefined,
-                    ),
-                  }
-                : args.arguments;
-            const managesCustomAutomations =
-              args.integrationId === ROOMOTE_MCP_ID &&
-              args.toolName === MANAGE_CUSTOM_AUTOMATIONS_TOOL.name;
-            if (call.agent && managesCustomAutomations) {
-              return {
-                success: false,
-                error:
-                  'Custom automation management is reserved for the Fast parent agent.',
-              };
-            }
-            if (
-              args.integrationId !== BRAIN_MCP_ID &&
-              !managesCustomAutomations
-            ) {
-              const ackError = requireAcknowledgement();
-              if (ackError) return ackError;
-            }
-            const signature = buildIntegrationCallSignature({
-              integrationId: args.integrationId,
-              toolName: args.toolName,
-              args: integrationArguments,
-            });
-            if (integrationCallSignatures.has(signature)) {
-              return {
-                success: false,
-                error: 'The same integration call already ran in this turn.',
-              };
-            }
-            integrationCallSignatures.add(signature);
-            throwIfTurnCancelled();
-            const result = await callFastAgentIntegration(
-              {
-                userId,
-                apiBaseUrl,
-                sessionId: session.id,
-                conversation,
-                messageId: currentMessageId ?? conversation.conversationId,
-              },
-              availableIntegrations,
-              {
-                integrationId: args.integrationId,
-                toolName: args.toolName,
-                args: integrationArguments,
-              },
-            );
-            return { success: true, result };
           }
 
           case FAST_AGENT_NATIVE_TOOL_NAMES.launchTask: {
@@ -1134,7 +1135,6 @@ export async function answerFastAgentQuestion({
       }
     };
 
-    const nativeRuntime = await getFastAgentNativeToolRuntime();
     const imageFiles = getFastAgentImageFiles(images);
     const serializedTurnPrompt = serializeFastAgentMessages([turnMessage]);
     const serializedBootstrapPrompt =
@@ -1146,6 +1146,10 @@ export async function answerFastAgentQuestion({
       bootstrapPrompt: serializedBootstrapPrompt,
       execute: async (openCodeSession, selectedPrompt) => {
         diagnostics.markInferenceSetupStarted();
+        const nativeRuntime = await getFastAgentNativeToolRuntime(
+          session.id,
+          availableIntegrations,
+        );
         const unbindExecutors = new Set<() => void>();
         const boundSubagentSessionIDs = new Set<string>();
         const unbindAllExecutors = () => {
@@ -1155,6 +1159,10 @@ export async function answerFastAgentQuestion({
         };
         let promptForAttempt = selectedPrompt;
         let promptTimeoutMs: number | null = null;
+        const unbindMcpExecutor = bindFastAgentMcpToolExecutor(
+          nativeRuntime.mcpCapability,
+          executeMcpTool,
+        );
         try {
           return await runFastAgentInferenceWithRetries(
             async () => {
@@ -1209,7 +1217,11 @@ export async function answerFastAgentQuestion({
                     permission: FAST_AGENT_SESSION_PERMISSIONS,
                     signal: promptSignal,
                     promptOnlySubagents: true,
-                    tools: FAST_AGENT_NATIVE_TOOL_FILTER,
+                    tools: buildFastAgentToolFilter(
+                      availableIntegrations.map(
+                        (integration) => integration.id,
+                      ),
+                    ),
                     onModelResolved: (model) => {
                       diagnostics.recordModelResolved(model);
                     },
@@ -1230,20 +1242,12 @@ export async function answerFastAgentQuestion({
                         return;
                       boundSubagentSessionIDs.add(subagentSessionID);
                       unbindExecutors.add(
-                        bindFastAgentNativeToolExecutor(
-                          subagentSessionID,
-                          (call) =>
-                            (call.agent ===
-                              ROOMOTE_OPENCODE_ADVISOR_AGENT_NAME ||
-                              call.agent ===
-                                ROOMOTE_OPENCODE_JUDGE_AGENT_NAME) &&
-                            isFastAgentSubagentTool(call.name)
-                              ? executeNativeTool(call)
-                              : Promise.resolve({
-                                  success: false,
-                                  error:
-                                    'That tool is reserved for the Fast parent agent.',
-                                }),
+                        bindFastAgentNativeToolExecutor(subagentSessionID, () =>
+                          Promise.resolve({
+                            success: false,
+                            error:
+                              'That tool is reserved for the Fast parent agent.',
+                          }),
                         ),
                       );
                     },
@@ -1284,6 +1288,7 @@ export async function answerFastAgentQuestion({
           );
         } finally {
           unbindAllExecutors();
+          unbindMcpExecutor();
         }
       },
     });
