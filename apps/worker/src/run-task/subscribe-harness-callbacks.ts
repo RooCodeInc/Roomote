@@ -18,6 +18,7 @@ import { captureWorkerException } from '../monitoring/sentry';
 
 import type { CallbackEvent, RunTaskCallbacks, RunTaskContext } from './types';
 import { fromRuntimeEnvelope } from './runtime-events/envelope';
+import { isEligibleProvisionalCompletionText } from './provisional-completion';
 import {
   recordMissingChatCloseoutFallback,
   waitForMissingChatCloseoutFallbackDelivery,
@@ -413,10 +414,14 @@ export function subscribeHarnessCallbacks({
         } else if (event.type === 'request_user_input_response') {
           latestAssistantMessagesByCallbackId.delete(callbackTaskId);
         } else if (event.type === 'text') {
-          latestAssistantMessagesByCallbackId.set(callbackTaskId, {
-            text: event.text,
-            ts: event.ts,
-          });
+          if (isEligibleProvisionalCompletionText(event.text)) {
+            latestAssistantMessagesByCallbackId.set(callbackTaskId, {
+              text: event.text,
+              ts: event.ts,
+            });
+          } else {
+            latestAssistantMessagesByCallbackId.delete(callbackTaskId);
+          }
         }
 
         void forwardCallbackEvent(callbackTaskId, event);

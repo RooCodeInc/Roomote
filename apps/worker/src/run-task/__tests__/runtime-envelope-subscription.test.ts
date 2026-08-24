@@ -473,6 +473,55 @@ describe('subscribeHarnessCallbacks', () => {
     await unsubscribe();
   });
 
+  it('does not promote transient assistant output to idle completion', async () => {
+    const { harness, emitEnvelope } = createRuntimeHarness();
+    const callbacks = { onMessage: vi.fn().mockResolvedValue(undefined) };
+    const unsubscribe = subscribeHarnessCallbacks({
+      harness: harness as never,
+      taskRun: { id: 147, taskId: 'task-transient-idle' } as never,
+      callbacks,
+      context: {},
+      logger: {
+        runId: 147,
+        filePath: '/tmp/test.log',
+        info: vi.fn(),
+        warn: vi.fn(),
+        error: vi.fn(),
+        log: vi.fn(),
+      },
+    });
+
+    emitEnvelope({
+      ts: 1772823377200,
+      eventType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+      role: 'assistant',
+      protocol: 'roomote_runtime',
+      contentBlocks: [{ type: 'text', text: 'Preparing the result.' }],
+      metadata: { sessionId: 'runtime-session-transient' },
+      payload: {},
+    });
+    emitEnvelope({
+      ts: 1772823377201,
+      eventType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+      role: 'assistant',
+      protocol: 'roomote_runtime',
+      contentBlocks: [{ type: 'text', text: 'Provider error: retrying.' }],
+      metadata: { sessionId: 'runtime-session-transient' },
+      payload: {},
+    });
+
+    await unsubscribe.flushPendingCompletionEvents();
+
+    expect(callbacks.onMessage).not.toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      expect.objectContaining({ type: 'completion' }),
+      expect.anything(),
+    );
+
+    await unsubscribe();
+  });
+
   it('records the latest finalized assistant message until completion settles', async () => {
     const { harness, emitTaskEvent, emitTurnCompleted } =
       createRuntimeHarness();

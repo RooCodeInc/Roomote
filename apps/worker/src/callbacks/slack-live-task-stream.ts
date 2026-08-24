@@ -10,13 +10,11 @@ import type {
   RunTaskCallbacks,
   RunTaskContext,
 } from '../run-task';
+import { isEligibleProvisionalCompletionText } from '../run-task/provisional-completion';
 import { captureWorkerException } from '../monitoring/sentry';
 import { getCallbackEventKey } from './utils';
 
 const updateQueues = new Map<number, Promise<void>>();
-
-/** Harness status noise that reads as an error but resolves on its own. */
-const TRANSIENT_NARRATION_PATTERN = /^(provider error|retrying)\b/i;
 
 /** Startup progress shown while the sandbox comes up, mirroring the web
  * launcher's booting steps (the controller-side Pending/Dequeued stretch is
@@ -343,7 +341,7 @@ export async function updateSlackLiveTaskStream(
   if (event.type === 'text') {
     const text = event.text.trim();
     // Transient status lines (provider retries) never reach the card.
-    if (!text || TRANSIENT_NARRATION_PATTERN.test(text)) {
+    if (!isEligibleProvisionalCompletionText(text)) {
       return;
     }
     state.status = 'in_progress';
