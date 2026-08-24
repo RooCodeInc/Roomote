@@ -29,6 +29,7 @@ import { authorize } from '@/lib/server';
 import { bootstrapWebRuntimeEnv } from '@/lib/server/bootstrap-runtime-env';
 import { getPublicAppUrl } from '@/lib/server/get-public-app-url';
 import { logger } from '@/lib/server/logger';
+import { captureIntegrationLifecycleEvent } from '@/lib/server/integration-telemetry';
 import {
   hydrateLinearMcpConnectionAfterOauth,
   LinearReplayIdentityMismatchError,
@@ -398,6 +399,19 @@ export async function GET(request: NextRequest) {
             updatedAt: new Date(),
           },
         });
+    }
+
+    captureIntegrationLifecycleEvent(
+      'integration_connected',
+      connection.mcpId,
+      userId,
+    );
+    if (requiresOrgAdmin && integration) {
+      captureIntegrationLifecycleEvent(
+        'integration_enabled',
+        integration.id,
+        userId,
+      );
     }
 
     return redirectToResult({ status: 'connected' });

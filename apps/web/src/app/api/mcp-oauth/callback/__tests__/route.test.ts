@@ -20,6 +20,7 @@ const {
   deploymentEnablementValuesMock,
   storeTokensMock,
   updateAuthStatusMock,
+  captureEventMock,
 } = vi.hoisted(() => ({
   authorizeMock: vi.fn(),
   bootstrapWebRuntimeEnvMock: vi.fn(),
@@ -40,6 +41,11 @@ const {
   deploymentEnablementValuesMock: vi.fn(),
   storeTokensMock: vi.fn(),
   updateAuthStatusMock: vi.fn(),
+  captureEventMock: vi.fn(),
+}));
+
+vi.mock('@roomote/telemetry/server', () => ({
+  captureEvent: captureEventMock,
 }));
 
 vi.mock('@/lib/server', () => ({
@@ -182,6 +188,10 @@ describe('GET /api/mcp-oauth/callback', () => {
       PUBLIC_CALLBACK,
     );
     expect(discoverOAuthEndpointsMock).not.toHaveBeenCalled();
+    expect(captureEventMock).toHaveBeenCalledWith('integration_connected', {
+      userId: 'user-1',
+      properties: { integration_id: 'linear' },
+    });
   });
 
   it('rejects a pending callback when integrations become disabled', async () => {
@@ -343,6 +353,14 @@ describe('GET /api/mcp-oauth/callback', () => {
         set: expect.not.objectContaining({ disabledTools: expect.anything() }),
       }),
     );
+    expect(captureEventMock).toHaveBeenCalledWith('integration_connected', {
+      userId: 'user-1',
+      properties: { integration_id: 'resend' },
+    });
+    expect(captureEventMock).toHaveBeenCalledWith('integration_enabled', {
+      userId: 'user-1',
+      properties: { integration_id: 'resend' },
+    });
   });
 
   it('surfaces token exchange failures with a safe reason and stage', async () => {
@@ -370,6 +388,7 @@ describe('GET /api/mcp-oauth/callback', () => {
     expect(JSON.stringify(loggerErrorMock.mock.calls)).not.toContain(
       'provider response omitted',
     );
+    expect(captureEventMock).not.toHaveBeenCalled();
   });
 
   it('does not store Linear tokens when identity metadata validation fails', async () => {
