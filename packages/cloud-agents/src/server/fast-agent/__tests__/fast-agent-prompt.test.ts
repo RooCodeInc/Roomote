@@ -65,6 +65,10 @@ describe('buildFastAgentSystemPrompt', () => {
       'The runtime rejects those calls until an acknowledgement',
     );
     expect(prompt).toContain('kickoffMessage');
+    expect(prompt).toContain('launch multiple independent tasks in one turn');
+    expect(prompt).toContain('the turn remains open for more tools');
+    expect(prompt).toContain('end with a normal closeout or clarification');
+    expect(prompt).not.toContain('kickoff closes the turn');
     expect(prompt).not.toContain('Each structured output');
     expect(prompt).not.toContain('toolArguments');
     expect(prompt).toContain('no local filesystem, shell');
