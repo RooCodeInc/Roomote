@@ -803,7 +803,48 @@ describe('prReviewNotificationJob', () => {
     );
   });
 
-  it('falls back to the interactive offer when auto-dispatch is unavailable', async () => {
+  it('uses auto-handling enabled while notification preparation was in flight', async () => {
+    mockFindFirstTaskPullRequest
+      .mockResolvedValueOnce({
+        status: 'open',
+        autoHandleFeedbackByUserId: null,
+      })
+      .mockResolvedValue({
+        status: 'open',
+        autoHandleFeedbackByUserId: 'user-9',
+      });
+    mockPrepareDelivery.mockResolvedValue({
+      post: true,
+      route: {
+        provider: 'slack',
+        channelId: 'C123',
+        threadId: '111.222',
+      },
+      text: 'formatted-message',
+      followUpQuestion: 'Want me to take a look?',
+      followUpPrompt: 'Address the review feedback on owner/repo#42.',
+    });
+    mockDispatchFollowUp.mockResolvedValue({ outcome: 'resumed', runId: 12 });
+
+    await prReviewNotificationJob(makeJob() as never);
+
+    expect(mockDispatchFollowUp).toHaveBeenCalledWith({
+      provider: 'slack',
+      taskId: 'task-1',
+      channelId: 'C123',
+      threadId: '111.222',
+      followUpPrompt: 'Address the review feedback on owner/repo#42.',
+      actingUserId: 'user-9',
+    });
+    expect(mockSetPendingPrReviewAction).not.toHaveBeenCalled();
+    expect(mockStickyFooterPost).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: expect.stringContaining("New review feedback — I'm on it"),
+      }),
+    );
+  });
+
+  it('defers opted-in feedback when auto-dispatch is temporarily unavailable', async () => {
     mockFindFirstTaskPullRequest.mockResolvedValue({
       status: 'open',
       autoHandleFeedbackByUserId: 'user-9',
@@ -823,9 +864,78 @@ describe('prReviewNotificationJob', () => {
 
     await prReviewNotificationJob(makeJob() as never);
 
+    expect(mockSchedule).toHaveBeenCalledWith({
+      request: expect.objectContaining({ deferrals: 1 }),
+      delayMs: 5000,
+    });
+    expect(mockSetPendingPrReviewAction).not.toHaveBeenCalled();
+    expect(mockStickyFooterPost).not.toHaveBeenCalled();
+    expect(mockRecordDelivery).not.toHaveBeenCalled();
+    expect(mockFinalize).not.toHaveBeenCalled();
+  });
+
+  it('auto-dispatches deferred opted-in feedback once the task becomes resumable', async () => {
+    mockFindFirstTaskPullRequest.mockResolvedValue({
+      status: 'open',
+      autoHandleFeedbackByUserId: 'user-9',
+    });
+    mockPrepareDelivery.mockResolvedValue({
+      post: true,
+      route: {
+        provider: 'slack',
+        channelId: 'C123',
+        threadId: '111.222',
+      },
+      text: 'formatted-message',
+      followUpQuestion: 'Want me to take a look?',
+      followUpPrompt: 'Address the review feedback on owner/repo#42.',
+    });
+    mockDispatchFollowUp
+      .mockResolvedValueOnce({ outcome: 'unavailable' })
+      .mockResolvedValueOnce({ outcome: 'resumed', runId: 12 });
+
+    await prReviewNotificationJob(makeJob() as never);
+    await prReviewNotificationJob(makeJob({ deferrals: 1 }) as never);
+
+    expect(mockSchedule).toHaveBeenCalledTimes(1);
+    expect(mockDispatchFollowUp).toHaveBeenCalledTimes(2);
+    expect(mockSetPendingPrReviewAction).not.toHaveBeenCalled();
+    expect(mockStickyFooterPost).toHaveBeenCalledTimes(1);
+    expect(mockStickyFooterPost).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: expect.stringContaining("New review feedback — I'm on it"),
+      }),
+    );
+    expect(mockRecordDelivery).toHaveBeenCalledTimes(1);
+    expect(mockFinalize).toHaveBeenCalledTimes(1);
+  });
+
+  it('falls back to an interactive offer after auto-dispatch exhausts its deferrals', async () => {
+    mockFindFirstTaskPullRequest.mockResolvedValue({
+      status: 'open',
+      autoHandleFeedbackByUserId: 'user-9',
+    });
+    mockPrepareDelivery.mockResolvedValue({
+      post: true,
+      route: {
+        provider: 'slack',
+        channelId: 'C123',
+        threadId: '111.222',
+      },
+      text: 'formatted-message',
+      followUpQuestion: 'Want me to take a look?',
+      followUpPrompt: 'Address the review feedback on owner/repo#42.',
+    });
+    mockDispatchFollowUp.mockResolvedValue({ outcome: 'unavailable' });
+
+    await prReviewNotificationJob(makeJob({ deferrals: 3 }) as never);
+
+    expect(mockSchedule).not.toHaveBeenCalled();
     expect(mockSetPendingPrReviewAction).toHaveBeenCalled();
-    const postedCall = mockStickyFooterPost.mock.calls[0]?.[0];
-    expect(postedCall.blocks).toBeDefined();
+    expect(mockStickyFooterPost).toHaveBeenCalledWith(
+      expect.objectContaining({ blocks: expect.any(Array) }),
+    );
+    expect(mockFinalize).toHaveBeenCalledTimes(1);
   });
 
   it('posts plain text without buttons when the triage produced no follow-up', async () => {

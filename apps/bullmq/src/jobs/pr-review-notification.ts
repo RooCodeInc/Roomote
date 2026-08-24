@@ -59,6 +59,30 @@ function isLiveTaskTurn(run: typeof taskRuns.$inferSelect): boolean {
   );
 }
 
+function findTaskPullRequestForNotification(data: PrReviewNotificationRequest) {
+  return db.query.taskPullRequests.findFirst({
+    where: and(
+      eq(taskPullRequests.taskId, data.taskId),
+      eq(
+        taskPullRequests.sourceControlProvider,
+        data.sourceControlProvider ?? 'github',
+      ),
+      eq(taskPullRequests.repository, data.repository),
+      eq(taskPullRequests.prNumber, data.prNumber),
+    ),
+    columns: {
+      sourceControlProvider: true,
+      host: true,
+      repository: true,
+      prNumber: true,
+      prTitle: true,
+      prUrl: true,
+      status: true,
+      autoHandleFeedbackByUserId: true,
+    },
+  });
+}
+
 function logPrReviewNotificationTriage(input: {
   data: PrReviewNotificationRequest;
   eventsDrained: number;
@@ -353,27 +377,7 @@ export const prReviewNotificationJob = async (
     );
   }
 
-  const prLink = await db.query.taskPullRequests.findFirst({
-    where: and(
-      eq(taskPullRequests.taskId, data.taskId),
-      eq(
-        taskPullRequests.sourceControlProvider,
-        data.sourceControlProvider ?? 'github',
-      ),
-      eq(taskPullRequests.repository, data.repository),
-      eq(taskPullRequests.prNumber, data.prNumber),
-    ),
-    columns: {
-      sourceControlProvider: true,
-      host: true,
-      repository: true,
-      prNumber: true,
-      prTitle: true,
-      prUrl: true,
-      status: true,
-      autoHandleFeedbackByUserId: true,
-    },
-  });
+  const prLink = await findTaskPullRequestForNotification(data);
 
   if (prLink?.status === 'merged' || prLink?.status === 'closed') {
     console.log(
@@ -426,10 +430,14 @@ export const prReviewNotificationJob = async (
     // triage are in flight. Recheck before posting so a bulk-fix run gets the
     // chance to resolve its included threads; the next delivery attempt then
     // filters those handled comments against live provider state.
-    const latestBeforeDelivery = await db.query.taskRuns.findFirst({
-      where: eq(taskRuns.taskId, data.taskId),
-      orderBy: [desc(taskRuns.createdAt)],
-    });
+    const [latestBeforeDelivery, latestPrLinkBeforeDelivery] =
+      await Promise.all([
+        db.query.taskRuns.findFirst({
+          where: eq(taskRuns.taskId, data.taskId),
+          orderBy: [desc(taskRuns.createdAt)],
+        }),
+        findTaskPullRequestForNotification(data),
+      ]);
     const taskChangedDuringPreparation =
       latestBeforeDelivery?.id !== latestJob.id;
     if (
@@ -449,6 +457,18 @@ export const prReviewNotificationJob = async (
 
       console.warn(
         `[PrReviewNotification] Task ${data.taskId} changed or resumed while preparing review feedback for ${data.repository}#${data.prNumber}; dropping pending activity after ${data.deferrals} deferrals`,
+      );
+      await finalizePrReviewNotificationRequest(data, 'suppressed');
+      return;
+    }
+
+    const deliveryPrLink = latestPrLinkBeforeDelivery ?? prLink;
+    if (
+      deliveryPrLink?.status === 'merged' ||
+      deliveryPrLink?.status === 'closed'
+    ) {
+      console.log(
+        `[PrReviewNotification] PR ${data.repository}#${data.prNumber} became ${deliveryPrLink.status} while preparing, skipping notification`,
       );
       await finalizePrReviewNotificationRequest(data, 'suppressed');
       return;
@@ -485,7 +505,7 @@ export const prReviewNotificationJob = async (
       (event) => event.reviewResult,
     )?.reviewResult;
     const persistedAutoHandleUserId =
-      prLink?.autoHandleFeedbackByUserId ?? null;
+      deliveryPrLink?.autoHandleFeedbackByUserId ?? null;
     const autoHandleRoute =
       followUp &&
       persistedAutoHandleUserId &&
@@ -518,15 +538,15 @@ export const prReviewNotificationJob = async (
       ),
       pullRequest: {
         provider:
-          prLink?.sourceControlProvider ??
+          deliveryPrLink?.sourceControlProvider ??
           data.sourceControlProvider ??
           'github',
-        host: prLink?.host,
-        repository: prLink?.repository ?? data.repository,
-        number: prLink?.prNumber ?? data.prNumber,
-        title: prLink?.prTitle,
-        url: prLink?.prUrl ?? data.prUrl,
-        status: prLink?.status,
+        host: deliveryPrLink?.host,
+        repository: deliveryPrLink?.repository ?? data.repository,
+        number: deliveryPrLink?.prNumber ?? data.prNumber,
+        title: deliveryPrLink?.prTitle,
+        url: deliveryPrLink?.prUrl ?? data.prUrl,
+        status: deliveryPrLink?.status,
       },
       summary: delivery.text,
       ...(roomoteReviewIdentity?.reviewTaskId &&
@@ -566,8 +586,19 @@ ${delivery.text}`;
           `[PrReviewNotification] Auto-dispatched review feedback for ${data.repository}#${data.prNumber} into task ${data.taskId} (${dispatched.outcome}, run ${dispatched.runId})`,
         );
       } else {
+        if (data.deferrals < PR_REVIEW_NOTIFICATION_MAX_DEFERRALS) {
+          await schedulePrReviewNotificationJob({
+            request: { ...data, deferrals: data.deferrals + 1 },
+            delayMs: PR_REVIEW_NOTIFICATION_DEFER_MS,
+          });
+          console.log(
+            `[PrReviewNotification] Auto-handle dispatch unavailable for ${data.repository}#${data.prNumber}; deferred delivery while task ${data.taskId} becomes resumable (deferral ${data.deferrals + 1})`,
+          );
+          return;
+        }
+
         console.warn(
-          `[PrReviewNotification] Auto-handle dispatch unavailable for ${data.repository}#${data.prNumber}; falling back to the interactive offer`,
+          `[PrReviewNotification] Auto-handle dispatch remained unavailable for ${data.repository}#${data.prNumber} after ${data.deferrals} deferrals; falling back to the interactive offer`,
         );
       }
     }
@@ -583,8 +614,8 @@ ${delivery.text}`;
       return;
     }
 
-    // If the automatic dispatch was unavailable, continue into the normal
-    // offer path even though the Fast parent already received the summary.
+    // Once retries are exhausted, continue into the normal offer path even
+    // though the Fast parent already received the deduplicated summary.
 
     if (autoHandledText && delivery.route) {
       const messageTs = await postPrReviewNotification({
