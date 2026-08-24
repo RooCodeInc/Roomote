@@ -143,6 +143,7 @@ export {
   Music2Icon,
   PanelLeftClose,
   PanelLeftOpen,
+  PackagePlus,
   PaperclipIcon,
   Pencil,
   Pin,

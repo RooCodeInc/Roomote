@@ -273,6 +273,7 @@ vi.mock('@/components/system', () => ({
   Input: (props: InputHTMLAttributes<HTMLInputElement>) => <input {...props} />,
   ArrowRight: (props: SVGProps<SVGSVGElement>) => <svg {...props} />,
   Loader2: (props: SVGProps<SVGSVGElement>) => <svg {...props} />,
+  PackagePlus: (props: SVGProps<SVGSVGElement>) => <svg {...props} />,
   Plus: (props: SVGProps<SVGSVGElement>) => <svg {...props} />,
   RefreshCcw: (props: SVGProps<SVGSVGElement>) => <svg {...props} />,
   RotateCw: (props: SVGProps<SVGSVGElement>) => <svg {...props} />,

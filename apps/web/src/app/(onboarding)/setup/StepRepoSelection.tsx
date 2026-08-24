@@ -519,6 +519,7 @@ export function StepRepoSelection({
                 selectedRepositoryIds={selectedRepositoryIds}
                 onToggleRepository={toggleRepository}
                 onCreateRepository={() => setCreateRepoDialogOpen(true)}
+                showSearch={false}
                 inputPrefix="setup-repository"
                 heightClassName="max-h-[calc(var(--effective-viewport-height)-26.75rem)] md:max-h-[calc(var(--effective-viewport-height)-30rem)]"
               />
