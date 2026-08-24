@@ -516,6 +516,132 @@ describe('sendMessageToTask', () => {
     expect(mockSendPromptMutate).not.toHaveBeenCalled();
   });
 
+  it('suppresses a review that finishes before the synchronize follow-up is relayed', async () => {
+    mockFindLatestTaskRun.mockResolvedValue(
+      createActiveRun({
+        payload: {
+          fastAgentParent: {
+            sessionId: '11111111-1111-4111-8111-111111111111',
+            conversation: {
+              surface: 'slack',
+              workspaceId: 'T123',
+              conversationId: '100.001',
+              replyTarget: { channelId: 'C123', threadId: '100.001' },
+            },
+          },
+        },
+      }),
+    );
+    mockTaskRunFindFirst.mockResolvedValue({
+      id: 200,
+      taskId: 'review-task',
+      payloadKind: 'github_pr_review_sync',
+      payload: {
+        repo: 'acme/app',
+        prNumber: 42,
+        prUrl: 'https://github.com/acme/app/pull/42',
+        headSha: 'old-head',
+        // Stamped by the synchronize handler before the debounced follow-up
+        // runs, so the linkage below still holds the pre-push head.
+        latestObservedHeadSha: 'pushed-head',
+      },
+    });
+    mockFindReusableGitHubPrFollowUpOwner.mockResolvedValue({
+      taskId: 'task-1',
+    });
+    mockTaskPullRequestFindFirst.mockResolvedValue({
+      host: 'github.com',
+      prTitle: 'Fix the thing',
+      prUrl: 'https://github.com/acme/app/pull/42',
+      status: 'open',
+      prSha: 'old-head',
+    });
+
+    const result = await sendMessageToTask({
+      taskId: 'task-1',
+      userId: 'reviewer-user',
+      authContext: {
+        tokenType: 'run',
+        runId: 200,
+        userId: 'reviewer-user',
+        principal: 'user',
+        version: 1,
+      } as RunTokenContext,
+      senderMode: 'linked_review_handoff',
+      message:
+        '<review_result><outcome>findings_remain</outcome><finding_count>1</finding_count><current_head_sha>old-head</current_head_sha></review_result>',
+    });
+
+    expect(result).toEqual({
+      success: true,
+      result: {
+        skipped: true,
+        reason:
+          'Linked review handoff skipped because the review targets an older pull request head.',
+      },
+    });
+    expect(mockNotifyFastAgentParentOnPrFeedback).not.toHaveBeenCalled();
+  });
+
+  it('delivers a review that reports the newly observed head after a push', async () => {
+    mockFindLatestTaskRun.mockResolvedValue(
+      createActiveRun({
+        payload: {
+          fastAgentParent: {
+            sessionId: '11111111-1111-4111-8111-111111111111',
+            conversation: {
+              surface: 'slack',
+              workspaceId: 'T123',
+              conversationId: '100.001',
+              replyTarget: { channelId: 'C123', threadId: '100.001' },
+            },
+          },
+        },
+      }),
+    );
+    mockTaskRunFindFirst.mockResolvedValue({
+      id: 200,
+      taskId: 'review-task',
+      payloadKind: 'github_pr_review_sync',
+      payload: {
+        repo: 'acme/app',
+        prNumber: 42,
+        prUrl: 'https://github.com/acme/app/pull/42',
+        headSha: 'old-head',
+        latestObservedHeadSha: 'pushed-head',
+      },
+    });
+    mockFindReusableGitHubPrFollowUpOwner.mockResolvedValue({
+      taskId: 'task-1',
+    });
+    mockTaskPullRequestFindFirst.mockResolvedValue({
+      host: 'github.com',
+      prTitle: 'Fix the thing',
+      prUrl: 'https://github.com/acme/app/pull/42',
+      status: 'open',
+      prSha: 'old-head',
+    });
+
+    await sendMessageToTask({
+      taskId: 'task-1',
+      userId: 'reviewer-user',
+      authContext: {
+        tokenType: 'run',
+        runId: 200,
+        userId: 'reviewer-user',
+        principal: 'user',
+        version: 1,
+      } as RunTokenContext,
+      senderMode: 'linked_review_handoff',
+      message:
+        '<review_result><outcome>clean</outcome><finding_count>0</finding_count><current_head_sha>pushed-head</current_head_sha></review_result>',
+    });
+
+    expect(mockNotifyFastAgentParentOnPrFeedback).toHaveBeenCalledWith(
+      expect.objectContaining({ reviewHeadSha: 'pushed-head' }),
+    );
+  });
+
   it('delivers a current sync review after the implementation task PR link becomes stale', async () => {
     mockFindLatestTaskRun.mockResolvedValue(
       createActiveRun({

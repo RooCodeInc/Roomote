@@ -1183,6 +1183,14 @@ export const githubPullRequestReviewOpenSchema = sharedTaskSchema.extend({
     prTitle: z.string(),
     prUrl: z.string(),
     headSha: z.string(),
+    /**
+     * Newest head observed for this PR while the review was already running.
+     * Stamped by the synchronize handler before the debounced follow-up is
+     * queued, so a review that finishes inside that window can still be
+     * recognized as reporting on a superseded head. `headSha` stays the head
+     * the review actually started from.
+     */
+    latestObservedHeadSha: z.string().optional(),
     branchName: z.string().optional(),
     targetBranch: z.string().optional(),
     relayReviewResultsToTask: z.boolean().optional(),
@@ -1205,6 +1213,14 @@ export const githubPullRequestReviewSyncSchema = sharedTaskSchema.extend({
     prTitle: z.string(),
     prUrl: z.string(),
     headSha: z.string(),
+    /**
+     * Newest head observed for this PR while the review was already running.
+     * Stamped by the synchronize handler before the debounced follow-up is
+     * queued, so a review that finishes inside that window can still be
+     * recognized as reporting on a superseded head. `headSha` stays the head
+     * the review actually started from.
+     */
+    latestObservedHeadSha: z.string().optional(),
     branchName: z.string().optional(),
     targetBranch: z.string().optional(),
     relayReviewResultsToTask: z.boolean().optional(),

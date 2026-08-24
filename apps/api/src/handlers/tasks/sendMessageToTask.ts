@@ -799,11 +799,15 @@ async function resolveLinkedReviewHandoff({
     (typeof sourcePayload.headSha === 'string'
       ? sourcePayload.headSha
       : undefined);
-  if (
-    reviewHeadSha &&
-    handoffTarget.currentHeadSha &&
-    reviewHeadSha !== handoffTarget.currentHeadSha
-  ) {
+  // `latestObservedHeadSha` is stamped by the synchronize handler the moment a
+  // push supersedes a running review, while the linkage `prSha` only advances
+  // once the debounced follow-up has been relayed. Prefer the former so a
+  // review that finishes inside that window is still recognized as stale.
+  const currentHeadSha =
+    (typeof sourcePayload.latestObservedHeadSha === 'string'
+      ? sourcePayload.latestObservedHeadSha
+      : null) ?? handoffTarget.currentHeadSha;
+  if (reviewHeadSha && currentHeadSha && reviewHeadSha !== currentHeadSha) {
     return {
       kind: 'skip',
       reason:
