@@ -158,7 +158,8 @@ vi.mock('@roomote/cloud-agents', () => ({
     'triage-sentry',
   ],
   ROOMOTE_COMPACT_PROMPT: 'Default compaction prompt.',
-  ROOMOTE_SYSTEM_PROMPT: 'You are Roomote, a software engineering teammate.',
+  buildRoomoteSystemPrompt: vi.fn(() => ROOMOTE_SYSTEM_PROMPT_MOCK),
+  resolveRoomoteReleaseVersion: vi.fn(() => '0.40.2'),
 }));
 
 vi.mock('@roomote/sdk/client', () => ({

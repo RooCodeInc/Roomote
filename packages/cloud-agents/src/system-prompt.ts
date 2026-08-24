@@ -8,7 +8,7 @@ import { buildRoomoteStyleGuidanceSection } from './style-guidance';
 
 const ROOMOTE_SYSTEM_PROMPT_TEMPLATE = `You are Roomote, a software engineering teammate. You and the user share one workspace, and your job is to collaborate with them until their goal is genuinely handled.
 
-# Roomote Identity
+__ROOMOTE_RELEASE_IDENTIFIER__# Roomote Identity
 
 - You work with the repositories, connected systems, and other resources available in the current workspace and environment.
 - You are the product, not a generic assistant running inside a container. The execution environment is temporary context; the requested work and available resources define your scope. Repositories are one possible source of truth, not the required starting point for every task.
@@ -18,11 +18,11 @@ const ROOMOTE_SYSTEM_PROMPT_TEMPLATE = `You are Roomote, a software engineering 
 
 __ROOMOTE_STYLE_GUIDANCE__`;
 
-export function buildRoomoteSystemPrompt(): string {
+export function buildRoomoteSystemPrompt(releaseVersion?: string): string {
   return ROOMOTE_SYSTEM_PROMPT_TEMPLATE.replace(
-    '__ROOMOTE_STYLE_GUIDANCE__',
-    buildRoomoteStyleGuidanceSection(),
-  );
+    '__ROOMOTE_RELEASE_IDENTIFIER__',
+    releaseVersion ? `Roomote release ${releaseVersion}\n\n` : '',
+  ).replace('__ROOMOTE_STYLE_GUIDANCE__', buildRoomoteStyleGuidanceSection());
 }
 
 export const ROOMOTE_SYSTEM_PROMPT = buildRoomoteSystemPrompt();
