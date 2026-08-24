@@ -82,6 +82,14 @@ export async function sendMessage(
   c: Context<{ Variables: Variables & { mcpAuth: McpAuth } }>,
 ): Promise<Response> {
   const auth = c.get('mcpAuth');
+  if (auth.authContext.tokenType === 'automation') {
+    return c.json(
+      {
+        error: 'Automation Fast turns must use the orchestration steer route.',
+      },
+      403,
+    );
+  }
 
   if (!auth.userId) {
     return c.json({ error: 'User context required' }, 403);

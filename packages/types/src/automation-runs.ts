@@ -73,11 +73,6 @@ export const fastAutomationChildKickoffModes = [
 
 export const fastAutomationExecutionPolicySchema = z.object({
   version: z.number().int().positive(),
-  allowedToolsByIntegration: z.record(z.array(z.string().min(1))),
-  maxIntegrationCalls: z.number().int().min(0),
-  maxIntegrationResponseBytes: z.number().int().positive(),
-  maxChildTasks: z.number().int().min(0),
-  allowedEnvironmentIds: z.array(z.string().uuid()),
   reporting: z.enum(fastAutomationReportingModes),
   childKickoff: z.enum(fastAutomationChildKickoffModes),
 });

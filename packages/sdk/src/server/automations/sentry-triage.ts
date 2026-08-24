@@ -14,7 +14,6 @@ import {
 } from '@roomote/db/server';
 import {
   ALL_REPOSITORIES,
-  SENTRY_READ_ONLY_TOOL_NAMES,
   type SentryTriageFrequency,
   type SourceControlProvider,
   type SuggestedTasksTask,
@@ -162,13 +161,6 @@ export const sentryTriageJob = createScheduledTriageJob({
   automationKey: 'sentry_triage',
   fastPolicy: {
     version: 1,
-    allowedToolsByIntegration: {
-      sentry: [...SENTRY_READ_ONLY_TOOL_NAMES],
-    },
-    maxIntegrationCalls: 20,
-    maxIntegrationResponseBytes: 1_000_000,
-    maxChildTasks: 1,
-    allowedEnvironmentIds: [],
     reporting: 'on_findings',
     childKickoff: 'silent_allowed',
   },
@@ -245,13 +237,6 @@ export const sentryTriageJob = createScheduledTriageJob({
         : {}),
       suggestionSource: 'sentry_triage',
       historicalThreadFeedbackDebugSnippet: recentThreadFeedback.debugSnippet,
-      fastAutomationAllowedEnvironmentIds: [
-        ...new Set(
-          partitionCoverage.flatMap((coverage) =>
-            coverage.targetEnvironmentId ? [coverage.targetEnvironmentId] : [],
-          ),
-        ),
-      ],
       visibleInTranscript: false,
     });
 

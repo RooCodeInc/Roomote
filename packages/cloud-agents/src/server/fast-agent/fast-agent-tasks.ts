@@ -20,7 +20,7 @@ type ResolveFastAgentAuthToken = () => Promise<string>;
 export interface FastAgentTaskApiContext {
   apiBaseUrl?: string;
   getAuthToken?: ResolveFastAgentAuthToken;
-  userId: string;
+  userId: string | null;
 }
 
 type ListEnvironmentsResponse = {
@@ -54,12 +54,17 @@ async function resolveFastAgentTaskAuthContext({
   }
 
   try {
-    const authToken =
-      (await getAuthToken?.()) ??
-      (await createAuthToken({
-        userId,
-        timeoutMs: 2 * 60_000,
-      }));
+    const authToken = getAuthToken
+      ? await getAuthToken()
+      : userId
+        ? await createAuthToken({
+            userId,
+            timeoutMs: 2 * 60_000,
+          })
+        : null;
+    if (!authToken) {
+      return { error: 'Task API authentication is unavailable.' };
+    }
 
     return {
       authToken,

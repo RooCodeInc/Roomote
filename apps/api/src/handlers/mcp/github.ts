@@ -32,12 +32,14 @@ function buildRouterGitHubHeaders(): Record<string, string> {
 
 export function createGithubMcp(options?: {
   allowAuthTokens?: boolean;
+  allowAutomationTokens?: boolean;
   allowedToolNames?: readonly string[];
 }) {
   return createMcpProxy({
     name: 'GitHub',
     upstream: Env.GITHUB_MCP_SERVER_URL ?? DEFAULT_GITHUB_MCP_URL,
     allowAuthTokens: options?.allowAuthTokens,
+    allowAutomationTokens: options?.allowAutomationTokens,
     allowedToolNames: options?.allowedToolNames,
     resolveCredentials: async () => {
       let githubToken: string;

@@ -42,11 +42,8 @@ export const FAST_AGENT_NATIVE_TOOL_FILTER: Record<string, boolean> = {
 };
 
 export const FAST_AUTOMATION_NATIVE_TOOL_FILTER: Record<string, boolean> = {
-  '*': false,
+  ...FAST_AGENT_NATIVE_TOOL_FILTER,
   [FAST_AGENT_NATIVE_TOOL_NAMES.completeAutomationRun]: true,
-  [FAST_AGENT_NATIVE_TOOL_NAMES.integrationCall]: true,
-  [FAST_AGENT_NATIVE_TOOL_NAMES.launchTask]: true,
-  [FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReply]: true,
 };
 
 export type FastAgentNativeToolCall = {

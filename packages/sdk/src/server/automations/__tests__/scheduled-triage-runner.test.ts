@@ -176,11 +176,6 @@ describe('createScheduledTriageJob', () => {
     });
     const fastPolicy = {
       version: 1,
-      allowedToolsByIntegration: { sentry: ['search_issues'] },
-      maxIntegrationCalls: 5,
-      maxIntegrationResponseBytes: 100_000,
-      maxChildTasks: 1,
-      allowedEnvironmentIds: [],
       reporting: 'on_findings' as const,
       childKickoff: 'silent_allowed' as const,
     };
@@ -223,11 +218,6 @@ describe('createScheduledTriageJob', () => {
     });
     const fastPolicy = {
       version: 1,
-      allowedToolsByIntegration: { sentry: ['search_issues'] },
-      maxIntegrationCalls: 5,
-      maxIntegrationResponseBytes: 100_000,
-      maxChildTasks: 1,
-      allowedEnvironmentIds: [],
       reporting: 'on_findings' as const,
       childKickoff: 'silent_allowed' as const,
     };
@@ -262,11 +252,6 @@ describe('createScheduledTriageJob', () => {
     });
     const fastPolicy = {
       version: 1,
-      allowedToolsByIntegration: { sentry: ['search_issues'] },
-      maxIntegrationCalls: 5,
-      maxIntegrationResponseBytes: 100_000,
-      maxChildTasks: 1,
-      allowedEnvironmentIds: [],
       reporting: 'on_findings' as const,
       childKickoff: 'silent_allowed' as const,
     };

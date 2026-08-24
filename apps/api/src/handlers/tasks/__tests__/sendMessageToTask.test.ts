@@ -260,6 +260,25 @@ describe('sendMessageToTask', () => {
     });
   });
 
+  it('steers an automation child as the deployment principal', async () => {
+    mockFindLatestTaskRun.mockResolvedValue(
+      createActiveRun({ actingUserId: null }),
+    );
+
+    const result = await steerMessageToTask({
+      taskId: 'task-1',
+      userId: null,
+      message: 'Continue with the follow-up.',
+      senderMode: 'fast_agent',
+    });
+
+    expect(result).toEqual({ success: true, result: { ok: true } });
+    expect(mockCreateRunToken).toHaveBeenCalledWith(
+      expect.objectContaining({ runId: 42, userId: null }),
+    );
+    expect(mockUpdateActingUserIdIfNeeded).not.toHaveBeenCalled();
+  });
+
   it('marks Fast child messages for worker-owned pending-input dispatch', async () => {
     mockFindLatestTaskRun.mockResolvedValue(
       createActiveRun({

@@ -14,7 +14,7 @@ export async function steerMessage(
 ): Promise<Response> {
   const auth = c.get('mcpAuth');
 
-  if (!auth.userId) {
+  if (!auth.userId && auth.authContext.tokenType !== 'automation') {
     return c.json({ error: 'User context required' }, 403);
   }
 
@@ -50,7 +50,7 @@ export async function steerMessage(
 
   const result = await steerMessageToTask({
     taskId,
-    userId: auth.userId,
+    userId: auth.userId ?? null,
     message: body.message,
     images: body.images,
     senderMode: body.senderMode,

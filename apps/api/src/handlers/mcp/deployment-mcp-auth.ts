@@ -1,4 +1,9 @@
-import { db, eq, taskRuns } from '@roomote/db/server';
+import {
+  db,
+  eq,
+  getActiveAutomationRunForPrincipal,
+  taskRuns,
+} from '@roomote/db/server';
 
 import type { Variables } from '../../types';
 
@@ -40,10 +45,21 @@ export async function resolveDeploymentMcpAuth(
   }
 
   if (isAutomationTokenContext(authContext)) {
-    throw new McpProxyError(
-      403,
-      `${providerName} MCP has not enabled automation-run tool policy enforcement`,
-    );
+    const run = await getActiveAutomationRunForPrincipal({
+      automationRunId: authContext.automationRunId,
+      leaseOwner: authContext.leaseOwner,
+      policyVersion: authContext.policyVersion,
+    });
+    if (!run) {
+      throw new McpProxyError(403, 'Automation run token is no longer active');
+    }
+    return {
+      userId: null,
+      tokenType: 'automation',
+      automationRunId: authContext.automationRunId,
+      automationLeaseOwner: authContext.leaseOwner,
+      automationPolicyVersion: authContext.policyVersion,
+    };
   }
 
   if (authContext.tokenType === 'auth') {

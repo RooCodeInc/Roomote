@@ -10,7 +10,12 @@ import {
   isUserToken,
   parseMcpJsonRpcPayload,
 } from '@roomote/types';
-import { db, eq, taskRuns } from '@roomote/db/server';
+import {
+  db,
+  eq,
+  getActiveAutomationRunForPrincipal,
+  taskRuns,
+} from '@roomote/db/server';
 import { Agent } from 'undici';
 import {
   assertEgressUrlAllowed,
@@ -374,6 +379,23 @@ export class McpProxyError extends Error {
     super(message);
     this.name = 'McpProxyError';
   }
+}
+
+async function verifyAutomationRunTokenTargetExists(
+  auth: AutomationTokenContext,
+): Promise<Response | null> {
+  const run = await getActiveAutomationRunForPrincipal({
+    automationRunId: auth.automationRunId,
+    leaseOwner: auth.leaseOwner,
+    policyVersion: auth.policyVersion,
+  });
+  return run
+    ? null
+    : jsonRpcErrorResponse(
+        403,
+        -32000,
+        'Automation run token is no longer active',
+      );
 }
 
 type JsonRpcRequestLike = {
@@ -741,7 +763,7 @@ export function createMcpProxy(config: McpProxyConfig) {
     allowAuthTokens = false,
     allowAutomationTokens = false,
     validateTaskRunToken = verifyTaskRunTokenTargetExists,
-    validateAutomationToken,
+    validateAutomationToken = verifyAutomationRunTokenTargetExists,
     allowedToolNames,
     stripToolSchemaPatterns: shouldStripToolSchemaPatterns = false,
     guardUpstreamEgress,

@@ -17,11 +17,6 @@ import { ensureAutomationRows } from '../automations';
 
 const policy: FastAutomationExecutionPolicy = {
   version: 1,
-  allowedToolsByIntegration: { sentry: ['search_issues'] },
-  maxIntegrationCalls: 2,
-  maxIntegrationResponseBytes: 100_000,
-  maxChildTasks: 1,
-  allowedEnvironmentIds: [],
   reporting: 'on_findings',
   childKickoff: 'silent_allowed',
 };
@@ -81,7 +76,7 @@ describe('automation runs', () => {
       triggerKind: 'manual',
       occurrenceKey: randomUUID(),
       promptSnapshot: 'nothing to announce',
-      policySnapshot: { ...policy, allowedToolsByIntegration: {} },
+      policySnapshot: { ...policy, reporting: 'required' },
       leaseOwner: 'worker-1',
       leaseDurationMs: 60_000,
     });

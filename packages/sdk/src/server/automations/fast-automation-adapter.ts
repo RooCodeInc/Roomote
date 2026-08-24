@@ -6,7 +6,6 @@ import {
   beginAutomationRunEffect,
   bindAutomationRunDelivery,
   completeAutomationRunEffect,
-  claimAutomationRunEffectWithinBudget,
   db,
   getAutomationRunById,
   getAutomationRunEffect,
@@ -15,11 +14,7 @@ import {
   retryAutomationRunEffect,
   upsertBackgroundAutomationSlackThread,
 } from '@roomote/db/server';
-import {
-  ALL_REPOSITORIES,
-  fastAutomationExecutionPolicySchema,
-  TaskPayloadKind,
-} from '@roomote/types';
+import { ALL_REPOSITORIES, TaskPayloadKind } from '@roomote/types';
 
 import { getCommunicationProviderAdapter } from '../lib/communication-providers';
 import { buildDestinationTaskPayloadFields } from './destination';
@@ -122,37 +117,13 @@ export function createFastAutomationExecutionAdapter(): FastAutomationExecutionA
           error: 'Automation run source was not found.',
         };
       }
-      if (!input.environmentId) {
-        return {
-          success: false,
-          error:
-            'Repository work requires an explicit configured environment for this automation.',
-        };
-      }
-      const policy = fastAutomationExecutionPolicySchema.parse(
-        run.policySnapshot,
-      );
-      if (!policy.allowedEnvironmentIds.includes(input.environmentId)) {
-        return {
-          success: false,
-          error:
-            'The selected environment is outside this automation run scope.',
-        };
-      }
-      const effect = await claimAutomationRunEffectWithinBudget({
+      const effect = await beginAutomationRunEffect({
         automationRunId: run.id,
         logicalKey: `child:${input.idempotencyKey}`,
         kind: 'child_launch',
-        maxEffects: policy.maxChildTasks,
         requestSignature: input.idempotencyKey,
         metadata: { environmentId: input.environmentId, prompt: input.prompt },
       });
-      if (effect.budgetExceeded) {
-        return {
-          success: false,
-          error: 'Automation child task budget exceeded.',
-        };
-      }
       let activeEffect = effect.effect;
       if (!effect.shouldExecute) {
         if (effect.effect.externalId) {
@@ -183,7 +154,10 @@ export function createFastAutomationExecutionAdapter(): FastAutomationExecutionA
               payload: {
                 repo: ALL_REPOSITORIES,
                 description: input.prompt,
-                environmentId: input.environmentId,
+                ...(input.environmentId &&
+                input.environmentId !== ALL_REPOSITORIES
+                  ? { environmentId: input.environmentId }
+                  : {}),
                 backgroundAutomationKey: run.automationKey,
                 automationRunParent: {
                   kind: 'automation_run',

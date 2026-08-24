@@ -1393,7 +1393,6 @@ const suggestedTasksPayloadSchema = delegatedTaskPayloadSchema.extend({
     .max(4000)
     .optional(),
   selectedRepositoryIds: z.array(z.string().uuid()).min(1).optional(),
-  fastAutomationAllowedEnvironmentIds: z.array(z.string().uuid()).optional(),
 });
 
 export const suggestedTasksTaskSchema = sharedTaskSchema.extend({

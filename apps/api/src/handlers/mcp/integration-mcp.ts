@@ -13,7 +13,6 @@ import {
   getMcpIntegrationUpstreamUrl,
   getMcpIntegrationConnectionScope,
   getAllowedIntegrationMcpToolNames,
-  fastAutomationExecutionPolicySchema,
   isMcpConnectionXConfig,
   type McpIntegration,
 } from '@roomote/types';
@@ -94,7 +93,7 @@ async function resolveDeploymentToolPolicy(
     },
   });
 
-  let allowedToolNames = getAllowedIntegrationMcpToolNames(mcpId) ?? null;
+  const allowedToolNames = getAllowedIntegrationMcpToolNames(mcpId) ?? null;
 
   if (auth.tokenType === 'automation') {
     if (!enablement) {
@@ -118,19 +117,6 @@ async function resolveDeploymentToolPolicy(
     if (!run) {
       throw new McpProxyError(403, 'Automation run token is no longer active');
     }
-    const policy = fastAutomationExecutionPolicySchema.parse(
-      run.policySnapshot,
-    );
-    const runAllowed = policy.allowedToolsByIntegration[mcpId];
-    if (!runAllowed?.length) {
-      throw new McpProxyError(
-        403,
-        `Automation run is not allowed to use ${mcpId}`,
-      );
-    }
-    allowedToolNames = allowedToolNames
-      ? runAllowed.filter((toolName) => allowedToolNames?.includes(toolName))
-      : runAllowed;
   }
 
   return {

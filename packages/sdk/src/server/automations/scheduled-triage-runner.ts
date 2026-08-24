@@ -225,10 +225,7 @@ export function createScheduledTriageJob(
                   timeZone: timezone,
                   partition: `${destination.provider}:${channelId}:0`,
                 }),
-              policy: {
-                ...config.fastPolicy,
-                allowedEnvironmentIds: [],
-              },
+              policy: config.fastPolicy,
               destination,
               error: scanTask.reason,
               reportMessage:
@@ -281,11 +278,7 @@ export function createScheduledTriageJob(
                     partition: `${destination.provider}:${channelId}:${index}`,
                   }),
               prompt: payload.description,
-              policy: {
-                ...config.fastPolicy!,
-                allowedEnvironmentIds:
-                  payload.fastAutomationAllowedEnvironmentIds ?? [],
-              },
+              policy: config.fastPolicy!,
               destination,
             });
           }
@@ -358,10 +351,7 @@ export function createScheduledTriageJob(
                 timeZone: failureTimeZone,
                 partition: `${failureDestination?.provider ?? 'unresolved'}:${failureDestination?.channelId ?? 'unresolved'}`,
               }),
-            policy: {
-              ...config.fastPolicy,
-              allowedEnvironmentIds: [],
-            },
+            policy: config.fastPolicy,
             destination: failureDestination,
             error: message,
           });

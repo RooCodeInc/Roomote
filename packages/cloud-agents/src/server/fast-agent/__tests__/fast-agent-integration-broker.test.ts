@@ -1,6 +1,7 @@
 const mocks = vi.hoisted(() => ({
   enabledRows: [] as Array<{ mcpId: string; disabledTools?: string[] | null }>,
   createAuthToken: vi.fn(),
+  createAutomationToken: vi.fn(),
   listMcpTools: vi.fn(),
   callMcpTool: vi.fn(),
   beginIntegrationCall: vi.fn(),
@@ -9,10 +10,13 @@ const mocks = vi.hoisted(() => ({
   findGithubInstallation: vi.fn(),
   brainEnv: { R_GBRAIN_URL: undefined as string | undefined },
   isBrainProviderConfigured: vi.fn(),
+  getAutomationRun: vi.fn(),
+  beginAutomationEffect: vi.fn(),
 }));
 
 vi.mock('@roomote/auth', () => ({
   createAuthToken: mocks.createAuthToken,
+  createAutomationToken: mocks.createAutomationToken,
 }));
 
 vi.mock('@roomote/env', () => ({
@@ -36,6 +40,10 @@ vi.mock('@roomote/db/server', () => ({
   eq: vi.fn(() => 'enabled-filter'),
   githubInstallations: { suspendedAt: 'suspendedAt' },
   isBrainProviderConfigured: mocks.isBrainProviderConfigured,
+  getActiveAutomationRunForPrincipal: mocks.getAutomationRun,
+  beginAutomationRunEffect: mocks.beginAutomationEffect,
+  completeAutomationRunEffect: vi.fn(),
+  retryAutomationRunEffect: vi.fn(),
   isNull: vi.fn(() => 'not-suspended-filter'),
 }));
 
@@ -78,6 +86,8 @@ describe('fast-agent integration broker', () => {
       }),
     }));
     mocks.createAuthToken.mockResolvedValue('control-plane-token');
+    mocks.createAutomationToken.mockResolvedValue('automation-token');
+    mocks.getAutomationRun.mockResolvedValue({ id: 'run-1' });
     mocks.findGithubInstallation.mockResolvedValue(undefined);
     mocks.brainEnv.R_GBRAIN_URL = undefined;
     mocks.isBrainProviderConfigured.mockResolvedValue(false);
@@ -137,6 +147,27 @@ describe('fast-agent integration broker', () => {
       headers: { Authorization: 'Bearer control-plane-token' },
       signal: expect.any(AbortSignal),
     });
+  });
+
+  it('gives automation runs the same enabled deployment integrations', async () => {
+    mocks.enabledRows = [{ mcpId: 'notion' }];
+    mocks.findGithubInstallation.mockResolvedValue({ id: 42 });
+    mocks.brainEnv.R_GBRAIN_URL = 'http://gbrain:8931';
+    mocks.isBrainProviderConfigured.mockResolvedValue(true);
+
+    const integrations = await listFastAgentIntegrations({
+      automationRunId: '11111111-1111-4111-8111-111111111111',
+      automationLeaseOwner: 'worker-1',
+      automationPolicyVersion: 1,
+      apiBaseUrl: 'https://api.example.com',
+    });
+
+    expect(integrations.map((integration) => integration.id)).toEqual([
+      'notion',
+      'gbrain',
+      'github',
+    ]);
+    expect(mocks.createAutomationToken).toHaveBeenCalled();
   });
 
   it('does not probe or expose Brain when it is not fully configured', async () => {

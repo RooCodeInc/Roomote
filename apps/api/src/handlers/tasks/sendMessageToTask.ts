@@ -1113,7 +1113,7 @@ export async function steerMessageToTask({
   workerQuoteUserName,
 }: {
   taskId: string;
-  userId: string;
+  userId: string | null;
   message: string;
   quoteText?: string;
   images?: string[];
@@ -1145,6 +1145,13 @@ export async function steerMessageToTask({
     const channelBindings = (await getTaskChannelBindings(taskId)) ?? null;
 
     if (isExitedRunStatus(run.status)) {
+      if (!userId) {
+        return {
+          success: false,
+          error: `Task is not active (status: ${run.status})`,
+          status: 409,
+        };
+      }
       const resumeResult = await resumeTaskFromSnapshot({
         taskId,
         userId,
@@ -1178,28 +1185,34 @@ export async function steerMessageToTask({
     let didSwitchActingUser = false;
 
     try {
-      await maybeCreateSlackReplyQuoteContext({
-        runId: run.id,
-        payload: run.payload as Record<string, unknown> | null,
-        slackThreadTs: channelBindings?.slackThreadTs ?? null,
-        userId,
-        message: quoteText,
-        senderMode,
-      });
+      if (userId) {
+        await maybeCreateSlackReplyQuoteContext({
+          runId: run.id,
+          payload: run.payload as Record<string, unknown> | null,
+          slackThreadTs: channelBindings?.slackThreadTs ?? null,
+          userId,
+          message: quoteText,
+          senderMode,
+        });
+      }
 
       const resolvedQuoteUserName =
         workerQuoteUserName ??
-        (await resolveWorkerQuoteUserName(senderMode, userId));
+        (userId
+          ? await resolveWorkerQuoteUserName(senderMode, userId)
+          : undefined);
 
       // The actor switch must land before the steer reaches the sandbox so
       // credential resolution and turn attribution agree. See
       // syncActingUserIdBeforeDelivery for the ordering rationale.
-      didSwitchActingUser = await syncActingUserIdBeforeDelivery({
-        runId: run.id,
-        currentActingUserId: run.actingUserId,
-        nextActingUserId: userId,
-        preserveActor: false,
-      });
+      if (userId) {
+        didSwitchActingUser = await syncActingUserIdBeforeDelivery({
+          runId: run.id,
+          currentActingUserId: run.actingUserId,
+          nextActingUserId: userId,
+          preserveActor: false,
+        });
+      }
 
       const result = await withSandboxServerRpcClient({
         runId: run.id,
@@ -1228,7 +1241,7 @@ export async function steerMessageToTask({
 
       return { success: true, result };
     } catch (error) {
-      if (didSwitchActingUser) {
+      if (didSwitchActingUser && userId) {
         await restoreActingUserIdAfterFailedDelivery({
           handlerName: 'steerMessageToTask',
           runId: run.id,

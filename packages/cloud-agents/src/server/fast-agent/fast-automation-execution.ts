@@ -1,10 +1,12 @@
 import { z } from 'zod';
+import { createAutomationToken } from '@roomote/auth';
 
 import {
   completeAutomationRun,
-  countAutomationRunChildren,
+  countUnsettledAutomationRunChildren,
   getActiveAutomationRunForPrincipal,
   getDeploymentTaskModelOptions,
+  listAutomationRunChildren,
   recordAutomationRunUsage,
   renewAutomationRunLease,
   suspendAutomationRunForChildren,
@@ -12,6 +14,8 @@ import {
 import {
   fastAutomationExecutionPolicySchema,
   formatErrorForLog,
+  ALL_REPOSITORIES,
+  roomoteTaskInspectionArgsSchema,
   type TaskModelOption,
 } from '@roomote/types';
 
@@ -34,6 +38,11 @@ import {
 } from './fast-agent-native-tool-bridge';
 import { fastAgentOpenCodeSessionManager } from './fast-agent-opencode-session';
 import { buildFastAutomationSystemPrompt } from './fast-automation-prompt';
+import {
+  cancelFastAgentTask,
+  inspectFastAgentTasks,
+  sendFastAgentTaskMessage,
+} from './fast-agent-tasks';
 
 const integrationCallArgsSchema = z.object({
   integrationId: z.string().min(1),
@@ -50,6 +59,13 @@ const launchArgsSchema = z.object({
   environmentId: z.string().trim().min(1).nullable().optional(),
   model: z.string().trim().min(1).nullable().optional(),
   idempotencyKey: z.string().trim().min(1),
+});
+const taskMessageArgsSchema = z.object({
+  taskId: z.string().trim().min(1).nullable().optional(),
+  message: z.string().trim().min(1),
+});
+const taskIdArgsSchema = z.object({
+  taskId: z.string().trim().min(1).nullable().optional(),
 });
 const completeArgsSchema = z.object({
   outcome: z.enum(['succeeded', 'skipped', 'failed']),
@@ -137,6 +153,12 @@ export async function runFastAutomationExecution(input: {
   const validEnvironmentIds = new Set(
     availableEnvironments.map((environment) => environment.id),
   );
+  const automationChildren = await listAutomationRunChildren(run.id);
+  const activeTaskIds = new Set(
+    automationChildren
+      .filter((child) => child.terminalOutcome === null)
+      .map((child) => child.taskId),
+  );
   let terminal:
     | {
         status: 'succeeded' | 'skipped' | 'failed' | 'waiting_for_children';
@@ -144,6 +166,7 @@ export async function runFastAutomationExecution(input: {
       }
     | undefined;
   let reportCount = 0;
+  let taskLaunched = false;
   let orchestrationSessionId: string | null = null;
   const abortController = new AbortController();
   const leaseHeartbeat = setInterval(() => {
@@ -160,6 +183,34 @@ export async function runFastAutomationExecution(input: {
       .catch((error: unknown) => abortController.abort(error));
   }, 60_000);
   leaseHeartbeat.unref?.();
+
+  const taskApiContext = {
+    userId: null,
+    apiBaseUrl: input.apiBaseUrl,
+    getAuthToken: () =>
+      createAutomationToken({
+        automationRunId: run.id,
+        leaseOwner: input.leaseOwner,
+        policyVersion: policy.version,
+        timeoutMs: 2 * 60_000,
+      }),
+  };
+  const selectActiveTaskId = (requestedTaskId?: string | null) => {
+    if (requestedTaskId) {
+      return activeTaskIds.has(requestedTaskId)
+        ? { taskId: requestedTaskId }
+        : { error: 'That task is not active for this automation run.' };
+    }
+    if (activeTaskIds.size === 1) {
+      return { taskId: [...activeTaskIds][0] };
+    }
+    return {
+      error:
+        activeTaskIds.size === 0
+          ? 'This automation run has no active child tasks.'
+          : 'Specify taskId because this automation run has multiple active child tasks.',
+    };
+  };
 
   const executeNativeTool = async (call: FastAgentNativeToolCall) => {
     if (terminal) {
@@ -182,12 +233,6 @@ export async function runFastAutomationExecution(input: {
       }
       case FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReply: {
         const args = reportArgsSchema.parse(call.args);
-        if (args.purpose === 'ack' || args.purpose === 'progress') {
-          return {
-            success: false,
-            error: 'Automation runs may only post final reports or blockers.',
-          };
-        }
         await input.adapter.postReport({
           automationRunId: run.id,
           logicalMessageKey: args.logicalMessageKey,
@@ -198,35 +243,20 @@ export async function runFastAutomationExecution(input: {
       }
       case FAST_AGENT_NATIVE_TOOL_NAMES.launchTask: {
         const args = launchArgsSchema.parse(call.args);
-        if (input.continuation) {
+        if (taskLaunched) {
           return {
             success: false,
-            error: 'Automation continuation turns cannot launch child tasks.',
-          };
-        }
-        if (policy.maxChildTasks === 0) {
-          return {
-            success: false,
-            error: 'Child task launches are disabled for this automation.',
+            error: 'A task was already launched in this Fast turn.',
           };
         }
         if (
           args.environmentId &&
+          args.environmentId !== ALL_REPOSITORIES &&
           !validEnvironmentIds.has(args.environmentId)
         ) {
           return {
             success: false,
             error: 'The selected environment was not found.',
-          };
-        }
-        if (
-          !args.environmentId ||
-          !policy.allowedEnvironmentIds.includes(args.environmentId)
-        ) {
-          return {
-            success: false,
-            error:
-              'The selected environment is outside this automation run scope.',
           };
         }
         if (
@@ -238,14 +268,49 @@ export async function runFastAutomationExecution(input: {
             error: 'The selected model is not enabled.',
           };
         }
-        return input.adapter.launchTask({
+        taskLaunched = true;
+        const result = await input.adapter.launchTask({
           automationRunId: run.id,
           idempotencyKey: args.idempotencyKey,
           prompt: args.prompt,
           environmentId: args.environmentId ?? null,
           model: args.model ?? null,
         });
+        if (result.success) activeTaskIds.add(result.taskId);
+        return result;
       }
+      case FAST_AGENT_NATIVE_TOOL_NAMES.manageTasks: {
+        const args = roomoteTaskInspectionArgsSchema.parse(call.args);
+        return inspectFastAgentTasks(taskApiContext, args);
+      }
+      case FAST_AGENT_NATIVE_TOOL_NAMES.sendTaskMessage: {
+        const args = taskMessageArgsSchema.parse(call.args);
+        const target = selectActiveTaskId(args.taskId);
+        if (!target.taskId) return { success: false, error: target.error };
+        return sendFastAgentTaskMessage(taskApiContext, {
+          taskId: target.taskId,
+          message: args.message,
+        });
+      }
+      case FAST_AGENT_NATIVE_TOOL_NAMES.cancelTask: {
+        const args = taskIdArgsSchema.parse(call.args);
+        const target = selectActiveTaskId(args.taskId);
+        if (!target.taskId) return { success: false, error: target.error };
+        const result = await cancelFastAgentTask(taskApiContext, target.taskId);
+        if (result.success) activeTaskIds.delete(target.taskId);
+        return result;
+      }
+      case FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReaction:
+        return {
+          success: false,
+          error: 'Emoji reactions are unavailable on this automation surface.',
+        };
+      case FAST_AGENT_NATIVE_TOOL_NAMES.retryTaskStart:
+      case FAST_AGENT_NATIVE_TOOL_NAMES.ignoreEvent:
+        return {
+          success: false,
+          error: 'This tool requires a platform event turn.',
+        };
       case FAST_AGENT_NATIVE_TOOL_NAMES.completeAutomationRun: {
         const args = completeArgsSchema.parse(call.args);
         if (
@@ -258,9 +323,9 @@ export async function runFastAutomationExecution(input: {
             error: 'This automation requires a report before completion.',
           };
         }
-        const childCount = await countAutomationRunChildren(run.id);
+        const childCount = await countUnsettledAutomationRunChildren(run.id);
         const waitingForChildren =
-          !input.continuation && args.outcome === 'succeeded' && childCount > 0;
+          args.outcome === 'succeeded' && childCount > 0;
         const completed = waitingForChildren
           ? await suspendAutomationRunForChildren({
               automationRunId: run.id,

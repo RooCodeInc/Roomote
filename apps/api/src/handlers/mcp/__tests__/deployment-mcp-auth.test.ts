@@ -114,7 +114,7 @@ describe.each(providers)('%s deployment-scoped MCP auth', (providerName) => {
     });
   });
 
-  it('denies automation principals until the native MCP enforces run tool policy', async () => {
+  it('accepts an active automation principal', async () => {
     const automationToken: AutomationTokenContext = {
       automationRunId: '11111111-1111-4111-8111-111111111111',
       leaseOwner: 'worker-1',
@@ -127,9 +127,12 @@ describe.each(providers)('%s deployment-scoped MCP auth', (providerName) => {
 
     await expect(
       resolveDeploymentMcpAuth(automationToken, providerName),
-    ).rejects.toMatchObject({
-      httpStatus: 403,
-      message: `${providerName} MCP has not enabled automation-run tool policy enforcement`,
+    ).resolves.toEqual({
+      userId: null,
+      tokenType: 'automation',
+      automationRunId: automationToken.automationRunId,
+      automationLeaseOwner: automationToken.leaseOwner,
+      automationPolicyVersion: automationToken.policyVersion,
     });
   });
 

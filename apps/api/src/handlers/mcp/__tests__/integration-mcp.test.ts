@@ -164,18 +164,13 @@ describe('createIntegrationMcpProxy acting-user scoping', () => {
       id: '11111111-1111-4111-8111-111111111111',
       policySnapshot: {
         version: 1,
-        allowedToolsByIntegration: { sentry: ['search_issues'] },
-        maxIntegrationCalls: 5,
-        maxIntegrationResponseBytes: 100_000,
-        maxChildTasks: 0,
-        allowedEnvironmentIds: [],
         reporting: 'on_findings',
         childKickoff: 'silent_allowed',
       },
     });
   });
 
-  it('enforces an automation run immutable tool allowlist', async () => {
+  it('gives automation runs the same enabled tool surface as human Fast turns', async () => {
     const token: AutomationTokenContext = {
       automationRunId: '11111111-1111-4111-8111-111111111111',
       leaseOwner: 'worker-1',
@@ -189,14 +184,8 @@ describe('createIntegrationMcpProxy acting-user scoping', () => {
     stubUpstreamFetch();
     const app = createApp('sentry', token, { allowAutomationTokens: true });
 
-    const rejected = await postMcp(
-      app,
-      createToolCallRequest(1, 'update_issue'),
-    );
-    expect(rejected.status).toBe(403);
-    await expect(rejected.json()).resolves.toMatchObject({
-      error: { message: expect.stringContaining('is not allowed') },
-    });
+    const response = await postMcp(app, createToolCallRequest(1, 'whoami'));
+    expect(response.status).toBe(200);
   });
 
   it('rejects automation access when the deployment integration is disabled', async () => {

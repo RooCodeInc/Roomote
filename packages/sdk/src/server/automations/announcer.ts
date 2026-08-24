@@ -89,11 +89,6 @@ const WINDOW_DAYS: Record<AnnouncerFrequency, number> = {
 const MAX_DETAIL_MESSAGE_CHARS = 3_000;
 const ANNOUNCER_FAST_POLICY: FastAutomationExecutionPolicy = {
   version: 1,
-  allowedToolsByIntegration: {},
-  maxIntegrationCalls: 0,
-  maxIntegrationResponseBytes: 500_000,
-  maxChildTasks: 0,
-  allowedEnvironmentIds: [],
   reporting: 'required',
   childKickoff: 'silent_allowed',
 };

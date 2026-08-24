@@ -1,12 +1,17 @@
 import { createMiddleware } from 'hono/factory';
 
-import type { AuthTokenContext, RunTokenContext } from '@roomote/types';
+import type {
+  AuthTokenContext,
+  AutomationTokenContext,
+  RunTokenContext,
+} from '@roomote/types';
+import { getActiveAutomationRunForPrincipal } from '@roomote/db/server';
 
 import type { Variables } from '../../types';
 
 export interface McpAuth {
   userId: string | undefined;
-  authContext: AuthTokenContext | RunTokenContext;
+  authContext: AuthTokenContext | AutomationTokenContext | RunTokenContext;
 }
 
 type McpVariables = Variables & { mcpAuth: McpAuth };
@@ -21,11 +26,23 @@ export const mcpAuthMiddleware = createMiddleware<{
 }>(async (c, next) => {
   const authContext = c.get('authContext') as
     | AuthTokenContext
+    | AutomationTokenContext
     | RunTokenContext
     | undefined;
 
   if (!authContext) {
     return c.json({ error: 'Authentication required' }, 401);
+  }
+
+  if (authContext.tokenType === 'automation') {
+    const run = await getActiveAutomationRunForPrincipal({
+      automationRunId: authContext.automationRunId,
+      leaseOwner: authContext.leaseOwner,
+      policyVersion: authContext.policyVersion,
+    });
+    if (!run) {
+      return c.json({ error: 'Automation run token is no longer active' }, 403);
+    }
   }
 
   // Run tokens minted for the deployment service principal carry a null

@@ -739,6 +739,19 @@ export async function countAutomationRunChildren(
   return row?.total ?? 0;
 }
 
+export async function listAutomationRunChildren(
+  automationRunId: string,
+  client: DatabaseOrTransaction = db,
+): Promise<Array<{ taskId: string; terminalOutcome: string | null }>> {
+  return client
+    .select({
+      taskId: automationRunChildren.taskId,
+      terminalOutcome: automationRunChildren.terminalOutcome,
+    })
+    .from(automationRunChildren)
+    .where(eq(automationRunChildren.automationRunId, automationRunId));
+}
+
 export async function listReadyAutomationRunsForContinuation(
   limit = 10,
   client: DatabaseOrTransaction = db,

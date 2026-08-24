@@ -4,9 +4,9 @@ import { createAuthToken, createAutomationToken } from '@roomote/auth';
 import { Env } from '@roomote/env';
 import {
   beginSlackFastIntegrationCall,
+  beginAutomationRunEffect,
   completeSlackFastIntegrationCall,
   completeAutomationRunEffect,
-  claimAutomationRunEffectWithinBudget,
   db,
   deploymentMcpEnablements,
   eq,
@@ -20,10 +20,8 @@ import {
   BRAIN_MCP_ID,
   getMcpIntegration,
   getMcpIntegrationConnectionScope,
-  getAllowedIntegrationMcpToolNames,
   formatErrorForLog,
   isCredentialOnlyMcpIntegration,
-  fastAutomationExecutionPolicySchema,
 } from '@roomote/types';
 
 import {
@@ -49,7 +47,6 @@ export type FastAgentIntegration = {
 
 type FastAgentIntegrationCandidate = Omit<FastAgentIntegration, 'tools'> & {
   disabledTools: Set<string>;
-  allowedTools?: Set<string>;
 };
 
 type UserBrokerContext = { userId: string; apiBaseUrl?: string };
@@ -212,19 +209,16 @@ async function resolveBrokerAuth(context: BrokerContext) {
   };
 }
 
-async function resolveAutomationBrokerPolicy(
+async function assertActiveAutomationBrokerContext(
   context: BrokerContext,
-): Promise<ReturnType<
-  typeof fastAutomationExecutionPolicySchema.parse
-> | null> {
-  if (!('automationRunId' in context)) return null;
+): Promise<void> {
+  if (!('automationRunId' in context)) return;
   const run = await getActiveAutomationRunForPrincipal({
     automationRunId: context.automationRunId,
     leaseOwner: context.automationLeaseOwner,
     policyVersion: context.automationPolicyVersion,
   });
   if (!run) throw new Error('Automation run lease is no longer active.');
-  return fastAutomationExecutionPolicySchema.parse(run.policySnapshot);
 }
 
 /**
@@ -235,7 +229,7 @@ async function resolveAutomationBrokerPolicy(
 export async function listFastAgentIntegrations(
   context: BrokerContext,
 ): Promise<FastAgentIntegration[]> {
-  const automationPolicy = await resolveAutomationBrokerPolicy(context);
+  await assertActiveAutomationBrokerContext(context);
   const [enabled, githubInstallation] = await Promise.all([
     db
       .select({
@@ -255,28 +249,13 @@ export async function listFastAgentIntegrations(
   const candidates: FastAgentIntegrationCandidate[] = enabled.flatMap(
     ({ mcpId, disabledTools }) => {
       const integration = getMcpIntegration(mcpId);
-      const automationAllowedTools =
-        automationPolicy?.allowedToolsByIntegration[mcpId];
-      return isFastModeIntegration(integration) &&
-        (!automationPolicy || automationAllowedTools?.length)
+      return isFastModeIntegration(integration)
         ? [
             {
               id: integration.id,
               name: integration.name,
               description: integration.description,
-              disabledTools: new Set([
-                ...(disabledTools ?? []),
-                ...(automationPolicy
-                  ? (
-                      getAllowedIntegrationMcpToolNames(integration.id) ?? []
-                    ).filter(
-                      (toolName) => !automationAllowedTools?.includes(toolName),
-                    )
-                  : []),
-              ]),
-              ...(automationAllowedTools
-                ? { allowedTools: new Set(automationAllowedTools) }
-                : {}),
+              disabledTools: new Set(disabledTools ?? []),
             },
           ]
         : [];
@@ -286,11 +265,7 @@ export async function listFastAgentIntegrations(
   // Same activation rule as sandbox MCP delivery: only an explicit R_BRAIN_*
   // provider key means the deployment has a Brain, because the URL and
   // gateway token are template-defaulted plumbing on some platforms.
-  if (
-    !automationPolicy &&
-    Env.R_GBRAIN_URL &&
-    (await isBrainProviderConfigured())
-  ) {
+  if (Env.R_GBRAIN_URL && (await isBrainProviderConfigured())) {
     candidates.push({
       id: BRAIN_MCP_ID,
       name: 'Brain',
@@ -301,23 +276,13 @@ export async function listFastAgentIntegrations(
     });
   }
 
-  if (
-    githubInstallation &&
-    (!automationPolicy || automationPolicy.allowedToolsByIntegration.github)
-  ) {
+  if (githubInstallation) {
     candidates.push({
       id: 'github',
       name: 'GitHub',
       description:
         'Read repositories, code, issues, pull requests, commits, and recent activity available to the deployment GitHub App.',
       disabledTools: new Set<string>(),
-      ...(automationPolicy
-        ? {
-            allowedTools: new Set(
-              automationPolicy.allowedToolsByIntegration.github ?? [],
-            ),
-          }
-        : {}),
     });
   }
 
@@ -334,12 +299,7 @@ export async function listFastAgentIntegrations(
           url: integrationProxyUrl(apiBaseUrl, integration.id),
           headers: { Authorization: `Bearer ${authToken}` },
         })
-      ).filter(
-        (tool) =>
-          !integration.disabledTools.has(tool.name) &&
-          (!integration.allowedTools ||
-            integration.allowedTools.has(tool.name)),
-      ),
+      ).filter((tool) => !integration.disabledTools.has(tool.name)),
     })),
   );
 
@@ -408,22 +368,17 @@ export async function callFastAgentIntegration(
   }
 
   if ('automationRunId' in context) {
-    const policy = await resolveAutomationBrokerPolicy(context);
-    if (!policy) throw new Error('Automation integration policy is missing.');
+    await assertActiveAutomationBrokerContext(context);
     const effectKey = buildAutomationIntegrationEffectKey(request);
-    const effect = await claimAutomationRunEffectWithinBudget({
+    const effect = await beginAutomationRunEffect({
       automationRunId: context.automationRunId,
       logicalKey: effectKey,
       kind: 'integration_call',
-      maxEffects: policy.maxIntegrationCalls,
       requestSignature: effectKey,
       integrationId: request.integrationId,
       toolName: request.toolName,
       metadata: { arguments: request.args },
     });
-    if (effect.budgetExceeded) {
-      throw new Error('Automation integration call budget exceeded.');
-    }
     let activeEffect = effect.effect;
     if (!effect.shouldExecute) {
       if (effect.effect.status === 'succeeded') {
@@ -460,9 +415,6 @@ export async function callFastAgentIntegration(
         `Fast automation ${integration.id}/${request.toolName} integration call`,
       );
       const serialized = JSON.stringify(result) ?? 'null';
-      if (Buffer.byteLength(serialized) > policy.maxIntegrationResponseBytes) {
-        throw new Error('Automation integration response exceeded its budget.');
-      }
       await completeAutomationRunEffect({
         id: activeEffect.id,
         attemptToken: activeEffect.attemptToken,

@@ -2,6 +2,7 @@ const mocks = vi.hoisted(() => ({
   completeRun: vi.fn(),
   countUnsettledChildren: vi.fn(),
   countChildren: vi.fn(),
+  listChildren: vi.fn(),
   suspendRun: vi.fn(),
   getRun: vi.fn(),
   getTaskModels: vi.fn(),
@@ -38,6 +39,7 @@ vi.mock('@roomote/db/server', () => ({
   completeAutomationRun: mocks.completeRun,
   countUnsettledAutomationRunChildren: mocks.countUnsettledChildren,
   countAutomationRunChildren: mocks.countChildren,
+  listAutomationRunChildren: mocks.listChildren,
   suspendAutomationRunForChildren: mocks.suspendRun,
   renewAutomationRunLease: vi.fn(async () => true),
   recordAutomationRunUsage: vi.fn(),
@@ -62,10 +64,16 @@ vi.mock('../fast-agent-native-tool-bridge', () => ({
   FAST_AGENT_NATIVE_TOOL_NAMES: nativeToolNames,
   FAST_AUTOMATION_NATIVE_TOOL_FILTER: {
     '*': false,
+    cancel_task: true,
     complete_automation_run: true,
+    ignore_event: true,
     integration_call: true,
     launch_task: true,
+    manage_tasks: true,
+    retry_task_start: true,
+    send_chat_reaction: true,
     send_chat_reply: true,
+    send_task_message: true,
   },
   getFastAgentNativeToolRuntime: vi.fn(async () => ({
     directory: '/tmp/fast-automation',
@@ -81,11 +89,6 @@ import { runFastAutomationExecution } from '../fast-automation-execution';
 
 const policy = {
   version: 1,
-  allowedToolsByIntegration: {},
-  maxIntegrationCalls: 0,
-  maxIntegrationResponseBytes: 100_000,
-  maxChildTasks: 0,
-  allowedEnvironmentIds: [],
   reporting: 'silent_allowed' as const,
   childKickoff: 'silent_allowed' as const,
 };
@@ -111,6 +114,7 @@ describe('Fast automation execution', () => {
     mocks.completeRun.mockResolvedValue(true);
     mocks.countUnsettledChildren.mockResolvedValue(0);
     mocks.countChildren.mockResolvedValue(0);
+    mocks.listChildren.mockResolvedValue([]);
     mocks.suspendRun.mockResolvedValue(true);
     mocks.runSession.mockImplementation(async ({ execute, prompt }) =>
       execute({}, prompt),
@@ -207,78 +211,12 @@ describe('Fast automation execution', () => {
     expect(mocks.completeRun).not.toHaveBeenCalled();
   });
 
-  it('denies child launches when the immutable run budget is zero', async () => {
-    let launchResult: unknown;
-    mocks.generateText.mockImplementation(
-      async (_params, _session, options) => {
-        options.onSessionReady('opencode-session');
-        launchResult = await mocks.nativeExecutor?.({
-          name: 'launch_task',
-          args: {
-            prompt: 'Edit code.',
-            environmentId: null,
-            idempotencyKey: 'fix-1',
-          },
-        });
-        await mocks.nativeExecutor?.({
-          name: 'complete_automation_run',
-          args: { outcome: 'skipped' },
-        });
-        return '';
-      },
-    );
-
-    await runFastAutomationExecution({
-      automationRunId: '11111111-1111-4111-8111-111111111111',
-      leaseOwner: 'worker-1',
-      policyVersion: 1,
-      adapter,
-    });
-    expect(launchResult).toEqual({
-      success: false,
-      error: 'Child task launches are disabled for this automation.',
-    });
-    expect(adapter.launchTask).not.toHaveBeenCalled();
-  });
-
-  it('terminalizes discovery failures before inference starts', async () => {
-    mocks.listIntegrations.mockRejectedValue(
-      new Error('integration discovery failed'),
-    );
-
-    await expect(
-      runFastAutomationExecution({
-        automationRunId: '11111111-1111-4111-8111-111111111111',
-        leaseOwner: 'worker-1',
-        policyVersion: 1,
-        adapter,
-      }),
-    ).rejects.toThrow('integration discovery failed');
-    expect(mocks.completeRun).toHaveBeenCalledWith(
-      expect.objectContaining({
-        status: 'failed',
-        error: 'integration discovery failed',
-      }),
-    );
-    expect(mocks.generateText).not.toHaveBeenCalled();
-  });
-
-  it('rejects child environments outside the immutable run scope', async () => {
-    mocks.getRun.mockResolvedValue({
-      id: '11111111-1111-4111-8111-111111111111',
-      sourceKey: 'built_in:sentry_triage',
-      automationKey: 'sentry_triage',
-      promptSnapshot: 'Run the automation.',
-      policySnapshot: {
-        ...policy,
-        maxChildTasks: 1,
-        allowedEnvironmentIds: ['22222222-2222-4222-8222-222222222222'],
-      },
-    });
+  it('launches a child without an automation-specific environment scope', async () => {
+    adapter.launchTask.mockResolvedValue({ success: true, taskId: 'task-1' });
     mocks.getEnvironments.mockResolvedValue([
       {
         id: '33333333-3333-4333-8333-333333333333',
-        name: 'Unrelated',
+        name: 'Available',
         repositoryNames: ['other/repo'],
       },
     ]);
@@ -308,10 +246,74 @@ describe('Fast automation execution', () => {
       policyVersion: 1,
       adapter,
     });
-    expect(launchResult).toEqual({
-      success: false,
-      error: 'The selected environment is outside this automation run scope.',
+    expect(launchResult).toEqual({ success: true, taskId: 'task-1' });
+    expect(adapter.launchTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        environmentId: '33333333-3333-4333-8333-333333333333',
+      }),
+    );
+  });
+
+  it('terminalizes discovery failures before inference starts', async () => {
+    mocks.listIntegrations.mockRejectedValue(
+      new Error('integration discovery failed'),
+    );
+
+    await expect(
+      runFastAutomationExecution({
+        automationRunId: '11111111-1111-4111-8111-111111111111',
+        leaseOwner: 'worker-1',
+        policyVersion: 1,
+        adapter,
+      }),
+    ).rejects.toThrow('integration discovery failed');
+    expect(mocks.completeRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'failed',
+        error: 'integration discovery failed',
+      }),
+    );
+    expect(mocks.generateText).not.toHaveBeenCalled();
+  });
+
+  it('allows a continuation turn to launch one child like a human Fast turn', async () => {
+    adapter.launchTask.mockResolvedValue({ success: true, taskId: 'task-2' });
+    mocks.getEnvironments.mockResolvedValue([
+      {
+        id: '33333333-3333-4333-8333-333333333333',
+        name: 'Available',
+        repositoryNames: ['other/repo'],
+      },
+    ]);
+    let launchResult: unknown;
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        options.onSessionReady('opencode-session');
+        launchResult = await mocks.nativeExecutor?.({
+          name: 'launch_task',
+          args: {
+            prompt: 'Edit code.',
+            environmentId: '33333333-3333-4333-8333-333333333333',
+            idempotencyKey: 'fix-1',
+          },
+        });
+        await mocks.nativeExecutor?.({
+          name: 'complete_automation_run',
+          args: { outcome: 'skipped' },
+        });
+        return '';
+      },
+    );
+
+    await runFastAutomationExecution({
+      automationRunId: '11111111-1111-4111-8111-111111111111',
+      leaseOwner: 'worker-1',
+      policyVersion: 1,
+      adapter,
+      continuation: true,
     });
-    expect(adapter.launchTask).not.toHaveBeenCalled();
+
+    expect(launchResult).toEqual({ success: true, taskId: 'task-2' });
+    expect(adapter.launchTask).toHaveBeenCalled();
   });
 });
