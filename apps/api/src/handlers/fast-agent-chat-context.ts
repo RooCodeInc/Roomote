@@ -9,6 +9,10 @@ export function createFastAgentChatContextAdapter(options: {
   actingUserId: string;
   conversation: FastAgentConversation;
 }) {
+  const slackTeamId =
+    options.conversation.surface === 'slack'
+      ? options.conversation.workspaceId
+      : undefined;
   const channel =
     options.conversation.surface === 'discord'
       ? (options.conversation.replyTarget.threadId ??
@@ -23,6 +27,7 @@ export function createFastAgentChatContextAdapter(options: {
       lookupCommunicationMessageContext({
         actingUserId: options.actingUserId,
         provider: options.conversation.surface,
+        ...(slackTeamId ? { slackTeamId } : {}),
         ...(input.messageLink
           ? { messageLink: input.messageLink }
           : { channel }),
@@ -36,6 +41,7 @@ export function createFastAgentChatContextAdapter(options: {
       lookupCommunicationChannelMessages({
         actingUserId: options.actingUserId,
         provider: options.conversation.surface,
+        ...(slackTeamId ? { slackTeamId } : {}),
         ...(input.channelLink
           ? { channelLink: input.channelLink }
           : { channel }),

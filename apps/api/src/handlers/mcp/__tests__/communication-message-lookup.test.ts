@@ -112,12 +112,14 @@ describe('lookupCommunicationMessageContext', () => {
     const taskRun = { payload: {}, actingUserId: 'user-1' };
     await lookupCommunicationMessageContext({
       messageLink: 'https://acme.slack.com/archives/C123/p1710000000000100',
+      slackTeamId: 'T123',
       taskRun,
     });
 
     expect(lookupSlackThreadMock).toHaveBeenCalledWith({
       channel: 'C123',
       messageTs: '1710000000.000100',
+      slackTeamId: 'T123',
       taskRun: { ...taskRun, slackThreadTs: null },
     });
   });
@@ -229,21 +231,23 @@ describe('lookupCommunicationChannelMessages', () => {
   });
 
   it('accepts a permalink-only channelLink and forwards the parsed channel', async () => {
-    lookupDiscordChannelMessagesMock.mockResolvedValueOnce({
-      channelId: '456',
+    lookupSlackChannelMessagesMock.mockResolvedValueOnce({
+      channelId: 'C123',
       messageCount: 0,
       messages: [],
     });
 
     await lookupCommunicationChannelMessages({
       actingUserId: 'user-1',
-      channelLink: 'https://discord.com/channels/123/456',
-      provider: 'discord',
+      channelLink: 'https://acme.slack.com/archives/C123',
+      provider: 'slack',
+      slackTeamId: 'T123',
     });
 
-    expect(lookupDiscordChannelMessagesMock).toHaveBeenCalledWith({
-      actingDiscordMembershipUserId: 'user-1',
-      channel: '456',
+    expect(lookupSlackChannelMessagesMock).toHaveBeenCalledWith({
+      actingSlackMembershipUserId: 'user-1',
+      channel: 'C123',
+      slackTeamId: 'T123',
     });
   });
 

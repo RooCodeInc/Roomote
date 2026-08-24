@@ -105,6 +105,7 @@ const slackLookupStrategy: CommunicationLookupStrategy = {
     const result = await lookupSlackThread({
       ...(options.channel ? { channel: options.channel } : {}),
       messageTs: options.messageId,
+      ...(options.slackTeamId ? { slackTeamId: options.slackTeamId } : {}),
       ...(options.taskRun
         ? { taskRun: toSlackLookupTaskRun(options.taskRun) }
         : {}),
@@ -148,6 +149,7 @@ const slackLookupStrategy: CommunicationLookupStrategy = {
       ...(options.channel ? { channel: options.channel } : {}),
       ...(options.oldest ? { oldest: options.oldest } : {}),
       ...(options.latest ? { latest: options.latest } : {}),
+      ...(options.slackTeamId ? { slackTeamId: options.slackTeamId } : {}),
       ...(options.taskRun
         ? { taskRun: toSlackLookupTaskRun(options.taskRun) }
         : {}),

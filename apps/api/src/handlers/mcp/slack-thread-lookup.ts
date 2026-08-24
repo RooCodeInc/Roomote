@@ -296,6 +296,7 @@ async function resolveSlackLookupChannel(options: {
   channel?: string;
   taskRun?: SlackReplyTargetTaskRun | null;
   actingSlackMembershipUserId?: string | null;
+  slackTeamId?: string;
   missingChannelError: string;
   missingLinkedAccountErrorMessage?: string;
   unlinkedUserPublicChannelErrorMessage?: string;
@@ -316,7 +317,12 @@ async function resolveSlackLookupChannel(options: {
 
   const slackInstallation = await db.query.slackInstallations.findFirst({
     columns: { botAccessToken: true, teamId: true },
-    where: eq(slackInstallations.isActive, true),
+    where: options.slackTeamId
+      ? and(
+          eq(slackInstallations.isActive, true),
+          eq(slackInstallations.teamId, options.slackTeamId),
+        )
+      : eq(slackInstallations.isActive, true),
   });
 
   if (!slackInstallation?.botAccessToken) {
@@ -413,6 +419,7 @@ export async function lookupSlackThread(options: {
   channel?: string;
   taskRun?: SlackReplyTargetTaskRun | null;
   actingSlackMembershipUserId?: string | null;
+  slackTeamId?: string;
 }): Promise<SlackThreadLookupPayload> {
   const requestedMessageTs = options.messageTs.trim();
   if (!requestedMessageTs) {
@@ -423,6 +430,7 @@ export async function lookupSlackThread(options: {
     channel: options.channel,
     taskRun: options.taskRun,
     actingSlackMembershipUserId: options.actingSlackMembershipUserId,
+    slackTeamId: options.slackTeamId,
     missingChannelError:
       'channel is required when Slack thread lookup is not running from a Slack-originated job',
     missingLinkedAccountErrorMessage:
@@ -483,6 +491,7 @@ export async function lookupSlackChannelMessages(options: {
   latest?: string;
   taskRun?: SlackReplyTargetTaskRun | null;
   actingSlackMembershipUserId?: string | null;
+  slackTeamId?: string;
 }): Promise<SlackChannelMessagesPayload> {
   const oldestBoundary = normalizeSlackTimeBoundary(options.oldest, 'oldest');
   const latestBoundary = normalizeSlackTimeBoundary(options.latest, 'latest');
@@ -504,6 +513,7 @@ export async function lookupSlackChannelMessages(options: {
     channel,
     taskRun: options.taskRun,
     actingSlackMembershipUserId: options.actingSlackMembershipUserId,
+    slackTeamId: options.slackTeamId,
     missingChannelError:
       'channel is required when Slack channel message lookup is not running from a Slack-originated job',
   });
