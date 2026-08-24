@@ -95,6 +95,8 @@ describe('roomote MCP Slack tool session propagation', () => {
       ROOMOTE_SLACK_CHANNEL: 'C123',
       ROOMOTE_SLACK_THREAD_TS: '123.456',
     };
+    // The test runner may itself be a Fast child; normal Slack cases must opt out.
+    delete process.env.ROOMOTE_FAST_AGENT_CHILD;
 
     await import('../index.js');
   });
