@@ -95,7 +95,6 @@ async function resolveMcpServerConfigs(options: {
   auth: Parameters<typeof resolveActorScopedUserContext>[0];
   requestOrigin: string | null;
   includeRoomote?: boolean;
-  deploymentScopedCuratedOnly?: boolean;
   quiet?: boolean;
 }): Promise<ResolvedMcpServerConfigs> {
   const logInfo: InfoLogger = options.quiet ? () => {} : console.info;
@@ -107,7 +106,6 @@ async function resolveMcpServerConfigs(options: {
       await buildCuratedMcpServerConfigs({
         auth: options.auth,
         requestOrigin: options.requestOrigin,
-        deploymentScopedOnly: options.deploymentScopedCuratedOnly,
         logInfo,
       }),
     );
@@ -158,11 +156,6 @@ export async function resolveUserMcpServerConfigs(options: {
     auth: { userId: options.userId },
     requestOrigin: getRequestOrigin({ url: options.apiBaseUrl }),
     includeRoomote: options.includeRoomote,
-    // The Fast broker authenticates against these entries with a control-plane
-    // auth token, which the API's integration proxies only accept for
-    // deployment-scoped integrations — user-scoped proxies would 403 on every
-    // turn, so they are excluded here.
-    deploymentScopedCuratedOnly: true,
     // This runs on every Fast turn; the per-connection info stream is worker
     // config-fetch debugging noise at that frequency.
     quiet: true,
@@ -365,7 +358,6 @@ async function buildCustomMcpServerConfigs(
 async function buildCuratedMcpServerConfigs(ctx: {
   auth: Parameters<typeof resolveActorScopedUserContext>[0];
   requestOrigin: string | null;
-  deploymentScopedOnly?: boolean;
   logInfo: InfoLogger;
 }): Promise<ResolvedMcpServerConfigs> {
   const logInfo = ctx.logInfo;
@@ -474,15 +466,6 @@ async function buildCuratedMcpServerConfigs(ctx: {
     }
 
     const connectionScope = getMcpIntegrationConnectionScope(integration);
-
-    if (ctx.deploymentScopedOnly && connectionScope !== 'deployment') {
-      logInfo('[getMcpServerConfigs] Skipping connection:', {
-        connectionId: connection.id,
-        mcpId: connection.mcpId,
-        reason: 'user_scoped_excluded',
-      });
-      continue;
-    }
 
     if (connection.mcpId === 'linear') {
       if (!INTEGRATION_PROXY_MCP_IDS.has(connection.mcpId)) {
