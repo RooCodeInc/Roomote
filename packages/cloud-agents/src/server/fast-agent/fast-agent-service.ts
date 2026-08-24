@@ -6,6 +6,7 @@ import {
 import {
   BRAIN_MCP_ID,
   CHAT_CHANNEL_MESSAGES_TOOL,
+  CHAT_MESSAGE_CONTEXT_TOOL,
   INFERENCE_PROVIDER_MAX_RETRIES,
   MANAGE_CUSTOM_AUTOMATIONS_TOOL,
   ROOMOTE_MCP_ID,
@@ -910,6 +911,14 @@ export async function answerFastAgentQuestion({
 
           case FAST_AGENT_NATIVE_TOOL_NAMES.integrationCall: {
             const args = integrationCallArgsSchema.parse(call.args);
+            const chatLookupProvider =
+              args.integrationId === ROOMOTE_MCP_ID &&
+              (args.toolName === CHAT_CHANNEL_MESSAGES_TOOL.name ||
+                args.toolName === CHAT_MESSAGE_CONTEXT_TOOL.name) &&
+              (conversation.surface === 'slack' ||
+                conversation.surface === 'discord')
+                ? conversation.surface
+                : undefined;
             const integrationArguments =
               args.integrationId === ROOMOTE_MCP_ID &&
               args.toolName === CHAT_CHANNEL_MESSAGES_TOOL.name &&
@@ -925,6 +934,9 @@ export async function answerFastAgentQuestion({
                     ),
                   }
                 : args.arguments;
+            const actorScopedIntegrationArguments = chatLookupProvider
+              ? { ...integrationArguments, provider: chatLookupProvider }
+              : integrationArguments;
             const managesCustomAutomations =
               args.integrationId === ROOMOTE_MCP_ID &&
               args.toolName === MANAGE_CUSTOM_AUTOMATIONS_TOOL.name;
@@ -945,7 +957,7 @@ export async function answerFastAgentQuestion({
             const signature = buildIntegrationCallSignature({
               integrationId: args.integrationId,
               toolName: args.toolName,
-              args: integrationArguments,
+              args: actorScopedIntegrationArguments,
             });
             if (integrationCallSignatures.has(signature)) {
               return {
@@ -967,7 +979,7 @@ export async function answerFastAgentQuestion({
               {
                 integrationId: args.integrationId,
                 toolName: args.toolName,
-                args: integrationArguments,
+                args: actorScopedIntegrationArguments,
               },
             );
             return { success: true, result };

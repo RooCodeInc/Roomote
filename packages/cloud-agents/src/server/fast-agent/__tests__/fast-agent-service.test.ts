@@ -850,7 +850,11 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       {
         integrationId: 'roomote',
         toolName: 'get_chat_message_context',
-        args: { channel: 'C123', messageId: '1710000000.000100' },
+        args: {
+          channel: 'C123',
+          messageId: '1710000000.000100',
+          provider: 'slack',
+        },
       },
     );
   });
@@ -911,6 +915,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
             channel: 'C123',
             ...(latest ? { latest } : {}),
             oldest: expectedOldest,
+            provider: 'slack',
           },
         },
       );
