@@ -406,7 +406,7 @@ function buildSpillOutput(
   throw new Error('Fast spill metadata exceeded the bridge output budget.');
 }
 
-export function formatFastAgentNativeToolResult(
+function formatFastAgentNativeToolResult(
   sessionId: string,
   result: unknown,
   options: { allowSpill?: boolean } = {},

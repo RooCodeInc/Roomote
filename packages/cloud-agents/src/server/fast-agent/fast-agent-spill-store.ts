@@ -19,7 +19,7 @@ const DEFAULT_SPILL_TTL_MS = 10 * 60_000;
 const DEFAULT_CONVERSATION_QUOTA_BYTES = 16 * 1024 * 1024;
 const DEFAULT_FILE_QUOTA_BYTES = 8 * 1024 * 1024;
 const DEFAULT_MAX_FILES_PER_CONVERSATION = 16;
-export const FAST_AGENT_SPILL_READ_MAX_BYTES = 5_000;
+const FAST_AGENT_SPILL_READ_MAX_BYTES = 5_000;
 export const FAST_AGENT_SPILL_GREP_RESULT_MAX_BYTES = 28_000;
 const FAST_AGENT_SPILL_GREP_MAX_MATCHES = 20;
 const FAST_AGENT_SPILL_GREP_MAX_QUERY_LENGTH = 512;
@@ -39,7 +39,7 @@ type ConversationSpills = {
   handles: Set<string>;
 };
 
-export type FastAgentSpillStoreOptions = {
+type FastAgentSpillStoreOptions = {
   conversationQuotaBytes?: number;
   fileQuotaBytes?: number;
   maxFilesPerConversation?: number;
@@ -49,7 +49,7 @@ export type FastAgentSpillStoreOptions = {
   ttlMs?: number;
 };
 
-export type FastAgentSpillWriteResult =
+type FastAgentSpillWriteResult =
   | {
       stored: true;
       byteLength: number;
@@ -62,7 +62,7 @@ export type FastAgentSpillWriteResult =
       reason: 'conversation_quota' | 'file_quota' | 'file_count_quota';
     };
 
-export type FastAgentSpillReadResult = {
+type FastAgentSpillReadResult = {
   byteLength: number;
   content: string;
   expiresAt: number;
@@ -71,7 +71,7 @@ export type FastAgentSpillReadResult = {
   offset: number;
 };
 
-export type FastAgentSpillGrepResult = {
+type FastAgentSpillGrepResult = {
   byteLength: number;
   expiresAt: number;
   handle: string;
