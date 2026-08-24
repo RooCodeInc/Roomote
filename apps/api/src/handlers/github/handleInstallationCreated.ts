@@ -1,6 +1,7 @@
 import { completePendingGitHubInstallation } from '@roomote/github';
-import { sendUserDirectMessageBestEffort } from '@roomote/sdk/server';
+import { attemptUserDirectMessage } from '@roomote/sdk/server';
 import { Env } from '@roomote/env';
+import { communicationProviders } from '@roomote/types';
 
 import type { WebhookResponse } from '../../types';
 
@@ -23,13 +24,19 @@ export async function handleInstallationCreated(
     if (result.success) {
       // The requester was waiting on a GitHub org owner's approval; let them
       // know on whichever chat integrations they have linked.
-      await sendUserDirectMessageBestEffort({
-        userId: result.requestedByUserId,
-        text: buildInstallationApprovedMessage(
-          result.githubInstallation.accountLogin,
+      const text = buildInstallationApprovedMessage(
+        result.githubInstallation.accountLogin,
+      );
+      await Promise.all(
+        communicationProviders.map((provider) =>
+          attemptUserDirectMessage({
+            provider,
+            userId: result.requestedByUserId,
+            text,
+            logContext: 'handleInstallationCreated',
+          }),
         ),
-        logContext: 'handleInstallationCreated',
-      });
+      );
     }
   } catch (error) {
     console.error(

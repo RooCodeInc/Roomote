@@ -30,10 +30,7 @@ import {
 } from '@roomote/slack';
 import { createDiscordCommunicationProviderFromRuntimeCredentials } from '../discord-communication';
 import { listConnectedCommunicationProviders } from '../../automations/destination';
-import {
-  hasUserDirectMessageIdentity,
-  sendUserDirectMessage,
-} from '../user-direct-message';
+import { attemptUserDirectMessage } from '../user-direct-message';
 import {
   appendManagerSlackFooter,
   buildAutomationSettingsMessage,
@@ -242,24 +239,14 @@ async function notifyDeploymentAdminsOfPlatformIssue(params: {
   let deliveredAdmins = 0;
 
   for (const admin of admins) {
-    const linkedProviders: CommunicationProvider[] = [];
+    let eligible = false;
     for (const provider of providers) {
-      if (await hasUserDirectMessageIdentity(provider, admin.id)) {
-        linkedProviders.push(provider);
-      }
-    }
-    if (linkedProviders.length === 0) {
-      continue;
-    }
-
-    eligibleAdmins += 1;
-    for (const provider of linkedProviders) {
       const slackText = buildPlatformIssueAlertText({
         taskId: params.taskId,
         report: params.report,
         utmSource: provider,
       });
-      const sent = await sendUserDirectMessage({
+      const attempt = await attemptUserDirectMessage({
         provider,
         userId: admin.id,
         text:
@@ -269,11 +256,17 @@ async function notifyDeploymentAdminsOfPlatformIssue(params: {
         logContext: 'recordTaskMessageEnvelope',
       });
 
-      if (sent) {
+      if (attempt.status !== 'unlinked') {
+        eligible = true;
+      }
+      if (attempt.status === 'sent') {
         delivered = true;
         deliveredAdmins += 1;
         break;
       }
+    }
+    if (eligible) {
+      eligibleAdmins += 1;
     }
   }
 

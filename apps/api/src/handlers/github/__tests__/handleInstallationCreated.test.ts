@@ -9,7 +9,7 @@ vi.mock('@roomote/github', () => ({
 }));
 
 vi.mock('@roomote/sdk/server', () => ({
-  sendUserDirectMessageBestEffort: mockSendUserDirectMessage,
+  attemptUserDirectMessage: mockSendUserDirectMessage,
 }));
 
 vi.mock('@roomote/env', () => ({
@@ -26,7 +26,10 @@ const payload = {
 describe('handleInstallationCreated', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockSendUserDirectMessage.mockResolvedValue(['slack']);
+    mockSendUserDirectMessage.mockImplementation(async ({ provider }) => ({
+      provider,
+      status: 'sent',
+    }));
   });
 
   it('notifies the requesting user after completing a pending installation', async () => {
@@ -41,11 +44,15 @@ describe('handleInstallationCreated', () => {
 
     expect(response).toEqual({ status: 'ok' });
     expect(mockCompletePendingGitHubInstallation).toHaveBeenCalledWith(42);
-    expect(mockSendUserDirectMessage).toHaveBeenCalledWith({
-      userId: 'user-1',
-      text: 'Your GitHub installation request for acme-inc was approved, and Roomote is now connected. Continue setup here: https://roomote.example.com/setup',
-      logContext: 'handleInstallationCreated',
-    });
+    expect(mockSendUserDirectMessage).toHaveBeenCalledTimes(4);
+    for (const provider of ['slack', 'teams', 'telegram', 'discord']) {
+      expect(mockSendUserDirectMessage).toHaveBeenCalledWith({
+        provider,
+        userId: 'user-1',
+        text: 'Your GitHub installation request for acme-inc was approved, and Roomote is now connected. Continue setup here: https://roomote.example.com/setup',
+        logContext: 'handleInstallationCreated',
+      });
+    }
   });
 
   it('does not notify when completion fails', async () => {

@@ -16,27 +16,34 @@ import { createTeamsCommunicationProviderFromRuntimeCredentials } from './teams-
 import { createTelegramCommunicationProviderFromRuntimeCredentials } from './telegram-communication';
 import { findTeamsPrimaryConversation } from './teams-primary-conversation';
 
-export type UserDirectMessageProvider = 'slack' | 'teams' | 'telegram';
-
 export type UserDirectMessageDestination = {
   channelId: string;
   teamId?: string;
   serviceUrl?: string;
 };
 
+export type UserDirectMessageAttempt =
+  | { provider: CommunicationProvider; status: 'unlinked' }
+  | { provider: CommunicationProvider; status: 'sent' }
+  | { provider: CommunicationProvider; status: 'failed' };
+
 function formatError(error: unknown) {
   return error instanceof Error ? error.message : String(error);
 }
 
 async function resolveSlackUserDirectMessage(userId: string): Promise<{
-  channelId: string;
-  slack: SlackNotifier;
-  teamId: string;
-} | null> {
+  destination: {
+    channelId: string;
+    slack: SlackNotifier;
+    teamId: string;
+  } | null;
+  linked: boolean;
+}> {
   const installations = await db.query.slackInstallations.findMany({
     where: eq(slackInstallations.isActive, true),
     columns: { botAccessToken: true, teamId: true },
   });
+  let linked = false;
 
   for (const installation of installations) {
     const mapping = await db.query.slackUserMappings.findFirst({
@@ -50,21 +57,25 @@ async function resolveSlackUserDirectMessage(userId: string): Promise<{
     if (!mapping) {
       continue;
     }
+    linked = true;
 
     const slack = new SlackNotifier(installation.botAccessToken);
     const channelId = await slack.openConversation(mapping.slackUserId);
     if (channelId) {
-      return { channelId, slack, teamId: installation.teamId };
+      return {
+        destination: { channelId, slack, teamId: installation.teamId },
+        linked,
+      };
     }
   }
 
-  return null;
+  return { destination: null, linked };
 }
 
 export async function findSlackUserDirectMessageDestination(
   userId: string,
 ): Promise<{ channelId: string; teamId: string } | null> {
-  const destination = await resolveSlackUserDirectMessage(userId);
+  const { destination } = await resolveSlackUserDirectMessage(userId);
   return destination
     ? { channelId: destination.channelId, teamId: destination.teamId }
     : null;
@@ -145,59 +156,13 @@ export async function findUserDirectMessageDestination(
   return null;
 }
 
-export async function hasUserDirectMessageIdentity(
-  provider: CommunicationProvider,
-  userId: string,
-): Promise<boolean> {
-  switch (provider) {
-    case 'slack': {
-      const installations = await db.query.slackInstallations.findMany({
-        where: eq(slackInstallations.isActive, true),
-        columns: { teamId: true },
-      });
-      for (const installation of installations) {
-        const mapping = await db.query.slackUserMappings.findFirst({
-          where: and(
-            eq(slackUserMappings.userId, userId),
-            eq(slackUserMappings.slackTeamId, installation.teamId),
-          ),
-          columns: { slackUserId: true },
-        });
-        if (mapping) return true;
-      }
-      return false;
-    }
-    case 'teams':
-      return Boolean(
-        await db.query.teamsUserMappings.findFirst({
-          where: eq(teamsUserMappings.userId, userId),
-          columns: { teamsUserId: true },
-        }),
-      );
-    case 'telegram':
-      return Boolean(
-        await db.query.telegramUserMappings.findFirst({
-          where: eq(telegramUserMappings.userId, userId),
-          columns: { telegramChatId: true },
-        }),
-      );
-    case 'discord':
-      return Boolean(
-        await db.query.discordUserMappings.findFirst({
-          where: eq(discordUserMappings.userId, userId),
-          columns: { discordUserId: true },
-        }),
-      );
-  }
-}
-
 async function sendSlackUserDirectMessage(
   userId: string,
   text: string,
   logContext: string,
-): Promise<boolean> {
+): Promise<UserDirectMessageAttempt['status']> {
   try {
-    const destination = await resolveSlackUserDirectMessage(userId);
+    const { destination, linked } = await resolveSlackUserDirectMessage(userId);
     if (destination) {
       const messageTs = await destination.slack.postMessage({
         channel: destination.channelId,
@@ -205,23 +170,25 @@ async function sendSlackUserDirectMessage(
       });
 
       if (messageTs) {
-        return true;
+        return 'sent';
       }
     }
+
+    return linked ? 'failed' : 'unlinked';
   } catch (error) {
     console.warn(
       `[${logContext}] Failed to send Slack DM: ${formatError(error)}`,
     );
   }
 
-  return false;
+  return 'failed';
 }
 
 async function sendTeamsUserDirectMessage(
   userId: string,
   text: string,
   logContext: string,
-): Promise<boolean> {
+): Promise<UserDirectMessageAttempt['status']> {
   try {
     const mapping = await db.query.teamsUserMappings.findFirst({
       where: eq(teamsUserMappings.userId, userId),
@@ -229,7 +196,7 @@ async function sendTeamsUserDirectMessage(
     });
 
     if (!mapping) {
-      return false;
+      return 'unlinked';
     }
 
     // Proactive DMs need a service URL, which lives on installations rather
@@ -237,14 +204,14 @@ async function sendTeamsUserDirectMessage(
     const conversation = await findTeamsPrimaryConversation();
 
     if (!conversation) {
-      return false;
+      return 'failed';
     }
 
     const provider =
       await createTeamsCommunicationProviderFromRuntimeCredentials();
 
     if (!provider) {
-      return false;
+      return 'failed';
     }
 
     await provider.postDirectMessage({
@@ -255,13 +222,13 @@ async function sendTeamsUserDirectMessage(
       textFormat: 'markdown',
     });
 
-    return true;
+    return 'sent';
   } catch (error) {
     console.warn(
       `[${logContext}] Failed to send Teams DM: ${formatError(error)}`,
     );
 
-    return false;
+    return 'failed';
   }
 }
 
@@ -269,7 +236,7 @@ async function sendTelegramUserDirectMessage(
   userId: string,
   text: string,
   logContext: string,
-): Promise<boolean> {
+): Promise<UserDirectMessageAttempt['status']> {
   try {
     const mapping = await db.query.telegramUserMappings.findFirst({
       where: eq(telegramUserMappings.userId, userId),
@@ -277,14 +244,14 @@ async function sendTelegramUserDirectMessage(
     });
 
     if (!mapping) {
-      return false;
+      return 'unlinked';
     }
 
     const provider =
       await createTelegramCommunicationProviderFromRuntimeCredentials();
 
     if (!provider) {
-      return false;
+      return 'failed';
     }
 
     await provider.postMessage({
@@ -293,13 +260,13 @@ async function sendTelegramUserDirectMessage(
       textFormat: 'markdown',
     });
 
-    return true;
+    return 'sent';
   } catch (error) {
     console.warn(
       `[${logContext}] Failed to send Telegram DM: ${formatError(error)}`,
     );
 
-    return false;
+    return 'failed';
   }
 }
 
@@ -307,34 +274,41 @@ async function sendDiscordUserDirectMessage(
   userId: string,
   text: string,
   logContext: string,
-): Promise<boolean> {
+): Promise<UserDirectMessageAttempt['status']> {
   try {
-    const destination = await findDiscordUserDirectMessageDestination(userId);
-    if (!destination) {
-      return false;
+    const mapping = await db.query.discordUserMappings.findFirst({
+      where: eq(discordUserMappings.userId, userId),
+      columns: { discordDmChannelId: true, discordUserId: true },
+    });
+    if (!mapping) {
+      return 'unlinked';
     }
 
     const provider =
       await createDiscordCommunicationProviderFromRuntimeCredentials();
     if (!provider) {
-      return false;
+      return 'failed';
     }
 
+    const channelId =
+      mapping.discordDmChannelId ??
+      (await provider.createDirectMessage(mapping.discordUserId)).id;
+
     await provider.postMessage({
-      channelId: destination.channelId,
+      channelId,
       text,
       textFormat: 'markdown',
     });
-    return true;
+    return 'sent';
   } catch (error) {
     console.warn(
       `[${logContext}] Failed to send Discord DM: ${formatError(error)}`,
     );
-    return false;
+    return 'failed';
   }
 }
 
-export async function sendUserDirectMessage({
+export async function attemptUserDirectMessage({
   provider,
   userId,
   text,
@@ -344,42 +318,22 @@ export async function sendUserDirectMessage({
   userId: string;
   text: string;
   logContext: string;
-}): Promise<boolean> {
+}): Promise<UserDirectMessageAttempt> {
+  let status: UserDirectMessageAttempt['status'];
   switch (provider) {
     case 'slack':
-      return sendSlackUserDirectMessage(userId, text, logContext);
+      status = await sendSlackUserDirectMessage(userId, text, logContext);
+      break;
     case 'teams':
-      return sendTeamsUserDirectMessage(userId, text, logContext);
+      status = await sendTeamsUserDirectMessage(userId, text, logContext);
+      break;
     case 'telegram':
-      return sendTelegramUserDirectMessage(userId, text, logContext);
+      status = await sendTelegramUserDirectMessage(userId, text, logContext);
+      break;
     case 'discord':
-      return sendDiscordUserDirectMessage(userId, text, logContext);
+      status = await sendDiscordUserDirectMessage(userId, text, logContext);
+      break;
   }
-}
 
-/**
- * Best-effort DM to a Roomote user on every chat integration that is both
- * connected on this deployment and linked to the user. Failures are logged
- * and swallowed; returns the providers that accepted the message.
- */
-export async function sendUserDirectMessageBestEffort({
-  userId,
-  text,
-  logContext,
-}: {
-  userId: string;
-  text: string;
-  logContext: string;
-}): Promise<UserDirectMessageProvider[]> {
-  const [slack, teams, telegram] = await Promise.all([
-    sendSlackUserDirectMessage(userId, text, logContext),
-    sendTeamsUserDirectMessage(userId, text, logContext),
-    sendTelegramUserDirectMessage(userId, text, logContext),
-  ]);
-
-  return [
-    ...(slack ? (['slack'] as const) : []),
-    ...(teams ? (['teams'] as const) : []),
-    ...(telegram ? (['telegram'] as const) : []),
-  ];
+  return { provider, status };
 }
