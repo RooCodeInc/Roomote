@@ -473,7 +473,7 @@ describe('subscribeHarnessCallbacks', () => {
     await unsubscribe();
   });
 
-  it('does not promote transient assistant output to idle completion', async () => {
+  it('settles filtered transient assistant output with a safe idle fallback', async () => {
     const { harness, emitEnvelope } = createRuntimeHarness();
     const callbacks = { onMessage: vi.fn().mockResolvedValue(undefined) };
     const unsubscribe = subscribeHarnessCallbacks({
@@ -512,11 +512,16 @@ describe('subscribeHarnessCallbacks', () => {
 
     await unsubscribe.flushPendingCompletionEvents();
 
-    expect(callbacks.onMessage).not.toHaveBeenCalledWith(
-      expect.anything(),
-      expect.anything(),
-      expect.objectContaining({ type: 'completion' }),
-      expect.anything(),
+    expect(callbacks.onMessage).toHaveBeenLastCalledWith(
+      { id: 147, taskId: 'task-transient-idle' },
+      'runtime-session-transient',
+      {
+        type: 'completion',
+        text: 'Task completed.',
+        ts: expect.any(Number),
+        provisional: true,
+      },
+      {},
     );
 
     await unsubscribe();

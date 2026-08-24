@@ -10,6 +10,7 @@ import {
   stripLlmCitationArtifacts,
 } from '@roomote/types';
 import { type DequeuedTaskRun, sdk } from '@roomote/sdk/client';
+import { SLACK_LIVE_TASK_CARD_MESSAGES } from '@roomote/slack/client';
 
 import type { Harness } from '../sandbox-server';
 import type { HarnessInferenceUsageEvent } from '../sandbox-server/lib/harness';
@@ -67,6 +68,7 @@ export function subscribeHarnessCallbacks({
     string,
     { text: string; ts: number }
   >();
+  const filteredCompletionCallbackIds = new Set<string>();
   let consecutivePersistenceFailures = 0;
   let assistantOutputStamped = false;
   let assistantOutputStampInFlight: Promise<void> | null = null;
@@ -258,6 +260,7 @@ export function subscribeHarnessCallbacks({
       await callbackPromise;
       if (event.type === 'completion') {
         latestAssistantMessagesByCallbackId.delete(callbackTaskId);
+        filteredCompletionCallbackIds.delete(callbackTaskId);
       }
     } catch (error) {
       logger.warn(
@@ -304,6 +307,15 @@ export function subscribeHarnessCallbacks({
         type: 'completion',
         text: message.text,
         ts: message.ts,
+        provisional: true,
+      });
+    }
+
+    for (const callbackTaskId of filteredCompletionCallbackIds) {
+      await forwardCallbackEvent(callbackTaskId, {
+        type: 'completion',
+        text: SLACK_LIVE_TASK_CARD_MESSAGES.completed,
+        ts: Date.now(),
         provisional: true,
       });
     }
@@ -411,16 +423,20 @@ export function subscribeHarnessCallbacks({
         if (event.type === 'followup' || event.type === 'request_user_input') {
           clearPendingCompletionEvents(callbackTaskId);
           latestAssistantMessagesByCallbackId.delete(callbackTaskId);
+          filteredCompletionCallbackIds.delete(callbackTaskId);
         } else if (event.type === 'request_user_input_response') {
           latestAssistantMessagesByCallbackId.delete(callbackTaskId);
+          filteredCompletionCallbackIds.delete(callbackTaskId);
         } else if (event.type === 'text') {
           if (isEligibleProvisionalCompletionText(event.text)) {
             latestAssistantMessagesByCallbackId.set(callbackTaskId, {
               text: event.text,
               ts: event.ts,
             });
+            filteredCompletionCallbackIds.delete(callbackTaskId);
           } else {
             latestAssistantMessagesByCallbackId.delete(callbackTaskId);
+            filteredCompletionCallbackIds.add(callbackTaskId);
           }
         }
 
@@ -467,6 +483,7 @@ export function subscribeHarnessCallbacks({
     if (event.eventName === TaskEventName.TaskStarted) {
       clearPendingCompletionEvents(taskId);
       latestAssistantMessagesByCallbackId.delete(taskId);
+      filteredCompletionCallbackIds.delete(taskId);
       void forwardCallbackEvent(taskId, {
         type: 'turn_started',
         ts: Date.now(),
@@ -477,6 +494,7 @@ export function subscribeHarnessCallbacks({
     if (event.eventName === TaskEventName.TaskAborted) {
       clearPendingCompletionEvents(taskId);
       latestAssistantMessagesByCallbackId.delete(taskId);
+      filteredCompletionCallbackIds.delete(taskId);
     }
   });
 
