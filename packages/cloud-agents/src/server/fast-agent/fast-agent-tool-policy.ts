@@ -10,6 +10,7 @@ export const FAST_AGENT_NATIVE_TOOL_NAMES = {
   ignoreEvent: 'ignore_event',
   integrationCall: 'integration_call',
   launchTask: 'launch_task',
+  manageCustomAutomations: 'manage_custom_automations',
   manageTasks: 'manage_tasks',
   retryTaskStart: 'retry_task_start',
   sendChatReaction: 'send_chat_reaction',

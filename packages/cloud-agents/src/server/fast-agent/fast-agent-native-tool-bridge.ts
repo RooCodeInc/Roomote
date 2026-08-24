@@ -176,6 +176,30 @@ export default {
 }
 `,
 
+    [FAST_AGENT_NATIVE_TOOL_NAMES.manageCustomAutomations]: String.raw`
+import { z } from "zod"
+import { invoke } from "../roomote-fast-tool-bridge.js"
+
+export default {
+  description: "Admin-only management of deployment custom automations. List automations or enabled task models, resolve schedules, create or update automations, delete an automation by exact ID, or run an enabled automation now. Use update with enabled false or true to disable or enable an automation.",
+  args: {
+    action: z.enum(["list", "list_models", "resolve_schedule", "create", "update", "delete", "run_now"]),
+    automationId: z.string().optional().describe("Required for update, delete, and run_now"),
+    name: z.string().optional(),
+    prompt: z.string().optional().describe("Automation instructions without the cadence, which belongs in schedule"),
+    enabled: z.boolean().optional(),
+    schedule: z.string().optional().describe("A five-field cron expression, natural-language recurring schedule, or built-in preset"),
+    model: z.string().nullable().optional().describe("Exact enabled model ID; null clears an existing override"),
+    environmentId: z.string().optional(),
+    targetProvider: z.enum(["slack", "discord", "teams", "telegram"]).nullable().optional(),
+    targetMode: z.enum(["channel", "direct_message"]).optional(),
+    targetChannelId: z.string().optional(),
+    targetServiceUrl: z.string().optional(),
+  },
+  execute: (args, context) => invoke("manage_custom_automations", args, context),
+}
+`,
+
     [FAST_AGENT_NATIVE_TOOL_NAMES.sendTaskMessage]: String.raw`
 import { z } from "zod"
 import { invoke } from "../roomote-fast-tool-bridge.js"

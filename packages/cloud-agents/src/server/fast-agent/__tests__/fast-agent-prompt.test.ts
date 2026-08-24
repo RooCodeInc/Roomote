@@ -66,7 +66,10 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain('Claude Sonnet 5 [id: anthropic/claude-sonnet-5]');
     expect(prompt).toContain('Omit it to use the deployment default');
     expect(prompt).toContain('manage_tasks');
+    expect(prompt).toContain('manage_custom_automations');
     expect(prompt).toContain('integration_call');
+    expect(prompt).toContain("current user's deployment authorization");
+    expect(prompt).toContain('use "run_now" rather than "launch_task"');
     expect(prompt).toContain(
       'These reads use the same deployment authorization semantics as delegated Roomote tasks.',
     );

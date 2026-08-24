@@ -61,6 +61,10 @@ import {
   inspectFastAgentTasks,
   sendFastAgentTaskMessage,
 } from './fast-agent-tasks';
+import {
+  fastAgentCustomAutomationArgsSchema,
+  manageFastAgentCustomAutomations,
+} from './fast-agent-custom-automations';
 import { getFastAgentUserIdentity } from './fast-agent-user-identity';
 import { FastAgentTurnDiagnostics } from './fast-agent-turn-diagnostics';
 import {
@@ -1062,6 +1066,24 @@ export async function answerFastAgentQuestion({
               args,
             );
             return result;
+          }
+
+          case FAST_AGENT_NATIVE_TOOL_NAMES.manageCustomAutomations: {
+            const args = fastAgentCustomAutomationArgsSchema.parse(call.args);
+            if (
+              args.action === 'create' ||
+              args.action === 'update' ||
+              args.action === 'delete' ||
+              args.action === 'run_now'
+            ) {
+              const ackError = requireAcknowledgement();
+              if (ackError) return ackError;
+            }
+            throwIfTurnCancelled();
+            return await manageFastAgentCustomAutomations(
+              { userId, apiBaseUrl },
+              args,
+            );
           }
 
           case FAST_AGENT_NATIVE_TOOL_NAMES.sendTaskMessage: {

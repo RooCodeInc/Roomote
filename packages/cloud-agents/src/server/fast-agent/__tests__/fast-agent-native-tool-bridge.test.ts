@@ -31,6 +31,10 @@ describe('Fast native OpenCode tool bridge', () => {
       join(toolsDirectory, 'manage_tasks.js'),
       'utf8',
     );
+    const manageCustomAutomationsSource = await readFile(
+      join(toolsDirectory, 'manage_custom_automations.js'),
+      'utf8',
+    );
     const messageContextSource = await readFile(
       join(toolsDirectory, 'get_chat_message_context.js'),
       'utf8',
@@ -61,6 +65,12 @@ describe('Fast native OpenCode tool bridge', () => {
     );
     expect(manageTasksSource).toContain(
       'Use launch_task, send_task_message, or cancel_task for task changes',
+    );
+    expect(manageCustomAutomationsSource).toContain(
+      'invoke("manage_custom_automations"',
+    );
+    expect(manageCustomAutomationsSource).toContain(
+      'Use update with enabled false or true',
     );
     expect(messageContextSource).toContain('invoke("get_chat_message_context"');
     expect(messageContextSource).toContain('messageId: z.string().min(1)');
@@ -95,6 +105,7 @@ describe('Fast native OpenCode tool bridge', () => {
       FAST_AGENT_NATIVE_TOOL_NAMES.getChatMessageContext,
       FAST_AGENT_NATIVE_TOOL_NAMES.getChatChannelMessages,
       FAST_AGENT_NATIVE_TOOL_NAMES.launchTask,
+      FAST_AGENT_NATIVE_TOOL_NAMES.manageCustomAutomations,
       FAST_AGENT_NATIVE_TOOL_NAMES.retryTaskStart,
       FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReaction,
       FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReply,
