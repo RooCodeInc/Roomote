@@ -57,6 +57,7 @@ import {
   type FastAgentPlatformEventHandling,
   type FastAgentPlatformEventVisibility,
   type FastAgentReply,
+  type FastAgentReplyHandle,
   type FastAgentTurnAdapter,
   type FastAgentTurnSource,
 } from './fast-agent-conversation';
@@ -130,6 +131,8 @@ function buildIntegrationCallSignature({
 }
 
 export const FAST_AGENT_INFERENCE_MAX_RETRIES = INFERENCE_PROVIDER_MAX_RETRIES;
+export const FAST_AGENT_TRANSIENT_INFERENCE_MAX_RETRIES = 6;
+const FAST_AGENT_TRANSIENT_RETRY_JITTER_RATIO = 0.2;
 
 type FastAgentInferenceFailure = ReturnType<
   typeof classifyNonTaskInferenceError
@@ -160,16 +163,42 @@ class FastAgentInferenceError extends Error {
   }
 }
 
+function resolveFastAgentInferenceMaxRetries(
+  failure: FastAgentInferenceFailure,
+): number {
+  switch (failure.reason) {
+    case 'endpoint_unreachable':
+    case 'gateway_blocked':
+    case 'timeout':
+      return FAST_AGENT_TRANSIENT_INFERENCE_MAX_RETRIES;
+    default:
+      return FAST_AGENT_INFERENCE_MAX_RETRIES;
+  }
+}
+
 function resolveFastAgentInferenceRetryDelayMs(
   error: unknown,
   failure: FastAgentInferenceFailure,
   retryNumber: number,
 ): number {
-  return resolveInferenceProviderRetryDelayMs({
+  const delayMs = resolveInferenceProviderRetryDelayMs({
     error,
     attemptNumber: retryNumber,
     rateLimited: failure.reason === 'rate_limited',
   });
+
+  if (
+    resolveFastAgentInferenceMaxRetries(failure) ===
+    FAST_AGENT_INFERENCE_MAX_RETRIES
+  ) {
+    return delayMs;
+  }
+
+  // Positive jitter spreads concurrent recovery attempts without shortening
+  // the 61-second base backoff window. Six retries remain bounded below 75s.
+  return Math.round(
+    delayMs * (1 + Math.random() * FAST_AGENT_TRANSIENT_RETRY_JITTER_RATIO),
+  );
 }
 
 function formatFastAgentInferenceRetryNotice(
@@ -177,12 +206,12 @@ function formatFastAgentInferenceRetryNotice(
 ): string {
   const headline =
     notice.failure.reason === 'rate_limited'
-      ? 'Fast mode’s inference provider is rate limiting requests.'
+      ? 'The inference provider is rate limiting requests.'
       : notice.failure.reason === 'gateway_blocked'
-        ? 'Fast mode’s request was blocked by the inference provider gateway.'
+        ? 'Having trouble reaching the inference provider.'
         : notice.failure.reason === 'timeout'
-          ? 'Fast mode’s inference provider did not respond in time.'
-          : 'Fast mode’s inference provider returned a temporary error.';
+          ? 'The inference provider did not respond in time.'
+          : 'The inference provider returned a temporary error.';
 
   if (notice.delayMs === undefined || notice.maxAttempts === undefined) {
     return `${headline} Retrying automatically…`;
@@ -197,21 +226,21 @@ function formatFastAgentInferenceFailure(
 ): string {
   switch (failure.reason) {
     case 'rate_limited':
-      return 'Fast mode is still being rate limited by the inference provider after retrying. Any delegated tasks can keep running; please try again when provider capacity is available.';
+      return 'The inference provider is still rate limiting requests after retrying. Any delegated tasks can keep running; please try again when provider capacity is available.';
     case 'timeout':
-      return 'Fast mode’s inference provider did not respond after retrying. Any delegated tasks can keep running; please try again in a moment.';
+      return 'The inference provider did not respond after retrying. Any delegated tasks can keep running; please try again in a moment.';
     case 'endpoint_unreachable':
-      return 'Fast mode could not reach the inference provider after retrying. Please try again in a moment.';
+      return 'Could not reach the inference provider after retrying. Please try again in a moment.';
     case 'gateway_blocked':
-      return 'Fast mode’s request is still being blocked by the inference provider gateway after retrying. Please try again in a moment.';
+      return 'The request is still being blocked by the inference provider gateway after retrying. Please try again in a moment.';
     case 'insufficient_credits':
-      return 'Fast mode cannot use the inference provider because the account has insufficient credits or quota.';
+      return 'The inference provider account has insufficient credits or quota.';
     case 'invalid_credentials':
-      return 'Fast mode cannot authenticate with the configured inference provider. An administrator needs to reconnect or replace its credentials.';
+      return 'Could not authenticate with the configured inference provider. An administrator needs to reconnect or replace its credentials.';
     case 'model_unavailable':
-      return 'Fast mode’s configured model is not available from the inference provider. An administrator needs to select an available model.';
+      return 'The configured model is not available from the inference provider. An administrator needs to select an available model.';
     default:
-      return 'Fast mode could not complete the request because its inference provider returned an error. Please try again in a moment.';
+      return 'Could not complete the request because the inference provider returned an error. Please try again in a moment.';
   }
 }
 
@@ -226,11 +255,7 @@ async function runFastAgentInferenceWithRetries<T>(
   onRetry?: (notice: FastAgentInferenceRetryNotice) => Promise<void>,
   options: FastAgentInferenceRetryOptions = {},
 ): Promise<T> {
-  for (
-    let retryNumber = 0;
-    retryNumber <= FAST_AGENT_INFERENCE_MAX_RETRIES;
-    retryNumber += 1
-  ) {
+  for (let retryNumber = 0; ; retryNumber += 1) {
     try {
       return await run();
     } catch (error) {
@@ -241,10 +266,11 @@ async function runFastAgentInferenceWithRetries<T>(
       }
 
       const failure = classifyNonTaskInferenceError(error);
+      const maxRetries = resolveFastAgentInferenceMaxRetries(failure);
       if (
         !failure.retryable ||
         options.canRetry?.(error, failure) === false ||
-        retryNumber >= FAST_AGENT_INFERENCE_MAX_RETRIES
+        retryNumber >= maxRetries
       ) {
         throw new FastAgentInferenceError(failure, error);
       }
@@ -256,13 +282,13 @@ async function runFastAgentInferenceWithRetries<T>(
         attemptNumber,
       );
       console.warn(
-        `[Fast Agent] Retrying inference failure attempt=${attemptNumber}/${FAST_AGENT_INFERENCE_MAX_RETRIES} delayMs=${delayMs} reason=${failure.reason}: ${formatErrorForLog(error)}`,
+        `[Fast Agent] Retrying inference failure attempt=${attemptNumber}/${maxRetries} delayMs=${delayMs} reason=${failure.reason}: ${formatErrorForLog(error)}`,
       );
       try {
         await onRetry?.({
           failure,
           attemptNumber,
-          maxAttempts: FAST_AGENT_INFERENCE_MAX_RETRIES,
+          maxAttempts: maxRetries,
           delayMs,
         });
       } catch (noticeError) {
@@ -521,6 +547,38 @@ export async function answerFastAgentQuestion({
   let canonicalConversationId: string | null = null;
   let launchedTaskMessage: string | null = null;
   let lastVisibleMessage = '';
+  let inferenceRetryReply: FastAgentReplyHandle | undefined;
+  let inferenceRetryMessageIndex: number | undefined;
+
+  const replaceInferenceRetryReply = async (
+    reply: FastAgentReply,
+    bestEffort = false,
+  ): Promise<boolean> => {
+    if (!inferenceRetryReply || !adapter.replaceReply) {
+      return false;
+    }
+
+    let replacement: FastAgentReplyHandle | void;
+    try {
+      replacement = await adapter.replaceReply(inferenceRetryReply, reply);
+    } catch (error) {
+      if (!bestEffort) {
+        throw error;
+      }
+      console.warn(
+        `[Fast Agent] Failed to replace inference retry notice: ${formatErrorForLog(error)}`,
+      );
+      inferenceRetryReply = undefined;
+      inferenceRetryMessageIndex = undefined;
+      return false;
+    }
+    inferenceRetryReply = replacement || inferenceRetryReply;
+    if (inferenceRetryMessageIndex !== undefined) {
+      turnVisibleMessages[inferenceRetryMessageIndex] =
+        buildAssistantTextMessage(reply.message);
+    }
+    return true;
+  };
 
   try {
     turnVisibleMessages.push(
@@ -621,9 +679,14 @@ export async function answerFastAgentQuestion({
       reply: FastAgentReply,
       mirrorImmediately = false,
     ) => {
-      await adapter.postReply(reply);
+      const replacedRetry = await replaceInferenceRetryReply(reply, true);
+      if (!replacedRetry) {
+        await adapter.postReply(reply);
+        turnVisibleMessages.push(buildAssistantTextMessage(reply.message));
+      }
+      inferenceRetryReply = undefined;
+      inferenceRetryMessageIndex = undefined;
       diagnostics.recordVisibleReply();
-      turnVisibleMessages.push(buildAssistantTextMessage(reply.message));
       lastVisibleMessage = reply.message;
       visibleUpdatePosted = true;
       if (reply.purpose === 'closeout' || reply.purpose === 'clarification') {
@@ -650,9 +713,13 @@ export async function answerFastAgentQuestion({
       reportedInferenceNotices.add(message);
       // Deliberately not the postReply closure: a system retry notice must
       // not satisfy the model's acknowledgement gate or close the turn.
-      await adapter.postReply({ purpose: 'progress', message });
+      const reply = { purpose: 'progress' as const, message };
+      if (!(await replaceInferenceRetryReply(reply))) {
+        inferenceRetryReply = (await adapter.postReply(reply)) || undefined;
+        inferenceRetryMessageIndex = turnVisibleMessages.length;
+        turnVisibleMessages.push(buildAssistantTextMessage(message));
+      }
       diagnostics.recordVisibleReply();
-      turnVisibleMessages.push(buildAssistantTextMessage(message));
     };
     const reportProviderRetryEvent = async (
       event: NonTaskProviderRetryEvent,
@@ -1106,9 +1173,14 @@ export async function answerFastAgentQuestion({
         ? formatFastAgentInferenceFailure(error.failure)
         : 'I hit an error while handling that request. Please try again in a moment.';
     try {
-      await adapter.postReply({ purpose: 'closeout', message });
+      const reply = { purpose: 'closeout' as const, message };
+      if (!(await replaceInferenceRetryReply(reply, true))) {
+        await adapter.postReply(reply);
+        turnVisibleMessages.push(buildAssistantTextMessage(message));
+      }
+      inferenceRetryReply = undefined;
+      inferenceRetryMessageIndex = undefined;
       diagnostics.recordVisibleReply();
-      turnVisibleMessages.push(buildAssistantTextMessage(message));
       lastVisibleMessage = message;
     } catch (postError) {
       console.error(
