@@ -197,11 +197,12 @@ async function renderCard(
 
     const state = { ...getCardState(context) };
 
-    // Nothing new since the last confirmed render. Settling renders always
-    // go out so the terminal state is never skipped.
+    // Nothing new since the last confirmed render. Settling renders retry
+    // until confirmed, then queued duplicates collapse.
+    const deliveredState = getDeliveredCardState(context);
     if (
-      !request.settle &&
-      isSameCardState(getDeliveredCardState(context), state)
+      isSameCardState(deliveredState, state) &&
+      (!request.settle || getCardState(context).settled === true)
     ) {
       return;
     }
@@ -382,6 +383,9 @@ export async function finishSlackLiveTaskStream(
   const state = getCardState(context);
 
   if (state.status === 'error') {
+    if (!state.settled) {
+      await renderCard(taskRun, context, { settle: true });
+    }
     return;
   }
 

@@ -764,6 +764,23 @@ describe('Slack live task card', () => {
     });
   });
 
+  it('retries a rejected terminal error render until Slack confirms it', async () => {
+    const taskRun = createTaskRun();
+    const context = {};
+    mocks.renderCard.mockResolvedValueOnce({ card: true, updated: false });
+
+    await finishSlackLiveTaskStream(taskRun, RunStatus.Failed, context);
+    await finishSlackLiveTaskStream(taskRun, RunStatus.Canceled, context);
+    await finishSlackLiveTaskStream(taskRun, RunStatus.Failed, context);
+
+    expect(mocks.renderCard).toHaveBeenCalledTimes(2);
+    expect(renderedCard(1)).toEqual({
+      status: 'error',
+      output: 'The task stopped because of an error.',
+    });
+    expect(renderedCard(2)).toEqual(renderedCard(1));
+  });
+
   it('does not replace a terminal error while its render is in flight', async () => {
     const taskRun = createTaskRun();
     const context = {};
@@ -786,9 +803,13 @@ describe('Slack live task card', () => {
       { type: 'completion', ts: 1000, text: 'Late result.' },
       context,
     );
-    await finishSlackLiveTaskStream(taskRun, RunStatus.Canceled, context);
+    const retryPromise = finishSlackLiveTaskStream(
+      taskRun,
+      RunStatus.Canceled,
+      context,
+    );
     resolveRender?.({ card: true, updated: true });
-    await finishPromise;
+    await Promise.all([finishPromise, retryPromise]);
 
     expect(mocks.renderCard).toHaveBeenCalledOnce();
     expect(renderedCard(1)).toEqual({
