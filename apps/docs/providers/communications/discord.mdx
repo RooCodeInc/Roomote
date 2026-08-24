@@ -127,6 +127,20 @@ under **Settings > Automations**, the same way you would pick a Slack channel.
   (lookups outside the originating task thread require a linked Discord account)
 - use `/help` to see the available commands
 
+A Fast conversation can run multiple independent tasks at the same time. Start
+new work naturally while another task is active. When you want to follow up on
+or cancel one of several active tasks, identify it by its title or task ID;
+Roomote asks which task you mean when the request is ambiguous. Anyone in a
+Fast thread can reply without first mentioning Roomote, although you should
+mention the bot again after side conversation so the next message is treated
+as an instruction.
+
+Roomote posts useful task updates back to the Fast conversation, including
+links when a task opens a pull request. If a sandbox fails to start for a reason
+that may be temporary, Roomote can retry it; configuration, authentication,
+permission, billing, quota, and other permanent failures are reported without
+retrying.
+
 Roomote does not quote every message it answers. In a task thread, the
 conversation itself supplies the context. When you start a task by tagging
 Roomote in an existing thread, Roomote reads earlier messages in that thread
@@ -135,13 +149,13 @@ has that background. Follow-ups in an active or resumed task thread also carry
 undelivered earlier Discord messages the same way Slack does, so the agent keeps
 full thread context across turns. Natural follow-ups without an @mention work
 for people already in the conversation with Roomote (the task owner, the thread
-starter, or anyone who tagged Roomote earlier). If somebody else posts or is
-mentioned after Roomote's last reply, tag Roomote again so side chat is not
-treated as a new instruction. Native forwarded messages contribute their text
-and supported attachments to the task context. Image attachments are passed to
-the task as image input, and supported documents are downloaded and added to
-the request. Attachment downloads are size-limited and restricted to Discord's
-media hosts.
+starter, or anyone who tagged Roomote earlier); Fast threads are open to any
+participant as described above. If somebody else posts or is mentioned after
+Roomote's last reply, tag Roomote again so side chat is not treated as a new
+instruction. Native forwarded messages contribute their text and supported
+attachments to the task context. Image attachments are passed to the task as
+image input, and supported documents are downloaded and added to the request.
+Attachment downloads are size-limited and restricted to Discord's media hosts.
 
 ## Self-hosted configuration
 
