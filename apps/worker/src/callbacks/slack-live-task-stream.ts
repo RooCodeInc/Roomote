@@ -242,6 +242,9 @@ export async function reportSlackLiveTaskStatus(
   }
 
   const state = getCardState(context);
+  if (state.status === 'error') {
+    return;
+  }
   state.status = 'in_progress';
   state.finalMessage = undefined;
   state.awaitingInput = false;
@@ -259,6 +262,9 @@ export async function startSlackLiveTaskStream(
   // the generated task title from here on, so render right away. A run
   // resumed after a settled turn also flips the card back to in progress.
   const state = getCardState(context);
+  if (state.status === 'error') {
+    return;
+  }
   state.status = 'in_progress';
   state.settled = false;
   state.awaitingInput = false;
@@ -274,6 +280,9 @@ export async function updateSlackLiveTaskStream(
   const state = getCardState(context);
 
   if (event.type === 'turn_started') {
+    if (state.status === 'error') {
+      return;
+    }
     if (!state.settled && state.status !== 'complete') {
       return;
     }

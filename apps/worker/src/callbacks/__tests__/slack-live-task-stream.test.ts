@@ -750,6 +750,12 @@ describe('Slack live task card', () => {
       context,
     );
     await finishSlackLiveTaskStream(taskRun, RunStatus.Canceled, context);
+    await reportSlackLiveTaskStatus(taskRun, RunStatus.Running, context);
+    await updateSlackLiveTaskStream(
+      taskRun,
+      { type: 'turn_started', ts: 1002 },
+      context,
+    );
 
     expect(mocks.renderCard).toHaveBeenCalledOnce();
     expect(renderedCard(1)).toEqual({
