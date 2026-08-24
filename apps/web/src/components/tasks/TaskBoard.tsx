@@ -5,13 +5,11 @@ import { PRODUCT_NAME } from '@roomote/types';
 
 import type { Task } from '@/lib/server';
 import { getUserDisplayName, stripHtmlTags, stripMarkdown } from '@/lib';
-import { getTaskSurfaceLabel } from '@/lib/task-surface-label';
 import {
   Avatar,
   Badge,
   Card,
   CardContent,
-  CardDescription,
   CardHeader,
   CardTitle,
   MessageSquareText,
@@ -23,11 +21,7 @@ import {
 import { PullRequestBadge, WorkspaceBadge } from '@/components/sandbox';
 
 import { TaskAutomationIcon } from './TaskAutomationIcon';
-import {
-  getTaskBoardColumn,
-  getTaskWorkType,
-  type TaskBoardColumn,
-} from './task-board';
+import { getTaskBoardColumn, type TaskBoardColumn } from './task-board';
 
 const DONE_TASK_LIMIT = 6;
 
@@ -70,7 +64,6 @@ function BoardTaskCard({ task }: { task: Task }) {
     PRODUCT_NAME;
   const activityAt = task.activityAt ?? task.timestamp;
   const activityDate = new Date(activityAt * 1000);
-  const sourceLabel = getTaskSurfaceLabel(task.surface);
   const people = task.user
     ? [task.user, ...task.participants]
     : task.participants;
@@ -78,34 +71,38 @@ function BoardTaskCard({ task }: { task: Task }) {
   const hiddenPeopleCount = Math.max(people.length - visiblePeople.length, 0);
 
   return (
-    <Card
-      variant="snug"
-      className="ph-no-capture gap-4 transition-colors hover:border-foreground/20"
-    >
-      <CardHeader>
-        <div className="flex flex-wrap items-center gap-1.5">
-          <Badge variant="secondary">{getTaskWorkType(task)}</Badge>
-          {sourceLabel && <Badge variant="outline">{sourceLabel}</Badge>}
-        </div>
-        <CardTitle className="text-base leading-snug">
-          <Link
-            href={`/task/${task.id}`}
-            className="line-clamp-2 hover:underline"
-          >
-            {stripMarkdown(stripHtmlTags(task.title))}
-          </Link>
-        </CardTitle>
-        <CardDescription className="truncate">
-          Started by {actorName}
-        </CardDescription>
-      </CardHeader>
+    <div className="ph-no-capture p-4 space-y-1.5 bg-card gap-4 transition-colors hover:bg-muted/50 cursor-pointer">
+      <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground/75">
+        <span className="truncate">Started by {actorName}</span>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <time dateTime={activityDate.toISOString()} className="shrink-0">
+              {formatDistanceToNow(activityDate, { addSuffix: true })}
+            </time>
+          </TooltipTrigger>
+          <TooltipContent>{activityDate.toLocaleString()}</TooltipContent>
+        </Tooltip>
+      </div>
+      <div className="text-base font-semibold leading-snug -mt-1">
+        <Link
+          href={`/task/${task.id}`}
+          className="line-clamp-2 hover:underline"
+        >
+          {stripMarkdown(stripHtmlTags(task.title))}
+        </Link>
+      </div>
+      {getTaskBoardColumn(task) === 'blocked' && task.goalBlockedReason && (
+        <p className="line-clamp-2 text-xs text-destructive">
+          {task.goalBlockedReason}
+        </p>
+      )}
 
-      <CardContent>
+      <div className="flex items-center gap-3 text-xs text-muted-foreground">
         {(task.taskRun.payload.environmentId ||
           task.taskRun.payload.repo ||
           task.repositoryName ||
           task.taskRun.prRepo) && (
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+          <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
             <WorkspaceBadge
               environmentId={task.taskRun.payload.environmentId}
               repo={
@@ -122,72 +119,54 @@ function BoardTaskCard({ task }: { task: Task }) {
             )}
           </div>
         )}
+        <div
+          className="ml-auto flex shrink-0 items-center -space-x-2"
+          aria-label={`${people.length || 1} task participant${people.length === 1 ? '' : 's'}`}
+        >
+          {visiblePeople.map((person) => {
+            const displayName = getUserDisplayName(person) ?? person.email;
 
-        {getTaskBoardColumn(task) === 'blocked' && task.goalBlockedReason && (
-          <p className="line-clamp-2 text-xs text-destructive">
-            {task.goalBlockedReason}
-          </p>
-        )}
-
-        <div className="flex items-center justify-between gap-3 text-xs text-muted-foreground">
-          <div
-            className="flex min-w-0 items-center -space-x-2"
-            aria-label={`${people.length || 1} task participant${people.length === 1 ? '' : 's'}`}
-          >
-            {visiblePeople.map((person) => {
-              const displayName = getUserDisplayName(person) ?? person.email;
-
-              return (
-                <Tooltip key={person.id}>
-                  <TooltipTrigger asChild>
-                    <Avatar
-                      imageUrl={person.imageUrl}
-                      name={person.name}
-                      email={person.email}
-                      size="sm"
-                      className="ring-2 ring-card"
-                      alt={displayName}
-                    />
-                  </TooltipTrigger>
-                  <TooltipContent>{displayName}</TooltipContent>
-                </Tooltip>
-              );
-            })}
-            {visiblePeople.length === 0 && (
-              <Tooltip>
+            return (
+              <Tooltip key={person.id}>
                 <TooltipTrigger asChild>
-                  <span className="flex size-6 items-center justify-center rounded-full border border-border bg-muted ring-2 ring-card">
-                    {task.attributionKind === 'automation' ? (
-                      <TaskAutomationIcon
-                        automationKey={task.initiatorAutomation}
-                        className="size-3 text-muted-foreground"
-                      />
-                    ) : (
-                      <MessageSquareText className="size-3 text-muted-foreground" />
-                    )}
-                  </span>
+                  <Avatar
+                    imageUrl={person.imageUrl}
+                    name={person.name}
+                    email={person.email}
+                    size="sm"
+                    className="ring-2 ring-card"
+                    alt={displayName}
+                  />
                 </TooltipTrigger>
-                <TooltipContent>{actorName}</TooltipContent>
+                <TooltipContent>{displayName}</TooltipContent>
               </Tooltip>
-            )}
-            {hiddenPeopleCount > 0 && (
-              <span className="flex size-6 items-center justify-center rounded-full border border-border bg-muted text-[10px] font-medium ring-2 ring-card">
-                +{hiddenPeopleCount}
-              </span>
-            )}
-          </div>
-
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <time dateTime={activityDate.toISOString()} className="shrink-0">
-                {formatDistanceToNow(activityDate, { addSuffix: true })}
-              </time>
-            </TooltipTrigger>
-            <TooltipContent>{activityDate.toLocaleString()}</TooltipContent>
-          </Tooltip>
+            );
+          })}
+          {visiblePeople.length === 0 && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="flex size-6 items-center justify-center rounded-full border border-border bg-muted ring-2 ring-card">
+                  {task.attributionKind === 'automation' ? (
+                    <TaskAutomationIcon
+                      automationKey={task.initiatorAutomation}
+                      className="size-3 text-muted-foreground"
+                    />
+                  ) : (
+                    <MessageSquareText className="size-3 text-muted-foreground" />
+                  )}
+                </span>
+              </TooltipTrigger>
+              <TooltipContent>{actorName}</TooltipContent>
+            </Tooltip>
+          )}
+          {hiddenPeopleCount > 0 && (
+            <span className="flex size-6 items-center justify-center rounded-full border border-border bg-muted text-[10px] font-medium ring-2 ring-card">
+              +{hiddenPeopleCount}
+            </span>
+          )}
         </div>
-      </CardContent>
-    </Card>
+      </div>
+    </div>
   );
 }
 
@@ -204,7 +183,7 @@ export function TaskBoard({ tasks }: { tasks: Task[] }) {
   const hiddenDoneCount = Math.max(doneTasks.length - DONE_TASK_LIMIT, 0);
 
   return (
-    <div className="grid min-w-0 grid-cols-1 gap-4 lg:grid-cols-2 xl:grid-cols-4">
+    <div className="grid min-w-0 grid-cols-1 lg:grid-cols-2 xl:grid-cols-4 lg:px-2">
       {COLUMN_CONFIG.map((column) => {
         const columnTasks = groupedTasks.get(column.id) ?? [];
         const visibleTasks =
@@ -216,10 +195,10 @@ export function TaskBoard({ tasks }: { tasks: Task[] }) {
           <section
             key={column.id}
             aria-labelledby={`task-board-${column.id}`}
-            className="min-w-0 rounded-xl border border-border/70 bg-card/40 p-3"
+            className="min-w-0 py-2"
           >
-            <header className="mb-3 flex items-start justify-between gap-3 px-1">
-              <div className="space-y-1">
+            <header className="mb-3 flex items-start justify-between gap-3">
+              <div className="space-y-0 pl-1">
                 <div className="flex items-center gap-2">
                   <span
                     className={`size-2 rounded-full ${column.dotClassName}`}
@@ -229,22 +208,25 @@ export function TaskBoard({ tasks }: { tasks: Task[] }) {
                     className="text-sm font-semibold"
                   >
                     {column.label}
+                    <span className="text-sm text-muted-foreground/50 ml-1">
+                      {columnTasks.length}
+                    </span>
                   </h2>
                 </div>
-                <p className="text-xs text-muted-foreground">
+                <p className="text-xs text-muted-foreground pl-4">
                   {column.description}
                 </p>
               </div>
-              <Badge variant="outline">{columnTasks.length}</Badge>
+              <span className="rounded-full text-xs text-muted-foreground"></span>
             </header>
 
-            <div className="space-y-3">
+            <div className="divide-y-2 divide-background px-1 [&>div]:first:rounded-t-xl [&>div]:last:rounded-b-xl">
               {visibleTasks.length > 0 ? (
                 visibleTasks.map((task) => (
                   <BoardTaskCard key={task.id} task={task} />
                 ))
               ) : (
-                <div className="rounded-lg border border-dashed border-border px-3 py-8 text-center text-xs text-muted-foreground">
+                <div className="pl-6 text-xs text-muted-foreground">
                   No tasks here
                 </div>
               )}
@@ -265,12 +247,9 @@ export function TaskBoard({ tasks }: { tasks: Task[] }) {
 
 export function TaskBoardSkeleton() {
   return (
-    <div className="grid w-full grid-cols-1 gap-4 p-4 lg:grid-cols-2 xl:grid-cols-4">
+    <div className="grid w-full grid-cols-1 divide-y-2 divide-card lg:grid-cols-2 lg:divide-x-2 lg:divide-y-0 lg:max-xl:[&>div:nth-child(odd)]:!border-l-0 xl:grid-cols-4">
       {COLUMN_CONFIG.map((column) => (
-        <div
-          key={column.id}
-          className="space-y-3 rounded-xl border border-border/70 bg-card/40 p-3"
-        >
+        <div key={column.id} className="space-y-3">
           <div className="flex items-center justify-between">
             <Skeleton className="h-5 w-28" />
             <Skeleton className="size-6 rounded-full" />

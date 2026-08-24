@@ -488,10 +488,6 @@ export const Tasks = () => {
     ) || timePeriod !== 'all';
 
   const canSelect = tasks.length > 0 && !isSelectionMode && !isLoading;
-  const isMineScope =
-    effectiveFilterUserId !== 'all' &&
-    (effectiveFilterUserId ?? userId) === userId;
-
   return (
     <div className="flex h-full min-h-0 w-full flex-col bg-card">
       <div className="bg-background border-b-4 border-b-card p-4">
@@ -515,27 +511,6 @@ export const Tasks = () => {
           />
 
           <div className="flex flex-wrap items-center justify-between gap-2">
-            {isBoardView && (
-              <div className="flex items-center rounded-md border border-border p-0.5">
-                <Button
-                  variant={isMineScope ? 'secondary' : 'ghost'}
-                  size="xs"
-                  onClick={() => handleUserChange(userId)}
-                >
-                  Mine
-                </Button>
-                <Button
-                  variant={
-                    effectiveFilterUserId === 'all' ? 'secondary' : 'ghost'
-                  }
-                  size="xs"
-                  onClick={() => handleUserChange(null)}
-                >
-                  Everyone
-                </Button>
-              </div>
-            )}
-
             <div className="flex items-center rounded-md border border-border p-0.5">
               <Button
                 variant={isBoardView ? 'ghost' : 'secondary'}
@@ -715,7 +690,7 @@ export const Tasks = () => {
             {isBoardView ? (
               <div
                 ref={tasksListRef}
-                className="min-h-0 flex-1 overflow-y-auto p-4"
+                className="min-h-0 flex-1 overflow-y-auto"
               >
                 <TaskBoard tasks={tasks} />
                 <CursorPagination

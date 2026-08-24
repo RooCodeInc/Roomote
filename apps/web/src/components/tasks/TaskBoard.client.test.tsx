@@ -99,17 +99,19 @@ describe('TaskBoard', () => {
       />,
     );
 
-    expect(screen.getByRole('heading', { name: 'Active' })).toBeInTheDocument();
     expect(
-      screen.getByRole('heading', { name: 'Needs input' }),
+      screen.getByRole('heading', { name: /^Active/ }),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole('heading', { name: 'Blocked / failed' }),
+      screen.getByRole('heading', { name: /^Needs input/ }),
     ).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Done' })).toBeInTheDocument();
+    expect(
+      screen.getByRole('heading', { name: /^Blocked \/ failed/ }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: /^Done/ })).toBeInTheDocument();
     expect(screen.getByText('Active task')).toBeInTheDocument();
-    expect(screen.getAllByText('Code')).not.toHaveLength(0);
-    expect(screen.getAllByText('Discord')).not.toHaveLength(0);
+    expect(screen.queryByText('Code')).not.toBeInTheDocument();
+    expect(screen.queryByText('Discord')).not.toBeInTheDocument();
     expect(
       screen.getByText('2 older completed tasks hidden'),
     ).toBeInTheDocument();
