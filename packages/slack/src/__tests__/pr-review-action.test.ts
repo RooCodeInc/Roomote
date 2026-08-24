@@ -4,6 +4,19 @@ import {
 } from '../pr-review-action';
 
 describe('PR review action blocks', () => {
+  it('renders the review summary as modern Slack markdown', () => {
+    const blocks = buildSlackPrReviewActionBlocks({
+      text: 'Review [PR #42](https://github.com/owner/repo/pull/42)',
+      question: 'Should I resolve these?',
+      nonce: 'nonce-1',
+    });
+
+    expect(blocks[0]).toEqual({
+      type: 'markdown',
+      text: 'Review [PR #42](https://github.com/owner/repo/pull/42)',
+    });
+  });
+
   it('uses neutral styling for every response button', () => {
     const blocks = buildSlackPrReviewActionBlocks({
       text: 'Review summary',

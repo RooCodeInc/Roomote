@@ -18,6 +18,7 @@ describe('getSetupSteps', () => {
       'automation-recommendations',
       'compute-provider',
       'compute-config',
+      'environment-explainer',
       'repo-selection',
       'invoke',
     ]);

@@ -36,7 +36,10 @@ describe('processFastAgentMessage', () => {
     mocks.acquireLock.mockResolvedValue(mocks.releaseLock);
     mocks.hasSession.mockResolvedValue(false);
     mocks.releaseLock.mockResolvedValue(undefined);
-    mocks.postThreadMessage.mockResolvedValue('posted');
+    mocks.postThreadMessage.mockResolvedValue({
+      status: 'posted',
+      messageId: '101.001',
+    });
     mocks.answerQuestion.mockImplementation(
       async ({
         adapter,
@@ -50,6 +53,62 @@ describe('processFastAgentMessage', () => {
         return 'Doing well.';
       },
     );
+  });
+
+  it('replaces a Fast retry notice in place', async () => {
+    const slack = {
+      addReaction: vi.fn().mockResolvedValue(true),
+      removeReaction: vi.fn().mockResolvedValue(true),
+      normalizeIncomingText: vi.fn(async (text: string) => text),
+      fetchThreadMessages: vi.fn(async () => []),
+      updateMessage: vi.fn().mockResolvedValue(true),
+    };
+    mocks.answerQuestion.mockImplementationOnce(
+      async ({
+        adapter,
+      }: {
+        adapter: {
+          postReply: (reply: unknown) => Promise<{ messageId: string }>;
+          replaceReply: (
+            handle: { messageId: string },
+            reply: unknown,
+          ) => Promise<{ messageId: string }>;
+        };
+      }) => {
+        const handle = await adapter.postReply({
+          purpose: 'progress',
+          message: 'Retrying connection to the inference provider.',
+        });
+        await adapter.replaceReply(handle, {
+          purpose: 'closeout',
+          message: 'Connection restored.',
+        });
+        return 'Connection restored.';
+      },
+    );
+
+    await processFastAgentMessage({
+      event: {
+        type: 'message',
+        channel: 'D123',
+        user: 'U123',
+        text: '!fast investigate this',
+        ts: '100.001',
+      } as never,
+      slack: slack as never,
+      userId: 'user-1',
+      teamId: 'T123',
+    });
+
+    expect(mocks.postThreadMessage).toHaveBeenCalledOnce();
+    expect(slack.updateMessage).toHaveBeenCalledWith({
+      channel: 'D123',
+      ts: '101.001',
+      message: {
+        text: 'Connection restored.',
+        blocks: [{ type: 'markdown', text: 'Connection restored.' }],
+      },
+    });
   });
 
   it('keeps injected Slack context separate from the Fast question', async () => {
@@ -88,6 +147,44 @@ describe('processFastAgentMessage', () => {
           { taskId: 'task-1', title: 'Fix API' },
           { taskId: 'task-2', title: 'Update docs' },
         ],
+      }),
+    );
+  });
+
+  it('resolves pending reply tasks only after acquiring the Fast turn lock', async () => {
+    const resolveActiveTasks = vi
+      .fn()
+      .mockResolvedValue([{ taskId: 'review-task' }]);
+    const slack = {
+      addReaction: vi.fn().mockResolvedValue(true),
+      removeReaction: vi.fn().mockResolvedValue(true),
+      normalizeIncomingText: vi.fn(async (text: string) => text),
+      fetchThreadMessages: vi.fn(async () => []),
+    };
+
+    await processFastAgentMessage({
+      event: {
+        type: 'message',
+        channel: 'C123',
+        user: 'U123',
+        text: 'resolve this issue',
+        thread_ts: '100.001',
+        ts: '100.002',
+      } as never,
+      slack: slack as never,
+      userId: 'user-1',
+      teamId: 'T123',
+      continuation: true,
+      resolveActiveTasks,
+    });
+
+    expect(mocks.acquireLock.mock.invocationCallOrder[0]).toBeLessThan(
+      resolveActiveTasks.mock.invocationCallOrder[0] as number,
+    );
+    expect(mocks.answerQuestion).toHaveBeenCalledWith(
+      expect.objectContaining({
+        question: 'resolve this issue',
+        activeTasks: [{ taskId: 'review-task' }],
       }),
     );
   });

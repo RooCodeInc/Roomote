@@ -4,6 +4,23 @@ import { buildFastAgentSystemPrompt } from '../fast-agent-prompt';
 import { FAST_AGENT_BRAIN_INSTRUCTIONS } from '../fast-agent-constants';
 
 describe('buildFastAgentSystemPrompt', () => {
+  it('includes a resolved release identifier before environments', () => {
+    const prompt = buildFastAgentSystemPrompt({
+      availableEnvironments: [],
+      releaseVersion: '0.40.2',
+    });
+
+    expect(prompt).toContain(
+      'deliberately delegate execution work when useful.\n\nRoomote release 0.40.2\n\n## All Environments',
+    );
+  });
+
+  it('omits the release identifier when no version is resolved', () => {
+    const prompt = buildFastAgentSystemPrompt({ availableEnvironments: [] });
+
+    expect(prompt).not.toContain('Roomote release');
+  });
+
   it('describes native OpenCode tools and Roomote orchestration policy', () => {
     const prompt = buildFastAgentSystemPrompt({
       availableEnvironments: [
@@ -14,6 +31,15 @@ describe('buildFastAgentSystemPrompt', () => {
           repositoryNames: ['Roomote/example-app'],
         },
       ],
+      availableTaskModels: [
+        { id: 'openai/gpt-5.6', displayName: 'GPT-5.6', family: 'GPT' },
+        {
+          id: 'anthropic/claude-sonnet-5',
+          displayName: 'Claude Sonnet 5',
+          family: 'Sonnet',
+        },
+      ],
+      defaultTaskModelId: 'openai/gpt-5.6',
       activeTasks: [
         { taskId: 'task-1', title: 'Fix API', status: RunStatus.Running },
         { taskId: 'task-2', title: 'Update docs', status: RunStatus.Pending },
@@ -29,7 +55,16 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain('Existing active tasks do not block');
     expect(prompt).toContain('send_chat_reply');
     expect(prompt).toContain('send_chat_reaction');
+    expect(prompt).toContain('`advisor` and `judge` subagents');
+    expect(prompt).toContain(
+      'deployment integrations and read-only task inspection',
+    );
     expect(prompt).toContain('launch_task');
+    expect(prompt).toContain(
+      'GPT-5.6 [id: openai/gpt-5.6] (deployment default)',
+    );
+    expect(prompt).toContain('Claude Sonnet 5 [id: anthropic/claude-sonnet-5]');
+    expect(prompt).toContain('Omit it to use the deployment default');
     expect(prompt).toContain('manage_tasks');
     expect(prompt).toContain('integration_call');
     expect(prompt).toContain(
@@ -47,6 +82,10 @@ describe('buildFastAgentSystemPrompt', () => {
       'The runtime rejects those calls until an acknowledgement',
     );
     expect(prompt).toContain('kickoffMessage');
+    expect(prompt).toContain('launch multiple independent tasks in one turn');
+    expect(prompt).toContain('the turn remains open for more tools');
+    expect(prompt).toContain('end with a normal closeout or clarification');
+    expect(prompt).not.toContain('kickoff closes the turn');
     expect(prompt).not.toContain('Each structured output');
     expect(prompt).not.toContain('toolArguments');
     expect(prompt).toContain('no local filesystem, shell');
@@ -168,7 +207,41 @@ describe('buildFastAgentSystemPrompt', () => {
       'Pull-request-status-changed events contain an authoritative merged or closed status',
     );
     expect(prompt).toContain(
+      'Pull-request-feedback events contain triaged feedback',
+    );
+    expect(prompt).toContain(
+      'Do not launch a fix or call "send_task_message" until the user explicitly responds or clicks an action',
+    );
+    expect(prompt).toContain(
       'Do not describe a closed pull request as merged or a merged pull request as merely closed',
+    );
+  });
+
+  it('requires a visible closeout for visibility-required platform events', () => {
+    const prompt = buildFastAgentSystemPrompt({
+      availableEnvironments: [],
+      turnSource: 'platform_event',
+      platformEventVisibility: 'required',
+    });
+
+    expect(prompt).toContain('requires a user-visible closeout');
+    expect(prompt).toContain('Do not call "ignore_event"');
+    expect(prompt).not.toContain(
+      'Call "ignore_event" when it is routine, redundant, or not worth interrupting the user',
+    );
+  });
+
+  it('requires presentation-only platform events to stop after posting', () => {
+    const prompt = buildFastAgentSystemPrompt({
+      availableEnvironments: [],
+      turnSource: 'platform_event',
+      platformEventHandling: 'present_only',
+    });
+
+    expect(prompt).toContain('This event is presentation-only');
+    expect(prompt).toContain('Post its supplied information, then stop');
+    expect(prompt).not.toContain(
+      'The normal tools remain available. Use them only when the event and conversation context justify the action',
     );
   });
 

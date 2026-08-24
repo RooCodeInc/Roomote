@@ -3,7 +3,11 @@
 // agents write their own narrative through a separate path, so both must
 // converge on exactly one memory candidate per completed run.
 
-import { RunStatus, TaskPayloadKind } from '@roomote/types';
+import {
+  BRAIN_COLLECTOR_IDS,
+  RunStatus,
+  TaskPayloadKind,
+} from '@roomote/types';
 
 import {
   db,
@@ -26,6 +30,7 @@ import {
   deleteBrainCollectorItems,
   deleteBrainSyncStateFamily,
   getBrainSyncState,
+  getBrainMemoryEventSummary,
   renameBrainSyncStateFamilyPrefix,
   listBrainCollectorItems,
   listBrainCollectorItemsBefore,
@@ -548,6 +553,27 @@ describe('backfillBrainMemoryEvents', () => {
       lastError: null,
       agentSummary: 'Keep this summary.',
     });
+  });
+});
+
+describe('getBrainMemoryEventSummary', () => {
+  it('separates pre-backfill history from current recording gaps', async () => {
+    await makeCompletedRun(new Date('2099-08-12T12:00:00Z'));
+    const recorded = await makeCompletedRun(new Date('2099-08-14T11:00:00Z'));
+    await makeCompletedRun(new Date('2101-08-14T12:00:00Z'));
+    await maybeEnqueueBrainMemoryEvent(db, recorded.id);
+    await upsertBrainSyncState(db, BRAIN_COLLECTOR_IDS.taskMemories, {
+      backfillCompletedAt: new Date('2100-01-01T00:00:00Z'),
+    });
+
+    const summary = await getBrainMemoryEventSummary(db);
+
+    // Other real-DB test files share this database and can leave unrelated
+    // legacy completed runs visible while Vitest executes them concurrently.
+    expect(summary.historicalCompletedRunsWithoutEvent).toBeGreaterThanOrEqual(
+      1,
+    );
+    expect(summary.recentCompletedRunsWithoutEvent).toBe(1);
   });
 });
 

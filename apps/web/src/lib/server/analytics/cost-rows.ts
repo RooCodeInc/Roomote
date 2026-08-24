@@ -122,6 +122,7 @@ export async function getCostAnalyticsRows(
       eventUserEmail: usageUsers.email,
       taskUserName: taskInitiatorUsers.name,
       taskUserEmail: taskInitiatorUsers.email,
+      source: llmUsageEvents.source,
       runEnvironmentId: sql<
         string | null
       >`${taskRuns.payload} ->> 'environmentId'`,
@@ -239,6 +240,7 @@ export async function getCostAnalyticsRows(
         user: userDimension,
         taskType,
         project: createLabelBackedDimensionValue(project),
+        source: createLabelBackedDimensionValue(row.source),
         provider: createLabelBackedDimensionValue(provider),
         model: createLabelBackedDimensionValue(model),
       },
@@ -249,6 +251,7 @@ export async function getCostAnalyticsRows(
           user: userDimension.label,
           taskType: taskType.label,
           project,
+          source: row.source,
           provider,
           model,
           cost: cost.toFixed(2),

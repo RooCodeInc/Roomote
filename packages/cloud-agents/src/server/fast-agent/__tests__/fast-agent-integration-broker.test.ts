@@ -358,7 +358,7 @@ describe('fast-agent integration broker', () => {
       signal: expect.any(AbortSignal),
     });
     expect(mocks.beginIntegrationCall).toHaveBeenCalledWith({
-      slackQuickAnswerId: 'session-1',
+      fastAgentConversationId: 'session-1',
       userId: 'user-1',
       slackTeamId: 'team-1',
       slackChannel: 'channel-1',

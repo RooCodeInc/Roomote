@@ -799,6 +799,7 @@ describe('Discord Gateway event handler', () => {
           launchTask: (params: {
             prompt: string;
             environmentId: null;
+            model?: string | null;
             parentSessionId: string;
             postKickoff: typeof postKickoff;
           }) => Promise<unknown>;
@@ -807,6 +808,7 @@ describe('Discord Gateway event handler', () => {
         await input.adapter.launchTask({
           prompt: 'Fix checkout',
           environmentId: null,
+          model: 'anthropic/claude-sonnet-5',
           parentSessionId: 'fast-session-1',
           postKickoff,
         });
@@ -818,7 +820,10 @@ describe('Discord Gateway event handler', () => {
 
     expect(response.status).toBe(200);
     expect(mocks.startNewTask).toHaveBeenCalledWith(
-      expect.objectContaining({ beforeEnqueueKickoff: postKickoff }),
+      expect.objectContaining({
+        beforeEnqueueKickoff: postKickoff,
+        model: 'anthropic/claude-sonnet-5',
+      }),
     );
     expect(postKickoff).toHaveBeenCalledWith({
       taskId: 'task-17',

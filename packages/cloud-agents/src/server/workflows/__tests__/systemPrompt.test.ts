@@ -20,4 +20,14 @@ describe('ROOMOTE_SYSTEM_PROMPT', () => {
     expect(ROOMOTE_SYSTEM_PROMPT).not.toContain('commentary channel');
     expect(ROOMOTE_SYSTEM_PROMPT).not.toContain('Frontend guidance');
   });
+
+  it('includes a resolved release identifier after the opening paragraph', () => {
+    expect(buildRoomoteSystemPrompt('0.40.2')).toContain(
+      'until their goal is genuinely handled.\n\nRoomote release 0.40.2\n\n# Roomote Identity',
+    );
+  });
+
+  it('omits the release identifier when no version is resolved', () => {
+    expect(buildRoomoteSystemPrompt()).not.toContain('Roomote release');
+  });
 });

@@ -128,6 +128,7 @@ function buildInput(
     announcerSlackChannel: null,
     announcerDiscordChannel: null,
     announcerInstructions: null,
+    platformIssueAlertsEnabled: true,
     platformIssueSlackChannel: null,
     platformIssueDiscordChannel: null,
     ...overrides,
@@ -695,6 +696,79 @@ describe('updateBackgroundAgentSettingsCommand Discord destinations', () => {
       expect(result.settings.platformIssueSlackChannelId).toBeNull();
     }
   }, 15_000);
+
+  it('keeps platform issue alerts enabled by default without a channel', async () => {
+    const result = await updateBackgroundAgentSettingsCommand(
+      adminAuth,
+      buildInput({
+        savingAutomation: 'platformIssueAlerts',
+        platformIssueSlackChannel: null,
+        platformIssueDiscordChannel: null,
+      }),
+    );
+
+    expect(result.success).toBe(true);
+    const automation = await db.query.automations.findFirst({
+      where: eq(automations.key, 'platform_issue_alerts'),
+    });
+    expect(automation).toMatchObject({
+      enabled: true,
+      settings: { optedOut: false },
+      targets: [],
+    });
+    if (result.success) {
+      expect(result.settings.platformIssueAlertsEnabled).toBe(true);
+    }
+  });
+
+  it('persists an explicit platform issue alert opt-out', async () => {
+    const result = await updateBackgroundAgentSettingsCommand(
+      adminAuth,
+      buildInput({
+        savingAutomation: 'platformIssueAlerts',
+        platformIssueAlertsEnabled: false,
+      }),
+    );
+
+    expect(result.success).toBe(true);
+    const automation = await db.query.automations.findFirst({
+      where: eq(automations.key, 'platform_issue_alerts'),
+    });
+    expect(automation).toMatchObject({
+      enabled: false,
+      settings: { optedOut: true },
+    });
+    if (result.success) {
+      expect(result.settings.platformIssueAlertsEnabled).toBe(false);
+    }
+  });
+
+  it('preserves an explicit opt-out when an older client omits the enabled field', async () => {
+    await updateBackgroundAgentSettingsCommand(
+      adminAuth,
+      buildInput({
+        savingAutomation: 'platformIssueAlerts',
+        platformIssueAlertsEnabled: false,
+      }),
+    );
+    const legacyInput = buildInput({ savingAutomation: 'platformIssueAlerts' });
+    delete (legacyInput as Partial<UpdateBackgroundAgentSettingsInput>)
+      .platformIssueAlertsEnabled;
+
+    const result = await updateBackgroundAgentSettingsCommand(
+      adminAuth,
+      legacyInput,
+    );
+
+    expect(result.success).toBe(true);
+    const automation = await db.query.automations.findFirst({
+      where: eq(automations.key, 'platform_issue_alerts'),
+    });
+    expect(automation).toMatchObject({
+      enabled: false,
+      settings: { optedOut: true },
+    });
+  });
 
   it('preserves a Discord target when an older client omits the optional field on a same-automation save', async () => {
     await insertAvailableDiscordChannel({

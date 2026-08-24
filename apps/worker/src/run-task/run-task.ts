@@ -23,9 +23,12 @@ import {
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
+import packageJson from '../../../../package.json';
+
 import { validateToken } from '@roomote/auth/client';
 import {
-  ROOMOTE_SYSTEM_PROMPT,
+  buildRoomoteSystemPrompt,
+  resolveRoomoteReleaseVersion,
   stripLeadingSlackProductMention,
   wrapSlackMessage,
 } from '@roomote/cloud-agents';
@@ -1036,7 +1039,17 @@ export const runTask = async ({
     // OpenCode consumes Roomote's identity, workflow, and runtime guidance
     // through its developer-instructions layer.
     const harnessDeveloperInstructions =
-      [ROOMOTE_SYSTEM_PROMPT, harnessInstructions, environmentInstructions]
+      [
+        buildRoomoteSystemPrompt(
+          resolveRoomoteReleaseVersion(
+            process.env.RELEASE_PRODUCT_VERSION,
+            process.env.RELEASE_VERSION,
+            packageJson.version,
+          ),
+        ),
+        harnessInstructions,
+        environmentInstructions,
+      ]
         .filter((value): value is string => Boolean(value))
         .join('\n\n') || undefined;
 
@@ -1331,6 +1344,7 @@ export const runTask = async ({
       harness,
       getSubprocess,
       unsubscribe: unsubscribeHarness,
+      flushPendingCompletionEvents,
     } = await createHarness({
       harnessType,
       workspacePath,
@@ -1517,10 +1531,12 @@ export const runTask = async ({
             eventType: 'decision',
             message: `Worker onExit finished runtime-state flush for task run #${taskRun.id}.`,
           });
+          await flushPendingCompletionEvents();
           await sdk.taskRuns.done({
             id: taskRun.id,
             status: RunStatus.Idle,
           });
+          await callbacks.onStatus?.(taskRun, RunStatus.Idle, context);
         },
       },
     });

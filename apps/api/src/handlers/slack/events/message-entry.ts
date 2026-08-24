@@ -92,6 +92,7 @@ import {
   mentionsSlackUserOtherThanBotWithoutMentioningBot,
 } from '../helpers/mention-routing.js';
 import { postSlackThreadMarkdownMessage } from '../helpers/thread-posting.js';
+import { resolveFastAgentReplyTasks } from '../pr-review-retire.js';
 import { lookupSlackUserMapping } from '../helpers/user-mapping.js';
 import {
   compareNumericMessageIds,
@@ -1247,8 +1248,6 @@ async function maybeHandleChannelAutoStart(params: {
           explicitInvocation: isBareFastCommandInvocation(
             channelAutoStartEvent.authoredText ?? channelAutoStartEvent.text,
           ),
-          deploymentSettingEnabled:
-            Env.R_COMMUNICATIONS_FAST_MODE_SETTING_ENABLED === true,
           userDefaultEnabled:
             userMapping.communicationsFastModeDefault &&
             !isRemovedEvalCommandInvocation(
@@ -1601,6 +1600,7 @@ function startFastAgentResponse(params: {
   usageText?: string;
   continuation?: boolean;
   activeTasks?: { taskId: string }[];
+  resolveActiveTasks?: () => Promise<{ taskId: string }[]>;
   processingReactionName: string;
   isExistingConversation?: boolean;
   errorLogPrefix: string;
@@ -1735,8 +1735,6 @@ async function handleSlackEntryEvent(params: {
   const authoredEventText = event.authoredText ?? event.text;
   const fastAgentEntryMode = resolveFastAgentEntryMode({
     explicitInvocation: isFastCommandInvocation(authoredEventText),
-    deploymentSettingEnabled:
-      Env.R_COMMUNICATIONS_FAST_MODE_SETTING_ENABLED === true,
     userDefaultEnabled:
       userMapping.communicationsFastModeDefault &&
       !isRemovedEvalCommandInvocation(authoredEventText),
@@ -1750,7 +1748,14 @@ async function handleSlackEntryEvent(params: {
       slack,
       userId: userMapping.userId,
       teamId,
-      activeTasks: activeRun ? [{ taskId: activeRun.taskId }] : [],
+      resolveActiveTasks: () =>
+        resolveFastAgentReplyTasks({
+          slack,
+          slackTeamId: teamId,
+          channelId: event.channel,
+          threadTs: threadId,
+          activeTaskId: activeRun?.taskId,
+        }),
       continuation: fastAgentEntryMode === 'default',
       processingReactionName: ackEmoji,
       errorLogPrefix: `❌ Background fast-agent response failed for thread ${threadId}:`,
@@ -1780,7 +1785,14 @@ async function handleSlackEntryEvent(params: {
       teamId,
       continuation: true,
       isExistingConversation: true,
-      activeTasks: activeRun ? [{ taskId: activeRun.taskId }] : [],
+      resolveActiveTasks: () =>
+        resolveFastAgentReplyTasks({
+          slack,
+          slackTeamId: teamId,
+          channelId: event.channel,
+          threadTs: threadId,
+          activeTaskId: activeRun?.taskId,
+        }),
       processingReactionName: ackEmoji,
       errorLogPrefix: `❌ Background fast-agent continuation failed for thread ${threadId}:`,
     });

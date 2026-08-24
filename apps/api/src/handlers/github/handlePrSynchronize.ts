@@ -284,6 +284,18 @@ export async function handlePrSynchronize({
         }
 
         if (followUpRun) {
+          // Record the superseding head before the debounced follow-up is
+          // queued. `prSha` stays the head this review last covered because
+          // it seeds `previous_review_head_sha` in the follow-up prompt, so
+          // the newest observed head needs its own field for a review that
+          // finishes before the relay lands.
+          await db
+            .update(taskRuns)
+            .set({
+              payload: sql`coalesce(${taskRuns.payload}, '{}'::jsonb) || jsonb_build_object('latestObservedHeadSha', ${headSha}::text)`,
+            })
+            .where(eq(taskRuns.id, followUpRun.id));
+
           const relayPayload = await getReviewTaskRelayPayload({
             repository: repository.full_name,
             prNumber: pr.number,

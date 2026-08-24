@@ -34,14 +34,22 @@ export function createFastAgentTaskLauncher(
     buildTask: (input: {
       prompt: string;
       environmentId: string | null;
+      model?: string | null;
       parentSessionId: string;
     }) => StandardTask | Promise<StandardTask>;
   } & FastAgentTaskLaunchHooks,
 ): LaunchFastAgentTask {
-  return async ({ prompt, environmentId, parentSessionId, postKickoff }) => {
+  return async ({
+    prompt,
+    environmentId,
+    model,
+    parentSessionId,
+    postKickoff,
+  }) => {
     const task = await params.buildTask({
       prompt,
       environmentId,
+      model,
       parentSessionId,
     });
     let taskUrl: string | undefined;
@@ -122,7 +130,7 @@ export function createFastAgentSlackTaskLauncher(
     afterKickoff: params.afterKickoff,
     onQueueFailure: params.onQueueFailure,
     rendersTaskLink: params.rendersTaskLink,
-    buildTask: ({ prompt, environmentId, parentSessionId }) => ({
+    buildTask: ({ prompt, environmentId, model, parentSessionId }) => ({
       type: TaskPayloadKind.StandardTask,
       payload: {
         repo: ALL_REPOSITORIES,
@@ -152,6 +160,9 @@ export function createFastAgentSlackTaskLauncher(
         ...(params.liveTaskStream ? { liveTaskStream: true } : {}),
         ...(environmentId && environmentId !== ALL_REPOSITORIES
           ? { environmentId }
+          : {}),
+        ...(model
+          ? { harnessModelOverrides: { 'opencode-server': model } }
           : {}),
       },
     }),

@@ -74,6 +74,24 @@ describe('Env', () => {
     }
   });
 
+  it('accepts optional additional GitHub App slugs, including an empty value', () => {
+    expect(
+      createRoomoteEnv(productionCoreEnv).R_GITHUB_ADDITIONAL_APP_SLUGS,
+    ).toBeUndefined();
+    expect(
+      createRoomoteEnv({
+        ...productionCoreEnv,
+        R_GITHUB_ADDITIONAL_APP_SLUGS: ' roomote-dev, acme ',
+      }).R_GITHUB_ADDITIONAL_APP_SLUGS,
+    ).toBe(' roomote-dev, acme ');
+    expect(
+      createRoomoteEnv({
+        ...productionCoreEnv,
+        R_GITHUB_ADDITIONAL_APP_SLUGS: '',
+      }).R_GITHUB_ADDITIONAL_APP_SLUGS,
+    ).toBe('');
+  });
+
   it('preserves optional and defaulted values when creating env from a custom source', () => {
     const previousSkipEnvValidation = process.env.SKIP_ENV_VALIDATION;
     const runtimeEnv = { ...process.env };
@@ -228,22 +246,6 @@ describe('Env', () => {
     expect(areCuratedIntegrationsDisabled(undefined)).toBe(false);
     expect(areCuratedIntegrationsDisabled('1')).toBe(true);
     expect(areCuratedIntegrationsDisabled('0')).toBe(false);
-  });
-
-  it('keeps the communications fast mode setting opt-in', () => {
-    const runtimeEnv = { ...process.env };
-    delete runtimeEnv.SKIP_ENV_VALIDATION;
-    delete runtimeEnv.R_COMMUNICATIONS_FAST_MODE_SETTING_ENABLED;
-
-    expect(
-      createRoomoteEnv(runtimeEnv).R_COMMUNICATIONS_FAST_MODE_SETTING_ENABLED,
-    ).toBe(false);
-    expect(
-      createRoomoteEnv({
-        ...runtimeEnv,
-        R_COMMUNICATIONS_FAST_MODE_SETTING_ENABLED: 'true',
-      }).R_COMMUNICATIONS_FAST_MODE_SETTING_ENABLED,
-    ).toBe(true);
   });
 
   it('accepts valid Ping instance IDs and rejects invalid ones', () => {
@@ -1198,11 +1200,20 @@ describe('isBrainConfigured', () => {
     );
   });
 
+  it('counts a file-backed gateway token as Brain wiring', () => {
+    expect(
+      isBrainConfigured({
+        R_BRAIN_GATEWAY_TOKEN_FILE: '/gbrain-data/gateway-token',
+      }),
+    ).toBe(true);
+  });
+
   it('stays off with no key, and treats whitespace as no key', () => {
     expect(isBrainConfigured({})).toBe(false);
     expect(
       isBrainConfigured({
         R_BRAIN_GATEWAY_TOKEN: '',
+        R_BRAIN_GATEWAY_TOKEN_FILE: '   ',
         R_BRAIN_OPENROUTER_API_KEY: '   ',
         R_BRAIN_OPENAI_API_KEY: '',
       }),

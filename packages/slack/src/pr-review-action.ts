@@ -30,7 +30,7 @@ export function parseSlackPrReviewActionButtonValue(
  * Dismiss buttons. The caller appends the sticky thread footer.
  */
 export function buildSlackPrReviewActionBlocks(params: {
-  /** Summary text already converted to Slack mrkdwn link syntax. */
+  /** Summary text in standard Markdown for Slack's modern markdown block. */
   text: string;
   question: string;
   nonce: string;
@@ -39,11 +39,8 @@ export function buildSlackPrReviewActionBlocks(params: {
 
   return [
     {
-      type: 'section',
-      text: {
-        type: 'mrkdwn',
-        text: params.text,
-      },
+      type: 'markdown',
+      text: params.text,
     },
     {
       type: 'section',

@@ -2,12 +2,6 @@ import { db, eq, userFactory, users } from '@roomote/db/server';
 
 import type { UserAuthSuccess } from '@/types';
 
-const { mockEnv } = vi.hoisted(() => ({
-  mockEnv: { R_COMMUNICATIONS_FAST_MODE_SETTING_ENABLED: false },
-}));
-
-vi.mock('@/lib/server/env', () => ({ Env: mockEnv }));
-
 import {
   getPersonalPreferencesCommand,
   updatePersonalPreferencesCommand,
@@ -18,10 +12,6 @@ function buildAuth(userId: string) {
 }
 
 describe('personal preferences', () => {
-  beforeEach(() => {
-    mockEnv.R_COMMUNICATIONS_FAST_MODE_SETTING_ENABLED = false;
-  });
-
   it('defaults mind reader mode to disabled', async () => {
     const user = await userFactory.create();
 
@@ -71,32 +61,7 @@ describe('personal preferences', () => {
     );
   });
 
-  it('rejects communications fast mode updates when the deployment setting is disabled', async () => {
-    const user = await userFactory.create();
-
-    await expect(
-      updatePersonalPreferencesCommand(buildAuth(user.id), {
-        communicationsFastModeDefault: true,
-      }),
-    ).rejects.toThrow(
-      'The communications fast mode default setting is not enabled for this deployment.',
-    );
-  });
-
-  it('does not expose a stored communications fast mode default when the deployment setting is disabled', async () => {
-    const user = await userFactory.create({
-      metadata: { communications_fast_mode_default: true },
-    });
-
-    await expect(
-      getPersonalPreferencesCommand(buildAuth(user.id)),
-    ).resolves.toEqual(
-      expect.objectContaining({ communicationsFastModeDefault: false }),
-    );
-  });
-
-  it('persists the communications fast mode default when the deployment setting is enabled', async () => {
-    mockEnv.R_COMMUNICATIONS_FAST_MODE_SETTING_ENABLED = true;
+  it('persists communications fast mode updates', async () => {
     const user = await userFactory.create();
 
     await expect(
@@ -114,6 +79,18 @@ describe('personal preferences', () => {
 
     expect(storedUser?.metadata).toEqual(
       expect.objectContaining({ communications_fast_mode_default: true }),
+    );
+  });
+
+  it('exposes a stored communications fast mode default', async () => {
+    const user = await userFactory.create({
+      metadata: { communications_fast_mode_default: true },
+    });
+
+    await expect(
+      getPersonalPreferencesCommand(buildAuth(user.id)),
+    ).resolves.toEqual(
+      expect.objectContaining({ communicationsFastModeDefault: true }),
     );
   });
 });

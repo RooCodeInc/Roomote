@@ -472,6 +472,12 @@ export function useSetupFlow(
           }
 
           return true;
+        case 'environment-explainer':
+          return (
+            !replayEntryVisit &&
+            (status.setupNewState.selectedRepositoryIds.length > 0 ||
+              status.setupNewState.onboardingTaskId !== null)
+          );
         case 'repo-selection':
           return (
             !replayEntryVisit &&

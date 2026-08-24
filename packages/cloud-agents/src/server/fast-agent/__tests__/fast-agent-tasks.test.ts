@@ -34,7 +34,10 @@ describe('fast-agent task operations', () => {
           Authorization: 'Bearer auth-token',
           'Content-Type': 'application/json',
         }),
-        body: JSON.stringify({ message: 'Also add a test.' }),
+        body: JSON.stringify({
+          message: 'Also add a test.',
+          senderMode: 'fast_agent',
+        }),
       }),
     );
   });

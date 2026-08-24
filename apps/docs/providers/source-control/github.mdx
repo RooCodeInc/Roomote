@@ -150,6 +150,15 @@ R_GITHUB_APP_PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----\n...\n-----END RSA PRI
 
 `R_GITHUB_APP_SLUG` is required when your GitHub App slug is not
 `roomote`; Roomote uses it for GitHub mentions and bot-authored PR detection.
+If trusted review or notification activity can also come from other Roomote
+GitHub Apps, list their exact slugs in `R_GITHUB_ADDITIONAL_APP_SLUGS`:
+
+```sh
+R_GITHUB_ADDITIONAL_APP_SLUGS=roomote-community,roomote-reviewer
+```
+
+Roomote treats only the primary slug and this comma-separated allowlist as
+managed bot identities. Do not add unrelated GitHub Apps.
 
 Generate a private key from the app's **Private keys** section. GitHub
 downloads a `.pem` file. Convert it to an escaped single-line value before
@@ -209,6 +218,20 @@ Once the app is installed and an environment maps the repository:
 
 Issue mentions use the environment mapped to the repository. Map the repository
 to an environment before mentioning Roomote on issues.
+
+When a task delegated from a Fast Slack or Discord conversation opens a pull
+request, actionable review feedback returns to that same conversation. Use
+**Resolve these issues** to address the current feedback, **Auto-resolve on this
+PR** to handle later actionable feedback automatically, or **Dismiss** to take
+no action.
+
+Failed GitHub checks also return to every Roomote task linked to the pull
+request and to the conversation that started the work. Roomote consolidates a
+burst of failures into one actionable notification with the check names and
+links. It suppresses failures from an outdated head commit and stays silent for
+successful or non-failing conclusions. Keep the **Checks** permission and
+**Check run** event enabled so these notifications reach Roomote, including for
+pull requests opened from forks.
 
 ## Verify setup
 

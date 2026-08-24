@@ -14,6 +14,10 @@ export function getFastAgentConversationStorageWorkspaceId(
 
 export type FastAgentTurnSource = 'human' | 'platform_event';
 
+export type FastAgentPlatformEventVisibility = 'optional' | 'required';
+
+export type FastAgentPlatformEventHandling = 'default' | 'present_only';
+
 export type FastAgentReply = {
   purpose: 'ack' | 'progress' | 'closeout' | 'clarification';
   message: string;
@@ -22,6 +26,10 @@ export type FastAgentReply = {
    * short of a visible, durable post (including deliberate suppression) as a
    * failure so the launch gate never opens without its kickoff. */
   kickoff?: boolean;
+};
+
+export type FastAgentReplyHandle = {
+  messageId: string;
 };
 
 export type FastAgentReaction = {
@@ -33,6 +41,7 @@ export type FastAgentReaction = {
 export type LaunchFastAgentTask = (params: {
   prompt: string;
   environmentId: string | null;
+  model?: string | null;
   parentSessionId: string;
   postKickoff: (task: {
     taskId: string;
@@ -42,7 +51,14 @@ export type LaunchFastAgentTask = (params: {
     taskLinkRendered?: boolean;
   }) => Promise<void>;
 }) => Promise<
-  | { success: true; taskId: string; taskUrl?: string }
+  | {
+      success: true;
+      taskId: string;
+      taskUrl?: string;
+      /** True when an idempotent surface replay reused a task whose kickoff
+       * was already delivered. */
+      kickoffDelivered?: boolean;
+    }
   | { success: false; error: string }
 >;
 
@@ -53,7 +69,11 @@ export type RetryFastAgentTaskStart = () => Promise<
 /** Surface adapter for side effects available during one Fast turn. */
 export type FastAgentTurnAdapter = {
   launchTask: LaunchFastAgentTask;
-  postReply: (reply: FastAgentReply) => Promise<void>;
+  postReply: (reply: FastAgentReply) => Promise<FastAgentReplyHandle | void>;
+  replaceReply?: (
+    handle: FastAgentReplyHandle,
+    reply: FastAgentReply,
+  ) => Promise<FastAgentReplyHandle | void>;
   postReaction?: (reaction: FastAgentReaction) => Promise<void>;
   retryTaskStart?: RetryFastAgentTaskStart;
 };

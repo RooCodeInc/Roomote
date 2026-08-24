@@ -163,6 +163,33 @@ describe('durable PR review notification ownership', () => {
     expect(mockQueueAdd).not.toHaveBeenCalled();
   });
 
+  it('debounces CI failures through the same durable notification batch', async () => {
+    await enqueuePrReviewNotification({
+      ...baseInput,
+      event: {
+        kind: 'ci_failure',
+        providerEventId: 'github-check-run:9001',
+        authorLogin: 'github-actions',
+        checkName: 'CI / Tests',
+        reviewHeadSha: 'abc123',
+        url: 'https://github.com/owner/repo/actions/runs/7/job/8',
+        observedAt: 100,
+      },
+    });
+
+    expect(mockPersistPrReviewEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        batchKind: 'human',
+        batchId: null,
+        dueAt: new Date(1_000 + PR_REVIEW_NOTIFICATION_DEBOUNCE_MS),
+        event: expect.objectContaining({
+          kind: 'ci_failure',
+          checkName: 'CI / Tests',
+        }),
+      }),
+    );
+  });
+
   it('groups one external automated reviewer under a stable database batch', async () => {
     const automatedAuthorId = 'github:9001';
     for (const [index, kind] of [
@@ -398,7 +425,7 @@ describe('PR review notification routing', () => {
 });
 
 describe('formatPrReviewActivityMessage', () => {
-  it('converts markdown links for Slack and appends a missing PR link', () => {
+  it('keeps clean markdown links for Slack and appends a missing PR link', () => {
     expect(
       formatPrReviewActivityMessage({
         repository: 'owner/repo',
@@ -409,7 +436,7 @@ describe('formatPrReviewActivityMessage', () => {
           'Alice commented on [the review](https://github.com/owner/repo/pull/42#discussion_r1).',
       }),
     ).toBe(
-      'Alice commented on <https://github.com/owner/repo/pull/42#discussion_r1|the review>.',
+      'Alice commented on [the review](https://github.com/owner/repo/pull/42#discussion_r1).',
     );
     expect(
       formatPrReviewActivityMessage({
@@ -420,7 +447,22 @@ describe('formatPrReviewActivityMessage', () => {
         summary: 'Alice requested changes.',
       }),
     ).toBe(
-      'Alice requested changes.\n<https://github.com/owner/repo/pull/42|owner/repo#42>',
+      'Alice requested changes.\n[owner/repo#42](https://github.com/owner/repo/pull/42)',
+    );
+  });
+
+  it('removes angle brackets wrapped around markdown link targets', () => {
+    expect(
+      formatPrReviewActivityMessage({
+        repository: 'owner/repo',
+        prNumber: 42,
+        prUrl: 'https://github.com/owner/repo/pull/42',
+        provider: 'slack',
+        summary:
+          'Review feedback on [PR #42](<https://github.com/owner/repo/pull/42>): update [the test](<https://github.com/owner/repo/pull/42#discussion_r1>).',
+      }),
+    ).toBe(
+      'Review feedback on [PR #42](https://github.com/owner/repo/pull/42): update [the test](https://github.com/owner/repo/pull/42#discussion_r1).',
     );
   });
 });

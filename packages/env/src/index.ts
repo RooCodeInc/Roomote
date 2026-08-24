@@ -124,8 +124,6 @@ const serverSchema = {
   // Roomote Cloud-only analytics and support integrations. These values are
   // intentionally not used by self-hosted deployments.
   R_CLOUD_ENABLED: optInBoolean(),
-  // Exposes the per-user setting that defaults communications messages to fast mode.
-  R_COMMUNICATIONS_FAST_MODE_SETTING_ENABLED: optInBoolean(),
   // Operator policy for the curated Settings > Integrations catalog. Enabled
   // by default; operators opt out explicitly. Existing connections remain
   // stored but cannot be configured or used while disabled.
@@ -185,6 +183,7 @@ const serverSchema = {
   SANDBOX_OIDC_PUBLIC_KEY_SECONDARY: z.string().min(1).optional(),
   R_GITHUB_APP_ID: emptyStringDefault(),
   R_GITHUB_APP_SLUG: z.string().min(1).default('roomote'),
+  R_GITHUB_ADDITIONAL_APP_SLUGS: z.string().optional(),
   R_GITHUB_APP_PRIVATE_KEY: emptyStringDefault(),
   R_GITHUB_CLIENT_ID: emptyStringDefault(),
   R_GITHUB_CLIENT_SECRET: emptyStringDefault(),
@@ -686,9 +685,9 @@ export function isRoomoteCloudEnabled(
 /**
  * Whether this deployment *might* have a Brain: some Brain wiring exists in
  * the environment. This is deliberately a superset question, not activation.
- * The Render and Coolify templates auto-generate the gateway token as
- * plumbing between the gbrain service and the inference gateway, so a set
- * token means "a Brain could be wired here", never "an operator turned the
+ * Deployment templates supply the gateway token directly or by file as
+ * plumbing between the gbrain service and the inference gateway, so either
+ * signal means "a Brain could be wired here", never "an operator turned the
  * Brain on". Activation — everything user-visible, from delivering the
  * gbrain MCP server to agents to running ingestion — additionally requires
  * an explicit R_BRAIN_* provider key and lives in isBrainProviderConfigured
@@ -708,11 +707,13 @@ export function isRoomoteCloudEnabled(
  */
 export function isBrainConfigured(env: {
   R_BRAIN_GATEWAY_TOKEN?: string;
+  R_BRAIN_GATEWAY_TOKEN_FILE?: string;
   R_BRAIN_OPENROUTER_API_KEY?: string;
   R_BRAIN_OPENAI_API_KEY?: string;
 }): boolean {
   return Boolean(
     env.R_BRAIN_GATEWAY_TOKEN?.trim() ||
+    env.R_BRAIN_GATEWAY_TOKEN_FILE?.trim() ||
     env.R_BRAIN_OPENROUTER_API_KEY?.trim() ||
     env.R_BRAIN_OPENAI_API_KEY?.trim(),
   );

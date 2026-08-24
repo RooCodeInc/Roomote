@@ -114,6 +114,7 @@ describe('getCostAnalyticsRows', () => {
       .values([
         {
           eventKey: `cost-analytics-task-${crypto.randomUUID()}`,
+          source: 'task_title_generation',
           costSource: 'missing',
           taskId: task.id,
           runId: run.id,
@@ -140,6 +141,11 @@ describe('getCostAnalyticsRows', () => {
     const row = rows.find((candidate) => candidate.id === usageEvents[0]!.id);
 
     expect(row?.dimensions.project?.label).toBe(environment.name);
+    expect(row?.dimensions.source).toEqual({
+      key: 'task_title_generation',
+      label: 'task_title_generation',
+    });
+    expect(row?.details.values.source).toBe('task_title_generation');
     expect(row?.meta?.prKeys).toEqual(['github:github.com:roomote/test#42']);
   });
 });
@@ -169,6 +175,7 @@ describe('aggregateCostAnalyticsRowsByTask', () => {
           date: timestamp,
           taskType: taskId ? 'Manual' : 'Non-task inference',
           project: 'Roomote',
+          source: 'opencode',
           provider: 'openai',
           model,
           cost: cost.toFixed(2),

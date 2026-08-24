@@ -15,6 +15,7 @@ vi.mock('@roomote/env', async (importOriginal) => {
     ...actual,
     Env: {
       R_GITHUB_APP_SLUG: 'roomote',
+      R_GITHUB_ADDITIONAL_APP_SLUGS: 'review-helper, roomote-community',
     },
   };
 });
@@ -413,6 +414,36 @@ describe('buildPrReviewActivityNotificationInput', () => {
     });
   });
 
+  it('keeps review threads from an explicitly configured additional app', () => {
+    expect(
+      buildPrReviewActivityNotificationInput(
+        reviewCommentPayload({
+          login: 'roomote-community[bot]',
+          userId: 9002,
+          userType: 'Bot',
+        }),
+      ),
+    ).toMatchObject({
+      event: {
+        kind: 'review_comment',
+        authorLogin: 'roomote-community[bot]',
+        roomoteAuthored: true,
+      },
+    });
+  });
+
+  it('skips review threads from an untrusted roomote-prefixed bot', () => {
+    expect(
+      buildPrReviewActivityNotificationInput(
+        reviewCommentPayload({
+          login: 'roomote-unknown[bot]',
+          userId: 9003,
+          userType: 'Bot',
+        }),
+      ),
+    ).toBeNull();
+  });
+
   it('skips Roomote-authored replies to existing review threads', () => {
     expect(
       buildPrReviewActivityNotificationInput(
@@ -723,6 +754,27 @@ describe('with a database-configured app slug', () => {
         summaryPayload({ login: 'othermote[bot]' }),
       ),
     ).toBeNull();
+  });
+
+  it('does not treat the process-env fallback bot as Roomote-authored', () => {
+    expect(
+      buildPrReviewSummaryNotification(
+        summaryPayload({ login: 'roomote[bot]' }),
+      ),
+    ).toBeNull();
+  });
+
+  it('marks additional trusted app activity as roomote-authored', () => {
+    expect(
+      buildPrReviewActivityNotificationInput(
+        reviewCommentPayload({ login: 'review-helper[bot]' }),
+      ),
+    ).toMatchObject({
+      event: {
+        authorLogin: 'review-helper[bot]',
+        roomoteAuthored: true,
+      },
+    });
   });
 
   it('marks new review threads from the configured bot as roomote-authored', () => {

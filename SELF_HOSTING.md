@@ -536,6 +536,8 @@ self-host secret management should own the values:
 
 ```sh
 R_GITHUB_APP_SLUG=<github-app-slug>
+# Optional comma-separated GitHub App slugs that are also trusted as Roomote-managed.
+R_GITHUB_ADDITIONAL_APP_SLUGS=<additional-app-slug-1>,<additional-app-slug-2>
 R_GITHUB_APP_ID=<app-id>
 R_GITHUB_APP_PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----\n...\n-----END RSA PRIVATE KEY-----"
 R_GITHUB_CLIENT_ID=<client-id>

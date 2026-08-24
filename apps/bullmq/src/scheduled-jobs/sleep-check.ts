@@ -38,6 +38,7 @@ import {
 import {
   createSnapshot,
   finishRun,
+  maybeEnqueueBrainMemoryForCompletedRun,
   refreshTaskTitleOnCompletion,
 } from '@roomote/sdk/server';
 
@@ -774,6 +775,7 @@ async function claimAndEnterStandby(
         })
         .where(eq(taskRuns.id, job.id));
       await syncTaskStateFromRuns(tx, job.taskId);
+      await maybeEnqueueBrainMemoryForCompletedRun(tx, job.id);
       await markTaskStartParallelCountEndedAt(tx, {
         runId: job.id,
         endedAt: completedAt,
@@ -1247,6 +1249,7 @@ async function handleTimedSleepCandidate(params: {
     // Direct-completion path (not via finishRun): derive the task state
     // from all its runs now that this run is completed.
     await syncTaskStateFromRuns(tx, job.taskId);
+    await maybeEnqueueBrainMemoryForCompletedRun(tx, job.id);
 
     await markTaskStartParallelCountEndedAt(tx, {
       runId: job.id,

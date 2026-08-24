@@ -12,6 +12,11 @@ type BootstrapAuthSetupStep = Extract<
   'auth-provider' | 'auth-env-vars'
 >;
 
+export type BootstrapAuthConfigEntryStep = Extract<
+  BootstrapStep,
+  'email-account' | 'auth-provider'
+>;
+
 export function getBootstrapAuthProvider(
   authSetup: SetupAuthStatus | null | undefined,
   pendingAuthProvider: SetupAuthProviderId | null,

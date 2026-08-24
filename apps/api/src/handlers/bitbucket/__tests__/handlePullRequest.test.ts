@@ -251,6 +251,7 @@ describe('handleBitbucketPullRequest', () => {
       pullRequest: {
         number: 42,
         title: 'Update backend',
+        body: null,
         url: 'https://bitbucket.org/acme/backend/pull-requests/42',
         authorLogin: 'bb-user',
         state: 'merged',

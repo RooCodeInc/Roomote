@@ -5,6 +5,7 @@ import {
   getChatMessageContext,
   postToChannel,
   replyToSlackThread,
+  suppressSlackReplyQuote,
   trackSlackReplyQuote,
 } from '../slack-api-client.js';
 import { ChatDeliveryError } from '../chat-delivery-error.js';
@@ -315,6 +316,27 @@ describe('reply quote helpers', () => {
           runId: 42,
           quoteId: 'quote-1',
         }),
+      }),
+    );
+  });
+
+  it('posts quote suppression requests through the Slack MCP API', async () => {
+    global.fetch = vi.fn().mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ success: true, quoteId: 'suppression-1' }),
+    });
+
+    const result = await suppressSlackReplyQuote(config, { runId: 42 });
+
+    expect(result).toEqual({ success: true, quoteId: 'suppression-1' });
+    expect(fetch).toHaveBeenCalledWith(
+      'https://platform.example.com/api/mcp/slack/suppress_reply_quote',
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({
+          Authorization: 'Bearer test-token',
+        }),
+        body: JSON.stringify({ runId: 42 }),
       }),
     );
   });

@@ -26,6 +26,7 @@ import { createTelegramLinkCode } from '@roomote/sdk/server';
 import type { UserAuthSuccess } from '@/types';
 import { Env } from '@/lib/server/env';
 import { resolveAuthProviderConfig } from '@/lib/server/auth-provider-config';
+import { captureIntegrationLifecycleEvent } from '@/lib/server/integration-telemetry';
 
 const MICROSOFT_ENTRA_PROVIDER_ID = 'microsoft-entra-id';
 
@@ -311,6 +312,14 @@ export async function unlinkLinkedLinearAccountCommand(auth: UserAuthSuccess) {
       ),
     )
     .returning({ id: mcpConnections.id });
+
+  if (deleted.length > 0) {
+    captureIntegrationLifecycleEvent(
+      'integration_removed',
+      'linear',
+      auth.userId,
+    );
+  }
 
   return {
     success: true as const,

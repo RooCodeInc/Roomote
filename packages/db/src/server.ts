@@ -69,6 +69,7 @@ export * from './lib/github-copilot-subscription';
 export * from './lib/xai-subscription';
 export * from './lib/subscription-provider-usage';
 export * from './lib/provider-credit-balance';
+export * from './lib/provider-usage-limits';
 export * from './lib/preview-runtime-config';
 export * from './lib/out-of-band-task-messages';
 export * from './lib/record-task-kickoff-message';
@@ -88,6 +89,7 @@ export * from './lib/instance-report';
 export * from './lib/deployment-license';
 export * from './lib/license-usage-observations';
 export * from './lib/pr-review-events';
+export * from './lib/fast-agent-pr-feedback-deliveries';
 export * from './lib/invocation-identities';
 export * from './lib/webhook-retention';
 export * from './lib/brain';
@@ -174,6 +176,8 @@ export {
   slackAuthTokensRelations,
   fastAgentConversations,
   fastAgentConversationsRelations,
+  fastAgentPrFeedbackDeliveries,
+  fastAgentPrFeedbackDeliveriesRelations,
   fastAgentConversationAliases,
   fastAgentConversationAliasesRelations,
   slackConversationMessages,
