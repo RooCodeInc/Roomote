@@ -747,6 +747,38 @@ describe('Slack live task card', () => {
     });
   });
 
+  it('does not replace a terminal error while its render is in flight', async () => {
+    const taskRun = createTaskRun();
+    const context = {};
+    let resolveRender:
+      | ((value: { card: true; updated: true }) => void)
+      | undefined;
+    mocks.renderCard.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveRender = resolve;
+      }),
+    );
+
+    const finishPromise = finishSlackLiveTaskStream(
+      taskRun,
+      RunStatus.Failed,
+      context,
+    );
+    await updateSlackLiveTaskStream(
+      taskRun,
+      { type: 'completion', ts: 1000, text: 'Late result.' },
+      context,
+    );
+    resolveRender?.({ card: true, updated: true });
+    await finishPromise;
+
+    expect(mocks.renderCard).toHaveBeenCalledOnce();
+    expect(renderedCard(1)).toEqual({
+      status: 'error',
+      output: 'The task stopped because of an error.',
+    });
+  });
+
   it('keeps an idle card active when the task is waiting for user input', async () => {
     const taskRun = createTaskRun();
     const context = {};

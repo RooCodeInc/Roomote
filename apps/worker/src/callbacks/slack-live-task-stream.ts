@@ -293,6 +293,15 @@ export async function updateSlackLiveTaskStream(
     return;
   }
 
+  if (
+    state.status === 'error' &&
+    event.type !== 'followup' &&
+    event.type !== 'request_user_input' &&
+    event.type !== 'request_user_input_response'
+  ) {
+    return;
+  }
+
   if (state.settled) {
     // Idle settlement may use the latest finalized assistant message before
     // the authoritative completion callback arrives. Let only that callback
