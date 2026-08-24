@@ -8,7 +8,11 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { createRequire } from 'node:module';
-import { ROOMOTE_TASK_INSPECTION_ACTIONS } from '@roomote/types';
+import {
+  CHAT_CHANNEL_MESSAGES_TOOL,
+  CHAT_MESSAGE_CONTEXT_TOOL,
+  ROOMOTE_TASK_INSPECTION_ACTIONS,
+} from '@roomote/types';
 import { z } from 'zod';
 
 import {
@@ -127,6 +131,33 @@ export default {
     purpose: z.enum(["ack", "closeout"]),
   },
   execute: (args, context) => invoke("send_chat_reaction", args, context),
+}
+`,
+
+    [FAST_AGENT_NATIVE_TOOL_NAMES.getChatMessageContext]: String.raw`
+import { z } from "zod"
+import { invoke } from "../roomote-fast-tool-bridge.js"
+
+export default {
+  description: ${JSON.stringify(`${CHAT_MESSAGE_CONTEXT_TOOL.description} Fast mode restricts this lookup to the current conversation channel.`)},
+  args: {
+    messageId: z.string().min(1).describe("Provider message ID or timestamp in the current conversation channel."),
+  },
+  execute: (args, context) => invoke(${JSON.stringify(CHAT_MESSAGE_CONTEXT_TOOL.name)}, args, context),
+}
+`,
+
+    [FAST_AGENT_NATIVE_TOOL_NAMES.getChatChannelMessages]: String.raw`
+import { z } from "zod"
+import { invoke } from "../roomote-fast-tool-bridge.js"
+
+export default {
+  description: ${JSON.stringify(`${CHAT_CHANNEL_MESSAGES_TOOL.description} Fast mode restricts this lookup to the current conversation channel and defaults Slack history to the previous 24 hours when oldest is omitted.`)},
+  args: {
+    oldest: z.string().min(1).optional().describe(${JSON.stringify(CHAT_CHANNEL_MESSAGES_TOOL.inputDescriptions.oldest)}),
+    latest: z.string().min(1).optional().describe(${JSON.stringify(CHAT_CHANNEL_MESSAGES_TOOL.inputDescriptions.latest)}),
+  },
+  execute: (args, context) => invoke(${JSON.stringify(CHAT_CHANNEL_MESSAGES_TOOL.name)}, args, context),
 }
 `,
 

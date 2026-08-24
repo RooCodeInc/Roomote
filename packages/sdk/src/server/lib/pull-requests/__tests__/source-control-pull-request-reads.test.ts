@@ -39,6 +39,11 @@ vi.mock('@roomote/github', () => ({
   getOctokit: (...args: unknown[]) => mockGetOctokit(...args),
   getGitHubRateLimitRetryAfterMs: (...args: unknown[]) =>
     mockGetGitHubRateLimitRetryAfterMs(...args),
+  isGitHubUnauthorizedError: (error: unknown) =>
+    typeof error === 'object' &&
+    error !== null &&
+    'status' in error &&
+    Number(error.status) === 401,
 }));
 
 vi.mock('@roomote/gitlab', () => ({
@@ -617,6 +622,42 @@ describe('readSourceControlPullRequestForTaskRun', () => {
         },
       }),
     ).rejects.toBe(rateLimitError);
+  });
+
+  it('propagates GitHub 401s so a task-scoped caller can refresh once', async () => {
+    mockRepositoriesFindFirst.mockResolvedValue({
+      installationId: 'installation-1',
+      externalRepoId: null,
+      fullName: 'acme/backend',
+      htmlUrl: 'https://github.com/acme/backend',
+    });
+    const unauthorized = Object.assign(new Error('Bad credentials'), {
+      status: 401,
+    });
+    mockGetOctokit.mockReturnValue({
+      graphql: vi.fn().mockRejectedValue(unauthorized),
+      paginate: vi.fn().mockResolvedValue([]),
+      rest: {
+        pulls: { listReviewComments: vi.fn() },
+        issues: { listComments: vi.fn() },
+      },
+    });
+
+    await expect(
+      readSourceControlPullRequestForTaskRun({
+        taskRun: makeTaskRun({
+          repo: 'acme/backend',
+          sourceControlProvider: 'github',
+        }),
+        input: {
+          action: 'list_pull_request_comments',
+          repositoryFullName: 'acme/backend',
+          prNumber: 55,
+          sourceControlProvider: 'github',
+        },
+        githubToken: 'github-token',
+      }),
+    ).rejects.toBe(unauthorized);
   });
 
   it('paginates every GitHub review thread and every comment in a thread', async () => {

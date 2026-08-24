@@ -22,7 +22,6 @@ vi.mock('@roomote/env', () => ({
   Env: {
     TRPC_URL: null,
     R_APP_URL: 'http://localhost:3000',
-    R_COMMUNICATIONS_FAST_MODE_SETTING_ENABLED: true,
   },
 }));
 

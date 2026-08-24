@@ -68,6 +68,7 @@ function logPrReviewNotificationTriage(input: {
       eventsDrained: input.eventsDrained,
       eventsTriaged: input.telemetry.eventsTriaged,
       githubApiCalls: input.telemetry.githubApiCalls,
+      githubTokenMintRequests: input.telemetry.githubTokenMintRequests,
       triageInvoked: input.telemetry.triageInvoked,
       triageCacheHit: input.telemetry.triageCacheHit,
       triageInputChars: input.telemetry.triageInputChars,

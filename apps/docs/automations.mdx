@@ -249,11 +249,22 @@ manager-facing updates and suggestions.
 | **Code Quality Auditor**     | Code quality follow-up work from recently merged PRs             | Every hour, every 6 hours, daily, or weekly |
 | **Suggest Ideas**            | Useful coding work Roomote thinks the team could do              | Daily or weekly                             |
 | **CI Failure Triage**        | Automatic repro-and-fix tasks for failing default-branch CI runs | Immediate via webhook                       |
+| **Platform Issue Alerts**    | Configuration and access issues reported by Roomote tasks        | Immediate when an issue is reported         |
 | **Summarize Merged PRs**     | A digest of recently merged pull requests                        | Daily or weekly                             |
 
 Set **Automation output** first. This is the shared Slack or Discord Manager
 Channel for manager-facing posts, suggestions, summaries, and setup alerts.
 Make sure the Roomote app can access the channel before you save it.
+
+**Platform Issue Alerts** are enabled by default. Their own Slack or Discord
+destination wins, followed by the shared Manager Channel. If neither channel is
+configured, Roomote sends the alert directly to active deployment admins using
+each admin's first linked provider in this order: Slack, Teams, Telegram, then
+Discord. Admins need a linked account and must be reachable by the bot for this
+fallback to work. When only some admins receive an alert, Roomote keeps it
+pending and retries the remaining deliveries instead of marking the report
+complete. Disable the automation explicitly if the deployment should not send
+these alerts.
 
 Each automation card shows a **Reports to** line with the destination the next
 run will use and which setting produced it. Reports go to the automation's own

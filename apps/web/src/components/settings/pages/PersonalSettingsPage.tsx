@@ -13,12 +13,10 @@ export function PersonalSettingsPage({
   profile,
   canChangePassword,
   canSetPassword,
-  communicationsFastModeDefaultAvailable,
 }: {
   profile: UserProfileSectionProfile;
   canChangePassword: boolean;
   canSetPassword: boolean;
-  communicationsFastModeDefaultAvailable: boolean;
 }) {
   return (
     <SettingsShell pageId="personal">
@@ -29,11 +27,7 @@ export function PersonalSettingsPage({
       {canChangePassword || canSetPassword ? (
         <ChangePasswordSection mode={canChangePassword ? 'change' : 'set'} />
       ) : null}
-      <UserPreferencesSection
-        communicationsFastModeDefaultAvailable={
-          communicationsFastModeDefaultAvailable
-        }
-      />
+      <UserPreferencesSection />
       <LinkedAccounts />
     </SettingsShell>
   );

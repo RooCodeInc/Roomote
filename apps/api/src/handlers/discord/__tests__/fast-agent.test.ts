@@ -28,7 +28,31 @@ vi.mock('../thread-context.js', () => ({
   fetchDiscordThreadHistoryBestEffort: mocks.fetchHistory,
 }));
 
-import { processDiscordFastAgentMessage } from '../fast-agent.js';
+import {
+  getDiscordFastLaunchSourceEventId,
+  processDiscordFastAgentMessage,
+} from '../fast-agent.js';
+
+describe('getDiscordFastLaunchSourceEventId', () => {
+  it('is stable for launch retries and distinct for independent launches', () => {
+    const checkout = {
+      eventId: 'event-1',
+      prompt: 'Fix checkout',
+      environmentId: 'env-1',
+      model: null,
+    };
+
+    expect(getDiscordFastLaunchSourceEventId(checkout)).toBe(
+      getDiscordFastLaunchSourceEventId(checkout),
+    );
+    expect(getDiscordFastLaunchSourceEventId(checkout)).not.toBe(
+      getDiscordFastLaunchSourceEventId({
+        ...checkout,
+        prompt: 'Update checkout docs',
+      }),
+    );
+  });
+});
 
 describe('processDiscordFastAgentMessage', () => {
   beforeEach(() => {

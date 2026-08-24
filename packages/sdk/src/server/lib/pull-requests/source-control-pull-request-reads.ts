@@ -1,5 +1,9 @@
 import { createGitHubToken } from '@roomote/auth';
-import { getGitHubRateLimitRetryAfterMs, getOctokit } from '@roomote/github';
+import {
+  getGitHubRateLimitRetryAfterMs,
+  getOctokit,
+  isGitHubUnauthorizedError,
+} from '@roomote/github';
 import { type TaskRun } from '@roomote/db/server';
 import {
   buildPullRequestUrl,
@@ -650,12 +654,15 @@ export async function readSourceControlPullRequestForTaskRun({
   fetchImpl = fetch,
   useGitHubConditionalRequests = false,
   onGitHubApiRequest,
+  githubToken,
 }: {
   taskRun: TaskRun;
   input: SourceControlPullRequestReadInput;
   fetchImpl?: FetchImpl;
   useGitHubConditionalRequests?: boolean;
   onGitHubApiRequest?: () => void;
+  /** Optional task-scoped token reused by a larger GitHub read workflow. */
+  githubToken?: string;
 }): Promise<SourceControlPullRequestReadResult> {
   const payloadRecord = getPayloadRecord(taskRun.payload);
   const payloadProvider = resolveSourceControlProviderForRepositoryFromPayload(
@@ -719,6 +726,7 @@ export async function readSourceControlPullRequestForTaskRun({
         provider,
         useConditionalRequests: useGitHubConditionalRequests,
         onGitHubApiRequest,
+        githubToken,
       });
     case 'gitlab':
       return listGitLabMergeRequestComments({
@@ -1003,17 +1011,19 @@ async function listGitHubPullRequestComments({
   provider,
   useConditionalRequests,
   onGitHubApiRequest,
+  githubToken,
 }: {
   prNumber: number;
   repository: RepositoryRow;
   provider: 'github';
   useConditionalRequests: boolean;
   onGitHubApiRequest?: () => void;
+  githubToken?: string;
 }): Promise<SourceControlPullRequestCommentsResult> {
-  const { octokit, owner, repo } = await createGitHubReadClient(
-    repository,
-    provider,
-  );
+  const [owner, repo] = splitRepositoryFullName(repository.fullName, provider);
+  const octokit = githubToken
+    ? getOctokit(githubToken)
+    : (await createGitHubReadClient(repository, provider)).octokit;
   const warnings: string[] = [];
 
   const [reviewComments, restIssueComments] = useConditionalRequests
@@ -1082,7 +1092,10 @@ async function listGitHubPullRequestComments({
       onGitHubApiRequest,
     });
   } catch (error) {
-    if (getGitHubRateLimitRetryAfterMs(error) !== null) {
+    if (
+      isGitHubUnauthorizedError(error) ||
+      getGitHubRateLimitRetryAfterMs(error) !== null
+    ) {
       throw error;
     }
     warnings.push(

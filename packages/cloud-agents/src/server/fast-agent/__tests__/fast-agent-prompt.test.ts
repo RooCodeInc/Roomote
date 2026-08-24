@@ -4,6 +4,23 @@ import { buildFastAgentSystemPrompt } from '../fast-agent-prompt';
 import { FAST_AGENT_BRAIN_INSTRUCTIONS } from '../fast-agent-constants';
 
 describe('buildFastAgentSystemPrompt', () => {
+  it('includes a resolved release identifier before environments', () => {
+    const prompt = buildFastAgentSystemPrompt({
+      availableEnvironments: [],
+      releaseVersion: '0.40.2',
+    });
+
+    expect(prompt).toContain(
+      'deliberately delegate execution work when useful.\n\nRoomote release 0.40.2\n\n## All Environments',
+    );
+  });
+
+  it('omits the release identifier when no version is resolved', () => {
+    const prompt = buildFastAgentSystemPrompt({ availableEnvironments: [] });
+
+    expect(prompt).not.toContain('Roomote release');
+  });
+
   it('describes native OpenCode tools and Roomote orchestration policy', () => {
     const prompt = buildFastAgentSystemPrompt({
       availableEnvironments: [
@@ -65,6 +82,10 @@ describe('buildFastAgentSystemPrompt', () => {
       'The runtime rejects those calls until an acknowledgement',
     );
     expect(prompt).toContain('kickoffMessage');
+    expect(prompt).toContain('launch multiple independent tasks in one turn');
+    expect(prompt).toContain('the turn remains open for more tools');
+    expect(prompt).toContain('end with a normal closeout or clarification');
+    expect(prompt).not.toContain('kickoff closes the turn');
     expect(prompt).not.toContain('Each structured output');
     expect(prompt).not.toContain('toolArguments');
     expect(prompt).toContain('no local filesystem, shell');

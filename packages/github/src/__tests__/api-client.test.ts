@@ -260,6 +260,15 @@ describe('getGitHubRateLimitRetryAfterMs', () => {
     expect(getGitHubRateLimitRetryAfterMs(error)).toBe(15 * 60 * 1_000);
   });
 
+  it('treats GitHub token endpoint spam protection as a secondary limit', () => {
+    const error = Object.assign(
+      new Error('Validation failed, or the endpoint has been spammed.'),
+      { status: 422, response: { headers: {} } },
+    );
+
+    expect(getGitHubRateLimitRetryAfterMs(error)).toBe(15 * 60 * 1_000);
+  });
+
   it('rejects ordinary permission failures', () => {
     const error = Object.assign(new Error('Resource not accessible'), {
       status: 403,

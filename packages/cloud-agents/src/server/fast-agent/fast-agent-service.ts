@@ -11,7 +11,10 @@ import {
   roomoteTaskInspectionArgsSchema,
 } from '@roomote/types';
 import { getDeploymentTaskModelOptions } from '@roomote/db/server';
+import { Env } from '@roomote/env';
 import { z } from 'zod';
+
+import packageJson from '../../../../../package.json';
 
 import {
   buildSlackThreadPromptBlocks,
@@ -19,6 +22,7 @@ import {
   wrapSlackThreadContext,
   type SlackThreadPromptMessage,
 } from '../../utils';
+import { resolveRoomoteReleaseVersion } from '../../release-version';
 import { getAvailableEnvironments, type RoutableEnvironment } from '../router';
 import { FAST_AGENT_MODEL_ROLE } from './fast-agent-constants';
 import { buildFastAgentSystemPrompt } from './fast-agent-prompt';
@@ -34,6 +38,7 @@ import {
   generateTrackedNonTaskTextInOpenCodeSession,
   isNonTaskOpenCodePromptTimeoutError,
   isNonTaskOpenCodeSessionNotFoundError,
+  NonTaskOpenCodePromptTimeoutError,
   NON_TASK_INFERENCE_SURFACES,
   type NonTaskPromptFile,
   type NonTaskProviderRetryEvent,
@@ -79,6 +84,29 @@ const chatReactionArgsSchema = z.object({
   name: z.string().trim().min(1),
   purpose: z.enum(['ack', 'closeout']),
 });
+const chatMessageContextArgsSchema = z.object({
+  messageId: z.string().trim().min(1),
+});
+const chatChannelMessagesArgsSchema = z.object({
+  oldest: z.string().trim().min(1).optional(),
+  latest: z.string().trim().min(1).optional(),
+});
+const FAST_AGENT_DEFAULT_SLACK_HISTORY_LOOKBACK_MS = 24 * 60 * 60 * 1000;
+
+function getFastAgentDefaultSlackHistoryOldest(latest?: string): string {
+  const numericLatest =
+    latest && /^\d+(?:\.\d+)?$/.test(latest) ? Number(latest) : Number.NaN;
+  const latestMs = Number.isFinite(numericLatest)
+    ? numericLatest * 1000
+    : latest
+      ? Date.parse(latest)
+      : Date.now();
+
+  return new Date(
+    (Number.isFinite(latestMs) ? latestMs : Date.now()) -
+      FAST_AGENT_DEFAULT_SLACK_HISTORY_LOOKBACK_MS,
+  ).toISOString();
+}
 const launchTaskArgsSchema = z.object({
   prompt: z.string().trim().min(1),
   environmentId: z.string().trim().min(1).nullable().optional(),
@@ -138,6 +166,7 @@ function buildIntegrationCallSignature({
 
 export const FAST_AGENT_INFERENCE_MAX_RETRIES = INFERENCE_PROVIDER_MAX_RETRIES;
 export const FAST_AGENT_TRANSIENT_INFERENCE_MAX_RETRIES = 6;
+const FAST_AGENT_INFERENCE_RETRY_ATTEMPT_TIMEOUT_MS = 5 * 60_000;
 const FAST_AGENT_TRANSIENT_RETRY_JITTER_RATIO = 0.2;
 
 type FastAgentInferenceFailure = ReturnType<
@@ -154,6 +183,7 @@ type FastAgentInferenceRetryNotice = {
 type FastAgentInferenceRetryOptions = {
   canRetry?: (error: unknown, failure: FastAgentInferenceFailure) => boolean;
   prepareRetry?: () => Promise<void> | void;
+  signal?: AbortSignal;
 };
 
 class FastAgentInferenceError extends Error {
@@ -252,9 +282,25 @@ function formatFastAgentInferenceFailure(
   }
 }
 
-function waitForFastAgentInferenceRetry(delayMs: number): Promise<void> {
-  return new Promise((resolve) => {
-    setTimeout(resolve, delayMs);
+function waitForFastAgentInferenceRetry(
+  delayMs: number,
+  signal?: AbortSignal,
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const abort = () => {
+      clearTimeout(timer);
+      reject(signal?.reason ?? new Error('The inference retry was aborted.'));
+    };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', abort);
+      resolve();
+    }, delayMs);
+
+    if (signal?.aborted) {
+      abort();
+      return;
+    }
+    signal?.addEventListener('abort', abort, { once: true });
   });
 }
 
@@ -265,6 +311,7 @@ async function runFastAgentInferenceWithRetries<T>(
 ): Promise<T> {
   for (let retryNumber = 0; ; retryNumber += 1) {
     try {
+      options.signal?.throwIfAborted();
       return await run();
     } catch (error) {
       // Session loss is the session manager's bootstrap signal, not a
@@ -305,7 +352,7 @@ async function runFastAgentInferenceWithRetries<T>(
         );
       }
       await options.prepareRetry?.();
-      await waitForFastAgentInferenceRetry(delayMs);
+      await waitForFastAgentInferenceRetry(delayMs, options.signal);
     }
   }
 
@@ -553,7 +600,6 @@ export async function answerFastAgentQuestion({
   const turnVisibleMessages: ModelMessage[] = [];
   let mirroredMessageCount = 0;
   let canonicalConversationId: string | null = null;
-  let launchedTaskMessage: string | null = null;
   let lastVisibleMessage = '';
   let inferenceRetryReply: FastAgentReplyHandle | undefined;
   let inferenceRetryMessageIndex: number | undefined;
@@ -658,10 +704,16 @@ export async function answerFastAgentQuestion({
       platformEventHandling,
       platformEventVisibility,
       retryTaskStartAvailable: Boolean(adapter.retryTaskStart),
+      releaseVersion: resolveRoomoteReleaseVersion(
+        Env.RELEASE_PRODUCT_VERSION,
+        Env.RELEASE_VERSION,
+        packageJson.version,
+      ),
     });
     const integrationCallSignatures = new Set<string>();
     const completedTaskActions = new Set<string>();
     let visibleUpdatePosted = false;
+    let kickoffPosted = false;
     let closed = false;
     let nativeToolInvoked = false;
     let retriedTaskStart = false;
@@ -855,6 +907,37 @@ export async function answerFastAgentQuestion({
             return { success: true, delivered: true, closed };
           }
 
+          case FAST_AGENT_NATIVE_TOOL_NAMES.getChatMessageContext: {
+            const args = chatMessageContextArgsSchema.parse(call.args);
+            if (!adapter.getChatMessageContext) {
+              return {
+                success: false,
+                error: 'Chat message context is unavailable for this turn.',
+              };
+            }
+            throwIfTurnCancelled();
+            return await adapter.getChatMessageContext(args);
+          }
+
+          case FAST_AGENT_NATIVE_TOOL_NAMES.getChatChannelMessages: {
+            const args = chatChannelMessagesArgsSchema.parse(call.args);
+            if (!adapter.getChatChannelMessages) {
+              return {
+                success: false,
+                error: 'Chat channel history is unavailable for this turn.',
+              };
+            }
+            throwIfTurnCancelled();
+            return await adapter.getChatChannelMessages({
+              ...args,
+              ...(conversation.surface === 'slack' && !args.oldest
+                ? {
+                    oldest: getFastAgentDefaultSlackHistoryOldest(args.latest),
+                  }
+                : {}),
+            });
+          }
+
           case FAST_AGENT_NATIVE_TOOL_NAMES.integrationCall: {
             const args = integrationCallArgsSchema.parse(call.args);
             if (args.integrationId !== BRAIN_MCP_ID) {
@@ -894,9 +977,6 @@ export async function answerFastAgentQuestion({
 
           case FAST_AGENT_NATIVE_TOOL_NAMES.launchTask: {
             const args = launchTaskArgsSchema.parse(call.args);
-            if (completedTaskActions.has('launch_task')) {
-              return { success: false, error: 'A task was already launched.' };
-            }
             const validEnvironmentIds = new Set(
               availableEnvironments.map((environment) => environment.id),
             );
@@ -918,7 +998,18 @@ export async function answerFastAgentQuestion({
                 error: `Model "${args.model}" is not enabled for new tasks. Choose an exact ID from Available Delegated Task Models.`,
               };
             }
-            completedTaskActions.add('launch_task');
+            const signature = `launch_task:${JSON.stringify([
+              args.prompt,
+              args.environmentId ?? null,
+              args.model ?? null,
+            ])}`;
+            if (completedTaskActions.has(signature)) {
+              return {
+                success: false,
+                error: 'The same task was already launched in this turn.',
+              };
+            }
+            completedTaskActions.add(signature);
             let kickoffDelivered = false;
             const deliverKickoff = async (task: {
               taskId: string;
@@ -937,11 +1028,11 @@ export async function answerFastAgentQuestion({
                 .join('\n\n');
               throwIfTurnCancelled();
               await postReply(
-                { purpose: 'closeout', message, kickoff: true },
+                { purpose: 'progress', message, kickoff: true },
                 true,
               );
               kickoffDelivered = true;
-              launchedTaskMessage = message;
+              kickoffPosted = true;
             };
             throwIfTurnCancelled();
             const result = await adapter.launchTask({
@@ -953,7 +1044,11 @@ export async function answerFastAgentQuestion({
             });
             if (result.success) {
               currentActiveTasks.set(result.taskId, { taskId: result.taskId });
-              if (!kickoffDelivered) {
+              if (result.kickoffDelivered) {
+                visibleUpdatePosted = true;
+                kickoffPosted = true;
+              }
+              if (!kickoffDelivered && !result.kickoffDelivered) {
                 await deliverKickoff(result);
               }
             }
@@ -1074,71 +1169,107 @@ export async function answerFastAgentQuestion({
           boundSubagentSessionIDs.clear();
         };
         let promptForAttempt = selectedPrompt;
+        let promptTimeoutMs: number | null = null;
         try {
           return await runFastAgentInferenceWithRetries(
-            () =>
-              generateTrackedNonTaskTextInOpenCodeSession(
-                {
-                  userId,
-                  surface:
-                    NON_TASK_INFERENCE_SURFACES.fastAgentQuestionAnswering,
-                  modelRole: FAST_AGENT_MODEL_ROLE,
-                  timeoutMs: null,
-                  maxProviderRetryAttempts: FAST_AGENT_INFERENCE_MAX_RETRIES,
-                  system,
-                  prompt: promptForAttempt,
-                  onProviderRetry: reportProviderRetryEvent,
-                  ...(imageFiles.length
-                    ? {
-                        files: imageFiles,
-                        requiredInputModality: 'image' as const,
+            async () => {
+              const providerRetryAbortController = new AbortController();
+              const promptSignal = signal
+                ? AbortSignal.any([signal, providerRetryAbortController.signal])
+                : providerRetryAbortController.signal;
+              let providerRetryTimeout:
+                | ReturnType<typeof setTimeout>
+                | undefined;
+              try {
+                return await generateTrackedNonTaskTextInOpenCodeSession(
+                  {
+                    userId,
+                    surface:
+                      NON_TASK_INFERENCE_SURFACES.fastAgentQuestionAnswering,
+                    modelRole: FAST_AGENT_MODEL_ROLE,
+                    timeoutMs: promptTimeoutMs,
+                    maxProviderRetryAttempts: FAST_AGENT_INFERENCE_MAX_RETRIES,
+                    system,
+                    prompt: promptForAttempt,
+                    onProviderRetry: async (event) => {
+                      // Initial turns stay unbounded unless the provider enters
+                      // recovery. Start this deadline once so repeated provider
+                      // retry events cannot extend the conversation lock.
+                      if (
+                        promptTimeoutMs === null &&
+                        providerRetryTimeout === undefined
+                      ) {
+                        providerRetryTimeout = setTimeout(() => {
+                          providerRetryAbortController.abort(
+                            new NonTaskOpenCodePromptTimeoutError(
+                              FAST_AGENT_INFERENCE_RETRY_ATTEMPT_TIMEOUT_MS,
+                            ),
+                          );
+                        }, FAST_AGENT_INFERENCE_RETRY_ATTEMPT_TIMEOUT_MS);
+                        providerRetryTimeout.unref();
                       }
-                    : {}),
-                },
-                openCodeSession,
-                {
-                  directory: nativeRuntime.directory,
-                  env: nativeRuntime.env,
-                  permission: FAST_AGENT_SESSION_PERMISSIONS,
-                  signal,
-                  promptOnlySubagents: true,
-                  tools: FAST_AGENT_NATIVE_TOOL_FILTER,
-                  onModelResolved: (model) => {
-                    diagnostics.recordModelResolved(model);
+                      await reportProviderRetryEvent(event);
+                    },
+                    ...(imageFiles.length
+                      ? {
+                          files: imageFiles,
+                          requiredInputModality: 'image' as const,
+                        }
+                      : {}),
                   },
-                  onPromptStarted: () => {
-                    diagnostics.markInferenceStarted();
+                  openCodeSession,
+                  {
+                    directory: nativeRuntime.directory,
+                    env: nativeRuntime.env,
+                    permission: FAST_AGENT_SESSION_PERMISSIONS,
+                    signal: promptSignal,
+                    promptOnlySubagents: true,
+                    tools: FAST_AGENT_NATIVE_TOOL_FILTER,
+                    onModelResolved: (model) => {
+                      diagnostics.recordModelResolved(model);
+                    },
+                    onPromptStarted: () => {
+                      diagnostics.markInferenceStarted();
+                    },
+                    onSessionReady: (openCodeSessionID) => {
+                      unbindAllExecutors();
+                      unbindExecutors.add(
+                        bindFastAgentNativeToolExecutor(
+                          openCodeSessionID,
+                          executeNativeTool,
+                        ),
+                      );
+                    },
+                    onSubagentSessionReady: (subagentSessionID) => {
+                      if (boundSubagentSessionIDs.has(subagentSessionID))
+                        return;
+                      boundSubagentSessionIDs.add(subagentSessionID);
+                      unbindExecutors.add(
+                        bindFastAgentNativeToolExecutor(
+                          subagentSessionID,
+                          (call) =>
+                            (call.agent ===
+                              ROOMOTE_OPENCODE_ADVISOR_AGENT_NAME ||
+                              call.agent ===
+                                ROOMOTE_OPENCODE_JUDGE_AGENT_NAME) &&
+                            isFastAgentSubagentTool(call.name)
+                              ? executeNativeTool(call)
+                              : Promise.resolve({
+                                  success: false,
+                                  error:
+                                    'That tool is reserved for the Fast parent agent.',
+                                }),
+                        ),
+                      );
+                    },
                   },
-                  onSessionReady: (openCodeSessionID) => {
-                    unbindAllExecutors();
-                    unbindExecutors.add(
-                      bindFastAgentNativeToolExecutor(
-                        openCodeSessionID,
-                        executeNativeTool,
-                      ),
-                    );
-                  },
-                  onSubagentSessionReady: (subagentSessionID) => {
-                    if (boundSubagentSessionIDs.has(subagentSessionID)) return;
-                    boundSubagentSessionIDs.add(subagentSessionID);
-                    unbindExecutors.add(
-                      bindFastAgentNativeToolExecutor(
-                        subagentSessionID,
-                        (call) =>
-                          (call.agent === ROOMOTE_OPENCODE_ADVISOR_AGENT_NAME ||
-                            call.agent === ROOMOTE_OPENCODE_JUDGE_AGENT_NAME) &&
-                          isFastAgentSubagentTool(call.name)
-                            ? executeNativeTool(call)
-                            : Promise.resolve({
-                                success: false,
-                                error:
-                                  'That tool is reserved for the Fast parent agent.',
-                              }),
-                      ),
-                    );
-                  },
-                },
-              ),
+                );
+              } finally {
+                if (providerRetryTimeout) {
+                  clearTimeout(providerRetryTimeout);
+                }
+              }
+            },
             reportRoomoteInferenceRetry,
             {
               // OpenCode already owns retries while a provider turn remains
@@ -1158,7 +1289,12 @@ export async function answerFastAgentQuestion({
                 // appending the same turn to a poisoned transcript.
                 openCodeSession.id = undefined;
                 promptForAttempt = serializedBootstrapPrompt;
+                // Preserve unbounded initial turns, which may run native tools,
+                // but do not let a clean-session recovery hold the conversation
+                // lock forever if the replacement provider request stalls.
+                promptTimeoutMs = FAST_AGENT_INFERENCE_RETRY_ATTEMPT_TIMEOUT_MS;
               },
+              signal,
             },
           );
         } finally {
@@ -1172,10 +1308,18 @@ export async function answerFastAgentQuestion({
 
     throwIfTurnCancelled();
     if (!closed) {
-      const message =
-        promptText.trim() ||
-        'I could not complete that request within the available turn.';
-      await postReply({ purpose: 'closeout', message });
+      const message = promptText.trim();
+      if (message) {
+        await postReply({ purpose: 'closeout', message });
+      } else if (!kickoffPosted) {
+        // A delivered kickoff is already a complete visible handoff artifact.
+        // Stay silent rather than append a generic closeout that duplicates it.
+        await postReply({
+          purpose: 'closeout',
+          message:
+            'I could not complete that request within the available turn.',
+        });
+      }
     }
     await mirrorPendingMessages();
     return lastVisibleMessage;
@@ -1194,6 +1338,16 @@ export async function answerFastAgentQuestion({
       if (canonicalConversationId) {
         fastAgentOpenCodeSessionManager.invalidate(canonicalConversationId);
       }
+      if (inferenceRetryReply) {
+        await replaceInferenceRetryReply(
+          {
+            purpose: 'closeout',
+            message:
+              'The inference retry was interrupted before it completed. Please send the request again.',
+          },
+          true,
+        );
+      }
       throw signal.reason instanceof Error ? signal.reason : error;
     }
     if (canonicalConversationId) {
@@ -1204,9 +1358,8 @@ export async function answerFastAgentQuestion({
     }
     if (platformEvent) throw error;
 
-    const message = launchedTaskMessage
-      ? 'I posted the task kickoff, but the task could not be queued. Please retry.'
-      : error instanceof FastAgentInferenceError
+    const message =
+      error instanceof FastAgentInferenceError
         ? formatFastAgentInferenceFailure(error.failure)
         : 'I hit an error while handling that request. Please try again in a moment.';
     try {
