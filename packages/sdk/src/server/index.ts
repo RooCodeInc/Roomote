@@ -60,6 +60,14 @@ export {
   enqueueActivePrReviewFollowUp,
   type ActivePrReviewFollowUpRequest,
 } from './lib/task-runs/active-pr-review-follow-up';
+export {
+  PULL_REQUEST_MERGEABILITY_CHECK_QUEUE_NAME,
+  PULL_REQUEST_MERGEABILITY_INITIAL_DELAY_MS,
+  PULL_REQUEST_MERGEABILITY_RETRY_DELAY_MS,
+  enqueuePullRequestMergeabilityCheck,
+  pullRequestMergeabilityCheckRequestSchema,
+  type PullRequestMergeabilityCheckRequest,
+} from './lib/task-runs/pull-request-mergeability-check';
 export * from './lib/manager-slack';
 export * from './lib/automation-result-metadata';
 export * from './automations';
@@ -262,6 +270,7 @@ export {
 export * from './lib/task-runs/pr-review-action';
 export * from './lib/task-runs/pr-review-follow-up-dispatch';
 export * from './lib/task-runs/notify-fast-agent-parent-on-pr-feedback';
+export * from './lib/task-runs/notify-fast-agent-parent-on-pull-request-conflict';
 
 export {
   formatPrStatusChangeTaskHistoryText,

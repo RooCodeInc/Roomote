@@ -172,6 +172,15 @@ export type FastAgentParentEvent =
       pullRequest: FastAgentPullRequestContext;
       status: 'merged' | 'closed';
       actorLogin: string;
+    }
+  | {
+      type: 'pull_request_conflict_detected';
+      taskId: string;
+      runId: number;
+      taskUrl: string;
+      pullRequest: FastAgentPullRequestContext;
+      conflictDetectedAt: string;
+      message: string;
     };
 
 export async function listFastAgentPullRequestContexts(
@@ -291,6 +300,8 @@ function buildEventClientMessageSeed(event: FastAgentParentEvent): string {
       return `fast-parent-pr-feedback:${event.feedbackId}`;
     case 'pull_request_status_changed':
       return `fast-parent-pr-status:${event.taskId}:${event.pullRequest.url}:${event.status}`;
+    case 'pull_request_conflict_detected':
+      return `fast-parent-pr-conflict:${event.taskId}:${event.pullRequest.url}:${event.conflictDetectedAt}`;
     case 'task_settled':
       return `fast-parent-settle:${event.runId}`;
   }
@@ -847,11 +858,13 @@ export async function deliverFastAgentParentEvent(params: {
       signal: releaseTurnLock.signal,
       turnSource: 'platform_event',
       platformEventHandling:
-        params.event.type === 'pull_request_feedback'
+        params.event.type === 'pull_request_feedback' ||
+        params.event.type === 'pull_request_conflict_detected'
           ? 'present_only'
           : 'default',
       platformEventVisibility:
         params.event.type === 'pull_request_feedback' ||
+        params.event.type === 'pull_request_conflict_detected' ||
         params.event.type === 'automation_triggered'
           ? 'required'
           : 'optional',
