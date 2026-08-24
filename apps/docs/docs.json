@@ -42,7 +42,7 @@
     "groups": [
       {
         "group": "Getting Started",
-        "pages": ["index", "self-hosting", "homelab"]
+        "pages": ["index", "slack-quickstart", "self-hosting", "homelab"]
       },
       {
         "group": "Using Roomote",

@@ -1,0 +1,56 @@
+---
+title: Roomote in Slack in 60 seconds
+icon: message-square
+description: Start a Roomote task from Slack and steer the cloud agent from the same thread.
+---
+
+Once your admin has connected Roomote to Slack, you can start agent work from
+the channel where the work is already being discussed. **No local setup is
+required.**
+
+<Steps>
+  <Step title="Invite Roomote to a channel">
+    In Slack, open the channel where you want to use Roomote and invite the bot.
+    You can type `/invite @Roomote` or add it from the channel's integrations.
+  </Step>
+  <Step title="Mention Roomote with an ask">
+    `@`-mention Roomote with a task, a question, or a link to a failing check or
+    pull request. Include any constraints that matter.
+  </Step>
+  <Step title="Watch the task in-thread">
+    Roomote starts a cloud agent in an isolated sandbox, works the job, and
+    posts progress and the result back in the Slack thread.
+  </Step>
+  <Step title="Follow up to steer it">
+    Reply in the same thread to add context, correct the direction, narrow the
+    scope, or ask Roomote to take the next step. The replies continue the same
+    task.
+  </Step>
+</Steps>
+
+## Try one
+
+```text
+@Roomote Fix the failing CI check: https://github.com/acme/api/actions/runs/123.
+Run the relevant tests and open a draft PR.
+```
+
+```text
+@Roomote Fix the small pagination bug described in this thread. Keep the API
+contract unchanged and open a PR.
+```
+
+```text
+@Roomote What does this error mean, and where should I look first?
+TypeError: Cannot read properties of undefined (reading 'status')
+```
+
+```text
+@Roomote Review https://github.com/acme/web/pull/456 and explain why its check
+is failing. Do not change code yet.
+```
+
+<Tip>
+  If Slack does not recognize `@Roomote`, ask an admin to install the app and
+  connect a working environment. See [Slack setup](/providers/communications/slack).
+</Tip>
