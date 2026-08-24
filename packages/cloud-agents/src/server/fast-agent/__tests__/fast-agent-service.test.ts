@@ -433,6 +433,12 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         description: 'Repository access',
         tools: [{ name: 'search_code' }],
       },
+      {
+        id: 'roomote',
+        name: 'Roomote',
+        description: 'Deployment management',
+        tools: [{ name: 'manage_custom_automations' }],
+      },
     ]);
 
     mocks.generateText.mockImplementation(
@@ -479,6 +485,21 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
           ).resolves.toEqual({
             success: true,
             result: { matches: ['fast-agent.ts'] },
+          });
+          await expect(
+            subagentExecutor({
+              agent,
+              name: nativeToolNames.integrationCall,
+              args: {
+                integrationId: 'roomote',
+                toolName: 'manage_custom_automations',
+                arguments: { action: 'delete', automationId: 'automation-1' },
+              },
+            }),
+          ).resolves.toEqual({
+            success: false,
+            error:
+              'Custom automation management is reserved for the Fast parent agent.',
           });
           await expect(
             subagentExecutor({

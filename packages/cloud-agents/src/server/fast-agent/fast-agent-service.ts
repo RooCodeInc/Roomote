@@ -944,12 +944,19 @@ export async function answerFastAgentQuestion({
 
           case FAST_AGENT_NATIVE_TOOL_NAMES.integrationCall: {
             const args = integrationCallArgsSchema.parse(call.args);
+            const managesCustomAutomations =
+              args.integrationId === 'roomote' &&
+              args.toolName === MANAGE_CUSTOM_AUTOMATIONS_TOOL.name;
+            if (call.agent && managesCustomAutomations) {
+              return {
+                success: false,
+                error:
+                  'Custom automation management is reserved for the Fast parent agent.',
+              };
+            }
             if (
               args.integrationId !== BRAIN_MCP_ID &&
-              !(
-                args.integrationId === 'roomote' &&
-                args.toolName === MANAGE_CUSTOM_AUTOMATIONS_TOOL.name
-              )
+              !managesCustomAutomations
             ) {
               const ackError = requireAcknowledgement();
               if (ackError) return ackError;
