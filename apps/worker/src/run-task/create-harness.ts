@@ -68,6 +68,8 @@ interface CreateHarnessResult {
   getSubprocess: () => ResultPromise | null;
   /** Unsubscribe from message/envelope event subscriptions. */
   unsubscribe: () => Promise<void>;
+  /** Deliver the turn's closing assistant message before idle settlement. */
+  flushPendingCompletionEvents: () => Promise<void>;
 }
 
 export async function createHarness({
@@ -222,5 +224,6 @@ export async function createHarness({
     harness: reconnectableHarness,
     getSubprocess: () => reconnectableHarness.getCurrentSubprocess(),
     unsubscribe,
+    flushPendingCompletionEvents: unsubscribe.flushPendingCompletionEvents,
   };
 }

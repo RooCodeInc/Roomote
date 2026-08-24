@@ -37,6 +37,7 @@ const {
     harness: {},
     getSubprocess: vi.fn(() => ({})),
     unsubscribe: vi.fn().mockResolvedValue(undefined),
+    flushPendingCompletionEvents: vi.fn().mockResolvedValue(undefined),
   }),
   createInitialTaskStateMock: vi.fn(() => ({
     sessionId: undefined,
@@ -244,6 +245,7 @@ describe('Zero integration runtime gating', () => {
       harness: {},
       getSubprocess: vi.fn(() => ({})),
       unsubscribe: vi.fn().mockResolvedValue(undefined),
+      flushPendingCompletionEvents: vi.fn().mockResolvedValue(undefined),
     });
     waitForShutdownMock.mockResolvedValue({
       sessionId: undefined,

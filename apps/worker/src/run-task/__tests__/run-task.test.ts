@@ -17,6 +17,7 @@ const {
   taskRunsUpdateRuntimeStateMock,
   taskRunsUpdateMock,
   createHarnessMock,
+  flushPendingCompletionEventsMock,
   createInitialTaskStateMock,
   createServerMock,
   drainSlackMessagesMock,
@@ -68,7 +69,9 @@ const {
     harness: {},
     getSubprocess: vi.fn(() => ({})),
     unsubscribe: vi.fn().mockResolvedValue(undefined),
+    flushPendingCompletionEvents: vi.fn().mockResolvedValue(undefined),
   }),
+  flushPendingCompletionEventsMock: vi.fn().mockResolvedValue(undefined),
   createInitialTaskStateMock: vi.fn(() => ({
     sessionId: undefined,
     cancelTriggeredAt: undefined,
@@ -308,7 +311,10 @@ describe('runTask', () => {
       harness: {},
       getSubprocess: vi.fn(() => ({})),
       unsubscribe: vi.fn().mockResolvedValue(undefined),
+      flushPendingCompletionEvents: flushPendingCompletionEventsMock,
     });
+    flushPendingCompletionEventsMock.mockReset();
+    flushPendingCompletionEventsMock.mockResolvedValue(undefined);
     createServerMock.mockReturnValue({
       close: vi.fn().mockResolvedValue(undefined),
     });
@@ -1900,6 +1906,7 @@ describe('runTask', () => {
       },
       getSubprocess: vi.fn(() => ({})),
       unsubscribe: vi.fn().mockResolvedValue(undefined),
+      flushPendingCompletionEvents: vi.fn().mockResolvedValue(undefined),
     });
     getMcpServerConfigsMock.mockResolvedValueOnce({
       servers: {
@@ -2085,6 +2092,7 @@ describe('runTask', () => {
       },
       getSubprocess: vi.fn(() => ({})),
       unsubscribe: vi.fn().mockResolvedValue(undefined),
+      flushPendingCompletionEvents: vi.fn().mockResolvedValue(undefined),
     });
     getMcpServerConfigsMock.mockResolvedValueOnce({ servers: {} });
 
@@ -2483,6 +2491,7 @@ describe('runTask', () => {
         },
         getSubprocess: vi.fn(() => ({})),
         unsubscribe: vi.fn().mockResolvedValue(undefined),
+        flushPendingCompletionEvents: vi.fn().mockResolvedValue(undefined),
       };
     });
     createServerMock.mockImplementationOnce(() => {
@@ -3356,6 +3365,7 @@ describe('runTask', () => {
       },
       getSubprocess: vi.fn(() => currentSubprocess),
       unsubscribe: vi.fn().mockResolvedValue(undefined),
+      flushPendingCompletionEvents: vi.fn().mockResolvedValue(undefined),
     });
 
     const runTaskPromise = runTask({
@@ -4486,6 +4496,16 @@ describe('runTask', () => {
 
   it('waits for queued runtime-state writes before marking the job idle', async () => {
     let resolveRuntimeUpdate: (() => void) | null = null;
+    const lifecycleOrder: string[] = [];
+    const onStatus = vi.fn().mockImplementation(async () => {
+      lifecycleOrder.push('status');
+    });
+    flushPendingCompletionEventsMock.mockImplementation(async () => {
+      lifecycleOrder.push('completion');
+    });
+    taskRunsDoneMock.mockImplementationOnce(async () => {
+      lifecycleOrder.push('idle');
+    });
     const pendingRuntimeUpdate = new Promise<{ updated: boolean }>(
       (resolve) => {
         resolveRuntimeUpdate = () => resolve({ updated: true });
@@ -4519,7 +4539,7 @@ describe('runTask', () => {
       harnessInstructions: undefined,
       agentInstructions: undefined,
       environmentConfig: undefined,
-      callbacks: {},
+      callbacks: { onStatus },
       context: {},
       logger: {
         info: vi.fn(),
@@ -4555,11 +4575,14 @@ describe('runTask', () => {
 
     await new Promise((resolve) => setImmediate(resolve));
 
+    onStatus.mockClear();
+    lifecycleOrder.length = 0;
     const onExitPromise = harnessManager!.callbacks?.onExit?.();
 
     await new Promise((resolve) => setImmediate(resolve));
 
     expect(taskRunsDoneMock).not.toHaveBeenCalled();
+    expect(onStatus).not.toHaveBeenCalled();
 
     expect(resolveRuntimeUpdate).toBeTypeOf('function');
     resolveRuntimeUpdate!();
@@ -4569,6 +4592,12 @@ describe('runTask', () => {
       id: 104,
       status: RunStatus.Idle,
     });
+    expect(onStatus).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 104 }),
+      RunStatus.Idle,
+      expect.any(Object),
+    );
+    expect(lifecycleOrder).toEqual(['completion', 'idle', 'status']);
   });
 
   describe('worker crash handlers', () => {
