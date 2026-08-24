@@ -9,6 +9,18 @@ CREATE INDEX "slack_fast_integration_calls_conversation_idx" ON "slack_fast_inte
 -- Phase-one N-1 bridge. Current application code reads and writes only
 -- fast_agent_conversations. These triggers keep the previous release safe
 -- during the migration-to-rollout window and after a one-release rollback.
+CREATE FUNCTION "serialize_fast_conversation_bridge_writes"()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+	PERFORM pg_advisory_xact_lock(
+		hashtextextended('fast-agent-conversation-history-bridge', 0)
+	);
+	RETURN NULL;
+END;
+$$;--> statement-breakpoint
+
 CREATE FUNCTION "sync_legacy_fast_conversation_to_canonical"()
 RETURNS trigger
 LANGUAGE plpgsql
@@ -181,6 +193,16 @@ BEGIN
 	RETURN NEW;
 END;
 $$;--> statement-breakpoint
+
+CREATE TRIGGER "serialize_legacy_fast_conversation_bridge_writes"
+BEFORE INSERT OR UPDATE ON "slack_quick_answers"
+FOR EACH STATEMENT
+EXECUTE FUNCTION "serialize_fast_conversation_bridge_writes"();--> statement-breakpoint
+
+CREATE TRIGGER "serialize_canonical_fast_conversation_bridge_writes"
+BEFORE INSERT OR UPDATE ON "fast_agent_conversations"
+FOR EACH STATEMENT
+EXECUTE FUNCTION "serialize_fast_conversation_bridge_writes"();--> statement-breakpoint
 
 CREATE TRIGGER "sync_legacy_fast_conversation_to_canonical"
 AFTER INSERT OR UPDATE ON "slack_quick_answers"

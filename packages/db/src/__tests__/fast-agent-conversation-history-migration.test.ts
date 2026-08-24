@@ -132,7 +132,10 @@ describe('Fast conversation history migration', () => {
         for (const statement of statements) {
           await tx.execute(sql.raw(statement));
         }
+      });
 
+      await db.transaction(async (tx) => {
+        await tx.execute(sql.raw(`SET LOCAL search_path TO "${schemaName}"`));
         const [backfilled] = await tx.execute<{
           compatibility_messages: unknown[];
           legacy_conversation_ids: string[];
@@ -247,6 +250,74 @@ describe('Fast conversation history migration', () => {
         expect(createdForRollback?.messages).toEqual([
           { role: 'assistant', content: 'created by N' },
         ]);
+      });
+
+      await db.transaction(async (tx) => {
+        await tx.execute(sql.raw(`SET LOCAL search_path TO "${schemaName}"`));
+        await tx.execute(
+          sql.raw(`
+          CREATE FUNCTION "pause_canonical_history_write"()
+          RETURNS trigger
+          LANGUAGE plpgsql
+          AS $$
+          BEGIN
+            PERFORM pg_sleep(0.5);
+            RETURN NEW;
+          END;
+          $$
+        `),
+        );
+        await tx.execute(
+          sql.raw(`
+          CREATE TRIGGER "pause_canonical_history_write"
+          BEFORE UPDATE OF "compatibility_messages"
+          ON "fast_agent_conversations"
+          FOR EACH ROW
+          EXECUTE FUNCTION "pause_canonical_history_write"()
+        `),
+        );
+      });
+
+      const canonicalWrite = db.transaction(async (tx) => {
+        await tx.execute(sql.raw(`SET LOCAL search_path TO "${schemaName}"`));
+        await tx.execute(sql`
+          UPDATE "fast_agent_conversations"
+          SET "compatibility_messages" = "compatibility_messages" ||
+            '[{"role":"assistant","content":"concurrent N write"}]'::jsonb
+          WHERE "id" = ${currentLegacyId}
+        `);
+      });
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      const legacyWrite = db.transaction(async (tx) => {
+        await tx.execute(sql.raw(`SET LOCAL search_path TO "${schemaName}"`));
+        await tx.execute(sql`
+          UPDATE "slack_quick_answers"
+          SET "messages" = "messages" ||
+            '[{"role":"user","content":"concurrent N-1 write"}]'::jsonb
+          WHERE "id" = ${currentLegacyId}
+        `);
+      });
+
+      await expect(
+        Promise.all([canonicalWrite, legacyWrite]),
+      ).resolves.toBeDefined();
+
+      await db.transaction(async (tx) => {
+        await tx.execute(sql.raw(`SET LOCAL search_path TO "${schemaName}"`));
+        const [conversation] = await tx.execute<{
+          compatibility_messages: unknown[];
+        }>(sql`
+          SELECT "compatibility_messages"
+          FROM "fast_agent_conversations"
+          WHERE "id" = ${currentLegacyId}
+        `);
+
+        expect(conversation?.compatibility_messages).toEqual(
+          expect.arrayContaining([
+            { role: 'assistant', content: 'concurrent N write' },
+            { role: 'user', content: 'concurrent N-1 write' },
+          ]),
+        );
       });
     } finally {
       await db.execute(
