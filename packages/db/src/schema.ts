@@ -2840,6 +2840,40 @@ export const fastAgentConversations = pgTable(
 );
 
 /**
+ * fast_agent_pr_feedback_deliveries
+ *
+ * Durable conversation-scoped claims for PR feedback presented by Fast.
+ * Task-level PR event deliveries intentionally fan out to every linked task;
+ * this table prevents those projections from posting the same review result
+ * more than once to a shared Fast conversation.
+ */
+export const fastAgentPrFeedbackDeliveries = pgTable(
+  'fast_agent_pr_feedback_deliveries',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    conversationId: uuid('conversation_id')
+      .notNull()
+      .references(() => fastAgentConversations.id, { onDelete: 'cascade' }),
+    feedbackId: text('feedback_id').notNull(),
+    taskId: text('task_id').references(() => tasks.id, {
+      onDelete: 'set null',
+    }),
+    leaseToken: uuid('lease_token'),
+    leaseExpiresAt: timestamp('lease_expires_at'),
+    deliveredAt: timestamp('delivered_at'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('fast_agent_pr_feedback_deliveries_identity_unique').on(
+      table.conversationId,
+      table.feedbackId,
+    ),
+    index('fast_agent_pr_feedback_deliveries_task_idx').on(table.taskId),
+  ],
+);
+
+/**
  * N-1 compatibility aliases for legacy Fast session UUIDs. Multiple legacy
  * rows can collapse to one provider-neutral identity when a reply destination
  * moved before this migration. Keep every UUID addressable while the legacy
@@ -2872,6 +2906,21 @@ export const fastAgentConversationsRelations = relations(
       references: [users.id],
     }),
     aliases: many(fastAgentConversationAliases),
+    prFeedbackDeliveries: many(fastAgentPrFeedbackDeliveries),
+  }),
+);
+
+export const fastAgentPrFeedbackDeliveriesRelations = relations(
+  fastAgentPrFeedbackDeliveries,
+  ({ one }) => ({
+    conversation: one(fastAgentConversations, {
+      fields: [fastAgentPrFeedbackDeliveries.conversationId],
+      references: [fastAgentConversations.id],
+    }),
+    task: one(tasks, {
+      fields: [fastAgentPrFeedbackDeliveries.taskId],
+      references: [tasks.id],
+    }),
   }),
 );
 

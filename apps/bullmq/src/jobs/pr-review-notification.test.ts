@@ -337,6 +337,7 @@ describe('prReviewNotificationJob', () => {
     expect(mockNotifyFastAgentParent).toHaveBeenCalledWith({
       run: expect.objectContaining({ id: 1, taskId: 'task-1' }),
       deliveryIds: ['delivery-2', 'delivery-1'],
+      feedbackSourceIds: [expect.any(String)],
       pullRequest: {
         provider: 'github',
         host: 'github.com',

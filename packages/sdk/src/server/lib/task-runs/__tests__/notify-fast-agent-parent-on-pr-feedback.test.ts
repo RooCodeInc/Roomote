@@ -17,6 +17,10 @@ const mocks = vi.hoisted(() => {
 
   return {
     claimReturning: vi.fn(),
+    claimConversationDelivery: vi.fn(),
+    completeConversationDelivery: vi.fn(),
+    releaseConversationDelivery: vi.fn(),
+    findReusableOwner: vi.fn(),
     findClaimRun: vi.fn(),
     updateSet: vi.fn(),
     recordLifecycle: vi.fn(),
@@ -40,6 +44,10 @@ vi.mock('@roomote/db/server', () => ({
       }),
     })),
   },
+  claimFastAgentPrFeedbackDelivery: mocks.claimConversationDelivery,
+  completeFastAgentPrFeedbackDelivery: mocks.completeConversationDelivery,
+  releaseFastAgentPrFeedbackDelivery: mocks.releaseConversationDelivery,
+  findReusableGitHubPrFollowUpOwner: mocks.findReusableOwner,
   and: vi.fn((...args: unknown[]) => args),
   asc: vi.fn((value: unknown) => value),
   desc: vi.fn((value: unknown) => value),
@@ -78,13 +86,17 @@ const fastParent = {
   },
 };
 
-function makeRun(payload: Record<string, unknown>): TaskRun {
+function makeRun(
+  payload: Record<string, unknown>,
+  overrides: Partial<Pick<TaskRun, 'id' | 'taskId'>> = {},
+): TaskRun {
   return {
     id: 200,
     taskId: 'child-task',
     payload,
     result: null,
     error: null,
+    ...overrides,
   } as TaskRun;
 }
 
@@ -108,6 +120,13 @@ describe('notifyFastAgentParentOnPrFeedback', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.claimReturning.mockResolvedValue([{ id: 200 }]);
+    mocks.claimConversationDelivery.mockResolvedValue({
+      id: 'delivery-claim',
+      leaseToken: 'lease-token',
+    });
+    mocks.completeConversationDelivery.mockResolvedValue(undefined);
+    mocks.releaseConversationDelivery.mockResolvedValue(undefined);
+    mocks.findReusableOwner.mockResolvedValue({ taskId: 'child-task' });
     mocks.findClaimRun.mockResolvedValue({ id: 200 });
     mocks.deliverParentEvent.mockResolvedValue('delivered');
     mocks.recordLifecycle.mockResolvedValue(undefined);
@@ -170,6 +189,52 @@ describe('notifyFastAgentParentOnPrFeedback', () => {
     const firstEvent = mocks.deliverParentEvent.mock.calls[0]?.[0]?.event;
     const secondEvent = mocks.deliverParentEvent.mock.calls[1]?.[0]?.event;
     expect(secondEvent.feedbackId).toBe(firstEvent.feedbackId);
+  });
+
+  it('uses stable source events instead of generated summary text for fallback identity', async () => {
+    const run = makeRun({ fastAgentParent: fastParent });
+    await notifyFastAgentParentOnPrFeedback({
+      run,
+      ...input,
+      summary: 'First generated summary.',
+      feedbackSourceIds: ['github-review:123'],
+    });
+    await notifyFastAgentParentOnPrFeedback({
+      run,
+      ...input,
+      summary: 'Differently worded generated summary.',
+      feedbackSourceIds: ['github-review:123'],
+    });
+
+    const firstEvent = mocks.deliverParentEvent.mock.calls[0]?.[0]?.event;
+    const secondEvent = mocks.deliverParentEvent.mock.calls[1]?.[0]?.event;
+    expect(secondEvent.feedbackId).toBe(firstEvent.feedbackId);
+  });
+
+  it('delivers once through the newest reusable task in a shared conversation', async () => {
+    const olderRun = makeRun(
+      { fastAgentParent: fastParent },
+      { id: 100, taskId: 'older-task' },
+    );
+    const newerRun = makeRun(
+      { fastAgentParent: fastParent },
+      { id: 200, taskId: 'newer-task' },
+    );
+    mocks.findReusableOwner.mockResolvedValue({ taskId: 'newer-task' });
+
+    await notifyFastAgentParentOnPrFeedback({ run: olderRun, ...input });
+    await notifyFastAgentParentOnPrFeedback({ run: newerRun, ...input });
+
+    expect(mocks.deliverParentEvent).toHaveBeenCalledOnce();
+    expect(mocks.deliverParentEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: expect.objectContaining({
+          taskId: 'newer-task',
+          runId: 200,
+        }),
+      }),
+    );
+    expect(mocks.claimConversationDelivery).toHaveBeenCalledOnce();
   });
 
   it('shares a feedback identity between direct review handoff and webhook delivery', async () => {

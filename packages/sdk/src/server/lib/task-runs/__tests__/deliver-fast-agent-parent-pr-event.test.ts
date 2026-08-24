@@ -15,6 +15,9 @@ const mocks = vi.hoisted(() => {
 
   return {
     claimReturning: vi.fn(),
+    claimConversationDelivery: vi.fn(),
+    completeConversationDelivery: vi.fn(),
+    releaseConversationDelivery: vi.fn(),
     findClaimRun: vi.fn(),
     updateSet: vi.fn(),
     sql: vi.fn((strings: TemplateStringsArray, ...values: unknown[]) => ({
@@ -39,6 +42,9 @@ vi.mock('@roomote/db/server', () => ({
       }),
     })),
   },
+  claimFastAgentPrFeedbackDelivery: mocks.claimConversationDelivery,
+  completeFastAgentPrFeedbackDelivery: mocks.completeConversationDelivery,
+  releaseFastAgentPrFeedbackDelivery: mocks.releaseConversationDelivery,
   and: vi.fn((...args: unknown[]) => args),
   asc: vi.fn((value: unknown) => value),
   desc: vi.fn((value: unknown) => value),
@@ -88,6 +94,12 @@ describe('deliverFastAgentParentPrEvent', () => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
     mocks.claimReturning.mockResolvedValue([{ id: run.id }]);
     mocks.findClaimRun.mockResolvedValue({ id: run.id });
+    mocks.claimConversationDelivery.mockResolvedValue({
+      id: 'conversation-claim',
+      leaseToken: 'lease-token',
+    });
+    mocks.completeConversationDelivery.mockResolvedValue(undefined);
+    mocks.releaseConversationDelivery.mockResolvedValue(undefined);
   });
 
   it('claims the event with stale-lease recovery before delivering it', async () => {
@@ -116,6 +128,63 @@ describe('deliverFastAgentParentPrEvent', () => {
     await deliver({ deliver: deliverEvent });
 
     expect(deliverEvent).not.toHaveBeenCalled();
+  });
+
+  it('uses a conversation-scoped claim when feedback can arrive through multiple tasks', async () => {
+    const deliverEvent = vi.fn().mockResolvedValue('delivered');
+    mocks.claimConversationDelivery
+      .mockResolvedValueOnce({
+        id: 'conversation-claim',
+        leaseToken: 'lease-token',
+      })
+      .mockResolvedValueOnce(null);
+    const conversationClaim = {
+      conversation: {
+        surface: 'slack' as const,
+        workspaceId: 'T123',
+        conversationId: '100.001',
+      },
+      feedbackId: 'feedback-1',
+    };
+
+    await deliverFastAgentParentPrEvent({
+      run,
+      deliveryKey,
+      logPrefix: 'testFastParentPrEvent',
+      conversationClaim,
+      deliver: deliverEvent,
+      recordLifecycle: vi.fn().mockResolvedValue(undefined),
+    });
+    await deliverFastAgentParentPrEvent({
+      run: { id: 201, taskId: 'sibling-task' },
+      deliveryKey,
+      logPrefix: 'testFastParentPrEvent',
+      conversationClaim,
+      deliver: deliverEvent,
+      recordLifecycle: vi.fn().mockResolvedValue(undefined),
+    });
+
+    expect(mocks.claimConversationDelivery).toHaveBeenNthCalledWith(1, {
+      conversation: {
+        surface: 'slack',
+        workspaceId: 'T123',
+        conversationId: '100.001',
+      },
+      feedbackId: 'feedback-1',
+      taskId: 'child-task',
+    });
+    expect(mocks.claimConversationDelivery).toHaveBeenNthCalledWith(2, {
+      conversation: {
+        surface: 'slack',
+        workspaceId: 'T123',
+        conversationId: '100.001',
+      },
+      feedbackId: 'feedback-1',
+      taskId: 'sibling-task',
+    });
+    expect(deliverEvent).toHaveBeenCalledOnce();
+    expect(mocks.completeConversationDelivery).toHaveBeenCalledOnce();
+    expect(mocks.findClaimRun).not.toHaveBeenCalled();
   });
 
   it('stores the claim on the canonical task row across resumed runs', async () => {

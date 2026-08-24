@@ -4,6 +4,7 @@ import { getTaskUrl } from '@roomote/cloud-agents/server';
 import {
   type TaskRun,
   db,
+  findReusableGitHubPrFollowUpOwner,
   recordTaskRunLifecycleEvent,
 } from '@roomote/db/server';
 import {
@@ -21,28 +22,46 @@ import { deliverFastAgentParentPrEvent } from './deliver-fast-agent-parent-pr-ev
 const PR_FEEDBACK_DELIVERY_LOCK_WAIT_MS = 30_000;
 
 function buildFeedbackId(params: {
-  taskId: string;
+  conversation: {
+    surface: string;
+    workspaceId: string;
+    conversationId: string;
+  };
+  provider: SourceControlProvider;
+  host?: string | null;
   repository: string;
   prNumber: number;
-  deliveryIds: string[];
+  summary: string;
+  feedbackSourceIds?: string[];
   reviewTaskId?: string;
   reviewHeadSha?: string;
+  reviewResult?: {
+    reviewKind: 'initial' | 'sync' | null;
+    outcome: string | null;
+    findingCount: number | null;
+    approvalStatus: 'approved' | 'skipped' | null;
+  };
 }): string {
-  const identityParts =
+  const identityParts = [
+    params.conversation.surface,
+    params.conversation.workspaceId,
+    params.conversation.conversationId,
+    params.provider,
+    params.host ?? '',
+    params.repository,
+    String(params.prNumber),
+    params.reviewTaskId ?? '',
+    params.reviewHeadSha ?? '',
+    params.reviewResult?.reviewKind ?? '',
+    params.reviewResult?.outcome ?? '',
+    String(params.reviewResult?.findingCount ?? ''),
+    params.reviewResult?.approvalStatus ?? '',
     params.reviewTaskId && params.reviewHeadSha
-      ? [
-          params.taskId,
-          params.repository,
-          String(params.prNumber),
-          params.reviewTaskId,
-          params.reviewHeadSha,
-        ]
-      : [
-          params.taskId,
-          params.repository,
-          String(params.prNumber),
-          ...[...params.deliveryIds].sort(),
-        ];
+      ? ''
+      : [...(params.feedbackSourceIds ?? [params.summary.trim()])]
+          .sort()
+          .join(','),
+  ];
 
   return createHash('sha256')
     .update(identityParts.join(':'))
@@ -66,6 +85,7 @@ export async function notifyFastAgentParentOnPrFeedback(params: {
     status?: PullRequestStatus | null;
   };
   summary: string;
+  feedbackSourceIds?: string[];
   suggestedActionQuestion?: string;
   suggestedActionPrompt?: string;
   reviewResult?: {
@@ -81,13 +101,29 @@ export async function notifyFastAgentParentOnPrFeedback(params: {
     return false;
   }
 
+  const reusableOwner = await findReusableGitHubPrFollowUpOwner({
+    repoFullName: params.pullRequest.repository,
+    prNumber: params.pullRequest.number,
+    branchName: '',
+    sourceControlProvider: params.pullRequest.provider,
+    host: params.pullRequest.host,
+    fastAgentConversation: parent.conversation,
+  });
+  if (reusableOwner && reusableOwner.taskId !== params.run.taskId) {
+    return true;
+  }
+
   const feedbackId = buildFeedbackId({
-    taskId: params.run.taskId,
+    conversation: parent.conversation,
+    provider: params.pullRequest.provider,
+    host: params.pullRequest.host,
     repository: params.pullRequest.repository,
     prNumber: params.pullRequest.number,
-    deliveryIds: params.deliveryIds,
+    summary: params.summary,
+    feedbackSourceIds: params.feedbackSourceIds,
     reviewTaskId: params.reviewTaskId,
     reviewHeadSha: params.reviewHeadSha,
+    reviewResult: params.reviewResult,
   });
   const notifiedResultKey = `fastAgentParentPrFeedback:${feedbackId}`;
   const pullRequest: FastAgentPullRequestContext = {
@@ -104,6 +140,10 @@ export async function notifyFastAgentParentOnPrFeedback(params: {
     run: params.run,
     deliveryKey: notifiedResultKey,
     logPrefix: 'notifyFastAgentParentOnPrFeedback',
+    conversationClaim: {
+      conversation: parent.conversation,
+      feedbackId,
+    },
     deliver: () =>
       deliverFastAgentParentEvent({
         parent,

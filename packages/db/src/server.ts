@@ -89,6 +89,7 @@ export * from './lib/instance-report';
 export * from './lib/deployment-license';
 export * from './lib/license-usage-observations';
 export * from './lib/pr-review-events';
+export * from './lib/fast-agent-pr-feedback-deliveries';
 export * from './lib/invocation-identities';
 export * from './lib/webhook-retention';
 export * from './lib/brain';
@@ -175,6 +176,8 @@ export {
   slackAuthTokensRelations,
   fastAgentConversations,
   fastAgentConversationsRelations,
+  fastAgentPrFeedbackDeliveries,
+  fastAgentPrFeedbackDeliveriesRelations,
   fastAgentConversationAliases,
   fastAgentConversationAliasesRelations,
   slackConversationMessages,

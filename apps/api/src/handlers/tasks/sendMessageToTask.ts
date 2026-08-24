@@ -642,6 +642,7 @@ async function getLinkedReviewHandoffTarget({
   targetTaskId: string;
 }): Promise<{
   status: PullRequestStatus | null;
+  currentHeadSha: string | null;
   pullRequest: LinkedReviewFastHandoff['pullRequest'];
 }> {
   const repo =
@@ -695,6 +696,7 @@ async function getLinkedReviewHandoffTarget({
       prTitle: true,
       prUrl: true,
       status: true,
+      prSha: true,
     },
   });
 
@@ -709,6 +711,7 @@ async function getLinkedReviewHandoffTarget({
 
   return {
     status: prLink?.status ?? null,
+    currentHeadSha: prLink?.prSha ?? null,
     pullRequest: {
       provider: 'github',
       host: prLink?.host ?? null,
@@ -792,6 +795,17 @@ async function resolveLinkedReviewHandoff({
     (typeof sourcePayload.headSha === 'string'
       ? sourcePayload.headSha
       : undefined);
+  if (
+    reviewHeadSha &&
+    handoffTarget.currentHeadSha &&
+    reviewHeadSha !== handoffTarget.currentHeadSha
+  ) {
+    return {
+      kind: 'skip',
+      reason:
+        'Linked review handoff skipped because the review targets an older pull request head.',
+    };
+  }
   const summary =
     getLinkedReviewHandoffQuoteText(message) ??
     (parsedReview?.outcome === 'clean'
@@ -911,15 +925,15 @@ export async function sendMessageToTask({
       getFastAgentParentFromPayload(run.payload)
     ) {
       const fastHandoff = linkedReviewHandoff.fastHandoff;
+      const feedbackSourceId = `linked-review:${fastHandoff.reviewTaskId}:${fastHandoff.reviewHeadSha ?? fastHandoff.reviewRunId}`;
       await notifyFastAgentParentOnPrFeedback({
         run: {
           id: run.id,
           taskId,
           payload: run.payload,
         },
-        deliveryIds: [
-          `linked-review:${fastHandoff.reviewTaskId}:${fastHandoff.reviewHeadSha ?? fastHandoff.reviewRunId}`,
-        ],
+        deliveryIds: [feedbackSourceId],
+        feedbackSourceIds: [feedbackSourceId],
         reviewTaskId: fastHandoff.reviewTaskId,
         ...(fastHandoff.reviewHeadSha
           ? { reviewHeadSha: fastHandoff.reviewHeadSha }

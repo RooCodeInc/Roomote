@@ -9,6 +9,7 @@ import {
   isExitedRunStatus,
   isResumableTaskPayloadKind,
   type SourceControlProvider,
+  type FastAgentConversation,
 } from '@roomote/types';
 
 import { db } from '../db';
@@ -245,15 +246,29 @@ export async function findReusableGitHubPrFollowUpOwner({
   prNumber,
   branchName,
   sourceControlProvider = 'github',
+  host,
+  fastAgentConversation,
 }: {
   repoFullName: string;
   prNumber: number;
   branchName: string;
   sourceControlProvider?: SourceControlProvider;
+  host?: string | null;
+  fastAgentConversation?: Pick<
+    FastAgentConversation,
+    'surface' | 'workspaceId' | 'conversationId'
+  >;
 }): Promise<ReusableGitHubPrFollowUpOwner | null> {
   const baseConditions = [
     isNull(taskRuns.canceledAt),
     inArray(taskRuns.payloadKind, [...REUSABLE_FOLLOW_UP_OWNER_TYPES]),
+    ...(fastAgentConversation
+      ? [
+          sql`${taskRuns.payload}->'fastAgentParent'->'conversation'->>'surface' = ${fastAgentConversation.surface}`,
+          sql`${taskRuns.payload}->'fastAgentParent'->'conversation'->>'workspaceId' = ${fastAgentConversation.workspaceId}`,
+          sql`${taskRuns.payload}->'fastAgentParent'->'conversation'->>'conversationId' = ${fastAgentConversation.conversationId}`,
+        ]
+      : []),
   ];
 
   const taskPullRequestRows = await db
@@ -266,9 +281,12 @@ export async function findReusableGitHubPrFollowUpOwner({
         eq(taskPullRequests.sourceControlProvider, sourceControlProvider),
         eq(taskPullRequests.repository, repoFullName),
         eq(taskPullRequests.prNumber, prNumber),
+        ...(host
+          ? [or(eq(taskPullRequests.host, host), isNull(taskPullRequests.host))]
+          : []),
       ),
     )
-    .orderBy(desc(taskRuns.createdAt));
+    .orderBy(desc(taskRuns.createdAt), desc(taskRuns.id));
 
   const taskPullRequestMatch = await pickReusableFollowUpOwner(
     taskPullRequestRows,
@@ -291,9 +309,17 @@ export async function findReusableGitHubPrFollowUpOwner({
           ${taskRuns.payload}->>'branch' = ${branchName}
           OR ${taskRuns.payload}->>'headRef' = ${branchName}
         )`,
+        ...(host
+          ? [
+              sql`(
+                ${taskRuns.payload}->>'sourceControlHost' = ${host}
+                OR ${taskRuns.payload}->>'sourceControlHost' IS NULL
+              )`,
+            ]
+          : []),
       ),
     )
-    .orderBy(desc(taskRuns.createdAt));
+    .orderBy(desc(taskRuns.createdAt), desc(taskRuns.id));
 
   return pickReusableFollowUpOwner(branchRows, 'branch');
 }
@@ -467,7 +493,7 @@ async function fetchLatestReusableFollowUpOwnerRun(
 ): Promise<ActiveFollowUpOwnerCandidate | null> {
   const row = await db.query.taskRuns.findFirst({
     where: eq(taskRuns.taskId, taskId),
-    orderBy: desc(taskRuns.createdAt),
+    orderBy: [desc(taskRuns.createdAt), desc(taskRuns.id)],
     columns: {
       id: true,
       taskId: true,
