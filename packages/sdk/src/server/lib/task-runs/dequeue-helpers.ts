@@ -645,6 +645,7 @@ async function createProviderTokenWithRetry(
   baseDelayMs: number,
 ): Promise<SourceControlRuntimeToken | null> {
   const label = getSourceControlProviderLabel(provider);
+  let githubInlineRateLimitRetries = 0;
 
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
@@ -656,6 +657,7 @@ async function createProviderTokenWithRetry(
 
       if (githubRetryAfterMs !== null) {
         const canRetryInline =
+          githubInlineRateLimitRetries === 0 &&
           attempt < maxRetries &&
           githubRetryAfterMs <= GITHUB_TOKEN_MAX_INLINE_RATE_LIMIT_DELAY_MS;
         const log = canRetryInline ? console.warn : console.error;
@@ -672,6 +674,7 @@ async function createProviderTokenWithRetry(
         );
 
         if (canRetryInline) {
+          githubInlineRateLimitRetries += 1;
           await new Promise((resolve) =>
             setTimeout(resolve, githubRetryAfterMs),
           );
