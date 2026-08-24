@@ -30,7 +30,6 @@ export async function queueBaseBranchMergeabilityCheck(
   const candidates = await listTrackedPullRequestsForMergeability({
     repository: payload.repository.full_name,
     baseRef,
-    skipNotifiedConflicts: true,
   });
   if (candidates.length === 0) return;
 
@@ -40,7 +39,7 @@ export async function queueBaseBranchMergeabilityCheck(
     taskPullRequestIds: candidates.map((candidate) => candidate.id),
     deduplicationKey: `base:${payload.repository.full_name}:${baseRef}`,
     retryAttempt: 0,
-    allowNotifiedConflictCheck: false,
+    allowNotifiedConflictCheck: true,
   });
 }
 

@@ -31,7 +31,7 @@ describe('queuePullRequestMergeabilityCheck', () => {
     mocks.enqueue.mockResolvedValue(undefined);
   });
 
-  it('queues one delayed branch batch containing only tracked candidates', async () => {
+  it('includes notified conflicts so base pushes can re-arm them as clean', async () => {
     await queueBaseBranchMergeabilityCheck({
       ref: 'refs/heads/main',
       installation: { id: 123 },
@@ -41,7 +41,6 @@ describe('queuePullRequestMergeabilityCheck', () => {
     expect(mocks.list).toHaveBeenCalledWith({
       repository: 'owner/repo',
       baseRef: 'main',
-      skipNotifiedConflicts: true,
     });
     expect(mocks.enqueue).toHaveBeenCalledWith({
       installationId: 123,
@@ -49,7 +48,7 @@ describe('queuePullRequestMergeabilityCheck', () => {
       taskPullRequestIds: ['11111111-1111-4111-8111-111111111111'],
       deduplicationKey: 'base:owner/repo:main',
       retryAttempt: 0,
-      allowNotifiedConflictCheck: false,
+      allowNotifiedConflictCheck: true,
     });
   });
 
