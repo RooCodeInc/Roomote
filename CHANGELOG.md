@@ -20,7 +20,7 @@ This release adds a shared task board, expands Fast delegation and preferences, 
 - Let Fast launch multiple independent Roomote tasks from one Slack or Discord turn while keeping each kickoff visible and preventing repeated identical requests from creating duplicate work.
 - Notify linked Roomote tasks and their originating conversations when checks fail on a GitHub pull request, consolidating related failures and ignoring results from outdated commits.
 - Warn operators before supported inference-provider usage limits are exhausted, and deliver platform configuration issues to linked deployment admins by direct message when no alert or Manager Channel is configured.
-- Add a shared task board that groups work into Active, Needs input, Blocked / failed, and Done columns, with Mine and Everyone scopes plus task context for coordinating team work.
+- Add a shared task board that groups work into Active, Needs input, Blocked / failed, and Done columns, with ownership, participant, activity, workspace, and pull-request context for coordinating team work.
 
 ### Patch changes
 
