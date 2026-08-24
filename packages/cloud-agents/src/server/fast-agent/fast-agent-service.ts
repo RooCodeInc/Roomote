@@ -225,6 +225,8 @@ function formatFastAgentInferenceFailure(
   failure: FastAgentInferenceFailure,
 ): string {
   switch (failure.reason) {
+    case 'content_filter':
+      return 'The inference provider blocked this response with its content filter, so retrying will not help. Try rephrasing the request or asking in a new thread.';
     case 'rate_limited':
       return 'The inference provider is still rate limiting requests after retrying. Any delegated tasks can keep running; please try again when provider capacity is available.';
     case 'timeout':

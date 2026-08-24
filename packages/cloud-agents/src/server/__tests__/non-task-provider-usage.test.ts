@@ -1151,7 +1151,7 @@ describe('resolveOpenCodeSmallModel', () => {
           name: 'ContentFilterError',
           data: { message: 'The response was blocked' },
         },
-        'provider_error',
+        'content_filter',
       ],
       [
         {
@@ -1163,6 +1163,34 @@ describe('resolveOpenCodeSmallModel', () => {
     ] as const) {
       expect(classifyNonTaskInferenceError(providerError)).toMatchObject({
         reason: expectedReason,
+        retryable: false,
+      });
+    }
+  });
+
+  it('recognizes content filter errors across provider SDK shapes', async () => {
+    const { classifyNonTaskInferenceError } =
+      await import('../non-task-provider-usage.js');
+
+    for (const providerError of [
+      {
+        type: 'ContentFilterError',
+        message: 'The response was blocked',
+      },
+      {
+        name: 'APIError',
+        data: {
+          message: "The response was blocked by the provider's content filter",
+        },
+      },
+      new Error(
+        "ContentFilterError: The response was blocked by the provider's content filter",
+      ),
+    ]) {
+      expect(classifyNonTaskInferenceError(providerError)).toEqual({
+        message:
+          'The inference provider blocked the response with its content filter.',
+        reason: 'content_filter',
         retryable: false,
       });
     }

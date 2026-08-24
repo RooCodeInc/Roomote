@@ -225,6 +225,14 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
           retryable: true,
         };
       }
+      if (detail.includes('content filter')) {
+        return {
+          message:
+            'The inference provider blocked the response with its content filter.',
+          reason: 'content_filter',
+          retryable: false,
+        };
+      }
 
       return {
         message: 'The inference provider rejected the request.',
@@ -1232,6 +1240,26 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       random.mockRestore();
       vi.useRealTimers();
     }
+  });
+
+  it('explains content filter failures without suggesting a retry', async () => {
+    mocks.generateText.mockRejectedValue(
+      new Error(
+        "ContentFilterError: The response was blocked by the provider's content filter",
+      ),
+    );
+    const adapter = callbacks();
+    const message =
+      'The inference provider blocked this response with its content filter, so retrying will not help. Try rephrasing the request or asking in a new thread.';
+
+    await expect(
+      answerFastAgentQuestion({ ...baseParams, adapter }),
+    ).resolves.toBe(message);
+    expect(mocks.generateText).toHaveBeenCalledOnce();
+    expect(adapter.postReply).toHaveBeenCalledWith({
+      purpose: 'closeout',
+      message,
+    });
   });
 
   it('does not surface a duplicate retry notice for repeated failures', async () => {
