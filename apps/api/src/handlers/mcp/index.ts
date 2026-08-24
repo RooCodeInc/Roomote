@@ -90,6 +90,8 @@ for (const integration of MCP_INTEGRATIONS.filter(
       ...getIntegrationMcpProxyOptions(integration),
       allowAuthTokens:
         getMcpIntegrationConnectionScope(integration) === 'deployment',
+      allowAutomationTokens:
+        getMcpIntegrationConnectionScope(integration) === 'deployment',
     }),
   );
 }

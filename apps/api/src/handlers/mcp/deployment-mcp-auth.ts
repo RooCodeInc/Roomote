@@ -4,6 +4,7 @@ import type { Variables } from '../../types';
 
 import {
   isRunTokenContext,
+  isAutomationTokenContext,
   McpProxyError,
   type McpAuthContext,
 } from './proxy-utils';
@@ -38,12 +39,19 @@ export async function resolveDeploymentMcpAuth(
     };
   }
 
+  if (isAutomationTokenContext(authContext)) {
+    throw new McpProxyError(
+      403,
+      `${providerName} MCP has not enabled automation-run tool policy enforcement`,
+    );
+  }
+
   if (authContext.tokenType === 'auth') {
     return { userId: authContext.userId, tokenType: 'auth' };
   }
 
   throw new McpProxyError(
     403,
-    `${providerName} MCP requires a user auth token or task run token for server-side credential access`,
+    `${providerName} MCP requires a user, task run, or authorized automation token for server-side credential access`,
   );
 }

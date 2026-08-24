@@ -56,6 +56,9 @@ import type {
   environmentRepositoryMappings,
   automations,
   customAutomations,
+  automationRuns,
+  automationRunEffects,
+  automationRunChildren,
   trackedMessages,
 } from './schema';
 
@@ -581,3 +584,11 @@ export type CreateCustomAutomation = Omit<
   typeof customAutomations.$inferInsert,
   Timestamp
 >;
+
+export type AutomationRun = typeof automationRuns.$inferSelect;
+export type CreateAutomationRun = Omit<
+  typeof automationRuns.$inferInsert,
+  Generated
+>;
+export type AutomationRunEffect = typeof automationRunEffects.$inferSelect;
+export type AutomationRunChild = typeof automationRunChildren.$inferSelect;

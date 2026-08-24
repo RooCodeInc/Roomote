@@ -3,6 +3,7 @@ import { createMiddleware } from 'hono/factory';
 
 import {
   validateAuthToken,
+  validateAutomationToken,
   validateMcpAccessToken,
   validateRunToken,
 } from '@roomote/auth';
@@ -57,6 +58,22 @@ export const tokenAuthMiddleware = () =>
     const token = extractBearerToken(c);
 
     if (token) {
+      const automationTokenRoute =
+        c.req.path.startsWith('/api/mcp/') ||
+        c.req.path.startsWith('/api/mcp-routing/');
+      if (automationTokenRoute) {
+        try {
+          const automationContext = await validateAutomationToken(token);
+          if (await deploymentAllowsTokenAuth()) {
+            c.set('authContext', automationContext);
+            await next();
+            return;
+          }
+        } catch {
+          // Not an automation token, continue through existing token types.
+        }
+      }
+
       // Try run token first (has more specific claims)
       let isRunToken = false;
 

@@ -14,6 +14,9 @@ const {
   mockEnqueueTask,
   mockSlackNotifier,
   mockAdapterPostMessage,
+  mockExecuteFastBuiltInAutomation,
+  mockCompleteFastBuiltInAutomationNoop,
+  mockRecordFastPreflightFailure,
 } = vi.hoisted(() => ({
   slackInstallationsTable: {
     botAccessToken: 'botAccessToken',
@@ -42,6 +45,9 @@ const {
   mockEnqueueTask: vi.fn(),
   mockSlackNotifier: vi.fn(),
   mockAdapterPostMessage: vi.fn(),
+  mockExecuteFastBuiltInAutomation: vi.fn(),
+  mockCompleteFastBuiltInAutomationNoop: vi.fn(),
+  mockRecordFastPreflightFailure: vi.fn(),
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -144,6 +150,13 @@ vi.mock('../custom-automation-schedule', () => ({
   })),
 }));
 
+vi.mock('../fast-automation-runner', () => ({
+  buildScheduledAutomationOccurrenceKey: vi.fn(() => 'scheduled-slot'),
+  executeFastBuiltInAutomation: mockExecuteFastBuiltInAutomation,
+  completeFastBuiltInAutomationNoop: mockCompleteFastBuiltInAutomationNoop,
+  recordFastBuiltInAutomationPreflightFailure: mockRecordFastPreflightFailure,
+}));
+
 import { announcerJob } from '../announcer';
 
 const MERGED_PR_ROWS = [
@@ -187,6 +200,11 @@ describe('announcerJob non-Slack posting', () => {
     mockMergedPullRequestRows.mockResolvedValue(MERGED_PR_ROWS);
     mockLoadAutomationThreadFeedbackContext.mockResolvedValue(null);
     mockEnqueueTask.mockResolvedValue({ taskId: 'announcer-task-1' });
+    mockExecuteFastBuiltInAutomation.mockResolvedValue({
+      acquired: true,
+      status: 'succeeded',
+      automationRunId: 'run-1',
+    });
 
     let nextMessageId = 100;
     mockAdapterPostMessage.mockImplementation(
@@ -231,6 +249,62 @@ describe('announcerJob non-Slack posting', () => {
     expect(mockRecordAutomationRunOutcome).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({ key: 'announcer', status: 'succeeded' }),
+    );
+  });
+
+  it('routes the pilot through Fast without launching a sandbox', async () => {
+    mockGetAutomationRuntime.mockResolvedValue({
+      key: 'announcer',
+      enabled: true,
+      scheduleMode: 'daily',
+      lastRunAt: null,
+      instructions: null,
+      destination: null,
+      executionRoute: 'fast',
+    });
+    mockResolveAutomationRuntimeDestination.mockResolvedValue({
+      provider: 'telegram',
+      channelId: '-100555',
+    });
+
+    const result = await announcerJob({ manualTrigger: true });
+
+    expect(result.completed).toBe(true);
+    expect(mockEnqueueTask).not.toHaveBeenCalled();
+    expect(mockExecuteFastBuiltInAutomation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        automationKey: 'announcer',
+        triggerKind: 'manual',
+        destination: { provider: 'telegram', channelId: '-100555' },
+        prompt: expect.stringContaining('logicalMessageKey `summary`'),
+      }),
+    );
+  });
+
+  it('records deterministic Fast preflight failures durably', async () => {
+    mockGetAutomationRuntime.mockResolvedValue({
+      key: 'announcer',
+      enabled: true,
+      scheduleMode: 'daily',
+      lastRunAt: null,
+      instructions: null,
+      destination: null,
+      executionRoute: 'fast',
+    });
+    mockResolveAutomationRuntimeDestination.mockResolvedValue({
+      provider: 'telegram',
+      channelId: '-100555',
+    });
+    mockMergedPullRequestRows.mockRejectedValue(new Error('collector failed'));
+
+    const result = await announcerJob({ manualTrigger: true });
+
+    expect(result.errors).toEqual(['collector failed']);
+    expect(mockRecordFastPreflightFailure).toHaveBeenCalledWith(
+      expect.objectContaining({
+        automationKey: 'announcer',
+        error: 'collector failed',
+      }),
     );
   });
 

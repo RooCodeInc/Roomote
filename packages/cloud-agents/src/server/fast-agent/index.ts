@@ -3,6 +3,8 @@ export * from './fast-agent-conversation';
 export * from './fast-agent-conversation-repository';
 export * from './fast-agent-prompt';
 export * from './fast-agent-service';
+export * from './fast-automation-execution';
+export * from './fast-automation-prompt';
 export * from './fast-agent-turn-lock';
 export * from './fast-agent-session';
 export * from './fast-agent-task-launcher';

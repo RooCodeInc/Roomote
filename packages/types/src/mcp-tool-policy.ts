@@ -96,7 +96,7 @@ const PYLON_READ_ONLY_TOOL_NAMES = [
   'get_account',
 ] as const;
 
-const SENTRY_READ_ONLY_TOOL_NAMES = [
+export const SENTRY_READ_ONLY_TOOL_NAMES = [
   'whoami',
   'find_organizations',
   'find_teams',

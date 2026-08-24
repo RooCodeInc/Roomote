@@ -46,6 +46,8 @@ vi.mock('@roomote/sdk/server', () => ({
   securityAuditorJob: vi.fn(),
   sentryTriageJob: vi.fn(),
   suggesterJob: vi.fn(),
+  retryFailedFastAutomationDeliveries: vi.fn(),
+  resumeReadyFastAutomationRuns: vi.fn(),
 }));
 
 vi.mock('./redis', () => ({ getRedis: () => ({}) }));
@@ -103,6 +105,15 @@ describe('startScheduler', () => {
     expect(
       mocks.queue.upsertJobScheduler.mock.invocationCallOrder.at(-1),
     ).toBeLessThan(mocks.workerConstructor.mock.invocationCallOrder[0]!);
+  });
+
+  it('installs the Fast automation delivery repair cadence', async () => {
+    await startScheduler();
+
+    expect(mocks.queue.upsertJobScheduler).toHaveBeenCalledWith(
+      ScheduledJobName.FastAutomationDeliveryRetry,
+      { every: 60 * 1000 },
+    );
   });
 
   it('schedules Brain maintenance nightly', async () => {

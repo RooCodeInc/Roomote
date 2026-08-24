@@ -532,7 +532,7 @@ function createRoomoteMcpRouter(options: {
       // are only mounted on the public endpoint and retain the resolved user.
       const actingUserId = await resolveActingUserIdOrNull(auth);
       const memberAuth =
-        options.memberTools && rawAuth
+        options.memberTools && rawAuth && rawAuth.tokenType !== 'automation'
           ? {
               userId: actingUserId ?? undefined,
               authContext:

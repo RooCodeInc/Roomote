@@ -23,6 +23,35 @@ export const runTokenPayloadSchema = z.object({
 
 export type RunTokenPayload = z.infer<typeof runTokenPayloadSchema>;
 
+export const automationTokenPayloadSchema = z.object({
+  iss: z.string().min(1, 'Issuer (iss) is required'),
+  sub: z.string().uuid('Subject (sub) must be an automation run ID'),
+  exp: z.number().int().positive('Expiration (exp) must be a positive integer'),
+  iat: z.number().int().positive('Issued at (iat) must be a positive integer'),
+  nbf: z.number().int().positive('Not before (nbf) must be a positive integer'),
+  v: z.literal(1, { errorMap: () => ({ message: 'Version must be 1' }) }),
+  r: z.object({
+    t: z.literal('automation'),
+    p: z.literal('deployment'),
+    pv: z.number().int().positive(),
+    l: z.string().min(1),
+  }),
+});
+
+export type AutomationTokenPayload = z.infer<
+  typeof automationTokenPayloadSchema
+>;
+
+export interface AutomationTokenContext {
+  automationRunId: string;
+  leaseOwner: string;
+  policyVersion: number;
+  principal: 'deployment';
+  tokenType: 'automation';
+  userId: null;
+  version: number;
+}
+
 /**
  * RunTokenContext
  *

@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+
 import {
   buildManagerAutomationRootSummaryPromptContract,
   enqueueTask,
@@ -15,7 +17,11 @@ import {
   gte,
   isNotNull,
 } from '@roomote/db/server';
-import { ALL_REPOSITORIES, TaskPayloadKind } from '@roomote/types';
+import {
+  ALL_REPOSITORIES,
+  TaskPayloadKind,
+  type FastAutomationExecutionPolicy,
+} from '@roomote/types';
 
 import { loadAutomationThreadFeedbackContext } from './automation-thread-feedback';
 import {
@@ -33,6 +39,12 @@ import {
   type AutomationJobResult,
   type AutomationRunOpts,
 } from './types';
+import {
+  buildScheduledAutomationOccurrenceKey,
+  completeFastBuiltInAutomationNoop,
+  executeFastBuiltInAutomation,
+  recordFastBuiltInAutomationPreflightFailure,
+} from './fast-automation-runner';
 
 const LOG_PREFIX = '[announcer]';
 const SCHEDULE_HOUR_LOCAL = 2;
@@ -57,6 +69,16 @@ const WINDOW_DAYS: Record<AnnouncerFrequency, number> = {
   weekly: 7,
 };
 const MAX_DETAIL_MESSAGE_CHARS = 3_000;
+const ANNOUNCER_FAST_POLICY: FastAutomationExecutionPolicy = {
+  version: 1,
+  allowedToolsByIntegration: {},
+  maxIntegrationCalls: 0,
+  maxIntegrationResponseBytes: 500_000,
+  maxChildTasks: 0,
+  allowedEnvironmentIds: [],
+  reporting: 'required',
+  childKickoff: 'silent_allowed',
+};
 
 async function findEligibleDeployments(): Promise<DeploymentContext[]> {
   // Merged-PR data comes from the provider-neutral taskPullRequests table,
@@ -231,6 +253,27 @@ ${detailMessages.map((message) => `---\n${message}`).join('\n')}
 Do not send an acknowledgement or progress update. Treat later replies in this thread as follow-up questions about the digest.`;
 }
 
+function buildAnnouncerFastPrompt(params: {
+  mergedPullRequests: MergedPullRequest[];
+  instructions?: string | null;
+  recentThreadFeedback?: string | null;
+}): string {
+  const detailMessages = buildAnnouncerDetailThreadMessages(
+    params.mergedPullRequests,
+  );
+  return `${buildAnnouncerSummaryPrompt(
+    params.mergedPullRequests,
+    params.instructions,
+    params.recentThreadFeedback,
+  )}
+
+Post the summary with \`send_chat_reply\` using purpose \`closeout\` and logicalMessageKey \`summary\`. Then post each exact detail chunk below with purpose \`closeout\` and logicalMessageKey \`detail-1\`, \`detail-2\`, and so on. Do not alter the detail chunks.
+
+${detailMessages.map((message, index) => `--- detail-${index + 1}\n${message}`).join('\n')}
+
+After every message is delivered, call \`complete_automation_run\` with outcome \`succeeded\`. Do not add final prose.`;
+}
+
 export async function announcerJob(
   opts: AutomationRunOpts = {},
 ): Promise<AutomationJobResult> {
@@ -249,9 +292,21 @@ export async function announcerJob(
   let skipped = 0;
 
   for (const deployment of eligibleDeployments) {
+    let failureRuntime: Awaited<
+      ReturnType<typeof getAutomationRuntime>
+    > | null = null;
+    let failureDestination: ResolvedAutomationDestination | null = null;
+    let failureFrequency = 'unknown';
+    let failureTimeZone = 'UTC';
+    let fastExecutionStarted = false;
+    const manualOccurrenceKey = opts.manualTrigger
+      ? `manual:${randomUUID()}`
+      : null;
     try {
       const runtime = await getAutomationRuntime('announcer');
       const frequency = runtime.enabled ? runtime.scheduleMode : 'off';
+      failureRuntime = runtime;
+      failureFrequency = frequency ?? 'off';
 
       if (!frequency || frequency === 'off' || !(frequency in WINDOW_DAYS)) {
         result.skippedReason = 'Automation is disabled.';
@@ -265,6 +320,7 @@ export async function announcerJob(
           runtime,
           slackConnected: deployment.slackBotToken !== null,
         }));
+      failureDestination = destination;
 
       if (!destination) {
         console.log(
@@ -277,6 +333,7 @@ export async function announcerJob(
 
       const channelId = destination.channelId;
       const timezone = (await resolveDeploymentTimeZone()).timeZone;
+      failureTimeZone = timezone;
 
       if (
         !opts.manualTrigger &&
@@ -303,11 +360,30 @@ export async function announcerJob(
           `${LOG_PREFIX} Deployment has no merged PRs in current window`,
         );
 
-        await recordAutomationRunOutcome(db, {
-          key: 'announcer',
-          status: 'skipped',
-          at: new Date(),
-        });
+        if (runtime.executionRoute === 'fast') {
+          fastExecutionStarted = true;
+          await completeFastBuiltInAutomationNoop({
+            automationKey: 'announcer',
+            triggerKind: opts.manualTrigger ? 'manual' : 'schedule',
+            occurrenceKey: opts.manualTrigger
+              ? manualOccurrenceKey!
+              : buildScheduledAutomationOccurrenceKey({
+                  automationKey: 'announcer',
+                  frequency,
+                  now,
+                  timeZone: timezone,
+                }),
+            prompt: 'No merged pull requests were found in the bounded window.',
+            policy: ANNOUNCER_FAST_POLICY,
+            destination,
+          });
+        } else {
+          await recordAutomationRunOutcome(db, {
+            key: 'announcer',
+            status: 'skipped',
+            at: new Date(),
+          });
+        }
 
         result.skippedReason = 'No merged pull requests in the window.';
         processed++;
@@ -320,6 +396,31 @@ export async function announcerJob(
         surface: destination.provider,
         now,
       });
+      if (runtime.executionRoute === 'fast') {
+        fastExecutionStarted = true;
+        const fastResult = await executeFastBuiltInAutomation({
+          automationKey: 'announcer',
+          triggerKind: opts.manualTrigger ? 'manual' : 'schedule',
+          occurrenceKey: opts.manualTrigger
+            ? manualOccurrenceKey!
+            : buildScheduledAutomationOccurrenceKey({
+                automationKey: 'announcer',
+                frequency,
+                now,
+                timeZone: timezone,
+              }),
+          prompt: buildAnnouncerFastPrompt({
+            mergedPullRequests,
+            instructions: runtime.instructions,
+            recentThreadFeedback,
+          }),
+          policy: ANNOUNCER_FAST_POLICY,
+          destination,
+        });
+        result.completed = fastResult.status !== 'failed';
+        processed++;
+        continue;
+      }
       await enqueueTask({
         task: {
           type: TaskPayloadKind.StandardTask,
@@ -362,6 +463,23 @@ export async function announcerJob(
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       result.errors.push(message);
+      if (failureRuntime?.executionRoute === 'fast' && !fastExecutionStarted) {
+        await recordFastBuiltInAutomationPreflightFailure({
+          automationKey: 'announcer',
+          triggerKind: opts.manualTrigger ? 'manual' : 'schedule',
+          occurrenceKey:
+            manualOccurrenceKey ??
+            buildScheduledAutomationOccurrenceKey({
+              automationKey: 'announcer',
+              frequency: failureFrequency,
+              now,
+              timeZone: failureTimeZone,
+            }),
+          policy: ANNOUNCER_FAST_POLICY,
+          destination: failureDestination,
+          error: message,
+        });
+      }
       await recordAutomationRunOutcome(db, {
         key: 'announcer',
         status: 'failed',

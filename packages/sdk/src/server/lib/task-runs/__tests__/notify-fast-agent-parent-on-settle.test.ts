@@ -20,6 +20,11 @@ const mocks = vi.hoisted(() => {
     claimReturning: vi.fn(),
     updateSet: vi.fn(),
     recordLifecycle: vi.fn(),
+    recordAutomationChildOutcome: vi.fn(),
+    countUnsettledAutomationChildren: vi.fn(),
+    resumeAutomationRun: vi.fn(),
+    recordAutomationOutcome: vi.fn(),
+    runFastAutomation: vi.fn(),
     deliverParentEvent: vi.fn(),
     listPullRequests: vi.fn(),
     getTaskUrl: vi.fn(() => 'https://roomote.example/task/child-task'),
@@ -47,6 +52,10 @@ vi.mock('@roomote/db/server', () => ({
   and: vi.fn((...args: unknown[]) => args),
   eq: vi.fn((...args: unknown[]) => args),
   recordTaskRunLifecycleEvent: mocks.recordLifecycle,
+  recordAutomationRunChildOutcome: mocks.recordAutomationChildOutcome,
+  countUnsettledAutomationRunChildren: mocks.countUnsettledAutomationChildren,
+  resumeAutomationRunAfterChildren: mocks.resumeAutomationRun,
+  recordAutomationRunOutcome: mocks.recordAutomationOutcome,
   sql: vi.fn((strings: TemplateStringsArray, ...values: unknown[]) => ({
     strings: [...strings],
     values,
@@ -63,6 +72,14 @@ vi.mock('@roomote/cloud-agents/server', () => ({
   canRetryFailedStart: mocks.canRetryFailedStart,
   enqueueTaskRelaunch: mocks.enqueueTaskRelaunch,
   getTaskUrl: mocks.getTaskUrl,
+  runFastAutomationExecution: mocks.runFastAutomation,
+}));
+
+vi.mock('../../../automations/fast-automation-adapter', () => ({
+  createFastAutomationExecutionAdapter: vi.fn(() => ({
+    postReport: vi.fn(),
+    launchTask: vi.fn(),
+  })),
 }));
 
 vi.mock('../../fast-agent-parent-event', () => ({
@@ -116,6 +133,10 @@ describe('notifyFastAgentParentOnSettle', () => {
     mocks.deliverParentEvent.mockResolvedValue(undefined);
     mocks.listPullRequests.mockResolvedValue([]);
     mocks.recordLifecycle.mockResolvedValue(undefined);
+    mocks.recordAutomationChildOutcome.mockResolvedValue(true);
+    mocks.countUnsettledAutomationChildren.mockResolvedValue(1);
+    mocks.recordAutomationOutcome.mockResolvedValue(undefined);
+    mocks.runFastAutomation.mockResolvedValue({ status: 'succeeded' });
     mocks.findTaskRun.mockResolvedValue(undefined);
     mocks.canRetryFailedStart.mockResolvedValue(false);
     mocks.enqueueTaskRelaunch.mockResolvedValue({ id: 201 });
@@ -154,6 +175,57 @@ describe('notifyFastAgentParentOnSettle', () => {
           reason: 'fast_agent_parent_settle_event',
         }),
       }),
+    );
+  });
+
+  it('records child settlement against an automation run parent', async () => {
+    await notifyFastAgentParentOnSettle(
+      makeRun({
+        automationRunParent: {
+          kind: 'automation_run',
+          automationRunId: '33333333-3333-4333-8333-333333333333',
+        },
+      }),
+      RunStatus.Completed,
+    );
+
+    expect(mocks.recordAutomationChildOutcome).toHaveBeenCalledWith({
+      automationRunId: '33333333-3333-4333-8333-333333333333',
+      taskId: 'child-task',
+      terminalOutcome: RunStatus.Completed,
+    });
+    expect(mocks.deliverParentEvent).not.toHaveBeenCalled();
+  });
+
+  it('resumes the automation parent after its final child settles', async () => {
+    mocks.countUnsettledAutomationChildren.mockResolvedValue(0);
+    mocks.resumeAutomationRun.mockResolvedValue({
+      id: '33333333-3333-4333-8333-333333333333',
+      automationKey: 'sentry_triage',
+      policyVersion: 1,
+    });
+
+    await notifyFastAgentParentOnSettle(
+      makeRun({
+        automationRunParent: {
+          kind: 'automation_run',
+          automationRunId: '33333333-3333-4333-8333-333333333333',
+        },
+      }),
+      RunStatus.Completed,
+      'Fix Sentry issue',
+    );
+
+    expect(mocks.runFastAutomation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        automationRunId: '33333333-3333-4333-8333-333333333333',
+        policyVersion: 1,
+        prompt: expect.stringContaining('Fix Sentry issue'),
+      }),
+    );
+    expect(mocks.recordAutomationOutcome).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ key: 'sentry_triage', status: 'succeeded' }),
     );
   });
 

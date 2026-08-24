@@ -5,6 +5,7 @@ import {
   isNull,
   mcpConnections,
   deploymentMcpEnablements,
+  getActiveAutomationRunForPrincipal,
 } from '@roomote/db/server';
 import { decrypt } from '@roomote/db/encryption';
 import { getValidAccessToken } from '@roomote/sdk/server';
@@ -12,6 +13,7 @@ import {
   getMcpIntegrationUpstreamUrl,
   getMcpIntegrationConnectionScope,
   getAllowedIntegrationMcpToolNames,
+  fastAutomationExecutionPolicySchema,
   isMcpConnectionXConfig,
   type McpIntegration,
 } from '@roomote/types';
@@ -21,6 +23,7 @@ import {
   McpProxyError,
   resolveActingUserId,
   resolveActingUserIdOrNull,
+  type McpAuthContext,
 } from './proxy-utils';
 
 async function resolveUpstreamAccessToken(
@@ -77,7 +80,10 @@ async function resolveUpstreamAccessToken(
   };
 }
 
-async function resolveDeploymentToolPolicy(mcpId: string) {
+async function resolveDeploymentToolPolicy(
+  mcpId: string,
+  auth: McpAuthContext,
+) {
   const enablement = await db.query.deploymentMcpEnablements.findFirst({
     where: and(
       eq(deploymentMcpEnablements.mcpId, mcpId),
@@ -88,9 +94,48 @@ async function resolveDeploymentToolPolicy(mcpId: string) {
     },
   });
 
+  let allowedToolNames = getAllowedIntegrationMcpToolNames(mcpId) ?? null;
+
+  if (auth.tokenType === 'automation') {
+    if (!enablement) {
+      throw new McpProxyError(
+        403,
+        `Automation run cannot use disabled integration ${mcpId}`,
+      );
+    }
+    if (
+      !auth.automationRunId ||
+      !auth.automationLeaseOwner ||
+      !auth.automationPolicyVersion
+    ) {
+      throw new McpProxyError(403, 'Automation MCP principal is incomplete');
+    }
+    const run = await getActiveAutomationRunForPrincipal({
+      automationRunId: auth.automationRunId,
+      leaseOwner: auth.automationLeaseOwner,
+      policyVersion: auth.automationPolicyVersion,
+    });
+    if (!run) {
+      throw new McpProxyError(403, 'Automation run token is no longer active');
+    }
+    const policy = fastAutomationExecutionPolicySchema.parse(
+      run.policySnapshot,
+    );
+    const runAllowed = policy.allowedToolsByIntegration[mcpId];
+    if (!runAllowed?.length) {
+      throw new McpProxyError(
+        403,
+        `Automation run is not allowed to use ${mcpId}`,
+      );
+    }
+    allowedToolNames = allowedToolNames
+      ? runAllowed.filter((toolName) => allowedToolNames?.includes(toolName))
+      : runAllowed;
+  }
+
   return {
     disabledToolNames: enablement?.disabledTools ?? null,
-    allowedToolNames: getAllowedIntegrationMcpToolNames(mcpId) ?? null,
+    allowedToolNames,
   };
 }
 
@@ -98,6 +143,7 @@ export function createIntegrationMcpProxy(
   integration: McpIntegration,
   options?: {
     allowAuthTokens?: boolean;
+    allowAutomationTokens?: boolean;
     allowedToolNames?: readonly string[];
   },
 ) {
@@ -113,6 +159,7 @@ export function createIntegrationMcpProxy(
     name: integration.name,
     upstream: upstreamUrl,
     allowAuthTokens: options?.allowAuthTokens,
+    allowAutomationTokens: options?.allowAutomationTokens,
     allowedToolNames: options?.allowedToolNames,
     // Resend's z.email() tool schemas include regex lookarounds that Azure
     // OpenAI rejects. The upstream Resend server still validates tool calls.
@@ -138,7 +185,7 @@ export function createIntegrationMcpProxy(
           actingUserId,
         );
         accessToken = resolvedConnection.accessToken;
-        toolPolicy = await resolveDeploymentToolPolicy(integration.id);
+        toolPolicy = await resolveDeploymentToolPolicy(integration.id, auth);
       } catch (error) {
         if (error instanceof McpProxyError) {
           throw error;

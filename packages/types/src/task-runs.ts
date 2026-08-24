@@ -12,6 +12,7 @@ import {
   queuedCommunicationMessageSchema,
 } from './communication';
 import { fastAgentParentSchema } from './fast-agent';
+import { automationRunParentSchema } from './automation-runs';
 import { SANDBOX_SNAPSHOT_EXPIRY_MS } from './compute-providers/worker-runtime';
 import { prActions } from './cloud-agents';
 import { ALL_REPOSITORIES } from './constants';
@@ -1042,6 +1043,8 @@ const sharedTaskPayloadSchema = z.object({
   communicationContextInherited: z.boolean().optional(),
   /** Runless Fast parent that owns this task's user-visible lifecycle. */
   fastAgentParent: fastAgentParentSchema.optional(),
+  /** Fast automation run that delegated this repository/workspace task. */
+  automationRunParent: automationRunParentSchema.optional(),
   /** Native Slack task card in the parent thread of a Fast-mode delegation.
    * Inherited onto every snapshot resume by the queue so the card follows
    * the task. */
@@ -1390,6 +1393,7 @@ const suggestedTasksPayloadSchema = delegatedTaskPayloadSchema.extend({
     .max(4000)
     .optional(),
   selectedRepositoryIds: z.array(z.string().uuid()).min(1).optional(),
+  fastAutomationAllowedEnvironmentIds: z.array(z.string().uuid()).optional(),
 });
 
 export const suggestedTasksTaskSchema = sharedTaskSchema.extend({

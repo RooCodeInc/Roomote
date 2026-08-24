@@ -21,6 +21,18 @@ export { sentryTriageJob } from './sentry-triage';
 export { suggesterJob } from './suggester';
 export { getAutomationRunner, runAutomationNow } from './run-now';
 export {
+  createFastAutomationExecutionAdapter,
+  retryFastAutomationReportDelivery,
+  retryFailedFastAutomationDeliveries,
+} from './fast-automation-adapter';
+export {
+  buildScheduledAutomationOccurrenceKey,
+  completeFastBuiltInAutomationNoop,
+  executeFastBuiltInAutomation,
+  recordFastBuiltInAutomationPreflightFailure,
+  resumeReadyFastAutomationRuns,
+} from './fast-automation-runner';
+export {
   buildDestinationTaskPayloadFields,
   findTeamsConversationDisplayName,
   findTeamsConversationServiceUrl,

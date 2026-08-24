@@ -5,6 +5,7 @@ import {
   formatSingleLineLog,
   getEffectiveAllowedMcpToolNames,
   type RunTokenContext,
+  type AutomationTokenContext,
   isMcpToolAllowed,
   isUserToken,
   parseMcpJsonRpcPayload,
@@ -56,6 +57,12 @@ export function isRunTokenContext(
   return Boolean(auth && 'runId' in auth);
 }
 
+export function isAutomationTokenContext(
+  auth: Variables['authContext'],
+): auth is AutomationTokenContext {
+  return auth?.tokenType === 'automation';
+}
+
 export function hasRealTaskRunUser(
   userId: string | null | undefined,
 ): userId is string {
@@ -93,6 +100,12 @@ export function toMcpToolResult<T extends Record<string, unknown>>(payload: T) {
 export async function resolveActingUserId(
   auth: McpAuthContext,
 ): Promise<string> {
+  if (auth.tokenType === 'automation') {
+    throw new McpProxyError(
+      403,
+      'This MCP requires a human actor; automation runs use deployment-scoped credentials only',
+    );
+  }
   if (auth.tokenType !== 'run') {
     if (!hasRealTaskRunUser(auth.userId)) {
       throw new McpProxyError(
@@ -142,6 +155,9 @@ export async function resolveActingUserId(
 export async function resolveActingUserIdOrNull(
   auth: McpAuthContext,
 ): Promise<string | null> {
+  if (auth.tokenType === 'automation') {
+    return null;
+  }
   if (auth.tokenType !== 'run') {
     return auth.userId;
   }
@@ -315,8 +331,11 @@ export interface McpAuthContext {
    * always a real user id for `auth` tokens.
    */
   userId: string | null;
-  tokenType: 'run' | 'auth';
+  tokenType: 'run' | 'auth' | 'automation';
   runId?: number;
+  automationRunId?: string;
+  automationLeaseOwner?: string;
+  automationPolicyVersion?: number;
 }
 
 interface McpProxyConfig {
@@ -328,6 +347,10 @@ interface McpProxyConfig {
     routeParams: Record<string, string>,
   ) => Promise<ResolvedCredentials>;
   allowAuthTokens?: boolean;
+  allowAutomationTokens?: boolean;
+  validateAutomationToken?: (
+    auth: AutomationTokenContext,
+  ) => Promise<Response | null>;
   validateTaskRunToken?: (auth: RunTokenContext) => Promise<Response | null>;
   allowedToolNames?: readonly string[];
   stripToolSchemaPatterns?: boolean;
@@ -716,7 +739,9 @@ export function createMcpProxy(config: McpProxyConfig) {
     resolveCredentials,
     timeoutMs = 30_000,
     allowAuthTokens = false,
+    allowAutomationTokens = false,
     validateTaskRunToken = verifyTaskRunTokenTargetExists,
+    validateAutomationToken,
     allowedToolNames,
     stripToolSchemaPatterns: shouldStripToolSchemaPatterns = false,
     guardUpstreamEgress,
@@ -790,6 +815,18 @@ export function createMcpProxy(config: McpProxyConfig) {
         tokenType: 'run',
         runId: rawAuth.runId,
       };
+    } else if (allowAutomationTokens && isAutomationTokenContext(rawAuth)) {
+      const validationError = await validateAutomationToken?.(rawAuth);
+      if (validationError) {
+        return validationError;
+      }
+      auth = {
+        userId: null,
+        tokenType: 'automation',
+        automationRunId: rawAuth.automationRunId,
+        automationLeaseOwner: rawAuth.leaseOwner,
+        automationPolicyVersion: rawAuth.policyVersion,
+      };
     } else if (allowAuthTokens && isUserToken(rawAuth)) {
       auth = {
         userId: rawAuth.userId,
@@ -811,7 +848,7 @@ export function createMcpProxy(config: McpProxyConfig) {
         403,
         -32000,
         allowAuthTokens
-          ? `${name} MCP requires a user-scoped auth token or task run token`
+          ? `${name} MCP requires a user-scoped auth token, task run token, or authorized automation token`
           : `${name} MCP is only available for task run tokens`,
       );
     }

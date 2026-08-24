@@ -79,6 +79,13 @@ import type {
   RepositoryAutomationSignals,
   McpToolAccessMode,
   FastAgentSurface,
+  AutomationDeliveryTarget,
+  AutomationExecutionRoute,
+  AutomationRunEffectKind,
+  AutomationRunEffectStatus,
+  AutomationRunStatus,
+  AutomationRunTriggerKind,
+  FastAutomationExecutionPolicy,
 } from '@roomote/types';
 import { DEFAULT_TASK_ARTIFACT_TYPE } from '@roomote/types';
 
@@ -3182,6 +3189,10 @@ export const automations = pgTable('automations', {
   lastFailedAt: timestamp('last_failed_at'),
   lastError: text('last_error'),
   scanCursor: jsonb('scan_cursor').$type<AutomationScanCursor | null>(),
+  executionRoute: text('execution_route')
+    .notNull()
+    .default('legacy_task')
+    .$type<AutomationExecutionRoute>(),
   createdAt: timestamp('created_at').notNull().defaultNow(),
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
 });
@@ -3190,6 +3201,7 @@ export const automationsRelations = relations(automations, ({ many }) => ({
   tasks: many(tasks),
   workItems: many(workItems),
   trackedMessages: many(trackedMessages),
+  runs: many(automationRuns),
 }));
 
 /**
@@ -3251,7 +3263,7 @@ export const customAutomations = pgTable(
 
 export const customAutomationsRelations = relations(
   customAutomations,
-  ({ one }) => ({
+  ({ one, many }) => ({
     environment: one(environments, {
       fields: [customAutomations.environmentId],
       references: [environments.id],
@@ -3262,6 +3274,183 @@ export const customAutomationsRelations = relations(
     }),
     lastLaunchedTask: one(tasks, {
       fields: [customAutomations.lastLaunchedTaskId],
+      references: [tasks.id],
+    }),
+    runs: many(automationRuns),
+  }),
+);
+
+/**
+ * Durable execution identity for runless Fast automation work. Scheduling and
+ * deterministic scans create/claim these rows before inference starts.
+ */
+export const automationRuns = pgTable(
+  'automation_runs',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    sourceKey: text('source_key').notNull(),
+    automationKey: text('automation_key')
+      .$type<BackgroundAutomationKey>()
+      .references(() => automations.key, { onDelete: 'restrict' }),
+    // Historical run identity remains durable if a custom definition is deleted.
+    customAutomationId: uuid('custom_automation_id'),
+    triggerKind: text('trigger_kind')
+      .notNull()
+      .$type<AutomationRunTriggerKind>(),
+    occurrenceKey: text('occurrence_key').notNull(),
+    status: text('status')
+      .notNull()
+      .default('pending')
+      .$type<AutomationRunStatus>(),
+    attemptCount: integer('attempt_count').notNull().default(0),
+    promptSnapshot: text('prompt_snapshot').notNull(),
+    policySnapshot: jsonb('policy_snapshot')
+      .notNull()
+      .$type<FastAutomationExecutionPolicy>(),
+    policyVersion: integer('policy_version').notNull(),
+    createdByUserId: text('created_by_user_id').references(() => users.id, {
+      onDelete: 'set null',
+    }),
+    destination: jsonb('destination').$type<AutomationDeliveryTarget | null>(),
+    deliveryMessageId: text('delivery_message_id'),
+    deliveryThreadId: text('delivery_thread_id'),
+    leaseOwner: text('lease_owner'),
+    leaseExpiresAt: timestamp('lease_expires_at'),
+    startedAt: timestamp('started_at'),
+    completedAt: timestamp('completed_at'),
+    lastError: text('last_error'),
+    orchestrationSessionId: text('orchestration_session_id'),
+    inputTokens: integer('input_tokens'),
+    outputTokens: integer('output_tokens'),
+    costUsd: real('cost_usd'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('automation_runs_occurrence_unique_idx').on(
+      table.sourceKey,
+      table.occurrenceKey,
+    ),
+    index('automation_runs_status_lease_idx').on(
+      table.status,
+      table.leaseExpiresAt,
+    ),
+    index('automation_runs_automation_key_idx').on(
+      table.automationKey,
+      table.createdAt,
+    ),
+    index('automation_runs_custom_automation_id_idx').on(
+      table.customAutomationId,
+      table.createdAt,
+    ),
+    check(
+      'automation_runs_source_check',
+      sql`(${table.automationKey} IS NOT NULL)::int + (${table.customAutomationId} IS NOT NULL)::int = 1`,
+    ),
+  ],
+);
+
+export const automationRunEffects = pgTable(
+  'automation_run_effects',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    automationRunId: uuid('automation_run_id')
+      .notNull()
+      .references(() => automationRuns.id, { onDelete: 'cascade' }),
+    logicalKey: text('logical_key').notNull(),
+    kind: text('kind').notNull().$type<AutomationRunEffectKind>(),
+    status: text('status')
+      .notNull()
+      .default('executing')
+      .$type<AutomationRunEffectStatus>(),
+    attemptToken: uuid('attempt_token').notNull().defaultRandom(),
+    requestSignature: text('request_signature'),
+    integrationId: text('integration_id'),
+    toolName: text('tool_name'),
+    externalId: text('external_id'),
+    metadata: jsonb('metadata').$type<Record<string, unknown> | null>(),
+    resultPreview: text('result_preview'),
+    error: text('error'),
+    startedAt: timestamp('started_at').notNull().defaultNow(),
+    completedAt: timestamp('completed_at'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('automation_run_effects_logical_key_unique_idx').on(
+      table.automationRunId,
+      table.logicalKey,
+    ),
+    index('automation_run_effects_status_idx').on(
+      table.status,
+      table.createdAt,
+    ),
+  ],
+);
+
+export const automationRunChildren = pgTable(
+  'automation_run_children',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    automationRunId: uuid('automation_run_id')
+      .notNull()
+      .references(() => automationRuns.id, { onDelete: 'cascade' }),
+    logicalLaunchKey: text('logical_launch_key').notNull(),
+    taskId: text('task_id')
+      .notNull()
+      .references(() => tasks.id, { onDelete: 'cascade' }),
+    terminalOutcome: text('terminal_outcome'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('automation_run_children_launch_key_unique_idx').on(
+      table.automationRunId,
+      table.logicalLaunchKey,
+    ),
+    uniqueIndex('automation_run_children_task_unique_idx').on(table.taskId),
+  ],
+);
+
+export const automationRunsRelations = relations(
+  automationRuns,
+  ({ one, many }) => ({
+    automation: one(automations, {
+      fields: [automationRuns.automationKey],
+      references: [automations.key],
+    }),
+    customAutomation: one(customAutomations, {
+      fields: [automationRuns.customAutomationId],
+      references: [customAutomations.id],
+    }),
+    createdByUser: one(users, {
+      fields: [automationRuns.createdByUserId],
+      references: [users.id],
+    }),
+    effects: many(automationRunEffects),
+    children: many(automationRunChildren),
+  }),
+);
+
+export const automationRunEffectsRelations = relations(
+  automationRunEffects,
+  ({ one }) => ({
+    run: one(automationRuns, {
+      fields: [automationRunEffects.automationRunId],
+      references: [automationRuns.id],
+    }),
+  }),
+);
+
+export const automationRunChildrenRelations = relations(
+  automationRunChildren,
+  ({ one }) => ({
+    run: one(automationRuns, {
+      fields: [automationRunChildren.automationRunId],
+      references: [automationRuns.id],
+    }),
+    task: one(tasks, {
+      fields: [automationRunChildren.taskId],
       references: [tasks.id],
     }),
   }),

@@ -1,4 +1,12 @@
 export {
+  type CreateAutomationTokenOptions,
+  MAX_AUTOMATION_TOKEN_TIMEOUT_MS,
+  createAutomationTokenOptionsSchema,
+  createAutomationToken,
+  validateAutomationToken,
+} from './automation-token';
+
+export {
   type CreateRunTokenOptions,
   MAX_RUN_TOKEN_TIMEOUT_MS,
   createRunTokenOptionsSchema,

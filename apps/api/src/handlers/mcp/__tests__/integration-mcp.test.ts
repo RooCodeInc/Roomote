@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import type { RunTokenContext } from '@roomote/types';
+import type { AutomationTokenContext, RunTokenContext } from '@roomote/types';
 import { getMcpIntegration } from '@roomote/types';
 
 import type { Variables } from '../../../types';
@@ -10,12 +10,14 @@ const {
   mockFindEnablement,
   mockGetValidAccessToken,
   mockDecrypt,
+  mockGetAutomationRun,
 } = vi.hoisted(() => ({
   mockFindTaskRun: vi.fn(),
   mockFindConnection: vi.fn(),
   mockFindEnablement: vi.fn(),
   mockGetValidAccessToken: vi.fn(),
   mockDecrypt: vi.fn(),
+  mockGetAutomationRun: vi.fn(),
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -39,6 +41,7 @@ vi.mock('@roomote/db/server', () => ({
   eq: vi.fn((column: unknown, value: unknown) => ({ column, value })),
   and: vi.fn((...clauses: unknown[]) => clauses),
   isNull: vi.fn((column: unknown) => ({ type: 'isNull', column })),
+  getActiveAutomationRunForPrincipal: mockGetAutomationRun,
 }));
 
 vi.mock('@roomote/sdk/server', () => ({
@@ -92,6 +95,7 @@ function createToolCallRequest(id: number, name: string) {
 function createApp(
   integrationId: string,
   authContext: Variables['authContext'],
+  options?: { allowAutomationTokens?: boolean },
 ) {
   const integration = getMcpIntegration(integrationId);
 
@@ -106,7 +110,12 @@ function createApp(
     await next();
   });
 
-  app.route('/mcp', createIntegrationMcpProxy(integration));
+  app.route(
+    '/mcp',
+    createIntegrationMcpProxy(integration, {
+      allowAutomationTokens: options?.allowAutomationTokens,
+    }),
+  );
   return app;
 }
 
@@ -151,6 +160,70 @@ describe('createIntegrationMcpProxy acting-user scoping', () => {
       disabledTools: null,
     });
     mockGetValidAccessToken.mockResolvedValue('valid-access-token');
+    mockGetAutomationRun.mockResolvedValue({
+      id: '11111111-1111-4111-8111-111111111111',
+      policySnapshot: {
+        version: 1,
+        allowedToolsByIntegration: { sentry: ['search_issues'] },
+        maxIntegrationCalls: 5,
+        maxIntegrationResponseBytes: 100_000,
+        maxChildTasks: 0,
+        allowedEnvironmentIds: [],
+        reporting: 'on_findings',
+        childKickoff: 'silent_allowed',
+      },
+    });
+  });
+
+  it('enforces an automation run immutable tool allowlist', async () => {
+    const token: AutomationTokenContext = {
+      automationRunId: '11111111-1111-4111-8111-111111111111',
+      leaseOwner: 'worker-1',
+      policyVersion: 1,
+      principal: 'deployment',
+      tokenType: 'automation',
+      userId: null,
+      version: 1,
+    };
+    mockFindConnection.mockResolvedValue({ id: 'conn-1', userId: null });
+    stubUpstreamFetch();
+    const app = createApp('sentry', token, { allowAutomationTokens: true });
+
+    const rejected = await postMcp(
+      app,
+      createToolCallRequest(1, 'update_issue'),
+    );
+    expect(rejected.status).toBe(403);
+    await expect(rejected.json()).resolves.toMatchObject({
+      error: { message: expect.stringContaining('is not allowed') },
+    });
+  });
+
+  it('rejects automation access when the deployment integration is disabled', async () => {
+    const token: AutomationTokenContext = {
+      automationRunId: '11111111-1111-4111-8111-111111111111',
+      leaseOwner: 'worker-1',
+      policyVersion: 1,
+      principal: 'deployment',
+      tokenType: 'automation',
+      userId: null,
+      version: 1,
+    };
+    mockFindEnablement.mockResolvedValue(undefined);
+    mockFindConnection.mockResolvedValue({ id: 'conn-1', userId: null });
+    stubUpstreamFetch();
+    const app = createApp('sentry', token, { allowAutomationTokens: true });
+
+    const response = await postMcp(
+      app,
+      createToolCallRequest(1, 'search_issues'),
+    );
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toMatchObject({
+      error: {
+        message: expect.stringContaining('disabled integration sentry'),
+      },
+    });
   });
 
   it('serves a deployment-scoped integration on a run with no human actor', async () => {

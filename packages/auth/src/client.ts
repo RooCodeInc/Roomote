@@ -1,4 +1,10 @@
 export {
+  type CreateAutomationTokenOptions,
+  createAutomationTokenOptionsSchema,
+  validateAutomationToken,
+} from './automation-token';
+
+export {
   type CreateRunTokenOptions,
   createRunTokenOptionsSchema,
   validateRunToken,

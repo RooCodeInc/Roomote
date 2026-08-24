@@ -4,6 +4,7 @@ import {
   type AnnouncerFrequency,
   type AutomationScanCursor,
   type AutomationTarget,
+  type AutomationExecutionRoute,
   type BackgroundAutomationKey,
   type BackgroundAutomationProvider,
   type BackgroundAutomationTargetKind,
@@ -473,6 +474,10 @@ export async function ensureAutomationRows(
         key,
         enabled: key === 'platform_issue_alerts',
         internal: isInternalAutomationKey(key),
+        executionRoute:
+          key === 'announcer' || key === 'sentry_triage'
+            ? ('fast' as const)
+            : ('legacy_task' as const),
       })),
     )
     .onConflictDoNothing({ target: automations.key });
@@ -750,6 +755,7 @@ export type AutomationRuntime = {
   settings: Record<string, unknown>;
   targets: AutomationTarget[];
   scanCursor: AutomationScanCursor | null;
+  executionRoute: AutomationExecutionRoute;
   /** Automation slack_channel target, falling back to the manager channel. */
   slackChannelId: string | null;
   managerSlackChannelId: string | null;
@@ -782,6 +788,7 @@ function toAutomationRuntime(params: {
     settings: asObject(automation?.settings),
     targets: automation?.targets ?? [],
     scanCursor: automation?.scanCursor ?? null,
+    executionRoute: automation?.executionRoute ?? 'legacy_task',
     slackChannelId: resolveAutomationSlackChannelId(
       automation ?? undefined,
       managerSlackChannelId,

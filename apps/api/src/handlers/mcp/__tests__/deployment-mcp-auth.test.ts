@@ -1,11 +1,13 @@
 import type {
   AuthTokenContext,
+  AutomationTokenContext,
   McpAccessTokenContext,
   RunTokenContext,
 } from '@roomote/types';
 
-const { mockFindTaskRun, mockEq } = vi.hoisted(() => ({
+const { mockFindTaskRun, mockGetAutomationRun, mockEq } = vi.hoisted(() => ({
   mockFindTaskRun: vi.fn(),
+  mockGetAutomationRun: vi.fn(),
   mockEq: vi.fn((column: unknown, value: unknown) => ({ column, value })),
 }));
 
@@ -17,6 +19,7 @@ vi.mock('@roomote/db/server', () => ({
   },
   taskRuns: { id: 'taskRuns.id' },
   eq: mockEq,
+  getActiveAutomationRunForPrincipal: mockGetAutomationRun,
 }));
 
 import { resolveDeploymentMcpAuth } from '../deployment-mcp-auth';
@@ -45,6 +48,9 @@ describe.each(providers)('%s deployment-scoped MCP auth', (providerName) => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockFindTaskRun.mockResolvedValue({ id: 42 });
+    mockGetAutomationRun.mockResolvedValue({
+      id: '11111111-1111-4111-8111-111111111111',
+    });
   });
 
   it('rejects missing authentication', async () => {
@@ -108,6 +114,25 @@ describe.each(providers)('%s deployment-scoped MCP auth', (providerName) => {
     });
   });
 
+  it('denies automation principals until the native MCP enforces run tool policy', async () => {
+    const automationToken: AutomationTokenContext = {
+      automationRunId: '11111111-1111-4111-8111-111111111111',
+      leaseOwner: 'worker-1',
+      policyVersion: 1,
+      principal: 'deployment',
+      tokenType: 'automation',
+      userId: null,
+      version: 1,
+    };
+
+    await expect(
+      resolveDeploymentMcpAuth(automationToken, providerName),
+    ).rejects.toMatchObject({
+      httpStatus: 403,
+      message: `${providerName} MCP has not enabled automation-run tool policy enforcement`,
+    });
+  });
+
   it('rejects MCP access tokens with the provider-specific public error', async () => {
     const mcpToken: McpAccessTokenContext = {
       userId: 'user-1',
@@ -121,7 +146,7 @@ describe.each(providers)('%s deployment-scoped MCP auth', (providerName) => {
       resolveDeploymentMcpAuth(mcpToken, providerName),
     ).rejects.toMatchObject({
       httpStatus: 403,
-      message: `${providerName} MCP requires a user auth token or task run token for server-side credential access`,
+      message: `${providerName} MCP requires a user, task run, or authorized automation token for server-side credential access`,
     });
   });
 });
