@@ -111,6 +111,16 @@ vi.mock('@roomote/github', () => ({
   }),
   getGitHubRateLimitRetryAfterMs: (...args: unknown[]) =>
     mockGetGitHubRateLimitRetryAfterMs(...args),
+  isGitHubUnauthorizedError: (error: unknown) =>
+    typeof error === 'object' &&
+    error !== null &&
+    'status' in error &&
+    Number(error.status) === 401,
+  withTaskRunGitHubTokenRetry: async (
+    taskRun: unknown,
+    operation: (token: string) => Promise<unknown>,
+    runtimeOptions?: unknown,
+  ) => operation(await mockCreateTaskRunGitHubToken(taskRun, runtimeOptions)),
 }));
 
 import type { TaskRun } from '@roomote/db/server';
@@ -163,7 +173,15 @@ beforeEach(() => {
 });
 
 function mockGreenCiChecks() {
-  mockCreateTaskRunGitHubToken.mockResolvedValue('github-token');
+  mockCreateTaskRunGitHubToken.mockImplementation(
+    async (
+      _taskRun: unknown,
+      runtimeOptions?: { onTokenMintRequest?: () => void },
+    ) => {
+      runtimeOptions?.onTokenMintRequest?.();
+      return 'github-token';
+    },
+  );
   mockPullsGet.mockResolvedValue({
     data: { head: { sha: 'abc123' }, mergeable: true },
   });
@@ -1296,10 +1314,12 @@ describe('gatherPrReviewTriageContext', () => {
   });
 
   it('collects thread counts and the latest review status', async () => {
+    const telemetry = createPrReviewNotificationTelemetry(1);
     const context = await gatherPrReviewTriageContext({
       taskRun,
       repository: request.repository,
       prNumber: request.prNumber,
+      telemetry,
     });
 
     expect(context).toEqual({
@@ -1324,8 +1344,13 @@ describe('gatherPrReviewTriageContext', () => {
       mergeable: true,
     });
     expect(mockReadSourceControlPullRequest).toHaveBeenCalledWith(
-      expect.objectContaining({ useGitHubConditionalRequests: true }),
+      expect.objectContaining({
+        useGitHubConditionalRequests: true,
+        githubToken: 'github-token',
+      }),
     );
+    expect(mockCreateTaskRunGitHubToken).toHaveBeenCalledTimes(1);
+    expect(telemetry.githubTokenMintRequests).toBe(1);
   });
 
   it('uses ETags for every GitHub live-head polling read', async () => {

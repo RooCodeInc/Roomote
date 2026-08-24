@@ -653,6 +653,7 @@ function getQueuedSnapshotResumeLinearMessages(
 
 export const runTask = async ({
   taskRun,
+  sourceControlToken,
   envVars,
   userEnvVars,
   workspacePath,
@@ -2291,6 +2292,7 @@ export const runTask = async ({
     // (syncPollingState was already called above, before task start/resume.)
     startPolling({
       taskRun,
+      sourceControlTokenExpiresAt: sourceControlToken?.expiresAt,
       task,
       state: pollingState,
       logger,

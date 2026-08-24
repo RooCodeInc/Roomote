@@ -98,6 +98,7 @@ vi.mock('@roomote/sdk/server', () => ({
   PrReviewNotificationRateLimitError: MockPrReviewNotificationRateLimitError,
   createPrReviewNotificationTelemetry: (eventsReceived: number) => ({
     githubApiCalls: 0,
+    githubTokenMintRequests: 0,
     eventsReceived,
     eventsTriaged: 0,
     triageInvoked: false,
