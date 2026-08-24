@@ -31,13 +31,13 @@ export const fastAgentCustomAutomationArgsSchema = z.object({
   targetServiceUrl: z.string().optional(),
 });
 
-export type FastAgentCustomAutomationArgs = z.infer<
+type FastAgentCustomAutomationArgs = z.infer<
   typeof fastAgentCustomAutomationArgsSchema
 >;
 
 type FastAgentCustomAutomationResult = Record<string, unknown>;
 
-export type FastAgentCustomAutomationApiContext = {
+type FastAgentCustomAutomationApiContext = {
   apiBaseUrl?: string;
   getAuthToken?: () => Promise<string>;
   userId: string;
