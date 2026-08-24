@@ -207,6 +207,7 @@ function scheduleAdoPullRequestFactSync(
     pullRequest: {
       number: pullRequest.pullRequestId,
       title: pullRequest.title,
+      body: pullRequest.description ?? null,
       url: getAdoPullRequestUrl({
         resourceContainers: payload.resourceContainers,
         pullRequest,

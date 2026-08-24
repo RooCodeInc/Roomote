@@ -2233,6 +2233,14 @@ export const pullRequestFacts = pgTable(
     state: text('state')
       .notNull()
       .$type<'open' | 'draft' | 'closed' | 'merged'>(),
+    // The PR description and labels as the provider's list payload carries
+    // them; both come free with the sync's existing list requests, and the
+    // Brain's pull-request pages are the consumer (the "why" behind a
+    // change). Both are nullable with null meaning "not known to this
+    // writer": webhook-driven upserts carry only what their event payload
+    // has, and must not erase what the list sync stored.
+    body: text('body'),
+    labels: jsonb('labels').$type<string[]>(),
     createdAtRemote: timestamp('created_at_remote').notNull(),
     updatedAtRemote: timestamp('updated_at_remote').notNull(),
     closedAtRemote: timestamp('closed_at_remote'),
