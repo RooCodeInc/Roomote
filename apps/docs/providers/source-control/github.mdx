@@ -225,6 +225,12 @@ request, actionable review feedback returns to that same conversation. Use
 PR** to handle later actionable feedback automatically, or **Dismiss** to take
 no action.
 
+Failed GitHub checks on the current head of a task-linked pull request also
+return to the linked task's conversation, with an offer to investigate and
+resolve the failure. This per-pull-request notification is separate from
+[CI Failure Triage](/automations#manager-automations), which automatically
+handles failures on a repository's default branch when enabled.
+
 ## Verify setup
 
 1. connect GitHub in setup or Settings
