@@ -71,19 +71,28 @@ describe('personal preferences', () => {
     );
   });
 
-  it('rejects communications fast mode updates when the deployment setting is disabled', async () => {
+  it('persists communications fast mode updates when the deployment setting is disabled', async () => {
     const user = await userFactory.create();
 
     await expect(
       updatePersonalPreferencesCommand(buildAuth(user.id), {
         communicationsFastModeDefault: true,
       }),
-    ).rejects.toThrow(
-      'The communications fast mode default setting is not enabled for this deployment.',
+    ).resolves.toEqual(
+      expect.objectContaining({ communicationsFastModeDefault: true }),
+    );
+
+    const storedUser = await db.query.users.findFirst({
+      where: eq(users.id, user.id),
+      columns: { metadata: true },
+    });
+
+    expect(storedUser?.metadata).toEqual(
+      expect.objectContaining({ communications_fast_mode_default: true }),
     );
   });
 
-  it('does not expose a stored communications fast mode default when the deployment setting is disabled', async () => {
+  it('exposes a stored communications fast mode default when the deployment setting is disabled', async () => {
     const user = await userFactory.create({
       metadata: { communications_fast_mode_default: true },
     });
@@ -91,7 +100,7 @@ describe('personal preferences', () => {
     await expect(
       getPersonalPreferencesCommand(buildAuth(user.id)),
     ).resolves.toEqual(
-      expect.objectContaining({ communicationsFastModeDefault: false }),
+      expect.objectContaining({ communicationsFastModeDefault: true }),
     );
   });
 
