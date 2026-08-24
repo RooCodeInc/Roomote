@@ -1475,6 +1475,42 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     }
   });
 
+  it('bounds a clean-session retry so a stalled provider cannot lock the conversation forever', async () => {
+    vi.useFakeTimers();
+    try {
+      const retryTimeout = new Error(
+        'Timed out waiting for OpenCode output after 300000ms.',
+      );
+      retryTimeout.name = 'NonTaskOpenCodePromptTimeoutError';
+      mocks.generateText
+        .mockRejectedValueOnce(new Error('TypeError: fetch failed'))
+        .mockRejectedValueOnce(retryTimeout);
+      const adapter = callbacks();
+
+      const resultPromise = answerFastAgentQuestion({ ...baseParams, adapter });
+      await vi.runAllTimersAsync();
+
+      await expect(resultPromise).resolves.toBe(
+        'The inference provider did not respond after retrying. Any delegated tasks can keep running; please try again in a moment.',
+      );
+      expect(mocks.generateText).toHaveBeenCalledTimes(2);
+      expect(mocks.generateText.mock.calls[0]?.[0]).toMatchObject({
+        timeoutMs: null,
+      });
+      expect(mocks.generateText.mock.calls[1]?.[0]).toMatchObject({
+        timeoutMs: 300_000,
+      });
+      expect(adapter.postReply).toHaveBeenLastCalledWith({
+        purpose: 'closeout',
+        message:
+          'The inference provider did not respond after retrying. Any delegated tasks can keep running; please try again in a moment.',
+      });
+      expect(mocks.invalidateSession).toHaveBeenCalledWith('conversation-1');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('backs off longer and reports a provider 429 before retrying', async () => {
     vi.useFakeTimers();
     try {

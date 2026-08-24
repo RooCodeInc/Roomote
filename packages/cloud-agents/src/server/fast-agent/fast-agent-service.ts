@@ -165,6 +165,7 @@ function buildIntegrationCallSignature({
 
 export const FAST_AGENT_INFERENCE_MAX_RETRIES = INFERENCE_PROVIDER_MAX_RETRIES;
 export const FAST_AGENT_TRANSIENT_INFERENCE_MAX_RETRIES = 6;
+const FAST_AGENT_INFERENCE_RETRY_ATTEMPT_TIMEOUT_MS = 5 * 60_000;
 const FAST_AGENT_TRANSIENT_RETRY_JITTER_RATIO = 0.2;
 
 type FastAgentInferenceFailure = ReturnType<
@@ -1149,6 +1150,7 @@ export async function answerFastAgentQuestion({
           boundSubagentSessionIDs.clear();
         };
         let promptForAttempt = selectedPrompt;
+        let promptTimeoutMs: number | null = null;
         try {
           return await runFastAgentInferenceWithRetries(
             () =>
@@ -1158,7 +1160,7 @@ export async function answerFastAgentQuestion({
                   surface:
                     NON_TASK_INFERENCE_SURFACES.fastAgentQuestionAnswering,
                   modelRole: FAST_AGENT_MODEL_ROLE,
-                  timeoutMs: null,
+                  timeoutMs: promptTimeoutMs,
                   maxProviderRetryAttempts: FAST_AGENT_INFERENCE_MAX_RETRIES,
                   system,
                   prompt: promptForAttempt,
@@ -1233,6 +1235,10 @@ export async function answerFastAgentQuestion({
                 // appending the same turn to a poisoned transcript.
                 openCodeSession.id = undefined;
                 promptForAttempt = serializedBootstrapPrompt;
+                // Preserve unbounded initial turns, which may run native tools,
+                // but do not let a clean-session recovery hold the conversation
+                // lock forever if the replacement provider request stalls.
+                promptTimeoutMs = FAST_AGENT_INFERENCE_RETRY_ATTEMPT_TIMEOUT_MS;
               },
             },
           );
