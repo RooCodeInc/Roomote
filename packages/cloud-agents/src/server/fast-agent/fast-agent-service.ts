@@ -38,6 +38,7 @@ import {
   generateTrackedNonTaskTextInOpenCodeSession,
   isNonTaskOpenCodePromptTimeoutError,
   isNonTaskOpenCodeSessionNotFoundError,
+  NonTaskOpenCodePromptTimeoutError,
   NON_TASK_INFERENCE_SURFACES,
   type NonTaskPromptFile,
   type NonTaskProviderRetryEvent,
@@ -165,6 +166,7 @@ function buildIntegrationCallSignature({
 
 export const FAST_AGENT_INFERENCE_MAX_RETRIES = INFERENCE_PROVIDER_MAX_RETRIES;
 export const FAST_AGENT_TRANSIENT_INFERENCE_MAX_RETRIES = 6;
+const FAST_AGENT_INFERENCE_RETRY_ATTEMPT_TIMEOUT_MS = 5 * 60_000;
 const FAST_AGENT_TRANSIENT_RETRY_JITTER_RATIO = 0.2;
 
 type FastAgentInferenceFailure = ReturnType<
@@ -1149,71 +1151,107 @@ export async function answerFastAgentQuestion({
           boundSubagentSessionIDs.clear();
         };
         let promptForAttempt = selectedPrompt;
+        let promptTimeoutMs: number | null = null;
         try {
           return await runFastAgentInferenceWithRetries(
-            () =>
-              generateTrackedNonTaskTextInOpenCodeSession(
-                {
-                  userId,
-                  surface:
-                    NON_TASK_INFERENCE_SURFACES.fastAgentQuestionAnswering,
-                  modelRole: FAST_AGENT_MODEL_ROLE,
-                  timeoutMs: null,
-                  maxProviderRetryAttempts: FAST_AGENT_INFERENCE_MAX_RETRIES,
-                  system,
-                  prompt: promptForAttempt,
-                  onProviderRetry: reportProviderRetryEvent,
-                  ...(imageFiles.length
-                    ? {
-                        files: imageFiles,
-                        requiredInputModality: 'image' as const,
+            async () => {
+              const providerRetryAbortController = new AbortController();
+              const promptSignal = signal
+                ? AbortSignal.any([signal, providerRetryAbortController.signal])
+                : providerRetryAbortController.signal;
+              let providerRetryTimeout:
+                | ReturnType<typeof setTimeout>
+                | undefined;
+              try {
+                return await generateTrackedNonTaskTextInOpenCodeSession(
+                  {
+                    userId,
+                    surface:
+                      NON_TASK_INFERENCE_SURFACES.fastAgentQuestionAnswering,
+                    modelRole: FAST_AGENT_MODEL_ROLE,
+                    timeoutMs: promptTimeoutMs,
+                    maxProviderRetryAttempts: FAST_AGENT_INFERENCE_MAX_RETRIES,
+                    system,
+                    prompt: promptForAttempt,
+                    onProviderRetry: async (event) => {
+                      // Initial turns stay unbounded unless the provider enters
+                      // recovery. Start this deadline once so repeated provider
+                      // retry events cannot extend the conversation lock.
+                      if (
+                        promptTimeoutMs === null &&
+                        providerRetryTimeout === undefined
+                      ) {
+                        providerRetryTimeout = setTimeout(() => {
+                          providerRetryAbortController.abort(
+                            new NonTaskOpenCodePromptTimeoutError(
+                              FAST_AGENT_INFERENCE_RETRY_ATTEMPT_TIMEOUT_MS,
+                            ),
+                          );
+                        }, FAST_AGENT_INFERENCE_RETRY_ATTEMPT_TIMEOUT_MS);
+                        providerRetryTimeout.unref();
                       }
-                    : {}),
-                },
-                openCodeSession,
-                {
-                  directory: nativeRuntime.directory,
-                  env: nativeRuntime.env,
-                  permission: FAST_AGENT_SESSION_PERMISSIONS,
-                  signal,
-                  promptOnlySubagents: true,
-                  tools: FAST_AGENT_NATIVE_TOOL_FILTER,
-                  onModelResolved: (model) => {
-                    diagnostics.recordModelResolved(model);
+                      await reportProviderRetryEvent(event);
+                    },
+                    ...(imageFiles.length
+                      ? {
+                          files: imageFiles,
+                          requiredInputModality: 'image' as const,
+                        }
+                      : {}),
                   },
-                  onPromptStarted: () => {
-                    diagnostics.markInferenceStarted();
+                  openCodeSession,
+                  {
+                    directory: nativeRuntime.directory,
+                    env: nativeRuntime.env,
+                    permission: FAST_AGENT_SESSION_PERMISSIONS,
+                    signal: promptSignal,
+                    promptOnlySubagents: true,
+                    tools: FAST_AGENT_NATIVE_TOOL_FILTER,
+                    onModelResolved: (model) => {
+                      diagnostics.recordModelResolved(model);
+                    },
+                    onPromptStarted: () => {
+                      diagnostics.markInferenceStarted();
+                    },
+                    onSessionReady: (openCodeSessionID) => {
+                      unbindAllExecutors();
+                      unbindExecutors.add(
+                        bindFastAgentNativeToolExecutor(
+                          openCodeSessionID,
+                          executeNativeTool,
+                        ),
+                      );
+                    },
+                    onSubagentSessionReady: (subagentSessionID) => {
+                      if (boundSubagentSessionIDs.has(subagentSessionID))
+                        return;
+                      boundSubagentSessionIDs.add(subagentSessionID);
+                      unbindExecutors.add(
+                        bindFastAgentNativeToolExecutor(
+                          subagentSessionID,
+                          (call) =>
+                            (call.agent ===
+                              ROOMOTE_OPENCODE_ADVISOR_AGENT_NAME ||
+                              call.agent ===
+                                ROOMOTE_OPENCODE_JUDGE_AGENT_NAME) &&
+                            isFastAgentSubagentTool(call.name)
+                              ? executeNativeTool(call)
+                              : Promise.resolve({
+                                  success: false,
+                                  error:
+                                    'That tool is reserved for the Fast parent agent.',
+                                }),
+                        ),
+                      );
+                    },
                   },
-                  onSessionReady: (openCodeSessionID) => {
-                    unbindAllExecutors();
-                    unbindExecutors.add(
-                      bindFastAgentNativeToolExecutor(
-                        openCodeSessionID,
-                        executeNativeTool,
-                      ),
-                    );
-                  },
-                  onSubagentSessionReady: (subagentSessionID) => {
-                    if (boundSubagentSessionIDs.has(subagentSessionID)) return;
-                    boundSubagentSessionIDs.add(subagentSessionID);
-                    unbindExecutors.add(
-                      bindFastAgentNativeToolExecutor(
-                        subagentSessionID,
-                        (call) =>
-                          (call.agent === ROOMOTE_OPENCODE_ADVISOR_AGENT_NAME ||
-                            call.agent === ROOMOTE_OPENCODE_JUDGE_AGENT_NAME) &&
-                          isFastAgentSubagentTool(call.name)
-                            ? executeNativeTool(call)
-                            : Promise.resolve({
-                                success: false,
-                                error:
-                                  'That tool is reserved for the Fast parent agent.',
-                              }),
-                      ),
-                    );
-                  },
-                },
-              ),
+                );
+              } finally {
+                if (providerRetryTimeout) {
+                  clearTimeout(providerRetryTimeout);
+                }
+              }
+            },
             reportRoomoteInferenceRetry,
             {
               // OpenCode already owns retries while a provider turn remains
@@ -1233,6 +1271,10 @@ export async function answerFastAgentQuestion({
                 // appending the same turn to a poisoned transcript.
                 openCodeSession.id = undefined;
                 promptForAttempt = serializedBootstrapPrompt;
+                // Preserve unbounded initial turns, which may run native tools,
+                // but do not let a clean-session recovery hold the conversation
+                // lock forever if the replacement provider request stalls.
+                promptTimeoutMs = FAST_AGENT_INFERENCE_RETRY_ATTEMPT_TIMEOUT_MS;
               },
             },
           );

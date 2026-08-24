@@ -1032,10 +1032,72 @@ describe('resolveOpenCodeSmallModel', () => {
         message: 'Too Many Requests',
       }),
     );
-    expect(sessionAbortMock).toHaveBeenCalledWith({
-      sessionID: 'session-1',
-      directory: expect.stringContaining('roomote-non-task-'),
-    });
+    expect(sessionAbortMock).toHaveBeenCalledWith(
+      {
+        sessionID: 'session-1',
+        directory: expect.stringContaining('roomote-non-task-'),
+      },
+      { signal: expect.any(AbortSignal) },
+    );
+  });
+
+  it('does not let stalled session-abort cleanup hide the original prompt failure', async () => {
+    vi.useFakeTimers();
+    try {
+      process.env = {
+        ...originalEnv,
+        OPENCODE_SDK_SERVER_URL: 'http://127.0.0.1:4096',
+      };
+      mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
+        R_MODEL: 'openai/gpt-5.6-sol',
+      });
+      const providerError = {
+        name: 'APIError',
+        data: { message: 'Upstream connection failed.' },
+      };
+      eventSubscribeMock.mockResolvedValue({
+        stream: (async function* () {
+          yield {
+            type: 'session.error' as const,
+            properties: { sessionID: 'session-1', error: providerError },
+          };
+        })(),
+      });
+      sessionPromptMock.mockReturnValue(new Promise(() => undefined));
+      sessionAbortMock.mockImplementation(
+        (_input, options: { signal: AbortSignal }) =>
+          new Promise((_resolve, reject) => {
+            options.signal.addEventListener(
+              'abort',
+              () => reject(options.signal.reason),
+              { once: true },
+            );
+          }),
+      );
+
+      const { generateTrackedNonTaskObject, NON_TASK_INFERENCE_SURFACES } =
+        await import('../non-task-provider-usage.js');
+      const result = generateTrackedNonTaskObject({
+        surface: NON_TASK_INFERENCE_SURFACES.fastAgentQuestionAnswering,
+        modelRole: 'primary',
+        schema: z.object({ answer: z.string() }),
+        prompt: 'Answer.',
+        onProviderRetry: vi.fn(),
+      });
+      const resultError = result.catch((error: unknown) => error);
+      await vi.advanceTimersByTimeAsync(5_000);
+
+      await expect(resultError).resolves.toMatchObject({
+        name: 'NonTaskOpenCodePromptError',
+        providerError,
+      });
+      expect(sessionAbortMock).toHaveBeenCalledWith(
+        expect.objectContaining({ sessionID: 'session-1' }),
+        { signal: expect.any(AbortSignal) },
+      );
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('stops OpenCode provider retries at the configured attempt limit', async () => {
@@ -1085,10 +1147,13 @@ describe('resolveOpenCodeSmallModel', () => {
     expect(classifyNonTaskInferenceError(error)).toMatchObject({
       retryable: false,
     });
-    expect(sessionAbortMock).toHaveBeenCalledWith({
-      sessionID: 'session-1',
-      directory: expect.stringContaining('roomote-non-task-'),
-    });
+    expect(sessionAbortMock).toHaveBeenCalledWith(
+      {
+        sessionID: 'session-1',
+        directory: expect.stringContaining('roomote-non-task-'),
+      },
+      { signal: expect.any(AbortSignal) },
+    );
   });
 
   it.each(['prompt_result', 'session_event'] as const)(
@@ -1153,10 +1218,13 @@ describe('resolveOpenCodeSmallModel', () => {
         reason: 'gateway_blocked',
         retryable: true,
       });
-      expect(sessionAbortMock).toHaveBeenCalledWith({
-        sessionID: 'session-1',
-        directory: expect.stringContaining('roomote-non-task-'),
-      });
+      expect(sessionAbortMock).toHaveBeenCalledWith(
+        {
+          sessionID: 'session-1',
+          directory: expect.stringContaining('roomote-non-task-'),
+        },
+        { signal: expect.any(AbortSignal) },
+      );
     },
   );
 

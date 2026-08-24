@@ -22,6 +22,7 @@ import {
 } from './opencode-runtime';
 
 const DEFAULT_OPENCODE_STRUCTURED_OUTPUT_RETRY_COUNT = 2;
+const NON_TASK_SESSION_ABORT_TIMEOUT_MS = 5_000;
 type NonTaskModelRuntimeEnv = Partial<Record<string, string | undefined>>;
 
 /**
@@ -956,9 +957,21 @@ async function runNonTaskSdkPrompt(
       // Aborting the HTTP request does not guarantee that an OpenCode server
       // stopped its model turn. Explicitly cancel it before the session or a
       // leased server is reused for a bounded retry.
-      await client.session
-        .abort({ sessionID: sessionId, directory: sessionDirectory })
-        .catch(() => undefined);
+      const sessionAbortController = new AbortController();
+      const sessionAbortTimeout = setTimeout(() => {
+        sessionAbortController.abort();
+      }, NON_TASK_SESSION_ABORT_TIMEOUT_MS);
+      sessionAbortTimeout.unref();
+      try {
+        await client.session
+          .abort(
+            { sessionID: sessionId, directory: sessionDirectory },
+            { signal: sessionAbortController.signal },
+          )
+          .catch(() => undefined);
+      } finally {
+        clearTimeout(sessionAbortTimeout);
+      }
       throw error;
     } finally {
       abortController.signal.removeEventListener('abort', abortEventMonitor);
