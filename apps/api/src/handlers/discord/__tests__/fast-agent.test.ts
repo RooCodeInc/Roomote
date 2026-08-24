@@ -162,7 +162,7 @@ describe('processDiscordFastAgentMessage', () => {
     expect(provider.editMessage).toHaveBeenCalledWith({
       channelId: 'channel-1',
       messageId: 'retry-1',
-      text: 'Fast mode reconnected to the inference provider.',
+      text: 'Reconnected to the inference provider.',
     });
     expect(mocks.reply).toHaveBeenCalledTimes(2);
   });

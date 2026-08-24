@@ -194,7 +194,7 @@ export async function processDiscordFastAgentMessage(input: {
             await input.provider.editMessage({
               channelId: input.channel.channelId,
               messageId,
-              text: 'Fast mode reconnected to the inference provider.',
+              text: 'Reconnected to the inference provider.',
             });
             const posted = await replyToDiscordEvent({
               provider: input.provider,

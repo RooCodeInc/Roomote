@@ -871,7 +871,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       expect(adapter.postReply).toHaveBeenNthCalledWith(1, {
         purpose: 'progress',
         message:
-          'Fast mode’s request was blocked by the inference provider gateway. Retrying in 1s (attempt 1/6).',
+          'Having trouble reaching the inference provider. Retrying in 1s (attempt 1/6).',
       });
       expect(mocks.invalidateSession).not.toHaveBeenCalled();
     } finally {
@@ -1088,7 +1088,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       expect(adapter.postReply).toHaveBeenNthCalledWith(1, {
         purpose: 'progress',
         message:
-          'Fast mode’s inference provider is rate limiting requests. Retrying in 5s (attempt 1/3).',
+          'The inference provider is rate limiting requests. Retrying in 5s (attempt 1/3).',
       });
     } finally {
       vi.useRealTimers();
@@ -1125,7 +1125,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       expect(adapter.postReply).toHaveBeenNthCalledWith(1, {
         purpose: 'progress',
         message:
-          'Fast mode’s inference provider is rate limiting requests. Retrying in 12s (attempt 1/3).',
+          'The inference provider is rate limiting requests. Retrying in 12s (attempt 1/3).',
       });
     } finally {
       vi.useRealTimers();
@@ -1159,7 +1159,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     expect(adapter.postReply).toHaveBeenNthCalledWith(1, {
       purpose: 'progress',
       message:
-        'Fast mode’s inference provider is rate limiting requests. Retrying automatically…',
+        'The inference provider is rate limiting requests. Retrying automatically…',
     });
   });
 
@@ -1177,7 +1177,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       await vi.runAllTimersAsync();
 
       await expect(resultPromise).resolves.toBe(
-        'Fast mode could not reach the inference provider after retrying. Please try again in a moment.',
+        'Could not reach the inference provider after retrying. Please try again in a moment.',
       );
       expect(mocks.generateText).toHaveBeenCalledTimes(7);
       expect(Date.now() - startedAt).toBe(67_100);
@@ -1188,7 +1188,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       expect(adapter.postReply).toHaveBeenLastCalledWith({
         purpose: 'closeout',
         message:
-          'Fast mode could not reach the inference provider after retrying. Please try again in a moment.',
+          'Could not reach the inference provider after retrying. Please try again in a moment.',
       });
     } finally {
       random.mockRestore();
@@ -1301,7 +1301,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       await vi.runAllTimersAsync();
 
       await expect(resultPromise).resolves.toContain(
-        'could not reach the inference provider',
+        'Could not reach the inference provider',
       );
       expect(postReply).toHaveBeenCalledOnce();
       expect(replaceReply).toHaveBeenCalledTimes(6);
@@ -1310,7 +1310,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         expect.objectContaining({
           purpose: 'closeout',
           message: expect.stringContaining(
-            'could not reach the inference provider',
+            'Could not reach the inference provider',
           ),
         }),
       );

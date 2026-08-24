@@ -206,12 +206,12 @@ function formatFastAgentInferenceRetryNotice(
 ): string {
   const headline =
     notice.failure.reason === 'rate_limited'
-      ? 'Fast mode’s inference provider is rate limiting requests.'
+      ? 'The inference provider is rate limiting requests.'
       : notice.failure.reason === 'gateway_blocked'
-        ? 'Fast mode’s request was blocked by the inference provider gateway.'
+        ? 'Having trouble reaching the inference provider.'
         : notice.failure.reason === 'timeout'
-          ? 'Fast mode’s inference provider did not respond in time.'
-          : 'Fast mode’s inference provider returned a temporary error.';
+          ? 'The inference provider did not respond in time.'
+          : 'The inference provider returned a temporary error.';
 
   if (notice.delayMs === undefined || notice.maxAttempts === undefined) {
     return `${headline} Retrying automatically…`;
@@ -226,21 +226,21 @@ function formatFastAgentInferenceFailure(
 ): string {
   switch (failure.reason) {
     case 'rate_limited':
-      return 'Fast mode is still being rate limited by the inference provider after retrying. Any delegated tasks can keep running; please try again when provider capacity is available.';
+      return 'The inference provider is still rate limiting requests after retrying. Any delegated tasks can keep running; please try again when provider capacity is available.';
     case 'timeout':
-      return 'Fast mode’s inference provider did not respond after retrying. Any delegated tasks can keep running; please try again in a moment.';
+      return 'The inference provider did not respond after retrying. Any delegated tasks can keep running; please try again in a moment.';
     case 'endpoint_unreachable':
-      return 'Fast mode could not reach the inference provider after retrying. Please try again in a moment.';
+      return 'Could not reach the inference provider after retrying. Please try again in a moment.';
     case 'gateway_blocked':
-      return 'Fast mode’s request is still being blocked by the inference provider gateway after retrying. Please try again in a moment.';
+      return 'The request is still being blocked by the inference provider gateway after retrying. Please try again in a moment.';
     case 'insufficient_credits':
-      return 'Fast mode cannot use the inference provider because the account has insufficient credits or quota.';
+      return 'The inference provider account has insufficient credits or quota.';
     case 'invalid_credentials':
-      return 'Fast mode cannot authenticate with the configured inference provider. An administrator needs to reconnect or replace its credentials.';
+      return 'Could not authenticate with the configured inference provider. An administrator needs to reconnect or replace its credentials.';
     case 'model_unavailable':
-      return 'Fast mode’s configured model is not available from the inference provider. An administrator needs to select an available model.';
+      return 'The configured model is not available from the inference provider. An administrator needs to select an available model.';
     default:
-      return 'Fast mode could not complete the request because its inference provider returned an error. Please try again in a moment.';
+      return 'Could not complete the request because the inference provider returned an error. Please try again in a moment.';
   }
 }
 
