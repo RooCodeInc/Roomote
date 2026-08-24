@@ -86,10 +86,9 @@ vi.mock('./teams-primary-conversation', () => ({
 
 import { createTelegramCommunicationProviderFromRuntimeCredentials } from './telegram-communication';
 import {
+  attemptUserDirectMessage,
   findSlackUserDirectMessageDestination,
   findUserDirectMessageDestination,
-  sendUserDirectMessage,
-  sendUserDirectMessageBestEffort,
 } from './user-direct-message';
 
 describe('findSlackUserDirectMessageDestination', () => {
@@ -181,9 +180,15 @@ describe('findUserDirectMessageDestination', () => {
   });
 });
 
-describe('sendUserDirectMessage', () => {
+describe('attemptUserDirectMessage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockSlackInstallationsFindMany.mockResolvedValue([
+      { botAccessToken: 'xoxb-token', teamId: 'T123' },
+    ]);
+    mockSlackUserMappingsFindFirst.mockResolvedValue({ slackUserId: 'U123' });
+    mockOpenConversation.mockResolvedValue('D123');
+    mockSlackPostMessage.mockResolvedValue('1720000000.000100');
     mockDiscordUserMappingsFindFirst.mockResolvedValue({
       discordDmChannelId: 'discord-dm-1',
       discordUserId: 'discord-user-1',
@@ -195,115 +200,77 @@ describe('sendUserDirectMessage', () => {
 
   it('sends to a linked Discord DM', async () => {
     await expect(
-      sendUserDirectMessage({
+      attemptUserDirectMessage({
         provider: 'discord',
         userId: 'user-1',
         text: 'hello',
         logContext: 'test',
       }),
-    ).resolves.toBe(true);
+    ).resolves.toEqual({ provider: 'discord', status: 'sent' });
     expect(mockDiscordPostMessage).toHaveBeenCalledWith({
       channelId: 'discord-dm-1',
       text: 'hello',
       textFormat: 'markdown',
     });
   });
-});
 
-describe('sendUserDirectMessageBestEffort', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
+  it('returns unlinked without attempting delivery when no identity exists', async () => {
+    mockTelegramUserMappingsFindFirst.mockResolvedValue(undefined);
 
-    mockSlackInstallationsFindMany.mockResolvedValue([
-      { botAccessToken: 'xoxb-token', teamId: 'T123' },
-    ]);
-    mockSlackUserMappingsFindFirst.mockResolvedValue({ slackUserId: 'U123' });
-    mockOpenConversation.mockResolvedValue('D123');
-    mockSlackPostMessage.mockResolvedValue('1720000000.000100');
+    await expect(
+      attemptUserDirectMessage({
+        provider: 'telegram',
+        userId: 'user-1',
+        text: 'hello',
+        logContext: 'test',
+      }),
+    ).resolves.toEqual({ provider: 'telegram', status: 'unlinked' });
+    expect(mockTelegramPostMessage).not.toHaveBeenCalled();
+  });
 
-    mockTeamsUserMappingsFindFirst.mockResolvedValue({
-      teamsUserId: 'teams-user-1',
-      teamsTenantId: 'tenant-1',
-    });
-    mockPostDirectMessage.mockResolvedValue({ messageId: 'teams-message-1' });
-
+  it('returns failed when a linked provider has no credentials', async () => {
     mockTelegramUserMappingsFindFirst.mockResolvedValue({
       telegramChatId: '424242',
     });
-    mockTelegramPostMessage.mockResolvedValue({ messageId: '77' });
-  });
-
-  it('sends the message on every provider with a linked identity', async () => {
-    const delivered = await sendUserDirectMessageBestEffort({
-      userId: 'user-1',
-      text: 'Your GitHub installation request was approved.',
-      logContext: 'test',
-    });
-
-    expect(delivered).toEqual(['slack', 'teams', 'telegram']);
-
-    expect(mockOpenConversation).toHaveBeenCalledWith('U123');
-    expect(mockSlackPostMessage).toHaveBeenCalledWith({
-      channel: 'D123',
-      text: 'Your GitHub installation request was approved.',
-    });
-
-    expect(mockPostDirectMessage).toHaveBeenCalledWith({
-      serviceUrl: 'https://smba.example.com/amer/',
-      tenantId: 'tenant-1',
-      userId: 'teams-user-1',
-      text: 'Your GitHub installation request was approved.',
-      textFormat: 'markdown',
-    });
-
-    expect(mockTelegramPostMessage).toHaveBeenCalledWith({
-      channelId: '424242',
-      text: 'Your GitHub installation request was approved.',
-      textFormat: 'markdown',
-    });
-  });
-
-  it('skips providers the user has not linked without failing the rest', async () => {
-    mockSlackUserMappingsFindFirst.mockResolvedValue(undefined);
-    mockTeamsUserMappingsFindFirst.mockResolvedValue(undefined);
-
-    const delivered = await sendUserDirectMessageBestEffort({
-      userId: 'user-1',
-      text: 'hello',
-      logContext: 'test',
-    });
-
-    expect(delivered).toEqual(['telegram']);
-    expect(mockSlackPostMessage).not.toHaveBeenCalled();
-    expect(mockPostDirectMessage).not.toHaveBeenCalled();
-  });
-
-  it('skips a provider whose credentials are not configured', async () => {
     vi.mocked(
       createTelegramCommunicationProviderFromRuntimeCredentials,
     ).mockResolvedValueOnce(null);
 
-    const delivered = await sendUserDirectMessageBestEffort({
-      userId: 'user-1',
-      text: 'hello',
-      logContext: 'test',
-    });
-
-    expect(delivered).toEqual(['slack', 'teams']);
+    await expect(
+      attemptUserDirectMessage({
+        provider: 'telegram',
+        userId: 'user-1',
+        text: 'hello',
+        logContext: 'test',
+      }),
+    ).resolves.toEqual({ provider: 'telegram', status: 'failed' });
     expect(mockTelegramPostMessage).not.toHaveBeenCalled();
   });
 
-  it('swallows a provider error and still delivers the others', async () => {
+  it('resolves a linked Slack identity only once before delivery', async () => {
+    await expect(
+      attemptUserDirectMessage({
+        provider: 'slack',
+        userId: 'user-1',
+        text: 'hello',
+        logContext: 'test',
+      }),
+    ).resolves.toEqual({ provider: 'slack', status: 'sent' });
+    expect(mockSlackUserMappingsFindFirst).toHaveBeenCalledTimes(1);
+  });
+
+  it('returns failed and logs when provider delivery throws', async () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     mockSlackPostMessage.mockRejectedValue(new Error('slack is down'));
 
-    const delivered = await sendUserDirectMessageBestEffort({
-      userId: 'user-1',
-      text: 'hello',
-      logContext: 'test',
-    });
-
-    expect(delivered).toEqual(['teams', 'telegram']);
+    await expect(
+      attemptUserDirectMessage({
+        provider: 'slack',
+        userId: 'user-1',
+        text: 'hello',
+        logContext: 'test',
+      }),
+    ).resolves.toEqual({ provider: 'slack', status: 'failed' });
     expect(warnSpy).toHaveBeenCalledWith(
       '[test] Failed to send Slack DM: slack is down',
     );

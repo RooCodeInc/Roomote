@@ -196,13 +196,11 @@ export {
 } from './lib/teams-primary-conversation';
 
 export {
+  attemptUserDirectMessage,
   findSlackUserDirectMessageDestination,
   findUserDirectMessageDestination,
-  hasUserDirectMessageIdentity,
-  sendUserDirectMessage,
-  sendUserDirectMessageBestEffort,
+  type UserDirectMessageAttempt,
   type UserDirectMessageDestination,
-  type UserDirectMessageProvider,
 } from './lib/user-direct-message';
 
 export {
