@@ -1578,6 +1578,75 @@ describe('optional targetBranch', () => {
     );
   });
 
+  it('does not duplicate entity-prefixed harness attribution when the canonical line uses a zero-width space', async () => {
+    const octokit = makeOctokit({
+      list: [],
+      created: {
+        number: 13,
+        node_id: 'node-13',
+        html_url: 'https://github.com/acme/web/pull/13',
+        title: '[Feature] X',
+        draft: true,
+        base: { ref: 'develop' },
+      },
+    });
+    const harnessAttribution =
+      '> &#8203;<!-- roomote:pr-attribution:start -->Created by Roomote.<!-- roomote:pr-attribution:end --> [View the task](https://example.com/task/1) or mention @roomote-roomote for follow-up asks.';
+    const canonicalAttribution =
+      '> \u200B<!-- roomote:pr-attribution:start -->Created by Roomote.<!-- roomote:pr-attribution:end --> Follow up by mentioning @roomote-roomote or in [the web UI](https://example.com/task/1).';
+    mockGetPrBodyAttributionLine.mockReturnValueOnce(canonicalAttribution);
+
+    await createOrUpdateSourceControlPullRequestForTaskRun({
+      taskRun: makeTaskRun({ repo: 'acme/web' }),
+      input: {
+        ...baseInput,
+        targetBranch: 'develop',
+        body: `${harnessAttribution}\n\n## What changed\n\nDone.`,
+      },
+    });
+
+    expect(octokit.rest.pulls.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        body: `${canonicalAttribution}\n\n## What changed\n\nDone.`,
+      }),
+    );
+  });
+
+  it('collapses the exact duplicated PR attribution shape to one canonical line', async () => {
+    const harnessAttribution =
+      '> &#8203;<!-- roomote:pr-attribution:start -->Created by Roomote.<!-- roomote:pr-attribution:end --> [View the task](https://example.com/task/1) or mention @roomote-roomote for follow-up asks.';
+    const staleCanonicalAttribution =
+      '> \u200B<!-- roomote:pr-attribution:start -->Created by Roomote.<!-- roomote:pr-attribution:end --> Follow up by mentioning @roomote-roomote or in [the web UI](https://example.com/task/1).';
+    const duplicatedBody = `${harnessAttribution}\n\n${staleCanonicalAttribution}\n\n## What changed\n\nDone.`;
+    const existing = {
+      number: 13,
+      node_id: 'node-13',
+      html_url: 'https://github.com/acme/web/pull/13',
+      title: '[Feature] X',
+      draft: true,
+      base: { ref: 'develop' },
+      body: duplicatedBody,
+    };
+    const octokit = makeOctokit({ list: [existing], updated: existing });
+    const canonicalAttribution = attributionBody('Created by Roomote.');
+    mockGetPrBodyAttributionLine.mockReturnValueOnce(canonicalAttribution);
+
+    await createOrUpdateSourceControlPullRequestForTaskRun({
+      taskRun: makeTaskRun({ repo: 'acme/web' }),
+      input: {
+        ...baseInput,
+        targetBranch: 'develop',
+        body: duplicatedBody,
+      },
+    });
+
+    expect(octokit.rest.pulls.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        body: `${canonicalAttribution}\n\n## What changed\n\nDone.`,
+      }),
+    );
+  });
+
   it('preserves the opener attribution when updating a private pull request', async () => {
     const existing = {
       number: 11,
