@@ -22,6 +22,17 @@ async function invokeCustomAutomationsApi(
   const app = new Hono<{
     Variables: Variables & { mcpAuth: McpAuth };
   }>();
+  // The router rethrows unexpected errors expecting an app-level handler; this
+  // in-process app is not behind the API server's onError, so without one Hono
+  // would answer with text/plain and the JSON parse below would mask the
+  // failure.
+  app.onError((error, c) => {
+    console.error(
+      '[manage_custom_automations] Unhandled custom-automations error:',
+      error,
+    );
+    return c.json({ error: 'Internal server error' }, 500);
+  });
   app.use('*', async (c, next) => {
     c.set('authContext', auth.authContext);
     c.set('mcpAuth', auth);
@@ -33,15 +44,24 @@ async function invokeCustomAutomationsApi(
     `http://roomote.internal/custom-automations${path}`,
     init,
   );
-  const rawPayload: unknown = await response.json();
+  const rawText = await response.text();
+  let rawPayload: unknown;
+  try {
+    rawPayload = JSON.parse(rawText) as unknown;
+  } catch {
+    rawPayload = { error: rawText || `Request failed (${response.status})` };
+  }
   const payload =
     rawPayload && typeof rawPayload === 'object' && !Array.isArray(rawPayload)
       ? (rawPayload as Record<string, unknown>)
       : { result: rawPayload };
 
+  // status is always the numeric HTTP code; a body that carries its own
+  // `status` marker (e.g. the 409 ambiguous-schedule response) must not
+  // clobber it — its meaning survives in the remaining fields.
   return response.ok
     ? toMcpToolResult(payload)
-    : toolError({ status: response.status, ...payload });
+    : toolError({ ...payload, status: response.status });
 }
 
 function jsonRequest(method: 'POST' | 'PATCH', body: Record<string, unknown>) {

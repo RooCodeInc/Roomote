@@ -35,6 +35,9 @@ export type FastAgentIntegration = {
   endpoint?: {
     url: string;
     headers: Record<string, string>;
+    // Deployment-proxy endpoints authenticate with a short-lived broker token
+    // that must be re-minted at call time rather than reused from list time.
+    deploymentProxy?: boolean;
   };
 };
 
@@ -137,6 +140,7 @@ async function listCachedIntegrationTools(options: {
     FAST_AGENT_INTEGRATION_DISCOVERY_TIMEOUT_MS,
     'Fast integration tool discovery',
   );
+  pruneExpiredIntegrationToolCacheEntries();
   integrationToolCache.set(cacheKey, {
     expiresAt: Date.now() + FAST_AGENT_INTEGRATION_TOOL_CACHE_TTL_MS,
     tools,
@@ -149,6 +153,18 @@ async function listCachedIntegrationTools(options: {
       integrationToolCache.delete(cacheKey);
     }
     throw error;
+  }
+}
+
+// The cache is keyed per user, so on deployments with many Fast users
+// abandoned entries would otherwise accumulate for the process lifetime.
+// Entries still inside the stale-while-refresh window are kept.
+function pruneExpiredIntegrationToolCacheEntries(): void {
+  const cutoff = Date.now() - FAST_AGENT_INTEGRATION_TOOL_CACHE_TTL_MS;
+  for (const [key, entry] of integrationToolCache) {
+    if (entry.expiresAt <= cutoff) {
+      integrationToolCache.delete(key);
+    }
   }
 }
 
@@ -217,6 +233,7 @@ function resolveFastMcpEndpoint(options: {
       ...options.config.headers,
       Authorization: `Bearer ${options.authToken}`,
     },
+    deploymentProxy: true,
   };
 }
 
@@ -246,6 +263,11 @@ export async function listFastAgentIntegrations(
     Record<string, FastAgentMcpServerConfig>
   >,
 ): Promise<FastAgentIntegration[]> {
+  if (!resolveMcpServerConfigs) {
+    console.warn(
+      '[Fast Agent] No MCP server config resolver was provided for this surface; deployment MCP servers will be unavailable.',
+    );
+  }
   const configuredServersPromise: Promise<
     Record<string, FastAgentMcpServerConfig>
   > = resolveMcpServerConfigs?.() ?? Promise.resolve({});
@@ -258,6 +280,11 @@ export async function listFastAgentIntegrations(
         })
       : Promise.resolve(undefined),
   ]);
+
+  if (Object.keys(configuredServers).length === 0 && !githubInstallation) {
+    return [];
+  }
+
   const { apiBaseUrl, authToken } = await resolveBrokerAuth(context);
   const candidates: FastAgentIntegrationCandidate[] = Object.entries(
     configuredServers,
@@ -277,6 +304,7 @@ export async function listFastAgentIntegrations(
       endpoint: {
         url: integrationProxyUrl(apiBaseUrl, 'github'),
         headers: { Authorization: `Bearer ${authToken}` },
+        deploymentProxy: true,
       },
       disabledTools: new Set<string>(),
     });
@@ -359,13 +387,25 @@ export async function callFastAgentIntegration(
   });
 
   try {
-    const { apiBaseUrl, authToken } = await resolveBrokerAuth(context);
-    const endpoint =
-      integration.endpoint ??
-      ({
-        url: integrationProxyUrl(apiBaseUrl, integration.id),
-        headers: { Authorization: `Bearer ${authToken}` },
-      } as const);
+    // The token minted at list time is short-lived, so deployment-proxy calls
+    // re-mint it here: a call late in a long turn must not send an expired
+    // bearer. Direct upstream endpoints keep their own resolved headers.
+    let endpoint = integration.endpoint;
+    if (!endpoint || endpoint.deploymentProxy) {
+      const { apiBaseUrl, authToken } = await resolveBrokerAuth(context);
+      endpoint = endpoint
+        ? {
+            ...endpoint,
+            headers: {
+              ...endpoint.headers,
+              Authorization: `Bearer ${authToken}`,
+            },
+          }
+        : {
+            url: integrationProxyUrl(apiBaseUrl, integration.id),
+            headers: { Authorization: `Bearer ${authToken}` },
+          };
+    }
     const result = await withFastIntegrationTimeout(
       (signal) =>
         callMcpTool({
