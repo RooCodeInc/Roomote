@@ -91,14 +91,14 @@ export const PR_BODY_ATTRIBUTION_END_MARKER =
   '<!-- roomote:pr-attribution:end -->';
 const PR_BODY_ATTRIBUTION_INLINE_PREFIX = '&#8203;';
 
-type PrBodyAttributionMarkerMatch = {
+export type PrBodyAttributionMarkerMatch = {
   start: number;
   end: number;
   lineStart: number;
   lineEnd: number;
 };
 
-function findPrBodyAttributionMarkers(
+export function findPrBodyAttributionMarkers(
   body: string,
 ): PrBodyAttributionMarkerMatch | null {
   const startMarker = body.indexOf(PR_BODY_ATTRIBUTION_START_MARKER);
@@ -114,7 +114,9 @@ function findPrBodyAttributionMarkers(
 
   const lineStart = body.lastIndexOf('\n', startMarker - 1) + 1;
   if (
-    !/^[ \t]*>[ \t]*(?:&#8203;)?$/u.test(body.slice(lineStart, startMarker))
+    !/^[ \t]*>[ \t]*(?:(?:&(?:amp;)?#8203;)|\u200B)?$/u.test(
+      body.slice(lineStart, startMarker),
+    )
   ) {
     return null;
   }
