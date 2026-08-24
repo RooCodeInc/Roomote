@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   findArtifacts: vi.fn(),
   findTaskRun: vi.fn(),
   postMessage: vi.fn(),
+  updateMessage: vi.fn(),
   addReaction: vi.fn(),
   resolveSlackReactionNames: vi.fn(),
   createDiscordProvider: vi.fn(),
@@ -19,6 +20,7 @@ const mocks = vi.hoisted(() => ({
   setPendingPrReviewAction: vi.fn(),
   attachPendingPrReviewActionMessage: vi.fn(),
   buildSlackPrReviewActionBlocks: vi.fn(),
+  resolveUserMcpServerConfigs: vi.fn(),
 }));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
@@ -82,6 +84,7 @@ vi.mock('@roomote/env', () => ({
 vi.mock('@roomote/slack', () => ({
   SlackNotifier: class SlackNotifier {
     postMessage = mocks.postMessage;
+    updateMessage = mocks.updateMessage;
     addReaction = mocks.addReaction;
   },
   buildSlackPrReviewActionBlocks: mocks.buildSlackPrReviewActionBlocks,
@@ -105,6 +108,10 @@ vi.mock('./artifacts/raw-url', () => ({
 vi.mock('./discord-communication', () => ({
   createDiscordCommunicationProviderFromRuntimeCredentials:
     mocks.createDiscordProvider,
+}));
+
+vi.mock('../routers/mcp-connections', () => ({
+  resolveUserMcpServerConfigs: mocks.resolveUserMcpServerConfigs,
 }));
 
 import { deliverFastAgentParentEvent } from './fast-agent-parent-event';
@@ -163,11 +170,13 @@ describe('deliverFastAgentParentEvent', () => {
     ]);
     mocks.findTaskRun.mockResolvedValue({ status: 'running' });
     mocks.postMessage.mockResolvedValue('101.001');
+    mocks.updateMessage.mockResolvedValue(true);
     mocks.addReaction.mockResolvedValue(true);
     mocks.resolveSlackReactionNames.mockResolvedValue({
       ackEmoji: 'eyes',
       completionEmoji: 'white_check_mark',
     });
+    mocks.resolveUserMcpServerConfigs.mockResolvedValue({});
     mocks.setPendingPrReviewAction.mockResolvedValue(undefined);
     mocks.attachPendingPrReviewActionMessage.mockResolvedValue(undefined);
     mocks.buildSlackPrReviewActionBlocks.mockImplementation(
@@ -298,6 +307,158 @@ describe('deliverFastAgentParentEvent', () => {
     expect(mocks.postMessage).not.toHaveBeenCalledWith(
       expect.objectContaining({ text: childEvent.message }),
     );
+  });
+
+  it('captures an automation platform turn without a chat provider', async () => {
+    const automationParent = {
+      sessionId: parent.sessionId,
+      conversation: {
+        surface: 'automation' as const,
+        workspaceId: 'automation-1',
+        conversationId: 'occurrence-1',
+      },
+    };
+
+    await expect(
+      deliverFastAgentParentEvent({
+        parent: automationParent,
+        event: {
+          type: 'automation_triggered',
+          eventId: 'occurrence-1',
+          automationId: 'automation-1',
+          automationName: 'Weekly scan',
+          prompt: 'Find actionable regressions.',
+          trigger: 'schedule',
+        },
+      }),
+    ).resolves.toBe('delivered');
+
+    expect(mocks.answerQuestion).toHaveBeenCalledWith(
+      expect.objectContaining({
+        conversation: automationParent.conversation,
+        platformEventKind: 'automation',
+        platformEventVisibility: 'required',
+        turnSource: 'platform_event',
+      }),
+    );
+    expect(mocks.postMessage).not.toHaveBeenCalled();
+    expect(mocks.createDiscordProvider).not.toHaveBeenCalled();
+  });
+
+  it('updates the Slack root for a channel-backed automation turn', async () => {
+    await deliverFastAgentParentEvent({
+      parent,
+      event: {
+        type: 'automation_triggered',
+        eventId: 'occurrence-1',
+        automationId: 'automation-1',
+        automationName: 'Weekly scan',
+        prompt: 'Find actionable regressions.',
+        trigger: 'schedule',
+        rootMessageId: '100.001',
+      },
+    });
+
+    expect(mocks.updateMessage).toHaveBeenCalledWith({
+      channel: 'C123',
+      ts: '100.001',
+      message: {
+        text: 'The proof is ready.',
+        blocks: [{ type: 'markdown', text: 'The proof is ready.' }],
+      },
+    });
+    expect(mocks.postMessage).not.toHaveBeenCalled();
+  });
+
+  it('relays child lifecycle events into a stored automation conversation', async () => {
+    const automationParent = {
+      sessionId: parent.sessionId,
+      conversation: {
+        surface: 'automation' as const,
+        workspaceId: 'automation-1',
+        conversationId: 'occurrence-1',
+      },
+    };
+
+    await deliverFastAgentParentEvent({
+      parent: automationParent,
+      event: {
+        type: 'task_settled',
+        taskId: 'child-task-1',
+        runId: 42,
+        status: 'completed',
+        taskUrl: 'https://roomote.example/task/child-task-1',
+        pullRequests: [],
+      },
+    });
+
+    expect(mocks.answerQuestion).toHaveBeenCalledWith(
+      expect.objectContaining({
+        conversation: automationParent.conversation,
+        platformEventKind: 'delegated_task',
+        turnSource: 'platform_event',
+      }),
+    );
+    expect(mocks.postMessage).not.toHaveBeenCalled();
+  });
+
+  it('delegates a task with the stored automation conversation as its Fast parent', async () => {
+    const automationParent = {
+      sessionId: parent.sessionId,
+      conversation: {
+        surface: 'automation' as const,
+        workspaceId: 'automation-1',
+        conversationId: 'occurrence-1',
+      },
+    };
+    mocks.answerQuestion.mockImplementationOnce(
+      async ({
+        adapter,
+      }: {
+        adapter: {
+          launchTask: typeof mocks.launchTask;
+          resolveMcpServerConfigs: () => Promise<unknown>;
+        };
+      }) => {
+        await adapter.resolveMcpServerConfigs();
+        return adapter.launchTask({
+          prompt: 'Inspect the repository.',
+          environmentId: null,
+          parentSessionId: automationParent.sessionId,
+          postKickoff: vi.fn(),
+        });
+      },
+    );
+
+    await deliverFastAgentParentEvent({
+      parent: automationParent,
+      event: {
+        type: 'automation_triggered',
+        eventId: 'occurrence-1',
+        automationId: 'automation-1',
+        automationName: 'Weekly scan',
+        prompt: 'Find actionable regressions.',
+        trigger: 'schedule',
+        defaultTaskModel: 'openai/gpt-5.6-luna',
+      },
+    });
+
+    expect(mocks.resolveUserMcpServerConfigs).toHaveBeenCalledWith({
+      userId: 'u1',
+      apiBaseUrl: 'https://roomote.example.com',
+      includeRoomote: true,
+    });
+    expect(mocks.enqueueTask).toHaveBeenCalledWith({
+      task: expect.objectContaining({
+        payload: expect.objectContaining({
+          fastAgentSessionId: automationParent.sessionId,
+          fastAgentParent: automationParent,
+          harnessModelOverrides: {
+            'opencode-server': 'openai/gpt-5.6-luna',
+          },
+        }),
+      }),
+    });
   });
 
   it('uses a stable delivery key when the same child update is retried', async () => {

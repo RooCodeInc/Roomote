@@ -8,6 +8,7 @@ import type {
 } from '@roomote/types';
 import {
   ALL_REPOSITORIES,
+  FAST_EXECUTION,
   MANAGE_CUSTOM_AUTOMATIONS_TOOL,
 } from '@roomote/types';
 
@@ -352,6 +353,35 @@ describe('custom-automations MCP routes', () => {
       );
       await expect(res.json()).resolves.toMatchObject({
         automation: { environmentId: ALL_REPOSITORIES },
+      });
+    });
+
+    it('accepts Fast from the environment target contract', async () => {
+      const { app } = createApp();
+      mockResolveCustomAutomationSchedule.mockResolvedValue({
+        status: 'resolved',
+        scheduleMode: 'daily',
+        cronExpression: null,
+        resolution: null,
+      });
+      mockCreateCustomAutomation.mockResolvedValue({
+        id: 'automation-fast',
+        environmentId: null,
+        allRepositories: false,
+        executionMode: 'fast',
+      });
+
+      const res = await postCreate(
+        app,
+        createBody({ environmentId: FAST_EXECUTION }),
+      );
+
+      expect(res.status).toBe(201);
+      expect(mockCreateCustomAutomation).toHaveBeenCalledWith(
+        expect.objectContaining({ environmentId: FAST_EXECUTION }),
+      );
+      await expect(res.json()).resolves.toMatchObject({
+        automation: { environmentId: FAST_EXECUTION, executionMode: 'fast' },
       });
     });
 

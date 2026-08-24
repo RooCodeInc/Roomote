@@ -2,6 +2,7 @@ import type { ModelMessage } from 'ai';
 import {
   BRAIN_MCP_ID,
   CHAT_CHANNEL_MESSAGES_TOOL,
+  CHAT_MESSAGE_CONTEXT_TOOL,
   INFERENCE_PROVIDER_MAX_RETRIES,
   MANAGE_CUSTOM_AUTOMATIONS_TOOL,
   ROOMOTE_MCP_ID,
@@ -64,6 +65,7 @@ import { FastAgentTurnDiagnostics } from './fast-agent-turn-diagnostics';
 import {
   type FastAgentConversation,
   type FastAgentPlatformEventHandling,
+  type FastAgentPlatformEventKind,
   type FastAgentPlatformEventVisibility,
   type FastAgentReply,
   type FastAgentReplyHandle,
@@ -557,6 +559,7 @@ export async function answerFastAgentQuestion({
   turnSource = 'human',
   platformEventHandling = 'default',
   platformEventVisibility = 'optional',
+  platformEventKind = 'delegated_task',
 }: {
   question: string;
   images?: string[];
@@ -574,6 +577,7 @@ export async function answerFastAgentQuestion({
   turnSource?: FastAgentTurnSource;
   platformEventHandling?: FastAgentPlatformEventHandling;
   platformEventVisibility?: FastAgentPlatformEventVisibility;
+  platformEventKind?: FastAgentPlatformEventKind;
 }): Promise<string> {
   const diagnostics = new FastAgentTurnDiagnostics({
     conversation,
@@ -692,6 +696,7 @@ export async function answerFastAgentQuestion({
       turnSource,
       platformEventHandling,
       platformEventVisibility,
+      platformEventKind,
       retryTaskStartAvailable: Boolean(adapter.retryTaskStart),
       releaseVersion: resolveRoomoteReleaseVersion(
         Env.RELEASE_PRODUCT_VERSION,
@@ -831,6 +836,14 @@ export async function answerFastAgentQuestion({
           };
         }
 
+        const chatLookupProvider =
+          call.integrationId === ROOMOTE_MCP_ID &&
+          (call.toolName === CHAT_CHANNEL_MESSAGES_TOOL.name ||
+            call.toolName === CHAT_MESSAGE_CONTEXT_TOOL.name) &&
+          (conversation.surface === 'slack' ||
+            conversation.surface === 'discord')
+            ? conversation.surface
+            : undefined;
         const integrationArguments =
           call.integrationId === ROOMOTE_MCP_ID &&
           call.toolName === CHAT_CHANNEL_MESSAGES_TOOL.name &&
@@ -846,6 +859,9 @@ export async function answerFastAgentQuestion({
                 ),
               }
             : call.args;
+        const actorScopedIntegrationArguments = chatLookupProvider
+          ? { ...integrationArguments, provider: chatLookupProvider }
+          : integrationArguments;
         const managesCustomAutomations =
           call.integrationId === ROOMOTE_MCP_ID &&
           call.toolName === MANAGE_CUSTOM_AUTOMATIONS_TOOL.name;
@@ -856,7 +872,7 @@ export async function answerFastAgentQuestion({
         const signature = buildIntegrationCallSignature({
           integrationId: call.integrationId,
           toolName: call.toolName,
-          args: integrationArguments,
+          args: actorScopedIntegrationArguments,
         });
         if (integrationCallSignatures.has(signature)) {
           return {
@@ -878,7 +894,7 @@ export async function answerFastAgentQuestion({
           {
             integrationId: call.integrationId,
             toolName: call.toolName,
-            args: integrationArguments,
+            args: actorScopedIntegrationArguments,
           },
         );
         return { success: true, result };

@@ -51,6 +51,13 @@ export type CustomAutomationScheduleMode =
   | ScheduleOnlyBackgroundAutomationFrequency
   | 'cron';
 
+export const CUSTOM_AUTOMATION_EXECUTION_MODES = [
+  'sandbox_task',
+  'fast',
+] as const;
+export type CustomAutomationExecutionMode =
+  (typeof CUSTOM_AUTOMATION_EXECUTION_MODES)[number];
+
 export const MAX_CUSTOM_AUTOMATIONS = 25;
 
 export const CUSTOM_AUTOMATION_NAME_MAX_LENGTH = 100;

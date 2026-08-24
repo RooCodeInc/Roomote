@@ -21,10 +21,11 @@ const state = vi.hoisted(() => ({
     scheduleMode: 'daily' | 'weekly' | 'cron';
     cronExpression: string | null;
     model: null;
+    executionMode?: 'sandbox_task' | 'fast';
     environmentId: string;
     target: {
-      provider: 'slack' | 'discord' | 'teams' | 'telegram';
-      externalRef: string;
+      provider?: 'slack' | 'discord' | 'teams' | 'telegram';
+      externalRef?: string;
       targetKind?:
         | 'slack_channel'
         | 'slack_user'
@@ -44,6 +45,7 @@ const state = vi.hoisted(() => ({
     createdByName: string;
     createdAt: Date;
     updatedAt: Date;
+    latestFastResult?: string | null;
   }>,
   environments: [] as Array<{ id: string; name: string }>,
   nextUpdateSettingsResult: null as {
@@ -1165,6 +1167,55 @@ describe('AutomationsSettings', () => {
     fireEvent.click(screen.getByRole('combobox', { name: 'Environment' }));
     expect(
       screen.getByRole('option', { name: 'All repositories' }),
+    ).toBeInTheDocument();
+  });
+
+  it('offers Fast in the Environment menu and explains channel-less output', async () => {
+    state.customAutomations = [
+      {
+        id: 'automation-fast',
+        name: 'Fast daily digest',
+        prompt: 'Summarize priorities.',
+        enabled: true,
+        scheduleMode: 'daily',
+        cronExpression: null,
+        model: null,
+        executionMode: 'fast',
+        environmentId: '__fast__',
+        target: {},
+        lastRunAt: null,
+        lastSucceededAt: null,
+        lastFailedAt: null,
+        lastError: null,
+        lastLaunchedTaskId: null,
+        createdByName: 'Ada',
+        createdAt: new Date('2026-01-01T00:00:00Z'),
+        updatedAt: new Date('2026-01-01T00:00:00Z'),
+        latestFastResult: 'No actionable regressions found.',
+      },
+    ];
+
+    render(<AutomationsSettings />);
+
+    expect(await screen.findByText('Daily, in Fast →')).toBeInTheDocument();
+    expect(
+      screen.getByText('No actionable regressions found.'),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole('link', {
+        name: 'View previous runs for Fast daily digest',
+      }),
+    ).not.toBeInTheDocument();
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Configure Fast daily digest' }),
+    );
+    expect(screen.getByText('Delegated task model')).toBeInTheDocument();
+    expect(
+      screen.getByText(/available in the upcoming Fast runs view/),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('combobox', { name: 'Environment' }));
+    expect(
+      screen.getByRole('option', { name: 'Fast (no sandbox)' }),
     ).toBeInTheDocument();
   });
 
