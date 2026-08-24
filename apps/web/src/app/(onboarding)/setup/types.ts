@@ -24,7 +24,7 @@ const SETUP_STEP_DEFINITIONS = [
   },
   {
     id: 'env-vars',
-    title: 'Configure inference',
+    title: 'Configure inference provider',
   },
   {
     id: 'source-control-provider',
