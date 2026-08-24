@@ -56,8 +56,10 @@ for (const [name, script] of [
   assert(
     script.includes('/usr/local/bin/roomote sync-unit') &&
       script.includes('/usr/local/bin/roomote up') &&
-      !script.includes('docker compose --env-file'),
-    `managed ${name}: remote compose operations must go through the host CLI`,
+      script.includes('/usr/local/bin/roomote docker pull') &&
+      !script.includes('docker compose --env-file') &&
+      !/^docker /m.test(script),
+    `managed ${name}: remote docker and compose operations must go through the host CLI`,
   );
 }
 assert(

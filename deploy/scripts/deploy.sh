@@ -361,7 +361,7 @@ cd /opt/roomote
 /usr/local/bin/roomote compose config >/dev/null
 echo "Stopping controller before image pull so new tasks remain queued during deploy"
 /usr/local/bin/roomote compose stop controller || true
-docker pull "$ROOMOTE_WORKER_IMAGE"
+/usr/local/bin/roomote docker pull "$ROOMOTE_WORKER_IMAGE"
 /usr/local/bin/roomote compose pull
 /usr/local/bin/roomote up
 REMOTE

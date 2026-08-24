@@ -57,6 +57,16 @@ env PATH='/usr/bin:/bin' \
   "$roomote_cli" compose ps -aq redis
 grep -Fq -- "compose --env-file $install_root/.env -f $install_root/docker-compose.prod.yml ps -aq redis" "$docker_log"
 
+# The `roomote docker` passthrough (used by managed deploys for the worker
+# image pull) resolves the recorded binary too.
+: >"$docker_log"
+env PATH='/usr/bin:/bin' \
+  MOCK_DOCKER_LOG="$docker_log" \
+  ROOMOTE_INSTALL_ROOT="$install_root" \
+  ROOMOTE_TEST_MODE=true \
+  "$roomote_cli" docker pull example.invalid/roomote-worker:test
+grep -Fq -- "pull example.invalid/roomote-worker:test" "$docker_log"
+
 # 4. sync-unit records the resolved Docker path when .env lacks one, so a
 # systemd boot (minimal PATH) can start the stack on snap/manual installs.
 # Managed deploys call sync-unit without the installer, so the guarantee

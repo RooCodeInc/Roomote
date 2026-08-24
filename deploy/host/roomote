@@ -41,6 +41,8 @@ Commands:
                          preserved across upgrades, backups, and restarts
   compose [args...]      Run docker compose against the full deployment file
                          list (base file plus registered overrides)
+  docker [args...]       Run the deployment's recorded Docker binary
+                         (ROOMOTE_DOCKER_BIN in .env)
   sync-unit              (Re)write the roomote-compose systemd unit so boots
                          and systemd restarts go through this CLI
 EOF
@@ -1336,6 +1338,7 @@ case "$command" in
   up) compose up -d --wait --wait-timeout 600 ;;
   override) cmd_override "$@" ;;
   compose) compose "$@" ;;
+  docker) docker_cmd "$@" ;;
   sync-unit) cmd_sync_unit "$@" ;;
   help | --help | -h) usage ;;
   *)

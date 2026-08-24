@@ -263,7 +263,7 @@ if [ -z "$(read_env_value R_DISCORD_GATEWAY_SECRET | tr -d '[:space:]')" ]; then
 fi
 
 /usr/local/bin/roomote compose config >/dev/null
-docker pull "$worker_image"
+/usr/local/bin/roomote docker pull "$worker_image"
 /usr/local/bin/roomote compose pull
 # Migrations run before any running service is replaced. Drizzle applies all
 # pending migrations in a single transaction, so a failure here rolls the
