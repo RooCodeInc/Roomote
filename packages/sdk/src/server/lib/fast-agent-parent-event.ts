@@ -6,6 +6,7 @@ import {
   answerFastAgentQuestion,
   createFastAgentTaskLauncher,
   fastAgentConversationRepository,
+  resolveApiBaseUrl,
   type FastAgentTurnAdapter,
   type LaunchFastAgentTask,
 } from '@roomote/cloud-agents/server';
@@ -669,7 +670,7 @@ export async function deliverFastAgentParentEvent(params: {
     // the broker only injects its auth header on deployment-proxy URLs whose
     // origin matches its own apiBaseUrl, so a mismatched pair silently drops
     // every deployment MCP server from parent-event turns.
-    const apiBaseUrl = Env.TRPC_URL ?? Env.R_APP_URL;
+    const apiBaseUrl = resolveApiBaseUrl() ?? undefined;
     await answerFastAgentQuestion({
       question: `<delegated_task_event>${JSON.stringify(params.event)}</delegated_task_event>`,
       userId: parentTurn.userId,

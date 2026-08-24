@@ -380,17 +380,17 @@ function createRoomoteTransport() {
 function createRoomoteMcpServer(
   auth: McpAuthContext,
   actingUserId: string | null,
-  customAutomationsAuth: McpAuth,
-  memberAuth?: McpAuth,
+  toolAuth: McpAuth,
+  registerMemberTools: boolean,
 ) {
   const server = new McpServer(ROOMOTE_MCP_SERVER_INFO, {
     instructions: `Use get_about_me for Roomote platform, integration, and getting-started context. Use ${CHAT_MESSAGE_CONTEXT_TOOL.name} for surrounding context from the task communication channel or a referenced Slack/Discord message. Use ${CHAT_CHANNEL_MESSAGES_TOOL.name} for readable history from the task communication channel or an explicitly linked channel.`,
   });
 
-  if (memberAuth) {
-    registerRoomoteMemberTools(server, memberAuth);
+  if (registerMemberTools) {
+    registerRoomoteMemberTools(server, toolAuth);
   }
-  registerRoomoteCustomAutomationsTool(server, customAutomationsAuth);
+  registerRoomoteCustomAutomationsTool(server, toolAuth);
 
   server.registerTool(
     'get_about_me',
@@ -551,12 +551,11 @@ function createRoomoteMcpRouter(options: {
               }
             : rawAuth,
       };
-      const memberAuth = options.memberTools ? toolAuth : undefined;
       const server = createRoomoteMcpServer(
         auth,
         actingUserId,
         toolAuth,
-        memberAuth,
+        options.memberTools,
       );
 
       await server.connect(transport);

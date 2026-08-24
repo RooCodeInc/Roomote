@@ -8,6 +8,9 @@ import {
 } from '@roomote/db/server';
 import {
   BRAIN_MCP_ID,
+  MCP_INTEGRATION_PROXY_PATH_PREFIX,
+  MCP_ROUTING_PROXY_PATH_PREFIX,
+  ROOMOTE_MCP_ID,
   getMcpIntegration,
   formatErrorForLog,
 } from '@roomote/types';
@@ -183,7 +186,7 @@ function integrationProxyUrl(baseUrl: string, integrationId: string): string {
 function describeMcpServer(
   id: string,
 ): Pick<FastAgentIntegration, 'name' | 'description' | 'instructions'> {
-  if (id === 'roomote') {
+  if (id === ROOMOTE_MCP_ID) {
     return {
       name: 'Roomote',
       description:
@@ -216,8 +219,8 @@ function resolveFastMcpEndpoint(options: {
   const configuredUrl = new URL(options.config.url, options.apiBaseUrl);
   const isDeploymentProxy =
     configuredUrl.origin === apiUrl.origin &&
-    (configuredUrl.pathname.startsWith('/api/mcp/') ||
-      configuredUrl.pathname.startsWith('/api/mcp-routing/'));
+    (configuredUrl.pathname.startsWith(MCP_INTEGRATION_PROXY_PATH_PREFIX) ||
+      configuredUrl.pathname.startsWith(MCP_ROUTING_PROXY_PATH_PREFIX));
 
   if (!isDeploymentProxy) {
     return {

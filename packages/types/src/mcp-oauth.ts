@@ -413,6 +413,16 @@ export const RESEND_DEFAULT_DISABLED_TOOL_NAMES = [
   'update-webhook',
 ] as const;
 
+/**
+ * Path prefixes of the API-hosted MCP proxy mounts. URL producers build proxy
+ * URLs from these, and consumers (e.g. the Fast integration broker) use the
+ * same constants to recognize deployment-proxied MCP endpoints — keep both
+ * sides on these rather than string literals so a mount move cannot silently
+ * break the recognition.
+ */
+export const MCP_INTEGRATION_PROXY_PATH_PREFIX = '/api/mcp/';
+export const MCP_ROUTING_PROXY_PATH_PREFIX = '/api/mcp-routing/';
+
 export const MCP_INTEGRATIONS: McpIntegration[] = [
   {
     id: 'notion',

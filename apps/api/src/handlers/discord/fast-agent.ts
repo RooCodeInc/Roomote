@@ -13,8 +13,8 @@ import {
 import {
   acquireFastAgentTurnLock,
   answerFastAgentQuestion,
+  resolveApiBaseUrl,
 } from '@roomote/cloud-agents/server';
-import { Env } from '@roomote/env';
 import { resolveUserMcpServerConfigs } from '@roomote/sdk/server';
 import { ALL_REPOSITORIES } from '@roomote/types';
 
@@ -105,6 +105,7 @@ export async function processDiscordFastAgentMessage(input: {
         : [];
     const message = getDiscordMessageCreate(input.event);
     let didSendVisibleResponse = false;
+    const apiBaseUrl = resolveApiBaseUrl() ?? undefined;
     const response = await answerFastAgentQuestion({
       question: input.question,
       threadContext: history.map((entry) => ({
@@ -115,7 +116,7 @@ export async function processDiscordFastAgentMessage(input: {
         ...(entry.botId ? { bot_id: entry.botId } : {}),
       })),
       userId: input.senderUserId,
-      apiBaseUrl: Env.TRPC_URL ?? Env.R_APP_URL,
+      apiBaseUrl,
       conversation,
       signal: releaseFastAgentLock.signal,
       senderDisplayName:
@@ -131,7 +132,7 @@ export async function processDiscordFastAgentMessage(input: {
         resolveMcpServerConfigs: () =>
           resolveUserMcpServerConfigs({
             userId: input.senderUserId,
-            apiBaseUrl: Env.TRPC_URL ?? Env.R_APP_URL,
+            apiBaseUrl,
             includeRoomote: true,
           }),
         launchTask: async ({

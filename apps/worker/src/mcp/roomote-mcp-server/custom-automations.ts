@@ -1,4 +1,7 @@
-import type { ManageCustomAutomationsInput } from '@roomote/types';
+import {
+  buildManageCustomAutomationsRequest,
+  type ManageCustomAutomationsInput,
+} from '@roomote/types';
 
 import type { RoomoteConfig, ToolResult } from './types.js';
 import {
@@ -12,56 +15,11 @@ export async function handleManageCustomAutomations(
   params: ManageCustomAutomationsInput,
   config: RoomoteConfig,
 ): Promise<ToolResult> {
-  let path = '/api/mcp/custom-automations';
-  let method = 'GET';
-  let body: Record<string, unknown> | undefined;
+  const built = buildManageCustomAutomationsRequest(params);
+  if (!built.ok) return errorResult(built.error);
 
-  if (params.action === 'list_models') {
-    path += '/models';
-  } else if (params.action === 'resolve_schedule') {
-    if (!params.schedule) return errorResult('schedule is required');
-    path += '/resolve-schedule';
-    method = 'POST';
-    body = { schedule: params.schedule };
-  } else if (params.action === 'create' || params.action === 'update') {
-    const required = ['name', 'prompt', 'schedule', 'environmentId'] as const;
-    if (params.action === 'create') {
-      const missing = required.find((key) => !params[key]);
-      if (missing) return errorResult(`${missing} is required`);
-    }
-    if (params.action === 'update' && !params.automationId) {
-      return errorResult('automationId is required for update');
-    }
-    path +=
-      params.action === 'update'
-        ? `/${encodeURIComponent(params.automationId!)}`
-        : '';
-    method = params.action === 'update' ? 'PATCH' : 'POST';
-    body = Object.fromEntries(
-      Object.entries({
-        name: params.name,
-        prompt: params.prompt,
-        enabled:
-          params.action === 'create'
-            ? (params.enabled ?? true)
-            : params.enabled,
-        schedule: params.schedule,
-        model: params.model,
-        environmentId: params.environmentId,
-        targetProvider: params.targetProvider,
-        targetMode: params.targetMode,
-        targetChannelId: params.targetChannelId,
-        targetServiceUrl: params.targetServiceUrl,
-      }).filter((entry) => entry[1] !== undefined),
-    );
-  } else if (params.action === 'delete' || params.action === 'run_now') {
-    if (!params.automationId) {
-      return errorResult(`automationId is required for ${params.action}`);
-    }
-    path += `/${encodeURIComponent(params.automationId)}`;
-    if (params.action === 'run_now') path += '/run';
-    method = params.action === 'delete' ? 'DELETE' : 'POST';
-  }
+  const { method, body } = built.request;
+  const path = `/api/mcp/custom-automations${built.request.path}`;
 
   const response = await fetchWithTimeout(
     `${config.platformApiUrl}${path}`,

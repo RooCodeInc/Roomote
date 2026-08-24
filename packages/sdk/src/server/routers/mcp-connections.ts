@@ -40,6 +40,8 @@ import {
   BRAIN_MCP_ID,
   BRAIN_PROXY_PATH,
   CUSTOM_MCP_PROXY_PATH_PREFIX,
+  MCP_INTEGRATION_PROXY_PATH_PREFIX,
+  ROOMOTE_MCP_ID,
   customMcpConnectionId,
   PRODUCT_NAME,
 } from '@roomote/types';
@@ -73,7 +75,7 @@ type ResolvedMcpServerConfigs = Record<string, ResolvedMcpServerConfig>;
 type InfoLogger = (...args: unknown[]) => void;
 
 function buildProxyUrl(mcpId: string, requestOrigin: string | null): string {
-  const proxyPath = `/api/mcp/${mcpId}`;
+  const proxyPath = `${MCP_INTEGRATION_PROXY_PATH_PREFIX}${mcpId}`;
   return requestOrigin ? `${requestOrigin}${proxyPath}` : proxyPath;
 }
 
@@ -133,8 +135,8 @@ async function resolveMcpServerConfigs(options: {
     };
   }
 
-  if (options.includeRoomote && !servers.roomote) {
-    servers.roomote = {
+  if (options.includeRoomote && !servers[ROOMOTE_MCP_ID]) {
+    servers[ROOMOTE_MCP_ID] = {
       url: `${options.requestOrigin ?? ''}${ROOMOTE_MCP_LEGACY_PATH}`,
       headers: {},
     };

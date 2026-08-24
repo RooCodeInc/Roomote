@@ -65,6 +65,108 @@ export type ManageCustomAutomationsInput = z.infer<
   typeof manageCustomAutomationsInputSchema
 >;
 
+export type ManageCustomAutomationsRequest = {
+  /** Path relative to the custom-automations REST base, e.g. '/models'. */
+  path: string;
+  method: 'GET' | 'POST' | 'PATCH' | 'DELETE';
+  body?: Record<string, unknown>;
+};
+
+export type ManageCustomAutomationsRequestResult =
+  | { ok: true; request: ManageCustomAutomationsRequest }
+  | { ok: false; error: string };
+
+/**
+ * Single source of truth for mapping a manage_custom_automations call onto
+ * the custom-automations REST routes. Both the sandbox MCP server and the
+ * API-hosted tool build their requests from this, so action or field changes
+ * cannot drift between the two transports.
+ */
+export function buildManageCustomAutomationsRequest(
+  params: ManageCustomAutomationsInput,
+): ManageCustomAutomationsRequestResult {
+  switch (params.action) {
+    case 'list':
+      return { ok: true, request: { path: '', method: 'GET' } };
+    case 'list_models':
+      return { ok: true, request: { path: '/models', method: 'GET' } };
+    case 'resolve_schedule':
+      if (!params.schedule) {
+        return { ok: false, error: 'schedule is required' };
+      }
+      return {
+        ok: true,
+        request: {
+          path: '/resolve-schedule',
+          method: 'POST',
+          body: { schedule: params.schedule },
+        },
+      };
+    case 'create':
+    case 'update': {
+      if (params.action === 'create') {
+        const required = [
+          'name',
+          'prompt',
+          'schedule',
+          'environmentId',
+        ] as const;
+        const missing = required.find((key) => !params[key]);
+        if (missing) {
+          return { ok: false, error: `${missing} is required` };
+        }
+      } else if (!params.automationId) {
+        return { ok: false, error: 'automationId is required for update' };
+      }
+      const body = Object.fromEntries(
+        Object.entries({
+          name: params.name,
+          prompt: params.prompt,
+          enabled:
+            params.action === 'create'
+              ? (params.enabled ?? true)
+              : params.enabled,
+          schedule: params.schedule,
+          model: params.model,
+          environmentId: params.environmentId,
+          targetProvider: params.targetProvider,
+          targetMode: params.targetMode,
+          targetChannelId: params.targetChannelId,
+          targetServiceUrl: params.targetServiceUrl,
+        }).filter((entry) => entry[1] !== undefined),
+      );
+      return {
+        ok: true,
+        request:
+          params.action === 'update'
+            ? {
+                path: `/${encodeURIComponent(params.automationId!)}`,
+                method: 'PATCH',
+                body,
+              }
+            : { path: '', method: 'POST', body },
+      };
+    }
+    case 'delete':
+    case 'run_now':
+      if (!params.automationId) {
+        return {
+          ok: false,
+          error: `automationId is required for ${params.action}`,
+        };
+      }
+      return {
+        ok: true,
+        request: {
+          path: `/${encodeURIComponent(params.automationId)}${
+            params.action === 'run_now' ? '/run' : ''
+          }`,
+          method: params.action === 'delete' ? 'DELETE' : 'POST',
+        },
+      };
+  }
+}
+
 export const MANAGE_CUSTOM_AUTOMATIONS_TOOL = {
   name: 'manage_custom_automations',
   title: 'Manage Custom Automations',

@@ -7,6 +7,7 @@ import {
   BRAIN_MCP_ID,
   INFERENCE_PROVIDER_MAX_RETRIES,
   MANAGE_CUSTOM_AUTOMATIONS_TOOL,
+  ROOMOTE_MCP_ID,
   formatErrorForLog,
   resolveInferenceProviderRetryDelayMs,
   roomoteTaskInspectionArgsSchema,
@@ -945,7 +946,7 @@ export async function answerFastAgentQuestion({
           case FAST_AGENT_NATIVE_TOOL_NAMES.integrationCall: {
             const args = integrationCallArgsSchema.parse(call.args);
             const managesCustomAutomations =
-              args.integrationId === 'roomote' &&
+              args.integrationId === ROOMOTE_MCP_ID &&
               args.toolName === MANAGE_CUSTOM_AUTOMATIONS_TOOL.name;
             if (call.agent && managesCustomAutomations) {
               return {
