@@ -29,7 +29,7 @@ interface PendingCompletionEvents {
   events: CallbackEvent[];
 }
 
-export interface HarnessCallbackSubscription {
+interface HarnessCallbackSubscription {
   (): Promise<void>;
   flushPendingCompletionEvents(): Promise<void>;
 }
