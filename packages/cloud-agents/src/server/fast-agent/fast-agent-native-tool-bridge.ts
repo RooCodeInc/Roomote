@@ -29,7 +29,6 @@ export type { FastAgentNativeToolName } from './fast-agent-tool-policy';
 
 const FAST_AGENT_TOOL_BRIDGE_BODY_LIMIT_BYTES = 1_000_000;
 const FAST_AGENT_TOOL_BRIDGE_ERROR = 'Fast tool execution failed.';
-const FAST_AGENT_NATIVE_TOOL_OUTPUT_LIMIT_BYTES = 45 * 1024;
 
 export type FastAgentNativeToolCall = {
   agent?: string;
@@ -59,24 +58,6 @@ const bridgeRequestSchema = z.object({
 });
 
 const FAST_AGENT_NATIVE_TOOL_BRIDGE_SOURCE = String.raw`
-const OUTPUT_LIMIT_BYTES = ${FAST_AGENT_NATIVE_TOOL_OUTPUT_LIMIT_BYTES}
-
-const formatResult = (result) => {
-  const serialized = JSON.stringify(result ?? null)
-  const bytes = Buffer.from(serialized)
-  if (bytes.length <= OUTPUT_LIMIT_BYTES) {
-    return { output: serialized, metadata: { roomoteResult: result ?? null } }
-  }
-
-  let previewEnd = OUTPUT_LIMIT_BYTES
-  while (previewEnd > 0 && (bytes[previewEnd] & 0xc0) === 0x80) previewEnd--
-  const preview = bytes.subarray(0, previewEnd).toString("utf8")
-  return {
-    output: preview + "\n\n...output truncated...\n\nThe native tool result exceeded Fast mode's inline output limit. Retry with narrower filters or pagination, or launch a full task when the complete result is required. Fast subagents cannot read OpenCode spill files.",
-    metadata: { roomoteResult: null, roomoteTruncated: true },
-  }
-}
-
 export const invoke = async (name, args, context) => {
   const url = process.env.ROOMOTE_FAST_TOOL_BRIDGE_URL
   const token = process.env.ROOMOTE_FAST_TOOL_BRIDGE_TOKEN
@@ -94,11 +75,10 @@ export const invoke = async (name, args, context) => {
   if (!response.ok || !payload?.ok) {
     throw new Error(payload?.error || "Roomote Fast tool " + name + " failed.")
   }
-  const formatted = formatResult(payload.result)
   return {
     title: name,
-    output: formatted.output,
-    metadata: formatted.metadata,
+    output: JSON.stringify(payload.result ?? null),
+    metadata: { roomoteResult: payload.result ?? null },
   }
 }
 `;
@@ -152,12 +132,10 @@ import { z } from "zod"
 import { invoke } from "../roomote-fast-tool-bridge.js"
 
 export default {
-  description: ${JSON.stringify(`${CHAT_CHANNEL_MESSAGES_TOOL.description} Fast mode restricts this lookup to the current conversation channel, defaults Slack history to the previous 24 hours when oldest is omitted, and returns a bounded page. Pass nextCursor back as cursor to continue with older messages.`)},
+  description: ${JSON.stringify(`${CHAT_CHANNEL_MESSAGES_TOOL.description} Fast mode restricts this lookup to the current conversation channel and defaults Slack history to the previous 24 hours when oldest is omitted.`)},
   args: {
     oldest: z.string().min(1).optional().describe(${JSON.stringify(CHAT_CHANNEL_MESSAGES_TOOL.inputDescriptions.oldest)}),
     latest: z.string().min(1).optional().describe(${JSON.stringify(CHAT_CHANNEL_MESSAGES_TOOL.inputDescriptions.latest)}),
-    cursor: z.string().min(1).optional().describe("Continuation cursor returned as nextCursor by the previous call. Fetches the next older page."),
-    limit: z.number().int().min(1).max(50).optional().describe("Maximum messages to return. Defaults to 20 and cannot exceed 50."),
   },
   execute: (args, context) => invoke(${JSON.stringify(CHAT_CHANNEL_MESSAGES_TOOL.name)}, args, context),
 }

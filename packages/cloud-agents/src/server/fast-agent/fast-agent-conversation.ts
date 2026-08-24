@@ -73,8 +73,6 @@ export type FastAgentTurnAdapter = {
   getChatChannelMessages?: (input: {
     oldest?: string;
     latest?: string;
-    cursor?: string;
-    limit?: number;
   }) => Promise<unknown>;
   postReply: (reply: FastAgentReply) => Promise<FastAgentReplyHandle | void>;
   replaceReply?: (
