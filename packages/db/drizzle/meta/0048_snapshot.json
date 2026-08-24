@@ -1,6 +1,6 @@
 {
-  "id": "af328f05-b6e2-4d7a-aa59-5e947059051a",
-  "prevId": "3c781ceb-7e70-4a71-92b6-1d6e9b1aed38",
+  "id": "2026903e-28ad-4295-af6b-9618fec02334",
+  "prevId": "ec88a59c-447b-4163-b15a-f4427bdf1a11",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -3162,6 +3162,20 @@
           "notNull": true,
           "default": true
         },
+        "compatibility_messages": {
+          "name": "compatibility_messages",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'[]'::jsonb"
+        },
+        "legacy_conversation_ids": {
+          "name": "legacy_conversation_ids",
+          "type": "uuid[]",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'::uuid[]"
+        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp",
@@ -3218,6 +3232,21 @@
           "isUnique": false,
           "concurrently": false,
           "method": "btree",
+          "with": {}
+        },
+        "fast_agent_conversations_legacy_ids_idx": {
+          "name": "fast_agent_conversations_legacy_ids_idx",
+          "columns": [
+            {
+              "expression": "legacy_conversation_ids",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "gin",
           "with": {}
         }
       },
@@ -5434,66 +5463,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "changed_files": {
-          "name": "changed_files",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "changed_file_count": {
-          "name": "changed_file_count",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "files_capped": {
-          "name": "files_capped",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "reviews_capped": {
-          "name": "reviews_capped",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "additions": {
-          "name": "additions",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "deletions": {
-          "name": "deletions",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "reviews": {
-          "name": "reviews",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "enriched_at": {
-          "name": "enriched_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "enriched_for_updated_at": {
-          "name": "enriched_for_updated_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "enrichment_failed_at": {
-          "name": "enrichment_failed_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": false
-        },
         "created_at_remote": {
           "name": "created_at_remote",
           "type": "timestamp",
@@ -7146,11 +7115,17 @@
           "notNull": true,
           "default": "gen_random_uuid()"
         },
+        "fast_agent_conversation_id": {
+          "name": "fast_agent_conversation_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
         "slack_quick_answer_id": {
           "name": "slack_quick_answer_id",
           "type": "uuid",
           "primaryKey": false,
-          "notNull": true
+          "notNull": false
         },
         "user_id": {
           "name": "user_id",
@@ -7274,6 +7249,27 @@
           "method": "btree",
           "with": {}
         },
+        "slack_fast_integration_calls_conversation_idx": {
+          "name": "slack_fast_integration_calls_conversation_idx",
+          "columns": [
+            {
+              "expression": "fast_agent_conversation_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
         "slack_fast_integration_calls_user_idx": {
           "name": "slack_fast_integration_calls_user_idx",
           "columns": [
@@ -7318,6 +7314,15 @@
         }
       },
       "foreignKeys": {
+        "slack_fast_integration_calls_fast_agent_conversation_id_fast_agent_conversations_id_fk": {
+          "name": "slack_fast_integration_calls_fast_agent_conversation_id_fast_agent_conversations_id_fk",
+          "tableFrom": "slack_fast_integration_calls",
+          "tableTo": "fast_agent_conversations",
+          "columnsFrom": ["fast_agent_conversation_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
         "slack_fast_integration_calls_slack_quick_answer_id_slack_quick_answers_id_fk": {
           "name": "slack_fast_integration_calls_slack_quick_answer_id_slack_quick_answers_id_fk",
           "tableFrom": "slack_fast_integration_calls",

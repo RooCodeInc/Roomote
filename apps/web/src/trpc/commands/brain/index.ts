@@ -55,7 +55,8 @@ const EMPTY_MEMORY_SUMMARY: Awaited<
   byStatus: { pending: 0, processing: 0, done: 0, skipped: 0, failed: 0 },
   lastProcessedAt: null,
   lastError: null,
-  completedRunsWithoutEvent: 0,
+  historicalCompletedRunsWithoutEvent: 0,
+  recentCompletedRunsWithoutEvent: 0,
 };
 
 /**
@@ -160,7 +161,8 @@ export type BrainSettings = {
     total: number;
     lastProcessedAt: Date | null;
     lastError: string | null;
-    completedRunsWithoutEvent: number;
+    historicalCompletedRunsWithoutEvent: number;
+    recentCompletedRunsWithoutEvent: number;
   };
 };
 
@@ -537,7 +539,9 @@ export async function getBrainSettingsCommand(
       total: memoryTotal,
       lastProcessedAt: memories.lastProcessedAt,
       lastError: memories.lastError,
-      completedRunsWithoutEvent: memories.completedRunsWithoutEvent,
+      historicalCompletedRunsWithoutEvent:
+        memories.historicalCompletedRunsWithoutEvent,
+      recentCompletedRunsWithoutEvent: memories.recentCompletedRunsWithoutEvent,
     },
   };
 }

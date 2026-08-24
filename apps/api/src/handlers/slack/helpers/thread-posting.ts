@@ -12,7 +12,10 @@ import {
 
 import { apiLogger } from '../../../logging.js';
 
-type SlackThreadMarkdownPostResult = 'posted' | 'suppressed' | 'failed';
+type SlackThreadMarkdownPostResult =
+  | { status: 'posted'; messageId: string }
+  | 'suppressed'
+  | 'failed';
 
 export async function postSlackThreadMarkdownMessage({
   slack,
@@ -89,7 +92,7 @@ export async function postSlackThreadMarkdownMessage({
     }
   }
 
-  return 'posted';
+  return { status: 'posted', messageId: messageTs };
 }
 
 export async function postTaskSuggestionStartedMessage(params: {

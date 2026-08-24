@@ -99,6 +99,9 @@ const RETRYABLE_WORKER_TRPC_MUTATION_PATHS = new Map<
   WorkerQueryRetryOptions
 >([
   ['taskRuns.recordMessageEnvelope', {}],
+  // Idempotent full-card chat.update; the worker's detached card renders
+  // swallow errors, so the settling render on exit must survive a blip.
+  ['taskRuns.renderSlackLiveTaskCard', {}],
   ['taskRuns.claimGoalContinuation', {}],
   ['taskRuns.releaseGoalContinuation', {}],
   ['taskRuns.dequeue', WORKER_STARTUP_MUTATION_RETRY_OPTIONS],

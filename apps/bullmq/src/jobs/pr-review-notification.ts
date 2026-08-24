@@ -15,7 +15,9 @@ import {
 import {
   PR_REVIEW_NOTIFICATION_DEFER_MS,
   PR_REVIEW_NOTIFICATION_MAX_DEFERRALS,
+  PrReviewNotificationRateLimitError,
   attachPendingPrReviewActionMessage,
+  createPrReviewNotificationTelemetry,
   getCommunicationProviderAdapter,
   type PrReviewNotificationRequest,
   type PrReviewNotificationRoute,
@@ -45,6 +47,37 @@ import {
 } from '@roomote/types';
 
 type PrReviewNotificationJob = Job<PrReviewNotificationRequest, void, string>;
+
+function logPrReviewNotificationTriage(input: {
+  data: PrReviewNotificationRequest;
+  eventsDrained: number;
+  outcome: 'notify' | 'suppress' | 'rate_limited' | 'error';
+  reason?: string;
+  durationMs: number;
+  telemetry: ReturnType<typeof createPrReviewNotificationTelemetry>;
+}): void {
+  console.log(
+    JSON.stringify({
+      event: 'pr_review_notification_triage',
+      instanceId: process.env.R_INSTANCE_ID ?? null,
+      taskId: input.data.taskId,
+      sourceControlProvider: input.data.sourceControlProvider ?? 'github',
+      repository: input.data.repository,
+      prNumber: input.data.prNumber,
+      batchKind: input.data.batchKind ?? null,
+      eventsDrained: input.eventsDrained,
+      eventsTriaged: input.telemetry.eventsTriaged,
+      githubApiCalls: input.telemetry.githubApiCalls,
+      triageInvoked: input.telemetry.triageInvoked,
+      triageCacheHit: input.telemetry.triageCacheHit,
+      triageInputChars: input.telemetry.triageInputChars,
+      triageInputTokenEstimate: input.telemetry.triageInputTokenEstimate,
+      outcome: input.outcome,
+      reason: input.reason ?? null,
+      durationMs: input.durationMs,
+    }),
+  );
+}
 
 function buildPrReviewNotificationPostInput(
   route: PrReviewNotificationRoute,
@@ -100,6 +133,12 @@ function isButtonRouteProvider(
   provider: PrReviewNotificationRoute['provider'],
 ): provider is ButtonRouteProvider {
   return (BUTTON_ROUTE_PROVIDERS as readonly string[]).includes(provider);
+}
+
+function isButtonRoute(
+  route: PrReviewNotificationRoute,
+): route is PrReviewNotificationRoute & { provider: ButtonRouteProvider } {
+  return isButtonRouteProvider(route.provider);
 }
 
 async function postPrReviewNotification({
@@ -163,7 +202,7 @@ async function postPrReviewNotification({
               nonce,
             }),
           }
-        : {}),
+        : { blocks: [{ type: 'markdown', text }] }),
       utmCampaign: 'slack.pr_review',
     });
 
@@ -347,11 +386,24 @@ export const prReviewNotificationJob = async (
     return;
   }
 
+  const deliveryStartedAt = Date.now();
+  const telemetry = createPrReviewNotificationTelemetry(events.length);
+
   try {
     const delivery = await preparePrReviewNotificationDelivery({
       taskRun: latestJob,
       request: data,
       events,
+      telemetry,
+    });
+
+    logPrReviewNotificationTriage({
+      data,
+      eventsDrained: events.length,
+      outcome: delivery.post ? 'notify' : 'suppress',
+      ...(!delivery.post ? { reason: delivery.reason } : {}),
+      durationMs: Date.now() - deliveryStartedAt,
+      telemetry,
     });
 
     if (!delivery.post) {
@@ -392,10 +444,38 @@ export const prReviewNotificationJob = async (
     const roomoteReviewResult = events.find(
       (event) => event.reviewResult,
     )?.reviewResult;
+    const persistedAutoHandleUserId =
+      prLink?.autoHandleFeedbackByUserId ?? null;
+    const autoHandleRoute =
+      followUp &&
+      persistedAutoHandleUserId &&
+      delivery.route &&
+      isButtonRoute(delivery.route)
+        ? delivery.route
+        : null;
+    const autoHandleUserId = autoHandleRoute ? persistedAutoHandleUserId : null;
 
-    await notifyFastAgentParentOnPrFeedback({
+    // Fast-parent delivery can fail and release this notification for retry.
+    // Complete it before auto-dispatch so a retry cannot enqueue the same
+    // resolve prompt twice.
+    const deliveredToFastParent = await notifyFastAgentParentOnPrFeedback({
       run: latestJob,
-      deliveryIds: data.deliveryIds ?? [],
+      feedbackSourceIds: events.map(
+        (event) =>
+          event.providerEventId ??
+          [
+            event.kind,
+            event.authorLogin,
+            event.batchId ?? '',
+            event.reviewHeadSha ?? '',
+            event.reviewState ?? '',
+            event.checkName ?? '',
+            event.inReplyToId ?? '',
+            event.url ?? '',
+            String(event.observedAt ?? ''),
+            event.summary ?? event.body ?? '',
+          ].join('\0'),
+      ),
       pullRequest: {
         provider:
           prLink?.sourceControlProvider ??
@@ -417,57 +497,71 @@ export const prReviewNotificationJob = async (
           }
         : {}),
       ...(roomoteReviewResult ? { reviewResult: roomoteReviewResult } : {}),
-      ...(followUp ? { suggestedActionPrompt: followUp.prompt } : {}),
+      ...(followUp && !autoHandleUserId
+        ? {
+            suggestedActionQuestion: followUp.question,
+            suggestedActionPrompt: followUp.prompt,
+          }
+        : {}),
     });
 
-    // Auto-handled PRs skip the offer entirely: the prepared follow-up is
-    // dispatched straight into the owning task and the conversation gets an
-    // informational line instead of buttons. Falls back to the normal offer
-    // when the task can no longer be reached (e.g. no resumable snapshot).
-    if (
-      followUp &&
-      prLink?.autoHandleFeedbackByUserId &&
-      delivery.route &&
-      isButtonRouteProvider(delivery.route.provider)
-    ) {
+    let autoHandledText: string | null = null;
+    if (followUp && autoHandleUserId && autoHandleRoute) {
       const dispatched = await dispatchPrReviewFollowUp({
-        provider: delivery.route.provider,
+        provider: autoHandleRoute.provider,
         taskId: data.taskId,
-        ...(delivery.route.provider === 'slack'
-          ? { slackTeamId: delivery.route.slackTeamId }
+        ...(autoHandleRoute.provider === 'slack'
+          ? { slackTeamId: autoHandleRoute.slackTeamId }
           : {}),
-        channelId: delivery.route.channelId,
-        threadId: delivery.route.threadId ?? null,
+        channelId: autoHandleRoute.channelId,
+        threadId: autoHandleRoute.threadId ?? null,
         followUpPrompt: followUp.prompt,
-        actingUserId: prLink.autoHandleFeedbackByUserId,
+        actingUserId: autoHandleUserId,
       });
 
       if (dispatched.outcome !== 'unavailable') {
-        const autoText = `New review feedback — I'm on it:
+        autoHandledText = `New review feedback — I'm on it:
 ${delivery.text}`;
-        const messageTs = await postPrReviewNotification({
-          taskId: data.taskId,
-          route: delivery.route,
-          text: autoText,
-        });
-
-        await recordPrReviewNotificationDeliveryBestEffort({
-          runId: latestJob.id,
-          taskId: data.taskId,
-          route: delivery.route,
-          text: autoText,
-          ...(messageTs ? { messageTs } : {}),
-        });
         console.log(
           `[PrReviewNotification] Auto-dispatched review feedback for ${data.repository}#${data.prNumber} into task ${data.taskId} (${dispatched.outcome}, run ${dispatched.runId})`,
         );
-        await finalizePrReviewNotificationRequest(data);
-        return;
+      } else {
+        console.warn(
+          `[PrReviewNotification] Auto-handle dispatch unavailable for ${data.repository}#${data.prNumber}; falling back to the interactive offer`,
+        );
       }
+    }
 
-      console.warn(
-        `[PrReviewNotification] Auto-handle dispatch unavailable for ${data.repository}#${data.prNumber}; falling back to the interactive offer`,
-      );
+    if (deliveredToFastParent && (!autoHandleUserId || autoHandledText)) {
+      await recordPrReviewNotificationDeliveryBestEffort({
+        runId: latestJob.id,
+        taskId: data.taskId,
+        route: null,
+        text: autoHandledText ?? textWithQuestion,
+      });
+      await finalizePrReviewNotificationRequest(data);
+      return;
+    }
+
+    // If the automatic dispatch was unavailable, continue into the normal
+    // offer path even though the Fast parent already received the summary.
+
+    if (autoHandledText && delivery.route) {
+      const messageTs = await postPrReviewNotification({
+        taskId: data.taskId,
+        route: delivery.route,
+        text: autoHandledText,
+      });
+
+      await recordPrReviewNotificationDeliveryBestEffort({
+        runId: latestJob.id,
+        taskId: data.taskId,
+        route: delivery.route,
+        text: autoHandledText,
+        ...(messageTs ? { messageTs } : {}),
+      });
+      await finalizePrReviewNotificationRequest(data);
+      return;
     }
 
     // Chat delivery is optional (web-only tasks have no route). Task history is
@@ -515,6 +609,51 @@ ${delivery.text}`;
       );
     }
   } catch (error) {
+    if (error instanceof PrReviewNotificationRateLimitError) {
+      const jitterMs = Math.floor(Math.random() * 30_000);
+      const delayMs = error.retryAfterMs + jitterMs;
+      await schedulePrReviewNotificationJob({
+        request: data,
+        delayMs,
+        countDeferral: false,
+      });
+      console.warn(
+        JSON.stringify({
+          event: 'pr_review_notification_github_rate_limit',
+          instanceId: process.env.R_INSTANCE_ID ?? null,
+          taskId: data.taskId,
+          repository: data.repository,
+          prNumber: data.prNumber,
+          status: error.rateLimit?.status ?? null,
+          remaining: error.rateLimit?.remaining ?? null,
+          resetAt: error.rateLimit?.resetAt ?? null,
+          retryAfter: error.rateLimit?.retryAfter ?? null,
+          retryAfterMs: error.retryAfterMs,
+          scheduledDelayMs: delayMs,
+          githubApiCalls:
+            error.telemetry?.githubApiCalls ?? telemetry.githubApiCalls,
+        }),
+      );
+      logPrReviewNotificationTriage({
+        data,
+        eventsDrained: events.length,
+        outcome: 'rate_limited',
+        reason: 'github_rate_limit',
+        durationMs: Date.now() - deliveryStartedAt,
+        telemetry: error.telemetry ?? telemetry,
+      });
+      return;
+    }
+
+    logPrReviewNotificationTriage({
+      data,
+      eventsDrained: events.length,
+      outcome: 'error',
+      reason: error instanceof Error ? error.name : 'unknown_error',
+      durationMs: Date.now() - deliveryStartedAt,
+      telemetry,
+    });
+
     // Put the drained events back so a retried job can deliver them.
     try {
       await requeuePendingPrReviewActivity({ target, events });

@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   resolveWorkspace: vi.fn(),
   finalizeWorkItem: vi.fn(),
   releaseWorkItem: vi.fn(),
+  handlePrReviewAction: vi.fn(),
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -59,6 +60,9 @@ vi.mock('../../tasks/current-thread-suggestion-reaction.js', () => ({
   findCurrentThreadSuggestionIdByMessage: mocks.findSuggestionByMessage,
   claimCurrentThreadSuggestionByMessage: mocks.claimSuggestionByMessage,
 }));
+vi.mock('../pr-review-action.js', () => ({
+  handleDiscordPrReviewActionCallback: mocks.handlePrReviewAction,
+}));
 
 import {
   handleDiscordComponentInteraction,
@@ -76,6 +80,48 @@ describe('Discord component callbacks', () => {
       environmentId: 'env-1',
       repoForPayload: 'acme/app',
       workspaceDisplayName: 'App',
+    });
+  });
+
+  it('routes PR review callback payloads to the persisted action handler', async () => {
+    const provider = {} as never;
+    const interaction = {
+      id: 'interaction-1',
+      application_id: 'app-1',
+      type: 3,
+      token: 'token-1',
+      channel_id: 'thread-1',
+      user: { id: 'discord-user-1', username: 'matt' },
+      data: { custom_id: 'prr:a:nonce-1234', component_type: 2 },
+    };
+    const channel = {
+      channelId: 'thread-1',
+      channelName: 'Fix tests',
+      channelType: 11,
+      guildId: 'guild-1',
+      parentChannelId: 'channel-1',
+      isDirectMessage: false,
+      isThread: true,
+    };
+
+    await expect(
+      handleDiscordComponentInteraction({
+        provider,
+        applicationId: 'app-1',
+        interaction,
+        interactionDeferred: true,
+        channel,
+      }),
+    ).resolves.toBe('handled');
+
+    expect(mocks.handlePrReviewAction).toHaveBeenCalledWith({
+      provider,
+      applicationId: 'app-1',
+      interaction,
+      interactionDeferred: true,
+      channel,
+      choice: 'auto',
+      nonce: 'nonce-1234',
     });
   });
 

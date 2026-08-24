@@ -4,6 +4,13 @@ vi.mock('jsonwebtoken', () => ({
   },
 }));
 
+vi.mock('@roomote/env', () => ({
+  Env: {
+    R_GITHUB_APP_ID: 'test-app-id',
+    R_GITHUB_APP_PRIVATE_KEY: 'test-private-key',
+  },
+}));
+
 import {
   clearWorkerReleaseGitHubAuthCache,
   getWorkerReleaseGitHubToken,

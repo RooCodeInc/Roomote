@@ -80,6 +80,10 @@ type Todo = {
  */
 export type CallbackEvent =
   | {
+      type: 'turn_started';
+      ts: number;
+    }
+  | {
       type: 'completion';
       text: string;
       ts: number;
@@ -148,6 +152,13 @@ export type RunTaskCallbacks = {
     deliveryContext?: CallbackDeliveryContext,
   ) => Promise<void>;
   onExit?: (
+    taskRun: TaskRun,
+    status: RunStatus,
+    context: RunTaskContext,
+  ) => Promise<void>;
+  /** A booting status transition (Preparing, Spawning, Connecting, Running)
+   * the worker just persisted; lets surfaces mirror startup progress. */
+  onStatus?: (
     taskRun: TaskRun,
     status: RunStatus,
     context: RunTaskContext,

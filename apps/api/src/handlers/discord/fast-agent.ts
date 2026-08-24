@@ -4,7 +4,10 @@ import {
   type DiscordInteraction,
   type DiscordUser,
 } from '@roomote/communication/discord-event';
-import type { DiscordCommunicationProvider } from '@roomote/communication/discord-provider';
+import {
+  DISCORD_MAX_MESSAGE_LENGTH,
+  type DiscordCommunicationProvider,
+} from '@roomote/communication/discord-provider';
 import {
   acquireFastAgentTurnLock,
   answerFastAgentQuestion,
@@ -102,6 +105,7 @@ export async function processDiscordFastAgentMessage(input: {
         launchTask: async ({
           prompt,
           environmentId,
+          model,
           parentSessionId,
           postKickoff,
         }) => {
@@ -148,6 +152,7 @@ export async function processDiscordFastAgentMessage(input: {
               conversation,
             },
             skipRoutingConfirmation: true,
+            model,
             workspaceOverride,
             beforeEnqueueKickoff: postKickoff,
           });
@@ -171,7 +176,7 @@ export async function processDiscordFastAgentMessage(input: {
           };
         },
         postReply: async ({ message: text }) => {
-          await replyToDiscordEvent({
+          const posted = await replyToDiscordEvent({
             provider: input.provider,
             applicationId: input.applicationId,
             channel: input.channel,
@@ -180,6 +185,36 @@ export async function processDiscordFastAgentMessage(input: {
             text,
           });
           didSendVisibleResponse = true;
+          return {
+            messageId: posted.lastTextMessageId ?? posted.messageId,
+          };
+        },
+        replaceReply: async ({ messageId }, { message: text }) => {
+          if (text.length > DISCORD_MAX_MESSAGE_LENGTH) {
+            await input.provider.editMessage({
+              channelId: input.channel.channelId,
+              messageId,
+              text: 'Reconnected to the inference provider.',
+            });
+            const posted = await replyToDiscordEvent({
+              provider: input.provider,
+              applicationId: input.applicationId,
+              channel: input.channel,
+              ...(message ? { replyToMessageId: message.id } : {}),
+              text,
+            });
+            didSendVisibleResponse = true;
+            return {
+              messageId: posted.lastTextMessageId ?? posted.messageId,
+            };
+          }
+          await input.provider.editMessage({
+            channelId: input.channel.channelId,
+            messageId,
+            text,
+          });
+          didSendVisibleResponse = true;
+          return { messageId };
         },
       },
     });

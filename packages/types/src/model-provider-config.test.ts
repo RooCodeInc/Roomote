@@ -18,11 +18,33 @@ import {
   REASONING_EFFORT_OPTIONS,
   resolveSetupModelProviderIdFromModel,
   SETUP_MODEL_PROVIDER_CATALOG,
+  TASK_MODEL_ROLE_DESCRIPTORS,
+  TASK_MODEL_ROLES,
   type ReasoningEffort,
   type SetupModelProviderDescriptor,
 } from './index';
 
 describe('normalizeDeploymentModelConfig', () => {
+  it('normalizes every role through the canonical descriptor', () => {
+    const input = Object.fromEntries(
+      TASK_MODEL_ROLES.flatMap((role) => {
+        const descriptor = TASK_MODEL_ROLE_DESCRIPTORS[role];
+        return [
+          [descriptor.modelConfigKey, `  openai/${role}  `],
+          [descriptor.reasoningConfigKey, 'high'],
+        ];
+      }),
+    );
+
+    const normalized = normalizeDeploymentModelConfig(input);
+
+    for (const role of TASK_MODEL_ROLES) {
+      const descriptor = TASK_MODEL_ROLE_DESCRIPTORS[role];
+      expect(normalized[descriptor.modelConfigKey]).toBe(`openai/${role}`);
+      expect(normalized[descriptor.reasoningConfigKey]).toBe('high');
+    }
+  });
+
   it('normalizes a fully populated config and trims whitespace', () => {
     expect(
       normalizeDeploymentModelConfig({

@@ -32,7 +32,7 @@ import {
   taskRuns,
   tasks,
 } from '@roomote/db/server';
-import { SlackNotifier } from '@roomote/slack';
+import { SlackNotifier, settleSlackLiveTaskCardForRun } from '@roomote/slack';
 
 import type { UserAuthSuccess } from '@/types';
 import { Env, getArtifactById, getRepositories } from '@/lib/server';
@@ -562,6 +562,13 @@ export async function cancelTaskRunCommand(
 
       if (canceledRun) {
         void captureTaskSettled(canceledRun.id, 'canceled');
+        // A run canceled before any worker claimed it has nobody else to
+        // settle its Slack task card.
+        void settleSlackLiveTaskCardForRun({
+          taskId: job.taskId,
+          payload: job.payload,
+          status: RunStatus.Canceled,
+        });
       }
     }
 

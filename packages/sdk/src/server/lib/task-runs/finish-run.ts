@@ -73,6 +73,7 @@ import {
 import { cleanupSandboxOidcTargetsForTaskRun } from '../sandbox-oidc';
 import { notifySourceRunOnSettle } from './notify-source-run-on-settle';
 import { notifyFastAgentParentOnSettle } from './notify-fast-agent-parent-on-settle';
+import { settleSlackLiveTaskCardOnExit } from './settle-slack-live-task-card-on-exit';
 import { refreshTaskTitleOnCompletion } from './record-task-message-envelope';
 import { getRedis } from '@roomote/redis';
 import { resolveSlackTaskRunRouting } from './slack-task-run-routing';
@@ -352,8 +353,8 @@ export const finishRun = async ({
     // completion or not at all, so no completed task can silently skip
     // memory ingestion. Deployments without a Brain never enqueue; skip
     // rules and DLP live in the bullmq drainer, not here.
-    if (status === RunStatus.Completed && isBrainConfigured(Env)) {
-      await maybeEnqueueBrainMemoryEvent(tx, id);
+    if (status === RunStatus.Completed) {
+      await maybeEnqueueBrainMemoryForCompletedRun(tx, id);
     }
   });
 
@@ -415,6 +416,9 @@ export const finishRun = async ({
     status,
     run.task.title,
   );
+  // The worker settles its own card on exit; this covers runs finalized
+  // here without one (reaper, failed bootstrap). Never throws.
+  void settleSlackLiveTaskCardOnExit(run, status, run.task.title);
 
   // Anonymous analytics (no-op unless enabled): terminal task outcome with
   // non-identifying routing facts only.
@@ -613,6 +617,19 @@ export const finishRun = async ({
     }
   }
 };
+
+/**
+ * Keep every direct completion writer on the same Brain activation guard.
+ * The caller supplies its transaction so completion and enqueue stay atomic.
+ */
+export async function maybeEnqueueBrainMemoryForCompletedRun(
+  tx: Parameters<typeof maybeEnqueueBrainMemoryEvent>[0],
+  runId: number,
+): Promise<void> {
+  if (isBrainConfigured(Env)) {
+    await maybeEnqueueBrainMemoryEvent(tx, runId);
+  }
+}
 
 /**
  * Flip this snapshot run's environment_snapshots row from 'pending' to

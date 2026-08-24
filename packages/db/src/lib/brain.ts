@@ -1,5 +1,23 @@
-import { and, count, desc, eq, inArray, like, lt, max, sql } from 'drizzle-orm';
-import { MISSING_MEMORY_EVENT_COUNT_CAP, RunStatus } from '@roomote/types';
+import {
+  and,
+  count,
+  desc,
+  eq,
+  gt,
+  inArray,
+  isNull,
+  like,
+  lt,
+  lte,
+  max,
+  or,
+  sql,
+} from 'drizzle-orm';
+import {
+  BRAIN_COLLECTOR_IDS,
+  MISSING_MEMORY_EVENT_COUNT_CAP,
+  RunStatus,
+} from '@roomote/types';
 
 import { type DatabaseOrTransaction } from '../db';
 import {
@@ -495,7 +513,9 @@ export type BrainMemoryEventSummary = {
    * predates the Brain (or a backfill has not been run), which is a state an
    * admin can act on rather than a fault.
    */
-  completedRunsWithoutEvent: number;
+  historicalCompletedRunsWithoutEvent: number;
+  /** Completed after the one-time backfill but missing their automatic row. */
+  recentCompletedRunsWithoutEvent: number;
 };
 
 const EMPTY_MEMORY_EVENT_STATUS_COUNTS: Record<BrainMemoryEventStatus, number> =
@@ -515,7 +535,22 @@ const EMPTY_MEMORY_EVENT_STATUS_COUNTS: Record<BrainMemoryEventStatus, number> =
 export async function getBrainMemoryEventSummary(
   database: DatabaseOrTransaction,
 ): Promise<BrainMemoryEventSummary> {
-  const [statusRows, processedRow, failureRow, missingRow] = await Promise.all([
+  const taskMemoryState = await getBrainSyncState(
+    database,
+    BRAIN_COLLECTOR_IDS.taskMemories,
+  );
+  const historyCutoff = taskMemoryState?.backfillCompletedAt ?? null;
+  const missingEvent = sql`NOT EXISTS (
+    SELECT 1 FROM ${brainMemoryEvents}
+    WHERE ${brainMemoryEvents.runId} = ${taskRuns.id}
+  )`;
+  const [
+    statusRows,
+    processedRow,
+    failureRow,
+    historicalMissingRows,
+    recentMissingRows,
+  ] = await Promise.all([
     database
       .select({
         status: brainMemoryEvents.status,
@@ -532,22 +567,37 @@ export async function getBrainMemoryEventSummary(
       .where(eq(brainMemoryEvents.status, 'failed'))
       .orderBy(desc(brainMemoryEvents.updatedAt))
       .limit(1),
-    // Capped rather than counted: the page only needs "how many are missing,
-    // roughly" to offer the history backfill, and an uncapped anti-join over
-    // all completed runs grows with total run history forever.
+    // Before the first backfill checkpoint, every missing row is history. Once
+    // it exists, only runs completed on or before it belong in that banner.
     database
       .select({ id: taskRuns.id })
       .from(taskRuns)
       .where(
         and(
           eq(taskRuns.status, RunStatus.Completed),
-          sql`NOT EXISTS (
-            SELECT 1 FROM ${brainMemoryEvents}
-            WHERE ${brainMemoryEvents.runId} = ${taskRuns.id}
-          )`,
+          missingEvent,
+          historyCutoff
+            ? or(
+                isNull(taskRuns.completedAt),
+                lte(taskRuns.completedAt, historyCutoff),
+              )
+            : undefined,
         ),
       )
       .limit(MISSING_MEMORY_EVENT_COUNT_CAP),
+    historyCutoff
+      ? database
+          .select({ id: taskRuns.id })
+          .from(taskRuns)
+          .where(
+            and(
+              eq(taskRuns.status, RunStatus.Completed),
+              gt(taskRuns.completedAt, historyCutoff),
+              missingEvent,
+            ),
+          )
+          .limit(MISSING_MEMORY_EVENT_COUNT_CAP)
+      : Promise.resolve([]),
   ]);
 
   const byStatus = { ...EMPTY_MEMORY_EVENT_STATUS_COUNTS };
@@ -560,7 +610,8 @@ export async function getBrainMemoryEventSummary(
     byStatus,
     lastProcessedAt: processedRow[0]?.lastProcessedAt ?? null,
     lastError: failureRow[0]?.lastError ?? null,
-    completedRunsWithoutEvent: missingRow.length,
+    historicalCompletedRunsWithoutEvent: historicalMissingRows.length,
+    recentCompletedRunsWithoutEvent: recentMissingRows.length,
   };
 }
 

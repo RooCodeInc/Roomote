@@ -302,7 +302,10 @@ projects.
 active repositories and suggests tightly scoped follow-up update tasks. It
 does not open PRs directly from the scheduled scan. Follow-up remediation
 preserves the repository's dependency minimum-age and exclusion policies and
-uses only versions those policies allow.
+uses only versions those policies allow. When every repository is scanned
+successfully and no alerts are open, Roomote stays silent instead of posting an
+empty report. Access failures, actionable alerts, and remediation work still
+produce a report.
 
 **Triage CodeQL Alerts** scans open GitHub code-scanning alerts (especially
 CodeQL findings) across your active repositories and launches tightly scoped

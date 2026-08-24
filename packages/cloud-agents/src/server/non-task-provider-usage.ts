@@ -41,6 +41,14 @@ const NON_TASK_SESSION_PERMISSIONS: PermissionRuleset = Object.keys(
   NON_TASK_TOOL_PERMISSION_DENIALS,
 ).map((permission) => ({ permission, pattern: '*', action: 'deny' }));
 
+export const FAST_AGENT_SESSION_PERMISSIONS: PermissionRuleset = Object.keys(
+  NON_TASK_TOOL_PERMISSION_DENIALS,
+).map((permission) => ({
+  permission,
+  pattern: '*',
+  action: permission === 'task' ? 'allow' : 'deny',
+}));
+
 /**
  * Default per-prompt tool filter: disable every registered tool — including MCP or
  * plugin tools an externally configured server (`OPENCODE_SDK_SERVER_URL`)
@@ -102,6 +110,7 @@ export const NON_TASK_INFERENCE_SURFACES = {
 const NON_TASK_INFERENCE_VALIDATION_TIMEOUT_MS = 15_000;
 
 export type NonTaskInferenceValidationFailureReason =
+  | 'content_filter'
   | 'endpoint_unreachable'
   | 'gateway_blocked'
   | 'insufficient_credits'
@@ -143,6 +152,8 @@ interface GenerateTrackedNonTaskBaseParams extends NonTaskInferenceTrackingInput
    * outer timeout fires.
    */
   onProviderRetry?: (event: NonTaskProviderRetryEvent) => void | Promise<void>;
+  /** Stop OpenCode's own provider retry loop at this attempt count. */
+  maxProviderRetryAttempts?: number;
 }
 
 export type NonTaskProviderRetryEvent = {
@@ -192,7 +203,9 @@ export type NonTaskOpenCodeNativeSessionOptions = {
   onModelResolved?: (model: string) => void;
   onPromptStarted?: () => void;
   onSessionReady?: (sessionID: string) => Promise<void> | void;
+  onSubagentSessionReady?: (sessionID: string) => Promise<void> | void;
   permission?: PermissionRuleset;
+  promptOnlySubagents?: boolean;
   signal?: AbortSignal;
   tools: Record<string, boolean>;
 };
@@ -698,8 +711,10 @@ async function runNonTaskSdkPrompt(
     env?: Partial<Record<string, string>>;
     onPromptStarted?: () => void;
     onSessionReady?: (sessionID: string) => Promise<void> | void;
+    onSubagentSessionReady?: (sessionID: string) => Promise<void> | void;
     permission?: PermissionRuleset;
     preserveReasoning?: boolean;
+    promptOnlySubagents?: boolean;
     promptErrorLabel?: string;
     session?: NonTaskOpenCodeSession;
     signal?: AbortSignal;
@@ -720,6 +735,7 @@ async function runNonTaskSdkPrompt(
     env: { ...resolvedModelRuntimeEnv, ...options.env },
     ephemeral: options.ephemeral,
     preserveReasoning: options.preserveReasoning,
+    promptOnlySubagents: options.promptOnlySubagents,
     startTimeoutMs:
       timeoutMs === null
         ? DEFAULT_OPENCODE_SDK_SERVER_START_TIMEOUT_MS
@@ -796,7 +812,7 @@ async function runNonTaskSdkPrompt(
     });
     let eventMonitor: Promise<void> | undefined;
 
-    if (params.onProviderRetry) {
+    if (params.onProviderRetry || options.onSubagentSessionReady) {
       try {
         const subscription = await client.event.subscribe(
           { directory: sessionDirectory },
@@ -806,6 +822,19 @@ async function runNonTaskSdkPrompt(
           try {
             for await (const event of subscription.stream) {
               if (
+                (event.type === 'session.created' ||
+                  event.type === 'session.updated') &&
+                event.properties.info.parentID === sessionId
+              ) {
+                try {
+                  await options.onSubagentSessionReady?.(
+                    event.properties.sessionID,
+                  );
+                } catch (error) {
+                  rejectSessionError(error);
+                  return;
+                }
+              } else if (
                 event.type === 'session.status' &&
                 event.properties.sessionID === sessionId &&
                 event.properties.status.type === 'retry'
@@ -825,6 +854,25 @@ async function runNonTaskSdkPrompt(
                   console.warn(
                     `[NonTaskProviderUsage] OpenCode provider retry reporter failed: ${formatOpenCodeSdkError(error)}`,
                   );
+                }
+                if (
+                  params.maxProviderRetryAttempts !== undefined &&
+                  event.properties.status.attempt >=
+                    params.maxProviderRetryAttempts
+                ) {
+                  rejectSessionError(
+                    new NonTaskOpenCodePromptError(
+                      {
+                        name: 'APIError',
+                        data: {
+                          message: event.properties.status.message,
+                          isRetryable: false,
+                        },
+                      },
+                      promptErrorLabel,
+                    ),
+                  );
+                  return;
                 }
               } else if (
                 event.type === 'session.error' &&
@@ -851,7 +899,12 @@ async function runNonTaskSdkPrompt(
           }
         })();
       } catch (error) {
-        // Event reporting is additive. Keep the prompt path available if an
+        if (options.onSubagentSessionReady) {
+          throw new Error(
+            `OpenCode subagent session discovery is unavailable: ${formatOpenCodeSdkError(error)}`,
+          );
+        }
+        // Retry reporting is additive. Keep the prompt path available if an
         // older externally configured OpenCode server cannot stream events.
         if (!eventAbortController.signal.aborted) {
           console.warn(
@@ -873,9 +926,10 @@ async function runNonTaskSdkPrompt(
         },
         { signal: abortController.signal },
       );
-      const promptResult = params.onProviderRetry
-        ? await Promise.race([promptRequest, sessionError])
-        : await promptRequest;
+      const promptResult =
+        params.onProviderRetry || options.onSubagentSessionReady
+          ? await Promise.race([promptRequest, sessionError])
+          : await promptRequest;
 
       if (promptResult.error || !promptResult.data) {
         if (isOpenCodeSessionMissing(promptResult.error)) {
@@ -1005,8 +1059,10 @@ export async function generateTrackedNonTaskTextInOpenCodeSession(
       env: options.env,
       onPromptStarted: options.onPromptStarted,
       onSessionReady: options.onSessionReady,
+      onSubagentSessionReady: options.onSubagentSessionReady,
       permission: options.permission,
       preserveReasoning: true,
+      promptOnlySubagents: options.promptOnlySubagents,
       promptErrorLabel: 'OpenCode native Fast prompt failed',
       session,
       signal: options.signal,
@@ -1139,6 +1195,83 @@ function findInferenceErrorStatusCode(error: unknown): number | undefined {
   return undefined;
 }
 
+function isInferenceErrorExplicitlyNonRetryable(error: unknown): boolean {
+  const pending: Array<{ value: unknown; depth: number }> = [
+    { value: error, depth: 0 },
+  ];
+  const seen = new Set<object>();
+
+  while (pending.length > 0) {
+    const current = pending.shift();
+    if (!current || current.depth > 4) continue;
+
+    const { value, depth } = current;
+    if (typeof value === 'string') {
+      try {
+        pending.push({ value: JSON.parse(value), depth: depth + 1 });
+      } catch {
+        // Provider prose is classified separately below.
+      }
+      continue;
+    }
+    if (!value || typeof value !== 'object' || seen.has(value)) continue;
+
+    seen.add(value);
+    const record = value as Record<string, unknown>;
+    if (record.isRetryable === false) return true;
+    for (const nested of Object.values(record)) {
+      pending.push({ value: nested, depth: depth + 1 });
+    }
+  }
+
+  return false;
+}
+
+function isContentFilterInferenceError(error: unknown): boolean {
+  const pending: Array<{ value: unknown; depth: number }> = [
+    { value: error, depth: 0 },
+  ];
+  const seen = new Set<object>();
+
+  while (pending.length > 0) {
+    const current = pending.shift();
+    if (!current || current.depth > 4) continue;
+
+    const { value, depth } = current;
+    if (typeof value === 'string') {
+      const normalized = value.toLowerCase();
+      if (
+        normalized.includes('contentfiltererror') ||
+        normalized.includes('content_filter') ||
+        (normalized.includes('content filter') &&
+          (normalized.includes('blocked') || normalized.includes('filtered')))
+      ) {
+        return true;
+      }
+
+      try {
+        pending.push({ value: JSON.parse(value), depth: depth + 1 });
+      } catch {
+        // The recognized provider message signatures above are sufficient.
+      }
+      continue;
+    }
+    if (!value || typeof value !== 'object' || seen.has(value)) continue;
+
+    seen.add(value);
+    const record = value as Record<string, unknown>;
+    pending.push(
+      { value: record.name, depth: depth + 1 },
+      { value: record.message, depth: depth + 1 },
+    );
+    for (const nested of Object.values(value)) {
+      pending.push({ value: nested, depth: depth + 1 });
+    }
+  }
+
+  return false;
+}
+
 export function classifyNonTaskInferenceError(
   error: unknown,
 ): Pick<
@@ -1169,6 +1302,23 @@ export function classifyNonTaskInferenceError(
     (statusCode === 403 && /^\s*(?:<!doctype|<html)/iu.test(responseBody)) ||
     (detail.includes('forbidden:') &&
       detail.includes('request was blocked by a gateway or proxy'));
+
+  if (isContentFilterInferenceError(inferenceError)) {
+    return {
+      message:
+        'The inference provider blocked the response with its content filter.',
+      reason: 'content_filter',
+      retryable: false,
+    };
+  }
+
+  if (isInferenceErrorExplicitlyNonRetryable(inferenceError)) {
+    return {
+      message: 'The inference provider rejected the request.',
+      reason: 'provider_error',
+      retryable: false,
+    };
+  }
 
   // Failures inside Roomote's own validation helper (the managed OpenCode
   // server) must not read as provider failures — the candidate credentials
@@ -1224,7 +1374,6 @@ export function classifyNonTaskInferenceError(
 
   if (
     errorName === 'ContextOverflowError' ||
-    errorName === 'ContentFilterError' ||
     errorName === 'MessageOutputLengthError' ||
     errorName === 'StructuredOutputError'
   ) {

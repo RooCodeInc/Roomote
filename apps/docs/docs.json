@@ -147,6 +147,7 @@
           "integrations/asana",
           "integrations/better-stack",
           "integrations/braintrust",
+          "integrations/elevenlabs",
           "integrations/grafana",
           "integrations/granola",
           "integrations/jira",

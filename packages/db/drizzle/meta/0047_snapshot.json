@@ -1,5 +1,5 @@
 {
-  "id": "3c781ceb-7e70-4a71-92b6-1d6e9b1aed38",
+  "id": "ec88a59c-447b-4163-b15a-f4427bdf1a11",
   "prevId": "e453ff58-6833-4798-823a-e81a1a7eac36",
   "version": "7",
   "dialect": "postgresql",
@@ -3162,6 +3162,20 @@
           "notNull": true,
           "default": true
         },
+        "compatibility_messages": {
+          "name": "compatibility_messages",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'[]'::jsonb"
+        },
+        "legacy_conversation_ids": {
+          "name": "legacy_conversation_ids",
+          "type": "uuid[]",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'::uuid[]"
+        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp",
@@ -3218,6 +3232,21 @@
           "isUnique": false,
           "concurrently": false,
           "method": "btree",
+          "with": {}
+        },
+        "fast_agent_conversations_legacy_ids_idx": {
+          "name": "fast_agent_conversations_legacy_ids_idx",
+          "columns": [
+            {
+              "expression": "legacy_conversation_ids",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "gin",
           "with": {}
         }
       },
@@ -5422,18 +5451,6 @@
           "primaryKey": false,
           "notNull": true
         },
-        "body": {
-          "name": "body",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "labels": {
-          "name": "labels",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": false
-        },
         "created_at_remote": {
           "name": "created_at_remote",
           "type": "timestamp",
@@ -7086,11 +7103,17 @@
           "notNull": true,
           "default": "gen_random_uuid()"
         },
+        "fast_agent_conversation_id": {
+          "name": "fast_agent_conversation_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
         "slack_quick_answer_id": {
           "name": "slack_quick_answer_id",
           "type": "uuid",
           "primaryKey": false,
-          "notNull": true
+          "notNull": false
         },
         "user_id": {
           "name": "user_id",
@@ -7214,6 +7237,27 @@
           "method": "btree",
           "with": {}
         },
+        "slack_fast_integration_calls_conversation_idx": {
+          "name": "slack_fast_integration_calls_conversation_idx",
+          "columns": [
+            {
+              "expression": "fast_agent_conversation_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
         "slack_fast_integration_calls_user_idx": {
           "name": "slack_fast_integration_calls_user_idx",
           "columns": [
@@ -7258,6 +7302,15 @@
         }
       },
       "foreignKeys": {
+        "slack_fast_integration_calls_fast_agent_conversation_id_fast_agent_conversations_id_fk": {
+          "name": "slack_fast_integration_calls_fast_agent_conversation_id_fast_agent_conversations_id_fk",
+          "tableFrom": "slack_fast_integration_calls",
+          "tableTo": "fast_agent_conversations",
+          "columnsFrom": ["fast_agent_conversation_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
         "slack_fast_integration_calls_slack_quick_answer_id_slack_quick_answers_id_fk": {
           "name": "slack_fast_integration_calls_slack_quick_answer_id_slack_quick_answers_id_fk",
           "tableFrom": "slack_fast_integration_calls",
