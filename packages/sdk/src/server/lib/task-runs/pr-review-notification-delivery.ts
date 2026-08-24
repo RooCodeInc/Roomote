@@ -1304,7 +1304,9 @@ function filterHandledReviewEvents(
     return (
       !context.currentHeadSha ||
       !event.reviewHeadSha ||
-      (event.kind !== 'review' && event.kind !== 'ci_failure') ||
+      (event.kind !== 'review' &&
+        event.kind !== 'ci_failure' &&
+        event.kind !== 'review_summary') ||
       event.reviewHeadSha === context.currentHeadSha
     );
   });

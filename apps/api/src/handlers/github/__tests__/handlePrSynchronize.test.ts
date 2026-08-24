@@ -242,7 +242,17 @@ describe('handlePrSynchronize', () => {
         }),
       }),
     );
-    expect(mockUpdate).not.toHaveBeenCalled();
+    // The superseding head is recorded before the debounced follow-up so a
+    // review finishing inside that window is still seen as stale, while
+    // `prSha` stays the head the review last covered (it seeds
+    // `previous_review_head_sha` in the follow-up prompt).
+    expect(mockUpdateSet).toHaveBeenCalledOnce();
+    expect(mockUpdateSet).toHaveBeenCalledWith({
+      payload: expect.anything(),
+    });
+    expect(mockUpdateSet).not.toHaveBeenCalledWith(
+      expect.objectContaining({ prSha: expect.anything() }),
+    );
     expect(mockEnqueueTask).not.toHaveBeenCalled();
     expect(mockReleaseLock).toHaveBeenCalledOnce();
   });
@@ -282,10 +292,12 @@ describe('handlePrSynchronize', () => {
         eventHeadSha: 'new-head',
       }),
     );
-    expect(mockUpdate).not.toHaveBeenCalled();
+    expect(mockUpdateSet).not.toHaveBeenCalledWith(
+      expect.objectContaining({ prSha: expect.anything() }),
+    );
   });
 
-  it('leaves the stored head unchanged when debounce scheduling fails', async () => {
+  it('leaves the covered head unchanged when debounce scheduling fails', async () => {
     mockSelect.mockReturnValueOnce(
       selectResult([
         {
@@ -306,7 +318,11 @@ describe('handlePrSynchronize', () => {
       'queue unavailable',
     );
 
-    expect(mockUpdate).not.toHaveBeenCalled();
+    // Recording the superseding head is safe to retry; advancing `prSha`
+    // would tell the next follow-up the review had already covered this push.
+    expect(mockUpdateSet).not.toHaveBeenCalledWith(
+      expect.objectContaining({ prSha: expect.anything() }),
+    );
     expect(mockEnqueueTask).not.toHaveBeenCalled();
     expect(mockReleaseLock).toHaveBeenCalledOnce();
   });

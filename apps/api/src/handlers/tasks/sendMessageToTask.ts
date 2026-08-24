@@ -636,12 +636,14 @@ async function getLinkedReviewHandoffTarget({
   targetTaskId,
 }: {
   sourceRun: {
+    taskId: string;
     type: TaskPayloadKind | string | null;
     payload: Record<string, unknown>;
   };
   targetTaskId: string;
 }): Promise<{
   status: PullRequestStatus | null;
+  currentHeadSha: string | null;
   pullRequest: LinkedReviewFastHandoff['pullRequest'];
 }> {
   const repo =
@@ -686,7 +688,9 @@ async function getLinkedReviewHandoffTarget({
 
   const prLink = await db.query.taskPullRequests.findFirst({
     where: and(
-      eq(taskPullRequests.taskId, targetTaskId),
+      // PR synchronize refreshes the review task linkage to the pushed head;
+      // the implementation owner's association can still contain its initial SHA.
+      eq(taskPullRequests.taskId, sourceRun.taskId),
       eq(taskPullRequests.repository, repo),
       eq(taskPullRequests.prNumber, prNumber),
     ),
@@ -695,6 +699,7 @@ async function getLinkedReviewHandoffTarget({
       prTitle: true,
       prUrl: true,
       status: true,
+      prSha: true,
     },
   });
 
@@ -709,6 +714,7 @@ async function getLinkedReviewHandoffTarget({
 
   return {
     status: prLink?.status ?? null,
+    currentHeadSha: prLink?.prSha ?? null,
     pullRequest: {
       provider: 'github',
       host: prLink?.host ?? null,
@@ -772,6 +778,7 @@ async function resolveLinkedReviewHandoff({
 
   const handoffTarget = await getLinkedReviewHandoffTarget({
     sourceRun: {
+      taskId: sourceRun.taskId,
       type: sourceRun.payloadKind,
       payload: sourcePayload,
     },
@@ -792,6 +799,21 @@ async function resolveLinkedReviewHandoff({
     (typeof sourcePayload.headSha === 'string'
       ? sourcePayload.headSha
       : undefined);
+  // `latestObservedHeadSha` is stamped by the synchronize handler the moment a
+  // push supersedes a running review, while the linkage `prSha` only advances
+  // once the debounced follow-up has been relayed. Prefer the former so a
+  // review that finishes inside that window is still recognized as stale.
+  const currentHeadSha =
+    (typeof sourcePayload.latestObservedHeadSha === 'string'
+      ? sourcePayload.latestObservedHeadSha
+      : null) ?? handoffTarget.currentHeadSha;
+  if (reviewHeadSha && currentHeadSha && reviewHeadSha !== currentHeadSha) {
+    return {
+      kind: 'skip',
+      reason:
+        'Linked review handoff skipped because the review targets an older pull request head.',
+    };
+  }
   const summary =
     getLinkedReviewHandoffQuoteText(message) ??
     (parsedReview?.outcome === 'clean'
@@ -911,15 +933,14 @@ export async function sendMessageToTask({
       getFastAgentParentFromPayload(run.payload)
     ) {
       const fastHandoff = linkedReviewHandoff.fastHandoff;
+      const feedbackSourceId = `linked-review:${fastHandoff.reviewTaskId}:${fastHandoff.reviewHeadSha ?? fastHandoff.reviewRunId}`;
       await notifyFastAgentParentOnPrFeedback({
         run: {
           id: run.id,
           taskId,
           payload: run.payload,
         },
-        deliveryIds: [
-          `linked-review:${fastHandoff.reviewTaskId}:${fastHandoff.reviewHeadSha ?? fastHandoff.reviewRunId}`,
-        ],
+        feedbackSourceIds: [feedbackSourceId],
         reviewTaskId: fastHandoff.reviewTaskId,
         ...(fastHandoff.reviewHeadSha
           ? { reviewHeadSha: fastHandoff.reviewHeadSha }

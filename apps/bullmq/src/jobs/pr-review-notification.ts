@@ -460,7 +460,22 @@ export const prReviewNotificationJob = async (
     // resolve prompt twice.
     const deliveredToFastParent = await notifyFastAgentParentOnPrFeedback({
       run: latestJob,
-      deliveryIds: data.deliveryIds ?? [],
+      feedbackSourceIds: events.map(
+        (event) =>
+          event.providerEventId ??
+          [
+            event.kind,
+            event.authorLogin,
+            event.batchId ?? '',
+            event.reviewHeadSha ?? '',
+            event.reviewState ?? '',
+            event.checkName ?? '',
+            event.inReplyToId ?? '',
+            event.url ?? '',
+            String(event.observedAt ?? ''),
+            event.summary ?? event.body ?? '',
+          ].join('\0'),
+      ),
       pullRequest: {
         provider:
           prLink?.sourceControlProvider ??
