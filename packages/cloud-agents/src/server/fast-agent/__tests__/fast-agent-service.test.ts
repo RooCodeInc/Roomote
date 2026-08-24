@@ -38,6 +38,10 @@ const nativeToolNames = vi.hoisted(
     }) as const,
 );
 
+const fastAgentSessionPermissions = vi.hoisted(() => [
+  { permission: 'task', pattern: '*', action: 'allow' },
+]);
+
 vi.mock('../fast-agent-session', () => ({
   appendFastAgentVisibleMessages: mocks.appendVisibleMessages,
   getActiveFastAgentTasks: mocks.getActiveTasks,
@@ -53,6 +57,7 @@ vi.mock('@roomote/db/server', () => ({
 }));
 
 vi.mock('../../non-task-provider-usage', () => ({
+  FAST_AGENT_SESSION_PERMISSIONS: fastAgentSessionPermissions,
   NON_TASK_INFERENCE_SURFACES: {
     fastAgentQuestionAnswering: 'fast_agent',
   },
@@ -277,6 +282,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       { id: 'opencode-session-1' },
       expect.objectContaining({
         directory: '/tmp/fast-native-tools',
+        permission: fastAgentSessionPermissions,
         promptOnlySubagents: true,
         tools: expect.objectContaining({
           send_chat_reply: true,
@@ -291,6 +297,112 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         expect.objectContaining({ role: 'assistant' }),
       ],
     });
+  });
+
+  it('binds only integration and task inspection tools for subagent sessions', async () => {
+    const adapter = callbacks();
+    mocks.listIntegrations.mockResolvedValue([
+      {
+        id: 'github',
+        name: 'GitHub',
+        description: 'Repository access',
+        tools: [{ name: 'search_code' }],
+      },
+    ]);
+
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        await options.onSubagentSessionReady('opencode-subagent-1');
+        await options.onSubagentSessionReady('opencode-subagent-1');
+
+        const parentExecutor = mocks.bindExecutor.mock.calls.find(
+          ([sessionID]) => sessionID === 'opencode-session-1',
+        )?.[1];
+        const subagentExecutor = mocks.bindExecutor.mock.calls.find(
+          ([sessionID]) => sessionID === 'opencode-subagent-1',
+        )?.[1];
+        if (!parentExecutor || !subagentExecutor) {
+          throw new Error('Expected parent and subagent executors to bind.');
+        }
+
+        await parentExecutor({
+          name: nativeToolNames.sendChatReply,
+          args: { purpose: 'ack', message: 'I’ll inspect that.' },
+        });
+        await expect(
+          subagentExecutor({
+            agent: 'advisor',
+            name: nativeToolNames.manageTasks,
+            args: { action: 'get_summary', taskId: 'task-1' },
+          }),
+        ).resolves.toEqual({
+          id: 'task-1',
+          taskRunStatus: 'running',
+        });
+        await expect(
+          subagentExecutor({
+            agent: 'advisor',
+            name: nativeToolNames.integrationCall,
+            args: {
+              integrationId: 'github',
+              toolName: 'search_code',
+              arguments: { query: 'Fast Agent' },
+            },
+          }),
+        ).resolves.toEqual({
+          success: true,
+          result: { matches: ['fast-agent.ts'] },
+        });
+        await expect(
+          subagentExecutor({
+            agent: 'advisor',
+            name: nativeToolNames.sendChatReply,
+            args: { purpose: 'closeout', message: 'leak' },
+          }),
+        ).resolves.toEqual({
+          success: false,
+          error: 'That tool is reserved for the Fast parent agent.',
+        });
+        await expect(
+          subagentExecutor({
+            agent: 'general',
+            name: nativeToolNames.manageTasks,
+            args: { action: 'get_summary', taskId: 'task-1' },
+          }),
+        ).resolves.toEqual({
+          success: false,
+          error: 'That tool is reserved for the Fast parent agent.',
+        });
+        await parentExecutor({
+          name: nativeToolNames.sendChatReply,
+          args: {
+            purpose: 'closeout',
+            message: 'Subagent review completed.',
+          },
+        });
+        return '';
+      },
+    );
+
+    await expect(
+      answerFastAgentQuestion({ ...baseParams, adapter }),
+    ).resolves.toBe('Subagent review completed.');
+    expect(mocks.inspectTasks).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: 'user-1' }),
+      { action: 'get_summary', taskId: 'task-1' },
+    );
+    expect(mocks.callIntegration).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: 'user-1' }),
+      expect.arrayContaining([expect.objectContaining({ id: 'github' })]),
+      {
+        integrationId: 'github',
+        toolName: 'search_code',
+        args: { query: 'Fast Agent' },
+      },
+    );
+    expect(adapter.postReply).toHaveBeenCalledTimes(2);
+    expect(mocks.bindExecutor).toHaveBeenCalledTimes(2);
   });
 
   it('rebuilds an invalidated OpenCode session from canonical compatibility history', async () => {

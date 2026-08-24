@@ -28,6 +28,7 @@ import {
   ROOMOTE_OPENCODE_JUDGE_AGENT_DESCRIPTION,
   ROOMOTE_OPENCODE_JUDGE_AGENT_NAME,
 } from '../opencode-prompt-subagents';
+import { FAST_AGENT_SUBAGENT_TOOL_FILTER } from './fast-agent/fast-agent-tool-policy';
 
 const ESCAPE_CHARACTER = String.fromCharCode(27);
 const BELL_CHARACTER = String.fromCharCode(7);
@@ -198,22 +199,20 @@ export const NON_TASK_TOOL_PERMISSION_DENIALS = {
   skill: 'deny',
 } as const;
 
-const PROMPT_ONLY_SUBAGENT_TOOL_FILTER = { '*': false } as const;
-
 const PROMPT_ONLY_SUBAGENTS = {
   [ROOMOTE_OPENCODE_ADVISOR_AGENT_NAME]: {
     description: ROOMOTE_OPENCODE_ADVISOR_AGENT_DESCRIPTION,
     mode: 'subagent',
     prompt: createRoomoteAdvisorAgentPrompt({ contextOnly: true }),
     permission: NON_TASK_TOOL_PERMISSION_DENIALS,
-    tools: PROMPT_ONLY_SUBAGENT_TOOL_FILTER,
+    tools: FAST_AGENT_SUBAGENT_TOOL_FILTER,
   },
   [ROOMOTE_OPENCODE_JUDGE_AGENT_NAME]: {
     description: ROOMOTE_OPENCODE_JUDGE_AGENT_DESCRIPTION,
     mode: 'subagent',
     prompt: createRoomoteJudgeAgentPrompt({ contextOnly: true }),
     permission: NON_TASK_TOOL_PERMISSION_DENIALS,
-    tools: PROMPT_ONLY_SUBAGENT_TOOL_FILTER,
+    tools: FAST_AGENT_SUBAGENT_TOOL_FILTER,
   },
 } as const;
 

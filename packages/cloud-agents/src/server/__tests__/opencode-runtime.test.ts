@@ -213,7 +213,11 @@ describe('buildOpenCodeCliEnv', () => {
       expect(agent).toMatchObject({
         mode: 'subagent',
         permission: NON_TASK_TOOL_PERMISSION_DENIALS,
-        tools: { '*': false },
+        tools: {
+          '*': false,
+          integration_call: true,
+          manage_tasks: true,
+        },
       });
       expect(agent.prompt).toEqual(expect.stringContaining('Use only'));
       expect(agent.prompt).not.toEqual(
