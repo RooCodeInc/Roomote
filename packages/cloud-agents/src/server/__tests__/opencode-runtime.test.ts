@@ -205,9 +205,16 @@ describe('buildOpenCodeCliEnv', () => {
       ...NON_TASK_TOOL_PERMISSION_DENIALS,
       task: 'allow',
     });
-    expect(Object.keys(config.agent)).toEqual(['advisor', 'judge']);
+    expect(config.agent.general).toEqual({ disable: true });
+    expect(config.agent.explore).toEqual({ disable: true });
+    expect(Object.keys(config.agent).sort()).toEqual([
+      'advisor',
+      'explore',
+      'general',
+      'judge',
+    ]);
 
-    for (const agent of Object.values(config.agent) as Array<
+    for (const agent of [config.agent.advisor, config.agent.judge] as Array<
       Record<string, unknown>
     >) {
       expect(agent).toMatchObject({

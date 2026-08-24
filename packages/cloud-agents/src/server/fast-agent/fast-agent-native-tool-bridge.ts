@@ -25,6 +25,7 @@ export type { FastAgentNativeToolName } from './fast-agent-tool-policy';
 
 const FAST_AGENT_TOOL_BRIDGE_BODY_LIMIT_BYTES = 1_000_000;
 const FAST_AGENT_TOOL_BRIDGE_ERROR = 'Fast tool execution failed.';
+const FAST_AGENT_NATIVE_TOOL_OUTPUT_LIMIT_BYTES = 45 * 1024;
 
 export type FastAgentNativeToolCall = {
   agent?: string;
@@ -54,6 +55,24 @@ const bridgeRequestSchema = z.object({
 });
 
 const FAST_AGENT_NATIVE_TOOL_BRIDGE_SOURCE = String.raw`
+const OUTPUT_LIMIT_BYTES = ${FAST_AGENT_NATIVE_TOOL_OUTPUT_LIMIT_BYTES}
+
+const formatResult = (result) => {
+  const serialized = JSON.stringify(result ?? null)
+  const bytes = Buffer.from(serialized)
+  if (bytes.length <= OUTPUT_LIMIT_BYTES) {
+    return { output: serialized, metadata: { roomoteResult: result ?? null } }
+  }
+
+  let previewEnd = OUTPUT_LIMIT_BYTES
+  while (previewEnd > 0 && (bytes[previewEnd] & 0xc0) === 0x80) previewEnd--
+  const preview = bytes.subarray(0, previewEnd).toString("utf8")
+  return {
+    output: preview + "\n\n...output truncated...\n\nThe integration result exceeded Fast mode's inline output limit. Refine the integration query or launch a full task when the complete result is required. Fast subagents cannot read OpenCode spill files.",
+    metadata: { roomoteResult: null, roomoteTruncated: true },
+  }
+}
+
 export const invoke = async (name, args, context) => {
   const url = process.env.ROOMOTE_FAST_TOOL_BRIDGE_URL
   const token = process.env.ROOMOTE_FAST_TOOL_BRIDGE_TOKEN
@@ -71,10 +90,11 @@ export const invoke = async (name, args, context) => {
   if (!response.ok || !payload?.ok) {
     throw new Error(payload?.error || "Roomote Fast tool " + name + " failed.")
   }
+  const formatted = formatResult(payload.result)
   return {
     title: name,
-    output: JSON.stringify(payload.result ?? null),
-    metadata: { roomoteResult: payload.result ?? null },
+    output: formatted.output,
+    metadata: formatted.metadata,
   }
 }
 `;

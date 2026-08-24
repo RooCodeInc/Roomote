@@ -200,6 +200,11 @@ export const NON_TASK_TOOL_PERMISSION_DENIALS = {
 } as const;
 
 const PROMPT_ONLY_SUBAGENTS = {
+  // OpenCode always installs its native general/explore agents unless they are
+  // explicitly disabled. Fast has no local file or shell capabilities, so
+  // exposing them invites fabricated answers after their tool calls are denied.
+  general: { disable: true },
+  explore: { disable: true },
   [ROOMOTE_OPENCODE_ADVISOR_AGENT_NAME]: {
     description: ROOMOTE_OPENCODE_ADVISOR_AGENT_DESCRIPTION,
     mode: 'subagent',

@@ -1,5 +1,6 @@
 import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { ROOMOTE_TASK_INSPECTION_ACTIONS } from '@roomote/types';
 
 import {
@@ -57,6 +58,9 @@ describe('Fast native OpenCode tool bridge', () => {
     expect(bridgeSource).toContain('context.sessionID');
     expect(bridgeSource).toContain('agent: context.agent');
     expect(bridgeSource).toContain('metadata: { roomoteResult:');
+    expect(bridgeSource).toContain(
+      'Fast subagents cannot read OpenCode spill files',
+    );
     expect(FAST_AGENT_NATIVE_TOOL_FILTER).toMatchObject({
       '*': false,
       task: true,
@@ -79,6 +83,68 @@ describe('Fast native OpenCode tool bridge', () => {
       FAST_AGENT_NATIVE_TOOL_NAMES.sendTaskMessage,
     ]) {
       expect(FAST_AGENT_SUBAGENT_TOOL_FILTER[parentOnlyTool]).not.toBe(true);
+    }
+  });
+
+  it("keeps large native results below OpenCode's spill-file threshold", async () => {
+    const runtime = await getFastAgentNativeToolRuntime();
+    const previousBridgeUrl = process.env.ROOMOTE_FAST_TOOL_BRIDGE_URL;
+    const previousBridgeToken = process.env.ROOMOTE_FAST_TOOL_BRIDGE_TOKEN;
+    process.env.ROOMOTE_FAST_TOOL_BRIDGE_URL =
+      runtime.env.ROOMOTE_FAST_TOOL_BRIDGE_URL;
+    process.env.ROOMOTE_FAST_TOOL_BRIDGE_TOKEN =
+      runtime.env.ROOMOTE_FAST_TOOL_BRIDGE_TOKEN;
+    const bridgePath = join(
+      runtime.directory,
+      '.opencode',
+      'roomote-fast-tool-bridge.js',
+    );
+    const bridge = (await import(
+      `${pathToFileURL(bridgePath).href}?test=${Date.now()}`
+    )) as {
+      invoke: (
+        name: string,
+        args: Record<string, unknown>,
+        context: { sessionID: string; agent: string },
+      ) => Promise<{
+        output: string;
+        metadata: Record<string, unknown>;
+      }>;
+    };
+    const unbind = bindFastAgentNativeToolExecutor(
+      'opencode-session-large-result',
+      async () => ({ content: '\u{1f680}'.repeat(20 * 1024) }),
+    );
+
+    try {
+      const result = await bridge.invoke(
+        FAST_AGENT_NATIVE_TOOL_NAMES.integrationCall,
+        {},
+        { sessionID: 'opencode-session-large-result', agent: 'build' },
+      );
+
+      expect(Buffer.byteLength(result.output)).toBeLessThan(50 * 1024);
+      expect(result.output).toContain('output truncated');
+      expect(result.output).toContain(
+        'Fast subagents cannot read OpenCode spill files',
+      );
+      expect(result.output).not.toContain('\ufffd');
+      expect(result.metadata).toEqual({
+        roomoteResult: null,
+        roomoteTruncated: true,
+      });
+    } finally {
+      unbind();
+      if (previousBridgeUrl === undefined) {
+        delete process.env.ROOMOTE_FAST_TOOL_BRIDGE_URL;
+      } else {
+        process.env.ROOMOTE_FAST_TOOL_BRIDGE_URL = previousBridgeUrl;
+      }
+      if (previousBridgeToken === undefined) {
+        delete process.env.ROOMOTE_FAST_TOOL_BRIDGE_TOKEN;
+      } else {
+        process.env.ROOMOTE_FAST_TOOL_BRIDGE_TOKEN = previousBridgeToken;
+      }
     }
   });
 
