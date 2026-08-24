@@ -739,6 +739,17 @@ describe('Slack live task card', () => {
       { type: 'completion', ts: 1000, text: 'Late result.' },
       context,
     );
+    await updateSlackLiveTaskStream(
+      taskRun,
+      {
+        type: 'followup',
+        ts: 1001,
+        question: 'Retry?',
+        suggestions: [],
+      },
+      context,
+    );
+    await finishSlackLiveTaskStream(taskRun, RunStatus.Canceled, context);
 
     expect(mocks.renderCard).toHaveBeenCalledOnce();
     expect(renderedCard(1)).toEqual({
@@ -769,6 +780,7 @@ describe('Slack live task card', () => {
       { type: 'completion', ts: 1000, text: 'Late result.' },
       context,
     );
+    await finishSlackLiveTaskStream(taskRun, RunStatus.Canceled, context);
     resolveRender?.({ card: true, updated: true });
     await finishPromise;
 

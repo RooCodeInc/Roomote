@@ -293,12 +293,7 @@ export async function updateSlackLiveTaskStream(
     return;
   }
 
-  if (
-    state.status === 'error' &&
-    event.type !== 'followup' &&
-    event.type !== 'request_user_input' &&
-    event.type !== 'request_user_input_response'
-  ) {
+  if (state.status === 'error') {
     return;
   }
 
@@ -376,6 +371,10 @@ export async function finishSlackLiveTaskStream(
   context: RunTaskContext,
 ): Promise<void> {
   const state = getCardState(context);
+
+  if (state.status === 'error') {
+    return;
+  }
 
   if (status === RunStatus.Idle) {
     if (
