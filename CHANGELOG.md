@@ -4,14 +4,14 @@ This file tracks product releases for Roomote (single monorepo version). Automat
 
 ## 0.41.3 (2026-08-24)
 
-This release expands Fast delegation, adds actionable pull-request CI updates and proactive operator alerts, clarifies inference costs, and gives the Brain richer pull-request context.
+This release adds a shared task board, expands Fast delegation, delivers actionable pull-request CI updates and proactive operator alerts, clarifies inference costs, and gives the Brain richer pull-request context.
 
 ### Highlights
 
+- Coordinate team work from a shared board organized by task lifecycle, ownership, and context.
 - Launch multiple independent tasks from one Fast conversation, choose their coding models, and consult focused reasoning subagents.
 - Send actionable GitHub check failures back to linked tasks and their originating conversations.
 - Warn operators about provider usage limits and deliver configuration issues to admins even without a configured channel.
-- Attribute inference spend by usage source and give the Brain richer pull-request context.
 
 ### Minor changes
 
@@ -20,6 +20,7 @@ This release expands Fast delegation, adds actionable pull-request CI updates an
 - Let Fast launch multiple independent Roomote tasks from one Slack or Discord turn while keeping each kickoff visible and preventing repeated identical requests from creating duplicate work.
 - Notify linked Roomote tasks and their originating conversations when checks fail on a GitHub pull request, consolidating related failures and ignoring results from outdated commits.
 - Warn operators before supported inference-provider usage limits are exhausted, and deliver platform configuration issues to linked deployment admins by direct message when no alert or Manager Channel is configured.
+- Add a shared task board that groups work into Active, Needs input, Blocked / failed, and Done columns, with Mine and Everyone scopes plus task context for coordinating team work.
 
 ### Patch changes
 
