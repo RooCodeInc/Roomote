@@ -91,7 +91,6 @@ describe('Slack live task card', () => {
     await reportSlackLiveTaskStatus(taskRun, RunStatus.Spawning, context);
     await reportSlackLiveTaskStatus(taskRun, RunStatus.Connecting, context);
     await reportSlackLiveTaskStatus(taskRun, RunStatus.Running, context);
-    await reportSlackLiveTaskStatus(taskRun, RunStatus.Idle, context);
 
     expect(mocks.renderCard).toHaveBeenCalledTimes(4);
     expect(mocks.renderCard.mock.calls.map((call) => call[0].message)).toEqual([
@@ -679,10 +678,62 @@ describe('Slack live task card', () => {
     });
   });
 
-  it('retains the card for idle runs awaiting a resume', async () => {
-    await finishSlackLiveTaskStream(createTaskRun(), RunStatus.Idle, {});
+  it('settles an idle run as a fallback when the completion event was lost', async () => {
+    const taskRun = createTaskRun();
+    const context = {};
+    await updateSlackLiveTaskStream(
+      taskRun,
+      { type: 'text', ts: 1000, text: 'Running the tests now.' },
+      context,
+    );
+    await reportSlackLiveTaskStatus(taskRun, RunStatus.Idle, context);
 
-    expect(mocks.renderCard).not.toHaveBeenCalled();
+    expect(renderedCard(2)).toEqual({
+      status: 'complete',
+      output: 'Task completed.',
+    });
+  });
+
+  it('replaces an idle fallback with a delayed real completion', async () => {
+    const taskRun = createTaskRun();
+    const context = {};
+    await reportSlackLiveTaskStatus(taskRun, RunStatus.Idle, context);
+    await updateSlackLiveTaskStream(
+      taskRun,
+      { type: 'completion', ts: 1000, text: 'Ready for review.' },
+      context,
+    );
+
+    expect(renderedCard(1)).toEqual({
+      status: 'complete',
+      output: 'Task completed.',
+    });
+    expect(renderedCard(2)).toEqual({
+      status: 'complete',
+      output: 'Ready for review.',
+    });
+  });
+
+  it('keeps an idle card active when the task is waiting for user input', async () => {
+    const taskRun = createTaskRun();
+    const context = {};
+    await updateSlackLiveTaskStream(
+      taskRun,
+      {
+        type: 'followup',
+        ts: 1000,
+        question: 'Which environment?',
+        suggestions: [],
+      },
+      context,
+    );
+    await reportSlackLiveTaskStatus(taskRun, RunStatus.Idle, context);
+
+    expect(mocks.renderCard).toHaveBeenCalledOnce();
+    expect(renderedCard(1)).toEqual({
+      status: 'in_progress',
+      output: 'Waiting for your input…',
+    });
   });
 
   it('wires callbacks only for runs that opted into a card', async () => {

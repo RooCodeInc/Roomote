@@ -4486,6 +4486,7 @@ describe('runTask', () => {
 
   it('waits for queued runtime-state writes before marking the job idle', async () => {
     let resolveRuntimeUpdate: (() => void) | null = null;
+    const onStatus = vi.fn().mockResolvedValue(undefined);
     const pendingRuntimeUpdate = new Promise<{ updated: boolean }>(
       (resolve) => {
         resolveRuntimeUpdate = () => resolve({ updated: true });
@@ -4519,7 +4520,7 @@ describe('runTask', () => {
       harnessInstructions: undefined,
       agentInstructions: undefined,
       environmentConfig: undefined,
-      callbacks: {},
+      callbacks: { onStatus },
       context: {},
       logger: {
         info: vi.fn(),
@@ -4555,11 +4556,13 @@ describe('runTask', () => {
 
     await new Promise((resolve) => setImmediate(resolve));
 
+    onStatus.mockClear();
     const onExitPromise = harnessManager!.callbacks?.onExit?.();
 
     await new Promise((resolve) => setImmediate(resolve));
 
     expect(taskRunsDoneMock).not.toHaveBeenCalled();
+    expect(onStatus).not.toHaveBeenCalled();
 
     expect(resolveRuntimeUpdate).toBeTypeOf('function');
     resolveRuntimeUpdate!();
@@ -4569,6 +4572,11 @@ describe('runTask', () => {
       id: 104,
       status: RunStatus.Idle,
     });
+    expect(onStatus).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 104 }),
+      RunStatus.Idle,
+      expect.any(Object),
+    );
   });
 
   describe('worker crash handlers', () => {

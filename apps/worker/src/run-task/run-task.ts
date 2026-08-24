@@ -1521,6 +1521,7 @@ export const runTask = async ({
             id: taskRun.id,
             status: RunStatus.Idle,
           });
+          await callbacks.onStatus?.(taskRun, RunStatus.Idle, context);
         },
       },
     });

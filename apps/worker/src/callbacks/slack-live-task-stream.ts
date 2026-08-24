@@ -228,6 +228,11 @@ export async function reportSlackLiveTaskStatus(
   status: RunStatus,
   context: RunTaskContext,
 ): Promise<void> {
+  if (status === RunStatus.Idle) {
+    await finishSlackLiveTaskStream(taskRun, status, context);
+    return;
+  }
+
   const message = STARTUP_STATUS_MESSAGES[status];
   if (!message) {
     return;
@@ -283,14 +288,24 @@ export async function updateSlackLiveTaskStream(
   }
 
   if (state.settled) {
+    // A lifecycle fallback may settle before the delayed completion callback
+    // carrying the real output. Let only that completion replace the generic
+    // result; terminal errors and cards with real output remain immutable.
     if (
+      event.type === 'completion' &&
+      state.status === 'complete' &&
+      state.finalMessage === undefined
+    ) {
+      state.settled = false;
+    } else if (
       event.type !== 'followup' &&
       event.type !== 'request_user_input' &&
       event.type !== 'request_user_input_response'
     ) {
       return;
+    } else {
+      state.settled = false;
     }
-    state.settled = false;
   }
 
   if (event.type === 'completion') {
@@ -339,18 +354,14 @@ export async function finishSlackLiveTaskStream(
   status: RunStatus,
   context: RunTaskContext,
 ): Promise<void> {
-  // Idle runs retain the card for a later resume.
-  if (status === RunStatus.Idle) {
-    return;
-  }
-
   const state = getCardState(context);
 
-  if (status === RunStatus.Completed) {
+  if (status === RunStatus.Completed || status === RunStatus.Idle) {
     // Usually a no-op: the completion CallbackEvent already settled the
     // card with the real output. This fallback guarantees the card cannot
-    // stay spinning when that event is lost (or its render was rejected),
-    // and never promotes the last narration line to the final result.
+    // stay spinning when that event is lost, rejected, or the resumable run
+    // first settles as idle. Never promote narration to the final result or
+    // overwrite a card that is genuinely waiting for user input.
     if (state.settled || state.awaitingInput) {
       return;
     }
@@ -420,9 +431,17 @@ export function getSlackLiveTaskStreamRunTaskCallbacks(
       }
     },
     onStatus: async (run, status, context) => {
-      void reportSlackLiveTaskStatus(run, status, context).catch((error) =>
-        reportCardCallbackError(error, 'slackLiveTaskStream.onStatus', run.id),
+      const update = reportSlackLiveTaskStatus(run, status, context).catch(
+        (error) =>
+          reportCardCallbackError(
+            error,
+            'slackLiveTaskStream.onStatus',
+            run.id,
+          ),
       );
+      if (status === RunStatus.Idle) {
+        await update;
+      }
     },
   };
 }
