@@ -42,14 +42,24 @@ export type GitHubTokenMetadata = {
 };
 
 export type CreateGitHubTokenRuntimeOptions = {
+  /** Reuse a valid token for this exact app, installation, and repo scope. */
+  cache?: boolean;
+  /** Ignore and replace any cached token for this scope. */
+  forceRefresh?: boolean;
+  /** Upper bound on token reuse, independent of the provider expiry. */
+  maxCacheAgeMs?: number;
   /** Called only when this process sends a token-mint POST to GitHub. */
   onTokenMintRequest?: () => void;
 };
 
 const GITHUB_TOKEN_CACHE_REFRESH_BUFFER_MS = 5 * 60 * 1000;
+const GITHUB_TOKEN_CACHE_MAX_AGE_MS = 15 * 60 * 1000;
 const GITHUB_TOKEN_CACHE_MAX_ENTRIES = 500;
 
-const githubTokenCache = new Map<string, GitHubTokenMetadata>();
+const githubTokenCache = new Map<
+  string,
+  { metadata: GitHubTokenMetadata; storedAt: number }
+>();
 const githubTokenMintsInFlight = new Map<
   string,
   Promise<GitHubTokenMetadata>
@@ -85,13 +95,17 @@ function getGitHubTokenCacheKey({
 
 function getCachedGitHubToken(
   cacheKey: string,
+  maxCacheAgeMs: number,
   now = Date.now(),
 ): GitHubTokenMetadata | null {
   const cached = githubTokenCache.get(cacheKey);
 
   if (
-    !cached?.expiresAt ||
-    cached.expiresAt.getTime() - GITHUB_TOKEN_CACHE_REFRESH_BUFFER_MS <= now
+    !cached?.metadata.expiresAt ||
+    cached.metadata.expiresAt.getTime() -
+      GITHUB_TOKEN_CACHE_REFRESH_BUFFER_MS <=
+      now ||
+    cached.storedAt + maxCacheAgeMs <= now
   ) {
     githubTokenCache.delete(cacheKey);
     return null;
@@ -101,7 +115,7 @@ function getCachedGitHubToken(
   // used scope first.
   githubTokenCache.delete(cacheKey);
   githubTokenCache.set(cacheKey, cached);
-  return cached;
+  return cached.metadata;
 }
 
 function cacheGitHubToken(
@@ -113,7 +127,7 @@ function cacheGitHubToken(
   }
 
   githubTokenCache.delete(cacheKey);
-  githubTokenCache.set(cacheKey, metadata);
+  githubTokenCache.set(cacheKey, { metadata, storedAt: Date.now() });
 
   while (githubTokenCache.size > GITHUB_TOKEN_CACHE_MAX_ENTRIES) {
     const oldestKey = githubTokenCache.keys().next().value;
@@ -304,9 +318,22 @@ export async function createGitHubTokenWithMetadata(
     installationId: installation.installationId,
     repositoryIds,
   });
-  const cached = getCachedGitHubToken(cacheKey);
-  if (cached) {
-    return cached;
+  const cacheEnabled = runtimeOptions?.cache === true;
+  const forceRefresh = runtimeOptions?.forceRefresh === true;
+  const maxCacheAgeMs = Math.max(
+    0,
+    runtimeOptions?.maxCacheAgeMs ?? GITHUB_TOKEN_CACHE_MAX_AGE_MS,
+  );
+
+  if (cacheEnabled && forceRefresh) {
+    githubTokenCache.delete(cacheKey);
+  }
+
+  if (cacheEnabled && !forceRefresh) {
+    const cached = getCachedGitHubToken(cacheKey, maxCacheAgeMs);
+    if (cached) {
+      return cached;
+    }
   }
 
   const existingMint = githubTokenMintsInFlight.get(cacheKey);
@@ -321,7 +348,9 @@ export async function createGitHubTokenWithMetadata(
     runtimeOptions,
   })
     .then((metadata) => {
-      cacheGitHubToken(cacheKey, metadata);
+      if (cacheEnabled) {
+        cacheGitHubToken(cacheKey, metadata);
+      }
       return metadata;
     })
     .finally(() => {

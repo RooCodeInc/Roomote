@@ -111,6 +111,16 @@ vi.mock('@roomote/github', () => ({
   }),
   getGitHubRateLimitRetryAfterMs: (...args: unknown[]) =>
     mockGetGitHubRateLimitRetryAfterMs(...args),
+  isGitHubUnauthorizedError: (error: unknown) =>
+    typeof error === 'object' &&
+    error !== null &&
+    'status' in error &&
+    Number(error.status) === 401,
+  withTaskRunGitHubTokenRetry: async (
+    taskRun: unknown,
+    operation: (token: string) => Promise<unknown>,
+    runtimeOptions?: unknown,
+  ) => operation(await mockCreateTaskRunGitHubToken(taskRun, runtimeOptions)),
 }));
 
 import type { TaskRun } from '@roomote/db/server';

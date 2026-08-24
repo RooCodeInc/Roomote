@@ -688,6 +688,44 @@ describe('createSourceControlTokenForTaskRun', () => {
     }
   });
 
+  it('honors a short GitHub retry-after delay once before succeeding', async () => {
+    const rateLimitError = Object.assign(new Error('Secondary rate limit'), {
+      status: 429,
+    });
+    mockCreateTaskRunWorkerGitHubTokenWithMetadata
+      .mockRejectedValueOnce(rateLimitError)
+      .mockResolvedValueOnce({
+        token: 'ghs_recovered_token',
+        source: 'app',
+        expiresAt: new Date('2030-01-01T01:00:00.000Z'),
+      });
+    mockGetGitHubRateLimitRetryAfterMs.mockReturnValue(1);
+    const consoleWarnSpy = vi
+      .spyOn(console, 'warn')
+      .mockImplementation(() => undefined);
+
+    try {
+      const result = await createSourceControlTokenForTaskRun(
+        makeTaskRun({
+          repo: 'owner/repo',
+          description: 'Work on GitHub',
+        }),
+        '[test]',
+        { maxRetries: 3, baseDelayMs: 0 },
+      );
+
+      expect(result?.token).toBe('ghs_recovered_token');
+      expect(
+        mockCreateTaskRunWorkerGitHubTokenWithMetadata,
+      ).toHaveBeenCalledTimes(2);
+      expect(consoleWarnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('"action":"retry"'),
+      );
+    } finally {
+      consoleWarnSpy.mockRestore();
+    }
+  });
+
   it('returns null when GitLab token is missing', async () => {
     mockCreateTaskRunScopedGitLabTokens.mockRejectedValueOnce(
       new Error('GITLAB_TOKEN is required for GitLab source control jobs.'),

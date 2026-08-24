@@ -51,6 +51,7 @@ import type { TaskRun } from '@roomote/db/server';
 import {
   createTaskRunGitHubToken,
   createTaskRunWorkerGitHubTokenWithMetadata,
+  withTaskRunGitHubTokenRetry,
 } from '../api';
 
 function buildTaskRun(payload: TaskRun['payload']): TaskRun {
@@ -333,5 +334,71 @@ describe('createTaskRunGitHubToken', () => {
       source: 'app',
       expiresAt: new Date('2030-01-01T01:00:00.000Z'),
     });
+  });
+
+  it('evicts a cached task token and retries once after a 401', async () => {
+    mockCreateGitHubTokenWithMetadata
+      .mockResolvedValueOnce({
+        token: 'ghs_cached_token',
+        expiresAt: new Date('2030-01-01T01:00:00.000Z'),
+      })
+      .mockResolvedValueOnce({
+        token: 'ghs_fresh_token',
+        expiresAt: new Date('2030-01-01T01:00:00.000Z'),
+      });
+    const unauthorized = Object.assign(new Error('Bad credentials'), {
+      status: 401,
+    });
+    const operation = vi
+      .fn<(token: string) => Promise<string>>()
+      .mockRejectedValueOnce(unauthorized)
+      .mockResolvedValueOnce('ok');
+    const taskRun = buildTaskRun({
+      repo: '__all_repositories__',
+    } as TaskRun['payload']);
+
+    await expect(withTaskRunGitHubTokenRetry(taskRun, operation)).resolves.toBe(
+      'ok',
+    );
+
+    expect(operation).toHaveBeenNthCalledWith(1, 'ghs_cached_token');
+    expect(operation).toHaveBeenNthCalledWith(2, 'ghs_fresh_token');
+    expect(mockCreateGitHubTokenWithMetadata).toHaveBeenNthCalledWith(
+      1,
+      { type: 'activeInstallation' },
+      undefined,
+      {
+        cache: true,
+        maxCacheAgeMs: 15 * 60 * 1000,
+      },
+    );
+    expect(mockCreateGitHubTokenWithMetadata).toHaveBeenNthCalledWith(
+      2,
+      { type: 'activeInstallation' },
+      undefined,
+      {
+        cache: true,
+        forceRefresh: true,
+        maxCacheAgeMs: 15 * 60 * 1000,
+      },
+    );
+  });
+
+  it('does not retry non-authentication failures', async () => {
+    const operation = vi
+      .fn<(token: string) => Promise<string>>()
+      .mockRejectedValueOnce(
+        Object.assign(new Error('Forbidden'), { status: 403 }),
+      );
+
+    await expect(
+      withTaskRunGitHubTokenRetry(
+        buildTaskRun({ repo: '__all_repositories__' } as TaskRun['payload']),
+        operation,
+      ),
+    ).rejects.toThrow('Forbidden');
+
+    expect(operation).toHaveBeenCalledTimes(1);
+    expect(mockCreateGitHubTokenWithMetadata).toHaveBeenCalledTimes(1);
   });
 });

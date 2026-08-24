@@ -2,4 +2,4 @@
 "@roomote/auth": patch
 ---
 
-Reduce GitHub App rate-limit pressure by caching and coalescing installation-token requests, reusing bootstrap credentials until their scheduled refresh, and stopping immediate retries when GitHub asks clients to back off.
+Reduce GitHub App rate-limit pressure by coalescing installation-token requests, briefly caching the PR-notification hot path with one fresh-token retry, reusing bootstrap credentials until their scheduled refresh, and honoring provider backoff signals.

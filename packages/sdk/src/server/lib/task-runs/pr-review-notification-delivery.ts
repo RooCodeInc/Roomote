@@ -17,7 +17,9 @@ import {
   createTaskRunGitHubToken,
   getGitHubRateLimitRetryAfterMs,
   getOctokit,
+  isGitHubUnauthorizedError,
   resolveConfiguredGitHubAppSlug,
+  withTaskRunGitHubTokenRetry,
 } from '@roomote/github';
 import { setLatestSlackBotReply, trackSlackBotReply } from '@roomote/slack';
 import {
@@ -150,6 +152,10 @@ function rethrowGitHubRateLimit(
   error: unknown,
   telemetry: PrReviewNotificationTelemetry,
 ): void {
+  if (isGitHubUnauthorizedError(error)) {
+    throw error;
+  }
+
   if (error instanceof PrReviewNotificationRateLimitError) {
     throw error;
   }
@@ -980,23 +986,29 @@ export async function gatherPrReviewTriageContext({
   telemetry?: PrReviewNotificationTelemetry;
 }): Promise<PrReviewTriageContext> {
   const provider = normalizeSourceControlProvider(sourceControlProvider);
-  let githubToken: string | undefined;
-
-  if (provider === 'github') {
+  const gatherWithToken = async (
+    githubToken?: string,
+  ): Promise<PrReviewTriageContext> => {
+    let discussionResult: Omit<PrReviewTriageContext, 'ciStatus' | 'mergeable'>;
     try {
-      githubToken = await createTaskRunGitHubToken(taskRun, {
-        onTokenMintRequest: () => {
-          telemetry.githubTokenMintRequests += 1;
-        },
+      discussionResult = await fetchPrDiscussionSignals({
+        taskRun,
+        repository,
+        prNumber,
+        telemetry,
+        githubToken,
       });
     } catch (error) {
-      rethrowGitHubRateLimit(error, telemetry);
+      if (provider === 'github') {
+        rethrowGitHubRateLimit(error, telemetry);
+      }
       console.warn(
-        `[PrReviewNotification] Could not create task-scoped GitHub client for ${repository}#${prNumber}: ${
+        `[PrReviewNotification] Could not fetch PR discussion signals for ${repository}#${prNumber}: ${
           error instanceof Error ? error.message : String(error)
         }`,
       );
-      return {
+
+      discussionResult = {
         resolvedThreadCount: null,
         unresolvedThreadCount: null,
         latestReviewStatus: null,
@@ -1004,32 +1016,46 @@ export async function gatherPrReviewTriageContext({
         latestTerminalReviewSummaryHeadSha: null,
         currentHeadSha: null,
         reviewThreads: [],
-        ciStatus: null,
-        mergeable: null,
       };
     }
-  }
 
-  let discussionResult: Omit<PrReviewTriageContext, 'ciStatus' | 'mergeable'>;
-  try {
-    discussionResult = await fetchPrDiscussionSignals({
+    // Avoid starting the live-head request burst when discussion reads have
+    // already established that the installation is rate limited.
+    const liveHeadState = await fetchPrReviewLiveHeadState({
       taskRun,
       repository,
       prNumber,
+      sourceControlProvider,
       telemetry,
       githubToken,
     });
+
+    return {
+      ...discussionResult,
+      currentHeadSha: liveHeadState.currentHeadSha,
+      ciStatus: liveHeadState.ciStatus,
+      mergeable: liveHeadState.mergeable,
+    };
+  };
+
+  if (provider !== 'github') {
+    return gatherWithToken();
+  }
+
+  try {
+    return await withTaskRunGitHubTokenRetry(taskRun, gatherWithToken, {
+      onTokenMintRequest: () => {
+        telemetry.githubTokenMintRequests += 1;
+      },
+    });
   } catch (error) {
-    if (provider === 'github') {
-      rethrowGitHubRateLimit(error, telemetry);
-    }
+    rethrowGitHubRateLimit(error, telemetry);
     console.warn(
-      `[PrReviewNotification] Could not fetch PR discussion signals for ${repository}#${prNumber}: ${
+      `[PrReviewNotification] Could not create task-scoped GitHub client for ${repository}#${prNumber}: ${
         error instanceof Error ? error.message : String(error)
       }`,
     );
-
-    discussionResult = {
+    return {
       resolvedThreadCount: null,
       unresolvedThreadCount: null,
       latestReviewStatus: null,
@@ -1037,26 +1063,10 @@ export async function gatherPrReviewTriageContext({
       latestTerminalReviewSummaryHeadSha: null,
       currentHeadSha: null,
       reviewThreads: [],
+      ciStatus: null,
+      mergeable: null,
     };
   }
-
-  // Avoid starting the live-head request burst when discussion reads have
-  // already established that the installation is rate limited.
-  const liveHeadState = await fetchPrReviewLiveHeadState({
-    taskRun,
-    repository,
-    prNumber,
-    sourceControlProvider,
-    telemetry,
-    githubToken,
-  });
-
-  return {
-    ...discussionResult,
-    currentHeadSha: liveHeadState.currentHeadSha,
-    ciStatus: liveHeadState.ciStatus,
-    mergeable: liveHeadState.mergeable,
-  };
 }
 
 function buildCiContextLines(context: PrReviewTriageContext): string[] {

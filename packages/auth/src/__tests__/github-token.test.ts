@@ -251,11 +251,13 @@ describe('createGitHubToken', () => {
 
     await expect(
       createGitHubToken({ type: 'activeInstallation' }, undefined, {
+        cache: true,
         onTokenMintRequest,
       }),
     ).resolves.toBe('ghs_installation_token');
     await expect(
       createGitHubToken({ type: 'activeInstallation' }, undefined, {
+        cache: true,
         onTokenMintRequest,
       }),
     ).resolves.toBe('ghs_installation_token');
@@ -267,21 +269,33 @@ describe('createGitHubToken', () => {
   it('normalizes equivalent repository scopes without crossing scope boundaries', async () => {
     mockFindInstallation.mockResolvedValue({ installationId: 999 });
 
-    await createGitHubToken({
-      type: 'installationId',
-      installationId: 'inst-row-id',
-      repositoryIds: [8, 7, 8],
-    });
-    await createGitHubToken({
-      type: 'installationId',
-      installationId: 'inst-row-id',
-      repositoryIds: [7, 8],
-    });
-    await createGitHubToken({
-      type: 'installationId',
-      installationId: 'inst-row-id',
-      repositoryIds: [7],
-    });
+    await createGitHubToken(
+      {
+        type: 'installationId',
+        installationId: 'inst-row-id',
+        repositoryIds: [8, 7, 8],
+      },
+      undefined,
+      { cache: true },
+    );
+    await createGitHubToken(
+      {
+        type: 'installationId',
+        installationId: 'inst-row-id',
+        repositoryIds: [7, 8],
+      },
+      undefined,
+      { cache: true },
+    );
+    await createGitHubToken(
+      {
+        type: 'installationId',
+        installationId: 'inst-row-id',
+        repositoryIds: [7],
+      },
+      undefined,
+      { cache: true },
+    );
 
     expect(mockCreateInstallationAccessToken).toHaveBeenCalledTimes(2);
     expect(mockCreateInstallationAccessToken).toHaveBeenNthCalledWith(1, {
@@ -332,8 +346,74 @@ describe('createGitHubToken', () => {
       },
     });
 
-    await createGitHubToken({ type: 'activeInstallation' });
-    await createGitHubToken({ type: 'activeInstallation' });
+    await createGitHubToken({ type: 'activeInstallation' }, undefined, {
+      cache: true,
+    });
+    await createGitHubToken({ type: 'activeInstallation' }, undefined, {
+      cache: true,
+    });
+
+    expect(mockCreateInstallationAccessToken).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not reuse a token beyond the configured cache age', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-08-24T12:00:00.000Z'));
+    mockCreateInstallationAccessToken.mockResolvedValue({
+      data: {
+        token: 'ghs_cached_token',
+        expires_at: '2026-08-24T13:00:00.000Z',
+      },
+    });
+
+    try {
+      await createGitHubToken({ type: 'activeInstallation' }, undefined, {
+        cache: true,
+        maxCacheAgeMs: 15 * 60 * 1000,
+      });
+      await vi.advanceTimersByTimeAsync(15 * 60 * 1000);
+      await createGitHubToken({ type: 'activeInstallation' }, undefined, {
+        cache: true,
+        maxCacheAgeMs: 15 * 60 * 1000,
+      });
+
+      expect(mockCreateInstallationAccessToken).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('force-refreshes and replaces a cached token', async () => {
+    mockCreateInstallationAccessToken
+      .mockResolvedValueOnce({
+        data: {
+          token: 'ghs_first_token',
+          expires_at: '2030-01-01T01:00:00.000Z',
+        },
+      })
+      .mockResolvedValueOnce({
+        data: {
+          token: 'ghs_fresh_token',
+          expires_at: '2030-01-01T01:00:00.000Z',
+        },
+      });
+
+    await expect(
+      createGitHubToken({ type: 'activeInstallation' }, undefined, {
+        cache: true,
+      }),
+    ).resolves.toBe('ghs_first_token');
+    await expect(
+      createGitHubToken({ type: 'activeInstallation' }, undefined, {
+        cache: true,
+        forceRefresh: true,
+      }),
+    ).resolves.toBe('ghs_fresh_token');
+    await expect(
+      createGitHubToken({ type: 'activeInstallation' }, undefined, {
+        cache: true,
+      }),
+    ).resolves.toBe('ghs_fresh_token');
 
     expect(mockCreateInstallationAccessToken).toHaveBeenCalledTimes(2);
   });

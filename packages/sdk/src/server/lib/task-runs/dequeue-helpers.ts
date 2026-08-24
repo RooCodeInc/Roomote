@@ -431,6 +431,7 @@ export async function notifyCanceledTaskRunOnSettle(
 
 const SOURCE_CONTROL_TOKEN_MAX_RETRIES = 3;
 const SOURCE_CONTROL_TOKEN_BASE_DELAY_MS = 1_000;
+const GITHUB_TOKEN_MAX_INLINE_RATE_LIMIT_DELAY_MS = 30 * 1_000;
 
 export type SourceControlRuntimeToken = SourceControlTokenMetadata & {
   source: 'user' | 'app';
@@ -654,7 +655,11 @@ async function createProviderTokenWithRetry(
         provider === 'github' ? getGitHubRateLimitRetryAfterMs(error) : null;
 
       if (githubRetryAfterMs !== null) {
-        console.error(
+        const canRetryInline =
+          attempt < maxRetries &&
+          githubRetryAfterMs <= GITHUB_TOKEN_MAX_INLINE_RATE_LIMIT_DELAY_MS;
+        const log = canRetryInline ? console.warn : console.error;
+        log(
           JSON.stringify({
             event: 'source_control_token_creation_rate_limited',
             provider,
@@ -662,8 +667,17 @@ async function createProviderTokenWithRetry(
             attempt,
             maxRetries,
             retryAfterMs: githubRetryAfterMs,
+            action: canRetryInline ? 'retry' : 'abort',
           }),
         );
+
+        if (canRetryInline) {
+          await new Promise((resolve) =>
+            setTimeout(resolve, githubRetryAfterMs),
+          );
+          continue;
+        }
+
         // A dequeue cannot safely hold a run claim for a provider-directed
         // delay that may last minutes. Stop immediately instead of converting
         // one rate-limited POST into two more premature retries.

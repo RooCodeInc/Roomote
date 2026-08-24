@@ -38,6 +38,7 @@ const ALL_REPOSITORIES = '__all_repositories__';
 const ANALYTICS_CONCURRENCY = 4;
 const ANALYTICS_PULL_REQUESTS_PER_PAGE = 100;
 const ANALYTICS_MAX_ALL_TIME_PULL_REQUEST_PAGES = 50;
+const TASK_RUN_GITHUB_TOKEN_CACHE_MAX_AGE_MS = 15 * 60 * 1000;
 
 async function resolveTokenOptionsForRepositoryNames({
   taskRun,
@@ -266,6 +267,55 @@ export const createTaskRunGitHubToken = async (
   );
   return metadata.token;
 };
+
+export function isGitHubUnauthorizedError(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null) {
+    return false;
+  }
+
+  const topLevelStatus = 'status' in error ? Number(error.status) : null;
+  const responseStatus =
+    'response' in error &&
+    typeof error.response === 'object' &&
+    error.response !== null &&
+    'status' in error.response
+      ? Number(error.response.status)
+      : null;
+
+  return topLevelStatus === 401 || responseStatus === 401;
+}
+
+/**
+ * Run a GitHub operation with a short-lived, task-scoped cached token. A 401
+ * evicts the cached credential and retries the operation exactly once with a
+ * freshly minted token; all other errors preserve their original behavior.
+ */
+export async function withTaskRunGitHubTokenRetry<T>(
+  taskRun: TaskRun,
+  operation: (token: string) => Promise<T>,
+  runtimeOptions?: CreateGitHubTokenRuntimeOptions,
+): Promise<T> {
+  const cacheOptions: CreateGitHubTokenRuntimeOptions = {
+    ...runtimeOptions,
+    cache: true,
+    maxCacheAgeMs: TASK_RUN_GITHUB_TOKEN_CACHE_MAX_AGE_MS,
+  };
+  const token = await createTaskRunGitHubToken(taskRun, cacheOptions);
+
+  try {
+    return await operation(token);
+  } catch (error) {
+    if (!isGitHubUnauthorizedError(error)) {
+      throw error;
+    }
+
+    const refreshedToken = await createTaskRunGitHubToken(taskRun, {
+      ...cacheOptions,
+      forceRefresh: true,
+    });
+    return operation(refreshedToken);
+  }
+}
 
 export type TaskRunWorkerGitHubToken = {
   token: string;

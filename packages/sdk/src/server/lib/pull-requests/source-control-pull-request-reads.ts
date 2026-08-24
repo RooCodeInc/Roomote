@@ -1,5 +1,9 @@
 import { createGitHubToken } from '@roomote/auth';
-import { getGitHubRateLimitRetryAfterMs, getOctokit } from '@roomote/github';
+import {
+  getGitHubRateLimitRetryAfterMs,
+  getOctokit,
+  isGitHubUnauthorizedError,
+} from '@roomote/github';
 import { type TaskRun } from '@roomote/db/server';
 import {
   buildPullRequestUrl,
@@ -1088,7 +1092,10 @@ async function listGitHubPullRequestComments({
       onGitHubApiRequest,
     });
   } catch (error) {
-    if (getGitHubRateLimitRetryAfterMs(error) !== null) {
+    if (
+      isGitHubUnauthorizedError(error) ||
+      getGitHubRateLimitRetryAfterMs(error) !== null
+    ) {
       throw error;
     }
     warnings.push(
