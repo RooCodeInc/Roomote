@@ -1,14 +1,20 @@
-import { createAuthToken } from '@roomote/auth';
+import { createHash } from 'node:crypto';
+
+import { createAuthToken, createAutomationToken } from '@roomote/auth';
 import { Env } from '@roomote/env';
 import {
   beginSlackFastIntegrationCall,
+  beginAutomationRunEffect,
   completeSlackFastIntegrationCall,
+  completeAutomationRunEffect,
   db,
   deploymentMcpEnablements,
   eq,
   githubInstallations,
   isBrainProviderConfigured,
   isNull,
+  getActiveAutomationRunForPrincipal,
+  retryAutomationRunEffect,
 } from '@roomote/db/server';
 import {
   BRAIN_MCP_ID,
@@ -43,16 +49,23 @@ type FastAgentIntegrationCandidate = Omit<FastAgentIntegration, 'tools'> & {
   disabledTools: Set<string>;
 };
 
-type BrokerContext = {
-  userId: string;
+type UserBrokerContext = { userId: string; apiBaseUrl?: string };
+type AutomationBrokerContext = {
+  automationRunId: string;
+  automationLeaseOwner: string;
+  automationPolicyVersion: number;
   apiBaseUrl?: string;
 };
+type BrokerContext = UserBrokerContext | AutomationBrokerContext;
 
-type IntegrationAuditContext = BrokerContext & {
+type UserIntegrationAuditContext = UserBrokerContext & {
   sessionId: string;
   conversation: FastAgentConversation;
   messageId: string;
 };
+type IntegrationAuditContext =
+  | UserIntegrationAuditContext
+  | AutomationBrokerContext;
 
 const FAST_AGENT_INTEGRATION_TOOL_CACHE_TTL_MS = 5 * 60_000;
 const FAST_AGENT_INTEGRATION_TOOL_CACHE_RETRY_MS = 30_000;
@@ -181,11 +194,31 @@ async function resolveBrokerAuth(context: BrokerContext) {
 
   return {
     apiBaseUrl,
-    authToken: await createAuthToken({
-      userId: context.userId,
-      timeoutMs: 2 * 60_000,
-    }),
+    authToken:
+      'automationRunId' in context
+        ? await createAutomationToken({
+            automationRunId: context.automationRunId,
+            leaseOwner: context.automationLeaseOwner,
+            policyVersion: context.automationPolicyVersion,
+            timeoutMs: 2 * 60_000,
+          })
+        : await createAuthToken({
+            userId: context.userId,
+            timeoutMs: 2 * 60_000,
+          }),
   };
+}
+
+async function assertActiveAutomationBrokerContext(
+  context: BrokerContext,
+): Promise<void> {
+  if (!('automationRunId' in context)) return;
+  const run = await getActiveAutomationRunForPrincipal({
+    automationRunId: context.automationRunId,
+    leaseOwner: context.automationLeaseOwner,
+    policyVersion: context.automationPolicyVersion,
+  });
+  if (!run) throw new Error('Automation run lease is no longer active.');
 }
 
 /**
@@ -196,6 +229,7 @@ async function resolveBrokerAuth(context: BrokerContext) {
 export async function listFastAgentIntegrations(
   context: BrokerContext,
 ): Promise<FastAgentIntegration[]> {
+  await assertActiveAutomationBrokerContext(context);
   const [enabled, githubInstallation] = await Promise.all([
     db
       .select({
@@ -292,6 +326,28 @@ function serializeAuditPreview(value: unknown, maxLength: number): string {
   }
 }
 
+function buildAutomationIntegrationEffectKey(request: {
+  integrationId: string;
+  toolName: string;
+  args: Record<string, unknown>;
+}): string {
+  return `integration:${createHash('sha256')
+    .update(JSON.stringify(canonicalizeEffectValue(request)))
+    .digest('hex')}`;
+}
+
+function canonicalizeEffectValue(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonicalizeEffectValue);
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value)
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([key, nested]) => [key, canonicalizeEffectValue(nested)]),
+    );
+  }
+  return value;
+}
+
 export async function callFastAgentIntegration(
   context: IntegrationAuditContext,
   available: FastAgentIntegration[],
@@ -309,6 +365,73 @@ export async function callFastAgentIntegration(
   }
   if (!integration.tools.some((tool) => tool.name === request.toolName)) {
     throw new Error('That integration tool is not available to fast mode.');
+  }
+
+  if ('automationRunId' in context) {
+    await assertActiveAutomationBrokerContext(context);
+    const effectKey = buildAutomationIntegrationEffectKey(request);
+    const effect = await beginAutomationRunEffect({
+      automationRunId: context.automationRunId,
+      logicalKey: effectKey,
+      kind: 'integration_call',
+      requestSignature: effectKey,
+      integrationId: request.integrationId,
+      toolName: request.toolName,
+      metadata: { arguments: request.args },
+    });
+    let activeEffect = effect.effect;
+    if (!effect.shouldExecute) {
+      if (effect.effect.status === 'succeeded') {
+        return effect.effect.metadata?.result ?? null;
+      }
+      if (effect.effect.status === 'failed') {
+        const retryClaimed = await retryAutomationRunEffect(effect.effect.id);
+        if (!retryClaimed) {
+          throw new Error(
+            `Automation integration effect ${effectKey} could not be retried.`,
+          );
+        }
+        activeEffect = retryClaimed;
+      }
+      if (effect.inFlight) {
+        throw new Error(
+          `Automation integration effect ${effectKey} is already in flight.`,
+        );
+      }
+    }
+    try {
+      const { apiBaseUrl, authToken } = await resolveBrokerAuth(context);
+      const result = await withFastIntegrationTimeout(
+        (signal) =>
+          callMcpTool({
+            url: integrationProxyUrl(apiBaseUrl, integration.id),
+            headers: { Authorization: `Bearer ${authToken}` },
+            toolName: request.toolName,
+            args: request.args,
+            toolCallId: `automation:${activeEffect.id}:${integration.id}:${request.toolName}`,
+            signal,
+          }),
+        FAST_AGENT_INTEGRATION_CALL_TIMEOUT_MS,
+        `Fast automation ${integration.id}/${request.toolName} integration call`,
+      );
+      const serialized = JSON.stringify(result) ?? 'null';
+      await completeAutomationRunEffect({
+        id: activeEffect.id,
+        attemptToken: activeEffect.attemptToken,
+        status: 'succeeded',
+        metadata: { arguments: request.args, result },
+        resultPreview: serialized.slice(0, 30_000),
+      });
+      return result;
+    } catch (error) {
+      await completeAutomationRunEffect({
+        id: activeEffect.id,
+        attemptToken: activeEffect.attemptToken,
+        status: 'failed',
+        error: formatErrorForLog(error).slice(0, 10_000),
+      });
+      throw error;
+    }
   }
 
   // Fail closed: an integration tool never executes unless its durable audit

@@ -788,6 +788,12 @@ export async function answerFastAgentQuestion({
         }
 
         switch (call.name) {
+          case FAST_AGENT_NATIVE_TOOL_NAMES.completeAutomationRun:
+            return {
+              success: false,
+              error:
+                'Automation completion is unavailable in a human Fast turn.',
+            };
           case FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReply: {
             const args = chatReplyArgsSchema.parse(call.args);
             if (

@@ -13,6 +13,8 @@ import {
   suggesterJob,
   type AutomationJobResult,
   type AutomationRunOpts,
+  retryFailedFastAutomationDeliveries,
+  resumeReadyFastAutomationRuns,
 } from '@roomote/sdk/server';
 
 import { getRedis } from './redis';
@@ -157,6 +159,10 @@ async function createJobs(queue: Queue): Promise<void> {
     { every: 60 * 1000 }, // Every minute for five-field cron precision.
   );
 
+  await queue.upsertJobScheduler(ScheduledJobName.FastAutomationDeliveryRetry, {
+    every: 60 * 1000,
+  });
+
   await queue.upsertJobScheduler(
     ScheduledJobName.PullRequestAnalyticsSync,
     { every: 15 * 60 * 1000 }, // Every 15 minutes.
@@ -267,6 +273,10 @@ const runJobs = async (job: ScheduledJob): Promise<void> => {
       return providerUsageLimitCheckJob();
     case ScheduledJobName.CustomAutomations:
       await customAutomationsJob();
+      return;
+    case ScheduledJobName.FastAutomationDeliveryRetry:
+      await retryFailedFastAutomationDeliveries();
+      await resumeReadyFastAutomationRuns();
       return;
     default:
       throw new Error(`Unknown job type: ${job.name}`);

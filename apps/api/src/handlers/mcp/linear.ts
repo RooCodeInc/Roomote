@@ -34,12 +34,14 @@ async function resolveLinearDisabledToolNames(): Promise<string[] | null> {
 
 export function createLinearMcp(options?: {
   allowAuthTokens?: boolean;
+  allowAutomationTokens?: boolean;
   allowedToolNames?: readonly string[];
 }) {
   return createMcpProxy({
     name: 'Linear',
     upstream: LINEAR_MCP_URL,
     allowAuthTokens: options?.allowAuthTokens,
+    allowAutomationTokens: options?.allowAutomationTokens,
     allowedToolNames: options?.allowedToolNames,
     resolveCredentials: async () => {
       const [linearAccessToken, disabledToolNames] = await Promise.all([

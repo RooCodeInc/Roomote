@@ -10,7 +10,10 @@ import {
   teamsInstallations,
   type AutomationRuntime,
 } from '@roomote/db/server';
-import type { CommunicationProvider } from '@roomote/types';
+import type {
+  AutomationDeliveryTarget,
+  CommunicationProvider,
+} from '@roomote/types';
 
 import { findDiscordDefaultDestination } from '../lib/discord-persistence';
 import { findTeamsPrimaryConversation } from '../lib/teams-primary-conversation';
@@ -204,7 +207,7 @@ export async function resolveAutomationRuntimeDestination(params: {
  * Slack channel normalization and membership checks.
  */
 export function buildDestinationTaskPayloadFields(
-  destination: ResolvedAutomationDestination,
+  destination: ResolvedAutomationDestination | AutomationDeliveryTarget,
 ): Record<string, string> {
   if (destination.provider === 'slack') {
     return {};

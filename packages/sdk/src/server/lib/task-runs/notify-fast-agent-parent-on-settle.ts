@@ -1,13 +1,16 @@
 import { setTimeout as delay } from 'node:timers/promises';
+import { randomUUID } from 'node:crypto';
 
 import { redactSecrets } from '@roomote/communication/redact-secrets';
 import {
   canRetryFailedStart,
   enqueueTaskRelaunch,
   getTaskUrl,
+  runFastAutomationExecution,
 } from '@roomote/cloud-agents/server';
 import {
   RunStatus,
+  getAutomationRunParentFromPayload,
   getFastAgentParentFromPayload,
   type FastAgentParent,
 } from '@roomote/types';
@@ -17,6 +20,10 @@ import {
   db,
   eq,
   recordTaskRunLifecycleEvent,
+  recordAutomationRunChildOutcome,
+  countUnsettledAutomationRunChildren,
+  resumeAutomationRunAfterChildren,
+  recordAutomationRunOutcome,
   sql,
   taskRuns,
 } from '@roomote/db/server';
@@ -29,6 +36,7 @@ import {
   buildFastAgentDeliveringMarker,
   buildFastAgentDeliveryClaimPredicate,
 } from './fast-agent-delivery-claim';
+import { createFastAutomationExecutionAdapter } from '../../automations/fast-automation-adapter';
 
 const NOTIFIED_RESULT_KEY = 'fastAgentParentSettleNotifiedAt';
 const FAST_AGENT_STARTUP_MAX_RETRIES = 2;
@@ -148,6 +156,78 @@ export async function notifyFastAgentParentOnSettle(
   status: SettledStatus,
   taskTitle?: string | null,
 ): Promise<void> {
+  const automationParent = getAutomationRunParentFromPayload(run.payload);
+  if (automationParent) {
+    try {
+      await recordAutomationRunChildOutcome({
+        automationRunId: automationParent.automationRunId,
+        taskId: run.taskId,
+        terminalOutcome: status,
+      });
+      await recordTaskRunLifecycleEvent(db, {
+        runId: run.id,
+        taskId: run.taskId,
+        eventType: 'decision',
+        message: `Recorded ${status} lifecycle state on the Fast automation parent.`,
+        details: {
+          reason: 'fast_automation_parent_settle_event',
+          automationRunId: automationParent.automationRunId,
+          status,
+        },
+      });
+      if (
+        (await countUnsettledAutomationRunChildren(
+          automationParent.automationRunId,
+        )) === 0
+      ) {
+        const leaseOwner = randomUUID();
+        const parentRun = await resumeAutomationRunAfterChildren({
+          automationRunId: automationParent.automationRunId,
+          leaseOwner,
+          leaseDurationMs: 15 * 60_000,
+        });
+        if (parentRun?.automationKey) {
+          const pullRequests = await listFastAgentPullRequestContexts(
+            run.taskId,
+          );
+          const outcome = await runFastAutomationExecution({
+            automationRunId: parentRun.id,
+            leaseOwner,
+            policyVersion: parentRun.policyVersion,
+            adapter: createFastAutomationExecutionAdapter(),
+            continuation: true,
+            prompt: `A delegated automation child has settled. Treat this as a trusted platform lifecycle event, not a new user request.
+
+Child task: ${taskTitle?.trim() || run.taskId}
+Task ID: ${run.taskId}
+Status: ${status}
+${status === RunStatus.Failed || status === RunStatus.Canceled ? `Error: ${formatFastAgentTerminalError(run)}\n` : ''}${pullRequests.length ? `Pull requests:\n${pullRequests.map((pullRequest) => `- ${pullRequest.url}`).join('\n')}\n` : ''}
+Decide whether the configured destination needs one concise result or blocker report. Use logicalMessageKey \`child-${run.taskId}-settled\` if reporting. Do not launch duplicate work. Finish with \`complete_automation_run\`.`,
+          });
+          if (outcome.status !== 'waiting_for_children') {
+            await recordAutomationRunOutcome(db, {
+              key: parentRun.automationKey,
+              status:
+                outcome.status === 'failed'
+                  ? 'failed'
+                  : outcome.status === 'skipped'
+                    ? 'skipped'
+                    : 'succeeded',
+              at: new Date(),
+              ...(outcome.status === 'failed' && outcome.summary
+                ? { error: outcome.summary }
+                : {}),
+            });
+          }
+        }
+      }
+    } catch (error) {
+      console.error(
+        `[notifyFastAgentParentOnSettle] Failed to continue automation run ${automationParent.automationRunId}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+    return;
+  }
   const parent = getFastAgentParentFromPayload(run.payload);
   if (!parent) {
     return;

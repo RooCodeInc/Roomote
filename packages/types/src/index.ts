@@ -8,6 +8,7 @@ export * from './background-agents';
 export * from './background-automation-registry';
 export * from './automation-recommendations';
 export * from './automation-destination-fields';
+export * from './automation-runs';
 export * from './cloud-agents';
 export * from './pr-review-action';
 export * from './task-runs';

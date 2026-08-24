@@ -68,12 +68,21 @@ mcp.route('/custom/:serverId', createCustomMcpProxy());
 // integration with a custom handler, like snowflake/grafana below. The
 // handler 404s per request unless the integration is enabled and a
 // connection (admin-entered or R_GBRAIN_* env) exists.
-mcp.route('/gbrain', createGbrainMcpProxy({ allowAuthTokens: true }));
+mcp.route(
+  '/gbrain',
+  createGbrainMcpProxy({
+    allowAuthTokens: true,
+    allowAutomationTokens: true,
+  }),
+);
 
 mcp.route('/asana', asanaMcp);
 mcp.route('/granola', granolaMcp);
 mcp.route('/grafana', grafanaMcp);
-mcp.route('/linear', createLinearMcp({ allowAuthTokens: true }));
+mcp.route(
+  '/linear',
+  createLinearMcp({ allowAuthTokens: true, allowAutomationTokens: true }),
+);
 mcp.route('/notion', notionMcp);
 mcp.route('/snowflake', snowflakeMcp);
 mcp.route('/vercel', vercelMcp);
@@ -89,6 +98,8 @@ for (const integration of MCP_INTEGRATIONS.filter(
     createIntegrationMcpProxy(integration, {
       ...getIntegrationMcpProxyOptions(integration),
       allowAuthTokens:
+        getMcpIntegrationConnectionScope(integration) === 'deployment',
+      allowAutomationTokens:
         getMcpIntegrationConnectionScope(integration) === 'deployment',
     }),
   );

@@ -1,9 +1,15 @@
-import { db, eq, taskRuns } from '@roomote/db/server';
+import {
+  db,
+  eq,
+  getActiveAutomationRunForPrincipal,
+  taskRuns,
+} from '@roomote/db/server';
 
 import type { Variables } from '../../types';
 
 import {
   isRunTokenContext,
+  isAutomationTokenContext,
   McpProxyError,
   type McpAuthContext,
 } from './proxy-utils';
@@ -38,12 +44,30 @@ export async function resolveDeploymentMcpAuth(
     };
   }
 
+  if (isAutomationTokenContext(authContext)) {
+    const run = await getActiveAutomationRunForPrincipal({
+      automationRunId: authContext.automationRunId,
+      leaseOwner: authContext.leaseOwner,
+      policyVersion: authContext.policyVersion,
+    });
+    if (!run) {
+      throw new McpProxyError(403, 'Automation run token is no longer active');
+    }
+    return {
+      userId: null,
+      tokenType: 'automation',
+      automationRunId: authContext.automationRunId,
+      automationLeaseOwner: authContext.leaseOwner,
+      automationPolicyVersion: authContext.policyVersion,
+    };
+  }
+
   if (authContext.tokenType === 'auth') {
     return { userId: authContext.userId, tokenType: 'auth' };
   }
 
   throw new McpProxyError(
     403,
-    `${providerName} MCP requires a user auth token or task run token for server-side credential access`,
+    `${providerName} MCP requires a user, task run, or authorized automation token for server-side credential access`,
   );
 }

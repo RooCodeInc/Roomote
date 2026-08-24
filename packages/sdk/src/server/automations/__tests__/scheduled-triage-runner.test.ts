@@ -9,6 +9,8 @@ const {
   mockIsRunDue,
   mockResolveSlackWorkspaceTimezone,
   mockPostScheduledTriageRoutingDebug,
+  mockExecuteFastBuiltInAutomation,
+  mockRecordFastPreflightFailure,
 } = vi.hoisted(() => ({
   mockDbSelect: vi.fn(),
   mockGetAutomationRuntime: vi.fn(),
@@ -20,6 +22,8 @@ const {
   mockIsRunDue: vi.fn(),
   mockResolveSlackWorkspaceTimezone: vi.fn(),
   mockPostScheduledTriageRoutingDebug: vi.fn(),
+  mockExecuteFastBuiltInAutomation: vi.fn(),
+  mockRecordFastPreflightFailure: vi.fn(),
 }));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
@@ -61,6 +65,12 @@ vi.mock('../triage-routing-debug', () => ({
   postScheduledTriageRoutingDebug: mockPostScheduledTriageRoutingDebug,
 }));
 
+vi.mock('../fast-automation-runner', () => ({
+  buildScheduledAutomationOccurrenceKey: vi.fn(() => 'scheduled-slot'),
+  executeFastBuiltInAutomation: mockExecuteFastBuiltInAutomation,
+  recordFastBuiltInAutomationPreflightFailure: mockRecordFastPreflightFailure,
+}));
+
 import { TaskPayloadKind } from '@roomote/types';
 
 import { createScheduledTriageJob } from '../scheduled-triage-runner';
@@ -95,6 +105,11 @@ describe('createScheduledTriageJob', () => {
     mockResolveSlackWorkspaceTimezone.mockResolvedValue('UTC');
     mockPostScheduledTriageRoutingDebug.mockResolvedValue(undefined);
     mockRecordAutomationRunOutcome.mockResolvedValue(undefined);
+    mockExecuteFastBuiltInAutomation.mockResolvedValue({
+      acquired: true,
+      status: 'skipped',
+      automationRunId: 'run-1',
+    });
   });
 
   it('launches one task run per scan payload and reports the first task id', async () => {
@@ -147,5 +162,116 @@ describe('createScheduledTriageJob', () => {
     expect(mockEnqueueTask).not.toHaveBeenCalled();
     expect(result.launchedTaskId).toBeNull();
     expect(result.skippedReason).toBe('No scan payloads to launch.');
+  });
+
+  it('routes configured read-only pilots through Fast without scan tasks', async () => {
+    mockGetAutomationRuntime.mockResolvedValue({
+      enabled: true,
+      scheduleMode: 'daily',
+      lastRunAt: null,
+      destination: { provider: 'slack', channelId: 'C123MANAGER' },
+      instructions: null,
+      settings: {},
+      executionRoute: 'fast',
+    });
+    const fastPolicy = {
+      version: 1,
+      reporting: 'on_findings' as const,
+      childKickoff: 'silent_allowed' as const,
+    };
+    const job = createScheduledTriageJob({
+      automationKey: 'sentry_triage',
+      fastPolicy,
+      buildScanTask: async () => ({
+        kind: 'scan',
+        payloads: [
+          {
+            repo: '__all_repositories__',
+            description: 'Inspect Sentry through Fast.',
+          },
+        ],
+      }),
+    });
+
+    const result = await job();
+
+    expect(result.completed).toBe(true);
+    expect(mockEnqueueTask).not.toHaveBeenCalled();
+    expect(mockExecuteFastBuiltInAutomation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        automationKey: 'sentry_triage',
+        prompt: 'Inspect Sentry through Fast.',
+        policy: fastPolicy,
+      }),
+    );
+  });
+
+  it('records Fast preflight failures before execution starts', async () => {
+    mockGetAutomationRuntime.mockResolvedValue({
+      enabled: true,
+      scheduleMode: 'daily',
+      lastRunAt: null,
+      destination: { provider: 'slack', channelId: 'C123MANAGER' },
+      instructions: null,
+      settings: {},
+      executionRoute: 'fast',
+    });
+    const fastPolicy = {
+      version: 1,
+      reporting: 'on_findings' as const,
+      childKickoff: 'silent_allowed' as const,
+    };
+    const job = createScheduledTriageJob({
+      automationKey: 'sentry_triage',
+      fastPolicy,
+      buildScanTask: async () => {
+        throw new Error('scope collector failed');
+      },
+    });
+
+    const result = await job({ manualTrigger: true });
+
+    expect(result.errors).toEqual(['scope collector failed']);
+    expect(mockRecordFastPreflightFailure).toHaveBeenCalledWith(
+      expect.objectContaining({
+        automationKey: 'sentry_triage',
+        error: 'scope collector failed',
+      }),
+    );
+  });
+
+  it('records and reports a missing Sentry connection as a durable blocker', async () => {
+    mockGetAutomationRuntime.mockResolvedValue({
+      enabled: true,
+      scheduleMode: 'daily',
+      lastRunAt: null,
+      destination: { provider: 'slack', channelId: 'C123MANAGER' },
+      instructions: null,
+      settings: {},
+      executionRoute: 'fast',
+    });
+    const fastPolicy = {
+      version: 1,
+      reporting: 'on_findings' as const,
+      childKickoff: 'silent_allowed' as const,
+    };
+    const job = createScheduledTriageJob({
+      automationKey: 'sentry_triage',
+      fastPolicy,
+      buildScanTask: async () => ({
+        kind: 'skip',
+        reason: 'Sentry MCP is not configured',
+      }),
+    });
+
+    const result = await job({ manualTrigger: true });
+
+    expect(result.errors).toEqual(['Sentry MCP is not configured']);
+    expect(mockRecordFastPreflightFailure).toHaveBeenCalledWith(
+      expect.objectContaining({
+        error: 'Sentry MCP is not configured',
+        reportMessage: expect.stringContaining('is not configured'),
+      }),
+    );
   });
 });

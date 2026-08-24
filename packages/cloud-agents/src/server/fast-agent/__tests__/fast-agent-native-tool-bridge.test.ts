@@ -6,6 +6,7 @@ import {
   bindFastAgentNativeToolExecutor,
   FAST_AGENT_NATIVE_TOOL_FILTER,
   FAST_AGENT_NATIVE_TOOL_NAMES,
+  FAST_AUTOMATION_NATIVE_TOOL_FILTER,
   getFastAgentNativeToolRuntime,
 } from '../fast-agent-native-tool-bridge';
 
@@ -60,6 +61,10 @@ describe('Fast native OpenCode tool bridge', () => {
       [FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReply]: true,
       [FAST_AGENT_NATIVE_TOOL_NAMES.integrationCall]: true,
       [FAST_AGENT_NATIVE_TOOL_NAMES.manageTasks]: true,
+    });
+    expect(FAST_AUTOMATION_NATIVE_TOOL_FILTER).toEqual({
+      ...FAST_AGENT_NATIVE_TOOL_FILTER,
+      [FAST_AGENT_NATIVE_TOOL_NAMES.completeAutomationRun]: true,
     });
   });
 

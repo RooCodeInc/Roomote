@@ -1,5 +1,6 @@
 import type {
   AuthTokenContext,
+  AutomationTokenContext,
   McpAccessTokenContext,
   RunTokenContext,
 } from '@roomote/types';
@@ -19,6 +20,7 @@ export type CiE2eAuthContext = {
 export type Variables = {
   authContext:
     | AuthTokenContext
+    | AutomationTokenContext
     | McpAccessTokenContext
     | RunTokenContext
     | undefined;

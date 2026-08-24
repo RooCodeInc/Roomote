@@ -4,11 +4,13 @@ import type { Variables } from '../../types';
 
 const {
   mockValidateRunToken,
+  mockValidateAutomationToken,
   mockValidateMcpAccessToken,
   mockValidateAuthToken,
   mockFindDeployment,
 } = vi.hoisted(() => ({
   mockValidateRunToken: vi.fn(),
+  mockValidateAutomationToken: vi.fn(),
   mockValidateMcpAccessToken: vi.fn(),
   mockValidateAuthToken: vi.fn(),
   mockFindDeployment: vi.fn(),
@@ -16,6 +18,7 @@ const {
 
 vi.mock('@roomote/auth', () => ({
   validateRunToken: mockValidateRunToken,
+  validateAutomationToken: mockValidateAutomationToken,
   validateMcpAccessToken: mockValidateMcpAccessToken,
   validateAuthToken: mockValidateAuthToken,
 }));
@@ -74,6 +77,7 @@ describe('tokenAuthMiddleware token extraction', () => {
 
       return RUN_TOKEN_CONTEXT;
     });
+    mockValidateAutomationToken.mockRejectedValue(new Error('invalid token'));
     mockValidateAuthToken.mockRejectedValue(new Error('invalid token'));
     mockValidateMcpAccessToken.mockRejectedValue(new Error('invalid token'));
   });
@@ -84,6 +88,45 @@ describe('tokenAuthMiddleware token extraction', () => {
     });
 
     expect(authContext).toEqual(RUN_TOKEN_CONTEXT);
+  });
+
+  it('attaches a dedicated automation principal', async () => {
+    const automationContext = {
+      automationRunId: '11111111-1111-4111-8111-111111111111',
+      leaseOwner: 'worker-1',
+      policyVersion: 1,
+      principal: 'deployment',
+      tokenType: 'automation',
+      userId: null,
+      version: 1,
+    } as const;
+    mockValidateAutomationToken.mockResolvedValue(automationContext);
+
+    await expect(
+      requestAuthContext('/api/mcp/sentry', {
+        authorization: 'Bearer automation-token',
+      }),
+    ).resolves.toEqual(automationContext);
+    expect(mockValidateRunToken).not.toHaveBeenCalled();
+  });
+
+  it('does not accept an automation token outside MCP integration routes', async () => {
+    mockValidateAutomationToken.mockResolvedValue({
+      automationRunId: '11111111-1111-4111-8111-111111111111',
+      leaseOwner: 'worker-1',
+      policyVersion: 1,
+      principal: 'deployment',
+      tokenType: 'automation',
+      userId: null,
+      version: 1,
+    });
+
+    await expect(
+      requestAuthContext('/api/task-runs/1', {
+        authorization: 'Bearer automation-token',
+      }),
+    ).resolves.toBeNull();
+    expect(mockValidateAutomationToken).not.toHaveBeenCalled();
   });
 
   it('attaches a browser-issued MCP token for route-level authorization', async () => {

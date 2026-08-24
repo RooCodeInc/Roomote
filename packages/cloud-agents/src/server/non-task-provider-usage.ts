@@ -86,6 +86,7 @@ export const NON_TASK_INFERENCE_SURFACES = {
   customAutomationScheduleResolution: 'custom_automation_schedule_resolution',
   fastAgentOnboardingSuggestions: 'fast_agent_onboarding_suggestions',
   fastAgentQuestionAnswering: 'fast_agent',
+  fastAutomation: 'fast_automation',
   inferenceValidation: 'inference_validation',
   prReviewNotificationTriage: 'pr_review_notification_triage',
   routerChannelLaunchGate: 'router_channel_launch_gate',
@@ -145,6 +146,11 @@ interface GenerateTrackedNonTaskBaseParams extends NonTaskInferenceTrackingInput
   onProviderRetry?: (event: NonTaskProviderRetryEvent) => void | Promise<void>;
   /** Stop OpenCode's own provider retry loop at this attempt count. */
   maxProviderRetryAttempts?: number;
+  onUsageRecorded?: (usage: {
+    inputTokens: number;
+    outputTokens: number;
+    costUsd: number | null;
+  }) => void | Promise<void>;
 }
 
 export type NonTaskProviderRetryEvent = {
@@ -339,6 +345,11 @@ async function recordNonTaskOpenCodeUsage(
       messageCreatedAt: openCodeTimestampToDate(info.time?.created),
       messageCompletedAt: openCodeTimestampToDate(info.time?.completed),
       details: { surface: params.surface },
+    });
+    await params.onUsageRecorded?.({
+      inputTokens,
+      outputTokens,
+      costUsd: costUsd ?? null,
     });
   } catch (error) {
     console.warn(

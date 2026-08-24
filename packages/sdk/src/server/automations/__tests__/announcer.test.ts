@@ -14,6 +14,11 @@ const {
   mockEnqueueTask,
   mockSlackNotifier,
   mockAdapterPostMessage,
+  mockExecuteFastBuiltInAutomation,
+  mockCompleteFastBuiltInAutomationNoop,
+  mockRecordFastPreflightFailure,
+  mockBuildScheduledAutomationOccurrenceKey,
+  mockIsRunDue,
 } = vi.hoisted(() => ({
   slackInstallationsTable: {
     botAccessToken: 'botAccessToken',
@@ -42,6 +47,14 @@ const {
   mockEnqueueTask: vi.fn(),
   mockSlackNotifier: vi.fn(),
   mockAdapterPostMessage: vi.fn(),
+  mockExecuteFastBuiltInAutomation: vi.fn(),
+  mockCompleteFastBuiltInAutomationNoop: vi.fn(),
+  mockRecordFastPreflightFailure: vi.fn(),
+  mockBuildScheduledAutomationOccurrenceKey: vi.fn(
+    ({ partition }: { partition?: string }) =>
+      `scheduled-slot:${partition ?? 'none'}`,
+  ),
+  mockIsRunDue: vi.fn((_input: { lastRunAt: Date | null }) => true),
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -132,7 +145,7 @@ vi.mock('../../lib/manager-slack', () => ({
 }));
 
 vi.mock('../scheduling-utils', () => ({
-  isRunDue: vi.fn(() => true),
+  isRunDue: mockIsRunDue,
   resolveSlackWorkspaceTimezone: vi.fn(async () => 'UTC'),
 }));
 
@@ -142,6 +155,14 @@ vi.mock('../custom-automation-schedule', () => ({
     source: 'utc_fallback',
     updatedAt: null,
   })),
+}));
+
+vi.mock('../fast-automation-runner', () => ({
+  buildScheduledAutomationOccurrenceKey:
+    mockBuildScheduledAutomationOccurrenceKey,
+  executeFastBuiltInAutomation: mockExecuteFastBuiltInAutomation,
+  completeFastBuiltInAutomationNoop: mockCompleteFastBuiltInAutomationNoop,
+  recordFastBuiltInAutomationPreflightFailure: mockRecordFastPreflightFailure,
 }));
 
 import { announcerJob } from '../announcer';
@@ -174,6 +195,7 @@ describe('announcerJob non-Slack posting', () => {
     vi.clearAllMocks();
 
     mockHasAnyActiveRepository.mockResolvedValue(true);
+    mockIsRunDue.mockReturnValue(true);
     mockSlackInstallationRows.mockResolvedValue([]);
     mockListConnectedCommunicationProviders.mockResolvedValue(['telegram']);
     mockGetAutomationRuntime.mockResolvedValue({
@@ -187,6 +209,11 @@ describe('announcerJob non-Slack posting', () => {
     mockMergedPullRequestRows.mockResolvedValue(MERGED_PR_ROWS);
     mockLoadAutomationThreadFeedbackContext.mockResolvedValue(null);
     mockEnqueueTask.mockResolvedValue({ taskId: 'announcer-task-1' });
+    mockExecuteFastBuiltInAutomation.mockResolvedValue({
+      acquired: true,
+      status: 'succeeded',
+      automationRunId: 'run-1',
+    });
 
     let nextMessageId = 100;
     mockAdapterPostMessage.mockImplementation(
@@ -231,6 +258,145 @@ describe('announcerJob non-Slack posting', () => {
     expect(mockRecordAutomationRunOutcome).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({ key: 'announcer', status: 'succeeded' }),
+    );
+  });
+
+  it('routes the pilot through Fast without launching a sandbox', async () => {
+    mockGetAutomationRuntime.mockResolvedValue({
+      key: 'announcer',
+      enabled: true,
+      scheduleMode: 'daily',
+      lastRunAt: null,
+      instructions: null,
+      destination: null,
+      executionRoute: 'fast',
+    });
+    mockResolveAutomationRuntimeDestination.mockResolvedValue({
+      provider: 'telegram',
+      channelId: '-100555',
+    });
+
+    const result = await announcerJob({ manualTrigger: true });
+
+    expect(result.completed).toBe(true);
+    expect(mockEnqueueTask).not.toHaveBeenCalled();
+    expect(mockExecuteFastBuiltInAutomation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        automationKey: 'announcer',
+        triggerKind: 'manual',
+        destination: { provider: 'telegram', channelId: '-100555' },
+        prompt: expect.stringContaining('logicalMessageKey `summary`'),
+      }),
+    );
+  });
+
+  it('partitions scheduled Fast runs by active Slack installation', async () => {
+    mockSlackInstallationRows.mockResolvedValue([
+      { slackBotToken: 'xoxb-one', slackTeamId: 'T-ONE' },
+      { slackBotToken: 'xoxb-two', slackTeamId: 'T-TWO' },
+    ]);
+    mockGetAutomationRuntime.mockResolvedValue({
+      key: 'announcer',
+      enabled: true,
+      scheduleMode: 'daily',
+      lastRunAt: null,
+      instructions: null,
+      destination: null,
+      executionRoute: 'fast',
+    });
+    mockResolveAutomationRuntimeDestination
+      .mockResolvedValueOnce({ provider: 'slack', channelId: 'C-ONE' })
+      .mockResolvedValueOnce({ provider: 'slack', channelId: 'C-TWO' });
+
+    const result = await announcerJob();
+
+    expect(result.completed).toBe(true);
+    expect(mockExecuteFastBuiltInAutomation).toHaveBeenCalledTimes(2);
+    expect(
+      mockExecuteFastBuiltInAutomation.mock.calls.map(
+        ([input]) => input.occurrenceKey,
+      ),
+    ).toEqual([
+      'scheduled-slot:slack:T-ONE:C-ONE',
+      'scheduled-slot:slack:T-TWO:C-TWO',
+    ]);
+  });
+
+  it('keeps every active Slack installation due for the scheduler pass', async () => {
+    const firstRunAt = new Date('2026-07-12T02:00:00Z');
+    mockSlackInstallationRows.mockResolvedValue([
+      { slackBotToken: 'xoxb-one', slackTeamId: 'T-ONE' },
+      { slackBotToken: 'xoxb-two', slackTeamId: 'T-TWO' },
+    ]);
+    mockGetAutomationRuntime
+      .mockResolvedValueOnce({
+        key: 'announcer',
+        enabled: true,
+        scheduleMode: 'daily',
+        lastRunAt: null,
+        instructions: null,
+        destination: null,
+        executionRoute: 'fast',
+      })
+      .mockResolvedValueOnce({
+        key: 'announcer',
+        enabled: true,
+        scheduleMode: 'daily',
+        lastRunAt: firstRunAt,
+        instructions: null,
+        destination: null,
+        executionRoute: 'fast',
+      });
+    mockResolveAutomationRuntimeDestination
+      .mockResolvedValueOnce({ provider: 'slack', channelId: 'C-ONE' })
+      .mockResolvedValueOnce({ provider: 'slack', channelId: 'C-TWO' });
+    mockIsRunDue.mockImplementation(
+      ({ lastRunAt }: { lastRunAt: Date | null }) => lastRunAt === null,
+    );
+
+    await announcerJob();
+
+    expect(mockGetAutomationRuntime).toHaveBeenCalledTimes(2);
+    expect(mockIsRunDue).toHaveBeenCalledTimes(2);
+    expect(mockIsRunDue.mock.calls.map(([input]) => input.lastRunAt)).toEqual([
+      null,
+      null,
+    ]);
+    expect(mockExecuteFastBuiltInAutomation).toHaveBeenCalledTimes(2);
+    expect(
+      mockExecuteFastBuiltInAutomation.mock.calls.map(
+        ([input]) => input.occurrenceKey,
+      ),
+    ).toEqual([
+      'scheduled-slot:slack:T-ONE:C-ONE',
+      'scheduled-slot:slack:T-TWO:C-TWO',
+    ]);
+  });
+
+  it('records deterministic Fast preflight failures durably', async () => {
+    mockGetAutomationRuntime.mockResolvedValue({
+      key: 'announcer',
+      enabled: true,
+      scheduleMode: 'daily',
+      lastRunAt: null,
+      instructions: null,
+      destination: null,
+      executionRoute: 'fast',
+    });
+    mockResolveAutomationRuntimeDestination.mockResolvedValue({
+      provider: 'telegram',
+      channelId: '-100555',
+    });
+    mockMergedPullRequestRows.mockRejectedValue(new Error('collector failed'));
+
+    const result = await announcerJob({ manualTrigger: true });
+
+    expect(result.errors).toEqual(['collector failed']);
+    expect(mockRecordFastPreflightFailure).toHaveBeenCalledWith(
+      expect.objectContaining({
+        automationKey: 'announcer',
+        error: 'collector failed',
+      }),
     );
   });
 
