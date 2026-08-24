@@ -17,6 +17,7 @@ const {
   mockExecuteFastBuiltInAutomation,
   mockCompleteFastBuiltInAutomationNoop,
   mockRecordFastPreflightFailure,
+  mockBuildScheduledAutomationOccurrenceKey,
 } = vi.hoisted(() => ({
   slackInstallationsTable: {
     botAccessToken: 'botAccessToken',
@@ -48,6 +49,10 @@ const {
   mockExecuteFastBuiltInAutomation: vi.fn(),
   mockCompleteFastBuiltInAutomationNoop: vi.fn(),
   mockRecordFastPreflightFailure: vi.fn(),
+  mockBuildScheduledAutomationOccurrenceKey: vi.fn(
+    ({ partition }: { partition?: string }) =>
+      `scheduled-slot:${partition ?? 'none'}`,
+  ),
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -151,7 +156,8 @@ vi.mock('../custom-automation-schedule', () => ({
 }));
 
 vi.mock('../fast-automation-runner', () => ({
-  buildScheduledAutomationOccurrenceKey: vi.fn(() => 'scheduled-slot'),
+  buildScheduledAutomationOccurrenceKey:
+    mockBuildScheduledAutomationOccurrenceKey,
   executeFastBuiltInAutomation: mockExecuteFastBuiltInAutomation,
   completeFastBuiltInAutomationNoop: mockCompleteFastBuiltInAutomationNoop,
   recordFastBuiltInAutomationPreflightFailure: mockRecordFastPreflightFailure,
@@ -279,6 +285,38 @@ describe('announcerJob non-Slack posting', () => {
         prompt: expect.stringContaining('logicalMessageKey `summary`'),
       }),
     );
+  });
+
+  it('partitions scheduled Fast runs by active Slack installation', async () => {
+    mockSlackInstallationRows.mockResolvedValue([
+      { slackBotToken: 'xoxb-one', slackTeamId: 'T-ONE' },
+      { slackBotToken: 'xoxb-two', slackTeamId: 'T-TWO' },
+    ]);
+    mockGetAutomationRuntime.mockResolvedValue({
+      key: 'announcer',
+      enabled: true,
+      scheduleMode: 'daily',
+      lastRunAt: null,
+      instructions: null,
+      destination: null,
+      executionRoute: 'fast',
+    });
+    mockResolveAutomationRuntimeDestination
+      .mockResolvedValueOnce({ provider: 'slack', channelId: 'C-ONE' })
+      .mockResolvedValueOnce({ provider: 'slack', channelId: 'C-TWO' });
+
+    const result = await announcerJob();
+
+    expect(result.completed).toBe(true);
+    expect(mockExecuteFastBuiltInAutomation).toHaveBeenCalledTimes(2);
+    expect(
+      mockExecuteFastBuiltInAutomation.mock.calls.map(
+        ([input]) => input.occurrenceKey,
+      ),
+    ).toEqual([
+      'scheduled-slot:slack:T-ONE:C-ONE',
+      'scheduled-slot:slack:T-TWO:C-TWO',
+    ]);
   });
 
   it('records deterministic Fast preflight failures durably', async () => {

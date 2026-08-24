@@ -54,6 +54,24 @@ interface DeploymentContext {
   slackTeamId: string | null;
 }
 
+function getAnnouncerOccurrencePartition(
+  deployment: DeploymentContext,
+  destination: ResolvedAutomationDestination | null,
+): string {
+  if (!destination) {
+    return `unresolved:${deployment.slackTeamId ?? 'deployment'}`;
+  }
+
+  const workspaceId =
+    destination.provider === 'slack'
+      ? (destination.teamId ?? deployment.slackTeamId)
+      : null;
+
+  return [destination.provider, workspaceId, destination.channelId]
+    .filter((part): part is string => Boolean(part))
+    .join(':');
+}
+
 interface MergedPullRequest {
   repo: string;
   prNumber: number;
@@ -372,6 +390,10 @@ export async function announcerJob(
                   frequency,
                   now,
                   timeZone: timezone,
+                  partition: getAnnouncerOccurrencePartition(
+                    deployment,
+                    destination,
+                  ),
                 }),
             prompt: 'No merged pull requests were found in the bounded window.',
             policy: ANNOUNCER_FAST_POLICY,
@@ -408,6 +430,10 @@ export async function announcerJob(
                 frequency,
                 now,
                 timeZone: timezone,
+                partition: getAnnouncerOccurrencePartition(
+                  deployment,
+                  destination,
+                ),
               }),
           prompt: buildAnnouncerFastPrompt({
             mergedPullRequests,
@@ -474,6 +500,10 @@ export async function announcerJob(
               frequency: failureFrequency,
               now,
               timeZone: failureTimeZone,
+              partition: getAnnouncerOccurrencePartition(
+                deployment,
+                failureDestination,
+              ),
             }),
           policy: ANNOUNCER_FAST_POLICY,
           destination: failureDestination,
