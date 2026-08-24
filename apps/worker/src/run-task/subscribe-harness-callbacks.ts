@@ -29,6 +29,11 @@ interface PendingCompletionEvents {
   events: CallbackEvent[];
 }
 
+export interface HarnessCallbackSubscription {
+  (): Promise<void>;
+  flushPendingCompletionEvents(): Promise<void>;
+}
+
 /**
  * Subscribe to the worker harness callback surface.
  *
@@ -49,7 +54,7 @@ export function subscribeHarnessCallbacks({
   context: RunTaskContext;
   logger: HarnessLogger;
   mcpTaskEnv?: Record<string, string>;
-}): () => Promise<void> {
+}): HarnessCallbackSubscription {
   const persistedTaskId = taskRun.taskId;
   const pendingCompletionEventsByCallbackId = new Map<
     string,
@@ -57,6 +62,10 @@ export function subscribeHarnessCallbacks({
   >();
   const pendingPersistenceWrites = new Set<Promise<void>>();
   const pendingTaskCompletionWork = new Set<Promise<void>>();
+  const latestAssistantMessagesByCallbackId = new Map<
+    string,
+    { text: string; ts: number }
+  >();
   let consecutivePersistenceFailures = 0;
   let assistantOutputStamped = false;
   let assistantOutputStampInFlight: Promise<void> | null = null;
@@ -220,10 +229,10 @@ export function subscribeHarnessCallbacks({
     );
   };
 
-  const forwardCallbackEvent = (
+  const forwardCallbackEvent = async (
     callbackTaskId: string,
     event: CallbackEvent,
-  ) => {
+  ): Promise<void> => {
     if (event.type === 'completion') {
       logger.info(
         `[subscribeHarnessCallbacks] Forwarding completion callback for task run ${taskRun.id}: taskId=${callbackTaskId} ts=${event.ts} textChars=${event.text.length}`,
@@ -244,16 +253,23 @@ export function subscribeHarnessCallbacks({
         })
       : callbacks.onMessage?.(taskRun, callbackTaskId, event, context);
 
-    void callbackPromise?.catch((error) => {
+    try {
+      await callbackPromise;
+      if (event.type === 'completion') {
+        latestAssistantMessagesByCallbackId.delete(callbackTaskId);
+      }
+    } catch (error) {
       logger.warn(
         `[subscribeHarnessCallbacks] Failed callback onMessage for task run ${taskRun.id}: ${
           error instanceof Error ? error.message : String(error)
         }`,
       );
-    });
+    }
   };
 
-  const flushPendingCompletionEvents = (callbackTaskId: string) => {
+  const flushPendingCompletionEventsForTask = async (
+    callbackTaskId: string,
+  ): Promise<void> => {
     const pending = pendingCompletionEventsByCallbackId.get(callbackTaskId);
 
     if (!pending) {
@@ -263,7 +279,32 @@ export function subscribeHarnessCallbacks({
     pendingCompletionEventsByCallbackId.delete(callbackTaskId);
 
     for (const event of pending.events) {
-      forwardCallbackEvent(pending.callbackTaskId, event);
+      await forwardCallbackEvent(pending.callbackTaskId, event);
+    }
+  };
+
+  const flushPendingCompletionEvents = async (): Promise<void> => {
+    await waitForPendingPersistenceWrites();
+    await waitForPendingTaskCompletionWork();
+
+    while (pendingCompletionEventsByCallbackId.size > 0) {
+      await Promise.all(
+        [...pendingCompletionEventsByCallbackId.keys()].map((callbackTaskId) =>
+          flushPendingCompletionEventsForTask(callbackTaskId),
+        ),
+      );
+    }
+
+    for (const [
+      callbackTaskId,
+      message,
+    ] of latestAssistantMessagesByCallbackId) {
+      await forwardCallbackEvent(callbackTaskId, {
+        type: 'completion',
+        text: message.text,
+        ts: message.ts,
+        provisional: true,
+      });
     }
   };
 
@@ -368,9 +409,17 @@ export function subscribeHarnessCallbacks({
       for (const event of events) {
         if (event.type === 'followup' || event.type === 'request_user_input') {
           clearPendingCompletionEvents(callbackTaskId);
+          latestAssistantMessagesByCallbackId.delete(callbackTaskId);
+        } else if (event.type === 'request_user_input_response') {
+          latestAssistantMessagesByCallbackId.delete(callbackTaskId);
+        } else if (event.type === 'text') {
+          latestAssistantMessagesByCallbackId.set(callbackTaskId, {
+            text: event.text,
+            ts: event.ts,
+          });
         }
 
-        forwardCallbackEvent(callbackTaskId, event);
+        void forwardCallbackEvent(callbackTaskId, event);
       }
     });
 
@@ -404,7 +453,7 @@ export function subscribeHarnessCallbacks({
       trackPendingTaskCompletionWork(
         (async () => {
           await waitForPendingPersistenceWrites();
-          flushPendingCompletionEvents(taskId);
+          await flushPendingCompletionEventsForTask(taskId);
         })(),
       );
       return;
@@ -412,7 +461,8 @@ export function subscribeHarnessCallbacks({
 
     if (event.eventName === TaskEventName.TaskStarted) {
       clearPendingCompletionEvents(taskId);
-      forwardCallbackEvent(taskId, {
+      latestAssistantMessagesByCallbackId.delete(taskId);
+      void forwardCallbackEvent(taskId, {
         type: 'turn_started',
         ts: Date.now(),
       });
@@ -421,10 +471,11 @@ export function subscribeHarnessCallbacks({
 
     if (event.eventName === TaskEventName.TaskAborted) {
       clearPendingCompletionEvents(taskId);
+      latestAssistantMessagesByCallbackId.delete(taskId);
     }
   });
 
-  return async () => {
+  const unsubscribe = async () => {
     unsubscribeRuntimeOutput();
     unsubscribeRuntimeInferenceUsage();
     unsubscribeTurnCompleted();
@@ -436,7 +487,10 @@ export function subscribeHarnessCallbacks({
     await waitForMissingChatCloseoutFallbackDelivery(context);
 
     for (const callbackTaskId of pendingCompletionEventsByCallbackId.keys()) {
-      flushPendingCompletionEvents(callbackTaskId);
+      await flushPendingCompletionEventsForTask(callbackTaskId);
     }
   };
+
+  unsubscribe.flushPendingCompletionEvents = flushPendingCompletionEvents;
+  return unsubscribe;
 }

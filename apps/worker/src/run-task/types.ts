@@ -87,6 +87,10 @@ export type CallbackEvent =
       type: 'completion';
       text: string;
       ts: number;
+      /** True when idle settlement inferred completion from the latest
+       * finalized assistant message before the authoritative turn-completed
+       * event arrived. */
+      provisional?: boolean;
     }
   | {
       type: 'followup';

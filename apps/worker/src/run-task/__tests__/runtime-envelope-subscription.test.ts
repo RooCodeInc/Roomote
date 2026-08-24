@@ -425,6 +425,54 @@ describe('subscribeHarnessCallbacks', () => {
     await unsubscribe();
   });
 
+  it('emits the latest finalized assistant message before idle settlement', async () => {
+    const { harness, emitEnvelope } = createRuntimeHarness();
+    const callbacks = { onMessage: vi.fn().mockResolvedValue(undefined) };
+    const unsubscribe = subscribeHarnessCallbacks({
+      harness: harness as never,
+      taskRun: { id: 47, taskId: 'task-idle-completion' } as never,
+      callbacks,
+      context: {},
+      logger: {
+        runId: 47,
+        filePath: '/tmp/test.log',
+        info: vi.fn(),
+        warn: vi.fn(),
+        error: vi.fn(),
+        log: vi.fn(),
+      },
+    });
+
+    emitEnvelope({
+      ts: 1772823377100,
+      eventType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+      role: 'assistant',
+      protocol: 'roomote_runtime',
+      contentBlocks: [{ type: 'text', text: 'Ready for review.' }],
+      metadata: {
+        source: 'assistant_message',
+        sessionId: 'runtime-session-idle',
+      },
+      payload: {},
+    });
+
+    await unsubscribe.flushPendingCompletionEvents();
+
+    expect(callbacks.onMessage).toHaveBeenLastCalledWith(
+      { id: 47, taskId: 'task-idle-completion' },
+      'runtime-session-idle',
+      {
+        type: 'completion',
+        text: 'Ready for review.',
+        ts: 1772823377100,
+        provisional: true,
+      },
+      {},
+    );
+
+    await unsubscribe();
+  });
+
   it('records the latest finalized assistant message until completion settles', async () => {
     const { harness, emitTaskEvent, emitTurnCompleted } =
       createRuntimeHarness();

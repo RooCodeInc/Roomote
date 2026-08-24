@@ -678,39 +678,72 @@ describe('Slack live task card', () => {
     });
   });
 
-  it('settles an idle run as a fallback when the completion event was lost', async () => {
+  it('settles an idle run with the provisional closing message', async () => {
     const taskRun = createTaskRun();
     const context = {};
     await updateSlackLiveTaskStream(
       taskRun,
-      { type: 'text', ts: 1000, text: 'Running the tests now.' },
+      {
+        type: 'completion',
+        ts: 1000,
+        text: 'Ready for review.',
+        provisional: true,
+      },
       context,
     );
     await reportSlackLiveTaskStatus(taskRun, RunStatus.Idle, context);
 
-    expect(renderedCard(2)).toEqual({
+    expect(mocks.renderCard).toHaveBeenCalledOnce();
+    expect(renderedCard(1)).toEqual({
       status: 'complete',
-      output: 'Task completed.',
+      output: 'Ready for review.',
     });
   });
 
-  it('replaces an idle fallback with a delayed real completion', async () => {
+  it('replaces a provisional idle completion with a delayed real completion', async () => {
     const taskRun = createTaskRun();
     const context = {};
+    await updateSlackLiveTaskStream(
+      taskRun,
+      {
+        type: 'completion',
+        ts: 1000,
+        text: 'Initial closing message.',
+        provisional: true,
+      },
+      context,
+    );
     await reportSlackLiveTaskStatus(taskRun, RunStatus.Idle, context);
     await updateSlackLiveTaskStream(
       taskRun,
-      { type: 'completion', ts: 1000, text: 'Ready for review.' },
+      { type: 'completion', ts: 1001, text: 'Ready for review.' },
       context,
     );
 
     expect(renderedCard(1)).toEqual({
       status: 'complete',
-      output: 'Task completed.',
+      output: 'Initial closing message.',
     });
     expect(renderedCard(2)).toEqual({
       status: 'complete',
       output: 'Ready for review.',
+    });
+  });
+
+  it('does not replace a terminal error with a delayed completion', async () => {
+    const taskRun = createTaskRun();
+    const context = {};
+    await finishSlackLiveTaskStream(taskRun, RunStatus.Failed, context);
+    await updateSlackLiveTaskStream(
+      taskRun,
+      { type: 'completion', ts: 1000, text: 'Late result.' },
+      context,
+    );
+
+    expect(mocks.renderCard).toHaveBeenCalledOnce();
+    expect(renderedCard(1)).toEqual({
+      status: 'error',
+      output: 'The task stopped because of an error.',
     });
   });
 
