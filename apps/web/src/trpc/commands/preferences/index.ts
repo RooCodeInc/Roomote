@@ -3,7 +3,6 @@ import { headers } from 'next/headers';
 
 import type { UserAuthSuccess } from '@/types';
 import { getAuth } from '@/lib/server/auth';
-import { Env } from '@/lib/server/env';
 import { userHasCredentialAccount } from '@/lib/server/user-management';
 import {
   DEFAULT_PERSONAL_PREFERENCES,
@@ -65,8 +64,6 @@ export async function getPersonalAccountCapabilitiesCommand(
   return {
     canChangePassword: hasCredentialAccount,
     canSetPassword: !hasCredentialAccount,
-    communicationsFastModeDefaultAvailable:
-      Env.R_COMMUNICATIONS_FAST_MODE_SETTING_ENABLED === true,
   };
 }
 

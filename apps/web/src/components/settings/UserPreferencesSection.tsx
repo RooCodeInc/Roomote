@@ -140,7 +140,9 @@ export function UserPreferencesSection() {
               Fast response mode
             </p>
             <p className="text-sm text-foreground">
-              Respond to prompts quickly, only spinning up sandboxes if needed
+              Use fast responses by default for linked Slack and Discord
+              messages. Dashboard, GitHub, Teams, and Telegram are unaffected;
+              `!fast` remains available in Slack.
             </p>
           </div>
         </div>
