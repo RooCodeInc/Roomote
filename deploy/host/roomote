@@ -1166,7 +1166,7 @@ cmd_restore() {
   local backup_file=''
   local confirmed='false'
   local passphrase_arg=''
-  local encrypted_tar entry
+  local encrypted_tar entry restored_docker_bin
   local redis_included='false'
   local local_minio_included='false'
   local redis_volume minio_volume
@@ -1263,6 +1263,14 @@ cmd_restore() {
 
   log "Restoring deployment configuration and release metadata"
   install -m 600 "$restore_staging_dir/config/.env" "$env_file"
+  # The bundled .env carries the source host's ROOMOTE_DOCKER_BIN, which may
+  # not exist here (snap vs apt Docker). Record the binary this restore is
+  # provably using so later CLI and systemd starts work on this host.
+  restored_docker_bin="$docker_bin"
+  if [ "$restored_docker_bin" = 'docker' ]; then
+    restored_docker_bin="$(command -v docker || printf 'docker')"
+  fi
+  set_env_value ROOMOTE_DOCKER_BIN "$restored_docker_bin"
   install -m 600 "$restore_staging_dir/config/docker-compose.prod.yml" "$compose_file"
   # Put bundled overrides back before the first compose call against the
   # restored .env: its COMPOSE_FILE may reference them. Bundles from before

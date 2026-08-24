@@ -37,10 +37,21 @@ set -euo pipefail
 
 printf '%s\n' "$*" >>"$MOCK_DOCKER_LOG"
 
-if [ "${1:-}" = 'compose' ] && [ "${MOCK_FAIL_DOWN:-}" = 'true' ]; then
+if [ "${1:-}" = 'compose' ]; then
+  if [ "${MOCK_FAIL_DOWN:-}" = 'true' ]; then
+    case " $* " in
+      *' down '*) exit 1 ;;
+    esac
+  fi
   case " $* " in
-    *' down '*) exit 1 ;;
+    *' ps -aq '*) printf 'mock-container\n' ;;
   esac
+  exit 0
+fi
+
+if [ "${1:-}" = 'inspect' ]; then
+  printf 'mock-volume\n'
+  exit 0
 fi
 
 if [ "${1:-}" = 'ps' ]; then
@@ -56,11 +67,17 @@ fi
 EOF
 chmod +x "$fake_bin/docker"
 
-# Create a valid bundle first (everything mocked to succeed).
+# The bundle should carry a source-host Docker path that does not exist here,
+# to prove restore re-records the recovery host's binary.
+printf 'ROOMOTE_DOCKER_BIN=/nonexistent/source-docker\n' >>"$install_root/.env"
+
+# Create a valid bundle first (everything mocked to succeed). The environment
+# override wins over the .env value, like the systemd unit's environment does.
 env PATH="$fake_bin:$PATH" \
   MOCK_DOCKER_LOG="$docker_log" \
   TMPDIR="$tmp_dir" \
   ROOMOTE_BACKUP_PASSPHRASE='restore-cleanup-passphrase' \
+  ROOMOTE_DOCKER_BIN="$fake_bin/docker" \
   ROOMOTE_INSTALL_ROOT="$install_root" \
   ROOMOTE_TEST_MODE=true \
   "$roomote_cli" backup --output "$bundle" >"$output_log" 2>&1
@@ -78,6 +95,7 @@ env PATH="$fake_bin:$PATH" \
   MOCK_FAIL_DOWN=true \
   TMPDIR="$tmp_dir" \
   ROOMOTE_BACKUP_PASSPHRASE='restore-cleanup-passphrase' \
+  ROOMOTE_DOCKER_BIN="$fake_bin/docker" \
   ROOMOTE_INSTALL_ROOT="$install_root" \
   ROOMOTE_TEST_MODE=true \
   "$roomote_cli" restore "$bundle" --yes >"$output_log" 2>&1
@@ -98,4 +116,21 @@ if [ -n "$(ls -A "$tmp_dir")" ]; then
   exit 1
 fi
 
-printf 'Failed restore cleaned up its staging directory and passphrase file.\n'
+# A successful restore must re-record this host's Docker binary instead of
+# keeping the source host's absolute path from the bundled .env.
+env PATH="$fake_bin:$PATH" \
+  MOCK_DOCKER_LOG="$docker_log" \
+  TMPDIR="$tmp_dir" \
+  ROOMOTE_BACKUP_PASSPHRASE='restore-cleanup-passphrase' \
+  ROOMOTE_DOCKER_BIN="$fake_bin/docker" \
+  ROOMOTE_INSTALL_ROOT="$install_root" \
+  ROOMOTE_TEST_MODE=true \
+  "$roomote_cli" restore "$bundle" --yes >"$output_log" 2>&1
+grep -q 'Restore complete' "$output_log"
+grep -Fq "ROOMOTE_DOCKER_BIN=$fake_bin/docker" "$install_root/.env"
+if grep -q '/nonexistent/source-docker' "$install_root/.env"; then
+  printf 'restore kept the source host Docker path in .env\n' >&2
+  exit 1
+fi
+
+printf 'Failed restore cleaned up; successful restore re-recorded the Docker path.\n'
