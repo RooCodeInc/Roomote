@@ -183,6 +183,7 @@ type FastAgentInferenceRetryNotice = {
 type FastAgentInferenceRetryOptions = {
   canRetry?: (error: unknown, failure: FastAgentInferenceFailure) => boolean;
   prepareRetry?: () => Promise<void> | void;
+  signal?: AbortSignal;
 };
 
 class FastAgentInferenceError extends Error {
@@ -281,9 +282,25 @@ function formatFastAgentInferenceFailure(
   }
 }
 
-function waitForFastAgentInferenceRetry(delayMs: number): Promise<void> {
-  return new Promise((resolve) => {
-    setTimeout(resolve, delayMs);
+function waitForFastAgentInferenceRetry(
+  delayMs: number,
+  signal?: AbortSignal,
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const abort = () => {
+      clearTimeout(timer);
+      reject(signal?.reason ?? new Error('The inference retry was aborted.'));
+    };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', abort);
+      resolve();
+    }, delayMs);
+
+    if (signal?.aborted) {
+      abort();
+      return;
+    }
+    signal?.addEventListener('abort', abort, { once: true });
   });
 }
 
@@ -294,6 +311,7 @@ async function runFastAgentInferenceWithRetries<T>(
 ): Promise<T> {
   for (let retryNumber = 0; ; retryNumber += 1) {
     try {
+      options.signal?.throwIfAborted();
       return await run();
     } catch (error) {
       // Session loss is the session manager's bootstrap signal, not a
@@ -334,7 +352,7 @@ async function runFastAgentInferenceWithRetries<T>(
         );
       }
       await options.prepareRetry?.();
-      await waitForFastAgentInferenceRetry(delayMs);
+      await waitForFastAgentInferenceRetry(delayMs, options.signal);
     }
   }
 
@@ -1276,6 +1294,7 @@ export async function answerFastAgentQuestion({
                 // lock forever if the replacement provider request stalls.
                 promptTimeoutMs = FAST_AGENT_INFERENCE_RETRY_ATTEMPT_TIMEOUT_MS;
               },
+              signal,
             },
           );
         } finally {
@@ -1318,6 +1337,16 @@ export async function answerFastAgentQuestion({
     if (signal?.aborted) {
       if (canonicalConversationId) {
         fastAgentOpenCodeSessionManager.invalidate(canonicalConversationId);
+      }
+      if (inferenceRetryReply) {
+        await replaceInferenceRetryReply(
+          {
+            purpose: 'closeout',
+            message:
+              'The inference retry was interrupted before it completed. Please send the request again.',
+          },
+          true,
+        );
       }
       throw signal.reason instanceof Error ? signal.reason : error;
     }
