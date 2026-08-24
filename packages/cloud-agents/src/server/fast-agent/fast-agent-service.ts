@@ -89,7 +89,8 @@ const chatChannelMessagesArgsSchema = z.object({
 const FAST_AGENT_DEFAULT_SLACK_HISTORY_LOOKBACK_MS = 24 * 60 * 60 * 1000;
 
 function getFastAgentDefaultSlackHistoryOldest(latest?: string): string {
-  const numericLatest = latest ? Number.parseFloat(latest) : Number.NaN;
+  const numericLatest =
+    latest && /^\d+(?:\.\d+)?$/.test(latest) ? Number(latest) : Number.NaN;
   const latestMs = Number.isFinite(numericLatest)
     ? numericLatest * 1000
     : latest

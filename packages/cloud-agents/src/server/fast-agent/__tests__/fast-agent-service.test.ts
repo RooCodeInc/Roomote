@@ -394,6 +394,30 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     });
   });
 
+  it('bounds Slack history relative to an explicit ISO latest date', async () => {
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        await invokeTool(nativeToolNames.getChatChannelMessages, {
+          latest: '2026-08-24T12:00:00.000Z',
+        });
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'closeout',
+          message: 'I found the context.',
+        });
+        return '';
+      },
+    );
+    const adapter = callbacks();
+
+    await answerFastAgentQuestion({ ...baseParams, adapter });
+
+    expect(adapter.getChatChannelMessages).toHaveBeenCalledWith({
+      latest: '2026-08-24T12:00:00.000Z',
+      oldest: '2026-08-23T12:00:00.000Z',
+    });
+  });
+
   it('binds only integration and task inspection tools for subagent sessions', async () => {
     const adapter = callbacks();
     mocks.listIntegrations.mockResolvedValue([
