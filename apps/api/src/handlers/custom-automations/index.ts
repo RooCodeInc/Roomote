@@ -22,6 +22,7 @@ import {
 } from '@roomote/sdk/server';
 import {
   ALL_REPOSITORIES,
+  FAST_EXECUTION,
   type BackgroundAutomationProvider,
   type BackgroundAutomationTargetKind,
   type CustomAutomationScheduleMode,
@@ -50,6 +51,7 @@ const modelSchema = z
 const environmentTargetSchema = z.union([
   z.string().uuid(),
   z.literal(ALL_REPOSITORIES),
+  z.literal(FAST_EXECUTION),
 ]);
 
 const writeSchema = z.object({
@@ -308,13 +310,20 @@ async function assertEnabledModel(model: string | null | undefined) {
 }
 
 function toApiAutomation<
-  T extends { allRepositories: boolean; environmentId: string | null },
+  T extends {
+    allRepositories: boolean;
+    environmentId: string | null;
+    executionMode: 'sandbox_task' | 'fast';
+  },
 >(automation: T): Omit<T, 'environmentId'> & { environmentId: string | null } {
   return {
     ...automation,
-    environmentId: automation.allRepositories
-      ? ALL_REPOSITORIES
-      : automation.environmentId,
+    environmentId:
+      automation.executionMode === 'fast'
+        ? FAST_EXECUTION
+        : automation.allRepositories
+          ? ALL_REPOSITORIES
+          : automation.environmentId,
   };
 }
 
@@ -486,9 +495,11 @@ customAutomationsRouter.patch('/:id', async (c) => {
           : (parsed.data.model ?? existing.model),
       environmentId:
         parsed.data.environmentId ??
-        (existing.allRepositories
-          ? ALL_REPOSITORIES
-          : (existing.environmentId ?? '')),
+        (existing.executionMode === 'fast'
+          ? FAST_EXECUTION
+          : existing.allRepositories
+            ? ALL_REPOSITORIES
+            : (existing.environmentId ?? '')),
       target: clearTarget
         ? {}
         : targetProvider && (targetMode === 'direct_message' || targetChannelId)

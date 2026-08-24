@@ -27,6 +27,8 @@ export const DEFAULT_AUTOMATION_KEEPALIVE_MS = 60 * 1_000;
 export const DEFAULT_MAINTENANCE_KEEPALIVE_MS = 5 * 60 * 1_000;
 
 export const ALL_REPOSITORIES = '__all_repositories__';
+/** Custom-automation environment selector sentinel for a runless Fast turn. */
+export const FAST_EXECUTION = '__fast__';
 export const HAS_PULL_REQUEST_FILTER_VALUE = '__has_pr__';
 
 /**

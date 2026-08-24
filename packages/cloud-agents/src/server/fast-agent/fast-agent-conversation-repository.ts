@@ -75,17 +75,25 @@ function toConversation(
     | 'currentReplyThreadId'
   >,
 ): FastAgentConversation | null {
-  const parsed = fastAgentConversationSchema.safeParse({
-    surface: record.surface,
-    workspaceId: record.workspaceId,
-    conversationId: record.conversationId,
-    replyTarget: {
-      channelId: record.currentReplyChannelId,
-      ...(record.currentReplyThreadId
-        ? { threadId: record.currentReplyThreadId }
-        : {}),
-    },
-  });
+  const parsed = fastAgentConversationSchema.safeParse(
+    record.surface === 'automation'
+      ? {
+          surface: record.surface,
+          workspaceId: record.workspaceId,
+          conversationId: record.conversationId,
+        }
+      : {
+          surface: record.surface,
+          workspaceId: record.workspaceId,
+          conversationId: record.conversationId,
+          replyTarget: {
+            channelId: record.currentReplyChannelId,
+            ...(record.currentReplyThreadId
+              ? { threadId: record.currentReplyThreadId }
+              : {}),
+          },
+        },
+  );
 
   return parsed.success ? parsed.data : null;
 }
@@ -142,8 +150,14 @@ export const fastAgentConversationRepository: FastAgentConversationRepository =
               surface: conversation.surface,
               workspaceId: conversation.workspaceId,
               conversationId: conversation.conversationId,
-              currentReplyChannelId: conversation.replyTarget.channelId,
-              currentReplyThreadId: conversation.replyTarget.threadId,
+              currentReplyChannelId:
+                'replyTarget' in conversation
+                  ? conversation.replyTarget.channelId
+                  : null,
+              currentReplyThreadId:
+                'replyTarget' in conversation
+                  ? conversation.replyTarget.threadId
+                  : null,
               replyTargetVerified: true,
             })
             .onConflictDoNothing();
@@ -161,8 +175,14 @@ export const fastAgentConversationRepository: FastAgentConversationRepository =
         const [updated] = await tx
           .update(fastAgentConversations)
           .set({
-            currentReplyChannelId: conversation.replyTarget.channelId,
-            currentReplyThreadId: conversation.replyTarget.threadId ?? null,
+            currentReplyChannelId:
+              'replyTarget' in conversation
+                ? conversation.replyTarget.channelId
+                : null,
+            currentReplyThreadId:
+              'replyTarget' in conversation
+                ? (conversation.replyTarget.threadId ?? null)
+                : null,
             replyTargetVerified: true,
             updatedAt: sql`now()`,
           })
@@ -190,9 +210,14 @@ export const fastAgentConversationRepository: FastAgentConversationRepository =
         const [updated] = await db
           .update(fastAgentConversations)
           .set({
-            currentReplyChannelId: fallbackConversation.replyTarget.channelId,
+            currentReplyChannelId:
+              'replyTarget' in fallbackConversation
+                ? fallbackConversation.replyTarget.channelId
+                : null,
             currentReplyThreadId:
-              fallbackConversation.replyTarget.threadId ?? null,
+              'replyTarget' in fallbackConversation
+                ? (fallbackConversation.replyTarget.threadId ?? null)
+                : null,
             replyTargetVerified: true,
             updatedAt: sql`now()`,
           })

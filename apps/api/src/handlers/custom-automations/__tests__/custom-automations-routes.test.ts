@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import type { Context } from 'hono';
 import type { AuthTokenContext } from '@roomote/types';
-import { ALL_REPOSITORIES } from '@roomote/types';
+import { ALL_REPOSITORIES, FAST_EXECUTION } from '@roomote/types';
 
 import type { Variables } from '../../../types';
 import type { McpAuth } from '../../mcp/middleware';
@@ -214,6 +214,35 @@ describe('custom-automations MCP routes', () => {
       );
       await expect(res.json()).resolves.toMatchObject({
         automation: { environmentId: ALL_REPOSITORIES },
+      });
+    });
+
+    it('accepts Fast from the environment target contract', async () => {
+      const { app } = createApp();
+      mockResolveCustomAutomationSchedule.mockResolvedValue({
+        status: 'resolved',
+        scheduleMode: 'daily',
+        cronExpression: null,
+        resolution: null,
+      });
+      mockCreateCustomAutomation.mockResolvedValue({
+        id: 'automation-fast',
+        environmentId: null,
+        allRepositories: false,
+        executionMode: 'fast',
+      });
+
+      const res = await postCreate(
+        app,
+        createBody({ environmentId: FAST_EXECUTION }),
+      );
+
+      expect(res.status).toBe(201);
+      expect(mockCreateCustomAutomation).toHaveBeenCalledWith(
+        expect.objectContaining({ environmentId: FAST_EXECUTION }),
+      );
+      await expect(res.json()).resolves.toMatchObject({
+        automation: { environmentId: FAST_EXECUTION, executionMode: 'fast' },
       });
     });
 

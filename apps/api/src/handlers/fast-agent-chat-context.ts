@@ -7,7 +7,7 @@ import {
 
 export function createFastAgentChatContextAdapter(options: {
   actingUserId: string;
-  conversation: FastAgentConversation;
+  conversation: Exclude<FastAgentConversation, { surface: 'automation' }>;
 }) {
   const channel =
     options.conversation.surface === 'discord'
