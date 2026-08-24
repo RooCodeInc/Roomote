@@ -368,9 +368,7 @@ describe('Setup StepInvoke', () => {
         /once your environment is configured, you can work with roomote in these ways/i,
       ),
     ).toBeInTheDocument();
-    fireEvent.click(
-      screen.getByRole('button', { name: /finish environment setup/i }),
-    );
+    fireEvent.click(screen.getByRole('button', { name: /let'?s go/i }));
 
     await waitFor(() => {
       expect(replaceMock).toHaveBeenCalledWith('/task/task-onboarding-1');

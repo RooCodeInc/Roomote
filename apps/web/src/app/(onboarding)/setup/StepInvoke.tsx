@@ -263,7 +263,7 @@ export function StepInvoke({
           {completeSetup.isPending && (
             <Loader2 className="animate-spin size-4 mr-2" />
           )}
-          {onboardingTaskId ? 'Finish environment setup' : "Let's go"}
+          Let&apos;s go
           <ArrowRight />
         </Button>
       </div>

@@ -13,6 +13,7 @@ import {
   ArrowRight,
   Switch,
   Button,
+  Label,
   Spinner,
   Zap,
 } from '@/components/system';
@@ -179,27 +180,30 @@ export function StepAutomationRecommendations({
             After analyzing your connected repos, Roomote found some automations
             to make your life easier:
           </p>
-          <div className="divide-y divide-foreground/10">
+          <div className="divide-y-2 divide-accent-bright-foreground bg-card rounded-xl">
             {batch.recommendations.map((recommendation) => (
               <div
                 key={recommendation.id}
-                className="flex flex-col gap-4 py-3 sm:flex-row sm:items-center"
+                className="flex flex-col gap-4 py-3 px-4 sm:flex-row sm:items-center"
               >
                 <Switch
+                  id={`automation-recommendation-${recommendation.id}`}
                   checked={recommendation.enabled}
                   onCheckedChange={(enabled) =>
                     setEnabled.mutate({ id: recommendation.id, enabled })
                   }
-                  aria-label={`Enable ${recommendation.candidateId}`}
                 />
-                <div className="min-w-0 flex-1">
-                  <p className="text-sm font-semibold">
+                <Label
+                  htmlFor={`automation-recommendation-${recommendation.id}`}
+                  className="min-w-0 flex-1 flex-col items-start gap-1"
+                >
+                  <span className="text-sm font-semibold">
                     {candidateTitle(recommendation.candidateId)}
-                  </p>
-                  <p className="text-sm text-muted-foreground">
+                  </span>
+                  <span className="text-sm font-normal text-muted-foreground">
                     {recommendation.explanation}
-                  </p>
-                </div>
+                  </span>
+                </Label>
               </div>
             ))}
           </div>

@@ -1,6 +1,12 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+} from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import {
@@ -19,6 +25,7 @@ import {
   Button,
   Check,
   Input,
+  Lock,
   Select,
   SelectContent,
   SelectItem,
@@ -66,6 +73,14 @@ function getProviderStatus(
   providerId: SetupModelProviderId | null,
 ) {
   return modelSetup.providers.find((provider) => provider.id === providerId);
+}
+
+function InferenceProviderRow({ children }: { children: ReactNode }) {
+  return (
+    <div className="flex md:max-w-lg flex-col gap-2 md:flex-row md:items-center">
+      {children}
+    </div>
+  );
 }
 
 export function StepInferenceProvider({
@@ -332,160 +347,140 @@ export function StepInferenceProvider({
   return (
     <div className="relative w-full max-w-2xl space-y-6 py-2 md:py-0">
       <StepTitle text={ENV_VARS_STEP.title} />
-      <div className="space-y-3">
+      <div className="space-y-2">
         <p>
-          Roomote needs a model provider for, you know, AI stuff. Pick yours and
-          connect it.
+          Roomote needs a model provider for, you know, AI stuff. Popular
+          choices are ChatGPT subscriptions and OpenRouter.
         </p>
-        <p>Popular choices are ChatGPT subscriptions and OpenRouter.</p>
+        <p className="text-sm text-foreground/50">
+          <Lock className="inline size-3 mr-1" />
+          Credentials are encrypted in your database.
+        </p>
       </div>
 
-      <div className="flex items-center gap-2 max-w-lg">
-        <Select
-          value={selectedProvider ?? undefined}
-          onValueChange={(value) =>
-            selectProvider(value as SetupModelProviderId)
-          }
-        >
-          <SelectTrigger aria-label="Model provider" className="min-w-44">
-            <SelectValue placeholder="Pick your provider" />
-          </SelectTrigger>
-          <SelectContent>
-            {sortedModelProviders.map((provider) => (
-              <SelectItem key={provider.id} value={provider.id}>
-                {provider.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-
-        {selectedProvider && !isOAuthProvider ? (
-          <Input
-            type={isEndpointProvider ? 'url' : undefined}
-            inputMode={isEndpointProvider ? 'url' : undefined}
-            autoComplete={isEndpointProvider ? 'url' : undefined}
-            secret={!isEndpointProvider && !hasRuntimeProviderKey}
-            value={shouldShowConfiguredMask ? MASKED_VALUE : apiKey}
-            onFocus={() => {
-              if (shouldShowSavedValueMask) {
-                setEditingSavedValue(true);
-              }
-            }}
-            onBlur={() => {
-              if (hasSavedProviderKey && apiKey.length === 0) {
-                setEditingSavedValue(false);
-              }
-            }}
-            onChange={(event) => setApiKey(event.target.value)}
-            placeholder={
-              hasRuntimeProviderKey
-                ? ''
-                : `${primaryCredentialLabel} for ${selectedProviderStatus?.label ?? 'provider'}`
+      <div className="w-full space-y-2">
+        <InferenceProviderRow>
+          <Select
+            value={selectedProvider ?? undefined}
+            onValueChange={(value) =>
+              selectProvider(value as SetupModelProviderId)
             }
-            disabled={saveModelConfig.isPending || hasRuntimeProviderKey}
-            data-1p-ignore
-          />
-        ) : null}
-
-        {isChatGptProvider && !hasRuntimeProviderKey && !chatgptConnected ? (
-          <Button
-            type="button"
-            variant="default"
-            size="sm"
-            disabled={saveModelConfig.isPending}
-            onClick={() => setIsChatGptDialogOpen(true)}
           >
-            Connect ChatGPT
-          </Button>
-        ) : null}
+            <SelectTrigger
+              aria-label="Model provider"
+              className="min-w-44 w-full md:w-auto"
+            >
+              <SelectValue placeholder="Pick your provider" />
+            </SelectTrigger>
+            <SelectContent>
+              {sortedModelProviders.map((provider) => (
+                <SelectItem key={provider.id} value={provider.id}>
+                  {provider.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
 
-        {isGitHubCopilotProvider &&
-        !hasRuntimeProviderKey &&
-        !githubCopilotConnected ? (
-          <Button
-            type="button"
-            variant="default"
-            size="sm"
-            disabled={saveModelConfig.isPending}
-            onClick={() => setIsGitHubCopilotDialogOpen(true)}
-          >
-            Connect GitHub Copilot
-          </Button>
-        ) : null}
+          {selectedProvider && !isOAuthProvider ? (
+            <Input
+              type={isEndpointProvider ? 'url' : undefined}
+              inputMode={isEndpointProvider ? 'url' : undefined}
+              autoComplete={isEndpointProvider ? 'url' : undefined}
+              secret={!isEndpointProvider && !hasRuntimeProviderKey}
+              value={shouldShowConfiguredMask ? MASKED_VALUE : apiKey}
+              onFocus={() => {
+                if (shouldShowSavedValueMask) {
+                  setEditingSavedValue(true);
+                }
+              }}
+              onBlur={() => {
+                if (hasSavedProviderKey && apiKey.length === 0) {
+                  setEditingSavedValue(false);
+                }
+              }}
+              onChange={(event) => setApiKey(event.target.value)}
+              placeholder={
+                hasRuntimeProviderKey
+                  ? ''
+                  : `${primaryCredentialLabel} for ${selectedProviderStatus?.label ?? 'provider'}`
+              }
+              disabled={saveModelConfig.isPending || hasRuntimeProviderKey}
+              data-1p-ignore
+            />
+          ) : null}
 
-        {isXaiSurface && !hasRuntimeProviderKey && !xaiSubscriptionConnected ? (
-          <Button
-            type="button"
-            variant="default"
-            size="sm"
-            disabled={saveModelConfig.isPending}
-            onClick={() => setIsXaiDialogOpen(true)}
-          >
-            Connect Grok subscription
-          </Button>
-        ) : null}
+          {isChatGptProvider && !hasRuntimeProviderKey && !chatgptConnected ? (
+            <Button
+              type="button"
+              variant="default"
+              size="sm"
+              disabled={saveModelConfig.isPending}
+              onClick={() => setIsChatGptDialogOpen(true)}
+            >
+              Connect ChatGPT
+            </Button>
+          ) : null}
 
-        {(hasRuntimeProviderKey ||
-          hasSavedProviderKey ||
-          (isXaiSurface && xaiSubscriptionConnected)) && <Check />}
-      </div>
+          {isGitHubCopilotProvider &&
+          !hasRuntimeProviderKey &&
+          !githubCopilotConnected ? (
+            <Button
+              type="button"
+              variant="default"
+              size="sm"
+              disabled={saveModelConfig.isPending}
+              onClick={() => setIsGitHubCopilotDialogOpen(true)}
+            >
+              Connect GitHub Copilot
+            </Button>
+          ) : null}
 
-      {isXaiSurface && !hasRuntimeProviderKey && xaiSubscriptionConnected ? (
-        <span className="text-sm text-muted-foreground">
-          {xaiStatus?.email
-            ? `Connected as ${xaiStatus.email}`
-            : 'Connected to a SuperGrok / X Premium+ account.'}
-        </span>
-      ) : null}
+          {isXaiSurface &&
+          !hasRuntimeProviderKey &&
+          !xaiSubscriptionConnected ? (
+            <Button
+              type="button"
+              variant="default"
+              size="sm"
+              disabled={saveModelConfig.isPending}
+              onClick={() => setIsXaiDialogOpen(true)}
+            >
+              Connect Grok subscription
+            </Button>
+          ) : null}
 
-      {requiresConnectionName && !hasRuntimeProviderKey ? (
-        <div className="flex max-w-lg items-center gap-2">
-          <span className="w-44 shrink-0 text-sm text-muted-foreground">
-            Connection name
-          </span>
-          <Input
-            value={connectionName}
-            onChange={(event) => setConnectionName(event.target.value)}
-            placeholder="e.g. company-proxy"
-            disabled={saveModelConfig.isPending}
-            aria-label="Connection name for OpenAI-compatible endpoint"
-          />
-        </div>
-      ) : null}
+          {(hasRuntimeProviderKey ||
+            hasSavedProviderKey ||
+            (isXaiSurface && xaiSubscriptionConnected)) && <Check />}
+        </InferenceProviderRow>
 
-      {selectedProviderStatus?.credentialHelp &&
-      !hasRuntimeProviderKey &&
-      !isGitHubCopilotProvider &&
-      additionalEnvFields.length === 0 ? (
-        <p className="max-w-lg text-xs text-muted-foreground">
-          {selectedProviderStatus.credentialHelp.text}{' '}
-          <a
-            className="font-medium underline underline-offset-2 hover:text-foreground"
-            href={selectedProviderStatus.credentialHelp.href}
-            target="_blank"
-            rel="noreferrer"
-          >
-            {selectedProviderStatus.credentialHelp.linkLabel}
-          </a>
-          .
-        </p>
-      ) : null}
-
-      {isChatGptProvider && !hasRuntimeProviderKey && chatgptConnected ? (
-        <span className="text-sm text-muted-foreground">
-          {chatgptStatus?.email
-            ? `Connected as ${chatgptStatus.email}`
-            : 'Connected to a ChatGPT account.'}
-        </span>
-      ) : null}
-
-      {isGitHubCopilotProvider && !hasRuntimeProviderKey ? (
-        githubCopilotConnected ? (
+        {isXaiSurface && !hasRuntimeProviderKey && xaiSubscriptionConnected ? (
           <span className="text-sm text-muted-foreground">
-            Connected to a GitHub Copilot account.
+            {xaiStatus?.email
+              ? `Connected as ${xaiStatus.email}`
+              : 'Connected to a SuperGrok / X Premium+ account.'}
           </span>
-        ) : selectedProviderStatus?.credentialHelp &&
-          additionalEnvFields.length === 0 ? (
+        ) : null}
+
+        {requiresConnectionName && !hasRuntimeProviderKey ? (
+          <InferenceProviderRow>
+            <span className="w-44 shrink-0 text-sm text-muted-foreground">
+              What to call this
+            </span>
+            <Input
+              value={connectionName}
+              onChange={(event) => setConnectionName(event.target.value)}
+              placeholder="e.g. Internal Provider"
+              disabled={saveModelConfig.isPending}
+              aria-label="Connection name for OpenAI-compatible endpoint"
+            />
+          </InferenceProviderRow>
+        ) : null}
+
+        {selectedProviderStatus?.credentialHelp &&
+        !hasRuntimeProviderKey &&
+        !isGitHubCopilotProvider &&
+        additionalEnvFields.length === 0 ? (
           <p className="max-w-lg text-xs text-muted-foreground">
             {selectedProviderStatus.credentialHelp.text}{' '}
             <a
@@ -498,70 +493,97 @@ export function StepInferenceProvider({
             </a>
             .
           </p>
-        ) : null
-      ) : null}
+        ) : null}
 
-      {!hasRuntimeProviderKey &&
-        additionalEnvFields.map((field) => (
-          <div
-            key={field.envVarName}
-            className="flex max-w-lg items-center gap-2"
-          >
-            <span className="w-44 shrink-0 text-sm text-muted-foreground">
-              {field.label}
-              {field.required ? '' : ' (optional)'}
-            </span>
-            <AdditionalEnvFieldInput
-              field={field}
-              value={additionalEnvValues[field.envVarName] ?? ''}
-              onValueChange={(value) =>
-                setAdditionalEnvValues((values) => ({
-                  ...values,
-                  [field.envVarName]: value,
-                }))
-              }
-              disabled={saveModelConfig.isPending}
-              ariaLabel={`${field.label} for ${selectedProviderStatus?.label ?? 'provider'}`}
-              selectTriggerClassName="min-w-44"
-            />
-          </div>
-        ))}
-
-      {selectedProviderStatus?.credentialHelp &&
-      !hasRuntimeProviderKey &&
-      additionalEnvFields.length > 0 ? (
-        <p className="max-w-lg text-xs text-muted-foreground">
-          {selectedProviderStatus.credentialHelp.text}{' '}
-          <a
-            className="font-medium underline underline-offset-2 hover:text-foreground"
-            href={selectedProviderStatus.credentialHelp.href}
-            target="_blank"
-            rel="noreferrer"
-          >
-            {selectedProviderStatus.credentialHelp.linkLabel}
-          </a>
-          .
-        </p>
-      ) : null}
-
-      {selectedProvider === 'openrouter' && !hasRuntimeProviderKey && (
-        <div className="flex items-center gap-3">
+        {isChatGptProvider && !hasRuntimeProviderKey && chatgptConnected ? (
           <span className="text-sm text-muted-foreground">
-            or, if you don&apos;t have a key handy:
+            {chatgptStatus?.email
+              ? `Connected as ${chatgptStatus.email}`
+              : 'Connected to a ChatGPT account.'}
           </span>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            disabled={saveModelConfig.isPending}
-            onClick={() =>
-              window.location.assign('/api/openrouter-oauth/initiate')
-            }
-          >
-            Connect with OpenRouter
-          </Button>
-        </div>
-      )}
+        ) : null}
+
+        {isGitHubCopilotProvider && !hasRuntimeProviderKey ? (
+          githubCopilotConnected ? (
+            <span className="text-sm text-muted-foreground">
+              Connected to a GitHub Copilot account.
+            </span>
+          ) : selectedProviderStatus?.credentialHelp &&
+            additionalEnvFields.length === 0 ? (
+            <p className="max-w-lg text-xs text-muted-foreground">
+              {selectedProviderStatus.credentialHelp.text}{' '}
+              <a
+                className="font-medium underline underline-offset-2 hover:text-foreground"
+                href={selectedProviderStatus.credentialHelp.href}
+                target="_blank"
+                rel="noreferrer"
+              >
+                {selectedProviderStatus.credentialHelp.linkLabel}
+              </a>
+              .
+            </p>
+          ) : null
+        ) : null}
+
+        {!hasRuntimeProviderKey &&
+          additionalEnvFields.map((field) => (
+            <InferenceProviderRow key={field.envVarName}>
+              <span className="w-44 shrink-0 text-sm text-muted-foreground">
+                {field.label}
+                {field.required ? '' : ' (optional)'}
+              </span>
+              <AdditionalEnvFieldInput
+                field={field}
+                value={additionalEnvValues[field.envVarName] ?? ''}
+                onValueChange={(value) =>
+                  setAdditionalEnvValues((values) => ({
+                    ...values,
+                    [field.envVarName]: value,
+                  }))
+                }
+                disabled={saveModelConfig.isPending}
+                ariaLabel={`${field.label} for ${selectedProviderStatus?.label ?? 'provider'}`}
+                selectTriggerClassName="min-w-44"
+              />
+            </InferenceProviderRow>
+          ))}
+
+        {selectedProviderStatus?.credentialHelp &&
+        !hasRuntimeProviderKey &&
+        additionalEnvFields.length > 0 ? (
+          <p className="max-w-lg text-xs text-muted-foreground">
+            {selectedProviderStatus.credentialHelp.text}{' '}
+            <a
+              className="font-medium underline underline-offset-2 hover:text-foreground"
+              href={selectedProviderStatus.credentialHelp.href}
+              target="_blank"
+              rel="noreferrer"
+            >
+              {selectedProviderStatus.credentialHelp.linkLabel}
+            </a>
+            .
+          </p>
+        ) : null}
+
+        {selectedProvider === 'openrouter' && !hasRuntimeProviderKey && (
+          <InferenceProviderRow>
+            <span className="text-sm text-muted-foreground">
+              or, if you don&apos;t have a key handy:
+            </span>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={saveModelConfig.isPending}
+              onClick={() =>
+                window.location.assign('/api/openrouter-oauth/initiate')
+              }
+            >
+              Connect with OpenRouter
+            </Button>
+          </InferenceProviderRow>
+        )}
+      </div>
 
       <ChatGptConnectDialog
         open={isChatGptDialogOpen}

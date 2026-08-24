@@ -41,6 +41,7 @@ import { StepInvoke } from './StepInvoke';
 import { useSetupFlow } from './hooks';
 import { StepRepoSelection, type SetupRetryReason } from './StepRepoSelection';
 import { StepAutomationRecommendations } from './StepAutomationRecommendations';
+import { StepEnvironmentExplainer } from './StepEnvironmentExplainer';
 import { getSetupStepPath } from './types';
 import { LoadingSetupFlow, stepTransitionVariants } from './SetupBootstrapFlow';
 
@@ -483,6 +484,12 @@ export function SetupSignedInFlow() {
               }}
               onBack={canGoBack ? goToPreviousStep : undefined}
               returnPath={getSetupStepPath('slack')}
+            />
+          )}
+          {step === 'environment-explainer' && (
+            <StepEnvironmentExplainer
+              onContinue={goToNextStep}
+              onBack={canGoBack ? goToPreviousStep : undefined}
             />
           )}
           {step === 'repo-selection' && (
