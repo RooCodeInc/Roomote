@@ -48,6 +48,10 @@ import type {
 } from '../../harness';
 import { buildTaskGoalContext } from '../../../../run-task/task-goal';
 import {
+  MAX_RETRYABLE_DELIVERY_FAILURES_BEFORE_TERMINAL,
+  recordChatReplyDeliveryFailure,
+} from '../../../../mcp/roomote-mcp-server/chat-reply-satisfaction';
+import {
   TERMINAL_PROVIDER_ERROR_SAY,
   TaskCommandName,
   extractQueuedMessageId,
@@ -1312,6 +1316,19 @@ function isTerminalOpenCodeToolStatus(status: AcpToolStatus): boolean {
   return status === 'completed' || status === 'failed';
 }
 
+function isFailedTerminalChatReply(tool: OpenCodeNormalizedToolPart): boolean {
+  const rawInput = asRecord(tool.callPayload.rawInput);
+  const purpose = asString(rawInput?.purpose);
+
+  return (
+    tool.status === 'failed' &&
+    tool.callPayload.isMcp === true &&
+    tool.callPayload.mcpServerName === 'roomote' &&
+    tool.callPayload.mcpToolName === 'send_chat_reply' &&
+    (purpose === 'closeout' || purpose === 'clarification')
+  );
+}
+
 function truncateProgressCommand(command: string): string {
   if (command.length <= MAX_PROGRESS_COMMAND_CHARS) {
     return command;
@@ -1649,6 +1666,7 @@ export class OpenCodeServerHarness
   private activeWorkflowSkill: string | null = null;
   private commandEnv: Record<string, string> | undefined;
   private stopHookReminderCount = 0;
+  private terminalChatReplyDeliveryFailed = false;
   private lastBlockedCloseoutAssistantText: string | null = null;
   private stopHookReminderStallTimer: ReturnType<typeof setTimeout> | null =
     null;
@@ -2161,6 +2179,7 @@ export class OpenCodeServerHarness
     this.clearProviderErrorRecoveryState();
     this.clearAllExecuteToolProgress();
     this.stopHookReminderCount = 0;
+    this.terminalChatReplyDeliveryFailed = false;
     this.lastBlockedCloseoutAssistantText = null;
     this.ignoreNextStopHookSessionIdle = false;
     this.ignoreNextQueuedDrainSessionIdle = false;
@@ -4525,6 +4544,26 @@ export class OpenCodeServerHarness
       toolCallId: normalized.toolCallId,
     });
 
+    if (
+      isFailedTerminalChatReply(normalized) &&
+      !this.terminalChatReplyDeliveryFailed &&
+      !this.persistedToolResultKeys.has(eventKey)
+    ) {
+      const failure = recordChatReplyDeliveryFailure({
+        retryable: true,
+        sessionId: context.sessionId,
+        stateFilePath:
+          this.commandEnv?.ROOMOTE_SLACK_REPLY_SATISFACTION_STATE_FILE,
+      });
+
+      if (failure.terminalDeliveryFailure) {
+        this.terminalChatReplyDeliveryFailed = true;
+        this.logger.warn(
+          `OpenCode terminal chat reply failed ${MAX_RETRYABLE_DELIVERY_FAILURES_BEFORE_TERMINAL} times; completing the turn and handing delivery back to the platform. Last error: ${normalized.error ?? normalized.output ?? 'unknown error'}`,
+        );
+      }
+    }
+
     // Capture the final activity summary before the terminal status disarms
     // the watchdog, so the settled spawn row keeps its receipt.
     const terminalSubagentActivity = this.captureTerminalSubagentActivity(
@@ -4884,7 +4923,10 @@ export class OpenCodeServerHarness
 
     if (sessionId) {
       const stopDecision = this.evaluateSlackStopHook(sessionId);
-      let missingChatCloseoutReminderCount: number | null = null;
+      let missingChatCloseoutReminderCount = this
+        .terminalChatReplyDeliveryFailed
+        ? MAX_RETRYABLE_DELIVERY_FAILURES_BEFORE_TERMINAL
+        : null;
 
       if (stopDecision.blocked) {
         const reason =
@@ -4940,6 +4982,7 @@ export class OpenCodeServerHarness
       }
 
       this.stopHookReminderCount = 0;
+      this.terminalChatReplyDeliveryFailed = false;
 
       const completionText =
         missingChatCloseoutReminderCount !== null && !finalized?.text.trim()

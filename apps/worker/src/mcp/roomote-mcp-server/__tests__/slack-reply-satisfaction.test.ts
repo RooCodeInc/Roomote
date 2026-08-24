@@ -766,7 +766,7 @@ describe('Slack reply satisfaction state', () => {
     it('stamps a terminal outcome when the bounded retry budget is spent', () => {
       const stateFilePath = writeStateFile({
         startedAtMs: 1000,
-        deliveryFailureCount: 4,
+        deliveryFailureCount: 2,
         lastDeliveryFailureAtMs: 1900,
       });
 
@@ -779,7 +779,7 @@ describe('Slack reply satisfaction state', () => {
       expect(result).toEqual({ terminalDeliveryFailure: true });
       expect(JSON.parse(fs.readFileSync(stateFilePath, 'utf8'))).toEqual({
         startedAtMs: 1000,
-        deliveryFailureCount: 5,
+        deliveryFailureCount: 3,
         lastDeliveryFailureAtMs: 2000,
         terminalDeliveryFailureAtMs: 2000,
       });
@@ -788,7 +788,7 @@ describe('Slack reply satisfaction state', () => {
     it('keeps the earliest terminal stamp across later failures', () => {
       const stateFilePath = writeStateFile({
         startedAtMs: 1000,
-        deliveryFailureCount: 5,
+        deliveryFailureCount: 3,
         lastDeliveryFailureAtMs: 2000,
         terminalDeliveryFailureAtMs: 2000,
       });
@@ -802,7 +802,7 @@ describe('Slack reply satisfaction state', () => {
       expect(result).toEqual({ terminalDeliveryFailure: true });
       const state = JSON.parse(fs.readFileSync(stateFilePath, 'utf8'));
       expect(state.terminalDeliveryFailureAtMs).toBe(2000);
-      expect(state.deliveryFailureCount).toBe(6);
+      expect(state.deliveryFailureCount).toBe(4);
     });
 
     it('ignores failures reported from non-parent sessions', () => {

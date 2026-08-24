@@ -175,7 +175,7 @@ export function recordChatTurnStart(input: {
  * as terminal even without a structured non-retryable verdict. Keeps a task
  * whose channel fails with an unclassified error from retrying forever.
  */
-const MAX_RETRYABLE_DELIVERY_FAILURES_BEFORE_TERMINAL = 5;
+export const MAX_RETRYABLE_DELIVERY_FAILURES_BEFORE_TERMINAL = 3;
 
 /**
  * Records a failed chat delivery attempt. When the failure is non-retryable,

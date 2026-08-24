@@ -119,6 +119,10 @@ const OPENCODE_GENERAL_AGENT_NAME = 'general';
 const MCP_ISOLATED_AGENT_NAMES = [ROOMOTE_OPENCODE_VISUAL_AGENT_NAME] as const;
 
 const ROOMOTE_MCP_SERVER_NAME = 'roomote';
+// OpenCode otherwise applies its 30s MCP request default, while Roomote's
+// platform relay intentionally allows up to 120s per API attempt. Keep the
+// outer request alive long enough for the relay to return a structured result.
+const ROOMOTE_OPENCODE_MCP_TIMEOUT_MS = 600_000;
 
 const ROOMOTE_OPENCODE_VISUAL_MODEL_INSTRUCTIONS_FILE_NAME =
   'roomote-opencode-visual-model-instructions.md';
@@ -606,6 +610,9 @@ function createOpenCodeMcpConfig(
             type: 'local',
             command: [mcpServer.command, ...(mcpServer.args ?? [])],
             enabled: true,
+            ...(mcpServer.name === ROOMOTE_MCP_SERVER_NAME
+              ? { timeout: ROOMOTE_OPENCODE_MCP_TIMEOUT_MS }
+              : {}),
             ...(mcpServer.environment
               ? { environment: mcpServer.environment }
               : {}),
@@ -620,6 +627,9 @@ function createOpenCodeMcpConfig(
           url: mcpServer.url,
           enabled: true,
           oauth: false,
+          ...(mcpServer.name === ROOMOTE_MCP_SERVER_NAME
+            ? { timeout: ROOMOTE_OPENCODE_MCP_TIMEOUT_MS }
+            : {}),
           ...(mcpServer.headers ? { headers: mcpServer.headers } : {}),
         },
       ];
