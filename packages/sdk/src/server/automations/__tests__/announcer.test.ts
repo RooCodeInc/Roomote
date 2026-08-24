@@ -18,6 +18,7 @@ const {
   mockCompleteFastBuiltInAutomationNoop,
   mockRecordFastPreflightFailure,
   mockBuildScheduledAutomationOccurrenceKey,
+  mockIsRunDue,
 } = vi.hoisted(() => ({
   slackInstallationsTable: {
     botAccessToken: 'botAccessToken',
@@ -53,6 +54,7 @@ const {
     ({ partition }: { partition?: string }) =>
       `scheduled-slot:${partition ?? 'none'}`,
   ),
+  mockIsRunDue: vi.fn((_input: { lastRunAt: Date | null }) => true),
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -143,7 +145,7 @@ vi.mock('../../lib/manager-slack', () => ({
 }));
 
 vi.mock('../scheduling-utils', () => ({
-  isRunDue: vi.fn(() => true),
+  isRunDue: mockIsRunDue,
   resolveSlackWorkspaceTimezone: vi.fn(async () => 'UTC'),
 }));
 
@@ -193,6 +195,7 @@ describe('announcerJob non-Slack posting', () => {
     vi.clearAllMocks();
 
     mockHasAnyActiveRepository.mockResolvedValue(true);
+    mockIsRunDue.mockReturnValue(true);
     mockSlackInstallationRows.mockResolvedValue([]);
     mockListConnectedCommunicationProviders.mockResolvedValue(['telegram']);
     mockGetAutomationRuntime.mockResolvedValue({
@@ -308,6 +311,57 @@ describe('announcerJob non-Slack posting', () => {
     const result = await announcerJob();
 
     expect(result.completed).toBe(true);
+    expect(mockExecuteFastBuiltInAutomation).toHaveBeenCalledTimes(2);
+    expect(
+      mockExecuteFastBuiltInAutomation.mock.calls.map(
+        ([input]) => input.occurrenceKey,
+      ),
+    ).toEqual([
+      'scheduled-slot:slack:T-ONE:C-ONE',
+      'scheduled-slot:slack:T-TWO:C-TWO',
+    ]);
+  });
+
+  it('keeps every active Slack installation due for the scheduler pass', async () => {
+    const firstRunAt = new Date('2026-07-12T02:00:00Z');
+    mockSlackInstallationRows.mockResolvedValue([
+      { slackBotToken: 'xoxb-one', slackTeamId: 'T-ONE' },
+      { slackBotToken: 'xoxb-two', slackTeamId: 'T-TWO' },
+    ]);
+    mockGetAutomationRuntime
+      .mockResolvedValueOnce({
+        key: 'announcer',
+        enabled: true,
+        scheduleMode: 'daily',
+        lastRunAt: null,
+        instructions: null,
+        destination: null,
+        executionRoute: 'fast',
+      })
+      .mockResolvedValueOnce({
+        key: 'announcer',
+        enabled: true,
+        scheduleMode: 'daily',
+        lastRunAt: firstRunAt,
+        instructions: null,
+        destination: null,
+        executionRoute: 'fast',
+      });
+    mockResolveAutomationRuntimeDestination
+      .mockResolvedValueOnce({ provider: 'slack', channelId: 'C-ONE' })
+      .mockResolvedValueOnce({ provider: 'slack', channelId: 'C-TWO' });
+    mockIsRunDue.mockImplementation(
+      ({ lastRunAt }: { lastRunAt: Date | null }) => lastRunAt === null,
+    );
+
+    await announcerJob();
+
+    expect(mockGetAutomationRuntime).toHaveBeenCalledTimes(2);
+    expect(mockIsRunDue).toHaveBeenCalledTimes(2);
+    expect(mockIsRunDue.mock.calls.map(([input]) => input.lastRunAt)).toEqual([
+      null,
+      null,
+    ]);
     expect(mockExecuteFastBuiltInAutomation).toHaveBeenCalledTimes(2);
     expect(
       mockExecuteFastBuiltInAutomation.mock.calls.map(

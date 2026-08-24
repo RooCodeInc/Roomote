@@ -308,6 +308,8 @@ export async function announcerJob(
 
   let processed = 0;
   let skipped = 0;
+  let passLastRunAt: Date | null = null;
+  let hasPassLastRunAt = false;
 
   for (const deployment of eligibleDeployments) {
     let failureRuntime: Awaited<
@@ -322,6 +324,10 @@ export async function announcerJob(
       : null;
     try {
       const runtime = await getAutomationRuntime('announcer');
+      if (!hasPassLastRunAt) {
+        passLastRunAt = runtime.lastRunAt;
+        hasPassLastRunAt = true;
+      }
       const frequency = runtime.enabled ? runtime.scheduleMode : 'off';
       failureRuntime = runtime;
       failureFrequency = frequency ?? 'off';
@@ -359,7 +365,7 @@ export async function announcerJob(
           now,
           timeZone: timezone,
           frequency: frequency as AnnouncerFrequency,
-          lastRunAt: runtime.lastRunAt,
+          lastRunAt: passLastRunAt,
           scheduleHourLocal: SCHEDULE_HOUR_LOCAL,
           windowDays: WINDOW_DAYS,
         })
