@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+
 import {
   getDiscordMessageCreate,
   type DiscordGatewayEvent,
@@ -36,6 +38,24 @@ export function getDiscordFastConversationId(
   return channel.isDirectMessage || channel.isThread
     ? channel.channelId
     : eventId;
+}
+
+export function getDiscordFastLaunchSourceEventId(input: {
+  eventId: string;
+  prompt: string;
+  environmentId: string | null;
+  model?: string | null;
+}): string {
+  const launchKey = JSON.stringify([
+    input.prompt,
+    input.environmentId,
+    input.model ?? null,
+  ]);
+  const digest = createHash('sha256')
+    .update(launchKey)
+    .digest('hex')
+    .slice(0, 16);
+  return `${input.eventId}:fast-launch:${digest}`;
 }
 
 export async function processDiscordFastAgentMessage(input: {
@@ -136,7 +156,12 @@ export async function processDiscordFastAgentMessage(input: {
               text: prompt,
               user: input.sender.global_name?.trim() || input.sender.username,
               userId: input.senderUserId,
-              ts: input.event.eventId,
+              ts: getDiscordFastLaunchSourceEventId({
+                eventId: input.event.eventId,
+                prompt,
+                environmentId,
+                model,
+              }),
               channel: input.metadata.communicationChannelId,
               ...(input.metadata.communicationThreadId
                 ? { threadTs: input.metadata.communicationThreadId }
@@ -168,6 +193,7 @@ export async function processDiscordFastAgentMessage(input: {
               success: true,
               taskId: started.existingRun.taskId,
               taskUrl: started.taskUrl,
+              kickoffDelivered: true,
             };
           }
           return {

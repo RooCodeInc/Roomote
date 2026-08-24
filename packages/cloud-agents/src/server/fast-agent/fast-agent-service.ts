@@ -553,7 +553,6 @@ export async function answerFastAgentQuestion({
   const turnVisibleMessages: ModelMessage[] = [];
   let mirroredMessageCount = 0;
   let canonicalConversationId: string | null = null;
-  let launchedTaskMessage: string | null = null;
   let lastVisibleMessage = '';
   let inferenceRetryReply: FastAgentReplyHandle | undefined;
   let inferenceRetryMessageIndex: number | undefined;
@@ -662,6 +661,7 @@ export async function answerFastAgentQuestion({
     const integrationCallSignatures = new Set<string>();
     const completedTaskActions = new Set<string>();
     let visibleUpdatePosted = false;
+    let kickoffPosted = false;
     let closed = false;
     let nativeToolInvoked = false;
     let retriedTaskStart = false;
@@ -894,9 +894,6 @@ export async function answerFastAgentQuestion({
 
           case FAST_AGENT_NATIVE_TOOL_NAMES.launchTask: {
             const args = launchTaskArgsSchema.parse(call.args);
-            if (completedTaskActions.has('launch_task')) {
-              return { success: false, error: 'A task was already launched.' };
-            }
             const validEnvironmentIds = new Set(
               availableEnvironments.map((environment) => environment.id),
             );
@@ -918,7 +915,18 @@ export async function answerFastAgentQuestion({
                 error: `Model "${args.model}" is not enabled for new tasks. Choose an exact ID from Available Delegated Task Models.`,
               };
             }
-            completedTaskActions.add('launch_task');
+            const signature = `launch_task:${JSON.stringify([
+              args.prompt,
+              args.environmentId ?? null,
+              args.model ?? null,
+            ])}`;
+            if (completedTaskActions.has(signature)) {
+              return {
+                success: false,
+                error: 'The same task was already launched in this turn.',
+              };
+            }
+            completedTaskActions.add(signature);
             let kickoffDelivered = false;
             const deliverKickoff = async (task: {
               taskId: string;
@@ -937,11 +945,11 @@ export async function answerFastAgentQuestion({
                 .join('\n\n');
               throwIfTurnCancelled();
               await postReply(
-                { purpose: 'closeout', message, kickoff: true },
+                { purpose: 'progress', message, kickoff: true },
                 true,
               );
               kickoffDelivered = true;
-              launchedTaskMessage = message;
+              kickoffPosted = true;
             };
             throwIfTurnCancelled();
             const result = await adapter.launchTask({
@@ -953,7 +961,11 @@ export async function answerFastAgentQuestion({
             });
             if (result.success) {
               currentActiveTasks.set(result.taskId, { taskId: result.taskId });
-              if (!kickoffDelivered) {
+              if (result.kickoffDelivered) {
+                visibleUpdatePosted = true;
+                kickoffPosted = true;
+              }
+              if (!kickoffDelivered && !result.kickoffDelivered) {
                 await deliverKickoff(result);
               }
             }
@@ -1172,10 +1184,18 @@ export async function answerFastAgentQuestion({
 
     throwIfTurnCancelled();
     if (!closed) {
-      const message =
-        promptText.trim() ||
-        'I could not complete that request within the available turn.';
-      await postReply({ purpose: 'closeout', message });
+      const message = promptText.trim();
+      if (message) {
+        await postReply({ purpose: 'closeout', message });
+      } else if (!kickoffPosted) {
+        // A delivered kickoff is already a complete visible handoff artifact.
+        // Stay silent rather than append a generic closeout that duplicates it.
+        await postReply({
+          purpose: 'closeout',
+          message:
+            'I could not complete that request within the available turn.',
+        });
+      }
     }
     await mirrorPendingMessages();
     return lastVisibleMessage;
@@ -1204,9 +1224,8 @@ export async function answerFastAgentQuestion({
     }
     if (platformEvent) throw error;
 
-    const message = launchedTaskMessage
-      ? 'I posted the task kickoff, but the task could not be queued. Please retry.'
-      : error instanceof FastAgentInferenceError
+    const message =
+      error instanceof FastAgentInferenceError
         ? formatFastAgentInferenceFailure(error.failure)
         : 'I hit an error while handling that request. Please try again in a moment.';
     try {

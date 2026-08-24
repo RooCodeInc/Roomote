@@ -51,7 +51,14 @@ export type LaunchFastAgentTask = (params: {
     taskLinkRendered?: boolean;
   }) => Promise<void>;
 }) => Promise<
-  | { success: true; taskId: string; taskUrl?: string }
+  | {
+      success: true;
+      taskId: string;
+      taskUrl?: string;
+      /** True when an idempotent surface replay reused a task whose kickoff
+       * was already delivered. */
+      kickoffDelivered?: boolean;
+    }
   | { success: false; error: string }
 >;
 
