@@ -63,6 +63,10 @@ for (const [name, script] of [
   );
 }
 assert(
+  deployer.includes('for key in COMPOSE_FILE ROOMOTE_DOCKER_BIN'),
+  'managed deploy.sh: redeploys must carry forward host-owned .env state (override registry, Docker path)',
+);
+assert(
   hostCli.includes('compose-overrides') &&
     hostCli.includes("backup_services_stopped='false'"),
   'host CLI: backups must stage override files and keep trap state global',
