@@ -1,16 +1,47 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+const fastMocks = vi.hoisted(() => ({
+  getSession: vi.fn(),
+  deliverParentEvent: vi.fn(),
+  slackPostMessage: vi.fn(),
+}));
+
 vi.mock('@roomote/cloud-agents/server', () => ({
   enqueueTask: vi.fn(),
+  getOrCreateFastAgentSession: fastMocks.getSession,
+}));
+
+vi.mock('../../lib/fast-agent-parent-event', () => ({
+  buildSlackClientMessageId: vi.fn(() => 'client-message-id'),
+  deliverFastAgentParentEvent: fastMocks.deliverParentEvent,
+}));
+
+vi.mock('@roomote/slack', () => ({
+  SlackNotifier: class SlackNotifier {
+    postMessage = fastMocks.slackPostMessage;
+  },
+}));
+
+vi.mock('../../lib/discord-communication', () => ({
+  createDiscordCommunicationProviderFromRuntimeCredentials: vi.fn(),
 }));
 
 vi.mock('@roomote/db/server', () => ({
   db: {
+    update: vi.fn(() => ({
+      set: vi.fn(() => ({ where: vi.fn() })),
+    })),
     query: {
       environments: { findFirst: vi.fn() },
       slackInstallations: { findFirst: vi.fn() },
     },
   },
+  and: vi.fn((...args: unknown[]) => args),
+  customAutomations: {
+    id: 'custom_automations.id',
+    launchClaimedAt: 'custom_automations.launch_claimed_at',
+  },
+  CUSTOM_AUTOMATION_LAUNCH_STALE_CLAIM_MS: 10 * 60 * 1_000,
   environments: {},
   eq: vi.fn((...args: unknown[]) => args),
   getCustomAutomationById: vi.fn(),
@@ -85,6 +116,7 @@ const automation = {
   scheduleMode: 'daily',
   environmentId: '22222222-2222-2222-2222-222222222222',
   allRepositories: false,
+  executionMode: 'sandbox_task',
   target: {
     provider: 'slack',
     targetKind: 'slack_channel',
@@ -127,6 +159,113 @@ describe('customAutomationsJob', () => {
       'slack',
       'teams',
     ]);
+    fastMocks.getSession.mockResolvedValue({
+      id: '33333333-3333-4333-8333-333333333333',
+      compatibilityMessages: [],
+    });
+    fastMocks.deliverParentEvent.mockResolvedValue('delivered');
+    fastMocks.slackPostMessage.mockResolvedValue('100.001');
+  });
+
+  it('runs a channel-less Fast automation without enqueueing a task', async () => {
+    vi.mocked(listEnabledCustomAutomations).mockResolvedValue([
+      {
+        ...automation,
+        executionMode: 'fast',
+        environmentId: null,
+        target: {},
+        createdByUserId: 'user-1',
+      } as never,
+    ]);
+
+    const result = await customAutomationsJob();
+
+    expect(result.completed).toBe(true);
+    expect(enqueueTask).not.toHaveBeenCalled();
+    expect(fastMocks.getSession).toHaveBeenCalledWith({
+      userId: 'user-1',
+      conversation: expect.objectContaining({
+        surface: 'automation',
+        workspaceId: automation.id,
+      }),
+    });
+    expect(fastMocks.deliverParentEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: expect.objectContaining({
+          type: 'automation_triggered',
+          automationId: automation.id,
+          trigger: 'schedule',
+        }),
+      }),
+    );
+    expect(recordCustomAutomationRunOutcome).toHaveBeenCalledWith(
+      db,
+      expect.objectContaining({
+        id: automation.id,
+        status: 'succeeded',
+      }),
+    );
+  });
+
+  it('creates a Slack thread for a channel-backed Fast automation', async () => {
+    vi.mocked(listEnabledCustomAutomations).mockResolvedValue([
+      {
+        ...automation,
+        executionMode: 'fast',
+        environmentId: null,
+        createdByUserId: 'user-1',
+      } as never,
+    ]);
+    vi.mocked(db.query.slackInstallations.findFirst).mockResolvedValue({
+      botAccessToken: 'xoxb-test',
+      teamId: 'T123',
+    } as never);
+
+    await customAutomationsJob();
+
+    expect(fastMocks.slackPostMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channel: 'C123',
+        client_msg_id: 'client-message-id',
+      }),
+    );
+    expect(fastMocks.getSession).toHaveBeenCalledWith({
+      userId: 'user-1',
+      conversation: {
+        surface: 'slack',
+        workspaceId: 'T123',
+        conversationId: '100.001',
+        replyTarget: { channelId: 'C123', threadId: '100.001' },
+      },
+    });
+  });
+
+  it('marks a stale Fast launch as interrupted instead of replaying it', async () => {
+    const staleClaim = new Date(Date.now() - 11 * 60 * 1_000);
+    vi.mocked(listEnabledCustomAutomations).mockResolvedValue([
+      {
+        ...automation,
+        executionMode: 'fast',
+        environmentId: null,
+        target: {},
+        createdByUserId: 'user-1',
+        launchClaimedAt: staleClaim,
+      } as never,
+    ]);
+
+    const result = await customAutomationsJob();
+
+    expect(result.errors).toEqual([
+      'Flaky tests: The previous Fast automation run was interrupted.',
+    ]);
+    expect(fastMocks.getSession).not.toHaveBeenCalled();
+    expect(recordCustomAutomationRunOutcome).toHaveBeenCalledWith(db, {
+      id: automation.id,
+      status: 'failed',
+      error: 'The previous Fast automation run was interrupted.',
+      lastLaunchedTaskId: null,
+      launchClaimedAt: staleClaim,
+    });
   });
 
   it('launches a StandardTask for due automations', async () => {

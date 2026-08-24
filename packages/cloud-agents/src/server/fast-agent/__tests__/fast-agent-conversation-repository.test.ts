@@ -35,6 +35,34 @@ afterEach(async () => {
 });
 
 describe('Fast conversation repository', () => {
+  it('persists a channel-less automation conversation', async () => {
+    const user = await createUser();
+    const conversation = {
+      surface: 'automation' as const,
+      workspaceId: 'automation-repository-test',
+      conversationId: 'occurrence-repository-test',
+    };
+
+    const session = await fastAgentConversationRepository.getOrCreate({
+      userId: user.id,
+      conversation,
+    });
+    const stored = await fastAgentConversationRepository.findById({
+      id: session.id,
+      fallbackConversation: conversation,
+    });
+
+    expect(stored?.conversation).toEqual(conversation);
+    const [row] = await db
+      .select({
+        channelId: fastAgentConversations.currentReplyChannelId,
+        surface: fastAgentConversations.surface,
+      })
+      .from(fastAgentConversations)
+      .where(eq(fastAgentConversations.id, session.id));
+    expect(row).toEqual({ channelId: null, surface: 'automation' });
+  });
+
   it('converges concurrent creation on one provider-neutral row', async () => {
     const user = await createUser();
     const sessions = await Promise.all(

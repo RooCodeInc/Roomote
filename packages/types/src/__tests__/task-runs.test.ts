@@ -268,6 +268,36 @@ describe('Task Tool invocation helpers', () => {
 });
 
 describe('taskSpecSchema', () => {
+  it('parses a channel-less automation Fast parent', () => {
+    const parsed = taskSpecSchema.parse({
+      userId: 'user-1',
+      type: TaskPayloadKind.StandardTask,
+      payload: {
+        repo: ALL_REPOSITORIES,
+        description: 'Delegated from a Fast automation',
+        communicationContextInherited: true,
+        fastAgentSessionId: '11111111-1111-4111-8111-111111111111',
+        fastAgentParent: {
+          sessionId: '11111111-1111-4111-8111-111111111111',
+          conversation: {
+            surface: 'automation',
+            workspaceId: 'automation-1',
+            conversationId: 'occurrence-1',
+          },
+        },
+      },
+    });
+
+    if (parsed.type !== TaskPayloadKind.StandardTask) {
+      throw new Error('Expected StandardTask payload');
+    }
+    expect(parsed.payload.fastAgentParent?.conversation).toEqual({
+      surface: 'automation',
+      workspaceId: 'automation-1',
+      conversationId: 'occurrence-1',
+    });
+  });
+
   it('preserves sourceControlProvider on StandardTask payloads', () => {
     const parsed = taskSpecSchema.parse({
       userId: 'user-1',

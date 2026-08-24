@@ -229,6 +229,21 @@ describe('buildFastAgentSystemPrompt', () => {
     );
   });
 
+  it('uses neutral guidance for a stored automation conversation', () => {
+    const prompt = buildFastAgentSystemPrompt({
+      availableEnvironments: [],
+      surface: 'automation',
+      turnSource: 'platform_event',
+      platformEventKind: 'automation',
+      platformEventVisibility: 'required',
+    });
+
+    expect(prompt).toContain('fast mode on a stored automation conversation');
+    expect(prompt).toContain('Automation Platform Event');
+    expect(prompt).toContain('Execute the automation prompt now');
+    expect(prompt).not.toContain('<slack_modern_markdown>');
+  });
+
   it('requires a visible closeout for visibility-required platform events', () => {
     const prompt = buildFastAgentSystemPrompt({
       availableEnvironments: [],
