@@ -1,6 +1,6 @@
 import { captureEvent } from '@roomote/telemetry/server';
 
-export type IntegrationLifecycleEvent =
+type IntegrationLifecycleEvent =
   | 'integration_connected'
   | 'integration_disabled'
   | 'integration_enabled'
