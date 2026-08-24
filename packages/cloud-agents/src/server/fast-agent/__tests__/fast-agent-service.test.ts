@@ -282,6 +282,44 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     });
   });
 
+  it('rebuilds an invalidated OpenCode session from canonical compatibility history', async () => {
+    const { FastAgentOpenCodeSessionManager } = await vi.importActual<
+      typeof import('../fast-agent-opencode-session')
+    >('../fast-agent-opencode-session');
+    const manager = new FastAgentOpenCodeSessionManager();
+    const prompts: string[] = [];
+    mocks.runSession.mockImplementation((input) => manager.run(input));
+    mocks.getSession
+      .mockResolvedValueOnce({
+        id: 'conversation-1',
+        compatibilityMessages: [],
+      })
+      .mockResolvedValue({
+        id: 'conversation-1',
+        compatibilityMessages: [
+          { role: 'user', content: 'Earlier question' },
+          { role: 'assistant', content: 'Earlier answer' },
+        ],
+      });
+    mocks.generateText.mockImplementation(async (params, session, options) => {
+      prompts.push(params.prompt);
+      session.id ??= `opencode-session-${prompts.length}`;
+      await options.onSessionReady(session.id);
+      await invokeTool(nativeToolNames.sendChatReply, {
+        purpose: 'closeout',
+        message: 'It coordinates incoming requests.',
+      });
+      return '';
+    });
+
+    await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+    manager.invalidate('conversation-1');
+    await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+
+    expect(prompts[0]).not.toContain('Earlier answer');
+    expect(prompts[1]).toContain('Earlier answer');
+  });
+
   it('logs successful turns with model, duration, and native tool diagnostics', async () => {
     const consoleInfo = vi
       .spyOn(console, 'info')
