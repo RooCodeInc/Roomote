@@ -24,6 +24,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock('@roomote/cloud-agents/server', () => ({
   acquireFastAgentTurnLock: mocks.acquireTurnLock,
   answerFastAgentQuestion: mocks.answerQuestion,
+  resolveApiBaseUrl: () => 'https://roomote.example.com',
   fastAgentConversationRepository: { findById: mocks.findSession },
   createFastAgentTaskLauncher:
     ({
