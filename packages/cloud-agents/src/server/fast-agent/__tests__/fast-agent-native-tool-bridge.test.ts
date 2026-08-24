@@ -84,7 +84,8 @@ describe('Fast native OpenCode tool bridge', () => {
 
   it('routes raw JSON arguments and results by OpenCode session id', async () => {
     const runtime = await getFastAgentNativeToolRuntime();
-    const executor = vi.fn(async ({ name, args }) => ({
+    const executor = vi.fn(async ({ agent, name, args }) => ({
+      agent,
       name,
       echoed: args,
       nestedResult: { values: [1, 2, 3] },
@@ -103,6 +104,7 @@ describe('Fast native OpenCode tool bridge', () => {
         },
         body: JSON.stringify({
           sessionID: 'opencode-session-1',
+          agent: 'judge',
           tool: FAST_AGENT_NATIVE_TOOL_NAMES.integrationCall,
           args: {
             integrationId: 'github',
@@ -116,6 +118,7 @@ describe('Fast native OpenCode tool bridge', () => {
       await expect(response.json()).resolves.toEqual({
         ok: true,
         result: {
+          agent: 'judge',
           name: FAST_AGENT_NATIVE_TOOL_NAMES.integrationCall,
           echoed: {
             integrationId: 'github',
@@ -125,6 +128,9 @@ describe('Fast native OpenCode tool bridge', () => {
           nestedResult: { values: [1, 2, 3] },
         },
       });
+      expect(executor).toHaveBeenCalledWith(
+        expect.objectContaining({ agent: 'judge' }),
+      );
     } finally {
       unbind();
     }

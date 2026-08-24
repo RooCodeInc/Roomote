@@ -330,40 +330,42 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
           name: nativeToolNames.sendChatReply,
           args: { purpose: 'ack', message: 'I’ll inspect that.' },
         });
-        await expect(
-          subagentExecutor({
-            agent: 'advisor',
-            name: nativeToolNames.manageTasks,
-            args: { action: 'get_summary', taskId: 'task-1' },
-          }),
-        ).resolves.toEqual({
-          id: 'task-1',
-          taskRunStatus: 'running',
-        });
-        await expect(
-          subagentExecutor({
-            agent: 'advisor',
-            name: nativeToolNames.integrationCall,
-            args: {
-              integrationId: 'github',
-              toolName: 'search_code',
-              arguments: { query: 'Fast Agent' },
-            },
-          }),
-        ).resolves.toEqual({
-          success: true,
-          result: { matches: ['fast-agent.ts'] },
-        });
-        await expect(
-          subagentExecutor({
-            agent: 'advisor',
-            name: nativeToolNames.sendChatReply,
-            args: { purpose: 'closeout', message: 'leak' },
-          }),
-        ).resolves.toEqual({
-          success: false,
-          error: 'That tool is reserved for the Fast parent agent.',
-        });
+        for (const agent of ['advisor', 'judge']) {
+          await expect(
+            subagentExecutor({
+              agent,
+              name: nativeToolNames.manageTasks,
+              args: { action: 'get_summary', taskId: 'task-1' },
+            }),
+          ).resolves.toEqual({
+            id: 'task-1',
+            taskRunStatus: 'running',
+          });
+          await expect(
+            subagentExecutor({
+              agent,
+              name: nativeToolNames.integrationCall,
+              args: {
+                integrationId: 'github',
+                toolName: 'search_code',
+                arguments: { query: `Fast Agent ${agent}` },
+              },
+            }),
+          ).resolves.toEqual({
+            success: true,
+            result: { matches: ['fast-agent.ts'] },
+          });
+          await expect(
+            subagentExecutor({
+              agent,
+              name: nativeToolNames.sendChatReply,
+              args: { purpose: 'closeout', message: 'leak' },
+            }),
+          ).resolves.toEqual({
+            success: false,
+            error: 'That tool is reserved for the Fast parent agent.',
+          });
+        }
         await expect(
           subagentExecutor({
             agent: 'general',
@@ -388,17 +390,21 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     await expect(
       answerFastAgentQuestion({ ...baseParams, adapter }),
     ).resolves.toBe('Subagent review completed.');
+    expect(mocks.inspectTasks).toHaveBeenCalledTimes(2);
     expect(mocks.inspectTasks).toHaveBeenCalledWith(
       expect.objectContaining({ userId: 'user-1' }),
       { action: 'get_summary', taskId: 'task-1' },
     );
+    expect(mocks.callIntegration).toHaveBeenCalledTimes(2);
     expect(mocks.callIntegration).toHaveBeenCalledWith(
       expect.objectContaining({ userId: 'user-1' }),
       expect.arrayContaining([expect.objectContaining({ id: 'github' })]),
       {
         integrationId: 'github',
         toolName: 'search_code',
-        args: { query: 'Fast Agent' },
+        args: expect.objectContaining({
+          query: expect.stringMatching(/^Fast Agent/),
+        }),
       },
     );
     expect(adapter.postReply).toHaveBeenCalledTimes(2);
