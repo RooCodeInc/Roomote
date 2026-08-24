@@ -22,6 +22,10 @@ describe('Fast native OpenCode tool bridge', () => {
       join(toolsDirectory, 'integration_call.js'),
       'utf8',
     );
+    const launchTaskSource = await readFile(
+      join(toolsDirectory, 'launch_task.js'),
+      'utf8',
+    );
     const manageTasksSource = await readFile(
       join(toolsDirectory, 'manage_tasks.js'),
       'utf8',
@@ -40,6 +44,8 @@ describe('Fast native OpenCode tool bridge', () => {
     expect(replySource).toContain('invoke("send_chat_reply"');
     expect(integrationSource).toContain('export default {');
     expect(integrationSource).toContain('invoke("integration_call"');
+    expect(launchTaskSource).toContain('model: z.string().min(1)');
+    expect(launchTaskSource).toContain('deployment-enabled model ID');
     expect(manageTasksSource).toContain('invoke("manage_tasks"');
     expect(manageTasksSource).toContain(
       `z.enum(${JSON.stringify(ROOMOTE_TASK_INSPECTION_ACTIONS)})`,

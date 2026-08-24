@@ -556,6 +556,9 @@ describe('platform-managed draft state', () => {
     finishNotification();
     const result = await resultPromise;
 
+    expect(mockGetOctokit).toHaveBeenCalledWith('github-token', {
+      retryRateLimits: true,
+    });
     expect(octokit.rest.pulls.create).toHaveBeenCalledWith(
       expect.objectContaining({ draft: true }),
     );

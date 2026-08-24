@@ -1,5 +1,5 @@
 import { createGitHubToken } from '@roomote/auth';
-import { getOctokit } from '@roomote/github';
+import { getGitHubRateLimitRetryAfterMs, getOctokit } from '@roomote/github';
 import { type TaskRun } from '@roomote/db/server';
 import {
   buildPullRequestUrl,
@@ -8,6 +8,10 @@ import {
   type SourceControlProvider,
 } from '@roomote/types';
 import { z } from 'zod';
+import {
+  prReviewGitHubConditionalRequestCache,
+  type GitHubRestResponse,
+} from './github-conditional-request-cache';
 import { requestSourceControlJson } from './source-control-pull-request-http';
 import {
   resolveAdoProviderContext,
@@ -644,10 +648,14 @@ export async function readSourceControlPullRequestForTaskRun({
   taskRun,
   input,
   fetchImpl = fetch,
+  useGitHubConditionalRequests = false,
+  onGitHubApiRequest,
 }: {
   taskRun: TaskRun;
   input: SourceControlPullRequestReadInput;
   fetchImpl?: FetchImpl;
+  useGitHubConditionalRequests?: boolean;
+  onGitHubApiRequest?: () => void;
 }): Promise<SourceControlPullRequestReadResult> {
   const payloadRecord = getPayloadRecord(taskRun.payload);
   const payloadProvider = resolveSourceControlProviderForRepositoryFromPayload(
@@ -705,7 +713,13 @@ export async function readSourceControlPullRequestForTaskRun({
 
   switch (provider) {
     case 'github':
-      return listGitHubPullRequestComments({ prNumber, repository, provider });
+      return listGitHubPullRequestComments({
+        prNumber,
+        repository,
+        provider,
+        useConditionalRequests: useGitHubConditionalRequests,
+        onGitHubApiRequest,
+      });
     case 'gitlab':
       return listGitLabMergeRequestComments({
         prNumber,
@@ -987,10 +1001,14 @@ async function listGitHubPullRequestComments({
   prNumber,
   repository,
   provider,
+  useConditionalRequests,
+  onGitHubApiRequest,
 }: {
   prNumber: number;
   repository: RepositoryRow;
   provider: 'github';
+  useConditionalRequests: boolean;
+  onGitHubApiRequest?: () => void;
 }): Promise<SourceControlPullRequestCommentsResult> {
   const { octokit, owner, repo } = await createGitHubReadClient(
     repository,
@@ -998,20 +1016,51 @@ async function listGitHubPullRequestComments({
   );
   const warnings: string[] = [];
 
-  const [reviewComments, restIssueComments] = await Promise.all([
-    octokit.paginate(octokit.rest.pulls.listReviewComments, {
-      owner,
-      repo,
-      pull_number: prNumber,
-      per_page: 100,
-    }),
-    octokit.paginate(octokit.rest.issues.listComments, {
-      owner,
-      repo,
-      issue_number: prNumber,
-      per_page: 100,
-    }),
-  ]);
+  const [reviewComments, restIssueComments] = useConditionalRequests
+    ? await Promise.all([
+        listConditionalGitHubPages({
+          cacheKey: `review-comments:${repository.installationId}:${repository.fullName}#${prNumber}`,
+          requestPage: (page, headers) => {
+            onGitHubApiRequest?.();
+            return octokit.rest.pulls.listReviewComments({
+              owner,
+              repo,
+              pull_number: prNumber,
+              per_page: 100,
+              page,
+              request: { headers },
+            });
+          },
+        }),
+        listConditionalGitHubPages({
+          cacheKey: `issue-comments:${repository.installationId}:${repository.fullName}#${prNumber}`,
+          requestPage: (page, headers) => {
+            onGitHubApiRequest?.();
+            return octokit.rest.issues.listComments({
+              owner,
+              repo,
+              issue_number: prNumber,
+              per_page: 100,
+              page,
+              request: { headers },
+            });
+          },
+        }),
+      ])
+    : await Promise.all([
+        octokit.paginate(octokit.rest.pulls.listReviewComments, {
+          owner,
+          repo,
+          pull_number: prNumber,
+          per_page: 100,
+        }),
+        octokit.paginate(octokit.rest.issues.listComments, {
+          owner,
+          repo,
+          issue_number: prNumber,
+          per_page: 100,
+        }),
+      ]);
 
   const issueComments: SourceControlPullRequestComment[] =
     restIssueComments.map((comment) => ({
@@ -1030,8 +1079,12 @@ async function listGitHubPullRequestComments({
       owner,
       repo,
       prNumber: prNumber,
+      onGitHubApiRequest,
     });
   } catch (error) {
+    if (getGitHubRateLimitRetryAfterMs(error) !== null) {
+      throw error;
+    }
     warnings.push(
       `GitHub review thread resolution could not be fetched (${
         error instanceof Error ? error.message : String(error)
@@ -1049,6 +1102,32 @@ async function listGitHubPullRequestComments({
     issueComments,
     warnings,
   };
+}
+
+async function listConditionalGitHubPages<T>({
+  cacheKey,
+  requestPage,
+}: {
+  cacheKey: string;
+  requestPage: (
+    page: number,
+    headers: Record<string, string>,
+  ) => Promise<GitHubRestResponse<T[]>>;
+}): Promise<T[]> {
+  const items: T[] = [];
+
+  for (let page = 1; ; page += 1) {
+    const response = await prReviewGitHubConditionalRequestCache.request(
+      `${cacheKey}:page:${page}`,
+      (headers) => requestPage(page, headers),
+    );
+    items.push(...response.data);
+
+    const link = response.headers.link;
+    if (typeof link !== 'string' || !link.includes('rel="next"')) break;
+  }
+
+  return items;
 }
 
 async function createGitHubReadClient(
@@ -1079,16 +1158,19 @@ async function fetchGitHubReviewThreadsViaGraphql({
   owner,
   repo,
   prNumber,
+  onGitHubApiRequest,
 }: {
   octokit: ReturnType<typeof getOctokit>;
   owner: string;
   repo: string;
   prNumber: number;
+  onGitHubApiRequest?: () => void;
 }): Promise<SourceControlPullRequestCommentThread[]> {
   const threads: z.infer<typeof gitHubReviewThreadSchema>[] = [];
   let cursor: string | null = null;
 
   do {
+    onGitHubApiRequest?.();
     const response = await octokit.graphql(
       `query PullRequestReviewThreads($owner: String!, $name: String!, $number: Int!, $cursor: String) {
       repository(owner: $owner, name: $name) {
@@ -1148,6 +1230,7 @@ async function fetchGitHubReviewThreadsViaGraphql({
     }
 
     while (commentCursor) {
+      onGitHubApiRequest?.();
       const response = await octokit.graphql(
         `query PullRequestReviewThreadComments($threadId: ID!, $cursor: String!) {
           node(id: $threadId) {

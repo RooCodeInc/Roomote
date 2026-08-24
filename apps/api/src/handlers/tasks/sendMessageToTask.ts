@@ -24,6 +24,7 @@ import type {
 import { trackLatestUserMessageForReplyQuote } from '@roomote/communication/messages';
 import {
   TaskPayloadKind,
+  buildFastAgentChildTaskMetadata,
   EXPIRED_SNAPSHOT_RESUME_ERROR,
   getFastAgentParentFromPayload,
   getCommunicationChannelFromTaskPayload,
@@ -60,6 +61,7 @@ const REVIEW_HANDOFF_TASK_TYPES = new Set<TaskPayloadKind>([
 type SendMessageErrorStatus = 404 | 409 | 500 | 502;
 export type SendMessageSenderMode =
   | 'authenticated_user'
+  | 'fast_agent'
   | 'linked_review_handoff'
   | 'github_pr_follow_up';
 
@@ -77,6 +79,7 @@ const ACTOR_PRESERVING_MODES = new Set<SendMessageSenderMode>([
 ]);
 
 const SLACK_REPLY_QUOTE_SUPPRESSING_MODES = new Set<SendMessageSenderMode>([
+  'fast_agent',
   'linked_review_handoff',
   'github_pr_follow_up',
 ]);
@@ -142,6 +145,7 @@ type LinkedReviewFastHandoff = {
     status: PullRequestStatus | null;
   };
   summary: string;
+  suggestedActionQuestion?: string;
   suggestedActionPrompt?: string;
   reviewResult: {
     reviewKind: 'initial' | 'sync' | null;
@@ -525,6 +529,10 @@ async function resumeTaskFromSnapshot({
   }
 
   const sourcePayload = sourceRun.payload ?? {};
+  const fastAgentParent =
+    senderMode === 'fast_agent'
+      ? getFastAgentParentFromPayload(sourcePayload)
+      : null;
   const repo =
     typeof sourcePayload.repo === 'string' ? sourcePayload.repo : undefined;
   const environmentId =
@@ -563,6 +571,9 @@ async function resumeTaskFromSnapshot({
     ...(images?.length ? { resumePromptImages: images } : {}),
     ...(normalizedClientMessageId
       ? { resumePromptClientMessageId: normalizedClientMessageId }
+      : {}),
+    ...(fastAgentParent
+      ? buildFastAgentChildTaskMetadata(fastAgentParent)
       : {}),
   };
   populateSnapshotResumeSlackMetadata(payload, {
@@ -815,6 +826,8 @@ async function resolveLinkedReviewHandoff({
       },
       ...(hasActionableFindings
         ? {
+            suggestedActionQuestion:
+              'Would you like me to resolve this feedback?',
             suggestedActionPrompt: `Address the review feedback on ${handoffTarget.pullRequest.repository}#${handoffTarget.pullRequest.number}.`,
           }
         : {}),
@@ -914,6 +927,9 @@ export async function sendMessageToTask({
         pullRequest: fastHandoff.pullRequest,
         summary: fastHandoff.summary,
         reviewResult: fastHandoff.reviewResult,
+        ...(fastHandoff.suggestedActionQuestion
+          ? { suggestedActionQuestion: fastHandoff.suggestedActionQuestion }
+          : {}),
         ...(fastHandoff.suggestedActionPrompt
           ? { suggestedActionPrompt: fastHandoff.suggestedActionPrompt }
           : {}),
@@ -1203,8 +1219,14 @@ export async function steerMessageToTask({
           return client.commands.steerTask.mutate({
             prompt: message,
             quoteText,
+            ...(getFastAgentParentFromPayload(run.payload)
+              ? { answerPendingInput: true }
+              : {}),
             ...(resolvedQuoteUserName
               ? { userName: resolvedQuoteUserName }
+              : {}),
+            ...(senderMode === 'fast_agent'
+              ? { suppressSlackReplyQuote: true }
               : {}),
             ...(images?.length ? { images } : {}),
             ...(goal?.status === 'active' ? { goalContext: goal } : {}),

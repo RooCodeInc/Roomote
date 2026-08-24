@@ -66,6 +66,7 @@ export async function notifyFastAgentParentOnPrFeedback(params: {
     status?: PullRequestStatus | null;
   };
   summary: string;
+  suggestedActionQuestion?: string;
   suggestedActionPrompt?: string;
   reviewResult?: {
     reviewKind: 'initial' | 'sync' | null;
@@ -74,10 +75,10 @@ export async function notifyFastAgentParentOnPrFeedback(params: {
     approvalStatus: 'approved' | 'skipped' | null;
     headSha: string | null;
   };
-}): Promise<void> {
+}): Promise<boolean> {
   const parent = getFastAgentParentFromPayload(params.run.payload);
   if (!parent) {
-    return;
+    return false;
   }
 
   const feedbackId = buildFeedbackId({
@@ -121,6 +122,9 @@ export async function notifyFastAgentParentOnPrFeedback(params: {
           pullRequest,
           summary: params.summary,
           ...(params.reviewResult ? { reviewResult: params.reviewResult } : {}),
+          ...(params.suggestedActionQuestion
+            ? { suggestedActionQuestion: params.suggestedActionQuestion }
+            : {}),
           ...(params.suggestedActionPrompt
             ? { suggestedActionPrompt: params.suggestedActionPrompt }
             : {}),
@@ -143,4 +147,6 @@ export async function notifyFastAgentParentOnPrFeedback(params: {
         },
       }),
   });
+
+  return true;
 }

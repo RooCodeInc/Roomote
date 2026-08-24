@@ -678,6 +678,7 @@ export const runTask = async ({
     id: taskRun.id,
     status: RunStatus.Spawning,
   });
+  await callbacks.onStatus?.(taskRun, RunStatus.Spawning, context);
 
   // Register the process-level crash listeners (at most once per process) and
   // point them at this run via the module-level context slot. The `finally` at
@@ -1057,6 +1058,7 @@ export const runTask = async ({
       id: taskRun.id,
       status: RunStatus.Connecting,
     });
+    await callbacks.onStatus?.(taskRun, RunStatus.Connecting, context);
 
     const recordWorkerRuntimeEvent = createWorkerRuntimeEventRecorder({
       runId: taskRun.id,
@@ -2137,6 +2139,7 @@ export const runTask = async ({
       id: taskRun.id,
       status: RunStatus.Running,
     });
+    await callbacks.onStatus?.(taskRun, RunStatus.Running, context);
 
     // Subscribe to HarnessManager state changes BEFORE starting/resuming a task
     // so we capture the initial stateChange event (which carries sessionId).

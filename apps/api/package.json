@@ -4,7 +4,6 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "lint": "eslint src --ext=ts --max-warnings=0",
     "check-types": "tsc --noEmit",
     "check-types:fast": "tsgo --noEmit",
     "test": "dotenvx run  -f ../../.env.test -- vitest",
@@ -51,7 +50,6 @@
     "zod": "^3.25.76"
   },
   "devDependencies": {
-    "@roomote/config-eslint": "workspace:^",
     "@roomote/config-typescript": "workspace:^",
     "@types/node": "^24.10.13",
     "tsup": "^8.5.1",

@@ -13,6 +13,8 @@ import { runTask } from '../run-task';
 import { getLinearSessionIdFromResumePayload } from '../run-task/linear-resume-payload';
 import { linearAgentCallbacks } from '../callbacks/linear-agent';
 import { slackMentionCallbacks } from '../callbacks/slack-mention';
+import { mergeRunTaskCallbacks } from '../callbacks/communication';
+import { getSlackLiveTaskStreamRunTaskCallbacks } from '../callbacks/slack-live-task-stream';
 
 import { buildWorkspaceConfig, executeTaskRun } from './utils';
 
@@ -75,10 +77,19 @@ export async function resume(runId: number): Promise<boolean> {
           getSlackThreadTsFromTaskPayload(jobContext.taskRun.payload),
         );
 
+      // defaultCallbacks (from executeTaskRun) already merge the live
+      // task-card callbacks; the linear/slack overrides must re-add them so
+      // a resumed run with a card keeps updating it.
       const callbacks = isLinearResume
-        ? linearAgentCallbacks
+        ? mergeRunTaskCallbacks(
+            linearAgentCallbacks,
+            getSlackLiveTaskStreamRunTaskCallbacks(jobContext.taskRun),
+          )
         : isSlackResume
-          ? slackMentionCallbacks
+          ? mergeRunTaskCallbacks(
+              slackMentionCallbacks,
+              getSlackLiveTaskStreamRunTaskCallbacks(jobContext.taskRun),
+            )
           : defaultCallbacks;
 
       // Seed callback context for resumed integrations before runTask starts.

@@ -148,6 +148,10 @@ export const linearAgentCallbacks: RunTaskCallbacks = {
     event: CallbackEvent,
     context: RunTaskContext,
   ) => {
+    if (event.type === 'turn_started') {
+      return;
+    }
+
     // Skip older events, but allow distinct same-timestamp events.
     // One Roomote message can map to multiple CallbackEvents with the same `ts`
     // (for example `tool_action` + `todo_update`).

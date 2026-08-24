@@ -282,6 +282,23 @@ describe('handleSlackPrReviewActionAuto', () => {
     // The message still resolves to the auto-handling note.
     expect(updateMessageMock).toHaveBeenCalled();
   });
+
+  it('does not promise auto-resolution when the preference was not persisted', async () => {
+    enableAutoHandleMock.mockRejectedValue(
+      new Error('linked pull request was not found'),
+    );
+
+    await handleSlackPrReviewActionAuto(makePayload('pr_review_action_auto'));
+
+    expect(dispatchFollowUpMock).not.toHaveBeenCalled();
+    expect(updateMessageMock).not.toHaveBeenCalled();
+    expect(postSlackInteractiveResponseMock).toHaveBeenCalledWith(
+      'https://hooks.slack.test/response',
+      expect.objectContaining({
+        text: expect.stringContaining('Failed to start the follow-up'),
+      }),
+    );
+  });
 });
 
 describe('handleSlackPrReviewActionDismiss', () => {

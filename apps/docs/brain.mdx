@@ -117,39 +117,37 @@ become canonical memory.
 **Settings → Brain** is the deployment-wide view of the memory, for admins. It
 answers three questions in order.
 
-**Is it working?** Summary tiles carry the corpus size, the task memories
-recorded, and the sources connected; the status section reports the Brain's
-endpoint, whether recall is semantic or keyword-only, and which provider is
-serving its embeddings and synthesis. A Brain that is running but has no
-provider key is called out as needing attention rather than shown as healthy:
-without one it can only match keywords, so recall would look real while
-missing everything semantic. A configuration section shows the models the
-Brain runs: the synthesis model (changeable through `R_BRAIN_MODEL`, applied
-immediately) and the embedding model, which is fixed when the Brain is created
-because it sizes the vector store.
+**Is it working?** Summary tiles carry the corpus size and the task memories
+recorded; the status section reports whether recall is semantic or keyword-only
+and which provider is serving its embeddings and synthesis. A Brain that is
+running but has no provider key is called out as needing attention rather than
+shown as healthy: without one it can only match keywords, so recall would look
+real while missing everything semantic. A configuration section shows the
+models the Brain runs: the synthesis model (changeable through `R_BRAIN_MODEL`,
+applied immediately) and the embedding model, which is fixed when the Brain is
+created because it sizes the vector store.
 
 **What has it learned?** A composition bar breaks the corpus down by what
 each page came from, such as task memories, pull requests, Slack, meetings,
 and people, followed by a chart of the pages written over the last 30 days
 and the pages written most recently. **Browse memory** opens the corpus page
-by page, searchable and filterable by source, so an admin can read exactly
-what the Brain stored. The Brain lists its newest pages first and answers
-with a bounded window, so on a large deployment this is labelled as a recent
-sample rather than presented as a total.
+by page, searchable and filterable by source. Large corpora load in pages, so
+admins can search and inspect older memory as well as the newest pages.
 
-**Where does it learn from?** Each source shows whether its integration is
-connected, when it was last read, and how far its one-time history sweep has
-got. A source with nothing connected upstream says so, which distinguishes
-"nothing collected yet" from "nothing to collect from".
+**Where does it learn from?** Connected sources are listed with their current
+collection state, when they were last read, and how far their one-time history
+sweep has got. Sources without a connected upstream integration are omitted.
 
 The page ends with the task-memory queue: how many completed tasks have been
-recorded, how many are waiting, and how many failed. Two actions live there.
-**Ingest task history** enqueues a memory for every completed task that does
-not have one, which is what you want after enabling the Brain on a deployment
-with existing history. **Retry failed** hands memories that exhausted their
-attempts back to the queue with a fresh budget, which is the fix after an
-outage. Both are safe to run twice: memories are filed under a slug derived
-from the run, so a repeat rewrites the same page rather than adding another.
+recorded, how many are waiting, and how many failed. Its actions are safe repair
+tools for each queue state.
+**Ingest task history** enqueues memories that predate the Brain's one-time
+backfill. If a task completed after that checkpoint without being queued, the
+page reports it separately as a recording gap and offers to queue the missing
+memory. **Retry failed** hands memories that exhausted their attempts back to
+the queue with a fresh budget, which is the fix after an outage. All three
+actions are safe to run twice: memories are filed under a slug derived from the
+run, so a repeat rewrites the same page rather than adding another.
 
 ## How agents use it
 

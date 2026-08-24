@@ -228,6 +228,69 @@ describe('sendMessageToTask', () => {
     });
   });
 
+  it('delegates Fast child answer-or-steer dispatch to the worker', async () => {
+    mockFindLatestTaskRun.mockResolvedValue(
+      createActiveRun({
+        payload: {
+          fastAgentParent: {
+            sessionId: '11111111-1111-4111-8111-111111111111',
+            conversation: {
+              surface: 'discord',
+              workspaceId: 'guild-1',
+              conversationId: 'channel-1:message-1',
+              replyTarget: { channelId: 'channel-1', threadId: 'message-1' },
+            },
+          },
+        },
+      }),
+    );
+    const result = await steerMessageToTask({
+      taskId: 'task-1',
+      userId: 'user-1',
+      message: 'Use a separate helper instead.',
+      senderMode: 'fast_agent',
+    });
+
+    expect(result).toEqual({ success: true, result: { ok: true } });
+    expect(mockSteerTaskMutate).toHaveBeenCalledWith({
+      prompt: 'Use a separate helper instead.',
+      quoteText: 'Use a separate helper instead.',
+      answerPendingInput: true,
+      suppressSlackReplyQuote: true,
+    });
+  });
+
+  it('marks Fast child messages for worker-owned pending-input dispatch', async () => {
+    mockFindLatestTaskRun.mockResolvedValue(
+      createActiveRun({
+        payload: {
+          fastAgentParent: {
+            sessionId: '11111111-1111-4111-8111-111111111111',
+            conversation: {
+              surface: 'discord',
+              workspaceId: 'guild-1',
+              conversationId: 'channel-1:message-1',
+              replyTarget: { channelId: 'channel-1', threadId: 'message-1' },
+            },
+          },
+        },
+      }),
+    );
+
+    const result = await steerMessageToTask({
+      taskId: 'task-1',
+      userId: 'user-1',
+      message: 'Also add another test.',
+    });
+
+    expect(result).toEqual({ success: true, result: { ok: true } });
+    expect(mockSteerTaskMutate).toHaveBeenCalledWith({
+      prompt: 'Also add another test.',
+      quoteText: 'Also add another test.',
+      answerPendingInput: true,
+    });
+  });
+
   it('delivers linked review results to the Fast parent without waking the implementation task', async () => {
     mockFindLatestTaskRun.mockResolvedValue(
       createActiveRun({
@@ -314,6 +377,7 @@ describe('sendMessageToTask', () => {
         approvalStatus: null,
         headSha: 'abc123',
       },
+      suggestedActionQuestion: 'Would you like me to resolve this feedback?',
       suggestedActionPrompt: 'Address the review feedback on acme/app#42.',
     });
     expect(mockSendPromptMutate).not.toHaveBeenCalled();
@@ -726,6 +790,53 @@ describe('sendMessageToTask', () => {
     );
   });
 
+  it('preserves Fast parent routing when a typed reply resumes a completed child', async () => {
+    const fastAgentParent = {
+      sessionId: '11111111-1111-4111-8111-111111111111',
+      conversation: {
+        surface: 'slack',
+        workspaceId: 'T123',
+        conversationId: '111.222',
+        replyTarget: { channelId: 'C123', threadId: '111.222' },
+      },
+    };
+    mockFindLatestTaskRun.mockResolvedValue(
+      createActiveRun({
+        status: 'completed',
+        sandboxServerUrl: null,
+        snapshotId: 'snap-fast',
+        payload: {
+          repo: 'acme/app',
+          fastAgentParent,
+        },
+      }),
+    );
+
+    const result = await steerMessageToTask({
+      taskId: 'task-1',
+      userId: 'user-1',
+      message: 'Address the review feedback.',
+      senderMode: 'fast_agent',
+    });
+
+    expect(result).toEqual({
+      success: true,
+      result: { resumed: true, runId: 77, taskId: 'task-1' },
+    });
+    expect(mockEnqueueTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        task: expect.objectContaining({
+          payload: expect.objectContaining({
+            communicationContextInherited: true,
+            fastAgentSessionId: fastAgentParent.sessionId,
+            fastAgentParent,
+          }),
+        }),
+      }),
+      expect.any(Object),
+    );
+  });
+
   it('returns a clear error when a sleeping task snapshot has expired', async () => {
     mockFindLatestTaskRun.mockResolvedValue(
       createActiveRun({
@@ -832,6 +943,29 @@ describe('sendMessageToTask', () => {
     expect(mockSteerTaskMutate).toHaveBeenCalledWith({
       prompt: 'Pause the implementation and inspect the failing test.',
       quoteText: 'Pause the implementation and inspect the failing test.',
+    });
+  });
+
+  it('does not track or request Slack reply quotes for Fast-agent steers', async () => {
+    mockFindLatestTaskRun.mockResolvedValue(createActiveRun());
+
+    const result = await steerMessageToTask({
+      taskId: 'task-1',
+      userId: 'user-1',
+      message: 'Continue the delegated task.',
+      senderMode: 'fast_agent',
+    });
+
+    expect(result).toEqual({
+      success: true,
+      result: { ok: true },
+    });
+    expect(mockTrackLatestUserMessageForSlackQuote).not.toHaveBeenCalled();
+    expect(mockTrackLatestUserMessageForReplyQuote).not.toHaveBeenCalled();
+    expect(mockSteerTaskMutate).toHaveBeenCalledWith({
+      prompt: 'Continue the delegated task.',
+      quoteText: 'Continue the delegated task.',
+      suppressSlackReplyQuote: true,
     });
   });
 

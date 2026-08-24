@@ -386,6 +386,16 @@ assert(
 );
 const caddyfile = read('deploy/caddy/Caddyfile');
 assert(
+  caddyfile.includes('path /api/webhooks /api/webhooks/*'),
+  'caddy: app domain must route public webhooks directly to the API',
+);
+assert(
+  caddyfile.includes(
+    'handle @api_webhooks {\n\t\timport roomote_proxy api:3001',
+  ),
+  'caddy: public webhooks must bypass the web application',
+);
+assert(
   caddyfile.includes(
     'path_regexp local_sandbox ^/_roomote-sandbox/([a-z0-9]+)(/.*)$',
   ),

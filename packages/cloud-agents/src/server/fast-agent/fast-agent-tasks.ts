@@ -198,7 +198,7 @@ export async function sendFastAgentTaskMessage(
     ...context,
     method: 'POST',
     path: `${FAST_AGENT_TASKS_API_PATH}/${params.taskId}/steer_message`,
-    body: { message: params.message },
+    body: { message: params.message, senderMode: 'fast_agent' },
   });
 }
 
@@ -299,9 +299,14 @@ export function createFastAgentTaskTools(
           type: fastAgentTaskTypeSchema
             .optional()
             .describe('Optional task type override'),
+          model: nonEmptyTrimmedStringSchema
+            .optional()
+            .describe(
+              'Optional exact deployment-enabled model ID. Omit it to use the deployment default',
+            ),
         })
         .strict(),
-      execute: async ({ prompt, environmentId, type }) =>
+      execute: async ({ prompt, environmentId, type, model }) =>
         callFastAgentTaskApi({
           ...context,
           method: 'POST',
@@ -313,6 +318,7 @@ export function createFastAgentTaskTools(
               ? { environmentId }
               : {}),
             ...(type ? { type } : {}),
+            ...(model ? { model } : {}),
           },
         }),
     }),

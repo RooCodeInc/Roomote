@@ -44,7 +44,7 @@ function SummaryTiles({ settings }: { settings: BrainSettingsData }) {
         value={formatNumber(recorded)}
         secondary={
           settings.taskMemories.lastProcessedAt
-            ? `last recorded ${formatDistanceToNowCompact(
+            ? `last processed ${formatDistanceToNowCompact(
                 settings.taskMemories.lastProcessedAt,
                 { addSuffix: true },
               )}`

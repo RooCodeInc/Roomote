@@ -41,6 +41,7 @@ x-roomote-base-env: &roomote-base-env
   R_PUBLIC_URL: https://${ROOMOTE_APP_DOMAIN:?ROOMOTE_APP_DOMAIN is required}
   ROOMOTE_PUBLIC_URL: https://${ROOMOTE_APP_DOMAIN:?ROOMOTE_APP_DOMAIN is required}
   R_INSTANCE_ID: ${R_INSTANCE_ID:-}
+  R_GITHUB_ADDITIONAL_APP_SLUGS: ${R_GITHUB_ADDITIONAL_APP_SLUGS:-}
   TRPC_URL: ${TRPC_URL:-https://${ROOMOTE_APP_DOMAIN:?ROOMOTE_APP_DOMAIN is required}/_roomote-api}
   # Azure Container Apps sandbox provider. In the base anchor so controller,
   # api, and bullmq all see it — credentials can also come from the

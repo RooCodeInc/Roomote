@@ -1,6 +1,6 @@
 import {
   DEFAULT_PR_REVIEW_SETTINGS,
-  getRoomoteManagedGitHubLogins,
+  getGitHubAppBotLogin,
   type PrReviewSettings,
 } from '@roomote/types';
 import {
@@ -11,7 +11,7 @@ import {
   upsertAutomation,
   users,
 } from '@roomote/db/server';
-import { getEffectiveGitHubAppSlug } from '@roomote/github';
+import { getEffectiveGitHubAppSlugs } from '@roomote/github';
 
 import type { UserAuthSuccess } from '@/types';
 
@@ -56,7 +56,10 @@ function getRoomoteReviewerLogins(): string[] {
   // evaluation so Next.js instrumentation can bootstrap the Node.js runtime
   // before server routes import this module.
   return normalizeGitHubLogins(
-    getRoomoteManagedGitHubLogins(getEffectiveGitHubAppSlug()),
+    getEffectiveGitHubAppSlugs().flatMap((appSlug) => [
+      getGitHubAppBotLogin(appSlug),
+      `app/${appSlug}`,
+    ]),
   );
 }
 

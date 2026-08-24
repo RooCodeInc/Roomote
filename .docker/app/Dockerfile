@@ -230,8 +230,9 @@ RUN mkdir -p /runtime-deps && cd /runtime-deps && npm init -y >/dev/null && \
     "form-data@$(cd /roomote/apps/controller && node -p "require('form-data/package.json').version")"
 
 # ---------------------------------------------------------------------------
-# bullmq: bundled dist plus the bull-board UI package, which serves its static
-# dashboard assets from the package directory at runtime.
+# bullmq: bundled dist plus runtime packages that must remain resolvable from
+# disk. Bull-board serves static assets from its package directory, while Fast
+# native tools symlink zod into generated OpenCode tool directories.
 # ---------------------------------------------------------------------------
 FROM base AS build-bullmq
 
@@ -245,7 +246,10 @@ RUN find dist -type f -name '*.map' -delete
 
 RUN mkdir -p /runtime-deps && cd /runtime-deps && npm init -y >/dev/null && \
   npm install --omit=dev --no-audit --no-fund \
-    "@bull-board/ui@$(cd /roomote/apps/bullmq && node -p "require('@bull-board/ui/package.json').version")"
+    "@bull-board/ui@$(cd /roomote/apps/bullmq && node -p "require('@bull-board/ui/package.json').version")" \
+    "zod@$(cd /roomote/apps/bullmq && node -p "require('zod/package.json').version")" && \
+  test "$(node -p "require('zod/package.json').version")" = \
+    "$(cd /roomote/apps/bullmq && node -p "require('zod/package.json').version")"
 
 # ---------------------------------------------------------------------------
 # preview-proxy: bundled dist plus the pino transports tsup keeps external.
@@ -384,7 +388,8 @@ COPY --from=build-preview-proxy /roomote/apps/preview-proxy/package.json ./apps/
 COPY --from=build-preview-proxy /roomote/apps/preview-proxy/dist ./apps/preview-proxy/dist/
 COPY --from=build-preview-proxy /runtime-deps/node_modules ./apps/preview-proxy/node_modules/
 COPY --from=github-cli /usr/bin/gh /usr/local/bin/gh
-RUN command -v gh >/dev/null && command -v opencode >/dev/null
+RUN command -v gh >/dev/null && command -v opencode >/dev/null && \
+  cd /roomote/apps/bullmq && node -e "require.resolve('zod/package.json')"
 
 USER roomote-app:roomote-app
 EXPOSE 3000 3001 3002 8081

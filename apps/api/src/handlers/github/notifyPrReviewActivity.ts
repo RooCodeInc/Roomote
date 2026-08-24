@@ -48,7 +48,7 @@ function isExternalBotAuthor(
 ): boolean {
   return (
     user?.type === 'Bot' &&
-    (!user.login || !GitHubSchemas.isRoomoteGitHubLogin(user.login))
+    (!user.login || !GitHubSchemas.isManagedRoomoteGitHubLogin(user.login))
   );
 }
 
@@ -145,7 +145,7 @@ export function buildPrReviewActivityNotificationInput(
 
     if (
       !authorLogin ||
-      GitHubSchemas.isRoomoteGitHubLogin(authorLogin) ||
+      GitHubSchemas.isManagedRoomoteGitHubLogin(authorLogin) ||
       isMention({ body: comment.body ?? '', user: { login: authorLogin } })
     ) {
       return null;
@@ -208,7 +208,7 @@ export function buildPrReviewActivityNotificationInput(
         ...(review.submitted_at
           ? { observedAt: getObservedAt(review.submitted_at) }
           : {}),
-        ...(GitHubSchemas.isRoomoteGitHubLogin(authorLogin)
+        ...(GitHubSchemas.isManagedRoomoteGitHubLogin(authorLogin)
           ? { roomoteAuthored: true }
           : {}),
       },
@@ -229,7 +229,7 @@ export function buildPrReviewActivityNotificationInput(
 
   if (
     comment.in_reply_to_id &&
-    GitHubSchemas.isRoomoteGitHubLogin(authorLogin)
+    GitHubSchemas.isManagedRoomoteGitHubLogin(authorLogin)
   ) {
     return null;
   }
@@ -251,7 +251,7 @@ export function buildPrReviewActivityNotificationInput(
         : {}),
       ...(comment.html_url ? { url: comment.html_url } : {}),
       observedAt: getObservedAt(comment.created_at),
-      ...(GitHubSchemas.isRoomoteGitHubLogin(authorLogin)
+      ...(GitHubSchemas.isManagedRoomoteGitHubLogin(authorLogin)
         ? { roomoteAuthored: true }
         : {}),
     },
@@ -374,7 +374,7 @@ function buildPrReviewSummaryLifecycle(
   const comment = eventPayload.comment;
   const authorLogin = comment.user?.login;
 
-  if (!authorLogin || !GitHubSchemas.isRoomoteGitHubLogin(authorLogin)) {
+  if (!authorLogin || !GitHubSchemas.isManagedRoomoteGitHubLogin(authorLogin)) {
     return null;
   }
 

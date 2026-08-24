@@ -35,6 +35,7 @@ import {
   queuePrReviewActivityNotification,
   queuePrReviewSummaryNotification,
 } from './notifyPrReviewActivity';
+import { queuePrCiFailureNotification } from './notifyPrCiFailure';
 
 // Conflict Resolution:
 import { handlePushConflictCheck } from './handlePushConflictCheck';
@@ -561,6 +562,17 @@ github.post('/', async (c) => {
         return handleWorkflowRunCompleted(payload);
       }),
     );
+
+    webhooks.on('check_run.completed', async ({ id, name, payload }) => {
+      await queuePrCiFailureNotification(payload);
+
+      return recordWebhook(
+        id,
+        `${name}.${payload.action}`,
+        payload,
+        async () => ({ status: 'ok' as const }),
+      );
+    });
 
     webhooks.on('pull_request.closed', ({ id, name, payload }) =>
       recordWebhook(id, `${name}.${payload.action}`, payload, async () => {
