@@ -13,6 +13,8 @@ const mocks = vi.hoisted(() => ({
   sendTaskMessage: vi.fn(),
   cancelTask: vi.fn(),
   inspectTasks: vi.fn(),
+  getChatMessageContext: vi.fn(),
+  getChatChannelMessages: vi.fn(),
   getUserIdentity: vi.fn(),
   bindExecutor: vi.fn(),
   nativeExecutor: undefined as
@@ -27,6 +29,8 @@ const nativeToolNames = vi.hoisted(
   () =>
     ({
       cancelTask: 'cancel_task',
+      getChatChannelMessages: 'get_chat_channel_messages',
+      getChatMessageContext: 'get_chat_message_context',
       ignoreEvent: 'ignore_event',
       integrationCall: 'integration_call',
       launchTask: 'launch_task',
@@ -136,6 +140,8 @@ function callbacks(
 ): FastAgentTurnAdapter {
   return {
     launchTask: vi.fn<LaunchFastAgentTask>(),
+    getChatMessageContext: mocks.getChatMessageContext,
+    getChatChannelMessages: mocks.getChatChannelMessages,
     postReply: vi.fn().mockResolvedValue(undefined),
     postReaction: vi.fn().mockResolvedValue(undefined),
     ...overrides,
@@ -195,6 +201,13 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     mocks.inspectTasks.mockResolvedValue({
       id: 'task-1',
       taskRunStatus: 'running',
+    });
+    mocks.getChatMessageContext.mockResolvedValue({
+      requestedMessageId: '100.1',
+      messages: [{ id: '100.1', text: 'Context' }],
+    });
+    mocks.getChatChannelMessages.mockResolvedValue({
+      messages: [{ id: '100.1', text: 'History' }],
     });
     mocks.getUserIdentity.mockResolvedValue({
       displayName: 'Matt Rubens',
@@ -296,6 +309,37 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         expect.objectContaining({ role: 'user' }),
         expect.objectContaining({ role: 'assistant' }),
       ],
+    });
+  });
+
+  it('reads message context and history through the conversation adapter', async () => {
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        await invokeTool(nativeToolNames.getChatMessageContext, {
+          messageId: '100.1',
+        });
+        await invokeTool(nativeToolNames.getChatChannelMessages, {
+          oldest: '99.1',
+          latest: '101.1',
+        });
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'closeout',
+          message: 'I found the context.',
+        });
+        return '';
+      },
+    );
+    const adapter = callbacks();
+
+    await answerFastAgentQuestion({ ...baseParams, adapter });
+
+    expect(adapter.getChatMessageContext).toHaveBeenCalledWith({
+      messageId: '100.1',
+    });
+    expect(adapter.getChatChannelMessages).toHaveBeenCalledWith({
+      oldest: '99.1',
+      latest: '101.1',
     });
   });
 

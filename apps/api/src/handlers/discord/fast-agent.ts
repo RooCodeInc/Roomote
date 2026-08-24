@@ -25,6 +25,7 @@ import {
 } from './task-launch.js';
 import { startNewDiscordTask } from './task-orchestration.js';
 import { fetchDiscordThreadHistoryBestEffort } from './thread-context.js';
+import { createFastAgentChatContextAdapter } from '../fast-agent-chat-context.js';
 
 type DiscordInteractionReplyContext = {
   interaction: DiscordInteraction;
@@ -122,6 +123,10 @@ export async function processDiscordFastAgentMessage(input: {
         input.sender.username,
       activeTasks: input.activeTasks,
       adapter: {
+        ...createFastAgentChatContextAdapter({
+          actingUserId: input.senderUserId,
+          conversation,
+        }),
         launchTask: async ({
           prompt,
           environmentId,

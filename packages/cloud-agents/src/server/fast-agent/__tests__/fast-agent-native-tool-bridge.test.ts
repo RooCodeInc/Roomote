@@ -31,6 +31,14 @@ describe('Fast native OpenCode tool bridge', () => {
       join(toolsDirectory, 'manage_tasks.js'),
       'utf8',
     );
+    const messageContextSource = await readFile(
+      join(toolsDirectory, 'get_chat_message_context.js'),
+      'utf8',
+    );
+    const channelMessagesSource = await readFile(
+      join(toolsDirectory, 'get_chat_channel_messages.js'),
+      'utf8',
+    );
     const bridgeSource = await readFile(
       join(runtime.directory, '.opencode', 'roomote-fast-tool-bridge.js'),
       'utf8',
@@ -54,6 +62,13 @@ describe('Fast native OpenCode tool bridge', () => {
     expect(manageTasksSource).toContain(
       'Use launch_task, send_task_message, or cancel_task for task changes',
     );
+    expect(messageContextSource).toContain('invoke("get_chat_message_context"');
+    expect(messageContextSource).toContain('messageId: z.string().min(1)');
+    expect(messageContextSource).not.toContain('channel:');
+    expect(channelMessagesSource).toContain(
+      'invoke("get_chat_channel_messages"',
+    );
+    expect(channelMessagesSource).not.toContain('channel:');
     expect(bridgeSource).toContain('context.sessionID');
     expect(bridgeSource).toContain('agent: context.agent');
     expect(bridgeSource).toContain('metadata: { roomoteResult:');
@@ -63,6 +78,8 @@ describe('Fast native OpenCode tool bridge', () => {
       [FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReply]: true,
       [FAST_AGENT_NATIVE_TOOL_NAMES.integrationCall]: true,
       [FAST_AGENT_NATIVE_TOOL_NAMES.manageTasks]: true,
+      [FAST_AGENT_NATIVE_TOOL_NAMES.getChatMessageContext]: true,
+      [FAST_AGENT_NATIVE_TOOL_NAMES.getChatChannelMessages]: true,
     });
     expect(FAST_AGENT_SUBAGENT_TOOL_FILTER).toEqual({
       '*': false,
@@ -72,6 +89,8 @@ describe('Fast native OpenCode tool bridge', () => {
     for (const parentOnlyTool of [
       FAST_AGENT_NATIVE_TOOL_NAMES.cancelTask,
       FAST_AGENT_NATIVE_TOOL_NAMES.ignoreEvent,
+      FAST_AGENT_NATIVE_TOOL_NAMES.getChatMessageContext,
+      FAST_AGENT_NATIVE_TOOL_NAMES.getChatChannelMessages,
       FAST_AGENT_NATIVE_TOOL_NAMES.launchTask,
       FAST_AGENT_NATIVE_TOOL_NAMES.retryTaskStart,
       FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReaction,

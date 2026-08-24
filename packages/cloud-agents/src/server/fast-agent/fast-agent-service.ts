@@ -79,6 +79,13 @@ const chatReactionArgsSchema = z.object({
   name: z.string().trim().min(1),
   purpose: z.enum(['ack', 'closeout']),
 });
+const chatMessageContextArgsSchema = z.object({
+  messageId: z.string().trim().min(1),
+});
+const chatChannelMessagesArgsSchema = z.object({
+  oldest: z.string().trim().min(1).optional(),
+  latest: z.string().trim().min(1).optional(),
+});
 const launchTaskArgsSchema = z.object({
   prompt: z.string().trim().min(1),
   environmentId: z.string().trim().min(1).nullable().optional(),
@@ -853,6 +860,30 @@ export async function answerFastAgentQuestion({
             visibleUpdatePosted = true;
             if (args.purpose === 'closeout') closed = true;
             return { success: true, delivered: true, closed };
+          }
+
+          case FAST_AGENT_NATIVE_TOOL_NAMES.getChatMessageContext: {
+            const args = chatMessageContextArgsSchema.parse(call.args);
+            if (!adapter.getChatMessageContext) {
+              return {
+                success: false,
+                error: 'Chat message context is unavailable for this turn.',
+              };
+            }
+            throwIfTurnCancelled();
+            return await adapter.getChatMessageContext(args);
+          }
+
+          case FAST_AGENT_NATIVE_TOOL_NAMES.getChatChannelMessages: {
+            const args = chatChannelMessagesArgsSchema.parse(call.args);
+            if (!adapter.getChatChannelMessages) {
+              return {
+                success: false,
+                error: 'Chat channel history is unavailable for this turn.',
+              };
+            }
+            throwIfTurnCancelled();
+            return await adapter.getChatChannelMessages(args);
           }
 
           case FAST_AGENT_NATIVE_TOOL_NAMES.integrationCall: {

@@ -165,6 +165,7 @@ ${reactionGuidance}
 - Set "model" on "launch_task" only to an exact ID from Available Delegated Task Models when a specific model is useful or requested. Omit it to use the deployment default. Never invent or abbreviate model IDs.
 - Use "send_task_message" only when an active task is listed above and the user clearly gives that task a new instruction. Set "taskId" when needed; with exactly one active task, omit it or use null.
 - Use "manage_tasks" to inspect tasks in this deployment. Use "get_summary" for current status and failures, "get_messages" for transcript details, and "get_compute_logs" for runtime output when supported. These reads use the same deployment authorization semantics as delegated Roomote tasks. Use "launch_task", "send_task_message", or "cancel_task" for task changes so Fast conversation kickoff and follow-up behavior is preserved.
+- Use "get_chat_message_context" to inspect the surrounding conversation for a message ID in the current channel. Use "get_chat_channel_messages" to read more history from the current channel, optionally bounded by oldest/latest. These tools cannot read another channel.
 - Never send conversational acknowledgements to a task. "Okay", "cool", "thanks", status questions, and similar conversation are addressed to you. Use a user-visible chat tool.
 - Use "cancel_task" only when the user explicitly asks to stop an active task.
 - Use "integration_call" when a listed deployment integration can answer the request. Select only an integration ID and tool name listed above. Pass the integration tool's JSON input directly in the native "arguments" object; never encode it as a string.
@@ -229,6 +230,6 @@ ${surface === 'slack' ? 'Do not assume Slack formatting is limited to old mrkdwn
 
 ## Capability Boundary
 - You have no local filesystem, shell, repository checkout, or arbitrary network access.
-- Deployment integrations are the only direct external capabilities available in fast mode.
+- Deployment integrations and current-channel chat context tools are the only direct external capabilities available in fast mode.
 - Never claim to read or modify local files. Delegate repository execution to a Roomote task.`;
 }
