@@ -12,6 +12,7 @@ import {
   type SlackNotifier,
 } from '@roomote/slack';
 import { stripLeadingSlackProductMention } from '@roomote/cloud-agents';
+import { resolveUserMcpServerConfigs } from '@roomote/sdk/server';
 
 import { LEADING_FAST_COMMAND_MENTION_PATTERN } from '../constants.js';
 import { postSlackThreadMarkdownMessage } from '../helpers/thread-posting.js';
@@ -201,6 +202,12 @@ export async function processFastAgentMessage(params: {
           actingUserId: userId,
           conversation,
         }),
+        resolveMcpServerConfigs: () =>
+          resolveUserMcpServerConfigs({
+            userId,
+            apiBaseUrl,
+            includeRoomote: true,
+          }),
         launchTask,
         postReply: async ({ message, kickoff }) => {
           const posted = await postSlackThreadMarkdownMessage({

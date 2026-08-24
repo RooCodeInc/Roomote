@@ -206,7 +206,7 @@ import { z } from "zod"
 import { invoke } from "../roomote-fast-tool-bridge.js"
 
 export default {
-  description: "Call one available deployment integration tool with its native JSON arguments.",
+  description: "Call one available deployment MCP server tool with its native JSON arguments.",
   args: {
     integrationId: z.string().min(1),
     toolName: z.string().min(1),

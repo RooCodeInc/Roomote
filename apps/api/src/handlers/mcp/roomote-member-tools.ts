@@ -1,4 +1,3 @@
-import { Hono } from 'hono';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 
@@ -9,52 +8,31 @@ import {
   roomoteTaskInspectionFieldSchemas,
 } from '@roomote/types';
 
-import type { Variables } from '../../types';
 import { environmentsRouter } from '../environments';
 import { tasksRouter } from '../tasks';
+import {
+  invokeInProcessApi,
+  toolError,
+  toolResultFromApi as resultFromApi,
+  type InProcessApiResult,
+} from './in-process-api';
 import type { McpAuth } from './middleware';
 import { toMcpToolResult } from './proxy-utils';
 
-type MemberApiResult = {
-  ok: boolean;
-  status: number;
-  payload: Record<string, unknown>;
-};
-
-function toolError(payload: Record<string, unknown>) {
-  return { ...toMcpToolResult(payload), isError: true as const };
-}
-
-async function invokeMemberApi(
+function invokeMemberApi(
   auth: McpAuth,
   path: string,
   init?: RequestInit,
-): Promise<MemberApiResult> {
-  const app = new Hono<{
-    Variables: Variables & { mcpAuth: McpAuth };
-  }>();
-  app.use('*', async (c, next) => {
-    c.set('authContext', auth.authContext);
-    c.set('mcpAuth', auth);
-    await next();
+): Promise<InProcessApiResult> {
+  return invokeInProcessApi({
+    auth,
+    mount: (app) => {
+      app.route('/tasks', tasksRouter);
+      app.route('/environments', environmentsRouter);
+    },
+    path,
+    init,
   });
-  app.route('/tasks', tasksRouter);
-  app.route('/environments', environmentsRouter);
-
-  const response = await app.request(`http://roomote.internal${path}`, init);
-  const rawPayload: unknown = await response.json();
-  const payload =
-    rawPayload && typeof rawPayload === 'object' && !Array.isArray(rawPayload)
-      ? (rawPayload as Record<string, unknown>)
-      : { result: rawPayload };
-
-  return { ok: response.ok, status: response.status, payload };
-}
-
-function resultFromApi(result: MemberApiResult) {
-  return result.ok
-    ? toMcpToolResult(result.payload)
-    : toolError({ status: result.status, ...result.payload });
 }
 
 const manageTasksInputSchema = {

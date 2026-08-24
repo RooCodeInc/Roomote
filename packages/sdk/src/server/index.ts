@@ -359,6 +359,8 @@ export {
   getValidAccessToken,
 } from './lib/mcp/data';
 
+export { resolveUserMcpServerConfigs } from './routers/mcp-connections';
+
 export {
   discoverOAuthEndpoints,
   discoverOAuthProtectedResourceMetadata,

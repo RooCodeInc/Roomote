@@ -6,6 +6,7 @@ import {
   answerFastAgentQuestion,
   createFastAgentTaskLauncher,
   fastAgentConversationRepository,
+  resolveApiBaseUrl,
   type FastAgentTurnAdapter,
   type LaunchFastAgentTask,
 } from '@roomote/cloud-agents/server';
@@ -42,6 +43,8 @@ import {
   type SourceControlProvider,
   type StandardTask,
 } from '@roomote/types';
+
+import { resolveUserMcpServerConfigs } from '../routers/mcp-connections';
 
 import {
   buildSignedArtifactRawUrl,
@@ -663,10 +666,16 @@ export async function deliverFastAgentParentEvent(params: {
         replyPosted = true;
       },
     });
+    // The same base URL must reach both the config resolver and the broker:
+    // the broker only injects its auth header on deployment-proxy URLs whose
+    // origin matches its own apiBaseUrl, so a mismatched pair silently drops
+    // every deployment MCP server from parent-event turns.
+    const apiBaseUrl = resolveApiBaseUrl() ?? undefined;
     await answerFastAgentQuestion({
       question: `<delegated_task_event>${JSON.stringify(params.event)}</delegated_task_event>`,
       userId: parentTurn.userId,
       conversation: parentTurn.conversation,
+      apiBaseUrl,
       signal: releaseTurnLock.signal,
       turnSource: 'platform_event',
       platformEventHandling:
@@ -677,6 +686,12 @@ export async function deliverFastAgentParentEvent(params: {
         params.event.type === 'pull_request_feedback' ? 'required' : 'optional',
       adapter: {
         ...parentTurn.adapter,
+        resolveMcpServerConfigs: () =>
+          resolveUserMcpServerConfigs({
+            userId: parentTurn.userId,
+            apiBaseUrl,
+            includeRoomote: true,
+          }),
         ...(params.retryTaskStart
           ? { retryTaskStart: params.retryTaskStart }
           : {}),

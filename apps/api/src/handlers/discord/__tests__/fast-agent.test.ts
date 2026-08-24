@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock('@roomote/cloud-agents/server', () => ({
   acquireFastAgentTurnLock: mocks.acquireLock,
   answerFastAgentQuestion: mocks.answerQuestion,
+  resolveApiBaseUrl: () => 'https://roomote.example.com',
 }));
 
 vi.mock('@roomote/communication/discord-event', () => ({

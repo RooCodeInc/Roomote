@@ -297,6 +297,9 @@ describe('route policy enforcement', () => {
       expect(publicBody.result?.tools?.map((tool) => tool.name)).toContain(
         'manage_tasks',
       );
+      expect(publicBody.result?.tools?.map((tool) => tool.name)).toContain(
+        'manage_custom_automations',
+      );
 
       const callResponse = await createApiApp().request(
         'http://localhost/mcp',
@@ -338,6 +341,9 @@ describe('route policy enforcement', () => {
       expect(legacyResponse.status).toBe(200);
       expect(legacyBody.result?.tools?.map((tool) => tool.name)).not.toContain(
         'manage_tasks',
+      );
+      expect(legacyBody.result?.tools?.map((tool) => tool.name)).toContain(
+        'manage_custom_automations',
       );
     });
 

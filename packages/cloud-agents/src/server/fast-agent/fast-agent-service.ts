@@ -6,6 +6,8 @@ import {
 import {
   BRAIN_MCP_ID,
   INFERENCE_PROVIDER_MAX_RETRIES,
+  MANAGE_CUSTOM_AUTOMATIONS_TOOL,
+  ROOMOTE_MCP_ID,
   formatErrorForLog,
   resolveInferenceProviderRetryDelayMs,
   roomoteTaskInspectionArgsSchema,
@@ -653,9 +655,12 @@ export async function answerFastAgentQuestion({
         return { models: [], defaultModelId: undefined };
       }),
       getOrCreateFastAgentSession({ userId, conversation }),
-      listFastAgentIntegrations({ userId, apiBaseUrl }).catch((error) => {
+      listFastAgentIntegrations(
+        { userId, apiBaseUrl },
+        adapter.resolveMcpServerConfigs,
+      ).catch((error) => {
         console.warn(
-          `[Fast Agent] Deployment integrations unavailable: ${formatErrorForLog(error)}`,
+          `[Fast Agent] Deployment MCP servers unavailable: ${formatErrorForLog(error)}`,
         );
         return [];
       }),
@@ -940,7 +945,20 @@ export async function answerFastAgentQuestion({
 
           case FAST_AGENT_NATIVE_TOOL_NAMES.integrationCall: {
             const args = integrationCallArgsSchema.parse(call.args);
-            if (args.integrationId !== BRAIN_MCP_ID) {
+            const managesCustomAutomations =
+              args.integrationId === ROOMOTE_MCP_ID &&
+              args.toolName === MANAGE_CUSTOM_AUTOMATIONS_TOOL.name;
+            if (call.agent && managesCustomAutomations) {
+              return {
+                success: false,
+                error:
+                  'Custom automation management is reserved for the Fast parent agent.',
+              };
+            }
+            if (
+              args.integrationId !== BRAIN_MCP_ID &&
+              !managesCustomAutomations
+            ) {
               const ackError = requireAcknowledgement();
               if (ackError) return ackError;
             }

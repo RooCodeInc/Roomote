@@ -1,41 +1,29 @@
 const mocks = vi.hoisted(() => ({
-  enabledRows: [] as Array<{ mcpId: string; disabledTools?: string[] | null }>,
+  configuredServers: {} as Record<
+    string,
+    { url: string; headers: Record<string, string>; disabledTools?: string[] }
+  >,
   createAuthToken: vi.fn(),
   listMcpTools: vi.fn(),
   callMcpTool: vi.fn(),
   beginIntegrationCall: vi.fn(),
   completeIntegrationCall: vi.fn(),
-  select: vi.fn(),
   findGithubInstallation: vi.fn(),
-  brainEnv: { R_GBRAIN_URL: undefined as string | undefined },
-  isBrainProviderConfigured: vi.fn(),
 }));
 
 vi.mock('@roomote/auth', () => ({
   createAuthToken: mocks.createAuthToken,
 }));
 
-vi.mock('@roomote/env', () => ({
-  Env: mocks.brainEnv,
-}));
-
 vi.mock('@roomote/db/server', () => ({
   beginSlackFastIntegrationCall: mocks.beginIntegrationCall,
   completeSlackFastIntegrationCall: mocks.completeIntegrationCall,
   db: {
-    select: mocks.select,
     query: {
       githubInstallations: { findFirst: mocks.findGithubInstallation },
     },
   },
-  deploymentMcpEnablements: {
-    mcpId: 'mcpId',
-    enabled: 'enabled',
-    disabledTools: 'disabledTools',
-  },
-  eq: vi.fn(() => 'enabled-filter'),
   githubInstallations: { suspendedAt: 'suspendedAt' },
-  isBrainProviderConfigured: mocks.isBrainProviderConfigured,
   isNull: vi.fn(() => 'not-suspended-filter'),
 }));
 
@@ -51,7 +39,7 @@ vi.mock('../../mcp-tool-client', () => ({
 import {
   callFastAgentIntegration,
   clearFastAgentIntegrationToolCache,
-  listFastAgentIntegrations,
+  listFastAgentIntegrations as listFastAgentIntegrationsWithResolver,
 } from '../fast-agent-integration-broker';
 
 const auditContext = {
@@ -67,20 +55,23 @@ const auditContext = {
   messageId: '100.2',
 };
 
+function listFastAgentIntegrations(context: {
+  userId: string;
+  apiBaseUrl?: string;
+}) {
+  return listFastAgentIntegrationsWithResolver(
+    context,
+    async () => mocks.configuredServers,
+  );
+}
+
 describe('fast-agent integration broker', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     clearFastAgentIntegrationToolCache();
-    mocks.enabledRows = [];
-    mocks.select.mockImplementation(() => ({
-      from: () => ({
-        where: () => Promise.resolve(mocks.enabledRows),
-      }),
-    }));
+    mocks.configuredServers = {};
     mocks.createAuthToken.mockResolvedValue('control-plane-token');
     mocks.findGithubInstallation.mockResolvedValue(undefined);
-    mocks.brainEnv.R_GBRAIN_URL = undefined;
-    mocks.isBrainProviderConfigured.mockResolvedValue(false);
     mocks.beginIntegrationCall.mockResolvedValue({
       id: 'audit-1',
       startedAt: new Date('2026-08-16T00:00:00.000Z'),
@@ -114,8 +105,12 @@ describe('fast-agent integration broker', () => {
   });
 
   it('exposes the read-only Brain proxy when the Brain is configured', async () => {
-    mocks.brainEnv.R_GBRAIN_URL = 'http://gbrain:8931';
-    mocks.isBrainProviderConfigured.mockResolvedValue(true);
+    mocks.configuredServers = {
+      gbrain: {
+        url: 'https://api.example.com/api/mcp/gbrain',
+        headers: {},
+      },
+    };
 
     const integrations = await listFastAgentIntegrations({
       userId: 'user-1',
@@ -140,9 +135,6 @@ describe('fast-agent integration broker', () => {
   });
 
   it('does not probe or expose Brain when it is not fully configured', async () => {
-    mocks.brainEnv.R_GBRAIN_URL = 'http://gbrain:8931';
-    mocks.isBrainProviderConfigured.mockResolvedValue(false);
-
     await expect(
       listFastAgentIntegrations({
         userId: 'user-1',
@@ -154,8 +146,12 @@ describe('fast-agent integration broker', () => {
   });
 
   it('does not expose a wired Brain whose proxy is not usable yet', async () => {
-    mocks.brainEnv.R_GBRAIN_URL = 'http://gbrain:8931';
-    mocks.isBrainProviderConfigured.mockResolvedValue(true);
+    mocks.configuredServers = {
+      gbrain: {
+        url: 'https://api.example.com/api/mcp/gbrain',
+        headers: {},
+      },
+    };
     mocks.listMcpTools.mockRejectedValue(
       new Error('The Brain inference provider is not configured'),
     );
@@ -168,13 +164,25 @@ describe('fast-agent integration broker', () => {
     ).resolves.toEqual([]);
   });
 
-  it('excludes user-scoped, credential-only, and unknown integrations', async () => {
-    mocks.enabledRows = [
-      { mcpId: 'notion' },
-      { mcpId: 'elevenlabs' },
-      { mcpId: 'neon' },
-      { mcpId: 'custom-local-server' },
-    ];
+  it('exposes every actor-resolved remote MCP server', async () => {
+    mocks.configuredServers = {
+      notion: {
+        url: 'https://api.example.com/api/mcp/notion',
+        headers: {},
+      },
+      'user-server': {
+        url: 'https://mcp.example.test/user',
+        headers: { Authorization: 'Bearer upstream-user-token' },
+      },
+      'custom-server': {
+        url: 'https://api.example.com/api/mcp/custom/server-1',
+        headers: { 'X-MCP-Client': 'Roomote' },
+      },
+      roomote: {
+        url: 'https://api.example.com/api/mcp-routing/roomote',
+        headers: {},
+      },
+    };
 
     const integrations = await listFastAgentIntegrations({
       userId: 'user-1',
@@ -183,11 +191,62 @@ describe('fast-agent integration broker', () => {
 
     expect(integrations.map((integration) => integration.id)).toEqual([
       'notion',
+      'user-server',
+      'custom-server',
+      'roomote',
     ]);
   });
 
+  it('injects the current user token into deployment proxies behind a reverse-proxy base path', async () => {
+    mocks.configuredServers = {
+      roomote: {
+        url: 'https://app.example.test/api/mcp-routing/roomote',
+        headers: { 'X-MCP-Client': 'Roomote' },
+      },
+    };
+
+    await listFastAgentIntegrations({
+      userId: 'user-1',
+      apiBaseUrl: 'https://app.example.test/_roomote-api',
+    });
+
+    expect(mocks.listMcpTools).toHaveBeenCalledWith({
+      url: 'https://app.example.test/_roomote-api/api/mcp-routing/roomote',
+      headers: {
+        'X-MCP-Client': 'Roomote',
+        Authorization: 'Bearer control-plane-token',
+      },
+      signal: expect.any(AbortSignal),
+    });
+  });
+
+  it('preserves actor-resolved credentials for direct upstream MCP servers', async () => {
+    mocks.configuredServers = {
+      'user-server': {
+        url: 'https://mcp.example.test/user',
+        headers: { Authorization: 'Bearer upstream-user-token' },
+      },
+    };
+
+    await listFastAgentIntegrations({
+      userId: 'user-1',
+      apiBaseUrl: 'https://api.example.com',
+    });
+
+    expect(mocks.listMcpTools).toHaveBeenCalledWith({
+      url: 'https://mcp.example.test/user',
+      headers: { Authorization: 'Bearer upstream-user-token' },
+      signal: expect.any(AbortSignal),
+    });
+  });
+
   it('reuses discovered tools across fast turns', async () => {
-    mocks.enabledRows = [{ mcpId: 'notion' }];
+    mocks.configuredServers = {
+      notion: {
+        url: 'https://api.example.com/api/mcp/notion',
+        headers: {},
+      },
+    };
 
     await listFastAgentIntegrations({
       userId: 'user-1',
@@ -201,9 +260,34 @@ describe('fast-agent integration broker', () => {
     expect(mocks.listMcpTools).toHaveBeenCalledOnce();
   });
 
+  it('does not share cached tool catalogs across acting users', async () => {
+    mocks.configuredServers = {
+      notion: {
+        url: 'https://api.example.com/api/mcp/notion',
+        headers: {},
+      },
+    };
+
+    await listFastAgentIntegrations({
+      userId: 'user-1',
+      apiBaseUrl: 'https://api.example.com',
+    });
+    await listFastAgentIntegrations({
+      userId: 'user-2',
+      apiBaseUrl: 'https://api.example.com',
+    });
+
+    expect(mocks.listMcpTools).toHaveBeenCalledTimes(2);
+  });
+
   it('serves stale tools immediately while a bounded refresh hangs', async () => {
     vi.useFakeTimers({ now: new Date('2026-08-19T00:00:00.000Z') });
-    mocks.enabledRows = [{ mcpId: 'notion' }];
+    mocks.configuredServers = {
+      notion: {
+        url: 'https://api.example.com/api/mcp/notion',
+        headers: {},
+      },
+    };
 
     await expect(
       listFastAgentIntegrations({
@@ -251,7 +335,13 @@ describe('fast-agent integration broker', () => {
   });
 
   it('excludes tools disabled by the deployment', async () => {
-    mocks.enabledRows = [{ mcpId: 'notion', disabledTools: ['search'] }];
+    mocks.configuredServers = {
+      notion: {
+        url: 'https://api.example.com/api/mcp/notion',
+        headers: {},
+        disabledTools: ['search'],
+      },
+    };
 
     const integrations = await listFastAgentIntegrations({
       userId: 'user-1',
@@ -262,7 +352,12 @@ describe('fast-agent integration broker', () => {
   });
 
   it('does not cache failed tool discovery', async () => {
-    mocks.enabledRows = [{ mcpId: 'notion' }];
+    mocks.configuredServers = {
+      notion: {
+        url: 'https://api.example.com/api/mcp/notion',
+        headers: {},
+      },
+    };
     mocks.listMcpTools
       .mockRejectedValueOnce(new Error('temporary MCP failure'))
       .mockResolvedValueOnce([{ name: 'search' }]);
@@ -287,7 +382,12 @@ describe('fast-agent integration broker', () => {
 
   it('times out hung tool discovery without poisoning the cache', async () => {
     vi.useFakeTimers();
-    mocks.enabledRows = [{ mcpId: 'notion' }];
+    mocks.configuredServers = {
+      notion: {
+        url: 'https://api.example.com/api/mcp/notion',
+        headers: {},
+      },
+    };
     mocks.listMcpTools
       .mockImplementationOnce(() => new Promise(() => undefined))
       .mockResolvedValueOnce([{ name: 'search' }]);
