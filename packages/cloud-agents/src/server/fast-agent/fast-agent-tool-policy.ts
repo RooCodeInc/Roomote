@@ -1,5 +1,12 @@
+import {
+  CHAT_CHANNEL_MESSAGES_TOOL,
+  CHAT_MESSAGE_CONTEXT_TOOL,
+} from '@roomote/types';
+
 export const FAST_AGENT_NATIVE_TOOL_NAMES = {
   cancelTask: 'cancel_task',
+  getChatChannelMessages: CHAT_CHANNEL_MESSAGES_TOOL.name,
+  getChatMessageContext: CHAT_MESSAGE_CONTEXT_TOOL.name,
   ignoreEvent: 'ignore_event',
   integrationCall: 'integration_call',
   launchTask: 'launch_task',

@@ -83,6 +83,29 @@ const chatReactionArgsSchema = z.object({
   name: z.string().trim().min(1),
   purpose: z.enum(['ack', 'closeout']),
 });
+const chatMessageContextArgsSchema = z.object({
+  messageId: z.string().trim().min(1),
+});
+const chatChannelMessagesArgsSchema = z.object({
+  oldest: z.string().trim().min(1).optional(),
+  latest: z.string().trim().min(1).optional(),
+});
+const FAST_AGENT_DEFAULT_SLACK_HISTORY_LOOKBACK_MS = 24 * 60 * 60 * 1000;
+
+function getFastAgentDefaultSlackHistoryOldest(latest?: string): string {
+  const numericLatest =
+    latest && /^\d+(?:\.\d+)?$/.test(latest) ? Number(latest) : Number.NaN;
+  const latestMs = Number.isFinite(numericLatest)
+    ? numericLatest * 1000
+    : latest
+      ? Date.parse(latest)
+      : Date.now();
+
+  return new Date(
+    (Number.isFinite(latestMs) ? latestMs : Date.now()) -
+      FAST_AGENT_DEFAULT_SLACK_HISTORY_LOOKBACK_MS,
+  ).toISOString();
+}
 const launchTaskArgsSchema = z.object({
   prompt: z.string().trim().min(1),
   environmentId: z.string().trim().min(1).nullable().optional(),
@@ -862,6 +885,37 @@ export async function answerFastAgentQuestion({
             visibleUpdatePosted = true;
             if (args.purpose === 'closeout') closed = true;
             return { success: true, delivered: true, closed };
+          }
+
+          case FAST_AGENT_NATIVE_TOOL_NAMES.getChatMessageContext: {
+            const args = chatMessageContextArgsSchema.parse(call.args);
+            if (!adapter.getChatMessageContext) {
+              return {
+                success: false,
+                error: 'Chat message context is unavailable for this turn.',
+              };
+            }
+            throwIfTurnCancelled();
+            return await adapter.getChatMessageContext(args);
+          }
+
+          case FAST_AGENT_NATIVE_TOOL_NAMES.getChatChannelMessages: {
+            const args = chatChannelMessagesArgsSchema.parse(call.args);
+            if (!adapter.getChatChannelMessages) {
+              return {
+                success: false,
+                error: 'Chat channel history is unavailable for this turn.',
+              };
+            }
+            throwIfTurnCancelled();
+            return await adapter.getChatChannelMessages({
+              ...args,
+              ...(conversation.surface === 'slack' && !args.oldest
+                ? {
+                    oldest: getFastAgentDefaultSlackHistoryOldest(args.latest),
+                  }
+                : {}),
+            });
           }
 
           case FAST_AGENT_NATIVE_TOOL_NAMES.integrationCall: {
