@@ -351,6 +351,13 @@
       "when": 1787542043040,
       "tag": "0049_omniscient_betty_brant",
       "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "7",
+      "when": 1787547062677,
+      "tag": "0050_wooden_polaris",
+      "breakpoints": true
     }
   ]
 }

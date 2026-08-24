@@ -2241,6 +2241,37 @@ export const pullRequestFacts = pgTable(
     // has, and must not erase what the list sync stored.
     body: text('body'),
     labels: jsonb('labels').$type<string[]>(),
+    // Per-PR enrichment that list payloads cannot carry (one to three extra
+    // provider requests each): the files touched and who reviewed it. Filled
+    // by a budgeted pass; null means not enriched yet. `enrichedForUpdatedAt`
+    // is the remote update time the enrichment reflects, so a PR that
+    // changed since is picked up again; `enrichmentAttemptedAt` spaces out
+    // retries after a failed read.
+    changedFiles: jsonb('changed_files').$type<string[]>(),
+    // How many files the enrichment READ. A lower bound rather than the
+    // total when `filesCapped` is set (the provider listing hit the fetch
+    // cap), which the page discloses instead of implying completeness.
+    changedFileCount: integer('changed_file_count'),
+    filesCapped: boolean('files_capped'),
+    reviewsCapped: boolean('reviews_capped'),
+    additions: integer('additions'),
+    deletions: integer('deletions'),
+    reviews: jsonb('reviews').$type<
+      Array<{
+        login: string | null;
+        state:
+          | 'approved'
+          | 'changes_requested'
+          | 'commented'
+          | 'dismissed'
+          | 'pending';
+      }>
+    >(),
+    enrichedAt: timestamp('enriched_at'),
+    enrichedForUpdatedAt: timestamp('enriched_for_updated_at'),
+    // Set only when a read FAILED, so the retry hold cannot park a row whose
+    // remote update time moved during a successful pass.
+    enrichmentFailedAt: timestamp('enrichment_failed_at'),
     createdAtRemote: timestamp('created_at_remote').notNull(),
     updatedAtRemote: timestamp('updated_at_remote').notNull(),
     closedAtRemote: timestamp('closed_at_remote'),

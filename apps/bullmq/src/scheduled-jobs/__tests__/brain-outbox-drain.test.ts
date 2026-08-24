@@ -140,6 +140,92 @@ describe('pull request fact pages', () => {
     );
   });
 
+  it('renders files touched with areas and review outcomes', () => {
+    const page = buildPullRequestFactPage({
+      repositoryFullName: 'owner/repo',
+      prNumber: 42,
+      title: 'Ship it',
+      htmlUrl: 'https://example.test/owner/repo/pull/42',
+      authorLogin: 'octocat',
+      changedFiles: [
+        'apps/web/src/page.tsx',
+        'packages/db/src/schema.ts',
+        'README.md',
+      ],
+      changedFileCount: 5,
+      additions: 40,
+      deletions: 7,
+      reviews: [
+        { login: 'grace', state: 'approved' },
+        { login: 'grace', state: 'commented' },
+        { login: 'ada', state: 'changes_requested' },
+      ],
+      state: 'merged',
+      createdAtRemote: new Date('2026-08-01T09:00:00Z'),
+      closedAtRemote: new Date('2026-08-14T10:00:00Z'),
+      mergedAtRemote: new Date('2026-08-14T10:00:00Z'),
+    });
+
+    expect(page.content).toContain('\nchanged_files: 5\n');
+    expect(page.content).toContain('\nareas: [".","apps/web","packages/db"]\n');
+    expect(page.content).toContain('\napproved_by: ["grace"]\n');
+    expect(page.content).toContain(
+      '\n## Changes\n\n5 files changed (+40 / -7) across ., apps/web, packages/db.\n\n- apps/web/src/page.tsx\n- packages/db/src/schema.ts\n- README.md\n- … and 2 more\n',
+    );
+    expect(page.content).toContain(
+      '\n## Reviews\n\n- Approved by grace\n- Changes requested by ada\n',
+    );
+  });
+
+  it('discloses a capped file or review listing instead of implying a total', () => {
+    const page = buildPullRequestFactPage({
+      repositoryFullName: 'owner/repo',
+      prNumber: 42,
+      title: 'Ship it',
+      htmlUrl: 'https://example.test/owner/repo/pull/42',
+      authorLogin: 'octocat',
+      changedFiles: ['apps/web/src/page.tsx'],
+      changedFileCount: 300,
+      filesCapped: true,
+      reviewsCapped: true,
+      additions: 900,
+      deletions: 10,
+      reviews: [{ login: 'grace', state: 'approved' }],
+      state: 'merged',
+      createdAtRemote: new Date('2026-08-01T09:00:00Z'),
+      closedAtRemote: new Date('2026-08-14T10:00:00Z'),
+      mergedAtRemote: new Date('2026-08-14T10:00:00Z'),
+    });
+
+    expect(page.content).toContain('\nchanged_files: 300+\n');
+    expect(page.content).toContain(
+      'At least 300 files changed (+900 / -10 so far) across apps/web.',
+    );
+    expect(page.content).toContain('- … and 299 or more more');
+    expect(page.content).toContain('_The provider file listing was capped');
+    expect(page.content).toContain('_The provider review listing was capped');
+  });
+
+  it('omits the changes and reviews sections when not enriched', () => {
+    const page = buildPullRequestFactPage({
+      repositoryFullName: 'owner/repo',
+      prNumber: 42,
+      title: 'Ship it',
+      htmlUrl: 'https://example.test/owner/repo/pull/42',
+      authorLogin: 'octocat',
+      changedFiles: null,
+      reviews: null,
+      state: 'open',
+      createdAtRemote: new Date('2026-08-01T09:00:00Z'),
+      closedAtRemote: null,
+      mergedAtRemote: null,
+    });
+
+    expect(page.content).not.toContain('## Changes');
+    expect(page.content).not.toContain('## Reviews');
+    expect(page.content).not.toContain('changed_files:');
+  });
+
   it('truncates a long description and omits the section when empty', () => {
     const base = {
       repositoryFullName: 'owner/repo',

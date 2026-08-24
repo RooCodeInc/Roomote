@@ -330,6 +330,16 @@ export {
   upsertSourceControlPullRequestFactFromWebhook,
 } from './lib/pull-requests/source-control-pull-request-facts';
 export { type PullRequestFactSnapshot } from './lib/pull-requests/pull-request-facts-store';
+export {
+  enrichPullRequestFacts,
+  STORED_CHANGED_FILE_CAP,
+} from './lib/pull-requests/pull-request-facts-enrichment';
+export {
+  readSourceControlPullRequestEnrichment,
+  totalPullRequestLineChanges,
+  type PullRequestEnrichment,
+  type PullRequestReviewSummary,
+} from './lib/pull-requests/source-control-pull-request-enrichment';
 
 export * from './lib/auth';
 export * from './lib/safe-fetch';
