@@ -376,6 +376,100 @@ describe('fast-agent integration broker', () => {
     });
   });
 
+  it('keeps Brain query results inline and useful to Fast mode', async () => {
+    const largeChunk =
+      '# Memory\n\n' + 'detail with "quotes" and \u{1f9e0}\n'.repeat(4_000);
+    mocks.callMcpTool.mockResolvedValue(
+      Array.from({ length: 20 }, (_, index) => ({
+        slug: `tasks/example-${index}`,
+        page_id: index,
+        title: `Example ${index}`,
+        type: 'task-memory',
+        chunk_text: largeChunk,
+        chunk_source: 'compiled_truth',
+        score: 0.9,
+        cosine: 0.8,
+        base_score: 0.9,
+        evidence: 'keyword_exact',
+        effective_date: '2026-08-24',
+      })),
+    );
+
+    const result = await callFastAgentIntegration(
+      auditContext,
+      [
+        {
+          id: 'gbrain',
+          name: 'Brain',
+          description: 'Shared memory',
+          tools: [{ name: 'query' }],
+        },
+      ],
+      {
+        integrationId: 'gbrain',
+        toolName: 'query',
+        args: { query: 'fast mode' },
+      },
+    );
+
+    expect(mocks.callMcpTool).toHaveBeenCalledWith(
+      expect.objectContaining({
+        args: {
+          query: 'fast mode',
+          detail: 'low',
+          adaptive_return: true,
+        },
+      }),
+    );
+    const serialized = JSON.stringify(result);
+    expect(Buffer.byteLength(serialized)).toBeLessThanOrEqual(40_000);
+    // The native bridge passes JSON.stringify output to OpenCode, so source
+    // newlines remain escaped and cannot trip its separate 2,000-line limit.
+    expect(serialized.split('\n')).toHaveLength(1);
+    expect(result).toMatchObject({ totalResults: 20, omittedResults: 14 });
+    expect(result).toHaveProperty('results.0', {
+      slug: 'tasks/example-0',
+      title: 'Example 0',
+      type: 'task-memory',
+      chunk_text: expect.stringContaining('[truncated for Fast mode]'),
+      effective_date: '2026-08-24',
+    });
+    expect(result).not.toHaveProperty('results.0.score');
+    expect(result).not.toHaveProperty('results.0.page_id');
+    expect(result).not.toHaveProperty('results.0.chunk_source');
+  });
+
+  it('preserves explicit Brain query detail controls', async () => {
+    mocks.callMcpTool.mockResolvedValue([]);
+
+    await callFastAgentIntegration(
+      auditContext,
+      [
+        {
+          id: 'gbrain',
+          name: 'Brain',
+          description: 'Shared memory',
+          tools: [{ name: 'query' }],
+        },
+      ],
+      {
+        integrationId: 'gbrain',
+        toolName: 'query',
+        args: { query: 'all context', detail: 'high', adaptive_return: false },
+      },
+    );
+
+    expect(mocks.callMcpTool).toHaveBeenCalledWith(
+      expect.objectContaining({
+        args: {
+          query: 'all context',
+          detail: 'high',
+          adaptive_return: false,
+        },
+      }),
+    );
+  });
+
   it('does not execute a tool when its durable audit cannot be created', async () => {
     mocks.beginIntegrationCall.mockRejectedValue(new Error('database offline'));
 

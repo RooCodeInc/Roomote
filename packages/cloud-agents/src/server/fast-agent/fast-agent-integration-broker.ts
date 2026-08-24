@@ -58,6 +58,9 @@ const FAST_AGENT_INTEGRATION_TOOL_CACHE_TTL_MS = 5 * 60_000;
 const FAST_AGENT_INTEGRATION_TOOL_CACHE_RETRY_MS = 30_000;
 const FAST_AGENT_INTEGRATION_DISCOVERY_TIMEOUT_MS = 10_000;
 const FAST_AGENT_INTEGRATION_CALL_TIMEOUT_MS = 60_000;
+const FAST_AGENT_BRAIN_QUERY_MAX_RESULTS = 6;
+const FAST_AGENT_BRAIN_QUERY_MAX_OUTPUT_BYTES = 40_000;
+const FAST_AGENT_BRAIN_QUERY_MAX_CHUNK_BYTES = 6_000;
 
 type IntegrationToolCacheEntry = {
   expiresAt: number;
@@ -292,6 +295,97 @@ function serializeAuditPreview(value: unknown, maxLength: number): string {
   }
 }
 
+function truncateUtf8(value: string, maxBytes: number): string {
+  const encoded = Buffer.from(value);
+  if (encoded.byteLength <= maxBytes) return value;
+
+  const suffix = '\n[truncated for Fast mode]';
+  const suffixBytes = Buffer.byteLength(suffix);
+  let end = Math.max(0, maxBytes - suffixBytes);
+  const decoder = new TextDecoder('utf-8', { fatal: true });
+
+  while (end > 0) {
+    try {
+      return decoder.decode(encoded.subarray(0, end)) + suffix;
+    } catch {
+      end -= 1;
+    }
+  }
+
+  return suffix.slice(0, maxBytes);
+}
+
+function compactBrainQueryHit(
+  value: unknown,
+  chunkTextMaxBytes: number,
+): unknown {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return value;
+  }
+
+  const hit = value as Record<string, unknown>;
+  const compact: Record<string, unknown> = {};
+  const copyString = (key: string, maxBytes: number): void => {
+    if (typeof hit[key] === 'string') {
+      compact[key] = truncateUtf8(hit[key], maxBytes);
+    }
+  };
+
+  copyString('slug', 500);
+  copyString('title', 500);
+  copyString('type', 100);
+  copyString('chunk_text', chunkTextMaxBytes);
+  copyString('effective_date', 100);
+  copyString('create_safety', 50);
+
+  return compact;
+}
+
+/**
+ * gbrain query hits include full page chunks plus ranking/debug metadata. Fast
+ * mode needs the memory text and a follow-up slug, but its OpenCode custom-tool
+ * layer spills outputs above 50 KiB into a scratch path unavailable to its
+ * prompt-only subagents. Keep the native result explicit and below that limit.
+ */
+function compactFastBrainQueryResult(result: unknown): unknown {
+  const sourceResults = Array.isArray(result)
+    ? result
+    : result &&
+        typeof result === 'object' &&
+        Array.isArray((result as Record<string, unknown>).results)
+      ? ((result as Record<string, unknown>).results as unknown[])
+      : null;
+  if (!sourceResults) return result;
+
+  const selected = sourceResults.slice(0, FAST_AGENT_BRAIN_QUERY_MAX_RESULTS);
+  const build = (chunkTextMaxBytes: number) => ({
+    results: selected.map((hit) =>
+      compactBrainQueryHit(hit, chunkTextMaxBytes),
+    ),
+    totalResults: sourceResults.length,
+    omittedResults: Math.max(0, sourceResults.length - selected.length),
+  });
+
+  let low = 0;
+  let high = FAST_AGENT_BRAIN_QUERY_MAX_CHUNK_BYTES;
+  let compacted = build(0);
+  while (low <= high) {
+    const candidateBytes = Math.floor((low + high) / 2);
+    const candidate = build(candidateBytes);
+    if (
+      Buffer.byteLength(JSON.stringify(candidate)) <=
+      FAST_AGENT_BRAIN_QUERY_MAX_OUTPUT_BYTES
+    ) {
+      compacted = candidate;
+      low = candidateBytes + 1;
+    } else {
+      high = candidateBytes - 1;
+    }
+  }
+
+  return compacted;
+}
+
 export async function callFastAgentIntegration(
   context: IntegrationAuditContext,
   available: FastAgentIntegration[],
@@ -329,25 +423,37 @@ export async function callFastAgentIntegration(
 
   try {
     const { apiBaseUrl, authToken } = await resolveBrokerAuth(context);
+    const effectiveArgs =
+      integration.id === BRAIN_MCP_ID && request.toolName === 'query'
+        ? {
+            ...request.args,
+            detail: request.args.detail ?? 'low',
+            adaptive_return: request.args.adaptive_return ?? true,
+          }
+        : request.args;
     const result = await withFastIntegrationTimeout(
       (signal) =>
         callMcpTool({
           url: integrationProxyUrl(apiBaseUrl, integration.id),
           headers: { Authorization: `Bearer ${authToken}` },
           toolName: request.toolName,
-          args: request.args,
+          args: effectiveArgs,
           toolCallId: `fast:${audit.id}:${integration.id}:${request.toolName}`,
           signal,
         }),
       FAST_AGENT_INTEGRATION_CALL_TIMEOUT_MS,
       `Fast ${integration.id}/${request.toolName} integration call`,
     );
+    const deliveredResult =
+      integration.id === BRAIN_MCP_ID && request.toolName === 'query'
+        ? compactFastBrainQueryResult(result)
+        : result;
 
     try {
       await completeSlackFastIntegrationCall({
         id: audit.id,
         status: 'succeeded',
-        resultPreview: serializeAuditPreview(result, 30_000),
+        resultPreview: serializeAuditPreview(deliveredResult, 30_000),
         startedAt: audit.startedAt,
       });
     } catch (error) {
@@ -356,7 +462,7 @@ export async function callFastAgentIntegration(
       );
     }
 
-    return result;
+    return deliveredResult;
   } catch (error) {
     try {
       await completeSlackFastIntegrationCall({
