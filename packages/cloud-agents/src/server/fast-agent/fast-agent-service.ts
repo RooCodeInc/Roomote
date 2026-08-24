@@ -6,6 +6,7 @@ import {
 import {
   BRAIN_MCP_ID,
   INFERENCE_PROVIDER_MAX_RETRIES,
+  MANAGE_CUSTOM_AUTOMATIONS_TOOL,
   formatErrorForLog,
   resolveInferenceProviderRetryDelayMs,
   roomoteTaskInspectionArgsSchema,
@@ -61,10 +62,6 @@ import {
   inspectFastAgentTasks,
   sendFastAgentTaskMessage,
 } from './fast-agent-tasks';
-import {
-  fastAgentCustomAutomationArgsSchema,
-  manageFastAgentCustomAutomations,
-} from './fast-agent-custom-automations';
 import { getFastAgentUserIdentity } from './fast-agent-user-identity';
 import { FastAgentTurnDiagnostics } from './fast-agent-turn-diagnostics';
 import {
@@ -657,9 +654,12 @@ export async function answerFastAgentQuestion({
         return { models: [], defaultModelId: undefined };
       }),
       getOrCreateFastAgentSession({ userId, conversation }),
-      listFastAgentIntegrations({ userId, apiBaseUrl }).catch((error) => {
+      listFastAgentIntegrations(
+        { userId, apiBaseUrl },
+        adapter.resolveMcpServerConfigs,
+      ).catch((error) => {
         console.warn(
-          `[Fast Agent] Deployment integrations unavailable: ${formatErrorForLog(error)}`,
+          `[Fast Agent] Deployment MCP servers unavailable: ${formatErrorForLog(error)}`,
         );
         return [];
       }),
@@ -944,7 +944,13 @@ export async function answerFastAgentQuestion({
 
           case FAST_AGENT_NATIVE_TOOL_NAMES.integrationCall: {
             const args = integrationCallArgsSchema.parse(call.args);
-            if (args.integrationId !== BRAIN_MCP_ID) {
+            if (
+              args.integrationId !== BRAIN_MCP_ID &&
+              !(
+                args.integrationId === 'roomote' &&
+                args.toolName === MANAGE_CUSTOM_AUTOMATIONS_TOOL.name
+              )
+            ) {
               const ackError = requireAcknowledgement();
               if (ackError) return ackError;
             }
@@ -1066,24 +1072,6 @@ export async function answerFastAgentQuestion({
               args,
             );
             return result;
-          }
-
-          case FAST_AGENT_NATIVE_TOOL_NAMES.manageCustomAutomations: {
-            const args = fastAgentCustomAutomationArgsSchema.parse(call.args);
-            if (
-              args.action === 'create' ||
-              args.action === 'update' ||
-              args.action === 'delete' ||
-              args.action === 'run_now'
-            ) {
-              const ackError = requireAcknowledgement();
-              if (ackError) return ackError;
-            }
-            throwIfTurnCancelled();
-            return await manageFastAgentCustomAutomations(
-              { userId, apiBaseUrl },
-              args,
-            );
           }
 
           case FAST_AGENT_NATIVE_TOOL_NAMES.sendTaskMessage: {

@@ -143,7 +143,10 @@ vi.mock('../lib/mcp/data', () => ({
 }));
 
 import { getValidAccessToken } from '../lib/mcp/data';
-import { mcpConnectionsRouter } from './mcp-connections';
+import {
+  mcpConnectionsRouter,
+  resolveUserMcpServerConfigs,
+} from './mcp-connections';
 
 const consoleInfoSpy = vi
   .spyOn(console, 'info')
@@ -188,11 +191,13 @@ function buildJoinedConnectionRow({
   userId = null,
   mcpId = 'notion',
   authConfig,
+  disabledTools,
 }: {
   id?: string;
   userId?: string | null;
   mcpId?: string;
   authConfig?: Record<string, unknown>;
+  disabledTools?: string[];
 } = {}) {
   const resolvedAuthConfig =
     authConfig ??
@@ -206,6 +211,7 @@ function buildJoinedConnectionRow({
 
   return {
     enabledMcpId: mcpId,
+    disabledTools,
     connection: {
       id,
       userId,
@@ -246,6 +252,36 @@ describe('mcpConnectionsRouter.getMcpServerConfigs', () => {
     expect(result).toEqual({ servers: {} });
     expect(mockSelect).not.toHaveBeenCalled();
     expect(mockGetValidAccessToken).not.toHaveBeenCalled();
+  });
+
+  it('can include the API-hosted Roomote MCP for Fast user sessions', async () => {
+    mockEnv.R_CURATED_INTEGRATIONS_DISABLED = true;
+
+    const result = await resolveUserMcpServerConfigs({
+      userId: 'user-1',
+      apiBaseUrl: 'https://api.preview.roomote.run/_roomote-api',
+      includeRoomote: true,
+    });
+
+    expect(result.roomote).toEqual({
+      url: 'https://api.preview.roomote.run/api/mcp-routing/roomote',
+      headers: {},
+    });
+  });
+
+  it('carries deployment-disabled tools with the resolved server config', async () => {
+    mockOrderBy.mockResolvedValue([
+      buildJoinedConnectionRow({
+        mcpId: 'notion',
+        disabledTools: ['search'],
+      }),
+    ]);
+
+    const result = await createCaller(
+      'https://api.preview.roomote.run/trpc/mcpConnections.getMcpServerConfigs',
+    ).getMcpServerConfigs();
+
+    expect(result.servers.notion?.disabledTools).toEqual(['search']);
   });
 
   it('delivers the Brain when an explicit Brain provider key is configured', async () => {

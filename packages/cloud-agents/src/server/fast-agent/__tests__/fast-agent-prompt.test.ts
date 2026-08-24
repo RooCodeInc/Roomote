@@ -57,7 +57,7 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain('send_chat_reaction');
     expect(prompt).toContain('`advisor` and `judge` subagents');
     expect(prompt).toContain(
-      'deployment integrations and read-only task inspection',
+      'deployment MCP servers and read-only task inspection',
     );
     expect(prompt).toContain('launch_task');
     expect(prompt).toContain(
@@ -70,6 +70,9 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain('integration_call');
     expect(prompt).toContain("current user's deployment authorization");
     expect(prompt).toContain('use "run_now" rather than "launch_task"');
+    expect(prompt).toContain('same actor-authorized remote');
+    expect(prompt).toContain('local stdio servers remain sandbox-only');
+    expect(prompt).toContain('It does not require a prior acknowledgement');
     expect(prompt).toContain(
       'These reads use the same deployment authorization semantics as delegated Roomote tasks.',
     );
@@ -131,7 +134,7 @@ describe('buildFastAgentSystemPrompt', () => {
       'Do not stop at acknowledgement, agreement, speculation, restatement, or a plan',
     );
     expect(prompt).toContain(
-      'Use deployment integrations as relevant sources of truth',
+      'Use deployment MCP servers as relevant sources of truth',
     );
     expect(prompt).toContain(
       'Ask for clarification only when ambiguity blocks meaningful investigation',

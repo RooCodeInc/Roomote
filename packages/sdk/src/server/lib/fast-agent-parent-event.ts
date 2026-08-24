@@ -43,6 +43,8 @@ import {
   type StandardTask,
 } from '@roomote/types';
 
+import { resolveUserMcpServerConfigs } from '../routers/mcp-connections';
+
 import {
   buildSignedArtifactRawUrl,
   currentEpochSeconds,
@@ -677,6 +679,12 @@ export async function deliverFastAgentParentEvent(params: {
         params.event.type === 'pull_request_feedback' ? 'required' : 'optional',
       adapter: {
         ...parentTurn.adapter,
+        resolveMcpServerConfigs: () =>
+          resolveUserMcpServerConfigs({
+            userId: parentTurn.userId,
+            apiBaseUrl: Env.R_APP_URL,
+            includeRoomote: true,
+          }),
         ...(params.retryTaskStart
           ? { retryTaskStart: params.retryTaskStart }
           : {}),

@@ -1,21 +1,15 @@
 import { createAuthToken } from '@roomote/auth';
-import { Env } from '@roomote/env';
 import {
   beginSlackFastIntegrationCall,
   completeSlackFastIntegrationCall,
   db,
-  deploymentMcpEnablements,
-  eq,
   githubInstallations,
-  isBrainProviderConfigured,
   isNull,
 } from '@roomote/db/server';
 import {
   BRAIN_MCP_ID,
   getMcpIntegration,
-  getMcpIntegrationConnectionScope,
   formatErrorForLog,
-  isCredentialOnlyMcpIntegration,
 } from '@roomote/types';
 
 import {
@@ -28,6 +22,7 @@ import { resolveApiBaseUrl } from '../shared-utils';
 import { FAST_AGENT_BRAIN_INSTRUCTIONS } from './fast-agent-constants';
 import {
   getFastAgentConversationStorageWorkspaceId,
+  type FastAgentMcpServerConfig,
   type FastAgentConversation,
 } from './fast-agent-conversation';
 
@@ -37,6 +32,10 @@ export type FastAgentIntegration = {
   description: string;
   instructions?: string;
   tools: McpToolDefinition[];
+  endpoint?: {
+    url: string;
+    headers: Record<string, string>;
+  };
 };
 
 type FastAgentIntegrationCandidate = Omit<FastAgentIntegration, 'tools'> & {
@@ -95,33 +94,35 @@ async function withFastIntegrationTimeout<T>(
 }
 
 async function listCachedIntegrationTools(options: {
+  cacheKey: string;
   url: string;
   headers: Record<string, string>;
 }): Promise<McpToolDefinition[]> {
-  const cached = integrationToolCache.get(options.url);
+  const { cacheKey, ...clientOptions } = options;
+  const cached = integrationToolCache.get(cacheKey);
   if (cached) {
     if (cached.expiresAt <= Date.now()) {
       // Keep serving the last known-good catalog while refreshing. Fast turns
-      // must never wait behind a deployment integration that stopped answering
+      // must never wait behind a deployment MCP server that stopped answering
       // after it was previously discovered successfully.
       cached.expiresAt =
         Date.now() + FAST_AGENT_INTEGRATION_TOOL_CACHE_RETRY_MS;
       const refresh = withFastIntegrationTimeout(
-        (signal) => listMcpTools({ ...options, signal }),
+        (signal) => listMcpTools({ ...clientOptions, signal }),
         FAST_AGENT_INTEGRATION_DISCOVERY_TIMEOUT_MS,
         'Fast integration tool discovery',
       );
       void refresh
         .then((tools) => {
-          if (integrationToolCache.get(options.url) === cached) {
-            integrationToolCache.set(options.url, {
+          if (integrationToolCache.get(cacheKey) === cached) {
+            integrationToolCache.set(cacheKey, {
               expiresAt: Date.now() + FAST_AGENT_INTEGRATION_TOOL_CACHE_TTL_MS,
               tools: Promise.resolve(tools),
             });
           }
         })
         .catch(() => {
-          if (integrationToolCache.get(options.url) === cached) {
+          if (integrationToolCache.get(cacheKey) === cached) {
             cached.expiresAt =
               Date.now() + FAST_AGENT_INTEGRATION_TOOL_CACHE_RETRY_MS;
           }
@@ -132,11 +133,11 @@ async function listCachedIntegrationTools(options: {
   }
 
   const tools = withFastIntegrationTimeout(
-    (signal) => listMcpTools({ ...options, signal }),
+    (signal) => listMcpTools({ ...clientOptions, signal }),
     FAST_AGENT_INTEGRATION_DISCOVERY_TIMEOUT_MS,
     'Fast integration tool discovery',
   );
-  integrationToolCache.set(options.url, {
+  integrationToolCache.set(cacheKey, {
     expiresAt: Date.now() + FAST_AGENT_INTEGRATION_TOOL_CACHE_TTL_MS,
     tools,
   });
@@ -144,8 +145,8 @@ async function listCachedIntegrationTools(options: {
   try {
     return await tools;
   } catch (error) {
-    if (integrationToolCache.get(options.url)?.tools === tools) {
-      integrationToolCache.delete(options.url);
+    if (integrationToolCache.get(cacheKey)?.tools === tools) {
+      integrationToolCache.delete(cacheKey);
     }
     throw error;
   }
@@ -155,22 +156,68 @@ export function clearFastAgentIntegrationToolCache(): void {
   integrationToolCache.clear();
 }
 
-function isFastModeIntegration(
-  integration: ReturnType<typeof getMcpIntegration>,
-): integration is NonNullable<ReturnType<typeof getMcpIntegration>> {
-  return Boolean(
-    integration &&
-    getMcpIntegrationConnectionScope(integration) === 'deployment' &&
-    !isCredentialOnlyMcpIntegration(integration),
-  );
-}
-
 function integrationProxyUrl(baseUrl: string, integrationId: string): string {
   const relativePath =
     integrationId === 'github'
       ? 'api/mcp-routing/github'
       : `api/mcp/${encodeURIComponent(integrationId)}`;
   return new URL(relativePath, `${baseUrl}/`).toString();
+}
+
+function describeMcpServer(
+  id: string,
+): Pick<FastAgentIntegration, 'name' | 'description' | 'instructions'> {
+  if (id === 'roomote') {
+    return {
+      name: 'Roomote',
+      description:
+        'Manage this Roomote deployment, including custom automations and other deployment capabilities.',
+    };
+  }
+  if (id === BRAIN_MCP_ID) {
+    return {
+      name: 'Brain',
+      description:
+        "Read this deployment's shared memory of completed tasks and connected integration activity.",
+      instructions: FAST_AGENT_BRAIN_INSTRUCTIONS,
+    };
+  }
+  const integration = getMcpIntegration(id);
+  return {
+    name: integration?.name ?? id,
+    description:
+      integration?.description ??
+      'Use tools from this deployment-configured MCP server.',
+  };
+}
+
+function resolveFastMcpEndpoint(options: {
+  apiBaseUrl: string;
+  authToken: string;
+  config: FastAgentMcpServerConfig;
+}) {
+  const apiUrl = new URL(options.apiBaseUrl);
+  const configuredUrl = new URL(options.config.url, options.apiBaseUrl);
+  const isDeploymentProxy =
+    configuredUrl.origin === apiUrl.origin &&
+    (configuredUrl.pathname.startsWith('/api/mcp/') ||
+      configuredUrl.pathname.startsWith('/api/mcp-routing/'));
+
+  if (!isDeploymentProxy) {
+    return {
+      url: configuredUrl.toString(),
+      headers: options.config.headers,
+    };
+  }
+
+  const relativePath = `${configuredUrl.pathname.replace(/^\/+/, '')}${configuredUrl.search}`;
+  return {
+    url: new URL(relativePath, `${options.apiBaseUrl}/`).toString(),
+    headers: {
+      ...options.config.headers,
+      Authorization: `Bearer ${options.authToken}`,
+    },
+  };
 }
 
 async function resolveBrokerAuth(context: BrokerContext) {
@@ -189,21 +236,21 @@ async function resolveBrokerAuth(context: BrokerContext) {
 }
 
 /**
- * Deployment integrations only. Fast mode never receives MCP server configs,
- * local transports, filesystem tools, or arbitrary proxy URLs. Tools disabled
- * by the deployment remain unavailable; calls to exposed tools are audited.
+ * Actor-resolved remote MCP servers only. Local transports and filesystem
+ * tools remain sandbox-only. Tools disabled by the deployment remain
+ * unavailable, and calls to exposed tools are audited.
  */
 export async function listFastAgentIntegrations(
   context: BrokerContext,
+  resolveMcpServerConfigs?: () => Promise<
+    Record<string, FastAgentMcpServerConfig>
+  >,
 ): Promise<FastAgentIntegration[]> {
-  const [enabled, githubInstallation] = await Promise.all([
-    db
-      .select({
-        mcpId: deploymentMcpEnablements.mcpId,
-        disabledTools: deploymentMcpEnablements.disabledTools,
-      })
-      .from(deploymentMcpEnablements)
-      .where(eq(deploymentMcpEnablements.enabled, true)),
+  const configuredServersPromise: Promise<
+    Record<string, FastAgentMcpServerConfig>
+  > = resolveMcpServerConfigs?.() ?? Promise.resolve({});
+  const [configuredServers, githubInstallation] = await Promise.all([
+    configuredServersPromise,
     isRouterMcpServerEnabled('github')
       ? db.query.githubInstallations.findFirst({
           where: isNull(githubInstallations.suspendedAt),
@@ -211,43 +258,26 @@ export async function listFastAgentIntegrations(
         })
       : Promise.resolve(undefined),
   ]);
+  const { apiBaseUrl, authToken } = await resolveBrokerAuth(context);
+  const candidates: FastAgentIntegrationCandidate[] = Object.entries(
+    configuredServers,
+  ).map(([id, config]) => ({
+    id,
+    ...describeMcpServer(id),
+    endpoint: resolveFastMcpEndpoint({ apiBaseUrl, authToken, config }),
+    disabledTools: new Set(config.disabledTools ?? []),
+  }));
 
-  const candidates: FastAgentIntegrationCandidate[] = enabled.flatMap(
-    ({ mcpId, disabledTools }) => {
-      const integration = getMcpIntegration(mcpId);
-      return isFastModeIntegration(integration)
-        ? [
-            {
-              id: integration.id,
-              name: integration.name,
-              description: integration.description,
-              disabledTools: new Set(disabledTools ?? []),
-            },
-          ]
-        : [];
-    },
-  );
-
-  // Same activation rule as sandbox MCP delivery: only an explicit R_BRAIN_*
-  // provider key means the deployment has a Brain, because the URL and
-  // gateway token are template-defaulted plumbing on some platforms.
-  if (Env.R_GBRAIN_URL && (await isBrainProviderConfigured())) {
-    candidates.push({
-      id: BRAIN_MCP_ID,
-      name: 'Brain',
-      description:
-        "Read this deployment's shared memory of completed tasks and connected integration activity.",
-      instructions: FAST_AGENT_BRAIN_INSTRUCTIONS,
-      disabledTools: new Set<string>(),
-    });
-  }
-
-  if (githubInstallation) {
+  if (githubInstallation && !configuredServers.github) {
     candidates.push({
       id: 'github',
       name: 'GitHub',
       description:
         'Read repositories, code, issues, pull requests, commits, and recent activity available to the deployment GitHub App.',
+      endpoint: {
+        url: integrationProxyUrl(apiBaseUrl, 'github'),
+        headers: { Authorization: `Bearer ${authToken}` },
+      },
       disabledTools: new Set<string>(),
     });
   }
@@ -256,14 +286,14 @@ export async function listFastAgentIntegrations(
     return [];
   }
 
-  const { apiBaseUrl, authToken } = await resolveBrokerAuth(context);
   const results = await Promise.allSettled(
     candidates.map(async (integration) => ({
       ...integration,
       tools: (
         await listCachedIntegrationTools({
-          url: integrationProxyUrl(apiBaseUrl, integration.id),
-          headers: { Authorization: `Bearer ${authToken}` },
+          cacheKey: `${context.userId}:${integration.endpoint!.url}`,
+          url: integration.endpoint!.url,
+          headers: integration.endpoint!.headers,
         })
       ).filter((tool) => !integration.disabledTools.has(tool.name)),
     })),
@@ -278,6 +308,7 @@ export async function listFastAgentIntegrations(
             description: result.value.description,
             instructions: result.value.instructions,
             tools: result.value.tools,
+            endpoint: result.value.endpoint,
           },
         ]
       : [],
@@ -329,11 +360,17 @@ export async function callFastAgentIntegration(
 
   try {
     const { apiBaseUrl, authToken } = await resolveBrokerAuth(context);
+    const endpoint =
+      integration.endpoint ??
+      ({
+        url: integrationProxyUrl(apiBaseUrl, integration.id),
+        headers: { Authorization: `Bearer ${authToken}` },
+      } as const);
     const result = await withFastIntegrationTimeout(
       (signal) =>
         callMcpTool({
-          url: integrationProxyUrl(apiBaseUrl, integration.id),
-          headers: { Authorization: `Bearer ${authToken}` },
+          url: endpoint.url,
+          headers: endpoint.headers,
           toolName: request.toolName,
           args: request.args,
           toolCallId: `fast:${audit.id}:${integration.id}:${request.toolName}`,

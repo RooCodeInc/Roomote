@@ -10,7 +10,6 @@ const mocks = vi.hoisted(() => ({
   runSession: vi.fn(),
   listIntegrations: vi.fn(),
   callIntegration: vi.fn(),
-  manageCustomAutomations: vi.fn(),
   sendTaskMessage: vi.fn(),
   cancelTask: vi.fn(),
   inspectTasks: vi.fn(),
@@ -35,7 +34,6 @@ const nativeToolNames = vi.hoisted(
       ignoreEvent: 'ignore_event',
       integrationCall: 'integration_call',
       launchTask: 'launch_task',
-      manageCustomAutomations: 'manage_custom_automations',
       manageTasks: 'manage_tasks',
       retryTaskStart: 'retry_task_start',
       sendChatReaction: 'send_chat_reaction',
@@ -111,15 +109,6 @@ vi.mock('../fast-agent-integration-broker', () => ({
   listFastAgentIntegrations: mocks.listIntegrations,
   callFastAgentIntegration: mocks.callIntegration,
 }));
-
-vi.mock('../fast-agent-custom-automations', async (importOriginal) => {
-  const original =
-    await importOriginal<typeof import('../fast-agent-custom-automations')>();
-  return {
-    ...original,
-    manageFastAgentCustomAutomations: mocks.manageCustomAutomations,
-  };
-});
 
 vi.mock('../fast-agent-tasks', () => ({
   sendFastAgentTaskMessage: mocks.sendTaskMessage,
@@ -213,9 +202,6 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     });
     mocks.listIntegrations.mockResolvedValue([]);
     mocks.callIntegration.mockResolvedValue({ matches: ['fast-agent.ts'] });
-    mocks.manageCustomAutomations.mockResolvedValue({
-      automation: { id: 'automation-1', enabled: false },
-    });
     mocks.sendTaskMessage.mockResolvedValue({ success: true });
     mocks.cancelTask.mockResolvedValue({ success: true });
     mocks.inspectTasks.mockResolvedValue({
@@ -888,29 +874,36 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     );
   });
 
-  it('uses the current user authorization and acknowledgement gate for custom automation mutations', async () => {
+  it('runs Roomote custom automation mutations without an acknowledgement gate', async () => {
+    const resolveMcpServerConfigs = vi.fn(async () => ({}));
+    mocks.listIntegrations.mockResolvedValue([
+      {
+        id: 'roomote',
+        name: 'Roomote',
+        description: 'Manage Roomote',
+        tools: [{ name: 'manage_custom_automations' }],
+      },
+    ]);
+    mocks.callIntegration.mockResolvedValue({
+      automation: { id: 'automation-1', enabled: false },
+    });
     const toolResults: unknown[] = [];
     mocks.generateText.mockImplementationOnce(
       async (_params, _session, options) => {
         await options.onSessionReady('opencode-session-1');
-        toolResults.push(
-          await invokeTool(nativeToolNames.manageCustomAutomations, {
-            action: 'update',
-            automationId: 'automation-1',
-            enabled: false,
-          }),
-        );
-        await invokeTool(nativeToolNames.sendChatReply, {
-          purpose: 'ack',
-          message: 'I’ll disable that automation.',
-        });
-        toolResults.push(
-          await invokeTool(nativeToolNames.manageCustomAutomations, {
-            action: 'update',
-            automationId: 'automation-1',
-            enabled: false,
-          }),
-        );
+        for (let attempt = 0; attempt < 2; attempt += 1) {
+          toolResults.push(
+            await invokeTool(nativeToolNames.integrationCall, {
+              integrationId: 'roomote',
+              toolName: 'manage_custom_automations',
+              arguments: {
+                action: 'update',
+                automationId: 'automation-1',
+                enabled: false,
+              },
+            }),
+          );
+        }
         await invokeTool(nativeToolNames.sendChatReply, {
           purpose: 'closeout',
           message: 'The automation is disabled.',
@@ -919,22 +912,35 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       },
     );
 
-    await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+    await answerFastAgentQuestion({
+      ...baseParams,
+      adapter: callbacks({ resolveMcpServerConfigs }),
+    });
 
     expect(toolResults[0]).toEqual({
-      success: false,
-      error: expect.stringContaining('acknowledgement'),
+      success: true,
+      result: { automation: { id: 'automation-1', enabled: false } },
     });
     expect(toolResults[1]).toEqual({
-      automation: { id: 'automation-1', enabled: false },
+      success: false,
+      error: 'The same integration call already ran in this turn.',
     });
-    expect(mocks.manageCustomAutomations).toHaveBeenCalledOnce();
-    expect(mocks.manageCustomAutomations).toHaveBeenCalledWith(
+    expect(mocks.callIntegration).toHaveBeenCalledOnce();
+    expect(mocks.listIntegrations).toHaveBeenCalledWith(
       { userId: 'user-1', apiBaseUrl: 'https://api.example.com' },
+      resolveMcpServerConfigs,
+    );
+    expect(mocks.callIntegration).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: 'user-1' }),
+      expect.arrayContaining([expect.objectContaining({ id: 'roomote' })]),
       {
-        action: 'update',
-        automationId: 'automation-1',
-        enabled: false,
+        integrationId: 'roomote',
+        toolName: 'manage_custom_automations',
+        args: {
+          action: 'update',
+          automationId: 'automation-1',
+          enabled: false,
+        },
       },
     );
   });

@@ -1,5 +1,6 @@
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
+import { ROOMOTE_MCP_LEGACY_PATH } from '@roomote/auth';
 import {
   Env,
   areCuratedIntegrationsDisabled,
@@ -61,6 +62,14 @@ const USER_SCOPED_MCP_IDS = MCP_INTEGRATIONS.filter(
   (integration) => !isDeploymentScopedMcpIntegration(integration.id),
 ).map((integration) => integration.id);
 
+type ResolvedMcpServerConfig = {
+  url: string;
+  headers: Record<string, string>;
+  disabledTools?: string[];
+};
+
+type ResolvedMcpServerConfigs = Record<string, ResolvedMcpServerConfig>;
+
 function buildProxyUrl(mcpId: string, requestOrigin: string | null): string {
   const proxyPath = `/api/mcp/${mcpId}`;
   return requestOrigin ? `${requestOrigin}${proxyPath}` : proxyPath;
@@ -76,6 +85,77 @@ function getRequestOrigin(req: { url?: string } | undefined): string | null {
   } catch {
     return null;
   }
+}
+
+async function resolveMcpServerConfigs(options: {
+  auth: Parameters<typeof resolveActorScopedUserContext>[0];
+  requestOrigin: string | null;
+  includeRoomote?: boolean;
+}): Promise<ResolvedMcpServerConfigs> {
+  const servers: ResolvedMcpServerConfigs = {};
+
+  if (!areCuratedIntegrationsDisabled(Env.R_CURATED_INTEGRATIONS_DISABLED)) {
+    Object.assign(
+      servers,
+      await buildCuratedMcpServerConfigs({
+        auth: options.auth,
+        requestOrigin: options.requestOrigin,
+      }),
+    );
+  }
+
+  if (!isCustomMcpDisabled(Env.R_CUSTOM_MCP_DISABLED)) {
+    const custom = await buildCustomMcpServerConfigs(options.requestOrigin);
+
+    for (const [name, config] of Object.entries(custom)) {
+      if (!servers[name]) servers[name] = config;
+    }
+  }
+
+  if (
+    Env.R_GBRAIN_URL &&
+    !servers[BRAIN_MCP_ID] &&
+    (await isBrainProviderConfigured())
+  ) {
+    servers[BRAIN_MCP_ID] = {
+      url: `${options.requestOrigin ?? ''}${BRAIN_PROXY_PATH}`,
+      headers: {},
+    };
+  }
+
+  if (options.includeRoomote && !servers.roomote) {
+    servers.roomote = {
+      url: `${options.requestOrigin ?? ''}${ROOMOTE_MCP_LEGACY_PATH}`,
+      headers: {},
+    };
+  }
+
+  console.info('[getMcpServerConfigs] Final resolved server keys:', [
+    ...Object.keys(servers),
+  ]);
+
+  return servers;
+}
+
+export async function resolveUserMcpServerConfigs(options: {
+  userId: string;
+  apiBaseUrl?: string;
+  includeRoomote?: boolean;
+}): Promise<ResolvedMcpServerConfigs> {
+  let requestOrigin: string | null = null;
+  if (options.apiBaseUrl) {
+    try {
+      requestOrigin = new URL(options.apiBaseUrl).origin;
+    } catch {
+      requestOrigin = null;
+    }
+  }
+
+  return resolveMcpServerConfigs({
+    auth: { userId: options.userId },
+    requestOrigin,
+    includeRoomote: options.includeRoomote,
+  });
 }
 
 export const mcpConnectionsRouter = router({
@@ -158,62 +238,12 @@ export const mcpConnectionsRouter = router({
    *
    * Returns a map of sanitized server names to { url, headers }.
    */
-  getMcpServerConfigs: authenticatedProcedure.query(async ({ ctx }) => {
-    const servers: Record<
-      string,
-      { url: string; headers: Record<string, string> }
-    > = {};
-
-    if (!areCuratedIntegrationsDisabled(Env.R_CURATED_INTEGRATIONS_DISABLED)) {
-      Object.assign(servers, await buildCuratedMcpServerConfigs(ctx));
-    }
-
-    // Deployment custom servers are delivered independently of the curated
-    // kill switch: operators who disable the catalog are precisely the
-    // audience for custom servers. Name collisions cannot happen (curated ids
-    // are reserved at save time), but curated entries win defensively.
-    if (!isCustomMcpDisabled(Env.R_CUSTOM_MCP_DISABLED)) {
-      const custom = await buildCustomMcpServerConfigs(
-        getRequestOrigin(ctx.req),
-      );
-
-      for (const [name, config] of Object.entries(custom)) {
-        if (!servers[name]) {
-          servers[name] = config;
-        }
-      }
-    }
-
-    // The Brain: infrastructure, not a catalog integration, so it is
-    // delivered directly whenever the deployment has one. The name cannot
-    // collide ('gbrain' is reserved for custom servers); the worker injects
-    // the run token sandbox-side and the read-only upstream credential never
-    // leaves the API proxy.
-    //
-    // Delivery requires the operator's explicit R_BRAIN_* provider key, not
-    // just Brain plumbing (R_GBRAIN_URL and the gateway token are
-    // template-defaulted on some platforms): an agent told the Brain exists
-    // starts every substantive topic with a preflight against it, which must
-    // never happen on a deployment that only *could* have a Brain. The check
-    // is cached alongside provider resolution, so the common off state costs
-    // nothing.
-    if (
-      Env.R_GBRAIN_URL &&
-      !servers[BRAIN_MCP_ID] &&
-      (await isBrainProviderConfigured())
-    ) {
-      servers[BRAIN_MCP_ID] = {
-        url: `${getRequestOrigin(ctx.req) ?? ''}${BRAIN_PROXY_PATH}`,
-        headers: {},
-      };
-    }
-
-    console.info('[getMcpServerConfigs] Final resolved server keys:', [
-      ...Object.keys(servers),
-    ]);
-
-    return { servers };
-  }),
+  getMcpServerConfigs: authenticatedProcedure.query(async ({ ctx }) => ({
+    servers: await resolveMcpServerConfigs({
+      auth: ctx.auth,
+      requestOrigin: getRequestOrigin(ctx.req),
+    }),
+  })),
 
   /**
    * Deployment-scoped custom stdio MCP servers, with decrypted env values.
@@ -279,11 +309,8 @@ export const mcpConnectionsRouter = router({
  */
 async function buildCustomMcpServerConfigs(
   requestOrigin: string | null,
-): Promise<Record<string, { url: string; headers: Record<string, string> }>> {
-  const servers: Record<
-    string,
-    { url: string; headers: Record<string, string> }
-  > = {};
+): Promise<ResolvedMcpServerConfigs> {
+  const servers: ResolvedMcpServerConfigs = {};
 
   const rows = await db.query.customMcpServers.findMany({
     where: eq(customMcpServers.enabled, true),
@@ -325,8 +352,8 @@ async function buildCustomMcpServerConfigs(
 
 async function buildCuratedMcpServerConfigs(ctx: {
   auth: Parameters<typeof resolveActorScopedUserContext>[0];
-  req?: { url?: string };
-}): Promise<Record<string, { url: string; headers: Record<string, string> }>> {
+  requestOrigin: string | null;
+}): Promise<ResolvedMcpServerConfigs> {
   const actorContext = await resolveActorScopedUserContext(ctx.auth);
 
   const connectionFilters = [];
@@ -356,6 +383,7 @@ async function buildCuratedMcpServerConfigs(ctx: {
   const enabledConnections = await db
     .select({
       enabledMcpId: deploymentMcpEnablements.mcpId,
+      disabledTools: deploymentMcpEnablements.disabledTools,
       connection: mcpConnections,
     })
     .from(deploymentMcpEnablements)
@@ -391,11 +419,8 @@ async function buildCuratedMcpServerConfigs(ctx: {
     userScopedCount: actorContext.userId ? userScopedEnabledIds.length : 0,
   });
 
-  const servers: Record<
-    string,
-    { url: string; headers: Record<string, string> }
-  > = {};
-  const requestOrigin = getRequestOrigin(ctx.req);
+  const servers: ResolvedMcpServerConfigs = {};
+  const requestOrigin = ctx.requestOrigin;
 
   for (const connection of connections) {
     console.info('[getMcpServerConfigs] Processing connection:', {
@@ -569,6 +594,12 @@ async function buildCuratedMcpServerConfigs(ctx: {
         `[getMcpServerConfigs] Failed to build config for ${connection.id}:`,
         error instanceof Error ? error.message : String(error),
       );
+    }
+  }
+
+  for (const server of enabledConnections) {
+    if (server.disabledTools?.length && servers[server.enabledMcpId]) {
+      servers[server.enabledMcpId]!.disabledTools = server.disabledTools;
     }
   }
 
