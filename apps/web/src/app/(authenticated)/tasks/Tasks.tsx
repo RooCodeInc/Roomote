@@ -19,8 +19,7 @@ import { cn } from '@/lib/utils';
 
 import { useAuthorizedUser } from '@/hooks/useUser';
 import {
-  useTasks,
-  useTaskPagination,
+  useInfiniteTasks,
   useDeleteTasks,
   useTaskFilterState,
 } from '@/hooks/tasks';
@@ -32,6 +31,7 @@ import {
   ListChecks,
   Columns3,
   List,
+  ToggleButton,
   X,
   FunnelX,
   Button,
@@ -43,10 +43,10 @@ import {
   DialogHeader,
   DialogTitle,
   Label,
-  CursorPagination,
   Empty,
   EmptyHeader,
   EmptyDescription,
+  Spinner,
 } from '@/components/system';
 import {
   TaskFilters,
@@ -343,17 +343,21 @@ export const Tasks = () => {
   });
 
   /**
-   * Tasks (Graceful Loading + Polling + Pagination)
+   * Tasks (Graceful Loading + Polling)
    */
 
-  const { data, isPending, isError, pagination } = useTasks({
+  const infiniteTasks = useInfiniteTasks({
     filters: effectiveFilters,
     timePeriod,
+    pageSize: 50,
   });
 
-  const tasks = data?.tasks || [];
-
-  useTaskPagination(pagination, effectiveFilters, timePeriod, data?.nextCursor);
+  const tasks = useMemo(
+    () => infiniteTasks.data?.pages.flatMap((page) => page.tasks) ?? [],
+    [infiniteTasks.data],
+  );
+  const isPending = infiniteTasks.isPending;
+  const isError = infiniteTasks.isError && !infiniteTasks.data;
 
   const { showContent } = useGracefulLoading({
     isPending,
@@ -465,13 +469,13 @@ export const Tasks = () => {
   // Preserve only selections that still exist in the current task list when
   // tasks change.
   useEffect(() => {
-    if (data?.tasks && data.tasks.length > 0 && selectedTasks.size > 0) {
+    if (tasks.length > 0 && selectedTasks.size > 0) {
       setSelectedTasks((prev) => {
-        const taskIds = new Set(data.tasks.map((t) => t.id));
+        const taskIds = new Set(tasks.map((task) => task.id));
         return new Set([...prev].filter((id) => taskIds.has(id)));
       });
     }
-  }, [data?.tasks, selectedTasks.size]);
+  }, [tasks, selectedTasks.size]);
 
   /**
    * Derived State
@@ -512,26 +516,36 @@ export const Tasks = () => {
 
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex items-center rounded-md border border-border p-0.5">
-              <Button
-                variant={isBoardView ? 'ghost' : 'secondary'}
+              <ToggleButton
+                pressed={!isBoardView}
                 size="xs"
-                onClick={() => handleViewChange('list')}
-                aria-pressed={!isBoardView}
+                variant="ghost"
+                pressedVariant="secondary"
+                onPressedChange={(pressed) => {
+                  if (pressed) {
+                    handleViewChange('list');
+                  }
+                }}
                 title="List view"
               >
                 <List />
                 <span className="hidden sm:inline">List</span>
-              </Button>
-              <Button
-                variant={isBoardView ? 'secondary' : 'ghost'}
+              </ToggleButton>
+              <ToggleButton
+                pressed={isBoardView}
                 size="xs"
-                onClick={() => handleViewChange('board')}
-                aria-pressed={isBoardView}
+                variant="ghost"
+                pressedVariant="secondary"
+                onPressedChange={(pressed) => {
+                  if (pressed) {
+                    handleViewChange('board');
+                  }
+                }}
                 title="Board view"
               >
                 <Columns3 />
                 <span className="hidden sm:inline">Board</span>
-              </Button>
+              </ToggleButton>
             </div>
 
             {!isSelectionMode ? (
@@ -687,41 +701,44 @@ export const Tasks = () => {
           </Dialog>
 
           <div className="flex min-h-0 flex-1 flex-col bg-background">
-            {isBoardView ? (
-              <div
-                ref={tasksListRef}
-                className="min-h-0 flex-1 overflow-y-auto"
-              >
+            <div
+              ref={tasksListRef}
+              className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden"
+            >
+              {isBoardView ? (
                 <TaskBoard tasks={tasks} />
-                <CursorPagination
-                  pagination={pagination}
-                  scrollTargetRef={tasksListRef}
-                />
-              </div>
-            ) : (
-              <div
-                ref={tasksListRef}
-                className="min-h-0 flex-1 divide-y divide-card overflow-y-auto overflow-x-hidden"
-              >
-                {tasks.map((task) => (
-                  <TaskCard
-                    key={task.id}
-                    task={task}
-                    filterState={taskFilterState}
-                    isSelected={selectedTasks.has(task.id)}
-                    inSelectionMode={isSelectionMode}
-                    onSelectionChange={
-                      isSelectionMode ? handleSelectionChange : undefined
-                    }
-                  />
-                ))}
-
-                <CursorPagination
-                  pagination={pagination}
-                  scrollTargetRef={tasksListRef}
-                />
-              </div>
-            )}
+              ) : (
+                <div className="divide-y divide-card">
+                  {tasks.map((task) => (
+                    <TaskCard
+                      key={task.id}
+                      task={task}
+                      filterState={taskFilterState}
+                      isSelected={selectedTasks.has(task.id)}
+                      inSelectionMode={isSelectionMode}
+                      onSelectionChange={
+                        isSelectionMode ? handleSelectionChange : undefined
+                      }
+                    />
+                  ))}
+                </div>
+              )}
+              {infiniteTasks.hasNextPage && (
+                <div className="flex justify-center py-4">
+                  <Button
+                    variant="outline"
+                    onClick={() => infiniteTasks.fetchNextPage()}
+                    disabled={infiniteTasks.isFetchingNextPage}
+                  >
+                    {infiniteTasks.isFetchingNextPage ? (
+                      <Spinner />
+                    ) : (
+                      'Load more'
+                    )}
+                  </Button>
+                </div>
+              )}
+            </div>
           </div>
         </>
       )}

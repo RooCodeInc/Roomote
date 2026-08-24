@@ -230,8 +230,8 @@ export function TaskBoard({ tasks }: { tasks: Task[] }) {
                   <BoardTaskCard key={task.id} task={task} />
                 ))
               ) : (
-                <div className="pl-6 text-xs text-muted-foreground">
-                  No tasks here
+                <div className="pl-4 text-xs text-muted-foreground/50">
+                  Empty
                 </div>
               )}
             </div>
