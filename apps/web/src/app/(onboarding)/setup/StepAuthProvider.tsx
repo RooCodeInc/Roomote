@@ -80,20 +80,18 @@ export function StepAuthProvider({
               </Button>
             );
           })}
-        </div>
-
-        <SetupFooter onBack={onBack} backDisabled={disabled}>
           {onSkip ? (
-            <button
-              type="button"
-              className="cursor-pointer text-sm text-muted-foreground underline disabled:cursor-not-allowed disabled:opacity-50"
+            <Button
+              className="w-full py-5"
+              variant="outline"
               onClick={onSkip}
               disabled={disabled}
             >
-              Do this later
-            </button>
+              <span className="font-medium grow text-left">Do this later</span>
+              <ArrowRight />
+            </Button>
           ) : null}
-        </SetupFooter>
+        </div>
       </div>
     </div>
   );
