@@ -48,6 +48,17 @@ import {
 
 type PrReviewNotificationJob = Job<PrReviewNotificationRequest, void, string>;
 
+function isLiveTaskTurn(run: typeof taskRuns.$inferSelect): boolean {
+  if (!isTaskExecutingTurn(run.status, run.taskPhase)) {
+    return false;
+  }
+
+  return !(
+    run.workerHeartbeatAt != null &&
+    Date.now() - run.workerHeartbeatAt.getTime() >= WORKER_HEARTBEAT_STALE_MS
+  );
+}
+
 function logPrReviewNotificationTriage(input: {
   data: PrReviewNotificationRequest;
   eventsDrained: number;
@@ -313,10 +324,7 @@ export const prReviewNotificationJob = async (
     latestJob.status,
     latestJob.taskPhase,
   );
-  const isWorkerHeartbeatStale =
-    latestJob.workerHeartbeatAt != null &&
-    Date.now() - latestJob.workerHeartbeatAt.getTime() >=
-      WORKER_HEARTBEAT_STALE_MS;
+  const isWorkerHeartbeatStale = isExecutingTurn && !isLiveTaskTurn(latestJob);
 
   if (isExecutingTurn && !isWorkerHeartbeatStale) {
     if (data.deferrals < PR_REVIEW_NOTIFICATION_MAX_DEFERRALS) {
@@ -409,6 +417,33 @@ export const prReviewNotificationJob = async (
     if (!delivery.post) {
       console.log(
         `[PrReviewNotification] Skipping review-feedback notification for ${data.repository}#${data.prNumber} (${delivery.reason})`,
+      );
+      await finalizePrReviewNotificationRequest(data, 'suppressed');
+      return;
+    }
+
+    // The task can be resumed by a review action while remote reads and model
+    // triage are in flight. Recheck before posting so a bulk-fix run gets the
+    // chance to resolve its included threads; the next delivery attempt then
+    // filters those handled comments against live provider state.
+    const latestBeforeDelivery = await db.query.taskRuns.findFirst({
+      where: eq(taskRuns.taskId, data.taskId),
+      orderBy: [desc(taskRuns.createdAt)],
+    });
+    if (latestBeforeDelivery && isLiveTaskTurn(latestBeforeDelivery)) {
+      if (data.deferrals < PR_REVIEW_NOTIFICATION_MAX_DEFERRALS) {
+        await schedulePrReviewNotificationJob({
+          request: { ...data, deferrals: data.deferrals + 1 },
+          delayMs: PR_REVIEW_NOTIFICATION_DEFER_MS,
+        });
+        console.log(
+          `[PrReviewNotification] Task ${data.taskId} resumed while preparing review feedback for ${data.repository}#${data.prNumber}; deferred delivery (deferral ${data.deferrals + 1})`,
+        );
+        return;
+      }
+
+      console.warn(
+        `[PrReviewNotification] Task ${data.taskId} resumed while preparing review feedback for ${data.repository}#${data.prNumber}; dropping pending activity after ${data.deferrals} deferrals`,
       );
       await finalizePrReviewNotificationRequest(data, 'suppressed');
       return;
