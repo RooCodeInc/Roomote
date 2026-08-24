@@ -102,6 +102,7 @@ export const NON_TASK_INFERENCE_SURFACES = {
 const NON_TASK_INFERENCE_VALIDATION_TIMEOUT_MS = 15_000;
 
 export type NonTaskInferenceValidationFailureReason =
+  | 'content_filter'
   | 'endpoint_unreachable'
   | 'gateway_blocked'
   | 'insufficient_credits'
@@ -1192,6 +1193,51 @@ function isInferenceErrorExplicitlyNonRetryable(error: unknown): boolean {
   return false;
 }
 
+function isContentFilterInferenceError(error: unknown): boolean {
+  const pending: Array<{ value: unknown; depth: number }> = [
+    { value: error, depth: 0 },
+  ];
+  const seen = new Set<object>();
+
+  while (pending.length > 0) {
+    const current = pending.shift();
+    if (!current || current.depth > 4) continue;
+
+    const { value, depth } = current;
+    if (typeof value === 'string') {
+      const normalized = value.toLowerCase();
+      if (
+        normalized.includes('contentfiltererror') ||
+        normalized.includes('content_filter') ||
+        (normalized.includes('content filter') &&
+          (normalized.includes('blocked') || normalized.includes('filtered')))
+      ) {
+        return true;
+      }
+
+      try {
+        pending.push({ value: JSON.parse(value), depth: depth + 1 });
+      } catch {
+        // The recognized provider message signatures above are sufficient.
+      }
+      continue;
+    }
+    if (!value || typeof value !== 'object' || seen.has(value)) continue;
+
+    seen.add(value);
+    const record = value as Record<string, unknown>;
+    pending.push(
+      { value: record.name, depth: depth + 1 },
+      { value: record.message, depth: depth + 1 },
+    );
+    for (const nested of Object.values(value)) {
+      pending.push({ value: nested, depth: depth + 1 });
+    }
+  }
+
+  return false;
+}
+
 export function classifyNonTaskInferenceError(
   error: unknown,
 ): Pick<
@@ -1222,6 +1268,15 @@ export function classifyNonTaskInferenceError(
     (statusCode === 403 && /^\s*(?:<!doctype|<html)/iu.test(responseBody)) ||
     (detail.includes('forbidden:') &&
       detail.includes('request was blocked by a gateway or proxy'));
+
+  if (isContentFilterInferenceError(inferenceError)) {
+    return {
+      message:
+        'The inference provider blocked the response with its content filter.',
+      reason: 'content_filter',
+      retryable: false,
+    };
+  }
 
   if (isInferenceErrorExplicitlyNonRetryable(inferenceError)) {
     return {
@@ -1285,7 +1340,6 @@ export function classifyNonTaskInferenceError(
 
   if (
     errorName === 'ContextOverflowError' ||
-    errorName === 'ContentFilterError' ||
     errorName === 'MessageOutputLengthError' ||
     errorName === 'StructuredOutputError'
   ) {
