@@ -64,7 +64,6 @@ export type CommunicationLookupStrategy = {
   getMessageContext(options: {
     channel?: string;
     messageId: string;
-    slackTeamId?: string;
     taskRun?: CommunicationLookupTaskRun | null;
     actingUserId?: string | null;
   }): Promise<CommunicationMessageContextPayload>;
@@ -72,7 +71,6 @@ export type CommunicationLookupStrategy = {
     channel?: string;
     oldest?: string;
     latest?: string;
-    slackTeamId?: string;
     taskRun?: CommunicationLookupTaskRun | null;
     actingUserId?: string | null;
   }): Promise<CommunicationChannelMessagesPayload>;

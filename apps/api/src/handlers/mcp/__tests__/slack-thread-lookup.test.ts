@@ -32,11 +32,7 @@ vi.mock('@roomote/db/server', () => ({
   },
   taskRuns: { id: 'id' },
   tasks: { id: 'id' },
-  slackInstallations: {
-    orgId: 'orgId',
-    isActive: 'isActive',
-    teamId: 'slackTeamId',
-  },
+  slackInstallations: { orgId: 'orgId', isActive: 'isActive' },
   slackUserMappings: {
     userId: 'userId',
     slackTeamId: 'slackTeamId',
@@ -96,10 +92,10 @@ vi.mock('@roomote/redis', () => ({
   })),
 }));
 
-import { db, eq } from '@roomote/db/server';
+import { db } from '@roomote/db/server';
 import { mcpAuthMiddleware } from '../middleware';
 import { slackMcp } from '../slack';
-import { getSlackReplyTarget, lookupSlackThread } from '../slack-thread-lookup';
+import { getSlackReplyTarget } from '../slack-thread-lookup';
 
 type JsonBody = {
   error?: string;
@@ -223,25 +219,6 @@ describe('slack thread lookup MCP endpoint', () => {
     expect(body.error).toBe(
       'Slack thread lookup MCP is only available for task run tokens',
     );
-  });
-
-  it('does not fall back to another Slack installation when the active workspace has none', async () => {
-    vi.mocked(db.query.slackInstallations.findFirst).mockResolvedValueOnce(
-      undefined as never,
-    );
-
-    await expect(
-      lookupSlackThread({
-        actingSlackMembershipUserId: 'user-1',
-        channel: 'COTHER123',
-        messageTs: '111.222',
-        slackTeamId: 'T_ACTIVE',
-      }),
-    ).rejects.toThrow('No active Slack installation found for this deployment');
-
-    expect(eq).toHaveBeenCalledWith('slackTeamId', 'T_ACTIVE');
-    expect(resolveChannelIdMock).not.toHaveBeenCalled();
-    expect(getMessageMock).not.toHaveBeenCalled();
   });
 
   it('returns the full thread containing the requested message', async () => {

@@ -112,14 +112,12 @@ describe('lookupCommunicationMessageContext', () => {
     const taskRun = { payload: {}, actingUserId: 'user-1' };
     await lookupCommunicationMessageContext({
       messageLink: 'https://acme.slack.com/archives/C123/p1710000000000100',
-      slackTeamId: 'T123',
       taskRun,
     });
 
     expect(lookupSlackThreadMock).toHaveBeenCalledWith({
       channel: 'C123',
       messageTs: '1710000000.000100',
-      slackTeamId: 'T123',
       taskRun: { ...taskRun, slackThreadTs: null },
     });
   });
@@ -241,13 +239,11 @@ describe('lookupCommunicationChannelMessages', () => {
       actingUserId: 'user-1',
       channel: 'https://acme.slack.com/archives/C123',
       provider: 'slack',
-      slackTeamId: 'T123',
     });
 
     expect(lookupSlackChannelMessagesMock).toHaveBeenCalledWith({
       actingSlackMembershipUserId: 'user-1',
       channel: 'C123',
-      slackTeamId: 'T123',
     });
   });
 

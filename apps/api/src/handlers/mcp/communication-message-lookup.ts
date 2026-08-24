@@ -83,7 +83,6 @@ export async function lookupCommunicationMessageContext(options: {
   messageId?: string;
   messageLink?: string;
   provider?: SupportedCommunicationLookupProvider;
-  slackTeamId?: string;
   taskRun?: CommunicationLookupTaskRun | null;
   actingUserId?: string | null;
 }): Promise<CommunicationMessageContextPayload> {
@@ -151,7 +150,6 @@ export async function lookupCommunicationMessageContext(options: {
     messageId,
     ...(options.taskRun ? { taskRun: options.taskRun } : {}),
     ...(options.actingUserId ? { actingUserId: options.actingUserId } : {}),
-    ...(options.slackTeamId ? { slackTeamId: options.slackTeamId } : {}),
   });
 }
 
@@ -160,7 +158,6 @@ export async function lookupCommunicationChannelMessages(options: {
   oldest?: string;
   latest?: string;
   provider?: SupportedCommunicationLookupProvider;
-  slackTeamId?: string;
   taskRun?: CommunicationLookupTaskRun | null;
   actingUserId?: string | null;
 }): Promise<CommunicationChannelMessagesPayload> {
@@ -188,6 +185,5 @@ export async function lookupCommunicationChannelMessages(options: {
     ...(options.latest ? { latest: options.latest } : {}),
     ...(options.taskRun ? { taskRun: options.taskRun } : {}),
     ...(options.actingUserId ? { actingUserId: options.actingUserId } : {}),
-    ...(options.slackTeamId ? { slackTeamId: options.slackTeamId } : {}),
   });
 }

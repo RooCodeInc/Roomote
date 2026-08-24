@@ -36,7 +36,6 @@ describe('createFastAgentChatContextAdapter', () => {
       channel: 'channel-1',
       messageId: '100.2',
       provider: 'slack',
-      slackTeamId: 'team-1',
     });
     expect(mocks.lookupChannelMessages).toHaveBeenCalledWith({
       actingUserId: 'user-1',
@@ -44,7 +43,6 @@ describe('createFastAgentChatContextAdapter', () => {
       oldest: '99.1',
       latest: '101.1',
       provider: 'slack',
-      slackTeamId: 'team-1',
     });
   });
 
@@ -96,13 +94,11 @@ describe('createFastAgentChatContextAdapter', () => {
       channel: 'COTHER',
       messageId: '1710000000.000100',
       provider: 'slack',
-      slackTeamId: 'team-1',
     });
     expect(mocks.lookupChannelMessages).toHaveBeenCalledWith({
       actingUserId: 'user-1',
       channel: '#other',
       provider: 'slack',
-      slackTeamId: 'team-1',
     });
   });
 
