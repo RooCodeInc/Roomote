@@ -168,7 +168,7 @@ describe('UserPreferencesSection', () => {
     expect(screen.getByText('Fast response mode')).toHaveClass('font-semibold');
     expect(
       screen.getByText(
-        'Respond to prompts quickly, only spinning up sandboxes if needed',
+        'Use fast responses by default for linked Slack and Discord messages. Dashboard, GitHub, Teams, and Telegram are unaffected; `!fast` remains available in Slack.',
       ),
     ).toBeInTheDocument();
   });
