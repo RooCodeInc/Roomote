@@ -240,6 +240,14 @@ function payloadProviderCondition(
  * Returns the newest active Roomote run that can safely continue follow-up
  * work on the same PR branch without introducing a second writer or second
  * PR-scoped thread when an active owner already exists.
+ *
+ * `host` scopes both lookups the same way `findActiveGitHubBranchWork` does:
+ * an association row or payload stamped with a different host is a same-named
+ * repository on another self-managed instance and must not match.
+ *
+ * `fastAgentConversation` narrows candidates to runs delegated by one Fast
+ * conversation, so a shared conversation can name a single owner across its
+ * linked tasks. An empty `branchName` skips the branch fallback entirely.
  */
 export async function findReusableGitHubPrFollowUpOwner({
   repoFullName,
@@ -297,6 +305,13 @@ export async function findReusableGitHubPrFollowUpOwner({
     return taskPullRequestMatch;
   }
 
+  // An empty branch name is never a real branch. Running the fallback anyway
+  // would match payloads that stamped an empty `branch`/`headRef` and hand
+  // ownership to an unrelated task.
+  if (!branchName) {
+    return null;
+  }
+
   const branchRows = await db
     .select(REUSABLE_FOLLOW_UP_OWNER_COLUMNS)
     .from(taskRuns)
@@ -311,9 +326,20 @@ export async function findReusableGitHubPrFollowUpOwner({
         )`,
         ...(host
           ? [
+              // Mirrors findActiveGitHubBranchWork: an unstamped (legacy)
+              // payload matches only when the task has no linkage row pinning
+              // it to a different self-managed instance.
               sql`(
                 ${taskRuns.payload}->>'sourceControlHost' = ${host}
-                OR ${taskRuns.payload}->>'sourceControlHost' IS NULL
+                OR (
+                  ${taskRuns.payload}->>'sourceControlHost' IS NULL
+                  AND NOT EXISTS (
+                    SELECT 1 FROM ${taskPullRequests}
+                    WHERE ${taskPullRequests.taskId} = ${taskRuns.taskId}
+                      AND ${taskPullRequests.host} IS NOT NULL
+                      AND ${taskPullRequests.host} <> ${host}
+                  )
+                )
               )`,
             ]
           : []),

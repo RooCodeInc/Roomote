@@ -364,7 +364,6 @@ describe('sendMessageToTask', () => {
     });
     expect(mockNotifyFastAgentParentOnPrFeedback).toHaveBeenCalledWith({
       run: expect.objectContaining({ id: 42, taskId: 'task-1' }),
-      deliveryIds: ['linked-review:review-task:abc123'],
       feedbackSourceIds: ['linked-review:review-task:abc123'],
       reviewTaskId: 'review-task',
       reviewHeadSha: 'abc123',
@@ -446,7 +445,6 @@ describe('sendMessageToTask', () => {
 
     expect(mockNotifyFastAgentParentOnPrFeedback).toHaveBeenCalledWith(
       expect.objectContaining({
-        deliveryIds: ['linked-review:review-task:200'],
         feedbackSourceIds: ['linked-review:review-task:200'],
         reviewTaskId: 'review-task',
       }),

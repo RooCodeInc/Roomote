@@ -17,6 +17,17 @@ export type FastAgentPrFeedbackDeliveryClaim = {
   leaseToken: string;
 };
 
+/**
+ * `no_conversation` is deliberately distinct from `already_claimed`: a missing
+ * conversation row means this identity cannot be deduplicated at all, so
+ * callers must fall back to their own claim instead of treating the delivery
+ * as already handled.
+ */
+export type FastAgentPrFeedbackDeliveryClaimResult =
+  | { status: 'claimed'; claim: FastAgentPrFeedbackDeliveryClaim }
+  | { status: 'already_claimed' }
+  | { status: 'no_conversation' };
+
 export async function claimFastAgentPrFeedbackDelivery(params: {
   conversation: Pick<
     FastAgentConversation,
@@ -25,7 +36,7 @@ export async function claimFastAgentPrFeedbackDelivery(params: {
   feedbackId: string;
   taskId: string;
   now?: Date;
-}): Promise<FastAgentPrFeedbackDeliveryClaim | null> {
+}): Promise<FastAgentPrFeedbackDeliveryClaimResult> {
   const conversation = await db.query.fastAgentConversations.findFirst({
     where: and(
       eq(fastAgentConversations.surface, params.conversation.surface),
@@ -38,7 +49,7 @@ export async function claimFastAgentPrFeedbackDelivery(params: {
     columns: { id: true },
   });
   if (!conversation) {
-    return null;
+    return { status: 'no_conversation' };
   }
 
   const now = params.now ?? new Date();
@@ -77,7 +88,9 @@ export async function claimFastAgentPrFeedbackDelivery(params: {
     })
     .returning({ id: fastAgentPrFeedbackDeliveries.id });
 
-  return claim ? { id: claim.id, leaseToken } : null;
+  return claim
+    ? { status: 'claimed', claim: { id: claim.id, leaseToken } }
+    : { status: 'already_claimed' };
 }
 
 export async function completeFastAgentPrFeedbackDelivery(

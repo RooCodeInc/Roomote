@@ -733,6 +733,66 @@ describe('findActiveGitHubBranchWork', () => {
 });
 
 describe('findReusableGitHubPrFollowUpOwner', () => {
+  it('skips the branch fallback when no branch name is given', async () => {
+    const { user } = await createActor();
+    const repoFullName = 'owner/repo-reusable-owner-empty-branch';
+    const task = await taskFactory.create({ initiatorUserId: user.id });
+    await runFactory.create({
+      actingUserId: user.id,
+      taskId: task.id,
+      payloadKind: TaskPayloadKind.StandardTask,
+      status: RunStatus.Pending,
+      payload: { repo: repoFullName, branch: '' },
+    });
+
+    const result = await findReusableGitHubPrFollowUpOwner({
+      repoFullName,
+      prNumber: 901,
+      branchName: '',
+    });
+
+    expect(result).toBeNull();
+  });
+
+  it('does not branch-match an unstamped payload pinned to another host', async () => {
+    const { user } = await createActor();
+    const repoFullName = 'owner/repo-reusable-owner-host-pin';
+    const branchName = 'feature/host-pin';
+    // The linkage row pins this task to ghe-a, so its unstamped payload must
+    // not satisfy a lookup for ghe-b.
+    const taskId = await createPrLinkedTask({
+      repoFullName,
+      prNumber: 902,
+      userId: user.id,
+      host: 'ghe-a.example.com',
+    });
+    await runFactory.create({
+      actingUserId: user.id,
+      taskId,
+      payloadKind: TaskPayloadKind.StandardTask,
+      status: RunStatus.Pending,
+      payload: { repo: repoFullName, branch: branchName },
+    });
+
+    await expect(
+      findReusableGitHubPrFollowUpOwner({
+        repoFullName,
+        prNumber: 903,
+        branchName,
+        host: 'ghe-b.example.com',
+      }),
+    ).resolves.toBeNull();
+
+    await expect(
+      findReusableGitHubPrFollowUpOwner({
+        repoFullName,
+        prNumber: 903,
+        branchName,
+        host: 'ghe-a.example.com',
+      }),
+    ).resolves.toMatchObject({ taskId });
+  });
+
   it('uses the newest run id when reusable owners have equal timestamps', async () => {
     const { user } = await createActor();
     const repoFullName = 'owner/repo-reusable-owner-tie';

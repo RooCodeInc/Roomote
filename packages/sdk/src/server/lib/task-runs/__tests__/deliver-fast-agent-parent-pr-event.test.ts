@@ -134,10 +134,10 @@ describe('deliverFastAgentParentPrEvent', () => {
     const deliverEvent = vi.fn().mockResolvedValue('delivered');
     mocks.claimConversationDelivery
       .mockResolvedValueOnce({
-        id: 'conversation-claim',
-        leaseToken: 'lease-token',
+        status: 'claimed',
+        claim: { id: 'conversation-claim', leaseToken: 'lease-token' },
       })
-      .mockResolvedValueOnce(null);
+      .mockResolvedValueOnce({ status: 'already_claimed' });
     const conversationClaim = {
       conversation: {
         surface: 'slack' as const,
@@ -184,7 +184,36 @@ describe('deliverFastAgentParentPrEvent', () => {
     });
     expect(deliverEvent).toHaveBeenCalledOnce();
     expect(mocks.completeConversationDelivery).toHaveBeenCalledOnce();
-    expect(mocks.findClaimRun).not.toHaveBeenCalled();
+    // The conversation claim is the sole arbiter, so the task-scoped claim
+    // predicate must never gate it.
+    expect(mocks.claimReturning).not.toHaveBeenCalled();
+  });
+
+  it('falls back to the task-scoped claim when the conversation row is missing', async () => {
+    const deliverEvent = vi.fn().mockResolvedValue('delivered');
+    mocks.claimConversationDelivery.mockResolvedValue({
+      status: 'no_conversation',
+    });
+
+    await deliverFastAgentParentPrEvent({
+      run,
+      deliveryKey,
+      logPrefix: 'testFastParentPrEvent',
+      conversationClaim: {
+        conversation: {
+          surface: 'slack' as const,
+          workspaceId: 'T123',
+          conversationId: '100.001',
+        },
+        feedbackId: 'feedback-1',
+      },
+      deliver: deliverEvent,
+      recordLifecycle: vi.fn().mockResolvedValue(undefined),
+    });
+
+    expect(deliverEvent).toHaveBeenCalledOnce();
+    expect(mocks.completeConversationDelivery).not.toHaveBeenCalled();
+    expect(mocks.findClaimRun).toHaveBeenCalled();
   });
 
   it('stores the claim on the canonical task row across resumed runs', async () => {

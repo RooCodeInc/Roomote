@@ -1,4 +1,5 @@
 import {
+  type FastAgentPrFeedbackDeliveryClaim,
   claimFastAgentPrFeedbackDelivery,
   completeFastAgentPrFeedbackDelivery,
   type SQL,
@@ -35,21 +36,26 @@ export async function deliverFastAgentParentPrEvent(params: {
     feedbackId: string;
   };
 }): Promise<void> {
+  let conversationClaim: FastAgentPrFeedbackDeliveryClaim | null = null;
   if (params.conversationClaim) {
-    const claim = await claimFastAgentPrFeedbackDelivery({
+    const claimResult = await claimFastAgentPrFeedbackDelivery({
       conversation: params.conversationClaim.conversation,
       feedbackId: params.conversationClaim.feedbackId,
       taskId: params.run.taskId,
     });
-    if (!claim) {
+    if (claimResult.status === 'already_claimed') {
       return;
     }
-
-    return deliverClaimedFastAgentParentPrEvent({
-      ...params,
-      markDelivered: () => completeFastAgentPrFeedbackDelivery(claim),
-      releaseClaim: () => releaseFastAgentPrFeedbackDelivery(claim),
-    });
+    if (claimResult.status === 'no_conversation') {
+      // The conversation row is the dedupe scope. Without it there is nothing
+      // to deduplicate against, so fall through to the task-scoped claim
+      // rather than silently dropping the event.
+      console.warn(
+        `[${params.logPrefix}] No Fast conversation row for ${params.conversationClaim.conversation.surface}:${params.conversationClaim.conversation.workspaceId}:${params.conversationClaim.conversation.conversationId}; falling back to the task-scoped delivery claim.`,
+      );
+    } else {
+      conversationClaim = claimResult.claim;
+    }
   }
 
   // Keep one claim row per task so a resume between two delivery paths cannot
@@ -78,6 +84,22 @@ export async function deliverFastAgentParentPrEvent(params: {
       })
       .where(eq(taskRuns.id, claimRun.id));
   };
+
+  // A held conversation claim is already the single arbiter for this identity,
+  // so it must not be double-gated on the task-scoped claim predicate. Stamp
+  // the run row on success anyway so the delivery stays visible on the task.
+  if (conversationClaim) {
+    const claim = conversationClaim;
+    return deliverClaimedFastAgentParentPrEvent({
+      ...params,
+      markDelivered: async () => {
+        await completeFastAgentPrFeedbackDelivery(claim);
+        await markDelivered();
+      },
+      releaseClaim: () => releaseFastAgentPrFeedbackDelivery(claim),
+    });
+  }
+
   const claimRows = await db
     .update(taskRuns)
     .set({

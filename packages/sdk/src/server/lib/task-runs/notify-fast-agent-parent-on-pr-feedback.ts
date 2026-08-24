@@ -69,10 +69,20 @@ function buildFeedbackId(params: {
     .slice(0, 24);
 }
 
+/**
+ * Best-effort branch for the reusable-owner branch fallback. An empty string is
+ * never a real branch, and `findReusableGitHubPrFollowUpOwner` skips the branch
+ * lookup rather than matching payloads that stamped an empty branch.
+ */
+function getPayloadBranchName(payload: TaskRun['payload']): string {
+  const record = (payload ?? {}) as Record<string, unknown>;
+  const branch = record.branchName ?? record.branch ?? record.headRef;
+  return typeof branch === 'string' ? branch : '';
+}
+
 /** Pass triaged PR feedback to the Fast conversation that delegated the task. */
 export async function notifyFastAgentParentOnPrFeedback(params: {
   run: Pick<TaskRun, 'id' | 'taskId' | 'payload'>;
-  deliveryIds: string[];
   reviewTaskId?: string;
   reviewHeadSha?: string;
   pullRequest: {
@@ -101,17 +111,21 @@ export async function notifyFastAgentParentOnPrFeedback(params: {
     return false;
   }
 
+  // Attribution only. Whichever linked task wins the conversation-scoped claim
+  // delivers, so this must not gate delivery: the newest reusable owner is not
+  // guaranteed to reach its own delivery path (its notification job can defer
+  // past its cap and drop the pending activity, or suppress in its own triage),
+  // and a hard skip here would lose the feedback entirely.
   const reusableOwner = await findReusableGitHubPrFollowUpOwner({
     repoFullName: params.pullRequest.repository,
     prNumber: params.pullRequest.number,
-    branchName: '',
+    branchName: getPayloadBranchName(params.run.payload),
     sourceControlProvider: params.pullRequest.provider,
     host: params.pullRequest.host,
     fastAgentConversation: parent.conversation,
   });
-  if (reusableOwner && reusableOwner.taskId !== params.run.taskId) {
-    return true;
-  }
+  const attributedTaskId = reusableOwner?.taskId ?? params.run.taskId;
+  const attributedRunId = reusableOwner?.runId ?? params.run.id;
 
   const feedbackId = buildFeedbackId({
     conversation: parent.conversation,
@@ -150,10 +164,10 @@ export async function notifyFastAgentParentOnPrFeedback(params: {
         event: {
           type: 'pull_request_feedback',
           feedbackId,
-          taskId: params.run.taskId,
-          runId: params.run.id,
+          taskId: attributedTaskId,
+          runId: attributedRunId,
           taskUrl: getTaskUrl({
-            taskId: params.run.taskId,
+            taskId: attributedTaskId,
             utm: {
               source: parent.conversation.surface,
               campaign: 'fast-delegation-pr-feedback',
