@@ -13,6 +13,7 @@ export function isTaskRunFollowUpCandidate(
     canceledAt: AnyPgColumn;
     snapshotId: AnyPgColumn;
     snapshotCreatedAt: AnyPgColumn;
+    snapshotFailedAt: AnyPgColumn;
   },
   now = new Date(),
 ): SQL {
@@ -23,7 +24,9 @@ export function isTaskRunFollowUpCandidate(
     ),
     and(
       inArray(columns.status, [...exitedRunStatuses]),
+      isNull(columns.canceledAt),
       isNotNull(columns.snapshotId),
+      isNull(columns.snapshotFailedAt),
       gt(
         columns.snapshotCreatedAt,
         new Date(now.getTime() - SANDBOX_SNAPSHOT_EXPIRY_MS),

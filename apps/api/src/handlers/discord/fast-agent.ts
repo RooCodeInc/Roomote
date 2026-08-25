@@ -117,6 +117,7 @@ export async function processDiscordFastAgentMessage(input: {
       userId: input.senderUserId,
       apiBaseUrl,
       conversation,
+      currentMessageId: message?.id,
       signal: releaseFastAgentLock.signal,
       senderDisplayName:
         input.interaction?.interaction.member?.nick ??

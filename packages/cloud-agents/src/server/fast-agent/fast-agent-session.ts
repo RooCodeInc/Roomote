@@ -57,6 +57,7 @@ export async function getActiveFastAgentTasks(
         canceledAt: taskRuns.canceledAt,
         snapshotId: taskRuns.snapshotId,
         snapshotCreatedAt: taskRuns.snapshotCreatedAt,
+        snapshotFailedAt: taskRuns.snapshotFailedAt,
       })
       .from(taskRuns)
       .innerJoin(tasks, eq(tasks.id, taskRuns.taskId))
@@ -83,6 +84,7 @@ export async function getActiveFastAgentTasks(
         canceledAt: latestRunPerTask.canceledAt,
         snapshotId: latestRunPerTask.snapshotId,
         snapshotCreatedAt: latestRunPerTask.snapshotCreatedAt,
+        snapshotFailedAt: latestRunPerTask.snapshotFailedAt,
       }),
     )
     .orderBy(desc(latestRunPerTask.createdAt));

@@ -88,6 +88,33 @@ describe('processDiscordFastAgentMessage', () => {
     });
   });
 
+  it('passes the inbound Discord message ID to the Fast turn', async () => {
+    mocks.answerQuestion.mockResolvedValueOnce('Handled.');
+
+    await processDiscordFastAgentMessage({
+      event: { eventId: 'event-1' } as never,
+      question: 'Investigate this',
+      sender: { id: 'discord-user-1', username: 'matt' } as never,
+      senderUserId: 'user-1',
+      provider: {} as never,
+      applicationId: 'application-1',
+      channel: {
+        channelId: 'channel-1',
+        guildId: null,
+        isDirectMessage: true,
+        isThread: false,
+      } as never,
+      metadata: {
+        communicationChannelId: 'channel-1',
+      } as never,
+      conversationId: 'channel-1',
+    });
+
+    expect(mocks.answerQuestion).toHaveBeenCalledWith(
+      expect.objectContaining({ currentMessageId: 'source-1' }),
+    );
+  });
+
   it('replaces a Fast retry notice in place', async () => {
     const provider = {
       editMessage: vi.fn().mockResolvedValue(undefined),
