@@ -201,6 +201,9 @@ describe('buildOpenCodeCliEnv', () => {
     );
     const config = JSON.parse(env.OPENCODE_CONFIG_CONTENT ?? '{}');
 
+    // Fast intentionally leaves OpenCode 1.18.10's 50 KiB / 2,000-line
+    // defaults in force; the bridge takeover predicate shares those defaults.
+    expect(config).not.toHaveProperty('tool_output');
     expect(config.permission).toEqual({
       ...NON_TASK_TOOL_PERMISSION_DENIALS,
       task: 'allow',

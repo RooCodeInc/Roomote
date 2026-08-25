@@ -40,7 +40,13 @@ export type { FastAgentNativeToolName } from './fast-agent-tool-policy';
 
 const FAST_AGENT_TOOL_BRIDGE_BODY_LIMIT_BYTES = 1_000_000;
 const FAST_AGENT_TOOL_BRIDGE_ERROR = 'Fast tool execution failed.';
-export const FAST_AGENT_NATIVE_TOOL_OUTPUT_LIMIT_BYTES = 40_000;
+// Fast's restricted OpenCode config intentionally does not forward
+// `tool_output`, so OpenCode 1.18.10 receives these built-in defaults. Keep
+// takeover and descriptor validation on this single invariant.
+export const FAST_AGENT_OPENCODE_TOOL_OUTPUT_LIMITS = {
+  maxBytes: 50 * 1024,
+  maxLines: 2_000,
+} as const;
 const FAST_AGENT_NATIVE_TOOL_PREVIEW_LIMIT_BYTES = 8_000;
 export const FAST_AGENT_SPILL_TURN_CALL_LIMIT = 6;
 export const FAST_AGENT_SPILL_TURN_OUTPUT_LIMIT_BYTES = 24_000;
@@ -105,6 +111,27 @@ type FastAgentBridgeOutput = {
   metadata: Record<string, unknown>;
   output: string;
 };
+
+export function countFastAgentModelOutputLines(output: string): number {
+  let lines = 1;
+  for (
+    let index = output.indexOf('\n');
+    index >= 0;
+    index = output.indexOf('\n', index + 1)
+  ) {
+    lines += 1;
+  }
+  return lines;
+}
+
+export function shouldSpillFastAgentModelOutput(output: string): boolean {
+  return (
+    Buffer.byteLength(output, 'utf8') >
+      FAST_AGENT_OPENCODE_TOOL_OUTPUT_LIMITS.maxBytes ||
+    countFastAgentModelOutputLines(output) >
+      FAST_AGENT_OPENCODE_TOOL_OUTPUT_LIMITS.maxLines
+  );
+}
 
 const bridgeRequestSchema = z.object({
   sessionID: z.string().min(1),
@@ -318,10 +345,7 @@ function utf8Prefix(value: string, maxBytes: number): string {
 
 function serializeWithinOutputBudget(value: unknown): string {
   const serialized = JSON.stringify(value ?? null);
-  if (
-    Buffer.byteLength(serialized, 'utf8') <=
-    FAST_AGENT_NATIVE_TOOL_OUTPUT_LIMIT_BYTES
-  ) {
+  if (!shouldSpillFastAgentModelOutput(serialized)) {
     return serialized;
   }
 
@@ -331,10 +355,7 @@ function serializeWithinOutputBudget(value: unknown): string {
       truncated: true,
       preview: utf8Prefix(serialized, previewBytes),
     });
-    if (
-      Buffer.byteLength(output, 'utf8') <=
-      FAST_AGENT_NATIVE_TOOL_OUTPUT_LIMIT_BYTES
-    ) {
+    if (!shouldSpillFastAgentModelOutput(output)) {
       return output;
     }
     previewBytes = Math.floor(previewBytes / 2);
@@ -378,10 +399,7 @@ async function buildSpillOutput(
           },
         };
     const output = JSON.stringify(descriptor);
-    if (
-      Buffer.byteLength(output, 'utf8') <=
-      FAST_AGENT_NATIVE_TOOL_OUTPUT_LIMIT_BYTES
-    ) {
+    if (!shouldSpillFastAgentModelOutput(output)) {
       return {
         output,
         metadata: {
@@ -405,10 +423,7 @@ async function formatFastAgentNativeToolResult(
   options: { allowSpill?: boolean } = {},
 ): Promise<FastAgentBridgeOutput> {
   const serialized = JSON.stringify(result ?? null);
-  if (
-    Buffer.byteLength(serialized, 'utf8') <=
-    FAST_AGENT_NATIVE_TOOL_OUTPUT_LIMIT_BYTES
-  ) {
+  if (!shouldSpillFastAgentModelOutput(serialized)) {
     return {
       output: serialized,
       metadata: { roomoteResult: result ?? null },
@@ -492,24 +507,16 @@ function resolveZodDirectoryForTools(): string {
   }
 }
 
-async function serializeMcpResult(
-  capability: FastAgentMcpCapability,
+export async function formatFastAgentMcpResultForModel(
+  conversationId: string,
   result: unknown,
 ): Promise<string> {
   try {
     const serialized = JSON.stringify(result ?? null) ?? String(result);
-    if (
-      Buffer.byteLength(serialized, 'utf8') <=
-      FAST_AGENT_NATIVE_TOOL_OUTPUT_LIMIT_BYTES
-    ) {
+    if (!shouldSpillFastAgentModelOutput(serialized)) {
       return serialized;
     }
-    return (
-      await buildSpillOutput(
-        { conversationId: capability.conversationId },
-        serialized,
-      )
-    ).output;
+    return (await buildSpillOutput({ conversationId }, serialized)).output;
   } catch {
     return '[Unserializable Fast MCP result]';
   }
@@ -556,7 +563,10 @@ async function handleMcpRequest(
       content: [
         {
           type: 'text' as const,
-          text: await serializeMcpResult(capability, result),
+          text: await formatFastAgentMcpResultForModel(
+            capability.conversationId,
+            result,
+          ),
         },
       ],
     };

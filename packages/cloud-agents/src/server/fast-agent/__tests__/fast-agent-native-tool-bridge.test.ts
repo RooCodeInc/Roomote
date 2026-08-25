@@ -5,17 +5,42 @@ import { ALL_REPOSITORIES } from '@roomote/types';
 import {
   bindFastAgentMcpToolExecutor,
   bindFastAgentNativeToolExecutor,
+  countFastAgentModelOutputLines,
   createFastAgentSpillTurnBudget,
   FAST_AGENT_NATIVE_TOOL_FILTER,
-  FAST_AGENT_NATIVE_TOOL_OUTPUT_LIMIT_BYTES,
   FAST_AGENT_NATIVE_TOOL_NAMES,
+  FAST_AGENT_OPENCODE_TOOL_OUTPUT_LIMITS,
   FAST_AGENT_SPILL_TURN_CALL_LIMIT,
   FAST_AGENT_SPILL_TURN_OUTPUT_LIMIT_BYTES,
   FAST_AGENT_SUBAGENT_TOOL_FILTER,
+  formatFastAgentMcpResultForModel,
   getFastAgentNativeToolRuntime,
+  shouldSpillFastAgentModelOutput,
 } from '../fast-agent-native-tool-bridge';
-import { FAST_AGENT_SPILL_MAX_FILE_BYTES } from '../fast-agent-spill-store';
+import {
+  FAST_AGENT_SPILL_MAX_FILE_BYTES,
+  fastAgentSpillStore,
+} from '../fast-agent-spill-store';
 import { callMcpTool, listMcpTools } from '../../mcp-tool-client';
+
+function stringWithSerializedByteLength(byteLength: number): string {
+  return 'x'.repeat(byteLength - 2);
+}
+
+function textWithLineCount(lines: number): string {
+  return Array.from({ length: lines }, () => 'x').join('\n');
+}
+
+function expectBoundedSpillDescriptor(output: string): void {
+  expect(shouldSpillFastAgentModelOutput(output)).toBe(false);
+  expect(Buffer.byteLength(output, 'utf8')).toBeLessThanOrEqual(
+    FAST_AGENT_OPENCODE_TOOL_OUTPUT_LIMITS.maxBytes,
+  );
+  expect(countFastAgentModelOutputLines(output)).toBeLessThanOrEqual(
+    FAST_AGENT_OPENCODE_TOOL_OUTPUT_LIMITS.maxLines,
+  );
+  expect(output).not.toMatch(/(?:\/tmp\/|tool-output|roomote-fast-spills)/u);
+}
 
 describe('Fast native OpenCode tool bridge', () => {
   it('installs Fast tools in an isolated OpenCode session directory', async () => {
@@ -226,7 +251,7 @@ describe('Fast native OpenCode tool bridge', () => {
       );
       expect(
         Buffer.byteLength(JSON.stringify(descriptor), 'utf8'),
-      ).toBeLessThanOrEqual(FAST_AGENT_NATIVE_TOOL_OUTPUT_LIMIT_BYTES);
+      ).toBeLessThanOrEqual(FAST_AGENT_OPENCODE_TOOL_OUTPUT_LIMITS.maxBytes);
 
       const response = await fetch(runtime.env.ROOMOTE_FAST_TOOL_BRIDGE_URL!, {
         method: 'POST',
@@ -384,6 +409,119 @@ describe('Fast native OpenCode tool bridge', () => {
     }
   });
 
+  it('matches OpenCode byte boundaries for native output without early takeover', async () => {
+    const conversationId = 'native-byte-boundaries';
+    const sessionID = 'native-byte-boundaries-session';
+    const runtime = await getFastAgentNativeToolRuntime(conversationId, []);
+    let nativeResult = '';
+    const unbind = bindFastAgentNativeToolExecutor(
+      sessionID,
+      conversationId,
+      async () => nativeResult,
+      { allowSpillRecovery: true },
+    );
+    const writeSpy = vi.spyOn(fastAgentSpillStore, 'write');
+    const callNative = () =>
+      fetch(runtime.env.ROOMOTE_FAST_TOOL_BRIDGE_URL!, {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${runtime.env.ROOMOTE_FAST_TOOL_BRIDGE_TOKEN}`,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          sessionID,
+          tool: FAST_AGENT_NATIVE_TOOL_NAMES.ignoreEvent,
+          args: {},
+        }),
+      }).then((response) => response.json());
+
+    try {
+      for (const byteLength of [39_999, 40_000, 40_001, 51_199, 51_200]) {
+        nativeResult = stringWithSerializedByteLength(byteLength);
+        const expectedOutput = JSON.stringify(nativeResult);
+        writeSpy.mockClear();
+
+        const payload = await callNative();
+
+        expect(Buffer.byteLength(payload.output, 'utf8')).toBe(byteLength);
+        expect(payload.output).toBe(expectedOutput);
+        expect(payload.metadata).toEqual({ roomoteResult: nativeResult });
+        expect(writeSpy).not.toHaveBeenCalled();
+      }
+
+      nativeResult = stringWithSerializedByteLength(51_201);
+      writeSpy.mockClear();
+      const payload = await callNative();
+      const descriptor = JSON.parse(payload.output);
+
+      expect(writeSpy).toHaveBeenCalledOnce();
+      expect(payload.metadata).not.toHaveProperty('roomoteResult');
+      expect(descriptor).toMatchObject({
+        truncated: true,
+        spill: { handle: expect.any(String), byteLength: 51_201 },
+      });
+      expectBoundedSpillDescriptor(payload.output);
+    } finally {
+      writeSpy.mockRestore();
+      unbind();
+      await fastAgentSpillStore.cleanupConversation(conversationId);
+    }
+  });
+
+  it('matches OpenCode byte boundaries for direct MCP output', async () => {
+    const conversationId = 'mcp-byte-boundaries';
+    const writeSpy = vi.spyOn(fastAgentSpillStore, 'writeForConversation');
+    try {
+      for (const byteLength of [39_999, 40_000, 40_001, 51_199, 51_200]) {
+        const result = stringWithSerializedByteLength(byteLength);
+        const expectedOutput = JSON.stringify(result);
+        writeSpy.mockClear();
+
+        const output = await formatFastAgentMcpResultForModel(
+          conversationId,
+          result,
+        );
+
+        expect(Buffer.byteLength(output, 'utf8')).toBe(byteLength);
+        expect(output).toBe(expectedOutput);
+        expect(writeSpy).not.toHaveBeenCalled();
+      }
+
+      const output = await formatFastAgentMcpResultForModel(
+        conversationId,
+        stringWithSerializedByteLength(51_201),
+      );
+      const descriptor = JSON.parse(output);
+
+      expect(writeSpy).toHaveBeenCalledOnce();
+      expect(descriptor).toMatchObject({
+        truncated: true,
+        spill: { handle: expect.any(String), byteLength: 51_201 },
+      });
+      expectBoundedSpillDescriptor(output);
+    } finally {
+      writeSpy.mockRestore();
+      await fastAgentSpillStore.cleanupConversation(conversationId);
+    }
+  });
+
+  it('matches OpenCode literal line boundaries without counting escaped JSON newlines', () => {
+    for (const lines of [1_999, 2_000]) {
+      const output = textWithLineCount(lines);
+      expect(countFastAgentModelOutputLines(output)).toBe(lines);
+      expect(shouldSpillFastAgentModelOutput(output)).toBe(false);
+    }
+
+    const oversized = textWithLineCount(2_001);
+    expect(countFastAgentModelOutputLines(oversized)).toBe(2_001);
+    expect(shouldSpillFastAgentModelOutput(oversized)).toBe(true);
+
+    const serialized = JSON.stringify(oversized);
+    expect(serialized).toContain('\\n');
+    expect(countFastAgentModelOutputLines(serialized)).toBe(1);
+    expect(shouldSpillFastAgentModelOutput(serialized)).toBe(false);
+  });
+
   it('does not expose unexpected executor errors through the bridge', async () => {
     const runtime = await getFastAgentNativeToolRuntime('native-errors', []);
     const unbind = bindFastAgentNativeToolExecutor(
@@ -467,7 +605,7 @@ describe('Fast native OpenCode tool bridge', () => {
         args: {},
       });
       expect(Buffer.byteLength(oversized.output, 'utf8')).toBeLessThanOrEqual(
-        FAST_AGENT_NATIVE_TOOL_OUTPUT_LIMIT_BYTES,
+        FAST_AGENT_OPENCODE_TOOL_OUTPUT_LIMITS.maxBytes,
       );
       expect(oversized.output.split('\n')).toHaveLength(1);
       expect(oversized.metadata).toMatchObject({ truncated: true });
@@ -484,7 +622,7 @@ describe('Fast native OpenCode tool bridge', () => {
         args: { handle: descriptor.spill.handle, limit: 64 },
       });
       expect(Buffer.byteLength(parentRead.output, 'utf8')).toBeLessThanOrEqual(
-        FAST_AGENT_NATIVE_TOOL_OUTPUT_LIMIT_BYTES,
+        FAST_AGENT_OPENCODE_TOOL_OUTPUT_LIMITS.maxBytes,
       );
       expect(JSON.parse(parentRead.output)).toMatchObject({
         success: true,
