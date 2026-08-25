@@ -211,6 +211,43 @@ describe('buildFastAgentSystemPrompt', () => {
     );
   });
 
+  it('treats replies as continuations of the existing conversation', () => {
+    const prompt = buildFastAgentSystemPrompt({ availableEnvironments: [] });
+
+    expect(prompt).toContain(
+      'Treat each message as one turn in an ongoing conversation',
+    );
+    expect(prompt).toContain('Assume prior context remains shared');
+    expect(prompt).toContain(
+      'respond to what changed or was newly asked in the latest message',
+    );
+    expect(prompt).toContain(
+      'preserve unresolved threads without mentioning ones that are not relevant now',
+    );
+    expect(prompt).toContain(
+      'Do not summarize prior work unless the user requests it, context may have been lost, or a handoff requires a recap',
+    );
+    expect(prompt).toContain(
+      'Concise contextual references such as "that change" or "the same task" are appropriate when unambiguous',
+    );
+    expect(prompt).toContain("Match the user's granularity");
+    expect(prompt).toContain(
+      'A correction, clarification, or quick opinion can be a complete turn',
+    );
+    expect(prompt).toContain(
+      'repair the belief explicitly and concisely: acknowledge the correction, state the updated understanding',
+    );
+    expect(prompt).toContain(
+      'A closeout does not need to be self-contained when the conversation already supplies the needed context',
+    );
+    expect(prompt).toContain(
+      'Reserve headings, recaps, and "what I did" lists for deliverables or handoffs',
+    );
+    expect(prompt).toContain(
+      'keep updates delta-only rather than repeating prior status',
+    );
+  });
+
   it('adapts native chat tool guidance for Discord', () => {
     const prompt = buildFastAgentSystemPrompt({
       availableEnvironments: [],
