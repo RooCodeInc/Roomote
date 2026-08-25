@@ -81,7 +81,8 @@ vi.mock('@roomote/env', () => ({
   getArtifactSigningKey: vi.fn(() => 'signing-key'),
 }));
 
-vi.mock('@roomote/slack', () => ({
+vi.mock('@roomote/slack', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@roomote/slack')>()),
   SlackNotifier: class SlackNotifier {
     postMessage = mocks.postMessage;
     updateMessage = mocks.updateMessage;
@@ -364,7 +365,29 @@ describe('deliverFastAgentParentEvent', () => {
       ts: '100.001',
       message: {
         text: 'The proof is ready.',
-        blocks: [{ type: 'markdown', text: 'The proof is ready.' }],
+        blocks: [
+          expect.objectContaining({
+            type: 'container',
+            title: expect.objectContaining({ text: 'Weekly scan' }),
+            icon: expect.objectContaining({
+              image_url: expect.stringContaining('/automation-icons/zap.png'),
+            }),
+            has_header_divider: true,
+            child_blocks: expect.arrayContaining([
+              expect.objectContaining({
+                type: 'actions',
+                elements: [
+                  expect.objectContaining({
+                    action_id: 'late_bound_automation_configure',
+                    url: expect.stringContaining(
+                      '/automations#custom-automation-automation-1',
+                    ),
+                  }),
+                ],
+              }),
+            ]),
+          }),
+        ],
       },
     });
     expect(mocks.postMessage).not.toHaveBeenCalled();
