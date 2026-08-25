@@ -4,14 +4,13 @@ import { cva, type VariantProps } from 'class-variance-authority';
 import { cn } from '@/lib/utils';
 
 const alertVariants = cva(
-  'relative w-full rounded-lg px-4 py-3 text-sm flex gap-2 items-start [&>svg]:size-4 [&>svg]:shrink-0 [&>svg]:mt-0.75',
+  'relative w-full rounded-lg px-4 py-3 text-sm flex gap-2 items-start [&>svg]:size-4 [&>svg]:shrink-0 [&>svg]:mt-0.75 border border-transparent',
   {
     variants: {
       variant: {
         default:
           'bg-card text-card-foreground dark:bg-foreground/10 outline-1 outline-accent-bright-foreground dark:outline-accent-foreground/70',
-        light:
-          'bg-transparent text-card-foreground outline-1 outline-foreground/10',
+        light: 'bg-transparent text-card-foreground border-foreground/10',
         notice: 'bg-accent-foreground text-black',
         warning:
           'bg-warning dark:bg-warning/90 text-warning-foreground [&>svg]:text-current *:data-[slot=alert-description]:text-warning/80',
@@ -82,7 +81,7 @@ function Alert({
       role="alert"
       className={cn(
         alertVariants({ variant }),
-        'flex flex-col gap-1 md:flex-row md:gap-3',
+        'flex gap-2 flex-row md:gap-3',
         className,
       )}
       {...props}
