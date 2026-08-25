@@ -491,6 +491,58 @@ describe('enqueueTask initiator stamping', () => {
     });
   });
 
+  it('generates an early title from a Slack app mention', async () => {
+    const userId = await createUser();
+    mockGenerateLlmTaskTitle.mockResolvedValueOnce(
+      'Order more catnip from Amazon',
+    );
+
+    const run = await enqueueTask(
+      {
+        task: {
+          type: TaskPayloadKind.SlackAppMention,
+          requestedWorkKindDecision: explicitWorkKind,
+          payload: {
+            repo: 'acme/widgets',
+            channel: 'C123',
+            user: 'U123',
+            text: 'Could you order more catnip from Amazon?',
+            ts: '123.456',
+            thread_ts: '123.456',
+          },
+        },
+        initiator: { kind: 'user', userId },
+        workflow: 'standard',
+        surface: 'slack',
+        trigger: 'message',
+      },
+      { enqueue: false },
+    );
+    createdTaskIds.push(run.taskId);
+
+    await vi.waitFor(async () => {
+      const task = await db.query.tasks.findFirst({
+        where: eq(tasks.id, run.taskId),
+        columns: { title: true, llmTitleCheckpoint: true },
+      });
+
+      expect(mockGenerateLlmTaskTitle).toHaveBeenCalledWith({
+        userId,
+        taskId: run.taskId,
+        messages: [
+          {
+            role: 'user',
+            text: 'Could you order more catnip from Amazon?',
+          },
+        ],
+      });
+      expect(task).toEqual({
+        title: 'Order more catnip from Amazon',
+        llmTitleCheckpoint: 1,
+      });
+    });
+  });
+
   it('re-applies the newer canonical title when the checkpoint lock loses a race', async () => {
     const userId = await createUser();
     mockGenerateLlmTaskTitle.mockResolvedValueOnce('Early generated title');
