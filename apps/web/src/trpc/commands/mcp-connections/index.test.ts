@@ -116,4 +116,30 @@ describe('MCP connection lifecycle telemetry', () => {
       properties: { integration_id: 'asana' },
     });
   });
+
+  it('keeps concurrent credential saves and disables consistent', async () => {
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      await Promise.all([
+        saveAsanaConnectionCommand(adminAuth, {
+          accessToken: `asana-token-${attempt}`,
+        }),
+        setDeploymentMcpEnabledCommand(adminAuth, {
+          mcpId: 'asana',
+          enabled: false,
+        }),
+      ]);
+
+      const connection = await db.query.mcpConnections.findFirst({
+        where: eq(mcpConnections.mcpId, 'asana'),
+        columns: { id: true },
+      });
+      const enablement = await db.query.deploymentMcpEnablements.findFirst({
+        where: eq(deploymentMcpEnablements.mcpId, 'asana'),
+        columns: { enabled: true },
+      });
+
+      expect(enablement).toBeDefined();
+      expect(Boolean(connection)).toBe(enablement!.enabled);
+    }
+  });
 });

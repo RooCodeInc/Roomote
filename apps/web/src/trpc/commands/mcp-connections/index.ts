@@ -7,6 +7,7 @@ import {
   and,
   isNull,
   or,
+  type DatabaseOrTransaction,
 } from '@roomote/db/server';
 import {
   filterMcpToolDefinitions,
@@ -670,32 +671,39 @@ export async function setDeploymentMcpEnabledCommand(
   const defaultDisabledTools =
     getMcpIntegrationDefaultDisabledTools(integration);
 
-  const [result] = await db
-    .insert(deploymentMcpEnablements)
-    .values({
-      mcpId: input.mcpId,
-      enabled: input.enabled,
-      enabledByUserId: auth.userId,
-      ...(defaultDisabledTools.length > 0
-        ? { disabledTools: [...defaultDisabledTools] }
-        : {}),
-    })
-    .onConflictDoUpdate({
-      target: [deploymentMcpEnablements.mcpId],
-      set: {
+  const persistEnablement = async (database: DatabaseOrTransaction) => {
+    const [result] = await database
+      .insert(deploymentMcpEnablements)
+      .values({
+        mcpId: input.mcpId,
         enabled: input.enabled,
         enabledByUserId: auth.userId,
-        updatedAt: new Date(),
-      },
-    })
-    .returning();
+        ...(defaultDisabledTools.length > 0
+          ? { disabledTools: [...defaultDisabledTools] }
+          : {}),
+      })
+      .onConflictDoUpdate({
+        target: [deploymentMcpEnablements.mcpId],
+        set: {
+          enabled: input.enabled,
+          enabledByUserId: auth.userId,
+          updatedAt: new Date(),
+        },
+      })
+      .returning();
 
-  // When disabling, clean up all user connections for this MCP
-  if (!input.enabled) {
-    await db
-      .delete(mcpConnections)
-      .where(eq(mcpConnections.mcpId, input.mcpId));
-  }
+    return result!;
+  };
+
+  const result = input.enabled
+    ? await persistEnablement(db)
+    : await db.transaction(async (tx) => {
+        // Credential saves lock the connection before the enablement row too.
+        await tx
+          .delete(mcpConnections)
+          .where(eq(mcpConnections.mcpId, input.mcpId));
+        return persistEnablement(tx);
+      });
 
   captureIntegrationLifecycleEvent(
     input.enabled ? 'integration_enabled' : 'integration_disabled',
@@ -703,7 +711,7 @@ export async function setDeploymentMcpEnabledCommand(
     auth.userId,
   );
 
-  return result!;
+  return result;
 }
 
 /**
