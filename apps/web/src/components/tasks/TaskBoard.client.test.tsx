@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 
 import { RunStatus } from '@roomote/types';
 
@@ -69,6 +69,9 @@ describe('TaskBoard', () => {
   it('keeps pull request badges independently clickable', () => {
     render(
       <TaskBoard
+        hasNextPage={false}
+        isFetchingNextPage={false}
+        onShowMore={vi.fn()}
         tasks={[
           createTask({
             taskRun: {
@@ -89,7 +92,8 @@ describe('TaskBoard', () => {
     );
   });
 
-  it('groups tasks and keeps completed work bounded', () => {
+  it('groups tasks and reveals more work within a column', () => {
+    const onShowMore = vi.fn();
     const doneTasks = Array.from({ length: 8 }, (_, index) =>
       createTask({
         id: `done-${index}`,
@@ -107,6 +111,9 @@ describe('TaskBoard', () => {
 
     render(
       <TaskBoard
+        hasNextPage={true}
+        isFetchingNextPage={false}
+        onShowMore={onShowMore}
         tasks={[
           createTask(),
           createTask({
@@ -146,9 +153,42 @@ describe('TaskBoard', () => {
     ).toHaveAttribute('href', '/task/task-1');
     expect(screen.queryByText('Code')).not.toBeInTheDocument();
     expect(screen.queryByText('Discord')).not.toBeInTheDocument();
-    expect(
-      screen.getByText('2 older completed tasks hidden'),
-    ).toBeInTheDocument();
     expect(screen.queryByText('Completed task 7')).not.toBeInTheDocument();
+
+    const doneColumn = screen
+      .getByRole('heading', { name: /^Done/ })
+      .closest('section');
+    expect(doneColumn).not.toBeNull();
+    fireEvent.click(
+      within(doneColumn!).getByRole('button', {
+        name: 'Show more done tasks',
+      }),
+    );
+
+    expect(screen.getByText('Completed task 7')).toBeInTheDocument();
+    expect(screen.getByText('Completed task 8')).toBeInTheDocument();
+    expect(onShowMore).not.toHaveBeenCalled();
+  });
+
+  it('offers Show more under every column when another page is available', () => {
+    const onShowMore = vi.fn();
+
+    render(
+      <TaskBoard
+        tasks={[createTask()]}
+        hasNextPage={true}
+        isFetchingNextPage={false}
+        onShowMore={onShowMore}
+      />,
+    );
+
+    expect(screen.getAllByRole('button', { name: /^Show more/ })).toHaveLength(
+      4,
+    );
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Show more active tasks' }),
+    );
+    expect(onShowMore).toHaveBeenCalledOnce();
   });
 });

@@ -1,3 +1,6 @@
+'use client';
+
+import { useState } from 'react';
 import Link from 'next/link';
 import { formatDistanceToNow } from 'date-fns';
 
@@ -7,6 +10,7 @@ import type { Task } from '@/lib/server';
 import { getUserDisplayName, stripHtmlTags, stripMarkdown } from '@/lib';
 import {
   Avatar,
+  Button,
   MessageSquareText,
   Skeleton,
   Tooltip,
@@ -18,7 +22,7 @@ import { PullRequestBadge, WorkspaceBadge } from '@/components/sandbox';
 import { TaskAutomationIcon } from './TaskAutomationIcon';
 import { getTaskBoardColumn, type TaskBoardColumn } from './task-board';
 
-const DONE_TASK_LIMIT = 6;
+const TASKS_PER_COLUMN = 6;
 
 const COLUMN_CONFIG: Array<{
   id: TaskBoardColumn;
@@ -169,7 +173,25 @@ function BoardTaskCard({ task }: { task: Task }) {
   );
 }
 
-export function TaskBoard({ tasks }: { tasks: Task[] }) {
+export function TaskBoard({
+  tasks,
+  hasNextPage,
+  isFetchingNextPage,
+  onShowMore,
+}: {
+  tasks: Task[];
+  hasNextPage: boolean;
+  isFetchingNextPage: boolean;
+  onShowMore: () => void | Promise<unknown>;
+}) {
+  const [visibleTaskLimits, setVisibleTaskLimits] = useState<
+    Record<TaskBoardColumn, number>
+  >({
+    active: TASKS_PER_COLUMN,
+    'needs-input': TASKS_PER_COLUMN,
+    blocked: TASKS_PER_COLUMN,
+    done: TASKS_PER_COLUMN,
+  });
   const groupedTasks = new Map<TaskBoardColumn, Task[]>(
     COLUMN_CONFIG.map((column) => [column.id, []]),
   );
@@ -178,17 +200,27 @@ export function TaskBoard({ tasks }: { tasks: Task[] }) {
     groupedTasks.get(getTaskBoardColumn(task))?.push(task);
   }
 
-  const doneTasks = groupedTasks.get('done') ?? [];
-  const hiddenDoneCount = Math.max(doneTasks.length - DONE_TASK_LIMIT, 0);
+  const handleShowMore = (
+    columnId: TaskBoardColumn,
+    hasHiddenTasks: boolean,
+  ) => {
+    setVisibleTaskLimits((current) => ({
+      ...current,
+      [columnId]: current[columnId] + TASKS_PER_COLUMN,
+    }));
+
+    if (!hasHiddenTasks && hasNextPage) {
+      void onShowMore();
+    }
+  };
 
   return (
     <div className="grid min-w-0 grid-cols-1 lg:grid-cols-2 xl:grid-cols-4 lg:px-2">
       {COLUMN_CONFIG.map((column) => {
         const columnTasks = groupedTasks.get(column.id) ?? [];
-        const visibleTasks =
-          column.id === 'done'
-            ? columnTasks.slice(0, DONE_TASK_LIMIT)
-            : columnTasks;
+        const visibleTasks = columnTasks.slice(0, visibleTaskLimits[column.id]);
+        const hasHiddenTasks = visibleTasks.length < columnTasks.length;
+        const canShowMore = hasHiddenTasks || hasNextPage;
 
         return (
           <section
@@ -231,11 +263,17 @@ export function TaskBoard({ tasks }: { tasks: Task[] }) {
               )}
             </div>
 
-            {column.id === 'done' && hiddenDoneCount > 0 && (
-              <p className="mt-3 text-center text-xs text-muted-foreground">
-                {hiddenDoneCount} older completed task
-                {hiddenDoneCount === 1 ? '' : 's'} hidden
-              </p>
+            {canShowMore && (
+              <Button
+                variant="ghost"
+                size="xs"
+                className="mx-auto mt-3 flex"
+                aria-label={`Show more ${column.label.toLowerCase()} tasks`}
+                disabled={isFetchingNextPage}
+                onClick={() => handleShowMore(column.id, hasHiddenTasks)}
+              >
+                Show more
+              </Button>
             )}
           </section>
         );

@@ -694,7 +694,13 @@ export const Tasks = () => {
               className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden"
             >
               {isBoardView ? (
-                <TaskBoard tasks={tasks} />
+                <TaskBoard
+                  key={searchParamsString}
+                  tasks={tasks}
+                  hasNextPage={infiniteTasks.hasNextPage}
+                  isFetchingNextPage={infiniteTasks.isFetchingNextPage}
+                  onShowMore={() => infiniteTasks.fetchNextPage()}
+                />
               ) : (
                 <div className="divide-y divide-card">
                   {tasks.map((task) => (
