@@ -44,7 +44,7 @@ export const FAST_AGENT_PACKAGED_SKILL_NAMES = [
   'zero',
 ] as const;
 
-export type FastAgentPackagedSkillName =
+type FastAgentPackagedSkillName =
   (typeof FAST_AGENT_PACKAGED_SKILL_NAMES)[number];
 
 type FastAgentSkillDocument = {
