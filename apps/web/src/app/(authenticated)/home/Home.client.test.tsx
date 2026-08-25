@@ -214,11 +214,13 @@ vi.mock('@/components/tasks', async () => {
     TaskPromptInput: ({
       onSubmit,
       onPromptTextChange,
+      promptText,
       placeholder,
       submitDisabledReason,
     }: {
       onSubmit: (message: PromptInputMessage) => Promise<void> | void;
       onPromptTextChange?: (value: string) => void;
+      promptText?: string;
       placeholder?: string;
       submitDisabledReason?: string;
     }) => (
@@ -237,6 +239,11 @@ vi.mock('@/components/tasks', async () => {
         }}
       >
         <div data-testid="prompt-placeholder">{placeholder}</div>
+        <textarea
+          aria-label="Task prompt"
+          value={promptText}
+          onChange={(event) => onPromptTextChange?.(event.target.value)}
+        />
         <button type="submit" disabled={Boolean(submitDisabledReason)}>
           Submit prompt
         </button>
@@ -382,6 +389,72 @@ describe('Home', () => {
     });
 
     expect(mockCreateStandardTaskRun).not.toHaveBeenCalled();
+  });
+
+  it('restores and updates the signed-in users unfinished prompt', () => {
+    const storageKey = 'roomote-home-prompt-draft:v1:user-1';
+    localStorage.setItem(storageKey, 'Review the deployment workflow');
+
+    render(<Home initialPlaceholderIndex={0} />);
+
+    const promptInput = screen.getByRole('textbox', { name: 'Task prompt' });
+    expect(promptInput).toHaveValue('Review the deployment workflow');
+
+    fireEvent.change(promptInput, {
+      target: { value: 'Review the release workflow' },
+    });
+
+    expect(localStorage.getItem(storageKey)).toBe(
+      'Review the release workflow',
+    );
+  });
+
+  it('prefers an explicit prompt link over an unfinished prompt', () => {
+    localStorage.setItem(
+      'roomote-home-prompt-draft:v1:user-1',
+      'Old unfinished prompt',
+    );
+    currentSearchParams = 'prompt=Use%20this%20prompt';
+
+    render(<Home initialPlaceholderIndex={0} />);
+
+    expect(screen.getByRole('textbox', { name: 'Task prompt' })).toHaveValue(
+      'Use this prompt',
+    );
+  });
+
+  it('clears the unfinished prompt after a successful launch', async () => {
+    const storageKey = 'roomote-home-prompt-draft:v1:user-1';
+    localStorage.setItem(storageKey, 'Review the deployment workflow');
+
+    render(<Home initialPlaceholderIndex={0} />);
+
+    fireEvent.click(screen.getByText('Use all repositories workspace'));
+    fireEvent.click(screen.getByRole('button', { name: 'Submit prompt' }));
+
+    await waitFor(() => {
+      expect(mockCreateStandardTaskRun).toHaveBeenCalled();
+    });
+    expect(localStorage.getItem(storageKey)).toBeNull();
+  });
+
+  it('keeps the unfinished prompt when launch fails', async () => {
+    const storageKey = 'roomote-home-prompt-draft:v1:user-1';
+    localStorage.setItem(storageKey, 'Review the deployment workflow');
+    mockCreateStandardTaskRun.mockResolvedValueOnce({
+      success: false,
+      error: 'Launch failed',
+    });
+
+    render(<Home initialPlaceholderIndex={0} />);
+
+    fireEvent.click(screen.getByText('Use all repositories workspace'));
+    fireEvent.click(screen.getByRole('button', { name: 'Submit prompt' }));
+
+    await waitFor(() => {
+      expect(mockCreateStandardTaskRun).toHaveBeenCalled();
+    });
+    expect(localStorage.getItem(storageKey)).toBe('Test prompt');
   });
 
   it('renders the feedback prompt below the input and opens its dialog', async () => {
