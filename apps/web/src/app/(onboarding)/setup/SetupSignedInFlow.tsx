@@ -466,7 +466,11 @@ export function SetupSignedInFlow() {
           )}
           {step === 'invoke' && (
             <StepInvoke
-              onboardingTaskId={status.setupNewState.onboardingTaskId}
+              onboardingTaskId={
+                status.onboardingFailed
+                  ? null
+                  : status.setupNewState.onboardingTaskId
+              }
               communicationProviders={
                 status.authSetup.selectedProvider
                   ? [status.authSetup.selectedProvider]

@@ -122,9 +122,10 @@ export function StepInvoke({
         const refreshedSetupNewStatus = await queryClient.fetchQuery(
           trpc.setupNew.status.queryOptions(undefined, { staleTime: 0 }),
         );
-        const targetTaskId =
-          refreshedSetupNewStatus.setupNewState.onboardingTaskId ??
-          onboardingTaskId;
+        const targetTaskId = refreshedSetupNewStatus.onboardingFailed
+          ? null
+          : (refreshedSetupNewStatus.setupNewState.onboardingTaskId ??
+            onboardingTaskId);
 
         if (targetTaskId) {
           router.replace(`/task/${targetTaskId}`);
