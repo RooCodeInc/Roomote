@@ -23,6 +23,7 @@ import {
 
 const DEFAULT_OPENCODE_STRUCTURED_OUTPUT_RETRY_COUNT = 2;
 const NON_TASK_SESSION_ABORT_TIMEOUT_MS = 5_000;
+const NON_TASK_USAGE_EVENT_BARRIER_TIMEOUT_MS = 1_000;
 type NonTaskModelRuntimeEnv = Partial<Record<string, string | undefined>>;
 
 /**
@@ -1014,10 +1015,22 @@ async function runNonTaskSdkPrompt(
 
       await recordUsageOnce(promptResult.data.info);
       if (options.trackSessionTreeUsage) {
+        const finalUsageKey = getUsageKey(promptResult.data.info);
+        let usageEventBarrierTimeout: NodeJS.Timeout | undefined;
         const finalEventObserved = await Promise.race([
           waitForUsageEvent(promptResult.data.info),
           eventMonitor?.then(() => false) ?? Promise.resolve(false),
-        ]);
+          new Promise<boolean>((resolve) => {
+            usageEventBarrierTimeout = setTimeout(
+              () => resolve(false),
+              NON_TASK_USAGE_EVENT_BARRIER_TIMEOUT_MS,
+            );
+            usageEventBarrierTimeout.unref();
+          }),
+        ]).finally(() => {
+          if (usageEventBarrierTimeout) clearTimeout(usageEventBarrierTimeout);
+          if (finalUsageKey) usageEventWaiters.delete(finalUsageKey);
+        });
         if (!finalEventObserved) {
           const currentParentId = asString(promptResult.data.info.parentID);
           await Promise.all(

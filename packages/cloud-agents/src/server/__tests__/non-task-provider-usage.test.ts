@@ -648,6 +648,7 @@ describe('resolveOpenCodeSmallModel', () => {
             info: { id: 'session-advisor-current', parentID: 'session-1' },
           },
         };
+        await new Promise<void>(() => undefined);
       })(),
     });
     const finalInfo = usageInfo(
