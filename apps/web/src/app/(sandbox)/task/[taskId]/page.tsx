@@ -14,6 +14,7 @@ import { CircleSlash, TriangleAlert } from '@/components/system';
 import {
   TaskPayloadKind,
   DEFAULT_CODING_HARNESS,
+  getLinkedEnvironmentIdFromPayload,
   type TaskPhase,
 } from '@roomote/types';
 
@@ -75,6 +76,24 @@ export default function SandboxPage() {
         images: session.prompt?.images,
       }
     : null;
+  const newTaskSearchParams = new URLSearchParams();
+
+  if (startupPrompt?.text) {
+    newTaskSearchParams.set('prompt', startupPrompt.text);
+  }
+
+  if (task?.model) {
+    newTaskSearchParams.set('model', task.model);
+  }
+
+  const environmentId = getLinkedEnvironmentIdFromPayload(taskRun?.payload);
+
+  if (environmentId) {
+    newTaskSearchParams.set('environmentId', environmentId);
+  }
+
+  const newTaskQuery = newTaskSearchParams.toString();
+  const newTaskHref = newTaskQuery ? `/?${newTaskQuery}` : '/';
   const shouldRenderBootingTranscript =
     sessionState === 'booting' &&
     (hasTranscriptHistory || hasVisibleSessionPrompt);
@@ -276,7 +295,7 @@ export default function SandboxPage() {
               <SnapshotResumeFailureFooter
                 taskId={taskId}
                 taskRun={taskRun}
-                prompt={startupPrompt}
+                newTaskHref={newTaskHref}
               />
             ) : null
           }
@@ -295,7 +314,7 @@ export default function SandboxPage() {
               runId={taskRun.id}
               taskId={taskId}
               initialTaskRun={taskRun}
-              prompt={startupPrompt}
+              newTaskHref={newTaskHref}
               onStatusChange={handleBootStatusChange}
             />
           </div>
@@ -317,7 +336,7 @@ export default function SandboxPage() {
               runId={taskRun.id}
               taskId={taskId}
               initialTaskRun={taskRun}
-              prompt={startupPrompt}
+              newTaskHref={newTaskHref}
               onStatusChange={handleBootStatusChange}
             />
             <ProductTips />
@@ -344,6 +363,7 @@ export default function SandboxPage() {
     >
       <MemoizedLiveContent
         session={session}
+        newTaskHref={newTaskHref}
         onBootStatusChange={handleBootStatusChange}
         onTaskPhaseChange={setLiveTaskPhase}
       />

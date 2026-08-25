@@ -19,7 +19,6 @@ import { getTaskRunError } from '@/lib/task-run-errors';
 import {
   StartupFailureMessage,
   StartupSequence,
-  type StartupPromptPreview,
   type StartupRetryAction,
 } from './StartupMessage';
 import { useStartupProgress } from './useStartupProgress';
@@ -104,7 +103,7 @@ interface StartupProps {
   runId: number;
   taskId: string;
   initialTaskRun?: TaskRun;
-  prompt?: StartupPromptPreview | null;
+  newTaskHref: string;
   onStatusChange?: (status: RunStatusValue) => void;
 }
 
@@ -112,7 +111,7 @@ export const Startup = ({
   runId,
   taskId,
   initialTaskRun,
-  prompt,
+  newTaskHref,
   onStatusChange,
 }: StartupProps) => {
   const eventSource = useCallback(() => {
@@ -131,7 +130,7 @@ export const Startup = ({
         runId={runId}
         taskId={taskId}
         initialTaskRun={initialTaskRun}
-        prompt={prompt}
+        newTaskHref={newTaskHref}
         onStatusChange={onStatusChange}
       />
     </SSEProvider>
@@ -142,7 +141,7 @@ interface StartupInnerProps {
   runId: number;
   taskId: string;
   initialTaskRun?: TaskRun;
-  prompt?: StartupPromptPreview | null;
+  newTaskHref: string;
   onStatusChange?: (status: RunStatusValue) => void;
 }
 
@@ -150,7 +149,7 @@ const StartupInner = ({
   runId,
   taskId,
   initialTaskRun,
-  prompt,
+  newTaskHref,
   onStatusChange,
 }: StartupInnerProps) => {
   const restoreSnapshot = useRestoreTaskRunSnapshot();
@@ -176,7 +175,7 @@ const StartupInner = ({
       logs={showLogs ? sandboxLogs : undefined}
       logsConnected={logsConnected}
       logsError={logsError}
-      prompt={prompt}
+      newTaskHref={newTaskHref}
       retryAction={buildRetryAction({
         taskId,
         taskRun: initialTaskRun,
@@ -200,13 +199,13 @@ interface SnapshotResumeFailureFooterProps {
     | 'status'
     | 'payloadKind'
   >;
-  prompt?: StartupPromptPreview | null;
+  newTaskHref: string;
 }
 
 export const SnapshotResumeFailureFooter = ({
   taskId,
   taskRun,
-  prompt,
+  newTaskHref,
 }: SnapshotResumeFailureFooterProps) => {
   const restoreSnapshot = useRestoreTaskRunSnapshot();
   const retryFailedStart = useRetryFailedTaskStart();
@@ -217,7 +216,7 @@ export const SnapshotResumeFailureFooter = ({
     <StartupFailureMessage
       status={taskRun.status}
       error={getTaskRunError(taskRun)}
-      prompt={prompt}
+      newTaskHref={newTaskHref}
       retryAction={buildRetryAction({
         taskId,
         taskRun,

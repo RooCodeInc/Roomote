@@ -1,5 +1,7 @@
 'use client';
 
+import Link from 'next/link';
+
 import type { LucideIcon } from '@/components/system';
 import {
   Check,
@@ -125,17 +127,12 @@ export type StartupRetryAction = {
   label?: string;
 };
 
-export type StartupPromptPreview = {
-  text?: string;
-  images?: string[];
-};
-
 interface StartupErrorMessageProps {
   status: RunStatus;
   error?: string;
   /** Machine-readable failure category persisted with the run. */
   errorCode?: string | null;
-  prompt?: StartupPromptPreview | null;
+  newTaskHref?: string;
   retryAction?: StartupRetryAction;
 }
 
@@ -143,15 +140,12 @@ export const StartupFailureMessage = ({
   status,
   error,
   errorCode,
-  prompt,
+  newTaskHref,
   retryAction,
 }: StartupErrorMessageProps) => {
   const isFailed = status === RunStatus.Failed;
   const isCanceled = status === RunStatus.Canceled;
   const displayError = getTaskRunErrorDisplayMessage(error, errorCode);
-  const promptText = prompt?.text?.trim() || undefined;
-  const promptImages = prompt?.images?.filter(Boolean) ?? [];
-  const hasPrompt = Boolean(promptText) || promptImages.length > 0;
 
   if ((isFailed || (isCanceled && displayError)) && displayError) {
     return (
@@ -164,29 +158,8 @@ export const StartupFailureMessage = ({
               <div className="text-foreground whitespace-pre-wrap wrap-break-word">
                 {displayError}
               </div>
-              {hasPrompt && (
-                <div className="space-y-1 pt-1 text-foreground">
-                  <div className="text-muted-foreground">Your prompt</div>
-                  {promptText && (
-                    <div className="whitespace-pre-wrap wrap-break-word rounded-md border border-border bg-muted/40 px-3 py-2 text-sm">
-                      {promptText}
-                    </div>
-                  )}
-                  {promptImages.length > 0 && (
-                    <div className="flex flex-wrap gap-2">
-                      {promptImages.map((image) => (
-                        <Button key={image} variant="outline" size="sm" asChild>
-                          <a href={image} target="_blank" rel="noreferrer">
-                            View attachment
-                          </a>
-                        </Button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
               {retryAction && (
-                <div className="pt-1">
+                <div className="flex flex-wrap gap-2 pt-1">
                   <Button
                     variant="outline"
                     size="sm"
@@ -195,6 +168,18 @@ export const StartupFailureMessage = ({
                   >
                     <RotateCcw className="size-4" />
                     {retryAction.label ?? 'Retry'}
+                  </Button>
+                  {newTaskHref && (
+                    <Button size="sm" asChild>
+                      <Link href={newTaskHref}>Try in a new task</Link>
+                    </Button>
+                  )}
+                </div>
+              )}
+              {!retryAction && newTaskHref && (
+                <div className="pt-1">
+                  <Button size="sm" asChild>
+                    <Link href={newTaskHref}>Try in a new task</Link>
                   </Button>
                 </div>
               )}
@@ -213,29 +198,8 @@ export const StartupFailureMessage = ({
             <MessageSquareWarning className="size-4 mt-0.5 shrink-0" />
             <div className="min-w-0 space-y-2">
               <div>There was an error starting this environment:</div>
-              {hasPrompt && (
-                <div className="space-y-1 pt-1 text-foreground">
-                  <div className="text-muted-foreground">Your prompt</div>
-                  {promptText && (
-                    <div className="whitespace-pre-wrap wrap-break-word rounded-md border border-border bg-muted/40 px-3 py-2 text-sm">
-                      {promptText}
-                    </div>
-                  )}
-                  {promptImages.length > 0 && (
-                    <div className="flex flex-wrap gap-2">
-                      {promptImages.map((image) => (
-                        <Button key={image} variant="outline" size="sm" asChild>
-                          <a href={image} target="_blank" rel="noreferrer">
-                            View attachment
-                          </a>
-                        </Button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
               {retryAction && (
-                <div className="pt-1">
+                <div className="flex flex-wrap gap-2 pt-1">
                   <Button
                     variant="outline"
                     size="sm"
@@ -244,6 +208,18 @@ export const StartupFailureMessage = ({
                   >
                     <RotateCcw className="size-4" />
                     {retryAction.label ?? 'Retry'}
+                  </Button>
+                  {newTaskHref && (
+                    <Button size="sm" asChild>
+                      <Link href={newTaskHref}>Try in a new task</Link>
+                    </Button>
+                  )}
+                </div>
+              )}
+              {!retryAction && newTaskHref && (
+                <div className="pt-1">
+                  <Button size="sm" asChild>
+                    <Link href={newTaskHref}>Try in a new task</Link>
                   </Button>
                 </div>
               )}
@@ -281,7 +257,7 @@ interface StartupSequenceProps {
   logs?: SandboxLogEntry[];
   logsConnected?: boolean;
   logsError?: string | null;
-  prompt?: StartupPromptPreview | null;
+  newTaskHref?: string;
   retryAction?: StartupRetryAction;
 }
 
@@ -292,7 +268,7 @@ export const StartupSequence = ({
   logs,
   logsConnected = true,
   logsError = null,
-  prompt,
+  newTaskHref,
   retryAction,
 }: StartupSequenceProps) => {
   const lastStep = steps[steps.length - 1];
@@ -345,7 +321,7 @@ export const StartupSequence = ({
         status={status}
         error={error}
         errorCode={errorCode}
-        prompt={prompt}
+        newTaskHref={newTaskHref}
         retryAction={retryAction}
       />
     </div>
