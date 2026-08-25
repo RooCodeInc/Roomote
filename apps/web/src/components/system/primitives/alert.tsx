@@ -9,7 +9,7 @@ const alertVariants = cva(
     variants: {
       variant: {
         default:
-          'bg-card text-card-foreground dark:bg-foreground/10 outline-1 outline-accent-bright-foreground dark:outline-accent-foreground/70',
+          'bg-card text-card-foreground dark:bg-foreground/10 border-accent-bright-foreground dark:border-accent-foreground/70',
         light: 'bg-transparent text-card-foreground border-foreground/10',
         notice: 'bg-accent-foreground text-black',
         warning:
@@ -81,7 +81,7 @@ function Alert({
       role="alert"
       className={cn(
         alertVariants({ variant }),
-        'flex gap-2 flex-row md:gap-3',
+        'flex flex-col gap-1 md:flex-row md:gap-3',
         className,
       )}
       {...props}
