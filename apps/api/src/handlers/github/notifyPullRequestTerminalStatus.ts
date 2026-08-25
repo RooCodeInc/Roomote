@@ -35,6 +35,7 @@ import {
   getCommunicationServiceUrlFromTaskPayload,
   getCommunicationThreadIdFromTaskPayload,
   getDiscordReactionTargetFromTaskPayload,
+  getFastAgentParentFromPayload,
 } from '@roomote/types';
 
 /** Fixed Slack reaction for closed (not merged) PRs on the originating message. */
@@ -120,6 +121,42 @@ type SlackTarget = {
   slackThreadTs: string;
   slackChannelId: string;
 };
+
+type SlackReplyTarget = {
+  channelId: string;
+  threadId: string;
+};
+
+function resolveSlackReplyTarget(payload: unknown): SlackReplyTarget | null {
+  const directReplyTarget =
+    getCommunicationProviderFromTaskPayload(payload) === 'slack'
+      ? {
+          channelId: getCommunicationChannelFromTaskPayload(payload),
+          threadId: getCommunicationThreadIdFromTaskPayload(payload),
+        }
+      : null;
+  const fastConversation = getFastAgentParentFromPayload(payload)?.conversation;
+  const fastReplyTarget =
+    fastConversation?.surface === 'slack' ? fastConversation.replyTarget : null;
+
+  return (
+    [directReplyTarget, fastReplyTarget].find(
+      (target): target is SlackReplyTarget =>
+        Boolean(target?.channelId && target.threadId),
+    ) ?? null
+  );
+}
+
+function getSlackTarget(taskId: string, payload: unknown): SlackTarget | null {
+  const replyTarget = resolveSlackReplyTarget(payload);
+  if (!replyTarget) return null;
+
+  return {
+    taskId,
+    slackChannelId: replyTarget.channelId,
+    slackThreadTs: replyTarget.threadId,
+  };
+}
 
 type TeamsTarget = {
   channelId: string;
@@ -282,7 +319,8 @@ async function deliverSlackTerminalStatus({
     status === 'closed' ? SLACK_PR_CLOSED_REACTION_EMOJI : completionEmoji;
 
   for (const target of slackTargets) {
-    if (notifiedThreads.has(target.slackThreadTs)) {
+    const threadKey = `${target.slackChannelId}:${target.slackThreadTs}`;
+    if (notifiedThreads.has(threadKey)) {
       continue;
     }
 
@@ -308,20 +346,39 @@ async function deliverSlackTerminalStatus({
         footerStyle: 'reply-only',
       });
 
-      await Promise.all([
-        notifier.addReaction({
-          channel: target.slackChannelId,
-          timestamp: target.slackThreadTs,
-          name: terminalReaction,
-        }),
-        notifier.removeReaction({
-          channel: target.slackChannelId,
-          timestamp: target.slackThreadTs,
-          name: ackEmoji,
-        }),
-      ]);
+      // The status post completes user-visible delivery for this pass.
+      // Record it before best-effort reaction cleanup so duplicate task/run
+      // bindings cannot repost the same lifecycle message when cleanup fails.
+      notifiedThreads.add(threadKey);
 
-      notifiedThreads.add(target.slackThreadTs);
+      const [terminalReactionResult, ackRemovalResult] =
+        await Promise.allSettled([
+          notifier.addReaction({
+            channel: target.slackChannelId,
+            timestamp: target.slackThreadTs,
+            name: terminalReaction,
+          }),
+          notifier.removeReaction({
+            channel: target.slackChannelId,
+            timestamp: target.slackThreadTs,
+            name: ackEmoji,
+          }),
+        ]);
+
+      if (
+        terminalReactionResult.status === 'rejected' ||
+        !terminalReactionResult.value
+      ) {
+        console.warn(
+          `[notifyPullRequestTerminalStatus] Failed to add ${status} reaction to Slack thread ${target.slackThreadTs}`,
+        );
+      }
+
+      if (ackRemovalResult.status === 'rejected' || !ackRemovalResult.value) {
+        console.warn(
+          `[notifyPullRequestTerminalStatus] Failed to remove acknowledgement reaction from Slack thread ${target.slackThreadTs}`,
+        );
+      }
 
       console.log(
         `[notifyPullRequestTerminalStatus] Sent ${status} notification to Slack thread ${target.slackThreadTs} for PR ${repository}#${prNumber}`,
@@ -769,6 +826,7 @@ export async function notifyPullRequestTerminalStatus({
       db.query.taskRuns.findMany({
         where: inArray(taskRuns.taskId, taskIds),
         columns: {
+          taskId: true,
           payload: true,
         },
       }),
@@ -790,6 +848,12 @@ export async function notifyPullRequestTerminalStatus({
         linearSessionIds.push(task.linearSessionId);
       }
     }
+
+    slackTargets.push(
+      ...linkedRuns
+        .map((run) => getSlackTarget(run.taskId, run.payload))
+        .filter((target): target is SlackTarget => target !== null),
+    );
 
     const teamsTargets = linkedRuns
       .map((run) => getTeamsTarget(run.payload))
