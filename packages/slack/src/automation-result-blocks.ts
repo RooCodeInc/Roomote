@@ -376,10 +376,12 @@ export function buildAutomationResultBlocks(params: {
   subtitle?: { type: string; text: string };
   taskUrl?: string | null;
   linkedPrUrls?: string[];
+  additionalActions?: Record<string, unknown>[];
+  configureLabel?: string;
 }): SlackBlock[] {
-  const actionElements: Record<string, unknown>[] = [];
+  const actionElements = [...(params.additionalActions ?? [])];
   const linkedPrUrls = params.linkedPrUrls ?? [];
-  const reservedActions = params.taskUrl ? 1 : 0;
+  const reservedActions = actionElements.length + (params.taskUrl ? 1 : 0);
 
   for (const [index, linkedPrUrl] of linkedPrUrls
     .slice(0, 25 - reservedActions)
@@ -407,7 +409,11 @@ export function buildAutomationResultBlocks(params: {
   actionElements.push({
     type: 'button',
     action_id: 'late_bound_automation_configure',
-    text: { type: 'plain_text', text: 'Configure', emoji: false },
+    text: {
+      type: 'plain_text',
+      text: params.configureLabel ?? 'Configure',
+      emoji: false,
+    },
     url: params.configureUrl,
   });
   const configureAction = actionElements.pop();

@@ -14,6 +14,7 @@ import {
   type ConflictResolverMaxPrAgeDays,
   type DependabotTriageFrequency,
   type ManagerStatsFrequency,
+  type ProviderUsageLimitFrequency,
   type PrReviewSettings,
   type SecurityAuditorFrequency,
   type SentryTriageFrequency,
@@ -23,11 +24,14 @@ import {
   BACKGROUND_AUTOMATION_KEYS,
   DEFAULT_CONFLICT_RESOLUTION_MAX_PR_AGE_DAYS,
   DEFAULT_CHANNEL_AUTO_START_LAUNCH_MODE,
+  DEFAULT_PROVIDER_USAGE_LIMIT_FREQUENCY,
+  DEFAULT_PROVIDER_USAGE_LIMIT_THRESHOLD,
   DEFAULT_PR_REVIEW_SETTINGS,
   getTriggerableBackgroundAutomationDescriptorByKey,
   isChannelAutoStartLaunchMode,
   isConflictResolverMaxPrAgeDays,
   isInternalAutomationKey,
+  isProviderUsageLimitThreshold,
   type TriggerableBackgroundAutomationKey,
 } from '@roomote/types';
 
@@ -192,6 +196,14 @@ function getAutomationFrequency<T extends string>(
 
   const mode = getScheduleMode(automation);
   return mode && validator(mode) ? mode : ('off' as T);
+}
+
+function getProviderUsageLimitFrequency(
+  automation: Automation | undefined,
+): ProviderUsageLimitFrequency {
+  return automation?.enabled === false
+    ? 'off'
+    : DEFAULT_PROVIDER_USAGE_LIMIT_FREQUENCY;
 }
 
 export function getAutomationTargetRefs(
@@ -471,8 +483,17 @@ export async function ensureAutomationRows(
     .values(
       BACKGROUND_AUTOMATION_KEYS.map((key) => ({
         key,
-        enabled: key === 'platform_issue_alerts',
+        enabled:
+          key === 'platform_issue_alerts' || key === 'provider_usage_limit',
         internal: isInternalAutomationKey(key),
+        ...(key === 'provider_usage_limit'
+          ? {
+              schedule: { mode: DEFAULT_PROVIDER_USAGE_LIMIT_FREQUENCY },
+              settings: {
+                threshold: DEFAULT_PROVIDER_USAGE_LIMIT_THRESHOLD,
+              },
+            }
+          : {}),
       })),
     )
     .onConflictDoNothing({ target: automations.key });
@@ -906,6 +927,7 @@ export function normalizeBackgroundAgentSettings(
   const callRoomoteViaEmoji = automationMap.get('call_roomote_via_emoji');
   const channelAutoStart = automationMap.get('slack_channel_auto_start');
   const managerStats = automationMap.get('manager_stats');
+  const providerUsageLimit = automationMap.get('provider_usage_limit');
   const sentryTriage = automationMap.get('sentry_triage');
   const dependabotTriage = automationMap.get('dependabot_triage');
   const codeqlTriage = automationMap.get('codeql_triage');
@@ -1006,6 +1028,18 @@ export function normalizeBackgroundAgentSettings(
       isFrequencyOf(MANAGER_STATS_FREQUENCIES),
     ),
     managerStatsLastRunAt: managerStats?.lastRunAt ?? null,
+
+    providerUsageLimitFrequency:
+      getProviderUsageLimitFrequency(providerUsageLimit),
+    providerUsageLimitThreshold: (() => {
+      const threshold =
+        getAutomationSettingNumber(providerUsageLimit, 'threshold') ??
+        DEFAULT_PROVIDER_USAGE_LIMIT_THRESHOLD;
+      return isProviderUsageLimitThreshold(threshold)
+        ? threshold
+        : DEFAULT_PROVIDER_USAGE_LIMIT_THRESHOLD;
+    })(),
+    providerUsageLimitLastRunAt: providerUsageLimit?.lastRunAt ?? null,
 
     sentryTriageFrequency: getAutomationFrequency(
       sentryTriage,

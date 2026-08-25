@@ -216,6 +216,7 @@ export {
   XIcon,
   Zap,
   BellElectric,
+  BatteryWarning,
 } from 'lucide-react';
 
 export type { LucideIcon } from 'lucide-react';
