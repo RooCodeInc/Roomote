@@ -268,7 +268,7 @@ async function buildFastAutomationConversation(params: {
       throw new Error('Slack is not connected.');
     }
     const slack = new SlackNotifier(installation.botAccessToken);
-    const kickoffText = `${automation.name} is running in Fast mode.`;
+    const kickoffText = `${automation.name} is running.`;
     const rootMessageId = await slack.postMessage({
       channel: destination.channelId,
       ...buildCustomAutomationSlackMessage({
@@ -278,7 +278,7 @@ async function buildFastAutomationConversation(params: {
         contentBlocks: [
           {
             type: 'markdown',
-            text: `**${automation.name}** is running in Fast mode.`,
+            text: `**${automation.name}** is running.`,
           },
         ],
       }),

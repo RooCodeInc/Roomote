@@ -228,6 +228,7 @@ describe('customAutomationsJob', () => {
       expect.objectContaining({
         channel: 'C123',
         client_msg_id: 'client-message-id',
+        text: 'Flaky tests is running.',
         blocks: [
           expect.objectContaining({
             type: 'container',
@@ -237,7 +238,7 @@ describe('customAutomationsJob', () => {
               expect.objectContaining({
                 type: 'section',
                 text: expect.objectContaining({
-                  text: '*Flaky tests* is running in Fast mode.',
+                  text: '*Flaky tests* is running.',
                 }),
               }),
               expect.objectContaining({
