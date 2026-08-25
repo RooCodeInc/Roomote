@@ -1845,23 +1845,19 @@ async function enqueueFreshLaunch(
   // Fire-and-forget: generate an LLM title from the initial prompt during
   // startup so the user sees a meaningful title before the worker records
   // the first envelope. Titles live on tasks only.
-  const description =
-    'description' in task.payload ? task.payload.description : undefined;
-
   if (
     !options.skipEarlyTitleGeneration &&
     !reusedTask &&
     !explicitTitle &&
     !hasDeterministicTaskRunTitle(task.type) &&
-    typeof description === 'string' &&
-    description.trim()
+    initialPrompt?.trim()
   ) {
     void (async () => {
       try {
         const generatedTitle = await generateLlmTaskTitle({
           userId: linkedUserId,
           taskId: taskRun.taskId,
-          messages: [{ role: 'user', text: description }],
+          messages: [{ role: 'user', text: initialPrompt }],
         });
         if (isFallbackTaskTitle(generatedTitle)) {
           return;
