@@ -828,6 +828,7 @@ export async function answerFastAgentQuestion({
 
     const executeNativeTool = async (
       call: FastAgentNativeToolCall,
+      isFastParentAgent: boolean,
     ): Promise<unknown> => {
       const recordToolFinished = diagnostics.recordNativeToolStarted(call.name);
 
@@ -940,7 +941,7 @@ export async function answerFastAgentQuestion({
             const managesCustomAutomations =
               args.integrationId === ROOMOTE_MCP_ID &&
               args.toolName === MANAGE_CUSTOM_AUTOMATIONS_TOOL.name;
-            if (call.agent && managesCustomAutomations) {
+            if (!isFastParentAgent && managesCustomAutomations) {
               return {
                 success: false,
                 error:
@@ -1237,7 +1238,7 @@ export async function answerFastAgentQuestion({
                       unbindExecutors.add(
                         bindFastAgentNativeToolExecutor(
                           openCodeSessionID,
-                          executeNativeTool,
+                          (call) => executeNativeTool(call, true),
                         ),
                       );
                     },
@@ -1254,7 +1255,7 @@ export async function answerFastAgentQuestion({
                               call.agent ===
                                 ROOMOTE_OPENCODE_JUDGE_AGENT_NAME) &&
                             isFastAgentSubagentTool(call.name)
-                              ? executeNativeTool(call)
+                              ? executeNativeTool(call, false)
                               : Promise.resolve({
                                   success: false,
                                   error:
