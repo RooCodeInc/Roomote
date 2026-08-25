@@ -76,6 +76,7 @@ const state = vi.hoisted(() => ({
           reviewAllPullRequestAuthors: false,
           reviewOnCommit: true,
           reviewDraftPrs: true,
+          publishGithubCheck: false,
           relayReviewResultsToTask: false,
           relayUsers: [],
         },
@@ -181,6 +182,7 @@ const state = vi.hoisted(() => ({
         reviewAllPullRequestAuthors: false,
         reviewOnCommit: true,
         reviewDraftPrs: true,
+        publishGithubCheck: false,
         relayReviewResultsToTask: false,
         relayUsers: [],
       },
@@ -578,6 +580,7 @@ describe('AutomationsSettings', () => {
     state.settingsQuery.data.settings.reviewer.reviewAllPullRequestAuthors = false;
     state.settingsQuery.data.reviewer.reviewOnCommit = true;
     state.settingsQuery.data.reviewer.reviewDraftPrs = true;
+    state.settingsQuery.data.reviewer.publishGithubCheck = false;
     state.settingsQuery.data.settings.reviewCodeInstructions = null;
     state.settingsQuery.data.reviewer.relayReviewResultsToTask = false;
     state.settingsQuery.data.reviewer.relayUsers = [];
@@ -664,6 +667,25 @@ describe('AutomationsSettings', () => {
     expect(screen.getByLabelText('Additional instructions')).toHaveValue(
       'Focus on authorization boundaries.',
     );
+  });
+
+  it('explains that GitHub controls whether the review check is required', async () => {
+    state.settingsQuery.data.reviewer.enabled = true;
+    state.settingsQuery.data.settings.reviewer.enabled = true;
+
+    render(<AutomationsSettings />);
+    await openReviewerCard();
+
+    expect(
+      screen.getByRole('switch', {
+        name: 'Publish review results as a GitHub check',
+      }),
+    ).not.toBeChecked();
+    expect(
+      screen.getByText(
+        'GitHub branch protection or rulesets control whether this check is required for merging.',
+      ),
+    ).toBeVisible();
   });
 
   it('shows per-automation Slack destinations without requiring a manager channel', async () => {

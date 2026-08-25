@@ -167,7 +167,10 @@ const mockSuggestSlackQuestionChannels = vi.fn();
 const mockBuildTerminalReviewStatus = vi
   .fn()
   .mockReturnValue('terminal-status');
-const mockFinalizeGithubPrReviewComment = vi.fn().mockResolvedValue(false);
+const mockFinalizeGithubPrReviewComment = vi.fn().mockResolvedValue({
+  finalized: false,
+  body: '<!-- roomote-review-summary sha=abc -->',
+});
 
 vi.mock('@roomote/cloud-agents/server', () => ({
   enqueueTask: vi.fn(),
@@ -179,6 +182,26 @@ vi.mock('@roomote/cloud-agents/server', () => ({
     mockBuildTerminalReviewStatus(...args),
   finalizeGithubPrReviewComment: (...args: unknown[]) =>
     mockFinalizeGithubPrReviewComment(...args),
+  REVIEW_SUMMARY_MARKER: '<!-- roomote-review-summary',
+  REVIEW_CHECKLIST_START_MARKER: '<!-- roomote-review-checklist:start -->',
+  REVIEW_CHECKLIST_END_MARKER: '<!-- roomote-review-checklist:end -->',
+  parseReviewSummaryMarkerSha: (body: string) =>
+    body.match(/roomote-review-summary\s+sha=([0-9a-f]+)/i)?.[1],
+  getMarkedSection: ({
+    content,
+    startMarker,
+    endMarker,
+  }: {
+    content: string;
+    startMarker: string;
+    endMarker: string;
+  }) => {
+    const start = content.indexOf(startMarker);
+    const end = content.indexOf(endMarker, start + startMarker.length);
+    return start === -1 || end === -1
+      ? undefined
+      : content.slice(start + startMarker.length, end).trim();
+  },
 }));
 
 vi.mock('@roomote/redis', () => ({
@@ -193,12 +216,13 @@ vi.mock('@roomote/telemetry/server', () => ({
 }));
 
 const mockCreateIssueComment = vi.fn().mockResolvedValue(undefined);
+const mockUpdateCheckRun = vi.fn().mockResolvedValue(undefined);
 
 vi.mock('@roomote/github', () => ({
   createTaskRunGitHubToken: vi.fn().mockResolvedValue('github-token'),
   createIssueComment: (...args: unknown[]) => mockCreateIssueComment(...args),
   deleteReaction: vi.fn(),
-  updateCheckRun: vi.fn(),
+  updateCheckRun: (...args: unknown[]) => mockUpdateCheckRun(...args),
 }));
 
 const mockPostMessage = vi.fn().mockResolvedValue('ts-123');
@@ -2229,6 +2253,70 @@ describe('finishRun', () => {
         text: "I ran into a hiccup and couldn't get started. This is usually temporary -- try again and I'll give it another shot.\n\n**Error details:** The provider returned an error: API key is invalid.\n\n[Open the task](https://example.com/task)",
         textFormat: 'markdown',
       });
+    });
+  });
+
+  describe('GitHub PR review checks', () => {
+    const reviewPrRow = {
+      id: 'tpr-review',
+      taskId: 'task-1',
+      sourceControlProvider: 'github',
+      repository: 'owner/repo',
+      prNumber: 42,
+      prUrl: 'https://github.com/owner/repo/pull/42',
+      githubReactionId: null,
+      githubCheckRunId: 123,
+      githubReviewCommentId: 456,
+    };
+
+    it('passes the check when the canonical review summary is clean', async () => {
+      mockFindFirstRun.mockResolvedValue(
+        makeRun(
+          { payloadKind: TaskPayloadKind.GithubPrReview },
+          { workflow: 'pr_review', surface: 'github' },
+        ),
+      );
+      mockFindManyTaskPullRequests.mockResolvedValue([reviewPrRow]);
+      mockFinalizeGithubPrReviewComment.mockResolvedValueOnce({
+        finalized: false,
+        body: '<!-- roomote-review-summary sha=abc -->\n<!-- roomote-review-checklist:start -->\n<!-- roomote-review-checklist:end -->',
+      });
+
+      await finishRun({ id: 1, status: RunStatus.Completed });
+
+      expect(mockUpdateCheckRun).toHaveBeenCalledWith(
+        'github-token',
+        expect.objectContaining({
+          check_run_id: 123,
+          status: 'completed',
+          conclusion: 'success',
+        }),
+      );
+    });
+
+    it('fails the check when the canonical review summary has findings', async () => {
+      mockFindFirstRun.mockResolvedValue(
+        makeRun(
+          { payloadKind: TaskPayloadKind.GithubPrReview },
+          { workflow: 'pr_review', surface: 'github' },
+        ),
+      );
+      mockFindManyTaskPullRequests.mockResolvedValue([reviewPrRow]);
+      mockFinalizeGithubPrReviewComment.mockResolvedValueOnce({
+        finalized: false,
+        body: '<!-- roomote-review-summary sha=abc -->\n<!-- roomote-review-checklist:start -->\n- [ ] Fix authorization\n<!-- roomote-review-checklist:end -->',
+      });
+
+      await finishRun({ id: 1, status: RunStatus.Completed });
+
+      expect(mockUpdateCheckRun).toHaveBeenCalledWith(
+        'github-token',
+        expect.objectContaining({
+          check_run_id: 123,
+          status: 'completed',
+          conclusion: 'failure',
+        }),
+      );
     });
   });
 

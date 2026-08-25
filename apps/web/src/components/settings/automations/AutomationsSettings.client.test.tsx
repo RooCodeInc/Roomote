@@ -37,6 +37,7 @@ const baseFormState: FormState = {
   reviewerReviewAllPullRequestAuthors: false,
   reviewerReviewOnCommit: true,
   reviewerReviewDraftPrs: true,
+  reviewerPublishGithubCheck: false,
   reviewerInstructions: '',
   reviewerRelayReviewResultsToTask: false,
   reviewerRelayUserIds: [] as string[],
@@ -489,6 +490,19 @@ describe('Automations selection helpers', () => {
     );
 
     expect(saveInput.reviewerReviewAllPullRequestAuthors).toBe(true);
+  });
+
+  it('includes GitHub check publication when saving Review Code', () => {
+    const saveInput = buildAutomationSettingsSaveInput(
+      {
+        ...baseFormState,
+        reviewerPublishGithubCheck: true,
+      },
+      baseFormState,
+      'reviewer',
+    );
+
+    expect(saveInput.reviewerPublishGithubCheck).toBe(true);
   });
 
   it('creates a prefilled channel auto-start row from a template', () => {
