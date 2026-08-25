@@ -1,5 +1,6 @@
 import {
   db,
+  eq,
   fastAgentConversations,
   runFactory,
   taskFactory,
@@ -157,6 +158,41 @@ describe('Fast session queries', () => {
         taskId: task.id,
         title: 'Delegated task',
         status: RunStatus.Running,
+      }),
+    ]);
+  });
+
+  it('finds delegated tasks linked through a legacy conversation ID', async () => {
+    const legacyConversationId = '11111111-1111-4111-8111-111111111111';
+    const owner = await userFactory.create();
+    const session = await createFastSession({
+      userId: owner.id,
+      conversationId: 'legacy-delegated-task-session',
+      updatedAt: new Date('2026-01-01T00:00:00.000Z'),
+    });
+    await db
+      .update(fastAgentConversations)
+      .set({ legacyConversationIds: [legacyConversationId] })
+      .where(eq(fastAgentConversations.id, session.id));
+    const task = await taskFactory.create({ title: 'Legacy delegated task' });
+    await runFactory.create({
+      taskId: task.id,
+      payload: {
+        repo: 'roomote/roomote',
+        description: 'Legacy delegated task',
+        fastAgentSessionId: legacyConversationId,
+      },
+    });
+
+    const result = await getFastSessionById(
+      { userId: owner.id, isAdmin: false },
+      session.id,
+    );
+
+    expect(result?.linkedTasks).toEqual([
+      expect.objectContaining({
+        taskId: task.id,
+        title: 'Legacy delegated task',
       }),
     ]);
   });

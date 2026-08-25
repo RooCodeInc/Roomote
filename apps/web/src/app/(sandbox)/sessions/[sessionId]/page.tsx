@@ -208,10 +208,11 @@ export default async function SessionDetailPage({
                   </CardDescription>
                 </CardHeader>
                 <CardContent>
-                  Full task-workspace parity requires canonical Fast message
-                  records linked to this conversation, with stable event IDs,
+                  The smallest durable path is an additive fast_agent_messages
+                  store linked to this conversation, with stable event IDs,
                   timestamps, content blocks, and optional task or run
-                  relationships.
+                  relationships. It must dual-write with compatibilityMessages
+                  for an N-1-safe release before the legacy path can retire.
                 </CardContent>
               </Card>
             </div>
