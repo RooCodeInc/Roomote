@@ -208,6 +208,7 @@ export type NonTaskOpenCodeNativeSessionOptions = {
   permission?: PermissionRuleset;
   promptOnlySubagents?: boolean;
   signal?: AbortSignal;
+  trackSessionTreeUsage?: boolean;
   tools: Record<string, boolean>;
 };
 
@@ -719,6 +720,7 @@ async function runNonTaskSdkPrompt(
     promptErrorLabel?: string;
     session?: NonTaskOpenCodeSession;
     signal?: AbortSignal;
+    trackSessionTreeUsage?: boolean;
     useConfiguredServer?: boolean;
   } = {},
 ): Promise<{
@@ -796,6 +798,24 @@ async function runNonTaskSdkPrompt(
     }
     await options.onSessionReady?.(sessionId);
 
+    const trackedSessionIds = new Set([sessionId]);
+    const usageRecordings = new Map<string, Promise<void>>();
+    const recordUsageOnce = (info: NonTaskOpenCodeMessageInfo) => {
+      const usageSessionId = asString(info.sessionID);
+      const usageMessageId = asString(info.id);
+      if (!usageSessionId || !usageMessageId) {
+        return recordNonTaskOpenCodeUsage(params, model, info);
+      }
+
+      const usageKey = `${usageSessionId}:${usageMessageId}`;
+      const existing = usageRecordings.get(usageKey);
+      if (existing) return existing;
+
+      const recording = recordNonTaskOpenCodeUsage(params, model, info);
+      usageRecordings.set(usageKey, recording);
+      return recording;
+    };
+
     const eventAbortController = new AbortController();
     const abortEventMonitor = () => {
       eventAbortController.abort(abortController.signal.reason);
@@ -813,7 +833,11 @@ async function runNonTaskSdkPrompt(
     });
     let eventMonitor: Promise<void> | undefined;
 
-    if (params.onProviderRetry || options.onSubagentSessionReady) {
+    if (
+      params.onProviderRetry ||
+      options.onSubagentSessionReady ||
+      options.trackSessionTreeUsage
+    ) {
       try {
         const subscription = await client.event.subscribe(
           { directory: sessionDirectory },
@@ -827,6 +851,7 @@ async function runNonTaskSdkPrompt(
                   event.type === 'session.updated') &&
                 event.properties.info.parentID === sessionId
               ) {
+                trackedSessionIds.add(event.properties.sessionID);
                 try {
                   await options.onSubagentSessionReady?.(
                     event.properties.sessionID,
@@ -835,6 +860,14 @@ async function runNonTaskSdkPrompt(
                   rejectSessionError(error);
                   return;
                 }
+              } else if (
+                options.trackSessionTreeUsage &&
+                event.type === 'message.updated' &&
+                event.properties.info.role === 'assistant' &&
+                event.properties.info.time.completed !== undefined &&
+                trackedSessionIds.has(event.properties.info.sessionID)
+              ) {
+                void recordUsageOnce(event.properties.info);
               } else if (
                 event.type === 'session.status' &&
                 event.properties.sessionID === sessionId &&
@@ -928,7 +961,9 @@ async function runNonTaskSdkPrompt(
         { signal: abortController.signal },
       );
       const promptResult =
-        params.onProviderRetry || options.onSubagentSessionReady
+        params.onProviderRetry ||
+        options.onSubagentSessionReady ||
+        options.trackSessionTreeUsage
           ? await Promise.race([promptRequest, sessionError])
           : await promptRequest;
 
@@ -950,7 +985,61 @@ async function runNonTaskSdkPrompt(
         );
       }
 
-      await recordNonTaskOpenCodeUsage(params, model, promptResult.data.info);
+      await recordUsageOnce(promptResult.data.info);
+      if (options.trackSessionTreeUsage) {
+        try {
+          const childrenResult = await client.session.children({
+            sessionID: sessionId,
+            directory: sessionDirectory,
+          });
+          if (childrenResult.error || !childrenResult.data) {
+            console.warn(
+              `[NonTaskProviderUsage] Could not reconcile OpenCode child sessions: ${formatOpenCodeSdkError(childrenResult.error)}`,
+            );
+          } else {
+            for (const child of childrenResult.data) {
+              trackedSessionIds.add(child.id);
+            }
+          }
+        } catch (error) {
+          console.warn(
+            `[NonTaskProviderUsage] Could not reconcile OpenCode child sessions: ${formatOpenCodeSdkError(error)}`,
+          );
+        }
+
+        await Promise.all(
+          [...trackedSessionIds].map(async (trackedSessionId) => {
+            try {
+              const messagesResult = await client.session.messages({
+                sessionID: trackedSessionId,
+                directory: sessionDirectory,
+              });
+              if (messagesResult.error || !messagesResult.data) {
+                console.warn(
+                  `[NonTaskProviderUsage] Could not reconcile OpenCode usage for session ${trackedSessionId}: ${formatOpenCodeSdkError(messagesResult.error)}`,
+                );
+                return;
+              }
+
+              await Promise.all(
+                messagesResult.data
+                  .map((message) => message.info)
+                  .filter(
+                    (info) =>
+                      info.role === 'assistant' &&
+                      info.time.completed !== undefined,
+                  )
+                  .map(recordUsageOnce),
+              );
+            } catch (error) {
+              console.warn(
+                `[NonTaskProviderUsage] Could not reconcile OpenCode usage for session ${trackedSessionId}: ${formatOpenCodeSdkError(error)}`,
+              );
+            }
+          }),
+        );
+        await Promise.all(usageRecordings.values());
+      }
 
       return promptResult.data;
     } catch (error) {
@@ -1079,6 +1168,7 @@ export async function generateTrackedNonTaskTextInOpenCodeSession(
       promptErrorLabel: 'OpenCode native Fast prompt failed',
       session,
       signal: options.signal,
+      trackSessionTreeUsage: options.trackSessionTreeUsage,
       useConfiguredServer: false,
     },
   );

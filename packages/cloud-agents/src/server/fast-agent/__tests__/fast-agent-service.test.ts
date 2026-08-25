@@ -424,6 +424,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       expect.any(Object),
       expect.any(Object),
       expect.objectContaining({
+        trackSessionTreeUsage: true,
         tools: expect.objectContaining({
           'github_*': true,
           'roomote_*': true,

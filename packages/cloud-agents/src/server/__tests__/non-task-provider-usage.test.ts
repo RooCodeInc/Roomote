@@ -13,8 +13,10 @@ const {
   mockResolveEffectiveModelRuntimeEnv,
   recordLlmUsageMock,
   sessionAbortMock,
+  sessionChildrenMock,
   spawnMock,
   sessionCreateMock,
+  sessionMessagesMock,
   sessionPromptMock,
 } = vi.hoisted(() => ({
   createOpencodeClientMock: vi.fn(),
@@ -26,8 +28,10 @@ const {
   mockResolveEffectiveModelRuntimeEnv: vi.fn(),
   recordLlmUsageMock: vi.fn(),
   sessionAbortMock: vi.fn(),
+  sessionChildrenMock: vi.fn(),
   spawnMock: vi.fn(),
   sessionCreateMock: vi.fn(),
+  sessionMessagesMock: vi.fn(),
   sessionPromptMock: vi.fn(),
 }));
 
@@ -138,15 +142,19 @@ describe('resolveOpenCodeSmallModel', () => {
       },
       session: {
         abort: sessionAbortMock,
+        children: sessionChildrenMock,
         create: sessionCreateMock,
+        messages: sessionMessagesMock,
         prompt: sessionPromptMock,
       },
     });
     sessionAbortMock.mockResolvedValue({ data: true, error: undefined });
+    sessionChildrenMock.mockResolvedValue({ data: [], error: undefined });
     sessionCreateMock.mockResolvedValue({
       data: { id: 'session-1' },
       error: undefined,
     });
+    sessionMessagesMock.mockResolvedValue({ data: [], error: undefined });
     configProvidersMock.mockResolvedValue({
       data: { providers: [], default: {} },
       error: undefined,
@@ -444,6 +452,204 @@ describe('resolveOpenCodeSmallModel', () => {
       messageCompletedAt: new Date('2026-08-21T10:00:02.000Z'),
       details: { surface: 'fast_agent' },
     });
+  });
+
+  it('records completed parent and advisor/judge messages once from a Fast session tree', async () => {
+    mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
+      R_MODEL: 'openrouter/openai/gpt-5.4',
+    });
+    let markEventsComplete!: () => void;
+    const eventsComplete = new Promise<void>((resolve) => {
+      markEventsComplete = resolve;
+    });
+    const completedTime = Date.parse('2026-08-21T10:00:02.000Z');
+    const usageInfo = (
+      id: string,
+      sessionID: string,
+      agent: string,
+      cost: number,
+    ) => ({
+      id,
+      sessionID,
+      role: 'assistant' as const,
+      providerID: 'openrouter',
+      modelID: 'openai/gpt-5.4',
+      agent,
+      tokens: {
+        input: 100,
+        output: 20,
+        reasoning: 5,
+        cache: { read: 10, write: 0 },
+      },
+      cost,
+      time: { created: completedTime - 1_000, completed: completedTime },
+    });
+    const intermediateInfo = usageInfo(
+      'message-parent-intermediate',
+      'session-1',
+      'build',
+      0.001,
+    );
+    eventSubscribeMock.mockResolvedValue({
+      stream: (async function* () {
+        yield {
+          type: 'message.updated',
+          properties: { info: intermediateInfo },
+        };
+        yield {
+          type: 'message.updated',
+          properties: { info: intermediateInfo },
+        };
+        yield {
+          type: 'session.created',
+          properties: {
+            sessionID: 'session-advisor',
+            info: { id: 'session-advisor', parentID: 'session-1' },
+          },
+        };
+        yield {
+          type: 'message.updated',
+          properties: {
+            info: usageInfo(
+              'message-advisor',
+              'session-advisor',
+              'advisor',
+              0.002,
+            ),
+          },
+        };
+        yield {
+          type: 'session.created',
+          properties: {
+            sessionID: 'session-judge',
+            info: { id: 'session-judge', parentID: 'session-1' },
+          },
+        };
+        yield {
+          type: 'message.updated',
+          properties: {
+            info: usageInfo('message-judge', 'session-judge', 'judge', 0.003),
+          },
+        };
+        markEventsComplete();
+      })(),
+    });
+    sessionPromptMock.mockImplementation(async () => {
+      await eventsComplete;
+      return {
+        data: {
+          info: usageInfo('message-parent-final', 'session-1', 'build', 0.004),
+          parts: [{ type: 'text', text: 'tracked answer' }],
+        },
+        error: undefined,
+      };
+    });
+    sessionChildrenMock.mockResolvedValue({
+      data: [
+        { id: 'session-advisor', parentID: 'session-1' },
+        { id: 'session-judge', parentID: 'session-1' },
+      ],
+      error: undefined,
+    });
+    sessionMessagesMock.mockImplementation(
+      async ({ sessionID }: { sessionID: string }) => ({
+        data:
+          sessionID === 'session-1'
+            ? [
+                { info: intermediateInfo, parts: [] },
+                {
+                  info: usageInfo(
+                    'message-parent-final',
+                    'session-1',
+                    'build',
+                    0.004,
+                  ),
+                  parts: [],
+                },
+              ]
+            : sessionID === 'session-advisor'
+              ? [
+                  {
+                    info: usageInfo(
+                      'message-advisor',
+                      'session-advisor',
+                      'advisor',
+                      0.002,
+                    ),
+                    parts: [],
+                  },
+                ]
+              : [
+                  {
+                    info: usageInfo(
+                      'message-judge',
+                      'session-judge',
+                      'judge',
+                      0.003,
+                    ),
+                    parts: [],
+                  },
+                ],
+        error: undefined,
+      }),
+    );
+    const { generateTrackedNonTaskTextInOpenCodeSession } =
+      await import('../non-task-provider-usage.js');
+
+    await generateTrackedNonTaskTextInOpenCodeSession(
+      {
+        surface: 'fast_agent',
+        taskId: 'task-1',
+        userId: 'user-1',
+        prompt: 'Use both review subagents.',
+      },
+      {},
+      {
+        directory: '/tmp/roomote-fast-native-test',
+        trackSessionTreeUsage: true,
+        tools: { '*': false, task: true },
+      },
+    );
+
+    expect(recordLlmUsageMock).toHaveBeenCalledTimes(4);
+    expect(
+      recordLlmUsageMock.mock.calls.map(([usage]) => ({
+        eventKey: usage.eventKey,
+        taskId: usage.taskId,
+        userId: usage.userId,
+        source: usage.source,
+        agent: usage.agent,
+      })),
+    ).toEqual([
+      {
+        eventKey: 'non-task:fast_agent:session-1:message-parent-intermediate',
+        taskId: 'task-1',
+        userId: 'user-1',
+        source: 'fast_agent',
+        agent: 'build',
+      },
+      {
+        eventKey: 'non-task:fast_agent:session-advisor:message-advisor',
+        taskId: 'task-1',
+        userId: 'user-1',
+        source: 'fast_agent',
+        agent: 'advisor',
+      },
+      {
+        eventKey: 'non-task:fast_agent:session-judge:message-judge',
+        taskId: 'task-1',
+        userId: 'user-1',
+        source: 'fast_agent',
+        agent: 'judge',
+      },
+      {
+        eventKey: 'non-task:fast_agent:session-1:message-parent-final',
+        taskId: 'task-1',
+        userId: 'user-1',
+        source: 'fast_agent',
+        agent: 'build',
+      },
+    ]);
   });
 
   it('lets OpenCode own a Fast prompt lifecycle when the deadline is disabled', async () => {
