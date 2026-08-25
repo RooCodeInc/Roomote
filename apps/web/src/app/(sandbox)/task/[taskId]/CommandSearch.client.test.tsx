@@ -51,6 +51,9 @@ describe('CommandSearch', () => {
     fireEvent.change(screen.getByPlaceholderText('Search commands...'), {
       target: { value: 'implement-changes' },
     });
+    expect(
+      screen.getByText('Implement, test, and deliver a repository change'),
+    ).toBeInTheDocument();
     fireEvent.click(screen.getByText('/implement-changes'));
 
     expect(onSelectCommand).toHaveBeenCalledWith('/implement-changes');
@@ -89,5 +92,22 @@ describe('CommandSearch', () => {
     });
 
     expect(screen.getByText('/goal')).toBeInTheDocument();
+  });
+
+  it('finds packaged workflows by their purpose', () => {
+    render(
+      <CommandSearch
+        open={true}
+        onOpenChange={() => {}}
+        onSelectCommand={() => {}}
+      />,
+    );
+
+    fireEvent.change(screen.getByPlaceholderText('Search commands...'), {
+      target: { value: 'dependency upgrades' },
+    });
+
+    expect(screen.getByText('/update-dependencies')).toBeInTheDocument();
+    expect(screen.queryByText('/implement-changes')).not.toBeInTheDocument();
   });
 });
