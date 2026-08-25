@@ -1,5 +1,5 @@
 import React from 'react';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 
 import { RunStatus } from '@roomote/types';
 
@@ -48,7 +48,6 @@ vi.mock('@/components/system', () => ({
   SquareDashedMousePointer: () => null,
   MessageSquareIcon: () => null,
   MessageSquareWarning: () => null,
-  RotateCcw: () => null,
 }));
 
 vi.mock('@/components/sandbox', () => ({
@@ -129,40 +128,6 @@ describe('StartupSequence', () => {
     expect(screen.getByText('Warming up my GPUs')).toBeInTheDocument();
   });
 
-  it('shows a retry button for startup failures when a retry action is provided', () => {
-    const onClick = vi.fn();
-
-    render(
-      <StartupSequence
-        steps={[{ status: RunStatus.Failed, completed: true }]}
-        error="resume failed"
-        retryAction={{ onClick, label: 'Retry resume' }}
-      />,
-    );
-
-    const button = screen.getByRole('button', { name: 'Retry resume' });
-    expect(button).toBeInTheDocument();
-
-    fireEvent.click(button);
-    expect(onClick).toHaveBeenCalledTimes(1);
-  });
-
-  it('shows the default Retry label for failed environment starts', () => {
-    const onClick = vi.fn();
-
-    render(
-      <StartupSequence
-        steps={[{ status: RunStatus.Failed, completed: true }]}
-        error="Workspace has exceeded its spend limit"
-        retryAction={{ onClick }}
-      />,
-    );
-
-    const button = screen.getByRole('button', { name: 'Retry' });
-    fireEvent.click(button);
-    expect(onClick).toHaveBeenCalledTimes(1);
-  });
-
   it('links startup failures to a pre-filled new task', () => {
     render(
       <StartupSequence
@@ -178,6 +143,9 @@ describe('StartupSequence', () => {
       'href',
       '/?prompt=Fix+the+build&model=openrouter%2Fopenai%2Fgpt-5.4&environmentId=env-1',
     );
+    expect(
+      screen.queryByRole('button', { name: 'Retry' }),
+    ).not.toBeInTheDocument();
   });
 
   it('does not render the removed prompt preview for failed starts', () => {

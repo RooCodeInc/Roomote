@@ -265,7 +265,6 @@ function LiveContentInner({
                         <>
                           <Startup
                             runId={bootingTaskRun.id}
-                            taskId={session.taskId}
                             initialTaskRun={bootingTaskRun}
                             newTaskHref={newTaskHref}
                             onStatusChange={onBootStatusChange}

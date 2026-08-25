@@ -293,7 +293,6 @@ export default function SandboxPage() {
           footer={
             taskRun ? (
               <SnapshotResumeFailureFooter
-                taskId={taskId}
                 taskRun={taskRun}
                 newTaskHref={newTaskHref}
               />
@@ -312,16 +311,12 @@ export default function SandboxPage() {
           <div className="mx-auto flex w-full max-w-4xl flex-col gap-2">
             <Startup
               runId={taskRun.id}
-              taskId={taskId}
               initialTaskRun={taskRun}
               newTaskHref={newTaskHref}
               onStatusChange={handleBootStatusChange}
             />
           </div>
         </div>
-        {session.draftPrompt && (
-          <DraftPromptBanner draftPrompt={session.draftPrompt} />
-        )}
       </div>
     );
   }
@@ -334,7 +329,6 @@ export default function SandboxPage() {
           <div className="mx-auto flex w-full max-w-4xl flex-col gap-2">
             <Startup
               runId={taskRun.id}
-              taskId={taskId}
               initialTaskRun={taskRun}
               newTaskHref={newTaskHref}
               onStatusChange={handleBootStatusChange}

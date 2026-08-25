@@ -328,6 +328,10 @@ describe('SandboxPage', () => {
         text: 'Fix the build',
         visibleInTranscript: true,
       },
+      draftPrompt: {
+        text: 'Change the failed task',
+        images: [],
+      },
       sessionState: 'boot-failed',
     });
     useTaskMessageEnvelopesMock.mockReturnValue({
@@ -341,6 +345,7 @@ describe('SandboxPage', () => {
       '/?prompt=Fix+the+build&model=openrouter%2Fopenai%2Fgpt-5.4&environmentId=env-1',
     );
     expect(screen.queryByTestId('product-tips')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('draft-prompt-banner')).not.toBeInTheDocument();
     expect(screen.queryByTestId('historical-content')).not.toBeInTheDocument();
     expect(
       screen.queryByTestId('snapshot-resume-failure-footer'),

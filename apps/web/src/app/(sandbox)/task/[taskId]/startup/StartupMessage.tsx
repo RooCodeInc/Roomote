@@ -24,7 +24,7 @@ import { getTaskRunErrorDisplayMessage } from '@/lib/task-run-errors';
 import { Message, MessageContent, Shimmer } from '@/components/ai-elements';
 
 import { SandboxLogsTerminal } from '@/components/sandbox';
-import { MessageSquareWarning, RotateCcw } from '@/components/system';
+import { MessageSquareWarning } from '@/components/system';
 
 export interface StartupStep {
   status: RunStatus;
@@ -121,19 +121,12 @@ const StartupMessage = ({ step, isActive }: StartupMessageProps) => {
   );
 };
 
-export type StartupRetryAction = {
-  onClick: () => void;
-  pending?: boolean;
-  label?: string;
-};
-
 interface StartupErrorMessageProps {
   status: RunStatus;
   error?: string;
   /** Machine-readable failure category persisted with the run. */
   errorCode?: string | null;
   newTaskHref?: string;
-  retryAction?: StartupRetryAction;
 }
 
 export const StartupFailureMessage = ({
@@ -141,7 +134,6 @@ export const StartupFailureMessage = ({
   error,
   errorCode,
   newTaskHref,
-  retryAction,
 }: StartupErrorMessageProps) => {
   const isFailed = status === RunStatus.Failed;
   const isCanceled = status === RunStatus.Canceled;
@@ -158,25 +150,7 @@ export const StartupFailureMessage = ({
               <div className="text-foreground whitespace-pre-wrap wrap-break-word">
                 {displayError}
               </div>
-              {retryAction && (
-                <div className="flex flex-wrap gap-2 pt-1">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={retryAction.onClick}
-                    disabled={retryAction.pending}
-                  >
-                    <RotateCcw className="size-4" />
-                    {retryAction.label ?? 'Retry'}
-                  </Button>
-                  {newTaskHref && (
-                    <Button size="sm" asChild>
-                      <Link href={newTaskHref}>Try in a new task</Link>
-                    </Button>
-                  )}
-                </div>
-              )}
-              {!retryAction && newTaskHref && (
+              {newTaskHref && (
                 <div className="pt-1">
                   <Button size="sm" asChild>
                     <Link href={newTaskHref}>Try in a new task</Link>
@@ -198,25 +172,7 @@ export const StartupFailureMessage = ({
             <MessageSquareWarning className="size-4 mt-0.5 shrink-0" />
             <div className="min-w-0 space-y-2">
               <div>There was an error starting this environment:</div>
-              {retryAction && (
-                <div className="flex flex-wrap gap-2 pt-1">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={retryAction.onClick}
-                    disabled={retryAction.pending}
-                  >
-                    <RotateCcw className="size-4" />
-                    {retryAction.label ?? 'Retry'}
-                  </Button>
-                  {newTaskHref && (
-                    <Button size="sm" asChild>
-                      <Link href={newTaskHref}>Try in a new task</Link>
-                    </Button>
-                  )}
-                </div>
-              )}
-              {!retryAction && newTaskHref && (
+              {newTaskHref && (
                 <div className="pt-1">
                   <Button size="sm" asChild>
                     <Link href={newTaskHref}>Try in a new task</Link>
@@ -258,7 +214,6 @@ interface StartupSequenceProps {
   logsConnected?: boolean;
   logsError?: string | null;
   newTaskHref?: string;
-  retryAction?: StartupRetryAction;
 }
 
 export const StartupSequence = ({
@@ -269,7 +224,6 @@ export const StartupSequence = ({
   logsConnected = true,
   logsError = null,
   newTaskHref,
-  retryAction,
 }: StartupSequenceProps) => {
   const lastStep = steps[steps.length - 1];
   const status = lastStep?.status ?? RunStatus.Pending;
@@ -322,7 +276,6 @@ export const StartupSequence = ({
         error={error}
         errorCode={errorCode}
         newTaskHref={newTaskHref}
-        retryAction={retryAction}
       />
     </div>
   );
