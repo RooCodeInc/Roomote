@@ -1267,6 +1267,7 @@ export async function answerFastAgentQuestion({
                     permission: FAST_AGENT_SESSION_PERMISSIONS,
                     signal: promptSignal,
                     promptOnlySubagents: true,
+                    trackSessionTreeUsage: true,
                     tools: buildFastAgentToolFilter(
                       availableIntegrations.map(
                         (integration) => integration.id,
