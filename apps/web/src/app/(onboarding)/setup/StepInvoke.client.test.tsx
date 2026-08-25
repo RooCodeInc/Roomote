@@ -400,6 +400,23 @@ describe('Setup StepInvoke', () => {
     });
   });
 
+  it('ignores a failed onboarding task id when finishing setup', async () => {
+    environmentState.environments = [];
+    fetchQueryMock.mockResolvedValueOnce({
+      onboardingFailed: true,
+      setupNewState: { onboardingTaskId: 'task-failed' },
+    });
+
+    render(<StepInvoke />);
+
+    fireEvent.click(screen.getByRole('button', { name: /let'?s go/i }));
+
+    await waitFor(() => {
+      expect(replaceMock).toHaveBeenCalledWith('/');
+    });
+    expect(replaceMock).not.toHaveBeenCalledWith('/task/task-failed');
+  });
+
   it('shows a concrete GitHub comment example', () => {
     render(<StepInvoke sourceControlProviders={['github']} />);
 

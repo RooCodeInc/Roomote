@@ -3,6 +3,8 @@ import {
   type NonTaskOpenCodeSession,
 } from '../non-task-provider-usage';
 import { getOpenCodeSdkServerIdleTtlMs } from '../opencode-runtime';
+import { revokeFastAgentMcpCapabilitiesForConversation } from './fast-agent-native-tool-bridge';
+import { fastAgentSpillStore } from './fast-agent-spill-store';
 
 const DEFAULT_FAST_AGENT_OPENCODE_SESSION_LIMIT = 250;
 
@@ -27,6 +29,7 @@ type FastAgentOpenCodeSessionManagerOptions = {
   idleTtlMs?: number;
   maxEntries?: number;
   now?: () => number;
+  onConversationEnd?: (conversationId: string) => Promise<void> | void;
 };
 
 /**
@@ -39,12 +42,21 @@ export class FastAgentOpenCodeSessionManager {
   private readonly idleTtlMs: number;
   private readonly maxEntries: number;
   private readonly now: () => number;
+  private readonly onConversationEnd: (
+    conversationId: string,
+  ) => Promise<void> | void;
 
   constructor(options: FastAgentOpenCodeSessionManagerOptions = {}) {
     this.idleTtlMs = options.idleTtlMs ?? getOpenCodeSdkServerIdleTtlMs();
     this.maxEntries =
       options.maxEntries ?? DEFAULT_FAST_AGENT_OPENCODE_SESSION_LIMIT;
     this.now = options.now ?? Date.now;
+    this.onConversationEnd =
+      options.onConversationEnd ??
+      (async (conversationId) => {
+        revokeFastAgentMcpCapabilitiesForConversation(conversationId);
+        await fastAgentSpillStore.cleanupConversation(conversationId);
+      });
   }
 
   async run<T>({
@@ -75,6 +87,7 @@ export class FastAgentOpenCodeSessionManager {
           // session before releasing queued work so the next turn cannot send
           // a delta into a poisoned transcript.
           entry.session.id = undefined;
+          this.endConversation(conversationId);
           throw error;
         }
       };
@@ -98,6 +111,9 @@ export class FastAgentOpenCodeSessionManager {
   }
 
   clear(): void {
+    for (const conversationId of this.entries.keys()) {
+      this.endConversation(conversationId);
+    }
     this.entries.clear();
   }
 
@@ -109,6 +125,7 @@ export class FastAgentOpenCodeSessionManager {
     const entry = this.entries.get(conversationId);
     if (entry) {
       entry.session.id = undefined;
+      this.endConversation(conversationId);
     }
   }
 
@@ -148,6 +165,7 @@ export class FastAgentOpenCodeSessionManager {
     for (const [key, entry] of this.entries) {
       if (entry.pending === 0 && now - entry.lastUsedAt >= this.idleTtlMs) {
         this.entries.delete(key);
+        this.endConversation(key);
       }
     }
 
@@ -161,8 +179,20 @@ export class FastAgentOpenCodeSessionManager {
       }
       if (entry.pending === 0) {
         this.entries.delete(key);
+        this.endConversation(key);
       }
     }
+  }
+
+  private endConversation(conversationId: string): void {
+    void Promise.resolve(this.onConversationEnd(conversationId)).catch(
+      (error) => {
+        console.error(
+          '[Fast Agent] Failed to clean conversation spill data.',
+          error,
+        );
+      },
+    );
   }
 }
 

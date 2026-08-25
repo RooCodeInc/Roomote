@@ -149,7 +149,6 @@ export const users = pgTable(
 export const userRelations = relations(users, ({ many }) => ({
   tasks: many(tasks, { relationName: 'taskInitiatorUser' }),
   taskPins: many(taskPins),
-  slackQuickAnswers: many(slackQuickAnswers),
   slackFastIntegrationCalls: many(slackFastIntegrationCalls),
   workItems: many(workItems),
   setupQualificationBlocks: many(setupQualificationBlocks),
@@ -2921,31 +2920,6 @@ export const fastAgentPrFeedbackDeliveries = pgTable(
   ],
 );
 
-/**
- * N-1 compatibility aliases for legacy Fast session UUIDs. Multiple legacy
- * rows can collapse to one provider-neutral identity when a reply destination
- * moved before this migration. Keep every UUID addressable while the legacy
- * table remains available to the previous application release.
- */
-export const fastAgentConversationAliases = pgTable(
-  'fast_agent_conversation_aliases',
-  {
-    legacyConversationId: uuid('legacy_conversation_id')
-      .primaryKey()
-      .references(() => slackQuickAnswers.id, { onDelete: 'cascade' }),
-    conversationId: uuid('conversation_id')
-      .notNull()
-      .references(() => fastAgentConversations.id, { onDelete: 'cascade' }),
-    createdAt: timestamp('created_at').notNull().defaultNow(),
-    updatedAt: timestamp('updated_at').notNull().defaultNow(),
-  },
-  (table) => [
-    index('fast_agent_conversation_aliases_conversation_idx').on(
-      table.conversationId,
-    ),
-  ],
-);
-
 export const fastAgentConversationsRelations = relations(
   fastAgentConversations,
   ({ one, many }) => ({
@@ -2953,7 +2927,6 @@ export const fastAgentConversationsRelations = relations(
       fields: [fastAgentConversations.userId],
       references: [users.id],
     }),
-    aliases: many(fastAgentConversationAliases),
     prFeedbackDeliveries: many(fastAgentPrFeedbackDeliveries),
   }),
 );
@@ -2968,20 +2941,6 @@ export const fastAgentPrFeedbackDeliveriesRelations = relations(
     task: one(tasks, {
       fields: [fastAgentPrFeedbackDeliveries.taskId],
       references: [tasks.id],
-    }),
-  }),
-);
-
-export const fastAgentConversationAliasesRelations = relations(
-  fastAgentConversationAliases,
-  ({ one }) => ({
-    conversation: one(fastAgentConversations, {
-      fields: [fastAgentConversationAliases.conversationId],
-      references: [fastAgentConversations.id],
-    }),
-    legacyConversation: one(slackQuickAnswers, {
-      fields: [fastAgentConversationAliases.legacyConversationId],
-      references: [slackQuickAnswers.id],
     }),
   }),
 );
@@ -3026,13 +2985,6 @@ export const slackConversationMessages = pgTable(
     runId: integer('run_id').references(() => taskRuns.id, {
       onDelete: 'set null',
     }),
-    /** N-1 rollback column: retained while the previous release writes it. */
-    slackQuickAnswerId: uuid('slack_quick_answer_id').references(
-      () => slackQuickAnswers.id,
-      {
-        onDelete: 'set null',
-      },
-    ),
     createdAt: timestamp('created_at').notNull().defaultNow(),
   },
   (table) => [
@@ -3075,56 +3027,6 @@ export const slackConversationMessagesRelations = relations(
       fields: [slackConversationMessages.runId],
       references: [taskRuns.id],
     }),
-    slackQuickAnswer: one(slackQuickAnswers, {
-      fields: [slackConversationMessages.slackQuickAnswerId],
-      references: [slackQuickAnswers.id],
-    }),
-  }),
-);
-
-/**
- * slack_quick_answers (renamed from fast_agent_sessions in Stage 4)
- *
- * N-1 rollback compatibility: keep this table and its columns for one release
- * after Fast moves identity, routing, and durable visible history to
- * fast_agent_conversations. Phase-one migration triggers bridge writes from
- * the previous release during rollout and rollback. Current application code
- * must not read or write this table.
- */
-export const slackQuickAnswers = pgTable(
-  'slack_quick_answers',
-  {
-    id: uuid('id').primaryKey().defaultRandom(),
-    userId: text('user_id')
-      .notNull()
-      .references(() => users.id, { onDelete: 'cascade' }),
-    slackChannel: text('slack_channel').notNull(),
-    slackThreadTs: text('slack_thread_ts').notNull(),
-    messages: jsonb('messages')
-      .notNull()
-      .default(sql`'[]'::jsonb`)
-      .$type<Record<string, unknown>[]>(),
-    createdAt: timestamp('created_at').notNull().defaultNow(),
-    updatedAt: timestamp('updated_at').notNull().defaultNow(),
-  },
-  (table) => [
-    uniqueIndex('slack_quick_answers_deployment_channel_thread_unique').on(
-      table.slackChannel,
-      table.slackThreadTs,
-    ),
-    index('slack_quick_answers_deployment_user_idx').on(table.userId),
-  ],
-);
-
-export const slackQuickAnswersRelations = relations(
-  slackQuickAnswers,
-  ({ one, many }) => ({
-    user: one(users, {
-      fields: [slackQuickAnswers.userId],
-      references: [users.id],
-    }),
-    integrationCalls: many(slackFastIntegrationCalls),
-    fastAgentConversationAliases: many(fastAgentConversationAliases),
   }),
 );
 
@@ -3144,15 +3046,9 @@ export const slackFastIntegrationCalls = pgTable(
   'slack_fast_integration_calls',
   {
     id: uuid('id').primaryKey().defaultRandom(),
-    fastAgentConversationId: uuid('fast_agent_conversation_id').references(
-      () => fastAgentConversations.id,
-      { onDelete: 'cascade' },
-    ),
-    /** N-1 rollback column: retained while the previous release writes it. */
-    slackQuickAnswerId: uuid('slack_quick_answer_id').references(
-      () => slackQuickAnswers.id,
-      { onDelete: 'cascade' },
-    ),
+    fastAgentConversationId: uuid('fast_agent_conversation_id')
+      .notNull()
+      .references(() => fastAgentConversations.id, { onDelete: 'cascade' }),
     userId: text('user_id')
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
@@ -3173,10 +3069,6 @@ export const slackFastIntegrationCalls = pgTable(
     updatedAt: timestamp('updated_at').notNull().defaultNow(),
   },
   (table) => [
-    index('slack_fast_integration_calls_session_idx').on(
-      table.slackQuickAnswerId,
-      table.createdAt,
-    ),
     index('slack_fast_integration_calls_conversation_idx').on(
       table.fastAgentConversationId,
       table.createdAt,
@@ -3198,10 +3090,6 @@ export const slackFastIntegrationCallsRelations = relations(
     fastAgentConversation: one(fastAgentConversations, {
       fields: [slackFastIntegrationCalls.fastAgentConversationId],
       references: [fastAgentConversations.id],
-    }),
-    slackQuickAnswer: one(slackQuickAnswers, {
-      fields: [slackFastIntegrationCalls.slackQuickAnswerId],
-      references: [slackQuickAnswers.id],
     }),
     user: one(users, {
       fields: [slackFastIntegrationCalls.userId],
