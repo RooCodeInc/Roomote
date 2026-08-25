@@ -15,7 +15,9 @@ import {
   db,
   DEFAULT_CONFLICT_RESOLVER_LABEL,
   deploymentSettings,
+  getAutomationByKey,
   getAutomationRuntime,
+  getAutomationSlackChannelTarget,
   getBackgroundAgentSettingsForDeployment,
   MANAGER_CHANNEL_STARTER_AUTOMATION_SETTINGS,
   upsertAutomation,
@@ -318,7 +320,11 @@ export async function updateBackgroundAgentSettingsCommand(
 > {
   assertAdmin(auth);
   const fieldErrors: BackgroundAgentFieldErrors = {};
-  const existingSettings = await getBackgroundAgentSettingsForDeployment();
+  const [existingSettings, existingProviderUsageLimitAutomation] =
+    await Promise.all([
+      getBackgroundAgentSettingsForDeployment(),
+      getAutomationByKey('provider_usage_limit'),
+    ]);
   const platformIssueAlertsEnabled =
     input.savingAutomation === 'platformIssueAlerts'
       ? (input.platformIssueAlertsEnabled ??
@@ -562,10 +568,14 @@ export async function updateBackgroundAgentSettingsCommand(
               notifier,
             })
           : keepPersistedSlackChannel(
-              getPersistedSlackChannelForDestination(
-                descriptor,
-                existingSettings,
-              ),
+              descriptor.automationKey === 'provider_usage_limit'
+                ? getAutomationSlackChannelTarget(
+                    existingProviderUsageLimitAutomation ?? undefined,
+                  )
+                : getPersistedSlackChannelForDestination(
+                    descriptor,
+                    existingSettings,
+                  ),
             ),
         shouldUpdate && submitted.resolveDiscord
           ? resolveDiscordChannelId({

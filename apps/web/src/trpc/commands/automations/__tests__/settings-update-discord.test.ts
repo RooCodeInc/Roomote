@@ -795,6 +795,34 @@ describe('updateBackgroundAgentSettingsCommand Discord destinations', () => {
     }
   });
 
+  it('keeps provider usage alerts on the Manager Channel fallback when it changes', async () => {
+    await insertSlackInstallation();
+    await db.insert(deploymentSettings).values({
+      id: 'default',
+      managerSlackChannelId: 'C111MANAGER',
+    });
+    await upsertAutomation(db, {
+      key: 'provider_usage_limit',
+      enabled: true,
+      schedule: { mode: 'every_hour' },
+      settings: { threshold: 85 },
+      targets: [],
+    });
+
+    const result = await updateBackgroundAgentSettingsCommand(
+      adminAuth,
+      buildInput({
+        savingAutomation: 'managerChannel',
+        managerSlackChannel: 'C222MANAGER',
+      }),
+    );
+    const settings = await db.query.deploymentSettings.findFirst();
+
+    expect(result.success).toBe(true);
+    expect(settings?.managerSlackChannelId).toBe('C222MANAGER');
+    expect(await getAutomationTargets('provider_usage_limit')).toEqual([]);
+  });
+
   it('persists an explicit platform issue alert opt-out', async () => {
     const result = await updateBackgroundAgentSettingsCommand(
       adminAuth,
