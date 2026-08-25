@@ -40,27 +40,6 @@ export type SlackBlock =
       has_header_divider?: boolean;
       width?: 'narrow' | 'standard' | 'wide' | 'full';
       child_blocks: SlackBlock[];
-    }
-  | {
-      type: 'card';
-      block_id?: string;
-      icon?: Record<string, unknown>;
-      title?: {
-        type: 'plain_text' | 'mrkdwn';
-        text: string;
-        verbatim?: boolean;
-      };
-      subtitle?: {
-        type: 'plain_text' | 'mrkdwn';
-        text: string;
-        verbatim?: boolean;
-      };
-      body?: {
-        type: 'plain_text' | 'mrkdwn';
-        text: string;
-        verbatim?: boolean;
-      };
-      actions?: Record<string, unknown>[];
     };
 
 export const DEFAULT_SLACK_ACK_EMOJI = 'eyes';

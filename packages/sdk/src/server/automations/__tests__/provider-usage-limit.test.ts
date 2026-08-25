@@ -118,19 +118,15 @@ describe('provider usage limit automation', () => {
     ).toBe('weekly:2026-08-17');
   });
 
-  it('uses the provider usage alert card and BatteryWarning icon', () => {
+  it('uses a provider usage alert container with only Configure', () => {
     const message = buildProviderUsageLimitWarningMessage({
       alerts: [{ snapshot: snapshot(), threshold: 85 }],
     });
 
     expect(message.text).toBe('OpenRouter usage is at 90%');
     expect(message.blocks[0]).toMatchObject({
-      type: 'card',
-      title: {
-        type: 'mrkdwn',
-        text: 'Inference Provider Usage Alert',
-        verbatim: false,
-      },
+      type: 'container',
+      title: { text: 'Inference Provider Usage Alert' },
       subtitle: {
         type: 'mrkdwn',
         text: 'OpenRouter (`Production`) is at 90% ($90.00 of $100.00)',
@@ -145,7 +141,21 @@ describe('provider usage limit automation', () => {
     expect(JSON.stringify(message.blocks)).not.toContain(
       'Production (abc123def456)',
     );
-    expect(message.blocks[0]).not.toHaveProperty('child_blocks');
+    expect(message.blocks[0]).toMatchObject({
+      child_blocks: [
+        {
+          type: 'actions',
+          elements: [
+            expect.objectContaining({
+              type: 'button',
+              action_id: 'late_bound_automation_configure',
+              text: { type: 'plain_text', text: 'Configure', emoji: false },
+              url: expect.stringContaining('#provider-usage-limit'),
+            }),
+          ],
+        },
+      ],
+    });
   });
 
   it('does nothing when disabled', async () => {

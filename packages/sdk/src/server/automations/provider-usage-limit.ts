@@ -11,12 +11,13 @@ import {
   type ProviderUsageLimitSnapshot,
 } from '@roomote/db/server';
 import { getRedis } from '@roomote/redis';
-import { SlackNotifier } from '@roomote/slack';
+import { buildAutomationResultBlocks, SlackNotifier } from '@roomote/slack';
 import {
   DEFAULT_PROVIDER_USAGE_LIMIT_THRESHOLD,
   isProviderUsageLimitThreshold,
   PROVIDER_USAGE_LIMIT_SETTINGS_HASH,
   type ProviderUsageLimitThreshold,
+  type SlackBlock,
 } from '@roomote/types';
 
 import { getCommunicationProviderAdapter } from '../lib/communication-providers';
@@ -250,28 +251,22 @@ function formatSnapshot({
 
 function buildProviderUsageLimitAlertBlock(
   snapshot: ProviderUsageLimitSnapshot,
-) {
+): SlackBlock {
   const percent = Math.round(snapshot.usedPercent * 10) / 10;
   const usage = formatUsage(snapshot, percent);
   const credentialLabel = formatCredentialLabel(snapshot);
 
-  return {
-    type: 'card',
-    title: {
-      type: 'mrkdwn',
-      text: 'Inference Provider Usage Alert',
-      verbatim: false,
-    },
+  return buildAutomationResultBlocks({
+    title: 'Inference Provider Usage Alert',
     subtitle: {
       type: 'mrkdwn',
       text: `${snapshot.providerName} (\`${credentialLabel}\`) is at ${percent}% (${usage})`,
     },
-    icon: {
-      type: 'image',
-      image_url: buildAutomationIconUrl('battery-warning'),
-      alt_text: 'Inference Provider Usage Alert automation icon',
-    },
-  };
+    iconUrl: buildAutomationIconUrl('battery-warning'),
+    configureUrl: buildManagerSlackSettingsUrl(
+      PROVIDER_USAGE_LIMIT_SETTINGS_HASH,
+    ),
+  })[0]!;
 }
 
 export function buildProviderUsageLimitWarningMessage(params: {
