@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('@roomote/auth', () => ({
   createAuthToken: mocks.createAuthToken,
+  ROOMOTE_MCP_PATH: '/mcp',
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -179,7 +180,7 @@ describe('fast-agent integration broker', () => {
         headers: { 'X-MCP-Client': 'Roomote' },
       },
       roomote: {
-        url: 'https://api.example.com/api/mcp-routing/roomote',
+        url: 'https://api.example.com/mcp',
         headers: {},
       },
     };
@@ -197,10 +198,39 @@ describe('fast-agent integration broker', () => {
     ]);
   });
 
+  it('discovers member Roomote tools for Fast with actor authorization', async () => {
+    mocks.configuredServers = {
+      roomote: {
+        url: 'https://app.example.test/mcp',
+        headers: {},
+      },
+    };
+    mocks.listMcpTools.mockResolvedValue([
+      { name: 'manage_tasks', inputSchema: { type: 'object' } },
+    ]);
+
+    const integrations = await listFastAgentIntegrations({
+      userId: 'user-1',
+      apiBaseUrl: 'https://app.example.test/_roomote-api',
+    });
+
+    expect(integrations).toEqual([
+      expect.objectContaining({
+        id: 'roomote',
+        tools: [{ name: 'manage_tasks', inputSchema: { type: 'object' } }],
+      }),
+    ]);
+    expect(mocks.listMcpTools).toHaveBeenCalledWith({
+      url: 'https://app.example.test/_roomote-api/mcp',
+      headers: { Authorization: 'Bearer control-plane-token' },
+      signal: expect.any(AbortSignal),
+    });
+  });
+
   it('injects the current user token into deployment proxies behind a reverse-proxy base path', async () => {
     mocks.configuredServers = {
       roomote: {
-        url: 'https://app.example.test/api/mcp-routing/roomote',
+        url: 'https://app.example.test/mcp',
         headers: { 'X-MCP-Client': 'Roomote' },
       },
     };
@@ -211,7 +241,7 @@ describe('fast-agent integration broker', () => {
     });
 
     expect(mocks.listMcpTools).toHaveBeenCalledWith({
-      url: 'https://app.example.test/_roomote-api/api/mcp-routing/roomote',
+      url: 'https://app.example.test/_roomote-api/mcp',
       headers: {
         'X-MCP-Client': 'Roomote',
         Authorization: 'Bearer control-plane-token',
