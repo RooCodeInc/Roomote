@@ -50,6 +50,7 @@ import {
   saveVercelConnectionSchema,
   saveXConnectionSchema,
   timePeriodFilterSchema,
+  taskBoardColumnSchema,
   PERSONAL_COLOR_THEMES,
 } from '@/types';
 
@@ -924,6 +925,7 @@ export const appRouter = createRouter({
           cursor: z.union([z.string(), z.number()]).optional(),
           filters: z.array(filterSchema).optional(),
           timePeriod: timePeriodFilterSchema.optional(),
+          boardColumn: taskBoardColumnSchema.optional(),
         }),
       )
       .query(({ ctx: { auth }, input }) => getTasksCommand(auth, input)),

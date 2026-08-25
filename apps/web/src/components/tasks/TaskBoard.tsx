@@ -1,12 +1,12 @@
 'use client';
 
-import { useState } from 'react';
 import Link from 'next/link';
 import { formatDistanceToNow } from 'date-fns';
 
 import { PRODUCT_NAME } from '@roomote/types';
 
 import type { Task } from '@/lib/server';
+import type { TaskBoardColumn } from '@/types';
 import { getUserDisplayName, stripHtmlTags, stripMarkdown } from '@/lib';
 import {
   Avatar,
@@ -20,9 +20,6 @@ import {
 import { PullRequestBadge, WorkspaceBadge } from '@/components/sandbox';
 
 import { TaskAutomationIcon } from './TaskAutomationIcon';
-import { getTaskBoardColumn, type TaskBoardColumn } from './task-board';
-
-const TASKS_PER_COLUMN = 6;
 
 const COLUMN_CONFIG: Array<{
   id: TaskBoardColumn;
@@ -56,7 +53,13 @@ const COLUMN_CONFIG: Array<{
   },
 ];
 
-function BoardTaskCard({ task }: { task: Task }) {
+function BoardTaskCard({
+  task,
+  column,
+}: {
+  task: Task;
+  column: TaskBoardColumn;
+}) {
   const actorName =
     task.attributionLabel?.trim() ||
     getUserDisplayName(task.user) ||
@@ -93,7 +96,7 @@ function BoardTaskCard({ task }: { task: Task }) {
       <div className="text-base font-semibold leading-snug -mt-1">
         {stripMarkdown(stripHtmlTags(task.title))}
       </div>
-      {getTaskBoardColumn(task) === 'blocked' && task.goalBlockedReason && (
+      {column === 'blocked' && task.goalBlockedReason && (
         <p className="line-clamp-2 text-xs text-destructive">
           {task.goalBlockedReason}
         </p>
@@ -174,53 +177,22 @@ function BoardTaskCard({ task }: { task: Task }) {
 }
 
 export function TaskBoard({
-  tasks,
-  hasNextPage,
-  isFetchingNextPage,
-  onShowMore,
+  columns,
 }: {
-  tasks: Task[];
-  hasNextPage: boolean;
-  isFetchingNextPage: boolean;
-  onShowMore: () => void | Promise<unknown>;
-}) {
-  const [visibleTaskLimits, setVisibleTaskLimits] = useState<
-    Record<TaskBoardColumn, number>
-  >({
-    active: TASKS_PER_COLUMN,
-    'needs-input': TASKS_PER_COLUMN,
-    blocked: TASKS_PER_COLUMN,
-    done: TASKS_PER_COLUMN,
-  });
-  const groupedTasks = new Map<TaskBoardColumn, Task[]>(
-    COLUMN_CONFIG.map((column) => [column.id, []]),
-  );
-
-  for (const task of tasks) {
-    groupedTasks.get(getTaskBoardColumn(task))?.push(task);
-  }
-
-  const handleShowMore = (
-    columnId: TaskBoardColumn,
-    hasHiddenTasks: boolean,
-  ) => {
-    setVisibleTaskLimits((current) => ({
-      ...current,
-      [columnId]: current[columnId] + TASKS_PER_COLUMN,
-    }));
-
-    if (!hasHiddenTasks && hasNextPage) {
-      void onShowMore();
+  columns: Record<
+    TaskBoardColumn,
+    {
+      tasks: Task[];
+      hasNextPage: boolean;
+      isFetchingNextPage: boolean;
+      onShowMore: () => void | Promise<unknown>;
     }
-  };
-
+  >;
+}) {
   return (
     <div className="grid min-w-0 grid-cols-1 lg:grid-cols-2 xl:grid-cols-4 lg:px-2">
       {COLUMN_CONFIG.map((column) => {
-        const columnTasks = groupedTasks.get(column.id) ?? [];
-        const visibleTasks = columnTasks.slice(0, visibleTaskLimits[column.id]);
-        const hasHiddenTasks = visibleTasks.length < columnTasks.length;
-        const canShowMore = hasHiddenTasks || hasNextPage;
+        const columnData = columns[column.id];
 
         return (
           <section
@@ -240,7 +212,7 @@ export function TaskBoard({
                   >
                     {column.label}
                     <span className="text-sm text-muted-foreground/50 ml-1">
-                      {columnTasks.length}
+                      {columnData.tasks.length}
                     </span>
                   </h2>
                 </div>
@@ -252,9 +224,9 @@ export function TaskBoard({
             </header>
 
             <div className="divide-y-2 divide-background px-1 [&>div]:first:rounded-t-xl [&>div]:last:rounded-b-xl">
-              {visibleTasks.length > 0 ? (
-                visibleTasks.map((task) => (
-                  <BoardTaskCard key={task.id} task={task} />
+              {columnData.tasks.length > 0 ? (
+                columnData.tasks.map((task) => (
+                  <BoardTaskCard key={task.id} task={task} column={column.id} />
                 ))
               ) : (
                 <div className="pl-4 text-xs text-muted-foreground/50">
@@ -263,14 +235,14 @@ export function TaskBoard({
               )}
             </div>
 
-            {canShowMore && (
+            {columnData.hasNextPage && (
               <Button
                 variant="ghost"
                 size="xs"
                 className="mx-auto mt-3 flex"
                 aria-label={`Show more ${column.label.toLowerCase()} tasks`}
-                disabled={isFetchingNextPage}
-                onClick={() => handleShowMore(column.id, hasHiddenTasks)}
+                disabled={columnData.isFetchingNextPage}
+                onClick={() => void columnData.onShowMore()}
               >
                 Show more
               </Button>

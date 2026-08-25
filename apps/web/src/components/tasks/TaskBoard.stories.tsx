@@ -1,13 +1,16 @@
 'use client';
 
+import type { ComponentProps } from 'react';
 import type { Meta, StoryObj } from '@storybook/nextjs-vite';
 
 import { RunStatus } from '@roomote/types';
 
 import type { Task } from '@/lib/server';
+import { TASK_BOARD_COLUMNS, type TaskBoardColumn } from '@/types';
 import { TRPCReactProvider } from '@/trpc/client';
 
 import { TaskBoard } from './TaskBoard';
+import { getTaskBoardColumn } from './task-board';
 
 const PEOPLE = {
   ada: {
@@ -137,6 +140,24 @@ const tasks: Task[] = [
   ),
 ];
 
+const tasksByColumn = Object.fromEntries(
+  TASK_BOARD_COLUMNS.map((column) => [
+    column,
+    tasks.filter((task) => getTaskBoardColumn(task) === column),
+  ]),
+) as Record<TaskBoardColumn, Task[]>;
+const columns = Object.fromEntries(
+  TASK_BOARD_COLUMNS.map((column) => [
+    column,
+    {
+      tasks: tasksByColumn[column].slice(0, 6),
+      hasNextPage: tasksByColumn[column].length > 6,
+      isFetchingNextPage: false,
+      onShowMore: () => {},
+    },
+  ]),
+) as ComponentProps<typeof TaskBoard>['columns'];
+
 const meta: Meta<typeof TaskBoard> = {
   title: 'Tasks/Shared workspace board',
   component: TaskBoard,
@@ -158,11 +179,11 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 export const SharedWorkspace: Story = {
-  args: { tasks },
+  args: { columns },
 };
 
 export const Mobile: Story = {
-  args: { tasks },
+  args: { columns },
   parameters: {
     viewport: {
       defaultViewport: 'mobile2',

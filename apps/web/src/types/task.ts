@@ -20,6 +20,15 @@ import type { User, TaskRun } from '@roomote/db';
 /** How a task's creator should be displayed, derived from initiator columns. */
 export type TaskCreatorKind = 'user' | 'automation' | 'external';
 
+export const TASK_BOARD_COLUMNS = [
+  'active',
+  'needs-input',
+  'blocked',
+  'done',
+] as const;
+export const taskBoardColumnSchema = z.enum(TASK_BOARD_COLUMNS);
+export type TaskBoardColumn = z.infer<typeof taskBoardColumnSchema>;
+
 export const taskSchema = z.object({
   id: z.string(),
   harnessSessionId: z.string().nullable().optional(),

@@ -23,6 +23,7 @@ import {
   lt,
   isNull,
   isNotNull,
+  not,
   sql,
 } from '@roomote/db/server';
 
@@ -31,6 +32,7 @@ import {
   type TaskCreatorKind,
   type TaskInferenceUsageSummary,
   type Filter,
+  type TaskBoardColumn,
   type TimePeriodFilter,
   HAS_PULL_REQUEST_FILTER_VALUE,
 } from '@/types';
@@ -199,6 +201,44 @@ const getTaskFilterConditions = ({ filters }: { filters: Filter[] }) => {
   return conditions;
 };
 
+function getTaskBoardColumnCondition(
+  boardColumn: TaskBoardColumn,
+): TaskFilterCondition {
+  const latestTaskPhase = sql<string | null>`(
+    SELECT ${taskRuns.taskPhase}
+    FROM ${taskRuns}
+    WHERE ${taskRuns.taskId} = ${tasks.id}
+    ORDER BY ${taskRuns.id} DESC
+    LIMIT 1
+  )`;
+  const needsInput = sql<boolean>`COALESCE(
+    ${tasks.state} = 'active'
+      AND ${latestTaskPhase} = 'waiting_for_user_input',
+    FALSE
+  )`;
+  const blocked = sql<boolean>`COALESCE(
+    ${tasks.state} = 'failed'
+      OR ${tasks.goalStatus} IN ('blocked', 'budget_limited'),
+    FALSE
+  )`;
+  const done = sql<boolean>`COALESCE(
+    ${tasks.state} IN ('completed', 'canceled')
+      OR ${tasks.goalStatus} = 'complete',
+    FALSE
+  )`;
+
+  switch (boardColumn) {
+    case 'needs-input':
+      return needsInput;
+    case 'blocked':
+      return and(not(needsInput), blocked)!;
+    case 'done':
+      return and(not(needsInput), not(blocked), done)!;
+    case 'active':
+      return and(not(needsInput), not(blocked), not(done))!;
+  }
+}
+
 function parseTaskActivityCursor(
   cursor?: string | number,
 ): { activityAt: number; id?: string } | undefined {
@@ -365,6 +405,7 @@ export const getTasks = async ({
   cursor,
   filters = [],
   timePeriod = 'all',
+  boardColumn,
   allowTaskTypeFilter = false,
 }: {
   userId: string;
@@ -373,6 +414,7 @@ export const getTasks = async ({
   cursor?: string | number;
   filters?: Filter[];
   timePeriod?: TimePeriodFilter;
+  boardColumn?: TaskBoardColumn;
   allowTaskTypeFilter?: boolean;
 }): Promise<GetTasksResult> => {
   const effectiveFilters = getEffectiveFilters(filters, {
@@ -389,6 +431,10 @@ export const getTasks = async ({
   }
 
   conditions.push(...getTaskFilterConditions({ filters: effectiveFilters }));
+
+  if (boardColumn) {
+    conditions.push(getTaskBoardColumnCondition(boardColumn));
+  }
 
   if (timePeriod !== 'all') {
     const cutoffTimestamp =

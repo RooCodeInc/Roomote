@@ -148,4 +148,17 @@ describe('getTasksCommand', () => {
       }),
     );
   });
+
+  it('passes a board column through to the task query', async () => {
+    await getTasksCommand(auth, {
+      boardColumn: 'blocked',
+      filters: [{ type: 'userId', value: auth.userId, label: auth.userId }],
+    });
+
+    expect(mockGetTasks).toHaveBeenCalledWith(
+      expect.objectContaining({
+        boardColumn: 'blocked',
+      }),
+    );
+  });
 });

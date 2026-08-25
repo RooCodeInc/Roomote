@@ -1,13 +1,5 @@
 import type { Task } from '@/lib/server';
-
-export const TASK_BOARD_COLUMNS = [
-  'active',
-  'needs-input',
-  'blocked',
-  'done',
-] as const;
-
-export type TaskBoardColumn = (typeof TASK_BOARD_COLUMNS)[number];
+import type { TaskBoardColumn } from '@/types';
 
 type BoardTask = Pick<
   Task,

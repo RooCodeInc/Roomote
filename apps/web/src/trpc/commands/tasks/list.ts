@@ -8,6 +8,7 @@ export async function getTasksCommand(
     cursor?: string | number;
     filters?: Parameters<typeof getTasks>[0]['filters'];
     timePeriod?: Parameters<typeof getTasks>[0]['timePeriod'];
+    boardColumn?: Parameters<typeof getTasks>[0]['boardColumn'];
   },
 ) {
   const allowTaskTypeFilter = false;
