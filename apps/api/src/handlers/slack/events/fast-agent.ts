@@ -182,7 +182,7 @@ export async function processFastAgentMessage(params: {
           resolveUserMcpServerConfigs({
             userId,
             apiBaseUrl,
-            includeRoomote: true,
+            includeRoomoteMemberTools: true,
           }),
         launchTask,
         postReply: async ({ message, kickoff }) => {

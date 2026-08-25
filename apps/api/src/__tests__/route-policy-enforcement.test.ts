@@ -34,6 +34,21 @@ vi.mock('@roomote/redis', async (importOriginal) => {
   };
 });
 
+vi.mock('../handlers/mcp/proxy-utils', async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import('../handlers/mcp/proxy-utils')>();
+
+  return {
+    ...actual,
+    assertTaskRunTokenTargetExists: vi.fn(async () => undefined),
+    resolveActingUserIdOrNull: vi.fn(async (auth) =>
+      auth.tokenType === 'run'
+        ? 'user-123'
+        : actual.resolveActingUserIdOrNull(auth),
+    ),
+  };
+});
+
 /**
  * Seed a rate-limit bucket for the current and next fixed windows so a
  * request issued immediately afterwards cannot slip into a fresh window.
@@ -345,6 +360,46 @@ describe('route policy enforcement', () => {
       expect(legacyBody.result?.tools?.map((tool) => tool.name)).toContain(
         'manage_custom_automations',
       );
+
+      const runTokenResponse = await createApiApp().request(
+        'http://localhost/mcp',
+        {
+          ...request,
+          headers: {
+            ...request.headers,
+            authorization: 'Bearer test-run-token',
+          },
+        },
+      );
+      expect(runTokenResponse.status).toBe(403);
+      await expect(runTokenResponse.json()).resolves.toMatchObject({
+        error: {
+          message: expect.stringContaining(
+            'member tools require a user-scoped access token',
+          ),
+        },
+      });
+
+      const legacyRunTokenResponse = await createApiApp().request(
+        'http://localhost/api/mcp-routing/roomote',
+        {
+          ...request,
+          headers: {
+            ...request.headers,
+            authorization: 'Bearer test-run-token',
+          },
+        },
+      );
+      const legacyRunTokenBody = (await legacyRunTokenResponse.json()) as {
+        result?: { tools?: Array<{ name: string }> };
+      };
+      expect(legacyRunTokenResponse.status).toBe(200);
+      expect(
+        legacyRunTokenBody.result?.tools?.map((tool) => tool.name),
+      ).not.toContain('manage_tasks');
+      expect(
+        legacyRunTokenBody.result?.tools?.map((tool) => tool.name),
+      ).toContain('manage_custom_automations');
     });
 
     it('lets run-token requests through to handler-level run scoping', async () => {

@@ -128,7 +128,7 @@ export async function processDiscordFastAgentMessage(input: {
           resolveUserMcpServerConfigs({
             userId: input.senderUserId,
             apiBaseUrl,
-            includeRoomote: true,
+            includeRoomoteMemberTools: true,
           }),
         launchTask: async ({
           prompt,

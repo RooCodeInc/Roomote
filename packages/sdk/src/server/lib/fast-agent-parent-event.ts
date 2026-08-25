@@ -883,7 +883,7 @@ export async function deliverFastAgentParentEvent(params: {
           resolveUserMcpServerConfigs({
             userId: parentTurn.userId,
             apiBaseUrl,
-            includeRoomote: true,
+            includeRoomoteMemberTools: true,
           }),
         ...(params.retryTaskStart
           ? { retryTaskStart: params.retryTaskStart }
