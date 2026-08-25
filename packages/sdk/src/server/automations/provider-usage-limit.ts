@@ -11,7 +11,7 @@ import {
   type ProviderUsageLimitSnapshot,
 } from '@roomote/db/server';
 import { getRedis } from '@roomote/redis';
-import { SlackNotifier } from '@roomote/slack';
+import { buildAutomationResultBlocks, SlackNotifier } from '@roomote/slack';
 import {
   DEFAULT_PROVIDER_USAGE_LIMIT_THRESHOLD,
   isProviderUsageLimitThreshold,
@@ -22,7 +22,7 @@ import {
 
 import { getCommunicationProviderAdapter } from '../lib/communication-providers';
 import {
-  buildAutomationSettingsMessage,
+  buildAutomationIconUrl,
   buildManagerSlackSettingsUrl,
   degradeSlackMrkdwnToMarkdown,
 } from '../lib/manager-slack';
@@ -228,19 +228,26 @@ function formatSnapshot({
   const percent = Math.round(snapshot.usedPercent * 10) / 10;
   const usage =
     snapshot.used !== undefined && snapshot.limit !== undefined
-      ? `${formatAmount(snapshot.used, snapshot.currency)} / ${formatAmount(snapshot.limit, snapshot.currency)}`
-      : `${percent}% / 100% (raw usage and limit not reported)`;
+      ? `${formatAmount(snapshot.used, snapshot.currency)} of ${formatAmount(snapshot.limit, snapshot.currency)}`
+      : `${percent}% of 100% (raw usage and limit not reported)`;
+  const credentialLabel = snapshot.credentialLabel.endsWith(
+    ` (${snapshot.credentialFingerprint})`,
+  )
+    ? snapshot.credentialLabel.slice(
+        0,
+        -` (${snapshot.credentialFingerprint})`.length,
+      )
+    : snapshot.credentialLabel;
 
   return [
-    `**${snapshot.providerName} usage is at ${percent}%**`,
-    `Provider: ${snapshot.providerName}`,
-    `Key: ${snapshot.credentialLabel}`,
-    `Limit window: ${snapshot.windowLabel}`,
-    `Usage: ${usage}`,
-    manualTest
-      ? `Manual test: scheduled alerts post at ${threshold}%.`
-      : `Threshold crossed: ${threshold}%`,
-  ].join('\n');
+    `*Provider* ${snapshot.providerName}`,
+    `*Usage* ${usage}`,
+    `*Limit window* ${snapshot.windowLabel}`,
+    `*Key* \`${credentialLabel}\``,
+    manualTest ? null : `*Threshold crossed* ${threshold}%`,
+  ]
+    .filter((line): line is string => Boolean(line))
+    .join('\n');
 }
 
 export function buildProviderUsageLimitWarningMessage(params: {
@@ -249,18 +256,39 @@ export function buildProviderUsageLimitWarningMessage(params: {
   const highestPercent = Math.max(
     ...params.alerts.map(({ snapshot }) => snapshot.usedPercent),
   );
+  const highestAlert = params.alerts.reduce((highest, alert) =>
+    alert.snapshot.usedPercent > highest.snapshot.usedPercent ? alert : highest,
+  );
   const summary =
     params.alerts.length === 1
       ? `${params.alerts[0]?.snapshot.providerName} usage is at ${Math.round(highestPercent * 10) / 10}%`
       : `${params.alerts.length} provider usage limits need attention`;
-  const message = buildAutomationSettingsMessage(
-    formatProviderUsageLimitWarningText(params),
-    PROVIDER_USAGE_LIMIT_SETTINGS_HASH,
-  );
-  return { ...message, text: summary };
+  return {
+    text: summary,
+    blocks: buildAutomationResultBlocks({
+      title: 'Inference Provider Usage Alert',
+      subtitle: {
+        type: 'plain_text',
+        text: `${highestAlert.snapshot.providerName} is at ${Math.round(highestPercent * 10) / 10}%`,
+      },
+      iconUrl: buildAutomationIconUrl('battery-warning'),
+      configureUrl: buildManagerSlackSettingsUrl(
+        PROVIDER_USAGE_LIMIT_SETTINGS_HASH,
+      ),
+      contentBlocks: [
+        {
+          type: 'section',
+          text: {
+            type: 'mrkdwn',
+            text: formatProviderUsageLimitWarningText(params),
+          },
+        },
+      ],
+    }),
+  };
 }
 
-export function formatProviderUsageLimitWarningText(params: {
+function formatProviderUsageLimitWarningText(params: {
   alerts: ProviderUsageLimitAlert[];
 }): string {
   return params.alerts.map(formatSnapshot).join('\n\n');

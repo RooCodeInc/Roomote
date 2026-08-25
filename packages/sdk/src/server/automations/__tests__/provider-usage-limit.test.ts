@@ -118,7 +118,7 @@ describe('provider usage limit automation', () => {
     ).toBe('weekly:2026-08-17');
   });
 
-  it('uses the automation result card and BatteryWarning icon', () => {
+  it('uses the provider usage alert card and BatteryWarning icon', () => {
     const message = buildProviderUsageLimitWarningMessage({
       alerts: [{ snapshot: snapshot(), threshold: 85 }],
     });
@@ -126,17 +126,21 @@ describe('provider usage limit automation', () => {
     expect(message.text).toBe('OpenRouter usage is at 90%');
     expect(message.blocks[0]).toMatchObject({
       type: 'container',
-      title: { text: 'Inference Provider Usage Alerts' },
+      title: { text: 'Inference Provider Usage Alert' },
+      subtitle: { text: 'OpenRouter is at 90%' },
       icon: {
         image_url: expect.stringContaining(
           '/automation-icons/battery-warning.png',
         ),
       },
     });
-    expect(JSON.stringify(message.blocks)).toContain(
+    expect(JSON.stringify(message.blocks)).toContain('*Key* `Production`');
+    expect(JSON.stringify(message.blocks)).not.toContain(
       'Production (abc123def456)',
     );
-    expect(JSON.stringify(message.blocks)).toContain('$90.00 / $100.00');
+    expect(JSON.stringify(message.blocks)).toContain(
+      '*Usage* $90.00 of $100.00',
+    );
   });
 
   it('does nothing when disabled', async () => {
@@ -213,8 +217,8 @@ describe('provider usage limit automation', () => {
     expect(deps.postMessage.mock.calls[0]?.[0]).toMatchObject({
       text: 'OpenRouter usage is at 0%',
     });
-    expect(JSON.stringify(deps.postMessage.mock.calls[0]?.[0])).toContain(
-      'Manual test: scheduled alerts post at 85%.',
+    expect(JSON.stringify(deps.postMessage.mock.calls[0]?.[0])).not.toContain(
+      'Manual test',
     );
   });
 
