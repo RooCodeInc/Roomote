@@ -60,7 +60,7 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain('send_chat_reaction');
     expect(prompt).toContain('`advisor` and `judge` subagents');
     expect(prompt).toContain(
-      'deployment MCP servers and read-only task inspection',
+      'deployment MCP servers, including Roomote task inspection',
     );
     expect(prompt).toContain('launch_task');
     expect(prompt).toContain(
@@ -69,18 +69,21 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain('Claude Sonnet 5 [id: anthropic/claude-sonnet-5]');
     expect(prompt).toContain('Omit it to use the deployment default');
     expect(prompt).toContain('manage_tasks');
+    expect(prompt).toContain('get_chat_message_context');
+    expect(prompt).toContain('get_chat_channel_messages');
     expect(prompt).toContain('manage_custom_automations');
     expect(prompt).toContain('integration_call');
+    expect(prompt).toContain('integrationId: "roomote"');
     expect(prompt).toContain("current user's deployment authorization");
     expect(prompt).toContain('use "run_now" rather than "launch_task"');
     expect(prompt).toContain('same actor-authorized remote');
     expect(prompt).toContain('local stdio servers remain sandbox-only');
     expect(prompt).toContain('It does not require a prior acknowledgement');
     expect(prompt).toContain(
-      'These reads use the same deployment authorization semantics as delegated Roomote tasks.',
+      'Keep using "launch_task", "send_task_message", or "cancel_task" for task changes',
     );
     expect(prompt).toContain(
-      'Use "launch_task", "send_task_message", or "cancel_task" for task changes',
+      'Slack channel history defaults to the previous 24 hours',
     );
     expect(prompt).not.toContain('roomote_fast_');
     expect(prompt).toContain(
@@ -98,6 +101,9 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).not.toContain('Each structured output');
     expect(prompt).not.toContain('toolArguments');
     expect(prompt).toContain('no local filesystem, shell');
+    expect(prompt).not.toContain(
+      'current-channel chat context tools are the only direct external capabilities',
+    );
   });
 
   it('includes native Brain guidance when Brain is available', () => {

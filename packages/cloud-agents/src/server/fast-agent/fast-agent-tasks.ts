@@ -1,10 +1,6 @@
 import { tool, type ToolSet } from 'ai';
 import { createAuthToken } from '@roomote/auth';
-import {
-  ALL_REPOSITORIES,
-  roomoteTaskInspectionArgsSchema,
-  type RoomoteTaskInspectionArgs,
-} from '@roomote/types';
+import { ALL_REPOSITORIES } from '@roomote/types';
 import { z } from 'zod';
 
 import { resolveApiBaseUrl } from '../shared-utils';
@@ -210,50 +206,6 @@ export async function cancelFastAgentTask(
     ...context,
     method: 'POST',
     path: `${FAST_AGENT_TASKS_API_PATH}/${taskId}/cancel`,
-  });
-}
-
-export async function inspectFastAgentTasks(
-  context: FastAgentTaskApiContext,
-  params: RoomoteTaskInspectionArgs,
-): Promise<FastAgentTaskToolResult> {
-  const args = roomoteTaskInspectionArgsSchema.parse(params);
-
-  if (args.action === 'search') {
-    return callFastAgentTaskApi({
-      ...context,
-      method: 'GET',
-      path: FAST_AGENT_TASKS_API_PATH,
-      query: {
-        query: args.query,
-        status: args.status,
-        limit: args.limit ? Math.min(args.limit, 100) : undefined,
-        cursor: args.cursor,
-        pullRequest: args.pullRequest,
-      },
-    });
-  }
-
-  const taskId = args.taskId?.trim();
-  if (!taskId) {
-    return {
-      success: false,
-      error: `taskId is required for ${args.action}`,
-    };
-  }
-  const actionPath = {
-    get_summary: 'summary',
-    get_compute_logs: 'compute_logs',
-    get_messages: 'messages',
-  }[args.action];
-
-  return callFastAgentTaskApi({
-    ...context,
-    method: 'GET',
-    path: `${FAST_AGENT_TASKS_API_PATH}/${encodeURIComponent(taskId)}/${actionPath}`,
-    ...(args.action === 'get_messages'
-      ? { query: { limit: args.limit, order: 'desc' } }
-      : {}),
   });
 }
 

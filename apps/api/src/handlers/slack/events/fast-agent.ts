@@ -16,7 +16,6 @@ import { resolveUserMcpServerConfigs } from '@roomote/sdk/server';
 
 import { LEADING_FAST_COMMAND_MENTION_PATTERN } from '../constants.js';
 import { postSlackThreadMarkdownMessage } from '../helpers/thread-posting.js';
-import { createFastAgentChatContextAdapter } from '../../fast-agent-chat-context.js';
 
 export function stripLeadingFastCommandMention(text: string): string {
   return text.replace(LEADING_FAST_COMMAND_MENTION_PATTERN, '').trimStart();
@@ -198,10 +197,6 @@ export async function processFastAgentMessage(params: {
           : undefined,
       activeTasks: resolvedActiveTasks,
       adapter: {
-        ...createFastAgentChatContextAdapter({
-          actingUserId: userId,
-          conversation,
-        }),
         resolveMcpServerConfigs: () =>
           resolveUserMcpServerConfigs({
             userId,

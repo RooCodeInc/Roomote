@@ -72,7 +72,7 @@ describe('FastAgentTurnDiagnostics', () => {
     const finishReply = diagnostics.recordNativeToolStarted('send_chat_reply');
     currentTime = 2_025;
     finishReply();
-    diagnostics.recordNativeToolStarted('manage_tasks');
+    diagnostics.recordNativeToolStarted('integration_call');
     currentTime = 2_040;
     diagnostics.finish();
 
@@ -83,7 +83,9 @@ describe('FastAgentTurnDiagnostics', () => {
     expect(logMessage).toContain(
       'nativeToolStats={"send_chat_reply":{"count":1,"totalDurationMs":25,"maxDurationMs":25}}',
     );
-    expect(logMessage).toContain('activeNativeToolCounts={"manage_tasks":1}');
+    expect(logMessage).toContain(
+      'activeNativeToolCounts={"integration_call":1}',
+    );
   });
 
   it('redacts and bounds provider errors before writing them', () => {

@@ -26,7 +26,6 @@ import {
 } from './task-launch.js';
 import { startNewDiscordTask } from './task-orchestration.js';
 import { fetchDiscordThreadHistoryBestEffort } from './thread-context.js';
-import { createFastAgentChatContextAdapter } from '../fast-agent-chat-context.js';
 
 type DiscordInteractionReplyContext = {
   interaction: DiscordInteraction;
@@ -125,10 +124,6 @@ export async function processDiscordFastAgentMessage(input: {
         input.sender.username,
       activeTasks: input.activeTasks,
       adapter: {
-        ...createFastAgentChatContextAdapter({
-          actingUserId: input.senderUserId,
-          conversation,
-        }),
         resolveMcpServerConfigs: () =>
           resolveUserMcpServerConfigs({
             userId: input.senderUserId,
@@ -142,16 +137,17 @@ export async function processDiscordFastAgentMessage(input: {
           parentSessionId,
           postKickoff,
         }) => {
-          const workspaceOverride = environmentId
-            ? await resolveDiscordWorkspace({
-                type: 'environment',
-                id: environmentId,
-                name: environmentId,
-              })
-            : {
-                repoForPayload: ALL_REPOSITORIES,
-                workspaceDisplayName: 'all repos',
-              };
+          const workspaceOverride =
+            environmentId && environmentId !== ALL_REPOSITORIES
+              ? await resolveDiscordWorkspace({
+                  type: 'environment',
+                  id: environmentId,
+                  name: environmentId,
+                })
+              : {
+                  repoForPayload: ALL_REPOSITORIES,
+                  workspaceDisplayName: 'all repos',
+                };
           if (!workspaceOverride) {
             return {
               success: false,

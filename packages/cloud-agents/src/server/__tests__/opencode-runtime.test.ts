@@ -216,7 +216,6 @@ describe('buildOpenCodeCliEnv', () => {
         tools: {
           '*': false,
           integration_call: true,
-          manage_tasks: true,
         },
       });
       expect(agent.prompt).toEqual(

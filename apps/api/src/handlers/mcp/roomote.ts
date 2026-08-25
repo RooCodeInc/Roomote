@@ -302,6 +302,7 @@ async function buildCommunicationMessageContextPayload(options: {
   channel?: string;
   messageId?: string;
   messageLink?: string;
+  provider?: 'slack' | 'discord';
 }) {
   let taskRun: CommunicationLookupTaskRun | undefined;
 
@@ -328,6 +329,9 @@ async function buildCommunicationMessageContextPayload(options: {
       ? { messageLink: options.messageLink }
       : {}),
     ...(taskRun ? { taskRun } : {}),
+    ...(options.auth.tokenType === 'auth' && options.provider
+      ? { provider: options.provider }
+      : {}),
     ...(options.auth.tokenType === 'auth'
       ? { actingUserId: options.actingUserId }
       : {}),
@@ -340,6 +344,7 @@ async function buildCommunicationChannelMessagesPayload(options: {
   channel?: string;
   oldest?: string;
   latest?: string;
+  provider?: 'slack' | 'discord';
 }) {
   let taskRun: CommunicationLookupTaskRun | undefined;
 
@@ -365,6 +370,9 @@ async function buildCommunicationChannelMessagesPayload(options: {
       ? { latest: options.latest }
       : {}),
     ...(taskRun ? { taskRun } : {}),
+    ...(options.auth.tokenType === 'auth' && options.provider
+      ? { provider: options.provider }
+      : {}),
     ...(options.auth.tokenType === 'auth'
       ? { actingUserId: options.actingUserId }
       : {}),
@@ -441,6 +449,12 @@ function createRoomoteMcpServer(
           .string()
           .optional()
           .describe(CHAT_CHANNEL_MESSAGES_TOOL.inputDescriptions.latest),
+        provider: z
+          .enum(['slack', 'discord'])
+          .optional()
+          .describe(
+            'Optional communication provider for raw channel IDs, names, or mentions when no task run supplies one.',
+          ),
       },
       outputSchema: z.object({}).passthrough(),
       annotations: {
@@ -450,7 +464,7 @@ function createRoomoteMcpServer(
         openWorldHint: false,
       },
     },
-    async ({ channel, oldest, latest }) => {
+    async ({ channel, oldest, latest, provider }) => {
       const payload = await buildCommunicationChannelMessagesPayload({
         auth,
         actingUserId,
@@ -463,6 +477,7 @@ function createRoomoteMcpServer(
         ...(typeof latest === 'string' && latest.trim().length > 0
           ? { latest: latest.trim() }
           : {}),
+        ...(provider ? { provider } : {}),
       });
 
       return toMcpToolResult(payload);
@@ -487,6 +502,12 @@ function createRoomoteMcpServer(
           .string()
           .optional()
           .describe(CHAT_MESSAGE_CONTEXT_TOOL.inputDescriptions.messageLink),
+        provider: z
+          .enum(['slack', 'discord'])
+          .optional()
+          .describe(
+            'Optional communication provider for raw channel IDs, names, or mentions when no task run supplies one.',
+          ),
       },
       outputSchema: z.object({}).passthrough(),
       annotations: {
@@ -496,7 +517,7 @@ function createRoomoteMcpServer(
         openWorldHint: false,
       },
     },
-    async ({ channel, messageId, messageLink }) => {
+    async ({ channel, messageId, messageLink, provider }) => {
       const payload = await buildCommunicationMessageContextPayload({
         auth,
         actingUserId,
@@ -509,6 +530,7 @@ function createRoomoteMcpServer(
         ...(typeof messageLink === 'string' && messageLink.trim().length > 0
           ? { messageLink: messageLink.trim() }
           : {}),
+        ...(provider ? { provider } : {}),
       });
 
       return toMcpToolResult(payload);
