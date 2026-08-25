@@ -4,7 +4,6 @@ import {
   mkdtempSync,
   readFileSync,
   rmSync,
-  statSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -12,7 +11,6 @@ import { join } from 'node:path';
 
 import {
   generateOpenCodeConfig,
-  rematerializeOpenCodeCredentialFiles,
   seedRuntimeHomeMiseGlobalConfig,
 } from './agent-home';
 
@@ -608,7 +606,7 @@ describe('generateOpenCodeConfig provider support', () => {
     });
   });
 
-  it('leaves the openai provider alone when a ChatGPT subscription is present', () => {
+  it('does not let legacy direct OAuth content bypass gateway rebasing', () => {
     const result = generateOpenCodeConfig({
       homeDir: createHomeDir(),
       runtimeEnv: {
@@ -622,7 +620,12 @@ describe('generateOpenCodeConfig provider support', () => {
       provider: Record<string, unknown>;
     };
 
-    expect(config.provider.openai).toBeUndefined();
+    expect(config.provider.openai).toMatchObject({
+      options: {
+        baseURL: 'https://api.example.com/api/inference/openai/v1',
+        apiKey: '{env:ROOMOTE_CLOUD_TOKEN}',
+      },
+    });
   });
 
   it('does not touch provider base URLs when no gateway URL is present', () => {
@@ -1091,102 +1094,6 @@ describe('generateOpenCodeConfig provider support', () => {
     expect(() => generateOpenCodeConfig({ homeDir, runtimeEnv })).toThrow(
       'Failed to remove disabled Google Vertex credentials before starting OpenCode',
     );
-  });
-});
-
-describe('rematerializeOpenCodeCredentialFiles', () => {
-  const tempDirs: string[] = [];
-
-  afterEach(() => {
-    for (const tempDir of tempDirs.splice(0)) {
-      rmSync(tempDir, { recursive: true, force: true });
-    }
-  });
-
-  function createHomeDir(): string {
-    const homeDir = mkdtempSync(join(tmpdir(), 'roomote-opencode-restore-'));
-    tempDirs.push(homeDir);
-    return homeDir;
-  }
-
-  function createLogger() {
-    return { info: vi.fn(), warn: vi.fn() };
-  }
-
-  it('rewrites the auth file from its env value', () => {
-    const homeDir = createHomeDir();
-    const authJson = JSON.stringify({ openai: { type: 'oauth' } });
-
-    const { failedSteps } = rematerializeOpenCodeCredentialFiles({
-      homeDir,
-      runtimeEnv: {
-        OPENCODE_AUTH_CONTENT: authJson,
-      },
-      logger: createLogger(),
-    });
-
-    expect(failedSteps).toEqual([]);
-
-    const dataDir = join(homeDir, '.local', 'share', 'opencode');
-    expect(readFileSync(join(dataDir, 'auth.json'), 'utf8')).toBe(authJson);
-    expect(statSync(join(dataDir, 'auth.json')).mode & 0o777).toBe(0o600);
-  });
-
-  it('does not rewrite the caller env or write files for absent values', () => {
-    const homeDir = createHomeDir();
-    const runtimeEnv = {};
-
-    const { failedSteps } = rematerializeOpenCodeCredentialFiles({
-      homeDir,
-      runtimeEnv,
-      logger: createLogger(),
-    });
-
-    expect(failedSteps).toEqual([]);
-    expect(
-      existsSync(join(homeDir, '.local', 'share', 'opencode', 'auth.json')),
-    ).toBe(false);
-    expect(runtimeEnv).toEqual({});
-  });
-
-  it('respects the task XDG data dir when rewriting files', () => {
-    const homeDir = createHomeDir();
-    const dataHome = join(homeDir, 'xdg-data');
-    const authJson = JSON.stringify({ openai: { type: 'oauth' } });
-
-    const { failedSteps } = rematerializeOpenCodeCredentialFiles({
-      homeDir,
-      runtimeEnv: {
-        XDG_DATA_HOME: dataHome,
-        OPENCODE_AUTH_CONTENT: authJson,
-      },
-      logger: createLogger(),
-    });
-
-    expect(failedSteps).toEqual([]);
-    expect(readFileSync(join(dataHome, 'opencode', 'auth.json'), 'utf8')).toBe(
-      authJson,
-    );
-  });
-
-  it('reports failed steps instead of throwing on write failures', () => {
-    const homeDir = createHomeDir();
-    // Occupy the data-dir path with a file so mkdir fails.
-    const dataParent = join(homeDir, '.local', 'share');
-    mkdirSync(dataParent, { recursive: true });
-    writeFileSync(join(dataParent, 'opencode'), 'not a directory');
-
-    const logger = createLogger();
-    const { failedSteps } = rematerializeOpenCodeCredentialFiles({
-      homeDir,
-      runtimeEnv: {
-        OPENCODE_AUTH_CONTENT: '{}',
-      },
-      logger,
-    });
-
-    expect(failedSteps).toEqual(['rewrite OpenCode auth file']);
-    expect(logger.warn).toHaveBeenCalledTimes(1);
   });
 });
 
