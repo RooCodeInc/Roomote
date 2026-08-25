@@ -121,6 +121,21 @@ type SlackTarget = {
   slackChannelId: string;
 };
 
+function getSlackTarget(taskId: string, payload: unknown): SlackTarget | null {
+  if (getCommunicationProviderFromTaskPayload(payload) !== 'slack') {
+    return null;
+  }
+
+  const slackChannelId = getCommunicationChannelFromTaskPayload(payload);
+  const slackThreadTs = getCommunicationThreadIdFromTaskPayload(payload);
+
+  if (!slackChannelId || !slackThreadTs) {
+    return null;
+  }
+
+  return { taskId, slackChannelId, slackThreadTs };
+}
+
 type TeamsTarget = {
   channelId: string;
   serviceUrl: string;
@@ -282,7 +297,8 @@ async function deliverSlackTerminalStatus({
     status === 'closed' ? SLACK_PR_CLOSED_REACTION_EMOJI : completionEmoji;
 
   for (const target of slackTargets) {
-    if (notifiedThreads.has(target.slackThreadTs)) {
+    const threadKey = `${target.slackChannelId}:${target.slackThreadTs}`;
+    if (notifiedThreads.has(threadKey)) {
       continue;
     }
 
@@ -321,7 +337,7 @@ async function deliverSlackTerminalStatus({
         }),
       ]);
 
-      notifiedThreads.add(target.slackThreadTs);
+      notifiedThreads.add(threadKey);
 
       console.log(
         `[notifyPullRequestTerminalStatus] Sent ${status} notification to Slack thread ${target.slackThreadTs} for PR ${repository}#${prNumber}`,
@@ -769,6 +785,7 @@ export async function notifyPullRequestTerminalStatus({
       db.query.taskRuns.findMany({
         where: inArray(taskRuns.taskId, taskIds),
         columns: {
+          taskId: true,
           payload: true,
         },
       }),
@@ -790,6 +807,12 @@ export async function notifyPullRequestTerminalStatus({
         linearSessionIds.push(task.linearSessionId);
       }
     }
+
+    slackTargets.push(
+      ...linkedRuns
+        .map((run) => getSlackTarget(run.taskId, run.payload))
+        .filter((target): target is SlackTarget => target !== null),
+    );
 
     const teamsTargets = linkedRuns
       .map((run) => getTeamsTarget(run.payload))
