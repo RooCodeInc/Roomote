@@ -34,7 +34,7 @@ describe('standardTask source context', () => {
 
   it('keeps informational Slack source context separate from the web surface', () => {
     const slackPermalink =
-      'https://acme.slack.com/archives/C123/p1234567890000100?thread_ts=1234567890.000100&cid=C123';
+      'https://acme.slack.com/archives/C123/p1234567890000200?thread_ts=1234567890.000100&cid=C123';
     const { harnessInstructions } = standardTask({
       description: 'Do the work',
       repo: 'RooCodeInc/Roomote',
@@ -43,10 +43,12 @@ describe('standardTask source context', () => {
       sourceProvider: 'slack',
       sourceChannelId: 'C123',
       sourceThreadId: '1234567890.000100',
+      sourceMessageId: '1234567890.000200',
       slackTeamDomain: 'acme',
       slackTeamId: 'T123',
       slackChannel: 'C123',
       slackThreadTs: '1234567890.000100',
+      slackConversationUrl: slackPermalink,
     });
 
     expect(harnessInstructions).toContain(

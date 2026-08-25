@@ -1,6 +1,7 @@
 import {
   ALL_REPOSITORIES,
   buildFastAgentChildTaskMetadata,
+  buildSlackThreadPermalink,
   TaskPayloadKind,
   type StandardTask,
   type TaskInitiator,
@@ -127,6 +128,14 @@ export type FastAgentSlackTaskLauncherParams = {
 export function createFastAgentSlackTaskLauncher(
   params: FastAgentSlackTaskLauncherParams,
 ): LaunchFastAgentTask {
+  const slackConversationUrl = buildSlackThreadPermalink({
+    slackWorkspaceDomain: params.teamDomain,
+    slackTeamId: params.teamId,
+    slackChannelId: params.channelId,
+    threadTs: params.threadTs,
+    messageTs: params.messageId,
+  });
+
   return createFastAgentTaskLauncher({
     userId: params.userId,
     surface: 'slack',
@@ -149,6 +158,7 @@ export function createFastAgentSlackTaskLauncher(
         ...(params.messageId
           ? { communicationMessageId: params.messageId }
           : {}),
+        ...(slackConversationUrl ? { slackConversationUrl } : {}),
         ...buildFastAgentChildTaskMetadata({
           sessionId: parentSessionId,
           conversation: {
