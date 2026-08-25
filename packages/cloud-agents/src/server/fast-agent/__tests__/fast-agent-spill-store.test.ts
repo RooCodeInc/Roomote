@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import {
+  FAST_AGENT_SPILL_GREP_MAX_SCAN_BYTES,
   FAST_AGENT_SPILL_GREP_RESULT_MAX_BYTES,
   FastAgentSpillStore,
 } from '../fast-agent-spill-store';
@@ -18,86 +19,89 @@ function createStore(
 }
 
 describe('FastAgentSpillStore', () => {
-  it('shares handles between parent and child sessions in one conversation', () => {
+  it('shares a child result handle with the parent conversation session', async () => {
     const store = createStore();
     try {
       store.bindSession('child-session', 'conversation-a');
       store.bindSession('parent-session', 'conversation-a');
-      const spill = store.write('child-session', 'child output');
+      const spill = await store.write('child-session', 'child output');
       expect(spill.stored).toBe(true);
       if (!spill.stored) throw new Error('Expected spill to be stored.');
 
-      expect(store.read('parent-session', spill.handle)).toMatchObject({
+      await expect(
+        store.read('parent-session', spill.handle),
+      ).resolves.toMatchObject({
         content: 'child output',
         handle: spill.handle,
         offset: 0,
         nextOffset: null,
       });
     } finally {
-      store.dispose();
+      await store.dispose();
     }
   });
 
-  it('rejects handles owned by another conversation', () => {
+  it('rejects child and parent sessions from another conversation', async () => {
     const store = createStore();
     try {
-      store.bindSession('owner-session', 'conversation-a');
-      store.bindSession('other-session', 'conversation-b');
-      const spill = store.write('owner-session', 'private output');
+      store.bindSession('owner-child', 'conversation-a');
+      store.bindSession('other-parent', 'conversation-b');
+      store.bindSession('other-child', 'conversation-b');
+      const spill = await store.write('owner-child', 'private output');
       if (!spill.stored) throw new Error('Expected spill to be stored.');
 
-      expect(() => store.read('other-session', spill.handle)).toThrow(
+      await expect(store.read('other-parent', spill.handle)).rejects.toThrow(
         'unavailable for this conversation',
       );
-      expect(() =>
-        store.grep('other-session', spill.handle, 'private'),
-      ).toThrow('unavailable for this conversation');
+      await expect(
+        store.grep('other-child', spill.handle, 'private'),
+      ).rejects.toThrow('unavailable for this conversation');
     } finally {
-      store.dispose();
+      await store.dispose();
     }
   });
 
-  it('expires handles and removes their files', () => {
+  it('expires handles and removes their files', async () => {
     let now = 100;
     const store = createStore({ now: () => now, ttlMs: 10 });
     try {
       store.bindSession('session', 'conversation');
-      const spill = store.write('session', 'temporary output');
+      const spill = await store.write('session', 'temporary output');
       if (!spill.stored) throw new Error('Expected spill to be stored.');
       now = 110;
 
-      expect(() => store.read('session', spill.handle)).toThrow(
+      await expect(store.read('session', spill.handle)).rejects.toThrow(
         'unavailable for this conversation',
       );
     } finally {
-      store.dispose();
+      await store.dispose();
     }
   });
 
-  it('removes every handle when a conversation ends', () => {
+  it('removes every handle when a conversation ends', async () => {
     const store = createStore();
     try {
       store.bindSession('session', 'conversation');
-      const first = store.write('session', 'first');
-      const second = store.write('session', 'second');
+      const first = await store.write('session', 'first');
+      const second = await store.write('session', 'second');
       if (!first.stored || !second.stored) {
         throw new Error('Expected spills to be stored.');
       }
 
-      store.cleanupConversation('conversation');
+      await store.cleanupConversation('conversation');
 
-      expect(() => store.read('session', first.handle)).toThrow(
+      await expect(store.read('session', first.handle)).rejects.toThrow(
         'unavailable for this conversation',
       );
-      expect(() => store.read('session', second.handle)).toThrow(
+      await expect(store.read('session', second.handle)).rejects.toThrow(
         'unavailable for this conversation',
       );
     } finally {
-      store.dispose();
+      await store.dispose();
     }
   });
 
-  it('enforces file, conversation-byte, and file-count quotas', () => {
+  it('enforces per-file and per-conversation byte and file quotas', async () => {
     const fileStore = createStore({ fileQuotaBytes: 4 });
     const byteStore = createStore({
       conversationQuotaBytes: 8,
@@ -106,84 +110,160 @@ describe('FastAgentSpillStore', () => {
     const countStore = createStore({ maxFilesPerConversation: 1 });
     try {
       fileStore.bindSession('file-session', 'file-conversation');
-      expect(fileStore.write('file-session', '12345')).toMatchObject({
+      await expect(
+        fileStore.write('file-session', '12345'),
+      ).resolves.toMatchObject({
         stored: false,
         reason: 'file_quota',
       });
 
       byteStore.bindSession('byte-session', 'byte-conversation');
-      expect(byteStore.write('byte-session', '12345')).toMatchObject({
+      await expect(
+        byteStore.write('byte-session', '12345'),
+      ).resolves.toMatchObject({
         stored: true,
       });
-      expect(byteStore.write('byte-session', '6789')).toMatchObject({
+      await expect(
+        byteStore.write('byte-session', '6789'),
+      ).resolves.toMatchObject({
         stored: false,
         reason: 'conversation_quota',
       });
 
       countStore.bindSession('count-session', 'count-conversation');
-      expect(countStore.write('count-session', 'first')).toMatchObject({
+      await expect(
+        countStore.write('count-session', 'first'),
+      ).resolves.toMatchObject({
         stored: true,
       });
-      expect(countStore.write('count-session', 'second')).toMatchObject({
+      await expect(
+        countStore.write('count-session', 'second'),
+      ).resolves.toMatchObject({
         stored: false,
         reason: 'file_count_quota',
       });
     } finally {
-      fileStore.dispose();
-      byteStore.dispose();
-      countStore.dispose();
+      await fileStore.dispose();
+      await byteStore.dispose();
+      await countStore.dispose();
     }
   });
 
-  it('returns valid UTF-8 windows at multibyte boundaries', () => {
+  it('enforces process-wide byte and file quotas and releases them on cleanup', async () => {
+    const byteStore = createStore({
+      conversationQuotaBytes: 8,
+      fileQuotaBytes: 8,
+      globalQuotaBytes: 8,
+    });
+    const countStore = createStore({ globalFileQuota: 1 });
+    try {
+      byteStore.bindSession('byte-a', 'conversation-a');
+      byteStore.bindSession('byte-b', 'conversation-b');
+      await expect(byteStore.write('byte-a', '12345')).resolves.toMatchObject({
+        stored: true,
+      });
+      await expect(byteStore.write('byte-b', '6789')).resolves.toMatchObject({
+        stored: false,
+        reason: 'global_quota',
+      });
+      await byteStore.cleanupConversation('conversation-a');
+      await expect(byteStore.write('byte-b', '6789')).resolves.toMatchObject({
+        stored: true,
+      });
+
+      countStore.bindSession('count-a', 'conversation-a');
+      countStore.bindSession('count-b', 'conversation-b');
+      await expect(countStore.write('count-a', 'first')).resolves.toMatchObject(
+        {
+          stored: true,
+        },
+      );
+      await expect(
+        countStore.write('count-b', 'second'),
+      ).resolves.toMatchObject({
+        stored: false,
+        reason: 'global_file_quota',
+      });
+      await countStore.cleanupConversation('conversation-a');
+      await expect(
+        countStore.write('count-b', 'second'),
+      ).resolves.toMatchObject({
+        stored: true,
+      });
+    } finally {
+      await byteStore.dispose();
+      await countStore.dispose();
+    }
+  });
+
+  it('returns valid UTF-8 windows at multibyte boundaries', async () => {
     const store = createStore();
     try {
       store.bindSession('session', 'conversation');
-      const spill = store.write('session', 'A😀B');
+      const spill = await store.write('session', 'A😀B');
       if (!spill.stored) throw new Error('Expected spill to be stored.');
 
-      expect(store.read('session', spill.handle, 1, 2)).toMatchObject({
+      await expect(
+        store.read('session', spill.handle, 1, 2),
+      ).resolves.toMatchObject({
         content: '😀',
         offset: 1,
         nextOffset: 5,
       });
-      expect(store.read('session', spill.handle, 2, 5)).toMatchObject({
+      await expect(
+        store.read('session', spill.handle, 2, 5),
+      ).resolves.toMatchObject({
         content: 'B',
         offset: 5,
         nextOffset: null,
       });
     } finally {
-      store.dispose();
+      await store.dispose();
     }
   });
 
-  it('searches literal text with bounded matches and byte offsets', () => {
-    const store = createStore();
+  it('streams literal search in bounded pages with byte offsets', async () => {
+    const store = createStore({ fileQuotaBytes: 2 * 1024 * 1024 });
     try {
       store.bindSession('session', 'conversation');
-      const spill = store.write('session', '😀 target one\ntarget two');
+      const content = `${'x'.repeat(FAST_AGENT_SPILL_GREP_MAX_SCAN_BYTES + 10)}needle`;
+      const spill = await store.write('session', content);
       if (!spill.stored) throw new Error('Expected spill to be stored.');
 
-      expect(store.grep('session', spill.handle, 'target', 1)).toMatchObject({
-        handle: spill.handle,
-        matches: [{ offset: 5, preview: expect.stringContaining('target') }],
-        query: 'target',
+      const first = await store.grep('session', spill.handle, 'needle');
+      expect(first).toMatchObject({
+        matches: [],
+        nextOffset: FAST_AGENT_SPILL_GREP_MAX_SCAN_BYTES,
+        offset: 0,
+        scannedBytes: FAST_AGENT_SPILL_GREP_MAX_SCAN_BYTES,
         truncated: true,
       });
+      await expect(
+        store.grep('session', spill.handle, 'needle', 20, first.nextOffset!),
+      ).resolves.toMatchObject({
+        matches: [
+          {
+            offset: FAST_AGENT_SPILL_GREP_MAX_SCAN_BYTES + 10,
+            preview: expect.stringContaining('needle'),
+          },
+        ],
+        nextOffset: null,
+        truncated: false,
+      });
     } finally {
-      store.dispose();
+      await store.dispose();
     }
   });
 
-  it('keeps heavily escaped grep results within the structured byte budget', () => {
+  it('keeps heavily escaped search results within the per-call byte budget', async () => {
     const store = createStore();
     try {
       store.bindSession('session', 'conversation');
       const query = '\0'.repeat(512);
-      const spill = store.write('session', query.repeat(30));
+      const spill = await store.write('session', query.repeat(30));
       if (!spill.stored) throw new Error('Expected spill to be stored.');
 
-      const result = store.grep('session', spill.handle, query, 20);
+      const result = await store.grep('session', spill.handle, query, 20);
 
       expect(result.truncated).toBe(true);
       expect(result.matches.length).toBeLessThan(20);
@@ -191,32 +271,11 @@ describe('FastAgentSpillStore', () => {
         Buffer.byteLength(JSON.stringify(result), 'utf8'),
       ).toBeLessThanOrEqual(FAST_AGENT_SPILL_GREP_RESULT_MAX_BYTES);
     } finally {
-      store.dispose();
+      await store.dispose();
     }
   });
 
-  it('budgets the larger non-truncated grep encoding', () => {
-    const store = createStore();
-    try {
-      store.bindSession('session', 'conversation');
-      const query = '\0'.repeat(80);
-      const spill = store.write('session', query.repeat(18));
-      if (!spill.stored) throw new Error('Expected spill to be stored.');
-
-      const result = store.grep('session', spill.handle, query, 20);
-      const serializedBytes = Buffer.byteLength(JSON.stringify(result), 'utf8');
-
-      expect(result.truncated).toBe(false);
-      expect(serializedBytes).toBeGreaterThan(25_000);
-      expect(serializedBytes).toBeLessThanOrEqual(
-        FAST_AGENT_SPILL_GREP_RESULT_MAX_BYTES,
-      );
-    } finally {
-      store.dispose();
-    }
-  });
-
-  it('creates private directories and files', () => {
+  it('creates private directories and files', async () => {
     const rootDirectory = mkdtempSync(join(tmpdir(), 'fast-spill-mode-test-'));
     const store = new FastAgentSpillStore({
       rootDirectory,
@@ -224,7 +283,7 @@ describe('FastAgentSpillStore', () => {
     });
     try {
       store.bindSession('session', 'conversation');
-      const spill = store.write('session', 'private');
+      const spill = await store.write('session', 'private');
       if (!spill.stored) throw new Error('Expected spill to be stored.');
       const [conversationDirectoryName] = readdirSync(rootDirectory);
       expect(conversationDirectoryName).toBeDefined();
@@ -239,7 +298,7 @@ describe('FastAgentSpillStore', () => {
         statSync(join(conversationDirectory, spillFileName!)).mode & 0o777,
       ).toBe(0o600);
     } finally {
-      store.dispose();
+      await store.dispose();
     }
   });
 });

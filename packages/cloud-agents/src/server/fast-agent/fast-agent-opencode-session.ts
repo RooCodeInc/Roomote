@@ -28,7 +28,7 @@ type FastAgentOpenCodeSessionManagerOptions = {
   idleTtlMs?: number;
   maxEntries?: number;
   now?: () => number;
-  onConversationEnd?: (conversationId: string) => void;
+  onConversationEnd?: (conversationId: string) => Promise<void> | void;
 };
 
 /**
@@ -41,7 +41,9 @@ export class FastAgentOpenCodeSessionManager {
   private readonly idleTtlMs: number;
   private readonly maxEntries: number;
   private readonly now: () => number;
-  private readonly onConversationEnd: (conversationId: string) => void;
+  private readonly onConversationEnd: (
+    conversationId: string,
+  ) => Promise<void> | void;
 
   constructor(options: FastAgentOpenCodeSessionManagerOptions = {}) {
     this.idleTtlMs = options.idleTtlMs ?? getOpenCodeSdkServerIdleTtlMs();
@@ -82,7 +84,7 @@ export class FastAgentOpenCodeSessionManager {
           // session before releasing queued work so the next turn cannot send
           // a delta into a poisoned transcript.
           entry.session.id = undefined;
-          this.onConversationEnd(conversationId);
+          this.endConversation(conversationId);
           throw error;
         }
       };
@@ -107,7 +109,7 @@ export class FastAgentOpenCodeSessionManager {
 
   clear(): void {
     for (const conversationId of this.entries.keys()) {
-      this.onConversationEnd(conversationId);
+      this.endConversation(conversationId);
     }
     this.entries.clear();
   }
@@ -120,7 +122,7 @@ export class FastAgentOpenCodeSessionManager {
     const entry = this.entries.get(conversationId);
     if (entry) {
       entry.session.id = undefined;
-      this.onConversationEnd(conversationId);
+      this.endConversation(conversationId);
     }
   }
 
@@ -160,7 +162,7 @@ export class FastAgentOpenCodeSessionManager {
     for (const [key, entry] of this.entries) {
       if (entry.pending === 0 && now - entry.lastUsedAt >= this.idleTtlMs) {
         this.entries.delete(key);
-        this.onConversationEnd(key);
+        this.endConversation(key);
       }
     }
 
@@ -174,9 +176,20 @@ export class FastAgentOpenCodeSessionManager {
       }
       if (entry.pending === 0) {
         this.entries.delete(key);
-        this.onConversationEnd(key);
+        this.endConversation(key);
       }
     }
+  }
+
+  private endConversation(conversationId: string): void {
+    void Promise.resolve(this.onConversationEnd(conversationId)).catch(
+      (error) => {
+        console.error(
+          '[Fast Agent] Failed to clean conversation spill data.',
+          error,
+        );
+      },
+    );
   }
 }
 

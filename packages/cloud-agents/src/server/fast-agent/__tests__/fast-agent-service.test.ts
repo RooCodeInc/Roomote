@@ -39,6 +39,8 @@ const nativeToolNames = vi.hoisted(
       sendChatReaction: 'send_chat_reaction',
       sendChatReply: 'send_chat_reply',
       sendTaskMessage: 'send_task_message',
+      spillGrep: 'spill_grep',
+      spillRead: 'spill_read',
     }) as const,
 );
 
@@ -103,6 +105,7 @@ vi.mock('../fast-agent-native-tool-bridge', () => ({
     },
   })),
   bindFastAgentNativeToolExecutor: mocks.bindExecutor,
+  createFastAgentSpillTurnBudget: () => ({ calls: 0, outputBytes: 0 }),
 }));
 
 vi.mock('../fast-agent-integration-broker', () => ({

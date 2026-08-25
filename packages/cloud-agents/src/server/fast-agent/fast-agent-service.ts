@@ -48,6 +48,7 @@ import {
 import { fastAgentOpenCodeSessionManager } from './fast-agent-opencode-session';
 import {
   bindFastAgentNativeToolExecutor,
+  createFastAgentSpillTurnBudget,
   FAST_AGENT_NATIVE_TOOL_FILTER,
   FAST_AGENT_NATIVE_TOOL_NAMES,
   getFastAgentNativeToolRuntime,
@@ -1179,6 +1180,7 @@ export async function answerFastAgentQuestion({
       bootstrapPrompt: serializedBootstrapPrompt,
       execute: async (openCodeSession, selectedPrompt) => {
         diagnostics.markInferenceSetupStarted();
+        const spillBudget = createFastAgentSpillTurnBudget();
         const unbindExecutors = new Set<() => void>();
         const boundSubagentSessionIDs = new Set<string>();
         const unbindAllExecutors = () => {
@@ -1256,6 +1258,7 @@ export async function answerFastAgentQuestion({
                           openCodeSessionID,
                           session.id,
                           executeNativeTool,
+                          spillBudget,
                         ),
                       );
                     },
@@ -1279,6 +1282,7 @@ export async function answerFastAgentQuestion({
                                   error:
                                     'That tool is reserved for the Fast parent agent.',
                                 }),
+                          spillBudget,
                         ),
                       );
                     },

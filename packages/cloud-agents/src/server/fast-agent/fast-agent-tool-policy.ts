@@ -26,11 +26,7 @@ export const FAST_AGENT_NATIVE_TOOL_FILTER: Record<string, boolean> = {
   '*': false,
   task: true,
   ...Object.fromEntries(
-    Object.values(FAST_AGENT_NATIVE_TOOL_NAMES).map((name) => [
-      name,
-      name !== FAST_AGENT_NATIVE_TOOL_NAMES.spillGrep &&
-        name !== FAST_AGENT_NATIVE_TOOL_NAMES.spillRead,
-    ]),
+    Object.values(FAST_AGENT_NATIVE_TOOL_NAMES).map((name) => [name, true]),
   ),
 };
 
@@ -38,12 +34,6 @@ export const FAST_AGENT_SUBAGENT_TOOL_FILTER: Record<string, boolean> = {
   '*': false,
   [FAST_AGENT_NATIVE_TOOL_NAMES.integrationCall]: true,
   [FAST_AGENT_NATIVE_TOOL_NAMES.manageTasks]: true,
-};
-
-export const FAST_AGENT_SPILL_SUBAGENT_TOOL_FILTER: Record<string, boolean> = {
-  '*': false,
-  [FAST_AGENT_NATIVE_TOOL_NAMES.spillGrep]: true,
-  [FAST_AGENT_NATIVE_TOOL_NAMES.spillRead]: true,
 };
 
 const FAST_AGENT_SUBAGENT_TOOL_NAMES = new Set<FastAgentNativeToolName>([
@@ -57,9 +47,7 @@ export function isFastAgentSubagentTool(
   return FAST_AGENT_SUBAGENT_TOOL_NAMES.has(name);
 }
 
-export function isFastAgentSpillSubagentTool(
-  name: FastAgentNativeToolName,
-): boolean {
+export function isFastAgentSpillTool(name: FastAgentNativeToolName): boolean {
   return (
     name === FAST_AGENT_NATIVE_TOOL_NAMES.spillRead ||
     name === FAST_AGENT_NATIVE_TOOL_NAMES.spillGrep
