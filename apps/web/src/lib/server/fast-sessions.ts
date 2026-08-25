@@ -4,7 +4,11 @@ import {
   desc,
   eq,
   fastAgentConversations,
+  inArray,
+  isNull,
   sql,
+  taskRuns,
+  tasks,
   users,
 } from '@roomote/db/server';
 
@@ -29,6 +33,56 @@ const fastSessionSelection = {
   updatedAt: fastAgentConversations.updatedAt,
 };
 
+const fastSessionDetailSelection = {
+  ...fastSessionSelection,
+  compatibilityMessages: fastAgentConversations.compatibilityMessages,
+  legacyConversationIds: fastAgentConversations.legacyConversationIds,
+};
+
+export type FastSessionTranscriptMessage = {
+  id: string;
+  role: 'user' | 'assistant';
+  text: string;
+};
+
+function getPersistedText(content: unknown): string {
+  if (typeof content === 'string') {
+    return content;
+  }
+
+  if (!Array.isArray(content)) {
+    return '';
+  }
+
+  return content
+    .flatMap((part) =>
+      part &&
+      typeof part === 'object' &&
+      'type' in part &&
+      part.type === 'text' &&
+      'text' in part &&
+      typeof part.text === 'string'
+        ? [part.text]
+        : [],
+    )
+    .join('\n');
+}
+
+export function normalizeFastSessionTranscript(
+  messages: Record<string, unknown>[],
+): FastSessionTranscriptMessage[] {
+  return messages.flatMap((message, index) => {
+    if (message.role !== 'user' && message.role !== 'assistant') {
+      return [];
+    }
+
+    const text = getPersistedText(message.content).trim();
+    return text
+      ? [{ id: `fast-message-${index}`, role: message.role, text }]
+      : [];
+  });
+}
+
 function fastSessionScope(auth: FastSessionAuth) {
   return auth.isAdmin
     ? undefined
@@ -52,7 +106,7 @@ export async function getFastSessionById(
   sessionId: string,
 ) {
   const [session] = await db
-    .select(fastSessionSelection)
+    .select(fastSessionDetailSelection)
     .from(fastAgentConversations)
     .innerJoin(users, eq(fastAgentConversations.userId, users.id))
     .where(
@@ -65,5 +119,51 @@ export async function getFastSessionById(
     )
     .limit(1);
 
-  return session ?? null;
+  if (!session) {
+    return null;
+  }
+
+  const lookupIds = [session.id, ...session.legacyConversationIds];
+  const latestRunPerTask = db.$with('latest_fast_session_task_runs').as(
+    db
+      .selectDistinctOn([taskRuns.taskId], {
+        taskId: taskRuns.taskId,
+        title: tasks.title,
+        status: taskRuns.status,
+        taskPhase: taskRuns.taskPhase,
+        createdAt: taskRuns.createdAt,
+      })
+      .from(taskRuns)
+      .innerJoin(tasks, eq(tasks.id, taskRuns.taskId))
+      .where(
+        and(
+          inArray(taskRuns.fastAgentSessionId, lookupIds),
+          eq(tasks.visibility, 'visible'),
+          isNull(tasks.deletedAt),
+        ),
+      )
+      .orderBy(taskRuns.taskId, desc(taskRuns.createdAt), desc(taskRuns.id)),
+  );
+  const linkedTasks = await db
+    .with(latestRunPerTask)
+    .select({
+      taskId: latestRunPerTask.taskId,
+      title: latestRunPerTask.title,
+      status: latestRunPerTask.status,
+      taskPhase: latestRunPerTask.taskPhase,
+      createdAt: latestRunPerTask.createdAt,
+    })
+    .from(latestRunPerTask)
+    .orderBy(desc(latestRunPerTask.createdAt));
+  const {
+    compatibilityMessages,
+    legacyConversationIds: _,
+    ...details
+  } = session;
+
+  return {
+    ...details,
+    transcript: normalizeFastSessionTranscript(compatibilityMessages),
+    linkedTasks,
+  };
 }

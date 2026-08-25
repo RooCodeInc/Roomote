@@ -1,6 +1,17 @@
-import { db, fastAgentConversations, userFactory } from '@roomote/db/server';
+import {
+  db,
+  fastAgentConversations,
+  runFactory,
+  taskFactory,
+  userFactory,
+} from '@roomote/db/server';
+import { RunStatus } from '@roomote/types';
 
-import { getFastSessionById, getFastSessions } from './fast-sessions';
+import {
+  getFastSessionById,
+  getFastSessions,
+  normalizeFastSessionTranscript,
+} from './fast-sessions';
 
 async function createFastSession({
   userId,
@@ -97,5 +108,56 @@ describe('Fast session queries', () => {
     await expect(
       getFastSessionById({ userId: otherUser.id, isAdmin: true }, session.id),
     ).resolves.toMatchObject({ id: session.id, userId: owner.id });
+  });
+
+  it('normalizes only persisted user and assistant text', () => {
+    expect(
+      normalizeFastSessionTranscript([
+        { role: 'user', content: [{ type: 'text', text: 'Question' }] },
+        {
+          role: 'assistant',
+          content: [
+            { type: 'text', text: 'Answer' },
+            { type: 'reasoning', text: 'Unsupported reasoning' },
+          ],
+        },
+        { role: 'tool', content: [{ type: 'text', text: 'Tool output' }] },
+      ]),
+    ).toEqual([
+      { id: 'fast-message-0', role: 'user', text: 'Question' },
+      { id: 'fast-message-1', role: 'assistant', text: 'Answer' },
+    ]);
+  });
+
+  it('returns visible tasks delegated from the Fast session', async () => {
+    const owner = await userFactory.create();
+    const session = await createFastSession({
+      userId: owner.id,
+      conversationId: 'delegated-task-session',
+      updatedAt: new Date('2026-01-01T00:00:00.000Z'),
+    });
+    const task = await taskFactory.create({ title: 'Delegated task' });
+    await runFactory.create({
+      taskId: task.id,
+      status: RunStatus.Running,
+      payload: {
+        repo: 'roomote/roomote',
+        description: 'Delegated task',
+        fastAgentSessionId: session.id,
+      },
+    });
+
+    const result = await getFastSessionById(
+      { userId: owner.id, isAdmin: false },
+      session.id,
+    );
+
+    expect(result?.linkedTasks).toEqual([
+      expect.objectContaining({
+        taskId: task.id,
+        title: 'Delegated task',
+        status: RunStatus.Running,
+      }),
+    ]);
   });
 });
