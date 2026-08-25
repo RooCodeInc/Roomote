@@ -1264,7 +1264,6 @@ async function maybeHandleChannelAutoStart(params: {
       slack: context.slack,
       userId: userMapping.userId,
       teamId: context.teamId,
-      usageText: 'Use `!fast <question>` in this channel.',
       continuation: fastAgentEntryMode === 'default',
       processingReactionName: ackEmoji,
       errorLogPrefix: `❌ Background fast-agent response failed for auto-start thread ${channelAutoStartEvent.ts}:`,
@@ -1597,7 +1596,6 @@ function startFastAgentResponse(params: {
   slack: SlackNotifier;
   userId: string;
   teamId: string;
-  usageText?: string;
   continuation?: boolean;
   activeTasks?: { taskId: string }[];
   resolveActiveTasks?: () => Promise<{ taskId: string }[]>;
