@@ -35,6 +35,7 @@ import {
   getCommunicationServiceUrlFromTaskPayload,
   getCommunicationThreadIdFromTaskPayload,
   getDiscordReactionTargetFromTaskPayload,
+  getFastAgentParentFromPayload,
 } from '@roomote/types';
 
 /** Fixed Slack reaction for closed (not merged) PRs on the originating message. */
@@ -122,18 +123,25 @@ type SlackTarget = {
 };
 
 function getSlackTarget(taskId: string, payload: unknown): SlackTarget | null {
-  if (getCommunicationProviderFromTaskPayload(payload) !== 'slack') {
+  if (getCommunicationProviderFromTaskPayload(payload) === 'slack') {
+    const slackChannelId = getCommunicationChannelFromTaskPayload(payload);
+    const slackThreadTs = getCommunicationThreadIdFromTaskPayload(payload);
+
+    if (slackChannelId && slackThreadTs) {
+      return { taskId, slackChannelId, slackThreadTs };
+    }
+  }
+
+  const fastAgentParent = getFastAgentParentFromPayload(payload);
+  if (fastAgentParent?.conversation.surface !== 'slack') {
     return null;
   }
 
-  const slackChannelId = getCommunicationChannelFromTaskPayload(payload);
-  const slackThreadTs = getCommunicationThreadIdFromTaskPayload(payload);
-
-  if (!slackChannelId || !slackThreadTs) {
-    return null;
-  }
-
-  return { taskId, slackChannelId, slackThreadTs };
+  return {
+    taskId,
+    slackChannelId: fastAgentParent.conversation.replyTarget.channelId,
+    slackThreadTs: fastAgentParent.conversation.replyTarget.threadId,
+  };
 }
 
 type TeamsTarget = {

@@ -131,6 +131,20 @@ const discordPayload = {
   discordTaskThread: true,
 };
 
+function fastParentSlackPayload(channelId: string, threadId: string) {
+  return {
+    fastAgentParent: {
+      sessionId: '00000000-0000-4000-8000-000000000001',
+      conversation: {
+        surface: 'slack',
+        workspaceId: 'T123',
+        conversationId: threadId,
+        replyTarget: { channelId, threadId },
+      },
+    },
+  };
+}
+
 const teamsAdapter = {
   postMessage: mockPostMessage,
 };
@@ -262,23 +276,7 @@ describe('notifyPullRequestTerminalStatus', () => {
     mockedTaskRunsFind.mockResolvedValue([
       {
         taskId: 'task-1',
-        payload: {
-          communicationProvider: 'slack',
-          communicationChannelId: 'CFAST',
-          communicationThreadId: 'fast-thread-ts',
-          fastAgentParent: {
-            sessionId: '00000000-0000-4000-8000-000000000001',
-            conversation: {
-              surface: 'slack',
-              workspaceId: 'T123',
-              conversationId: 'fast-thread-ts',
-              replyTarget: {
-                channelId: 'CFAST',
-                threadId: 'fast-thread-ts',
-              },
-            },
-          },
-        },
+        payload: fastParentSlackPayload('CFAST', 'fast-thread-ts'),
       },
     ] as any);
     mockedSlackFind.mockResolvedValue({ botAccessToken: 'xoxb-token' } as any);
@@ -308,7 +306,7 @@ describe('notifyPullRequestTerminalStatus', () => {
     });
   });
 
-  it('does not duplicate the status post when acknowledgement cleanup rejects', async () => {
+  it('deduplicates an overlapping Fast-parent binding when cleanup rejects', async () => {
     mockedGithubFind.mockResolvedValue({ id: 1 } as any);
     mockedTaskPullRequestsFind.mockResolvedValue([{ taskId: 'task-1' }] as any);
     mockedTasksFind.mockResolvedValue([
@@ -322,11 +320,7 @@ describe('notifyPullRequestTerminalStatus', () => {
     mockedTaskRunsFind.mockResolvedValue([
       {
         taskId: 'task-1',
-        payload: {
-          communicationProvider: 'slack',
-          communicationChannelId: 'C123',
-          communicationThreadId: 'thread-ts-1',
-        },
+        payload: fastParentSlackPayload('C123', 'thread-ts-1'),
       },
     ] as any);
     mockedSlackFind.mockResolvedValue({ botAccessToken: 'xoxb-token' } as any);
