@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => ({
   bindMcpExecutor: vi.fn(),
   nativeExecutor: undefined as
     | ((call: {
+        agent?: string;
         name: string;
         args: Record<string, unknown>;
       }) => Promise<unknown>)
@@ -154,9 +155,13 @@ function callbacks(
   };
 }
 
-async function invokeTool(name: string, args: Record<string, unknown>) {
+async function invokeTool(
+  name: string,
+  args: Record<string, unknown>,
+  agent?: string,
+) {
   if (!mocks.nativeExecutor) throw new Error('Native executor is not bound.');
-  return mocks.nativeExecutor({ name, args });
+  return mocks.nativeExecutor({ name, args, ...(agent ? { agent } : {}) });
 }
 
 async function invokeMcpTool(
@@ -906,7 +911,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     },
   );
 
-  it('runs Roomote custom automation mutations without an acknowledgement gate', async () => {
+  it('lets the Fast parent manage custom automations through MCP tools', async () => {
     const resolveMcpServerConfigs = vi.fn(async () => ({}));
     mocks.listIntegrations.mockResolvedValue([
       {
@@ -917,7 +922,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       },
     ]);
     mocks.callIntegration.mockResolvedValue({
-      automation: { id: 'automation-1', enabled: false },
+      automations: [],
     });
     const toolResults: unknown[] = [];
     mocks.generateText.mockImplementationOnce(
@@ -926,9 +931,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         for (let attempt = 0; attempt < 2; attempt += 1) {
           toolResults.push(
             await invokeMcpTool('roomote', 'manage_custom_automations', {
-              action: 'update',
-              automationId: 'automation-1',
-              enabled: false,
+              action: 'list',
             }),
           );
         }
@@ -947,7 +950,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
 
     expect(toolResults[0]).toEqual({
       success: true,
-      result: { automation: { id: 'automation-1', enabled: false } },
+      result: { automations: [] },
     });
     expect(toolResults[1]).toEqual({
       success: false,
@@ -964,11 +967,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       {
         integrationId: 'roomote',
         toolName: 'manage_custom_automations',
-        args: {
-          action: 'update',
-          automationId: 'automation-1',
-          enabled: false,
-        },
+        args: { action: 'list' },
       },
     );
   });
