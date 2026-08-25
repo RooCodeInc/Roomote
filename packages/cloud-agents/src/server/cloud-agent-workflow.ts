@@ -298,13 +298,7 @@ export async function generatePrompt({
       const activeCommunicationProvider = inheritedCommunicationContext
         ? null
         : communicationProvider;
-      const sourceChatProvider =
-        communicationProvider === 'slack' ||
-        communicationProvider === 'teams' ||
-        communicationProvider === 'telegram' ||
-        communicationProvider === 'discord'
-          ? communicationProvider
-          : null;
+      const sourceChatProvider = communicationProvider;
       const nonSlackChatProvider =
         sourceChatProvider && sourceChatProvider !== 'slack'
           ? sourceChatProvider

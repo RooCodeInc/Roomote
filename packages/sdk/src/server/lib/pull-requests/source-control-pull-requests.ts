@@ -261,11 +261,7 @@ export async function createOrUpdateSourceControlPullRequestForTaskRun({
     taskRun.payload,
   );
   const inheritedChatProvider =
-    payloadRecord.communicationContextInherited === true &&
-    (communicationProvider === 'slack' ||
-      communicationProvider === 'teams' ||
-      communicationProvider === 'telegram' ||
-      communicationProvider === 'discord')
+    payloadRecord.communicationContextInherited === true
       ? communicationProvider
       : null;
   const communicationChannelId = getCommunicationChannelFromTaskPayload(
