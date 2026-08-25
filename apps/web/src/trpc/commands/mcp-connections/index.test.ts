@@ -1,6 +1,7 @@
 import {
   db,
   deploymentMcpEnablements,
+  eq,
   mcpConnections,
   userFactory,
 } from '@roomote/db/server';
@@ -84,5 +85,35 @@ describe('MCP connection lifecycle telemetry', () => {
     await saveAsanaConnectionCommand(adminAuth, { accessToken: '' });
 
     expect(captureEventMock).not.toHaveBeenCalled();
+  });
+
+  it('captures credential connection and enablement transitions independently', async () => {
+    await db.insert(deploymentMcpEnablements).values({
+      mcpId: 'asana',
+      enabled: true,
+      enabledByUserId: adminAuth.userId,
+    });
+
+    await saveAsanaConnectionCommand(adminAuth, { accessToken: 'asana-token' });
+
+    expect(captureEventMock).toHaveBeenCalledTimes(1);
+    expect(captureEventMock).toHaveBeenCalledWith('integration_connected', {
+      userId: adminAuth.userId,
+      properties: { integration_id: 'asana' },
+    });
+
+    captureEventMock.mockClear();
+    await db
+      .update(deploymentMcpEnablements)
+      .set({ enabled: false })
+      .where(eq(deploymentMcpEnablements.mcpId, 'asana'));
+
+    await saveAsanaConnectionCommand(adminAuth, { accessToken: '' });
+
+    expect(captureEventMock).toHaveBeenCalledTimes(1);
+    expect(captureEventMock).toHaveBeenCalledWith('integration_enabled', {
+      userId: adminAuth.userId,
+      properties: { integration_id: 'asana' },
+    });
   });
 });

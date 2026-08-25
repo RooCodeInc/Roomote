@@ -307,7 +307,6 @@ describe('GET /api/mcp-oauth/callback', () => {
         refresh_token: 'refresh-token',
       },
       replayToken: null,
-      enabledByUserId: 'user-1',
     });
     expect(storeTokensMock).not.toHaveBeenCalled();
   });
@@ -427,6 +426,33 @@ describe('GET /api/mcp-oauth/callback', () => {
     await GET(buildRequest('?code=auth-code&state=state-1'));
 
     expect(deploymentEnablementOnConflictMock).not.toHaveBeenCalled();
+    expect(captureEventMock).toHaveBeenCalledWith('integration_enabled', {
+      userId: 'user-1',
+      properties: { integration_id: 'resend' },
+    });
+  });
+
+  it('captures enablement when a concurrent disable wins the insert race', async () => {
+    mcpConnectionsFindFirstMock.mockResolvedValue({
+      id: CONNECTION_ID,
+      mcpId: 'resend',
+      userId: null,
+      connectionRole: 'default',
+    });
+    getMcpIntegrationMock.mockReturnValue({
+      id: 'resend',
+      name: 'Resend',
+      url: 'https://mcp.resend.com/mcp',
+    });
+    isDeploymentScopedMcpIntegrationMock.mockReturnValue(true);
+    deploymentEnablementUpdateReturningMock
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ mcpId: 'resend' }]);
+    deploymentEnablementInsertReturningMock.mockResolvedValue([]);
+
+    await GET(buildRequest('?code=auth-code&state=state-1'));
+
+    expect(deploymentEnablementUpdateReturningMock).toHaveBeenCalledTimes(2);
     expect(captureEventMock).toHaveBeenCalledWith('integration_enabled', {
       userId: 'user-1',
       properties: { integration_id: 'resend' },

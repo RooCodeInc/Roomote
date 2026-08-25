@@ -45,6 +45,7 @@ import { Env, areCuratedIntegrationsDisabled } from '@/lib/server/env';
 import { assertCuratedIntegrationsEnabled } from '@/lib/server/curated-integrations';
 import { MCP_TOOL_CATALOG_REQUIRES_PERSONAL_CONNECTION } from '@/lib/mcp-tool-errors';
 import { captureIntegrationLifecycleEvent } from '@/lib/server/integration-telemetry';
+import { saveAuthenticatedDeploymentMcpConnection } from '@/lib/server/deployment-mcp-connection';
 import type {
   SaveAsanaConnectionInput,
   SaveNotionConnectionInput,
@@ -982,152 +983,97 @@ export async function saveSnowflakeConnectionCommand(
   assertAdmin(auth);
   assertCuratedIntegrationsEnabled();
 
-  const existingConnection = await db.query.mcpConnections.findFirst({
-    where: and(
-      eq(mcpConnections.mcpId, 'snowflake'),
-      isNull(mcpConnections.userId),
-    ),
-    columns: {
-      authConfig: true,
+  const authConfig = await saveAuthenticatedDeploymentMcpConnection({
+    mcpId: 'snowflake',
+    userId: auth.userId,
+    buildAuthConfig: (existingAuthConfig) => {
+      const existingConfig = isMcpConnectionSnowflakeConfig(existingAuthConfig)
+        ? existingAuthConfig
+        : null;
+      const preservingExistingCredential =
+        input.authMethod === 'password' && input.password.length === 0;
+      const nextEncryptedPassword =
+        input.authMethod === 'password'
+          ? input.password.length > 0
+            ? encrypt(input.password)
+            : existingConfig?.encryptedPassword
+          : undefined;
+      const nextEncryptedPrivateKey =
+        input.authMethod === 'key_pair'
+          ? input.privateKey.trim().length > 0
+            ? encrypt(input.privateKey)
+            : existingConfig?.encryptedPrivateKey
+          : preservingExistingCredential
+            ? existingConfig?.encryptedPrivateKey
+            : undefined;
+      const nextEncryptedPrivateKeyPassphrase =
+        input.authMethod === 'key_pair'
+          ? input.privateKeyPassphrase.length > 0
+            ? encrypt(input.privateKeyPassphrase)
+            : input.privateKey.trim().length > 0
+              ? undefined
+              : existingConfig?.encryptedPrivateKeyPassphrase
+          : preservingExistingCredential
+            ? existingConfig?.encryptedPrivateKeyPassphrase
+            : undefined;
+
+      const nextAuthConfig = {
+        type: 'snowflake' as const,
+        account: input.account,
+        username: input.username,
+        role: input.role,
+        ...(input.warehouse
+          ? { warehouse: input.warehouse }
+          : existingConfig?.warehouse
+            ? { warehouse: existingConfig.warehouse }
+            : {}),
+        ...(input.database
+          ? { database: input.database }
+          : existingConfig?.database
+            ? { database: existingConfig.database }
+            : {}),
+        ...(nextEncryptedPassword
+          ? { encryptedPassword: nextEncryptedPassword }
+          : {}),
+        ...(nextEncryptedPrivateKey
+          ? { encryptedPrivateKey: nextEncryptedPrivateKey }
+          : {}),
+        ...(nextEncryptedPrivateKeyPassphrase
+          ? {
+              encryptedPrivateKeyPassphrase: nextEncryptedPrivateKeyPassphrase,
+            }
+          : {}),
+        ...(existingConfig?.schema ? { schema: existingConfig.schema } : {}),
+        ...(existingConfig?.allowedStatementTypes
+          ? { allowedStatementTypes: existingConfig.allowedStatementTypes }
+          : {}),
+      };
+
+      if (
+        input.authMethod === 'password' &&
+        !nextAuthConfig.encryptedPassword &&
+        !nextAuthConfig.encryptedPrivateKey
+      ) {
+        throw new Error(
+          'Programmatic Access Token is required when no Snowflake credential is already stored.',
+        );
+      }
+
+      if (
+        input.authMethod === 'key_pair' &&
+        !nextAuthConfig.encryptedPrivateKey
+      ) {
+        throw new Error(
+          'Private key is required when no Snowflake key pair is already stored.',
+        );
+      }
+
+      return nextAuthConfig;
     },
   });
 
-  const existingConfig = isMcpConnectionSnowflakeConfig(
-    existingConnection?.authConfig,
-  )
-    ? existingConnection.authConfig
-    : null;
-  const preservingExistingCredential =
-    input.authMethod === 'password' && input.password.length === 0;
-  const nextEncryptedPassword =
-    input.authMethod === 'password'
-      ? input.password.length > 0
-        ? encrypt(input.password)
-        : existingConfig?.encryptedPassword
-      : undefined;
-  const nextEncryptedPrivateKey =
-    input.authMethod === 'key_pair'
-      ? input.privateKey.trim().length > 0
-        ? encrypt(input.privateKey)
-        : existingConfig?.encryptedPrivateKey
-      : preservingExistingCredential
-        ? existingConfig?.encryptedPrivateKey
-        : undefined;
-  const nextEncryptedPrivateKeyPassphrase =
-    input.authMethod === 'key_pair'
-      ? input.privateKeyPassphrase.length > 0
-        ? encrypt(input.privateKeyPassphrase)
-        : input.privateKey.trim().length > 0
-          ? undefined
-          : existingConfig?.encryptedPrivateKeyPassphrase
-      : preservingExistingCredential
-        ? existingConfig?.encryptedPrivateKeyPassphrase
-        : undefined;
-
-  const authConfig = {
-    type: 'snowflake' as const,
-    account: input.account,
-    username: input.username,
-    role: input.role,
-    ...(input.warehouse
-      ? { warehouse: input.warehouse }
-      : existingConfig?.warehouse
-        ? { warehouse: existingConfig.warehouse }
-        : {}),
-    ...(input.database
-      ? { database: input.database }
-      : existingConfig?.database
-        ? { database: existingConfig.database }
-        : {}),
-    ...(nextEncryptedPassword
-      ? { encryptedPassword: nextEncryptedPassword }
-      : {}),
-    ...(nextEncryptedPrivateKey
-      ? { encryptedPrivateKey: nextEncryptedPrivateKey }
-      : {}),
-    ...(nextEncryptedPrivateKeyPassphrase
-      ? {
-          encryptedPrivateKeyPassphrase: nextEncryptedPrivateKeyPassphrase,
-        }
-      : {}),
-    ...(existingConfig?.schema ? { schema: existingConfig.schema } : {}),
-    ...(existingConfig?.allowedStatementTypes
-      ? { allowedStatementTypes: existingConfig.allowedStatementTypes }
-      : {}),
-  };
-
-  if (
-    input.authMethod === 'password' &&
-    !authConfig.encryptedPassword &&
-    !authConfig.encryptedPrivateKey
-  ) {
-    throw new Error(
-      'Programmatic Access Token is required when no Snowflake credential is already stored.',
-    );
-  }
-
-  if (input.authMethod === 'key_pair' && !authConfig.encryptedPrivateKey) {
-    throw new Error(
-      'Private key is required when no Snowflake key pair is already stored.',
-    );
-  }
-
-  await db
-    .insert(mcpConnections)
-    .values({
-      userId: null,
-      mcpId: 'snowflake',
-      connectionRole: 'default',
-      authConfig,
-      enabled: true,
-      authStatus: 'authenticated',
-    })
-    .onConflictDoUpdate({
-      target: [
-        mcpConnections.userId,
-        mcpConnections.mcpId,
-        mcpConnections.connectionRole,
-      ],
-      set: {
-        connectionRole: 'default',
-        authConfig,
-        enabled: true,
-        authStatus: 'authenticated',
-        updatedAt: new Date(),
-      },
-    });
-
-  await db
-    .insert(deploymentMcpEnablements)
-    .values({
-      mcpId: 'snowflake',
-      enabled: true,
-      enabledByUserId: auth.userId,
-    })
-    .onConflictDoUpdate({
-      target: [deploymentMcpEnablements.mcpId],
-      set: {
-        enabled: true,
-        enabledByUserId: auth.userId,
-        updatedAt: new Date(),
-      },
-    });
-
-  if (!existingConnection) {
-    captureIntegrationLifecycleEvent(
-      'integration_connected',
-      'snowflake',
-      auth.userId,
-    );
-    captureIntegrationLifecycleEvent(
-      'integration_enabled',
-      'snowflake',
-      auth.userId,
-    );
-  }
-
   return {
-    authMethod: nextEncryptedPrivateKey
+    authMethod: authConfig.encryptedPrivateKey
       ? ('key_pair' as const)
       : ('password' as const),
     account: authConfig.account,
@@ -1145,90 +1091,26 @@ export async function saveAsanaConnectionCommand(
   assertAdmin(auth);
   assertCuratedIntegrationsEnabled();
 
-  const existingConnection = await db.query.mcpConnections.findFirst({
-    where: and(
-      eq(mcpConnections.mcpId, 'asana'),
-      isNull(mcpConnections.userId),
-    ),
-    columns: {
-      authConfig: true,
+  await saveAuthenticatedDeploymentMcpConnection({
+    mcpId: 'asana',
+    userId: auth.userId,
+    buildAuthConfig: (existingAuthConfig) => {
+      const existingConfig = isMcpConnectionAsanaConfig(existingAuthConfig)
+        ? existingAuthConfig
+        : null;
+      const encryptedToken = input.accessToken.length
+        ? encrypt(input.accessToken)
+        : existingConfig?.encryptedToken;
+
+      if (!encryptedToken) {
+        throw new Error(
+          'Asana access token is required when no Asana token is already stored.',
+        );
+      }
+
+      return { type: 'asana' as const, encryptedToken };
     },
   });
-
-  const existingConfig = isMcpConnectionAsanaConfig(
-    existingConnection?.authConfig,
-  )
-    ? existingConnection.authConfig
-    : null;
-  const nextEncryptedToken =
-    input.accessToken.length > 0
-      ? encrypt(input.accessToken)
-      : existingConfig?.encryptedToken;
-
-  if (!nextEncryptedToken) {
-    throw new Error(
-      'Asana access token is required when no Asana token is already stored.',
-    );
-  }
-
-  const authConfig = {
-    type: 'asana' as const,
-    encryptedToken: nextEncryptedToken,
-  };
-
-  await db
-    .insert(mcpConnections)
-    .values({
-      userId: null,
-      mcpId: 'asana',
-      connectionRole: 'default',
-      authConfig,
-      enabled: true,
-      authStatus: 'authenticated',
-    })
-    .onConflictDoUpdate({
-      target: [
-        mcpConnections.userId,
-        mcpConnections.mcpId,
-        mcpConnections.connectionRole,
-      ],
-      set: {
-        connectionRole: 'default',
-        authConfig,
-        enabled: true,
-        authStatus: 'authenticated',
-        updatedAt: new Date(),
-      },
-    });
-
-  await db
-    .insert(deploymentMcpEnablements)
-    .values({
-      mcpId: 'asana',
-      enabled: true,
-      enabledByUserId: auth.userId,
-    })
-    .onConflictDoUpdate({
-      target: [deploymentMcpEnablements.mcpId],
-      set: {
-        enabled: true,
-        enabledByUserId: auth.userId,
-        updatedAt: new Date(),
-      },
-    });
-
-  if (!existingConnection) {
-    captureIntegrationLifecycleEvent(
-      'integration_connected',
-      'asana',
-      auth.userId,
-    );
-    captureIntegrationLifecycleEvent(
-      'integration_enabled',
-      'asana',
-      auth.userId,
-    );
-  }
 
   return {
     authStatus: 'authenticated' as const,
@@ -1242,92 +1124,28 @@ export async function saveNotionConnectionCommand(
   assertAdmin(auth);
   assertCuratedIntegrationsEnabled();
 
-  const existingConnection = await db.query.mcpConnections.findFirst({
-    where: and(
-      eq(mcpConnections.mcpId, 'notion'),
-      isNull(mcpConnections.userId),
-    ),
-    columns: { authConfig: true },
+  await saveAuthenticatedDeploymentMcpConnection({
+    mcpId: 'notion',
+    userId: auth.userId,
+    clearOauthTokens: true,
+    resetDisabledTools: true,
+    buildAuthConfig: (existingAuthConfig) => {
+      const existingConfig = isMcpConnectionNotionConfig(existingAuthConfig)
+        ? existingAuthConfig
+        : null;
+      const encryptedToken = input.internalIntegrationSecret.length
+        ? encrypt(input.internalIntegrationSecret)
+        : existingConfig?.encryptedToken;
+
+      if (!encryptedToken) {
+        throw new Error(
+          'A Notion internal integration secret is required when no secret is already stored.',
+        );
+      }
+
+      return { type: 'notion' as const, encryptedToken };
+    },
   });
-  const existingConfig = isMcpConnectionNotionConfig(
-    existingConnection?.authConfig,
-  )
-    ? existingConnection.authConfig
-    : null;
-  const nextEncryptedToken =
-    input.internalIntegrationSecret.length > 0
-      ? encrypt(input.internalIntegrationSecret)
-      : existingConfig?.encryptedToken;
-
-  if (!nextEncryptedToken) {
-    throw new Error(
-      'A Notion internal integration secret is required when no secret is already stored.',
-    );
-  }
-
-  const authConfig = {
-    type: 'notion' as const,
-    encryptedToken: nextEncryptedToken,
-  };
-
-  await db
-    .insert(mcpConnections)
-    .values({
-      userId: null,
-      mcpId: 'notion',
-      connectionRole: 'default',
-      authConfig,
-      enabled: true,
-      authStatus: 'authenticated',
-    })
-    .onConflictDoUpdate({
-      target: [
-        mcpConnections.userId,
-        mcpConnections.mcpId,
-        mcpConnections.connectionRole,
-      ],
-      set: {
-        connectionRole: 'default',
-        authConfig,
-        accessToken: null,
-        refreshToken: null,
-        tokenExpiresAt: null,
-        scopes: null,
-        enabled: true,
-        authStatus: 'authenticated',
-        updatedAt: new Date(),
-      },
-    });
-
-  await db
-    .insert(deploymentMcpEnablements)
-    .values({
-      mcpId: 'notion',
-      enabled: true,
-      enabledByUserId: auth.userId,
-    })
-    .onConflictDoUpdate({
-      target: [deploymentMcpEnablements.mcpId],
-      set: {
-        enabled: true,
-        enabledByUserId: auth.userId,
-        disabledTools: null,
-        updatedAt: new Date(),
-      },
-    });
-
-  if (!existingConnection) {
-    captureIntegrationLifecycleEvent(
-      'integration_connected',
-      'notion',
-      auth.userId,
-    );
-    captureIntegrationLifecycleEvent(
-      'integration_enabled',
-      'notion',
-      auth.userId,
-    );
-  }
 
   return { authStatus: 'authenticated' as const };
 }
@@ -1339,94 +1157,33 @@ export async function saveRipplingConnectionCommand(
   assertAdmin(auth);
   assertCuratedIntegrationsEnabled();
 
-  const existingConnection = await db.query.mcpConnections.findFirst({
-    where: and(
-      eq(mcpConnections.mcpId, 'rippling'),
-      isNull(mcpConnections.userId),
-    ),
-    columns: { authConfig: true },
+  await saveAuthenticatedDeploymentMcpConnection({
+    mcpId: 'rippling',
+    userId: auth.userId,
+    clearOauthTokens: true,
+    resetDisabledTools: true,
+    buildAuthConfig: async (existingAuthConfig) => {
+      const existingConfig = isMcpConnectionRipplingConfig(existingAuthConfig)
+        ? existingAuthConfig
+        : null;
+      const encryptedApiToken = input.apiToken.length
+        ? encrypt(input.apiToken)
+        : existingConfig?.encryptedApiToken;
+
+      if (!encryptedApiToken) {
+        throw new Error(
+          'A Rippling API token is required when no token is already stored.',
+        );
+      }
+
+      const authConfig = {
+        type: 'rippling' as const,
+        encryptedApiToken,
+      };
+      await validateRipplingConnection(authConfig);
+      return authConfig;
+    },
   });
-  const existingConfig = isMcpConnectionRipplingConfig(
-    existingConnection?.authConfig,
-  )
-    ? existingConnection.authConfig
-    : null;
-  const nextEncryptedApiToken =
-    input.apiToken.length > 0
-      ? encrypt(input.apiToken)
-      : existingConfig?.encryptedApiToken;
-
-  if (!nextEncryptedApiToken) {
-    throw new Error(
-      'A Rippling API token is required when no token is already stored.',
-    );
-  }
-
-  const authConfig = {
-    type: 'rippling' as const,
-    encryptedApiToken: nextEncryptedApiToken,
-  };
-
-  await validateRipplingConnection(authConfig);
-
-  await db
-    .insert(mcpConnections)
-    .values({
-      userId: null,
-      mcpId: 'rippling',
-      connectionRole: 'default',
-      authConfig,
-      enabled: true,
-      authStatus: 'authenticated',
-    })
-    .onConflictDoUpdate({
-      target: [
-        mcpConnections.userId,
-        mcpConnections.mcpId,
-        mcpConnections.connectionRole,
-      ],
-      set: {
-        connectionRole: 'default',
-        authConfig,
-        accessToken: null,
-        refreshToken: null,
-        tokenExpiresAt: null,
-        scopes: null,
-        enabled: true,
-        authStatus: 'authenticated',
-        updatedAt: new Date(),
-      },
-    });
-
-  await db
-    .insert(deploymentMcpEnablements)
-    .values({
-      mcpId: 'rippling',
-      enabled: true,
-      enabledByUserId: auth.userId,
-    })
-    .onConflictDoUpdate({
-      target: [deploymentMcpEnablements.mcpId],
-      set: {
-        enabled: true,
-        enabledByUserId: auth.userId,
-        disabledTools: null,
-        updatedAt: new Date(),
-      },
-    });
-
-  if (!existingConnection) {
-    captureIntegrationLifecycleEvent(
-      'integration_connected',
-      'rippling',
-      auth.userId,
-    );
-    captureIntegrationLifecycleEvent(
-      'integration_enabled',
-      'rippling',
-      auth.userId,
-    );
-  }
 
   return { authStatus: 'authenticated' as const };
 }
@@ -1438,90 +1195,26 @@ export async function saveGranolaConnectionCommand(
   assertAdmin(auth);
   assertCuratedIntegrationsEnabled();
 
-  const existingConnection = await db.query.mcpConnections.findFirst({
-    where: and(
-      eq(mcpConnections.mcpId, 'granola'),
-      isNull(mcpConnections.userId),
-    ),
-    columns: {
-      authConfig: true,
+  await saveAuthenticatedDeploymentMcpConnection({
+    mcpId: 'granola',
+    userId: auth.userId,
+    buildAuthConfig: (existingAuthConfig) => {
+      const existingConfig = isMcpConnectionGranolaConfig(existingAuthConfig)
+        ? existingAuthConfig
+        : null;
+      const encryptedApiKey = input.apiKey.length
+        ? encrypt(input.apiKey)
+        : existingConfig?.encryptedApiKey;
+
+      if (!encryptedApiKey) {
+        throw new Error(
+          'Granola API key is required when no Granola key is already stored.',
+        );
+      }
+
+      return { type: 'granola' as const, encryptedApiKey };
     },
   });
-
-  const existingConfig = isMcpConnectionGranolaConfig(
-    existingConnection?.authConfig,
-  )
-    ? existingConnection.authConfig
-    : null;
-  const nextEncryptedApiKey =
-    input.apiKey.length > 0
-      ? encrypt(input.apiKey)
-      : existingConfig?.encryptedApiKey;
-
-  if (!nextEncryptedApiKey) {
-    throw new Error(
-      'Granola API key is required when no Granola key is already stored.',
-    );
-  }
-
-  const authConfig = {
-    type: 'granola' as const,
-    encryptedApiKey: nextEncryptedApiKey,
-  };
-
-  await db
-    .insert(mcpConnections)
-    .values({
-      userId: null,
-      mcpId: 'granola',
-      connectionRole: 'default',
-      authConfig,
-      enabled: true,
-      authStatus: 'authenticated',
-    })
-    .onConflictDoUpdate({
-      target: [
-        mcpConnections.userId,
-        mcpConnections.mcpId,
-        mcpConnections.connectionRole,
-      ],
-      set: {
-        connectionRole: 'default',
-        authConfig,
-        enabled: true,
-        authStatus: 'authenticated',
-        updatedAt: new Date(),
-      },
-    });
-
-  await db
-    .insert(deploymentMcpEnablements)
-    .values({
-      mcpId: 'granola',
-      enabled: true,
-      enabledByUserId: auth.userId,
-    })
-    .onConflictDoUpdate({
-      target: [deploymentMcpEnablements.mcpId],
-      set: {
-        enabled: true,
-        enabledByUserId: auth.userId,
-        updatedAt: new Date(),
-      },
-    });
-
-  if (!existingConnection) {
-    captureIntegrationLifecycleEvent(
-      'integration_connected',
-      'granola',
-      auth.userId,
-    );
-    captureIntegrationLifecycleEvent(
-      'integration_enabled',
-      'granola',
-      auth.userId,
-    );
-  }
 
   return {
     authStatus: 'authenticated' as const,
@@ -1535,91 +1228,30 @@ export async function saveElevenLabsConnectionCommand(
   assertAdmin(auth);
   assertCuratedIntegrationsEnabled();
 
-  const existingConnection = await db.query.mcpConnections.findFirst({
-    where: and(
-      eq(mcpConnections.mcpId, 'elevenlabs'),
-      isNull(mcpConnections.userId),
-    ),
-    columns: {
-      authConfig: true,
+  await saveAuthenticatedDeploymentMcpConnection({
+    mcpId: 'elevenlabs',
+    userId: auth.userId,
+    buildAuthConfig: (existingAuthConfig) => {
+      const existingConfig = isMcpConnectionElevenLabsConfig(existingAuthConfig)
+        ? existingAuthConfig
+        : null;
+      const encryptedApiKey = input.apiKey.length
+        ? encrypt(input.apiKey)
+        : existingConfig?.encryptedApiKey;
+
+      if (!encryptedApiKey) {
+        throw new Error(
+          'ElevenLabs API key is required when no ElevenLabs key is already stored.',
+        );
+      }
+
+      return {
+        type: 'elevenlabs' as const,
+        encryptedApiKey,
+        voiceId: input.voiceId,
+      };
     },
   });
-
-  const existingConfig = isMcpConnectionElevenLabsConfig(
-    existingConnection?.authConfig,
-  )
-    ? existingConnection.authConfig
-    : null;
-  const nextEncryptedApiKey =
-    input.apiKey.length > 0
-      ? encrypt(input.apiKey)
-      : existingConfig?.encryptedApiKey;
-
-  if (!nextEncryptedApiKey) {
-    throw new Error(
-      'ElevenLabs API key is required when no ElevenLabs key is already stored.',
-    );
-  }
-
-  const authConfig = {
-    type: 'elevenlabs' as const,
-    encryptedApiKey: nextEncryptedApiKey,
-    voiceId: input.voiceId,
-  };
-
-  await db
-    .insert(mcpConnections)
-    .values({
-      userId: null,
-      mcpId: 'elevenlabs',
-      connectionRole: 'default',
-      authConfig,
-      enabled: true,
-      authStatus: 'authenticated',
-    })
-    .onConflictDoUpdate({
-      target: [
-        mcpConnections.userId,
-        mcpConnections.mcpId,
-        mcpConnections.connectionRole,
-      ],
-      set: {
-        connectionRole: 'default',
-        authConfig,
-        enabled: true,
-        authStatus: 'authenticated',
-        updatedAt: new Date(),
-      },
-    });
-
-  await db
-    .insert(deploymentMcpEnablements)
-    .values({
-      mcpId: 'elevenlabs',
-      enabled: true,
-      enabledByUserId: auth.userId,
-    })
-    .onConflictDoUpdate({
-      target: [deploymentMcpEnablements.mcpId],
-      set: {
-        enabled: true,
-        enabledByUserId: auth.userId,
-        updatedAt: new Date(),
-      },
-    });
-
-  if (!existingConnection) {
-    captureIntegrationLifecycleEvent(
-      'integration_connected',
-      'elevenlabs',
-      auth.userId,
-    );
-    captureIntegrationLifecycleEvent(
-      'integration_enabled',
-      'elevenlabs',
-      auth.userId,
-    );
-  }
 
   return {
     authStatus: 'authenticated' as const,
@@ -1633,77 +1265,26 @@ export async function saveXConnectionCommand(
   assertAdmin(auth);
   assertCuratedIntegrationsEnabled();
 
-  const existingConnection = await db.query.mcpConnections.findFirst({
-    where: and(eq(mcpConnections.mcpId, 'x'), isNull(mcpConnections.userId)),
-    columns: {
-      authConfig: true,
+  await saveAuthenticatedDeploymentMcpConnection({
+    mcpId: 'x',
+    userId: auth.userId,
+    buildAuthConfig: (existingAuthConfig) => {
+      const existingConfig = isMcpConnectionXConfig(existingAuthConfig)
+        ? existingAuthConfig
+        : null;
+      const encryptedBearerToken = input.bearerToken.length
+        ? encrypt(input.bearerToken)
+        : existingConfig?.encryptedBearerToken;
+
+      if (!encryptedBearerToken) {
+        throw new Error(
+          'X bearer token is required when no X token is already stored.',
+        );
+      }
+
+      return { type: 'x' as const, encryptedBearerToken };
     },
   });
-
-  const existingConfig = isMcpConnectionXConfig(existingConnection?.authConfig)
-    ? existingConnection.authConfig
-    : null;
-  const nextEncryptedBearerToken =
-    input.bearerToken.length > 0
-      ? encrypt(input.bearerToken)
-      : existingConfig?.encryptedBearerToken;
-
-  if (!nextEncryptedBearerToken) {
-    throw new Error(
-      'X bearer token is required when no X token is already stored.',
-    );
-  }
-
-  const authConfig = {
-    type: 'x' as const,
-    encryptedBearerToken: nextEncryptedBearerToken,
-  };
-
-  await db
-    .insert(mcpConnections)
-    .values({
-      userId: null,
-      mcpId: 'x',
-      connectionRole: 'default',
-      authConfig,
-      enabled: true,
-      authStatus: 'authenticated',
-    })
-    .onConflictDoUpdate({
-      target: [
-        mcpConnections.userId,
-        mcpConnections.mcpId,
-        mcpConnections.connectionRole,
-      ],
-      set: {
-        connectionRole: 'default',
-        authConfig,
-        enabled: true,
-        authStatus: 'authenticated',
-        updatedAt: new Date(),
-      },
-    });
-
-  await db
-    .insert(deploymentMcpEnablements)
-    .values({
-      mcpId: 'x',
-      enabled: true,
-      enabledByUserId: auth.userId,
-    })
-    .onConflictDoUpdate({
-      target: [deploymentMcpEnablements.mcpId],
-      set: {
-        enabled: true,
-        enabledByUserId: auth.userId,
-        updatedAt: new Date(),
-      },
-    });
-
-  if (!existingConnection) {
-    captureIntegrationLifecycleEvent('integration_connected', 'x', auth.userId);
-    captureIntegrationLifecycleEvent('integration_enabled', 'x', auth.userId);
-  }
 
   return {
     authStatus: 'authenticated' as const,
@@ -1717,93 +1298,32 @@ export async function saveVercelConnectionCommand(
   assertAdmin(auth);
   assertCuratedIntegrationsEnabled();
 
-  const existingConnection = await db.query.mcpConnections.findFirst({
-    where: and(
-      eq(mcpConnections.mcpId, 'vercel'),
-      isNull(mcpConnections.userId),
-    ),
-    columns: {
-      authConfig: true,
+  const authConfig = await saveAuthenticatedDeploymentMcpConnection({
+    mcpId: 'vercel',
+    userId: auth.userId,
+    buildAuthConfig: (existingAuthConfig) => {
+      const existingConfig = isMcpConnectionVercelConfig(existingAuthConfig)
+        ? existingAuthConfig
+        : null;
+      const encryptedAccessToken = input.accessToken.length
+        ? encrypt(input.accessToken)
+        : existingConfig?.encryptedAccessToken;
+
+      if (!encryptedAccessToken) {
+        throw new Error(
+          'Vercel access token is required when no Vercel token is already stored.',
+        );
+      }
+
+      return {
+        type: 'vercel' as const,
+        encryptedAccessToken,
+        ...(input.defaultTeamIdOrSlug
+          ? { defaultTeamIdOrSlug: input.defaultTeamIdOrSlug }
+          : {}),
+      };
     },
   });
-
-  const existingConfig = isMcpConnectionVercelConfig(
-    existingConnection?.authConfig,
-  )
-    ? existingConnection.authConfig
-    : null;
-  const nextEncryptedAccessToken =
-    input.accessToken.length > 0
-      ? encrypt(input.accessToken)
-      : existingConfig?.encryptedAccessToken;
-
-  if (!nextEncryptedAccessToken) {
-    throw new Error(
-      'Vercel access token is required when no Vercel token is already stored.',
-    );
-  }
-
-  const authConfig = {
-    type: 'vercel' as const,
-    encryptedAccessToken: nextEncryptedAccessToken,
-    ...(input.defaultTeamIdOrSlug
-      ? { defaultTeamIdOrSlug: input.defaultTeamIdOrSlug }
-      : {}),
-  };
-
-  await db
-    .insert(mcpConnections)
-    .values({
-      userId: null,
-      mcpId: 'vercel',
-      connectionRole: 'default',
-      authConfig,
-      enabled: true,
-      authStatus: 'authenticated',
-    })
-    .onConflictDoUpdate({
-      target: [
-        mcpConnections.userId,
-        mcpConnections.mcpId,
-        mcpConnections.connectionRole,
-      ],
-      set: {
-        connectionRole: 'default',
-        authConfig,
-        enabled: true,
-        authStatus: 'authenticated',
-        updatedAt: new Date(),
-      },
-    });
-
-  await db
-    .insert(deploymentMcpEnablements)
-    .values({
-      mcpId: 'vercel',
-      enabled: true,
-      enabledByUserId: auth.userId,
-    })
-    .onConflictDoUpdate({
-      target: [deploymentMcpEnablements.mcpId],
-      set: {
-        enabled: true,
-        enabledByUserId: auth.userId,
-        updatedAt: new Date(),
-      },
-    });
-
-  if (!existingConnection) {
-    captureIntegrationLifecycleEvent(
-      'integration_connected',
-      'vercel',
-      auth.userId,
-    );
-    captureIntegrationLifecycleEvent(
-      'integration_enabled',
-      'vercel',
-      auth.userId,
-    );
-  }
 
   return {
     authStatus: 'authenticated' as const,
@@ -1818,91 +1338,30 @@ export async function saveGrafanaConnectionCommand(
   assertAdmin(auth);
   assertCuratedIntegrationsEnabled();
 
-  const existingConnection = await db.query.mcpConnections.findFirst({
-    where: and(
-      eq(mcpConnections.mcpId, 'grafana'),
-      isNull(mcpConnections.userId),
-    ),
-    columns: {
-      authConfig: true,
+  const authConfig = await saveAuthenticatedDeploymentMcpConnection({
+    mcpId: 'grafana',
+    userId: auth.userId,
+    buildAuthConfig: (existingAuthConfig) => {
+      const existingConfig = isMcpConnectionGrafanaConfig(existingAuthConfig)
+        ? existingAuthConfig
+        : null;
+      const encryptedServiceAccountToken = input.serviceAccountToken.length
+        ? encrypt(input.serviceAccountToken)
+        : existingConfig?.encryptedServiceAccountToken;
+
+      if (!encryptedServiceAccountToken) {
+        throw new Error(
+          'Grafana service account token is required when no Grafana token is already stored.',
+        );
+      }
+
+      return {
+        type: 'grafana' as const,
+        baseUrl: normalizeGrafanaBaseUrl(input.baseUrl),
+        encryptedServiceAccountToken,
+      };
     },
   });
-
-  const existingConfig = isMcpConnectionGrafanaConfig(
-    existingConnection?.authConfig,
-  )
-    ? existingConnection.authConfig
-    : null;
-  const nextEncryptedServiceAccountToken =
-    input.serviceAccountToken.length > 0
-      ? encrypt(input.serviceAccountToken)
-      : existingConfig?.encryptedServiceAccountToken;
-
-  if (!nextEncryptedServiceAccountToken) {
-    throw new Error(
-      'Grafana service account token is required when no Grafana token is already stored.',
-    );
-  }
-
-  const authConfig = {
-    type: 'grafana' as const,
-    baseUrl: normalizeGrafanaBaseUrl(input.baseUrl),
-    encryptedServiceAccountToken: nextEncryptedServiceAccountToken,
-  };
-
-  await db
-    .insert(mcpConnections)
-    .values({
-      userId: null,
-      mcpId: 'grafana',
-      connectionRole: 'default',
-      authConfig,
-      enabled: true,
-      authStatus: 'authenticated',
-    })
-    .onConflictDoUpdate({
-      target: [
-        mcpConnections.userId,
-        mcpConnections.mcpId,
-        mcpConnections.connectionRole,
-      ],
-      set: {
-        connectionRole: 'default',
-        authConfig,
-        enabled: true,
-        authStatus: 'authenticated',
-        updatedAt: new Date(),
-      },
-    });
-
-  await db
-    .insert(deploymentMcpEnablements)
-    .values({
-      mcpId: 'grafana',
-      enabled: true,
-      enabledByUserId: auth.userId,
-    })
-    .onConflictDoUpdate({
-      target: [deploymentMcpEnablements.mcpId],
-      set: {
-        enabled: true,
-        enabledByUserId: auth.userId,
-        updatedAt: new Date(),
-      },
-    });
-
-  if (!existingConnection) {
-    captureIntegrationLifecycleEvent(
-      'integration_connected',
-      'grafana',
-      auth.userId,
-    );
-    captureIntegrationLifecycleEvent(
-      'integration_enabled',
-      'grafana',
-      auth.userId,
-    );
-  }
 
   return {
     authStatus: 'authenticated' as const,
