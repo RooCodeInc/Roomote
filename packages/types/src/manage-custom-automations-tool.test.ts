@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   MANAGE_CUSTOM_AUTOMATIONS_ACTIONS,
   MANAGE_CUSTOM_AUTOMATIONS_TOOL,
+  buildManageCustomAutomationsRequest,
   manageCustomAutomationsInputSchema,
 } from './manage-custom-automations-tool';
 
@@ -34,5 +35,21 @@ describe('manage custom automations tool contract', () => {
     expect(
       MANAGE_CUSTOM_AUTOMATIONS_TOOL.inputSchema.prompt.description,
     ).toContain('Do not mention internal tool names or parameters.');
+  });
+
+  it('builds the accepted-run polling request', () => {
+    expect(
+      buildManageCustomAutomationsRequest({
+        action: 'run_status',
+        automationId: 'automation-1',
+        invocationId: 'invocation-1',
+      }),
+    ).toEqual({
+      ok: true,
+      request: {
+        path: '/automation-1/runs/invocation-1',
+        method: 'GET',
+      },
+    });
   });
 });

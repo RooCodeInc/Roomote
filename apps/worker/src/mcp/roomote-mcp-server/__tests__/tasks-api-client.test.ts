@@ -844,7 +844,7 @@ describe('manageSourceControl timeout', () => {
         body: 'Body',
       }),
     ).rejects.toThrow(
-      'Failed to manage source control: no response from the Roomote API within 25ms; the request was aborted and is safe to retry.',
+      'Failed to manage source control: no response from the Roomote API within 25ms; the request was aborted, but the operation may still complete; check its status before retrying.',
     );
   });
 });

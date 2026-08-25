@@ -48,6 +48,7 @@ import { startSlackPrInactivityQueue } from './slack-pr-inactivity-queue';
 import { startPrReviewNotificationQueue } from './pr-review-notification-queue';
 import { startActivePrReviewFollowUpQueue } from './active-pr-review-follow-up-queue';
 import { startPullRequestMergeabilityCheckQueue } from './pull-request-mergeability-check-queue';
+import { startCustomAutomationRunQueue } from './custom-automation-run-queue';
 import { startTaskSleepQueue } from './task-sleep-queue';
 import { startAutomationRecommendationsQueue } from './automation-recommendations-queue';
 
@@ -187,6 +188,11 @@ const {
   worker: pullRequestMergeabilityCheckWorker,
   queueEvents: pullRequestMergeabilityCheckQueueEvents,
 } = startPullRequestMergeabilityCheckQueue();
+const {
+  queue: customAutomationRunQueue,
+  worker: customAutomationRunWorker,
+  queueEvents: customAutomationRunQueueEvents,
+} = startCustomAutomationRunQueue();
 
 const serverAdapter = new HonoAdapter(serveStatic);
 
@@ -226,6 +232,7 @@ createBullBoard({
     new BullMQAdapter(pullRequestMergeabilityCheckQueue, {
       readOnlyMode: false,
     }),
+    new BullMQAdapter(customAutomationRunQueue, { readOnlyMode: false }),
   ],
   serverAdapter,
 });
@@ -399,6 +406,9 @@ async function gracefulShutdown() {
     await pullRequestMergeabilityCheckWorker.close();
     await pullRequestMergeabilityCheckQueueEvents.close();
     await pullRequestMergeabilityCheckQueue.close();
+    await customAutomationRunWorker.close();
+    await customAutomationRunQueueEvents.close();
+    await customAutomationRunQueue.close();
     await discordGatewaySupervisor.stop();
     await closeRedis();
   } catch (error) {

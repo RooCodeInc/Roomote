@@ -16,6 +16,7 @@ import {
   users,
 } from '@roomote/db/server';
 import {
+  getCustomAutomationRunStatus,
   listConnectedCommunicationProviders,
   resolveCustomAutomationSchedule,
   runCustomAutomationNow,
@@ -540,5 +541,22 @@ customAutomationsRouter.delete('/:id', async (c) => {
 
 customAutomationsRouter.post('/:id/run', async (c) => {
   const result = await runCustomAutomationNow(c.req.param('id'));
-  return c.json(result, result.outcome === 'failed' ? 400 : 200);
+  return c.json(
+    result,
+    result.outcome === 'accepted'
+      ? 202
+      : result.outcome === 'failed'
+        ? 400
+        : 200,
+  );
+});
+
+customAutomationsRouter.get('/:id/runs/:invocationId', async (c) => {
+  const result = await getCustomAutomationRunStatus({
+    automationId: c.req.param('id'),
+    invocationId: c.req.param('invocationId'),
+  });
+  return result
+    ? c.json(result)
+    : c.json({ error: 'Custom automation run was not found.' }, 404);
 });

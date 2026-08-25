@@ -32,6 +32,7 @@ const {
   mockListConnectedCommunicationProviders,
   mockResolveCustomAutomationSchedule,
   mockRunCustomAutomationNow,
+  mockGetCustomAutomationRunStatus,
   mockCaptureActivationCustomAutomationChanged,
 } = vi.hoisted(() => ({
   mockUsersFindFirst: vi.fn(),
@@ -45,6 +46,7 @@ const {
   mockListConnectedCommunicationProviders: vi.fn(),
   mockResolveCustomAutomationSchedule: vi.fn(),
   mockRunCustomAutomationNow: vi.fn(),
+  mockGetCustomAutomationRunStatus: vi.fn(),
   mockCaptureActivationCustomAutomationChanged: vi.fn(),
 }));
 
@@ -63,6 +65,7 @@ vi.mock('@roomote/db/server', () => ({
 }));
 
 vi.mock('@roomote/sdk/server', () => ({
+  getCustomAutomationRunStatus: mockGetCustomAutomationRunStatus,
   listConnectedCommunicationProviders: mockListConnectedCommunicationProviders,
   resolveCustomAutomationSchedule: mockResolveCustomAutomationSchedule,
   runCustomAutomationNow: mockRunCustomAutomationNow,
@@ -765,6 +768,49 @@ describe('custom-automations MCP routes', () => {
       expect(res.status).toBe(500);
       expect(await res.json()).toEqual({ error: 'internal_server_error' });
       expect(onError).toHaveBeenCalledWith(unexpected, expect.anything());
+    });
+  });
+
+  describe('manual runs', () => {
+    it('returns 202 with the accepted Fast invocation identifier', async () => {
+      const { app } = createApp();
+      mockRunCustomAutomationNow.mockResolvedValue({
+        outcome: 'accepted',
+        invocationId: 'invocation-1',
+      });
+
+      const res = await app.request('/custom-automations/automation-1/run', {
+        method: 'POST',
+      });
+
+      expect(res.status).toBe(202);
+      await expect(res.json()).resolves.toEqual({
+        outcome: 'accepted',
+        invocationId: 'invocation-1',
+      });
+    });
+
+    it.each([
+      { status: 'succeeded' as const },
+      { status: 'failed' as const, error: 'provider unavailable' },
+    ])('returns $status terminal status', async (terminal) => {
+      const { app } = createApp();
+      mockGetCustomAutomationRunStatus.mockResolvedValue({
+        automationId: 'automation-1',
+        invocationId: 'invocation-1',
+        ...terminal,
+      });
+
+      const res = await app.request(
+        '/custom-automations/automation-1/runs/invocation-1',
+      );
+
+      expect(res.status).toBe(200);
+      await expect(res.json()).resolves.toEqual({
+        automationId: 'automation-1',
+        invocationId: 'invocation-1',
+        ...terminal,
+      });
     });
   });
 

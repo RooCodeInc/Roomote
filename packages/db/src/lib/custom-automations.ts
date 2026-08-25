@@ -391,7 +391,10 @@ export async function tryClaimCustomAutomationLaunch(
         eq(customAutomations.id, id),
         or(
           isNull(customAutomations.launchClaimedAt),
-          lt(customAutomations.launchClaimedAt, staleBefore),
+          and(
+            lt(customAutomations.launchClaimedAt, staleBefore),
+            lt(customAutomations.updatedAt, staleBefore),
+          ),
         )!,
         expectedLastRunAt
           ? eq(customAutomations.lastRunAt, expectedLastRunAt)
@@ -401,6 +404,25 @@ export async function tryClaimCustomAutomationLaunch(
     .returning({ launchClaimedAt: customAutomations.launchClaimedAt });
 
   return claimed?.launchClaimedAt ?? null;
+}
+
+export async function renewCustomAutomationLaunchClaim(
+  id: string,
+  launchClaimedAt: Date,
+  client: DatabaseOrTransaction = db,
+): Promise<boolean> {
+  const renewed = await client
+    .update(customAutomations)
+    .set({ updatedAt: new Date() })
+    .where(
+      and(
+        eq(customAutomations.id, id),
+        eq(customAutomations.launchClaimedAt, launchClaimedAt),
+      ),
+    )
+    .returning({ id: customAutomations.id });
+
+  return renewed.length > 0;
 }
 
 export async function releaseCustomAutomationLaunchClaim(

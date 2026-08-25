@@ -15,6 +15,7 @@ import {
   listEnabledCustomAutomations,
   recordCustomAutomationRunOutcome,
   releaseCustomAutomationLaunchClaim,
+  renewCustomAutomationLaunchClaim,
   tryClaimCustomAutomationLaunch,
   type CustomAutomation,
   slackInstallations,
@@ -48,9 +49,10 @@ import { DAILY_WEEKLY_SCHEDULE_HOUR_LOCAL, isRunDue } from './scheduling-utils';
 import {
   emptyJobResult,
   type AutomationJobResult,
-  type AutomationRunNowResult,
   type AutomationRunOpts,
+  type CustomAutomationRunNowResult,
 } from './types';
+import { enqueueCustomAutomationRun } from './custom-automation-run-queue';
 import { findUserDirectMessageDestination } from '../lib/user-direct-message';
 import { createDiscordCommunicationProviderFromRuntimeCredentials } from '../lib/discord-communication';
 import { buildCustomAutomationSlackMessage } from '../lib/manager-slack';
@@ -61,6 +63,7 @@ import {
 } from '../lib/fast-agent-parent-event';
 
 const LOG_PREFIX = '[custom-automations]';
+const CLAIM_HEARTBEAT_INTERVAL_MS = 60_000;
 
 const PROVIDER_LABELS: Record<CommunicationProvider, string> = {
   discord: 'Discord',
@@ -424,6 +427,7 @@ async function launchCustomAutomationRow(
   automation: CustomAutomation,
   opts: AutomationRunOpts,
   scheduleContext?: ResolvedDeploymentTimeZone,
+  preclaimedLaunchAt?: Date,
 ): Promise<AutomationJobResult> {
   const result = emptyJobResult();
   const frequency = getCustomAutomationFrequency(automation);
@@ -481,9 +485,10 @@ async function launchCustomAutomationRow(
   }
 
   if (
+    !preclaimedLaunchAt &&
     fastExecution &&
     automation.launchClaimedAt &&
-    Date.now() - automation.launchClaimedAt.getTime() >=
+    Date.now() - automation.updatedAt.getTime() >=
       CUSTOM_AUTOMATION_LAUNCH_STALE_CLAIM_MS
   ) {
     const message = 'The previous Fast automation run was interrupted.';
@@ -580,10 +585,9 @@ async function launchCustomAutomationRow(
 
   // The short claim fence prevents concurrent launchers from double-launching
   // without blocking a due run behind a previous task that still appears active.
-  const launchClaimedAt = await tryClaimCustomAutomationLaunch(
-    automation.id,
-    automation.lastRunAt,
-  );
+  const launchClaimedAt =
+    preclaimedLaunchAt ??
+    (await tryClaimCustomAutomationLaunch(automation.id, automation.lastRunAt));
   if (!launchClaimedAt) {
     result.skippedReason = 'Another launch is already in progress.';
     return result;
@@ -699,7 +703,74 @@ async function launchCustomAutomationRow(
     result.completed = true;
     return result;
   } catch (error) {
-    await releaseCustomAutomationLaunchClaim(automation.id, launchClaimedAt);
+    if (!preclaimedLaunchAt) {
+      await releaseCustomAutomationLaunchClaim(automation.id, launchClaimedAt);
+    }
+    throw error;
+  }
+}
+
+export async function runClaimedFastCustomAutomation(params: {
+  automationId: string;
+  launchClaimedAt: string;
+}): Promise<void> {
+  const launchClaimedAt = new Date(params.launchClaimedAt);
+  const automation = await getCustomAutomationById(params.automationId);
+
+  try {
+    if (
+      !automation ||
+      automation.executionMode !== 'fast' ||
+      automation.launchClaimedAt?.getTime() !== launchClaimedAt.getTime()
+    ) {
+      throw new Error('Custom automation invocation is no longer active.');
+    }
+    if (
+      Date.now() - launchClaimedAt.getTime() >=
+      CUSTOM_AUTOMATION_LAUNCH_STALE_CLAIM_MS
+    ) {
+      throw new Error(
+        'Custom automation invocation expired before it started.',
+      );
+    }
+
+    const heartbeat = setInterval(() => {
+      void renewCustomAutomationLaunchClaim(
+        automation.id,
+        launchClaimedAt,
+      ).catch((error) =>
+        console.warn(
+          `${LOG_PREFIX} Failed to renew invocation ${params.automationId}: ${error instanceof Error ? error.message : String(error)}`,
+        ),
+      );
+    }, CLAIM_HEARTBEAT_INTERVAL_MS);
+    heartbeat.unref();
+
+    const result = await (async () => {
+      try {
+        return await launchCustomAutomationRow(
+          automation,
+          { manualTrigger: true },
+          undefined,
+          launchClaimedAt,
+        );
+      } finally {
+        clearInterval(heartbeat);
+      }
+    })();
+    const error = result.errors.join('; ') || result.skippedReason;
+    if (error) throw new Error(error);
+    if (!result.completed) {
+      throw new Error('Custom automation invocation did not complete.');
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    await recordCustomAutomationRunOutcome(db, {
+      id: params.automationId,
+      status: 'failed',
+      error: message,
+      launchClaimedAt,
+    });
     throw error;
   }
 }
@@ -764,7 +835,7 @@ export async function customAutomationsJob(
 
 export async function runCustomAutomationNow(
   id: string,
-): Promise<AutomationRunNowResult> {
+): Promise<CustomAutomationRunNowResult> {
   const automation = await getCustomAutomationById(id);
 
   if (!automation) {
@@ -777,6 +848,33 @@ export async function runCustomAutomationNow(
       error:
         'This custom automation is disabled. Enable and save it before running.',
     };
+  }
+
+  if (automation.executionMode === 'fast') {
+    const launchClaimedAt = await tryClaimCustomAutomationLaunch(
+      automation.id,
+      automation.lastRunAt,
+    );
+    if (!launchClaimedAt) {
+      return {
+        outcome: 'skipped',
+        reason: 'Another launch is already in progress.',
+      };
+    }
+
+    try {
+      const invocationId = await enqueueCustomAutomationRun({
+        automationId: automation.id,
+        launchClaimedAt,
+      });
+      return { outcome: 'accepted', invocationId };
+    } catch (error) {
+      await releaseCustomAutomationLaunchClaim(automation.id, launchClaimedAt);
+      return {
+        outcome: 'failed',
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
   }
 
   try {

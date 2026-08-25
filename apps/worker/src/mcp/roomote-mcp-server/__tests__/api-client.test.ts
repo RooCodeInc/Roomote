@@ -37,7 +37,7 @@ describe('fetchWithTimeout', () => {
     delete process.env.ROOMOTE_MCP_PLATFORM_API_TIMEOUT_MS;
   });
 
-  it('rejects with a retryable error when the API never responds', async () => {
+  it('does not describe a timed-out POST as safe to retry', async () => {
     process.env.ROOMOTE_MCP_PLATFORM_API_TIMEOUT_MS = '25';
     global.fetch = neverRespondingFetch() as unknown as typeof fetch;
 
@@ -48,8 +48,21 @@ describe('fetchWithTimeout', () => {
         { label: 'Failed to manage source control' },
       ),
     ).rejects.toThrow(
-      'Failed to manage source control: no response from the Roomote API within 25ms; the request was aborted and is safe to retry.',
+      'Failed to manage source control: no response from the Roomote API within 25ms; the request was aborted, but the operation may still complete; check its status before retrying.',
     );
+  });
+
+  it('describes a timed-out GET as safe to retry', async () => {
+    process.env.ROOMOTE_MCP_PLATFORM_API_TIMEOUT_MS = '25';
+    global.fetch = neverRespondingFetch() as unknown as typeof fetch;
+
+    await expect(
+      fetchWithTimeout(
+        'https://test-api.example.com/api/mcp/tasks',
+        { method: 'GET' },
+        { label: 'Failed to search tasks' },
+      ),
+    ).rejects.toThrow('the request was aborted and is safe to retry.');
   });
 
   it('honors an explicit timeoutMs over the environment default', async () => {

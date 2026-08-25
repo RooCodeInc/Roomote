@@ -8,6 +8,7 @@ import {
   listCustomAutomations,
   recordCustomAutomationRunOutcome,
   releaseCustomAutomationLaunchClaim,
+  renewCustomAutomationLaunchClaim,
   tryClaimCustomAutomationLaunch,
   updateCustomAutomation,
 } from '../custom-automations';
@@ -274,6 +275,49 @@ describe('custom automations helpers', () => {
     expect(nextClaim).toBeInstanceOf(Date);
 
     await releaseCustomAutomationLaunchClaim(created.id, nextClaim!);
+    await deleteCustomAutomation(created.id);
+  });
+
+  it('does not reclaim an old claim while its lease heartbeat is fresh', async () => {
+    const [environment] = await db
+      .insert(environments)
+      .values({
+        name: `custom-auto-env-lease-${Date.now()}`,
+        config: { name: 'test', repositories: [] },
+      })
+      .returning();
+    const created = await createCustomAutomation({
+      name: `Lease gate ${Date.now()}`,
+      prompt: 'Run a long automation.',
+      enabled: true,
+      scheduleMode: 'daily',
+      environmentId: environment!.id,
+      target: {},
+    });
+    const oldClaim = new Date(Date.now() - 11 * 60 * 1_000);
+    await db
+      .update(customAutomations)
+      .set({ launchClaimedAt: oldClaim, updatedAt: oldClaim })
+      .where(eq(customAutomations.id, created.id));
+
+    await expect(
+      renewCustomAutomationLaunchClaim(created.id, oldClaim),
+    ).resolves.toBe(true);
+    await expect(
+      tryClaimCustomAutomationLaunch(created.id, created.lastRunAt),
+    ).resolves.toBeNull();
+
+    await db
+      .update(customAutomations)
+      .set({ updatedAt: oldClaim })
+      .where(eq(customAutomations.id, created.id));
+    const reclaimed = await tryClaimCustomAutomationLaunch(
+      created.id,
+      created.lastRunAt,
+    );
+    expect(reclaimed).toBeInstanceOf(Date);
+
+    await releaseCustomAutomationLaunchClaim(created.id, reclaimed!);
     await deleteCustomAutomation(created.id);
   });
 

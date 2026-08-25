@@ -139,6 +139,9 @@ function CustomAutomationRunButton({
     ...trpc.automations.triggerCustomAutomation.mutationOptions({
       onSuccess: (result) => {
         switch (result.outcome) {
+          case 'accepted':
+            toast.success(`Running ${automation.name} now`);
+            break;
           case 'launched':
             toast.success(`Running ${automation.name} now`, {
               action: {
