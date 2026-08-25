@@ -761,7 +761,7 @@ describe('resolveEffectiveModelRuntimeEnv', () => {
     expect(env.R_CHATGPT_FAST_MODE).toBe('1');
   });
 
-  it('emits the ChatGPT gateway marker instead of OPENCODE_AUTH_CONTENT in gateway mode', async () => {
+  it('emits the ChatGPT gateway marker instead of OPENCODE_AUTH_CONTENT for task sandboxes', async () => {
     mockDeploymentSettingsFindFirst.mockResolvedValue({
       runtimeModelConfig: { roomoteModel: 'openai/gpt-5.4' },
     });

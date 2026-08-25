@@ -3,7 +3,6 @@ import * as os from 'node:os';
 import { configureAuthClientEnv } from '@roomote/auth/client';
 import {
   DEFAULT_MODEL_PROVIDER_ENV_KEYS,
-  OPENCODE_AUTH_CONTENT_ENV_VAR_NAME,
   parseModelProviderEnvKeys,
 } from '@roomote/types';
 
@@ -76,7 +75,6 @@ const MODEL_RUNTIME_ENV_KEYS = [
   'R_MODEL_ENV_KEYS',
   'OPENCODE_CONFIG_CONTENT',
   'OPENCODE_COMMAND',
-  OPENCODE_AUTH_CONTENT_ENV_VAR_NAME,
 ] as const;
 function buildLauncherOpenCodeEnv(
   processEnv: NodeJS.ProcessEnv,

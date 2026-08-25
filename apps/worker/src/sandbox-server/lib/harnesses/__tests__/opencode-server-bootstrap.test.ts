@@ -1837,7 +1837,7 @@ describe('opencode-server bootstrap', () => {
     });
   });
 
-  it('materializes OPENCODE_AUTH_CONTENT into auth.json and strips the env var', async () => {
+  it('strips OPENCODE_AUTH_CONTENT without materializing auth.json', async () => {
     const { prepareOpenCodeCommandEnv } =
       await import('../opencode-server/bootstrap');
 
@@ -1863,11 +1863,10 @@ describe('opencode-server bootstrap', () => {
       'opencode',
       'auth.json',
     );
-    expect(fs.existsSync(authPath)).toBe(true);
-    expect(fs.readFileSync(authPath, 'utf8')).toBe(authContent);
+    expect(fs.existsSync(authPath)).toBe(false);
   });
 
-  it('removes stale auth.json before ChatGPT gateway mode starts', async () => {
+  it('removes stale auth.json before the task harness starts', async () => {
     const { prepareOpenCodeCommandEnv } =
       await import('../opencode-server/bootstrap');
 
@@ -1892,7 +1891,6 @@ describe('opencode-server bootstrap', () => {
     const { commandEnv } = await prepareOpenCodeCommandEnv({
       runtimeEnv: {
         ...createDirectHarnessRuntimeEnv(homeDir),
-        R_INFERENCE_GATEWAY_CHATGPT: '1',
         OPENCODE_AUTH_CONTENT: JSON.stringify({
           openai: { type: 'oauth', refresh: 'conflicting-token' },
         }),
@@ -1905,7 +1903,7 @@ describe('opencode-server bootstrap', () => {
     expect(fs.existsSync(authPath)).toBe(false);
   });
 
-  it('fails closed when stale auth.json cannot be removed in gateway mode', async () => {
+  it('fails closed when stale auth.json cannot be removed', async () => {
     const { prepareOpenCodeCommandEnv } =
       await import('../opencode-server/bootstrap');
 
@@ -1924,38 +1922,11 @@ describe('opencode-server bootstrap', () => {
       prepareOpenCodeCommandEnv({
         runtimeEnv: {
           ...createDirectHarnessRuntimeEnv(homeDir),
-          R_INFERENCE_GATEWAY_CHATGPT: '1',
         },
         workspacePath: '/tmp/workspace',
         logger: createLogger(),
       }),
-    ).rejects.toThrow(
-      'Failed to remove OpenCode auth.json for ChatGPT gateway mode',
-    );
-  });
-
-  it('leaves OPENCODE_AUTH_CONTENT set when auth.json cannot be written', async () => {
-    const { prepareOpenCodeCommandEnv } =
-      await import('../opencode-server/bootstrap');
-
-    // Point HOME at a path that cannot be created (a file under an existing
-    // file) so the mkdir for the opencode data dir fails.
-    const homeDir = createTempHome();
-    fs.writeFileSync(path.join(homeDir, '.local'), 'block');
-
-    const authContent = JSON.stringify({ openai: { type: 'oauth' } });
-
-    const { commandEnv } = await prepareOpenCodeCommandEnv({
-      runtimeEnv: {
-        ...createDirectHarnessRuntimeEnv(homeDir),
-        OPENCODE_AUTH_CONTENT: authContent,
-      },
-      workspacePath: '/tmp/workspace',
-      logger: createLogger(),
-    });
-
-    // Failed materialization keeps the env var as a fallback.
-    expect(commandEnv.OPENCODE_AUTH_CONTENT).toBe(authContent);
+    ).rejects.toThrow('Failed to remove OpenCode auth.json from task sandbox');
   });
 
   it('strips disabled-provider credentials after sourcing the shared BASH_ENV', async () => {
