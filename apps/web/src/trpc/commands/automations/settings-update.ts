@@ -626,6 +626,8 @@ export async function updateBackgroundAgentSettingsCommand(
     destinationResults.codeQualityAuditor.slack;
   const ciFailureTriageChannelResult = destinationResults.ciFailureTriage.slack;
   const managerStatsDiscordResult = destinationResults.managerStats.discord;
+  const providerUsageLimitDiscordResult =
+    destinationResults.providerUsageLimit.discord;
   const sentryTriageDiscordResult = destinationResults.sentryTriage.discord;
   const dependabotTriageDiscordResult =
     destinationResults.dependabotTriage.discord;
@@ -973,7 +975,9 @@ export async function updateBackgroundAgentSettingsCommand(
       automationId: 'providerUsageLimit',
       key: 'provider_usage_limit',
       frequency: providerUsageLimitFrequency,
-      channelId: providerUsageLimitChannelResult.channelId,
+      channelId:
+        providerUsageLimitChannelResult.channelId ??
+        providerUsageLimitDiscordResult.channelId,
       field: 'providerUsageLimitSlackChannel',
     },
     {
