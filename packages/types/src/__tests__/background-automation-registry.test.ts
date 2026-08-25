@@ -98,7 +98,7 @@ describe('background automation registry', () => {
     expect(descriptor).toMatchObject({
       label: 'Inference Provider Usage Alerts',
       slackIcon: 'battery-warning',
-      scheduleModes: ['off', 'every_15_minutes', 'every_hour', 'daily'],
+      scheduleModes: ['off', 'every_hour'],
       usesManagerChannel: true,
       supportedCommunicationProviders: [
         'slack',

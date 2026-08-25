@@ -84,9 +84,6 @@ export const SUGGESTER_FREQUENCIES =
 export const MANAGER_STATS_FREQUENCIES =
   getScheduleModes<ManagerStatsFrequency>('manager_stats');
 
-export const PROVIDER_USAGE_LIMIT_FREQUENCIES =
-  getScheduleModes<ProviderUsageLimitFrequency>('provider_usage_limit');
-
 export const SENTRY_TRIAGE_FREQUENCIES =
   getScheduleModes<SentryTriageFrequency>('sentry_triage');
 
@@ -204,13 +201,8 @@ function getAutomationFrequency<T extends string>(
 function getProviderUsageLimitFrequency(
   automation: Automation | undefined,
 ): ProviderUsageLimitFrequency {
-  if (automation?.enabled === false) {
-    return 'off';
-  }
-
-  const mode = getScheduleMode(automation);
-  return mode && isFrequencyOf(PROVIDER_USAGE_LIMIT_FREQUENCIES)(mode)
-    ? mode
+  return automation?.enabled === false
+    ? 'off'
     : DEFAULT_PROVIDER_USAGE_LIMIT_FREQUENCY;
 }
 

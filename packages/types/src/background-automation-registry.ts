@@ -137,9 +137,7 @@ const MANAGER_STATS_SCHEDULE_MODES = [
 
 const PROVIDER_USAGE_LIMIT_SCHEDULE_MODES = [
   'off',
-  'every_15_minutes',
   'every_hour',
-  'daily',
 ] as const satisfies readonly ProviderUsageLimitFrequency[];
 
 export const TRIGGERABLE_BACKGROUND_AUTOMATION_DESCRIPTORS = [

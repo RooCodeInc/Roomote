@@ -16,11 +16,7 @@ export type ConflictResolverFrequency =
 export type SuggesterFrequency = 'off' | 'daily' | 'weekly';
 export type AnnouncerFrequency = 'off' | 'daily' | 'weekly';
 export type ManagerStatsFrequency = 'off' | 'weekly';
-export type ProviderUsageLimitFrequency =
-  | 'off'
-  | 'every_15_minutes'
-  | 'every_hour'
-  | 'daily';
+export type ProviderUsageLimitFrequency = 'off' | 'every_hour';
 export type SentryTriageFrequency = 'off' | 'daily' | 'weekly';
 export type DependabotTriageFrequency = 'off' | 'daily' | 'weekly';
 export type CodeqlTriageFrequency = 'off' | 'daily' | 'weekly';

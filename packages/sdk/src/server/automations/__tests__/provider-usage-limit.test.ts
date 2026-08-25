@@ -159,7 +159,7 @@ describe('provider usage limit automation', () => {
     expect(deps.postMessage).not.toHaveBeenCalled();
   });
 
-  it('caps scheduled delivery at the configured frequency without launching a task', async () => {
+  it('runs the hourly check even when the prior run was less than an hour ago', async () => {
     const deps = dependencies({
       automationRuntime: runtime({
         scheduleMode: 'every_hour',
@@ -169,10 +169,12 @@ describe('provider usage limit automation', () => {
 
     const result = await providerUsageLimitJob({}, deps.overrides);
 
-    expect(result.launchedTaskId).toBeNull();
-    expect(result.skippedReason).toBe('Not due yet.');
-    expect(deps.overrides.getSnapshots).not.toHaveBeenCalled();
-    expect(deps.recordOutcome).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ launchedTaskId: null, completed: true });
+    expect(deps.overrides.getSnapshots).toHaveBeenCalledOnce();
+    expect(deps.recordOutcome).toHaveBeenCalledWith(
+      expect.objectContaining({}),
+      expect.objectContaining({ status: 'succeeded' }),
+    );
   });
 
   it('alerts at the configured threshold and deduplicates scheduled runs in a quota period', async () => {
@@ -186,6 +188,21 @@ describe('provider usage limit automation', () => {
     expect(deps.postMessage).toHaveBeenCalledTimes(1);
     expect(deps.postMessage).toHaveBeenCalledWith(
       expect.objectContaining({ channel: 'C-ALERTS' }),
+    );
+  });
+
+  it('sends one critical alert when usage reaches 100% after the threshold alert', async () => {
+    const snapshots = [snapshot({ usedPercent: 90, used: 90 })];
+    const deps = dependencies({ snapshots });
+
+    await providerUsageLimitJob({}, deps.overrides);
+    snapshots[0] = snapshot({ usedPercent: 100, used: 100, remaining: 0 });
+    await providerUsageLimitJob({}, deps.overrides);
+    await providerUsageLimitJob({}, deps.overrides);
+
+    expect(deps.postMessage).toHaveBeenCalledTimes(2);
+    expect(JSON.stringify(deps.postMessage.mock.calls[1]?.[0])).toContain(
+      '*Threshold crossed* 100%',
     );
   });
 

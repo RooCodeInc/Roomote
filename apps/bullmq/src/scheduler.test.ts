@@ -114,7 +114,7 @@ describe('startScheduler', () => {
     );
   });
 
-  it('checks provider usage limits every 15 minutes', async () => {
+  it('checks provider usage limits every hour', async () => {
     await startScheduler();
 
     expect(mocks.queue.removeJobScheduler).toHaveBeenCalledWith(
@@ -122,7 +122,7 @@ describe('startScheduler', () => {
     );
     expect(mocks.queue.upsertJobScheduler).toHaveBeenCalledWith(
       'provider_usage_limit',
-      { every: 15 * 60 * 1000 },
+      { every: 60 * 60 * 1000 },
     );
   });
 });

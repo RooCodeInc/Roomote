@@ -226,12 +226,12 @@ describe('normalizeBackgroundAgentSettings provider usage limits', () => {
     expect(settings.providerUsageLimitThreshold).toBe(85);
   });
 
-  it('projects the configured frequency, threshold, and Slack destination', () => {
+  it('normalizes enabled alerts to hourly checks and preserves their configuration', () => {
     const settings = normalizeBackgroundAgentSettings(null, [
       {
         key: 'provider_usage_limit',
         enabled: true,
-        schedule: { mode: 'every_15_minutes' },
+        schedule: { mode: 'daily' },
         settings: { threshold: 70 },
         targets: [
           {
@@ -243,7 +243,7 @@ describe('normalizeBackgroundAgentSettings provider usage limits', () => {
       } as unknown as Automation,
     ]);
 
-    expect(settings.providerUsageLimitFrequency).toBe('every_15_minutes');
+    expect(settings.providerUsageLimitFrequency).toBe('every_hour');
     expect(settings.providerUsageLimitThreshold).toBe(70);
     expect(settings.providerUsageLimitSlackChannelId).toBe('C-QUOTAS');
   });

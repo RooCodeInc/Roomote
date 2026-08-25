@@ -474,9 +474,10 @@ export async function updateBackgroundAgentSettingsCommand(
     : null;
   const managerStatsFrequency = input.managerStatsFrequency ?? 'off';
   const providerUsageLimitFrequency =
-    input.providerUsageLimitFrequency ??
-    existingSettings.providerUsageLimitFrequency ??
-    DEFAULT_PROVIDER_USAGE_LIMIT_FREQUENCY;
+    (input.providerUsageLimitFrequency ??
+      existingSettings.providerUsageLimitFrequency) === 'off'
+      ? 'off'
+      : DEFAULT_PROVIDER_USAGE_LIMIT_FREQUENCY;
   const providerUsageLimitThreshold =
     input.providerUsageLimitThreshold ??
     existingSettings.providerUsageLimitThreshold ??

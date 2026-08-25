@@ -10,11 +10,7 @@ export type AnnouncerFrequency = 'off' | 'daily' | 'weekly';
 
 export type ManagerStatsFrequency = 'off' | 'weekly';
 
-export type ProviderUsageLimitFrequency =
-  | 'off'
-  | 'every_15_minutes'
-  | 'every_hour'
-  | 'daily';
+export type ProviderUsageLimitFrequency = 'off' | 'every_hour';
 
 export const DEFAULT_PROVIDER_USAGE_LIMIT_FREQUENCY: ProviderUsageLimitFrequency =
   'every_hour';

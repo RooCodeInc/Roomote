@@ -243,7 +243,7 @@ describe('updateBackgroundAgentSettingsCommand Discord destinations', () => {
     expect(mockCaptureActivationAutomationChanged).not.toHaveBeenCalled();
   });
 
-  it('persists provider usage frequency and threshold without creating task state', async () => {
+  it('persists hourly provider usage checks and the threshold without creating task state', async () => {
     await db.insert(deploymentSettings).values({
       id: 'default',
       managerSlackChannelId: 'C-MANAGER',
@@ -253,7 +253,7 @@ describe('updateBackgroundAgentSettingsCommand Discord destinations', () => {
       adminAuth,
       buildInput({
         savingAutomation: 'providerUsageLimit',
-        providerUsageLimitFrequency: 'daily',
+        providerUsageLimitFrequency: 'every_hour',
         providerUsageLimitThreshold: 5,
         providerUsageLimitSlackChannel: null,
         providerUsageLimitDiscordChannel: null,
@@ -266,7 +266,7 @@ describe('updateBackgroundAgentSettingsCommand Discord destinations', () => {
     expect(result.success).toBe(true);
     expect(automation).toMatchObject({
       enabled: true,
-      schedule: { mode: 'daily' },
+      schedule: { mode: 'every_hour' },
       settings: { threshold: 5 },
       targets: [],
     });

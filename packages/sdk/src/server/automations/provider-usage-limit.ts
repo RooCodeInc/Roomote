@@ -16,7 +16,6 @@ import {
   DEFAULT_PROVIDER_USAGE_LIMIT_THRESHOLD,
   isProviderUsageLimitThreshold,
   PROVIDER_USAGE_LIMIT_SETTINGS_HASH,
-  type ProviderUsageLimitFrequency,
   type ProviderUsageLimitThreshold,
 } from '@roomote/types';
 
@@ -39,14 +38,6 @@ import {
 const LOG_PREFIX = '[providerUsageLimit]';
 const REDIS_KEY_PREFIX = 'provider-usage-limit-warning';
 const SECONDS_PER_DAY = 24 * 60 * 60;
-const FREQUENCY_INTERVAL_MS: Record<
-  Exclude<ProviderUsageLimitFrequency, 'off'>,
-  number
-> = {
-  every_15_minutes: 15 * 60 * 1000,
-  every_hour: 60 * 60 * 1000,
-  daily: 24 * 60 * 60 * 1000,
-};
 
 type UsageLimitRedis = {
   del: (key: string) => Promise<number>;
@@ -319,18 +310,6 @@ async function postProviderUsageLimitViaCommunicationAdapter(params: {
   });
 }
 
-function isDue(params: {
-  frequency: Exclude<ProviderUsageLimitFrequency, 'off'>;
-  lastRunAt: Date | null;
-  now: Date;
-}): boolean {
-  return (
-    !params.lastRunAt ||
-    params.now.getTime() - params.lastRunAt.getTime() >=
-      FREQUENCY_INTERVAL_MS[params.frequency]
-  );
-}
-
 export async function providerUsageLimitJob(
   opts: AutomationRunOpts = {},
   dependencyOverrides: Partial<ProviderUsageLimitDependencies> = {},
@@ -338,26 +317,13 @@ export async function providerUsageLimitJob(
   const dependencies = { ...defaultDependencies, ...dependencyOverrides };
   const result = emptyJobResult();
   const runtime = await dependencies.getRuntime('provider_usage_limit');
-  const frequency = runtime.enabled ? runtime.scheduleMode : 'off';
 
-  if (
-    frequency !== 'every_15_minutes' &&
-    frequency !== 'every_hour' &&
-    frequency !== 'daily'
-  ) {
+  if (!runtime.enabled) {
     result.skippedReason = 'Automation is disabled.';
     return result;
   }
 
   const now = dependencies.now();
-  if (
-    !opts.manualTrigger &&
-    !isDue({ frequency, lastRunAt: runtime.lastRunAt, now })
-  ) {
-    result.skippedReason = 'Not due yet.';
-    return result;
-  }
-
   const slackBotToken = await dependencies.getSlackBotToken();
   const destination =
     opts.destination ??

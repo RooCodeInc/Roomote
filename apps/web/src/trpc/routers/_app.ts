@@ -622,9 +622,7 @@ const automationsRouter = createRouter({
           .min(1)
           .max(160)
           .nullable(),
-        providerUsageLimitFrequency: z
-          .enum(['off', 'every_15_minutes', 'every_hour', 'daily'])
-          .optional(),
+        providerUsageLimitFrequency: z.enum(['off', 'every_hour']).optional(),
         providerUsageLimitThreshold: z
           .number()
           .int()

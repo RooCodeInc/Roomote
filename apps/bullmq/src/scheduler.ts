@@ -131,7 +131,7 @@ async function createJobs(queue: Queue): Promise<void> {
 
   await queue.upsertJobScheduler(
     'provider_usage_limit' satisfies ScheduledAutomationJobName,
-    { every: 15 * 60 * 1000 },
+    { every: 60 * 60 * 1000 },
   );
 
   await queue.upsertJobScheduler(

@@ -426,11 +426,11 @@ describe('Automations selection helpers', () => {
     expect(saveInput.managerStatsSlackChannel).toBeNull();
   });
 
-  it('includes provider usage cadence, threshold, and channel destination', () => {
+  it('includes provider usage enablement, threshold, and channel destination', () => {
     const saveInput = buildAutomationSettingsSaveInput(
       {
         ...baseFormState,
-        providerUsageLimitFrequency: 'every_15_minutes',
+        providerUsageLimitFrequency: 'every_hour',
         providerUsageLimitThreshold: 70,
         providerUsageLimitSlackChannel: ' #provider-alerts ',
       },
@@ -440,7 +440,7 @@ describe('Automations selection helpers', () => {
 
     expect(saveInput).toMatchObject({
       savingAutomation: 'providerUsageLimit',
-      providerUsageLimitFrequency: 'every_15_minutes',
+      providerUsageLimitFrequency: 'every_hour',
       providerUsageLimitThreshold: 70,
       providerUsageLimitSlackChannel: '#provider-alerts',
       providerUsageLimitDiscordChannel: null,

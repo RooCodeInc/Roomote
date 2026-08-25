@@ -462,8 +462,6 @@ const ANNOUNCER_FREQUENCY_OPTIONS =
   getScheduleOptions<AnnouncerFrequency>('announcer');
 const SENTRY_TRIAGE_FREQUENCY_OPTIONS =
   getScheduleOptions<SentryTriageFrequency>('sentry_triage');
-const PROVIDER_USAGE_LIMIT_FREQUENCY_OPTIONS =
-  getScheduleOptions<ProviderUsageLimitFrequency>('provider_usage_limit');
 const SCHEDULE_ONLY_AUTOMATION_FREQUENCY_OPTIONS =
   getScheduleOptions<ScheduleOnlyBackgroundAutomationFrequency>(
     'security_auditor',
@@ -3861,35 +3859,30 @@ export function AutomationsSettings() {
               }
             >
               <div className="space-y-5">
-                <Select
-                  value={formState.providerUsageLimitFrequency}
-                  onValueChange={(value) =>
-                    setFormState((prev) =>
-                      prev
-                        ? {
-                            ...prev,
-                            providerUsageLimitFrequency:
-                              value as ProviderUsageLimitFrequency,
-                          }
-                        : prev,
-                    )
-                  }
-                >
-                  <SelectTrigger
-                    id="provider-usage-limit-frequency"
-                    aria-label="Inference Provider Usage Alerts schedule"
-                    className="w-full md:w-56"
+                <div className="flex items-center gap-2">
+                  <Switch
+                    id="provider-usage-limit-enabled"
+                    checked={providerUsageLimitIsEnabled}
+                    onCheckedChange={(enabled) =>
+                      setFormState((prev) =>
+                        prev
+                          ? {
+                              ...prev,
+                              providerUsageLimitFrequency: enabled
+                                ? 'every_hour'
+                                : 'off',
+                            }
+                          : prev,
+                      )
+                    }
+                  />
+                  <Label
+                    htmlFor="provider-usage-limit-enabled"
+                    className="text-sm"
                   >
-                    <SelectValue placeholder="Select a schedule" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {PROVIDER_USAGE_LIMIT_FREQUENCY_OPTIONS.map((option) => (
-                      <SelectItem key={option.value} value={option.value}>
-                        {option.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                    Enabled
+                  </Label>
+                </div>
 
                 {providerUsageLimitIsEnabled ? (
                   <div className="space-y-5">
@@ -3939,8 +3932,8 @@ export function AutomationsSettings() {
                       />
                       <p className="text-xs text-muted-foreground">
                         Alert when a provider reaches this percentage of its
-                        reported quota. Exhausted quotas trigger a new critical
-                        alert after the configured frequency window.
+                        reported quota. Roomote checks hourly and sends one
+                        alert per quota cycle, plus a critical alert at 100%.
                       </p>
                     </div>
                   </div>

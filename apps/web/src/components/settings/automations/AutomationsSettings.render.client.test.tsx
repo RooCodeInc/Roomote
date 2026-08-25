@@ -610,7 +610,7 @@ describe('AutomationsSettings', () => {
     expect(screen.queryByText('Beta')).not.toBeInTheDocument();
   });
 
-  it('shows provider usage alert cadence, channel destination, and threshold controls', async () => {
+  it('shows provider usage alert enablement, channel destination, and threshold controls', async () => {
     render(<AutomationsSettings />);
 
     fireEvent.click(
@@ -619,11 +619,7 @@ describe('AutomationsSettings', () => {
       }),
     );
 
-    expect(
-      screen.getByRole('combobox', {
-        name: 'Inference Provider Usage Alerts schedule',
-      }),
-    ).toHaveTextContent('Every hour');
+    expect(screen.getByRole('switch', { name: 'Enabled' })).toBeChecked();
     expect(
       screen.getByLabelText('Post alerts to this Slack channel'),
     ).toBeInTheDocument();
