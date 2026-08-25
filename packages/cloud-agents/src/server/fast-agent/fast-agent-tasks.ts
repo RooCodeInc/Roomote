@@ -340,7 +340,8 @@ export function createFastAgentTaskTools(
         }),
     }),
     send_task_message: tool({
-      description: 'Send a follow-up message to a running Roomote task.',
+      description:
+        'Send a follow-up message to an active or resumable Roomote task.',
       inputSchema: z
         .object({
           taskId: nonEmptyTrimmedStringSchema.describe(

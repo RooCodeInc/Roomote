@@ -55,6 +55,10 @@ describe('buildFastAgentSystemPrompt', () => {
     );
     expect(prompt).toContain('conversational orchestrator');
     expect(prompt).toContain('Task ID: task-2 | Update docs | pending');
+    expect(prompt).toContain('Active or Resumable Delegated Tasks');
+    expect(prompt).toContain(
+      'A resumable settled task continues under the same task identity',
+    );
     expect(prompt).toContain('Existing active tasks do not block');
     expect(prompt).toContain('send_chat_reply');
     expect(prompt).toContain('send_chat_reaction');
