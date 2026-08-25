@@ -84,6 +84,18 @@ and then includes the finding with a file and line reference in the review
 summary. On later sync reviews, Roomote resolves its inline thread when the
 flagged issue is clearly fixed and the provider supports thread resolution.
 
+## Pull request status notifications
+
+When a tracked, Roomote-created GitHub pull request becomes conflicted, Roomote
+notifies the Slack, Teams, Telegram, Discord, or Fast conversation where the
+task started. The notification is automatic and is sent once for each
+transition into a conflicting state. If the pull request becomes clean and then
+conflicts again, Roomote sends a new notification.
+
+This status notification does not run **Resolve PR Conflicts**. Enable that
+automation separately under **Settings > Automations** when you want Roomote to
+attempt conflict resolution.
+
 ## Public URLs
 
 Use the same deployment URL across source-control callbacks and webhooks. If

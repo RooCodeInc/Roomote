@@ -379,6 +379,13 @@
       "when": 1787677888886,
       "tag": "0053_watery_shinobi_shaw",
       "breakpoints": true
+    },
+    {
+      "idx": 54,
+      "version": "7",
+      "when": 1787681808817,
+      "tag": "0054_chilly_legion",
+      "breakpoints": true
     }
   ]
 }

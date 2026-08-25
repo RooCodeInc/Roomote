@@ -469,7 +469,7 @@ describe('deliverFastAgentParentEvent', () => {
     expect(mocks.resolveUserMcpServerConfigs).toHaveBeenCalledWith({
       userId: 'u1',
       apiBaseUrl: 'https://roomote.example.com',
-      includeRoomote: true,
+      includeRoomoteMemberTools: true,
     });
     expect(mocks.enqueueTask).toHaveBeenCalledWith({
       task: expect.objectContaining({

@@ -1,6 +1,6 @@
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
-import { ROOMOTE_MCP_LEGACY_PATH } from '@roomote/auth';
+import { ROOMOTE_MCP_PATH } from '@roomote/auth';
 import {
   Env,
   areCuratedIntegrationsDisabled,
@@ -94,7 +94,7 @@ function getRequestOrigin(req: { url?: string } | undefined): string | null {
 async function resolveMcpServerConfigs(options: {
   auth: Parameters<typeof resolveActorScopedUserContext>[0];
   requestOrigin: string | null;
-  includeRoomote?: boolean;
+  includeRoomoteMemberTools?: boolean;
   quiet?: boolean;
 }): Promise<ResolvedMcpServerConfigs> {
   const logInfo: InfoLogger = options.quiet ? () => {} : console.info;
@@ -133,9 +133,9 @@ async function resolveMcpServerConfigs(options: {
     };
   }
 
-  if (options.includeRoomote && !servers[ROOMOTE_MCP_ID]) {
+  if (options.includeRoomoteMemberTools && !servers[ROOMOTE_MCP_ID]) {
     servers[ROOMOTE_MCP_ID] = {
-      url: `${options.requestOrigin ?? ''}${ROOMOTE_MCP_LEGACY_PATH}`,
+      url: `${options.requestOrigin ?? ''}${ROOMOTE_MCP_PATH}`,
       headers: {},
     };
   }
@@ -150,12 +150,12 @@ async function resolveMcpServerConfigs(options: {
 export async function resolveUserMcpServerConfigs(options: {
   userId: string;
   apiBaseUrl?: string;
-  includeRoomote?: boolean;
+  includeRoomoteMemberTools?: boolean;
 }): Promise<ResolvedMcpServerConfigs> {
   return resolveMcpServerConfigs({
     auth: { userId: options.userId },
     requestOrigin: getRequestOrigin({ url: options.apiBaseUrl }),
-    includeRoomote: options.includeRoomote,
+    includeRoomoteMemberTools: options.includeRoomoteMemberTools,
     // This runs on every Fast turn; the per-connection info stream is worker
     // config-fetch debugging noise at that frequency.
     quiet: true,

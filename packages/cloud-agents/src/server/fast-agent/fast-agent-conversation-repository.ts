@@ -20,6 +20,8 @@ export type FastAgentConversationRecord = {
    * not this field, owns the live warm transcript.
    */
   compatibilityMessages: ModelMessage[];
+  /** Last successfully completed native session; validated before cold resume. */
+  openCodeSessionId: string | null;
 };
 
 export interface FastAgentConversationRepository {
@@ -36,6 +38,10 @@ export interface FastAgentConversationRepository {
   appendVisibleMessages(input: {
     conversationId: string;
     messages: ModelMessage[];
+  }): Promise<void>;
+  setOpenCodeSession(input: {
+    conversationId: string;
+    openCodeSessionId: string;
   }): Promise<void>;
 }
 
@@ -127,6 +133,7 @@ async function loadConversationRecord(
     userId: record.userId,
     conversation,
     compatibilityMessages: record.compatibilityMessages as ModelMessage[],
+    openCodeSessionId: record.openCodeSessionId,
   };
 }
 
@@ -272,6 +279,27 @@ export const fastAgentConversationRepository: FastAgentConversationRepository =
         if (!updated) {
           throw new Error('Fast conversation was not found.');
         }
+      });
+    },
+
+    async setOpenCodeSession({
+      conversationId: requestedId,
+      openCodeSessionId,
+    }) {
+      await db.transaction(async (tx) => {
+        const conversationId = await resolveCanonicalId(tx, requestedId);
+        await tx.execute(
+          sql`select pg_advisory_xact_lock(hashtextextended(${`fast-agent-conversation:${conversationId}`}, 0))`,
+        );
+        const [updated] = await tx
+          .update(fastAgentConversations)
+          .set({
+            openCodeSessionId,
+            updatedAt: sql`now()`,
+          })
+          .where(eq(fastAgentConversations.id, conversationId))
+          .returning({ id: fastAgentConversations.id });
+        if (!updated) throw new Error('Fast conversation was not found.');
       });
     },
   };

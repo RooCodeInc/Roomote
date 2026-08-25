@@ -636,7 +636,7 @@ type OpenCodeSdkServerLease = {
   url: string;
 };
 
-export function getOpenCodeSdkServerIdleTtlMs(): number {
+function getOpenCodeSdkServerIdleTtlMs(): number {
   const configured = Number.parseInt(
     process.env.OPENCODE_SDK_SERVER_IDLE_TTL_MS ?? '',
     10,

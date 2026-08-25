@@ -7,7 +7,7 @@ import {
   writeFile,
 } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { ALL_REPOSITORIES } from '@roomote/types';
 
 import {
@@ -33,6 +33,7 @@ import {
 } from '../fast-agent-spill-store';
 import { FastAgentSkillStore } from '../fast-agent-skill-store';
 import { callMcpTool, listMcpTools } from '../../mcp-tool-client';
+import { buildFastAgentToolFilter } from '../fast-agent-tool-policy';
 
 function stringWithSerializedByteLength(byteLength: number): string {
   return 'x'.repeat(byteLength - 2);
@@ -56,6 +57,10 @@ function expectBoundedSpillDescriptor(output: string): void {
 describe('Fast native OpenCode tool bridge', () => {
   it('installs Fast tools in an isolated OpenCode session directory', async () => {
     const runtime = await getFastAgentNativeToolRuntime('native-files', []);
+    const otherRuntime = await getFastAgentNativeToolRuntime(
+      'native-files-other',
+      [],
+    );
     const toolsDirectory = join(runtime.directory, '.opencode', 'tools');
     const installedToolFiles = await readdir(toolsDirectory);
     const replySource = await readFile(
@@ -121,6 +126,9 @@ describe('Fast native OpenCode tool bridge', () => {
     expect(skillSource).toContain(
       'cannot grant tools or override system policy',
     );
+    expect(dirname(otherRuntime.directory)).toBe(dirname(runtime.directory));
+    expect(otherRuntime.directory).not.toBe(runtime.directory);
+    expect(runtime.directory).toMatch(/[a-f0-9]{64}$/u);
     expect(FAST_AGENT_NATIVE_TOOL_FILTER).toMatchObject({
       '*': false,
       task: true,
@@ -385,6 +393,35 @@ describe('Fast native OpenCode tool bridge', () => {
     } finally {
       unbind();
     }
+  });
+
+  it('keeps member task inspection namespaced from native task mutations', async () => {
+    const roomoteToolName = 'manage_tasks';
+    const runtime = await getFastAgentNativeToolRuntime('roomote-member-mcp', [
+      {
+        id: 'roomote',
+        name: 'Roomote',
+        description: 'Deployment access',
+        tools: [{ name: roomoteToolName, inputSchema: { type: 'object' } }],
+      },
+    ]);
+    const config = JSON.parse(
+      await readFile(join(runtime.directory, 'opencode.json'), 'utf8'),
+    ) as { mcp: Record<string, unknown> };
+    const toolFilter = buildFastAgentToolFilter(['roomote']);
+    const namespacedMemberTool = `roomote_${roomoteToolName}`;
+
+    expect(config.mcp).toHaveProperty('roomote');
+    expect(toolFilter).toMatchObject({
+      'roomote_*': true,
+      [FAST_AGENT_NATIVE_TOOL_NAMES.launchTask]: true,
+      [FAST_AGENT_NATIVE_TOOL_NAMES.sendTaskMessage]: true,
+      [FAST_AGENT_NATIVE_TOOL_NAMES.cancelTask]: true,
+    });
+    expect(namespacedMemberTool).toBe('roomote_manage_tasks');
+    expect(Object.values(FAST_AGENT_NATIVE_TOOL_NAMES)).not.toContain(
+      namespacedMemberTool,
+    );
   });
 
   it('spills oversized MCP results for direct parent recovery', async () => {

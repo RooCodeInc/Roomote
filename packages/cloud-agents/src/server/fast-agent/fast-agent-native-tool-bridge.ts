@@ -4,15 +4,17 @@ import {
   type ServerResponse,
 } from 'node:http';
 import {
+  chmodSync,
+  lstatSync,
   mkdirSync,
-  mkdtempSync,
   rmSync,
   symlinkSync,
+  unlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { randomBytes, timingSafeEqual } from 'node:crypto';
+import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
@@ -922,8 +924,16 @@ async function startBridge(): Promise<FastAgentNativeToolBridge> {
   };
 }
 
-function createRuntimeDirectory(): string {
-  const directory = mkdtempSync(join(tmpdir(), 'roomote-fast-opencode-'));
+function createRuntimeDirectory(sessionId: string): string {
+  const rootDirectory = join(tmpdir(), 'roomote-fast-opencode');
+  mkdirSync(rootDirectory, { recursive: true, mode: 0o700 });
+  chmodSync(rootDirectory, 0o700);
+  const directory = join(
+    rootDirectory,
+    createHash('sha256').update(sessionId).digest('hex'),
+  );
+  mkdirSync(directory, { recursive: true, mode: 0o700 });
+  chmodSync(directory, 0o700);
   const toolsDirectory = join(directory, '.opencode', 'tools');
   mkdirSync(toolsDirectory, { recursive: true });
   writeFileSync(
@@ -933,11 +943,14 @@ function createRuntimeDirectory(): string {
   );
   const toolNodeModules = join(directory, '.opencode', 'node_modules');
   mkdirSync(toolNodeModules, { recursive: true });
-  symlinkSync(
-    resolveZodDirectoryForTools(),
-    join(toolNodeModules, 'zod'),
-    'dir',
-  );
+  const zodLink = join(toolNodeModules, 'zod');
+  try {
+    if (lstatSync(zodLink).isSymbolicLink()) unlinkSync(zodLink);
+    else rmSync(zodLink, { recursive: true, force: true });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+  }
+  symlinkSync(resolveZodDirectoryForTools(), zodLink, 'dir');
   writeFileSync(
     join(directory, '.opencode', 'roomote-fast-tool-bridge.js'),
     FAST_AGENT_NATIVE_TOOL_BRIDGE_SOURCE,
@@ -973,7 +986,7 @@ export async function getFastAgentNativeToolRuntime(
   let runtime = sessionRuntimes.get(sessionId);
   if (!runtime) {
     runtime = {
-      directory: createRuntimeDirectory(),
+      directory: createRuntimeDirectory(sessionId),
       env: bridge.env,
       mcpCapability: randomBytes(32).toString('hex'),
     };

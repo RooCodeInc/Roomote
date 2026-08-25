@@ -17,6 +17,7 @@ import { fastAgentConversationRepository } from './fast-agent-conversation-repos
 type FastAgentSessionRecord = {
   id: string;
   compatibilityMessages: ModelMessage[];
+  openCodeSessionId: string | null;
 };
 
 export type FastAgentActiveTask = {
@@ -104,5 +105,18 @@ export async function appendFastAgentVisibleMessages({
   await fastAgentConversationRepository.appendVisibleMessages({
     conversationId: sessionId,
     messages,
+  });
+}
+
+export async function setFastAgentOpenCodeSession({
+  sessionId,
+  openCodeSessionId,
+}: {
+  sessionId: string;
+  openCodeSessionId: string;
+}): Promise<void> {
+  await fastAgentConversationRepository.setOpenCodeSession({
+    conversationId: sessionId,
+    openCodeSessionId,
   });
 }
