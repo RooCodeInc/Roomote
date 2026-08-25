@@ -55,7 +55,6 @@ describe('Slack fast integration call audit', () => {
       .where(eq(slackFastIntegrationCalls.id, started.id));
     expect(executing).toMatchObject({
       fastAgentConversationId: conversation!.id,
-      slackQuickAnswerId: null,
       userId: user.id,
       slackTeamId: 'T123',
       slackChannel: 'C123',

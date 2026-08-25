@@ -372,6 +372,13 @@
       "when": 1787613996624,
       "tag": "0052_good_stick",
       "breakpoints": true
+    },
+    {
+      "idx": 53,
+      "version": "7",
+      "when": 1787677888886,
+      "tag": "0053_watery_shinobi_shaw",
+      "breakpoints": true
     }
   ]
 }
