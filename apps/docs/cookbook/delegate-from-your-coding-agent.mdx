@@ -1,0 +1,117 @@
+---
+title: Delegate from your coding agent
+description: Keep your preferred coding agent in control while Roomote handles isolated, asynchronous work through MCP.
+contributor: Roomote
+contributor_url: https://github.com/RooCodeInc
+contributor_company: Roomote
+contributor_company_url: https://roomote.dev
+---
+
+## Overview
+
+You do not need to replace your local coding agent to use Roomote. Connect the
+Roomote MCP server, then give your preferred agent one reusable delegation rule.
+It can send bounded work to a Roomote agent, keep the task context in the
+original conversation, and bring the result and evidence back for review.
+
+This works best for independent tasks that can run asynchronously, such as a
+focused bug fix, investigation, documentation update, or test repair. Keep
+tightly coupled edits in one workspace instead of asking two agents to change
+the same files at once.
+
+- **Trigger**: A task that can be completed and reviewed independently
+- **Setup time**: About 10 minutes
+- **Requires**: Roomote MCP, an OAuth-capable MCP client, a healthy environment
+- **Serves**: Engineers, Engineering leads
+- **Cooked By**: [Roomote](https://github.com/RooCodeInc) from [Roomote](https://roomote.dev)
+
+## Ingredients
+
+- The [Roomote MCP server](/integrations/roomote-mcp) connected to your coding agent
+- A healthy [environment](/environments) for the target repository
+- A source-control connection that can create remote branches and pull requests
+- Your coding agent's project or user instruction file
+
+## Steps
+
+1. Connect Roomote to your MCP client and confirm the client can list your
+   available environments.
+2. Add the standing delegation rule below to the instruction or skill system
+   your coding agent already uses. Keep one canonical copy under version control
+   when the rule should apply to the whole team.
+3. Ask your coding agent to delegate one small, independent task. Name the
+   desired outcome, relevant repository context, constraints, and required
+   evidence.
+4. Let the Roomote task run asynchronously. Continue local work only on files
+   outside the delegated scope.
+5. Ask your coding agent to retrieve the task result. Review the transcript,
+   validation, diff, and pull request before accepting the work.
+6. Send follow-up instructions to the same task when they depend on its existing
+   context or workspace. Start a new task for a separate objective.
+
+## Paste-ready instruction
+
+Add this to the project or user instructions used by your coding agent:
+
+```text
+Use the Roomote MCP server when work is independent, can run asynchronously,
+and benefits from an isolated cloud workspace. Good candidates include focused
+bug fixes, investigations, documentation updates, and test repairs.
+
+Before delegating:
+- confirm the requested outcome, repository or environment, constraints, and
+  expected deliverable
+- avoid delegating work that overlaps files currently being changed locally
+- if existing local work is required, ask before committing and pushing it to a
+  remote branch for the handoff
+- choose an available Roomote environment immediately before starting the task
+
+When delegating, give Roomote a bounded prompt with the relevant branch, issue,
+pull request, logs, screenshots, or conversation context. Require it to validate
+the result and return a pull request for repository changes.
+
+After delegation, keep the Roomote task ID in this conversation. Use that same
+task for dependent follow-ups. When the task finishes, retrieve its summary and
+messages, then report:
+- the outcome and any remaining blocker
+- the branch or pull request
+- the validation that ran, including anything that could not be verified
+- screenshots, logs, or other evidence relevant to the claim
+
+Do not present delegated work as complete until the evidence and delivered diff
+have been reviewed.
+```
+
+## Paste-ready handoff
+
+Use this when you want to delegate a specific task:
+
+```text
+Delegate this to Roomote through MCP as a new task:
+
+Outcome: <one independently reviewable result>
+Repository or environment: <target>
+Starting branch or context: <branch, issue, PR, logs, or conversation link>
+Constraints: <scope boundaries and behavior that must not change>
+Deliverable: <answer, plan, patch, or pull request>
+Verification: <tests, checks, screenshots, logs, or other required evidence>
+
+Keep the Roomote task ID here, let it work asynchronously, and bring back the
+result and verification when it finishes.
+```
+
+## Variations
+
+- For read-only investigation, set the deliverable to a cited answer or plan and
+  explicitly say not to change repository files.
+- For partially completed work, push a dedicated remote branch and tell Roomote
+  to continue from that branch without modifying the local agent's branch.
+- For team-wide use, store the standing rule in the repository's shared agent
+  instructions. Keep personal preferences in your client's user-level rules.
+
+MCP access follows the permissions of the signed-in Roomote user. The standing
+instruction improves coordination, but it is not a security boundary; enforce
+repository, environment, and integration access in Roomote and the connected
+providers.
+
+**Pairs well with:** [reviewing a task](/tasks) and [easing your team into cloud agents](/cookbook/ease-your-team-into-cloud-agents)
