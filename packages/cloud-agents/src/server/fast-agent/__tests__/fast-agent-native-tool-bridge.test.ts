@@ -39,6 +39,15 @@ describe('Fast native OpenCode tool bridge', () => {
     expect(replySource).toContain('invoke("send_chat_reply"');
     expect(launchTaskSource).toContain('model: z.string().min(1)');
     expect(launchTaskSource).toContain('deployment-enabled model ID');
+    expect(launchTaskSource).toContain(
+      'Brief user-facing description of the work now underway',
+    );
+    expect(launchTaskSource).toContain(
+      'do not mention delegation, launching, or queue state',
+    );
+    expect(launchTaskSource).not.toContain(
+      'explanation of what is being delegated',
+    );
     expect(launchTaskSource).toContain(ALL_REPOSITORIES);
     expect(launchTaskSource).toContain(
       'to run against all active repositories',
