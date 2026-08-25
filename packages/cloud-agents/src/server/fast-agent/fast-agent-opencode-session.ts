@@ -2,7 +2,6 @@ import {
   isNonTaskOpenCodeSessionNotFoundError,
   type NonTaskOpenCodeSession,
 } from '../non-task-provider-usage';
-import { getOpenCodeSdkServerIdleTtlMs } from '../opencode-runtime';
 import { revokeFastAgentMcpCapabilitiesForConversation } from './fast-agent-native-tool-bridge';
 import { fastAgentSpillStore } from './fast-agent-spill-store';
 
@@ -47,7 +46,9 @@ export class FastAgentOpenCodeSessionManager {
   ) => Promise<void> | void;
 
   constructor(options: FastAgentOpenCodeSessionManagerOptions = {}) {
-    this.idleTtlMs = options.idleTtlMs ?? getOpenCodeSdkServerIdleTtlMs();
+    // The OpenCode server can restart after its own idle timeout without
+    // losing sessions. Keep their ids until bounded LRU eviction instead.
+    this.idleTtlMs = options.idleTtlMs ?? Number.POSITIVE_INFINITY;
     this.maxEntries =
       options.maxEntries ?? DEFAULT_FAST_AGENT_OPENCODE_SESSION_LIMIT;
     this.now = options.now ?? Date.now;

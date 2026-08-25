@@ -211,6 +211,29 @@ describe('FastAgentOpenCodeSessionManager', () => {
     expect(prompts.at(-1)).toBe('bootstrap a3');
   });
 
+  it('keeps sessions across the OpenCode server idle timeout by default', async () => {
+    let now = 0;
+    const manager = new FastAgentOpenCodeSessionManager({ now: () => now });
+    const prompts: string[] = [];
+    const execute = vi.fn(async (session, prompt: string) => {
+      prompts.push(prompt);
+      session.id ??= 'session-1';
+    });
+    const run = () =>
+      manager.run({
+        conversationId: 'conversation-1',
+        prompt: 'delta',
+        bootstrapPrompt: 'bootstrap',
+        execute,
+      });
+
+    await run();
+    now = 10 * 60_000;
+    await run();
+
+    expect(prompts).toEqual(['bootstrap', 'delta']);
+  });
+
   it('cleans conversation spills on invalidation, eviction, and clear', async () => {
     let now = 0;
     const onConversationEnd = vi.fn();
