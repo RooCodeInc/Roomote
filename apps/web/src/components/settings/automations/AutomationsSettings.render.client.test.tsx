@@ -588,6 +588,7 @@ describe('AutomationsSettings', () => {
         displayName: '#roomote-managers',
       };
     }
+    window.location.search = '';
     window.location.hash = '';
     Element.prototype.scrollIntoView = vi.fn();
   });
@@ -1133,6 +1134,28 @@ describe('AutomationsSettings', () => {
         'Configure what runs, when it runs, and where the result is sent.',
       ),
     ).not.toBeInTheDocument();
+  });
+
+  it('opens a new custom automation with a prompt from a task message', async () => {
+    window.location.pathname = '/automations';
+    window.location.search =
+      '?prompt=%20%20Review%20new%20errors%20%20&source=task';
+    const replaceState = vi.spyOn(window.history, 'replaceState');
+
+    render(<AutomationsSettings />);
+
+    expect(
+      await screen.findByRole('dialog', { name: 'New custom automation' }),
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText('Prompt')).toHaveValue(
+      '  Review new errors  ',
+    );
+    expect(replaceState).toHaveBeenCalledWith(
+      null,
+      '',
+      '/automations?source=task',
+    );
+    closeAutomationDialog();
   });
 
   it('offers and displays the all-repositories workspace target', async () => {

@@ -10,6 +10,8 @@ import {
 } from '@roomote/types';
 
 import { cn } from '@/lib/utils';
+import { SETTINGS_PATHS } from '@/lib/settings';
+import { useAuthorizedUser } from '@/hooks/useUser';
 
 import {
   BasicTooltip,
@@ -17,6 +19,7 @@ import {
   ChevronDownIcon,
   MediaViewerDialog,
   MediaViewerImage,
+  Zap,
 } from '@/components/system';
 import {
   type CollapsibleToggleRenderProps,
@@ -25,6 +28,7 @@ import {
   Attachments,
   CollapsibleContent,
   Message,
+  MessageAction,
   MessageActions,
   MessageContent,
   MessagePlainText,
@@ -40,6 +44,8 @@ import { messageAnchorId } from '../message-anchor';
 import type { AcpUiMessage } from './types';
 import { ProviderRetryNoticeMessage } from './ProviderRetryNoticeMessage';
 import { TerminalProviderErrorMessage } from './TerminalProviderErrorMessage';
+
+const MAX_AUTOMATION_PREFILL_LENGTH = 5_000;
 
 const UserMessageToggle = ({
   isExpanded,
@@ -153,6 +159,7 @@ function getRequestUserInputResponseDisplay(
 }
 
 export function AcpTextMessage({ msg }: AcpTextMessageProps) {
+  const { isAdmin } = useAuthorizedUser();
   const [selectedImageIndex, setSelectedImageIndex] = useState<number | null>(
     null,
   );
@@ -194,6 +201,13 @@ export function AcpTextMessage({ msg }: AcpTextMessageProps) {
         )
         .join('\n\n')
     : baseContent;
+  const automationPrompt =
+    isAdmin &&
+    isUser &&
+    msg.updateType === ACP_ENVELOPE_EVENT_TYPES.UserPrompt &&
+    baseContent.length <= MAX_AUTOMATION_PREFILL_LENGTH
+      ? baseContent
+      : null;
   const shouldShowContentActions = isUser
     ? msg.partial !== true && !taskTool && !linkedReviewResult
     : msg.partial !== true &&
@@ -350,6 +364,16 @@ export function AcpTextMessage({ msg }: AcpTextMessageProps) {
         <MessageActions>
           <MessageCopyButton content={content} />
           <MessageNewTaskButton content={content} />
+          {automationPrompt !== null ? (
+            <MessageAction
+              tooltip="Save as automation"
+              onClick={() => {
+                window.location.href = `${SETTINGS_PATHS.automations}?prompt=${encodeURIComponent(automationPrompt)}`;
+              }}
+            >
+              <Zap className="size-4 text-muted-foreground" />
+            </MessageAction>
+          ) : null}
           {!showPersistentTimestamp && (
             <MessageTimestamp
               ts={msg.ts}

@@ -5,6 +5,11 @@ import { ACP_ENVELOPE_EVENT_TYPES } from '@roomote/types';
 const transcriptVisibilityState = vi.hoisted(() => ({
   enabled: false,
 }));
+const authState = vi.hoisted(() => ({ isAdmin: true }));
+
+vi.mock('@/hooks/useUser', () => ({
+  useAuthorizedUser: () => ({ isAdmin: authState.isAdmin }),
+}));
 
 vi.mock('@/components/ai-elements', () => ({
   Attachment: ({
@@ -22,6 +27,19 @@ vi.mock('@/components/ai-elements', () => ({
     <div>{children}</div>
   ),
   Message: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+  MessageAction: ({
+    children,
+    onClick,
+    tooltip,
+  }: {
+    children: ReactNode;
+    onClick?: () => void;
+    tooltip: string;
+  }) => (
+    <button aria-label={tooltip} onClick={onClick}>
+      {children}
+    </button>
+  ),
   MessageActions: ({ children }: { children: ReactNode }) => (
     <div>{children}</div>
   ),
@@ -100,6 +118,7 @@ vi.mock('@/components/system', () => ({
   ScanFace: () => <svg aria-label="ScanFace" />,
   ScanSearch: () => <svg aria-label="ScanSearch" />,
   Sparkles: () => <svg aria-label="Sparkles" />,
+  Zap: () => <svg aria-label="Zap" />,
 }));
 
 vi.mock('../../../useInternalTranscriptRowsVisible', () => ({
@@ -111,6 +130,8 @@ import { AcpTextMessage } from '../AcpTextMessage';
 describe('AcpTextMessage', () => {
   beforeEach(() => {
     transcriptVisibilityState.enabled = false;
+    authState.isAdmin = true;
+    window.location.href = 'http://localhost:3000';
   });
 
   it('shows copy and new task actions for assistant completion text', () => {
@@ -135,6 +156,9 @@ describe('AcpTextMessage', () => {
     expect(
       screen.getByRole('button', { name: 'new-task:Done!' }),
     ).toBeVisible();
+    expect(
+      screen.queryByRole('button', { name: 'Save as automation' }),
+    ).not.toBeInTheDocument();
   });
 
   it('passes a permalink anchor id to the timestamp', () => {
@@ -305,7 +329,7 @@ describe('AcpTextMessage', () => {
     ).not.toBeInTheDocument();
   });
 
-  it('shows copy and new task actions for user text', () => {
+  it('shows reuse actions for user text when the user is an admin', () => {
     render(
       <AcpTextMessage
         msg={{
@@ -326,6 +350,57 @@ describe('AcpTextMessage', () => {
     expect(
       screen.getByRole('button', { name: 'new-task:Continue' }),
     ).toBeVisible();
+    expect(
+      screen.getByRole('button', { name: 'Save as automation' }),
+    ).toBeVisible();
+  });
+
+  it('hides the automation action from non-admin users', () => {
+    authState.isAdmin = false;
+
+    render(
+      <AcpTextMessage
+        msg={{
+          id: 'message-1',
+          ts: 123,
+          role: 'user',
+          kind: 'text',
+          partial: false,
+          sessionId: 'session-1',
+          updateType: 'roomote_runtime.user_prompt',
+          text: 'Continue',
+          data: {},
+        }}
+      />,
+    );
+
+    expect(
+      screen.queryByRole('button', { name: 'Save as automation' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('preserves and encodes the user prompt when saving it as an automation', () => {
+    render(
+      <AcpTextMessage
+        msg={{
+          id: 'message-1',
+          ts: 123,
+          role: 'user',
+          kind: 'text',
+          partial: false,
+          sessionId: 'session-1',
+          updateType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
+          text: '  Review errors & logs  ',
+          data: {},
+        }}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save as automation' }));
+
+    expect(window.location.href).toBe(
+      '/automations?prompt=%20%20Review%20errors%20%26%20logs%20%20',
+    );
   });
 
   it('renders user text as plain text instead of markdown', () => {
@@ -642,6 +717,9 @@ describe('AcpTextMessage', () => {
         name: /copy:/,
       }),
     ).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Save as automation' }),
+    ).not.toBeInTheDocument();
   });
 
   it('renders every question for multi-question request_user_input responses', () => {

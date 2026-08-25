@@ -302,6 +302,7 @@ export function CustomAutomationsSection() {
   const [form, setForm] = useState<CustomAutomationFormState>(EMPTY_FORM);
   const [resolvedCron, setResolvedCron] = useState<string | null>(null);
   const [scheduleSummary, setScheduleSummary] = useState<string | null>(null);
+  const promptPrefillHandledRef = useRef(false);
 
   // New destinations default to the shared manager channel, matching where
   // the other automations report by default.
@@ -338,6 +339,34 @@ export function CustomAutomationsSection() {
   const selectedDestinationLabel =
     DESTINATION_OPTIONS.find((option) => option.value === form.targetProvider)
       ?.label ?? 'Provider';
+
+  const initialCreateForm = useMemo<CustomAutomationFormState>(() => {
+    const managerProvider =
+      managerSlackChannelId && capabilities?.slackConnected
+        ? 'slack'
+        : managerDiscordChannelId && capabilities?.discordConnected
+          ? 'discord'
+          : null;
+    const targetProvider =
+      managerProvider ?? connectedDestinationOptions[0]?.value ?? 'none';
+
+    return {
+      ...EMPTY_FORM,
+      targetProvider,
+      targetChannelId:
+        targetProvider === 'slack'
+          ? managerSlackChannelId
+          : targetProvider === 'discord'
+            ? managerDiscordChannelId
+            : '',
+    };
+  }, [
+    capabilities?.discordConnected,
+    capabilities?.slackConnected,
+    connectedDestinationOptions,
+    managerDiscordChannelId,
+    managerSlackChannelId,
+  ]);
 
   const environmentOptions = useMemo(
     () => [
@@ -490,6 +519,33 @@ export function CustomAutomationsSection() {
     updateMutation.isPending ||
     deleteMutation.isPending ||
     toggleMutation.isPending;
+
+  useEffect(() => {
+    if (promptPrefillHandledRef.current || !capabilitiesLoaded || atCap) {
+      return;
+    }
+
+    const searchParams = new URLSearchParams(window.location.search);
+    const prompt = searchParams.get('prompt');
+    if (!prompt?.trim()) {
+      return;
+    }
+
+    promptPrefillHandledRef.current = true;
+    setIsCreating(true);
+    setEditingId(null);
+    setForm({ ...initialCreateForm, prompt: prompt.slice(0, 8_000) });
+    setResolvedCron(null);
+    setScheduleSummary(null);
+
+    searchParams.delete('prompt');
+    const query = searchParams.toString();
+    window.history.replaceState(
+      null,
+      '',
+      `${window.location.pathname}${query ? `?${query}` : ''}${window.location.hash}`,
+    );
+  }, [atCap, capabilitiesLoaded, initialCreateForm]);
 
   const closeEditor = () => {
     setIsCreating(false);
@@ -1028,30 +1084,9 @@ export function CustomAutomationsSection() {
             size="sm"
             disabled={busy || atCap || !capabilitiesLoaded}
             onClick={() => {
-              const managerProvider =
-                managerSlackChannelId &&
-                settingsQuery.data?.capabilities.slackConnected
-                  ? 'slack'
-                  : managerDiscordChannelId &&
-                      settingsQuery.data?.capabilities.discordConnected
-                    ? 'discord'
-                    : null;
-              const targetProvider =
-                managerProvider ??
-                connectedDestinationOptions[0]?.value ??
-                'none';
               setIsCreating(true);
               setEditingId(null);
-              setForm({
-                ...EMPTY_FORM,
-                targetProvider,
-                targetChannelId:
-                  targetProvider === 'slack'
-                    ? managerSlackChannelId
-                    : targetProvider === 'discord'
-                      ? managerDiscordChannelId
-                      : '',
-              });
+              setForm(initialCreateForm);
               setResolvedCron(null);
               setScheduleSummary(null);
             }}
