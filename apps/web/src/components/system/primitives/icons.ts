@@ -160,7 +160,6 @@ export {
   RotateCcw,
   History as RotateCcwClock,
   RotateCcwKey,
-  RotateCw,
   ScrollText,
   Rows4,
   ScanFace,

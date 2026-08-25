@@ -52,7 +52,7 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
-  TriangleAlert,
+  VectorSquare,
 } from '@/components/system';
 import type { PromptInputMessage } from '@/components/ai-elements';
 import {
@@ -736,28 +736,33 @@ export function Home({
                 animateContainer={false}
                 submitDisabledReason={submitDisabledReason}
               />
-              {showNoEnvironmentsWarning && (
-                <Alert variant="warning" className="mt-2">
-                  <TriangleAlert />
-                  <p>
-                    You haven&apos;t created any environments yet. Roomote can
-                    work directly on your repos, but it can&apos;t verify its
-                    work.{' '}
-                    <Link
-                      href={SETTINGS_PATHS.newEnvironment}
-                      className="text-primary font-semibold underline hover:no-underline"
-                    >
-                      Create an environment now{' '}
-                      <ArrowRight className="inline size-4" />
-                    </Link>
-                  </p>
-                </Alert>
-              )}
             </div>
 
+            {showNoEnvironmentsWarning && (
+              <Alert
+                variant="light"
+                className="mt-2 animate-[enter-down_1s_1_300ms_backwards]"
+              >
+                <VectorSquare />
+                <p>
+                  <span>You haven&apos;t created any environments yet. </span>
+                  <span className="block md:inline">
+                    Roomote can work directly on your repos, but it can&apos;t
+                    verify its work.{' '}
+                  </span>
+                  <Link
+                    href={SETTINGS_PATHS.newEnvironment}
+                    className="text-primary font-semibold underline hover:no-underline block md:inline"
+                  >
+                    Create your first <ArrowRight className="inline size-4" />
+                  </Link>
+                </p>
+              </Alert>
+            )}
+
             <div className="flex flex-col md:flex-row flex-wrap md:items-center gap-2 animate-[fade-in_1s_1_750ms_backwards]">
-              <OnboardingCard />
-              {isFeedbackPromptVisible ? (
+              {!showNoEnvironmentsWarning && <OnboardingCard />}
+              {!showNoEnvironmentsWarning && isFeedbackPromptVisible ? (
                 <button
                   type="button"
                   onClick={() => setIsFeedbackDialogOpen(true)}
