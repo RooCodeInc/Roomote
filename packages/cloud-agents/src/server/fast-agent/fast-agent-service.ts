@@ -32,6 +32,7 @@ import {
   appendFastAgentVisibleMessages,
   getActiveFastAgentTasks,
   getOrCreateFastAgentSession,
+  setFastAgentOpenCodeSession,
   type FastAgentActiveTask,
 } from './fast-agent-session';
 import {
@@ -40,6 +41,7 @@ import {
   generateTrackedNonTaskTextInOpenCodeSession,
   isNonTaskOpenCodePromptTimeoutError,
   isNonTaskOpenCodeSessionNotFoundError,
+  isNonTaskOpenCodeSessionValidationError,
   NonTaskOpenCodePromptTimeoutError,
   NON_TASK_INFERENCE_SURFACES,
   type NonTaskPromptFile,
@@ -596,6 +598,7 @@ export async function answerFastAgentQuestion({
   const turnVisibleMessages: ModelMessage[] = [];
   let mirroredMessageCount = 0;
   let canonicalConversationId: string | null = null;
+  let durableOpenCodeSessionId: string | null = null;
   let lastVisibleMessage = '';
   let inferenceRetryReply: FastAgentReplyHandle | undefined;
   let inferenceRetryMessageIndex: number | undefined;
@@ -666,6 +669,7 @@ export async function answerFastAgentQuestion({
       }),
     ]);
     canonicalConversationId = session.id;
+    durableOpenCodeSessionId = session.openCodeSessionId;
     diagnostics.setCanonicalConversationId(session.id);
     const sessionActiveTasks = await getActiveFastAgentTasks(session.id);
     const resolvedActiveTasks = [
@@ -1190,12 +1194,25 @@ export async function answerFastAgentQuestion({
     const serializedTurnPrompt = serializeFastAgentMessages([turnMessage]);
     const serializedBootstrapPrompt =
       serializeFastAgentMessages(bootstrapMessages);
+    const persistOpenCodeSession = async (openCodeSessionId: string) => {
+      if (durableOpenCodeSessionId === openCodeSessionId) return;
+      await setFastAgentOpenCodeSession({
+        sessionId: session.id,
+        openCodeSessionId,
+      });
+      durableOpenCodeSessionId = openCodeSessionId;
+      session.openCodeSessionId = openCodeSessionId;
+    };
     diagnostics.markInferenceQueued();
     const promptTextPromise = fastAgentOpenCodeSessionManager.run({
       conversationId: session.id,
+      persistedSessionId: session.openCodeSessionId,
       prompt: serializedTurnPrompt,
       bootstrapPrompt: serializedBootstrapPrompt,
-      execute: async (openCodeSession, selectedPrompt) => {
+      onPathSelected: (path) => {
+        console.info(`[Fast Agent] OpenCode session path=${path}.`);
+      },
+      execute: async (openCodeSession, selectedPrompt, { validateSession }) => {
         diagnostics.markInferenceSetupStarted();
         const spillBudget = createFastAgentSpillTurnBudget();
         const nativeRuntime = await getFastAgentNativeToolRuntime(
@@ -1216,7 +1233,7 @@ export async function answerFastAgentQuestion({
           executeMcpTool,
         );
         try {
-          return await runFastAgentInferenceWithRetries(
+          const result = await runFastAgentInferenceWithRetries(
             async () => {
               const providerRetryAbortController = new AbortController();
               const promptSignal = signal
@@ -1270,6 +1287,7 @@ export async function answerFastAgentQuestion({
                     signal: promptSignal,
                     promptOnlySubagents: true,
                     trackSessionTreeUsage: true,
+                    validateSession,
                     tools: buildFastAgentToolFilter(
                       availableIntegrations.map(
                         (integration) => integration.id,
@@ -1281,7 +1299,7 @@ export async function answerFastAgentQuestion({
                     onPromptStarted: () => {
                       diagnostics.markInferenceStarted();
                     },
-                    onSessionReady: (openCodeSessionID) => {
+                    onSessionReady: async (openCodeSessionID) => {
                       unbindAllExecutors();
                       unbindExecutors.add(
                         bindFastAgentNativeToolExecutor(
@@ -1329,7 +1347,8 @@ export async function answerFastAgentQuestion({
               canRetry: (error) =>
                 !signal?.aborted &&
                 !nativeToolInvoked &&
-                !isNonTaskOpenCodePromptTimeoutError(error),
+                !isNonTaskOpenCodePromptTimeoutError(error) &&
+                !isNonTaskOpenCodeSessionValidationError(error),
               prepareRetry: () => {
                 // OpenCode persists the user message before inference starts,
                 // and abort does not roll it back. Discard the failed session
@@ -1345,6 +1364,16 @@ export async function answerFastAgentQuestion({
               signal,
             },
           );
+          if (openCodeSession.id) {
+            try {
+              await persistOpenCodeSession(openCodeSession.id);
+            } catch (error) {
+              console.error(
+                `[Fast Agent] Failed to persist OpenCode session identity: ${formatErrorForLog(error)}`,
+              );
+            }
+          }
+          return result;
         } finally {
           unbindAllExecutors();
           unbindMcpExecutor();

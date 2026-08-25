@@ -212,12 +212,25 @@ export type NonTaskOpenCodeNativeSessionOptions = {
   signal?: AbortSignal;
   trackSessionTreeUsage?: boolean;
   tools: Record<string, boolean>;
+  validateSession?: boolean;
 };
 
 export class NonTaskOpenCodeSessionNotFoundError extends Error {
   constructor() {
     super('The OpenCode session is no longer available.');
     this.name = 'NonTaskOpenCodeSessionNotFoundError';
+  }
+}
+
+export class NonTaskOpenCodeSessionValidationError extends Error {
+  constructor(error: unknown) {
+    super(
+      `OpenCode session validation failed: ${formatOpenCodeSdkError(error)}`,
+      {
+        cause: error,
+      },
+    );
+    this.name = 'NonTaskOpenCodeSessionValidationError';
   }
 }
 
@@ -250,6 +263,12 @@ export function isNonTaskOpenCodeSessionNotFoundError(
   error: unknown,
 ): error is NonTaskOpenCodeSessionNotFoundError {
   return error instanceof NonTaskOpenCodeSessionNotFoundError;
+}
+
+export function isNonTaskOpenCodeSessionValidationError(
+  error: unknown,
+): error is NonTaskOpenCodeSessionValidationError {
+  return error instanceof NonTaskOpenCodeSessionValidationError;
 }
 
 function asString(value: unknown): string | undefined {
@@ -507,6 +526,27 @@ function isOpenCodeSessionMissing(error: unknown): boolean {
   return statusCode === 404 || record.name === 'NotFoundError';
 }
 
+function isOpenCodeSessionInvalid(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+  const record = error as Record<string, unknown>;
+  const data =
+    record.data && typeof record.data === 'object'
+      ? (record.data as Record<string, unknown>)
+      : undefined;
+  const statusCode =
+    typeof data?.statusCode === 'number'
+      ? data.statusCode
+      : typeof record.status === 'number'
+        ? record.status
+        : undefined;
+  if (statusCode !== 400 && statusCode !== 422) return false;
+  const detail = formatOpenCodeSdkError(error).toLowerCase();
+  return (
+    detail.includes('session') &&
+    ['invalid', 'malformed', 'corrupt'].some((term) => detail.includes(term))
+  );
+}
+
 async function resolveNonTaskModelRuntime(
   model?: string,
   modelRole: 'primary' | 'small' | 'orchestration' = 'small',
@@ -725,6 +765,7 @@ async function runNonTaskSdkPrompt(
     signal?: AbortSignal;
     trackSessionTreeUsage?: boolean;
     useConfiguredServer?: boolean;
+    validateSession?: boolean;
   } = {},
 ): Promise<{
   info: NonTaskOpenCodeMessageInfo;
@@ -778,6 +819,28 @@ async function runNonTaskSdkPrompt(
       fetch: openCodeSdkFetch,
     });
     let sessionId = options.session?.id;
+    if (sessionId && options.validateSession) {
+      const validationResult = await client.session.messages(
+        {
+          sessionID: sessionId,
+          directory: sessionDirectory,
+          limit: 1,
+        },
+        { signal: abortController.signal },
+      );
+      if (validationResult.error) {
+        if (
+          isOpenCodeSessionMissing(validationResult.error) ||
+          isOpenCodeSessionInvalid(validationResult.error)
+        ) {
+          throw new NonTaskOpenCodeSessionNotFoundError();
+        }
+        throw new NonTaskOpenCodeSessionValidationError(validationResult.error);
+      }
+      if (!validationResult.data || validationResult.data.length === 0) {
+        throw new NonTaskOpenCodeSessionNotFoundError();
+      }
+    }
     if (!sessionId) {
       const sessionResult = await client.session.create(
         {
@@ -1283,6 +1346,7 @@ export async function generateTrackedNonTaskTextInOpenCodeSession(
       signal: options.signal,
       trackSessionTreeUsage: options.trackSessionTreeUsage,
       useConfiguredServer: false,
+      validateSession: options.validateSession,
     },
   );
 
