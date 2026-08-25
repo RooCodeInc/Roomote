@@ -571,6 +571,74 @@ describe('updateBackgroundAgentSettingsCommand Discord destinations', () => {
     ]);
   }, 15_000);
 
+  it('does not validate an enabled automation while saving an unrelated automation', async () => {
+    await upsertAutomation(db, {
+      key: 'dependabot_triage',
+      enabled: true,
+      schedule: { mode: 'daily' },
+    });
+
+    const result = await updateBackgroundAgentSettingsCommand(
+      adminAuth,
+      buildInput({
+        savingAutomation: 'managerStats',
+        dependabotTriageFrequency: 'daily',
+      }),
+    );
+
+    expect(result.success).toBe(true);
+  });
+
+  it('does not require Slack for an unrelated persisted destination', async () => {
+    await upsertAutomation(db, {
+      key: 'dependabot_triage',
+      enabled: true,
+      schedule: { mode: 'daily' },
+      targets: [
+        {
+          provider: 'slack',
+          targetKind: 'slack_channel',
+          externalRef: 'C123ALERTS',
+        },
+      ],
+    });
+
+    const result = await updateBackgroundAgentSettingsCommand(
+      adminAuth,
+      buildInput({
+        savingAutomation: 'managerStats',
+        dependabotTriageFrequency: 'daily',
+        dependabotTriageSlackChannel: '#alerts',
+      }),
+    );
+
+    expect(result.success).toBe(true);
+    expect(await getAutomationTargets('dependabot_triage')).toEqual([
+      {
+        provider: 'slack',
+        targetKind: 'slack_channel',
+        externalRef: 'C123ALERTS',
+      },
+    ]);
+  });
+
+  it('still validates an enabled automation when saving that automation', async () => {
+    const result = await updateBackgroundAgentSettingsCommand(
+      adminAuth,
+      buildInput({
+        savingAutomation: 'dependabotTriage',
+        dependabotTriageFrequency: 'daily',
+      }),
+    );
+
+    expect(result).toMatchObject({
+      success: false,
+      fieldErrors: {
+        general: 'Connect GitHub before enabling Triage Dependabot Alerts.',
+      },
+    });
+  });
+
   it('writes a suggester discord_channel target and clears its Slack one', async () => {
     await insertAvailableDiscordChannel({
       guildId: 'guild-1',

@@ -2011,8 +2011,17 @@ export async function handleMessageOrAppMentionEvent(params: {
 }): Promise<void> {
   const { event, context } = params;
   enrichSlackMessageEvent(event);
+  const automatedAppMentionEvent = isRoutableAutomatedSlackAppMention(
+    event,
+    context.slackInstallation,
+  )
+    ? event
+    : null;
   const redis = getRedis();
-  if (await maybeHandleChannelAutoStart({ event, context, redis })) {
+  if (
+    !automatedAppMentionEvent &&
+    (await maybeHandleChannelAutoStart({ event, context, redis }))
+  ) {
     return;
   }
 
@@ -2022,12 +2031,6 @@ export async function handleMessageOrAppMentionEvent(params: {
     botUserId: context.slackInstallation.botUserId,
   });
 
-  const automatedAppMentionEvent = isRoutableAutomatedSlackAppMention(
-    event,
-    context.slackInstallation,
-  )
-    ? event
-    : null;
   const mentionedThreadAliasTaskId =
     await resolveMentionedSlackThreadAliasTaskId({
       event,
@@ -2051,7 +2054,8 @@ export async function handleMessageOrAppMentionEvent(params: {
   if (
     event.type === 'message' &&
     event.channel_type !== 'im' &&
-    !unmentionedThreadReplyRouting.shouldRoute
+    !unmentionedThreadReplyRouting.shouldRoute &&
+    !automatedAppMentionEvent
   ) {
     await maybeRecordTrackedAutomationThreadReply({
       event,

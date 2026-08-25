@@ -796,6 +796,39 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     );
   });
 
+  it('stays silent after an acknowledgement when an integration has no result to report', async () => {
+    mocks.listIntegrations.mockResolvedValue([
+      {
+        id: 'github',
+        name: 'GitHub',
+        description: 'Read GitHub',
+        tools: [{ name: 'search_code', inputSchema: { type: 'object' } }],
+      },
+    ]);
+    mocks.callIntegration.mockResolvedValue({ matches: [] });
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'ack',
+          message: 'I’ll check.',
+        });
+        await invokeMcpTool('github', 'search_code', { query: 'missing' });
+        return '';
+      },
+    );
+    const adapter = callbacks();
+
+    await expect(
+      answerFastAgentQuestion({ ...baseParams, adapter }),
+    ).resolves.toBe('I’ll check.');
+    expect(adapter.postReply).toHaveBeenCalledOnce();
+    expect(adapter.postReply).toHaveBeenCalledWith({
+      purpose: 'ack',
+      message: 'I’ll check.',
+    });
+  });
+
   it('routes task inspection and chat context through the Roomote MCP', async () => {
     mocks.listIntegrations.mockResolvedValue([
       {

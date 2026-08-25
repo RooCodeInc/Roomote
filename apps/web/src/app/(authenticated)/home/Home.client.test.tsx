@@ -214,11 +214,13 @@ vi.mock('@/components/tasks', async () => {
     TaskPromptInput: ({
       onSubmit,
       onPromptTextChange,
+      promptText,
       placeholder,
       submitDisabledReason,
     }: {
       onSubmit: (message: PromptInputMessage) => Promise<void> | void;
       onPromptTextChange?: (value: string) => void;
+      promptText?: string;
       placeholder?: string;
       submitDisabledReason?: string;
     }) => (
@@ -237,6 +239,11 @@ vi.mock('@/components/tasks', async () => {
         }}
       >
         <div data-testid="prompt-placeholder">{placeholder}</div>
+        <textarea
+          aria-label="Task prompt"
+          value={promptText ?? ''}
+          onChange={(event) => onPromptTextChange?.(event.target.value)}
+        />
         <button type="submit" disabled={Boolean(submitDisabledReason)}>
           Submit prompt
         </button>
@@ -1111,6 +1118,45 @@ describe('Home', () => {
     );
     expect(persisted).not.toHaveProperty('harness');
     expect(persisted).not.toHaveProperty('harnessPreference');
+  });
+
+  it('prefills editable task details from the URL', async () => {
+    currentSearchParams = new URLSearchParams({
+      prompt: 'Fix the build',
+      model: 'openrouter/openai/gpt-5.4',
+      environmentId: 'env-created',
+    }).toString();
+
+    render(<Home initialPlaceholderIndex={0} />);
+
+    expect(screen.getByRole('textbox', { name: 'Task prompt' })).toHaveValue(
+      'Fix the build',
+    );
+    expect(screen.getByTestId('selected-model-id')).toHaveTextContent(
+      'openrouter/openai/gpt-5.4',
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('environment')).toHaveTextContent(
+        'env-created',
+      );
+    });
+
+    fireEvent.change(screen.getByRole('textbox', { name: 'Task prompt' }), {
+      target: { value: 'Fix the tests instead' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Model' }));
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Use single-repo environment' }),
+    );
+
+    expect(screen.getByRole('textbox', { name: 'Task prompt' })).toHaveValue(
+      'Fix the tests instead',
+    );
+    expect(screen.getByTestId('selected-model-id')).toHaveTextContent(
+      'openrouter/z-ai/glm-5.2',
+    );
+    expect(screen.getByTestId('environment')).toHaveTextContent('env-single');
   });
 
   it('defaults to the sole environment on load when workspace storage is Auto', async () => {
