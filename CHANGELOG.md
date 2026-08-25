@@ -4,14 +4,14 @@ This file tracks product releases for Roomote (single monorepo version). Automat
 
 ## 0.42.0 (2026-08-25)
 
-This release expands Fast and automation workflows, adds proactive usage and pull-request conflict alerts, and improves task recovery and chat reliability.
+This release expands Fast and automation workflows, shortens initial setup, adds proactive usage and pull-request conflict alerts, and improves task recovery and chat reliability.
 
 ### Highlights
 
 - Use current chat context and deployment-configured MCP tools directly from Fast, including automation management and all-repository delegation.
 - Run custom automations in Fast and trigger Roomote from Slack workflows and third-party apps.
 - Configure inference-provider usage alerts and notify originating conversations when Roomote-created GitHub pull requests conflict.
-- Recover failed task starts with a prefilled launcher while keeping chat-backed and delegated work more reliable.
+- Finish initial setup sooner, recover failed task starts with a prefilled launcher, and keep chat-backed work more reliable.
 
 ### Minor changes
 
@@ -21,6 +21,7 @@ This release expands Fast and automation workflows, adds proactive usage and pul
 - Notify the originating task conversation when a Roomote-created GitHub pull request becomes conflicted so the team can resolve it promptly.
 - Retry failed task starts through an editable new-task launcher prefilled with the original prompt, model, and environment.
 - Let Slack workflows and third-party apps trigger Roomote through explicit mentions.
+- Finish initial setup sooner by making environment creation optional, then guide teams to create an environment from Home when they want verified repository setup.
 
 ### Patch changes
 
@@ -34,6 +35,7 @@ This release expands Fast and automation workflows, adds proactive usage and pul
 - Stop pull-request review prompts from reappearing after a user selects automatic Fix all handling.
 - Move completed tasks to Done after their pull request merges and resume settled delegated work under the original task.
 - Restore each user's preferred Tasks layout and give Slack-launched tasks meaningful generated titles.
+- Keep oversized Fast integration results readable through conversation-scoped spill handles without exposing the service filesystem.
 
 ## 0.41.0 (2026-08-24)
 
