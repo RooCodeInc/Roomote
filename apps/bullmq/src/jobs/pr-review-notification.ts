@@ -2,7 +2,6 @@ import { randomUUID } from 'node:crypto';
 
 import { Job } from 'bullmq';
 
-import type { CommunicationPostMessageInput } from '@roomote/communication';
 import {
   and,
   db,
@@ -17,6 +16,7 @@ import {
   PR_REVIEW_NOTIFICATION_MAX_DEFERRALS,
   PrReviewNotificationRateLimitError,
   attachPendingPrReviewActionMessage,
+  buildPrReviewNotificationPostInput,
   createPrReviewNotificationTelemetry,
   getCommunicationProviderAdapter,
   type PrReviewNotificationRequest,
@@ -113,43 +113,6 @@ function logPrReviewNotificationTriage(input: {
       durationMs: input.durationMs,
     }),
   );
-}
-
-function buildPrReviewNotificationPostInput(
-  route: PrReviewNotificationRoute,
-  text: string,
-): CommunicationPostMessageInput {
-  switch (route.provider) {
-    case 'slack':
-      return {
-        channelId: route.channelId,
-        threadId: route.threadId,
-        text,
-      };
-    case 'teams':
-      return {
-        channelId: route.channelId,
-        serviceUrl: route.serviceUrl,
-        ...(route.threadId
-          ? { threadId: route.threadId, replyToMessageId: route.threadId }
-          : {}),
-        text,
-        textFormat: 'markdown',
-      };
-    case 'telegram':
-      return {
-        channelId: route.channelId,
-        ...(route.threadId ? { threadId: route.threadId } : {}),
-        text,
-      };
-    case 'discord':
-      return {
-        channelId: route.channelId,
-        ...(route.threadId ? { threadId: route.threadId } : {}),
-        text,
-        textFormat: 'markdown',
-      };
-  }
 }
 
 type PrReviewNotificationAction = {
