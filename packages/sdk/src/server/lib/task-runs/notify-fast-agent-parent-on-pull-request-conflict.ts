@@ -16,6 +16,7 @@ import {
   type FastAgentPullRequestContext,
 } from '../fast-agent-parent-event';
 import { deliverFastAgentParentPrEvent } from './deliver-fast-agent-parent-pr-event';
+import { buildPullRequestConflictMessage } from './pull-request-mergeability-check';
 
 const PR_CONFLICT_DELIVERY_LOCK_WAIT_MS = 30_000;
 
@@ -80,7 +81,10 @@ export async function notifyFastAgentParentOnPullRequestConflict(params: {
           }),
           pullRequest,
           conflictDetectedAt: params.conflictDetectedAt.toISOString(),
-          message: `[${pullRequest.title}](${pullRequest.url}) now has merge conflicts. Update the branch or ask Roomote to resolve them.`,
+          message: buildPullRequestConflictMessage({
+            title: params.pullRequest.title,
+            url: params.pullRequest.url,
+          }),
         },
         lockWaitMs: PR_CONFLICT_DELIVERY_LOCK_WAIT_MS,
       }),

@@ -1,6 +1,7 @@
 import { Queue } from 'bullmq';
 import { z } from 'zod';
 
+import type { CommunicationPostMessageInput } from '@roomote/communication';
 import type { TaskRun } from '@roomote/db/server';
 import {
   buildPrReviewEventKey,
@@ -209,6 +210,48 @@ export type PrReviewNotificationRoute =
     }
   | { provider: 'telegram'; channelId: string; threadId: string | null }
   | { provider: 'discord'; channelId: string; threadId: string | null };
+
+/**
+ * Maps a notification route to the provider adapter's post input. Slack routes
+ * are posted through the sticky-footer helper instead of the adapter, so
+ * callers handle 'slack' separately.
+ */
+export function buildPrReviewNotificationPostInput(
+  route: PrReviewNotificationRoute,
+  text: string,
+): CommunicationPostMessageInput {
+  switch (route.provider) {
+    case 'slack':
+      return {
+        channelId: route.channelId,
+        threadId: route.threadId,
+        text,
+      };
+    case 'teams':
+      return {
+        channelId: route.channelId,
+        serviceUrl: route.serviceUrl,
+        ...(route.threadId
+          ? { threadId: route.threadId, replyToMessageId: route.threadId }
+          : {}),
+        text,
+        textFormat: 'markdown',
+      };
+    case 'telegram':
+      return {
+        channelId: route.channelId,
+        ...(route.threadId ? { threadId: route.threadId } : {}),
+        text,
+      };
+    case 'discord':
+      return {
+        channelId: route.channelId,
+        ...(route.threadId ? { threadId: route.threadId } : {}),
+        text,
+        textFormat: 'markdown',
+      };
+  }
+}
 
 let prReviewNotificationQueue: Queue<PrReviewNotificationRequest> | null = null;
 

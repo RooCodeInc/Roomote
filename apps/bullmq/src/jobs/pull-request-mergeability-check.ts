@@ -1,6 +1,7 @@
 import type { Job } from 'bullmq';
 
 import {
+  and,
   db,
   desc,
   eq,
@@ -16,6 +17,8 @@ import {
 } from '@roomote/db/server';
 import { getInstallationOctokit } from '@roomote/github';
 import {
+  buildPrReviewNotificationPostInput,
+  buildPullRequestConflictMessage,
   enqueuePullRequestMergeabilityCheck,
   getCommunicationProviderAdapter,
   notifyFastAgentParentOnPullRequestConflict,
@@ -38,6 +41,9 @@ type GraphQlPullRequest = {
   state: 'OPEN' | 'CLOSED' | 'MERGED';
   baseRefName: string;
 };
+type GraphQlMergeabilityResponse = {
+  repository: Record<string, GraphQlPullRequest | null> | null;
+};
 
 export function buildPullRequestMergeabilityQuery(prNumbers: number[]): {
   query: string;
@@ -56,11 +62,32 @@ export function buildPullRequestMergeabilityQuery(prNumbers: number[]): {
   };
 }
 
-function buildConflictNotificationText(
+/**
+ * Octokit rejects the whole call when any alias errors (e.g. one stale PR
+ * number resolves to NOT_FOUND), attaching the partial data to the error.
+ */
+function extractPartialGraphQlData(
+  error: unknown,
+): GraphQlMergeabilityResponse | null {
+  if (
+    error instanceof Error &&
+    error.name === 'GraphqlResponseError' &&
+    'data' in error &&
+    typeof error.data === 'object' &&
+    error.data !== null
+  ) {
+    return error.data as GraphQlMergeabilityResponse;
+  }
+  return null;
+}
+
+function buildCandidateConflictText(
   candidate: TrackedPullRequestMergeabilityCandidate,
 ): string {
-  const title = candidate.prTitle ?? `Pull request #${candidate.prNumber}`;
-  return `[${title}](${candidate.prUrl}) now has merge conflicts. Update the branch or ask Roomote to resolve them.`;
+  return buildPullRequestConflictMessage({
+    title: candidate.prTitle ?? `Pull request #${candidate.prNumber}`,
+    url: candidate.prUrl,
+  });
 }
 
 async function postConflictNotification(params: {
@@ -91,18 +118,14 @@ async function postConflictNotification(params: {
   if (deliveredToFastParent) return true;
 
   const route = await resolvePrReviewNotificationRoute(latestRun);
-  const text = buildConflictNotificationText(params.candidate);
-  let messageTs: string | null = null;
-
-  if (route?.provider === 'slack') {
-    messageTs = await postSlackConflictNotification(
-      route,
-      params.candidate.taskId,
-      text,
-    );
-  } else if (route?.provider === 'discord') {
-    await postDiscordConflictNotification(route, text);
-  }
+  const text = buildCandidateConflictText(params.candidate);
+  const messageTs = route
+    ? await postConflictNotificationToRoute(
+        route,
+        params.candidate.taskId,
+        text,
+      )
+    : null;
 
   await recordPrReviewNotificationDeliveryBestEffort({
     runId: latestRun.id,
@@ -115,49 +138,48 @@ async function postConflictNotification(params: {
   return true;
 }
 
-async function postSlackConflictNotification(
-  route: Extract<PrReviewNotificationRoute, { provider: 'slack' }>,
+async function postConflictNotificationToRoute(
+  route: PrReviewNotificationRoute,
   taskId: string,
   text: string,
-): Promise<string> {
-  const installation = await db.query.slackInstallations.findFirst({
-    where: eq(slackInstallations.teamId, route.slackTeamId),
-    columns: { botAccessToken: true },
-  });
-  if (!installation?.botAccessToken) {
-    throw new Error('Slack is not connected for PR conflict notification.');
+): Promise<string | null> {
+  if (route.provider === 'slack') {
+    const installation = await db.query.slackInstallations.findFirst({
+      where: and(
+        eq(slackInstallations.teamId, route.slackTeamId),
+        eq(slackInstallations.isActive, true),
+      ),
+      columns: { botAccessToken: true },
+    });
+    if (!installation?.botAccessToken) {
+      console.warn(
+        '[PullRequestMergeabilityCheck] Slack is not connected, skipping conflict notification',
+      );
+      return null;
+    }
+
+    const messageTs = await postSlackThreadMessageWithStickyFooter({
+      slack: new SlackNotifier(installation.botAccessToken),
+      channel: route.channelId,
+      threadTs: route.threadId,
+      taskId,
+      text,
+      blocks: [{ type: 'markdown', text }],
+      utmCampaign: 'slack.pr_conflict',
+    });
+    return messageTs ?? null;
   }
 
-  const messageTs = await postSlackThreadMessageWithStickyFooter({
-    slack: new SlackNotifier(installation.botAccessToken),
-    channel: route.channelId,
-    threadTs: route.threadId,
-    taskId,
-    text,
-    blocks: [{ type: 'markdown', text }],
-    utmCampaign: 'slack.pr_conflict',
-  });
-  if (!messageTs) {
-    throw new Error('Slack did not return a PR conflict message timestamp.');
-  }
-  return messageTs;
-}
-
-async function postDiscordConflictNotification(
-  route: Extract<PrReviewNotificationRoute, { provider: 'discord' }>,
-  text: string,
-): Promise<void> {
-  const adapter = await getCommunicationProviderAdapter('discord');
+  const adapter = await getCommunicationProviderAdapter(route.provider);
   if (!adapter) {
-    throw new Error('Discord is not connected for PR conflict notification.');
+    console.warn(
+      `[PullRequestMergeabilityCheck] ${route.provider} is not connected, skipping conflict notification`,
+    );
+    return null;
   }
 
-  await adapter.postMessage({
-    channelId: route.channelId,
-    ...(route.threadId ? { threadId: route.threadId } : {}),
-    text,
-    textFormat: 'markdown',
-  });
+  await adapter.postMessage(buildPrReviewNotificationPostInput(route, text));
+  return null;
 }
 
 async function notifyConflictTransition(
@@ -192,7 +214,11 @@ export async function pullRequestMergeabilityCheckJob(
   const data = pullRequestMergeabilityCheckRequestSchema.parse(job.data);
   const candidates = await listTrackedPullRequestsForMergeability({
     repository: data.repository,
-    ids: data.taskPullRequestIds,
+    ...(data.baseRef !== undefined ? { baseRef: data.baseRef } : {}),
+    ...(data.prNumber !== undefined ? { prNumber: data.prNumber } : {}),
+    ...(data.taskPullRequestIds !== undefined
+      ? { ids: data.taskPullRequestIds }
+      : {}),
     skipNotifiedConflicts: !data.allowNotifiedConflictCheck,
   });
   if (candidates.length === 0) return;
@@ -217,9 +243,19 @@ export async function pullRequestMergeabilityCheckJob(
   const octokit = await getInstallationOctokit({
     installationId: data.installationId,
   });
-  const response = await octokit.graphql<{
-    repository: Record<string, GraphQlPullRequest | null> | null;
-  }>(query, { owner, repo, ...variables });
+
+  let response: GraphQlMergeabilityResponse;
+  try {
+    response = await octokit.graphql<GraphQlMergeabilityResponse>(query, {
+      owner,
+      repo,
+      ...variables,
+    });
+  } catch (error) {
+    const partial = extractPartialGraphQlData(error);
+    if (!partial) throw error;
+    response = partial;
+  }
   const unknownIds: string[] = [];
 
   await Promise.all(
@@ -228,11 +264,13 @@ export async function pullRequestMergeabilityCheckJob(
       const links = candidatesByNumber.get(prNumber) ?? [];
       if (!pullRequest || pullRequest.state !== 'OPEN') return;
 
-      await updateTrackedPullRequestBaseRef({
-        repository: data.repository,
-        prNumber,
-        baseRef: pullRequest.baseRefName,
-      });
+      if (links.some((link) => link.prBaseRef !== pullRequest.baseRefName)) {
+        await updateTrackedPullRequestBaseRef({
+          repository: data.repository,
+          prNumber,
+          baseRef: pullRequest.baseRefName,
+        });
+      }
 
       if (pullRequest.mergeable === 'UNKNOWN') {
         for (const link of links) {
@@ -265,10 +303,12 @@ export async function pullRequestMergeabilityCheckJob(
 
   if (unknownIds.length > 0 && data.retryAttempt === 0) {
     await enqueuePullRequestMergeabilityCheck({
-      ...data,
+      installationId: data.installationId,
+      repository: data.repository,
       taskPullRequestIds: unknownIds,
-      deduplicationKey: `${data.deduplicationKey}:unknown`,
+      deduplicationKey: data.deduplicationKey,
       retryAttempt: 1,
+      allowNotifiedConflictCheck: data.allowNotifiedConflictCheck,
     });
   }
 }

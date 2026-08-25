@@ -8,18 +8,42 @@ export const PULL_REQUEST_MERGEABILITY_CHECK_QUEUE_NAME =
 export const PULL_REQUEST_MERGEABILITY_INITIAL_DELAY_MS = 45_000;
 export const PULL_REQUEST_MERGEABILITY_RETRY_DELAY_MS = 60_000;
 
-export const pullRequestMergeabilityCheckRequestSchema = z.object({
-  installationId: z.number().int().positive(),
-  repository: z.string().min(3),
-  taskPullRequestIds: z.array(z.string().uuid()).min(1),
-  deduplicationKey: z.string().min(1),
-  retryAttempt: z.union([z.literal(0), z.literal(1)]),
-  allowNotifiedConflictCheck: z.boolean().default(false),
-});
+export const pullRequestMergeabilityCheckRequestSchema = z
+  .object({
+    installationId: z.number().int().positive(),
+    repository: z.string().min(3),
+    // Scope is resolved by the job at run time so tracked rows inserted after
+    // the webhook (opened events race the task's own PR persistence) are
+    // still picked up.
+    baseRef: z.string().min(1).optional(),
+    prNumber: z.number().int().positive().optional(),
+    taskPullRequestIds: z.array(z.string().uuid()).min(1).optional(),
+    deduplicationKey: z.string().min(1),
+    retryAttempt: z.union([z.literal(0), z.literal(1)]),
+    allowNotifiedConflictCheck: z.boolean().default(false),
+  })
+  .refine(
+    (data) =>
+      data.baseRef !== undefined ||
+      data.prNumber !== undefined ||
+      data.taskPullRequestIds !== undefined,
+    {
+      message:
+        'A mergeability check requires a baseRef, prNumber, or taskPullRequestIds scope.',
+    },
+  );
 
 export type PullRequestMergeabilityCheckRequest = z.infer<
   typeof pullRequestMergeabilityCheckRequestSchema
 >;
+
+/** The one user-facing conflict sentence shared by chat and Fast-parent notifications. */
+export function buildPullRequestConflictMessage(params: {
+  title: string;
+  url: string;
+}): string {
+  return `[${params.title}](${params.url}) now has merge conflicts. Update the branch or ask Roomote to resolve them.`;
+}
 
 let pullRequestMergeabilityQueue: Queue<PullRequestMergeabilityCheckRequest> | null =
   null;
@@ -51,13 +75,15 @@ export async function enqueuePullRequestMergeabilityCheck(
       ? PULL_REQUEST_MERGEABILITY_INITIAL_DELAY_MS
       : PULL_REQUEST_MERGEABILITY_RETRY_DELAY_MS;
   const deduplicationId = `pr-mergeability:${data.deduplicationKey}:attempt-${data.retryAttempt}`;
-  const deduplicationTtl = delay + 60_000;
 
   await getPullRequestMergeabilityQueue().add('check-pr-mergeability', data, {
     delay,
     deduplication: {
       id: deduplicationId,
-      ttl: deduplicationTtl,
+      // The key must not outlive the job's promotion: BullMQ only replaces
+      // DELAYED jobs, so a longer TTL would silently drop pushes that arrive
+      // while the job runs or shortly after it completes.
+      ttl: delay,
       extend: true,
       replace: true,
     },

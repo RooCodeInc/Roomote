@@ -28,6 +28,7 @@ vi.mock('@roomote/db/server', () => ({
       },
     },
   },
+  and: vi.fn(),
   desc: vi.fn(),
   eq: vi.fn(),
   claimPullRequestConflictNotification: (...args: unknown[]) =>
@@ -50,6 +51,17 @@ vi.mock('@roomote/github', () => ({
 }));
 
 vi.mock('@roomote/sdk/server', () => ({
+  buildPrReviewNotificationPostInput: (
+    route: { channelId: string; threadId?: string | null },
+    text: string,
+  ) => ({
+    channelId: route.channelId,
+    ...(route.threadId ? { threadId: route.threadId } : {}),
+    text,
+    textFormat: 'markdown',
+  }),
+  buildPullRequestConflictMessage: (params: { title: string; url: string }) =>
+    `[${params.title}](${params.url}) now has merge conflicts. Update the branch or ask Roomote to resolve them.`,
   enqueuePullRequestMergeabilityCheck: (...args: unknown[]) =>
     mocks.enqueue(...args),
   getCommunicationProviderAdapter: (...args: unknown[]) =>
@@ -59,7 +71,9 @@ vi.mock('@roomote/sdk/server', () => ({
   pullRequestMergeabilityCheckRequestSchema: z.object({
     installationId: z.number(),
     repository: z.string(),
-    taskPullRequestIds: z.array(z.string()),
+    baseRef: z.string().optional(),
+    prNumber: z.number().optional(),
+    taskPullRequestIds: z.array(z.string()).optional(),
     deduplicationKey: z.string(),
     retryAttempt: z.union([z.literal(0), z.literal(1)]),
     allowNotifiedConflictCheck: z.boolean(),
@@ -110,12 +124,23 @@ const candidates = [
   },
 ];
 
-const data = {
+type TestRequest = {
+  installationId: number;
+  repository: string;
+  baseRef?: string;
+  prNumber?: number;
+  taskPullRequestIds?: string[];
+  deduplicationKey: string;
+  retryAttempt: 0 | 1;
+  allowNotifiedConflictCheck: boolean;
+};
+
+const data: TestRequest = {
   installationId: 123,
   repository: 'owner/repo',
-  taskPullRequestIds: candidates.map((candidate) => candidate.id),
+  baseRef: 'main',
   deduplicationKey: 'base:owner/repo:main',
-  retryAttempt: 0 as const,
+  retryAttempt: 0,
   allowNotifiedConflictCheck: false,
 };
 const conflictNotificationClaimedAt = new Date('2026-08-24T23:00:01.000Z');
@@ -170,6 +195,11 @@ describe('pullRequestMergeabilityCheckJob', () => {
       string
     >);
 
+    expect(mocks.list).toHaveBeenCalledWith({
+      repository: 'owner/repo',
+      baseRef: 'main',
+      skipNotifiedConflicts: true,
+    });
     expect(mocks.graphql).toHaveBeenCalledOnce();
     const [query, variables] = mocks.graphql.mock.calls[0]!;
     expect(query).toContain(
@@ -193,10 +223,12 @@ describe('pullRequestMergeabilityCheckJob', () => {
       status: 'clean',
     });
     expect(mocks.enqueue).toHaveBeenCalledWith({
-      ...data,
+      installationId: 123,
+      repository: 'owner/repo',
       taskPullRequestIds: [candidates[0]!.id],
-      deduplicationKey: 'base:owner/repo:main:unknown',
+      deduplicationKey: 'base:owner/repo:main',
       retryAttempt: 1,
+      allowNotifiedConflictCheck: false,
     });
   });
 
@@ -321,6 +353,68 @@ describe('pullRequestMergeabilityCheckJob', () => {
       });
     },
   );
+
+  it('posts through the provider adapter for teams routes', async () => {
+    const conflictDetectedAt = new Date('2026-08-24T23:00:00.000Z');
+    mocks.list.mockResolvedValue([candidates[0]]);
+    mocks.graphql.mockResolvedValue({
+      repository: {
+        pr0: {
+          number: 41,
+          mergeable: 'CONFLICTING',
+          state: 'OPEN',
+          baseRefName: 'main',
+        },
+      },
+    });
+    mocks.record.mockResolvedValue({ shouldNotify: true, conflictDetectedAt });
+    mocks.notifyFast.mockResolvedValue(false);
+    mocks.resolveRoute.mockResolvedValue({
+      provider: 'teams',
+      channelId: 'teams-channel',
+      threadId: 'teams-thread',
+      serviceUrl: 'https://smba.example.com',
+    });
+
+    await pullRequestMergeabilityCheckJob({
+      data,
+    } as Job<typeof data, void, string>);
+
+    expect(mocks.getAdapter).toHaveBeenCalledWith('teams');
+    expect(mocks.postMessage).toHaveBeenCalled();
+    expect(mocks.markNotified).toHaveBeenCalledOnce();
+  });
+
+  it('records the healthy aliases when one PR in the batch is unresolvable', async () => {
+    const partialError = Object.assign(new Error('Could not resolve'), {
+      name: 'GraphqlResponseError',
+      data: {
+        repository: {
+          pr0: null,
+          pr1: {
+            number: 42,
+            mergeable: 'MERGEABLE',
+            state: 'OPEN',
+            baseRefName: 'main',
+          },
+        },
+      },
+    });
+    mocks.graphql.mockRejectedValue(partialError);
+
+    await pullRequestMergeabilityCheckJob({
+      data,
+    } as Job<typeof data, void, string>);
+
+    expect(mocks.record).toHaveBeenCalledWith({
+      id: candidates[1]!.id,
+      status: 'clean',
+    });
+    expect(mocks.record).not.toHaveBeenCalledWith({
+      id: candidates[0]!.id,
+      status: expect.anything(),
+    });
+  });
 
   it('allows only one concurrent job to claim a conflict notification', async () => {
     const conflictDetectedAt = new Date('2026-08-24T23:00:00.000Z');

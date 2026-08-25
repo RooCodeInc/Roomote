@@ -35,12 +35,27 @@ describe('enqueuePullRequestMergeabilityCheck', () => {
         delay: PULL_REQUEST_MERGEABILITY_INITIAL_DELAY_MS,
         deduplication: {
           id: 'pr-mergeability:base:owner/repo:main:attempt-0',
-          ttl: PULL_REQUEST_MERGEABILITY_INITIAL_DELAY_MS + 60_000,
+          // Capped at the delay so the key cannot outlive the job's
+          // promotion and swallow later pushes.
+          ttl: PULL_REQUEST_MERGEABILITY_INITIAL_DELAY_MS,
           extend: true,
           replace: true,
         },
       },
     );
+  });
+
+  it('rejects a request without any scope', async () => {
+    await expect(
+      enqueuePullRequestMergeabilityCheck({
+        installationId: 123,
+        repository: 'owner/repo',
+        deduplicationKey: 'base:owner/repo:main',
+        retryAttempt: 0,
+        allowNotifiedConflictCheck: false,
+      }),
+    ).rejects.toThrow();
+    expect(mockQueueAdd).not.toHaveBeenCalled();
   });
 
   it('uses one distinct late-retry delay', async () => {

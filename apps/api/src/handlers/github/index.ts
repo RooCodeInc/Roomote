@@ -420,18 +420,24 @@ github.post('/', async (c) => {
           return { status: 'ok' as const };
         }
 
-        await queueTrackedPullRequestMergeabilityCheck(payload);
+        await queueTrackedPullRequestMergeabilityCheck(payload, {
+          updateBaseRef: true,
+        });
         return { status: 'ok' as const };
       }),
     );
 
     webhooks.on('pull_request.ready_for_review', ({ id, name, payload }) =>
       recordWebhook(id, `${name}.${payload.action}`, payload, async () => {
-        syncPrStatus(
+        // Awaited so the mergeability check below sees the row as 'open';
+        // conflicts accrued while the PR was a draft surface at this
+        // transition.
+        await syncPrStatus(
           payload.repository.full_name,
           payload.pull_request.number,
           'open',
         );
+        await queueTrackedPullRequestMergeabilityCheck(payload);
         syncPullRequestFact({
           githubRepoId: payload.repository.id,
           repositoryFullName: payload.repository.full_name,
@@ -542,8 +548,11 @@ github.post('/', async (c) => {
 
     webhooks.on('push', ({ id, name, payload }) =>
       recordWebhook(id, name, payload, async () => {
-        await queueBaseBranchMergeabilityCheck(payload);
-        return handlePushConflictCheck(payload);
+        const [result] = await Promise.all([
+          handlePushConflictCheck(payload),
+          queueBaseBranchMergeabilityCheck(payload),
+        ]);
+        return result;
       }),
     );
 
