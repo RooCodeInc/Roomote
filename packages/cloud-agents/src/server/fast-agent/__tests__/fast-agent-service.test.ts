@@ -114,6 +114,8 @@ vi.mock('../fast-agent-user-identity', () => ({
   getFastAgentUserIdentity: mocks.getUserIdentity,
 }));
 
+import { ALL_REPOSITORIES } from '@roomote/types';
+
 import { answerFastAgentQuestion } from '../fast-agent-service';
 import type {
   FastAgentTurnAdapter,
@@ -1118,6 +1120,33 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     );
     expect(launchTask).toHaveBeenCalledWith(
       expect.objectContaining({ model: 'anthropic/claude-sonnet-5' }),
+    );
+  });
+
+  it('launches across all repositories when the sentinel is explicit', async () => {
+    const launchTask = vi.fn<LaunchFastAgentTask>(async ({ postKickoff }) => {
+      await postKickoff({ taskId: 'task-1' });
+      return { success: true, taskId: 'task-1' };
+    });
+    const adapter = callbacks({ launchTask });
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        await expect(
+          invokeTool(nativeToolNames.launchTask, {
+            prompt: 'Update every repository.',
+            environmentId: ALL_REPOSITORIES,
+            kickoffMessage: 'I’m delegating the cross-repository update.',
+          }),
+        ).resolves.toMatchObject({ success: true, taskId: 'task-1' });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({ ...baseParams, adapter });
+
+    expect(launchTask).toHaveBeenCalledWith(
+      expect.objectContaining({ environmentId: ALL_REPOSITORIES }),
     );
   });
 

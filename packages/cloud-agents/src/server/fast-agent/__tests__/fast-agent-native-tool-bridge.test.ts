@@ -1,5 +1,6 @@
 import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { ALL_REPOSITORIES } from '@roomote/types';
 
 import {
   bindFastAgentNativeToolExecutor,
@@ -42,6 +43,10 @@ describe('Fast native OpenCode tool bridge', () => {
     expect(integrationSource).toContain('invoke("integration_call"');
     expect(launchTaskSource).toContain('model: z.string().min(1)');
     expect(launchTaskSource).toContain('deployment-enabled model ID');
+    expect(launchTaskSource).toContain(ALL_REPOSITORIES);
+    expect(launchTaskSource).toContain(
+      'to run against all active repositories',
+    );
     expect(installedToolFiles).not.toEqual(
       expect.arrayContaining([
         'get_chat_channel_messages.js',

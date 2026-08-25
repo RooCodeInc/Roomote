@@ -8,6 +8,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { createRequire } from 'node:module';
+import { ALL_REPOSITORIES } from '@roomote/types';
 import { z } from 'zod';
 
 import {
@@ -117,7 +118,7 @@ export default {
   description: "Delegate new repository or workspace execution work to a Roomote task, optionally using an exact deployment-enabled model ID from the system prompt.",
   args: {
     prompt: z.string().min(1).describe("Complete task instruction"),
-    environmentId: z.string().nullable().optional(),
+    environmentId: z.string().nullable().optional().describe(${JSON.stringify(`Exact environment ID from the system prompt; omit, pass null, or pass "${ALL_REPOSITORIES}" to run against all active repositories`)}),
     model: z.string().min(1).nullable().optional().describe("Exact deployment-enabled model ID; omit or pass null to use the deployment default"),
     kickoffMessage: z.string().min(1).describe("Specific user-visible explanation of what is being delegated"),
   },
