@@ -154,6 +154,15 @@ export async function handleGitLabMergeRequest(
     return { status: 'ok' };
   }
 
+  if (mergeRequest.action === 'open' || mergeRequest.action === 'reopen') {
+    await updateTaskPrStatus(
+      'gitlab',
+      repoFullName,
+      mergeRequest.iid,
+      mergeRequest.draft ? 'draft' : 'open',
+    );
+  }
+
   const taskType = getReviewTaskType(payload);
 
   if (!taskType) {

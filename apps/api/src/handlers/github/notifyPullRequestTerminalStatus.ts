@@ -324,20 +324,39 @@ async function deliverSlackTerminalStatus({
         footerStyle: 'reply-only',
       });
 
-      await Promise.all([
-        notifier.addReaction({
-          channel: target.slackChannelId,
-          timestamp: target.slackThreadTs,
-          name: terminalReaction,
-        }),
-        notifier.removeReaction({
-          channel: target.slackChannelId,
-          timestamp: target.slackThreadTs,
-          name: ackEmoji,
-        }),
-      ]);
-
+      // The status post completes user-visible delivery for this pass.
+      // Record it before best-effort reaction cleanup so duplicate task/run
+      // bindings cannot repost the same lifecycle message when cleanup fails.
       notifiedThreads.add(threadKey);
+
+      const [terminalReactionResult, ackRemovalResult] =
+        await Promise.allSettled([
+          notifier.addReaction({
+            channel: target.slackChannelId,
+            timestamp: target.slackThreadTs,
+            name: terminalReaction,
+          }),
+          notifier.removeReaction({
+            channel: target.slackChannelId,
+            timestamp: target.slackThreadTs,
+            name: ackEmoji,
+          }),
+        ]);
+
+      if (
+        terminalReactionResult.status === 'rejected' ||
+        !terminalReactionResult.value
+      ) {
+        console.warn(
+          `[notifyPullRequestTerminalStatus] Failed to add ${status} reaction to Slack thread ${target.slackThreadTs}`,
+        );
+      }
+
+      if (ackRemovalResult.status === 'rejected' || !ackRemovalResult.value) {
+        console.warn(
+          `[notifyPullRequestTerminalStatus] Failed to remove acknowledgement reaction from Slack thread ${target.slackThreadTs}`,
+        );
+      }
 
       console.log(
         `[notifyPullRequestTerminalStatus] Sent ${status} notification to Slack thread ${target.slackThreadTs} for PR ${repository}#${prNumber}`,

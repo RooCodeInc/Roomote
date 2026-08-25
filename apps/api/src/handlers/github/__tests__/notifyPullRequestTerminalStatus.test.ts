@@ -308,6 +308,61 @@ describe('notifyPullRequestTerminalStatus', () => {
     });
   });
 
+  it('does not duplicate the status post when acknowledgement cleanup rejects', async () => {
+    mockedGithubFind.mockResolvedValue({ id: 1 } as any);
+    mockedTaskPullRequestsFind.mockResolvedValue([{ taskId: 'task-1' }] as any);
+    mockedTasksFind.mockResolvedValue([
+      {
+        id: 'task-1',
+        slackThreadTs: 'thread-ts-1',
+        slackChannelId: 'C123',
+        linearSessionId: null,
+      },
+    ] as any);
+    mockedTaskRunsFind.mockResolvedValue([
+      {
+        taskId: 'task-1',
+        payload: {
+          communicationProvider: 'slack',
+          communicationChannelId: 'C123',
+          communicationThreadId: 'thread-ts-1',
+        },
+      },
+    ] as any);
+    mockedSlackFind.mockResolvedValue({ botAccessToken: 'xoxb-token' } as any);
+    mockRemoveReaction.mockRejectedValueOnce(new Error('Slack unavailable'));
+
+    await notifyPullRequestTerminalStatus(baseParams);
+
+    expect(mockStickyFooterPost).toHaveBeenCalledTimes(1);
+    expect(mockAddReaction).toHaveBeenCalledTimes(1);
+    expect(mockRemoveReaction).toHaveBeenCalledTimes(1);
+  });
+
+  it('reports a rejected terminal reaction without failing the status post', async () => {
+    mockedGithubFind.mockResolvedValue({ id: 1 } as any);
+    mockedTaskPullRequestsFind.mockResolvedValue([{ taskId: 'task-1' }] as any);
+    mockedTasksFind.mockResolvedValue([
+      {
+        id: 'task-1',
+        slackThreadTs: 'thread-ts-1',
+        slackChannelId: 'C123',
+        linearSessionId: null,
+      },
+    ] as any);
+    mockedSlackFind.mockResolvedValue({ botAccessToken: 'xoxb-token' } as any);
+    mockAddReaction.mockResolvedValueOnce(false);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    await notifyPullRequestTerminalStatus(baseParams);
+
+    expect(mockStickyFooterPost).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith(
+      '[notifyPullRequestTerminalStatus] Failed to add merged reaction to Slack thread thread-ts-1',
+    );
+    warn.mockRestore();
+  });
+
   it('resolves Slack thread aliases retained by resumed task runs', async () => {
     mockedGithubFind.mockResolvedValue({ id: 1 } as any);
     mockedTaskPullRequestsFind.mockResolvedValue([{ taskId: 'task-1' }] as any);
