@@ -326,13 +326,16 @@ export async function finalizeGithubPrReviewComment({
   prNumber: number;
   commentId?: number | null;
   terminalStatus: string;
-}): Promise<boolean> {
+}): Promise<{
+  finalized: boolean;
+  body?: string;
+}> {
   const fullName = `${owner}/${repo}`;
   const resolvedCommentId =
     commentId ?? (await getPrReviewCommentId({ repo: fullName, prNumber }));
 
   if (!resolvedCommentId) {
-    return false;
+    return { finalized: false };
   }
 
   let comment: { body: string };
@@ -343,7 +346,7 @@ export async function finalizeGithubPrReviewComment({
       commentId: resolvedCommentId,
     });
   } catch {
-    return false;
+    return { finalized: false };
   }
 
   const updatedBody = buildTerminalReviewSummaryBody({
@@ -353,7 +356,7 @@ export async function finalizeGithubPrReviewComment({
   });
 
   if (!updatedBody) {
-    return false;
+    return { finalized: false, body: comment.body };
   }
 
   await updateIssueComment(gitHubToken, {
@@ -363,5 +366,5 @@ export async function finalizeGithubPrReviewComment({
     body: updatedBody,
   });
 
-  return true;
+  return { finalized: true, body: updatedBody };
 }

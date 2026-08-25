@@ -4,6 +4,7 @@ const {
   mockEnqueueTask,
   mockFindLatestTaskRun,
   mockGetTaskChannelBindings,
+  mockPublishGithubPrReviewCheck,
   MockSnapshotResumeAlreadyExistsError,
 } = vi.hoisted(() => ({
   mockGetGitHubAutomationTargets: vi.fn(),
@@ -11,6 +12,7 @@ const {
   mockEnqueueTask: vi.fn(),
   mockFindLatestTaskRun: vi.fn(),
   mockGetTaskChannelBindings: vi.fn(),
+  mockPublishGithubPrReviewCheck: vi.fn(),
   MockSnapshotResumeAlreadyExistsError: class extends Error {},
 }));
 
@@ -39,6 +41,7 @@ vi.mock('@roomote/github', () => ({
 
 vi.mock('@roomote/sdk/server', () => ({
   ensureSnapshotResumeGitHubFollowUpFallback: vi.fn(),
+  publishGithubPrReviewCheck: mockPublishGithubPrReviewCheck,
 }));
 
 vi.mock('../getGitHubAutomationTargets', async () => {

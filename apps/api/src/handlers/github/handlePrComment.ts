@@ -11,7 +11,10 @@ import {
   findReusableGitHubPrFollowUpOwner,
 } from '@roomote/db/server';
 import { getInstallationOctokit } from '@roomote/github';
-import { ensureSnapshotResumeGitHubFollowUpFallback } from '@roomote/sdk/server';
+import {
+  ensureSnapshotResumeGitHubFollowUpFallback,
+  publishGithubPrReviewCheck,
+} from '@roomote/sdk/server';
 import {
   type TaskPayload,
   RunStatus,
@@ -1370,6 +1373,16 @@ export async function handlePrComment(
             prSha: headSha,
           },
         });
+        if (reviewer.settings?.publishGithubCheck) {
+          await publishGithubPrReviewCheck({
+            installationId: githubInstallationId,
+            repository: repository.full_name,
+            prNumber: pr.number,
+            headSha,
+            taskId: reviewLaunch.taskId,
+            runId: reviewLaunch.id,
+          });
+        }
         reviewLaunches.push(reviewLaunch);
       } catch (error) {
         failedReviewerIds.push(reviewer.id);

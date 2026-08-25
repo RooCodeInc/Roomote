@@ -252,6 +252,7 @@ export interface UpdateBackgroundAgentSettingsInput extends ScheduleOnlyAutomati
   reviewerReviewAllPullRequestAuthors: boolean;
   reviewerReviewOnCommit: boolean;
   reviewerReviewDraftPrs: boolean;
+  reviewerPublishGithubCheck: boolean;
   reviewerInstructions?: string | null;
   reviewerRelayReviewResultsToTask: boolean;
   reviewerRelayUserIds: string[];
