@@ -1,5 +1,6 @@
 import type { ModelMessage } from 'ai';
 import {
+  ALL_REPOSITORIES,
   BRAIN_MCP_ID,
   CHAT_CHANNEL_MESSAGES_TOOL,
   CHAT_MESSAGE_CONTEXT_TOOL,
@@ -1005,9 +1006,10 @@ export async function answerFastAgentQuestion({
 
           case FAST_AGENT_NATIVE_TOOL_NAMES.launchTask: {
             const args = launchTaskArgsSchema.parse(call.args);
-            const validEnvironmentIds = new Set(
-              availableEnvironments.map((environment) => environment.id),
-            );
+            const validEnvironmentIds = new Set([
+              ALL_REPOSITORIES,
+              ...availableEnvironments.map((environment) => environment.id),
+            ]);
             if (
               args.environmentId &&
               !validEnvironmentIds.has(args.environmentId)

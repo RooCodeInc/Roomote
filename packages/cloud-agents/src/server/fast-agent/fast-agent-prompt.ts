@@ -1,4 +1,8 @@
-import { PRODUCT_NAME, type TaskModelOption } from '@roomote/types';
+import {
+  ALL_REPOSITORIES,
+  PRODUCT_NAME,
+  type TaskModelOption,
+} from '@roomote/types';
 
 import type { RoutableEnvironment } from '../router';
 import type { FastAgentIntegration } from './fast-agent-integration-broker';
@@ -15,12 +19,14 @@ import { buildRoomoteStyleGuidanceSection } from '../../style-guidance';
 function formatRepositoriesForPrompt(
   availableEnvironments: RoutableEnvironment[],
 ): string {
+  const allRepositories = `- All repositories [id: ${ALL_REPOSITORIES}]: Run against all active repositories.`;
   if (availableEnvironments.length === 0) {
-    return '- No configured environments were found for this deployment.';
+    return `${allRepositories}\n- No configured environments were found for this deployment.`;
   }
 
-  return availableEnvironments
-    .map((environment) => {
+  return [
+    allRepositories,
+    ...availableEnvironments.map((environment) => {
       const repos =
         environment.repositoryNames.length > 0
           ? environment.repositoryNames.join(', ')
@@ -29,8 +35,8 @@ function formatRepositoriesForPrompt(
         ? ` (${environment.description})`
         : '';
       return `- ${environment.name} [id: ${environment.id}]${description}: ${repos}`;
-    })
-    .join('\n');
+    }),
+  ].join('\n');
 }
 
 function formatActiveTasksForPrompt(

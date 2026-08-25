@@ -137,16 +137,17 @@ export async function processDiscordFastAgentMessage(input: {
           parentSessionId,
           postKickoff,
         }) => {
-          const workspaceOverride = environmentId
-            ? await resolveDiscordWorkspace({
-                type: 'environment',
-                id: environmentId,
-                name: environmentId,
-              })
-            : {
-                repoForPayload: ALL_REPOSITORIES,
-                workspaceDisplayName: 'all repos',
-              };
+          const workspaceOverride =
+            environmentId && environmentId !== ALL_REPOSITORIES
+              ? await resolveDiscordWorkspace({
+                  type: 'environment',
+                  id: environmentId,
+                  name: environmentId,
+                })
+              : {
+                  repoForPayload: ALL_REPOSITORIES,
+                  workspaceDisplayName: 'all repos',
+                };
           if (!workspaceOverride) {
             return {
               success: false,

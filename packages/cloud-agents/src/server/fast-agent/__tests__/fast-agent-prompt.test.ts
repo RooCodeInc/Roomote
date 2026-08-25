@@ -1,4 +1,4 @@
-import { RunStatus } from '@roomote/types';
+import { ALL_REPOSITORIES, RunStatus } from '@roomote/types';
 
 import { buildFastAgentSystemPrompt } from '../fast-agent-prompt';
 import { FAST_AGENT_BRAIN_INSTRUCTIONS } from '../fast-agent-constants';
@@ -50,6 +50,9 @@ describe('buildFastAgentSystemPrompt', () => {
       'You are a deeply pragmatic, effective software engineer.',
     );
     expect(prompt).toContain('Roomote/example-app');
+    expect(prompt).toContain(
+      `All repositories [id: ${ALL_REPOSITORIES}]: Run against all active repositories.`,
+    );
     expect(prompt).toContain('conversational orchestrator');
     expect(prompt).toContain('Task ID: task-2 | Update docs | pending');
     expect(prompt).toContain('Existing active tasks do not block');

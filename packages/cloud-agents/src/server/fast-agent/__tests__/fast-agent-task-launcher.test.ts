@@ -138,6 +138,26 @@ describe('createFastAgentSlackTaskLauncher', () => {
     expect(task.payload).not.toHaveProperty('liveTaskStream');
   });
 
+  it('treats the all-repositories sentinel like an omitted environment', async () => {
+    const launchTask = createFastAgentSlackTaskLauncher({
+      userId: 'user-1',
+      teamId: 'T123',
+      channelId: 'C123',
+      threadTs: '100.001',
+    });
+
+    await launchTask({
+      prompt: 'Update every repository',
+      environmentId: ALL_REPOSITORIES,
+      parentSessionId: '11111111-1111-4111-8111-111111111111',
+      postKickoff: vi.fn(),
+    });
+
+    const task = mocks.enqueueTask.mock.calls[0]?.[0]?.task;
+    expect(task.payload).toMatchObject({ repo: ALL_REPOSITORIES });
+    expect(task.payload).not.toHaveProperty('environmentId');
+  });
+
   it('runs afterKickoff inside the launch gate', async () => {
     const order: string[] = [];
     const afterKickoff = vi.fn(async () => {
