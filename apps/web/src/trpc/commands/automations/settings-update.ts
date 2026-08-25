@@ -484,7 +484,7 @@ export async function updateBackgroundAgentSettingsCommand(
 
   if (!isProviderUsageLimitThreshold(providerUsageLimitThreshold)) {
     fieldErrors.general =
-      'Provider usage threshold must be between 50% and 95% in 5% increments.';
+      'Provider usage threshold must be between 5% and 95% in 5% increments.';
   }
   const channelAutoStartRequiresSlackInstallation =
     shouldUpdateChannelAutoStart &&
@@ -1032,7 +1032,7 @@ export async function updateBackgroundAgentSettingsCommand(
       !managerChannelResult.channelId
     ) {
       fieldErrors[validation.field] =
-        'Choose a Slack channel before enabling Provider Usage Limits.';
+        'Choose a Slack channel before enabling Inference Provider Usage Alerts.';
       continue;
     }
 

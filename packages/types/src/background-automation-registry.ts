@@ -194,7 +194,7 @@ export const TRIGGERABLE_BACKGROUND_AUTOMATION_DESCRIPTORS = [
   },
   {
     automationKey: 'provider_usage_limit',
-    label: 'Provider Usage Limits',
+    label: 'Inference Provider Usage Alerts',
     slackIcon: 'battery-warning',
     scheduleModes: PROVIDER_USAGE_LIMIT_SCHEDULE_MODES,
     manualTriggerRequirements: [],

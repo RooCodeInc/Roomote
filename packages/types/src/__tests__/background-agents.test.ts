@@ -79,10 +79,11 @@ describe('background agent helpers', () => {
   });
 
   it('accepts only supported provider usage threshold slider values', () => {
+    expect(isProviderUsageLimitThreshold(5)).toBe(true);
     expect(isProviderUsageLimitThreshold(50)).toBe(true);
     expect(isProviderUsageLimitThreshold(85)).toBe(true);
     expect(isProviderUsageLimitThreshold(95)).toBe(true);
-    expect(isProviderUsageLimitThreshold(49)).toBe(false);
+    expect(isProviderUsageLimitThreshold(4)).toBe(false);
     expect(isProviderUsageLimitThreshold(81)).toBe(false);
     expect(isProviderUsageLimitThreshold(100)).toBe(false);
   });

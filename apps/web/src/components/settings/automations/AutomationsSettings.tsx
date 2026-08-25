@@ -3877,7 +3877,7 @@ export function AutomationsSettings() {
                 >
                   <SelectTrigger
                     id="provider-usage-limit-frequency"
-                    aria-label="Provider Usage Limits schedule"
+                    aria-label="Inference Provider Usage Alerts schedule"
                     className="w-full md:w-56"
                   >
                     <SelectValue placeholder="Select a schedule" />
@@ -3920,7 +3920,7 @@ export function AutomationsSettings() {
                       </div>
                       <Slider
                         id="provider-usage-limit-threshold"
-                        min={50}
+                        min={5}
                         max={95}
                         step={5}
                         value={[formState.providerUsageLimitThreshold]}

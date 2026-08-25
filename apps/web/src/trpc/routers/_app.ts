@@ -628,7 +628,7 @@ const automationsRouter = createRouter({
         providerUsageLimitThreshold: z
           .number()
           .int()
-          .min(50)
+          .min(5)
           .max(95)
           .refine((value) => value % 5 === 0)
           .optional(),

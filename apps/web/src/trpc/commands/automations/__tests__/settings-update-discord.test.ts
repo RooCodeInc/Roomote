@@ -254,7 +254,7 @@ describe('updateBackgroundAgentSettingsCommand Discord destinations', () => {
       buildInput({
         savingAutomation: 'providerUsageLimit',
         providerUsageLimitFrequency: 'daily',
-        providerUsageLimitThreshold: 70,
+        providerUsageLimitThreshold: 5,
         providerUsageLimitSlackChannel: null,
         providerUsageLimitDiscordChannel: null,
       }),
@@ -267,7 +267,7 @@ describe('updateBackgroundAgentSettingsCommand Discord destinations', () => {
     expect(automation).toMatchObject({
       enabled: true,
       schedule: { mode: 'daily' },
-      settings: { threshold: 70 },
+      settings: { threshold: 5 },
       targets: [],
     });
   });
@@ -318,7 +318,7 @@ describe('updateBackgroundAgentSettingsCommand Discord destinations', () => {
       success: false,
       fieldErrors: {
         general:
-          'Provider usage threshold must be between 50% and 95% in 5% increments.',
+          'Provider usage threshold must be between 5% and 95% in 5% increments.',
       },
     });
   });

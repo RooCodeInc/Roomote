@@ -214,10 +214,17 @@ function formatAmount(value: number, currency?: string): string {
       );
 }
 
-function formatSnapshot(
-  snapshot: ProviderUsageLimitSnapshot,
-  threshold: number,
-): string {
+type ProviderUsageLimitAlert = {
+  snapshot: ProviderUsageLimitSnapshot;
+  threshold: number;
+  manualTest?: boolean;
+};
+
+function formatSnapshot({
+  snapshot,
+  threshold,
+  manualTest = false,
+}: ProviderUsageLimitAlert): string {
   const percent = Math.round(snapshot.usedPercent * 10) / 10;
   const usage =
     snapshot.used !== undefined && snapshot.limit !== undefined
@@ -230,15 +237,14 @@ function formatSnapshot(
     `Key: ${snapshot.credentialLabel}`,
     `Limit window: ${snapshot.windowLabel}`,
     `Usage: ${usage}`,
-    `Threshold crossed: ${threshold}%`,
+    manualTest
+      ? `Manual test: scheduled alerts post at ${threshold}%.`
+      : `Threshold crossed: ${threshold}%`,
   ].join('\n');
 }
 
 export function buildProviderUsageLimitWarningMessage(params: {
-  alerts: Array<{
-    snapshot: ProviderUsageLimitSnapshot;
-    threshold: number;
-  }>;
+  alerts: ProviderUsageLimitAlert[];
 }) {
   const highestPercent = Math.max(
     ...params.alerts.map(({ snapshot }) => snapshot.usedPercent),
@@ -255,23 +261,15 @@ export function buildProviderUsageLimitWarningMessage(params: {
 }
 
 export function formatProviderUsageLimitWarningText(params: {
-  alerts: Array<{
-    snapshot: ProviderUsageLimitSnapshot;
-    threshold: number;
-  }>;
+  alerts: ProviderUsageLimitAlert[];
 }): string {
-  return params.alerts
-    .map(({ snapshot, threshold }) => formatSnapshot(snapshot, threshold))
-    .join('\n\n');
+  return params.alerts.map(formatSnapshot).join('\n\n');
 }
 
 async function postProviderUsageLimitViaCommunicationAdapter(params: {
   adapter: NonNullable<UsageLimitCommunicationAdapter>;
   destination: ResolvedAutomationDestination;
-  alerts: Array<{
-    snapshot: ProviderUsageLimitSnapshot;
-    threshold: number;
-  }>;
+  alerts: ProviderUsageLimitAlert[];
 }): Promise<void> {
   await params.adapter.postMessage({
     channelId: params.destination.channelId,
@@ -357,30 +355,35 @@ export async function providerUsageLimitJob(
       ? configuredThreshold
       : DEFAULT_PROVIDER_USAGE_LIMIT_THRESHOLD;
   const snapshots = await dependencies.getSnapshots();
-  const redis = dependencies.getRedisClient();
-  const alerts: Array<{
-    snapshot: ProviderUsageLimitSnapshot;
-    threshold: number;
-  }> = [];
+  const alerts: ProviderUsageLimitAlert[] = opts.manualTrigger
+    ? snapshots.map((snapshot) => ({
+        snapshot,
+        threshold,
+        manualTest: true,
+      }))
+    : [];
   const claimedKeys: string[] = [];
 
-  for (const snapshot of snapshots) {
-    const newlyClaimed: Array<{ threshold: number; key: string }> = [];
-    for (const candidate of [...new Set([threshold, 100])]) {
-      const key = await claimThreshold({
-        redis,
-        snapshot,
-        threshold: candidate,
-        now,
-      });
-      if (key) newlyClaimed.push({ threshold: candidate, key });
-    }
-    if (newlyClaimed.length > 0) {
-      claimedKeys.push(...newlyClaimed.map(({ key }) => key));
-      alerts.push({
-        snapshot,
-        threshold: Math.max(...newlyClaimed.map((claim) => claim.threshold)),
-      });
+  if (!opts.manualTrigger) {
+    const redis = dependencies.getRedisClient();
+    for (const snapshot of snapshots) {
+      const newlyClaimed: Array<{ threshold: number; key: string }> = [];
+      for (const candidate of [...new Set([threshold, 100])]) {
+        const key = await claimThreshold({
+          redis,
+          snapshot,
+          threshold: candidate,
+          now,
+        });
+        if (key) newlyClaimed.push({ threshold: candidate, key });
+      }
+      if (newlyClaimed.length > 0) {
+        claimedKeys.push(...newlyClaimed.map(({ key }) => key));
+        alerts.push({
+          snapshot,
+          threshold: Math.max(...newlyClaimed.map((claim) => claim.threshold)),
+        });
+      }
     }
   }
 
@@ -422,7 +425,10 @@ export async function providerUsageLimitJob(
     });
     result.completed = true;
   } catch (error) {
-    await Promise.all(claimedKeys.map((key) => redis.del(key)));
+    if (claimedKeys.length > 0) {
+      const redis = dependencies.getRedisClient();
+      await Promise.all(claimedKeys.map((key) => redis.del(key)));
+    }
     const message = error instanceof Error ? error.message : String(error);
     await dependencies.recordOutcome(db, {
       key: 'provider_usage_limit',

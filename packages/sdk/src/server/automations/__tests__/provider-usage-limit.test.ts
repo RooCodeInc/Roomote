@@ -126,7 +126,7 @@ describe('provider usage limit automation', () => {
     expect(message.text).toBe('OpenRouter usage is at 90%');
     expect(message.blocks[0]).toMatchObject({
       type: 'container',
-      title: { text: 'Provider Usage Limits' },
+      title: { text: 'Inference Provider Usage Alerts' },
       icon: {
         image_url: expect.stringContaining(
           '/automation-icons/battery-warning.png',
@@ -171,14 +171,11 @@ describe('provider usage limit automation', () => {
     expect(deps.recordOutcome).not.toHaveBeenCalled();
   });
 
-  it('alerts at the configured threshold and deduplicates the quota period', async () => {
+  it('alerts at the configured threshold and deduplicates scheduled runs in a quota period', async () => {
     const deps = dependencies({});
 
     const first = await providerUsageLimitJob({}, deps.overrides);
-    const second = await providerUsageLimitJob(
-      { manualTrigger: true },
-      deps.overrides,
-    );
+    const second = await providerUsageLimitJob({}, deps.overrides);
 
     expect(first).toMatchObject({ launchedTaskId: null, completed: true });
     expect(second).toMatchObject({ launchedTaskId: null, completed: true });
@@ -195,11 +192,30 @@ describe('provider usage limit automation', () => {
 
     await providerUsageLimitJob({}, deps.overrides);
     snapshots[0] = snapshot({ usedPercent: 80, used: 80 });
-    await providerUsageLimitJob({ manualTrigger: true }, deps.overrides);
+    await providerUsageLimitJob({}, deps.overrides);
     snapshots[0] = snapshot({ usedPercent: 90, used: 90 });
+    await providerUsageLimitJob({}, deps.overrides);
+
+    expect(deps.postMessage).toHaveBeenCalledTimes(2);
+  });
+
+  it('posts a manual test below the configured threshold without claiming the quota period', async () => {
+    const deps = dependencies({
+      automationRuntime: runtime({ settings: { threshold: 85 } }),
+      snapshots: [snapshot({ usedPercent: 0, used: 0, remaining: 100 })],
+    });
+
+    await providerUsageLimitJob({ manualTrigger: true }, deps.overrides);
     await providerUsageLimitJob({ manualTrigger: true }, deps.overrides);
 
     expect(deps.postMessage).toHaveBeenCalledTimes(2);
+    expect(deps.redis.set).not.toHaveBeenCalled();
+    expect(deps.postMessage.mock.calls[0]?.[0]).toMatchObject({
+      text: 'OpenRouter usage is at 0%',
+    });
+    expect(JSON.stringify(deps.postMessage.mock.calls[0]?.[0])).toContain(
+      'Manual test: scheduled alerts post at 85%.',
+    );
   });
 
   it('consolidates multiple provider warnings into one Slack delivery', async () => {

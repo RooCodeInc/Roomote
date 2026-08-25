@@ -615,23 +615,23 @@ describe('AutomationsSettings', () => {
 
     fireEvent.click(
       await screen.findByRole('button', {
-        name: 'Configure Provider Usage Limits',
+        name: 'Configure Inference Provider Usage Alerts',
       }),
     );
 
     expect(
       screen.getByRole('combobox', {
-        name: 'Provider Usage Limits schedule',
+        name: 'Inference Provider Usage Alerts schedule',
       }),
     ).toHaveTextContent('Every hour');
     expect(
       screen.getByLabelText('Post alerts to this Slack channel'),
     ).toBeInTheDocument();
-    expect(
-      screen.getByRole('slider', {
-        name: 'Provider usage alert threshold',
-      }),
-    ).toHaveAttribute('aria-valuenow', '85');
+    const thresholdSlider = screen.getByRole('slider', {
+      name: 'Provider usage alert threshold',
+    });
+    expect(thresholdSlider).toHaveAttribute('aria-valuemin', '5');
+    expect(thresholdSlider).toHaveAttribute('aria-valuenow', '85');
     expect(screen.getByText('85%')).toBeInTheDocument();
   });
 
