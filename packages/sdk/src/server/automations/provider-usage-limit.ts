@@ -71,7 +71,7 @@ const defaultDependencies: ProviderUsageLimitDependencies = {
   now: () => new Date(),
 };
 
-export async function getActiveSlackBotToken(): Promise<string | null> {
+async function getActiveSlackBotToken(): Promise<string | null> {
   const installation = await db.query.slackInstallations.findFirst({
     where: eq(slackInstallations.isActive, true),
     orderBy: [desc(slackInstallations.updatedAt)],
