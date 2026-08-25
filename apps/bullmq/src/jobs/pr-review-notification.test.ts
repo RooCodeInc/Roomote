@@ -96,6 +96,41 @@ vi.mock('@roomote/sdk/server', () => ({
   PR_REVIEW_NOTIFICATION_DEFER_MS: 5000,
   PR_REVIEW_NOTIFICATION_MAX_DEFERRALS: 3,
   PrReviewNotificationRateLimitError: MockPrReviewNotificationRateLimitError,
+  buildPrReviewNotificationPostInput: (
+    route: {
+      provider: string;
+      channelId: string;
+      threadId?: string | null;
+      serviceUrl?: string;
+    },
+    text: string,
+  ) => {
+    switch (route.provider) {
+      case 'teams':
+        return {
+          channelId: route.channelId,
+          serviceUrl: route.serviceUrl,
+          ...(route.threadId
+            ? { threadId: route.threadId, replyToMessageId: route.threadId }
+            : {}),
+          text,
+          textFormat: 'markdown',
+        };
+      case 'telegram':
+        return {
+          channelId: route.channelId,
+          ...(route.threadId ? { threadId: route.threadId } : {}),
+          text,
+        };
+      default:
+        return {
+          channelId: route.channelId,
+          ...(route.threadId ? { threadId: route.threadId } : {}),
+          text,
+          textFormat: 'markdown',
+        };
+    }
+  },
   createPrReviewNotificationTelemetry: (eventsReceived: number) => ({
     githubApiCalls: 0,
     githubTokenMintRequests: 0,

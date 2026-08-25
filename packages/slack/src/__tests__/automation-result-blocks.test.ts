@@ -237,6 +237,50 @@ describe('automation result blocks', () => {
     ).toBe('Weekly · GPT 5.6 Max · $0.00 · 1d 2h 3m 4s');
   });
 
+  it('places additional actions before a custom Configure label', () => {
+    const [container] = buildAutomationResultBlocks({
+      title: 'Usage alert',
+      iconUrl: 'https://app.example.com/automation-icons/battery-warning.png',
+      configureUrl: 'https://app.example.com/automations#provider-usage-limit',
+      configureLabel: 'Configure alert',
+      additionalActions: [
+        {
+          type: 'button',
+          action_id: 'manage_models',
+          text: { type: 'plain_text', text: 'Manage models', emoji: false },
+          url: 'https://app.example.com/settings/models',
+        },
+      ],
+    });
+
+    expect(container?.type).toBe('container');
+    if (container?.type !== 'container') return;
+    expect(container.child_blocks).toEqual([
+      {
+        type: 'actions',
+        block_id: 'roomote_automation_result_actions',
+        elements: [
+          {
+            type: 'button',
+            action_id: 'manage_models',
+            text: { type: 'plain_text', text: 'Manage models', emoji: false },
+            url: 'https://app.example.com/settings/models',
+          },
+          {
+            type: 'button',
+            action_id: 'late_bound_automation_configure',
+            text: {
+              type: 'plain_text',
+              text: 'Configure alert',
+              emoji: false,
+            },
+            url: 'https://app.example.com/automations#provider-usage-limit',
+          },
+        ],
+      },
+    ]);
+  });
+
   it('reserves action capacity for task and configure buttons', () => {
     const [container] = buildAutomationResultBlocks({
       title: 'Audit',

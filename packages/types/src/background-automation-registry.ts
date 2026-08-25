@@ -8,6 +8,7 @@ import type {
   DependabotTriageFrequency,
   IssueFixerFrequency,
   ManagerStatsFrequency,
+  ProviderUsageLimitFrequency,
   SecurityAuditorFrequency,
   SentryTriageFrequency,
   SuggesterFrequency,
@@ -30,6 +31,7 @@ export const CODE_QUALITY_AUDITOR_SETTINGS_HASH = 'code-quality-auditor';
 export const CI_FAILURE_TRIAGE_SETTINGS_HASH = 'ci-failure-triage';
 export const SUMMARIZE_MERGED_PRS_SETTINGS_HASH = 'summarize-merged-prs';
 export const PLATFORM_ISSUE_ALERTS_SETTINGS_HASH = 'platform-issue-alerts';
+export const PROVIDER_USAGE_LIMIT_SETTINGS_HASH = 'provider-usage-limit';
 
 export type BackgroundAutomationSettingsHash =
   | typeof AUTO_RESPOND_CHANNELS_SETTINGS_HASH
@@ -44,7 +46,8 @@ export type BackgroundAutomationSettingsHash =
   | typeof CODE_QUALITY_AUDITOR_SETTINGS_HASH
   | typeof CI_FAILURE_TRIAGE_SETTINGS_HASH
   | typeof SUMMARIZE_MERGED_PRS_SETTINGS_HASH
-  | typeof PLATFORM_ISSUE_ALERTS_SETTINGS_HASH;
+  | typeof PLATFORM_ISSUE_ALERTS_SETTINGS_HASH
+  | typeof PROVIDER_USAGE_LIMIT_SETTINGS_HASH;
 
 export type BackgroundAutomationManualTriggerRequirement =
   | 'slack'
@@ -132,6 +135,11 @@ const MANAGER_STATS_SCHEDULE_MODES = [
   'weekly',
 ] as const satisfies readonly ManagerStatsFrequency[];
 
+const PROVIDER_USAGE_LIMIT_SCHEDULE_MODES = [
+  'off',
+  'every_hour',
+] as const satisfies readonly ProviderUsageLimitFrequency[];
+
 export const TRIGGERABLE_BACKGROUND_AUTOMATION_DESCRIPTORS = [
   {
     automationKey: 'conflict_resolver',
@@ -181,6 +189,16 @@ export const TRIGGERABLE_BACKGROUND_AUTOMATION_DESCRIPTORS = [
     usesManagerChannel: true,
     supportedCommunicationProviders: ['slack', 'teams', 'telegram', 'discord'],
     supportedSourceControlProviders: sourceControlProviders,
+  },
+  {
+    automationKey: 'provider_usage_limit',
+    label: 'Inference Provider Usage Alerts',
+    slackIcon: 'battery-warning',
+    scheduleModes: PROVIDER_USAGE_LIMIT_SCHEDULE_MODES,
+    manualTriggerRequirements: [],
+    usesManagerChannel: true,
+    supportedCommunicationProviders: ['slack', 'teams', 'telegram', 'discord'],
+    supportedSourceControlProviders: [],
   },
   {
     automationKey: 'sentry_triage',
@@ -334,6 +352,10 @@ const BACKGROUND_AUTOMATION_SETTINGS_CATALOG = [
   {
     hash: MANAGER_STATS_SETTINGS_HASH,
     automationKey: 'manager_stats',
+  },
+  {
+    hash: PROVIDER_USAGE_LIMIT_SETTINGS_HASH,
+    automationKey: 'provider_usage_limit',
   },
   {
     hash: SUGGEST_IDEAS_SETTINGS_HASH,

@@ -109,6 +109,10 @@ export const PR_REVIEW_NOTIFICATION_TASK_MESSAGE_SOURCE =
 export const PR_STATUS_NOTIFICATION_TASK_MESSAGE_SOURCE =
   'pr_status_notification';
 
+/** `metadata.source` for durable PR merge-conflict notifications. */
+export const PR_CONFLICT_NOTIFICATION_TASK_MESSAGE_SOURCE =
+  'pr_conflict_notification';
+
 /**
  * `metadata.source` value for the provider-posted task kickoff/started message
  * (including free-form router kickoffs). Written directly to task history so
@@ -124,6 +128,7 @@ export const TASK_KICKOFF_MESSAGE_SOURCE = 'task_kickoff';
 export const OUT_OF_BAND_TASK_MESSAGE_SOURCES = [
   PR_REVIEW_NOTIFICATION_TASK_MESSAGE_SOURCE,
   PR_STATUS_NOTIFICATION_TASK_MESSAGE_SOURCE,
+  PR_CONFLICT_NOTIFICATION_TASK_MESSAGE_SOURCE,
   TASK_KICKOFF_MESSAGE_SOURCE,
 ] as const;
 
@@ -135,6 +140,7 @@ export const OUT_OF_BAND_TASK_MESSAGE_SOURCES = [
 export const RESURFACE_OUT_OF_BAND_TASK_MESSAGE_SOURCES = [
   PR_REVIEW_NOTIFICATION_TASK_MESSAGE_SOURCE,
   PR_STATUS_NOTIFICATION_TASK_MESSAGE_SOURCE,
+  PR_CONFLICT_NOTIFICATION_TASK_MESSAGE_SOURCE,
 ] as const;
 
 /**

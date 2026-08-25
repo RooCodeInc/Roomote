@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 import { SCHEDULE_ONLY_BACKGROUND_AUTOMATION_FREQUENCIES } from './background-agents';
+import { ALL_REPOSITORIES, FAST_EXECUTION } from './constants';
 
 export const MANAGE_CUSTOM_AUTOMATIONS_ACTIONS = [
   'list',
@@ -39,7 +40,12 @@ export const manageCustomAutomationsFieldSchemas = {
       'Optional provider/model launch override. Call list_models first and pass an exact returned model ID. The ID prefix selects the configured inference route; openai/... includes connected ChatGPT subscription routing. Omit to keep the deployment default; pass null on update to clear an existing override.',
     )
     .optional(),
-  environmentId: z.string().optional(),
+  environmentId: z
+    .string()
+    .describe(
+      `Environment UUID, "${ALL_REPOSITORIES}", or "${FAST_EXECUTION}" for Fast mode without an initial sandbox task.`,
+    )
+    .optional(),
   targetProvider: z
     .enum(['slack', 'discord', 'teams', 'telegram'])
     .nullable()
@@ -170,8 +176,7 @@ export function buildManageCustomAutomationsRequest(
 export const MANAGE_CUSTOM_AUTOMATIONS_TOOL = {
   name: 'manage_custom_automations',
   title: 'Manage Custom Automations',
-  description:
-    'Admin-only management of deployment custom automations. List existing automations or enabled task models, resolve a cron or natural-language schedule, create or update an automation, delete an automation by exact ID, or run an enabled automation now. Use list_models before setting a model override; create and update accept only exact model IDs returned by that action. Model IDs encode the inference route: for example, openrouter/... targets OpenRouter, while openai/... uses the deployment OpenAI route, including a connected ChatGPT subscription when configured. When the user asks an automation to DM them, set their preferred connected targetProvider and targetMode to direct_message; no targetChannelId is needed. Natural-language schedules are converted to validated five-field cron in the deployment scheduling timezone. Keep cadence only in the schedule field; do not repeat it in the stored prompt. When a user asks an automation to offer help, suggest tasks, make follow-ups actionable or launchable, or turn findings or action items into tasks, encode that intent in product language by instructing the automation to post concrete actions as launchable suggested tasks alongside its report. Do not expose runtime tool names or parameter syntax in the stored prompt. A request only to summarize or list action items is not suggested-task intent. Only promise launchable suggested tasks when the automation has both a configured chat report destination and a repository or environment for executable work; otherwise keep actions as report text and explain the missing capability. After successfully creating an automation in response to a conversational request, ask the user whether they want to run it now to test it.',
+  description: `Admin-only management of deployment custom automations. List existing automations or enabled task models, resolve a cron or natural-language schedule, create or update an automation, delete an automation by exact ID, or run an enabled automation now. Pass environmentId "${FAST_EXECUTION}" to run the automation in Fast mode without starting a sandbox; Fast may still delegate a task when repository or workspace execution is required. Use list_models before setting a model override; create and update accept only exact model IDs returned by that action. Model IDs encode the inference route: for example, openrouter/... targets OpenRouter, while openai/... uses the deployment OpenAI route, including a connected ChatGPT subscription when configured. When the user asks an automation to DM them, set their preferred connected targetProvider and targetMode to direct_message; no targetChannelId is needed. Natural-language schedules are converted to validated five-field cron in the deployment scheduling timezone. Keep cadence only in the schedule field; do not repeat it in the stored prompt. When a user asks an automation to offer help, suggest tasks, make follow-ups actionable or launchable, or turn findings or action items into tasks, encode that intent in product language by instructing the automation to post concrete actions as launchable suggested tasks alongside its report. Do not expose runtime tool names or parameter syntax in the stored prompt. A request only to summarize or list action items is not suggested-task intent. Only promise launchable suggested tasks when the automation has both a configured chat report destination and a repository or environment for executable work; otherwise keep actions as report text and explain the missing capability. After successfully creating an automation in response to a conversational request, ask the user whether they want to run it now to test it.`,
   inputSchema: manageCustomAutomationsFieldSchemas,
   annotations: {
     readOnlyHint: false,

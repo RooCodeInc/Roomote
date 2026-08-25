@@ -269,6 +269,22 @@ export class FastAgentSpillStore {
     await this.ready;
     await this.cleanupExpired();
     const conversationId = this.requireConversation(sessionId);
+    return this.writeForConversationInternal(conversationId, content);
+  }
+
+  async writeForConversation(
+    conversationId: string,
+    content: string,
+  ): Promise<FastAgentSpillWriteResult> {
+    await this.ready;
+    await this.cleanupExpired();
+    return this.writeForConversationInternal(conversationId, content);
+  }
+
+  private async writeForConversationInternal(
+    conversationId: string,
+    content: string,
+  ): Promise<FastAgentSpillWriteResult> {
     const buffer = Buffer.from(content, 'utf8');
     if (buffer.length > this.fileQuotaBytes) {
       return { stored: false, byteLength: buffer.length, reason: 'file_quota' };

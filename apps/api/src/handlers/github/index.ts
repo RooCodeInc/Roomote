@@ -40,6 +40,10 @@ import { queuePrCiFailureNotification } from './notifyPrCiFailure';
 // Conflict Resolution:
 import { handlePushConflictCheck } from './handlePushConflictCheck';
 import { handleWorkflowRunCompleted } from './handleWorkflowRunCompleted';
+import {
+  queueBaseBranchMergeabilityCheck,
+  queueTrackedPullRequestMergeabilityCheck,
+} from './queuePullRequestMergeabilityCheck';
 
 // Repository metadata sync:
 import { handleRepositoryEdited } from './handleRepositoryEdited';
@@ -56,8 +60,8 @@ function syncPrStatus(
   repo: string,
   prNumber: number,
   status: PullRequestStatus,
-): void {
-  updateTaskPrStatus('github', repo, prNumber, status).catch((error) =>
+): Promise<void> {
+  return updateTaskPrStatus('github', repo, prNumber, status).catch((error) =>
     console.warn(
       `[syncPrStatus] Failed to update PR status for ${repo}#${prNumber}: ${
         error instanceof Error ? error.message : String(error)
@@ -300,7 +304,7 @@ github.post('/', async (c) => {
 
     webhooks.on('pull_request.opened', ({ id, name, payload }) =>
       recordWebhook(id, `${name}.${payload.action}`, payload, async () => {
-        syncPrStatus(
+        await syncPrStatus(
           payload.repository.full_name,
           payload.pull_request.number,
           payload.pull_request.draft ? 'draft' : 'open',
@@ -324,6 +328,7 @@ github.post('/', async (c) => {
             url: payload.pull_request.html_url,
           },
         });
+        await queueTrackedPullRequestMergeabilityCheck(payload);
 
         if (isRepoSkipped(payload.repository.full_name)) {
           return {
@@ -338,7 +343,7 @@ github.post('/', async (c) => {
 
     webhooks.on('pull_request.reopened', ({ id, name, payload }) =>
       recordWebhook(id, `${name}.${payload.action}`, payload, async () => {
-        syncPrStatus(
+        await syncPrStatus(
           payload.repository.full_name,
           payload.pull_request.number,
           'open',
@@ -362,6 +367,7 @@ github.post('/', async (c) => {
             url: payload.pull_request.html_url,
           },
         });
+        await queueTrackedPullRequestMergeabilityCheck(payload);
 
         if (isRepoSkipped(payload.repository.full_name)) {
           return {
@@ -395,6 +401,7 @@ github.post('/', async (c) => {
             url: payload.pull_request.html_url,
           },
         });
+        await queueTrackedPullRequestMergeabilityCheck(payload);
 
         if (isRepoSkipped(payload.repository.full_name)) {
           return {
@@ -407,13 +414,30 @@ github.post('/', async (c) => {
       }),
     );
 
+    webhooks.on('pull_request.edited', ({ id, name, payload }) =>
+      recordWebhook(id, `${name}.${payload.action}`, payload, async () => {
+        if (!payload.changes.base) {
+          return { status: 'ok' as const };
+        }
+
+        await queueTrackedPullRequestMergeabilityCheck(payload, {
+          updateBaseRef: true,
+        });
+        return { status: 'ok' as const };
+      }),
+    );
+
     webhooks.on('pull_request.ready_for_review', ({ id, name, payload }) =>
       recordWebhook(id, `${name}.${payload.action}`, payload, async () => {
-        syncPrStatus(
+        // Awaited so the mergeability check below sees the row as 'open';
+        // conflicts accrued while the PR was a draft surface at this
+        // transition.
+        await syncPrStatus(
           payload.repository.full_name,
           payload.pull_request.number,
           'open',
         );
+        await queueTrackedPullRequestMergeabilityCheck(payload);
         syncPullRequestFact({
           githubRepoId: payload.repository.id,
           repositoryFullName: payload.repository.full_name,
@@ -523,7 +547,13 @@ github.post('/', async (c) => {
     );
 
     webhooks.on('push', ({ id, name, payload }) =>
-      recordWebhook(id, name, payload, () => handlePushConflictCheck(payload)),
+      recordWebhook(id, name, payload, async () => {
+        const [result] = await Promise.all([
+          handlePushConflictCheck(payload),
+          queueBaseBranchMergeabilityCheck(payload),
+        ]);
+        return result;
+      }),
     );
 
     webhooks.on('repository.edited', ({ id, name, payload }) =>

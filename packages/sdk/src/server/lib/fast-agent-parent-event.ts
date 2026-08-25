@@ -15,6 +15,7 @@ import {
   asc,
   and,
   db,
+  customAutomations,
   eq,
   inArray,
   slackInstallations,
@@ -45,6 +46,7 @@ import {
 } from '@roomote/types';
 
 import { resolveUserMcpServerConfigs } from '../routers/mcp-connections';
+import { buildCustomAutomationSlackMessage } from './manager-slack';
 
 import {
   buildSignedArtifactRawUrl,
@@ -94,7 +96,17 @@ export type FastAgentPullRequestContext = {
   status: PullRequestStatus | null;
 };
 
-type FastAgentParentEvent =
+export type FastAgentParentEvent =
+  | {
+      type: 'automation_triggered';
+      eventId: string;
+      automationId: string;
+      automationName: string;
+      prompt: string;
+      trigger: 'schedule' | 'manual';
+      defaultTaskModel?: string;
+      rootMessageId?: string;
+    }
   | {
       type: 'child_message';
       taskId: string;
@@ -161,6 +173,15 @@ type FastAgentParentEvent =
       pullRequest: FastAgentPullRequestContext;
       status: 'merged' | 'closed';
       actorLogin: string;
+    }
+  | {
+      type: 'pull_request_conflict_detected';
+      taskId: string;
+      runId: number;
+      taskUrl: string;
+      pullRequest: FastAgentPullRequestContext;
+      conflictDetectedAt: string;
+      message: string;
     };
 
 export async function listFastAgentPullRequestContexts(
@@ -245,6 +266,7 @@ async function buildSelectedImages(params: {
     if (
       !artifact ||
       !artifact.uploaded ||
+      !('taskId' in params.event) ||
       artifact.taskId !== params.event.taskId ||
       artifact.runId !== params.event.runId ||
       !artifact.contentType.startsWith('image/')
@@ -267,6 +289,8 @@ async function buildSelectedImages(params: {
 
 function buildEventClientMessageSeed(event: FastAgentParentEvent): string {
   switch (event.type) {
+    case 'automation_triggered':
+      return `fast-parent-automation:${event.eventId}`;
     case 'child_message':
       return `fast-parent-child-message:${event.messageId}`;
     case 'artifact_published':
@@ -277,6 +301,8 @@ function buildEventClientMessageSeed(event: FastAgentParentEvent): string {
       return `fast-parent-pr-feedback:${event.feedbackId}`;
     case 'pull_request_status_changed':
       return `fast-parent-pr-status:${event.taskId}:${event.pullRequest.url}:${event.status}`;
+    case 'pull_request_conflict_detected':
+      return `fast-parent-pr-conflict:${event.taskId}:${event.pullRequest.url}:${event.conflictDetectedAt}`;
     case 'task_settled':
       return `fast-parent-settle:${event.runId}`;
   }
@@ -287,6 +313,106 @@ type FastAgentParentTurn = {
   conversation: FastAgentConversation;
   adapter: FastAgentTurnAdapter;
 };
+
+function createFastAgentAutomationTaskLauncher(params: {
+  userId: string;
+  conversation: Extract<FastAgentConversation, { surface: 'automation' }>;
+  event: FastAgentParentEvent;
+}): LaunchFastAgentTask {
+  const automationName =
+    params.event.type === 'automation_triggered'
+      ? params.event.automationName
+      : 'Custom automation';
+
+  return createFastAgentTaskLauncher({
+    userId: params.userId,
+    surface: 'system',
+    trigger:
+      params.event.type === 'automation_triggered'
+        ? params.event.trigger
+        : 'schedule',
+    taskUrlCampaign: 'fast-automation-delegation',
+    initiator: {
+      kind: 'automation',
+      key: 'custom_automation',
+      actor: {
+        externalId: params.conversation.workspaceId,
+        displayName: automationName,
+      },
+    },
+    afterKickoff: async (taskRun) => {
+      await db
+        .update(customAutomations)
+        .set({ lastLaunchedTaskId: taskRun.taskId })
+        .where(eq(customAutomations.id, params.conversation.workspaceId));
+    },
+    onQueueFailure: async (taskRun) => {
+      await db
+        .update(customAutomations)
+        .set({ lastLaunchedTaskId: null })
+        .where(
+          and(
+            eq(customAutomations.id, params.conversation.workspaceId),
+            eq(customAutomations.lastLaunchedTaskId, taskRun.taskId),
+          ),
+        );
+    },
+    buildTask: ({ prompt, environmentId, model, parentSessionId }) => ({
+      type: TaskPayloadKind.StandardTask,
+      payload: {
+        repo: ALL_REPOSITORIES,
+        description: prompt,
+        ...buildFastAgentChildTaskMetadata({
+          sessionId: parentSessionId,
+          conversation: params.conversation,
+        }),
+        ...(environmentId && environmentId !== ALL_REPOSITORIES
+          ? { environmentId }
+          : {}),
+        ...(model
+          ? { harnessModelOverrides: { 'opencode-server': model } }
+          : {}),
+      },
+    }),
+  });
+}
+
+async function createAutomationFastAgentParentTurn(params: {
+  parent: FastAgentParent;
+  event: FastAgentParentEvent;
+  onReplyPosted: () => void;
+}): Promise<FastAgentParentTurn> {
+  const fallbackConversation = params.parent.conversation;
+  if (fallbackConversation.surface !== 'automation') {
+    throw new Error('Expected an automation Fast parent conversation.');
+  }
+
+  const session = await fastAgentConversationRepository.findById({
+    id: params.parent.sessionId,
+    fallbackConversation,
+  });
+  if (!session || session.conversation.surface !== 'automation') {
+    throw new FastAgentParentEventDeliveryError(
+      'Fast automation parent session was not found.',
+      { replyPosted: false, permanent: true },
+    );
+  }
+
+  return {
+    userId: session.userId,
+    conversation: session.conversation,
+    adapter: {
+      launchTask: createFastAgentAutomationTaskLauncher({
+        userId: session.userId,
+        conversation: session.conversation,
+        event: params.event,
+      }),
+      postReply: async () => {
+        params.onReplyPosted();
+      },
+    },
+  };
+}
 
 async function createSlackFastAgentParentTurn(params: {
   parent: FastAgentParent;
@@ -352,7 +478,7 @@ async function createSlackFastAgentParentTurn(params: {
         channelId: conversation.replyTarget.channelId,
         threadTs: conversation.replyTarget.threadId,
       }),
-      postReply: async ({ message, imageArtifactIds = [] }) => {
+      postReply: async ({ message, imageArtifactIds = [], kickoff }) => {
         const images = await buildSelectedImages({
           artifactIds: imageArtifactIds,
           event: params.event,
@@ -365,6 +491,7 @@ async function createSlackFastAgentParentTurn(params: {
           params.event.pullRequest.number
             ? {
                 nonce: randomUUID(),
+                taskId: params.event.taskId,
                 question: params.event.suggestedActionQuestion,
                 followUpPrompt: params.event.suggestedActionPrompt,
                 repository: params.event.pullRequest.repository,
@@ -373,12 +500,38 @@ async function createSlackFastAgentParentTurn(params: {
               }
             : null;
 
+        if (params.event.type === 'automation_triggered' && !kickoff) {
+          const contentBlocks = [
+            { type: 'markdown' as const, text: message },
+            ...images.map((image) => ({
+              type: 'image' as const,
+              image_url: image.url,
+              alt_text: image.altText,
+            })),
+          ];
+          const updated = await slack.updateMessage({
+            channel: conversation.replyTarget.channelId,
+            ts: params.event.rootMessageId ?? conversation.replyTarget.threadId,
+            message: buildCustomAutomationSlackMessage({
+              automationId: params.event.automationId,
+              automationName: params.event.automationName,
+              text: message,
+              contentBlocks,
+            }),
+          });
+          if (!updated) {
+            throw new Error('Slack did not update the Fast automation root.');
+          }
+          params.onReplyPosted();
+          return;
+        }
+
         if (action) {
           await setPendingPrReviewAction({
             nonce: action.nonce,
             provider: 'slack',
             slackTeamId: conversation.workspaceId,
-            taskId: params.event.taskId,
+            taskId: action.taskId,
             repository: action.repository,
             prNumber: action.prNumber,
             prUrl: action.prUrl,
@@ -525,7 +678,7 @@ async function createDiscordFastAgentParentTurn(params: {
         userId: session.userId,
         conversation,
       }),
-      postReply: async ({ message, imageArtifactIds = [] }) => {
+      postReply: async ({ message, imageArtifactIds = [], kickoff }) => {
         const images = await buildSelectedImages({
           artifactIds: imageArtifactIds,
           event: params.event,
@@ -538,6 +691,7 @@ async function createDiscordFastAgentParentTurn(params: {
           params.event.pullRequest.number
             ? {
                 nonce: randomUUID(),
+                taskId: params.event.taskId,
                 question: params.event.suggestedActionQuestion,
                 followUpPrompt: params.event.suggestedActionPrompt,
                 repository: params.event.pullRequest.repository,
@@ -546,11 +700,27 @@ async function createDiscordFastAgentParentTurn(params: {
               }
             : null;
 
+        if (
+          params.event.type === 'automation_triggered' &&
+          params.event.rootMessageId &&
+          !kickoff
+        ) {
+          await provider.editMessage({
+            channelId:
+              conversation.replyTarget.threadId ??
+              conversation.replyTarget.channelId,
+            messageId: params.event.rootMessageId,
+            text: message,
+          });
+          params.onReplyPosted();
+          return;
+        }
+
         if (action) {
           await setPendingPrReviewAction({
             nonce: action.nonce,
             provider: 'discord',
-            taskId: params.event.taskId,
+            taskId: action.taskId,
             repository: action.repository,
             prNumber: action.prNumber,
             prUrl: action.prUrl,
@@ -618,6 +788,8 @@ async function createFastAgentParentTurn(params: {
       return createSlackFastAgentParentTurn(params);
     case 'discord':
       return createDiscordFastAgentParentTurn(params);
+    case 'automation':
+      return createAutomationFastAgentParentTurn(params);
   }
 }
 
@@ -666,26 +838,47 @@ export async function deliverFastAgentParentEvent(params: {
         replyPosted = true;
       },
     });
+    const defaultTaskModel =
+      params.event.type === 'automation_triggered'
+        ? params.event.defaultTaskModel
+        : undefined;
+    const launchTask = defaultTaskModel
+      ? (input: Parameters<LaunchFastAgentTask>[0]) =>
+          parentTurn.adapter.launchTask({
+            ...input,
+            model: input.model ?? defaultTaskModel,
+          })
+      : parentTurn.adapter.launchTask;
     // The same base URL must reach both the config resolver and the broker:
     // the broker only injects its auth header on deployment-proxy URLs whose
     // origin matches its own apiBaseUrl, so a mismatched pair silently drops
     // every deployment MCP server from parent-event turns.
     const apiBaseUrl = resolveApiBaseUrl() ?? undefined;
     await answerFastAgentQuestion({
-      question: `<delegated_task_event>${JSON.stringify(params.event)}</delegated_task_event>`,
+      question: `<platform_event>${JSON.stringify(params.event)}</platform_event>`,
       userId: parentTurn.userId,
       conversation: parentTurn.conversation,
       apiBaseUrl,
       signal: releaseTurnLock.signal,
       turnSource: 'platform_event',
       platformEventHandling:
-        params.event.type === 'pull_request_feedback'
+        params.event.type === 'pull_request_feedback' ||
+        params.event.type === 'pull_request_conflict_detected'
           ? 'present_only'
           : 'default',
       platformEventVisibility:
-        params.event.type === 'pull_request_feedback' ? 'required' : 'optional',
+        params.event.type === 'pull_request_feedback' ||
+        params.event.type === 'pull_request_conflict_detected' ||
+        params.event.type === 'automation_triggered'
+          ? 'required'
+          : 'optional',
+      platformEventKind:
+        params.event.type === 'automation_triggered'
+          ? 'automation'
+          : 'delegated_task',
       adapter: {
         ...parentTurn.adapter,
+        launchTask,
         resolveMcpServerConfigs: () =>
           resolveUserMcpServerConfigs({
             userId: parentTurn.userId,

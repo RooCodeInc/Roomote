@@ -3,6 +3,7 @@ import {
   buildAutomationRootSummaryText,
   buildAutomationSettingsContextText,
   buildAutomationSettingsMessage,
+  buildCustomAutomationSlackMessage,
   degradeSlackMrkdwnToMarkdown,
   SENTRY_TRIAGE_SETTINGS_HASH,
   SUGGEST_IDEAS_SETTINGS_HASH,
@@ -75,6 +76,50 @@ describe('manager slack helpers', () => {
         ],
       }),
     ]);
+  });
+
+  it('uses the standard automation chrome for custom automation reports', () => {
+    const message = buildCustomAutomationSlackMessage({
+      automationId: 'automation-1',
+      automationName: 'Weekly scan',
+      text: 'Found two regressions.',
+    });
+
+    expect(message).toEqual({
+      text: 'Found two regressions.',
+      blocks: [
+        expect.objectContaining({
+          type: 'container',
+          width: 'full',
+          title: {
+            type: 'plain_text',
+            text: 'Weekly scan',
+            emoji: false,
+          },
+          icon: {
+            type: 'image',
+            image_url: 'https://app.example.com/automation-icons/zap.png',
+            alt_text: 'Weekly scan automation icon',
+          },
+          has_header_divider: true,
+          child_blocks: [
+            {
+              type: 'section',
+              text: { type: 'mrkdwn', text: 'Found two regressions.' },
+            },
+            expect.objectContaining({
+              type: 'actions',
+              elements: [
+                expect.objectContaining({
+                  action_id: 'late_bound_automation_configure',
+                  url: 'https://app.example.com/automations#custom-automation-automation-1',
+                }),
+              ],
+            }),
+          ],
+        }),
+      ],
+    });
   });
 
   it('joins a generated summary with an optional action footer', () => {

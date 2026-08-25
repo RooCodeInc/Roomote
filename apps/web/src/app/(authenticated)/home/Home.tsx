@@ -171,6 +171,7 @@ export function Home({
 
   const searchParams = useSearchParams();
   const promptParam = searchParams.get('prompt') ?? '';
+  const modelParam = searchParams.get('model')?.trim() || undefined;
   const environmentIdParam = searchParams.get('environmentId')?.trim() ?? '';
 
   const [promptText, setPromptText] = useState(promptParam);
@@ -178,8 +179,9 @@ export function Home({
   const [routingState, setRoutingState] = useState<RoutingFlowState>('idle');
   const [selectedComputeProvider, setSelectedComputeProvider] =
     useState<ComputeProvider>(initialComputeProvider);
-  const [selectedModelOverrideId, setSelectedModelOverrideId] =
-    useState<string>();
+  const [selectedModelOverrideId, setSelectedModelOverrideId] = useState<
+    string | undefined
+  >(modelParam);
   const [isBottomSheetExpanded, setIsBottomSheetExpanded] = useState(false);
   const [isFeedbackPromptVisible, setIsFeedbackPromptVisible] = useState(false);
   const [isFeedbackDialogOpen, setIsFeedbackDialogOpen] = useState(false);
@@ -202,6 +204,7 @@ export function Home({
   const routingRequestIdRef = useRef(0);
 
   useEffect(() => setPromptText(promptParam), [promptParam]);
+  useEffect(() => setSelectedModelOverrideId(modelParam), [modelParam]);
 
   useEffect(() => {
     setIsFeedbackPromptVisible(!isFeedbackPromptDismissed());

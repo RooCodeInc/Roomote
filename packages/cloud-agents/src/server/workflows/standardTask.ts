@@ -4,6 +4,7 @@ import {
   type SourceControlProvider,
   ALL_REPOSITORIES,
   getSourceControlProviderLabel,
+  isCommunicationProvider,
   isSourceControlTaskSurface,
   PRODUCT_NAME,
 } from '@roomote/types';
@@ -144,10 +145,13 @@ export function standardTask({
   const isAllRepositoriesSelection = repo === ALL_REPOSITORIES;
   const usesSharedWorkspaceRoot =
     isAllRepositoriesSelection || (repoFullNames?.length ?? 0) > 0;
+  const attributionSurface = isCommunicationProvider(sourceProvider)
+    ? sourceProvider
+    : taskSurface;
   const prBodyAttributionLine = getPrBodyAttributionLine({
     attribution,
     taskUrl: _taskRunUrl,
-    taskSurface,
+    taskSurface: attributionSurface,
     slackTeamDomain,
     slackTeamId,
     slackConversationUrl,

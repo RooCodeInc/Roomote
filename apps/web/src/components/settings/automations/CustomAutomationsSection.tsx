@@ -6,6 +6,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import {
   ALL_REPOSITORIES,
+  FAST_EXECUTION,
   isBackgroundAutomationUserTargetKind,
   MAX_CUSTOM_AUTOMATIONS,
   type CustomAutomationScheduleMode,
@@ -340,6 +341,7 @@ export function CustomAutomationsSection() {
 
   const environmentOptions = useMemo(
     () => [
+      { id: FAST_EXECUTION, name: 'Fast (no sandbox)' },
       { id: ALL_REPOSITORIES, name: 'All repositories' },
       ...(environmentsQuery.data ?? []).map((environment) => ({
         id: environment.id,
@@ -774,12 +776,20 @@ export function CustomAutomationsSection() {
           </div>
 
           <div className="space-y-2">
-            <Label>Model</Label>
+            <Label>
+              {form.environmentId === FAST_EXECUTION
+                ? 'Delegated task model'
+                : 'Model'}
+            </Label>
             <ModelSelect
               size="default"
               ariaLabel="Automation model"
               value={form.model}
-              emptyOptionLabel="Default coding model"
+              emptyOptionLabel={
+                form.environmentId === FAST_EXECUTION
+                  ? 'Default delegated task model'
+                  : 'Default coding model'
+              }
               disabled={busy}
               onValueChange={(value) =>
                 setForm((current) => ({ ...current, model: value }))
@@ -955,6 +965,17 @@ export function CustomAutomationsSection() {
               </div>
             ) : null}
           </div>
+          {form.environmentId === FAST_EXECUTION &&
+          !(
+            (form.targetProvider === 'slack' ||
+              form.targetProvider === 'discord') &&
+            form.targetMode === 'channel'
+          ) ? (
+            <p className="text-sm text-muted-foreground">
+              This run is stored as a Fast conversation. Its output will be
+              available in the upcoming Fast runs view.
+            </p>
+          ) : null}
         </div>
 
         <div className="flex items-center justify-between gap-3">
@@ -1079,9 +1100,11 @@ export function CustomAutomationsSection() {
             <div className="divide-y divide-background">
               {rows.map((row) => {
                 const environmentName =
-                  environmentOptions.find(
-                    (environment) => environment.id === row.environmentId,
-                  )?.name ?? 'Environment missing';
+                  row.executionMode === 'fast'
+                    ? 'Fast'
+                    : (environmentOptions.find(
+                        (environment) => environment.id === row.environmentId,
+                      )?.name ?? 'Environment missing');
                 const target = targetFromRow(row);
                 const destinationName =
                   DESTINATION_OPTIONS.find(
@@ -1162,18 +1185,25 @@ export function CustomAutomationsSection() {
                           </>
                         ) : null}
                       </p>
+                      {row.executionMode === 'fast' && row.latestFastResult ? (
+                        <p className="line-clamp-2 text-xs text-muted-foreground">
+                          {row.latestFastResult}
+                        </p>
+                      ) : null}
                     </div>
                     <div className="col-start-2 row-start-2 flex shrink-0 items-center gap-1 sm:col-start-3 sm:row-start-1">
-                      <BasicTooltip content="View previous runs">
-                        <Button asChild size="icon" variant="ghost">
-                          <Link
-                            href={`/tasks?userId=${encodeURIComponent(historyFilter!)}`}
-                            aria-label={`View previous runs for ${row.name}`}
-                          >
-                            <RotateCcwClock />
-                          </Link>
-                        </Button>
-                      </BasicTooltip>
+                      {row.executionMode !== 'fast' ? (
+                        <BasicTooltip content="View previous runs">
+                          <Button asChild size="icon" variant="ghost">
+                            <Link
+                              href={`/tasks?userId=${encodeURIComponent(historyFilter!)}`}
+                              aria-label={`View previous runs for ${row.name}`}
+                            >
+                              <RotateCcwClock />
+                            </Link>
+                          </Button>
+                        </BasicTooltip>
+                      ) : null}
                       <CustomAutomationRunButton
                         automation={row}
                         disabled={busy}

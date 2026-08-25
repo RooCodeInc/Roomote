@@ -1,8 +1,9 @@
 import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { ROOMOTE_TASK_INSPECTION_ACTIONS } from '@roomote/types';
+import { ALL_REPOSITORIES } from '@roomote/types';
 
 import {
+  bindFastAgentMcpToolExecutor,
   bindFastAgentNativeToolExecutor,
   createFastAgentSpillTurnBudget,
   FAST_AGENT_NATIVE_TOOL_FILTER,
@@ -13,34 +14,19 @@ import {
   FAST_AGENT_SUBAGENT_TOOL_FILTER,
   getFastAgentNativeToolRuntime,
 } from '../fast-agent-native-tool-bridge';
+import { callMcpTool, listMcpTools } from '../../mcp-tool-client';
 
 describe('Fast native OpenCode tool bridge', () => {
   it('installs Fast tools in an isolated OpenCode session directory', async () => {
-    const runtime = await getFastAgentNativeToolRuntime();
+    const runtime = await getFastAgentNativeToolRuntime('native-files', []);
     const toolsDirectory = join(runtime.directory, '.opencode', 'tools');
     const installedToolFiles = await readdir(toolsDirectory);
     const replySource = await readFile(
       join(toolsDirectory, 'send_chat_reply.js'),
       'utf8',
     );
-    const integrationSource = await readFile(
-      join(toolsDirectory, 'integration_call.js'),
-      'utf8',
-    );
     const launchTaskSource = await readFile(
       join(toolsDirectory, 'launch_task.js'),
-      'utf8',
-    );
-    const manageTasksSource = await readFile(
-      join(toolsDirectory, 'manage_tasks.js'),
-      'utf8',
-    );
-    const messageContextSource = await readFile(
-      join(toolsDirectory, 'get_chat_message_context.js'),
-      'utf8',
-    );
-    const channelMessagesSource = await readFile(
-      join(toolsDirectory, 'get_chat_channel_messages.js'),
       'utf8',
     );
     const bridgeSource = await readFile(
@@ -59,27 +45,29 @@ describe('Fast native OpenCode tool bridge', () => {
     );
     expect(replySource).toContain('export default {');
     expect(replySource).toContain('invoke("send_chat_reply"');
-    expect(integrationSource).toContain('export default {');
-    expect(integrationSource).toContain('invoke("integration_call"');
     expect(launchTaskSource).toContain('model: z.string().min(1)');
     expect(launchTaskSource).toContain('deployment-enabled model ID');
-    expect(manageTasksSource).toContain('invoke("manage_tasks"');
-    expect(manageTasksSource).toContain(
-      `z.enum(${JSON.stringify(ROOMOTE_TASK_INSPECTION_ACTIONS)})`,
+    expect(launchTaskSource).toContain(
+      'Brief user-facing description of the work now underway',
     );
-    expect(manageTasksSource).toContain(
-      'Use launch_task, send_task_message, or cancel_task for task changes',
+    expect(launchTaskSource).toContain(
+      'do not mention delegation, launching, or queue state',
     );
-    expect(messageContextSource).toContain('invoke("get_chat_message_context"');
-    expect(messageContextSource).toContain('messageId: z.string().min(1)');
-    expect(messageContextSource).not.toContain('channel:');
-    expect(channelMessagesSource).toContain(
-      'invoke("get_chat_channel_messages"',
+    expect(launchTaskSource).not.toContain(
+      'explanation of what is being delegated',
     );
-    expect(channelMessagesSource).toContain(
-      'defaults Slack history to the previous 24 hours',
+    expect(launchTaskSource).toContain(ALL_REPOSITORIES);
+    expect(launchTaskSource).toContain(
+      'to run against all active repositories',
     );
-    expect(channelMessagesSource).not.toContain('channel:');
+    expect(installedToolFiles).not.toEqual(
+      expect.arrayContaining([
+        'get_chat_channel_messages.js',
+        'get_chat_message_context.js',
+        'integration_call.js',
+        'manage_tasks.js',
+      ]),
+    );
     expect(bridgeSource).toContain('context.sessionID');
     expect(bridgeSource).toContain('agent: context.agent');
     expect(bridgeSource).toContain('metadata: payload.metadata ?? {}');
@@ -88,17 +76,13 @@ describe('Fast native OpenCode tool bridge', () => {
       '*': false,
       task: true,
       [FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReply]: true,
-      [FAST_AGENT_NATIVE_TOOL_NAMES.integrationCall]: true,
-      [FAST_AGENT_NATIVE_TOOL_NAMES.manageTasks]: true,
-      [FAST_AGENT_NATIVE_TOOL_NAMES.getChatMessageContext]: true,
-      [FAST_AGENT_NATIVE_TOOL_NAMES.getChatChannelMessages]: true,
       [FAST_AGENT_NATIVE_TOOL_NAMES.spillGrep]: true,
       [FAST_AGENT_NATIVE_TOOL_NAMES.spillRead]: true,
     });
-    expect(FAST_AGENT_SUBAGENT_TOOL_FILTER).toEqual({
-      '*': false,
-      [FAST_AGENT_NATIVE_TOOL_NAMES.integrationCall]: true,
-      [FAST_AGENT_NATIVE_TOOL_NAMES.manageTasks]: true,
+    expect(FAST_AGENT_SUBAGENT_TOOL_FILTER).toMatchObject({
+      '*': true,
+      task: false,
+      roomote_manage_custom_automations: false,
     });
     for (const rawFilesystemTool of [
       'read',
@@ -113,8 +97,6 @@ describe('Fast native OpenCode tool bridge', () => {
     for (const parentOnlyTool of [
       FAST_AGENT_NATIVE_TOOL_NAMES.cancelTask,
       FAST_AGENT_NATIVE_TOOL_NAMES.ignoreEvent,
-      FAST_AGENT_NATIVE_TOOL_NAMES.getChatMessageContext,
-      FAST_AGENT_NATIVE_TOOL_NAMES.getChatChannelMessages,
       FAST_AGENT_NATIVE_TOOL_NAMES.launchTask,
       FAST_AGENT_NATIVE_TOOL_NAMES.retryTaskStart,
       FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReaction,
@@ -127,8 +109,147 @@ describe('Fast native OpenCode tool bridge', () => {
     }
   });
 
+  it('mounts actor-resolved MCP tools with their native JSON schemas', async () => {
+    const inputSchema = {
+      type: 'object' as const,
+      properties: {
+        query: { type: 'string', minLength: 2 },
+        filters: {
+          oneOf: [
+            { type: 'array', items: { type: 'string' } },
+            { type: 'null' },
+          ],
+        },
+      },
+      required: ['query'],
+      additionalProperties: false,
+    };
+    const runtime = await getFastAgentNativeToolRuntime('native-mcp', [
+      {
+        id: 'github',
+        name: 'GitHub',
+        description: 'Repository access',
+        tools: [
+          { name: 'search_code', description: 'Search code', inputSchema },
+        ],
+      },
+    ]);
+    const config = JSON.parse(
+      await readFile(join(runtime.directory, 'opencode.json'), 'utf8'),
+    ) as {
+      mcp: Record<string, { url: string; headers: Record<string, string> }>;
+    };
+    const executor = vi.fn(async ({ args }) => ({ matches: [args.query] }));
+    expect(config.mcp.github!.headers.Authorization).toBe(
+      `Bearer ${runtime.mcpCapability}`,
+    );
+    expect(config.mcp.github!.headers.Authorization).not.toContain(
+      runtime.env.ROOMOTE_FAST_TOOL_BRIDGE_TOKEN,
+    );
+    const unbind = bindFastAgentMcpToolExecutor(
+      runtime.mcpCapability,
+      executor,
+    );
+
+    try {
+      await expect(
+        listMcpTools({
+          url: config.mcp.github!.url,
+          headers: config.mcp.github!.headers,
+        }),
+      ).resolves.toEqual([
+        { name: 'search_code', description: 'Search code', inputSchema },
+      ]);
+      await expect(
+        callMcpTool({
+          url: config.mcp.github!.url,
+          headers: config.mcp.github!.headers,
+          toolName: 'search_code',
+          args: { query: 'Fast', filters: null },
+        }),
+      ).resolves.toEqual({ matches: ['Fast'] });
+      expect(executor).toHaveBeenCalledWith({
+        integrationId: 'github',
+        toolName: 'search_code',
+        args: { query: 'Fast', filters: null },
+      });
+    } finally {
+      unbind();
+    }
+  });
+
+  it('spills oversized MCP results for direct parent recovery', async () => {
+    const conversationId = 'mcp-spill-conversation';
+    const parentSessionId = 'mcp-spill-parent-session';
+    const runtime = await getFastAgentNativeToolRuntime(conversationId, [
+      {
+        id: 'github',
+        name: 'GitHub',
+        description: 'Repository access',
+        tools: [{ name: 'search_code' }],
+      },
+    ]);
+    const config = JSON.parse(
+      await readFile(join(runtime.directory, 'opencode.json'), 'utf8'),
+    ) as {
+      mcp: Record<string, { url: string; headers: Record<string, string> }>;
+    };
+    const unbindMcp = bindFastAgentMcpToolExecutor(
+      runtime.mcpCapability,
+      async () => ({ text: 'MCP evidence '.repeat(6_000) }),
+    );
+    const unbindParent = bindFastAgentNativeToolExecutor(
+      parentSessionId,
+      conversationId,
+      async () => null,
+    );
+
+    try {
+      const descriptor = (await callMcpTool({
+        url: config.mcp.github!.url,
+        headers: config.mcp.github!.headers,
+        toolName: 'search_code',
+        args: {},
+      })) as {
+        preview: string;
+        spill: { byteLength: number; guidance: string; handle: string };
+        truncated: boolean;
+      };
+      expect(descriptor).toMatchObject({
+        truncated: true,
+        spill: { handle: expect.any(String), byteLength: expect.any(Number) },
+      });
+      expect(descriptor.spill.guidance).toContain(
+        'subagent should return the handle verbatim',
+      );
+      expect(
+        Buffer.byteLength(JSON.stringify(descriptor), 'utf8'),
+      ).toBeLessThanOrEqual(FAST_AGENT_NATIVE_TOOL_OUTPUT_LIMIT_BYTES);
+
+      const response = await fetch(runtime.env.ROOMOTE_FAST_TOOL_BRIDGE_URL!, {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${runtime.env.ROOMOTE_FAST_TOOL_BRIDGE_TOKEN}`,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          sessionID: parentSessionId,
+          tool: FAST_AGENT_NATIVE_TOOL_NAMES.spillGrep,
+          args: { handle: descriptor.spill.handle, query: 'MCP evidence' },
+        }),
+      }).then((result) => result.json());
+      expect(JSON.parse(response.output)).toMatchObject({
+        success: true,
+        result: { matches: expect.any(Array) },
+      });
+    } finally {
+      unbindParent();
+      unbindMcp();
+    }
+  });
+
   it('routes raw JSON arguments and results by OpenCode session id', async () => {
-    const runtime = await getFastAgentNativeToolRuntime();
+    const runtime = await getFastAgentNativeToolRuntime('native-route', []);
     const executor = vi.fn(async ({ agent, name, args }) => ({
       agent,
       name,
@@ -151,12 +272,8 @@ describe('Fast native OpenCode tool bridge', () => {
         body: JSON.stringify({
           sessionID: 'opencode-session-1',
           agent: 'judge',
-          tool: FAST_AGENT_NATIVE_TOOL_NAMES.integrationCall,
-          args: {
-            integrationId: 'github',
-            toolName: 'search_code',
-            arguments: { query: 'Fast', nested: { exact: true } },
-          },
+          tool: FAST_AGENT_NATIVE_TOOL_NAMES.ignoreEvent,
+          args: { reason: 'test' },
         }),
       });
 
@@ -167,18 +284,14 @@ describe('Fast native OpenCode tool bridge', () => {
         metadata: {
           roomoteResult: {
             agent: 'judge',
-            name: FAST_AGENT_NATIVE_TOOL_NAMES.integrationCall,
+            name: FAST_AGENT_NATIVE_TOOL_NAMES.ignoreEvent,
           },
         },
       });
       expect(JSON.parse(payload.output)).toEqual({
         agent: 'judge',
-        name: FAST_AGENT_NATIVE_TOOL_NAMES.integrationCall,
-        echoed: {
-          integrationId: 'github',
-          toolName: 'search_code',
-          arguments: { query: 'Fast', nested: { exact: true } },
-        },
+        name: FAST_AGENT_NATIVE_TOOL_NAMES.ignoreEvent,
+        echoed: { reason: 'test' },
         nestedResult: { values: [1, 2, 3] },
       });
       expect(executor).toHaveBeenCalledWith(
@@ -190,7 +303,7 @@ describe('Fast native OpenCode tool bridge', () => {
   });
 
   it('does not expose unexpected executor errors through the bridge', async () => {
-    const runtime = await getFastAgentNativeToolRuntime();
+    const runtime = await getFastAgentNativeToolRuntime('native-errors', []);
     const unbind = bindFastAgentNativeToolExecutor(
       'opencode-session-sensitive-error',
       'conversation-sensitive-error',
@@ -211,7 +324,7 @@ describe('Fast native OpenCode tool bridge', () => {
         },
         body: JSON.stringify({
           sessionID: 'opencode-session-sensitive-error',
-          tool: FAST_AGENT_NATIVE_TOOL_NAMES.integrationCall,
+          tool: FAST_AGENT_NATIVE_TOOL_NAMES.ignoreEvent,
           args: {},
         }),
       });
@@ -232,7 +345,7 @@ describe('Fast native OpenCode tool bridge', () => {
   });
 
   it('spills oversized output before OpenCode can invoke its native spill writer', async () => {
-    const runtime = await getFastAgentNativeToolRuntime();
+    const runtime = await getFastAgentNativeToolRuntime('native-spill', []);
     const parentSession = 'opencode-parent-spill';
     const childSession = 'opencode-child-spill';
     const otherSession = 'opencode-other-spill';
@@ -264,7 +377,7 @@ describe('Fast native OpenCode tool bridge', () => {
     try {
       const oversized = await callBridge({
         sessionID: parentSession,
-        tool: FAST_AGENT_NATIVE_TOOL_NAMES.integrationCall,
+        tool: FAST_AGENT_NATIVE_TOOL_NAMES.ignoreEvent,
         args: {},
       });
       expect(Buffer.byteLength(oversized.output, 'utf8')).toBeLessThanOrEqual(
@@ -310,7 +423,7 @@ describe('Fast native OpenCode tool bridge', () => {
   });
 
   it('returns advisor handles to the Fast parent without delegation guidance', async () => {
-    const runtime = await getFastAgentNativeToolRuntime();
+    const runtime = await getFastAgentNativeToolRuntime('native-advisor', []);
     const budget = createFastAgentSpillTurnBudget();
     const unbindAdvisor = bindFastAgentNativeToolExecutor(
       'advisor-session',
@@ -338,7 +451,7 @@ describe('Fast native OpenCode tool bridge', () => {
       const oversized = await callBridge({
         sessionID: 'advisor-session',
         agent: 'advisor',
-        tool: FAST_AGENT_NATIVE_TOOL_NAMES.integrationCall,
+        tool: FAST_AGENT_NATIVE_TOOL_NAMES.ignoreEvent,
         args: {},
       });
       const descriptor = JSON.parse(oversized.output);
@@ -375,7 +488,10 @@ describe('Fast native OpenCode tool bridge', () => {
   });
 
   it('enforces the cumulative per-turn spill call limit', async () => {
-    const runtime = await getFastAgentNativeToolRuntime();
+    const runtime = await getFastAgentNativeToolRuntime(
+      'native-call-budget',
+      [],
+    );
     const budget = createFastAgentSpillTurnBudget();
     const sessionID = 'opencode-spill-call-budget';
     const unbind = bindFastAgentNativeToolExecutor(
@@ -396,7 +512,7 @@ describe('Fast native OpenCode tool bridge', () => {
 
     try {
       const oversized = await callBridge(
-        FAST_AGENT_NATIVE_TOOL_NAMES.integrationCall,
+        FAST_AGENT_NATIVE_TOOL_NAMES.ignoreEvent,
         {},
       );
       const handle = JSON.parse(oversized.output).spill.handle;
@@ -426,7 +542,10 @@ describe('Fast native OpenCode tool bridge', () => {
   });
 
   it('enforces the cumulative per-turn spill output budget', async () => {
-    const runtime = await getFastAgentNativeToolRuntime();
+    const runtime = await getFastAgentNativeToolRuntime(
+      'native-output-budget',
+      [],
+    );
     const budget = createFastAgentSpillTurnBudget();
     const sessionID = 'opencode-spill-output-budget';
     const unbind = bindFastAgentNativeToolExecutor(
@@ -447,7 +566,7 @@ describe('Fast native OpenCode tool bridge', () => {
 
     try {
       const oversized = await callBridge(
-        FAST_AGENT_NATIVE_TOOL_NAMES.integrationCall,
+        FAST_AGENT_NATIVE_TOOL_NAMES.ignoreEvent,
         {},
       );
       const handle = JSON.parse(oversized.output).spill.handle;
@@ -481,7 +600,7 @@ describe('Fast native OpenCode tool bridge', () => {
   });
 
   it('rejects unauthenticated and inactive-session calls', async () => {
-    const runtime = await getFastAgentNativeToolRuntime();
+    const runtime = await getFastAgentNativeToolRuntime('native-auth', []);
     const body = JSON.stringify({
       sessionID: 'missing-session',
       tool: FAST_AGENT_NATIVE_TOOL_NAMES.ignoreEvent,

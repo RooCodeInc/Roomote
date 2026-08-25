@@ -12,6 +12,8 @@ const {
   mockHandlePrReopen,
   mockHandlePrSynchronize,
   mockHandlePushConflictCheck,
+  mockQueueBaseBranchMergeabilityCheck,
+  mockQueueTrackedPullRequestMergeabilityCheck,
   mockIsRepoSkipped,
   mockQueuePrReviewActivityNotification,
   mockQueuePrReviewSummaryNotification,
@@ -46,6 +48,8 @@ const {
   mockHandlePrReopen: vi.fn(),
   mockHandlePrSynchronize: vi.fn(),
   mockHandlePushConflictCheck: vi.fn(),
+  mockQueueBaseBranchMergeabilityCheck: vi.fn(),
+  mockQueueTrackedPullRequestMergeabilityCheck: vi.fn(),
   mockIsRepoSkipped: vi.fn(),
   mockQueuePrReviewActivityNotification: vi.fn(),
   mockQueuePrReviewSummaryNotification: vi.fn(),
@@ -167,6 +171,12 @@ vi.mock('../handlePrSynchronize', () => ({
 
 vi.mock('../handlePushConflictCheck', () => ({
   handlePushConflictCheck: mockHandlePushConflictCheck,
+}));
+
+vi.mock('../queuePullRequestMergeabilityCheck', () => ({
+  queueBaseBranchMergeabilityCheck: mockQueueBaseBranchMergeabilityCheck,
+  queueTrackedPullRequestMergeabilityCheck:
+    mockQueueTrackedPullRequestMergeabilityCheck,
 }));
 
 vi.mock('../handleWorkflowRunCompleted', () => ({

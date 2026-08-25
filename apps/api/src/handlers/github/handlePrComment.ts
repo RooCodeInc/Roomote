@@ -4,6 +4,7 @@ import {
   enqueueTask,
   getTaskUrl,
   routeGitHubTask,
+  SnapshotResumeAlreadyExistsError,
 } from '@roomote/cloud-agents/server';
 import {
   findActiveGitHubPrReviewTask,
@@ -931,7 +932,7 @@ async function deliverFollowUpToExistingTask({
   });
 }
 
-async function resumeExistingTaskAndDeliverFollowUp({
+export async function resumeExistingTaskAndDeliverFollowUp({
   taskId,
   userId,
   sourceRunId,
@@ -1048,18 +1049,32 @@ async function resumeExistingTaskAndDeliverFollowUp({
 
   // Resumes never create tasks and never re-attribute; the resuming human
   // becomes the new run's acting user.
-  const resumeLaunch = await enqueueTask(
-    {
-      task: {
-        type: TaskPayloadKind.SnapshotResume,
-        sourceSnapshotId: sourceRun.snapshotId,
-        sourceRunId: sourceRun.id,
-        payload: resumePayload,
+  let resumeLaunch: Awaited<ReturnType<typeof enqueueTask>>;
+  try {
+    resumeLaunch = await enqueueTask(
+      {
+        task: {
+          type: TaskPayloadKind.SnapshotResume,
+          sourceSnapshotId: sourceRun.snapshotId,
+          sourceRunId: sourceRun.id,
+          payload: resumePayload,
+        },
+        actingUserId: senderUserId,
       },
-      actingUserId: senderUserId,
-    },
-    {},
-  );
+      {},
+    );
+  } catch (error) {
+    if (error instanceof SnapshotResumeAlreadyExistsError) {
+      // Continue through the normal fallback path so this distinct instruction
+      // gets its own linked follow-up task and response instead of being lost.
+      return {
+        success: false as const,
+        error: 'Reusable PR owner is already resuming',
+        status: 409,
+      };
+    }
+    throw error;
+  }
 
   const accepted = await waitForResumeRunToAcceptDeferredPrompt({
     taskId,

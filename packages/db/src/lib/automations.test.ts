@@ -202,3 +202,49 @@ describe('normalizeBackgroundAgentSettings emoji trigger', () => {
     expect(settings.callRoomoteViaEmojiName).toBe('eyes');
   });
 });
+
+describe('normalizeBackgroundAgentSettings provider usage limits', () => {
+  it('preserves the legacy alert behavior with hourly checks at 85% by default', () => {
+    const settings = normalizeBackgroundAgentSettings(null);
+
+    expect(settings.providerUsageLimitFrequency).toBe('every_hour');
+    expect(settings.providerUsageLimitThreshold).toBe(85);
+  });
+
+  it('projects persisted disablement and validates the stored threshold', () => {
+    const settings = normalizeBackgroundAgentSettings(null, [
+      {
+        key: 'provider_usage_limit',
+        enabled: false,
+        schedule: {},
+        settings: { threshold: 81 },
+        targets: [],
+      } as unknown as Automation,
+    ]);
+
+    expect(settings.providerUsageLimitFrequency).toBe('off');
+    expect(settings.providerUsageLimitThreshold).toBe(85);
+  });
+
+  it('normalizes enabled alerts to hourly checks and preserves their configuration', () => {
+    const settings = normalizeBackgroundAgentSettings(null, [
+      {
+        key: 'provider_usage_limit',
+        enabled: true,
+        schedule: { mode: 'daily' },
+        settings: { threshold: 70 },
+        targets: [
+          {
+            provider: 'slack',
+            targetKind: 'slack_channel',
+            externalRef: 'C-QUOTAS',
+          },
+        ],
+      } as unknown as Automation,
+    ]);
+
+    expect(settings.providerUsageLimitFrequency).toBe('every_hour');
+    expect(settings.providerUsageLimitThreshold).toBe(70);
+    expect(settings.providerUsageLimitSlackChannelId).toBe('C-QUOTAS');
+  });
+});

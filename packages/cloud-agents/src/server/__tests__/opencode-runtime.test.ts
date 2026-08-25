@@ -213,9 +213,10 @@ describe('buildOpenCodeCliEnv', () => {
         mode: 'subagent',
         permission: NON_TASK_TOOL_PERMISSION_DENIALS,
         tools: {
-          '*': false,
-          integration_call: true,
-          manage_tasks: true,
+          '*': true,
+          task: false,
+          roomote_manage_custom_automations: false,
+          send_chat_reply: false,
         },
       });
       expect(agent.prompt).toEqual(

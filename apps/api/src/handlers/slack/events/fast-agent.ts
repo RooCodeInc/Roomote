@@ -1,4 +1,3 @@
-import { PRODUCT_NAME } from '@roomote/types';
 import {
   acquireFastAgentTurnLock,
   answerFastAgentQuestion,
@@ -16,7 +15,6 @@ import { resolveUserMcpServerConfigs } from '@roomote/sdk/server';
 
 import { LEADING_FAST_COMMAND_MENTION_PATTERN } from '../constants.js';
 import { postSlackThreadMarkdownMessage } from '../helpers/thread-posting.js';
-import { createFastAgentChatContextAdapter } from '../../fast-agent-chat-context.js';
 
 export function stripLeadingFastCommandMention(text: string): string {
   return text.replace(LEADING_FAST_COMMAND_MENTION_PATTERN, '').trimStart();
@@ -57,7 +55,6 @@ export async function processFastAgentMessage(params: {
   userId: string;
   teamId: string;
   apiBaseUrl?: string;
-  usageText?: string;
   continuation?: boolean;
   activeTasks?: FastAgentActiveTask[];
   resolveActiveTasks?: () => Promise<FastAgentActiveTask[]>;
@@ -71,7 +68,6 @@ export async function processFastAgentMessage(params: {
     userId,
     teamId,
     apiBaseUrl,
-    usageText = `Use \`!fast <question>\` after mentioning ${PRODUCT_NAME}.`,
     continuation = false,
     activeTasks = [],
     resolveActiveTasks,
@@ -105,7 +101,7 @@ export async function processFastAgentMessage(params: {
       stripLeadingFastCommandMention(event.authoredText ?? event.text),
     ),
   );
-  const question = extractFastQuestion(normalizedText, continuation);
+  const question = extractFastQuestion(normalizedText, continuation) ?? '';
 
   let didAddProcessingReaction = false;
 
@@ -119,22 +115,6 @@ export async function processFastAgentMessage(params: {
         timestamp: event.ts,
         name: processingReactionName,
       });
-    }
-
-    if (!question) {
-      await postSlackThreadMarkdownMessage({
-        slack,
-        channel: event.channel,
-        threadTs: threadId,
-        text: usageText,
-        sourceMessageTs: event.ts,
-        conversationLog: {
-          userId,
-          slackTeamId: teamId,
-          source: 'fast_agent',
-        },
-      });
-      return;
     }
 
     let threadContext: Awaited<ReturnType<typeof slack.fetchThreadMessages>> =
@@ -198,10 +178,6 @@ export async function processFastAgentMessage(params: {
           : undefined,
       activeTasks: resolvedActiveTasks,
       adapter: {
-        ...createFastAgentChatContextAdapter({
-          actingUserId: userId,
-          conversation,
-        }),
         resolveMcpServerConfigs: () =>
           resolveUserMcpServerConfigs({
             userId,
