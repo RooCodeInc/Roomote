@@ -3,116 +3,25 @@
 import { useCallback } from 'react';
 import { SSEProvider } from 'react-hooks-sse';
 
-import {
-  DEFAULT_MANAGED_DEPLOYMENT_ACCESS,
-  RunStatus,
-  TaskPayloadKind,
-  type RunStatus as RunStatusValue,
-} from '@roomote/types';
+import type { RunStatus as RunStatusValue } from '@roomote/types';
 import type { TaskRun } from '@roomote/db';
 
-import { useRestoreTaskRunSnapshot } from '@/hooks/snapshots';
-import { useRetryFailedTaskStart } from '@/hooks/task-runs';
-import { useAuthorizedUser } from '@/hooks/useUser';
 import { getTaskRunError } from '@/lib/task-run-errors';
 
-import {
-  StartupFailureMessage,
-  StartupSequence,
-  type StartupPromptPreview,
-  type StartupRetryAction,
-} from './StartupMessage';
+import { StartupFailureMessage, StartupSequence } from './StartupMessage';
 import { useStartupProgress } from './useStartupProgress';
-
-/**
- * Client-side eligibility for start retry. Keep in lockstep with
- * `isRelaunchableFailedStartPayloadKind` in packages/cloud-agents.
- */
-function canRelaunchFailedStart(
-  taskRun: Pick<TaskRun, 'payloadKind' | 'status'>,
-): boolean {
-  if (taskRun.status !== RunStatus.Failed) {
-    return false;
-  }
-
-  switch (taskRun.payloadKind) {
-    case TaskPayloadKind.StandardTask:
-    case TaskPayloadKind.Scan:
-    case TaskPayloadKind.SlackAppMention:
-    case TaskPayloadKind.LinearAgentSession:
-    case TaskPayloadKind.GithubPrReviewFollowUp:
-    case TaskPayloadKind.McpRecommendations:
-      return true;
-    default:
-      return false;
-  }
-}
-
-function buildRetryAction(params: {
-  taskId: string;
-  taskRun?:
-    | Pick<
-        TaskRun,
-        'id' | 'payloadKind' | 'status' | 'sourceRunId' | 'sourceSnapshotId'
-      >
-    | TaskRun;
-  restoreSnapshot: ReturnType<typeof useRestoreTaskRunSnapshot>;
-  retryFailedStart: ReturnType<typeof useRetryFailedTaskStart>;
-  readOnly: boolean;
-}): StartupRetryAction | undefined {
-  const { taskId, taskRun, restoreSnapshot, retryFailedStart, readOnly } =
-    params;
-
-  if (!taskRun || readOnly) {
-    return undefined;
-  }
-
-  const canRetryResume =
-    taskRun.payloadKind === TaskPayloadKind.SnapshotResume &&
-    typeof taskRun.sourceSnapshotId === 'string' &&
-    taskRun.sourceSnapshotId.length > 0 &&
-    typeof taskRun.sourceRunId === 'number';
-
-  if (canRetryResume) {
-    return {
-      label: 'Retry resume',
-      onClick: () =>
-        restoreSnapshot.mutate({
-          sourceSnapshotId: taskRun.sourceSnapshotId!,
-          sourceRunId: taskRun.sourceRunId!,
-        }),
-      pending: restoreSnapshot.isPending,
-    };
-  }
-
-  if (canRelaunchFailedStart(taskRun)) {
-    return {
-      label: 'Retry',
-      onClick: () =>
-        retryFailedStart.mutate({
-          taskId,
-          runId: taskRun.id,
-        }),
-      pending: retryFailedStart.isPending,
-    };
-  }
-
-  return undefined;
-}
 
 interface StartupProps {
   runId: number;
-  taskId: string;
   initialTaskRun?: TaskRun;
-  prompt?: StartupPromptPreview | null;
+  newTaskHref: string;
   onStatusChange?: (status: RunStatusValue) => void;
 }
 
 export const Startup = ({
   runId,
-  taskId,
   initialTaskRun,
-  prompt,
+  newTaskHref,
   onStatusChange,
 }: StartupProps) => {
   const eventSource = useCallback(() => {
@@ -129,9 +38,8 @@ export const Startup = ({
     <SSEProvider source={eventSource}>
       <StartupInner
         runId={runId}
-        taskId={taskId}
         initialTaskRun={initialTaskRun}
-        prompt={prompt}
+        newTaskHref={newTaskHref}
         onStatusChange={onStatusChange}
       />
     </SSEProvider>
@@ -140,24 +48,17 @@ export const Startup = ({
 
 interface StartupInnerProps {
   runId: number;
-  taskId: string;
   initialTaskRun?: TaskRun;
-  prompt?: StartupPromptPreview | null;
+  newTaskHref: string;
   onStatusChange?: (status: RunStatusValue) => void;
 }
 
 const StartupInner = ({
   runId,
-  taskId,
   initialTaskRun,
-  prompt,
+  newTaskHref,
   onStatusChange,
 }: StartupInnerProps) => {
-  const restoreSnapshot = useRestoreTaskRunSnapshot();
-  const retryFailedStart = useRetryFailedTaskStart();
-  const { managedAccess = DEFAULT_MANAGED_DEPLOYMENT_ACCESS } =
-    useAuthorizedUser();
-
   const {
     steps,
     error,
@@ -176,55 +77,23 @@ const StartupInner = ({
       logs={showLogs ? sandboxLogs : undefined}
       logsConnected={logsConnected}
       logsError={logsError}
-      prompt={prompt}
-      retryAction={buildRetryAction({
-        taskId,
-        taskRun: initialTaskRun,
-        restoreSnapshot,
-        retryFailedStart,
-        readOnly: managedAccess.state === 'read_only',
-      })}
+      newTaskHref={newTaskHref}
     />
   );
 };
 
 interface SnapshotResumeFailureFooterProps {
-  taskId: string;
-  taskRun: Pick<
-    TaskRun,
-    | 'id'
-    | 'error'
-    | 'result'
-    | 'sourceRunId'
-    | 'sourceSnapshotId'
-    | 'status'
-    | 'payloadKind'
-  >;
-  prompt?: StartupPromptPreview | null;
+  taskRun: Pick<TaskRun, 'error' | 'result' | 'status'>;
+  newTaskHref: string;
 }
 
 export const SnapshotResumeFailureFooter = ({
-  taskId,
   taskRun,
-  prompt,
-}: SnapshotResumeFailureFooterProps) => {
-  const restoreSnapshot = useRestoreTaskRunSnapshot();
-  const retryFailedStart = useRetryFailedTaskStart();
-  const { managedAccess = DEFAULT_MANAGED_DEPLOYMENT_ACCESS } =
-    useAuthorizedUser();
-
-  return (
-    <StartupFailureMessage
-      status={taskRun.status}
-      error={getTaskRunError(taskRun)}
-      prompt={prompt}
-      retryAction={buildRetryAction({
-        taskId,
-        taskRun,
-        restoreSnapshot,
-        retryFailedStart,
-        readOnly: managedAccess.state === 'read_only',
-      })}
-    />
-  );
-};
+  newTaskHref,
+}: SnapshotResumeFailureFooterProps) => (
+  <StartupFailureMessage
+    status={taskRun.status}
+    error={getTaskRunError(taskRun)}
+    newTaskHref={newTaskHref}
+  />
+);

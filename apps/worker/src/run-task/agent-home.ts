@@ -51,7 +51,6 @@ import {
   resolveOpenRouterVariantModelAlias,
   toBedrockMantleRuntimeModelId,
   OPENCODE_ARCHITECT_AGENT,
-  OPENCODE_AUTH_CONTENT_ENV_VAR_NAME,
   OPENCODE_GO_API_KEY_ENV_VAR_NAME,
   TASK_MODEL_CONTEXT_WINDOWS_ENV_VAR_NAME,
   TaskPayloadKind,
@@ -729,16 +728,6 @@ function mergeInferenceGatewayProviderConfig(
       !modelIds.some((modelId) =>
         modelId?.trim().startsWith(`${BEDROCK_MANTLE_OPENCODE_PROVIDER_ID}/`),
       )
-    ) {
-      continue;
-    }
-
-    // ChatGPT-subscription OAuth authenticates through opencode's Codex
-    // plugin directly; leave the openai provider on its default base URL
-    // when a subscription record is present in the sandbox (non-gateway mode).
-    if (
-      providerId === CHATGPT_OPENCODE_PROVIDER_ID &&
-      runtimeEnv[OPENCODE_AUTH_CONTENT_ENV_VAR_NAME]
     ) {
       continue;
     }
@@ -1943,10 +1932,9 @@ export function resolveOpenCodeDataDir(
 }
 
 /**
- * Credential files under the OpenCode data dir. The ChatGPT subscription
- * `auth.json` is active only outside gateway mode; the Google service-account
- * path is retained here solely to scrub files left by snapshots created while
- * Vertex was enabled.
+ * Credential files under the OpenCode data dir. These paths are retained
+ * solely to scrub files left by snapshots created before sandbox credentials
+ * moved behind the gateway or while Vertex was enabled.
  */
 export function resolveOpenCodeCredentialFilePaths(
   homeDir: string,
@@ -1958,45 +1946,6 @@ export function resolveOpenCodeCredentialFilePaths(
     path.join(dataDir, OPENCODE_AUTH_FILE_NAME),
     path.join(dataDir, GOOGLE_APPLICATION_CREDENTIALS_FILE_NAME),
   ];
-}
-
-/**
- * Rewrite the OpenCode auth file the pre-snapshot scrub removed, for
- * a sandbox that survived an abandoned snapshot attempt. Normally these files
- * are materialized once during harness bootstrap and OpenCode persists OAuth
- * refreshes back to auth.json, so restoring the same path from the
- * deployment's current env value heals the live harness without a restart.
- */
-export function rematerializeOpenCodeCredentialFiles(options: {
-  homeDir: string;
-  runtimeEnv: Record<string, string>;
-  logger: { info(message: string): void; warn(message: string): void };
-}): { failedSteps: string[] } {
-  const failedSteps: string[] = [];
-  const env = { ...options.runtimeEnv };
-
-  const authContent = env[OPENCODE_AUTH_CONTENT_ENV_VAR_NAME];
-
-  if (authContent) {
-    try {
-      const dataDir = resolveOpenCodeDataDir(options.homeDir, env);
-      fs.mkdirSync(dataDir, { recursive: true, mode: 0o700 });
-      fs.writeFileSync(
-        path.join(dataDir, OPENCODE_AUTH_FILE_NAME),
-        authContent,
-        { encoding: 'utf8', mode: 0o600 },
-      );
-    } catch (error) {
-      options.logger.warn(
-        `[rematerializeOpenCodeCredentialFiles] Failed to rewrite OpenCode auth file: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
-      );
-      failedSteps.push('rewrite OpenCode auth file');
-    }
-  }
-
-  return { failedSteps };
 }
 
 /**

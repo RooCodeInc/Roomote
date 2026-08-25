@@ -21,10 +21,11 @@ const state = vi.hoisted(() => ({
     scheduleMode: 'daily' | 'weekly' | 'cron';
     cronExpression: string | null;
     model: null;
+    executionMode?: 'sandbox_task' | 'fast';
     environmentId: string;
     target: {
-      provider: 'slack' | 'discord' | 'teams' | 'telegram';
-      externalRef: string;
+      provider?: 'slack' | 'discord' | 'teams' | 'telegram';
+      externalRef?: string;
       targetKind?:
         | 'slack_channel'
         | 'slack_user'
@@ -44,6 +45,7 @@ const state = vi.hoisted(() => ({
     createdByName: string;
     createdAt: Date;
     updatedAt: Date;
+    latestFastResult?: string | null;
   }>,
   environments: [] as Array<{ id: string; name: string }>,
   nextUpdateSettingsResult: null as {
@@ -98,6 +100,10 @@ const state = vi.hoisted(() => ({
         managerStatsFrequency: 'off' as const,
         managerStatsSlackChannelId: null,
         managerStatsDiscordChannelId: null,
+        providerUsageLimitFrequency: 'every_hour' as const,
+        providerUsageLimitThreshold: 85,
+        providerUsageLimitSlackChannelId: null,
+        providerUsageLimitDiscordChannelId: null,
         sentryTriageFrequency: 'off' as const,
         sentryTriageSlackChannelId: null,
         sentryTriageDiscordChannelId: null,
@@ -140,6 +146,7 @@ const state = vi.hoisted(() => ({
         },
         managerSlackChannel: '#roomote-managers',
         managerStatsSlackChannel: null,
+        providerUsageLimitSlackChannel: null,
         suggesterSlackChannel: null,
         announcerSlackChannel: null,
         platformIssueSlackChannel: null,
@@ -155,6 +162,7 @@ const state = vi.hoisted(() => ({
         channelAutoStartSlackChannels: [],
         managerSlackChannel: null,
         managerStatsSlackChannel: null,
+        providerUsageLimitSlackChannel: null,
         suggesterSlackChannel: null,
         announcerSlackChannel: null,
         platformIssueSlackChannel: null,
@@ -179,6 +187,7 @@ const state = vi.hoisted(() => ({
       resolvedDestinations: Object.fromEntries(
         [
           'manager_stats',
+          'provider_usage_limit',
           'sentry_triage',
           'dependabot_triage',
           'codeql_triage',
@@ -601,6 +610,27 @@ describe('AutomationsSettings', () => {
     expect(screen.queryByText('Beta')).not.toBeInTheDocument();
   });
 
+  it('shows provider usage alert enablement, channel destination, and threshold controls', async () => {
+    render(<AutomationsSettings />);
+
+    fireEvent.click(
+      await screen.findByRole('button', {
+        name: 'Configure Inference Provider Usage Alerts',
+      }),
+    );
+
+    expect(screen.getByRole('switch', { name: 'Enabled' })).toBeChecked();
+    expect(
+      screen.getByLabelText('Post alerts to this Slack channel'),
+    ).toBeInTheDocument();
+    const thresholdSlider = screen.getByRole('slider', {
+      name: 'Provider usage alert threshold',
+    });
+    expect(thresholdSlider).toHaveAttribute('aria-valuemin', '5');
+    expect(thresholdSlider).toHaveAttribute('aria-valuenow', '85');
+    expect(screen.getByText('85%')).toBeInTheDocument();
+  });
+
   it('configures Call Roomote via emoji with a name and instructions', async () => {
     render(<AutomationsSettings />);
 
@@ -917,6 +947,10 @@ describe('AutomationsSettings', () => {
     expect(getAutomationHistoryHref('managerChannel')).toBeNull();
   });
 
+  it('does not add task history to provider usage alerts', () => {
+    expect(getAutomationHistoryHref('providerUsageLimit')).toBeNull();
+  });
+
   it('filters available automations by category and provider-aware search', async () => {
     render(<AutomationsSettings />);
 
@@ -1165,6 +1199,55 @@ describe('AutomationsSettings', () => {
     fireEvent.click(screen.getByRole('combobox', { name: 'Environment' }));
     expect(
       screen.getByRole('option', { name: 'All repositories' }),
+    ).toBeInTheDocument();
+  });
+
+  it('offers Fast in the Environment menu and explains channel-less output', async () => {
+    state.customAutomations = [
+      {
+        id: 'automation-fast',
+        name: 'Fast daily digest',
+        prompt: 'Summarize priorities.',
+        enabled: true,
+        scheduleMode: 'daily',
+        cronExpression: null,
+        model: null,
+        executionMode: 'fast',
+        environmentId: '__fast__',
+        target: {},
+        lastRunAt: null,
+        lastSucceededAt: null,
+        lastFailedAt: null,
+        lastError: null,
+        lastLaunchedTaskId: null,
+        createdByName: 'Ada',
+        createdAt: new Date('2026-01-01T00:00:00Z'),
+        updatedAt: new Date('2026-01-01T00:00:00Z'),
+        latestFastResult: 'No actionable regressions found.',
+      },
+    ];
+
+    render(<AutomationsSettings />);
+
+    expect(await screen.findByText('Daily, in Fast →')).toBeInTheDocument();
+    expect(
+      screen.getByText('No actionable regressions found.'),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole('link', {
+        name: 'View previous runs for Fast daily digest',
+      }),
+    ).not.toBeInTheDocument();
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Configure Fast daily digest' }),
+    );
+    expect(screen.getByText('Delegated task model')).toBeInTheDocument();
+    expect(
+      screen.getByText(/available in the upcoming Fast runs view/),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('combobox', { name: 'Environment' }));
+    expect(
+      screen.getByRole('option', { name: 'Fast (no sandbox)' }),
     ).toBeInTheDocument();
   });
 

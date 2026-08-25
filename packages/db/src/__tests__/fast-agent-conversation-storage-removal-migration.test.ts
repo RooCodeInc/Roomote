@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { db, sql } from '../server';
 
 const migrationPath = fileURLToPath(
-  new URL('../../drizzle/0051_zippy_warbird.sql', import.meta.url),
+  new URL('../../drizzle/0053_watery_shinobi_shaw.sql', import.meta.url),
 );
 
 describe('Fast conversation storage removal migration', () => {

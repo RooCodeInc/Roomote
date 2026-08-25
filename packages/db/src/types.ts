@@ -10,6 +10,8 @@ import type {
   DependabotTriageFrequency,
   IssueFixerFrequency,
   ManagerStatsFrequency,
+  ProviderUsageLimitFrequency,
+  ProviderUsageLimitThreshold,
   PrReviewSettings,
   SecurityAuditorFrequency,
   SentryTriageFrequency,
@@ -502,6 +504,11 @@ export type BackgroundAgentSettings = StoredBackgroundAgentSettings & {
   managerStatsSlackChannelId: string | null;
   managerStatsDiscordChannelId: string | null;
   managerStatsLastRunAt: Date | null;
+  providerUsageLimitFrequency: ProviderUsageLimitFrequency;
+  providerUsageLimitThreshold: ProviderUsageLimitThreshold;
+  providerUsageLimitSlackChannelId: string | null;
+  providerUsageLimitDiscordChannelId: string | null;
+  providerUsageLimitLastRunAt: Date | null;
   sentryTriageFrequency: SentryTriageFrequency;
   sentryTriageSlackChannelId: string | null;
   sentryTriageDiscordChannelId: string | null;

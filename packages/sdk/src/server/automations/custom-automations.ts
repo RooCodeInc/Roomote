@@ -1,16 +1,25 @@
-import { enqueueTask } from '@roomote/cloud-agents/server';
+import {
+  enqueueTask,
+  getOrCreateFastAgentSession,
+} from '@roomote/cloud-agents/server';
 import {
   db,
+  and,
+  customAutomations,
+  discordInstallationChannels,
   environments,
   eq,
   getCustomAutomationById,
   getCustomAutomationFrequency,
+  CUSTOM_AUTOMATION_LAUNCH_STALE_CLAIM_MS,
   listEnabledCustomAutomations,
   recordCustomAutomationRunOutcome,
   releaseCustomAutomationLaunchClaim,
   tryClaimCustomAutomationLaunch,
   type CustomAutomation,
+  slackInstallations,
 } from '@roomote/db/server';
+import { SlackNotifier } from '@roomote/slack';
 import {
   ALL_REPOSITORIES,
   isConfiguredAutomationTarget,
@@ -19,6 +28,7 @@ import {
   TaskPayloadKind,
   type AutomationTarget,
   type CommunicationProvider,
+  type FastAgentConversation,
 } from '@roomote/types';
 
 import {
@@ -42,6 +52,13 @@ import {
   type AutomationRunOpts,
 } from './types';
 import { findUserDirectMessageDestination } from '../lib/user-direct-message';
+import { createDiscordCommunicationProviderFromRuntimeCredentials } from '../lib/discord-communication';
+import { buildCustomAutomationSlackMessage } from '../lib/manager-slack';
+import {
+  buildSlackClientMessageId,
+  deliverFastAgentParentEvent,
+  type FastAgentParentEvent,
+} from '../lib/fast-agent-parent-event';
 
 const LOG_PREFIX = '[custom-automations]';
 
@@ -219,6 +236,190 @@ ${presentationGuidance}
 The ${promptContext.surfaceLabel} conversation above is available for reports through \`send_chat_reply\`; do not use \`${promptContext.postToolName}\` and do not post anywhere else. Default to finishing silently. Interrupt the conversation only when there is something a human should see now: a concrete actionable or important finding, a meaningful completed result, a durable blocker, or required user input. Routine success, healthy status, no-change results, and findings that are neither actionable nor important should not produce a message unless the automation request explicitly asks for them. Stay silent while work is in flight: send no opening acknowledgement and do not post progress updates. If you do report, your first message creates this run's thread in that conversation, so make it one self-contained message that stands alone for readers who have not seen this task; later messages and user replies continue that same thread. Write the report as the result itself, like a teammate sharing what they found or did: do not mention this automation, the schedule, the task, or that anything requested the work; the message footer already attributes the automation. Lead with the outcome, not with framing like "Automation requested ..." or "Outcome: ...".${orgWideSuggestionInstruction}`;
 }
 
+function isFastChannelTarget(target: AutomationTarget): boolean {
+  return (
+    (target.provider === 'slack' && target.targetKind === 'slack_channel') ||
+    (target.provider === 'discord' && target.targetKind === 'discord_channel')
+  );
+}
+
+async function buildFastAutomationConversation(params: {
+  automation: CustomAutomation;
+  eventId: string;
+  destination: ResolvedAutomationDestination | null;
+}): Promise<{ conversation: FastAgentConversation; rootMessageId?: string }> {
+  const { automation, destination, eventId } = params;
+  if (!destination) {
+    return {
+      conversation: {
+        surface: 'automation',
+        workspaceId: automation.id,
+        conversationId: eventId,
+      },
+    };
+  }
+
+  if (destination.provider === 'slack') {
+    const installation = await db.query.slackInstallations.findFirst({
+      where: eq(slackInstallations.isActive, true),
+      columns: { botAccessToken: true, teamId: true },
+    });
+    if (!installation?.botAccessToken) {
+      throw new Error('Slack is not connected.');
+    }
+    const slack = new SlackNotifier(installation.botAccessToken);
+    const kickoffText = `${automation.name} is running.`;
+    const rootMessageId = await slack.postMessage({
+      channel: destination.channelId,
+      ...buildCustomAutomationSlackMessage({
+        automationId: automation.id,
+        automationName: automation.name,
+        text: kickoffText,
+        contentBlocks: [
+          {
+            type: 'markdown',
+            text: `**${automation.name}** is running.`,
+          },
+        ],
+      }),
+      unfurl_links: false,
+      unfurl_media: false,
+      client_msg_id: buildSlackClientMessageId(
+        `fast-automation-root:${eventId}`,
+      ),
+    });
+    if (!rootMessageId) {
+      throw new Error('Slack did not create the Fast automation thread.');
+    }
+    return {
+      rootMessageId,
+      conversation: {
+        surface: 'slack',
+        workspaceId: installation.teamId,
+        conversationId: rootMessageId,
+        replyTarget: {
+          channelId: destination.channelId,
+          threadId: rootMessageId,
+        },
+      },
+    };
+  }
+
+  if (destination.provider === 'discord') {
+    const channel = await db.query.discordInstallationChannels.findFirst({
+      where: eq(discordInstallationChannels.channelId, destination.channelId),
+      columns: { id: true },
+      with: {
+        installation: { columns: { guildId: true, isActive: true } },
+      },
+    });
+    if (!channel?.installation.isActive) {
+      throw new Error('Discord destination is no longer available.');
+    }
+    const provider =
+      await createDiscordCommunicationProviderFromRuntimeCredentials();
+    if (!provider) {
+      throw new Error('Discord is not connected.');
+    }
+    const thread = await provider.createTaskThread({
+      channelId: destination.channelId,
+      name: automation.name,
+      initialText: `${automation.name} is running in Fast mode.`,
+    });
+    return {
+      ...(thread.messageId ? { rootMessageId: thread.messageId } : {}),
+      conversation: {
+        surface: 'discord',
+        workspaceId: channel.installation.guildId,
+        conversationId: thread.channelId,
+        replyTarget: {
+          channelId: destination.channelId,
+          threadId: thread.channelId,
+        },
+      },
+    };
+  }
+
+  throw new Error('Fast channel delivery supports Slack and Discord only.');
+}
+
+async function runFastCustomAutomation(params: {
+  automation: CustomAutomation;
+  destination: ResolvedAutomationDestination | null;
+  launchClaimedAt: Date;
+  trigger: 'schedule' | 'manual';
+}): Promise<void> {
+  if (!params.automation.createdByUserId) {
+    throw new Error('Fast automation run-as user is not configured.');
+  }
+  const eventId = `${params.automation.id}:${params.launchClaimedAt.toISOString()}`;
+  const { conversation, rootMessageId } = await buildFastAutomationConversation(
+    {
+      automation: params.automation,
+      eventId,
+      destination: params.destination,
+    },
+  );
+  try {
+    const session = await getOrCreateFastAgentSession({
+      userId: params.automation.createdByUserId,
+      conversation,
+    });
+    const event: FastAgentParentEvent = {
+      type: 'automation_triggered',
+      eventId,
+      automationId: params.automation.id,
+      automationName: params.automation.name,
+      prompt: params.automation.prompt,
+      trigger: params.trigger,
+      ...(params.automation.model
+        ? { defaultTaskModel: params.automation.model }
+        : {}),
+      ...(rootMessageId ? { rootMessageId } : {}),
+    };
+    await deliverFastAgentParentEvent({
+      parent: { sessionId: session.id, conversation },
+      event,
+    });
+  } catch (error) {
+    const message = `${params.automation.name} failed: ${error instanceof Error ? error.message : String(error)}`;
+    try {
+      if (conversation.surface === 'slack' && rootMessageId) {
+        const installation = await db.query.slackInstallations.findFirst({
+          where: eq(slackInstallations.isActive, true),
+          columns: { botAccessToken: true },
+        });
+        if (installation?.botAccessToken) {
+          await new SlackNotifier(installation.botAccessToken).updateMessage({
+            channel: conversation.replyTarget.channelId,
+            ts: rootMessageId,
+            message: buildCustomAutomationSlackMessage({
+              automationId: params.automation.id,
+              automationName: params.automation.name,
+              text: message,
+            }),
+          });
+        }
+      } else if (conversation.surface === 'discord' && rootMessageId) {
+        const provider =
+          await createDiscordCommunicationProviderFromRuntimeCredentials();
+        await provider?.editMessage({
+          channelId:
+            conversation.replyTarget.threadId ??
+            conversation.replyTarget.channelId,
+          messageId: rootMessageId,
+          text: message,
+        });
+      }
+    } catch (updateError) {
+      console.warn(
+        `${LOG_PREFIX} Failed to update Fast automation error output: ${updateError instanceof Error ? updateError.message : String(updateError)}`,
+      );
+    }
+    throw error;
+  }
+}
+
 async function launchCustomAutomationRow(
   automation: CustomAutomation,
   opts: AutomationRunOpts,
@@ -226,6 +427,7 @@ async function launchCustomAutomationRow(
 ): Promise<AutomationJobResult> {
   const result = emptyJobResult();
   const frequency = getCustomAutomationFrequency(automation);
+  const fastExecution = automation.executionMode === 'fast';
 
   if (automation.scheduleMode !== 'cron' && frequency === 'off') {
     result.skippedReason = 'Automation is disabled.';
@@ -278,7 +480,30 @@ async function launchCustomAutomationRow(
     }
   }
 
-  if (!automation.allRepositories && !automation.environmentId) {
+  if (
+    fastExecution &&
+    automation.launchClaimedAt &&
+    Date.now() - automation.launchClaimedAt.getTime() >=
+      CUSTOM_AUTOMATION_LAUNCH_STALE_CLAIM_MS
+  ) {
+    const message = 'The previous Fast automation run was interrupted.';
+    result.skippedReason = message;
+    result.errors.push(message);
+    await recordCustomAutomationRunOutcome(db, {
+      id: automation.id,
+      status: 'failed',
+      error: message,
+      lastLaunchedTaskId: null,
+      launchClaimedAt: automation.launchClaimedAt,
+    });
+    return result;
+  }
+
+  if (
+    !fastExecution &&
+    !automation.allRepositories &&
+    !automation.environmentId
+  ) {
     result.skippedReason = 'Environment is not configured.';
     result.errors.push('Environment is not configured.');
     await recordCustomAutomationRunOutcome(db, {
@@ -289,14 +514,15 @@ async function launchCustomAutomationRow(
     return result;
   }
 
-  const environment = automation.allRepositories
-    ? null
-    : await db.query.environments.findFirst({
-        columns: { id: true },
-        where: eq(environments.id, automation.environmentId!),
-      });
+  const environment =
+    fastExecution || automation.allRepositories
+      ? null
+      : await db.query.environments.findFirst({
+          columns: { id: true },
+          where: eq(environments.id, automation.environmentId!),
+        });
 
-  if (!automation.allRepositories && !environment) {
+  if (!fastExecution && !automation.allRepositories && !environment) {
     result.skippedReason = 'Environment no longer exists.';
     result.errors.push('Environment no longer exists.');
     await recordCustomAutomationRunOutcome(db, {
@@ -311,7 +537,10 @@ async function launchCustomAutomationRow(
   // created/enabled the automation so an enabled run still has a chat-facing
   // result; if that admin has no linked DM, preserve the task-UI fallback.
   let destination: ResolvedAutomationDestination | null = null;
-  if (isConfiguredAutomationTarget(automation.target)) {
+  if (
+    isConfiguredAutomationTarget(automation.target) &&
+    (!fastExecution || isFastChannelTarget(automation.target))
+  ) {
     destination = await resolveDestination(automation.target);
     if (!destination) {
       const message = isBackgroundAutomationUserTargetKind(
@@ -343,7 +572,7 @@ async function launchCustomAutomationRow(
       });
       return result;
     }
-  } else {
+  } else if (!fastExecution) {
     destination = await resolveOwnerFallbackDestination(
       automation.createdByUserId,
     );
@@ -374,6 +603,31 @@ async function launchCustomAutomationRow(
   const modelOverride = modelSelection?.ok ? modelSelection : null;
 
   try {
+    if (fastExecution) {
+      await db
+        .update(customAutomations)
+        .set({ lastLaunchedTaskId: null })
+        .where(
+          and(
+            eq(customAutomations.id, automation.id),
+            eq(customAutomations.launchClaimedAt, launchClaimedAt),
+          ),
+        );
+      await runFastCustomAutomation({
+        automation,
+        destination,
+        launchClaimedAt,
+        trigger: opts.manualTrigger ? 'manual' : 'schedule',
+      });
+      await recordCustomAutomationRunOutcome(db, {
+        id: automation.id,
+        status: 'succeeded',
+        launchClaimedAt,
+      });
+      result.completed = true;
+      return result;
+    }
+
     const launchResult = await enqueueTask({
       task: {
         type: TaskPayloadKind.StandardTask,
@@ -477,6 +731,9 @@ export async function customAutomationsJob(
 
       if (rowResult.launchedTaskId) {
         result.launchedTaskId ??= rowResult.launchedTaskId;
+        processed++;
+      } else if (rowResult.completed) {
+        result.completed = true;
         processed++;
       } else if (rowResult.errors.length > 0) {
         result.errors.push(

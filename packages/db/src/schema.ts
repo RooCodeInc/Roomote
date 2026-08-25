@@ -58,6 +58,7 @@ import type {
   AutomationScanCursor,
   AutomationTarget,
   OptionalAutomationTarget,
+  CustomAutomationExecutionMode,
   BackgroundAutomationKey,
   PlatformIssueReport,
   WorkspaceReadiness,
@@ -1004,6 +1005,15 @@ export const taskPullRequests = pgTable(
 
     // Status
     status: text('status').$type<import('@roomote/types').PullRequestStatus>(),
+    mergeabilityStatus: text('mergeability_status')
+      .notNull()
+      .default('unknown')
+      .$type<'unknown' | 'clean' | 'conflicting'>(),
+    conflictDetectedAt: timestamp('conflict_detected_at'),
+    conflictNotificationClaimedAt: timestamp(
+      'conflict_notification_claimed_at',
+    ),
+    conflictNotifiedAt: timestamp('conflict_notified_at'),
 
     // When set, new review feedback on this PR is dispatched into the owning
     // task automatically instead of asking first; the referenced user (who
@@ -1028,6 +1038,13 @@ export const taskPullRequests = pgTable(
       table.sourceControlProvider,
       table.repository,
       table.prNumber,
+    ),
+    index('task_pull_requests_mergeability_lookup_idx').on(
+      table.sourceControlProvider,
+      table.repository,
+      table.status,
+      table.createdByRoomote,
+      table.prBaseRef,
     ),
 
     // Prevent duplicate PR URLs for the same task
@@ -2839,7 +2856,7 @@ export const fastAgentConversations = pgTable(
     surface: text('surface').notNull().$type<FastAgentSurface>(),
     workspaceId: text('workspace_id').notNull(),
     conversationId: text('conversation_id').notNull(),
-    currentReplyChannelId: text('current_reply_channel_id').notNull(),
+    currentReplyChannelId: text('current_reply_channel_id'),
     currentReplyThreadId: text('current_reply_thread_id'),
     replyTargetVerified: boolean('reply_target_verified')
       .notNull()
@@ -3194,6 +3211,10 @@ export const customAutomations = pgTable(
       onDelete: 'set null',
     }),
     allRepositories: boolean('all_repositories').notNull().default(false),
+    executionMode: text('execution_mode')
+      .notNull()
+      .default('sandbox_task')
+      .$type<CustomAutomationExecutionMode>(),
     target: jsonb('target')
       .notNull()
       .default(sql`'{}'::jsonb`)

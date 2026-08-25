@@ -24,6 +24,9 @@ async function createRun(input: {
   canceledAt?: Date;
   fastAgentSessionId?: string;
   fastAgentParent?: FastAgentParent;
+  snapshotId?: string;
+  snapshotCreatedAt?: Date;
+  snapshotFailedAt?: Date;
 }) {
   const [run] = await db
     .insert(taskRuns)
@@ -44,6 +47,9 @@ async function createRun(input: {
           ? { fastAgentParent: input.fastAgentParent }
           : {}),
       },
+      snapshotId: input.snapshotId,
+      snapshotCreatedAt: input.snapshotCreatedAt,
+      snapshotFailedAt: input.snapshotFailedAt,
     })
     .returning();
 
@@ -70,6 +76,9 @@ describe('getActiveFastAgentTasks', () => {
     const apiTask = await createTask('Fix API');
     const settledTask = await createTask('Settled restart');
     const canceledTask = await createTask('Canceled task');
+    const canceledSnapshotTask = await createTask('Canceled snapshot task');
+    const failedSnapshotTask = await createTask('Failed snapshot task');
+    const expiredTask = await createTask('Expired task');
     const otherSessionTask = await createTask('Other session');
     const deletedTask = await createTask(
       'Deleted task',
@@ -99,6 +108,8 @@ describe('getActiveFastAgentTasks', () => {
       status: RunStatus.Completed,
       createdAt: new Date('2026-08-17T00:03:00Z'),
       fastAgentSessionId: SESSION_ID,
+      snapshotId: 'snapshot-settled',
+      snapshotCreatedAt: new Date(),
     });
     await createRun({
       taskId: settledTask.id,
@@ -107,11 +118,37 @@ describe('getActiveFastAgentTasks', () => {
       fastAgentSessionId: SESSION_ID,
     });
     await createRun({
+      taskId: expiredTask.id,
+      status: RunStatus.Completed,
+      createdAt: new Date('2026-08-17T00:00:30Z'),
+      fastAgentSessionId: SESSION_ID,
+      snapshotId: 'snapshot-expired',
+      snapshotCreatedAt: new Date(Date.now() - 8 * 24 * 60 * 60 * 1000),
+    });
+    await createRun({
       taskId: canceledTask.id,
       status: RunStatus.Running,
       createdAt: new Date('2026-08-17T00:01:00Z'),
       canceledAt: new Date('2026-08-17T00:01:30Z'),
       fastAgentSessionId: SESSION_ID,
+    });
+    await createRun({
+      taskId: canceledSnapshotTask.id,
+      status: RunStatus.Completed,
+      createdAt: new Date('2026-08-17T00:00:50Z'),
+      canceledAt: new Date('2026-08-17T00:01:00Z'),
+      fastAgentSessionId: SESSION_ID,
+      snapshotId: 'snapshot-canceled',
+      snapshotCreatedAt: new Date(),
+    });
+    await createRun({
+      taskId: failedSnapshotTask.id,
+      status: RunStatus.Completed,
+      createdAt: new Date('2026-08-17T00:00:40Z'),
+      fastAgentSessionId: SESSION_ID,
+      snapshotId: 'snapshot-failed',
+      snapshotCreatedAt: new Date(),
+      snapshotFailedAt: new Date(),
     });
     await createRun({
       taskId: otherSessionTask.id,
@@ -136,6 +173,11 @@ describe('getActiveFastAgentTasks', () => {
         taskId: apiTask.id,
         title: 'Fix API',
         status: RunStatus.Processing,
+      },
+      {
+        taskId: settledTask.id,
+        title: 'Settled restart',
+        status: RunStatus.Completed,
       },
     ]);
   });

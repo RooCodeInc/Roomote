@@ -1,5 +1,5 @@
 {
-  "id": "9f611596-8297-4eb0-9b28-16e303f66ec3",
+  "id": "4e83220c-3074-45b7-8d7a-182c22fba84c",
   "prevId": "75f3e8f0-f873-4aa1-96d4-179f791631fe",
   "version": "7",
   "dialect": "postgresql",
@@ -1234,6 +1234,13 @@
           "primaryKey": false,
           "notNull": true,
           "default": false
+        },
+        "execution_mode": {
+          "name": "execution_mode",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'sandbox_task'"
         },
         "target": {
           "name": "target",
@@ -3034,6 +3041,80 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
+    "public.fast_agent_conversation_aliases": {
+      "name": "fast_agent_conversation_aliases",
+      "schema": "",
+      "columns": {
+        "legacy_conversation_id": {
+          "name": "legacy_conversation_id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "conversation_id": {
+          "name": "conversation_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "fast_agent_conversation_aliases_conversation_idx": {
+          "name": "fast_agent_conversation_aliases_conversation_idx",
+          "columns": [
+            {
+              "expression": "conversation_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "fast_agent_conversation_aliases_legacy_conversation_id_slack_quick_answers_id_fk": {
+          "name": "fast_agent_conversation_aliases_legacy_conversation_id_slack_quick_answers_id_fk",
+          "tableFrom": "fast_agent_conversation_aliases",
+          "tableTo": "slack_quick_answers",
+          "columnsFrom": ["legacy_conversation_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "fast_agent_conversation_aliases_conversation_id_fast_agent_conversations_id_fk": {
+          "name": "fast_agent_conversation_aliases_conversation_id_fast_agent_conversations_id_fk",
+          "tableFrom": "fast_agent_conversation_aliases",
+          "tableTo": "fast_agent_conversations",
+          "columnsFrom": ["conversation_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
     "public.fast_agent_conversations": {
       "name": "fast_agent_conversations",
       "schema": "",
@@ -3073,7 +3154,7 @@
           "name": "current_reply_channel_id",
           "type": "text",
           "primaryKey": false,
-          "notNull": true
+          "notNull": false
         },
         "current_reply_thread_id": {
           "name": "current_reply_thread_id",
@@ -6910,6 +6991,12 @@
           "primaryKey": false,
           "notNull": false
         },
+        "slack_quick_answer_id": {
+          "name": "slack_quick_answer_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp",
@@ -7067,6 +7154,15 @@
           "columnsTo": ["id"],
           "onDelete": "set null",
           "onUpdate": "no action"
+        },
+        "slack_conversation_messages_slack_quick_answer_id_slack_quick_answers_id_fk": {
+          "name": "slack_conversation_messages_slack_quick_answer_id_slack_quick_answers_id_fk",
+          "tableFrom": "slack_conversation_messages",
+          "tableTo": "slack_quick_answers",
+          "columnsFrom": ["slack_quick_answer_id"],
+          "columnsTo": ["id"],
+          "onDelete": "set null",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -7216,7 +7312,13 @@
           "name": "fast_agent_conversation_id",
           "type": "uuid",
           "primaryKey": false,
-          "notNull": true
+          "notNull": false
+        },
+        "slack_quick_answer_id": {
+          "name": "slack_quick_answer_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
         },
         "user_id": {
           "name": "user_id",
@@ -7319,6 +7421,27 @@
         }
       },
       "indexes": {
+        "slack_fast_integration_calls_session_idx": {
+          "name": "slack_fast_integration_calls_session_idx",
+          "columns": [
+            {
+              "expression": "slack_quick_answer_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
         "slack_fast_integration_calls_conversation_idx": {
           "name": "slack_fast_integration_calls_conversation_idx",
           "columns": [
@@ -7389,6 +7512,15 @@
           "tableFrom": "slack_fast_integration_calls",
           "tableTo": "fast_agent_conversations",
           "columnsFrom": ["fast_agent_conversation_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "slack_fast_integration_calls_slack_quick_answer_id_slack_quick_answers_id_fk": {
+          "name": "slack_fast_integration_calls_slack_quick_answer_id_slack_quick_answers_id_fk",
+          "tableFrom": "slack_fast_integration_calls",
+          "tableTo": "slack_quick_answers",
+          "columnsFrom": ["slack_quick_answer_id"],
           "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
@@ -7667,6 +7799,112 @@
           "columns": ["team_id"]
         }
       },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.slack_quick_answers": {
+      "name": "slack_quick_answers",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "slack_channel": {
+          "name": "slack_channel",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "slack_thread_ts": {
+          "name": "slack_thread_ts",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "messages": {
+          "name": "messages",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'[]'::jsonb"
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "slack_quick_answers_deployment_channel_thread_unique": {
+          "name": "slack_quick_answers_deployment_channel_thread_unique",
+          "columns": [
+            {
+              "expression": "slack_channel",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "slack_thread_ts",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "slack_quick_answers_deployment_user_idx": {
+          "name": "slack_quick_answers_deployment_user_idx",
+          "columns": [
+            {
+              "expression": "user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "slack_quick_answers_user_id_users_id_fk": {
+          "name": "slack_quick_answers_user_id_users_id_fk",
+          "tableFrom": "slack_quick_answers",
+          "tableTo": "users",
+          "columnsFrom": ["user_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false

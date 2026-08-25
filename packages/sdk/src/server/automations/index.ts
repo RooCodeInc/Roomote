@@ -16,6 +16,11 @@ export { conflictScanJob } from './conflict-scan';
 export { dependabotTriageJob } from './dependabot-triage';
 export { issueFixerJob } from './issue-fixer';
 export { managerStatsJob, formatManagerStatsMessage } from './manager-stats';
+export {
+  providerUsageLimitJob,
+  buildProviderUsageLimitWarningMessage,
+  getProviderUsageLimitPeriodId,
+} from './provider-usage-limit';
 export { securityAuditorJob } from './security-auditor';
 export { sentryTriageJob } from './sentry-triage';
 export { suggesterJob } from './suggester';

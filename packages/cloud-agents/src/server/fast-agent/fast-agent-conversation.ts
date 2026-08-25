@@ -18,6 +18,8 @@ export type FastAgentPlatformEventVisibility = 'optional' | 'required';
 
 export type FastAgentPlatformEventHandling = 'default' | 'present_only';
 
+export type FastAgentPlatformEventKind = 'delegated_task' | 'automation';
+
 export type FastAgentReply = {
   purpose: 'ack' | 'progress' | 'closeout' | 'clarification';
   message: string;
@@ -66,14 +68,15 @@ export type RetryFastAgentTaskStart = () => Promise<
   { success: true; runId: number } | { success: false; error: string }
 >;
 
+export type FastAgentMcpServerConfig = {
+  url: string;
+  headers: Record<string, string>;
+  disabledTools?: string[];
+};
+
 /** Surface adapter for side effects available during one Fast turn. */
 export type FastAgentTurnAdapter = {
   launchTask: LaunchFastAgentTask;
-  getChatMessageContext?: (input: { messageId: string }) => Promise<unknown>;
-  getChatChannelMessages?: (input: {
-    oldest?: string;
-    latest?: string;
-  }) => Promise<unknown>;
   postReply: (reply: FastAgentReply) => Promise<FastAgentReplyHandle | void>;
   replaceReply?: (
     handle: FastAgentReplyHandle,
@@ -81,4 +84,7 @@ export type FastAgentTurnAdapter = {
   ) => Promise<FastAgentReplyHandle | void>;
   postReaction?: (reaction: FastAgentReaction) => Promise<void>;
   retryTaskStart?: RetryFastAgentTaskStart;
+  resolveMcpServerConfigs?: () => Promise<
+    Record<string, FastAgentMcpServerConfig>
+  >;
 };

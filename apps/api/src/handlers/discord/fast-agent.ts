@@ -13,8 +13,9 @@ import {
 import {
   acquireFastAgentTurnLock,
   answerFastAgentQuestion,
+  resolveApiBaseUrl,
 } from '@roomote/cloud-agents/server';
-import { Env } from '@roomote/env';
+import { resolveUserMcpServerConfigs } from '@roomote/sdk/server';
 import { ALL_REPOSITORIES } from '@roomote/types';
 
 import { replyToDiscordEvent } from './replies.js';
@@ -25,7 +26,6 @@ import {
 } from './task-launch.js';
 import { startNewDiscordTask } from './task-orchestration.js';
 import { fetchDiscordThreadHistoryBestEffort } from './thread-context.js';
-import { createFastAgentChatContextAdapter } from '../fast-agent-chat-context.js';
 
 type DiscordInteractionReplyContext = {
   interaction: DiscordInteraction;
@@ -104,6 +104,7 @@ export async function processDiscordFastAgentMessage(input: {
         : [];
     const message = getDiscordMessageCreate(input.event);
     let didSendVisibleResponse = false;
+    const apiBaseUrl = resolveApiBaseUrl() ?? undefined;
     const response = await answerFastAgentQuestion({
       question: input.question,
       threadContext: history.map((entry) => ({
@@ -114,7 +115,7 @@ export async function processDiscordFastAgentMessage(input: {
         ...(entry.botId ? { bot_id: entry.botId } : {}),
       })),
       userId: input.senderUserId,
-      apiBaseUrl: Env.TRPC_URL ?? Env.R_APP_URL,
+      apiBaseUrl,
       conversation,
       signal: releaseFastAgentLock.signal,
       senderDisplayName:
@@ -123,10 +124,12 @@ export async function processDiscordFastAgentMessage(input: {
         input.sender.username,
       activeTasks: input.activeTasks,
       adapter: {
-        ...createFastAgentChatContextAdapter({
-          actingUserId: input.senderUserId,
-          conversation,
-        }),
+        resolveMcpServerConfigs: () =>
+          resolveUserMcpServerConfigs({
+            userId: input.senderUserId,
+            apiBaseUrl,
+            includeRoomote: true,
+          }),
         launchTask: async ({
           prompt,
           environmentId,
@@ -134,16 +137,17 @@ export async function processDiscordFastAgentMessage(input: {
           parentSessionId,
           postKickoff,
         }) => {
-          const workspaceOverride = environmentId
-            ? await resolveDiscordWorkspace({
-                type: 'environment',
-                id: environmentId,
-                name: environmentId,
-              })
-            : {
-                repoForPayload: ALL_REPOSITORIES,
-                workspaceDisplayName: 'all repos',
-              };
+          const workspaceOverride =
+            environmentId && environmentId !== ALL_REPOSITORIES
+              ? await resolveDiscordWorkspace({
+                  type: 'environment',
+                  id: environmentId,
+                  name: environmentId,
+                })
+              : {
+                  repoForPayload: ALL_REPOSITORIES,
+                  workspaceDisplayName: 'all repos',
+                };
           if (!workspaceOverride) {
             return {
               success: false,

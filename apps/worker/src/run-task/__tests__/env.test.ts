@@ -21,14 +21,13 @@ describe('buildOpenCodeHarnessEnv', () => {
     });
   });
 
-  it('forwards OPENCODE_AUTH_CONTENT so the harness can materialize auth.json', () => {
+  it('does not forward direct OAuth content to the task harness', () => {
     const env = buildOpenCodeHarnessEnv({
       OPENCODE_AUTH_CONTENT: JSON.stringify({
         openai: { type: 'oauth', refresh: 'rt', access: 'at', expires: 1 },
       }),
     });
 
-    expect(env.OPENCODE_AUTH_CONTENT).toBeDefined();
-    expect(env.OPENCODE_AUTH_CONTENT).toContain('"type":"oauth"');
+    expect(env).not.toHaveProperty('OPENCODE_AUTH_CONTENT');
   });
 });

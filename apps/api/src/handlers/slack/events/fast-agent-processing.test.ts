@@ -151,6 +151,67 @@ describe('processFastAgentMessage', () => {
     );
   });
 
+  it('lets the Fast model answer a bare !fast invocation', async () => {
+    const slack = {
+      addReaction: vi.fn().mockResolvedValue(true),
+      removeReaction: vi.fn().mockResolvedValue(true),
+      normalizeIncomingText: vi.fn(async (text: string) => text),
+      fetchThreadMessages: vi.fn(async () => []),
+    };
+
+    await processFastAgentMessage({
+      event: {
+        type: 'message',
+        channel: 'D123',
+        user: 'U123',
+        text: '!fast',
+        ts: '100.001',
+      } as never,
+      slack: slack as never,
+      userId: 'user-1',
+      teamId: 'T123',
+    });
+
+    expect(mocks.answerQuestion).toHaveBeenCalledWith(
+      expect.objectContaining({ question: '' }),
+    );
+    expect(mocks.postThreadMessage).toHaveBeenCalledOnce();
+    expect(mocks.postThreadMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ text: 'Doing well.' }),
+    );
+  });
+
+  it('lets the Fast model answer an empty default-mode invocation', async () => {
+    const slack = {
+      addReaction: vi.fn().mockResolvedValue(true),
+      removeReaction: vi.fn().mockResolvedValue(true),
+      normalizeIncomingText: vi.fn(async (text: string) => text),
+      fetchThreadMessages: vi.fn(async () => []),
+    };
+
+    await processFastAgentMessage({
+      event: {
+        type: 'app_mention',
+        channel: 'C123',
+        user: 'U123',
+        text: '',
+        ts: '100.001',
+      } as never,
+      slack: slack as never,
+      userId: 'user-1',
+      teamId: 'T123',
+      continuation: true,
+    });
+
+    expect(mocks.answerQuestion).toHaveBeenCalledWith(
+      expect.objectContaining({ question: '' }),
+    );
+    expect(mocks.postThreadMessage).toHaveBeenCalledOnce();
+    expect(mocks.postThreadMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ text: 'Doing well.' }),
+    );
+  });
+
   it('resolves pending reply tasks only after acquiring the Fast turn lock', async () => {
     const resolveActiveTasks = vi
       .fn()

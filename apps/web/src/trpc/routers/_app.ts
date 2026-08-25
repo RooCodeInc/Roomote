@@ -7,6 +7,7 @@ import { FeatureFlag } from '@roomote/feature-flags';
 
 import {
   ALL_REPOSITORIES,
+  FAST_EXECUTION,
   CONFLICT_RESOLUTION_MAX_PR_AGE_DAYS_OPTIONS,
   launchCodingHarnesses,
   computeProviders,
@@ -461,6 +462,7 @@ const UPDATE_SETTINGS_SAVING_AUTOMATION_VALUES = [
   'channelAutoStart',
   'managerChannel',
   'managerStats',
+  'providerUsageLimit',
   'reviewer',
   'conflictResolver',
   'suggester',
@@ -620,6 +622,22 @@ const automationsRouter = createRouter({
           .min(1)
           .max(160)
           .nullable(),
+        providerUsageLimitFrequency: z.enum(['off', 'every_hour']).optional(),
+        providerUsageLimitThreshold: z
+          .number()
+          .int()
+          .min(5)
+          .max(95)
+          .refine((value) => value % 5 === 0)
+          .optional(),
+        providerUsageLimitSlackChannel: z
+          .string()
+          .trim()
+          .min(1)
+          .max(160)
+          .nullable()
+          .optional(),
+        providerUsageLimitDiscordChannel: z.string().nullable().optional(),
         sentryTriageFrequency: z.enum(['off', 'daily', 'weekly']),
         sentryTriageSlackChannel: z.string().trim().min(1).max(160).nullable(),
         sentryTriageDiscordChannel: z
@@ -782,6 +800,7 @@ const automationsRouter = createRouter({
         environmentId: z.union([
           z.string().uuid(),
           z.literal(ALL_REPOSITORIES),
+          z.literal(FAST_EXECUTION),
         ]),
         targetProvider: z
           .enum(['slack', 'discord', 'teams', 'telegram'])
@@ -828,6 +847,7 @@ const automationsRouter = createRouter({
         environmentId: z.union([
           z.string().uuid(),
           z.literal(ALL_REPOSITORIES),
+          z.literal(FAST_EXECUTION),
         ]),
         targetProvider: z
           .enum(['slack', 'discord', 'teams', 'telegram'])

@@ -60,13 +60,41 @@ import {
   serializeTaskTypeFilterParam,
 } from '@/components/tasks/taskTypeFilter';
 
+type TasksView = 'list' | 'board';
+
+const TASKS_VIEW_STORAGE_KEY = 'roomote-tasks-view';
+
+function readStoredTasksView(): TasksView {
+  try {
+    return window.localStorage.getItem(TASKS_VIEW_STORAGE_KEY) === 'board'
+      ? 'board'
+      : 'list';
+  } catch {
+    return 'list';
+  }
+}
+
+function writeStoredTasksView(view: TasksView): void {
+  try {
+    window.localStorage.setItem(TASKS_VIEW_STORAGE_KEY, view);
+  } catch {
+    // Ignore localStorage failures.
+  }
+}
+
 export const Tasks = () => {
   const { userId, isAdmin } = useAuthorizedUser();
   const showTaskTypeFilter = false;
 
   const router = useRouter();
   const searchParams = useSearchParams();
-  const isBoardView = searchParams.get('view') === 'board';
+  const [storedView, setStoredView] = useState<TasksView>('list');
+  const isBoardView =
+    searchParams.get('view') === 'board' || storedView === 'board';
+
+  useEffect(() => {
+    setStoredView(readStoredTasksView());
+  }, []);
 
   /**
    * Filters
@@ -445,11 +473,14 @@ export const Tasks = () => {
     setIsSelectionMode(!isSelectionMode);
   };
 
-  const handleViewChange = (view: 'list' | 'board') => {
+  const handleViewChange = (view: TasksView) => {
     if (view === 'board') {
       setSelectedTasks(new Set());
       setIsSelectionMode(false);
     }
+
+    setStoredView(view);
+    writeStoredTasksView(view);
 
     const params = new URLSearchParams(searchParams.toString());
 
