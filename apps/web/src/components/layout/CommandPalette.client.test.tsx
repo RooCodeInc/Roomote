@@ -62,11 +62,17 @@ vi.mock('@/components/system', () => ({
   CommandItem: ({
     children,
     onSelect,
+    keywords,
   }: {
     children: React.ReactNode;
     onSelect?: () => void;
+    keywords?: string[];
   }) => (
-    <button type="button" onClick={() => onSelect?.()}>
+    <button
+      type="button"
+      data-keywords={keywords?.join(' ')}
+      onClick={() => onSelect?.()}
+    >
       {children}
     </button>
   ),
@@ -79,6 +85,7 @@ vi.mock('@/components/system', () => ({
   Settings: Icon,
   HelpCircle: Icon,
   Plus: Icon,
+  Zap: Icon,
 }));
 
 vi.mock('@/components/sandbox/WorkspaceBadge', () => ({
@@ -207,9 +214,58 @@ describe('CommandPalette', () => {
       .getAllByRole('button')
       .map((button) => button.textContent?.trim())
       .filter((label): label is string =>
-        ['New Task', 'Tasks', 'Settings', 'Help'].includes(label ?? ''),
+        [
+          'New Task',
+          'Tasks',
+          'Automations',
+          'Analytics',
+          'Settings',
+          'Help',
+        ].includes(label ?? ''),
       );
 
     expect(navItems).toEqual(['New Task', 'Tasks', 'Settings', 'Help']);
+  });
+
+  it('lets admins find and open recurring automations', () => {
+    useUserMock.mockReturnValue({
+      isSignedIn: true,
+      user: { isAdmin: true },
+    });
+
+    render(<CommandPalette />);
+
+    const automations = screen.getByRole('button', { name: 'Automations' });
+    expect(automations).toHaveAttribute(
+      'data-keywords',
+      'recurring scheduled prompts',
+    );
+
+    const navItems = screen
+      .getAllByRole('button')
+      .map((button) => button.textContent?.trim())
+      .filter((label): label is string =>
+        [
+          'New Task',
+          'Tasks',
+          'Automations',
+          'Analytics',
+          'Settings',
+          'Help',
+        ].includes(label ?? ''),
+      );
+    expect(navItems).toEqual([
+      'New Task',
+      'Tasks',
+      'Automations',
+      'Analytics',
+      'Settings',
+      'Help',
+    ]);
+
+    fireEvent.click(automations);
+
+    expect(setOpen).toHaveBeenCalledWith(false);
+    expect(push).toHaveBeenCalledWith('/automations');
   });
 });
