@@ -667,6 +667,12 @@ const AUTOMATION_HISTORY_KEYS_BY_ID: Partial<
 export function getAutomationHistoryHref(
   automationId: AutomationId,
 ): string | null {
+  // Provider usage alerts are delivered directly to a communication channel;
+  // their runner does not create Roomote tasks to inspect.
+  if (automationId === 'providerUsageLimit') {
+    return null;
+  }
+
   const automationKey = AUTOMATION_HISTORY_KEYS_BY_ID[automationId];
   return automationKey
     ? `/tasks?userId=${encodeURIComponent(`automation:${automationKey}`)}`

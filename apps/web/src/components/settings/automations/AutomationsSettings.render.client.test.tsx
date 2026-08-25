@@ -947,6 +947,10 @@ describe('AutomationsSettings', () => {
     expect(getAutomationHistoryHref('managerChannel')).toBeNull();
   });
 
+  it('does not add task history to provider usage alerts', () => {
+    expect(getAutomationHistoryHref('providerUsageLimit')).toBeNull();
+  });
+
   it('filters available automations by category and provider-aware search', async () => {
     render(<AutomationsSettings />);
 
