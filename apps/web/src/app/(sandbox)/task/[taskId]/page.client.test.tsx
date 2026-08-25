@@ -83,10 +83,16 @@ vi.mock('./hooks', () => ({
 }));
 
 vi.mock('./startup', () => ({
-  Startup: () => <div data-testid="startup" />,
+  Startup: ({ newTaskHref }: { newTaskHref: string }) => (
+    <a data-testid="startup" href={newTaskHref}>
+      Startup
+    </a>
+  ),
   ProductTips: () => <div data-testid="product-tips" />,
-  SnapshotResumeFailureFooter: () => (
-    <div data-testid="snapshot-resume-failure-footer" />
+  SnapshotResumeFailureFooter: ({ newTaskHref }: { newTaskHref: string }) => (
+    <a data-testid="snapshot-resume-failure-footer" href={newTaskHref}>
+      Startup failure
+    </a>
   ),
 }));
 
@@ -311,10 +317,20 @@ describe('SandboxPage', () => {
         ...baseSession.taskRun,
         status: RunStatus.Failed,
         payloadKind: TaskPayloadKind.StandardTask,
+        payload: { environmentId: 'env-1' },
+      },
+      task: {
+        ...baseSession.task,
+        model: 'openrouter/openai/gpt-5.4',
       },
       prompt: {
         id: 'prompt-1',
+        text: 'Fix the build',
         visibleInTranscript: true,
+      },
+      draftPrompt: {
+        text: 'Change the failed task',
+        images: [],
       },
       sessionState: 'boot-failed',
     });
@@ -324,8 +340,12 @@ describe('SandboxPage', () => {
 
     renderPage();
 
-    expect(screen.getByTestId('startup')).toBeInTheDocument();
+    expect(screen.getByTestId('startup')).toHaveAttribute(
+      'href',
+      '/?prompt=Fix+the+build&model=openrouter%2Fopenai%2Fgpt-5.4&environmentId=env-1',
+    );
     expect(screen.queryByTestId('product-tips')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('draft-prompt-banner')).not.toBeInTheDocument();
     expect(screen.queryByTestId('historical-content')).not.toBeInTheDocument();
     expect(
       screen.queryByTestId('snapshot-resume-failure-footer'),

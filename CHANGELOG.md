@@ -2,6 +2,41 @@
 
 This file tracks product releases for Roomote (single monorepo version). Automated release entries are prepended by `pnpm run version`.
 
+## 0.42.0 (2026-08-25)
+
+This release expands Fast and automation workflows, shortens initial setup, adds proactive usage and pull-request conflict alerts, and improves task recovery and chat reliability.
+
+### Highlights
+
+- Use current chat context and deployment-configured MCP tools directly from Fast, including automation management and all-repository delegation.
+- Run custom automations in Fast and trigger Roomote from Slack workflows and third-party apps.
+- Configure inference-provider usage alerts and notify originating conversations when Roomote-created GitHub pull requests conflict.
+- Finish initial setup sooner, recover failed task starts with a prefilled launcher, and keep chat-backed work more reliable.
+
+### Minor changes
+
+- Run custom automations in Fast mode with consistent Slack reports, easier command-palette discovery, and validation focused on the automation being saved.
+- Let Fast read the current chat context and use deployment-configured MCP tools directly, including custom automation management and delegation across all repositories.
+- Configure inference-provider usage alerts with adjustable thresholds, destinations, deduplication, and multi-provider delivery.
+- Notify the originating task conversation when a Roomote-created GitHub pull request becomes conflicted so the team can resolve it promptly.
+- Retry failed task starts through an editable new-task launcher prefilled with the original prompt, model, and environment.
+- Let Slack workflows and third-party apps trigger Roomote through explicit mentions.
+- Finish initial setup sooner by making environment creation optional, then guide teams to create an environment from Home when they want verified repository setup.
+
+### Patch changes
+
+- Reduce GitHub App rate-limit pressure by coalescing installation-token requests, briefly caching the PR-notification hot path with one fresh-token retry, reusing bootstrap credentials until their scheduled refresh, and honoring provider backoff signals.
+- Prevent chat-backed and Fast work from hanging during terminal delivery failures, provider recovery, or interrupted retries.
+- Keep ChatGPT subscription OAuth credentials on the control plane and out of task sandboxes and restored snapshots.
+- Deliver GitHub installation approval notifications to requesters who use Discord without Slack.
+- Include complete Fast parent and advisor or judge inference usage in Costs analytics.
+- Make empty Fast invocations respond contextually and keep updates focused on useful outcomes instead of orchestration details.
+- Preserve exact Slack or Discord source-message links in pull requests created by Fast-delegated tasks.
+- Stop pull-request review prompts from reappearing after a user selects automatic Fix all handling.
+- Move completed tasks to Done after their pull request merges and resume settled delegated work under the original task.
+- Restore each user's preferred Tasks layout and give Slack-launched tasks meaningful generated titles.
+- Keep oversized Fast integration results readable through conversation-scoped spill handles without exposing the service filesystem.
+
 ## 0.41.0 (2026-08-24)
 
 This release adds a shared task board, expands Fast delegation and preferences, delivers actionable pull-request CI updates and proactive operator alerts, clarifies inference costs, and gives the Brain richer pull-request context.

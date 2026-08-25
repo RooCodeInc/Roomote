@@ -39,30 +39,9 @@ import { StepSourceControlConnect } from './StepSourceControlConnect';
 import { StepCommunicationConnect } from './StepCommunicationConnect';
 import { StepInvoke } from './StepInvoke';
 import { useSetupFlow } from './hooks';
-import { StepRepoSelection, type SetupRetryReason } from './StepRepoSelection';
 import { StepAutomationRecommendations } from './StepAutomationRecommendations';
-import { StepEnvironmentExplainer } from './StepEnvironmentExplainer';
 import { getSetupStepPath } from './types';
 import { LoadingSetupFlow, stepTransitionVariants } from './SetupBootstrapFlow';
-
-function getSetupRetryReason(status: {
-  onboardingFailed: boolean;
-  onboardingTaskStatus: string | null;
-  onboardingTaskPhase?: string | null;
-  matchingEnvironment: { id: string; name: string } | null;
-}): SetupRetryReason | null {
-  if (!status.onboardingFailed) return null;
-  if (
-    (status.onboardingTaskStatus === 'completed' ||
-      (status.onboardingTaskStatus === 'idle' &&
-        status.onboardingTaskPhase === 'waiting_for_prompt')) &&
-    status.matchingEnvironment === null
-  )
-    return 'no-environment';
-  return status.onboardingTaskStatus === 'canceled'
-    ? 'task-canceled'
-    : 'task-failed';
-}
 
 export function SetupSignedInFlow() {
   const router = useRouter();
@@ -271,7 +250,6 @@ export function SetupSignedInFlow() {
     params.delete('sync');
     commitSetupUrl(params);
   };
-  const setupRetryReason = getSetupRetryReason(status);
   const computeProvisioning =
     selectedComputeProvider &&
     isSetupProvisionableComputeProvider(selectedComputeProvider)
@@ -486,61 +464,13 @@ export function SetupSignedInFlow() {
               returnPath={getSetupStepPath('slack')}
             />
           )}
-          {step === 'environment-explainer' && (
-            <StepEnvironmentExplainer
-              onContinue={goToNextStep}
-              onBack={canGoBack ? goToPreviousStep : undefined}
-            />
-          )}
-          {step === 'repo-selection' && (
-            <StepRepoSelection
-              initialSelectedRepositoryIds={
-                status.setupNewState.selectedRepositoryIds
-              }
-              initialSetupGuidance={status.setupNewState.setupGuidance ?? ''}
-              initialSelectedModelId={status.setupNewState.selectedModelId}
-              retryReason={setupRetryReason}
-              computeProvisioningError={
-                computeProvisioning?.status === 'failed'
-                  ? computeProvisioning.error
-                  : null
-              }
-              onRetryComputeProvisioning={() =>
-                goToStep('compute-config', { revisit: true })
-              }
-              onReviewComputeProvider={() =>
-                goToStep('compute-provider', { revisit: true })
-              }
-              onContinue={({
-                recommendationBatch,
-                setupNewState,
-                nextStep,
-              }) => {
-                if (recommendationBatch) {
-                  queryClient.setQueryData(
-                    trpc.automations.listRecommendations.queryKey(),
-                    recommendationBatch,
-                  );
-                }
-                queryClient.setQueryData(
-                  trpc.setup.status.queryKey(),
-                  (currentStatus) =>
-                    currentStatus
-                      ? { ...currentStatus, setupNewState }
-                      : currentStatus,
-                );
-                goToStep(nextStep);
-              }}
-              onBack={canGoBack ? goToPreviousStep : undefined}
-              onSkip={() => {
-                setupSession.unlockPostOnboardingFlow();
-                goToStep('invoke');
-              }}
-            />
-          )}
           {step === 'invoke' && (
             <StepInvoke
-              onboardingTaskId={status.setupNewState.onboardingTaskId}
+              onboardingTaskId={
+                status.onboardingFailed
+                  ? null
+                  : status.setupNewState.onboardingTaskId
+              }
               communicationProviders={
                 status.authSetup.selectedProvider
                   ? [status.authSetup.selectedProvider]

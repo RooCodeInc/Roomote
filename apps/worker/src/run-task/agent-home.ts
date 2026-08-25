@@ -51,7 +51,6 @@ import {
   resolveOpenRouterVariantModelAlias,
   toBedrockMantleRuntimeModelId,
   OPENCODE_ARCHITECT_AGENT,
-  OPENCODE_AUTH_CONTENT_ENV_VAR_NAME,
   OPENCODE_GO_API_KEY_ENV_VAR_NAME,
   TASK_MODEL_CONTEXT_WINDOWS_ENV_VAR_NAME,
   TaskPayloadKind,
@@ -123,6 +122,10 @@ const OPENCODE_GENERAL_AGENT_NAME = 'general';
 const MCP_ISOLATED_AGENT_NAMES = [ROOMOTE_OPENCODE_VISUAL_AGENT_NAME] as const;
 
 const ROOMOTE_MCP_SERVER_NAME = 'roomote';
+// OpenCode otherwise applies its 30s MCP request default, while Roomote's
+// platform relay intentionally allows up to 120s per API attempt. Keep the
+// outer request alive long enough for the relay to return a structured result.
+const ROOMOTE_OPENCODE_MCP_TIMEOUT_MS = 600_000;
 
 const ROOMOTE_OPENCODE_VISUAL_MODEL_INSTRUCTIONS_FILE_NAME =
   'roomote-opencode-visual-model-instructions.md';
@@ -576,6 +579,9 @@ function createOpenCodeMcpConfig(
             type: 'local',
             command: [mcpServer.command, ...(mcpServer.args ?? [])],
             enabled: true,
+            ...(mcpServer.name === ROOMOTE_MCP_SERVER_NAME
+              ? { timeout: ROOMOTE_OPENCODE_MCP_TIMEOUT_MS }
+              : {}),
             ...(mcpServer.environment
               ? { environment: mcpServer.environment }
               : {}),
@@ -590,6 +596,9 @@ function createOpenCodeMcpConfig(
           url: mcpServer.url,
           enabled: true,
           oauth: false,
+          ...(mcpServer.name === ROOMOTE_MCP_SERVER_NAME
+            ? { timeout: ROOMOTE_OPENCODE_MCP_TIMEOUT_MS }
+            : {}),
           ...(mcpServer.headers ? { headers: mcpServer.headers } : {}),
         },
       ];
@@ -719,16 +728,6 @@ function mergeInferenceGatewayProviderConfig(
       !modelIds.some((modelId) =>
         modelId?.trim().startsWith(`${BEDROCK_MANTLE_OPENCODE_PROVIDER_ID}/`),
       )
-    ) {
-      continue;
-    }
-
-    // ChatGPT-subscription OAuth authenticates through opencode's Codex
-    // plugin directly; leave the openai provider on its default base URL
-    // when a subscription record is present in the sandbox (non-gateway mode).
-    if (
-      providerId === CHATGPT_OPENCODE_PROVIDER_ID &&
-      runtimeEnv[OPENCODE_AUTH_CONTENT_ENV_VAR_NAME]
     ) {
       continue;
     }
@@ -1933,10 +1932,9 @@ export function resolveOpenCodeDataDir(
 }
 
 /**
- * Credential files under the OpenCode data dir. The ChatGPT subscription
- * `auth.json` is active only outside gateway mode; the Google service-account
- * path is retained here solely to scrub files left by snapshots created while
- * Vertex was enabled.
+ * Credential files under the OpenCode data dir. These paths are retained
+ * solely to scrub files left by snapshots created before sandbox credentials
+ * moved behind the gateway or while Vertex was enabled.
  */
 export function resolveOpenCodeCredentialFilePaths(
   homeDir: string,
@@ -1948,45 +1946,6 @@ export function resolveOpenCodeCredentialFilePaths(
     path.join(dataDir, OPENCODE_AUTH_FILE_NAME),
     path.join(dataDir, GOOGLE_APPLICATION_CREDENTIALS_FILE_NAME),
   ];
-}
-
-/**
- * Rewrite the OpenCode auth file the pre-snapshot scrub removed, for
- * a sandbox that survived an abandoned snapshot attempt. Normally these files
- * are materialized once during harness bootstrap and OpenCode persists OAuth
- * refreshes back to auth.json, so restoring the same path from the
- * deployment's current env value heals the live harness without a restart.
- */
-export function rematerializeOpenCodeCredentialFiles(options: {
-  homeDir: string;
-  runtimeEnv: Record<string, string>;
-  logger: { info(message: string): void; warn(message: string): void };
-}): { failedSteps: string[] } {
-  const failedSteps: string[] = [];
-  const env = { ...options.runtimeEnv };
-
-  const authContent = env[OPENCODE_AUTH_CONTENT_ENV_VAR_NAME];
-
-  if (authContent) {
-    try {
-      const dataDir = resolveOpenCodeDataDir(options.homeDir, env);
-      fs.mkdirSync(dataDir, { recursive: true, mode: 0o700 });
-      fs.writeFileSync(
-        path.join(dataDir, OPENCODE_AUTH_FILE_NAME),
-        authContent,
-        { encoding: 'utf8', mode: 0o600 },
-      );
-    } catch (error) {
-      options.logger.warn(
-        `[rematerializeOpenCodeCredentialFiles] Failed to rewrite OpenCode auth file: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
-      );
-      failedSteps.push('rewrite OpenCode auth file');
-    }
-  }
-
-  return { failedSteps };
 }
 
 /**

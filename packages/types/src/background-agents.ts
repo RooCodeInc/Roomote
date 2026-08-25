@@ -10,6 +10,23 @@ export type AnnouncerFrequency = 'off' | 'daily' | 'weekly';
 
 export type ManagerStatsFrequency = 'off' | 'weekly';
 
+export type ProviderUsageLimitFrequency = 'off' | 'every_hour';
+
+export const DEFAULT_PROVIDER_USAGE_LIMIT_FREQUENCY: ProviderUsageLimitFrequency =
+  'every_hour';
+export const DEFAULT_PROVIDER_USAGE_LIMIT_THRESHOLD = 85;
+export const PROVIDER_USAGE_LIMIT_THRESHOLDS = [
+  5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90, 95,
+] as const;
+export type ProviderUsageLimitThreshold =
+  (typeof PROVIDER_USAGE_LIMIT_THRESHOLDS)[number];
+
+export function isProviderUsageLimitThreshold(
+  value: number,
+): value is ProviderUsageLimitThreshold {
+  return (PROVIDER_USAGE_LIMIT_THRESHOLDS as readonly number[]).includes(value);
+}
+
 export type SentryTriageFrequency = 'off' | 'daily' | 'weekly';
 
 export type DependabotTriageFrequency = 'off' | 'daily' | 'weekly';
@@ -51,6 +68,13 @@ export type CustomAutomationScheduleMode =
   | ScheduleOnlyBackgroundAutomationFrequency
   | 'cron';
 
+export const CUSTOM_AUTOMATION_EXECUTION_MODES = [
+  'sandbox_task',
+  'fast',
+] as const;
+export type CustomAutomationExecutionMode =
+  (typeof CUSTOM_AUTOMATION_EXECUTION_MODES)[number];
+
 export const MAX_CUSTOM_AUTOMATIONS = 25;
 
 export const CUSTOM_AUTOMATION_NAME_MAX_LENGTH = 100;
@@ -88,6 +112,7 @@ export const USER_FACING_AUTOMATION_KEYS = [
   // would break the N-1 rollback release.
   'slack_channel_auto_start',
   'manager_stats',
+  'provider_usage_limit',
   'platform_issue_alerts',
   'sentry_triage',
   'dependabot_triage',

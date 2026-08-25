@@ -160,7 +160,6 @@ export {
   RotateCcw,
   History as RotateCcwClock,
   RotateCcwKey,
-  RotateCw,
   ScrollText,
   Rows4,
   ScanFace,
@@ -216,6 +215,7 @@ export {
   XIcon,
   Zap,
   BellElectric,
+  BatteryWarning,
 } from 'lucide-react';
 
 export type { LucideIcon } from 'lucide-react';

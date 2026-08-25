@@ -49,17 +49,15 @@ function runScrubStep(
  * anything left on disk here persists in the snapshot image at the provider
  * and survives key rotation in the database.
  *
- * Everything scrubbed below is re-materialized from the dequeue/resume
- * response at the next run start (`injectEnvVars` plus the OpenCode
- * bootstrap), so restored sandboxes never rely on snapshotted credential
- * state:
+ * Current credentials scrubbed below are re-materialized from the
+ * dequeue/resume response at the next run start, while legacy OpenCode
+ * credentials are removed permanently because task inference is gateway-only:
  * - `~/.roomote/env.sh` holds plaintext exports of all deployment env vars,
- *   including inference provider keys, pasted Google service-account JSON,
- *   and the ChatGPT subscription OAuth record.
+ *   including inference provider keys and pasted Google service-account JSON.
  * - `~/.roomote/gh-token` and the source-control credentials TSV hold git
  *   provider tokens.
- * - The OpenCode data dir holds the materialized `auth.json` and Google
- *   service-account JSON.
+ * - Old snapshots can contain OpenCode `auth.json`; the data dir can also
+ *   contain disabled Google service-account JSON.
  */
 export async function scrubSandboxSecretsBeforeSnapshot(
   logger: ScrubLogger = console,

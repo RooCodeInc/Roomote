@@ -12,12 +12,21 @@ const mocks = vi.hoisted(() => ({
   callIntegration: vi.fn(),
   sendTaskMessage: vi.fn(),
   cancelTask: vi.fn(),
-  inspectTasks: vi.fn(),
   getUserIdentity: vi.fn(),
   bindExecutor: vi.fn(),
+  bindMcpExecutor: vi.fn(),
+  revokeMcpCapabilities: vi.fn(),
   nativeExecutor: undefined as
     | ((call: {
+        agent?: string;
         name: string;
+        args: Record<string, unknown>;
+      }) => Promise<unknown>)
+    | undefined,
+  mcpExecutor: undefined as
+    | ((call: {
+        integrationId: string;
+        toolName: string;
         args: Record<string, unknown>;
       }) => Promise<unknown>)
     | undefined,
@@ -28,13 +37,13 @@ const nativeToolNames = vi.hoisted(
     ({
       cancelTask: 'cancel_task',
       ignoreEvent: 'ignore_event',
-      integrationCall: 'integration_call',
       launchTask: 'launch_task',
-      manageTasks: 'manage_tasks',
       retryTaskStart: 'retry_task_start',
       sendChatReaction: 'send_chat_reaction',
       sendChatReply: 'send_chat_reply',
       sendTaskMessage: 'send_task_message',
+      spillGrep: 'spill_grep',
+      spillRead: 'spill_read',
     }) as const,
 );
 
@@ -63,6 +72,12 @@ vi.mock('../../non-task-provider-usage', () => ({
   },
   classifyNonTaskInferenceError: mocks.classifyInferenceError,
   generateTrackedNonTaskTextInOpenCodeSession: mocks.generateText,
+  NonTaskOpenCodePromptTimeoutError: class extends Error {
+    constructor(timeoutMs: number) {
+      super(`Timed out waiting for OpenCode output after ${timeoutMs}ms.`);
+      this.name = 'NonTaskOpenCodePromptTimeoutError';
+    }
+  },
   isNonTaskOpenCodePromptTimeoutError: (error: unknown) =>
     error instanceof Error &&
     error.name === 'NonTaskOpenCodePromptTimeoutError',
@@ -87,12 +102,16 @@ vi.mock('../fast-agent-native-tool-bridge', () => ({
   },
   getFastAgentNativeToolRuntime: vi.fn(async () => ({
     directory: '/tmp/fast-native-tools',
+    mcpCapability: 'mcp-capability-1',
     env: {
       ROOMOTE_FAST_TOOL_BRIDGE_URL: 'http://127.0.0.1:4321/tool',
       ROOMOTE_FAST_TOOL_BRIDGE_TOKEN: 'test-token',
     },
   })),
   bindFastAgentNativeToolExecutor: mocks.bindExecutor,
+  createFastAgentSpillTurnBudget: () => ({ calls: 0, outputBytes: 0 }),
+  bindFastAgentMcpToolExecutor: mocks.bindMcpExecutor,
+  revokeFastAgentMcpCapabilitiesForConversation: mocks.revokeMcpCapabilities,
 }));
 
 vi.mock('../fast-agent-integration-broker', () => ({
@@ -103,12 +122,13 @@ vi.mock('../fast-agent-integration-broker', () => ({
 vi.mock('../fast-agent-tasks', () => ({
   sendFastAgentTaskMessage: mocks.sendTaskMessage,
   cancelFastAgentTask: mocks.cancelTask,
-  inspectFastAgentTasks: mocks.inspectTasks,
 }));
 
 vi.mock('../fast-agent-user-identity', () => ({
   getFastAgentUserIdentity: mocks.getUserIdentity,
 }));
+
+import { ALL_REPOSITORIES } from '@roomote/types';
 
 import { answerFastAgentQuestion } from '../fast-agent-service';
 import type {
@@ -142,15 +162,29 @@ function callbacks(
   };
 }
 
-async function invokeTool(name: string, args: Record<string, unknown>) {
+async function invokeTool(
+  name: string,
+  args: Record<string, unknown>,
+  agent?: string,
+) {
   if (!mocks.nativeExecutor) throw new Error('Native executor is not bound.');
-  return mocks.nativeExecutor({ name, args });
+  return mocks.nativeExecutor({ name, args, ...(agent ? { agent } : {}) });
+}
+
+async function invokeMcpTool(
+  integrationId: string,
+  toolName: string,
+  args: Record<string, unknown>,
+) {
+  if (!mocks.mcpExecutor) throw new Error('MCP executor is not bound.');
+  return mocks.mcpExecutor({ integrationId, toolName, args });
 }
 
 describe('answerFastAgentQuestion native OpenCode tools', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.nativeExecutor = undefined;
+    mocks.mcpExecutor = undefined;
     mocks.runSession.mockImplementation(
       ({
         prompt,
@@ -163,10 +197,18 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         ) => Promise<unknown>;
       }) => execute({ id: 'opencode-session-1' }, prompt),
     );
-    mocks.bindExecutor.mockImplementation((_sessionID, executor) => {
-      mocks.nativeExecutor = executor;
+    mocks.bindExecutor.mockImplementation(
+      (_sessionID, _conversationId, executor) => {
+        mocks.nativeExecutor = executor;
+        return () => {
+          mocks.nativeExecutor = undefined;
+        };
+      },
+    );
+    mocks.bindMcpExecutor.mockImplementation((_capability, executor) => {
+      mocks.mcpExecutor = executor;
       return () => {
-        mocks.nativeExecutor = undefined;
+        mocks.mcpExecutor = undefined;
       };
     });
     mocks.getSession.mockResolvedValue({
@@ -192,10 +234,6 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     mocks.callIntegration.mockResolvedValue({ matches: ['fast-agent.ts'] });
     mocks.sendTaskMessage.mockResolvedValue({ success: true });
     mocks.cancelTask.mockResolvedValue({ success: true });
-    mocks.inspectTasks.mockResolvedValue({
-      id: 'task-1',
-      taskRunStatus: 'running',
-    });
     mocks.getUserIdentity.mockResolvedValue({
       displayName: 'Matt Rubens',
       githubLogin: 'mrubens',
@@ -299,7 +337,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     });
   });
 
-  it('binds only integration and task inspection tools for subagent sessions', async () => {
+  it('keeps Fast-native tools parent-only while MCP tools use the shared broker', async () => {
     const adapter = callbacks();
     mocks.listIntegrations.mockResolvedValue([
       {
@@ -308,7 +346,22 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         description: 'Repository access',
         tools: [{ name: 'search_code' }],
       },
+      {
+        id: 'roomote',
+        name: 'Roomote',
+        description: 'Deployment management',
+        tools: [
+          { name: 'manage_custom_automations' },
+          { name: 'manage_tasks' },
+        ],
+      },
     ]);
+    mocks.callIntegration.mockImplementation(
+      async (_context, _integrations, request) =>
+        request.toolName === 'manage_tasks'
+          ? { id: request.args.taskId, taskRunStatus: 'running' }
+          : { matches: ['fast-agent.ts'] },
+    );
 
     mocks.generateText.mockImplementation(
       async (_params, _session, options) => {
@@ -318,10 +371,10 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
 
         const parentExecutor = mocks.bindExecutor.mock.calls.find(
           ([sessionID]) => sessionID === 'opencode-session-1',
-        )?.[1];
+        )?.[2];
         const subagentExecutor = mocks.bindExecutor.mock.calls.find(
           ([sessionID]) => sessionID === 'opencode-subagent-1',
-        )?.[1];
+        )?.[2];
         if (!parentExecutor || !subagentExecutor) {
           throw new Error('Expected parent and subagent executors to bind.');
         }
@@ -334,30 +387,6 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
           await expect(
             subagentExecutor({
               agent,
-              name: nativeToolNames.manageTasks,
-              args: { action: 'get_summary', taskId: 'task-1' },
-            }),
-          ).resolves.toEqual({
-            id: 'task-1',
-            taskRunStatus: 'running',
-          });
-          await expect(
-            subagentExecutor({
-              agent,
-              name: nativeToolNames.integrationCall,
-              args: {
-                integrationId: 'github',
-                toolName: 'search_code',
-                arguments: { query: `Fast Agent ${agent}` },
-              },
-            }),
-          ).resolves.toEqual({
-            success: true,
-            result: { matches: ['fast-agent.ts'] },
-          });
-          await expect(
-            subagentExecutor({
-              agent,
               name: nativeToolNames.sendChatReply,
               args: { purpose: 'closeout', message: 'leak' },
             }),
@@ -367,14 +396,21 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
           });
         }
         await expect(
-          subagentExecutor({
-            agent: 'general',
-            name: nativeToolNames.manageTasks,
-            args: { action: 'get_summary', taskId: 'task-1' },
+          invokeMcpTool('roomote', 'manage_tasks', {
+            action: 'get_summary',
+            taskId: 'task-advisor',
           }),
         ).resolves.toEqual({
-          success: false,
-          error: 'That tool is reserved for the Fast parent agent.',
+          success: true,
+          result: { id: 'task-advisor', taskRunStatus: 'running' },
+        });
+        await expect(
+          invokeMcpTool('github', 'search_code', {
+            query: 'Fast Agent advisor',
+          }),
+        ).resolves.toEqual({
+          success: true,
+          result: { matches: ['fast-agent.ts'] },
         });
         await parentExecutor({
           name: nativeToolNames.sendChatReply,
@@ -390,12 +426,21 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     await expect(
       answerFastAgentQuestion({ ...baseParams, adapter }),
     ).resolves.toBe('Subagent review completed.');
-    expect(mocks.inspectTasks).toHaveBeenCalledTimes(2);
-    expect(mocks.inspectTasks).toHaveBeenCalledWith(
-      expect.objectContaining({ userId: 'user-1' }),
-      { action: 'get_summary', taskId: 'task-1' },
-    );
     expect(mocks.callIntegration).toHaveBeenCalledTimes(2);
+    expect(mocks.generateText).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.any(Object),
+      expect.objectContaining({
+        trackSessionTreeUsage: true,
+        tools: expect.objectContaining({
+          'github_*': true,
+          'roomote_*': true,
+        }),
+      }),
+    );
+    expect(mocks.generateText.mock.calls[0]?.[2].tools).not.toHaveProperty(
+      'integration_call',
+    );
     expect(mocks.callIntegration).toHaveBeenCalledWith(
       expect.objectContaining({ userId: 'user-1' }),
       expect.arrayContaining([expect.objectContaining({ id: 'github' })]),
@@ -407,8 +452,30 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         }),
       },
     );
+    expect(mocks.callIntegration).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: 'user-1' }),
+      expect.arrayContaining([expect.objectContaining({ id: 'roomote' })]),
+      {
+        integrationId: 'roomote',
+        toolName: 'manage_tasks',
+        args: {
+          action: 'get_summary',
+          taskId: expect.stringMatching(/^task-/),
+        },
+      },
+    );
     expect(adapter.postReply).toHaveBeenCalledTimes(2);
     expect(mocks.bindExecutor).toHaveBeenCalledTimes(2);
+    expect(
+      mocks.bindExecutor.mock.calls.find(
+        ([sessionID]) => sessionID === 'opencode-session-1',
+      )?.[3],
+    ).toMatchObject({ allowSpillRecovery: true });
+    expect(
+      mocks.bindExecutor.mock.calls.find(
+        ([sessionID]) => sessionID === 'opencode-subagent-1',
+      )?.[3],
+    ).toMatchObject({ allowSpillRecovery: false });
   });
 
   it('rebuilds an invalidated OpenCode session from canonical compatibility history', async () => {
@@ -533,9 +600,12 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     const lockLost = new Error('Fast conversation lock ownership was lost.');
     mocks.generateText.mockImplementationOnce(
       async (_params, _session, options) => {
-        expect(options.signal).toBe(controller.signal);
+        expect(options.signal).toBeInstanceOf(AbortSignal);
+        expect(options.signal.aborted).toBe(false);
         await options.onSessionReady('opencode-session-1');
         controller.abort(lockLost);
+        expect(options.signal.aborted).toBe(true);
+        expect(options.signal.reason).toBe(lockLost);
         await expect(
           invokeTool(nativeToolNames.sendChatReply, {
             purpose: 'closeout',
@@ -558,6 +628,85 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     expect(mocks.generateText).toHaveBeenCalledOnce();
     expect(adapter.postReply).not.toHaveBeenCalled();
     expect(mocks.invalidateSession).toHaveBeenCalledWith('conversation-1');
+  });
+
+  it('closes a retry notice when conversation lock loss cancels backoff', async () => {
+    vi.useFakeTimers();
+    const controller = new AbortController();
+    const lockLost = new Error('Fast conversation lock ownership was lost.');
+    const postReply = vi.fn().mockImplementation(async () => {
+      controller.abort(lockLost);
+      return { messageId: 'retry-1' };
+    });
+    const replaceReply = vi.fn().mockResolvedValue({ messageId: 'retry-1' });
+    mocks.generateText.mockRejectedValue(new Error('TypeError: fetch failed'));
+
+    try {
+      const resultPromise = answerFastAgentQuestion({
+        ...baseParams,
+        adapter: callbacks({ postReply, replaceReply }),
+        signal: controller.signal,
+      });
+      const rejection = expect(resultPromise).rejects.toBe(lockLost);
+      await vi.runAllTimersAsync();
+
+      await rejection;
+      expect(mocks.generateText).toHaveBeenCalledOnce();
+      expect(postReply).toHaveBeenCalledWith({
+        purpose: 'progress',
+        message: expect.stringContaining('attempt 1/6'),
+      });
+      expect(replaceReply).toHaveBeenCalledWith(
+        { messageId: 'retry-1' },
+        {
+          purpose: 'closeout',
+          message:
+            'The inference retry was interrupted before it completed. Please send the request again.',
+        },
+      );
+      expect(mocks.invalidateSession).toHaveBeenCalledWith('conversation-1');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not start another attempt when lock loss follows backoff expiry', async () => {
+    const controller = new AbortController();
+    const lockLost = new Error('Fast conversation lock ownership was lost.');
+    const postReply = vi.fn().mockResolvedValue({ messageId: 'retry-1' });
+    const replaceReply = vi.fn().mockResolvedValue({ messageId: 'retry-1' });
+    const originalSetTimeout = globalThis.setTimeout;
+    let shouldAbort = true;
+    const timeout = vi.spyOn(globalThis, 'setTimeout').mockImplementation(((
+      callback: () => void,
+    ) => {
+      return originalSetTimeout(() => {
+        callback();
+        if (shouldAbort) {
+          shouldAbort = false;
+          controller.abort(lockLost);
+        }
+      }, 0);
+    }) as typeof setTimeout);
+    mocks.generateText.mockRejectedValue(new Error('TypeError: fetch failed'));
+
+    try {
+      await expect(
+        answerFastAgentQuestion({
+          ...baseParams,
+          adapter: callbacks({ postReply, replaceReply }),
+          signal: controller.signal,
+        }),
+      ).rejects.toBe(lockLost);
+
+      expect(mocks.generateText).toHaveBeenCalledOnce();
+      expect(replaceReply).toHaveBeenCalledWith(
+        { messageId: 'retry-1' },
+        expect.objectContaining({ purpose: 'closeout' }),
+      );
+    } finally {
+      timeout.mockRestore();
+    }
   });
 
   it('passes image data URLs to the Fast model as image-capable file input', async () => {
@@ -620,10 +769,9 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       async (_params, _session, options) => {
         await options.onSessionReady('opencode-session-1');
         toolResults.push(
-          await invokeTool(nativeToolNames.integrationCall, {
-            integrationId: 'github',
-            toolName: 'search_code',
-            arguments: { query: 'fast agent', nested: { exact: true } },
+          await invokeMcpTool('github', 'search_code', {
+            query: 'fast agent',
+            nested: { exact: true },
           }),
         );
         await invokeTool(nativeToolNames.sendChatReply, {
@@ -631,10 +779,9 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
           message: 'I’ll check.',
         });
         toolResults.push(
-          await invokeTool(nativeToolNames.integrationCall, {
-            integrationId: 'github',
-            toolName: 'search_code',
-            arguments: { query: 'fast agent', nested: { exact: true } },
+          await invokeMcpTool('github', 'search_code', {
+            query: 'fast agent',
+            nested: { exact: true },
           }),
         );
         await invokeTool(nativeToolNames.sendChatReply, {
@@ -663,6 +810,281 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         integrationId: 'github',
         toolName: 'search_code',
         args: { query: 'fast agent', nested: { exact: true } },
+      },
+    );
+  });
+
+  it('stays silent after an acknowledgement when an integration has no result to report', async () => {
+    mocks.listIntegrations.mockResolvedValue([
+      {
+        id: 'github',
+        name: 'GitHub',
+        description: 'Read GitHub',
+        tools: [{ name: 'search_code', inputSchema: { type: 'object' } }],
+      },
+    ]);
+    mocks.callIntegration.mockResolvedValue({ matches: [] });
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'ack',
+          message: 'I’ll check.',
+        });
+        await invokeMcpTool('github', 'search_code', { query: 'missing' });
+        return '';
+      },
+    );
+    const adapter = callbacks();
+
+    await expect(
+      answerFastAgentQuestion({ ...baseParams, adapter }),
+    ).resolves.toBe('I’ll check.');
+    expect(adapter.postReply).toHaveBeenCalledOnce();
+    expect(adapter.postReply).toHaveBeenCalledWith({
+      purpose: 'ack',
+      message: 'I’ll check.',
+    });
+  });
+
+  it('routes task inspection and chat context through the Roomote MCP', async () => {
+    mocks.listIntegrations.mockResolvedValue([
+      {
+        id: 'roomote',
+        name: 'Roomote',
+        description: 'Manage Roomote',
+        tools: [{ name: 'manage_tasks' }, { name: 'get_chat_message_context' }],
+      },
+    ]);
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'ack',
+          message: 'I’ll inspect that.',
+        });
+        await invokeMcpTool('roomote', 'manage_tasks', {
+          action: 'get_summary',
+          taskId: 'task-1',
+        });
+        await invokeMcpTool('roomote', 'get_chat_message_context', {
+          messageId: '1710000000.000100',
+        });
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'closeout',
+          message: 'I found the context.',
+        });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+
+    expect(mocks.callIntegration).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: 'user-1' }),
+      expect.arrayContaining([expect.objectContaining({ id: 'roomote' })]),
+      {
+        integrationId: 'roomote',
+        toolName: 'manage_tasks',
+        args: { action: 'get_summary', taskId: 'task-1' },
+      },
+    );
+    expect(mocks.callIntegration).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: 'user-1' }),
+      expect.any(Array),
+      {
+        integrationId: 'roomote',
+        toolName: 'get_chat_message_context',
+        args: {
+          channel: 'channel-1',
+          messageId: '1710000000.000100',
+          provider: 'slack',
+        },
+      },
+    );
+  });
+
+  it.each([
+    [undefined, '2026-08-23T12:00:00.000Z'],
+    ['1710000000.000000', '2024-03-08T16:00:00.000Z'],
+    ['2026-08-24T12:00:00.000Z', '2026-08-23T12:00:00.000Z'],
+  ])(
+    'defaults Slack Roomote MCP history from latest %s to the previous 24 hours',
+    async (latest, expectedOldest) => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date('2026-08-24T12:00:00.000Z'));
+      mocks.listIntegrations.mockResolvedValue([
+        {
+          id: 'roomote',
+          name: 'Roomote',
+          description: 'Manage Roomote',
+          tools: [{ name: 'get_chat_channel_messages' }],
+        },
+      ]);
+      mocks.generateText.mockImplementation(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          await invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'ack',
+            message: 'I’ll inspect that.',
+          });
+          await invokeMcpTool('roomote', 'get_chat_channel_messages', {
+            ...(latest ? { latest } : {}),
+          });
+          await invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'closeout',
+            message: 'I found the history.',
+          });
+          return '';
+        },
+      );
+
+      try {
+        await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+      } finally {
+        vi.useRealTimers();
+      }
+
+      expect(mocks.callIntegration).toHaveBeenCalledWith(
+        expect.any(Object),
+        expect.any(Array),
+        {
+          integrationId: 'roomote',
+          toolName: 'get_chat_channel_messages',
+          args: {
+            channel: 'channel-1',
+            ...(latest ? { latest } : {}),
+            oldest: expectedOldest,
+            provider: 'slack',
+          },
+        },
+      );
+    },
+  );
+
+  it('defaults Discord Roomote MCP lookups to the current thread', async () => {
+    mocks.listIntegrations.mockResolvedValue([
+      {
+        id: 'roomote',
+        name: 'Roomote',
+        description: 'Manage Roomote',
+        tools: [
+          { name: 'get_chat_message_context' },
+          { name: 'get_chat_channel_messages' },
+        ],
+      },
+    ]);
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'ack',
+          message: 'I’ll inspect that.',
+        });
+        await invokeMcpTool('roomote', 'get_chat_message_context', {
+          messageId: 'message-1',
+        });
+        await invokeMcpTool('roomote', 'get_chat_channel_messages', {});
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'closeout',
+          message: 'I found the context.',
+        });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({
+      ...baseParams,
+      conversation: {
+        surface: 'discord',
+        workspaceId: 'guild-1',
+        conversationId: 'thread-1',
+        replyTarget: { channelId: 'channel-1', threadId: 'thread-1' },
+      },
+      adapter: callbacks(),
+    });
+
+    expect(mocks.callIntegration).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.any(Array),
+      {
+        integrationId: 'roomote',
+        toolName: 'get_chat_message_context',
+        args: {
+          channel: 'thread-1',
+          messageId: 'message-1',
+          provider: 'discord',
+        },
+      },
+    );
+    expect(mocks.callIntegration).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.any(Array),
+      {
+        integrationId: 'roomote',
+        toolName: 'get_chat_channel_messages',
+        args: { channel: 'thread-1', provider: 'discord' },
+      },
+    );
+  });
+
+  it('lets the Fast parent manage custom automations through MCP tools', async () => {
+    const resolveMcpServerConfigs = vi.fn(async () => ({}));
+    mocks.listIntegrations.mockResolvedValue([
+      {
+        id: 'roomote',
+        name: 'Roomote',
+        description: 'Manage Roomote',
+        tools: [{ name: 'manage_custom_automations' }],
+      },
+    ]);
+    mocks.callIntegration.mockResolvedValue({
+      automations: [],
+    });
+    const toolResults: unknown[] = [];
+    mocks.generateText.mockImplementationOnce(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        for (let attempt = 0; attempt < 2; attempt += 1) {
+          toolResults.push(
+            await invokeMcpTool('roomote', 'manage_custom_automations', {
+              action: 'list',
+            }),
+          );
+        }
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'closeout',
+          message: 'The automation is disabled.',
+        });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({
+      ...baseParams,
+      adapter: callbacks({ resolveMcpServerConfigs }),
+    });
+
+    expect(toolResults[0]).toEqual({
+      success: true,
+      result: { automations: [] },
+    });
+    expect(toolResults[1]).toEqual({
+      success: false,
+      error: 'The same integration call already ran in this turn.',
+    });
+    expect(mocks.callIntegration).toHaveBeenCalledOnce();
+    expect(mocks.listIntegrations).toHaveBeenCalledWith(
+      { userId: 'user-1', apiBaseUrl: 'https://api.example.com' },
+      resolveMcpServerConfigs,
+    );
+    expect(mocks.callIntegration).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: 'user-1' }),
+      expect.arrayContaining([expect.objectContaining({ id: 'roomote' })]),
+      {
+        integrationId: 'roomote',
+        toolName: 'manage_custom_automations',
+        args: { action: 'list' },
       },
     );
   });
@@ -724,6 +1146,33 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     );
   });
 
+  it('launches across all repositories when the sentinel is explicit', async () => {
+    const launchTask = vi.fn<LaunchFastAgentTask>(async ({ postKickoff }) => {
+      await postKickoff({ taskId: 'task-1' });
+      return { success: true, taskId: 'task-1' };
+    });
+    const adapter = callbacks({ launchTask });
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        await expect(
+          invokeTool(nativeToolNames.launchTask, {
+            prompt: 'Update every repository.',
+            environmentId: ALL_REPOSITORIES,
+            kickoffMessage: 'I’m delegating the cross-repository update.',
+          }),
+        ).resolves.toMatchObject({ success: true, taskId: 'task-1' });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({ ...baseParams, adapter });
+
+    expect(launchTask).toHaveBeenCalledWith(
+      expect.objectContaining({ environmentId: ALL_REPOSITORIES }),
+    );
+  });
+
   it('launches two tasks, keeps the turn open, messages a child, and posts a closeout', async () => {
     let taskNumber = 0;
     const order: string[] = [];
@@ -779,7 +1228,10 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     expect(adapter.postReply).toHaveBeenCalledTimes(3);
     expect(mocks.sendTaskMessage).toHaveBeenCalledWith(
       expect.objectContaining({ userId: 'user-1' }),
-      { taskId: 'task-1', message: 'Include the regression test.' },
+      {
+        taskId: 'task-1',
+        message: 'Include the regression test.',
+      },
     );
     expect(order).toEqual([
       'kickoff',
@@ -942,35 +1394,14 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
 
     expect(mocks.sendTaskMessage).toHaveBeenCalledWith(
       expect.objectContaining({ userId: 'user-1' }),
-      { taskId: 'task-1', message: 'Include the failing test.' },
+      {
+        taskId: 'task-1',
+        message: 'Include the failing test.',
+      },
     );
     expect(mocks.cancelTask).toHaveBeenCalledWith(
       expect.objectContaining({ userId: 'user-1' }),
       'task-1',
-    );
-  });
-
-  it('uses deployment-wide task inspection without a conversation allow-list', async () => {
-    mocks.generateText.mockImplementation(
-      async (_params, _session, options) => {
-        await options.onSessionReady('opencode-session-1');
-        const result = await invokeTool(nativeToolNames.manageTasks, {
-          action: 'get_summary',
-          taskId: 'task-completed',
-        });
-        await invokeTool(nativeToolNames.sendChatReply, {
-          purpose: 'closeout',
-          message: 'The task completed.',
-        });
-        return JSON.stringify(result);
-      },
-    );
-
-    await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
-
-    expect(mocks.inspectTasks).toHaveBeenCalledWith(
-      expect.objectContaining({ userId: 'user-1' }),
-      { action: 'get_summary', taskId: 'task-completed' },
     );
   });
 
@@ -1285,15 +1716,21 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     const toolResult = new Promise<Record<string, unknown>>((resolve) => {
       releaseTool = () => resolve({ success: true });
     });
-    mocks.inspectTasks.mockReturnValueOnce(toolResult);
+    mocks.getActiveTasks.mockResolvedValue([
+      { taskId: 'task-1', taskRunStatus: 'running' },
+    ]);
+    mocks.cancelTask.mockReturnValueOnce(toolResult);
     let pendingTool: Promise<unknown> | undefined;
     mocks.generateText.mockImplementation(
       async (_params, _session, options) => {
         await options.onSessionReady('opencode-session-1');
         options.onPromptStarted?.();
-        pendingTool = invokeTool(nativeToolNames.manageTasks, {
-          action: 'get_summary',
-          taskId: 'task-completed',
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'ack',
+          message: 'I’ll cancel it.',
+        });
+        pendingTool = invokeTool(nativeToolNames.cancelTask, {
+          taskId: 'task-1',
         });
         await Promise.resolve();
         throw timeout;
@@ -1307,11 +1744,11 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
 
       expect(consoleError).toHaveBeenCalledWith(
-        expect.stringContaining('activeNativeToolCounts={"manage_tasks":1}'),
+        expect.stringContaining('activeNativeToolCounts={"cancel_task":1}'),
       );
       expect(consoleError).toHaveBeenCalledWith(
         expect.stringContaining(
-          'nativeToolCallCount=1 completedNativeToolCallCount=0',
+          'nativeToolCallCount=2 completedNativeToolCallCount=1',
         ),
       );
     } finally {
@@ -1351,6 +1788,42 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         2,
         expect.objectContaining({ purpose: 'closeout' }),
       );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('bounds a clean-session retry so a stalled provider cannot lock the conversation forever', async () => {
+    vi.useFakeTimers();
+    try {
+      const retryTimeout = new Error(
+        'Timed out waiting for OpenCode output after 300000ms.',
+      );
+      retryTimeout.name = 'NonTaskOpenCodePromptTimeoutError';
+      mocks.generateText
+        .mockRejectedValueOnce(new Error('TypeError: fetch failed'))
+        .mockRejectedValueOnce(retryTimeout);
+      const adapter = callbacks();
+
+      const resultPromise = answerFastAgentQuestion({ ...baseParams, adapter });
+      await vi.runAllTimersAsync();
+
+      await expect(resultPromise).resolves.toBe(
+        'The inference provider did not respond after retrying. Any delegated tasks can keep running; please try again in a moment.',
+      );
+      expect(mocks.generateText).toHaveBeenCalledTimes(2);
+      expect(mocks.generateText.mock.calls[0]?.[0]).toMatchObject({
+        timeoutMs: null,
+      });
+      expect(mocks.generateText.mock.calls[1]?.[0]).toMatchObject({
+        timeoutMs: 300_000,
+      });
+      expect(adapter.postReply).toHaveBeenLastCalledWith({
+        purpose: 'closeout',
+        message:
+          'The inference provider did not respond after retrying. Any delegated tasks can keep running; please try again in a moment.',
+      });
+      expect(mocks.invalidateSession).toHaveBeenCalledWith('conversation-1');
     } finally {
       vi.useRealTimers();
     }
@@ -1455,6 +1928,56 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       message:
         'The inference provider is rate limiting requests. Retrying automatically…',
     });
+  });
+
+  it('bounds an initial prompt after OpenCode enters provider recovery', async () => {
+    vi.useFakeTimers();
+    try {
+      mocks.generateText.mockImplementationOnce(
+        async (params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          options.onPromptStarted?.();
+          await params.onProviderRetry?.({
+            attempt: 1,
+            message: 'Provider temporarily unavailable',
+          });
+          await new Promise((resolve) => setTimeout(resolve, 240_000));
+          await params.onProviderRetry?.({
+            attempt: 2,
+            message: 'Provider still unavailable',
+          });
+          await new Promise((_resolve, reject) => {
+            if (options.signal.aborted) {
+              reject(options.signal.reason);
+              return;
+            }
+            options.signal.addEventListener(
+              'abort',
+              () => reject(options.signal.reason),
+              { once: true },
+            );
+          });
+          return '';
+        },
+      );
+      const adapter = callbacks();
+
+      const resultPromise = answerFastAgentQuestion({ ...baseParams, adapter });
+      await vi.advanceTimersByTimeAsync(300_000);
+
+      await expect(resultPromise).resolves.toBe(
+        'The inference provider did not respond after retrying. Any delegated tasks can keep running; please try again in a moment.',
+      );
+      expect(mocks.generateText).toHaveBeenCalledOnce();
+      expect(mocks.invalidateSession).toHaveBeenCalledWith('conversation-1');
+      expect(adapter.postReply).toHaveBeenLastCalledWith({
+        purpose: 'closeout',
+        message:
+          'The inference provider did not respond after retrying. Any delegated tasks can keep running; please try again in a moment.',
+      });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('reports the classified provider failure after retries are exhausted', async () => {

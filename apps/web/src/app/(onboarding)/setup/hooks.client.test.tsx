@@ -470,7 +470,7 @@ describe('useSetupFlow', () => {
     expect(result.current.step).toBe('compute-provider');
   });
 
-  it('moves from automation recommendations to the environment explainer when compute is already configured', async () => {
+  it('moves from automation recommendations to invoke when compute is already configured', async () => {
     mockReadyForRepository({
       automationRecommendations: null,
     });
@@ -485,7 +485,7 @@ describe('useSetupFlow', () => {
       result.current.goToNextStep();
     });
 
-    expect(result.current.step).toBe('environment-explainer');
+    expect(result.current.step).toBe('invoke');
   });
 
   it('requires a new choice when the saved compute provider is excluded', async () => {
@@ -1284,11 +1284,11 @@ describe('useSetupFlow', () => {
     const { result } = renderHook(() => useSetupFlow());
 
     await waitFor(() => {
-      expect(result.current.step).toBe('environment-explainer');
+      expect(result.current.step).toBe('invoke');
     });
   });
 
-  it('shows recommendations before environment setup', async () => {
+  it('shows recommendations before setup completion', async () => {
     setupSessionState.session = {
       ...setupSessionState.session,
       communicationStep: {
@@ -1371,13 +1371,13 @@ describe('useSetupFlow', () => {
     });
   });
 
-  it('keeps a saved selection without a task recoverable at repository selection', async () => {
+  it('ignores a legacy saved repository selection', async () => {
     mockReadyForRepository({ selectedRepositoryIds: ['repo-1'] });
 
     const { result } = renderHook(() => useSetupFlow());
 
     await waitFor(() => {
-      expect(result.current.step).toBe('repo-selection');
+      expect(result.current.step).toBe('invoke');
     });
   });
 
@@ -1394,7 +1394,7 @@ describe('useSetupFlow', () => {
     });
   });
 
-  it('returns a failed onboarding task to repository selection', async () => {
+  it('allows setup completion after a legacy onboarding task failed', async () => {
     mockReadyForRepository({
       selectedRepositoryIds: ['repo-1'],
       onboardingTaskId: 'task-failed',
@@ -1404,7 +1404,7 @@ describe('useSetupFlow', () => {
     const { result } = renderHook(() => useSetupFlow());
 
     await waitFor(() => {
-      expect(result.current.step).toBe('repo-selection');
+      expect(result.current.step).toBe('invoke');
     });
   });
 
@@ -1907,7 +1907,7 @@ describe('useSetupFlow', () => {
     expect(result.current.canGoBack).toBe(false);
 
     act(() => {
-      result.current.goToStep('repo-selection');
+      result.current.goToStep('invoke');
     });
 
     expect(result.current.canGoBack).toBe(true);

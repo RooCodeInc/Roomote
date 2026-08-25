@@ -6,10 +6,6 @@ const FAST_AGENT_TURN_LOCK_TTL_SECONDS = 600;
 const FAST_AGENT_TURN_LOCK_RENEW_MS =
   (FAST_AGENT_TURN_LOCK_TTL_SECONDS * 1_000) / 3;
 const FAST_AGENT_TURN_LOCK_RETRY_MS = 500;
-const FAST_AGENT_TURN_LOCK_MAX_ATTEMPTS =
-  Math.ceil(
-    (FAST_AGENT_TURN_LOCK_TTL_SECONDS * 1_000) / FAST_AGENT_TURN_LOCK_RETRY_MS,
-  ) + 1;
 
 export class FastAgentTurnLockLostError extends Error {
   constructor() {
@@ -38,7 +34,7 @@ export async function acquireFastAgentTurnLock(params: {
   const key = buildFastAgentTurnLockKey(params.conversation);
   const maxAttempts =
     params.maxWaitMs === undefined
-      ? FAST_AGENT_TURN_LOCK_MAX_ATTEMPTS
+      ? Number.POSITIVE_INFINITY
       : Math.max(
           1,
           Math.ceil(params.maxWaitMs / FAST_AGENT_TURN_LOCK_RETRY_MS) + 1,

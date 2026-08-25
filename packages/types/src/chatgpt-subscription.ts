@@ -17,11 +17,10 @@ export const CHATGPT_OAUTH_DEVICE_TOKEN_ENDPOINT = `${CHATGPT_OAUTH_ISSUER}/api/
 export const CHATGPT_OAUTH_DEVICE_CALLBACK_REDIRECT_URI = `${CHATGPT_OAUTH_ISSUER}/deviceauth/callback`;
 
 /**
- * Env var injected into the opencode harness (worker sandbox and the API
- * routing helper) to authenticate ChatGPT subscription requests. Its value is
- * a JSON object keyed by opencode provider id (currently `openai`) matching
- * opencode's `Auth.Info` OAuth shape. The worker materializes it into the
- * sandbox `auth.json` so long-running tasks can self-refresh.
+ * Env var used by control-plane OpenCode helpers to authenticate ChatGPT
+ * subscription requests. Its value is a JSON object keyed by OpenCode
+ * provider id (currently `openai`) matching OpenCode's `Auth.Info` OAuth
+ * shape. Task sandboxes use the inference gateway and never receive it.
  */
 export const OPENCODE_AUTH_CONTENT_ENV_VAR_NAME = 'OPENCODE_AUTH_CONTENT';
 

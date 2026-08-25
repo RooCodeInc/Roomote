@@ -5,11 +5,14 @@ const mocks = vi.hoisted(() => ({
   getMessage: vi.fn(),
   releaseLock: vi.fn(),
   reply: vi.fn(),
+  resolveWorkspace: vi.fn(),
+  startTask: vi.fn(),
 }));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
   acquireFastAgentTurnLock: mocks.acquireLock,
   answerFastAgentQuestion: mocks.answerQuestion,
+  resolveApiBaseUrl: () => 'https://roomote.example.com',
 }));
 
 vi.mock('@roomote/communication/discord-event', () => ({
@@ -27,6 +30,17 @@ vi.mock('../replies.js', () => ({
 vi.mock('../thread-context.js', () => ({
   fetchDiscordThreadHistoryBestEffort: mocks.fetchHistory,
 }));
+
+vi.mock('../task-launch.js', () => ({
+  discordMetadataForChannel: vi.fn(),
+  resolveDiscordWorkspace: mocks.resolveWorkspace,
+}));
+
+vi.mock('../task-orchestration.js', () => ({
+  startNewDiscordTask: mocks.startTask,
+}));
+
+import { ALL_REPOSITORIES } from '@roomote/types';
 
 import {
   getDiscordFastLaunchSourceEventId,
@@ -66,6 +80,11 @@ describe('processDiscordFastAgentMessage', () => {
       channelId: 'channel-1',
       messageId: 'retry-1',
       lastTextMessageId: 'retry-1',
+    });
+    mocks.startTask.mockResolvedValue({
+      status: 'started',
+      launchResult: { taskId: 'task-1' },
+      taskUrl: 'https://roomote.example.com/task/task-1',
     });
   });
 
@@ -189,5 +208,57 @@ describe('processDiscordFastAgentMessage', () => {
       text: 'Reconnected to the inference provider.',
     });
     expect(mocks.reply).toHaveBeenCalledTimes(2);
+  });
+
+  it('launches the all-repositories sentinel without resolving an environment', async () => {
+    mocks.answerQuestion.mockImplementationOnce(
+      async ({
+        adapter,
+      }: {
+        adapter: {
+          launchTask: (input: {
+            prompt: string;
+            environmentId: string;
+            parentSessionId: string;
+            postKickoff: () => Promise<void>;
+          }) => Promise<unknown>;
+        };
+      }) =>
+        adapter.launchTask({
+          prompt: 'Update every repository.',
+          environmentId: ALL_REPOSITORIES,
+          parentSessionId: 'session-1',
+          postKickoff: vi.fn().mockResolvedValue(undefined),
+        }),
+    );
+
+    await processDiscordFastAgentMessage({
+      event: { eventId: 'event-1' } as never,
+      question: 'Update every repository',
+      sender: { id: 'discord-user-1', username: 'matt' } as never,
+      senderUserId: 'user-1',
+      provider: {} as never,
+      applicationId: 'application-1',
+      channel: {
+        channelId: 'channel-1',
+        guildId: null,
+        isDirectMessage: true,
+        isThread: false,
+      } as never,
+      metadata: {
+        communicationChannelId: 'channel-1',
+      } as never,
+      conversationId: 'channel-1',
+    });
+
+    expect(mocks.resolveWorkspace).not.toHaveBeenCalled();
+    expect(mocks.startTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workspaceOverride: {
+          repoForPayload: ALL_REPOSITORIES,
+          workspaceDisplayName: 'all repos',
+        },
+      }),
+    );
   });
 });

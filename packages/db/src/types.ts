@@ -10,6 +10,8 @@ import type {
   DependabotTriageFrequency,
   IssueFixerFrequency,
   ManagerStatsFrequency,
+  ProviderUsageLimitFrequency,
+  ProviderUsageLimitThreshold,
   PrReviewSettings,
   SecurityAuditorFrequency,
   SentryTriageFrequency,
@@ -37,7 +39,6 @@ import type {
   repositories,
   slackAuthTokens,
   fastAgentConversations,
-  fastAgentConversationAliases,
   slackInstallations,
   slackInstallationChannels,
   slackUserMappings,
@@ -47,7 +48,6 @@ import type {
   discordGatewaySessions,
   teamsInstallations,
   teamsUserMappings,
-  slackQuickAnswers,
   slackFastIntegrationCalls,
   linearPendingSelections,
   environmentVariables,
@@ -272,25 +272,6 @@ export type FastAgentConversationRecord =
 
 export type CreateFastAgentConversationRecord = Omit<
   typeof fastAgentConversations.$inferInsert,
-  Generated
->;
-
-export type FastAgentConversationAlias =
-  typeof fastAgentConversationAliases.$inferSelect;
-
-export type CreateFastAgentConversationAlias = Omit<
-  typeof fastAgentConversationAliases.$inferInsert,
-  Generated
->;
-
-/**
- * slackQuickAnswers (renamed from fastAgentSessions in Stage 4)
- */
-
-export type SlackQuickAnswer = typeof slackQuickAnswers.$inferSelect;
-
-export type CreateSlackQuickAnswer = Omit<
-  typeof slackQuickAnswers.$inferInsert,
   Generated
 >;
 
@@ -523,6 +504,11 @@ export type BackgroundAgentSettings = StoredBackgroundAgentSettings & {
   managerStatsSlackChannelId: string | null;
   managerStatsDiscordChannelId: string | null;
   managerStatsLastRunAt: Date | null;
+  providerUsageLimitFrequency: ProviderUsageLimitFrequency;
+  providerUsageLimitThreshold: ProviderUsageLimitThreshold;
+  providerUsageLimitSlackChannelId: string | null;
+  providerUsageLimitDiscordChannelId: string | null;
+  providerUsageLimitLastRunAt: Date | null;
   sentryTriageFrequency: SentryTriageFrequency;
   sentryTriageSlackChannelId: string | null;
   sentryTriageDiscordChannelId: string | null;
