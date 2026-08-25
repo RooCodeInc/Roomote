@@ -4,6 +4,7 @@ import {
   ROOMOTE_OPENCODE_JUDGE_AGENT_NAME,
 } from '../../opencode-prompt-subagents';
 import {
+  ALL_REPOSITORIES,
   BRAIN_MCP_ID,
   INFERENCE_PROVIDER_MAX_RETRIES,
   MANAGE_CUSTOM_AUTOMATIONS_TOOL,
@@ -1000,9 +1001,10 @@ export async function answerFastAgentQuestion({
 
           case FAST_AGENT_NATIVE_TOOL_NAMES.launchTask: {
             const args = launchTaskArgsSchema.parse(call.args);
-            const validEnvironmentIds = new Set(
-              availableEnvironments.map((environment) => environment.id),
-            );
+            const validEnvironmentIds = new Set([
+              ALL_REPOSITORIES,
+              ...availableEnvironments.map((environment) => environment.id),
+            ]);
             if (
               args.environmentId &&
               !validEnvironmentIds.has(args.environmentId)
