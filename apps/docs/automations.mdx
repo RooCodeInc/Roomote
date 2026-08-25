@@ -258,7 +258,7 @@ manager-facing updates and suggestions.
 | ---------------------------- | ---------------------------------------------------------------- | ------------------------------------------- |
 | **Automation output**        | The shared Manager Channel destination                           | Configure once                              |
 | **Weekly Manager Stats**     | A weekly summary of Roomote activity                             | Weekly                                      |
-| **Provider Usage Limits**    | Warnings when an inference-provider quota approaches exhaustion | Hourly                                        |
+| **Inference Provider Usage Alerts** | Warnings when an inference-provider quota approaches exhaustion | Hourly                              |
 | **Triage Sentry Issues**     | Prioritized Sentry follow-up work                                | Daily or weekly                             |
 | **Triage Dependabot Alerts** | Suggested follow-up tasks for open dependency alerts             | Daily or weekly                             |
 | **Triage CodeQL Alerts**     | Remediation follow-up tasks for open code-scanning / CodeQL alerts | Daily or weekly                           |
@@ -273,14 +273,16 @@ Set **Automation output** first. This is the shared Slack or Discord Manager
 Channel for manager-facing posts, suggestions, summaries, and setup alerts.
 Make sure the Roomote app can access the channel before you save it.
 
-**Provider Usage Limits** is enabled at an hourly cadence with an 85% threshold
+**Inference Provider Usage Alerts** is enabled at an hourly cadence with an 85% threshold
 when it first appears, preserving the provider warning behavior from earlier
-Roomote releases. Admins can disable it, choose a Slack or Discord channel (or
-use the normal Teams, Telegram, or Discord primary-conversation fallback), and
-set the warning threshold from 5% through 95% in 5% increments. Roomote checks
-hourly, posts an alert card for each provider that crosses the threshold in a
-quota cycle, and sends a fresh critical alert if the quota later reaches 100%.
-The check is deterministic and never starts a Roomote task or session.
+Roomote releases. Admins can disable it, choose a Slack or Discord destination,
+and set the warning threshold from 5% through 95% in 5% increments. Roomote
+checks hourly, posts an alert card for each provider that crosses the threshold
+in a quota cycle, and sends a fresh critical alert if the quota later reaches
+100%. The automation-specific destination wins, followed by the shared Manager
+Channel and then the supported primary Teams, Telegram, or Discord conversation
+fallback. The check is deterministic, supports **Run now**, and never starts a
+Roomote task or session.
 
 **Platform Issue Alerts** are enabled by default. Their own Slack or Discord
 destination wins, followed by the shared Manager Channel. If neither channel is

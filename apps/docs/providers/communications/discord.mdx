@@ -127,6 +127,14 @@ under **Settings > Automations**, the same way you would pick a Slack channel.
   (lookups outside the originating task thread require a linked Discord account)
 - use `/help` to see the available commands
 
+Fast can read bounded context from the current Discord thread or channel, use
+MCP servers and user-scoped integrations that you are allowed to access, and
+delegate repository work to Roomote tasks. Deployment admins can also manage
+custom automations through Fast. Fast does not read other channels implicitly
+or inspect repository contents without delegating the work to a task. When the
+request spans every repository, Fast can delegate it to the deployment's
+all-repositories environment.
+
 Roomote does not quote every message it answers. In a task thread, the
 conversation itself supplies the context. When you start a task by tagging
 Roomote in an existing thread, Roomote reads earlier messages in that thread
