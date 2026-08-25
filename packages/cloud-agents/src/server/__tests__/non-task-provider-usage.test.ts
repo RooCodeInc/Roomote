@@ -14,6 +14,7 @@ const {
   recordLlmUsageMock,
   sessionAbortMock,
   spawnMock,
+  sessionChildrenMock,
   sessionCreateMock,
   sessionMessagesMock,
   sessionPromptMock,
@@ -28,6 +29,7 @@ const {
   recordLlmUsageMock: vi.fn(),
   sessionAbortMock: vi.fn(),
   spawnMock: vi.fn(),
+  sessionChildrenMock: vi.fn(),
   sessionCreateMock: vi.fn(),
   sessionMessagesMock: vi.fn(),
   sessionPromptMock: vi.fn(),
@@ -140,6 +142,7 @@ describe('resolveOpenCodeSmallModel', () => {
       },
       session: {
         abort: sessionAbortMock,
+        children: sessionChildrenMock,
         create: sessionCreateMock,
         messages: sessionMessagesMock,
         prompt: sessionPromptMock,
@@ -150,6 +153,7 @@ describe('resolveOpenCodeSmallModel', () => {
       data: { id: 'session-1' },
       error: undefined,
     });
+    sessionChildrenMock.mockResolvedValue({ data: [], error: undefined });
     sessionMessagesMock.mockResolvedValue({ data: [], error: undefined });
     configProvidersMock.mockResolvedValue({
       data: { providers: [], default: {} },
@@ -689,21 +693,60 @@ describe('resolveOpenCodeSmallModel', () => {
                 },
                 { info: finalInfo, parts: [] },
               ]
-            : [
-                {
-                  info: usageInfo(
-                    'message-advisor-current',
-                    'session-advisor-current',
-                    'message-advisor-user',
-                    'advisor',
-                  ),
-                  parts: [],
-                },
-              ],
+            : sessionID === 'session-judge-current'
+              ? [
+                  {
+                    info: usageInfo(
+                      'message-judge-current',
+                      'session-judge-current',
+                      'message-judge-user',
+                      'judge',
+                    ),
+                    parts: [],
+                  },
+                ]
+              : [
+                  {
+                    info: usageInfo(
+                      'message-advisor-current',
+                      'session-advisor-current',
+                      'message-advisor-user',
+                      'advisor',
+                    ),
+                    parts: [],
+                  },
+                ],
         error: undefined,
         limit,
       }),
     );
+    const currentTurnCreatedAt = Date.now() + 60_000;
+    sessionChildrenMock.mockResolvedValue({
+      data: [
+        {
+          id: 'session-advisor-current',
+          parentID: 'session-1',
+          time: {
+            created: currentTurnCreatedAt,
+            updated: currentTurnCreatedAt,
+          },
+        },
+        {
+          id: 'session-judge-current',
+          parentID: 'session-1',
+          time: {
+            created: currentTurnCreatedAt,
+            updated: currentTurnCreatedAt,
+          },
+        },
+        {
+          id: 'session-advisor-historical',
+          parentID: 'session-1',
+          time: { created: completedTime, updated: completedTime },
+        },
+      ],
+      error: undefined,
+    });
     const { generateTrackedNonTaskTextInOpenCodeSession } =
       await import('../non-task-provider-usage.js');
 
@@ -722,13 +765,24 @@ describe('resolveOpenCodeSmallModel', () => {
       },
     );
 
-    expect(sessionMessagesMock).toHaveBeenCalledTimes(2);
-    expect(sessionMessagesMock).toHaveBeenCalledWith({
-      sessionID: 'session-1',
-      directory: '/tmp/roomote-fast-native-test',
-      limit: 100,
-    });
-    expect(recordLlmUsageMock).toHaveBeenCalledTimes(3);
+    expect(sessionChildrenMock).toHaveBeenCalledWith(
+      { sessionID: 'session-1', directory: '/tmp/roomote-fast-native-test' },
+      { signal: expect.any(AbortSignal) },
+    );
+    expect(sessionMessagesMock).toHaveBeenCalledTimes(3);
+    expect(sessionMessagesMock).toHaveBeenCalledWith(
+      {
+        sessionID: 'session-1',
+        directory: '/tmp/roomote-fast-native-test',
+        limit: 100,
+      },
+      { signal: expect.any(AbortSignal) },
+    );
+    expect(sessionMessagesMock).not.toHaveBeenCalledWith(
+      expect.objectContaining({ sessionID: 'session-advisor-historical' }),
+      expect.anything(),
+    );
+    expect(recordLlmUsageMock).toHaveBeenCalledTimes(4);
     expect(
       recordLlmUsageMock.mock.calls.map(([usage]) => ({
         eventKey: usage.eventKey,
@@ -747,6 +801,11 @@ describe('resolveOpenCodeSmallModel', () => {
       {
         eventKey:
           'non-task:fast_agent:session-advisor-current:message-advisor-current',
+        userId: 'user-current',
+      },
+      {
+        eventKey:
+          'non-task:fast_agent:session-judge-current:message-judge-current',
         userId: 'user-current',
       },
     ]);

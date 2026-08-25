@@ -24,6 +24,7 @@ import {
 const DEFAULT_OPENCODE_STRUCTURED_OUTPUT_RETRY_COUNT = 2;
 const NON_TASK_SESSION_ABORT_TIMEOUT_MS = 5_000;
 const NON_TASK_USAGE_EVENT_BARRIER_TIMEOUT_MS = 1_000;
+const NON_TASK_USAGE_RECONCILE_TIMEOUT_MS = 5_000;
 type NonTaskModelRuntimeEnv = Partial<Record<string, string | undefined>>;
 
 /**
@@ -801,6 +802,7 @@ async function runNonTaskSdkPrompt(
     await options.onSessionReady?.(sessionId);
 
     const trackedSessionIds = new Set([sessionId]);
+    const sessionsCreatedThisTurn = new Set<string>();
     const usageRecordings = new Map<string, Promise<void>>();
     const observedUsageEventKeys = new Set<string>();
     const usageEventWaiters = new Map<string, () => void>();
@@ -859,12 +861,13 @@ async function runNonTaskSdkPrompt(
       rejectSessionError = reject;
     });
     let eventMonitor: Promise<void> | undefined;
-
-    if (
+    const needsEventMonitor = Boolean(
       params.onProviderRetry ||
       options.onSubagentSessionReady ||
-      options.trackSessionTreeUsage
-    ) {
+      options.trackSessionTreeUsage,
+    );
+
+    if (needsEventMonitor) {
       try {
         const subscription = await client.event.subscribe(
           { directory: sessionDirectory },
@@ -879,6 +882,9 @@ async function runNonTaskSdkPrompt(
                 event.properties.info.parentID === sessionId
               ) {
                 trackedSessionIds.add(event.properties.sessionID);
+                if (event.type === 'session.created') {
+                  sessionsCreatedThisTurn.add(event.properties.sessionID);
+                }
                 try {
                   await options.onSubagentSessionReady?.(
                     event.properties.sessionID,
@@ -977,6 +983,7 @@ async function runNonTaskSdkPrompt(
     }
 
     try {
+      const turnStartedAtMs = Date.now();
       options.onPromptStarted?.();
       const promptRequest = client.session.prompt(
         {
@@ -988,12 +995,9 @@ async function runNonTaskSdkPrompt(
         },
         { signal: abortController.signal },
       );
-      const promptResult =
-        params.onProviderRetry ||
-        options.onSubagentSessionReady ||
-        options.trackSessionTreeUsage
-          ? await Promise.race([promptRequest, sessionError])
-          : await promptRequest;
+      const promptResult = needsEventMonitor
+        ? await Promise.race([promptRequest, sessionError])
+        : await promptRequest;
 
       if (promptResult.error || !promptResult.data) {
         if (isOpenCodeSessionMissing(promptResult.error)) {
@@ -1033,43 +1037,111 @@ async function runNonTaskSdkPrompt(
         });
         if (!finalEventObserved) {
           const currentParentId = asString(promptResult.data.info.parentID);
-          await Promise.all(
-            [...trackedSessionIds].map(async (trackedSessionId) => {
-              try {
-                const messagesResult = await client.session.messages({
-                  sessionID: trackedSessionId,
-                  directory: sessionDirectory,
-                  limit: 100,
-                });
-                if (messagesResult.error || !messagesResult.data) {
-                  console.warn(
-                    `[NonTaskProviderUsage] Could not reconcile OpenCode usage for session ${trackedSessionId}: ${formatOpenCodeSdkError(messagesResult.error)}`,
-                  );
-                  return;
-                }
-
-                await Promise.all(
-                  messagesResult.data
-                    .map((message) => message.info)
-                    .filter(
-                      (info) =>
-                        info.role === 'assistant' &&
-                        info.time.completed !== undefined &&
-                        (trackedSessionId !== sessionId ||
-                          (currentParentId !== undefined &&
-                            asString(info.parentID) === currentParentId)),
-                    )
-                    .map(recordUsageOnce),
-                );
-              } catch (error) {
+          if (currentParentId === undefined) {
+            console.warn(
+              `[NonTaskProviderUsage] OpenCode final message for session ${sessionId} has no parent id; intermediate parent usage cannot be reconciled for this turn.`,
+            );
+          }
+          // Reconciliation must stay cancellable and bounded: a wedged
+          // OpenCode server would otherwise hold the leased server (and the
+          // caller's already-generated answer) behind unsignaled fetches.
+          const reconcileAbortController = new AbortController();
+          const reconcileTimeout = setTimeout(() => {
+            reconcileAbortController.abort(
+              new Error('OpenCode usage reconciliation timed out.'),
+            );
+          }, NON_TASK_USAGE_RECONCILE_TIMEOUT_MS);
+          reconcileTimeout.unref();
+          const abortReconcile = () => {
+            reconcileAbortController.abort(abortController.signal.reason);
+          };
+          if (abortController.signal.aborted) {
+            abortReconcile();
+          } else {
+            abortController.signal.addEventListener('abort', abortReconcile, {
+              once: true,
+            });
+          }
+          try {
+            // Child sessions are enumerated from the server rather than from
+            // event-stream bookkeeping so a mid-turn stream failure cannot
+            // hide subagent usage, and they are bounded to sessions created
+            // in the current turn so a warm shared conversation's historical
+            // usage is never re-recorded under the current requester.
+            const reconcileSessionIds = new Set([
+              sessionId,
+              ...sessionsCreatedThisTurn,
+            ]);
+            try {
+              const childrenResult = await client.session.children(
+                { sessionID: sessionId, directory: sessionDirectory },
+                { signal: reconcileAbortController.signal },
+              );
+              if (childrenResult.error || !childrenResult.data) {
                 console.warn(
-                  `[NonTaskProviderUsage] Could not reconcile OpenCode usage for session ${trackedSessionId}: ${formatOpenCodeSdkError(error)}`,
+                  `[NonTaskProviderUsage] Could not list OpenCode child sessions for ${sessionId}: ${formatOpenCodeSdkError(childrenResult.error)}`,
                 );
+              } else {
+                for (const child of childrenResult.data) {
+                  const childId = asString(child.id);
+                  const childCreatedAtMs = asFiniteNumber(child.time?.created);
+                  if (
+                    childId &&
+                    childCreatedAtMs !== undefined &&
+                    childCreatedAtMs >= turnStartedAtMs
+                  ) {
+                    reconcileSessionIds.add(childId);
+                  }
+                }
               }
-            }),
-          );
+            } catch (error) {
+              console.warn(
+                `[NonTaskProviderUsage] Could not list OpenCode child sessions for ${sessionId}: ${formatOpenCodeSdkError(error)}`,
+              );
+            }
+            await Promise.all(
+              [...reconcileSessionIds].map(async (trackedSessionId) => {
+                try {
+                  const messagesResult = await client.session.messages(
+                    {
+                      sessionID: trackedSessionId,
+                      directory: sessionDirectory,
+                      limit: 100,
+                    },
+                    { signal: reconcileAbortController.signal },
+                  );
+                  if (messagesResult.error || !messagesResult.data) {
+                    console.warn(
+                      `[NonTaskProviderUsage] Could not reconcile OpenCode usage for session ${trackedSessionId}: ${formatOpenCodeSdkError(messagesResult.error)}`,
+                    );
+                    return;
+                  }
+
+                  await Promise.all(
+                    messagesResult.data
+                      .map((message) => message.info)
+                      .filter(
+                        (info) =>
+                          info.role === 'assistant' &&
+                          info.time.completed !== undefined &&
+                          (trackedSessionId !== sessionId ||
+                            (currentParentId !== undefined &&
+                              asString(info.parentID) === currentParentId)),
+                      )
+                      .map(recordUsageOnce),
+                  );
+                } catch (error) {
+                  console.warn(
+                    `[NonTaskProviderUsage] Could not reconcile OpenCode usage for session ${trackedSessionId}: ${formatOpenCodeSdkError(error)}`,
+                  );
+                }
+              }),
+            );
+          } finally {
+            clearTimeout(reconcileTimeout);
+            abortController.signal.removeEventListener('abort', abortReconcile);
+          }
         }
-        await Promise.all(usageRecordings.values());
       }
 
       return promptResult.data;
@@ -1097,6 +1169,16 @@ async function runNonTaskSdkPrompt(
       abortController.signal.removeEventListener('abort', abortEventMonitor);
       eventAbortController.abort();
       void eventMonitor?.catch(() => undefined);
+      // Usage writes started by the event monitor must settle before the
+      // prompt call returns or throws — on either path an in-flight write
+      // would otherwise race process shutdown. The loop re-snapshots because
+      // the monitor can add entries while earlier ones are being awaited.
+      let awaitedUsageRecordings = 0;
+      while (awaitedUsageRecordings < usageRecordings.size) {
+        const pendingUsageRecordings = [...usageRecordings.values()];
+        awaitedUsageRecordings = pendingUsageRecordings.length;
+        await Promise.allSettled(pendingUsageRecordings);
+      }
     }
   } finally {
     externalSignal?.removeEventListener('abort', abortFromExternalSignal);
