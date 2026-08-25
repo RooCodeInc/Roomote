@@ -62,12 +62,13 @@ type ProviderUsageLimitDependencies = {
 };
 
 const defaultDependencies: ProviderUsageLimitDependencies = {
-  getRuntime: getAutomationRuntime,
+  getRuntime: (key) => getAutomationRuntime(key),
   getSlackBotToken: getActiveSlackBotToken,
-  getSnapshots: getProviderUsageLimitSnapshots,
+  getSnapshots: () => getProviderUsageLimitSnapshots(),
   getRedisClient: getRedis,
   createNotifier: (token) => new SlackNotifier(token),
-  recordOutcome: recordAutomationRunOutcome,
+  recordOutcome: (executor, params) =>
+    recordAutomationRunOutcome(executor, params),
   now: () => new Date(),
 };
 
