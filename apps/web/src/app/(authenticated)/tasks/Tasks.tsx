@@ -711,7 +711,7 @@ export const Tasks = () => {
                   ))}
                 </div>
               )}
-              {infiniteTasks.hasNextPage && (
+              {!isBoardView && infiniteTasks.hasNextPage && (
                 <div className="flex justify-center py-4">
                   <Button
                     variant="outline"
