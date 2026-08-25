@@ -53,6 +53,7 @@ describe('Fast conversation repository', () => {
     });
 
     expect(stored?.conversation).toEqual(conversation);
+    expect(stored?.openCodeSessionId).toBeNull();
     const [row] = await db
       .select({
         channelId: fastAgentConversations.currentReplyChannelId,
@@ -224,6 +225,27 @@ describe('Fast conversation repository', () => {
     await expect(
       fastAgentConversationRepository.findById({ id: session.id }),
     ).resolves.toMatchObject({ compatibilityMessages: visibleHistory });
+  });
+
+  it('persists the canonical OpenCode session identity', async () => {
+    const user = await createUser();
+    const session = await fastAgentConversationRepository.getOrCreate({
+      userId: user.id,
+      conversation: slackConversation,
+    });
+
+    await expect(
+      fastAgentConversationRepository.setOpenCodeSession({
+        conversationId: session.id,
+        openCodeSessionId: 'opencode-session-1',
+      }),
+    ).resolves.toBeUndefined();
+
+    await expect(
+      fastAgentConversationRepository.findById({ id: session.id }),
+    ).resolves.toMatchObject({
+      openCodeSessionId: 'opencode-session-1',
+    });
   });
 
   it('resolves retained legacy IDs without consulting the alias table', async () => {
