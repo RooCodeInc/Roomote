@@ -777,6 +777,7 @@ function SnowflakeConnectionFields({
             </Label>
             <Input
               id="snowflake-private-key-passphrase"
+              type="password"
               value={form.privateKeyPassphrase}
               onChange={(event) =>
                 onFieldChange('privateKeyPassphrase', event.target.value)

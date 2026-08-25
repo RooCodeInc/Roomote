@@ -2019,6 +2019,9 @@ describe('Integrations settings', () => {
         target: { value: 'pem-passphrase' },
       },
     );
+    expect(
+      screen.getByLabelText('Private Key Passphrase (optional)'),
+    ).toHaveAttribute('type', 'password');
     fireEvent.change(screen.getByLabelText('Role'), {
       target: { value: 'ANALYST' },
     });

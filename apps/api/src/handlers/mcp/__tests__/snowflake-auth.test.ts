@@ -1,3 +1,5 @@
+import { createPrivateKey, generateKeyPairSync } from 'node:crypto';
+
 import { Hono } from 'hono';
 import type { RunTokenContext } from '@roomote/types';
 
@@ -74,6 +76,25 @@ vi.mock('snowflake-sdk', () => ({
 
 import { db } from '@roomote/db/server';
 import { snowflakeMcp } from '../snowflake';
+
+const PRIVATE_KEY_PASSPHRASE = 'test-pem-passphrase';
+const { privateKey: encryptedPrivateKey } = generateKeyPairSync('rsa', {
+  modulusLength: 2048,
+  privateKeyEncoding: {
+    type: 'pkcs8',
+    format: 'pem',
+    cipher: 'aes-256-cbc',
+    passphrase: PRIVATE_KEY_PASSPHRASE,
+  },
+  publicKeyEncoding: { type: 'spki', format: 'pem' },
+});
+const unencryptedPrivateKey = createPrivateKey({
+  key: encryptedPrivateKey,
+  format: 'pem',
+  passphrase: PRIVATE_KEY_PASSPHRASE,
+})
+  .export({ type: 'pkcs8', format: 'pem' })
+  .toString();
 
 function createInitializeRequest(id: number) {
   return {
@@ -309,9 +330,8 @@ describe('snowflake MCP auth and tool handling', () => {
     mockFindConnection.mockResolvedValue(
       mockConnectionRow({
         encryptedPassword: 'enc:legacy-password',
-        encryptedPrivateKey:
-          'enc:-----BEGIN PRIVATE KEY-----\\nabc\\n-----END PRIVATE KEY-----',
-        encryptedPrivateKeyPassphrase: 'enc:pem-passphrase',
+        encryptedPrivateKey: `enc:${encryptedPrivateKey}`,
+        encryptedPrivateKeyPassphrase: `enc:${PRIVATE_KEY_PASSPHRASE}`,
       }),
     );
 
@@ -334,17 +354,145 @@ describe('snowflake MCP auth and tool handling', () => {
         | undefined;
     expect(lastCreateConnectionCall).toBeDefined();
     const [connectionConfig] = lastCreateConnectionCall ?? [];
+    if (!connectionConfig) {
+      throw new Error('Expected Snowflake connection options');
+    }
     expect(connectionConfig).toEqual(
       expect.objectContaining({
         account: 'xy12345.us-east-1',
         username: 'roomote',
         authenticator: 'SNOWFLAKE_JWT',
-        privateKey:
-          '-----BEGIN PRIVATE KEY-----\\nabc\\n-----END PRIVATE KEY-----',
-        privateKeyPass: 'pem-passphrase',
+        privateKey: expect.stringContaining('-----BEGIN PRIVATE KEY-----'),
       }),
     );
     expect(connectionConfig).not.toHaveProperty('password');
+    expect(connectionConfig).not.toHaveProperty('privateKeyPass');
+    expect(connectionConfig.privateKey).not.toBe(encryptedPrivateKey);
+    expect(() =>
+      createPrivateKey({
+        key: connectionConfig.privateKey as string,
+        format: 'pem',
+      }),
+    ).not.toThrow();
+  });
+
+  it('continues to accept unencrypted PKCS8 private keys', async () => {
+    mockFindConnection.mockResolvedValue(
+      mockConnectionRow({
+        encryptedPassword: undefined,
+        encryptedPrivateKey: `enc:${unencryptedPrivateKey}`,
+        encryptedPrivateKeyPassphrase: undefined,
+      }),
+    );
+
+    const response = await postMcp(
+      createApp(createRunToken()),
+      createInitializeRequest(77),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mockSnowflakeCreateConnection).not.toHaveBeenCalled();
+  });
+
+  it('rejects an incorrect private key passphrase without exposing secrets', async () => {
+    mockFindConnection.mockResolvedValue(
+      mockConnectionRow({
+        encryptedPassword: undefined,
+        encryptedPrivateKey: `enc:${encryptedPrivateKey}`,
+        encryptedPrivateKeyPassphrase: 'enc:wrong-secret-passphrase',
+      }),
+    );
+
+    const response = await postMcp(
+      createApp(createRunToken()),
+      createInitializeRequest(73),
+    );
+    const body = await response.text();
+
+    expect(response.status).toBe(500);
+    expect(body).toContain('Snowflake private key or passphrase is invalid');
+    expect(body).not.toContain('wrong-secret-passphrase');
+    expect(body).not.toContain(encryptedPrivateKey);
+    expect(mockSnowflakeCreateConnection).not.toHaveBeenCalled();
+  });
+
+  it('rejects non-RSA PKCS8 private keys', async () => {
+    const { privateKey: encryptedEcPrivateKey } = generateKeyPairSync('ec', {
+      namedCurve: 'P-256',
+      privateKeyEncoding: {
+        type: 'pkcs8',
+        format: 'pem',
+        cipher: 'aes-256-cbc',
+        passphrase: PRIVATE_KEY_PASSPHRASE,
+      },
+      publicKeyEncoding: { type: 'spki', format: 'pem' },
+    });
+    mockFindConnection.mockResolvedValue(
+      mockConnectionRow({
+        encryptedPassword: undefined,
+        encryptedPrivateKey: `enc:${encryptedEcPrivateKey}`,
+        encryptedPrivateKeyPassphrase: `enc:${PRIVATE_KEY_PASSPHRASE}`,
+      }),
+    );
+
+    const response = await postMcp(
+      createApp(createRunToken()),
+      createInitializeRequest(74),
+    );
+
+    expect(response.status).toBe(500);
+    await expect(response.json()).resolves.toMatchObject({
+      error: { message: 'Snowflake private key or passphrase is invalid' },
+    });
+    expect(mockSnowflakeCreateConnection).not.toHaveBeenCalled();
+  });
+
+  it('rejects RSA private keys smaller than 2048 bits', async () => {
+    const { privateKey: shortPrivateKey } = generateKeyPairSync('rsa', {
+      modulusLength: 1024,
+      privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
+      publicKeyEncoding: { type: 'spki', format: 'pem' },
+    });
+    mockFindConnection.mockResolvedValue(
+      mockConnectionRow({
+        encryptedPassword: undefined,
+        encryptedPrivateKey: `enc:${shortPrivateKey}`,
+        encryptedPrivateKeyPassphrase: undefined,
+      }),
+    );
+
+    const response = await postMcp(
+      createApp(createRunToken()),
+      createInitializeRequest(75),
+    );
+
+    expect(response.status).toBe(500);
+    await expect(response.json()).resolves.toMatchObject({
+      error: { message: 'Snowflake private key or passphrase is invalid' },
+    });
+    expect(mockSnowflakeCreateConnection).not.toHaveBeenCalled();
+  });
+
+  it('redacts Snowflake SDK connection errors', async () => {
+    mockSnowflakeConnect.mockImplementationOnce((callback) => {
+      callback?.(new Error(`Login failed for ${PRIVATE_KEY_PASSPHRASE}`));
+      return {} as never;
+    });
+
+    const response = await postMcp(createApp(createRunToken()), {
+      jsonrpc: '2.0',
+      id: 76,
+      method: 'tools/call',
+      params: {
+        name: 'execute_sql',
+        arguments: { sql: 'SELECT 1 AS RESULT' },
+      },
+    });
+    const body = await response.text();
+
+    expect(response.status).toBe(200);
+    expect(body).toContain('Snowflake connection failed');
+    expect(body).not.toContain(PRIVATE_KEY_PASSPHRASE);
   });
 
   it('returns normalized table descriptions', async () => {
