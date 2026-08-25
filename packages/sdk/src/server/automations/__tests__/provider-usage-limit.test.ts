@@ -125,8 +125,12 @@ describe('provider usage limit automation', () => {
 
     expect(message.text).toBe('OpenRouter usage is at 90%');
     expect(message.blocks[0]).toMatchObject({
-      type: 'container',
-      title: { text: 'Inference Provider Usage Alert' },
+      type: 'card',
+      title: {
+        type: 'mrkdwn',
+        text: 'Inference Provider Usage Alert',
+        verbatim: false,
+      },
       subtitle: {
         type: 'mrkdwn',
         text: 'OpenRouter (`Production`) is at 90% ($90.00 of $100.00)',
@@ -141,7 +145,7 @@ describe('provider usage limit automation', () => {
     expect(JSON.stringify(message.blocks)).not.toContain(
       'Production (abc123def456)',
     );
-    expect(message.blocks[0]).toMatchObject({ child_blocks: [] });
+    expect(message.blocks[0]).not.toHaveProperty('child_blocks');
   });
 
   it('does nothing when disabled', async () => {

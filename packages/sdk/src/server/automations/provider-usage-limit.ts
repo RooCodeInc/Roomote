@@ -17,7 +17,6 @@ import {
   isProviderUsageLimitThreshold,
   PROVIDER_USAGE_LIMIT_SETTINGS_HASH,
   type ProviderUsageLimitThreshold,
-  type SlackBlock,
 } from '@roomote/types';
 
 import { getCommunicationProviderAdapter } from '../lib/communication-providers';
@@ -251,18 +250,17 @@ function formatSnapshot({
 
 function buildProviderUsageLimitAlertBlock(
   snapshot: ProviderUsageLimitSnapshot,
-): SlackBlock {
+) {
   const percent = Math.round(snapshot.usedPercent * 10) / 10;
   const usage = formatUsage(snapshot, percent);
   const credentialLabel = formatCredentialLabel(snapshot);
 
   return {
-    type: 'container',
-    width: 'full',
+    type: 'card',
     title: {
-      type: 'plain_text',
+      type: 'mrkdwn',
       text: 'Inference Provider Usage Alert',
-      emoji: false,
+      verbatim: false,
     },
     subtitle: {
       type: 'mrkdwn',
@@ -273,7 +271,6 @@ function buildProviderUsageLimitAlertBlock(
       image_url: buildAutomationIconUrl('battery-warning'),
       alt_text: 'Inference Provider Usage Alert automation icon',
     },
-    child_blocks: [],
   };
 }
 
