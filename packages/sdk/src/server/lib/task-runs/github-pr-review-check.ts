@@ -112,76 +112,74 @@ export async function publishGithubPrReviewCheck(input: {
         ),
       );
 
-    if (status === 'queued') {
-      try {
-        const run = await db.query.taskRuns.findFirst({
-          where: eq(taskRuns.id, input.runId),
-          columns: { startedAt: true, status: true },
-        });
+    try {
+      const run = await db.query.taskRuns.findFirst({
+        where: eq(taskRuns.id, input.runId),
+        columns: { startedAt: true, status: true },
+      });
 
+      if (
+        run?.status === RunStatus.Completed ||
+        run?.status === RunStatus.Failed ||
+        run?.status === RunStatus.Canceled
+      ) {
+        let reviewSummaryBody: string | undefined;
         if (
-          run?.status === RunStatus.Completed ||
-          run?.status === RunStatus.Failed ||
-          run?.status === RunStatus.Canceled
+          run.status === RunStatus.Completed &&
+          existingLinkage?.githubReviewCommentId
         ) {
-          let reviewSummaryBody: string | undefined;
-          if (
-            run.status === RunStatus.Completed &&
-            existingLinkage?.githubReviewCommentId
-          ) {
-            try {
-              const { data: comment } = await octokit.rest.issues.getComment({
-                ...repository,
-                comment_id: existingLinkage.githubReviewCommentId,
-              });
-              reviewSummaryBody = comment.body ?? undefined;
-            } catch (error) {
-              console.error(
-                `[githubPrReviewCheck] Failed to load review summary for settled run ${input.runId}: ${
-                  error instanceof Error ? error.message : String(error)
-                }`,
-              );
-            }
+          try {
+            const { data: comment } = await octokit.rest.issues.getComment({
+              ...repository,
+              comment_id: existingLinkage.githubReviewCommentId,
+            });
+            reviewSummaryBody = comment.body ?? undefined;
+          } catch (error) {
+            console.error(
+              `[githubPrReviewCheck] Failed to load review summary for settled run ${input.runId}: ${
+                error instanceof Error ? error.message : String(error)
+              }`,
+            );
           }
-
-          const result = getGithubPrReviewCheckResult({
-            runStatus: run.status,
-            reviewSummaryBody,
-            safetyNetFinalized: false,
-            expectedHeadSha: input.headSha,
-          });
-          await octokit.rest.checks.update({
-            ...repository,
-            check_run_id: checkRun.id,
-            status: 'completed',
-            conclusion: result.conclusion,
-            completed_at: new Date().toISOString(),
-            details_url: taskUrl,
-            output: {
-              title: result.title,
-              summary: `${result.summary} [Open the task](${taskUrl}).`,
-            },
-          });
-        } else if (run?.startedAt) {
-          await octokit.rest.checks.update({
-            ...repository,
-            check_run_id: checkRun.id,
-            status: 'in_progress',
-            started_at: run.startedAt.toISOString(),
-            details_url: taskUrl,
-            output: {
-              title: 'Roomote review in progress',
-              summary: `Roomote is reviewing this commit. [Open the task](${taskUrl}).`,
-            },
-          });
         }
-      } catch (error) {
-        console.error(
-          `[githubPrReviewCheck] Failed to reconcile started run ${input.runId}: ${
-            error instanceof Error ? error.message : String(error)
-          }`,
-        );
+
+        const result = getGithubPrReviewCheckResult({
+          runStatus: run.status,
+          reviewSummaryBody,
+          safetyNetFinalized: false,
+          expectedHeadSha: input.headSha,
+        });
+        await octokit.rest.checks.update({
+          ...repository,
+          check_run_id: checkRun.id,
+          status: 'completed',
+          conclusion: result.conclusion,
+          completed_at: new Date().toISOString(),
+          details_url: taskUrl,
+          output: {
+            title: result.title,
+            summary: `${result.summary} [Open the task](${taskUrl}).`,
+          },
+        });
+      } else if (status === 'queued' && run?.startedAt) {
+        await octokit.rest.checks.update({
+          ...repository,
+          check_run_id: checkRun.id,
+          status: 'in_progress',
+          started_at: run.startedAt.toISOString(),
+          details_url: taskUrl,
+          output: {
+            title: 'Roomote review in progress',
+            summary: `Roomote is reviewing this commit. [Open the task](${taskUrl}).`,
+          },
+        });
       }
+    } catch (error) {
+      console.error(
+        `[githubPrReviewCheck] Failed to reconcile run ${input.runId}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
     }
 
     if (

@@ -164,45 +164,49 @@ describe('GitHub PR review check lifecycle', () => {
     );
   });
 
-  it('completes a check when its run settled before the check id was persisted', async () => {
-    mockFindFirstLinkage.mockResolvedValue({
-      githubCheckRunId: null,
-      githubReviewCommentId: 30,
-    });
-    mockFindFirstRun.mockResolvedValue({
-      startedAt: new Date('2026-08-25T12:00:00.000Z'),
-      status: RunStatus.Completed,
-    });
-    mockCreateCheck.mockResolvedValue({ data: { id: 20 } });
-    mockGetIssueComment.mockResolvedValue({
-      data: {
-        body: '<!-- roomote-review-summary sha=abcdef -->\n<!-- roomote-review-status:start -->\nNo issues found.\n<!-- roomote-review-status:end -->\n<!-- roomote-review-checklist:start -->\n<!-- roomote-review-checklist:end -->',
-      },
-    });
+  it.each([undefined, 'in_progress'] as const)(
+    'completes a %s check when its run settled before the check id was persisted',
+    async (status) => {
+      mockFindFirstLinkage.mockResolvedValue({
+        githubCheckRunId: null,
+        githubReviewCommentId: 30,
+      });
+      mockFindFirstRun.mockResolvedValue({
+        startedAt: new Date('2026-08-25T12:00:00.000Z'),
+        status: RunStatus.Completed,
+      });
+      mockCreateCheck.mockResolvedValue({ data: { id: 20 } });
+      mockGetIssueComment.mockResolvedValue({
+        data: {
+          body: '<!-- roomote-review-summary sha=abcdef -->\n<!-- roomote-review-status:start -->\nNo issues found.\n<!-- roomote-review-status:end -->\n<!-- roomote-review-checklist:start -->\n<!-- roomote-review-checklist:end -->',
+        },
+      });
 
-    await publishGithubPrReviewCheck({
-      installationId: 1,
-      repository: 'owner/repo',
-      prNumber: 42,
-      headSha: 'abcdef',
-      taskId: 'task-1',
-      runId: 2,
-    });
+      await publishGithubPrReviewCheck({
+        installationId: 1,
+        repository: 'owner/repo',
+        prNumber: 42,
+        headSha: 'abcdef',
+        taskId: 'task-1',
+        runId: 2,
+        ...(status ? { status } : {}),
+      });
 
-    expect(mockUpdateInstallationCheck).toHaveBeenCalledWith(
-      expect.objectContaining({
-        check_run_id: 20,
-        status: 'completed',
-        conclusion: 'success',
-      }),
-    );
-    expect(mockUpdateInstallationCheck).not.toHaveBeenCalledWith(
-      expect.objectContaining({
-        check_run_id: 20,
-        status: 'in_progress',
-      }),
-    );
-  });
+      expect(mockUpdateInstallationCheck).toHaveBeenCalledWith(
+        expect.objectContaining({
+          check_run_id: 20,
+          status: 'completed',
+          conclusion: 'success',
+        }),
+      );
+      expect(mockUpdateInstallationCheck).not.toHaveBeenCalledWith(
+        expect.objectContaining({
+          check_run_id: 20,
+          status: 'in_progress',
+        }),
+      );
+    },
+  );
 });
 
 describe('getGithubPrReviewCheckResult', () => {
