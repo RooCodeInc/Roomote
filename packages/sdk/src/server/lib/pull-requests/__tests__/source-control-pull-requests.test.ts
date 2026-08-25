@@ -1450,6 +1450,106 @@ describe('optional targetBranch', () => {
     },
   );
 
+  it.each([
+    [
+      'Slack',
+      {
+        repo: 'acme/web',
+        communicationContextInherited: true,
+        communicationProvider: 'slack',
+        communicationTeamId: 'T123',
+        communicationTeamDomain: 'acme',
+        communicationChannelId: 'C123',
+        communicationThreadId: '1234567890.000100',
+      },
+      {
+        taskSurface: 'slack',
+        slackTeamId: 'T123',
+        slackTeamDomain: 'acme',
+        slackChannel: 'C123',
+        slackThreadTs: '1234567890.000100',
+      },
+      '[Slack](https://acme.slack.com/archives/C123/p1234567890000100)',
+    ],
+    [
+      'Discord',
+      {
+        repo: 'acme/web',
+        communicationContextInherited: true,
+        communicationProvider: 'discord',
+        communicationGuildId: '123',
+        communicationChannelId: '456',
+        communicationThreadId: '789',
+        communicationMessageId: '101112',
+      },
+      {
+        taskSurface: 'discord',
+        discordGuildId: '123',
+        discordChannelId: '789',
+        discordMessageId: '101112',
+      },
+      '[Discord](https://discord.com/channels/123/789/101112)',
+    ],
+  ] as const)(
+    'keeps inherited %s provenance during the final provider mutation',
+    async (_label, payload, expectedMetadata, conversationLink) => {
+      const canonicalAttribution = attributionBody(
+        'Created by Roomote.',
+        `Follow up by mentioning @roomote or in ${conversationLink}.`,
+      );
+      const octokit = makeOctokit({
+        list: [],
+        created: {
+          number: 13,
+          node_id: 'node-13',
+          html_url: 'https://github.com/acme/web/pull/13',
+          title: '[Feature] X',
+          draft: true,
+          base: { ref: 'develop' },
+        },
+      });
+      mockRepositoriesFindFirst.mockResolvedValue({
+        installationId: 555,
+        externalRepoId: null,
+        fullName: 'acme/web',
+        htmlUrl: 'https://github.com/acme/web',
+        private: false,
+      });
+      mockGetPrBodyAttributionLine.mockReturnValueOnce(canonicalAttribution);
+      mockTasksFindFirst.mockResolvedValue({
+        surface: 'web',
+        slackChannelId: null,
+        slackThreadTs: null,
+      });
+
+      await createOrUpdateSourceControlPullRequestForTaskRun({
+        taskRun: makeTaskRun(payload),
+        input: {
+          ...baseInput,
+          targetBranch: 'develop',
+          body: `${attributionBody('Created by Roomote.')}
+
+## What changed
+
+Done.`,
+        },
+      });
+
+      expect(mockGetPrBodyAttributionLine).toHaveBeenCalledWith(
+        expect.objectContaining(expectedMetadata),
+      );
+      expect(octokit.rest.pulls.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          body: `${canonicalAttribution}
+
+## What changed
+
+Done.`,
+        }),
+      );
+    },
+  );
+
   it('passes canonical web metadata instead of parsing the input opener', async () => {
     makeOctokit({
       list: [],
