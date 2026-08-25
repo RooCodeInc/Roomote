@@ -1,4 +1,12 @@
-import { readdir, readFile } from 'node:fs/promises';
+import {
+  mkdir,
+  mkdtemp,
+  readdir,
+  readFile,
+  rm,
+  writeFile,
+} from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ALL_REPOSITORIES } from '@roomote/types';
 
@@ -14,6 +22,7 @@ import {
   FAST_AGENT_SPILL_TURN_OUTPUT_LIMIT_BYTES,
   FAST_AGENT_SUBAGENT_TOOL_FILTER,
   formatFastAgentMcpResultForModel,
+  formatFastAgentSkillDocumentForModel,
   getFastAgentNativeToolRuntime,
   revokeFastAgentMcpCapabilitiesForConversation,
   shouldSpillFastAgentModelOutput,
@@ -22,6 +31,7 @@ import {
   FAST_AGENT_SPILL_MAX_FILE_BYTES,
   fastAgentSpillStore,
 } from '../fast-agent-spill-store';
+import { FastAgentSkillStore } from '../fast-agent-skill-store';
 import { callMcpTool, listMcpTools } from '../../mcp-tool-client';
 
 function stringWithSerializedByteLength(byteLength: number): string {
@@ -210,16 +220,26 @@ describe('Fast native OpenCode tool bridge', () => {
       const descriptor = JSON.parse(oversized.output);
       expectBoundedSpillDescriptor(oversized.output);
       expect(descriptor).toMatchObject({
-        truncated: true,
-        preview: expect.stringContaining('untrusted lower-priority data'),
-        spill: { handle: expect.any(String), byteLength: expect.any(Number) },
+        success: true,
+        guidance: expect.stringContaining('untrusted lower-priority data'),
+        result: {
+          content: {
+            truncated: true,
+            preview: expect.stringContaining('name: implement-changes'),
+            spill: {
+              handle: expect.any(String),
+              byteLength: expect.any(Number),
+            },
+          },
+        },
       });
+      const spillHandle = descriptor.result.content.spill.handle as string;
 
       const search = await callBridge({
         sessionID: parentSession,
         tool: FAST_AGENT_NATIVE_TOOL_NAMES.spillGrep,
         args: {
-          handle: descriptor.spill.handle,
+          handle: spillHandle,
           query: 'post-implementation proof rule',
         },
       });
@@ -235,7 +255,7 @@ describe('Fast native OpenCode tool bridge', () => {
         sessionID: parentSession,
         tool: FAST_AGENT_NATIVE_TOOL_NAMES.spillRead,
         args: {
-          handle: descriptor.spill.handle,
+          handle: spillHandle,
           offset: Math.max(0, matchOffset - 100),
           limit: 500,
         },
@@ -274,6 +294,82 @@ describe('Fast native OpenCode tool bridge', () => {
     } finally {
       unbindChild();
       unbindParent();
+    }
+  });
+
+  it('keeps an accepted 8 MiB skill recoverable despite JSON escaping', async () => {
+    const runtime = await getFastAgentNativeToolRuntime('max-skill', []);
+    const sessionId = 'max-skill-parent';
+    const root = await mkdtemp(join(tmpdir(), 'fast-max-skill-'));
+    const skillDirectory = join(root, 'security-review');
+    const marker = 'MAX_SKILL_MARKER';
+    const content = `${marker}${'"'.repeat(
+      FAST_AGENT_SPILL_MAX_FILE_BYTES - Buffer.byteLength(marker, 'utf8'),
+    )}`;
+    await mkdir(skillDirectory);
+    await writeFile(join(skillDirectory, 'SKILL.md'), content, 'utf8');
+    const store = new FastAgentSkillStore(root);
+    const unbind = bindFastAgentNativeToolExecutor(
+      sessionId,
+      'max-skill-conversation',
+      async () => null,
+      { allowSkillAccess: true, allowSpillRecovery: true },
+    );
+    const callBridge = (body: Record<string, unknown>) =>
+      fetch(runtime.env.ROOMOTE_FAST_TOOL_BRIDGE_URL!, {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${runtime.env.ROOMOTE_FAST_TOOL_BRIDGE_TOKEN}`,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify(body),
+      }).then((response) => response.json());
+
+    try {
+      const document = await store.read('security-review');
+      expect(document.byteLength).toBe(FAST_AGENT_SPILL_MAX_FILE_BYTES);
+      expect(
+        Buffer.byteLength(JSON.stringify(document), 'utf8'),
+      ).toBeGreaterThan(FAST_AGENT_SPILL_MAX_FILE_BYTES);
+
+      const formatted = await formatFastAgentSkillDocumentForModel(
+        sessionId,
+        document,
+      );
+      expectBoundedSpillDescriptor(formatted.output);
+      const descriptor = JSON.parse(formatted.output);
+      expect(descriptor.result.content.spill).toMatchObject({
+        handle: expect.any(String),
+        byteLength: FAST_AGENT_SPILL_MAX_FILE_BYTES,
+      });
+      const handle = descriptor.result.content.spill.handle as string;
+
+      const search = await callBridge({
+        sessionID: sessionId,
+        tool: FAST_AGENT_NATIVE_TOOL_NAMES.spillGrep,
+        args: { handle, query: marker },
+      });
+      expect(JSON.parse(search.output)).toMatchObject({
+        success: true,
+        result: { matches: [expect.objectContaining({ offset: 0 })] },
+      });
+
+      const read = await callBridge({
+        sessionID: sessionId,
+        tool: FAST_AGENT_NATIVE_TOOL_NAMES.spillRead,
+        args: { handle, offset: FAST_AGENT_SPILL_MAX_FILE_BYTES - 8 },
+      });
+      expect(JSON.parse(read.output)).toMatchObject({
+        success: true,
+        result: {
+          byteLength: FAST_AGENT_SPILL_MAX_FILE_BYTES,
+          content: '"'.repeat(8),
+          nextOffset: null,
+        },
+      });
+    } finally {
+      unbind();
+      await rm(root, { recursive: true, force: true });
     }
   });
 

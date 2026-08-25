@@ -1,7 +1,7 @@
 import { constants } from 'node:fs';
 import { open, readdir, stat } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
-import { join, relative, resolve, sep } from 'node:path';
+import { dirname, join, relative, resolve, sep } from 'node:path';
 
 import { FAST_AGENT_SPILL_MAX_FILE_BYTES } from './fast-agent-spill-store';
 
@@ -47,7 +47,7 @@ export const FAST_AGENT_PACKAGED_SKILL_NAMES = [
 type FastAgentPackagedSkillName =
   (typeof FAST_AGENT_PACKAGED_SKILL_NAMES)[number];
 
-type FastAgentSkillDocument = {
+export type FastAgentSkillDocument = {
   byteLength: number;
   content: string;
   name: FastAgentPackagedSkillName;
@@ -58,8 +58,9 @@ type FastAgentSkillDocument = {
 const FAST_AGENT_PACKAGED_SKILL_NAME_SET = new Set<string>(
   FAST_AGENT_PACKAGED_SKILL_NAMES,
 );
-const SOURCE_SKILL_ROOT = fileURLToPath(
-  new URL('../workflows/skills/standard', import.meta.url),
+const SOURCE_SKILL_ROOT = resolve(
+  dirname(fileURLToPath(import.meta.url)),
+  '../workflows/skills/standard',
 );
 const RUNTIME_SKILL_ROOT = resolve(process.cwd(), '../../skills/standard');
 
@@ -143,8 +144,12 @@ export class FastAgentSkillStore {
         throw new Error('Packaged skill resource is not a supported document.');
       }
       const content = await descriptor.readFile('utf8');
+      const byteLength = Buffer.byteLength(content, 'utf8');
+      if (byteLength > FAST_AGENT_SPILL_MAX_FILE_BYTES) {
+        throw new Error('Packaged skill resource is not a supported document.');
+      }
       return {
-        byteLength: Buffer.byteLength(content, 'utf8'),
+        byteLength,
         content,
         name: typedName,
         resource: requestedResource,
