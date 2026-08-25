@@ -256,6 +256,72 @@ describe('prepareDockerTaskNetwork', () => {
       ]),
     );
   });
+
+  it('prunes stale managed networks and retries once after address pool exhaustion', async () => {
+    const staleNetwork = getDockerTaskNetworkName(90);
+    let createAttempts = 0;
+    const runDocker = vi.fn<DockerCommand>(async (args) => {
+      if (args[0] === 'network' && args[1] === 'create') {
+        createAttempts++;
+        if (createAttempts === 1) {
+          throw new Error(
+            'Error response from daemon: all predefined address pools have been fully subnetted',
+          );
+        }
+      }
+      if (args[0] === 'network' && args[1] === 'ls') {
+        return `${staleNetwork}\n`;
+      }
+      if (
+        args[0] === 'network' &&
+        args[1] === 'inspect' &&
+        args[2] === staleNetwork
+      ) {
+        return JSON.stringify([{ Labels: {} }]);
+      }
+      return '';
+    });
+
+    await expect(
+      prepareDockerTaskNetwork(
+        {
+          taskRunId: 91,
+          egressPolicy: 'internet',
+          autoRemove: true,
+        },
+        runDocker,
+      ),
+    ).resolves.toBe('roomote-task-91');
+
+    expect(createAttempts).toBe(2);
+    expect(runDocker).toHaveBeenCalledWith(['network', 'rm', staleNetwork], {
+      allowFailure: true,
+    });
+  });
+
+  it('preserves the address-pool error code when pruning cannot free capacity', async () => {
+    const runDocker = vi.fn<DockerCommand>(async (args) => {
+      if (args[0] === 'network' && args[1] === 'create') {
+        throw new Error(
+          'Error response from daemon: all predefined address pools have been fully subnetted',
+        );
+      }
+      return '';
+    });
+
+    await expect(
+      prepareDockerTaskNetwork(
+        {
+          taskRunId: 92,
+          egressPolicy: 'internet',
+          autoRemove: true,
+        },
+        runDocker,
+      ),
+    ).rejects.toMatchObject({
+      errorCode: TaskRunErrorCode.DockerAddressPoolExhausted,
+    });
+  });
 });
 
 describe('attachDockerEgressPolicy', () => {
@@ -607,6 +673,89 @@ describe('cleanupStaleDockerSandboxes', () => {
     expect(runDocker).toHaveBeenCalledWith(['network', 'rm', taskNetwork], {
       allowFailure: true,
     });
+  });
+
+  it('removes a retained sandbox when its task run is terminal', async () => {
+    const taskNetwork = getDockerTaskNetworkName(94);
+    const containerName = 'roomote-worker-94';
+    const runDocker = vi.fn<DockerCommand>(async (args) => {
+      if (args[0] === 'network' && args[1] === 'ls') {
+        return `${taskNetwork}\n`;
+      }
+      if (args[0] === 'network' && args[1] === 'inspect') {
+        return JSON.stringify([
+          {
+            Labels: {
+              'dev.roomote.sandbox.container': containerName,
+              'dev.roomote.sandbox.auto-remove': 'false',
+              'dev.roomote.task-run-id': '94',
+              'dev.roomote.sandbox.created-at-ms': '1000',
+            },
+          },
+        ]);
+      }
+      if (args[0] === 'container' && args[1] === 'inspect') {
+        return JSON.stringify([{ State: { Running: false } }]);
+      }
+      return '';
+    });
+    const shouldRemoveTaskRun = vi.fn().mockResolvedValue(true);
+
+    await cleanupStaleDockerSandboxes(
+      { nowMs: 20_000, shouldRemoveTaskRun },
+      runDocker,
+    );
+
+    expect(shouldRemoveTaskRun).toHaveBeenCalledWith(94);
+    expect(runDocker).toHaveBeenCalledWith(['rm', '-f', containerName], {
+      allowFailure: true,
+    });
+    expect(runDocker).toHaveBeenCalledWith(['network', 'rm', taskNetwork], {
+      allowFailure: true,
+    });
+  });
+
+  it('preserves a retained sandbox while its task run is active', async () => {
+    const taskNetwork = getDockerTaskNetworkName(95);
+    const containerName = 'roomote-worker-95';
+    const runDocker = vi.fn<DockerCommand>(async (args) => {
+      if (args[0] === 'network' && args[1] === 'ls') {
+        return `${taskNetwork}\n`;
+      }
+      if (args[0] === 'network' && args[1] === 'inspect') {
+        return JSON.stringify([
+          {
+            Labels: {
+              'dev.roomote.sandbox.container': containerName,
+              'dev.roomote.sandbox.auto-remove': 'false',
+              'dev.roomote.task-run-id': '95',
+              'dev.roomote.sandbox.created-at-ms': '1000',
+            },
+          },
+        ]);
+      }
+      if (args[0] === 'container' && args[1] === 'inspect') {
+        return JSON.stringify([{ State: { Running: false } }]);
+      }
+      return '';
+    });
+
+    await cleanupStaleDockerSandboxes(
+      {
+        nowMs: 20_000,
+        shouldRemoveTaskRun: vi.fn().mockResolvedValue(false),
+      },
+      runDocker,
+    );
+
+    expect(runDocker).not.toHaveBeenCalledWith(
+      ['rm', '-f', containerName],
+      expect.anything(),
+    );
+    expect(runDocker).not.toHaveBeenCalledWith(
+      ['network', 'rm', taskNetwork],
+      expect.anything(),
+    );
   });
 
   it('reattaches a replacement API container to a running task network', async () => {
