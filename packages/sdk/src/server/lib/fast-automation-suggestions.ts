@@ -15,7 +15,7 @@ import type { SlackNotifier } from '@roomote/slack';
 
 const SUGGESTION_METADATA_EVENT_TYPE = 'roomote.setup_onboarding_suggestion';
 
-export type FastAutomationSuggestion = {
+type FastAutomationSuggestion = {
   title: string;
   brief: string;
 };
