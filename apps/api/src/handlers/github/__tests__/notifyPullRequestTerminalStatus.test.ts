@@ -270,41 +270,58 @@ describe('notifyPullRequestTerminalStatus', () => {
     expect(SLACK_PR_CLOSED_REACTION_EMOJI).toBe('-1');
   });
 
-  it('posts the closed reaction to a Fast parent Slack thread', async () => {
-    mockedGithubFind.mockResolvedValue({ id: 1 } as any);
-    mockedTaskPullRequestsFind.mockResolvedValue([{ taskId: 'task-1' }] as any);
-    mockedTaskRunsFind.mockResolvedValue([
-      {
-        taskId: 'task-1',
-        payload: fastParentSlackPayload('CFAST', 'fast-thread-ts'),
+  it.each([
+    {
+      label: 'direct task-run',
+      payload: {
+        communicationProvider: 'slack',
+        communicationChannelId: 'CSHARED',
+        communicationThreadId: 'shared-thread-ts',
       },
-    ] as any);
-    mockedSlackFind.mockResolvedValue({ botAccessToken: 'xoxb-token' } as any);
+    },
+    {
+      label: 'Fast-parent',
+      payload: fastParentSlackPayload('CSHARED', 'shared-thread-ts'),
+    },
+  ])(
+    'normalizes $label Slack bindings through one delivery path',
+    async ({ payload }) => {
+      mockedGithubFind.mockResolvedValue({ id: 1 } as any);
+      mockedTaskPullRequestsFind.mockResolvedValue([
+        { taskId: 'task-1' },
+      ] as any);
+      mockedTaskRunsFind.mockResolvedValue([
+        { taskId: 'task-1', payload },
+      ] as any);
+      mockedSlackFind.mockResolvedValue({
+        botAccessToken: 'xoxb-token',
+      } as any);
 
-    await notifyPullRequestTerminalStatus({
-      ...baseParams,
-      status: 'closed',
-      actorLogin: 'closer',
-    });
+      await notifyPullRequestTerminalStatus({
+        ...baseParams,
+        status: 'closed',
+        actorLogin: 'closer',
+      });
 
-    expect(mockStickyFooterPost).toHaveBeenCalledWith(
-      expect.objectContaining({
-        channel: 'CFAST',
-        threadTs: 'fast-thread-ts',
-        taskId: 'task-1',
-      }),
-    );
-    expect(mockAddReaction).toHaveBeenCalledWith({
-      channel: 'CFAST',
-      timestamp: 'fast-thread-ts',
-      name: SLACK_PR_CLOSED_REACTION_EMOJI,
-    });
-    expect(mockRemoveReaction).toHaveBeenCalledWith({
-      channel: 'CFAST',
-      timestamp: 'fast-thread-ts',
-      name: 'eyes',
-    });
-  });
+      expect(mockStickyFooterPost).toHaveBeenCalledWith(
+        expect.objectContaining({
+          channel: 'CSHARED',
+          threadTs: 'shared-thread-ts',
+          taskId: 'task-1',
+        }),
+      );
+      expect(mockAddReaction).toHaveBeenCalledWith({
+        channel: 'CSHARED',
+        timestamp: 'shared-thread-ts',
+        name: SLACK_PR_CLOSED_REACTION_EMOJI,
+      });
+      expect(mockRemoveReaction).toHaveBeenCalledWith({
+        channel: 'CSHARED',
+        timestamp: 'shared-thread-ts',
+        name: 'eyes',
+      });
+    },
+  );
 
   it('deduplicates an overlapping Fast-parent binding when cleanup rejects', async () => {
     mockedGithubFind.mockResolvedValue({ id: 1 } as any);

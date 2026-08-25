@@ -122,25 +122,39 @@ type SlackTarget = {
   slackChannelId: string;
 };
 
+type SlackReplyTarget = {
+  channelId: string;
+  threadId: string;
+};
+
+function resolveSlackReplyTarget(payload: unknown): SlackReplyTarget | null {
+  const directReplyTarget =
+    getCommunicationProviderFromTaskPayload(payload) === 'slack'
+      ? {
+          channelId: getCommunicationChannelFromTaskPayload(payload),
+          threadId: getCommunicationThreadIdFromTaskPayload(payload),
+        }
+      : null;
+  const fastConversation = getFastAgentParentFromPayload(payload)?.conversation;
+  const fastReplyTarget =
+    fastConversation?.surface === 'slack' ? fastConversation.replyTarget : null;
+
+  return (
+    [directReplyTarget, fastReplyTarget].find(
+      (target): target is SlackReplyTarget =>
+        Boolean(target?.channelId && target.threadId),
+    ) ?? null
+  );
+}
+
 function getSlackTarget(taskId: string, payload: unknown): SlackTarget | null {
-  if (getCommunicationProviderFromTaskPayload(payload) === 'slack') {
-    const slackChannelId = getCommunicationChannelFromTaskPayload(payload);
-    const slackThreadTs = getCommunicationThreadIdFromTaskPayload(payload);
-
-    if (slackChannelId && slackThreadTs) {
-      return { taskId, slackChannelId, slackThreadTs };
-    }
-  }
-
-  const fastAgentParent = getFastAgentParentFromPayload(payload);
-  if (fastAgentParent?.conversation.surface !== 'slack') {
-    return null;
-  }
+  const replyTarget = resolveSlackReplyTarget(payload);
+  if (!replyTarget) return null;
 
   return {
     taskId,
-    slackChannelId: fastAgentParent.conversation.replyTarget.channelId,
-    slackThreadTs: fastAgentParent.conversation.replyTarget.threadId,
+    slackChannelId: replyTarget.channelId,
+    slackThreadTs: replyTarget.threadId,
   };
 }
 
