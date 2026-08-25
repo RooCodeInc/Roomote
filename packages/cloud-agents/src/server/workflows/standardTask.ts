@@ -144,10 +144,17 @@ export function standardTask({
   const isAllRepositoriesSelection = repo === ALL_REPOSITORIES;
   const usesSharedWorkspaceRoot =
     isAllRepositoriesSelection || (repoFullNames?.length ?? 0) > 0;
+  const attributionSurface =
+    sourceProvider === 'slack' ||
+    sourceProvider === 'teams' ||
+    sourceProvider === 'telegram' ||
+    sourceProvider === 'discord'
+      ? sourceProvider
+      : taskSurface;
   const prBodyAttributionLine = getPrBodyAttributionLine({
     attribution,
     taskUrl: _taskRunUrl,
-    taskSurface,
+    taskSurface: attributionSurface,
     slackTeamDomain,
     slackTeamId,
     slackConversationUrl,

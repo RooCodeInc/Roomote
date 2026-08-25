@@ -6,11 +6,15 @@ import {
   getCommunicationGuildIdFromTaskPayload,
   getCommunicationMessageIdFromTaskPayload,
   getCommunicationProviderFromTaskPayload,
+  getCommunicationTeamDomainFromTaskPayload,
+  getCommunicationTeamIdFromTaskPayload,
   getCommunicationTenantIdFromTaskPayload,
   getCommunicationThreadIdFromTaskPayload,
   getSkillCommandDelimiter,
   getSlackChannelFromTaskPayload,
+  getSlackConversationUrlFromTaskPayload,
   getSlackTeamDomainFromTaskPayload,
+  getSlackTeamIdFromTaskPayload,
   getSlackThreadTsFromTaskPayload,
   resolveSourceControlProviderFromPayload,
 } from '@roomote/types';
@@ -294,11 +298,16 @@ export async function generatePrompt({
       const activeCommunicationProvider = inheritedCommunicationContext
         ? null
         : communicationProvider;
+      const sourceChatProvider =
+        communicationProvider === 'slack' ||
+        communicationProvider === 'teams' ||
+        communicationProvider === 'telegram' ||
+        communicationProvider === 'discord'
+          ? communicationProvider
+          : null;
       const nonSlackChatProvider =
-        activeCommunicationProvider === 'teams' ||
-        activeCommunicationProvider === 'telegram' ||
-        activeCommunicationProvider === 'discord'
-          ? activeCommunicationProvider
+        sourceChatProvider && sourceChatProvider !== 'slack'
+          ? sourceChatProvider
           : null;
       const slackThreadTs =
         getSlackThreadTsFromTaskPayload(taskSpec.payload) ??
@@ -337,9 +346,29 @@ export async function generatePrompt({
         taskRunUrl,
         attribution: commitAuthor,
         slackTeamDomain:
-          getSlackTeamDomainFromTaskPayload(taskSpec.payload) ?? undefined,
-        slackChannel: activeSlackChannel ?? undefined,
-        slackThreadTs: slackThreadTs ?? undefined,
+          getSlackTeamDomainFromTaskPayload(taskSpec.payload) ??
+          (sourceChatProvider === 'slack'
+            ? (getCommunicationTeamDomainFromTaskPayload(taskSpec.payload) ??
+              undefined)
+            : undefined),
+        slackTeamId:
+          getSlackTeamIdFromTaskPayload(taskSpec.payload) ??
+          (sourceChatProvider === 'slack'
+            ? (getCommunicationTeamIdFromTaskPayload(taskSpec.payload) ??
+              undefined)
+            : undefined),
+        slackConversationUrl:
+          getSlackConversationUrlFromTaskPayload(taskSpec.payload) ?? undefined,
+        slackChannel:
+          activeSlackChannel ??
+          (sourceChatProvider === 'slack'
+            ? (communicationChannelId ?? undefined)
+            : undefined),
+        slackThreadTs:
+          slackThreadTs ??
+          (sourceChatProvider === 'slack'
+            ? (communicationThreadId ?? undefined)
+            : undefined),
         telegramChatId:
           nonSlackChatProvider === 'telegram'
             ? (communicationChannelId ?? undefined)
