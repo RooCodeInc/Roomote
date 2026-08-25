@@ -57,6 +57,10 @@ describe('Fast native OpenCode tool bridge', () => {
       join(toolsDirectory, 'launch_task.js'),
       'utf8',
     );
+    const searchTasksSource = await readFile(
+      join(toolsDirectory, 'search_tasks.js'),
+      'utf8',
+    );
     const bridgeSource = await readFile(
       join(runtime.directory, '.opencode', 'roomote-fast-tool-bridge.js'),
       'utf8',
@@ -88,6 +92,11 @@ describe('Fast native OpenCode tool bridge', () => {
     expect(launchTaskSource).toContain(
       'to run against all active repositories',
     );
+    expect(searchTasksSource).toContain('invoke("search_tasks"');
+    expect(searchTasksSource).toContain('"active", "completed", "all"');
+    expect(searchTasksSource).toContain('pullRequest: z.string()');
+    expect(searchTasksSource).toContain('cursor: z.string()');
+    expect(searchTasksSource).toContain('.max(100)');
     expect(installedToolFiles).not.toEqual(
       expect.arrayContaining([
         'get_chat_channel_messages.js',
@@ -127,6 +136,7 @@ describe('Fast native OpenCode tool bridge', () => {
       FAST_AGENT_NATIVE_TOOL_NAMES.ignoreEvent,
       FAST_AGENT_NATIVE_TOOL_NAMES.launchTask,
       FAST_AGENT_NATIVE_TOOL_NAMES.retryTaskStart,
+      FAST_AGENT_NATIVE_TOOL_NAMES.searchTasks,
       FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReaction,
       FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReply,
       FAST_AGENT_NATIVE_TOOL_NAMES.sendTaskMessage,
@@ -226,6 +236,7 @@ describe('Fast native OpenCode tool bridge', () => {
     expect(toolFilter).toMatchObject({
       'roomote_*': true,
       [FAST_AGENT_NATIVE_TOOL_NAMES.launchTask]: true,
+      [FAST_AGENT_NATIVE_TOOL_NAMES.searchTasks]: true,
       [FAST_AGENT_NATIVE_TOOL_NAMES.sendTaskMessage]: true,
       [FAST_AGENT_NATIVE_TOOL_NAMES.cancelTask]: true,
     });

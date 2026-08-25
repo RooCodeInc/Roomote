@@ -233,6 +233,23 @@ export default {
 }
 `,
 
+    [FAST_AGENT_NATIVE_TOOL_NAMES.searchTasks]: String.raw`
+import { z } from "zod"
+import { invoke } from "../roomote-fast-tool-bridge.js"
+
+export default {
+  description: "Search existing Roomote tasks by text, status, or linked pull request.",
+  args: {
+    query: z.string().trim().min(1).optional().describe("Text to match against task titles and prompts"),
+    status: z.enum(["active", "completed", "all"]).optional().describe("Task status filter"),
+    pullRequest: z.string().trim().min(1).optional().describe('Pull request filter: "__has_pr__" or "owner/repo#123"'),
+    limit: z.number().int().min(1).max(100).optional().describe("Maximum tasks to return, from 1 to 100; defaults to 20"),
+    cursor: z.string().trim().min(1).optional().describe("Pagination cursor from a previous search result"),
+  },
+  execute: (args, context) => invoke("search_tasks", args, context),
+}
+`,
+
     [FAST_AGENT_NATIVE_TOOL_NAMES.sendTaskMessage]: String.raw`
 import { z } from "zod"
 import { invoke } from "../roomote-fast-tool-bridge.js"

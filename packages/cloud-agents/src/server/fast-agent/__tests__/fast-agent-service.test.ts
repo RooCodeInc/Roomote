@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   runSession: vi.fn(),
   listIntegrations: vi.fn(),
   callIntegration: vi.fn(),
+  searchTasks: vi.fn(),
   sendTaskMessage: vi.fn(),
   cancelTask: vi.fn(),
   getUserIdentity: vi.fn(),
@@ -39,6 +40,7 @@ const nativeToolNames = vi.hoisted(
       ignoreEvent: 'ignore_event',
       launchTask: 'launch_task',
       retryTaskStart: 'retry_task_start',
+      searchTasks: 'search_tasks',
       sendChatReaction: 'send_chat_reaction',
       sendChatReply: 'send_chat_reply',
       sendTaskMessage: 'send_task_message',
@@ -120,6 +122,8 @@ vi.mock('../fast-agent-integration-broker', () => ({
 }));
 
 vi.mock('../fast-agent-tasks', () => ({
+  fastAgentTaskSearchArgsSchema: { parse: (args: unknown) => args },
+  searchFastAgentTasks: mocks.searchTasks,
   sendFastAgentTaskMessage: mocks.sendTaskMessage,
   cancelFastAgentTask: mocks.cancelTask,
 }));
@@ -232,6 +236,10 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     });
     mocks.listIntegrations.mockResolvedValue([]);
     mocks.callIntegration.mockResolvedValue({ matches: ['fast-agent.ts'] });
+    mocks.searchTasks.mockResolvedValue({
+      tasks: [{ id: 'task-1', title: 'Fix checkout' }],
+      hasMore: false,
+    });
     mocks.sendTaskMessage.mockResolvedValue({ success: true });
     mocks.cancelTask.mockResolvedValue({ success: true });
     mocks.getUserIdentity.mockResolvedValue({
@@ -902,6 +910,48 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         },
       },
     );
+  });
+
+  it('searches existing tasks through the native member-authorized task API', async () => {
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        await expect(
+          invokeTool(nativeToolNames.searchTasks, {
+            query: 'checkout',
+            status: 'completed',
+            pullRequest: '__has_pr__',
+            limit: 5,
+            cursor: 'next-page',
+          }),
+        ).resolves.toEqual({
+          tasks: [{ id: 'task-1', title: 'Fix checkout' }],
+          hasMore: false,
+        });
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'closeout',
+          message: 'I found the task.',
+        });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+
+    expect(mocks.searchTasks).toHaveBeenCalledWith(
+      {
+        userId: 'user-1',
+        apiBaseUrl: 'https://api.example.com',
+      },
+      {
+        query: 'checkout',
+        status: 'completed',
+        pullRequest: '__has_pr__',
+        limit: 5,
+        cursor: 'next-page',
+      },
+    );
+    expect(mocks.callIntegration).not.toHaveBeenCalled();
   });
 
   it.each([

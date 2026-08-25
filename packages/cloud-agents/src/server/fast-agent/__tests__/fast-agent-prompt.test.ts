@@ -79,6 +79,7 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain('Claude Sonnet 5 [id: anthropic/claude-sonnet-5]');
     expect(prompt).toContain('Omit it to use the deployment default');
     expect(prompt).toContain('manage_tasks');
+    expect(prompt).toContain('Use "search_tasks" to find existing tasks');
     expect(prompt).toContain('get_chat_message_context');
     expect(prompt).toContain('get_chat_channel_messages');
     expect(prompt).toContain('manage_custom_automations');

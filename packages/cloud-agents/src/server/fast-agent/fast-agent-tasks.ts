@@ -219,6 +219,44 @@ const nonEmptyTrimmedStringSchema = z
     message: 'Value must be non-empty.',
   });
 
+export const fastAgentTaskSearchArgsSchema = z
+  .object({
+    query: nonEmptyTrimmedStringSchema
+      .optional()
+      .describe('Optional text to match against task titles and prompts'),
+    status: fastAgentTaskStatusSchema
+      .optional()
+      .describe('Optional task-status filter'),
+    pullRequest: nonEmptyTrimmedStringSchema
+      .optional()
+      .describe(
+        'Optional pull request filter: "__has_pr__" or "owner/repo#123"',
+      ),
+    limit: z
+      .number()
+      .int()
+      .min(1)
+      .max(100)
+      .optional()
+      .describe('Maximum number of tasks to return, from 1 to 100'),
+    cursor: nonEmptyTrimmedStringSchema
+      .optional()
+      .describe('Pagination cursor from a previous search result'),
+  })
+  .strict();
+
+export async function searchFastAgentTasks(
+  context: FastAgentTaskApiContext,
+  params: z.infer<typeof fastAgentTaskSearchArgsSchema>,
+): Promise<FastAgentTaskToolResult> {
+  return callFastAgentTaskApi({
+    ...context,
+    method: 'GET',
+    path: FAST_AGENT_TASKS_API_PATH,
+    query: params,
+  });
+}
+
 export function createFastAgentTaskTools(
   context: FastAgentTaskApiContext,
 ): ToolSet {
@@ -275,37 +313,16 @@ export function createFastAgentTaskTools(
         }),
     }),
     search_tasks: tool({
-      description: 'Search Roomote tasks by text or status.',
-      inputSchema: z
-        .object({
-          query: nonEmptyTrimmedStringSchema
-            .optional()
-            .describe(
-              'Optional non-empty text to match against task titles and prompts',
-            ),
-          status: fastAgentTaskStatusSchema
-            .optional()
-            .describe('Optional task-status filter'),
-          limit: z
-            .number()
-            .int()
-            .refine((value) => value >= 1 && value <= 100, {
-              message: 'Limit must be between 1 and 100.',
-            })
-            .optional()
-            .describe('Maximum number of tasks to return, from 1 to 100'),
-        })
-        .strict(),
-      execute: async ({ query, status, limit }) =>
-        callFastAgentTaskApi({
-          ...context,
-          method: 'GET',
-          path: FAST_AGENT_TASKS_API_PATH,
-          query: {
-            query,
-            status,
-            limit,
-          },
+      description:
+        'Search Roomote tasks by text, status, or linked pull request.',
+      inputSchema: fastAgentTaskSearchArgsSchema,
+      execute: async ({ query, status, pullRequest, limit, cursor }) =>
+        searchFastAgentTasks(context, {
+          query,
+          status,
+          pullRequest,
+          limit,
+          cursor,
         }),
     }),
     get_task_messages: tool({

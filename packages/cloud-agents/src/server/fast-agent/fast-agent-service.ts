@@ -62,6 +62,8 @@ import {
 } from './fast-agent-integration-broker';
 import {
   cancelFastAgentTask,
+  fastAgentTaskSearchArgsSchema,
+  searchFastAgentTasks,
   sendFastAgentTaskMessage,
 } from './fast-agent-tasks';
 import { getFastAgentUserIdentity } from './fast-agent-user-identity';
@@ -1085,6 +1087,12 @@ export async function answerFastAgentQuestion({
               }
             }
             return result;
+          }
+
+          case FAST_AGENT_NATIVE_TOOL_NAMES.searchTasks: {
+            const args = fastAgentTaskSearchArgsSchema.parse(call.args);
+            throwIfTurnCancelled();
+            return await searchFastAgentTasks({ userId, apiBaseUrl }, args);
           }
 
           case FAST_AGENT_NATIVE_TOOL_NAMES.sendTaskMessage: {
