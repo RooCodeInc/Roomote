@@ -7,6 +7,7 @@ const mockFindFirstRun = vi.fn();
 const mockFindManyRuns = vi.fn();
 const mockFindFirstTask = vi.fn();
 const mockFindManyTaskPullRequests = vi.fn();
+const mockFindFirstTaskPullRequest = vi.fn();
 const mockFindFirstDeploymentSettings = vi.fn();
 const mockFindFirstSlackInstallation = vi.fn();
 const mockFindFirstSlackUserMapping = vi.fn();
@@ -128,6 +129,8 @@ vi.mock('@roomote/db/server', async () => {
         taskPullRequests: {
           findMany: (...args: unknown[]) =>
             mockFindManyTaskPullRequests(...args),
+          findFirst: (...args: unknown[]) =>
+            mockFindFirstTaskPullRequest(...args),
         },
         deploymentSettings: {
           findFirst: (...args: unknown[]) =>
@@ -183,8 +186,14 @@ vi.mock('@roomote/cloud-agents/server', () => ({
   finalizeGithubPrReviewComment: (...args: unknown[]) =>
     mockFinalizeGithubPrReviewComment(...args),
   REVIEW_SUMMARY_MARKER: '<!-- roomote-review-summary',
+  REVIEW_STATUS_START_MARKER: '<!-- roomote-review-status:start -->',
+  REVIEW_STATUS_END_MARKER: '<!-- roomote-review-status:end -->',
   REVIEW_CHECKLIST_START_MARKER: '<!-- roomote-review-checklist:start -->',
   REVIEW_CHECKLIST_END_MARKER: '<!-- roomote-review-checklist:end -->',
+  isReviewInProgressStatusLine: (line: string) =>
+    /^(Self-reviewing the PR(?: with fresh eyes)? now\.|Reviewing the PR now\.|Re-reviewing new commits now\.)/i.test(
+      line.trim(),
+    ),
   parseReviewSummaryMarkerSha: (body: string) =>
     body.match(/roomote-review-summary\s+sha=([0-9a-f]+)/i)?.[1],
   getMarkedSection: ({
@@ -383,6 +392,7 @@ describe('finishRun', () => {
     joinedSelectRows = [];
     mockFindManyRuns.mockResolvedValue([]);
     mockFindManyTaskPullRequests.mockResolvedValue([]);
+    mockFindFirstTaskPullRequest.mockResolvedValue(undefined);
     mockFindFirstDeploymentSettings.mockResolvedValue({
       slackOnboardingStage: 'awaiting_task_milestone',
     });
@@ -2279,7 +2289,7 @@ describe('finishRun', () => {
       mockFindManyTaskPullRequests.mockResolvedValue([reviewPrRow]);
       mockFinalizeGithubPrReviewComment.mockResolvedValueOnce({
         finalized: false,
-        body: '<!-- roomote-review-summary sha=abc -->\n<!-- roomote-review-checklist:start -->\n<!-- roomote-review-checklist:end -->',
+        body: '<!-- roomote-review-summary sha=abc -->\n<!-- roomote-review-status:start -->\nNo issues found.\n<!-- roomote-review-status:end -->\n<!-- roomote-review-checklist:start -->\n<!-- roomote-review-checklist:end -->',
       });
 
       await finishRun({ id: 1, status: RunStatus.Completed });
@@ -2304,7 +2314,7 @@ describe('finishRun', () => {
       mockFindManyTaskPullRequests.mockResolvedValue([reviewPrRow]);
       mockFinalizeGithubPrReviewComment.mockResolvedValueOnce({
         finalized: false,
-        body: '<!-- roomote-review-summary sha=abc -->\n<!-- roomote-review-checklist:start -->\n- [ ] Fix authorization\n<!-- roomote-review-checklist:end -->',
+        body: '<!-- roomote-review-summary sha=abc -->\n<!-- roomote-review-status:start -->\n1 issue outstanding.\n<!-- roomote-review-status:end -->\n<!-- roomote-review-checklist:start -->\n- [ ] Fix authorization\n<!-- roomote-review-checklist:end -->',
       });
 
       await finishRun({ id: 1, status: RunStatus.Completed });
@@ -2315,6 +2325,36 @@ describe('finishRun', () => {
           check_run_id: 123,
           status: 'completed',
           conclusion: 'failure',
+        }),
+      );
+    });
+
+    it('refreshes a missing check id when publication races with finalization', async () => {
+      mockFindFirstRun.mockResolvedValue(
+        makeRun(
+          { payloadKind: TaskPayloadKind.GithubPrReview },
+          { workflow: 'pr_review', surface: 'github' },
+        ),
+      );
+      mockFindManyTaskPullRequests.mockResolvedValue([
+        { ...reviewPrRow, githubCheckRunId: null },
+      ]);
+      mockFindFirstTaskPullRequest.mockResolvedValue({
+        githubCheckRunId: 123,
+      });
+      mockFinalizeGithubPrReviewComment.mockResolvedValueOnce({
+        finalized: false,
+        body: '<!-- roomote-review-summary sha=abc -->\n<!-- roomote-review-status:start -->\nNo issues found.\n<!-- roomote-review-status:end -->\n<!-- roomote-review-checklist:start -->\n<!-- roomote-review-checklist:end -->',
+      });
+
+      await finishRun({ id: 1, status: RunStatus.Completed });
+
+      expect(mockUpdateCheckRun).toHaveBeenCalledWith(
+        'github-token',
+        expect.objectContaining({
+          check_run_id: 123,
+          status: 'completed',
+          conclusion: 'success',
         }),
       );
     });

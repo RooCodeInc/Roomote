@@ -798,7 +798,24 @@ async function cleanupGithubPrReviewArtifacts(
         );
       }
 
-      if (prRow.githubCheckRunId) {
+      let checkRunId = prRow.githubCheckRunId;
+      if (!checkRunId) {
+        try {
+          const refreshedLinkage = await db.query.taskPullRequests.findFirst({
+            where: eq(taskPullRequests.id, prRow.id),
+            columns: { githubCheckRunId: true },
+          });
+          checkRunId = refreshedLinkage?.githubCheckRunId ?? null;
+        } catch (error) {
+          console.error(
+            `[finishRun] Failed to refresh PR review check linkage for run ${run.id}: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          );
+        }
+      }
+
+      if (checkRunId) {
         try {
           token ??= await createTaskRunGitHubToken(run);
           const checkResult = getGithubPrReviewCheckResult({
@@ -826,7 +843,7 @@ async function cleanupGithubPrReviewArtifacts(
           await updateCheckRun(token, {
             owner,
             repo,
-            check_run_id: prRow.githubCheckRunId,
+            check_run_id: checkRunId,
             status: 'completed',
             conclusion: checkResult.conclusion,
             completed_at: new Date().toISOString(),

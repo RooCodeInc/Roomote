@@ -10,9 +10,12 @@ import {
 import {
   getMarkedSection,
   getTaskUrl,
+  isReviewInProgressStatusLine,
   parseReviewSummaryMarkerSha,
   REVIEW_CHECKLIST_END_MARKER,
   REVIEW_CHECKLIST_START_MARKER,
+  REVIEW_STATUS_END_MARKER,
+  REVIEW_STATUS_START_MARKER,
   REVIEW_SUMMARY_MARKER,
 } from '@roomote/cloud-agents/server';
 import { getInstallationOctokit, updateCheckRun } from '@roomote/github';
@@ -113,10 +116,53 @@ export async function publishGithubPrReviewCheck(input: {
       try {
         const run = await db.query.taskRuns.findFirst({
           where: eq(taskRuns.id, input.runId),
-          columns: { startedAt: true },
+          columns: { startedAt: true, status: true },
         });
 
-        if (run?.startedAt) {
+        if (
+          run?.status === RunStatus.Completed ||
+          run?.status === RunStatus.Failed ||
+          run?.status === RunStatus.Canceled
+        ) {
+          let reviewSummaryBody: string | undefined;
+          if (
+            run.status === RunStatus.Completed &&
+            existingLinkage?.githubReviewCommentId
+          ) {
+            try {
+              const { data: comment } = await octokit.rest.issues.getComment({
+                ...repository,
+                comment_id: existingLinkage.githubReviewCommentId,
+              });
+              reviewSummaryBody = comment.body ?? undefined;
+            } catch (error) {
+              console.error(
+                `[githubPrReviewCheck] Failed to load review summary for settled run ${input.runId}: ${
+                  error instanceof Error ? error.message : String(error)
+                }`,
+              );
+            }
+          }
+
+          const result = getGithubPrReviewCheckResult({
+            runStatus: run.status,
+            reviewSummaryBody,
+            safetyNetFinalized: false,
+            expectedHeadSha: input.headSha,
+          });
+          await octokit.rest.checks.update({
+            ...repository,
+            check_run_id: checkRun.id,
+            status: 'completed',
+            conclusion: result.conclusion,
+            completed_at: new Date().toISOString(),
+            details_url: taskUrl,
+            output: {
+              title: result.title,
+              summary: `${result.summary} [Open the task](${taskUrl}).`,
+            },
+          });
+        } else if (run?.startedAt) {
           await octokit.rest.checks.update({
             ...repository,
             check_run_id: checkRun.id,
@@ -247,6 +293,19 @@ export function getGithubPrReviewCheckResult(input: {
       title: 'Roomote review result is stale',
       summary:
         'The published review result does not cover the latest pull request commit.',
+    };
+  }
+
+  const reviewStatus = getMarkedSection({
+    content: input.reviewSummaryBody,
+    startMarker: REVIEW_STATUS_START_MARKER,
+    endMarker: REVIEW_STATUS_END_MARKER,
+  });
+  if (!reviewStatus || isReviewInProgressStatusLine(reviewStatus)) {
+    return {
+      conclusion: 'failure',
+      title: 'Roomote review result unavailable',
+      summary: 'The task completed without publishing a review result.',
     };
   }
 
