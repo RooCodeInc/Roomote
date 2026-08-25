@@ -104,13 +104,18 @@ describe('fast-agent integration broker', () => {
     });
   });
 
-  it('exposes the read-only Brain proxy when the Brain is configured', async () => {
+  it('exposes the Fast Brain memory proxy when the Brain is configured', async () => {
     mocks.configuredServers = {
       gbrain: {
         url: 'https://api.example.com/api/mcp/gbrain',
         headers: {},
       },
     };
+    mocks.listMcpTools.mockResolvedValueOnce([
+      { name: 'search', inputSchema: { type: 'object' } },
+      { name: 'recall', inputSchema: { type: 'object' } },
+      { name: 'remember', inputSchema: { type: 'object' } },
+    ]);
 
     const integrations = await listFastAgentIntegrations({
       userId: 'user-1',
@@ -124,11 +129,15 @@ describe('fast-agent integration broker', () => {
         instructions: expect.stringContaining(
           'Use Brain as lightweight conversational context',
         ),
-        tools: [{ name: 'search', inputSchema: { type: 'object' } }],
+        tools: [
+          { name: 'search', inputSchema: { type: 'object' } },
+          { name: 'recall', inputSchema: { type: 'object' } },
+          { name: 'remember', inputSchema: { type: 'object' } },
+        ],
       }),
     ]);
     expect(mocks.listMcpTools).toHaveBeenCalledWith({
-      url: 'https://api.example.com/api/mcp/gbrain',
+      url: 'https://api.example.com/api/mcp/gbrain-fast',
       headers: { Authorization: 'Bearer control-plane-token' },
       signal: expect.any(AbortSignal),
     });

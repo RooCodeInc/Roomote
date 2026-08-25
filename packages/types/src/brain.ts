@@ -16,6 +16,9 @@ export const BRAIN_MCP_ID = 'gbrain';
 /** API proxy mount; shared by SDK config delivery and the worker. */
 export const BRAIN_PROXY_PATH = '/api/mcp/gbrain';
 
+/** User-authenticated Brain proxy used only by the runless Fast agent. */
+export const BRAIN_FAST_PROXY_PATH = '/api/mcp/gbrain-fast';
+
 /**
  * Namespaces the Brain files pages under, in the order a reader should see
  * them: what the deployment is about first, then the activity streams, then

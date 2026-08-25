@@ -7,6 +7,7 @@ import {
   isNull,
 } from '@roomote/db/server';
 import {
+  BRAIN_FAST_PROXY_PATH,
   BRAIN_MCP_ID,
   MCP_INTEGRATION_PROXY_PATH_PREFIX,
   MCP_ROUTING_PROXY_PATH_PREFIX,
@@ -197,7 +198,7 @@ function describeMcpServer(
     return {
       name: 'Brain',
       description:
-        "Read this deployment's shared memory of completed tasks and connected integration activity.",
+        "Read and contribute to this deployment's shared memory of completed tasks, durable facts, preferences, decisions, and connected integration activity.",
       instructions: FAST_AGENT_BRAIN_INSTRUCTIONS,
     };
   }
@@ -213,6 +214,7 @@ function describeMcpServer(
 function resolveFastMcpEndpoint(options: {
   apiBaseUrl: string;
   authToken: string;
+  integrationId: string;
   config: FastAgentMcpServerConfig;
 }) {
   const apiUrl = new URL(options.apiBaseUrl);
@@ -227,6 +229,10 @@ function resolveFastMcpEndpoint(options: {
       url: configuredUrl.toString(),
       headers: options.config.headers,
     };
+  }
+
+  if (options.integrationId === BRAIN_MCP_ID) {
+    configuredUrl.pathname = BRAIN_FAST_PROXY_PATH;
   }
 
   const relativePath = `${configuredUrl.pathname.replace(/^\/+/, '')}${configuredUrl.search}`;
@@ -294,7 +300,12 @@ export async function listFastAgentIntegrations(
   ).map(([id, config]) => ({
     id,
     ...describeMcpServer(id),
-    endpoint: resolveFastMcpEndpoint({ apiBaseUrl, authToken, config }),
+    endpoint: resolveFastMcpEndpoint({
+      apiBaseUrl,
+      authToken,
+      integrationId: id,
+      config,
+    }),
     disabledTools: new Set(config.disabledTools ?? []),
   }));
 

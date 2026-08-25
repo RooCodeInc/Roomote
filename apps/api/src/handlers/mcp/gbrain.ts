@@ -45,6 +45,19 @@ export const GBRAIN_READ_TOOL_NAMES = [
 ] as const;
 
 /**
+ * Fast runs as a user-authenticated conversational agent rather than inside a
+ * task sandbox. It may add bounded memories through gbrain's purpose-built
+ * memory verb, but never receives raw page, delete, or admin operations.
+ * `recall` is paired with `remember` because remembered facts live in its
+ * hot-memory arm rather than the page-search surface above.
+ */
+export const GBRAIN_FAST_TOOL_NAMES = [
+  ...GBRAIN_READ_TOOL_NAMES,
+  'recall',
+  'remember',
+] as const;
+
+/**
  * Brain proxy: fronts the deployment-hosted gbrain HTTP MCP server
  * for sandboxed agents. The upstream lives on the deployment network and is
  * never exposed publicly; sandboxes reach it only through this route with
@@ -69,6 +82,56 @@ export function createGbrainMcpProxy(options?: { allowAuthTokens?: boolean }) {
       // while silently missing everything semantic.
       const [connection, provider] = await Promise.all([
         resolveBrainConnection('agent'),
+        resolveBrainInferenceProvider(),
+      ]);
+
+      if (!connection || !provider) {
+        throw new McpProxyError(
+          404,
+          'The Brain is not configured on this deployment',
+        );
+      }
+
+      return {
+        authHeader: connection.token,
+        upstream: `${connection.baseUrl.replace(/\/$/, '')}/mcp`,
+      };
+    },
+  });
+}
+
+/**
+ * Fast-only Brain proxy. The endpoint accepts user auth tokens and uses the
+ * write-scoped ingest client upstream, while its explicit allowlist limits the
+ * mutation surface to `remember`.
+ */
+export function createGbrainFastMcpProxy() {
+  return createMcpProxy({
+    name: 'Brain Fast',
+    allowAuthTokens: true,
+    validateTaskRunToken: async () =>
+      Response.json(
+        {
+          jsonrpc: '2.0',
+          id: null,
+          error: {
+            code: -32000,
+            message: 'Brain memory writes require a user-scoped auth token',
+          },
+        },
+        { status: 403 },
+      ),
+    allowedToolNames: GBRAIN_FAST_TOOL_NAMES,
+    resolveCredentials: async (auth) => {
+      if (auth.tokenType !== 'auth') {
+        throw new McpProxyError(
+          403,
+          'Brain memory writes require a user-scoped auth token',
+        );
+      }
+
+      const [connection, provider] = await Promise.all([
+        resolveBrainConnection('ingest'),
         resolveBrainInferenceProvider(),
       ]);
 

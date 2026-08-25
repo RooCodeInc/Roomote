@@ -2,7 +2,7 @@ import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 
 import { Hono } from 'hono';
-import type { RunTokenContext } from '@roomote/types';
+import type { RunTokenContext, UserAuthTokenContext } from '@roomote/types';
 
 import type { Variables } from '../../../types';
 
@@ -18,7 +18,12 @@ vi.mock('@roomote/sdk/server', () => ({
 
 import { BRAIN_MCP_INSTRUCTIONS } from '@roomote/types';
 
-import { createGbrainMcpProxy, GBRAIN_READ_TOOL_NAMES } from '../gbrain';
+import {
+  createGbrainFastMcpProxy,
+  createGbrainMcpProxy,
+  GBRAIN_FAST_TOOL_NAMES,
+  GBRAIN_READ_TOOL_NAMES,
+} from '../gbrain';
 
 function createRunToken(): RunTokenContext {
   return {
@@ -28,6 +33,10 @@ function createRunToken(): RunTokenContext {
     tokenType: 'run',
     version: 1,
   };
+}
+
+function createUserToken(): UserAuthTokenContext {
+  return { userId: 'user-1', tokenType: 'auth', version: 1 };
 }
 
 function createApp() {
@@ -42,8 +51,32 @@ function createApp() {
   return app;
 }
 
+function createFastApp(
+  authContext: RunTokenContext | UserAuthTokenContext = createUserToken(),
+) {
+  const app = new Hono<{ Variables: Variables }>();
+
+  app.use('*', async (c, next) => {
+    c.set('authContext', authContext);
+    await next();
+  });
+  app.route('/gbrain-fast', createGbrainFastMcpProxy());
+  return app;
+}
+
 async function postMcp(app: Hono<{ Variables: Variables }>, body: unknown) {
   return app.request('/gbrain', {
+    method: 'POST',
+    headers: {
+      accept: 'application/json, text/event-stream',
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify(body),
+  });
+}
+
+async function postFastMcp(app: Hono<{ Variables: Variables }>, body: unknown) {
+  return app.request('/gbrain-fast', {
     method: 'POST',
     headers: {
       accept: 'application/json, text/event-stream',
@@ -196,6 +229,77 @@ describe('createGbrainMcpProxy', () => {
       expect(upstreamRequests).toHaveLength(1);
     },
   );
+
+  it('allows Fast to remember with the write-scoped credential', async () => {
+    mockResolveConnection.mockResolvedValue({
+      baseUrl: await startUpstream(),
+      token: 'ingest-token',
+    });
+
+    const response = await postFastMcp(createFastApp(), toolCall('remember'));
+
+    expect(response.status).toBe(200);
+    expect(mockResolveConnection).toHaveBeenCalledWith('ingest');
+    expect(upstreamRequests).toHaveLength(1);
+    expect(upstreamRequests[0]?.authorization).toBe('Bearer ingest-token');
+    expect(upstreamRequests[0]?.body).toContain('"remember"');
+  });
+
+  it.each(['recall', 'query'])(
+    'keeps the %s read path available to Fast',
+    async (name) => {
+      mockResolveConnection.mockResolvedValue({
+        baseUrl: await startUpstream(),
+        token: 'ingest-token',
+      });
+
+      const response = await postFastMcp(createFastApp(), toolCall(name));
+
+      expect(response.status).toBe(200);
+      expect(upstreamRequests).toHaveLength(1);
+    },
+  );
+
+  it.each(['forget', 'put_page', 'delete_page', 'submit_job'])(
+    'blocks the %s operation from the Fast write proxy',
+    async (name) => {
+      mockResolveConnection.mockResolvedValue({
+        baseUrl: await startUpstream(),
+        token: 'ingest-token',
+      });
+
+      const response = await postFastMcp(createFastApp(), toolCall(name));
+
+      expect(response.status).toBe(403);
+      expect(upstreamRequests).toHaveLength(0);
+    },
+  );
+
+  it('rejects task run tokens from the Fast write proxy', async () => {
+    mockResolveConnection.mockResolvedValue({
+      baseUrl: await startUpstream(),
+      token: 'ingest-token',
+    });
+
+    const response = await postFastMcp(
+      createFastApp(createRunToken()),
+      toolCall('remember'),
+    );
+
+    expect(response.status).toBe(403);
+    expect(upstreamRequests).toHaveLength(0);
+  });
+
+  it('limits Fast mutation to the purpose-built memory verb', () => {
+    expect(GBRAIN_FAST_TOOL_NAMES).toEqual([
+      ...GBRAIN_READ_TOOL_NAMES,
+      'recall',
+      'remember',
+    ]);
+    for (const forbidden of ['forget', 'put_page', 'delete_page']) {
+      expect(GBRAIN_FAST_TOOL_NAMES).not.toContain(forbidden);
+    }
+  });
 });
 
 describe('allowlist and instructions stay in step', () => {
