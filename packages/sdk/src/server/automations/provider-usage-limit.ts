@@ -24,6 +24,7 @@ import { getCommunicationProviderAdapter } from '../lib/communication-providers'
 import {
   buildAutomationIconUrl,
   buildManagerSlackSettingsUrl,
+  buildModelsSettingsUrl,
   degradeSlackMrkdwnToMarkdown,
 } from '../lib/manager-slack';
 import {
@@ -266,6 +267,15 @@ function buildProviderUsageLimitAlertBlock(
     configureUrl: buildManagerSlackSettingsUrl(
       PROVIDER_USAGE_LIMIT_SETTINGS_HASH,
     ),
+    configureLabel: 'Configure alert',
+    additionalActions: [
+      {
+        type: 'button',
+        action_id: 'provider_usage_limit_manage_models',
+        text: { type: 'plain_text', text: 'Manage models', emoji: false },
+        url: buildModelsSettingsUrl(),
+      },
+    ],
   })[0]!;
 }
 

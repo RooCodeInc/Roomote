@@ -148,8 +148,18 @@ describe('provider usage limit automation', () => {
           elements: [
             expect.objectContaining({
               type: 'button',
+              action_id: 'provider_usage_limit_manage_models',
+              text: { type: 'plain_text', text: 'Manage models', emoji: false },
+              url: expect.stringContaining('/settings/models'),
+            }),
+            expect.objectContaining({
+              type: 'button',
               action_id: 'late_bound_automation_configure',
-              text: { type: 'plain_text', text: 'Configure', emoji: false },
+              text: {
+                type: 'plain_text',
+                text: 'Configure alert',
+                emoji: false,
+              },
               url: expect.stringContaining('#provider-usage-limit'),
             }),
           ],
