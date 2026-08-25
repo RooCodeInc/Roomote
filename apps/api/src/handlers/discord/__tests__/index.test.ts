@@ -2005,6 +2005,20 @@ describe('Discord Gateway event handler', () => {
         ),
       }),
     );
+    const helpText = mocks.reply.mock.calls[0]?.[0]?.text;
+    expect(helpText).toContain('**Prompt starters**');
+    expect(helpText).toContain(
+      'Review PR #123, address actionable feedback, and update the PR.',
+    );
+    expect(helpText).toContain(
+      'Investigate the latest CI failure, fix it, and open a draft PR.',
+    );
+    expect(helpText).toContain(
+      'Find the smallest fix for <issue>, test it, and open a draft PR.',
+    );
+    expect(helpText).toContain(
+      'Copy a starter into `/new`, then replace the details for your task.',
+    );
   });
 
   it('uses /new to start fresh even when the DM has an active task', async () => {

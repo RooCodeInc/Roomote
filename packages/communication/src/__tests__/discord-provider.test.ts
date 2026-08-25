@@ -245,7 +245,13 @@ describe('DiscordCommunicationProvider', () => {
       {
         name: 'new',
         type: 1,
-        options: [expect.objectContaining({ name: 'request', required: true })],
+        options: [
+          expect.objectContaining({
+            name: 'request',
+            description: 'Describe the task, or run /help for prompt starters',
+            required: true,
+          }),
+        ],
       },
       { name: 'link', type: 1 },
       {
