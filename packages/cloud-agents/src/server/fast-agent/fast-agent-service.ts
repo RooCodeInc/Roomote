@@ -1288,7 +1288,7 @@ export async function answerFastAgentQuestion({
                           openCodeSessionID,
                           session.id,
                           executeNativeTool,
-                          spillBudget,
+                          { allowSpillRecovery: true, spillBudget },
                         ),
                       );
                     },
@@ -1306,7 +1306,7 @@ export async function answerFastAgentQuestion({
                               error:
                                 'That tool is reserved for the Fast parent agent.',
                             }),
-                          spillBudget,
+                          { allowSpillRecovery: false, spillBudget },
                         ),
                       );
                     },

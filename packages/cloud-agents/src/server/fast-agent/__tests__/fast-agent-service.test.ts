@@ -464,6 +464,16 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     );
     expect(adapter.postReply).toHaveBeenCalledTimes(2);
     expect(mocks.bindExecutor).toHaveBeenCalledTimes(2);
+    expect(
+      mocks.bindExecutor.mock.calls.find(
+        ([sessionID]) => sessionID === 'opencode-session-1',
+      )?.[3],
+    ).toMatchObject({ allowSpillRecovery: true });
+    expect(
+      mocks.bindExecutor.mock.calls.find(
+        ([sessionID]) => sessionID === 'opencode-subagent-1',
+      )?.[3],
+    ).toMatchObject({ allowSpillRecovery: false });
   });
 
   it('rebuilds an invalidated OpenCode session from canonical compatibility history', async () => {

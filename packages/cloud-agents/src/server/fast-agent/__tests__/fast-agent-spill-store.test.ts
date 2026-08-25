@@ -223,7 +223,7 @@ describe('FastAgentSpillStore', () => {
   });
 
   it('streams literal search in bounded pages with byte offsets', async () => {
-    const store = createStore({ fileQuotaBytes: 2 * 1024 * 1024 });
+    const store = createStore({ fileQuotaBytes: 3 * 1024 * 1024 });
     try {
       store.bindSession('session', 'conversation');
       const content = `${'x'.repeat(FAST_AGENT_SPILL_GREP_MAX_SCAN_BYTES + 10)}needle`;

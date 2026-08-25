@@ -14,6 +14,7 @@ import {
   FAST_AGENT_SUBAGENT_TOOL_FILTER,
   getFastAgentNativeToolRuntime,
 } from '../fast-agent-native-tool-bridge';
+import { FAST_AGENT_SPILL_MAX_FILE_BYTES } from '../fast-agent-spill-store';
 import { callMcpTool, listMcpTools } from '../../mcp-tool-client';
 
 describe('Fast native OpenCode tool bridge', () => {
@@ -202,6 +203,7 @@ describe('Fast native OpenCode tool bridge', () => {
       parentSessionId,
       conversationId,
       async () => null,
+      { allowSpillRecovery: true },
     );
 
     try {
@@ -248,6 +250,85 @@ describe('Fast native OpenCode tool bridge', () => {
     }
   });
 
+  it('finds the first match near the end of a maximum-size MCP result', async () => {
+    const conversationId = 'mcp-max-result-conversation';
+    const parentSessionId = 'mcp-max-result-parent';
+    const marker = 'FIRST_MATCH_NEAR_EOF';
+    const result = `${'x'.repeat(
+      FAST_AGENT_SPILL_MAX_FILE_BYTES - marker.length - 2,
+    )}${marker}`;
+    const runtime = await getFastAgentNativeToolRuntime(conversationId, [
+      {
+        id: 'github',
+        name: 'GitHub',
+        description: 'Repository access',
+        tools: [{ name: 'search_code' }],
+      },
+    ]);
+    const config = JSON.parse(
+      await readFile(join(runtime.directory, 'opencode.json'), 'utf8'),
+    ) as {
+      mcp: Record<string, { url: string; headers: Record<string, string> }>;
+    };
+    const budget = createFastAgentSpillTurnBudget();
+    const unbindMcp = bindFastAgentMcpToolExecutor(
+      runtime.mcpCapability,
+      async () => result,
+    );
+    const unbindParent = bindFastAgentNativeToolExecutor(
+      parentSessionId,
+      conversationId,
+      async () => null,
+      { allowSpillRecovery: true, spillBudget: budget },
+    );
+
+    try {
+      const descriptor = (await callMcpTool({
+        url: config.mcp.github!.url,
+        headers: config.mcp.github!.headers,
+        toolName: 'search_code',
+        args: {},
+      })) as { spill: { byteLength: number; handle: string } };
+      expect(descriptor.spill.byteLength).toBe(FAST_AGENT_SPILL_MAX_FILE_BYTES);
+      expect(budget.calls).toBe(0);
+
+      let offset = 0;
+      let matchOffset: number | undefined;
+      while (
+        offset < descriptor.spill.byteLength &&
+        matchOffset === undefined
+      ) {
+        const response = await fetch(
+          runtime.env.ROOMOTE_FAST_TOOL_BRIDGE_URL!,
+          {
+            method: 'POST',
+            headers: {
+              authorization: `Bearer ${runtime.env.ROOMOTE_FAST_TOOL_BRIDGE_TOKEN}`,
+              'content-type': 'application/json',
+            },
+            body: JSON.stringify({
+              sessionID: parentSessionId,
+              tool: FAST_AGENT_NATIVE_TOOL_NAMES.spillGrep,
+              args: { handle: descriptor.spill.handle, query: marker, offset },
+            }),
+          },
+        ).then((value) => value.json());
+        const search = JSON.parse(response.output);
+        expect(search.success).toBe(true);
+        matchOffset = search.result.matches[0]?.offset;
+        offset = search.result.nextOffset ?? descriptor.spill.byteLength;
+      }
+
+      expect(matchOffset).toBe(
+        FAST_AGENT_SPILL_MAX_FILE_BYTES - marker.length - 1,
+      );
+      expect(budget.calls).toBe(4);
+    } finally {
+      unbindParent();
+      unbindMcp();
+    }
+  });
+
   it('routes raw JSON arguments and results by OpenCode session id', async () => {
     const runtime = await getFastAgentNativeToolRuntime('native-route', []);
     const executor = vi.fn(async ({ agent, name, args }) => ({
@@ -260,6 +341,7 @@ describe('Fast native OpenCode tool bridge', () => {
       'opencode-session-1',
       'conversation-1',
       executor,
+      { allowSpillRecovery: true },
     );
 
     try {
@@ -310,6 +392,7 @@ describe('Fast native OpenCode tool bridge', () => {
       async () => {
         throw new Error('database password appeared in a downstream stack');
       },
+      { allowSpillRecovery: true },
     );
     const consoleError = vi
       .spyOn(console, 'error')
@@ -353,16 +436,19 @@ describe('Fast native OpenCode tool bridge', () => {
       parentSession,
       'conversation-spill',
       async () => ({ text: '😀'.repeat(20_000) }),
+      { allowSpillRecovery: true },
     );
     const unbindChild = bindFastAgentNativeToolExecutor(
       childSession,
       'conversation-spill',
       async () => null,
+      { allowSpillRecovery: false },
     );
     const unbindOther = bindFastAgentNativeToolExecutor(
       otherSession,
       'other-conversation',
       async () => null,
+      { allowSpillRecovery: true },
     );
     const callBridge = (body: Record<string, unknown>) =>
       fetch(runtime.env.ROOMOTE_FAST_TOOL_BRIDGE_URL!, {
@@ -422,20 +508,20 @@ describe('Fast native OpenCode tool bridge', () => {
     }
   });
 
-  it('returns advisor handles to the Fast parent without delegation guidance', async () => {
+  it('denies spill recovery to every child agent capability', async () => {
     const runtime = await getFastAgentNativeToolRuntime('native-advisor', []);
     const budget = createFastAgentSpillTurnBudget();
     const unbindAdvisor = bindFastAgentNativeToolExecutor(
       'advisor-session',
       'shared-conversation',
       async () => ({ text: 'advisor evidence '.repeat(5_000) }),
-      budget,
+      { allowSpillRecovery: false, spillBudget: budget },
     );
     const unbindParent = bindFastAgentNativeToolExecutor(
       'parent-session',
       'shared-conversation',
       async () => null,
-      budget,
+      { allowSpillRecovery: true, spillBudget: budget },
     );
     const callBridge = (body: Record<string, unknown>) =>
       fetch(runtime.env.ROOMOTE_FAST_TOOL_BRIDGE_URL!, {
@@ -456,20 +542,22 @@ describe('Fast native OpenCode tool bridge', () => {
       });
       const descriptor = JSON.parse(oversized.output);
       expect(descriptor.spill.guidance).toContain(
-        'Return this handle verbatim',
+        'subagent should return the handle verbatim',
       );
-      expect(descriptor.spill.guidance).not.toContain('delegate');
 
-      const advisorRead = await callBridge({
-        sessionID: 'advisor-session',
-        agent: 'advisor',
-        tool: FAST_AGENT_NATIVE_TOOL_NAMES.spillRead,
-        args: { handle: descriptor.spill.handle },
-      });
-      expect(JSON.parse(advisorRead.output)).toEqual({
-        success: false,
-        error: 'Result recovery tools are reserved for the Fast parent agent.',
-      });
+      for (const agent of ['general', 'explore', 'advisor', 'judge']) {
+        const childRead = await callBridge({
+          sessionID: 'advisor-session',
+          agent,
+          tool: FAST_AGENT_NATIVE_TOOL_NAMES.spillRead,
+          args: { handle: descriptor.spill.handle },
+        });
+        expect(JSON.parse(childRead.output)).toEqual({
+          success: false,
+          error:
+            'Result recovery tools are reserved for the Fast parent agent.',
+        });
+      }
 
       const parentSearch = await callBridge({
         sessionID: 'parent-session',
@@ -498,7 +586,7 @@ describe('Fast native OpenCode tool bridge', () => {
       sessionID,
       'conversation-call-budget',
       async () => ({ text: 'x'.repeat(60_000) }),
-      budget,
+      { allowSpillRecovery: true, spillBudget: budget },
     );
     const callBridge = (tool: string, args: Record<string, unknown>) =>
       fetch(runtime.env.ROOMOTE_FAST_TOOL_BRIDGE_URL!, {
@@ -552,7 +640,7 @@ describe('Fast native OpenCode tool bridge', () => {
       sessionID,
       'conversation-output-budget',
       async () => ({ text: 'x'.repeat(60_000) }),
-      budget,
+      { allowSpillRecovery: true, spillBudget: budget },
     );
     const callBridge = (tool: string, args: Record<string, unknown>) =>
       fetch(runtime.env.ROOMOTE_FAST_TOOL_BRIDGE_URL!, {

@@ -6,13 +6,13 @@ import { randomBytes } from 'node:crypto';
 
 const DEFAULT_SPILL_TTL_MS = 10 * 60_000;
 const DEFAULT_CONVERSATION_QUOTA_BYTES = 16 * 1024 * 1024;
-const DEFAULT_FILE_QUOTA_BYTES = 8 * 1024 * 1024;
+export const FAST_AGENT_SPILL_MAX_FILE_BYTES = 8 * 1024 * 1024;
 const DEFAULT_MAX_FILES_PER_CONVERSATION = 16;
 const DEFAULT_GLOBAL_QUOTA_BYTES = 64 * 1024 * 1024;
 const DEFAULT_GLOBAL_FILE_QUOTA = 64;
 const FAST_AGENT_SPILL_READ_MAX_BYTES = 5_000;
 export const FAST_AGENT_SPILL_GREP_RESULT_MAX_BYTES = 12_000;
-export const FAST_AGENT_SPILL_GREP_MAX_SCAN_BYTES = 1024 * 1024;
+export const FAST_AGENT_SPILL_GREP_MAX_SCAN_BYTES = 2 * 1024 * 1024;
 const FAST_AGENT_SPILL_GREP_CHUNK_BYTES = 64 * 1024;
 const FAST_AGENT_SPILL_GREP_MAX_MATCHES = 20;
 const FAST_AGENT_SPILL_GREP_MAX_QUERY_LENGTH = 512;
@@ -193,7 +193,8 @@ export class FastAgentSpillStore {
   constructor(options: FastAgentSpillStoreOptions = {}) {
     this.conversationQuotaBytes =
       options.conversationQuotaBytes ?? DEFAULT_CONVERSATION_QUOTA_BYTES;
-    this.fileQuotaBytes = options.fileQuotaBytes ?? DEFAULT_FILE_QUOTA_BYTES;
+    this.fileQuotaBytes =
+      options.fileQuotaBytes ?? FAST_AGENT_SPILL_MAX_FILE_BYTES;
     this.globalFileQuota = options.globalFileQuota ?? DEFAULT_GLOBAL_FILE_QUOTA;
     this.globalQuotaBytes =
       options.globalQuotaBytes ?? DEFAULT_GLOBAL_QUOTA_BYTES;
