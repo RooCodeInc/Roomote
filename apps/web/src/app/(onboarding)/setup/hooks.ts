@@ -472,35 +472,18 @@ export function useSetupFlow(
           }
 
           return true;
-        case 'environment-explainer':
-          return (
-            !replayEntryVisit &&
-            (status.setupNewState.selectedRepositoryIds.length > 0 ||
-              status.setupNewState.onboardingTaskId !== null)
-          );
-        case 'repo-selection':
-          return (
-            !replayEntryVisit &&
-            status.setupNewState.onboardingTaskId !== null &&
-            !status.onboardingFailed
-          );
         case 'automation-recommendations':
           return ['applied', 'skipped'].includes(
             status.setupNewState.automationRecommendations?.applicationState ??
               'pending',
           );
         case 'invoke':
-          return !hasPostOnboardingAccess();
+          return false;
         default:
           return false;
       }
     },
-    [
-      communicationStepResolved,
-      hasPostOnboardingAccess,
-      pendingAuthProvider,
-      status,
-    ],
+    [communicationStepResolved, pendingAuthProvider, status],
   );
 
   const shouldSkipPostOnboarding = useCallback(
@@ -532,9 +515,9 @@ export function useSetupFlow(
         }
       }
 
-      return hasPostOnboardingAccess() ? 'invoke' : 'repo-selection';
+      return 'invoke';
     },
-    [hasPostOnboardingAccess, setupSteps, shouldSkip],
+    [setupSteps, shouldSkip],
   );
 
   const findPreviousStep = useCallback(
