@@ -148,6 +148,58 @@ describe('getCostAnalyticsRows', () => {
     expect(row?.details.values.source).toBe('task_title_generation');
     expect(row?.meta?.prKeys).toEqual(['github:github.com:roomote/test#42']);
   });
+
+  it('includes Fast parent, advisor, and judge usage with shared attribution', async () => {
+    const user = await userFactory.create();
+    userIds.push(user.id);
+    const insertedEvents = await db
+      .insert(llmUsageEvents)
+      .values(
+        [
+          ['fast-session', 'fast-message', 'coding', 1_000],
+          ['advisor-session', 'advisor-message', 'advisor', 2_000],
+          ['judge-session', 'judge-message', 'judge', 3_000],
+        ].map(([sessionId, messageId, agent, costMicroUsd]) => ({
+          eventKey: `non-task:fast_agent:${sessionId}:${messageId}`,
+          source: 'fast_agent',
+          usageType: 'inference' as const,
+          userId: user.id,
+          harnessSessionId: String(sessionId),
+          messageId: String(messageId),
+          providerId: 'openrouter',
+          modelId: 'anthropic/claude-fable-5',
+          agent: String(agent),
+          costSource: 'opencode_message' as const,
+          costMicroUsd: Number(costMicroUsd),
+          messageCompletedAt: new Date('2026-08-24T12:00:00.000Z'),
+        })),
+      )
+      .returning({ id: llmUsageEvents.id });
+    usageEventIds.push(...insertedEvents.map((event) => event.id));
+
+    const rows = await getCostAnalyticsRows(
+      {} as UserAuthSuccess,
+      'all',
+      new Date('2026-08-25T12:00:00.000Z'),
+    );
+    const eventIds = new Set(insertedEvents.map((event) => event.id));
+    const fastRows = rows.filter((row) => eventIds.has(row.id));
+
+    expect(fastRows).toHaveLength(3);
+    expect(
+      fastRows.every(
+        (row) =>
+          row.dimensions.source?.key === 'fast_agent' &&
+          row.dimensions.user?.key === `user:${user.id}` &&
+          row.dimensions.taskType?.key === 'Non-task inference' &&
+          row.dimensions.provider?.key === 'openrouter' &&
+          row.dimensions.model?.key === 'anthropic/claude-fable-5' &&
+          row.meta?.canonicalTaskId === null &&
+          row.details.links === undefined,
+      ),
+    ).toBe(true);
+    expect(fastRows.reduce((sum, row) => sum + row.value, 0)).toBe(0.006);
+  });
 });
 
 describe('aggregateCostAnalyticsRowsByTask', () => {

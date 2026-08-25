@@ -308,7 +308,9 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       expect.objectContaining({
         modelRole: 'orchestration',
         prompt: expect.stringContaining('What does this service do?'),
+        surface: 'fast_agent',
         timeoutMs: null,
+        userId: 'user-1',
       }),
       { id: 'opencode-session-1' },
       expect.objectContaining({
@@ -321,6 +323,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         }),
       }),
     );
+    expect(mocks.generateText.mock.calls[0]?.[0]).not.toHaveProperty('taskId');
     expect(mocks.appendVisibleMessages).toHaveBeenCalledWith({
       sessionId: 'conversation-1',
       messages: [

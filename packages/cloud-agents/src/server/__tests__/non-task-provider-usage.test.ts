@@ -13,8 +13,10 @@ const {
   mockResolveEffectiveModelRuntimeEnv,
   recordLlmUsageMock,
   sessionAbortMock,
+  sessionChildrenMock,
   spawnMock,
   sessionCreateMock,
+  sessionMessagesMock,
   sessionPromptMock,
 } = vi.hoisted(() => ({
   createOpencodeClientMock: vi.fn(),
@@ -26,8 +28,10 @@ const {
   mockResolveEffectiveModelRuntimeEnv: vi.fn(),
   recordLlmUsageMock: vi.fn(),
   sessionAbortMock: vi.fn(),
+  sessionChildrenMock: vi.fn(),
   spawnMock: vi.fn(),
   sessionCreateMock: vi.fn(),
+  sessionMessagesMock: vi.fn(),
   sessionPromptMock: vi.fn(),
 }));
 
@@ -138,14 +142,22 @@ describe('resolveOpenCodeSmallModel', () => {
       },
       session: {
         abort: sessionAbortMock,
+        children: sessionChildrenMock,
         create: sessionCreateMock,
+        messages: sessionMessagesMock,
         prompt: sessionPromptMock,
       },
     });
     sessionAbortMock.mockResolvedValue({ data: true, error: undefined });
+    sessionChildrenMock.mockResolvedValue({ data: [], error: undefined });
     sessionCreateMock.mockResolvedValue({
       data: { id: 'session-1' },
       error: undefined,
+    });
+    sessionMessagesMock.mockResolvedValue({
+      data: [],
+      error: undefined,
+      response: new Response(),
     });
     configProvidersMock.mockResolvedValue({
       data: { providers: [], default: {} },
@@ -374,6 +386,206 @@ describe('resolveOpenCodeSmallModel', () => {
       }),
       expect.any(Object),
     );
+  });
+
+  it('records intermediate Fast and completed advisor and judge usage idempotently', async () => {
+    process.env = { ...originalEnv };
+    mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
+      R_MODEL: 'openrouter/anthropic/claude-fable-5',
+    });
+    const createdAt = Date.now() + 1_000;
+    const messageInfo = ({
+      agent,
+      cost,
+      id,
+      sessionID,
+    }: {
+      agent: string;
+      cost: number;
+      id: string;
+      sessionID: string;
+    }) => ({
+      id,
+      sessionID,
+      role: 'assistant' as const,
+      parentID: 'fast-user-message-1',
+      providerID: 'openrouter',
+      modelID: 'anthropic/claude-fable-5',
+      mode: agent,
+      agent,
+      cost,
+      time: { created: createdAt, completed: createdAt + 1 },
+      tokens: {
+        input: 10,
+        output: 4,
+        reasoning: 2,
+        cache: { read: 3, write: 1 },
+      },
+    });
+    const rootIntermediate = messageInfo({
+      agent: 'build',
+      cost: 0.001,
+      id: 'fast-message-intermediate',
+      sessionID: 'session-1',
+    });
+    const advisor = messageInfo({
+      agent: 'advisor',
+      cost: 0.002,
+      id: 'advisor-message-1',
+      sessionID: 'advisor-session-1',
+    });
+    const judge = messageInfo({
+      agent: 'judge',
+      cost: 0.003,
+      id: 'judge-message-1',
+      sessionID: 'judge-session-1',
+    });
+    const rootFinal = messageInfo({
+      agent: 'build',
+      cost: 0.004,
+      id: 'fast-message-final',
+      sessionID: 'session-1',
+    });
+    let finishEvents!: () => void;
+    const eventsFinished = new Promise<void>((resolve) => {
+      finishEvents = resolve;
+    });
+    eventSubscribeMock.mockResolvedValue({
+      stream: (async function* () {
+        yield {
+          type: 'session.created',
+          properties: {
+            sessionID: 'advisor-session-1',
+            info: { id: 'advisor-session-1', parentID: 'session-1' },
+          },
+        };
+        yield {
+          type: 'message.updated',
+          properties: { info: rootIntermediate },
+        };
+        yield {
+          type: 'message.updated',
+          properties: { info: advisor },
+        };
+        yield {
+          type: 'message.updated',
+          properties: {
+            info: { ...judge, time: { created: createdAt } },
+          },
+        };
+        yield {
+          type: 'message.updated',
+          properties: { info: advisor },
+        };
+        yield {
+          type: 'message.updated',
+          properties: { info: rootFinal },
+        };
+        finishEvents();
+      })(),
+    });
+    sessionPromptMock.mockImplementation(async () => {
+      await eventsFinished;
+      return {
+        data: {
+          info: rootFinal,
+          parts: [{ type: 'text', text: 'Fast turn complete' }],
+        },
+        error: undefined,
+      };
+    });
+    sessionChildrenMock.mockResolvedValue({
+      data: [
+        { id: 'advisor-session-1', time: { updated: createdAt } },
+        { id: 'judge-session-1', time: { updated: createdAt } },
+      ],
+      error: undefined,
+    });
+    sessionMessagesMock.mockImplementation(
+      async ({ sessionID }: { sessionID: string }) => ({
+        data:
+          sessionID === 'session-1'
+            ? [
+                { info: rootIntermediate, parts: [] },
+                { info: rootFinal, parts: [] },
+              ]
+            : sessionID === 'advisor-session-1'
+              ? [{ info: advisor, parts: [] }]
+              : [{ info: judge, parts: [] }],
+        error: undefined,
+        response: new Response(),
+      }),
+    );
+
+    const {
+      FAST_AGENT_SESSION_PERMISSIONS,
+      generateTrackedNonTaskTextInOpenCodeSession,
+      NON_TASK_INFERENCE_SURFACES,
+    } = await import('../non-task-provider-usage.js');
+
+    await expect(
+      generateTrackedNonTaskTextInOpenCodeSession(
+        {
+          surface: NON_TASK_INFERENCE_SURFACES.fastAgentQuestionAnswering,
+          prompt: 'Consult advisor and judge.',
+          modelRole: 'orchestration',
+          taskId: 'task-1',
+          userId: 'user-1',
+        },
+        {},
+        {
+          directory: '/tmp/roomote-fast-usage-test',
+          tools: { '*': false, task: true },
+          onSubagentSessionReady: vi.fn(),
+          permission: FAST_AGENT_SESSION_PERMISSIONS,
+          promptOnlySubagents: true,
+        },
+      ),
+    ).resolves.toBe('Fast turn complete');
+
+    const usageCalls = recordLlmUsageMock.mock.calls.map(([input]) => input);
+    const callsByEventKey = new Map<string, typeof usageCalls>();
+    for (const input of usageCalls) {
+      const eventKey = input.eventKey as string;
+      callsByEventKey.set(eventKey, [
+        ...(callsByEventKey.get(eventKey) ?? []),
+        input,
+      ]);
+    }
+    expect([...callsByEventKey.keys()].sort()).toEqual(
+      [
+        'non-task:fast_agent:advisor-session-1:advisor-message-1',
+        'non-task:fast_agent:judge-session-1:judge-message-1',
+        'non-task:fast_agent:session-1:fast-message-final',
+        'non-task:fast_agent:session-1:fast-message-intermediate',
+      ].sort(),
+    );
+    expect(
+      callsByEventKey.get(
+        'non-task:fast_agent:advisor-session-1:advisor-message-1',
+      ),
+    ).toHaveLength(3);
+    expect(
+      usageCalls.every(
+        (input) =>
+          input.source === 'fast_agent' &&
+          input.taskId === 'task-1' &&
+          input.userId === 'user-1' &&
+          input.providerId === 'openrouter' &&
+          input.modelId === 'anthropic/claude-fable-5',
+      ),
+    ).toBe(true);
+    expect(
+      callsByEventKey.get(
+        'non-task:fast_agent:judge-session-1:judge-message-1',
+      )?.[0],
+    ).toMatchObject({
+      agent: 'judge',
+      costMicroUsd: 3_000,
+      reasoningTokens: 2,
+      cacheReadTokens: 3,
+      cacheWriteTokens: 1,
+    });
   });
 
   it('records completed Fast OpenCode usage with a stable event key', async () => {

@@ -23,6 +23,7 @@ import {
 
 const DEFAULT_OPENCODE_STRUCTURED_OUTPUT_RETRY_COUNT = 2;
 const NON_TASK_SESSION_ABORT_TIMEOUT_MS = 5_000;
+const NON_TASK_USAGE_RECONCILIATION_PAGE_SIZE = 100;
 type NonTaskModelRuntimeEnv = Partial<Record<string, string | undefined>>;
 
 /**
@@ -274,9 +275,14 @@ function openCodeTimestampToDate(value: unknown): Date | undefined {
   return Number.isNaN(date.getTime()) ? undefined : date;
 }
 
+// OpenCode 1.18.10 assistant-message and step-finish events do not expose the
+// upstream provider request/generation ID. Add it to usage details when the
+// SDK surfaces that identifier so OpenRouter rows can be reconciled exactly.
 type NonTaskOpenCodeMessageInfo = {
   id?: unknown;
   sessionID?: unknown;
+  role?: unknown;
+  parentID?: unknown;
   providerID?: unknown;
   modelID?: unknown;
   agent?: unknown;
@@ -298,6 +304,15 @@ type NonTaskOpenCodeMessageInfo = {
     };
   };
 };
+
+function isCompletedAssistantMessage(
+  info: NonTaskOpenCodeMessageInfo,
+): boolean {
+  return (
+    info.role === 'assistant' &&
+    openCodeTimestampToDate(info.time?.completed) !== undefined
+  );
+}
 
 async function recordNonTaskOpenCodeUsage(
   params: GenerateTrackedNonTaskBaseParams,
@@ -795,6 +810,8 @@ async function runNonTaskSdkPrompt(
       }
     }
     await options.onSessionReady?.(sessionId);
+    const usageSessionIds = new Set([sessionId]);
+    const promptStartedAt = Date.now();
 
     const eventAbortController = new AbortController();
     const abortEventMonitor = () => {
@@ -825,8 +842,9 @@ async function runNonTaskSdkPrompt(
               if (
                 (event.type === 'session.created' ||
                   event.type === 'session.updated') &&
-                event.properties.info.parentID === sessionId
+                usageSessionIds.has(event.properties.info.parentID ?? '')
               ) {
+                usageSessionIds.add(event.properties.sessionID);
                 try {
                   await options.onSubagentSessionReady?.(
                     event.properties.sessionID,
@@ -834,6 +852,14 @@ async function runNonTaskSdkPrompt(
                 } catch (error) {
                   rejectSessionError(error);
                   return;
+                }
+              } else if (event.type === 'message.updated') {
+                const info = event.properties.info;
+                if (
+                  usageSessionIds.has(info.sessionID) &&
+                  isCompletedAssistantMessage(info)
+                ) {
+                  await recordNonTaskOpenCodeUsage(params, model, info);
                 }
               } else if (
                 event.type === 'session.status' &&
@@ -951,6 +977,72 @@ async function runNonTaskSdkPrompt(
       }
 
       await recordNonTaskOpenCodeUsage(params, model, promptResult.data.info);
+
+      if (options.onSubagentSessionReady) {
+        try {
+          const childResult = await client.session.children({
+            sessionID: sessionId,
+            directory: sessionDirectory,
+          });
+          if (childResult.error || !childResult.data) {
+            throw new Error(formatOpenCodeSdkError(childResult.error));
+          }
+          for (const child of childResult.data) {
+            if (
+              asFiniteNumber(child.time?.updated) !== undefined &&
+              Number(child.time.updated) >= promptStartedAt
+            ) {
+              usageSessionIds.add(child.id);
+            }
+          }
+
+          for (const usageSessionId of usageSessionIds) {
+            let before: string | undefined;
+            do {
+              const messagesResult = await client.session.messages({
+                sessionID: usageSessionId,
+                directory: sessionDirectory,
+                limit: NON_TASK_USAGE_RECONCILIATION_PAGE_SIZE,
+                ...(before ? { before } : {}),
+              });
+              if (messagesResult.error || !messagesResult.data) {
+                throw new Error(formatOpenCodeSdkError(messagesResult.error));
+              }
+
+              const messages = messagesResult.data;
+              for (const message of messages) {
+                if (
+                  isCompletedAssistantMessage(message.info) &&
+                  asFiniteNumber(message.info.time?.created) !== undefined &&
+                  Number(message.info.time?.created) >= promptStartedAt
+                ) {
+                  await recordNonTaskOpenCodeUsage(params, model, message.info);
+                }
+              }
+
+              const oldestMessageCreatedAt = Math.min(
+                ...messages
+                  .map((message) => asFiniteNumber(message.info.time?.created))
+                  .filter((value): value is number => value !== undefined),
+              );
+              if (
+                messages.length === 0 ||
+                oldestMessageCreatedAt < promptStartedAt
+              ) {
+                break;
+              }
+
+              before =
+                messagesResult.response.headers.get('x-next-cursor') ??
+                undefined;
+            } while (before);
+          }
+        } catch (error) {
+          console.warn(
+            `[NonTaskProviderUsage] Failed to reconcile OpenCode usage for ${params.surface}: ${formatOpenCodeSdkError(error)}`,
+          );
+        }
+      }
 
       return promptResult.data;
     } catch (error) {
