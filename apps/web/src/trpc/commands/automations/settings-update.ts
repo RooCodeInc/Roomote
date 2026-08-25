@@ -493,8 +493,10 @@ export async function updateBackgroundAgentSettingsCommand(
   const requiresSlackInstallation =
     channelAutoStartRequiresSlackInstallation ||
     Boolean(managerSlackChannel) ||
-    destinationDescriptors.some((descriptor) =>
-      Boolean(submittedDestinations[descriptor.automationId].slackChannel),
+    destinationDescriptors.some(
+      (descriptor) =>
+        input.savingAutomation === descriptor.automationId &&
+        Boolean(submittedDestinations[descriptor.automationId].slackChannel),
     );
 
   const slackInstallation = requiresSlackInstallation
@@ -919,6 +921,7 @@ export async function updateBackgroundAgentSettingsCommand(
   const sharedManagerChannelId =
     managerChannelResult.channelId ?? managerDiscordChannelResult.channelId;
   const managerChannelAutomationValidations: Array<{
+    automationId: UpdateBackgroundAgentSettingsInput['savingAutomation'];
     key: TriggerableBackgroundAutomationKey;
     frequency: string;
     channelId: string | null;
@@ -937,6 +940,7 @@ export async function updateBackgroundAgentSettingsCommand(
     // A per-automation Discord destination satisfies the channel requirement
     // just like a per-automation Slack channel does.
     {
+      automationId: 'suggester',
       key: 'suggester',
       frequency: effectiveSuggesterFrequency,
       channelId:
@@ -948,6 +952,7 @@ export async function updateBackgroundAgentSettingsCommand(
       field: 'suggesterSlackChannel',
     },
     {
+      automationId: 'announcer',
       key: 'announcer',
       frequency: effectiveAnnouncerFrequency,
       channelId:
@@ -955,6 +960,7 @@ export async function updateBackgroundAgentSettingsCommand(
       field: 'announcerSlackChannel',
     },
     {
+      automationId: 'managerStats',
       key: 'manager_stats',
       frequency: effectiveManagerStatsFrequency,
       channelId:
@@ -963,15 +969,14 @@ export async function updateBackgroundAgentSettingsCommand(
       field: 'managerStatsSlackChannel',
     },
     {
+      automationId: 'providerUsageLimit',
       key: 'provider_usage_limit',
-      frequency:
-        input.savingAutomation === 'providerUsageLimit'
-          ? providerUsageLimitFrequency
-          : 'off',
+      frequency: providerUsageLimitFrequency,
       channelId: providerUsageLimitChannelResult.channelId,
       field: 'providerUsageLimitSlackChannel',
     },
     {
+      automationId: 'sentryTriage',
       key: 'sentry_triage',
       frequency: sentryTriageFrequency,
       channelId:
@@ -980,6 +985,7 @@ export async function updateBackgroundAgentSettingsCommand(
       field: 'sentryTriageSlackChannel',
     },
     {
+      automationId: 'dependabotTriage',
       key: 'dependabot_triage',
       frequency: dependabotTriageFrequency,
       channelId:
@@ -988,6 +994,7 @@ export async function updateBackgroundAgentSettingsCommand(
       field: 'dependabotTriageSlackChannel',
     },
     {
+      automationId: 'codeqlTriage',
       key: 'codeql_triage',
       frequency: codeqlTriageFrequency,
       channelId:
@@ -996,6 +1003,7 @@ export async function updateBackgroundAgentSettingsCommand(
       field: 'codeqlTriageSlackChannel',
     },
     {
+      automationId: 'securityAuditor',
       key: 'security_auditor',
       frequency: securityAuditorFrequency,
       channelId:
@@ -1004,6 +1012,7 @@ export async function updateBackgroundAgentSettingsCommand(
       field: 'securityAuditorSlackChannel',
     },
     {
+      automationId: 'codeQualityAuditor',
       key: 'code_quality_auditor',
       frequency: codeQualityAuditorFrequency,
       channelId:
@@ -1012,6 +1021,7 @@ export async function updateBackgroundAgentSettingsCommand(
       field: 'codeQualityAuditorSlackChannel',
     },
     {
+      automationId: 'ciFailureTriage',
       key: 'ci_failure_triage',
       frequency: ciFailureTriageFrequency,
       channelId:
@@ -1022,7 +1032,10 @@ export async function updateBackgroundAgentSettingsCommand(
   ];
 
   for (const validation of managerChannelAutomationValidations) {
-    if (validation.frequency === 'off') {
+    if (
+      input.savingAutomation !== validation.automationId ||
+      validation.frequency === 'off'
+    ) {
       continue;
     }
 
@@ -1069,6 +1082,7 @@ export async function updateBackgroundAgentSettingsCommand(
   }
 
   if (
+    input.savingAutomation === 'sentryTriage' &&
     sentryTriageFrequency !== 'off' &&
     !(await hasActiveSentryIntegration())
   ) {
@@ -1078,6 +1092,7 @@ export async function updateBackgroundAgentSettingsCommand(
   }
 
   if (
+    input.savingAutomation === 'dependabotTriage' &&
     dependabotTriageFrequency !== 'off' &&
     !(await hasActiveGitHubInstallation())
   ) {
@@ -1086,13 +1101,18 @@ export async function updateBackgroundAgentSettingsCommand(
       'Connect GitHub before enabling Triage Dependabot Alerts.';
   }
 
-  if (dependabotTriageFrequency !== 'off' && !(await hasActiveRepository())) {
+  if (
+    input.savingAutomation === 'dependabotTriage' &&
+    dependabotTriageFrequency !== 'off' &&
+    !(await hasActiveRepository())
+  ) {
     fieldErrors.general =
       fieldErrors.general ||
       'Add at least one active repository before enabling Triage Dependabot Alerts.';
   }
 
   if (
+    input.savingAutomation === 'codeqlTriage' &&
     codeqlTriageFrequency !== 'off' &&
     !(await hasActiveGitHubInstallation())
   ) {
@@ -1101,7 +1121,11 @@ export async function updateBackgroundAgentSettingsCommand(
       'Connect GitHub before enabling Triage CodeQL Alerts.';
   }
 
-  if (codeqlTriageFrequency !== 'off' && !(await hasActiveRepository())) {
+  if (
+    input.savingAutomation === 'codeqlTriage' &&
+    codeqlTriageFrequency !== 'off' &&
+    !(await hasActiveRepository())
+  ) {
     fieldErrors.general =
       fieldErrors.general ||
       'Add at least one active repository before enabling Triage CodeQL Alerts.';
@@ -1112,6 +1136,7 @@ export async function updateBackgroundAgentSettingsCommand(
       ?.supportedSourceControlProviders ?? [];
 
   if (
+    input.savingAutomation === 'issueFixer' &&
     issueFixerFrequency !== 'off' &&
     !(await hasActiveRepository(issueFixerProviders))
   ) {
