@@ -1,5 +1,8 @@
 import { TRPCClientError } from '@trpc/client';
-import { enqueueTask } from '@roomote/cloud-agents/server';
+import {
+  enqueueTask,
+  SnapshotResumeAlreadyExistsError,
+} from '@roomote/cloud-agents/server';
 import {
   notifyFastAgentParentOnPrFeedback,
   withSandboxServerRpcClient,
@@ -593,18 +596,30 @@ async function resumeTaskFromSnapshot({
 
   // Resumes never create tasks and never re-attribute; the follow-up sender
   // becomes the new run's acting user.
-  const resumeLaunch = await enqueueTask(
-    {
-      task: {
-        type: TaskPayloadKind.SnapshotResume,
-        sourceSnapshotId: sourceRun.snapshotId,
-        sourceRunId: sourceRun.id,
-        payload,
+  let resumeLaunch: Awaited<ReturnType<typeof enqueueTask>>;
+  try {
+    resumeLaunch = await enqueueTask(
+      {
+        task: {
+          type: TaskPayloadKind.SnapshotResume,
+          sourceSnapshotId: sourceRun.snapshotId,
+          sourceRunId: sourceRun.id,
+          payload,
+        },
+        actingUserId: userId,
       },
-      actingUserId: userId,
-    },
-    {},
-  );
+      {},
+    );
+  } catch (error) {
+    if (error instanceof SnapshotResumeAlreadyExistsError) {
+      return {
+        success: false,
+        error: 'Task continuation is already in progress. Try again shortly.',
+        status: 409,
+      };
+    }
+    throw error;
+  }
 
   await maybeCreateSlackReplyQuoteContext({
     runId: resumeLaunch.id,
