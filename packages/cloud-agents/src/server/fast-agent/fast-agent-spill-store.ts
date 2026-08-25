@@ -276,16 +276,20 @@ export class FastAgentSpillStore {
   async writeForConversation(
     conversationId: string,
     content: string,
+    isActive: () => boolean = () => true,
   ): Promise<FastAgentSpillWriteResult> {
     await this.ready;
     await this.cleanupExpired();
-    return this.writeForConversationInternal(conversationId, content);
+    if (!isActive()) throw new Error('Fast turn is no longer active.');
+    return this.writeForConversationInternal(conversationId, content, isActive);
   }
 
   private async writeForConversationInternal(
     conversationId: string,
     content: string,
+    isActive: () => boolean = () => true,
   ): Promise<FastAgentSpillWriteResult> {
+    if (!isActive()) throw new Error('Fast turn is no longer active.');
     const buffer = Buffer.from(content, 'utf8');
     if (buffer.length > this.fileQuotaBytes) {
       return { stored: false, byteLength: buffer.length, reason: 'file_quota' };
@@ -349,6 +353,13 @@ export class FastAgentSpillStore {
       throw error;
     }
 
+    if (!isActive()) {
+      if (!conversation.closed) {
+        this.releaseReservation(conversation, buffer.length);
+      }
+      await rm(filePath, { force: true });
+      throw new Error('Fast turn is no longer active.');
+    }
     if (conversation.closed) {
       await rm(filePath, { force: true });
       return {

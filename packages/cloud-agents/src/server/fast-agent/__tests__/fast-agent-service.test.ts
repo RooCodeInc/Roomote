@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   getUserIdentity: vi.fn(),
   bindExecutor: vi.fn(),
   bindMcpExecutor: vi.fn(),
+  revokeMcpCapabilities: vi.fn(),
   nativeExecutor: undefined as
     | ((call: {
         agent?: string;
@@ -110,6 +111,7 @@ vi.mock('../fast-agent-native-tool-bridge', () => ({
   bindFastAgentNativeToolExecutor: mocks.bindExecutor,
   createFastAgentSpillTurnBudget: () => ({ calls: 0, outputBytes: 0 }),
   bindFastAgentMcpToolExecutor: mocks.bindMcpExecutor,
+  revokeFastAgentMcpCapabilitiesForConversation: mocks.revokeMcpCapabilities,
 }));
 
 vi.mock('../fast-agent-integration-broker', () => ({

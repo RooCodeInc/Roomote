@@ -15,6 +15,7 @@ import {
   FAST_AGENT_SUBAGENT_TOOL_FILTER,
   formatFastAgentMcpResultForModel,
   getFastAgentNativeToolRuntime,
+  revokeFastAgentMcpCapabilitiesForConversation,
   shouldSpillFastAgentModelOutput,
 } from '../fast-agent-native-tool-bridge';
 import {
@@ -351,6 +352,116 @@ describe('Fast native OpenCode tool bridge', () => {
     } finally {
       unbindParent();
       unbindMcp();
+    }
+  });
+
+  it('revokes an in-flight MCP completion before it can recreate spill state', async () => {
+    const conversationId = 'mcp-revocation-conversation';
+    const integration = {
+      id: 'github',
+      name: 'GitHub',
+      description: 'Repository access',
+      tools: [{ name: 'search_code' }],
+    };
+    const runtime = await getFastAgentNativeToolRuntime(conversationId, [
+      integration,
+    ]);
+    const config = JSON.parse(
+      await readFile(join(runtime.directory, 'opencode.json'), 'utf8'),
+    ) as {
+      mcp: Record<string, { url: string; headers: Record<string, string> }>;
+    };
+    let resolveExecutor!: (value: unknown) => void;
+    let markExecutorStarted!: () => void;
+    const executorStarted = new Promise<void>((resolve) => {
+      markExecutorStarted = resolve;
+    });
+    const pendingResult = new Promise<unknown>((resolve) => {
+      resolveExecutor = resolve;
+    });
+    const staleUnbind = bindFastAgentMcpToolExecutor(
+      runtime.mcpCapability,
+      async () => {
+        markExecutorStarted();
+        return pendingResult;
+      },
+    );
+    const writeSpy = vi.spyOn(fastAgentSpillStore, 'writeForConversation');
+
+    try {
+      const staleCall = callMcpTool({
+        url: config.mcp.github!.url,
+        headers: config.mcp.github!.headers,
+        toolName: 'search_code',
+        args: {},
+      });
+      const staleExpectation = expect(staleCall).rejects.toThrow(
+        'Fast turn is no longer active.',
+      );
+      await executorStarted;
+
+      revokeFastAgentMcpCapabilitiesForConversation(conversationId);
+      await fastAgentSpillStore.cleanupConversation(conversationId);
+      staleUnbind();
+      resolveExecutor({ text: 'stale output '.repeat(6_000) });
+
+      await staleExpectation;
+      expect(writeSpy).not.toHaveBeenCalled();
+
+      const freshRuntime = await getFastAgentNativeToolRuntime(conversationId, [
+        integration,
+      ]);
+      const freshUnbind = bindFastAgentMcpToolExecutor(
+        freshRuntime.mcpCapability,
+        async () => ({ text: 'fresh output '.repeat(6_000) }),
+      );
+      const parentSessionId = 'mcp-revocation-fresh-parent';
+      const unbindParent = bindFastAgentNativeToolExecutor(
+        parentSessionId,
+        conversationId,
+        async () => null,
+        { allowSpillRecovery: true },
+      );
+      try {
+        const descriptor = (await callMcpTool({
+          url: config.mcp.github!.url,
+          headers: config.mcp.github!.headers,
+          toolName: 'search_code',
+          args: {},
+        })) as { spill: { handle: string }; truncated: boolean };
+        expect(descriptor).toMatchObject({
+          truncated: true,
+          spill: { handle: expect.any(String) },
+        });
+        expect(writeSpy).toHaveBeenCalledOnce();
+
+        const response = await fetch(
+          freshRuntime.env.ROOMOTE_FAST_TOOL_BRIDGE_URL!,
+          {
+            method: 'POST',
+            headers: {
+              authorization: `Bearer ${freshRuntime.env.ROOMOTE_FAST_TOOL_BRIDGE_TOKEN}`,
+              'content-type': 'application/json',
+            },
+            body: JSON.stringify({
+              sessionID: parentSessionId,
+              tool: FAST_AGENT_NATIVE_TOOL_NAMES.spillGrep,
+              args: { handle: descriptor.spill.handle, query: 'fresh output' },
+            }),
+          },
+        ).then((result) => result.json());
+        expect(JSON.parse(response.output)).toMatchObject({
+          success: true,
+          result: { matches: expect.any(Array) },
+        });
+      } finally {
+        unbindParent();
+        freshUnbind();
+      }
+    } finally {
+      writeSpy.mockRestore();
+      revokeFastAgentMcpCapabilitiesForConversation(conversationId);
+      await fastAgentSpillStore.cleanupConversation(conversationId);
     }
   });
 

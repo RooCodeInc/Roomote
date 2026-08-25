@@ -3,6 +3,7 @@ import {
   type NonTaskOpenCodeSession,
 } from '../non-task-provider-usage';
 import { getOpenCodeSdkServerIdleTtlMs } from '../opencode-runtime';
+import { revokeFastAgentMcpCapabilitiesForConversation } from './fast-agent-native-tool-bridge';
 import { fastAgentSpillStore } from './fast-agent-spill-store';
 
 const DEFAULT_FAST_AGENT_OPENCODE_SESSION_LIMIT = 250;
@@ -52,8 +53,10 @@ export class FastAgentOpenCodeSessionManager {
     this.now = options.now ?? Date.now;
     this.onConversationEnd =
       options.onConversationEnd ??
-      ((conversationId) =>
-        fastAgentSpillStore.cleanupConversation(conversationId));
+      (async (conversationId) => {
+        revokeFastAgentMcpCapabilitiesForConversation(conversationId);
+        await fastAgentSpillStore.cleanupConversation(conversationId);
+      });
   }
 
   async run<T>({

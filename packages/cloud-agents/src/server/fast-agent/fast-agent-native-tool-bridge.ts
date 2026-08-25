@@ -80,7 +80,9 @@ type FastAgentMcpToolExecutor = (
 
 type FastAgentMcpCapability = {
   conversationId: string;
+  generation: number;
   integrations: FastAgentIntegration[];
+  revoked: boolean;
   executor?: FastAgentMcpToolExecutor;
 };
 
@@ -366,6 +368,7 @@ function serializeWithinOutputBudget(value: unknown): string {
 async function buildSpillOutput(
   owner: { conversationId: string } | { sessionId: string },
   serialized: string,
+  isActive: () => boolean = () => true,
 ): Promise<FastAgentBridgeOutput> {
   const spill =
     'sessionId' in owner
@@ -373,6 +376,7 @@ async function buildSpillOutput(
       : await fastAgentSpillStore.writeForConversation(
           owner.conversationId,
           serialized,
+          isActive,
         );
   let previewBytes = FAST_AGENT_NATIVE_TOOL_PREVIEW_LIMIT_BYTES;
 
@@ -510,16 +514,37 @@ function resolveZodDirectoryForTools(): string {
 export async function formatFastAgentMcpResultForModel(
   conversationId: string,
   result: unknown,
+  isActive: () => boolean = () => true,
 ): Promise<string> {
   try {
+    assertFastTurnActive(isActive);
     const serialized = JSON.stringify(result ?? null) ?? String(result);
     if (!shouldSpillFastAgentModelOutput(serialized)) {
+      assertFastTurnActive(isActive);
       return serialized;
     }
-    return (await buildSpillOutput({ conversationId }, serialized)).output;
-  } catch {
+    const output = (
+      await buildSpillOutput({ conversationId }, serialized, isActive)
+    ).output;
+    assertFastTurnActive(isActive);
+    return output;
+  } catch (error) {
+    if (!isActive() || error instanceof FastAgentTurnInactiveError) {
+      throw new FastAgentTurnInactiveError();
+    }
     return '[Unserializable Fast MCP result]';
   }
+}
+
+class FastAgentTurnInactiveError extends Error {
+  constructor() {
+    super('Fast turn is no longer active.');
+    this.name = 'FastAgentTurnInactiveError';
+  }
+}
+
+function assertFastTurnActive(isActive: () => boolean): void {
+  if (!isActive()) throw new FastAgentTurnInactiveError();
 }
 
 async function handleMcpRequest(
@@ -551,14 +576,19 @@ async function handleMcpRequest(
     })),
   }));
   server.setRequestHandler(CallToolRequestSchema, async ({ params }) => {
-    if (!capability.executor) {
-      throw new Error('The Fast turn is no longer active.');
-    }
-    const result = await capability.executor({
+    const executor = capability.executor;
+    const generation = capability.generation;
+    const isActive = () =>
+      !capability.revoked &&
+      capability.generation === generation &&
+      capability.executor === executor;
+    if (!executor || !isActive()) throw new FastAgentTurnInactiveError();
+    const result = await executor({
       integrationId,
       toolName: params.name,
       args: params.arguments ?? {},
     });
+    assertFastTurnActive(isActive);
     return {
       content: [
         {
@@ -566,6 +596,7 @@ async function handleMcpRequest(
           text: await formatFastAgentMcpResultForModel(
             capability.conversationId,
             result,
+            isActive,
           ),
         },
       ],
@@ -785,6 +816,8 @@ function pruneSessionRuntimes(): void {
     if (!removable) return;
     const [sessionId, runtime] = removable;
     sessionRuntimes.delete(sessionId);
+    const capability = mcpCapabilities.get(runtime.mcpCapability);
+    if (capability) revokeFastAgentMcpCapability(capability);
     mcpCapabilities.delete(runtime.mcpCapability);
     rmSync(runtime.directory, { recursive: true, force: true });
   }
@@ -809,9 +842,13 @@ export async function getFastAgentNativeToolRuntime(
     sessionRuntimes.set(sessionId, runtime);
   }
 
+  const previousCapability = mcpCapabilities.get(runtime.mcpCapability);
+  if (previousCapability) revokeFastAgentMcpCapability(previousCapability);
   mcpCapabilities.set(runtime.mcpCapability, {
     conversationId: sessionId,
+    generation: 0,
     integrations,
+    revoked: false,
   });
   pruneSessionRuntimes();
   writeFileSync(
@@ -846,13 +883,37 @@ export function bindFastAgentMcpToolExecutor(
   if (capability.executor && capability.executor !== executor) {
     throw new Error('The Fast MCP session already has an active turn.');
   }
+  capability.generation += 1;
+  capability.revoked = false;
   capability.executor = executor;
+  const generation = capability.generation;
   return () => {
-    if (capability.executor === executor) {
-      capability.executor = undefined;
+    if (
+      capability.executor === executor &&
+      capability.generation === generation
+    ) {
+      revokeFastAgentMcpCapability(capability);
       mcpCapabilities.delete(capabilityId);
     }
   };
+}
+
+function revokeFastAgentMcpCapability(
+  capability: FastAgentMcpCapability,
+): void {
+  capability.revoked = true;
+  capability.generation += 1;
+  capability.executor = undefined;
+}
+
+export function revokeFastAgentMcpCapabilitiesForConversation(
+  conversationId: string,
+): void {
+  for (const [capabilityId, capability] of mcpCapabilities) {
+    if (capability.conversationId !== conversationId) continue;
+    revokeFastAgentMcpCapability(capability);
+    mcpCapabilities.delete(capabilityId);
+  }
 }
 
 export function bindFastAgentNativeToolExecutor(
