@@ -826,7 +826,6 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
           integrationId: 'roomote',
           toolName: 'get_chat_message_context',
           arguments: {
-            channel: 'C123',
             messageId: '1710000000.000100',
           },
         });
@@ -856,7 +855,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         integrationId: 'roomote',
         toolName: 'get_chat_message_context',
         args: {
-          channel: 'C123',
+          channel: 'channel-1',
           messageId: '1710000000.000100',
           provider: 'slack',
         },
@@ -892,7 +891,6 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
             integrationId: 'roomote',
             toolName: 'get_chat_channel_messages',
             arguments: {
-              channel: 'C123',
               ...(latest ? { latest } : {}),
             },
           });
@@ -917,7 +915,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
           integrationId: 'roomote',
           toolName: 'get_chat_channel_messages',
           args: {
-            channel: 'C123',
+            channel: 'channel-1',
             ...(latest ? { latest } : {}),
             oldest: expectedOldest,
             provider: 'slack',
@@ -926,6 +924,78 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       );
     },
   );
+
+  it('defaults Discord Roomote MCP lookups to the current thread', async () => {
+    mocks.listIntegrations.mockResolvedValue([
+      {
+        id: 'roomote',
+        name: 'Roomote',
+        description: 'Manage Roomote',
+        tools: [
+          { name: 'get_chat_message_context' },
+          { name: 'get_chat_channel_messages' },
+        ],
+      },
+    ]);
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'ack',
+          message: 'I’ll inspect that.',
+        });
+        await invokeTool(nativeToolNames.integrationCall, {
+          integrationId: 'roomote',
+          toolName: 'get_chat_message_context',
+          arguments: { messageId: 'message-1' },
+        });
+        await invokeTool(nativeToolNames.integrationCall, {
+          integrationId: 'roomote',
+          toolName: 'get_chat_channel_messages',
+          arguments: {},
+        });
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'closeout',
+          message: 'I found the context.',
+        });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({
+      ...baseParams,
+      conversation: {
+        surface: 'discord',
+        workspaceId: 'guild-1',
+        conversationId: 'thread-1',
+        replyTarget: { channelId: 'channel-1', threadId: 'thread-1' },
+      },
+      adapter: callbacks(),
+    });
+
+    expect(mocks.callIntegration).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.any(Array),
+      {
+        integrationId: 'roomote',
+        toolName: 'get_chat_message_context',
+        args: {
+          channel: 'thread-1',
+          messageId: 'message-1',
+          provider: 'discord',
+        },
+      },
+    );
+    expect(mocks.callIntegration).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.any(Array),
+      {
+        integrationId: 'roomote',
+        toolName: 'get_chat_channel_messages',
+        args: { channel: 'thread-1', provider: 'discord' },
+      },
+    );
+  });
 
   it('lets the Fast parent manage custom automations through integration_call', async () => {
     const resolveMcpServerConfigs = vi.fn(async () => ({}));

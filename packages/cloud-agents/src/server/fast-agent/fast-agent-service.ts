@@ -935,9 +935,26 @@ export async function answerFastAgentQuestion({
                     ),
                   }
                 : args.arguments;
+            const currentChatChannel =
+              conversation.surface === 'slack'
+                ? conversation.replyTarget.channelId
+                : conversation.surface === 'discord'
+                  ? (conversation.replyTarget.threadId ??
+                    conversation.replyTarget.channelId)
+                  : undefined;
+            const chatLookupArguments =
+              chatLookupProvider &&
+              currentChatChannel &&
+              (typeof integrationArguments.channel !== 'string' ||
+                integrationArguments.channel.trim().length === 0) &&
+              (args.toolName !== CHAT_MESSAGE_CONTEXT_TOOL.name ||
+                typeof integrationArguments.messageLink !== 'string' ||
+                integrationArguments.messageLink.trim().length === 0)
+                ? { ...integrationArguments, channel: currentChatChannel }
+                : integrationArguments;
             const actorScopedIntegrationArguments = chatLookupProvider
-              ? { ...integrationArguments, provider: chatLookupProvider }
-              : integrationArguments;
+              ? { ...chatLookupArguments, provider: chatLookupProvider }
+              : chatLookupArguments;
             const managesCustomAutomations =
               args.integrationId === ROOMOTE_MCP_ID &&
               args.toolName === MANAGE_CUSTOM_AUTOMATIONS_TOOL.name;
