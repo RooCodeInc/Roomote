@@ -3,24 +3,22 @@ import { join } from 'node:path';
 import { ALL_REPOSITORIES } from '@roomote/types';
 
 import {
+  bindFastAgentMcpToolExecutor,
   bindFastAgentNativeToolExecutor,
   FAST_AGENT_NATIVE_TOOL_FILTER,
   FAST_AGENT_NATIVE_TOOL_NAMES,
   FAST_AGENT_SUBAGENT_TOOL_FILTER,
   getFastAgentNativeToolRuntime,
 } from '../fast-agent-native-tool-bridge';
+import { callMcpTool, listMcpTools } from '../../mcp-tool-client';
 
 describe('Fast native OpenCode tool bridge', () => {
   it('installs Fast tools in an isolated OpenCode session directory', async () => {
-    const runtime = await getFastAgentNativeToolRuntime();
+    const runtime = await getFastAgentNativeToolRuntime('native-files', []);
     const toolsDirectory = join(runtime.directory, '.opencode', 'tools');
     const installedToolFiles = await readdir(toolsDirectory);
     const replySource = await readFile(
       join(toolsDirectory, 'send_chat_reply.js'),
-      'utf8',
-    );
-    const integrationSource = await readFile(
-      join(toolsDirectory, 'integration_call.js'),
       'utf8',
     );
     const launchTaskSource = await readFile(
@@ -39,8 +37,6 @@ describe('Fast native OpenCode tool bridge', () => {
     );
     expect(replySource).toContain('export default {');
     expect(replySource).toContain('invoke("send_chat_reply"');
-    expect(integrationSource).toContain('export default {');
-    expect(integrationSource).toContain('invoke("integration_call"');
     expect(launchTaskSource).toContain('model: z.string().min(1)');
     expect(launchTaskSource).toContain('deployment-enabled model ID');
     expect(launchTaskSource).toContain(ALL_REPOSITORIES);
@@ -51,6 +47,7 @@ describe('Fast native OpenCode tool bridge', () => {
       expect.arrayContaining([
         'get_chat_channel_messages.js',
         'get_chat_message_context.js',
+        'integration_call.js',
         'manage_tasks.js',
       ]),
     );
@@ -61,11 +58,11 @@ describe('Fast native OpenCode tool bridge', () => {
       '*': false,
       task: true,
       [FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReply]: true,
-      [FAST_AGENT_NATIVE_TOOL_NAMES.integrationCall]: true,
     });
-    expect(FAST_AGENT_SUBAGENT_TOOL_FILTER).toEqual({
-      '*': false,
-      [FAST_AGENT_NATIVE_TOOL_NAMES.integrationCall]: true,
+    expect(FAST_AGENT_SUBAGENT_TOOL_FILTER).toMatchObject({
+      '*': true,
+      task: false,
+      roomote_manage_custom_automations: false,
     });
     for (const parentOnlyTool of [
       FAST_AGENT_NATIVE_TOOL_NAMES.cancelTask,
@@ -80,8 +77,77 @@ describe('Fast native OpenCode tool bridge', () => {
     }
   });
 
+  it('mounts actor-resolved MCP tools with their native JSON schemas', async () => {
+    const inputSchema = {
+      type: 'object' as const,
+      properties: {
+        query: { type: 'string', minLength: 2 },
+        filters: {
+          oneOf: [
+            { type: 'array', items: { type: 'string' } },
+            { type: 'null' },
+          ],
+        },
+      },
+      required: ['query'],
+      additionalProperties: false,
+    };
+    const runtime = await getFastAgentNativeToolRuntime('native-mcp', [
+      {
+        id: 'github',
+        name: 'GitHub',
+        description: 'Repository access',
+        tools: [
+          { name: 'search_code', description: 'Search code', inputSchema },
+        ],
+      },
+    ]);
+    const config = JSON.parse(
+      await readFile(join(runtime.directory, 'opencode.json'), 'utf8'),
+    ) as {
+      mcp: Record<string, { url: string; headers: Record<string, string> }>;
+    };
+    const executor = vi.fn(async ({ args }) => ({ matches: [args.query] }));
+    expect(config.mcp.github!.headers.Authorization).toBe(
+      `Bearer ${runtime.mcpCapability}`,
+    );
+    expect(config.mcp.github!.headers.Authorization).not.toContain(
+      runtime.env.ROOMOTE_FAST_TOOL_BRIDGE_TOKEN,
+    );
+    const unbind = bindFastAgentMcpToolExecutor(
+      runtime.mcpCapability,
+      executor,
+    );
+
+    try {
+      await expect(
+        listMcpTools({
+          url: config.mcp.github!.url,
+          headers: config.mcp.github!.headers,
+        }),
+      ).resolves.toEqual([
+        { name: 'search_code', description: 'Search code', inputSchema },
+      ]);
+      await expect(
+        callMcpTool({
+          url: config.mcp.github!.url,
+          headers: config.mcp.github!.headers,
+          toolName: 'search_code',
+          args: { query: 'Fast', filters: null },
+        }),
+      ).resolves.toEqual({ matches: ['Fast'] });
+      expect(executor).toHaveBeenCalledWith({
+        integrationId: 'github',
+        toolName: 'search_code',
+        args: { query: 'Fast', filters: null },
+      });
+    } finally {
+      unbind();
+    }
+  });
+
   it('routes raw JSON arguments and results by OpenCode session id', async () => {
-    const runtime = await getFastAgentNativeToolRuntime();
+    const runtime = await getFastAgentNativeToolRuntime('native-route', []);
     const executor = vi.fn(async ({ agent, name, args }) => ({
       agent,
       name,
@@ -103,12 +169,8 @@ describe('Fast native OpenCode tool bridge', () => {
         body: JSON.stringify({
           sessionID: 'opencode-session-1',
           agent: 'judge',
-          tool: FAST_AGENT_NATIVE_TOOL_NAMES.integrationCall,
-          args: {
-            integrationId: 'github',
-            toolName: 'search_code',
-            arguments: { query: 'Fast', nested: { exact: true } },
-          },
+          tool: FAST_AGENT_NATIVE_TOOL_NAMES.ignoreEvent,
+          args: { reason: 'test' },
         }),
       });
 
@@ -117,12 +179,8 @@ describe('Fast native OpenCode tool bridge', () => {
         ok: true,
         result: {
           agent: 'judge',
-          name: FAST_AGENT_NATIVE_TOOL_NAMES.integrationCall,
-          echoed: {
-            integrationId: 'github',
-            toolName: 'search_code',
-            arguments: { query: 'Fast', nested: { exact: true } },
-          },
+          name: FAST_AGENT_NATIVE_TOOL_NAMES.ignoreEvent,
+          echoed: { reason: 'test' },
           nestedResult: { values: [1, 2, 3] },
         },
       });
@@ -135,7 +193,7 @@ describe('Fast native OpenCode tool bridge', () => {
   });
 
   it('does not expose unexpected executor errors through the bridge', async () => {
-    const runtime = await getFastAgentNativeToolRuntime();
+    const runtime = await getFastAgentNativeToolRuntime('native-errors', []);
     const unbind = bindFastAgentNativeToolExecutor(
       'opencode-session-sensitive-error',
       async () => {
@@ -155,7 +213,7 @@ describe('Fast native OpenCode tool bridge', () => {
         },
         body: JSON.stringify({
           sessionID: 'opencode-session-sensitive-error',
-          tool: FAST_AGENT_NATIVE_TOOL_NAMES.integrationCall,
+          tool: FAST_AGENT_NATIVE_TOOL_NAMES.ignoreEvent,
           args: {},
         }),
       });
@@ -176,7 +234,7 @@ describe('Fast native OpenCode tool bridge', () => {
   });
 
   it('rejects unauthenticated and inactive-session calls', async () => {
-    const runtime = await getFastAgentNativeToolRuntime();
+    const runtime = await getFastAgentNativeToolRuntime('native-auth', []);
     const body = JSON.stringify({
       sessionID: 'missing-session',
       tool: FAST_AGENT_NATIVE_TOOL_NAMES.ignoreEvent,

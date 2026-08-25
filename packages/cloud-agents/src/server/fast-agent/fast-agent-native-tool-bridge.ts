@@ -3,11 +3,23 @@ import {
   type IncomingMessage,
   type ServerResponse,
 } from 'node:http';
-import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from 'node:fs';
+import {
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { createRequire } from 'node:module';
+import { Server } from '@modelcontextprotocol/sdk/server/index.js';
+import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
+import {
+  CallToolRequestSchema,
+  ListToolsRequestSchema,
+} from '@modelcontextprotocol/sdk/types.js';
 import { ALL_REPOSITORIES } from '@roomote/types';
 import { z } from 'zod';
 
@@ -15,6 +27,7 @@ import {
   FAST_AGENT_NATIVE_TOOL_NAMES,
   type FastAgentNativeToolName,
 } from './fast-agent-tool-policy';
+import type { FastAgentIntegration } from './fast-agent-integration-broker';
 
 export {
   FAST_AGENT_NATIVE_TOOL_FILTER,
@@ -25,6 +38,7 @@ export type { FastAgentNativeToolName } from './fast-agent-tool-policy';
 
 const FAST_AGENT_TOOL_BRIDGE_BODY_LIMIT_BYTES = 1_000_000;
 const FAST_AGENT_TOOL_BRIDGE_ERROR = 'Fast tool execution failed.';
+const FAST_AGENT_NATIVE_RUNTIME_LIMIT = 250;
 
 export type FastAgentNativeToolCall = {
   agent?: string;
@@ -39,6 +53,28 @@ type FastAgentNativeToolExecutor = (
 type FastAgentNativeToolRuntime = {
   directory: string;
   env: Record<string, string>;
+  mcpCapability: string;
+};
+
+export type FastAgentMcpToolCall = {
+  integrationId: string;
+  toolName: string;
+  args: Record<string, unknown>;
+};
+
+type FastAgentMcpToolExecutor = (
+  call: FastAgentMcpToolCall,
+) => Promise<unknown>;
+
+type FastAgentMcpCapability = {
+  integrations: FastAgentIntegration[];
+  executor?: FastAgentMcpToolExecutor;
+};
+
+type FastAgentNativeToolBridge = {
+  env: Record<string, string>;
+  token: string;
+  url: string;
 };
 
 const bridgeRequestSchema = z.object({
@@ -151,21 +187,6 @@ export default {
 }
 `,
 
-    [FAST_AGENT_NATIVE_TOOL_NAMES.integrationCall]: String.raw`
-import { z } from "zod"
-import { invoke } from "../roomote-fast-tool-bridge.js"
-
-export default {
-  description: "Call one available deployment MCP server tool with its native JSON arguments.",
-  args: {
-    integrationId: z.string().min(1),
-    toolName: z.string().min(1),
-    arguments: z.record(z.string(), z.unknown()),
-  },
-  execute: (args, context) => invoke("integration_call", args, context),
-}
-`,
-
     [FAST_AGENT_NATIVE_TOOL_NAMES.retryTaskStart]: String.raw`
 import { z } from "zod"
 import { invoke } from "../roomote-fast-tool-bridge.js"
@@ -190,7 +211,9 @@ export default {
   };
 
 const activeExecutors = new Map<string, FastAgentNativeToolExecutor>();
-let runtimePromise: Promise<FastAgentNativeToolRuntime> | undefined;
+const mcpCapabilities = new Map<string, FastAgentMcpCapability>();
+const sessionRuntimes = new Map<string, FastAgentNativeToolRuntime>();
+let bridgePromise: Promise<FastAgentNativeToolBridge> | undefined;
 const require = createRequire(import.meta.url);
 
 function writeJson(
@@ -252,34 +275,106 @@ function resolveZodDirectoryForTools(): string {
   }
 }
 
-async function startRuntime(): Promise<FastAgentNativeToolRuntime> {
-  const token = randomBytes(32).toString('hex');
-  const directory = mkdtempSync(join(tmpdir(), 'roomote-fast-opencode-'));
-  const toolsDirectory = join(directory, '.opencode', 'tools');
-  mkdirSync(toolsDirectory, { recursive: true });
-  writeFileSync(
-    join(directory, '.opencode', 'package.json'),
-    JSON.stringify({ private: true, type: 'module' }),
-    'utf8',
+function serializeMcpResult(result: unknown): string {
+  try {
+    return JSON.stringify(result ?? null) ?? String(result);
+  } catch {
+    return '[Unserializable Fast MCP result]';
+  }
+}
+
+async function handleMcpRequest(
+  request: IncomingMessage,
+  response: ServerResponse,
+  capability: FastAgentMcpCapability,
+  integrationId: string,
+): Promise<void> {
+  const integration = capability.integrations.find(
+    (candidate) => candidate.id === integrationId,
   );
-  const toolNodeModules = join(directory, '.opencode', 'node_modules');
-  mkdirSync(toolNodeModules, { recursive: true });
-  symlinkSync(
-    resolveZodDirectoryForTools(),
-    join(toolNodeModules, 'zod'),
-    'dir',
-  );
-  writeFileSync(
-    join(directory, '.opencode', 'roomote-fast-tool-bridge.js'),
-    FAST_AGENT_NATIVE_TOOL_BRIDGE_SOURCE,
-    'utf8',
-  );
-  for (const [name, source] of Object.entries(FAST_AGENT_NATIVE_TOOL_SOURCES)) {
-    writeFileSync(join(toolsDirectory, `${name}.js`), source, 'utf8');
+  if (!integration) {
+    writeJson(response, 404, { ok: false, error: 'not_found' });
+    return;
   }
 
+  const server = new Server(
+    { name: `roomote-fast-${integration.id}`, version: '1.0.0' },
+    { capabilities: { tools: {} }, instructions: integration.instructions },
+  );
+  server.setRequestHandler(ListToolsRequestSchema, async () => ({
+    tools: integration.tools.map((tool) => ({
+      name: tool.name,
+      ...(tool.description ? { description: tool.description } : {}),
+      inputSchema:
+        tool.inputSchema && typeof tool.inputSchema === 'object'
+          ? tool.inputSchema
+          : { type: 'object' as const },
+    })),
+  }));
+  server.setRequestHandler(CallToolRequestSchema, async ({ params }) => {
+    if (!capability.executor) {
+      throw new Error('The Fast turn is no longer active.');
+    }
+    const result = await capability.executor({
+      integrationId,
+      toolName: params.name,
+      args: params.arguments ?? {},
+    });
+    return {
+      content: [{ type: 'text' as const, text: serializeMcpResult(result) }],
+    };
+  });
+
+  const transport = new StreamableHTTPServerTransport({
+    sessionIdGenerator: undefined,
+    enableJsonResponse: true,
+  });
+  try {
+    await server.connect(transport);
+    await transport.handleRequest(request, response);
+  } finally {
+    await server.close().catch(() => undefined);
+  }
+}
+
+async function startBridge(): Promise<FastAgentNativeToolBridge> {
+  const token = randomBytes(32).toString('hex');
   const server = createServer(async (request, response) => {
-    if (request.method !== 'POST' || request.url !== '/tool') {
+    const url = new URL(request.url ?? '/', 'http://127.0.0.1');
+    const mcpMatch = /^\/mcp\/([^/]+)\/([^/]+)$/u.exec(url.pathname);
+    if (mcpMatch) {
+      if (!tokenMatches(request.headers.authorization, mcpMatch[1]!)) {
+        writeJson(response, 401, { ok: false, error: 'unauthorized' });
+        return;
+      }
+      const capability = mcpCapabilities.get(mcpMatch[1]!);
+      if (!capability) {
+        writeJson(response, 409, {
+          ok: false,
+          error: 'The Fast MCP session is no longer active.',
+        });
+        return;
+      }
+      try {
+        await handleMcpRequest(
+          request,
+          response,
+          capability,
+          decodeURIComponent(mcpMatch[2]!),
+        );
+      } catch (error) {
+        console.error('[Fast Agent] MCP bridge request failed.', error);
+        if (!response.headersSent) {
+          writeJson(response, 400, {
+            ok: false,
+            error: FAST_AGENT_TOOL_BRIDGE_ERROR,
+          });
+        }
+      }
+      return;
+    }
+
+    if (request.method !== 'POST' || url.pathname !== '/tool') {
       writeJson(response, 404, { ok: false, error: 'not_found' });
       return;
     }
@@ -330,7 +425,8 @@ async function startRuntime(): Promise<FastAgentNativeToolRuntime> {
   }
 
   return {
-    directory,
+    token,
+    url: `http://127.0.0.1:${address.port}`,
     env: {
       ROOMOTE_FAST_TOOL_BRIDGE_TOKEN: token,
       ROOMOTE_FAST_TOOL_BRIDGE_URL: `http://127.0.0.1:${address.port}/tool`,
@@ -338,9 +434,106 @@ async function startRuntime(): Promise<FastAgentNativeToolRuntime> {
   };
 }
 
-export function getFastAgentNativeToolRuntime(): Promise<FastAgentNativeToolRuntime> {
-  runtimePromise ??= startRuntime();
-  return runtimePromise;
+function createRuntimeDirectory(): string {
+  const directory = mkdtempSync(join(tmpdir(), 'roomote-fast-opencode-'));
+  const toolsDirectory = join(directory, '.opencode', 'tools');
+  mkdirSync(toolsDirectory, { recursive: true });
+  writeFileSync(
+    join(directory, '.opencode', 'package.json'),
+    JSON.stringify({ private: true, type: 'module' }),
+    'utf8',
+  );
+  const toolNodeModules = join(directory, '.opencode', 'node_modules');
+  mkdirSync(toolNodeModules, { recursive: true });
+  symlinkSync(
+    resolveZodDirectoryForTools(),
+    join(toolNodeModules, 'zod'),
+    'dir',
+  );
+  writeFileSync(
+    join(directory, '.opencode', 'roomote-fast-tool-bridge.js'),
+    FAST_AGENT_NATIVE_TOOL_BRIDGE_SOURCE,
+    'utf8',
+  );
+  for (const [name, source] of Object.entries(FAST_AGENT_NATIVE_TOOL_SOURCES)) {
+    writeFileSync(join(toolsDirectory, `${name}.js`), source, 'utf8');
+  }
+  return directory;
+}
+
+function pruneSessionRuntimes(): void {
+  while (sessionRuntimes.size > FAST_AGENT_NATIVE_RUNTIME_LIMIT) {
+    const removable = [...sessionRuntimes.entries()].find(
+      ([, runtime]) => !mcpCapabilities.get(runtime.mcpCapability)?.executor,
+    );
+    if (!removable) return;
+    const [sessionId, runtime] = removable;
+    sessionRuntimes.delete(sessionId);
+    mcpCapabilities.delete(runtime.mcpCapability);
+    rmSync(runtime.directory, { recursive: true, force: true });
+  }
+}
+
+export async function getFastAgentNativeToolRuntime(
+  sessionId: string,
+  integrations: FastAgentIntegration[],
+): Promise<FastAgentNativeToolRuntime> {
+  bridgePromise ??= startBridge();
+  const bridge = await bridgePromise;
+  let runtime = sessionRuntimes.get(sessionId);
+  if (!runtime) {
+    runtime = {
+      directory: createRuntimeDirectory(),
+      env: bridge.env,
+      mcpCapability: randomBytes(32).toString('hex'),
+    };
+    sessionRuntimes.set(sessionId, runtime);
+  } else {
+    sessionRuntimes.delete(sessionId);
+    sessionRuntimes.set(sessionId, runtime);
+  }
+
+  mcpCapabilities.set(runtime.mcpCapability, { integrations });
+  pruneSessionRuntimes();
+  writeFileSync(
+    join(runtime.directory, 'opencode.json'),
+    JSON.stringify({
+      mcp: Object.fromEntries(
+        integrations.map((integration) => [
+          integration.id,
+          {
+            type: 'remote',
+            url: `${bridge.url}/mcp/${runtime.mcpCapability}/${encodeURIComponent(integration.id)}`,
+            enabled: true,
+            oauth: false,
+            headers: { Authorization: `Bearer ${runtime.mcpCapability}` },
+          },
+        ]),
+      ),
+    }),
+    'utf8',
+  );
+  return runtime;
+}
+
+export function bindFastAgentMcpToolExecutor(
+  capabilityId: string,
+  executor: FastAgentMcpToolExecutor,
+): () => void {
+  const capability = mcpCapabilities.get(capabilityId);
+  if (!capability) {
+    throw new Error('The Fast MCP capability is unavailable.');
+  }
+  if (capability.executor && capability.executor !== executor) {
+    throw new Error('The Fast MCP session already has an active turn.');
+  }
+  capability.executor = executor;
+  return () => {
+    if (capability.executor === executor) {
+      capability.executor = undefined;
+      mcpCapabilities.delete(capabilityId);
+    }
+  };
 }
 
 export function bindFastAgentNativeToolExecutor(
