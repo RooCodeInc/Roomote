@@ -486,10 +486,6 @@ export async function updateBackgroundAgentSettingsCommand(
     fieldErrors.general =
       'Provider usage threshold must be between 50% and 95% in 5% increments.';
   }
-  if (input.providerUsageLimitDiscordChannel) {
-    fieldErrors.providerUsageLimitDiscordChannel =
-      'Provider Usage Limits supports Slack channels only.';
-  }
   const channelAutoStartRequiresSlackInstallation =
     shouldUpdateChannelAutoStart &&
     channelAutoStartRows.some((row) => Boolean(row.slackChannel));

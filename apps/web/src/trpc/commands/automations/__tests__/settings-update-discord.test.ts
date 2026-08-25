@@ -272,6 +272,33 @@ describe('updateBackgroundAgentSettingsCommand Discord destinations', () => {
     });
   });
 
+  it('persists a Discord provider usage alert destination', async () => {
+    await insertAvailableDiscordChannel({
+      guildId: 'guild-1',
+      channelId: 'provider-alerts',
+      channelName: 'provider-alerts',
+    });
+
+    const result = await updateBackgroundAgentSettingsCommand(
+      adminAuth,
+      buildInput({
+        savingAutomation: 'providerUsageLimit',
+        providerUsageLimitFrequency: 'every_hour',
+        providerUsageLimitThreshold: 85,
+        providerUsageLimitDiscordChannel: 'provider-alerts',
+      }),
+    );
+
+    expect(result.success).toBe(true);
+    expect(await getAutomationTargets('provider_usage_limit')).toEqual([
+      {
+        provider: 'discord',
+        targetKind: 'discord_channel',
+        externalRef: 'provider-alerts',
+      },
+    ]);
+  });
+
   it('rejects provider usage thresholds outside slider increments', async () => {
     await db.insert(deploymentSettings).values({
       id: 'default',

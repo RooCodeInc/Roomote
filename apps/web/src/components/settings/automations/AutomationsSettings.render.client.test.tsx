@@ -610,7 +610,7 @@ describe('AutomationsSettings', () => {
     expect(screen.queryByText('Beta')).not.toBeInTheDocument();
   });
 
-  it('shows provider usage alert cadence, Slack destination, and threshold controls', async () => {
+  it('shows provider usage alert cadence, channel destination, and threshold controls', async () => {
     render(<AutomationsSettings />);
 
     fireEvent.click(

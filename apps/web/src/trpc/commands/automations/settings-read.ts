@@ -235,10 +235,6 @@ async function resolveAutomationDestinations(params: {
         return [key, null] as const;
       }
 
-      if (key === 'provider_usage_limit' && destination.provider !== 'slack') {
-        return [key, null] as const;
-      }
-
       return [
         key,
         {

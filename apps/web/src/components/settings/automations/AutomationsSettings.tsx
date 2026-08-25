@@ -3893,52 +3893,21 @@ export function AutomationsSettings() {
 
                 {providerUsageLimitIsEnabled ? (
                   <div className="space-y-5">
-                    <AutomationSlackDestinationInput
-                      inputId="provider-usage-limit-slack-channel"
-                      label="Post alerts to this Slack channel"
-                      helperText="Choose where Roomote should post provider usage warnings."
-                      value={formState.providerUsageLimitSlackChannel || null}
-                      options={buildSlackDestinationOptions(
-                        formState.providerUsageLimitSlackChannel,
-                      )}
-                      disabled={isManagerChannelSelectionDisabled({
-                        slackConnected,
-                        isFetching: slackChannelsQuery.isFetching,
-                        hasValue: Boolean(
-                          formState.providerUsageLimitSlackChannel.trim(),
-                        ),
-                        isConfigured: Boolean(
-                          settingsQuery.data?.settings
-                            .providerUsageLimitSlackChannelId,
-                        ),
-                      })}
-                      destination={
-                        settingsQuery.data?.resolvedDestinations
-                          .provider_usage_limit
-                      }
-                      slackAppMention={slackAppMention}
-                      showWarning={shouldShowManagerSlackChannelWarning({
-                        formValue: formState.providerUsageLimitSlackChannel,
-                        savedChannelId:
-                          settingsQuery.data?.settings
-                            .providerUsageLimitSlackChannelId ?? null,
-                        warningChannelId:
-                          slackChannelAccessWarnings.providerUsageLimitSlackChannel,
-                        isDirty: isDirty.providerUsageLimit,
-                      })}
-                      error={fieldErrors.providerUsageLimitSlackChannel}
-                      onChange={(value) =>
-                        setFormState((prev) =>
-                          prev
-                            ? {
-                                ...prev,
-                                providerUsageLimitSlackChannel: value ?? '',
-                                providerUsageLimitDiscordChannel: '',
-                              }
-                            : prev,
-                        )
-                      }
-                    />
+                    {renderSlackDestinationField({
+                      field: 'providerUsageLimitSlackChannel',
+                      inputId: 'provider-usage-limit-slack-channel',
+                      label: 'Post alerts to this Slack channel',
+                      helperText:
+                        'Choose where Roomote should post provider usage warnings.',
+                      savedChannelId:
+                        settingsQuery.data?.settings
+                          .providerUsageLimitSlackChannelId ?? null,
+                      savedDiscordChannelId:
+                        settingsQuery.data?.settings
+                          .providerUsageLimitDiscordChannelId ?? null,
+                      warningChannelId:
+                        slackChannelAccessWarnings.providerUsageLimitSlackChannel,
+                    })}
 
                     <div className="space-y-3 md:max-w-md">
                       <div className="flex items-center justify-between gap-4">

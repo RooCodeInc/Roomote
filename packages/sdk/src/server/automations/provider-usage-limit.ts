@@ -20,7 +20,16 @@ import {
   type ProviderUsageLimitThreshold,
 } from '@roomote/types';
 
-import { buildAutomationSettingsMessage } from '../lib/manager-slack';
+import { getCommunicationProviderAdapter } from '../lib/communication-providers';
+import {
+  buildAutomationSettingsMessage,
+  buildManagerSlackSettingsUrl,
+  degradeSlackMrkdwnToMarkdown,
+} from '../lib/manager-slack';
+import {
+  resolveAutomationRuntimeDestination,
+  type ResolvedAutomationDestination,
+} from './destination';
 import {
   emptyJobResult,
   type AutomationJobResult,
@@ -50,6 +59,9 @@ type UsageLimitRedis = {
   ) => Promise<string | null>;
 };
 type UsageLimitNotifier = Pick<SlackNotifier, 'postMessage'>;
+type UsageLimitCommunicationAdapter = Awaited<
+  ReturnType<typeof getCommunicationProviderAdapter>
+>;
 
 type ProviderUsageLimitDependencies = {
   getRuntime: typeof getAutomationRuntime;
@@ -57,6 +69,8 @@ type ProviderUsageLimitDependencies = {
   getSnapshots: () => Promise<ProviderUsageLimitSnapshot[]>;
   getRedisClient: () => UsageLimitRedis;
   createNotifier: (token: string) => UsageLimitNotifier;
+  resolveDestination: typeof resolveAutomationRuntimeDestination;
+  getCommunicationAdapter: typeof getCommunicationProviderAdapter;
   recordOutcome: typeof recordAutomationRunOutcome;
   now: () => Date;
 };
@@ -67,6 +81,8 @@ const defaultDependencies: ProviderUsageLimitDependencies = {
   getSnapshots: () => getProviderUsageLimitSnapshots(),
   getRedisClient: getRedis,
   createNotifier: (token) => new SlackNotifier(token),
+  resolveDestination: resolveAutomationRuntimeDestination,
+  getCommunicationAdapter: getCommunicationProviderAdapter,
   recordOutcome: (executor, params) =>
     recordAutomationRunOutcome(executor, params),
   now: () => new Date(),
@@ -232,12 +248,49 @@ export function buildProviderUsageLimitWarningMessage(params: {
       ? `${params.alerts[0]?.snapshot.providerName} usage is at ${Math.round(highestPercent * 10) / 10}%`
       : `${params.alerts.length} provider usage limits need attention`;
   const message = buildAutomationSettingsMessage(
-    params.alerts
-      .map(({ snapshot, threshold }) => formatSnapshot(snapshot, threshold))
-      .join('\n\n'),
+    formatProviderUsageLimitWarningText(params),
     PROVIDER_USAGE_LIMIT_SETTINGS_HASH,
   );
   return { ...message, text: summary };
+}
+
+export function formatProviderUsageLimitWarningText(params: {
+  alerts: Array<{
+    snapshot: ProviderUsageLimitSnapshot;
+    threshold: number;
+  }>;
+}): string {
+  return params.alerts
+    .map(({ snapshot, threshold }) => formatSnapshot(snapshot, threshold))
+    .join('\n\n');
+}
+
+async function postProviderUsageLimitViaCommunicationAdapter(params: {
+  adapter: NonNullable<UsageLimitCommunicationAdapter>;
+  destination: ResolvedAutomationDestination;
+  alerts: Array<{
+    snapshot: ProviderUsageLimitSnapshot;
+    threshold: number;
+  }>;
+}): Promise<void> {
+  await params.adapter.postMessage({
+    channelId: params.destination.channelId,
+    ...(params.destination.serviceUrl
+      ? { serviceUrl: params.destination.serviceUrl }
+      : {}),
+    text: degradeSlackMrkdwnToMarkdown(
+      formatProviderUsageLimitWarningText({ alerts: params.alerts }),
+    ),
+    textFormat: 'markdown',
+    buttons: [
+      [
+        {
+          text: 'Automation settings',
+          url: buildManagerSlackSettingsUrl(PROVIDER_USAGE_LIMIT_SETTINGS_HASH),
+        },
+      ],
+    ],
+  });
 }
 
 function isDue(params: {
@@ -279,15 +332,21 @@ export async function providerUsageLimitJob(
     return result;
   }
 
-  if (opts.destination && opts.destination.provider !== 'slack') {
-    result.skippedReason = 'Provider usage limit alerts require Slack.';
+  const slackBotToken = await dependencies.getSlackBotToken();
+  const destination =
+    opts.destination ??
+    (await dependencies.resolveDestination({
+      runtime,
+      slackConnected: Boolean(slackBotToken),
+    }));
+  if (!destination) {
+    result.skippedReason =
+      'Provider usage limit alert channel is not configured.';
     return result;
   }
 
-  const channelId = opts.destination?.channelId ?? runtime.slackChannelId;
-  const slackBotToken = await dependencies.getSlackBotToken();
-  if (!channelId || !slackBotToken) {
-    result.skippedReason = 'Slack channel is not configured.';
+  if (destination.provider === 'slack' && !slackBotToken) {
+    result.skippedReason = 'Slack is not connected.';
     return result;
   }
 
@@ -327,16 +386,33 @@ export async function providerUsageLimitJob(
 
   try {
     if (alerts.length > 0) {
-      const notifier = dependencies.createNotifier(slackBotToken);
-      const message = buildProviderUsageLimitWarningMessage({ alerts });
-      const messageTs = await notifier.postMessage({
-        channel: channelId,
-        ...message,
-        unfurl_links: false,
-        unfurl_media: false,
-      });
-      if (!messageTs)
-        throw new Error('Failed to post provider usage limit alert');
+      if (destination.provider === 'slack') {
+        const notifier = dependencies.createNotifier(slackBotToken!);
+        const message = buildProviderUsageLimitWarningMessage({ alerts });
+        const messageTs = await notifier.postMessage({
+          channel: destination.channelId,
+          ...message,
+          unfurl_links: false,
+          unfurl_media: false,
+        });
+        if (!messageTs) {
+          throw new Error('Failed to post provider usage limit alert');
+        }
+      } else {
+        const adapter = await dependencies.getCommunicationAdapter(
+          destination.provider,
+        );
+        if (!adapter) {
+          throw new Error(
+            `Failed to post provider usage limit alert: ${destination.provider} is not connected`,
+          );
+        }
+        await postProviderUsageLimitViaCommunicationAdapter({
+          adapter,
+          destination,
+          alerts,
+        });
+      }
     }
 
     await dependencies.recordOutcome(db, {

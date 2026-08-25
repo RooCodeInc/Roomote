@@ -426,7 +426,7 @@ describe('Automations selection helpers', () => {
     expect(saveInput.managerStatsSlackChannel).toBeNull();
   });
 
-  it('includes provider usage cadence, threshold, and Slack destination', () => {
+  it('includes provider usage cadence, threshold, and channel destination', () => {
     const saveInput = buildAutomationSettingsSaveInput(
       {
         ...baseFormState,
@@ -445,6 +445,22 @@ describe('Automations selection helpers', () => {
       providerUsageLimitSlackChannel: '#provider-alerts',
       providerUsageLimitDiscordChannel: null,
     });
+  });
+
+  it('includes the provider usage Discord destination in the API save input', () => {
+    const saveInput = buildAutomationSettingsSaveInput(
+      {
+        ...baseFormState,
+        providerUsageLimitFrequency: 'every_hour',
+        providerUsageLimitSlackChannel: '',
+        providerUsageLimitDiscordChannel: ' 123456789 ',
+      },
+      baseFormState,
+      'providerUsageLimit',
+    );
+
+    expect(saveInput.providerUsageLimitDiscordChannel).toBe('123456789');
+    expect(saveInput.providerUsageLimitSlackChannel).toBeNull();
   });
 
   it('includes the Discord manager destination in the API save input', () => {

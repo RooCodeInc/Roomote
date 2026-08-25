@@ -90,7 +90,7 @@ describe('background automation registry', () => {
     ]);
   });
 
-  it('registers provider usage alerts as a Slack-only deterministic automation', () => {
+  it('registers provider usage alerts as a cross-provider deterministic automation', () => {
     const descriptor = getTriggerableBackgroundAutomationDescriptorByKey(
       'provider_usage_limit',
     );
@@ -100,7 +100,12 @@ describe('background automation registry', () => {
       slackIcon: 'battery-warning',
       scheduleModes: ['off', 'every_15_minutes', 'every_hour', 'daily'],
       usesManagerChannel: true,
-      supportedCommunicationProviders: ['slack'],
+      supportedCommunicationProviders: [
+        'slack',
+        'teams',
+        'telegram',
+        'discord',
+      ],
       supportedSourceControlProviders: [],
     });
     expect(

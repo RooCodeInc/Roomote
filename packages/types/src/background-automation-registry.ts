@@ -197,9 +197,9 @@ export const TRIGGERABLE_BACKGROUND_AUTOMATION_DESCRIPTORS = [
     label: 'Provider Usage Limits',
     slackIcon: 'battery-warning',
     scheduleModes: PROVIDER_USAGE_LIMIT_SCHEDULE_MODES,
-    manualTriggerRequirements: ['slack'],
+    manualTriggerRequirements: [],
     usesManagerChannel: true,
-    supportedCommunicationProviders: ['slack'],
+    supportedCommunicationProviders: ['slack', 'teams', 'telegram', 'discord'],
     supportedSourceControlProviders: [],
   },
   {

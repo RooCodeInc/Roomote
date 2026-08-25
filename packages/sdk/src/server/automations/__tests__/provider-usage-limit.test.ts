@@ -5,6 +5,8 @@ import type {
   ProviderUsageLimitSnapshot,
 } from '@roomote/db/server';
 
+import type { ResolvedAutomationDestination } from '../destination';
+
 import {
   buildProviderUsageLimitWarningMessage,
   getProviderUsageLimitPeriodId,
@@ -80,6 +82,7 @@ function dependencies(params: {
   snapshots?: ProviderUsageLimitSnapshot[];
   redis?: ReturnType<typeof createRedis>;
   now?: Date;
+  communicationAdapter?: { postMessage: ReturnType<typeof vi.fn> } | null;
 }) {
   const redis = params.redis ?? createRedis();
   const postMessage = vi.fn().mockResolvedValue('123.45');
@@ -96,6 +99,9 @@ function dependencies(params: {
       getSnapshots: vi.fn().mockResolvedValue(params.snapshots ?? [snapshot()]),
       getRedisClient: () => redis,
       createNotifier: () => ({ postMessage }),
+      getCommunicationAdapter: vi
+        .fn()
+        .mockResolvedValue(params.communicationAdapter ?? null),
       recordOutcome,
       now: () => params.now ?? new Date('2026-08-19T12:00:00.000Z'),
     },
@@ -214,6 +220,53 @@ describe('provider usage limit automation', () => {
     expect(deps.postMessage).toHaveBeenCalledTimes(1);
     expect(deps.postMessage.mock.calls[0]?.[0]?.text).toBe(
       '2 provider usage limits need attention',
+    );
+  });
+
+  it('posts Markdown and a settings link through a non-Slack adapter', async () => {
+    const adapterPostMessage = vi.fn().mockResolvedValue({
+      provider: 'teams',
+      channelId: 'teams-conversation',
+      messageId: 'message-1',
+    });
+    const destination = {
+      provider: 'teams',
+      channelId: 'teams-conversation',
+      serviceUrl: 'https://smba.trafficmanager.net/emea/',
+      source: 'primary_conversation',
+    } satisfies ResolvedAutomationDestination;
+    const deps = dependencies({
+      automationRuntime: runtime({ destination: null }),
+      communicationAdapter: { postMessage: adapterPostMessage },
+    });
+
+    await providerUsageLimitJob(
+      {},
+      {
+        ...deps.overrides,
+        resolveDestination: vi.fn().mockResolvedValue(destination),
+      },
+    );
+
+    expect(deps.postMessage).not.toHaveBeenCalled();
+    expect(deps.overrides.getCommunicationAdapter).toHaveBeenCalledWith(
+      'teams',
+    );
+    expect(adapterPostMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channelId: 'teams-conversation',
+        serviceUrl: 'https://smba.trafficmanager.net/emea/',
+        textFormat: 'markdown',
+        text: expect.stringContaining('**OpenRouter usage is at 90%**'),
+        buttons: [
+          [
+            expect.objectContaining({
+              text: 'Automation settings',
+              url: expect.stringContaining('#provider-usage-limit'),
+            }),
+          ],
+        ],
+      }),
     );
   });
 
