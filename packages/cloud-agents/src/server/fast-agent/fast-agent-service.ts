@@ -48,6 +48,7 @@ import {
 import { fastAgentOpenCodeSessionManager } from './fast-agent-opencode-session';
 import {
   bindFastAgentNativeToolExecutor,
+  createFastAgentSpillTurnBudget,
   bindFastAgentMcpToolExecutor,
   FAST_AGENT_NATIVE_TOOL_NAMES,
   getFastAgentNativeToolRuntime,
@@ -1196,6 +1197,7 @@ export async function answerFastAgentQuestion({
       bootstrapPrompt: serializedBootstrapPrompt,
       execute: async (openCodeSession, selectedPrompt) => {
         diagnostics.markInferenceSetupStarted();
+        const spillBudget = createFastAgentSpillTurnBudget();
         const nativeRuntime = await getFastAgentNativeToolRuntime(
           session.id,
           availableIntegrations,
@@ -1284,7 +1286,9 @@ export async function answerFastAgentQuestion({
                       unbindExecutors.add(
                         bindFastAgentNativeToolExecutor(
                           openCodeSessionID,
+                          session.id,
                           executeNativeTool,
+                          { allowSpillRecovery: true, spillBudget },
                         ),
                       );
                     },
@@ -1293,12 +1297,16 @@ export async function answerFastAgentQuestion({
                         return;
                       boundSubagentSessionIDs.add(subagentSessionID);
                       unbindExecutors.add(
-                        bindFastAgentNativeToolExecutor(subagentSessionID, () =>
-                          Promise.resolve({
-                            success: false,
-                            error:
-                              'That tool is reserved for the Fast parent agent.',
-                          }),
+                        bindFastAgentNativeToolExecutor(
+                          subagentSessionID,
+                          session.id,
+                          () =>
+                            Promise.resolve({
+                              success: false,
+                              error:
+                                'That tool is reserved for the Fast parent agent.',
+                            }),
+                          { allowSpillRecovery: false, spillBudget },
                         ),
                       );
                     },

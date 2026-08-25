@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   getUserIdentity: vi.fn(),
   bindExecutor: vi.fn(),
   bindMcpExecutor: vi.fn(),
+  revokeMcpCapabilities: vi.fn(),
   nativeExecutor: undefined as
     | ((call: {
         agent?: string;
@@ -41,6 +42,8 @@ const nativeToolNames = vi.hoisted(
       sendChatReaction: 'send_chat_reaction',
       sendChatReply: 'send_chat_reply',
       sendTaskMessage: 'send_task_message',
+      spillGrep: 'spill_grep',
+      spillRead: 'spill_read',
     }) as const,
 );
 
@@ -106,7 +109,9 @@ vi.mock('../fast-agent-native-tool-bridge', () => ({
     },
   })),
   bindFastAgentNativeToolExecutor: mocks.bindExecutor,
+  createFastAgentSpillTurnBudget: () => ({ calls: 0, outputBytes: 0 }),
   bindFastAgentMcpToolExecutor: mocks.bindMcpExecutor,
+  revokeFastAgentMcpCapabilitiesForConversation: mocks.revokeMcpCapabilities,
 }));
 
 vi.mock('../fast-agent-integration-broker', () => ({
@@ -192,12 +197,14 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         ) => Promise<unknown>;
       }) => execute({ id: 'opencode-session-1' }, prompt),
     );
-    mocks.bindExecutor.mockImplementation((_sessionID, executor) => {
-      mocks.nativeExecutor = executor;
-      return () => {
-        mocks.nativeExecutor = undefined;
-      };
-    });
+    mocks.bindExecutor.mockImplementation(
+      (_sessionID, _conversationId, executor) => {
+        mocks.nativeExecutor = executor;
+        return () => {
+          mocks.nativeExecutor = undefined;
+        };
+      },
+    );
     mocks.bindMcpExecutor.mockImplementation((_capability, executor) => {
       mocks.mcpExecutor = executor;
       return () => {
@@ -364,10 +371,10 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
 
         const parentExecutor = mocks.bindExecutor.mock.calls.find(
           ([sessionID]) => sessionID === 'opencode-session-1',
-        )?.[1];
+        )?.[2];
         const subagentExecutor = mocks.bindExecutor.mock.calls.find(
           ([sessionID]) => sessionID === 'opencode-subagent-1',
-        )?.[1];
+        )?.[2];
         if (!parentExecutor || !subagentExecutor) {
           throw new Error('Expected parent and subagent executors to bind.');
         }
@@ -459,6 +466,16 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     );
     expect(adapter.postReply).toHaveBeenCalledTimes(2);
     expect(mocks.bindExecutor).toHaveBeenCalledTimes(2);
+    expect(
+      mocks.bindExecutor.mock.calls.find(
+        ([sessionID]) => sessionID === 'opencode-session-1',
+      )?.[3],
+    ).toMatchObject({ allowSpillRecovery: true });
+    expect(
+      mocks.bindExecutor.mock.calls.find(
+        ([sessionID]) => sessionID === 'opencode-subagent-1',
+      )?.[3],
+    ).toMatchObject({ allowSpillRecovery: false });
   });
 
   it('rebuilds an invalidated OpenCode session from canonical compatibility history', async () => {
