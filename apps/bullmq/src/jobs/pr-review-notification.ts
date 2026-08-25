@@ -26,6 +26,7 @@ import {
   finalizePrReviewNotificationRequest,
   isDurablePrReviewNotificationRequest,
   renewPrReviewNotificationRequestLease,
+  retirePrReviewActionMessagesBestEffort,
   migrateLegacyPrReviewNotificationRequest,
   notifyFastAgentParentOnPrFeedback,
   preparePrReviewNotificationDelivery,
@@ -206,7 +207,13 @@ async function postPrReviewNotification({
     });
 
     if (nonce && messageTs) {
-      await attachPendingPrReviewActionMessage(nonce, messageTs);
+      const superseded = await attachPendingPrReviewActionMessage(
+        nonce,
+        messageTs,
+      );
+      if (superseded.length > 0) {
+        await retirePrReviewActionMessagesBestEffort(superseded);
+      }
     }
 
     return messageTs;
@@ -245,7 +252,13 @@ async function postPrReviewNotification({
   const posted = await adapter.postMessage(postInput);
 
   if (nonce && posted?.messageId) {
-    await attachPendingPrReviewActionMessage(nonce, posted.messageId);
+    const superseded = await attachPendingPrReviewActionMessage(
+      nonce,
+      posted.lastTextMessageId ?? posted.messageId,
+    );
+    if (superseded.length > 0) {
+      await retirePrReviewActionMessagesBestEffort(superseded);
+    }
   }
 
   return null;

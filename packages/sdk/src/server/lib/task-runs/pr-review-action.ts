@@ -6,11 +6,18 @@ import {
   taskPullRequests,
 } from '@roomote/db/server';
 import { getRedis } from '@roomote/redis';
+import {
+  buildResolvedSlackPrReviewMessageBlocks,
+  SlackNotifier,
+} from '@roomote/slack';
+
+import { getCommunicationProviderAdapter } from '../communication-providers';
 
 /** Conversation providers that can render PR review action buttons. */
 export type PrReviewActionProvider = 'slack' | 'discord' | 'telegram';
 
 const PR_REVIEW_ACTION_PREFIX = 'pr-review-action:';
+const PR_REVIEW_ACTION_ORDER_KEY = `${PR_REVIEW_ACTION_PREFIX}order`;
 // The notification stays actionable for a week; after that the buttons report
 // the offer as expired and the user falls back to replying in the thread.
 const PR_REVIEW_ACTION_TTL_SECONDS = 7 * 24 * 60 * 60;
@@ -23,6 +30,8 @@ const PR_REVIEW_ACTION_TTL_SECONDS = 7 * 24 * 60 * 60;
  */
 export interface PendingPrReviewAction {
   nonce: string;
+  /** Monotonic creation order used when concurrent offers finish out of order. */
+  createdOrder?: number;
   provider: PrReviewActionProvider;
   /** Slack workspace identity. Absent only on legacy pending records. */
   slackTeamId?: string;
@@ -62,7 +71,14 @@ if ARGV[1] ~= '' then
     if not pending.slackTeamId and ARGV[2] ~= '1' then return nil end
   end
 end
-redis.call('del', KEYS[1])
+local pending = cjson.decode(val)
+if pending.retired then return nil end
+if pending.messageId then
+  redis.call('del', KEYS[1])
+else
+  pending.retired = true
+  redis.call('set', KEYS[1], cjson.encode(pending), 'KEEPTTL')
+end
 return val
 `;
 
@@ -70,11 +86,60 @@ return val
 // click claimed after the notification was posted.
 const ATTACH_PR_REVIEW_ACTION_MESSAGE_LUA = `
 local val = redis.call('get', KEYS[1])
-if not val then return 0 end
+if not val then return {} end
 local pending = cjson.decode(val)
 pending.messageId = ARGV[1]
+if pending.retired then
+  redis.call('del', KEYS[1])
+  redis.call('srem', KEYS[2], pending.nonce)
+  return {cjson.encode(pending)}
+end
 redis.call('set', KEYS[1], cjson.encode(pending), 'KEEPTTL')
-return 1
+local nonces = redis.call('smembers', KEYS[2])
+local function sameContext(prior)
+  local sameSlackTeam = (prior.slackTeamId == pending.slackTeamId)
+    or (not prior.slackTeamId and not pending.slackTeamId)
+  return prior.repository == pending.repository
+    and prior.prNumber == pending.prNumber
+    and sameSlackTeam
+end
+for _, nonce in ipairs(nonces) do
+  if nonce ~= pending.nonce then
+    local previous = redis.call('get', ARGV[2] .. nonce)
+    if previous then
+      local prior = cjson.decode(previous)
+      local priorCreatedOrder = prior.createdOrder or 0
+      local pendingCreatedOrder = pending.createdOrder or 0
+      if sameContext(prior)
+        and priorCreatedOrder > pendingCreatedOrder then
+        redis.call('del', KEYS[1])
+        redis.call('srem', KEYS[2], pending.nonce)
+        return {cjson.encode(pending)}
+      end
+    end
+  end
+end
+local claimed = {}
+for _, nonce in ipairs(nonces) do
+  if nonce ~= pending.nonce then
+    local previousKey = ARGV[2] .. nonce
+    local previous = redis.call('get', previousKey)
+    if previous then
+      local prior = cjson.decode(previous)
+      if sameContext(prior) then
+        redis.call('srem', KEYS[2], nonce)
+        if prior.messageId then
+          redis.call('del', previousKey)
+          table.insert(claimed, previous)
+        else
+          prior.retired = true
+          redis.call('set', previousKey, cjson.encode(prior), 'KEEPTTL')
+        end
+      end
+    end
+  end
+end
+return claimed
 `;
 
 // Read, clear, and claim the complete conversation index in one operation so
@@ -88,8 +153,14 @@ for _, nonce in ipairs(nonces) do
   local actionKey = ARGV[1] .. nonce
   local val = redis.call('get', actionKey)
   if val then
-    redis.call('del', actionKey)
-    table.insert(claimed, val)
+    local pending = cjson.decode(val)
+    if pending.messageId then
+      redis.call('del', actionKey)
+      table.insert(claimed, val)
+    else
+      pending.retired = true
+      redis.call('set', actionKey, cjson.encode(pending), 'KEEPTTL')
+    end
   end
 end
 return claimed
@@ -119,12 +190,17 @@ export async function setPendingPrReviewAction(
 ): Promise<void> {
   const redis = getRedis();
   const threadKey = getPrReviewActionThreadKey(pending);
+  const createdOrder = await redis.incr(PR_REVIEW_ACTION_ORDER_KEY);
+  const stored = {
+    ...pending,
+    createdOrder,
+  };
 
   await redis
     .multi()
     .set(
       getPrReviewActionKey(pending.nonce),
-      JSON.stringify(pending),
+      JSON.stringify(stored),
       'EX',
       PR_REVIEW_ACTION_TTL_SECONDS,
     )
@@ -135,22 +211,119 @@ export async function setPendingPrReviewAction(
 
 /**
  * Records the posted notification message id on an already-stored pending
- * offer so retirement can edit the message later. No-op when the offer was
+ * offer so retirement can edit the message later. This also atomically claims
+ * every older offer for the same PR conversation. No-op when the new offer was
  * already claimed.
  */
 export async function attachPendingPrReviewActionMessage(
   nonce: string,
   messageId: string,
-): Promise<void> {
+): Promise<PendingPrReviewAction[]> {
   const redis = getRedis();
-  await redis
-    .eval(
-      ATTACH_PR_REVIEW_ACTION_MESSAGE_LUA,
-      1,
-      getPrReviewActionKey(nonce),
-      messageId,
-    )
-    .catch(() => undefined);
+  const rawPending = await redis.get(getPrReviewActionKey(nonce));
+  if (!rawPending) return [];
+
+  let pending: PendingPrReviewAction;
+  try {
+    pending = JSON.parse(rawPending) as PendingPrReviewAction;
+  } catch {
+    return [];
+  }
+
+  const rawClaims = await redis.eval(
+    ATTACH_PR_REVIEW_ACTION_MESSAGE_LUA,
+    2,
+    getPrReviewActionKey(nonce),
+    getPrReviewActionThreadKey(pending),
+    messageId,
+    PR_REVIEW_ACTION_PREFIX,
+  );
+
+  const claimed: PendingPrReviewAction[] = [];
+  for (const raw of Array.isArray(rawClaims) ? rawClaims : []) {
+    if (typeof raw !== 'string') continue;
+    try {
+      claimed.push(JSON.parse(raw) as PendingPrReviewAction);
+    } catch {
+      // Malformed record; skip.
+    }
+  }
+  return claimed;
+}
+
+/** Removes controls from superseded review offers without failing delivery. */
+export async function retirePrReviewActionMessagesBestEffort(
+  pendingActions: PendingPrReviewAction[],
+): Promise<void> {
+  for (const pending of pendingActions) {
+    if (!pending.messageId) continue;
+
+    try {
+      if (pending.provider === 'slack') {
+        if (!pending.threadId) continue;
+        const installation = await db.query.slackInstallations.findFirst({
+          where: pending.slackTeamId
+            ? and(
+                eq(slackInstallations.teamId, pending.slackTeamId),
+                eq(slackInstallations.isActive, true),
+              )
+            : eq(slackInstallations.isActive, true),
+          columns: { botAccessToken: true },
+        });
+        if (!installation?.botAccessToken) continue;
+
+        const slack = new SlackNotifier(installation.botAccessToken);
+        const blocks = await slack.getMessageBlocks({
+          channel: pending.channelId,
+          messageTs: pending.messageId,
+          threadTs: pending.threadId,
+        });
+        await slack.updateMessage({
+          channel: pending.channelId,
+          ts: pending.messageId,
+          message: {
+            blocks: buildResolvedSlackPrReviewMessageBlocks(
+              blocks,
+              'Superseded by newer review feedback.',
+            ),
+          },
+        });
+        continue;
+      }
+
+      const adapter = await getCommunicationProviderAdapter(pending.provider);
+      if (!adapter) continue;
+
+      if (pending.provider === 'discord' && adapter.provider === 'discord') {
+        const channelId = pending.threadId ?? pending.channelId;
+        const message = await adapter.getMessage({
+          channelId,
+          messageId: pending.messageId,
+        });
+        if (message) {
+          await adapter.editMessage({
+            channelId,
+            messageId: pending.messageId,
+            text: message.text,
+          });
+        }
+      } else if (
+        pending.provider === 'telegram' &&
+        adapter.provider === 'telegram'
+      ) {
+        await adapter.editMessageReplyMarkup({
+          channelId: pending.channelId,
+          messageId: pending.messageId,
+        });
+      }
+    } catch (error) {
+      console.warn(
+        `[PrReviewAction] Failed to retire superseded ${pending.provider} message ${pending.messageId}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
+  }
 }
 
 export async function claimPendingPrReviewAction(

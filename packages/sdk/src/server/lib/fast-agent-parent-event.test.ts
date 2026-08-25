@@ -19,6 +19,7 @@ const mocks = vi.hoisted(() => ({
   getTaskUrl: vi.fn(),
   setPendingPrReviewAction: vi.fn(),
   attachPendingPrReviewActionMessage: vi.fn(),
+  retirePrReviewActionMessagesBestEffort: vi.fn(),
   buildSlackPrReviewActionBlocks: vi.fn(),
   resolveUserMcpServerConfigs: vi.fn(),
 }));
@@ -96,6 +97,8 @@ vi.mock('@roomote/slack', async (importOriginal) => ({
 vi.mock('./task-runs/pr-review-action', () => ({
   setPendingPrReviewAction: mocks.setPendingPrReviewAction,
   attachPendingPrReviewActionMessage: mocks.attachPendingPrReviewActionMessage,
+  retirePrReviewActionMessagesBestEffort:
+    mocks.retirePrReviewActionMessagesBestEffort,
 }));
 
 vi.mock('./artifacts/raw-url', () => ({
@@ -179,7 +182,8 @@ describe('deliverFastAgentParentEvent', () => {
     });
     mocks.resolveUserMcpServerConfigs.mockResolvedValue({});
     mocks.setPendingPrReviewAction.mockResolvedValue(undefined);
-    mocks.attachPendingPrReviewActionMessage.mockResolvedValue(undefined);
+    mocks.attachPendingPrReviewActionMessage.mockResolvedValue([]);
+    mocks.retirePrReviewActionMessagesBestEffort.mockResolvedValue(undefined);
     mocks.buildSlackPrReviewActionBlocks.mockImplementation(
       ({ text, question, nonce }) => [
         { type: 'section', text: { type: 'mrkdwn', text } },
@@ -707,6 +711,19 @@ describe('deliverFastAgentParentEvent', () => {
   });
 
   it('delivers pull request feedback as a platform event with a stable idempotency key', async () => {
+    const superseded = {
+      nonce: 'old-nonce',
+      provider: 'slack',
+      taskId: 'task-1',
+      repository: 'acme/web',
+      prNumber: 42,
+      channelId: 'C123',
+      threadId: '100.001',
+      messageId: '99.001',
+    };
+    mocks.attachPendingPrReviewActionMessage.mockResolvedValueOnce([
+      superseded,
+    ]);
     const feedbackEvent = {
       type: 'pull_request_feedback' as const,
       feedbackId: 'feedback-123',
@@ -776,6 +793,9 @@ describe('deliverFastAgentParentEvent', () => {
       expect.any(String),
       '101.001',
     );
+    expect(mocks.retirePrReviewActionMessagesBestEffort).toHaveBeenCalledWith([
+      superseded,
+    ]);
     expect(mocks.addReaction).not.toHaveBeenCalled();
   });
 

@@ -55,6 +55,7 @@ import {
 import { createDiscordCommunicationProviderFromRuntimeCredentials } from './discord-communication';
 import {
   attachPendingPrReviewActionMessage,
+  retirePrReviewActionMessagesBestEffort,
   setPendingPrReviewAction,
 } from './task-runs/pr-review-action';
 
@@ -570,7 +571,13 @@ async function createSlackFastAgentParentTurn(params: {
           );
         }
         if (action) {
-          await attachPendingPrReviewActionMessage(action.nonce, messageTs);
+          const superseded = await attachPendingPrReviewActionMessage(
+            action.nonce,
+            messageTs,
+          );
+          if (superseded.length > 0) {
+            await retirePrReviewActionMessagesBestEffort(superseded);
+          }
         }
         params.onReplyPosted();
       },
@@ -767,10 +774,13 @@ async function createDiscordFastAgentParentTurn(params: {
             : {}),
         });
         if (action) {
-          await attachPendingPrReviewActionMessage(
+          const superseded = await attachPendingPrReviewActionMessage(
             action.nonce,
             posted.lastTextMessageId ?? posted.messageId,
           );
+          if (superseded.length > 0) {
+            await retirePrReviewActionMessagesBestEffort(superseded);
+          }
         }
         params.onReplyPosted();
       },

@@ -64,7 +64,14 @@ export async function handleTelegramPrReviewActionCallback(params: {
       callbackQueryId: query.id,
       text: 'This offer was already handled or has expired.',
     });
+    if (chatId && messageId) {
+      await clearTelegramMessageButtonsBestEffort({ chatId, messageId });
+    }
     return;
+  }
+
+  if (chatId && messageId) {
+    await clearTelegramMessageButtonsBestEffort({ chatId, messageId });
   }
 
   if (choice === 'dismiss') {
@@ -72,10 +79,6 @@ export async function handleTelegramPrReviewActionCallback(params: {
       callbackQueryId: query.id,
       text: 'Dismissed.',
     });
-
-    if (chatId && messageId) {
-      await clearTelegramMessageButtonsBestEffort({ chatId, messageId });
-    }
 
     return;
   }
@@ -129,8 +132,6 @@ export async function handleTelegramPrReviewActionCallback(params: {
     });
 
     if (chatId && messageId) {
-      await clearTelegramMessageButtonsBestEffort({ chatId, messageId });
-
       if (dispatched.outcome !== 'unavailable') {
         await postTelegramMessageBestEffort({
           chatId,

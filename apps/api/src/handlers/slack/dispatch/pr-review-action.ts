@@ -131,6 +131,10 @@ async function handleAcceptedPrReviewAction({
   });
 
   if (!pending) {
+    await updateNotificationMessage({
+      payload,
+      resolution: 'Already handled or expired.',
+    });
     await respondEphemeral(
       payload,
       'This offer was already handled or has expired. Reply in the thread to ask again.',
@@ -155,6 +159,10 @@ async function handleAcceptedPrReviewAction({
       payload,
       'Failed to start the follow-up. Reply in the thread to ask again.',
     );
+    await updateNotificationMessage({
+      payload,
+      resolution: 'Failed to start the follow-up.',
+    });
   }
 }
 
@@ -198,6 +206,10 @@ async function dispatchAcceptedPrReviewAction({
     );
 
     if (!enableAutoHandle) {
+      await updateNotificationMessage({
+        payload,
+        resolution: 'This task can no longer be resumed.',
+      });
       return;
     }
   }
@@ -257,6 +269,10 @@ export async function handleSlackPrReviewActionDismiss(
   });
 
   if (!pending) {
+    await updateNotificationMessage({
+      payload,
+      resolution: 'Already handled or expired.',
+    });
     await respondEphemeral(
       payload,
       'This offer was already handled or has expired.',

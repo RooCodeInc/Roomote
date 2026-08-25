@@ -1,6 +1,10 @@
 const {
   mockEval,
   mockGet,
+  mockIncr,
+  mockMulti,
+  mockMultiSet,
+  mockMultiExec,
   mockSrem,
   mockFindManySlackInstallations,
   mockUpdateReturning,
@@ -9,10 +13,21 @@ const {
   const mockUpdateReturning = vi.fn();
   const mockUpdateWhere = vi.fn(() => ({ returning: mockUpdateReturning }));
   const mockUpdateSet = vi.fn(() => ({ where: mockUpdateWhere }));
+  const mockMultiExec = vi.fn();
+  const multi: Record<string, ReturnType<typeof vi.fn>> = {};
+  const mockMultiSet = vi.fn((..._args: unknown[]) => multi);
+  multi.set = mockMultiSet;
+  multi.sadd = vi.fn(() => multi);
+  multi.expire = vi.fn(() => multi);
+  multi.exec = mockMultiExec;
 
   return {
     mockEval: vi.fn(),
     mockGet: vi.fn(),
+    mockIncr: vi.fn(),
+    mockMulti: vi.fn(() => multi),
+    mockMultiSet,
+    mockMultiExec,
     mockSrem: vi.fn(),
     mockFindManySlackInstallations: vi.fn(),
     mockUpdateReturning,
@@ -21,7 +36,13 @@ const {
 });
 
 vi.mock('@roomote/redis', () => ({
-  getRedis: () => ({ eval: mockEval, get: mockGet, srem: mockSrem }),
+  getRedis: () => ({
+    eval: mockEval,
+    get: mockGet,
+    incr: mockIncr,
+    multi: mockMulti,
+    srem: mockSrem,
+  }),
 }));
 
 vi.mock('@roomote/db/server', async () => {
@@ -49,15 +70,46 @@ import {
   claimPendingPrReviewAction,
   claimPendingPrReviewActionsForThread,
   enableAutoHandlePrReviewFeedback,
+  setPendingPrReviewAction,
 } from '../pr-review-action';
 
 describe('PR review action state', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockGet.mockResolvedValue(null);
+    mockIncr.mockResolvedValue(1);
+    mockMultiExec.mockResolvedValue([]);
     mockSrem.mockResolvedValue(1);
     mockFindManySlackInstallations.mockResolvedValue([{ teamId: 'T1' }]);
     mockUpdateReturning.mockResolvedValue([{ id: 'link-1' }]);
+  });
+
+  it('assigns each offer an atomic creation order before storing it', async () => {
+    mockIncr.mockResolvedValue(42);
+
+    await setPendingPrReviewAction({
+      nonce: 'nonce-1',
+      provider: 'discord',
+      taskId: 'task-1',
+      repository: 'owner/repo',
+      prNumber: 42,
+      prUrl: 'https://github.com/owner/repo/pull/42',
+      channelId: 'channel-1',
+      threadId: 'thread-1',
+      followUpPrompt: 'Address the feedback.',
+    });
+
+    expect(mockIncr).toHaveBeenCalledWith('pr-review-action:order');
+    expect(mockMultiSet).toHaveBeenCalledWith(
+      'pr-review-action:nonce-1',
+      expect.any(String),
+      'EX',
+      7 * 24 * 60 * 60,
+    );
+    expect(JSON.parse(mockMultiSet.mock.calls[0]![1] as string)).toMatchObject({
+      nonce: 'nonce-1',
+      createdOrder: 42,
+    });
   });
 
   it('does not consume an offer from another Slack workspace', async () => {
@@ -82,6 +134,12 @@ describe('PR review action state', () => {
       'pr-review-action:nonce-1',
       'T2',
       '0',
+    );
+    expect(mockEval.mock.calls[0]?.[0]).toContain(
+      'if pending.retired then return nil end',
+    );
+    expect(mockEval.mock.calls[0]?.[0]).toContain(
+      "redis.call('set', KEYS[1], cjson.encode(pending), 'KEEPTTL')",
     );
   });
 
@@ -134,17 +192,109 @@ describe('PR review action state', () => {
   });
 
   it('attaches notification ids with an atomic compare-and-update script', async () => {
-    mockEval.mockResolvedValue(1);
+    mockGet.mockResolvedValue(
+      JSON.stringify({
+        nonce: 'nonce-1',
+        provider: 'discord',
+        channelId: 'channel-1',
+        threadId: 'thread-1',
+        repository: 'owner/repo',
+        prNumber: 42,
+      }),
+    );
+    mockEval.mockResolvedValue([]);
 
-    await attachPendingPrReviewActionMessage('nonce-1', 'message-1');
+    await expect(
+      attachPendingPrReviewActionMessage('nonce-1', 'message-1'),
+    ).resolves.toEqual([]);
 
     expect(mockEval).toHaveBeenCalledWith(
       expect.stringContaining("redis.call('get', KEYS[1])"),
-      1,
+      2,
       'pr-review-action:nonce-1',
+      'pr-review-action:thread:discord:channel-1:thread-1',
       'message-1',
+      'pr-review-action:',
     );
     expect(mockEval.mock.calls[0]?.[0]).toContain("'KEEPTTL'");
+    expect(mockEval.mock.calls[0]?.[0]).toContain(
+      'prior.repository == pending.repository',
+    );
+    expect(mockEval.mock.calls[0]?.[0]).toContain(
+      'priorCreatedOrder > pendingCreatedOrder',
+    );
+    expect(mockEval.mock.calls[0]?.[0]).toContain("redis.call('del', KEYS[1])");
+    expect(mockEval.mock.calls[0]?.[0]).toContain('pending.retired');
+    expect(mockEval.mock.calls[0]?.[0]).toContain('prior.retired = true');
+  });
+
+  it('returns and de-indexes the prior offer for the same PR context', async () => {
+    mockGet.mockResolvedValue(
+      JSON.stringify({
+        nonce: 'nonce-new',
+        provider: 'slack',
+        slackTeamId: 'T1',
+        channelId: 'C1',
+        threadId: '111.222',
+        repository: 'owner/repo',
+        prNumber: 42,
+      }),
+    );
+    mockEval.mockResolvedValue([
+      JSON.stringify({
+        nonce: 'nonce-old',
+        provider: 'slack',
+        slackTeamId: 'T1',
+        channelId: 'C1',
+        threadId: '111.222',
+        repository: 'owner/repo',
+        prNumber: 42,
+        messageId: 'message-old',
+      }),
+    ]);
+
+    await expect(
+      attachPendingPrReviewActionMessage('nonce-new', 'message-new'),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        nonce: 'nonce-old',
+        messageId: 'message-old',
+      }),
+    ]);
+
+    expect(mockEval.mock.calls[0]?.[3]).toBe(
+      'pr-review-action:thread:slack:T1:C1:111.222',
+    );
+    expect(mockEval.mock.calls[0]?.[0]).toContain(
+      'prior.prNumber == pending.prNumber',
+    );
+  });
+
+  it('returns a late-posting offer so its own stale controls are retired', async () => {
+    const lateOffer = {
+      nonce: 'nonce-old',
+      provider: 'discord',
+      createdOrder: 1,
+      retired: true,
+      channelId: 'channel-1',
+      threadId: 'thread-1',
+      repository: 'owner/repo',
+      prNumber: 42,
+    };
+    mockGet.mockResolvedValue(JSON.stringify(lateOffer));
+    mockEval.mockResolvedValue([
+      JSON.stringify({ ...lateOffer, messageId: 'message-old' }),
+    ]);
+
+    await expect(
+      attachPendingPrReviewActionMessage('nonce-old', 'message-old'),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        nonce: 'nonce-old',
+        messageId: 'message-old',
+        retired: true,
+      }),
+    ]);
   });
 
   it('claims every indexed offer through one atomic script', async () => {
@@ -167,6 +317,7 @@ describe('PR review action state', () => {
       'pr-review-action:',
     );
     expect(mockEval.mock.calls[0]?.[0]).toContain("redis.call('del', KEYS[1])");
+    expect(mockEval.mock.calls[0]?.[0]).toContain('pending.retired = true');
   });
 
   it('isolates Slack thread indexes by workspace', async () => {

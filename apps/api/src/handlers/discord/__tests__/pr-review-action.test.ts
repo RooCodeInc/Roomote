@@ -1,13 +1,16 @@
 const mocks = vi.hoisted(() => ({
   claimPending: vi.fn(),
+  claimThread: vi.fn(),
   dispatchFollowUp: vi.fn(),
   findMappedUser: vi.fn(),
   reply: vi.fn(),
+  editMessage: vi.fn(),
+  getMessage: vi.fn(),
 }));
 
 vi.mock('@roomote/sdk/server', () => ({
   claimPendingPrReviewAction: mocks.claimPending,
-  claimPendingPrReviewActionsForThread: vi.fn(),
+  claimPendingPrReviewActionsForThread: mocks.claimThread,
   dispatchPrReviewFollowUp: mocks.dispatchFollowUp,
   enableAutoHandlePrReviewFeedback: vi.fn(),
   findDiscordMappedUserId: mocks.findMappedUser,
@@ -15,7 +18,15 @@ vi.mock('@roomote/sdk/server', () => ({
 
 vi.mock('../replies.js', () => ({ replyToDiscordEvent: mocks.reply }));
 
-import { handleDiscordPrReviewActionCallback } from '../pr-review-action.js';
+import {
+  handleDiscordPrReviewActionCallback,
+  retireDiscordPrReviewOffersBestEffort,
+} from '../pr-review-action.js';
+
+const provider = {
+  editMessage: mocks.editMessage,
+  getMessage: mocks.getMessage,
+};
 
 describe('handleDiscordPrReviewActionCallback', () => {
   beforeEach(() => {
@@ -30,11 +41,13 @@ describe('handleDiscordPrReviewActionCallback', () => {
       followUpPrompt: 'Address the feedback.',
     });
     mocks.dispatchFollowUp.mockResolvedValue({ outcome: 'queued' });
+    mocks.editMessage.mockResolvedValue(undefined);
+    mocks.getMessage.mockResolvedValue(null);
   });
 
   it('preserves the feedback card and renders auto-resolve as a regular message', async () => {
     await handleDiscordPrReviewActionCallback({
-      provider: {} as never,
+      provider: provider as never,
       applicationId: 'app-1',
       interaction: {
         id: 'interaction-1',
@@ -71,6 +84,11 @@ describe('handleDiscordPrReviewActionCallback', () => {
       }),
     );
     expect(mocks.reply.mock.calls[0]?.[0]).not.toHaveProperty('buttons');
+    expect(mocks.editMessage).toHaveBeenCalledWith({
+      channelId: 'thread-1',
+      messageId: 'message-1',
+      text: 'Review feedback: add a regression test.',
+    });
     expect(mocks.dispatchFollowUp).toHaveBeenCalledWith({
       provider: 'discord',
       taskId: 'task-1',
@@ -86,7 +104,7 @@ describe('handleDiscordPrReviewActionCallback', () => {
     mocks.claimPending.mockResolvedValue(null);
 
     await handleDiscordPrReviewActionCallback({
-      provider: {} as never,
+      provider: provider as never,
       applicationId: 'app-1',
       interaction: {
         id: 'interaction-1',
@@ -122,13 +140,18 @@ describe('handleDiscordPrReviewActionCallback', () => {
         text: 'Review feedback: add a regression test.\n\n-# This offer was already handled or has expired.',
       }),
     );
+    expect(mocks.editMessage).toHaveBeenCalledWith({
+      channelId: 'thread-1',
+      messageId: 'message-1',
+      text: 'Review feedback: add a regression test.',
+    });
   });
 
   it('renders the resolution as subtext when the feedback is empty', async () => {
     mocks.claimPending.mockResolvedValue(null);
 
     await handleDiscordPrReviewActionCallback({
-      provider: {} as never,
+      provider: provider as never,
       applicationId: 'app-1',
       interaction: {
         id: 'interaction-1',
@@ -170,7 +193,7 @@ describe('handleDiscordPrReviewActionCallback', () => {
     const content = 'x'.repeat(2_000);
 
     await handleDiscordPrReviewActionCallback({
-      provider: {} as never,
+      provider: provider as never,
       applicationId: 'app-1',
       interaction: {
         id: 'interaction-1',
@@ -206,5 +229,50 @@ describe('handleDiscordPrReviewActionCallback', () => {
     expect(text).toMatch(
       /\.\.\.\n\n-# On it — resolving the review feedback\.$/,
     );
+  });
+});
+
+describe('retireDiscordPrReviewOffersBestEffort', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.editMessage.mockResolvedValue(undefined);
+  });
+
+  it('removes controls from every offer claimed by a typed reply', async () => {
+    mocks.claimThread.mockResolvedValue([
+      {
+        messageId: 'message-1',
+        channelId: 'channel-1',
+        threadId: 'thread-1',
+      },
+      {
+        messageId: 'message-2',
+        channelId: 'channel-1',
+        threadId: 'thread-1',
+      },
+    ]);
+    mocks.getMessage
+      .mockResolvedValueOnce({ text: 'First review offer' })
+      .mockResolvedValueOnce({ text: 'Second review offer' });
+
+    retireDiscordPrReviewOffersBestEffort({
+      provider: provider as never,
+      channelId: 'channel-1',
+      threadId: 'thread-1',
+    });
+
+    await vi.waitFor(() => {
+      expect(mocks.editMessage).toHaveBeenCalledTimes(2);
+    });
+    expect(mocks.editMessage).toHaveBeenNthCalledWith(1, {
+      channelId: 'thread-1',
+      messageId: 'message-1',
+      text: 'First review offer',
+    });
+    expect(mocks.editMessage).toHaveBeenNthCalledWith(2, {
+      channelId: 'thread-1',
+      messageId: 'message-2',
+      text: 'Second review offer',
+    });
   });
 });
