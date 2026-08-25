@@ -42,6 +42,7 @@ const nativeToolNames = vi.hoisted(
       sendChatReaction: 'send_chat_reaction',
       sendChatReply: 'send_chat_reply',
       sendTaskMessage: 'send_task_message',
+      loadSkill: 'load_skill',
       spillGrep: 'spill_grep',
       spillRead: 'spill_read',
     }) as const,
@@ -470,12 +471,12 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       mocks.bindExecutor.mock.calls.find(
         ([sessionID]) => sessionID === 'opencode-session-1',
       )?.[3],
-    ).toMatchObject({ allowSpillRecovery: true });
+    ).toMatchObject({ allowSkillAccess: true, allowSpillRecovery: true });
     expect(
       mocks.bindExecutor.mock.calls.find(
         ([sessionID]) => sessionID === 'opencode-subagent-1',
       )?.[3],
-    ).toMatchObject({ allowSpillRecovery: false });
+    ).toMatchObject({ allowSkillAccess: false, allowSpillRecovery: false });
   });
 
   it('rebuilds an invalidated OpenCode session from canonical compatibility history', async () => {

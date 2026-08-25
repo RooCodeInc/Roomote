@@ -6,6 +6,7 @@ export const FAST_AGENT_NATIVE_TOOL_NAMES = {
   sendChatReaction: 'send_chat_reaction',
   sendChatReply: 'send_chat_reply',
   sendTaskMessage: 'send_task_message',
+  loadSkill: 'load_skill',
   spillGrep: 'spill_grep',
   spillRead: 'spill_read',
 } as const;

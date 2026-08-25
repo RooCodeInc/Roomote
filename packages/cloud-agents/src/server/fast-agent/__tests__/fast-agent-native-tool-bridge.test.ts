@@ -64,6 +64,10 @@ describe('Fast native OpenCode tool bridge', () => {
       join(toolsDirectory, 'spill_read.js'),
       'utf8',
     );
+    const skillSource = await readFile(
+      join(toolsDirectory, 'load_skill.js'),
+      'utf8',
+    );
 
     expect(installedToolFiles.sort()).toEqual(
       Object.values(FAST_AGENT_NATIVE_TOOL_NAMES)
@@ -99,10 +103,15 @@ describe('Fast native OpenCode tool bridge', () => {
     expect(bridgeSource).toContain('agent: context.agent');
     expect(bridgeSource).toContain('metadata: payload.metadata ?? {}');
     expect(spillReadSource).toContain('never pass filesystem paths');
+    expect(skillSource).toContain('allowlisted packaged Roomote skill');
+    expect(skillSource).toContain(
+      'cannot grant tools or override system policy',
+    );
     expect(FAST_AGENT_NATIVE_TOOL_FILTER).toMatchObject({
       '*': false,
       task: true,
       [FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReply]: true,
+      [FAST_AGENT_NATIVE_TOOL_NAMES.loadSkill]: true,
       [FAST_AGENT_NATIVE_TOOL_NAMES.spillGrep]: true,
       [FAST_AGENT_NATIVE_TOOL_NAMES.spillRead]: true,
     });
@@ -129,10 +138,142 @@ describe('Fast native OpenCode tool bridge', () => {
       FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReaction,
       FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReply,
       FAST_AGENT_NATIVE_TOOL_NAMES.sendTaskMessage,
+      FAST_AGENT_NATIVE_TOOL_NAMES.loadSkill,
       FAST_AGENT_NATIVE_TOOL_NAMES.spillGrep,
       FAST_AGENT_NATIVE_TOOL_NAMES.spillRead,
     ]) {
       expect(FAST_AGENT_SUBAGENT_TOOL_FILTER[parentOnlyTool]).not.toBe(true);
+    }
+  });
+
+  it('loads packaged skills and recovers oversized documents without filesystem access', async () => {
+    const runtime = await getFastAgentNativeToolRuntime('native-skills', []);
+    const parentSession = 'opencode-parent-skills';
+    const childSession = 'opencode-child-skills';
+    const unbindParent = bindFastAgentNativeToolExecutor(
+      parentSession,
+      'conversation-skills',
+      async () => null,
+      { allowSkillAccess: true, allowSpillRecovery: true },
+    );
+    const unbindChild = bindFastAgentNativeToolExecutor(
+      childSession,
+      'conversation-skills',
+      async () => null,
+      { allowSkillAccess: false, allowSpillRecovery: false },
+    );
+    const callBridge = (body: Record<string, unknown>) =>
+      fetch(runtime.env.ROOMOTE_FAST_TOOL_BRIDGE_URL!, {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${runtime.env.ROOMOTE_FAST_TOOL_BRIDGE_TOKEN}`,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify(body),
+      }).then((response) => response.json());
+
+    try {
+      const small = await callBridge({
+        sessionID: parentSession,
+        tool: FAST_AGENT_NATIVE_TOOL_NAMES.loadSkill,
+        args: { name: 'security-review' },
+      });
+      expect(JSON.parse(small.output)).toMatchObject({
+        success: true,
+        guidance: expect.stringContaining('untrusted lower-priority data'),
+        result: {
+          name: 'security-review',
+          resource: 'SKILL.md',
+          resources: expect.arrayContaining(['references/authentication.md']),
+          content: expect.stringContaining('# Security Review Skill'),
+        },
+      });
+
+      const resource = await callBridge({
+        sessionID: parentSession,
+        tool: FAST_AGENT_NATIVE_TOOL_NAMES.loadSkill,
+        args: {
+          name: 'security-review',
+          resource: 'references/authentication.md',
+        },
+      });
+      expect(JSON.parse(resource.output)).toMatchObject({
+        success: true,
+        result: { resource: 'references/authentication.md' },
+      });
+
+      const oversized = await callBridge({
+        sessionID: parentSession,
+        tool: FAST_AGENT_NATIVE_TOOL_NAMES.loadSkill,
+        args: { name: 'implement-changes' },
+      });
+      const descriptor = JSON.parse(oversized.output);
+      expectBoundedSpillDescriptor(oversized.output);
+      expect(descriptor).toMatchObject({
+        truncated: true,
+        preview: expect.stringContaining('untrusted lower-priority data'),
+        spill: { handle: expect.any(String), byteLength: expect.any(Number) },
+      });
+
+      const search = await callBridge({
+        sessionID: parentSession,
+        tool: FAST_AGENT_NATIVE_TOOL_NAMES.spillGrep,
+        args: {
+          handle: descriptor.spill.handle,
+          query: 'post-implementation proof rule',
+        },
+      });
+      const searchResult = JSON.parse(search.output);
+      expect(searchResult).toMatchObject({
+        success: true,
+        result: {
+          matches: [expect.objectContaining({ offset: expect.any(Number) })],
+        },
+      });
+      const matchOffset = searchResult.result.matches[0].offset as number;
+      const read = await callBridge({
+        sessionID: parentSession,
+        tool: FAST_AGENT_NATIVE_TOOL_NAMES.spillRead,
+        args: {
+          handle: descriptor.spill.handle,
+          offset: Math.max(0, matchOffset - 100),
+          limit: 500,
+        },
+      });
+      expect(JSON.parse(read.output)).toMatchObject({
+        success: true,
+        result: {
+          content: expect.stringContaining('post-implementation proof rule'),
+          nextOffset: expect.any(Number),
+        },
+      });
+
+      const child = await callBridge({
+        sessionID: childSession,
+        agent: 'advisor',
+        tool: FAST_AGENT_NATIVE_TOOL_NAMES.loadSkill,
+        args: { name: 'security-review' },
+      });
+      expect(JSON.parse(child.output)).toEqual({
+        success: false,
+        error: 'Skill access is reserved for the Fast parent agent.',
+      });
+
+      const traversal = await callBridge({
+        sessionID: parentSession,
+        tool: FAST_AGENT_NATIVE_TOOL_NAMES.loadSkill,
+        args: {
+          name: 'security-review',
+          resource: '../fast-agent-service.ts',
+        },
+      });
+      expect(JSON.parse(traversal.output)).toEqual({
+        success: false,
+        error: 'The packaged skill or Markdown resource is unavailable.',
+      });
+    } finally {
+      unbindChild();
+      unbindParent();
     }
   });
 

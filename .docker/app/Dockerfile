@@ -376,6 +376,7 @@ COPY --chown=roomote-app:roomote-app --from=build-web /roomote/apps/docs ./apps/
 COPY --from=build-api /roomote/apps/api/package.json ./apps/api/
 COPY --from=build-api /roomote/apps/api/dist ./apps/api/dist/
 COPY --from=build-api /runtime-deps/node_modules ./apps/api/node_modules/
+COPY --chown=roomote-app:roomote-app --from=build-api /roomote/packages/cloud-agents/src/server/workflows/skills/standard ./skills/standard/
 COPY --from=build-api /migrate /roomote/migrate/
 COPY --from=build-controller /roomote/releases /roomote/releases/
 COPY --from=build-controller /roomote/apps/controller/package.json ./apps/controller/
