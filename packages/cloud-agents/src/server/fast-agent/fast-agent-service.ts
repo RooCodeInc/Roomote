@@ -708,7 +708,6 @@ export async function answerFastAgentQuestion({
     const integrationCallSignatures = new Set<string>();
     const completedTaskActions = new Set<string>();
     let visibleUpdatePosted = false;
-    let kickoffPosted = false;
     let closed = false;
     let nativeToolInvoked = false;
     let retriedTaskStart = false;
@@ -1062,7 +1061,6 @@ export async function answerFastAgentQuestion({
                 true,
               );
               kickoffDelivered = true;
-              kickoffPosted = true;
             };
             throwIfTurnCancelled();
             const result = await adapter.launchTask({
@@ -1076,7 +1074,6 @@ export async function answerFastAgentQuestion({
               currentActiveTasks.set(result.taskId, { taskId: result.taskId });
               if (result.kickoffDelivered) {
                 visibleUpdatePosted = true;
-                kickoffPosted = true;
               }
               if (!kickoffDelivered && !result.kickoffDelivered) {
                 await deliverKickoff(result);
@@ -1336,9 +1333,9 @@ export async function answerFastAgentQuestion({
       const message = promptText.trim();
       if (message) {
         await postReply({ purpose: 'closeout', message });
-      } else if (!kickoffPosted) {
-        // A delivered kickoff is already a complete visible handoff artifact.
-        // Stay silent rather than append a generic closeout that duplicates it.
+      } else if (!visibleUpdatePosted) {
+        // A delivered update is already a complete visible response. Stay
+        // silent rather than append a generic closeout that contradicts it.
         await postReply({
           purpose: 'closeout',
           message:
