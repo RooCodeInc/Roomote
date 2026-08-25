@@ -13,7 +13,6 @@ const {
   mockResolveEffectiveModelRuntimeEnv,
   recordLlmUsageMock,
   sessionAbortMock,
-  sessionChildrenMock,
   spawnMock,
   sessionCreateMock,
   sessionMessagesMock,
@@ -28,7 +27,6 @@ const {
   mockResolveEffectiveModelRuntimeEnv: vi.fn(),
   recordLlmUsageMock: vi.fn(),
   sessionAbortMock: vi.fn(),
-  sessionChildrenMock: vi.fn(),
   spawnMock: vi.fn(),
   sessionCreateMock: vi.fn(),
   sessionMessagesMock: vi.fn(),
@@ -142,14 +140,12 @@ describe('resolveOpenCodeSmallModel', () => {
       },
       session: {
         abort: sessionAbortMock,
-        children: sessionChildrenMock,
         create: sessionCreateMock,
         messages: sessionMessagesMock,
         prompt: sessionPromptMock,
       },
     });
     sessionAbortMock.mockResolvedValue({ data: true, error: undefined });
-    sessionChildrenMock.mockResolvedValue({ data: [], error: undefined });
     sessionCreateMock.mockResolvedValue({
       data: { id: 'session-1' },
       error: undefined,
@@ -471,6 +467,7 @@ describe('resolveOpenCodeSmallModel', () => {
     ) => ({
       id,
       sessionID,
+      parentID: 'message-user-current',
       role: 'assistant' as const,
       providerID: 'openrouter',
       modelID: 'openai/gpt-5.4',
@@ -531,6 +528,17 @@ describe('resolveOpenCodeSmallModel', () => {
             info: usageInfo('message-judge', 'session-judge', 'judge', 0.003),
           },
         };
+        yield {
+          type: 'message.updated',
+          properties: {
+            info: usageInfo(
+              'message-parent-final',
+              'session-1',
+              'build',
+              0.004,
+            ),
+          },
+        };
         markEventsComplete();
       })(),
     });
@@ -544,55 +552,6 @@ describe('resolveOpenCodeSmallModel', () => {
         error: undefined,
       };
     });
-    sessionChildrenMock.mockResolvedValue({
-      data: [
-        { id: 'session-advisor', parentID: 'session-1' },
-        { id: 'session-judge', parentID: 'session-1' },
-      ],
-      error: undefined,
-    });
-    sessionMessagesMock.mockImplementation(
-      async ({ sessionID }: { sessionID: string }) => ({
-        data:
-          sessionID === 'session-1'
-            ? [
-                { info: intermediateInfo, parts: [] },
-                {
-                  info: usageInfo(
-                    'message-parent-final',
-                    'session-1',
-                    'build',
-                    0.004,
-                  ),
-                  parts: [],
-                },
-              ]
-            : sessionID === 'session-advisor'
-              ? [
-                  {
-                    info: usageInfo(
-                      'message-advisor',
-                      'session-advisor',
-                      'advisor',
-                      0.002,
-                    ),
-                    parts: [],
-                  },
-                ]
-              : [
-                  {
-                    info: usageInfo(
-                      'message-judge',
-                      'session-judge',
-                      'judge',
-                      0.003,
-                    ),
-                    parts: [],
-                  },
-                ],
-        error: undefined,
-      }),
-    );
     const { generateTrackedNonTaskTextInOpenCodeSession } =
       await import('../non-task-provider-usage.js');
 
@@ -612,6 +571,7 @@ describe('resolveOpenCodeSmallModel', () => {
     );
 
     expect(recordLlmUsageMock).toHaveBeenCalledTimes(4);
+    expect(sessionMessagesMock).not.toHaveBeenCalled();
     expect(
       recordLlmUsageMock.mock.calls.map(([usage]) => ({
         eventKey: usage.eventKey,
@@ -648,6 +608,145 @@ describe('resolveOpenCodeSmallModel', () => {
         userId: 'user-1',
         source: 'fast_agent',
         agent: 'build',
+      },
+    ]);
+  });
+
+  it('bounds fallback reconciliation to the current Fast turn', async () => {
+    mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
+      R_MODEL: 'openrouter/openai/gpt-5.4',
+    });
+    const completedTime = Date.parse('2026-08-21T10:00:02.000Z');
+    const usageInfo = (
+      id: string,
+      sessionID: string,
+      parentID: string,
+      agent: string,
+    ) => ({
+      id,
+      sessionID,
+      parentID,
+      role: 'assistant' as const,
+      providerID: 'openrouter',
+      modelID: 'openai/gpt-5.4',
+      agent,
+      tokens: {
+        input: 100,
+        output: 20,
+        reasoning: 5,
+        cache: { read: 10, write: 0 },
+      },
+      cost: 0.001,
+      time: { created: completedTime - 1_000, completed: completedTime },
+    });
+    eventSubscribeMock.mockResolvedValue({
+      stream: (async function* () {
+        yield {
+          type: 'session.created',
+          properties: {
+            sessionID: 'session-advisor-current',
+            info: { id: 'session-advisor-current', parentID: 'session-1' },
+          },
+        };
+      })(),
+    });
+    const finalInfo = usageInfo(
+      'message-parent-final-current',
+      'session-1',
+      'message-user-current',
+      'build',
+    );
+    sessionPromptMock.mockResolvedValue({
+      data: {
+        info: finalInfo,
+        parts: [{ type: 'text', text: 'tracked answer' }],
+      },
+      error: undefined,
+    });
+    sessionMessagesMock.mockImplementation(
+      async ({ sessionID, limit }: { sessionID: string; limit?: number }) => ({
+        data:
+          sessionID === 'session-1'
+            ? [
+                {
+                  info: usageInfo(
+                    'message-parent-historical',
+                    'session-1',
+                    'message-user-historical',
+                    'build',
+                  ),
+                  parts: [],
+                },
+                {
+                  info: usageInfo(
+                    'message-parent-intermediate-current',
+                    'session-1',
+                    'message-user-current',
+                    'build',
+                  ),
+                  parts: [],
+                },
+                { info: finalInfo, parts: [] },
+              ]
+            : [
+                {
+                  info: usageInfo(
+                    'message-advisor-current',
+                    'session-advisor-current',
+                    'message-advisor-user',
+                    'advisor',
+                  ),
+                  parts: [],
+                },
+              ],
+        error: undefined,
+        limit,
+      }),
+    );
+    const { generateTrackedNonTaskTextInOpenCodeSession } =
+      await import('../non-task-provider-usage.js');
+
+    await generateTrackedNonTaskTextInOpenCodeSession(
+      {
+        surface: 'fast_agent',
+        userId: 'user-current',
+        prompt: 'Use an advisor.',
+      },
+      {},
+      {
+        directory: '/tmp/roomote-fast-native-test',
+        onSubagentSessionReady: vi.fn(),
+        trackSessionTreeUsage: true,
+        tools: { '*': false, task: true },
+      },
+    );
+
+    expect(sessionMessagesMock).toHaveBeenCalledTimes(2);
+    expect(sessionMessagesMock).toHaveBeenCalledWith({
+      sessionID: 'session-1',
+      directory: '/tmp/roomote-fast-native-test',
+      limit: 100,
+    });
+    expect(recordLlmUsageMock).toHaveBeenCalledTimes(3);
+    expect(
+      recordLlmUsageMock.mock.calls.map(([usage]) => ({
+        eventKey: usage.eventKey,
+        userId: usage.userId,
+      })),
+    ).toEqual([
+      {
+        eventKey: 'non-task:fast_agent:session-1:message-parent-final-current',
+        userId: 'user-current',
+      },
+      {
+        eventKey:
+          'non-task:fast_agent:session-1:message-parent-intermediate-current',
+        userId: 'user-current',
+      },
+      {
+        eventKey:
+          'non-task:fast_agent:session-advisor-current:message-advisor-current',
+        userId: 'user-current',
       },
     ]);
   });

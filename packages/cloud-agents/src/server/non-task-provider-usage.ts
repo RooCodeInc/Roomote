@@ -278,6 +278,7 @@ function openCodeTimestampToDate(value: unknown): Date | undefined {
 type NonTaskOpenCodeMessageInfo = {
   id?: unknown;
   sessionID?: unknown;
+  parentID?: unknown;
   providerID?: unknown;
   modelID?: unknown;
   agent?: unknown;
@@ -800,20 +801,45 @@ async function runNonTaskSdkPrompt(
 
     const trackedSessionIds = new Set([sessionId]);
     const usageRecordings = new Map<string, Promise<void>>();
-    const recordUsageOnce = (info: NonTaskOpenCodeMessageInfo) => {
+    const observedUsageEventKeys = new Set<string>();
+    const usageEventWaiters = new Map<string, () => void>();
+    const getUsageKey = (info: NonTaskOpenCodeMessageInfo) => {
       const usageSessionId = asString(info.sessionID);
       const usageMessageId = asString(info.id);
-      if (!usageSessionId || !usageMessageId) {
+      return usageSessionId && usageMessageId
+        ? `${usageSessionId}:${usageMessageId}`
+        : undefined;
+    };
+    const recordUsageOnce = (info: NonTaskOpenCodeMessageInfo) => {
+      const usageKey = getUsageKey(info);
+      if (!usageKey) {
         return recordNonTaskOpenCodeUsage(params, model, info);
       }
 
-      const usageKey = `${usageSessionId}:${usageMessageId}`;
       const existing = usageRecordings.get(usageKey);
       if (existing) return existing;
 
       const recording = recordNonTaskOpenCodeUsage(params, model, info);
       usageRecordings.set(usageKey, recording);
       return recording;
+    };
+    const markUsageEventObserved = (info: NonTaskOpenCodeMessageInfo) => {
+      const usageKey = getUsageKey(info);
+      if (!usageKey) return;
+
+      observedUsageEventKeys.add(usageKey);
+      usageEventWaiters.get(usageKey)?.();
+      usageEventWaiters.delete(usageKey);
+    };
+    const waitForUsageEvent = (info: NonTaskOpenCodeMessageInfo) => {
+      const usageKey = getUsageKey(info);
+      if (!usageKey || observedUsageEventKeys.has(usageKey)) {
+        return Promise.resolve(true);
+      }
+
+      return new Promise<boolean>((resolve) => {
+        usageEventWaiters.set(usageKey, () => resolve(true));
+      });
     };
 
     const eventAbortController = new AbortController();
@@ -868,6 +894,7 @@ async function runNonTaskSdkPrompt(
                 trackedSessionIds.has(event.properties.info.sessionID)
               ) {
                 void recordUsageOnce(event.properties.info);
+                markUsageEventObserved(event.properties.info);
               } else if (
                 event.type === 'session.status' &&
                 event.properties.sessionID === sessionId &&
@@ -987,57 +1014,48 @@ async function runNonTaskSdkPrompt(
 
       await recordUsageOnce(promptResult.data.info);
       if (options.trackSessionTreeUsage) {
-        try {
-          const childrenResult = await client.session.children({
-            sessionID: sessionId,
-            directory: sessionDirectory,
-          });
-          if (childrenResult.error || !childrenResult.data) {
-            console.warn(
-              `[NonTaskProviderUsage] Could not reconcile OpenCode child sessions: ${formatOpenCodeSdkError(childrenResult.error)}`,
-            );
-          } else {
-            for (const child of childrenResult.data) {
-              trackedSessionIds.add(child.id);
-            }
-          }
-        } catch (error) {
-          console.warn(
-            `[NonTaskProviderUsage] Could not reconcile OpenCode child sessions: ${formatOpenCodeSdkError(error)}`,
+        const finalEventObserved = await Promise.race([
+          waitForUsageEvent(promptResult.data.info),
+          eventMonitor?.then(() => false) ?? Promise.resolve(false),
+        ]);
+        if (!finalEventObserved) {
+          const currentParentId = asString(promptResult.data.info.parentID);
+          await Promise.all(
+            [...trackedSessionIds].map(async (trackedSessionId) => {
+              try {
+                const messagesResult = await client.session.messages({
+                  sessionID: trackedSessionId,
+                  directory: sessionDirectory,
+                  limit: 100,
+                });
+                if (messagesResult.error || !messagesResult.data) {
+                  console.warn(
+                    `[NonTaskProviderUsage] Could not reconcile OpenCode usage for session ${trackedSessionId}: ${formatOpenCodeSdkError(messagesResult.error)}`,
+                  );
+                  return;
+                }
+
+                await Promise.all(
+                  messagesResult.data
+                    .map((message) => message.info)
+                    .filter(
+                      (info) =>
+                        info.role === 'assistant' &&
+                        info.time.completed !== undefined &&
+                        (trackedSessionId !== sessionId ||
+                          (currentParentId !== undefined &&
+                            asString(info.parentID) === currentParentId)),
+                    )
+                    .map(recordUsageOnce),
+                );
+              } catch (error) {
+                console.warn(
+                  `[NonTaskProviderUsage] Could not reconcile OpenCode usage for session ${trackedSessionId}: ${formatOpenCodeSdkError(error)}`,
+                );
+              }
+            }),
           );
         }
-
-        await Promise.all(
-          [...trackedSessionIds].map(async (trackedSessionId) => {
-            try {
-              const messagesResult = await client.session.messages({
-                sessionID: trackedSessionId,
-                directory: sessionDirectory,
-              });
-              if (messagesResult.error || !messagesResult.data) {
-                console.warn(
-                  `[NonTaskProviderUsage] Could not reconcile OpenCode usage for session ${trackedSessionId}: ${formatOpenCodeSdkError(messagesResult.error)}`,
-                );
-                return;
-              }
-
-              await Promise.all(
-                messagesResult.data
-                  .map((message) => message.info)
-                  .filter(
-                    (info) =>
-                      info.role === 'assistant' &&
-                      info.time.completed !== undefined,
-                  )
-                  .map(recordUsageOnce),
-              );
-            } catch (error) {
-              console.warn(
-                `[NonTaskProviderUsage] Could not reconcile OpenCode usage for session ${trackedSessionId}: ${formatOpenCodeSdkError(error)}`,
-              );
-            }
-          }),
-        );
         await Promise.all(usageRecordings.values());
       }
 
