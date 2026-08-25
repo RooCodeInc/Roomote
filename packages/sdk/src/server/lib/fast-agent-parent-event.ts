@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from 'node:crypto';
+import { createHash } from 'node:crypto';
 import { basename } from 'node:path';
 
 import {
@@ -309,6 +309,12 @@ function buildEventClientMessageSeed(event: FastAgentParentEvent): string {
   }
 }
 
+function buildPrReviewActionNonce(event: FastAgentParentEvent): string {
+  return buildSlackClientMessageId(
+    `${buildEventClientMessageSeed(event)}:pr-review-action`,
+  );
+}
+
 type FastAgentParentTurn = {
   userId: string;
   conversation: FastAgentConversation;
@@ -491,7 +497,7 @@ async function createSlackFastAgentParentTurn(params: {
           params.event.pullRequest.repository &&
           params.event.pullRequest.number
             ? {
-                nonce: randomUUID(),
+                nonce: buildPrReviewActionNonce(params.event),
                 taskId: params.event.taskId,
                 question: params.event.suggestedActionQuestion,
                 followUpPrompt: params.event.suggestedActionPrompt,
@@ -697,7 +703,7 @@ async function createDiscordFastAgentParentTurn(params: {
           params.event.pullRequest.repository &&
           params.event.pullRequest.number
             ? {
-                nonce: randomUUID(),
+                nonce: buildPrReviewActionNonce(params.event),
                 taskId: params.event.taskId,
                 question: params.event.suggestedActionQuestion,
                 followUpPrompt: params.event.suggestedActionPrompt,

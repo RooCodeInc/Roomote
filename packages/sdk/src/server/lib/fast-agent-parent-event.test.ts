@@ -893,6 +893,89 @@ describe('deliverFastAgentParentEvent', () => {
     );
   });
 
+  it('preserves Discord action callbacks when attachment failure retries the post', async () => {
+    const feedbackEvent = {
+      type: 'pull_request_feedback' as const,
+      feedbackId: 'feedback-retry',
+      taskId: 'task-1',
+      runId: 42,
+      taskUrl: 'https://roomote.example/task/task-1',
+      pullRequest: {
+        provider: 'github' as const,
+        host: 'github.com',
+        repository: 'acme/web',
+        number: 42,
+        title: 'Fix review feedback',
+        url: 'https://github.com/acme/web/pull/42',
+        status: 'open' as const,
+      },
+      summary: 'Alice requested changes.',
+      suggestedActionQuestion: 'Want me to resolve these issues?',
+      suggestedActionPrompt: 'Address the requested changes.',
+    };
+    const discordParent = {
+      ...parent,
+      conversation: {
+        surface: 'discord' as const,
+        workspaceId: 'guild-1',
+        conversationId: 'thread-1',
+        replyTarget: { channelId: 'channel-1', threadId: 'thread-1' },
+      },
+    };
+    mocks.answerQuestion.mockImplementation(
+      async ({
+        adapter,
+      }: {
+        adapter: { postReply: (reply: unknown) => unknown };
+      }) =>
+        adapter.postReply({
+          purpose: 'closeout',
+          message: 'There is new PR feedback.',
+        }),
+    );
+    mocks.discordPostMessage.mockResolvedValue({
+      provider: 'discord',
+      channelId: 'channel-1',
+      threadId: 'thread-1',
+      messageId: 'message-with-actions',
+    });
+    mocks.attachPendingPrReviewActionMessage
+      .mockRejectedValueOnce(new Error('attachment failed'))
+      .mockResolvedValueOnce([]);
+
+    await expect(
+      deliverFastAgentParentEvent({
+        parent: discordParent,
+        event: feedbackEvent,
+      }),
+    ).rejects.toThrow('attachment failed');
+    await expect(
+      deliverFastAgentParentEvent({
+        parent: discordParent,
+        event: feedbackEvent,
+      }),
+    ).resolves.toBe('delivered');
+
+    const firstNonce = mocks.setPendingPrReviewAction.mock.calls[0]?.[0]?.nonce;
+    const secondNonce =
+      mocks.setPendingPrReviewAction.mock.calls[1]?.[0]?.nonce;
+    expect(firstNonce).toEqual(expect.any(String));
+    expect(secondNonce).toBe(firstNonce);
+    expect(mocks.discordPostMessage.mock.calls[0]?.[0]?.buttons).toEqual(
+      mocks.discordPostMessage.mock.calls[1]?.[0]?.buttons,
+    );
+    expect(mocks.attachPendingPrReviewActionMessage).toHaveBeenNthCalledWith(
+      1,
+      firstNonce,
+      'message-with-actions',
+    );
+    expect(mocks.attachPendingPrReviewActionMessage).toHaveBeenNthCalledWith(
+      2,
+      firstNonce,
+      'message-with-actions',
+    );
+  });
+
   it('delivers a pull request status event with a stable idempotency key', async () => {
     const statusEvent = {
       type: 'pull_request_status_changed' as const,
