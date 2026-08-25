@@ -129,7 +129,7 @@ describe('provider usage limit automation', () => {
       title: { text: 'Inference Provider Usage Alert' },
       subtitle: {
         type: 'mrkdwn',
-        text: 'OpenRouter (`Production`) is at 90% ($90.00 of $100.00)',
+        text: 'OpenRouter is at 90% ($90.00 of $100.00)',
       },
       icon: {
         image_url: expect.stringContaining(
@@ -137,10 +137,8 @@ describe('provider usage limit automation', () => {
         ),
       },
     });
-    expect(JSON.stringify(message.blocks)).toContain('(`Production`)');
-    expect(JSON.stringify(message.blocks)).not.toContain(
-      'Production (abc123def456)',
-    );
+    expect(JSON.stringify(message.blocks)).not.toContain('Production');
+    expect(JSON.stringify(message.blocks)).not.toContain('abc123def456');
     expect(message.blocks[0]).toMatchObject({
       child_blocks: [
         {
@@ -227,7 +225,7 @@ describe('provider usage limit automation', () => {
 
     expect(deps.postMessage).toHaveBeenCalledTimes(2);
     expect(JSON.stringify(deps.postMessage.mock.calls[1]?.[0])).toContain(
-      'OpenRouter (`Production`) is at 100% ($100.00 of $100.00)',
+      'OpenRouter is at 100% ($100.00 of $100.00)',
     );
   });
 
@@ -330,6 +328,9 @@ describe('provider usage limit automation', () => {
           ],
         ],
       }),
+    );
+    expect(adapterPostMessage.mock.calls[0]?.[0]?.text).not.toContain(
+      'Production',
     );
   });
 

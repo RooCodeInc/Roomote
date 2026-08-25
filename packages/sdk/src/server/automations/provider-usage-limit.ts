@@ -219,17 +219,6 @@ function formatUsage(snapshot: ProviderUsageLimitSnapshot, percent: number) {
     : `${percent}% of 100% (raw usage and limit not reported)`;
 }
 
-function formatCredentialLabel(snapshot: ProviderUsageLimitSnapshot) {
-  return snapshot.credentialLabel.endsWith(
-    ` (${snapshot.credentialFingerprint})`,
-  )
-    ? snapshot.credentialLabel.slice(
-        0,
-        -` (${snapshot.credentialFingerprint})`.length,
-      )
-    : snapshot.credentialLabel;
-}
-
 function formatSnapshot({
   snapshot,
   threshold,
@@ -237,13 +226,11 @@ function formatSnapshot({
 }: ProviderUsageLimitAlert): string {
   const percent = Math.round(snapshot.usedPercent * 10) / 10;
   const usage = formatUsage(snapshot, percent);
-  const credentialLabel = formatCredentialLabel(snapshot);
 
   return [
     `*Provider* ${snapshot.providerName}`,
     `*Usage* ${usage}`,
     `*Limit window* ${snapshot.windowLabel}`,
-    `*Key* \`${credentialLabel}\``,
     manualTest ? null : `*Threshold crossed* ${threshold}%`,
   ]
     .filter((line): line is string => Boolean(line))
@@ -255,13 +242,12 @@ function buildProviderUsageLimitAlertBlock(
 ): SlackBlock {
   const percent = Math.round(snapshot.usedPercent * 10) / 10;
   const usage = formatUsage(snapshot, percent);
-  const credentialLabel = formatCredentialLabel(snapshot);
 
   return buildAutomationResultBlocks({
     title: 'Inference Provider Usage Alert',
     subtitle: {
       type: 'mrkdwn',
-      text: `${snapshot.providerName} (\`${credentialLabel}\`) is at ${percent}% (${usage})`,
+      text: `${snapshot.providerName} is at ${percent}% (${usage})`,
     },
     iconUrl: buildAutomationIconUrl('battery-warning'),
     configureUrl: buildManagerSlackSettingsUrl(
