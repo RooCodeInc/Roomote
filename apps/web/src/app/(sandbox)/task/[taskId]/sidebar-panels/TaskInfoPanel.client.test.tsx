@@ -1,15 +1,21 @@
 import type { ReactNode } from 'react';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { TaskPayloadKind } from '@roomote/types';
 
-const { useSandboxMessagesMock, useTaskSummaryMock } = vi.hoisted(() => ({
-  useSandboxMessagesMock: vi.fn(),
-  useTaskSummaryMock: vi.fn(),
-}));
+const { copyToClipboardMock, useSandboxMessagesMock, useTaskSummaryMock } =
+  vi.hoisted(() => ({
+    copyToClipboardMock: vi.fn(),
+    useSandboxMessagesMock: vi.fn(),
+    useTaskSummaryMock: vi.fn(),
+  }));
 
 vi.mock('../hooks', () => ({
   useSandboxMessages: useSandboxMessagesMock,
   useTaskSummary: useTaskSummaryMock,
+}));
+
+vi.mock('@/lib/clipboard', () => ({
+  copyToClipboard: copyToClipboardMock,
 }));
 
 vi.mock('streamdown', () => ({
@@ -62,6 +68,7 @@ const baseTask = {
   initiatorKind: 'user',
   initiatorUserId: 'user-1',
   title: 'Task title',
+  prompt: null,
   model: 'openrouter/openai/gpt-5.6-terra',
   user: null,
 };
@@ -80,6 +87,7 @@ const baseTaskRun = {
 describe('TaskInfoPanel', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    copyToClipboardMock.mockResolvedValue(true);
     useSandboxMessagesMock.mockReturnValue({
       messages: [],
       protocol: 'roomote_runtime',
@@ -93,6 +101,45 @@ describe('TaskInfoPanel', () => {
       isSummaryStale: false,
       regenerateSummary: vi.fn(),
     });
+  });
+
+  it('shows and copies the original task prompt', async () => {
+    const originalPrompt = 'Investigate the task UI and make it easier to use.';
+
+    render(
+      <TaskInfoPanel
+        active={true}
+        task={{ ...baseTask, prompt: originalPrompt } as never}
+        taskRun={baseTaskRun as never}
+        harness="opencode-server"
+        onClose={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText('Original Prompt')).toBeInTheDocument();
+    expect(screen.getByText(originalPrompt)).toBeInTheDocument();
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Copy original prompt' }),
+    );
+
+    await waitFor(() => {
+      expect(copyToClipboardMock).toHaveBeenCalledWith(originalPrompt);
+    });
+  });
+
+  it('omits the original prompt section when the task has no prompt', () => {
+    render(
+      <TaskInfoPanel
+        active={true}
+        task={baseTask as never}
+        taskRun={baseTaskRun as never}
+        harness="opencode-server"
+        onClose={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByText('Original Prompt')).not.toBeInTheDocument();
   });
 
   it('hides the runtime row by default', () => {
