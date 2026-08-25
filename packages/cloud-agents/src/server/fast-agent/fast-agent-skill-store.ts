@@ -4,59 +4,21 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 
 import { FAST_AGENT_SPILL_MAX_FILE_BYTES } from './fast-agent-spill-store';
-
-export const FAST_AGENT_PACKAGED_SKILL_NAMES = [
-  'address-pr-feedback',
-  'agent-browser',
-  'capture-visual-proof',
-  'ci-failure-triage',
-  'code-quality-auditor',
-  'codeql-triage',
-  'create-draft-pr',
-  'create-pr',
-  'debug-reported-bug',
-  'dependabot-triage',
-  'doctor',
-  'environment-setup',
-  'explain-repo-code',
-  'explore-and-act',
-  'feature-demo',
-  'fix-pr',
-  'fix-sentry-error',
-  'github-management',
-  'implement-changes',
-  'implement-repo-change',
-  'issue-fixer',
-  'plan-repo-implementation',
-  'push',
-  'refactor-code',
-  'resolve-github-pr-merge-conflicts',
-  'review-and-fix',
-  'review-code',
-  'security-auditor',
-  'security-best-practices',
-  'security-review',
-  'sentry-triage',
-  'simplify',
-  'triage-better-stack',
-  'triage-sentry',
-  'update-dependencies',
-  'zero',
-] as const;
-
-type FastAgentPackagedSkillName =
-  (typeof FAST_AGENT_PACKAGED_SKILL_NAMES)[number];
+import {
+  FAST_DIRECT_PACKAGED_SKILL_NAMES,
+  type PackagedSkillName,
+} from '../../packaged-skill-catalog';
 
 export type FastAgentSkillDocument = {
   byteLength: number;
   content: string;
-  name: FastAgentPackagedSkillName;
+  name: PackagedSkillName;
   resource: string;
   resources: string[];
 };
 
 const FAST_AGENT_PACKAGED_SKILL_NAME_SET = new Set<string>(
-  FAST_AGENT_PACKAGED_SKILL_NAMES,
+  FAST_DIRECT_PACKAGED_SKILL_NAMES,
 );
 const SOURCE_SKILL_ROOT = resolve(
   dirname(fileURLToPath(import.meta.url)),
@@ -114,7 +76,7 @@ export class FastAgentSkillStore {
     if (!FAST_AGENT_PACKAGED_SKILL_NAME_SET.has(name)) {
       throw new Error('Unknown packaged skill.');
     }
-    const typedName = name as FastAgentPackagedSkillName;
+    const typedName = name as PackagedSkillName;
     const rootDirectory = await this.rootDirectory;
     const skillDirectory = join(rootDirectory, typedName);
     let resourcePromise = this.resources.get(typedName);

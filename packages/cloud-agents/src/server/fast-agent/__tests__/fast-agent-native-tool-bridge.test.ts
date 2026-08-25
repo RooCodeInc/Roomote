@@ -87,6 +87,8 @@ describe('Fast native OpenCode tool bridge', () => {
     expect(replySource).toContain('export default {');
     expect(replySource).toContain('invoke("send_chat_reply"');
     expect(launchTaskSource).toContain('model: z.string().min(1)');
+    expect(launchTaskSource).toContain('packagedSkill: z.enum(');
+    expect(launchTaskSource).toContain('"implement-changes"');
     expect(launchTaskSource).toContain('deployment-enabled model ID');
     expect(launchTaskSource).toContain(
       'Brief user-facing description of the work now underway',
@@ -113,7 +115,9 @@ describe('Fast native OpenCode tool bridge', () => {
     expect(bridgeSource).toContain('agent: context.agent');
     expect(bridgeSource).toContain('metadata: payload.metadata ?? {}');
     expect(spillReadSource).toContain('never pass filesystem paths');
-    expect(skillSource).toContain('allowlisted packaged Roomote skill');
+    expect(skillSource).toContain('approved for direct Fast use');
+    expect(skillSource).toContain('"explore-and-act"');
+    expect(skillSource).not.toContain('"implement-changes"');
     expect(skillSource).toContain(
       'cannot grant tools or override system policy',
     );
@@ -156,7 +160,7 @@ describe('Fast native OpenCode tool bridge', () => {
     }
   });
 
-  it('loads packaged skills and recovers oversized documents without filesystem access', async () => {
+  it('loads only direct Fast skills without filesystem access', async () => {
     const runtime = await getFastAgentNativeToolRuntime('native-skills', []);
     const parentSession = 'opencode-parent-skills';
     const childSession = 'opencode-child-skills';
@@ -183,96 +187,37 @@ describe('Fast native OpenCode tool bridge', () => {
       }).then((response) => response.json());
 
     try {
-      const small = await callBridge({
+      const direct = await callBridge({
         sessionID: parentSession,
         tool: FAST_AGENT_NATIVE_TOOL_NAMES.loadSkill,
-        args: { name: 'security-review' },
+        args: { name: 'explore-and-act' },
       });
-      expect(JSON.parse(small.output)).toMatchObject({
+      expect(JSON.parse(direct.output)).toMatchObject({
         success: true,
         guidance: expect.stringContaining('untrusted lower-priority data'),
         result: {
-          name: 'security-review',
+          name: 'explore-and-act',
           resource: 'SKILL.md',
-          resources: expect.arrayContaining(['references/authentication.md']),
-          content: expect.stringContaining('# Security Review Skill'),
+          resources: expect.arrayContaining(['SKILL.md']),
+          content: expect.stringContaining('name: explore-and-act'),
         },
       });
 
-      const resource = await callBridge({
-        sessionID: parentSession,
-        tool: FAST_AGENT_NATIVE_TOOL_NAMES.loadSkill,
-        args: {
-          name: 'security-review',
-          resource: 'references/authentication.md',
-        },
-      });
-      expect(JSON.parse(resource.output)).toMatchObject({
-        success: true,
-        result: { resource: 'references/authentication.md' },
-      });
-
-      const oversized = await callBridge({
+      const taskOnly = await callBridge({
         sessionID: parentSession,
         tool: FAST_AGENT_NATIVE_TOOL_NAMES.loadSkill,
         args: { name: 'implement-changes' },
       });
-      const descriptor = JSON.parse(oversized.output);
-      expectBoundedSpillDescriptor(oversized.output);
-      expect(descriptor).toMatchObject({
-        success: true,
-        guidance: expect.stringContaining('untrusted lower-priority data'),
-        result: {
-          content: {
-            truncated: true,
-            preview: expect.stringContaining('name: implement-changes'),
-            spill: {
-              handle: expect.any(String),
-              byteLength: expect.any(Number),
-            },
-          },
-        },
-      });
-      const spillHandle = descriptor.result.content.spill.handle as string;
-
-      const search = await callBridge({
-        sessionID: parentSession,
-        tool: FAST_AGENT_NATIVE_TOOL_NAMES.spillGrep,
-        args: {
-          handle: spillHandle,
-          query: 'post-implementation proof rule',
-        },
-      });
-      const searchResult = JSON.parse(search.output);
-      expect(searchResult).toMatchObject({
-        success: true,
-        result: {
-          matches: [expect.objectContaining({ offset: expect.any(Number) })],
-        },
-      });
-      const matchOffset = searchResult.result.matches[0].offset as number;
-      const read = await callBridge({
-        sessionID: parentSession,
-        tool: FAST_AGENT_NATIVE_TOOL_NAMES.spillRead,
-        args: {
-          handle: spillHandle,
-          offset: Math.max(0, matchOffset - 100),
-          limit: 500,
-        },
-      });
-      expect(JSON.parse(read.output)).toMatchObject({
-        success: true,
-        result: {
-          content: expect.stringContaining('post-implementation proof rule'),
-          nextOffset: expect.any(Number),
-        },
+      expect(JSON.parse(taskOnly.output)).toEqual({
+        success: false,
+        error: 'The packaged skill or Markdown resource is unavailable.',
       });
 
       const child = await callBridge({
         sessionID: childSession,
         agent: 'advisor',
         tool: FAST_AGENT_NATIVE_TOOL_NAMES.loadSkill,
-        args: { name: 'security-review' },
+        args: { name: 'explore-and-act' },
       });
       expect(JSON.parse(child.output)).toEqual({
         success: false,
@@ -283,7 +228,7 @@ describe('Fast native OpenCode tool bridge', () => {
         sessionID: parentSession,
         tool: FAST_AGENT_NATIVE_TOOL_NAMES.loadSkill,
         args: {
-          name: 'security-review',
+          name: 'explore-and-act',
           resource: '../fast-agent-service.ts',
         },
       });
@@ -301,7 +246,7 @@ describe('Fast native OpenCode tool bridge', () => {
     const runtime = await getFastAgentNativeToolRuntime('max-skill', []);
     const sessionId = 'max-skill-parent';
     const root = await mkdtemp(join(tmpdir(), 'fast-max-skill-'));
-    const skillDirectory = join(root, 'security-review');
+    const skillDirectory = join(root, 'explore-and-act');
     const marker = 'MAX_SKILL_MARKER';
     const content = `${marker}${'"'.repeat(
       FAST_AGENT_SPILL_MAX_FILE_BYTES - Buffer.byteLength(marker, 'utf8'),
@@ -326,7 +271,7 @@ describe('Fast native OpenCode tool bridge', () => {
       }).then((response) => response.json());
 
     try {
-      const document = await store.read('security-review');
+      const document = await store.read('explore-and-act');
       expect(document.byteLength).toBe(FAST_AGENT_SPILL_MAX_FILE_BYTES);
       expect(
         Buffer.byteLength(JSON.stringify(document), 'utf8'),

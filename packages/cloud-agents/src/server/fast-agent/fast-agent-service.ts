@@ -15,6 +15,7 @@ import {
 import { getDeploymentTaskModelOptions } from '@roomote/db/server';
 import { Env } from '@roomote/env';
 import { z } from 'zod';
+import { FAST_TASK_PACKAGED_SKILL_NAMES } from '../../packaged-skill-catalog';
 
 import packageJson from '../../../../../package.json';
 
@@ -106,6 +107,7 @@ function getFastAgentDefaultSlackHistoryOldest(latest?: string): string {
 }
 const launchTaskArgsSchema = z.object({
   prompt: z.string().trim().min(1),
+  packagedSkill: z.enum(FAST_TASK_PACKAGED_SKILL_NAMES).optional(),
   environmentId: z.string().trim().min(1).nullable().optional(),
   model: z.string().trim().min(1).nullable().optional(),
   kickoffMessage: z.string().trim().min(1),
@@ -1010,6 +1012,9 @@ export async function answerFastAgentQuestion({
 
           case FAST_AGENT_NATIVE_TOOL_NAMES.launchTask: {
             const args = launchTaskArgsSchema.parse(call.args);
+            const taskPrompt = args.packagedSkill
+              ? `$${args.packagedSkill}\n\n${args.prompt}`
+              : args.prompt;
             const validEnvironmentIds = new Set([
               ALL_REPOSITORIES,
               ...availableEnvironments.map((environment) => environment.id),
@@ -1033,7 +1038,7 @@ export async function answerFastAgentQuestion({
               };
             }
             const signature = `launch_task:${JSON.stringify([
-              args.prompt,
+              taskPrompt,
               args.environmentId ?? null,
               args.model ?? null,
             ])}`;
@@ -1069,7 +1074,7 @@ export async function answerFastAgentQuestion({
             };
             throwIfTurnCancelled();
             const result = await adapter.launchTask({
-              prompt: args.prompt,
+              prompt: taskPrompt,
               environmentId: args.environmentId ?? null,
               model: args.model ?? null,
               parentSessionId: session.id,

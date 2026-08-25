@@ -1118,6 +1118,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         await options.onSessionReady('opencode-session-1');
         const result = await invokeTool(nativeToolNames.launchTask, {
           prompt: 'Fix checkout.',
+          packagedSkill: 'implement-changes',
           environmentId: 'env-1',
           model: 'anthropic/claude-sonnet-5',
           kickoffMessage: 'I’m delegating the checkout fix.',
@@ -1143,7 +1144,10 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       expect.objectContaining({ kickoff: true, purpose: 'progress' }),
     );
     expect(launchTask).toHaveBeenCalledWith(
-      expect.objectContaining({ model: 'anthropic/claude-sonnet-5' }),
+      expect.objectContaining({
+        model: 'anthropic/claude-sonnet-5',
+        prompt: '$implement-changes\n\nFix checkout.',
+      }),
     );
   });
 
