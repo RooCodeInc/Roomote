@@ -59,6 +59,73 @@ export type ClaimedPrReviewDelivery = {
   events: Record<string, unknown>[];
 };
 
+function crossTriggerClaimKey(
+  claim: ClaimedPrReviewDelivery,
+  reviewHeadSha: string,
+): string {
+  return [
+    claim.taskId,
+    claim.sourceControlProvider,
+    claim.repository,
+    claim.prNumber,
+    reviewHeadSha,
+  ].join('\0');
+}
+
+function coalesceReviewSummaryCiFailures(
+  claims: ClaimedPrReviewDelivery[],
+): ClaimedPrReviewDelivery[] {
+  const summaryClaims = new Map<string, ClaimedPrReviewDelivery | null>();
+
+  for (const claim of claims) {
+    for (const event of claim.events) {
+      if (
+        event.kind !== 'review_summary' ||
+        typeof event.reviewHeadSha !== 'string'
+      ) {
+        continue;
+      }
+
+      const key = crossTriggerClaimKey(claim, event.reviewHeadSha);
+      summaryClaims.set(key, summaryClaims.has(key) ? null : claim);
+    }
+  }
+
+  return claims.flatMap((claim) => {
+    if (claim.events.some((event) => event.kind === 'review_summary')) {
+      return [claim];
+    }
+
+    const remainingDeliveryIds: string[] = [];
+    const remainingEvents: Record<string, unknown>[] = [];
+    claim.events.forEach((event, index) => {
+      const target =
+        event.kind === 'ci_failure' && typeof event.reviewHeadSha === 'string'
+          ? summaryClaims.get(crossTriggerClaimKey(claim, event.reviewHeadSha))
+          : null;
+
+      if (target) {
+        target.deliveryIds.push(claim.deliveryIds[index]!);
+        target.events.push(event);
+        target.deferrals = Math.max(target.deferrals, claim.deferrals);
+      } else {
+        remainingDeliveryIds.push(claim.deliveryIds[index]!);
+        remainingEvents.push(event);
+      }
+    });
+
+    return remainingEvents.length > 0
+      ? [
+          {
+            ...claim,
+            deliveryIds: remainingDeliveryIds,
+            events: remainingEvents,
+          },
+        ]
+      : [];
+  });
+}
+
 /**
  * The external post and the database completion cannot be one transaction.
  * Delivery is consequently at-least-once; Postgres is still the sole owner of
@@ -640,6 +707,8 @@ export async function claimDuePrReviewDeliveries(
             )
           )
         )
+        -- A task/PR claim must own every due batch so cross-trigger events
+        -- cannot be split between workers before they are coalesced below.
         and pg_try_advisory_xact_lock(
           hashtextextended(
             jsonb_build_array(
@@ -647,9 +716,7 @@ export async function claimDuePrReviewDeliveries(
               g.task_id,
               g.source_control_provider,
               g.repository,
-              g.pr_number::text,
-              g.batch_kind,
-              coalesce(g.batch_id, '')
+              g.pr_number::text
             )::text,
             0
           )
@@ -724,7 +791,7 @@ export async function claimDuePrReviewDeliveries(
         });
       }
     }
-    return [...groups.values()];
+    return coalesceReviewSummaryCiFailures([...groups.values()]);
   });
 }
 
