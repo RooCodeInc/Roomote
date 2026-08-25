@@ -1627,7 +1627,9 @@ export const llmUsageEvents = pgTable(
       .default(0),
     costSource: text('cost_source')
       .notNull()
-      .$type<'opencode_message' | 'litellm_gateway' | 'missing'>(),
+      .$type<
+        'opencode_message' | 'litellm_gateway' | 'provider_response' | 'missing'
+      >(),
     pricingMetadata: jsonb('pricing_metadata')
       .notNull()
       .default({})

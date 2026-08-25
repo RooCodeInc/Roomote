@@ -9,6 +9,7 @@ import {
 import {
   getBrainGatewayToken,
   mapBrainModelName,
+  recordLlmUsage,
   resolveBrainInferenceProvider,
   type ResolvedBrainInference,
 } from '@roomote/sdk/server';
@@ -60,6 +61,187 @@ const RESPONSE_HEADER_DENYLIST = new Set([
   'connection',
 ]);
 
+type BrainInferenceOperation = {
+  name: 'embeddings' | 'rerank' | 'chat_completions' | 'responses';
+  usageType: 'embedding' | 'rerank' | 'inference';
+};
+
+type ProviderUsage = {
+  modelId: string | null;
+  inputTokens: number | null;
+  outputTokens: number | null;
+  reasoningTokens: number | null;
+  cacheReadTokens: number | null;
+  cacheWriteTokens: number | null;
+  totalTokens: number | null;
+  costUsd: number | null;
+  costDetails: Record<string, unknown> | null;
+};
+
+function resolveOperation(upstreamPath: string): BrainInferenceOperation {
+  if (upstreamPath === '/v1/embeddings') {
+    return { name: 'embeddings', usageType: 'embedding' };
+  }
+
+  if (upstreamPath === '/v1/rerank') {
+    return { name: 'rerank', usageType: 'rerank' };
+  }
+
+  return {
+    name: upstreamPath === '/v1/responses' ? 'responses' : 'chat_completions',
+    usageType: 'inference',
+  };
+}
+
+function finiteNonNegative(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0
+    ? value
+    : null;
+}
+
+function objectValue(value: unknown): Record<string, unknown> | null {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function findUsageEnvelope(body: string): Record<string, unknown> | null {
+  const candidates = [body];
+
+  if (body.includes('\ndata:')) {
+    candidates.push(
+      ...body
+        .split('\n')
+        .filter((line) => line.startsWith('data:'))
+        .map((line) => line.slice('data:'.length).trim())
+        .filter((line) => line && line !== '[DONE]'),
+    );
+  }
+
+  for (const candidate of candidates.reverse()) {
+    try {
+      const envelope = objectValue(JSON.parse(candidate));
+      const response = objectValue(envelope?.response);
+
+      if (objectValue(envelope?.usage)) {
+        return envelope;
+      }
+
+      if (objectValue(response?.usage)) {
+        return response;
+      }
+    } catch {
+      // Provider errors and streaming sentinels are not necessarily JSON.
+    }
+  }
+
+  return null;
+}
+
+function parseProviderUsage(body: string): ProviderUsage | null {
+  const envelope = findUsageEnvelope(body);
+  const usage = objectValue(envelope?.usage);
+
+  if (!usage) {
+    return null;
+  }
+
+  const inputDetails =
+    objectValue(usage.prompt_tokens_details) ??
+    objectValue(usage.input_tokens_details);
+  const outputDetails =
+    objectValue(usage.completion_tokens_details) ??
+    objectValue(usage.output_tokens_details);
+
+  return {
+    modelId: typeof envelope?.model === 'string' ? envelope.model : null,
+    inputTokens:
+      finiteNonNegative(usage.prompt_tokens) ??
+      finiteNonNegative(usage.input_tokens),
+    outputTokens:
+      finiteNonNegative(usage.completion_tokens) ??
+      finiteNonNegative(usage.output_tokens),
+    reasoningTokens:
+      finiteNonNegative(usage.reasoning_tokens) ??
+      finiteNonNegative(outputDetails?.reasoning_tokens),
+    cacheReadTokens:
+      finiteNonNegative(usage.cache_read_tokens) ??
+      finiteNonNegative(inputDetails?.cached_tokens),
+    cacheWriteTokens: finiteNonNegative(usage.cache_write_tokens),
+    totalTokens: finiteNonNegative(usage.total_tokens),
+    costUsd: finiteNonNegative(usage.cost),
+    costDetails: objectValue(usage.cost_details),
+  };
+}
+
+function recordBrainInferenceUsage(input: {
+  requestId: string;
+  providerId: ResolvedBrainInference['providerId'];
+  modelId: string | null;
+  operation: BrainInferenceOperation;
+  upstreamPath: string;
+  status: number;
+  startedAt: number;
+  response?: Response;
+}): void {
+  const persist = async () => {
+    let usage: ProviderUsage | null = null;
+    let metadataReadFailed = false;
+
+    if (input.response) {
+      try {
+        usage = parseProviderUsage(await input.response.text());
+      } catch {
+        metadataReadFailed = true;
+      }
+    }
+
+    const costMicroUsd =
+      usage?.costUsd === null || usage?.costUsd === undefined
+        ? null
+        : Math.round(usage.costUsd * 1_000_000);
+
+    await recordLlmUsage({
+      eventKey: `brain-inference-gateway:${input.requestId}`,
+      source: 'brain-inference-gateway',
+      usageType: input.operation.usageType,
+      providerId: input.providerId,
+      modelId: usage?.modelId ?? input.modelId,
+      inputTokens: usage?.inputTokens,
+      outputTokens: usage?.outputTokens,
+      reasoningTokens: usage?.reasoningTokens,
+      cacheReadTokens: usage?.cacheReadTokens,
+      cacheWriteTokens: usage?.cacheWriteTokens,
+      totalTokens: usage?.totalTokens,
+      contextTokens: usage?.inputTokens,
+      costMicroUsd,
+      costSource: costMicroUsd === null ? 'missing' : 'provider_response',
+      pricingMetadata: usage?.costDetails
+        ? { costDetails: usage.costDetails }
+        : undefined,
+      details: {
+        operation: input.operation.name,
+        upstreamPath: input.upstreamPath,
+        status: input.status,
+        latencyMs: Date.now() - input.startedAt,
+        usageMetadataAvailable: usage !== null,
+        metadataReadFailed,
+      },
+    });
+  };
+
+  void persist().catch((error) => {
+    console.warn(
+      formatSingleLineLog(`${LOG_PREFIX} Failed to record usage`, {
+        requestId: input.requestId,
+        providerId: input.providerId,
+        upstreamPath: input.upstreamPath,
+        error: error instanceof Error ? error.message : String(error),
+      }),
+    );
+  });
+}
+
 function presentedToken(header: string | undefined): string | null {
   if (!header) {
     return null;
@@ -94,6 +276,7 @@ function tokenMatches(presented: string, expected: string): boolean {
 async function rewriteBody(
   rawBody: string,
   resolved: ResolvedBrainInference,
+  upstreamPath: string,
 ): Promise<string> {
   if (!rawBody) {
     return rawBody;
@@ -106,10 +289,22 @@ async function rewriteBody(
       return rawBody;
     }
 
-    return JSON.stringify({
+    const rewritten: Record<string, unknown> = {
       ...parsed,
       model: mapBrainModelName(parsed.model, resolved),
-    });
+    };
+
+    // OpenAI-compatible chat streams omit usage unless explicitly requested.
+    // Preserve any existing stream options while asking supported providers to
+    // include the final usage-only chunk for asynchronous accounting.
+    if (upstreamPath === '/v1/chat/completions' && parsed.stream === true) {
+      rewritten.stream_options = {
+        ...(objectValue(parsed.stream_options) ?? {}),
+        include_usage: true,
+      };
+    }
+
+    return JSON.stringify(rewritten);
   } catch {
     // Not JSON we understand; forward untouched rather than failing the call.
     return rawBody;
@@ -218,8 +413,18 @@ brainInference.post('/*', async (c) => {
       : resolved.apiKey,
   );
 
-  const body = await rewriteBody(await c.req.text(), resolved);
+  const body = await rewriteBody(await c.req.text(), resolved, upstreamPath);
   const startedAt = Date.now();
+  const requestId = crypto.randomUUID();
+  const operation = resolveOperation(upstreamPath);
+  let modelId: string | null = null;
+
+  try {
+    const parsedBody = JSON.parse(body) as Record<string, unknown>;
+    modelId = typeof parsedBody.model === 'string' ? parsedBody.model : null;
+  } catch {
+    // An unparseable body is still forwarded and accounted for without a model.
+  }
 
   let upstream: Response;
 
@@ -236,6 +441,15 @@ brainInference.post('/*', async (c) => {
       },
     );
   } catch (error) {
+    recordBrainInferenceUsage({
+      requestId,
+      providerId: resolved.providerId,
+      modelId,
+      operation,
+      upstreamPath,
+      status: 502,
+      startedAt,
+    });
     console.warn(
       formatSingleLineLog(`${LOG_PREFIX} Upstream request failed`, {
         providerId: resolved.providerId,
@@ -257,6 +471,17 @@ brainInference.post('/*', async (c) => {
       }),
     );
   }
+
+  recordBrainInferenceUsage({
+    requestId,
+    providerId: resolved.providerId,
+    modelId,
+    operation,
+    upstreamPath,
+    status: upstream.status,
+    startedAt,
+    response: upstream.clone(),
+  });
 
   const responseHeaders = new Headers();
 
