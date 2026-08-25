@@ -20,7 +20,11 @@ describe('fast-agent task operations', () => {
         apiBaseUrl: 'https://app.example.test/_roomote-api',
         getAuthToken: async () => 'auth-token',
       },
-      { taskId: 'task-42', message: 'Also add a test.' },
+      {
+        taskId: 'task-42',
+        message: 'Also add a test.',
+        clientMessageId: 'fast-agent:session:message:task-42',
+      },
     );
 
     expect(fetchMock).toHaveBeenCalledWith(
@@ -34,6 +38,7 @@ describe('fast-agent task operations', () => {
         body: JSON.stringify({
           message: 'Also add a test.',
           senderMode: 'fast_agent',
+          clientMessageId: 'fast-agent:session:message:task-42',
         }),
       }),
     );

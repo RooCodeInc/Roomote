@@ -44,6 +44,7 @@ export * from './lib/deployment-auth-keypairs';
 export * from './lib/environment-variables';
 export * from './lib/task-id';
 export * from './lib/task-activity-timestamp';
+export * from './lib/task-run-continuation';
 export * from './lib/acting-user';
 export * from './lib/task-suggestion-content-hash';
 export * from './lib/work-item-claims';

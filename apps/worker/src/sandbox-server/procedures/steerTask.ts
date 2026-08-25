@@ -25,6 +25,7 @@ export const steerTask = publicProcedure
       .object({
         prompt: z.string(),
         quoteText: z.string(),
+        clientMessageId: z.string().optional(),
         images: z.array(z.string()).optional(),
         userName: z.string().optional(),
         suppressSlackReplyQuote: z.boolean().optional(),
@@ -131,6 +132,9 @@ export const steerTask = publicProcedure
         const success = ctx.harnessManager.sendFollowUpPrompt({
           prompt: input.prompt,
           images: input.images,
+          ...(input.clientMessageId
+            ? { clientMessageId: input.clientMessageId }
+            : {}),
           ...(workflowPhase ? { workflowPhase } : {}),
           autoSteerWhenQueued: true,
           userId,
@@ -195,6 +199,9 @@ export const steerTask = publicProcedure
         const success = ctx.harnessManager.sendFollowUpPrompt({
           prompt: input.prompt,
           images: input.images,
+          ...(input.clientMessageId
+            ? { clientMessageId: input.clientMessageId }
+            : {}),
           ...(workflowPhase ? { workflowPhase } : {}),
           userId,
           goalContext: input.goalContext,
@@ -272,6 +279,9 @@ export const steerTask = publicProcedure
       const success = ctx.harnessManager.sendFollowUpPrompt({
         prompt: input.prompt,
         images: input.images,
+        ...(input.clientMessageId
+          ? { clientMessageId: input.clientMessageId }
+          : {}),
         ...(workflowPhase ? { workflowPhase } : {}),
         userId,
         goalContext: input.goalContext,

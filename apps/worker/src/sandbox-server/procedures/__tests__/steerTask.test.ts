@@ -234,6 +234,7 @@ describe('steerTask procedure', () => {
       prompt: 'Steer this into the current turn',
       quoteText: 'Steer this into the current turn',
       images: ['data:image/png;base64,abc'],
+      clientMessageId: 'delivery-1',
     });
 
     expect(result).toEqual({ success: true });
@@ -244,6 +245,7 @@ describe('steerTask procedure', () => {
     expect(sendFollowUpPrompt).toHaveBeenCalledWith({
       prompt: 'Steer this into the current turn',
       images: ['data:image/png;base64,abc'],
+      clientMessageId: 'delivery-1',
       autoSteerWhenQueued: true,
       userId: 'sender-user-1',
     });

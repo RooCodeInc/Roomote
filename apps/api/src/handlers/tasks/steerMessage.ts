@@ -28,6 +28,7 @@ export async function steerMessage(
     message: string;
     images?: string[];
     senderMode?: 'fast_agent';
+    clientMessageId?: string;
   };
 
   try {
@@ -35,6 +36,7 @@ export async function steerMessage(
       message: string;
       images?: string[];
       senderMode?: 'fast_agent';
+      clientMessageId?: string;
     };
   } catch {
     return c.json({ error: 'Invalid JSON body' }, 400);
@@ -54,6 +56,7 @@ export async function steerMessage(
     message: body.message,
     images: body.images,
     senderMode: body.senderMode,
+    clientMessageId: body.clientMessageId,
   });
 
   if (result.success) {

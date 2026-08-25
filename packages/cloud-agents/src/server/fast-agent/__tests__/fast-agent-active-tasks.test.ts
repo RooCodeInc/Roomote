@@ -24,6 +24,8 @@ async function createRun(input: {
   canceledAt?: Date;
   fastAgentSessionId?: string;
   fastAgentParent?: FastAgentParent;
+  snapshotId?: string;
+  snapshotCreatedAt?: Date;
 }) {
   const [run] = await db
     .insert(taskRuns)
@@ -44,6 +46,8 @@ async function createRun(input: {
           ? { fastAgentParent: input.fastAgentParent }
           : {}),
       },
+      snapshotId: input.snapshotId,
+      snapshotCreatedAt: input.snapshotCreatedAt,
     })
     .returning();
 
@@ -70,6 +74,7 @@ describe('getActiveFastAgentTasks', () => {
     const apiTask = await createTask('Fix API');
     const settledTask = await createTask('Settled restart');
     const canceledTask = await createTask('Canceled task');
+    const expiredTask = await createTask('Expired task');
     const otherSessionTask = await createTask('Other session');
     const deletedTask = await createTask(
       'Deleted task',
@@ -99,12 +104,22 @@ describe('getActiveFastAgentTasks', () => {
       status: RunStatus.Completed,
       createdAt: new Date('2026-08-17T00:03:00Z'),
       fastAgentSessionId: SESSION_ID,
+      snapshotId: 'snapshot-settled',
+      snapshotCreatedAt: new Date(),
     });
     await createRun({
       taskId: settledTask.id,
       status: RunStatus.Idle,
       createdAt: new Date('2026-08-17T00:02:00Z'),
       fastAgentSessionId: SESSION_ID,
+    });
+    await createRun({
+      taskId: expiredTask.id,
+      status: RunStatus.Completed,
+      createdAt: new Date('2026-08-17T00:00:30Z'),
+      fastAgentSessionId: SESSION_ID,
+      snapshotId: 'snapshot-expired',
+      snapshotCreatedAt: new Date(Date.now() - 8 * 24 * 60 * 60 * 1000),
     });
     await createRun({
       taskId: canceledTask.id,
@@ -136,6 +151,11 @@ describe('getActiveFastAgentTasks', () => {
         taskId: apiTask.id,
         title: 'Fix API',
         status: RunStatus.Processing,
+      },
+      {
+        taskId: settledTask.id,
+        title: 'Settled restart',
+        status: RunStatus.Completed,
       },
     ]);
   });

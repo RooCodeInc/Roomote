@@ -5,11 +5,12 @@ import {
   db,
   eq,
   inArray,
+  isTaskRunFollowUpCandidate,
   isNull,
   taskRuns,
   tasks,
 } from '@roomote/db/server';
-import { activeRunStatuses, type RunStatus } from '@roomote/types';
+import type { RunStatus } from '@roomote/types';
 import type { FastAgentConversation } from './fast-agent-conversation';
 import { fastAgentConversationRepository } from './fast-agent-conversation-repository';
 
@@ -54,6 +55,8 @@ export async function getActiveFastAgentTasks(
         title: tasks.title,
         status: taskRuns.status,
         canceledAt: taskRuns.canceledAt,
+        snapshotId: taskRuns.snapshotId,
+        snapshotCreatedAt: taskRuns.snapshotCreatedAt,
       })
       .from(taskRuns)
       .innerJoin(tasks, eq(tasks.id, taskRuns.taskId))
@@ -75,10 +78,12 @@ export async function getActiveFastAgentTasks(
     })
     .from(latestRunPerTask)
     .where(
-      and(
-        inArray(latestRunPerTask.status, [...activeRunStatuses]),
-        isNull(latestRunPerTask.canceledAt),
-      ),
+      isTaskRunFollowUpCandidate({
+        status: latestRunPerTask.status,
+        canceledAt: latestRunPerTask.canceledAt,
+        snapshotId: latestRunPerTask.snapshotId,
+        snapshotCreatedAt: latestRunPerTask.snapshotCreatedAt,
+      }),
     )
     .orderBy(desc(latestRunPerTask.createdAt));
 }

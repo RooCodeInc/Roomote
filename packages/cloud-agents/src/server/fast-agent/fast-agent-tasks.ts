@@ -188,13 +188,19 @@ async function callFastAgentTaskApi({
 
 export async function sendFastAgentTaskMessage(
   context: FastAgentTaskApiContext,
-  params: { taskId: string; message: string },
+  params: { taskId: string; message: string; clientMessageId?: string },
 ): Promise<FastAgentTaskToolResult> {
   return callFastAgentTaskApi({
     ...context,
     method: 'POST',
     path: `${FAST_AGENT_TASKS_API_PATH}/${params.taskId}/steer_message`,
-    body: { message: params.message, senderMode: 'fast_agent' },
+    body: {
+      message: params.message,
+      senderMode: 'fast_agent',
+      ...(params.clientMessageId
+        ? { clientMessageId: params.clientMessageId }
+        : {}),
+    },
   });
 }
 
@@ -340,7 +346,8 @@ export function createFastAgentTaskTools(
         }),
     }),
     send_task_message: tool({
-      description: 'Send a follow-up message to a running Roomote task.',
+      description:
+        'Send a follow-up message to an active or resumable Roomote task.',
       inputSchema: z
         .object({
           taskId: nonEmptyTrimmedStringSchema.describe(

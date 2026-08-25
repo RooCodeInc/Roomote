@@ -17,6 +17,7 @@ const {
   mockUserFindFirst,
   mockTaskPullRequestFindFirst,
   mockTaskRunFindFirst,
+  mockWithContention,
   mockAnd,
   mockEq,
 } = vi.hoisted(() => ({
@@ -38,6 +39,7 @@ const {
   mockUserFindFirst: vi.fn(),
   mockTaskPullRequestFindFirst: vi.fn(),
   mockTaskRunFindFirst: vi.fn(),
+  mockWithContention: vi.fn(),
   mockAnd: vi.fn((...conditions: unknown[]) => conditions),
   mockEq: vi.fn((left: unknown, right: unknown) => ({ left, right })),
 }));
@@ -76,6 +78,10 @@ vi.mock('@roomote/sdk/server', async (importOriginal) => {
 
 vi.mock('@roomote/cloud-agents/server', () => ({
   enqueueTask: mockEnqueueTask,
+}));
+
+vi.mock('@roomote/redis', () => ({
+  withContention: mockWithContention,
 }));
 
 vi.mock('@roomote/communication/messages', () => ({
@@ -209,6 +215,15 @@ describe('sendMessageToTask', () => {
     mockSendPromptMutate.mockResolvedValue({ ok: true });
     mockSteerTaskMutate.mockResolvedValue({ ok: true });
     mockEnqueueTask.mockResolvedValue({ id: 77, taskId: 'task-1' });
+    mockWithContention.mockImplementation(
+      async (
+        _key: string,
+        options: { onAcquired: () => Promise<unknown> },
+      ) => ({
+        acquired: true,
+        value: await options.onAcquired(),
+      }),
+    );
     mockGetTaskChannelBindings.mockResolvedValue({
       slackChannelId: 'C123',
       slackThreadTs: '111.222',
@@ -1165,6 +1180,95 @@ describe('sendMessageToTask', () => {
     );
   });
 
+  it('resumes the same task when an active steer races with run settlement', async () => {
+    const activeRun = createActiveRun({ snapshotId: 'snap-race' });
+    const completedRun = createActiveRun({
+      status: 'completed',
+      sandboxServerUrl: null,
+      snapshotId: 'snap-race',
+      payload: { repo: 'acme/app' },
+    });
+    mockFindLatestTaskRun
+      .mockResolvedValueOnce(activeRun)
+      .mockResolvedValueOnce(completedRun)
+      .mockResolvedValueOnce(completedRun);
+    mockSteerTaskMutate.mockRejectedValueOnce(new Error('worker exited'));
+
+    const result = await steerMessageToTask({
+      taskId: 'task-1',
+      userId: 'user-1',
+      message: 'Continue after settlement.',
+      clientMessageId: 'fast-agent:session:message:task-1',
+    });
+
+    expect(result).toEqual({
+      success: true,
+      result: { resumed: true, runId: 77, taskId: 'task-1' },
+    });
+    expect(mockEnqueueTask).toHaveBeenCalledTimes(1);
+    expect(mockEnqueueTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        task: expect.objectContaining({
+          sourceRunId: 42,
+          payload: expect.objectContaining({
+            resumePromptClientMessageId: 'fast-agent:session:message:task-1',
+          }),
+        }),
+      }),
+      expect.any(Object),
+    );
+  });
+
+  it('deduplicates concurrent resume delivery under the canonical task lock', async () => {
+    const completedRun = createActiveRun({
+      status: 'completed',
+      sandboxServerUrl: null,
+      snapshotId: 'snap-race',
+      payload: { repo: 'acme/app' },
+    });
+    const existingResumeRun = createActiveRun({
+      id: 78,
+      status: 'pending',
+      sandboxServerUrl: null,
+      sourceRunId: 42,
+      payload: {
+        repo: 'acme/app',
+        resumePromptClientMessageId: 'delivery-1',
+      },
+    });
+    mockFindLatestTaskRun
+      .mockResolvedValueOnce(completedRun)
+      .mockResolvedValueOnce(existingResumeRun);
+    mockWithContention.mockImplementationOnce(
+      async (
+        _key: string,
+        options: { onContended: () => Promise<unknown> },
+      ) => ({ acquired: false, value: await options.onContended() }),
+    );
+
+    const result = await steerMessageToTask({
+      taskId: 'task-1',
+      userId: 'user-1',
+      message: 'Continue once.',
+      clientMessageId: 'delivery-1',
+    });
+
+    expect(result).toEqual({
+      success: true,
+      result: {
+        resumed: true,
+        runId: 78,
+        taskId: 'task-1',
+        deduplicated: true,
+      },
+    });
+    expect(mockEnqueueTask).not.toHaveBeenCalled();
+    expect(mockWithContention).toHaveBeenCalledWith(
+      'task:resume-lock:task-1',
+      expect.any(Object),
+    );
+  });
+
   it('returns a clear error when a sleeping task snapshot has expired', async () => {
     mockFindLatestTaskRun.mockResolvedValue(
       createActiveRun({
@@ -1282,6 +1386,7 @@ describe('sendMessageToTask', () => {
       userId: 'user-1',
       message: 'Continue the delegated task.',
       senderMode: 'fast_agent',
+      clientMessageId: 'fast-agent:session:message:task-1',
     });
 
     expect(result).toEqual({
@@ -1293,6 +1398,7 @@ describe('sendMessageToTask', () => {
     expect(mockSteerTaskMutate).toHaveBeenCalledWith({
       prompt: 'Continue the delegated task.',
       quoteText: 'Continue the delegated task.',
+      clientMessageId: 'fast-agent:session:message:task-1',
       suppressSlackReplyQuote: true,
     });
   });
