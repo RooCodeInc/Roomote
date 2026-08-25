@@ -48,6 +48,10 @@ const baseFormState: FormState = {
   managerSlackChannel: '',
   managerDiscordChannel: '',
   managerStatsFrequency: 'off' as const,
+  providerUsageLimitFrequency: 'every_hour' as const,
+  providerUsageLimitThreshold: 85,
+  providerUsageLimitSlackChannel: '',
+  providerUsageLimitDiscordChannel: '',
   managerStatsSlackChannel: '',
   managerStatsDiscordChannel: '',
   sentryTriageFrequency: 'off' as const,
@@ -420,6 +424,27 @@ describe('Automations selection helpers', () => {
 
     expect(saveInput.managerStatsDiscordChannel).toBe('123456789');
     expect(saveInput.managerStatsSlackChannel).toBeNull();
+  });
+
+  it('includes provider usage cadence, threshold, and Slack destination', () => {
+    const saveInput = buildAutomationSettingsSaveInput(
+      {
+        ...baseFormState,
+        providerUsageLimitFrequency: 'every_15_minutes',
+        providerUsageLimitThreshold: 70,
+        providerUsageLimitSlackChannel: ' #provider-alerts ',
+      },
+      baseFormState,
+      'providerUsageLimit',
+    );
+
+    expect(saveInput).toMatchObject({
+      savingAutomation: 'providerUsageLimit',
+      providerUsageLimitFrequency: 'every_15_minutes',
+      providerUsageLimitThreshold: 70,
+      providerUsageLimitSlackChannel: '#provider-alerts',
+      providerUsageLimitDiscordChannel: null,
+    });
   });
 
   it('includes the Discord manager destination in the API save input', () => {

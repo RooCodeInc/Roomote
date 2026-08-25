@@ -31,10 +31,12 @@ Automations can create useful work quickly. Start with one or two that map to
 a real team habit, tell the team where output will appear, then expand once
 the signal is good.
 
-Every automation that posts to a chat channel is replyable. Reply in the
+Task-backed automations that post to a chat channel are replyable. Reply in the
 thread Roomote started and you are talking to the task behind that report,
 without needing to mention Roomote. That works on Slack, Discord, Teams, and
-Telegram, and it works after the run has finished.
+Telegram, and it works after the run has finished. Deterministic alerts such as
+**Provider Usage Limits** do not create a task or session, so their cards are
+informational rather than replyable task threads.
 
 ## Recommended automations
 
@@ -256,6 +258,7 @@ manager-facing updates and suggestions.
 | ---------------------------- | ---------------------------------------------------------------- | ------------------------------------------- |
 | **Automation output**        | The shared Manager Channel destination                           | Configure once                              |
 | **Weekly Manager Stats**     | A weekly summary of Roomote activity                             | Weekly                                      |
+| **Provider Usage Limits**    | Warnings when an inference-provider quota approaches exhaustion | Every 15 minutes, hourly, or daily           |
 | **Triage Sentry Issues**     | Prioritized Sentry follow-up work                                | Daily or weekly                             |
 | **Triage Dependabot Alerts** | Suggested follow-up tasks for open dependency alerts             | Daily or weekly                             |
 | **Triage CodeQL Alerts**     | Remediation follow-up tasks for open code-scanning / CodeQL alerts | Daily or weekly                           |
@@ -269,6 +272,16 @@ manager-facing updates and suggestions.
 Set **Automation output** first. This is the shared Slack or Discord Manager
 Channel for manager-facing posts, suggestions, summaries, and setup alerts.
 Make sure the Roomote app can access the channel before you save it.
+
+**Provider Usage Limits** is enabled at an hourly cadence with an 85% threshold
+when it first appears, preserving the provider warning behavior from earlier
+Roomote releases. Admins can disable it, choose a Slack channel, change the
+maximum alert cadence to every 15 minutes, hourly, or daily, and set the warning
+threshold from 50% through 95% in 5% increments. Roomote posts one consolidated
+automation result card per due check, deduplicates a threshold crossing within
+the provider's quota period, and sends a fresh critical alert if the quota later
+reaches 100%. The check is deterministic and never starts a Roomote task or
+session.
 
 **Platform Issue Alerts** are enabled by default. Their own Slack or Discord
 destination wins, followed by the shared Manager Channel. If neither channel is

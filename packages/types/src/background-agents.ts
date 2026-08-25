@@ -10,6 +10,27 @@ export type AnnouncerFrequency = 'off' | 'daily' | 'weekly';
 
 export type ManagerStatsFrequency = 'off' | 'weekly';
 
+export type ProviderUsageLimitFrequency =
+  | 'off'
+  | 'every_15_minutes'
+  | 'every_hour'
+  | 'daily';
+
+export const DEFAULT_PROVIDER_USAGE_LIMIT_FREQUENCY: ProviderUsageLimitFrequency =
+  'every_hour';
+export const DEFAULT_PROVIDER_USAGE_LIMIT_THRESHOLD = 85;
+export const PROVIDER_USAGE_LIMIT_THRESHOLDS = [
+  50, 55, 60, 65, 70, 75, 80, 85, 90, 95,
+] as const;
+export type ProviderUsageLimitThreshold =
+  (typeof PROVIDER_USAGE_LIMIT_THRESHOLDS)[number];
+
+export function isProviderUsageLimitThreshold(
+  value: number,
+): value is ProviderUsageLimitThreshold {
+  return (PROVIDER_USAGE_LIMIT_THRESHOLDS as readonly number[]).includes(value);
+}
+
 export type SentryTriageFrequency = 'off' | 'daily' | 'weekly';
 
 export type DependabotTriageFrequency = 'off' | 'daily' | 'weekly';
@@ -95,6 +116,7 @@ export const USER_FACING_AUTOMATION_KEYS = [
   // would break the N-1 rollback release.
   'slack_channel_auto_start',
   'manager_stats',
+  'provider_usage_limit',
   'platform_issue_alerts',
   'sentry_triage',
   'dependabot_triage',

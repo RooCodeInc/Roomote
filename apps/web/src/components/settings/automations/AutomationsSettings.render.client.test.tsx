@@ -100,6 +100,10 @@ const state = vi.hoisted(() => ({
         managerStatsFrequency: 'off' as const,
         managerStatsSlackChannelId: null,
         managerStatsDiscordChannelId: null,
+        providerUsageLimitFrequency: 'every_hour' as const,
+        providerUsageLimitThreshold: 85,
+        providerUsageLimitSlackChannelId: null,
+        providerUsageLimitDiscordChannelId: null,
         sentryTriageFrequency: 'off' as const,
         sentryTriageSlackChannelId: null,
         sentryTriageDiscordChannelId: null,
@@ -142,6 +146,7 @@ const state = vi.hoisted(() => ({
         },
         managerSlackChannel: '#roomote-managers',
         managerStatsSlackChannel: null,
+        providerUsageLimitSlackChannel: null,
         suggesterSlackChannel: null,
         announcerSlackChannel: null,
         platformIssueSlackChannel: null,
@@ -157,6 +162,7 @@ const state = vi.hoisted(() => ({
         channelAutoStartSlackChannels: [],
         managerSlackChannel: null,
         managerStatsSlackChannel: null,
+        providerUsageLimitSlackChannel: null,
         suggesterSlackChannel: null,
         announcerSlackChannel: null,
         platformIssueSlackChannel: null,
@@ -181,6 +187,7 @@ const state = vi.hoisted(() => ({
       resolvedDestinations: Object.fromEntries(
         [
           'manager_stats',
+          'provider_usage_limit',
           'sentry_triage',
           'dependabot_triage',
           'codeql_triage',
@@ -601,6 +608,31 @@ describe('AutomationsSettings', () => {
       }),
     ).toBeInTheDocument();
     expect(screen.queryByText('Beta')).not.toBeInTheDocument();
+  });
+
+  it('shows provider usage alert cadence, Slack destination, and threshold controls', async () => {
+    render(<AutomationsSettings />);
+
+    fireEvent.click(
+      await screen.findByRole('button', {
+        name: 'Configure Provider Usage Limits',
+      }),
+    );
+
+    expect(
+      screen.getByRole('combobox', {
+        name: 'Provider Usage Limits schedule',
+      }),
+    ).toHaveTextContent('Every hour');
+    expect(
+      screen.getByLabelText('Post alerts to this Slack channel'),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('slider', {
+        name: 'Provider usage alert threshold',
+      }),
+    ).toHaveAttribute('aria-valuenow', '85');
+    expect(screen.getByText('85%')).toBeInTheDocument();
   });
 
   it('configures Call Roomote via emoji with a name and instructions', async () => {

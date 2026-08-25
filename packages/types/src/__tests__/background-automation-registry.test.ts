@@ -90,6 +90,24 @@ describe('background automation registry', () => {
     ]);
   });
 
+  it('registers provider usage alerts as a Slack-only deterministic automation', () => {
+    const descriptor = getTriggerableBackgroundAutomationDescriptorByKey(
+      'provider_usage_limit',
+    );
+
+    expect(descriptor).toMatchObject({
+      label: 'Provider Usage Limits',
+      slackIcon: 'battery-warning',
+      scheduleModes: ['off', 'every_15_minutes', 'every_hour', 'daily'],
+      usesManagerChannel: true,
+      supportedCommunicationProviders: ['slack'],
+      supportedSourceControlProviders: [],
+    });
+    expect(
+      getTriggerableBackgroundAutomationSettingsHash('provider_usage_limit'),
+    ).toBe('provider-usage-limit');
+  });
+
   it('allows Teams, Telegram, and Discord destinations for CI failure triage Run now', () => {
     const descriptor =
       getTriggerableBackgroundAutomationDescriptorByKey('ci_failure_triage');

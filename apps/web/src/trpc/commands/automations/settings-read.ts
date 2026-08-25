@@ -81,6 +81,7 @@ const RUN_HISTORY_KEYS: BackgroundAutomationKey[] = [
   'suggester',
   'announcer',
   'manager_stats',
+  'provider_usage_limit',
   'sentry_triage',
   'dependabot_triage',
   'codeql_triage',
@@ -234,6 +235,10 @@ async function resolveAutomationDestinations(params: {
         return [key, null] as const;
       }
 
+      if (key === 'provider_usage_limit' && destination.provider !== 'slack') {
+        return [key, null] as const;
+      }
+
       return [
         key,
         {
@@ -285,6 +290,7 @@ export async function getBackgroundAgentSettingsCommand(
   slackChannelAccessWarnings: {
     channelAutoStartSlackChannels: string[];
     managerStatsSlackChannel: string | null;
+    providerUsageLimitSlackChannel: string | null;
     suggesterSlackChannel: string | null;
     announcerSlackChannel: string | null;
     platformIssueSlackChannel: string | null;
@@ -363,6 +369,8 @@ export async function getBackgroundAgentSettingsCommand(
           ({ channelId }) => channelId,
         ),
       managerStatsSlackChannelId: visibleSettings.managerStatsSlackChannelId,
+      providerUsageLimitSlackChannelId:
+        visibleSettings.providerUsageLimitSlackChannelId,
       suggesterSlackChannelId: visibleSettings.suggesterSlackChannelId,
       announcerSlackChannelId: visibleSettings.announcerSlackChannelId,
       platformIssueSlackChannelId: visibleSettings.platformIssueSlackChannelId,
@@ -385,6 +393,8 @@ export async function getBackgroundAgentSettingsCommand(
         ),
       managerSlackChannelId: visibleSettings.managerSlackChannelId,
       managerStatsSlackChannelId: visibleSettings.managerStatsSlackChannelId,
+      providerUsageLimitSlackChannelId:
+        visibleSettings.providerUsageLimitSlackChannelId,
       suggesterSlackChannelId: visibleSettings.suggesterSlackChannelId,
       announcerSlackChannelId: visibleSettings.announcerSlackChannelId,
       platformIssueSlackChannelId: visibleSettings.platformIssueSlackChannelId,

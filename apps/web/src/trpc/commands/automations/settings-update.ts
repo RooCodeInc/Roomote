@@ -2,8 +2,11 @@ import {
   DEFAULT_CONFLICT_RESOLUTION_MAX_PR_AGE_DAYS,
   DEFAULT_CHANNEL_AUTO_START_LAUNCH_MODE,
   DEFAULT_PR_REVIEW_SETTINGS,
+  DEFAULT_PROVIDER_USAGE_LIMIT_FREQUENCY,
+  DEFAULT_PROVIDER_USAGE_LIMIT_THRESHOLD,
   getTriggerableBackgroundAutomationDescriptorByKey,
   isConflictResolverMaxPrAgeDays,
+  isProviderUsageLimitThreshold,
   type AutomationTarget,
   type PrReviewSettings,
   type TriggerableBackgroundAutomationKey,
@@ -106,6 +109,10 @@ function getAutomationActivations(
     {
       automation: 'manager_stats',
       enabled: settings.managerStatsFrequency !== 'off',
+    },
+    {
+      automation: 'provider_usage_limit',
+      enabled: settings.providerUsageLimitFrequency !== 'off',
     },
     {
       automation: 'sentry_triage',
@@ -291,6 +298,7 @@ export async function updateBackgroundAgentSettingsCommand(
         channelAutoStartSlackChannels: string[];
         managerSlackChannel: string | null;
         managerStatsSlackChannel: string | null;
+        providerUsageLimitSlackChannel: string | null;
         suggesterSlackChannel: string | null;
         announcerSlackChannel: string | null;
         platformIssueSlackChannel: string | null;
@@ -459,6 +467,23 @@ export async function updateBackgroundAgentSettingsCommand(
     ? submittedManagerDiscordChannel
     : null;
   const managerStatsFrequency = input.managerStatsFrequency ?? 'off';
+  const providerUsageLimitFrequency =
+    input.providerUsageLimitFrequency ??
+    existingSettings.providerUsageLimitFrequency ??
+    DEFAULT_PROVIDER_USAGE_LIMIT_FREQUENCY;
+  const providerUsageLimitThreshold =
+    input.providerUsageLimitThreshold ??
+    existingSettings.providerUsageLimitThreshold ??
+    DEFAULT_PROVIDER_USAGE_LIMIT_THRESHOLD;
+
+  if (!isProviderUsageLimitThreshold(providerUsageLimitThreshold)) {
+    fieldErrors.general =
+      'Provider usage threshold must be between 50% and 95% in 5% increments.';
+  }
+  if (input.providerUsageLimitDiscordChannel) {
+    fieldErrors.providerUsageLimitDiscordChannel =
+      'Provider Usage Limits supports Slack channels only.';
+  }
   const channelAutoStartRequiresSlackInstallation =
     shouldUpdateChannelAutoStart &&
     channelAutoStartRows.some((row) => Boolean(row.slackChannel));
@@ -577,6 +602,8 @@ export async function updateBackgroundAgentSettingsCommand(
   >;
 
   const managerStatsChannelResult = destinationResults.managerStats.slack;
+  const providerUsageLimitChannelResult =
+    destinationResults.providerUsageLimit.slack;
   const sentryTriageChannelResult = destinationResults.sentryTriage.slack;
   const dependabotTriageChannelResult =
     destinationResults.dependabotTriage.slack;
@@ -737,6 +764,7 @@ export async function updateBackgroundAgentSettingsCommand(
   for (const result of [
     managerChannelResult,
     managerStatsChannelResult,
+    providerUsageLimitChannelResult,
     sentryTriageChannelResult,
     dependabotTriageChannelResult,
     codeqlTriageChannelResult,
@@ -890,6 +918,7 @@ export async function updateBackgroundAgentSettingsCommand(
     channelId: string | null;
     field:
       | 'managerStatsSlackChannel'
+      | 'providerUsageLimitSlackChannel'
       | 'sentryTriageSlackChannel'
       | 'dependabotTriageSlackChannel'
       | 'codeqlTriageSlackChannel'
@@ -926,6 +955,15 @@ export async function updateBackgroundAgentSettingsCommand(
         managerStatsChannelResult.channelId ??
         managerStatsDiscordResult.channelId,
       field: 'managerStatsSlackChannel',
+    },
+    {
+      key: 'provider_usage_limit',
+      frequency:
+        input.savingAutomation === 'providerUsageLimit'
+          ? providerUsageLimitFrequency
+          : 'off',
+      channelId: providerUsageLimitChannelResult.channelId,
+      field: 'providerUsageLimitSlackChannel',
     },
     {
       key: 'sentry_triage',
@@ -979,6 +1017,16 @@ export async function updateBackgroundAgentSettingsCommand(
 
   for (const validation of managerChannelAutomationValidations) {
     if (validation.frequency === 'off') {
+      continue;
+    }
+
+    if (
+      validation.key === 'provider_usage_limit' &&
+      !validation.channelId &&
+      !managerChannelResult.channelId
+    ) {
+      fieldErrors[validation.field] =
+        'Choose a Slack channel before enabling Provider Usage Limits.';
       continue;
     }
 
@@ -1249,6 +1297,15 @@ export async function updateBackgroundAgentSettingsCommand(
     });
 
     await upsertAutomation(tx, {
+      key: 'provider_usage_limit',
+      enabled: providerUsageLimitFrequency !== 'off',
+      schedule: { mode: providerUsageLimitFrequency },
+      settings: { threshold: providerUsageLimitThreshold },
+      ...destinationUpsertFields('providerUsageLimit'),
+      updatedAt: now,
+    });
+
+    await upsertAutomation(tx, {
       key: 'sentry_triage',
       enabled: sentryTriageFrequency !== 'off',
       schedule: { mode: sentryTriageFrequency },
@@ -1406,6 +1463,8 @@ export async function updateBackgroundAgentSettingsCommand(
     notifier: postSaveNotifier,
     channelAutoStartSlackChannelIds: updatedChannelAutoStartSlackChannelIds,
     managerStatsSlackChannelId: updatedSettings.managerStatsSlackChannelId,
+    providerUsageLimitSlackChannelId:
+      updatedSettings.providerUsageLimitSlackChannelId,
     suggesterSlackChannelId: updatedSettings.suggesterSlackChannelId,
     announcerSlackChannelId: updatedSettings.announcerSlackChannelId,
     platformIssueSlackChannelId: updatedSettings.platformIssueSlackChannelId,
@@ -1425,6 +1484,8 @@ export async function updateBackgroundAgentSettingsCommand(
     channelAutoStartSlackChannelIds: updatedChannelAutoStartSlackChannelIds,
     managerSlackChannelId: updatedSettings.managerSlackChannelId,
     managerStatsSlackChannelId: updatedSettings.managerStatsSlackChannelId,
+    providerUsageLimitSlackChannelId:
+      updatedSettings.providerUsageLimitSlackChannelId,
     suggesterSlackChannelId: updatedSettings.suggesterSlackChannelId,
     announcerSlackChannelId: updatedSettings.announcerSlackChannelId,
     platformIssueSlackChannelId: updatedSettings.platformIssueSlackChannelId,

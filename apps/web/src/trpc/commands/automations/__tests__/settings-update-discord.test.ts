@@ -243,6 +243,80 @@ describe('updateBackgroundAgentSettingsCommand Discord destinations', () => {
     expect(mockCaptureActivationAutomationChanged).not.toHaveBeenCalled();
   });
 
+  it('persists provider usage frequency and threshold without creating task state', async () => {
+    await db.insert(deploymentSettings).values({
+      id: 'default',
+      managerSlackChannelId: 'C-MANAGER',
+    });
+
+    const result = await updateBackgroundAgentSettingsCommand(
+      adminAuth,
+      buildInput({
+        savingAutomation: 'providerUsageLimit',
+        providerUsageLimitFrequency: 'daily',
+        providerUsageLimitThreshold: 70,
+        providerUsageLimitSlackChannel: null,
+        providerUsageLimitDiscordChannel: null,
+      }),
+    );
+    const automation = await db.query.automations.findFirst({
+      where: eq(automations.key, 'provider_usage_limit'),
+    });
+
+    expect(result.success).toBe(true);
+    expect(automation).toMatchObject({
+      enabled: true,
+      schedule: { mode: 'daily' },
+      settings: { threshold: 70 },
+      targets: [],
+    });
+  });
+
+  it('rejects provider usage thresholds outside slider increments', async () => {
+    await db.insert(deploymentSettings).values({
+      id: 'default',
+      managerSlackChannelId: 'C-MANAGER',
+    });
+
+    const result = await updateBackgroundAgentSettingsCommand(
+      adminAuth,
+      buildInput({
+        savingAutomation: 'providerUsageLimit',
+        providerUsageLimitFrequency: 'every_hour',
+        providerUsageLimitThreshold: 81,
+      }),
+    );
+
+    expect(result).toEqual({
+      success: false,
+      fieldErrors: {
+        general:
+          'Provider usage threshold must be between 50% and 95% in 5% increments.',
+      },
+    });
+  });
+
+  it('disables provider usage alerts without requiring a Slack channel', async () => {
+    const result = await updateBackgroundAgentSettingsCommand(
+      adminAuth,
+      buildInput({
+        savingAutomation: 'providerUsageLimit',
+        providerUsageLimitFrequency: 'off',
+        providerUsageLimitThreshold: 85,
+      }),
+    );
+    const automation = await db.query.automations.findFirst({
+      where: eq(automations.key, 'provider_usage_limit'),
+    });
+
+    expect(result.success).toBe(true);
+    expect(automation).toMatchObject({ enabled: false, schedule: {} });
+    expect(mockCaptureActivationAutomationChanged).toHaveBeenCalledWith(
+      'disabled',
+      'provider_usage_limit',
+    );
+  });
+
   it('tracks a built-in automation when it is disabled', async () => {
     await upsertAutomation(db, {
       key: 'manager_stats',

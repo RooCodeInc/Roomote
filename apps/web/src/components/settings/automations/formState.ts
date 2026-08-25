@@ -16,6 +16,11 @@ export type ConflictResolverFrequency =
 export type SuggesterFrequency = 'off' | 'daily' | 'weekly';
 export type AnnouncerFrequency = 'off' | 'daily' | 'weekly';
 export type ManagerStatsFrequency = 'off' | 'weekly';
+export type ProviderUsageLimitFrequency =
+  | 'off'
+  | 'every_15_minutes'
+  | 'every_hour'
+  | 'daily';
 export type SentryTriageFrequency = 'off' | 'daily' | 'weekly';
 export type DependabotTriageFrequency = 'off' | 'daily' | 'weekly';
 export type CodeqlTriageFrequency = 'off' | 'daily' | 'weekly';
@@ -89,6 +94,8 @@ export type FormState = {
   managerSlackChannel: string;
   managerDiscordChannel: string;
   managerStatsFrequency: ManagerStatsFrequency;
+  providerUsageLimitFrequency: ProviderUsageLimitFrequency;
+  providerUsageLimitThreshold: number;
   sentryTriageFrequency: SentryTriageFrequency;
   sentryTriageProjectSlugs: string;
   dependabotTriageFrequency: DependabotTriageFrequency;
@@ -116,6 +123,7 @@ export type AutomationId =
   | 'channelAutoStart'
   | 'managerChannel'
   | 'managerStats'
+  | 'providerUsageLimit'
   | 'sentryTriage'
   | 'dependabotTriage'
   | 'codeqlTriage'
@@ -166,6 +174,12 @@ const MANAGER_CHANNEL_FIELDS: Array<keyof FormState> = [
 const MANAGER_STATS_FIELDS: Array<keyof FormState> = [
   'managerStatsFrequency',
   ...DESTINATION_CHANNEL_FIELDS_BY_AUTOMATION_ID.managerStats,
+];
+
+const PROVIDER_USAGE_LIMIT_FIELDS: Array<keyof FormState> = [
+  'providerUsageLimitFrequency',
+  'providerUsageLimitThreshold',
+  ...DESTINATION_CHANNEL_FIELDS_BY_AUTOMATION_ID.providerUsageLimit,
 ];
 
 const SENTRY_TRIAGE_FIELDS: Array<keyof FormState> = [
@@ -223,6 +237,7 @@ const AUTOMATION_FIELDS: Record<AutomationId, Array<keyof FormState>> = {
   channelAutoStart: CHANNEL_AUTO_START_FIELDS,
   managerChannel: MANAGER_CHANNEL_FIELDS,
   managerStats: MANAGER_STATS_FIELDS,
+  providerUsageLimit: PROVIDER_USAGE_LIMIT_FIELDS,
   sentryTriage: SENTRY_TRIAGE_FIELDS,
   dependabotTriage: DEPENDABOT_TRIAGE_FIELDS,
   codeqlTriage: CODEQL_TRIAGE_FIELDS,
@@ -363,6 +378,8 @@ export function buildAutomationSettingsSaveInput(
     managerSlackChannel: stateToSave.managerSlackChannel.trim() || null,
     managerDiscordChannel: stateToSave.managerDiscordChannel.trim() || null,
     managerStatsFrequency: stateToSave.managerStatsFrequency,
+    providerUsageLimitFrequency: stateToSave.providerUsageLimitFrequency,
+    providerUsageLimitThreshold: stateToSave.providerUsageLimitThreshold,
     sentryTriageFrequency: stateToSave.sentryTriageFrequency,
     sentryTriageProjectSlugs:
       stateToSave.sentryTriageProjectSlugs.trim() || null,
