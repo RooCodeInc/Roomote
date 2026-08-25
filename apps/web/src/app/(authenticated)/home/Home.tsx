@@ -73,6 +73,7 @@ import {
 
 const FALLBACK_PROMPT_PLACEHOLDER = 'What do you want to do?';
 const FEEDBACK_DISMISSED_STORAGE_KEY = 'roomote-home-feedback-dismissed';
+const PROMPT_DRAFT_STORAGE_KEY_PREFIX = 'roomote-home-prompt-draft:v1';
 const FEEDBACK_CALENDLY_URL =
   'https://calendly.com/d/ctx9-f7q-6vr/roomote-feedback';
 const FEEDBACK_EMAIL_URL =
@@ -92,6 +93,38 @@ function persistFeedbackPromptDismissal(): void {
     window.localStorage.setItem(FEEDBACK_DISMISSED_STORAGE_KEY, '1');
   } catch {
     // Ignore storage failures; the prompt can still be dismissed for this session.
+  }
+}
+
+function getPromptDraftStorageKey(userId: string | undefined): string | null {
+  return userId ? `${PROMPT_DRAFT_STORAGE_KEY_PREFIX}:${userId}` : null;
+}
+
+function readPromptDraft(storageKey: string | null): string {
+  if (!storageKey) {
+    return '';
+  }
+
+  try {
+    return window.localStorage.getItem(storageKey) ?? '';
+  } catch {
+    return '';
+  }
+}
+
+function persistPromptDraft(storageKey: string | null, prompt: string): void {
+  if (!storageKey) {
+    return;
+  }
+
+  try {
+    if (prompt) {
+      window.localStorage.setItem(storageKey, prompt);
+    } else {
+      window.localStorage.removeItem(storageKey);
+    }
+  } catch {
+    // Draft recovery is best-effort when browser storage is unavailable.
   }
 }
 
@@ -141,6 +174,7 @@ export function Home({
   const router = useRouter();
   const environments = useEnvironments();
   const {
+    userId,
     cloudEnabled,
     isAdmin,
     managedAccess = DEFAULT_MANAGED_DEPLOYMENT_ACCESS,
@@ -172,8 +206,11 @@ export function Home({
   const searchParams = useSearchParams();
   const promptParam = searchParams.get('prompt') ?? '';
   const environmentIdParam = searchParams.get('environmentId')?.trim() ?? '';
+  const promptDraftStorageKey = getPromptDraftStorageKey(userId);
 
-  const [promptText, setPromptText] = useState(promptParam);
+  const [promptText, setPromptText] = useState(
+    () => promptParam || readPromptDraft(promptDraftStorageKey),
+  );
   const [isExiting, setIsExiting] = useState(false);
   const [routingState, setRoutingState] = useState<RoutingFlowState>('idle');
   const [selectedComputeProvider, setSelectedComputeProvider] =
@@ -201,7 +238,21 @@ export function Home({
 
   const routingRequestIdRef = useRef(0);
 
-  useEffect(() => setPromptText(promptParam), [promptParam]);
+  useEffect(() => {
+    setPromptText(promptParam || readPromptDraft(promptDraftStorageKey));
+  }, [promptDraftStorageKey, promptParam]);
+
+  const handlePromptTextChange = useCallback(
+    (prompt: string) => {
+      setPromptText(prompt);
+      persistPromptDraft(promptDraftStorageKey, prompt);
+    },
+    [promptDraftStorageKey],
+  );
+
+  const clearPromptDraft = useCallback(() => {
+    persistPromptDraft(promptDraftStorageKey, '');
+  }, [promptDraftStorageKey]);
 
   useEffect(() => {
     setIsFeedbackPromptVisible(!isFeedbackPromptDismissed());
@@ -437,12 +488,21 @@ export function Home({
           payload,
         });
 
+        if (result.success) {
+          clearPromptDraft();
+        }
+
         return result.success;
       } catch {
         return false;
       }
     },
-    [createStandardTaskRun, selectedComputeProvider, selectedModelId],
+    [
+      clearPromptDraft,
+      createStandardTaskRun,
+      selectedComputeProvider,
+      selectedModelId,
+    ],
   );
 
   useEffect(() => {
@@ -725,7 +785,7 @@ export function Home({
                 promptKey={promptParam}
                 isBusy={isBusy}
                 promptText={promptText}
-                onPromptTextChange={setPromptText}
+                onPromptTextChange={handlePromptTextChange}
                 onSubmit={handleSubmit}
                 placeholder={activePromptPlaceholder}
                 autoFocus
