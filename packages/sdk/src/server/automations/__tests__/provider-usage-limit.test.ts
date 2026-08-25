@@ -127,20 +127,21 @@ describe('provider usage limit automation', () => {
     expect(message.blocks[0]).toMatchObject({
       type: 'container',
       title: { text: 'Inference Provider Usage Alert' },
-      subtitle: { text: 'OpenRouter is at 90%' },
+      subtitle: {
+        type: 'mrkdwn',
+        text: 'OpenRouter (`Production`) is at 90% ($90.00 of $100.00)',
+      },
       icon: {
         image_url: expect.stringContaining(
           '/automation-icons/battery-warning.png',
         ),
       },
     });
-    expect(JSON.stringify(message.blocks)).toContain('*Key* `Production`');
+    expect(JSON.stringify(message.blocks)).toContain('(`Production`)');
     expect(JSON.stringify(message.blocks)).not.toContain(
       'Production (abc123def456)',
     );
-    expect(JSON.stringify(message.blocks)).toContain(
-      '*Usage* $90.00 of $100.00',
-    );
+    expect(message.blocks[0]).toMatchObject({ child_blocks: [] });
   });
 
   it('does nothing when disabled', async () => {
@@ -202,7 +203,7 @@ describe('provider usage limit automation', () => {
 
     expect(deps.postMessage).toHaveBeenCalledTimes(2);
     expect(JSON.stringify(deps.postMessage.mock.calls[1]?.[0])).toContain(
-      '*Threshold crossed* 100%',
+      'OpenRouter (`Production`) is at 100% ($100.00 of $100.00)',
     );
   });
 
@@ -258,6 +259,7 @@ describe('provider usage limit automation', () => {
     expect(deps.postMessage.mock.calls[0]?.[0]?.text).toBe(
       '2 provider usage limits need attention',
     );
+    expect(deps.postMessage.mock.calls[0]?.[0]?.blocks).toHaveLength(2);
   });
 
   it('posts Markdown and a settings link through a non-Slack adapter', async () => {
@@ -294,7 +296,7 @@ describe('provider usage limit automation', () => {
         channelId: 'teams-conversation',
         serviceUrl: 'https://smba.trafficmanager.net/emea/',
         textFormat: 'markdown',
-        text: expect.stringContaining('**OpenRouter usage is at 90%**'),
+        text: expect.stringContaining('**Provider** OpenRouter'),
         buttons: [
           [
             expect.objectContaining({

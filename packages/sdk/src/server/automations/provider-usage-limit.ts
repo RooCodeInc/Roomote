@@ -11,12 +11,13 @@ import {
   type ProviderUsageLimitSnapshot,
 } from '@roomote/db/server';
 import { getRedis } from '@roomote/redis';
-import { buildAutomationResultBlocks, SlackNotifier } from '@roomote/slack';
+import { SlackNotifier } from '@roomote/slack';
 import {
   DEFAULT_PROVIDER_USAGE_LIMIT_THRESHOLD,
   isProviderUsageLimitThreshold,
   PROVIDER_USAGE_LIMIT_SETTINGS_HASH,
   type ProviderUsageLimitThreshold,
+  type SlackBlock,
 } from '@roomote/types';
 
 import { getCommunicationProviderAdapter } from '../lib/communication-providers';
@@ -211,17 +212,14 @@ type ProviderUsageLimitAlert = {
   manualTest?: boolean;
 };
 
-function formatSnapshot({
-  snapshot,
-  threshold,
-  manualTest = false,
-}: ProviderUsageLimitAlert): string {
-  const percent = Math.round(snapshot.usedPercent * 10) / 10;
-  const usage =
-    snapshot.used !== undefined && snapshot.limit !== undefined
-      ? `${formatAmount(snapshot.used, snapshot.currency)} of ${formatAmount(snapshot.limit, snapshot.currency)}`
-      : `${percent}% of 100% (raw usage and limit not reported)`;
-  const credentialLabel = snapshot.credentialLabel.endsWith(
+function formatUsage(snapshot: ProviderUsageLimitSnapshot, percent: number) {
+  return snapshot.used !== undefined && snapshot.limit !== undefined
+    ? `${formatAmount(snapshot.used, snapshot.currency)} of ${formatAmount(snapshot.limit, snapshot.currency)}`
+    : `${percent}% of 100% (raw usage and limit not reported)`;
+}
+
+function formatCredentialLabel(snapshot: ProviderUsageLimitSnapshot) {
+  return snapshot.credentialLabel.endsWith(
     ` (${snapshot.credentialFingerprint})`,
   )
     ? snapshot.credentialLabel.slice(
@@ -229,6 +227,16 @@ function formatSnapshot({
         -` (${snapshot.credentialFingerprint})`.length,
       )
     : snapshot.credentialLabel;
+}
+
+function formatSnapshot({
+  snapshot,
+  threshold,
+  manualTest = false,
+}: ProviderUsageLimitAlert): string {
+  const percent = Math.round(snapshot.usedPercent * 10) / 10;
+  const usage = formatUsage(snapshot, percent);
+  const credentialLabel = formatCredentialLabel(snapshot);
 
   return [
     `*Provider* ${snapshot.providerName}`,
@@ -241,14 +249,39 @@ function formatSnapshot({
     .join('\n');
 }
 
+function buildProviderUsageLimitAlertBlock(
+  snapshot: ProviderUsageLimitSnapshot,
+): SlackBlock {
+  const percent = Math.round(snapshot.usedPercent * 10) / 10;
+  const usage = formatUsage(snapshot, percent);
+  const credentialLabel = formatCredentialLabel(snapshot);
+
+  return {
+    type: 'container',
+    width: 'full',
+    title: {
+      type: 'plain_text',
+      text: 'Inference Provider Usage Alert',
+      emoji: false,
+    },
+    subtitle: {
+      type: 'mrkdwn',
+      text: `${snapshot.providerName} (\`${credentialLabel}\`) is at ${percent}% (${usage})`,
+    },
+    icon: {
+      type: 'image',
+      image_url: buildAutomationIconUrl('battery-warning'),
+      alt_text: 'Inference Provider Usage Alert automation icon',
+    },
+    child_blocks: [],
+  };
+}
+
 export function buildProviderUsageLimitWarningMessage(params: {
   alerts: ProviderUsageLimitAlert[];
 }) {
   const highestPercent = Math.max(
     ...params.alerts.map(({ snapshot }) => snapshot.usedPercent),
-  );
-  const highestAlert = params.alerts.reduce((highest, alert) =>
-    alert.snapshot.usedPercent > highest.snapshot.usedPercent ? alert : highest,
   );
   const summary =
     params.alerts.length === 1
@@ -256,26 +289,9 @@ export function buildProviderUsageLimitWarningMessage(params: {
       : `${params.alerts.length} provider usage limits need attention`;
   return {
     text: summary,
-    blocks: buildAutomationResultBlocks({
-      title: 'Inference Provider Usage Alert',
-      subtitle: {
-        type: 'plain_text',
-        text: `${highestAlert.snapshot.providerName} is at ${Math.round(highestPercent * 10) / 10}%`,
-      },
-      iconUrl: buildAutomationIconUrl('battery-warning'),
-      configureUrl: buildManagerSlackSettingsUrl(
-        PROVIDER_USAGE_LIMIT_SETTINGS_HASH,
-      ),
-      contentBlocks: [
-        {
-          type: 'section',
-          text: {
-            type: 'mrkdwn',
-            text: formatProviderUsageLimitWarningText(params),
-          },
-        },
-      ],
-    }),
+    blocks: params.alerts.map(({ snapshot }) =>
+      buildProviderUsageLimitAlertBlock(snapshot),
+    ),
   };
 }
 

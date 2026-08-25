@@ -278,10 +278,9 @@ when it first appears, preserving the provider warning behavior from earlier
 Roomote releases. Admins can disable it, choose a Slack or Discord channel (or
 use the normal Teams, Telegram, or Discord primary-conversation fallback), and
 set the warning threshold from 5% through 95% in 5% increments. Roomote checks
-hourly, posts one consolidated automation result card when a provider crosses
-the threshold in a quota cycle, and sends a fresh critical alert if the quota
-later reaches 100%. The check is deterministic and never starts a Roomote task
-or session.
+hourly, posts an alert card for each provider that crosses the threshold in a
+quota cycle, and sends a fresh critical alert if the quota later reaches 100%.
+The check is deterministic and never starts a Roomote task or session.
 
 **Platform Issue Alerts** are enabled by default. Their own Slack or Discord
 destination wins, followed by the shared Manager Channel. If neither channel is
