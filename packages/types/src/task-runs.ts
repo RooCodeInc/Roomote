@@ -236,6 +236,8 @@ export type SuggestionCategory =
   | 'improvement';
 
 export type SuggestionPriority = 'P0' | 'P1' | 'P2' | 'P3';
+export const TASK_SUGGESTION_MESSAGE_METADATA_EVENT_TYPE =
+  'roomote.setup_onboarding_suggestion';
 export const TASK_SUGGESTION_SOURCES = [
   'suggest_ideas',
   'sentry_triage',

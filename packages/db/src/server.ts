@@ -47,6 +47,7 @@ export * from './lib/task-activity-timestamp';
 export * from './lib/acting-user';
 export * from './lib/task-suggestion-content-hash';
 export * from './lib/work-item-claims';
+export * from './lib/tracked-suggestion-cards';
 export * from './lib/task-start-parallel-counts';
 export * from './lib/tasks';
 export * from './lib/task-goals';

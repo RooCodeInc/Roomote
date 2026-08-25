@@ -6,14 +6,16 @@ import {
   asc,
   db,
   eq,
+  findTrackedSuggestionWorkItemIds,
   inArray,
+  registerTrackedSuggestionCards,
   sql,
-  trackedMessages,
   workItems,
 } from '@roomote/db/server';
-import type { SlackNotifier } from '@roomote/slack';
-
-const SUGGESTION_METADATA_EVENT_TYPE = 'roomote.setup_onboarding_suggestion';
+import {
+  buildTaskSuggestionMessageMetadata,
+  type SlackNotifier,
+} from '@roomote/slack';
 
 type FastAutomationSuggestion = {
   title: string;
@@ -145,22 +147,6 @@ function formatSuggestion(
     .join('\n')}`;
 }
 
-async function hasTrackedSuggestion(
-  surface: 'slack' | 'discord',
-  workItemId: string,
-): Promise<boolean> {
-  return Boolean(
-    await db.query.trackedMessages.findFirst({
-      where: and(
-        eq(trackedMessages.surface, surface),
-        eq(trackedMessages.kind, 'suggestion_card'),
-        eq(trackedMessages.workItemId, workItemId),
-      ),
-      columns: { id: true },
-    }),
-  );
-}
-
 async function trackSuggestion(params: {
   surface: 'slack' | 'discord';
   channelId: string;
@@ -170,27 +156,20 @@ async function trackSuggestion(params: {
   createdByUserId: string;
   eventId: string;
 }): Promise<void> {
-  await db
-    .insert(trackedMessages)
-    .values({
+  await registerTrackedSuggestionCards([
+    {
       surface: params.surface,
-      kind: 'suggestion_card',
-      dedupeKey: `${params.channelId}:${params.messageId}`,
       channelId: params.channelId,
       messageTs: params.messageId,
-      ...(params.threadId ? { threadTs: params.threadId } : {}),
+      threadTs: params.threadId,
       workItemId: params.workItemId,
       createdByUserId: params.createdByUserId,
-      metadata: {
-        suggestionType: 'suggested_tasks',
-        suggestionKey: `${params.eventId}:${params.workItemId}`,
-        suggestionGroupKey: params.eventId,
-        launchRouting: 'router',
-      },
-    })
-    .onConflictDoNothing({
-      target: [trackedMessages.kind, trackedMessages.dedupeKey],
-    });
+      suggestionType: 'suggested_tasks',
+      suggestionKey: `${params.eventId}:${params.workItemId}`,
+      suggestionGroupKey: params.eventId,
+      launchRouting: 'router',
+    },
+  ]);
 }
 
 export async function postFastAutomationSuggestionsToSlack(params: {
@@ -202,8 +181,12 @@ export async function postFastAutomationSuggestionsToSlack(params: {
   suggestions: FastAutomationSuggestion[];
 }): Promise<void> {
   const suggestions = await persistFastAutomationSuggestions(params);
+  const trackedWorkItemIds = await findTrackedSuggestionWorkItemIds({
+    surface: 'slack',
+    workItemIds: suggestions.map((suggestion) => suggestion.id),
+  });
   for (const suggestion of suggestions) {
-    if (await hasTrackedSuggestion('slack', suggestion.id)) continue;
+    if (trackedWorkItemIds.has(suggestion.id)) continue;
 
     const text = formatSuggestion(suggestion);
     const messageId = await params.slack.postMessage({
@@ -214,14 +197,10 @@ export async function postFastAutomationSuggestionsToSlack(params: {
       ),
       text,
       blocks: [{ type: 'markdown', text }],
-      metadata: {
-        event_type: SUGGESTION_METADATA_EVENT_TYPE,
-        event_payload: {
-          sourceTaskId: params.eventId,
-          suggestionId: suggestion.id,
-          schemaVersion: 1,
-        },
-      },
+      metadata: buildTaskSuggestionMessageMetadata({
+        sourceTaskId: params.eventId,
+        suggestionId: suggestion.id,
+      }),
     });
     if (!messageId) {
       throw new Error('Slack did not post a Fast automation suggestion.');
@@ -247,8 +226,12 @@ export async function postFastAutomationSuggestionsToDiscord(params: {
   suggestions: FastAutomationSuggestion[];
 }): Promise<void> {
   const suggestions = await persistFastAutomationSuggestions(params);
+  const trackedWorkItemIds = await findTrackedSuggestionWorkItemIds({
+    surface: 'discord',
+    workItemIds: suggestions.map((suggestion) => suggestion.id),
+  });
   for (const suggestion of suggestions) {
-    if (await hasTrackedSuggestion('discord', suggestion.id)) continue;
+    if (trackedWorkItemIds.has(suggestion.id)) continue;
 
     const posted = await params.provider.postMessage({
       channelId: params.channelId,

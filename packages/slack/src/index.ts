@@ -41,6 +41,7 @@ export * from './statuspage-incidents';
 export * from './persist-posted-slack-kickoff';
 export * from './pr-review-action';
 export * from './suggested-tasks-onboarding-followup';
+export * from './suggestion-message-metadata';
 export * from './slack-thread-delivery-tracker';
 export * from './task-cancellation-blocks';
 export * from './thread-reply-details';
