@@ -16,7 +16,8 @@ vi.mock('../../lib/fast-agent-parent-event', () => ({
   deliverFastAgentParentEvent: fastMocks.deliverParentEvent,
 }));
 
-vi.mock('@roomote/slack', () => ({
+vi.mock('@roomote/slack', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@roomote/slack')>()),
   SlackNotifier: class SlackNotifier {
     postMessage = fastMocks.slackPostMessage;
   },
@@ -227,6 +228,29 @@ describe('customAutomationsJob', () => {
       expect.objectContaining({
         channel: 'C123',
         client_msg_id: 'client-message-id',
+        blocks: [
+          expect.objectContaining({
+            type: 'container',
+            title: expect.objectContaining({ text: 'Flaky tests' }),
+            has_header_divider: true,
+            child_blocks: expect.arrayContaining([
+              expect.objectContaining({
+                type: 'section',
+                text: expect.objectContaining({
+                  text: '*Flaky tests* is running in Fast mode.',
+                }),
+              }),
+              expect.objectContaining({
+                type: 'actions',
+                elements: [
+                  expect.objectContaining({
+                    action_id: 'late_bound_automation_configure',
+                  }),
+                ],
+              }),
+            ]),
+          }),
+        ],
       }),
     );
     expect(fastMocks.getSession).toHaveBeenCalledWith({

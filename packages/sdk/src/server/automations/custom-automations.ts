@@ -53,6 +53,7 @@ import {
 } from './types';
 import { findUserDirectMessageDestination } from '../lib/user-direct-message';
 import { createDiscordCommunicationProviderFromRuntimeCredentials } from '../lib/discord-communication';
+import { buildCustomAutomationSlackMessage } from '../lib/manager-slack';
 import {
   buildSlackClientMessageId,
   deliverFastAgentParentEvent,
@@ -267,15 +268,20 @@ async function buildFastAutomationConversation(params: {
       throw new Error('Slack is not connected.');
     }
     const slack = new SlackNotifier(installation.botAccessToken);
+    const kickoffText = `${automation.name} is running in Fast mode.`;
     const rootMessageId = await slack.postMessage({
       channel: destination.channelId,
-      text: `${automation.name} is running in Fast mode.`,
-      blocks: [
-        {
-          type: 'markdown',
-          text: `**${automation.name}** is running in Fast mode.`,
-        },
-      ],
+      ...buildCustomAutomationSlackMessage({
+        automationId: automation.id,
+        automationName: automation.name,
+        text: kickoffText,
+        contentBlocks: [
+          {
+            type: 'markdown',
+            text: `**${automation.name}** is running in Fast mode.`,
+          },
+        ],
+      }),
       unfurl_links: false,
       unfurl_media: false,
       client_msg_id: buildSlackClientMessageId(
@@ -387,10 +393,11 @@ async function runFastCustomAutomation(params: {
           await new SlackNotifier(installation.botAccessToken).updateMessage({
             channel: conversation.replyTarget.channelId,
             ts: rootMessageId,
-            message: {
+            message: buildCustomAutomationSlackMessage({
+              automationId: params.automation.id,
+              automationName: params.automation.name,
               text: message,
-              blocks: [{ type: 'markdown', text: message }],
-            },
+            }),
           });
         }
       } else if (conversation.surface === 'discord' && rootMessageId) {

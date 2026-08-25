@@ -46,6 +46,7 @@ import {
 } from '@roomote/types';
 
 import { resolveUserMcpServerConfigs } from '../routers/mcp-connections';
+import { buildCustomAutomationSlackMessage } from './manager-slack';
 
 import {
   buildSignedArtifactRawUrl,
@@ -489,20 +490,23 @@ async function createSlackFastAgentParentTurn(params: {
             : null;
 
         if (params.event.type === 'automation_triggered' && !kickoff) {
+          const contentBlocks = [
+            { type: 'markdown' as const, text: message },
+            ...images.map((image) => ({
+              type: 'image' as const,
+              image_url: image.url,
+              alt_text: image.altText,
+            })),
+          ];
           const updated = await slack.updateMessage({
             channel: conversation.replyTarget.channelId,
             ts: params.event.rootMessageId ?? conversation.replyTarget.threadId,
-            message: {
+            message: buildCustomAutomationSlackMessage({
+              automationId: params.event.automationId,
+              automationName: params.event.automationName,
               text: message,
-              blocks: [
-                { type: 'markdown', text: message },
-                ...images.map((image) => ({
-                  type: 'image' as const,
-                  image_url: image.url,
-                  alt_text: image.altText,
-                })),
-              ],
-            },
+              contentBlocks,
+            }),
           });
           if (!updated) {
             throw new Error('Slack did not update the Fast automation root.');
