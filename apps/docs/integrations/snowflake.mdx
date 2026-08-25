@@ -20,12 +20,24 @@ identifier, username, role, and PKCS8 PEM-encoded private key. Add the matching
 public key to the Snowflake user first. Supply the private-key passphrase too
 when the key is encrypted.
 
+Generate a dedicated encrypted RSA key on a secure operator machine. Keep the
+private key out of shell arguments, repositories, chat, and logs. For example,
+run `umask 077`, then use `openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:3072 -aes-256-cbc -out roomote_snowflake_key.p8` and enter the passphrase interactively. Export only the public key with `openssl pkey -in roomote_snowflake_key.p8 -pubout -out roomote_snowflake_key.pub`.
+
 <Warning>
   The `execute_sql` tool can run any statement permitted by the configured
   Snowflake role, including statements that change data or schema. Use a
   dedicated least-privilege role, preferably read-only when tasks only need
   warehouse context.
 </Warning>
+
+## Rotate from an existing credential
+
+1. Install the new public key in Snowflake's unused `RSA_PUBLIC_KEY_2` slot and verify its fingerprint before changing Roomote.
+2. Enter the encrypted PKCS8 private key and passphrase in **Settings > Integrations > Snowflake**. Leave both fields blank on later edits to keep the stored key.
+3. Run a Roomote task that calls `list_databases`, `list_schemas`, and `execute_sql` with `SELECT CURRENT_USER(), CURRENT_ROLE(), CURRENT_WAREHOUSE()`. Confirm the configured role can read only the intended data.
+4. Review Roomote and Snowflake login logs for a successful JWT login without credential material. A saved connection is not proof that Snowflake accepted it.
+5. After an observation window, revoke the previous password, programmatic access token, or public-key slot and verify a fresh Roomote task still connects.
 
 ## What to expect
 
