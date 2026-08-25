@@ -57,8 +57,6 @@ export type ContentionResult<T> =
 export interface ContentionOptions<T> {
   /** Lock TTL in seconds (default: 30). */
   ttlSeconds?: number;
-  /** Keep the creation lease alive while onAcquired is still running. */
-  renewIntervalMs?: number;
   poll?: {
     /** Milliseconds between poll attempts (default: 500). */
     intervalMs?: number;
@@ -79,8 +77,6 @@ export interface ContentionOptions<T> {
 export interface RedisLockOptions {
   /** Lock TTL in seconds (default: 30). */
   ttlSeconds?: number;
-  /** Keep the lease alive while the protected callback is still running. */
-  renewIntervalMs?: number;
   /** Optional Redis instance override (defaults to `getRedis()`). */
   redis?: Redis;
 }
@@ -152,19 +148,12 @@ export async function withRedisLock<T>(
   const ttl = options.ttlSeconds ?? 30;
   const redis = options.redis ?? getRedis();
   const ownerId = crypto.randomUUID();
-  const renewIntervalMs = options.renewIntervalMs;
 
   const acquired = await redis.set(key, ownerId, 'EX', ttl, 'NX');
 
   if (!acquired) {
     return { acquired: false };
   }
-
-  const renewalTimer = renewIntervalMs
-    ? setInterval(() => {
-        void safeRenew(redis, key, ownerId, ttl);
-      }, renewIntervalMs)
-    : undefined;
 
   try {
     const value = await fn();
@@ -175,10 +164,6 @@ export async function withRedisLock<T>(
     // (e.g. if our TTL expired and someone else acquired it while fn() was running).
     await safeRelease(redis, key, ownerId);
     throw error;
-  } finally {
-    if (renewalTimer) {
-      clearInterval(renewalTimer);
-    }
   }
 }
 
@@ -206,10 +191,8 @@ export async function withContention<T>(
   const intervalMs = options.poll?.intervalMs ?? 500;
   const maxAttempts = options.poll?.maxAttempts ?? 10;
 
-  const lockResult = await withRedisLock(
-    key,
-    { ttlSeconds, renewIntervalMs: options.renewIntervalMs, redis },
-    async () => options.onAcquired(),
+  const lockResult = await withRedisLock(key, { ttlSeconds, redis }, async () =>
+    options.onAcquired(),
   );
 
   if (lockResult.acquired) {

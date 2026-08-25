@@ -675,17 +675,8 @@ export async function answerFastAgentQuestion({
         ]),
       ).values(),
     ];
-    const currentFollowUpTasks = new Map(
+    const currentTasks = new Map(
       resolvedActiveTasks.map((task) => [task.taskId, task]),
-    );
-    const currentActiveTasks = new Map(
-      resolvedActiveTasks
-        .filter(
-          (task) =>
-            task.status === undefined ||
-            (activeRunStatuses as readonly RunStatus[]).includes(task.status),
-        )
-        .map((task) => [task.taskId, task]),
     );
     const { bootstrapMessages, turnMessage } = buildFastAgentMessages({
       question,
@@ -1084,10 +1075,7 @@ export async function answerFastAgentQuestion({
               postKickoff: deliverKickoff,
             });
             if (result.success) {
-              currentActiveTasks.set(result.taskId, { taskId: result.taskId });
-              currentFollowUpTasks.set(result.taskId, {
-                taskId: result.taskId,
-              });
+              currentTasks.set(result.taskId, { taskId: result.taskId });
               if (result.kickoffDelivered) {
                 visibleUpdatePosted = true;
               }
@@ -1102,10 +1090,7 @@ export async function answerFastAgentQuestion({
             const args = taskMessageArgsSchema.parse(call.args);
             const ackError = requireAcknowledgement();
             if (ackError) return ackError;
-            const target = selectActiveTaskId(
-              args.taskId,
-              currentFollowUpTasks,
-            );
+            const target = selectActiveTaskId(args.taskId, currentTasks);
             if (!target.taskId) return { success: false, error: target.error };
             const signature = `send_task_message:${target.taskId}`;
             if (completedTaskActions.has(signature)) {
@@ -1118,11 +1103,7 @@ export async function answerFastAgentQuestion({
             throwIfTurnCancelled();
             const result = await sendFastAgentTaskMessage(
               { userId, apiBaseUrl },
-              {
-                taskId: target.taskId,
-                message: args.message,
-                clientMessageId: `fast-agent:${session.id}:${currentMessageId ?? conversation.conversationId}:${target.taskId}`,
-              },
+              { taskId: target.taskId, message: args.message },
             );
             return result;
           }
@@ -1131,8 +1112,20 @@ export async function answerFastAgentQuestion({
             const args = taskIdArgsSchema.parse(call.args);
             const ackError = requireAcknowledgement();
             if (ackError) return ackError;
-            const target = selectActiveTaskId(args.taskId, currentActiveTasks);
+            const target = selectActiveTaskId(args.taskId, currentTasks);
             if (!target.taskId) return { success: false, error: target.error };
+            const targetTask = currentTasks.get(target.taskId);
+            if (
+              targetTask?.status !== undefined &&
+              !(activeRunStatuses as readonly RunStatus[]).includes(
+                targetTask.status,
+              )
+            ) {
+              return {
+                success: false,
+                error: `Task ${target.taskId} is not active in this conversation.`,
+              };
+            }
             const signature = `cancel_task:${target.taskId}`;
             if (completedTaskActions.has(signature)) {
               return {
@@ -1147,8 +1140,7 @@ export async function answerFastAgentQuestion({
               target.taskId,
             );
             if (result.success) {
-              currentActiveTasks.delete(target.taskId);
-              currentFollowUpTasks.delete(target.taskId);
+              currentTasks.delete(target.taskId);
             }
             return result;
           }

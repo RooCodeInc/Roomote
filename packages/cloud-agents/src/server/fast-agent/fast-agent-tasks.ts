@@ -188,19 +188,13 @@ async function callFastAgentTaskApi({
 
 export async function sendFastAgentTaskMessage(
   context: FastAgentTaskApiContext,
-  params: { taskId: string; message: string; clientMessageId?: string },
+  params: { taskId: string; message: string },
 ): Promise<FastAgentTaskToolResult> {
   return callFastAgentTaskApi({
     ...context,
     method: 'POST',
     path: `${FAST_AGENT_TASKS_API_PATH}/${params.taskId}/steer_message`,
-    body: {
-      message: params.message,
-      senderMode: 'fast_agent',
-      ...(params.clientMessageId
-        ? { clientMessageId: params.clientMessageId }
-        : {}),
-    },
+    body: { message: params.message, senderMode: 'fast_agent' },
   });
 }
 

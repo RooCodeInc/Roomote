@@ -19,11 +19,9 @@ import type {
   TaskPayload,
   RunTokenContext,
   PullRequestStatus,
-  RunStatus,
   TaskGoal,
 } from '@roomote/types';
 import { trackLatestUserMessageForReplyQuote } from '@roomote/communication/messages';
-import { withContention } from '@roomote/redis';
 import {
   TaskPayloadKind,
   buildFastAgentChildTaskMetadata,
@@ -55,7 +53,6 @@ import { logHandlerError } from '../utils';
 const LINKED_REVIEW_HANDOFF_SOURCE = 'linked_review_handoff';
 const SANDBOX_BOOTING_ERROR =
   "The task hasn't started yet — the sandbox is still booting. Try again in a few seconds.";
-const TASK_RESUME_LOCK_PREFIX = 'task:resume-lock:';
 const REVIEW_HANDOFF_TASK_TYPES = new Set<TaskPayloadKind>([
   TaskPayloadKind.GithubPrReview,
   TaskPayloadKind.GithubPrReviewSync,
@@ -122,7 +119,7 @@ type SendMessageToTaskResult =
 
 type LatestTaskRun = {
   id: number;
-  status: RunStatus;
+  status: string;
   sandboxServerUrl: string | null;
   actingUserId: string | null;
   snapshotId: string | null;
@@ -132,103 +129,6 @@ type LatestTaskRun = {
   port: number | null;
   result: unknown;
 };
-
-type ResumeSelection =
-  | { kind: 'created'; runId: number }
-  | { kind: 'existing'; run: LatestTaskRun };
-
-function getTaskResumeLockKey(taskId: string): string {
-  return `${TASK_RESUME_LOCK_PREFIX}${taskId}`;
-}
-
-function hasMatchingResumeDelivery(
-  run: LatestTaskRun,
-  clientMessageId?: string,
-): boolean {
-  const normalizedClientMessageId = normalizeOptionalString(clientMessageId);
-  return (
-    normalizedClientMessageId !== undefined &&
-    run.payload?.resumePromptClientMessageId === normalizedClientMessageId
-  );
-}
-
-async function findLatestFollowUpRun(
-  taskId: string,
-): Promise<LatestTaskRun | null> {
-  return (await findLatestTaskRun(taskId, {
-    id: true,
-    status: true,
-    sandboxServerUrl: true,
-    actingUserId: true,
-    snapshotId: true,
-    snapshotCreatedAt: true,
-    sourceRunId: true,
-    payload: true,
-    port: true,
-    result: true,
-  })) as LatestTaskRun | null;
-}
-
-async function resumeAfterSettledDelivery({
-  taskId,
-  sourceRunId,
-  userId,
-  message,
-  quoteText,
-  images,
-  source,
-  clientMessageId,
-  channelBindings,
-  senderMode,
-}: {
-  taskId: string;
-  sourceRunId: number;
-  userId: string;
-  message: string;
-  quoteText: string;
-  images?: string[];
-  source?: string;
-  clientMessageId?: string;
-  channelBindings: TaskChannelBindingsRow | null;
-  senderMode?: SendMessageSenderMode;
-}): Promise<SendMessageToTaskResult | null> {
-  const latestRun = await findLatestFollowUpRun(taskId);
-
-  if (!latestRun) {
-    return null;
-  }
-
-  if (latestRun.id !== sourceRunId) {
-    return hasMatchingResumeDelivery(latestRun, clientMessageId)
-      ? {
-          success: true,
-          result: {
-            resumed: true,
-            runId: latestRun.id,
-            taskId,
-            deduplicated: true,
-          },
-        }
-      : null;
-  }
-
-  if (!isExitedRunStatus(latestRun.status)) {
-    return null;
-  }
-
-  return resumeTaskFromSnapshot({
-    taskId,
-    userId,
-    message,
-    quoteText,
-    images,
-    source,
-    clientMessageId,
-    sourceRun: latestRun,
-    channelBindings,
-    senderMode,
-  });
-}
 
 type LinkedReviewFastHandoff = {
   fastParentRequired: boolean;
@@ -691,79 +591,23 @@ async function resumeTaskFromSnapshot({
     sourceRun.sourceRunId,
   );
 
-  const { value: selection } = await withContention<ResumeSelection>(
-    getTaskResumeLockKey(taskId),
+  // Resumes never create tasks and never re-attribute; the follow-up sender
+  // becomes the new run's acting user.
+  const resumeLaunch = await enqueueTask(
     {
-      ttlSeconds: 30,
-      renewIntervalMs: 10_000,
-      poll: { intervalMs: 100, maxAttempts: 50 },
-      onAcquired: async () => {
-        const latestRun = await findLatestFollowUpRun(taskId);
-
-        if (!latestRun) {
-          throw new Error('Task not found while resuming');
-        }
-
-        if (latestRun.id !== sourceRun.id) {
-          return { kind: 'existing', run: latestRun };
-        }
-
-        // Resumes never create tasks and never re-attribute; the follow-up
-        // sender becomes the new run's acting user.
-        const resumeLaunch = await enqueueTask(
-          {
-            task: {
-              type: TaskPayloadKind.SnapshotResume,
-              sourceSnapshotId: sourceRun.snapshotId,
-              sourceRunId: sourceRun.id,
-              payload,
-            },
-            actingUserId: userId,
-          },
-          {},
-        );
-
-        return { kind: 'created', runId: resumeLaunch.id };
+      task: {
+        type: TaskPayloadKind.SnapshotResume,
+        sourceSnapshotId: sourceRun.snapshotId,
+        sourceRunId: sourceRun.id,
+        payload,
       },
-      onContended: async () => {
-        const latestRun = await findLatestFollowUpRun(taskId);
-        return latestRun && latestRun.id !== sourceRun.id
-          ? { kind: 'existing', run: latestRun }
-          : undefined;
-      },
+      actingUserId: userId,
     },
+    {},
   );
 
-  if (!selection) {
-    return {
-      success: false,
-      error: 'Task continuation is already starting. Try again in a moment.',
-      status: 409,
-    };
-  }
-
-  if (selection.kind === 'existing') {
-    if (hasMatchingResumeDelivery(selection.run, clientMessageId)) {
-      return {
-        success: true,
-        result: {
-          resumed: true,
-          runId: selection.run.id,
-          taskId,
-          deduplicated: true,
-        },
-      };
-    }
-
-    return {
-      success: false,
-      error: 'Task continuation is already starting. Try again in a moment.',
-      status: 409,
-    };
-  }
-
   await maybeCreateSlackReplyQuoteContext({
-    runId: selection.runId,
+    runId: resumeLaunch.id,
     payload,
     slackThreadTs: channelBindings?.slackThreadTs ?? null,
     userId,
@@ -775,7 +619,7 @@ async function resumeTaskFromSnapshot({
     success: true,
     result: {
       resumed: true,
-      runId: selection.runId,
+      runId: resumeLaunch.id,
       taskId,
     },
   };
@@ -1160,25 +1004,6 @@ export async function sendMessageToTask({
     }
 
     if (!run.sandboxServerUrl) {
-      if (!goalContext) {
-        const continuationResult = await resumeAfterSettledDelivery({
-          taskId,
-          sourceRunId: run.id,
-          userId: linkedReviewHandoff.senderUserId,
-          message,
-          quoteText,
-          images,
-          source,
-          clientMessageId,
-          channelBindings,
-          senderMode,
-        });
-
-        if (continuationResult) {
-          return continuationResult;
-        }
-      }
-
       return {
         success: false,
         error: 'Task has no active sandbox. The worker may still be booting.',
@@ -1271,25 +1096,6 @@ export async function sendMessageToTask({
         });
       }
 
-      if (!goalContext) {
-        const continuationResult = await resumeAfterSettledDelivery({
-          taskId,
-          sourceRunId: run.id,
-          userId: senderUserId,
-          message,
-          quoteText,
-          images,
-          source,
-          clientMessageId,
-          channelBindings,
-          senderMode,
-        });
-
-        if (continuationResult) {
-          return continuationResult;
-        }
-      }
-
       if (error instanceof SandboxNotReadyError) {
         return {
           success: false,
@@ -1334,7 +1140,6 @@ export async function steerMessageToTask({
   images,
   senderMode,
   workerQuoteUserName,
-  clientMessageId,
 }: {
   taskId: string;
   userId: string;
@@ -1342,7 +1147,6 @@ export async function steerMessageToTask({
   quoteText?: string;
   images?: string[];
   senderMode?: SendMessageSenderMode;
-  clientMessageId?: string;
   /**
    * Explicit display name for the worker-side Slack reply quote. See
    * {@link sendMessageToTask} for semantics.
@@ -1376,7 +1180,6 @@ export async function steerMessageToTask({
         message,
         quoteText,
         images,
-        clientMessageId,
         sourceRun: run as LatestTaskRun,
         channelBindings,
         senderMode,
@@ -1394,22 +1197,6 @@ export async function steerMessageToTask({
     }
 
     if (!run.sandboxServerUrl) {
-      const continuationResult = await resumeAfterSettledDelivery({
-        taskId,
-        sourceRunId: run.id,
-        userId,
-        message,
-        quoteText,
-        images,
-        clientMessageId,
-        channelBindings,
-        senderMode,
-      });
-
-      if (continuationResult) {
-        return continuationResult;
-      }
-
       return {
         success: false,
         error: 'Task has no active sandbox. The worker may still be booting.',
@@ -1453,9 +1240,6 @@ export async function steerMessageToTask({
           return client.commands.steerTask.mutate({
             prompt: message,
             quoteText,
-            ...(normalizeOptionalString(clientMessageId)
-              ? { clientMessageId: normalizeOptionalString(clientMessageId) }
-              : {}),
             ...(getFastAgentParentFromPayload(run.payload)
               ? { answerPendingInput: true }
               : {}),
@@ -1482,20 +1266,32 @@ export async function steerMessageToTask({
         });
       }
 
-      const continuationResult = await resumeAfterSettledDelivery({
-        taskId,
-        sourceRunId: run.id,
-        userId,
-        message,
-        quoteText,
-        images,
-        clientMessageId,
-        channelBindings,
-        senderMode,
+      const latestRun = await findLatestTaskRun(taskId, {
+        id: true,
+        status: true,
+        sandboxServerUrl: true,
+        actingUserId: true,
+        snapshotId: true,
+        snapshotCreatedAt: true,
+        sourceRunId: true,
+        payload: true,
+        port: true,
+        result: true,
       });
-
-      if (continuationResult) {
-        return continuationResult;
+      if (latestRun?.id === run.id && isExitedRunStatus(latestRun.status)) {
+        const resumeResult = await resumeTaskFromSnapshot({
+          taskId,
+          userId,
+          message,
+          quoteText,
+          images,
+          sourceRun: latestRun as LatestTaskRun,
+          channelBindings,
+          senderMode,
+        });
+        if (resumeResult) {
+          return resumeResult;
+        }
       }
 
       if (error instanceof SandboxNotReadyError) {

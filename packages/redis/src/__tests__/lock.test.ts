@@ -195,44 +195,6 @@ describe('withContention', () => {
     expect(result).toEqual({ acquired: true, value: 99 });
   });
 
-  it('renews an acquired lease while slow creation is still running', async () => {
-    vi.useFakeTimers();
-    const redis = createMockRedis();
-    let finishCreation: (() => void) | undefined;
-    const creation = new Promise<void>((resolve) => {
-      finishCreation = resolve;
-    });
-
-    const resultPromise = withContention<number>('test-lock', {
-      redis,
-      ttlSeconds: 30,
-      renewIntervalMs: 10_000,
-      onAcquired: async () => {
-        await creation;
-        return 99;
-      },
-      onContended: async () => undefined,
-    });
-
-    await vi.advanceTimersByTimeAsync(31_000);
-
-    expect(redis.eval).toHaveBeenCalledTimes(3);
-    expect(redis.eval).toHaveBeenLastCalledWith(
-      expect.stringContaining("redis.call('expire'"),
-      1,
-      'test-lock',
-      expect.any(String),
-      '30',
-    );
-
-    finishCreation?.();
-    await expect(resultPromise).resolves.toEqual({
-      acquired: true,
-      value: 99,
-    });
-    vi.useRealTimers();
-  });
-
   it('polls onContended when lock is held and returns first non-undefined value', async () => {
     const redis = createMockRedis({ set: vi.fn().mockResolvedValue(null) });
     let pollCount = 0;

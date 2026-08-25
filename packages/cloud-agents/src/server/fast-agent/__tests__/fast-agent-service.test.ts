@@ -1213,7 +1213,6 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       {
         taskId: 'task-1',
         message: 'Include the regression test.',
-        clientMessageId: 'fast-agent:conversation-1:100.2:task-1',
       },
     );
     expect(order).toEqual([
@@ -1380,7 +1379,6 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       {
         taskId: 'task-1',
         message: 'Include the failing test.',
-        clientMessageId: 'fast-agent:conversation-1:100.2:task-1',
       },
     );
     expect(mocks.cancelTask).toHaveBeenCalledWith(
