@@ -1,0 +1,30 @@
+{
+  "name": "@roomote/mcp-server",
+  "version": "0.0.3",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "roomote-mcp-server": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsup --clean",
+    "check-types": "tsc --noEmit",
+    "check-types:fast": "tsgo --noEmit",
+    "clean": "rimraf dist .turbo",
+    "format": "oxfmt \"**/*.{js,jsx,ts,tsx,json,css}\"",
+    "format:check": "oxfmt --check \"**/*.{js,jsx,ts,tsx,json,css}\"",
+    "start": "node dist/index.js",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@roomote/config-typescript": "workspace:^",
+    "@types/node": "^24.10.13",
+    "rimraf": "^6.1.2",
+    "tsup": "^8.5.1",
+    "vitest": "^4.1.1"
+  }
+}

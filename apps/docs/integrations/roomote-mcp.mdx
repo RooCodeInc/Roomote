@@ -129,11 +129,23 @@ Cursor can request a native app link, a hosted HTTPS callback, or a loopback
 HTTP callback. Roomote accepts each form and returns the authorization result
 to the exact callback Cursor registered.
 
-In each client, Roomote opens a browser so you can sign in and approve the
-connection. During OAuth dynamic client registration, the client sends Roomote
-its callback URL in `redirect_uris`. Roomote validates and saves that URL, then
-only sends the result to the same registered URL after approval. You do not
-need to create or copy an API token.
+### Stdio bridge
+
+Roomote also includes a small stdio bridge for clients or workflows that
+require a local command transport. Build `packages/mcp-server` from a Roomote
+checkout and follow its package README to configure Claude Code or Cursor.
+
+The bridge requires `ROOMOTE_URL` and an existing user-scoped bearer token in
+`ROOMOTE_ACCESS_TOKEN`. It does not currently run or refresh the browser OAuth
+flow, so prefer the hosted `/mcp` endpoint above when your client supports
+remote MCP OAuth.
+
+When using the hosted `/mcp` configurations above, Roomote opens a browser so
+you can sign in and approve the connection. During OAuth dynamic client
+registration, the client sends Roomote its callback URL in `redirect_uris`.
+Roomote validates and saves that URL, then only sends the result to the same
+registered URL after approval. Hosted OAuth connections do not require you to
+create or copy an API token.
 
 Roomote validates callbacks by callback class instead of maintaining a list of
 client-specific URLs: HTTPS for hosted clients, HTTP only on loopback
