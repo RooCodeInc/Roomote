@@ -105,6 +105,9 @@ describe('buildFastAgentSystemPrompt', () => {
     );
     expect(prompt).toContain('kickoffMessage');
     expect(prompt).toContain("describing the user's work now underway");
+    expect(prompt).toContain(
+      'The kickoff acknowledges the request, but it is not the only communication expected while longer work continues',
+    );
     expect(prompt).not.toContain('explaining what is being delegated');
     expect(prompt).toContain('launch multiple independent tasks in one turn');
     expect(prompt).toContain('the turn remains open for more tools');
@@ -206,14 +209,28 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain(
       'preserve any useful partial findings or artifacts',
     );
+    expect(prompt).toContain('meaningful work milestones');
+    expect(prompt).toContain('roughly 10 minutes without a message');
     expect(prompt).toContain(
-      'If there is no finding, artifact, changed expectation, question, required decision, or recovery action, remain silent',
+      'I found the failure starts in the permissions check; I’m narrowing the fix now.',
+    );
+    expect(prompt).toContain(
+      'The implementation is in place. I’m checking the edge cases before I wrap up.',
+    );
+    expect(prompt).toContain(
+      'Never label a message as a progress update or use policy vocabulary',
+    );
+    expect(prompt).toContain(
+      'duplicate messages, lifecycle-only signals, machinery-only narration, and routine logs',
+    );
+    expect(prompt).toContain(
+      'Do not suppress a useful update merely because expectations have not changed',
     );
     expect(prompt).toContain(
       'would this still be useful if the user did not know delegation existed?',
     );
     expect(prompt).toContain(
-      'A launch kickoff is already visible and needs no duplicate reply',
+      'A launch kickoff is already visible and needs no duplicate launch reply, but it does not suppress later useful updates while work continues',
     );
   });
 
@@ -341,10 +358,20 @@ describe('buildFastAgentSystemPrompt', () => {
     );
     expect(prompt).toContain('Child-message events are private updates');
     expect(prompt).toContain(
-      'Lifecycle state alone is not sufficient reason to post',
+      'Call "ignore_event" only when the event is duplicate, lifecycle-only, machinery-only, or a routine log that adds nothing useful',
+    );
+    expect(prompt).not.toContain('not worth interrupting the user');
+    expect(prompt).toContain(
+      'Preserve concrete findings, blockers, meaningful work milestones, required questions, and brief updates sent after roughly 10 minutes of silence',
     );
     expect(prompt).toContain(
-      'must provide a result, changed expectation, required decision, or recovery action',
+      'Treat an acknowledgement that repeats the launch kickoff as a duplicate; otherwise ignore only duplicate, lifecycle-only, machinery-only, and routine-log messages',
+    );
+    expect(prompt).toContain(
+      'Child-message events with concrete findings, blockers, meaningful work milestones, required input, or roughly 10 minutes of silence during active work carry useful substance even when expectations have not changed',
+    );
+    expect(prompt).toContain(
+      'Apply the same narrow ignore rule above to every other platform event',
     );
     expect(prompt).toContain(
       'Settled, stopped, or failed state by itself is not worth posting',
