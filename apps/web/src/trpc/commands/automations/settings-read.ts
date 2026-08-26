@@ -268,6 +268,7 @@ export async function getBackgroundAgentSettingsCommand(
     reviewAllPullRequestAuthors: boolean;
     reviewOnCommit: boolean;
     reviewDraftPrs: boolean;
+    publishGithubCheck: boolean;
     relayReviewResultsToTask: boolean;
     relayUsers: ReviewerRelayUser[];
     approvePr: boolean;

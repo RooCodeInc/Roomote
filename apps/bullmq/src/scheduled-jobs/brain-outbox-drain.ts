@@ -2,20 +2,28 @@ import {
   db,
   backfillBrainMemoryEvents,
   claimPendingBrainMemoryEvents,
+  claimPendingFastAgentMemoryEvents,
   getBrainSyncState,
   upsertBrainSyncState,
   environments,
+  fastAgentConversations,
   markBrainMemoryEvent,
+  markFastAgentMemoryEvent,
+  settleBrainMemoryEvent,
   releaseBrainMemoryEvents,
+  releaseFastAgentMemoryEvents,
+  settleFastAgentMemoryEvent,
   pullRequestFacts,
   taskPullRequests,
   taskRuns,
+  users,
   and,
   eq,
   gt,
   gte,
   or,
   renameBrainSyncStateFamilyPrefix,
+  type FastAgentMemoryEventRow,
 } from '@roomote/db/server';
 import {
   parseBrainToolPayloads,
@@ -257,12 +265,13 @@ export function buildMemoryPage(input: {
 }
 
 /**
- * Drain the brain_memory_events transactional outbox. Runs on the
- * shared scheduler queue; claims use FOR UPDATE SKIP LOCKED so overlapping
- * ticks never double-process. When the brain is enabled, completed tasks
- * feed it deployment-wide (the corpus is company-wide by definition;
- * enabling the integration is the ingestion consent). Skip rules decide
- * whether a claimed event becomes a memory ('done'), is skipped, or retries.
+ * Drain the brain_memory_events and fast_agent_memory_events transactional
+ * outboxes. Runs on the shared scheduler queue; claims use FOR UPDATE SKIP
+ * LOCKED so overlapping ticks never double-process. When the brain is
+ * enabled, completed tasks and Fast conversation memories feed it
+ * deployment-wide (the corpus is company-wide by definition; enabling the
+ * integration is the ingestion consent). Skip rules decide whether a claimed
+ * event becomes a memory ('done'), is skipped, or retries.
  */
 export async function brainOutboxDrainJob(): Promise<void> {
   const connection = await resolveReadyBrain();
@@ -275,6 +284,14 @@ export async function brainOutboxDrainJob(): Promise<void> {
 
   for (let batch = 0; batch < MAX_BATCHES_PER_TICK; batch++) {
     const drained = await drainOneBatch(connection);
+
+    if (!drained) {
+      break;
+    }
+  }
+
+  for (let batch = 0; batch < MAX_BATCHES_PER_TICK; batch++) {
+    const drained = await drainOneFastMemoryBatch(connection);
 
     if (!drained) {
       break;
@@ -530,10 +547,17 @@ async function drainOneBatch(connection: {
       });
 
       await postToBrain(page, connection);
-      await markBrainMemoryEvent(db, event.id, 'done');
+      const settleResult = await settleBrainMemoryEvent(
+        db,
+        event.id,
+        event.revision,
+        'done',
+      );
 
       console.log(
-        `${LOG_PREFIX} ingested memory for run ${event.runId} (${page.slug})`,
+        settleResult === 'settled'
+          ? `${LOG_PREFIX} ingested memory for run ${event.runId} (${page.slug})`
+          : `${LOG_PREFIX} run ${event.runId} gained a newer summary mid-write; re-ingesting next tick (${page.slug})`,
       );
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -562,17 +586,180 @@ async function drainOneBatch(connection: {
 
       const terminal = event.attempts >= MAX_ATTEMPTS;
 
-      await markBrainMemoryEvent(
-        db,
-        event.id,
-        terminal ? 'failed' : 'pending',
-        message,
-      );
+      if (terminal) {
+        await settleBrainMemoryEvent(
+          db,
+          event.id,
+          event.revision,
+          'failed',
+          message,
+        );
+      } else {
+        await markBrainMemoryEvent(db, event.id, 'pending', message);
+      }
 
       console.warn(
         `${LOG_PREFIX} ${terminal ? 'permanently failed' : 'will retry'} run ${
           event.runId
         } (attempt ${event.attempts}): ${message}`,
+      );
+    }
+  }
+
+  return true;
+}
+
+/**
+ * Build the memory page for a Fast conversation's remembered facts. Same
+ * conservative posture as task memories: structured provenance fields only,
+ * the accumulated facts as body, deterministic redaction over the whole page.
+ * `created` is the outbox row's creation time so idempotent re-puts of an
+ * unchanged memory do not read as content changes.
+ */
+export function buildFastMemoryPage(input: {
+  conversationId: string;
+  conversationTitle: string | null;
+  userName: string | null;
+  userId: string;
+  surface: string;
+  memory: string;
+  createdAt: Date;
+  updatedAt: Date;
+}): IngestPage {
+  const title =
+    input.conversationTitle ??
+    `Fast conversation ${input.conversationId.slice(0, 8)}`;
+
+  const content = [
+    ...renderBrainFrontmatter({
+      type: BRAIN_PAGE_TYPES.conversationMemory,
+      title,
+      created: input.createdAt,
+      fields: [
+        `roomote_conversation_id: ${input.conversationId}`,
+        `roomote_user_id: ${input.userId}`,
+        input.userName && `saved_by: ${JSON.stringify(input.userName)}`,
+        `surface: ${input.surface}`,
+        // GBrain derives effective_date from this conventional field. The
+        // last save is the honest date for a page whose content grows.
+        `date: ${input.updatedAt.toISOString().slice(0, 10)}`,
+        'provenance: roomote-fast-memory',
+      ],
+    }),
+    '',
+    `# ${title}`,
+    '',
+    '## Remembered facts',
+    '',
+    input.memory,
+    '',
+  ].join('\n');
+
+  return {
+    slug: `${brainNamespacePrefix('memories')}fast/${input.conversationId}`,
+    title,
+    content: redactBrainText(content),
+  };
+}
+
+/** Returns false when no pending conversation-memory events remained. */
+async function drainOneFastMemoryBatch(connection: {
+  baseUrl: string;
+  token: string;
+}): Promise<boolean> {
+  const events: FastAgentMemoryEventRow[] =
+    await claimPendingFastAgentMemoryEvents(db, CLAIM_BATCH_SIZE);
+
+  if (events.length === 0) {
+    return false;
+  }
+
+  for (const [index, event] of events.entries()) {
+    try {
+      const [conversation] = await db
+        .select({
+          title: fastAgentConversations.title,
+          surface: fastAgentConversations.surface,
+          userId: fastAgentConversations.userId,
+          userName: users.name,
+        })
+        .from(fastAgentConversations)
+        .leftJoin(users, eq(users.id, fastAgentConversations.userId))
+        .where(eq(fastAgentConversations.id, event.conversationId))
+        .limit(1);
+
+      if (!conversation) {
+        await markFastAgentMemoryEvent(
+          db,
+          event.id,
+          'skipped',
+          'conversation no longer exists',
+        );
+        continue;
+      }
+
+      const page = buildFastMemoryPage({
+        conversationId: event.conversationId,
+        conversationTitle: conversation.title,
+        userName: conversation.userName,
+        userId: conversation.userId,
+        surface: conversation.surface,
+        memory: event.memory,
+        createdAt: event.createdAt,
+        updatedAt: event.updatedAt,
+      });
+
+      await postToBrain(page, connection);
+      const settleResult = await settleFastAgentMemoryEvent(
+        db,
+        event.id,
+        event.revision,
+        'done',
+      );
+
+      console.log(
+        settleResult === 'settled'
+          ? `${LOG_PREFIX} ingested memory for conversation ${event.conversationId} (${page.slug})`
+          : `${LOG_PREFIX} conversation ${event.conversationId} gained facts mid-write; re-ingesting next tick (${page.slug})`,
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+
+      // Same backpressure contract as the task outbox: 429 and cannot-embed
+      // are not this event's fault; hand the rest of the batch back and let
+      // a later tick retry the same idempotent slug.
+      if (isBrainRateLimited(error) || isBrainNotReady(error)) {
+        await markFastAgentMemoryEvent(db, event.id, 'pending', message);
+        await releaseFastAgentMemoryEvents(db, [
+          event.id,
+          ...events.slice(index + 1).map((pending) => pending.id),
+        ]);
+        console.log(
+          `${LOG_PREFIX} ${
+            isBrainRateLimited(error) ? 'rate limited by' : 'cannot embed into'
+          } the brain; pausing conversation-memory drain until next tick`,
+        );
+        return false;
+      }
+
+      const terminal = event.attempts >= MAX_ATTEMPTS;
+
+      if (terminal) {
+        await settleFastAgentMemoryEvent(
+          db,
+          event.id,
+          event.revision,
+          'failed',
+          message,
+        );
+      } else {
+        await markFastAgentMemoryEvent(db, event.id, 'pending', message);
+      }
+
+      console.warn(
+        `${LOG_PREFIX} ${
+          terminal ? 'permanently failed' : 'will retry'
+        } conversation ${event.conversationId} (attempt ${event.attempts}): ${message}`,
       );
     }
   }

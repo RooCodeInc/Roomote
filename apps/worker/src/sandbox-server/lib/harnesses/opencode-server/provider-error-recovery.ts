@@ -5,6 +5,7 @@ import {
   asFiniteNumber,
   asRecord,
   asString,
+  buildInferenceProviderRecoveryPrompt,
   resolveInferenceProviderRetryDelayMs,
 } from '@roomote/types';
 
@@ -16,10 +17,8 @@ export const DEFAULT_OPENCODE_PROVIDER_ERROR_BASE_DELAY_MS =
 export const DEFAULT_OPENCODE_PROVIDER_ERROR_MAX_DELAY_MS =
   INFERENCE_PROVIDER_ERROR_MAX_DELAY_MS;
 
-const OPENCODE_PROVIDER_ERROR_RETRY_PROMPT_TEXT = [
-  'Continue. The previous model request failed due to a provider error and was automatically retried.',
-  'Resume from where you left off without restating the provider error.',
-].join(' ');
+const OPENCODE_PROVIDER_ERROR_RETRY_PROMPT_TEXT =
+  buildInferenceProviderRecoveryPrompt();
 
 const OPENCODE_POLICY_REFUSAL_RETRY_PROMPT_TEXT = [
   'Continue the legitimate task. The previous model request was declined by the provider safety policy.',

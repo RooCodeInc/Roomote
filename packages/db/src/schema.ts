@@ -80,6 +80,7 @@ import type {
   RepositoryAutomationSignals,
   McpToolAccessMode,
   FastAgentSurface,
+  ReasoningEffort,
 } from '@roomote/types';
 import { DEFAULT_TASK_ARTIFACT_TYPE } from '@roomote/types';
 
@@ -980,7 +981,6 @@ export const taskPullRequests = pgTable(
     repositoryId: uuid('repository_id').references(() => repositories.id, {
       onDelete: 'set null',
     }),
-
     // PR details
     prUrl: text('pr_url').notNull(),
     prNumber: integer('pr_number'),
@@ -1165,6 +1165,207 @@ export const prReviewEventDeliveries = pgTable(
     check(
       'pr_review_event_deliveries_status_check',
       sql`${table.status} in ('pending', 'processing', 'delivered', 'suppressed')`,
+    ),
+  ],
+);
+
+/**
+ * One semantic PR feedback episode. New notification work is assigned here;
+ * the legacy event-delivery rows above remain for N-1 rollback and draining.
+ */
+export const prReviewNotificationUnits = pgTable(
+  'pr_review_notification_units',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    sourceControlProvider: text('source_control_provider')
+      .notNull()
+      .$type<SourceControlProvider>(),
+    host: text('host'),
+    repositoryId: uuid('repository_id').references(() => repositories.id, {
+      onDelete: 'set null',
+    }),
+    repositoryIdentityKey: text('repository_identity_key').notNull(),
+    repository: text('repository').notNull(),
+    prNumber: integer('pr_number').notNull(),
+    prUrl: text('pr_url').notNull(),
+    headSha: text('head_sha'),
+    headIdentityKey: text('head_identity_key').notNull(),
+    episodeKind: text('episode_kind')
+      .notNull()
+      .$type<'roomote_cycle' | 'human' | 'automated' | 'ci'>(),
+    episodeId: text('episode_id').notNull(),
+    dueAt: timestamp('due_at').notNull(),
+    firstObservedAt: timestamp('first_observed_at').notNull(),
+    lastObservedAt: timestamp('last_observed_at').notNull(),
+    sealedAt: timestamp('sealed_at'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('pr_review_notification_units_identity_unique').on(
+      table.sourceControlProvider,
+      table.repositoryIdentityKey,
+      table.prNumber,
+      table.headIdentityKey,
+      table.episodeKind,
+      table.episodeId,
+    ),
+    index('pr_review_notification_units_open_head_idx').on(
+      table.sourceControlProvider,
+      table.repository,
+      table.prNumber,
+      table.headSha,
+      table.sealedAt,
+    ),
+    check(
+      'pr_review_notification_units_episode_kind_check',
+      sql`${table.episodeKind} in ('roomote_cycle', 'human', 'automated', 'ci')`,
+    ),
+  ],
+);
+
+export const prReviewNotificationUnitEvents = pgTable(
+  'pr_review_notification_unit_events',
+  {
+    unitId: uuid('unit_id')
+      .notNull()
+      .references(() => prReviewNotificationUnits.id, { onDelete: 'cascade' }),
+    eventId: uuid('event_id')
+      .notNull()
+      .references(() => prReviewEvents.id, { onDelete: 'cascade' }),
+    attachedAt: timestamp('attached_at').notNull().defaultNow(),
+  },
+  (table) => [
+    primaryKey({
+      name: 'pr_review_notification_unit_events_pk',
+      columns: [table.unitId, table.eventId],
+    }),
+    uniqueIndex('pr_review_notification_unit_events_event_unique').on(
+      table.eventId,
+    ),
+  ],
+);
+
+export const prReviewNotificationDeliveries = pgTable(
+  'pr_review_notification_deliveries',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    notificationUnitId: uuid('notification_unit_id')
+      .notNull()
+      .references(() => prReviewNotificationUnits.id, {
+        onDelete: 'cascade',
+      }),
+    destinationKind: text('destination_kind')
+      .notNull()
+      .$type<'fast_conversation' | 'task'>(),
+    destinationKey: text('destination_key').notNull(),
+    taskId: text('task_id').references(() => tasks.id, {
+      onDelete: 'set null',
+    }),
+    status: text('status')
+      .notNull()
+      .default('pending')
+      .$type<
+        | 'pending'
+        | 'claimed'
+        | 'prepared'
+        | 'prompt_posting'
+        | 'awaiting_user_action'
+        | 'auto_dispatch_pending'
+        | 'completed'
+        | 'suppressed'
+        | 'dismissed'
+      >(),
+    dueAt: timestamp('due_at').notNull(),
+    deferrals: integer('deferrals').notNull().default(0),
+    attempt: integer('attempt').notNull().default(0),
+    leaseToken: uuid('lease_token'),
+    leaseExpiresAt: timestamp('lease_expires_at'),
+    routeProvider: text('route_provider').$type<
+      'slack' | 'teams' | 'telegram' | 'discord'
+    >(),
+    routeWorkspaceId: text('route_workspace_id'),
+    routeChannelId: text('route_channel_id'),
+    routeThreadId: text('route_thread_id'),
+    followUpPrompt: text('follow_up_prompt'),
+    targetTaskId: text('target_task_id').references(() => tasks.id, {
+      onDelete: 'set null',
+    }),
+    actingUserId: text('acting_user_id').references(() => users.id, {
+      onDelete: 'set null',
+    }),
+    providerMessageId: text('provider_message_id'),
+    actionClaimedAt: timestamp('action_claimed_at'),
+    dispatchKey: text('dispatch_key').notNull(),
+    dispatchedRunId: integer('dispatched_run_id'),
+    completedAt: timestamp('completed_at'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('pr_review_notification_deliveries_destination_unique').on(
+      table.notificationUnitId,
+      table.destinationKind,
+      table.destinationKey,
+    ),
+    uniqueIndex('pr_review_notification_deliveries_dispatch_key_unique').on(
+      table.dispatchKey,
+    ),
+    index('pr_review_notification_deliveries_due_idx').on(
+      table.status,
+      table.dueAt,
+      table.leaseExpiresAt,
+    ),
+    index('pr_review_notification_deliveries_destination_idx').on(
+      table.destinationKind,
+      table.destinationKey,
+    ),
+    check(
+      'pr_review_notification_deliveries_destination_kind_check',
+      sql`${table.destinationKind} in ('fast_conversation', 'task')`,
+    ),
+    check(
+      'pr_review_notification_deliveries_status_check',
+      sql`${table.status} in ('pending', 'claimed', 'prepared', 'prompt_posting', 'awaiting_user_action', 'auto_dispatch_pending', 'completed', 'suppressed', 'dismissed')`,
+    ),
+  ],
+);
+
+export const prReviewAutoPreferences = pgTable(
+  'pr_review_auto_preferences',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    sourceControlProvider: text('source_control_provider')
+      .notNull()
+      .$type<SourceControlProvider>(),
+    host: text('host'),
+    repositoryId: uuid('repository_id').references(() => repositories.id, {
+      onDelete: 'set null',
+    }),
+    repositoryIdentityKey: text('repository_identity_key').notNull(),
+    repository: text('repository').notNull(),
+    prNumber: integer('pr_number').notNull(),
+    enabledByUserId: text('enabled_by_user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    enabledAt: timestamp('enabled_at').notNull().defaultNow(),
+    sourceTaskId: text('source_task_id').references(() => tasks.id, {
+      onDelete: 'set null',
+    }),
+    sourceDestinationKey: text('source_destination_key'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('pr_review_auto_preferences_identity_unique').on(
+      table.sourceControlProvider,
+      table.repositoryIdentityKey,
+      table.prNumber,
+    ),
+    index('pr_review_auto_preferences_repository_idx').on(
+      table.sourceControlProvider,
+      table.repository,
+      table.prNumber,
     ),
   ],
 );
@@ -1379,6 +1580,9 @@ export const taskRuns = pgTable(
       .where(
         sql`${table.payload}->>'communicationProvider' = 'discord' AND ${table.payload}->>'communicationSourceEventId' IS NOT NULL AND ${table.canceledAt} IS NULL`,
       ),
+    uniqueIndex('task_runs_launch_idempotency_key_unique')
+      .on(sql`(${table.payload}->>'launchIdempotencyKey')`)
+      .where(sql`${table.payload}->>'launchIdempotencyKey' IS NOT NULL`),
     index('task_runs_first_assistant_output_at_idx').on(
       table.firstAssistantOutputAt,
     ),
@@ -2866,6 +3070,11 @@ export const fastAgentConversations = pgTable(
       .default(sql`'[]'::jsonb`)
       .$type<Record<string, unknown>[]>(),
     openCodeSessionId: text('opencode_session_id'),
+    model: text('model'),
+    reasoningEffort: text('reasoning_effort').$type<ReasoningEffort>(),
+    title: text('title'),
+    titleEditedByUserAt: timestamp('title_edited_by_user_at'),
+    llmTitleCheckpoint: integer('llm_title_checkpoint').notNull().default(0),
     legacyConversationIds: uuid('legacy_conversation_ids')
       .array()
       .notNull()
@@ -2883,6 +3092,51 @@ export const fastAgentConversations = pgTable(
     index('fast_agent_conversations_legacy_ids_idx').using(
       'gin',
       table.legacyConversationIds,
+    ),
+  ],
+);
+
+/**
+ * fast_agent_messages
+ *
+ * Forward-only canonical Fast/OpenCode transcript events. During the N-1
+ * compatibility window, visible text is also written to
+ * fast_agent_conversations.compatibility_messages for rollback safety.
+ */
+export const fastAgentMessages = pgTable(
+  'fast_agent_messages',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    conversationId: uuid('conversation_id')
+      .notNull()
+      .references(() => fastAgentConversations.id, { onDelete: 'cascade' }),
+    eventId: text('event_id').notNull(),
+    turnId: text('turn_id').notNull(),
+    turnSeq: integer('turn_seq').notNull(),
+    ts: bigint('ts', { mode: 'number' }).notNull(),
+    eventType: text('event_type').notNull().$type<TaskMessageEventType>(),
+    role: text('role').$type<TaskMessageRole>(),
+    contentBlocks: jsonb('content_blocks')
+      .$type<TaskMessageContentBlock[]>()
+      .notNull()
+      .default([]),
+    metadata: jsonb('metadata').$type<TaskMessageMetadata>(),
+    payload: jsonb('payload').notNull().$type<TaskMessagePayload>().default({}),
+    source: text('source'),
+    nativeSessionId: text('native_session_id'),
+    nativeMessageId: text('native_message_id'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('fast_agent_messages_conversation_event_unique').on(
+      table.conversationId,
+      table.eventId,
+    ),
+    index('fast_agent_messages_conversation_order_idx').on(
+      table.conversationId,
+      table.ts,
+      table.turnSeq,
     ),
   ],
 );
@@ -2928,7 +3182,18 @@ export const fastAgentConversationsRelations = relations(
       fields: [fastAgentConversations.userId],
       references: [users.id],
     }),
+    messages: many(fastAgentMessages),
     prFeedbackDeliveries: many(fastAgentPrFeedbackDeliveries),
+  }),
+);
+
+export const fastAgentMessagesRelations = relations(
+  fastAgentMessages,
+  ({ one }) => ({
+    conversation: one(fastAgentConversations, {
+      fields: [fastAgentMessages.conversationId],
+      references: [fastAgentConversations.id],
+    }),
   }),
 );
 
@@ -4010,6 +4275,14 @@ export const brainMemoryEvents = pgTable(
      * other page.
      */
     agentSummary: text('agent_summary'),
+    /**
+     * Bumped whenever saveBrainAgentSummary updates the row's content. The
+     * drainer fences its completion on the revision it claimed, so a summary
+     * that lands while a page write is in flight forces a re-ingest of the
+     * newer content instead of being stranded behind an already-written older
+     * snapshot.
+     */
+    revision: integer('revision').notNull().default(0),
     attempts: integer('attempts').notNull().default(0),
     lastError: text('last_error'),
     processedAt: timestamp('processed_at'),
@@ -4019,6 +4292,54 @@ export const brainMemoryEvents = pgTable(
   (table) => [
     unique('brain_memory_events_run_unique').on(table.runId),
     index('brain_memory_events_status_created_idx').on(
+      table.status,
+      table.createdAt,
+    ),
+  ],
+);
+
+/**
+ * fast_agent_memory_events
+ *
+ * Transactional outbox for Fast conversation memories, the conversational
+ * sibling of brain_memory_events. One row per conversation accumulates the
+ * facts Fast was asked to remember; the ingestion drainer is the only writer
+ * to the Brain, so the slug, redaction, and provenance stay server-controlled
+ * and Fast never holds a Brain write credential. A separate table (rather
+ * than a nullable run_id on brain_memory_events) keeps the N-1 release's
+ * drainer, which claims rows without filtering, from ever seeing runless rows.
+ */
+export const fastAgentMemoryEvents = pgTable(
+  'fast_agent_memory_events',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    conversationId: uuid('conversation_id')
+      .notNull()
+      .references(() => fastAgentConversations.id, { onDelete: 'cascade' }),
+    /** Accumulated `- fact` markdown lines, newest appended last. */
+    memory: text('memory').notNull(),
+    /**
+     * Bumped on every appended fact. The drainer fences its completion on the
+     * revision it claimed, so a save that lands while a page write is in
+     * flight forces a re-ingest of the newer content instead of being
+     * stranded behind an already-written older snapshot.
+     */
+    revision: integer('revision').notNull().default(0),
+    status: text('status')
+      .notNull()
+      .default('pending')
+      .$type<'pending' | 'processing' | 'done' | 'skipped' | 'failed'>(),
+    attempts: integer('attempts').notNull().default(0),
+    lastError: text('last_error'),
+    processedAt: timestamp('processed_at'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => [
+    unique('fast_agent_memory_events_conversation_unique').on(
+      table.conversationId,
+    ),
+    index('fast_agent_memory_events_status_created_idx').on(
       table.status,
       table.createdAt,
     ),

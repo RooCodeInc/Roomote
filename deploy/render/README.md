@@ -345,7 +345,7 @@ Live previews need a wildcard domain, which requires a domain you control:
    hostname. Previews are always enabled and publish for every environment
    that defines preview ports.
 
-## Enabling the Brain (optional)
+## Enabling Memory (optional)
 
 The `roomote-gbrain` private service ships with the Blueprint and boots
 idle. It gives the deployment shared memory: completed tasks and activity
@@ -355,18 +355,18 @@ agents record what they decided and why when they finish substantial work.
 
 Render's Blueprint cannot generate the admin token for you (`generateValue`
 produces base64, and gbrain requires at least 32 characters of
-`[A-Za-z0-9_-]` or it refuses to boot), so enabling the Brain is two values
+`[A-Za-z0-9_-]` or it refuses to boot), so enabling Memory is two values
 rather than Railway's one:
 
 1. Set `R_BRAIN_OPENROUTER_API_KEY` or `R_BRAIN_OPENAI_API_KEY` as a
    Settings environment value, which reaches every app service from one
    place. (Setting it as a Render environment variable also works, but the
    Blueprint duplicates the env block per service, so it must be set on all
-   four app services.) The explicit `R_BRAIN_*` name is the Brain's on
+   four app services.) The explicit `R_BRAIN_*` name is the on
    switch: a deployment that only configured task models under
-   **Settings → Models** keeps no Brain, no ingestion, and agents are never
+   **Settings → Models** keeps no Memory, no ingestion, and agents are never
    told one exists. The value can be the same key you use for tasks, or a
-   separate one to bill the Brain independently. The roomote-gbrain service
+   separate one to bill Memory independently. The roomote-gbrain service
    holds no provider key; it asks roomote-api for embeddings and synthesis
    using this key, and changing it later needs no redeploy.
 2. Set `GBRAIN_ADMIN_BOOTSTRAP_TOKEN` to a fresh random value. Generate one
@@ -376,12 +376,12 @@ rather than Railway's one:
 3. Redeploy `roomote-gbrain` and the four app services. Within a minute the
    deployment registers a read-only client for agents and a write-only one
    for ingestion, backfills the task history it already has, and starts
-   delivering the Brain to new tasks. Watch the `roomote-bullmq` logs for
+   delivering Memory to new tasks. Watch the `roomote-bullmq` logs for
    `[brain] provisioned scoped clients`.
 
 The app services read these through `fromService` references, so setting
 them in one place is enough and there is no second copy to drift.
-Blank on the gbrain service means blank everywhere, which is the Brain-off
+Blank on the gbrain service means blank everywhere, which is the Memory-off
 state: agents are told nothing about it and no ingestion runs.
 
 Nothing is exposed. The service is a Render private service with no public
@@ -393,7 +393,7 @@ Two operational notes:
 
 - **Back up the disk.** The 10 GB `gbrain-data` disk holds the corpus.
   Losing it is recoverable — task history and integration sources re-ingest,
-  and Roomote re-registers its clients automatically when the Brain no
+  and Roomote re-registers its clients automatically when Memory no
   longer recognizes them — but the deployment starts cold until that
   finishes.
 - **Model choice is a variable, not a rebuild.** `R_BRAIN_MODEL` selects the
@@ -401,13 +401,13 @@ Two operational notes:
   `R_BRAIN_RERANKER_MODEL` the reranker. Set them on the api service. Leave
   them empty for the defaults. The synthesis model can change at any time;
   the reranker changes after a gbrain restart; the embedding model
-  sizes the Brain's vector storage when it is first created, so set it (with
+  sizes Memory's vector storage when it is first created, so set it (with
   `R_BRAIN_EMBEDDING_DIMENSIONS`) before first boot or not at all. A later
-  change is ignored and reported in the Brain's logs rather than silently
+  change is ignored and reported in Memory's logs rather than silently
   applied.
 
 Deployments that want no memory at all can delete `roomote-gbrain` from the
-Blueprint; the app services treat the missing reference as Brain-off.
+Blueprint; the app services treat the missing reference as Memory-off.
 
 ## Upgrades, backups, and costs
 
@@ -454,6 +454,6 @@ references above: confirm that a private service accepts a `disk` (the
 Blueprint spec documents disks per service type without listing private
 services explicitly), and that `ROOMOTE_GBRAIN_HOSTPORT` resolves to a
 `host:port` pair the app services can reach. Both failure modes are
-contained — a Brain that never boots leaves the rest of the deployment
-working, because every Brain code path is already conditional on the key
+contained — Memory that never boots leaves the rest of the deployment
+working, because every Memory code path is already conditional on the key
 being present.

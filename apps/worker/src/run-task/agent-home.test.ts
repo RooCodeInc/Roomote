@@ -10,9 +10,93 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import {
+  createIntegrationMcpInstructions,
   generateOpenCodeConfig,
   seedRuntimeHomeMiseGlobalConfig,
 } from './agent-home';
+
+describe('createIntegrationMcpInstructions', () => {
+  it.each(['gbrain', 'supermemory'])(
+    'injects shared memory lifecycle guidance for %s',
+    (name) => {
+      const instructions = createIntegrationMcpInstructions([
+        { type: 'remote', name, url: 'https://example.com/mcp' },
+      ]);
+
+      expect(instructions).toContain(
+        'before any other context or work tool call',
+      );
+      expect(instructions).toContain(
+        'At task completion, proactively save concise durable learnings',
+      );
+    },
+  );
+
+  it('does not infer memory guidance from a custom server name', () => {
+    expect(
+      createIntegrationMcpInstructions([
+        {
+          type: 'remote',
+          name: 'team-memory',
+          url: 'https://example.com/mcp',
+        },
+      ]),
+    ).toBeUndefined();
+  });
+
+  it('keeps ordinary integration guidance provider-specific', () => {
+    const instructions = createIntegrationMcpInstructions([
+      {
+        type: 'remote',
+        name: 'notion',
+        url: 'https://example.com/mcp',
+      },
+    ]);
+
+    expect(instructions).toContain('# Connected integration: Notion');
+    expect(instructions).not.toContain(
+      'before any other context or work tool call',
+    );
+  });
+
+  it('assigns the initial recall to only the first installed memory server', () => {
+    const instructions = createIntegrationMcpInstructions([
+      { type: 'remote', name: 'gbrain', url: 'https://example.com/brain' },
+      {
+        type: 'remote',
+        name: 'supermemory',
+        url: 'https://example.com/supermemory',
+      },
+    ]);
+
+    expect(
+      instructions?.match(/first normal context or work tool call/g),
+    ).toHaveLength(1);
+    expect(instructions).toContain(
+      'Another installed memory server owns the required initial recall',
+    );
+    expect(instructions).toContain(
+      'Treat Brain recall as a sequential preflight',
+    );
+    expect(instructions).toContain('save_task_memory');
+  });
+
+  it('does not inject Brain guidance when gbrain is a secondary memory server', () => {
+    const instructions = createIntegrationMcpInstructions([
+      {
+        type: 'remote',
+        name: 'supermemory',
+        url: 'https://example.com/supermemory',
+      },
+      { type: 'remote', name: 'gbrain', url: 'https://example.com/brain' },
+    ]);
+
+    expect(instructions).not.toContain(
+      'Treat Brain recall as a sequential preflight',
+    );
+    expect(instructions).not.toContain('save_task_memory');
+  });
+});
 
 describe('generateOpenCodeConfig provider support', () => {
   const tempDirs: string[] = [];

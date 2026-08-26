@@ -1,6 +1,24 @@
 import { describe, expect, it } from 'vitest';
 
-import { resolveInferenceProviderRetryDelayMs } from '../inference-provider-retry';
+import {
+  buildInferenceProviderRecoveryPrompt,
+  resolveInferenceProviderRetryDelayMs,
+} from '../inference-provider-retry';
+
+describe('buildInferenceProviderRecoveryPrompt', () => {
+  it('adds side-effect guidance only for runtimes that need it', () => {
+    expect(buildInferenceProviderRecoveryPrompt()).toBe(
+      'Continue. The previous model request failed due to a provider error and was automatically retried. Resume from where you left off without restating the provider error.',
+    );
+    expect(
+      buildInferenceProviderRecoveryPrompt({
+        protectCompletedSideEffects: true,
+      }),
+    ).toBe(
+      'Continue. The previous model request failed due to a provider error and was automatically retried. Resume from where you left off without restating the provider error. Do not repeat completed tool calls or messages already sent to the user.',
+    );
+  });
+});
 
 describe('resolveInferenceProviderRetryDelayMs', () => {
   it('uses the task retry policy for provider and rate-limit failures', () => {

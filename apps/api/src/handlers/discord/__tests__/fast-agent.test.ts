@@ -9,10 +9,27 @@ const mocks = vi.hoisted(() => ({
   startTask: vi.fn(),
 }));
 
+vi.mock('@roomote/redis', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@roomote/redis')>();
+  return {
+    ...actual,
+    // The sticky-footer lock and state live in Redis; unit tests run without
+    // a server, so satisfy lock acquisition and empty prior state.
+    getRedis: () => ({
+      set: async () => 'OK',
+      get: async () => null,
+      eval: async () => 1,
+    }),
+  };
+});
+
 vi.mock('@roomote/cloud-agents/server', () => ({
   acquireFastAgentTurnLock: mocks.acquireLock,
   answerFastAgentQuestion: mocks.answerQuestion,
   resolveApiBaseUrl: () => 'https://roomote.example.com',
+  getOrCreateFastAgentSession: vi
+    .fn()
+    .mockResolvedValue({ id: 'fast-session-1' }),
 }));
 
 vi.mock('@roomote/communication/discord-event', () => ({
@@ -136,6 +153,9 @@ describe('processDiscordFastAgentMessage', () => {
     });
 
     expect(mocks.reply).toHaveBeenCalledOnce();
+    expect(mocks.answerQuestion).toHaveBeenCalledWith(
+      expect.objectContaining({ currentMessageId: 'source-1' }),
+    );
     expect(provider.editMessage).toHaveBeenCalledWith({
       channelId: 'channel-1',
       messageId: 'retry-1',

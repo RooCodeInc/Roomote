@@ -15,6 +15,7 @@ import {
   releasePrReviewDeliveries,
   renewPrReviewDeliveryClaim,
   slackInstallations,
+  transitionCanonicalPrReviewDelivery,
 } from '@roomote/db/server';
 import { getRedis } from '@roomote/redis';
 import {
@@ -38,10 +39,10 @@ export const PR_REVIEW_NOTIFICATION_DEBOUNCE_MS = 1 * 60 * 1000;
 
 /**
  * Roomote's own inline findings are provisional until its review summary
- * completes. Keep them as a fallback instead of presenting them as a second
- * notification while the review is still running.
+ * completes. Give the summary five minutes to supersede them, then deliver
+ * the inline findings as a fallback so feedback does not appear missing.
  */
-export const PR_REVIEW_NOTIFICATION_ROOMOTE_FALLBACK_MS = 15 * 60 * 1000;
+export const PR_REVIEW_NOTIFICATION_ROOMOTE_FALLBACK_MS = 5 * 60 * 1000;
 
 /**
  * Delay before re-checking an owner task that is still actively running when
@@ -140,9 +141,39 @@ export const prReviewNotificationRequestSchema = z.object({
   batchKind: prReviewNotificationBatchKindSchema.optional(),
   batchId: z.string().optional(),
   sourceControlProvider: sourceControlProviderSchema.optional(),
+  host: z.string().nullable().optional(),
+  repositoryId: z.string().uuid().nullable().optional(),
   deliveryIds: z.array(z.string()).optional(),
   leaseToken: z.string().optional(),
   events: z.array(prReviewActivityEventSchema).optional(),
+  ownershipVersion: z.enum(['legacy', 'canonical']).optional(),
+  deliveryId: z.string().uuid().optional(),
+  notificationUnitId: z.string().uuid().optional(),
+  destinationKey: z.string().optional(),
+  deliveryState: z
+    .enum([
+      'pending',
+      'claimed',
+      'prepared',
+      'prompt_posting',
+      'awaiting_user_action',
+      'auto_dispatch_pending',
+      'completed',
+      'suppressed',
+      'dismissed',
+    ])
+    .optional(),
+  followUpPrompt: z.string().nullable().optional(),
+  targetTaskId: z.string().nullable().optional(),
+  actingUserId: z.string().nullable().optional(),
+  routeProvider: z
+    .enum(['slack', 'teams', 'telegram', 'discord'])
+    .nullable()
+    .optional(),
+  routeWorkspaceId: z.string().nullable().optional(),
+  routeChannelId: z.string().nullable().optional(),
+  routeThreadId: z.string().nullable().optional(),
+  dispatchKey: z.string().optional(),
 });
 
 export type PrReviewNotificationRequest = z.infer<
@@ -159,6 +190,8 @@ type PrReviewNotificationTarget = {
   deliveryIds?: string[];
   leaseToken?: string;
   events?: PrReviewActivityEvent[];
+  ownershipVersion?: 'legacy' | 'canonical';
+  deliveryId?: string;
 };
 
 export const startPrReviewNotificationCycleInputSchema = z.object({
@@ -465,7 +498,14 @@ export async function schedulePrReviewNotificationJob({
   }
 
   await deferPrReviewDeliveries(
-    { deliveryIds: request.deliveryIds, leaseToken: request.leaseToken },
+    request.ownershipVersion === 'canonical' && request.deliveryId
+      ? {
+          ownershipVersion: 'canonical',
+          deliveryId: request.deliveryId,
+          deliveryIds: request.deliveryIds,
+          leaseToken: request.leaseToken,
+        }
+      : { deliveryIds: request.deliveryIds, leaseToken: request.leaseToken },
     new Date(Date.now() + delayMs),
     { incrementDeferrals: countDeferral },
   );
@@ -492,6 +532,12 @@ export async function requeuePendingPrReviewActivity({
   }
 
   await releasePrReviewDeliveries({
+    ...(target.ownershipVersion === 'canonical' && target.deliveryId
+      ? {
+          ownershipVersion: 'canonical' as const,
+          deliveryId: target.deliveryId,
+        }
+      : {}),
     deliveryIds: target.deliveryIds,
     leaseToken: target.leaseToken,
   });
@@ -602,6 +648,7 @@ export async function migrateLegacyPrReviewNotificationRequest(
       reviewHeadSha: event.reviewHeadSha ?? null,
       roomoteAuthored,
       isSummary: roomoteAuthored && event.kind === 'review_summary',
+      legacyOwnership: true,
     });
   }
 
@@ -704,6 +751,25 @@ export async function dispatchDuePrReviewNotifications(): Promise<number> {
         events: claim.events.map((event) =>
           prReviewActivityEventSchema.parse(event),
         ),
+        ownershipVersion: claim.ownershipVersion,
+        ...(claim.ownershipVersion === 'canonical'
+          ? {
+              deliveryId: claim.deliveryId,
+              notificationUnitId: claim.notificationUnitId,
+              destinationKey: claim.destinationKey,
+              host: claim.host,
+              repositoryId: claim.repositoryId,
+              deliveryState: claim.state,
+              followUpPrompt: claim.followUpPrompt,
+              targetTaskId: claim.targetTaskId,
+              actingUserId: claim.actingUserId,
+              routeProvider: claim.routeProvider,
+              routeWorkspaceId: claim.routeWorkspaceId,
+              routeChannelId: claim.routeChannelId,
+              routeThreadId: claim.routeThreadId,
+              dispatchKey: claim.dispatchKey,
+            }
+          : {}),
       });
       enqueued += 1;
     } catch (error) {
@@ -742,7 +808,14 @@ export async function finalizePrReviewNotificationRequest(
 ): Promise<void> {
   if (request.deliveryIds && request.leaseToken) {
     await completePrReviewDeliveries(
-      { deliveryIds: request.deliveryIds, leaseToken: request.leaseToken },
+      request.ownershipVersion === 'canonical' && request.deliveryId
+        ? {
+            ownershipVersion: 'canonical',
+            deliveryId: request.deliveryId,
+            deliveryIds: request.deliveryIds,
+            leaseToken: request.leaseToken,
+          }
+        : { deliveryIds: request.deliveryIds, leaseToken: request.leaseToken },
       status,
     );
   }
@@ -753,8 +826,122 @@ export async function renewPrReviewNotificationRequestLease(
 ): Promise<boolean> {
   if (!request.deliveryIds || !request.leaseToken) return true;
   return renewPrReviewDeliveryClaim({
+    ...(request.ownershipVersion === 'canonical' && request.deliveryId
+      ? {
+          ownershipVersion: 'canonical' as const,
+          deliveryId: request.deliveryId,
+        }
+      : {}),
     deliveryIds: request.deliveryIds,
     leaseToken: request.leaseToken,
+  });
+}
+
+export async function prepareCanonicalPrReviewNotificationRequest(
+  request: PrReviewNotificationRequest,
+  followUpPrompt: string | null,
+): Promise<boolean> {
+  if (
+    request.ownershipVersion !== 'canonical' ||
+    !request.deliveryId ||
+    !request.leaseToken
+  ) {
+    return true;
+  }
+  if (
+    request.deliveryState === 'auto_dispatch_pending' ||
+    request.deliveryState === 'prepared' ||
+    request.deliveryState === 'prompt_posting'
+  ) {
+    return true;
+  }
+  return transitionCanonicalPrReviewDelivery({
+    deliveryId: request.deliveryId,
+    leaseToken: request.leaseToken,
+    expected: 'claimed',
+    status: 'prepared',
+    values: { followUpPrompt },
+  });
+}
+
+export async function beginCanonicalPrReviewPrompt(input: {
+  request: PrReviewNotificationRequest;
+  route: PrReviewNotificationRoute;
+  followUpPrompt: string;
+}): Promise<boolean> {
+  const { request, route } = input;
+  if (
+    request.ownershipVersion !== 'canonical' ||
+    !request.deliveryId ||
+    !request.leaseToken
+  ) {
+    return true;
+  }
+  return transitionCanonicalPrReviewDelivery({
+    deliveryId: request.deliveryId,
+    leaseToken: request.leaseToken,
+    expected: ['prepared', 'prompt_posting'],
+    status: 'prompt_posting',
+    values: {
+      followUpPrompt: input.followUpPrompt,
+      routeProvider: route.provider,
+      routeWorkspaceId: route.provider === 'slack' ? route.slackTeamId : null,
+      routeChannelId: route.channelId,
+      routeThreadId: route.threadId,
+    },
+  });
+}
+
+export async function beginCanonicalPrReviewAutoDispatch(input: {
+  request: PrReviewNotificationRequest;
+  followUpPrompt: string;
+  targetTaskId: string;
+  actingUserId: string;
+  route: PrReviewNotificationRoute;
+}): Promise<boolean> {
+  const { request, route } = input;
+  if (
+    request.ownershipVersion !== 'canonical' ||
+    !request.deliveryId ||
+    !request.leaseToken
+  ) {
+    return true;
+  }
+  return transitionCanonicalPrReviewDelivery({
+    deliveryId: request.deliveryId,
+    leaseToken: request.leaseToken,
+    expected: 'prepared',
+    status: 'auto_dispatch_pending',
+    values: {
+      followUpPrompt: input.followUpPrompt,
+      targetTaskId: input.targetTaskId,
+      actingUserId: input.actingUserId,
+      routeProvider: route.provider,
+      routeWorkspaceId: route.provider === 'slack' ? route.slackTeamId : null,
+      routeChannelId: route.channelId,
+      routeThreadId: route.threadId,
+    },
+  });
+}
+
+export async function completeCanonicalPrReviewAutoDispatch(input: {
+  request: PrReviewNotificationRequest;
+  runId: number;
+}): Promise<boolean> {
+  const { request } = input;
+  if (
+    request.ownershipVersion !== 'canonical' ||
+    !request.deliveryId ||
+    !request.leaseToken
+  ) {
+    return true;
+  }
+  return transitionCanonicalPrReviewDelivery({
+    deliveryId: request.deliveryId,
+    leaseToken: request.leaseToken,
+    expected: 'auto_dispatch_pending',
+    status: 'completed',
+    values: { dispatchedRunId: input.runId },
   });
 }
 

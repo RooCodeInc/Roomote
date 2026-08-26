@@ -10,6 +10,7 @@ import { toast } from 'sonner';
 import {
   type ComputeProvider,
   ALL_REPOSITORIES,
+  FAST_EXECUTION,
   DEFAULT_LAUNCH_CODING_HARNESS,
   DEFAULT_MANAGED_DEPLOYMENT_ACCESS,
   pickPreferredConfiguredComputeProvider,
@@ -31,7 +32,11 @@ import {
   type WorkspaceSelection,
   useWorkspaceStorage,
 } from '@/hooks/useWorkspaceStorage';
-import { useCreateStandardTaskRun, useRouteHomeTask } from '@/hooks/task-runs';
+import {
+  useCreateStandardTaskRun,
+  useStartFastSession,
+  useRouteHomeTask,
+} from '@/hooks/task-runs';
 
 import {
   Alert,
@@ -418,6 +423,34 @@ export function Home({
 
   const createStandardTaskRun = useCreateStandardTaskRun(mutationOptions);
   const routeHomeTask = useRouteHomeTask();
+  const startFastSessionMutation = useStartFastSession();
+
+  const startFastSession = useCallback(
+    async (payload: {
+      text: string;
+      images?: string[];
+      model?: string;
+    }): Promise<void> => {
+      // A second submit while the first is in flight would mint a second
+      // session and orphan one of them.
+      if (startFastSessionMutation.isPending) {
+        return;
+      }
+      try {
+        const { sessionId } =
+          await startFastSessionMutation.mutateAsync(payload);
+        setIsExiting(true);
+        router.push(`/sessions/${sessionId}`);
+      } catch (error) {
+        toast.error(
+          error instanceof Error
+            ? error.message
+            : 'Failed to start Fast session',
+        );
+      }
+    },
+    [startFastSessionMutation, router],
+  );
   const launchTaskModels = useLaunchTaskModels();
   const selectedModelId =
     selectedModelOverrideId ?? launchTaskModels.data?.defaultModelId;
@@ -484,6 +517,7 @@ export function Home({
 
   const isBusy =
     createStandardTaskRun.isPending ||
+    startFastSessionMutation.isPending ||
     routingState === 'routing_pending' ||
     routingState === 'launching';
 
@@ -609,6 +643,18 @@ export function Home({
         blank: preparedPrompt.text.length === 0,
       };
 
+      if (repository === FAST_EXECUTION) {
+        if (!submission.description && !submission.images?.length) {
+          return;
+        }
+        await startFastSession({
+          text: submission.description ?? '',
+          images: submission.images,
+          model: selectedModelId,
+        });
+        return;
+      }
+
       if (isAutoWorkspace) {
         await handleAutoSubmit(submission);
         return;
@@ -640,6 +686,8 @@ export function Home({
       setWorkspace,
       canSelectBranch,
       wiggleWorkspace,
+      startFastSession,
+      selectedModelId,
     ],
   );
 
@@ -674,6 +722,7 @@ export function Home({
               <div ref={workspaceRef}>
                 <SelectWorkspace
                   allowAuto
+                  allowFast
                   allowBranchSelection={canSelectBranch}
                 />
               </div>

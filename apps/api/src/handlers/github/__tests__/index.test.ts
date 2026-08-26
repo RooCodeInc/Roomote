@@ -887,7 +887,7 @@ describe('github webhook router', () => {
       },
       comment: {
         id: 7,
-        body: '<!-- roomote-review-summary sha=abc -->',
+        body: '<!-- roomote-review-summary sha=abc1234 -->',
         user: { login: 'roomote[bot]' },
       },
       sender: { login: 'roomote[bot]' },
@@ -932,7 +932,7 @@ describe('github webhook router', () => {
       },
       comment: {
         id: 7,
-        body: '<!-- roomote-review-summary sha=abc -->',
+        body: '<!-- roomote-review-summary sha=abc1234 -->',
         user: { login: 'roomote[bot]' },
       },
       sender: { login: 'roomote[bot]' },

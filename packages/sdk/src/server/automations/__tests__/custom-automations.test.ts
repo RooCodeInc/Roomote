@@ -265,6 +265,114 @@ describe('customAutomationsJob', () => {
     });
   });
 
+  it('delivers a Slack user-backed Fast automation to the owner DM', async () => {
+    vi.mocked(listEnabledCustomAutomations).mockResolvedValue([
+      {
+        ...automation,
+        executionMode: 'fast',
+        environmentId: null,
+        target: {
+          provider: 'slack',
+          targetKind: 'slack_user',
+          externalRef: 'user-1',
+        },
+        createdByUserId: 'user-1',
+      } as never,
+    ]);
+    vi.mocked(db.query.slackInstallations.findFirst).mockResolvedValue({
+      botAccessToken: 'xoxb-test',
+      teamId: 'T123',
+    } as never);
+
+    const result = await customAutomationsJob();
+
+    expect(result.completed).toBe(true);
+    expect(findUserDirectMessageDestination).toHaveBeenCalledWith(
+      'slack',
+      'user-1',
+    );
+    expect(fastMocks.slackPostMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ channel: 'D123' }),
+    );
+    expect(fastMocks.getSession).toHaveBeenCalledWith({
+      userId: 'user-1',
+      conversation: {
+        surface: 'slack',
+        workspaceId: 'T123',
+        conversationId: '100.001',
+        replyTarget: { channelId: 'D123', threadId: '100.001' },
+      },
+    });
+    expect(recordCustomAutomationRunOutcome).toHaveBeenCalledWith(
+      db,
+      expect.objectContaining({
+        id: automation.id,
+        status: 'succeeded',
+      }),
+    );
+  });
+
+  it('marks a Fast Slack DM run failed when the destination cannot be resolved', async () => {
+    vi.mocked(listEnabledCustomAutomations).mockResolvedValue([
+      {
+        ...automation,
+        executionMode: 'fast',
+        environmentId: null,
+        target: {
+          provider: 'slack',
+          targetKind: 'slack_user',
+          externalRef: 'user-1',
+        },
+        createdByUserId: 'user-1',
+      } as never,
+    ]);
+    vi.mocked(findUserDirectMessageDestination).mockResolvedValue(null);
+
+    const result = await customAutomationsJob();
+
+    const error =
+      'The automation owner does not have a linked Slack account that can receive direct messages.';
+    expect(result.errors).toEqual([`Flaky tests: ${error}`]);
+    expect(fastMocks.getSession).not.toHaveBeenCalled();
+    expect(recordCustomAutomationRunOutcome).toHaveBeenCalledWith(db, {
+      id: automation.id,
+      status: 'failed',
+      error,
+    });
+    expect(recordCustomAutomationRunOutcome).not.toHaveBeenCalledWith(
+      db,
+      expect.objectContaining({ status: 'succeeded' }),
+    );
+  });
+
+  it('fails an unsupported configured Fast destination instead of running without one', async () => {
+    vi.mocked(listEnabledCustomAutomations).mockResolvedValue([
+      {
+        ...automation,
+        executionMode: 'fast',
+        environmentId: null,
+        target: {
+          provider: 'telegram',
+          targetKind: 'telegram_channel',
+          externalRef: 'telegram-channel-1',
+        },
+        createdByUserId: 'user-1',
+      } as never,
+    ]);
+
+    const result = await customAutomationsJob();
+
+    const error =
+      'Telegram report destinations of this type are not supported in Fast mode.';
+    expect(result.errors).toEqual([`Flaky tests: ${error}`]);
+    expect(fastMocks.getSession).not.toHaveBeenCalled();
+    expect(recordCustomAutomationRunOutcome).toHaveBeenCalledWith(db, {
+      id: automation.id,
+      status: 'failed',
+      error,
+    });
+  });
+
   it('marks a stale Fast launch as interrupted instead of replaying it', async () => {
     const staleClaim = new Date(Date.now() - 11 * 60 * 1_000);
     vi.mocked(listEnabledCustomAutomations).mockResolvedValue([

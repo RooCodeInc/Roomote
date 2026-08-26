@@ -1,9 +1,11 @@
 import type { ModelMessage } from 'ai';
 import {
   and,
+  type CreateFastAgentMessage,
   db,
   eq,
   fastAgentConversations,
+  fastAgentMessages,
   sql,
   type DatabaseOrTransaction,
 } from '@roomote/db/server';
@@ -24,6 +26,11 @@ export type FastAgentConversationRecord = {
   openCodeSessionId: string | null;
 };
 
+export type FastAgentMessageWrite = Omit<
+  CreateFastAgentMessage,
+  'conversationId'
+>;
+
 export interface FastAgentConversationRepository {
   getOrCreate(input: {
     userId: string;
@@ -38,6 +45,10 @@ export interface FastAgentConversationRepository {
   appendVisibleMessages(input: {
     conversationId: string;
     messages: ModelMessage[];
+  }): Promise<void>;
+  upsertMessage(input: {
+    conversationId: string;
+    message: FastAgentMessageWrite;
   }): Promise<void>;
   setOpenCodeSession(input: {
     conversationId: string;
@@ -82,7 +93,7 @@ function toConversation(
   >,
 ): FastAgentConversation | null {
   const parsed = fastAgentConversationSchema.safeParse(
-    record.surface === 'automation'
+    record.surface === 'automation' || record.surface === 'web'
       ? {
           surface: record.surface,
           workspaceId: record.workspaceId,
@@ -279,6 +290,51 @@ export const fastAgentConversationRepository: FastAgentConversationRepository =
         if (!updated) {
           throw new Error('Fast conversation was not found.');
         }
+      });
+    },
+
+    async upsertMessage({ conversationId: requestedId, message }) {
+      await db.transaction(async (tx) => {
+        const conversationId = await resolveCanonicalId(tx, requestedId);
+        await tx.execute(
+          sql`select pg_advisory_xact_lock(hashtextextended(${`fast-agent-conversation:${conversationId}`}, 0))`,
+        );
+        const [conversation] = await tx
+          .select({ id: fastAgentConversations.id })
+          .from(fastAgentConversations)
+          .where(eq(fastAgentConversations.id, conversationId))
+          .limit(1);
+        if (!conversation) {
+          throw new Error('Fast conversation was not found.');
+        }
+
+        await tx
+          .insert(fastAgentMessages)
+          .values({ conversationId, ...message })
+          .onConflictDoUpdate({
+            target: [
+              fastAgentMessages.conversationId,
+              fastAgentMessages.eventId,
+            ],
+            set: {
+              turnId: message.turnId,
+              turnSeq: message.turnSeq,
+              ts: message.ts,
+              eventType: message.eventType,
+              role: message.role ?? null,
+              contentBlocks: message.contentBlocks ?? [],
+              metadata: message.metadata ?? null,
+              payload: message.payload ?? {},
+              source: message.source ?? null,
+              nativeSessionId: message.nativeSessionId ?? null,
+              nativeMessageId: message.nativeMessageId ?? null,
+              updatedAt: sql`now()`,
+            },
+          });
+        await tx
+          .update(fastAgentConversations)
+          .set({ updatedAt: sql`now()` })
+          .where(eq(fastAgentConversations.id, conversationId));
       });
     },
 

@@ -90,11 +90,13 @@ export * from './lib/instance-report';
 export * from './lib/deployment-license';
 export * from './lib/license-usage-observations';
 export * from './lib/pr-review-events';
+export * from './lib/pr-review-notification-units';
 export * from './lib/pull-request-mergeability';
 export * from './lib/fast-agent-pr-feedback-deliveries';
 export * from './lib/invocation-identities';
 export * from './lib/webhook-retention';
 export * from './lib/brain';
+export * from './lib/fast-agent-memory';
 export * from './lib/managed-access';
 
 export {
@@ -124,6 +126,10 @@ export {
   prReviewEvents,
   prReviewCycles,
   prReviewEventDeliveries,
+  prReviewNotificationUnits,
+  prReviewNotificationUnitEvents,
+  prReviewNotificationDeliveries,
+  prReviewAutoPreferences,
   taskRuns,
   taskRunsRelations,
   taskRunEvents,
@@ -178,6 +184,9 @@ export {
   slackAuthTokensRelations,
   fastAgentConversations,
   fastAgentConversationsRelations,
+  fastAgentMemoryEvents,
+  fastAgentMessages,
+  fastAgentMessagesRelations,
   fastAgentPrFeedbackDeliveries,
   fastAgentPrFeedbackDeliveriesRelations,
   slackConversationMessages,

@@ -182,3 +182,35 @@ export function createFastAgentSlackTaskLauncher(
     }),
   });
 }
+
+export function createFastAgentWebTaskLauncher(params: {
+  userId: string;
+  conversation: {
+    surface: 'web' | 'automation';
+    workspaceId: string;
+    conversationId: string;
+  };
+}): LaunchFastAgentTask {
+  return createFastAgentTaskLauncher({
+    userId: params.userId,
+    surface: 'web',
+    taskUrlCampaign: 'fast-delegation',
+    buildTask: ({ prompt, environmentId, model, parentSessionId }) => ({
+      type: TaskPayloadKind.StandardTask,
+      payload: {
+        repo: ALL_REPOSITORIES,
+        description: prompt,
+        ...buildFastAgentChildTaskMetadata({
+          sessionId: parentSessionId,
+          conversation: params.conversation,
+        }),
+        ...(environmentId && environmentId !== ALL_REPOSITORIES
+          ? { environmentId }
+          : {}),
+        ...(model
+          ? { harnessModelOverrides: { 'opencode-server': model } }
+          : {}),
+      },
+    }),
+  });
+}

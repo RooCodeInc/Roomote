@@ -12,7 +12,10 @@ import {
   taskRuns,
   tasks,
 } from '@roomote/db/server';
-import { queueCommunicationMessage } from '@roomote/communication';
+import {
+  queueCommunicationMessage,
+  queueCommunicationMessageOnce,
+} from '@roomote/communication';
 import { withContention } from '@roomote/redis';
 import {
   clearLatestUserMessage,
@@ -164,6 +167,8 @@ export async function dispatchPrReviewFollowUp(input: {
    * it because their immutable task binding is the routing authority.
    */
   slackTeamId?: string;
+  /** Stable canonical delivery key used to deduplicate retry dispatches. */
+  idempotencyKey?: string;
 }): Promise<PrReviewFollowUpDispatchResult> {
   if (input.provider === 'slack') {
     return dispatchSlackFollowUp(input);
@@ -180,6 +185,7 @@ async function dispatchSlackFollowUp(input: {
   actingUserId: string;
   providerUserId?: string;
   slackTeamId?: string;
+  idempotencyKey?: string;
 }): Promise<PrReviewFollowUpDispatchResult> {
   const threadTs = input.threadId;
 
@@ -191,7 +197,7 @@ async function dispatchSlackFollowUp(input: {
     text: input.followUpPrompt,
     user: input.providerUserId ?? input.actingUserId,
     userId: input.actingUserId,
-    ts: new Date().toISOString(),
+    ts: input.idempotencyKey ?? new Date().toISOString(),
   };
   const lookupScope = input.slackTeamId
     ? { taskId: input.taskId, slackTeamId: input.slackTeamId }
@@ -216,7 +222,11 @@ async function dispatchSlackFollowUp(input: {
       runId: activeRun.id,
       userId: input.actingUserId,
     });
-    await queueSlackMessage(activeRun.id, queuedMessage);
+    if (input.idempotencyKey) {
+      await queueCommunicationMessageOnce('slack', activeRun.id, queuedMessage);
+    } else {
+      await queueSlackMessage(activeRun.id, queuedMessage);
+    }
 
     return { outcome: 'queued', runId: activeRun.id };
   }
@@ -344,7 +354,11 @@ async function dispatchSlackFollowUp(input: {
     return { outcome: 'unavailable' };
   }
 
-  await queueSlackMessage(resumeRunId, queuedMessage);
+  if (input.idempotencyKey) {
+    await queueCommunicationMessageOnce('slack', resumeRunId, queuedMessage);
+  } else {
+    await queueSlackMessage(resumeRunId, queuedMessage);
+  }
   await clearLatestUserMessage(resumeRunId);
 
   return { outcome: 'resumed', runId: resumeRunId };
@@ -358,6 +372,7 @@ async function dispatchCommunicationFollowUp(input: {
   followUpPrompt: string;
   actingUserId: string;
   providerUserId?: string;
+  idempotencyKey?: string;
 }): Promise<PrReviewFollowUpDispatchResult> {
   const provider = input.provider as 'discord' | 'telegram';
   const conversation = {
@@ -370,7 +385,7 @@ async function dispatchCommunicationFollowUp(input: {
     text: input.followUpPrompt,
     user: input.providerUserId ?? input.actingUserId,
     userId: input.actingUserId,
-    ts: new Date().toISOString(),
+    ts: input.idempotencyKey ?? new Date().toISOString(),
   };
   const activeRun = await findActiveCommunicationTaskRun(conversation);
 
@@ -379,7 +394,15 @@ async function dispatchCommunicationFollowUp(input: {
       runId: activeRun.id,
       userId: input.actingUserId,
     });
-    await queueCommunicationMessage(provider, activeRun.id, queuedMessage);
+    if (input.idempotencyKey) {
+      await queueCommunicationMessageOnce(
+        provider,
+        activeRun.id,
+        queuedMessage,
+      );
+    } else {
+      await queueCommunicationMessage(provider, activeRun.id, queuedMessage);
+    }
 
     return { outcome: 'queued', runId: activeRun.id };
   }

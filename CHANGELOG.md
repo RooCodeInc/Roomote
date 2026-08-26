@@ -2,6 +2,33 @@
 
 This file tracks product releases for Roomote (single monorepo version). Automated release entries are prepended by `pnpm run version`.
 
+## 0.43.0 (2026-08-26)
+
+This release brings Fast conversations into the dashboard, introduces a streamlined Memory experience, launches useful starter tasks directly from setup, and adds optional GitHub review checks.
+
+### Highlights
+
+- Start and continue Fast sessions from the dashboard with generated titles and live canonical transcripts.
+- Browse and share individual memories from a streamlined Memory settings experience.
+- Launch preselected starter tasks as soon as setup completes.
+- Publish Review Code results as optional GitHub checks for branch protection and rulesets.
+
+### Minor changes
+
+- Start, title, inspect, and continue Fast sessions from the web dashboard with live canonical transcripts, while Slack and Discord replies link back to the same session view.
+- Publish Review Code results as an optional GitHub check that teams can use with branch protection and rulesets.
+- Use consistent Memory naming across Roomote and browse, focus, and share individual memories from a streamlined settings page with recovery controls when ingestion needs attention.
+- Replace the final setup step with preselected starter tasks (speed up CI, security scan, fix test flakes, update dependencies) that launch idempotently as standard tasks when setup completes.
+
+### Patch changes
+
+- Keep Slack pull request status and resumed task previews accurate across ordinary, Fast-delegated, retried, reopened, and completed task paths.
+- Keep Fast conversations useful across follow-ups and longer work by preserving native context through helper restarts, exposing deployment task inspection, responding naturally to corrections, and sharing concise progress when work takes time.
+- Make pull request feedback and review checks more reliable by coalescing duplicate actionable notifications, completing checks when reviews finish, and showing provisional findings sooner when a summary is delayed.
+- Render automation result tables in Slack with valid cell payloads, including tables with visually empty cells.
+- Show the first user message as a Fast session's temporary title instead of exposing a timestamp-like conversation identifier while title generation finishes.
+- Allow image-only prompts when starting or continuing Fast sessions while continuing to reject invalid images and empty messages.
+
 ## 0.42.0 (2026-08-25)
 
 This release expands Fast and automation workflows, shortens initial setup, adds proactive usage and pull-request conflict alerts, and improves task recovery and chat reliability.

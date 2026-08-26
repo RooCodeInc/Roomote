@@ -10,7 +10,10 @@ import {
   recordLlmUsage,
   resolveEffectiveModelRuntimeEnv,
 } from '@roomote/db/server';
-import { toBedrockMantleRuntimeModelId } from '@roomote/types';
+import {
+  toBedrockMantleRuntimeModelId,
+  type ReasoningEffort,
+} from '@roomote/types';
 import type { z } from 'zod';
 import zodToJsonSchema from 'zod-to-json-schema';
 
@@ -95,7 +98,6 @@ export const NON_TASK_INFERENCE_SURFACES = {
   chatAudioTranscription: 'chat_audio_transcription',
   chatVideoDescription: 'chat_video_description',
   customAutomationScheduleResolution: 'custom_automation_schedule_resolution',
-  fastAgentOnboardingSuggestions: 'fast_agent_onboarding_suggestions',
   fastAgentQuestionAnswering: 'fast_agent',
   inferenceValidation: 'inference_validation',
   prReviewNotificationTriage: 'pr_review_notification_triage',
@@ -145,6 +147,8 @@ interface GenerateTrackedNonTaskBaseParams extends NonTaskInferenceTrackingInput
   system?: string;
   model?: string;
   modelRole?: 'primary' | 'small' | 'orchestration';
+  /** Explicit reasoning-effort override applied to the resolved model. */
+  reasoningEffort?: ReasoningEffort;
   maxOutputTokens?: number;
   /** null lets OpenCode own the prompt lifecycle without a Roomote deadline. */
   timeoutMs?: number | null;
@@ -200,10 +204,20 @@ export type NonTaskOpenCodeSession = {
   id?: string;
 };
 
+export type NonTaskOpenCodeCompletedMessage = {
+  id: string | null;
+  sessionId: string;
+  createdAtMs: number | null;
+  completedAtMs: number | null;
+};
+
 export type NonTaskOpenCodeNativeSessionOptions = {
   directory: string;
   env?: Partial<Record<string, string>>;
   onModelResolved?: (model: string) => void;
+  onMessageCompleted?: (
+    message: NonTaskOpenCodeCompletedMessage,
+  ) => Promise<void> | void;
   onPromptStarted?: () => void;
   onSessionReady?: (sessionID: string) => Promise<void> | void;
   onSubagentSessionReady?: (sessionID: string) => Promise<void> | void;
@@ -550,6 +564,7 @@ function isOpenCodeSessionInvalid(error: unknown): boolean {
 async function resolveNonTaskModelRuntime(
   model?: string,
   modelRole: 'primary' | 'small' | 'orchestration' = 'small',
+  reasoningEffort?: ReasoningEffort,
 ): Promise<{
   model: string;
   resolvedModelRuntimeEnv: NonTaskModelRuntimeEnv;
@@ -614,6 +629,15 @@ async function resolveNonTaskModelRuntime(
         selectedRuntimeEnv.R_MODEL_REASONING_EFFORT = undefined;
       }
     }
+  }
+
+  if (reasoningEffort) {
+    // The lease cache keys on env, so an explicit effort gets its own server
+    // rather than mutating a shared lease.
+    selectedRuntimeEnv = {
+      ...selectedRuntimeEnv,
+      R_MODEL_REASONING_EFFORT: reasoningEffort,
+    };
   }
 
   return {
@@ -755,6 +779,9 @@ async function runNonTaskSdkPrompt(
     ephemeral?: boolean;
     env?: Partial<Record<string, string>>;
     onPromptStarted?: () => void;
+    onMessageCompleted?: (
+      message: NonTaskOpenCodeCompletedMessage,
+    ) => Promise<void> | void;
     onSessionReady?: (sessionID: string) => Promise<void> | void;
     onSubagentSessionReady?: (sessionID: string) => Promise<void> | void;
     permission?: PermissionRuleset;
@@ -1207,6 +1234,21 @@ async function runNonTaskSdkPrompt(
         }
       }
 
+      try {
+        await options.onMessageCompleted?.({
+          id: asString(promptResult.data.info.id) ?? null,
+          sessionId,
+          createdAtMs:
+            asFiniteNumber(promptResult.data.info.time?.created) ?? null,
+          completedAtMs:
+            asFiniteNumber(promptResult.data.info.time?.completed) ?? null,
+        });
+      } catch (error) {
+        console.warn(
+          `[NonTaskProviderUsage] OpenCode completion observer failed: ${formatOpenCodeSdkError(error)}`,
+        );
+      }
+
       return promptResult.data;
     } catch (error) {
       // Aborting the HTTP request does not guarantee that an OpenCode server
@@ -1256,6 +1298,7 @@ export async function generateTrackedNonTaskText(
   const runtime = await resolveNonTaskModelRuntime(
     params.model,
     params.modelRole,
+    params.reasoningEffort,
   );
   const model = await resolveModelForInputModality(params, runtime);
 
@@ -1307,6 +1350,7 @@ export async function generateTrackedNonTaskTextInOpenCodeSession(
   const runtime = await resolveNonTaskModelRuntime(
     params.model,
     params.modelRole,
+    params.reasoningEffort,
   );
   const model = await resolveModelForInputModality(params, runtime);
   options.onModelResolved?.(model);
@@ -1336,6 +1380,7 @@ export async function generateTrackedNonTaskTextInOpenCodeSession(
       directory: options.directory,
       env: options.env,
       onPromptStarted: options.onPromptStarted,
+      onMessageCompleted: options.onMessageCompleted,
       onSessionReady: options.onSessionReady,
       onSubagentSessionReady: options.onSubagentSessionReady,
       permission: options.permission,
@@ -1368,6 +1413,7 @@ async function generateTrackedNonTaskObjectWithSdk<
   const resolvedRuntime = await resolveNonTaskModelRuntime(
     params.model,
     params.modelRole,
+    params.reasoningEffort,
   );
 
   const data = await runNonTaskSdkPrompt(

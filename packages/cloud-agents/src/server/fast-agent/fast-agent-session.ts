@@ -13,6 +13,7 @@ import {
 import type { RunStatus } from '@roomote/types';
 import type { FastAgentConversation } from './fast-agent-conversation';
 import { fastAgentConversationRepository } from './fast-agent-conversation-repository';
+import type { FastAgentMessageWrite } from './fast-agent-conversation-repository';
 
 type FastAgentSessionRecord = {
   id: string;
@@ -106,6 +107,30 @@ export async function appendFastAgentVisibleMessages({
     conversationId: sessionId,
     messages,
   });
+}
+
+export async function upsertFastAgentMessage({
+  sessionId,
+  message,
+}: {
+  sessionId: string;
+  message: FastAgentMessageWrite;
+}): Promise<void> {
+  let lastError: unknown;
+
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      await fastAgentConversationRepository.upsertMessage({
+        conversationId: sessionId,
+        message,
+      });
+      return;
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  throw lastError;
 }
 
 export async function setFastAgentOpenCodeSession({

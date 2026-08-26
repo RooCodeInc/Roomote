@@ -6,14 +6,16 @@ import {
 import {
   chmodSync,
   lstatSync,
+  readdirSync,
   mkdirSync,
   rmSync,
+  statSync,
   symlinkSync,
   unlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, isAbsolute, join } from 'node:path';
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
@@ -61,6 +63,7 @@ const FAST_AGENT_NATIVE_RUNTIME_LIMIT = 250;
 
 export type FastAgentNativeToolCall = {
   agent?: string;
+  sessionId?: string;
   name: FastAgentNativeToolName;
   args: Record<string, unknown>;
 };
@@ -286,6 +289,19 @@ export default {
   description: "Retry startup for the delegated task associated with an eligible failed platform event.",
   args: {},
   execute: (args, context) => invoke("retry_task_start", args, context),
+}
+`,
+
+    [FAST_AGENT_NATIVE_TOOL_NAMES.saveMemory]: String.raw`
+import { z } from "zod"
+import { invoke } from "../roomote-fast-tool-bridge.js"
+
+export default {
+  description: "Save one concise durable fact from this conversation into the deployment's shared memory. Use when the user asks to remember something or states a durable preference, decision, correction, or fact. The memory is redacted and ingested server-side; it becomes searchable after the next ingestion pass, not instantly.",
+  args: {
+    memory: z.string().min(1).describe("One self-contained fact a future conversation can act on without this conversation's context"),
+  },
+  execute: (args, context) => invoke("save_memory", args, context),
 }
 `,
 
@@ -612,18 +628,56 @@ async function readRequestBody(request: IncomingMessage): Promise<unknown> {
  * bare module-not-found mid-turn.
  */
 function resolveZodDirectoryForTools(): string {
+  const candidates: string[] = [];
+  let resolveError: unknown;
   try {
-    return dirname(require.resolve('zod/package.json'));
+    candidates.push(dirname(require.resolve('zod/package.json')));
   } catch (error) {
-    throw new Error(
-      'Fast native tools need the zod package on disk to link into the ' +
-        'OpenCode tool directory, and none is resolvable from this process. ' +
-        'In the app image zod ships in each service runtime-deps tree ' +
-        '(asserted at image build); if this error reaches production, that ' +
-        'service packaging step regressed. ' +
-        `${error instanceof Error ? error.message : String(error)}`,
-    );
+    resolveError = error;
   }
+  // Bundled hosts rewrite require.resolve: Turbopack dev yields a virtual
+  // '[project]/...' specifier and the webpack production build yields a
+  // numeric module id, neither of which exists on disk. Validate the
+  // resolution and fall back to walking the real node_modules tree from the
+  // working directory, including pnpm stores without a top-level zod link
+  // (the Next standalone output ships zod only under node_modules/.pnpm).
+  for (let dir = process.cwd(); ;) {
+    candidates.push(join(dir, 'node_modules', 'zod'));
+    const pnpmStore = join(dir, 'node_modules', '.pnpm');
+    try {
+      const storeEntries = readdirSync(pnpmStore)
+        .filter((entry) => entry.startsWith('zod@'))
+        .sort();
+      for (const entry of storeEntries) {
+        candidates.push(join(pnpmStore, entry, 'node_modules', 'zod'));
+      }
+    } catch {
+      // No pnpm store at this level.
+    }
+    const parent = dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  for (const candidate of candidates) {
+    try {
+      if (
+        isAbsolute(candidate) &&
+        statSync(join(candidate, 'package.json')).isFile()
+      ) {
+        return candidate;
+      }
+    } catch {
+      // Try the next candidate.
+    }
+  }
+  throw new Error(
+    'Fast native tools need the zod package on disk to link into the ' +
+      'OpenCode tool directory, and none is resolvable from this process. ' +
+      'In the app image zod ships in each service runtime-deps tree ' +
+      '(asserted at image build); if this error reaches production, that ' +
+      'service packaging step regressed. ' +
+      `${resolveError instanceof Error ? resolveError.message : String(resolveError ?? 'require.resolve returned a non-filesystem path')}`,
+  );
 }
 
 export async function formatFastAgentMcpResultForModel(
@@ -788,6 +842,7 @@ async function startBridge(): Promise<FastAgentNativeToolBridge> {
       }
 
       const call = {
+        sessionId: parsed.sessionID,
         name: parsed.tool,
         args: parsed.args,
         ...(parsed.agent ? { agent: parsed.agent } : {}),
@@ -991,6 +1046,10 @@ function createRuntimeDirectory(sessionId: string): string {
   mkdirSync(directory, { recursive: true, mode: 0o700 });
   chmodSync(directory, 0o700);
   const toolsDirectory = join(directory, '.opencode', 'tools');
+  // Recreate the tool directory from scratch: a reused runtime directory may
+  // hold tool files from an older code version, and stale tools would stay
+  // loadable (and invokable) after a deploy that removed them.
+  rmSync(toolsDirectory, { recursive: true, force: true });
   mkdirSync(toolsDirectory, { recursive: true });
   writeFileSync(
     join(directory, '.opencode', 'package.json'),

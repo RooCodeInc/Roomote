@@ -5,6 +5,7 @@ import type { WebhookPullRequestSynchronize } from '../types';
 const {
   mockAcquireRedisLock,
   mockEnqueueActivePrReviewFollowUp,
+  mockPublishGithubPrReviewCheck,
   mockEnqueueTask,
   mockGetGitHubAutomationTargets,
   mockGetCurrentGitHubPrHeadSha,
@@ -17,6 +18,7 @@ const {
 } = vi.hoisted(() => ({
   mockAcquireRedisLock: vi.fn(),
   mockEnqueueActivePrReviewFollowUp: vi.fn(),
+  mockPublishGithubPrReviewCheck: vi.fn(),
   mockEnqueueTask: vi.fn(),
   mockGetGitHubAutomationTargets: vi.fn(),
   mockGetCurrentGitHubPrHeadSha: vi.fn(),
@@ -44,6 +46,8 @@ vi.mock('../currentPrHead', () => ({
 vi.mock('@roomote/sdk/server', () => ({
   enqueueActivePrReviewFollowUp: (...args: unknown[]) =>
     mockEnqueueActivePrReviewFollowUp(...args),
+  publishGithubPrReviewCheck: (...args: unknown[]) =>
+    mockPublishGithubPrReviewCheck(...args),
 }));
 
 vi.mock('@roomote/db/server', async () => {
@@ -207,6 +211,17 @@ describe('handlePrSynchronize', () => {
   });
 
   it('debounces new commits onto the active OpenCode review', async () => {
+    mockGetGitHubAutomationTargets.mockResolvedValueOnce({
+      status: 'ok',
+      targets: [
+        {
+          id: 'github:pr_review:repo-id',
+          settings: { reviewOnCommit: true, publishGithubCheck: true },
+          repo: { id: 'repo-id', host: 'github.com' },
+          properties: {},
+        },
+      ],
+    });
     mockSelect.mockReturnValueOnce(
       selectResult([
         {
@@ -254,6 +269,15 @@ describe('handlePrSynchronize', () => {
       expect.objectContaining({ prSha: expect.anything() }),
     );
     expect(mockEnqueueTask).not.toHaveBeenCalled();
+    expect(mockPublishGithubPrReviewCheck).toHaveBeenCalledWith({
+      installationId: 1,
+      repository: 'owner/repo',
+      prNumber: 42,
+      headSha: 'new-head',
+      taskId: 'task-100',
+      runId: 100,
+      status: 'in_progress',
+    });
     expect(mockReleaseLock).toHaveBeenCalledOnce();
   });
 
@@ -342,6 +366,17 @@ describe('handlePrSynchronize', () => {
   });
 
   it('queues a newer head as another run on the existing review task', async () => {
+    mockGetGitHubAutomationTargets.mockResolvedValueOnce({
+      status: 'ok',
+      targets: [
+        {
+          id: 'github:pr_review:repo-id',
+          settings: { reviewOnCommit: true, publishGithubCheck: true },
+          repo: { id: 'repo-id', host: 'github.com' },
+          properties: {},
+        },
+      ],
+    });
     mockSelect
       .mockReturnValueOnce(selectResult([]))
       .mockReturnValueOnce(selectResult([]))
@@ -362,6 +397,14 @@ describe('handlePrSynchronize', () => {
         }),
       }),
     );
+    expect(mockPublishGithubPrReviewCheck).toHaveBeenCalledWith({
+      installationId: 1,
+      repository: 'owner/repo',
+      prNumber: 42,
+      headSha: 'new-head',
+      taskId: 'task-100',
+      runId: 200,
+    });
     expect(mockReleaseLock).toHaveBeenCalledOnce();
   });
 

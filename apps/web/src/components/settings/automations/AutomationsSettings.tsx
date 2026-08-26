@@ -751,6 +751,7 @@ function mapSettingsToFormState(
       reviewAllPullRequestAuthors: boolean;
       reviewOnCommit: boolean;
       reviewDraftPrs: boolean;
+      publishGithubCheck: boolean;
       relayReviewResultsToTask: boolean;
       relayUsers: Array<{
         userId: string;
@@ -850,6 +851,7 @@ function mapSettingsToFormState(
       settings.reviewer.reviewAllPullRequestAuthors,
     reviewerReviewOnCommit: settings.reviewer.reviewOnCommit,
     reviewerReviewDraftPrs: settings.reviewer.reviewDraftPrs,
+    reviewerPublishGithubCheck: settings.reviewer.publishGithubCheck,
     reviewerInstructions: settings.reviewCodeInstructions ?? '',
     reviewerRelayReviewResultsToTask:
       settings.reviewer.relayReviewResultsToTask,
@@ -2868,6 +2870,30 @@ export function AutomationsSettings() {
                         </p>
                         <p className="text-xs text-muted-foreground">
                           Include pull requests opened by people or others
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-start gap-2">
+                      <Switch
+                        className="mt-1"
+                        aria-label="Publish review results as a GitHub check"
+                        checked={formState.reviewerPublishGithubCheck}
+                        onCheckedChange={(reviewerPublishGithubCheck) =>
+                          setFormState((prev) =>
+                            prev
+                              ? { ...prev, reviewerPublishGithubCheck }
+                              : prev,
+                          )
+                        }
+                      />
+                      <div className="space-y-1">
+                        <p className="text-sm font-medium">
+                          Publish review results as a GitHub check
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          GitHub branch protection or rulesets control whether
+                          this check is required for merging.
                         </p>
                       </div>
                     </div>

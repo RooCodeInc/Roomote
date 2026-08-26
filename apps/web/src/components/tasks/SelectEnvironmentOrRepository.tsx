@@ -8,11 +8,12 @@ import {
   BookCopy,
   ChevronsUpDown,
   SquareDashed,
+  Zap,
   Check,
   VectorSquare,
 } from '@/components/system';
 
-import { ALL_REPOSITORIES } from '@roomote/types';
+import { ALL_REPOSITORIES, FAST_EXECUTION } from '@roomote/types';
 
 import type { CreateTaskFormValues } from '@/types';
 
@@ -51,6 +52,7 @@ interface SelectEnvironmentOrRepositoryProps {
   repositoryFilter?: string;
   lockedBranch?: string;
   allowAuto?: boolean;
+  allowFast?: boolean;
   onCreate: () => void;
   onCreateRepository?: () => void;
   onEdit: (e: React.MouseEvent, envId: string) => void;
@@ -61,6 +63,7 @@ export const SelectEnvironmentOrRepository = ({
   repositoryFilter,
   lockedBranch,
   allowAuto = false,
+  allowFast = false,
   onCreate,
   onCreateRepository,
   onEdit,
@@ -228,7 +231,11 @@ export const SelectEnvironmentOrRepository = ({
       return;
     }
 
-    if (!repository || repository === ALL_REPOSITORIES) {
+    if (
+      !repository ||
+      repository === ALL_REPOSITORIES ||
+      repository === FAST_EXECUTION
+    ) {
       return;
     }
 
@@ -284,6 +291,13 @@ export const SelectEnvironmentOrRepository = ({
       };
     }
 
+    if (repository === FAST_EXECUTION) {
+      return {
+        label: 'Fast',
+        icon: Zap,
+      };
+    }
+
     if (!repository) {
       return {
         label: 'Select an environment',
@@ -324,6 +338,13 @@ export const SelectEnvironmentOrRepository = ({
         if (repository === AUTO_WORKSPACE_VALUE) {
           setValue('branch', '');
           setWorkspace({ workspace: { type: 'auto' } });
+          return;
+        }
+
+        if (repository === FAST_EXECUTION) {
+          // A Fast chat has no repository workspace; it is not persisted as a
+          // default workspace choice.
+          setValue('branch', '');
           return;
         }
 
@@ -506,6 +527,19 @@ export const SelectEnvironmentOrRepository = ({
                     strokeWidth={1.5}
                   />
                   <span>Auto</span>
+                </div>
+              </DropdownMenuItem>
+            )}
+
+            {allowFast && (
+              <DropdownMenuItem
+                onSelect={() =>
+                  handleValueChange(`${REPO_PREFIX}${FAST_EXECUTION}`)
+                }
+              >
+                <div className="flex items-center gap-2">
+                  <Zap className="size-3.5 shrink-0" strokeWidth={1.5} />
+                  <span>Fast</span>
                 </div>
               </DropdownMenuItem>
             )}
