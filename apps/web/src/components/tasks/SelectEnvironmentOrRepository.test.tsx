@@ -4,6 +4,8 @@ import { act, render, screen, waitFor } from '@testing-library/react';
 
 import type { CreateTaskFormValues } from '@/types';
 
+import { FAST_EXECUTION } from '@roomote/types';
+
 import { AUTO_WORKSPACE_VALUE } from './constants';
 import { SelectEnvironmentOrRepository } from './SelectEnvironmentOrRepository';
 
@@ -111,12 +113,14 @@ const WorkspaceValuesProbe = ({
 
 const SelectEnvironmentOrRepositoryHarness = ({
   allowAuto = false,
+  allowFast = false,
   repositoryFilter,
   defaultValues,
   onValuesChange,
   onCreateRepository,
 }: {
   allowAuto?: boolean;
+  allowFast?: boolean;
   /** Omit for no filter (homepage Auto). Pass a repo full name to filter. */
   repositoryFilter?: string;
   defaultValues: Partial<CreateTaskFormValues>;
@@ -136,6 +140,7 @@ const SelectEnvironmentOrRepositoryHarness = ({
       <SelectEnvironmentOrRepository
         repositoryFilter={repositoryFilter}
         allowAuto={allowAuto}
+        allowFast={allowFast}
         onCreate={vi.fn()}
         onCreateRepository={onCreateRepository}
         onEdit={vi.fn()}
@@ -237,6 +242,33 @@ describe('SelectEnvironmentOrRepository', () => {
 
     expect(screen.getAllByText('Member environment')).toHaveLength(2);
     expect(screen.getByText(/Environments.*recommended/)).toBeInTheDocument();
+  });
+
+  it('keeps a Fast selection instead of resetting it to Auto', async () => {
+    let latestValues: WorkspaceSelectionValues | undefined;
+
+    render(
+      <SelectEnvironmentOrRepositoryHarness
+        allowAuto
+        allowFast
+        defaultValues={{ repository: FAST_EXECUTION }}
+        onValuesChange={(values) => {
+          latestValues = values;
+        }}
+      />,
+    );
+
+    // Rendered both as the selected trigger label and as the menu item.
+    expect(screen.getAllByText('Fast')).toHaveLength(2);
+
+    await waitFor(() => {
+      expect(latestValues?.repository).toBe(FAST_EXECUTION);
+    });
+    expect(latestValues).toMatchObject({
+      environmentId: undefined,
+      repository: FAST_EXECUTION,
+    });
+    expect(setWorkspace).not.toHaveBeenCalled();
   });
 
   it('preserves prefilled repository in auto mode instead of force-selecting an environment', async () => {

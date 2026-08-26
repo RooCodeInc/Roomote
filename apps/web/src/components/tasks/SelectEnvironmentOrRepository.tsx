@@ -231,7 +231,11 @@ export const SelectEnvironmentOrRepository = ({
       return;
     }
 
-    if (!repository || repository === ALL_REPOSITORIES) {
+    if (
+      !repository ||
+      repository === ALL_REPOSITORIES ||
+      repository === FAST_EXECUTION
+    ) {
       return;
     }
 
