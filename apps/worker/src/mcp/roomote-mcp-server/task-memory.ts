@@ -1,4 +1,4 @@
-import { redactBrainText } from '@roomote/communication/redact-brain-text';
+import { redactBrainTextFragments } from '@roomote/communication/redact-brain-text';
 
 import { getRoomoteConfig } from './config.js';
 import { saveTaskMemory } from './tasks-api-client.js';
@@ -41,20 +41,31 @@ export async function handleSaveTaskMemory(
     }
 
     const result = await saveTaskMemory(config, runId, input);
-    const redactArray = (values: string[]) => values.map(redactBrainText);
+    const fragments = [
+      input.outcome,
+      ...(input.rationale !== undefined ? [input.rationale] : []),
+      ...(input.decisions ?? []),
+      ...(input.reusableFacts ?? []),
+      ...(input.unresolvedQuestions ?? []),
+    ];
+    const redactedFragments = redactBrainTextFragments(fragments);
+    let fragmentIndex = 0;
+    const takeFragment = () => redactedFragments[fragmentIndex++]!;
+    const outcome = takeFragment();
+    const rationale =
+      input.rationale !== undefined ? takeFragment() : undefined;
+    const decisions = input.decisions?.map(() => takeFragment());
+    const reusableFacts = input.reusableFacts?.map(() => takeFragment());
+    const unresolvedQuestions = input.unresolvedQuestions?.map(() =>
+      takeFragment(),
+    );
     const memory = {
-      outcome: redactBrainText(input.outcome),
-      ...(input.decisions !== undefined
-        ? { decisions: redactArray(input.decisions) }
-        : {}),
-      ...(input.rationale !== undefined
-        ? { rationale: redactBrainText(input.rationale) }
-        : {}),
-      ...(input.reusableFacts !== undefined
-        ? { reusableFacts: redactArray(input.reusableFacts) }
-        : {}),
+      outcome,
+      ...(input.decisions !== undefined ? { decisions } : {}),
+      ...(input.rationale !== undefined ? { rationale } : {}),
+      ...(input.reusableFacts !== undefined ? { reusableFacts } : {}),
       ...(input.unresolvedQuestions !== undefined
-        ? { unresolvedQuestions: redactArray(input.unresolvedQuestions) }
+        ? { unresolvedQuestions }
         : {}),
     };
 

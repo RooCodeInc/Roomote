@@ -69,4 +69,24 @@ describe('save task memory tool', () => {
       memory,
     });
   });
+
+  it('redacts private keys split across memory fields', async () => {
+    const memory = {
+      outcome: 'before\n-----BEGIN PRIVATE KEY-----\nsecret',
+      rationale: 'more secret',
+      decisions: ['-----END PRIVATE KEY-----\nafter'],
+    };
+    saveTaskMemory.mockResolvedValue({ saved: true });
+
+    const result = await handleSaveTaskMemory(memory);
+
+    expect(JSON.parse(result.content[0]?.text ?? '')).toMatchObject({
+      memory: {
+        outcome: 'before\n[REDACTED]',
+        rationale: '[REDACTED]',
+        decisions: ['[REDACTED]\nafter'],
+      },
+    });
+    expect(saveTaskMemory).toHaveBeenCalledWith(expect.any(Object), 42, memory);
+  });
 });

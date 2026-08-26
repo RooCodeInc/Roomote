@@ -40,30 +40,70 @@ function findPrivateKeyMarker(
   return null;
 }
 
-function redactPrivateKeys(text: string): string {
-  let output = '';
+type TextRange = { start: number; end: number };
+
+function findPrivateKeyRanges(text: string): TextRange[] {
+  const ranges: TextRange[] = [];
   let cursor = 0;
 
   while (cursor < text.length) {
     const begin = findPrivateKeyMarker(text, 'BEGIN', cursor);
-    if (!begin) return output + text.slice(cursor);
+    if (!begin) break;
 
     const end = findPrivateKeyMarker(text, 'END', begin.end);
-    if (!end) return output + text.slice(cursor);
+    if (!end) break;
 
-    output += `${text.slice(cursor, begin.start)}[REDACTED]`;
+    ranges.push({ start: begin.start, end: end.end });
     cursor = end.end;
   }
 
-  return output;
+  return ranges;
 }
 
-export function redactBrainText(text: string): string {
-  let redacted = redactPrivateKeys(text);
+function redactRanges(
+  text: string,
+  ranges: TextRange[],
+  offset: number,
+): string {
+  let output = '';
+  let cursor = 0;
+
+  for (const range of ranges) {
+    const start = Math.max(0, range.start - offset);
+    const end = Math.min(text.length, range.end - offset);
+    if (start >= end) continue;
+
+    output += `${text.slice(cursor, start)}[REDACTED]`;
+    cursor = end;
+  }
+
+  return output + text.slice(cursor);
+}
+
+function redactPatterns(text: string): string {
+  let redacted = text;
 
   for (const pattern of SECRET_PATTERNS) {
     redacted = redacted.replace(pattern, '[REDACTED]');
   }
 
   return redacted;
+}
+
+export function redactBrainTextFragments(fragments: string[]): string[] {
+  const joined = fragments.join('\n');
+  const privateKeyRanges = findPrivateKeyRanges(joined);
+  let offset = 0;
+
+  return fragments.map((fragment) => {
+    const redacted = redactPatterns(
+      redactRanges(fragment, privateKeyRanges, offset),
+    );
+    offset += fragment.length + 1;
+    return redacted;
+  });
+}
+
+export function redactBrainText(text: string): string {
+  return redactBrainTextFragments([text])[0]!;
 }
