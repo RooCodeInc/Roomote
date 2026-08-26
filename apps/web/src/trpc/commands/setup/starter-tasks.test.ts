@@ -6,12 +6,16 @@ const {
   mockCreateStandardTaskRun,
   mockCaptureEvent,
   environmentState,
+  launchState,
 } = vi.hoisted(() => ({
   mockAssertAdmin: vi.fn(),
   mockCompleteSetup: vi.fn(),
   mockCreateStandardTaskRun: vi.fn(),
   mockCaptureEvent: vi.fn(),
   environmentState: { rows: [] as Array<{ id: string }> },
+  launchState: {
+    lookupResults: [] as Array<Array<{ taskId: string }>>,
+  },
 }));
 
 vi.mock('./shared', () => ({
@@ -29,15 +33,25 @@ vi.mock('../task-runs', () => ({
 
 vi.mock('@roomote/db/server', () => ({
   db: {
-    select: () => ({
-      from: () => ({
-        where: () => ({
-          orderBy: () => ({
-            limit: () => Promise.resolve(environmentState.rows),
-          }),
-        }),
-      }),
-    }),
+    select: (fields: Record<string, unknown>) =>
+      'taskId' in fields
+        ? {
+            from: () => ({
+              where: () => ({
+                limit: () =>
+                  Promise.resolve(launchState.lookupResults.shift() ?? []),
+              }),
+            }),
+          }
+        : {
+            from: () => ({
+              where: () => ({
+                orderBy: () => ({
+                  limit: () => Promise.resolve(environmentState.rows),
+                }),
+              }),
+            }),
+          },
   },
   environments: {
     id: 'environments.id',
@@ -49,6 +63,11 @@ vi.mock('@roomote/db/server', () => ({
   eq: vi.fn(),
   desc: vi.fn(),
   isNull: vi.fn(),
+  sql: vi.fn(),
+  taskRuns: {
+    taskId: 'taskRuns.taskId',
+    payload: 'taskRuns.payload',
+  },
 }));
 
 vi.mock('@roomote/telemetry/server', () => ({
@@ -89,6 +108,7 @@ describe('completeSetupWithStarterTasksCommand', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     environmentState.rows = [];
+    launchState.lookupResults = [];
     mockCompleteSetup.mockResolvedValue({ success: true });
     mockCreateStandardTaskRun.mockImplementation(
       async (_auth: unknown, input: { payload: { description: string } }) => ({
@@ -105,6 +125,7 @@ describe('completeSetupWithStarterTasksCommand', () => {
       .mockResolvedValueOnce({ success: true, id: 2, taskId: 'task-security' });
 
     const result = await completeSetupWithStarterTasksCommand(buildAuth(), {
+      launchBatchId: '11111111-1111-4111-8111-111111111111',
       selectedStarterTaskIds: ['speed-up-ci', 'security-scan'],
       anonymousAnalyticsEnabled: true,
       productUpdatesEnabled: false,
@@ -119,6 +140,8 @@ describe('completeSetupWithStarterTasksCommand', () => {
         payload: {
           repo: ALL_REPOSITORIES,
           description: getSetupStarterTask('speed-up-ci').prompt,
+          launchIdempotencyKey:
+            'setup-starter:admin-1:11111111-1111-4111-8111-111111111111:speed-up-ci',
         },
       },
     );
@@ -129,6 +152,8 @@ describe('completeSetupWithStarterTasksCommand', () => {
         payload: {
           repo: ALL_REPOSITORIES,
           description: getSetupStarterTask('security-scan').prompt,
+          launchIdempotencyKey:
+            'setup-starter:admin-1:11111111-1111-4111-8111-111111111111:security-scan',
         },
       },
     );
@@ -161,6 +186,7 @@ describe('completeSetupWithStarterTasksCommand', () => {
 
   it('deduplicates repeated starter task ids', async () => {
     const result = await completeSetupWithStarterTasksCommand(buildAuth(), {
+      launchBatchId: '11111111-1111-4111-8111-111111111111',
       selectedStarterTaskIds: ['speed-up-ci', 'speed-up-ci'],
     });
 
@@ -172,6 +198,7 @@ describe('completeSetupWithStarterTasksCommand', () => {
     environmentState.rows = [{ id: 'env-newest' }];
 
     await completeSetupWithStarterTasksCommand(buildAuth(), {
+      launchBatchId: '11111111-1111-4111-8111-111111111111',
       selectedStarterTaskIds: ['update-dependencies'],
     });
 
@@ -180,6 +207,8 @@ describe('completeSetupWithStarterTasksCommand', () => {
         repo: ALL_REPOSITORIES,
         environmentId: 'env-newest',
         description: getSetupStarterTask('update-dependencies').prompt,
+        launchIdempotencyKey:
+          'setup-starter:admin-1:11111111-1111-4111-8111-111111111111:update-dependencies',
       },
     });
   });
@@ -191,6 +220,7 @@ describe('completeSetupWithStarterTasksCommand', () => {
       .mockRejectedValueOnce(new Error('enqueue blew up'));
 
     const result = await completeSetupWithStarterTasksCommand(buildAuth(), {
+      launchBatchId: '11111111-1111-4111-8111-111111111111',
       selectedStarterTaskIds: [
         'speed-up-ci',
         'security-scan',
@@ -220,6 +250,7 @@ describe('completeSetupWithStarterTasksCommand', () => {
 
   it('completes setup without launching anything for an empty selection', async () => {
     const result = await completeSetupWithStarterTasksCommand(buildAuth(), {
+      launchBatchId: '11111111-1111-4111-8111-111111111111',
       selectedStarterTaskIds: [],
       productUpdatesEnabled: true,
     });
@@ -240,6 +271,7 @@ describe('completeSetupWithStarterTasksCommand', () => {
     mockCompleteSetup.mockRejectedValueOnce(new Error('settings write failed'));
 
     const result = await completeSetupWithStarterTasksCommand(buildAuth(), {
+      launchBatchId: '11111111-1111-4111-8111-111111111111',
       selectedStarterTaskIds: ['fix-test-flakes'],
     });
 
@@ -247,5 +279,41 @@ describe('completeSetupWithStarterTasksCommand', () => {
     expect(result.failed).toEqual([]);
     expect(result.setupCompleted).toBe(false);
     expect(result.completionError).toBe('settings write failed');
+  });
+
+  it('recovers a previously launched task without enqueueing a duplicate', async () => {
+    launchState.lookupResults = [[{ taskId: 'task-existing' }]];
+
+    const result = await completeSetupWithStarterTasksCommand(buildAuth(), {
+      launchBatchId: '22222222-2222-4222-8222-222222222222',
+      selectedStarterTaskIds: ['speed-up-ci'],
+    });
+
+    expect(mockCreateStandardTaskRun).not.toHaveBeenCalled();
+    expect(result.launched).toEqual([
+      { starterTaskId: 'speed-up-ci', taskId: 'task-existing' },
+    ]);
+    expect(result.setupCompleted).toBe(true);
+  });
+
+  it('recovers the winning task after a concurrent uniqueness race', async () => {
+    launchState.lookupResults = [[], [{ taskId: 'task-winner' }]];
+    mockCreateStandardTaskRun.mockResolvedValueOnce({
+      success: false,
+      error:
+        'duplicate key value violates unique constraint task_runs_launch_idempotency_key_unique',
+    });
+
+    const result = await completeSetupWithStarterTasksCommand(buildAuth(), {
+      launchBatchId: '33333333-3333-4333-8333-333333333333',
+      selectedStarterTaskIds: ['security-scan'],
+    });
+
+    expect(mockCreateStandardTaskRun).toHaveBeenCalledOnce();
+    expect(result.launched).toEqual([
+      { starterTaskId: 'security-scan', taskId: 'task-winner' },
+    ]);
+    expect(result.failed).toEqual([]);
+    expect(result.setupCompleted).toBe(true);
   });
 });

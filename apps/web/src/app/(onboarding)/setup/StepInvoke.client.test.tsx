@@ -243,6 +243,10 @@ function clickGo() {
 describe('Setup StepInvoke', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    window.sessionStorage.clear();
+    vi.spyOn(globalThis.crypto, 'randomUUID').mockReturnValue(
+      '11111111-1111-4111-8111-111111111111',
+    );
     invalidateQueriesMock.mockResolvedValue(undefined);
     fetchQueryMock.mockImplementation(
       async (options: { queryKey?: unknown[] }) => {
@@ -313,6 +317,7 @@ describe('Setup StepInvoke', () => {
 
     await waitFor(() => {
       expect(starterMutateMock).toHaveBeenCalledWith({
+        launchBatchId: '11111111-1111-4111-8111-111111111111',
         selectedStarterTaskIds: ['speed-up-ci'],
         anonymousAnalyticsEnabled: true,
         productUpdatesEnabled: true,
@@ -349,6 +354,7 @@ describe('Setup StepInvoke', () => {
 
     await waitFor(() => {
       expect(starterMutateMock).toHaveBeenCalledWith({
+        launchBatchId: '11111111-1111-4111-8111-111111111111',
         selectedStarterTaskIds: [
           'speed-up-ci',
           'security-scan',
@@ -400,6 +406,7 @@ describe('Setup StepInvoke', () => {
 
     await waitFor(() => {
       expect(starterMutateMock).toHaveBeenLastCalledWith({
+        launchBatchId: '11111111-1111-4111-8111-111111111111',
         selectedStarterTaskIds: ['fix-test-flakes', 'update-dependencies'],
         anonymousAnalyticsEnabled: true,
         productUpdatesEnabled: true,
@@ -409,6 +416,43 @@ describe('Setup StepInvoke', () => {
     await waitFor(() => {
       expect(replaceMock).toHaveBeenCalledWith('/tasks');
     });
+  });
+
+  it('reuses the launch batch id after an ambiguous result and remount', async () => {
+    starterResultState.queue.push({
+      launched: [],
+      failed: [
+        { starterTaskId: 'speed-up-ci', error: 'Request timed out.' },
+        { starterTaskId: 'security-scan', error: 'Request timed out.' },
+        { starterTaskId: 'fix-test-flakes', error: 'Request timed out.' },
+        { starterTaskId: 'update-dependencies', error: 'Request timed out.' },
+      ],
+      setupCompleted: false,
+      completionError: null,
+    });
+
+    const firstRender = render(<StepInvoke />);
+    clickGo();
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole('button', { name: /retry/i }),
+      ).toBeInTheDocument();
+    });
+    firstRender.unmount();
+
+    render(<StepInvoke />);
+    clickGo();
+
+    await waitFor(() => {
+      expect(starterMutateMock).toHaveBeenCalledTimes(2);
+    });
+    expect(starterMutateMock.mock.calls[0]?.[0].launchBatchId).toBe(
+      '11111111-1111-4111-8111-111111111111',
+    );
+    expect(starterMutateMock.mock.calls[1]?.[0].launchBatchId).toBe(
+      starterMutateMock.mock.calls[0]?.[0].launchBatchId,
+    );
   });
 
   it('keeps setup incomplete and offers retry when completion fails after launches', async () => {
@@ -437,6 +481,7 @@ describe('Setup StepInvoke', () => {
 
     await waitFor(() => {
       expect(starterMutateMock).toHaveBeenLastCalledWith({
+        launchBatchId: '11111111-1111-4111-8111-111111111111',
         selectedStarterTaskIds: [],
         anonymousAnalyticsEnabled: true,
         productUpdatesEnabled: true,

@@ -1,4 +1,13 @@
-import { and, db, desc, environments, eq, isNull } from '@roomote/db/server';
+import {
+  and,
+  db,
+  desc,
+  environments,
+  eq,
+  isNull,
+  sql,
+  taskRuns,
+} from '@roomote/db/server';
 import { ALL_REPOSITORIES } from '@roomote/types';
 import { captureEvent } from '@roomote/telemetry/server';
 
@@ -35,20 +44,35 @@ async function findStarterTaskEnvironmentId(): Promise<string | null> {
   return environment?.id ?? null;
 }
 
+async function findStarterTaskLaunch(
+  launchIdempotencyKey: string,
+): Promise<string | null> {
+  const [existingRun] = await db
+    .select({ taskId: taskRuns.taskId })
+    .from(taskRuns)
+    .where(
+      sql`${taskRuns.payload}->>'launchIdempotencyKey' = ${launchIdempotencyKey}`,
+    )
+    .limit(1);
+
+  return existingRun?.taskId ?? null;
+}
+
 /**
  * Launches the selected setup starter tasks as direct standard web tasks and
  * completes setup once every requested launch succeeded.
  *
- * The command is intentionally stateless so the client can retry safely after
- * a partial failure: it resubmits only the starter tasks that have not
- * launched yet, and an empty selection simply completes setup (used when every
- * remaining launch already succeeded on a previous attempt, or when the user
- * deselected everything). Setup stays incomplete while any requested launch is
- * still failing.
+ * Each launch carries a stable key derived from the browser-session batch and
+ * starter-task id. A partial unique index on task_runs makes concurrent retries
+ * mutually exclusive, while the lookup before and after create recovers the
+ * original task after a lost response or uniqueness race. An empty selection
+ * simply completes setup, and setup stays incomplete while any requested launch
+ * is still failing.
  */
 export async function completeSetupWithStarterTasksCommand(
   auth: UserAuthSuccess,
   input: {
+    launchBatchId: string;
     selectedStarterTaskIds: SetupStarterTaskId[];
     anonymousAnalyticsEnabled?: boolean;
     productUpdatesEnabled?: boolean;
@@ -70,20 +94,48 @@ export async function completeSetupWithStarterTasksCommand(
     selectedStarterTaskIds.map(
       async (starterTaskId): Promise<StarterTaskLaunchOutcome> => {
         const starterTask = getSetupStarterTask(starterTaskId);
+        const launchIdempotencyKey = [
+          'setup-starter',
+          auth.userId,
+          input.launchBatchId,
+          starterTaskId,
+        ].join(':');
 
         try {
+          const existingTaskId =
+            await findStarterTaskLaunch(launchIdempotencyKey);
+          if (existingTaskId) {
+            return { starterTaskId, taskId: existingTaskId };
+          }
+
           const result = await createStandardTaskRunCommand(auth, {
             payload: {
               repo: ALL_REPOSITORIES,
               ...(environmentId ? { environmentId } : {}),
               description: starterTask.prompt,
+              launchIdempotencyKey,
             },
           });
 
-          return result.success
-            ? { starterTaskId, taskId: result.taskId }
+          if (result.success) {
+            return { starterTaskId, taskId: result.taskId };
+          }
+
+          // A concurrent request can win the unique-index race after our first
+          // lookup. Recover its task instead of surfacing a retry that would
+          // otherwise remain ambiguous.
+          const concurrentlyLaunchedTaskId =
+            await findStarterTaskLaunch(launchIdempotencyKey);
+          return concurrentlyLaunchedTaskId
+            ? { starterTaskId, taskId: concurrentlyLaunchedTaskId }
             : { starterTaskId, error: result.error };
         } catch (error) {
+          const concurrentlyLaunchedTaskId =
+            await findStarterTaskLaunch(launchIdempotencyKey);
+          if (concurrentlyLaunchedTaskId) {
+            return { starterTaskId, taskId: concurrentlyLaunchedTaskId };
+          }
+
           return {
             starterTaskId,
             error:

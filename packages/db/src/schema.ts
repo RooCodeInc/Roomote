@@ -1580,6 +1580,9 @@ export const taskRuns = pgTable(
       .where(
         sql`${table.payload}->>'communicationProvider' = 'discord' AND ${table.payload}->>'communicationSourceEventId' IS NOT NULL AND ${table.canceledAt} IS NULL`,
       ),
+    uniqueIndex('task_runs_launch_idempotency_key_unique')
+      .on(sql`(${table.payload}->>'launchIdempotencyKey')`)
+      .where(sql`${table.payload}->>'launchIdempotencyKey' IS NOT NULL`),
     index('task_runs_first_assistant_output_at_idx').on(
       table.firstAssistantOutputAt,
     ),
