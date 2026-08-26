@@ -4,6 +4,7 @@ const {
   claimPendingMock,
   dispatchFollowUpMock,
   enableAutoHandleMock,
+  completeActionDispatchMock,
   postSlackInteractiveResponseMock,
   slackUserMappingsFindFirstMock,
   dbSelectMock,
@@ -12,6 +13,7 @@ const {
   claimPendingMock: vi.fn(),
   dispatchFollowUpMock: vi.fn(),
   enableAutoHandleMock: vi.fn(),
+  completeActionDispatchMock: vi.fn(),
   postSlackInteractiveResponseMock: vi.fn(),
   slackUserMappingsFindFirstMock: vi.fn(),
   dbSelectMock: vi.fn(),
@@ -36,6 +38,7 @@ vi.mock('@roomote/sdk/server', () => ({
   claimPendingPrReviewAction: claimPendingMock,
   dispatchPrReviewFollowUp: dispatchFollowUpMock,
   enableAutoHandlePrReviewFeedback: enableAutoHandleMock,
+  completePendingPrReviewActionDispatch: completeActionDispatchMock,
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -128,6 +131,8 @@ describe('handleSlackPrReviewActionYes', () => {
 
     expect(claimPendingMock).toHaveBeenCalledWith('nonce-1', {
       expectedSlackTeamId: 'T1',
+      choice: 'yes',
+      actingUserId: 'user-1',
     });
     expect(enableAutoHandleMock).not.toHaveBeenCalled();
     expect(dispatchFollowUpMock).toHaveBeenCalledWith({
@@ -309,6 +314,7 @@ describe('handleSlackPrReviewActionDismiss', () => {
 
     expect(claimPendingMock).toHaveBeenCalledWith('nonce-1', {
       expectedSlackTeamId: 'T1',
+      choice: 'dismiss',
     });
     expect(dispatchFollowUpMock).not.toHaveBeenCalled();
     expect(updateMessageMock).toHaveBeenCalledWith(
