@@ -32,11 +32,13 @@ import type {
   BrainPageListing,
 } from '@/trpc/commands/brain';
 import { brainNamespaceColor } from './brain-presentation';
+import { Streamdown } from 'streamdown';
 
 type ListedPage = BrainPageListing['pages'][number];
 
 const PAGE_SIZE = 100;
 const SEARCH_DEBOUNCE_MS = 200;
+const PREVIEW_SKELETON_DELAY_MS = 300;
 type PageEdge = 'first' | 'last';
 
 /** Registry position, so the filter chips keep a stable, meaningful order. */
@@ -56,6 +58,26 @@ function useDebouncedValue<T>(value: T, delayMs: number): T {
   }, [delayMs, value]);
 
   return debouncedValue;
+}
+
+function useDelayedLoading(isPending: boolean): boolean {
+  const [showLoading, setShowLoading] = useState(false);
+
+  useEffect(() => {
+    if (!isPending) {
+      setShowLoading(false);
+      return;
+    }
+
+    const timeout = window.setTimeout(
+      () => setShowLoading(true),
+      PREVIEW_SKELETON_DELAY_MS,
+    );
+
+    return () => window.clearTimeout(timeout);
+  }, [isPending]);
+
+  return showLoading;
 }
 
 const PageListRow = memo(function PageListRow({
@@ -94,8 +116,9 @@ function PagePreview({ slug }: { slug: string }) {
   const { data, isPending } = useQuery(
     trpc.brain.getPage.queryOptions({ slug }),
   );
+  const showLoading = useDelayedLoading(isPending);
 
-  if (isPending) {
+  if (isPending && showLoading) {
     return (
       <div className="space-y-2 px-4">
         <Skeleton className="h-5 w-64" />
@@ -105,24 +128,29 @@ function PagePreview({ slug }: { slug: string }) {
     );
   }
 
+  if (isPending) {
+    return null;
+  }
+
   if (!data) {
     return (
       <EmptyState
         title="Memory unavailable"
-        description="Memory did not answer for this memory. It may have been removed, or Memory may be briefly unreachable."
+        description="Couldn't find this memory. It may have been removed, or Memory may be briefly unreachable."
       />
     );
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-3 px-4">
-      <div className="space-y-1">
-        <p className="text-sm font-semibold">{data.title}</p>
+    <div className="flex h-full min-h-0 flex-col gap-3 divide-y">
+      <div className="space-y-1 px-4 pb-3">
+        <p className="text-sm font-semibold truncate line-clamp-1">
+          {data.title}
+        </p>
         <div className="flex items-center gap-2 text-sm text-muted-foreground">
           {data.updatedAt ? (
             <>
               <span>
-                updated{' '}
                 {formatDistanceToNowCompact(data.updatedAt, {
                   addSuffix: true,
                 })}
@@ -137,10 +165,12 @@ function PagePreview({ slug }: { slug: string }) {
        * Brain memories are distilled from tasks and integrations: cross-user
        * content, rendered strictly as text.
        */}
-      <div className="min-h-0 flex-1 overflow-y-auto scroll-thin rounded-lg bg-background/60 p-3">
-        <pre className="font-mono text-xs whitespace-pre-wrap">
-          {data.content ?? 'This memory has no stored content.'}
-        </pre>
+      <div className="min-h-0 flex-1 overflow-y-auto scroll-thin px-4">
+        <div className="w-full max-w-2xl">
+          <Streamdown className="text-sm **:data-[streamdown='heading-1']:text-xl! **:data-[streamdown='heading-2']:text-base! **:data-[streamdown='heading-3']:text-base!">
+            {data.content ?? 'This memory has no stored content.'}
+          </Streamdown>
+        </div>
         {data.contentTruncated ? (
           <p className="pt-2 text-xs text-muted-foreground">
             Long memory, preview cut. Agents still read the full memory.
@@ -283,7 +313,7 @@ export function BrainBrowseSection({
       <div
         ref={listRef}
         onKeyDown={handleListKeyDown}
-        className="min-h-0 flex-1 space-y-0.5 overflow-y-auto scroll-thin pr-1"
+        className="min-h-0 flex-1 space-y-0.5 overflow-y-auto scroll-thin pr-2"
       >
         {pages.map((page) => (
           <PageListRow
@@ -334,7 +364,7 @@ export function BrainBrowseSection({
 
   return (
     <Section icon={BookOpenText} title="Explore memories">
-      <div className="space-y-3">
+      <div className="space-y-4">
         <div className="relative">
           <Search
             aria-hidden="true"
@@ -354,7 +384,7 @@ export function BrainBrowseSection({
           />
         </div>
 
-        <div className="flex flex-wrap items-center gap-1.5">
+        <div className="flex flex-wrap items-center gap-1.5 mb-6">
           <Badge
             asChild
             variant={namespaceId === null ? 'default' : 'secondary'}
@@ -412,15 +442,15 @@ export function BrainBrowseSection({
             description="Nothing in Memory matches this search."
           />
         ) : selectedSlug ? (
-          <div className="grid h-[500px] grid-cols-1 grid-rows-2 divide-y md:grid-cols-[280px_1fr] md:grid-rows-1 md:divide-x md:divide-y-0">
+          <div className="grid h-140 grid-cols-1 grid-rows-2 divide-y md:grid-cols-[280px_1fr] md:grid-rows-1 md:divide-x md:divide-y-0 overflow-clip">
             {/* The list and preview stack below `md`, then sit side by side. */}
             {pageList}
-            <div className="min-h-0">
+            <div className="min-h-0 flex-1">
               <PagePreview slug={selectedSlug} />
             </div>
           </div>
         ) : (
-          <div className="flex h-[500px] min-h-0">{pageList}</div>
+          <div className="flex h-140 min-h-0">{pageList}</div>
         )}
       </div>
     </Section>

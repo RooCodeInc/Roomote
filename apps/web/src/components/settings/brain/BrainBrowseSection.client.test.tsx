@@ -1,17 +1,24 @@
 import { useState } from 'react';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from '@testing-library/react';
 
 import type { BrainCorpusSummary } from '@/trpc/commands/brain';
 
-const { listInputs } = vi.hoisted(() => ({
+const { listInputs, state } = vi.hoisted(() => ({
   listInputs: [] as Array<Record<string, unknown>>,
+  state: { pagePending: false },
 }));
 
 vi.mock('@tanstack/react-query', () => ({
   keepPreviousData: (previousData: unknown) => previousData,
   useQuery: (options: { queryKind?: string; input?: { offset?: number } }) =>
     options.queryKind === 'page'
-      ? { isPending: false, data: undefined }
+      ? { isPending: state.pagePending, data: undefined }
       : {
           isPending: false,
           data: {
@@ -84,6 +91,11 @@ const corpus: BrainCorpusSummary = {
 
 beforeEach(() => {
   listInputs.length = 0;
+  state.pagePending = false;
+});
+
+afterEach(() => {
+  vi.useRealTimers();
 });
 
 it('debounces server-side search and pages bounded results', async () => {
@@ -223,4 +235,27 @@ it('marks the selected memory and renders its preview beside the list', () => {
     'page',
   );
   expect(screen.getByText('Memory unavailable')).toBeInTheDocument();
+});
+
+it('waits 300 ms before showing a preview skeleton', () => {
+  vi.useFakeTimers();
+  state.pagePending = true;
+
+  const { container } = render(
+    <BrainBrowseSection
+      corpus={corpus}
+      namespaceId={null}
+      selectedSlug="tasks/run-2"
+      onSelectNamespace={() => undefined}
+      onSelectMemory={() => undefined}
+    />,
+  );
+
+  expect(container.querySelector('[data-slot="skeleton"]')).toBeNull();
+
+  act(() => {
+    vi.advanceTimersByTime(300);
+  });
+
+  expect(container.querySelector('[data-slot="skeleton"]')).not.toBeNull();
 });
