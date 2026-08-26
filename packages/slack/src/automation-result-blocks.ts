@@ -1,4 +1,4 @@
-import type { SlackBlock } from '@roomote/types';
+import type { SlackBlock, SlackTableCell } from '@roomote/types';
 
 import { convertMarkdownToSlack } from './markdown-converter';
 
@@ -12,14 +12,6 @@ const MAX_SECTION_TEXT_LENGTH = 2900;
 const MAX_TABLE_ROWS = 100;
 const MAX_TABLE_COLUMNS = 20;
 const MAX_TABLE_CHARACTERS = 10_000;
-
-type SlackTableCell = {
-  type: 'rich_text';
-  elements: Array<{
-    type: 'rich_text_section';
-    elements: Array<Record<string, unknown>>;
-  }>;
-};
 
 function splitTableRow(line: string): string[] {
   const trimmed = line.trim().replace(/^\|/, '').replace(/\|$/, '');
@@ -165,12 +157,25 @@ function inlineRichTextElements(
 }
 
 function buildTableCell(value: string, header: boolean): SlackTableCell {
+  const elements = inlineRichTextElements(value, header ? { bold: true } : {});
+  if (elements.length === 0) {
+    return { type: 'raw_text', text: ' ' };
+  }
+  if (
+    !header &&
+    elements.length === 1 &&
+    elements[0]?.type === 'text' &&
+    !elements[0].style
+  ) {
+    return { type: 'raw_text', text: value };
+  }
+
   return {
     type: 'rich_text',
     elements: [
       {
         type: 'rich_text_section',
-        elements: inlineRichTextElements(value, header ? { bold: true } : {}),
+        elements,
       },
     ],
   };
