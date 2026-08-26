@@ -156,7 +156,7 @@ describe('BrainSettings', () => {
     expect(
       screen.getByText('openai/text-embedding-3-small'),
     ).toBeInTheDocument();
-    expect(screen.getByText('Manage in Models')).toBeInTheDocument();
+    expect(screen.queryByText('Manage in Models')).not.toBeInTheDocument();
 
     expect(screen.getByText('What the Brain knows')).toBeInTheDocument();
     expect(screen.getByText('30 pages')).toBeInTheDocument();
