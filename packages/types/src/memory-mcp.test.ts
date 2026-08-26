@@ -3,6 +3,7 @@ import {
   getMemoryMcpDisplayName,
   isMemoryMcpServer,
 } from './memory-mcp';
+import { BRAIN_MCP_INSTRUCTIONS } from './brain';
 
 describe('memory MCP task guidance', () => {
   it.each([
@@ -37,6 +38,24 @@ describe('memory MCP task guidance', () => {
     expect(instructions).toContain('If no memory-writing tool is available');
   });
 
+  it('appends the complete Brain contract when gbrain is primary', () => {
+    const instructions = createMemoryMcpInstructions('gbrain');
+
+    expect(instructions).toContain(
+      'first normal context or work tool call and remain visible in the session',
+    );
+    expect(instructions.endsWith(BRAIN_MCP_INSTRUCTIONS)).toBe(true);
+  });
+
+  it('keeps provider-neutral instructions for non-Brain memory servers', () => {
+    expect(createMemoryMcpInstructions('supermemory')).not.toContain(
+      'Treat Brain recall as a sequential preflight',
+    );
+    expect(createMemoryMcpInstructions('team-memory')).not.toContain(
+      'save_task_memory',
+    );
+  });
+
   it('keeps an additional memory store from competing for the first call', () => {
     const instructions = createMemoryMcpInstructions('team-memory', {
       primary: false,
@@ -47,6 +66,9 @@ describe('memory MCP task guidance', () => {
     );
     expect(instructions).not.toContain(
       'first normal context or work tool call',
+    );
+    expect(instructions).not.toContain(
+      'Treat Brain recall as a sequential preflight',
     );
     expect(instructions).toContain(
       'Do not duplicate the same learning across memory stores',

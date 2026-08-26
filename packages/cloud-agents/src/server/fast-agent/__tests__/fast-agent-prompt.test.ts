@@ -141,6 +141,8 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain('before any other context or work tool call');
     expect(prompt).toContain('remain visible in the session');
     expect(prompt).toContain('proactively save concise durable learnings');
+    expect(prompt).toContain('Treat Brain recall as a sequential preflight');
+    expect(prompt).toContain('save_task_memory');
   });
 
   it('drives actionable messages through evidence and execution', () => {

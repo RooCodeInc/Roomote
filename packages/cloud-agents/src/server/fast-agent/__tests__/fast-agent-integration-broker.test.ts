@@ -128,6 +128,9 @@ describe('fast-agent integration broker', () => {
         tools: [{ name: 'search', inputSchema: { type: 'object' } }],
       }),
     ]);
+    expect(integrations[0]?.instructions).toContain(
+      'Treat Brain recall as a sequential preflight',
+    );
     expect(mocks.listMcpTools).toHaveBeenCalledWith({
       url: 'https://api.example.com/api/mcp/gbrain',
       headers: { Authorization: 'Bearer control-plane-token' },
@@ -241,8 +244,14 @@ describe('fast-agent integration broker', () => {
     expect(integrations[0]?.instructions).toContain(
       'first normal context or work tool call',
     );
+    expect(integrations[0]?.instructions).toContain(
+      'Treat Brain recall as a sequential preflight',
+    );
     expect(integrations[1]?.instructions).toContain(
       'Another installed memory server owns the required initial recall',
+    );
+    expect(integrations[1]?.instructions).not.toContain(
+      'Treat Brain recall as a sequential preflight',
     );
   });
 

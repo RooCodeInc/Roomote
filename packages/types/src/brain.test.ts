@@ -1,9 +1,26 @@
 import {
+  BRAIN_MCP_INSTRUCTIONS,
+  BRAIN_MCP_READ_INSTRUCTIONS,
   BRAIN_NAMESPACES,
   brainNamespaceLabel,
   resolveBrainNamespaceId,
   resolveBrainSourceIdForCollector,
 } from './brain';
+
+describe('Brain MCP instructions', () => {
+  it('retains Brain-specific recall, tool, provenance, and write guidance', () => {
+    expect(BRAIN_MCP_INSTRUCTIONS).toContain(
+      'Treat Brain recall as a sequential preflight',
+    );
+    expect(BRAIN_MCP_INSTRUCTIONS).toContain(
+      'run one `query` about the area you are about to touch and wait for its result',
+    );
+    expect(BRAIN_MCP_READ_INSTRUCTIONS).toContain(
+      "never expose Brain's `source` field or other internal provenance metadata",
+    );
+    expect(BRAIN_MCP_INSTRUCTIONS).toContain('save_task_memory');
+  });
+});
 
 describe('resolveBrainNamespaceId', () => {
   it('buckets a page by the namespace its slug was written under', () => {

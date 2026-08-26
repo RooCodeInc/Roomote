@@ -63,6 +63,26 @@ describe('createIntegrationMcpInstructions', () => {
     expect(instructions).toContain(
       'Another installed memory server owns the required initial recall',
     );
+    expect(instructions).toContain(
+      'Treat Brain recall as a sequential preflight',
+    );
+    expect(instructions).toContain('save_task_memory');
+  });
+
+  it('does not inject Brain guidance when gbrain is a secondary memory server', () => {
+    const instructions = createIntegrationMcpInstructions([
+      {
+        type: 'remote',
+        name: 'supermemory',
+        url: 'https://example.com/supermemory',
+      },
+      { type: 'remote', name: 'gbrain', url: 'https://example.com/brain' },
+    ]);
+
+    expect(instructions).not.toContain(
+      'Treat Brain recall as a sequential preflight',
+    );
+    expect(instructions).not.toContain('save_task_memory');
   });
 });
 

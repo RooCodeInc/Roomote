@@ -2,7 +2,10 @@ import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 
 import { Hono } from 'hono';
-import type { RunTokenContext } from '@roomote/types';
+import {
+  BRAIN_MCP_READ_INSTRUCTIONS,
+  type RunTokenContext,
+} from '@roomote/types';
 
 import type { Variables } from '../../../types';
 
@@ -197,6 +200,12 @@ describe('createGbrainMcpProxy', () => {
 });
 
 describe('Brain agent allowlist', () => {
+  it('keeps the specialized read instructions aligned with exposed tools', () => {
+    for (const tool of GBRAIN_READ_TOOL_NAMES) {
+      expect(BRAIN_MCP_READ_INSTRUCTIONS).toContain(`\`${tool}\``);
+    }
+  });
+
   it('exposes no write or admin surface', () => {
     // gbrain publishes 100+ tools including writes, job control and schema
     // mutation. Reads flow through here; writes only ever go through the
