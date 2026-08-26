@@ -316,11 +316,15 @@ function ProviderCredentialsDialog({
       field.required &&
       (additionalEnvValues[field.envVarName]?.trim() ?? '').length === 0,
   );
+  // A free-trial fallback key is not an operator credential: editing a
+  // trial-only provider is exactly the save-your-own-key flow, so an empty
+  // form must stay unsubmittable (the server validator would reject it).
   const hasExistingPrimaryCredential = Boolean(
     mode === 'edit' &&
     selectedProvider &&
     (selectedProvider.savedApiKeySatisfied ||
-      selectedProvider.runtimeApiKeySatisfied),
+      (selectedProvider.runtimeApiKeySatisfied &&
+        !selectedProvider.trialKeySatisfied)),
   );
   const hasMissingPrimaryCredential =
     !hasExistingPrimaryCredential && apiKey.trim().length === 0;

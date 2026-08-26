@@ -160,6 +160,7 @@ import { InferenceProviderSection } from './InferenceProviderSection';
 function buildProviderSetup(
   overrides: {
     openrouterRuntimeKey?: boolean;
+    openrouterTrialKey?: boolean;
     openrouterSavedKey?: boolean;
     openaiSavedKey?: boolean;
     anthropicSavedKey?: boolean;
@@ -191,7 +192,10 @@ function buildProviderSetup(
           defaultRoomoteModel: 'openrouter/openai/gpt-5.4',
           authKind: 'api-key' as const,
           suggestedTaskModels: [],
-          runtimeApiKeySatisfied: overrides.openrouterRuntimeKey ?? false,
+          runtimeApiKeySatisfied:
+            (overrides.openrouterRuntimeKey ?? false) ||
+            (overrides.openrouterTrialKey ?? false),
+          trialKeySatisfied: overrides.openrouterTrialKey ?? false,
           savedApiKeySatisfied: overrides.openrouterSavedKey ?? false,
           additionalEnvValues: {} satisfies Record<string, string>,
         },
@@ -893,6 +897,41 @@ describe('InferenceProviderSection', () => {
     });
 
     expect(mutateAsyncMock).toHaveBeenCalledWith({ provider: 'anthropic' });
+  });
+
+  it('keeps a trial-satisfied key editable and requires a real key to save', async () => {
+    providerSetupData.current = buildProviderSetup({
+      openrouterTrialKey: true,
+    });
+    mutateAsyncMock.mockResolvedValue({});
+
+    renderInferenceProviderSection();
+
+    // Trial keys are not presented as env-locked: the edit affordance stays.
+    const editButton = screen.getByRole('button', {
+      name: 'Edit OpenRouter API key',
+    });
+    fireEvent.click(editButton);
+
+    // The empty form must not be submittable: the trial key is not an
+    // operator credential, so saving requires typing a real key.
+    expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
+
+    await act(async () => {
+      fireEvent.change(screen.getByLabelText('New API key for OpenRouter'), {
+        target: { value: 'sk-or-own-key' },
+      });
+    });
+    expect(screen.getByRole('button', { name: 'Save' })).toBeEnabled();
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    });
+
+    expect(mutateAsyncMock).toHaveBeenCalledWith({
+      provider: 'openrouter',
+      apiKey: 'sk-or-own-key',
+    });
   });
 
   it('locks a runtime env-managed key behind a masked field and lock tooltip', () => {
