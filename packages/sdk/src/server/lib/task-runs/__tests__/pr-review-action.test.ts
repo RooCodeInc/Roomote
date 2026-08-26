@@ -3,8 +3,12 @@ const {
   mockGet,
   mockSrem,
   mockFindManySlackInstallations,
+  mockFindFirstTaskPullRequest,
   mockUpdateReturning,
   mockUpdate,
+  mockUpsertPreference,
+  mockFindPreference,
+  mockRetireCanonical,
 } = vi.hoisted(() => {
   const mockUpdateReturning = vi.fn();
   const mockUpdateWhere = vi.fn(() => ({ returning: mockUpdateReturning }));
@@ -15,8 +19,12 @@ const {
     mockGet: vi.fn(),
     mockSrem: vi.fn(),
     mockFindManySlackInstallations: vi.fn(),
+    mockFindFirstTaskPullRequest: vi.fn(),
     mockUpdateReturning,
     mockUpdate: vi.fn(() => ({ set: mockUpdateSet })),
+    mockUpsertPreference: vi.fn(),
+    mockFindPreference: vi.fn(),
+    mockRetireCanonical: vi.fn(),
   };
 });
 
@@ -32,12 +40,24 @@ vi.mock('@roomote/db/server', async () => {
 
   return {
     ...actual,
+    attachCanonicalPrReviewActionMessage: vi.fn().mockResolvedValue(false),
+    claimCanonicalPrReviewAction: vi.fn().mockResolvedValue(null),
+    retireCanonicalPrReviewActionsForDestination: (...args: unknown[]) =>
+      mockRetireCanonical(...args),
+    upsertPrReviewAutoPreference: (...args: unknown[]) =>
+      mockUpsertPreference(...args),
+    findPrReviewAutoPreference: (...args: unknown[]) =>
+      mockFindPreference(...args),
     db: {
       update: mockUpdate,
       query: {
         slackInstallations: {
           findMany: (...args: unknown[]) =>
             mockFindManySlackInstallations(...args),
+        },
+        taskPullRequests: {
+          findFirst: (...args: unknown[]) =>
+            mockFindFirstTaskPullRequest(...args),
         },
       },
     },
@@ -49,6 +69,7 @@ import {
   claimPendingPrReviewAction,
   claimPendingPrReviewActionsForThread,
   enableAutoHandlePrReviewFeedback,
+  findAutoHandlePrReviewFeedbackPreference,
 } from '../pr-review-action';
 
 describe('PR review action state', () => {
@@ -57,7 +78,11 @@ describe('PR review action state', () => {
     mockGet.mockResolvedValue(null);
     mockSrem.mockResolvedValue(1);
     mockFindManySlackInstallations.mockResolvedValue([{ teamId: 'T1' }]);
+    mockFindFirstTaskPullRequest.mockResolvedValue(null);
     mockUpdateReturning.mockResolvedValue([{ id: 'link-1' }]);
+    mockUpsertPreference.mockResolvedValue(undefined);
+    mockFindPreference.mockResolvedValue(null);
+    mockRetireCanonical.mockResolvedValue([]);
   });
 
   it('does not consume an offer from another Slack workspace', async () => {
@@ -188,7 +213,9 @@ describe('PR review action state', () => {
   });
 
   it('fails when auto-handling cannot be persisted to the linked PR', async () => {
-    mockUpdateReturning.mockResolvedValue([]);
+    mockUpsertPreference.mockRejectedValue(
+      new Error('linked pull request was not found'),
+    );
 
     await expect(
       enableAutoHandlePrReviewFeedback({
@@ -198,5 +225,39 @@ describe('PR review action state', () => {
         userId: 'user-1',
       }),
     ).rejects.toThrow('linked pull request was not found');
+  });
+
+  it('resolves auto-handling across task links for the same provider PR', async () => {
+    mockFindFirstTaskPullRequest.mockResolvedValue({
+      taskId: 'parent-task',
+      autoHandleFeedbackByUserId: 'user-1',
+    });
+    mockFindPreference.mockResolvedValue({
+      taskId: 'parent-task',
+      userId: 'user-1',
+      destinationKey: null,
+    });
+
+    await enableAutoHandlePrReviewFeedback({
+      taskId: 'parent-task',
+      repository: 'owner/repo',
+      prNumber: 42,
+      userId: 'user-1',
+    });
+
+    await expect(
+      findAutoHandlePrReviewFeedbackPreference({
+        sourceControlProvider: 'github',
+        repository: 'owner/repo',
+        prNumber: 42,
+      }),
+    ).resolves.toEqual({
+      taskId: 'parent-task',
+      userId: 'user-1',
+      destinationKey: null,
+    });
+    expect(mockUpsertPreference.mock.invocationCallOrder[0]).toBeLessThan(
+      mockFindPreference.mock.invocationCallOrder[0]!,
+    );
   });
 });

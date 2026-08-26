@@ -386,6 +386,20 @@
       "when": 1787681808817,
       "tag": "0054_chilly_legion",
       "breakpoints": true
+    },
+    {
+      "idx": 55,
+      "version": "7",
+      "when": 1787705365940,
+      "tag": "0055_wealthy_komodo",
+      "breakpoints": true
+    },
+    {
+      "idx": 56,
+      "version": "7",
+      "when": 1787708162500,
+      "tag": "0056_slow_taskmaster",
+      "breakpoints": true
     }
   ]
 }

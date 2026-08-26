@@ -43,6 +43,7 @@ function eventInput(repository: string, prNumber: number, eventKey: string) {
     batchId: null,
     dueAt: new Date(),
     observedAt: new Date(),
+    legacyOwnership: true,
   };
 }
 
@@ -391,6 +392,7 @@ describe('durable PR review events', () => {
     await associate(task.id, repository, 1659);
     await persistPrReviewEvent({
       ...eventInput(repository, 1659, `summary-${task.id}`),
+      legacyOwnership: false,
       event: {
         kind: 'review_summary',
         authorLogin: 'roomote[bot]',
@@ -406,6 +408,7 @@ describe('durable PR review events', () => {
     });
     await persistPrReviewEvent({
       ...eventInput(repository, 1659, `check-run-${task.id}`),
+      legacyOwnership: false,
       event: {
         kind: 'ci_failure',
         authorLogin: 'github-actions',
@@ -431,7 +434,7 @@ describe('durable PR review events', () => {
     expect(claims[0]).toMatchObject({
       batchKind: 'roomote',
       batchId: 'review-cycle',
-      deliveryIds: [expect.any(String), expect.any(String)],
+      deliveryIds: [expect.any(String)],
       events: expect.arrayContaining([
         expect.objectContaining({ kind: 'review_summary' }),
         expect.objectContaining({ kind: 'ci_failure', checkName: 'Test' }),
@@ -445,6 +448,7 @@ describe('durable PR review events', () => {
     await associate(task.id, repository, 1660);
     await persistPrReviewEvent({
       ...eventInput(repository, 1660, `summary-${task.id}`),
+      legacyOwnership: false,
       event: {
         kind: 'review_summary',
         roomoteAuthored: true,
@@ -458,6 +462,7 @@ describe('durable PR review events', () => {
     });
     await persistPrReviewEvent({
       ...eventInput(repository, 1660, `check-run-${task.id}`),
+      legacyOwnership: false,
       event: {
         kind: 'ci_failure',
         checkName: 'Test',
@@ -467,6 +472,7 @@ describe('durable PR review events', () => {
     });
     await persistPrReviewEvent({
       ...eventInput(repository, 1660, `human-comment-${task.id}`),
+      legacyOwnership: false,
       event: {
         kind: 'review_comment',
         authorLogin: 'alice',
@@ -501,6 +507,7 @@ describe('durable PR review events', () => {
     for (const batchId of ['review-cycle-a', 'review-cycle-b']) {
       await persistPrReviewEvent({
         ...eventInput(repository, 1661, `${batchId}-${task.id}`),
+        legacyOwnership: false,
         event: {
           kind: 'review_summary',
           roomoteAuthored: true,
@@ -515,6 +522,7 @@ describe('durable PR review events', () => {
     }
     await persistPrReviewEvent({
       ...eventInput(repository, 1661, `check-run-${task.id}`),
+      legacyOwnership: false,
       event: {
         kind: 'ci_failure',
         checkName: 'Test',
@@ -532,10 +540,14 @@ describe('durable PR review events', () => {
       claims
         .map(({ batchId }) => batchId)
         .sort((a, b) => String(a).localeCompare(String(b))),
-    ).toEqual([null, 'review-cycle-a', 'review-cycle-b']);
-    expect(claims.find(({ batchId }) => batchId === null)?.events).toEqual([
-      expect.objectContaining({ kind: 'ci_failure' }),
+    ).toEqual([
+      expect.stringMatching(/^ci:/),
+      'review-cycle-a',
+      'review-cycle-b',
     ]);
+    expect(
+      claims.find(({ batchId }) => batchId?.startsWith('ci:'))?.events,
+    ).toEqual([expect.objectContaining({ kind: 'ci_failure' })]);
   });
 
   it('defers provider rate limits without consuming task deferral budget', async () => {
