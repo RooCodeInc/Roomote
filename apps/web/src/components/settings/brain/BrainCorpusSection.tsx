@@ -1,13 +1,9 @@
 'use client';
 
-import { useState } from 'react';
-
 import { Section } from '@/components/settings';
 import {
-  Badge,
   BasicTooltip,
-  Button,
-  Database,
+  ChartColumn,
   EmptyState,
   TriangleAlert,
 } from '@/components/system';
@@ -18,7 +14,6 @@ import {
 } from '@/lib/formatters';
 
 import type { BrainCorpusSummary } from '@/trpc/commands/brain';
-import { BrainBrowseDialog } from './BrainBrowseDialog';
 import { buildNamespaceSegments } from './brain-presentation';
 
 function formatActivityDate(date: string): string {
@@ -116,27 +111,23 @@ function CompositionBar({
   );
 }
 
-export function BrainCorpusSection({ corpus }: { corpus: BrainCorpusSummary }) {
+export function BrainCorpusSection({
+  corpus,
+  onSelectMemory,
+}: {
+  corpus: BrainCorpusSummary;
+  onSelectMemory: (slug: string) => void;
+}) {
   const segments = buildNamespaceSegments(corpus.namespaces);
-  const [browseOpen, setBrowseOpen] = useState(false);
 
   return (
     <Section
-      icon={Database}
-      title="What the Brain knows"
+      icon={ChartColumn}
+      title="Memory Stats"
       action={
         corpus.reachable && corpus.listedPages > 0 ? (
-          <span className="flex items-center gap-3">
-            <span className="text-sm font-normal text-muted-foreground">
-              {formatNumber(corpus.listedPages)} pages
-            </span>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setBrowseOpen(true)}
-            >
-              Browse memory
-            </Button>
+          <span className="text-sm font-normal text-muted-foreground">
+            {formatNumber(corpus.listedPages)} pages
           </span>
         ) : null
       }
@@ -145,7 +136,7 @@ export function BrainCorpusSection({ corpus }: { corpus: BrainCorpusSummary }) {
         <EmptyState
           icon={<TriangleAlert className="size-6 text-warning" />}
           title="Corpus unavailable"
-          description="The Brain did not answer, so its contents cannot be shown. Collectors keep their position while it is down."
+          description="Memory did not answer, so its contents cannot be shown. Collectors keep their position while it is down."
         />
       ) : segments.length === 0 ? (
         <EmptyState
@@ -176,7 +167,7 @@ export function BrainCorpusSection({ corpus }: { corpus: BrainCorpusSummary }) {
             <div className="space-y-2 border-t pt-4">
               <div className="flex items-baseline justify-between">
                 <p className="text-sm font-medium">
-                  Pages written, last 30 days
+                  Memory activity (past 30 days)
                 </p>
                 <span className="text-xs text-muted-foreground">
                   {formatNumber(
@@ -194,22 +185,24 @@ export function BrainCorpusSection({ corpus }: { corpus: BrainCorpusSummary }) {
 
           {corpus.recentPages.length > 0 ? (
             <div className="space-y-2 border-t pt-4">
-              <p className="text-sm font-medium">Recently learned</p>
+              <p className="text-sm font-medium">New memories</p>
               <ul className="space-y-2">
                 {corpus.recentPages.map((page) => (
-                  <li
-                    key={page.slug}
-                    className="flex items-center gap-3 text-sm"
-                  >
-                    <span className="truncate">{page.title}</span>
-                    <Badge variant="outline">{page.namespaceLabel}</Badge>
-                    {page.updatedAt ? (
-                      <span className="ml-auto shrink-0 text-xs text-muted-foreground">
-                        {formatDistanceToNowCompact(page.updatedAt, {
-                          addSuffix: true,
-                        })}
-                      </span>
-                    ) : null}
+                  <li key={page.slug}>
+                    <button
+                      type="button"
+                      className="flex w-full cursor-pointer items-center gap-3 rounded-lg px-2 py-1.5 text-left text-sm transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      onClick={() => onSelectMemory(page.slug)}
+                    >
+                      <span className="truncate">{page.title}</span>
+                      {page.updatedAt ? (
+                        <span className="ml-auto shrink-0 text-xs text-muted-foreground">
+                          {formatDistanceToNowCompact(page.updatedAt, {
+                            addSuffix: true,
+                          })}
+                        </span>
+                      ) : null}
+                    </button>
                   </li>
                 ))}
               </ul>
@@ -217,12 +210,6 @@ export function BrainCorpusSection({ corpus }: { corpus: BrainCorpusSummary }) {
           ) : null}
         </div>
       )}
-
-      <BrainBrowseDialog
-        open={browseOpen}
-        onOpenChange={setBrowseOpen}
-        corpus={corpus}
-      />
     </Section>
   );
 }

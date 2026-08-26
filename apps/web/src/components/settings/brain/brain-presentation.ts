@@ -128,7 +128,7 @@ export function describeSourceStatus(
       return {
         label: 'Not connected',
         variant: 'outline',
-        hint: 'Connect this integration to let the Brain read it.',
+        hint: 'Connect this integration to let Memory read it.',
       };
   }
 }
@@ -140,58 +140,3 @@ export const BRAIN_INFERENCE_PROVIDER_LABELS: Record<
   openrouter: 'OpenRouter',
   openai: 'OpenAI',
 };
-
-type BrainMemorySegment = {
-  id: 'done' | 'queued' | 'skipped' | 'failed';
-  label: string;
-  count: number;
-  color: string;
-  percent: number;
-};
-
-/**
- * Collapse the outbox's five row states into the four an admin can act on.
- * `processing` is folded into the queue on purpose: it is a claim held by the
- * drainer for at most one tick, and surfacing it separately makes a healthy
- * pipeline look like it has a fifth failure mode.
- */
-export function buildMemorySegments(byStatus: {
-  pending: number;
-  processing: number;
-  done: number;
-  skipped: number;
-  failed: number;
-}): BrainMemorySegment[] {
-  const segments = [
-    {
-      id: 'done' as const,
-      label: 'Recorded',
-      count: byStatus.done,
-      color: 'var(--color-chart-2)',
-    },
-    {
-      id: 'queued' as const,
-      label: 'Queued',
-      count: byStatus.pending + byStatus.processing,
-      color: 'var(--color-chart-7)',
-    },
-    {
-      id: 'skipped' as const,
-      label: 'Skipped',
-      count: byStatus.skipped,
-      color: 'var(--color-muted-foreground)',
-    },
-    {
-      id: 'failed' as const,
-      label: 'Failed',
-      count: byStatus.failed,
-      color: 'var(--color-chart-6)',
-    },
-  ];
-  const total = segments.reduce((sum, segment) => sum + segment.count, 0);
-
-  return segments.map((segment) => ({
-    ...segment,
-    percent: total === 0 ? 0 : (segment.count / total) * 100,
-  }));
-}

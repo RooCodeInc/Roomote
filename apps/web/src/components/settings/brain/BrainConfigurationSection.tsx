@@ -61,7 +61,7 @@ export function BrainConfigurationSection({
 
         <ConfigRow
           label="Embedding model"
-          helper="Fixed when this Brain was created. It sizes the vector store, and changing it requires a migration that re-embeds every page."
+          helper="Fixed when Memory was created. It sizes the vector store, and changing it requires a migration that re-embeds every page."
         >
           <Lock className="size-3.5 text-muted-foreground" />
           <code className="rounded bg-foreground/10 px-1.5 py-0.5 font-mono text-xs">
@@ -76,12 +76,12 @@ export function BrainConfigurationSection({
 
         <ConfigRow
           label="Inference key"
-          helper="The Brain holds no provider credential. Every call routes through Roomote, so rotating the key applies on the next call with no restart."
+          helper="Memory holds no provider credential. Every call routes through Roomote, so rotating the key applies on the next call with no restart."
         >
           <span>
             {providerLabel
               ? settings.keySource === 'brain'
-                ? `Brain-specific ${providerLabel} key`
+                ? `Memory-specific ${providerLabel} key`
                 : `The deployment's ${providerLabel} key`
               : 'No provider key resolves'}
           </span>

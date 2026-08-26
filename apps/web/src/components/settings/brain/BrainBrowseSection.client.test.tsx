@@ -53,7 +53,7 @@ vi.mock('@/trpc/client', () => ({
   }),
 }));
 
-const { BrainBrowseDialog } = await import('./BrainBrowseDialog');
+const { BrainBrowseSection } = await import('./BrainBrowseSection');
 
 const corpus: BrainCorpusSummary = {
   reachable: true,
@@ -70,9 +70,14 @@ beforeEach(() => {
 
 it('debounces server-side search and pages bounded results', async () => {
   render(
-    <BrainBrowseDialog open onOpenChange={() => undefined} corpus={corpus} />,
+    <BrainBrowseSection
+      corpus={corpus}
+      selectedSlug={null}
+      onSelectMemory={() => undefined}
+    />,
   );
 
+  expect(screen.getByText('Browser memories')).toBeInTheDocument();
   expect(screen.getByText('1-2 of 250')).toBeInTheDocument();
   expect(listInputs.at(-1)).toMatchObject({ offset: 0, limit: 100 });
 
@@ -86,4 +91,40 @@ it('debounces server-side search and pages bounded results', async () => {
 
   fireEvent.click(screen.getByRole('button', { name: 'Next' }));
   expect(listInputs.at(-1)).toMatchObject({ search: 'drainer', offset: 100 });
+});
+
+it('uses the controlled memory selection for embedded browser rows', () => {
+  const onSelectMemory = vi.fn();
+
+  render(
+    <BrainBrowseSection
+      corpus={corpus}
+      selectedSlug={null}
+      onSelectMemory={onSelectMemory}
+    />,
+  );
+
+  fireEvent.click(screen.getByRole('button', { name: /Second run/ }));
+  expect(onSelectMemory).toHaveBeenCalledWith('tasks/run-2');
+});
+
+it('marks the selected memory and focuses the mobile preview return control', () => {
+  vi.stubGlobal(
+    'matchMedia',
+    vi.fn(() => ({ matches: true }) as MediaQueryList),
+  );
+
+  render(
+    <BrainBrowseSection
+      corpus={corpus}
+      selectedSlug="tasks/run-2"
+      onSelectMemory={() => undefined}
+    />,
+  );
+
+  expect(screen.getByRole('button', { name: /Second run/ })).toHaveAttribute(
+    'aria-current',
+    'page',
+  );
+  expect(screen.getByRole('button', { name: 'Back to pages' })).toHaveFocus();
 });

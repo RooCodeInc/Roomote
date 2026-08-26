@@ -1,21 +1,21 @@
 ---
-title: Brain
-icon: brain
+title: Memory
+icon: book-open-text
 description: Give Roomote shared memory, so agents start each task knowing what your team already decided, shipped, and discussed.
 ---
 
-The Brain is Roomote's shared memory. Without it, every Roomote task starts
+Memory is Roomote's shared memory. Without it, every Roomote task starts
 from zero: it reads the repository, works out the conventions again, and has no
 idea that the same question was answered three weeks ago. With it, agents can
 recall what your deployment already knows, with citations back to the source.
 
-The Brain is deployment-wide by design. There is no per-user corpus and no
+Memory is deployment-wide by design. There is no per-user corpus and no
 per-task corpus: one deployment, one memory, shared by everyone who can run a
 Roomote task.
 
 ## What goes into it
 
-Roomote fills the Brain from what it can already see:
+Roomote fills Memory from what it can already see:
 
 - **completed Roomote tasks**, including a short memory the agent writes about
   its own work: what it decided, why, and what is still open
@@ -50,7 +50,7 @@ details require additional provider requests, so Roomote enriches a bounded set
 of pull requests during each hourly analytics pass, prioritizing merged work.
 Older pages gain this context progressively as the sync reaches them.
 
-Turning the Brain on also backfills history rather than starting from the
+Turning Memory on also backfills history rather than starting from the
 moment you enabled it. Completed tasks are enqueued immediately, and each
 source drains its own deeper history in bounded background passes that resume
 after an interruption.
@@ -59,7 +59,7 @@ Private Slack channels and DMs are never read. Adding the Roomote bot to a
 public channel is what designates that channel as a source, so the corpus stays
 inside what your team has already made visible company-wide. Slack directory
 cards contain names, handles, and job titles, but never copy profile email,
-status, timezone, or avatar fields into the Brain.
+status, timezone, or avatar fields into Memory.
 
 Notion only returns pages explicitly shared with its integration. Workspace
 guests and restricted users may omit email addresses, and some integration
@@ -72,27 +72,27 @@ the next refresh.
 
 ## Turning it on
 
-The Brain runs as its own service alongside Roomote, reachable only on your
+Memory runs as its own service alongside Roomote, reachable only on your
 deployment's internal network. On the hosted templates (Railway, Render,
 Coolify) that service is already there after a deploy, sitting idle.
 
-Setting a Brain provider key, `R_BRAIN_OPENROUTER_API_KEY` or
+Setting a Memory provider key, `R_BRAIN_OPENROUTER_API_KEY` or
 `R_BRAIN_OPENAI_API_KEY`, is what turns it on. Set either one as an
 environment variable or a Settings environment value; the value can be the
-same key you already use for tasks, or a separate one to bill the Brain
+same key you already use for tasks, or a separate one to bill Memory
 independently. The explicit `R_BRAIN_*` name is the opt-in: the general
-provider keys your deployment uses for tasks never activate the Brain on
-their own, so configuring task models leaves the Brain off.
+provider keys your deployment uses for tasks never activate Memory on
+their own, so configuring task models leaves Memory off.
 
-The Brain service holds no provider key of its own. It asks Roomote for
-embeddings and synthesis, and Roomote forwards them under the Brain key.
-Changing that key later takes effect on the Brain's next request, with no
+The Memory service holds no provider key of its own. It asks Roomote for
+embeddings and synthesis, and Roomote forwards them under the Memory key.
+Changing that key later takes effect on Memory's next request, with no
 redeploy.
 
-OpenRouter and OpenAI both support the Brain's embedding and synthesis calls,
+OpenRouter and OpenAI both support Memory's embedding and synthesis calls,
 but search reranking requires OpenRouter.
 
-Without a Brain key, the Brain stays inert. Agents are not told it exists,
+Without a Memory key, Memory stays inert. Agents are not told it exists,
 and nothing is ingested.
 
 Roomote schedules one maintenance pass each night. It retrieves a bounded,
@@ -110,7 +110,7 @@ Beginning Tuesday, the same pass also updates
 decisions, unresolved blockers, commitments, and recurring or superseded
 information across the week's available daily digests. Roomote reads those
 digest pages by their exact slugs and supplies their content as the complete
-evidence set, so raw or historical Brain pages cannot enter the weekly pass.
+evidence set, so raw or historical Memory pages cannot enter the weekly pass.
 
 The daily cutoff trails active ingestion and overlaps the previous pass so
 collector writes around the nightly boundary are reconsidered. gbrain's
@@ -121,57 +121,45 @@ that upstream feature requires an operator review workflow before proposals
 become canonical memory.
 
 <Note>
-  Self-hosted Compose deployments start the Brain from the `brain`
-  profile, so set a Brain key in your environment file to bring the container
+  Self-hosted Compose deployments start Memory from the `brain`
+  profile, so set a Memory key in your environment file to bring the container
   up. Everything after that is the same.
 </Note>
 
 ## Seeing what it knows
 
-**Settings → Brain** is the deployment-wide view of the memory, for admins. It
-answers three questions in order.
+**Settings → Memory** is the deployment-wide view of the memory, for admins.
 
-**Is it working?** Summary tiles carry the corpus size and the task memories
-recorded; the status section reports whether recall is semantic or keyword-only
-and which provider is serving its embeddings and synthesis. A Brain that is
-running but has no provider key is called out as needing attention rather than
-shown as healthy: without one it can only match keywords, so recall would look
-real while missing everything semantic. A configuration section shows the
-models the Brain runs: the synthesis model (changeable through `R_BRAIN_MODEL`,
-applied immediately) and the embedding model, which is fixed when the Brain is
-created because it sizes the vector store.
+**Memory Stats** breaks the corpus down by what each page came from, such as task
+memories, pull requests, Slack, meetings, and people, followed by a chart of the
+pages written over the last 30 days and the memories written most recently.
+**Browser memories** embeds the corpus page by page, searchable and filterable by
+source. Selecting a new memory opens it in the browser and updates the page URL
+without adding browser history.
 
-**What has it learned?** A composition bar breaks the corpus down by what
-each page came from, such as task memories, pull requests, Slack, meetings,
-and people, followed by a chart of the pages written over the last 30 days
-and the pages written most recently. **Browse memory** opens the corpus page
-by page, searchable and filterable by source. Large corpora load in pages, so
-admins can search and inspect older memory as well as the newest pages.
+**Status** reports whether recall is semantic or keyword-only and which provider
+is serving its embeddings and synthesis. Memory that is running but has no
+provider key is called out as needing attention rather than shown as healthy:
+without one it can only match keywords, so recall would look real while missing
+everything semantic.
 
-**Where does it learn from?** Connected sources are listed with their current
-collection state, when they were last read, and how far their one-time history
-sweep has got. Sources without a connected upstream integration are omitted.
+**Sources** shows connected sources with their current collection state, when
+they were last read, and how far their one-time history sweep has got. Sources
+without a connected upstream integration are omitted.
 
-The page ends with the task-memory queue: how many completed tasks have been
-recorded, how many are waiting, and how many failed. Its actions are safe repair
-tools for each queue state.
-**Ingest task history** enqueues memories that predate the Brain's one-time
-backfill. If a task completed after that checkpoint without being queued, the
-page reports it separately as a recording gap and offers to queue the missing
-memory. **Retry failed** hands memories that exhausted their attempts back to
-the queue with a fresh budget, which is the fix after an outage. All three
-actions are safe to run twice: memories are filed under a slug derived from the
-run, so a repeat rewrites the same page rather than adding another.
+**Configuration** appears last and shows the synthesis model (changeable through
+`R_BRAIN_MODEL`, applied immediately) and the embedding model, which is fixed
+when Memory is created because it sizes the vector store.
 
 ## How agents use it
 
-Agents get the Brain as an MCP server with read-only tools. They can search it,
+Agents get Memory as an MCP server with read-only tools. They can search it,
 recall relevant pages, browse what exists, and ask for a synthesized answer
 with sources. They cannot write to it directly.
 
-For a substantive topic, agents query the Brain before consulting overlapping
+For a substantive topic, agents query Memory before consulting overlapping
 Slack, GitHub, task-history, meeting, or pull-request sources. They check those
-live sources when Brain coverage is insufficient, freshness could change the
+live sources when Memory coverage is insufficient, freshness could change the
 answer, or you explicitly ask for live verification.
 
 Writes go through Roomote instead. When an agent finishes substantial work it
@@ -185,7 +173,7 @@ in staging is distinguishable from one written against production.
 
 ## Choosing models
 
-Three settings pick the Brain's models:
+Three settings pick Memory's models:
 
 | Variable                      | What it does      | Written as                        | Changeable            |
 | ----------------------------- | ----------------- | --------------------------------- | --------------------- |
@@ -193,7 +181,7 @@ Three settings pick the Brain's models:
 | `R_BRAIN_EMBEDDING_MODEL`     | Semantic recall   | a plain model id                  | before the first boot |
 | `R_BRAIN_RERANKER_MODEL`      | Search precision  | `openrouter:<provider>/<model-id>` | after a restart       |
 
-Leave the first two unset and the Brain uses OpenAI's `gpt-5.6-luna` and
+Leave the first two unset and Memory uses OpenAI's `gpt-5.6-luna` and
 `text-embedding-3-small` through whichever provider you configured.
 
 The reranker defaults to OpenRouter's `voyageai/rerank-2.5-lite`. Set
@@ -209,54 +197,54 @@ it takes effect on the next request with nothing to restart.
 
 <Warning>
   The embedding model works differently, and the difference matters. Its
-  output width sizes the Brain's vector storage when the Brain is first
+  output width sizes Memory's vector storage when Memory is first
   created, and that cannot be resized in place afterwards. So it is given to
-  the Brain at creation rather than applied per request, written as a plain
+  Memory at creation rather than applied per request, written as a plain
   model id (`text-embedding-3-large`) that Roomote translates for whichever
   provider is serving. Set it together with `R_BRAIN_EMBEDDING_DIMENSIONS`
   (1536 for `text-embedding-3-small`, 3072 for `text-embedding-3-large`)
-  before the Brain's first boot, or leave both alone.
+  before Memory's first boot, or leave both alone.
 
-  Changing it later is not silently applied: the Brain keeps its original
+  Changing it later is not silently applied: Memory keeps its original
   model and width, and reports the mismatch in its logs on every start.
-  Moving an existing Brain to a different embedding model means re-embedding
+  Moving existing Memory to a different embedding model means re-embedding
   the whole corpus with `gbrain migrate embeddings`.
 </Warning>
 
-## If you turned the Brain on later
+## If you turned Memory on later
 
-A Brain that first boots without a provider key is created with semantic
+Memory that first boots without a provider key is created with semantic
 recall switched off, because the embedding model sizes its vector storage at
-creation time. Adding a key later is still fine: the Brain notices on its next
+creation time. Adding a key later is still fine: Memory notices on its next
 start, enables semantic recall, and embeds whatever it already holds. It logs
 `semantic recall enabled` when it does.
 
-That repair runs once and is safe, since a Brain in this state has no
+That repair runs once and is safe, since Memory in this state has no
 embeddings to lose and its pages are preserved. If it cannot complete, the
 service logs the commands to run by hand and keeps serving in the meantime,
 matching on keywords alone.
 
 ## Operating it
 
-- **Back up the Brain volume.** The Railway template schedules daily and
+- **Back up the Memory volume.** The Railway template schedules daily and
   weekly backups for it. On other platforms, include `/data/brain` in the
   deployment's normal volume backups. That directory is the Markdown corpus,
   including pages produced by nightly synthesis. Postgres holds the searchable
   index, extracted facts, and durable maintenance jobs; keeping it in the
   normal database backup makes restores faster, but it is not the only copy of
   the source pages.
-- **Losing the Brain is recoverable but not free.** If the volume or isolated
+- **Losing Memory is recoverable but not free.** If the volume or isolated
   `gbrain` database is recreated, Roomote re-registers its clients, resets its
   ingestion checkpoints, and backfills task history and integration sources.
   The deployment starts cold until that finishes, and regenerated synthesis
   may not be byte-for-byte identical.
-- **The filesystem cutover rebuilds older Brains once.** The first start of a
-  filesystem-backed image replaces a Postgres-only Brain instead of trying to
-  merge the old index into an empty checkout. Roomote then repopulates it from
-  its connected sources.
-- **The Brain has no public route.** It is never exposed to the internet, and
-  task sandboxes reach it only through Roomote's API with their run token,
+- **The filesystem cutover rebuilds older memory once.** The first start of a
+  filesystem-backed image replaces a Postgres-only Memory service instead of
+  trying to merge the old index into an empty checkout. Roomote then repopulates
+  it from its connected sources.
+- **Memory has no public service route.** It is never exposed to the internet,
+  and task sandboxes reach it only through Roomote's API with their run token,
   which grants read access only.
-- **To run with no memory at all**, leave both provider keys unset. Deployments that want
-  to reclaim the resources entirely can delete the Brain service from their
-  compose file or template.
+- **To run with no memory at all**, leave both provider keys unset. Deployments
+  that want to reclaim the resources entirely can delete the Memory service
+  from their compose file or template.

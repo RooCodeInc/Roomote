@@ -1,5 +1,7 @@
-import { BrainSettingsPage } from '@/components/settings/pages/BrainSettingsPage';
+import { redirect } from 'next/navigation';
+
+import { SETTINGS_PATHS } from '@/lib/settings';
 
 export default function Page() {
-  return <BrainSettingsPage />;
+  redirect(SETTINGS_PATHS.memory);
 }

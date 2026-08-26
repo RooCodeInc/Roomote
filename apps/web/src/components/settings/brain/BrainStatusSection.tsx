@@ -39,7 +39,7 @@ export function BrainStatusSection({ settings }: { settings: BrainSettings }) {
     >
       <p className="text-sm text-muted-foreground">
         {settings.statusDetail ??
-          'Agents read the Brain before they start work, so what one task learns the next one already knows.'}
+          'Agents read Memory before they start work, so what one task learns the next one already knows.'}
       </p>
 
       {settings.status !== 'not_configured' ? (

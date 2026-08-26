@@ -479,7 +479,7 @@ export async function getBrainSettingsCommand(
       return {
         status: 'not_configured',
         statusDetail:
-          'This deployment has no Brain. Set a Brain provider key to give agents shared memory.',
+          'Memory is not configured for this deployment. Set a Memory provider key to give agents shared memory.',
       };
     }
 
@@ -487,7 +487,7 @@ export async function getBrainSettingsCommand(
       return {
         status: 'incomplete',
         statusDetail:
-          'A Brain provider key is set, but no Brain service URL is configured, so there is nowhere to store memories.',
+          'A Memory provider key is set, but no Memory service URL is configured, so there is nowhere to store memories.',
       };
     }
 
@@ -495,7 +495,7 @@ export async function getBrainSettingsCommand(
       return {
         status: 'incomplete',
         statusDetail:
-          'The Brain has no inference provider, so it can only match keywords. Configure a Brain provider key to enable semantic recall.',
+          'Memory has no inference provider, so it can only match keywords. Configure a Memory provider key to enable semantic recall.',
       };
     }
 
@@ -507,14 +507,14 @@ export async function getBrainSettingsCommand(
       return {
         status: 'incomplete',
         statusDetail:
-          'Roomote has not been able to provision its Brain credentials yet. This resolves on its own once the Brain has started.',
+          'Roomote has not been able to provision its Memory credentials yet. This resolves on its own once Memory has started.',
       };
     }
 
     return {
       status: 'unreachable',
       statusDetail:
-        'The Brain did not answer. Ingestion holds its position while it is down, so nothing is lost.',
+        'Memory did not answer. Ingestion holds its position while it is down, so nothing is lost.',
     };
   })();
 
