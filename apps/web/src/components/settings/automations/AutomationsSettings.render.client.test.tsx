@@ -1265,7 +1265,9 @@ describe('AutomationsSettings', () => {
     );
     expect(screen.getByText('Delegated task model')).toBeInTheDocument();
     expect(
-      screen.getByText(/available in the upcoming Fast runs view/),
+      screen.getByText(
+        'This run is stored as a Fast conversation without posting to chat.',
+      ),
     ).toBeInTheDocument();
     fireEvent.click(screen.getByRole('combobox', { name: 'Environment' }));
     expect(
@@ -1321,7 +1323,8 @@ describe('AutomationsSettings', () => {
         scheduleMode: 'daily',
         cronExpression: null,
         model: null,
-        environmentId: 'env-1',
+        executionMode: 'fast',
+        environmentId: '__fast__',
         target: {
           provider: 'slack',
           targetKind: 'slack_user',
@@ -1352,6 +1355,11 @@ describe('AutomationsSettings', () => {
         'Results are sent privately to your linked Slack account.',
       ),
     ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        'Each Fast run posts here, and replies continue the Fast session.',
+      ),
+    ).toBeInTheDocument();
   });
 
   it('shows DM me for non-Slack custom automation destinations', async () => {
@@ -1366,7 +1374,8 @@ describe('AutomationsSettings', () => {
         scheduleMode: 'daily',
         cronExpression: null,
         model: null,
-        environmentId: 'env-1',
+        executionMode: 'fast',
+        environmentId: '__fast__',
         target: {
           provider: 'discord',
           targetKind: 'discord_user',
@@ -1395,6 +1404,54 @@ describe('AutomationsSettings', () => {
     expect(
       screen.getByText(
         'Results are sent privately to your linked Discord account.',
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        'Each Fast run posts here, and replies continue the Fast session.',
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it('explains that Teams replies continue the Fast session', async () => {
+    state.settingsQuery.data.capabilities.teamsConnected = true;
+    state.customAutomations = [
+      {
+        id: 'automation-teams-fast',
+        name: 'Teams daily brief',
+        prompt: 'Summarize my priorities.',
+        enabled: true,
+        scheduleMode: 'daily',
+        cronExpression: null,
+        model: null,
+        executionMode: 'fast',
+        environmentId: '__fast__',
+        target: {
+          provider: 'teams',
+          targetKind: 'teams_user',
+          externalRef: 'user-1',
+        },
+        lastRunAt: null,
+        lastSucceededAt: null,
+        lastFailedAt: null,
+        lastError: null,
+        lastLaunchedTaskId: null,
+        createdByName: 'Ada',
+        createdAt: new Date('2026-01-01T00:00:00Z'),
+        updatedAt: new Date('2026-01-01T00:00:00Z'),
+      },
+    ];
+
+    render(<AutomationsSettings />);
+    fireEvent.click(
+      await screen.findByRole('button', {
+        name: 'Configure Teams daily brief',
+      }),
+    );
+
+    expect(
+      screen.getByText(
+        'Each Fast run posts here, and replies continue the Fast session.',
       ),
     ).toBeInTheDocument();
   });

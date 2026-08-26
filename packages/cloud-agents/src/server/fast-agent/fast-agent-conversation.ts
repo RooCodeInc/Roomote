@@ -1,6 +1,10 @@
 import type { FastAgentConversation } from '@roomote/types';
 
-export type { FastAgentConversation, FastAgentSurface } from '@roomote/types';
+export {
+  isFastAgentCommunicationConversation,
+  type FastAgentConversation,
+  type FastAgentSurface,
+} from '@roomote/types';
 
 /** Build the N-1 Slack-shaped compatibility namespace. New persistence and
  * turn locks use surface/workspace/conversation identity fields directly. */

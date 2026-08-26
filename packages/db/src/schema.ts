@@ -3062,6 +3062,7 @@ export const fastAgentConversations = pgTable(
     conversationId: text('conversation_id').notNull(),
     currentReplyChannelId: text('current_reply_channel_id'),
     currentReplyThreadId: text('current_reply_thread_id'),
+    currentReplyServiceUrl: text('current_reply_service_url'),
     replyTargetVerified: boolean('reply_target_verified')
       .notNull()
       .default(true),
@@ -3142,6 +3143,52 @@ export const fastAgentMessages = pgTable(
 );
 
 /**
+ * fast_agent_provider_messages
+ *
+ * Durable provider message bindings for communication surfaces whose stable
+ * conversation address can host more than one Fast session. Inbound replies
+ * use these server-written rows to recover the canonical session without
+ * trusting identifiers embedded in message text or webhook routing metadata.
+ */
+export const fastAgentProviderMessages = pgTable(
+  'fast_agent_provider_messages',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    conversationId: uuid('conversation_id')
+      .notNull()
+      .references(() => fastAgentConversations.id, { onDelete: 'cascade' }),
+    provider: text('provider').notNull().$type<'discord' | 'teams'>(),
+    workspaceId: text('workspace_id').notNull(),
+    channelId: text('channel_id').notNull(),
+    threadId: text('thread_id'),
+    messageId: text('message_id').notNull(),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('fast_agent_provider_messages_route_unique').on(
+      table.provider,
+      table.workspaceId,
+      table.channelId,
+      table.messageId,
+    ),
+    index('fast_agent_provider_messages_conversation_idx').on(
+      table.conversationId,
+    ),
+    index('fast_agent_provider_messages_thread_idx').on(
+      table.provider,
+      table.workspaceId,
+      table.channelId,
+      table.threadId,
+    ),
+    check(
+      'fast_agent_provider_messages_provider_check',
+      sql`${table.provider} in ('discord', 'teams')`,
+    ),
+  ],
+);
+
+/**
  * fast_agent_pr_feedback_deliveries
  *
  * Durable conversation-scoped claims for PR feedback presented by Fast.
@@ -3183,6 +3230,7 @@ export const fastAgentConversationsRelations = relations(
       references: [users.id],
     }),
     messages: many(fastAgentMessages),
+    providerMessages: many(fastAgentProviderMessages),
     prFeedbackDeliveries: many(fastAgentPrFeedbackDeliveries),
   }),
 );
@@ -3192,6 +3240,16 @@ export const fastAgentMessagesRelations = relations(
   ({ one }) => ({
     conversation: one(fastAgentConversations, {
       fields: [fastAgentMessages.conversationId],
+      references: [fastAgentConversations.id],
+    }),
+  }),
+);
+
+export const fastAgentProviderMessagesRelations = relations(
+  fastAgentProviderMessages,
+  ({ one }) => ({
+    conversation: one(fastAgentConversations, {
+      fields: [fastAgentProviderMessages.conversationId],
       references: [fastAgentConversations.id],
     }),
   }),

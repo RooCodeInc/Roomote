@@ -6,7 +6,8 @@ description: Chat with the fast orchestrator from the dashboard and review every
 
 Fast is Roomote's conversational orchestrator: it answers directly when it can
 and delegates execution work into tasks when needed. A Fast session persists
-across Slack, Discord, an automation, or the web dashboard.
+across Slack, Discord, Microsoft Teams, Telegram, an automation, or the web
+dashboard.
 
 ## Start a Fast session from the dashboard
 
@@ -34,5 +35,10 @@ continue the same session with full context. For sessions that live
 on another surface, such as a Slack thread, Roomote's answer is posted back
 into the originating thread with a quoted copy of your web message, so the
 session stays in one place for everyone following it there. Fast replies
-in Slack and Discord carry the same "Reply or use the web app" footer as task
-replies, linking to the session view.
+across Slack, Discord, Microsoft Teams, and Telegram carry a "Reply or use the
+web app" footer linking to the session view. Slack and Discord can also resume
+Fast directly from chat. Microsoft Teams replies to Fast session and automation
+messages also continue the same session after Roomote verifies the tenant,
+installation, conversation, and linked user. Telegram currently uses the
+session view for Fast follow-ups because its inbound webhook route does not yet
+carry Fast session identity.

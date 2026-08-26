@@ -40,6 +40,7 @@ import type {
   slackAuthTokens,
   fastAgentConversations,
   fastAgentMessages,
+  fastAgentProviderMessages,
   slackInstallations,
   slackInstallationChannels,
   slackUserMappings,
@@ -280,6 +281,14 @@ export type FastAgentMessage = typeof fastAgentMessages.$inferSelect;
 
 export type CreateFastAgentMessage = Omit<
   typeof fastAgentMessages.$inferInsert,
+  Generated
+>;
+
+export type FastAgentProviderMessage =
+  typeof fastAgentProviderMessages.$inferSelect;
+
+export type CreateFastAgentProviderMessage = Omit<
+  typeof fastAgentProviderMessages.$inferInsert,
   Generated
 >;
 
