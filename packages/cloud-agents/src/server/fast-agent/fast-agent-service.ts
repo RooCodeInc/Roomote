@@ -230,6 +230,10 @@ export const FAST_AGENT_INFERENCE_MAX_RETRIES = INFERENCE_PROVIDER_MAX_RETRIES;
 export const FAST_AGENT_TRANSIENT_INFERENCE_MAX_RETRIES = 6;
 const FAST_AGENT_INFERENCE_RETRY_ATTEMPT_TIMEOUT_MS = 5 * 60_000;
 const FAST_AGENT_TRANSIENT_RETRY_JITTER_RATIO = 0.2;
+const FAST_AGENT_PROVIDER_RECOVERY_PROMPT = [
+  'Continue. The previous model request failed due to a provider error and was automatically retried.',
+  'Resume from where you left off without repeating completed tool calls or messages already sent to the user.',
+].join(' ');
 
 type FastAgentInferenceFailure = ReturnType<
   typeof classifyNonTaskInferenceError
@@ -688,6 +692,7 @@ export async function answerFastAgentQuestion({
   let canonicalConversationId: string | null = null;
   let durableOpenCodeSessionId: string | null = null;
   let lastVisibleMessage = '';
+  let closed = false;
   let inferenceRetryReply: FastAgentReplyHandle | undefined;
   let inferenceRetryMessageIndex: number | undefined;
   let inferenceRetryCanonicalEvent:
@@ -1018,9 +1023,10 @@ export async function answerFastAgentQuestion({
       ),
     });
     const integrationCallSignatures = new Set<string>();
+    const completedChatReactionSignatures = new Set<string>();
+    const completedChatReplySignatures = new Set<string>();
     const completedTaskActions = new Set<string>();
     let visibleUpdatePosted = false;
-    let closed = false;
     let nativeToolInvoked = false;
     let retriedTaskStart = false;
 
@@ -1312,6 +1318,19 @@ export async function answerFastAgentQuestion({
                   'Platform events may post only a closeout or clarification.',
               };
             }
+            const signature = JSON.stringify([
+              args.purpose,
+              args.message,
+              args.imageArtifactIds ?? [],
+            ]);
+            if (completedChatReplySignatures.has(signature)) {
+              return {
+                success: true,
+                delivered: true,
+                duplicate: true,
+                closed,
+              };
+            }
             throwIfTurnCancelled();
             await postReply({
               purpose: args.purpose,
@@ -1320,6 +1339,7 @@ export async function answerFastAgentQuestion({
                 ? { imageArtifactIds: args.imageArtifactIds }
                 : {}),
             });
+            completedChatReplySignatures.add(signature);
             return { success: true, delivered: true, closed };
           }
 
@@ -1335,12 +1355,23 @@ export async function answerFastAgentQuestion({
             if (!name || /\s/.test(name)) {
               return { success: false, error: 'Invalid reaction name.' };
             }
+            const messageId = currentMessageId ?? conversation.conversationId;
+            const signature = JSON.stringify([name, args.purpose, messageId]);
+            if (completedChatReactionSignatures.has(signature)) {
+              return {
+                success: true,
+                delivered: true,
+                duplicate: true,
+                closed,
+              };
+            }
             throwIfTurnCancelled();
             await adapter.postReaction({
               name,
               purpose: args.purpose,
-              messageId: currentMessageId ?? conversation.conversationId,
+              messageId,
             });
+            completedChatReactionSignatures.add(signature);
             turnVisibleMessages.push(
               buildAssistantTextMessage(`[Reacted with :${name}:]`),
             );
@@ -1609,6 +1640,7 @@ export async function answerFastAgentQuestion({
           boundSubagentSessionIDs.clear();
         };
         let promptForAttempt = selectedPrompt;
+        let imageFilesForAttempt = imageFiles;
         let promptTimeoutMs: number | null = null;
         const unbindMcpExecutor = bindFastAgentMcpToolExecutor(
           nativeRuntime.mcpCapability,
@@ -1656,9 +1688,9 @@ export async function answerFastAgentQuestion({
                       }
                       await reportProviderRetryEvent(event);
                     },
-                    ...(imageFiles.length
+                    ...(imageFilesForAttempt.length
                       ? {
-                          files: imageFiles,
+                          files: imageFilesForAttempt,
                           requiredInputModality: 'image' as const,
                         }
                       : {}),
@@ -1726,27 +1758,30 @@ export async function answerFastAgentQuestion({
             },
             reportRoomoteInferenceRetry,
             {
-              // OpenCode already owns retries while a provider turn remains
-              // active. Roomote retries only a terminal failure that happened
-              // before the model invoked any native tool, so replay cannot
-              // duplicate a visible reply or external side effect. The signal
-              // aborts only after definitive conversation-lock loss; retrying
-              // then would post into a conversation another worker may own.
+              // OpenCode owns retries while a provider turn remains active.
+              // After a terminal failure, continue an intact session when
+              // tools already ran; otherwise rebuild from visible history so
+              // the original user turn is not appended twice.
               canRetry: (error) =>
                 !signal?.aborted &&
-                !nativeToolInvoked &&
+                !closed &&
+                (!nativeToolInvoked || openCodeSession.id !== undefined) &&
                 !isNonTaskOpenCodePromptTimeoutError(error) &&
                 !isNonTaskOpenCodeSessionValidationError(error),
               prepareRetry: () => {
-                // OpenCode persists the user message before inference starts,
-                // and abort does not roll it back. Discard the failed session
-                // and rebuild from visible compatibility history instead of
-                // appending the same turn to a poisoned transcript.
-                openCodeSession.id = undefined;
-                promptForAttempt = serializedBootstrapPrompt;
-                // Preserve unbounded initial turns, which may run native tools,
-                // but do not let a clean-session recovery hold the conversation
-                // lock forever if the replacement provider request stalls.
+                if (nativeToolInvoked && openCodeSession.id) {
+                  promptForAttempt = FAST_AGENT_PROVIDER_RECOVERY_PROMPT;
+                  imageFilesForAttempt = [];
+                } else {
+                  // OpenCode persists the user message before inference starts.
+                  // Before tools run, rebuild from visible history rather than
+                  // append the original turn to the failed session again.
+                  openCodeSession.id = undefined;
+                  promptForAttempt = serializedBootstrapPrompt;
+                  imageFilesForAttempt = imageFiles;
+                }
+                // Keep every recovery attempt bounded so it cannot hold the
+                // conversation lock forever if the provider stalls again.
                 promptTimeoutMs = FAST_AGENT_INFERENCE_RETRY_ATTEMPT_TIMEOUT_MS;
               },
               signal,
@@ -1835,26 +1870,30 @@ export async function answerFastAgentQuestion({
             inferenceRetryAttempted,
           )
         : 'I hit an error while handling that request. Please try again in a moment.';
-    try {
-      const reply = { purpose: 'closeout' as const, message };
-      if (!(await replaceInferenceRetryReply(reply, true))) {
-        const posted = await adapter.postReply(reply);
-        turnVisibleMessages.push(buildAssistantTextMessage(message));
-        await persistAssistantReply({
-          reply,
-          event: allocateCanonicalEvent(`assistant:${nextAssistantOrdinal++}`),
-          platformMessageId: posted?.messageId,
-        });
+    if (!closed) {
+      try {
+        const reply = { purpose: 'closeout' as const, message };
+        if (!(await replaceInferenceRetryReply(reply, true))) {
+          const posted = await adapter.postReply(reply);
+          turnVisibleMessages.push(buildAssistantTextMessage(message));
+          await persistAssistantReply({
+            reply,
+            event: allocateCanonicalEvent(
+              `assistant:${nextAssistantOrdinal++}`,
+            ),
+            platformMessageId: posted?.messageId,
+          });
+        }
+        inferenceRetryReply = undefined;
+        inferenceRetryMessageIndex = undefined;
+        inferenceRetryCanonicalEvent = undefined;
+        diagnostics.recordVisibleReply();
+        lastVisibleMessage = message;
+      } catch (postError) {
+        console.error(
+          `[Fast Agent] Failed to post error closeout: ${formatErrorForLog(postError)}`,
+        );
       }
-      inferenceRetryReply = undefined;
-      inferenceRetryMessageIndex = undefined;
-      inferenceRetryCanonicalEvent = undefined;
-      diagnostics.recordVisibleReply();
-      lastVisibleMessage = message;
-    } catch (postError) {
-      console.error(
-        `[Fast Agent] Failed to post error closeout: ${formatErrorForLog(postError)}`,
-      );
     }
     if (canonicalConversationId) {
       try {
