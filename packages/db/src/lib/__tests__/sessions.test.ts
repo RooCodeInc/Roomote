@@ -128,6 +128,72 @@ describe('session helpers', () => {
     );
   });
 
+  it('serializes concurrent status refreshes before reading linked tasks', async () => {
+    const session = await sessionFactory.create({
+      activityAt: 100,
+      cachedStatus: 'active',
+    });
+    createdSessionIds.push(session.id);
+    const firstTask = await taskFactory.create({ state: 'active' });
+    const secondTask = await taskFactory.create({ state: 'active' });
+    createdTaskIds.push(firstTask.id, secondTask.id);
+    await db.insert(sessionTasks).values([
+      {
+        sessionId: session.id,
+        taskId: firstTask.id,
+        origin: 'direct_launch',
+      },
+      {
+        sessionId: session.id,
+        taskId: secondTask.id,
+        origin: 'follow_up',
+      },
+    ]);
+
+    let releaseFirst!: () => void;
+    const firstCanCommit = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    let firstRefreshed!: () => void;
+    const firstRefreshComplete = new Promise<void>((resolve) => {
+      firstRefreshed = resolve;
+    });
+
+    const first = db.transaction(async (tx) => {
+      await tx
+        .update(tasks)
+        .set({ state: 'completed' })
+        .where(eq(tasks.id, firstTask.id));
+      await touchSessionActivity(tx, session.id, 200);
+      firstRefreshed();
+      await firstCanCommit;
+    });
+    await firstRefreshComplete;
+
+    let secondUpdated!: () => void;
+    const secondTaskUpdated = new Promise<void>((resolve) => {
+      secondUpdated = resolve;
+    });
+    const second = db.transaction(async (tx) => {
+      await tx
+        .update(tasks)
+        .set({ state: 'completed' })
+        .where(eq(tasks.id, secondTask.id));
+      secondUpdated();
+      await touchSessionActivity(tx, session.id, 300);
+    });
+    await secondTaskUpdated;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    releaseFirst();
+    await Promise.all([first, second]);
+
+    const [refreshed] = await db
+      .select({ cachedStatus: sessions.cachedStatus })
+      .from(sessions)
+      .where(eq(sessions.id, session.id));
+    expect(refreshed?.cachedStatus).toBe('ready');
+  });
+
   it('creates one canonical session and owner participant for a visible task', async () => {
     const user = await userFactory.create();
     createdUserIds.push(user.id);

@@ -14,6 +14,8 @@ import {
 } from '../schema';
 import type { Session } from '../types';
 
+import { runInTransactionIfAvailable } from './transaction-utils';
+
 export type SessionStatusInput = {
   conversationResponding: boolean;
   tasks: Array<{
@@ -55,10 +57,31 @@ export function deriveSessionStatus(input: SessionStatusInput): SessionStatus {
 }
 
 export async function touchSessionActivity(
-  tx: DatabaseOrTransaction,
+  dbOrTx: DatabaseOrTransaction,
   sessionId: string,
   at: number,
   options: { conversationResponding?: boolean } = {},
+): Promise<Session> {
+  return runInTransactionIfAvailable(dbOrTx, async (tx) => {
+    const [lockedSession] = await tx
+      .select({ id: sessions.id })
+      .from(sessions)
+      .where(eq(sessions.id, sessionId))
+      .for('update');
+
+    if (!lockedSession) {
+      throw new Error(`Session ${sessionId} does not exist.`);
+    }
+
+    return refreshLockedSession(tx, sessionId, at, options);
+  });
+}
+
+async function refreshLockedSession(
+  tx: DatabaseOrTransaction,
+  sessionId: string,
+  at: number,
+  options: { conversationResponding?: boolean },
 ): Promise<Session> {
   const linkedTasks = await tx
     .selectDistinctOn([tasks.id], {
@@ -85,9 +108,7 @@ export async function touchSessionActivity(
     .where(eq(sessions.id, sessionId))
     .returning();
 
-  if (!updated) {
-    throw new Error(`Session ${sessionId} does not exist.`);
-  }
+  if (!updated) throw new Error(`Session ${sessionId} does not exist.`);
 
   return updated;
 }
