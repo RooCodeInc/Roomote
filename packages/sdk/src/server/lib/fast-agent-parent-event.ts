@@ -988,13 +988,16 @@ async function createTeamsFastAgentParentTurn(params: {
     conversation.replyTarget.channelId,
     conversation.workspaceId,
   );
-  if (!route) {
+  const persistedDirectMessageServiceUrl = conversation.replyTarget.threadId
+    ? undefined
+    : conversation.replyTarget.serviceUrl;
+  const serviceUrl = route?.serviceUrl ?? persistedDirectMessageServiceUrl;
+  if (!serviceUrl) {
     throw new FastAgentParentEventDeliveryError(
       'Fast Teams parent routing was not found.',
       { replyPosted: false, permanent: true },
     );
   }
-  const serviceUrl = route.serviceUrl;
   return {
     userId: session.userId,
     conversation,
