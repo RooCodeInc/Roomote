@@ -57,10 +57,7 @@ import {
   type FastAgentMcpToolCall,
   type FastAgentNativeToolCall,
 } from './fast-agent-native-tool-bridge';
-import {
-  buildFastAgentSubagentToolFilter,
-  buildFastAgentToolFilter,
-} from './fast-agent-tool-policy';
+import { buildFastAgentToolFilter } from './fast-agent-tool-policy';
 import {
   callFastAgentIntegration,
   listFastAgentIntegrations,
@@ -1289,9 +1286,6 @@ export async function answerFastAgentQuestion({
                     permission: FAST_AGENT_SESSION_PERMISSIONS,
                     signal: promptSignal,
                     promptOnlySubagents: true,
-                    promptOnlySubagentTools: buildFastAgentSubagentToolFilter(
-                      availableIntegrations,
-                    ),
                     trackSessionTreeUsage: true,
                     validateSession,
                     tools: buildFastAgentToolFilter(

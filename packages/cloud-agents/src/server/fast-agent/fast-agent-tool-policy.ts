@@ -22,30 +22,13 @@ export const FAST_AGENT_NATIVE_TOOL_FILTER: Record<string, boolean> = {
 };
 
 export const FAST_AGENT_SUBAGENT_TOOL_FILTER: Record<string, boolean> = {
-  '*': false,
+  '*': true,
   task: false,
+  roomote_manage_custom_automations: false,
   ...Object.fromEntries(
     Object.values(FAST_AGENT_NATIVE_TOOL_NAMES).map((name) => [name, false]),
   ),
 };
-
-export function buildFastAgentSubagentToolFilter(
-  integrations: Array<{
-    id: string;
-    tools: Array<{ name: string; annotations?: { readOnlyHint?: boolean } }>;
-  }>,
-): Record<string, boolean> {
-  return {
-    ...FAST_AGENT_SUBAGENT_TOOL_FILTER,
-    ...Object.fromEntries(
-      integrations.flatMap((integration) =>
-        integration.tools
-          .filter((tool) => tool.annotations?.readOnlyHint === true)
-          .map((tool) => [`${integration.id}_${tool.name}`, true]),
-      ),
-    ),
-  };
-}
 
 export function buildFastAgentToolFilter(
   integrationIds: string[],

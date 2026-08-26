@@ -571,7 +571,6 @@ async function handleMcpRequest(
     tools: integration.tools.map((tool) => ({
       name: tool.name,
       ...(tool.description ? { description: tool.description } : {}),
-      ...(tool.annotations ? { annotations: tool.annotations } : {}),
       inputSchema:
         tool.inputSchema && typeof tool.inputSchema === 'object'
           ? tool.inputSchema

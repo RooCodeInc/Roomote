@@ -460,21 +460,15 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         id: 'github',
         name: 'GitHub',
         description: 'Repository access',
-        tools: [
-          { name: 'search_code', annotations: { readOnlyHint: true } },
-          { name: 'create_issue', annotations: { readOnlyHint: false } },
-        ],
+        tools: [{ name: 'search_code' }],
       },
       {
         id: 'roomote',
         name: 'Roomote',
         description: 'Deployment management',
         tools: [
-          {
-            name: 'manage_custom_automations',
-            annotations: { readOnlyHint: false },
-          },
-          { name: 'manage_tasks', annotations: { readOnlyHint: true } },
+          { name: 'manage_custom_automations' },
+          { name: 'manage_tasks' },
         ],
       },
     ]);
@@ -554,11 +548,6 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       expect.any(Object),
       expect.objectContaining({
         trackSessionTreeUsage: true,
-        promptOnlySubagentTools: expect.objectContaining({
-          '*': false,
-          github_search_code: true,
-          roomote_manage_tasks: true,
-        }),
         tools: expect.objectContaining({
           'github_*': true,
           'roomote_*': true,
@@ -568,12 +557,6 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     expect(mocks.generateText.mock.calls[0]?.[2].tools).not.toHaveProperty(
       'integration_call',
     );
-    expect(
-      mocks.generateText.mock.calls[0]?.[2].promptOnlySubagentTools,
-    ).not.toHaveProperty('github_create_issue');
-    expect(
-      mocks.generateText.mock.calls[0]?.[2].promptOnlySubagentTools,
-    ).not.toHaveProperty('roomote_manage_custom_automations');
     expect(mocks.callIntegration).toHaveBeenCalledWith(
       expect.objectContaining({ userId: 'user-1' }),
       expect.arrayContaining([expect.objectContaining({ id: 'github' })]),

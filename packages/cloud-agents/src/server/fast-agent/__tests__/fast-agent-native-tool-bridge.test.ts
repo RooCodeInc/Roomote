@@ -23,10 +23,7 @@ import {
   fastAgentSpillStore,
 } from '../fast-agent-spill-store';
 import { callMcpTool, listMcpTools } from '../../mcp-tool-client';
-import {
-  buildFastAgentSubagentToolFilter,
-  buildFastAgentToolFilter,
-} from '../fast-agent-tool-policy';
+import { buildFastAgentToolFilter } from '../fast-agent-tool-policy';
 
 function stringWithSerializedByteLength(byteLength: number): string {
   return 'x'.repeat(byteLength - 2);
@@ -118,8 +115,9 @@ describe('Fast native OpenCode tool bridge', () => {
       [FAST_AGENT_NATIVE_TOOL_NAMES.spillRead]: true,
     });
     expect(FAST_AGENT_SUBAGENT_TOOL_FILTER).toMatchObject({
-      '*': false,
+      '*': true,
       task: false,
+      roomote_manage_custom_automations: false,
     });
     for (const rawFilesystemTool of [
       'read',
@@ -167,12 +165,7 @@ describe('Fast native OpenCode tool bridge', () => {
         name: 'GitHub',
         description: 'Repository access',
         tools: [
-          {
-            name: 'search_code',
-            description: 'Search code',
-            inputSchema,
-            annotations: { readOnlyHint: true },
-          },
+          { name: 'search_code', description: 'Search code', inputSchema },
         ],
       },
     ]);
@@ -200,12 +193,7 @@ describe('Fast native OpenCode tool bridge', () => {
           headers: config.mcp.github!.headers,
         }),
       ).resolves.toEqual([
-        {
-          name: 'search_code',
-          description: 'Search code',
-          inputSchema,
-          annotations: { readOnlyHint: true },
-        },
+        { name: 'search_code', description: 'Search code', inputSchema },
       ]);
       await expect(
         callMcpTool({
@@ -223,26 +211,6 @@ describe('Fast native OpenCode tool bridge', () => {
     } finally {
       unbind();
     }
-  });
-
-  it('projects only explicitly read-only MCP tools into Fast subagents', () => {
-    const toolFilter = buildFastAgentSubagentToolFilter([
-      {
-        id: 'github',
-        tools: [
-          { name: 'search_code', annotations: { readOnlyHint: true } },
-          { name: 'create_issue', annotations: { readOnlyHint: false } },
-          { name: 'unannotated_tool' },
-        ],
-      },
-    ]);
-
-    expect(toolFilter).toMatchObject({
-      '*': false,
-      github_search_code: true,
-    });
-    expect(toolFilter).not.toHaveProperty('github_create_issue');
-    expect(toolFilter).not.toHaveProperty('github_unannotated_tool');
   });
 
   it('keeps member task inspection namespaced from native task mutations', async () => {
