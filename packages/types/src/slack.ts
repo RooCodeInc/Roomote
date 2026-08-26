@@ -1,3 +1,7 @@
+export type SlackTableCell =
+  | { type: 'raw_text'; text: string }
+  | { type: 'rich_text'; elements: Array<Record<string, unknown>> };
+
 export type SlackBlock =
   | {
       type: 'section' | 'context' | 'actions';
@@ -28,8 +32,11 @@ export type SlackBlock =
   | {
       type: 'table';
       block_id?: string;
-      rows: Array<Array<Record<string, unknown>>>;
-      column_settings?: Array<Record<string, unknown>>;
+      rows: SlackTableCell[][];
+      column_settings?: Array<{
+        align?: 'left' | 'center' | 'right';
+        is_wrapped?: boolean;
+      }>;
     }
   | {
       type: 'container';
