@@ -4,14 +4,14 @@ This file tracks product releases for Roomote (single monorepo version). Automat
 
 ## 0.44.0 (2026-08-26)
 
-This release gives Fast durable shared memory, adds Slack direct-message delivery for automations, and improves session reliability across follow-ups, provider failures, production builds, and image-only replies.
+This release gives Fast durable shared memory and skill discovery, adds Slack direct-message delivery for automations, and improves session and pull request review reliability.
 
 ### Highlights
 
 - Ask Fast to remember durable context and recall it in later tasks or sessions through the deployment's connected memory providers.
 - Deliver Fast custom automation reports directly to their owners in Slack.
 - Keep Fast sessions moving through retryable provider failures and route follow-up instructions to active tasks sooner.
-- Run web-initiated Fast turns reliably in standalone production images and keep image-only transcripts in sync.
+- Discover and load packaged or repository-defined skills from Fast before delegating work.
 
 ### Minor changes
 
@@ -25,6 +25,8 @@ This release gives Fast durable shared memory, adds Slack direct-message deliver
 - Restore web-initiated Fast turns in standalone production images by shipping native-tool runtime dependencies and removing stale generated tool files during setup.
 - Keep the current page visible while authenticated navigation loads and correct the label shown when an input request is cancelled.
 - Make Fast coding-task kickoffs clearer by describing the repository work and naming the target repository when it is known without exposing internal orchestration details.
+- Let Fast sessions discover and load packaged and repository-defined skill documents through bounded, session-safe tools without exposing filesystem access.
+- Keep pull request review threads clear by removing stale action buttons when newer feedback arrives or an action is handled, while preserving the latest actionable controls across Slack, Discord, and Telegram.
 
 ## 0.43.0 (2026-08-26)
 
