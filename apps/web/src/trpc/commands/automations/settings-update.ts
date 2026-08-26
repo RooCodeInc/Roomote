@@ -292,6 +292,7 @@ export async function updateBackgroundAgentSettingsCommand(
         reviewAllPullRequestAuthors: boolean;
         reviewOnCommit: boolean;
         reviewDraftPrs: boolean;
+        publishGithubCheck: boolean;
         relayReviewResultsToTask: boolean;
         relayUsers: ReviewerRelayUser[];
         approvePr: boolean;
@@ -1167,6 +1168,7 @@ export async function updateBackgroundAgentSettingsCommand(
     reviewAllPullRequestAuthors: input.reviewerReviewAllPullRequestAuthors,
     reviewOnCommit: input.reviewerReviewOnCommit,
     reviewDraftPrs: input.reviewerReviewDraftPrs,
+    publishGithubCheck: input.reviewerPublishGithubCheck,
     relayReviewResultsToTask: false,
     relayEligibleCreatorIds: [],
     approvePr: false,

@@ -62,7 +62,12 @@ These automations react to pull requests, issues, and repository state.
 For **Review Code**, decide whether Roomote should review new commits
 automatically and whether draft pull requests should be included. If your team
 treats drafts as active collaboration, include them. If drafts are noisy or
-half-formed, keep them out until they are ready.
+half-formed, keep them out until they are ready. You can also publish each
+GitHub review as a **Roomote code review** check on the reviewed commit. Roomote
+controls whether it publishes the check; GitHub branch protection or rulesets
+control whether that check is required before merging. The GitHub App
+installation must grant **Checks: Read and write**; update and reapprove older
+installations that do not have that permission.
 
 For **Triage Issues**, turn the toggle on once a supported source-control
 provider is connected (GitHub, GitLab, or Gitea) and the repos you care about

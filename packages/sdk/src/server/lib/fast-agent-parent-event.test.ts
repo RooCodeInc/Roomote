@@ -249,6 +249,7 @@ describe('deliverFastAgentParentEvent', () => {
     });
     expect(mocks.answerQuestion).toHaveBeenCalledWith(
       expect.objectContaining({
+        currentMessageId: 'fast-parent-artifact:artifact-1:v1',
         turnSource: 'platform_event',
         adapter: expect.objectContaining({ launchTask: mocks.launchTask }),
       }),

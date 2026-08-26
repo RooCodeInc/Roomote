@@ -61,6 +61,7 @@ CREATE TABLE "pr_review_notification_units" (
 	"pr_number" integer NOT NULL,
 	"pr_url" text NOT NULL,
 	"head_sha" text,
+	"head_identity_key" text NOT NULL,
 	"episode_kind" text NOT NULL,
 	"episode_id" text NOT NULL,
 	"due_at" timestamp NOT NULL,
@@ -89,7 +90,7 @@ CREATE UNIQUE INDEX "pr_review_notification_deliveries_dispatch_key_unique" ON "
 CREATE INDEX "pr_review_notification_deliveries_due_idx" ON "pr_review_notification_deliveries" USING btree ("status","due_at","lease_expires_at");--> statement-breakpoint
 CREATE INDEX "pr_review_notification_deliveries_destination_idx" ON "pr_review_notification_deliveries" USING btree ("destination_kind","destination_key");--> statement-breakpoint
 CREATE UNIQUE INDEX "pr_review_notification_unit_events_event_unique" ON "pr_review_notification_unit_events" USING btree ("event_id");--> statement-breakpoint
-CREATE UNIQUE INDEX "pr_review_notification_units_identity_unique" ON "pr_review_notification_units" USING btree ("source_control_provider","repository_identity_key","pr_number","episode_kind","episode_id");--> statement-breakpoint
+CREATE UNIQUE INDEX "pr_review_notification_units_identity_unique" ON "pr_review_notification_units" USING btree ("source_control_provider","repository_identity_key","pr_number","head_identity_key","episode_kind","episode_id");--> statement-breakpoint
 CREATE INDEX "pr_review_notification_units_open_head_idx" ON "pr_review_notification_units" USING btree ("source_control_provider","repository","pr_number","head_sha","sealed_at");
 --> statement-breakpoint
 INSERT INTO "pr_review_auto_preferences" (

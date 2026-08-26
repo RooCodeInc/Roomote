@@ -136,6 +136,9 @@ describe('processDiscordFastAgentMessage', () => {
     });
 
     expect(mocks.reply).toHaveBeenCalledOnce();
+    expect(mocks.answerQuestion).toHaveBeenCalledWith(
+      expect.objectContaining({ currentMessageId: 'source-1' }),
+    );
     expect(provider.editMessage).toHaveBeenCalledWith({
       channelId: 'channel-1',
       messageId: 'retry-1',

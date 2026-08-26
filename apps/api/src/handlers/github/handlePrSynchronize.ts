@@ -25,7 +25,10 @@ import {
 } from '@roomote/db/server';
 import { enqueueTask } from '@roomote/cloud-agents/server';
 import { acquireRedisLock } from '@roomote/redis';
-import { enqueueActivePrReviewFollowUp } from '@roomote/sdk/server';
+import {
+  enqueueActivePrReviewFollowUp,
+  publishGithubPrReviewCheck,
+} from '@roomote/sdk/server';
 
 import type { WebhookResponse } from '../../types';
 import { toHostFromUrl } from '../utils';
@@ -347,6 +350,17 @@ export async function handlePrSynchronize({
               },
             },
           });
+          if (currentTarget.settings?.publishGithubCheck) {
+            await publishGithubPrReviewCheck({
+              installationId: installation!.id,
+              repository: repository.full_name,
+              prNumber: pr.number,
+              headSha,
+              taskId: followUpRun.taskId,
+              runId: followUpRun.id,
+              status: 'in_progress',
+            });
+          }
           queuedActiveReviewFollowUp = true;
         }
 
@@ -398,7 +412,7 @@ export async function handlePrSynchronize({
         reviewerSettings: currentTarget.settings,
       });
 
-      return enqueueTask({
+      const launch = await enqueueTask({
         existingTaskId: existingReviewTask?.taskId,
         task: {
           type: shouldRunSyncReview
@@ -442,6 +456,19 @@ export async function handlePrSynchronize({
           prBaseSha: pr.base?.sha ?? null,
         },
       });
+
+      if (currentTarget.settings?.publishGithubCheck) {
+        await publishGithubPrReviewCheck({
+          installationId: installation!.id,
+          repository: repository.full_name,
+          prNumber: pr.number,
+          headSha,
+          taskId: launch.taskId,
+          runId: launch.id,
+        });
+      }
+
+      return launch;
     } finally {
       await releaseLaunchLock();
     }

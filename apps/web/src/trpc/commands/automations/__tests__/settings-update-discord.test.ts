@@ -87,6 +87,7 @@ function buildInput(
     reviewerReviewAllPullRequestAuthors: false,
     reviewerReviewOnCommit: true,
     reviewerReviewDraftPrs: true,
+    reviewerPublishGithubCheck: false,
     reviewerRelayReviewResultsToTask: false,
     reviewerRelayUserIds: [],
     conflictResolverFrequency: 'off',

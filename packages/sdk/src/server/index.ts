@@ -61,6 +61,10 @@ export {
   type ActivePrReviewFollowUpRequest,
 } from './lib/task-runs/active-pr-review-follow-up';
 export {
+  GITHUB_PR_REVIEW_CHECK_NAME,
+  publishGithubPrReviewCheck,
+} from './lib/task-runs/github-pr-review-check';
+export {
   PULL_REQUEST_MERGEABILITY_CHECK_QUEUE_NAME,
   PULL_REQUEST_MERGEABILITY_INITIAL_DELAY_MS,
   PULL_REQUEST_MERGEABILITY_RETRY_DELAY_MS,

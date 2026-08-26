@@ -27,6 +27,7 @@ export interface PrReviewSettings {
   reviewAllPullRequestAuthors?: boolean; // Whether to automatically review PRs opened by authors other than Roomote (default: false).
   reviewOnCommit?: boolean; // Whether to automatically review PRs when opened/pushed to (default: true). If false, only @mention triggers review.
   reviewDraftPrs?: boolean; // Whether to automatically review draft PRs (default: true).
+  publishGithubCheck?: boolean; // Whether GitHub reviews publish a check run on the reviewed commit (default: false).
   approvePr?: boolean; // Whether to approve PRs after review when no issues found (default: true).
   relayReviewResultsToTask?: boolean; // Whether completed PR reviews should relay results to the canonical DB-linked Roomote task (default: false).
   relayEligibleCreatorIds?: string[]; // Org-scoped Roomote task creator IDs eligible for linked-task review relays when relay is enabled.
@@ -40,6 +41,7 @@ export const DEFAULT_PR_REVIEW_SETTINGS = {
   reviewAllPullRequestAuthors: false,
   reviewOnCommit: true,
   reviewDraftPrs: true,
+  publishGithubCheck: false,
   approvePr: true,
   relayReviewResultsToTask: false,
   relayEligibleCreatorIds: [],

@@ -1,5 +1,5 @@
 {
-  "id": "72c7f88d-9f5d-4d9f-abd5-08ab398016bc",
+  "id": "95d07096-7507-4381-ab49-85567e321664",
   "prevId": "e294060b-3fe4-4660-94a2-f225a804401c",
   "version": "7",
   "dialect": "postgresql",
@@ -3206,6 +3206,179 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
+    "public.fast_agent_messages": {
+      "name": "fast_agent_messages",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "conversation_id": {
+          "name": "conversation_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "event_id": {
+          "name": "event_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "turn_id": {
+          "name": "turn_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "turn_seq": {
+          "name": "turn_seq",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "ts": {
+          "name": "ts",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "event_type": {
+          "name": "event_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "role": {
+          "name": "role",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "content_blocks": {
+          "name": "content_blocks",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'[]'::jsonb"
+        },
+        "metadata": {
+          "name": "metadata",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "payload": {
+          "name": "payload",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'::jsonb"
+        },
+        "source": {
+          "name": "source",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "native_session_id": {
+          "name": "native_session_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "native_message_id": {
+          "name": "native_message_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "fast_agent_messages_conversation_event_unique": {
+          "name": "fast_agent_messages_conversation_event_unique",
+          "columns": [
+            {
+              "expression": "conversation_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "event_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "fast_agent_messages_conversation_order_idx": {
+          "name": "fast_agent_messages_conversation_order_idx",
+          "columns": [
+            {
+              "expression": "conversation_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "ts",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "turn_seq",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "fast_agent_messages_conversation_id_fast_agent_conversations_id_fk": {
+          "name": "fast_agent_messages_conversation_id_fast_agent_conversations_id_fk",
+          "tableFrom": "fast_agent_messages",
+          "tableTo": "fast_agent_conversations",
+          "columnsFrom": ["conversation_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
     "public.fast_agent_pr_feedback_deliveries": {
       "name": "fast_agent_pr_feedback_deliveries",
       "schema": "",
@@ -5032,184 +5205,6 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.pr_review_auto_preferences": {
-      "name": "pr_review_auto_preferences",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "source_control_provider": {
-          "name": "source_control_provider",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "host": {
-          "name": "host",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "repository_id": {
-          "name": "repository_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "repository_identity_key": {
-          "name": "repository_identity_key",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "repository": {
-          "name": "repository",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "pr_number": {
-          "name": "pr_number",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "enabled_by_user_id": {
-          "name": "enabled_by_user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "enabled_at": {
-          "name": "enabled_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "source_task_id": {
-          "name": "source_task_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "source_destination_key": {
-          "name": "source_destination_key",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "pr_review_auto_preferences_identity_unique": {
-          "name": "pr_review_auto_preferences_identity_unique",
-          "columns": [
-            {
-              "expression": "source_control_provider",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "repository_identity_key",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "pr_number",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "pr_review_auto_preferences_repository_idx": {
-          "name": "pr_review_auto_preferences_repository_idx",
-          "columns": [
-            {
-              "expression": "source_control_provider",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "repository",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "pr_number",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "pr_review_auto_preferences_repository_id_repositories_id_fk": {
-          "name": "pr_review_auto_preferences_repository_id_repositories_id_fk",
-          "tableFrom": "pr_review_auto_preferences",
-          "tableTo": "repositories",
-          "columnsFrom": ["repository_id"],
-          "columnsTo": ["id"],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        },
-        "pr_review_auto_preferences_enabled_by_user_id_users_id_fk": {
-          "name": "pr_review_auto_preferences_enabled_by_user_id_users_id_fk",
-          "tableFrom": "pr_review_auto_preferences",
-          "tableTo": "users",
-          "columnsFrom": ["enabled_by_user_id"],
-          "columnsTo": ["id"],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "pr_review_auto_preferences_source_task_id_tasks_id_fk": {
-          "name": "pr_review_auto_preferences_source_task_id_tasks_id_fk",
-          "tableFrom": "pr_review_auto_preferences",
-          "tableTo": "tasks",
-          "columnsFrom": ["source_task_id"],
-          "columnsTo": ["id"],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
     "public.pr_review_cycles": {
       "name": "pr_review_cycles",
       "schema": "",
@@ -5624,596 +5619,6 @@
         "pr_review_events_batch_kind_check": {
           "name": "pr_review_events_batch_kind_check",
           "value": "\"pr_review_events\".\"batch_kind\" in ('human', 'roomote')"
-        }
-      },
-      "isRLSEnabled": false
-    },
-    "public.pr_review_notification_deliveries": {
-      "name": "pr_review_notification_deliveries",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "notification_unit_id": {
-          "name": "notification_unit_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "destination_kind": {
-          "name": "destination_kind",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "destination_key": {
-          "name": "destination_key",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "task_id": {
-          "name": "task_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "status": {
-          "name": "status",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'pending'"
-        },
-        "due_at": {
-          "name": "due_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "deferrals": {
-          "name": "deferrals",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
-        "attempt": {
-          "name": "attempt",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
-        "lease_token": {
-          "name": "lease_token",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "lease_expires_at": {
-          "name": "lease_expires_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "route_provider": {
-          "name": "route_provider",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "route_workspace_id": {
-          "name": "route_workspace_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "route_channel_id": {
-          "name": "route_channel_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "route_thread_id": {
-          "name": "route_thread_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "follow_up_prompt": {
-          "name": "follow_up_prompt",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "target_task_id": {
-          "name": "target_task_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "acting_user_id": {
-          "name": "acting_user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "provider_message_id": {
-          "name": "provider_message_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "action_claimed_at": {
-          "name": "action_claimed_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "dispatch_key": {
-          "name": "dispatch_key",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "dispatched_run_id": {
-          "name": "dispatched_run_id",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "completed_at": {
-          "name": "completed_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "pr_review_notification_deliveries_destination_unique": {
-          "name": "pr_review_notification_deliveries_destination_unique",
-          "columns": [
-            {
-              "expression": "notification_unit_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "destination_kind",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "destination_key",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "pr_review_notification_deliveries_dispatch_key_unique": {
-          "name": "pr_review_notification_deliveries_dispatch_key_unique",
-          "columns": [
-            {
-              "expression": "dispatch_key",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "pr_review_notification_deliveries_due_idx": {
-          "name": "pr_review_notification_deliveries_due_idx",
-          "columns": [
-            {
-              "expression": "status",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "due_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "lease_expires_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "pr_review_notification_deliveries_destination_idx": {
-          "name": "pr_review_notification_deliveries_destination_idx",
-          "columns": [
-            {
-              "expression": "destination_kind",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "destination_key",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "pr_review_notification_deliveries_notification_unit_id_pr_review_notification_units_id_fk": {
-          "name": "pr_review_notification_deliveries_notification_unit_id_pr_review_notification_units_id_fk",
-          "tableFrom": "pr_review_notification_deliveries",
-          "tableTo": "pr_review_notification_units",
-          "columnsFrom": ["notification_unit_id"],
-          "columnsTo": ["id"],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "pr_review_notification_deliveries_task_id_tasks_id_fk": {
-          "name": "pr_review_notification_deliveries_task_id_tasks_id_fk",
-          "tableFrom": "pr_review_notification_deliveries",
-          "tableTo": "tasks",
-          "columnsFrom": ["task_id"],
-          "columnsTo": ["id"],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        },
-        "pr_review_notification_deliveries_target_task_id_tasks_id_fk": {
-          "name": "pr_review_notification_deliveries_target_task_id_tasks_id_fk",
-          "tableFrom": "pr_review_notification_deliveries",
-          "tableTo": "tasks",
-          "columnsFrom": ["target_task_id"],
-          "columnsTo": ["id"],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        },
-        "pr_review_notification_deliveries_acting_user_id_users_id_fk": {
-          "name": "pr_review_notification_deliveries_acting_user_id_users_id_fk",
-          "tableFrom": "pr_review_notification_deliveries",
-          "tableTo": "users",
-          "columnsFrom": ["acting_user_id"],
-          "columnsTo": ["id"],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "pr_review_notification_deliveries_destination_kind_check": {
-          "name": "pr_review_notification_deliveries_destination_kind_check",
-          "value": "\"pr_review_notification_deliveries\".\"destination_kind\" in ('fast_conversation', 'task')"
-        },
-        "pr_review_notification_deliveries_status_check": {
-          "name": "pr_review_notification_deliveries_status_check",
-          "value": "\"pr_review_notification_deliveries\".\"status\" in ('pending', 'claimed', 'prepared', 'prompt_posting', 'awaiting_user_action', 'auto_dispatch_pending', 'completed', 'suppressed', 'dismissed')"
-        }
-      },
-      "isRLSEnabled": false
-    },
-    "public.pr_review_notification_unit_events": {
-      "name": "pr_review_notification_unit_events",
-      "schema": "",
-      "columns": {
-        "unit_id": {
-          "name": "unit_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "event_id": {
-          "name": "event_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "attached_at": {
-          "name": "attached_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "pr_review_notification_unit_events_event_unique": {
-          "name": "pr_review_notification_unit_events_event_unique",
-          "columns": [
-            {
-              "expression": "event_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "pr_review_notification_unit_events_unit_id_pr_review_notification_units_id_fk": {
-          "name": "pr_review_notification_unit_events_unit_id_pr_review_notification_units_id_fk",
-          "tableFrom": "pr_review_notification_unit_events",
-          "tableTo": "pr_review_notification_units",
-          "columnsFrom": ["unit_id"],
-          "columnsTo": ["id"],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "pr_review_notification_unit_events_event_id_pr_review_events_id_fk": {
-          "name": "pr_review_notification_unit_events_event_id_pr_review_events_id_fk",
-          "tableFrom": "pr_review_notification_unit_events",
-          "tableTo": "pr_review_events",
-          "columnsFrom": ["event_id"],
-          "columnsTo": ["id"],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {
-        "pr_review_notification_unit_events_pk": {
-          "name": "pr_review_notification_unit_events_pk",
-          "columns": ["unit_id", "event_id"]
-        }
-      },
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.pr_review_notification_units": {
-      "name": "pr_review_notification_units",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "source_control_provider": {
-          "name": "source_control_provider",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "host": {
-          "name": "host",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "repository_id": {
-          "name": "repository_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "repository_identity_key": {
-          "name": "repository_identity_key",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "repository": {
-          "name": "repository",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "pr_number": {
-          "name": "pr_number",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "pr_url": {
-          "name": "pr_url",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "head_sha": {
-          "name": "head_sha",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "episode_kind": {
-          "name": "episode_kind",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "episode_id": {
-          "name": "episode_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "due_at": {
-          "name": "due_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "first_observed_at": {
-          "name": "first_observed_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "last_observed_at": {
-          "name": "last_observed_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "sealed_at": {
-          "name": "sealed_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "pr_review_notification_units_identity_unique": {
-          "name": "pr_review_notification_units_identity_unique",
-          "columns": [
-            {
-              "expression": "source_control_provider",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "repository_identity_key",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "pr_number",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "episode_kind",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "episode_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "pr_review_notification_units_open_head_idx": {
-          "name": "pr_review_notification_units_open_head_idx",
-          "columns": [
-            {
-              "expression": "source_control_provider",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "repository",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "pr_number",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "head_sha",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "sealed_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "pr_review_notification_units_repository_id_repositories_id_fk": {
-          "name": "pr_review_notification_units_repository_id_repositories_id_fk",
-          "tableFrom": "pr_review_notification_units",
-          "tableTo": "repositories",
-          "columnsFrom": ["repository_id"],
-          "columnsTo": ["id"],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "pr_review_notification_units_episode_kind_check": {
-          "name": "pr_review_notification_units_episode_kind_check",
-          "value": "\"pr_review_notification_units\".\"episode_kind\" in ('roomote_cycle', 'human', 'automated', 'ci')"
         }
       },
       "isRLSEnabled": false

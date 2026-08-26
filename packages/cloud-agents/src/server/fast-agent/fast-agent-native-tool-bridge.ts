@@ -56,6 +56,7 @@ const FAST_AGENT_NATIVE_RUNTIME_LIMIT = 250;
 
 export type FastAgentNativeToolCall = {
   agent?: string;
+  sessionId?: string;
   name: FastAgentNativeToolName;
   args: Record<string, unknown>;
 };
@@ -675,6 +676,7 @@ async function startBridge(): Promise<FastAgentNativeToolBridge> {
       }
 
       const call = {
+        sessionId: parsed.sessionID,
         name: parsed.tool,
         args: parsed.args,
         ...(parsed.agent ? { agent: parsed.agent } : {}),

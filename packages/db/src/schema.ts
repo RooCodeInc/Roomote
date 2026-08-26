@@ -3088,6 +3088,51 @@ export const fastAgentConversations = pgTable(
 );
 
 /**
+ * fast_agent_messages
+ *
+ * Forward-only canonical Fast/OpenCode transcript events. During the N-1
+ * compatibility window, visible text is also written to
+ * fast_agent_conversations.compatibility_messages for rollback safety.
+ */
+export const fastAgentMessages = pgTable(
+  'fast_agent_messages',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    conversationId: uuid('conversation_id')
+      .notNull()
+      .references(() => fastAgentConversations.id, { onDelete: 'cascade' }),
+    eventId: text('event_id').notNull(),
+    turnId: text('turn_id').notNull(),
+    turnSeq: integer('turn_seq').notNull(),
+    ts: bigint('ts', { mode: 'number' }).notNull(),
+    eventType: text('event_type').notNull().$type<TaskMessageEventType>(),
+    role: text('role').$type<TaskMessageRole>(),
+    contentBlocks: jsonb('content_blocks')
+      .$type<TaskMessageContentBlock[]>()
+      .notNull()
+      .default([]),
+    metadata: jsonb('metadata').$type<TaskMessageMetadata>(),
+    payload: jsonb('payload').notNull().$type<TaskMessagePayload>().default({}),
+    source: text('source'),
+    nativeSessionId: text('native_session_id'),
+    nativeMessageId: text('native_message_id'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('fast_agent_messages_conversation_event_unique').on(
+      table.conversationId,
+      table.eventId,
+    ),
+    index('fast_agent_messages_conversation_order_idx').on(
+      table.conversationId,
+      table.ts,
+      table.turnSeq,
+    ),
+  ],
+);
+
+/**
  * fast_agent_pr_feedback_deliveries
  *
  * Durable conversation-scoped claims for PR feedback presented by Fast.
@@ -3128,7 +3173,18 @@ export const fastAgentConversationsRelations = relations(
       fields: [fastAgentConversations.userId],
       references: [users.id],
     }),
+    messages: many(fastAgentMessages),
     prFeedbackDeliveries: many(fastAgentPrFeedbackDeliveries),
+  }),
+);
+
+export const fastAgentMessagesRelations = relations(
+  fastAgentMessages,
+  ({ one }) => ({
+    conversation: one(fastAgentConversations, {
+      fields: [fastAgentMessages.conversationId],
+      references: [fastAgentConversations.id],
+    }),
   }),
 );
 
