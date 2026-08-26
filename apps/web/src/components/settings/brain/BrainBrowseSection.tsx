@@ -39,6 +39,7 @@ type ListedPage = BrainPageListing['pages'][number];
 const PAGE_SIZE = 100;
 const SEARCH_DEBOUNCE_MS = 200;
 const PREVIEW_SKELETON_DELAY_MS = 300;
+const EMPTY_PAGES: ListedPage[] = [];
 type PageEdge = 'first' | 'last';
 
 /** Registry position, so the filter chips keep a stable, meaningful order. */
@@ -218,7 +219,7 @@ export function BrainBrowseSection({
       { placeholderData: keepPreviousData },
     ),
   );
-  const pages = data?.pages ?? [];
+  const pages = data?.pages ?? EMPTY_PAGES;
 
   const namespaces = useMemo(
     () =>
