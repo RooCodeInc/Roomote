@@ -264,6 +264,7 @@ async function upsertDestinationDelivery(
     routeWorkspaceId: string | null;
     routeChannelId: string | null;
     routeThreadId: string | null;
+    promoteDueAt: boolean;
   },
 ): Promise<void> {
   const id = randomUUID();
@@ -289,7 +290,9 @@ async function upsertDestinationDelivery(
         prReviewNotificationDeliveries.destinationKey,
       ],
       set: {
-        dueAt: sql`greatest(${prReviewNotificationDeliveries.dueAt}, ${input.dueAt.toISOString()}::timestamp)`,
+        dueAt: input.promoteDueAt
+          ? sql`least(${prReviewNotificationDeliveries.dueAt}, ${input.dueAt.toISOString()}::timestamp)`
+          : sql`greatest(${prReviewNotificationDeliveries.dueAt}, ${input.dueAt.toISOString()}::timestamp)`,
         updatedAt: new Date(),
       },
       setWhere: eq(prReviewNotificationDeliveries.status, 'pending'),
@@ -301,6 +304,7 @@ async function projectUnitToLinks(
   unitId: string,
   dueAt: Date,
   links: PrLinkIdentity[],
+  promoteDueAt: boolean,
 ): Promise<void> {
   for (const link of links) {
     const parent = getFastAgentParentFromPayload(
@@ -313,6 +317,7 @@ async function projectUnitToLinks(
         dueAt,
         taskId: link.taskId,
         destinationKind: 'fast_conversation',
+        promoteDueAt,
         ...destination,
       });
       continue;
@@ -328,6 +333,7 @@ async function projectUnitToLinks(
       routeWorkspaceId: null,
       routeChannelId: null,
       routeThreadId: null,
+      promoteDueAt,
     });
   }
 }
@@ -436,6 +442,8 @@ export async function assignPrReviewNotificationUnit(
   });
   const headIdentityKey = input.reviewHeadSha ?? '';
   const baseEpisode = episodeIdentity(input);
+  const promoteDueAt =
+    input.isSummary === true && baseEpisode.kind === 'roomote_cycle';
 
   let targetUnit = null;
   if (baseEpisode.kind === 'ci') {
@@ -490,7 +498,9 @@ export async function assignPrReviewNotificationUnit(
           prReviewNotificationUnits.episodeId,
         ],
         set: {
-          dueAt: sql`greatest(${prReviewNotificationUnits.dueAt}, ${input.dueAt.toISOString()}::timestamp)`,
+          dueAt: promoteDueAt
+            ? sql`least(${prReviewNotificationUnits.dueAt}, ${input.dueAt.toISOString()}::timestamp)`
+            : sql`greatest(${prReviewNotificationUnits.dueAt}, ${input.dueAt.toISOString()}::timestamp)`,
           lastObservedAt: sql`greatest(${prReviewNotificationUnits.lastObservedAt}, ${input.observedAt.toISOString()}::timestamp)`,
           updatedAt: new Date(),
         },
@@ -556,7 +566,13 @@ export async function assignPrReviewNotificationUnit(
     );
   }
 
-  await projectUnitToLinks(executor, targetUnit.id, input.dueAt, uniqueLinks);
+  await projectUnitToLinks(
+    executor,
+    targetUnit.id,
+    input.dueAt,
+    uniqueLinks,
+    promoteDueAt,
+  );
   return { unitId: targetUnit.id, projectedTaskCount: uniqueLinks.length };
 }
 
@@ -583,9 +599,13 @@ export async function projectPrReviewUnitForAssociation(
     );
   const units = [...new Map(rows.map((row) => [row.unitId, row])).values()];
   for (const unit of units) {
-    await projectUnitToLinks(executor, unit.unitId, unit.dueAt, [
-      { taskId: input.taskId, host: null, repositoryId: null },
-    ]);
+    await projectUnitToLinks(
+      executor,
+      unit.unitId,
+      unit.dueAt,
+      [{ taskId: input.taskId, host: null, repositoryId: null }],
+      false,
+    );
   }
 }
 
