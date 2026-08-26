@@ -1,7 +1,17 @@
+import { redactBrainText } from '@roomote/communication/redact-brain-text';
+
 import { getRoomoteConfig } from './config.js';
 import { saveTaskMemory } from './tasks-api-client.js';
 import { successResult, errorResult, catchError } from './tool-result.js';
 import type { ToolResult } from './types.js';
+
+type TaskMemoryInput = {
+  outcome: string;
+  decisions?: string[];
+  rationale?: string;
+  reusableFacts?: string[];
+  unresolvedQuestions?: string[];
+};
 
 function currentRunId(): number | null {
   const runId = Number(process.env.ROOMOTE_TASK_RUN_ID);
@@ -14,13 +24,9 @@ function currentRunId(): number | null {
  * server-chosen slug after redaction. The agent never holds a Brain write
  * credential and cannot reach any page but its own task's.
  */
-export async function handleSaveTaskMemory(input: {
-  outcome: string;
-  decisions?: string[];
-  rationale?: string;
-  reusableFacts?: string[];
-  unresolvedQuestions?: string[];
-}): Promise<ToolResult> {
+export async function handleSaveTaskMemory(
+  input: TaskMemoryInput,
+): Promise<ToolResult> {
   const runId = currentRunId();
 
   if (!runId) {
@@ -35,18 +41,34 @@ export async function handleSaveTaskMemory(input: {
     }
 
     const result = await saveTaskMemory(config, runId, input);
+    const redactArray = (values: string[]) => values.map(redactBrainText);
+    const memory = {
+      outcome: redactBrainText(input.outcome),
+      ...(input.decisions !== undefined
+        ? { decisions: redactArray(input.decisions) }
+        : {}),
+      ...(input.rationale !== undefined
+        ? { rationale: redactBrainText(input.rationale) }
+        : {}),
+      ...(input.reusableFacts !== undefined
+        ? { reusableFacts: redactArray(input.reusableFacts) }
+        : {}),
+      ...(input.unresolvedQuestions !== undefined
+        ? { unresolvedQuestions: redactArray(input.unresolvedQuestions) }
+        : {}),
+    };
 
     return successResult(
       result.saved
         ? {
             saved: true,
             note: 'Recorded for the shared Brain.',
-            memory: input,
+            memory,
           }
         : {
             saved: false,
             reason: result.reason ?? 'Not saved.',
-            memory: input,
+            memory,
           },
     );
   } catch (error) {

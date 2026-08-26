@@ -24,11 +24,15 @@ describe('save task memory tool', () => {
 
   it('returns the submitted memory when saved', async () => {
     const memory = {
-      outcome: 'Made task memories visible in tool results.',
+      outcome:
+        'Made task memories visible with token sk-abcdefghijklmnopqrstuvwxyz redacted.',
       decisions: ['Return the submitted input without server metadata.'],
-      rationale: 'The tool call already contains this agent-authored content.',
+      rationale:
+        'The tool call already contains Bearer example1234567890 this content.',
       reusableFacts: ['Tool results are rendered from their JSON text.'],
-      unresolvedQuestions: ['Should other write tools echo their input?'],
+      unresolvedQuestions: [
+        'Could ghp_abcdefghijklmnopqrstuvwxyz leak elsewhere?',
+      ],
     };
     saveTaskMemory.mockResolvedValue({ saved: true });
 
@@ -38,8 +42,15 @@ describe('save task memory tool', () => {
       success: true,
       saved: true,
       note: 'Recorded for the shared Brain.',
-      memory,
+      memory: {
+        ...memory,
+        outcome: 'Made task memories visible with token [REDACTED] redacted.',
+        rationale: 'The tool call already contains [REDACTED] this content.',
+        unresolvedQuestions: ['Could [REDACTED] leak elsewhere?'],
+      },
     });
+
+    expect(saveTaskMemory).toHaveBeenCalledWith(expect.any(Object), 42, memory);
   });
 
   it('returns the submitted memory when not saved', async () => {
