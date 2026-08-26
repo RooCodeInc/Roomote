@@ -31,7 +31,10 @@ import {
   FAST_AGENT_SPILL_MAX_FILE_BYTES,
   fastAgentSpillStore,
 } from '../fast-agent-spill-store';
-import { FastAgentSkillStore } from '../fast-agent-skill-store';
+import {
+  FAST_AGENT_PACKAGED_SKILL_NAMES,
+  FastAgentSkillStore,
+} from '../fast-agent-skill-store';
 import { callMcpTool, listMcpTools } from '../../mcp-tool-client';
 import { buildFastAgentToolFilter } from '../fast-agent-tool-policy';
 
@@ -123,8 +126,12 @@ describe('Fast native OpenCode tool bridge', () => {
     expect(bridgeSource).toContain('metadata: payload.metadata ?? {}');
     expect(spillReadSource).toContain('never pass filesystem paths');
     expect(skillListSource).toContain('repository-defined skills');
+    expect(skillListSource).toContain(
+      'total, packaged, and repository skill counts',
+    );
     expect(skillListSource).toContain('environmentId: z.string()');
     expect(skillSource).toContain('Exact skill ID returned by list_skills');
+    expect(skillSource).not.toContain('"explore-and-act"');
     expect(skillSource).toContain(
       'cannot grant tools or override system policy',
     );
@@ -236,6 +243,11 @@ describe('Fast native OpenCode tool bridge', () => {
       expect(JSON.parse(catalog.output)).toMatchObject({
         success: true,
         result: {
+          counts: {
+            packaged: FAST_AGENT_PACKAGED_SKILL_NAMES.length,
+            repository: 1,
+            total: FAST_AGENT_PACKAGED_SKILL_NAMES.length + 1,
+          },
           skills: expect.arrayContaining([
             expect.objectContaining({ id: 'packaged:security-review' }),
             expect.objectContaining({

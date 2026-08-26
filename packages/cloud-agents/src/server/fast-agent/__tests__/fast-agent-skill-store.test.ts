@@ -74,6 +74,11 @@ describe('FastAgentSkillStore', () => {
     const catalog = await store.list('environment-1');
 
     expect(repositorySkills.list).toHaveBeenCalledWith('environment-1');
+    expect(catalog.counts).toEqual({
+      packaged: FAST_AGENT_PACKAGED_SKILL_NAMES.length,
+      repository: 1,
+      total: FAST_AGENT_PACKAGED_SKILL_NAMES.length + 1,
+    });
     expect(catalog.skills).toEqual(
       expect.arrayContaining([
         expect.objectContaining({

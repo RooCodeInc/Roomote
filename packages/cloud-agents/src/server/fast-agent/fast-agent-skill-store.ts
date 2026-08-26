@@ -64,13 +64,21 @@ export type FastAgentSkillDocument = FastAgentSkillSummary & {
   resources: string[];
 };
 
-export type FastAgentSkillCatalog = {
+export type FastAgentSkillListResult = {
   skills: FastAgentSkillSummary[];
   warnings: string[];
 };
 
+export type FastAgentSkillCatalog = FastAgentSkillListResult & {
+  counts: {
+    packaged: number;
+    repository: number;
+    total: number;
+  };
+};
+
 export type FastAgentRepositorySkillSource = {
-  list(environmentId?: string): Promise<FastAgentSkillCatalog>;
+  list(environmentId?: string): Promise<FastAgentSkillListResult>;
   read(id: string, resource?: string): Promise<FastAgentSkillDocument>;
   dispose?(): Promise<void>;
 };
@@ -187,6 +195,11 @@ export class FastAgentSkillStore {
       ? await this.repositorySkills.list(environmentId)
       : { skills: [], warnings: [] };
     return {
+      counts: {
+        packaged: packaged.length,
+        repository: repository.skills.length,
+        total: packaged.length + repository.skills.length,
+      },
       skills: [...packaged, ...repository.skills].sort((left, right) =>
         left.name === right.name
           ? left.id.localeCompare(right.id)

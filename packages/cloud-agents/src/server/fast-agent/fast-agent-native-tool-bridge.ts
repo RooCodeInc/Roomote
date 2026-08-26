@@ -305,7 +305,7 @@ import { z } from "zod"
 import { invoke } from "../roomote-fast-tool-bridge.js"
 
 export default {
-  description: "List packaged Roomote skills and repository-defined skills from configured environments without filesystem access. Returns exact skill IDs, task invocation names, descriptions, repositories, and environment IDs for load_skill and task routing.",
+  description: "List packaged Roomote skills and repository-defined skills from configured environments without filesystem access. Returns total, packaged, and repository skill counts plus exact IDs, task invocation names, descriptions, repositories, and environment IDs for load_skill and task routing.",
   args: {
     environmentId: z.string().min(1).optional().describe("Exact environment ID from the system prompt; omit to inspect all configured environments"),
   },

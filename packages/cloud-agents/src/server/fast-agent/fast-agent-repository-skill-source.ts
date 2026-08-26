@@ -25,8 +25,8 @@ import {
 import {
   getFastAgentSkillDescription,
   type FastAgentRepositorySkillSource,
-  type FastAgentSkillCatalog,
   type FastAgentSkillDocument,
+  type FastAgentSkillListResult,
   type FastAgentSkillSummary,
 } from './fast-agent-skill-store';
 import { FAST_AGENT_SPILL_MAX_FILE_BYTES } from './fast-agent-spill-store';
@@ -470,7 +470,7 @@ export class RemoteFastAgentRepositorySkillSource implements FastAgentRepository
         ));
   }
 
-  async list(environmentId?: string): Promise<FastAgentSkillCatalog> {
+  async list(environmentId?: string): Promise<FastAgentSkillListResult> {
     if (environmentId && !this.allowedEnvironmentIds.has(environmentId)) {
       throw new Error('Unknown Fast environment.');
     }
