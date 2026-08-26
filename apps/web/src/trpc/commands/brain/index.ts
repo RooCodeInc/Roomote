@@ -42,13 +42,6 @@ import { Env } from '@/lib/server/env';
 
 import { assertAdmin } from '../setup/shared';
 
-/**
- * How many recently written pages the Settings page lists under the
- * composition chart. Enough to recognise what the Brain has been learning
- * lately, short enough to stay a glance rather than a log.
- */
-const RECENT_PAGE_LIMIT = 8;
-
 const EMPTY_MEMORY_SUMMARY: Awaited<
   ReturnType<typeof getBrainMemoryEventSummary>
 > = {
@@ -118,12 +111,6 @@ export type BrainCorpusSummary = {
    * zero-filled. Computed from the exhaustive corpus listing.
    */
   activityByDay: Array<{ date: string; pages: number }>;
-  recentPages: Array<{
-    slug: string;
-    title: string;
-    namespaceLabel: string;
-    updatedAt: Date | null;
-  }>;
 };
 
 export type BrainSettings = {
@@ -209,7 +196,6 @@ function summarizeCorpus(
       totalPages: null,
       namespaces: [],
       activityByDay: [],
-      recentPages: [],
     };
   }
 
@@ -230,27 +216,12 @@ function summarizeCorpus(
       return right.pages - left.pages || left.label.localeCompare(right.label);
     });
 
-  const recentPages = snapshot.pages
-    .filter((page) => page.updatedAt)
-    .sort(
-      (left, right) =>
-        (right.updatedAt?.getTime() ?? 0) - (left.updatedAt?.getTime() ?? 0),
-    )
-    .slice(0, RECENT_PAGE_LIMIT)
-    .map((page) => ({
-      slug: page.slug,
-      title: page.title ?? page.slug,
-      namespaceLabel: brainNamespaceLabel(resolveBrainNamespaceId(page.slug)),
-      updatedAt: page.updatedAt,
-    }));
-
   return {
     reachable: true,
     listedPages: snapshot.pages.length,
     totalPages: null,
     namespaces,
     activityByDay: buildActivityByDay(snapshot.pages),
-    recentPages,
   };
 }
 

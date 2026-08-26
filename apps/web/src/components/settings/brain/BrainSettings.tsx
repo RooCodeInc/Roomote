@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback } from 'react';
+import { useCallback, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 
@@ -33,6 +33,7 @@ export function BrainSettings() {
   const searchParams = useSearchParams();
   const { data, isPending, isError } = useQuery(trpc.brain.get.queryOptions());
   const selectedSlug = searchParams.get('memory');
+  const [namespaceId, setNamespaceId] = useState<string | null>(null);
   const selectMemory = useCallback(
     (slug: string | null) => {
       const params = new URLSearchParams(searchParams);
@@ -47,6 +48,15 @@ export function BrainSettings() {
       });
     },
     [pathname, router, searchParams],
+  );
+  const selectNamespace = useCallback(
+    (nextNamespaceId: string | null) => {
+      setNamespaceId(nextNamespaceId);
+      if (selectedSlug) {
+        selectMemory(null);
+      }
+    },
+    [selectMemory, selectedSlug],
   );
 
   if (isPending) {
@@ -76,10 +86,15 @@ export function BrainSettings() {
   return (
     <div className="space-y-6">
       <BrainMemoryIssuesSection taskMemories={data.taskMemories} />
-      <BrainCorpusSection corpus={data.corpus} onSelectMemory={selectMemory} />
+      <BrainCorpusSection
+        corpus={data.corpus}
+        onSelectNamespace={selectNamespace}
+      />
       <BrainBrowseSection
         corpus={data.corpus}
+        namespaceId={namespaceId}
         selectedSlug={selectedSlug}
+        onSelectNamespace={selectNamespace}
         onSelectMemory={selectMemory}
       />
       <BrainStatusSection settings={data} />

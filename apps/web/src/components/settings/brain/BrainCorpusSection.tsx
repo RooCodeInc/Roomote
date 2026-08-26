@@ -7,11 +7,7 @@ import {
   EmptyState,
   TriangleAlert,
 } from '@/components/system';
-import {
-  formatDistanceToNowCompact,
-  formatNumber,
-  formatShortDate,
-} from '@/lib/formatters';
+import { formatNumber, formatShortDate } from '@/lib/formatters';
 
 import type { BrainCorpusSummary } from '@/trpc/commands/brain';
 import { buildNamespaceSegments } from './brain-presentation';
@@ -36,24 +32,8 @@ function ActivityChart({
     );
   }
 
-  // A freshly enabled Brain has all of its activity in the last day or two,
-  // which renders as one tower over 29 empty days and reads as a broken
-  // chart rather than a young corpus. Say what is actually happening.
-  const firstActiveIndex = days.findIndex((day) => day.pages > 0);
-
-  if (firstActiveIndex >= days.length - 2) {
-    return (
-      <p className="text-xs text-muted-foreground">
-        Ingestion started{' '}
-        {firstActiveIndex === days.length - 1 ? 'today' : 'yesterday'}.{' '}
-        {formatNumber(total)} pages written so far; the chart appears as history
-        accumulates.
-      </p>
-    );
-  }
-
   return (
-    <div className="space-y-1">
+    <div role="img" aria-label="Memory activity chart" className="space-y-1">
       <div className="flex h-20 items-end gap-[3px] border-b border-foreground/10">
         {days.map((day) => (
           <BasicTooltip
@@ -88,8 +68,10 @@ const MIN_SEGMENT_PERCENT = 1.5;
 
 function CompositionBar({
   segments,
+  onSelectNamespace,
 }: {
   segments: ReturnType<typeof buildNamespaceSegments>;
+  onSelectNamespace: (namespaceId: string) => void;
 }) {
   return (
     <div className="flex h-3 w-full overflow-hidden rounded-full bg-background">
@@ -98,8 +80,11 @@ function CompositionBar({
           key={segment.id}
           content={`${segment.label}: ${formatNumber(segment.pages)} pages (${Math.round(segment.percent)}%)`}
         >
-          <div
-            className="h-full first:rounded-l-full last:rounded-r-full"
+          <button
+            type="button"
+            aria-label={`Filter Explore memories by ${segment.label}`}
+            className="h-full cursor-pointer first:rounded-l-full last:rounded-r-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+            onClick={() => onSelectNamespace(segment.id)}
             style={{
               width: `${Math.max(segment.percent, MIN_SEGMENT_PERCENT)}%`,
               backgroundColor: segment.color,
@@ -113,10 +98,10 @@ function CompositionBar({
 
 export function BrainCorpusSection({
   corpus,
-  onSelectMemory,
+  onSelectNamespace,
 }: {
   corpus: BrainCorpusSummary;
-  onSelectMemory: (slug: string) => void;
+  onSelectNamespace: (namespaceId: string) => void;
 }) {
   const segments = buildNamespaceSegments(corpus.namespaces);
 
@@ -145,11 +130,19 @@ export function BrainCorpusSection({
         />
       ) : (
         <div className="space-y-4">
-          <CompositionBar segments={segments} />
+          <CompositionBar
+            segments={segments}
+            onSelectNamespace={onSelectNamespace}
+          />
 
           <div className="grid grid-cols-2 gap-x-6 gap-y-2 sm:grid-cols-3">
             {segments.map((segment) => (
-              <div key={segment.id} className="flex items-center gap-2 text-sm">
+              <button
+                key={segment.id}
+                type="button"
+                className="flex cursor-pointer items-center gap-2 rounded-md px-1 text-left text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                onClick={() => onSelectNamespace(segment.id)}
+              >
                 <span
                   aria-hidden="true"
                   className="size-2 shrink-0 rounded-full"
@@ -159,7 +152,7 @@ export function BrainCorpusSection({
                 <span className="ml-auto tabular-nums text-muted-foreground">
                   {formatNumber(segment.pages)}
                 </span>
-              </div>
+              </button>
             ))}
           </div>
 
@@ -180,32 +173,6 @@ export function BrainCorpusSection({
                 </span>
               </div>
               <ActivityChart days={corpus.activityByDay} />
-            </div>
-          ) : null}
-
-          {corpus.recentPages.length > 0 ? (
-            <div className="space-y-2 border-t pt-4">
-              <p className="text-sm font-medium">New memories</p>
-              <ul className="space-y-2">
-                {corpus.recentPages.map((page) => (
-                  <li key={page.slug}>
-                    <button
-                      type="button"
-                      className="flex w-full cursor-pointer items-center gap-3 rounded-lg px-2 py-1.5 text-left text-sm transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                      onClick={() => onSelectMemory(page.slug)}
-                    >
-                      <span className="truncate">{page.title}</span>
-                      {page.updatedAt ? (
-                        <span className="ml-auto shrink-0 text-xs text-muted-foreground">
-                          {formatDistanceToNowCompact(page.updatedAt, {
-                            addSuffix: true,
-                          })}
-                        </span>
-                      ) : null}
-                    </button>
-                  </li>
-                ))}
-              </ul>
             </div>
           ) : null}
         </div>

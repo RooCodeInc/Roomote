@@ -11,6 +11,7 @@ const { state, navigation, mutations } = vi.hoisted(() => ({
     },
     searchParams: new URLSearchParams(),
     pageInputs: [] as Array<{ slug: string }>,
+    listInputs: [] as Array<Record<string, unknown>>,
     pagePending: true,
   },
   navigation: {
@@ -75,7 +76,10 @@ vi.mock('@/trpc/client', () => ({
         queryKey: () => ['brain', 'get'],
       },
       listPages: {
-        queryOptions: () => ({ queryKind: 'list' }),
+        queryOptions: (input: Record<string, unknown>) => {
+          state.listInputs.push(input);
+          return { queryKind: 'list' };
+        },
       },
       getPage: {
         queryOptions: (input: { slug: string }) => {
@@ -123,14 +127,6 @@ function buildSettings(
         { date: '2026-01-01', pages: 12 },
         { date: '2026-01-02', pages: 6 },
       ],
-      recentPages: [
-        {
-          slug: 'tasks/run-9',
-          title: 'Reworked the outbox drainer',
-          namespaceLabel: 'Task memories',
-          updatedAt: new Date('2026-01-02T00:00:00Z'),
-        },
-      ],
     },
     sources: [
       {
@@ -172,6 +168,7 @@ beforeEach(() => {
   state.query = { isPending: false, isError: false, data: buildSettings() };
   state.searchParams = new URLSearchParams();
   state.pageInputs.length = 0;
+  state.listInputs.length = 0;
   state.pagePending = true;
   navigation.replace.mockClear();
   mutations.backfill.mockClear();
@@ -197,12 +194,11 @@ describe('BrainSettings', () => {
 
     expect(screen.getByText('Memory Stats')).toBeInTheDocument();
     expect(screen.getByText('30 pages')).toBeInTheDocument();
-    expect(screen.getByText('Browser memories')).toBeInTheDocument();
+    expect(screen.getByText('Explore memories')).toBeInTheDocument();
     expect(
       screen.getByText('Memory activity (past 30 days)'),
     ).toBeInTheDocument();
-    expect(screen.getByText('New memories')).toBeInTheDocument();
-    expect(screen.getAllByText('Reworked the outbox drainer')).toHaveLength(2);
+    expect(screen.getByText('Reworked the outbox drainer')).toBeInTheDocument();
 
     expect(screen.getByText('Sources')).toBeInTheDocument();
     expect(screen.queryByText('1 of 2 connected')).not.toBeInTheDocument();
@@ -216,7 +212,7 @@ describe('BrainSettings', () => {
     expect(screen.queryByText('Memory issues')).not.toBeInTheDocument();
 
     const memoryStats = screen.getByText('Memory Stats');
-    const browser = screen.getByText('Browser memories');
+    const browser = screen.getByText('Explore memories');
     const configuration = screen.getByText('Configuration');
     expect(memoryStats.compareDocumentPosition(browser)).toBe(
       Node.DOCUMENT_POSITION_FOLLOWING,
@@ -253,17 +249,48 @@ describe('BrainSettings', () => {
     expect(mutations.retryFailed).toHaveBeenCalledOnce();
   });
 
-  it('selects recent and browsed memories with URL replace semantics', () => {
+  it('selects browsed memories with URL replace semantics', () => {
     render(<BrainSettings />);
-    const rows = screen.getAllByText('Reworked the outbox drainer');
-    fireEvent.click(rows[0]!);
-    fireEvent.click(rows[1]!);
+    fireEvent.click(screen.getByText('Reworked the outbox drainer'));
 
-    expect(navigation.replace).toHaveBeenCalledTimes(2);
+    expect(navigation.replace).toHaveBeenCalledTimes(1);
     expect(navigation.replace).toHaveBeenLastCalledWith(
       '/settings/memory?memory=tasks%2Frun-9',
       { scroll: false },
     );
+  });
+
+  it('filters Explore memories when a stats category is selected', () => {
+    render(<BrainSettings />);
+
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: 'Filter Explore memories by Slack',
+      }),
+    );
+
+    expect(state.listInputs.at(-1)).toMatchObject({ namespaceId: 'slack' });
+  });
+
+  it('keeps the activity chart visible for a newly active corpus', () => {
+    const settings = buildSettings();
+    state.query.data = {
+      ...settings,
+      corpus: {
+        ...settings.corpus,
+        activityByDay: [
+          { date: '2026-01-01', pages: 0 },
+          { date: '2026-01-02', pages: 4 },
+        ],
+      },
+    };
+
+    render(<BrainSettings />);
+
+    expect(
+      screen.getByRole('img', { name: 'Memory activity chart' }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/Ingestion started/)).not.toBeInTheDocument();
   });
 
   it('opens a directly linked memory from the query parameter', () => {
@@ -288,7 +315,6 @@ describe('BrainSettings', () => {
         totalPages: null,
         namespaces: [],
         activityByDay: [],
-        recentPages: [],
       },
     };
 
@@ -318,9 +344,9 @@ describe('BrainSettings', () => {
   it('omits source badges and disconnected sources', () => {
     render(<BrainSettings />);
 
-    // Only the composition legend keeps the Slack label; source cards have no
-    // namespace badge.
-    expect(screen.getAllByText('Slack')).toHaveLength(1);
+    // The stats legend and browser filter keep the Slack label; source cards
+    // have no namespace badge.
+    expect(screen.getAllByText('Slack')).toHaveLength(2);
     // Disconnected sources are omitted from the list entirely.
     expect(screen.queryByText('Notion')).not.toBeInTheDocument();
   });

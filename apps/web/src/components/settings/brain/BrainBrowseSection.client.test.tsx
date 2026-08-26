@@ -10,7 +10,7 @@ vi.mock('@tanstack/react-query', () => ({
   keepPreviousData: (previousData: unknown) => previousData,
   useQuery: (options: { queryKind?: string }) =>
     options.queryKind === 'page'
-      ? { isPending: true, data: undefined }
+      ? { isPending: false, data: undefined }
       : {
           isPending: false,
           data: {
@@ -61,7 +61,6 @@ const corpus: BrainCorpusSummary = {
   totalPages: 250,
   namespaces: [{ id: 'tasks', label: 'Task memories', pages: 250 }],
   activityByDay: [],
-  recentPages: [],
 };
 
 beforeEach(() => {
@@ -72,13 +71,16 @@ it('debounces server-side search and pages bounded results', async () => {
   render(
     <BrainBrowseSection
       corpus={corpus}
+      namespaceId={null}
       selectedSlug={null}
+      onSelectNamespace={() => undefined}
       onSelectMemory={() => undefined}
     />,
   );
 
-  expect(screen.getByText('Browser memories')).toBeInTheDocument();
+  expect(screen.getByText('Explore memories')).toBeInTheDocument();
   expect(screen.getByText('1-2 of 250')).toBeInTheDocument();
+  expect(screen.queryByText('Select a page')).not.toBeInTheDocument();
   expect(listInputs.at(-1)).toMatchObject({ offset: 0, limit: 100 });
 
   fireEvent.change(screen.getByLabelText('Search pages'), {
@@ -89,7 +91,7 @@ it('debounces server-side search and pages bounded results', async () => {
     expect(listInputs.at(-1)).toMatchObject({ search: 'drainer', offset: 0 }),
   );
 
-  fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Next page' }));
   expect(listInputs.at(-1)).toMatchObject({ search: 'drainer', offset: 100 });
 });
 
@@ -99,7 +101,9 @@ it('uses the controlled memory selection for embedded browser rows', () => {
   render(
     <BrainBrowseSection
       corpus={corpus}
+      namespaceId={null}
       selectedSlug={null}
+      onSelectNamespace={() => undefined}
       onSelectMemory={onSelectMemory}
     />,
   );
@@ -108,16 +112,30 @@ it('uses the controlled memory selection for embedded browser rows', () => {
   expect(onSelectMemory).toHaveBeenCalledWith('tasks/run-2');
 });
 
-it('marks the selected memory and focuses the mobile preview return control', () => {
-  vi.stubGlobal(
-    'matchMedia',
-    vi.fn(() => ({ matches: true }) as MediaQueryList),
-  );
+it('uses the controlled namespace filter for browser chips', () => {
+  const onSelectNamespace = vi.fn();
 
   render(
     <BrainBrowseSection
       corpus={corpus}
+      namespaceId={null}
+      selectedSlug={null}
+      onSelectNamespace={onSelectNamespace}
+      onSelectMemory={() => undefined}
+    />,
+  );
+
+  fireEvent.click(screen.getByRole('button', { name: 'Task memories' }));
+  expect(onSelectNamespace).toHaveBeenCalledWith('tasks');
+});
+
+it('marks the selected memory and renders its preview beside the list', () => {
+  render(
+    <BrainBrowseSection
+      corpus={corpus}
+      namespaceId={null}
       selectedSlug="tasks/run-2"
+      onSelectNamespace={() => undefined}
       onSelectMemory={() => undefined}
     />,
   );
@@ -126,5 +144,5 @@ it('marks the selected memory and focuses the mobile preview return control', ()
     'aria-current',
     'page',
   );
-  expect(screen.getByRole('button', { name: 'Back to pages' })).toHaveFocus();
+  expect(screen.getByText('Page unavailable')).toBeInTheDocument();
 });

@@ -1,15 +1,15 @@
 'use client';
 
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { BRAIN_NAMESPACES } from '@roomote/types';
 
 import { Section } from '@/components/settings';
 import {
   Badge,
+  BasicTooltip,
   BookOpenText,
   Button,
-  ChevronLeftIcon,
   EmptyState,
   Input,
   Search,
@@ -135,18 +135,20 @@ function PagePreview({ slug }: { slug: string }) {
 
 export function BrainBrowseSection({
   corpus,
+  namespaceId,
   selectedSlug,
+  onSelectNamespace,
   onSelectMemory,
 }: {
   corpus: BrainCorpusSummary;
+  namespaceId: string | null;
   selectedSlug: string | null;
+  onSelectNamespace: (namespaceId: string | null) => void;
   onSelectMemory: (slug: string | null) => void;
 }) {
   const trpc = useTRPC();
   const [search, setSearch] = useState('');
-  const [namespaceId, setNamespaceId] = useState<string | null>(null);
   const [offset, setOffset] = useState(0);
-  const mobileBackButtonRef = useRef<HTMLButtonElement>(null);
   const debouncedSearch = useDebouncedValue(search.trim(), SEARCH_DEBOUNCE_MS);
 
   const { data, isPending } = useQuery(
@@ -174,25 +176,66 @@ export function BrainBrowseSection({
     setOffset(0);
   }, [debouncedSearch]);
 
-  useEffect(() => {
-    if (selectedSlug && window.matchMedia?.('(max-width: 639px)').matches) {
-      mobileBackButtonRef.current?.focus();
-    }
-  }, [selectedSlug]);
-
   const selectNamespace = useCallback(
     (nextNamespaceId: string | null) => {
-      setNamespaceId(nextNamespaceId);
+      onSelectNamespace(nextNamespaceId);
       setOffset(0);
-      if (selectedSlug) {
-        onSelectMemory(null);
-      }
     },
-    [onSelectMemory, selectedSlug],
+    [onSelectNamespace],
+  );
+
+  const pageList = (
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="min-h-0 flex-1 space-y-0.5 overflow-y-auto scroll-thin pr-1">
+        {pages.map((page) => (
+          <PageListRow
+            key={page.slug}
+            page={page}
+            selected={page.slug === selectedSlug}
+            onSelect={onSelectMemory}
+          />
+        ))}
+      </div>
+      <div className="flex items-center justify-between gap-2 pt-2">
+        <p className="pl-3 text-xs text-muted-foreground">
+          {data && data.total > 0
+            ? `${formatNumber(offset + 1)}-${formatNumber(offset + pages.length)} of ${formatNumber(data.total)}`
+            : '0 pages'}
+        </p>
+        <div className="flex gap-1">
+          <BasicTooltip content="Previous page">
+            <Button
+              variant="ghost"
+              size="sm"
+              aria-label="Previous page"
+              disabled={offset === 0}
+              onClick={() =>
+                setOffset((current) => Math.max(0, current - PAGE_SIZE))
+              }
+            >
+              ←
+            </Button>
+          </BasicTooltip>
+          <BasicTooltip content="Next page">
+            <Button
+              variant="ghost"
+              size="sm"
+              aria-label="Next page"
+              disabled={data?.nextOffset === null}
+              onClick={() =>
+                data?.nextOffset !== null && setOffset(data?.nextOffset ?? 0)
+              }
+            >
+              →
+            </Button>
+          </BasicTooltip>
+        </div>
+      </div>
+    </div>
   );
 
   return (
-    <Section icon={BookOpenText} title="Browser memories">
+    <Section icon={BookOpenText} title="Explore memories">
       <div className="space-y-3">
         <p className="text-sm text-muted-foreground">
           What Memory has stored, page by page.
@@ -226,7 +269,7 @@ export function BrainBrowseSection({
               className="cursor-pointer"
               onClick={() => selectNamespace(null)}
             >
-              All {formatNumber(corpus.listedPages)}
+              All
             </button>
           </Badge>
           {namespaces.map((namespace) => (
@@ -251,7 +294,7 @@ export function BrainBrowseSection({
                     backgroundColor: brainNamespaceColor(namespace.id),
                   }}
                 />
-                {namespace.label} {formatNumber(namespace.pages)}
+                {namespace.label}
               </button>
             </Badge>
           ))}
@@ -273,91 +316,16 @@ export function BrainBrowseSection({
             title="No matching pages"
             description="Nothing in Memory matches this search."
           />
-        ) : (
-          <div className="grid h-[420px] grid-cols-1 gap-3 sm:grid-cols-[280px_1fr]">
-            {/*
-             * One column below `sm`: the list until a page is chosen, then
-             * the preview with a way back. Both panes side by side from
-             * `sm` up.
-             */}
-            <div
-              className={cn(
-                'flex min-h-0 flex-col',
-                selectedSlug !== null && 'hidden sm:flex',
-              )}
-            >
-              <div className="min-h-0 flex-1 space-y-0.5 overflow-y-auto scroll-thin pr-1">
-                {pages.map((page) => (
-                  <PageListRow
-                    key={page.slug}
-                    page={page}
-                    selected={page.slug === selectedSlug}
-                    onSelect={onSelectMemory}
-                  />
-                ))}
-              </div>
-              <div className="flex items-center justify-between gap-2 pt-2">
-                <p className="text-xs text-muted-foreground">
-                  {data && data.total > 0
-                    ? `${formatNumber(offset + 1)}-${formatNumber(offset + pages.length)} of ${formatNumber(data.total)}`
-                    : '0 pages'}
-                </p>
-                <div className="flex gap-1">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    disabled={offset === 0}
-                    onClick={() =>
-                      setOffset((current) => Math.max(0, current - PAGE_SIZE))
-                    }
-                  >
-                    Previous
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    disabled={data?.nextOffset === null}
-                    onClick={() =>
-                      data?.nextOffset !== null &&
-                      setOffset(data?.nextOffset ?? 0)
-                    }
-                  >
-                    Next
-                  </Button>
-                </div>
-              </div>
-            </div>
-            <div
-              className={cn(
-                'flex min-h-0 flex-col rounded-lg border',
-                selectedSlug === null && 'hidden sm:flex',
-              )}
-            >
-              {selectedSlug ? (
-                <>
-                  <div className="border-b p-2 sm:hidden">
-                    <Button
-                      ref={mobileBackButtonRef}
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => onSelectMemory(null)}
-                    >
-                      <ChevronLeftIcon />
-                      Back to pages
-                    </Button>
-                  </div>
-                  <div className="min-h-0 flex-1">
-                    <PagePreview slug={selectedSlug} />
-                  </div>
-                </>
-              ) : (
-                <EmptyState
-                  title="Select a page"
-                  description="Choose a page to read what Memory stored."
-                />
-              )}
+        ) : selectedSlug ? (
+          <div className="grid h-[500px] grid-cols-1 grid-rows-2 divide-y md:grid-cols-[280px_1fr] md:grid-rows-1 md:divide-x md:divide-y-0">
+            {/* The list and preview stack below `md`, then sit side by side. */}
+            {pageList}
+            <div className="min-h-0">
+              <PagePreview slug={selectedSlug} />
             </div>
           </div>
+        ) : (
+          <div className="flex h-[500px] min-h-0">{pageList}</div>
         )}
       </div>
     </Section>
