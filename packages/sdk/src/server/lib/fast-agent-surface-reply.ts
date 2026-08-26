@@ -1,6 +1,9 @@
 import {
+  acquireFastAgentTurnLock,
+  answerFastAgentQuestion,
   createFastAgentWebTaskLauncher,
   fastAgentConversationRepository,
+  resolveApiBaseUrl,
   type FastAgentConversation,
   type FastAgentTurnAdapter,
 } from '@roomote/cloud-agents/server';
@@ -27,10 +30,9 @@ import {
 } from './fast-agent-parent-event';
 import { createTeamsCommunicationProviderFromRuntimeCredentials } from './teams-communication';
 import { createTelegramCommunicationProviderFromRuntimeCredentials } from './telegram-communication';
-import {
-  findTeamsConversationServiceUrl,
-  findTeamsWorkspaceServiceUrl,
-} from '../automations/destination';
+import { findTeamsConversationRoute } from '../automations/destination';
+import { recordFastAgentConversationMessageBestEffort } from './fast-agent-provider-message';
+import { resolveUserMcpServerConfigs } from '../routers/mcp-connections';
 
 const SLACK_QUOTE_MAX_LENGTH = 100;
 const DISCORD_QUOTE_MAX_LENGTH = 280;
@@ -121,6 +123,9 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
     id: params.sessionId,
   });
   if (!session) {
+    return null;
+  }
+  if (session.userId !== params.userId) {
     return null;
   }
   const conversation = session.conversation;
@@ -310,6 +315,11 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
               });
             },
           });
+          await recordFastAgentConversationMessageBestEffort({
+            sessionId: session.id,
+            conversation,
+            messageId: posted.messageId,
+          });
           return { messageId: posted.messageId };
         },
       },
@@ -317,19 +327,17 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
   }
 
   if (conversation.surface === 'teams') {
-    const [provider, conversationServiceUrl, workspaceServiceUrl] =
-      await Promise.all([
-        createTeamsCommunicationProviderFromRuntimeCredentials(),
-        findTeamsConversationServiceUrl(conversation.replyTarget.channelId),
-        findTeamsWorkspaceServiceUrl(conversation.workspaceId),
-      ]);
-    const serviceUrl =
-      conversation.replyTarget.serviceUrl ??
-      conversationServiceUrl ??
-      workspaceServiceUrl;
-    if (!provider || !serviceUrl) {
+    const [provider, route] = await Promise.all([
+      createTeamsCommunicationProviderFromRuntimeCredentials(),
+      findTeamsConversationRoute(
+        conversation.replyTarget.channelId,
+        conversation.workspaceId,
+      ),
+    ]);
+    if (!provider || !route) {
       return null;
     }
+    const serviceUrl = route.serviceUrl;
     return {
       conversation,
       adapter: {
@@ -351,6 +359,11 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
             text: `${message}\n\n${buildFastSessionReplyFooterText({ provider: 'teams', sessionId: session.id })}`,
             textFormat: 'markdown',
           });
+          await recordFastAgentConversationMessageBestEffort({
+            sessionId: session.id,
+            conversation,
+            messageId: posted.messageId,
+          });
           return { messageId: posted.messageId };
         },
         replaceReply: async (handle, { message }) => {
@@ -360,6 +373,11 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
             serviceUrl,
             text: `${message}\n\n${buildFastSessionReplyFooterText({ provider: 'teams', sessionId: session.id })}`,
             textFormat: 'markdown',
+          });
+          await recordFastAgentConversationMessageBestEffort({
+            sessionId: session.id,
+            conversation,
+            messageId: handle.messageId,
           });
           return handle;
         },
@@ -405,4 +423,51 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
   }
 
   return null;
+}
+
+export async function continueFastAgentSurfaceReply(params: {
+  sessionId: string;
+  userId: string;
+  senderDisplayName: string | null;
+  question: string;
+  currentMessageId: string;
+  images?: string[];
+}): Promise<boolean> {
+  const delivery = await buildFastAgentSurfaceReplyDelivery(params);
+  if (!delivery) {
+    return false;
+  }
+
+  const release = await acquireFastAgentTurnLock({
+    conversation: delivery.conversation,
+  });
+  if (!release) {
+    return false;
+  }
+
+  const apiBaseUrl = resolveApiBaseUrl() ?? undefined;
+  try {
+    await answerFastAgentQuestion({
+      question: params.question,
+      images: params.images,
+      userId: params.userId,
+      apiBaseUrl,
+      conversation: delivery.conversation,
+      currentMessageId: params.currentMessageId,
+      signal: release.signal,
+      senderDisplayName: params.senderDisplayName ?? undefined,
+      adapter: {
+        resolveMcpServerConfigs: () =>
+          resolveUserMcpServerConfigs({
+            userId: params.userId,
+            apiBaseUrl,
+            includeRoomoteMemberTools: true,
+          }),
+        ...delivery.adapter,
+      },
+    });
+    return true;
+  } finally {
+    await release().catch(() => {});
+  }
 }

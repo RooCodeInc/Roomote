@@ -1413,7 +1413,7 @@ describe('AutomationsSettings', () => {
     ).toBeInTheDocument();
   });
 
-  it('explains the Teams and Telegram Fast reply capability difference', async () => {
+  it('explains that Teams replies continue the Fast session', async () => {
     state.settingsQuery.data.capabilities.teamsConnected = true;
     state.customAutomations = [
       {
@@ -1451,7 +1451,7 @@ describe('AutomationsSettings', () => {
 
     expect(
       screen.getByText(
-        'Each Fast run posts here. Continue the session from the web app; chat replies on this provider do not resume Fast yet.',
+        'Each Fast run posts here, and replies continue the Fast session.',
       ),
     ).toBeInTheDocument();
   });

@@ -4,6 +4,7 @@ import {
   getTeamsActivityCommunicationMetadata,
   getTeamsActivityAudioAttachments,
   getTeamsActivityImageAttachments,
+  getTeamsBaseConversationId,
   getTeamsConversationMessageIdSuffix,
   isTeamsBotAuthoredActivity,
   isTeamsBotMentioned,
@@ -111,6 +112,9 @@ describe('Teams activity helpers', () => {
     expect(
       getTeamsConversationMessageIdSuffix(parsed.data.conversation.id),
     ).toBe('activity-root');
+    expect(getTeamsBaseConversationId(parsed.data.conversation.id)).toBe(
+      '19:conversation@thread.v2',
+    );
     expect(teamsActivityToQueuedCommunicationMessage(parsed.data)).toEqual({
       provider: 'teams',
       text: 'keep going',

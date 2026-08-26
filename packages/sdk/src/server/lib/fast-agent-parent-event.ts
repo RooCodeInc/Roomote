@@ -62,10 +62,8 @@ import {
 import { createDiscordCommunicationProviderFromRuntimeCredentials } from './discord-communication';
 import { createTeamsCommunicationProviderFromRuntimeCredentials } from './teams-communication';
 import { createTelegramCommunicationProviderFromRuntimeCredentials } from './telegram-communication';
-import {
-  findTeamsConversationServiceUrl,
-  findTeamsWorkspaceServiceUrl,
-} from '../automations/destination';
+import { findTeamsConversationRoute } from '../automations/destination';
+import { recordFastAgentConversationMessageBestEffort } from './fast-agent-provider-message';
 import {
   attachPendingPrReviewActionMessageWithRetirement,
   retirePrReviewActionMessagesBestEffort,
@@ -869,6 +867,11 @@ async function createDiscordFastAgentParentTurn(params: {
             messageId: params.event.rootMessageId,
             text: message,
           });
+          await recordFastAgentConversationMessageBestEffort({
+            sessionId: session.id,
+            conversation,
+            messageId: params.event.rootMessageId,
+          });
           params.onReplyPosted();
           return;
         }
@@ -937,6 +940,11 @@ async function createDiscordFastAgentParentTurn(params: {
                 : {}),
             }),
         });
+        await recordFastAgentConversationMessageBestEffort({
+          sessionId: session.id,
+          conversation,
+          messageId: posted.messageId,
+        });
         if (action) {
           const { superseded } =
             await attachPendingPrReviewActionMessageWithRetirement(
@@ -976,29 +984,17 @@ async function createTeamsFastAgentParentTurn(params: {
     );
   }
   const conversation = session.conversation;
-  const [conversationServiceUrl, workspaceServiceUrl, fallbackServiceUrl] =
-    await Promise.all([
-      findTeamsConversationServiceUrl(conversation.replyTarget.channelId),
-      findTeamsWorkspaceServiceUrl(conversation.workspaceId),
-      conversation.replyTarget.channelId ===
-      fallbackConversation.replyTarget.channelId
-        ? Promise.resolve(null)
-        : findTeamsConversationServiceUrl(
-            fallbackConversation.replyTarget.channelId,
-          ),
-    ]);
-  const serviceUrl =
-    conversationServiceUrl ??
-    workspaceServiceUrl ??
-    conversation.replyTarget.serviceUrl ??
-    fallbackServiceUrl ??
-    fallbackConversation.replyTarget.serviceUrl;
-  if (!serviceUrl) {
+  const route = await findTeamsConversationRoute(
+    conversation.replyTarget.channelId,
+    conversation.workspaceId,
+  );
+  if (!route) {
     throw new FastAgentParentEventDeliveryError(
       'Fast Teams parent routing was not found.',
       { replyPosted: false, permanent: true },
     );
   }
+  const serviceUrl = route.serviceUrl;
   return {
     userId: session.userId,
     conversation,
@@ -1027,6 +1023,11 @@ async function createTeamsFastAgentParentTurn(params: {
             textFormat: 'markdown',
             images,
           });
+          await recordFastAgentConversationMessageBestEffort({
+            sessionId: session.id,
+            conversation,
+            messageId: params.event.rootMessageId,
+          });
           params.onReplyPosted();
           return { messageId: params.event.rootMessageId };
         }
@@ -1042,6 +1043,11 @@ async function createTeamsFastAgentParentTurn(params: {
           text,
           textFormat: 'markdown',
           images,
+        });
+        await recordFastAgentConversationMessageBestEffort({
+          sessionId: session.id,
+          conversation,
+          messageId: posted.messageId,
         });
         params.onReplyPosted();
         return { messageId: posted.messageId };

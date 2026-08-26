@@ -20,8 +20,8 @@ const mocks = vi.hoisted(() => ({
   teamsUpdateMessage: vi.fn(),
   createTelegramProvider: vi.fn(),
   telegramPostMessage: vi.fn(),
-  findTeamsConversationServiceUrl: vi.fn(),
-  findTeamsWorkspaceServiceUrl: vi.fn(),
+  findTeamsConversationRoute: vi.fn(),
+  recordProviderMessage: vi.fn(),
   enqueueTask: vi.fn(),
   getTaskUrl: vi.fn(),
   setPendingPrReviewAction: vi.fn(),
@@ -147,8 +147,11 @@ vi.mock('./telegram-communication', () => ({
 }));
 
 vi.mock('../automations/destination', () => ({
-  findTeamsConversationServiceUrl: mocks.findTeamsConversationServiceUrl,
-  findTeamsWorkspaceServiceUrl: mocks.findTeamsWorkspaceServiceUrl,
+  findTeamsConversationRoute: mocks.findTeamsConversationRoute,
+}));
+
+vi.mock('./fast-agent-provider-message', () => ({
+  recordFastAgentConversationMessageBestEffort: mocks.recordProviderMessage,
 }));
 
 vi.mock('../routers/mcp-connections', () => ({
@@ -269,10 +272,11 @@ describe('deliverFastAgentParentEvent', () => {
     mocks.createTelegramProvider.mockResolvedValue({
       postMessage: mocks.telegramPostMessage,
     });
-    mocks.findTeamsConversationServiceUrl.mockResolvedValue(
-      'https://smba.example.com/amer/',
-    );
-    mocks.findTeamsWorkspaceServiceUrl.mockResolvedValue(null);
+    mocks.findTeamsConversationRoute.mockResolvedValue({
+      serviceUrl: 'https://smba.example.com/amer/',
+      workspaceId: 'tenant-1',
+    });
+    mocks.recordProviderMessage.mockResolvedValue(true);
     mocks.getTaskUrl.mockReturnValue(
       'https://roomote.example/task/child-task-1',
     );
@@ -735,14 +739,14 @@ describe('deliverFastAgentParentEvent', () => {
     expect(mocks.teamsPostMessage).not.toHaveBeenCalled();
   });
 
-  it('refreshes Teams routing from the session current reply channel', async () => {
+  it("refreshes Teams routing from the persisted session's current channel", async () => {
     const fallbackConversation = {
       surface: 'teams' as const,
       workspaceId: 'tenant-1',
       conversationId: 'teams-occurrence-1',
       replyTarget: {
-        channelId: 'teams-old-channel',
-        threadId: 'teams-old-root',
+        channelId: 'stale-channel',
+        threadId: 'stale-root',
         serviceUrl: 'https://stale.example.com/amer/',
       },
     };
@@ -753,33 +757,33 @@ describe('deliverFastAgentParentEvent', () => {
       conversation: {
         ...fallbackConversation,
         replyTarget: {
-          channelId: 'teams-current-channel',
-          threadId: 'teams-current-root',
-          serviceUrl: 'https://persisted.example.com/amer/',
+          channelId: 'current-channel',
+          threadId: 'current-root',
+          serviceUrl: 'https://also-stale.example.com/amer/',
         },
       },
     });
-    mocks.findTeamsConversationServiceUrl.mockImplementation(
-      async (channelId: string) =>
-        channelId === 'teams-current-channel'
-          ? 'https://current.example.com/amer/'
-          : 'https://old.example.com/amer/',
-    );
-    mocks.findTeamsWorkspaceServiceUrl.mockResolvedValue(null);
+    mocks.findTeamsConversationRoute.mockResolvedValueOnce({
+      serviceUrl: 'https://current.example.com/amer/',
+      workspaceId: 'tenant-1',
+    });
 
     await deliverFastAgentParentEvent({
-      parent: { ...parent, conversation: fallbackConversation },
+      parent: {
+        sessionId: parent.sessionId,
+        conversation: fallbackConversation,
+      },
       event,
     });
 
-    expect(mocks.findTeamsConversationServiceUrl).toHaveBeenNthCalledWith(
-      1,
-      'teams-current-channel',
+    expect(mocks.findTeamsConversationRoute).toHaveBeenCalledWith(
+      'current-channel',
+      'tenant-1',
     );
     expect(mocks.teamsPostMessage).toHaveBeenCalledWith(
       expect.objectContaining({
-        channelId: 'teams-current-channel',
-        threadId: 'teams-current-root',
+        channelId: 'current-channel',
+        threadId: 'current-root',
         serviceUrl: 'https://current.example.com/amer/',
       }),
     );

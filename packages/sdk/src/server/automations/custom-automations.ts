@@ -37,7 +37,6 @@ import {
   buildDestinationPromptContext,
   buildDestinationTaskPayloadFields,
   findTeamsConversationRoute,
-  findTeamsWorkspaceServiceUrl,
   listConnectedCommunicationProviders,
   type ResolvedAutomationDestination,
 } from './destination';
@@ -64,6 +63,7 @@ import {
   deliverFastAgentParentEvent,
   type FastAgentParentEvent,
 } from '../lib/fast-agent-parent-event';
+import { recordFastAgentConversationMessage } from '../lib/fast-agent-provider-message';
 
 const LOG_PREFIX = '[custom-automations]';
 
@@ -456,6 +456,13 @@ async function runFastCustomAutomation(params: {
       userId: params.automation.createdByUserId,
       conversation,
     });
+    if (rootMessageId) {
+      await recordFastAgentConversationMessage({
+        sessionId: session.id,
+        conversation,
+        messageId: rootMessageId,
+      });
+    }
     const event: FastAgentParentEvent = {
       type: 'automation_triggered',
       eventId,
@@ -509,16 +516,13 @@ async function runFastCustomAutomation(params: {
           await createTeamsCommunicationProviderFromRuntimeCredentials();
         const route = await findTeamsConversationRoute(
           conversation.replyTarget.channelId,
+          conversation.workspaceId,
         );
-        const serviceUrl =
-          conversation.replyTarget.serviceUrl ??
-          route?.serviceUrl ??
-          (await findTeamsWorkspaceServiceUrl(conversation.workspaceId));
-        if (provider && serviceUrl) {
+        if (provider && route) {
           await provider.updateMessage({
             channelId: conversation.replyTarget.channelId,
             messageId: rootMessageId,
-            serviceUrl,
+            serviceUrl: route.serviceUrl,
             text: message,
             textFormat: 'markdown',
           });

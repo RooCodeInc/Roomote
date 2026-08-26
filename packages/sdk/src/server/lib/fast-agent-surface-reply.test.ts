@@ -5,8 +5,7 @@ const mocks = vi.hoisted(() => ({
   createTelegramProvider: vi.fn(),
   telegramPostMessage: vi.fn(),
   telegramEditMessage: vi.fn(),
-  findTeamsConversationServiceUrl: vi.fn(),
-  findTeamsWorkspaceServiceUrl: vi.fn(),
+  findTeamsConversationRoute: vi.fn(),
 }));
 
 vi.mock('./teams-communication', () => ({
@@ -20,8 +19,7 @@ vi.mock('./telegram-communication', () => ({
 }));
 
 vi.mock('../automations/destination', () => ({
-  findTeamsConversationServiceUrl: mocks.findTeamsConversationServiceUrl,
-  findTeamsWorkspaceServiceUrl: mocks.findTeamsWorkspaceServiceUrl,
+  findTeamsConversationRoute: mocks.findTeamsConversationRoute,
 }));
 
 import { db, fastAgentConversations, userFactory } from '@roomote/db/server';
@@ -69,10 +67,10 @@ describe('buildFastAgentSurfaceReplyDelivery', () => {
       postMessage: mocks.telegramPostMessage,
       editMessageText: mocks.telegramEditMessage,
     });
-    mocks.findTeamsConversationServiceUrl.mockResolvedValue(
-      'https://smba.example.com/amer/',
-    );
-    mocks.findTeamsWorkspaceServiceUrl.mockResolvedValue(null);
+    mocks.findTeamsConversationRoute.mockResolvedValue({
+      serviceUrl: 'https://smba.example.com/amer/',
+      workspaceId: 'tenant-1',
+    });
   });
 
   it('serves web sessions with a transcript-only adapter', async () => {

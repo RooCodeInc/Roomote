@@ -435,6 +435,13 @@
       "when": 1787771579749,
       "tag": "0061_furry_hellfire_club",
       "breakpoints": true
+    },
+    {
+      "idx": 62,
+      "version": "7",
+      "when": 1787776112381,
+      "tag": "0062_neat_lady_deathstrike",
+      "breakpoints": true
     }
   ]
 }

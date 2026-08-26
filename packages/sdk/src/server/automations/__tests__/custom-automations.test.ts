@@ -12,6 +12,7 @@ const fastMocks = vi.hoisted(() => ({
   teamsUpdateMessage: vi.fn(),
   createTelegramProvider: vi.fn(),
   telegramPostMessage: vi.fn(),
+  recordProviderMessage: vi.fn(),
 }));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
@@ -22,6 +23,10 @@ vi.mock('@roomote/cloud-agents/server', () => ({
 vi.mock('../../lib/fast-agent-parent-event', () => ({
   buildSlackClientMessageId: vi.fn(() => 'client-message-id'),
   deliverFastAgentParentEvent: fastMocks.deliverParentEvent,
+}));
+
+vi.mock('../../lib/fast-agent-provider-message', () => ({
+  recordFastAgentConversationMessage: fastMocks.recordProviderMessage,
 }));
 
 vi.mock('@roomote/slack', async (importOriginal) => ({
@@ -85,7 +90,6 @@ vi.mock('../destination', () => ({
   })),
   buildDestinationTaskPayloadFields: vi.fn(() => ({})),
   findTeamsConversationRoute: vi.fn(),
-  findTeamsWorkspaceServiceUrl: vi.fn(),
   listConnectedCommunicationProviders: vi.fn(async () => ['slack', 'teams']),
 }));
 
@@ -585,6 +589,13 @@ describe('customAutomationsJob', () => {
           }),
         }),
       );
+      if ('rootMessageId' in expected) {
+        expect(fastMocks.recordProviderMessage).toHaveBeenCalledWith({
+          sessionId: '33333333-3333-4333-8333-333333333333',
+          conversation: expect.objectContaining({ surface, workspaceId }),
+          messageId: expected.rootMessageId,
+        });
+      }
     },
   );
 

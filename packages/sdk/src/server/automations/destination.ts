@@ -106,6 +106,7 @@ export async function findTeamsConversationServiceUrl(
 
 export async function findTeamsConversationRoute(
   conversationId: string,
+  workspaceId?: string,
 ): Promise<{ serviceUrl: string; workspaceId: string } | null> {
   const [row] = await db
     .select({
@@ -116,6 +117,7 @@ export async function findTeamsConversationRoute(
     .where(
       and(
         eq(teamsInstallations.conversationId, conversationId),
+        ...(workspaceId ? [eq(teamsInstallations.tenantId, workspaceId)] : []),
         eq(teamsInstallations.isActive, true),
         isNotNull(teamsInstallations.serviceUrl),
       ),
@@ -125,24 +127,6 @@ export async function findTeamsConversationRoute(
   return row?.serviceUrl && row.workspaceId
     ? { serviceUrl: row.serviceUrl, workspaceId: row.workspaceId }
     : null;
-}
-
-export async function findTeamsWorkspaceServiceUrl(
-  workspaceId: string,
-): Promise<string | null> {
-  const [row] = await db
-    .select({ serviceUrl: teamsInstallations.serviceUrl })
-    .from(teamsInstallations)
-    .where(
-      and(
-        eq(teamsInstallations.tenantId, workspaceId),
-        eq(teamsInstallations.isActive, true),
-        isNotNull(teamsInstallations.serviceUrl),
-      ),
-    )
-    .limit(1);
-
-  return row?.serviceUrl ?? null;
 }
 
 /**
