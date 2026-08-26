@@ -482,6 +482,14 @@ describe('redactBrainText', () => {
     expect(output).toContain('after');
   });
 
+  it('redacts private key blocks with repeated begin markers', () => {
+    const input = `${'-----BEGIN PRIVATE KEY-----\n'.repeat(1_000)}secret\n-----END PRIVATE KEY-----`;
+
+    const output = redactBrainText(input);
+
+    expect(output).toBe('[REDACTED]');
+  });
+
   it('leaves ordinary prose and identifiers alone', () => {
     const input =
       'Completed task tasks/abc123: merged owner/repo#42 at 2026-08-13.';
