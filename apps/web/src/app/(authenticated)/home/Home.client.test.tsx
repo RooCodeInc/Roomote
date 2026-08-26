@@ -6,7 +6,7 @@ import {
   waitFor,
 } from '@testing-library/react';
 
-import { ALL_REPOSITORIES } from '@roomote/types';
+import { ALL_REPOSITORIES, FAST_EXECUTION } from '@roomote/types';
 import type { RoutingDecision } from '@roomote/cloud-agents/server';
 import type { PromptInputMessage } from '@/components/ai-elements';
 import { AUTO_WORKSPACE_VALUE } from '@/components/tasks/constants';
@@ -31,6 +31,8 @@ const {
   mockUseLaunchTaskModels,
   mockUseRouteHomeTask,
   mockRouteHomeTask,
+  mockPreparePromptAttachments,
+  mockStartFastSession,
 } = vi.hoisted(() => ({
   mockPush: vi.fn(),
   mockToast: vi.fn(),
@@ -42,6 +44,8 @@ const {
   mockUseLaunchTaskModels: vi.fn(),
   mockUseRouteHomeTask: vi.fn(),
   mockRouteHomeTask: vi.fn(),
+  mockPreparePromptAttachments: vi.fn(),
+  mockStartFastSession: vi.fn(),
 }));
 
 vi.mock('next/navigation', () => ({
@@ -93,9 +97,21 @@ vi.mock('@/hooks/task-runs', () => ({
   useCreateStandardTaskRun: mockUseCreateStandardTaskRun,
   useRouteHomeTask: mockUseRouteHomeTask,
   useStartFastSession: () => ({
-    mutateAsync: vi.fn().mockResolvedValue({ sessionId: 'fast-session-1' }),
+    isPending: false,
+    mutateAsync: mockStartFastSession,
   }),
 }));
+
+vi.mock('@/lib/prompt-attachments', async () => {
+  const actual = await vi.importActual<
+    typeof import('@/lib/prompt-attachments')
+  >('@/lib/prompt-attachments');
+
+  return {
+    ...actual,
+    preparePromptAttachments: mockPreparePromptAttachments,
+  };
+});
 
 vi.mock('@/hooks/task-models/useLaunchTaskModels', () => ({
   useLaunchTaskModels: mockUseLaunchTaskModels,
@@ -144,9 +160,11 @@ vi.mock('@/components/tasks', async () => {
     ...actual,
     SelectWorkspace: ({
       allowAuto,
+      allowFast,
       allowBranchSelection,
     }: {
       allowAuto?: boolean;
+      allowFast?: boolean;
       allowBranchSelection?: boolean;
     }) => {
       const { watch, setValue } = useFormContext();
@@ -181,6 +199,18 @@ vi.mock('@/components/tasks', async () => {
           >
             Use auto workspace
           </button>
+          {allowFast && (
+            <button
+              type="button"
+              onClick={() => {
+                setValue('repository', FAST_EXECUTION);
+                setValue('environmentId', undefined);
+                setValue('branch', '');
+              }}
+            >
+              Use Fast workspace
+            </button>
+          )}
           <button
             type="button"
             onClick={() => {
@@ -335,6 +365,10 @@ describe('Home', () => {
     vi.clearAllMocks();
 
     mockProcessImageFiles.mockResolvedValue([]);
+    mockPreparePromptAttachments.mockImplementation(
+      ({ text }: { text: string }) => Promise.resolve({ text }),
+    );
+    mockStartFastSession.mockResolvedValue({ sessionId: 'fast-session-1' });
     mockCreateStandardTaskRun.mockResolvedValue({
       success: true,
       id: 4,
@@ -392,6 +426,26 @@ describe('Home', () => {
     });
 
     expect(mockCreateStandardTaskRun).not.toHaveBeenCalled();
+  });
+
+  it('starts a Fast session with an image-only prompt', async () => {
+    mockPreparePromptAttachments.mockResolvedValueOnce({
+      text: '',
+      images: ['data:image/png;base64,image-1'],
+    });
+    render(<Home initialPlaceholderIndex={0} />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Use Fast workspace' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Submit prompt' }));
+
+    await waitFor(() => {
+      expect(mockStartFastSession).toHaveBeenCalledWith({
+        text: '',
+        images: ['data:image/png;base64,image-1'],
+        model: 'openrouter/openai/gpt-5.4',
+      });
+    });
+    expect(mockPush).toHaveBeenCalledWith('/sessions/fast-session-1');
   });
 
   it('renders the feedback prompt below the input and opens its dialog', async () => {
