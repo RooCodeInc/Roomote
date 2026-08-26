@@ -93,7 +93,7 @@ function toConversation(
   >,
 ): FastAgentConversation | null {
   const parsed = fastAgentConversationSchema.safeParse(
-    record.surface === 'automation'
+    record.surface === 'automation' || record.surface === 'web'
       ? {
           surface: record.surface,
           workspaceId: record.workspaceId,

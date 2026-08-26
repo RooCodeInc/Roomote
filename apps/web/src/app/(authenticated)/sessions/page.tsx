@@ -90,7 +90,10 @@ export default async function SessionsPage({
                         </Tooltip>
                       </div>
                       <p className="ph-no-capture my-1 line-clamp-2 text-lg leading-tight text-foreground group-hover:underline">
-                        {session.conversationId}
+                        {session.title ??
+                          (session.surface === 'web'
+                            ? 'Fast session'
+                            : session.conversationId)}
                       </p>
                       <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
                         <span className="ph-no-capture truncate">

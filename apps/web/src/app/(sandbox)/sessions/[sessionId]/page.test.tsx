@@ -103,10 +103,51 @@ describe('Fast session detail page', () => {
     expect(html).not.toContain('OpenCode workspace details unavailable');
     expect(transcriptMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        messages: expect.arrayContaining([
+        sessionId: 'session-1',
+        canReply: false,
+        initialMessages: expect.arrayContaining([
           expect.objectContaining({ eventId: 'turn-1:user' }),
         ]),
       }),
+      undefined,
+    );
+  });
+
+  it('enables the reply composer for web-surface sessions', async () => {
+    authorizeMock.mockResolvedValue({
+      success: true,
+      userId: 'user-1',
+      isAdmin: false,
+    });
+    getFastSessionByIdMock.mockResolvedValue({
+      id: 'session-2',
+      userId: 'user-1',
+      ownerName: 'User',
+      ownerEmail: 'user@example.com',
+      title: 'Rotate the API keys',
+      surface: 'web',
+      workspaceId: 'user-1',
+      conversationId: 'b3b0a53e-6dab-4bb8-b3a5-111111111111',
+      currentReplyChannelId: null,
+      currentReplyThreadId: null,
+      replyTargetVerified: true,
+      openCodeSessionId: null,
+      messageCount: 0,
+      createdAt: new Date('2026-01-01T00:00:00.000Z'),
+      updatedAt: new Date('2026-01-02T00:00:00.000Z'),
+      messages: [],
+    });
+
+    const html = renderToStaticMarkup(
+      await SessionDetailPage({
+        params: Promise.resolve({ sessionId: 'session-2' }),
+      }),
+    );
+
+    expect(html).toContain('Rotate the API keys');
+    expect(html).not.toContain('b3b0a53e-6dab-4bb8-b3a5-111111111111');
+    expect(transcriptMock).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionId: 'session-2', canReply: true }),
       undefined,
     );
   });

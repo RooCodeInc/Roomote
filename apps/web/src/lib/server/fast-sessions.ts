@@ -4,6 +4,7 @@ import {
 } from '@roomote/types';
 import {
   and,
+  asc,
   db,
   desc,
   eq,
@@ -47,6 +48,7 @@ const fastSessionSelection = {
   userId: fastAgentConversations.userId,
   ownerName: users.name,
   ownerEmail: users.email,
+  title: fastAgentConversations.title,
   surface: fastAgentConversations.surface,
   workspaceId: fastAgentConversations.workspaceId,
   conversationId: fastAgentConversations.conversationId,
@@ -86,6 +88,108 @@ function fastSessionScope(auth: FastSessionAuth) {
         ),
     ),
   );
+}
+
+/** Light session lookup with the same visibility scope as the list/detail. */
+export async function findAccessibleFastSession(
+  auth: FastSessionAuth,
+  sessionId: string,
+) {
+  const [session] = await db
+    .select({
+      id: fastAgentConversations.id,
+      userId: fastAgentConversations.userId,
+      title: fastAgentConversations.title,
+      surface: fastAgentConversations.surface,
+      workspaceId: fastAgentConversations.workspaceId,
+      conversationId: fastAgentConversations.conversationId,
+    })
+    .from(fastAgentConversations)
+    .where(
+      and(eq(fastAgentConversations.id, sessionId), fastSessionScope(auth)),
+    )
+    .limit(1);
+
+  return session ?? null;
+}
+
+function sanitizeFastSessionMessageRow<
+  T extends Pick<
+    FastSessionMessage,
+    'eventType' | 'contentBlocks' | 'metadata' | 'payload'
+  >,
+>(row: T): T {
+  const sanitized = sanitizeEnvelopeFields(
+    row.eventType,
+    row.contentBlocks,
+    (row.metadata as Record<string, unknown> | null) ?? null,
+    (row.payload as Record<string, unknown> | null) ?? null,
+    { maxOutputChars: ACP_UI_TOOL_OUTPUT_MAX_CHARS },
+  );
+
+  return {
+    ...row,
+    contentBlocks: sanitized.contentBlocks,
+    metadata: sanitized.metadata,
+    payload: sanitized.payload ?? {},
+  };
+}
+
+/**
+ * Rows created or rewritten after `sinceMs` (epoch millis of the row
+ * updatedAt), sanitized for the client. Rows mutate in place (tool results
+ * replace their call slot), so consumers merge by eventId, not append.
+ */
+export async function getFastSessionMessagesSince(
+  sessionId: string,
+  sinceMs: number,
+): Promise<{
+  messages: FastSessionMessage[];
+  cursor: number;
+}> {
+  const rows = await db
+    .select({
+      id: fastAgentMessages.id,
+      eventId: fastAgentMessages.eventId,
+      turnId: fastAgentMessages.turnId,
+      turnSeq: fastAgentMessages.turnSeq,
+      ts: fastAgentMessages.ts,
+      eventType: fastAgentMessages.eventType,
+      role: fastAgentMessages.role,
+      contentBlocks: fastAgentMessages.contentBlocks,
+      metadata: fastAgentMessages.metadata,
+      payload: fastAgentMessages.payload,
+      source: fastAgentMessages.source,
+      nativeSessionId: fastAgentMessages.nativeSessionId,
+      nativeMessageId: fastAgentMessages.nativeMessageId,
+      createdAt: fastAgentMessages.createdAt,
+      // Millisecond Dates truncate Postgres microsecond timestamps, which
+      // would replay the newest row on every poll — keep the cursor as a
+      // fractional epoch-millisecond float instead.
+      updatedAtMs: sql<number>`extract(epoch from ${fastAgentMessages.updatedAt}) * 1000`,
+    })
+    .from(fastAgentMessages)
+    .where(
+      and(
+        eq(fastAgentMessages.conversationId, sessionId),
+        sql`coalesce(${fastAgentMessages.metadata} ->> 'visibleInTranscript', 'true') <> 'false'`,
+        sql`extract(epoch from ${fastAgentMessages.updatedAt}) * 1000 > ${sinceMs}`,
+      ),
+    )
+    .orderBy(
+      asc(fastAgentMessages.ts),
+      asc(fastAgentMessages.turnSeq),
+      asc(fastAgentMessages.createdAt),
+      asc(fastAgentMessages.id),
+    );
+
+  let cursor = sinceMs;
+  const messages = rows.map(({ updatedAtMs, ...row }) => {
+    cursor = Math.max(cursor, Number(updatedAtMs));
+    return sanitizeFastSessionMessageRow(row);
+  });
+
+  return { messages, cursor };
 }
 
 export function encodeFastSessionCursor(row: {
@@ -223,22 +327,9 @@ export async function getFastSessionById(
   // Sanitize at the read boundary, matching the task transcript path: the DB
   // stores full payloads, but oversized tool output is truncated before it is
   // serialized into the RSC payload.
-  const messages = windowed.reverse().map((row): FastSessionMessage => {
-    const sanitized = sanitizeEnvelopeFields(
-      row.eventType,
-      row.contentBlocks,
-      (row.metadata as Record<string, unknown> | null) ?? null,
-      (row.payload as Record<string, unknown> | null) ?? null,
-      { maxOutputChars: ACP_UI_TOOL_OUTPUT_MAX_CHARS },
-    );
-
-    return {
-      ...row,
-      contentBlocks: sanitized.contentBlocks,
-      metadata: sanitized.metadata,
-      payload: sanitized.payload ?? {},
-    };
-  });
+  const messages = windowed
+    .reverse()
+    .map((row): FastSessionMessage => sanitizeFastSessionMessageRow(row));
 
   return {
     ...session,

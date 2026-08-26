@@ -40,6 +40,7 @@ import {
   upsertFastAgentMessage,
   type FastAgentActiveTask,
 } from './fast-agent-session';
+import { refreshFastAgentSessionTitle } from './fast-agent-title';
 import {
   classifyNonTaskInferenceError,
   FAST_AGENT_SESSION_PERMISSIONS,
@@ -953,6 +954,9 @@ export async function answerFastAgentQuestion({
       },
       true,
     );
+    if (!platformEvent) {
+      void refreshFastAgentSessionTitle({ sessionId: session.id, userId });
+    }
     const sessionActiveTasks = await getActiveFastAgentTasks(session.id);
     const resolvedActiveTasks = [
       ...new Map(

@@ -33,6 +33,10 @@ import {
 } from '@roomote/types';
 
 import {
+  replyToFastSessionCommand,
+  startFastSessionCommand,
+} from '../commands/fast-sessions';
+import {
   analyticsChartInputSchema,
   analyticsDetailsInputSchema,
   analyticsExportInputSchema,
@@ -2829,6 +2833,31 @@ export const appRouter = createRouter({
 
   backgroundAgents: automationsRouter,
   automations: automationsRouter,
+
+  fastSessions: createRouter({
+    start: protectedProcedure
+      .input(
+        z.object({
+          text: z.string().trim().min(1),
+          images: z.array(z.string()).optional(),
+        }),
+      )
+      .mutation(({ ctx: { auth }, input }) =>
+        startFastSessionCommand(auth, input),
+      ),
+
+    reply: protectedProcedure
+      .input(
+        z.object({
+          sessionId: z.string().uuid(),
+          text: z.string().trim().min(1),
+          images: z.array(z.string()).optional(),
+        }),
+      )
+      .mutation(({ ctx: { auth }, input }) =>
+        replyToFastSessionCommand(auth, input),
+      ),
+  }),
 
   agentBehavior: createRouter({
     get: protectedProcedure.query(({ ctx: { auth } }) =>

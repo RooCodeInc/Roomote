@@ -4,12 +4,7 @@ import { notFound } from 'next/navigation';
 import { authorize } from '@/lib/server/auth-context';
 import { getFastSessionById } from '@/lib/server/fast-sessions';
 import { WorkspaceHeader, WorkspaceSurface } from '@/components/layout';
-import {
-  ArrowLeft,
-  BotMessageSquare,
-  Button,
-  EmptyState,
-} from '@/components/system';
+import { ArrowLeft, Button } from '@/components/system';
 
 import { FastSessionTranscript } from './FastSessionTranscript';
 
@@ -46,29 +41,18 @@ export default async function SessionDetailPage({
             </Link>
           </Button>
           <h1 className="ph-no-capture min-w-0 flex-1 truncate text-sm font-medium">
-            {session.conversationId}
+            {session.title ??
+              (session.surface === 'web'
+                ? 'Fast session'
+                : session.conversationId)}
           </h1>
         </WorkspaceHeader>
 
         <FastSessionTranscript
-          messages={session.messages}
-          header={
-            session.hasOlderMessages ? (
-              <p className="mb-4 rounded-md border border-border bg-muted px-3 py-2 text-center text-xs text-muted-foreground">
-                Older messages in this session are not shown.
-              </p>
-            ) : null
-          }
-          footer={
-            session.messages.length === 0 ? (
-              <EmptyState
-                icon={<BotMessageSquare className="size-6" />}
-                title="No canonical messages"
-                description="This session predates canonical Fast message persistence or has not recorded a new turn yet."
-                containerClassName="py-10"
-              />
-            ) : null
-          }
+          sessionId={session.id}
+          initialMessages={session.messages}
+          hasOlderMessages={session.hasOlderMessages}
+          canReply={session.surface === 'web'}
         />
       </div>
     </WorkspaceSurface>

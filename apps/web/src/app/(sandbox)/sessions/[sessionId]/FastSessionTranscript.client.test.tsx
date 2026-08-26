@@ -1,13 +1,59 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import { ACP_ENVELOPE_EVENT_TYPES } from '@roomote/types';
 
 import { FastSessionTranscript } from './FastSessionTranscript';
+
+const replyMutate = vi.fn();
+
+vi.mock('@/trpc/client', () => ({
+  useTRPCClient: () => ({
+    fastSessions: { reply: { mutate: replyMutate } },
+  }),
+}));
+
+class FakeEventSource {
+  static instances: FakeEventSource[] = [];
+  listeners = new Map<string, Set<(event: MessageEvent) => void>>();
+
+  constructor(public url: string) {
+    FakeEventSource.instances.push(this);
+  }
+
+  addEventListener(type: string, listener: (event: MessageEvent) => void) {
+    const set = this.listeners.get(type) ?? new Set();
+    set.add(listener);
+    this.listeners.set(type, set);
+  }
+
+  removeEventListener(type: string, listener: (event: MessageEvent) => void) {
+    this.listeners.get(type)?.delete(listener);
+  }
+
+  close() {}
+
+  emit(type: string, data: unknown) {
+    for (const listener of this.listeners.get(type) ?? []) {
+      listener({ data: JSON.stringify(data) } as MessageEvent);
+    }
+  }
+}
+
+beforeEach(() => {
+  FakeEventSource.instances = [];
+  replyMutate.mockReset();
+  vi.stubGlobal('EventSource', FakeEventSource);
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 describe('FastSessionTranscript', () => {
   it('renders persisted user and assistant text with task transcript primitives', () => {
     render(
       <FastSessionTranscript
-        messages={[
+        sessionId="session-1"
+        initialMessages={[
           {
             id: 'tool-call-1',
             eventId: 'turn-1:tool-call:0',
@@ -70,17 +116,15 @@ describe('FastSessionTranscript', () => {
             createdAt: new Date('2026-01-01T00:00:01.000Z'),
           },
         ]}
-        footer={<p>Transcript limitation</p>}
       />,
     );
 
     expect(screen.getByRole('log')).toBeInTheDocument();
     expect(screen.getByText('What changed?')).toBeInTheDocument();
     expect(screen.getByText('Two files')).toBeInTheDocument();
-    expect(screen.getByText('Transcript limitation')).toBeInTheDocument();
   });
 
-  it('updates one canonical tool row from in-progress to completed', () => {
+  it('updates one canonical tool row from in-progress to completed via the stream', () => {
     const baseMessage = {
       id: 'tool-1',
       eventId: 'turn-1:tool:0',
@@ -123,14 +167,27 @@ describe('FastSessionTranscript', () => {
         exitCode: null,
         output: '{"success":true}',
       },
+      createdAt: '2026-01-01T00:00:01.000Z',
     };
-    const { rerender } = render(
-      <FastSessionTranscript messages={[toolCall]} />,
+
+    render(
+      <FastSessionTranscript
+        sessionId="session-1"
+        initialMessages={[toolCall]}
+      />,
     );
 
     expect(screen.getAllByText('launch_task')).toHaveLength(1);
+    expect(FakeEventSource.instances).toHaveLength(1);
+    expect(FakeEventSource.instances[0]!.url).toBe(
+      '/api/sessions/session-1/stream',
+    );
 
-    rerender(<FastSessionTranscript messages={[toolResult]} />);
+    act(() => {
+      FakeEventSource.instances[0]!.emit('messages', {
+        messages: [toolResult],
+      });
+    });
 
     expect(screen.getAllByText('launch_task')).toHaveLength(1);
   });
@@ -138,7 +195,8 @@ describe('FastSessionTranscript', () => {
   it('cold-loads one completed tool row before an intervening kickoff', () => {
     render(
       <FastSessionTranscript
-        messages={[
+        sessionId="session-1"
+        initialMessages={[
           {
             id: 'tool-1',
             eventId: 'turn-1:tool:0',
@@ -200,5 +258,36 @@ describe('FastSessionTranscript', () => {
 
     expect(screen.getAllByText('launch_task')).toHaveLength(1);
     expect(screen.getByText('I started the checkout fix.')).toBeInTheDocument();
+  });
+
+  it('shows a reply composer for web sessions and sends replies optimistically', () => {
+    replyMutate.mockResolvedValue({ success: true });
+
+    render(
+      <FastSessionTranscript
+        sessionId="session-1"
+        initialMessages={[]}
+        canReply
+      />,
+    );
+
+    const input = screen.getByPlaceholderText('Reply to Fast…');
+    fireEvent.change(input, { target: { value: 'Follow up question' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+
+    expect(replyMutate).toHaveBeenCalledWith({
+      sessionId: 'session-1',
+      text: 'Follow up question',
+    });
+    expect(screen.getByText('Follow up question')).toBeInTheDocument();
+  });
+
+  it('hides the reply composer for non-web sessions', () => {
+    render(
+      <FastSessionTranscript sessionId="session-1" initialMessages={[]} />,
+    );
+
+    expect(screen.queryByPlaceholderText('Reply to Fast…')).toBeNull();
+    expect(screen.getByText('No canonical messages')).toBeInTheDocument();
   });
 });
