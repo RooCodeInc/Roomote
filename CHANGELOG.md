@@ -24,6 +24,7 @@ This release gives Fast durable shared memory, adds Slack direct-message deliver
 - Keep Fast conversations moving through retryable provider failures without repeating completed tool effects, and forward follow-up instructions to active tasks before posting the confirmation reply.
 - Restore web-initiated Fast turns in standalone production images by shipping native-tool runtime dependencies and removing stale generated tool files during setup.
 - Keep the current page visible while authenticated navigation loads and correct the label shown when an input request is cancelled.
+- Make Fast coding-task kickoffs clearer by describing the repository work and naming the target repository when it is known without exposing internal orchestration details.
 
 ## 0.43.0 (2026-08-26)
 
