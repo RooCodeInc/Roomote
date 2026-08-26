@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { ACP_ENVELOPE_EVENT_TYPES } from '@roomote/types';
 
 import { FastSessionTranscript } from './FastSessionTranscript';
@@ -133,5 +133,72 @@ describe('FastSessionTranscript', () => {
     rerender(<FastSessionTranscript messages={[toolResult]} />);
 
     expect(screen.getAllByText('launch_task')).toHaveLength(1);
+  });
+
+  it('cold-loads one completed tool row before an intervening kickoff', () => {
+    render(
+      <FastSessionTranscript
+        messages={[
+          {
+            id: 'tool-1',
+            eventId: 'turn-1:tool:0',
+            turnId: 'turn-1',
+            turnSeq: 1,
+            ts: 2,
+            eventType: ACP_ENVELOPE_EVENT_TYPES.ToolResult,
+            role: 'tool',
+            contentBlocks: [{ type: 'text', text: '{"success":true}' }],
+            metadata: { visibleInTranscript: true },
+            payload: {
+              toolCallId: 'turn-1:tool:0',
+              title: 'launch_task',
+              kind: 'tool',
+              status: 'completed',
+              isExecute: false,
+              isMcp: false,
+              mcpServerName: null,
+              mcpToolName: null,
+              toolName: 'launch_task',
+              command: null,
+              exitCode: null,
+              output: '{"success":true}',
+              rawInput: { arguments: { prompt: 'Fix checkout' } },
+            },
+            source: 'slack',
+            nativeSessionId: 'opencode-1',
+            nativeMessageId: null,
+            createdAt: new Date('2026-01-01T00:00:01.000Z'),
+          },
+          {
+            id: 'kickoff-1',
+            eventId: 'turn-1:assistant:0',
+            turnId: 'turn-1',
+            turnSeq: 2,
+            ts: 3,
+            eventType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+            role: 'assistant',
+            contentBlocks: [
+              { type: 'text', text: 'I started the checkout fix.' },
+            ],
+            metadata: { visibleInTranscript: true },
+            payload: { purpose: 'progress', kickoff: true },
+            source: 'slack',
+            nativeSessionId: 'opencode-1',
+            nativeMessageId: null,
+            createdAt: new Date('2026-01-01T00:00:02.000Z'),
+          },
+        ]}
+      />,
+    );
+
+    const activityToggle = screen.getByRole('button', {
+      name: /Worked for/,
+    });
+    expect(screen.queryByText('launch_task')).not.toBeInTheDocument();
+
+    fireEvent.click(activityToggle);
+
+    expect(screen.getAllByText('launch_task')).toHaveLength(1);
+    expect(screen.getByText('I started the checkout fix.')).toBeInTheDocument();
   });
 });
