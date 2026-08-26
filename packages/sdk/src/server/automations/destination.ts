@@ -21,7 +21,7 @@ import { findUserDirectMessageDestination } from '../lib/user-direct-message';
 export type ResolvedAutomationDestination = {
   provider: CommunicationProvider;
   channelId: string;
-  /** Slack workspace that owns the channel when routing must be installation-specific. */
+  /** Provider workspace/tenant that owns the destination when routing is installation-specific. */
   teamId?: string;
   /** Bot Framework serviceUrl; present for Teams destinations. */
   serviceUrl?: string;
@@ -102,6 +102,31 @@ export async function findTeamsConversationServiceUrl(
     .limit(1);
 
   return row?.serviceUrl ?? null;
+}
+
+export async function findTeamsConversationRoute(
+  conversationId: string,
+  workspaceId?: string,
+): Promise<{ serviceUrl: string; workspaceId: string } | null> {
+  const [row] = await db
+    .select({
+      serviceUrl: teamsInstallations.serviceUrl,
+      workspaceId: teamsInstallations.tenantId,
+    })
+    .from(teamsInstallations)
+    .where(
+      and(
+        eq(teamsInstallations.conversationId, conversationId),
+        ...(workspaceId ? [eq(teamsInstallations.tenantId, workspaceId)] : []),
+        eq(teamsInstallations.isActive, true),
+        isNotNull(teamsInstallations.serviceUrl),
+      ),
+    )
+    .limit(1);
+
+  return row?.serviceUrl && row.workspaceId
+    ? { serviceUrl: row.serviceUrl, workspaceId: row.workspaceId }
+    : null;
 }
 
 /**

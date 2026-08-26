@@ -90,6 +90,7 @@ function toConversation(
     | 'conversationId'
     | 'currentReplyChannelId'
     | 'currentReplyThreadId'
+    | 'currentReplyServiceUrl'
   >,
 ): FastAgentConversation | null {
   const parsed = fastAgentConversationSchema.safeParse(
@@ -107,6 +108,9 @@ function toConversation(
             channelId: record.currentReplyChannelId,
             ...(record.currentReplyThreadId
               ? { threadId: record.currentReplyThreadId }
+              : {}),
+            ...(record.currentReplyServiceUrl
+              ? { serviceUrl: record.currentReplyServiceUrl }
               : {}),
           },
         },
@@ -176,6 +180,10 @@ export const fastAgentConversationRepository: FastAgentConversationRepository =
                 'replyTarget' in conversation
                   ? conversation.replyTarget.threadId
                   : null,
+              currentReplyServiceUrl:
+                'replyTarget' in conversation
+                  ? (conversation.replyTarget.serviceUrl ?? null)
+                  : null,
               replyTargetVerified: true,
             })
             .onConflictDoNothing();
@@ -200,6 +208,10 @@ export const fastAgentConversationRepository: FastAgentConversationRepository =
             currentReplyThreadId:
               'replyTarget' in conversation
                 ? (conversation.replyTarget.threadId ?? null)
+                : null,
+            currentReplyServiceUrl:
+              'replyTarget' in conversation
+                ? (conversation.replyTarget.serviceUrl ?? null)
                 : null,
             replyTargetVerified: true,
             updatedAt: sql`now()`,
@@ -235,6 +247,10 @@ export const fastAgentConversationRepository: FastAgentConversationRepository =
             currentReplyThreadId:
               'replyTarget' in fallbackConversation
                 ? (fallbackConversation.replyTarget.threadId ?? null)
+                : null,
+            currentReplyServiceUrl:
+              'replyTarget' in fallbackConversation
+                ? (fallbackConversation.replyTarget.serviceUrl ?? null)
                 : null,
             replyTargetVerified: true,
             updatedAt: sql`now()`,

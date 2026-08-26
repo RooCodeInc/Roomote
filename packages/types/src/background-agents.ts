@@ -189,6 +189,41 @@ export function isBackgroundAutomationUserTargetKind(
   );
 }
 
+export const communicationAutomationTargetKinds = {
+  slack: { channel: 'slack_channel', direct_message: 'slack_user' },
+  discord: { channel: 'discord_channel', direct_message: 'discord_user' },
+  teams: { channel: 'teams_channel', direct_message: 'teams_user' },
+  telegram: { channel: 'telegram_chat', direct_message: 'telegram_user' },
+} as const satisfies Record<
+  CommunicationProvider,
+  Record<'channel' | 'direct_message', BackgroundAutomationTargetKind>
+>;
+
+export function getCommunicationAutomationTargetKind(
+  provider: CommunicationProvider,
+  mode: 'channel' | 'direct_message',
+): BackgroundAutomationTargetKind {
+  return communicationAutomationTargetKinds[provider][mode];
+}
+
+export function isCommunicationAutomationTarget(
+  target: Pick<AutomationTarget, 'provider' | 'targetKind'>,
+): target is Pick<AutomationTarget, 'provider' | 'targetKind'> & {
+  provider: CommunicationProvider;
+} {
+  if (!(target.provider in communicationAutomationTargetKinds)) {
+    return false;
+  }
+  const kinds =
+    communicationAutomationTargetKinds[
+      target.provider as CommunicationProvider
+    ];
+  return (
+    target.targetKind === kinds.channel ||
+    target.targetKind === kinds.direct_message
+  );
+}
+
 /**
  * A single automation target stored in automations.targets (jsonb array).
  */
@@ -370,3 +405,4 @@ export function hasEnabledBackgroundAgents(
     getBackgroundAgentFrequencyValues(settings).some((value) => value !== 'off')
   );
 }
+import type { CommunicationProvider } from './communication';

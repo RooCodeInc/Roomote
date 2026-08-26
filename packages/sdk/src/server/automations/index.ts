@@ -28,6 +28,7 @@ export { getAutomationRunner, runAutomationNow } from './run-now';
 export {
   buildDestinationTaskPayloadFields,
   findTeamsConversationDisplayName,
+  findTeamsConversationRoute,
   findTeamsConversationServiceUrl,
   listConnectedCommunicationProviders,
   resolveAutomationRuntimeDestination,

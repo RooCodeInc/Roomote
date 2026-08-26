@@ -123,9 +123,13 @@ export function buildFastAgentSystemPrompt({
       ? 'Slack'
       : surface === 'discord'
         ? 'Discord'
-        : surface === 'web'
-          ? 'the Roomote web app'
-          : 'a stored automation conversation';
+        : surface === 'teams'
+          ? 'Microsoft Teams'
+          : surface === 'telegram'
+            ? 'Telegram'
+            : surface === 'web'
+              ? 'the Roomote web app'
+              : 'a stored automation conversation';
   const reactionGuidance =
     surface === 'slack'
       ? '- Use `send_chat_reaction` only for a lightweight acknowledgement or an emoji-only answer. Put the Slack emoji name without colons in `name`. Reserve "eyes" for actively looking, use "thumbsup" for acknowledgement or agreement, and "white_check_mark" for completion.'
