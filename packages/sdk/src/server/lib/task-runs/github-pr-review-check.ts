@@ -11,6 +11,7 @@ import {
   getMarkedSection,
   getTaskUrl,
   isReviewInProgressStatusLine,
+  isSafetyNetReviewStatusLine,
   parseReviewSummaryMarkerSha,
   REVIEW_CHECKLIST_END_MARKER,
   REVIEW_CHECKLIST_START_MARKER,
@@ -38,17 +39,26 @@ function getReviewTaskUrl(taskId: string) {
   });
 }
 
-function getTerminalReviewSummaryResult(input: {
+type ReviewSummaryClassification =
+  | { kind: 'missing' }
+  | { kind: 'stale' }
+  | { kind: 'pending' }
+  | { kind: 'terminal'; reviewStatus: string; reviewSummaryBody: string };
+
+function classifyReviewSummary(input: {
   reviewSummaryBody?: string;
-  expectedHeadSha: string;
-}) {
+  expectedHeadSha?: string;
+}): ReviewSummaryClassification {
   if (!input.reviewSummaryBody?.trim().startsWith(REVIEW_SUMMARY_MARKER)) {
-    return null;
+    return { kind: 'missing' };
   }
 
   const reviewedHeadSha = parseReviewSummaryMarkerSha(input.reviewSummaryBody);
-  if (!reviewedHeadSha || !input.expectedHeadSha.startsWith(reviewedHeadSha)) {
-    return null;
+  if (
+    input.expectedHeadSha &&
+    (!reviewedHeadSha || !input.expectedHeadSha.startsWith(reviewedHeadSha))
+  ) {
+    return { kind: 'stale' };
   }
 
   const reviewStatus = getMarkedSection({
@@ -57,6 +67,29 @@ function getTerminalReviewSummaryResult(input: {
     endMarker: REVIEW_STATUS_END_MARKER,
   });
   if (!reviewStatus || isReviewInProgressStatusLine(reviewStatus)) {
+    return { kind: 'pending' };
+  }
+
+  return {
+    kind: 'terminal',
+    reviewStatus,
+    reviewSummaryBody: input.reviewSummaryBody,
+  };
+}
+
+function getTerminalReviewSummaryResult(input: {
+  reviewSummaryBody?: string;
+  expectedHeadSha: string;
+}) {
+  const classification = classifyReviewSummary(input);
+  if (classification.kind !== 'terminal') {
+    return null;
+  }
+
+  // A safety-net status ("Review could not be completed." etc.) marks a run
+  // that never published a real result; only the run-status-driven path knows
+  // the correct conclusion for it.
+  if (isSafetyNetReviewStatusLine(classification.reviewStatus)) {
     return null;
   }
 
@@ -84,6 +117,31 @@ async function findGithubPrLinkage(input: {
         ? [eq(taskPullRequests.prNumber, input.prNumber)]
         : []),
     ),
+  });
+}
+
+async function completeCheckRunWithResult(input: {
+  octokit: Awaited<ReturnType<typeof getInstallationOctokit>>;
+  repository: { owner: string; repo: string };
+  checkRunId: number;
+  result: {
+    conclusion: 'success' | 'failure' | 'cancelled';
+    title: string;
+    summary: string;
+  };
+  taskUrl: string;
+}): Promise<void> {
+  await input.octokit.rest.checks.update({
+    ...input.repository,
+    check_run_id: input.checkRunId,
+    status: 'completed',
+    conclusion: input.result.conclusion,
+    completed_at: new Date().toISOString(),
+    details_url: input.taskUrl,
+    output: {
+      title: input.result.title,
+      summary: `${input.result.summary} [Open the task](${input.taskUrl}).`,
+    },
   });
 }
 
@@ -149,8 +207,18 @@ export async function publishGithubPrReviewCheck(input: {
         columns: { startedAt: true, status: true },
       });
 
+      // Only a run that actually executed can own the summary comment's
+      // terminal result. A freshly enqueued same-head re-review (Pending)
+      // must not be completed from the previous review's summary.
+      const canCompleteFromSummary =
+        run?.startedAt != null &&
+        (run.status === RunStatus.Running || run.status === RunStatus.Idle);
+
       let reviewSummaryBody: string | undefined;
-      if (currentLinkage?.githubReviewCommentId) {
+      if (
+        currentLinkage?.githubReviewCommentId &&
+        (run?.status === RunStatus.Completed || canCompleteFromSummary)
+      ) {
         try {
           const { data: comment } = await octokit.rest.issues.getComment({
             ...repository,
@@ -166,46 +234,30 @@ export async function publishGithubPrReviewCheck(input: {
         }
       }
 
-      const terminalSummaryResult = getTerminalReviewSummaryResult({
-        reviewSummaryBody,
-        expectedHeadSha: input.headSha,
-      });
-
-      if (
+      const result =
         run?.status === RunStatus.Completed ||
         run?.status === RunStatus.Failed ||
         run?.status === RunStatus.Canceled
-      ) {
-        const result = getGithubPrReviewCheckResult({
-          runStatus: run.status,
-          reviewSummaryBody,
-          safetyNetFinalized: false,
-          expectedHeadSha: input.headSha,
-        });
-        await octokit.rest.checks.update({
-          ...repository,
-          check_run_id: checkRun.id,
-          status: 'completed',
-          conclusion: result.conclusion,
-          completed_at: new Date().toISOString(),
-          details_url: taskUrl,
-          output: {
-            title: result.title,
-            summary: `${result.summary} [Open the task](${taskUrl}).`,
-          },
-        });
-      } else if (terminalSummaryResult) {
-        await octokit.rest.checks.update({
-          ...repository,
-          check_run_id: checkRun.id,
-          status: 'completed',
-          conclusion: terminalSummaryResult.conclusion,
-          completed_at: new Date().toISOString(),
-          details_url: taskUrl,
-          output: {
-            title: terminalSummaryResult.title,
-            summary: `${terminalSummaryResult.summary} [Open the task](${taskUrl}).`,
-          },
+          ? getGithubPrReviewCheckResult({
+              runStatus: run.status,
+              reviewSummaryBody,
+              safetyNetFinalized: false,
+              expectedHeadSha: input.headSha,
+            })
+          : canCompleteFromSummary
+            ? getTerminalReviewSummaryResult({
+                reviewSummaryBody,
+                expectedHeadSha: input.headSha,
+              })
+            : null;
+
+      if (result) {
+        await completeCheckRunWithResult({
+          octokit,
+          repository,
+          checkRunId: checkRun.id,
+          result,
+          taskUrl,
         });
       } else if (status === 'queued' && run?.startedAt) {
         await octokit.rest.checks.update({
@@ -267,46 +319,50 @@ export async function completeGithubPrReviewCheckFromSummary(input: {
     return;
   }
 
-  const linkage = await findGithubPrLinkage(input);
-  if (!linkage?.githubCheckRunId) {
-    return;
-  }
+  // Best-effort like the other check publishers: a checks-API failure must
+  // not fail the webhook delivery that carried the summary.
+  try {
+    const result = getTerminalReviewSummaryResult({
+      reviewSummaryBody: input.reviewSummaryBody,
+      expectedHeadSha: input.reviewHeadSha,
+    });
+    if (!result) {
+      return;
+    }
 
-  const octokit = await getInstallationOctokit({
-    installationId: input.installationId,
-  });
-  const { data: checkRun } = await octokit.rest.checks.get({
-    ...repository,
-    check_run_id: linkage.githubCheckRunId,
-  });
-  if (
-    checkRun.status === 'completed' ||
-    !checkRun.head_sha.startsWith(input.reviewHeadSha)
-  ) {
-    return;
-  }
+    const linkage = await findGithubPrLinkage(input);
+    if (!linkage?.githubCheckRunId) {
+      return;
+    }
 
-  const result = getTerminalReviewSummaryResult({
-    reviewSummaryBody: input.reviewSummaryBody,
-    expectedHeadSha: checkRun.head_sha,
-  });
-  if (!result) {
-    return;
-  }
+    const octokit = await getInstallationOctokit({
+      installationId: input.installationId,
+    });
+    const { data: checkRun } = await octokit.rest.checks.get({
+      ...repository,
+      check_run_id: linkage.githubCheckRunId,
+    });
+    if (
+      checkRun.status === 'completed' ||
+      !checkRun.head_sha.startsWith(input.reviewHeadSha)
+    ) {
+      return;
+    }
 
-  const taskUrl = getReviewTaskUrl(input.taskId);
-  await octokit.rest.checks.update({
-    ...repository,
-    check_run_id: linkage.githubCheckRunId,
-    status: 'completed',
-    conclusion: result.conclusion,
-    completed_at: new Date().toISOString(),
-    details_url: taskUrl,
-    output: {
-      title: result.title,
-      summary: `${result.summary} [Open the task](${taskUrl}).`,
-    },
-  });
+    await completeCheckRunWithResult({
+      octokit,
+      repository,
+      checkRunId: linkage.githubCheckRunId,
+      result,
+      taskUrl: getReviewTaskUrl(input.taskId),
+    });
+  } catch (error) {
+    console.error(
+      `[githubPrReviewCheck] Failed to complete check from summary for task ${input.taskId}: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
 }
 
 export async function markGithubPrReviewCheckInProgress(input: {
@@ -371,10 +427,9 @@ export function getGithubPrReviewCheckResult(input: {
     };
   }
 
-  if (
-    !input.reviewSummaryBody?.trim().startsWith(REVIEW_SUMMARY_MARKER) ||
-    input.safetyNetFinalized
-  ) {
+  const classification = classifyReviewSummary(input);
+
+  if (classification.kind === 'missing' || input.safetyNetFinalized) {
     return {
       conclusion: 'failure',
       title: 'Roomote review result unavailable',
@@ -382,11 +437,7 @@ export function getGithubPrReviewCheckResult(input: {
     };
   }
 
-  const reviewedHeadSha = parseReviewSummaryMarkerSha(input.reviewSummaryBody);
-  if (
-    input.expectedHeadSha &&
-    (!reviewedHeadSha || !input.expectedHeadSha.startsWith(reviewedHeadSha))
-  ) {
+  if (classification.kind === 'stale') {
     return {
       conclusion: 'failure',
       title: 'Roomote review result is stale',
@@ -395,12 +446,7 @@ export function getGithubPrReviewCheckResult(input: {
     };
   }
 
-  const reviewStatus = getMarkedSection({
-    content: input.reviewSummaryBody,
-    startMarker: REVIEW_STATUS_START_MARKER,
-    endMarker: REVIEW_STATUS_END_MARKER,
-  });
-  if (!reviewStatus || isReviewInProgressStatusLine(reviewStatus)) {
+  if (classification.kind === 'pending') {
     return {
       conclusion: 'failure',
       title: 'Roomote review result unavailable',
@@ -409,7 +455,7 @@ export function getGithubPrReviewCheckResult(input: {
   }
 
   const checklist = getMarkedSection({
-    content: input.reviewSummaryBody,
+    content: classification.reviewSummaryBody,
     startMarker: REVIEW_CHECKLIST_START_MARKER,
     endMarker: REVIEW_CHECKLIST_END_MARKER,
   });

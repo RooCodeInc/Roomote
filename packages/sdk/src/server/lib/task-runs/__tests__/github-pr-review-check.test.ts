@@ -360,6 +360,73 @@ describe('GitHub PR review check lifecycle', () => {
 
     expect(mockUpdateInstallationCheck).not.toHaveBeenCalled();
   });
+
+  it('does not complete a fresh same-head re-review from the previous terminal summary', async () => {
+    mockFindFirstLinkage.mockResolvedValue({
+      githubCheckRunId: null,
+      githubReviewCommentId: 30,
+    });
+    mockFindFirstRun.mockResolvedValue({
+      startedAt: null,
+      status: RunStatus.Pending,
+    });
+    mockCreateCheck.mockResolvedValue({ data: { id: 20 } });
+    mockGetIssueComment.mockResolvedValue({
+      data: {
+        body: '<!-- roomote-review-summary sha=abcdef -->\n<!-- roomote-review-status:start -->\nNo code issues found.\n<!-- roomote-review-status:end -->\n<!-- roomote-review-checklist:start -->\n<!-- roomote-review-checklist:end -->',
+      },
+    });
+
+    await publishGithubPrReviewCheck({
+      installationId: 1,
+      repository: 'owner/repo',
+      prNumber: 42,
+      headSha: 'abcdef',
+      taskId: 'task-1',
+      runId: 2,
+    });
+
+    expect(mockGetIssueComment).not.toHaveBeenCalled();
+    expect(mockUpdateInstallationCheck).not.toHaveBeenCalled();
+  });
+
+  it('does not treat a safety-net finalized summary as a passing review', async () => {
+    mockFindFirstLinkage.mockResolvedValue({ githubCheckRunId: 20 });
+    mockGetCheck.mockResolvedValue({
+      data: { head_sha: 'abcdef', status: 'in_progress' },
+    });
+
+    await completeGithubPrReviewCheckFromSummary({
+      installationId: 1,
+      repository: 'owner/repo',
+      prNumber: 42,
+      taskId: 'task-1',
+      reviewHeadSha: 'abcdef',
+      reviewSummaryBody:
+        '<!-- roomote-review-summary sha=abcdef -->\n<!-- roomote-review-status:start -->\nReview could not be completed. [See task](https://roomote.test/task/task-1)\n<!-- roomote-review-status:end -->\n<!-- roomote-review-checklist:start -->\n<!-- roomote-review-checklist:end -->',
+    });
+
+    expect(mockUpdateInstallationCheck).not.toHaveBeenCalled();
+  });
+
+  it('swallows checks API failures instead of failing the webhook delivery', async () => {
+    mockFindFirstLinkage.mockResolvedValue({ githubCheckRunId: 20 });
+    mockGetCheck.mockRejectedValue(new Error('Not Found'));
+
+    await expect(
+      completeGithubPrReviewCheckFromSummary({
+        installationId: 1,
+        repository: 'owner/repo',
+        prNumber: 42,
+        taskId: 'task-1',
+        reviewHeadSha: 'abcdef',
+        reviewSummaryBody:
+          '<!-- roomote-review-summary sha=abcdef -->\n<!-- roomote-review-status:start -->\nNo code issues found.\n<!-- roomote-review-status:end -->',
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(mockUpdateInstallationCheck).not.toHaveBeenCalled();
+  });
 });
 
 describe('getGithubPrReviewCheckResult', () => {
