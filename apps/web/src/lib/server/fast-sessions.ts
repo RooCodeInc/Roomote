@@ -48,6 +48,7 @@ const fastSessionSelection = {
   userId: fastAgentConversations.userId,
   ownerName: users.name,
   ownerEmail: users.email,
+  ownerImageUrl: users.imageUrl,
   title: fastAgentConversations.title,
   surface: fastAgentConversations.surface,
   workspaceId: fastAgentConversations.workspaceId,

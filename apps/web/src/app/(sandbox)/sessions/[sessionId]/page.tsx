@@ -1,10 +1,8 @@
-import Link from 'next/link';
 import { notFound } from 'next/navigation';
 
 import { authorize } from '@/lib/server/auth-context';
 import { getFastSessionById } from '@/lib/server/fast-sessions';
 import { WorkspaceHeader, WorkspaceSurface } from '@/components/layout';
-import { ArrowLeft, Button } from '@/components/system';
 
 import { FastSessionTranscript } from './FastSessionTranscript';
 
@@ -30,16 +28,6 @@ export default async function SessionDetailPage({
     <WorkspaceSurface>
       <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col rounded-r-3xl bg-background">
         <WorkspaceHeader contentClassName="flex-row items-center gap-3">
-          <Button
-            asChild
-            variant="ghost"
-            size="icon"
-            aria-label="Back to sessions"
-          >
-            <Link href="/sessions">
-              <ArrowLeft />
-            </Link>
-          </Button>
           <h1 className="ph-no-capture min-w-0 flex-1 truncate text-sm font-medium">
             {session.title ??
               (session.surface === 'web'
