@@ -7,8 +7,10 @@ import {
   INFERENCE_PROVIDER_MAX_RETRIES,
   MANAGE_CUSTOM_AUTOMATIONS_TOOL,
   ROOMOTE_MCP_ID,
+  activeRunStatuses,
   formatErrorForLog,
   resolveInferenceProviderRetryDelayMs,
+  type RunStatus,
 } from '@roomote/types';
 import { getDeploymentTaskModelOptions } from '@roomote/db/server';
 import { Env } from '@roomote/env';
@@ -522,7 +524,7 @@ function selectActiveTaskId(
   activeTasks: Map<string, FastAgentActiveTask>,
 ): { taskId?: string; error?: string } {
   if (activeTasks.size === 0) {
-    return { error: 'There is no active delegated task.' };
+    return { error: 'There is no active or resumable delegated task.' };
   }
   const taskId =
     requestedTaskId ??
@@ -530,11 +532,13 @@ function selectActiveTaskId(
   if (!taskId) {
     return {
       error:
-        'Multiple delegated tasks are active. Ask the user which task they mean.',
+        'Multiple delegated tasks are available. Ask the user which task they mean.',
     };
   }
   if (!activeTasks.has(taskId)) {
-    return { error: `Task ${taskId} is not active in this conversation.` };
+    return {
+      error: `Task ${taskId} is not active or resumable in this conversation.`,
+    };
   }
   return { taskId };
 }
@@ -671,7 +675,7 @@ export async function answerFastAgentQuestion({
         ]),
       ).values(),
     ];
-    const currentActiveTasks = new Map(
+    const currentTasks = new Map(
       resolvedActiveTasks.map((task) => [task.taskId, task]),
     );
     const { bootstrapMessages, turnMessage } = buildFastAgentMessages({
@@ -1071,7 +1075,7 @@ export async function answerFastAgentQuestion({
               postKickoff: deliverKickoff,
             });
             if (result.success) {
-              currentActiveTasks.set(result.taskId, { taskId: result.taskId });
+              currentTasks.set(result.taskId, { taskId: result.taskId });
               if (result.kickoffDelivered) {
                 visibleUpdatePosted = true;
               }
@@ -1086,7 +1090,7 @@ export async function answerFastAgentQuestion({
             const args = taskMessageArgsSchema.parse(call.args);
             const ackError = requireAcknowledgement();
             if (ackError) return ackError;
-            const target = selectActiveTaskId(args.taskId, currentActiveTasks);
+            const target = selectActiveTaskId(args.taskId, currentTasks);
             if (!target.taskId) return { success: false, error: target.error };
             const signature = `send_task_message:${target.taskId}`;
             if (completedTaskActions.has(signature)) {
@@ -1108,8 +1112,20 @@ export async function answerFastAgentQuestion({
             const args = taskIdArgsSchema.parse(call.args);
             const ackError = requireAcknowledgement();
             if (ackError) return ackError;
-            const target = selectActiveTaskId(args.taskId, currentActiveTasks);
+            const target = selectActiveTaskId(args.taskId, currentTasks);
             if (!target.taskId) return { success: false, error: target.error };
+            const targetTask = currentTasks.get(target.taskId);
+            if (
+              targetTask?.status !== undefined &&
+              !(activeRunStatuses as readonly RunStatus[]).includes(
+                targetTask.status,
+              )
+            ) {
+              return {
+                success: false,
+                error: `Task ${target.taskId} is not active in this conversation.`,
+              };
+            }
             const signature = `cancel_task:${target.taskId}`;
             if (completedTaskActions.has(signature)) {
               return {
@@ -1123,7 +1139,9 @@ export async function answerFastAgentQuestion({
               { userId, apiBaseUrl },
               target.taskId,
             );
-            if (result.success) currentActiveTasks.delete(target.taskId);
+            if (result.success) {
+              currentTasks.delete(target.taskId);
+            }
             return result;
           }
 

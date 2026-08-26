@@ -1210,7 +1210,10 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     expect(adapter.postReply).toHaveBeenCalledTimes(3);
     expect(mocks.sendTaskMessage).toHaveBeenCalledWith(
       expect.objectContaining({ userId: 'user-1' }),
-      { taskId: 'task-1', message: 'Include the regression test.' },
+      {
+        taskId: 'task-1',
+        message: 'Include the regression test.',
+      },
     );
     expect(order).toEqual([
       'kickoff',
@@ -1373,7 +1376,10 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
 
     expect(mocks.sendTaskMessage).toHaveBeenCalledWith(
       expect.objectContaining({ userId: 'user-1' }),
-      { taskId: 'task-1', message: 'Include the failing test.' },
+      {
+        taskId: 'task-1',
+        message: 'Include the failing test.',
+      },
     );
     expect(mocks.cancelTask).toHaveBeenCalledWith(
       expect.objectContaining({ userId: 'user-1' }),

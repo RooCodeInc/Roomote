@@ -17,6 +17,7 @@ const {
   mockUserFindFirst,
   mockTaskPullRequestFindFirst,
   mockTaskRunFindFirst,
+  MockSnapshotResumeAlreadyExistsError,
   mockAnd,
   mockEq,
 } = vi.hoisted(() => ({
@@ -38,6 +39,7 @@ const {
   mockUserFindFirst: vi.fn(),
   mockTaskPullRequestFindFirst: vi.fn(),
   mockTaskRunFindFirst: vi.fn(),
+  MockSnapshotResumeAlreadyExistsError: class extends Error {},
   mockAnd: vi.fn((...conditions: unknown[]) => conditions),
   mockEq: vi.fn((left: unknown, right: unknown) => ({ left, right })),
 }));
@@ -76,6 +78,7 @@ vi.mock('@roomote/sdk/server', async (importOriginal) => {
 
 vi.mock('@roomote/cloud-agents/server', () => ({
   enqueueTask: mockEnqueueTask,
+  SnapshotResumeAlreadyExistsError: MockSnapshotResumeAlreadyExistsError,
 }));
 
 vi.mock('@roomote/communication/messages', () => ({
@@ -1163,6 +1166,66 @@ describe('sendMessageToTask', () => {
       }),
       expect.any(Object),
     );
+  });
+
+  it('resumes the same task when an active steer races with run settlement', async () => {
+    const activeRun = createActiveRun({ snapshotId: 'snap-race' });
+    const completedRun = createActiveRun({
+      status: 'completed',
+      sandboxServerUrl: null,
+      snapshotId: 'snap-race',
+      payload: { repo: 'acme/app' },
+    });
+    mockFindLatestTaskRun
+      .mockResolvedValueOnce(activeRun)
+      .mockResolvedValueOnce(completedRun);
+    mockSteerTaskMutate.mockRejectedValueOnce(new Error('worker exited'));
+
+    const result = await steerMessageToTask({
+      taskId: 'task-1',
+      userId: 'user-1',
+      message: 'Continue after settlement.',
+    });
+
+    expect(result).toEqual({
+      success: true,
+      result: { resumed: true, runId: 77, taskId: 'task-1' },
+    });
+    expect(mockEnqueueTask).toHaveBeenCalledTimes(1);
+    expect(mockEnqueueTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        task: expect.objectContaining({
+          sourceRunId: 42,
+        }),
+      }),
+      expect.any(Object),
+    );
+  });
+
+  it('returns a retryable conflict when another resume wins the race', async () => {
+    mockFindLatestTaskRun.mockResolvedValue(
+      createActiveRun({
+        status: 'completed',
+        sandboxServerUrl: null,
+        snapshotId: 'snap-race',
+        payload: { repo: 'acme/app' },
+      }),
+    );
+    mockEnqueueTask.mockRejectedValueOnce(
+      new MockSnapshotResumeAlreadyExistsError(),
+    );
+
+    const result = await steerMessageToTask({
+      taskId: 'task-1',
+      userId: 'user-1',
+      message: 'Continue after the other resume.',
+    });
+
+    expect(result).toEqual({
+      success: false,
+      error: 'Task continuation is already in progress. Try again shortly.',
+      status: 409,
+    });
   });
 
   it('returns a clear error when a sleeping task snapshot has expired', async () => {
