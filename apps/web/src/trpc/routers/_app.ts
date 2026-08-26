@@ -276,6 +276,8 @@ import {
   completeSetupCommand,
   getSetupStatusCommand,
 } from '../commands/setup';
+import { completeSetupWithStarterTasksCommand } from '../commands/setup/starter-tasks';
+import { SETUP_STARTER_TASK_IDS } from '@/lib/setup-starter-tasks';
 import {
   getSetupNewStatusCommand,
   getSetupBootstrapStatusCommand,
@@ -2529,6 +2531,21 @@ export const appRouter = createRouter({
       )
       .mutation(({ ctx: { auth }, input }) =>
         completeSetupCommand(auth, input),
+      ),
+
+    completeWithStarterTasks: protectedProcedure
+      .input(
+        z.object({
+          launchBatchId: z.string().uuid(),
+          selectedStarterTaskIds: z
+            .array(z.enum(SETUP_STARTER_TASK_IDS))
+            .max(SETUP_STARTER_TASK_IDS.length),
+          anonymousAnalyticsEnabled: z.boolean().optional(),
+          productUpdatesEnabled: z.boolean().optional(),
+        }),
+      )
+      .mutation(({ ctx: { auth }, input }) =>
+        completeSetupWithStarterTasksCommand(auth, input),
       ),
   }),
 

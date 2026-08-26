@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX "task_runs_launch_idempotency_key_unique" ON "task_runs" USING btree (("payload"->>'launchIdempotencyKey')) WHERE "task_runs"."payload"->>'launchIdempotencyKey' IS NOT NULL;
