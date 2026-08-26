@@ -1,8 +1,9 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ACP_ENVELOPE_EVENT_TYPES,
+  getImageUrisFromContentBlocks,
   getTextFromContentBlocks,
   inferAcpMessageKind,
   type AcpEventType,
@@ -42,6 +43,13 @@ function compareTranscriptMessages(a: TranscriptMessage, b: TranscriptMessage) {
   return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
 }
 
+function getUserMessageIdentity(message: TranscriptMessage) {
+  return JSON.stringify([
+    getTextFromContentBlocks(message.contentBlocks)?.trim() ?? '',
+    getImageUrisFromContentBlocks(message.contentBlocks),
+  ]);
+}
+
 export function FastSessionTranscript({
   sessionId,
   initialMessages,
@@ -71,6 +79,7 @@ export function FastSessionTranscript({
   >(
     () => new Map(initialMessages.map((message) => [message.eventId, message])),
   );
+  const serverMessagesRef = useRef(serverMessages);
   const [optimisticMessages, setOptimisticMessages] = useState<
     TranscriptMessage[]
   >([]);
@@ -85,13 +94,32 @@ export function FastSessionTranscript({
         const { messages } = JSON.parse(event.data) as {
           messages: TranscriptMessage[];
         };
-        setServerMessages((previous) => {
-          const next = new Map(previous);
-          for (const message of messages) {
-            next.set(message.eventId, message);
-          }
-          return next;
-        });
+        const previous = serverMessagesRef.current;
+        const canonicalUserMessages = messages.filter(
+          (message) =>
+            message.role === 'user' && !previous.has(message.eventId),
+        );
+        const next = new Map(previous);
+        for (const message of messages) {
+          next.set(message.eventId, message);
+        }
+        serverMessagesRef.current = next;
+        setServerMessages(next);
+
+        if (canonicalUserMessages.length > 0) {
+          setOptimisticMessages((current) => {
+            const pending = [...current];
+            for (const canonical of canonicalUserMessages) {
+              const index = pending.findIndex(
+                (optimistic) =>
+                  getUserMessageIdentity(optimistic) ===
+                  getUserMessageIdentity(canonical),
+              );
+              if (index >= 0) pending.splice(index, 1);
+            }
+            return pending;
+          });
+        }
       } catch {
         // Ignore malformed frames; the next poll re-sends current state.
       }
@@ -116,22 +144,9 @@ export function FastSessionTranscript({
   }, [sessionId]);
 
   const messages = useMemo(() => {
-    const serverList = [...serverMessages.values()];
-    const serverUserTexts = new Set(
-      serverList
-        .filter((message) => message.role === 'user')
-        .map((message) =>
-          getTextFromContentBlocks(message.contentBlocks)?.trim(),
-        )
-        .filter(Boolean),
+    return [...serverMessages.values(), ...optimisticMessages].sort(
+      compareTranscriptMessages,
     );
-    const pending = optimisticMessages.filter(
-      (message) =>
-        !serverUserTexts.has(
-          getTextFromContentBlocks(message.contentBlocks)?.trim(),
-        ),
-    );
-    return [...serverList, ...pending].sort(compareTranscriptMessages);
   }, [serverMessages, optimisticMessages]);
 
   const uiMessages = useMemo(
@@ -182,6 +197,16 @@ export function FastSessionTranscript({
         }
 
         optimisticId = `optimistic:${Date.now()}:${Math.random().toString(36).slice(2)}`;
+        const imageBlocks: TranscriptMessage['contentBlocks'] = images.flatMap(
+          (image) => {
+            const match = /^data:(image\/[^;,]+);base64,(.+)$/i.exec(
+              image.trim(),
+            );
+            return match?.[1] && match[2]
+              ? [{ type: 'image', mimeType: match[1], data: match[2] }]
+              : [];
+          },
+        );
         const optimistic: TranscriptMessage = {
           id: optimisticId,
           eventId: optimisticId,
@@ -190,7 +215,10 @@ export function FastSessionTranscript({
           ts: Date.now(),
           eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
           role: 'user',
-          contentBlocks: [{ type: 'text', text: prepared.text }],
+          contentBlocks: [
+            { type: 'text', text: prepared.text },
+            ...imageBlocks,
+          ],
           metadata: { visibleInTranscript: true },
           payload: {},
           source: 'web',
