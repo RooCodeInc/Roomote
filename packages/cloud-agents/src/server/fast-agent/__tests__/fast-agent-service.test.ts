@@ -2,6 +2,9 @@ const mocks = vi.hoisted(() => ({
   appendVisibleMessages: vi.fn(),
   getActiveTasks: vi.fn(),
   getSession: vi.fn(),
+  getNativeRuntime: vi.fn(),
+  setOpenCodeSession: vi.fn(),
+  upsertMessage: vi.fn(),
   getEnvironments: vi.fn(),
   getTaskModelOptions: vi.fn(),
   generateText: vi.fn(),
@@ -30,6 +33,7 @@ const mocks = vi.hoisted(() => ({
         args: Record<string, unknown>;
       }) => Promise<unknown>)
     | undefined,
+  mcpCapabilityAvailable: false,
 }));
 
 const nativeToolNames = vi.hoisted(
@@ -55,6 +59,8 @@ vi.mock('../fast-agent-session', () => ({
   appendFastAgentVisibleMessages: mocks.appendVisibleMessages,
   getActiveFastAgentTasks: mocks.getActiveTasks,
   getOrCreateFastAgentSession: mocks.getSession,
+  setFastAgentOpenCodeSession: mocks.setOpenCodeSession,
+  upsertFastAgentMessage: mocks.upsertMessage,
 }));
 
 vi.mock('../../router', () => ({
@@ -84,6 +90,9 @@ vi.mock('../../non-task-provider-usage', () => ({
   isNonTaskOpenCodeSessionNotFoundError: (error: unknown) =>
     error instanceof Error &&
     error.name === 'NonTaskOpenCodeSessionNotFoundError',
+  isNonTaskOpenCodeSessionValidationError: (error: unknown) =>
+    error instanceof Error &&
+    error.name === 'NonTaskOpenCodeSessionValidationError',
 }));
 
 vi.mock('../fast-agent-opencode-session', () => ({
@@ -100,14 +109,7 @@ vi.mock('../fast-agent-native-tool-bridge', () => ({
     send_chat_reply: true,
     task: true,
   },
-  getFastAgentNativeToolRuntime: vi.fn(async () => ({
-    directory: '/tmp/fast-native-tools',
-    mcpCapability: 'mcp-capability-1',
-    env: {
-      ROOMOTE_FAST_TOOL_BRIDGE_URL: 'http://127.0.0.1:4321/tool',
-      ROOMOTE_FAST_TOOL_BRIDGE_TOKEN: 'test-token',
-    },
-  })),
+  getFastAgentNativeToolRuntime: mocks.getNativeRuntime,
   bindFastAgentNativeToolExecutor: mocks.bindExecutor,
   createFastAgentSpillTurnBudget: () => ({ calls: 0, outputBytes: 0 }),
   bindFastAgentMcpToolExecutor: mocks.bindMcpExecutor,
@@ -185,6 +187,18 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     vi.clearAllMocks();
     mocks.nativeExecutor = undefined;
     mocks.mcpExecutor = undefined;
+    mocks.mcpCapabilityAvailable = false;
+    mocks.getNativeRuntime.mockImplementation(async () => {
+      mocks.mcpCapabilityAvailable = true;
+      return {
+        directory: '/tmp/fast-native-tools',
+        mcpCapability: 'mcp-capability-1',
+        env: {
+          ROOMOTE_FAST_TOOL_BRIDGE_URL: 'http://127.0.0.1:4321/tool',
+          ROOMOTE_FAST_TOOL_BRIDGE_TOKEN: 'test-token',
+        },
+      };
+    });
     mocks.runSession.mockImplementation(
       ({
         prompt,
@@ -194,8 +208,13 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         execute: (
           session: { id?: string },
           selectedPrompt: string,
+          context: { path: string; validateSession: boolean },
         ) => Promise<unknown>;
-      }) => execute({ id: 'opencode-session-1' }, prompt),
+      }) =>
+        execute({ id: 'opencode-session-1' }, prompt, {
+          path: 'warm',
+          validateSession: false,
+        }),
     );
     mocks.bindExecutor.mockImplementation(
       (_sessionID, _conversationId, executor) => {
@@ -206,15 +225,25 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       },
     );
     mocks.bindMcpExecutor.mockImplementation((_capability, executor) => {
+      if (!mocks.mcpCapabilityAvailable) {
+        throw new Error('The Fast MCP capability is unavailable.');
+      }
       mocks.mcpExecutor = executor;
       return () => {
         mocks.mcpExecutor = undefined;
+        mocks.mcpCapabilityAvailable = false;
       };
+    });
+    mocks.revokeMcpCapabilities.mockImplementation(() => {
+      mocks.mcpCapabilityAvailable = false;
     });
     mocks.getSession.mockResolvedValue({
       id: 'conversation-1',
       compatibilityMessages: [],
+      openCodeSessionId: null,
     });
+    mocks.setOpenCodeSession.mockResolvedValue(undefined);
+    mocks.upsertMessage.mockResolvedValue(undefined);
     mocks.getActiveTasks.mockResolvedValue([]);
     mocks.getEnvironments.mockResolvedValue([
       {
@@ -311,6 +340,58 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       purpose: 'closeout',
       message: 'It coordinates incoming requests.',
     });
+    expect(mocks.upsertMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: 'conversation-1',
+        message: expect.objectContaining({
+          eventId: '100.2:user',
+          turnSeq: 0,
+          eventType: 'roomote_runtime.user_prompt',
+        }),
+      }),
+    );
+    expect(mocks.upsertMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: expect.objectContaining({
+          eventId: '100.2:tool:0',
+          eventType: 'roomote_runtime.tool_call',
+          metadata: { visibleInTranscript: true },
+          payload: expect.objectContaining({
+            toolCallId: '100.2:tool:0',
+            toolName: 'send_chat_reply',
+          }),
+        }),
+      }),
+    );
+    expect(mocks.upsertMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: expect.objectContaining({
+          eventId: '100.2:assistant:0',
+          eventType: 'roomote_runtime.assistant_message',
+          nativeSessionId: 'opencode-session-1',
+        }),
+      }),
+    );
+    expect(mocks.upsertMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: expect.objectContaining({
+          eventId: '100.2:tool:0',
+          eventType: 'roomote_runtime.tool_result',
+          payload: expect.objectContaining({
+            toolCallId: '100.2:tool:0',
+            status: 'completed',
+          }),
+        }),
+      }),
+    );
+    const toolWrites = mocks.upsertMessage.mock.calls
+      .map(([input]) => input.message)
+      .filter((message) => message.eventId === '100.2:tool:0');
+    expect(toolWrites.map((message) => message.eventType)).toEqual([
+      'roomote_runtime.tool_call',
+      'roomote_runtime.tool_result',
+    ]);
+    expect(new Set(toolWrites.map((message) => message.turnSeq)).size).toBe(1);
     expect(mocks.generateText).toHaveBeenCalledWith(
       expect.objectContaining({
         modelRole: 'orchestration',
@@ -335,6 +416,96 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         expect.objectContaining({ role: 'assistant' }),
       ],
     });
+    expect(mocks.setOpenCodeSession).toHaveBeenCalledWith({
+      sessionId: 'conversation-1',
+      openCodeSessionId: 'opencode-session-1',
+    });
+  });
+
+  it('validates a durable session before resuming with the new turn', async () => {
+    mocks.getSession.mockResolvedValue({
+      id: 'conversation-1',
+      compatibilityMessages: [
+        { role: 'user', content: 'Earlier question' },
+        { role: 'assistant', content: 'Earlier answer' },
+      ],
+      openCodeSessionId: 'persisted-session',
+    });
+    mocks.runSession.mockImplementation(({ prompt, execute }) =>
+      execute({ id: 'persisted-session' }, prompt, {
+        path: 'cold_resume',
+        validateSession: true,
+      }),
+    );
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('persisted-session');
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'closeout',
+          message: 'It coordinates incoming requests.',
+        });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+
+    expect(mocks.runSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        persistedSessionId: 'persisted-session',
+      }),
+    );
+    expect(mocks.generateText).toHaveBeenCalledWith(
+      expect.objectContaining({
+        prompt: expect.not.stringContaining('Earlier answer'),
+      }),
+      { id: 'persisted-session' },
+      expect.objectContaining({ validateSession: true }),
+    );
+    expect(mocks.setOpenCodeSession).not.toHaveBeenCalled();
+  });
+
+  it('rebuilds missing durable sessions and stores the replacement id', async () => {
+    const { FastAgentOpenCodeSessionManager } = await vi.importActual<
+      typeof import('../fast-agent-opencode-session')
+    >('../fast-agent-opencode-session');
+    const manager = new FastAgentOpenCodeSessionManager();
+    const prompts: string[] = [];
+    mocks.runSession.mockImplementation((input) => manager.run(input));
+    mocks.getSession.mockResolvedValue({
+      id: 'conversation-1',
+      compatibilityMessages: [
+        { role: 'user', content: 'Earlier question' },
+        { role: 'assistant', content: 'Earlier answer' },
+      ],
+      openCodeSessionId: 'missing-session',
+    });
+    mocks.generateText.mockImplementation(async (params, session, options) => {
+      prompts.push(params.prompt);
+      if (options.validateSession) {
+        const error = new Error('Session not found');
+        error.name = 'NonTaskOpenCodeSessionNotFoundError';
+        throw error;
+      }
+      session.id = 'replacement-session';
+      await options.onSessionReady(session.id);
+      await invokeTool(nativeToolNames.sendChatReply, {
+        purpose: 'closeout',
+        message: 'Recovered from visible history.',
+      });
+      return '';
+    });
+
+    await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+
+    expect(prompts).toHaveLength(2);
+    expect(prompts[0]).not.toContain('Earlier answer');
+    expect(prompts[1]).toContain('Earlier answer');
+    expect(mocks.setOpenCodeSession).toHaveBeenCalledWith({
+      sessionId: 'conversation-1',
+      openCodeSessionId: 'replacement-session',
+    });
+    expect(mocks.getNativeRuntime).toHaveBeenCalledTimes(2);
   });
 
   it('keeps Fast-native tools parent-only while MCP tools use the shared broker', async () => {
@@ -489,6 +660,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       .mockResolvedValueOnce({
         id: 'conversation-1',
         compatibilityMessages: [],
+        openCodeSessionId: null,
       })
       .mockResolvedValue({
         id: 'conversation-1',
@@ -496,6 +668,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
           { role: 'user', content: 'Earlier question' },
           { role: 'assistant', content: 'Earlier answer' },
         ],
+        openCodeSessionId: null,
       });
     mocks.generateText.mockImplementation(async (params, session, options) => {
       prompts.push(params.prompt);
@@ -565,10 +738,14 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         execute: (
           session: { id?: string },
           selectedPrompt: string,
+          context: { path: string; validateSession: boolean },
         ) => Promise<unknown>;
       }) => {
         await new Promise((resolve) => setTimeout(resolve, 50));
-        return execute({ id: 'opencode-session-1' }, prompt);
+        return execute({ id: 'opencode-session-1' }, prompt, {
+          path: 'warm',
+          validateSession: false,
+        });
       },
     );
 
@@ -731,10 +908,43 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     );
   });
 
+  it('still answers when the canonical user prompt cannot persist', async () => {
+    mocks.upsertMessage.mockRejectedValue(new Error('database unavailable'));
+
+    const adapter = callbacks();
+    await expect(
+      answerFastAgentQuestion({
+        ...baseParams,
+        adapter,
+      }),
+    ).resolves.toBe('It coordinates incoming requests.');
+    expect(mocks.generateText).toHaveBeenCalledOnce();
+  });
+
+  it('does not repost when canonical persistence fails after a visible reply', async () => {
+    mocks.upsertMessage.mockImplementation(async ({ message }) => {
+      if (message.eventType === 'roomote_runtime.assistant_message') {
+        throw new Error('database unavailable');
+      }
+    });
+    const adapter = callbacks();
+
+    await expect(
+      answerFastAgentQuestion({ ...baseParams, adapter }),
+    ).resolves.toBe('It coordinates incoming requests.');
+    expect(adapter.postReply).toHaveBeenCalledOnce();
+  });
+
   it('posts final assistant text only as a defensive fallback', async () => {
     mocks.generateText.mockImplementation(
       async (_params, _session, options) => {
         await options.onSessionReady('opencode-session-1');
+        await options.onMessageCompleted?.({
+          id: 'native-message-1',
+          sessionId: 'opencode-session-1',
+          createdAtMs: 100,
+          completedAtMs: 200,
+        });
         return 'Fallback final text';
       },
     );
@@ -747,6 +957,16 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       purpose: 'closeout',
       message: 'Fallback final text',
     });
+    expect(mocks.upsertMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: expect.objectContaining({
+          eventId: '100.2:assistant:0',
+          ts: 200,
+          nativeSessionId: 'opencode-session-1',
+          nativeMessageId: 'native-message-1',
+        }),
+      }),
+    );
   });
 
   it('passes native integration arguments and results without text encoding', async () => {
@@ -1143,6 +1363,32 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     );
     expect(launchTask).toHaveBeenCalledWith(
       expect.objectContaining({ model: 'anthropic/claude-sonnet-5' }),
+    );
+    const canonicalWrites = mocks.upsertMessage.mock.calls.map(
+      ([input]) => input.message,
+    );
+    const toolCallIndex = canonicalWrites.findIndex(
+      (message) =>
+        message.eventId === '100.2:tool:0' &&
+        message.eventType === 'roomote_runtime.tool_call',
+    );
+    const kickoffIndex = canonicalWrites.findIndex(
+      (message) =>
+        message.eventType === 'roomote_runtime.assistant_message' &&
+        JSON.stringify(message.contentBlocks).includes(
+          'delegating the checkout fix',
+        ),
+    );
+    const toolResultIndex = canonicalWrites.findIndex(
+      (message) =>
+        message.eventId === '100.2:tool:0' &&
+        message.eventType === 'roomote_runtime.tool_result',
+    );
+    expect(toolCallIndex).toBeGreaterThanOrEqual(0);
+    expect(kickoffIndex).toBeGreaterThan(toolCallIndex);
+    expect(toolResultIndex).toBeGreaterThan(kickoffIndex);
+    expect(canonicalWrites[toolResultIndex]?.turnSeq).toBe(
+      canonicalWrites[toolCallIndex]?.turnSeq,
     );
   });
 
@@ -2118,6 +2364,16 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       expect(
         JSON.stringify(mocks.appendVisibleMessages.mock.lastCall),
       ).not.toContain('Retrying in');
+      const retryWrites = mocks.upsertMessage.mock.calls
+        .map(([input]) => input.message)
+        .filter((message) => message.eventId === '100.2:retry-notice:0');
+      expect(retryWrites.length).toBeGreaterThan(1);
+      expect(new Set(retryWrites.map((message) => message.eventId)).size).toBe(
+        1,
+      );
+      expect(retryWrites.at(-1)?.contentBlocks).toEqual([
+        { type: 'text', text: 'Connection restored.' },
+      ]);
     } finally {
       vi.useRealTimers();
     }

@@ -1,9 +1,11 @@
 import type { ModelMessage } from 'ai';
 import {
   and,
+  type CreateFastAgentMessage,
   db,
   eq,
   fastAgentConversations,
+  fastAgentMessages,
   sql,
   type DatabaseOrTransaction,
 } from '@roomote/db/server';
@@ -20,7 +22,14 @@ export type FastAgentConversationRecord = {
    * not this field, owns the live warm transcript.
    */
   compatibilityMessages: ModelMessage[];
+  /** Last successfully completed native session; validated before cold resume. */
+  openCodeSessionId: string | null;
 };
+
+export type FastAgentMessageWrite = Omit<
+  CreateFastAgentMessage,
+  'conversationId'
+>;
 
 export interface FastAgentConversationRepository {
   getOrCreate(input: {
@@ -36,6 +45,14 @@ export interface FastAgentConversationRepository {
   appendVisibleMessages(input: {
     conversationId: string;
     messages: ModelMessage[];
+  }): Promise<void>;
+  upsertMessage(input: {
+    conversationId: string;
+    message: FastAgentMessageWrite;
+  }): Promise<void>;
+  setOpenCodeSession(input: {
+    conversationId: string;
+    openCodeSessionId: string;
   }): Promise<void>;
 }
 
@@ -76,7 +93,7 @@ function toConversation(
   >,
 ): FastAgentConversation | null {
   const parsed = fastAgentConversationSchema.safeParse(
-    record.surface === 'automation'
+    record.surface === 'automation' || record.surface === 'web'
       ? {
           surface: record.surface,
           workspaceId: record.workspaceId,
@@ -127,6 +144,7 @@ async function loadConversationRecord(
     userId: record.userId,
     conversation,
     compatibilityMessages: record.compatibilityMessages as ModelMessage[],
+    openCodeSessionId: record.openCodeSessionId,
   };
 }
 
@@ -272,6 +290,72 @@ export const fastAgentConversationRepository: FastAgentConversationRepository =
         if (!updated) {
           throw new Error('Fast conversation was not found.');
         }
+      });
+    },
+
+    async upsertMessage({ conversationId: requestedId, message }) {
+      await db.transaction(async (tx) => {
+        const conversationId = await resolveCanonicalId(tx, requestedId);
+        await tx.execute(
+          sql`select pg_advisory_xact_lock(hashtextextended(${`fast-agent-conversation:${conversationId}`}, 0))`,
+        );
+        const [conversation] = await tx
+          .select({ id: fastAgentConversations.id })
+          .from(fastAgentConversations)
+          .where(eq(fastAgentConversations.id, conversationId))
+          .limit(1);
+        if (!conversation) {
+          throw new Error('Fast conversation was not found.');
+        }
+
+        await tx
+          .insert(fastAgentMessages)
+          .values({ conversationId, ...message })
+          .onConflictDoUpdate({
+            target: [
+              fastAgentMessages.conversationId,
+              fastAgentMessages.eventId,
+            ],
+            set: {
+              turnId: message.turnId,
+              turnSeq: message.turnSeq,
+              ts: message.ts,
+              eventType: message.eventType,
+              role: message.role ?? null,
+              contentBlocks: message.contentBlocks ?? [],
+              metadata: message.metadata ?? null,
+              payload: message.payload ?? {},
+              source: message.source ?? null,
+              nativeSessionId: message.nativeSessionId ?? null,
+              nativeMessageId: message.nativeMessageId ?? null,
+              updatedAt: sql`now()`,
+            },
+          });
+        await tx
+          .update(fastAgentConversations)
+          .set({ updatedAt: sql`now()` })
+          .where(eq(fastAgentConversations.id, conversationId));
+      });
+    },
+
+    async setOpenCodeSession({
+      conversationId: requestedId,
+      openCodeSessionId,
+    }) {
+      await db.transaction(async (tx) => {
+        const conversationId = await resolveCanonicalId(tx, requestedId);
+        await tx.execute(
+          sql`select pg_advisory_xact_lock(hashtextextended(${`fast-agent-conversation:${conversationId}`}, 0))`,
+        );
+        const [updated] = await tx
+          .update(fastAgentConversations)
+          .set({
+            openCodeSessionId,
+            updatedAt: sql`now()`,
+          })
+          .where(eq(fastAgentConversations.id, conversationId))
+          .returning({ id: fastAgentConversations.id });
+        if (!updated) throw new Error('Fast conversation was not found.');
       });
     },
   };

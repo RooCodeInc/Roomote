@@ -457,6 +457,9 @@ export function normalizeReviewCodeAutomationSettings(
     reviewDraftPrs:
       getAutomationSettingBoolean(automation, 'reviewDraftPrs') ??
       DEFAULT_PR_REVIEW_SETTINGS.reviewDraftPrs,
+    publishGithubCheck:
+      getAutomationSettingBoolean(automation, 'publishGithubCheck') ??
+      DEFAULT_PR_REVIEW_SETTINGS.publishGithubCheck,
     relayReviewResultsToTask:
       getAutomationSettingBoolean(automation, 'relayReviewResultsToTask') ??
       DEFAULT_PR_REVIEW_SETTINGS.relayReviewResultsToTask,

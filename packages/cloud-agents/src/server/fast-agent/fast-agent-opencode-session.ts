@@ -2,7 +2,6 @@ import {
   isNonTaskOpenCodeSessionNotFoundError,
   type NonTaskOpenCodeSession,
 } from '../non-task-provider-usage';
-import { getOpenCodeSdkServerIdleTtlMs } from '../opencode-runtime';
 import { revokeFastAgentMcpCapabilitiesForConversation } from './fast-agent-native-tool-bridge';
 import { fastAgentSpillStore } from './fast-agent-spill-store';
 
@@ -10,6 +9,8 @@ const DEFAULT_FAST_AGENT_OPENCODE_SESSION_LIMIT = 250;
 
 type SessionEntry = {
   session: NonTaskOpenCodeSession;
+  resumeValidationPending: boolean;
+  generation: number;
   lastUsedAt: number;
   pending: number;
   tail: Promise<void>;
@@ -17,13 +18,22 @@ type SessionEntry = {
 
 type FastAgentOpenCodeSessionRunInput<T> = {
   conversationId: string;
+  persistedSessionId?: string | null;
   prompt: string;
   bootstrapPrompt: string;
   execute: (
     session: NonTaskOpenCodeSession,
     selectedPrompt: string,
+    context: { path: FastAgentOpenCodeSessionPath; validateSession: boolean },
   ) => Promise<T>;
+  onPathSelected?: (path: FastAgentOpenCodeSessionPath) => void;
 };
+
+type FastAgentOpenCodeSessionPath =
+  | 'warm'
+  | 'cold_resume'
+  | 'cold_rebuild'
+  | 'fallback_rebuild';
 
 type FastAgentOpenCodeSessionManagerOptions = {
   idleTtlMs?: number;
@@ -34,8 +44,8 @@ type FastAgentOpenCodeSessionManagerOptions = {
 
 /**
  * Process-local ownership for warm Fast OpenCode conversations. The map is
- * deliberately disposable: Roomote persists only stable conversation identity
- * and routing, while OpenCode owns the live transcript behind each session id.
+ * deliberately disposable: Roomote persists the last known session id, while
+ * OpenCode owns the native transcript in its best-effort local storage.
  */
 export class FastAgentOpenCodeSessionManager {
   private readonly entries = new Map<string, SessionEntry>();
@@ -47,7 +57,9 @@ export class FastAgentOpenCodeSessionManager {
   ) => Promise<void> | void;
 
   constructor(options: FastAgentOpenCodeSessionManagerOptions = {}) {
-    this.idleTtlMs = options.idleTtlMs ?? getOpenCodeSdkServerIdleTtlMs();
+    // The OpenCode server can restart after its own idle timeout without
+    // losing sessions. Keep their ids until bounded LRU eviction instead.
+    this.idleTtlMs = options.idleTtlMs ?? Number.POSITIVE_INFINITY;
     this.maxEntries =
       options.maxEntries ?? DEFAULT_FAST_AGENT_OPENCODE_SESSION_LIMIT;
     this.now = options.now ?? Date.now;
@@ -61,11 +73,14 @@ export class FastAgentOpenCodeSessionManager {
 
   async run<T>({
     conversationId,
+    persistedSessionId,
     prompt,
     bootstrapPrompt,
     execute,
+    onPathSelected,
   }: FastAgentOpenCodeSessionRunInput<T>): Promise<T> {
     const entry = this.acquire(conversationId);
+    const generationAtAcquire = entry.generation;
     const previous = entry.tail;
     let release!: () => void;
     entry.tail = new Promise<void>((resolve) => {
@@ -76,12 +91,30 @@ export class FastAgentOpenCodeSessionManager {
     await previous;
 
     try {
-      const selectedPrompt = entry.session.id ? prompt : bootstrapPrompt;
+      if (entry.generation === generationAtAcquire) {
+        if (persistedSessionId && entry.session.id !== persistedSessionId) {
+          entry.session.id = persistedSessionId;
+          entry.resumeValidationPending = true;
+        }
+      }
+
+      const validateSession = entry.resumeValidationPending;
+      const path: FastAgentOpenCodeSessionPath = entry.session.id
+        ? validateSession
+          ? 'cold_resume'
+          : 'warm'
+        : 'cold_rebuild';
+      entry.resumeValidationPending = false;
+      onPathSelected?.(path);
       const executeAndInvalidateOnFailure = async (
         nextPrompt: string,
+        context: {
+          path: FastAgentOpenCodeSessionPath;
+          validateSession: boolean;
+        },
       ): Promise<T> => {
         try {
-          return await execute(entry.session, nextPrompt);
+          return await execute(entry.session, nextPrompt, context);
         } catch (error) {
           // OpenCode persists the user turn before inference. Clear the failed
           // session before releasing queued work so the next turn cannot send
@@ -93,16 +126,24 @@ export class FastAgentOpenCodeSessionManager {
       };
 
       try {
-        return await executeAndInvalidateOnFailure(selectedPrompt);
+        return await executeAndInvalidateOnFailure(
+          entry.session.id ? prompt : bootstrapPrompt,
+          { path, validateSession },
+        );
       } catch (error) {
         if (!isNonTaskOpenCodeSessionNotFoundError(error)) {
           throw error;
         }
 
-        return await executeAndInvalidateOnFailure(bootstrapPrompt);
+        onPathSelected?.('fallback_rebuild');
+        return await executeAndInvalidateOnFailure(bootstrapPrompt, {
+          path: 'fallback_rebuild',
+          validateSession: false,
+        });
       }
     } finally {
       entry.pending -= 1;
+      entry.generation += 1;
       entry.lastUsedAt = this.now();
       this.touch(conversationId, entry);
       release();
@@ -142,6 +183,8 @@ export class FastAgentOpenCodeSessionManager {
 
     const entry: SessionEntry = {
       session: {},
+      resumeValidationPending: false,
+      generation: 0,
       lastUsedAt: this.now(),
       pending: 0,
       tail: Promise.resolve(),

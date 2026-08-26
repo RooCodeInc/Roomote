@@ -249,7 +249,7 @@ export const BRAIN_SOURCES = [
     id: 'notion-pages',
     label: 'Notion',
     description:
-      'Pages the connected Notion integration can reach, refreshed as they change upstream.',
+      'Memories the connected Notion integration can reach, refreshed as they change upstream.',
     namespaceId: 'notion',
     collectorIdPrefix: 'notion-pages',
     collectorIds: [BRAIN_COLLECTOR_IDS.notionPages] as readonly string[],

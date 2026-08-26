@@ -35,7 +35,17 @@ export async function deliverFastAgentParentPrEvent(params: {
     >;
     feedbackId: string;
   };
-}): Promise<void> {
+  /** Canonical destination delivery already owns the external side effect. */
+  canonicalDeliveryOwned?: boolean;
+}): Promise<boolean | void> {
+  if (params.canonicalDeliveryOwned) {
+    return deliverClaimedFastAgentParentPrEvent({
+      ...params,
+      markDelivered: async () => true,
+      releaseClaim: async () => undefined,
+    });
+  }
+
   let conversationClaim: FastAgentPrFeedbackDeliveryClaim | null = null;
   if (params.conversationClaim) {
     const claimResult = await claimFastAgentPrFeedbackDelivery({
@@ -90,14 +100,16 @@ export async function deliverFastAgentParentPrEvent(params: {
   // the run row on success anyway so the delivery stays visible on the task.
   if (conversationClaim) {
     const claim = conversationClaim;
-    return deliverClaimedFastAgentParentPrEvent({
+    await deliverClaimedFastAgentParentPrEvent({
       ...params,
       markDelivered: async () => {
         await completeFastAgentPrFeedbackDelivery(claim);
         await markDelivered();
+        return true;
       },
       releaseClaim: () => releaseFastAgentPrFeedbackDelivery(claim),
     });
+    return;
   }
 
   const claimRows = await db
@@ -118,9 +130,12 @@ export async function deliverFastAgentParentPrEvent(params: {
     return;
   }
 
-  return deliverClaimedFastAgentParentPrEvent({
+  await deliverClaimedFastAgentParentPrEvent({
     ...params,
-    markDelivered,
+    markDelivered: async () => {
+      await markDelivered();
+      return true;
+    },
     releaseClaim: async () => {
       await db
         .update(taskRuns)
@@ -130,6 +145,7 @@ export async function deliverFastAgentParentPrEvent(params: {
         .where(eq(taskRuns.id, claimRun.id));
     },
   });
+  return;
 }
 
 async function deliverClaimedFastAgentParentPrEvent(params: {
@@ -137,20 +153,22 @@ async function deliverClaimedFastAgentParentPrEvent(params: {
   deliver: () => Promise<'delivered' | 'skipped'>;
   recordLifecycle: () => Promise<unknown>;
   logPrefix: string;
-  markDelivered: () => Promise<void>;
+  markDelivered: () => Promise<boolean>;
   releaseClaim: () => Promise<void>;
-}): Promise<void> {
+}): Promise<boolean> {
   let delivered = false;
   try {
     const delivery = await params.deliver();
     if (delivery === 'skipped') {
-      await params.markDelivered();
-      return;
+      return params.markDelivered();
     }
     delivered = true;
 
-    await params.markDelivered();
+    if (!(await params.markDelivered())) {
+      return false;
+    }
     await params.recordLifecycle();
+    return true;
   } catch (error) {
     console.error(
       `[${params.logPrefix}] Failed for run ${params.run.id}: ${
@@ -161,8 +179,7 @@ async function deliverClaimedFastAgentParentPrEvent(params: {
       error instanceof FastAgentParentEventDeliveryError ? error : null;
 
     if (delivered || deliveryError?.replyPosted || deliveryError?.permanent) {
-      await params.markDelivered().catch(() => {});
-      return;
+      return params.markDelivered().catch(() => false);
     }
 
     try {

@@ -4,15 +4,18 @@ import {
   type ServerResponse,
 } from 'node:http';
 import {
+  chmodSync,
+  lstatSync,
   mkdirSync,
-  mkdtempSync,
   rmSync,
+  statSync,
   symlinkSync,
+  unlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
-import { randomBytes, timingSafeEqual } from 'node:crypto';
+import { dirname, isAbsolute, join } from 'node:path';
+import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
@@ -54,6 +57,7 @@ const FAST_AGENT_NATIVE_RUNTIME_LIMIT = 250;
 
 export type FastAgentNativeToolCall = {
   agent?: string;
+  sessionId?: string;
   name: FastAgentNativeToolName;
   args: Record<string, unknown>;
 };
@@ -497,18 +501,43 @@ async function readRequestBody(request: IncomingMessage): Promise<unknown> {
  * bare module-not-found mid-turn.
  */
 function resolveZodDirectoryForTools(): string {
+  const candidates: string[] = [];
+  let resolveError: unknown;
   try {
-    return dirname(require.resolve('zod/package.json'));
+    candidates.push(dirname(require.resolve('zod/package.json')));
   } catch (error) {
-    throw new Error(
-      'Fast native tools need the zod package on disk to link into the ' +
-        'OpenCode tool directory, and none is resolvable from this process. ' +
-        'In the app image zod ships in each service runtime-deps tree ' +
-        '(asserted at image build); if this error reaches production, that ' +
-        'service packaging step regressed. ' +
-        `${error instanceof Error ? error.message : String(error)}`,
-    );
+    resolveError = error;
   }
+  // Bundled hosts (the Next.js web app under Turbopack) rewrite
+  // require.resolve to a virtual '[project]/...' specifier that does not
+  // exist on disk, so validate the resolution and fall back to walking the
+  // real node_modules tree from the working directory.
+  for (let dir = process.cwd(); ;) {
+    candidates.push(join(dir, 'node_modules', 'zod'));
+    const parent = dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  for (const candidate of candidates) {
+    try {
+      if (
+        isAbsolute(candidate) &&
+        statSync(join(candidate, 'package.json')).isFile()
+      ) {
+        return candidate;
+      }
+    } catch {
+      // Try the next candidate.
+    }
+  }
+  throw new Error(
+    'Fast native tools need the zod package on disk to link into the ' +
+      'OpenCode tool directory, and none is resolvable from this process. ' +
+      'In the app image zod ships in each service runtime-deps tree ' +
+      '(asserted at image build); if this error reaches production, that ' +
+      'service packaging step regressed. ' +
+      `${resolveError instanceof Error ? resolveError.message : String(resolveError ?? 'require.resolve returned a non-filesystem path')}`,
+  );
 }
 
 export async function formatFastAgentMcpResultForModel(
@@ -673,6 +702,7 @@ async function startBridge(): Promise<FastAgentNativeToolBridge> {
       }
 
       const call = {
+        sessionId: parsed.sessionID,
         name: parsed.tool,
         args: parsed.args,
         ...(parsed.agent ? { agent: parsed.agent } : {}),
@@ -781,8 +811,16 @@ async function startBridge(): Promise<FastAgentNativeToolBridge> {
   };
 }
 
-function createRuntimeDirectory(): string {
-  const directory = mkdtempSync(join(tmpdir(), 'roomote-fast-opencode-'));
+function createRuntimeDirectory(sessionId: string): string {
+  const rootDirectory = join(tmpdir(), 'roomote-fast-opencode');
+  mkdirSync(rootDirectory, { recursive: true, mode: 0o700 });
+  chmodSync(rootDirectory, 0o700);
+  const directory = join(
+    rootDirectory,
+    createHash('sha256').update(sessionId).digest('hex'),
+  );
+  mkdirSync(directory, { recursive: true, mode: 0o700 });
+  chmodSync(directory, 0o700);
   const toolsDirectory = join(directory, '.opencode', 'tools');
   mkdirSync(toolsDirectory, { recursive: true });
   writeFileSync(
@@ -792,11 +830,14 @@ function createRuntimeDirectory(): string {
   );
   const toolNodeModules = join(directory, '.opencode', 'node_modules');
   mkdirSync(toolNodeModules, { recursive: true });
-  symlinkSync(
-    resolveZodDirectoryForTools(),
-    join(toolNodeModules, 'zod'),
-    'dir',
-  );
+  const zodLink = join(toolNodeModules, 'zod');
+  try {
+    if (lstatSync(zodLink).isSymbolicLink()) unlinkSync(zodLink);
+    else rmSync(zodLink, { recursive: true, force: true });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+  }
+  symlinkSync(resolveZodDirectoryForTools(), zodLink, 'dir');
   writeFileSync(
     join(directory, '.opencode', 'roomote-fast-tool-bridge.js'),
     FAST_AGENT_NATIVE_TOOL_BRIDGE_SOURCE,
@@ -832,7 +873,7 @@ export async function getFastAgentNativeToolRuntime(
   let runtime = sessionRuntimes.get(sessionId);
   if (!runtime) {
     runtime = {
-      directory: createRuntimeDirectory(),
+      directory: createRuntimeDirectory(sessionId),
       env: bridge.env,
       mcpCapability: randomBytes(32).toString('hex'),
     };

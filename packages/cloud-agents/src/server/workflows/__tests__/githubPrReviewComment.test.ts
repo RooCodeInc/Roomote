@@ -131,7 +131,7 @@ describe('buildTerminalReviewSummaryBody', () => {
 
   it('finalizes an in-progress initial summary, preserving the marker and checklist', () => {
     const existing = buildReviewSummaryBody({
-      summaryMarker: MARKER('abc123'),
+      summaryMarker: MARKER('abc123f'),
       statusContent: IN_PROGRESS_INITIAL,
       checklistContent: '- [ ] Fix the thing\n- [x] Already addressed',
     });
@@ -142,7 +142,7 @@ describe('buildTerminalReviewSummaryBody', () => {
     });
 
     expect(updated).not.toBeNull();
-    expect(updated!.startsWith(MARKER('abc123'))).toBe(true);
+    expect(updated!.startsWith(MARKER('abc123f'))).toBe(true);
     expect(updated).toContain(
       `${REVIEW_STATUS_START_MARKER}\n${terminal}\n${REVIEW_STATUS_END_MARKER}`,
     );
@@ -150,12 +150,12 @@ describe('buildTerminalReviewSummaryBody', () => {
     expect(updated).toContain(
       `${REVIEW_CHECKLIST_START_MARKER}\n- [ ] Fix the thing\n- [x] Already addressed\n${REVIEW_CHECKLIST_END_MARKER}`,
     );
-    expect(updated).toContain('<sub>Reviewed abc123</sub>');
+    expect(updated).toContain('<sub>Reviewed abc123f</sub>');
   });
 
   it('finalizes an in-progress sync summary', () => {
     const existing = buildReviewSummaryBody({
-      summaryMarker: MARKER('def456', 'sync'),
+      summaryMarker: MARKER('def456f', 'sync'),
       statusContent: IN_PROGRESS_SYNC,
     });
 
@@ -165,15 +165,15 @@ describe('buildTerminalReviewSummaryBody', () => {
     });
 
     expect(updated).not.toBeNull();
-    expect(updated!.startsWith(MARKER('def456', 'sync'))).toBe(true);
+    expect(updated!.startsWith(MARKER('def456f', 'sync'))).toBe(true);
     expect(updated).toContain(terminal);
     expect(updated).not.toContain(IN_PROGRESS_SYNC);
-    expect(updated).toContain('<sub>Reviewed def456</sub>');
+    expect(updated).toContain('<sub>Reviewed def456f</sub>');
   });
 
   it('does not clobber a comment the agent already finalized', () => {
     const existing = buildReviewSummaryBody({
-      summaryMarker: MARKER('abc123'),
+      summaryMarker: MARKER('abc123f'),
       statusContent: COMPLETION,
     });
 
@@ -205,7 +205,7 @@ describe('buildTerminalReviewSummaryBody', () => {
 
   it('preserves the checklist when finalizing a sync comment that has one', () => {
     const existing = buildReviewSummaryBody({
-      summaryMarker: MARKER('def456', 'sync'),
+      summaryMarker: MARKER('def456f', 'sync'),
       statusContent: IN_PROGRESS_SYNC,
       checklistContent: '- [ ] Surviving finding',
     });

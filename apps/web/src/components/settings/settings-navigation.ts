@@ -1,6 +1,6 @@
 import type { LucideIcon } from '@/components/system';
 import {
-  Brain,
+  BookOpenText,
   Cpu,
   FlaskConical,
   GraduationCap,
@@ -27,7 +27,7 @@ export type SettingsPageId =
   | 'compute'
   | 'source-control'
   | 'models'
-  | 'brain'
+  | 'memory'
   | 'skills'
   | 'experimental'
   | 'misc';
@@ -41,7 +41,7 @@ type SettingsNavigationItem = {
   icon: LucideIcon;
   adminOnly?: boolean;
   hiddenWhenCloud?: boolean;
-  /** Shown only on deployments that have enabled the Brain. */
+  /** Shown only on deployments that have enabled Memory. */
   requiresBrain?: boolean;
   newGroup?: boolean;
   matches: (pathname: string) => boolean;
@@ -116,16 +116,16 @@ const SETTINGS_NAVIGATION_ITEMS: SettingsNavigationItem[] = [
     matches: (pathname) => pathname.startsWith(SETTINGS_PATHS.integrations),
   },
   {
-    id: 'brain',
-    label: 'Brain',
-    title: 'Brain',
+    id: 'memory',
+    label: 'Memory',
+    title: 'Memory',
     description:
       'The shared memory agents read before they start: what it has learned, where it learns from, and how ingestion is doing.',
-    href: SETTINGS_PATHS.brain,
-    icon: Brain,
+    href: SETTINGS_PATHS.memory,
+    icon: BookOpenText,
     adminOnly: true,
     requiresBrain: true,
-    matches: (pathname) => pathname.startsWith(SETTINGS_PATHS.brain),
+    matches: (pathname) => pathname.startsWith(SETTINGS_PATHS.memory),
   },
   {
     id: 'environments',

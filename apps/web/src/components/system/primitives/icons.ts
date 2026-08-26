@@ -26,6 +26,7 @@ export {
   Bug,
   Calendar,
   Camera,
+  ChartColumn,
   ChartColumnIncreasing,
   Check,
   CheckCircle2,

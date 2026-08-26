@@ -10,7 +10,10 @@ import {
   recordLlmUsage,
   resolveEffectiveModelRuntimeEnv,
 } from '@roomote/db/server';
-import { toBedrockMantleRuntimeModelId } from '@roomote/types';
+import {
+  toBedrockMantleRuntimeModelId,
+  type ReasoningEffort,
+} from '@roomote/types';
 import type { z } from 'zod';
 import zodToJsonSchema from 'zod-to-json-schema';
 
@@ -145,6 +148,8 @@ interface GenerateTrackedNonTaskBaseParams extends NonTaskInferenceTrackingInput
   system?: string;
   model?: string;
   modelRole?: 'primary' | 'small' | 'orchestration';
+  /** Explicit reasoning-effort override applied to the resolved model. */
+  reasoningEffort?: ReasoningEffort;
   maxOutputTokens?: number;
   /** null lets OpenCode own the prompt lifecycle without a Roomote deadline. */
   timeoutMs?: number | null;
@@ -200,10 +205,20 @@ export type NonTaskOpenCodeSession = {
   id?: string;
 };
 
+export type NonTaskOpenCodeCompletedMessage = {
+  id: string | null;
+  sessionId: string;
+  createdAtMs: number | null;
+  completedAtMs: number | null;
+};
+
 export type NonTaskOpenCodeNativeSessionOptions = {
   directory: string;
   env?: Partial<Record<string, string>>;
   onModelResolved?: (model: string) => void;
+  onMessageCompleted?: (
+    message: NonTaskOpenCodeCompletedMessage,
+  ) => Promise<void> | void;
   onPromptStarted?: () => void;
   onSessionReady?: (sessionID: string) => Promise<void> | void;
   onSubagentSessionReady?: (sessionID: string) => Promise<void> | void;
@@ -212,12 +227,25 @@ export type NonTaskOpenCodeNativeSessionOptions = {
   signal?: AbortSignal;
   trackSessionTreeUsage?: boolean;
   tools: Record<string, boolean>;
+  validateSession?: boolean;
 };
 
 export class NonTaskOpenCodeSessionNotFoundError extends Error {
   constructor() {
     super('The OpenCode session is no longer available.');
     this.name = 'NonTaskOpenCodeSessionNotFoundError';
+  }
+}
+
+export class NonTaskOpenCodeSessionValidationError extends Error {
+  constructor(error: unknown) {
+    super(
+      `OpenCode session validation failed: ${formatOpenCodeSdkError(error)}`,
+      {
+        cause: error,
+      },
+    );
+    this.name = 'NonTaskOpenCodeSessionValidationError';
   }
 }
 
@@ -250,6 +278,12 @@ export function isNonTaskOpenCodeSessionNotFoundError(
   error: unknown,
 ): error is NonTaskOpenCodeSessionNotFoundError {
   return error instanceof NonTaskOpenCodeSessionNotFoundError;
+}
+
+export function isNonTaskOpenCodeSessionValidationError(
+  error: unknown,
+): error is NonTaskOpenCodeSessionValidationError {
+  return error instanceof NonTaskOpenCodeSessionValidationError;
 }
 
 function asString(value: unknown): string | undefined {
@@ -507,9 +541,31 @@ function isOpenCodeSessionMissing(error: unknown): boolean {
   return statusCode === 404 || record.name === 'NotFoundError';
 }
 
+function isOpenCodeSessionInvalid(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+  const record = error as Record<string, unknown>;
+  const data =
+    record.data && typeof record.data === 'object'
+      ? (record.data as Record<string, unknown>)
+      : undefined;
+  const statusCode =
+    typeof data?.statusCode === 'number'
+      ? data.statusCode
+      : typeof record.status === 'number'
+        ? record.status
+        : undefined;
+  if (statusCode !== 400 && statusCode !== 422) return false;
+  const detail = formatOpenCodeSdkError(error).toLowerCase();
+  return (
+    detail.includes('session') &&
+    ['invalid', 'malformed', 'corrupt'].some((term) => detail.includes(term))
+  );
+}
+
 async function resolveNonTaskModelRuntime(
   model?: string,
   modelRole: 'primary' | 'small' | 'orchestration' = 'small',
+  reasoningEffort?: ReasoningEffort,
 ): Promise<{
   model: string;
   resolvedModelRuntimeEnv: NonTaskModelRuntimeEnv;
@@ -574,6 +630,15 @@ async function resolveNonTaskModelRuntime(
         selectedRuntimeEnv.R_MODEL_REASONING_EFFORT = undefined;
       }
     }
+  }
+
+  if (reasoningEffort) {
+    // The lease cache keys on env, so an explicit effort gets its own server
+    // rather than mutating a shared lease.
+    selectedRuntimeEnv = {
+      ...selectedRuntimeEnv,
+      R_MODEL_REASONING_EFFORT: reasoningEffort,
+    };
   }
 
   return {
@@ -715,6 +780,9 @@ async function runNonTaskSdkPrompt(
     ephemeral?: boolean;
     env?: Partial<Record<string, string>>;
     onPromptStarted?: () => void;
+    onMessageCompleted?: (
+      message: NonTaskOpenCodeCompletedMessage,
+    ) => Promise<void> | void;
     onSessionReady?: (sessionID: string) => Promise<void> | void;
     onSubagentSessionReady?: (sessionID: string) => Promise<void> | void;
     permission?: PermissionRuleset;
@@ -725,6 +793,7 @@ async function runNonTaskSdkPrompt(
     signal?: AbortSignal;
     trackSessionTreeUsage?: boolean;
     useConfiguredServer?: boolean;
+    validateSession?: boolean;
   } = {},
 ): Promise<{
   info: NonTaskOpenCodeMessageInfo;
@@ -778,6 +847,28 @@ async function runNonTaskSdkPrompt(
       fetch: openCodeSdkFetch,
     });
     let sessionId = options.session?.id;
+    if (sessionId && options.validateSession) {
+      const validationResult = await client.session.messages(
+        {
+          sessionID: sessionId,
+          directory: sessionDirectory,
+          limit: 1,
+        },
+        { signal: abortController.signal },
+      );
+      if (validationResult.error) {
+        if (
+          isOpenCodeSessionMissing(validationResult.error) ||
+          isOpenCodeSessionInvalid(validationResult.error)
+        ) {
+          throw new NonTaskOpenCodeSessionNotFoundError();
+        }
+        throw new NonTaskOpenCodeSessionValidationError(validationResult.error);
+      }
+      if (!validationResult.data || validationResult.data.length === 0) {
+        throw new NonTaskOpenCodeSessionNotFoundError();
+      }
+    }
     if (!sessionId) {
       const sessionResult = await client.session.create(
         {
@@ -1144,6 +1235,21 @@ async function runNonTaskSdkPrompt(
         }
       }
 
+      try {
+        await options.onMessageCompleted?.({
+          id: asString(promptResult.data.info.id) ?? null,
+          sessionId,
+          createdAtMs:
+            asFiniteNumber(promptResult.data.info.time?.created) ?? null,
+          completedAtMs:
+            asFiniteNumber(promptResult.data.info.time?.completed) ?? null,
+        });
+      } catch (error) {
+        console.warn(
+          `[NonTaskProviderUsage] OpenCode completion observer failed: ${formatOpenCodeSdkError(error)}`,
+        );
+      }
+
       return promptResult.data;
     } catch (error) {
       // Aborting the HTTP request does not guarantee that an OpenCode server
@@ -1193,6 +1299,7 @@ export async function generateTrackedNonTaskText(
   const runtime = await resolveNonTaskModelRuntime(
     params.model,
     params.modelRole,
+    params.reasoningEffort,
   );
   const model = await resolveModelForInputModality(params, runtime);
 
@@ -1244,6 +1351,7 @@ export async function generateTrackedNonTaskTextInOpenCodeSession(
   const runtime = await resolveNonTaskModelRuntime(
     params.model,
     params.modelRole,
+    params.reasoningEffort,
   );
   const model = await resolveModelForInputModality(params, runtime);
   options.onModelResolved?.(model);
@@ -1273,6 +1381,7 @@ export async function generateTrackedNonTaskTextInOpenCodeSession(
       directory: options.directory,
       env: options.env,
       onPromptStarted: options.onPromptStarted,
+      onMessageCompleted: options.onMessageCompleted,
       onSessionReady: options.onSessionReady,
       onSubagentSessionReady: options.onSubagentSessionReady,
       permission: options.permission,
@@ -1283,6 +1392,7 @@ export async function generateTrackedNonTaskTextInOpenCodeSession(
       signal: options.signal,
       trackSessionTreeUsage: options.trackSessionTreeUsage,
       useConfiguredServer: false,
+      validateSession: options.validateSession,
     },
   );
 
@@ -1304,6 +1414,7 @@ async function generateTrackedNonTaskObjectWithSdk<
   const resolvedRuntime = await resolveNonTaskModelRuntime(
     params.model,
     params.modelRole,
+    params.reasoningEffort,
   );
 
   const data = await runNonTaskSdkPrompt(

@@ -177,6 +177,9 @@ vi.mock('@roomote/cloud-agents/server', () => ({
   resolveApiBaseUrl: () => 'https://roomote.example.com',
   getTaskUrl: mocks.getTaskUrl,
   hasFastAgentSession: mocks.hasFastSession,
+  getOrCreateFastAgentSession: vi
+    .fn()
+    .mockResolvedValue({ id: 'fast-session-1' }),
 }));
 
 vi.mock('../../fast-agent-entry.js', () => ({
@@ -766,7 +769,9 @@ describe('Discord Gateway event handler', () => {
     expect(mocks.reply).toHaveBeenCalledWith(
       expect.objectContaining({
         replyToMessageId: 'message-1',
-        text: 'A quick answer',
+        text: expect.stringMatching(
+          /^A quick answer\n\n-# Reply or use the \[web app\]\(.*\/sessions\/fast-session-1.*\)\.$/,
+        ),
       }),
     );
     expect(mocks.startNewTask).not.toHaveBeenCalled();

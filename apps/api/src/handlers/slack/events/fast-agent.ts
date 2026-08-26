@@ -1,11 +1,16 @@
 import {
+  getOrCreateFastAgentSession,
   acquireFastAgentTurnLock,
   answerFastAgentQuestion,
   hasFastAgentSession,
   type FastAgentActiveTask,
   type LaunchFastAgentTask,
 } from '@roomote/cloud-agents/server';
+import { buildFastSessionReplyFooterText } from '@roomote/communication';
 import {
+  buildSlackThreadReplyFooterBlock,
+  getSlackThreadReplyFooterMessageTs,
+  withSlackThreadReplyFooterLock,
   resolveCurrentSlackMessageFiles,
   type SlackEvent,
   type SlackNotifier,
@@ -117,6 +122,10 @@ export async function processFastAgentMessage(params: {
       });
     }
 
+    // Resolved ahead of the turn so replies can carry the session footer;
+    // the service's own getOrCreate finds this same row.
+    const session = await getOrCreateFastAgentSession({ userId, conversation });
+
     let threadContext: Awaited<ReturnType<typeof slack.fetchThreadMessages>> =
       [];
 
@@ -182,7 +191,7 @@ export async function processFastAgentMessage(params: {
           resolveUserMcpServerConfigs({
             userId,
             apiBaseUrl,
-            includeRoomote: true,
+            includeRoomoteMemberTools: true,
           }),
         launchTask,
         postReply: async ({ message, kickoff }) => {
@@ -197,6 +206,7 @@ export async function processFastAgentMessage(params: {
               slackTeamId: teamId,
               source: 'fast_agent',
             },
+            fastSessionFooter: { sessionId: session.id },
           });
           if (posted === 'failed') {
             throw new Error('Slack did not accept the Fast parent reply.');
@@ -218,12 +228,37 @@ export async function processFastAgentMessage(params: {
             : undefined;
         },
         replaceReply: async ({ messageId }, { message }) => {
-          const updated = await slack.updateMessage({
+          // Keep the sticky footer when the edited message is its current
+          // carrier; the lookup and edit share the footer lock so a
+          // concurrent relocation cannot slip in between them.
+          const updated = await withSlackThreadReplyFooterLock({
             channel: event.channel,
-            ts: messageId,
-            message: {
-              text: message,
-              blocks: [{ type: 'markdown', text: message }],
+            threadTs: threadId,
+            fn: async () => {
+              const footerMessageTs = await getSlackThreadReplyFooterMessageTs(
+                event.channel,
+                threadId,
+              ).catch(() => null);
+              return slack.updateMessage({
+                channel: event.channel,
+                ts: messageId,
+                message: {
+                  text: message,
+                  blocks: [
+                    { type: 'markdown', text: message },
+                    ...(footerMessageTs === messageId
+                      ? [
+                          buildSlackThreadReplyFooterBlock({
+                            footerText: buildFastSessionReplyFooterText({
+                              provider: 'slack',
+                              sessionId: session.id,
+                            }),
+                          }),
+                        ]
+                      : []),
+                  ],
+                },
+              });
             },
           });
           if (!updated) {
@@ -270,6 +305,7 @@ export async function processFastAgentMessage(params: {
           slackTeamId: teamId,
           source: 'fast_agent',
         },
+        fastSessionFooter: { sessionId: session.id },
       });
     }
   } finally {

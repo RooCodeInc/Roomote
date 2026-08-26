@@ -53,13 +53,8 @@ describe('automation result blocks', () => {
           ],
           [
             {
-              type: 'rich_text',
-              elements: [
-                {
-                  type: 'rich_text_section',
-                  elements: [{ type: 'text', text: 'Build' }],
-                },
-              ],
+              type: 'raw_text',
+              text: 'Build',
             },
             {
               type: 'rich_text',
@@ -124,6 +119,43 @@ describe('automation result blocks', () => {
     if (blocks[0]?.type !== 'table') return;
     expect(blocks[0].rows).toHaveLength(2);
     expect(JSON.stringify(blocks[0].rows[1])).toContain('a|b');
+  });
+
+  it('uses documented table cell objects inside automation containers', () => {
+    const [container] = buildAutomationResultBlocks({
+      title: 'Build report',
+      iconUrl: 'https://app.example.com/automation-icons/wrench.png',
+      configureUrl: 'https://app.example.com/automations#build-report',
+      contentText:
+        '| Name | Result | Details |\n| --- | --- | --- |\n| Build | **Passed** | [Logs](https://example.com/logs) |',
+    });
+
+    expect(container?.type).toBe('container');
+    if (container?.type !== 'container') return;
+    expect(container.child_blocks).toEqual([
+      expect.objectContaining({
+        type: 'table',
+        rows: [
+          expect.any(Array),
+          [
+            { type: 'raw_text', text: 'Build' },
+            expect.objectContaining({ type: 'rich_text' }),
+            expect.objectContaining({ type: 'rich_text' }),
+          ],
+        ],
+      }),
+      expect.objectContaining({ type: 'actions' }),
+    ]);
+  });
+
+  it('represents visually empty table cells with valid non-empty raw text', () => {
+    const [table] = buildAutomationResultContentBlocks(
+      '| Name | Result |\n| --- | --- |\n| Build | |',
+    );
+
+    expect(table?.type).toBe('table');
+    if (table?.type !== 'table') return;
+    expect(table.rows[1]?.[1]).toEqual({ type: 'raw_text', text: ' ' });
   });
 
   it('uses sections for oversized table fallbacks', () => {

@@ -1,5 +1,7 @@
+import { createHash } from 'node:crypto';
 import type { ModelMessage } from 'ai';
 import {
+  ACP_ENVELOPE_EVENT_TYPES,
   ALL_REPOSITORIES,
   BRAIN_MCP_ID,
   CHAT_CHANNEL_MESSAGES_TOOL,
@@ -10,7 +12,10 @@ import {
   activeRunStatuses,
   formatErrorForLog,
   resolveInferenceProviderRetryDelayMs,
+  truncateAcpOutputText,
+  type ReasoningEffort,
   type RunStatus,
+  type TaskMessageContentBlock,
 } from '@roomote/types';
 import { getDeploymentTaskModelOptions } from '@roomote/db/server';
 import { Env } from '@roomote/env';
@@ -32,18 +37,23 @@ import {
   appendFastAgentVisibleMessages,
   getActiveFastAgentTasks,
   getOrCreateFastAgentSession,
+  setFastAgentOpenCodeSession,
+  upsertFastAgentMessage,
   type FastAgentActiveTask,
 } from './fast-agent-session';
+import { refreshFastAgentSessionTitle } from './fast-agent-title';
 import {
   classifyNonTaskInferenceError,
   FAST_AGENT_SESSION_PERMISSIONS,
   generateTrackedNonTaskTextInOpenCodeSession,
   isNonTaskOpenCodePromptTimeoutError,
   isNonTaskOpenCodeSessionNotFoundError,
+  isNonTaskOpenCodeSessionValidationError,
   NonTaskOpenCodePromptTimeoutError,
   NON_TASK_INFERENCE_SURFACES,
   type NonTaskPromptFile,
   type NonTaskProviderRetryEvent,
+  type NonTaskOpenCodeCompletedMessage,
 } from '../non-task-provider-usage';
 import { fastAgentOpenCodeSessionManager } from './fast-agent-opencode-session';
 import {
@@ -89,6 +99,66 @@ const chatReactionArgsSchema = z.object({
   purpose: z.enum(['ack', 'closeout']),
 });
 const FAST_AGENT_DEFAULT_SLACK_HISTORY_LOOKBACK_MS = 24 * 60 * 60 * 1000;
+const FAST_AGENT_CANONICAL_TOOL_OUTPUT_MAX_CHARS = 50_000;
+
+function buildFastAgentTurnId({
+  currentMessageId,
+  conversation,
+  question,
+}: {
+  currentMessageId?: string;
+  conversation: FastAgentConversation;
+  question: string;
+}): string {
+  if (currentMessageId) return currentMessageId;
+
+  const digest = createHash('sha256')
+    .update(
+      JSON.stringify([
+        conversation.surface,
+        conversation.workspaceId,
+        conversation.conversationId,
+        question,
+      ]),
+    )
+    .digest('hex')
+    .slice(0, 24);
+  return `fallback:${digest}`;
+}
+
+function buildFastAgentUserContentBlocks(
+  text: string,
+  images: string[],
+): TaskMessageContentBlock[] {
+  const blocks: TaskMessageContentBlock[] = [{ type: 'text', text }];
+
+  for (const image of images) {
+    const match = /^data:(image\/[^;,]+);base64,(.+)$/i.exec(image.trim());
+    if (match?.[1] && match[2]) {
+      blocks.push({ type: 'image', mimeType: match[1], data: match[2] });
+    }
+  }
+
+  return blocks;
+}
+
+function serializeFastAgentToolOutput(result: unknown): {
+  output: string;
+  truncated: boolean;
+} {
+  let output: string;
+  try {
+    output = JSON.stringify(result, null, 2) ?? String(result);
+  } catch {
+    output = String(result);
+  }
+
+  const { text, truncation } = truncateAcpOutputText(
+    output,
+    FAST_AGENT_CANONICAL_TOOL_OUTPUT_MAX_CHARS,
+  );
+  return { output: text, truncated: truncation !== null };
+}
 
 function getFastAgentDefaultSlackHistoryOldest(latest?: string): string {
   const numericLatest =
@@ -562,6 +632,8 @@ export async function answerFastAgentQuestion({
   activeTasks = [],
   adapter,
   signal,
+  model,
+  reasoningEffort,
   turnSource = 'human',
   platformEventHandling = 'default',
   platformEventVisibility = 'optional',
@@ -580,11 +652,20 @@ export async function answerFastAgentQuestion({
   activeTasks?: FastAgentActiveTask[];
   adapter: FastAgentTurnAdapter;
   signal?: AbortSignal;
+  /** Explicit model override for this turn; defaults to the deployment's
+   * orchestration model. */
+  model?: string | null;
+  reasoningEffort?: ReasoningEffort | null;
   turnSource?: FastAgentTurnSource;
   platformEventHandling?: FastAgentPlatformEventHandling;
   platformEventVisibility?: FastAgentPlatformEventVisibility;
   platformEventKind?: FastAgentPlatformEventKind;
 }): Promise<string> {
+  const turnId = buildFastAgentTurnId({
+    currentMessageId,
+    conversation,
+    question,
+  });
   const diagnostics = new FastAgentTurnDiagnostics({
     conversation,
     currentMessageId,
@@ -596,9 +677,186 @@ export async function answerFastAgentQuestion({
   const turnVisibleMessages: ModelMessage[] = [];
   let mirroredMessageCount = 0;
   let canonicalConversationId: string | null = null;
+  let durableOpenCodeSessionId: string | null = null;
   let lastVisibleMessage = '';
   let inferenceRetryReply: FastAgentReplyHandle | undefined;
   let inferenceRetryMessageIndex: number | undefined;
+  let inferenceRetryCanonicalEvent:
+    | { eventId: string; turnSeq: number }
+    | undefined;
+  let activeOpenCodeSessionId: string | null = null;
+  let completedOpenCodeMessage: NonTaskOpenCodeCompletedMessage | null = null;
+  let nextAssistantOrdinal = 0;
+  let nextToolOrdinal = 0;
+  let nextRetryNoticeOrdinal = 0;
+  let nextTurnSeq = 0;
+
+  const allocateCanonicalEvent = (slot: string) => ({
+    eventId: `${turnId}:${slot}`,
+    turnSeq: nextTurnSeq++,
+  });
+  const persistCanonicalMessage = async (
+    message: Parameters<typeof upsertFastAgentMessage>[0]['message'],
+    bestEffort = false,
+  ): Promise<void> => {
+    if (!canonicalConversationId) {
+      if (bestEffort) return;
+      throw new Error(
+        'Fast conversation is not ready for message persistence.',
+      );
+    }
+
+    try {
+      await upsertFastAgentMessage({
+        sessionId: canonicalConversationId,
+        message,
+      });
+    } catch (error) {
+      if (!bestEffort) throw error;
+      console.error(
+        `[Fast Agent] Failed to persist canonical message conversation=${canonicalConversationId} event=${message.eventId}: ${formatErrorForLog(error)}`,
+      );
+    }
+  };
+  const persistAssistantReply = async ({
+    reply,
+    event,
+    platformMessageId,
+    nativeMessage,
+  }: {
+    reply: FastAgentReply;
+    event: { eventId: string; turnSeq: number };
+    platformMessageId?: string;
+    nativeMessage?: NonTaskOpenCodeCompletedMessage | null;
+  }) =>
+    persistCanonicalMessage(
+      {
+        ...event,
+        turnId,
+        // createdAtMs predates the turn's tool events and would sort the
+        // reply above the tool activity that produced it, so fall straight
+        // through to the persist-time clock when completion time is missing.
+        ts: nativeMessage?.completedAtMs ?? Date.now(),
+        eventType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+        role: 'assistant',
+        contentBlocks: [{ type: 'text', text: reply.message }],
+        metadata: {
+          visibleInTranscript: true,
+          purpose: reply.purpose,
+          ...(platformMessageId ? { platformMessageId } : {}),
+        },
+        payload: {
+          purpose: reply.purpose,
+          ...(reply.imageArtifactIds?.length
+            ? { imageArtifactIds: reply.imageArtifactIds }
+            : {}),
+          ...(reply.kickoff ? { kickoff: true } : {}),
+        },
+        source: conversation.surface,
+        nativeSessionId: nativeMessage?.sessionId ?? activeOpenCodeSessionId,
+        nativeMessageId: nativeMessage?.id ?? null,
+      },
+      true,
+    );
+  const beginCanonicalToolEvent = async ({
+    title,
+    args,
+    nativeSessionId,
+    mcpServerName = null,
+    mcpToolName = null,
+  }: {
+    title: string;
+    args: Record<string, unknown>;
+    nativeSessionId?: string | null;
+    mcpServerName?: string | null;
+    mcpToolName?: string | null;
+  }) => {
+    const ordinal = nextToolOrdinal++;
+    const toolCallId = `${turnId}:tool:${ordinal}`;
+    const isMcp = Boolean(mcpServerName && mcpToolName);
+    const canonicalEvent = allocateCanonicalEvent(`tool:${ordinal}`);
+    await persistCanonicalMessage(
+      {
+        ...canonicalEvent,
+        turnId,
+        ts: Date.now(),
+        eventType: ACP_ENVELOPE_EVENT_TYPES.ToolCall,
+        role: 'tool',
+        contentBlocks: [],
+        metadata: { visibleInTranscript: true },
+        payload: {
+          toolCallId,
+          title,
+          kind: 'tool',
+          status: 'in_progress',
+          isExecute: false,
+          isRead: false,
+          isMcp,
+          mcpServerName,
+          mcpToolName,
+          serverName: mcpServerName,
+          toolName: mcpToolName ?? title,
+          command: null,
+          rawInput: { arguments: args },
+        },
+        source: conversation.surface,
+        nativeSessionId: nativeSessionId ?? activeOpenCodeSessionId,
+      },
+      true,
+    );
+    return {
+      ordinal,
+      toolCallId,
+      title,
+      args,
+      isMcp,
+      mcpServerName,
+      mcpToolName,
+      canonicalEvent,
+    };
+  };
+  const finishCanonicalToolEvent = async (
+    event: Awaited<ReturnType<typeof beginCanonicalToolEvent>>,
+    result: unknown,
+    nativeSessionId?: string | null,
+  ) => {
+    const { output, truncated } = serializeFastAgentToolOutput(result);
+    const failed =
+      result !== null &&
+      typeof result === 'object' &&
+      'success' in result &&
+      result.success === false;
+    await persistCanonicalMessage(
+      {
+        ...event.canonicalEvent,
+        turnId,
+        ts: Date.now(),
+        eventType: ACP_ENVELOPE_EVENT_TYPES.ToolResult,
+        role: 'tool',
+        contentBlocks: output ? [{ type: 'text', text: output }] : [],
+        metadata: { visibleInTranscript: true, truncated },
+        payload: {
+          toolCallId: event.toolCallId,
+          title: event.title,
+          kind: 'tool',
+          status: failed ? 'failed' : 'completed',
+          isExecute: false,
+          isMcp: event.isMcp,
+          mcpServerName: event.mcpServerName,
+          mcpToolName: event.mcpToolName,
+          serverName: event.mcpServerName,
+          toolName: event.mcpToolName ?? event.title,
+          command: null,
+          exitCode: null,
+          output,
+          rawInput: { arguments: event.args },
+        },
+        source: conversation.surface,
+        nativeSessionId: nativeSessionId ?? activeOpenCodeSessionId,
+      },
+      true,
+    );
+  };
 
   const replaceInferenceRetryReply = async (
     reply: FastAgentReply,
@@ -620,12 +878,20 @@ export async function answerFastAgentQuestion({
       );
       inferenceRetryReply = undefined;
       inferenceRetryMessageIndex = undefined;
+      inferenceRetryCanonicalEvent = undefined;
       return false;
     }
     inferenceRetryReply = replacement || inferenceRetryReply;
     if (inferenceRetryMessageIndex !== undefined) {
       turnVisibleMessages[inferenceRetryMessageIndex] =
         buildAssistantTextMessage(reply.message);
+    }
+    if (inferenceRetryCanonicalEvent) {
+      await persistAssistantReply({
+        reply,
+        event: inferenceRetryCanonicalEvent,
+        platformMessageId: inferenceRetryReply.messageId,
+      });
     }
     return true;
   };
@@ -666,7 +932,38 @@ export async function answerFastAgentQuestion({
       }),
     ]);
     canonicalConversationId = session.id;
+    durableOpenCodeSessionId = session.openCodeSessionId;
+    activeOpenCodeSessionId = session.openCodeSessionId;
     diagnostics.setCanonicalConversationId(session.id);
+    const userEvent = allocateCanonicalEvent('user');
+    await persistCanonicalMessage(
+      {
+        ...userEvent,
+        turnId,
+        ts: Date.now(),
+        eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
+        role: 'user',
+        contentBlocks: buildFastAgentUserContentBlocks(
+          normalizeThreadText(question),
+          images,
+        ),
+        metadata: {
+          // Platform-event prompts are internal <platform_event> JSON, not
+          // something a person typed — keep them out of the transcript view.
+          visibleInTranscript: !platformEvent,
+          turnSource,
+          userId,
+          ...(senderDisplayName ? { senderDisplayName } : {}),
+          ...(senderExternalId ? { senderExternalId } : {}),
+        },
+        payload: {},
+        source: conversation.surface,
+      },
+      true,
+    );
+    if (!platformEvent) {
+      void refreshFastAgentSessionTitle({ sessionId: session.id, userId });
+    }
     const sessionActiveTasks = await getActiveFastAgentTasks(session.id);
     const resolvedActiveTasks = [
       ...new Map(
@@ -737,14 +1034,22 @@ export async function answerFastAgentQuestion({
     const postReply = async (
       reply: FastAgentReply,
       mirrorImmediately = false,
+      nativeMessage?: NonTaskOpenCodeCompletedMessage | null,
     ) => {
       const replacedRetry = await replaceInferenceRetryReply(reply, true);
       if (!replacedRetry) {
-        await adapter.postReply(reply);
+        const posted = await adapter.postReply(reply);
         turnVisibleMessages.push(buildAssistantTextMessage(reply.message));
+        await persistAssistantReply({
+          reply,
+          event: allocateCanonicalEvent(`assistant:${nextAssistantOrdinal++}`),
+          platformMessageId: posted?.messageId,
+          nativeMessage,
+        });
       }
       inferenceRetryReply = undefined;
       inferenceRetryMessageIndex = undefined;
+      inferenceRetryCanonicalEvent = undefined;
       diagnostics.recordVisibleReply();
       lastVisibleMessage = reply.message;
       visibleUpdatePosted = true;
@@ -777,6 +1082,16 @@ export async function answerFastAgentQuestion({
         inferenceRetryReply = (await adapter.postReply(reply)) || undefined;
         inferenceRetryMessageIndex = turnVisibleMessages.length;
         turnVisibleMessages.push(buildAssistantTextMessage(message));
+        // Ordinal-suffixed so a second retry episode in the same turn gets
+        // its own row instead of overwriting the first notice's upsert slot.
+        inferenceRetryCanonicalEvent ??= allocateCanonicalEvent(
+          `retry-notice:${nextRetryNoticeOrdinal++}`,
+        );
+        await persistAssistantReply({
+          reply,
+          event: inferenceRetryCanonicalEvent,
+          platformMessageId: inferenceRetryReply?.messageId,
+        });
       }
       diagnostics.recordVisibleReply();
     };
@@ -826,6 +1141,9 @@ export async function answerFastAgentQuestion({
     const executeMcpTool = async (
       call: FastAgentMcpToolCall,
     ): Promise<unknown> => {
+      let canonicalToolEvent:
+        | Awaited<ReturnType<typeof beginCanonicalToolEvent>>
+        | undefined;
       try {
         const closedError = requireOpen();
         if (closedError) return closedError;
@@ -904,6 +1222,12 @@ export async function answerFastAgentQuestion({
         }
         integrationCallSignatures.add(signature);
         throwIfTurnCancelled();
+        canonicalToolEvent = await beginCanonicalToolEvent({
+          title: call.toolName,
+          args: actorScopedIntegrationArguments,
+          mcpServerName: call.integrationId,
+          mcpToolName: call.toolName,
+        });
         const result = await callFastAgentIntegration(
           {
             userId,
@@ -919,13 +1243,19 @@ export async function answerFastAgentQuestion({
             args: actorScopedIntegrationArguments,
           },
         );
-        return { success: true, result };
+        const response = { success: true, result };
+        await finishCanonicalToolEvent(canonicalToolEvent, response);
+        return response;
       } catch (error) {
-        return toolFailure(error);
+        const failure = toolFailure(error);
+        if (canonicalToolEvent) {
+          await finishCanonicalToolEvent(canonicalToolEvent, failure);
+        }
+        return failure;
       }
     };
 
-    const executeNativeTool = async (
+    const executeNativeToolInner = async (
       call: FastAgentNativeToolCall,
     ): Promise<unknown> => {
       const recordToolFinished = diagnostics.recordNativeToolStarted(call.name);
@@ -1002,6 +1332,25 @@ export async function answerFastAgentQuestion({
             });
             turnVisibleMessages.push(
               buildAssistantTextMessage(`[Reacted with :${name}:]`),
+            );
+            await persistCanonicalMessage(
+              {
+                ...allocateCanonicalEvent(
+                  `assistant:${nextAssistantOrdinal++}`,
+                ),
+                turnId,
+                ts: Date.now(),
+                eventType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+                role: 'assistant',
+                contentBlocks: [
+                  { type: 'text', text: `[Reacted with :${name}:]` },
+                ],
+                metadata: { visibleInTranscript: true },
+                payload: { reaction: name, purpose: args.purpose },
+                source: conversation.surface,
+                nativeSessionId: activeOpenCodeSessionId,
+              },
+              true,
             );
             visibleUpdatePosted = true;
             if (args.purpose === 'closeout') closed = true;
@@ -1186,16 +1535,55 @@ export async function answerFastAgentQuestion({
       }
     };
 
+    const executeNativeTool = async (
+      call: FastAgentNativeToolCall,
+    ): Promise<unknown> => {
+      const canonicalToolEvent = await beginCanonicalToolEvent({
+        title: call.name,
+        args: call.args,
+        nativeSessionId: call.sessionId,
+      });
+      try {
+        const result = await executeNativeToolInner(call);
+        await finishCanonicalToolEvent(
+          canonicalToolEvent,
+          result,
+          call.sessionId,
+        );
+        return result;
+      } catch (error) {
+        await finishCanonicalToolEvent(
+          canonicalToolEvent,
+          toolFailure(error),
+          call.sessionId,
+        );
+        throw error;
+      }
+    };
+
     const imageFiles = getFastAgentImageFiles(images);
     const serializedTurnPrompt = serializeFastAgentMessages([turnMessage]);
     const serializedBootstrapPrompt =
       serializeFastAgentMessages(bootstrapMessages);
+    const persistOpenCodeSession = async (openCodeSessionId: string) => {
+      if (durableOpenCodeSessionId === openCodeSessionId) return;
+      await setFastAgentOpenCodeSession({
+        sessionId: session.id,
+        openCodeSessionId,
+      });
+      durableOpenCodeSessionId = openCodeSessionId;
+      session.openCodeSessionId = openCodeSessionId;
+    };
     diagnostics.markInferenceQueued();
     const promptTextPromise = fastAgentOpenCodeSessionManager.run({
       conversationId: session.id,
+      persistedSessionId: session.openCodeSessionId,
       prompt: serializedTurnPrompt,
       bootstrapPrompt: serializedBootstrapPrompt,
-      execute: async (openCodeSession, selectedPrompt) => {
+      onPathSelected: (path) => {
+        console.info(`[Fast Agent] OpenCode session path=${path}.`);
+      },
+      execute: async (openCodeSession, selectedPrompt, { validateSession }) => {
         diagnostics.markInferenceSetupStarted();
         const spillBudget = createFastAgentSpillTurnBudget();
         const nativeRuntime = await getFastAgentNativeToolRuntime(
@@ -1216,7 +1604,7 @@ export async function answerFastAgentQuestion({
           executeMcpTool,
         );
         try {
-          return await runFastAgentInferenceWithRetries(
+          const result = await runFastAgentInferenceWithRetries(
             async () => {
               const providerRetryAbortController = new AbortController();
               const promptSignal = signal
@@ -1232,6 +1620,8 @@ export async function answerFastAgentQuestion({
                     surface:
                       NON_TASK_INFERENCE_SURFACES.fastAgentQuestionAnswering,
                     modelRole: FAST_AGENT_MODEL_ROLE,
+                    ...(model ? { model } : {}),
+                    ...(reasoningEffort ? { reasoningEffort } : {}),
                     timeoutMs: promptTimeoutMs,
                     maxProviderRetryAttempts: FAST_AGENT_INFERENCE_MAX_RETRIES,
                     system,
@@ -1270,6 +1660,7 @@ export async function answerFastAgentQuestion({
                     signal: promptSignal,
                     promptOnlySubagents: true,
                     trackSessionTreeUsage: true,
+                    validateSession,
                     tools: buildFastAgentToolFilter(
                       availableIntegrations.map(
                         (integration) => integration.id,
@@ -1278,10 +1669,14 @@ export async function answerFastAgentQuestion({
                     onModelResolved: (model) => {
                       diagnostics.recordModelResolved(model);
                     },
+                    onMessageCompleted: (message) => {
+                      completedOpenCodeMessage = message;
+                    },
                     onPromptStarted: () => {
                       diagnostics.markInferenceStarted();
                     },
-                    onSessionReady: (openCodeSessionID) => {
+                    onSessionReady: async (openCodeSessionID) => {
+                      activeOpenCodeSessionId = openCodeSessionID;
                       unbindAllExecutors();
                       unbindExecutors.add(
                         bindFastAgentNativeToolExecutor(
@@ -1329,7 +1724,8 @@ export async function answerFastAgentQuestion({
               canRetry: (error) =>
                 !signal?.aborted &&
                 !nativeToolInvoked &&
-                !isNonTaskOpenCodePromptTimeoutError(error),
+                !isNonTaskOpenCodePromptTimeoutError(error) &&
+                !isNonTaskOpenCodeSessionValidationError(error),
               prepareRetry: () => {
                 // OpenCode persists the user message before inference starts,
                 // and abort does not roll it back. Discard the failed session
@@ -1345,6 +1741,16 @@ export async function answerFastAgentQuestion({
               signal,
             },
           );
+          if (openCodeSession.id) {
+            try {
+              await persistOpenCodeSession(openCodeSession.id);
+            } catch (error) {
+              console.error(
+                `[Fast Agent] Failed to persist OpenCode session identity: ${formatErrorForLog(error)}`,
+              );
+            }
+          }
+          return result;
         } finally {
           unbindAllExecutors();
           unbindMcpExecutor();
@@ -1359,7 +1765,11 @@ export async function answerFastAgentQuestion({
     if (!closed) {
       const message = promptText.trim();
       if (message) {
-        await postReply({ purpose: 'closeout', message });
+        await postReply(
+          { purpose: 'closeout', message },
+          false,
+          completedOpenCodeMessage,
+        );
       } else if (!visibleUpdatePosted) {
         // A delivered update is already a complete visible response. Stay
         // silent rather than append a generic closeout that contradicts it.
@@ -1414,11 +1824,17 @@ export async function answerFastAgentQuestion({
     try {
       const reply = { purpose: 'closeout' as const, message };
       if (!(await replaceInferenceRetryReply(reply, true))) {
-        await adapter.postReply(reply);
+        const posted = await adapter.postReply(reply);
         turnVisibleMessages.push(buildAssistantTextMessage(message));
+        await persistAssistantReply({
+          reply,
+          event: allocateCanonicalEvent(`assistant:${nextAssistantOrdinal++}`),
+          platformMessageId: posted?.messageId,
+        });
       }
       inferenceRetryReply = undefined;
       inferenceRetryMessageIndex = undefined;
+      inferenceRetryCanonicalEvent = undefined;
       diagnostics.recordVisibleReply();
       lastVisibleMessage = message;
     } catch (postError) {
