@@ -76,7 +76,7 @@ export const SETUP_MODEL_PROVIDER_IDS = [
 ] as const;
 
 /**
- * Built-in catalog providerids. Named OpenAI-compatible connections use
+ * Built-in catalog provider IDs. Named OpenAI-compatible connections use
  * `openai-compatible-<slug>` in addition to this closed set.
  */
 export type BuiltinSetupModelProviderId =
