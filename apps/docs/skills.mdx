@@ -90,9 +90,13 @@ Skills configured in Roomote settings are different:
   environments, even when the guidance is not checked into a repository.
 - **Repository-defined skills are codebase-level.** They apply when the task
   is working in that repository and the active workflow finds them relevant.
-- **Both are supplemental.** They help Roomote perform specialized work after
-  a Roomote task is underway; they do not replace the built-in task flow,
-  environment setup, or the user's prompt.
+- **Fast mode can discover repository-defined skills before starting a task.**
+  It reads only the checked-in skill Markdown from repositories in configured
+  environments. If the workflow needs a workspace, Fast starts a task in a
+  matching environment and the task loads its checked-out copy of the skill.
+- **Both are supplemental.** They help Roomote perform specialized work; they
+  do not replace the built-in task flow, environment setup, or the user's
+  prompt.
 - **Built-in Roomote skills stay authoritative.** If a custom or
   repository-defined skill uses the same name as a built-in Roomote workflow,
   Roomote's built-in workflow wins. Use distinct names for team skills.

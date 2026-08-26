@@ -19,6 +19,7 @@ const mocks = vi.hoisted(() => ({
   getTaskUrl: vi.fn(),
   setPendingPrReviewAction: vi.fn(),
   attachPendingPrReviewActionMessage: vi.fn(),
+  retirePrReviewActionMessagesBestEffort: vi.fn(),
   buildSlackPrReviewActionBlocks: vi.fn(),
   resolveUserMcpServerConfigs: vi.fn(),
 }));
@@ -109,7 +110,10 @@ vi.mock('@roomote/slack', async (importOriginal) => ({
 
 vi.mock('./task-runs/pr-review-action', () => ({
   setPendingPrReviewAction: mocks.setPendingPrReviewAction,
-  attachPendingPrReviewActionMessage: mocks.attachPendingPrReviewActionMessage,
+  attachPendingPrReviewActionMessageWithRetirement:
+    mocks.attachPendingPrReviewActionMessage,
+  retirePrReviewActionMessagesBestEffort:
+    mocks.retirePrReviewActionMessagesBestEffort,
 }));
 
 vi.mock('./artifacts/raw-url', () => ({
@@ -193,7 +197,11 @@ describe('deliverFastAgentParentEvent', () => {
     });
     mocks.resolveUserMcpServerConfigs.mockResolvedValue({});
     mocks.setPendingPrReviewAction.mockResolvedValue(undefined);
-    mocks.attachPendingPrReviewActionMessage.mockResolvedValue(undefined);
+    mocks.attachPendingPrReviewActionMessage.mockResolvedValue({
+      attached: true,
+      superseded: [],
+    });
+    mocks.retirePrReviewActionMessagesBestEffort.mockResolvedValue(undefined);
     mocks.buildSlackPrReviewActionBlocks.mockImplementation(
       ({ text, question, nonce }) => [
         { type: 'section', text: { type: 'mrkdwn', text } },
@@ -734,6 +742,20 @@ describe('deliverFastAgentParentEvent', () => {
   });
 
   it('delivers pull request feedback as a platform event with a stable idempotency key', async () => {
+    const superseded = {
+      nonce: 'old-nonce',
+      provider: 'slack',
+      taskId: 'task-1',
+      repository: 'acme/web',
+      prNumber: 42,
+      channelId: 'C123',
+      threadId: '100.001',
+      messageId: '99.001',
+    };
+    mocks.attachPendingPrReviewActionMessage.mockResolvedValueOnce({
+      attached: true,
+      superseded: [superseded],
+    });
     const feedbackEvent = {
       type: 'pull_request_feedback' as const,
       feedbackId: 'feedback-123',
@@ -803,6 +825,9 @@ describe('deliverFastAgentParentEvent', () => {
       expect.any(String),
       '101.001',
     );
+    expect(mocks.retirePrReviewActionMessagesBestEffort).toHaveBeenCalledWith([
+      superseded,
+    ]);
     expect(mocks.addReaction).not.toHaveBeenCalled();
   });
 
@@ -898,6 +923,89 @@ describe('deliverFastAgentParentEvent', () => {
     });
     expect(mocks.attachPendingPrReviewActionMessage).toHaveBeenCalledWith(
       nonce,
+      'message-with-actions',
+    );
+  });
+
+  it('preserves Discord action callbacks when attachment failure retries the post', async () => {
+    const feedbackEvent = {
+      type: 'pull_request_feedback' as const,
+      feedbackId: 'feedback-retry',
+      taskId: 'task-1',
+      runId: 42,
+      taskUrl: 'https://roomote.example/task/task-1',
+      pullRequest: {
+        provider: 'github' as const,
+        host: 'github.com',
+        repository: 'acme/web',
+        number: 42,
+        title: 'Fix review feedback',
+        url: 'https://github.com/acme/web/pull/42',
+        status: 'open' as const,
+      },
+      summary: 'Alice requested changes.',
+      suggestedActionQuestion: 'Want me to resolve these issues?',
+      suggestedActionPrompt: 'Address the requested changes.',
+    };
+    const discordParent = {
+      ...parent,
+      conversation: {
+        surface: 'discord' as const,
+        workspaceId: 'guild-1',
+        conversationId: 'thread-1',
+        replyTarget: { channelId: 'channel-1', threadId: 'thread-1' },
+      },
+    };
+    mocks.answerQuestion.mockImplementation(
+      async ({
+        adapter,
+      }: {
+        adapter: { postReply: (reply: unknown) => unknown };
+      }) =>
+        adapter.postReply({
+          purpose: 'closeout',
+          message: 'There is new PR feedback.',
+        }),
+    );
+    mocks.discordPostMessage.mockResolvedValue({
+      provider: 'discord',
+      channelId: 'channel-1',
+      threadId: 'thread-1',
+      messageId: 'message-with-actions',
+    });
+    mocks.attachPendingPrReviewActionMessage
+      .mockRejectedValueOnce(new Error('attachment failed'))
+      .mockResolvedValueOnce({ attached: true, superseded: [] });
+
+    await expect(
+      deliverFastAgentParentEvent({
+        parent: discordParent,
+        event: feedbackEvent,
+      }),
+    ).rejects.toThrow('attachment failed');
+    await expect(
+      deliverFastAgentParentEvent({
+        parent: discordParent,
+        event: feedbackEvent,
+      }),
+    ).resolves.toBe('delivered');
+
+    const firstNonce = mocks.setPendingPrReviewAction.mock.calls[0]?.[0]?.nonce;
+    const secondNonce =
+      mocks.setPendingPrReviewAction.mock.calls[1]?.[0]?.nonce;
+    expect(firstNonce).toEqual(expect.any(String));
+    expect(secondNonce).toBe(firstNonce);
+    expect(mocks.discordPostMessage.mock.calls[0]?.[0]?.buttons).toEqual(
+      mocks.discordPostMessage.mock.calls[1]?.[0]?.buttons,
+    );
+    expect(mocks.attachPendingPrReviewActionMessage).toHaveBeenNthCalledWith(
+      1,
+      firstNonce,
+      'message-with-actions',
+    );
+    expect(mocks.attachPendingPrReviewActionMessage).toHaveBeenNthCalledWith(
+      2,
+      firstNonce,
       'message-with-actions',
     );
   });
