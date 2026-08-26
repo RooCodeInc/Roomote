@@ -103,6 +103,12 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain(
       'The runtime rejects those calls until an acknowledgement',
     );
+    expect(prompt).toContain(
+      'Sending a task message is also exempt so steering is not delayed',
+    );
+    expect(prompt).toContain(
+      'Call it immediately, before an acknowledgement or other user-visible response',
+    );
     expect(prompt).toContain('kickoffMessage');
     expect(prompt).toContain("describing the user's work now underway");
     expect(prompt).toContain(
