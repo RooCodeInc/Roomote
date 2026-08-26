@@ -10,6 +10,7 @@ import {
   MANAGE_CUSTOM_AUTOMATIONS_TOOL,
   ROOMOTE_MCP_ID,
   activeRunStatuses,
+  buildInferenceProviderRecoveryPrompt,
   formatErrorForLog,
   resolveInferenceProviderRetryDelayMs,
   truncateAcpOutputText,
@@ -230,10 +231,8 @@ export const FAST_AGENT_INFERENCE_MAX_RETRIES = INFERENCE_PROVIDER_MAX_RETRIES;
 export const FAST_AGENT_TRANSIENT_INFERENCE_MAX_RETRIES = 6;
 const FAST_AGENT_INFERENCE_RETRY_ATTEMPT_TIMEOUT_MS = 5 * 60_000;
 const FAST_AGENT_TRANSIENT_RETRY_JITTER_RATIO = 0.2;
-const FAST_AGENT_PROVIDER_RECOVERY_PROMPT = [
-  'Continue. The previous model request failed due to a provider error and was automatically retried.',
-  'Resume from where you left off without repeating completed tool calls or messages already sent to the user.',
-].join(' ');
+const FAST_AGENT_PROVIDER_RECOVERY_PROMPT =
+  buildInferenceProviderRecoveryPrompt({ protectCompletedSideEffects: true });
 
 type FastAgentInferenceFailure = ReturnType<
   typeof classifyNonTaskInferenceError

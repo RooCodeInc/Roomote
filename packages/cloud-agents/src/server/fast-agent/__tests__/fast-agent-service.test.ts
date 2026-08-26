@@ -1912,7 +1912,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       });
       expect(mocks.generateText.mock.calls[1]?.[0]).toMatchObject({
         prompt: expect.stringContaining(
-          'without repeating completed tool calls or messages already sent',
+          'Do not repeat completed tool calls or messages already sent',
         ),
         timeoutMs: 300_000,
       });
