@@ -310,6 +310,12 @@ FROM runtime-base AS runtime-inference-base
 
 ARG OPENCODE_CLI_VERSION=1.18.10
 
+# Fast mode uses bounded, temporary partial Git fetches to discover
+# repository-defined skills without exposing a checkout to the model.
+RUN apt -qq update && \
+  apt -qq install -y git && \
+  rm -rf /var/lib/apt/lists/*
+
 # The install and version check run as root; with the image's HOME=/tmp they
 # would bake root-owned dotdirs (npm cache, OpenCode's data/config/cache
 # dirs) into the layer. The runtime user shares that HOME and must be able to
@@ -376,6 +382,7 @@ COPY --chown=roomote-app:roomote-app --from=build-web /roomote/apps/docs ./apps/
 COPY --from=build-api /roomote/apps/api/package.json ./apps/api/
 COPY --from=build-api /roomote/apps/api/dist ./apps/api/dist/
 COPY --from=build-api /runtime-deps/node_modules ./apps/api/node_modules/
+COPY --chown=roomote-app:roomote-app --from=build-api /roomote/packages/cloud-agents/src/server/workflows/skills/standard ./skills/standard/
 COPY --from=build-api /migrate /roomote/migrate/
 COPY --from=build-controller /roomote/releases /roomote/releases/
 COPY --from=build-controller /roomote/apps/controller/package.json ./apps/controller/
@@ -388,7 +395,8 @@ COPY --from=build-preview-proxy /roomote/apps/preview-proxy/package.json ./apps/
 COPY --from=build-preview-proxy /roomote/apps/preview-proxy/dist ./apps/preview-proxy/dist/
 COPY --from=build-preview-proxy /runtime-deps/node_modules ./apps/preview-proxy/node_modules/
 COPY --from=github-cli /usr/bin/gh /usr/local/bin/gh
-RUN command -v gh >/dev/null && command -v opencode >/dev/null && \
+RUN command -v git >/dev/null && command -v gh >/dev/null && \
+  command -v opencode >/dev/null && \
   cd /roomote/apps/bullmq && node -e "require.resolve('zod/package.json')" && \
   ls -d /roomote/node_modules/.pnpm/zod@*/node_modules/zod >/dev/null
 

@@ -49,6 +49,8 @@ const nativeToolNames = vi.hoisted(
       sendChatReaction: 'send_chat_reaction',
       sendChatReply: 'send_chat_reply',
       sendTaskMessage: 'send_task_message',
+      listSkills: 'list_skills',
+      loadSkill: 'load_skill',
       spillGrep: 'spill_grep',
       spillRead: 'spill_read',
     }) as const,
@@ -732,12 +734,12 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       mocks.bindExecutor.mock.calls.find(
         ([sessionID]) => sessionID === 'opencode-session-1',
       )?.[3],
-    ).toMatchObject({ allowSpillRecovery: true });
+    ).toMatchObject({ allowSkillAccess: true, allowSpillRecovery: true });
     expect(
       mocks.bindExecutor.mock.calls.find(
         ([sessionID]) => sessionID === 'opencode-subagent-1',
       )?.[3],
-    ).toMatchObject({ allowSpillRecovery: false });
+    ).toMatchObject({ allowSkillAccess: false, allowSpillRecovery: false });
   });
 
   it('rebuilds an invalidated OpenCode session from canonical compatibility history', async () => {
@@ -1456,7 +1458,10 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       expect.objectContaining({ kickoff: true, purpose: 'progress' }),
     );
     expect(launchTask).toHaveBeenCalledWith(
-      expect.objectContaining({ model: 'anthropic/claude-sonnet-5' }),
+      expect.objectContaining({
+        model: 'anthropic/claude-sonnet-5',
+        prompt: 'Fix checkout.',
+      }),
     );
     const canonicalWrites = mocks.upsertMessage.mock.calls.map(
       ([input]) => input.message,

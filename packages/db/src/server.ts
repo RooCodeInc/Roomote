@@ -188,6 +188,8 @@ export {
   fastAgentMemoryEvents,
   fastAgentMessages,
   fastAgentMessagesRelations,
+  fastAgentProviderMessages,
+  fastAgentProviderMessagesRelations,
   fastAgentPrFeedbackDeliveries,
   fastAgentPrFeedbackDeliveriesRelations,
   slackConversationMessages,

@@ -1121,9 +1121,15 @@ importers:
       '@opencode-ai/sdk':
         specifier: 1.18.10
         version: 1.18.10
+      '@roomote/ado':
+        specifier: workspace:^
+        version: link:../ado
       '@roomote/auth':
         specifier: workspace:^
         version: link:../auth
+      '@roomote/bitbucket':
+        specifier: workspace:^
+        version: link:../bitbucket
       '@roomote/communication':
         specifier: workspace:^
         version: link:../communication
@@ -1133,9 +1139,15 @@ importers:
       '@roomote/env':
         specifier: workspace:^
         version: link:../env
+      '@roomote/gitea':
+        specifier: workspace:^
+        version: link:../gitea
       '@roomote/github':
         specifier: workspace:^
         version: link:../github
+      '@roomote/gitlab':
+        specifier: workspace:^
+        version: link:../gitlab
       '@roomote/redis':
         specifier: workspace:^
         version: link:../redis

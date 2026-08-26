@@ -190,9 +190,10 @@ vi.mock('@roomote/cloud-agents/server', () => ({
   REVIEW_STATUS_END_MARKER: '<!-- roomote-review-status:end -->',
   REVIEW_CHECKLIST_START_MARKER: '<!-- roomote-review-checklist:start -->',
   REVIEW_CHECKLIST_END_MARKER: '<!-- roomote-review-checklist:end -->',
-  isReviewInProgressStatusLine: (line: string) =>
-    /^(Self-reviewing the PR(?: with fresh eyes)? now\.|Reviewing the PR now\.|Re-reviewing new commits now\.)/i.test(
-      line.trim(),
+  isReviewSummaryInProgress: (body: string) =>
+    body.includes('version=2 phase=reviewing') ||
+    /<!-- roomote-review-status:start -->\s*(?:Self-reviewing the PR(?: with fresh eyes)? now\.|Reviewing the PR now\.|Re-reviewing new commits now\.)/i.test(
+      body,
     ),
   parseReviewSummaryMarkerSha: (body: string) =>
     body.match(/roomote-review-summary\s+sha=([0-9a-f]+)/i)?.[1],

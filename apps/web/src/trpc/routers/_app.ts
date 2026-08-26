@@ -813,13 +813,6 @@ const automationsRouter = createRouter({
           .optional(),
         targetMode: z.enum(['channel', 'direct_message']).optional(),
         targetChannelId: z.string().trim().min(1).max(160).optional(),
-        targetServiceUrl: z
-          .string()
-          .trim()
-          .min(1)
-          .max(500)
-          .nullable()
-          .optional(),
       }),
     )
     .mutation(({ ctx: { auth }, input }) =>
@@ -860,13 +853,6 @@ const automationsRouter = createRouter({
           .optional(),
         targetMode: z.enum(['channel', 'direct_message']).optional(),
         targetChannelId: z.string().trim().min(1).max(160).optional(),
-        targetServiceUrl: z
-          .string()
-          .trim()
-          .min(1)
-          .max(500)
-          .nullable()
-          .optional(),
       }),
     )
     .mutation(({ ctx: { auth }, input }) =>

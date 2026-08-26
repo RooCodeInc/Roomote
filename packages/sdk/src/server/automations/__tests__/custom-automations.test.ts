@@ -4,6 +4,15 @@ const fastMocks = vi.hoisted(() => ({
   getSession: vi.fn(),
   deliverParentEvent: vi.fn(),
   slackPostMessage: vi.fn(),
+  createDiscordProvider: vi.fn(),
+  discordPostMessage: vi.fn(),
+  createDiscordThread: vi.fn(),
+  createTeamsProvider: vi.fn(),
+  teamsPostMessage: vi.fn(),
+  teamsUpdateMessage: vi.fn(),
+  createTelegramProvider: vi.fn(),
+  telegramPostMessage: vi.fn(),
+  recordProviderMessage: vi.fn(),
 }));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
@@ -16,6 +25,10 @@ vi.mock('../../lib/fast-agent-parent-event', () => ({
   deliverFastAgentParentEvent: fastMocks.deliverParentEvent,
 }));
 
+vi.mock('../../lib/fast-agent-provider-message', () => ({
+  recordFastAgentConversationMessage: fastMocks.recordProviderMessage,
+}));
+
 vi.mock('@roomote/slack', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@roomote/slack')>()),
   SlackNotifier: class SlackNotifier {
@@ -24,7 +37,18 @@ vi.mock('@roomote/slack', async (importOriginal) => ({
 }));
 
 vi.mock('../../lib/discord-communication', () => ({
-  createDiscordCommunicationProviderFromRuntimeCredentials: vi.fn(),
+  createDiscordCommunicationProviderFromRuntimeCredentials:
+    fastMocks.createDiscordProvider,
+}));
+
+vi.mock('../../lib/teams-communication', () => ({
+  createTeamsCommunicationProviderFromRuntimeCredentials:
+    fastMocks.createTeamsProvider,
+}));
+
+vi.mock('../../lib/telegram-communication', () => ({
+  createTelegramCommunicationProviderFromRuntimeCredentials:
+    fastMocks.createTelegramProvider,
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -33,7 +57,9 @@ vi.mock('@roomote/db/server', () => ({
       set: vi.fn(() => ({ where: vi.fn() })),
     })),
     query: {
+      discordInstallationChannels: { findFirst: vi.fn() },
       environments: { findFirst: vi.fn() },
+      slackInstallationChannels: { findFirst: vi.fn() },
       slackInstallations: { findFirst: vi.fn() },
     },
   },
@@ -42,6 +68,7 @@ vi.mock('@roomote/db/server', () => ({
     id: 'custom_automations.id',
     launchClaimedAt: 'custom_automations.launch_claimed_at',
   },
+  discordInstallationChannels: { channelId: 'discord_channels.channel_id' },
   CUSTOM_AUTOMATION_LAUNCH_STALE_CLAIM_MS: 10 * 60 * 1_000,
   environments: {},
   eq: vi.fn((...args: unknown[]) => args),
@@ -50,6 +77,7 @@ vi.mock('@roomote/db/server', () => ({
   listEnabledCustomAutomations: vi.fn(),
   recordCustomAutomationRunOutcome: vi.fn(),
   releaseCustomAutomationLaunchClaim: vi.fn(),
+  slackInstallationChannels: { channelId: 'slack_channels.channel_id' },
   tryClaimCustomAutomationLaunch: vi.fn(),
   slackInstallations: {},
 }));
@@ -61,7 +89,7 @@ vi.mock('../destination', () => ({
     surfaceLabel: 'Slack',
   })),
   buildDestinationTaskPayloadFields: vi.fn(() => ({})),
-  findTeamsConversationServiceUrl: vi.fn(),
+  findTeamsConversationRoute: vi.fn(),
   listConnectedCommunicationProviders: vi.fn(async () => ['slack', 'teams']),
 }));
 
@@ -104,7 +132,7 @@ import {
 } from '../custom-automations';
 import {
   buildDestinationTaskPayloadFields,
-  findTeamsConversationServiceUrl,
+  findTeamsConversationRoute,
   listConnectedCommunicationProviders,
 } from '../destination';
 import { isRunDue } from '../scheduling-utils';
@@ -146,6 +174,16 @@ describe('customAutomationsJob', () => {
     vi.mocked(db.query.environments.findFirst).mockResolvedValue({
       id: automation.environmentId,
     } as never);
+    vi.mocked(db.query.discordInstallationChannels.findFirst).mockResolvedValue(
+      {
+        id: 'discord-installation-channel-1',
+        installation: { guildId: 'guild-1', isActive: true },
+      } as never,
+    );
+    vi.mocked(db.query.slackInstallationChannels.findFirst).mockResolvedValue({
+      id: 'slack-installation-channel-1',
+      slackInstallation: { isActive: true, teamId: 'T123' },
+    } as never);
     vi.mocked(db.query.slackInstallations.findFirst).mockResolvedValue(
       undefined,
     );
@@ -166,6 +204,37 @@ describe('customAutomationsJob', () => {
     });
     fastMocks.deliverParentEvent.mockResolvedValue('delivered');
     fastMocks.slackPostMessage.mockResolvedValue('100.001');
+    fastMocks.discordPostMessage.mockResolvedValue({
+      provider: 'discord',
+      channelId: 'discord-dm-1',
+      messageId: 'discord-message-1',
+    });
+    fastMocks.createDiscordThread.mockResolvedValue({
+      channelId: 'discord-thread-1',
+      parentChannelId: 'discord-channel-1',
+      messageId: 'discord-message-1',
+    });
+    fastMocks.createDiscordProvider.mockResolvedValue({
+      postMessage: fastMocks.discordPostMessage,
+      createTaskThread: fastMocks.createDiscordThread,
+    });
+    fastMocks.teamsPostMessage.mockResolvedValue({
+      provider: 'teams',
+      channelId: 'teams-conversation-1',
+      messageId: 'teams-message-1',
+    });
+    fastMocks.createTeamsProvider.mockResolvedValue({
+      postMessage: fastMocks.teamsPostMessage,
+      updateMessage: fastMocks.teamsUpdateMessage,
+    });
+    fastMocks.telegramPostMessage.mockResolvedValue({
+      provider: 'telegram',
+      channelId: 'telegram-chat-1',
+      messageId: 'telegram-message-1',
+    });
+    fastMocks.createTelegramProvider.mockResolvedValue({
+      postMessage: fastMocks.telegramPostMessage,
+    });
   });
 
   it('runs a channel-less Fast automation without enqueueing a task', async () => {
@@ -224,6 +293,7 @@ describe('customAutomationsJob', () => {
 
     await customAutomationsJob();
 
+    expect(db.query.slackInstallationChannels.findFirst).toHaveBeenCalled();
     expect(fastMocks.slackPostMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         channel: 'C123',
@@ -263,6 +333,75 @@ describe('customAutomationsJob', () => {
         replyTarget: { channelId: 'C123', threadId: '100.001' },
       },
     });
+  });
+
+  it('preserves Discord channel thread delivery for Fast automations', async () => {
+    vi.mocked(listEnabledCustomAutomations).mockResolvedValue([
+      {
+        ...automation,
+        executionMode: 'fast',
+        environmentId: null,
+        target: {
+          provider: 'discord',
+          targetKind: 'discord_channel',
+          externalRef: 'discord-channel-1',
+        },
+        createdByUserId: 'user-1',
+      } as never,
+    ]);
+    vi.mocked(listConnectedCommunicationProviders).mockResolvedValue([
+      'discord',
+    ]);
+
+    const result = await customAutomationsJob();
+
+    expect(result.completed).toBe(true);
+    expect(fastMocks.createDiscordThread).toHaveBeenCalledWith({
+      channelId: 'discord-channel-1',
+      name: 'Flaky tests',
+      initialText: 'Flaky tests is running in Fast mode.',
+    });
+    expect(fastMocks.getSession).toHaveBeenCalledWith({
+      userId: 'user-1',
+      conversation: {
+        surface: 'discord',
+        workspaceId: 'guild-1',
+        conversationId: 'discord-thread-1',
+        replyTarget: {
+          channelId: 'discord-channel-1',
+          threadId: 'discord-thread-1',
+        },
+      },
+    });
+  });
+
+  it('fails closed when a configured Discord channel is unavailable', async () => {
+    vi.mocked(listEnabledCustomAutomations).mockResolvedValue([
+      {
+        ...automation,
+        executionMode: 'fast',
+        environmentId: null,
+        target: {
+          provider: 'discord',
+          targetKind: 'discord_channel',
+          externalRef: 'missing-discord-channel',
+        },
+        createdByUserId: 'user-1',
+      } as never,
+    ]);
+    vi.mocked(listConnectedCommunicationProviders).mockResolvedValue([
+      'discord',
+    ]);
+    vi.mocked(db.query.discordInstallationChannels.findFirst).mockResolvedValue(
+      undefined,
+    );
+
+    const result = await customAutomationsJob();
+
+    expect(result.errors).toEqual([
+      'Flaky tests: Discord destination is no longer available.',
+    ]);
+    expect(fastMocks.getSession).not.toHaveBeenCalled();
   });
 
   it('delivers a Slack user-backed Fast automation to the owner DM', async () => {
@@ -345,33 +484,207 @@ describe('customAutomationsJob', () => {
     );
   });
 
-  it('fails an unsupported configured Fast destination instead of running without one', async () => {
+  it.each([
+    {
+      provider: 'discord',
+      targetKind: 'discord_user',
+      channelId: 'discord-dm-1',
+      surface: 'discord',
+      workspaceId: 'dm',
+      rootMessageId: 'discord-message-1',
+    },
+    {
+      provider: 'teams',
+      targetKind: 'teams_channel',
+      channelId: 'teams-conversation-1',
+      surface: 'teams',
+      workspaceId: 'tenant-1',
+      threadId: 'teams-message-1',
+      rootMessageId: 'teams-message-1',
+    },
+    {
+      provider: 'teams',
+      targetKind: 'teams_user',
+      channelId: 'teams-dm-1',
+      surface: 'teams',
+      workspaceId: 'tenant-1',
+      rootMessageId: 'teams-message-1',
+    },
+    {
+      provider: 'telegram',
+      targetKind: 'telegram_chat',
+      channelId: 'telegram-chat-1',
+      surface: 'telegram',
+      workspaceId: 'telegram-chat-1',
+    },
+    {
+      provider: 'telegram',
+      targetKind: 'telegram_user',
+      channelId: 'telegram-dm-1',
+      surface: 'telegram',
+      workspaceId: 'telegram-dm-1',
+    },
+  ] as const)(
+    'delivers a $targetKind Fast automation through the $provider surface',
+    async ({
+      provider,
+      targetKind,
+      channelId,
+      surface,
+      workspaceId,
+      ...expected
+    }) => {
+      vi.mocked(listEnabledCustomAutomations).mockResolvedValue([
+        {
+          ...automation,
+          executionMode: 'fast',
+          environmentId: null,
+          target: { provider, targetKind, externalRef: channelId },
+          createdByUserId: 'user-1',
+        } as never,
+      ]);
+      vi.mocked(listConnectedCommunicationProviders).mockResolvedValue([
+        provider,
+      ]);
+      if (targetKind.endsWith('_user')) {
+        vi.mocked(findUserDirectMessageDestination).mockResolvedValue({
+          channelId,
+          ...(provider === 'teams'
+            ? {
+                teamId: 'tenant-1',
+                serviceUrl: 'https://smba.example.com/amer/',
+              }
+            : {}),
+        });
+      } else if (provider === 'teams') {
+        vi.mocked(findTeamsConversationRoute).mockResolvedValue({
+          serviceUrl: 'https://smba.example.com/amer/',
+          workspaceId: 'tenant-1',
+        });
+      }
+
+      const result = await customAutomationsJob();
+
+      expect(result.completed).toBe(true);
+      expect(fastMocks.getSession).toHaveBeenCalledWith({
+        userId: 'user-1',
+        conversation: expect.objectContaining({
+          surface,
+          workspaceId,
+          replyTarget: {
+            channelId,
+            ...('threadId' in expected ? { threadId: expected.threadId } : {}),
+            ...(provider === 'teams'
+              ? { serviceUrl: 'https://smba.example.com/amer/' }
+              : {}),
+          },
+        }),
+      });
+      expect(fastMocks.deliverParentEvent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          event: expect.objectContaining({
+            ...('rootMessageId' in expected
+              ? { rootMessageId: expected.rootMessageId }
+              : {}),
+          }),
+        }),
+      );
+      if ('rootMessageId' in expected) {
+        expect(fastMocks.recordProviderMessage).toHaveBeenCalledWith({
+          sessionId: '33333333-3333-4333-8333-333333333333',
+          conversation: expect.objectContaining({ surface, workspaceId }),
+          messageId: expected.rootMessageId,
+        });
+      }
+    },
+  );
+
+  it('fails closed for a Teams service URL without a verified installation', async () => {
     vi.mocked(listEnabledCustomAutomations).mockResolvedValue([
       {
         ...automation,
         executionMode: 'fast',
         environmentId: null,
         target: {
-          provider: 'telegram',
-          targetKind: 'telegram_channel',
-          externalRef: 'telegram-channel-1',
+          provider: 'teams',
+          targetKind: 'teams_channel',
+          externalRef: 'manual-teams-conversation',
+          metadata: { serviceUrl: 'https://smba.example.com/amer/' },
         },
         createdByUserId: 'user-1',
       } as never,
     ]);
+    vi.mocked(findTeamsConversationRoute).mockResolvedValue(null);
+    vi.mocked(listConnectedCommunicationProviders).mockResolvedValue(['teams']);
 
     const result = await customAutomationsJob();
 
-    const error =
-      'Telegram report destinations of this type are not supported in Fast mode.';
-    expect(result.errors).toEqual([`Flaky tests: ${error}`]);
+    expect(result.errors).toEqual([
+      'Flaky tests: Teams report destination is missing a resolvable service URL.',
+    ]);
     expect(fastMocks.getSession).not.toHaveBeenCalled();
-    expect(recordCustomAutomationRunOutcome).toHaveBeenCalledWith(db, {
-      id: automation.id,
-      status: 'failed',
-      error,
-    });
+    expect(recordCustomAutomationRunOutcome).not.toHaveBeenCalledWith(
+      db,
+      expect.objectContaining({ status: 'succeeded' }),
+    );
   });
+
+  it.each([
+    {
+      provider: 'discord',
+      targetKind: 'discord_user',
+      destination: { channelId: 'discord-dm-1' },
+      disable: () => fastMocks.createDiscordProvider.mockResolvedValue(null),
+    },
+    {
+      provider: 'teams',
+      targetKind: 'teams_user',
+      destination: {
+        channelId: 'teams-dm-1',
+        teamId: 'tenant-1',
+        serviceUrl: 'https://smba.example.com/amer/',
+      },
+      disable: () => fastMocks.createTeamsProvider.mockResolvedValue(null),
+    },
+    {
+      provider: 'telegram',
+      targetKind: 'telegram_user',
+      destination: { channelId: 'telegram-dm-1' },
+      disable: () => fastMocks.createTelegramProvider.mockResolvedValue(null),
+    },
+  ] as const)(
+    'fails closed when $provider Fast delivery credentials are unavailable',
+    async ({ provider, targetKind, destination, disable }) => {
+      vi.mocked(listEnabledCustomAutomations).mockResolvedValue([
+        {
+          ...automation,
+          executionMode: 'fast',
+          environmentId: null,
+          target: { provider, targetKind, externalRef: 'user-1' },
+          createdByUserId: 'user-1',
+        } as never,
+      ]);
+      vi.mocked(findUserDirectMessageDestination).mockResolvedValue(
+        destination,
+      );
+      vi.mocked(listConnectedCommunicationProviders).mockResolvedValue([
+        provider,
+      ]);
+      disable();
+
+      const result = await customAutomationsJob();
+
+      expect(result.errors).toEqual([
+        expect.stringContaining(
+          `${provider[0]!.toUpperCase()}${provider.slice(1)} is not connected`,
+        ),
+      ]);
+      expect(recordCustomAutomationRunOutcome).not.toHaveBeenCalledWith(
+        db,
+        expect.objectContaining({ status: 'succeeded' }),
+      );
+    },
+  );
 
   it('marks a stale Fast launch as interrupted instead of replaying it', async () => {
     const staleClaim = new Date(Date.now() - 11 * 60 * 1_000);
@@ -770,12 +1083,14 @@ describe('customAutomationsJob', () => {
           provider: 'teams',
           targetKind: 'teams_channel',
           externalRef: '19:abc@thread.tacv2',
+          metadata: { serviceUrl: 'https://attacker.example/' },
         },
       } as never,
     ]);
-    vi.mocked(findTeamsConversationServiceUrl).mockResolvedValue(
-      'https://smba.trafficmanager.net/amer/',
-    );
+    vi.mocked(findTeamsConversationRoute).mockResolvedValue({
+      serviceUrl: 'https://smba.trafficmanager.net/amer/',
+      workspaceId: 'tenant-1',
+    });
     vi.mocked(buildDestinationTaskPayloadFields).mockReturnValue({
       communicationProvider: 'teams',
       communicationChannelId: '19:abc@thread.tacv2',
@@ -785,7 +1100,7 @@ describe('customAutomationsJob', () => {
     const result = await customAutomationsJob();
 
     expect(result.launchedTaskId).toBe('task_abc');
-    expect(findTeamsConversationServiceUrl).toHaveBeenCalledWith(
+    expect(findTeamsConversationRoute).toHaveBeenCalledWith(
       '19:abc@thread.tacv2',
     );
     expect(enqueueTask).toHaveBeenCalledWith(
@@ -810,7 +1125,7 @@ describe('customAutomationsJob', () => {
         },
       } as never,
     ]);
-    vi.mocked(findTeamsConversationServiceUrl).mockResolvedValue(null);
+    vi.mocked(findTeamsConversationRoute).mockResolvedValue(null);
 
     const result = await customAutomationsJob();
 

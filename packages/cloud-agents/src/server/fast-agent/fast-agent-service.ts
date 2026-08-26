@@ -82,8 +82,11 @@ import {
 } from './fast-agent-tasks';
 import { getFastAgentUserIdentity } from './fast-agent-user-identity';
 import { FastAgentTurnDiagnostics } from './fast-agent-turn-diagnostics';
+import { RemoteFastAgentRepositorySkillSource } from './fast-agent-repository-skill-source';
+import { FastAgentSkillStore } from './fast-agent-skill-store';
 import {
   type FastAgentConversation,
+  isFastAgentCommunicationConversation,
   type FastAgentPlatformEventHandling,
   type FastAgentPlatformEventKind,
   type FastAgentPlatformEventVisibility,
@@ -1187,8 +1190,7 @@ export async function answerFastAgentQuestion({
           call.integrationId === ROOMOTE_MCP_ID &&
           (call.toolName === CHAT_CHANNEL_MESSAGES_TOOL.name ||
             call.toolName === CHAT_MESSAGE_CONTEXT_TOOL.name) &&
-          (conversation.surface === 'slack' ||
-            conversation.surface === 'discord')
+          isFastAgentCommunicationConversation(conversation)
             ? conversation.surface
             : undefined;
         const integrationArguments =
@@ -1206,13 +1208,14 @@ export async function answerFastAgentQuestion({
                 ),
               }
             : call.args;
-        const currentChatChannel =
-          conversation.surface === 'slack'
+        const currentChatChannel = isFastAgentCommunicationConversation(
+          conversation,
+        )
+          ? conversation.surface === 'slack'
             ? conversation.replyTarget.channelId
-            : conversation.surface === 'discord'
-              ? (conversation.replyTarget.threadId ??
-                conversation.replyTarget.channelId)
-              : undefined;
+            : (conversation.replyTarget.threadId ??
+              conversation.replyTarget.channelId)
+          : undefined;
         const chatLookupArguments =
           chatLookupProvider &&
           currentChatChannel &&
@@ -1661,6 +1664,14 @@ export async function answerFastAgentQuestion({
       execute: async (openCodeSession, selectedPrompt, { validateSession }) => {
         diagnostics.markInferenceSetupStarted();
         const spillBudget = createFastAgentSpillTurnBudget();
+        const skillStore = new FastAgentSkillStore(
+          undefined,
+          new RemoteFastAgentRepositorySkillSource({
+            allowedEnvironmentIds: availableEnvironments.map(
+              (environment) => environment.id,
+            ),
+          }),
+        );
         const nativeRuntime = await getFastAgentNativeToolRuntime(
           session.id,
           availableIntegrations,
@@ -1759,7 +1770,12 @@ export async function answerFastAgentQuestion({
                           openCodeSessionID,
                           session.id,
                           executeNativeTool,
-                          { allowSpillRecovery: true, spillBudget },
+                          {
+                            allowSkillAccess: true,
+                            allowSpillRecovery: true,
+                            skillStore,
+                            spillBudget,
+                          },
                         ),
                       );
                     },
@@ -1777,7 +1793,12 @@ export async function answerFastAgentQuestion({
                               error:
                                 'That tool is reserved for the Fast parent agent.',
                             }),
-                          { allowSpillRecovery: false, spillBudget },
+                          {
+                            allowSkillAccess: false,
+                            allowSpillRecovery: false,
+                            skillStore,
+                            spillBudget,
+                          },
                         ),
                       );
                     },
@@ -1833,6 +1854,7 @@ export async function answerFastAgentQuestion({
         } finally {
           unbindAllExecutors();
           unbindMcpExecutor();
+          await skillStore.dispose();
         }
       },
     });

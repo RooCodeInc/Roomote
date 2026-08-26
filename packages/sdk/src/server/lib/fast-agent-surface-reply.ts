@@ -1,6 +1,9 @@
 import {
+  acquireFastAgentTurnLock,
+  answerFastAgentQuestion,
   createFastAgentWebTaskLauncher,
   fastAgentConversationRepository,
+  resolveApiBaseUrl,
   type FastAgentConversation,
   type FastAgentTurnAdapter,
 } from '@roomote/cloud-agents/server';
@@ -21,7 +24,15 @@ import {
 } from '@roomote/slack';
 
 import { createDiscordCommunicationProviderFromRuntimeCredentials } from './discord-communication';
-import { createFastAgentDiscordTaskLauncher } from './fast-agent-parent-event';
+import {
+  createFastAgentCommunicationTaskLauncher,
+  createFastAgentDiscordTaskLauncher,
+} from './fast-agent-parent-event';
+import { createTeamsCommunicationProviderFromRuntimeCredentials } from './teams-communication';
+import { createTelegramCommunicationProviderFromRuntimeCredentials } from './telegram-communication';
+import { findTeamsConversationRoute } from '../automations/destination';
+import { recordFastAgentConversationMessageBestEffort } from './fast-agent-provider-message';
+import { resolveUserMcpServerConfigs } from '../routers/mcp-connections';
 
 const SLACK_QUOTE_MAX_LENGTH = 100;
 const DISCORD_QUOTE_MAX_LENGTH = 280;
@@ -112,6 +123,9 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
     id: params.sessionId,
   });
   if (!session) {
+    return null;
+  }
+  if (session.userId !== params.userId) {
     return null;
   }
   const conversation = session.conversation;
@@ -301,11 +315,159 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
               });
             },
           });
+          await recordFastAgentConversationMessageBestEffort({
+            sessionId: session.id,
+            conversation,
+            messageId: posted.messageId,
+          });
           return { messageId: posted.messageId };
         },
       },
     };
   }
 
+  if (conversation.surface === 'teams') {
+    const [provider, route] = await Promise.all([
+      createTeamsCommunicationProviderFromRuntimeCredentials(),
+      findTeamsConversationRoute(
+        conversation.replyTarget.channelId,
+        conversation.workspaceId,
+      ),
+    ]);
+    if (!provider || !route) {
+      return null;
+    }
+    const serviceUrl = route.serviceUrl;
+    return {
+      conversation,
+      adapter: {
+        launchTask: createFastAgentCommunicationTaskLauncher({
+          userId: params.userId,
+          conversation,
+          serviceUrl,
+        }),
+        postReply: async ({ message }) => {
+          const posted = await provider.postMessage({
+            channelId: conversation.replyTarget.channelId,
+            serviceUrl,
+            ...(conversation.replyTarget.threadId
+              ? {
+                  threadId: conversation.replyTarget.threadId,
+                  replyToMessageId: conversation.replyTarget.threadId,
+                }
+              : {}),
+            text: `${message}\n\n${buildFastSessionReplyFooterText({ provider: 'teams', sessionId: session.id })}`,
+            textFormat: 'markdown',
+          });
+          await recordFastAgentConversationMessageBestEffort({
+            sessionId: session.id,
+            conversation,
+            messageId: posted.messageId,
+          });
+          return { messageId: posted.messageId };
+        },
+        replaceReply: async (handle, { message }) => {
+          await provider.updateMessage({
+            channelId: conversation.replyTarget.channelId,
+            messageId: handle.messageId,
+            serviceUrl,
+            text: `${message}\n\n${buildFastSessionReplyFooterText({ provider: 'teams', sessionId: session.id })}`,
+            textFormat: 'markdown',
+          });
+          await recordFastAgentConversationMessageBestEffort({
+            sessionId: session.id,
+            conversation,
+            messageId: handle.messageId,
+          });
+          return handle;
+        },
+      },
+    };
+  }
+
+  if (conversation.surface === 'telegram') {
+    const provider =
+      await createTelegramCommunicationProviderFromRuntimeCredentials();
+    if (!provider) {
+      return null;
+    }
+    return {
+      conversation,
+      adapter: {
+        launchTask: createFastAgentCommunicationTaskLauncher({
+          userId: params.userId,
+          conversation,
+        }),
+        postReply: async ({ message }) => {
+          const posted = await provider.postMessage({
+            channelId: conversation.replyTarget.channelId,
+            ...(conversation.replyTarget.threadId
+              ? { threadId: conversation.replyTarget.threadId }
+              : {}),
+            text: `${message}\n\n${buildFastSessionReplyFooterText({ provider: 'telegram', sessionId: session.id })}`,
+            textFormat: 'markdown',
+          });
+          return { messageId: posted.messageId };
+        },
+        replaceReply: async (handle, { message }) => {
+          await provider.editMessageText({
+            channelId: conversation.replyTarget.channelId,
+            messageId: handle.messageId,
+            text: `${message}\n\n${buildFastSessionReplyFooterText({ provider: 'telegram', sessionId: session.id })}`,
+            textFormat: 'markdown',
+          });
+          return handle;
+        },
+      },
+    };
+  }
+
   return null;
+}
+
+export async function continueFastAgentSurfaceReply(params: {
+  sessionId: string;
+  userId: string;
+  senderDisplayName: string | null;
+  question: string;
+  currentMessageId: string;
+  images?: string[];
+}): Promise<boolean> {
+  const delivery = await buildFastAgentSurfaceReplyDelivery(params);
+  if (!delivery) {
+    return false;
+  }
+
+  const release = await acquireFastAgentTurnLock({
+    conversation: delivery.conversation,
+  });
+  if (!release) {
+    return false;
+  }
+
+  const apiBaseUrl = resolveApiBaseUrl() ?? undefined;
+  try {
+    await answerFastAgentQuestion({
+      question: params.question,
+      images: params.images,
+      userId: params.userId,
+      apiBaseUrl,
+      conversation: delivery.conversation,
+      currentMessageId: params.currentMessageId,
+      signal: release.signal,
+      senderDisplayName: params.senderDisplayName ?? undefined,
+      adapter: {
+        resolveMcpServerConfigs: () =>
+          resolveUserMcpServerConfigs({
+            userId: params.userId,
+            apiBaseUrl,
+            includeRoomoteMemberTools: true,
+          }),
+        ...delivery.adapter,
+      },
+    });
+    return true;
+  } finally {
+    await release().catch(() => {});
+  }
 }

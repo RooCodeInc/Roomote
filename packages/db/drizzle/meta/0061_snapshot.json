@@ -1,5 +1,5 @@
 {
-  "id": "cacca1c4-37ed-4313-bb64-9831bef1c053",
+  "id": "bead5b83-f338-4734-832f-ac80e92db1f6",
   "prevId": "df5ebdeb-4055-46c6-87fc-a10c618013f3",
   "version": "7",
   "dialect": "postgresql",
@@ -3091,6 +3091,12 @@
         },
         "current_reply_thread_id": {
           "name": "current_reply_thread_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "current_reply_service_url": {
+          "name": "current_reply_service_url",
           "type": "text",
           "primaryKey": false,
           "notNull": false
@@ -11373,18 +11379,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "resolution_status": {
-          "name": "resolution_status",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "resolution_updated_at": {
-          "name": "resolution_updated_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": false
-        },
         "harness_instructions": {
           "name": "harness_instructions",
           "type": "text",
@@ -11663,10 +11657,6 @@
         "tasks_requested_work_kind_source_check": {
           "name": "tasks_requested_work_kind_source_check",
           "value": "\"tasks\".\"requested_work_kind_source\" in ('explicit_bootstrap', 'task_tool', 'llm_classifier', 'inherited', 'system_default')"
-        },
-        "tasks_resolution_status_check": {
-          "name": "tasks_resolution_status_check",
-          "value": "\"tasks\".\"resolution_status\" IS NULL OR \"tasks\".\"resolution_status\" in ('awaiting_confirmation', 'acknowledged', 'needs_follow_up')"
         },
         "tasks_commit_author_kind_check": {
           "name": "tasks_commit_author_kind_check",

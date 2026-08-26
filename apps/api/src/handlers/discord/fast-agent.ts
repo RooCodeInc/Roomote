@@ -24,7 +24,10 @@ import {
   setThreadReplyFooterRecord,
   withThreadReplyFooterLock,
 } from '@roomote/communication';
-import { resolveUserMcpServerConfigs } from '@roomote/sdk/server';
+import {
+  recordFastAgentConversationMessageBestEffort,
+  resolveUserMcpServerConfigs,
+} from '@roomote/sdk/server';
 import { ALL_REPOSITORIES } from '@roomote/types';
 
 import { replyToDiscordEvent } from './replies.js';
@@ -145,6 +148,11 @@ export async function processDiscordFastAgentMessage(input: {
             ...(input.interaction ? { interaction: input.interaction } : {}),
             ...(message ? { replyToMessageId: message.id } : {}),
             text: textWithFooter,
+          });
+          await recordFastAgentConversationMessageBestEffort({
+            sessionId: session.id,
+            conversation,
+            messageId: posted.lastTextMessageId ?? posted.messageId,
           });
           return {
             messageId: posted.lastTextMessageId ?? posted.messageId,
