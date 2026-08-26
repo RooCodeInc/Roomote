@@ -11,6 +11,7 @@ import {
   markFastAgentMemoryEvent,
   releaseBrainMemoryEvents,
   releaseFastAgentMemoryEvents,
+  settleFastAgentMemoryEvent,
   pullRequestFacts,
   taskPullRequests,
   taskRuns,
@@ -696,10 +697,17 @@ async function drainOneFastMemoryBatch(connection: {
       });
 
       await postToBrain(page, connection);
-      await markFastAgentMemoryEvent(db, event.id, 'done');
+      const settleResult = await settleFastAgentMemoryEvent(
+        db,
+        event.id,
+        event.revision,
+        'done',
+      );
 
       console.log(
-        `${LOG_PREFIX} ingested memory for conversation ${event.conversationId} (${page.slug})`,
+        settleResult === 'settled'
+          ? `${LOG_PREFIX} ingested memory for conversation ${event.conversationId} (${page.slug})`
+          : `${LOG_PREFIX} conversation ${event.conversationId} gained facts mid-write; re-ingesting next tick (${page.slug})`,
       );
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -723,12 +731,17 @@ async function drainOneFastMemoryBatch(connection: {
 
       const terminal = event.attempts >= MAX_ATTEMPTS;
 
-      await markFastAgentMemoryEvent(
-        db,
-        event.id,
-        terminal ? 'failed' : 'pending',
-        message,
-      );
+      if (terminal) {
+        await settleFastAgentMemoryEvent(
+          db,
+          event.id,
+          event.revision,
+          'failed',
+          message,
+        );
+      } else {
+        await markFastAgentMemoryEvent(db, event.id, 'pending', message);
+      }
 
       console.warn(
         `${LOG_PREFIX} ${

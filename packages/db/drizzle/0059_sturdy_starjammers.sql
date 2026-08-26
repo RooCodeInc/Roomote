@@ -2,6 +2,7 @@ CREATE TABLE "fast_agent_memory_events" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"conversation_id" uuid NOT NULL,
 	"memory" text NOT NULL,
+	"revision" integer DEFAULT 0 NOT NULL,
 	"status" text DEFAULT 'pending' NOT NULL,
 	"attempts" integer DEFAULT 0 NOT NULL,
 	"last_error" text,

@@ -4310,6 +4310,13 @@ export const fastAgentMemoryEvents = pgTable(
       .references(() => fastAgentConversations.id, { onDelete: 'cascade' }),
     /** Accumulated `- fact` markdown lines, newest appended last. */
     memory: text('memory').notNull(),
+    /**
+     * Bumped on every appended fact. The drainer fences its completion on the
+     * revision it claimed, so a save that lands while a page write is in
+     * flight forces a re-ingest of the newer content instead of being
+     * stranded behind an already-written older snapshot.
+     */
+    revision: integer('revision').notNull().default(0),
     status: text('status')
       .notNull()
       .default('pending')

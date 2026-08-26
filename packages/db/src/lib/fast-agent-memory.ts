@@ -19,8 +19,13 @@ export type AppendFastAgentMemoryResult =
  * ingestion pipeline, which owns the slug, redaction, and provenance, so Fast
  * never reaches the Brain directly.
  *
- * Status resets to 'pending' so an already-ingested memory is re-written with
- * the richer content at the same conversation-specific slug.
+ * Every append bumps `revision`, which the drainer fences its completion on.
+ * A settled row ('done'/'skipped'/'failed') returns to 'pending' with a fresh
+ * retry budget so the richer content re-ingests at the same slug. A row the
+ * drainer currently holds ('processing') keeps its status and budget: leaving
+ * it claimed guarantees a single in-flight page writer per conversation, and
+ * the drainer's revision fence hands the row back when its snapshot went
+ * stale mid-write.
  */
 export async function appendFastAgentMemory(
   database: DatabaseOrTransaction,
@@ -50,8 +55,9 @@ export async function appendFastAgentMemory(
         target: fastAgentMemoryEvents.conversationId,
         set: {
           memory: sql`${fastAgentMemoryEvents.memory} || E'\n' || ${line}`,
-          status: 'pending',
-          attempts: 0,
+          revision: sql`${fastAgentMemoryEvents.revision} + 1`,
+          status: sql`case when ${fastAgentMemoryEvents.status} = 'processing' then 'processing' else 'pending' end`,
+          attempts: sql`case when ${fastAgentMemoryEvents.status} = 'processing' then ${fastAgentMemoryEvents.attempts} else 0 end`,
           lastError: null,
           updatedAt: sql`now()`,
         },
@@ -122,18 +128,14 @@ export async function releaseFastAgentMemoryEvents(
 }
 
 /**
- * Terminal transitions ('done', 'skipped', 'failed') apply only while the row
- * is still 'processing': a save_memory call landing between the claim and
- * this mark resets the row to 'pending' with content the drainer's snapshot
- * did not include, and completing it anyway would strand that newer fact as
- * ingested-when-it-wasn't. The guarded update matches nothing then, so the
- * row stays pending and the next tick re-ingests the full memory at the same
- * idempotent slug.
+ * Non-terminal transitions. 'pending' hands a claimed row back unguarded;
+ * 'skipped' (the conversation no longer exists) applies only while the row is
+ * still 'processing', so a concurrent reclaim is not clobbered.
  */
 export async function markFastAgentMemoryEvent(
   database: DatabaseOrTransaction,
   id: string,
-  status: 'pending' | 'done' | 'skipped' | 'failed',
+  status: 'pending' | 'skipped',
   lastError?: string,
 ): Promise<void> {
   await database
@@ -141,8 +143,7 @@ export async function markFastAgentMemoryEvent(
     .set({
       status,
       lastError: lastError ?? null,
-      processedAt:
-        status === 'done' || status === 'skipped' ? sql`now()` : null,
+      processedAt: status === 'skipped' ? sql`now()` : null,
       updatedAt: sql`now()`,
     })
     .where(
@@ -153,4 +154,54 @@ export async function markFastAgentMemoryEvent(
             eq(fastAgentMemoryEvents.status, 'processing'),
           ),
     );
+}
+
+/**
+ * Settle a claimed event after the page write, fenced on the revision the
+ * drainer claimed. The fence is what makes overlapping writers safe: gbrain
+ * page writes carry no timeout, so an older in-flight `put_page` can land
+ * after a newer one. Whichever writer holds a stale revision (or lost its
+ * claim to a stale-reclaim) fails the fence, and the row is handed back to
+ * 'pending' — the forced re-ingest both carries any newer facts and re-puts
+ * the latest content over whatever snapshot reached the page last.
+ */
+export async function settleFastAgentMemoryEvent(
+  database: DatabaseOrTransaction,
+  id: string,
+  claimedRevision: number,
+  outcome: 'done' | 'failed',
+  lastError?: string,
+): Promise<'settled' | 'superseded'> {
+  const settled = await database
+    .update(fastAgentMemoryEvents)
+    .set({
+      status: outcome,
+      lastError: lastError ?? null,
+      processedAt: outcome === 'done' ? sql`now()` : null,
+      updatedAt: sql`now()`,
+    })
+    .where(
+      and(
+        eq(fastAgentMemoryEvents.id, id),
+        eq(fastAgentMemoryEvents.status, 'processing'),
+        eq(fastAgentMemoryEvents.revision, claimedRevision),
+      ),
+    )
+    .returning({ id: fastAgentMemoryEvents.id });
+
+  if (settled.length > 0) {
+    return 'settled';
+  }
+
+  await database
+    .update(fastAgentMemoryEvents)
+    .set({ status: 'pending', updatedAt: sql`now()` })
+    .where(
+      and(
+        eq(fastAgentMemoryEvents.id, id),
+        eq(fastAgentMemoryEvents.status, 'processing'),
+      ),
+    );
+
+  return 'superseded';
 }

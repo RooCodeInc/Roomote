@@ -1,5 +1,5 @@
 {
-  "id": "c7e39dcc-0562-4bec-b3c9-9c54cb5ae7dd",
+  "id": "a2ad74ed-f971-4786-bc8c-1c00f5dc88b4",
   "prevId": "f94a51e6-0e6e-43b6-9d79-3e9a1cd779b9",
   "version": "7",
   "dialect": "postgresql",
@@ -3259,6 +3259,13 @@
           "type": "text",
           "primaryKey": false,
           "notNull": true
+        },
+        "revision": {
+          "name": "revision",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
         },
         "status": {
           "name": "status",

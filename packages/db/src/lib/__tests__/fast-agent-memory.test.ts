@@ -15,6 +15,7 @@ import {
   claimPendingFastAgentMemoryEvents,
   markFastAgentMemoryEvent,
   releaseFastAgentMemoryEvents,
+  settleFastAgentMemoryEvent,
 } from '../../server';
 
 const createdUserIds: string[] = [];
@@ -71,7 +72,12 @@ describe('appendFastAgentMemory', () => {
     await appendFastAgentMemory(db, conversation.id, 'first fact');
 
     const [claimed] = await claimPendingFastAgentMemoryEvents(db, 10);
-    await markFastAgentMemoryEvent(db, claimed!.id, 'done');
+    await settleFastAgentMemoryEvent(
+      db,
+      claimed!.id,
+      claimed!.revision,
+      'done',
+    );
 
     await appendFastAgentMemory(db, conversation.id, 'second fact');
 
@@ -130,15 +136,26 @@ describe('claim/release/mark', () => {
     expect(row!.attempts).toBe(0);
   });
 
-  it('does not complete an event that gained a fact after the claim', async () => {
+  it('keeps a claimed row with a single writer and fences its completion', async () => {
     const conversation = await makeConversation();
     await appendFastAgentMemory(db, conversation.id, 'first fact');
     const [claimed] = await claimPendingFastAgentMemoryEvents(db, 10);
 
-    // A save lands between the claim and the drainer's completion: the row
-    // returns to pending with content the claimed snapshot did not include.
+    // A save lands between the claim and the drainer's completion. The row
+    // stays 'processing' (no second writer can claim it), but its revision
+    // moves past the drainer's snapshot.
     await appendFastAgentMemory(db, conversation.id, 'late fact');
-    await markFastAgentMemoryEvent(db, claimed!.id, 'done');
+
+    expect(await claimPendingFastAgentMemoryEvents(db, 10)).toHaveLength(0);
+
+    expect(
+      await settleFastAgentMemoryEvent(
+        db,
+        claimed!.id,
+        claimed!.revision,
+        'done',
+      ),
+    ).toBe('superseded');
 
     const [row] = await db
       .select()
@@ -151,7 +168,15 @@ describe('claim/release/mark', () => {
 
     // The next tick re-claims it and completes normally.
     const [reclaimed] = await claimPendingFastAgentMemoryEvents(db, 10);
-    await markFastAgentMemoryEvent(db, reclaimed!.id, 'done');
+
+    expect(
+      await settleFastAgentMemoryEvent(
+        db,
+        reclaimed!.id,
+        reclaimed!.revision,
+        'done',
+      ),
+    ).toBe('settled');
 
     const [settled] = await db
       .select()
@@ -161,12 +186,19 @@ describe('claim/release/mark', () => {
     expect(settled!.status).toBe('done');
   });
 
-  it('mark done stamps processedAt', async () => {
+  it('settling done stamps processedAt', async () => {
     const conversation = await makeConversation();
     await appendFastAgentMemory(db, conversation.id, 'a fact');
     const [claimed] = await claimPendingFastAgentMemoryEvents(db, 10);
 
-    await markFastAgentMemoryEvent(db, claimed!.id, 'done');
+    expect(
+      await settleFastAgentMemoryEvent(
+        db,
+        claimed!.id,
+        claimed!.revision,
+        'done',
+      ),
+    ).toBe('settled');
 
     const [row] = await db
       .select()
@@ -175,6 +207,21 @@ describe('claim/release/mark', () => {
 
     expect(row!.status).toBe('done');
     expect(row!.processedAt).not.toBeNull();
+  });
+
+  it('marking skipped applies only to a still-claimed row', async () => {
+    const conversation = await makeConversation();
+    await appendFastAgentMemory(db, conversation.id, 'a fact');
+    const [claimed] = await claimPendingFastAgentMemoryEvents(db, 10);
+
+    await markFastAgentMemoryEvent(db, claimed!.id, 'skipped', 'gone');
+
+    const [row] = await db
+      .select()
+      .from(fastAgentMemoryEvents)
+      .where(eq(fastAgentMemoryEvents.id, claimed!.id));
+
+    expect(row!.status).toBe('skipped');
   });
 
   it('deleting the conversation cascades to its memory row', async () => {

@@ -9,6 +9,7 @@ const {
   mockConversationRows,
   mockGetSyncState,
   mockMarkFastEvent,
+  mockSettleFastEvent,
   mockPullRequestFacts,
   mockReleaseFastEvents,
   mockRunBrainCollectors,
@@ -21,6 +22,7 @@ const {
   mockConversationRows: vi.fn(),
   mockGetSyncState: vi.fn(),
   mockMarkFastEvent: vi.fn(),
+  mockSettleFastEvent: vi.fn(),
   mockPullRequestFacts: vi.fn(),
   mockReleaseFastEvents: vi.fn(),
   mockRunBrainCollectors: vi.fn(),
@@ -55,6 +57,7 @@ vi.mock('@roomote/db/server', async (importOriginal) => {
     claimPendingBrainMemoryEvents: mockClaimEvents,
     claimPendingFastAgentMemoryEvents: mockClaimFastEvents,
     markFastAgentMemoryEvent: mockMarkFastEvent,
+    settleFastAgentMemoryEvent: mockSettleFastEvent,
     releaseFastAgentMemoryEvents: mockReleaseFastEvents,
     getBrainSyncState: mockGetSyncState,
     upsertBrainSyncState: vi.fn(),
@@ -71,6 +74,7 @@ beforeEach(() => {
   mockClaimEvents.mockResolvedValue([]);
   mockClaimFastEvents.mockResolvedValue([]);
   mockConversationRows.mockResolvedValue([]);
+  mockSettleFastEvent.mockResolvedValue('settled');
   mockPullRequestFacts.mockResolvedValue([]);
   mockRunBrainCollectors.mockResolvedValue({
     backfillProgressed: false,
@@ -679,6 +683,7 @@ describe('fast conversation memory drain', () => {
     id: 'event-1',
     conversationId: 'conversation-1',
     memory: '- prefers deploys on Fridays',
+    revision: 3,
     attempts: 1,
     createdAt: new Date('2026-08-01T09:00:00Z'),
     updatedAt: new Date('2026-08-20T10:00:00Z'),
@@ -709,9 +714,10 @@ describe('fast conversation memory drain', () => {
         body: expect.stringContaining('memories/fast/conversation-1'),
       }),
     );
-    expect(mockMarkFastEvent).toHaveBeenCalledWith(
+    expect(mockSettleFastEvent).toHaveBeenCalledWith(
       expect.anything(),
       'event-1',
+      3,
       'done',
     );
   });
