@@ -217,6 +217,99 @@ describe('buildFastAgentSystemPrompt', () => {
     );
   });
 
+  it('treats replies as continuations of the existing conversation', () => {
+    const prompt = buildFastAgentSystemPrompt({ availableEnvironments: [] });
+
+    expect(prompt).toContain(
+      'Treat each message as one turn in an ongoing conversation',
+    );
+    expect(prompt).toContain('Assume prior context remains shared');
+    expect(prompt).toContain(
+      'respond to what changed or was newly asked in the latest message',
+    );
+    expect(prompt).toContain(
+      'preserve unresolved threads without mentioning ones that are not relevant now',
+    );
+    expect(prompt).toContain(
+      'Do not summarize prior work unless the user requests it, context may have been lost, or a handoff requires a recap',
+    );
+    expect(prompt).toContain(
+      'Concise contextual references such as "that change" or "the same task" are appropriate when unambiguous',
+    );
+    expect(prompt).toContain("Match the user's granularity");
+    expect(prompt).toContain(
+      'A correction, clarification, or quick opinion can be a complete turn',
+    );
+    expect(prompt).toContain(
+      'Treat explanations as working models, not settled truth',
+    );
+    expect(prompt).toContain(
+      'A closeout does not need to be self-contained when the conversation already supplies the needed context',
+    );
+    expect(prompt).toContain(
+      'Reserve headings, recaps, and "what I did" lists for deliverables or handoffs',
+    );
+    expect(prompt).toContain(
+      'keep updates delta-only rather than repeating prior status',
+    );
+  });
+
+  it('prioritizes conversation state over unnecessary verification', () => {
+    const prompt = buildFastAgentSystemPrompt({ availableEnvironments: [] });
+    const conversationStateRule =
+      'User-supplied corrections, status updates, acknowledgements, and opinions are conversation state';
+    const launchRule =
+      'Use "launch_task" for new independent repository or workspace work';
+
+    expect(prompt).toContain(conversationStateRule);
+    expect(prompt).toContain(
+      'Do not launch a task or call an integration merely to re-check user-supplied facts unless the user asks for verification',
+    );
+    expect(prompt).toContain(
+      'If the message actually requires repository or workspace inspection, execution, change, or validation, delegate it',
+    );
+    expect(prompt.indexOf(conversationStateRule)).toBeLessThan(
+      prompt.indexOf(launchRule),
+    );
+  });
+
+  it('provides collaborative-diagnosis contracts and contrastive examples', () => {
+    const prompt = buildFastAgentSystemPrompt({ availableEnvironments: [] });
+
+    expect(prompt).toContain(
+      'name the belief that changed, update only the affected conclusion',
+    );
+    expect(prompt).toContain(
+      'keep any still-relevant disagreement or risk without defending the old answer or replaying the full history',
+    );
+    expect(prompt).toContain(
+      'do not paraphrase it again. Change abstraction level by grounding it in a concrete object, event, or causal sequence',
+    );
+    expect(prompt).toContain(
+      'identify the visible UI object and say which extra wording was redundant',
+    );
+    expect(prompt).toContain(
+      'Keep observed facts separate from provisional interpretation, and never invent causality',
+    );
+    expect(prompt).toContain(
+      'Use calibrated language when certainty would be fake',
+    );
+    expect(prompt).toContain(
+      'For a supported opinion, lead with a labeled provisional stance',
+    );
+    expect(prompt).toContain('Do not present interpretation as fact');
+    expect(prompt).toContain(
+      'Avoid an updated full checklist. Prefer: "That clears the last blocker—the release is ready."',
+    );
+    expect(prompt).toContain(
+      'The data-loss blocker is gone; only index-build locking risk remains.',
+    );
+    expect(prompt).toContain(
+      'That Slack task card is the kickoff. The extra text is duplicate.',
+    );
+    expect(prompt).toContain('My read: ship it today.');
+  });
+
   it('adapts native chat tool guidance for Discord', () => {
     const prompt = buildFastAgentSystemPrompt({
       availableEnvironments: [],
