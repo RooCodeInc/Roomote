@@ -180,8 +180,8 @@ const listSkillsArgsSchema = z
     repositoryId: z.string().min(1).optional(),
   })
   .refine(
-    (args) => Boolean(args.environmentId) !== Boolean(args.repositoryId),
-    'Exactly one skill scope is required.',
+    (args) => !(args.environmentId && args.repositoryId),
+    'Only one skill scope may be provided.',
   );
 
 const loadSkillArgsSchema = z.object({
@@ -327,7 +327,7 @@ import { z } from "zod"
 import { invoke } from "../roomote-fast-tool-bridge.js"
 
 export default {
-  description: "List packaged Roomote skills and repository-defined skills within exactly one environment or repository without filesystem access. Provide exactly one of environmentId or repositoryId. Returns total, packaged, and repository skill counts plus exact IDs, task invocation names, descriptions, repositories, and environment IDs for load_skill and task routing.",
+  description: "List packaged Roomote skills and optionally repository-defined skills without filesystem access. Omit scope for packaged skills only, or provide exactly one environmentId or repositoryId to include matching repository skills. Returns total, packaged, and repository skill counts plus exact IDs, task invocation names, descriptions, repositories, and environment IDs for load_skill and task routing.",
   args: {
     environmentId: z.string().min(1).optional().describe("Exact environment ID from the system prompt; mutually exclusive with repositoryId"),
     repositoryId: z.string().min(1).optional().describe("Exact repository ID from the system prompt; mutually exclusive with environmentId"),
@@ -879,7 +879,9 @@ async function startBridge(): Promise<FastAgentNativeToolBridge> {
           const catalog = await activeExecutor.skillStore.list(
             args.environmentId
               ? { environmentId: args.environmentId }
-              : { repositoryId: args.repositoryId! },
+              : args.repositoryId
+                ? { repositoryId: args.repositoryId }
+                : undefined,
           );
           writeJson(response, 200, {
             ok: true,
