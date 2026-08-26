@@ -9,6 +9,11 @@ import {
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { ALL_REPOSITORIES } from '@roomote/types';
+import {
+  SHOW_WIDGET_FIXED_CANVAS_GUIDANCE,
+  SHOW_WIDGET_HEIGHT_DESCRIPTION,
+  SHOW_WIDGET_THEME_GUIDANCE,
+} from '../../show-widget';
 
 import {
   bindFastAgentMcpToolExecutor,
@@ -122,6 +127,9 @@ describe('Fast native OpenCode tool bridge', () => {
     expect(showWidgetSource).toContain(
       'On Slack or Discord, textFallback is posted instead',
     );
+    expect(showWidgetSource).toContain(SHOW_WIDGET_THEME_GUIDANCE);
+    expect(showWidgetSource).toContain(SHOW_WIDGET_FIXED_CANVAS_GUIDANCE);
+    expect(showWidgetSource).toContain(SHOW_WIDGET_HEIGHT_DESCRIPTION);
     expect(installedToolFiles).not.toEqual(
       expect.arrayContaining([
         'get_chat_channel_messages.js',

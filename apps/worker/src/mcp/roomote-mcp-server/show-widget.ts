@@ -11,8 +11,11 @@ export {
   sanitizeWidgetCss,
   sanitizeWidgetHtml,
   SHOW_WIDGET_DEFAULT_HEIGHT,
+  SHOW_WIDGET_FIXED_CANVAS_GUIDANCE,
+  SHOW_WIDGET_HEIGHT_DESCRIPTION,
   SHOW_WIDGET_MAX_HEIGHT,
   SHOW_WIDGET_MIN_HEIGHT,
+  SHOW_WIDGET_THEME_GUIDANCE,
 } from '@roomote/cloud-agents/show-widget';
 
 export async function handleShowWidget(

@@ -8,6 +8,14 @@ const SVG_NAMESPACE = 'http://www.w3.org/2000/svg';
 export const SHOW_WIDGET_DEFAULT_HEIGHT = 320;
 export const SHOW_WIDGET_MIN_HEIGHT = 120;
 export const SHOW_WIDGET_MAX_HEIGHT = 800;
+export const SHOW_WIDGET_ESTIMATED_ROW_HEIGHT = 48;
+export const SHOW_WIDGET_TABLE_MIN_HEIGHT = 480;
+export const SHOW_WIDGET_SUMMARY_TABLE_MIN_HEIGHT = 560;
+export const SHOW_WIDGET_THEME_GUIDANCE =
+  'Prefer semantic HTML with the built-in widget classes (`rw-card`, `rw-stack`, `rw-row`, `rw-grid`, `rw-stat`, `rw-badge`, `rw-callout`, `rw-muted`) so the widget follows the host theme. For custom CSS, use the provided `--rw-*` theme variables instead of hard-coded colors; omit css when the built-in styles are sufficient.';
+export const SHOW_WIDGET_HEIGHT_GUIDANCE = `Do not guess a tight height. Estimate the rendered height before calling the tool: include body padding, section padding and gaps, headings, and about ${SHOW_WIDGET_ESTIMATED_ROW_HEIGHT}px for each table or list row. Use at least ${SHOW_WIDGET_TABLE_MIN_HEIGHT}px for a table or list and ${SHOW_WIDGET_SUMMARY_TABLE_MIN_HEIGHT}-${SHOW_WIDGET_MAX_HEIGHT}px when summary cards or metrics appear above one. Add headroom; when uncertain, choose a taller canvas or reduce the content before calling the tool.`;
+export const SHOW_WIDGET_HEIGHT_DESCRIPTION = `Optional fixed widget iframe height in pixels (clamped to ${SHOW_WIDGET_MIN_HEIGHT}-${SHOW_WIDGET_MAX_HEIGHT}; default ${SHOW_WIDGET_DEFAULT_HEIGHT}). ${SHOW_WIDGET_HEIGHT_GUIDANCE}`;
+export const SHOW_WIDGET_FIXED_CANVAS_GUIDANCE = `Treat the widget width and declared height as a fixed canvas. The complete widget must fit within both dimensions without horizontal or vertical overflow. Never rely on scrollbars, clipping, \`overflow: auto\`, \`overflow: scroll\`, or content hidden below the fold. Use compact spacing, concise labels, and a small number of cards, rows, or table entries. ${SHOW_WIDGET_HEIGHT_GUIDANCE} Use ordinary prose or an artifact for long content.`;
 
 export type ShowWidgetInput = {
   html: string;
