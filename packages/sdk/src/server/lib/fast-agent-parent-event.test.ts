@@ -789,6 +789,81 @@ describe('deliverFastAgentParentEvent', () => {
     );
   });
 
+  it('uses the persisted Teams DM service URL when no route row exists', async () => {
+    const fallbackConversation = {
+      surface: 'teams' as const,
+      workspaceId: 'tenant-1',
+      conversationId: 'teams-occurrence-1',
+      replyTarget: {
+        channelId: 'stale-channel',
+        serviceUrl: 'https://stale.example.com/amer/',
+      },
+    };
+    mocks.findSession.mockResolvedValueOnce({
+      id: parent.sessionId,
+      userId: 'u1',
+      messages: [],
+      conversation: {
+        ...fallbackConversation,
+        replyTarget: {
+          channelId: 'teams-dm-1',
+          serviceUrl: 'https://persisted.example.com/amer/',
+        },
+      },
+    });
+    mocks.findTeamsConversationRoute.mockResolvedValueOnce(null);
+
+    await deliverFastAgentParentEvent({
+      parent: {
+        sessionId: parent.sessionId,
+        conversation: fallbackConversation,
+      },
+      event,
+    });
+
+    expect(mocks.findTeamsConversationRoute).toHaveBeenCalledWith(
+      'teams-dm-1',
+      'tenant-1',
+    );
+    expect(mocks.teamsPostMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channelId: 'teams-dm-1',
+        serviceUrl: 'https://persisted.example.com/amer/',
+      }),
+    );
+  });
+
+  it('does not use a persisted Teams channel service URL without a route row', async () => {
+    const fallbackConversation = {
+      surface: 'teams' as const,
+      workspaceId: 'tenant-1',
+      conversationId: 'teams-occurrence-1',
+      replyTarget: {
+        channelId: 'teams-channel-1',
+        threadId: 'teams-root-1',
+        serviceUrl: 'https://persisted.example.com/amer/',
+      },
+    };
+    mocks.findSession.mockResolvedValueOnce({
+      id: parent.sessionId,
+      userId: 'u1',
+      messages: [],
+      conversation: fallbackConversation,
+    });
+    mocks.findTeamsConversationRoute.mockResolvedValueOnce(null);
+
+    await expect(
+      deliverFastAgentParentEvent({
+        parent: {
+          sessionId: parent.sessionId,
+          conversation: fallbackConversation,
+        },
+        event,
+      }),
+    ).rejects.toThrow('Fast Teams parent routing was not found.');
+    expect(mocks.teamsPostMessage).not.toHaveBeenCalled();
+  });
+
   it('uses the repository current destination instead of stale child metadata', async () => {
     mocks.findSession.mockResolvedValueOnce({
       id: parent.sessionId,
