@@ -6,6 +6,7 @@ import {
 import {
   chmodSync,
   lstatSync,
+  readdirSync,
   mkdirSync,
   rmSync,
   statSync,
@@ -508,12 +509,25 @@ function resolveZodDirectoryForTools(): string {
   } catch (error) {
     resolveError = error;
   }
-  // Bundled hosts (the Next.js web app under Turbopack) rewrite
-  // require.resolve to a virtual '[project]/...' specifier that does not
-  // exist on disk, so validate the resolution and fall back to walking the
-  // real node_modules tree from the working directory.
+  // Bundled hosts rewrite require.resolve: Turbopack dev yields a virtual
+  // '[project]/...' specifier and the webpack production build yields a
+  // numeric module id, neither of which exists on disk. Validate the
+  // resolution and fall back to walking the real node_modules tree from the
+  // working directory, including pnpm stores without a top-level zod link
+  // (the Next standalone output ships zod only under node_modules/.pnpm).
   for (let dir = process.cwd(); ;) {
     candidates.push(join(dir, 'node_modules', 'zod'));
+    const pnpmStore = join(dir, 'node_modules', '.pnpm');
+    try {
+      const storeEntries = readdirSync(pnpmStore)
+        .filter((entry) => entry.startsWith('zod@'))
+        .sort();
+      for (const entry of storeEntries) {
+        candidates.push(join(pnpmStore, entry, 'node_modules', 'zod'));
+      }
+    } catch {
+      // No pnpm store at this level.
+    }
     const parent = dirname(dir);
     if (parent === dir) break;
     dir = parent;
@@ -822,6 +836,10 @@ function createRuntimeDirectory(sessionId: string): string {
   mkdirSync(directory, { recursive: true, mode: 0o700 });
   chmodSync(directory, 0o700);
   const toolsDirectory = join(directory, '.opencode', 'tools');
+  // Recreate the tool directory from scratch: a reused runtime directory may
+  // hold tool files from an older code version, and stale tools would stay
+  // loadable (and invokable) after a deploy that removed them.
+  rmSync(toolsDirectory, { recursive: true, force: true });
   mkdirSync(toolsDirectory, { recursive: true });
   writeFileSync(
     join(directory, '.opencode', 'package.json'),

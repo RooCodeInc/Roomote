@@ -389,7 +389,8 @@ COPY --from=build-preview-proxy /roomote/apps/preview-proxy/dist ./apps/preview-
 COPY --from=build-preview-proxy /runtime-deps/node_modules ./apps/preview-proxy/node_modules/
 COPY --from=github-cli /usr/bin/gh /usr/local/bin/gh
 RUN command -v gh >/dev/null && command -v opencode >/dev/null && \
-  cd /roomote/apps/bullmq && node -e "require.resolve('zod/package.json')"
+  cd /roomote/apps/bullmq && node -e "require.resolve('zod/package.json')" && \
+  ls -d /roomote/node_modules/.pnpm/zod@*/node_modules/zod >/dev/null
 
 USER roomote-app:roomote-app
 EXPOSE 3000 3001 3002 8081
