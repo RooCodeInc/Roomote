@@ -98,7 +98,6 @@ export const NON_TASK_INFERENCE_SURFACES = {
   chatAudioTranscription: 'chat_audio_transcription',
   chatVideoDescription: 'chat_video_description',
   customAutomationScheduleResolution: 'custom_automation_schedule_resolution',
-  fastAgentOnboardingSuggestions: 'fast_agent_onboarding_suggestions',
   fastAgentQuestionAnswering: 'fast_agent',
   inferenceValidation: 'inference_validation',
   prReviewNotificationTriage: 'pr_review_notification_triage',
