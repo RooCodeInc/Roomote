@@ -23,6 +23,20 @@ const mocks = vi.hoisted(() => ({
   resolveUserMcpServerConfigs: vi.fn(),
 }));
 
+vi.mock('@roomote/redis', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@roomote/redis')>();
+  return {
+    ...actual,
+    // The sticky-footer lock and state live in Redis; these tests run without
+    // a server, so satisfy lock acquisition and empty prior state.
+    getRedis: () => ({
+      set: async () => 'OK',
+      get: async () => null,
+      eval: async () => 1,
+    }),
+  };
+});
+
 vi.mock('@roomote/cloud-agents/server', () => ({
   acquireFastAgentTurnLock: mocks.acquireTurnLock,
   answerFastAgentQuestion: mocks.answerQuestion,
