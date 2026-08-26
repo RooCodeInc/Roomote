@@ -428,6 +428,13 @@
       "when": 1787765765044,
       "tag": "0060_organic_harrier",
       "breakpoints": true
+    },
+    {
+      "idx": 61,
+      "version": "7",
+      "when": 1787771579749,
+      "tag": "0061_furry_hellfire_club",
+      "breakpoints": true
     }
   ]
 }

@@ -21,7 +21,16 @@ import {
 } from '@roomote/slack';
 
 import { createDiscordCommunicationProviderFromRuntimeCredentials } from './discord-communication';
-import { createFastAgentDiscordTaskLauncher } from './fast-agent-parent-event';
+import {
+  createFastAgentCommunicationTaskLauncher,
+  createFastAgentDiscordTaskLauncher,
+} from './fast-agent-parent-event';
+import { createTeamsCommunicationProviderFromRuntimeCredentials } from './teams-communication';
+import { createTelegramCommunicationProviderFromRuntimeCredentials } from './telegram-communication';
+import {
+  findTeamsConversationServiceUrl,
+  findTeamsWorkspaceServiceUrl,
+} from '../automations/destination';
 
 const SLACK_QUOTE_MAX_LENGTH = 100;
 const DISCORD_QUOTE_MAX_LENGTH = 280;
@@ -302,6 +311,94 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
             },
           });
           return { messageId: posted.messageId };
+        },
+      },
+    };
+  }
+
+  if (conversation.surface === 'teams') {
+    const [provider, conversationServiceUrl, workspaceServiceUrl] =
+      await Promise.all([
+        createTeamsCommunicationProviderFromRuntimeCredentials(),
+        findTeamsConversationServiceUrl(conversation.replyTarget.channelId),
+        findTeamsWorkspaceServiceUrl(conversation.workspaceId),
+      ]);
+    const serviceUrl =
+      conversation.replyTarget.serviceUrl ??
+      conversationServiceUrl ??
+      workspaceServiceUrl;
+    if (!provider || !serviceUrl) {
+      return null;
+    }
+    return {
+      conversation,
+      adapter: {
+        launchTask: createFastAgentCommunicationTaskLauncher({
+          userId: params.userId,
+          conversation,
+          serviceUrl,
+        }),
+        postReply: async ({ message }) => {
+          const posted = await provider.postMessage({
+            channelId: conversation.replyTarget.channelId,
+            serviceUrl,
+            ...(conversation.replyTarget.threadId
+              ? {
+                  threadId: conversation.replyTarget.threadId,
+                  replyToMessageId: conversation.replyTarget.threadId,
+                }
+              : {}),
+            text: `${message}\n\n${buildFastSessionReplyFooterText({ provider: 'teams', sessionId: session.id })}`,
+            textFormat: 'markdown',
+          });
+          return { messageId: posted.messageId };
+        },
+        replaceReply: async (handle, { message }) => {
+          await provider.updateMessage({
+            channelId: conversation.replyTarget.channelId,
+            messageId: handle.messageId,
+            serviceUrl,
+            text: `${message}\n\n${buildFastSessionReplyFooterText({ provider: 'teams', sessionId: session.id })}`,
+            textFormat: 'markdown',
+          });
+          return handle;
+        },
+      },
+    };
+  }
+
+  if (conversation.surface === 'telegram') {
+    const provider =
+      await createTelegramCommunicationProviderFromRuntimeCredentials();
+    if (!provider) {
+      return null;
+    }
+    return {
+      conversation,
+      adapter: {
+        launchTask: createFastAgentCommunicationTaskLauncher({
+          userId: params.userId,
+          conversation,
+        }),
+        postReply: async ({ message }) => {
+          const posted = await provider.postMessage({
+            channelId: conversation.replyTarget.channelId,
+            ...(conversation.replyTarget.threadId
+              ? { threadId: conversation.replyTarget.threadId }
+              : {}),
+            text: `${message}\n\n${buildFastSessionReplyFooterText({ provider: 'telegram', sessionId: session.id })}`,
+            textFormat: 'markdown',
+          });
+          return { messageId: posted.messageId };
+        },
+        replaceReply: async (handle, { message }) => {
+          await provider.editMessageText({
+            channelId: conversation.replyTarget.channelId,
+            messageId: handle.messageId,
+            text: `${message}\n\n${buildFastSessionReplyFooterText({ provider: 'telegram', sessionId: session.id })}`,
+            textFormat: 'markdown',
+          });
+          return handle;
         },
       },
     };

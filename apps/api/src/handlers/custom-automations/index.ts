@@ -23,8 +23,8 @@ import {
 import {
   ALL_REPOSITORIES,
   FAST_EXECUTION,
+  getCommunicationAutomationTargetKind,
   type BackgroundAutomationProvider,
-  type BackgroundAutomationTargetKind,
   type CustomAutomationScheduleMode,
   type OptionalAutomationTarget,
 } from '@roomote/types';
@@ -64,7 +64,6 @@ const writeSchema = z.object({
   targetProvider: z.enum(['slack', 'discord', 'teams', 'telegram']).optional(),
   targetMode: z.enum(['channel', 'direct_message']).optional(),
   targetChannelId: z.string().trim().min(1).max(160).optional(),
-  targetServiceUrl: z.string().trim().min(1).max(500).optional(),
 });
 
 const updateSchema = z.object({
@@ -80,7 +79,6 @@ const updateSchema = z.object({
     .optional(),
   targetMode: z.enum(['channel', 'direct_message']).optional(),
   targetChannelId: z.string().trim().min(1).max(160).optional(),
-  targetServiceUrl: z.string().trim().min(1).max(500).optional(),
 });
 
 const UNIQUE_VIOLATION_CODE = '23505';
@@ -218,7 +216,7 @@ async function requireAdmin(auth: McpAuth): Promise<string | null> {
 function buildTarget(
   input: Pick<
     z.infer<typeof writeSchema>,
-    'targetProvider' | 'targetMode' | 'targetChannelId' | 'targetServiceUrl'
+    'targetProvider' | 'targetMode' | 'targetChannelId'
   >,
   ownerUserId: string,
 ): OptionalAutomationTarget {
@@ -228,27 +226,13 @@ function buildTarget(
     throw new Error('targetChannelId is required when targetProvider is set.');
   }
 
-  const kinds: Record<string, BackgroundAutomationTargetKind> = {
-    slack: 'slack_channel',
-    discord: 'discord_channel',
-    teams: 'teams_channel',
-    telegram: 'telegram_chat',
-  };
-  const userKinds: Record<string, BackgroundAutomationTargetKind> = {
-    slack: 'slack_user',
-    discord: 'discord_user',
-    teams: 'teams_user',
-    telegram: 'telegram_user',
-  };
   return {
     provider: input.targetProvider as BackgroundAutomationProvider,
-    targetKind: directMessage
-      ? userKinds[input.targetProvider]!
-      : kinds[input.targetProvider]!,
+    targetKind: getCommunicationAutomationTargetKind(
+      input.targetProvider,
+      directMessage ? 'direct_message' : 'channel',
+    ),
     externalRef: directMessage ? ownerUserId : input.targetChannelId!,
-    ...(!directMessage && input.targetServiceUrl
-      ? { metadata: { serviceUrl: input.targetServiceUrl } }
-      : {}),
   };
 }
 
@@ -465,8 +449,7 @@ customAutomationsRouter.patch('/:id', async (c) => {
     const destinationChanged =
       parsed.data.targetProvider !== undefined ||
       parsed.data.targetMode !== undefined ||
-      parsed.data.targetChannelId !== undefined ||
-      parsed.data.targetServiceUrl !== undefined;
+      parsed.data.targetChannelId !== undefined;
     if (
       !clearTarget &&
       destinationChanged &&
@@ -478,10 +461,6 @@ customAutomationsRouter.patch('/:id', async (c) => {
         'targetChannelId is required when targetProvider is set.',
       );
     }
-    const existingServiceUrl =
-      typeof existingTarget.metadata?.serviceUrl === 'string'
-        ? existingTarget.metadata.serviceUrl
-        : undefined;
     const automation = await updateCustomAutomation(c.req.param('id'), {
       name: parsed.data.name ?? existing.name,
       prompt: parsed.data.prompt ?? existing.prompt,
@@ -508,8 +487,6 @@ customAutomationsRouter.patch('/:id', async (c) => {
                 targetProvider,
                 targetMode,
                 targetChannelId,
-                targetServiceUrl:
-                  parsed.data.targetServiceUrl ?? existingServiceUrl,
               },
               existing.createdByUserId ?? adminId(c),
             )

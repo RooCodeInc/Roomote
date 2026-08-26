@@ -174,6 +174,12 @@ function getFastParentButtonRoute(
     };
   }
 
+  // Teams and Telegram can receive the Fast parent event itself, but the PR
+  // action-button renderer does not yet have provider-native callbacks there.
+  if (conversation.surface !== 'discord') {
+    return null;
+  }
+
   return {
     provider: 'discord',
     channelId: conversation.replyTarget.channelId,

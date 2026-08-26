@@ -3062,6 +3062,7 @@ export const fastAgentConversations = pgTable(
     conversationId: text('conversation_id').notNull(),
     currentReplyChannelId: text('current_reply_channel_id'),
     currentReplyThreadId: text('current_reply_thread_id'),
+    currentReplyServiceUrl: text('current_reply_service_url'),
     replyTargetVerified: boolean('reply_target_verified')
       .notNull()
       .default(true),

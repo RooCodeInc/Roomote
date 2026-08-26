@@ -84,6 +84,7 @@ import { getFastAgentUserIdentity } from './fast-agent-user-identity';
 import { FastAgentTurnDiagnostics } from './fast-agent-turn-diagnostics';
 import {
   type FastAgentConversation,
+  isFastAgentCommunicationConversation,
   type FastAgentPlatformEventHandling,
   type FastAgentPlatformEventKind,
   type FastAgentPlatformEventVisibility,
@@ -1187,8 +1188,7 @@ export async function answerFastAgentQuestion({
           call.integrationId === ROOMOTE_MCP_ID &&
           (call.toolName === CHAT_CHANNEL_MESSAGES_TOOL.name ||
             call.toolName === CHAT_MESSAGE_CONTEXT_TOOL.name) &&
-          (conversation.surface === 'slack' ||
-            conversation.surface === 'discord')
+          isFastAgentCommunicationConversation(conversation)
             ? conversation.surface
             : undefined;
         const integrationArguments =
@@ -1206,13 +1206,12 @@ export async function answerFastAgentQuestion({
                 ),
               }
             : call.args;
-        const currentChatChannel =
-          conversation.surface === 'slack'
-            ? conversation.replyTarget.channelId
-            : conversation.surface === 'discord'
-              ? (conversation.replyTarget.threadId ??
-                conversation.replyTarget.channelId)
-              : undefined;
+        const currentChatChannel = isFastAgentCommunicationConversation(
+          conversation,
+        )
+          ? (conversation.replyTarget.threadId ??
+            conversation.replyTarget.channelId)
+          : undefined;
         const chatLookupArguments =
           chatLookupProvider &&
           currentChatChannel &&

@@ -61,7 +61,6 @@ type CustomAutomationFormState = {
   targetProvider: 'none' | 'slack' | 'discord' | 'teams' | 'telegram';
   targetMode: 'channel' | 'direct_message';
   targetChannelId: string;
-  targetServiceUrl: string;
 };
 
 type AutomationDestinationProvider = Exclude<
@@ -80,7 +79,6 @@ const EMPTY_FORM: CustomAutomationFormState = {
   targetProvider: 'slack',
   targetMode: 'channel',
   targetChannelId: '',
-  targetServiceUrl: '',
 };
 
 const SCHEDULE_OPTIONS: Array<{
@@ -187,14 +185,12 @@ function targetFromRow(row: CustomAutomationListItem): {
   provider: CustomAutomationFormState['targetProvider'];
   mode: CustomAutomationFormState['targetMode'];
   channelId: string;
-  serviceUrl: string;
 } {
   if (!row.target.provider || !row.target.externalRef) {
     return {
       provider: 'none',
       mode: 'channel',
       channelId: '',
-      serviceUrl: '',
     };
   }
 
@@ -204,10 +200,6 @@ function targetFromRow(row: CustomAutomationListItem): {
     row.target.provider === 'telegram'
       ? row.target.provider
       : 'slack';
-  const serviceUrl =
-    typeof row.target.metadata?.serviceUrl === 'string'
-      ? row.target.metadata.serviceUrl
-      : '';
   return {
     provider,
     mode: isBackgroundAutomationUserTargetKind(row.target.targetKind)
@@ -216,7 +208,6 @@ function targetFromRow(row: CustomAutomationListItem): {
     channelId: isBackgroundAutomationUserTargetKind(row.target.targetKind)
       ? ''
       : (row.target.externalRef ?? ''),
-    serviceUrl,
   };
 }
 
@@ -240,7 +231,6 @@ function formFromRow(
     targetProvider: targetIsConnected ? target.provider : 'none',
     targetMode: target.mode,
     targetChannelId: targetIsConnected ? target.channelId : '',
-    targetServiceUrl: targetIsConnected ? target.serviceUrl : '',
   };
 }
 
@@ -263,11 +253,6 @@ function writeInputFromRow(row: CustomAutomationListItem) {
             ? { targetChannelId: target.channelId }
             : {}),
         }
-      : {}),
-    ...(target.provider === 'teams' &&
-    target.mode === 'channel' &&
-    target.serviceUrl
-      ? { targetServiceUrl: target.serviceUrl }
       : {}),
   };
 }
@@ -568,7 +553,6 @@ export function CustomAutomationsSection() {
             targetProvider: 'none',
             targetMode: 'channel',
             targetChannelId: '',
-            targetServiceUrl: '',
           },
     );
   }, [capabilitiesLoaded, connectedDestinationProviders]);
@@ -614,11 +598,6 @@ export function CustomAutomationsSection() {
               ? { targetChannelId: form.targetChannelId }
               : {}),
           }
-        : {}),
-      ...(form.targetProvider === 'teams' &&
-      form.targetMode === 'channel' &&
-      form.targetServiceUrl.trim()
-        ? { targetServiceUrl: form.targetServiceUrl.trim() }
         : {}),
     };
 
@@ -816,7 +795,6 @@ export function CustomAutomationsSection() {
                       : value === 'discord'
                         ? managerDiscordChannelId
                         : '',
-                  targetServiceUrl: '',
                 }))
               }
             >
@@ -859,8 +837,6 @@ export function CustomAutomationsSection() {
                               ? managerDiscordChannelId
                               : ''
                           : '',
-                      targetServiceUrl:
-                        value === 'channel' ? current.targetServiceUrl : '',
                     }))
                   }
                 >
@@ -940,40 +916,15 @@ export function CustomAutomationsSection() {
                 )}
               </div>
             )}
-            {form.targetProvider === 'teams' &&
-            form.targetMode === 'channel' ? (
-              <div className="flex min-w-0 flex-1 items-center gap-2">
-                <Label
-                  htmlFor="custom-automation-service-url"
-                  className="shrink-0"
-                >
-                  Service URL
-                </Label>
-                <Input
-                  id="custom-automation-service-url"
-                  className="flex-1"
-                  value={form.targetServiceUrl}
-                  disabled={busy}
-                  onChange={(event) =>
-                    setForm((current) => ({
-                      ...current,
-                      targetServiceUrl: event.target.value,
-                    }))
-                  }
-                  placeholder="Optional"
-                />
-              </div>
-            ) : null}
           </div>
-          {form.environmentId === FAST_EXECUTION &&
-          !(
-            (form.targetProvider === 'slack' ||
-              form.targetProvider === 'discord') &&
-            form.targetMode === 'channel'
-          ) ? (
+          {form.environmentId === FAST_EXECUTION ? (
             <p className="text-sm text-muted-foreground">
-              This run is stored as a Fast conversation. Its output will be
-              available in the upcoming Fast runs view.
+              {form.targetProvider === 'none'
+                ? 'This run is stored as a Fast conversation without posting to chat.'
+                : form.targetProvider === 'teams' ||
+                    form.targetProvider === 'telegram'
+                  ? 'Each Fast run posts here. Continue the session from the web app; chat replies on this provider do not resume Fast yet.'
+                  : 'Each Fast run posts here, and replies continue the Fast session.'}
             </p>
           ) : null}
         </div>
