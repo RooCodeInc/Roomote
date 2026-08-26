@@ -259,8 +259,7 @@ import {
   trackSetupBootstrapWelcomeSeenCommand,
   trackSetupCommsStateCommand,
   trackSetupWelcomeSeenCommand,
-  ensureTrialModelConfigSeeded,
-  resetTrialModelConfigSeedCheckForTests,
+  chooseSetupTrialInferenceCommand,
 } from './index';
 import {
   DEFAULT_MODEL_PROVIDER_CREDENTIAL_ENV_VAR_NAMES,
@@ -1345,10 +1344,10 @@ describe('setup recommendation commands', () => {
   });
 });
 
-describe('ensureTrialModelConfigSeeded', () => {
+describe('chooseSetupTrialInferenceCommand', () => {
   function createTxStub(row: Record<string, unknown>) {
-    // Records only the config upserts; the bare row insert that backs the
-    // FOR UPDATE lock carries neither field and stays out of assertions.
+    // Records only the config upserts; the setup-state save and the bare row
+    // insert that backs the FOR UPDATE lock stay out of assertions.
     const inserted: Array<Record<string, unknown>> = [];
     const tx = {
       select: vi.fn(() => ({
@@ -1378,7 +1377,6 @@ describe('ensureTrialModelConfigSeeded', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.unstubAllEnvs();
-    resetTrialModelConfigSeedCheckForTests();
     mockGetPersistedEnvironmentVariableNames.mockResolvedValue([]);
     // Hermetic against the host environment: a developer or CI shell with
     // role models or provider keys set must not change these outcomes.
@@ -1393,10 +1391,9 @@ describe('ensureTrialModelConfigSeeded', () => {
 
   afterEach(() => {
     vi.unstubAllEnvs();
-    resetTrialModelConfigSeedCheckForTests();
   });
 
-  it('seeds the Efficient OpenRouter defaults on a fresh trial deployment', async () => {
+  it('seeds the Efficient OpenRouter defaults and records the provider choice', async () => {
     vi.stubEnv('R_TRIAL_OPENROUTER_API_KEY', 'sk-trial');
     const { tx, inserted } = createTxStub({
       setupNewState: {},
@@ -1407,8 +1404,9 @@ describe('ensureTrialModelConfigSeeded', () => {
       async (callback: (tx: unknown) => Promise<unknown>) => callback(tx),
     );
 
-    await ensureTrialModelConfigSeeded();
+    const result = await chooseSetupTrialInferenceCommand(buildMockAuth());
 
+    expect(result.setupNewState.modelProvider).toBe('openrouter');
     const runtimeModelConfigInsert = inserted.find(
       (values) => 'runtimeModelConfig' in values,
     );
@@ -1426,13 +1424,14 @@ describe('ensureTrialModelConfigSeeded', () => {
     });
   });
 
-  it('does nothing without the trial key in the environment', async () => {
-    await ensureTrialModelConfigSeeded();
-
+  it('refuses when the trial key is not in the environment', async () => {
+    await expect(
+      chooseSetupTrialInferenceCommand(buildMockAuth()),
+    ).rejects.toThrow('Free trial inference is not available');
     expect(mockDbTransaction).not.toHaveBeenCalled();
   });
 
-  it('never overwrites an operator-configured provider', async () => {
+  it('refuses when an operator provider is already connected', async () => {
     vi.stubEnv('R_TRIAL_OPENROUTER_API_KEY', 'sk-trial');
     vi.stubEnv('OPENROUTER_API_KEY', 'sk-operator');
     const { tx, inserted } = createTxStub({
@@ -1444,29 +1443,13 @@ describe('ensureTrialModelConfigSeeded', () => {
       async (callback: (tx: unknown) => Promise<unknown>) => callback(tx),
     );
 
-    await ensureTrialModelConfigSeeded();
-
+    await expect(
+      chooseSetupTrialInferenceCommand(buildMockAuth()),
+    ).rejects.toThrow('already connected');
     expect(inserted).toEqual([]);
   });
 
-  it('treats any role-model env override as an operator model choice', async () => {
-    vi.stubEnv('R_TRIAL_OPENROUTER_API_KEY', 'sk-trial');
-    vi.stubEnv('R_PLANNING_MODEL', 'anthropic/claude-opus-5');
-    const { tx, inserted } = createTxStub({
-      setupNewState: {},
-      runtimeModelConfig: null,
-      taskModelSettings: null,
-    });
-    mockDbTransaction.mockImplementation(
-      async (callback: (tx: unknown) => Promise<unknown>) => callback(tx),
-    );
-
-    await ensureTrialModelConfigSeeded();
-
-    expect(inserted).toEqual([]);
-  });
-
-  it('never overwrites existing model choices', async () => {
+  it('no-ops when model choices already exist', async () => {
     vi.stubEnv('R_TRIAL_OPENROUTER_API_KEY', 'sk-trial');
     const { tx, inserted } = createTxStub({
       setupNewState: {},
@@ -1480,8 +1463,28 @@ describe('ensureTrialModelConfigSeeded', () => {
       async (callback: (tx: unknown) => Promise<unknown>) => callback(tx),
     );
 
-    await ensureTrialModelConfigSeeded();
+    await chooseSetupTrialInferenceCommand(buildMockAuth());
 
     expect(inserted).toEqual([]);
+  });
+
+  it('seeds despite a role-model env override, which keeps winning at runtime', async () => {
+    vi.stubEnv('R_TRIAL_OPENROUTER_API_KEY', 'sk-trial');
+    vi.stubEnv('R_PLANNING_MODEL', 'anthropic/claude-opus-5');
+    const { tx, inserted } = createTxStub({
+      setupNewState: {},
+      runtimeModelConfig: null,
+      taskModelSettings: null,
+    });
+    mockDbTransaction.mockImplementation(
+      async (callback: (tx: unknown) => Promise<unknown>) => callback(tx),
+    );
+
+    const result = await chooseSetupTrialInferenceCommand(buildMockAuth());
+
+    expect(result.setupNewState.modelProvider).toBe('openrouter');
+    expect(
+      inserted.find((values) => 'runtimeModelConfig' in values),
+    ).toBeDefined();
   });
 });

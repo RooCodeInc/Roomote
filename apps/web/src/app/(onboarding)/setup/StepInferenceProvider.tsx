@@ -23,6 +23,8 @@ import { useTRPC } from '@/trpc/client';
 import {
   ArrowRight,
   Button,
+  Card,
+  CardContent,
   Check,
   Input,
   Lock,
@@ -149,6 +151,19 @@ export function StepInferenceProvider({
       },
     }),
   );
+  const chooseTrialInference = useMutation(
+    trpc.setupNew.chooseTrialInference.mutationOptions({
+      onSuccess: async () => {
+        await queryClient.invalidateQueries({
+          queryKey: trpc.setupNew.status.queryKey(),
+        });
+        onContinue();
+      },
+      onError: (error) => {
+        toast.error(error.message);
+      },
+    }),
+  );
   const discoverProviderModels = useMutation(
     trpc.taskModels.discoverProviderModels.mutationOptions(),
   );
@@ -212,10 +227,20 @@ export function StepInferenceProvider({
   const xaiSubscriptionConnected = Boolean(
     modelSetup.xaiSubscriptionConnected || xaiStatus?.connected,
   );
+  // A free-trial fallback key must not present the provider as configured
+  // via env: picking it from the list means connecting a real credential.
   const hasRuntimeProviderKey =
-    selectedProviderStatus?.runtimeApiKeySatisfied === true;
+    selectedProviderStatus?.runtimeApiKeySatisfied === true &&
+    selectedProviderStatus?.trialKeySatisfied !== true;
   const hasSavedProviderKey =
     selectedProviderStatus?.savedApiKeySatisfied === true;
+  const trialInferenceAvailable = useMemo(
+    () =>
+      modelSetup.providers.some(
+        (provider) => provider.trialKeySatisfied === true,
+      ),
+    [modelSetup.providers],
+  );
   const primaryCredentialLabel =
     selectedProviderStatus?.envVarLabel ?? 'API key';
   const additionalEnvFields = selectedProviderStatus?.additionalEnvFields ?? [];
@@ -258,6 +283,7 @@ export function StepInferenceProvider({
     requiresConnectionName && connectionName.trim().length === 0;
   const isActionDisabled =
     saveModelConfig.isPending ||
+    chooseTrialInference.isPending ||
     discoverProviderModels.isPending ||
     qualifyProviderModel.isPending ||
     selectedProvider === null ||
@@ -357,6 +383,37 @@ export function StepInferenceProvider({
           Credentials are encrypted in your database.
         </p>
       </div>
+
+      {trialInferenceAvailable ? (
+        <>
+          <Card>
+            <CardContent>
+              <div className="space-y-1">
+                <p className="font-medium text-foreground">
+                  Start with free credits
+                </p>
+                <p className="text-foreground/70">
+                  Your first tasks are on us, running on an efficient model. You
+                  can connect your own provider anytime from Settings.
+                </p>
+              </div>
+              <Button
+                type="button"
+                disabled={
+                  chooseTrialInference.isPending || saveModelConfig.isPending
+                }
+                onClick={() => chooseTrialInference.mutate()}
+              >
+                {chooseTrialInference.isPending ? <Spinner /> : null}
+                Start with free credits
+              </Button>
+            </CardContent>
+          </Card>
+          <p className="text-sm text-foreground/50">
+            Or connect your own provider:
+          </p>
+        </>
+      ) : null}
 
       <div className="w-full space-y-2">
         <InferenceProviderRow>

@@ -80,8 +80,6 @@ import {
   isRequiredComputeField,
   normalizeTaskModelSettings,
   DEFAULT_TASK_MODEL_SETTINGS,
-  TASK_MODEL_ROLE_DESCRIPTORS,
-  TASK_MODEL_ROLES,
   NON_SECRET_AUTH_ENV_VAR_NAMES,
   NON_SECRET_COMPUTE_ENV_VAR_NAMES,
   NON_SECRET_SOURCE_CONTROL_ENV_VAR_NAMES,
@@ -291,129 +289,123 @@ async function savePersistedTaskModelSettings(
 // settings commands and imported from '../compute'.
 
 /**
- * Free-trial inference seeding. A hosting provisioner can inject a capped,
- * Roomote-minted OpenRouter key as `R_TRIAL_OPENROUTER_API_KEY`; a fresh
- * deployment holding that key and no inference choices of its own is seeded
- * with OpenRouter's "Efficient" preset as ordinary editable config. The
- * setup wizard then skips the inference step, first tasks run on an
- * inexpensive default, and every model and provider control keeps working
- * because nothing is pinned through env.
+ * Free-trial inference. A hosting provisioner can inject a capped,
+ * Roomote-minted OpenRouter key as `R_TRIAL_OPENROUTER_API_KEY`. The setup
+ * wizard's inference step then offers "start with free credits" alongside
+ * connecting a provider; choosing it applies OpenRouter's "Efficient" preset
+ * as ordinary editable config, so first tasks run on an inexpensive default
+ * and every model and provider control keeps working because nothing is
+ * pinned through env.
  *
- * Seeding runs at most once per process and only while the deployment has
- * made no inference choices at all: no provider selected in setup, no saved
- * or operator-env provider credential, no saved model config or task model
- * settings, and no `R_MODEL` role pin. Any of those appearing later must
- * never be overwritten back to the trial defaults.
+ * This is an explicit operator choice, never an automatic seed: the command
+ * no-ops once any inference choice exists (a selected provider, saved model
+ * config, or task model settings) and refuses when a real provider is
+ * already connected, so it can never overwrite configuration.
  */
-const TRIAL_SEED_PRESET_ID = 'efficient';
-let trialModelConfigSeedChecked = false;
+const TRIAL_PRESET_ID = 'efficient';
 
-export function resetTrialModelConfigSeedCheckForTests(): void {
-  trialModelConfigSeedChecked = false;
-}
+export async function chooseSetupTrialInferenceCommand(auth: UserAuthSuccess) {
+  assertAdmin(auth);
 
-export async function ensureTrialModelConfigSeeded(): Promise<void> {
-  if (trialModelConfigSeedChecked) {
-    return;
-  }
+  const { userId } = auth;
 
   if (!isConfiguredEnvValue(process.env.R_TRIAL_OPENROUTER_API_KEY)) {
-    trialModelConfigSeedChecked = true;
-    return;
-  }
-
-  try {
-    await db.transaction(async (tx) => {
-      // Serialize against concurrent configuration writes: every check below
-      // must observe the row state the seed upserts will replace, or an
-      // operator's save landing between read and write would be overwritten.
-      await tx
-        .insert(deploymentSettings)
-        .values({ id: 'default' })
-        .onConflictDoNothing();
-      await tx
-        .select({ id: deploymentSettings.id })
-        .from(deploymentSettings)
-        .where(eq(deploymentSettings.id, 'default'))
-        .for('update');
-
-      const [
-        currentState,
-        persistedModelConfig,
-        persistedTaskModelSettings,
-        persistedEnvVarNames,
-        chatgptConnected,
-        githubCopilotConnected,
-        xaiSubscriptionConnected,
-      ] = await Promise.all([
-        getPersistedSetupNewState(tx),
-        getPersistedRuntimeModelConfig(tx),
-        getPersistedRawTaskModelSettings(tx),
-        getPersistedEnvironmentVariableNames(tx),
-        isChatGptSubscriptionConnected(),
-        isGitHubCopilotSubscriptionConnected(),
-        isXaiSubscriptionConnected(),
-      ]);
-
-      const hasModelChoices =
-        currentState.modelProvider !== null ||
-        persistedTaskModelSettings !== null ||
-        Object.values(persistedModelConfig).some((value) => value !== null);
-
-      const status = buildSetupModelStatus({
-        runtimeEnv: process.env,
-        persistedEnvVarNames,
-        chatgptConnected,
-        githubCopilotConnected,
-        xaiSubscriptionConnected,
-      });
-      // Any role-model env override (R_MODEL, R_PLANNING_MODEL, …) is an
-      // operator model choice: seeding around it would persist config that
-      // unexpectedly activates once the override is removed.
-      const hasRuntimeRoleModelOverride = TASK_MODEL_ROLES.some((role) =>
-        isConfiguredEnvValue(
-          process.env[TASK_MODEL_ROLE_DESCRIPTORS[role].modelEnvVar],
-        ),
-      );
-      const hasOperatorProvider =
-        hasRuntimeRoleModelOverride ||
-        status.providers.some(
-          (provider) =>
-            provider.savedApiKeySatisfied ||
-            (provider.runtimeApiKeySatisfied && !provider.trialKeySatisfied),
-        );
-
-      if (hasModelChoices || hasOperatorProvider) {
-        return;
-      }
-
-      const provider = getSetupModelProvider('openrouter');
-      const runtimeModelConfig = buildRecommendedDeploymentModelConfig(
-        provider,
-        TRIAL_SEED_PRESET_ID,
-      );
-      const defaultModelId = runtimeModelConfig.roomoteModel;
-
-      await Promise.all([
-        savePersistedRuntimeModelConfig(runtimeModelConfig, tx),
-        savePersistedTaskModelSettings(
-          normalizeTaskModelSettings({
-            ...DEFAULT_TASK_MODEL_SETTINGS,
-            ...(defaultModelId ? { defaultModelId } : {}),
-          }),
-          tx,
-        ),
-      ]);
-    });
-
-    trialModelConfigSeedChecked = true;
-  } catch (error) {
-    console.error(
-      `[ensureTrialModelConfigSeeded] Failed to seed trial model config: ${
-        error instanceof Error ? error.message : String(error)
-      }`,
+    throw new Error(
+      'Free trial inference is not available on this deployment.',
     );
   }
+
+  return db.transaction(async (tx) => {
+    // Serialize against concurrent configuration writes: every check below
+    // must observe the row state the upserts will replace, or an operator's
+    // save landing between read and write would be overwritten.
+    await tx
+      .insert(deploymentSettings)
+      .values({ id: 'default' })
+      .onConflictDoNothing();
+    await tx
+      .select({ id: deploymentSettings.id })
+      .from(deploymentSettings)
+      .where(eq(deploymentSettings.id, 'default'))
+      .for('update');
+
+    const [
+      currentState,
+      persistedModelConfig,
+      persistedTaskModelSettings,
+      persistedEnvVarNames,
+      chatgptConnected,
+      githubCopilotConnected,
+      xaiSubscriptionConnected,
+    ] = await Promise.all([
+      getPersistedSetupNewState(tx),
+      getPersistedRuntimeModelConfig(tx),
+      getPersistedRawTaskModelSettings(tx),
+      getPersistedEnvironmentVariableNames(tx),
+      isChatGptSubscriptionConnected(),
+      isGitHubCopilotSubscriptionConnected(),
+      isXaiSubscriptionConnected(),
+    ]);
+
+    // Any prior inference choice wins: a repeat click (or a stale wizard tab)
+    // must not reset models an operator has since adjusted.
+    const hasModelChoices =
+      currentState.modelProvider !== null ||
+      persistedTaskModelSettings !== null ||
+      Object.values(persistedModelConfig).some((value) => value !== null);
+
+    if (hasModelChoices) {
+      return {
+        setupNewState: currentState,
+        runtimeModelConfig: persistedModelConfig,
+      };
+    }
+
+    const status = buildSetupModelStatus({
+      runtimeEnv: process.env,
+      persistedEnvVarNames,
+      chatgptConnected,
+      githubCopilotConnected,
+      xaiSubscriptionConnected,
+    });
+    const hasOperatorProvider = status.providers.some(
+      (provider) =>
+        provider.savedApiKeySatisfied ||
+        (provider.runtimeApiKeySatisfied && !provider.trialKeySatisfied),
+    );
+
+    if (hasOperatorProvider) {
+      throw new Error(
+        'A model provider is already connected, so the free trial is not needed.',
+      );
+    }
+
+    const provider = getSetupModelProvider('openrouter');
+    const runtimeModelConfig = buildRecommendedDeploymentModelConfig(
+      provider,
+      TRIAL_PRESET_ID,
+    );
+    const defaultModelId = runtimeModelConfig.roomoteModel;
+    const setupNewState = normalizeSetupNewState({
+      ...currentState,
+      modelProvider: provider.id,
+      lastInteractedByUserId: userId,
+    });
+
+    await Promise.all([
+      savePersistedSetupNewState(setupNewState, tx),
+      savePersistedRuntimeModelConfig(runtimeModelConfig, tx),
+      savePersistedTaskModelSettings(
+        normalizeTaskModelSettings({
+          ...DEFAULT_TASK_MODEL_SETTINGS,
+          ...(defaultModelId ? { defaultModelId } : {}),
+        }),
+        tx,
+      ),
+    ]);
+
+    return { setupNewState, runtimeModelConfig };
+  });
 }
 
 async function resolveSelectedRepositories(repositoryIds: string[]): Promise<{
@@ -1229,7 +1221,6 @@ export async function getSetupNewStatusCommand(auth: UserAuthSuccess) {
 
   const { userId } = auth;
   await purgeSavedDeploymentWorkerImage();
-  await ensureTrialModelConfigSeeded();
 
   const [
     baseStatus,

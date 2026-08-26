@@ -9,8 +9,9 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { SetupModelProviderId, SetupModelStatus } from '@roomote/types';
 import { toast } from 'sonner';
 
-const { mutateAsyncMock } = vi.hoisted(() => ({
+const { mutateAsyncMock, mutateMock } = vi.hoisted(() => ({
   mutateAsyncMock: vi.fn(),
+  mutateMock: vi.fn(),
 }));
 
 vi.mock('sonner', () => ({
@@ -24,6 +25,9 @@ vi.mock('@/trpc/client', () => ({
   useTRPC: () => ({
     setupNew: {
       saveModelConfig: {
+        mutationOptions: (options: Record<string, unknown>) => options,
+      },
+      chooseTrialInference: {
         mutationOptions: (options: Record<string, unknown>) => options,
       },
       status: {
@@ -110,6 +114,8 @@ vi.mock('@/components/system', () => ({
       {children}
     </button>
   ),
+  Card: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+  CardContent: ({ children }: { children: ReactNode }) => <div>{children}</div>,
   Check: (props: SVGProps<SVGSVGElement>) => <svg {...props} />,
   Lock: (props: SVGProps<SVGSVGElement>) => <svg {...props} />,
   Input: ({
@@ -272,9 +278,11 @@ function buildModelSetup(
 function setupMutationMock() {
   mutateAsyncMock.mockReset();
   mutateAsyncMock.mockResolvedValue(undefined);
+  mutateMock.mockReset();
 
   mockUseMutation.mockReturnValue({
     mutateAsync: mutateAsyncMock,
+    mutate: mutateMock,
     isPending: false,
   } as unknown as ReturnType<typeof mockUseMutation>);
 }
@@ -779,5 +787,76 @@ describe('StepInferenceProvider ChatGPT subscription', () => {
       | undefined;
     await options?.onSuccess?.();
     expect(onContinue).toHaveBeenCalled();
+  });
+});
+
+describe('StepInferenceProvider free trial', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockUseQueryClient.mockReturnValue({
+      invalidateQueries: vi.fn(),
+    } as unknown as ReturnType<typeof mockUseQueryClient>);
+    setupMutationMock();
+    setupQueryMocks({ chatgptConnected: false });
+  });
+
+  function trialOpenrouterProviderStatus(): SetupModelStatus['providers'][number] {
+    return {
+      ...openrouterProviderStatus(),
+      runtimeApiKeySatisfied: true,
+      trialKeySatisfied: true,
+    };
+  }
+
+  it('offers free credits when a trial key is available and starts the trial on click', () => {
+    render(
+      <StepInferenceProvider
+        modelSetup={buildModelSetup({
+          providers: [
+            trialOpenrouterProviderStatus(),
+            chatgptProviderStatus(false),
+          ],
+        })}
+        onContinue={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Start with free credits' }),
+    );
+
+    expect(mutateMock).toHaveBeenCalled();
+  });
+
+  it('does not offer free credits without a trial key', () => {
+    render(
+      <StepInferenceProvider
+        modelSetup={buildModelSetup()}
+        onContinue={vi.fn()}
+      />,
+    );
+
+    expect(
+      screen.queryByRole('button', { name: 'Start with free credits' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('keeps the API key field editable for a trial-satisfied provider', () => {
+    render(
+      <StepInferenceProvider
+        modelSetup={buildModelSetup({
+          providers: [
+            trialOpenrouterProviderStatus(),
+            chatgptProviderStatus(false),
+          ],
+        })}
+        onContinue={vi.fn()}
+      />,
+    );
+
+    selectProvider('openrouter');
+
+    const input = screen.getByPlaceholderText('API key for OpenRouter');
+    expect(input).toBeEnabled();
   });
 });
