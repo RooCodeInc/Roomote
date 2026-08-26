@@ -355,6 +355,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         message: expect.objectContaining({
           eventId: '100.2:tool-call:0',
           eventType: 'roomote_runtime.tool_call',
+          metadata: { visibleInTranscript: true },
           payload: expect.objectContaining({
             toolCallId: '100.2:tool:0',
             toolName: 'send_chat_reply',

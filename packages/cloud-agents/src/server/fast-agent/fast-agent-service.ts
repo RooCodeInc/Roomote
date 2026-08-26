@@ -775,7 +775,7 @@ export async function answerFastAgentQuestion({
         eventType: ACP_ENVELOPE_EVENT_TYPES.ToolCall,
         role: 'tool',
         contentBlocks: [],
-        metadata: { visibleInTranscript: false },
+        metadata: { visibleInTranscript: true },
         payload: {
           toolCallId,
           title,

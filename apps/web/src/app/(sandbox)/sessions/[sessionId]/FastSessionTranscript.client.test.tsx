@@ -9,6 +9,35 @@ describe('FastSessionTranscript', () => {
       <FastSessionTranscript
         messages={[
           {
+            id: 'tool-call-1',
+            eventId: 'turn-1:tool-call:0',
+            turnId: 'turn-1',
+            turnSeq: 1,
+            ts: 2,
+            eventType: ACP_ENVELOPE_EVENT_TYPES.ToolCall,
+            role: 'tool',
+            contentBlocks: [],
+            metadata: { visibleInTranscript: true },
+            payload: {
+              toolCallId: 'turn-1:tool:0',
+              title: 'launch_task',
+              kind: 'tool',
+              status: 'in_progress',
+              isExecute: false,
+              isRead: false,
+              isMcp: false,
+              mcpServerName: null,
+              mcpToolName: null,
+              toolName: 'launch_task',
+              command: null,
+              rawInput: { arguments: { prompt: 'Fix checkout' } },
+            },
+            source: 'slack',
+            nativeSessionId: 'opencode-1',
+            nativeMessageId: null,
+            createdAt: new Date('2026-01-01T00:00:01.000Z'),
+          },
+          {
             id: 'user-1',
             eventId: 'turn-1:user',
             turnId: 'turn-1',
@@ -67,18 +96,18 @@ describe('FastSessionTranscript', () => {
             metadata: { visibleInTranscript: true },
             payload: {
               toolCallId: 'turn-1:tool:0',
-              title: 'send_chat_reply',
+              title: 'launch_task',
               kind: 'tool',
               status: 'completed',
               isExecute: false,
               isMcp: false,
               mcpServerName: null,
               mcpToolName: null,
-              toolName: 'send_chat_reply',
+              toolName: 'launch_task',
               command: null,
               exitCode: null,
               output: '{"delivered":true}',
-              rawInput: { arguments: { message: 'Done' } },
+              rawInput: { arguments: { prompt: 'Fix checkout' } },
             },
             source: 'slack',
             nativeSessionId: 'opencode-1',
@@ -89,6 +118,6 @@ describe('FastSessionTranscript', () => {
       />,
     );
 
-    expect(screen.getByText('send_chat_reply')).toBeInTheDocument();
+    expect(screen.getAllByText('launch_task')).toHaveLength(1);
   });
 });
