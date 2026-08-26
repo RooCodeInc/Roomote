@@ -39,6 +39,15 @@ import {
   type FastAgentSkillDocument,
 } from './fast-agent-skill-store';
 import type { FastAgentIntegration } from './fast-agent-integration-broker';
+import {
+  SHOW_WIDGET_FIXED_CANVAS_GUIDANCE,
+  SHOW_WIDGET_HEIGHT_DESCRIPTION,
+  SHOW_WIDGET_MAX_CSS_CHARS,
+  SHOW_WIDGET_MAX_HTML_CHARS,
+  SHOW_WIDGET_MAX_TEXT_FALLBACK_CHARS,
+  SHOW_WIDGET_MAX_TITLE_CHARS,
+  SHOW_WIDGET_THEME_GUIDANCE,
+} from '../show-widget';
 
 export {
   FAST_AGENT_NATIVE_TOOL_FILTER,
@@ -273,6 +282,25 @@ export default {
     message: z.string().min(1),
   },
   execute: (args, context) => invoke("send_task_message", args, context),
+}
+`,
+
+    [FAST_AGENT_NATIVE_TOOL_NAMES.showWidget]: String.raw`
+import { z } from "zod"
+import { invoke } from "../roomote-fast-tool-bridge.js"
+
+export default {
+  description: ${JSON.stringify(
+    `Render presentational HTML in the web transcript. ${SHOW_WIDGET_THEME_GUIDANCE} ${SHOW_WIDGET_FIXED_CANVAS_GUIDANCE} On Slack or Discord, textFallback is posted instead; use request_user_input for questions.`,
+  )},
+  args: {
+    html: z.string().min(1).max(${SHOW_WIDGET_MAX_HTML_CHARS}).describe("Compact semantic HTML that fully fits the fixed canvas; avoid long prose, large lists, and dense data"),
+    title: z.string().max(${SHOW_WIDGET_MAX_TITLE_CHARS}).optional(),
+    css: z.string().max(${SHOW_WIDGET_MAX_CSS_CHARS}).optional().describe("Optional CSS using --rw-* theme variables; do not mask overflow with clipping or scroll containers"),
+    height: z.number().finite().optional().describe(${JSON.stringify(SHOW_WIDGET_HEIGHT_DESCRIPTION)}),
+    textFallback: z.string().max(${SHOW_WIDGET_MAX_TEXT_FALLBACK_CHARS}).optional(),
+  },
+  execute: (args, context) => invoke("show_widget", args, context),
 }
 `,
 
