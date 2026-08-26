@@ -11,10 +11,16 @@ import {
   type DiscordCommunicationProvider,
 } from '@roomote/communication/discord-provider';
 import {
+  getOrCreateFastAgentSession,
   acquireFastAgentTurnLock,
   answerFastAgentQuestion,
   resolveApiBaseUrl,
 } from '@roomote/cloud-agents/server';
+import {
+  buildFastSessionReplyFooterText,
+  deliverManagedThreadReplyFooter,
+  getDiscordFooterlessFinalChunk,
+} from '@roomote/communication';
 import { resolveUserMcpServerConfigs } from '@roomote/sdk/server';
 import { ALL_REPOSITORIES } from '@roomote/types';
 
@@ -103,6 +109,57 @@ export async function processDiscordFastAgentMessage(input: {
           })
         : [];
     const message = getDiscordMessageCreate(input.event);
+    // Resolved ahead of the turn so replies can carry the session footer;
+    // the service's own getOrCreate finds this same row.
+    const session = await getOrCreateFastAgentSession({
+      userId: input.senderUserId,
+      conversation,
+    });
+    const postFastReplyWithFooter = async (text: string) => {
+      const footerText = buildFastSessionReplyFooterText({
+        provider: 'discord',
+        sessionId: session.id,
+      });
+      const textWithFooter = `${text}\n\n${footerText}`;
+      const channelId = conversation.replyTarget.channelId;
+      const footerStateThreadId = conversation.replyTarget.threadId ?? 'root';
+      const footerMessageChannelId =
+        conversation.replyTarget.threadId ?? channelId;
+
+      return deliverManagedThreadReplyFooter({
+        provider: 'discord',
+        providerLabel: 'Discord',
+        channelId,
+        footerStateThreadId,
+        lockKey: `discord:thread_reply_footer_lock:${channelId}:${footerStateThreadId}`,
+        logRef: `fast session ${session.id}`,
+        logContext: 'DiscordFastAgent',
+        postReplyWithFooter: async () => {
+          const posted = await replyToDiscordEvent({
+            provider: input.provider,
+            applicationId: input.applicationId,
+            channel: input.channel,
+            ...(input.interaction ? { interaction: input.interaction } : {}),
+            ...(message ? { replyToMessageId: message.id } : {}),
+            text: textWithFooter,
+          });
+          return {
+            messageId: posted.lastTextMessageId ?? posted.messageId,
+            textWithoutFooter: getDiscordFooterlessFinalChunk({
+              textWithFooter,
+              footerText,
+            }),
+          };
+        },
+        clearPreviousFooter: async (previousFooterRecord) => {
+          await input.provider.editMessage({
+            channelId: footerMessageChannelId,
+            messageId: previousFooterRecord.messageId,
+            text: previousFooterRecord.textWithoutFooter,
+          });
+        },
+      });
+    };
     let didSendVisibleResponse = false;
     const apiBaseUrl = resolveApiBaseUrl() ?? undefined;
     const response = await answerFastAgentQuestion({
@@ -212,18 +269,9 @@ export async function processDiscordFastAgentMessage(input: {
           };
         },
         postReply: async ({ message: text }) => {
-          const posted = await replyToDiscordEvent({
-            provider: input.provider,
-            applicationId: input.applicationId,
-            channel: input.channel,
-            ...(input.interaction ? { interaction: input.interaction } : {}),
-            ...(message ? { replyToMessageId: message.id } : {}),
-            text,
-          });
+          const posted = await postFastReplyWithFooter(text);
           didSendVisibleResponse = true;
-          return {
-            messageId: posted.lastTextMessageId ?? posted.messageId,
-          };
+          return { messageId: posted.messageId };
         },
         replaceReply: async ({ messageId }, { message: text }) => {
           if (text.length > DISCORD_MAX_MESSAGE_LENGTH) {
@@ -255,14 +303,7 @@ export async function processDiscordFastAgentMessage(input: {
       },
     });
     if (response && !didSendVisibleResponse) {
-      await replyToDiscordEvent({
-        provider: input.provider,
-        applicationId: input.applicationId,
-        channel: input.channel,
-        ...(input.interaction ? { interaction: input.interaction } : {}),
-        ...(message ? { replyToMessageId: message.id } : {}),
-        text: response,
-      });
+      await postFastReplyWithFooter(response);
     }
   } finally {
     await releaseFastAgentLock().catch(() => {});

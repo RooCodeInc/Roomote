@@ -1,4 +1,5 @@
 import {
+  getOrCreateFastAgentSession,
   acquireFastAgentTurnLock,
   answerFastAgentQuestion,
   hasFastAgentSession,
@@ -117,6 +118,10 @@ export async function processFastAgentMessage(params: {
       });
     }
 
+    // Resolved ahead of the turn so replies can carry the session footer;
+    // the service's own getOrCreate finds this same row.
+    const session = await getOrCreateFastAgentSession({ userId, conversation });
+
     let threadContext: Awaited<ReturnType<typeof slack.fetchThreadMessages>> =
       [];
 
@@ -197,6 +202,7 @@ export async function processFastAgentMessage(params: {
               slackTeamId: teamId,
               source: 'fast_agent',
             },
+            fastSessionFooter: { sessionId: session.id },
           });
           if (posted === 'failed') {
             throw new Error('Slack did not accept the Fast parent reply.');
@@ -270,6 +276,7 @@ export async function processFastAgentMessage(params: {
           slackTeamId: teamId,
           source: 'fast_agent',
         },
+        fastSessionFooter: { sessionId: session.id },
       });
     }
   } finally {

@@ -10,6 +10,9 @@ vi.mock('@roomote/cloud-agents/server', () => ({
   acquireFastAgentTurnLock: mocks.acquireLock,
   answerFastAgentQuestion: mocks.answerQuestion,
   hasFastAgentSession: mocks.hasSession,
+  getOrCreateFastAgentSession: vi
+    .fn()
+    .mockResolvedValue({ id: 'fast-session-1' }),
 }));
 
 vi.mock('@roomote/cloud-agents', () => ({

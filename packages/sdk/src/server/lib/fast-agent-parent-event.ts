@@ -28,9 +28,15 @@ import { Env, getArtifactSigningKey } from '@roomote/env';
 import {
   buildSlackPrReviewActionBlocks,
   createFastAgentSlackLiveTaskLauncher,
+  postSlackThreadMessageWithFooterText,
   resolveSlackReactionNames,
   SlackNotifier,
 } from '@roomote/slack';
+import {
+  buildFastSessionReplyFooterText,
+  deliverManagedThreadReplyFooter,
+  getDiscordFooterlessFinalChunk,
+} from '@roomote/communication';
 import {
   ALL_REPOSITORIES,
   buildFastAgentChildTaskMetadata,
@@ -579,11 +585,12 @@ async function createSlackFastAgentParentTurn(params: {
             followUpPrompt: action.followUpPrompt,
           });
         }
-        const messageTs = await slack.postMessage({
+        const messageTs = await postSlackThreadMessageWithFooterText({
+          slack,
           channel: conversation.replyTarget.channelId,
-          thread_ts: conversation.replyTarget.threadId,
+          threadTs: conversation.replyTarget.threadId,
           text: action ? `${message}\n${action.question}` : message,
-          blocks: action
+          bodyBlocks: action
             ? buildSlackPrReviewActionBlocks({
                 text: message,
                 question: action.question,
@@ -597,9 +604,11 @@ async function createSlackFastAgentParentTurn(params: {
                   alt_text: image.altText,
                 })),
               ],
-          unfurl_links: false,
-          unfurl_media: false,
-          client_msg_id: buildSlackClientMessageId(
+          footerText: buildFastSessionReplyFooterText({
+            provider: 'slack',
+            sessionId: params.parent.sessionId,
+          }),
+          clientMsgId: buildSlackClientMessageId(
             buildEventClientMessageSeed(params.event),
           ),
         });
@@ -679,6 +688,52 @@ export function createFastAgentDiscordTaskLauncher(params: {
             : {}),
         },
       } satisfies StandardTask;
+    },
+  });
+}
+
+async function postDiscordFastParentMessageWithFooter(params: {
+  provider: NonNullable<
+    Awaited<
+      ReturnType<
+        typeof createDiscordCommunicationProviderFromRuntimeCredentials
+      >
+    >
+  >;
+  conversation: Extract<FastAgentConversation, { surface: 'discord' }>;
+  sessionId: string;
+  footerText: string;
+  textWithFooter: string;
+  post: () => Promise<{ messageId: string; lastTextMessageId?: string }>;
+}): Promise<{ messageId: string }> {
+  const channelId = params.conversation.replyTarget.channelId;
+  const footerStateThreadId =
+    params.conversation.replyTarget.threadId ?? 'root';
+
+  return deliverManagedThreadReplyFooter({
+    provider: 'discord',
+    providerLabel: 'Discord',
+    channelId,
+    footerStateThreadId,
+    lockKey: `discord:thread_reply_footer_lock:${channelId}:${footerStateThreadId}`,
+    logRef: `fast session ${params.sessionId}`,
+    logContext: 'fastAgentParentEvent',
+    postReplyWithFooter: async () => {
+      const result = await params.post();
+      return {
+        messageId: result.lastTextMessageId ?? result.messageId,
+        textWithoutFooter: getDiscordFooterlessFinalChunk({
+          textWithFooter: params.textWithFooter,
+          footerText: params.footerText,
+        }),
+      };
+    },
+    clearPreviousFooter: async (previousFooterRecord) => {
+      await params.provider.editMessage({
+        channelId: params.conversation.replyTarget.threadId ?? channelId,
+        messageId: previousFooterRecord.messageId,
+        text: previousFooterRecord.textWithoutFooter,
+      });
     },
   });
 }
@@ -769,46 +824,60 @@ async function createDiscordFastAgentParentTurn(params: {
           });
         }
 
-        const posted = await provider.postMessage({
-          ...conversation.replyTarget,
-          idempotencyKey: buildEventClientMessageSeed(params.event),
-          text: action ? `${message}\n${action.question}` : message,
-          textFormat: 'markdown',
-          images,
-          ...(action
-            ? {
-                buttons: [
-                  [
-                    {
-                      text: 'Resolve these issues',
-                      callbackData: buildPrReviewActionCallbackData(
-                        'yes',
-                        action.nonce,
-                      ),
-                    },
-                    {
-                      text: 'Auto-resolve on this PR',
-                      callbackData: buildPrReviewActionCallbackData(
-                        'auto',
-                        action.nonce,
-                      ),
-                    },
-                    {
-                      text: 'Dismiss',
-                      callbackData: buildPrReviewActionCallbackData(
-                        'dismiss',
-                        action.nonce,
-                      ),
-                    },
-                  ],
-                ],
-              }
-            : {}),
+        const footerText = buildFastSessionReplyFooterText({
+          provider: 'discord',
+          sessionId: params.parent.sessionId,
+        });
+        const bodyText = action ? `${message}\n${action.question}` : message;
+        const textWithFooter = `${bodyText}\n\n${footerText}`;
+        const posted = await postDiscordFastParentMessageWithFooter({
+          provider,
+          conversation,
+          sessionId: params.parent.sessionId,
+          footerText,
+          textWithFooter,
+          post: () =>
+            provider.postMessage({
+              ...conversation.replyTarget,
+              idempotencyKey: buildEventClientMessageSeed(params.event),
+              text: textWithFooter,
+              textFormat: 'markdown',
+              images,
+              ...(action
+                ? {
+                    buttons: [
+                      [
+                        {
+                          text: 'Resolve these issues',
+                          callbackData: buildPrReviewActionCallbackData(
+                            'yes',
+                            action.nonce,
+                          ),
+                        },
+                        {
+                          text: 'Auto-resolve on this PR',
+                          callbackData: buildPrReviewActionCallbackData(
+                            'auto',
+                            action.nonce,
+                          ),
+                        },
+                        {
+                          text: 'Dismiss',
+                          callbackData: buildPrReviewActionCallbackData(
+                            'dismiss',
+                            action.nonce,
+                          ),
+                        },
+                      ],
+                    ],
+                  }
+                : {}),
+            }),
         });
         if (action) {
           await attachPendingPrReviewActionMessage(
             action.nonce,
-            posted.lastTextMessageId ?? posted.messageId,
+            posted.messageId,
           );
         }
         params.onReplyPosted();

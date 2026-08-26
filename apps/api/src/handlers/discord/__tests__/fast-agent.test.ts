@@ -13,6 +13,9 @@ vi.mock('@roomote/cloud-agents/server', () => ({
   acquireFastAgentTurnLock: mocks.acquireLock,
   answerFastAgentQuestion: mocks.answerQuestion,
   resolveApiBaseUrl: () => 'https://roomote.example.com',
+  getOrCreateFastAgentSession: vi
+    .fn()
+    .mockResolvedValue({ id: 'fast-session-1' }),
 }));
 
 vi.mock('@roomote/communication/discord-event', () => ({
