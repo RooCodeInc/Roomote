@@ -69,7 +69,7 @@ export type FastAgentSkillListResult = {
   warnings: string[];
 };
 
-export type FastAgentSkillCatalog = FastAgentSkillListResult & {
+type FastAgentSkillCatalog = FastAgentSkillListResult & {
   counts: {
     packaged: number;
     repository: number;
@@ -77,8 +77,12 @@ export type FastAgentSkillCatalog = FastAgentSkillListResult & {
   };
 };
 
+export type FastAgentSkillScope =
+  | { environmentId: string; repositoryId?: never }
+  | { environmentId?: never; repositoryId: string };
+
 export type FastAgentRepositorySkillSource = {
-  list(environmentId?: string): Promise<FastAgentSkillListResult>;
+  list(scope: FastAgentSkillScope): Promise<FastAgentSkillListResult>;
   read(id: string, resource?: string): Promise<FastAgentSkillDocument>;
   dispose?(): Promise<void>;
 };
@@ -178,7 +182,7 @@ export class FastAgentSkillStore {
       : resolveDefaultSkillRoot();
   }
 
-  async list(environmentId?: string): Promise<FastAgentSkillCatalog> {
+  async list(scope: FastAgentSkillScope): Promise<FastAgentSkillCatalog> {
     const packaged = await Promise.all(
       FAST_AGENT_PACKAGED_SKILL_NAMES.map(async (name) => {
         const document = await this.readPackaged(name);
@@ -192,7 +196,7 @@ export class FastAgentSkillStore {
       }),
     );
     const repository = this.repositorySkills
-      ? await this.repositorySkills.list(environmentId)
+      ? await this.repositorySkills.list(scope)
       : { skills: [], warnings: [] };
     return {
       counts: {

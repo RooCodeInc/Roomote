@@ -174,9 +174,15 @@ const spillGrepArgsSchema = z.object({
   query: z.string().min(1),
 });
 
-const listSkillsArgsSchema = z.object({
-  environmentId: z.string().min(1).optional(),
-});
+const listSkillsArgsSchema = z
+  .object({
+    environmentId: z.string().min(1).optional(),
+    repositoryId: z.string().min(1).optional(),
+  })
+  .refine(
+    (args) => Boolean(args.environmentId) !== Boolean(args.repositoryId),
+    'Exactly one skill scope is required.',
+  );
 
 const loadSkillArgsSchema = z.object({
   id: z.string().min(1),
@@ -321,9 +327,10 @@ import { z } from "zod"
 import { invoke } from "../roomote-fast-tool-bridge.js"
 
 export default {
-  description: "List packaged Roomote skills and repository-defined skills from configured environments without filesystem access. Returns total, packaged, and repository skill counts plus exact IDs, task invocation names, descriptions, repositories, and environment IDs for load_skill and task routing.",
+  description: "List packaged Roomote skills and repository-defined skills within exactly one environment or repository without filesystem access. Provide exactly one of environmentId or repositoryId. Returns total, packaged, and repository skill counts plus exact IDs, task invocation names, descriptions, repositories, and environment IDs for load_skill and task routing.",
   args: {
-    environmentId: z.string().min(1).optional().describe("Exact environment ID from the system prompt; omit to inspect all configured environments"),
+    environmentId: z.string().min(1).optional().describe("Exact environment ID from the system prompt; mutually exclusive with repositoryId"),
+    repositoryId: z.string().min(1).optional().describe("Exact repository ID from the system prompt; mutually exclusive with environmentId"),
   },
   execute: (args, context) => invoke("list_skills", args, context),
 }
@@ -870,7 +877,9 @@ async function startBridge(): Promise<FastAgentNativeToolBridge> {
         try {
           const args = listSkillsArgsSchema.parse(parsed.args);
           const catalog = await activeExecutor.skillStore.list(
-            args.environmentId,
+            args.environmentId
+              ? { environmentId: args.environmentId }
+              : { repositoryId: args.repositoryId! },
           );
           writeJson(response, 200, {
             ok: true,

@@ -27,6 +27,7 @@ import {
   type FastAgentRepositorySkillSource,
   type FastAgentSkillDocument,
   type FastAgentSkillListResult,
+  type FastAgentSkillScope,
   type FastAgentSkillSummary,
 } from './fast-agent-skill-store';
 import { FAST_AGENT_SPILL_MAX_FILE_BYTES } from './fast-agent-spill-store';
@@ -470,14 +471,19 @@ export class RemoteFastAgentRepositorySkillSource implements FastAgentRepository
         ));
   }
 
-  async list(environmentId?: string): Promise<FastAgentSkillListResult> {
+  async list(scope: FastAgentSkillScope): Promise<FastAgentSkillListResult> {
+    const environmentId = scope.environmentId;
     if (environmentId && !this.allowedEnvironmentIds.has(environmentId)) {
       throw new Error('Unknown Fast environment.');
     }
-    const repositoriesList = (await this.resolveRepositories()).filter(
-      (repository) =>
-        !environmentId || repository.environmentIds.includes(environmentId),
+    const repositoriesList = (
+      await this.resolveRepositories(environmentId)
+    ).filter((repository) =>
+      scope.repositoryId ? repository.id === scope.repositoryId : true,
     );
+    if (scope.repositoryId && repositoriesList.length === 0) {
+      throw new Error('Unknown Fast repository.');
+    }
     const skills: FastAgentSkillSummary[] = [];
     const warnings: string[] = [];
     for (

@@ -160,6 +160,7 @@ export interface RoutableEnvironment {
   id: string;
   name: string;
   description?: string;
+  repositories?: Array<{ id: string; name: string }>;
   repositoryNames: string[];
 }
 

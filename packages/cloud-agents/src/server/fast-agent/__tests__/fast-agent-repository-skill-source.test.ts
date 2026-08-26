@@ -93,7 +93,7 @@ describe('RemoteFastAgentRepositorySkillSource', () => {
       },
     });
 
-    const catalog = await source.list('environment-1');
+    const catalog = await source.list({ environmentId: 'environment-1' });
 
     expect(catalog).toMatchObject({ warnings: [] });
     expect(catalog.skills).toEqual([
@@ -116,9 +116,17 @@ describe('RemoteFastAgentRepositorySkillSource', () => {
     await expect(source.read('repository:repo-3:unknown')).rejects.toThrow(
       'Unknown skill resource.',
     );
-    await expect(source.list('unknown-environment')).rejects.toThrow(
-      'Unknown Fast environment.',
-    );
+    await expect(
+      source.list({ environmentId: 'unknown-environment' }),
+    ).rejects.toThrow('Unknown Fast environment.');
+    await expect(
+      source.list({ repositoryId: 'repo-1' }),
+    ).resolves.toMatchObject({
+      skills: [expect.objectContaining({ repository: 'acme/one' })],
+    });
+    await expect(
+      source.list({ repositoryId: 'unknown-repository' }),
+    ).rejects.toThrow('Unknown Fast repository.');
 
     await source.dispose();
     for (const directory of directories) {
@@ -140,7 +148,7 @@ describe('RemoteFastAgentRepositorySkillSource', () => {
       },
     });
 
-    const catalog = await source.list();
+    const catalog = await source.list({ environmentId: 'environment-1' });
 
     expect(catalog.skills).toEqual([
       expect.objectContaining({ repository: 'acme/two' }),

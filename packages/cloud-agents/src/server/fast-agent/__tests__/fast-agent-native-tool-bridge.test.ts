@@ -130,6 +130,8 @@ describe('Fast native OpenCode tool bridge', () => {
       'total, packaged, and repository skill counts',
     );
     expect(skillListSource).toContain('environmentId: z.string()');
+    expect(skillListSource).toContain('repositoryId: z.string()');
+    expect(skillListSource).toContain('Provide exactly one');
     expect(skillSource).toContain('Exact skill ID returned by list_skills');
     expect(skillSource).not.toContain('"explore-and-act"');
     expect(skillSource).toContain(
@@ -256,6 +258,29 @@ describe('Fast native OpenCode tool bridge', () => {
             }),
           ]),
         },
+      });
+
+      const unscopedCatalog = await callBridge({
+        sessionID: parentSession,
+        tool: FAST_AGENT_NATIVE_TOOL_NAMES.listSkills,
+        args: {},
+      });
+      expect(JSON.parse(unscopedCatalog.output)).toEqual({
+        success: false,
+        error: 'The requested skill catalog is unavailable.',
+      });
+
+      const ambiguousCatalog = await callBridge({
+        sessionID: parentSession,
+        tool: FAST_AGENT_NATIVE_TOOL_NAMES.listSkills,
+        args: {
+          environmentId: 'environment-1',
+          repositoryId: 'repo-1',
+        },
+      });
+      expect(JSON.parse(ambiguousCatalog.output)).toEqual({
+        success: false,
+        error: 'The requested skill catalog is unavailable.',
       });
 
       const skill = await callBridge({
