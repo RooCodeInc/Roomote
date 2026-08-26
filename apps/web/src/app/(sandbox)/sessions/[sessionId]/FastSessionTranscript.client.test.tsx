@@ -346,6 +346,5 @@ describe('FastSessionTranscript', () => {
     );
 
     expect(screen.queryByPlaceholderText('Message agent')).toBeNull();
-    expect(screen.getByText('No canonical messages')).toBeInTheDocument();
   });
 });

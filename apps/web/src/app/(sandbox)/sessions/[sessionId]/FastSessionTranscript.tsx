@@ -17,7 +17,6 @@ import {
   ConversationScrollButton,
   MessageUiOptionsProvider,
 } from '@/components/ai-elements';
-import { BotMessageSquare, EmptyState } from '@/components/system';
 import { WorkspaceHeader } from '@/components/layout';
 import {
   SessionPromptInput,
@@ -245,14 +244,6 @@ export function FastSessionTranscript({
             showInternalMessages={false}
             onSuppress={suppressMessage}
           />
-          {messages.length === 0 ? (
-            <EmptyState
-              icon={<BotMessageSquare className="size-6" />}
-              title="No canonical messages"
-              description="This session predates canonical Fast message persistence or has not recorded a new turn yet."
-              containerClassName="py-10"
-            />
-          ) : null}
         </ConversationContent>
         <ConversationScrollButton />
       </Conversation>
