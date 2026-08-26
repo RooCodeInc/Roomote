@@ -305,6 +305,11 @@ export function Home({
   const { preferences, isLoading: isPersonalPreferencesLoading } =
     usePersonalPreferences();
   const hasRestoredWorkspace = useRef(false);
+  const shouldRestoreDefaultWorkspace = useRef(false);
+
+  const handleInvalidWorkspaceReset = useCallback(() => {
+    shouldRestoreDefaultWorkspace.current = true;
+  }, []);
 
   const clearRoutingState = useCallback(() => {
     setRoutingState('idle');
@@ -326,8 +331,21 @@ export function Home({
   }, [form, setWorkspace]);
 
   useEffect(() => {
+    const restoredWorkspace = workspace.workspace as
+      | WorkspaceSelection['workspace']
+      | undefined;
+
     if (hasRestoredWorkspace.current) {
-      return;
+      if (
+        !shouldRestoreDefaultWorkspace.current ||
+        restoredWorkspace?.type !== 'auto' ||
+        form.getValues('repository') !== AUTO_WORKSPACE_VALUE
+      ) {
+        return;
+      }
+
+      hasRestoredWorkspace.current = false;
+      shouldRestoreDefaultWorkspace.current = false;
     }
 
     if (environmentIdParam) {
@@ -342,10 +360,6 @@ export function Home({
       hasRestoredWorkspace.current = true;
       return;
     }
-
-    const restoredWorkspace = workspace.workspace as
-      | WorkspaceSelection['workspace']
-      | undefined;
 
     if (restoredWorkspace?.type === 'repository') {
       form.setValue('repository', restoredWorkspace.value);
@@ -749,6 +763,7 @@ export function Home({
                     !isPersonalPreferencesLoading &&
                     !preferences.communicationsFastModeDefault
                   }
+                  onInvalidWorkspaceReset={handleInvalidWorkspaceReset}
                   allowBranchSelection={canSelectBranch}
                 />
               </div>

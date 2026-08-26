@@ -171,6 +171,9 @@ vi.mock('@/components/tasks', async () => {
   const { useEffect } = await vi.importActual<typeof import('react')>('react');
   const { useFormContext } =
     await vi.importActual<typeof import('react-hook-form')>('react-hook-form');
+  const { useWorkspaceStorage } = await vi.importActual<
+    typeof import('@/hooks/useWorkspaceStorage')
+  >('@/hooks/useWorkspaceStorage');
 
   return {
     ...actual,
@@ -178,14 +181,17 @@ vi.mock('@/components/tasks', async () => {
       allowAuto,
       allowFast,
       autoSelectDefaultWorkspace,
+      onInvalidWorkspaceReset,
       allowBranchSelection,
     }: {
       allowAuto?: boolean;
       allowFast?: boolean;
       autoSelectDefaultWorkspace?: boolean;
+      onInvalidWorkspaceReset?: () => void;
       allowBranchSelection?: boolean;
     }) => {
       const { watch, setValue } = useFormContext();
+      const { setWorkspace } = useWorkspaceStorage();
       const repository = watch('repository');
       const environmentId = watch('environmentId');
 
@@ -197,7 +203,15 @@ vi.mock('@/components/tasks', async () => {
         setValue('repository', AUTO_WORKSPACE_VALUE);
         setValue('environmentId', undefined);
         setValue('branch', '');
-      }, [allowAuto, environmentId, setValue]);
+        setWorkspace({ workspace: { type: 'auto' } });
+        onInvalidWorkspaceReset?.();
+      }, [
+        allowAuto,
+        environmentId,
+        onInvalidWorkspaceReset,
+        setValue,
+        setWorkspace,
+      ]);
 
       return (
         <div>
@@ -1240,6 +1254,25 @@ describe('Home', () => {
     });
 
     expect(mockCreateStandardTaskRun).not.toHaveBeenCalled();
+  });
+
+  it('restores the Fast preference after normalizing a stale persisted workspace', async () => {
+    currentCommunicationsFastModeDefault = true;
+    localStorage.setItem(
+      'roomote-workspace:deployment',
+      JSON.stringify({
+        workspace: { type: 'environment', id: 'env-stale' },
+      }),
+    );
+
+    render(<Home initialPlaceholderIndex={0} />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('repository')).toHaveTextContent(
+        FAST_EXECUTION,
+      );
+      expect(screen.getByTestId('environment')).toHaveTextContent('');
+    });
   });
 
   it('prefers environmentId from the URL when Fast is preferred', async () => {

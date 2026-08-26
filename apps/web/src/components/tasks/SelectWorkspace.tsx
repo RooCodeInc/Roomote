@@ -23,6 +23,7 @@ export const SelectWorkspace = ({
   allowAuto = false,
   allowFast = false,
   autoSelectDefaultWorkspace = true,
+  onInvalidWorkspaceReset,
   allowBranchSelection = true,
   environmentBranchRepositoryFullName,
   environmentBranchDefault,
@@ -32,6 +33,7 @@ export const SelectWorkspace = ({
   allowAuto?: boolean;
   allowFast?: boolean;
   autoSelectDefaultWorkspace?: boolean;
+  onInvalidWorkspaceReset?: () => void;
   allowBranchSelection?: boolean;
   environmentBranchRepositoryFullName?: string;
   environmentBranchDefault?: string;
@@ -116,6 +118,7 @@ export const SelectWorkspace = ({
           allowAuto={allowAuto}
           allowFast={allowFast}
           autoSelectDefaultWorkspace={autoSelectDefaultWorkspace}
+          onInvalidWorkspaceReset={onInvalidWorkspaceReset}
           onCreate={handleCreateEnvironment}
           onCreateRepository={handleCreateRepository}
           onEdit={handleUpdateEnvironment}
