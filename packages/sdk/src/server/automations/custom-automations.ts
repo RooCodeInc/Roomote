@@ -236,9 +236,11 @@ ${presentationGuidance}
 The ${promptContext.surfaceLabel} conversation above is available for reports through \`send_chat_reply\`; do not use \`${promptContext.postToolName}\` and do not post anywhere else. Default to finishing silently. Interrupt the conversation only when there is something a human should see now: a concrete actionable or important finding, a meaningful completed result, a durable blocker, or required user input. Routine success, healthy status, no-change results, and findings that are neither actionable nor important should not produce a message unless the automation request explicitly asks for them. Stay silent while work is in flight: send no opening acknowledgement and do not post progress updates. If you do report, your first message creates this run's thread in that conversation, so make it one self-contained message that stands alone for readers who have not seen this task; later messages and user replies continue that same thread. Write the report as the result itself, like a teammate sharing what they found or did: do not mention this automation, the schedule, the task, or that anything requested the work; the message footer already attributes the automation. Lead with the outcome, not with framing like "Automation requested ..." or "Outcome: ...".${orgWideSuggestionInstruction}`;
 }
 
-function isFastChannelTarget(target: AutomationTarget): boolean {
+function isFastDeliveryTarget(target: AutomationTarget): boolean {
   return (
-    (target.provider === 'slack' && target.targetKind === 'slack_channel') ||
+    (target.provider === 'slack' &&
+      (target.targetKind === 'slack_channel' ||
+        target.targetKind === 'slack_user')) ||
     (target.provider === 'discord' && target.targetKind === 'discord_channel')
   );
 }
@@ -261,7 +263,12 @@ async function buildFastAutomationConversation(params: {
 
   if (destination.provider === 'slack') {
     const installation = await db.query.slackInstallations.findFirst({
-      where: eq(slackInstallations.isActive, true),
+      where: destination.teamId
+        ? and(
+            eq(slackInstallations.isActive, true),
+            eq(slackInstallations.teamId, destination.teamId),
+          )
+        : eq(slackInstallations.isActive, true),
       columns: { botAccessToken: true, teamId: true },
     });
     if (!installation?.botAccessToken) {
@@ -537,10 +544,19 @@ async function launchCustomAutomationRow(
   // created/enabled the automation so an enabled run still has a chat-facing
   // result; if that admin has no linked DM, preserve the task-UI fallback.
   let destination: ResolvedAutomationDestination | null = null;
-  if (
-    isConfiguredAutomationTarget(automation.target) &&
-    (!fastExecution || isFastChannelTarget(automation.target))
-  ) {
+  if (isConfiguredAutomationTarget(automation.target)) {
+    if (fastExecution && !isFastDeliveryTarget(automation.target)) {
+      const message = `${PROVIDER_LABELS[automation.target.provider as CommunicationProvider]} report destinations of this type are not supported in Fast mode.`;
+      result.skippedReason = message;
+      result.errors.push(message);
+      await recordCustomAutomationRunOutcome(db, {
+        id: automation.id,
+        status: 'failed',
+        error: message,
+      });
+      return result;
+    }
+
     destination = await resolveDestination(automation.target);
     if (!destination) {
       const message = isBackgroundAutomationUserTargetKind(
