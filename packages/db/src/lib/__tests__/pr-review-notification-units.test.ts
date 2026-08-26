@@ -168,6 +168,49 @@ describe('canonical PR review notification ownership', () => {
     ).toHaveLength(1);
   });
 
+  it('keeps review and CI coalescing on its independent 15-minute window', async () => {
+    const observedAt = new Date('2026-08-26T05:00:00.000Z');
+
+    for (const [suffix, ciOffsetMs, expectedUnits] of [
+      ['inside', 15 * 60 * 1000 - 1, 1],
+      ['outside', 15 * 60 * 1000 + 1, 2],
+    ] as const) {
+      const task = await taskFactory.create();
+      const repository = `owner/ci-window-${suffix}-${task.id}`;
+      await associate(task.id, repository, suffix === 'inside' ? 14 : 15);
+      await persistPrReviewEvent(
+        eventInput({
+          repository,
+          prNumber: suffix === 'inside' ? 14 : 15,
+          eventKey: `summary-${suffix}-${task.id}`,
+          kind: 'review_summary',
+          batchId: `cycle-${suffix}`,
+          headSha: 'same-head',
+          roomoteAuthored: true,
+          isSummary: true,
+          observedAt,
+        }),
+      );
+      await persistPrReviewEvent(
+        eventInput({
+          repository,
+          prNumber: suffix === 'inside' ? 14 : 15,
+          eventKey: `ci-${suffix}-${task.id}`,
+          kind: 'ci_failure',
+          headSha: 'same-head',
+          observedAt: new Date(observedAt.getTime() + ciOffsetMs),
+        }),
+      );
+
+      await expect(
+        db
+          .select({ id: prReviewNotificationUnits.id })
+          .from(prReviewNotificationUnits)
+          .where(eq(prReviewNotificationUnits.repository, repository)),
+      ).resolves.toHaveLength(expectedUnits);
+    }
+  });
+
   it('keeps the same episode id separate across head SHAs', async () => {
     const task = await taskFactory.create();
     const repository = `owner/head-identity-${task.id}`;

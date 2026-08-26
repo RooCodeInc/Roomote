@@ -39,10 +39,10 @@ export const PR_REVIEW_NOTIFICATION_DEBOUNCE_MS = 1 * 60 * 1000;
 
 /**
  * Roomote's own inline findings are provisional until its review summary
- * completes. Keep them as a fallback instead of presenting them as a second
- * notification while the review is still running.
+ * completes. Give the summary five minutes to supersede them, then deliver
+ * the inline findings as a fallback so feedback does not appear missing.
  */
-export const PR_REVIEW_NOTIFICATION_ROOMOTE_FALLBACK_MS = 15 * 60 * 1000;
+export const PR_REVIEW_NOTIFICATION_ROOMOTE_FALLBACK_MS = 5 * 60 * 1000;
 
 /**
  * Delay before re-checking an owner task that is still actively running when
