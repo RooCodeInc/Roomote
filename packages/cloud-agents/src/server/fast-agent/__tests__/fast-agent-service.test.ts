@@ -969,70 +969,73 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     );
   });
 
-  it('passes native integration arguments and results without text encoding', async () => {
-    mocks.listIntegrations.mockResolvedValue([
-      {
-        id: 'github',
-        name: 'GitHub',
-        description: 'Read GitHub',
-        tools: [
-          {
-            name: 'search_code',
-            description: 'Search code',
-            inputSchema: { type: 'object' },
-          },
-        ],
-      },
-    ]);
-    const toolResults: unknown[] = [];
-    mocks.generateText.mockImplementation(
-      async (_params, _session, options) => {
-        await options.onSessionReady('opencode-session-1');
-        toolResults.push(
-          await invokeMcpTool('github', 'search_code', {
-            query: 'fast agent',
-            nested: { exact: true },
-          }),
-        );
-        await invokeTool(nativeToolNames.sendChatReply, {
-          purpose: 'ack',
-          message: 'I’ll check.',
-        });
-        toolResults.push(
-          await invokeMcpTool('github', 'search_code', {
-            query: 'fast agent',
-            nested: { exact: true },
-          }),
-        );
-        await invokeTool(nativeToolNames.sendChatReply, {
-          purpose: 'closeout',
-          message: 'I found it.',
-        });
-        return '';
-      },
-    );
-    const adapter = callbacks();
+  it.each(['github', 'gbrain'])(
+    'requires an acknowledgement before calling the %s integration',
+    async (integrationId) => {
+      mocks.listIntegrations.mockResolvedValue([
+        {
+          id: integrationId,
+          name: integrationId,
+          description: 'Read integration',
+          tools: [
+            {
+              name: 'search_code',
+              description: 'Search code',
+              inputSchema: { type: 'object' },
+            },
+          ],
+        },
+      ]);
+      const toolResults: unknown[] = [];
+      mocks.generateText.mockImplementation(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          toolResults.push(
+            await invokeMcpTool(integrationId, 'search_code', {
+              query: 'fast agent',
+              nested: { exact: true },
+            }),
+          );
+          await invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'ack',
+            message: 'I’ll check.',
+          });
+          toolResults.push(
+            await invokeMcpTool(integrationId, 'search_code', {
+              query: 'fast agent',
+              nested: { exact: true },
+            }),
+          );
+          await invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'closeout',
+            message: 'I found it.',
+          });
+          return '';
+        },
+      );
+      const adapter = callbacks();
 
-    await answerFastAgentQuestion({ ...baseParams, adapter });
+      await answerFastAgentQuestion({ ...baseParams, adapter });
 
-    expect(toolResults[0]).toEqual({
-      success: false,
-      error: expect.stringContaining('acknowledgement'),
-    });
-    expect(toolResults[1]).toEqual({
-      success: true,
-      result: { matches: ['fast-agent.ts'] },
-    });
-    expect(mocks.callIntegration).toHaveBeenCalledWith(
-      expect.objectContaining({ sessionId: 'conversation-1' }),
-      expect.any(Array),
-      {
-        integrationId: 'github',
-        toolName: 'search_code',
-        args: { query: 'fast agent', nested: { exact: true } },
-      },
-    );
-  });
+      expect(toolResults[0]).toEqual({
+        success: false,
+        error: expect.stringContaining('acknowledgement'),
+      });
+      expect(toolResults[1]).toEqual({
+        success: true,
+        result: { matches: ['fast-agent.ts'] },
+      });
+      expect(mocks.callIntegration).toHaveBeenCalledWith(
+        expect.objectContaining({ sessionId: 'conversation-1' }),
+        expect.any(Array),
+        {
+          integrationId,
+          toolName: 'search_code',
+          args: { query: 'fast agent', nested: { exact: true } },
+        },
+      );
+    },
+  );
 
   it('stays silent after an acknowledgement when an integration has no result to report', async () => {
     mocks.listIntegrations.mockResolvedValue([

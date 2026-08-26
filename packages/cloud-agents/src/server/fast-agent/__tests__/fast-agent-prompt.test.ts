@@ -1,7 +1,7 @@
 import { ALL_REPOSITORIES, RunStatus } from '@roomote/types';
 
 import { buildFastAgentSystemPrompt } from '../fast-agent-prompt';
-import { FAST_AGENT_BRAIN_INSTRUCTIONS } from '../fast-agent-constants';
+import { createMemoryMcpInstructions } from '@roomote/types';
 
 describe('buildFastAgentSystemPrompt', () => {
   it('includes a resolved release identifier before environments', () => {
@@ -123,7 +123,7 @@ describe('buildFastAgentSystemPrompt', () => {
     );
   });
 
-  it('includes native Brain guidance when Brain is available', () => {
+  it('includes shared memory guidance when a memory MCP is available', () => {
     const prompt = buildFastAgentSystemPrompt({
       availableEnvironments: [],
       availableIntegrations: [
@@ -131,20 +131,16 @@ describe('buildFastAgentSystemPrompt', () => {
           id: 'gbrain',
           name: 'Brain',
           description: 'Deployment memory',
-          instructions: FAST_AGENT_BRAIN_INSTRUCTIONS,
+          instructions: createMemoryMcpInstructions('gbrain'),
           tools: [{ name: 'query' }],
         },
       ],
     });
 
     expect(prompt).toContain('Brain [tool prefix: gbrain_]');
-    expect(prompt).toContain('narrowest native Brain tool call');
-    expect(prompt).toContain('one useful Brain result is usually enough');
-    expect(prompt).toContain(
-      "Never expose Brain's `source` field, architecture, or other internal provenance metadata",
-    );
-    expect(prompt).toContain('Do not add a `Source:` line for Brain results');
-    expect(prompt).not.toContain('automatically performs one Brain query');
+    expect(prompt).toContain('before any other context or work tool call');
+    expect(prompt).toContain('remain visible in the session');
+    expect(prompt).toContain('proactively save concise durable learnings');
   });
 
   it('drives actionable messages through evidence and execution', () => {

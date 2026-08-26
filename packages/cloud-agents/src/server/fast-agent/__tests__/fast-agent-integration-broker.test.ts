@@ -123,7 +123,7 @@ describe('fast-agent integration broker', () => {
         id: 'gbrain',
         name: 'Brain',
         instructions: expect.stringContaining(
-          'Use Brain as lightweight conversational context',
+          'make one normal Brain tool call before any other context or work tool call',
         ),
         tools: [{ name: 'search', inputSchema: { type: 'object' } }],
       }),
@@ -196,6 +196,54 @@ describe('fast-agent integration broker', () => {
       'custom-server',
       'roomote',
     ]);
+  });
+
+  it('gives identifiable custom memory servers the shared memory instructions', async () => {
+    mocks.configuredServers = {
+      'team-memory': {
+        url: 'https://memory.example.test/mcp',
+        headers: {},
+      },
+    };
+
+    const integrations = await listFastAgentIntegrations({
+      userId: 'user-1',
+      apiBaseUrl: 'https://api.example.com',
+    });
+
+    expect(integrations).toEqual([
+      expect.objectContaining({
+        id: 'team-memory',
+        instructions: expect.stringContaining(
+          'make one normal team-memory tool call before any other context or work tool call',
+        ),
+      }),
+    ]);
+  });
+
+  it('assigns the initial recall to only the first available memory server', async () => {
+    mocks.configuredServers = {
+      gbrain: {
+        url: 'https://api.example.com/api/mcp/gbrain',
+        headers: {},
+      },
+      supermemory: {
+        url: 'https://api.example.com/api/mcp/supermemory',
+        headers: {},
+      },
+    };
+
+    const integrations = await listFastAgentIntegrations({
+      userId: 'user-1',
+      apiBaseUrl: 'https://api.example.com',
+    });
+
+    expect(integrations[0]?.instructions).toContain(
+      'first normal context or work tool call',
+    );
+    expect(integrations[1]?.instructions).toContain(
+      'Another installed memory server owns the required initial recall',
+    );
   });
 
   it('discovers member Roomote tools for Fast with actor authorization', async () => {

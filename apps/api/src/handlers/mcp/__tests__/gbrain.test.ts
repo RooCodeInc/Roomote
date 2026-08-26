@@ -16,8 +16,6 @@ vi.mock('@roomote/sdk/server', () => ({
   resolveBrainInferenceProvider: mockResolveBrainProvider,
 }));
 
-import { BRAIN_MCP_INSTRUCTIONS } from '@roomote/types';
-
 import { createGbrainMcpProxy, GBRAIN_READ_TOOL_NAMES } from '../gbrain';
 
 function createRunToken(): RunTokenContext {
@@ -198,18 +196,7 @@ describe('createGbrainMcpProxy', () => {
   );
 });
 
-describe('allowlist and instructions stay in step', () => {
-  it('names every exposed tool in the agent instructions, and exposes every named one', () => {
-    // A tool exposed but unexplained is chosen from gbrain's own description,
-    // which is written for a different product; a tool explained but not
-    // exposed sends the agent at something that 403s.
-    const named = GBRAIN_READ_TOOL_NAMES.filter((tool) =>
-      BRAIN_MCP_INSTRUCTIONS.includes(`\`${tool}\``),
-    );
-
-    expect(named).toEqual([...GBRAIN_READ_TOOL_NAMES]);
-  });
-
+describe('Brain agent allowlist', () => {
   it('exposes no write or admin surface', () => {
     // gbrain publishes 100+ tools including writes, job control and schema
     // mutation. Reads flow through here; writes only ever go through the
