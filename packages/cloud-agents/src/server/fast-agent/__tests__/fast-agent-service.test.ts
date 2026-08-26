@@ -51,6 +51,7 @@ const nativeToolNames = vi.hoisted(
       sendTaskMessage: 'send_task_message',
       listSkills: 'list_skills',
       loadSkill: 'load_skill',
+      showWidget: 'show_widget',
       spillGrep: 'spill_grep',
       spillRead: 'spill_read',
     }) as const,
@@ -138,7 +139,7 @@ vi.mock('../fast-agent-user-identity', () => ({
   getFastAgentUserIdentity: mocks.getUserIdentity,
 }));
 
-import { ALL_REPOSITORIES } from '@roomote/types';
+import { ACP_ENVELOPE_EVENT_TYPES, ALL_REPOSITORIES } from '@roomote/types';
 
 import { answerFastAgentQuestion } from '../fast-agent-service';
 import type {
@@ -427,6 +428,102 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     expect(mocks.setOpenCodeSession).toHaveBeenCalledWith({
       sessionId: 'conversation-1',
       openCodeSessionId: 'opencode-session-1',
+    });
+  });
+
+  it('sanitizes and persists Fast widgets while posting only the Slack fallback', async () => {
+    const adapter = callbacks();
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        const result = await invokeTool(nativeToolNames.showWidget, {
+          html: '<p onclick="alert(1)">Safe</p><script>alert(2)</script>',
+          title: 'Status',
+          textFallback: 'Status is available in the web transcript.',
+        });
+        expect(result).toMatchObject({
+          success: true,
+          shown: true,
+          html: '<p>Safe</p>',
+        });
+        return '';
+      },
+    );
+
+    await expect(
+      answerFastAgentQuestion({ ...baseParams, adapter }),
+    ).resolves.toBe('Status is available in the web transcript.');
+
+    expect(adapter.postReply).toHaveBeenCalledTimes(1);
+    expect(adapter.postReply).toHaveBeenCalledWith({
+      purpose: 'progress',
+      message: 'Status is available in the web transcript.',
+    });
+    const toolResult = mocks.upsertMessage.mock.calls
+      .map(([input]) => input.message)
+      .find(
+        (message) =>
+          message.eventId === '100.2:tool:0' &&
+          message.eventType === ACP_ENVELOPE_EVENT_TYPES.ToolResult,
+      );
+    expect(toolResult).toMatchObject({
+      metadata: { visibleInTranscript: true, truncated: false },
+      payload: {
+        toolName: 'show_widget',
+        isMcp: false,
+        isRoomoteNativeTool: true,
+        status: 'completed',
+      },
+    });
+    expect(JSON.parse(toolResult.payload.output)).toMatchObject({
+      success: true,
+      shown: true,
+      html: '<p>Safe</p>',
+      textFallback: 'Status is available in the web transcript.',
+    });
+  });
+
+  it('persists a parseable failure when a widget exceeds the Fast transcript limit', async () => {
+    const adapter = callbacks();
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        const result = await invokeTool(nativeToolNames.showWidget, {
+          html: `<p>${'x'.repeat(20_000)}</p>`,
+          textFallback: 'This must not be posted.',
+        });
+        expect(result).toMatchObject({
+          success: false,
+          error: expect.stringContaining('Fast transcript limit'),
+        });
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'closeout',
+          message: 'The widget was too large to display.',
+        });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({ ...baseParams, adapter });
+
+    expect(adapter.postReply).toHaveBeenCalledTimes(1);
+    expect(adapter.postReply).not.toHaveBeenCalledWith(
+      expect.objectContaining({ message: 'This must not be posted.' }),
+    );
+    const widgetResult = mocks.upsertMessage.mock.calls
+      .map(([input]) => input.message)
+      .find(
+        (message) =>
+          message.eventId === '100.2:tool:0' &&
+          message.eventType === ACP_ENVELOPE_EVENT_TYPES.ToolResult,
+      );
+    expect(widgetResult).toMatchObject({
+      metadata: { visibleInTranscript: true, truncated: false },
+      payload: { status: 'failed', toolName: 'show_widget' },
+    });
+    expect(JSON.parse(widgetResult.payload.output)).toMatchObject({
+      success: false,
+      error: expect.stringContaining('Fast transcript limit'),
     });
   });
 

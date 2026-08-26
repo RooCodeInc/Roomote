@@ -39,6 +39,12 @@ import {
   type FastAgentSkillDocument,
 } from './fast-agent-skill-store';
 import type { FastAgentIntegration } from './fast-agent-integration-broker';
+import {
+  SHOW_WIDGET_MAX_CSS_CHARS,
+  SHOW_WIDGET_MAX_HTML_CHARS,
+  SHOW_WIDGET_MAX_TEXT_FALLBACK_CHARS,
+  SHOW_WIDGET_MAX_TITLE_CHARS,
+} from '../show-widget';
 
 export {
   FAST_AGENT_NATIVE_TOOL_FILTER,
@@ -273,6 +279,23 @@ export default {
     message: z.string().min(1),
   },
   execute: (args, context) => invoke("send_task_message", args, context),
+}
+`,
+
+    [FAST_AGENT_NATIVE_TOOL_NAMES.showWidget]: String.raw`
+import { z } from "zod"
+import { invoke } from "../roomote-fast-tool-bridge.js"
+
+export default {
+  description: "Render presentational HTML in the web transcript. On Slack or Discord, textFallback is posted instead; use request_user_input for questions.",
+  args: {
+    html: z.string().min(1).max(${SHOW_WIDGET_MAX_HTML_CHARS}),
+    title: z.string().max(${SHOW_WIDGET_MAX_TITLE_CHARS}).optional(),
+    css: z.string().max(${SHOW_WIDGET_MAX_CSS_CHARS}).optional(),
+    height: z.number().finite().optional(),
+    textFallback: z.string().max(${SHOW_WIDGET_MAX_TEXT_FALLBACK_CHARS}).optional(),
+  },
+  execute: (args, context) => invoke("show_widget", args, context),
 }
 `,
 

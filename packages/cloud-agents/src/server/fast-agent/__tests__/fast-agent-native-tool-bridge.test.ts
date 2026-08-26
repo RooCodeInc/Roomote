@@ -74,6 +74,10 @@ describe('Fast native OpenCode tool bridge', () => {
       join(toolsDirectory, 'launch_task.js'),
       'utf8',
     );
+    const showWidgetSource = await readFile(
+      join(toolsDirectory, 'show_widget.js'),
+      'utf8',
+    );
     const bridgeSource = await readFile(
       join(runtime.directory, '.opencode', 'roomote-fast-tool-bridge.js'),
       'utf8',
@@ -113,6 +117,11 @@ describe('Fast native OpenCode tool bridge', () => {
     expect(launchTaskSource).toContain(
       'to run against all active repositories',
     );
+    expect(showWidgetSource).toContain('invoke("show_widget"');
+    expect(showWidgetSource).toContain('textFallback: z.string().max(4000)');
+    expect(showWidgetSource).toContain(
+      'On Slack or Discord, textFallback is posted instead',
+    );
     expect(installedToolFiles).not.toEqual(
       expect.arrayContaining([
         'get_chat_channel_messages.js',
@@ -149,6 +158,7 @@ describe('Fast native OpenCode tool bridge', () => {
       [FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReply]: true,
       [FAST_AGENT_NATIVE_TOOL_NAMES.listSkills]: true,
       [FAST_AGENT_NATIVE_TOOL_NAMES.loadSkill]: true,
+      [FAST_AGENT_NATIVE_TOOL_NAMES.showWidget]: true,
       [FAST_AGENT_NATIVE_TOOL_NAMES.spillGrep]: true,
       [FAST_AGENT_NATIVE_TOOL_NAMES.spillRead]: true,
     });
@@ -177,6 +187,7 @@ describe('Fast native OpenCode tool bridge', () => {
       FAST_AGENT_NATIVE_TOOL_NAMES.sendTaskMessage,
       FAST_AGENT_NATIVE_TOOL_NAMES.listSkills,
       FAST_AGENT_NATIVE_TOOL_NAMES.loadSkill,
+      FAST_AGENT_NATIVE_TOOL_NAMES.showWidget,
       FAST_AGENT_NATIVE_TOOL_NAMES.spillGrep,
       FAST_AGENT_NATIVE_TOOL_NAMES.spillRead,
     ]) {
