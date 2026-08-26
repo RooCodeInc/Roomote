@@ -492,7 +492,7 @@ describe('GitHub PR review check lifecycle', () => {
     mockGetIssueComment.mockResolvedValue({
       data: {
         updated_at: '2026-08-25T12:30:00.000Z',
-        body: '<!-- roomote-review-summary sha=abcdef9 -->\n<!-- roomote-review-status:start -->\nRe-reviewing new commits now.\n<!-- roomote-review-status:end -->',
+        body: '<!-- roomote-review-summary sha=abcdef9 version=2 phase=reviewing -->\n<!-- roomote-review-status:start -->\nI am inspecting the updated head.\n<!-- roomote-review-status:end -->',
       },
     });
 

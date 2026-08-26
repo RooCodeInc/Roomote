@@ -135,6 +135,14 @@ describe('review meta footer', () => {
     expect(isReviewSummaryInProgress(body)).toBe(false);
   });
 
+  it('parses the alternate HTML comment ending without regex filtering', () => {
+    const body =
+      '<!-- roomote-review-summary sha=abc1234 mode=sync version=2 phase=reviewing --!>';
+
+    expect(parseReviewSummaryMarkerSha(body)).toBe('abc1234');
+    expect(getReviewSummaryMarkerPhase(body)).toBe('Reviewing');
+  });
+
   it('falls back to legacy status wording when no footer exists', () => {
     const body = [
       MARKER('abc1234deadbeef'),

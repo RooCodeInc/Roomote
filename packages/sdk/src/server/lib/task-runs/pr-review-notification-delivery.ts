@@ -5,7 +5,7 @@ import {
   REVIEW_STATUS_START_MARKER,
   REVIEW_SUMMARY_MARKER,
   getMarkedSection,
-  isReviewInProgressStatusLine,
+  isReviewSummaryInProgress,
 } from '@roomote/cloud-agents/server';
 import {
   generateTrackedNonTaskObject,
@@ -934,8 +934,8 @@ async function fetchPrDiscussionSignals({
 
     if (status?.trim()) {
       latestReviewStatus = sanitizeReviewStatus(status);
-      latestTerminalReviewSummaryHeadSha = isReviewInProgressStatusLine(
-        status.trim().split('\n')[0] ?? '',
+      latestTerminalReviewSummaryHeadSha = isReviewSummaryInProgress(
+        comment.body,
       )
         ? null
         : getReviewSummaryHeadSha(comment.body);

@@ -17,6 +17,7 @@ export const REVIEW_CHECKLIST_END_MARKER =
 
 export type ReviewMetaPhase = 'Reviewing' | 'Reviewed';
 export const REVIEW_SUMMARY_MARKER_VERSION = '2';
+const MAX_REVIEW_SUMMARY_MARKER_LENGTH = 1_024;
 
 export function isReviewInProgressStatusLine(line: string): boolean {
   return /^(Self-reviewing the PR(?: with fresh eyes)? now\.|Reviewing the PR now\.|Re-reviewing new commits now\.|I am reviewing the updated PR head now\.)/i.test(
@@ -53,27 +54,103 @@ export function getReviewFooterPhase(
   body: string,
 ): ReviewMetaPhase | undefined {
   const footer = body.trimEnd().split('\n').at(-1)?.trim();
-  const phase = footer?.match(/^<sub>\s*(Reviewing|Reviewed)(?:\s|<)/i)?.[1];
-
-  if (!phase) {
+  if (!footer?.startsWith('<sub>')) {
     return undefined;
   }
 
-  return phase.toLowerCase() === 'reviewing' ? 'Reviewing' : 'Reviewed';
+  const content = footer.slice('<sub>'.length).trimStart().toLowerCase();
+  if (
+    content === 'reviewing' ||
+    content.startsWith('reviewing ') ||
+    content.startsWith('reviewing<')
+  ) {
+    return 'Reviewing';
+  }
+  if (
+    content === 'reviewed' ||
+    content.startsWith('reviewed ') ||
+    content.startsWith('reviewed<')
+  ) {
+    return 'Reviewed';
+  }
+  return undefined;
+}
+
+function getReviewSummaryMarkerTokens(body: string): string[] | undefined {
+  const trimmedBody = body.trimStart();
+  const boundedLine = trimmedBody.slice(
+    0,
+    MAX_REVIEW_SUMMARY_MARKER_LENGTH + 1,
+  );
+  const newline = boundedLine.indexOf('\n');
+  const firstLine =
+    newline === -1 ? boundedLine : boundedLine.slice(0, newline);
+  if (
+    !firstLine.startsWith(REVIEW_SUMMARY_MARKER) ||
+    firstLine.length > MAX_REVIEW_SUMMARY_MARKER_LENGTH ||
+    (newline === -1 && trimmedBody.length > MAX_REVIEW_SUMMARY_MARKER_LENGTH)
+  ) {
+    return undefined;
+  }
+
+  const standardEnd = firstLine.indexOf('-->');
+  const alternateEnd = firstLine.indexOf('--!>');
+  const markerEnd =
+    standardEnd === -1
+      ? alternateEnd
+      : alternateEnd === -1
+        ? standardEnd
+        : Math.min(standardEnd, alternateEnd);
+  if (markerEnd === -1) {
+    return undefined;
+  }
+
+  const attributes = firstLine.slice(REVIEW_SUMMARY_MARKER.length, markerEnd);
+  const tokens: string[] = [];
+  let tokenStart = -1;
+
+  for (let index = 0; index <= attributes.length; index += 1) {
+    const character = attributes[index];
+    const separator =
+      index === attributes.length ||
+      character === ' ' ||
+      character === '\t' ||
+      character === '\r';
+    if (!separator && tokenStart === -1) {
+      tokenStart = index;
+    } else if (separator && tokenStart !== -1) {
+      tokens.push(attributes.slice(tokenStart, index));
+      tokenStart = -1;
+    }
+  }
+
+  return tokens;
+}
+
+function getReviewSummaryMarkerAttribute(
+  body: string,
+  name: string,
+): string | undefined {
+  const prefix = `${name}=`;
+  return getReviewSummaryMarkerTokens(body)
+    ?.find((token) => token.startsWith(prefix))
+    ?.slice(prefix.length);
 }
 
 export function getReviewSummaryMarkerPhase(
   body: string,
 ): ReviewMetaPhase | undefined {
-  const marker = body.match(/<!--\s*roomote-review-summary\b[^>]*-->/i)?.[0];
-  const version = marker?.match(/\bversion=(\d+)\b/i)?.[1];
-  const phase = marker?.match(/\bphase=(reviewing|reviewed)\b/i)?.[1];
+  const version = getReviewSummaryMarkerAttribute(body, 'version');
+  const phase = getReviewSummaryMarkerAttribute(body, 'phase')?.toLowerCase();
 
-  if (version !== REVIEW_SUMMARY_MARKER_VERSION || !phase) {
+  if (
+    version !== REVIEW_SUMMARY_MARKER_VERSION ||
+    (phase !== 'reviewing' && phase !== 'reviewed')
+  ) {
     return undefined;
   }
 
-  return phase.toLowerCase() === 'reviewing' ? 'Reviewing' : 'Reviewed';
+  return phase === 'reviewing' ? 'Reviewing' : 'Reviewed';
 }
 
 /**
@@ -109,38 +186,38 @@ function withReviewSummaryMarkerPhase(
   phase: ReviewMetaPhase,
 ): string {
   const markerPhase = phase.toLowerCase();
-  let marker = summaryMarker.replace(
-    /\bversion=\S+(?=\s|-->)/i,
-    `version=${REVIEW_SUMMARY_MARKER_VERSION}`,
+  const tokens = getReviewSummaryMarkerTokens(summaryMarker);
+  if (!tokens) {
+    return summaryMarker;
+  }
+
+  const attributes = new Map(
+    tokens.map((token) => {
+      const separator = token.indexOf('=');
+      return separator === -1
+        ? [token, token]
+        : [token.slice(0, separator), token];
+    }),
   );
-
-  if (!/\bversion=\S+(?=\s|-->)/i.test(marker)) {
-    marker = marker.replace(
-      /\s*-->$/,
-      ` version=${REVIEW_SUMMARY_MARKER_VERSION} -->`,
-    );
-  }
-
-  if (/\bphase=(?:reviewing|reviewed)\b/i.test(marker)) {
-    return marker.replace(
-      /\bphase=(?:reviewing|reviewed)\b/i,
-      `phase=${markerPhase}`,
-    );
-  }
-
-  return marker.replace(/\s*-->$/, ` phase=${markerPhase} -->`);
+  attributes.set('version', `version=${REVIEW_SUMMARY_MARKER_VERSION}`);
+  attributes.set('phase', `phase=${markerPhase}`);
+  return `${REVIEW_SUMMARY_MARKER} ${[...attributes.values()].join(' ')} -->`;
 }
 
 export function parseReviewSummaryMarkerSha(
   markerOrBody: string,
 ): string | undefined {
-  // Require at least a short-sha (7 hex chars) so a truncated or mangled
-  // marker cannot satisfy the prefix-based staleness checks downstream.
-  const match = markerOrBody.match(
-    /<!--\s*roomote-review-summary\s+sha=([0-9a-f]{7,})/i,
-  );
+  const sha = getReviewSummaryMarkerAttribute(markerOrBody, 'sha');
+  if (!sha || sha.length < 7) {
+    return undefined;
+  }
 
-  return match?.[1];
+  for (const character of sha.toLowerCase()) {
+    if (!'0123456789abcdef'.includes(character)) {
+      return undefined;
+    }
+  }
+  return sha;
 }
 
 export function buildGithubCommitHref({
