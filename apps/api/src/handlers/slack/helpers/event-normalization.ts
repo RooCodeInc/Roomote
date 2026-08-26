@@ -11,7 +11,10 @@ import type {
   AutomatedSlackAppMentionEvent,
   SlackWebhookEvent,
 } from '../types.js';
-import { mentionsSlackBot } from './mention-routing.js';
+import {
+  getMentionedSlackUserIds,
+  mentionsSlackBot,
+} from './mention-routing.js';
 
 function normalizeSlackReactionName(reaction: string): string {
   return reaction.trim().toLowerCase().split('::')[0] ?? '';
@@ -204,6 +207,46 @@ export function isRoomoteAuthoredSlackEvent(
     (Boolean(eventUser) && eventUser === slackInstallation.botUserId) ||
     (Boolean(eventAppId) && eventAppId === slackInstallation.appId) ||
     (Boolean(eventBotId) && eventBotId === slackInstallation.botUserId)
+  );
+}
+
+// Automated (app/bot-authored) messages that mention users without mentioning
+// the installed Roomote bot are discarded, which is invisible in logs and has
+// hidden real misconfigurations — e.g. a Slack workflow whose message template
+// still mentions the bot user of a previous Roomote installation. Surface a
+// log line naming the mentioned IDs so those drops are diagnosable.
+export function getIgnoredAutomatedSlackMentionLog(
+  event: SlackWebhookEvent,
+  slackInstallation: SlackInstallation,
+): string | null {
+  if (event.type !== 'message' && event.type !== 'app_mention') {
+    return null;
+  }
+
+  if (isRoomoteAuthoredSlackEvent(event, slackInstallation)) {
+    return null;
+  }
+
+  const slackEvent = event as SlackEvent;
+  const mentionedUserIds = getMentionedSlackUserIds(slackEvent);
+
+  if (
+    mentionedUserIds.length === 0 ||
+    (slackInstallation.botUserId &&
+      mentionedUserIds.includes(slackInstallation.botUserId))
+  ) {
+    return null;
+  }
+
+  const subtype = getSlackEventStringField(event, 'subtype') ?? 'none';
+  const appId = getSlackEventStringField(event, 'app_id') ?? 'none';
+  const botId = getSlackEventStringField(event, 'bot_id') ?? 'none';
+
+  return (
+    `[SlackWebhook] Ignoring automated message mentioning [${mentionedUserIds.join(', ')}] ` +
+    `but not the Roomote bot user ${slackInstallation.botUserId} ` +
+    `(channel=${slackEvent.channel}, ts=${slackEvent.ts}, thread_ts=${slackEvent.thread_ts ?? 'none'}, ` +
+    `subtype=${subtype}, app_id=${appId}, bot_id=${botId})`
   );
 }
 

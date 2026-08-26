@@ -55,7 +55,9 @@ export function getSlackMentionDirectiveText(
   return candidateLines.join(' ');
 }
 
-function getMentionedSlackUserIds(message: SlackMentionTextSource): string[] {
+export function getMentionedSlackUserIds(
+  message: SlackMentionTextSource,
+): string[] {
   return Array.from(
     getSlackMentionDirectiveText(message).matchAll(/<@([^>|]+)(?:\|[^>]+)?>/g),
   )
