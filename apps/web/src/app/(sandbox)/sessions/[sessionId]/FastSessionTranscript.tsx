@@ -18,6 +18,7 @@ import {
   MessageUiOptionsProvider,
 } from '@/components/ai-elements';
 import { BotMessageSquare, EmptyState } from '@/components/system';
+import { WorkspaceHeader } from '@/components/layout';
 import {
   SessionPromptInput,
   type SessionPromptSubmission,
@@ -47,6 +48,8 @@ export function FastSessionTranscript({
   initialMessages,
   hasOlderMessages,
   canReply,
+  initialTitle = null,
+  fallbackTitle = 'Session',
   sessionModel = null,
   sessionReasoningEffort = null,
   defaultModelId = null,
@@ -56,6 +59,8 @@ export function FastSessionTranscript({
   initialMessages: FastSessionMessage[];
   hasOlderMessages?: boolean;
   canReply?: boolean;
+  initialTitle?: string | null;
+  fallbackTitle?: string;
   sessionModel?: string | null;
   sessionReasoningEffort?: ReasoningEffort | null;
   defaultModelId?: string | null;
@@ -72,6 +77,7 @@ export function FastSessionTranscript({
   >([]);
   const [isSending, setIsSending] = useState(false);
   const [replyError, setReplyError] = useState<string | null>(null);
+  const [title, setTitle] = useState<string | null>(initialTitle);
 
   useEffect(() => {
     const source = new EventSource(`/api/sessions/${sessionId}/stream`);
@@ -91,9 +97,21 @@ export function FastSessionTranscript({
         // Ignore malformed frames; the next poll re-sends current state.
       }
     };
+    const onSession = (event: MessageEvent) => {
+      try {
+        const { title: nextTitle } = JSON.parse(event.data) as {
+          title: string | null;
+        };
+        setTitle(nextTitle);
+      } catch {
+        // Ignore malformed frames.
+      }
+    };
     source.addEventListener('messages', onMessages);
+    source.addEventListener('session', onSession);
     return () => {
       source.removeEventListener('messages', onMessages);
+      source.removeEventListener('session', onSession);
       source.close();
     };
   }, [sessionId]);
@@ -146,41 +164,41 @@ export function FastSessionTranscript({
   });
 
   const sendReply = useCallback(
-    async (message: SessionPromptSubmission) => {
+    async (message: SessionPromptSubmission): Promise<boolean> => {
       if (isSending) {
-        return;
-      }
-
-      const prepared = await preparePromptAttachments({
-        text: message.text.trim(),
-        attachments: message.files,
-      });
-      const images = prepared.images ?? [];
-      if (!prepared.text && images.length === 0) {
-        return;
+        return false;
       }
 
       setIsSending(true);
       setReplyError(null);
-      const optimisticId = `optimistic:${Date.now()}:${Math.random().toString(36).slice(2)}`;
-      const optimistic: TranscriptMessage = {
-        id: optimisticId,
-        eventId: optimisticId,
-        turnId: 'optimistic',
-        turnSeq: 0,
-        ts: Date.now(),
-        eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
-        role: 'user',
-        contentBlocks: [{ type: 'text', text: prepared.text }],
-        metadata: { visibleInTranscript: true },
-        payload: {},
-        source: 'web',
-        nativeSessionId: null,
-        nativeMessageId: null,
-        createdAt: new Date(),
-      };
-
+      let optimisticId: string | null = null;
       try {
+        const prepared = await preparePromptAttachments({
+          text: message.text.trim(),
+          attachments: message.files,
+        });
+        const images = prepared.images ?? [];
+        if (!prepared.text && images.length === 0) {
+          return false;
+        }
+
+        optimisticId = `optimistic:${Date.now()}:${Math.random().toString(36).slice(2)}`;
+        const optimistic: TranscriptMessage = {
+          id: optimisticId,
+          eventId: optimisticId,
+          turnId: 'optimistic',
+          turnSeq: 0,
+          ts: Date.now(),
+          eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
+          role: 'user',
+          contentBlocks: [{ type: 'text', text: prepared.text }],
+          metadata: { visibleInTranscript: true },
+          payload: {},
+          source: 'web',
+          nativeSessionId: null,
+          nativeMessageId: null,
+          createdAt: new Date(),
+        };
         setOptimisticMessages((previous) => [...previous, optimistic]);
         await trpcClient.fastSessions.reply.mutate({
           sessionId,
@@ -189,13 +207,18 @@ export function FastSessionTranscript({
           model: message.model ?? null,
           reasoningEffort: message.reasoningEffort ?? null,
         });
+        return true;
       } catch (error) {
-        setOptimisticMessages((previous) =>
-          previous.filter((row) => row.eventId !== optimistic.eventId),
-        );
+        if (optimisticId) {
+          const failedId = optimisticId;
+          setOptimisticMessages((previous) =>
+            previous.filter((row) => row.eventId !== failedId),
+          );
+        }
         setReplyError(
           error instanceof Error ? error.message : 'Failed to send message',
         );
+        return false;
       } finally {
         setIsSending(false);
       }
@@ -205,6 +228,11 @@ export function FastSessionTranscript({
 
   return (
     <MessageUiOptionsProvider>
+      <WorkspaceHeader contentClassName="flex-row items-center gap-3">
+        <h1 className="ph-no-capture min-w-0 flex-1 truncate text-sm font-medium">
+          {title ?? fallbackTitle}
+        </h1>
+      </WorkspaceHeader>
       <Conversation className="min-h-0 flex-1" initial="instant">
         <ConversationContent className="ph-no-capture mx-auto w-full max-w-4xl p-4">
           {hasOlderMessages ? (
@@ -232,7 +260,7 @@ export function FastSessionTranscript({
         <div className="mx-auto w-full shrink-0 overflow-clip rounded-t-md rounded-b-3xl border-2 border-background bg-card transition-colors @[56rem]:rounded-t-lg">
           <SessionPromptInput
             isBusy={isSending}
-            onSend={(submission) => void sendReply(submission)}
+            onSend={sendReply}
             initialModel={sessionModel}
             initialReasoningEffort={sessionReasoningEffort}
             defaultModelId={defaultModelId}

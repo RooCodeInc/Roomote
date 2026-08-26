@@ -5,7 +5,6 @@ import { REASONING_EFFORT_VALUES, type ReasoningEffort } from '@roomote/types';
 
 import { authorize } from '@/lib/server/auth-context';
 import { getFastSessionById } from '@/lib/server/fast-sessions';
-import { WorkspaceHeader } from '@/components/layout';
 
 import { FastSessionTranscript } from './FastSessionTranscript';
 import { SessionWorkspace, type SessionInfo } from './SessionWorkspace';
@@ -58,18 +57,15 @@ export default async function SessionDetailPage({
   return (
     <SessionWorkspace session={sessionInfo}>
       <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col rounded-r-3xl bg-background">
-        <WorkspaceHeader contentClassName="flex-row items-center gap-3">
-          <h1 className="ph-no-capture min-w-0 flex-1 truncate text-sm font-medium">
-            {session.title ??
-              (session.surface === 'web' ? 'Session' : session.conversationId)}
-          </h1>
-        </WorkspaceHeader>
-
         <FastSessionTranscript
           sessionId={session.id}
           initialMessages={session.messages}
           hasOlderMessages={session.hasOlderMessages}
           canReply={session.surface === 'web'}
+          initialTitle={session.title}
+          fallbackTitle={
+            session.surface === 'web' ? 'Session' : session.conversationId
+          }
           sessionModel={session.model}
           sessionReasoningEffort={session.reasoningEffort}
           defaultModelId={defaultModelId}

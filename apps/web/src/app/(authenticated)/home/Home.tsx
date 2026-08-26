@@ -431,6 +431,11 @@ export function Home({
       images?: string[];
       model?: string;
     }): Promise<void> => {
+      // A second submit while the first is in flight would mint a second
+      // session and orphan one of them.
+      if (startFastSessionMutation.isPending) {
+        return;
+      }
       try {
         const { sessionId } =
           await startFastSessionMutation.mutateAsync(payload);
@@ -512,6 +517,7 @@ export function Home({
 
   const isBusy =
     createStandardTaskRun.isPending ||
+    startFastSessionMutation.isPending ||
     routingState === 'routing_pending' ||
     routingState === 'launching';
 

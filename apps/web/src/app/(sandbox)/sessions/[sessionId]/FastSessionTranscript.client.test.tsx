@@ -299,6 +299,47 @@ describe('FastSessionTranscript', () => {
     });
   });
 
+  it('keeps the drafted reply when the send fails', async () => {
+    replyMutate.mockRejectedValue(new Error('turn is busy'));
+
+    render(
+      <FastSessionTranscript
+        sessionId="session-1"
+        initialMessages={[]}
+        canReply
+      />,
+    );
+
+    const input = screen.getByPlaceholderText(
+      'Message agent',
+    ) as HTMLTextAreaElement;
+    fireEvent.change(input, { target: { value: 'Do not lose me' } });
+    fireEvent.keyDown(input, { key: 'Enter', code: 'Enter', charCode: 13 });
+
+    expect(await screen.findByText('turn is busy')).toBeInTheDocument();
+    expect(input.value).toBe('Do not lose me');
+  });
+
+  it('updates the header title from the session stream event', () => {
+    render(
+      <FastSessionTranscript
+        sessionId="session-1"
+        initialMessages={[]}
+        fallbackTitle="Session"
+      />,
+    );
+
+    expect(screen.getByText('Session')).toBeInTheDocument();
+
+    act(() => {
+      FakeEventSource.instances[0]!.emit('session', {
+        title: 'Rotate the API keys',
+      });
+    });
+
+    expect(screen.getByText('Rotate the API keys')).toBeInTheDocument();
+  });
+
   it('hides the reply composer for non-web sessions', () => {
     render(
       <FastSessionTranscript sessionId="session-1" initialMessages={[]} />,

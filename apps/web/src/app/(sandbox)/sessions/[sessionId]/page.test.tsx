@@ -96,8 +96,6 @@ describe('Fast session detail page', () => {
     );
 
     expect(html).toContain('data-testid="workspace-surface"');
-    expect(html).toContain('data-testid="workspace-header"');
-    expect(html).toContain('conversation-1');
     expect(html).not.toContain('Delegated tasks');
     expect(html).not.toContain('Session context');
     expect(html).not.toContain('OpenCode workspace details unavailable');
@@ -105,6 +103,7 @@ describe('Fast session detail page', () => {
       expect.objectContaining({
         sessionId: 'session-1',
         canReply: false,
+        fallbackTitle: 'conversation-1',
         initialMessages: expect.arrayContaining([
           expect.objectContaining({ eventId: 'turn-1:user' }),
         ]),
@@ -144,10 +143,14 @@ describe('Fast session detail page', () => {
       }),
     );
 
-    expect(html).toContain('Rotate the API keys');
     expect(html).not.toContain('b3b0a53e-6dab-4bb8-b3a5-111111111111');
     expect(transcriptMock).toHaveBeenCalledWith(
-      expect.objectContaining({ sessionId: 'session-2', canReply: true }),
+      expect.objectContaining({
+        sessionId: 'session-2',
+        canReply: true,
+        initialTitle: 'Rotate the API keys',
+        fallbackTitle: 'Session',
+      }),
       undefined,
     );
   });

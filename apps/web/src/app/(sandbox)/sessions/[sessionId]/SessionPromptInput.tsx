@@ -59,13 +59,14 @@ export function SessionPromptInput({
   defaultReasoningEffort = null,
 }: {
   isBusy: boolean;
-  onSend: (submission: SessionPromptSubmission) => void;
+  onSend: (submission: SessionPromptSubmission) => Promise<boolean>;
   initialModel?: string | null;
   initialReasoningEffort?: ReasoningEffort | null;
   defaultModelId?: string | null;
   defaultReasoningEffort?: ReasoningEffort | null;
 }) {
   const [prompt, setPrompt] = useState('');
+  const [resetKey, setResetKey] = useState(0);
   const [model, setModel] = useState(initialModel ?? '');
   const [reasoningEffort, setReasoningEffort] =
     useState<ReasoningEffort | null>(initialReasoningEffort);
@@ -75,22 +76,30 @@ export function SessionPromptInput({
     disabled: isBusy,
   });
 
-  const handleSubmit = (message: PromptInputMessage) => {
-    setPrompt('');
+  const handleSubmit = async (message: PromptInputMessage) => {
     // Always send the current picker state: it round-trips the persisted
-    // choice and clears it when the picker is reset to the default.
-    onSend({
+    // choice and clears it when the picker is reset to the default. The
+    // draft and attachments are only cleared once the send succeeds, so a
+    // failed reply is not lost.
+    const sent = await onSend({
       ...message,
       model: model || null,
       reasoningEffort,
     });
+    if (sent) {
+      setPrompt('');
+      // Remount the root to clear held attachments.
+      setResetKey((previous) => previous + 1);
+    }
   };
 
   return (
     <div className="mx-auto w-full max-w-4xl">
       <PromptInputRoot
+        key={`composer-${resetKey}`}
         onSubmit={handleSubmit}
         accept={ROOMOTE_FILE_ATTACHMENT_ACCEPT}
+        clearOnSubmit={false}
         multiple
       >
         <AttachmentsDisplay />
