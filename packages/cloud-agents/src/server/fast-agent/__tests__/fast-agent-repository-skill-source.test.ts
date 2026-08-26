@@ -150,4 +150,30 @@ describe('RemoteFastAgentRepositorySkillSource', () => {
     ]);
     await source.dispose();
   });
+
+  it('limits repository discovery and warns when repositories are omitted', async () => {
+    const repositories = Array.from({ length: 10 }, (_, index) =>
+      repository(`repo-${index + 1}`, `acme/repo-${index + 1}`),
+    );
+    const inspectedRepositories: string[] = [];
+    const source = new RemoteFastAgentRepositorySkillSource({
+      allowedEnvironmentIds: ['environment-1'],
+      resolveRepositories: vi.fn().mockResolvedValue(repositories),
+      loadSnapshot: async (value) => {
+        inspectedRepositories.push(value.fullName);
+        return snapshot(value);
+      },
+    });
+
+    const catalog = await source.list();
+
+    expect(inspectedRepositories).toEqual(
+      repositories.slice(0, 8).map((value) => value.fullName),
+    );
+    expect(catalog.skills).toHaveLength(8);
+    expect(catalog.warnings).toEqual([
+      'Repository skill discovery omitted 2 repositories after reaching the limit of 8.',
+    ]);
+    await source.dispose();
+  });
 });

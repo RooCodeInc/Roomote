@@ -34,6 +34,7 @@ import { FAST_AGENT_SPILL_MAX_FILE_BYTES } from './fast-agent-spill-store';
 const execFileAsync = promisify(execFile);
 const REPOSITORY_SKILL_FETCH_TIMEOUT_MS = 60_000;
 const REPOSITORY_SKILL_FETCH_CONCURRENCY = 4;
+const REPOSITORY_SKILL_MAX_REPOSITORIES = 8;
 const REPOSITORY_SKILL_GIT_OUTPUT_LIMIT_BYTES = 16 * 1024 * 1024;
 const REPOSITORY_SKILL_MAX_FILES = 256;
 const REPOSITORY_SKILL_MAX_SKILLS = 128;
@@ -478,15 +479,26 @@ export class RemoteFastAgentRepositorySkillSource implements FastAgentRepository
       (repository) =>
         !environmentId || repository.environmentIds.includes(environmentId),
     );
+    const selectedRepositories = repositoriesList.slice(
+      0,
+      REPOSITORY_SKILL_MAX_REPOSITORIES,
+    );
     const skills: FastAgentSkillSummary[] = [];
     const warnings: string[] = [];
+    const omittedRepositoryCount =
+      repositoriesList.length - selectedRepositories.length;
+    if (omittedRepositoryCount > 0) {
+      warnings.push(
+        `Repository skill discovery omitted ${omittedRepositoryCount} repositories after reaching the limit of ${REPOSITORY_SKILL_MAX_REPOSITORIES}.`,
+      );
+    }
     for (
       let start = 0;
-      start < repositoriesList.length;
+      start < selectedRepositories.length;
       start += REPOSITORY_SKILL_FETCH_CONCURRENCY
     ) {
       const results = await Promise.all(
-        repositoriesList
+        selectedRepositories
           .slice(start, start + REPOSITORY_SKILL_FETCH_CONCURRENCY)
           .map(async (repository) => {
             let snapshotPromise = this.snapshots.get(repository.id);
