@@ -68,6 +68,7 @@ export function SidePanelHeader({
             variant="ghost"
             size="icon"
             className="size-8"
+            aria-label="Close panel"
             onClick={onClose}
           >
             <X className="size-4" />

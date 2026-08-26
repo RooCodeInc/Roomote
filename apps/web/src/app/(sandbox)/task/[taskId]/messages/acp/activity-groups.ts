@@ -10,6 +10,7 @@ import type {
 import type { AcpRenderBlock } from './render-blocks';
 import { resolveShowWidgetForToolMessage } from './show-widget-tool-result';
 import { resolveVisualProofMediaForToolMessage } from './visual-proof-tool-result';
+import { getDelegatedTaskDetails } from './delegated-task';
 
 const COLLAPSIBLE_ACP_MESSAGE_KINDS = [
   'reasoning',
@@ -42,6 +43,7 @@ interface BuildAcpActivityRenderBlocksOptions {
   displayMode?: 'default' | 'narration';
   hasLeadingTextBoundary?: boolean;
   collapseLeadingActivity?: boolean;
+  keepDelegatedTasksVisible?: boolean;
 }
 
 function isToolMessage(
@@ -152,6 +154,7 @@ function isLivePartialBlock(block: AcpRenderBlock): boolean {
 export function isActivityCollapsibleBlock(
   block: AcpRenderBlock,
   artifacts?: readonly TaskArtifact[] | null,
+  keepDelegatedTasksVisible = false,
 ): boolean {
   // Keep in-flight reasoning/tool rows outside default-closed groups so current
   // activity stays visible without a manual expand.
@@ -176,6 +179,14 @@ export function isActivityCollapsibleBlock(
   }
 
   if (isToolMessage(msg) && isArtifactToolMessage(msg, artifacts)) {
+    return false;
+  }
+
+  if (
+    keepDelegatedTasksVisible &&
+    isToolMessage(msg) &&
+    getDelegatedTaskDetails(msg)
+  ) {
     return false;
   }
 
@@ -215,7 +226,11 @@ export function buildAcpActivityRenderBlocks(
 
     if (
       !hasLeftTextBoundary ||
-      !isActivityCollapsibleBlock(current, options.artifacts)
+      !isActivityCollapsibleBlock(
+        current,
+        options.artifacts,
+        options.keepDelegatedTasksVisible,
+      )
     ) {
       groupedBlocks.push(current);
       hasLeftTextBoundary = false;
@@ -228,7 +243,11 @@ export function buildAcpActivityRenderBlocks(
 
     while (
       activityEnd < blocks.length &&
-      isActivityCollapsibleBlock(blocks[activityEnd]!, options.artifacts)
+      isActivityCollapsibleBlock(
+        blocks[activityEnd]!,
+        options.artifacts,
+        options.keepDelegatedTasksVisible,
+      )
     ) {
       activityEnd += 1;
     }

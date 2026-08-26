@@ -2014,4 +2014,27 @@ describe('buildAcpRenderBlocks', () => {
       },
     });
   });
+
+  it('keeps multiple delegated tasks as standalone cards when requested', () => {
+    const delegatedTask = (id: string, ts: number) =>
+      explorationToolMessage({
+        id,
+        ts,
+        title: 'launch_task',
+        kind: 'tool',
+        mcp: false,
+        payload: {
+          toolName: 'launch_task',
+          output: JSON.stringify({ success: true, taskId: id }),
+        },
+      });
+
+    const entries = buildAcpRenderBlocks(
+      [delegatedTask('child-1', 1), delegatedTask('child-2', 2)],
+      { keepDelegatedTasksVisible: true },
+    );
+
+    expect(entries).toHaveLength(2);
+    expect(entries.every((entry) => entry.kind === 'message')).toBe(true);
+  });
 });
