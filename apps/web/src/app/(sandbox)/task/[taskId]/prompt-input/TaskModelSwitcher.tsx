@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 
@@ -60,9 +60,12 @@ type RoleSelection = {
 export function TaskModelSwitcher({
   taskRun,
   disabled = false,
+  onPendingChange,
 }: {
-  taskRun: TaskRunDetail;
+  taskRun: Pick<TaskRunDetail, 'taskId'> &
+    Partial<Pick<TaskRunDetail, 'payload'>>;
   disabled?: boolean;
+  onPendingChange?: (pending: boolean) => void;
 }) {
   const trpc = useTRPC();
   const queryClient = useQueryClient();
@@ -73,6 +76,20 @@ export function TaskModelSwitcher({
   const [localSelections, setLocalSelections] = useState<
     Partial<Record<SwitcherRole, RoleSelection>>
   >({});
+  const pendingOperationsRef = useRef(0);
+
+  const startPendingOperation = () => {
+    pendingOperationsRef.current += 1;
+    onPendingChange?.(true);
+  };
+
+  const finishPendingOperation = () => {
+    pendingOperationsRef.current = Math.max(
+      0,
+      pendingOperationsRef.current - 1,
+    );
+    onPendingChange?.(pendingOperationsRef.current > 0);
+  };
 
   const { data: roleDefaults } = useQuery(
     trpc.taskModels.roleDefaults.queryOptions(undefined, { enabled: open }),
@@ -137,6 +154,7 @@ export function TaskModelSwitcher({
         });
         toast.error(error.message || 'Failed to update the model settings');
       },
+      onSettled: finishPendingOperation,
     }),
   );
 
@@ -148,6 +166,7 @@ export function TaskModelSwitcher({
 
   const applyRoleSelection = (role: SwitcherRole, selection: RoleSelection) => {
     setLocalSelections((current) => ({ ...current, [role]: selection }));
+    startPendingOperation();
     updateModelSelection.mutate({
       taskId: taskRun.taskId,
       role,
@@ -199,6 +218,7 @@ export function TaskModelSwitcher({
     : 'Model';
 
   const [resetting, setResetting] = useState(false);
+  const isPending = updateModelSelection.isPending || resetting;
 
   // Reset clears roles sequentially: firing the per-role mutations
   // concurrently would race their payload read-modify-writes (the server
@@ -215,6 +235,7 @@ export function TaskModelSwitcher({
     ];
     const cleared: RoleSelection = { model: null, reasoningEffort: null };
 
+    startPendingOperation();
     setResetting(true);
     setLocalSelections(
       Object.fromEntries(rolesToClear.map((role) => [role, cleared])),
@@ -238,6 +259,7 @@ export function TaskModelSwitcher({
       );
     } finally {
       setResetting(false);
+      finishPendingOperation();
       void invalidateSession();
     }
   };
@@ -401,7 +423,7 @@ export function TaskModelSwitcher({
               size="sm"
               className="text-xs font-medium"
               onClick={() => void handleReset()}
-              disabled={disabled || resetting}
+              disabled={disabled || isPending}
             >
               <RotateCcw />
               Defaults

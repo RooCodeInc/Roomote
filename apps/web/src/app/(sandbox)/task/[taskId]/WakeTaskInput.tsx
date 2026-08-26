@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { toast } from 'sonner';
 
 import { DEFAULT_MANAGED_DEPLOYMENT_ACCESS } from '@roomote/types';
@@ -16,9 +16,11 @@ import type { TaskRunDetail } from '@/lib/server';
 import { cn } from '@/lib/utils';
 
 import { useOptimisticPromptSubmission } from './prompt-input/useOptimisticPromptSubmission';
+import { TaskModelSwitcher } from './prompt-input/TaskModelSwitcher';
 
 interface WakeTaskInputProps {
-  taskRun: Pick<TaskRunDetail, 'id' | 'snapshotId' | 'taskId'>;
+  taskRun: Pick<TaskRunDetail, 'id' | 'snapshotId' | 'taskId'> &
+    Partial<Pick<TaskRunDetail, 'harness' | 'payload'>>;
   initialPrompt?: string;
   embedded?: boolean;
 }
@@ -34,6 +36,7 @@ export function WakeTaskInput({
   } = useOptimisticPromptSubmission();
   const [promptText, setPromptText] = useState(initialPrompt);
   const [sending, setSending] = useState(false);
+  const [modelSettingsPending, setModelSettingsPending] = useState(false);
   const { managedAccess = DEFAULT_MANAGED_DEPLOYMENT_ACCESS } =
     useAuthorizedUser();
   const taskLaunchDisabledReason = getTaskLaunchDisabledReason(managedAccess);
@@ -41,7 +44,11 @@ export function WakeTaskInput({
   const restore = useRestoreTaskRunSnapshot({
     onSuccess: () => setPromptText(''),
   });
-  const isBusy = sending || restore.isPending;
+  const isBusy = sending || restore.isPending || modelSettingsPending;
+  const handleModelSettingsPendingChange = useCallback(
+    (pending: boolean) => setModelSettingsPending(pending),
+    [],
+  );
 
   useEffect(() => {
     setPromptText(initialPrompt);
@@ -142,6 +149,15 @@ export function WakeTaskInput({
         animateContainer={false}
         submitWithMetaKey={false}
         submitIcon={promptText.trim().length === 0 ? <Sun /> : undefined}
+        tools={
+          taskRun.harness === 'opencode-server' ? (
+            <TaskModelSwitcher
+              taskRun={taskRun}
+              disabled={isBusy}
+              onPendingChange={handleModelSettingsPendingChange}
+            />
+          ) : undefined
+        }
         surface={embedded ? 'embedded' : 'default'}
         submitDisabledReason={taskLaunchDisabledReason}
       />

@@ -26,6 +26,7 @@ let capturedSuggestion: unknown;
 let capturedSubmitWithMetaKey: boolean | undefined;
 let capturedSubmitIcon: unknown;
 let capturedSurface: string | undefined;
+let capturedModelSwitcherDisabled: boolean | undefined;
 const submittedFilesRef: {
   current: Array<{
     url?: string;
@@ -99,6 +100,7 @@ vi.mock('@/components/tasks', () => ({
     suggestion,
     submitWithMetaKey,
     submitIcon,
+    tools,
     surface,
     submitDisabledReason,
   }: {
@@ -117,6 +119,7 @@ vi.mock('@/components/tasks', () => ({
     suggestion?: unknown;
     submitWithMetaKey?: boolean;
     submitIcon?: unknown;
+    tools?: React.ReactNode;
     surface?: string;
     submitDisabledReason?: string;
   }) => {
@@ -145,7 +148,26 @@ vi.mock('@/components/tasks', () => ({
         >
           Send
         </button>
+        {tools}
       </div>
+    );
+  },
+}));
+
+vi.mock('./prompt-input/TaskModelSwitcher', () => ({
+  TaskModelSwitcher: ({
+    disabled,
+    onPendingChange,
+  }: {
+    disabled?: boolean;
+    onPendingChange?: (pending: boolean) => void;
+  }) => {
+    capturedModelSwitcherDisabled = disabled;
+
+    return (
+      <button type="button" onClick={() => onPendingChange?.(true)}>
+        Model selector
+      </button>
     );
   },
 }));
@@ -166,6 +188,7 @@ describe('WakeTaskInput', () => {
     capturedSubmitWithMetaKey = undefined;
     capturedSubmitIcon = undefined;
     capturedSurface = undefined;
+    capturedModelSwitcherDisabled = undefined;
     submittedFilesRef.current = [];
     preparePromptAttachmentsMock.mockResolvedValue({
       text: 'Wake up and keep going',
@@ -217,6 +240,41 @@ describe('WakeTaskInput', () => {
     );
 
     expect(capturedSurface).toBe('embedded');
+  });
+
+  it('allows model selection before waking an OpenCode task', async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        queries: { retry: false },
+      },
+    });
+
+    renderWithQueryClient(
+      <WakeTaskInput
+        taskRun={{
+          id: 42,
+          snapshotId: 'snap-42',
+          taskId: 'task-42',
+          harness: 'opencode-server',
+        }}
+      />,
+      queryClient,
+    );
+
+    expect(
+      screen.getByRole('button', { name: 'Model selector' }),
+    ).toBeVisible();
+    expect(capturedModelSwitcherDisabled).toBe(false);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Model selector' }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled();
+      expect(capturedModelSwitcherDisabled).toBe(true);
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    expect(restoreMutateAsyncMock).not.toHaveBeenCalled();
   });
 
   it('prefills the sleeping draft, appends an optimistic transcript row, and resumes the task with a deferred prompt', async () => {

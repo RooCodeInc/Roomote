@@ -37,4 +37,19 @@ describe('TaskPromptInput', () => {
 
     expect(screen.getByRole('button', { name: 'Submit' })).toBeEnabled();
   });
+
+  it('renders additional prompt tools', () => {
+    render(
+      <TaskPromptInput
+        isBusy={false}
+        promptText="Fix the login bug"
+        onPromptTextChange={() => {}}
+        onSubmit={() => {}}
+        placeholder="Describe a task"
+        tools={<button type="button">Choose model</button>}
+      />,
+    );
+
+    expect(screen.getByRole('button', { name: 'Choose model' })).toBeVisible();
+  });
 });
