@@ -277,4 +277,28 @@ describe('retireDiscordPrReviewOffersBestEffort', () => {
       text: 'Second review offer',
     });
   });
+
+  it('continues retiring offers after one provider cleanup fails', async () => {
+    mocks.claimThread.mockResolvedValue([
+      { messageId: 'message-1', channelId: 'channel-1', threadId: 'thread-1' },
+      { messageId: 'message-2', channelId: 'channel-1', threadId: 'thread-1' },
+    ]);
+    mocks.getMessage
+      .mockRejectedValueOnce(new Error('Discord unavailable'))
+      .mockResolvedValueOnce({ text: 'Second review offer' });
+
+    retireDiscordPrReviewOffersBestEffort({
+      provider: provider as never,
+      channelId: 'channel-1',
+      threadId: 'thread-1',
+    });
+
+    await vi.waitFor(() => {
+      expect(mocks.editMessage).toHaveBeenCalledWith({
+        channelId: 'thread-1',
+        messageId: 'message-2',
+        text: 'Second review offer',
+      });
+    });
+  });
 });

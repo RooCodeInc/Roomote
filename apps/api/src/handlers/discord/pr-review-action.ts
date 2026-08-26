@@ -212,17 +212,25 @@ export function retireDiscordPrReviewOffersBestEffort({
     });
     for (const pending of claimed) {
       if (!pending.messageId) continue;
-      const destinationId = pending.threadId ?? pending.channelId;
-      const message = await provider.getMessage({
-        channelId: destinationId,
-        messageId: pending.messageId,
-      });
-      if (message) {
-        await provider.editMessage({
+      try {
+        const destinationId = pending.threadId ?? pending.channelId;
+        const message = await provider.getMessage({
           channelId: destinationId,
           messageId: pending.messageId,
-          text: message.text,
         });
+        if (message) {
+          await provider.editMessage({
+            channelId: destinationId,
+            messageId: pending.messageId,
+            text: message.text,
+          });
+        }
+      } catch (error) {
+        apiLogger.warn(
+          `[discord] Failed to clear PR review action buttons from ${pending.messageId}: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
       }
     }
   })().catch((error: unknown) => {
