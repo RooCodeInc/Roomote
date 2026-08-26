@@ -68,6 +68,8 @@ import {
 } from './fast-agent-tasks';
 import { getFastAgentUserIdentity } from './fast-agent-user-identity';
 import { FastAgentTurnDiagnostics } from './fast-agent-turn-diagnostics';
+import { RemoteFastAgentRepositorySkillSource } from './fast-agent-repository-skill-source';
+import { FastAgentSkillStore } from './fast-agent-skill-store';
 import {
   type FastAgentConversation,
   type FastAgentPlatformEventHandling,
@@ -1215,6 +1217,14 @@ export async function answerFastAgentQuestion({
       execute: async (openCodeSession, selectedPrompt, { validateSession }) => {
         diagnostics.markInferenceSetupStarted();
         const spillBudget = createFastAgentSpillTurnBudget();
+        const skillStore = new FastAgentSkillStore(
+          undefined,
+          new RemoteFastAgentRepositorySkillSource({
+            allowedEnvironmentIds: availableEnvironments.map(
+              (environment) => environment.id,
+            ),
+          }),
+        );
         const nativeRuntime = await getFastAgentNativeToolRuntime(
           session.id,
           availableIntegrations,
@@ -1309,6 +1319,7 @@ export async function answerFastAgentQuestion({
                           {
                             allowSkillAccess: true,
                             allowSpillRecovery: true,
+                            skillStore,
                             spillBudget,
                           },
                         ),
@@ -1331,6 +1342,7 @@ export async function answerFastAgentQuestion({
                           {
                             allowSkillAccess: false,
                             allowSpillRecovery: false,
+                            skillStore,
                             spillBudget,
                           },
                         ),
@@ -1385,6 +1397,7 @@ export async function answerFastAgentQuestion({
         } finally {
           unbindAllExecutors();
           unbindMcpExecutor();
+          await skillStore.dispose();
         }
       },
     });

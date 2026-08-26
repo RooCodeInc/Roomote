@@ -45,6 +45,7 @@ const nativeToolNames = vi.hoisted(
       sendChatReaction: 'send_chat_reaction',
       sendChatReply: 'send_chat_reply',
       sendTaskMessage: 'send_task_message',
+      listSkills: 'list_skills',
       loadSkill: 'load_skill',
       spillGrep: 'spill_grep',
       spillRead: 'spill_read',

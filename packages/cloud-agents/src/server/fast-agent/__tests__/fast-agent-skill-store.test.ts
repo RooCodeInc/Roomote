@@ -32,18 +32,61 @@ describe('FastAgentSkillStore', () => {
     const store = new FastAgentSkillStore();
 
     for (const name of FAST_AGENT_PACKAGED_SKILL_NAMES) {
-      const skill = await store.read(name);
-      expect(skill).toMatchObject({ name, resource: 'SKILL.md' });
+      const skill = await store.read(`packaged:${name}`);
+      expect(skill).toMatchObject({
+        id: `packaged:${name}`,
+        name,
+        resource: 'SKILL.md',
+        source: 'packaged',
+      });
       expect(skill.content).toMatch(new RegExp(`name: ["']?${name}["']?`, 'u'));
+      expect(skill.description.length).toBeGreaterThan(0);
       expect(skill.resources).toContain('SKILL.md');
     }
 
     const reference = await store.read(
-      'security-review',
+      'packaged:security-review',
       'references/authentication.md',
     );
     expect(reference.resource).toBe('references/authentication.md');
     expect(reference.content).toContain('Authentication');
+  });
+
+  it('combines packaged and repository-defined skill catalogs', async () => {
+    const repositorySkills = {
+      list: vi.fn().mockResolvedValue({
+        skills: [
+          {
+            description: 'Prepare the next release.',
+            environmentIds: ['environment-1'],
+            id: 'repository:repo-1:.agents/skills:changeset-release-pr',
+            name: 'changeset-release-pr',
+            repository: 'RooCodeInc/Roomote',
+            source: 'repository' as const,
+          },
+        ],
+        warnings: [],
+      }),
+      read: vi.fn(),
+    };
+    const store = new FastAgentSkillStore(undefined, repositorySkills);
+
+    const catalog = await store.list('environment-1');
+
+    expect(repositorySkills.list).toHaveBeenCalledWith('environment-1');
+    expect(catalog.skills).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'packaged:security-review',
+          source: 'packaged',
+        }),
+        expect.objectContaining({
+          id: 'repository:repo-1:.agents/skills:changeset-release-pr',
+          repository: 'RooCodeInc/Roomote',
+          source: 'repository',
+        }),
+      ]),
+    );
   });
 
   it('rejects traversal, non-Markdown files, symlinks, and unknown skills', async () => {
@@ -64,23 +107,25 @@ describe('FastAgentSkillStore', () => {
     const store = new FastAgentSkillStore(root);
 
     try {
-      await expect(store.read('explore-and-act')).resolves.toMatchObject({
+      await expect(
+        store.read('packaged:explore-and-act'),
+      ).resolves.toMatchObject({
         content: 'safe skill',
         resources: ['SKILL.md', 'references/guide.md'],
       });
       await expect(
-        store.read('explore-and-act', 'references/guide.md'),
+        store.read('packaged:explore-and-act', 'references/guide.md'),
       ).resolves.toMatchObject({ content: 'safe guide' });
       await expect(
-        store.read('explore-and-act', '../outside.md'),
+        store.read('packaged:explore-and-act', '../outside.md'),
       ).rejects.toThrow('Unknown packaged skill resource.');
-      await expect(store.read('explore-and-act', 'script.ts')).rejects.toThrow(
-        'Unknown packaged skill resource.',
-      );
-      await expect(store.read('explore-and-act', 'linked.md')).rejects.toThrow(
-        'Unknown packaged skill resource.',
-      );
-      await expect(store.read('not-a-skill')).rejects.toThrow(
+      await expect(
+        store.read('packaged:explore-and-act', 'script.ts'),
+      ).rejects.toThrow('Unknown packaged skill resource.');
+      await expect(
+        store.read('packaged:explore-and-act', 'linked.md'),
+      ).rejects.toThrow('Unknown packaged skill resource.');
+      await expect(store.read('packaged:not-a-skill')).rejects.toThrow(
         'Unknown packaged skill.',
       );
     } finally {

@@ -47,12 +47,32 @@ export const FAST_AGENT_PACKAGED_SKILL_NAMES = [
 type FastAgentPackagedSkillName =
   (typeof FAST_AGENT_PACKAGED_SKILL_NAMES)[number];
 
-export type FastAgentSkillDocument = {
+export type FastAgentSkillSummary = {
+  description: string;
+  environmentIds?: string[];
+  id: string;
+  invocation?: string;
+  name: string;
+  repository?: string;
+  source: 'packaged' | 'repository';
+};
+
+export type FastAgentSkillDocument = FastAgentSkillSummary & {
   byteLength: number;
   content: string;
-  name: FastAgentPackagedSkillName;
   resource: string;
   resources: string[];
+};
+
+export type FastAgentSkillCatalog = {
+  skills: FastAgentSkillSummary[];
+  warnings: string[];
+};
+
+export type FastAgentRepositorySkillSource = {
+  list(environmentId?: string): Promise<FastAgentSkillCatalog>;
+  read(id: string, resource?: string): Promise<FastAgentSkillDocument>;
+  dispose?(): Promise<void>;
 };
 
 const FAST_AGENT_PACKAGED_SKILL_NAME_SET = new Set<string>(
@@ -97,17 +117,101 @@ async function listMarkdownResources(
   return resources;
 }
 
+function unquoteYamlScalar(value: string): string {
+  const trimmed = value.trim();
+  if (
+    trimmed.length >= 2 &&
+    ((trimmed.startsWith("'") && trimmed.endsWith("'")) ||
+      (trimmed.startsWith('"') && trimmed.endsWith('"')))
+  ) {
+    return trimmed.slice(1, -1);
+  }
+  return trimmed;
+}
+
+export function getFastAgentSkillDescription(content: string): string {
+  const frontmatter = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/u.exec(
+    content,
+  )?.[1];
+  if (!frontmatter) return '';
+  const lines = frontmatter.split(/\r?\n/u);
+  for (let index = 0; index < lines.length; index += 1) {
+    const match = /^description:\s*(.*)$/u.exec(lines[index] ?? '');
+    if (!match) continue;
+    const value = match[1]?.trim() ?? '';
+    if (value === '>' || value === '|') {
+      const folded: string[] = [];
+      for (let nested = index + 1; nested < lines.length; nested += 1) {
+        const line = lines[nested] ?? '';
+        if (!/^\s+/u.test(line)) break;
+        folded.push(line.trim());
+      }
+      return folded.join(value === '>' ? ' ' : '\n').trim();
+    }
+    return unquoteYamlScalar(value);
+  }
+  return '';
+}
+
+function packagedSkillId(name: string): string {
+  return `packaged:${name}`;
+}
+
 export class FastAgentSkillStore {
   private readonly resources = new Map<string, Promise<string[]>>();
   private readonly rootDirectory: Promise<string>;
 
-  constructor(rootDirectory?: string) {
+  constructor(
+    rootDirectory?: string,
+    private readonly repositorySkills?: FastAgentRepositorySkillSource,
+  ) {
     this.rootDirectory = rootDirectory
       ? Promise.resolve(resolve(rootDirectory))
       : resolveDefaultSkillRoot();
   }
 
+  async list(environmentId?: string): Promise<FastAgentSkillCatalog> {
+    const packaged = await Promise.all(
+      FAST_AGENT_PACKAGED_SKILL_NAMES.map(async (name) => {
+        const document = await this.readPackaged(name);
+        return {
+          description: getFastAgentSkillDescription(document.content),
+          id: document.id,
+          invocation: name,
+          name,
+          source: 'packaged' as const,
+        };
+      }),
+    );
+    const repository = this.repositorySkills
+      ? await this.repositorySkills.list(environmentId)
+      : { skills: [], warnings: [] };
+    return {
+      skills: [...packaged, ...repository.skills].sort((left, right) =>
+        left.name === right.name
+          ? left.id.localeCompare(right.id)
+          : left.name.localeCompare(right.name),
+      ),
+      warnings: repository.warnings,
+    };
+  }
+
   async read(
+    id: string,
+    requestedResource = 'SKILL.md',
+  ): Promise<FastAgentSkillDocument> {
+    if (id.startsWith('packaged:')) {
+      return this.readPackaged(id.slice('packaged:'.length), requestedResource);
+    }
+    if (!this.repositorySkills) throw new Error('Unknown skill.');
+    return this.repositorySkills.read(id, requestedResource);
+  }
+
+  async dispose(): Promise<void> {
+    await this.repositorySkills?.dispose?.();
+  }
+
+  private async readPackaged(
     name: string,
     requestedResource = 'SKILL.md',
   ): Promise<FastAgentSkillDocument> {
@@ -151,9 +255,16 @@ export class FastAgentSkillStore {
       return {
         byteLength,
         content,
+        description:
+          requestedResource === 'SKILL.md'
+            ? getFastAgentSkillDescription(content)
+            : '',
+        id: packagedSkillId(typedName),
+        invocation: typedName,
         name: typedName,
         resource: requestedResource,
         resources,
+        source: 'packaged',
       };
     } finally {
       await descriptor.close();

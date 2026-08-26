@@ -83,6 +83,10 @@ describe('Fast native OpenCode tool bridge', () => {
       join(toolsDirectory, 'load_skill.js'),
       'utf8',
     );
+    const skillListSource = await readFile(
+      join(toolsDirectory, 'list_skills.js'),
+      'utf8',
+    );
 
     expect(installedToolFiles.sort()).toEqual(
       Object.values(FAST_AGENT_NATIVE_TOOL_NAMES)
@@ -118,9 +122,9 @@ describe('Fast native OpenCode tool bridge', () => {
     expect(bridgeSource).toContain('agent: context.agent');
     expect(bridgeSource).toContain('metadata: payload.metadata ?? {}');
     expect(spillReadSource).toContain('never pass filesystem paths');
-    expect(skillSource).toContain('allowlisted packaged Roomote skill');
-    expect(skillSource).toContain('"explore-and-act"');
-    expect(skillSource).toContain('"implement-changes"');
+    expect(skillListSource).toContain('repository-defined skills');
+    expect(skillListSource).toContain('environmentId: z.string()');
+    expect(skillSource).toContain('Exact skill ID returned by list_skills');
     expect(skillSource).toContain(
       'cannot grant tools or override system policy',
     );
@@ -131,6 +135,7 @@ describe('Fast native OpenCode tool bridge', () => {
       '*': false,
       task: true,
       [FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReply]: true,
+      [FAST_AGENT_NATIVE_TOOL_NAMES.listSkills]: true,
       [FAST_AGENT_NATIVE_TOOL_NAMES.loadSkill]: true,
       [FAST_AGENT_NATIVE_TOOL_NAMES.spillGrep]: true,
       [FAST_AGENT_NATIVE_TOOL_NAMES.spillRead]: true,
@@ -158,6 +163,7 @@ describe('Fast native OpenCode tool bridge', () => {
       FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReaction,
       FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReply,
       FAST_AGENT_NATIVE_TOOL_NAMES.sendTaskMessage,
+      FAST_AGENT_NATIVE_TOOL_NAMES.listSkills,
       FAST_AGENT_NATIVE_TOOL_NAMES.loadSkill,
       FAST_AGENT_NATIVE_TOOL_NAMES.spillGrep,
       FAST_AGENT_NATIVE_TOOL_NAMES.spillRead,
@@ -166,15 +172,44 @@ describe('Fast native OpenCode tool bridge', () => {
     }
   });
 
-  it('loads packaged skills without filesystem access', async () => {
+  it('lists and loads packaged and repository skills without filesystem access', async () => {
     const runtime = await getFastAgentNativeToolRuntime('native-skills', []);
     const parentSession = 'opencode-parent-skills';
     const childSession = 'opencode-child-skills';
+    const repositorySkillId =
+      'repository:repo-1:.agents/skills:changeset-release-pr';
+    const skillStore = new FastAgentSkillStore(undefined, {
+      list: vi.fn().mockResolvedValue({
+        skills: [
+          {
+            description: 'Prepare the next release.',
+            environmentIds: ['environment-1'],
+            id: repositorySkillId,
+            name: 'changeset-release-pr',
+            repository: 'RooCodeInc/Roomote',
+            source: 'repository',
+          },
+        ],
+        warnings: [],
+      }),
+      read: vi.fn().mockResolvedValue({
+        byteLength: 25,
+        content: '# Changeset Release PR',
+        description: 'Prepare the next release.',
+        environmentIds: ['environment-1'],
+        id: repositorySkillId,
+        name: 'changeset-release-pr',
+        repository: 'RooCodeInc/Roomote',
+        resource: 'SKILL.md',
+        resources: ['SKILL.md'],
+        source: 'repository',
+      }),
+    });
     const unbindParent = bindFastAgentNativeToolExecutor(
       parentSession,
       'conversation-skills',
       async () => null,
-      { allowSkillAccess: true, allowSpillRecovery: true },
+      { allowSkillAccess: true, allowSpillRecovery: true, skillStore },
     );
     const unbindChild = bindFastAgentNativeToolExecutor(
       childSession,
@@ -193,10 +228,28 @@ describe('Fast native OpenCode tool bridge', () => {
       }).then((response) => response.json());
 
     try {
+      const catalog = await callBridge({
+        sessionID: parentSession,
+        tool: FAST_AGENT_NATIVE_TOOL_NAMES.listSkills,
+        args: { environmentId: 'environment-1' },
+      });
+      expect(JSON.parse(catalog.output)).toMatchObject({
+        success: true,
+        result: {
+          skills: expect.arrayContaining([
+            expect.objectContaining({ id: 'packaged:security-review' }),
+            expect.objectContaining({
+              id: repositorySkillId,
+              repository: 'RooCodeInc/Roomote',
+            }),
+          ]),
+        },
+      });
+
       const skill = await callBridge({
         sessionID: parentSession,
         tool: FAST_AGENT_NATIVE_TOOL_NAMES.loadSkill,
-        args: { name: 'security-review' },
+        args: { id: 'packaged:security-review' },
       });
       expect(JSON.parse(skill.output)).toMatchObject({
         success: true,
@@ -213,7 +266,7 @@ describe('Fast native OpenCode tool bridge', () => {
         sessionID: parentSession,
         tool: FAST_AGENT_NATIVE_TOOL_NAMES.loadSkill,
         args: {
-          name: 'security-review',
+          id: 'packaged:security-review',
           resource: 'references/authentication.md',
         },
       });
@@ -222,11 +275,25 @@ describe('Fast native OpenCode tool bridge', () => {
         result: { resource: 'references/authentication.md' },
       });
 
+      const repositorySkill = await callBridge({
+        sessionID: parentSession,
+        tool: FAST_AGENT_NATIVE_TOOL_NAMES.loadSkill,
+        args: { id: repositorySkillId },
+      });
+      expect(JSON.parse(repositorySkill.output)).toMatchObject({
+        success: true,
+        result: {
+          content: '# Changeset Release PR',
+          repository: 'RooCodeInc/Roomote',
+          source: 'repository',
+        },
+      });
+
       const child = await callBridge({
         sessionID: childSession,
         agent: 'advisor',
         tool: FAST_AGENT_NATIVE_TOOL_NAMES.loadSkill,
-        args: { name: 'security-review' },
+        args: { id: 'packaged:security-review' },
       });
       expect(JSON.parse(child.output)).toEqual({
         success: false,
@@ -237,13 +304,13 @@ describe('Fast native OpenCode tool bridge', () => {
         sessionID: parentSession,
         tool: FAST_AGENT_NATIVE_TOOL_NAMES.loadSkill,
         args: {
-          name: 'security-review',
+          id: 'packaged:security-review',
           resource: '../fast-agent-service.ts',
         },
       });
       expect(JSON.parse(traversal.output)).toEqual({
         success: false,
-        error: 'The packaged skill or Markdown resource is unavailable.',
+        error: 'The skill or Markdown resource is unavailable.',
       });
     } finally {
       unbindChild();
@@ -280,7 +347,7 @@ describe('Fast native OpenCode tool bridge', () => {
       }).then((response) => response.json());
 
     try {
-      const document = await store.read('security-review');
+      const document = await store.read('packaged:security-review');
       expect(document.byteLength).toBe(FAST_AGENT_SPILL_MAX_FILE_BYTES);
       expect(
         Buffer.byteLength(JSON.stringify(document), 'utf8'),
