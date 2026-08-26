@@ -9,19 +9,21 @@ describe('memory MCP task guidance', () => {
   it.each([
     ['gbrain', 'Brain'],
     ['supermemory', 'Supermemory'],
-    ['team-memory', 'team-memory'],
-    ['mem0', 'mem0'],
   ])('recognizes %s as memory', (serverId, displayName) => {
     expect(isMemoryMcpServer(serverId)).toBe(true);
     expect(getMemoryMcpDisplayName(serverId)).toBe(displayName);
   });
 
-  it.each(['notion', 'braintrust', 'in-memory-cache', 'remember-the-milk'])(
-    'does not infer memory behavior for %s',
-    (serverId) => {
-      expect(isMemoryMcpServer(serverId)).toBe(false);
-    },
-  );
+  it.each([
+    'notion',
+    'braintrust',
+    'team-memory',
+    'mem0',
+    'in-memory-cache',
+    'remember-the-milk',
+  ])('does not infer memory behavior for %s', (serverId) => {
+    expect(isMemoryMcpServer(serverId)).toBe(false);
+  });
 
   it('requires visible recall first and a durable write at completion', () => {
     const instructions = createMemoryMcpInstructions('supermemory');
@@ -51,13 +53,10 @@ describe('memory MCP task guidance', () => {
     expect(createMemoryMcpInstructions('supermemory')).not.toContain(
       'Treat Brain recall as a sequential preflight',
     );
-    expect(createMemoryMcpInstructions('team-memory')).not.toContain(
-      'save_task_memory',
-    );
   });
 
   it('keeps an additional memory store from competing for the first call', () => {
-    const instructions = createMemoryMcpInstructions('team-memory', {
+    const instructions = createMemoryMcpInstructions('supermemory', {
       primary: false,
     });
 

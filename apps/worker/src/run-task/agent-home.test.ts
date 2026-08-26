@@ -16,7 +16,7 @@ import {
 } from './agent-home';
 
 describe('createIntegrationMcpInstructions', () => {
-  it.each(['gbrain', 'supermemory', 'team-memory'])(
+  it.each(['gbrain', 'supermemory'])(
     'injects shared memory lifecycle guidance for %s',
     (name) => {
       const instructions = createIntegrationMcpInstructions([
@@ -31,6 +31,18 @@ describe('createIntegrationMcpInstructions', () => {
       );
     },
   );
+
+  it('does not infer memory guidance from a custom server name', () => {
+    expect(
+      createIntegrationMcpInstructions([
+        {
+          type: 'remote',
+          name: 'team-memory',
+          url: 'https://example.com/mcp',
+        },
+      ]),
+    ).toBeUndefined();
+  });
 
   it('keeps ordinary integration guidance provider-specific', () => {
     const instructions = createIntegrationMcpInstructions([

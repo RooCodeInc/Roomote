@@ -201,7 +201,7 @@ describe('fast-agent integration broker', () => {
     ]);
   });
 
-  it('gives identifiable custom memory servers the shared memory instructions', async () => {
+  it('does not infer memory guidance from a custom server name', async () => {
     mocks.configuredServers = {
       'team-memory': {
         url: 'https://memory.example.test/mcp',
@@ -217,9 +217,7 @@ describe('fast-agent integration broker', () => {
     expect(integrations).toEqual([
       expect.objectContaining({
         id: 'team-memory',
-        instructions: expect.stringContaining(
-          'make one normal team-memory tool call before any other context or work tool call',
-        ),
+        instructions: undefined,
       }),
     ]);
   });

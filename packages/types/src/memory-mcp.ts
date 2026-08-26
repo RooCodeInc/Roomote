@@ -5,15 +5,10 @@ const BUILT_IN_MEMORY_MCP_NAMES: Readonly<Record<string, string>> = {
   gbrain: 'Brain',
 };
 
-const CUSTOM_MEMORY_MCP_NAME_PATTERN =
-  /(?:^|[-_])(memory|memories|mem0|supermemory)(?:$|[-_])/i;
-
 export function isMemoryMcpServer(serverId: string): boolean {
   return (
     serverId in BUILT_IN_MEMORY_MCP_NAMES ||
-    getMcpIntegration(serverId)?.category === 'memory' ||
-    (CUSTOM_MEMORY_MCP_NAME_PATTERN.test(serverId) &&
-      !/(?:^|[-_])in[-_]memory(?:[-_]|$)/i.test(serverId))
+    getMcpIntegration(serverId)?.category === 'memory'
   );
 }
 
