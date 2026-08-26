@@ -2,7 +2,7 @@ import type { AcpToolCallUiMessage, AcpToolResultUiMessage } from './types';
 
 type ToolMessage = AcpToolCallUiMessage | AcpToolResultUiMessage;
 
-export interface DelegatedTaskDetails {
+interface DelegatedTaskDetails {
   taskId: string;
   prompt: string | null;
 }
