@@ -1,3 +1,4 @@
+import { useState, type ReactNode } from 'react';
 import { fireEvent, render, screen } from '@testing-library/react';
 
 import { SandboxLayoutContext } from '../../use-sandbox-layout';
@@ -28,35 +29,37 @@ const session: SessionInfo = {
   createdAt: new Date('2026-01-01T00:00:00.000Z'),
 };
 
-function renderWorkspace({
-  isMobile,
-  toggleSidebar = vi.fn(),
-}: {
-  isMobile: boolean;
-  toggleSidebar?: () => void;
-}) {
+function SandboxLayoutProvider({ children }: { children: ReactNode }) {
+  const [isSidebarVisible, setSidebarVisible] = useState(true);
+
+  return (
+    <SandboxLayoutContext.Provider
+      value={{
+        isSidebarVisible,
+        setSidebarVisible,
+        toggleSidebar: () => setSidebarVisible((visible) => !visible),
+      }}
+    >
+      {children}
+    </SandboxLayoutContext.Provider>
+  );
+}
+
+function renderWorkspace({ isMobile }: { isMobile: boolean }) {
   useMediaQueryMock.mockReturnValue(!isMobile);
 
   render(
-    <SandboxLayoutContext.Provider
-      value={{
-        isSidebarVisible: true,
-        setSidebarVisible: vi.fn(),
-        toggleSidebar,
-      }}
-    >
+    <SandboxLayoutProvider>
       <SessionWorkspace session={session}>
         <div>Session transcript</div>
       </SessionWorkspace>
-    </SandboxLayoutContext.Provider>,
+    </SandboxLayoutProvider>,
   );
-
-  return { toggleSidebar };
 }
 
 describe('SessionWorkspace', () => {
   it('matches the task sidebar replacement behavior and controls on mobile', () => {
-    const { toggleSidebar } = renderWorkspace({ isMobile: true });
+    renderWorkspace({ isMobile: true });
 
     expect(screen.getByText('Session transcript')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Chat' })).toBeInTheDocument();
@@ -71,12 +74,23 @@ describe('SessionWorkspace', () => {
       screen.queryByRole('button', { name: 'Close session info' }),
     ).toBeNull();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Chat' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Hide sidebar' }));
+
+    expect(
+      screen.getByRole('button', { name: 'Close session info' }),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Close session info' }));
 
     expect(screen.getByText('Session transcript')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Session info' })).toBeNull();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Hide sidebar' }));
-    expect(toggleSidebar).toHaveBeenCalledOnce();
+    fireEvent.click(screen.getByRole('button', { name: 'Show sidebar' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Session info' }));
+
+    expect(
+      screen.getByRole('heading', { name: 'Session info' }),
+    ).toBeInTheDocument();
   });
 
   it('preserves the split panel and close control on desktop', () => {

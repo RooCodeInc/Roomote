@@ -7,13 +7,21 @@ import { formatInferenceCost, getUserDisplayName } from '@/lib';
 import { useLaunchTaskModels } from '@/hooks/task-models/useLaunchTaskModels';
 import { WorkspaceSurface } from '@/components/layout';
 import { SideNavItem } from '@/components/layout/side-nav/SideNavItem';
-import { Avatar, BasicTooltip, DollarSign, Info } from '@/components/system';
+import {
+  ArrowLeftFromLine,
+  Avatar,
+  BasicTooltip,
+  Button,
+  DollarSign,
+  Info,
+} from '@/components/system';
 
 import { SandboxSidePanelHeader } from '../../SandboxSidePanelHeader';
 import {
   ResponsiveWorkspacePanels,
   SandboxSideActions,
 } from '../../SandboxWorkspacePanels';
+import { useSandboxLayout } from '../../use-sandbox-layout';
 
 export type SessionInfo = {
   id: string;
@@ -118,23 +126,39 @@ export function SessionWorkspace({
   children: ReactNode;
 }) {
   const [isInfoOpen, setIsInfoOpen] = useState(false);
+  const { isSidebarVisible, toggleSidebar } = useSandboxLayout();
 
   return (
     <WorkspaceSurface
+      className="relative"
       sideActions={
-        <SandboxSideActions
-          isPanelOpen={isInfoOpen}
-          onShowMain={() => setIsInfoOpen(false)}
-        >
-          <SideNavItem
-            side="right"
-            label="Session info"
-            tooltip="Session info"
-            active={isInfoOpen}
-            icon={Info}
-            onClick={() => setIsInfoOpen((previous) => !previous)}
-          />
-        </SandboxSideActions>
+        <>
+          <SandboxSideActions
+            isPanelOpen={isInfoOpen}
+            onShowMain={() => setIsInfoOpen(false)}
+          >
+            <SideNavItem
+              side="right"
+              label="Session info"
+              tooltip="Session info"
+              active={isInfoOpen}
+              icon={Info}
+              onClick={() => setIsInfoOpen((previous) => !previous)}
+            />
+          </SandboxSideActions>
+          {!isSidebarVisible && !isInfoOpen ? (
+            <BasicTooltip content="Show sidebar">
+              <Button
+                variant="ghost"
+                className="absolute top-2.5 right-3 size-8 shrink-0 md:hidden"
+                aria-label="Show sidebar"
+                onClick={toggleSidebar}
+              >
+                <ArrowLeftFromLine className="size-4" />
+              </Button>
+            </BasicTooltip>
+          ) : null}
+        </>
       }
     >
       <ResponsiveWorkspacePanels
