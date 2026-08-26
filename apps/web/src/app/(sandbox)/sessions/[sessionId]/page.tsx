@@ -9,11 +9,6 @@ import {
   Badge,
   BotMessageSquare,
   Button,
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
   EmptyState,
 } from '@/components/system';
 
@@ -89,7 +84,7 @@ export default async function SessionDetailPage({
         <FastSessionTranscript
           messages={session.messages}
           footer={
-            <div className="space-y-4 pt-4">
+            <div className="space-y-8 border-t border-border/60 pt-6 pb-2">
               {session.messages.length === 0 ? (
                 <EmptyState
                   icon={<BotMessageSquare className="size-6" />}
@@ -100,120 +95,116 @@ export default async function SessionDetailPage({
               ) : null}
 
               {session.linkedTasks.length > 0 ? (
-                <Card>
-                  <CardHeader>
-                    <CardTitle>Delegated tasks</CardTitle>
-                    <CardDescription>
-                      Tasks launched from this Fast conversation.
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="divide-y divide-border">
-                      {session.linkedTasks.map((task) => (
-                        <Link
-                          key={task.taskId}
-                          href={`/task/${task.taskId}`}
-                          className="flex items-center justify-between gap-3 py-3 first:pt-0 last:pb-0 hover:underline"
-                        >
-                          <span className="min-w-0 truncate">{task.title}</span>
-                          <div className="flex shrink-0 items-center gap-2">
-                            {task.taskPhase ? (
-                              <Badge variant="outline">{task.taskPhase}</Badge>
-                            ) : null}
-                            {task.status ? (
-                              <Badge variant="secondary">{task.status}</Badge>
-                            ) : null}
-                          </div>
-                        </Link>
-                      ))}
-                    </div>
-                  </CardContent>
-                </Card>
+                <section aria-labelledby="delegated-tasks-heading">
+                  <h2 id="delegated-tasks-heading" className="font-semibold">
+                    Delegated tasks
+                  </h2>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    Tasks launched from this Fast conversation.
+                  </p>
+                  <div className="mt-3 divide-y divide-border">
+                    {session.linkedTasks.map((task) => (
+                      <Link
+                        key={task.taskId}
+                        href={`/task/${task.taskId}`}
+                        className="flex items-center justify-between gap-3 py-3 first:pt-0 last:pb-0 hover:underline"
+                      >
+                        <span className="min-w-0 truncate">{task.title}</span>
+                        <div className="flex shrink-0 items-center gap-2">
+                          {task.taskPhase ? (
+                            <Badge variant="outline">{task.taskPhase}</Badge>
+                          ) : null}
+                          {task.status ? (
+                            <Badge variant="secondary">{task.status}</Badge>
+                          ) : null}
+                        </div>
+                      </Link>
+                    ))}
+                  </div>
+                </section>
               ) : null}
 
-              <Card>
-                <CardHeader>
-                  <CardTitle>Session context</CardTitle>
-                  <CardDescription>
-                    Identity and persistence details for this Fast conversation.
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <dl className="space-y-3">
-                    <IdentityRow label="Session ID" value={session.id} />
-                    <IdentityRow label="Surface" value={session.surface} />
+              <section
+                aria-labelledby="session-context-heading"
+                className="border-t border-border/60 pt-6"
+              >
+                <h2 id="session-context-heading" className="font-semibold">
+                  Session context
+                </h2>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Identity and persistence details for this Fast conversation.
+                </p>
+                <dl className="mt-4 space-y-3">
+                  <IdentityRow label="Session ID" value={session.id} />
+                  <IdentityRow label="Surface" value={session.surface} />
+                  <IdentityRow label="Workspace" value={session.workspaceId} />
+                  <IdentityRow
+                    label="Conversation"
+                    value={session.conversationId}
+                  />
+                  {authorizedUser.isAdmin ? (
                     <IdentityRow
-                      label="Workspace"
-                      value={session.workspaceId}
+                      label="Owner"
+                      value={session.ownerName ?? session.ownerEmail}
                     />
+                  ) : null}
+                  <IdentityRow
+                    label="Reply target"
+                    value={
+                      session.replyTargetVerified ? 'Verified' : 'Unverified'
+                    }
+                  />
+                  {session.currentReplyChannelId ? (
                     <IdentityRow
-                      label="Conversation"
-                      value={session.conversationId}
+                      label="Reply channel"
+                      value={session.currentReplyChannelId}
                     />
-                    {authorizedUser.isAdmin ? (
-                      <IdentityRow
-                        label="Owner"
-                        value={session.ownerName ?? session.ownerEmail}
-                      />
-                    ) : null}
+                  ) : null}
+                  {session.currentReplyThreadId ? (
                     <IdentityRow
-                      label="Reply target"
-                      value={
-                        session.replyTargetVerified ? 'Verified' : 'Unverified'
-                      }
+                      label="Reply thread"
+                      value={session.currentReplyThreadId}
                     />
-                    {session.currentReplyChannelId ? (
-                      <IdentityRow
-                        label="Reply channel"
-                        value={session.currentReplyChannelId}
-                      />
-                    ) : null}
-                    {session.currentReplyThreadId ? (
-                      <IdentityRow
-                        label="Reply thread"
-                        value={session.currentReplyThreadId}
-                      />
-                    ) : null}
-                    {session.openCodeSessionId ? (
-                      <IdentityRow
-                        label="OpenCode session"
-                        value={session.openCodeSessionId}
-                      />
-                    ) : null}
+                  ) : null}
+                  {session.openCodeSessionId ? (
                     <IdentityRow
-                      label="Messages stored"
-                      value={session.messageCount.toLocaleString()}
+                      label="OpenCode session"
+                      value={session.openCodeSessionId}
                     />
-                    <IdentityRow
-                      label="Created"
-                      value={session.createdAt.toISOString()}
-                    />
-                    <IdentityRow
-                      label="Last activity"
-                      value={session.updatedAt.toISOString()}
-                    />
-                  </dl>
-                </CardContent>
-              </Card>
+                  ) : null}
+                  <IdentityRow
+                    label="Messages stored"
+                    value={session.messageCount.toLocaleString()}
+                  />
+                  <IdentityRow
+                    label="Created"
+                    value={session.createdAt.toISOString()}
+                  />
+                  <IdentityRow
+                    label="Last activity"
+                    value={session.updatedAt.toISOString()}
+                  />
+                </dl>
+              </section>
 
-              <Card>
-                <CardHeader>
-                  <CardTitle>OpenCode workspace details unavailable</CardTitle>
-                  <CardDescription>
-                    Fast now persists canonical visible messages, native tool
-                    calls and results, and OpenCode session relationships. Raw
-                    OpenCode reasoning, child-session event streams,
-                    conversation lifecycle status, artifacts, repository state,
-                    logs, terminal access, and preview endpoints are not exposed
-                    by the current Fast runtime.
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
+              <section className="border-t border-border/60 pt-6 text-sm">
+                <h2 className="font-semibold">
+                  OpenCode workspace details unavailable
+                </h2>
+                <p className="mt-1 text-muted-foreground">
+                  Fast now persists canonical visible messages, native tool
+                  calls and results, and OpenCode session relationships. Raw
+                  OpenCode reasoning, child-session event streams, conversation
+                  lifecycle status, artifacts, repository state, logs, terminal
+                  access, and preview endpoints are not exposed by the current
+                  Fast runtime.
+                </p>
+                <p className="mt-3">
                   compatibilityMessages remains a write-only N-1 rollback path
                   during this release. Canonical transcript reads do not
                   backfill or fall back to legacy history.
-                </CardContent>
-              </Card>
+                </p>
+              </section>
             </div>
           }
         />
