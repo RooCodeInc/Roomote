@@ -14,6 +14,7 @@ import {
   createFastAgentSlackLiveTaskLauncher,
   getSlackThreadReplyFooterMessageTs,
   postSlackThreadMessageWithFooterText,
+  withSlackThreadReplyFooterLock,
   buildSlackThreadReplyFooterBlock,
   SlackNotifier,
   ROOMOTE_THREAD_REPLY_QUOTE_BLOCK_ID,
@@ -194,29 +195,36 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
         },
         replaceReply: async (handle, { message }) => {
           // Keep the sticky footer when the edited message is its current
-          // carrier; a bare block replacement would silently drop it.
-          const footerMessageTs = await getSlackThreadReplyFooterMessageTs(
-            conversation.replyTarget.channelId,
-            conversation.replyTarget.threadId,
-          ).catch(() => null);
-          const updated = await slack.updateMessage({
+          // carrier; the lookup and edit share the footer lock so a
+          // concurrent relocation cannot slip in between them.
+          const updated = await withSlackThreadReplyFooterLock({
             channel: conversation.replyTarget.channelId,
-            ts: handle.messageId,
-            message: {
-              text: message,
-              blocks: [
-                { type: 'markdown', text: message },
-                ...(footerMessageTs === handle.messageId
-                  ? [
-                      buildSlackThreadReplyFooterBlock({
-                        footerText: buildFastSessionReplyFooterText({
-                          provider: 'slack',
-                          sessionId: session.id,
-                        }),
-                      }),
-                    ]
-                  : []),
-              ],
+            threadTs: conversation.replyTarget.threadId,
+            fn: async () => {
+              const footerMessageTs = await getSlackThreadReplyFooterMessageTs(
+                conversation.replyTarget.channelId,
+                conversation.replyTarget.threadId,
+              ).catch(() => null);
+              return slack.updateMessage({
+                channel: conversation.replyTarget.channelId,
+                ts: handle.messageId,
+                message: {
+                  text: message,
+                  blocks: [
+                    { type: 'markdown', text: message },
+                    ...(footerMessageTs === handle.messageId
+                      ? [
+                          buildSlackThreadReplyFooterBlock({
+                            footerText: buildFastSessionReplyFooterText({
+                              provider: 'slack',
+                              sessionId: session.id,
+                            }),
+                          }),
+                        ]
+                      : []),
+                  ],
+                },
+              });
             },
           });
           if (!updated) {

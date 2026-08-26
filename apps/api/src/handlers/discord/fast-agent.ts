@@ -22,6 +22,7 @@ import {
   getDiscordFooterlessFinalChunk,
   getThreadReplyFooterRecord,
   setThreadReplyFooterRecord,
+  withThreadReplyFooterLock,
 } from '@roomote/communication';
 import { resolveUserMcpServerConfigs } from '@roomote/sdk/server';
 import { ALL_REPOSITORIES } from '@roomote/types';
@@ -283,53 +284,69 @@ export async function processDiscordFastAgentMessage(input: {
           const footerChannelId = conversation.replyTarget.channelId;
           const footerStateThreadId =
             conversation.replyTarget.threadId ?? 'root';
-          const footerRecord = await getThreadReplyFooterRecord(
-            'discord',
-            footerChannelId,
-            footerStateThreadId,
-          ).catch(() => null);
-          const isFooterCarrier = footerRecord?.messageId === messageId;
-          const replacementText = isFooterCarrier
-            ? `${text}\n\n${footerText}`
-            : text;
 
-          if (replacementText.length > DISCORD_MAX_MESSAGE_LENGTH) {
-            const placeholder = 'Reconnected to the inference provider.';
-            await input.provider.editMessage({
-              channelId: input.channel.channelId,
-              messageId,
-              text: isFooterCarrier
-                ? `${placeholder}\n\n${footerText}`
-                : placeholder,
-            });
-            if (isFooterCarrier) {
-              // The relocation that follows rewrites this message to its
-              // stored footerless text; keep that text current so the edit
-              // does not resurrect the pre-retry notice.
-              await setThreadReplyFooterRecord(
+          // The carrier check, edit, and record write must share the footer
+          // lock, or a concurrent reply can relocate the footer in between
+          // and this replacement would re-mark the old message as carrier.
+          const replaced = await withThreadReplyFooterLock({
+            lockKey: `discord:thread_reply_footer_lock:${footerChannelId}:${footerStateThreadId}`,
+            fn: async () => {
+              const footerRecord = await getThreadReplyFooterRecord(
                 'discord',
                 footerChannelId,
                 footerStateThreadId,
-                { messageId, textWithoutFooter: placeholder },
-              ).catch(() => {});
-            }
+              ).catch(() => null);
+              const isFooterCarrier = footerRecord?.messageId === messageId;
+              const replacementText = isFooterCarrier
+                ? `${text}\n\n${footerText}`
+                : text;
+
+              if (replacementText.length > DISCORD_MAX_MESSAGE_LENGTH) {
+                const placeholder = 'Reconnected to the inference provider.';
+                await input.provider.editMessage({
+                  channelId: input.channel.channelId,
+                  messageId,
+                  text: isFooterCarrier
+                    ? `${placeholder}\n\n${footerText}`
+                    : placeholder,
+                });
+                if (isFooterCarrier) {
+                  // The relocation that follows rewrites this message to its
+                  // stored footerless text; keep that text current so the
+                  // edit does not resurrect the pre-retry notice.
+                  await setThreadReplyFooterRecord(
+                    'discord',
+                    footerChannelId,
+                    footerStateThreadId,
+                    { messageId, textWithoutFooter: placeholder },
+                  ).catch(() => {});
+                }
+                return false;
+              }
+
+              await input.provider.editMessage({
+                channelId: input.channel.channelId,
+                messageId,
+                text: replacementText,
+              });
+              if (isFooterCarrier) {
+                await setThreadReplyFooterRecord(
+                  'discord',
+                  footerChannelId,
+                  footerStateThreadId,
+                  { messageId, textWithoutFooter: text },
+                ).catch(() => {});
+              }
+              return true;
+            },
+          });
+
+          if (!replaced) {
+            // The oversized replacement posts as a new message; the sticky
+            // post takes the lock itself, so it runs outside ours.
             const posted = await postFastReplyWithFooter(text);
             didSendVisibleResponse = true;
             return { messageId: posted.messageId };
-          }
-
-          await input.provider.editMessage({
-            channelId: input.channel.channelId,
-            messageId,
-            text: replacementText,
-          });
-          if (isFooterCarrier) {
-            await setThreadReplyFooterRecord(
-              'discord',
-              footerChannelId,
-              footerStateThreadId,
-              { messageId, textWithoutFooter: text },
-            ).catch(() => {});
           }
           didSendVisibleResponse = true;
           return { messageId };
