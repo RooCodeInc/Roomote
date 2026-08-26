@@ -182,8 +182,8 @@ COPY .docker/app/runtime-deps/api /runtime-deps/
 # guards the Fast agent's native tool runtime, which symlinks it into each
 # generated OpenCode tool directory via require.resolve.
 RUN cd /runtime-deps && pnpm install --prod --frozen-lockfile && \
-  test "$(node -p "require('dompurify/package.json').version")" = \
-    "$(cd /roomote/apps/api && node -p "require('dompurify/package.json').version")" && \
+  test "$(node -p "require(require('node:path').join(require('node:path').dirname(require.resolve('dompurify')), '../package.json')).version")" = \
+    "$(cd /roomote/apps/api && node -p "require(require('node:path').join(require('node:path').dirname(require.resolve('dompurify')), '../package.json')).version")" && \
   test "$(node -p "require('jsdom/package.json').version")" = \
     "$(cd /roomote/apps/api && node -p "require('jsdom/package.json').version")" && \
   test "$(node -p "require('snowflake-sdk/package.json').version")" = \
