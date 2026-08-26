@@ -6,6 +6,20 @@ export const INFERENCE_PROVIDER_ERROR_MAX_DELAY_MS = 30_000;
 export const INFERENCE_PROVIDER_RATE_LIMIT_BASE_DELAY_MS = 5_000;
 export const INFERENCE_PROVIDER_RATE_LIMIT_MAX_DELAY_MS = 60_000;
 
+export function buildInferenceProviderRecoveryPrompt(
+  options: { protectCompletedSideEffects?: boolean } = {},
+): string {
+  return [
+    'Continue. The previous model request failed due to a provider error and was automatically retried.',
+    'Resume from where you left off without restating the provider error.',
+    options.protectCompletedSideEffects
+      ? 'Do not repeat completed tool calls or messages already sent to the user.'
+      : undefined,
+  ]
+    .filter((part): part is string => Boolean(part))
+    .join(' ');
+}
+
 function findResponseHeaders(
   error: unknown,
 ): Record<string, unknown> | undefined {

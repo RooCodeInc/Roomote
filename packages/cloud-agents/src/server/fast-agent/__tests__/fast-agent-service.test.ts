@@ -1853,30 +1853,136 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     }
   });
 
-  it('does not replay a failed turn after a native tool was invoked', async () => {
+  it('continues the same session without redelivering completed chat tools', async () => {
+    vi.useFakeTimers();
+    try {
+      let duplicateAckResult: unknown;
+      let duplicateReactionResult: unknown;
+      mocks.generateText
+        .mockImplementationOnce(async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          await invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'ack',
+            message: 'I’m checking.',
+          });
+          await invokeTool(nativeToolNames.sendChatReaction, {
+            name: 'eyes',
+            purpose: 'ack',
+          });
+          throw new Error('TypeError: fetch failed');
+        })
+        .mockImplementationOnce(async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          duplicateAckResult = await invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'ack',
+            message: 'I’m checking.',
+          });
+          duplicateReactionResult = await invokeTool(
+            nativeToolNames.sendChatReaction,
+            {
+              name: 'eyes',
+              purpose: 'ack',
+            },
+          );
+          await invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'closeout',
+            message: 'The provider recovered.',
+          });
+          return '';
+        });
+      const replaceReply = vi.fn().mockResolvedValue({ messageId: 'retry-1' });
+      const postReaction = vi.fn().mockResolvedValue(undefined);
+      const adapter = callbacks({
+        postReply: vi.fn().mockResolvedValue({ messageId: 'retry-1' }),
+        postReaction,
+        replaceReply,
+      });
+
+      const resultPromise = answerFastAgentQuestion({
+        ...baseParams,
+        images: ['data:image/png;base64,aGVsbG8='],
+        adapter,
+      });
+      await vi.runAllTimersAsync();
+
+      await expect(resultPromise).resolves.toBe('The provider recovered.');
+      expect(mocks.generateText).toHaveBeenCalledTimes(2);
+      expect(mocks.generateText.mock.calls[1]?.[1]).toBe(
+        mocks.generateText.mock.calls[0]?.[1],
+      );
+      expect(mocks.generateText.mock.calls[1]?.[1]).toEqual({
+        id: 'opencode-session-1',
+      });
+      expect(mocks.generateText.mock.calls[1]?.[0]).toMatchObject({
+        prompt: expect.stringContaining(
+          'Do not repeat completed tool calls or messages already sent',
+        ),
+        timeoutMs: 300_000,
+      });
+      expect(mocks.generateText.mock.calls[0]?.[0]).toHaveProperty('files');
+      expect(mocks.generateText.mock.calls[1]?.[0]).not.toHaveProperty('files');
+      expect(adapter.postReply).toHaveBeenCalledWith({
+        purpose: 'progress',
+        message: expect.stringContaining('Retrying in 1s (attempt 1/6)'),
+      });
+      expect(adapter.postReply).toHaveBeenCalledTimes(2);
+      expect(adapter.postReply).toHaveBeenNthCalledWith(1, {
+        purpose: 'ack',
+        message: 'I’m checking.',
+      });
+      expect(duplicateAckResult).toMatchObject({
+        success: true,
+        delivered: true,
+        duplicate: true,
+      });
+      expect(postReaction).toHaveBeenCalledOnce();
+      expect(postReaction).toHaveBeenCalledWith({
+        name: 'eyes',
+        purpose: 'ack',
+        messageId: '100.2',
+      });
+      expect(duplicateReactionResult).toMatchObject({
+        success: true,
+        delivered: true,
+        duplicate: true,
+      });
+      expect(replaceReply).toHaveBeenCalledWith(
+        { messageId: 'retry-1' },
+        { purpose: 'closeout', message: 'The provider recovered.' },
+      );
+      expect(mocks.setOpenCodeSession).toHaveBeenCalledWith({
+        sessionId: 'conversation-1',
+        openCodeSessionId: 'opencode-session-1',
+      });
+      expect(mocks.invalidateSession).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not retry or append an error after the turn already closed', async () => {
     mocks.generateText.mockImplementationOnce(
       async (_params, _session, options) => {
         await options.onSessionReady('opencode-session-1');
         await invokeTool(nativeToolNames.sendChatReply, {
-          purpose: 'ack',
-          message: 'I’m checking.',
+          purpose: 'closeout',
+          message: 'The requested work is complete.',
         });
         throw new Error('TypeError: fetch failed');
       },
     );
-    const replaceReply = vi.fn().mockResolvedValue({ messageId: 'retry-1' });
-    const adapter = callbacks({ replaceReply });
+    const adapter = callbacks();
 
-    await answerFastAgentQuestion({ ...baseParams, adapter });
+    await expect(
+      answerFastAgentQuestion({ ...baseParams, adapter }),
+    ).resolves.toBe('The requested work is complete.');
 
     expect(mocks.generateText).toHaveBeenCalledOnce();
-    expect(adapter.postReply).not.toHaveBeenCalledWith(
-      expect.objectContaining({
-        purpose: 'progress',
-        message: expect.stringContaining('Retrying in'),
-      }),
-    );
-    expect(replaceReply).not.toHaveBeenCalled();
+    expect(adapter.postReply).toHaveBeenCalledOnce();
+    expect(adapter.postReply).toHaveBeenCalledWith({
+      purpose: 'closeout',
+      message: 'The requested work is complete.',
+    });
     expect(mocks.invalidateSession).toHaveBeenCalledWith('conversation-1');
   });
 
