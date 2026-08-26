@@ -709,6 +709,7 @@ describe('deliverFastAgentParentEvent', () => {
           replyTarget: {
             channelId: 'teams-channel-1',
             threadId: 'teams-root-1',
+            serviceUrl: 'https://stale.example.com/amer/',
           },
         },
       },

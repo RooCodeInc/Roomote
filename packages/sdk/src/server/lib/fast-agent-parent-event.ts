@@ -974,22 +974,24 @@ async function createTeamsFastAgentParentTurn(params: {
       ),
       findTeamsWorkspaceServiceUrl(fallbackConversation.workspaceId),
     ]);
-  const serviceUrl =
-    fallbackConversation.replyTarget.serviceUrl ??
-    conversationServiceUrl ??
-    workspaceServiceUrl;
-  if (
-    !session ||
-    session.conversation.surface !== 'teams' ||
-    !provider ||
-    !serviceUrl
-  ) {
+  if (!session || session.conversation.surface !== 'teams' || !provider) {
     throw new FastAgentParentEventDeliveryError(
       'Fast parent session or Teams routing credentials were not found.',
       { replyPosted: false, permanent: true },
     );
   }
   const conversation = session.conversation;
+  const serviceUrl =
+    conversationServiceUrl ??
+    workspaceServiceUrl ??
+    conversation.replyTarget.serviceUrl ??
+    fallbackConversation.replyTarget.serviceUrl;
+  if (!serviceUrl) {
+    throw new FastAgentParentEventDeliveryError(
+      'Fast Teams parent routing was not found.',
+      { replyPosted: false, permanent: true },
+    );
+  }
   return {
     userId: session.userId,
     conversation,

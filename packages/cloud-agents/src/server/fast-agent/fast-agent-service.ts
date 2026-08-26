@@ -1209,8 +1209,10 @@ export async function answerFastAgentQuestion({
         const currentChatChannel = isFastAgentCommunicationConversation(
           conversation,
         )
-          ? (conversation.replyTarget.threadId ??
-            conversation.replyTarget.channelId)
+          ? conversation.surface === 'slack'
+            ? conversation.replyTarget.channelId
+            : (conversation.replyTarget.threadId ??
+              conversation.replyTarget.channelId)
           : undefined;
         const chatLookupArguments =
           chatLookupProvider &&
