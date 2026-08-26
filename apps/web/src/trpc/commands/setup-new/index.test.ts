@@ -259,6 +259,8 @@ import {
   trackSetupBootstrapWelcomeSeenCommand,
   trackSetupCommsStateCommand,
   trackSetupWelcomeSeenCommand,
+  ensureTrialModelConfigSeeded,
+  resetTrialModelConfigSeedCheckForTests,
 } from './index';
 import {
   WORKER_RUNTIME_SCHEMA_VERSION,
@@ -1337,5 +1339,106 @@ describe('setup recommendation commands', () => {
         expect.objectContaining({ enabled: false, applied: false }),
       ],
     });
+  });
+});
+
+describe('ensureTrialModelConfigSeeded', () => {
+  function createTxStub(row: Record<string, unknown>) {
+    const inserted: Array<Record<string, unknown>> = [];
+    const tx = {
+      select: vi.fn(() => createSelectChain([row])),
+      insert: vi.fn(() => ({
+        values: vi.fn((values: Record<string, unknown>) => {
+          inserted.push(values);
+          return { onConflictDoUpdate: vi.fn(async () => undefined) };
+        }),
+      })),
+    };
+
+    return { tx, inserted };
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.unstubAllEnvs();
+    resetTrialModelConfigSeedCheckForTests();
+    mockGetPersistedEnvironmentVariableNames.mockResolvedValue([]);
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    resetTrialModelConfigSeedCheckForTests();
+  });
+
+  it('seeds the Efficient OpenRouter defaults on a fresh trial deployment', async () => {
+    vi.stubEnv('R_TRIAL_OPENROUTER_API_KEY', 'sk-trial');
+    const { tx, inserted } = createTxStub({
+      setupNewState: {},
+      runtimeModelConfig: null,
+      taskModelSettings: null,
+    });
+    mockDbTransaction.mockImplementation(
+      async (callback: (tx: unknown) => Promise<unknown>) => callback(tx),
+    );
+
+    await ensureTrialModelConfigSeeded();
+
+    const runtimeModelConfigInsert = inserted.find(
+      (values) => 'runtimeModelConfig' in values,
+    );
+    const taskModelSettingsInsert = inserted.find(
+      (values) => 'taskModelSettings' in values,
+    );
+
+    expect(runtimeModelConfigInsert?.runtimeModelConfig).toMatchObject({
+      roomoteModel: 'openrouter/openai/gpt-5.6-luna',
+      roomoteSmallModel: 'openrouter/openai/gpt-5.6-luna',
+      roomotePlanningModel: 'openrouter/openai/gpt-5.6-luna',
+    });
+    expect(taskModelSettingsInsert?.taskModelSettings).toMatchObject({
+      defaultModelId: 'openrouter/openai/gpt-5.6-luna',
+    });
+  });
+
+  it('does nothing without the trial key in the environment', async () => {
+    await ensureTrialModelConfigSeeded();
+
+    expect(mockDbTransaction).not.toHaveBeenCalled();
+  });
+
+  it('never overwrites an operator-configured provider', async () => {
+    vi.stubEnv('R_TRIAL_OPENROUTER_API_KEY', 'sk-trial');
+    vi.stubEnv('OPENROUTER_API_KEY', 'sk-operator');
+    const { tx, inserted } = createTxStub({
+      setupNewState: {},
+      runtimeModelConfig: null,
+      taskModelSettings: null,
+    });
+    mockDbTransaction.mockImplementation(
+      async (callback: (tx: unknown) => Promise<unknown>) => callback(tx),
+    );
+
+    await ensureTrialModelConfigSeeded();
+
+    expect(inserted).toEqual([]);
+  });
+
+  it('never overwrites existing model choices', async () => {
+    vi.stubEnv('R_TRIAL_OPENROUTER_API_KEY', 'sk-trial');
+    const { tx, inserted } = createTxStub({
+      setupNewState: {},
+      runtimeModelConfig: null,
+      taskModelSettings: {
+        allowedModelIds: ['openrouter/openai/gpt-5.6-terra'],
+        defaultModelId: 'openrouter/openai/gpt-5.6-terra',
+      },
+    });
+    mockDbTransaction.mockImplementation(
+      async (callback: (tx: unknown) => Promise<unknown>) => callback(tx),
+    );
+
+    await ensureTrialModelConfigSeeded();
+
+    expect(inserted).toEqual([]);
   });
 });

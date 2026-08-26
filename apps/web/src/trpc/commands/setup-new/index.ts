@@ -79,6 +79,7 @@ import {
   isConfiguredEnvValue,
   isRequiredComputeField,
   normalizeTaskModelSettings,
+  DEFAULT_TASK_MODEL_SETTINGS,
   NON_SECRET_AUTH_ENV_VAR_NAMES,
   NON_SECRET_COMPUTE_ENV_VAR_NAMES,
   NON_SECRET_SOURCE_CONTROL_ENV_VAR_NAMES,
@@ -286,6 +287,111 @@ async function savePersistedTaskModelSettings(
 
 // Persisted runtime compute config helpers are shared with the compute
 // settings commands and imported from '../compute'.
+
+/**
+ * Free-trial inference seeding. A hosting provisioner can inject a capped,
+ * Roomote-minted OpenRouter key as `R_TRIAL_OPENROUTER_API_KEY`; a fresh
+ * deployment holding that key and no inference choices of its own is seeded
+ * with OpenRouter's "Efficient" preset as ordinary editable config. The
+ * setup wizard then skips the inference step, first tasks run on an
+ * inexpensive default, and every model and provider control keeps working
+ * because nothing is pinned through env.
+ *
+ * Seeding runs at most once per process and only while the deployment has
+ * made no inference choices at all: no provider selected in setup, no saved
+ * or operator-env provider credential, no saved model config or task model
+ * settings, and no `R_MODEL` role pin. Any of those appearing later must
+ * never be overwritten back to the trial defaults.
+ */
+const TRIAL_SEED_PRESET_ID = 'efficient';
+let trialModelConfigSeedChecked = false;
+
+export function resetTrialModelConfigSeedCheckForTests(): void {
+  trialModelConfigSeedChecked = false;
+}
+
+export async function ensureTrialModelConfigSeeded(): Promise<void> {
+  if (trialModelConfigSeedChecked) {
+    return;
+  }
+
+  if (!isConfiguredEnvValue(process.env.R_TRIAL_OPENROUTER_API_KEY)) {
+    trialModelConfigSeedChecked = true;
+    return;
+  }
+
+  try {
+    await db.transaction(async (tx) => {
+      const [
+        currentState,
+        persistedModelConfig,
+        persistedTaskModelSettings,
+        persistedEnvVarNames,
+        chatgptConnected,
+        githubCopilotConnected,
+        xaiSubscriptionConnected,
+      ] = await Promise.all([
+        getPersistedSetupNewState(tx),
+        getPersistedRuntimeModelConfig(tx),
+        getPersistedRawTaskModelSettings(tx),
+        getPersistedEnvironmentVariableNames(tx),
+        isChatGptSubscriptionConnected(),
+        isGitHubCopilotSubscriptionConnected(),
+        isXaiSubscriptionConnected(),
+      ]);
+
+      const hasModelChoices =
+        currentState.modelProvider !== null ||
+        persistedTaskModelSettings !== null ||
+        Object.values(persistedModelConfig).some((value) => value !== null);
+
+      const status = buildSetupModelStatus({
+        runtimeEnv: process.env,
+        persistedEnvVarNames,
+        chatgptConnected,
+        githubCopilotConnected,
+        xaiSubscriptionConnected,
+      });
+      const hasOperatorProvider =
+        status.runtimeRoomoteModelSatisfied ||
+        status.providers.some(
+          (provider) =>
+            provider.savedApiKeySatisfied ||
+            (provider.runtimeApiKeySatisfied && !provider.trialKeySatisfied),
+        );
+
+      if (hasModelChoices || hasOperatorProvider) {
+        return;
+      }
+
+      const provider = getSetupModelProvider('openrouter');
+      const runtimeModelConfig = buildRecommendedDeploymentModelConfig(
+        provider,
+        TRIAL_SEED_PRESET_ID,
+      );
+      const defaultModelId = runtimeModelConfig.roomoteModel;
+
+      await Promise.all([
+        savePersistedRuntimeModelConfig(runtimeModelConfig, tx),
+        savePersistedTaskModelSettings(
+          normalizeTaskModelSettings({
+            ...DEFAULT_TASK_MODEL_SETTINGS,
+            ...(defaultModelId ? { defaultModelId } : {}),
+          }),
+          tx,
+        ),
+      ]);
+    });
+
+    trialModelConfigSeedChecked = true;
+  } catch (error) {
+    console.error(
+      `[ensureTrialModelConfigSeeded] Failed to seed trial model config: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
+}
 
 async function resolveSelectedRepositories(repositoryIds: string[]): Promise<{
   normalizedRepositoryIds: string[];
@@ -1100,6 +1206,7 @@ export async function getSetupNewStatusCommand(auth: UserAuthSuccess) {
 
   const { userId } = auth;
   await purgeSavedDeploymentWorkerImage();
+  await ensureTrialModelConfigSeeded();
 
   const [
     baseStatus,

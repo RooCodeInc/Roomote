@@ -470,6 +470,32 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
           },
         },
       },
+      {
+        id: 'efficient',
+        label: 'Efficient',
+        roles: {
+          coding: {
+            modelId: 'openrouter/openai/gpt-5.6-luna',
+            reasoningEffort: 'medium',
+          },
+          helper: {
+            modelId: 'openrouter/openai/gpt-5.6-luna',
+            reasoningEffort: 'low',
+          },
+          codeReview: {
+            modelId: 'openrouter/openai/gpt-5.6-luna',
+            reasoningEffort: 'medium',
+          },
+          explore: {
+            modelId: 'openrouter/openai/gpt-5.6-luna',
+            reasoningEffort: 'low',
+          },
+          planning: {
+            modelId: 'openrouter/openai/gpt-5.6-luna',
+            reasoningEffort: 'medium',
+          },
+        },
+      },
     ],
   },
   {
@@ -1362,6 +1388,13 @@ export function getDefaultRecommendedModelPreset(
 export type SetupModelProviderStatus = SetupModelProviderDescriptor & {
   runtimeApiKeySatisfied: boolean;
   savedApiKeySatisfied: boolean;
+  /**
+   * True when `runtimeApiKeySatisfied` holds only because a free-trial
+   * fallback credential (`TRIAL_MODEL_PROVIDER_ENV_VAR_FALLBACKS`) is
+   * present. The UI keeps the connect/edit affordances in this state so an
+   * operator can save their own key, which then outranks the trial key.
+   */
+  trialKeySatisfied?: boolean;
   additionalEnvValues: Record<string, string>;
 };
 
@@ -1785,6 +1818,39 @@ export function isConfiguredEnvValue(
   return normalizeOptionalString(value) !== null;
 }
 
+/**
+ * Free-trial fallback credentials, keyed by the provider credential they
+ * stand in for. A hosting provisioner can inject a capped, Roomote-minted
+ * key under the fallback name; it acts as the provider's credential only
+ * when the primary name is configured nowhere (runtime env or saved), so
+ * connecting a real key always wins. Runtime-env only by design: the values
+ * are never persisted, never editable in Settings, and stay on the control
+ * plane like any other inference-gateway-served key.
+ */
+export const TRIAL_MODEL_PROVIDER_ENV_VAR_FALLBACKS: Readonly<
+  Partial<Record<string, string>>
+> = {
+  OPENROUTER_API_KEY: 'R_TRIAL_OPENROUTER_API_KEY',
+};
+
+export function getTrialModelProviderEnvVarName(
+  primaryEnvVarName: string,
+): string | undefined {
+  return TRIAL_MODEL_PROVIDER_ENV_VAR_FALLBACKS[primaryEnvVarName];
+}
+
+export function isTrialModelProviderEnvVarConfigured(
+  primaryEnvVarName: string,
+  runtimeEnv: Partial<Record<string, string | undefined>>,
+): boolean {
+  const trialEnvVarName = getTrialModelProviderEnvVarName(primaryEnvVarName);
+
+  return (
+    trialEnvVarName !== undefined &&
+    isConfiguredEnvValue(runtimeEnv[trialEnvVarName])
+  );
+}
+
 /** Legacy Google Vertex credential name, reserved and stripped while the provider is disabled. */
 const GOOGLE_APPLICATION_CREDENTIALS_ENV_VAR_NAME =
   'GOOGLE_APPLICATION_CREDENTIALS';
@@ -1966,6 +2032,7 @@ export function buildSetupModelStatus(input: {
         additionalEnvValues: {},
         runtimeApiKeySatisfied: false,
         savedApiKeySatisfied: oauthConnected,
+        trialKeySatisfied: false,
       };
     }
 
@@ -1977,8 +2044,11 @@ export function buildSetupModelStatus(input: {
     const requiredEnvVarNames =
       getSetupModelProviderRequiredEnvVarNames(provider);
     const hasRequiredEnvVars = requiredEnvVarNames.length > 0;
+    // A free-trial fallback credential satisfies its primary name at runtime
+    // so setup skips the inference step and the provider reads as connected.
     const isRuntimeConfigured = (name: string) =>
-      isConfiguredEnvValue(runtimeEnv[name]);
+      isConfiguredEnvValue(runtimeEnv[name]) ||
+      isTrialModelProviderEnvVarConfigured(name, runtimeEnv);
     const isPersisted = (name: string) => persistedEnvVarNameSet.has(name);
     const additionalEnvValues = Object.fromEntries(
       [
@@ -2014,12 +2084,21 @@ export function buildSetupModelStatus(input: {
         (name) => isPersisted(name) || isRuntimeConfigured(name),
       ) &&
       requiredEnvVarNames.some(isPersisted);
+    const trialKeySatisfied =
+      runtimeApiKeySatisfied &&
+      !savedApiKeySatisfied &&
+      requiredEnvVarNames.some(
+        (name) =>
+          !isConfiguredEnvValue(runtimeEnv[name]) &&
+          isTrialModelProviderEnvVarConfigured(name, runtimeEnv),
+      );
 
     return {
       ...provider,
       additionalEnvValues,
       runtimeApiKeySatisfied,
       savedApiKeySatisfied,
+      trialKeySatisfied,
     };
   };
 

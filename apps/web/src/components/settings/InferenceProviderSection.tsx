@@ -149,7 +149,10 @@ function ConnectedProviderRow({
   onEdit: () => void;
   onDelete: () => void;
 }) {
-  const hasRuntimeKey = provider.runtimeApiKeySatisfied;
+  // A free-trial fallback key connects the provider but must not lock the
+  // row: saving an operator key over it is exactly how a trial ends.
+  const hasRuntimeKey =
+    provider.runtimeApiKeySatisfied && !provider.trialKeySatisfied;
   const primaryCredentialLabel = provider.envVarLabel ?? 'API key';
   const runtimeKeyTooltip = provider.envVarName
     ? `Set by ${provider.envVarName}, not changeable in the UI.`

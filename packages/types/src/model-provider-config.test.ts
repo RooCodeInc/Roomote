@@ -1054,6 +1054,30 @@ describe('buildRecommendedDeploymentModelConfig', () => {
     },
   );
 
+  it('builds the openrouter Efficient preset on the inexpensive model for every role', () => {
+    expect(
+      buildRecommendedDeploymentModelConfig(
+        getSetupModelProvider('openrouter'),
+        'efficient',
+      ),
+    ).toEqual({
+      roomoteModel: 'openrouter/openai/gpt-5.6-luna',
+      roomoteOrchestrationModel: null,
+      roomoteSmallModel: 'openrouter/openai/gpt-5.6-luna',
+      roomoteVisionModel: null,
+      roomoteCodeReviewModel: 'openrouter/openai/gpt-5.6-luna',
+      roomoteExploreModel: 'openrouter/openai/gpt-5.6-luna',
+      roomotePlanningModel: 'openrouter/openai/gpt-5.6-luna',
+      roomoteModelReasoningEffort: 'medium',
+      roomoteOrchestrationModelReasoningEffort: null,
+      roomoteSmallModelReasoningEffort: 'low',
+      roomoteVisionModelReasoningEffort: null,
+      roomoteCodeReviewModelReasoningEffort: 'medium',
+      roomoteExploreModelReasoningEffort: 'low',
+      roomotePlanningModelReasoningEffort: 'medium',
+    });
+  });
+
   it('maps the provider default to coding and recommended models to their roles', () => {
     expect(
       buildRecommendedDeploymentModelConfig(getSetupModelProvider('anthropic')),
@@ -1551,6 +1575,60 @@ describe('buildSetupModelStatus', () => {
 
     expect(status.setupSatisfiedByRuntimeEnv).toBe(false);
     expect(status.setupSatisfied).toBe(true);
+  });
+
+  it('satisfies openrouter through the free-trial fallback key and flags it', () => {
+    const status = buildSetupModelStatus({
+      runtimeEnv: {
+        R_TRIAL_OPENROUTER_API_KEY: 'sk-trial',
+      },
+      persistedModelConfig: {
+        roomoteModel: 'openrouter/openai/gpt-5.6-luna',
+        roomoteSmallModel: null,
+        roomoteVisionModel: null,
+      },
+      persistedEnvVarNames: [],
+    });
+
+    expect(status.setupSatisfied).toBe(true);
+    expect(
+      status.providers.find((provider) => provider.id === 'openrouter'),
+    ).toMatchObject({
+      runtimeApiKeySatisfied: true,
+      savedApiKeySatisfied: false,
+      trialKeySatisfied: true,
+    });
+  });
+
+  it('does not flag the trial when a real openrouter key is configured', () => {
+    const runtimeStatus = buildSetupModelStatus({
+      runtimeEnv: {
+        OPENROUTER_API_KEY: 'sk-runtime',
+        R_TRIAL_OPENROUTER_API_KEY: 'sk-trial',
+      },
+      persistedEnvVarNames: [],
+    });
+
+    expect(
+      runtimeStatus.providers.find((provider) => provider.id === 'openrouter'),
+    ).toMatchObject({
+      runtimeApiKeySatisfied: true,
+      trialKeySatisfied: false,
+    });
+
+    const savedStatus = buildSetupModelStatus({
+      runtimeEnv: {
+        R_TRIAL_OPENROUTER_API_KEY: 'sk-trial',
+      },
+      persistedEnvVarNames: ['OPENROUTER_API_KEY'],
+    });
+
+    expect(
+      savedStatus.providers.find((provider) => provider.id === 'openrouter'),
+    ).toMatchObject({
+      savedApiKeySatisfied: true,
+      trialKeySatisfied: false,
+    });
   });
 
   it('resolves the vercel provider from a runtime AI Gateway model id', () => {

@@ -364,6 +364,14 @@ const serverSchema = {
   // an OpenAI key for something else never silently re-points an existing
   // Brain at a different embedding path.
   R_BRAIN_OPENAI_API_KEY: z.string().min(1).optional(),
+  // Free-trial OpenRouter credential a hosting provisioner injects for new
+  // cloud deployments: a Roomote-minted key with a hard spend limit, used as
+  // the OpenRouter credential only while no operator key is configured
+  // (runtime or saved), so connecting a real key always wins. Runtime-env
+  // only: never persisted, never editable in Settings, and served through
+  // the inference gateway like any other provider key, so it never reaches
+  // a sandbox.
+  R_TRIAL_OPENROUTER_API_KEY: z.string().min(1).optional(),
   // Shared secret between this deployment and its Brain container, so the
   // Brain can reach /api/brain/inference without holding a provider key of
   // its own. It is the Brain's whole credential: the real provider key stays
@@ -515,6 +523,7 @@ const OPTIONAL_NON_EMPTY_KEYS = new Set([
   'R_GBRAIN_ADMIN_TOKEN_FILE',
   'R_BRAIN_OPENROUTER_API_KEY',
   'R_BRAIN_OPENAI_API_KEY',
+  'R_TRIAL_OPENROUTER_API_KEY',
   'R_BRAIN_GATEWAY_TOKEN',
   'R_BRAIN_GATEWAY_TOKEN_FILE',
   'R_BRAIN_MODEL',

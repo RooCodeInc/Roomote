@@ -9,6 +9,7 @@ import {
   isGitHubCopilotSubscriptionConnected,
   isXaiSubscriptionConnected,
   isNull,
+  resolveModelProviderEnvValue,
   type DatabaseOrTransaction,
 } from '@roomote/db/server';
 import {
@@ -1512,11 +1513,11 @@ export async function lookupTaskModelCommand(
     return lookupModelFromModelsDevCatalog(modelId);
   }
 
-  const runtimeOpenRouterKey = process.env.OPENROUTER_API_KEY?.trim();
-  const openRouterKey = runtimeOpenRouterKey
-    ? runtimeOpenRouterKey
-    : (await getPersistedEnvironmentVariableValues(['OPENROUTER_API_KEY']))
-        .OPENROUTER_API_KEY;
+  // Shared runtime-first resolution, including the free-trial fallback key,
+  // so metadata lookups work on trial-only deployments.
+  const openRouterKey = await resolveModelProviderEnvValue([
+    'OPENROUTER_API_KEY',
+  ]);
 
   if (!openRouterKey) {
     return {

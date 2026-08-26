@@ -73,6 +73,34 @@ vi.mock('@roomote/db/server', () => ({
     mockIsGitHubCopilotSubscriptionConnected,
   isXaiSubscriptionConnected: mockIsXaiSubscriptionConnected,
   isNull: vi.fn((column) => ({ isNull: column })),
+  // Mirrors the real runtime-first-then-persisted precedence through the
+  // persisted-values mock this file already controls.
+  resolveModelProviderEnvValue: vi.fn(
+    async (envVarNames: string | readonly string[]) => {
+      const names =
+        typeof envVarNames === 'string' ? [envVarNames] : envVarNames;
+
+      for (const name of names) {
+        const value = process.env[name]?.trim();
+        if (value) {
+          return value;
+        }
+      }
+
+      const persisted = (await mockGetPersistedEnvironmentVariableValues(
+        names,
+      )) as Partial<Record<string, string>> | undefined;
+
+      for (const name of names) {
+        const value = persisted?.[name]?.trim();
+        if (value) {
+          return value;
+        }
+      }
+
+      return undefined;
+    },
+  ),
 }));
 
 vi.mock('../environment-variables', () => ({

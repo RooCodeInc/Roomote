@@ -74,6 +74,7 @@ import {
   isBrainProviderConfigured,
   resetBrainProviderConfiguredCache,
   resolveEffectiveModelRuntimeEnv,
+  resolveModelProviderEnvValue,
   resolveSandboxModelRuntimeEnv,
 } from './model-runtime-config';
 import { TASK_MODEL_ROLE_DESCRIPTORS, TASK_MODEL_ROLES } from '@roomote/types';
@@ -1150,6 +1151,93 @@ describe('resolveEffectiveModelRuntimeEnv', () => {
       expect(env).not.toHaveProperty('LITELLM_API_KEY');
       expect(env).not.toHaveProperty('LITELLM_BASE_URL');
     });
+  });
+});
+
+describe('free-trial fallback key', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockDecryptSecrets.mockImplementation(async (value) => value);
+    mockEnvironmentVariablesFindMany.mockResolvedValue([]);
+    mockResolveGitHubCopilotOpenCodeAuthContent.mockResolvedValue(null);
+    mockResolveOpenCodeAuthContent.mockResolvedValue(null);
+    mockIsChatGptSubscriptionFastModeEnabled.mockResolvedValue(false);
+    mockGetFreshXaiAccessToken.mockResolvedValue(null);
+  });
+
+  it('advertises OpenRouter as gateway-served without leaking the trial key', async () => {
+    mockDeploymentSettingsFindFirst.mockResolvedValue({
+      runtimeModelConfig: { roomoteModel: 'openrouter/openai/gpt-5.6-luna' },
+      taskModelSettings: null,
+    });
+
+    const env = await resolveSandboxModelRuntimeEnv({
+      runtimeEnv: { R_TRIAL_OPENROUTER_API_KEY: 'sk-trial' },
+      deploymentEnvVars: {},
+    });
+
+    expect(env.R_INFERENCE_GATEWAY_KEYS?.split(',')).toContain(
+      'OPENROUTER_API_KEY',
+    );
+    expect(env).not.toHaveProperty('OPENROUTER_API_KEY');
+    expect(env).not.toHaveProperty('R_TRIAL_OPENROUTER_API_KEY');
+    expect(Object.values(env)).not.toContain('sk-trial');
+  });
+
+  it('materializes the trial key on the control plane when nothing else is configured', async () => {
+    mockDeploymentSettingsFindFirst.mockResolvedValue({
+      runtimeModelConfig: { roomoteModel: 'openrouter/openai/gpt-5.6-luna' },
+      taskModelSettings: null,
+    });
+
+    const env = await resolveEffectiveModelRuntimeEnv({
+      runtimeEnv: { R_TRIAL_OPENROUTER_API_KEY: 'sk-trial' },
+      deploymentEnvVars: {},
+    });
+
+    expect(env.OPENROUTER_API_KEY).toBe('sk-trial');
+    expect(env).not.toHaveProperty('R_TRIAL_OPENROUTER_API_KEY');
+  });
+
+  it('never outranks a saved operator key', async () => {
+    mockDeploymentSettingsFindFirst.mockResolvedValue({
+      runtimeModelConfig: { roomoteModel: 'openrouter/openai/gpt-5.6-luna' },
+      taskModelSettings: null,
+    });
+
+    const env = await resolveEffectiveModelRuntimeEnv({
+      runtimeEnv: { R_TRIAL_OPENROUTER_API_KEY: 'sk-trial' },
+      deploymentEnvVars: { OPENROUTER_API_KEY: 'sk-saved' },
+    });
+
+    expect(env.OPENROUTER_API_KEY).toBe('sk-saved');
+  });
+
+  it('resolveModelProviderEnvValue prefers runtime, then saved, then trial', async () => {
+    await expect(
+      resolveModelProviderEnvValue(['OPENROUTER_API_KEY'], {
+        runtimeEnv: {
+          OPENROUTER_API_KEY: 'sk-runtime',
+          R_TRIAL_OPENROUTER_API_KEY: 'sk-trial',
+        },
+      }),
+    ).resolves.toBe('sk-runtime');
+
+    mockEnvironmentVariablesFindMany.mockResolvedValue([
+      { name: 'OPENROUTER_API_KEY', value: 'sk-saved' },
+    ]);
+    await expect(
+      resolveModelProviderEnvValue(['OPENROUTER_API_KEY'], {
+        runtimeEnv: { R_TRIAL_OPENROUTER_API_KEY: 'sk-trial' },
+      }),
+    ).resolves.toBe('sk-saved');
+
+    mockEnvironmentVariablesFindMany.mockResolvedValue([]);
+    await expect(
+      resolveModelProviderEnvValue(['OPENROUTER_API_KEY'], {
+        runtimeEnv: { R_TRIAL_OPENROUTER_API_KEY: 'sk-trial' },
+      }),
+    ).resolves.toBe('sk-trial');
   });
 });
 
