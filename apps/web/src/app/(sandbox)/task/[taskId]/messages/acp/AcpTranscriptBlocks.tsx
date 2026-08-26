@@ -28,6 +28,7 @@ export function useAcpTranscriptBlocks({
   shouldHideFirstMessage,
   showInternalMessages,
   hasLeadingTextBoundary,
+  keepDelegatedTasksVisible = false,
   resetKey,
 }: {
   messages: AcpUiMessage[];
@@ -37,6 +38,7 @@ export function useAcpTranscriptBlocks({
   shouldHideFirstMessage: boolean;
   showInternalMessages: boolean;
   hasLeadingTextBoundary: boolean;
+  keepDelegatedTasksVisible?: boolean;
   resetKey: string;
 }) {
   const [suppressedMessageIds, setSuppressedMessageIds] = useState<Set<string>>(
@@ -63,6 +65,7 @@ export function useAcpTranscriptBlocks({
       initialPrompt,
       shouldHideFirstMessage,
       showInternalMessages,
+      keepDelegatedTasksVisible,
       suppressedMessageIds,
     });
 
@@ -70,12 +73,14 @@ export function useAcpTranscriptBlocks({
       artifacts,
       displayMode,
       hasLeadingTextBoundary,
+      keepDelegatedTasksVisible,
     });
   }, [
     artifacts,
     displayMode,
     hasLeadingTextBoundary,
     initialPrompt,
+    keepDelegatedTasksVisible,
     messages,
     shouldHideFirstMessage,
     showInternalMessages,
@@ -106,10 +111,12 @@ export function AcpTranscriptBlockList({
   blocks,
   showInternalMessages,
   onSuppress,
+  onOpenDelegatedTask,
 }: {
   blocks: AcpConversationRenderBlock[];
   showInternalMessages: boolean;
   onSuppress: (messageId: string) => void;
+  onOpenDelegatedTask?: (taskId: string) => void;
 }) {
   function renderNestedBlocks(nestedBlocks: AcpRenderBlock[]) {
     return nestedBlocks.map((block) => (
@@ -196,6 +203,7 @@ export function AcpTranscriptBlockList({
         msg={block.msg}
         onSuppress={onSuppress}
         showSubagentPayload={showInternalMessages}
+        onOpenDelegatedTask={onOpenDelegatedTask}
       >
         {block.childBlocks?.length
           ? renderNestedBlocks(block.childBlocks)

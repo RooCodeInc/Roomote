@@ -20,6 +20,7 @@ import {
   isSubagentToolPayload,
 } from './subagent-tool';
 import { resolveShowWidgetForToolMessage } from './show-widget-tool-result';
+import { getDelegatedTaskDetails } from './delegated-task';
 
 export type ExplorationStepKind = 'list' | 'read' | 'search';
 
@@ -113,6 +114,7 @@ interface BuildAcpRenderBlocksOptions {
   initialPrompt?: Pick<AcpUiMessage, 'text' | 'images'> | null;
   shouldHideFirstMessage?: boolean;
   showInternalMessages?: boolean;
+  keepDelegatedTasksVisible?: boolean;
   suppressedMessageIds?: ReadonlySet<string>;
 }
 
@@ -759,7 +761,10 @@ function resolveMessageRenderState(
 
   return {
     visibility: 'render',
-    groupKey: resolveToolGroupKey(msg),
+    groupKey:
+      options.keepDelegatedTasksVisible && getDelegatedTaskDetails(msg)
+        ? null
+        : resolveToolGroupKey(msg),
   };
 }
 

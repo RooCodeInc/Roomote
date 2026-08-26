@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, type ReactNode } from 'react';
+import { useCallback, useState, type ReactNode } from 'react';
 import { formatDistanceToNow } from 'date-fns';
 
 import { formatInferenceCost, getUserDisplayName } from '@/lib';
@@ -10,14 +10,15 @@ import { SideNavItem } from '@/components/layout/side-nav/SideNavItem';
 import {
   Avatar,
   BasicTooltip,
-  Button,
   DollarSign,
   Info,
   ResizableDivider,
   ResizablePanel,
   ResizablePanelGroup,
-  X,
 } from '@/components/system';
+import { SidePanelHeader } from '../../task/[taskId]/sidebar-panels/SidePanelHeader';
+import { NestedTaskSidePanel } from './NestedTaskSidePanel';
+import { OpenSessionTaskPanelContext } from './session-task-panel-context';
 
 export type SessionInfo = {
   id: string;
@@ -68,19 +69,7 @@ function SessionInfoPanel({
 
   return (
     <>
-      <div className="flex shrink-0 items-center justify-between gap-2 border-b-2 border-card px-4 py-2">
-        <h2 className="text-sm font-medium">Session info</h2>
-        <BasicTooltip content="Close">
-          <Button
-            variant="ghost"
-            size="icon"
-            aria-label="Close session info"
-            onClick={onClose}
-          >
-            <X />
-          </Button>
-        </BasicTooltip>
-      </div>
+      <SidePanelHeader title="Session info" onClose={onClose} />
       <div className="scroll-thin min-h-0 flex-1 overflow-y-auto px-4 py-4">
         <table className="text-sm">
           <tbody>
@@ -120,6 +109,8 @@ function SessionInfoPanel({
   );
 }
 
+type SessionPanel = { type: 'info' } | { type: 'task'; taskId: string };
+
 export function SessionWorkspace({
   session,
   children,
@@ -127,47 +118,62 @@ export function SessionWorkspace({
   session: SessionInfo;
   children: ReactNode;
 }) {
-  const [isInfoOpen, setIsInfoOpen] = useState(false);
+  const [activePanel, setActivePanel] = useState<SessionPanel | null>(null);
+  const openTaskPanel = useCallback((taskId: string) => {
+    setActivePanel({ type: 'task', taskId });
+  }, []);
+  const isInfoOpen = activePanel?.type === 'info';
+  const closePanel = useCallback(() => setActivePanel(null), []);
 
   return (
-    <WorkspaceSurface
-      sideActions={
-        <div className="flex h-full shrink-0 flex-col gap-2 overflow-y-auto bg-card py-3 pr-2">
-          <SideNavItem
-            side="right"
-            label="Session info"
-            tooltip="Session info"
-            active={isInfoOpen}
-            icon={Info}
-            onClick={() => setIsInfoOpen((previous) => !previous)}
-          />
-        </div>
-      }
-    >
-      <ResizablePanelGroup direction="horizontal" className="min-h-0 flex-1">
-        <ResizablePanel
-          defaultSize={isInfoOpen ? 65 : 100}
-          minSize={30}
-          className="flex min-h-0 min-w-0 flex-col"
-        >
-          {children}
-        </ResizablePanel>
-        {isInfoOpen && (
-          <>
-            <ResizableDivider />
-            <ResizablePanel
-              defaultSize={35}
-              minSize={20}
-              className="flex min-h-0 min-w-0 flex-col border-l-2 border-card"
-            >
-              <SessionInfoPanel
-                session={session}
-                onClose={() => setIsInfoOpen(false)}
-              />
-            </ResizablePanel>
-          </>
-        )}
-      </ResizablePanelGroup>
-    </WorkspaceSurface>
+    <OpenSessionTaskPanelContext.Provider value={openTaskPanel}>
+      <WorkspaceSurface
+        sideActions={
+          <div className="flex h-full shrink-0 flex-col gap-2 overflow-y-auto bg-card py-3 pr-2">
+            <SideNavItem
+              side="right"
+              label="Session info"
+              tooltip="Session info"
+              active={isInfoOpen}
+              icon={Info}
+              onClick={() =>
+                setActivePanel((previous) =>
+                  previous?.type === 'info' ? null : { type: 'info' },
+                )
+              }
+            />
+          </div>
+        }
+      >
+        <ResizablePanelGroup direction="horizontal" className="min-h-0 flex-1">
+          <ResizablePanel
+            defaultSize={activePanel ? 65 : 100}
+            minSize={30}
+            className="flex min-h-0 min-w-0 flex-col"
+          >
+            {children}
+          </ResizablePanel>
+          {activePanel ? (
+            <>
+              <ResizableDivider />
+              <ResizablePanel
+                defaultSize={35}
+                minSize={20}
+                className="flex min-h-0 min-w-0 flex-col border-l-2 border-card"
+              >
+                {activePanel.type === 'info' ? (
+                  <SessionInfoPanel session={session} onClose={closePanel} />
+                ) : (
+                  <NestedTaskSidePanel
+                    taskId={activePanel.taskId}
+                    onClose={closePanel}
+                  />
+                )}
+              </ResizablePanel>
+            </>
+          ) : null}
+        </ResizablePanelGroup>
+      </WorkspaceSurface>
+    </OpenSessionTaskPanelContext.Provider>
   );
 }
