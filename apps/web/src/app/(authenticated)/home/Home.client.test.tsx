@@ -517,18 +517,29 @@ describe('Home', () => {
     });
   });
 
-  it('preserves an explicitly persisted workspace when Fast is preferred', async () => {
+  it.each([
+    {
+      name: 'environment',
+      workspace: { type: 'environment', id: 'env-1' },
+    },
+    {
+      name: 'repository',
+      workspace: { type: 'repository', value: 'RooCodeInc/Roomote' },
+    },
+  ])('prefers Fast over a persisted $name workspace', async ({ workspace }) => {
     currentCommunicationsFastModeDefault = true;
     localStorage.setItem(
       'roomote-workspace:deployment',
-      JSON.stringify({ workspace: { type: 'environment', id: 'env-1' } }),
+      JSON.stringify({ workspace }),
     );
 
     render(<Home initialPlaceholderIndex={0} />);
 
     await waitFor(() => {
-      expect(screen.getByTestId('repository')).toHaveTextContent('env-1');
-      expect(screen.getByTestId('environment')).toHaveTextContent('env-1');
+      expect(screen.getByTestId('repository')).toHaveTextContent(
+        FAST_EXECUTION,
+      );
+      expect(screen.getByTestId('environment')).toHaveTextContent('');
     });
   });
 
