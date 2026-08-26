@@ -629,6 +629,46 @@ describe('customAutomationsJob', () => {
     );
   });
 
+  it('uses the persisted Teams DM service URL to report a parent-turn failure', async () => {
+    vi.mocked(listEnabledCustomAutomations).mockResolvedValue([
+      {
+        ...automation,
+        executionMode: 'fast',
+        environmentId: null,
+        target: {
+          provider: 'teams',
+          targetKind: 'teams_user',
+          externalRef: 'user-1',
+        },
+        createdByUserId: 'user-1',
+      } as never,
+    ]);
+    vi.mocked(listConnectedCommunicationProviders).mockResolvedValue(['teams']);
+    vi.mocked(findUserDirectMessageDestination).mockResolvedValue({
+      channelId: 'teams-dm-1',
+      teamId: 'tenant-1',
+      serviceUrl: 'https://persisted.example.com/amer/',
+    });
+    fastMocks.deliverParentEvent.mockRejectedValueOnce(
+      new Error('parent turn failed'),
+    );
+    vi.mocked(findTeamsConversationRoute).mockResolvedValue(null);
+
+    await customAutomationsJob();
+
+    expect(findTeamsConversationRoute).toHaveBeenCalledWith(
+      'teams-dm-1',
+      'tenant-1',
+    );
+    expect(fastMocks.teamsUpdateMessage).toHaveBeenCalledWith({
+      channelId: 'teams-dm-1',
+      messageId: 'teams-message-1',
+      serviceUrl: 'https://persisted.example.com/amer/',
+      text: 'Flaky tests failed: parent turn failed',
+      textFormat: 'markdown',
+    });
+  });
+
   it.each([
     {
       provider: 'discord',
