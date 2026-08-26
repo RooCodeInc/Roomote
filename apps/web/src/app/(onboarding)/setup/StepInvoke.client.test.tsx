@@ -4,8 +4,16 @@ const setQueryDataMock = vi.fn();
 const invalidateQueriesMock = vi.fn().mockResolvedValue(undefined);
 const removeQueriesMock = vi.fn();
 const fetchQueryMock = vi.fn();
-const mutationOptionsMock = vi.fn((options) => options);
+const mutationOptionsMock = vi.fn((options) => ({
+  ...options,
+  __mutationKey: 'complete',
+}));
+const starterMutationOptionsMock = vi.fn((options) => ({
+  ...options,
+  __mutationKey: 'starter',
+}));
 const mutateMock = vi.fn();
+const starterMutateMock = vi.fn();
 const environmentState = vi.hoisted(() => ({
   environments: [{ id: 'env-1' }],
   commsProviders: [] as Array<{
@@ -15,6 +23,14 @@ const environmentState = vi.hoisted(() => ({
 }));
 const userState = vi.hoisted(() => ({
   user: null as { cloudEnabled: boolean; isAdmin: boolean } | null,
+}));
+const starterResultState = vi.hoisted(() => ({
+  queue: [] as Array<{
+    launched: Array<{ starterTaskId: string; taskId: string }>;
+    failed: Array<{ starterTaskId: string; error: string }>;
+    setupCompleted: boolean;
+    completionError: string | null;
+  }>,
 }));
 const queryKeys = {
   setupStatus: ['setup.status'],
@@ -33,13 +49,38 @@ vi.mock('@tanstack/react-query', async () => {
 
   return {
     ...actual,
-    useMutation: (options: { onSuccess?: () => Promise<void> | void }) => ({
-      mutate: async (input?: unknown) => {
-        mutateMock(input);
-        await options.onSuccess?.();
-      },
-      isPending: false,
-    }),
+    useMutation: (options: {
+      __mutationKey?: string;
+      onSuccess?: (data?: unknown, variables?: unknown) => Promise<void> | void;
+      onError?: (error: Error) => void;
+    }) => {
+      if (options.__mutationKey === 'starter') {
+        return {
+          mutate: async (input: { selectedStarterTaskIds: string[] }) => {
+            starterMutateMock(input);
+            const result = starterResultState.queue.shift() ?? {
+              launched: input.selectedStarterTaskIds.map((starterTaskId) => ({
+                starterTaskId,
+                taskId: `task-${starterTaskId}`,
+              })),
+              failed: [],
+              setupCompleted: true,
+              completionError: null,
+            };
+            await options.onSuccess?.(result, input);
+          },
+          isPending: false,
+        };
+      }
+
+      return {
+        mutate: async (input?: unknown) => {
+          mutateMock(input);
+          await options.onSuccess?.();
+        },
+        isPending: false,
+      };
+    },
     useQuery: () => ({
       data: {
         providers: environmentState.commsProviders,
@@ -66,6 +107,9 @@ vi.mock('@/trpc/client', () => ({
     setup: {
       complete: {
         mutationOptions: mutationOptionsMock,
+      },
+      completeWithStarterTasks: {
+        mutationOptions: starterMutationOptionsMock,
       },
       status: {
         queryKey: () => queryKeys.setupStatus,
@@ -142,15 +186,18 @@ vi.mock('@/components/system', () => ({
   ),
   Checkbox: ({
     checked,
+    disabled,
     onCheckedChange,
     ...props
   }: {
     checked?: boolean;
+    disabled?: boolean;
     onCheckedChange?: (checked: boolean) => void;
   } & Record<string, unknown>) => (
     <input
       type="checkbox"
       checked={checked}
+      disabled={disabled}
       onChange={(event) => onCheckedChange?.(event.target.checked)}
       aria-label={String(props['aria-label'] ?? 'checkbox')}
     />
@@ -176,7 +223,22 @@ vi.mock('@/components/system', () => ({
   ),
 }));
 
+import { SETUP_STARTER_TASKS } from '@/lib/setup-starter-tasks';
 import { StepInvoke } from './StepInvoke';
+
+const STARTER_TASK_TITLES = SETUP_STARTER_TASKS.map(
+  (starterTask) => starterTask.title,
+);
+
+function uncheckAllStarterTasks() {
+  for (const title of STARTER_TASK_TITLES) {
+    fireEvent.click(screen.getByRole('checkbox', { name: title }));
+  }
+}
+
+function clickGo() {
+  fireEvent.click(screen.getByRole('button', { name: /^go/i }));
+}
 
 describe('Setup StepInvoke', () => {
   beforeEach(() => {
@@ -196,6 +258,7 @@ describe('Setup StepInvoke', () => {
     environmentState.environments = [{ id: 'env-1' }];
     environmentState.commsProviders = [];
     userState.user = null;
+    starterResultState.queue = [];
   });
 
   it('shows an actionable retry when sandbox provisioning fails', () => {
@@ -223,15 +286,174 @@ describe('Setup StepInvoke', () => {
     expect(onRetryComputeProvisioning).toHaveBeenCalledOnce();
   });
 
-  it('optimistically completes setup and onboarding before routing away', async () => {
+  it('renders every starter task preselected under the new headline', () => {
+    render(<StepInvoke />);
+
+    expect(
+      screen.getByText("You're all set up. Let's run your first few tasks."),
+    ).toBeInTheDocument();
+
+    for (const title of STARTER_TASK_TITLES) {
+      expect(screen.getByRole('checkbox', { name: title })).toBeChecked();
+    }
+  });
+
+  it('launches a single selected task and routes to it', async () => {
+    render(<StepInvoke />);
+
+    for (const title of STARTER_TASK_TITLES.slice(1)) {
+      fireEvent.click(screen.getByRole('checkbox', { name: title }));
+    }
+    clickGo();
+
+    await waitFor(() => {
+      expect(starterMutateMock).toHaveBeenCalledWith({
+        selectedStarterTaskIds: ['speed-up-ci'],
+        anonymousAnalyticsEnabled: true,
+        productUpdatesEnabled: true,
+      });
+    });
+
+    await waitFor(() => {
+      expect(replaceMock).toHaveBeenCalledWith('/task/task-speed-up-ci');
+    });
+
+    expect(setQueryDataMock).toHaveBeenCalledWith(
+      queryKeys.setupStatus,
+      expect.any(Function),
+    );
+    expect(setQueryDataMock).toHaveBeenCalledWith(
+      queryKeys.onboardingStatus,
+      expect.any(Function),
+    );
+    await waitFor(() => {
+      expect(invalidateQueriesMock).toHaveBeenCalledWith({
+        queryKey: queryKeys.setupStatus,
+      });
+    });
+    expect(removeQueriesMock).toHaveBeenCalledWith({
+      queryKey: queryKeys.githubInstallations,
+    });
+    expect(mutateMock).not.toHaveBeenCalled();
+  });
+
+  it('launches every selected task and routes to the tasks list', async () => {
+    render(<StepInvoke />);
+
+    clickGo();
+
+    await waitFor(() => {
+      expect(starterMutateMock).toHaveBeenCalledWith({
+        selectedStarterTaskIds: [
+          'speed-up-ci',
+          'security-scan',
+          'fix-test-flakes',
+          'update-dependencies',
+        ],
+        anonymousAnalyticsEnabled: true,
+        productUpdatesEnabled: true,
+      });
+    });
+
+    await waitFor(() => {
+      expect(replaceMock).toHaveBeenCalledWith('/tasks');
+    });
+  });
+
+  it('keeps failures visible and retries only tasks that have not launched', async () => {
+    starterResultState.queue.push({
+      launched: [
+        { starterTaskId: 'speed-up-ci', taskId: 'task-ci' },
+        { starterTaskId: 'security-scan', taskId: 'task-security' },
+      ],
+      failed: [
+        { starterTaskId: 'fix-test-flakes', error: 'No repositories.' },
+        { starterTaskId: 'update-dependencies', error: 'No repositories.' },
+      ],
+      setupCompleted: false,
+      completionError: null,
+    });
+
+    render(<StepInvoke />);
+
+    clickGo();
+
+    await waitFor(() => {
+      expect(
+        screen.getByText(
+          /Couldn't start: Fix test flakes, Update dependencies/,
+        ),
+      ).toBeInTheDocument();
+    });
+    expect(replaceMock).not.toHaveBeenCalled();
+    expect(
+      screen.getByRole('checkbox', { name: 'Speed up CI' }),
+    ).toBeDisabled();
+    expect(screen.getAllByText('Started.')).toHaveLength(2);
+
+    fireEvent.click(screen.getByRole('button', { name: /retry/i }));
+
+    await waitFor(() => {
+      expect(starterMutateMock).toHaveBeenLastCalledWith({
+        selectedStarterTaskIds: ['fix-test-flakes', 'update-dependencies'],
+        anonymousAnalyticsEnabled: true,
+        productUpdatesEnabled: true,
+      });
+    });
+
+    await waitFor(() => {
+      expect(replaceMock).toHaveBeenCalledWith('/tasks');
+    });
+  });
+
+  it('keeps setup incomplete and offers retry when completion fails after launches', async () => {
+    starterResultState.queue.push({
+      launched: [{ starterTaskId: 'speed-up-ci', taskId: 'task-ci' }],
+      failed: [],
+      setupCompleted: false,
+      completionError: 'settings write failed',
+    });
+
+    render(<StepInvoke />);
+
+    for (const title of STARTER_TASK_TITLES.slice(1)) {
+      fireEvent.click(screen.getByRole('checkbox', { name: title }));
+    }
+    clickGo();
+
+    await waitFor(() => {
+      expect(screen.getByText(/settings write failed/)).toBeInTheDocument();
+    });
+    expect(replaceMock).not.toHaveBeenCalled();
+
+    // The remaining selection is empty, so the retry completes setup through
+    // the starter mutation and routes to the already-launched task.
+    fireEvent.click(screen.getByRole('button', { name: /retry/i }));
+
+    await waitFor(() => {
+      expect(starterMutateMock).toHaveBeenLastCalledWith({
+        selectedStarterTaskIds: [],
+        anonymousAnalyticsEnabled: true,
+        productUpdatesEnabled: true,
+      });
+    });
+
+    await waitFor(() => {
+      expect(replaceMock).toHaveBeenCalledWith('/task/task-ci');
+    });
+  });
+
+  it('optimistically completes setup and onboarding before routing away when nothing is selected', async () => {
     const onTryItOut = vi.fn();
 
     render(<StepInvoke onTryItOut={onTryItOut} />);
 
-    fireEvent.click(screen.getByRole('button', { name: /let'?s go/i }));
+    uncheckAllStarterTasks();
+    clickGo();
 
     expect(onTryItOut).toHaveBeenCalledTimes(1);
     expect(mutationOptionsMock).toHaveBeenCalled();
+    expect(starterMutateMock).not.toHaveBeenCalled();
 
     await waitFor(() => {
       expect(setQueryDataMock).toHaveBeenCalledWith(
@@ -310,7 +532,8 @@ describe('Setup StepInvoke', () => {
   it('sends independent enabled preferences by default', async () => {
     render(<StepInvoke />);
 
-    fireEvent.click(screen.getByRole('button', { name: /let'?s go/i }));
+    uncheckAllStarterTasks();
+    clickGo();
 
     await waitFor(() => {
       expect(mutateMock).toHaveBeenCalledWith({
@@ -326,7 +549,8 @@ describe('Setup StepInvoke', () => {
     fireEvent.click(
       screen.getByRole('checkbox', { name: 'Toggle product updates' }),
     );
-    fireEvent.click(screen.getByRole('button', { name: /let'?s go/i }));
+    uncheckAllStarterTasks();
+    clickGo();
 
     await waitFor(() => {
       expect(mutateMock).toHaveBeenCalledWith({
@@ -336,12 +560,31 @@ describe('Setup StepInvoke', () => {
     });
   });
 
+  it('includes preferences when launching starter tasks', async () => {
+    render(<StepInvoke />);
+
+    fireEvent.click(
+      screen.getByRole('checkbox', { name: 'Toggle product updates' }),
+    );
+    clickGo();
+
+    await waitFor(() => {
+      expect(starterMutateMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          anonymousAnalyticsEnabled: true,
+          productUpdatesEnabled: false,
+        }),
+      );
+    });
+  });
+
   it('routes to the first environment when multiple environments exist', async () => {
     environmentState.environments = [{ id: 'env-newer' }, { id: 'env-older' }];
 
     render(<StepInvoke />);
 
-    fireEvent.click(screen.getByRole('button', { name: /let'?s go/i }));
+    uncheckAllStarterTasks();
+    clickGo();
 
     await waitFor(() => {
       expect(replaceMock).toHaveBeenCalledWith('/?environmentId=env-newer');
@@ -353,7 +596,8 @@ describe('Setup StepInvoke', () => {
 
     render(<StepInvoke />);
 
-    fireEvent.click(screen.getByRole('button', { name: /let'?s go/i }));
+    uncheckAllStarterTasks();
+    clickGo();
 
     await waitFor(() => {
       expect(replaceMock).toHaveBeenCalledWith('/');
@@ -393,7 +637,8 @@ describe('Setup StepInvoke', () => {
 
     render(<StepInvoke />);
 
-    fireEvent.click(screen.getByRole('button', { name: /let'?s go/i }));
+    uncheckAllStarterTasks();
+    clickGo();
 
     await waitFor(() => {
       expect(replaceMock).toHaveBeenCalledWith('/task/task-refreshed');
@@ -409,7 +654,8 @@ describe('Setup StepInvoke', () => {
 
     render(<StepInvoke />);
 
-    fireEvent.click(screen.getByRole('button', { name: /let'?s go/i }));
+    uncheckAllStarterTasks();
+    clickGo();
 
     await waitFor(() => {
       expect(replaceMock).toHaveBeenCalledWith('/');
@@ -418,7 +664,12 @@ describe('Setup StepInvoke', () => {
   });
 
   it('shows a concrete GitHub comment example', () => {
-    render(<StepInvoke sourceControlProviders={['github']} />);
+    render(
+      <StepInvoke
+        onboardingTaskId="task-onboarding-1"
+        sourceControlProviders={['github']}
+      />,
+    );
 
     expect(
       screen.getByText(
@@ -428,7 +679,12 @@ describe('Setup StepInvoke', () => {
   });
 
   it('shows a concrete GitLab comment example', () => {
-    render(<StepInvoke sourceControlProviders={['gitlab']} />);
+    render(
+      <StepInvoke
+        onboardingTaskId="task-onboarding-1"
+        sourceControlProviders={['gitlab']}
+      />,
+    );
 
     expect(
       screen.getByText(
@@ -438,7 +694,12 @@ describe('Setup StepInvoke', () => {
   });
 
   it('shows a concrete Bitbucket Cloud comment example', () => {
-    render(<StepInvoke sourceControlProviders={['bitbucket']} />);
+    render(
+      <StepInvoke
+        onboardingTaskId="task-onboarding-1"
+        sourceControlProviders={['bitbucket']}
+      />,
+    );
 
     expect(
       screen.getByText(
@@ -450,6 +711,7 @@ describe('Setup StepInvoke', () => {
   it('shows configured providers with automations before the web UI', () => {
     render(
       <StepInvoke
+        onboardingTaskId="task-onboarding-1"
         communicationProviders={['telegram']}
         sourceControlProviders={['ado']}
       />,
@@ -475,7 +737,7 @@ describe('Setup StepInvoke', () => {
   it('discovers configured Discord and shows a concrete prompt example', () => {
     environmentState.commsProviders = [{ id: 'discord', setupSatisfied: true }];
 
-    render(<StepInvoke />);
+    render(<StepInvoke onboardingTaskId="task-onboarding-1" />);
 
     expect(screen.getByText(/^Discord:/)).toBeInTheDocument();
     expect(
@@ -486,7 +748,8 @@ describe('Setup StepInvoke', () => {
   it('includes the link_suggested param when selected suggested tasks were started', async () => {
     render(<StepInvoke linkSuggestedTasks={true} />);
 
-    fireEvent.click(screen.getByRole('button', { name: /let'?s go/i }));
+    uncheckAllStarterTasks();
+    clickGo();
 
     await waitFor(() => {
       expect(replaceMock).toHaveBeenCalledWith(

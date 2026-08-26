@@ -20,24 +20,23 @@ import {
 import { useTRPC } from '@/trpc/client';
 import { useEnvironments } from '@/hooks/environments/useEnvironments';
 import { useUser } from '@/hooks/useUser';
+import {
+  SETUP_STARTER_TASKS,
+  getSetupStarterTask,
+  type SetupStarterTaskId,
+} from '@/lib/setup-starter-tasks';
 import { buildInvokeMethods } from '../invokeMethods';
 import { StepTitle } from './StepTitle';
 import { getSetupStepDefinition } from './types';
 
 const INVOKE_STEP = getSetupStepDefinition('invoke');
 
+const STARTER_TASKS_TITLE =
+  "You're all set up. Let's run your first few tasks.";
+
 type CommunicationProviderId = 'slack' | 'microsoft' | 'telegram' | 'discord';
 
-export function StepInvoke({
-  onTryItOut,
-  onboardingTaskId,
-  linkSuggestedTasks = false,
-  communicationProviders = [],
-  sourceControlProviders = [],
-  includeLinear = false,
-  computeProvisioning = null,
-  onRetryComputeProvisioning,
-}: {
+type StepInvokeProps = {
   onTryItOut?: () => void;
   onboardingTaskId?: string | null;
   linkSuggestedTasks?: boolean;
@@ -46,34 +45,38 @@ export function StepInvoke({
   includeLinear?: boolean;
   computeProvisioning?: SetupNewComputeProvisioningState | null;
   onRetryComputeProvisioning?: () => void;
-} = {}) {
+};
+
+export function StepInvoke(props: StepInvokeProps = {}) {
+  // Legacy sessions that already run a background environment-setup task keep
+  // the previous invocation-guide behavior (and its immediate task redirect)
+  // instead of the starter-task catalog.
+  return props.onboardingTaskId ? (
+    <OnboardingTaskStepContent {...props} />
+  ) : (
+    <StarterTasksStepContent {...props} />
+  );
+}
+
+/**
+ * Completes setup through the pre-starter-tasks mutation and preserves its
+ * navigation semantics: optimistic route-guard cache updates, immediate
+ * redirect to a known onboarding task, and Home routing with the newest
+ * environment preselected otherwise.
+ */
+function useCompleteSetupMutation({
+  onboardingTaskId = null,
+  linkSuggestedTasks = false,
+}: {
+  onboardingTaskId?: string | null;
+  linkSuggestedTasks?: boolean;
+}) {
   const router = useRouter();
   const trpc = useTRPC();
-  const { user } = useUser();
   const queryClient = useQueryClient();
   const environments = useEnvironments({ enabled: !onboardingTaskId });
-  const commsStatus = useQuery(trpc.comms.status.queryOptions());
-  const effectiveCommunicationProviders = [
-    ...communicationProviders,
-    ...(['telegram', 'discord'] as const).filter(
-      (providerId) =>
-        commsStatus.data?.providers?.some(
-          (provider) => provider.id === providerId && provider.setupSatisfied,
-        ) && !communicationProviders.includes(providerId),
-    ),
-  ];
-  const [anonymousAnalyticsEnabled, setAnonymousAnalyticsEnabled] =
-    useState(true);
-  const [productUpdatesEnabled, setProductUpdatesEnabled] = useState(true);
-  const isCloudAdmin = user?.cloudEnabled && user.isAdmin;
-  const methods = buildInvokeMethods({
-    communicationProviders: effectiveCommunicationProviders,
-    sourceControlProviders,
-    includeLinear,
-    invocationIdentities: commsStatus.data?.invocationIdentities,
-  });
 
-  const completeSetup = useMutation(
+  return useMutation(
     trpc.setup.complete.mutationOptions({
       onSuccess: async () => {
         // Optimistically mark setup as completed in the cache so the
@@ -162,15 +165,17 @@ export function StepInvoke({
       },
     }),
   );
+}
 
+function ComputeProvisioningNotice({
+  computeProvisioning,
+  onRetryComputeProvisioning,
+}: {
+  computeProvisioning?: SetupNewComputeProvisioningState | null;
+  onRetryComputeProvisioning?: () => void;
+}) {
   return (
-    <div className="relative w-full max-w-2xl space-y-6 py-2 md:py-0">
-      <StepTitle text={INVOKE_STEP.title} />
-      <p className="mb-4">
-        {onboardingTaskId
-          ? `Once your environment is configured, you can work with ${PRODUCT_NAME} in these ways (verification may still be in progress):`
-          : `How to work with ${PRODUCT_NAME}:`}
-      </p>
+    <>
       {computeProvisioning?.status === 'building' ? (
         <p className="text-sm text-muted-foreground">
           The sandbox provider is still being prepared. Your environment task is
@@ -198,6 +203,321 @@ export function StepInvoke({
           </AlertDescription>
         </Alert>
       ) : null}
+    </>
+  );
+}
+
+function CompletionPreferences({
+  anonymousAnalyticsEnabled,
+  onAnonymousAnalyticsChange,
+  productUpdatesEnabled,
+  onProductUpdatesChange,
+}: {
+  anonymousAnalyticsEnabled: boolean;
+  onAnonymousAnalyticsChange: (enabled: boolean) => void;
+  productUpdatesEnabled: boolean;
+  onProductUpdatesChange: (enabled: boolean) => void;
+}) {
+  const { user } = useUser();
+  const isCloudAdmin = user?.cloudEnabled && user.isAdmin;
+
+  if (user?.cloudEnabled && isCloudAdmin) {
+    return null;
+  }
+
+  return (
+    <div className="space-y-2 text-sm mt-8 pl-0.5 text-foreground/80">
+      {!user?.cloudEnabled && (
+        <label className="flex gap-2 item-start cursor-pointer">
+          <Checkbox
+            aria-label="Toggle anonymous analytics"
+            className="relative top-1"
+            checked={anonymousAnalyticsEnabled}
+            onCheckedChange={(checked) =>
+              onAnonymousAnalyticsChange(checked === true)
+            }
+          />
+          <span>
+            Share anonymous stats with the {PRODUCT_NAME} team for product
+            improvements.
+            <br />
+            No PII, code, or conversation content is ever shared.
+          </span>
+        </label>
+      )}
+      {!isCloudAdmin && (
+        <label className="flex gap-2 item-start cursor-pointer">
+          <Checkbox
+            aria-label="Toggle product updates"
+            className="mt-0.5"
+            checked={productUpdatesEnabled}
+            onCheckedChange={(checked) =>
+              onProductUpdatesChange(checked === true)
+            }
+          />
+          <span>Get occasional emails from Roomote with product updates.</span>
+        </label>
+      )}
+    </div>
+  );
+}
+
+type StarterTaskLaunch = {
+  starterTaskId: SetupStarterTaskId;
+  taskId: string;
+};
+
+function buildLaunchErrorMessage(result: {
+  failed: Array<{ starterTaskId: SetupStarterTaskId; error: string }>;
+  completionError: string | null;
+}) {
+  const [firstFailure] = result.failed;
+
+  if (firstFailure) {
+    const failedTitles = result.failed
+      .map((failure) => getSetupStarterTask(failure.starterTaskId).title)
+      .join(', ');
+
+    return `Couldn't start: ${failedTitles} (${firstFailure.error}). Press Retry to try again.`;
+  }
+
+  return `${result.completionError ?? 'Setup could not be completed.'} Press Retry to try again.`;
+}
+
+function StarterTasksStepContent({
+  onTryItOut,
+  linkSuggestedTasks = false,
+  computeProvisioning = null,
+  onRetryComputeProvisioning,
+}: StepInvokeProps) {
+  const router = useRouter();
+  const trpc = useTRPC();
+  const { user } = useUser();
+  const queryClient = useQueryClient();
+  const [selectedIds, setSelectedIds] = useState<SetupStarterTaskId[]>(() =>
+    SETUP_STARTER_TASKS.map((starterTask) => starterTask.id),
+  );
+  const [launchedTasks, setLaunchedTasks] = useState<StarterTaskLaunch[]>([]);
+  const [launchError, setLaunchError] = useState<string | null>(null);
+  const [anonymousAnalyticsEnabled, setAnonymousAnalyticsEnabled] =
+    useState(true);
+  const [productUpdatesEnabled, setProductUpdatesEnabled] = useState(true);
+  const isCloudAdmin = user?.cloudEnabled && user.isAdmin;
+
+  const completeSetup = useCompleteSetupMutation({
+    onboardingTaskId: null,
+    linkSuggestedTasks,
+  });
+
+  const launchStarterTasks = useMutation(
+    trpc.setup.completeWithStarterTasks.mutationOptions({
+      onSuccess: async (result) => {
+        const allLaunched = [...launchedTasks, ...(result?.launched ?? [])];
+        setLaunchedTasks(allLaunched);
+
+        if (!result || result.failed.length > 0 || !result.setupCompleted) {
+          setLaunchError(
+            result
+              ? buildLaunchErrorMessage(result)
+              : 'The tasks could not be started. Press Retry to try again.',
+          );
+          return;
+        }
+
+        setLaunchError(null);
+
+        // Optimistically mark setup as completed in the cache so the
+        // authenticated layout doesn't redirect back to /setup.
+        queryClient.setQueryData(trpc.setup.status.queryKey(), (old) =>
+          old ? { ...old, setupCompletedAt: new Date() } : old,
+        );
+        queryClient.setQueryData(trpc.onboarding.status.queryKey(), (old) =>
+          old ? { ...old, onboardingCompletedAt: new Date() } : old,
+        );
+
+        // Leave before awaiting invalidation so /setup's completed-setup
+        // guard cannot race and flash Home before the destination page.
+        const [firstLaunched] = allLaunched;
+        router.replace(
+          allLaunched.length === 0
+            ? '/'
+            : allLaunched.length === 1 && firstLaunched
+              ? `/task/${firstLaunched.taskId}`
+              : '/tasks',
+        );
+
+        await Promise.all([
+          queryClient.invalidateQueries({
+            queryKey: trpc.setup.status.queryKey(),
+          }),
+          queryClient.invalidateQueries({
+            queryKey: trpc.onboarding.status.queryKey(),
+          }),
+        ]);
+        queryClient.removeQueries({
+          queryKey: trpc.github.installations.queryKey(),
+        });
+      },
+      onError: (error) => {
+        setLaunchError(`${error.message} Press Retry to try again.`);
+      },
+    }),
+  );
+
+  const launchedIds = new Set(
+    launchedTasks.map((launch) => launch.starterTaskId),
+  );
+  const remainingIds = selectedIds.filter((id) => !launchedIds.has(id));
+  const isPending = completeSetup.isPending || launchStarterTasks.isPending;
+
+  const toggleStarterTask = (id: SetupStarterTaskId, checked: boolean) => {
+    setSelectedIds((current) =>
+      checked
+        ? current.includes(id)
+          ? current
+          : [...current, id]
+        : current.filter((candidate) => candidate !== id),
+    );
+  };
+
+  const handleGo = () => {
+    onTryItOut?.();
+
+    const preferences = {
+      ...(user?.cloudEnabled ? {} : { anonymousAnalyticsEnabled }),
+      ...(!isCloudAdmin ? { productUpdatesEnabled } : {}),
+    };
+
+    if (remainingIds.length === 0 && launchedTasks.length === 0) {
+      // Nothing selected and nothing launched: plain setup completion with
+      // the existing Home routing.
+      completeSetup.mutate(preferences);
+      return;
+    }
+
+    setLaunchError(null);
+    launchStarterTasks.mutate({
+      selectedStarterTaskIds: remainingIds,
+      ...preferences,
+    });
+  };
+
+  return (
+    <div className="relative w-full max-w-2xl space-y-6 py-2 md:py-0">
+      <StepTitle text={STARTER_TASKS_TITLE} />
+      <p className="mb-4">
+        {`Pick the tasks you want ${PRODUCT_NAME} to start right now. Uncheck any you don't want.`}
+      </p>
+      <ComputeProvisioningNotice
+        computeProvisioning={computeProvisioning}
+        onRetryComputeProvisioning={onRetryComputeProvisioning}
+      />
+      <div className="space-y-2 rounded-xl bg-card py-2 divide-y">
+        {SETUP_STARTER_TASKS.map((starterTask) => {
+          const isLaunched = launchedIds.has(starterTask.id);
+          const checked = isLaunched || selectedIds.includes(starterTask.id);
+          const inputId = `setup-starter-task-${starterTask.id}`;
+
+          return (
+            <label
+              key={starterTask.id}
+              htmlFor={inputId}
+              className="flex cursor-pointer items-start gap-3 px-4 pt-1 pb-3 text-sm"
+            >
+              <Checkbox
+                id={inputId}
+                aria-label={starterTask.title}
+                className="relative top-0.5 shrink-0"
+                checked={checked}
+                disabled={isLaunched || isPending}
+                onCheckedChange={(nextChecked) =>
+                  toggleStarterTask(starterTask.id, nextChecked === true)
+                }
+              />
+              <span className="flex-1">
+                <span className="font-semibold">{starterTask.title}</span>
+                <span className="block text-muted-foreground">
+                  {isLaunched ? 'Started.' : starterTask.description}
+                </span>
+              </span>
+            </label>
+          );
+        })}
+      </div>
+
+      {launchError ? (
+        <Alert variant="destructive">
+          <AlertCircle />
+          <AlertDescription>{launchError}</AlertDescription>
+        </Alert>
+      ) : null}
+
+      <CompletionPreferences
+        anonymousAnalyticsEnabled={anonymousAnalyticsEnabled}
+        onAnonymousAnalyticsChange={setAnonymousAnalyticsEnabled}
+        productUpdatesEnabled={productUpdatesEnabled}
+        onProductUpdatesChange={setProductUpdatesEnabled}
+      />
+
+      <div className="mt-3 flex">
+        <Button onClick={handleGo} disabled={isPending}>
+          {isPending && <Loader2 className="animate-spin size-4 mr-2" />}
+          {launchError ? 'Retry' : 'Go'}
+          <ArrowRight />
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function OnboardingTaskStepContent({
+  onTryItOut,
+  onboardingTaskId,
+  linkSuggestedTasks = false,
+  communicationProviders = [],
+  sourceControlProviders = [],
+  includeLinear = false,
+  computeProvisioning = null,
+  onRetryComputeProvisioning,
+}: StepInvokeProps) {
+  const trpc = useTRPC();
+  const { user } = useUser();
+  const commsStatus = useQuery(trpc.comms.status.queryOptions());
+  const effectiveCommunicationProviders = [
+    ...communicationProviders,
+    ...(['telegram', 'discord'] as const).filter(
+      (providerId) =>
+        commsStatus.data?.providers?.some(
+          (provider) => provider.id === providerId && provider.setupSatisfied,
+        ) && !communicationProviders.includes(providerId),
+    ),
+  ];
+  const [anonymousAnalyticsEnabled, setAnonymousAnalyticsEnabled] =
+    useState(true);
+  const [productUpdatesEnabled, setProductUpdatesEnabled] = useState(true);
+  const isCloudAdmin = user?.cloudEnabled && user.isAdmin;
+  const methods = buildInvokeMethods({
+    communicationProviders: effectiveCommunicationProviders,
+    sourceControlProviders,
+    includeLinear,
+    invocationIdentities: commsStatus.data?.invocationIdentities,
+  });
+
+  const completeSetup = useCompleteSetupMutation({
+    onboardingTaskId,
+    linkSuggestedTasks,
+  });
+
+  return (
+    <div className="relative w-full max-w-2xl space-y-6 py-2 md:py-0">
+      <StepTitle text={INVOKE_STEP.title} />
+      <p className="mb-4">
+        {`Once your environment is configured, you can work with ${PRODUCT_NAME} in these ways (verification may still be in progress):`}
+      </p>
+      <ComputeProvisioningNotice
+        computeProvisioning={computeProvisioning}
+        onRetryComputeProvisioning={onRetryComputeProvisioning}
+      />
       <div className="space-y-5">
         {methods.map((method) => (
           <div key={method.title} className="flex items-start gap-3 group">
@@ -212,43 +532,12 @@ export function StepInvoke({
         ))}
       </div>
 
-      {(!user?.cloudEnabled || !isCloudAdmin) && (
-        <div className="space-y-2 text-sm mt-8 pl-0.5 text-foreground/80">
-          {!user?.cloudEnabled && (
-            <label className="flex gap-2 item-start cursor-pointer">
-              <Checkbox
-                aria-label="Toggle anonymous analytics"
-                className="relative top-1"
-                checked={anonymousAnalyticsEnabled}
-                onCheckedChange={(checked) =>
-                  setAnonymousAnalyticsEnabled(checked === true)
-                }
-              />
-              <span>
-                Share anonymous stats with the {PRODUCT_NAME} team for product
-                improvements.
-                <br />
-                No PII, code, or conversation content is ever shared.
-              </span>
-            </label>
-          )}
-          {!isCloudAdmin && (
-            <label className="flex gap-2 item-start cursor-pointer">
-              <Checkbox
-                aria-label="Toggle product updates"
-                className="mt-0.5"
-                checked={productUpdatesEnabled}
-                onCheckedChange={(checked) =>
-                  setProductUpdatesEnabled(checked === true)
-                }
-              />
-              <span>
-                Get occasional emails from Roomote with product updates.
-              </span>
-            </label>
-          )}
-        </div>
-      )}
+      <CompletionPreferences
+        anonymousAnalyticsEnabled={anonymousAnalyticsEnabled}
+        onAnonymousAnalyticsChange={setAnonymousAnalyticsEnabled}
+        productUpdatesEnabled={productUpdatesEnabled}
+        onProductUpdatesChange={setProductUpdatesEnabled}
+      />
 
       <div className="mt-3 flex">
         <Button
