@@ -962,18 +962,13 @@ async function createTeamsFastAgentParentTurn(params: {
   if (fallbackConversation.surface !== 'teams') {
     throw new Error('Expected a Teams Fast parent conversation.');
   }
-  const [session, provider, conversationServiceUrl, workspaceServiceUrl] =
-    await Promise.all([
-      fastAgentConversationRepository.findById({
-        id: params.parent.sessionId,
-        fallbackConversation,
-      }),
-      createTeamsCommunicationProviderFromRuntimeCredentials(),
-      findTeamsConversationServiceUrl(
-        fallbackConversation.replyTarget.channelId,
-      ),
-      findTeamsWorkspaceServiceUrl(fallbackConversation.workspaceId),
-    ]);
+  const [session, provider] = await Promise.all([
+    fastAgentConversationRepository.findById({
+      id: params.parent.sessionId,
+      fallbackConversation,
+    }),
+    createTeamsCommunicationProviderFromRuntimeCredentials(),
+  ]);
   if (!session || session.conversation.surface !== 'teams' || !provider) {
     throw new FastAgentParentEventDeliveryError(
       'Fast parent session or Teams routing credentials were not found.',
@@ -981,10 +976,22 @@ async function createTeamsFastAgentParentTurn(params: {
     );
   }
   const conversation = session.conversation;
+  const [conversationServiceUrl, workspaceServiceUrl, fallbackServiceUrl] =
+    await Promise.all([
+      findTeamsConversationServiceUrl(conversation.replyTarget.channelId),
+      findTeamsWorkspaceServiceUrl(conversation.workspaceId),
+      conversation.replyTarget.channelId ===
+      fallbackConversation.replyTarget.channelId
+        ? Promise.resolve(null)
+        : findTeamsConversationServiceUrl(
+            fallbackConversation.replyTarget.channelId,
+          ),
+    ]);
   const serviceUrl =
     conversationServiceUrl ??
     workspaceServiceUrl ??
     conversation.replyTarget.serviceUrl ??
+    fallbackServiceUrl ??
     fallbackConversation.replyTarget.serviceUrl;
   if (!serviceUrl) {
     throw new FastAgentParentEventDeliveryError(

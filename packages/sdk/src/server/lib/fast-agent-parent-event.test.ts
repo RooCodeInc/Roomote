@@ -735,6 +735,56 @@ describe('deliverFastAgentParentEvent', () => {
     expect(mocks.teamsPostMessage).not.toHaveBeenCalled();
   });
 
+  it('refreshes Teams routing from the session current reply channel', async () => {
+    const fallbackConversation = {
+      surface: 'teams' as const,
+      workspaceId: 'tenant-1',
+      conversationId: 'teams-occurrence-1',
+      replyTarget: {
+        channelId: 'teams-old-channel',
+        threadId: 'teams-old-root',
+        serviceUrl: 'https://stale.example.com/amer/',
+      },
+    };
+    mocks.findSession.mockResolvedValueOnce({
+      id: parent.sessionId,
+      userId: 'u1',
+      messages: [],
+      conversation: {
+        ...fallbackConversation,
+        replyTarget: {
+          channelId: 'teams-current-channel',
+          threadId: 'teams-current-root',
+          serviceUrl: 'https://persisted.example.com/amer/',
+        },
+      },
+    });
+    mocks.findTeamsConversationServiceUrl.mockImplementation(
+      async (channelId: string) =>
+        channelId === 'teams-current-channel'
+          ? 'https://current.example.com/amer/'
+          : 'https://old.example.com/amer/',
+    );
+    mocks.findTeamsWorkspaceServiceUrl.mockResolvedValue(null);
+
+    await deliverFastAgentParentEvent({
+      parent: { ...parent, conversation: fallbackConversation },
+      event,
+    });
+
+    expect(mocks.findTeamsConversationServiceUrl).toHaveBeenNthCalledWith(
+      1,
+      'teams-current-channel',
+    );
+    expect(mocks.teamsPostMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channelId: 'teams-current-channel',
+        threadId: 'teams-current-root',
+        serviceUrl: 'https://current.example.com/amer/',
+      }),
+    );
+  });
+
   it('uses the repository current destination instead of stale child metadata', async () => {
     mocks.findSession.mockResolvedValueOnce({
       id: parent.sessionId,
