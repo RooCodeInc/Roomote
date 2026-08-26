@@ -9,6 +9,7 @@ import {
   desc,
   eq,
   exists,
+  gte,
   fastAgentConversations,
   fastAgentMessages,
   lt,
@@ -18,7 +19,7 @@ import {
 } from '@roomote/db/server';
 import type { FastAgentMessage } from '@roomote/db';
 
-import type { UserAuthSuccess } from '@/types';
+import type { TimePeriodFilter, UserAuthSuccess } from '@/types';
 
 type FastSessionAuth = Pick<UserAuthSuccess, 'userId' | 'isAdmin'>;
 
@@ -221,7 +222,11 @@ function decodeFastSessionCursor(cursor: string | undefined) {
 
 export async function getFastSessions(
   auth: FastSessionAuth,
-  options?: { before?: string },
+  options?: {
+    before?: string;
+    filterUserId?: string | null;
+    timePeriod?: TimePeriodFilter;
+  },
 ) {
   const cursor = decodeFastSessionCursor(options?.before);
 
@@ -236,11 +241,23 @@ export async function getFastSessions(
       )
     : undefined;
 
+  const ownerFilter = options?.filterUserId
+    ? eq(fastAgentConversations.userId, options.filterUserId)
+    : undefined;
+  const timePeriod = options?.timePeriod ?? 'all';
+  const timeFilter =
+    timePeriod === 'all'
+      ? undefined
+      : gte(
+          fastAgentConversations.updatedAt,
+          new Date(Date.now() - timePeriod * 24 * 60 * 60 * 1000),
+        );
+
   const rows = await db
     .select(fastSessionSelection)
     .from(fastAgentConversations)
     .innerJoin(users, eq(fastAgentConversations.userId, users.id))
-    .where(and(fastSessionScope(auth), beforeCursor))
+    .where(and(fastSessionScope(auth), ownerFilter, timeFilter, beforeCursor))
     .orderBy(
       desc(fastAgentConversations.updatedAt),
       desc(fastAgentConversations.id),

@@ -30,9 +30,7 @@ export default async function SessionDetailPage({
         <WorkspaceHeader contentClassName="flex-row items-center gap-3">
           <h1 className="ph-no-capture min-w-0 flex-1 truncate text-sm font-medium">
             {session.title ??
-              (session.surface === 'web'
-                ? 'Fast session'
-                : session.conversationId)}
+              (session.surface === 'web' ? 'Session' : session.conversationId)}
           </h1>
         </WorkspaceHeader>
 

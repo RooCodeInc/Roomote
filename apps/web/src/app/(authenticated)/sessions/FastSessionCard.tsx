@@ -7,14 +7,12 @@ import { formatDistanceToNow } from 'date-fns';
 import { getUserDisplayName } from '@/lib';
 import {
   Avatar,
-  Badge,
   Tooltip,
   TooltipContent,
   TooltipTrigger,
-  MessagesSquare,
 } from '@/components/system';
 
-export type FastSessionCardSession = {
+type FastSessionCardSession = {
   id: string;
   ownerName: string | null;
   ownerEmail: string | null;
@@ -22,9 +20,6 @@ export type FastSessionCardSession = {
   title: string | null;
   surface: string;
   conversationId: string;
-  replyTargetVerified: boolean;
-  openCodeSessionId: string | null;
-  messageCount: number;
   updatedAt: Date;
 };
 
@@ -44,7 +39,7 @@ export function FastSessionCard({
   const activityDate = new Date(session.updatedAt);
   const title =
     session.title ??
-    (session.surface === 'web' ? 'Fast session' : session.conversationId);
+    (session.surface === 'web' ? 'Session' : session.conversationId);
 
   return (
     <div
@@ -77,7 +72,7 @@ export function FastSessionCard({
             <span className="ph-no-capture">
               {showOwner ? ownerDisplayName : 'You'}
             </span>
-            <span>started a Fast session</span>
+            <span>started a session</span>
           </div>
           <Tooltip>
             <TooltipTrigger asChild>
@@ -101,24 +96,6 @@ export function FastSessionCard({
             {title}
           </p>
         </Link>
-
-        {/* Metadata */}
-        <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1 overflow-hidden text-xs text-muted-foreground">
-          <span className="inline-flex items-center gap-1 text-nowrap capitalize">
-            <MessagesSquare className="size-3 shrink-0" />
-            <span>{session.surface}</span>
-          </span>
-          <span className="text-nowrap">
-            {session.messageCount}{' '}
-            {session.messageCount === 1 ? 'message' : 'messages'}
-          </span>
-          <Badge variant="outline">
-            {session.openCodeSessionId ? 'Native context' : 'Stored history'}
-          </Badge>
-          {!session.replyTargetVerified && (
-            <Badge variant="warning">Reply unverified</Badge>
-          )}
-        </div>
       </div>
     </div>
   );
