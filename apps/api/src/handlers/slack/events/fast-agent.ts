@@ -6,7 +6,10 @@ import {
   type FastAgentActiveTask,
   type LaunchFastAgentTask,
 } from '@roomote/cloud-agents/server';
+import { buildFastSessionReplyFooterText } from '@roomote/communication';
 import {
+  buildSlackThreadReplyFooterBlock,
+  getSlackThreadReplyFooterMessageTs,
   resolveCurrentSlackMessageFiles,
   type SlackEvent,
   type SlackNotifier,
@@ -224,12 +227,30 @@ export async function processFastAgentMessage(params: {
             : undefined;
         },
         replaceReply: async ({ messageId }, { message }) => {
+          // Keep the sticky footer when the edited message is its current
+          // carrier; a bare block replacement would silently drop it.
+          const footerMessageTs = await getSlackThreadReplyFooterMessageTs(
+            event.channel,
+            threadId,
+          ).catch(() => null);
           const updated = await slack.updateMessage({
             channel: event.channel,
             ts: messageId,
             message: {
               text: message,
-              blocks: [{ type: 'markdown', text: message }],
+              blocks: [
+                { type: 'markdown', text: message },
+                ...(footerMessageTs === messageId
+                  ? [
+                      buildSlackThreadReplyFooterBlock({
+                        footerText: buildFastSessionReplyFooterText({
+                          provider: 'slack',
+                          sessionId: session.id,
+                        }),
+                      }),
+                    ]
+                  : []),
+              ],
             },
           });
           if (!updated) {

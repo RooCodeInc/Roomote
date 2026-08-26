@@ -20,6 +20,8 @@ import {
   buildFastSessionReplyFooterText,
   deliverManagedThreadReplyFooter,
   getDiscordFooterlessFinalChunk,
+  getThreadReplyFooterRecord,
+  setThreadReplyFooterRecord,
 } from '@roomote/communication';
 import { resolveUserMcpServerConfigs } from '@roomote/sdk/server';
 import { ALL_REPOSITORIES } from '@roomote/types';
@@ -274,29 +276,61 @@ export async function processDiscordFastAgentMessage(input: {
           return { messageId: posted.messageId };
         },
         replaceReply: async ({ messageId }, { message: text }) => {
-          if (text.length > DISCORD_MAX_MESSAGE_LENGTH) {
+          const footerText = buildFastSessionReplyFooterText({
+            provider: 'discord',
+            sessionId: session.id,
+          });
+          const footerChannelId = conversation.replyTarget.channelId;
+          const footerStateThreadId =
+            conversation.replyTarget.threadId ?? 'root';
+          const footerRecord = await getThreadReplyFooterRecord(
+            'discord',
+            footerChannelId,
+            footerStateThreadId,
+          ).catch(() => null);
+          const isFooterCarrier = footerRecord?.messageId === messageId;
+          const replacementText = isFooterCarrier
+            ? `${text}\n\n${footerText}`
+            : text;
+
+          if (replacementText.length > DISCORD_MAX_MESSAGE_LENGTH) {
+            const placeholder = 'Reconnected to the inference provider.';
             await input.provider.editMessage({
               channelId: input.channel.channelId,
               messageId,
-              text: 'Reconnected to the inference provider.',
+              text: isFooterCarrier
+                ? `${placeholder}\n\n${footerText}`
+                : placeholder,
             });
-            const posted = await replyToDiscordEvent({
-              provider: input.provider,
-              applicationId: input.applicationId,
-              channel: input.channel,
-              ...(message ? { replyToMessageId: message.id } : {}),
-              text,
-            });
+            if (isFooterCarrier) {
+              // The relocation that follows rewrites this message to its
+              // stored footerless text; keep that text current so the edit
+              // does not resurrect the pre-retry notice.
+              await setThreadReplyFooterRecord(
+                'discord',
+                footerChannelId,
+                footerStateThreadId,
+                { messageId, textWithoutFooter: placeholder },
+              ).catch(() => {});
+            }
+            const posted = await postFastReplyWithFooter(text);
             didSendVisibleResponse = true;
-            return {
-              messageId: posted.lastTextMessageId ?? posted.messageId,
-            };
+            return { messageId: posted.messageId };
           }
+
           await input.provider.editMessage({
             channelId: input.channel.channelId,
             messageId,
-            text,
+            text: replacementText,
           });
+          if (isFooterCarrier) {
+            await setThreadReplyFooterRecord(
+              'discord',
+              footerChannelId,
+              footerStateThreadId,
+              { messageId, textWithoutFooter: text },
+            ).catch(() => {});
+          }
           didSendVisibleResponse = true;
           return { messageId };
         },
