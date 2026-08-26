@@ -23,6 +23,20 @@ const mocks = vi.hoisted(() => ({
   resolveUserMcpServerConfigs: vi.fn(),
 }));
 
+vi.mock('@roomote/redis', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@roomote/redis')>();
+  return {
+    ...actual,
+    // The sticky-footer lock and state live in Redis; these tests run without
+    // a server, so satisfy lock acquisition and empty prior state.
+    getRedis: () => ({
+      set: async () => 'OK',
+      get: async () => null,
+      eval: async () => 1,
+    }),
+  };
+});
+
 vi.mock('@roomote/cloud-agents/server', () => ({
   acquireFastAgentTurnLock: mocks.acquireTurnLock,
   answerFastAgentQuestion: mocks.answerQuestion,
@@ -273,6 +287,16 @@ describe('deliverFastAgentParentEvent', () => {
             image_url:
               'https://api.roomote.example/api/artifacts/artifact-1/raw?signed=1',
             alt_text: 'result.png',
+          },
+          {
+            type: 'context',
+            block_id: 'roomote_thread_reply_footer',
+            elements: [
+              {
+                type: 'mrkdwn',
+                text: expect.stringContaining('Reply or use the'),
+              },
+            ],
           },
         ],
       }),
@@ -530,7 +554,9 @@ describe('deliverFastAgentParentEvent', () => {
     expect(mocks.discordPostMessage).toHaveBeenCalledWith({
       channelId: 'channel-1',
       idempotencyKey: 'fast-parent-artifact:artifact-1:v1',
-      text: 'The proof is ready.',
+      text: expect.stringMatching(
+        /^The proof is ready\.\n\n-# Reply or use the \[web app\]\(.*\/sessions\/.*\)\.$/,
+      ),
       textFormat: 'markdown',
       images: [
         {
@@ -851,7 +877,9 @@ describe('deliverFastAgentParentEvent', () => {
       channelId: 'channel-1',
       threadId: 'thread-1',
       idempotencyKey: 'fast-parent-pr-feedback:feedback-123',
-      text: 'There is new PR feedback.\nWant me to resolve these issues?',
+      text: expect.stringMatching(
+        /^There is new PR feedback\.\nWant me to resolve these issues\?\n\n-# Reply or use the \[web app\]\(.*\/sessions\/.*\)\.$/,
+      ),
       textFormat: 'markdown',
       images: [],
       buttons: [

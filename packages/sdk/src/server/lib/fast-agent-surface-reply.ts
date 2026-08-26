@@ -6,7 +6,16 @@ import {
 } from '@roomote/cloud-agents/server';
 import { and, db, eq, slackInstallations } from '@roomote/db/server';
 import {
+  buildFastSessionReplyFooterText,
+  deliverManagedThreadReplyFooter,
+  getDiscordFooterlessFinalChunk,
+} from '@roomote/communication';
+import {
   createFastAgentSlackLiveTaskLauncher,
+  getSlackThreadReplyFooterMessageTs,
+  postSlackThreadMessageWithFooterText,
+  withSlackThreadReplyFooterLock,
+  buildSlackThreadReplyFooterBlock,
   SlackNotifier,
   ROOMOTE_THREAD_REPLY_QUOTE_BLOCK_ID,
 } from '@roomote/slack';
@@ -157,11 +166,12 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
         postReply: async ({ message }) => {
           const quote = pendingQuote;
           pendingQuote = null;
-          const messageTs = await slack.postMessage({
+          const messageTs = await postSlackThreadMessageWithFooterText({
+            slack,
             channel: conversation.replyTarget.channelId,
-            thread_ts: conversation.replyTarget.threadId,
+            threadTs: conversation.replyTarget.threadId,
             text: quote ? `${quote}\n${message}` : message,
-            blocks: [
+            bodyBlocks: [
               ...(quote
                 ? [
                     {
@@ -173,8 +183,10 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
                 : []),
               { type: 'markdown' as const, text: message },
             ],
-            unfurl_links: false,
-            unfurl_media: false,
+            footerText: buildFastSessionReplyFooterText({
+              provider: 'slack',
+              sessionId: session.id,
+            }),
           });
           if (!messageTs) {
             throw new Error('Slack did not return a Fast reply timestamp.');
@@ -182,12 +194,37 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
           return { messageId: messageTs };
         },
         replaceReply: async (handle, { message }) => {
-          const updated = await slack.updateMessage({
+          // Keep the sticky footer when the edited message is its current
+          // carrier; the lookup and edit share the footer lock so a
+          // concurrent relocation cannot slip in between them.
+          const updated = await withSlackThreadReplyFooterLock({
             channel: conversation.replyTarget.channelId,
-            ts: handle.messageId,
-            message: {
-              text: message,
-              blocks: [{ type: 'markdown', text: message }],
+            threadTs: conversation.replyTarget.threadId,
+            fn: async () => {
+              const footerMessageTs = await getSlackThreadReplyFooterMessageTs(
+                conversation.replyTarget.channelId,
+                conversation.replyTarget.threadId,
+              ).catch(() => null);
+              return slack.updateMessage({
+                channel: conversation.replyTarget.channelId,
+                ts: handle.messageId,
+                message: {
+                  text: message,
+                  blocks: [
+                    { type: 'markdown', text: message },
+                    ...(footerMessageTs === handle.messageId
+                      ? [
+                          buildSlackThreadReplyFooterBlock({
+                            footerText: buildFastSessionReplyFooterText({
+                              provider: 'slack',
+                              sessionId: session.id,
+                            }),
+                          }),
+                        ]
+                      : []),
+                  ],
+                },
+              });
             },
           });
           if (!updated) {
@@ -222,12 +259,49 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
         postReply: async ({ message }) => {
           const quote = pendingQuote;
           pendingQuote = null;
-          const posted = await provider.postMessage({
-            ...conversation.replyTarget,
-            text: quote ? `${quote}\n\n${message}` : message,
-            textFormat: 'markdown',
+          const footerText = buildFastSessionReplyFooterText({
+            provider: 'discord',
+            sessionId: session.id,
           });
-          return { messageId: posted.lastTextMessageId ?? posted.messageId };
+          const bodyText = quote ? `${quote}\n\n${message}` : message;
+          const textWithFooter = `${bodyText}\n\n${footerText}`;
+          const channelId = conversation.replyTarget.channelId;
+          const footerStateThreadId =
+            conversation.replyTarget.threadId ?? 'root';
+          const footerMessageChannelId =
+            conversation.replyTarget.threadId ?? channelId;
+
+          const posted = await deliverManagedThreadReplyFooter({
+            provider: 'discord',
+            providerLabel: 'Discord',
+            channelId,
+            footerStateThreadId,
+            lockKey: `discord:thread_reply_footer_lock:${channelId}:${footerStateThreadId}`,
+            logRef: `fast session ${session.id}`,
+            logContext: 'fastAgentSurfaceReply',
+            postReplyWithFooter: async () => {
+              const result = await provider.postMessage({
+                ...conversation.replyTarget,
+                text: textWithFooter,
+                textFormat: 'markdown',
+              });
+              return {
+                messageId: result.lastTextMessageId ?? result.messageId,
+                textWithoutFooter: getDiscordFooterlessFinalChunk({
+                  textWithFooter,
+                  footerText,
+                }),
+              };
+            },
+            clearPreviousFooter: async (previousFooterRecord) => {
+              await provider.editMessage({
+                channelId: footerMessageChannelId,
+                messageId: previousFooterRecord.messageId,
+                text: previousFooterRecord.textWithoutFooter,
+              });
+            },
+          });
+          return { messageId: posted.messageId };
         },
       },
     };
