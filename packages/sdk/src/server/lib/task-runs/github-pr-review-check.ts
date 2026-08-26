@@ -38,6 +38,36 @@ function getReviewTaskUrl(taskId: string) {
   });
 }
 
+function getTerminalReviewSummaryResult(input: {
+  reviewSummaryBody?: string;
+  expectedHeadSha: string;
+}) {
+  if (!input.reviewSummaryBody?.trim().startsWith(REVIEW_SUMMARY_MARKER)) {
+    return null;
+  }
+
+  const reviewedHeadSha = parseReviewSummaryMarkerSha(input.reviewSummaryBody);
+  if (!reviewedHeadSha || !input.expectedHeadSha.startsWith(reviewedHeadSha)) {
+    return null;
+  }
+
+  const reviewStatus = getMarkedSection({
+    content: input.reviewSummaryBody,
+    startMarker: REVIEW_STATUS_START_MARKER,
+    endMarker: REVIEW_STATUS_END_MARKER,
+  });
+  if (!reviewStatus || isReviewInProgressStatusLine(reviewStatus)) {
+    return null;
+  }
+
+  return getGithubPrReviewCheckResult({
+    runStatus: RunStatus.Completed,
+    reviewSummaryBody: input.reviewSummaryBody,
+    safetyNetFinalized: false,
+    expectedHeadSha: input.expectedHeadSha,
+  });
+}
+
 async function findGithubPrLinkage(input: {
   taskId: string;
   repository?: string;
@@ -113,9 +143,32 @@ export async function publishGithubPrReviewCheck(input: {
       );
 
     try {
+      const currentLinkage = await findGithubPrLinkage(input);
       const run = await db.query.taskRuns.findFirst({
         where: eq(taskRuns.id, input.runId),
         columns: { startedAt: true, status: true },
+      });
+
+      let reviewSummaryBody: string | undefined;
+      if (currentLinkage?.githubReviewCommentId) {
+        try {
+          const { data: comment } = await octokit.rest.issues.getComment({
+            ...repository,
+            comment_id: currentLinkage.githubReviewCommentId,
+          });
+          reviewSummaryBody = comment.body ?? undefined;
+        } catch (error) {
+          console.error(
+            `[githubPrReviewCheck] Failed to load review summary for run ${input.runId}: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          );
+        }
+      }
+
+      const terminalSummaryResult = getTerminalReviewSummaryResult({
+        reviewSummaryBody,
+        expectedHeadSha: input.headSha,
       });
 
       if (
@@ -123,26 +176,6 @@ export async function publishGithubPrReviewCheck(input: {
         run?.status === RunStatus.Failed ||
         run?.status === RunStatus.Canceled
       ) {
-        let reviewSummaryBody: string | undefined;
-        if (
-          run.status === RunStatus.Completed &&
-          existingLinkage?.githubReviewCommentId
-        ) {
-          try {
-            const { data: comment } = await octokit.rest.issues.getComment({
-              ...repository,
-              comment_id: existingLinkage.githubReviewCommentId,
-            });
-            reviewSummaryBody = comment.body ?? undefined;
-          } catch (error) {
-            console.error(
-              `[githubPrReviewCheck] Failed to load review summary for settled run ${input.runId}: ${
-                error instanceof Error ? error.message : String(error)
-              }`,
-            );
-          }
-        }
-
         const result = getGithubPrReviewCheckResult({
           runStatus: run.status,
           reviewSummaryBody,
@@ -159,6 +192,19 @@ export async function publishGithubPrReviewCheck(input: {
           output: {
             title: result.title,
             summary: `${result.summary} [Open the task](${taskUrl}).`,
+          },
+        });
+      } else if (terminalSummaryResult) {
+        await octokit.rest.checks.update({
+          ...repository,
+          check_run_id: checkRun.id,
+          status: 'completed',
+          conclusion: terminalSummaryResult.conclusion,
+          completed_at: new Date().toISOString(),
+          details_url: taskUrl,
+          output: {
+            title: terminalSummaryResult.title,
+            summary: `${terminalSummaryResult.summary} [Open the task](${taskUrl}).`,
           },
         });
       } else if (status === 'queued' && run?.startedAt) {
@@ -206,6 +252,61 @@ export async function publishGithubPrReviewCheck(input: {
       }`,
     );
   }
+}
+
+export async function completeGithubPrReviewCheckFromSummary(input: {
+  installationId: number;
+  repository: string;
+  prNumber: number;
+  taskId: string;
+  reviewHeadSha: string;
+  reviewSummaryBody: string;
+}): Promise<void> {
+  const repository = splitRepository(input.repository);
+  if (!repository) {
+    return;
+  }
+
+  const linkage = await findGithubPrLinkage(input);
+  if (!linkage?.githubCheckRunId) {
+    return;
+  }
+
+  const octokit = await getInstallationOctokit({
+    installationId: input.installationId,
+  });
+  const { data: checkRun } = await octokit.rest.checks.get({
+    ...repository,
+    check_run_id: linkage.githubCheckRunId,
+  });
+  if (
+    checkRun.status === 'completed' ||
+    !checkRun.head_sha.startsWith(input.reviewHeadSha)
+  ) {
+    return;
+  }
+
+  const result = getTerminalReviewSummaryResult({
+    reviewSummaryBody: input.reviewSummaryBody,
+    expectedHeadSha: checkRun.head_sha,
+  });
+  if (!result) {
+    return;
+  }
+
+  const taskUrl = getReviewTaskUrl(input.taskId);
+  await octokit.rest.checks.update({
+    ...repository,
+    check_run_id: linkage.githubCheckRunId,
+    status: 'completed',
+    conclusion: result.conclusion,
+    completed_at: new Date().toISOString(),
+    details_url: taskUrl,
+    output: {
+      title: result.title,
+      summary: `${result.summary} [Open the task](${taskUrl}).`,
+    },
+  });
 }
 
 export async function markGithubPrReviewCheckInProgress(input: {

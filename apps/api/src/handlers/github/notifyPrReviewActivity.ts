@@ -9,6 +9,7 @@ import {
 } from '@roomote/cloud-agents/server';
 import { Schemas as GitHubSchemas } from '@roomote/github';
 import {
+  completeGithubPrReviewCheckFromSummary,
   enqueuePrReviewNotification,
   startPrReviewNotificationCycle,
   type EnqueuePrReviewNotificationInput,
@@ -513,23 +514,46 @@ export async function queuePrReviewSummaryNotification(
     return;
   }
 
-  const operation =
-    lifecycle.kind === 'started'
-      ? startPrReviewNotificationCycle(lifecycle.input)
-      : enqueuePrReviewNotification(lifecycle.notification.input);
   const reference =
     lifecycle.kind === 'started'
       ? lifecycle.input
       : lifecycle.notification.input;
 
-  await operation.catch((error) => {
+  try {
+    if (lifecycle.kind === 'started') {
+      await startPrReviewNotificationCycle(lifecycle.input);
+      return;
+    }
+
+    const { event } = lifecycle.notification.input;
+    const operations: Promise<unknown>[] = [
+      enqueuePrReviewNotification(lifecycle.notification.input),
+    ];
+    if (
+      eventPayload.installation?.id &&
+      event.reviewTaskId &&
+      event.reviewHeadSha
+    ) {
+      operations.push(
+        completeGithubPrReviewCheckFromSummary({
+          installationId: eventPayload.installation.id,
+          repository: lifecycle.notification.input.repository,
+          prNumber: lifecycle.notification.input.prNumber,
+          taskId: event.reviewTaskId,
+          reviewHeadSha: event.reviewHeadSha,
+          reviewSummaryBody: eventPayload.comment.body ?? '',
+        }),
+      );
+    }
+    await Promise.all(operations);
+  } catch (error) {
     console.warn(
       `[queuePrReviewSummaryNotification] Failed to record review-summary lifecycle for ${reference.repository}#${reference.prNumber}: ${
         error instanceof Error ? error.message : String(error)
       }`,
     );
     throw error;
-  });
+  }
 }
 
 /**

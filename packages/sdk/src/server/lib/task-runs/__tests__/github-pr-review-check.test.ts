@@ -7,6 +7,7 @@ const {
   mockDbUpdateSet,
   mockDbUpdateWhere,
   mockCreateCheck,
+  mockGetCheck,
   mockGetIssueComment,
   mockUpdateInstallationCheck,
   mockUpdateCheckRun,
@@ -17,6 +18,7 @@ const {
   mockDbUpdateSet: vi.fn(),
   mockDbUpdateWhere: vi.fn(),
   mockCreateCheck: vi.fn(),
+  mockGetCheck: vi.fn(),
   mockGetIssueComment: vi.fn(),
   mockUpdateInstallationCheck: vi.fn(),
   mockUpdateCheckRun: vi.fn(),
@@ -48,6 +50,7 @@ vi.mock('@roomote/github', async () => {
       rest: {
         checks: {
           create: mockCreateCheck,
+          get: mockGetCheck,
           update: mockUpdateInstallationCheck,
         },
         issues: { getComment: mockGetIssueComment },
@@ -68,6 +71,7 @@ vi.mock('@roomote/cloud-agents/server', async () => {
 });
 
 import {
+  completeGithubPrReviewCheckFromSummary,
   getGithubPrReviewCheckResult,
   markGithubPrReviewCheckInProgress,
   publishGithubPrReviewCheck,
@@ -80,6 +84,9 @@ describe('GitHub PR review check lifecycle', () => {
     mockDbUpdateSet.mockReturnValue({ where: mockDbUpdateWhere });
     mockDbUpdateWhere.mockResolvedValue(undefined);
     mockFindFirstRun.mockResolvedValue(undefined);
+    mockGetCheck.mockResolvedValue({
+      data: { head_sha: 'new-head', status: 'in_progress' },
+    });
   });
 
   it('publishes a queued check, persists its id, and supersedes the old head', async () => {
@@ -207,6 +214,152 @@ describe('GitHub PR review check lifecycle', () => {
       );
     },
   );
+
+  it.each([RunStatus.Running, RunStatus.Idle])(
+    'completes the check from a terminal summary while its run is %s',
+    async (status) => {
+      mockFindFirstLinkage
+        .mockResolvedValueOnce({ githubCheckRunId: null })
+        .mockResolvedValueOnce({
+          githubCheckRunId: 20,
+          githubReviewCommentId: 30,
+        });
+      mockFindFirstRun.mockResolvedValue({
+        startedAt: new Date('2026-08-25T12:00:00.000Z'),
+        status,
+      });
+      mockCreateCheck.mockResolvedValue({ data: { id: 20 } });
+      mockGetIssueComment.mockResolvedValue({
+        data: {
+          body: '<!-- roomote-review-summary sha=abcdef -->\n<!-- roomote-review-status:start -->\nNo code issues found.\n<!-- roomote-review-status:end -->\n<!-- roomote-review-checklist:start -->\n<!-- roomote-review-checklist:end -->',
+        },
+      });
+
+      await publishGithubPrReviewCheck({
+        installationId: 1,
+        repository: 'owner/repo',
+        prNumber: 42,
+        headSha: 'abcdef',
+        taskId: 'task-1',
+        runId: 2,
+        status: 'in_progress',
+      });
+
+      expect(mockUpdateInstallationCheck).toHaveBeenCalledWith(
+        expect.objectContaining({
+          check_run_id: 20,
+          status: 'completed',
+          conclusion: 'success',
+        }),
+      );
+    },
+  );
+
+  it.each([
+    [RunStatus.Failed, 'failure'],
+    [RunStatus.Canceled, 'cancelled'],
+  ] as const)(
+    'preserves a %s run conclusion when a clean terminal summary already exists',
+    async (status, conclusion) => {
+      mockFindFirstLinkage
+        .mockResolvedValueOnce({ githubCheckRunId: null })
+        .mockResolvedValueOnce({
+          githubCheckRunId: 20,
+          githubReviewCommentId: 30,
+        });
+      mockFindFirstRun.mockResolvedValue({
+        startedAt: new Date('2026-08-25T12:00:00.000Z'),
+        status,
+      });
+      mockCreateCheck.mockResolvedValue({ data: { id: 20 } });
+      mockGetIssueComment.mockResolvedValue({
+        data: {
+          body: '<!-- roomote-review-summary sha=abcdef -->\n<!-- roomote-review-status:start -->\nNo code issues found.\n<!-- roomote-review-status:end -->\n<!-- roomote-review-checklist:start -->\n<!-- roomote-review-checklist:end -->',
+        },
+      });
+
+      await publishGithubPrReviewCheck({
+        installationId: 1,
+        repository: 'owner/repo',
+        prNumber: 42,
+        headSha: 'abcdef',
+        taskId: 'task-1',
+        runId: 2,
+        status: 'in_progress',
+      });
+
+      expect(mockUpdateInstallationCheck).toHaveBeenCalledWith(
+        expect.objectContaining({
+          check_run_id: 20,
+          status: 'completed',
+          conclusion,
+        }),
+      );
+    },
+  );
+
+  it('completes a persisted check when its terminal summary webhook arrives', async () => {
+    mockFindFirstLinkage.mockResolvedValue({ githubCheckRunId: 20 });
+    mockGetCheck.mockResolvedValue({
+      data: { head_sha: 'abcdef', status: 'in_progress' },
+    });
+
+    await completeGithubPrReviewCheckFromSummary({
+      installationId: 1,
+      repository: 'owner/repo',
+      prNumber: 42,
+      taskId: 'task-1',
+      reviewHeadSha: 'abcdef',
+      reviewSummaryBody:
+        '<!-- roomote-review-summary sha=abcdef -->\n<!-- roomote-review-status:start -->\nNo code issues found.\n<!-- roomote-review-status:end -->\n<!-- roomote-review-checklist:start -->\n<!-- roomote-review-checklist:end -->',
+    });
+
+    expect(mockUpdateInstallationCheck).toHaveBeenCalledWith(
+      expect.objectContaining({
+        check_run_id: 20,
+        status: 'completed',
+        conclusion: 'success',
+      }),
+    );
+  });
+
+  it('does not let a delayed summary complete a newer head check', async () => {
+    mockFindFirstLinkage.mockResolvedValue({ githubCheckRunId: 20 });
+    mockGetCheck.mockResolvedValue({
+      data: { head_sha: 'new-head', status: 'in_progress' },
+    });
+
+    await completeGithubPrReviewCheckFromSummary({
+      installationId: 1,
+      repository: 'owner/repo',
+      prNumber: 42,
+      taskId: 'task-1',
+      reviewHeadSha: 'old-head',
+      reviewSummaryBody:
+        '<!-- roomote-review-summary sha=old-head -->\n<!-- roomote-review-status:start -->\nNo code issues found.\n<!-- roomote-review-status:end -->',
+    });
+
+    expect(mockUpdateInstallationCheck).not.toHaveBeenCalled();
+  });
+
+  it('does not overwrite an already completed check from a delayed same-head summary', async () => {
+    mockFindFirstLinkage.mockResolvedValue({ githubCheckRunId: 20 });
+    mockGetCheck.mockResolvedValue({
+      data: { head_sha: 'abcdef', status: 'completed' },
+    });
+
+    await completeGithubPrReviewCheckFromSummary({
+      installationId: 1,
+      repository: 'owner/repo',
+      prNumber: 42,
+      taskId: 'task-1',
+      reviewHeadSha: 'abcdef',
+      reviewSummaryBody:
+        '<!-- roomote-review-summary sha=abcdef -->\n<!-- roomote-review-status:start -->\nNo code issues found.\n<!-- roomote-review-status:end -->',
+    });
+
+    expect(mockUpdateInstallationCheck).not.toHaveBeenCalled();
+  });
 });
 
 describe('getGithubPrReviewCheckResult', () => {

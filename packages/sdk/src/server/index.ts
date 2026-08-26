@@ -61,6 +61,7 @@ export {
   type ActivePrReviewFollowUpRequest,
 } from './lib/task-runs/active-pr-review-follow-up';
 export {
+  completeGithubPrReviewCheckFromSummary,
   GITHUB_PR_REVIEW_CHECK_NAME,
   publishGithubPrReviewCheck,
 } from './lib/task-runs/github-pr-review-check';
