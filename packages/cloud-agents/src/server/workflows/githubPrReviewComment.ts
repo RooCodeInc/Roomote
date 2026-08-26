@@ -51,8 +51,10 @@ export function getMarkedSection({
 export function parseReviewSummaryMarkerSha(
   markerOrBody: string,
 ): string | undefined {
+  // Require at least a short-sha (7 hex chars) so a truncated or mangled
+  // marker cannot satisfy the prefix-based staleness checks downstream.
   const match = markerOrBody.match(
-    /<!--\s*roomote-review-summary\s+sha=([0-9a-f]+)/i,
+    /<!--\s*roomote-review-summary\s+sha=([0-9a-f]{7,})/i,
   );
 
   return match?.[1];
@@ -284,6 +286,20 @@ export function buildTerminalReviewSummaryBody({
 
 export type ReviewTerminalOutcome = 'completed' | 'failed' | 'canceled';
 
+const TERMINAL_REVIEW_STATUS_MESSAGES: Record<ReviewTerminalOutcome, string> = {
+  completed: 'Review complete.',
+  failed: 'Review could not be completed.',
+  canceled: 'Review was canceled.',
+};
+
+export function isSafetyNetReviewStatusLine(line: string): boolean {
+  const trimmed = line.trim();
+
+  return Object.values(TERMINAL_REVIEW_STATUS_MESSAGES).some((message) =>
+    trimmed.startsWith(message),
+  );
+}
+
 export function buildTerminalReviewStatus({
   outcome,
   taskUrl,
@@ -295,14 +311,8 @@ export function buildTerminalReviewStatus({
     href: taskUrl,
     label: 'See task',
   });
-  const message =
-    outcome === 'completed'
-      ? 'Review complete.'
-      : outcome === 'failed'
-        ? 'Review could not be completed.'
-        : 'Review was canceled.';
 
-  return `${message} ${link}`;
+  return `${TERMINAL_REVIEW_STATUS_MESSAGES[outcome]} ${link}`;
 }
 
 /**

@@ -9,6 +9,7 @@ import {
 } from '@roomote/cloud-agents/server';
 import { Schemas as GitHubSchemas } from '@roomote/github';
 import {
+  completeGithubPrReviewCheckFromSummary,
   enqueuePrReviewNotification,
   startPrReviewNotificationCycle,
   type EnqueuePrReviewNotificationInput,
@@ -275,10 +276,13 @@ function sanitizeReviewSummaryStatus(statusContent: string): string {
 
 /**
  * Parses the head SHA out of the review-summary marker line, e.g.
- * `<!-- roomote-review-summary sha=abc123 mode=initial -->`.
+ * `<!-- roomote-review-summary sha=abc1234 mode=initial -->`. Requires at
+ * least a short-sha (7 hex chars), matching parseReviewSummaryMarkerSha.
  */
 function getReviewSummaryMarkerSha(body: string): string | null {
-  const match = body.match(/<!--\s*roomote-review-summary\s+sha=([0-9a-f]+)/i);
+  const match = body.match(
+    /<!--\s*roomote-review-summary\s+sha=([0-9a-f]{7,})/i,
+  );
 
   return match?.[1] ?? null;
 }
@@ -513,23 +517,57 @@ export async function queuePrReviewSummaryNotification(
     return;
   }
 
-  const operation =
-    lifecycle.kind === 'started'
-      ? startPrReviewNotificationCycle(lifecycle.input)
-      : enqueuePrReviewNotification(lifecycle.notification.input);
   const reference =
     lifecycle.kind === 'started'
       ? lifecycle.input
       : lifecycle.notification.input;
 
-  await operation.catch((error) => {
+  try {
+    if (lifecycle.kind === 'started') {
+      await startPrReviewNotificationCycle(lifecycle.input);
+      return;
+    }
+
+    const { event } = lifecycle.notification.input;
+    const operations: Promise<unknown>[] = [
+      enqueuePrReviewNotification(lifecycle.notification.input),
+    ];
+    if (
+      eventPayload.installation?.id &&
+      event.reviewTaskId &&
+      event.reviewHeadSha
+    ) {
+      operations.push(
+        completeGithubPrReviewCheckFromSummary({
+          installationId: eventPayload.installation.id,
+          repository: lifecycle.notification.input.repository,
+          prNumber: lifecycle.notification.input.prNumber,
+          taskId: event.reviewTaskId,
+          reviewHeadSha: event.reviewHeadSha,
+          reviewSummaryBody: eventPayload.comment.body ?? '',
+        }),
+      );
+    } else {
+      const missing = [
+        !eventPayload.installation?.id && 'installation id',
+        !event.reviewTaskId && 'task link',
+        !event.reviewHeadSha && 'head sha marker',
+      ]
+        .filter(Boolean)
+        .join(', ');
+      console.warn(
+        `[queuePrReviewSummaryNotification] Skipping check completion for ${reference.repository}#${reference.prNumber}: summary is missing ${missing}`,
+      );
+    }
+    await Promise.all(operations);
+  } catch (error) {
     console.warn(
       `[queuePrReviewSummaryNotification] Failed to record review-summary lifecycle for ${reference.repository}#${reference.prNumber}: ${
         error instanceof Error ? error.message : String(error)
       }`,
     );
     throw error;
-  });
+  }
 }
 
 /**

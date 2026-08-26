@@ -172,7 +172,7 @@ const mockBuildTerminalReviewStatus = vi
   .mockReturnValue('terminal-status');
 const mockFinalizeGithubPrReviewComment = vi.fn().mockResolvedValue({
   finalized: false,
-  body: '<!-- roomote-review-summary sha=abc -->',
+  body: '<!-- roomote-review-summary sha=abc1234 -->',
 });
 
 vi.mock('@roomote/cloud-agents/server', () => ({
@@ -2289,7 +2289,7 @@ describe('finishRun', () => {
       mockFindManyTaskPullRequests.mockResolvedValue([reviewPrRow]);
       mockFinalizeGithubPrReviewComment.mockResolvedValueOnce({
         finalized: false,
-        body: '<!-- roomote-review-summary sha=abc -->\n<!-- roomote-review-status:start -->\nNo issues found.\n<!-- roomote-review-status:end -->\n<!-- roomote-review-checklist:start -->\n<!-- roomote-review-checklist:end -->',
+        body: '<!-- roomote-review-summary sha=abc1234 -->\n<!-- roomote-review-status:start -->\nNo issues found.\n<!-- roomote-review-status:end -->\n<!-- roomote-review-checklist:start -->\n<!-- roomote-review-checklist:end -->',
       });
 
       await finishRun({ id: 1, status: RunStatus.Completed });
@@ -2314,7 +2314,7 @@ describe('finishRun', () => {
       mockFindManyTaskPullRequests.mockResolvedValue([reviewPrRow]);
       mockFinalizeGithubPrReviewComment.mockResolvedValueOnce({
         finalized: false,
-        body: '<!-- roomote-review-summary sha=abc -->\n<!-- roomote-review-status:start -->\n1 issue outstanding.\n<!-- roomote-review-status:end -->\n<!-- roomote-review-checklist:start -->\n- [ ] Fix authorization\n<!-- roomote-review-checklist:end -->',
+        body: '<!-- roomote-review-summary sha=abc1234 -->\n<!-- roomote-review-status:start -->\n1 issue outstanding.\n<!-- roomote-review-status:end -->\n<!-- roomote-review-checklist:start -->\n- [ ] Fix authorization\n<!-- roomote-review-checklist:end -->',
       });
 
       await finishRun({ id: 1, status: RunStatus.Completed });
@@ -2344,7 +2344,7 @@ describe('finishRun', () => {
       });
       mockFinalizeGithubPrReviewComment.mockResolvedValueOnce({
         finalized: false,
-        body: '<!-- roomote-review-summary sha=abc -->\n<!-- roomote-review-status:start -->\nNo issues found.\n<!-- roomote-review-status:end -->\n<!-- roomote-review-checklist:start -->\n<!-- roomote-review-checklist:end -->',
+        body: '<!-- roomote-review-summary sha=abc1234 -->\n<!-- roomote-review-status:start -->\nNo issues found.\n<!-- roomote-review-status:end -->\n<!-- roomote-review-checklist:start -->\n<!-- roomote-review-checklist:end -->',
       });
 
       await finishRun({ id: 1, status: RunStatus.Completed });
