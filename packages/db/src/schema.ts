@@ -80,6 +80,7 @@ import type {
   RepositoryAutomationSignals,
   McpToolAccessMode,
   FastAgentSurface,
+  ReasoningEffort,
 } from '@roomote/types';
 import { DEFAULT_TASK_ARTIFACT_TYPE } from '@roomote/types';
 
@@ -3066,6 +3067,11 @@ export const fastAgentConversations = pgTable(
       .default(sql`'[]'::jsonb`)
       .$type<Record<string, unknown>[]>(),
     openCodeSessionId: text('opencode_session_id'),
+    model: text('model'),
+    reasoningEffort: text('reasoning_effort').$type<ReasoningEffort>(),
+    title: text('title'),
+    titleEditedByUserAt: timestamp('title_edited_by_user_at'),
+    llmTitleCheckpoint: integer('llm_title_checkpoint').notNull().default(0),
     legacyConversationIds: uuid('legacy_conversation_ids')
       .array()
       .notNull()

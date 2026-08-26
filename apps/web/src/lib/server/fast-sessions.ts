@@ -4,12 +4,15 @@ import {
 } from '@roomote/types';
 import {
   and,
+  asc,
   db,
   desc,
   eq,
   exists,
+  gte,
   fastAgentConversations,
   fastAgentMessages,
+  llmUsageEvents,
   lt,
   or,
   sql,
@@ -17,7 +20,7 @@ import {
 } from '@roomote/db/server';
 import type { FastAgentMessage } from '@roomote/db';
 
-import type { UserAuthSuccess } from '@/types';
+import type { TimePeriodFilter, UserAuthSuccess } from '@/types';
 
 type FastSessionAuth = Pick<UserAuthSuccess, 'userId' | 'isAdmin'>;
 
@@ -47,6 +50,10 @@ const fastSessionSelection = {
   userId: fastAgentConversations.userId,
   ownerName: users.name,
   ownerEmail: users.email,
+  ownerImageUrl: users.imageUrl,
+  title: fastAgentConversations.title,
+  model: fastAgentConversations.model,
+  reasoningEffort: fastAgentConversations.reasoningEffort,
   surface: fastAgentConversations.surface,
   workspaceId: fastAgentConversations.workspaceId,
   conversationId: fastAgentConversations.conversationId,
@@ -88,6 +95,110 @@ function fastSessionScope(auth: FastSessionAuth) {
   );
 }
 
+/** Light session lookup with the same visibility scope as the list/detail. */
+export async function findAccessibleFastSession(
+  auth: FastSessionAuth,
+  sessionId: string,
+) {
+  const [session] = await db
+    .select({
+      id: fastAgentConversations.id,
+      userId: fastAgentConversations.userId,
+      title: fastAgentConversations.title,
+      surface: fastAgentConversations.surface,
+      workspaceId: fastAgentConversations.workspaceId,
+      conversationId: fastAgentConversations.conversationId,
+      model: fastAgentConversations.model,
+      reasoningEffort: fastAgentConversations.reasoningEffort,
+    })
+    .from(fastAgentConversations)
+    .where(
+      and(eq(fastAgentConversations.id, sessionId), fastSessionScope(auth)),
+    )
+    .limit(1);
+
+  return session ?? null;
+}
+
+function sanitizeFastSessionMessageRow<
+  T extends Pick<
+    FastSessionMessage,
+    'eventType' | 'contentBlocks' | 'metadata' | 'payload'
+  >,
+>(row: T): T {
+  const sanitized = sanitizeEnvelopeFields(
+    row.eventType,
+    row.contentBlocks,
+    (row.metadata as Record<string, unknown> | null) ?? null,
+    (row.payload as Record<string, unknown> | null) ?? null,
+    { maxOutputChars: ACP_UI_TOOL_OUTPUT_MAX_CHARS },
+  );
+
+  return {
+    ...row,
+    contentBlocks: sanitized.contentBlocks,
+    metadata: sanitized.metadata,
+    payload: sanitized.payload ?? {},
+  };
+}
+
+/**
+ * Rows created or rewritten after `sinceMs` (epoch millis of the row
+ * updatedAt), sanitized for the client. Rows mutate in place (tool results
+ * replace their call slot), so consumers merge by eventId, not append.
+ */
+export async function getFastSessionMessagesSince(
+  sessionId: string,
+  sinceMs: number,
+): Promise<{
+  messages: FastSessionMessage[];
+  cursor: number;
+}> {
+  const rows = await db
+    .select({
+      id: fastAgentMessages.id,
+      eventId: fastAgentMessages.eventId,
+      turnId: fastAgentMessages.turnId,
+      turnSeq: fastAgentMessages.turnSeq,
+      ts: fastAgentMessages.ts,
+      eventType: fastAgentMessages.eventType,
+      role: fastAgentMessages.role,
+      contentBlocks: fastAgentMessages.contentBlocks,
+      metadata: fastAgentMessages.metadata,
+      payload: fastAgentMessages.payload,
+      source: fastAgentMessages.source,
+      nativeSessionId: fastAgentMessages.nativeSessionId,
+      nativeMessageId: fastAgentMessages.nativeMessageId,
+      createdAt: fastAgentMessages.createdAt,
+      // Millisecond Dates truncate Postgres microsecond timestamps, which
+      // would replay the newest row on every poll — keep the cursor as a
+      // fractional epoch-millisecond float instead.
+      updatedAtMs: sql<number>`extract(epoch from ${fastAgentMessages.updatedAt}) * 1000`,
+    })
+    .from(fastAgentMessages)
+    .where(
+      and(
+        eq(fastAgentMessages.conversationId, sessionId),
+        sql`coalesce(${fastAgentMessages.metadata} ->> 'visibleInTranscript', 'true') <> 'false'`,
+        sql`extract(epoch from ${fastAgentMessages.updatedAt}) * 1000 > ${sinceMs}`,
+      ),
+    )
+    .orderBy(
+      asc(fastAgentMessages.ts),
+      asc(fastAgentMessages.turnSeq),
+      asc(fastAgentMessages.createdAt),
+      asc(fastAgentMessages.id),
+    );
+
+  let cursor = sinceMs;
+  const messages = rows.map(({ updatedAtMs, ...row }) => {
+    cursor = Math.max(cursor, Number(updatedAtMs));
+    return sanitizeFastSessionMessageRow(row);
+  });
+
+  return { messages, cursor };
+}
+
 export function encodeFastSessionCursor(row: {
   updatedAt: Date;
   id: string;
@@ -116,7 +227,11 @@ function decodeFastSessionCursor(cursor: string | undefined) {
 
 export async function getFastSessions(
   auth: FastSessionAuth,
-  options?: { before?: string },
+  options?: {
+    before?: string;
+    filterUserId?: string | null;
+    timePeriod?: TimePeriodFilter;
+  },
 ) {
   const cursor = decodeFastSessionCursor(options?.before);
 
@@ -131,11 +246,23 @@ export async function getFastSessions(
       )
     : undefined;
 
+  const ownerFilter = options?.filterUserId
+    ? eq(fastAgentConversations.userId, options.filterUserId)
+    : undefined;
+  const timePeriod = options?.timePeriod ?? 'all';
+  const timeFilter =
+    timePeriod === 'all'
+      ? undefined
+      : gte(
+          fastAgentConversations.updatedAt,
+          new Date(Date.now() - timePeriod * 24 * 60 * 60 * 1000),
+        );
+
   const rows = await db
     .select(fastSessionSelection)
     .from(fastAgentConversations)
     .innerJoin(users, eq(fastAgentConversations.userId, users.id))
-    .where(and(fastSessionScope(auth), beforeCursor))
+    .where(and(fastSessionScope(auth), ownerFilter, timeFilter, beforeCursor))
     .orderBy(
       desc(fastAgentConversations.updatedAt),
       desc(fastAgentConversations.id),
@@ -223,26 +350,33 @@ export async function getFastSessionById(
   // Sanitize at the read boundary, matching the task transcript path: the DB
   // stores full payloads, but oversized tool output is truncated before it is
   // serialized into the RSC payload.
-  const messages = windowed.reverse().map((row): FastSessionMessage => {
-    const sanitized = sanitizeEnvelopeFields(
-      row.eventType,
-      row.contentBlocks,
-      (row.metadata as Record<string, unknown> | null) ?? null,
-      (row.payload as Record<string, unknown> | null) ?? null,
-      { maxOutputChars: ACP_UI_TOOL_OUTPUT_MAX_CHARS },
-    );
+  const messages = windowed
+    .reverse()
+    .map((row): FastSessionMessage => sanitizeFastSessionMessageRow(row));
 
-    return {
-      ...row,
-      contentBlocks: sanitized.contentBlocks,
-      metadata: sanitized.metadata,
-      payload: sanitized.payload ?? {},
-    };
-  });
+  // Fast usage events carry the OpenCode session id; a conversation can span
+  // several (cold rebuilds), so sum across every session id the transcript
+  // references plus the current one.
+  const [usage] = await db
+    .select({
+      costMicroUsd: sql<number>`coalesce(sum(${llmUsageEvents.costMicroUsd}), 0)::bigint`,
+    })
+    .from(llmUsageEvents)
+    .where(
+      sql`${llmUsageEvents.harnessSessionId} in (
+        select distinct ${fastAgentMessages.nativeSessionId}
+        from ${fastAgentMessages}
+        where ${fastAgentMessages.conversationId} = ${session.id}
+          and ${fastAgentMessages.nativeSessionId} is not null
+        union
+        select ${session.openCodeSessionId}::text
+      )`,
+    );
 
   return {
     ...session,
     messages,
     hasOlderMessages,
+    inferenceCostMicroUsd: Number(usage?.costMicroUsd ?? 0),
   };
 }

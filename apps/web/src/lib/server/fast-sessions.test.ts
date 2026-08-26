@@ -7,7 +7,9 @@ import {
 
 import {
   encodeFastSessionCursor,
+  findAccessibleFastSession,
   getFastSessionById,
+  getFastSessionMessagesSince,
   getFastSessions,
 } from './fast-sessions';
 
@@ -393,6 +395,90 @@ describe('Fast session queries', () => {
     expect(result?.messages[0]?.turnSeq).toBe(0);
     // The newest messages are the ones kept.
     expect(result?.messages.at(-1)?.eventId).toBe('event-1009');
+  });
+
+  it('streams only rows updated after the cursor and advances it', async () => {
+    const owner = await userFactory.create();
+    const session = await createFastSession({
+      userId: owner.id,
+      conversationId: 'stream-session',
+      updatedAt: new Date('2026-01-01T00:00:00.000Z'),
+    });
+    await createFastMessage({
+      conversationId: session.id,
+      eventId: 'turn-1:user',
+      turnSeq: 0,
+      ts: 1,
+      role: 'user',
+      eventType: 'roomote_runtime.user_prompt',
+    });
+    await createFastMessage({
+      conversationId: session.id,
+      eventId: 'turn-1:hidden',
+      turnSeq: 1,
+      ts: 2,
+      role: 'user',
+      eventType: 'roomote_runtime.user_prompt',
+      metadata: { visibleInTranscript: false },
+    });
+
+    const first = await getFastSessionMessagesSince(session.id, 0);
+    expect(first.messages.map((message) => message.eventId)).toEqual([
+      'turn-1:user',
+    ]);
+    expect(first.cursor).toBeGreaterThan(0);
+
+    const second = await getFastSessionMessagesSince(session.id, first.cursor);
+    expect(second.messages).toEqual([]);
+
+    await createFastMessage({
+      conversationId: session.id,
+      eventId: 'turn-1:assistant:0',
+      turnSeq: 2,
+      ts: 3,
+    });
+    const third = await getFastSessionMessagesSince(session.id, first.cursor);
+    expect(third.messages.map((message) => message.eventId)).toEqual([
+      'turn-1:assistant:0',
+    ]);
+  });
+
+  it('finds sessions for owners and participants but not bystanders', async () => {
+    const owner = await userFactory.create();
+    const participant = await userFactory.create();
+    const bystander = await userFactory.create();
+    const session = await createFastSession({
+      userId: owner.id,
+      conversationId: 'access-session',
+      updatedAt: new Date('2026-01-01T00:00:00.000Z'),
+    });
+    await createFastMessage({
+      conversationId: session.id,
+      eventId: 'turn-1:user',
+      turnSeq: 0,
+      role: 'user',
+      eventType: 'roomote_runtime.user_prompt',
+      metadata: { visibleInTranscript: true, userId: participant.id },
+    });
+
+    await expect(
+      findAccessibleFastSession(
+        { userId: owner.id, isAdmin: false },
+        session.id,
+      ),
+    ).resolves.toMatchObject({ id: session.id, surface: 'slack' });
+    await expect(
+      findAccessibleFastSession(
+        { userId: participant.id, isAdmin: false },
+        session.id,
+      ),
+    ).resolves.toMatchObject({ id: session.id });
+    await expect(
+      findAccessibleFastSession(
+        { userId: bystander.id, isAdmin: false },
+        session.id,
+      ),
+    ).resolves.toBeNull();
   });
 
   it('keeps a partial newest turn when a single turn overflows the window', async () => {

@@ -5,6 +5,7 @@ import {
   acquireFastAgentTurnLock,
   answerFastAgentQuestion,
   createFastAgentTaskLauncher,
+  createFastAgentWebTaskLauncher,
   fastAgentConversationRepository,
   resolveApiBaseUrl,
   type FastAgentTurnAdapter,
@@ -414,6 +415,44 @@ async function createAutomationFastAgentParentTurn(params: {
   };
 }
 
+async function createWebFastAgentParentTurn(params: {
+  parent: FastAgentParent;
+  event: FastAgentParentEvent;
+  onReplyPosted: () => void;
+}): Promise<FastAgentParentTurn> {
+  const fallbackConversation = params.parent.conversation;
+  if (fallbackConversation.surface !== 'web') {
+    throw new Error('Expected a web Fast parent conversation.');
+  }
+
+  const session = await fastAgentConversationRepository.findById({
+    id: params.parent.sessionId,
+    fallbackConversation,
+  });
+  if (!session || session.conversation.surface !== 'web') {
+    throw new FastAgentParentEventDeliveryError(
+      'Fast web parent session was not found.',
+      { replyPosted: false, permanent: true },
+    );
+  }
+
+  return {
+    userId: session.userId,
+    conversation: session.conversation,
+    adapter: {
+      launchTask: createFastAgentWebTaskLauncher({
+        userId: session.userId,
+        conversation: session.conversation,
+      }),
+      // Web replies are read from the canonical transcript; posting is the
+      // persistence the service already performs.
+      postReply: async () => {
+        params.onReplyPosted();
+      },
+    },
+  };
+}
+
 async function createSlackFastAgentParentTurn(params: {
   parent: FastAgentParent;
   event: FastAgentParentEvent;
@@ -578,7 +617,7 @@ async function createSlackFastAgentParentTurn(params: {
   };
 }
 
-function createFastAgentDiscordTaskLauncher(params: {
+export function createFastAgentDiscordTaskLauncher(params: {
   provider: NonNullable<
     Awaited<
       ReturnType<
@@ -790,6 +829,8 @@ async function createFastAgentParentTurn(params: {
       return createDiscordFastAgentParentTurn(params);
     case 'automation':
       return createAutomationFastAgentParentTurn(params);
+    case 'web':
+      return createWebFastAgentParentTurn(params);
   }
 }
 

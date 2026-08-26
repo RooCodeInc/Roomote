@@ -13,6 +13,7 @@ import {
   formatErrorForLog,
   resolveInferenceProviderRetryDelayMs,
   truncateAcpOutputText,
+  type ReasoningEffort,
   type RunStatus,
   type TaskMessageContentBlock,
 } from '@roomote/types';
@@ -40,6 +41,7 @@ import {
   upsertFastAgentMessage,
   type FastAgentActiveTask,
 } from './fast-agent-session';
+import { refreshFastAgentSessionTitle } from './fast-agent-title';
 import {
   classifyNonTaskInferenceError,
   FAST_AGENT_SESSION_PERMISSIONS,
@@ -630,6 +632,8 @@ export async function answerFastAgentQuestion({
   activeTasks = [],
   adapter,
   signal,
+  model,
+  reasoningEffort,
   turnSource = 'human',
   platformEventHandling = 'default',
   platformEventVisibility = 'optional',
@@ -648,6 +652,10 @@ export async function answerFastAgentQuestion({
   activeTasks?: FastAgentActiveTask[];
   adapter: FastAgentTurnAdapter;
   signal?: AbortSignal;
+  /** Explicit model override for this turn; defaults to the deployment's
+   * orchestration model. */
+  model?: string | null;
+  reasoningEffort?: ReasoningEffort | null;
   turnSource?: FastAgentTurnSource;
   platformEventHandling?: FastAgentPlatformEventHandling;
   platformEventVisibility?: FastAgentPlatformEventVisibility;
@@ -953,6 +961,9 @@ export async function answerFastAgentQuestion({
       },
       true,
     );
+    if (!platformEvent) {
+      void refreshFastAgentSessionTitle({ sessionId: session.id, userId });
+    }
     const sessionActiveTasks = await getActiveFastAgentTasks(session.id);
     const resolvedActiveTasks = [
       ...new Map(
@@ -1609,6 +1620,8 @@ export async function answerFastAgentQuestion({
                     surface:
                       NON_TASK_INFERENCE_SURFACES.fastAgentQuestionAnswering,
                     modelRole: FAST_AGENT_MODEL_ROLE,
+                    ...(model ? { model } : {}),
+                    ...(reasoningEffort ? { reasoningEffort } : {}),
                     timeoutMs: promptTimeoutMs,
                     maxProviderRetryAttempts: FAST_AGENT_INFERENCE_MAX_RETRIES,
                     system,

@@ -92,6 +92,9 @@ vi.mock('@/hooks/environments', () => ({
 vi.mock('@/hooks/task-runs', () => ({
   useCreateStandardTaskRun: mockUseCreateStandardTaskRun,
   useRouteHomeTask: mockUseRouteHomeTask,
+  useStartFastSession: () => ({
+    mutateAsync: vi.fn().mockResolvedValue({ sessionId: 'fast-session-1' }),
+  }),
 }));
 
 vi.mock('@/hooks/task-models/useLaunchTaskModels', () => ({

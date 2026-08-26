@@ -113,23 +113,32 @@ describe('TaskFilters', () => {
   it('forwards the active category to the filter hooks', () => {
     render(<TaskFilters {...baseProps} category="pr-reviews" />);
 
-    expect(useUsersForFilterMock).toHaveBeenCalledWith({
-      repositoryName: null,
-      category: 'pr-reviews',
-      timePeriod: 'all',
-    });
-    expect(useRepositoriesForFilterMock).toHaveBeenCalledWith({
-      userId: null,
-      category: 'pr-reviews',
-      timePeriod: 'all',
-    });
-    expect(usePullRequestsForFilterMock).toHaveBeenCalledWith({
-      userId: null,
-      category: 'pr-reviews',
-      repositoryName: null,
-      timePeriod: 'all',
-      search: '',
-    });
+    expect(useUsersForFilterMock).toHaveBeenCalledWith(
+      {
+        repositoryName: null,
+        category: 'pr-reviews',
+        timePeriod: 'all',
+      },
+      { enabled: true },
+    );
+    expect(useRepositoriesForFilterMock).toHaveBeenCalledWith(
+      {
+        userId: null,
+        category: 'pr-reviews',
+        timePeriod: 'all',
+      },
+      { enabled: true },
+    );
+    expect(usePullRequestsForFilterMock).toHaveBeenCalledWith(
+      {
+        userId: null,
+        category: 'pr-reviews',
+        repositoryName: null,
+        timePeriod: 'all',
+        search: '',
+      },
+      { enabled: true },
+    );
   });
 
   it('groups the user filter into Users and Automations sections', () => {
