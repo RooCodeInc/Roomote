@@ -50,6 +50,7 @@ export * from './lib/task-suggestion-content-hash';
 export * from './lib/work-item-claims';
 export * from './lib/task-start-parallel-counts';
 export * from './lib/tasks';
+export * from './lib/sessions';
 export * from './lib/task-goals';
 export * from './lib/source-control-provider';
 export * from './lib/sync-task-state';
@@ -118,6 +119,12 @@ export {
   tasksRelations,
   taskPins,
   taskPinsRelations,
+  sessions,
+  sessionsRelations,
+  sessionTasks,
+  sessionTasksRelations,
+  sessionParticipants,
+  sessionParticipantsRelations,
   taskArtifacts,
   taskArtifactsRelations,
   taskPullRequests,
@@ -238,5 +245,10 @@ export type {
   SuggestionType,
   ManagerMcpSetupNotificationReason,
   EnvironmentConfigVersionSource,
+  SessionOwnerKind,
+  SessionSourceSurface,
+  SessionStatus,
+  SessionTaskOrigin,
+  SessionParticipantRole,
 } from './schema';
 export type { AutomationWorkItemDisposition } from '@roomote/types';
