@@ -15,7 +15,7 @@ import {
   PR_REVIEW_NOTIFICATION_DEFER_MS,
   PR_REVIEW_NOTIFICATION_MAX_DEFERRALS,
   PrReviewNotificationRateLimitError,
-  attachPendingPrReviewActionMessage,
+  attachPendingPrReviewActionMessageWithRetirement,
   beginCanonicalPrReviewAutoDispatch,
   beginCanonicalPrReviewPrompt,
   buildPrReviewNotificationPostInput,
@@ -30,6 +30,7 @@ import {
   finalizePrReviewNotificationRequest,
   isDurablePrReviewNotificationRequest,
   renewPrReviewNotificationRequestLease,
+  retirePrReviewActionMessagesBestEffort,
   migrateLegacyPrReviewNotificationRequest,
   notifyFastAgentParentOnPrFeedback,
   preparePrReviewNotificationDelivery,
@@ -223,21 +224,27 @@ async function postPrReviewNotification({
   // Stored before posting: an orphaned record just expires, while a posted
   // message without a record would leave dead buttons.
   const nonce = action ? (canonicalDeliveryId ?? randomUUID()) : null;
+  const pendingAction =
+    action && nonce && isButtonRouteProvider(route.provider)
+      ? {
+          nonce,
+          provider: route.provider,
+          ...(route.provider === 'slack'
+            ? { slackTeamId: route.slackTeamId }
+            : {}),
+          taskId,
+          repository: action.repository,
+          prNumber: action.prNumber,
+          prUrl: action.prUrl,
+          channelId: route.channelId,
+          threadId: route.threadId ?? null,
+          followUpPrompt: action.followUpPrompt,
+          ...(canonicalDeliveryId ? { canonicalDeliveryId } : {}),
+        }
+      : null;
 
-  if (action && nonce && isButtonRouteProvider(route.provider)) {
-    await setPendingPrReviewAction({
-      nonce,
-      provider: route.provider,
-      ...(route.provider === 'slack' ? { slackTeamId: route.slackTeamId } : {}),
-      taskId,
-      repository: action.repository,
-      prNumber: action.prNumber,
-      prUrl: action.prUrl,
-      channelId: route.channelId,
-      threadId: route.threadId ?? null,
-      followUpPrompt: action.followUpPrompt,
-      ...(canonicalDeliveryId ? { canonicalDeliveryId } : {}),
-    });
+  if (pendingAction) {
+    await setPendingPrReviewAction(pendingAction);
   }
 
   if (route.provider === 'slack') {
@@ -275,13 +282,20 @@ async function postPrReviewNotification({
     });
 
     if (nonce && messageTs) {
-      const attached = await attachPendingPrReviewActionMessage(
-        nonce,
-        messageTs,
-        canonicalLeaseToken ? { leaseToken: canonicalLeaseToken } : {},
-      );
+      const { attached, superseded } =
+        await attachPendingPrReviewActionMessageWithRetirement(
+          nonce,
+          messageTs,
+          {
+            ...(canonicalLeaseToken ? { leaseToken: canonicalLeaseToken } : {}),
+            ...(pendingAction ? { context: pendingAction } : {}),
+          },
+        );
       if (canonicalDeliveryId && !attached) {
         throw new Error('Canonical PR review prompt lost its posting fence');
+      }
+      if (superseded.length > 0) {
+        await retirePrReviewActionMessagesBestEffort(superseded);
       }
     }
 
@@ -321,13 +335,20 @@ async function postPrReviewNotification({
   const posted = await adapter.postMessage(postInput);
 
   if (nonce && posted?.messageId) {
-    const attached = await attachPendingPrReviewActionMessage(
-      nonce,
-      posted.messageId,
-      canonicalLeaseToken ? { leaseToken: canonicalLeaseToken } : {},
-    );
+    const { attached, superseded } =
+      await attachPendingPrReviewActionMessageWithRetirement(
+        nonce,
+        posted.lastTextMessageId ?? posted.messageId,
+        {
+          ...(canonicalLeaseToken ? { leaseToken: canonicalLeaseToken } : {}),
+          ...(pendingAction ? { context: pendingAction } : {}),
+        },
+      );
     if (canonicalDeliveryId && !attached) {
       throw new Error('Canonical PR review prompt lost its posting fence');
+    }
+    if (superseded.length > 0) {
+      await retirePrReviewActionMessagesBestEffort(superseded);
     }
   }
 
