@@ -426,7 +426,11 @@ export function Home({
   const startFastSessionMutation = useStartFastSession();
 
   const startFastSession = useCallback(
-    async (payload: { text: string; images?: string[] }): Promise<void> => {
+    async (payload: {
+      text: string;
+      images?: string[];
+      model?: string;
+    }): Promise<void> => {
       try {
         const { sessionId } =
           await startFastSessionMutation.mutateAsync(payload);
@@ -640,6 +644,7 @@ export function Home({
         await startFastSession({
           text: submission.description,
           images: submission.images,
+          model: selectedModelId,
         });
         return;
       }
@@ -676,6 +681,7 @@ export function Home({
       canSelectBranch,
       wiggleWorkspace,
       startFastSession,
+      selectedModelId,
     ],
   );
 

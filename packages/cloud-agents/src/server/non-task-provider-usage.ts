@@ -10,7 +10,10 @@ import {
   recordLlmUsage,
   resolveEffectiveModelRuntimeEnv,
 } from '@roomote/db/server';
-import { toBedrockMantleRuntimeModelId } from '@roomote/types';
+import {
+  toBedrockMantleRuntimeModelId,
+  type ReasoningEffort,
+} from '@roomote/types';
 import type { z } from 'zod';
 import zodToJsonSchema from 'zod-to-json-schema';
 
@@ -145,6 +148,8 @@ interface GenerateTrackedNonTaskBaseParams extends NonTaskInferenceTrackingInput
   system?: string;
   model?: string;
   modelRole?: 'primary' | 'small' | 'orchestration';
+  /** Explicit reasoning-effort override applied to the resolved model. */
+  reasoningEffort?: ReasoningEffort;
   maxOutputTokens?: number;
   /** null lets OpenCode own the prompt lifecycle without a Roomote deadline. */
   timeoutMs?: number | null;
@@ -560,6 +565,7 @@ function isOpenCodeSessionInvalid(error: unknown): boolean {
 async function resolveNonTaskModelRuntime(
   model?: string,
   modelRole: 'primary' | 'small' | 'orchestration' = 'small',
+  reasoningEffort?: ReasoningEffort,
 ): Promise<{
   model: string;
   resolvedModelRuntimeEnv: NonTaskModelRuntimeEnv;
@@ -624,6 +630,15 @@ async function resolveNonTaskModelRuntime(
         selectedRuntimeEnv.R_MODEL_REASONING_EFFORT = undefined;
       }
     }
+  }
+
+  if (reasoningEffort) {
+    // The lease cache keys on env, so an explicit effort gets its own server
+    // rather than mutating a shared lease.
+    selectedRuntimeEnv = {
+      ...selectedRuntimeEnv,
+      R_MODEL_REASONING_EFFORT: reasoningEffort,
+    };
   }
 
   return {
@@ -1284,6 +1299,7 @@ export async function generateTrackedNonTaskText(
   const runtime = await resolveNonTaskModelRuntime(
     params.model,
     params.modelRole,
+    params.reasoningEffort,
   );
   const model = await resolveModelForInputModality(params, runtime);
 
@@ -1335,6 +1351,7 @@ export async function generateTrackedNonTaskTextInOpenCodeSession(
   const runtime = await resolveNonTaskModelRuntime(
     params.model,
     params.modelRole,
+    params.reasoningEffort,
   );
   const model = await resolveModelForInputModality(params, runtime);
   options.onModelResolved?.(model);
@@ -1397,6 +1414,7 @@ async function generateTrackedNonTaskObjectWithSdk<
   const resolvedRuntime = await resolveNonTaskModelRuntime(
     params.model,
     params.modelRole,
+    params.reasoningEffort,
   );
 
   const data = await runNonTaskSdkPrompt(

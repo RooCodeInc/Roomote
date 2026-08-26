@@ -2840,6 +2840,8 @@ export const appRouter = createRouter({
         z.object({
           text: z.string().trim().min(1),
           images: z.array(z.string()).optional(),
+          model: z.string().trim().min(1).optional(),
+          reasoningEffort: z.enum(REASONING_EFFORT_VALUES).optional(),
         }),
       )
       .mutation(({ ctx: { auth }, input }) =>
@@ -2852,6 +2854,8 @@ export const appRouter = createRouter({
           sessionId: z.string().uuid(),
           text: z.string().trim().min(1),
           images: z.array(z.string()).optional(),
+          model: z.string().trim().min(1).optional(),
+          reasoningEffort: z.enum(REASONING_EFFORT_VALUES).optional(),
         }),
       )
       .mutation(({ ctx: { auth }, input }) =>

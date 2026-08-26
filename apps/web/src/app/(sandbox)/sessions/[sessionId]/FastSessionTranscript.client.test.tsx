@@ -1,4 +1,10 @@
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from '@testing-library/react';
 import { ACP_ENVELOPE_EVENT_TYPES } from '@roomote/types';
 
 import { FastSessionTranscript } from './FastSessionTranscript';
@@ -8,6 +14,13 @@ const replyMutate = vi.fn();
 vi.mock('@/trpc/client', () => ({
   useTRPCClient: () => ({
     fastSessions: { reply: { mutate: replyMutate } },
+  }),
+}));
+
+vi.mock('@/hooks/task-models/useLaunchTaskModels', () => ({
+  useLaunchTaskModels: () => ({
+    data: { models: [], defaultModelId: undefined },
+    isPending: false,
   }),
 }));
 
@@ -260,7 +273,7 @@ describe('FastSessionTranscript', () => {
     expect(screen.getByText('I started the checkout fix.')).toBeInTheDocument();
   });
 
-  it('shows a reply composer for web sessions and sends replies optimistically', () => {
+  it('shows a reply composer for web sessions and sends replies optimistically', async () => {
     replyMutate.mockResolvedValue({ success: true });
 
     render(
@@ -271,15 +284,17 @@ describe('FastSessionTranscript', () => {
       />,
     );
 
-    const input = screen.getByPlaceholderText('Reply to Fast…');
+    const input = screen.getByPlaceholderText('Message agent');
     fireEvent.change(input, { target: { value: 'Follow up question' } });
-    fireEvent.keyDown(input, { key: 'Enter' });
+    fireEvent.keyDown(input, { key: 'Enter', code: 'Enter', charCode: 13 });
 
+    // Attachment preparation is async before the mutation fires.
+    await waitFor(() => expect(replyMutate).toHaveBeenCalled());
+    expect(await screen.findByText('Follow up question')).toBeInTheDocument();
     expect(replyMutate).toHaveBeenCalledWith({
       sessionId: 'session-1',
       text: 'Follow up question',
     });
-    expect(screen.getByText('Follow up question')).toBeInTheDocument();
   });
 
   it('hides the reply composer for non-web sessions', () => {
@@ -287,7 +302,7 @@ describe('FastSessionTranscript', () => {
       <FastSessionTranscript sessionId="session-1" initialMessages={[]} />,
     );
 
-    expect(screen.queryByPlaceholderText('Reply to Fast…')).toBeNull();
+    expect(screen.queryByPlaceholderText('Message agent')).toBeNull();
     expect(screen.getByText('No canonical messages')).toBeInTheDocument();
   });
 });

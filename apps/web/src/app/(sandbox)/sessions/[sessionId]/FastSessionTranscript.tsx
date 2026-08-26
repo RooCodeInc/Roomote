@@ -1,13 +1,6 @@
 'use client';
 
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type FormEvent,
-} from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ACP_ENVELOPE_EVENT_TYPES,
   getTextFromContentBlocks,
@@ -23,13 +16,12 @@ import {
   ConversationScrollButton,
   MessageUiOptionsProvider,
 } from '@/components/ai-elements';
+import { BotMessageSquare, EmptyState } from '@/components/system';
 import {
-  BotMessageSquare,
-  Button,
-  EmptyState,
-  SendHorizontal,
-  Textarea,
-} from '@/components/system';
+  SessionPromptInput,
+  type SessionPromptSubmission,
+} from './SessionPromptInput';
+import { preparePromptAttachments } from '@/lib/prompt-attachments';
 
 import {
   AcpTranscriptBlockList,
@@ -69,7 +61,6 @@ export function FastSessionTranscript({
   const [optimisticMessages, setOptimisticMessages] = useState<
     TranscriptMessage[]
   >([]);
-  const [draft, setDraft] = useState('');
   const [isSending, setIsSending] = useState(false);
   const [replyError, setReplyError] = useState<string | null>(null);
 
@@ -145,57 +136,65 @@ export function FastSessionTranscript({
     resetKey: `${messages.length}:${messages[0]?.eventId ?? ''}:${messages.at(-1)?.eventId ?? ''}`,
   });
 
-  const sendReply = useCallback(async () => {
-    const text = draft.trim();
-    if (!text || isSending) {
-      return;
-    }
+  const sendReply = useCallback(
+    async (message: SessionPromptSubmission) => {
+      if (isSending) {
+        return;
+      }
 
-    setIsSending(true);
-    setReplyError(null);
-    const optimisticId = `optimistic:${Date.now()}:${Math.random().toString(36).slice(2)}`;
-    const optimistic: TranscriptMessage = {
-      id: optimisticId,
-      eventId: optimisticId,
-      turnId: 'optimistic',
-      turnSeq: 0,
-      ts: Date.now(),
-      eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
-      role: 'user',
-      contentBlocks: [{ type: 'text', text }],
-      metadata: { visibleInTranscript: true },
-      payload: {},
-      source: 'web',
-      nativeSessionId: null,
-      nativeMessageId: null,
-      createdAt: new Date(),
-    };
+      const prepared = await preparePromptAttachments({
+        text: message.text.trim(),
+        attachments: message.files,
+      });
+      const images = prepared.images ?? [];
+      if (!prepared.text && images.length === 0) {
+        return;
+      }
 
-    try {
-      setOptimisticMessages((previous) => [...previous, optimistic]);
-      setDraft('');
-      await trpcClient.fastSessions.reply.mutate({ sessionId, text });
-    } catch (error) {
-      setOptimisticMessages((previous) =>
-        previous.filter((message) => message.eventId !== optimistic.eventId),
-      );
-      setDraft(text);
-      setReplyError(
-        error instanceof Error ? error.message : 'Failed to send message',
-      );
-    } finally {
-      setIsSending(false);
-    }
-  }, [draft, isSending, sessionId, trpcClient]);
+      setIsSending(true);
+      setReplyError(null);
+      const optimisticId = `optimistic:${Date.now()}:${Math.random().toString(36).slice(2)}`;
+      const optimistic: TranscriptMessage = {
+        id: optimisticId,
+        eventId: optimisticId,
+        turnId: 'optimistic',
+        turnSeq: 0,
+        ts: Date.now(),
+        eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
+        role: 'user',
+        contentBlocks: [{ type: 'text', text: prepared.text }],
+        metadata: { visibleInTranscript: true },
+        payload: {},
+        source: 'web',
+        nativeSessionId: null,
+        nativeMessageId: null,
+        createdAt: new Date(),
+      };
 
-  const handleSubmit = useCallback(
-    (event: FormEvent) => {
-      event.preventDefault();
-      void sendReply();
+      try {
+        setOptimisticMessages((previous) => [...previous, optimistic]);
+        await trpcClient.fastSessions.reply.mutate({
+          sessionId,
+          text: prepared.text,
+          ...(images.length > 0 ? { images } : {}),
+          ...(message.model ? { model: message.model } : {}),
+          ...(message.reasoningEffort
+            ? { reasoningEffort: message.reasoningEffort }
+            : {}),
+        });
+      } catch (error) {
+        setOptimisticMessages((previous) =>
+          previous.filter((row) => row.eventId !== optimistic.eventId),
+        );
+        setReplyError(
+          error instanceof Error ? error.message : 'Failed to send message',
+        );
+      } finally {
+        setIsSending(false);
+      }
     },
-    [sendReply],
+    [isSending, sessionId, trpcClient],
   );
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   return (
     <MessageUiOptionsProvider>
@@ -223,38 +222,15 @@ export function FastSessionTranscript({
         <ConversationScrollButton />
       </Conversation>
       {canReply ? (
-        <form
-          onSubmit={handleSubmit}
-          className="mx-auto w-full max-w-4xl shrink-0 px-4 pb-4"
-        >
-          <div className="flex items-end gap-2 rounded-lg border border-border bg-background p-2">
-            <Textarea
-              ref={textareaRef}
-              value={draft}
-              onChange={(event) => setDraft(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter' && !event.shiftKey) {
-                  event.preventDefault();
-                  void sendReply();
-                }
-              }}
-              placeholder="Reply to Fast…"
-              className="ph-no-capture max-h-40 min-h-10 flex-1 resize-none border-0 shadow-none focus-visible:ring-0"
-              disabled={isSending}
-            />
-            <Button
-              type="submit"
-              size="icon"
-              aria-label="Send reply"
-              disabled={isSending || !draft.trim()}
-            >
-              <SendHorizontal />
-            </Button>
-          </div>
+        <div className="mx-auto w-full shrink-0 overflow-clip rounded-t-md rounded-b-3xl border-2 border-background bg-card transition-colors @[56rem]:rounded-t-lg">
+          <SessionPromptInput
+            isBusy={isSending}
+            onSend={(submission) => void sendReply(submission)}
+          />
           {replyError ? (
-            <p className="mt-1 text-xs text-destructive">{replyError}</p>
+            <p className="px-4 pb-2 text-xs text-destructive">{replyError}</p>
           ) : null}
-        </form>
+        </div>
       ) : null}
     </MessageUiOptionsProvider>
   );

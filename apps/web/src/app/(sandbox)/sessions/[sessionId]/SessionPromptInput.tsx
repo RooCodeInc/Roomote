@@ -1,0 +1,129 @@
+'use client';
+
+import { useState } from 'react';
+
+import type { ReasoningEffort } from '@roomote/types';
+
+import { ROOMOTE_FILE_ATTACHMENT_ACCEPT } from '@/lib/prompt-attachments';
+import { useVoiceDictation } from '@/hooks/useVoiceDictation';
+import {
+  type PromptInputMessage,
+  PromptInput as PromptInputRoot,
+  PromptInputActionAddAttachments,
+  PromptInputActionMenu,
+  PromptInputActionMenuContent,
+  PromptInputActionMenuTrigger,
+  PromptInputBody,
+  PromptInputFooter,
+  PromptInputSubmit,
+  PromptInputTextarea,
+  PromptInputTools,
+  VoiceDictationButton,
+  usePromptInputAttachments,
+} from '@/components/ai-elements';
+import { BasicTooltip } from '@/components/system';
+
+import { AttachmentsDisplay } from '../../task/[taskId]/prompt-input/AttachmentsDisplay';
+import { SessionModelSwitcher } from './SessionModelSwitcher';
+
+export type SessionPromptSubmission = PromptInputMessage & {
+  model?: string;
+  reasoningEffort?: ReasoningEffort;
+};
+
+function SessionSubmit({
+  sending,
+  prompt,
+}: {
+  sending: boolean;
+  prompt: string;
+}) {
+  const attachments = usePromptInputAttachments();
+  const hasAttachments = attachments.files.length > 0;
+
+  return (
+    <PromptInputSubmit
+      disabled={sending || (!prompt.trim() && !hasAttachments)}
+    />
+  );
+}
+
+/** Session reply composer mirroring the task composer's structure: action
+ * menu and model switcher on the left, voice and submit on the right. */
+export function SessionPromptInput({
+  isBusy,
+  onSend,
+}: {
+  isBusy: boolean;
+  onSend: (submission: SessionPromptSubmission) => void;
+}) {
+  const [prompt, setPrompt] = useState('');
+  const [model, setModel] = useState('');
+  const [reasoningEffort, setReasoningEffort] =
+    useState<ReasoningEffort | null>(null);
+  const voiceDictation = useVoiceDictation({
+    onTranscript: (text) => setPrompt(text),
+    getPrefix: () => prompt,
+    disabled: isBusy,
+  });
+
+  const handleSubmit = (message: PromptInputMessage) => {
+    setPrompt('');
+    onSend({
+      ...message,
+      ...(model ? { model } : {}),
+      ...(reasoningEffort ? { reasoningEffort } : {}),
+    });
+  };
+
+  return (
+    <div className="mx-auto w-full max-w-4xl">
+      <PromptInputRoot
+        onSubmit={handleSubmit}
+        accept={ROOMOTE_FILE_ATTACHMENT_ACCEPT}
+        multiple
+      >
+        <AttachmentsDisplay />
+        <PromptInputBody>
+          <PromptInputTextarea
+            value={prompt}
+            onChange={(event) => setPrompt(event.target.value)}
+            placeholder="Message agent"
+            disabled={isBusy}
+          />
+        </PromptInputBody>
+        <PromptInputFooter className="px-4 pt-0 pb-4">
+          <PromptInputTools>
+            <PromptInputActionMenu>
+              <BasicTooltip content="Add to session">
+                <PromptInputActionMenuTrigger
+                  aria-label="Add to session"
+                  className="hover:bg-secondary"
+                />
+              </BasicTooltip>
+              <PromptInputActionMenuContent>
+                <PromptInputActionAddAttachments />
+              </PromptInputActionMenuContent>
+            </PromptInputActionMenu>
+            <SessionModelSwitcher
+              model={model}
+              onModelChange={setModel}
+              reasoningEffort={reasoningEffort}
+              onReasoningEffortChange={setReasoningEffort}
+              disabled={isBusy}
+            />
+          </PromptInputTools>
+          <div className="flex items-center gap-2">
+            <VoiceDictationButton
+              isRecording={voiceDictation.isRecording}
+              isSupported={voiceDictation.isSupported}
+              onClick={voiceDictation.toggle}
+              disabled={isBusy}
+            />
+            <SessionSubmit sending={isBusy} prompt={prompt} />
+          </div>
+        </PromptInputFooter>
+      </PromptInputRoot>
+    </div>
+  );
+}

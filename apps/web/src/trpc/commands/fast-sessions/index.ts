@@ -8,7 +8,7 @@ import {
   resolveApiBaseUrl,
 } from '@roomote/cloud-agents/server';
 import { resolveUserMcpServerConfigs } from '@roomote/sdk/server';
-import { formatErrorForLog } from '@roomote/types';
+import { formatErrorForLog, type ReasoningEffort } from '@roomote/types';
 
 import type { UserAuthSuccess } from '@/types';
 import { findAccessibleFastSession } from '@/lib/server/fast-sessions';
@@ -30,11 +30,15 @@ async function runWebFastAgentTurn({
   conversation,
   question,
   images,
+  model,
+  reasoningEffort,
 }: {
   userId: string;
   conversation: WebFastAgentConversation;
   question: string;
   images?: string[];
+  model?: string;
+  reasoningEffort?: ReasoningEffort;
 }): Promise<void> {
   const release = await acquireFastAgentTurnLock({ conversation });
   if (!release) {
@@ -54,6 +58,8 @@ async function runWebFastAgentTurn({
       conversation,
       currentMessageId: `web-${randomUUID()}`,
       signal: release.signal,
+      model,
+      reasoningEffort,
       adapter: {
         resolveMcpServerConfigs: () =>
           resolveUserMcpServerConfigs({
@@ -78,7 +84,12 @@ async function runWebFastAgentTurn({
 
 export async function startFastSessionCommand(
   auth: UserAuthSuccess,
-  input: { text: string; images?: string[] },
+  input: {
+    text: string;
+    images?: string[];
+    model?: string;
+    reasoningEffort?: ReasoningEffort;
+  },
 ): Promise<{ sessionId: string }> {
   const conversation: WebFastAgentConversation = {
     surface: 'web',
@@ -96,6 +107,8 @@ export async function startFastSessionCommand(
     conversation,
     question: input.text,
     images: input.images,
+    model: input.model,
+    reasoningEffort: input.reasoningEffort,
   });
 
   return { sessionId: session.id };
@@ -103,7 +116,13 @@ export async function startFastSessionCommand(
 
 export async function replyToFastSessionCommand(
   auth: UserAuthSuccess,
-  input: { sessionId: string; text: string; images?: string[] },
+  input: {
+    sessionId: string;
+    text: string;
+    images?: string[];
+    model?: string;
+    reasoningEffort?: ReasoningEffort;
+  },
 ): Promise<{ success: true }> {
   const session = await findAccessibleFastSession(auth, input.sessionId);
   if (!session) {
@@ -124,6 +143,8 @@ export async function replyToFastSessionCommand(
     },
     question: input.text,
     images: input.images,
+    model: input.model,
+    reasoningEffort: input.reasoningEffort,
   });
 
   return { success: true };
