@@ -1,10 +1,7 @@
 'use client';
 
-import Link from 'next/link';
-
 import { Section } from '@/components/settings';
 import { Badge, Lock, Settings2 } from '@/components/system';
-import { SETTINGS_PATHS } from '@/lib/settings';
 
 import type { BrainSettings } from '@/trpc/commands/brain';
 import { BRAIN_INFERENCE_PROVIDER_LABELS } from './brain-presentation';
@@ -88,12 +85,6 @@ export function BrainConfigurationSection({
                 : `The deployment's ${providerLabel} key`
               : 'No provider key resolves'}
           </span>
-          <Link
-            className="text-secondary-foreground underline-offset-4 hover:underline"
-            href={SETTINGS_PATHS.models}
-          >
-            Manage in Models
-          </Link>
         </ConfigRow>
       </div>
     </Section>
