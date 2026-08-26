@@ -40,6 +40,7 @@ function eventInput(input: {
   headSha?: string;
   roomoteAuthored?: boolean;
   isSummary?: boolean;
+  dueAt?: Date;
   observedAt?: Date;
 }) {
   const kind = input.kind ?? 'review_comment';
@@ -61,7 +62,7 @@ function eventInput(input: {
       ? ('roomote' as const)
       : ('human' as const),
     batchId: input.batchId ?? null,
-    dueAt: CLAIM_AT,
+    dueAt: input.dueAt ?? CLAIM_AT,
     observedAt,
     reviewHeadSha: input.headSha ?? null,
     roomoteAuthored: input.roomoteAuthored,
@@ -166,6 +167,128 @@ describe('canonical PR review notification ownership', () => {
           eq(prReviewNotificationDeliveries.notificationUnitId, units[0]!.id),
         ),
     ).toHaveLength(1);
+  });
+
+  it('promotes a provisional Roomote cycle for immediate canonical delivery', async () => {
+    const task = await taskFactory.create();
+    const repository = `owner/summary-promotion-${task.id}`;
+    const inlineDueAt = new Date(CLAIM_AT.getTime() + 5 * 60 * 1000);
+    await associate(task.id, repository, 16);
+
+    await persistPrReviewEvent(
+      eventInput({
+        repository,
+        prNumber: 16,
+        eventKey: `inline-${task.id}`,
+        batchId: 'cycle-1',
+        headSha: 'same-head',
+        roomoteAuthored: true,
+        dueAt: inlineDueAt,
+      }),
+    );
+
+    const [provisionalUnit] = await db
+      .select()
+      .from(prReviewNotificationUnits)
+      .where(eq(prReviewNotificationUnits.repository, repository));
+    const [provisionalDelivery] = await db
+      .select()
+      .from(prReviewNotificationDeliveries)
+      .where(
+        eq(
+          prReviewNotificationDeliveries.notificationUnitId,
+          provisionalUnit!.id,
+        ),
+      );
+    expect(provisionalUnit?.dueAt).toEqual(inlineDueAt);
+    expect(provisionalDelivery?.dueAt).toEqual(inlineDueAt);
+    await expect(claimForRepository(repository, CLAIM_AT)).resolves.toEqual([]);
+
+    await persistPrReviewEvent(
+      eventInput({
+        repository,
+        prNumber: 16,
+        eventKey: `summary-${task.id}`,
+        kind: 'review_summary',
+        batchId: 'cycle-1',
+        headSha: 'same-head',
+        roomoteAuthored: true,
+        isSummary: true,
+        dueAt: CLAIM_AT,
+      }),
+    );
+
+    const units = await db
+      .select()
+      .from(prReviewNotificationUnits)
+      .where(eq(prReviewNotificationUnits.repository, repository));
+    const deliveries = await db
+      .select()
+      .from(prReviewNotificationDeliveries)
+      .where(
+        eq(prReviewNotificationDeliveries.notificationUnitId, units[0]!.id),
+      );
+    expect(units).toHaveLength(1);
+    expect(deliveries).toHaveLength(1);
+    expect(units[0]).toMatchObject({
+      id: provisionalUnit!.id,
+      dueAt: CLAIM_AT,
+    });
+    expect(deliveries[0]).toMatchObject({
+      id: provisionalDelivery!.id,
+      dueAt: CLAIM_AT,
+    });
+    await expect(claimForRepository(repository, CLAIM_AT)).resolves.toEqual([
+      expect.objectContaining({
+        ownershipVersion: 'canonical',
+        deliveryId: provisionalDelivery!.id,
+        notificationUnitId: provisionalUnit!.id,
+        repository,
+      }),
+    ]);
+  });
+
+  it('keeps review and CI coalescing on its independent 15-minute window', async () => {
+    const observedAt = new Date('2026-08-26T05:00:00.000Z');
+
+    for (const [suffix, ciOffsetMs, expectedUnits] of [
+      ['inside', 15 * 60 * 1000 - 1, 1],
+      ['outside', 15 * 60 * 1000 + 1, 2],
+    ] as const) {
+      const task = await taskFactory.create();
+      const repository = `owner/ci-window-${suffix}-${task.id}`;
+      await associate(task.id, repository, suffix === 'inside' ? 14 : 15);
+      await persistPrReviewEvent(
+        eventInput({
+          repository,
+          prNumber: suffix === 'inside' ? 14 : 15,
+          eventKey: `summary-${suffix}-${task.id}`,
+          kind: 'review_summary',
+          batchId: `cycle-${suffix}`,
+          headSha: 'same-head',
+          roomoteAuthored: true,
+          isSummary: true,
+          observedAt,
+        }),
+      );
+      await persistPrReviewEvent(
+        eventInput({
+          repository,
+          prNumber: suffix === 'inside' ? 14 : 15,
+          eventKey: `ci-${suffix}-${task.id}`,
+          kind: 'ci_failure',
+          headSha: 'same-head',
+          observedAt: new Date(observedAt.getTime() + ciOffsetMs),
+        }),
+      );
+
+      await expect(
+        db
+          .select({ id: prReviewNotificationUnits.id })
+          .from(prReviewNotificationUnits)
+          .where(eq(prReviewNotificationUnits.repository, repository)),
+      ).resolves.toHaveLength(expectedUnits);
+    }
   });
 
   it('keeps the same episode id separate across head SHAs', async () => {
