@@ -141,8 +141,12 @@ function OverflowMenuBase({
 
   const handleMarkDone = async () => {
     try {
-      await acknowledgeResolution.mutateAsync({ taskId });
-      toast.success('Task marked done.');
+      const { changed } = await acknowledgeResolution.mutateAsync({ taskId });
+      if (changed) {
+        toast.success('Task marked done.');
+      } else {
+        toast.error('Task status changed before it could be marked done.');
+      }
     } catch (error) {
       toast.error(
         error instanceof Error ? error.message : 'Failed to mark task done.',

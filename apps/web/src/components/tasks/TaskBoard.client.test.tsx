@@ -4,16 +4,16 @@ import { RunStatus } from '@roomote/types';
 
 import type { Task } from '@/lib/server';
 
-const { acknowledgeMock, acknowledgeState, errorToastMock } = vi.hoisted(
-  () => ({
+const { acknowledgeMock, acknowledgeState, errorToastMock, successToastMock } =
+  vi.hoisted(() => ({
     acknowledgeMock: vi.fn(),
     acknowledgeState: { isPending: false },
     errorToastMock: vi.fn(),
-  }),
-);
+    successToastMock: vi.fn(),
+  }));
 
 vi.mock('sonner', () => ({
-  toast: { success: vi.fn(), error: errorToastMock },
+  toast: { success: successToastMock, error: errorToastMock },
 }));
 
 vi.mock('@/hooks/tasks', () => ({
@@ -204,7 +204,38 @@ describe('TaskBoard', () => {
 
     await waitFor(() => {
       expect(acknowledgeMock).toHaveBeenCalledWith({ taskId: 'task-1' });
+      expect(successToastMock).toHaveBeenCalledWith('Task marked done.');
     });
+  });
+
+  it('does not report success when acknowledgement loses a lifecycle race', async () => {
+    acknowledgeMock.mockResolvedValueOnce({ success: true, changed: false });
+
+    render(
+      <TaskBoard
+        tasks={[
+          createTask({
+            resolutionStatus: 'awaiting_confirmation',
+            taskRun: {
+              status: RunStatus.Idle,
+              taskPhase: 'waiting_for_prompt',
+              payload: {},
+              prRepo: null,
+              prNumber: null,
+            } as Task['taskRun'],
+          }),
+        ]}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Mark done' }));
+
+    await waitFor(() => {
+      expect(errorToastMock).toHaveBeenCalledWith(
+        'Task status changed before it could be marked done.',
+      );
+    });
+    expect(successToastMock).not.toHaveBeenCalled();
   });
 
   it('disables an actionable card while acknowledgement is pending', () => {

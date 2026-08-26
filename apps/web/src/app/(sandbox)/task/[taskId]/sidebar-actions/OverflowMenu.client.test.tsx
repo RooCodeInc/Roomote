@@ -256,6 +256,30 @@ describe('OverflowMenu', () => {
     expect(successToastMock).toHaveBeenCalledWith('Task marked done.');
   });
 
+  it('does not report success when acknowledgement loses a lifecycle race', async () => {
+    acknowledgeMutateAsyncMock.mockResolvedValueOnce({
+      success: true,
+      changed: false,
+    });
+
+    render(
+      <OverflowMenu
+        taskId="task-1"
+        taskRun={createTaskRun()}
+        resolutionStatus="awaiting_confirmation"
+      />,
+    );
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Mark done' }));
+    });
+
+    expect(errorToastMock).toHaveBeenCalledWith(
+      'Task status changed before it could be marked done.',
+    );
+    expect(successToastMock).not.toHaveBeenCalled();
+  });
+
   it.each([
     ['pending', null],
     ['running', null],
