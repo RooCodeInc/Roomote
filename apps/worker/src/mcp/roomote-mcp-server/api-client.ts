@@ -57,8 +57,14 @@ export async function fetchWithTimeout(
     return await fetch(url, { ...options, signal });
   } catch (error) {
     if (timeoutSignal.aborted) {
+      const method = options.method?.toUpperCase() ?? 'GET';
+      const retrySafe = method === 'GET' || method === 'HEAD';
       throw new Error(
-        `${context.label}: no response from the Roomote API within ${timeoutMs}ms; the request was aborted and is safe to retry.`,
+        `${context.label}: no response from the Roomote API within ${timeoutMs}ms; the request was aborted${
+          retrySafe
+            ? ' and is safe to retry.'
+            : ', but the operation may still complete; check its status before retrying.'
+        }`,
       );
     }
 

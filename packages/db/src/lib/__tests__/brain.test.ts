@@ -25,6 +25,7 @@ import {
   releaseBrainMemoryEvents,
   maybeEnqueueBrainMemoryEvent,
   saveBrainAgentSummary,
+  sql,
   resetBrainIngestionState,
   canonicalizeBrainCollectorItemSlugs,
   deleteBrainCollectorItems,
@@ -513,8 +514,15 @@ describe('backfillBrainMemoryEvents', () => {
       })
       .returning();
 
-    const first = await backfillBrainMemoryEvents(db);
-    const second = await backfillBrainMemoryEvents(db);
+    const [first, second] = await db.transaction(async (tx) => {
+      await tx.execute(sql`SET TRANSACTION ISOLATION LEVEL REPEATABLE READ`);
+      const firstResult = await backfillBrainMemoryEvents(tx);
+      // Root CI runs package suites concurrently against one database. A run
+      // completed by another package must not invalidate this idempotency pass.
+      await makeCompletedRun();
+      const secondResult = await backfillBrainMemoryEvents(tx);
+      return [firstResult, secondResult];
+    });
 
     expect(first).toBeGreaterThanOrEqual(1);
     expect(second).toBe(0);

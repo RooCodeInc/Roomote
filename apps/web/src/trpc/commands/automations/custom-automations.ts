@@ -18,7 +18,7 @@ import {
   resolveDeploymentTimeZone,
   runCustomAutomationNow,
   validateCronExpression,
-  type AutomationRunNowResult,
+  type CustomAutomationRunNowResult,
 } from '@roomote/sdk/server';
 import {
   ALL_REPOSITORIES,
@@ -346,7 +346,7 @@ export async function deleteCustomAutomationCommand(
 export async function triggerCustomAutomationCommand(
   auth: UserAuthSuccess,
   input: { id: string },
-): Promise<AutomationRunNowResult> {
+): Promise<CustomAutomationRunNowResult> {
   assertAdmin(auth);
   return runCustomAutomationNow(input.id);
 }

@@ -40,3 +40,7 @@ export type AutomationRunNowResult =
   | { outcome: 'completed' }
   | { outcome: 'skipped'; reason: string }
   | { outcome: 'failed'; error: string };
+
+export type CustomAutomationRunNowResult =
+  | AutomationRunNowResult
+  | { outcome: 'accepted'; invocationId: string };

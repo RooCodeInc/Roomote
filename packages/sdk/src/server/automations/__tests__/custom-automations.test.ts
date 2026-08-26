@@ -5,6 +5,11 @@ const fastMocks = vi.hoisted(() => ({
   deliverParentEvent: vi.fn(),
   slackPostMessage: vi.fn(),
 }));
+const runQueueMocks = vi.hoisted(() => ({ enqueue: vi.fn() }));
+
+vi.mock('../custom-automation-run-queue', () => ({
+  enqueueCustomAutomationRun: runQueueMocks.enqueue,
+}));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
   enqueueTask: vi.fn(),
@@ -50,6 +55,7 @@ vi.mock('@roomote/db/server', () => ({
   listEnabledCustomAutomations: vi.fn(),
   recordCustomAutomationRunOutcome: vi.fn(),
   releaseCustomAutomationLaunchClaim: vi.fn(),
+  renewCustomAutomationLaunchClaim: vi.fn(),
   tryClaimCustomAutomationLaunch: vi.fn(),
   slackInstallations: {},
 }));
@@ -93,6 +99,7 @@ import {
   listEnabledCustomAutomations,
   recordCustomAutomationRunOutcome,
   releaseCustomAutomationLaunchClaim,
+  renewCustomAutomationLaunchClaim,
   tryClaimCustomAutomationLaunch,
 } from '@roomote/db/server';
 import { ALL_REPOSITORIES, TaskPayloadKind } from '@roomote/types';
@@ -100,6 +107,7 @@ import { findUserDirectMessageDestination } from '../../lib/user-direct-message'
 
 import {
   customAutomationsJob,
+  runClaimedFastCustomAutomation,
   runCustomAutomationNow,
 } from '../custom-automations';
 import {
@@ -166,6 +174,7 @@ describe('customAutomationsJob', () => {
     });
     fastMocks.deliverParentEvent.mockResolvedValue('delivered');
     fastMocks.slackPostMessage.mockResolvedValue('100.001');
+    runQueueMocks.enqueue.mockResolvedValue('invocation-1');
   });
 
   it('runs a channel-less Fast automation without enqueueing a task', async () => {
@@ -275,6 +284,7 @@ describe('customAutomationsJob', () => {
         target: {},
         createdByUserId: 'user-1',
         launchClaimedAt: staleClaim,
+        updatedAt: staleClaim,
       } as never,
     ]);
 
@@ -757,6 +767,43 @@ describe('runCustomAutomationNow', () => {
     );
   });
 
+  it('accepts a Fast manual run after claiming and enqueueing it', async () => {
+    const claimAt = new Date('2026-08-25T17:41:38.469Z');
+    vi.mocked(getCustomAutomationById).mockResolvedValue({
+      ...automation,
+      executionMode: 'fast',
+      environmentId: null,
+      createdByUserId: 'user-1',
+    } as never);
+    vi.mocked(tryClaimCustomAutomationLaunch).mockResolvedValue(claimAt);
+
+    await expect(runCustomAutomationNow(automation.id)).resolves.toEqual({
+      outcome: 'accepted',
+      invocationId: 'invocation-1',
+    });
+    expect(runQueueMocks.enqueue).toHaveBeenCalledWith({
+      automationId: automation.id,
+      launchClaimedAt: claimAt,
+    });
+    expect(fastMocks.deliverParentEvent).not.toHaveBeenCalled();
+  });
+
+  it('does not enqueue a duplicate Fast manual run while claimed', async () => {
+    vi.mocked(getCustomAutomationById).mockResolvedValue({
+      ...automation,
+      executionMode: 'fast',
+      environmentId: null,
+      createdByUserId: 'user-1',
+    } as never);
+    vi.mocked(tryClaimCustomAutomationLaunch).mockResolvedValue(null);
+
+    await expect(runCustomAutomationNow(automation.id)).resolves.toEqual({
+      outcome: 'skipped',
+      reason: 'Another launch is already in progress.',
+    });
+    expect(runQueueMocks.enqueue).not.toHaveBeenCalled();
+  });
+
   it('skips manual run when a concurrent launch holds the claim', async () => {
     vi.mocked(tryClaimCustomAutomationLaunch).mockResolvedValue(null);
 
@@ -793,5 +840,61 @@ describe('runCustomAutomationNow', () => {
 
     expect(result.outcome).toBe('failed');
     expect(enqueueTask).not.toHaveBeenCalled();
+  });
+});
+
+describe('runClaimedFastCustomAutomation', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(recordCustomAutomationRunOutcome).mockResolvedValue(true);
+    vi.mocked(renewCustomAutomationLaunchClaim).mockResolvedValue(true);
+  });
+
+  it('clears the fenced claim when the execution mode changed', async () => {
+    const claimAt = new Date('2026-08-25T17:41:38.469Z');
+    vi.mocked(getCustomAutomationById).mockResolvedValue({
+      ...automation,
+      launchClaimedAt: claimAt,
+    } as never);
+
+    await expect(
+      runClaimedFastCustomAutomation({
+        automationId: automation.id,
+        launchClaimedAt: claimAt.toISOString(),
+      }),
+    ).rejects.toThrow('invocation is no longer active');
+    expect(recordCustomAutomationRunOutcome).toHaveBeenCalledWith(
+      db,
+      expect.objectContaining({
+        id: automation.id,
+        status: 'failed',
+        launchClaimedAt: claimAt,
+      }),
+    );
+  });
+
+  it('rejects an invocation that outlived its claim window', async () => {
+    const claimAt = new Date(Date.now() - 10 * 60 * 1_000 - 1);
+    vi.mocked(getCustomAutomationById).mockResolvedValue({
+      ...automation,
+      executionMode: 'fast',
+      environmentId: null,
+      createdByUserId: 'user-1',
+      launchClaimedAt: claimAt,
+    } as never);
+
+    await expect(
+      runClaimedFastCustomAutomation({
+        automationId: automation.id,
+        launchClaimedAt: claimAt.toISOString(),
+      }),
+    ).rejects.toThrow('invocation expired before it started');
+    expect(recordCustomAutomationRunOutcome).toHaveBeenCalledWith(
+      db,
+      expect.objectContaining({
+        status: 'failed',
+        launchClaimedAt: claimAt,
+      }),
+    );
   });
 });

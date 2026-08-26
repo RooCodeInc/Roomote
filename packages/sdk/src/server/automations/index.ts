@@ -1,8 +1,18 @@
 export { announcerJob } from './announcer';
 export {
   customAutomationsJob,
+  runClaimedFastCustomAutomation,
   runCustomAutomationNow,
 } from './custom-automations';
+export {
+  CUSTOM_AUTOMATION_RUN_JOB_NAME,
+  CUSTOM_AUTOMATION_RUN_QUEUE_NAME,
+  customAutomationRunJobSchema,
+  enqueueCustomAutomationRun,
+  getCustomAutomationRunStatus,
+  type CustomAutomationRunJob,
+  type CustomAutomationRunStatus,
+} from './custom-automation-run-queue';
 export * from './custom-automation-schedule';
 export { ciFailureTriageJob } from './ci-failure-triage';
 export {
@@ -50,5 +60,6 @@ export {
 export type {
   AutomationJobResult,
   AutomationRunNowResult,
+  CustomAutomationRunNowResult,
   AutomationRunOpts,
 } from './types';
