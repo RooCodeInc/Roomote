@@ -701,10 +701,15 @@ export async function markBrainMemoryEvent(
  * Settle a claimed event after the page write, fenced on the revision the
  * drainer claimed. The fence is what makes overlapping writers safe: gbrain
  * page writes carry no timeout, so an older in-flight `put_page` can land
- * after a newer one. Whichever writer holds a stale revision (or lost its
- * claim to a stale-reclaim) fails the fence, and the row is handed back to
- * 'pending' — the forced re-ingest both carries the newer summary and re-puts
- * the latest content over whatever snapshot reached the page last.
+ * after a newer one. A writer whose fence misses forces the row back to
+ * 'pending' UNCONDITIONALLY — even over a 'done' another claim settled in
+ * the meantime — because its own external write just landed with unknown
+ * ordering relative to the newer one, and the only safe response is a fresh
+ * re-put of the latest content at the same idempotent slug. This is what
+ * heals the stale-reclaim ordering: A claims and hangs past the reclaim
+ * window, B claims the newer revision, writes it, and settles 'done'; when
+ * A's older write finally lands, A's fence miss re-queues the row and the
+ * next tick re-puts the newest content over A's stale snapshot.
  */
 export async function settleBrainMemoryEvent(
   database: DatabaseOrTransaction,
@@ -736,13 +741,8 @@ export async function settleBrainMemoryEvent(
 
   await database
     .update(brainMemoryEvents)
-    .set({ status: 'pending', updatedAt: sql`now()` })
-    .where(
-      and(
-        eq(brainMemoryEvents.id, id),
-        eq(brainMemoryEvents.status, 'processing'),
-      ),
-    );
+    .set({ status: 'pending', processedAt: null, updatedAt: sql`now()` })
+    .where(eq(brainMemoryEvents.id, id));
 
   return 'superseded';
 }

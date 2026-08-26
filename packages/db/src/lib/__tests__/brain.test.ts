@@ -537,6 +537,55 @@ describe('saveBrainAgentSummary', () => {
     expect(settled!.status).toBe('done');
   });
 
+  it('re-queues a settled row when a stale-reclaimed writer returns late', async () => {
+    const run = await makeCompletedRun();
+    await maybeEnqueueBrainMemoryEvent(db, run.id);
+
+    // Writer A claims, then hangs in its page write past the reclaim window.
+    const claimedA = (await claimPendingBrainMemoryEvents(db, 10)).find(
+      (candidate) => candidate.runId === run.id,
+    );
+    await saveBrainAgentSummary(db, run.id, 'newer narrative');
+    await db
+      .update(brainMemoryEvents)
+      .set({ updatedAt: new Date(Date.now() - 16 * 60 * 1000) })
+      .where(eq(brainMemoryEvents.id, claimedA!.id));
+
+    // Writer B stale-reclaims the newer revision, writes it, settles done.
+    const claimedB = (await claimPendingBrainMemoryEvents(db, 10)).find(
+      (candidate) => candidate.id === claimedA!.id,
+    );
+    expect(claimedB!.revision).toBeGreaterThan(claimedA!.revision);
+    expect(
+      await settleBrainMemoryEvent(
+        db,
+        claimedB!.id,
+        claimedB!.revision,
+        'done',
+      ),
+    ).toBe('settled');
+
+    // A's stale page write finally lands and A settles: the fence miss must
+    // re-queue the row even though it is already 'done', so the next tick
+    // re-puts the newest content over A's stale snapshot.
+    expect(
+      await settleBrainMemoryEvent(
+        db,
+        claimedA!.id,
+        claimedA!.revision,
+        'done',
+      ),
+    ).toBe('superseded');
+
+    const [row] = await db
+      .select()
+      .from(brainMemoryEvents)
+      .where(eq(brainMemoryEvents.id, claimedA!.id));
+
+    expect(row!.status).toBe('pending');
+    expect(row!.processedAt).toBeNull();
+  });
+
   it('keeps the summary when the completion path enqueues afterwards', async () => {
     const run = await makeCompletedRun();
 
