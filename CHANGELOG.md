@@ -4,20 +4,21 @@ This file tracks product releases for Roomote (single monorepo version). Automat
 
 ## 0.44.0 (2026-08-26)
 
-This release adds shared memory and skill discovery to Fast sessions, expands automation delivery across chat providers, and improves session and pull request review reliability.
+This release adds shared memory, skill discovery, and presentational widgets to Fast sessions, expands automation delivery across chat providers, and improves session and pull request review reliability.
 
 ### Highlights
 
 - Save durable context from Fast sessions and recall it in later work through connected memory providers.
 - Discover and load packaged or repository-defined skills from Fast before delegating work.
+- Render safe status cards, tables, plans, and other presentational widgets in Fast session transcripts.
 - Deliver Fast automation reports across Slack, Discord, Microsoft Teams, and Telegram, with direct chat continuation where supported.
-- Keep Fast sessions and pull request review workflows reliable across interruptions, follow-ups, and chat providers.
 
 ### Minor changes
 
 - Deliver Fast automation reports across Slack, Discord, Microsoft Teams, and Telegram channel or direct-message destinations, with web continuation everywhere and direct chat continuation where the provider supports Fast session identity.
 - Let Fast sessions discover and load packaged and repository-defined skill documents through bounded, session-safe tools without exposing filesystem access.
 - Let Fast save durable preferences, decisions, corrections, and facts to shared memory so they can be recalled in later sessions, while supporting pluggable memory providers and making concurrent memory ingestion more reliable.
+- Render safe presentational widgets such as status cards, tables, and plans directly in Fast session transcripts while keeping raw HTML confined to the sandboxed web view.
 
 ### Patch changes
 
@@ -31,6 +32,9 @@ This release adds shared memory and skill discovery to Fast sessions, expands au
 - Keep pull request review threads clear by removing stale action buttons when newer feedback arrives or an action is handled, while preserving the latest actionable controls across Slack, Discord, and Telegram.
 - Settle Slack task cards when work becomes idle or waits for input, then return them to an active state when work resumes without losing delayed final output.
 - Keep the current page visible while authenticated navigation loads and correct the label shown when an input request is cancelled.
+- Show Slack pull request review resolutions as subdued context notes instead of prominent message sections after an action is handled.
+- Show the redacted task memory submitted by an agent in the save tool result so users can inspect what was recorded without exposing secret-shaped values.
+- Deliver Teams Fast automation reports and failure states to newly created owner direct messages by using the persisted session route when no active route row exists.
 
 ## 0.43.0 (2026-08-26)
 
