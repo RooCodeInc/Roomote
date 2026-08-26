@@ -23,6 +23,7 @@ import {
   claimPendingBrainMemoryEvents,
   markBrainMemoryEvent,
   releaseBrainMemoryEvents,
+  settleBrainMemoryEvent,
   maybeEnqueueBrainMemoryEvent,
   saveBrainAgentSummary,
   resetBrainIngestionState,
@@ -85,7 +86,7 @@ describe('resetBrainIngestionState', () => {
     const run = await makeCompletedRun();
     await maybeEnqueueBrainMemoryEvent(db, run.id);
     const [claimed] = await claimPendingBrainMemoryEvents(db, 10);
-    await markBrainMemoryEvent(db, claimed!.id, 'done');
+    await settleBrainMemoryEvent(db, claimed!.id, claimed!.revision, 'done');
     await upsertBrainSyncState(db, 'granola-meetings', {
       watermark: new Date('2026-08-01T00:00:00Z'),
       backfillCompletedAt: new Date('2026-08-01T01:00:00Z'),
@@ -464,7 +465,7 @@ describe('saveBrainAgentSummary', () => {
     const run = await makeCompletedRun();
     await maybeEnqueueBrainMemoryEvent(db, run.id);
     const [claimed] = await claimPendingBrainMemoryEvents(db, 10);
-    await markBrainMemoryEvent(db, claimed!.id, 'done');
+    await settleBrainMemoryEvent(db, claimed!.id, claimed!.revision, 'done');
 
     await saveBrainAgentSummary(db, run.id, 'agent narrative');
 
@@ -476,6 +477,64 @@ describe('saveBrainAgentSummary', () => {
     expect(event?.status).toBe('pending');
     expect(event?.attempts).toBe(0);
     expect(event?.agentSummary).toBe('agent narrative');
+  });
+
+  it('keeps a claimed row with a single writer and fences its completion', async () => {
+    const run = await makeCompletedRun();
+    await maybeEnqueueBrainMemoryEvent(db, run.id);
+    const claimed = (await claimPendingBrainMemoryEvents(db, 10)).find(
+      (candidate) => candidate.runId === run.id,
+    );
+
+    // A save lands between the claim and the drainer's completion: the row
+    // stays 'processing' (no second claimer can pick it up) but its revision
+    // moves past the drainer's snapshot.
+    await saveBrainAgentSummary(db, run.id, 'late richer narrative');
+
+    const [held] = await db
+      .select()
+      .from(brainMemoryEvents)
+      .where(eq(brainMemoryEvents.id, claimed!.id));
+    expect(held!.status).toBe('processing');
+    expect(held!.revision).toBe(claimed!.revision + 1);
+
+    // The stale-revision settle fails the fence and hands the row back.
+    const outcome = await settleBrainMemoryEvent(
+      db,
+      claimed!.id,
+      claimed!.revision,
+      'done',
+    );
+    expect(outcome).toBe('superseded');
+
+    const [row] = await db
+      .select()
+      .from(brainMemoryEvents)
+      .where(eq(brainMemoryEvents.id, claimed!.id));
+
+    expect(row!.status).toBe('pending');
+    expect(row!.processedAt).toBeNull();
+    expect(row!.agentSummary).toBe('late richer narrative');
+
+    // The next tick re-claims it and completes normally.
+    const reclaimed = (await claimPendingBrainMemoryEvents(db, 10)).find(
+      (candidate) => candidate.id === claimed!.id,
+    );
+    expect(
+      await settleBrainMemoryEvent(
+        db,
+        reclaimed!.id,
+        reclaimed!.revision,
+        'done',
+      ),
+    ).toBe('settled');
+
+    const [settled] = await db
+      .select()
+      .from(brainMemoryEvents)
+      .where(eq(brainMemoryEvents.id, claimed!.id));
+
+    expect(settled!.status).toBe('done');
   });
 
   it('keeps the summary when the completion path enqueues afterwards', async () => {
@@ -534,11 +593,9 @@ describe('backfillBrainMemoryEvents', () => {
   it('requeues completed memories for a one-time metadata replay', async () => {
     const completed = await makeCompletedRun();
     await saveBrainAgentSummary(db, completed.id, 'Keep this summary.');
-    const [event] = await db
-      .select()
-      .from(brainMemoryEvents)
-      .where(eq(brainMemoryEvents.runId, completed.id));
-    await markBrainMemoryEvent(db, event!.id, 'done');
+    const claimed = await claimPendingBrainMemoryEvents(db, 10);
+    const event = claimed.find((row) => row.runId === completed.id);
+    await settleBrainMemoryEvent(db, event!.id, event!.revision, 'done');
 
     await backfillBrainMemoryEvents(db, { requeueCompleted: true });
 

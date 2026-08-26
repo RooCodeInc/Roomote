@@ -368,10 +368,15 @@ export async function maybeEnqueueBrainMemoryEvent(
  * drainer stays the single writer to the brain and the per-run slug,
  * redaction, and provenance remain server-controlled.
  *
- * Status resets to 'pending' so a memory already ingested is re-written with
- * richer content at the same run-specific slug, and the row is
- * created if the run has not finished yet — the completion path's
- * onConflictDoNothing then leaves this summary intact.
+ * Every save bumps `revision`, which the drainer fences its completion on.
+ * A settled row ('done'/'skipped'/'failed') returns to 'pending' with a fresh
+ * retry budget so the richer content re-ingests at the same run-specific
+ * slug, and the row is created if the run has not finished yet — the
+ * completion path's onConflictDoNothing then leaves this summary intact. A
+ * row the drainer currently holds ('processing') keeps its status and budget:
+ * leaving it claimed guarantees a single in-flight page writer per run, and
+ * the drainer's revision fence hands the row back when its snapshot went
+ * stale mid-write.
  */
 export async function saveBrainAgentSummary(
   database: DatabaseOrTransaction,
@@ -385,8 +390,9 @@ export async function saveBrainAgentSummary(
       target: brainMemoryEvents.runId,
       set: {
         agentSummary,
-        status: 'pending',
-        attempts: 0,
+        revision: sql`${brainMemoryEvents.revision} + 1`,
+        status: sql`case when ${brainMemoryEvents.status} = 'processing' then 'processing' else 'pending' end`,
+        attempts: sql`case when ${brainMemoryEvents.status} = 'processing' then ${brainMemoryEvents.attempts} else 0 end`,
         lastError: null,
         updatedAt: sql`now()`,
       },
@@ -661,10 +667,16 @@ export async function countBrainCollectorItemsByCollector(
     .groupBy(brainCollectorItems.collectorId);
 }
 
+/**
+ * Non-terminal transitions. 'pending' hands a claimed row back unguarded;
+ * 'skipped' (the run no longer exists or settled without completing) applies
+ * only while the row is still 'processing', so a concurrent reclaim is not
+ * clobbered.
+ */
 export async function markBrainMemoryEvent(
   database: DatabaseOrTransaction,
   id: string,
-  status: 'pending' | 'done' | 'skipped' | 'failed',
+  status: 'pending' | 'skipped',
   lastError?: string,
 ): Promise<void> {
   await database
@@ -672,9 +684,65 @@ export async function markBrainMemoryEvent(
     .set({
       status,
       lastError: lastError ?? null,
-      processedAt:
-        status === 'done' || status === 'skipped' ? sql`now()` : null,
+      processedAt: status === 'skipped' ? sql`now()` : null,
       updatedAt: sql`now()`,
     })
-    .where(eq(brainMemoryEvents.id, id));
+    .where(
+      status === 'pending'
+        ? eq(brainMemoryEvents.id, id)
+        : and(
+            eq(brainMemoryEvents.id, id),
+            eq(brainMemoryEvents.status, 'processing'),
+          ),
+    );
+}
+
+/**
+ * Settle a claimed event after the page write, fenced on the revision the
+ * drainer claimed. The fence is what makes overlapping writers safe: gbrain
+ * page writes carry no timeout, so an older in-flight `put_page` can land
+ * after a newer one. Whichever writer holds a stale revision (or lost its
+ * claim to a stale-reclaim) fails the fence, and the row is handed back to
+ * 'pending' — the forced re-ingest both carries the newer summary and re-puts
+ * the latest content over whatever snapshot reached the page last.
+ */
+export async function settleBrainMemoryEvent(
+  database: DatabaseOrTransaction,
+  id: string,
+  claimedRevision: number,
+  outcome: 'done' | 'failed',
+  lastError?: string,
+): Promise<'settled' | 'superseded'> {
+  const settled = await database
+    .update(brainMemoryEvents)
+    .set({
+      status: outcome,
+      lastError: lastError ?? null,
+      processedAt: outcome === 'done' ? sql`now()` : null,
+      updatedAt: sql`now()`,
+    })
+    .where(
+      and(
+        eq(brainMemoryEvents.id, id),
+        eq(brainMemoryEvents.status, 'processing'),
+        eq(brainMemoryEvents.revision, claimedRevision),
+      ),
+    )
+    .returning({ id: brainMemoryEvents.id });
+
+  if (settled.length > 0) {
+    return 'settled';
+  }
+
+  await database
+    .update(brainMemoryEvents)
+    .set({ status: 'pending', updatedAt: sql`now()` })
+    .where(
+      and(
+        eq(brainMemoryEvents.id, id),
+        eq(brainMemoryEvents.status, 'processing'),
+      ),
+    );
+
+  return 'superseded';
 }

@@ -4275,6 +4275,14 @@ export const brainMemoryEvents = pgTable(
      * other page.
      */
     agentSummary: text('agent_summary'),
+    /**
+     * Bumped whenever saveBrainAgentSummary updates the row's content. The
+     * drainer fences its completion on the revision it claimed, so a summary
+     * that lands while a page write is in flight forces a re-ingest of the
+     * newer content instead of being stranded behind an already-written older
+     * snapshot.
+     */
+    revision: integer('revision').notNull().default(0),
     attempts: integer('attempts').notNull().default(0),
     lastError: text('last_error'),
     processedAt: timestamp('processed_at'),
