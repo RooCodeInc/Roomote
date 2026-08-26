@@ -2,35 +2,32 @@
 
 This file tracks product releases for Roomote (single monorepo version). Automated release entries are prepended by `pnpm run version`.
 
-## 0.44.0 (2026-08-26)
+## 0.43.1 (2026-08-26)
 
-This release gives Fast durable shared memory, skill discovery, and cross-provider automation delivery while improving session and pull request review reliability.
+This patch expands Fast automation delivery across chat providers and improves shared memory, skill discovery, session recovery, Slack task cards, and pull request review reliability.
 
 ### Highlights
 
-- Ask Fast to remember durable context and recall it in later tasks or sessions through the deployment's connected memory providers.
 - Deliver Fast automation reports across Slack, Discord, Microsoft Teams, and Telegram, with direct chat continuation where supported.
-- Keep Fast sessions moving through retryable provider failures and route follow-up instructions to active tasks sooner.
-- Discover and load packaged or repository-defined skills from Fast before delegating work.
-
-### Minor changes
-
-- Let Fast save durable preferences, decisions, corrections, and facts to shared memory so they can be recalled in later sessions, while supporting pluggable memory providers and making concurrent memory ingestion more reliable.
-- Deliver Fast automation reports across Slack, Discord, Microsoft Teams, and Telegram channel or direct-message destinations, with web continuation everywhere and direct chat continuation where the provider supports Fast session identity.
+- Save durable context from Fast sessions and discover packaged or repository-defined skills before delegating work.
+- Keep Fast sessions moving through provider interruptions, follow-ups, image-only replies, and standalone production builds.
+- Keep pull request review findings and action controls current across supported chat providers.
 
 ### Patch changes
 
+- Deliver Fast automation reports across Slack, Discord, Microsoft Teams, and Telegram channel or direct-message destinations, with web continuation everywhere and direct chat continuation where the provider supports Fast session identity.
 - Deliver Fast custom automation reports to their owners through configured Slack direct messages, and fail runs clearly when their configured Fast destination cannot be resolved or supported.
 - Reconcile image-only Fast replies with their canonical transcript events so optimistic messages do not remain duplicated or stale.
-- Keep Fast sessions moving through retryable provider failures without repeating completed tool effects, and forward follow-up instructions to active tasks before posting the confirmation reply.
-- Restore web-initiated Fast turns in standalone production images by shipping native-tool runtime dependencies and removing stale generated tool files during setup.
-- Keep the current page visible while authenticated navigation loads and correct the label shown when an input request is cancelled.
-- Make Fast coding-task kickoffs clearer by describing the repository work and naming the target repository when it is known without exposing internal orchestration details.
 - Let Fast sessions discover and load packaged and repository-defined skill documents through bounded, session-safe tools without exposing filesystem access.
-- Keep pull request review threads clear by removing stale action buttons when newer feedback arrives or an action is handled, while preserving the latest actionable controls across Slack, Discord, and Telegram.
+- Keep Fast sessions moving through retryable provider failures without repeating completed tool effects, and forward follow-up instructions to active tasks before posting the confirmation reply.
+- Make Fast coding-task kickoffs clearer by describing the repository work and naming the target repository when it is known without exposing internal orchestration details.
+- Let Fast save durable preferences, decisions, corrections, and facts to shared memory so they can be recalled in later sessions, while supporting pluggable memory providers and making concurrent memory ingestion more reliable.
+- Restore web-initiated Fast turns in standalone production images by shipping native-tool runtime dependencies and removing stale generated tool files during setup.
 - Honor each user's Fast response mode preference on the homepage by selecting Fast for new prompts unless an explicit workspace choice takes precedence.
-- Deliver completed pull request review findings reliably by tracking the review lifecycle with structured metadata instead of variable status wording. Thanks to @daniel-lxs for contributing this improvement.
+- Deliver completed pull request review findings reliably by tracking the review lifecycle with structured metadata instead of variable status wording.
+- Keep pull request review threads clear by removing stale action buttons when newer feedback arrives or an action is handled, while preserving the latest actionable controls across Slack, Discord, and Telegram.
 - Settle Slack task cards when work becomes idle or waits for input, then return them to an active state when work resumes without losing delayed final output.
+- Keep the current page visible while authenticated navigation loads and correct the label shown when an input request is cancelled.
 
 ## 0.43.0 (2026-08-26)
 
@@ -497,12 +494,12 @@ This release expands Amazon Bedrock and deployment controls, refreshes Automatio
 ### Patch changes
 
 - Keep Azure Container Apps sandboxes suspended until Roomote deliberately wakes them, recover cleanly from leftover workers, and stop retrying runs whose sandboxes were deleted. Thanks to @tebieshi for contributing this improvement.
-- Stop ChatGPT subscription connections from waiting forever on expired or blocked device codes, explain why authorization stopped, and offer a clean restart. Thanks to @daniel-lxs for contributing this improvement.
+- Stop ChatGPT subscription connections from waiting forever on expired or blocked device codes, explain why authorization stopped, and offer a clean restart.
 - Recommend Claude Sonnet 5 at medium reasoning for code review when operators apply supported provider presets, while retaining Opus for planning.
 - Keep Discord task requests through account linking, focus onboarding on the required personal account connection, and preserve automation reply threads when tasks resume.
 - Keep the Users settings invite list focused on links that still have uses remaining while retaining consumed invite records.
 - Add a direct Personal settings shortcut to the signed-in user menu.
-- Make ChatGPT, xAI, and GitHub Copilot device connections handle expiry, rate limits, restarts, and stale polling consistently, with clearer terminal errors across all three providers. Thanks to @daniel-lxs for contributing this improvement.
+- Make ChatGPT, xAI, and GitHub Copilot device connections handle expiry, rate limits, restarts, and stale polling consistently, with clearer terminal errors across all three providers.
 - Give sandbox providers more time to finish rate-limited starts before aborting, and offer a retry when a task start fails before producing output.
 - Show terminal command output again in the web task view, with collapsible details and a copy button for easier inspection.
 - Restore the previous deployment metadata and controller after a failed self-hosted image pull so operators can retry upgrades without breaking the next backup.
@@ -721,7 +718,7 @@ This release makes Roomote easier to reach across communication channels while r
 
 ### Patch changes
 
-- Let interrupted MCP OAuth connections resume safely after sign-in, route GitHub issue links to their matching environment, and keep source-control attribution and review follow-up behavior accurate. Thanks to @daniel-lxs for contributing the MCP OAuth improvement.
+- Let interrupted MCP OAuth connections resume safely after sign-in, route GitHub issue links to their matching environment, and keep source-control attribution and review follow-up behavior accurate.
 - Improve deployment and task reliability with faster encrypted configuration access, request timing diagnostics, safer custom MCP environment-variable handling, and quieter automation discovery scans. Thanks to @mrubens for contributing these improvements.
 - Show a workspace-shaped loading state while task history hydrates, preserve accepted or dismissed PR feedback in Discord, and add a Discord community link to the release-update dialog.
 
