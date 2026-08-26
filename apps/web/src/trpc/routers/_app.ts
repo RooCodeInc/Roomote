@@ -37,6 +37,10 @@ import {
   startFastSessionCommand,
 } from '../commands/fast-sessions';
 import {
+  replyToFastSessionInputSchema,
+  startFastSessionInputSchema,
+} from '../commands/fast-sessions/input';
+import {
   analyticsChartInputSchema,
   analyticsDetailsInputSchema,
   analyticsExportInputSchema,
@@ -2853,34 +2857,13 @@ export const appRouter = createRouter({
 
   fastSessions: createRouter({
     start: protectedProcedure
-      .input(
-        z.object({
-          text: z.string().trim().min(1),
-          images: z.array(z.string()).optional(),
-          model: z.string().trim().min(1).nullable().optional(),
-          reasoningEffort: z
-            .enum(REASONING_EFFORT_VALUES)
-            .nullable()
-            .optional(),
-        }),
-      )
+      .input(startFastSessionInputSchema)
       .mutation(({ ctx: { auth }, input }) =>
         startFastSessionCommand(auth, input),
       ),
 
     reply: protectedProcedure
-      .input(
-        z.object({
-          sessionId: z.string().uuid(),
-          text: z.string().trim().min(1),
-          images: z.array(z.string()).optional(),
-          model: z.string().trim().min(1).nullable().optional(),
-          reasoningEffort: z
-            .enum(REASONING_EFFORT_VALUES)
-            .nullable()
-            .optional(),
-        }),
-      )
+      .input(replyToFastSessionInputSchema)
       .mutation(({ ctx: { auth }, input }) =>
         replyToFastSessionCommand(auth, input),
       ),

@@ -9,13 +9,27 @@ import { ACP_ENVELOPE_EVENT_TYPES } from '@roomote/types';
 
 import { FastSessionTranscript } from './FastSessionTranscript';
 
-const replyMutate = vi.fn();
+const { replyMutate, preparePromptAttachments } = vi.hoisted(() => ({
+  replyMutate: vi.fn(),
+  preparePromptAttachments: vi.fn(),
+}));
 
 vi.mock('@/trpc/client', () => ({
   useTRPCClient: () => ({
     fastSessions: { reply: { mutate: replyMutate } },
   }),
 }));
+
+vi.mock('@/lib/prompt-attachments', async () => {
+  const actual = await vi.importActual<
+    typeof import('@/lib/prompt-attachments')
+  >('@/lib/prompt-attachments');
+
+  return {
+    ...actual,
+    preparePromptAttachments,
+  };
+});
 
 vi.mock('@/hooks/task-models/useLaunchTaskModels', () => ({
   useLaunchTaskModels: () => ({
@@ -54,6 +68,9 @@ class FakeEventSource {
 beforeEach(() => {
   FakeEventSource.instances = [];
   replyMutate.mockReset();
+  preparePromptAttachments.mockImplementation(({ text }: { text: string }) =>
+    Promise.resolve({ text }),
+  );
   vi.stubGlobal('EventSource', FakeEventSource);
 });
 
@@ -296,6 +313,36 @@ describe('FastSessionTranscript', () => {
       text: 'Follow up question',
       model: null,
       reasoningEffort: null,
+    });
+  });
+
+  it('sends an image-only reply', async () => {
+    preparePromptAttachments.mockResolvedValueOnce({
+      text: '',
+      images: ['data:image/png;base64,image-1'],
+    });
+    replyMutate.mockResolvedValue({ success: true });
+
+    render(
+      <FastSessionTranscript
+        sessionId="session-1"
+        initialMessages={[]}
+        canReply
+      />,
+    );
+
+    const input = screen.getByPlaceholderText('Message agent');
+    fireEvent.change(input, { target: { value: 'Image attachment' } });
+    fireEvent.keyDown(input, { key: 'Enter', code: 'Enter', charCode: 13 });
+
+    await waitFor(() => {
+      expect(replyMutate).toHaveBeenCalledWith({
+        sessionId: 'session-1',
+        text: '',
+        images: ['data:image/png;base64,image-1'],
+        model: null,
+        reasoningEffort: null,
+      });
     });
   });
 
