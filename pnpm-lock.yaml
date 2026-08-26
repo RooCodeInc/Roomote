@@ -213,12 +213,18 @@ importers:
       '@trpc/server':
         specifier: ^11.15.0
         version: 11.15.0(typescript@5.9.3)
+      dompurify:
+        specifier: 3.4.13
+        version: 3.4.13
       hono:
         specifier: 4.12.34
         version: 4.12.34
       jose:
         specifier: ^6.2.3
         version: 6.2.3
+      jsdom:
+        specifier: 26.1.0
+        version: 26.1.0(bufferutil@4.1.0)(utf-8-validate@6.0.6)
       p-map:
         specifier: ^7.0.4
         version: 7.0.4

@@ -178,12 +178,14 @@ RUN cd /roomote && pnpm dlx esbuild@0.25.5 packages/db/src/run-migrations.ts \
 # Runtime-only dependency tree for the externals tsup does not bundle. Install
 # from its standalone lockfile so unrelated workspace packages stay excluded.
 COPY .docker/app/runtime-deps/api /runtime-deps/
-# The zod parity check guards the Fast agent's native tool runtime: it
-# symlinks an on-disk zod into each generated OpenCode tool directory via
-# require.resolve, which the api bundle (noExternal) cannot satisfy on its
-# own. A version drifting from the workspace would silently change what the
-# generated tool sources execute against.
+# Version parity keeps API externals aligned with the workspace. Zod also
+# guards the Fast agent's native tool runtime, which symlinks it into each
+# generated OpenCode tool directory via require.resolve.
 RUN cd /runtime-deps && pnpm install --prod --frozen-lockfile && \
+  test "$(node -p "require('dompurify/package.json').version")" = \
+    "$(cd /roomote/apps/api && node -p "require('dompurify/package.json').version")" && \
+  test "$(node -p "require('jsdom/package.json').version")" = \
+    "$(cd /roomote/apps/api && node -p "require('jsdom/package.json').version")" && \
   test "$(node -p "require('snowflake-sdk/package.json').version")" = \
     "$(cd /roomote/apps/api && node -p "require('snowflake-sdk/package.json').version")" && \
   test "$(node -p "require('zod/package.json').version")" = \
