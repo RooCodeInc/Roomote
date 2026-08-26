@@ -611,47 +611,41 @@ set_env_value DOCKER_WORKER_NETWORK 'roomote_worker'
 # baked RELEASE_VERSION differ.
 set_env_value DOCKER_WORKER_RELEASE_PATH '/roomote/releases/worker-current.tar.gz'
 
+# COMPOSE_FILE records the deployment's Compose file list (base file plus any
+# operator overrides registered with `roomote override add`). Preserve an
+# existing list on reruns -- overrides are operator state, like TLS mode.
+if ! env_has_value COMPOSE_FILE; then
+  set_env_value COMPOSE_FILE docker-compose.prod.yml
+fi
+
+# The host CLI reads the Docker binary path from .env so every operation --
+# including systemd starts with their minimal PATH -- works with nonstandard
+# Docker installs (snap, manual binary). Refreshed on every rerun.
+set_env_value ROOMOTE_DOCKER_BIN "$(command -v docker)"
+
 chown root:root "$env_file"
 chmod 600 "$env_file"
 
 # --- systemd unit ------------------------------------------------------------
 
-# systemd ExecStart needs an absolute path, and a pre-existing Docker install
-# may live outside /usr/bin (snap, manual binary).
-docker_bin="$(command -v docker)"
-
-cat >/etc/systemd/system/roomote-compose.service <<EOF
-[Unit]
-Description=Roomote Docker Compose stack
-Requires=docker.service
-After=docker.service network-online.target
-Wants=network-online.target
-
-[Service]
-Type=oneshot
-WorkingDirectory=$install_root
-RemainAfterExit=yes
-ExecStart=$docker_bin compose --env-file $install_root/.env -f $install_root/docker-compose.prod.yml up -d --wait --wait-timeout 600
-ExecStop=$docker_bin compose --env-file $install_root/.env -f $install_root/docker-compose.prod.yml down
-TimeoutStartSec=0
-
-[Install]
-WantedBy=multi-user.target
-EOF
-systemctl daemon-reload
-systemctl enable roomote-compose.service >/dev/null 2>&1
+# The unit is owned by the host CLI (sync-unit) so boots and systemd restarts
+# use the same override-aware Compose invocation as every other operation, and
+# so `roomote upgrade` can refresh the unit on existing deployments.
+/usr/local/bin/roomote sync-unit
 
 # --- Start the stack ---------------------------------------------------------
 
+# Validation, pull, and start all go through the host CLI so they cover the
+# full Compose file list (base file plus any operator overrides on a rerun).
 cd "$install_root"
 log "Validating the Compose configuration"
-docker compose --env-file .env -f docker-compose.prod.yml config >/dev/null
+/usr/local/bin/roomote compose config >/dev/null
 
 log "Pulling application images (this can take a few minutes)"
-docker compose --env-file .env -f docker-compose.prod.yml pull
+/usr/local/bin/roomote compose pull
 
 log "Starting Roomote"
-docker compose --env-file .env -f docker-compose.prod.yml up -d --wait --wait-timeout 600
+/usr/local/bin/roomote up
 
 # The worker image is only needed once the first task runs, so it downloads
 # in the background while the operator finishes setup in the browser.

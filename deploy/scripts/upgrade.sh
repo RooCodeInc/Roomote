@@ -86,23 +86,27 @@ target="$ssh_user@$host"
 configure_ssh_args "$ssh_private_key"
 
 printf 'Upgrading %s on %s to %s\n' "$customer" "$target" "$version"
-printf 'Copying updated Compose and Caddy files to %s\n' "$target"
+printf 'Copying updated Compose, Caddy, and host CLI files to %s\n' "$target"
 ssh "${ssh_args[@]}" "$target" 'install -d -m 0700 /opt/roomote /opt/roomote/caddy'
 scp "${scp_args[@]}" "$deploy_root/compose/docker-compose.prod.yml" "$target:/opt/roomote/docker-compose.prod.yml"
 scp "${scp_args[@]}" "$deploy_root/caddy/Caddyfile" "$target:/opt/roomote/caddy/Caddyfile"
+# The host CLI owns the Compose invocation (base file plus operator overrides
+# from COMPOSE_FILE in .env) and the systemd unit; refresh it with every
+# managed upgrade so this path can never diverge from `roomote upgrade`.
+scp "${scp_args[@]}" "$deploy_root/host/roomote" "$target:/usr/local/bin/roomote"
+ssh "${ssh_args[@]}" "$target" 'chmod 0755 /usr/local/bin/roomote'
 
 ssh "${ssh_args[@]}" "$target" \
   "ROOMOTE_VERSION=$(shell_quote "$version") ROOMOTE_IMAGE_REGISTRY_ARG=$(shell_quote "$image_registry") ROOMOTE_IMAGE_NAMESPACE_ARG=$(shell_quote "$image_namespace") bash -s" <<'REMOTE'
 set -euo pipefail
 cd /opt/roomote
 
-if [ -f /etc/systemd/system/roomote-compose.service ]; then
-  sed -i '/^EnvironmentFile=-\/opt\/roomote\/deployment.env$/d' /etc/systemd/system/roomote-compose.service
-  systemctl daemon-reload
-fi
-docker compose --env-file .env -f docker-compose.prod.yml config >/dev/null
+# sync-unit rewrites the whole unit (CLI-owned, override-aware ExecStart),
+# which also drops the obsolete EnvironmentFile line older units carried.
+/usr/local/bin/roomote sync-unit
+/usr/local/bin/roomote compose config >/dev/null
 echo "Stopping controller before deployment metadata changes so new tasks remain queued during deploy"
-docker compose --env-file .env -f docker-compose.prod.yml stop controller || true
+/usr/local/bin/roomote compose stop controller || true
 
 read_env_value() {
   local key="$1"
@@ -258,21 +262,20 @@ if [ -z "$(read_env_value R_DISCORD_GATEWAY_SECRET | tr -d '[:space:]')" ]; then
   echo "Generated R_DISCORD_GATEWAY_SECRET for Discord gateway↔API auth"
 fi
 
-docker compose --env-file .env -f docker-compose.prod.yml config >/dev/null
-docker pull "$worker_image"
-docker compose --env-file .env -f docker-compose.prod.yml pull
+/usr/local/bin/roomote compose config >/dev/null
+/usr/local/bin/roomote docker pull "$worker_image"
+/usr/local/bin/roomote compose pull
 # Migrations run before any running service is replaced. Drizzle applies all
 # pending migrations in a single transaction, so a failure here rolls the
 # schema back while the previous release keeps serving.
 echo "Applying database migrations before replacing running services"
-if ! docker compose --env-file .env -f docker-compose.prod.yml run --rm db-migrate; then
+if ! /usr/local/bin/roomote compose run --rm db-migrate; then
   echo "Database migrations failed and were rolled back; the previous release keeps serving." >&2
   echo "Restarting the previous controller. Re-run roomote-deploy upgrade with the previous tag to restore deployment metadata, or fix the migration and retry." >&2
-  docker compose --env-file .env -f docker-compose.prod.yml start controller || true
+  /usr/local/bin/roomote compose start controller || true
   exit 1
 fi
-docker compose --env-file .env -f docker-compose.prod.yml up -d --wait --wait-timeout 600
-systemctl enable roomote-compose.service
+/usr/local/bin/roomote up
 REMOTE
 
 printf 'Pruning old Roomote images on %s; keeping %s release tag(s)\n' "$target" "$image_retention_releases"

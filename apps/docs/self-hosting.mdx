@@ -91,7 +91,27 @@ roomote upgrade   # pull and roll out newer images
 roomote rollback  # return to the release before the last upgrade
 roomote backup    # create an encrypted deployment recovery bundle
 roomote logs      # tail service logs
+roomote override  # register operator Compose override files
 ```
+
+### Customizing the stack with Compose overrides
+
+`docker-compose.prod.yml` and the managed Caddyfile are replaced on every
+upgrade, so never edit them directly. Put customizations (for example a Caddy
+image built with a DNS-provider plugin) in an override file in `/opt/roomote`
+and register it:
+
+```sh
+sudo roomote override add docker-compose.caddy-dns.yml
+```
+
+Registered overrides are layered after the base file, in registration order,
+for every `roomote` command, systemd restart, and boot. They ride along in
+backup bundles, come back with `roomote restore`, and survive `roomote
+upgrade`. `roomote override list` shows the merge order; `roomote override
+remove` unregisters a file without deleting it. Images referenced only by
+override files are not covered by backup image identities, so keep locally
+built override images rebuildable on a replacement host.
 
 `roomote backup` prompts for a passphrase and writes a versioned `.roomote`
 bundle under `/opt/roomote/backups`. The bundle contains PostgreSQL, the
@@ -136,7 +156,9 @@ empty PostgreSQL/MinIO/Redis volumes, and starts the recorded Roomote release.
   that also rewinds data.
 
 Use `roomote upgrade` instead of updating application image references alone.
-The command refreshes the release's Compose and Caddy configuration together;
+The command refreshes the release's Compose and Caddy configuration, the
+`roomote` CLI itself, and the systemd unit together (operator override files
+and their registration are left untouched);
 mixing newer application images with an older Caddyfile can leave routes used
 by the new controller unavailable until the deployment configuration is also
 updated.
