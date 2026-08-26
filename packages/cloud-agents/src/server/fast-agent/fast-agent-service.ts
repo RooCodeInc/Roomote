@@ -3,7 +3,6 @@ import type { ModelMessage } from 'ai';
 import {
   ACP_ENVELOPE_EVENT_TYPES,
   ALL_REPOSITORIES,
-  BRAIN_MCP_ID,
   CHAT_CHANNEL_MESSAGES_TOOL,
   CHAT_MESSAGE_CONTEXT_TOOL,
   INFERENCE_PROVIDER_MAX_RETRIES,
@@ -1205,7 +1204,7 @@ export async function answerFastAgentQuestion({
         const managesCustomAutomations =
           call.integrationId === ROOMOTE_MCP_ID &&
           call.toolName === MANAGE_CUSTOM_AUTOMATIONS_TOOL.name;
-        if (call.integrationId !== BRAIN_MCP_ID && !managesCustomAutomations) {
+        if (!managesCustomAutomations) {
           const ackError = requireAcknowledgement();
           if (ackError) return ackError;
         }
