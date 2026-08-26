@@ -85,7 +85,7 @@ describe('GitHub PR review check lifecycle', () => {
     mockDbUpdateWhere.mockResolvedValue(undefined);
     mockFindFirstRun.mockResolvedValue(undefined);
     mockGetCheck.mockResolvedValue({
-      data: { head_sha: 'new-head', status: 'in_progress' },
+      data: { head_sha: '789abcd', status: 'in_progress' },
     });
   });
 
@@ -97,7 +97,7 @@ describe('GitHub PR review check lifecycle', () => {
       installationId: 1,
       repository: 'owner/repo',
       prNumber: 42,
-      headSha: 'new-head',
+      headSha: '789abcd',
       taskId: 'task-1',
       runId: 2,
     });
@@ -106,7 +106,7 @@ describe('GitHub PR review check lifecycle', () => {
       expect.objectContaining({
         owner: 'owner',
         repo: 'repo',
-        head_sha: 'new-head',
+        head_sha: '789abcd',
         status: 'queued',
         details_url: 'https://roomote.test/task/task-1',
       }),
@@ -157,7 +157,7 @@ describe('GitHub PR review check lifecycle', () => {
       installationId: 1,
       repository: 'owner/repo',
       prNumber: 42,
-      headSha: 'new-head',
+      headSha: '789abcd',
       taskId: 'task-1',
       runId: 2,
     });
@@ -185,7 +185,7 @@ describe('GitHub PR review check lifecycle', () => {
       mockCreateCheck.mockResolvedValue({ data: { id: 20 } });
       mockGetIssueComment.mockResolvedValue({
         data: {
-          body: '<!-- roomote-review-summary sha=abcdef -->\n<!-- roomote-review-status:start -->\nNo issues found.\n<!-- roomote-review-status:end -->\n<!-- roomote-review-checklist:start -->\n<!-- roomote-review-checklist:end -->',
+          body: '<!-- roomote-review-summary sha=abcdef9 -->\n<!-- roomote-review-status:start -->\nNo issues found.\n<!-- roomote-review-status:end -->\n<!-- roomote-review-checklist:start -->\n<!-- roomote-review-checklist:end -->',
         },
       });
 
@@ -193,7 +193,7 @@ describe('GitHub PR review check lifecycle', () => {
         installationId: 1,
         repository: 'owner/repo',
         prNumber: 42,
-        headSha: 'abcdef',
+        headSha: 'abcdef9',
         taskId: 'task-1',
         runId: 2,
         ...(status ? { status } : {}),
@@ -231,7 +231,7 @@ describe('GitHub PR review check lifecycle', () => {
       mockCreateCheck.mockResolvedValue({ data: { id: 20 } });
       mockGetIssueComment.mockResolvedValue({
         data: {
-          body: '<!-- roomote-review-summary sha=abcdef -->\n<!-- roomote-review-status:start -->\nNo code issues found.\n<!-- roomote-review-status:end -->\n<!-- roomote-review-checklist:start -->\n<!-- roomote-review-checklist:end -->',
+          body: '<!-- roomote-review-summary sha=abcdef9 -->\n<!-- roomote-review-status:start -->\nNo code issues found.\n<!-- roomote-review-status:end -->\n<!-- roomote-review-checklist:start -->\n<!-- roomote-review-checklist:end -->',
         },
       });
 
@@ -239,7 +239,7 @@ describe('GitHub PR review check lifecycle', () => {
         installationId: 1,
         repository: 'owner/repo',
         prNumber: 42,
-        headSha: 'abcdef',
+        headSha: 'abcdef9',
         taskId: 'task-1',
         runId: 2,
         status: 'in_progress',
@@ -274,7 +274,7 @@ describe('GitHub PR review check lifecycle', () => {
       mockCreateCheck.mockResolvedValue({ data: { id: 20 } });
       mockGetIssueComment.mockResolvedValue({
         data: {
-          body: '<!-- roomote-review-summary sha=abcdef -->\n<!-- roomote-review-status:start -->\nNo code issues found.\n<!-- roomote-review-status:end -->\n<!-- roomote-review-checklist:start -->\n<!-- roomote-review-checklist:end -->',
+          body: '<!-- roomote-review-summary sha=abcdef9 -->\n<!-- roomote-review-status:start -->\nNo code issues found.\n<!-- roomote-review-status:end -->\n<!-- roomote-review-checklist:start -->\n<!-- roomote-review-checklist:end -->',
         },
       });
 
@@ -282,7 +282,7 @@ describe('GitHub PR review check lifecycle', () => {
         installationId: 1,
         repository: 'owner/repo',
         prNumber: 42,
-        headSha: 'abcdef',
+        headSha: 'abcdef9',
         taskId: 'task-1',
         runId: 2,
         status: 'in_progress',
@@ -299,9 +299,25 @@ describe('GitHub PR review check lifecycle', () => {
   );
 
   it('completes a persisted check when its terminal summary webhook arrives', async () => {
-    mockFindFirstLinkage.mockResolvedValue({ githubCheckRunId: 20 });
+    mockFindFirstLinkage.mockResolvedValue({
+      githubCheckRunId: 20,
+      githubReviewCommentId: 30,
+    });
     mockGetCheck.mockResolvedValue({
-      data: { head_sha: 'abcdef', status: 'in_progress' },
+      data: {
+        head_sha: 'abcdef9',
+        status: 'in_progress',
+        external_id: 'roomote-review:2',
+      },
+    });
+    mockFindFirstRun.mockResolvedValue({
+      startedAt: new Date('2026-08-25T12:00:00.000Z'),
+      status: RunStatus.Idle,
+    });
+    mockGetIssueComment.mockResolvedValue({
+      data: {
+        body: '<!-- roomote-review-summary sha=abcdef9 -->\n<!-- roomote-review-status:start -->\nNo code issues found.\n<!-- roomote-review-status:end -->\n<!-- roomote-review-checklist:start -->\n<!-- roomote-review-checklist:end -->',
+      },
     });
 
     await completeGithubPrReviewCheckFromSummary({
@@ -309,9 +325,9 @@ describe('GitHub PR review check lifecycle', () => {
       repository: 'owner/repo',
       prNumber: 42,
       taskId: 'task-1',
-      reviewHeadSha: 'abcdef',
+      reviewHeadSha: 'abcdef9',
       reviewSummaryBody:
-        '<!-- roomote-review-summary sha=abcdef -->\n<!-- roomote-review-status:start -->\nNo code issues found.\n<!-- roomote-review-status:end -->\n<!-- roomote-review-checklist:start -->\n<!-- roomote-review-checklist:end -->',
+        '<!-- roomote-review-summary sha=abcdef9 -->\n<!-- roomote-review-status:start -->\nNo code issues found.\n<!-- roomote-review-status:end -->\n<!-- roomote-review-checklist:start -->\n<!-- roomote-review-checklist:end -->',
     });
 
     expect(mockUpdateInstallationCheck).toHaveBeenCalledWith(
@@ -324,9 +340,16 @@ describe('GitHub PR review check lifecycle', () => {
   });
 
   it('does not let a delayed summary complete a newer head check', async () => {
-    mockFindFirstLinkage.mockResolvedValue({ githubCheckRunId: 20 });
+    mockFindFirstLinkage.mockResolvedValue({
+      githubCheckRunId: 20,
+      githubReviewCommentId: 30,
+    });
     mockGetCheck.mockResolvedValue({
-      data: { head_sha: 'new-head', status: 'in_progress' },
+      data: {
+        head_sha: '789abcd',
+        status: 'in_progress',
+        external_id: 'roomote-review:3',
+      },
     });
 
     await completeGithubPrReviewCheckFromSummary({
@@ -334,18 +357,21 @@ describe('GitHub PR review check lifecycle', () => {
       repository: 'owner/repo',
       prNumber: 42,
       taskId: 'task-1',
-      reviewHeadSha: 'old-head',
+      reviewHeadSha: '0123456',
       reviewSummaryBody:
-        '<!-- roomote-review-summary sha=old-head -->\n<!-- roomote-review-status:start -->\nNo code issues found.\n<!-- roomote-review-status:end -->',
+        '<!-- roomote-review-summary sha=0123456 -->\n<!-- roomote-review-status:start -->\nNo code issues found.\n<!-- roomote-review-status:end -->',
     });
 
     expect(mockUpdateInstallationCheck).not.toHaveBeenCalled();
   });
 
   it('does not overwrite an already completed check from a delayed same-head summary', async () => {
-    mockFindFirstLinkage.mockResolvedValue({ githubCheckRunId: 20 });
+    mockFindFirstLinkage.mockResolvedValue({
+      githubCheckRunId: 20,
+      githubReviewCommentId: 30,
+    });
     mockGetCheck.mockResolvedValue({
-      data: { head_sha: 'abcdef', status: 'completed' },
+      data: { head_sha: 'abcdef9', status: 'completed' },
     });
 
     await completeGithubPrReviewCheckFromSummary({
@@ -353,9 +379,9 @@ describe('GitHub PR review check lifecycle', () => {
       repository: 'owner/repo',
       prNumber: 42,
       taskId: 'task-1',
-      reviewHeadSha: 'abcdef',
+      reviewHeadSha: 'abcdef9',
       reviewSummaryBody:
-        '<!-- roomote-review-summary sha=abcdef -->\n<!-- roomote-review-status:start -->\nNo code issues found.\n<!-- roomote-review-status:end -->',
+        '<!-- roomote-review-summary sha=abcdef9 -->\n<!-- roomote-review-status:start -->\nNo code issues found.\n<!-- roomote-review-status:end -->',
     });
 
     expect(mockUpdateInstallationCheck).not.toHaveBeenCalled();
@@ -373,7 +399,7 @@ describe('GitHub PR review check lifecycle', () => {
     mockCreateCheck.mockResolvedValue({ data: { id: 20 } });
     mockGetIssueComment.mockResolvedValue({
       data: {
-        body: '<!-- roomote-review-summary sha=abcdef -->\n<!-- roomote-review-status:start -->\nNo code issues found.\n<!-- roomote-review-status:end -->\n<!-- roomote-review-checklist:start -->\n<!-- roomote-review-checklist:end -->',
+        body: '<!-- roomote-review-summary sha=abcdef9 -->\n<!-- roomote-review-status:start -->\nNo code issues found.\n<!-- roomote-review-status:end -->\n<!-- roomote-review-checklist:start -->\n<!-- roomote-review-checklist:end -->',
       },
     });
 
@@ -381,7 +407,7 @@ describe('GitHub PR review check lifecycle', () => {
       installationId: 1,
       repository: 'owner/repo',
       prNumber: 42,
-      headSha: 'abcdef',
+      headSha: 'abcdef9',
       taskId: 'task-1',
       runId: 2,
     });
@@ -391,9 +417,12 @@ describe('GitHub PR review check lifecycle', () => {
   });
 
   it('does not treat a safety-net finalized summary as a passing review', async () => {
-    mockFindFirstLinkage.mockResolvedValue({ githubCheckRunId: 20 });
+    mockFindFirstLinkage.mockResolvedValue({
+      githubCheckRunId: 20,
+      githubReviewCommentId: 30,
+    });
     mockGetCheck.mockResolvedValue({
-      data: { head_sha: 'abcdef', status: 'in_progress' },
+      data: { head_sha: 'abcdef9', status: 'in_progress' },
     });
 
     await completeGithubPrReviewCheckFromSummary({
@@ -401,16 +430,84 @@ describe('GitHub PR review check lifecycle', () => {
       repository: 'owner/repo',
       prNumber: 42,
       taskId: 'task-1',
-      reviewHeadSha: 'abcdef',
+      reviewHeadSha: 'abcdef9',
       reviewSummaryBody:
-        '<!-- roomote-review-summary sha=abcdef -->\n<!-- roomote-review-status:start -->\nReview could not be completed. [See task](https://roomote.test/task/task-1)\n<!-- roomote-review-status:end -->\n<!-- roomote-review-checklist:start -->\n<!-- roomote-review-checklist:end -->',
+        '<!-- roomote-review-summary sha=abcdef9 -->\n<!-- roomote-review-status:start -->\nReview could not be completed. [See task](https://roomote.test/task/task-1)\n<!-- roomote-review-status:end -->\n<!-- roomote-review-checklist:start -->\n<!-- roomote-review-checklist:end -->',
+    });
+
+    expect(mockUpdateInstallationCheck).not.toHaveBeenCalled();
+  });
+
+  it('does not settle a newer same-head cycle whose run has not started', async () => {
+    mockFindFirstLinkage.mockResolvedValue({
+      githubCheckRunId: 20,
+      githubReviewCommentId: 30,
+    });
+    mockGetCheck.mockResolvedValue({
+      data: {
+        head_sha: 'abcdef9',
+        status: 'queued',
+        external_id: 'roomote-review:3',
+      },
+    });
+    mockFindFirstRun.mockResolvedValue({
+      startedAt: null,
+      status: RunStatus.Pending,
+    });
+
+    await completeGithubPrReviewCheckFromSummary({
+      installationId: 1,
+      repository: 'owner/repo',
+      prNumber: 42,
+      taskId: 'task-1',
+      reviewHeadSha: 'abcdef9',
+      reviewSummaryBody:
+        '<!-- roomote-review-summary sha=abcdef9 -->\n<!-- roomote-review-status:start -->\nNo code issues found.\n<!-- roomote-review-status:end -->',
+    });
+
+    expect(mockUpdateInstallationCheck).not.toHaveBeenCalled();
+  });
+
+  it('ignores a delayed terminal snapshot when the live summary is in progress again', async () => {
+    mockFindFirstLinkage.mockResolvedValue({
+      githubCheckRunId: 20,
+      githubReviewCommentId: 30,
+    });
+    mockGetCheck.mockResolvedValue({
+      data: {
+        head_sha: 'abcdef9',
+        status: 'in_progress',
+        external_id: 'roomote-review:3',
+      },
+    });
+    mockFindFirstRun.mockResolvedValue({
+      startedAt: new Date('2026-08-25T12:00:00.000Z'),
+      status: RunStatus.Running,
+    });
+    mockGetIssueComment.mockResolvedValue({
+      data: {
+        body: '<!-- roomote-review-summary sha=abcdef9 -->\n<!-- roomote-review-status:start -->\nRe-reviewing new commits now.\n<!-- roomote-review-status:end -->',
+      },
+    });
+
+    await completeGithubPrReviewCheckFromSummary({
+      installationId: 1,
+      repository: 'owner/repo',
+      prNumber: 42,
+      taskId: 'task-1',
+      reviewHeadSha: 'abcdef9',
+      reviewSummaryBody:
+        '<!-- roomote-review-summary sha=abcdef9 -->\n<!-- roomote-review-status:start -->\nNo code issues found.\n<!-- roomote-review-status:end -->',
     });
 
     expect(mockUpdateInstallationCheck).not.toHaveBeenCalled();
   });
 
   it('swallows checks API failures instead of failing the webhook delivery', async () => {
-    mockFindFirstLinkage.mockResolvedValue({ githubCheckRunId: 20 });
+    mockFindFirstLinkage.mockResolvedValue({
+      githubCheckRunId: 20,
+      githubReviewCommentId: 30,
+    });
     mockGetCheck.mockRejectedValue(new Error('Not Found'));
 
     await expect(
@@ -419,9 +516,9 @@ describe('GitHub PR review check lifecycle', () => {
         repository: 'owner/repo',
         prNumber: 42,
         taskId: 'task-1',
-        reviewHeadSha: 'abcdef',
+        reviewHeadSha: 'abcdef9',
         reviewSummaryBody:
-          '<!-- roomote-review-summary sha=abcdef -->\n<!-- roomote-review-status:start -->\nNo code issues found.\n<!-- roomote-review-status:end -->',
+          '<!-- roomote-review-summary sha=abcdef9 -->\n<!-- roomote-review-status:start -->\nNo code issues found.\n<!-- roomote-review-status:end -->',
       }),
     ).resolves.toBeUndefined();
 
@@ -435,7 +532,7 @@ describe('getGithubPrReviewCheckResult', () => {
       getGithubPrReviewCheckResult({
         runStatus: RunStatus.Completed,
         reviewSummaryBody:
-          '<!-- roomote-review-summary sha=abc -->\n<!-- roomote-review-status:start -->\nNo issues found.\n<!-- roomote-review-status:end -->\n<!-- roomote-review-checklist:start -->\n<!-- roomote-review-checklist:end -->',
+          '<!-- roomote-review-summary sha=abc1234 -->\n<!-- roomote-review-status:start -->\nNo issues found.\n<!-- roomote-review-status:end -->\n<!-- roomote-review-checklist:start -->\n<!-- roomote-review-checklist:end -->',
         safetyNetFinalized: false,
       }),
     ).toMatchObject({ conclusion: 'success' });
@@ -446,7 +543,7 @@ describe('getGithubPrReviewCheckResult', () => {
       getGithubPrReviewCheckResult({
         runStatus: RunStatus.Completed,
         reviewSummaryBody:
-          '<!-- roomote-review-summary sha=abc -->\n<!-- roomote-review-status:start -->\n1 issue outstanding.\n<!-- roomote-review-status:end -->\n<!-- roomote-review-checklist:start -->\n- [ ] Fix the authorization check\n<!-- roomote-review-checklist:end -->',
+          '<!-- roomote-review-summary sha=abc1234 -->\n<!-- roomote-review-status:start -->\n1 issue outstanding.\n<!-- roomote-review-status:end -->\n<!-- roomote-review-checklist:start -->\n- [ ] Fix the authorization check\n<!-- roomote-review-checklist:end -->',
         safetyNetFinalized: false,
       }),
     ).toMatchObject({ conclusion: 'failure', title: 'Roomote found issues' });
@@ -467,9 +564,9 @@ describe('getGithubPrReviewCheckResult', () => {
       getGithubPrReviewCheckResult({
         runStatus: RunStatus.Completed,
         reviewSummaryBody:
-          '<!-- roomote-review-summary sha=abc123 -->\n<!-- roomote-review-status:start -->\nNo issues found.\n<!-- roomote-review-status:end -->\n<!-- roomote-review-checklist:start -->\n<!-- roomote-review-checklist:end -->',
+          '<!-- roomote-review-summary sha=abc1234 -->\n<!-- roomote-review-status:start -->\nNo issues found.\n<!-- roomote-review-status:end -->\n<!-- roomote-review-checklist:start -->\n<!-- roomote-review-checklist:end -->',
         safetyNetFinalized: false,
-        expectedHeadSha: 'def456',
+        expectedHeadSha: 'def4567',
       }),
     ).toMatchObject({
       conclusion: 'failure',
@@ -482,7 +579,7 @@ describe('getGithubPrReviewCheckResult', () => {
       getGithubPrReviewCheckResult({
         runStatus: RunStatus.Completed,
         reviewSummaryBody:
-          '<!-- roomote-review-summary sha=abc -->\n<!-- roomote-review-status:start -->\nReviewing the PR now.\n<!-- roomote-review-status:end -->\n<!-- roomote-review-checklist:start -->\n<!-- roomote-review-checklist:end -->',
+          '<!-- roomote-review-summary sha=abc1234 -->\n<!-- roomote-review-status:start -->\nReviewing the PR now.\n<!-- roomote-review-status:end -->\n<!-- roomote-review-checklist:start -->\n<!-- roomote-review-checklist:end -->',
         safetyNetFinalized: false,
       }),
     ).toMatchObject({

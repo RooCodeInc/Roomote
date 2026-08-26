@@ -322,16 +322,18 @@ export async function completeGithubPrReviewCheckFromSummary(input: {
   // Best-effort like the other check publishers: a checks-API failure must
   // not fail the webhook delivery that carried the summary.
   try {
-    const result = getTerminalReviewSummaryResult({
-      reviewSummaryBody: input.reviewSummaryBody,
-      expectedHeadSha: input.reviewHeadSha,
-    });
-    if (!result) {
+    // Cheap pre-filter on the webhook's body snapshot before any DB/API work.
+    if (
+      !getTerminalReviewSummaryResult({
+        reviewSummaryBody: input.reviewSummaryBody,
+        expectedHeadSha: input.reviewHeadSha,
+      })
+    ) {
       return;
     }
 
     const linkage = await findGithubPrLinkage(input);
-    if (!linkage?.githubCheckRunId) {
+    if (!linkage?.githubCheckRunId || !linkage.githubReviewCommentId) {
       return;
     }
 
@@ -346,6 +348,42 @@ export async function completeGithubPrReviewCheckFromSummary(input: {
       checkRun.status === 'completed' ||
       !checkRun.head_sha.startsWith(input.reviewHeadSha)
     ) {
+      return;
+    }
+
+    // Bind completion to the review cycle that owns the current check: a
+    // delayed webhook for an earlier same-SHA cycle must not settle a newer
+    // cycle's check. The check's external_id carries its run id.
+    const owningRunId = Number(
+      /^roomote-review:(\d+)$/.exec(checkRun.external_id ?? '')?.[1],
+    );
+    if (Number.isFinite(owningRunId)) {
+      const run = await db.query.taskRuns.findFirst({
+        where: eq(taskRuns.id, owningRunId),
+        columns: { startedAt: true, status: true },
+      });
+      const runCanOwnSummary =
+        run?.startedAt != null &&
+        (run.status === RunStatus.Running ||
+          run.status === RunStatus.Idle ||
+          run.status === RunStatus.Completed);
+      if (!runCanOwnSummary) {
+        return;
+      }
+    }
+
+    // Decide from the live comment, not the webhook snapshot: if a newer
+    // same-SHA cycle already reset the summary to in-progress, this yields
+    // null and the delayed terminal snapshot is ignored.
+    const { data: liveComment } = await octokit.rest.issues.getComment({
+      ...repository,
+      comment_id: linkage.githubReviewCommentId,
+    });
+    const result = getTerminalReviewSummaryResult({
+      reviewSummaryBody: liveComment.body ?? undefined,
+      expectedHeadSha: checkRun.head_sha,
+    });
+    if (!result) {
       return;
     }
 

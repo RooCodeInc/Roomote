@@ -221,7 +221,7 @@ describe('preparePrReviewNotificationDelivery', () => {
         {
           id: 'c1',
           author: 'roomote[bot]',
-          body: '<!-- roomote-review-summary sha=abc mode=initial -->\n<!-- roomote-review-status:start -->\n**All 1 issue addressed.** [See task](https://example.com)\n<!-- roomote-review-status:end -->',
+          body: '<!-- roomote-review-summary sha=abc1234 mode=initial -->\n<!-- roomote-review-status:start -->\n**All 1 issue addressed.** [See task](https://example.com)\n<!-- roomote-review-status:end -->',
           createdAt: null,
           url: null,
         },
@@ -449,7 +449,7 @@ describe('preparePrReviewNotificationDelivery', () => {
             kind: 'review_comment',
             authorLogin: 'roomote[bot]',
             roomoteAuthored: true,
-            reviewHeadSha: 'abc',
+            reviewHeadSha: 'abc1234',
           },
         ],
       }),
@@ -468,12 +468,12 @@ describe('preparePrReviewNotificationDelivery', () => {
           kind: 'review_comment',
           authorLogin: 'roomote[bot]',
           roomoteAuthored: true,
-          reviewHeadSha: 'abc',
+          reviewHeadSha: 'abc1234',
         },
         {
           kind: 'review_comment',
           authorLogin: 'alice',
-          reviewHeadSha: 'abc',
+          reviewHeadSha: 'abc1234',
         },
       ],
     });
@@ -512,7 +512,7 @@ describe('preparePrReviewNotificationDelivery', () => {
         {
           id: 'c1',
           author: 'roomote[bot]',
-          body: '<!-- roomote-review-summary sha=abc mode=initial -->\n<!-- roomote-review-status:start -->\nReviewing the PR now.\n<!-- roomote-review-status:end -->',
+          body: '<!-- roomote-review-summary sha=abc1234 mode=initial -->\n<!-- roomote-review-status:start -->\nReviewing the PR now.\n<!-- roomote-review-status:end -->',
           createdAt: null,
           url: null,
         },
@@ -528,7 +528,7 @@ describe('preparePrReviewNotificationDelivery', () => {
           kind: 'review_comment',
           authorLogin: 'roomote[bot]',
           roomoteAuthored: true,
-          reviewHeadSha: 'abc',
+          reviewHeadSha: 'abc1234',
         },
       ],
     });
@@ -547,7 +547,7 @@ describe('preparePrReviewNotificationDelivery', () => {
         {
           id: 'c1',
           author: 'alice',
-          body: '<!-- roomote-review-summary sha=abc mode=initial -->\n<!-- roomote-review-status:start -->\n1 issue outstanding.\n<!-- roomote-review-status:end -->',
+          body: '<!-- roomote-review-summary sha=abc1234 mode=initial -->\n<!-- roomote-review-status:start -->\n1 issue outstanding.\n<!-- roomote-review-status:end -->',
           createdAt: null,
           url: null,
         },
@@ -563,7 +563,7 @@ describe('preparePrReviewNotificationDelivery', () => {
           kind: 'review_comment',
           authorLogin: 'roomote[bot]',
           roomoteAuthored: true,
-          reviewHeadSha: 'abc',
+          reviewHeadSha: 'abc1234',
         },
       ],
     });
@@ -947,7 +947,7 @@ describe('preparePrReviewNotificationDelivery', () => {
         {
           id: 'c1',
           author: 'acme[bot]',
-          body: '<!-- roomote-review-summary sha=abc mode=initial -->\n<!-- roomote-review-status:start -->\n1 issue outstanding.\n<!-- roomote-review-status:end -->',
+          body: '<!-- roomote-review-summary sha=abc1234 mode=initial -->\n<!-- roomote-review-status:start -->\n1 issue outstanding.\n<!-- roomote-review-status:end -->',
           createdAt: null,
           url: null,
         },
@@ -964,7 +964,7 @@ describe('preparePrReviewNotificationDelivery', () => {
             kind: 'review_comment',
             authorLogin: 'acme[bot]',
             roomoteAuthored: true,
-            reviewHeadSha: 'abc',
+            reviewHeadSha: 'abc1234',
           },
         ],
       }),
@@ -1138,8 +1138,8 @@ describe('triagePrReviewActivity', () => {
         unresolvedThreadCount: 2,
         latestReviewStatus: '2 issues outstanding.',
         latestReviewSummaryComment:
-          '<!-- roomote-review-summary sha=abc mode=initial -->\n<!-- roomote-review-checklist:start -->\n- [ ] `apps/api/src/foo.ts:10` - Handle null actor ids\n- [ ] `apps/api/src/bar.ts:20` - Rename the helper to match its return shape\n<!-- roomote-review-checklist:end -->',
-        latestTerminalReviewSummaryHeadSha: 'abc',
+          '<!-- roomote-review-summary sha=abc1234 mode=initial -->\n<!-- roomote-review-checklist:start -->\n- [ ] `apps/api/src/foo.ts:10` - Handle null actor ids\n- [ ] `apps/api/src/bar.ts:20` - Rename the helper to match its return shape\n<!-- roomote-review-checklist:end -->',
+        latestTerminalReviewSummaryHeadSha: 'abc1234',
         ciStatus: {
           checks: [
             { name: 'CI / Lint', status: 'success' },
@@ -1303,7 +1303,7 @@ describe('gatherPrReviewTriageContext', () => {
         {
           id: 'c1',
           author: 'roomote[bot]',
-          body: '<!-- roomote-review-summary sha=abc mode=initial -->\n<!-- roomote-review-status:start -->\n**All 1 issue addressed.** [See task](https://example.com)\n<!-- roomote-review-status:end -->',
+          body: '<!-- roomote-review-summary sha=abc1234 mode=initial -->\n<!-- roomote-review-status:start -->\n**All 1 issue addressed.** [See task](https://example.com)\n<!-- roomote-review-status:end -->',
           createdAt: null,
           url: null,
         },
@@ -1327,8 +1327,8 @@ describe('gatherPrReviewTriageContext', () => {
       unresolvedThreadCount: 1,
       latestReviewStatus: 'All 1 issue addressed. See task',
       latestReviewSummaryComment:
-        '<!-- roomote-review-summary sha=abc mode=initial -->\n<!-- roomote-review-status:start -->\n**All 1 issue addressed.** [See task](https://example.com)\n<!-- roomote-review-status:end -->',
-      latestTerminalReviewSummaryHeadSha: 'abc',
+        '<!-- roomote-review-summary sha=abc1234 mode=initial -->\n<!-- roomote-review-status:start -->\n**All 1 issue addressed.** [See task](https://example.com)\n<!-- roomote-review-status:end -->',
+      latestTerminalReviewSummaryHeadSha: 'abc1234',
       currentHeadSha: 'abc123',
       reviewThreads: [
         { resolved: true, outdated: undefined, commentIds: [] },

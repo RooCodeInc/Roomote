@@ -276,10 +276,13 @@ function sanitizeReviewSummaryStatus(statusContent: string): string {
 
 /**
  * Parses the head SHA out of the review-summary marker line, e.g.
- * `<!-- roomote-review-summary sha=abc123 mode=initial -->`.
+ * `<!-- roomote-review-summary sha=abc1234 mode=initial -->`. Requires at
+ * least a short-sha (7 hex chars), matching parseReviewSummaryMarkerSha.
  */
 function getReviewSummaryMarkerSha(body: string): string | null {
-  const match = body.match(/<!--\s*roomote-review-summary\s+sha=([0-9a-f]+)/i);
+  const match = body.match(
+    /<!--\s*roomote-review-summary\s+sha=([0-9a-f]{7,})/i,
+  );
 
   return match?.[1] ?? null;
 }
@@ -543,6 +546,17 @@ export async function queuePrReviewSummaryNotification(
           reviewHeadSha: event.reviewHeadSha,
           reviewSummaryBody: eventPayload.comment.body ?? '',
         }),
+      );
+    } else {
+      const missing = [
+        !eventPayload.installation?.id && 'installation id',
+        !event.reviewTaskId && 'task link',
+        !event.reviewHeadSha && 'head sha marker',
+      ]
+        .filter(Boolean)
+        .join(', ');
+      console.warn(
+        `[queuePrReviewSummaryNotification] Skipping check completion for ${reference.repository}#${reference.prNumber}: summary is missing ${missing}`,
       );
     }
     await Promise.all(operations);

@@ -51,8 +51,10 @@ export function getMarkedSection({
 export function parseReviewSummaryMarkerSha(
   markerOrBody: string,
 ): string | undefined {
+  // Require at least a short-sha (7 hex chars) so a truncated or mangled
+  // marker cannot satisfy the prefix-based staleness checks downstream.
   const match = markerOrBody.match(
-    /<!--\s*roomote-review-summary\s+sha=([0-9a-f]+)/i,
+    /<!--\s*roomote-review-summary\s+sha=([0-9a-f]{7,})/i,
   );
 
   return match?.[1];
