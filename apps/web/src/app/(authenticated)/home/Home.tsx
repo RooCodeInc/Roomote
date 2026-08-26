@@ -26,6 +26,7 @@ import { cn } from '@/lib/utils';
 import { getTaskLaunchDisabledReason } from '@/lib/managed-access';
 
 import { useEnvironments } from '@/hooks/environments';
+import { usePersonalPreferences } from '@/hooks/usePersonalPreferences';
 import { useAuthorizedUser } from '@/hooks/useUser';
 import { useLaunchTaskModels } from '@/hooks/task-models/useLaunchTaskModels';
 import {
@@ -301,6 +302,8 @@ export function Home({
   const watchedRepository = form.watch('repository');
 
   const { workspace, setWorkspace } = useWorkspaceStorage();
+  const { preferences, isLoading: isPersonalPreferencesLoading } =
+    usePersonalPreferences();
   const hasRestoredWorkspace = useRef(false);
 
   const clearRoutingState = useCallback(() => {
@@ -358,6 +361,23 @@ export function Home({
       return;
     }
 
+    if (form.getValues('repository') !== AUTO_WORKSPACE_VALUE) {
+      hasRestoredWorkspace.current = true;
+      return;
+    }
+
+    if (isPersonalPreferencesLoading) {
+      return;
+    }
+
+    if (preferences.communicationsFastModeDefault) {
+      form.setValue('repository', FAST_EXECUTION);
+      form.setValue('environmentId', undefined);
+      form.setValue('branch', '');
+      hasRestoredWorkspace.current = true;
+      return;
+    }
+
     // Auto (or unset) stored preference: wait for environments so we can
     // default the sole environment instead of writing Auto over the selector.
     if (environments.isPending || !environments.isSuccess) {
@@ -387,6 +407,8 @@ export function Home({
     environments.isPending,
     environments.isSuccess,
     form,
+    isPersonalPreferencesLoading,
+    preferences.communicationsFastModeDefault,
     setWorkspace,
     workspace,
   ]);
@@ -723,6 +745,10 @@ export function Home({
                 <SelectWorkspace
                   allowAuto
                   allowFast
+                  autoSelectDefaultWorkspace={
+                    !isPersonalPreferencesLoading &&
+                    !preferences.communicationsFastModeDefault
+                  }
                   allowBranchSelection={canSelectBranch}
                 />
               </div>

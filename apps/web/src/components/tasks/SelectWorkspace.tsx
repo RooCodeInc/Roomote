@@ -22,6 +22,7 @@ export const SelectWorkspace = ({
   lockedBranch,
   allowAuto = false,
   allowFast = false,
+  autoSelectDefaultWorkspace = true,
   allowBranchSelection = true,
   environmentBranchRepositoryFullName,
   environmentBranchDefault,
@@ -30,6 +31,7 @@ export const SelectWorkspace = ({
   lockedBranch?: string;
   allowAuto?: boolean;
   allowFast?: boolean;
+  autoSelectDefaultWorkspace?: boolean;
   allowBranchSelection?: boolean;
   environmentBranchRepositoryFullName?: string;
   environmentBranchDefault?: string;
@@ -113,6 +115,7 @@ export const SelectWorkspace = ({
           lockedBranch={lockedBranch}
           allowAuto={allowAuto}
           allowFast={allowFast}
+          autoSelectDefaultWorkspace={autoSelectDefaultWorkspace}
           onCreate={handleCreateEnvironment}
           onCreateRepository={handleCreateRepository}
           onEdit={handleUpdateEnvironment}
