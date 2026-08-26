@@ -224,7 +224,17 @@ export async function publishGithubPrReviewCheck(input: {
             ...repository,
             comment_id: currentLinkage.githubReviewCommentId,
           });
-          reviewSummaryBody = comment.body ?? undefined;
+          // Only trust a summary authored during this run's lifetime. The
+          // shared comment can still hold a previous same-SHA cycle's
+          // terminal result until this run resets it, so an edit that
+          // predates startedAt belongs to an earlier cycle.
+          if (
+            comment.updated_at &&
+            run?.startedAt != null &&
+            new Date(comment.updated_at).getTime() >= run.startedAt.getTime()
+          ) {
+            reviewSummaryBody = comment.body ?? undefined;
+          }
         } catch (error) {
           console.error(
             `[githubPrReviewCheck] Failed to load review summary for run ${input.runId}: ${
@@ -357,6 +367,7 @@ export async function completeGithubPrReviewCheckFromSummary(input: {
     const owningRunId = Number(
       /^roomote-review:(\d+)$/.exec(checkRun.external_id ?? '')?.[1],
     );
+    let owningRunStartedAt: Date | undefined;
     if (Number.isFinite(owningRunId)) {
       const run = await db.query.taskRuns.findFirst({
         where: eq(taskRuns.id, owningRunId),
@@ -370,6 +381,7 @@ export async function completeGithubPrReviewCheckFromSummary(input: {
       if (!runCanOwnSummary) {
         return;
       }
+      owningRunStartedAt = run.startedAt ?? undefined;
     }
 
     // Decide from the live comment, not the webhook snapshot: if a newer
@@ -379,6 +391,20 @@ export async function completeGithubPrReviewCheckFromSummary(input: {
       ...repository,
       comment_id: linkage.githubReviewCommentId,
     });
+
+    // The owning run must also have authored the live terminal state: between
+    // that run starting and it resetting the shared summary comment, the
+    // comment can still hold a previous same-SHA cycle's terminal result. An
+    // edit that predates the owning run's start belongs to an earlier cycle.
+    if (
+      owningRunStartedAt &&
+      (!liveComment.updated_at ||
+        new Date(liveComment.updated_at).getTime() <
+          owningRunStartedAt.getTime())
+    ) {
+      return;
+    }
+
     const result = getTerminalReviewSummaryResult({
       reviewSummaryBody: liveComment.body ?? undefined,
       expectedHeadSha: checkRun.head_sha,
