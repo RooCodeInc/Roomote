@@ -163,18 +163,23 @@ function serializeFastAgentToolOutput(result: unknown): {
   output: string;
   truncated: boolean;
 } {
-  let output: string;
-  try {
-    output = JSON.stringify(result, null, 2) ?? String(result);
-  } catch {
-    output = String(result);
-  }
+  const output = stringifyFastAgentToolOutput(result);
 
   const { text, truncation } = truncateAcpOutputText(
     output,
     FAST_AGENT_CANONICAL_TOOL_OUTPUT_MAX_CHARS,
   );
   return { output: text, truncated: truncation !== null };
+}
+
+function stringifyFastAgentToolOutput(result: unknown): string {
+  let output: string;
+  try {
+    output = JSON.stringify(result, null, 2) ?? String(result);
+  } catch {
+    output = String(result);
+  }
+  return output;
 }
 
 function getFastAgentDefaultSlackHistoryOldest(latest?: string): string {
@@ -1426,7 +1431,10 @@ export async function answerFastAgentQuestion({
               return result;
             }
 
-            if (JSON.stringify(result).length > ACP_UI_TOOL_OUTPUT_MAX_CHARS) {
+            if (
+              stringifyFastAgentToolOutput(result).length >
+              ACP_UI_TOOL_OUTPUT_MAX_CHARS
+            ) {
               return {
                 success: false,
                 error: `The sanitized widget exceeds the Fast transcript limit of ${ACP_UI_TOOL_OUTPUT_MAX_CHARS} characters.`,

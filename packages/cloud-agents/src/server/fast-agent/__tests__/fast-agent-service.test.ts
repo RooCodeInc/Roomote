@@ -139,7 +139,11 @@ vi.mock('../fast-agent-user-identity', () => ({
   getFastAgentUserIdentity: mocks.getUserIdentity,
 }));
 
-import { ACP_ENVELOPE_EVENT_TYPES, ALL_REPOSITORIES } from '@roomote/types';
+import {
+  ACP_ENVELOPE_EVENT_TYPES,
+  ACP_UI_TOOL_OUTPUT_MAX_CHARS,
+  ALL_REPOSITORIES,
+} from '@roomote/types';
 
 import { answerFastAgentQuestion } from '../fast-agent-service';
 import type {
@@ -483,14 +487,34 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     });
   });
 
-  it('persists a parseable failure when a widget exceeds the Fast transcript limit', async () => {
+  it('rejects a compact widget that exceeds the limit when pretty-serialized', async () => {
     const adapter = callbacks();
+    const textFallback = 'This must not be posted.';
+    const emptyResult = {
+      success: true,
+      shown: true,
+      title: null,
+      html: '',
+      css: null,
+      height: 320,
+      textFallback,
+    };
+    const html = 'x'.repeat(
+      ACP_UI_TOOL_OUTPUT_MAX_CHARS - JSON.stringify(emptyResult).length,
+    );
+    const compactResult = { ...emptyResult, html };
+    expect(JSON.stringify(compactResult)).toHaveLength(
+      ACP_UI_TOOL_OUTPUT_MAX_CHARS,
+    );
+    expect(JSON.stringify(compactResult, null, 2).length).toBeGreaterThan(
+      ACP_UI_TOOL_OUTPUT_MAX_CHARS,
+    );
     mocks.generateText.mockImplementation(
       async (_params, _session, options) => {
         await options.onSessionReady('opencode-session-1');
         const result = await invokeTool(nativeToolNames.showWidget, {
-          html: `<p>${'x'.repeat(20_000)}</p>`,
-          textFallback: 'This must not be posted.',
+          html,
+          textFallback,
         });
         expect(result).toMatchObject({
           success: false,
