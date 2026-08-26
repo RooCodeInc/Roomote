@@ -9,12 +9,10 @@ import {
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
-import { FastAgentSkillStore } from '../fast-agent-skill-store';
 import {
-  FAST_DIRECT_PACKAGED_SKILL_NAMES,
-  FAST_TASK_PACKAGED_SKILL_NAMES,
-  PACKAGED_SKILL_CATALOG,
-} from '../../../packaged-skill-catalog';
+  FAST_AGENT_PACKAGED_SKILL_NAMES,
+  FastAgentSkillStore,
+} from '../fast-agent-skill-store';
 
 describe('FastAgentSkillStore', () => {
   it('keeps the allowlist synchronized with shipped skill directories', async () => {
@@ -27,24 +25,25 @@ describe('FastAgentSkillStore', () => {
       .map((entry) => entry.name)
       .sort();
 
-    expect(Object.keys(PACKAGED_SKILL_CATALOG).sort()).toEqual(directoryNames);
-    expect(FAST_DIRECT_PACKAGED_SKILL_NAMES).toEqual(['explore-and-act']);
-    expect(FAST_TASK_PACKAGED_SKILL_NAMES).toContain('implement-changes');
+    expect([...FAST_AGENT_PACKAGED_SKILL_NAMES].sort()).toEqual(directoryNames);
   });
 
   it('loads every allowlisted packaged skill and exposes Markdown resources', async () => {
     const store = new FastAgentSkillStore();
 
-    for (const name of FAST_DIRECT_PACKAGED_SKILL_NAMES) {
+    for (const name of FAST_AGENT_PACKAGED_SKILL_NAMES) {
       const skill = await store.read(name);
       expect(skill).toMatchObject({ name, resource: 'SKILL.md' });
       expect(skill.content).toMatch(new RegExp(`name: ["']?${name}["']?`, 'u'));
       expect(skill.resources).toContain('SKILL.md');
     }
 
-    await expect(store.read('security-review')).rejects.toThrow(
-      'Unknown packaged skill.',
+    const reference = await store.read(
+      'security-review',
+      'references/authentication.md',
     );
+    expect(reference.resource).toBe('references/authentication.md');
+    expect(reference.content).toContain('Authentication');
   });
 
   it('rejects traversal, non-Markdown files, symlinks, and unknown skills', async () => {
