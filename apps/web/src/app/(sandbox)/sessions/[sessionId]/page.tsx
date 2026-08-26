@@ -52,6 +52,13 @@ export default async function SessionDetailPage({
 
         <FastSessionTranscript
           messages={session.messages}
+          header={
+            session.hasOlderMessages ? (
+              <p className="mb-4 rounded-md border border-border bg-muted px-3 py-2 text-center text-xs text-muted-foreground">
+                Older messages in this session are not shown.
+              </p>
+            ) : null
+          }
           footer={
             session.messages.length === 0 ? (
               <EmptyState

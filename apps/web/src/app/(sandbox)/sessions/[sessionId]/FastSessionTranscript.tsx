@@ -23,9 +23,11 @@ import { toAcpUiMessage } from '../../task/[taskId]/hooks/services/acp-protocol-
 
 export function FastSessionTranscript({
   messages,
+  header,
   footer,
 }: {
   messages: FastSessionMessage[];
+  header?: ReactNode;
   footer?: ReactNode;
 }) {
   const uiMessages = useMemo(
@@ -60,6 +62,7 @@ export function FastSessionTranscript({
     <MessageUiOptionsProvider>
       <Conversation className="min-h-0 flex-1" initial="instant">
         <ConversationContent className="ph-no-capture mx-auto w-full max-w-4xl p-4">
+          {header}
           <AcpTranscriptBlockList
             blocks={renderBlocks}
             showInternalMessages={false}

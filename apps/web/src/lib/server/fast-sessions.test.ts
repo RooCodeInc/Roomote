@@ -5,7 +5,11 @@ import {
   userFactory,
 } from '@roomote/db/server';
 
-import { getFastSessionById, getFastSessions } from './fast-sessions';
+import {
+  encodeFastSessionCursor,
+  getFastSessionById,
+  getFastSessions,
+} from './fast-sessions';
 
 async function createFastSession({
   userId,
@@ -97,7 +101,7 @@ describe('Fast session queries', () => {
       updatedAt: new Date('2026-01-03T00:00:00.000Z'),
     });
 
-    const sessions = await getFastSessions({
+    const { sessions, nextCursor } = await getFastSessions({
       userId: owner.id,
       isAdmin: false,
     });
@@ -107,6 +111,7 @@ describe('Fast session queries', () => {
       messageCount: 1,
       ownerName: owner.name,
     });
+    expect(nextCursor).toBeNull();
   });
 
   it('lists sessions across users for an admin', async () => {
@@ -123,7 +128,7 @@ describe('Fast session queries', () => {
       updatedAt: new Date('2026-01-02T00:00:00.000Z'),
     });
 
-    const sessions = await getFastSessions({
+    const { sessions } = await getFastSessions({
       userId: admin.id,
       isAdmin: true,
     });
@@ -131,6 +136,32 @@ describe('Fast session queries', () => {
     expect(sessions.map((session) => session.id)).toEqual(
       expect.arrayContaining([adminSession.id, otherSession.id]),
     );
+  });
+
+  it('pages older sessions with a keyset cursor', async () => {
+    const owner = await userFactory.create();
+    const oldest = await createFastSession({
+      userId: owner.id,
+      conversationId: 'cursor-oldest',
+      updatedAt: new Date('2026-01-01T00:00:00.000Z'),
+    });
+    const middle = await createFastSession({
+      userId: owner.id,
+      conversationId: 'cursor-middle',
+      updatedAt: new Date('2026-01-02T00:00:00.000Z'),
+    });
+    await createFastSession({
+      userId: owner.id,
+      conversationId: 'cursor-newest',
+      updatedAt: new Date('2026-01-03T00:00:00.000Z'),
+    });
+
+    const { sessions } = await getFastSessions(
+      { userId: owner.id, isAdmin: false },
+      { before: encodeFastSessionCursor(middle) },
+    );
+
+    expect(sessions.map((session) => session.id)).toEqual([oldest.id]);
   });
 
   it('applies the same scope to detail lookups', async () => {
@@ -256,7 +287,8 @@ describe('Fast session queries', () => {
     await expect(
       getFastSessionById(participantAuth, session.id),
     ).resolves.toMatchObject({ id: session.id });
-    const participantList = await getFastSessions(participantAuth);
+    const { sessions: participantList } =
+      await getFastSessions(participantAuth);
     expect(participantList.map((row) => row.id)).toContain(session.id);
 
     await expect(
@@ -325,5 +357,41 @@ describe('Fast session queries', () => {
     const payload = result?.messages[0]?.payload as Record<string, unknown>;
     expect((payload.output as string).length).toBeLessThan(oversized.length);
     expect(payload.output).toContain('[output truncated');
+  });
+
+  it('windows long transcripts to whole turns and flags older messages', async () => {
+    const owner = await userFactory.create();
+    const session = await createFastSession({
+      userId: owner.id,
+      conversationId: 'long-session',
+      updatedAt: new Date('2026-01-01T00:00:00.000Z'),
+    });
+    // 101 turns x 10 events = 1010 rows; the newest 1000 land mid-turn.
+    const rows = Array.from({ length: 1010 }, (_, index) => ({
+      conversationId: session.id,
+      eventId: `event-${index}`,
+      turnId: `turn-${Math.floor(index / 10)}`,
+      turnSeq: index % 10,
+      ts: index + 1,
+      eventType: 'roomote_runtime.assistant_message' as const,
+      role: 'assistant' as const,
+      contentBlocks: [{ type: 'text' as const, text: `event-${index}` }],
+      metadata: { visibleInTranscript: true },
+      payload: {},
+      source: 'slack',
+    }));
+    await db.insert(fastAgentMessages).values(rows);
+
+    const result = await getFastSessionById(
+      { userId: owner.id, isAdmin: false },
+      session.id,
+    );
+
+    expect(result?.hasOlderMessages).toBe(true);
+    expect(result?.messages.length).toBeLessThanOrEqual(1000);
+    // The oldest included message starts its turn.
+    expect(result?.messages[0]?.turnSeq).toBe(0);
+    // The newest messages are the ones kept.
+    expect(result?.messages.at(-1)?.eventId).toBe('event-1009');
   });
 });

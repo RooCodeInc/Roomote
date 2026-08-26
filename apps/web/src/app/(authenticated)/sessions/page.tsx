@@ -20,13 +20,22 @@ function sessionContextLabel(openCodeSessionId: string | null) {
   return openCodeSessionId ? 'Native context' : 'Stored history';
 }
 
-export default async function SessionsPage() {
-  const authorizedUser = await authorize();
+export default async function SessionsPage({
+  searchParams,
+}: {
+  searchParams?: Promise<{ before?: string }>;
+}) {
+  const [authorizedUser, { before } = {}] = await Promise.all([
+    authorize(),
+    searchParams,
+  ]);
   if (!authorizedUser.success) {
     notFound();
   }
 
-  const sessions = await getFastSessions(authorizedUser);
+  const { sessions, nextCursor } = await getFastSessions(authorizedUser, {
+    before,
+  });
 
   return (
     <div className="flex h-full min-h-0 w-full flex-col bg-card">
@@ -113,6 +122,16 @@ export default async function SessionsPage() {
                   </Link>
                 );
               })}
+              {nextCursor ? (
+                <div className="flex justify-center p-4">
+                  <Link
+                    href={`/sessions?before=${encodeURIComponent(nextCursor)}`}
+                    className="text-sm text-muted-foreground underline-offset-4 hover:underline"
+                  >
+                    Show older sessions
+                  </Link>
+                </div>
+              ) : null}
             </div>
           )}
         </div>

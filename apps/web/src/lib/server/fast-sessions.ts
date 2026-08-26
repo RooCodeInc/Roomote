@@ -10,6 +10,7 @@ import {
   exists,
   fastAgentConversations,
   fastAgentMessages,
+  lt,
   or,
   sql,
   users,
@@ -87,17 +88,70 @@ function fastSessionScope(auth: FastSessionAuth) {
   );
 }
 
-export async function getFastSessions(auth: FastSessionAuth) {
-  return db
+export function encodeFastSessionCursor(row: {
+  updatedAt: Date;
+  id: string;
+}): string {
+  return `${row.updatedAt.getTime()}:${row.id}`;
+}
+
+function decodeFastSessionCursor(cursor: string | undefined) {
+  if (!cursor) {
+    return null;
+  }
+
+  const separator = cursor.indexOf(':');
+  if (separator <= 0) {
+    return null;
+  }
+
+  const updatedAtMs = Number(cursor.slice(0, separator));
+  const id = cursor.slice(separator + 1);
+  if (!Number.isFinite(updatedAtMs) || !id) {
+    return null;
+  }
+
+  return { updatedAt: new Date(updatedAtMs), id };
+}
+
+export async function getFastSessions(
+  auth: FastSessionAuth,
+  options?: { before?: string },
+) {
+  const cursor = decodeFastSessionCursor(options?.before);
+
+  // Keyset pagination matching the (updatedAt desc, id desc) ordering.
+  const beforeCursor = cursor
+    ? or(
+        lt(fastAgentConversations.updatedAt, cursor.updatedAt),
+        and(
+          eq(fastAgentConversations.updatedAt, cursor.updatedAt),
+          lt(fastAgentConversations.id, cursor.id),
+        ),
+      )
+    : undefined;
+
+  const rows = await db
     .select(fastSessionSelection)
     .from(fastAgentConversations)
     .innerJoin(users, eq(fastAgentConversations.userId, users.id))
-    .where(fastSessionScope(auth))
+    .where(and(fastSessionScope(auth), beforeCursor))
     .orderBy(
       desc(fastAgentConversations.updatedAt),
       desc(fastAgentConversations.id),
     )
-    .limit(FAST_SESSION_LIST_LIMIT);
+    .limit(FAST_SESSION_LIST_LIMIT + 1);
+
+  const sessions = rows.slice(0, FAST_SESSION_LIST_LIMIT);
+  const lastSession = sessions.at(-1);
+
+  return {
+    sessions,
+    nextCursor:
+      rows.length > FAST_SESSION_LIST_LIMIT && lastSession
+        ? encodeFastSessionCursor(lastSession)
+        : null,
+  };
 }
 
 export async function getFastSessionById(
@@ -147,12 +201,23 @@ export async function getFastSessionById(
       desc(fastAgentMessages.createdAt),
       desc(fastAgentMessages.id),
     )
-    .limit(FAST_SESSION_TRANSCRIPT_MESSAGE_LIMIT);
+    .limit(FAST_SESSION_TRANSCRIPT_MESSAGE_LIMIT + 1);
+
+  const hasOlderMessages = rows.length > FAST_SESSION_TRANSCRIPT_MESSAGE_LIMIT;
+  let windowed = rows.slice(0, FAST_SESSION_TRANSCRIPT_MESSAGE_LIMIT);
+  if (hasOlderMessages) {
+    // The window boundary can land mid-turn; drop the partial turn at the old
+    // end so the transcript always starts on a turn boundary.
+    const boundaryTurnId = rows[FAST_SESSION_TRANSCRIPT_MESSAGE_LIMIT]!.turnId;
+    while (windowed.length > 0 && windowed.at(-1)!.turnId === boundaryTurnId) {
+      windowed = windowed.slice(0, -1);
+    }
+  }
 
   // Sanitize at the read boundary, matching the task transcript path: the DB
   // stores full payloads, but oversized tool output is truncated before it is
   // serialized into the RSC payload.
-  const messages = rows.reverse().map((row): FastSessionMessage => {
+  const messages = windowed.reverse().map((row): FastSessionMessage => {
     const sanitized = sanitizeEnvelopeFields(
       row.eventType,
       row.contentBlocks,
@@ -172,5 +237,6 @@ export async function getFastSessionById(
   return {
     ...session,
     messages,
+    hasOlderMessages,
   };
 }
