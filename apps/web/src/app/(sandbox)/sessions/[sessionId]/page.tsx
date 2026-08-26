@@ -46,12 +46,9 @@ export default async function SessionDetailPage({
     ownerEmail: session.ownerEmail,
     ownerImageUrl: session.ownerImageUrl,
     surface: session.surface,
-    workspaceId: session.workspaceId,
-    conversationId: session.conversationId,
-    openCodeSessionId: session.openCodeSessionId,
-    messageCount: session.messageCount,
+    model: session.model ?? defaultModelId,
+    inferenceCostMicroUsd: session.inferenceCostMicroUsd,
     createdAt: session.createdAt,
-    updatedAt: session.updatedAt,
   };
 
   return (

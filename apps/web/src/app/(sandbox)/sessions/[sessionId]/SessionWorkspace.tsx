@@ -3,13 +3,15 @@
 import { useState, type ReactNode } from 'react';
 import { formatDistanceToNow } from 'date-fns';
 
-import { getUserDisplayName } from '@/lib';
+import { formatInferenceCost, getUserDisplayName } from '@/lib';
+import { useLaunchTaskModels } from '@/hooks/task-models/useLaunchTaskModels';
 import { WorkspaceSurface } from '@/components/layout';
 import { SideNavItem } from '@/components/layout/side-nav/SideNavItem';
 import {
   Avatar,
   BasicTooltip,
   Button,
+  DollarSign,
   Info,
   ResizableDivider,
   ResizablePanel,
@@ -23,12 +25,17 @@ export type SessionInfo = {
   ownerEmail: string | null;
   ownerImageUrl: string | null;
   surface: string;
-  workspaceId: string;
-  conversationId: string;
-  openCodeSessionId: string | null;
-  messageCount: number;
+  /** Effective model for the session's turns (stored override or default). */
+  model: string | null;
+  inferenceCostMicroUsd: number;
   createdAt: Date;
-  updatedAt: Date;
+};
+
+const SURFACE_LABELS: Record<string, string> = {
+  slack: 'Slack',
+  discord: 'Discord',
+  automation: 'Automation',
+  web: 'Web',
 };
 
 function InfoRow({ label, children }: { label: string; children: ReactNode }) {
@@ -52,6 +59,12 @@ function SessionInfoPanel({
       name: session.ownerName,
       email: session.ownerEmail,
     }) ?? 'Unknown';
+  const { data: modelData } = useLaunchTaskModels();
+  const modelLabel = session.model
+    ? (modelData?.models.find(({ id }) => id === session.model)?.displayName ??
+      session.model)
+    : null;
+  const inferenceCostLabel = formatInferenceCost(session.inferenceCostMicroUsd);
 
   return (
     <>
@@ -71,7 +84,7 @@ function SessionInfoPanel({
       <div className="scroll-thin min-h-0 flex-1 overflow-y-auto px-4 py-4">
         <table className="text-sm">
           <tbody>
-            <InfoRow label="Owner">
+            <InfoRow label="Creator">
               <span className="inline-flex items-center gap-2">
                 <Avatar
                   imageUrl={session.ownerImageUrl}
@@ -83,29 +96,23 @@ function SessionInfoPanel({
                 {ownerDisplayName}
               </span>
             </InfoRow>
-            <InfoRow label="Surface">
-              <span className="capitalize">{session.surface}</span>
+            <InfoRow label="Model">{modelLabel ?? 'Default model'}</InfoRow>
+            <InfoRow label="Inference cost">
+              <span className="inline-flex items-center gap-1">
+                <DollarSign className="size-3 shrink-0" />
+                {inferenceCostLabel}
+              </span>
             </InfoRow>
-            <InfoRow label="Messages">{session.messageCount}</InfoRow>
-            <InfoRow label="Context">
-              {session.openCodeSessionId ? 'Native context' : 'Stored history'}
-            </InfoRow>
-            <InfoRow label="Created">
+            <InfoRow label="Started at">
               <BasicTooltip content={session.createdAt.toLocaleString()}>
                 <span className="cursor-default">
                   {formatDistanceToNow(session.createdAt, { addSuffix: true })}
                 </span>
               </BasicTooltip>
             </InfoRow>
-            <InfoRow label="Last activity">
-              <BasicTooltip content={session.updatedAt.toLocaleString()}>
-                <span className="cursor-default">
-                  {formatDistanceToNow(session.updatedAt, { addSuffix: true })}
-                </span>
-              </BasicTooltip>
+            <InfoRow label="Started from">
+              {SURFACE_LABELS[session.surface] ?? session.surface}
             </InfoRow>
-            <InfoRow label="Conversation">{session.conversationId}</InfoRow>
-            <InfoRow label="Workspace">{session.workspaceId}</InfoRow>
           </tbody>
         </table>
       </div>

@@ -12,6 +12,7 @@ import {
   gte,
   fastAgentConversations,
   fastAgentMessages,
+  llmUsageEvents,
   lt,
   or,
   sql,
@@ -353,9 +354,29 @@ export async function getFastSessionById(
     .reverse()
     .map((row): FastSessionMessage => sanitizeFastSessionMessageRow(row));
 
+  // Fast usage events carry the OpenCode session id; a conversation can span
+  // several (cold rebuilds), so sum across every session id the transcript
+  // references plus the current one.
+  const [usage] = await db
+    .select({
+      costMicroUsd: sql<number>`coalesce(sum(${llmUsageEvents.costMicroUsd}), 0)::bigint`,
+    })
+    .from(llmUsageEvents)
+    .where(
+      sql`${llmUsageEvents.harnessSessionId} in (
+        select distinct ${fastAgentMessages.nativeSessionId}
+        from ${fastAgentMessages}
+        where ${fastAgentMessages.conversationId} = ${session.id}
+          and ${fastAgentMessages.nativeSessionId} is not null
+        union
+        select ${session.openCodeSessionId}::text
+      )`,
+    );
+
   return {
     ...session,
     messages,
     hasOlderMessages,
+    inferenceCostMicroUsd: Number(usage?.costMicroUsd ?? 0),
   };
 }
