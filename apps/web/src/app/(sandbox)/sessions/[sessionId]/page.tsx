@@ -1,7 +1,11 @@
 import { notFound } from 'next/navigation';
 
 import { resolveEffectiveModelRuntimeEnv } from '@roomote/db/server';
-import { REASONING_EFFORT_VALUES, type ReasoningEffort } from '@roomote/types';
+import {
+  getTextFromContentBlocks,
+  REASONING_EFFORT_VALUES,
+  type ReasoningEffort,
+} from '@roomote/types';
 
 import { authorize } from '@/lib/server/auth-context';
 import { getFastSessionById } from '@/lib/server/fast-sessions';
@@ -50,6 +54,12 @@ export default async function SessionDetailPage({
     inferenceCostMicroUsd: session.inferenceCostMicroUsd,
     createdAt: session.createdAt,
   };
+  const initialUserMessage = session.messages.find(
+    (message) => message.role === 'user',
+  );
+  const fallbackTitle =
+    getTextFromContentBlocks(initialUserMessage?.contentBlocks ?? [])?.trim() ||
+    'Session';
 
   return (
     <SessionWorkspace session={sessionInfo}>
@@ -60,9 +70,7 @@ export default async function SessionDetailPage({
           hasOlderMessages={session.hasOlderMessages}
           canReply
           initialTitle={session.title}
-          fallbackTitle={
-            session.surface === 'web' ? 'Session' : session.conversationId
-          }
+          fallbackTitle={fallbackTitle}
           sessionModel={session.model}
           sessionReasoningEffort={session.reasoningEffort}
           defaultModelId={defaultModelId}
