@@ -1,13 +1,13 @@
 ---
 title: Fast sessions
 icon: zap
-description: Chat with the fast orchestrator from the dashboard and review every Fast conversation's transcript.
+description: Chat with the fast orchestrator from the dashboard and review every Fast session transcript.
 ---
 
 Fast is Roomote's conversational orchestrator: it answers directly when it can
-and delegates execution work into tasks when needed. A Fast session is one
-persisted Fast conversation, whether it started in Slack, Discord, Microsoft
-Teams, Telegram, an automation, or the web dashboard.
+and delegates execution work into tasks when needed. A Fast session persists
+across Slack, Discord, Microsoft Teams, Telegram, an automation, or the web
+dashboard.
 
 ## Start a Fast session from the dashboard
 
@@ -24,17 +24,22 @@ appear in the transcript with links to their task pages.
 
 A session's transcript shows prompts, replies, and the tool activity behind
 them, rendered with the same transcript view as tasks, with a generated title
-that updates as the conversation evolves. The view updates in real time while
+that updates as the session evolves. The view updates in real time while
 a turn is running, so you can watch tool calls complete and replies land
 without refreshing.
+
+Fast sessions can also render presentational widgets such as status cards,
+tables, and plans directly in the transcript. Widget HTML is sanitized and
+sandboxed in the web view; chat surfaces receive only the widget's text
+fallback.
 
 ## Reply to a session
 
 Every session has a reply box at the bottom of the transcript; follow-ups
-continue the same conversation with full context. For conversations that live
+continue the same session with full context. For sessions that live
 on another surface, such as a Slack thread, Roomote's answer is posted back
 into the originating thread with a quoted copy of your web message, so the
-conversation stays in one place for everyone following it there. Fast replies
+session stays in one place for everyone following it there. Fast replies
 across Slack, Discord, Microsoft Teams, and Telegram carry a "Reply or use the
 web app" footer linking to the session view. Slack and Discord can also resume
 Fast directly from chat. Microsoft Teams replies to Fast session and automation

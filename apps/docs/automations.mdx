@@ -134,7 +134,7 @@ Microsoft Teams replies continue the Fast session directly in chat. Teams only
 resumes after verifying the active tenant installation, conversation, and
 linked user. Telegram can deliver the same reports and continue them from the
 web app, but inbound Telegram replies still use its normal task-routing flow.
-Runs with no report destination remain stored conversations and do not post to
+Runs with no report destination remain stored Fast sessions and do not post to
 chat.
 
 A run can skip or fail before execution when its configuration or launch state
@@ -186,9 +186,9 @@ an explicit IANA timezone.
 Admins can also manage custom automations conversationally through the
 `manage_custom_automations` tool: list, resolve a schedule, create, update,
 delete, or run an enabled automation immediately. The tool is available both
-from a Roomote task and directly in a Fast conversation, so a quick chat
+from a Roomote task and directly in a Fast session, so a quick chat
 message can handle the full automation lifecycle without launching a task.
-Fast conversations can also reach the deployment's enabled MCP servers, the
+Fast sessions can also reach the deployment's enabled MCP servers, the
 same ones delegated tasks use. Use the tool's model-list action to
 see the deployment's enabled model IDs and default before setting an override.
 Model IDs preserve the configured inference route: `openrouter/...` targets
