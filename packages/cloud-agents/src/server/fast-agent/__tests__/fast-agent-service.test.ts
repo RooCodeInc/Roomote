@@ -1851,30 +1851,41 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
   });
 
   it('does not replay a failed turn after a native tool was invoked', async () => {
-    mocks.generateText.mockImplementationOnce(
-      async (_params, _session, options) => {
-        await options.onSessionReady('opencode-session-1');
-        await invokeTool(nativeToolNames.sendChatReply, {
-          purpose: 'ack',
-          message: 'I’m checking.',
-        });
-        throw new Error('TypeError: fetch failed');
-      },
-    );
-    const replaceReply = vi.fn().mockResolvedValue({ messageId: 'retry-1' });
-    const adapter = callbacks({ replaceReply });
+    vi.useFakeTimers();
+    try {
+      mocks.generateText.mockImplementationOnce(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          await invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'ack',
+            message: 'I’m checking.',
+          });
+          throw new Error('TypeError: fetch failed');
+        },
+      );
+      const replaceReply = vi.fn().mockResolvedValue({ messageId: 'retry-1' });
+      const adapter = callbacks({ replaceReply });
+      const startedAt = Date.now();
 
-    await answerFastAgentQuestion({ ...baseParams, adapter });
+      await expect(
+        answerFastAgentQuestion({ ...baseParams, adapter }),
+      ).resolves.toBe(
+        'Could not reach the inference provider. Please try again in a moment.',
+      );
 
-    expect(mocks.generateText).toHaveBeenCalledOnce();
-    expect(adapter.postReply).not.toHaveBeenCalledWith(
-      expect.objectContaining({
-        purpose: 'progress',
-        message: expect.stringContaining('Retrying in'),
-      }),
-    );
-    expect(replaceReply).not.toHaveBeenCalled();
-    expect(mocks.invalidateSession).toHaveBeenCalledWith('conversation-1');
+      expect(Date.now() - startedAt).toBe(0);
+      expect(mocks.generateText).toHaveBeenCalledOnce();
+      expect(adapter.postReply).not.toHaveBeenCalledWith(
+        expect.objectContaining({
+          purpose: 'progress',
+          message: expect.stringContaining('Retrying in'),
+        }),
+      );
+      expect(replaceReply).not.toHaveBeenCalled();
+      expect(mocks.invalidateSession).toHaveBeenCalledWith('conversation-1');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('uses the extended retry budget for provider timeouts', async () => {

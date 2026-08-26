@@ -321,18 +321,27 @@ function formatFastAgentInferenceRetryNotice(
 
 function formatFastAgentInferenceFailure(
   failure: FastAgentInferenceFailure,
+  retried: boolean,
 ): string {
   switch (failure.reason) {
     case 'content_filter':
       return 'The inference provider blocked this response with its content filter, so retrying will not help. Try rephrasing the request or asking in a new thread.';
     case 'rate_limited':
-      return 'The inference provider is still rate limiting requests after retrying. Any delegated tasks can keep running; please try again when provider capacity is available.';
+      return retried
+        ? 'The inference provider is still rate limiting requests after retrying. Any delegated tasks can keep running; please try again when provider capacity is available.'
+        : 'The inference provider is rate limiting requests. Any delegated tasks can keep running; please try again when provider capacity is available.';
     case 'timeout':
-      return 'The inference provider did not respond after retrying. Any delegated tasks can keep running; please try again in a moment.';
+      return retried
+        ? 'The inference provider did not respond after retrying. Any delegated tasks can keep running; please try again in a moment.'
+        : 'The inference provider did not respond. Any delegated tasks can keep running; please try again in a moment.';
     case 'endpoint_unreachable':
-      return 'Could not reach the inference provider after retrying. Please try again in a moment.';
+      return retried
+        ? 'Could not reach the inference provider after retrying. Please try again in a moment.'
+        : 'Could not reach the inference provider. Please try again in a moment.';
     case 'gateway_blocked':
-      return 'The request is still being blocked by the inference provider gateway after retrying. Please try again in a moment.';
+      return retried
+        ? 'The request is still being blocked by the inference provider gateway after retrying. Please try again in a moment.'
+        : 'The request was blocked by the inference provider gateway. Please try again in a moment.';
     case 'insufficient_credits':
       return 'The inference provider account has insufficient credits or quota.';
     case 'invalid_credentials':
@@ -684,6 +693,7 @@ export async function answerFastAgentQuestion({
   let inferenceRetryCanonicalEvent:
     | { eventId: string; turnSeq: number }
     | undefined;
+  let inferenceRetryAttempted = false;
   let activeOpenCodeSessionId: string | null = null;
   let completedOpenCodeMessage: NonTaskOpenCodeCompletedMessage | null = null;
   let nextAssistantOrdinal = 0;
@@ -1065,6 +1075,7 @@ export async function answerFastAgentQuestion({
     const reportInferenceRetry = async (
       notice: FastAgentInferenceRetryNotice,
     ) => {
+      inferenceRetryAttempted = true;
       if (platformEvent) {
         return;
       }
@@ -1819,7 +1830,10 @@ export async function answerFastAgentQuestion({
 
     const message =
       error instanceof FastAgentInferenceError
-        ? formatFastAgentInferenceFailure(error.failure)
+        ? formatFastAgentInferenceFailure(
+            error.failure,
+            inferenceRetryAttempted,
+          )
         : 'I hit an error while handling that request. Please try again in a moment.';
     try {
       const reply = { purpose: 'closeout' as const, message };
