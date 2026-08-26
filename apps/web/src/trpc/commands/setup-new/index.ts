@@ -80,6 +80,8 @@ import {
   isRequiredComputeField,
   normalizeTaskModelSettings,
   DEFAULT_TASK_MODEL_SETTINGS,
+  TASK_MODEL_ROLE_DESCRIPTORS,
+  TASK_MODEL_ROLES,
   NON_SECRET_AUTH_ENV_VAR_NAMES,
   NON_SECRET_COMPUTE_ENV_VAR_NAMES,
   NON_SECRET_SOURCE_CONTROL_ENV_VAR_NAMES,
@@ -322,6 +324,19 @@ export async function ensureTrialModelConfigSeeded(): Promise<void> {
 
   try {
     await db.transaction(async (tx) => {
+      // Serialize against concurrent configuration writes: every check below
+      // must observe the row state the seed upserts will replace, or an
+      // operator's save landing between read and write would be overwritten.
+      await tx
+        .insert(deploymentSettings)
+        .values({ id: 'default' })
+        .onConflictDoNothing();
+      await tx
+        .select({ id: deploymentSettings.id })
+        .from(deploymentSettings)
+        .where(eq(deploymentSettings.id, 'default'))
+        .for('update');
+
       const [
         currentState,
         persistedModelConfig,
@@ -352,8 +367,16 @@ export async function ensureTrialModelConfigSeeded(): Promise<void> {
         githubCopilotConnected,
         xaiSubscriptionConnected,
       });
+      // Any role-model env override (R_MODEL, R_PLANNING_MODEL, …) is an
+      // operator model choice: seeding around it would persist config that
+      // unexpectedly activates once the override is removed.
+      const hasRuntimeRoleModelOverride = TASK_MODEL_ROLES.some((role) =>
+        isConfiguredEnvValue(
+          process.env[TASK_MODEL_ROLE_DESCRIPTORS[role].modelEnvVar],
+        ),
+      );
       const hasOperatorProvider =
-        status.runtimeRoomoteModelSatisfied ||
+        hasRuntimeRoleModelOverride ||
         status.providers.some(
           (provider) =>
             provider.savedApiKeySatisfied ||

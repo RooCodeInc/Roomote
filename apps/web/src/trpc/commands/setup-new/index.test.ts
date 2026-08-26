@@ -263,6 +263,9 @@ import {
   resetTrialModelConfigSeedCheckForTests,
 } from './index';
 import {
+  DEFAULT_MODEL_PROVIDER_CREDENTIAL_ENV_VAR_NAMES,
+  TASK_MODEL_ROLE_DESCRIPTORS,
+  TASK_MODEL_ROLES,
   WORKER_RUNTIME_SCHEMA_VERSION,
   type SetupNewState,
 } from '@roomote/types';
@@ -1344,13 +1347,27 @@ describe('setup recommendation commands', () => {
 
 describe('ensureTrialModelConfigSeeded', () => {
   function createTxStub(row: Record<string, unknown>) {
+    // Records only the config upserts; the bare row insert that backs the
+    // FOR UPDATE lock carries neither field and stays out of assertions.
     const inserted: Array<Record<string, unknown>> = [];
     const tx = {
-      select: vi.fn(() => createSelectChain([row])),
+      select: vi.fn(() => ({
+        from: vi.fn(() => ({
+          where: vi.fn(() => ({
+            limit: vi.fn(async () => [row]),
+            for: vi.fn(async () => [row]),
+          })),
+        })),
+      })),
       insert: vi.fn(() => ({
         values: vi.fn((values: Record<string, unknown>) => {
-          inserted.push(values);
-          return { onConflictDoUpdate: vi.fn(async () => undefined) };
+          if ('runtimeModelConfig' in values || 'taskModelSettings' in values) {
+            inserted.push(values);
+          }
+          return {
+            onConflictDoUpdate: vi.fn(async () => undefined),
+            onConflictDoNothing: vi.fn(async () => undefined),
+          };
         }),
       })),
     };
@@ -1363,6 +1380,15 @@ describe('ensureTrialModelConfigSeeded', () => {
     vi.unstubAllEnvs();
     resetTrialModelConfigSeedCheckForTests();
     mockGetPersistedEnvironmentVariableNames.mockResolvedValue([]);
+    // Hermetic against the host environment: a developer or CI shell with
+    // role models or provider keys set must not change these outcomes.
+    for (const role of TASK_MODEL_ROLES) {
+      vi.stubEnv(TASK_MODEL_ROLE_DESCRIPTORS[role].modelEnvVar, '');
+    }
+    for (const name of DEFAULT_MODEL_PROVIDER_CREDENTIAL_ENV_VAR_NAMES) {
+      vi.stubEnv(name, '');
+    }
+    vi.stubEnv('R_TRIAL_OPENROUTER_API_KEY', '');
   });
 
   afterEach(() => {
@@ -1409,6 +1435,23 @@ describe('ensureTrialModelConfigSeeded', () => {
   it('never overwrites an operator-configured provider', async () => {
     vi.stubEnv('R_TRIAL_OPENROUTER_API_KEY', 'sk-trial');
     vi.stubEnv('OPENROUTER_API_KEY', 'sk-operator');
+    const { tx, inserted } = createTxStub({
+      setupNewState: {},
+      runtimeModelConfig: null,
+      taskModelSettings: null,
+    });
+    mockDbTransaction.mockImplementation(
+      async (callback: (tx: unknown) => Promise<unknown>) => callback(tx),
+    );
+
+    await ensureTrialModelConfigSeeded();
+
+    expect(inserted).toEqual([]);
+  });
+
+  it('treats any role-model env override as an operator model choice', async () => {
+    vi.stubEnv('R_TRIAL_OPENROUTER_API_KEY', 'sk-trial');
+    vi.stubEnv('R_PLANNING_MODEL', 'anthropic/claude-opus-5');
     const { tx, inserted } = createTxStub({
       setupNewState: {},
       runtimeModelConfig: null,
