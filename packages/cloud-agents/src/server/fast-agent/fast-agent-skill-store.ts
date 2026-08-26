@@ -69,7 +69,7 @@ export type FastAgentSkillListResult = {
   warnings: string[];
 };
 
-export type FastAgentSkillCatalog = FastAgentSkillListResult & {
+type FastAgentSkillCatalog = FastAgentSkillListResult & {
   counts: {
     packaged: number;
     repository: number;
