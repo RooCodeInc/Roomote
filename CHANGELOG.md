@@ -26,6 +26,8 @@ This release brings Fast conversations into the dashboard, introduces a streamli
 - Keep Fast conversations useful across follow-ups and longer work by preserving native context through helper restarts, exposing deployment task inspection, responding naturally to corrections, and sharing concise progress when work takes time.
 - Make pull request feedback and review checks more reliable by coalescing duplicate actionable notifications, completing checks when reviews finish, and showing provisional findings sooner when a summary is delayed.
 - Render automation result tables in Slack with valid cell payloads, including tables with visually empty cells.
+- Show the first user message as a Fast session's temporary title instead of exposing a timestamp-like conversation identifier while title generation finishes.
+- Allow image-only prompts when starting or continuing Fast sessions while continuing to reject invalid images and empty messages.
 
 ## 0.42.0 (2026-08-25)
 
