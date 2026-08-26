@@ -344,6 +344,44 @@ describe('FastSessionTranscript', () => {
         reasoningEffort: null,
       });
     });
+
+    expect(
+      await screen.findAllByRole('button', {
+        name: 'Open conversation image attachment 1',
+      }),
+    ).toHaveLength(1);
+
+    act(() => {
+      FakeEventSource.instances[0]!.emit('messages', {
+        messages: [
+          {
+            id: 'user-image-1',
+            eventId: 'turn-image-1:user',
+            turnId: 'turn-image-1',
+            turnSeq: 0,
+            ts: Date.now(),
+            eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
+            role: 'user',
+            contentBlocks: [
+              { type: 'text', text: '' },
+              { type: 'image', mimeType: 'image/png', data: 'image-1' },
+            ],
+            metadata: { visibleInTranscript: true },
+            payload: {},
+            source: 'web',
+            nativeSessionId: null,
+            nativeMessageId: null,
+            createdAt: new Date().toISOString(),
+          },
+        ],
+      });
+    });
+
+    expect(
+      screen.getAllByRole('button', {
+        name: 'Open conversation image attachment 1',
+      }),
+    ).toHaveLength(1);
   });
 
   it('keeps the drafted reply when the send fails', async () => {
