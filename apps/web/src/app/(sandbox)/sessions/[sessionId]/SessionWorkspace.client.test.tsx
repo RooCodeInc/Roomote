@@ -3,6 +3,7 @@ import { fireEvent, render, screen } from '@testing-library/react';
 
 import { SandboxLayoutContext } from '../../use-sandbox-layout';
 import { SessionWorkspace, type SessionInfo } from './SessionWorkspace';
+import { useOpenSessionTaskPanel } from './session-task-panel-context';
 
 const { useMediaQueryMock } = vi.hoisted(() => ({
   useMediaQueryMock: vi.fn(),
@@ -21,6 +22,12 @@ vi.mock('@/hooks/task-models/useLaunchTaskModels', () => ({
   useLaunchTaskModels: () => ({
     data: { models: [{ id: 'model-1', displayName: 'Model One' }] },
   }),
+}));
+
+vi.mock('./NestedTaskSidePanel', () => ({
+  NestedTaskSidePanel: ({ taskId }: { taskId: string }) => (
+    <div>Nested panel {taskId}</div>
+  ),
 }));
 
 const session: SessionInfo = {
@@ -51,15 +58,29 @@ function SandboxLayoutProvider({ children }: { children: ReactNode }) {
   );
 }
 
-function renderWorkspace({ isMobile }: { isMobile: boolean }) {
+function renderWorkspace({
+  isMobile,
+  children = <div>Session transcript</div>,
+}: {
+  isMobile: boolean;
+  children?: ReactNode;
+}) {
   useMediaQueryMock.mockReturnValue(!isMobile);
 
   render(
     <SandboxLayoutProvider>
-      <SessionWorkspace session={session}>
-        <div>Session transcript</div>
-      </SessionWorkspace>
+      <SessionWorkspace session={session}>{children}</SessionWorkspace>
     </SandboxLayoutProvider>,
+  );
+}
+
+function OpenNestedTask() {
+  const openTaskPanel = useOpenSessionTaskPanel();
+
+  return (
+    <button type="button" onClick={() => openTaskPanel?.('child-1')}>
+      Open child
+    </button>
   );
 }
 
@@ -108,5 +129,13 @@ describe('SessionWorkspace', () => {
     expect(
       screen.getByRole('button', { name: 'Close session info' }),
     ).toBeInTheDocument();
+  });
+
+  it('opens delegated tasks in the existing session side-panel slot', () => {
+    renderWorkspace({ isMobile: false, children: <OpenNestedTask /> });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open child' }));
+
+    expect(screen.getByText('Nested panel child-1')).toBeInTheDocument();
   });
 });

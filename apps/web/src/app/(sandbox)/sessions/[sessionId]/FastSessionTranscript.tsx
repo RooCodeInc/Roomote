@@ -31,6 +31,7 @@ import {
   type SessionPromptSubmission,
 } from './SessionPromptInput';
 import { preparePromptAttachments } from '@/lib/prompt-attachments';
+import { useOpenSessionTaskPanel } from './session-task-panel-context';
 
 import {
   AcpTranscriptBlockList,
@@ -85,6 +86,7 @@ export function FastSessionTranscript({
   timelineExtras?: ReactNode;
 }) {
   const trpcClient = useTRPCClient();
+  const openTaskPanel = useOpenSessionTaskPanel();
   const [serverMessages, setServerMessages] = useState<
     Map<string, TranscriptMessage>
   >(
@@ -185,6 +187,7 @@ export function FastSessionTranscript({
     shouldHideFirstMessage: false,
     showInternalMessages: false,
     hasLeadingTextBoundary: false,
+    keepDelegatedTasksVisible: true,
     resetKey: `${messages.length}:${messages[0]?.eventId ?? ''}:${messages.at(-1)?.eventId ?? ''}`,
   });
 
@@ -284,6 +287,7 @@ export function FastSessionTranscript({
             blocks={renderBlocks}
             showInternalMessages={false}
             onSuppress={suppressMessage}
+            onOpenDelegatedTask={openTaskPanel ?? undefined}
           />
         </ConversationContent>
         <ConversationScrollButton />

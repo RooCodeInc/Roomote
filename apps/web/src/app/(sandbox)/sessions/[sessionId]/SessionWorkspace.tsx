@@ -32,6 +32,8 @@ import {
   SandboxSideActions,
 } from '../../SandboxWorkspacePanels';
 import { useSandboxLayout } from '../../use-sandbox-layout';
+import { NestedTaskSidePanel } from './NestedTaskSidePanel';
+import { OpenSessionTaskPanelContext } from './session-task-panel-context';
 
 export type SessionInfo = {
   id: string;
@@ -241,13 +243,15 @@ export function SessionWorkspace({
   children: ReactNode;
 }) {
   const [isInfoOpen, setIsInfoOpen] = useState(false);
+  const [nestedTaskId, setNestedTaskId] = useState<string | null>(null);
   const router = useRouter();
   const searchParams = useSearchParams();
   const selectedTaskId = searchParams.get('task');
   const selectedTask = session.tasks.find(
     (task) => task.taskId === selectedTaskId,
   );
-  const panelOpen = isInfoOpen || Boolean(selectedTask);
+  const panelOpen =
+    isInfoOpen || Boolean(selectedTask) || Boolean(nestedTaskId);
 
   const selectTask = useCallback(
     (taskId: string | null) => {
@@ -266,11 +270,22 @@ export function SessionWorkspace({
     }
   }, [selectTask, selectedTaskId, session.tasks]);
 
+  const openTaskPanel = useCallback(
+    (taskId: string) => {
+      setIsInfoOpen(false);
+      setNestedTaskId(taskId);
+      selectTask(null);
+    },
+    [selectTask],
+  );
   const closePanel = () => {
     setIsInfoOpen(false);
+    setNestedTaskId(null);
     selectTask(null);
   };
-  const panelContent = selectedTask ? (
+  const panelContent = nestedTaskId ? (
+    <NestedTaskSidePanel taskId={nestedTaskId} onClose={closePanel} />
+  ) : selectedTask ? (
     <SessionTaskPanel
       sessionId={session.id}
       task={selectedTask}
@@ -284,58 +299,62 @@ export function SessionWorkspace({
   const { isSidebarVisible, toggleSidebar } = useSandboxLayout();
 
   return (
-    <WorkspaceSurface
-      className="relative"
-      sideActions={
-        <>
-          <SandboxSideActions isPanelOpen={panelOpen} onShowMain={closePanel}>
-            <SideNavItem
-              side="right"
-              label="Session info"
-              tooltip="Session info"
-              active={isInfoOpen && !selectedTask}
-              icon={Info}
-              onClick={() => {
-                selectTask(null);
-                setIsInfoOpen((previous) => !previous);
-              }}
-            />
-            {session.tasks.length ? (
+    <OpenSessionTaskPanelContext.Provider value={openTaskPanel}>
+      <WorkspaceSurface
+        className="relative"
+        sideActions={
+          <>
+            <SandboxSideActions isPanelOpen={panelOpen} onShowMain={closePanel}>
               <SideNavItem
                 side="right"
-                label="Executions"
-                tooltip="Executions"
-                active={Boolean(selectedTask)}
-                icon={Rows4}
+                label="Session info"
+                tooltip="Session info"
+                active={isInfoOpen && !selectedTask && !nestedTaskId}
+                icon={Info}
                 onClick={() => {
-                  setIsInfoOpen(false);
-                  selectTask(selectedTask ? null : session.tasks[0]!.taskId);
+                  setNestedTaskId(null);
+                  selectTask(null);
+                  setIsInfoOpen((previous) => !previous);
                 }}
               />
+              {session.tasks.length ? (
+                <SideNavItem
+                  side="right"
+                  label="Executions"
+                  tooltip="Executions"
+                  active={Boolean(selectedTask)}
+                  icon={Rows4}
+                  onClick={() => {
+                    setNestedTaskId(null);
+                    setIsInfoOpen(false);
+                    selectTask(selectedTask ? null : session.tasks[0]!.taskId);
+                  }}
+                />
+              ) : null}
+            </SandboxSideActions>
+            {!isSidebarVisible && !panelOpen ? (
+              <BasicTooltip content="Show sidebar">
+                <Button
+                  variant="ghost"
+                  className="absolute top-2.5 right-3 size-8 shrink-0 md:hidden"
+                  aria-label="Show sidebar"
+                  onClick={toggleSidebar}
+                >
+                  <ArrowLeftFromLine className="size-4" />
+                </Button>
+              </BasicTooltip>
             ) : null}
-          </SandboxSideActions>
-          {!isSidebarVisible && !panelOpen ? (
-            <BasicTooltip content="Show sidebar">
-              <Button
-                variant="ghost"
-                className="absolute top-2.5 right-3 size-8 shrink-0 md:hidden"
-                aria-label="Show sidebar"
-                onClick={toggleSidebar}
-              >
-                <ArrowLeftFromLine className="size-4" />
-              </Button>
-            </BasicTooltip>
-          ) : null}
-        </>
-      }
-    >
-      <ResponsiveWorkspacePanels
-        isPanelOpen={panelOpen}
-        main={children}
-        mainSize={65}
-        panelSize={35}
-        panel={panelContent}
-      />
-    </WorkspaceSurface>
+          </>
+        }
+      >
+        <ResponsiveWorkspacePanels
+          isPanelOpen={panelOpen}
+          main={children}
+          mainSize={65}
+          panelSize={35}
+          panel={panelContent}
+        />
+      </WorkspaceSurface>
+    </OpenSessionTaskPanelContext.Provider>
   );
 }

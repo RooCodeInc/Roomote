@@ -9,10 +9,13 @@ import { ACP_ENVELOPE_EVENT_TYPES } from '@roomote/types';
 
 import { FastSessionTranscript } from './FastSessionTranscript';
 
-const { replyMutate, preparePromptAttachments } = vi.hoisted(() => ({
-  replyMutate: vi.fn(),
-  preparePromptAttachments: vi.fn(),
-}));
+const { replyMutate, preparePromptAttachments, openTaskPanel } = vi.hoisted(
+  () => ({
+    replyMutate: vi.fn(),
+    preparePromptAttachments: vi.fn(),
+    openTaskPanel: vi.fn(),
+  }),
+);
 
 vi.mock('@/trpc/client', () => ({
   useTRPCClient: () => ({
@@ -36,6 +39,24 @@ vi.mock('@/hooks/task-models/useLaunchTaskModels', () => ({
     data: { models: [], defaultModelId: undefined },
     isPending: false,
   }),
+}));
+
+vi.mock('./session-task-panel-context', () => ({
+  useOpenSessionTaskPanel: () => openTaskPanel,
+}));
+
+vi.mock('../../task/[taskId]/messages/acp/DelegatedTaskCard', () => ({
+  DelegatedTaskCard: ({
+    taskId,
+    onOpen,
+  }: {
+    taskId: string;
+    onOpen: (taskId: string) => void;
+  }) => (
+    <button type="button" onClick={() => onOpen(taskId)}>
+      Delegated task {taskId}
+    </button>
+  ),
 }));
 
 class FakeEventSource {
@@ -71,6 +92,7 @@ beforeEach(() => {
   preparePromptAttachments.mockImplementation(({ text }: { text: string }) =>
     Promise.resolve({ text }),
   );
+  openTaskPanel.mockReset();
   vi.stubGlobal('EventSource', FakeEventSource);
 });
 
@@ -277,6 +299,68 @@ describe('FastSessionTranscript', () => {
       'srcdoc',
       expect.stringContaining("default-src 'none'"),
     );
+  });
+
+  it('opens a launched child task in the session side panel', () => {
+    render(
+      <FastSessionTranscript
+        sessionId="session-1"
+        initialMessages={[
+          {
+            id: 'tool-1',
+            eventId: 'turn-1:tool:0',
+            turnId: 'turn-1',
+            turnSeq: 1,
+            ts: 2,
+            eventType: ACP_ENVELOPE_EVENT_TYPES.ToolResult,
+            role: 'tool',
+            contentBlocks: [],
+            metadata: { visibleInTranscript: true },
+            payload: {
+              toolCallId: 'turn-1:tool:0',
+              title: 'launch_task',
+              kind: 'tool',
+              status: 'completed',
+              isExecute: false,
+              isMcp: false,
+              mcpServerName: null,
+              mcpToolName: null,
+              toolName: 'launch_task',
+              command: null,
+              exitCode: null,
+              output: JSON.stringify({ success: true, taskId: 'child-1' }),
+              rawInput: { arguments: { prompt: 'Fix checkout' } },
+            },
+            source: 'web',
+            nativeSessionId: 'opencode-1',
+            nativeMessageId: null,
+            createdAt: new Date('2026-01-01T00:00:01.000Z'),
+          },
+          {
+            id: 'kickoff-child-1',
+            eventId: 'turn-1:assistant:child-kickoff',
+            turnId: 'turn-1',
+            turnSeq: 2,
+            ts: 3,
+            eventType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+            role: 'assistant',
+            contentBlocks: [
+              { type: 'text', text: 'I started the delegated task.' },
+            ],
+            metadata: { visibleInTranscript: true },
+            payload: { purpose: 'progress', kickoff: true },
+            source: 'web',
+            nativeSessionId: 'opencode-1',
+            nativeMessageId: null,
+            createdAt: new Date('2026-01-01T00:00:02.000Z'),
+          },
+        ]}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /Delegated task/ }));
+
+    expect(openTaskPanel).toHaveBeenCalledWith('child-1');
   });
 
   it('cold-loads one completed tool row before an intervening kickoff', () => {
