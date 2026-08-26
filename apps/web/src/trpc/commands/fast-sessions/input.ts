@@ -4,7 +4,17 @@ import { REASONING_EFFORT_VALUES } from '@roomote/types';
 
 const fastSessionMessageInputShape = {
   text: z.string().trim(),
-  images: z.array(z.string()).optional(),
+  images: z
+    .array(
+      z
+        .string()
+        .trim()
+        .regex(
+          /^data:(image\/[^;,]+);base64,(.+)$/i,
+          'Image must be a base64 data URL',
+        ),
+    )
+    .optional(),
   model: z.string().trim().min(1).nullable().optional(),
   reasoningEffort: z.enum(REASONING_EFFORT_VALUES).nullable().optional(),
 };
