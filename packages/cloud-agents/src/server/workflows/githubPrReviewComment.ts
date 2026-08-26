@@ -51,8 +51,10 @@ export function getMarkedSection({
 export function parseReviewSummaryMarkerSha(
   markerOrBody: string,
 ): string | undefined {
+  // Require at least a short-sha (7 hex chars) so a truncated or mangled
+  // marker cannot satisfy the prefix-based staleness checks downstream.
   const match = markerOrBody.match(
-    /<!--\s*roomote-review-summary\s+sha=([0-9a-f]+)/i,
+    /<!--\s*roomote-review-summary\s+sha=([0-9a-f]{7,})/i,
   );
 
   return match?.[1];
@@ -284,6 +286,20 @@ export function buildTerminalReviewSummaryBody({
 
 export type ReviewTerminalOutcome = 'completed' | 'failed' | 'canceled';
 
+const TERMINAL_REVIEW_STATUS_MESSAGES: Record<ReviewTerminalOutcome, string> = {
+  completed: 'Review complete.',
+  failed: 'Review could not be completed.',
+  canceled: 'Review was canceled.',
+};
+
+export function isSafetyNetReviewStatusLine(line: string): boolean {
+  const trimmed = line.trim();
+
+  return Object.values(TERMINAL_REVIEW_STATUS_MESSAGES).some((message) =>
+    trimmed.startsWith(message),
+  );
+}
+
 export function buildTerminalReviewStatus({
   outcome,
   taskUrl,
@@ -295,14 +311,8 @@ export function buildTerminalReviewStatus({
     href: taskUrl,
     label: 'See task',
   });
-  const message =
-    outcome === 'completed'
-      ? 'Review complete.'
-      : outcome === 'failed'
-        ? 'Review could not be completed.'
-        : 'Review was canceled.';
 
-  return `${message} ${link}`;
+  return `${TERMINAL_REVIEW_STATUS_MESSAGES[outcome]} ${link}`;
 }
 
 /**
@@ -326,13 +336,16 @@ export async function finalizeGithubPrReviewComment({
   prNumber: number;
   commentId?: number | null;
   terminalStatus: string;
-}): Promise<boolean> {
+}): Promise<{
+  finalized: boolean;
+  body?: string;
+}> {
   const fullName = `${owner}/${repo}`;
   const resolvedCommentId =
     commentId ?? (await getPrReviewCommentId({ repo: fullName, prNumber }));
 
   if (!resolvedCommentId) {
-    return false;
+    return { finalized: false };
   }
 
   let comment: { body: string };
@@ -343,7 +356,7 @@ export async function finalizeGithubPrReviewComment({
       commentId: resolvedCommentId,
     });
   } catch {
-    return false;
+    return { finalized: false };
   }
 
   const updatedBody = buildTerminalReviewSummaryBody({
@@ -353,7 +366,7 @@ export async function finalizeGithubPrReviewComment({
   });
 
   if (!updatedBody) {
-    return false;
+    return { finalized: false, body: comment.body };
   }
 
   await updateIssueComment(gitHubToken, {
@@ -363,5 +376,5 @@ export async function finalizeGithubPrReviewComment({
     body: updatedBody,
   });
 
-  return true;
+  return { finalized: true, body: updatedBody };
 }

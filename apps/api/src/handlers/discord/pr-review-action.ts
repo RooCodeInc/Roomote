@@ -6,6 +6,7 @@ import {
 import {
   claimPendingPrReviewAction,
   claimPendingPrReviewActionsForThread,
+  completePendingPrReviewActionDispatch,
   dispatchPrReviewFollowUp,
   enableAutoHandlePrReviewFeedback,
   findDiscordMappedUserId,
@@ -101,7 +102,10 @@ export async function handleDiscordPrReviewActionCallback(input: {
     return;
   }
 
-  const pending = await claimPendingPrReviewAction(input.nonce);
+  const pending = await claimPendingPrReviewAction(input.nonce, {
+    choice: input.choice,
+    actingUserId: mappedUserId ?? undefined,
+  });
 
   if (!pending) {
     if (input.interaction.message) {
@@ -132,7 +136,7 @@ export async function handleDiscordPrReviewActionCallback(input: {
   }
 
   try {
-    if (input.choice === 'auto') {
+    if (input.choice === 'auto' && !pending.canonicalDeliveryId) {
       await enableAutoHandlePrReviewFeedback({
         taskId: pending.taskId,
         repository: pending.repository,
@@ -149,6 +153,11 @@ export async function handleDiscordPrReviewActionCallback(input: {
       followUpPrompt: pending.followUpPrompt,
       actingUserId: mappedUserId!,
       providerUserId: user?.id,
+      ...(pending.canonicalDeliveryId
+        ? {
+            idempotencyKey: `pr-review-delivery:${pending.canonicalDeliveryId}`,
+          }
+        : {}),
     });
 
     if (dispatched.outcome === 'unavailable') {
@@ -159,6 +168,8 @@ export async function handleDiscordPrReviewActionCallback(input: {
       );
       return;
     }
+
+    await completePendingPrReviewActionDispatch(pending, dispatched.runId);
 
     await replyToOffer(
       input.choice === 'auto'

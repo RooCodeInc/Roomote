@@ -346,7 +346,7 @@ github.post('/', async (c) => {
         await syncPrStatus(
           payload.repository.full_name,
           payload.pull_request.number,
-          'open',
+          payload.pull_request.draft ? 'draft' : 'open',
         );
         syncPullRequestFact({
           githubRepoId: payload.repository.id,
@@ -610,7 +610,8 @@ github.post('/', async (c) => {
       recordWebhook(id, `${name}.${payload.action}`, payload, async () => {
         const status = payload.pull_request.merged ? 'merged' : 'closed';
 
-        syncPrStatus(
+        await updateTaskPrStatus(
+          'github',
           payload.repository.full_name,
           payload.pull_request.number,
           status,

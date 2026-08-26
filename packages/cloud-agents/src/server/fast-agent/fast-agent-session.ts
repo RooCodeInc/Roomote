@@ -13,10 +13,12 @@ import {
 import type { RunStatus } from '@roomote/types';
 import type { FastAgentConversation } from './fast-agent-conversation';
 import { fastAgentConversationRepository } from './fast-agent-conversation-repository';
+import type { FastAgentMessageWrite } from './fast-agent-conversation-repository';
 
 type FastAgentSessionRecord = {
   id: string;
   compatibilityMessages: ModelMessage[];
+  openCodeSessionId: string | null;
 };
 
 export type FastAgentActiveTask = {
@@ -104,5 +106,42 @@ export async function appendFastAgentVisibleMessages({
   await fastAgentConversationRepository.appendVisibleMessages({
     conversationId: sessionId,
     messages,
+  });
+}
+
+export async function upsertFastAgentMessage({
+  sessionId,
+  message,
+}: {
+  sessionId: string;
+  message: FastAgentMessageWrite;
+}): Promise<void> {
+  let lastError: unknown;
+
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      await fastAgentConversationRepository.upsertMessage({
+        conversationId: sessionId,
+        message,
+      });
+      return;
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  throw lastError;
+}
+
+export async function setFastAgentOpenCodeSession({
+  sessionId,
+  openCodeSessionId,
+}: {
+  sessionId: string;
+  openCodeSessionId: string;
+}): Promise<void> {
+  await fastAgentConversationRepository.setOpenCodeSession({
+    conversationId: sessionId,
+    openCodeSessionId,
   });
 }

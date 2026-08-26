@@ -76,6 +76,7 @@ const state = vi.hoisted(() => ({
           reviewAllPullRequestAuthors: false,
           reviewOnCommit: true,
           reviewDraftPrs: true,
+          publishGithubCheck: false,
           relayReviewResultsToTask: false,
           relayUsers: [],
         },
@@ -100,6 +101,10 @@ const state = vi.hoisted(() => ({
         managerStatsFrequency: 'off' as const,
         managerStatsSlackChannelId: null,
         managerStatsDiscordChannelId: null,
+        providerUsageLimitFrequency: 'every_hour' as const,
+        providerUsageLimitThreshold: 85,
+        providerUsageLimitSlackChannelId: null,
+        providerUsageLimitDiscordChannelId: null,
         sentryTriageFrequency: 'off' as const,
         sentryTriageSlackChannelId: null,
         sentryTriageDiscordChannelId: null,
@@ -142,6 +147,7 @@ const state = vi.hoisted(() => ({
         },
         managerSlackChannel: '#roomote-managers',
         managerStatsSlackChannel: null,
+        providerUsageLimitSlackChannel: null,
         suggesterSlackChannel: null,
         announcerSlackChannel: null,
         platformIssueSlackChannel: null,
@@ -157,6 +163,7 @@ const state = vi.hoisted(() => ({
         channelAutoStartSlackChannels: [],
         managerSlackChannel: null,
         managerStatsSlackChannel: null,
+        providerUsageLimitSlackChannel: null,
         suggesterSlackChannel: null,
         announcerSlackChannel: null,
         platformIssueSlackChannel: null,
@@ -175,12 +182,14 @@ const state = vi.hoisted(() => ({
         reviewAllPullRequestAuthors: false,
         reviewOnCommit: true,
         reviewDraftPrs: true,
+        publishGithubCheck: false,
         relayReviewResultsToTask: false,
         relayUsers: [],
       },
       resolvedDestinations: Object.fromEntries(
         [
           'manager_stats',
+          'provider_usage_limit',
           'sentry_triage',
           'dependabot_triage',
           'codeql_triage',
@@ -571,6 +580,7 @@ describe('AutomationsSettings', () => {
     state.settingsQuery.data.settings.reviewer.reviewAllPullRequestAuthors = false;
     state.settingsQuery.data.reviewer.reviewOnCommit = true;
     state.settingsQuery.data.reviewer.reviewDraftPrs = true;
+    state.settingsQuery.data.reviewer.publishGithubCheck = false;
     state.settingsQuery.data.settings.reviewCodeInstructions = null;
     state.settingsQuery.data.reviewer.relayReviewResultsToTask = false;
     state.settingsQuery.data.reviewer.relayUsers = [];
@@ -601,6 +611,27 @@ describe('AutomationsSettings', () => {
       }),
     ).toBeInTheDocument();
     expect(screen.queryByText('Beta')).not.toBeInTheDocument();
+  });
+
+  it('shows provider usage alert enablement, channel destination, and threshold controls', async () => {
+    render(<AutomationsSettings />);
+
+    fireEvent.click(
+      await screen.findByRole('button', {
+        name: 'Configure Inference Provider Usage Alerts',
+      }),
+    );
+
+    expect(screen.getByRole('switch', { name: 'Enabled' })).toBeChecked();
+    expect(
+      screen.getByLabelText('Post alerts to this Slack channel'),
+    ).toBeInTheDocument();
+    const thresholdSlider = screen.getByRole('slider', {
+      name: 'Provider usage alert threshold',
+    });
+    expect(thresholdSlider).toHaveAttribute('aria-valuemin', '5');
+    expect(thresholdSlider).toHaveAttribute('aria-valuenow', '85');
+    expect(screen.getByText('85%')).toBeInTheDocument();
   });
 
   it('configures Call Roomote via emoji with a name and instructions', async () => {
@@ -636,6 +667,25 @@ describe('AutomationsSettings', () => {
     expect(screen.getByLabelText('Additional instructions')).toHaveValue(
       'Focus on authorization boundaries.',
     );
+  });
+
+  it('explains that GitHub controls whether the review check is required', async () => {
+    state.settingsQuery.data.reviewer.enabled = true;
+    state.settingsQuery.data.settings.reviewer.enabled = true;
+
+    render(<AutomationsSettings />);
+    await openReviewerCard();
+
+    expect(
+      screen.getByRole('switch', {
+        name: 'Publish review results as a GitHub check',
+      }),
+    ).not.toBeChecked();
+    expect(
+      screen.getByText(
+        'GitHub branch protection or rulesets control whether this check is required for merging.',
+      ),
+    ).toBeVisible();
   });
 
   it('shows per-automation Slack destinations without requiring a manager channel', async () => {
@@ -917,6 +967,10 @@ describe('AutomationsSettings', () => {
 
   it('does not add task history to non-running built-in configuration', () => {
     expect(getAutomationHistoryHref('managerChannel')).toBeNull();
+  });
+
+  it('does not add task history to provider usage alerts', () => {
+    expect(getAutomationHistoryHref('providerUsageLimit')).toBeNull();
   });
 
   it('filters available automations by category and provider-aware search', async () => {

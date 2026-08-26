@@ -279,7 +279,7 @@ export async function updateSlackLiveTaskStream(
   const state = getCardState(context);
 
   if (event.type === 'turn_started') {
-    if (state.status === 'error') {
+    if (state.status === 'error' || !shouldProcessEvent(event, context)) {
       return;
     }
     if (!state.settled && state.status !== 'complete') {

@@ -1,6 +1,11 @@
 import { z } from 'zod';
 
-export const fastAgentSurfaces = ['slack', 'discord', 'automation'] as const;
+export const fastAgentSurfaces = [
+  'slack',
+  'discord',
+  'automation',
+  'web',
+] as const;
 export const fastAgentSurfaceSchema = z.enum(fastAgentSurfaces);
 
 export type FastAgentSurface = z.infer<typeof fastAgentSurfaceSchema>;
@@ -35,6 +40,10 @@ export const fastAgentConversationSchema = z.discriminatedUnion('surface', [
   }),
   z.object({
     surface: z.literal('automation'),
+    ...fastAgentConversationIdentitySchema,
+  }),
+  z.object({
+    surface: z.literal('web'),
     ...fastAgentConversationIdentitySchema,
   }),
 ]);

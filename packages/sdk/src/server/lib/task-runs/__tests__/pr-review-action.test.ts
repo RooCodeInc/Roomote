@@ -3,8 +3,13 @@ const {
   mockGet,
   mockSrem,
   mockFindManySlackInstallations,
+  mockFindFirstTaskPullRequest,
   mockUpdateReturning,
   mockUpdate,
+  mockUpsertPreference,
+  mockFindPreference,
+  mockRetireCanonical,
+  mockAttachCanonical,
 } = vi.hoisted(() => {
   const mockUpdateReturning = vi.fn();
   const mockUpdateWhere = vi.fn(() => ({ returning: mockUpdateReturning }));
@@ -14,8 +19,13 @@ const {
     mockGet: vi.fn(),
     mockSrem: vi.fn(),
     mockFindManySlackInstallations: vi.fn(),
+    mockFindFirstTaskPullRequest: vi.fn(),
     mockUpdateReturning,
     mockUpdate: vi.fn(() => ({ set: mockUpdateSet })),
+    mockUpsertPreference: vi.fn(),
+    mockFindPreference: vi.fn(),
+    mockRetireCanonical: vi.fn(),
+    mockAttachCanonical: vi.fn(),
   };
 });
 
@@ -35,6 +45,15 @@ vi.mock('@roomote/db/server', async () => {
 
   return {
     ...actual,
+    attachCanonicalPrReviewActionMessage: (...args: unknown[]) =>
+      mockAttachCanonical(...args),
+    claimCanonicalPrReviewAction: vi.fn().mockResolvedValue(null),
+    retireCanonicalPrReviewActionsForDestination: (...args: unknown[]) =>
+      mockRetireCanonical(...args),
+    upsertPrReviewAutoPreference: (...args: unknown[]) =>
+      mockUpsertPreference(...args),
+    findPrReviewAutoPreference: (...args: unknown[]) =>
+      mockFindPreference(...args),
     db: {
       update: mockUpdate,
       query: {
@@ -42,17 +61,22 @@ vi.mock('@roomote/db/server', async () => {
           findMany: (...args: unknown[]) =>
             mockFindManySlackInstallations(...args),
         },
+        taskPullRequests: {
+          findFirst: (...args: unknown[]) =>
+            mockFindFirstTaskPullRequest(...args),
+        },
       },
     },
   };
 });
 
 import {
-  attachPendingPrReviewActionMessage,
+  attachPendingPrReviewActionMessageWithRetirement,
   claimPendingPrReviewAction,
   claimPendingPrReviewActionsForThread,
   enableAutoHandlePrReviewFeedback,
   setPendingPrReviewAction,
+  findAutoHandlePrReviewFeedbackPreference,
 } from '../pr-review-action';
 
 describe('PR review action state', () => {
@@ -61,7 +85,12 @@ describe('PR review action state', () => {
     mockGet.mockResolvedValue(null);
     mockSrem.mockResolvedValue(1);
     mockFindManySlackInstallations.mockResolvedValue([{ teamId: 'T1' }]);
+    mockFindFirstTaskPullRequest.mockResolvedValue(null);
     mockUpdateReturning.mockResolvedValue([{ id: 'link-1' }]);
+    mockUpsertPreference.mockResolvedValue(undefined);
+    mockFindPreference.mockResolvedValue(null);
+    mockRetireCanonical.mockResolvedValue([]);
+    mockAttachCanonical.mockResolvedValue(false);
   });
 
   it('creates and orders each nonce atomically without overwriting retries', async () => {
@@ -185,11 +214,11 @@ describe('PR review action state', () => {
         prNumber: 42,
       }),
     );
-    mockEval.mockResolvedValue([]);
+    mockEval.mockResolvedValue([1]);
 
     await expect(
-      attachPendingPrReviewActionMessage('nonce-1', 'message-1'),
-    ).resolves.toEqual([]);
+      attachPendingPrReviewActionMessageWithRetirement('nonce-1', 'message-1'),
+    ).resolves.toEqual({ attached: true, superseded: [] });
 
     expect(mockEval).toHaveBeenCalledWith(
       expect.stringContaining("redis.call('get', KEYS[1])"),
@@ -224,6 +253,7 @@ describe('PR review action state', () => {
       }),
     );
     mockEval.mockResolvedValue([
+      1,
       JSON.stringify({
         nonce: 'nonce-old',
         provider: 'slack',
@@ -237,13 +267,19 @@ describe('PR review action state', () => {
     ]);
 
     await expect(
-      attachPendingPrReviewActionMessage('nonce-new', 'message-new'),
-    ).resolves.toEqual([
-      expect.objectContaining({
-        nonce: 'nonce-old',
-        messageId: 'message-old',
-      }),
-    ]);
+      attachPendingPrReviewActionMessageWithRetirement(
+        'nonce-new',
+        'message-new',
+      ),
+    ).resolves.toEqual({
+      attached: true,
+      superseded: [
+        expect.objectContaining({
+          nonce: 'nonce-old',
+          messageId: 'message-old',
+        }),
+      ],
+    });
 
     expect(mockEval.mock.calls[0]?.[3]).toBe(
       'pr-review-action:thread:slack:T1:C1:111.222',
@@ -266,18 +302,66 @@ describe('PR review action state', () => {
     };
     mockGet.mockResolvedValue(JSON.stringify(lateOffer));
     mockEval.mockResolvedValue([
+      1,
       JSON.stringify({ ...lateOffer, messageId: 'message-old' }),
     ]);
 
     await expect(
-      attachPendingPrReviewActionMessage('nonce-old', 'message-old'),
-    ).resolves.toEqual([
-      expect.objectContaining({
-        nonce: 'nonce-old',
-        messageId: 'message-old',
-        retired: true,
-      }),
-    ]);
+      attachPendingPrReviewActionMessageWithRetirement(
+        'nonce-old',
+        'message-old',
+      ),
+    ).resolves.toEqual({
+      attached: true,
+      superseded: [
+        expect.objectContaining({
+          nonce: 'nonce-old',
+          messageId: 'message-old',
+          retired: true,
+        }),
+      ],
+    });
+  });
+
+  it('retires legacy offers after a canonical attachment succeeds', async () => {
+    const context = {
+      nonce: '00000000-0000-4000-8000-000000000001',
+      canonicalDeliveryId: '00000000-0000-4000-8000-000000000001',
+      provider: 'discord' as const,
+      taskId: 'task-1',
+      repository: 'owner/repo',
+      prNumber: 42,
+      prUrl: 'https://github.com/owner/repo/pull/42',
+      channelId: 'channel-1',
+      threadId: 'thread-1',
+      followUpPrompt: 'Address the feedback.',
+    };
+    const legacy = {
+      ...context,
+      nonce: 'legacy-nonce',
+      canonicalDeliveryId: undefined,
+      messageId: 'legacy-message',
+    };
+    mockAttachCanonical.mockResolvedValue(true);
+    mockEval.mockResolvedValue([JSON.stringify(legacy)]);
+
+    await expect(
+      attachPendingPrReviewActionMessageWithRetirement(
+        context.nonce,
+        'canonical-message',
+        { leaseToken: 'lease-token', context },
+      ),
+    ).resolves.toEqual({
+      attached: true,
+      superseded: [expect.objectContaining({ nonce: 'legacy-nonce' })],
+    });
+
+    expect(mockEval.mock.calls[0]?.[0]).toContain(
+      'pending.repository == context.repository',
+    );
+    expect(mockEval.mock.calls[0]?.[2]).toBe(
+      'pr-review-action:thread:discord:channel-1:thread-1',
+    );
   });
 
   it('claims every indexed offer through one atomic script', async () => {
@@ -322,7 +406,9 @@ describe('PR review action state', () => {
   });
 
   it('fails when auto-handling cannot be persisted to the linked PR', async () => {
-    mockUpdateReturning.mockResolvedValue([]);
+    mockUpsertPreference.mockRejectedValue(
+      new Error('linked pull request was not found'),
+    );
 
     await expect(
       enableAutoHandlePrReviewFeedback({
@@ -332,5 +418,39 @@ describe('PR review action state', () => {
         userId: 'user-1',
       }),
     ).rejects.toThrow('linked pull request was not found');
+  });
+
+  it('resolves auto-handling across task links for the same provider PR', async () => {
+    mockFindFirstTaskPullRequest.mockResolvedValue({
+      taskId: 'parent-task',
+      autoHandleFeedbackByUserId: 'user-1',
+    });
+    mockFindPreference.mockResolvedValue({
+      taskId: 'parent-task',
+      userId: 'user-1',
+      destinationKey: null,
+    });
+
+    await enableAutoHandlePrReviewFeedback({
+      taskId: 'parent-task',
+      repository: 'owner/repo',
+      prNumber: 42,
+      userId: 'user-1',
+    });
+
+    await expect(
+      findAutoHandlePrReviewFeedbackPreference({
+        sourceControlProvider: 'github',
+        repository: 'owner/repo',
+        prNumber: 42,
+      }),
+    ).resolves.toEqual({
+      taskId: 'parent-task',
+      userId: 'user-1',
+      destinationKey: null,
+    });
+    expect(mockUpsertPreference.mock.invocationCallOrder[0]).toBeLessThan(
+      mockFindPreference.mock.invocationCallOrder[0]!,
+    );
   });
 });

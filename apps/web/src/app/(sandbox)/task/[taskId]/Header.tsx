@@ -14,6 +14,7 @@ import {
   Input,
 } from '@/components/system';
 import { PullRequestBadge, WorkspaceBadge } from '@/components/sandbox';
+import { WorkspaceHeader } from '@/components/layout';
 
 import { useTRPC } from '@/trpc/client';
 import { useSandboxLayout } from '../../use-sandbox-layout';
@@ -151,8 +152,8 @@ export const Header = ({ session: { taskRun, task, taskId } }: HeaderProps) => {
   const title = task?.title || 'Untitled task';
 
   return (
-    <div className="flex shrink-0 items-center overflow-hidden py-3 border-b-2 border-card @container">
-      <div className="relative flex flex-col @[600px]:flex-row min-w-0 max-w-4xl mx-auto flex-1 px-4 @[600px]:items-center gap-2 @[600px]:gap-4">
+    <>
+      <WorkspaceHeader>
         <h1
           role="button"
           tabIndex={0}
@@ -182,7 +183,7 @@ export const Header = ({ session: { taskRun, task, taskId } }: HeaderProps) => {
             <ArrowLeftFromLine className="size-4" />
           </Button>
         )}
-      </div>
+      </WorkspaceHeader>
       <Dialog open={isRenameDialogOpen} onOpenChange={setIsRenameDialogOpen}>
         <DialogContent size="sm">
           <DialogHeader>
@@ -218,6 +219,6 @@ export const Header = ({ session: { taskRun, task, taskId } }: HeaderProps) => {
           </form>
         </DialogContent>
       </Dialog>
-    </div>
+    </>
   );
 };

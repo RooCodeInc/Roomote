@@ -1,4 +1,4 @@
-import type { SlackBlock } from '@roomote/types';
+import type { SlackBlock, SlackTableCell } from '@roomote/types';
 
 import { convertMarkdownToSlack } from './markdown-converter';
 
@@ -12,14 +12,6 @@ const MAX_SECTION_TEXT_LENGTH = 2900;
 const MAX_TABLE_ROWS = 100;
 const MAX_TABLE_COLUMNS = 20;
 const MAX_TABLE_CHARACTERS = 10_000;
-
-type SlackTableCell = {
-  type: 'rich_text';
-  elements: Array<{
-    type: 'rich_text_section';
-    elements: Array<Record<string, unknown>>;
-  }>;
-};
 
 function splitTableRow(line: string): string[] {
   const trimmed = line.trim().replace(/^\|/, '').replace(/\|$/, '');
@@ -165,12 +157,25 @@ function inlineRichTextElements(
 }
 
 function buildTableCell(value: string, header: boolean): SlackTableCell {
+  const elements = inlineRichTextElements(value, header ? { bold: true } : {});
+  if (elements.length === 0) {
+    return { type: 'raw_text', text: ' ' };
+  }
+  if (
+    !header &&
+    elements.length === 1 &&
+    elements[0]?.type === 'text' &&
+    !elements[0].style
+  ) {
+    return { type: 'raw_text', text: value };
+  }
+
   return {
     type: 'rich_text',
     elements: [
       {
         type: 'rich_text_section',
-        elements: inlineRichTextElements(value, header ? { bold: true } : {}),
+        elements,
       },
     ],
   };
@@ -376,10 +381,12 @@ export function buildAutomationResultBlocks(params: {
   subtitle?: { type: string; text: string };
   taskUrl?: string | null;
   linkedPrUrls?: string[];
+  additionalActions?: Record<string, unknown>[];
+  configureLabel?: string;
 }): SlackBlock[] {
-  const actionElements: Record<string, unknown>[] = [];
+  const actionElements = [...(params.additionalActions ?? [])];
   const linkedPrUrls = params.linkedPrUrls ?? [];
-  const reservedActions = params.taskUrl ? 1 : 0;
+  const reservedActions = actionElements.length + (params.taskUrl ? 1 : 0);
 
   for (const [index, linkedPrUrl] of linkedPrUrls
     .slice(0, 25 - reservedActions)
@@ -407,7 +414,11 @@ export function buildAutomationResultBlocks(params: {
   actionElements.push({
     type: 'button',
     action_id: 'late_bound_automation_configure',
-    text: { type: 'plain_text', text: 'Configure', emoji: false },
+    text: {
+      type: 'plain_text',
+      text: params.configureLabel ?? 'Configure',
+      emoji: false,
+    },
     url: params.configureUrl,
   });
   const configureAction = actionElements.pop();

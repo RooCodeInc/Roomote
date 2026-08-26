@@ -93,6 +93,13 @@ export function buildManagerSlackSettingsUrl(
   return buildAutomationsSettingsUrl(hash).toString();
 }
 
+export function buildModelsSettingsUrl() {
+  return new URL(
+    '/settings/models',
+    process.env.R_APP_URL || DEFAULT_LOCAL_R_APP_URL,
+  ).toString();
+}
+
 export function buildManagerSlackFooterText(
   hash = MANAGER_CHANNEL_SETTINGS_HASH,
 ) {

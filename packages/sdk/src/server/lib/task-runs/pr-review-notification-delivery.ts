@@ -863,7 +863,8 @@ function sanitizeReviewStatus(status: string): string {
 
 function getReviewSummaryHeadSha(body: string): string | null {
   return (
-    body.match(/<!--\s*roomote-review-summary\s+sha=([0-9a-f]+)/i)?.[1] ?? null
+    body.match(/<!--\s*roomote-review-summary\s+sha=([0-9a-f]{7,})/i)?.[1] ??
+    null
   );
 }
 

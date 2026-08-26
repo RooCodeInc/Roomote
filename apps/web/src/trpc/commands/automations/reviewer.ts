@@ -36,6 +36,7 @@ export interface ReviewerBackgroundAgentSettings {
   reviewAllPullRequestAuthors: boolean;
   reviewOnCommit: boolean;
   reviewDraftPrs: boolean;
+  publishGithubCheck: boolean;
   relayReviewResultsToTask: boolean;
   relayUsers: ReviewerRelayUser[];
   approvePr: boolean;
@@ -82,6 +83,9 @@ export function mapReviewerSettingsToBackgroundSettings(
       settings.reviewOnCommit ?? DEFAULT_PR_REVIEW_SETTINGS.reviewOnCommit,
     reviewDraftPrs:
       settings.reviewDraftPrs ?? DEFAULT_PR_REVIEW_SETTINGS.reviewDraftPrs,
+    publishGithubCheck:
+      settings.publishGithubCheck ??
+      DEFAULT_PR_REVIEW_SETTINGS.publishGithubCheck,
     relayReviewResultsToTask:
       settings.relayReviewResultsToTask ??
       DEFAULT_PR_REVIEW_SETTINGS.relayReviewResultsToTask,

@@ -14,7 +14,9 @@ const {
   recordLlmUsageMock,
   sessionAbortMock,
   spawnMock,
+  sessionChildrenMock,
   sessionCreateMock,
+  sessionMessagesMock,
   sessionPromptMock,
 } = vi.hoisted(() => ({
   createOpencodeClientMock: vi.fn(),
@@ -27,7 +29,9 @@ const {
   recordLlmUsageMock: vi.fn(),
   sessionAbortMock: vi.fn(),
   spawnMock: vi.fn(),
+  sessionChildrenMock: vi.fn(),
   sessionCreateMock: vi.fn(),
+  sessionMessagesMock: vi.fn(),
   sessionPromptMock: vi.fn(),
 }));
 
@@ -138,7 +142,9 @@ describe('resolveOpenCodeSmallModel', () => {
       },
       session: {
         abort: sessionAbortMock,
+        children: sessionChildrenMock,
         create: sessionCreateMock,
+        messages: sessionMessagesMock,
         prompt: sessionPromptMock,
       },
     });
@@ -147,6 +153,8 @@ describe('resolveOpenCodeSmallModel', () => {
       data: { id: 'session-1' },
       error: undefined,
     });
+    sessionChildrenMock.mockResolvedValue({ data: [], error: undefined });
+    sessionMessagesMock.mockResolvedValue({ data: [], error: undefined });
     configProvidersMock.mockResolvedValue({
       data: { providers: [], default: {} },
       error: undefined,
@@ -293,7 +301,11 @@ describe('resolveOpenCodeSmallModel', () => {
       await subagentReady;
       return {
         data: {
-          info: {},
+          info: {
+            id: 'message-1',
+            sessionID: 'session-1',
+            time: { created: 100, completed: 200 },
+          },
           parts: [{ type: 'text', text: 'native tool turn complete' }],
         },
         error: undefined,
@@ -307,6 +319,7 @@ describe('resolveOpenCodeSmallModel', () => {
     const onSessionReady = vi.fn();
     const onModelResolved = vi.fn();
     const onPromptStarted = vi.fn();
+    const onMessageCompleted = vi.fn();
     const onSubagentSessionReady = vi.fn(() => markSubagentReady());
     const session: { id?: string } = {};
 
@@ -329,6 +342,7 @@ describe('resolveOpenCodeSmallModel', () => {
             send_chat_reply: true,
           },
           onModelResolved,
+          onMessageCompleted,
           onPromptStarted,
           onSessionReady,
           onSubagentSessionReady,
@@ -340,6 +354,12 @@ describe('resolveOpenCodeSmallModel', () => {
 
     expect(session.id).toBe('session-1');
     expect(onModelResolved).toHaveBeenCalledWith('openrouter/openai/gpt-5.4');
+    expect(onMessageCompleted).toHaveBeenCalledWith({
+      id: 'message-1',
+      sessionId: 'session-1',
+      createdAtMs: 100,
+      completedAtMs: 200,
+    });
     expect(onPromptStarted).toHaveBeenCalledOnce();
     expect(onSessionReady).toHaveBeenCalledWith('session-1');
     expect(onSubagentSessionReady).toHaveBeenCalledWith('subagent-session-1');
@@ -444,6 +464,363 @@ describe('resolveOpenCodeSmallModel', () => {
       messageCompletedAt: new Date('2026-08-21T10:00:02.000Z'),
       details: { surface: 'fast_agent' },
     });
+  });
+
+  it('records completed parent and advisor/judge messages once from a Fast session tree', async () => {
+    mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
+      R_MODEL: 'openrouter/openai/gpt-5.4',
+    });
+    let markEventsComplete!: () => void;
+    const eventsComplete = new Promise<void>((resolve) => {
+      markEventsComplete = resolve;
+    });
+    const completedTime = Date.parse('2026-08-21T10:00:02.000Z');
+    const usageInfo = (
+      id: string,
+      sessionID: string,
+      agent: string,
+      cost: number,
+    ) => ({
+      id,
+      sessionID,
+      parentID: 'message-user-current',
+      role: 'assistant' as const,
+      providerID: 'openrouter',
+      modelID: 'openai/gpt-5.4',
+      agent,
+      tokens: {
+        input: 100,
+        output: 20,
+        reasoning: 5,
+        cache: { read: 10, write: 0 },
+      },
+      cost,
+      time: { created: completedTime - 1_000, completed: completedTime },
+    });
+    const intermediateInfo = usageInfo(
+      'message-parent-intermediate',
+      'session-1',
+      'build',
+      0.001,
+    );
+    eventSubscribeMock.mockResolvedValue({
+      stream: (async function* () {
+        yield {
+          type: 'message.updated',
+          properties: { info: intermediateInfo },
+        };
+        yield {
+          type: 'message.updated',
+          properties: { info: intermediateInfo },
+        };
+        yield {
+          type: 'session.created',
+          properties: {
+            sessionID: 'session-advisor',
+            info: { id: 'session-advisor', parentID: 'session-1' },
+          },
+        };
+        yield {
+          type: 'message.updated',
+          properties: {
+            info: usageInfo(
+              'message-advisor',
+              'session-advisor',
+              'advisor',
+              0.002,
+            ),
+          },
+        };
+        yield {
+          type: 'session.created',
+          properties: {
+            sessionID: 'session-judge',
+            info: { id: 'session-judge', parentID: 'session-1' },
+          },
+        };
+        yield {
+          type: 'message.updated',
+          properties: {
+            info: usageInfo('message-judge', 'session-judge', 'judge', 0.003),
+          },
+        };
+        yield {
+          type: 'message.updated',
+          properties: {
+            info: usageInfo(
+              'message-parent-final',
+              'session-1',
+              'build',
+              0.004,
+            ),
+          },
+        };
+        markEventsComplete();
+      })(),
+    });
+    sessionPromptMock.mockImplementation(async () => {
+      await eventsComplete;
+      return {
+        data: {
+          info: usageInfo('message-parent-final', 'session-1', 'build', 0.004),
+          parts: [{ type: 'text', text: 'tracked answer' }],
+        },
+        error: undefined,
+      };
+    });
+    const { generateTrackedNonTaskTextInOpenCodeSession } =
+      await import('../non-task-provider-usage.js');
+
+    await generateTrackedNonTaskTextInOpenCodeSession(
+      {
+        surface: 'fast_agent',
+        taskId: 'task-1',
+        userId: 'user-1',
+        prompt: 'Use both review subagents.',
+      },
+      {},
+      {
+        directory: '/tmp/roomote-fast-native-test',
+        trackSessionTreeUsage: true,
+        tools: { '*': false, task: true },
+      },
+    );
+
+    expect(recordLlmUsageMock).toHaveBeenCalledTimes(4);
+    expect(sessionMessagesMock).not.toHaveBeenCalled();
+    expect(
+      recordLlmUsageMock.mock.calls.map(([usage]) => ({
+        eventKey: usage.eventKey,
+        taskId: usage.taskId,
+        userId: usage.userId,
+        source: usage.source,
+        agent: usage.agent,
+      })),
+    ).toEqual([
+      {
+        eventKey: 'non-task:fast_agent:session-1:message-parent-intermediate',
+        taskId: 'task-1',
+        userId: 'user-1',
+        source: 'fast_agent',
+        agent: 'build',
+      },
+      {
+        eventKey: 'non-task:fast_agent:session-advisor:message-advisor',
+        taskId: 'task-1',
+        userId: 'user-1',
+        source: 'fast_agent',
+        agent: 'advisor',
+      },
+      {
+        eventKey: 'non-task:fast_agent:session-judge:message-judge',
+        taskId: 'task-1',
+        userId: 'user-1',
+        source: 'fast_agent',
+        agent: 'judge',
+      },
+      {
+        eventKey: 'non-task:fast_agent:session-1:message-parent-final',
+        taskId: 'task-1',
+        userId: 'user-1',
+        source: 'fast_agent',
+        agent: 'build',
+      },
+    ]);
+  });
+
+  it('bounds fallback reconciliation to the current Fast turn', async () => {
+    mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
+      R_MODEL: 'openrouter/openai/gpt-5.4',
+    });
+    const completedTime = Date.parse('2026-08-21T10:00:02.000Z');
+    const usageInfo = (
+      id: string,
+      sessionID: string,
+      parentID: string,
+      agent: string,
+    ) => ({
+      id,
+      sessionID,
+      parentID,
+      role: 'assistant' as const,
+      providerID: 'openrouter',
+      modelID: 'openai/gpt-5.4',
+      agent,
+      tokens: {
+        input: 100,
+        output: 20,
+        reasoning: 5,
+        cache: { read: 10, write: 0 },
+      },
+      cost: 0.001,
+      time: { created: completedTime - 1_000, completed: completedTime },
+    });
+    eventSubscribeMock.mockResolvedValue({
+      stream: (async function* () {
+        yield {
+          type: 'session.created',
+          properties: {
+            sessionID: 'session-advisor-current',
+            info: { id: 'session-advisor-current', parentID: 'session-1' },
+          },
+        };
+        await new Promise<void>(() => undefined);
+      })(),
+    });
+    const finalInfo = usageInfo(
+      'message-parent-final-current',
+      'session-1',
+      'message-user-current',
+      'build',
+    );
+    sessionPromptMock.mockResolvedValue({
+      data: {
+        info: finalInfo,
+        parts: [{ type: 'text', text: 'tracked answer' }],
+      },
+      error: undefined,
+    });
+    sessionMessagesMock.mockImplementation(
+      async ({ sessionID, limit }: { sessionID: string; limit?: number }) => ({
+        data:
+          sessionID === 'session-1'
+            ? [
+                {
+                  info: usageInfo(
+                    'message-parent-historical',
+                    'session-1',
+                    'message-user-historical',
+                    'build',
+                  ),
+                  parts: [],
+                },
+                {
+                  info: usageInfo(
+                    'message-parent-intermediate-current',
+                    'session-1',
+                    'message-user-current',
+                    'build',
+                  ),
+                  parts: [],
+                },
+                { info: finalInfo, parts: [] },
+              ]
+            : sessionID === 'session-judge-current'
+              ? [
+                  {
+                    info: usageInfo(
+                      'message-judge-current',
+                      'session-judge-current',
+                      'message-judge-user',
+                      'judge',
+                    ),
+                    parts: [],
+                  },
+                ]
+              : [
+                  {
+                    info: usageInfo(
+                      'message-advisor-current',
+                      'session-advisor-current',
+                      'message-advisor-user',
+                      'advisor',
+                    ),
+                    parts: [],
+                  },
+                ],
+        error: undefined,
+        limit,
+      }),
+    );
+    const currentTurnCreatedAt = Date.now() + 60_000;
+    sessionChildrenMock.mockResolvedValue({
+      data: [
+        {
+          id: 'session-advisor-current',
+          parentID: 'session-1',
+          time: {
+            created: currentTurnCreatedAt,
+            updated: currentTurnCreatedAt,
+          },
+        },
+        {
+          id: 'session-judge-current',
+          parentID: 'session-1',
+          time: {
+            created: currentTurnCreatedAt,
+            updated: currentTurnCreatedAt,
+          },
+        },
+        {
+          id: 'session-advisor-historical',
+          parentID: 'session-1',
+          time: { created: completedTime, updated: completedTime },
+        },
+      ],
+      error: undefined,
+    });
+    const { generateTrackedNonTaskTextInOpenCodeSession } =
+      await import('../non-task-provider-usage.js');
+
+    await generateTrackedNonTaskTextInOpenCodeSession(
+      {
+        surface: 'fast_agent',
+        userId: 'user-current',
+        prompt: 'Use an advisor.',
+      },
+      {},
+      {
+        directory: '/tmp/roomote-fast-native-test',
+        onSubagentSessionReady: vi.fn(),
+        trackSessionTreeUsage: true,
+        tools: { '*': false, task: true },
+      },
+    );
+
+    expect(sessionChildrenMock).toHaveBeenCalledWith(
+      { sessionID: 'session-1', directory: '/tmp/roomote-fast-native-test' },
+      { signal: expect.any(AbortSignal) },
+    );
+    expect(sessionMessagesMock).toHaveBeenCalledTimes(3);
+    expect(sessionMessagesMock).toHaveBeenCalledWith(
+      {
+        sessionID: 'session-1',
+        directory: '/tmp/roomote-fast-native-test',
+        limit: 100,
+      },
+      { signal: expect.any(AbortSignal) },
+    );
+    expect(sessionMessagesMock).not.toHaveBeenCalledWith(
+      expect.objectContaining({ sessionID: 'session-advisor-historical' }),
+      expect.anything(),
+    );
+    expect(recordLlmUsageMock).toHaveBeenCalledTimes(4);
+    expect(
+      recordLlmUsageMock.mock.calls.map(([usage]) => ({
+        eventKey: usage.eventKey,
+        userId: usage.userId,
+      })),
+    ).toEqual([
+      {
+        eventKey: 'non-task:fast_agent:session-1:message-parent-final-current',
+        userId: 'user-current',
+      },
+      {
+        eventKey:
+          'non-task:fast_agent:session-1:message-parent-intermediate-current',
+        userId: 'user-current',
+      },
+      {
+        eventKey:
+          'non-task:fast_agent:session-advisor-current:message-advisor-current',
+        userId: 'user-current',
+      },
+      {
+        eventKey:
+          'non-task:fast_agent:session-judge-current:message-judge-current',
+        userId: 'user-current',
+      },
+    ]);
   });
 
   it('lets OpenCode own a Fast prompt lifecycle when the deadline is disabled', async () => {
@@ -568,6 +945,163 @@ describe('resolveOpenCodeSmallModel', () => {
         },
       ),
     ).rejects.toBeInstanceOf(NonTaskOpenCodeSessionNotFoundError);
+    expect(sessionCreateMock).not.toHaveBeenCalled();
+  });
+
+  it('validates a durable Fast session before sending its delta prompt', async () => {
+    mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
+      R_MODEL: 'openrouter/openai/gpt-5.4',
+    });
+    sessionPromptMock.mockResolvedValue({
+      data: {
+        info: {},
+        parts: [{ type: 'text', text: 'resumed answer' }],
+      },
+      error: undefined,
+    });
+    sessionMessagesMock.mockResolvedValue({
+      data: [{ info: { id: 'message-1' }, parts: [] }],
+      error: undefined,
+    });
+    const { generateTrackedNonTaskTextInOpenCodeSession } =
+      await import('../non-task-provider-usage.js');
+
+    await expect(
+      generateTrackedNonTaskTextInOpenCodeSession(
+        { surface: 'fast_agent', prompt: 'New turn.' },
+        { id: 'persisted-session' },
+        {
+          directory: '/var/lib/roomote/opencode/runtime/conversation',
+          tools: { '*': false, send_chat_reply: true },
+          validateSession: true,
+        },
+      ),
+    ).resolves.toBe('resumed answer');
+
+    expect(sessionMessagesMock).toHaveBeenCalledWith(
+      {
+        sessionID: 'persisted-session',
+        directory: '/var/lib/roomote/opencode/runtime/conversation',
+        limit: 1,
+      },
+      expect.any(Object),
+    );
+    expect(sessionMessagesMock.mock.invocationCallOrder[0]!).toBeLessThan(
+      sessionPromptMock.mock.invocationCallOrder[0]!,
+    );
+    expect(sessionCreateMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects an unavailable durable session before appending a prompt', async () => {
+    mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
+      R_MODEL: 'openrouter/openai/gpt-5.4',
+    });
+    sessionMessagesMock.mockResolvedValue({
+      data: undefined,
+      error: { name: 'NotFoundError' },
+    });
+    const {
+      generateTrackedNonTaskTextInOpenCodeSession,
+      NonTaskOpenCodeSessionNotFoundError,
+    } = await import('../non-task-provider-usage.js');
+
+    await expect(
+      generateTrackedNonTaskTextInOpenCodeSession(
+        { surface: 'fast_agent', prompt: 'New turn.' },
+        { id: 'missing-session' },
+        {
+          directory: '/var/lib/roomote/opencode/runtime/conversation',
+          tools: { '*': false, send_chat_reply: true },
+          validateSession: true,
+        },
+      ),
+    ).rejects.toBeInstanceOf(NonTaskOpenCodeSessionNotFoundError);
+    expect(sessionPromptMock).not.toHaveBeenCalled();
+  });
+
+  it('treats an empty durable session as unavailable', async () => {
+    mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
+      R_MODEL: 'openrouter/openai/gpt-5.4',
+    });
+    sessionMessagesMock.mockResolvedValue({ data: [], error: undefined });
+    const {
+      generateTrackedNonTaskTextInOpenCodeSession,
+      NonTaskOpenCodeSessionNotFoundError,
+    } = await import('../non-task-provider-usage.js');
+
+    await expect(
+      generateTrackedNonTaskTextInOpenCodeSession(
+        { surface: 'fast_agent', prompt: 'New turn.' },
+        { id: 'empty-session' },
+        {
+          directory: '/tmp/roomote-fast-native-test',
+          tools: { '*': false, send_chat_reply: true },
+          validateSession: true,
+        },
+      ),
+    ).rejects.toBeInstanceOf(NonTaskOpenCodeSessionNotFoundError);
+    expect(sessionPromptMock).not.toHaveBeenCalled();
+  });
+
+  it('treats a corrupt durable session record as unavailable', async () => {
+    mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
+      R_MODEL: 'openrouter/openai/gpt-5.4',
+    });
+    sessionMessagesMock.mockResolvedValue({
+      data: undefined,
+      error: {
+        name: 'BadRequestError',
+        data: { statusCode: 400, message: 'Invalid session record' },
+      },
+    });
+    const {
+      generateTrackedNonTaskTextInOpenCodeSession,
+      NonTaskOpenCodeSessionNotFoundError,
+    } = await import('../non-task-provider-usage.js');
+
+    await expect(
+      generateTrackedNonTaskTextInOpenCodeSession(
+        { surface: 'fast_agent', prompt: 'New turn.' },
+        { id: 'corrupt-session' },
+        {
+          directory: '/tmp/roomote-fast-native-test',
+          tools: { '*': false, send_chat_reply: true },
+          validateSession: true,
+        },
+      ),
+    ).rejects.toBeInstanceOf(NonTaskOpenCodeSessionNotFoundError);
+    expect(sessionPromptMock).not.toHaveBeenCalled();
+  });
+
+  it('does not replace a durable session on transient validation failure', async () => {
+    mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
+      R_MODEL: 'openrouter/openai/gpt-5.4',
+    });
+    sessionMessagesMock.mockResolvedValue({
+      data: undefined,
+      error: {
+        name: 'ServerError',
+        status: 503,
+        message: 'temporarily unavailable',
+      },
+    });
+    const {
+      generateTrackedNonTaskTextInOpenCodeSession,
+      NonTaskOpenCodeSessionValidationError,
+    } = await import('../non-task-provider-usage.js');
+
+    await expect(
+      generateTrackedNonTaskTextInOpenCodeSession(
+        { surface: 'fast_agent', prompt: 'New turn.' },
+        { id: 'persisted-session' },
+        {
+          directory: '/tmp/roomote-fast-native-test',
+          tools: { '*': false, send_chat_reply: true },
+          validateSession: true,
+        },
+      ),
+    ).rejects.toBeInstanceOf(NonTaskOpenCodeSessionValidationError);
+    expect(sessionPromptMock).not.toHaveBeenCalled();
     expect(sessionCreateMock).not.toHaveBeenCalled();
   });
 

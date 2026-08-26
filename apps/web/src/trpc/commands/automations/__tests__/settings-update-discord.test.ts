@@ -87,6 +87,7 @@ function buildInput(
     reviewerReviewAllPullRequestAuthors: false,
     reviewerReviewOnCommit: true,
     reviewerReviewDraftPrs: true,
+    reviewerPublishGithubCheck: false,
     reviewerRelayReviewResultsToTask: false,
     reviewerRelayUserIds: [],
     conflictResolverFrequency: 'off',
@@ -241,6 +242,107 @@ describe('updateBackgroundAgentSettingsCommand Discord destinations', () => {
 
     expect(result.success).toBe(true);
     expect(mockCaptureActivationAutomationChanged).not.toHaveBeenCalled();
+  });
+
+  it('persists hourly provider usage checks and the threshold without creating task state', async () => {
+    await db.insert(deploymentSettings).values({
+      id: 'default',
+      managerSlackChannelId: 'C-MANAGER',
+    });
+
+    const result = await updateBackgroundAgentSettingsCommand(
+      adminAuth,
+      buildInput({
+        savingAutomation: 'providerUsageLimit',
+        providerUsageLimitFrequency: 'every_hour',
+        providerUsageLimitThreshold: 5,
+        providerUsageLimitSlackChannel: null,
+        providerUsageLimitDiscordChannel: null,
+      }),
+    );
+    const automation = await db.query.automations.findFirst({
+      where: eq(automations.key, 'provider_usage_limit'),
+    });
+
+    expect(result.success).toBe(true);
+    expect(automation).toMatchObject({
+      enabled: true,
+      schedule: { mode: 'every_hour' },
+      settings: { threshold: 5 },
+      targets: [],
+    });
+  });
+
+  it('persists a Discord provider usage alert destination', async () => {
+    await insertAvailableDiscordChannel({
+      guildId: 'guild-1',
+      channelId: 'provider-alerts',
+      channelName: 'provider-alerts',
+    });
+
+    const result = await updateBackgroundAgentSettingsCommand(
+      adminAuth,
+      buildInput({
+        savingAutomation: 'providerUsageLimit',
+        providerUsageLimitFrequency: 'every_hour',
+        providerUsageLimitThreshold: 85,
+        providerUsageLimitDiscordChannel: 'provider-alerts',
+      }),
+    );
+
+    expect(result.success).toBe(true);
+    expect(await getAutomationTargets('provider_usage_limit')).toEqual([
+      {
+        provider: 'discord',
+        targetKind: 'discord_channel',
+        externalRef: 'provider-alerts',
+      },
+    ]);
+  });
+
+  it('rejects provider usage thresholds outside slider increments', async () => {
+    await db.insert(deploymentSettings).values({
+      id: 'default',
+      managerSlackChannelId: 'C-MANAGER',
+    });
+
+    const result = await updateBackgroundAgentSettingsCommand(
+      adminAuth,
+      buildInput({
+        savingAutomation: 'providerUsageLimit',
+        providerUsageLimitFrequency: 'every_hour',
+        providerUsageLimitThreshold: 81,
+      }),
+    );
+
+    expect(result).toEqual({
+      success: false,
+      fieldErrors: {
+        general:
+          'Provider usage threshold must be between 5% and 95% in 5% increments.',
+      },
+    });
+  });
+
+  it('disables provider usage alerts without requiring a Slack channel', async () => {
+    const result = await updateBackgroundAgentSettingsCommand(
+      adminAuth,
+      buildInput({
+        savingAutomation: 'providerUsageLimit',
+        providerUsageLimitFrequency: 'off',
+        providerUsageLimitThreshold: 85,
+      }),
+    );
+    const automation = await db.query.automations.findFirst({
+      where: eq(automations.key, 'provider_usage_limit'),
+    });
+
+    expect(result.success).toBe(true);
+    expect(automation).toMatchObject({ enabled: false, schedule: {} });
+    expect(mockCaptureActivationAutomationChanged).toHaveBeenCalledWith(
+      'disabled',
+      'provider_usage_limit',
+    );
   });
 
   it('tracks a built-in automation when it is disabled', async () => {
@@ -787,6 +889,34 @@ describe('updateBackgroundAgentSettingsCommand Discord destinations', () => {
     if (result.success) {
       expect(result.settings.platformIssueAlertsEnabled).toBe(true);
     }
+  });
+
+  it('keeps provider usage alerts on the Manager Channel fallback when it changes', async () => {
+    await insertSlackInstallation();
+    await db.insert(deploymentSettings).values({
+      id: 'default',
+      managerSlackChannelId: 'C111MANAGER',
+    });
+    await upsertAutomation(db, {
+      key: 'provider_usage_limit',
+      enabled: true,
+      schedule: { mode: 'every_hour' },
+      settings: { threshold: 85 },
+      targets: [],
+    });
+
+    const result = await updateBackgroundAgentSettingsCommand(
+      adminAuth,
+      buildInput({
+        savingAutomation: 'managerChannel',
+        managerSlackChannel: 'C222MANAGER',
+      }),
+    );
+    const settings = await db.query.deploymentSettings.findFirst();
+
+    expect(result.success).toBe(true);
+    expect(settings?.managerSlackChannelId).toBe('C222MANAGER');
+    expect(await getAutomationTargets('provider_usage_limit')).toEqual([]);
   });
 
   it('persists an explicit platform issue alert opt-out', async () => {

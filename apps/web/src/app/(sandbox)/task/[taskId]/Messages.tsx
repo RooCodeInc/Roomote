@@ -1,9 +1,7 @@
 'use client';
 
 import {
-  Fragment,
   memo,
-  useCallback,
   useEffect,
   useMemo,
   useState,
@@ -12,13 +10,11 @@ import {
 import type { ScrollToBottom } from 'use-stick-to-bottom';
 
 import {
-  Message,
-  MessageActions,
-  MessageContent,
-  MessageTimestamp,
   Conversation,
   ConversationContent,
   ConversationScrollButton,
+  Message,
+  MessageContent,
   Shimmer,
 } from '@/components/ai-elements';
 import {
@@ -40,21 +36,11 @@ import { useInternalTranscriptRowsVisible } from './useInternalTranscriptRowsVis
 
 import { SleepWakeMessages } from './messages/index';
 import {
-  AcpMessageItem,
-  AcpGroupedToolMessage,
-  AcpActivityGroupMessage,
   AcpTextMessage,
+  AcpTranscriptBlockList,
+  hasVisibleAssistantOutput,
+  useAcpTranscriptBlocks,
 } from './messages/acp';
-import {
-  buildAcpActivityRenderBlocks,
-  type AcpConversationRenderBlock,
-} from './messages/acp/activity-groups';
-import {
-  buildAcpRenderBlocks,
-  type AcpRenderBlock,
-} from './messages/acp/render-blocks';
-import { messageAnchorId } from './messages/message-anchor';
-import { LazyMessage } from './LazyMessage';
 import { ScrollToHash } from './ScrollToHash';
 import { ScrollBridge } from './ScrollBridge';
 
@@ -89,9 +75,7 @@ function NarrationWorkingReasoningMessage() {
     return () => clearTimeout(timer);
   }, []);
 
-  if (!isVisible) {
-    return null;
-  }
+  if (!isVisible) return null;
 
   return (
     <Message from="assistant" className="chat-reasoning-message">
@@ -122,71 +106,6 @@ function TranscriptSkeleton() {
   );
 }
 
-function DebugTimestamp({
-  ts,
-  previousTs,
-  anchorId,
-  isUser = false,
-}: {
-  ts: number;
-  previousTs?: number;
-  anchorId: string;
-  isUser?: boolean;
-}) {
-  return (
-    <MessageActions
-      className={cn('md:opacity-100', isUser ? 'justify-end' : 'justify-start')}
-    >
-      <MessageTimestamp ts={ts} previousTs={previousTs} anchorId={anchorId} />
-    </MessageActions>
-  );
-}
-
-function blockUsesOwnTimestamp(block: AcpConversationRenderBlock): boolean {
-  if (block.kind === 'activity_group') {
-    return false;
-  }
-
-  if (block.kind === 'tool_group') {
-    return false;
-  }
-
-  switch (block.msg.kind) {
-    case 'reasoning':
-    case 'todo_section':
-    case 'tool_call':
-    case 'tool_result':
-      return false;
-    case 'text':
-    case 'plan':
-      return true;
-    default:
-      return true;
-  }
-}
-
-function hasVisibleAssistantOutput(
-  blocks: AcpConversationRenderBlock[],
-): boolean {
-  return blocks.some((block) => {
-    if (block.kind === 'activity_group') {
-      return hasVisibleAssistantOutput(block.blocks);
-    }
-
-    if (block.kind === 'tool_group') {
-      return false;
-    }
-
-    if (block.msg.role === 'assistant') {
-      return true;
-    }
-
-    return block.childBlocks
-      ? hasVisibleAssistantOutput(block.childBlocks)
-      : false;
-  });
-}
-
 const MessagesBase = ({
   session,
   scrollRef,
@@ -202,9 +121,6 @@ const MessagesBase = ({
   const taskPhase = useSandboxTaskPhase();
   const { enabled: mindReaderModeEnabled } = useMindReaderMode();
   const { enabled: narrationModeEnabled } = useNarrationMode();
-  const [suppressedMessageIds, setSuppressedMessageIds] = useState<Set<string>>(
-    () => new Set(),
-  );
   const showInternalMessages = useInternalTranscriptRowsVisible();
 
   const resolvedMessageUiOptions = useMemo(
@@ -219,22 +135,6 @@ const MessagesBase = ({
     [messageUiOptions, mindReaderModeEnabled, narrationModeEnabled],
   );
 
-  useEffect(() => {
-    setSuppressedMessageIds(new Set());
-  }, [session.taskId]);
-
-  const suppressMessage = useCallback((messageId: string) => {
-    setSuppressedMessageIds((prev) => {
-      if (prev.has(messageId)) {
-        return prev;
-      }
-
-      const next = new Set(prev);
-      next.add(messageId);
-      return next;
-    });
-  }, []);
-
   // When the URL has a hash anchor, skip the automatic scroll-to-bottom
   // so ScrollToHash can scroll to the linked message instead.
   const hasAnchor =
@@ -246,171 +146,20 @@ const MessagesBase = ({
     Boolean(sessionPrompt);
   const resolvedHideFirstAcpUserPrompt =
     hideFirstAcpUserPrompt ?? shouldRenderSessionPrompt;
-
-  const renderBlocks = useMemo(() => {
-    const acpBlocks = buildAcpRenderBlocks(messages, {
-      displayMode: resolvedMessageUiOptions.displayMode,
-      initialPrompt: resolvedHideFirstAcpUserPrompt ? sessionPrompt : null,
-      shouldHideFirstMessage: resolvedHideFirstAcpUserPrompt,
-      showInternalMessages,
-      suppressedMessageIds,
-    });
-
-    return buildAcpActivityRenderBlocks(acpBlocks, {
-      artifacts: session.artifacts,
-      displayMode: resolvedMessageUiOptions.displayMode,
-      hasLeadingTextBoundary: shouldRenderSessionPrompt,
-    });
-  }, [
+  const { renderBlocks, suppressMessage } = useAcpTranscriptBlocks({
     messages,
-    resolvedHideFirstAcpUserPrompt,
-    resolvedMessageUiOptions.displayMode,
-    session.artifacts,
-    sessionPrompt,
-    shouldRenderSessionPrompt,
+    artifacts: session.artifacts,
+    displayMode: resolvedMessageUiOptions.displayMode,
+    initialPrompt: resolvedHideFirstAcpUserPrompt ? sessionPrompt : null,
+    shouldHideFirstMessage: resolvedHideFirstAcpUserPrompt,
     showInternalMessages,
-    suppressedMessageIds,
-  ]);
-  const hasVisibleAssistantOutputInTranscript =
-    hasVisibleAssistantOutput(renderBlocks);
+    hasLeadingTextBoundary: shouldRenderSessionPrompt,
+    resetKey: session.taskId,
+  });
   const shouldShowNarrationWorkingReasoning =
     resolvedMessageUiOptions.displayMode === 'narration' &&
     taskPhase === 'running' &&
-    !hasVisibleAssistantOutputInTranscript;
-
-  function renderNestedBlocks(blocks: AcpRenderBlock[]) {
-    return blocks.map((block) => (
-      <Fragment key={block.kind === 'tool_group' ? block.id : block.msg.id}>
-        {renderRenderBlock(block, true)}
-      </Fragment>
-    ));
-  }
-
-  function renderRenderBlock(
-    block: AcpConversationRenderBlock,
-    nested: boolean,
-  ) {
-    const timestamp =
-      showInternalMessages && !blockUsesOwnTimestamp(block) ? (
-        <DebugTimestamp
-          ts={
-            block.kind === 'activity_group'
-              ? block.ts
-              : block.kind === 'tool_group'
-                ? block.ts
-                : block.msg.ts
-          }
-          previousTs={
-            block.kind === 'activity_group'
-              ? block.blocks[0]?.kind === 'tool_group'
-                ? block.blocks[0].items[0]?.msg.previousTs
-                : block.blocks[0]?.msg.previousTs
-              : block.kind === 'tool_group'
-                ? block.items[0]?.msg.previousTs
-                : block.msg.previousTs
-          }
-          anchorId={
-            block.kind === 'activity_group'
-              ? messageAnchorId(block.ts)
-              : block.kind === 'tool_group'
-                ? messageAnchorId(block.ts)
-                : messageAnchorId(block.msg.ts)
-          }
-          isUser={block.kind === 'message' && block.msg.role === 'user'}
-        />
-      ) : null;
-
-    if (block.kind === 'activity_group') {
-      const content = (
-        <AcpActivityGroupMessage
-          group={block}
-          anchorIds={collectBlockAnchorIds(block.blocks, [
-            messageAnchorId(block.ts),
-          ])}
-        >
-          {renderNestedBlocks(block.blocks)}
-        </AcpActivityGroupMessage>
-      );
-
-      const blockWithTimestamp = (
-        <>
-          {content}
-          {timestamp}
-        </>
-      );
-
-      return nested ? (
-        blockWithTimestamp
-      ) : (
-        <LazyMessage
-          key={block.id}
-          anchorId={messageAnchorId(block.ts)}
-          forceVisible={block.blocks.some(blockHasPartialMessage)}
-        >
-          {blockWithTimestamp}
-        </LazyMessage>
-      );
-    }
-
-    if (block.kind === 'tool_group') {
-      const content = (
-        <AcpGroupedToolMessage
-          group={block}
-          showSubagentPayload={showInternalMessages}
-        />
-      );
-
-      const blockWithTimestamp = (
-        <>
-          {content}
-          {timestamp}
-        </>
-      );
-
-      return nested ? (
-        blockWithTimestamp
-      ) : (
-        <LazyMessage
-          key={block.id}
-          anchorId={messageAnchorId(block.ts)}
-          forceVisible={block.items.some((item) => item.msg.partial)}
-        >
-          {blockWithTimestamp}
-        </LazyMessage>
-      );
-    }
-
-    const content = (
-      <AcpMessageItem
-        msg={block.msg}
-        onSuppress={suppressMessage}
-        showSubagentPayload={showInternalMessages}
-      >
-        {block.childBlocks?.length
-          ? renderNestedBlocks(block.childBlocks)
-          : null}
-      </AcpMessageItem>
-    );
-
-    const blockWithTimestamp = (
-      <>
-        {content}
-        {timestamp}
-      </>
-    );
-
-    return nested ? (
-      blockWithTimestamp
-    ) : (
-      <LazyMessage
-        key={block.msg.id}
-        anchorId={messageAnchorId(block.msg.ts)}
-        forceVisible={block.msg.partial}
-      >
-        {blockWithTimestamp}
-      </LazyMessage>
-    );
-  }
+    !hasVisibleAssistantOutput(renderBlocks);
 
   return (
     <MessageUiOptionsProvider value={resolvedMessageUiOptions}>
@@ -425,7 +174,11 @@ const MessagesBase = ({
             <AcpTextMessage msg={sessionPrompt} />
           )}
           {!historyReady && <TranscriptSkeleton />}
-          {renderBlocks.map((block) => renderRenderBlock(block, false))}
+          <AcpTranscriptBlockList
+            blocks={renderBlocks}
+            showInternalMessages={showInternalMessages}
+            onSuppress={suppressMessage}
+          />
           {session.taskRun && <SleepWakeMessages taskRun={session.taskRun} />}
           {shouldShowNarrationWorkingReasoning && (
             <NarrationWorkingReasoningMessage />
@@ -443,56 +196,3 @@ const MessagesBase = ({
 export const Messages = memo(MessagesBase);
 
 Messages.displayName = 'Messages';
-
-function collectBlockAnchorIds(
-  blocks: AcpRenderBlock[],
-  excludedAnchorIds: string[] = [],
-): string[] {
-  const excluded = new Set(excludedAnchorIds);
-  const anchorIds: string[] = [];
-
-  const pushAnchor = (anchorId: string) => {
-    if (excluded.has(anchorId)) {
-      return;
-    }
-
-    excluded.add(anchorId);
-    anchorIds.push(anchorId);
-  };
-
-  collectBlockAnchorIdsInto(blocks, pushAnchor);
-
-  return anchorIds;
-}
-
-function collectBlockAnchorIdsInto(
-  blocks: AcpRenderBlock[],
-  pushAnchor: (anchorId: string) => void,
-): void {
-  for (const block of blocks) {
-    if (block.kind === 'tool_group') {
-      pushAnchor(messageAnchorId(block.ts));
-      for (const item of block.items) {
-        pushAnchor(messageAnchorId(item.msg.ts));
-      }
-      continue;
-    }
-
-    pushAnchor(messageAnchorId(block.msg.ts));
-
-    if (block.childBlocks) {
-      collectBlockAnchorIdsInto(block.childBlocks, pushAnchor);
-    }
-  }
-}
-
-function blockHasPartialMessage(block: AcpRenderBlock): boolean {
-  if (block.kind === 'tool_group') {
-    return block.items.some((item) => item.msg.partial);
-  }
-
-  return (
-    block.msg.partial ||
-    Boolean(block.childBlocks?.some(blockHasPartialMessage))
-  );
-}

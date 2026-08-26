@@ -12,6 +12,7 @@ import {
   communicationProviders,
   CONFLICT_RESOLUTION_MAX_PR_AGE_DAYS_OPTIONS,
   DEFAULT_CHANNEL_AUTO_START_LAUNCH_MODE,
+  DEFAULT_PROVIDER_USAGE_LIMIT_THRESHOLD,
   DEFAULT_CONFLICT_RESOLUTION_MAX_PR_AGE_DAYS,
   getCommunicationProviderDisplayName,
   getSourceControlProviderLabel,
@@ -47,6 +48,7 @@ import {
   type FormState,
   isAutomationDirty,
   type ManagerStatsFrequency,
+  type ProviderUsageLimitFrequency,
   mergeAutomationFields,
   mergeServerStatePreservingDirtySections,
   resetAutomationFields,
@@ -82,6 +84,7 @@ import {
   AlertTitle,
   BasicTooltip,
   BellElectric,
+  BatteryWarning,
   BrandIcon,
   Button,
   Card,
@@ -114,6 +117,7 @@ import {
   MessagesSquare,
   Skeleton,
   Slack,
+  Slider,
   Spinner,
   Settings2,
   Switch,
@@ -140,6 +144,7 @@ type FieldErrors = Partial<
     | 'managerSlackChannel'
     | 'managerDiscordChannel'
     | 'managerStatsSlackChannel'
+    | 'providerUsageLimitSlackChannel'
     | 'suggesterSlackChannel'
     | 'announcerSlackChannel'
     | 'platformIssueSlackChannel'
@@ -150,6 +155,7 @@ type FieldErrors = Partial<
     | 'codeQualityAuditorSlackChannel'
     | 'ciFailureTriageSlackChannel'
     | 'managerStatsDiscordChannel'
+    | 'providerUsageLimitDiscordChannel'
     | 'sentryTriageDiscordChannel'
     | 'dependabotTriageDiscordChannel'
     | 'codeqlTriageDiscordChannel'
@@ -174,6 +180,7 @@ type SlackChannelAccessWarnings = {
   channelAutoStartSlackChannels: string[];
   managerSlackChannel: string | null;
   managerStatsSlackChannel: string | null;
+  providerUsageLimitSlackChannel: string | null;
   suggesterSlackChannel: string | null;
   announcerSlackChannel: string | null;
   platformIssueSlackChannel: string | null;
@@ -287,6 +294,7 @@ const EMPTY_SLACK_CHANNEL_ACCESS_WARNINGS: SlackChannelAccessWarnings = {
   channelAutoStartSlackChannels: [],
   managerSlackChannel: null,
   managerStatsSlackChannel: null,
+  providerUsageLimitSlackChannel: null,
   suggesterSlackChannel: null,
   announcerSlackChannel: null,
   platformIssueSlackChannel: null,
@@ -318,6 +326,8 @@ const TRIGGERABLE_AUTOMATION_DESCRIPTIONS = {
   suggester: 'Suggest valuable coding work to do.',
   announcer: 'Post a recurring digest of recently merged PRs.',
   manager_stats: "Summary of Roomote's activity during the week",
+  provider_usage_limit:
+    'Alert when a configured AI provider approaches its usage limit.',
   sentry_triage: 'Scan Sentry issues and post a prioritized triage report.',
   dependabot_triage:
     'Scan open Dependabot alerts and suggest the safest updates.',
@@ -332,6 +342,7 @@ const TRIGGERABLE_AUTOMATION_DESCRIPTIONS = {
 const TRIGGERABLE_AUTOMATION_SCHEDULE_LABELS = {
   off: 'Never',
   every_hour: 'Every hour',
+  every_15_minutes: 'Every 15 minutes',
   every_6_hours: 'Every 6 hours',
   daily: 'Daily',
   weekly: 'Once a week',
@@ -520,6 +531,14 @@ const AUTOMATION_DEFINITIONS: Record<AutomationId, AutomationDefinition> = {
     ),
     category: 'communication',
   },
+  providerUsageLimit: {
+    ...getAutomationDefinition(
+      'providerUsageLimit',
+      'provider_usage_limit',
+      BatteryWarning,
+    ),
+    category: 'operations',
+  },
   sentryTriage: {
     ...getAutomationDefinition('sentryTriage', 'sentry_triage', SentryIcon),
   },
@@ -587,6 +606,8 @@ const HASH_ALIAS_TO_AUTOMATION_ID: Record<string, AutomationId> = {
   'manager-channel': 'managerChannel',
   'weekly-manager-stats': 'managerStats',
   managerstats: 'managerStats',
+  'provider-usage-limit': 'providerUsageLimit',
+  providerusagelimit: 'providerUsageLimit',
   'triage-sentry-issues': 'sentryTriage',
   'sentry-triage': 'sentryTriage',
   sentrytriage: 'sentryTriage',
@@ -621,6 +642,7 @@ const AUTOMATION_RUN_KEYS_BY_ID: Partial<
   suggester: 'suggester',
   announcer: 'announcer',
   managerStats: 'manager_stats',
+  providerUsageLimit: 'provider_usage_limit',
   sentryTriage: 'sentry_triage',
   dependabotTriage: 'dependabot_triage',
   codeqlTriage: 'codeql_triage',
@@ -645,6 +667,12 @@ const AUTOMATION_HISTORY_KEYS_BY_ID: Partial<
 export function getAutomationHistoryHref(
   automationId: AutomationId,
 ): string | null {
+  // Provider usage alerts are delivered directly to a communication channel;
+  // their runner does not create Roomote tasks to inspect.
+  if (automationId === 'providerUsageLimit') {
+    return null;
+  }
+
   const automationKey = AUTOMATION_HISTORY_KEYS_BY_ID[automationId];
   return automationKey
     ? `/tasks?userId=${encodeURIComponent(`automation:${automationKey}`)}`
@@ -723,6 +751,7 @@ function mapSettingsToFormState(
       reviewAllPullRequestAuthors: boolean;
       reviewOnCommit: boolean;
       reviewDraftPrs: boolean;
+      publishGithubCheck: boolean;
       relayReviewResultsToTask: boolean;
       relayUsers: Array<{
         userId: string;
@@ -760,6 +789,11 @@ function mapSettingsToFormState(
     managerStatsSlackChannelId: string | null;
     managerStatsSlackChannelName?: string | null;
     managerStatsDiscordChannelId: string | null;
+    providerUsageLimitFrequency: ProviderUsageLimitFrequency;
+    providerUsageLimitThreshold: number;
+    providerUsageLimitSlackChannelId: string | null;
+    providerUsageLimitSlackChannelName?: string | null;
+    providerUsageLimitDiscordChannelId: string | null;
     sentryTriageFrequency: SentryTriageFrequency;
     sentryTriageSlackChannelId: string | null;
     sentryTriageSlackChannelName?: string | null;
@@ -817,6 +851,7 @@ function mapSettingsToFormState(
       settings.reviewer.reviewAllPullRequestAuthors,
     reviewerReviewOnCommit: settings.reviewer.reviewOnCommit,
     reviewerReviewDraftPrs: settings.reviewer.reviewDraftPrs,
+    reviewerPublishGithubCheck: settings.reviewer.publishGithubCheck,
     reviewerInstructions: settings.reviewCodeInstructions ?? '',
     reviewerRelayReviewResultsToTask:
       settings.reviewer.relayReviewResultsToTask,
@@ -864,6 +899,15 @@ function mapSettingsToFormState(
       settings.managerStatsSlackChannelId ??
       '',
     managerStatsDiscordChannel: settings.managerStatsDiscordChannelId ?? '',
+    providerUsageLimitFrequency: settings.providerUsageLimitFrequency,
+    providerUsageLimitThreshold:
+      settings.providerUsageLimitThreshold ??
+      DEFAULT_PROVIDER_USAGE_LIMIT_THRESHOLD,
+    providerUsageLimitSlackChannel:
+      settings.providerUsageLimitSlackChannelName ??
+      settings.providerUsageLimitSlackChannelId ??
+      '',
+    providerUsageLimitDiscordChannel: '',
     sentryTriageFrequency: settings.sentryTriageFrequency,
     sentryTriageSlackChannel:
       settings.sentryTriageSlackChannelName ??
@@ -1634,6 +1678,9 @@ export function AutomationsSettings() {
         settingsQuery.data.slackChannelDisplayNames.managerSlackChannel,
       managerStatsSlackChannelName:
         settingsQuery.data.slackChannelDisplayNames.managerStatsSlackChannel,
+      providerUsageLimitSlackChannelName:
+        settingsQuery.data.slackChannelDisplayNames
+          .providerUsageLimitSlackChannel,
       sentryTriageSlackChannelName:
         settingsQuery.data.slackChannelDisplayNames.sentryTriageSlackChannel,
       dependabotTriageSlackChannelName:
@@ -1766,6 +1813,8 @@ export function AutomationsSettings() {
             result.slackChannelDisplayNames.managerSlackChannel,
           managerStatsSlackChannelName:
             result.slackChannelDisplayNames.managerStatsSlackChannel,
+          providerUsageLimitSlackChannelName:
+            result.slackChannelDisplayNames.providerUsageLimitSlackChannel,
           sentryTriageSlackChannelName:
             result.slackChannelDisplayNames.sentryTriageSlackChannel,
           dependabotTriageSlackChannelName:
@@ -1875,6 +1924,7 @@ export function AutomationsSettings() {
         channelAutoStart: false,
         managerChannel: false,
         managerStats: false,
+        providerUsageLimit: false,
         sentryTriage: false,
         dependabotTriage: false,
         codeqlTriage: false,
@@ -1904,6 +1954,11 @@ export function AutomationsSettings() {
         'managerChannel',
       ),
       managerStats: isAutomationDirty(formState, savedState, 'managerStats'),
+      providerUsageLimit: isAutomationDirty(
+        formState,
+        savedState,
+        'providerUsageLimit',
+      ),
       sentryTriage: isAutomationDirty(formState, savedState, 'sentryTriage'),
       dependabotTriage: isAutomationDirty(
         formState,
@@ -2113,6 +2168,8 @@ export function AutomationsSettings() {
     [slackChannelsQuery.data?.channels],
   );
   const managerStatsIsEnabled = formState?.managerStatsFrequency !== 'off';
+  const providerUsageLimitIsEnabled =
+    formState?.providerUsageLimitFrequency !== 'off';
   const sentryConnected = capabilities?.sentryConnected === true;
   const sentryTriageIsEnabled = formState?.sentryTriageFrequency !== 'off';
   const dependabotTriageIsEnabled =
@@ -2410,6 +2467,7 @@ export function AutomationsSettings() {
     channelAutoStart: channelAutoStartIsEnabled,
     managerChannel: managerChannelIsEnabled,
     managerStats: managerStatsIsEnabled,
+    providerUsageLimit: providerUsageLimitIsEnabled,
     sentryTriage: sentryTriageIsEnabled,
     dependabotTriage: dependabotTriageIsEnabled,
     codeqlTriage: codeqlTriageIsEnabled,
@@ -2812,6 +2870,30 @@ export function AutomationsSettings() {
                         </p>
                         <p className="text-xs text-muted-foreground">
                           Include pull requests opened by people or others
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-start gap-2">
+                      <Switch
+                        className="mt-1"
+                        aria-label="Publish review results as a GitHub check"
+                        checked={formState.reviewerPublishGithubCheck}
+                        onCheckedChange={(reviewerPublishGithubCheck) =>
+                          setFormState((prev) =>
+                            prev
+                              ? { ...prev, reviewerPublishGithubCheck }
+                              : prev,
+                          )
+                        }
+                      />
+                      <div className="space-y-1">
+                        <p className="text-sm font-medium">
+                          Publish review results as a GitHub check
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          GitHub branch protection or rulesets control whether
+                          this check is required for merging.
                         </p>
                       </div>
                     </div>
@@ -3756,6 +3838,136 @@ export function AutomationsSettings() {
                     <p className="text-xs text-muted-foreground md:max-w-160">
                       Posts a weekly summary on Fridays.
                     </p>
+                  </div>
+                ) : null}
+              </div>
+            </AutomationCard>
+
+            <AutomationCard
+              automation={AUTOMATION_DEFINITIONS.providerUsageLimit}
+              isAvailableMatch={availableAutomationMatches.has(
+                'providerUsageLimit',
+              )}
+              isOpen={openAutomationIds.has('providerUsageLimit')}
+              onOpenChange={(open) =>
+                setAutomationOpen('providerUsageLimit', open)
+              }
+              iconEnabled={iconEnabled.providerUsageLimit}
+              debugSection={renderDebugRunsSection('providerUsageLimit')}
+              runAction={
+                <BasicTooltip
+                  content={getRunTooltip(
+                    'providerUsageLimit',
+                    providerUsageLimitIsEnabled,
+                  )}
+                >
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={() =>
+                      triggerMutation.mutate({
+                        automationKey: 'provider_usage_limit',
+                      })
+                    }
+                    disabled={isRunDisabled(
+                      'providerUsageLimit',
+                      providerUsageLimitIsEnabled,
+                    )}
+                  >
+                    <Play />
+                  </Button>
+                </BasicTooltip>
+              }
+              footer={
+                <AutomationFooter
+                  isDirty={isDirty.providerUsageLimit}
+                  isPending={
+                    updateMutation.isPending &&
+                    savingAutomation === 'providerUsageLimit'
+                  }
+                  onSave={() => saveAgent('providerUsageLimit')}
+                  onReset={() => resetAgent('providerUsageLimit')}
+                />
+              }
+            >
+              <div className="space-y-5">
+                <div className="flex items-center gap-2">
+                  <Switch
+                    id="provider-usage-limit-enabled"
+                    checked={providerUsageLimitIsEnabled}
+                    onCheckedChange={(enabled) =>
+                      setFormState((prev) =>
+                        prev
+                          ? {
+                              ...prev,
+                              providerUsageLimitFrequency: enabled
+                                ? 'every_hour'
+                                : 'off',
+                            }
+                          : prev,
+                      )
+                    }
+                  />
+                  <Label
+                    htmlFor="provider-usage-limit-enabled"
+                    className="text-sm"
+                  >
+                    Enabled
+                  </Label>
+                </div>
+
+                {providerUsageLimitIsEnabled ? (
+                  <div className="space-y-5">
+                    {renderSlackDestinationField({
+                      field: 'providerUsageLimitSlackChannel',
+                      inputId: 'provider-usage-limit-slack-channel',
+                      label: 'Post alerts to this Slack channel',
+                      helperText:
+                        'Choose where Roomote should post provider usage warnings.',
+                      savedChannelId:
+                        settingsQuery.data?.settings
+                          .providerUsageLimitSlackChannelId ?? null,
+                      savedDiscordChannelId:
+                        settingsQuery.data?.settings
+                          .providerUsageLimitDiscordChannelId ?? null,
+                      warningChannelId:
+                        slackChannelAccessWarnings.providerUsageLimitSlackChannel,
+                    })}
+
+                    <div className="space-y-3 md:max-w-md">
+                      <div className="flex items-center justify-between gap-4">
+                        <Label htmlFor="provider-usage-limit-threshold">
+                          Alert threshold
+                        </Label>
+                        <span className="text-sm font-medium tabular-nums">
+                          {formState.providerUsageLimitThreshold}%
+                        </span>
+                      </div>
+                      <Slider
+                        id="provider-usage-limit-threshold"
+                        min={5}
+                        max={95}
+                        step={5}
+                        value={[formState.providerUsageLimitThreshold]}
+                        onValueChange={([threshold]) => {
+                          if (threshold === undefined) return;
+                          setFormState((prev) =>
+                            prev
+                              ? {
+                                  ...prev,
+                                  providerUsageLimitThreshold: threshold,
+                                }
+                              : prev,
+                          );
+                        }}
+                        aria-label="Provider usage alert threshold"
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        Alert when a provider reaches this percentage of its
+                        reported quota. Roomote checks hourly and sends one
+                        alert per quota cycle, plus a critical alert at 100%.
+                      </p>
+                    </div>
                   </div>
                 ) : null}
               </div>

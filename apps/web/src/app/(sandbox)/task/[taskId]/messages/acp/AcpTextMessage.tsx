@@ -147,7 +147,7 @@ function getRequestUserInputResponseDisplay(
     .filter((text) => text.length > 0);
 
   return {
-    title: data.resolution === 'cancelled' ? 'Cancelled requested input' : null,
+    title: data.resolution === 'cancelled' ? 'Cancelled input request' : null,
     questionTexts,
   };
 }

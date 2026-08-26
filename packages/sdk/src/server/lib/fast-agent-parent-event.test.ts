@@ -24,6 +24,20 @@ const mocks = vi.hoisted(() => ({
   resolveUserMcpServerConfigs: vi.fn(),
 }));
 
+vi.mock('@roomote/redis', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@roomote/redis')>();
+  return {
+    ...actual,
+    // The sticky-footer lock and state live in Redis; these tests run without
+    // a server, so satisfy lock acquisition and empty prior state.
+    getRedis: () => ({
+      set: async () => 'OK',
+      get: async () => null,
+      eval: async () => 1,
+    }),
+  };
+});
+
 vi.mock('@roomote/cloud-agents/server', () => ({
   acquireFastAgentTurnLock: mocks.acquireTurnLock,
   answerFastAgentQuestion: mocks.answerQuestion,
@@ -96,7 +110,8 @@ vi.mock('@roomote/slack', async (importOriginal) => ({
 
 vi.mock('./task-runs/pr-review-action', () => ({
   setPendingPrReviewAction: mocks.setPendingPrReviewAction,
-  attachPendingPrReviewActionMessage: mocks.attachPendingPrReviewActionMessage,
+  attachPendingPrReviewActionMessageWithRetirement:
+    mocks.attachPendingPrReviewActionMessage,
   retirePrReviewActionMessagesBestEffort:
     mocks.retirePrReviewActionMessagesBestEffort,
 }));
@@ -182,7 +197,10 @@ describe('deliverFastAgentParentEvent', () => {
     });
     mocks.resolveUserMcpServerConfigs.mockResolvedValue({});
     mocks.setPendingPrReviewAction.mockResolvedValue(undefined);
-    mocks.attachPendingPrReviewActionMessage.mockResolvedValue([]);
+    mocks.attachPendingPrReviewActionMessage.mockResolvedValue({
+      attached: true,
+      superseded: [],
+    });
     mocks.retirePrReviewActionMessagesBestEffort.mockResolvedValue(undefined);
     mocks.buildSlackPrReviewActionBlocks.mockImplementation(
       ({ text, question, nonce }) => [
@@ -253,6 +271,7 @@ describe('deliverFastAgentParentEvent', () => {
     });
     expect(mocks.answerQuestion).toHaveBeenCalledWith(
       expect.objectContaining({
+        currentMessageId: 'fast-parent-artifact:artifact-1:v1',
         turnSource: 'platform_event',
         adapter: expect.objectContaining({ launchTask: mocks.launchTask }),
       }),
@@ -276,6 +295,16 @@ describe('deliverFastAgentParentEvent', () => {
             image_url:
               'https://api.roomote.example/api/artifacts/artifact-1/raw?signed=1',
             alt_text: 'result.png',
+          },
+          {
+            type: 'context',
+            block_id: 'roomote_thread_reply_footer',
+            elements: [
+              {
+                type: 'mrkdwn',
+                text: expect.stringContaining('Reply or use the'),
+              },
+            ],
           },
         ],
       }),
@@ -473,7 +502,7 @@ describe('deliverFastAgentParentEvent', () => {
     expect(mocks.resolveUserMcpServerConfigs).toHaveBeenCalledWith({
       userId: 'u1',
       apiBaseUrl: 'https://roomote.example.com',
-      includeRoomote: true,
+      includeRoomoteMemberTools: true,
     });
     expect(mocks.enqueueTask).toHaveBeenCalledWith({
       task: expect.objectContaining({
@@ -533,7 +562,9 @@ describe('deliverFastAgentParentEvent', () => {
     expect(mocks.discordPostMessage).toHaveBeenCalledWith({
       channelId: 'channel-1',
       idempotencyKey: 'fast-parent-artifact:artifact-1:v1',
-      text: 'The proof is ready.',
+      text: expect.stringMatching(
+        /^The proof is ready\.\n\n-# Reply or use the \[web app\]\(.*\/sessions\/.*\)\.$/,
+      ),
       textFormat: 'markdown',
       images: [
         {
@@ -721,9 +752,10 @@ describe('deliverFastAgentParentEvent', () => {
       threadId: '100.001',
       messageId: '99.001',
     };
-    mocks.attachPendingPrReviewActionMessage.mockResolvedValueOnce([
-      superseded,
-    ]);
+    mocks.attachPendingPrReviewActionMessage.mockResolvedValueOnce({
+      attached: true,
+      superseded: [superseded],
+    });
     const feedbackEvent = {
       type: 'pull_request_feedback' as const,
       feedbackId: 'feedback-123',
@@ -870,7 +902,9 @@ describe('deliverFastAgentParentEvent', () => {
       channelId: 'channel-1',
       threadId: 'thread-1',
       idempotencyKey: 'fast-parent-pr-feedback:feedback-123',
-      text: 'There is new PR feedback.\nWant me to resolve these issues?',
+      text: expect.stringMatching(
+        /^There is new PR feedback\.\nWant me to resolve these issues\?\n\n-# Reply or use the \[web app\]\(.*\/sessions\/.*\)\.$/,
+      ),
       textFormat: 'markdown',
       images: [],
       buttons: [
@@ -941,7 +975,7 @@ describe('deliverFastAgentParentEvent', () => {
     });
     mocks.attachPendingPrReviewActionMessage
       .mockRejectedValueOnce(new Error('attachment failed'))
-      .mockResolvedValueOnce([]);
+      .mockResolvedValueOnce({ attached: true, superseded: [] });
 
     await expect(
       deliverFastAgentParentEvent({
