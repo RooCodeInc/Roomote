@@ -41,17 +41,16 @@ describe('PR review action blocks', () => {
     );
   });
 
-  it('can render a resolution as a regular message', () => {
+  it('renders a resolution as an italicized context note', () => {
     expect(
       buildResolvedSlackPrReviewMessageBlocks(
         [{ type: 'actions', block_id: 'pr_review_action', elements: [] }],
         'Resolution',
-        'section',
       ),
     ).toEqual([
       {
-        type: 'section',
-        text: { type: 'mrkdwn', text: 'Resolution' },
+        type: 'context',
+        elements: [{ type: 'mrkdwn', text: '_Resolution_' }],
       },
     ]);
   });

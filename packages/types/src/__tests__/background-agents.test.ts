@@ -1,6 +1,8 @@
 import {
   getBackgroundAgentFrequencyValues,
+  getCommunicationAutomationTargetKind,
   hasEnabledBackgroundAgents,
+  isCommunicationAutomationTarget,
   isProviderUsageLimitThreshold,
   SCHEDULE_ONLY_BACKGROUND_AUTOMATION_IDS,
   SCHEDULE_ONLY_BACKGROUND_AUTOMATION_LIST,
@@ -87,4 +89,30 @@ describe('background agent helpers', () => {
     expect(isProviderUsageLimitThreshold(81)).toBe(false);
     expect(isProviderUsageLimitThreshold(100)).toBe(false);
   });
+
+  it.each([
+    ['slack', 'slack_channel', 'slack_user'],
+    ['discord', 'discord_channel', 'discord_user'],
+    ['teams', 'teams_channel', 'teams_user'],
+    ['telegram', 'telegram_chat', 'telegram_user'],
+  ] as const)(
+    'keeps channel and direct-message target kinds aligned for %s',
+    (provider, channelKind, userKind) => {
+      expect(getCommunicationAutomationTargetKind(provider, 'channel')).toBe(
+        channelKind,
+      );
+      expect(
+        getCommunicationAutomationTargetKind(provider, 'direct_message'),
+      ).toBe(userKind);
+      expect(
+        isCommunicationAutomationTarget({
+          provider,
+          targetKind: channelKind,
+        }),
+      ).toBe(true);
+      expect(
+        isCommunicationAutomationTarget({ provider, targetKind: userKind }),
+      ).toBe(true);
+    },
+  );
 });

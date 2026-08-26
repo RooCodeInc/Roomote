@@ -6,7 +6,11 @@ import {
 } from './chat-messages';
 import { chunkDiscordMessage } from './discord-provider';
 
-export type FastSessionFooterProvider = 'slack' | 'discord';
+export type FastSessionFooterProvider =
+  | 'slack'
+  | 'discord'
+  | 'teams'
+  | 'telegram';
 
 export function buildFastSessionUrl(
   provider: FastSessionFooterProvider,
@@ -36,10 +40,12 @@ export function buildFastSessionReplyFooterText(params: {
     explicitMentionRequired: false,
     ...(params.provider === 'slack'
       ? { formatLink: (label: string, url: string) => `<${url}|${label}>` }
-      : {
-          formatLink: formatMarkdownLink,
-          formatFooterText: (text: string) => `-# ${text}`,
-        }),
+      : params.provider === 'discord'
+        ? {
+            formatLink: formatMarkdownLink,
+            formatFooterText: (text: string) => `-# ${text}`,
+          }
+        : { formatLink: formatMarkdownLink }),
   });
 }
 

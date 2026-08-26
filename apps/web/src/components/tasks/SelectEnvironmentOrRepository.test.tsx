@@ -114,17 +114,21 @@ const WorkspaceValuesProbe = ({
 const SelectEnvironmentOrRepositoryHarness = ({
   allowAuto = false,
   allowFast = false,
+  autoSelectDefaultWorkspace = true,
   repositoryFilter,
   defaultValues,
   onValuesChange,
+  onInvalidWorkspaceReset,
   onCreateRepository,
 }: {
   allowAuto?: boolean;
   allowFast?: boolean;
+  autoSelectDefaultWorkspace?: boolean;
   /** Omit for no filter (homepage Auto). Pass a repo full name to filter. */
   repositoryFilter?: string;
   defaultValues: Partial<CreateTaskFormValues>;
   onValuesChange: (values: WorkspaceSelectionValues) => void;
+  onInvalidWorkspaceReset?: () => void;
   onCreateRepository?: () => void;
 }) => {
   const form = useForm<CreateTaskFormValues>({
@@ -141,6 +145,8 @@ const SelectEnvironmentOrRepositoryHarness = ({
         repositoryFilter={repositoryFilter}
         allowAuto={allowAuto}
         allowFast={allowFast}
+        autoSelectDefaultWorkspace={autoSelectDefaultWorkspace}
+        onInvalidWorkspaceReset={onInvalidWorkspaceReset}
         onCreate={vi.fn()}
         onCreateRepository={onCreateRepository}
         onEdit={vi.fn()}
@@ -322,6 +328,53 @@ describe('SelectEnvironmentOrRepository', () => {
     expect(setWorkspace).toHaveBeenCalledWith({
       workspace: { type: 'environment', id: 'env_123' },
     });
+  });
+
+  it('leaves Auto unchanged when default workspace selection is deferred', async () => {
+    let latestValues: WorkspaceSelectionValues | undefined;
+
+    render(
+      <SelectEnvironmentOrRepositoryHarness
+        allowAuto
+        autoSelectDefaultWorkspace={false}
+        defaultValues={{ repository: AUTO_WORKSPACE_VALUE }}
+        onValuesChange={(values) => {
+          latestValues = values;
+        }}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(latestValues?.repository).toBe(AUTO_WORKSPACE_VALUE);
+    });
+    expect(latestValues?.environmentId).toBeUndefined();
+    expect(setWorkspace).not.toHaveBeenCalled();
+  });
+
+  it('reports when an invalid persisted environment is reset', async () => {
+    let latestValues: WorkspaceSelectionValues | undefined;
+    const onInvalidWorkspaceReset = vi.fn();
+
+    render(
+      <SelectEnvironmentOrRepositoryHarness
+        allowAuto
+        autoSelectDefaultWorkspace={false}
+        defaultValues={{
+          repository: 'env-stale',
+          environmentId: 'env-stale',
+        }}
+        onValuesChange={(values) => {
+          latestValues = values;
+        }}
+        onInvalidWorkspaceReset={onInvalidWorkspaceReset}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(latestValues?.repository).toBe(AUTO_WORKSPACE_VALUE);
+      expect(latestValues?.environmentId).toBeUndefined();
+    });
+    expect(onInvalidWorkspaceReset).toHaveBeenCalledOnce();
   });
 
   it('re-defaults to the sole environment after a programmatic reset backs out to Auto', async () => {

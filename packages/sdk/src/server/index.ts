@@ -281,6 +281,7 @@ export {
 export * from './lib/task-runs/pr-review-action';
 export * from './lib/task-runs/pr-review-follow-up-dispatch';
 export * from './lib/fast-agent-surface-reply';
+export * from './lib/fast-agent-provider-message';
 export * from './lib/task-runs/notify-fast-agent-parent-on-pr-feedback';
 export * from './lib/task-runs/notify-fast-agent-parent-on-pull-request-conflict';
 

@@ -39,11 +39,9 @@ async function getSlackTeamNotifier(teamId: string) {
 async function updateNotificationMessage({
   payload,
   resolution,
-  resolutionType,
 }: {
   payload: SlackInteractivePayload;
   resolution: string;
-  resolutionType?: 'context' | 'section';
 }): Promise<void> {
   try {
     const { slack } = await getSlackTeamNotifier(payload.team.id);
@@ -55,7 +53,6 @@ async function updateNotificationMessage({
         blocks: buildResolvedSlackPrReviewMessageBlocks(
           payload.message.blocks,
           resolution,
-          resolutionType,
         ),
       },
     });
@@ -134,6 +131,10 @@ async function handleAcceptedPrReviewAction({
   });
 
   if (!pending) {
+    await updateNotificationMessage({
+      payload,
+      resolution: 'Already handled or expired.',
+    });
     await respondEphemeral(
       payload,
       'This offer was already handled or has expired. Reply in the thread to ask again.',
@@ -158,6 +159,10 @@ async function handleAcceptedPrReviewAction({
       payload,
       'Failed to start the follow-up. Reply in the thread to ask again.',
     );
+    await updateNotificationMessage({
+      payload,
+      resolution: 'Failed to start the follow-up.',
+    });
   }
 }
 
@@ -204,6 +209,10 @@ async function dispatchAcceptedPrReviewAction({
     );
 
     if (!enableAutoHandle) {
+      await updateNotificationMessage({
+        payload,
+        resolution: 'This task can no longer be resumed.',
+      });
       return;
     }
   } else {
@@ -217,7 +226,6 @@ async function dispatchAcceptedPrReviewAction({
   await updateNotificationMessage({
     payload,
     resolution,
-    ...(enableAutoHandle ? { resolutionType: 'section' } : {}),
   });
 }
 
@@ -266,6 +274,10 @@ export async function handleSlackPrReviewActionDismiss(
   });
 
   if (!pending) {
+    await updateNotificationMessage({
+      payload,
+      resolution: 'Already handled or expired.',
+    });
     await respondEphemeral(
       payload,
       'This offer was already handled or has expired.',

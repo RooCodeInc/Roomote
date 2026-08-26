@@ -61,6 +61,9 @@ const mocks = vi.hoisted(() => ({
   answerFast: vi.fn(),
   hasFastDefault: vi.fn(),
   hasFastSession: vi.fn(),
+  findFastReplySession: vi.fn(),
+  isFastProviderMessage: vi.fn(),
+  recordProviderMessage: vi.fn(),
 }));
 
 vi.mock('../../account-link-help.js', () => ({
@@ -106,6 +109,10 @@ vi.mock('@roomote/sdk/server', () => ({
   upsertDiscordInstallation: mocks.upsertInstallation,
   enqueueDiscordGatewayEvent: mocks.enqueueGatewayEvent,
   claimPendingPrReviewActionsForThread: vi.fn(async () => []),
+  findFastAgentSessionForProviderReply: mocks.findFastReplySession,
+  isFastAgentProviderMessage: mocks.isFastProviderMessage,
+  recordFastAgentConversationMessageBestEffort: mocks.recordProviderMessage,
+  resolveUserMcpServerConfigs: vi.fn(async () => ({})),
 }));
 
 vi.mock('@roomote/sdk/server/communication', () => ({
@@ -299,6 +306,9 @@ describe('Discord Gateway event handler', () => {
     mocks.answerFast.mockResolvedValue('A quick answer');
     mocks.hasFastDefault.mockResolvedValue(false);
     mocks.hasFastSession.mockResolvedValue(false);
+    mocks.findFastReplySession.mockResolvedValue(null);
+    mocks.isFastProviderMessage.mockResolvedValue(false);
+    mocks.recordProviderMessage.mockResolvedValue(true);
     mocks.reply.mockResolvedValue({ messageId: 'reply-1' });
     mocks.createDirectMessage.mockResolvedValue({ id: 'dm-private-1' });
     mocks.postMessage.mockResolvedValue({ messageId: 'dm-msg-1' });
@@ -1438,6 +1448,88 @@ describe('Discord Gateway event handler', () => {
         },
       }),
     );
+    expect(mocks.startNewTask).not.toHaveBeenCalled();
+  });
+
+  it('continues the Fast session bound to a Discord DM report reply', async () => {
+    mocks.findFastReplySession.mockResolvedValue({
+      id: '11111111-1111-4111-8111-111111111111',
+      userId: 'roomote-user-1',
+      conversation: {
+        surface: 'discord',
+        workspaceId: 'dm',
+        conversationId: 'automation-run-1',
+        replyTarget: { channelId: 'dm-1' },
+      },
+    });
+
+    const response = await postEvent(
+      envelope(
+        message({
+          content: 'Investigate the second finding',
+          message_reference: { message_id: 'fast-report-1' },
+        }),
+      ),
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual(
+      expect.objectContaining({ fastAnswered: true, fastContinued: true }),
+    );
+    expect(mocks.findFastReplySession).toHaveBeenCalledWith({
+      provider: 'discord',
+      workspaceId: 'dm',
+      channelId: 'dm-1',
+      replyToMessageId: 'fast-report-1',
+    });
+    expect(mocks.answerFast).toHaveBeenCalledWith(
+      expect.objectContaining({
+        question: 'Investigate the second finding',
+        conversation: expect.objectContaining({
+          conversationId: 'automation-run-1',
+        }),
+      }),
+    );
+    expect(mocks.findAutomationReportRun).not.toHaveBeenCalled();
+    expect(mocks.startNewTask).not.toHaveBeenCalled();
+  });
+
+  it('fails closed when a different Discord DM user replies to a Fast report', async () => {
+    mocks.findFastReplySession.mockResolvedValue({
+      id: '11111111-1111-4111-8111-111111111111',
+      userId: 'another-roomote-user',
+      conversation: {
+        surface: 'discord',
+        workspaceId: 'dm',
+        conversationId: 'automation-run-1',
+        replyTarget: { channelId: 'dm-1' },
+      },
+    });
+
+    const response = await postEvent(
+      envelope(message({ message_reference: { message_id: 'fast-report-1' } })),
+    );
+
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      ignored: 'discord_fast_session_user_mismatch',
+    });
+    expect(mocks.answerFast).not.toHaveBeenCalled();
+    expect(mocks.startNewTask).not.toHaveBeenCalled();
+  });
+
+  it('does not fall through when a Discord Fast message is replayed from another route', async () => {
+    mocks.isFastProviderMessage.mockResolvedValue(true);
+
+    const response = await postEvent(
+      envelope(message({ message_reference: { message_id: 'fast-report-1' } })),
+    );
+
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      ignored: 'discord_fast_session_route_mismatch',
+    });
+    expect(mocks.findAutomationReportRun).not.toHaveBeenCalled();
     expect(mocks.startNewTask).not.toHaveBeenCalled();
   });
 

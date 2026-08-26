@@ -222,6 +222,63 @@ describe('FastSessionTranscript', () => {
     expect(screen.getAllByText('launch_task')).toHaveLength(1);
   });
 
+  it('renders trusted Fast show_widget results with the shared sandboxed preview', () => {
+    render(
+      <FastSessionTranscript
+        sessionId="session-1"
+        initialMessages={[
+          {
+            id: 'widget-1',
+            eventId: 'turn-1:tool:0',
+            turnId: 'turn-1',
+            turnSeq: 1,
+            ts: 2,
+            eventType: ACP_ENVELOPE_EVENT_TYPES.ToolResult,
+            role: 'tool',
+            contentBlocks: [],
+            metadata: { visibleInTranscript: true },
+            payload: {
+              toolCallId: 'turn-1:tool:0',
+              title: 'show_widget',
+              kind: 'tool',
+              status: 'completed',
+              isExecute: false,
+              isMcp: false,
+              isRoomoteNativeTool: true,
+              mcpServerName: null,
+              mcpToolName: null,
+              toolName: 'show_widget',
+              command: null,
+              exitCode: null,
+              output: JSON.stringify({
+                success: true,
+                shown: true,
+                title: 'Fast status',
+                html: '<p>Ready</p>',
+                css: null,
+                height: 240,
+                textFallback: null,
+              }),
+              rawInput: { arguments: { html: '<p>Ready</p>' } },
+            },
+            source: 'web',
+            nativeSessionId: 'opencode-1',
+            nativeMessageId: null,
+            createdAt: new Date('2026-01-01T00:00:01.000Z'),
+          },
+        ]}
+      />,
+    );
+
+    const iframe = screen.getByTitle('Fast status');
+    expect(iframe).toHaveAttribute('sandbox', '');
+    expect(iframe).toHaveAttribute('referrerpolicy', 'no-referrer');
+    expect(iframe).toHaveAttribute(
+      'srcdoc',
+      expect.stringContaining("default-src 'none'"),
+    );
+  });
+
   it('cold-loads one completed tool row before an intervening kickoff', () => {
     render(
       <FastSessionTranscript
@@ -344,6 +401,44 @@ describe('FastSessionTranscript', () => {
         reasoningEffort: null,
       });
     });
+
+    expect(
+      await screen.findAllByRole('button', {
+        name: 'Open conversation image attachment 1',
+      }),
+    ).toHaveLength(1);
+
+    act(() => {
+      FakeEventSource.instances[0]!.emit('messages', {
+        messages: [
+          {
+            id: 'user-image-1',
+            eventId: 'turn-image-1:user',
+            turnId: 'turn-image-1',
+            turnSeq: 0,
+            ts: Date.now(),
+            eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
+            role: 'user',
+            contentBlocks: [
+              { type: 'text', text: '' },
+              { type: 'image', mimeType: 'image/png', data: 'image-1' },
+            ],
+            metadata: { visibleInTranscript: true },
+            payload: {},
+            source: 'web',
+            nativeSessionId: null,
+            nativeMessageId: null,
+            createdAt: new Date().toISOString(),
+          },
+        ],
+      });
+    });
+
+    expect(
+      screen.getAllByRole('button', {
+        name: 'Open conversation image attachment 1',
+      }),
+    ).toHaveLength(1);
   });
 
   it('keeps the drafted reply when the send fails', async () => {

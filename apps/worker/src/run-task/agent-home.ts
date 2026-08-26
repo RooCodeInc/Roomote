@@ -24,9 +24,9 @@ import {
   DISABLED_MODEL_PROVIDER_ENV_VAR_NAMES,
   getInferenceGatewayProvider,
   getInferenceGatewayProviderByEnvVarName,
-  BRAIN_MCP_ID,
-  BRAIN_MCP_INSTRUCTIONS,
+  createMemoryMcpInstructions,
   getMcpIntegration,
+  getMemoryMcpDisplayName,
   getOpenAiCompatibleRuntimeConfigs,
   INFERENCE_GATEWAY_CHATGPT_ENV_VAR_NAME,
   INFERENCE_GATEWAY_GITHUB_COPILOT_ENV_VAR_NAME,
@@ -36,6 +36,7 @@ import {
   XAI_OPENCODE_PROVIDER_ID,
   type InferenceGatewayProvider,
   isConfiguredEnvValue,
+  isMemoryMcpServer,
   isTaskModelIdDisabled,
   mergeAmazonBedrockProviderConfig,
   mergeBedrockMantleOpenAiProviderConfig,
@@ -531,14 +532,17 @@ export type OpenCodeConfigMcpServer =
  * attached to the task, that guidance is injected as an instruction file so
  * usage does not depend on tool descriptions alone.
  */
-function createIntegrationMcpInstructions(
+export function createIntegrationMcpInstructions(
   mcpServers: OpenCodeConfigMcpServer[] | undefined,
 ): string | undefined {
+  let hasPrimaryMemory = false;
   const sections = (mcpServers ?? []).flatMap((mcpServer) => {
-    // The Brain is infrastructure rather than a catalog integration, so its
-    // recall-first guidance ships from the shared types contract.
-    if (mcpServer.name === BRAIN_MCP_ID) {
-      return [`# Connected: Brain\n\n${BRAIN_MCP_INSTRUCTIONS}`];
+    if (isMemoryMcpServer(mcpServer.name)) {
+      const primary = !hasPrimaryMemory;
+      hasPrimaryMemory = true;
+      return [
+        `# Connected memory: ${getMemoryMcpDisplayName(mcpServer.name)}\n\n${createMemoryMcpInstructions(mcpServer.name, { primary })}`,
+      ];
     }
 
     const integration = getMcpIntegration(mcpServer.name);

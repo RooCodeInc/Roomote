@@ -37,6 +37,8 @@ import {
   consumeDiscordLinkCode,
   findDiscordInstallationByGuildId,
   findDiscordMappedUserId,
+  findFastAgentSessionForProviderReply,
+  isFastAgentProviderMessage,
   restoreDiscordLinkCode,
   upsertDiscordInstallation,
   upsertDiscordUserMapping,
@@ -543,8 +545,40 @@ async function processDiscordGatewayEvent(
       : {}),
   };
   const forceNewTask = command?.name === 'new';
-  const repliedToAutomationReport =
+  const repliedFastSession =
     !forceNewTask && message?.message_reference?.message_id
+      ? await findFastAgentSessionForProviderReply({
+          provider: 'discord',
+          workspaceId: channel.guildId ?? 'dm',
+          channelId: metadata.communicationChannelId,
+          ...(metadata.communicationThreadId
+            ? { threadId: metadata.communicationThreadId }
+            : {}),
+          replyToMessageId: message.message_reference.message_id,
+        })
+      : null;
+  if (
+    !forceNewTask &&
+    !repliedFastSession &&
+    message?.message_reference?.message_id &&
+    (await isFastAgentProviderMessage({
+      provider: 'discord',
+      messageId: message.message_reference.message_id,
+    }))
+  ) {
+    return { ok: true, ignored: 'discord_fast_session_route_mismatch' };
+  }
+  if (
+    repliedFastSession &&
+    channel.isDirectMessage &&
+    repliedFastSession.userId !== senderUserId
+  ) {
+    return { ok: true, ignored: 'discord_fast_session_user_mismatch' };
+  }
+  const repliedToAutomationReport =
+    !forceNewTask &&
+    !repliedFastSession &&
+    message?.message_reference?.message_id
       ? await findTaskBackedAutomationReportRun({
           provider: 'discord',
           channelId: metadata.communicationChannelId,
@@ -580,8 +614,9 @@ async function processDiscordGatewayEvent(
           launchOwnerUserId: senderUserId,
         })
       : null;
-  const isFastAgentConversation =
-    channel.isThread || channel.isDirectMessage
+  const isFastAgentConversation = Boolean(
+    repliedFastSession ??
+    (channel.isThread || channel.isDirectMessage
       ? await hasFastAgentSession({
           surface: 'discord',
           workspaceId: channel.guildId ?? 'dm',
@@ -591,7 +626,8 @@ async function processDiscordGatewayEvent(
             ...(channel.isThread ? { threadId: channel.channelId } : {}),
           },
         })
-      : false;
+      : false),
+  );
   const isRoomoteThread = Boolean(
     activeRun ||
     completedRun ||
@@ -772,7 +808,8 @@ async function processDiscordGatewayEvent(
         applicationId: resolved.applicationId,
         channel,
         metadata,
-        conversationId: channel.channelId,
+        conversationId:
+          repliedFastSession?.conversation.conversationId ?? channel.channelId,
         activeTasks: activeRun ? [{ taskId: activeRun.taskId }] : [],
       });
       return { ok: true, fastAnswered: true, fastContinued: true };
@@ -995,6 +1032,7 @@ async function processDiscordGatewayEvent(
       );
       // A typed reply supersedes any pending PR review offers here.
       retireDiscordPrReviewOffersBestEffort({
+        provider: resolved.provider,
         channelId: metadata.communicationChannelId,
         threadId: metadata.communicationThreadId ?? null,
       });
@@ -1108,6 +1146,7 @@ async function processDiscordGatewayEvent(
       });
       // A typed reply supersedes any pending PR review offers here.
       retireDiscordPrReviewOffersBestEffort({
+        provider: resolved.provider,
         channelId: metadata.communicationChannelId,
         threadId: metadata.communicationThreadId ?? null,
       });

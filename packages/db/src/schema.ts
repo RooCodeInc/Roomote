@@ -3062,6 +3062,7 @@ export const fastAgentConversations = pgTable(
     conversationId: text('conversation_id').notNull(),
     currentReplyChannelId: text('current_reply_channel_id'),
     currentReplyThreadId: text('current_reply_thread_id'),
+    currentReplyServiceUrl: text('current_reply_service_url'),
     replyTargetVerified: boolean('reply_target_verified')
       .notNull()
       .default(true),
@@ -3142,6 +3143,52 @@ export const fastAgentMessages = pgTable(
 );
 
 /**
+ * fast_agent_provider_messages
+ *
+ * Durable provider message bindings for communication surfaces whose stable
+ * conversation address can host more than one Fast session. Inbound replies
+ * use these server-written rows to recover the canonical session without
+ * trusting identifiers embedded in message text or webhook routing metadata.
+ */
+export const fastAgentProviderMessages = pgTable(
+  'fast_agent_provider_messages',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    conversationId: uuid('conversation_id')
+      .notNull()
+      .references(() => fastAgentConversations.id, { onDelete: 'cascade' }),
+    provider: text('provider').notNull().$type<'discord' | 'teams'>(),
+    workspaceId: text('workspace_id').notNull(),
+    channelId: text('channel_id').notNull(),
+    threadId: text('thread_id'),
+    messageId: text('message_id').notNull(),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('fast_agent_provider_messages_route_unique').on(
+      table.provider,
+      table.workspaceId,
+      table.channelId,
+      table.messageId,
+    ),
+    index('fast_agent_provider_messages_conversation_idx').on(
+      table.conversationId,
+    ),
+    index('fast_agent_provider_messages_thread_idx').on(
+      table.provider,
+      table.workspaceId,
+      table.channelId,
+      table.threadId,
+    ),
+    check(
+      'fast_agent_provider_messages_provider_check',
+      sql`${table.provider} in ('discord', 'teams')`,
+    ),
+  ],
+);
+
+/**
  * fast_agent_pr_feedback_deliveries
  *
  * Durable conversation-scoped claims for PR feedback presented by Fast.
@@ -3183,6 +3230,7 @@ export const fastAgentConversationsRelations = relations(
       references: [users.id],
     }),
     messages: many(fastAgentMessages),
+    providerMessages: many(fastAgentProviderMessages),
     prFeedbackDeliveries: many(fastAgentPrFeedbackDeliveries),
   }),
 );
@@ -3192,6 +3240,16 @@ export const fastAgentMessagesRelations = relations(
   ({ one }) => ({
     conversation: one(fastAgentConversations, {
       fields: [fastAgentMessages.conversationId],
+      references: [fastAgentConversations.id],
+    }),
+  }),
+);
+
+export const fastAgentProviderMessagesRelations = relations(
+  fastAgentProviderMessages,
+  ({ one }) => ({
+    conversation: one(fastAgentConversations, {
+      fields: [fastAgentProviderMessages.conversationId],
       references: [fastAgentConversations.id],
     }),
   }),
@@ -4275,6 +4333,14 @@ export const brainMemoryEvents = pgTable(
      * other page.
      */
     agentSummary: text('agent_summary'),
+    /**
+     * Bumped whenever saveBrainAgentSummary updates the row's content. The
+     * drainer fences its completion on the revision it claimed, so a summary
+     * that lands while a page write is in flight forces a re-ingest of the
+     * newer content instead of being stranded behind an already-written older
+     * snapshot.
+     */
+    revision: integer('revision').notNull().default(0),
     attempts: integer('attempts').notNull().default(0),
     lastError: text('last_error'),
     processedAt: timestamp('processed_at'),
@@ -4284,6 +4350,54 @@ export const brainMemoryEvents = pgTable(
   (table) => [
     unique('brain_memory_events_run_unique').on(table.runId),
     index('brain_memory_events_status_created_idx').on(
+      table.status,
+      table.createdAt,
+    ),
+  ],
+);
+
+/**
+ * fast_agent_memory_events
+ *
+ * Transactional outbox for Fast conversation memories, the conversational
+ * sibling of brain_memory_events. One row per conversation accumulates the
+ * facts Fast was asked to remember; the ingestion drainer is the only writer
+ * to the Brain, so the slug, redaction, and provenance stay server-controlled
+ * and Fast never holds a Brain write credential. A separate table (rather
+ * than a nullable run_id on brain_memory_events) keeps the N-1 release's
+ * drainer, which claims rows without filtering, from ever seeing runless rows.
+ */
+export const fastAgentMemoryEvents = pgTable(
+  'fast_agent_memory_events',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    conversationId: uuid('conversation_id')
+      .notNull()
+      .references(() => fastAgentConversations.id, { onDelete: 'cascade' }),
+    /** Accumulated `- fact` markdown lines, newest appended last. */
+    memory: text('memory').notNull(),
+    /**
+     * Bumped on every appended fact. The drainer fences its completion on the
+     * revision it claimed, so a save that lands while a page write is in
+     * flight forces a re-ingest of the newer content instead of being
+     * stranded behind an already-written older snapshot.
+     */
+    revision: integer('revision').notNull().default(0),
+    status: text('status')
+      .notNull()
+      .default('pending')
+      .$type<'pending' | 'processing' | 'done' | 'skipped' | 'failed'>(),
+    attempts: integer('attempts').notNull().default(0),
+    lastError: text('last_error'),
+    processedAt: timestamp('processed_at'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => [
+    unique('fast_agent_memory_events_conversation_unique').on(
+      table.conversationId,
+    ),
+    index('fast_agent_memory_events_status_created_idx').on(
       table.status,
       table.createdAt,
     ),

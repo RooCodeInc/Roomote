@@ -60,7 +60,6 @@ export const manageCustomAutomationsFieldSchemas = {
     )
     .optional(),
   targetChannelId: z.string().optional(),
-  targetServiceUrl: z.string().optional(),
 } satisfies z.ZodRawShape;
 
 export const manageCustomAutomationsInputSchema = z.object(
@@ -138,7 +137,6 @@ export function buildManageCustomAutomationsRequest(
           targetProvider: params.targetProvider,
           targetMode: params.targetMode,
           targetChannelId: params.targetChannelId,
-          targetServiceUrl: params.targetServiceUrl,
         }).filter((entry) => entry[1] !== undefined),
       );
       return {

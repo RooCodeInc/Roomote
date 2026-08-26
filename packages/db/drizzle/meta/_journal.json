@@ -414,6 +414,34 @@
       "when": 1787740900410,
       "tag": "0058_smiling_betty_ross",
       "breakpoints": true
+    },
+    {
+      "idx": 59,
+      "version": "7",
+      "when": 1787764680385,
+      "tag": "0059_sturdy_starjammers",
+      "breakpoints": true
+    },
+    {
+      "idx": 60,
+      "version": "7",
+      "when": 1787765765044,
+      "tag": "0060_organic_harrier",
+      "breakpoints": true
+    },
+    {
+      "idx": 61,
+      "version": "7",
+      "when": 1787771579749,
+      "tag": "0061_furry_hellfire_club",
+      "breakpoints": true
+    },
+    {
+      "idx": 62,
+      "version": "7",
+      "when": 1787776112381,
+      "tag": "0062_neat_lady_deathstrike",
+      "breakpoints": true
     }
   ]
 }

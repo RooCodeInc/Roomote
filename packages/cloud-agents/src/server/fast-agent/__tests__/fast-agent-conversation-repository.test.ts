@@ -65,6 +65,34 @@ describe('Fast conversation repository', () => {
     expect(row).toEqual({ channelId: null, surface: 'automation' });
   });
 
+  it.each(['teams', 'telegram'] as const)(
+    'persists and reconstructs a %s Fast conversation reply target',
+    async (surface) => {
+      const user = await createUser();
+      const conversation = {
+        surface,
+        workspaceId: `${surface}-workspace-repository-test`,
+        conversationId: `${surface}-conversation-repository-test`,
+        replyTarget: {
+          channelId: `${surface}-channel-repository-test`,
+          threadId: `${surface}-thread-repository-test`,
+          ...(surface === 'teams'
+            ? { serviceUrl: 'https://smba.example.com/amer/' }
+            : {}),
+        },
+      };
+
+      const session = await fastAgentConversationRepository.getOrCreate({
+        userId: user.id,
+        conversation,
+      });
+
+      await expect(
+        fastAgentConversationRepository.findById({ id: session.id }),
+      ).resolves.toMatchObject({ conversation });
+    },
+  );
+
   it('converges concurrent creation on one provider-neutral row', async () => {
     const user = await createUser();
     const sessions = await Promise.all(

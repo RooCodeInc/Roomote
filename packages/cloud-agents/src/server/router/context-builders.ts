@@ -340,6 +340,7 @@ export async function getAvailableEnvironments(): Promise<
   for (const env of envs) {
     const mappings = await db
       .select({
+        repoId: repositories.id,
         repoName: repositories.fullName,
       })
       .from(environmentRepositoryMappings)
@@ -353,6 +354,10 @@ export async function getAvailableEnvironments(): Promise<
       id: env.id,
       name: env.name,
       description: env.description ?? undefined,
+      repositories: mappings.map((mapping) => ({
+        id: mapping.repoId,
+        name: mapping.repoName,
+      })),
       repositoryNames: mappings.map((m) => m.repoName),
     });
   }

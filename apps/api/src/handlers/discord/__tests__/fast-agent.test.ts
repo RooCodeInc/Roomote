@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   reply: vi.fn(),
   resolveWorkspace: vi.fn(),
   startTask: vi.fn(),
+  recordProviderMessage: vi.fn(),
 }));
 
 vi.mock('@roomote/redis', async (importOriginal) => {
@@ -30,6 +31,11 @@ vi.mock('@roomote/cloud-agents/server', () => ({
   getOrCreateFastAgentSession: vi
     .fn()
     .mockResolvedValue({ id: 'fast-session-1' }),
+}));
+
+vi.mock('@roomote/sdk/server', () => ({
+  recordFastAgentConversationMessageBestEffort: mocks.recordProviderMessage,
+  resolveUserMcpServerConfigs: vi.fn(async () => ({})),
 }));
 
 vi.mock('@roomote/communication/discord-event', () => ({

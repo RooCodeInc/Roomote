@@ -260,7 +260,7 @@ async function upsertDestinationDelivery(
     taskId: string;
     destinationKind: 'fast_conversation' | 'task';
     destinationKey: string;
-    routeProvider: 'slack' | 'discord' | null;
+    routeProvider: 'slack' | 'teams' | 'telegram' | 'discord' | null;
     routeWorkspaceId: string | null;
     routeChannelId: string | null;
     routeThreadId: string | null;

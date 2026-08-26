@@ -33,6 +33,11 @@ const nextConfig: NextConfig = {
     'bullmq',
     'ioredis',
     'postgres',
+    // The Fast native tool runtime symlinks an on-disk zod into generated
+    // OpenCode tool directories (fast-agent-native-tool-bridge). Bundling it
+    // makes require.resolve return a webpack module id with no file on disk,
+    // which breaks every web-run Fast turn in the standalone image.
+    'zod',
   ],
   // Always bundle the env files the runtime may need so preview deploys can
   // load preview secrets even when build-time env detection resolves differently.

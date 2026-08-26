@@ -59,8 +59,11 @@ vi.mock('@roomote/cloud-agents/server', () => ({
 
     return content.slice(start + startMarker.length, end);
   },
-  isReviewInProgressStatusLine: (line: string) =>
-    /^(Self-reviewing|Reviewing|Re-reviewing)/i.test(line.trim()),
+  isReviewSummaryInProgress: (body: string) =>
+    body.includes('version=2 phase=reviewing') ||
+    /<!-- roomote-review-status:start -->\s*(?:Self-reviewing|Reviewing|Re-reviewing)/i.test(
+      body,
+    ),
 }));
 
 vi.mock('../../pull-requests/source-control-pull-request-reads', () => ({
@@ -512,7 +515,7 @@ describe('preparePrReviewNotificationDelivery', () => {
         {
           id: 'c1',
           author: 'roomote[bot]',
-          body: '<!-- roomote-review-summary sha=abc1234 mode=initial -->\n<!-- roomote-review-status:start -->\nReviewing the PR now.\n<!-- roomote-review-status:end -->',
+          body: '<!-- roomote-review-summary sha=abc1234 mode=initial version=2 phase=reviewing -->\n<!-- roomote-review-status:start -->\nI am inspecting the updated head.\n<!-- roomote-review-status:end -->',
           createdAt: null,
           url: null,
         },

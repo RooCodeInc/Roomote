@@ -97,6 +97,7 @@ async function findTeamsUserDirectMessageDestination(
   });
   return {
     channelId: destination.channelId,
+    teamId: mapping.teamsTenantId,
     serviceUrl: conversation.serviceUrl,
   };
 }

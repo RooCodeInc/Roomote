@@ -206,7 +206,7 @@ describe('handleSlackPrReviewActionYes', () => {
     await handleSlackPrReviewActionYes(makePayload('pr_review_action_yes'));
 
     expect(dispatchFollowUpMock).not.toHaveBeenCalled();
-    expect(updateMessageMock).not.toHaveBeenCalled();
+    expect(updateMessageMock).toHaveBeenCalled();
     expect(postSlackInteractiveResponseMock).toHaveBeenCalledWith(
       'https://hooks.slack.test/response',
       expect.objectContaining({
@@ -240,7 +240,7 @@ describe('handleSlackPrReviewActionYes', () => {
         text: expect.stringContaining('no longer be resumed'),
       }),
     );
-    expect(updateMessageMock).not.toHaveBeenCalled();
+    expect(updateMessageMock).toHaveBeenCalled();
   });
 });
 
@@ -260,11 +260,13 @@ describe('handleSlackPrReviewActionAuto', () => {
         message: {
           blocks: expect.arrayContaining([
             expect.objectContaining({
-              type: 'section',
-              text: {
-                type: 'mrkdwn',
-                text: 'OK, <@U1>. Future review feedback on this PR will get resolved automatically.',
-              },
+              type: 'context',
+              elements: [
+                {
+                  type: 'mrkdwn',
+                  text: '_OK, <@U1>. Future review feedback on this PR will get resolved automatically._',
+                },
+              ],
             }),
           ]),
         },
@@ -296,7 +298,7 @@ describe('handleSlackPrReviewActionAuto', () => {
     await handleSlackPrReviewActionAuto(makePayload('pr_review_action_auto'));
 
     expect(dispatchFollowUpMock).not.toHaveBeenCalled();
-    expect(updateMessageMock).not.toHaveBeenCalled();
+    expect(updateMessageMock).toHaveBeenCalled();
     expect(postSlackInteractiveResponseMock).toHaveBeenCalledWith(
       'https://hooks.slack.test/response',
       expect.objectContaining({
@@ -334,14 +336,14 @@ describe('handleSlackPrReviewActionDismiss', () => {
     );
   });
 
-  it('reports an expired offer instead of updating the message', async () => {
+  it('reports an expired offer and removes its stale controls', async () => {
     claimPendingMock.mockResolvedValue(null);
 
     await handleSlackPrReviewActionDismiss(
       makePayload('pr_review_action_dismiss'),
     );
 
-    expect(updateMessageMock).not.toHaveBeenCalled();
+    expect(updateMessageMock).toHaveBeenCalled();
     expect(postSlackInteractiveResponseMock).toHaveBeenCalledWith(
       'https://hooks.slack.test/response',
       expect.objectContaining({

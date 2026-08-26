@@ -34,6 +34,8 @@ export type SessionInfo = {
 const SURFACE_LABELS: Record<string, string> = {
   slack: 'Slack',
   discord: 'Discord',
+  teams: 'Microsoft Teams',
+  telegram: 'Telegram',
   automation: 'Automation',
   web: 'Web',
 };
