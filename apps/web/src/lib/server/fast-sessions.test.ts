@@ -1,18 +1,14 @@
 import {
   db,
-  eq,
   fastAgentConversations,
+  fastAgentMessages,
   runFactory,
   taskFactory,
   userFactory,
 } from '@roomote/db/server';
 import { RunStatus } from '@roomote/types';
 
-import {
-  getFastSessionById,
-  getFastSessions,
-  normalizeFastSessionTranscript,
-} from './fast-sessions';
+import { getFastSessionById, getFastSessions } from './fast-sessions';
 
 async function createFastSession({
   userId,
@@ -38,6 +34,43 @@ async function createFastSession({
   return session!;
 }
 
+async function createFastMessage({
+  conversationId,
+  eventId,
+  turnSeq,
+  ts = 1,
+  eventType = 'roomote_runtime.assistant_message',
+  role = 'assistant',
+  payload = {},
+}: {
+  conversationId: string;
+  eventId: string;
+  turnSeq: number;
+  ts?: number;
+  eventType?: `roomote_runtime.${string}`;
+  role?: 'user' | 'assistant' | 'tool';
+  payload?: Record<string, unknown>;
+}) {
+  const [message] = await db
+    .insert(fastAgentMessages)
+    .values({
+      conversationId,
+      eventId,
+      turnId: 'turn-1',
+      turnSeq,
+      ts,
+      eventType,
+      role,
+      contentBlocks: [{ type: 'text', text: eventId }],
+      metadata: { visibleInTranscript: true },
+      payload,
+      source: 'slack',
+    })
+    .returning();
+
+  return message!;
+}
+
 describe('Fast session queries', () => {
   it('lists only the current user sessions for a non-admin', async () => {
     const owner = await userFactory.create();
@@ -51,6 +84,13 @@ describe('Fast session queries', () => {
       userId: owner.id,
       conversationId: 'newer',
       updatedAt: new Date('2026-01-02T00:00:00.000Z'),
+    });
+    await createFastMessage({
+      conversationId: newer.id,
+      eventId: 'newer:user',
+      turnSeq: 0,
+      role: 'user',
+      eventType: 'roomote_runtime.user_prompt',
     });
     await createFastSession({
       userId: otherUser.id,
@@ -111,23 +151,88 @@ describe('Fast session queries', () => {
     ).resolves.toMatchObject({ id: session.id, userId: owner.id });
   });
 
-  it('normalizes only persisted user and assistant text', () => {
-    expect(
-      normalizeFastSessionTranscript([
-        { role: 'user', content: [{ type: 'text', text: 'Question' }] },
-        {
-          role: 'assistant',
-          content: [
-            { type: 'text', text: 'Answer' },
-            { type: 'reasoning', text: 'Unsupported reasoning' },
-          ],
-        },
-        { role: 'tool', content: [{ type: 'text', text: 'Tool output' }] },
-      ]),
-    ).toEqual([
-      { id: 'fast-message-0', role: 'user', text: 'Question' },
-      { id: 'fast-message-1', role: 'assistant', text: 'Answer' },
+  it('reads canonical messages in timestamp and turn sequence order', async () => {
+    const owner = await userFactory.create();
+    const session = await createFastSession({
+      userId: owner.id,
+      conversationId: 'ordered-session',
+      updatedAt: new Date('2026-01-01T00:00:00.000Z'),
+    });
+    await createFastMessage({
+      conversationId: session.id,
+      eventId: 'turn-1:assistant:0',
+      turnSeq: 1,
+      ts: 100,
+    });
+    await createFastMessage({
+      conversationId: session.id,
+      eventId: 'turn-1:user',
+      turnSeq: 0,
+      ts: 100,
+      role: 'user',
+      eventType: 'roomote_runtime.user_prompt',
+    });
+
+    const result = await getFastSessionById(
+      { userId: owner.id, isAdmin: false },
+      session.id,
+    );
+
+    expect(result?.messages.map((message) => message.eventId)).toEqual([
+      'turn-1:user',
+      'turn-1:assistant:0',
     ]);
+  });
+
+  it('does not fall back to compatibility messages for existing sessions', async () => {
+    const owner = await userFactory.create();
+    const session = await createFastSession({
+      userId: owner.id,
+      conversationId: 'legacy-only-session',
+      updatedAt: new Date('2026-01-01T00:00:00.000Z'),
+    });
+
+    const result = await getFastSessionById(
+      { userId: owner.id, isAdmin: false },
+      session.id,
+    );
+
+    expect(session.compatibilityMessages).toHaveLength(1);
+    expect(result?.messages).toEqual([]);
+    expect(result?.messageCount).toBe(0);
+  });
+
+  it('returns native tool event payloads unchanged', async () => {
+    const owner = await userFactory.create();
+    const session = await createFastSession({
+      userId: owner.id,
+      conversationId: 'native-tool-session',
+      updatedAt: new Date('2026-01-01T00:00:00.000Z'),
+    });
+    await createFastMessage({
+      conversationId: session.id,
+      eventId: 'turn-1:tool-result:0',
+      turnSeq: 2,
+      eventType: 'roomote_runtime.tool_result',
+      role: 'tool',
+      payload: {
+        toolCallId: 'turn-1:tool:0',
+        toolName: 'send_chat_reply',
+        status: 'completed',
+        output: '{"delivered":true}',
+      },
+    });
+
+    const result = await getFastSessionById(
+      { userId: owner.id, isAdmin: false },
+      session.id,
+    );
+
+    expect(result?.messages[0]?.payload).toMatchObject({
+      toolCallId: 'turn-1:tool:0',
+      toolName: 'send_chat_reply',
+      status: 'completed',
+    });
   });
 
   it('returns visible tasks delegated from the Fast session', async () => {
@@ -158,41 +263,6 @@ describe('Fast session queries', () => {
         taskId: task.id,
         title: 'Delegated task',
         status: RunStatus.Running,
-      }),
-    ]);
-  });
-
-  it('finds delegated tasks linked through a legacy conversation ID', async () => {
-    const legacyConversationId = '11111111-1111-4111-8111-111111111111';
-    const owner = await userFactory.create();
-    const session = await createFastSession({
-      userId: owner.id,
-      conversationId: 'legacy-delegated-task-session',
-      updatedAt: new Date('2026-01-01T00:00:00.000Z'),
-    });
-    await db
-      .update(fastAgentConversations)
-      .set({ legacyConversationIds: [legacyConversationId] })
-      .where(eq(fastAgentConversations.id, session.id));
-    const task = await taskFactory.create({ title: 'Legacy delegated task' });
-    await runFactory.create({
-      taskId: task.id,
-      payload: {
-        repo: 'roomote/roomote',
-        description: 'Legacy delegated task',
-        fastAgentSessionId: legacyConversationId,
-      },
-    });
-
-    const result = await getFastSessionById(
-      { userId: owner.id, isAdmin: false },
-      session.id,
-    );
-
-    expect(result?.linkedTasks).toEqual([
-      expect.objectContaining({
-        taskId: task.id,
-        title: 'Legacy delegated task',
       }),
     ]);
   });

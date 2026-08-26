@@ -1,55 +1,58 @@
 'use client';
 
-import type { ReactNode } from 'react';
+import { useMemo, type ReactNode } from 'react';
+import {
+  getTextFromContentBlocks,
+  inferAcpMessageKind,
+  isVisibleInTranscript,
+  type AcpEventType,
+} from '@roomote/types';
 
-import type { FastSessionTranscriptMessage } from '@/lib/server/fast-sessions';
+import type { FastSessionMessage } from '@/lib/server/fast-sessions';
 import {
   Conversation,
   ConversationContent,
   ConversationScrollButton,
-  Message,
-  MessageActions,
-  MessageContent,
-  MessageCopyButton,
-  MessageNewTaskButton,
-  MessagePlainText,
-  MessageResponse,
   MessageUiOptionsProvider,
 } from '@/components/ai-elements';
-import { cn } from '@/lib/utils';
+
+import { AcpMessageItem } from '../../task/[taskId]/messages/acp';
+import { toAcpUiMessage } from '../../task/[taskId]/hooks/services/acp-protocol-service';
 
 export function FastSessionTranscript({
   messages,
   footer,
 }: {
-  messages: FastSessionTranscriptMessage[];
+  messages: FastSessionMessage[];
   footer?: ReactNode;
 }) {
+  const uiMessages = useMemo(
+    () =>
+      messages
+        .filter((message) => isVisibleInTranscript(message.metadata))
+        .map((message) =>
+          toAcpUiMessage({
+            id: message.id,
+            ts: message.ts,
+            eventType: message.eventType as AcpEventType,
+            role: message.role,
+            kind: inferAcpMessageKind(message.eventType),
+            contentBlocks: message.contentBlocks,
+            metadata: message.metadata,
+            payload: message.payload,
+            text: getTextFromContentBlocks(message.contentBlocks) ?? undefined,
+          }),
+        ),
+    [messages],
+  );
+
   return (
     <MessageUiOptionsProvider>
       <Conversation className="min-h-0 flex-1" initial="instant">
         <ConversationContent className="ph-no-capture mx-auto w-full max-w-4xl p-4">
-          {messages.map((message) => {
-            const isUser = message.role === 'user';
-
-            return (
-              <Message key={message.id} from={message.role}>
-                <MessageContent
-                  className={cn('min-w-0 flex-1', isUser ? 'pt-8' : 'py-0')}
-                >
-                  {isUser ? (
-                    <MessagePlainText>{message.text}</MessagePlainText>
-                  ) : (
-                    <MessageResponse>{message.text}</MessageResponse>
-                  )}
-                </MessageContent>
-                <MessageActions className={isUser ? 'justify-end' : undefined}>
-                  <MessageCopyButton content={message.text} />
-                  <MessageNewTaskButton content={message.text} />
-                </MessageActions>
-              </Message>
-            );
-          })}
+          {uiMessages.map((message) => (
+            <AcpMessageItem key={message.id} msg={message} />
+          ))}
           {footer}
         </ConversationContent>
         <ConversationScrollButton />

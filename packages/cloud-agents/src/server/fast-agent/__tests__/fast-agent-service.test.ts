@@ -4,6 +4,7 @@ const mocks = vi.hoisted(() => ({
   getSession: vi.fn(),
   getNativeRuntime: vi.fn(),
   setOpenCodeSession: vi.fn(),
+  upsertMessage: vi.fn(),
   getEnvironments: vi.fn(),
   getTaskModelOptions: vi.fn(),
   generateText: vi.fn(),
@@ -59,6 +60,7 @@ vi.mock('../fast-agent-session', () => ({
   getActiveFastAgentTasks: mocks.getActiveTasks,
   getOrCreateFastAgentSession: mocks.getSession,
   setFastAgentOpenCodeSession: mocks.setOpenCodeSession,
+  upsertFastAgentMessage: mocks.upsertMessage,
 }));
 
 vi.mock('../../router', () => ({
@@ -241,6 +243,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       openCodeSessionId: null,
     });
     mocks.setOpenCodeSession.mockResolvedValue(undefined);
+    mocks.upsertMessage.mockResolvedValue(undefined);
     mocks.getActiveTasks.mockResolvedValue([]);
     mocks.getEnvironments.mockResolvedValue([
       {
@@ -337,6 +340,49 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       purpose: 'closeout',
       message: 'It coordinates incoming requests.',
     });
+    expect(mocks.upsertMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: 'conversation-1',
+        message: expect.objectContaining({
+          eventId: '100.2:user',
+          turnSeq: 0,
+          eventType: 'roomote_runtime.user_prompt',
+        }),
+      }),
+    );
+    expect(mocks.upsertMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: expect.objectContaining({
+          eventId: '100.2:tool-call:0',
+          eventType: 'roomote_runtime.tool_call',
+          payload: expect.objectContaining({
+            toolCallId: '100.2:tool:0',
+            toolName: 'send_chat_reply',
+          }),
+        }),
+      }),
+    );
+    expect(mocks.upsertMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: expect.objectContaining({
+          eventId: '100.2:assistant:0',
+          eventType: 'roomote_runtime.assistant_message',
+          nativeSessionId: 'opencode-session-1',
+        }),
+      }),
+    );
+    expect(mocks.upsertMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: expect.objectContaining({
+          eventId: '100.2:tool-result:0',
+          eventType: 'roomote_runtime.tool_result',
+          payload: expect.objectContaining({
+            toolCallId: '100.2:tool:0',
+            status: 'completed',
+          }),
+        }),
+      }),
+    );
     expect(mocks.generateText).toHaveBeenCalledWith(
       expect.objectContaining({
         modelRole: 'orchestration',
@@ -853,10 +899,44 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     );
   });
 
+  it('stops before inference when the canonical user prompt cannot persist', async () => {
+    mocks.upsertMessage.mockRejectedValue(new Error('database unavailable'));
+
+    const adapter = callbacks();
+    await expect(
+      answerFastAgentQuestion({
+        ...baseParams,
+        adapter,
+      }),
+    ).resolves.toContain('I hit an error');
+    expect(mocks.generateText).not.toHaveBeenCalled();
+    expect(adapter.postReply).toHaveBeenCalledOnce();
+  });
+
+  it('does not repost when canonical persistence fails after a visible reply', async () => {
+    mocks.upsertMessage.mockImplementation(async ({ message }) => {
+      if (message.eventType === 'roomote_runtime.assistant_message') {
+        throw new Error('database unavailable');
+      }
+    });
+    const adapter = callbacks();
+
+    await expect(
+      answerFastAgentQuestion({ ...baseParams, adapter }),
+    ).resolves.toBe('It coordinates incoming requests.');
+    expect(adapter.postReply).toHaveBeenCalledOnce();
+  });
+
   it('posts final assistant text only as a defensive fallback', async () => {
     mocks.generateText.mockImplementation(
       async (_params, _session, options) => {
         await options.onSessionReady('opencode-session-1');
+        await options.onMessageCompleted?.({
+          id: 'native-message-1',
+          sessionId: 'opencode-session-1',
+          createdAtMs: 100,
+          completedAtMs: 200,
+        });
         return 'Fallback final text';
       },
     );
@@ -869,6 +949,16 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       purpose: 'closeout',
       message: 'Fallback final text',
     });
+    expect(mocks.upsertMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: expect.objectContaining({
+          eventId: '100.2:assistant:0',
+          ts: 200,
+          nativeSessionId: 'opencode-session-1',
+          nativeMessageId: 'native-message-1',
+        }),
+      }),
+    );
   });
 
   it('passes native integration arguments and results without text encoding', async () => {
@@ -2240,6 +2330,16 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       expect(
         JSON.stringify(mocks.appendVisibleMessages.mock.lastCall),
       ).not.toContain('Retrying in');
+      const retryWrites = mocks.upsertMessage.mock.calls
+        .map(([input]) => input.message)
+        .filter((message) => message.eventId === '100.2:retry-notice');
+      expect(retryWrites.length).toBeGreaterThan(1);
+      expect(new Set(retryWrites.map((message) => message.eventId)).size).toBe(
+        1,
+      );
+      expect(retryWrites.at(-1)?.contentBlocks).toEqual([
+        { type: 'text', text: 'Connection restored.' },
+      ]);
     } finally {
       vi.useRealTimers();
     }

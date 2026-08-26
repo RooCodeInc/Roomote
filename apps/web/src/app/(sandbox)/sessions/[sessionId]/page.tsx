@@ -87,14 +87,14 @@ export default async function SessionDetailPage({
         </WorkspaceHeader>
 
         <FastSessionTranscript
-          messages={session.transcript}
+          messages={session.messages}
           footer={
             <div className="space-y-4 pt-4">
-              {session.transcript.length === 0 ? (
+              {session.messages.length === 0 ? (
                 <EmptyState
                   icon={<BotMessageSquare className="size-6" />}
-                  title="No persisted text transcript"
-                  description="This Fast session has no user or assistant text in its durable fallback history."
+                  title="No canonical messages"
+                  description="This session predates canonical Fast message persistence or has not recorded a new turn yet."
                   containerClassName="py-10"
                 />
               ) : null}
@@ -200,19 +200,18 @@ export default async function SessionDetailPage({
                 <CardHeader>
                   <CardTitle>OpenCode workspace details unavailable</CardTitle>
                   <CardDescription>
-                    Fast currently persists visible fallback text and the last
-                    native OpenCode session ID, but not per-message timestamps,
-                    native tool or reasoning events, conversation lifecycle
-                    status, artifacts, repository state, logs, terminal access,
-                    or preview endpoints.
+                    Fast now persists canonical visible messages, native tool
+                    calls and results, and OpenCode session relationships. Raw
+                    OpenCode reasoning, child-session event streams,
+                    conversation lifecycle status, artifacts, repository state,
+                    logs, terminal access, and preview endpoints are not exposed
+                    by the current Fast runtime.
                   </CardDescription>
                 </CardHeader>
                 <CardContent>
-                  The smallest durable path is an additive fast_agent_messages
-                  store linked to this conversation, with stable event IDs,
-                  timestamps, content blocks, and optional task or run
-                  relationships. It must dual-write with compatibilityMessages
-                  for an N-1-safe release before the legacy path can retire.
+                  compatibilityMessages remains a write-only N-1 rollback path
+                  during this release. Canonical transcript reads do not
+                  backfill or fall back to legacy history.
                 </CardContent>
               </Card>
             </div>

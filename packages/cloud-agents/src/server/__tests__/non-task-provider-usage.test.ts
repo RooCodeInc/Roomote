@@ -301,7 +301,11 @@ describe('resolveOpenCodeSmallModel', () => {
       await subagentReady;
       return {
         data: {
-          info: {},
+          info: {
+            id: 'message-1',
+            sessionID: 'session-1',
+            time: { created: 100, completed: 200 },
+          },
           parts: [{ type: 'text', text: 'native tool turn complete' }],
         },
         error: undefined,
@@ -315,6 +319,7 @@ describe('resolveOpenCodeSmallModel', () => {
     const onSessionReady = vi.fn();
     const onModelResolved = vi.fn();
     const onPromptStarted = vi.fn();
+    const onMessageCompleted = vi.fn();
     const onSubagentSessionReady = vi.fn(() => markSubagentReady());
     const session: { id?: string } = {};
 
@@ -337,6 +342,7 @@ describe('resolveOpenCodeSmallModel', () => {
             send_chat_reply: true,
           },
           onModelResolved,
+          onMessageCompleted,
           onPromptStarted,
           onSessionReady,
           onSubagentSessionReady,
@@ -348,6 +354,12 @@ describe('resolveOpenCodeSmallModel', () => {
 
     expect(session.id).toBe('session-1');
     expect(onModelResolved).toHaveBeenCalledWith('openrouter/openai/gpt-5.4');
+    expect(onMessageCompleted).toHaveBeenCalledWith({
+      id: 'message-1',
+      sessionId: 'session-1',
+      createdAtMs: 100,
+      completedAtMs: 200,
+    });
     expect(onPromptStarted).toHaveBeenCalledOnce();
     expect(onSessionReady).toHaveBeenCalledWith('session-1');
     expect(onSubagentSessionReady).toHaveBeenCalledWith('subagent-session-1');

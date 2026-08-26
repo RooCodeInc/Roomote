@@ -1,9 +1,11 @@
 import {
   and,
+  asc,
   db,
   desc,
   eq,
   fastAgentConversations,
+  fastAgentMessages,
   inArray,
   isNull,
   sql,
@@ -11,10 +13,29 @@ import {
   tasks,
   users,
 } from '@roomote/db/server';
+import type { FastAgentMessage } from '@roomote/db';
 
 import type { UserAuthSuccess } from '@/types';
 
 type FastSessionAuth = Pick<UserAuthSuccess, 'userId' | 'isAdmin'>;
+
+export type FastSessionMessage = Pick<
+  FastAgentMessage,
+  | 'id'
+  | 'eventId'
+  | 'turnId'
+  | 'turnSeq'
+  | 'ts'
+  | 'eventType'
+  | 'role'
+  | 'contentBlocks'
+  | 'metadata'
+  | 'payload'
+  | 'source'
+  | 'nativeSessionId'
+  | 'nativeMessageId'
+  | 'createdAt'
+>;
 
 const fastSessionSelection = {
   id: fastAgentConversations.id,
@@ -28,60 +49,19 @@ const fastSessionSelection = {
   currentReplyThreadId: fastAgentConversations.currentReplyThreadId,
   replyTargetVerified: fastAgentConversations.replyTargetVerified,
   openCodeSessionId: fastAgentConversations.openCodeSessionId,
-  messageCount: sql<number>`jsonb_array_length(${fastAgentConversations.compatibilityMessages})`,
+  messageCount: sql<number>`(
+    select count(*)::int
+    from ${fastAgentMessages}
+    where ${fastAgentMessages.conversationId} = ${fastAgentConversations.id}
+  )`,
   createdAt: fastAgentConversations.createdAt,
   updatedAt: fastAgentConversations.updatedAt,
 };
 
 const fastSessionDetailSelection = {
   ...fastSessionSelection,
-  compatibilityMessages: fastAgentConversations.compatibilityMessages,
   legacyConversationIds: fastAgentConversations.legacyConversationIds,
 };
-
-export type FastSessionTranscriptMessage = {
-  id: string;
-  role: 'user' | 'assistant';
-  text: string;
-};
-
-function getPersistedText(content: unknown): string {
-  if (typeof content === 'string') {
-    return content;
-  }
-
-  if (!Array.isArray(content)) {
-    return '';
-  }
-
-  return content
-    .flatMap((part) =>
-      part &&
-      typeof part === 'object' &&
-      'type' in part &&
-      part.type === 'text' &&
-      'text' in part &&
-      typeof part.text === 'string'
-        ? [part.text]
-        : [],
-    )
-    .join('\n');
-}
-
-export function normalizeFastSessionTranscript(
-  messages: Record<string, unknown>[],
-): FastSessionTranscriptMessage[] {
-  return messages.flatMap((message, index) => {
-    if (message.role !== 'user' && message.role !== 'assistant') {
-      return [];
-    }
-
-    const text = getPersistedText(message.content).trim();
-    return text
-      ? [{ id: `fast-message-${index}`, role: message.role, text }]
-      : [];
-  });
-}
 
 function fastSessionScope(auth: FastSessionAuth) {
   return auth.isAdmin
@@ -144,26 +124,49 @@ export async function getFastSessionById(
       )
       .orderBy(taskRuns.taskId, desc(taskRuns.createdAt), desc(taskRuns.id)),
   );
-  const linkedTasks = await db
-    .with(latestRunPerTask)
-    .select({
-      taskId: latestRunPerTask.taskId,
-      title: latestRunPerTask.title,
-      status: latestRunPerTask.status,
-      taskPhase: latestRunPerTask.taskPhase,
-      createdAt: latestRunPerTask.createdAt,
-    })
-    .from(latestRunPerTask)
-    .orderBy(desc(latestRunPerTask.createdAt));
-  const {
-    compatibilityMessages,
-    legacyConversationIds: _,
-    ...details
-  } = session;
+  const [linkedTasks, messages] = await Promise.all([
+    db
+      .with(latestRunPerTask)
+      .select({
+        taskId: latestRunPerTask.taskId,
+        title: latestRunPerTask.title,
+        status: latestRunPerTask.status,
+        taskPhase: latestRunPerTask.taskPhase,
+        createdAt: latestRunPerTask.createdAt,
+      })
+      .from(latestRunPerTask)
+      .orderBy(desc(latestRunPerTask.createdAt)),
+    db
+      .select({
+        id: fastAgentMessages.id,
+        eventId: fastAgentMessages.eventId,
+        turnId: fastAgentMessages.turnId,
+        turnSeq: fastAgentMessages.turnSeq,
+        ts: fastAgentMessages.ts,
+        eventType: fastAgentMessages.eventType,
+        role: fastAgentMessages.role,
+        contentBlocks: fastAgentMessages.contentBlocks,
+        metadata: fastAgentMessages.metadata,
+        payload: fastAgentMessages.payload,
+        source: fastAgentMessages.source,
+        nativeSessionId: fastAgentMessages.nativeSessionId,
+        nativeMessageId: fastAgentMessages.nativeMessageId,
+        createdAt: fastAgentMessages.createdAt,
+      })
+      .from(fastAgentMessages)
+      .where(eq(fastAgentMessages.conversationId, session.id))
+      .orderBy(
+        asc(fastAgentMessages.ts),
+        asc(fastAgentMessages.turnSeq),
+        asc(fastAgentMessages.createdAt),
+        asc(fastAgentMessages.id),
+      ),
+  ]);
+  const { legacyConversationIds: _, ...details } = session;
 
   return {
     ...details,
-    transcript: normalizeFastSessionTranscript(compatibilityMessages),
+    messages,
     linkedTasks,
   };
 }

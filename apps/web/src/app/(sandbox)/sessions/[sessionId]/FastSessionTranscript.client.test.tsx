@@ -1,4 +1,5 @@
 import { render, screen } from '@testing-library/react';
+import { ACP_ENVELOPE_EVENT_TYPES } from '@roomote/types';
 
 import { FastSessionTranscript } from './FastSessionTranscript';
 
@@ -7,8 +8,38 @@ describe('FastSessionTranscript', () => {
     render(
       <FastSessionTranscript
         messages={[
-          { id: 'user-1', role: 'user', text: 'What changed?' },
-          { id: 'assistant-1', role: 'assistant', text: '**Two files**' },
+          {
+            id: 'user-1',
+            eventId: 'turn-1:user',
+            turnId: 'turn-1',
+            turnSeq: 0,
+            ts: 1,
+            eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
+            role: 'user',
+            contentBlocks: [{ type: 'text', text: 'What changed?' }],
+            metadata: { visibleInTranscript: true },
+            payload: {},
+            source: 'slack',
+            nativeSessionId: null,
+            nativeMessageId: null,
+            createdAt: new Date('2026-01-01T00:00:00.000Z'),
+          },
+          {
+            id: 'assistant-1',
+            eventId: 'turn-1:assistant:0',
+            turnId: 'turn-1',
+            turnSeq: 1,
+            ts: 2,
+            eventType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+            role: 'assistant',
+            contentBlocks: [{ type: 'text', text: '**Two files**' }],
+            metadata: { visibleInTranscript: true },
+            payload: {},
+            source: 'slack',
+            nativeSessionId: 'opencode-1',
+            nativeMessageId: null,
+            createdAt: new Date('2026-01-01T00:00:01.000Z'),
+          },
         ]}
         footer={<p>Transcript limitation</p>}
       />,
@@ -18,5 +49,46 @@ describe('FastSessionTranscript', () => {
     expect(screen.getByText('What changed?')).toBeInTheDocument();
     expect(screen.getByText('Two files')).toBeInTheDocument();
     expect(screen.getByText('Transcript limitation')).toBeInTheDocument();
+  });
+
+  it('renders canonical native tool result payloads with the shared tool UI', () => {
+    render(
+      <FastSessionTranscript
+        messages={[
+          {
+            id: 'tool-result-1',
+            eventId: 'turn-1:tool-result:0',
+            turnId: 'turn-1',
+            turnSeq: 2,
+            ts: 3,
+            eventType: ACP_ENVELOPE_EVENT_TYPES.ToolResult,
+            role: 'tool',
+            contentBlocks: [{ type: 'text', text: '{"delivered":true}' }],
+            metadata: { visibleInTranscript: true },
+            payload: {
+              toolCallId: 'turn-1:tool:0',
+              title: 'send_chat_reply',
+              kind: 'tool',
+              status: 'completed',
+              isExecute: false,
+              isMcp: false,
+              mcpServerName: null,
+              mcpToolName: null,
+              toolName: 'send_chat_reply',
+              command: null,
+              exitCode: null,
+              output: '{"delivered":true}',
+              rawInput: { arguments: { message: 'Done' } },
+            },
+            source: 'slack',
+            nativeSessionId: 'opencode-1',
+            nativeMessageId: null,
+            createdAt: new Date('2026-01-01T00:00:02.000Z'),
+          },
+        ]}
+      />,
+    );
+
+    expect(screen.getByText('send_chat_reply')).toBeInTheDocument();
   });
 });

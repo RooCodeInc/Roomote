@@ -53,9 +53,39 @@ describe('Fast session detail page', () => {
       messageCount: 2,
       createdAt: new Date('2026-01-01T00:00:00.000Z'),
       updatedAt: new Date('2026-01-02T00:00:00.000Z'),
-      transcript: [
-        { id: 'message-1', role: 'user', text: 'Question' },
-        { id: 'message-2', role: 'assistant', text: 'Answer' },
+      messages: [
+        {
+          id: 'message-1',
+          eventId: 'turn-1:user',
+          turnId: 'turn-1',
+          turnSeq: 0,
+          ts: 1,
+          eventType: 'roomote_runtime.user_prompt',
+          role: 'user',
+          contentBlocks: [{ type: 'text', text: 'Question' }],
+          metadata: { visibleInTranscript: true },
+          payload: {},
+          source: 'slack',
+          nativeSessionId: null,
+          nativeMessageId: null,
+          createdAt: new Date('2026-01-01T00:00:00.000Z'),
+        },
+        {
+          id: 'message-2',
+          eventId: 'turn-1:assistant:0',
+          turnId: 'turn-1',
+          turnSeq: 1,
+          ts: 2,
+          eventType: 'roomote_runtime.assistant_message',
+          role: 'assistant',
+          contentBlocks: [{ type: 'text', text: 'Answer' }],
+          metadata: { visibleInTranscript: true },
+          payload: {},
+          source: 'slack',
+          nativeSessionId: 'opencode-1',
+          nativeMessageId: null,
+          createdAt: new Date('2026-01-01T00:00:01.000Z'),
+        },
       ],
       linkedTasks: [
         {
@@ -82,7 +112,7 @@ describe('Fast session detail page', () => {
     expect(transcriptMock).toHaveBeenCalledWith(
       expect.objectContaining({
         messages: expect.arrayContaining([
-          expect.objectContaining({ text: 'Question' }),
+          expect.objectContaining({ eventId: 'turn-1:user' }),
         ]),
       }),
       undefined,
