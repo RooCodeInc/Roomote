@@ -290,7 +290,12 @@ describe('Setup StepInvoke', () => {
     render(<StepInvoke />);
 
     expect(
-      screen.getByText("You're all set up. Let's run your first few tasks."),
+      screen.getByText("You're set up. Let's get Roomote working."),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        'These are a few good starter tasks to get you going, zero effort:',
+      ),
     ).toBeInTheDocument();
 
     for (const title of STARTER_TASK_TITLES) {

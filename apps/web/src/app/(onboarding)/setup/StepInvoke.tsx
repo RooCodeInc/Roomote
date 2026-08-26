@@ -31,8 +31,7 @@ import { getSetupStepDefinition } from './types';
 
 const INVOKE_STEP = getSetupStepDefinition('invoke');
 
-const STARTER_TASKS_TITLE =
-  "You're all set up. Let's run your first few tasks.";
+const STARTER_TASKS_TITLE = "You're set up. Let's get Roomote working.";
 
 type CommunicationProviderId = 'slack' | 'microsoft' | 'telegram' | 'discord';
 
@@ -406,7 +405,7 @@ function StarterTasksStepContent({
     <div className="relative w-full max-w-2xl space-y-6 py-2 md:py-0">
       <StepTitle text={STARTER_TASKS_TITLE} />
       <p className="mb-4">
-        {`Pick the tasks you want ${PRODUCT_NAME} to start right now. Uncheck any you don't want.`}
+        These are a few good starter tasks to get you going, zero effort:
       </p>
       <ComputeProvisioningNotice
         computeProvisioning={computeProvisioning}
