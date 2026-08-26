@@ -45,7 +45,7 @@ describe('Fast session detail page', () => {
       ownerEmail: 'user@example.com',
       surface: 'slack',
       workspaceId: 'workspace-1',
-      conversationId: 'conversation-1',
+      conversationId: '1787748111.947499',
       currentReplyChannelId: 'channel-1',
       currentReplyThreadId: 'thread-1',
       replyTargetVerified: true,
@@ -103,7 +103,7 @@ describe('Fast session detail page', () => {
       expect.objectContaining({
         sessionId: 'session-1',
         canReply: true,
-        fallbackTitle: 'conversation-1',
+        fallbackTitle: 'Question',
         initialMessages: expect.arrayContaining([
           expect.objectContaining({ eventId: 'turn-1:user' }),
         ]),
