@@ -207,9 +207,6 @@ describe('buildFastAgentSystemPrompt', () => {
       'Delegated tasks, child or parent runs, queues, steering, routing, environments, and lifecycle states are internal details',
     );
     expect(prompt).toContain(
-      'Kickoff messages describe work underway, not delegation or launch state',
-    );
-    expect(prompt).toContain(
       'details already visible in an automatically posted kickoff or task card',
     );
     expect(prompt).toContain(
@@ -240,6 +237,21 @@ describe('buildFastAgentSystemPrompt', () => {
     );
     expect(prompt).toContain(
       'A launch kickoff is already visible and needs no duplicate launch reply, but it does not suppress later useful updates while work continues',
+    );
+  });
+
+  it('provides repository-focused coding task kickoff guidance', () => {
+    const prompt = buildFastAgentSystemPrompt({ availableEnvironments: [] });
+
+    expect(prompt).toContain('## Coding Task Kickoffs');
+    expect(prompt).toContain(
+      'For repository work, describe the work underway and name the target repository when known',
+    );
+    expect(prompt).toContain(
+      'Do not describe delegation, launching, routing, queues, or other orchestration mechanics',
+    );
+    expect(prompt).toContain(
+      'Mention an environment by name only when it adds useful context beyond the repository, such as work spanning multiple repositories',
     );
   });
 
