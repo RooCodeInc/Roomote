@@ -6,6 +6,21 @@ const mocks = vi.hoisted(() => ({
   postThreadMessage: vi.fn(),
 }));
 
+vi.mock('@roomote/redis', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@roomote/redis')>();
+  return {
+    ...actual,
+    // The sticky-footer state lives in Redis; unit tests run without a
+    // server (a real client would wait on commands forever), so serve
+    // empty state.
+    getRedis: () => ({
+      set: async () => 'OK',
+      get: async () => null,
+      eval: async () => 1,
+    }),
+  };
+});
+
 vi.mock('@roomote/cloud-agents/server', () => ({
   acquireFastAgentTurnLock: mocks.acquireLock,
   answerFastAgentQuestion: mocks.answerQuestion,
