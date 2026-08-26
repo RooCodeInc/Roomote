@@ -599,8 +599,12 @@ async function resolveDeletedFastOwner(
     pr_number: number;
   },
 ): Promise<string | null> {
-  if (row.task_id && (await isExistingTaskOwner(executor, row.task_id))) {
-    return row.task_id;
+  if (row.task_id) {
+    const originalIsUsable =
+      row.destination_kind === 'fast_conversation'
+        ? await isReusableTaskOwner(executor, row.task_id)
+        : await isExistingTaskOwner(executor, row.task_id);
+    if (originalIsUsable) return row.task_id;
   }
   if (row.destination_kind !== 'fast_conversation') {
     return null;

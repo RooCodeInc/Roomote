@@ -23,6 +23,7 @@ import {
   upsertPrReviewAutoPreference,
   userFactory,
 } from '../../server';
+import { RunStatus } from '@roomote/types';
 
 const CLAIM_AT = new Date('2099-01-01T00:00:00Z');
 
@@ -563,6 +564,69 @@ describe('canonical PR review notification ownership', () => {
       userId: user.id,
       destinationKey: '["slack","T-pref","C-pref:1"]',
     });
+  });
+
+  it('claims through a resumable Fast sibling when the original task cannot resume', async () => {
+    const original = await taskFactory.create();
+    const sibling = await taskFactory.create();
+    const repository = `owner/fast-resumable-sibling-${original.id}`;
+    const parent = {
+      sessionId: '33333333-3333-4333-8333-333333333333',
+      conversation: {
+        surface: 'slack' as const,
+        workspaceId: 'T-sibling',
+        conversationId: 'C-sibling:1',
+        replyTarget: { channelId: 'C-sibling', threadId: '1' },
+      },
+    };
+    await associate(original.id, repository, 13);
+    await associate(sibling.id, repository, 13);
+    await runFactory.create({
+      taskId: original.id,
+      status: RunStatus.Completed,
+      snapshotId: null,
+      payload: { fastAgentParent: parent },
+    });
+    await runFactory.create({
+      taskId: sibling.id,
+      status: RunStatus.Completed,
+      snapshotId: 'snapshot-sibling',
+      snapshotCreatedAt: new Date(),
+      payload: { fastAgentParent: parent },
+    });
+    await persistPrReviewEvent(
+      eventInput({
+        repository,
+        prNumber: 13,
+        eventKey: `sibling-${original.id}`,
+      }),
+    );
+    const [deliveryBeforeClaim] = await db
+      .select({ taskId: prReviewNotificationDeliveries.taskId })
+      .from(prReviewNotificationDeliveries)
+      .innerJoin(
+        prReviewNotificationUnits,
+        eq(
+          prReviewNotificationUnits.id,
+          prReviewNotificationDeliveries.notificationUnitId,
+        ),
+      )
+      .where(eq(prReviewNotificationUnits.repository, repository));
+    expect(deliveryBeforeClaim?.taskId).toBe(original.id);
+
+    await expect(claimForRepository(repository)).resolves.toEqual([
+      expect.objectContaining({
+        ownershipVersion: 'canonical',
+        taskId: sibling.id,
+        repository,
+      }),
+    ]);
+    await expect(
+      db.query.prReviewNotificationDeliveries.findFirst({
+        where: eq(prReviewNotificationDeliveries.taskId, sibling.id),
+        columns: { taskId: true },
+      }),
+    ).resolves.toEqual({ taskId: sibling.id });
   });
 
   it('claims one canonical action and upserts Fix all atomically', async () => {
