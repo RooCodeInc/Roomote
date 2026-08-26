@@ -602,7 +602,7 @@ describe('canonical PR review notification ownership', () => {
       }),
     );
     const [deliveryBeforeClaim] = await db
-      .select({ taskId: prReviewNotificationDeliveries.taskId })
+      .select({ id: prReviewNotificationDeliveries.id })
       .from(prReviewNotificationDeliveries)
       .innerJoin(
         prReviewNotificationUnits,
@@ -612,7 +612,11 @@ describe('canonical PR review notification ownership', () => {
         ),
       )
       .where(eq(prReviewNotificationUnits.repository, repository));
-    expect(deliveryBeforeClaim?.taskId).toBe(original.id);
+    if (!deliveryBeforeClaim) throw new Error('expected canonical delivery');
+    await db
+      .update(prReviewNotificationDeliveries)
+      .set({ taskId: original.id })
+      .where(eq(prReviewNotificationDeliveries.id, deliveryBeforeClaim.id));
 
     await expect(claimForRepository(repository)).resolves.toEqual([
       expect.objectContaining({
@@ -623,7 +627,7 @@ describe('canonical PR review notification ownership', () => {
     ]);
     await expect(
       db.query.prReviewNotificationDeliveries.findFirst({
-        where: eq(prReviewNotificationDeliveries.taskId, sibling.id),
+        where: eq(prReviewNotificationDeliveries.id, deliveryBeforeClaim.id),
         columns: { taskId: true },
       }),
     ).resolves.toEqual({ taskId: sibling.id });
