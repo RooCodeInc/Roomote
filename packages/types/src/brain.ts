@@ -28,6 +28,7 @@ export const BRAIN_PROXY_PATH = '/api/mcp/gbrain';
 export const BRAIN_NAMESPACES = [
   { id: 'people', prefix: 'people/', label: 'People' },
   { id: 'tasks', prefix: 'tasks/', label: 'Task memories' },
+  { id: 'memories', prefix: 'memories/', label: 'Conversation memories' },
   { id: 'prs', prefix: 'prs/', label: 'Pull requests' },
   { id: 'github', prefix: 'github/', label: 'GitHub issues' },
   { id: 'slack', prefix: 'slack/', label: 'Slack' },
@@ -46,6 +47,17 @@ export type BrainNamespaceId = (typeof BRAIN_NAMESPACES)[number]['id'];
  * so the query that stops counting and the UI that renders the `+` agree.
  */
 export const MISSING_MEMORY_EVENT_COUNT_CAP = 1_000;
+
+/**
+ * Ceiling on one Fast conversation's accumulated memory text. A
+ * conversation's memory is a distillation, not a transcript; the cap keeps a
+ * chatty or adversarial conversation from turning its Brain page into a
+ * dumping ground.
+ */
+export const FAST_AGENT_MEMORY_MAX_CHARS = 20_000;
+
+/** One saved Fast memory fact; enforced by the save_memory tool schema. */
+export const FAST_AGENT_MEMORY_FACT_MAX_CHARS = 1_000;
 
 /** Bucket for a slug written under a prefix this registry does not name. */
 export const BRAIN_OTHER_NAMESPACE_ID = 'other';
@@ -120,6 +132,7 @@ export const BRAIN_COLLECTOR_IDS = {
  */
 export const BRAIN_PAGE_TYPES = {
   taskMemory: 'task-memory',
+  conversationMemory: 'conversation-memory',
   pullRequest: 'pull-request',
   githubIssue: 'github-issue',
   slackDay: 'slack',
@@ -397,3 +410,21 @@ Work that ended without a fix is worth recording too. Knowing that an approach d
 Call it as soon as the outcome is clear rather than saving it for the last moment. A later call replaces the earlier one, so you can refine the memory if more emerges.
 
 Keep it concise and reusable: a few sentences a future agent can act on. Never include secrets or credentials, file contents or long code blocks, a step-by-step narration of what you did, or anything a future agent could read straight out of the repository or the pull request.`;
+
+/**
+ * The Fast (conversational) variant of the Brain instructions. Fast reads the
+ * Brain through the same read-only proxy tasks use, but writes through the
+ * `save_memory` native tool: the memory is parked on this conversation's
+ * outbox row and the server-side ingestion pipeline redacts it and files it
+ * as a page, so Fast never holds a write credential and saved facts come back
+ * through the same \`query\`/\`search\` reads as everything else.
+ */
+export const BRAIN_MCP_FAST_INSTRUCTIONS = `${BRAIN_MCP_READ_INSTRUCTIONS}
+
+## Remembering for future conversations
+
+Save a memory by calling the \`save_memory\` native tool (not a Brain tool). Roomote redacts it and files it into the Brain under this conversation's own entry, where later \`query\` and \`search\` calls will find it after the next ingestion pass — it is durable, but not instantly retrievable.
+
+Save when the user explicitly asks you to remember something, or states a durable preference, decision, correction, or fact that will materially help future conversations. Keep each memory concise and self-contained: one fact per call, phrased so a future agent can act on it without this conversation's context.
+
+Do not save secrets or credentials, transient requests, casual chatter, speculative conclusions, or facts already durable in a connected source the Brain ingests. When you save, tell the user plainly that you have remembered it; do not promise instant recall.`;

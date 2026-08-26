@@ -198,7 +198,9 @@ function describeMcpServer(
     return {
       name: getMemoryMcpDisplayName(id),
       description: 'Read and write persistent context shared across tasks.',
-      instructions: createMemoryMcpInstructions(id),
+      instructions: createMemoryMcpInstructions(id, {
+        surface: 'conversation',
+      }),
     };
   }
   const integration = getMcpIntegration(id);
@@ -359,6 +361,7 @@ export async function listFastAgentIntegrations(
         instructions: isMemory
           ? createMemoryMcpInstructions(result.value.id, {
               primary: primaryMemory,
+              surface: 'conversation',
             })
           : result.value.instructions,
         tools: result.value.tools,

@@ -131,6 +131,8 @@ describe('fast-agent integration broker', () => {
     expect(integrations[0]?.instructions).toContain(
       'Treat Brain recall as a sequential preflight',
     );
+    expect(integrations[0]?.instructions).toContain('save_memory');
+    expect(integrations[0]?.instructions).not.toContain('save_task_memory');
     expect(mocks.listMcpTools).toHaveBeenCalledWith({
       url: 'https://api.example.com/api/mcp/gbrain',
       headers: { Authorization: 'Bearer control-plane-token' },

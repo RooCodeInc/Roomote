@@ -274,6 +274,19 @@ export default {
 }
 `,
 
+    [FAST_AGENT_NATIVE_TOOL_NAMES.saveMemory]: String.raw`
+import { z } from "zod"
+import { invoke } from "../roomote-fast-tool-bridge.js"
+
+export default {
+  description: "Save one concise durable fact from this conversation into the deployment's shared memory. Use when the user asks to remember something or states a durable preference, decision, correction, or fact. The memory is redacted and ingested server-side; it becomes searchable after the next ingestion pass, not instantly.",
+  args: {
+    memory: z.string().min(1).describe("One self-contained fact a future conversation can act on without this conversation's context"),
+  },
+  execute: (args, context) => invoke("save_memory", args, context),
+}
+`,
+
     [FAST_AGENT_NATIVE_TOOL_NAMES.ignoreEvent]: String.raw`
 import { z } from "zod"
 import { invoke } from "../roomote-fast-tool-bridge.js"

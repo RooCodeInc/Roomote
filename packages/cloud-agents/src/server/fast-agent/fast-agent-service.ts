@@ -5,6 +5,7 @@ import {
   ALL_REPOSITORIES,
   CHAT_CHANNEL_MESSAGES_TOOL,
   CHAT_MESSAGE_CONTEXT_TOOL,
+  FAST_AGENT_MEMORY_FACT_MAX_CHARS,
   INFERENCE_PROVIDER_MAX_RETRIES,
   MANAGE_CUSTOM_AUTOMATIONS_TOOL,
   ROOMOTE_MCP_ID,
@@ -17,7 +18,12 @@ import {
   type RunStatus,
   type TaskMessageContentBlock,
 } from '@roomote/types';
-import { getDeploymentTaskModelOptions } from '@roomote/db/server';
+import {
+  appendFastAgentMemory,
+  db,
+  getDeploymentTaskModelOptions,
+  isBrainProviderConfigured,
+} from '@roomote/db/server';
 import { Env } from '@roomote/env';
 import { z } from 'zod';
 
@@ -188,6 +194,9 @@ const taskIdArgsSchema = z.object({
   taskId: z.string().trim().min(1).nullable().optional(),
 });
 const ignoreEventArgsSchema = z.object({ reason: z.string().trim().min(1) });
+const saveMemoryArgsSchema = z.object({
+  memory: z.string().trim().min(1).max(FAST_AGENT_MEMORY_FACT_MAX_CHARS),
+});
 
 function normalizeThreadText(text: string): string {
   return text.replace(/\s+/g, ' ').trim();
@@ -1546,6 +1555,34 @@ export async function answerFastAgentQuestion({
             retriedTaskStart = true;
             throwIfTurnCancelled();
             return await adapter.retryTaskStart();
+          }
+
+          case FAST_AGENT_NATIVE_TOOL_NAMES.saveMemory: {
+            const args = saveMemoryArgsSchema.parse(call.args);
+            if (!(await isBrainProviderConfigured())) {
+              return {
+                success: false,
+                error: 'This deployment has no Brain configured.',
+              };
+            }
+            throwIfTurnCancelled();
+            const result = await appendFastAgentMemory(
+              db,
+              session.id,
+              args.memory,
+            );
+            if (!result.saved) {
+              return {
+                success: false,
+                error:
+                  "This conversation's memory is full. Start a new conversation to save further memories.",
+              };
+            }
+            return {
+              success: true,
+              saved: true,
+              note: 'Saved. The memory becomes searchable after the next ingestion pass.',
+            };
           }
 
           case FAST_AGENT_NATIVE_TOOL_NAMES.ignoreEvent: {

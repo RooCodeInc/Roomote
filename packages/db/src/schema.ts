@@ -4291,6 +4291,54 @@ export const brainMemoryEvents = pgTable(
 );
 
 /**
+ * fast_agent_memory_events
+ *
+ * Transactional outbox for Fast conversation memories, the conversational
+ * sibling of brain_memory_events. One row per conversation accumulates the
+ * facts Fast was asked to remember; the ingestion drainer is the only writer
+ * to the Brain, so the slug, redaction, and provenance stay server-controlled
+ * and Fast never holds a Brain write credential. A separate table (rather
+ * than a nullable run_id on brain_memory_events) keeps the N-1 release's
+ * drainer, which claims rows without filtering, from ever seeing runless rows.
+ */
+export const fastAgentMemoryEvents = pgTable(
+  'fast_agent_memory_events',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    conversationId: uuid('conversation_id')
+      .notNull()
+      .references(() => fastAgentConversations.id, { onDelete: 'cascade' }),
+    /** Accumulated `- fact` markdown lines, newest appended last. */
+    memory: text('memory').notNull(),
+    /**
+     * Bumped on every appended fact. The drainer fences its completion on the
+     * revision it claimed, so a save that lands while a page write is in
+     * flight forces a re-ingest of the newer content instead of being
+     * stranded behind an already-written older snapshot.
+     */
+    revision: integer('revision').notNull().default(0),
+    status: text('status')
+      .notNull()
+      .default('pending')
+      .$type<'pending' | 'processing' | 'done' | 'skipped' | 'failed'>(),
+    attempts: integer('attempts').notNull().default(0),
+    lastError: text('last_error'),
+    processedAt: timestamp('processed_at'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => [
+    unique('fast_agent_memory_events_conversation_unique').on(
+      table.conversationId,
+    ),
+    index('fast_agent_memory_events_status_created_idx').on(
+      table.status,
+      table.createdAt,
+    ),
+  ],
+);
+
+/**
  * brainSyncState
  *
  * Durable per-collector sync state for Brain memory sources. `watermark`
