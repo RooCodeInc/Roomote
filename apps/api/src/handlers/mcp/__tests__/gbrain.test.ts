@@ -245,22 +245,19 @@ describe('createGbrainMcpProxy', () => {
     expect(upstreamRequests[0]?.body).toContain('"remember"');
   });
 
-  it.each(['recall', 'query'])(
-    'keeps the %s read path available to Fast',
-    async (name) => {
-      mockResolveConnection.mockResolvedValue({
-        baseUrl: await startUpstream(),
-        token: 'ingest-token',
-      });
+  it('keeps the existing read path available to Fast', async () => {
+    mockResolveConnection.mockResolvedValue({
+      baseUrl: await startUpstream(),
+      token: 'ingest-token',
+    });
 
-      const response = await postFastMcp(createFastApp(), toolCall(name));
+    const response = await postFastMcp(createFastApp(), toolCall('query'));
 
-      expect(response.status).toBe(200);
-      expect(upstreamRequests).toHaveLength(1);
-    },
-  );
+    expect(response.status).toBe(200);
+    expect(upstreamRequests).toHaveLength(1);
+  });
 
-  it.each(['forget', 'put_page', 'delete_page', 'submit_job'])(
+  it.each(['recall', 'forget', 'put_page', 'delete_page', 'submit_job'])(
     'blocks the %s operation from the Fast write proxy',
     async (name) => {
       mockResolveConnection.mockResolvedValue({
@@ -293,10 +290,9 @@ describe('createGbrainMcpProxy', () => {
   it('limits Fast mutation to the purpose-built memory verb', () => {
     expect(GBRAIN_FAST_TOOL_NAMES).toEqual([
       ...GBRAIN_READ_TOOL_NAMES,
-      'recall',
       'remember',
     ]);
-    for (const forbidden of ['forget', 'put_page', 'delete_page']) {
+    for (const forbidden of ['recall', 'forget', 'put_page', 'delete_page']) {
       expect(GBRAIN_FAST_TOOL_NAMES).not.toContain(forbidden);
     }
   });

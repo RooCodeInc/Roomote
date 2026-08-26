@@ -113,7 +113,6 @@ describe('fast-agent integration broker', () => {
     };
     mocks.listMcpTools.mockResolvedValueOnce([
       { name: 'search', inputSchema: { type: 'object' } },
-      { name: 'recall', inputSchema: { type: 'object' } },
       { name: 'remember', inputSchema: { type: 'object' } },
     ]);
 
@@ -131,7 +130,6 @@ describe('fast-agent integration broker', () => {
         ),
         tools: [
           { name: 'search', inputSchema: { type: 'object' } },
-          { name: 'recall', inputSchema: { type: 'object' } },
           { name: 'remember', inputSchema: { type: 'object' } },
         ],
       }),

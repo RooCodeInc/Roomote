@@ -48,12 +48,12 @@ export const GBRAIN_READ_TOOL_NAMES = [
  * Fast runs as a user-authenticated conversational agent rather than inside a
  * task sandbox. It may add bounded memories through gbrain's purpose-built
  * memory verb, but never receives raw page, delete, or admin operations.
- * `recall` is paired with `remember` because remembered facts live in its
- * hot-memory arm rather than the page-search surface above.
+ * Fast intentionally receives only the write verb in addition to the existing
+ * page-oriented reads. Facts written through `remember` are therefore not
+ * available through gbrain's separate hot-memory `recall` surface.
  */
 export const GBRAIN_FAST_TOOL_NAMES = [
   ...GBRAIN_READ_TOOL_NAMES,
-  'recall',
   'remember',
 ] as const;
 

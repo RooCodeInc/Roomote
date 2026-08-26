@@ -115,7 +115,7 @@ describe('buildFastAgentSystemPrompt', () => {
           name: 'Brain',
           description: 'Deployment memory',
           instructions: FAST_AGENT_BRAIN_INSTRUCTIONS,
-          tools: [{ name: 'query' }, { name: 'recall' }, { name: 'remember' }],
+          tools: [{ name: 'query' }, { name: 'remember' }],
         },
       ],
     });
@@ -130,7 +130,7 @@ describe('buildFastAgentSystemPrompt', () => {
       'durable preference, decision, correction, or fact',
     );
     expect(prompt).toContain('Do not remember secrets, credentials');
-    expect(prompt).toContain('Use `recall`');
+    expect(prompt).not.toContain('Use `recall`');
     expect(prompt).toContain(
       "Never expose Brain's `source` field, architecture, or other internal provenance metadata",
     );
