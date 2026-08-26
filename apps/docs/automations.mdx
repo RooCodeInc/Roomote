@@ -127,10 +127,13 @@ environment (or across all active repositories), or runs the prompt directly in
 when repository or workspace execution is required.
 
 Fast runs with a Slack or Discord channel destination create a new report thread
-for each run. Fast runs without a supported channel are stored as channel-less
-Fast conversations; their output will be available in the upcoming Fast runs
-view. Until that view ships, use a Slack or Discord channel when the result must
-be visible outside the automation's latest-run status.
+for each run. A Fast run with a Slack direct-message destination posts to the
+automation owner's DM and requires that owner to link their Slack account and
+make the bot reachable there. Fast runs without a destination are stored as
+channel-less Fast conversations; their output will be available in the upcoming
+Fast runs view. Until that view ships, use a supported Slack or Discord
+destination when the result must be visible outside the automation's latest-run
+status.
 
 A run can skip or fail before execution when its configuration or launch state
 prevents it from starting.

@@ -2,6 +2,29 @@
 
 This file tracks product releases for Roomote (single monorepo version). Automated release entries are prepended by `pnpm run version`.
 
+## 0.44.0 (2026-08-26)
+
+This release gives Fast durable shared memory, adds Slack direct-message delivery for automations, and improves conversation reliability across follow-ups, provider failures, production builds, and image-only replies.
+
+### Highlights
+
+- Ask Fast to remember durable context and recall it in later tasks or conversations through the deployment's connected memory providers.
+- Deliver Fast custom automation reports directly to their owners in Slack.
+- Keep Fast conversations moving through retryable provider failures and route follow-up instructions to active tasks sooner.
+- Run web-initiated Fast turns reliably in standalone production images and keep image-only transcripts in sync.
+
+### Minor changes
+
+- Let Fast save durable preferences, decisions, corrections, and facts to shared memory so they can be recalled in later conversations, while supporting pluggable memory providers and making concurrent memory ingestion more reliable.
+
+### Patch changes
+
+- Deliver Fast custom automation reports to their owners through configured Slack direct messages, and fail runs clearly when their configured Fast destination cannot be resolved or supported.
+- Reconcile image-only Fast replies with their canonical transcript events so optimistic messages do not remain duplicated or stale.
+- Keep Fast conversations moving through retryable provider failures without repeating completed tool effects, and forward follow-up instructions to active tasks before posting the confirmation reply.
+- Restore web-initiated Fast turns in standalone production images by shipping native-tool runtime dependencies and removing stale generated tool files during setup.
+- Keep the current page visible while authenticated navigation loads and correct the label shown when an input request is cancelled.
+
 ## 0.43.0 (2026-08-26)
 
 This release brings Fast conversations into the dashboard, introduces a streamlined Memory experience, launches useful starter tasks directly from setup, and adds optional GitHub review checks.
