@@ -155,7 +155,11 @@ function getFastParentButtonRoute(
   payload: unknown,
 ): ButtonPrReviewNotificationRoute | null {
   const parent = getFastAgentParentFromPayload(payload);
-  if (!parent || parent.conversation.surface === 'automation') {
+  if (
+    !parent ||
+    parent.conversation.surface === 'automation' ||
+    parent.conversation.surface === 'web'
+  ) {
     return null;
   }
 

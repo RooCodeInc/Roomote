@@ -231,7 +231,9 @@ function fastDestination(
     conversation.conversationId,
   ]);
 
-  if (conversation.surface === 'automation') {
+  if (conversation.surface === 'automation' || conversation.surface === 'web') {
+    // Identity-only surfaces have no reply channel; delivery resolves the
+    // Fast conversation itself.
     return {
       destinationKey,
       routeProvider: null,
