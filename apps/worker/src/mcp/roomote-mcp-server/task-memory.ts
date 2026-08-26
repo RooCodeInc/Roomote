@@ -38,8 +38,16 @@ export async function handleSaveTaskMemory(input: {
 
     return successResult(
       result.saved
-        ? { saved: true, note: 'Recorded for the shared Brain.' }
-        : { saved: false, reason: result.reason ?? 'Not saved.' },
+        ? {
+            saved: true,
+            note: 'Recorded for the shared Brain.',
+            memory: input,
+          }
+        : {
+            saved: false,
+            reason: result.reason ?? 'Not saved.',
+            memory: input,
+          },
     );
   } catch (error) {
     return catchError(error);
