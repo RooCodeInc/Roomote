@@ -48,6 +48,7 @@ import {
   db,
   deploymentSettings,
   ensureAutomationRowsOnce,
+  ensureSessionForTask,
   isChatGptSubscriptionConnected,
   createTaskWithRetry,
   markTaskStartParallelCountEndedAt,
@@ -71,6 +72,10 @@ import {
   resolveWorkspaceRepositoryProviders,
   sql,
 } from '@roomote/db/server';
+import {
+  FeatureFlag,
+  getFeatureFlagEvaluator,
+} from '@roomote/feature-flags/server';
 import { type Redis, getRedis } from '@roomote/redis';
 import {
   captureActivationTaskCreated,
@@ -1385,6 +1390,9 @@ async function enqueueFreshLaunch(
   const { task, initiator, workflow, surface, trigger } = input;
   const visibility: TaskVisibility = input.visibility ?? 'visible';
   const linkedUserId = getTaskInitiatorLinkedUserId(initiator);
+  const sessionsDataEnabled = await getFeatureFlagEvaluator(
+    getRedis(),
+  ).evaluate(FeatureFlag.SessionsData, { isDeploymentContext: true });
 
   await assertUserIsNotDeleted(linkedUserId);
 
@@ -1637,6 +1645,16 @@ async function enqueueFreshLaunch(
         });
 
         if (activeRun) {
+          if (sessionsDataEnabled) {
+            await ensureSessionForTask(tx, {
+              taskId: existingTask.id,
+              fastConversationId:
+                getFastAgentParentFromPayload(taskWithHarnessOverrides.payload)
+                  ?.sessionId ?? null,
+              origin: 'follow_up',
+              existingTaskReused: true,
+            });
+          }
           return { taskRun: activeRun, createdRun: false, reusedTask: true };
         }
 
@@ -1684,6 +1702,22 @@ async function enqueueFreshLaunch(
           { db: tx },
         );
         taskId = createdTask.id;
+      }
+
+      if (sessionsDataEnabled) {
+        const fastParent = getFastAgentParentFromPayload(
+          taskWithHarnessOverrides.payload,
+        );
+        await ensureSessionForTask(tx, {
+          taskId,
+          fastConversationId: fastParent?.sessionId ?? null,
+          origin: fastParent
+            ? 'fast_delegation'
+            : existingTask
+              ? 'follow_up'
+              : 'direct_launch',
+          existingTaskReused: Boolean(existingTask),
+        });
       }
 
       if (input.prLinkage) {
@@ -1800,6 +1834,20 @@ async function enqueueFreshLaunch(
 
   if (!createdRun) {
     return taskRun;
+  }
+
+  if (sessionsDataEnabled) {
+    const delegated = Boolean(
+      reusedTask ||
+      getFastAgentParentFromPayload(taskWithHarnessOverrides.payload),
+    );
+    void captureEvent(
+      delegated ? 'session_task_delegated' : 'session_created',
+      {
+        ...(linkedUserId ? { userId: linkedUserId } : {}),
+        properties: { surface, outcome: 'created' },
+      },
+    );
   }
 
   if (shouldCaptureTaskCreatedEvent(taskRun.payloadKind)) {

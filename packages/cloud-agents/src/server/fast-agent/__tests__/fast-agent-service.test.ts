@@ -77,6 +77,9 @@ vi.mock('@roomote/db/server', () => ({
   appendFastAgentMemory: mocks.appendMemory,
   isBrainProviderConfigured: mocks.isBrainProviderConfigured,
   db: {},
+  getSessionForFastConversation: vi.fn().mockResolvedValue(null),
+  getSessionForTask: vi.fn().mockResolvedValue(null),
+  touchSessionActivity: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock('../../non-task-provider-usage', () => ({

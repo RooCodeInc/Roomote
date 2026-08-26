@@ -1,4 +1,4 @@
-import { and, desc, eq, sql } from 'drizzle-orm';
+import { and, desc, eq, or, sql } from 'drizzle-orm';
 
 import type { TaskGoalStatus, TaskState } from '@roomote/types';
 
@@ -7,6 +7,7 @@ import {
   sessionParticipants,
   sessions,
   sessionTasks,
+  fastAgentConversations,
   taskRuns,
   tasks,
   type SessionStatus,
@@ -60,7 +61,10 @@ export async function touchSessionActivity(
   dbOrTx: DatabaseOrTransaction,
   sessionId: string,
   at: number,
-  options: { conversationResponding?: boolean } = {},
+  options: {
+    conversationResponding?: boolean;
+    recomputeStatus?: boolean;
+  } = {},
 ): Promise<Session> {
   return runInTransactionIfAvailable(dbOrTx, async (tx) => {
     const [lockedSession] = await tx
@@ -81,7 +85,7 @@ async function refreshLockedSession(
   tx: DatabaseOrTransaction,
   sessionId: string,
   at: number,
-  options: { conversationResponding?: boolean },
+  options: { conversationResponding?: boolean; recomputeStatus?: boolean },
 ): Promise<Session> {
   const linkedTasks = await tx
     .selectDistinctOn([tasks.id], {
@@ -99,10 +103,14 @@ async function refreshLockedSession(
     .update(sessions)
     .set({
       activityAt: sql`GREATEST(${sessions.activityAt}, ${at})`,
-      cachedStatus: deriveSessionStatus({
-        conversationResponding: options.conversationResponding ?? false,
-        tasks: linkedTasks,
-      }),
+      ...(options.recomputeStatus === false
+        ? {}
+        : {
+            cachedStatus: deriveSessionStatus({
+              conversationResponding: options.conversationResponding ?? false,
+              tasks: linkedTasks,
+            }),
+          }),
       updatedAt: new Date(),
     })
     .where(eq(sessions.id, sessionId))
@@ -119,6 +127,69 @@ export type EnsureSessionForTaskInput = {
   origin?: SessionTaskOrigin;
   existingTaskReused?: boolean;
 };
+
+export async function ensureSessionForFastConversation(
+  tx: DatabaseOrTransaction,
+  fastConversationId: string,
+): Promise<Session> {
+  const [conversation] = await tx
+    .select({
+      id: fastAgentConversations.id,
+      userId: fastAgentConversations.userId,
+      surface: fastAgentConversations.surface,
+      title: fastAgentConversations.title,
+      updatedAt: fastAgentConversations.updatedAt,
+    })
+    .from(fastAgentConversations)
+    .where(eq(fastAgentConversations.id, fastConversationId))
+    .for('update');
+
+  if (!conversation) {
+    throw new Error(`Fast conversation ${fastConversationId} does not exist.`);
+  }
+
+  const existing = await getSessionForFastConversation(tx, conversation.id);
+  if (existing) {
+    return existing;
+  }
+
+  const activityAt = Math.floor(conversation.updatedAt.getTime() / 1000);
+  const [inserted] = await tx
+    .insert(sessions)
+    .values({
+      title: conversation.title?.trim() || 'New session',
+      ownerKind: 'user',
+      ownerUserId: conversation.userId,
+      sourceSurface: conversation.surface,
+      sourceTrigger:
+        conversation.surface === 'automation' ? 'schedule' : 'message',
+      fastConversationId: conversation.id,
+      visibility: 'visible',
+      activityAt,
+      cachedStatus: 'ready',
+    })
+    .onConflictDoNothing()
+    .returning();
+
+  const session =
+    inserted ?? (await getSessionForFastConversation(tx, conversation.id));
+  if (!session) {
+    throw new Error(
+      `Failed to create a Session for Fast conversation ${conversation.id}.`,
+    );
+  }
+
+  await tx
+    .insert(sessionParticipants)
+    .values({
+      sessionId: session.id,
+      userId: conversation.userId,
+      role: 'owner',
+    })
+    .onConflictDoNothing();
+
+  return session;
+}
 
 /**
  * Ensures a visible task has one canonical Session inside the caller's
@@ -154,13 +225,13 @@ export async function ensureSessionForTask(
     return null;
   }
 
-  const existing = await findSessionForTask(tx, task.id);
+  const existing = await getSessionForTask(tx, task.id);
   if (existing) {
     return existing;
   }
 
   let session = input.fastConversationId
-    ? await findSessionForFastConversation(tx, input.fastConversationId)
+    ? await getSessionForFastConversation(tx, input.fastConversationId)
     : null;
   let createdCandidate = false;
 
@@ -211,7 +282,7 @@ export async function ensureSessionForTask(
     session =
       inserted ??
       (input.fastConversationId
-        ? await findSessionForFastConversation(tx, input.fastConversationId)
+        ? await getSessionForFastConversation(tx, input.fastConversationId)
         : null);
     createdCandidate = inserted !== undefined;
   }
@@ -231,7 +302,7 @@ export async function ensureSessionForTask(
     .returning({ sessionId: sessionTasks.sessionId });
 
   if (!attached) {
-    const canonical = await findSessionForTask(tx, task.id);
+    const canonical = await getSessionForTask(tx, task.id);
     if (!canonical) {
       throw new Error(`Failed to attach task ${task.id} to a Session.`);
     }
@@ -257,7 +328,7 @@ export async function ensureSessionForTask(
   return touchSessionActivity(tx, session.id, task.activityAt);
 }
 
-async function findSessionForTask(
+export async function getSessionForTask(
   tx: DatabaseOrTransaction,
   taskId: string,
 ): Promise<Session | null> {
@@ -271,7 +342,7 @@ async function findSessionForTask(
   return session?.session ?? null;
 }
 
-async function findSessionForFastConversation(
+export async function getSessionForFastConversation(
   tx: DatabaseOrTransaction,
   fastConversationId: string,
 ): Promise<Session | null> {
@@ -287,4 +358,109 @@ async function findSessionForFastConversation(
     .limit(1);
 
   return session ?? null;
+}
+
+export async function touchSessionForTask(
+  tx: DatabaseOrTransaction,
+  taskId: string,
+  at: number,
+): Promise<Session | null> {
+  const session = await getSessionForTask(tx, taskId);
+  return session ? touchSessionActivity(tx, session.id, at) : null;
+}
+
+export async function advanceSessionReadCursor(
+  dbOrTx: DatabaseOrTransaction,
+  input: {
+    sessionId: string;
+    userId: string;
+    eventAt: number;
+    eventId: string;
+  },
+) {
+  return runInTransactionIfAvailable(dbOrTx, async (tx) => {
+    const [lockedSession] = await tx
+      .select({ id: sessions.id })
+      .from(sessions)
+      .where(eq(sessions.id, input.sessionId))
+      .for('update');
+    if (!lockedSession) {
+      throw new Error(`Session ${input.sessionId} does not exist.`);
+    }
+
+    const [participant] = await tx
+      .insert(sessionParticipants)
+      .values({
+        sessionId: input.sessionId,
+        userId: input.userId,
+        role: 'member',
+        lastReadEventAt: input.eventAt,
+        lastReadEventId: input.eventId,
+      })
+      .onConflictDoUpdate({
+        target: [sessionParticipants.sessionId, sessionParticipants.userId],
+        set: {
+          lastReadEventAt: input.eventAt,
+          lastReadEventId: input.eventId,
+          updatedAt: new Date(),
+        },
+        setWhere: or(
+          sql`${sessionParticipants.lastReadEventAt} IS NULL`,
+          sql`${sessionParticipants.lastReadEventAt} < ${input.eventAt}`,
+          and(
+            eq(sessionParticipants.lastReadEventAt, input.eventAt),
+            or(
+              sql`${sessionParticipants.lastReadEventId} IS NULL`,
+              sql`${sessionParticipants.lastReadEventId} < ${input.eventId}`,
+            ),
+          ),
+        ),
+      })
+      .returning();
+
+    if (participant) return participant;
+
+    const [current] = await tx
+      .select()
+      .from(sessionParticipants)
+      .where(
+        and(
+          eq(sessionParticipants.sessionId, input.sessionId),
+          eq(sessionParticipants.userId, input.userId),
+        ),
+      );
+    if (!current) {
+      throw new Error('Failed to advance Session read cursor.');
+    }
+    return current;
+  });
+}
+
+export async function advanceSessionNotifiedCursor(
+  tx: DatabaseOrTransaction,
+  input: { sessionId: string; eventAt: number; eventId: string },
+): Promise<void> {
+  await tx
+    .update(sessionParticipants)
+    .set({
+      lastNotifiedEventAt: input.eventAt,
+      lastNotifiedEventId: input.eventId,
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(sessionParticipants.sessionId, input.sessionId),
+        or(
+          sql`${sessionParticipants.lastNotifiedEventAt} IS NULL`,
+          sql`${sessionParticipants.lastNotifiedEventAt} < ${input.eventAt}`,
+          and(
+            eq(sessionParticipants.lastNotifiedEventAt, input.eventAt),
+            or(
+              sql`${sessionParticipants.lastNotifiedEventId} IS NULL`,
+              sql`${sessionParticipants.lastNotifiedEventId} < ${input.eventId}`,
+            ),
+          ),
+        ),
+      ),
+    );
 }

@@ -126,6 +126,9 @@ export {
   sessionTasksRelations,
   sessionParticipants,
   sessionParticipantsRelations,
+  sessionPins,
+  sessionPinsRelations,
+  sessionBackfillState,
   taskArtifacts,
   taskArtifactsRelations,
   taskPullRequests,
@@ -252,5 +255,6 @@ export type {
   SessionStatus,
   SessionTaskOrigin,
   SessionParticipantRole,
+  SessionBackfillPhase,
 } from './schema';
 export type { AutomationWorkItemDisposition } from '@roomote/types';

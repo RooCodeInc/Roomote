@@ -16,6 +16,14 @@ export const SLACK_LIVE_TASK_CARD_MESSAGES = {
     'Live updates are unavailable for this task; open it to follow progress.',
 } as const;
 
+export const SLACK_SESSION_LIVE_TASK_CARD_MESSAGES = {
+  completed: 'Ready.',
+  canceled: 'Stopped.',
+  failed: 'Stopped because of an error.',
+  trackingUnavailable:
+    'Live updates are unavailable; open Roomote to follow progress.',
+} as const;
+
 export interface SlackLiveTaskCardContent {
   taskUpdateId: string;
   title: string;
@@ -24,6 +32,7 @@ export interface SlackLiveTaskCardContent {
    * the card output. Always the latest one, never accumulated. */
   message?: string;
   taskUrl?: string;
+  sessionMode?: boolean;
 }
 
 /**
@@ -53,7 +62,9 @@ export function buildSlackLiveTaskCardBlocks(
     text: [
       content.title,
       message,
-      content.taskUrl ? `<${content.taskUrl}|Open the task>` : undefined,
+      content.taskUrl
+        ? `<${content.taskUrl}|${content.sessionMode ? 'Open in Roomote' : 'Open the task'}>`
+        : undefined,
     ]
       .filter((line): line is string => Boolean(line))
       .join('\n'),
@@ -68,7 +79,11 @@ export function buildSlackLiveTaskCardBlocks(
         ...(content.taskUrl
           ? {
               sources: [
-                { type: 'url', url: content.taskUrl, text: 'View task' },
+                {
+                  type: 'url',
+                  url: content.taskUrl,
+                  text: content.sessionMode ? 'Open in Roomote' : 'View task',
+                },
               ],
             }
           : {}),

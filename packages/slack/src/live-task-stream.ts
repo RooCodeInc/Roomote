@@ -15,6 +15,7 @@ export interface SlackLiveTaskStreamData {
   threadTs: string;
   title: string;
   taskUrl?: string;
+  sessionMode?: boolean;
 }
 
 // Keyed by task id: runs are replaced on snapshot resume, but the card in the

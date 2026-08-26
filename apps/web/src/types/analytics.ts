@@ -2,7 +2,12 @@ import { z } from 'zod';
 
 import { timePeriodFilterSchema, type TimePeriodFilter } from './time-period';
 
-export const analyticsObjects = ['tasks', 'pullRequests', 'costs'] as const;
+export const analyticsObjects = [
+  'sessions',
+  'tasks',
+  'pullRequests',
+  'costs',
+] as const;
 export const analyticsObjectSchema = z.enum(analyticsObjects);
 export type AnalyticsObject = z.infer<typeof analyticsObjectSchema>;
 
@@ -21,6 +26,8 @@ const analyticsDimensions = [
   'taskType',
   'provider',
   'model',
+  'ownerKind',
+  'hasExecution',
 ] as const;
 export const analyticsDimensionSchema = z.enum(analyticsDimensions);
 export type AnalyticsDimension = z.infer<typeof analyticsDimensionSchema>;
@@ -42,6 +49,8 @@ export const analyticsFiltersSchema = z
     taskType: analyticsFilterValueSchema,
     provider: analyticsFilterValueSchema,
     model: analyticsFilterValueSchema,
+    ownerKind: analyticsFilterValueSchema,
+    hasExecution: analyticsFilterValueSchema,
   })
   .partial();
 export type AnalyticsFilters = z.infer<typeof analyticsFiltersSchema>;
@@ -202,6 +211,27 @@ export type PullRequestAnalyticsOverviewResponse = {
 };
 
 export const ANALYTICS_OBJECT_CONFIG = {
+  sessions: {
+    label: 'Sessions',
+    axisLabel: 'Sessions',
+    filterDimensions: [
+      'user',
+      'status',
+      'source',
+      'ownerKind',
+      'hasExecution',
+    ] as AnalyticsDimension[],
+    viewByDimensions: [
+      'user',
+      'status',
+      'source',
+      'ownerKind',
+      'hasExecution',
+    ] as AnalyticsDimension[],
+    defaultViewBy: 'status' as AnalyticsDimension,
+    supportedMetrics: ['tasks'] as readonly AnalyticsMetric[],
+    defaultMetric: 'tasks' as AnalyticsMetric,
+  },
   tasks: {
     label: 'Tasks',
     axisLabel: 'Tasks',
@@ -286,6 +316,8 @@ export const ANALYTICS_DIMENSION_LABELS: Record<AnalyticsDimension, string> = {
   taskType: 'Task Type',
   provider: 'Provider',
   model: 'Model',
+  ownerKind: 'Owner kind',
+  hasExecution: 'Has execution',
 };
 
 export const ANALYTICS_METRIC_LABELS: Record<AnalyticsMetric, string> = {

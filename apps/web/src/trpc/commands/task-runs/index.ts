@@ -28,6 +28,7 @@ import {
   inArray,
   markTaskStartParallelCountEndedAt,
   prepareTaskGoalActivation,
+  sessionTasks,
   slackInstallations,
   taskRuns,
   tasks,
@@ -45,7 +46,7 @@ import { sendSandboxPromptCommand } from '../sandbox-session';
 import { resolveTaskByIdAccessCommand } from '../tasks/by-id';
 
 export type CreateTaskRunResult =
-  | { success: true; id: number; taskId: string }
+  | { success: true; id: number; taskId: string; sessionId?: string }
   | { success: false; error: string };
 
 export async function startTaskGoalCommand(
@@ -464,6 +465,12 @@ export async function createStandardTaskRunCommand(
       surface: 'web',
       trigger: 'manual',
     });
+    const linkedSession = auth.featureFlags.sessions_ui
+      ? await db.query.sessionTasks.findFirst({
+          where: eq(sessionTasks.taskId, launchResult.taskId),
+          columns: { sessionId: true },
+        })
+      : null;
 
     try {
       await notifySourceTaskArtifactBuild({
@@ -486,6 +493,7 @@ export async function createStandardTaskRunCommand(
       success: true,
       id: launchResult.id,
       taskId: launchResult.taskId,
+      sessionId: linkedSession?.sessionId,
     };
   } catch (error) {
     console.error(error);

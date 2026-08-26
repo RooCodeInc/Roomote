@@ -1,6 +1,13 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react';
 import {
   ACP_ENVELOPE_EVENT_TYPES,
   getImageUrisFromContentBlocks,
@@ -61,6 +68,8 @@ export function FastSessionTranscript({
   sessionReasoningEffort = null,
   defaultModelId = null,
   defaultReasoningEffort = null,
+  headerExtras,
+  timelineExtras,
 }: {
   sessionId: string;
   initialMessages: FastSessionMessage[];
@@ -72,6 +81,8 @@ export function FastSessionTranscript({
   sessionReasoningEffort?: ReasoningEffort | null;
   defaultModelId?: string | null;
   defaultReasoningEffort?: ReasoningEffort | null;
+  headerExtras?: ReactNode;
+  timelineExtras?: ReactNode;
 }) {
   const trpcClient = useTRPCClient();
   const [serverMessages, setServerMessages] = useState<
@@ -259,6 +270,7 @@ export function FastSessionTranscript({
         <h1 className="ph-no-capture min-w-0 flex-1 truncate text-sm font-medium">
           {title ?? fallbackTitle}
         </h1>
+        {headerExtras}
       </WorkspaceHeader>
       <Conversation className="min-h-0 flex-1" initial="instant">
         <ConversationContent className="ph-no-capture mx-auto w-full max-w-4xl p-4">
@@ -267,6 +279,7 @@ export function FastSessionTranscript({
               Older messages in this session are not shown.
             </p>
           ) : null}
+          {timelineExtras}
           <AcpTranscriptBlockList
             blocks={renderBlocks}
             showInternalMessages={false}

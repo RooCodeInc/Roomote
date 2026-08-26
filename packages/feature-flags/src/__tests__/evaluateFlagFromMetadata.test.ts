@@ -23,7 +23,7 @@ describe('generic feature flag evaluation', () => {
     });
   });
 
-  it('evaluates all flags to an empty object even with stale metadata', () => {
+  it('ignores stale metadata and keeps Sessions flags disabled by default', () => {
     expect(
       evaluateFeatureFlagsFromMetadata({
         slack_eval_launcher: true,
@@ -33,6 +33,24 @@ describe('generic feature flag evaluation', () => {
         background_subagents: true,
         opencode_code_mode: true,
       }),
-    ).toEqual({});
+    ).toEqual({
+      sessions_data: false,
+      sessions_ui: false,
+      sessions_comms: false,
+    });
+  });
+
+  it('evaluates each Sessions rollout flag independently', () => {
+    expect(
+      evaluateFeatureFlagsFromMetadata({
+        sessions_data: true,
+        sessions_ui: 'true',
+        sessions_comms: false,
+      }),
+    ).toEqual({
+      sessions_data: true,
+      sessions_ui: true,
+      sessions_comms: false,
+    });
   });
 });

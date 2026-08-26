@@ -2,6 +2,8 @@ import {
   db,
   eq,
   fastAgentConversations,
+  llmUsageEvents,
+  recordLlmUsage,
   sessionFactory,
   sessionParticipants,
   sessions,
@@ -13,7 +15,10 @@ import {
 } from '../../server';
 
 import {
+  advanceSessionReadCursor,
+  advanceSessionNotifiedCursor,
   deriveSessionStatus,
+  ensureSessionForFastConversation,
   ensureSessionForTask,
   touchSessionActivity,
 } from '../sessions';
@@ -102,6 +107,21 @@ describe('session helpers', () => {
     const updated = await touchSessionActivity(db, session.id, 150);
 
     expect(updated.activityAt).toBe(200);
+  });
+
+  it('keeps Fast-only Sessions active while a conversation is responding', async () => {
+    const session = await sessionFactory.create({ cachedStatus: 'ready' });
+    createdSessionIds.push(session.id);
+
+    const active = await touchSessionActivity(db, session.id, 200, {
+      conversationResponding: true,
+    });
+    const ready = await touchSessionActivity(db, session.id, 201, {
+      conversationResponding: false,
+    });
+
+    expect(active.cachedStatus).toBe('active');
+    expect(ready.cachedStatus).toBe('ready');
   });
 
   it('recomputes cached status from linked tasks while touching activity', async () => {
@@ -310,5 +330,120 @@ describe('session helpers', () => {
         .from(sessionTasks)
         .where(eq(sessionTasks.sessionId, first!.id)),
     ).toHaveLength(2);
+  });
+
+  it('creates one Session when a Fast conversation is created repeatedly', async () => {
+    const user = await userFactory.create();
+    createdUserIds.push(user.id);
+    const [conversation] = await db
+      .insert(fastAgentConversations)
+      .values({
+        userId: user.id,
+        surface: 'web',
+        workspaceId: `workspace-${crypto.randomUUID()}`,
+        conversationId: `conversation-${crypto.randomUUID()}`,
+      })
+      .returning();
+    createdConversationIds.push(conversation!.id);
+
+    const first = await db.transaction((tx) =>
+      ensureSessionForFastConversation(tx, conversation!.id),
+    );
+    const second = await db.transaction((tx) =>
+      ensureSessionForFastConversation(tx, conversation!.id),
+    );
+    createdSessionIds.push(first.id);
+
+    expect(second.id).toBe(first.id);
+    expect(
+      await db
+        .select()
+        .from(sessions)
+        .where(eq(sessions.fastConversationId, conversation!.id)),
+    ).toHaveLength(1);
+  });
+
+  it('never regresses a participant read cursor', async () => {
+    const user = await userFactory.create();
+    createdUserIds.push(user.id);
+    const session = await sessionFactory.create({
+      ownerKind: 'user',
+      ownerUserId: user.id,
+    });
+    createdSessionIds.push(session.id);
+
+    await advanceSessionReadCursor(db, {
+      sessionId: session.id,
+      userId: user.id,
+      eventAt: 200,
+      eventId: 'event-b',
+    });
+    const current = await advanceSessionReadCursor(db, {
+      sessionId: session.id,
+      userId: user.id,
+      eventAt: 100,
+      eventId: 'event-a',
+    });
+
+    expect(current.lastReadEventAt).toBe(200);
+    expect(current.lastReadEventId).toBe('event-b');
+  });
+
+  it('advances participant notification cursors monotonically', async () => {
+    const user = await userFactory.create();
+    createdUserIds.push(user.id);
+    const session = await sessionFactory.create({
+      ownerKind: 'user',
+      ownerUserId: user.id,
+    });
+    createdSessionIds.push(session.id);
+    await db.insert(sessionParticipants).values({
+      sessionId: session.id,
+      userId: user.id,
+      role: 'owner',
+    });
+
+    await advanceSessionNotifiedCursor(db, {
+      sessionId: session.id,
+      eventAt: 200,
+      eventId: 'event-b',
+    });
+    await advanceSessionNotifiedCursor(db, {
+      sessionId: session.id,
+      eventAt: 100,
+      eventId: 'event-a',
+    });
+
+    const [participant] = await db
+      .select()
+      .from(sessionParticipants)
+      .where(eq(sessionParticipants.sessionId, session.id));
+    expect(participant?.lastNotifiedEventAt).toBe(200);
+    expect(participant?.lastNotifiedEventId).toBe('event-b');
+  });
+
+  it('stamps new task usage with the owning Session', async () => {
+    const task = await taskFactory.create();
+    createdTaskIds.push(task.id);
+    const session = await sessionFactory.create();
+    createdSessionIds.push(session.id);
+    await db.insert(sessionTasks).values({
+      sessionId: session.id,
+      taskId: task.id,
+      origin: 'direct_launch',
+    });
+
+    await recordLlmUsage({
+      taskId: task.id,
+      eventKey: `session-usage:${crypto.randomUUID()}`,
+      inputTokens: 10,
+      outputTokens: 5,
+    });
+
+    const [usage] = await db
+      .select({ sessionId: llmUsageEvents.sessionId })
+      .from(llmUsageEvents)
+      .where(eq(llmUsageEvents.taskId, task.id));
+    expect(usage?.sessionId).toBe(session.id);
   });
 });

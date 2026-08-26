@@ -17,8 +17,11 @@ import { getVisiblePrimaryNavItems } from '../navigation-items';
 
 export const NavbarDrawer = () => {
   const pathname = usePathname();
-  const { isAdmin } = useAuthorizedUser();
-  const visibleNavItems = getVisiblePrimaryNavItems({ isAdmin });
+  const { isAdmin, featureFlags } = useAuthorizedUser();
+  const visibleNavItems = getVisiblePrimaryNavItems({
+    isAdmin,
+    sessionsUi: featureFlags?.sessions_ui === true,
+  });
 
   const [open, setOpen] = useState(false);
 

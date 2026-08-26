@@ -4,9 +4,17 @@ import {
   type LaunchFastAgentTask,
 } from '@roomote/cloud-agents/server';
 import { RunStatus } from '@roomote/types';
+import { Env } from '@roomote/env';
+import { db, getSessionForTask } from '@roomote/db/server';
+import {
+  FeatureFlag,
+  getFeatureFlagEvaluator,
+} from '@roomote/feature-flags/server';
+import { getRedis } from '@roomote/redis';
 import {
   buildSlackLiveTaskCardBlocks,
   SLACK_LIVE_TASK_CARD_MESSAGES,
+  SLACK_SESSION_LIVE_TASK_CARD_MESSAGES,
 } from './live-task-card-blocks';
 import {
   buildSlackLiveTaskTitle,
@@ -22,6 +30,7 @@ type SlackLiveTaskCardNotifier = Pick<
 >;
 
 export const STARTING_TASK_TITLE = 'Starting task…';
+export const PREPARING_WORKSPACE_TITLE = 'Preparing workspace…';
 
 function describeError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -49,13 +58,17 @@ export function createFastAgentSlackLiveTaskLauncher(
 ): LaunchFastAgentTask {
   const { slack, ...launcherParams } = params;
 
-  const postTaskLink = async (taskUrl: string): Promise<void> => {
+  const postTaskLink = async (
+    taskUrl: string,
+    sessionMode = false,
+  ): Promise<void> => {
+    const label = sessionMode ? 'Open in Roomote' : 'Open the task';
     try {
       await slack.postMessage({
         channel: launcherParams.channelId,
         thread_ts: launcherParams.threadTs,
-        text: `Open the task: ${taskUrl}`,
-        blocks: [{ type: 'markdown', text: `[Open the task](${taskUrl})` }],
+        text: `${label}: ${taskUrl}`,
+        blocks: [{ type: 'markdown', text: `[${label}](${taskUrl})` }],
         unfurl_links: false,
         unfurl_media: false,
       });
@@ -72,8 +85,20 @@ export function createFastAgentSlackLiveTaskLauncher(
   ): Promise<void> => {
     const taskUpdateId = `roomote-task-${taskRun.taskId}`;
     let messageTs: string | undefined;
+    let sessionMode = false;
+    let destinationUrl = context.taskUrl;
 
     try {
+      sessionMode = await getFeatureFlagEvaluator(getRedis()).evaluate(
+        FeatureFlag.SessionsComms,
+        { isDeploymentContext: true },
+      );
+      const linkedSession = sessionMode
+        ? await getSessionForTask(db, taskRun.taskId)
+        : null;
+      destinationUrl = linkedSession
+        ? `${Env.R_APP_URL}/sessions/${linkedSession.id}?task=${taskRun.taskId}`
+        : context.taskUrl;
       // A card for this task already exists (for example an idempotent
       // relaunch of the same task); keep updating it instead of posting
       // a second card in the thread.
@@ -86,9 +111,10 @@ export function createFastAgentSlackLiveTaskLauncher(
         thread_ts: launcherParams.threadTs,
         ...buildSlackLiveTaskCardBlocks({
           taskUpdateId,
-          title: STARTING_TASK_TITLE,
+          title: sessionMode ? PREPARING_WORKSPACE_TITLE : STARTING_TASK_TITLE,
           status: 'in_progress',
-          taskUrl: context.taskUrl,
+          taskUrl: destinationUrl,
+          sessionMode,
         }),
         unfurl_links: false,
         unfurl_media: false,
@@ -104,7 +130,7 @@ export function createFastAgentSlackLiveTaskLauncher(
         console.warn(
           `[Fast Agent] Slack rejected the task card for run ${taskRun.id} (${posted.slackErrorCode ?? (posted.transportError ? 'transport error' : 'unknown')}); posting the task link instead.`,
         );
-        await postTaskLink(context.taskUrl);
+        await postTaskLink(destinationUrl, sessionMode);
         return;
       }
 
@@ -118,7 +144,8 @@ export function createFastAgentSlackLiveTaskLauncher(
         taskUpdateId,
         threadTs: launcherParams.threadTs,
         title: buildSlackLiveTaskTitle(context.prompt),
-        taskUrl: context.taskUrl,
+        taskUrl: destinationUrl,
+        ...(sessionMode ? { sessionMode: true } : {}),
       });
     } catch (error) {
       console.error(
@@ -140,10 +167,15 @@ export function createFastAgentSlackLiveTaskLauncher(
           ts: messageTs,
           message: buildSlackLiveTaskCardBlocks({
             taskUpdateId,
-            title: STARTING_TASK_TITLE,
+            title: sessionMode
+              ? PREPARING_WORKSPACE_TITLE
+              : STARTING_TASK_TITLE,
             status: 'error',
-            message: SLACK_LIVE_TASK_CARD_MESSAGES.trackingUnavailable,
-            taskUrl: context.taskUrl,
+            message: sessionMode
+              ? SLACK_SESSION_LIVE_TASK_CARD_MESSAGES.trackingUnavailable
+              : SLACK_LIVE_TASK_CARD_MESSAGES.trackingUnavailable,
+            taskUrl: destinationUrl,
+            sessionMode,
           }),
         });
       } catch (updateError) {
@@ -152,7 +184,7 @@ export function createFastAgentSlackLiveTaskLauncher(
         );
       }
       if (!settled) {
-        await postTaskLink(context.taskUrl);
+        await postTaskLink(destinationUrl, sessionMode);
       }
     }
   };

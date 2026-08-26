@@ -40,6 +40,19 @@ import {
   startFastSessionInputSchema,
 } from '../commands/fast-sessions/input';
 import {
+  getSessionByIdCommand,
+  getSessionForTask,
+  getSessions,
+  getSessionTimeline,
+  archiveSessionCommand,
+  listSessionPins,
+  markSessionReadCommand,
+  sessionIdInputSchema,
+  sessionsListInputSchema,
+  setSessionPinned,
+  updateSessionMetadata,
+} from '../commands/sessions';
+import {
   analyticsChartInputSchema,
   analyticsDetailsInputSchema,
   analyticsExportInputSchema,
@@ -2822,6 +2835,72 @@ export const appRouter = createRouter({
       .input(replyToFastSessionInputSchema)
       .mutation(({ ctx: { auth }, input }) =>
         replyToFastSessionCommand(auth, input),
+      ),
+  }),
+
+  sessions: createRouter({
+    list: protectedProcedure
+      .input(sessionsListInputSchema)
+      .query(({ ctx: { auth }, input }) => getSessions(auth, input)),
+    byId: protectedProcedure
+      .input(sessionIdInputSchema)
+      .query(({ ctx: { auth }, input }) =>
+        getSessionByIdCommand(auth, input.sessionId),
+      ),
+    timeline: protectedProcedure
+      .input(sessionIdInputSchema.extend({ since: z.number().optional() }))
+      .query(({ ctx: { auth }, input }) =>
+        getSessionTimeline(auth, input.sessionId, input.since),
+      ),
+    forTask: protectedProcedure
+      .input(z.object({ taskId: z.string().min(1) }))
+      .query(({ ctx: { auth }, input }) =>
+        getSessionForTask(auth, input.taskId),
+      ),
+    markRead: protectedProcedure
+      .input(
+        sessionIdInputSchema.extend({
+          throughEventAt: z.number().nonnegative(),
+          throughEventId: z.string().min(1),
+        }),
+      )
+      .mutation(({ ctx: { auth }, input }) =>
+        markSessionReadCommand(auth, input),
+      ),
+    rename: protectedProcedure
+      .input(
+        sessionIdInputSchema.extend({
+          title: z.string().trim().min(1).max(500),
+        }),
+      )
+      .mutation(({ ctx: { auth }, input }) =>
+        updateSessionMetadata(auth, input.sessionId, { title: input.title }),
+      ),
+    archive: protectedProcedure
+      .input(sessionIdInputSchema)
+      .mutation(({ ctx: { auth }, input }) =>
+        archiveSessionCommand(auth, input.sessionId),
+      ),
+    unarchive: protectedProcedure
+      .input(sessionIdInputSchema)
+      .mutation(({ ctx: { auth }, input }) =>
+        updateSessionMetadata(auth, input.sessionId, { archivedAt: null }),
+      ),
+    pins: protectedProcedure.query(({ ctx: { auth } }) =>
+      listSessionPins(auth),
+    ),
+    setPinned: protectedProcedure
+      .input(sessionIdInputSchema.extend({ pinned: z.boolean() }))
+      .mutation(({ ctx: { auth }, input }) => setSessionPinned(auth, input)),
+    search: protectedProcedure
+      .input(
+        z.object({
+          query: z.string().max(200),
+          limit: z.number().int().min(1).max(50).optional(),
+        }),
+      )
+      .query(({ ctx: { auth }, input }) =>
+        getSessions(auth, { q: input.query, limit: input.limit ?? 20 }),
       ),
   }),
 

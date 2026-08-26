@@ -111,7 +111,11 @@ function AuthorizedCommandPalette() {
   const navItems = useMemo<NavItem[]>(() => {
     const items: NavItem[] = [
       { icon: Plus, label: 'New Task', href: '/' },
-      { icon: GalleryVerticalEnd, label: 'Tasks', href: '/tasks' },
+      {
+        icon: GalleryVerticalEnd,
+        label: user?.featureFlags?.sessions_ui ? 'Sessions' : 'Tasks',
+        href: user?.featureFlags?.sessions_ui ? '/sessions' : '/tasks',
+      },
       { icon: Settings, label: 'Settings', href: '/settings' },
       { icon: HelpCircle, label: 'Help', action: 'contact-support' },
     ];
@@ -133,7 +137,7 @@ function AuthorizedCommandPalette() {
       );
     }
     return items;
-  }, [user?.isAdmin]);
+  }, [user?.featureFlags?.sessions_ui, user?.isAdmin]);
 
   // Debounce search input
   useEffect(() => {
@@ -157,6 +161,15 @@ function AuthorizedCommandPalette() {
       { enabled: open },
     ),
   );
+  const sessionSearchOptions = trpc.sessions?.search?.queryOptions(
+    { query: debouncedSearch, limit: SEARCH_TASKS_LIMIT },
+    { enabled: open && user?.featureFlags?.sessions_ui === true },
+  ) ?? {
+    queryKey: ['sessions', 'search', 'disabled'],
+    queryFn: async () => null,
+    enabled: false,
+  };
+  const { data: sessionResults } = useQuery(sessionSearchOptions);
 
   // Promote recently-visited tasks to the top of the list
   const sortedTasks = useMemo(() => {
@@ -280,6 +293,23 @@ function AuthorizedCommandPalette() {
             </CommandGroup>
           </>
         )}
+
+        {(sessionResults?.sessions?.length ?? 0) > 0 ? (
+          <CommandGroup heading="Sessions">
+            {sessionResults!.sessions.map((session) => (
+              <CommandItem
+                key={session.id}
+                value={`${session.title}-${session.id}`}
+                onSelect={() => navigate(`/sessions/${session.id}`)}
+              >
+                <span className="truncate">{session.title}</span>
+                <span className="ml-auto text-xs text-muted-foreground">
+                  {session.executionCount} executions
+                </span>
+              </CommandItem>
+            ))}
+          </CommandGroup>
+        ) : null}
 
         {commandGroups.size > 0 &&
           Array.from(commandGroups.entries()).map(([group, cmds]) => (

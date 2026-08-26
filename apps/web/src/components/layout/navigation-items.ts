@@ -1,6 +1,5 @@
 import { type LucideIcon } from '@/components/system';
-import { ChartColumnIncreasing, House, Zap } from '@/components/system';
-import { Rows4 } from 'lucide-react';
+import { ChartColumnIncreasing, House, Rows4, Zap } from '@/components/system';
 
 interface PrimaryNavItem {
   icon: LucideIcon;
@@ -52,6 +51,17 @@ const PRIMARY_NAV_ITEMS: PrimaryNavItem[] = [
 
 export function getVisiblePrimaryNavItems(opts: {
   isAdmin: boolean;
+  sessionsUi?: boolean;
 }): PrimaryNavItem[] {
-  return PRIMARY_NAV_ITEMS.filter((item) => !item.adminOnly || opts.isAdmin);
+  return PRIMARY_NAV_ITEMS.map((item) =>
+    item.href === '/tasks' && opts.sessionsUi
+      ? {
+          ...item,
+          href: '/sessions',
+          label: 'Sessions',
+          description: 'View conversations and delegated work',
+          matchPaths: ['/sessions', '/tasks', '/cloud-agents'],
+        }
+      : item,
+  ).filter((item) => !item.adminOnly || opts.isAdmin);
 }

@@ -4,6 +4,7 @@ import { and, db, eq, slackInstallations } from '@roomote/db/server';
 import {
   buildSlackLiveTaskCardBlocks,
   SLACK_LIVE_TASK_CARD_MESSAGES,
+  SLACK_SESSION_LIVE_TASK_CARD_MESSAGES,
 } from './live-task-card-blocks';
 import {
   buildSlackLiveTaskTitle,
@@ -74,6 +75,7 @@ export async function renderSlackLiveTaskCard(input: {
       status: input.status,
       ...(input.message ? { message: input.message } : {}),
       ...(data.taskUrl ? { taskUrl: data.taskUrl } : {}),
+      sessionMode: data.sessionMode === true,
     }),
   });
 
@@ -105,8 +107,8 @@ export async function settleSlackLiveTaskCardForRun(input: {
       status: 'error',
       message:
         input.status === RunStatus.Canceled
-          ? SLACK_LIVE_TASK_CARD_MESSAGES.canceled
-          : SLACK_LIVE_TASK_CARD_MESSAGES.failed,
+          ? await dataSessionMessages(input.taskId, 'canceled')
+          : await dataSessionMessages(input.taskId, 'failed'),
       taskTitle: input.taskTitle,
     });
   } catch (error) {
@@ -114,4 +116,14 @@ export async function settleSlackLiveTaskCardForRun(input: {
       `[settleSlackLiveTaskCard] Failed to settle the task card for task ${input.taskId}: ${error instanceof Error ? error.message : String(error)}`,
     );
   }
+}
+
+async function dataSessionMessages(
+  taskId: string,
+  state: 'canceled' | 'failed',
+): Promise<string> {
+  const data = await getSlackLiveTaskStreamData(taskId);
+  return data?.sessionMode
+    ? SLACK_SESSION_LIVE_TASK_CARD_MESSAGES[state]
+    : SLACK_LIVE_TASK_CARD_MESSAGES[state];
 }

@@ -12,7 +12,12 @@ import {
   resolveUserMcpServerConfigs,
   type FastAgentSurfaceReplyDelivery,
 } from '@roomote/sdk/server';
-import { db, eq, fastAgentConversations } from '@roomote/db/server';
+import {
+  db,
+  eq,
+  fastAgentConversations,
+  getSessionForFastConversation,
+} from '@roomote/db/server';
 import {
   formatErrorForLog,
   getUserDisplayName,
@@ -148,7 +153,7 @@ export async function startFastSessionCommand(
     model?: string | null;
     reasoningEffort?: ReasoningEffort | null;
   },
-): Promise<{ sessionId: string }> {
+): Promise<{ sessionId: string; fastConversationId?: string }> {
   const conversation: WebFastAgentConversation = {
     surface: 'web',
     workspaceId: auth.userId,
@@ -182,7 +187,13 @@ export async function startFastSessionCommand(
     reasoningEffort: settings.reasoningEffort,
   });
 
-  return { sessionId: session.id };
+  const unifiedSession = auth.featureFlags.sessions_ui
+    ? await getSessionForFastConversation(db, session.id)
+    : null;
+  return {
+    sessionId: unifiedSession?.id ?? session.id,
+    fastConversationId: session.id,
+  };
 }
 
 export async function replyToFastSessionCommand(

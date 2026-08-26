@@ -64,6 +64,7 @@
     "@roomote/communication": "workspace:^",
     "@roomote/db": "workspace:^",
     "@roomote/env": "workspace:^",
+    "@roomote/feature-flags": "workspace:^",
     "@roomote/github": "workspace:^",
     "@roomote/gitea": "workspace:^",
     "@roomote/gitlab": "workspace:^",

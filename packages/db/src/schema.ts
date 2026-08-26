@@ -1795,6 +1795,9 @@ export const llmUsageEvents = pgTable(
     environmentId: uuid('environment_id').references(() => environments.id, {
       onDelete: 'set null',
     }),
+    sessionId: uuid('session_id').references(() => sessions.id, {
+      onDelete: 'set null',
+    }),
     // Non-task producers use eventKey for idempotency. Task harness events use
     // the session/message pair below because a message may be retried with
     // progressively richer usage data.
@@ -1862,6 +1865,7 @@ export const llmUsageEvents = pgTable(
     index('task_inference_usage_events_environment_id_idx').on(
       table.environmentId,
     ),
+    index('task_inference_usage_events_session_id_idx').on(table.sessionId),
     index('task_inference_usage_events_provider_model_idx').on(
       table.providerId,
       table.modelId,
@@ -1886,6 +1890,10 @@ export const llmUsageEventsRelations = relations(llmUsageEvents, ({ one }) => ({
   environment: one(environments, {
     fields: [llmUsageEvents.environmentId],
     references: [environments.id],
+  }),
+  session: one(sessions, {
+    fields: [llmUsageEvents.sessionId],
+    references: [sessions.id],
   }),
 }));
 
@@ -3465,6 +3473,11 @@ export type SessionTaskOrigin =
   | 'backfill'
   | 'follow_up';
 export type SessionParticipantRole = 'owner' | 'member';
+export type SessionBackfillPhase =
+  | 'fast_conversations'
+  | 'fast_tasks'
+  | 'tasks'
+  | 'participants';
 
 /**
  * sessions
@@ -3593,6 +3606,7 @@ export const sessionParticipants = pgTable(
     lastReadEventAt: bigint('last_read_event_at', { mode: 'number' }),
     lastReadEventId: text('last_read_event_id'),
     lastNotifiedEventAt: bigint('last_notified_event_at', { mode: 'number' }),
+    lastNotifiedEventId: text('last_notified_event_id'),
     createdAt: timestamp('created_at').notNull().defaultNow(),
     updatedAt: timestamp('updated_at').notNull().defaultNow(),
   },
@@ -3605,6 +3619,58 @@ export const sessionParticipants = pgTable(
     check(
       'session_participants_role_check',
       sql`${table.role} in ('owner', 'member')`,
+    ),
+  ],
+);
+
+/** User-scoped Session pins mirror task pins without changing task storage. */
+export const sessionPins = pgTable(
+  'session_pins',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    sessionId: uuid('session_id')
+      .notNull()
+      .references(() => sessions.id, { onDelete: 'cascade' }),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('session_pins_user_session_unique').on(
+      table.userId,
+      table.sessionId,
+    ),
+    index('session_pins_user_updated_at_idx').on(table.userId, table.updatedAt),
+    index('session_pins_session_id_idx').on(table.sessionId),
+  ],
+);
+
+/** Durable bounded-backfill position retained independently for N-1 safety. */
+export const sessionBackfillState = pgTable(
+  'session_backfill_state',
+  {
+    key: text('key').primaryKey(),
+    phase: text('phase')
+      .notNull()
+      .default('fast_conversations')
+      .$type<SessionBackfillPhase>(),
+    cursorCreatedAt: timestamp('cursor_created_at'),
+    cursorId: text('cursor_id'),
+    completedAt: timestamp('completed_at'),
+    lastRunAt: timestamp('last_run_at'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => [
+    check(
+      'session_backfill_state_phase_check',
+      sql`${table.phase} in ('fast_conversations', 'fast_tasks', 'tasks', 'participants')`,
+    ),
+    check(
+      'session_backfill_state_cursor_shape_check',
+      sql`(${table.cursorCreatedAt} IS NULL) = (${table.cursorId} IS NULL)`,
     ),
   ],
 );
@@ -3625,6 +3691,8 @@ export const sessionsRelations = relations(sessions, ({ one, many }) => ({
   }),
   tasks: many(sessionTasks),
   participants: many(sessionParticipants),
+  pins: many(sessionPins),
+  usageEvents: many(llmUsageEvents),
 }));
 
 export const sessionTasksRelations = relations(sessionTasks, ({ one }) => ({
@@ -3651,6 +3719,17 @@ export const sessionParticipantsRelations = relations(
     }),
   }),
 );
+
+export const sessionPinsRelations = relations(sessionPins, ({ one }) => ({
+  session: one(sessions, {
+    fields: [sessionPins.sessionId],
+    references: [sessions.id],
+  }),
+  user: one(users, {
+    fields: [sessionPins.userId],
+    references: [users.id],
+  }),
+}));
 
 /**
  * custom_automations

@@ -148,8 +148,10 @@ export function Home({
   const {
     cloudEnabled,
     isAdmin,
+    featureFlags,
     managedAccess = DEFAULT_MANAGED_DEPLOYMENT_ACCESS,
   } = useAuthorizedUser();
+  const sessionsUiEnabled = featureFlags?.sessions_ui === true;
 
   const canSelectBranch = false;
 
@@ -406,11 +408,16 @@ export function Home({
   const navigateToTaskRun = (result: {
     success: boolean;
     taskId?: string;
+    sessionId?: string;
     error?: string;
   }) => {
     if (result.success && 'taskId' in result) {
       setIsExiting(true);
-      router.push(`/task/${result.taskId}`);
+      router.push(
+        sessionsUiEnabled && result.sessionId
+          ? `/sessions/${result.sessionId}?task=${result.taskId}`
+          : `/task/${result.taskId}`,
+      );
     } else if ('error' in result) {
       toast.error(result.error);
     }
@@ -655,6 +662,16 @@ export function Home({
         return;
       }
 
+      if (isAutoWorkspace && sessionsUiEnabled) {
+        if (!submission.description && !submission.images?.length) return;
+        await startFastSession({
+          text: submission.description ?? '',
+          images: submission.images,
+          model: selectedModelId,
+        });
+        return;
+      }
+
       if (isAutoWorkspace) {
         await handleAutoSubmit(submission);
         return;
@@ -688,6 +705,7 @@ export function Home({
       wiggleWorkspace,
       startFastSession,
       selectedModelId,
+      sessionsUiEnabled,
     ],
   );
 
@@ -722,7 +740,7 @@ export function Home({
               <div ref={workspaceRef}>
                 <SelectWorkspace
                   allowAuto
-                  allowFast
+                  allowFast={!sessionsUiEnabled}
                   allowBranchSelection={canSelectBranch}
                 />
               </div>

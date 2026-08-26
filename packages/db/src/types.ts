@@ -26,6 +26,8 @@ import type {
   sessions,
   sessionTasks,
   sessionParticipants,
+  sessionPins,
+  sessionBackfillState,
   taskPullRequests,
   taskRuns,
   taskRunEvents,
@@ -123,6 +125,9 @@ export type CreateSessionParticipant = Omit<
   typeof sessionParticipants.$inferInsert,
   Generated
 >;
+
+export type SessionBackfillState = typeof sessionBackfillState.$inferSelect;
+export type SessionPin = typeof sessionPins.$inferSelect;
 
 /**
  * taskPullRequests

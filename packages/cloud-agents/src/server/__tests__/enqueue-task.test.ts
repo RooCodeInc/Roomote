@@ -39,10 +39,13 @@ import {
   environments,
   environmentRepositoryMappings,
   repositories,
+  sessionTasks,
   userFactory,
   environmentFactory,
   repositoryFactory,
 } from '@roomote/db/server';
+import { getFeatureFlagEvaluator } from '@roomote/feature-flags/server';
+import { getRedis } from '@roomote/redis';
 
 import {
   TaskRunQueue,
@@ -906,6 +909,59 @@ describe('enqueueTask initiator stamping', () => {
     expect(task!.actorExternalId).toBe('U999');
     expect(task!.actorDisplayName).toBe('Matched Human');
     expect(run.actingUserId).toBe(userId);
+  });
+});
+
+describe('enqueueTask Session linkage', () => {
+  beforeEach(async () => {
+    await db
+      .insert(deploymentSettings)
+      .values({ id: 'default', metadata: { sessions_data: true } })
+      .onConflictDoUpdate({
+        target: deploymentSettings.id,
+        set: { metadata: { sessions_data: true } },
+      });
+    await getFeatureFlagEvaluator(getRedis()).invalidateDeploymentCache();
+  });
+
+  afterEach(async () => {
+    await db
+      .update(deploymentSettings)
+      .set({ metadata: {} })
+      .where(eq(deploymentSettings.id, 'default'));
+    await getFeatureFlagEvaluator(getRedis()).invalidateDeploymentCache();
+  });
+
+  it('creates exactly one Session link for a visible fresh task', async () => {
+    const userId = await createUser();
+    const run = await launchFresh({
+      initiator: { kind: 'user', userId },
+      workflow: 'standard',
+      surface: 'web',
+      trigger: 'manual',
+    });
+
+    const links = await db
+      .select()
+      .from(sessionTasks)
+      .where(eq(sessionTasks.taskId, run.taskId));
+    expect(links).toHaveLength(1);
+    expect(links[0]?.origin).toBe('direct_launch');
+  });
+
+  it('does not create Session links for hidden tasks', async () => {
+    const userId = await createUser();
+    const run = await launchFresh({
+      initiator: { kind: 'user', userId },
+      workflow: 'scan',
+      surface: 'system',
+      trigger: 'schedule',
+      visibility: 'hidden',
+    });
+
+    await expect(
+      db.select().from(sessionTasks).where(eq(sessionTasks.taskId, run.taskId)),
+    ).resolves.toEqual([]);
   });
 });
 

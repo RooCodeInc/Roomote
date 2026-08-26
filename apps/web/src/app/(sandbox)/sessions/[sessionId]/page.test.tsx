@@ -14,6 +14,10 @@ const { authorizeMock, getFastSessionByIdMock, transcriptMock } = vi.hoisted(
 );
 
 vi.mock('@/lib/server/auth-context', () => ({ authorize: authorizeMock }));
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ replace: vi.fn() }),
+  useSearchParams: () => new URLSearchParams(),
+}));
 vi.mock('@/lib/server/fast-sessions', () => ({
   getFastSessionById: getFastSessionByIdMock,
 }));

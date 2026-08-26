@@ -52,11 +52,27 @@ function buildAuth(isAdmin: boolean): UserAuthSuccess {
 describe('feature-flags commands', () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it('returns no experimental flags', async () => {
+  it('returns the default-off Sessions rollout flags', async () => {
     await expect(getExperimentalFlagsCommand(buildAuth(true))).resolves.toEqual(
-      [],
+      [
+        expect.objectContaining({
+          id: 'sessions_data',
+          value: false,
+          explicitlySet: false,
+        }),
+        expect.objectContaining({
+          id: 'sessions_ui',
+          value: false,
+          explicitlySet: false,
+        }),
+        expect.objectContaining({
+          id: 'sessions_comms',
+          value: false,
+          explicitlySet: false,
+        }),
+      ],
     );
-    expect(mockFindFirst).not.toHaveBeenCalled();
+    expect(mockFindFirst).toHaveBeenCalledOnce();
   });
 
   it('rejects stale flags before metadata lookup or a database write', async () => {

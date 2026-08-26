@@ -22,8 +22,16 @@ import {
   appendFastAgentMemory,
   db,
   getDeploymentTaskModelOptions,
+  getSessionForFastConversation,
+  getSessionForTask,
   isBrainProviderConfigured,
+  touchSessionActivity,
 } from '@roomote/db/server';
+import {
+  FeatureFlag,
+  getFeatureFlagEvaluator,
+} from '@roomote/feature-flags/server';
+import { getRedis } from '@roomote/redis';
 import { Env } from '@roomote/env';
 import { z } from 'zod';
 
@@ -108,6 +116,17 @@ const chatReactionArgsSchema = z.object({
 });
 const FAST_AGENT_DEFAULT_SLACK_HISTORY_LOOKBACK_MS = 24 * 60 * 60 * 1000;
 const FAST_AGENT_CANONICAL_TOOL_OUTPUT_MAX_CHARS = 50_000;
+
+async function setFastSessionResponding(
+  fastConversationId: string,
+  responding: boolean,
+): Promise<void> {
+  const session = await getSessionForFastConversation(db, fastConversationId);
+  if (!session) return;
+  await touchSessionActivity(db, session.id, Math.floor(Date.now() / 1000), {
+    conversationResponding: responding,
+  });
+}
 
 function buildFastAgentTurnId({
   currentMessageId,
@@ -956,6 +975,11 @@ export async function answerFastAgentQuestion({
       }),
     ]);
     canonicalConversationId = session.id;
+    await setFastSessionResponding(session.id, true).catch((error) => {
+      console.warn(
+        `[sessions] Failed to mark Fast Session active: ${formatErrorForLog(error)}`,
+      );
+    });
     durableOpenCodeSessionId = session.openCodeSessionId;
     activeOpenCodeSessionId = session.openCodeSessionId;
     diagnostics.setCanonicalConversationId(session.id);
@@ -1450,12 +1474,34 @@ export async function answerFastAgentQuestion({
               taskUrl?: string;
               taskLinkRendered?: boolean;
             }) => {
+              let sessionCommsEnabled = false;
+              let linkedSession: Awaited<ReturnType<typeof getSessionForTask>> =
+                null;
+              try {
+                sessionCommsEnabled = await getFeatureFlagEvaluator(
+                  getRedis(),
+                ).evaluate(FeatureFlag.SessionsComms, {
+                  isDeploymentContext: true,
+                });
+                linkedSession = sessionCommsEnabled
+                  ? await getSessionForTask(db, task.taskId)
+                  : null;
+              } catch (error) {
+                console.warn(
+                  `[sessions] Failed to resolve Session kickoff link: ${formatErrorForLog(error)}`,
+                );
+              }
+              const destinationUrl = linkedSession
+                ? `${Env.R_APP_URL}/sessions/${linkedSession.id}?task=${task.taskId}`
+                : task.taskUrl;
               const message = [
-                args.kickoffMessage,
-                task.taskUrl &&
+                sessionCommsEnabled
+                  ? `Preparing workspace…\n\n${args.kickoffMessage}`
+                  : args.kickoffMessage,
+                destinationUrl &&
                 !task.taskLinkRendered &&
-                !args.kickoffMessage.includes(task.taskUrl)
-                  ? `[Open the task](${task.taskUrl})`
+                !args.kickoffMessage.includes(destinationUrl)
+                  ? `[${sessionCommsEnabled ? 'Open in Roomote' : 'Open the task'}](${destinationUrl})`
                   : undefined,
               ]
                 .filter((part): part is string => Boolean(part))
@@ -1703,6 +1749,7 @@ export async function answerFastAgentQuestion({
                 return await generateTrackedNonTaskTextInOpenCodeSession(
                   {
                     userId,
+                    fastConversationId: session.id,
                     surface:
                       NON_TASK_INFERENCE_SURFACES.fastAgentQuestionAnswering,
                     modelRole: FAST_AGENT_MODEL_ROLE,
@@ -1963,6 +2010,15 @@ export async function answerFastAgentQuestion({
     }
     return lastVisibleMessage || message;
   } finally {
+    if (canonicalConversationId) {
+      await setFastSessionResponding(canonicalConversationId, false).catch(
+        (error) => {
+          console.warn(
+            `[sessions] Failed to settle Fast Session status: ${formatErrorForLog(error)}`,
+          );
+        },
+      );
+    }
     diagnostics.finish();
   }
 }
