@@ -130,7 +130,7 @@ Fast runs with a Slack or Discord channel destination create a new report thread
 for each run. A Fast run with a Slack direct-message destination posts to the
 automation owner's DM and requires that owner to link their Slack account and
 make the bot reachable there. Fast runs without a destination are stored as
-channel-less Fast conversations; their output will be available in the upcoming
+channel-less Fast sessions; their output will be available in the upcoming
 Fast runs view. Until that view ships, use a supported Slack or Discord
 destination when the result must be visible outside the automation's latest-run
 status.
@@ -181,9 +181,9 @@ an explicit IANA timezone.
 Admins can also manage custom automations conversationally through the
 `manage_custom_automations` tool: list, resolve a schedule, create, update,
 delete, or run an enabled automation immediately. The tool is available both
-from a Roomote task and directly in a Fast conversation, so a quick chat
+from a Roomote task and directly in a Fast session, so a quick chat
 message can handle the full automation lifecycle without launching a task.
-Fast conversations can also reach the deployment's enabled MCP servers, the
+Fast sessions can also reach the deployment's enabled MCP servers, the
 same ones delegated tasks use. Use the tool's model-list action to
 see the deployment's enabled model IDs and default before setting an override.
 Model IDs preserve the configured inference route: `openrouter/...` targets
