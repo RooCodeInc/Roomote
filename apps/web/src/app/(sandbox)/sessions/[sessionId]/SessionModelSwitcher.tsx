@@ -72,8 +72,13 @@ export function SessionModelSwitcher({
       <PopoverContent align="start" className="w-sm p-3 md:w-xl">
         <div className="grid grid-cols-[minmax(0,1fr)_7rem] items-center gap-2">
           <ModelSelect
-            value={model || (defaultModelId ?? undefined)}
+            value={model}
             onValueChange={onModelChange}
+            emptyOptionLabel={
+              defaultModelId
+                ? `Default (${displayModelName(defaultModelId)})`
+                : 'Deployment default'
+            }
             disabled={disabled}
             className="w-full min-w-0"
             ariaLabel="Session model"
