@@ -150,6 +150,8 @@ export const users = pgTable(
 export const userRelations = relations(users, ({ many }) => ({
   tasks: many(tasks, { relationName: 'taskInitiatorUser' }),
   taskPins: many(taskPins),
+  ownedSessions: many(sessions, { relationName: 'sessionOwnerUser' }),
+  sessionParticipants: many(sessionParticipants),
   slackFastIntegrationCalls: many(slackFastIntegrationCalls),
   workItems: many(workItems),
   setupQualificationBlocks: many(setupQualificationBlocks),
@@ -840,6 +842,7 @@ export const tasksRelations = relations(tasks, ({ one, many }) => ({
     relationName: 'taskCommitAuthorUser',
   }),
   taskPins: many(taskPins),
+  sessionTasks: many(sessionTasks),
   runs: many(taskRuns),
   inferenceUsageEvents: many(llmUsageEvents),
   workItemsAsSource: many(workItems, {
@@ -3184,6 +3187,7 @@ export const fastAgentConversationsRelations = relations(
     }),
     messages: many(fastAgentMessages),
     prFeedbackDeliveries: many(fastAgentPrFeedbackDeliveries),
+    session: one(sessions),
   }),
 );
 
@@ -3447,9 +3451,206 @@ export const automations = pgTable('automations', {
 
 export const automationsRelations = relations(automations, ({ many }) => ({
   tasks: many(tasks),
+  sessions: many(sessions),
   workItems: many(workItems),
   trackedMessages: many(trackedMessages),
 }));
+
+export type SessionOwnerKind = 'user' | 'automation' | 'system';
+export type SessionSourceSurface = TaskSurface | FastAgentSurface;
+export type SessionStatus = 'active' | 'needs_input' | 'blocked' | 'ready';
+export type SessionTaskOrigin =
+  | 'direct_launch'
+  | 'fast_delegation'
+  | 'backfill'
+  | 'follow_up';
+export type SessionParticipantRole = 'owner' | 'member';
+
+/**
+ * sessions
+ *
+ * Additive Session storage is intentionally separate from tasks and Fast
+ * conversations so the previous release remains safe against this schema for
+ * N-1 rollback. Existing operational records remain canonical.
+ */
+export const sessions = pgTable(
+  'sessions',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    title: text('title').notNull(),
+    ownerKind: text('owner_kind').notNull().$type<SessionOwnerKind>(),
+    ownerUserId: text('owner_user_id').references(() => users.id, {
+      onDelete: 'set null',
+    }),
+    ownerAutomation: text('owner_automation')
+      .$type<BackgroundAutomationKey>()
+      .references(() => automations.key, { onDelete: 'set null' }),
+    sourceSurface: text('source_surface')
+      .notNull()
+      .$type<SessionSourceSurface>(),
+    sourceTrigger: text('source_trigger').notNull().$type<TaskTrigger>(),
+    fastConversationId: uuid('fast_conversation_id').references(
+      () => fastAgentConversations.id,
+      { onDelete: 'set null' },
+    ),
+    visibility: text('visibility')
+      .notNull()
+      .default('visible')
+      .$type<TaskVisibility>(),
+    activityAt: bigint('activity_at', { mode: 'number' }).notNull(),
+    cachedStatus: text('cached_status').$type<SessionStatus>(),
+    archivedAt: timestamp('archived_at'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => [
+    index('sessions_visibility_activity_at_idx').on(
+      table.visibility,
+      table.activityAt.desc(),
+      table.id.desc(),
+    ),
+    index('sessions_owner_user_id_idx').on(table.ownerUserId),
+    uniqueIndex('sessions_fast_conversation_id_unique')
+      .on(table.fastConversationId)
+      .where(sql`${table.fastConversationId} IS NOT NULL`),
+    check(
+      'sessions_owner_shape_check',
+      // Owner FKs use ON DELETE SET NULL so retained Sessions can outlive
+      // deleted users and automation definitions. The shape still prevents a
+      // value from being stored in the wrong owner column.
+      sql`(${table.ownerKind} = 'user' AND ${table.ownerAutomation} IS NULL) OR (${table.ownerKind} = 'automation' AND ${table.ownerUserId} IS NULL) OR (${table.ownerKind} = 'system' AND ${table.ownerUserId} IS NULL AND ${table.ownerAutomation} IS NULL)`,
+    ),
+    check(
+      'sessions_owner_kind_check',
+      sql`${table.ownerKind} in ('user', 'automation', 'system')`,
+    ),
+    check(
+      'sessions_source_surface_check',
+      sql`${table.sourceSurface} in ('web', 'api', 'slack', 'teams', 'telegram', 'discord', 'linear', 'github', 'gitlab', 'gitea', 'ado', 'bitbucket', 'system', 'automation')`,
+    ),
+    check(
+      'sessions_source_trigger_check',
+      sql`${table.sourceTrigger} in ('message', 'webhook', 'schedule', 'manual')`,
+    ),
+    check(
+      'sessions_visibility_check',
+      sql`${table.visibility} in ('visible', 'hidden')`,
+    ),
+    check(
+      'sessions_cached_status_check',
+      sql`${table.cachedStatus} IS NULL OR ${table.cachedStatus} in ('active', 'needs_input', 'blocked', 'ready')`,
+    ),
+  ],
+);
+
+/** Additive task linkage retained independently for N-1 rollback safety. */
+export const sessionTasks = pgTable(
+  'session_tasks',
+  {
+    sessionId: uuid('session_id')
+      .notNull()
+      .references(() => sessions.id, { onDelete: 'cascade' }),
+    taskId: text('task_id')
+      .notNull()
+      .references(() => tasks.id, { onDelete: 'cascade' }),
+    attachedAt: timestamp('attached_at').notNull().defaultNow(),
+    origin: text('origin').notNull().$type<SessionTaskOrigin>(),
+  },
+  (table) => [
+    primaryKey({
+      name: 'session_tasks_session_id_task_id_pk',
+      columns: [table.sessionId, table.taskId],
+    }),
+    uniqueIndex('session_tasks_task_id_unique').on(table.taskId),
+    index('session_tasks_session_attached_at_idx').on(
+      table.sessionId,
+      table.attachedAt.desc(),
+    ),
+    check(
+      'session_tasks_origin_check',
+      sql`${table.origin} in ('direct_launch', 'fast_delegation', 'backfill', 'follow_up')`,
+    ),
+  ],
+);
+
+/** Additive read-state storage retained independently for N-1 rollback safety. */
+export const sessionParticipants = pgTable(
+  'session_participants',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    sessionId: uuid('session_id')
+      .notNull()
+      .references(() => sessions.id, { onDelete: 'cascade' }),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, {
+        onDelete: 'cascade',
+      }),
+    role: text('role')
+      .notNull()
+      .default('member')
+      .$type<SessionParticipantRole>(),
+    lastReadEventAt: bigint('last_read_event_at', { mode: 'number' }),
+    lastReadEventId: text('last_read_event_id'),
+    lastNotifiedEventAt: bigint('last_notified_event_at', { mode: 'number' }),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('session_participants_session_user_unique').on(
+      table.sessionId,
+      table.userId,
+    ),
+    index('session_participants_user_id_idx').on(table.userId),
+    check(
+      'session_participants_role_check',
+      sql`${table.role} in ('owner', 'member')`,
+    ),
+  ],
+);
+
+export const sessionsRelations = relations(sessions, ({ one, many }) => ({
+  ownerUser: one(users, {
+    fields: [sessions.ownerUserId],
+    references: [users.id],
+    relationName: 'sessionOwnerUser',
+  }),
+  ownerAutomationRow: one(automations, {
+    fields: [sessions.ownerAutomation],
+    references: [automations.key],
+  }),
+  fastConversation: one(fastAgentConversations, {
+    fields: [sessions.fastConversationId],
+    references: [fastAgentConversations.id],
+  }),
+  tasks: many(sessionTasks),
+  participants: many(sessionParticipants),
+}));
+
+export const sessionTasksRelations = relations(sessionTasks, ({ one }) => ({
+  session: one(sessions, {
+    fields: [sessionTasks.sessionId],
+    references: [sessions.id],
+  }),
+  task: one(tasks, {
+    fields: [sessionTasks.taskId],
+    references: [tasks.id],
+  }),
+}));
+
+export const sessionParticipantsRelations = relations(
+  sessionParticipants,
+  ({ one }) => ({
+    session: one(sessions, {
+      fields: [sessionParticipants.sessionId],
+      references: [sessions.id],
+    }),
+    user: one(users, {
+      fields: [sessionParticipants.userId],
+      references: [users.id],
+    }),
+  }),
+);
 
 /**
  * custom_automations
