@@ -1,12 +1,18 @@
 // pnpm --filter @roomote/api test src/handlers/github/__tests__/notifyPrReviewActivity.test.ts
 
-const { mockEnqueuePrReviewNotification, mockStartPrReviewNotificationCycle } =
-  vi.hoisted(() => ({
-    mockEnqueuePrReviewNotification: vi.fn().mockResolvedValue({
-      notifiedTaskCount: 1,
-    }),
-    mockStartPrReviewNotificationCycle: vi.fn().mockResolvedValue(undefined),
-  }));
+const {
+  mockCompleteGithubPrReviewCheckFromSummary,
+  mockEnqueuePrReviewNotification,
+  mockStartPrReviewNotificationCycle,
+} = vi.hoisted(() => ({
+  mockCompleteGithubPrReviewCheckFromSummary: vi
+    .fn()
+    .mockResolvedValue(undefined),
+  mockEnqueuePrReviewNotification: vi.fn().mockResolvedValue({
+    notifiedTaskCount: 1,
+  }),
+  mockStartPrReviewNotificationCycle: vi.fn().mockResolvedValue(undefined),
+}));
 
 vi.mock('@roomote/env', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@roomote/env')>();
@@ -21,6 +27,8 @@ vi.mock('@roomote/env', async (importOriginal) => {
 });
 
 vi.mock('@roomote/sdk/server', () => ({
+  completeGithubPrReviewCheckFromSummary:
+    mockCompleteGithubPrReviewCheckFromSummary,
   enqueuePrReviewNotification: mockEnqueuePrReviewNotification,
   startPrReviewNotificationCycle: mockStartPrReviewNotificationCycle,
 }));
@@ -581,6 +589,7 @@ function summaryPayload({
   updatedAt?: string | null;
 } = {}): any {
   return {
+    installation: { id: 1 },
     repository,
     issue: {
       number: 42,
@@ -817,6 +826,8 @@ describe('queuePrReviewSummaryNotification', () => {
     mockEnqueuePrReviewNotification.mockResolvedValue({ notifiedTaskCount: 1 });
     mockStartPrReviewNotificationCycle.mockClear();
     mockStartPrReviewNotificationCycle.mockResolvedValue(undefined);
+    mockCompleteGithubPrReviewCheckFromSummary.mockClear();
+    mockCompleteGithubPrReviewCheckFromSummary.mockResolvedValue(undefined);
   });
 
   it('opens an explicit cycle when the Roomote summary enters in-progress state', async () => {
@@ -856,6 +867,14 @@ describe('queuePrReviewSummaryNotification', () => {
         }),
       ),
     );
+    expect(mockCompleteGithubPrReviewCheckFromSummary).toHaveBeenCalledWith({
+      installationId: 1,
+      repository: 'owner/repo',
+      prNumber: 42,
+      taskId: 'x',
+      reviewHeadSha,
+      reviewSummaryBody: TERMINAL_SUMMARY_BODY,
+    });
   });
 
   it('opens a distinct cycle when the same SHA is reviewed again', async () => {

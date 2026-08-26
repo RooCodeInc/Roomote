@@ -1,11 +1,16 @@
 import {
-  and,
+  attachCanonicalPrReviewActionMessage,
+  claimCanonicalPrReviewAction,
+  completeCanonicalPrReviewActionDispatch,
   db,
   eq,
+  findPrReviewAutoPreference,
+  retireCanonicalPrReviewActionsForDestination,
   slackInstallations,
-  taskPullRequests,
+  upsertPrReviewAutoPreference,
 } from '@roomote/db/server';
 import { getRedis } from '@roomote/redis';
+import type { SourceControlProvider } from '@roomote/types';
 
 /** Conversation providers that can render PR review action buttons. */
 export type PrReviewActionProvider = 'slack' | 'discord' | 'telegram';
@@ -14,6 +19,12 @@ const PR_REVIEW_ACTION_PREFIX = 'pr-review-action:';
 // The notification stays actionable for a week; after that the buttons report
 // the offer as expired and the user falls back to replying in the thread.
 const PR_REVIEW_ACTION_TTL_SECONDS = 7 * 24 * 60 * 60;
+
+function isUuid(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+    value,
+  );
+}
 
 /**
  * Pending state behind a PR review-feedback notification's action buttons.
@@ -48,6 +59,8 @@ export interface PendingPrReviewAction {
    * visually retired later.
    */
   messageId?: string | null;
+  /** Present for actions owned by the canonical Postgres delivery row. */
+  canonicalDeliveryId?: string;
 }
 
 // GETDEL is atomic: exactly one clicker receives the record; every later
@@ -117,6 +130,9 @@ function getPrReviewActionThreadKey(input: {
 export async function setPendingPrReviewAction(
   pending: PendingPrReviewAction,
 ): Promise<void> {
+  if (pending.canonicalDeliveryId) {
+    return;
+  }
   const redis = getRedis();
   const threadKey = getPrReviewActionThreadKey(pending);
 
@@ -141,22 +157,72 @@ export async function setPendingPrReviewAction(
 export async function attachPendingPrReviewActionMessage(
   nonce: string,
   messageId: string,
-): Promise<void> {
+  options: { leaseToken?: string } = {},
+): Promise<boolean> {
+  if (
+    isUuid(nonce) &&
+    options.leaseToken &&
+    (await attachCanonicalPrReviewActionMessage(
+      nonce,
+      messageId,
+      options.leaseToken,
+    ))
+  ) {
+    return true;
+  }
   const redis = getRedis();
-  await redis
+  const attached = await redis
     .eval(
       ATTACH_PR_REVIEW_ACTION_MESSAGE_LUA,
       1,
       getPrReviewActionKey(nonce),
       messageId,
     )
-    .catch(() => undefined);
+    .catch(() => 0);
+  return attached === 1;
 }
 
 export async function claimPendingPrReviewAction(
   nonce: string,
-  options: { expectedSlackTeamId?: string } = {},
+  options: {
+    expectedSlackTeamId?: string;
+    choice?: 'yes' | 'auto' | 'dismiss';
+    actingUserId?: string;
+  } = {},
 ): Promise<PendingPrReviewAction | null> {
+  const canonical = isUuid(nonce)
+    ? await claimCanonicalPrReviewAction({
+        deliveryId: nonce,
+        choice: options.choice ?? 'yes',
+        actingUserId: options.actingUserId,
+        expectedSlackTeamId: options.expectedSlackTeamId,
+      })
+    : null;
+  if (
+    canonical?.provider &&
+    canonical.provider !== 'teams' &&
+    canonical.taskId &&
+    canonical.channelId &&
+    canonical.followUpPrompt
+  ) {
+    return {
+      nonce,
+      canonicalDeliveryId: nonce,
+      provider: canonical.provider,
+      ...(canonical.provider === 'slack' && canonical.slackTeamId
+        ? { slackTeamId: canonical.slackTeamId }
+        : {}),
+      taskId: canonical.taskId,
+      repository: canonical.repository,
+      prNumber: canonical.prNumber,
+      prUrl: canonical.prUrl,
+      channelId: canonical.channelId,
+      threadId: canonical.threadId,
+      followUpPrompt: canonical.followUpPrompt,
+      messageId: canonical.messageId,
+    };
+  }
+
   const redis = getRedis();
   let allowLegacySlackRecord = false;
 
@@ -203,6 +269,17 @@ export async function claimPendingPrReviewAction(
   }
 }
 
+export async function completePendingPrReviewActionDispatch(
+  pending: PendingPrReviewAction,
+  runId: number,
+): Promise<void> {
+  if (!pending.canonicalDeliveryId) return;
+  await completeCanonicalPrReviewActionDispatch({
+    deliveryId: pending.canonicalDeliveryId,
+    runId,
+  });
+}
+
 async function isOnlyActiveSlackWorkspace(teamId: string): Promise<boolean> {
   const installations = await db.query.slackInstallations.findMany({
     where: eq(slackInstallations.isActive, true),
@@ -225,6 +302,34 @@ export async function claimPendingPrReviewActionsForThread(input: {
   channelId: string;
   threadId: string | null;
 }): Promise<PendingPrReviewAction[]> {
+  const canonical = (
+    await retireCanonicalPrReviewActionsForDestination(input)
+  ).flatMap((action) =>
+    action?.provider &&
+    action.provider !== 'teams' &&
+    action.taskId &&
+    action.channelId &&
+    action.followUpPrompt
+      ? [
+          {
+            nonce: action.deliveryId,
+            canonicalDeliveryId: action.deliveryId,
+            provider: action.provider,
+            ...(action.provider === 'slack' && action.slackTeamId
+              ? { slackTeamId: action.slackTeamId }
+              : {}),
+            taskId: action.taskId,
+            repository: action.repository,
+            prNumber: action.prNumber,
+            prUrl: action.prUrl,
+            channelId: action.channelId,
+            threadId: action.threadId,
+            followUpPrompt: action.followUpPrompt,
+            messageId: action.messageId,
+          } satisfies PendingPrReviewAction,
+        ]
+      : [],
+  );
   const redis = getRedis();
   const threadKeys = [getPrReviewActionThreadKey(input)];
 
@@ -261,7 +366,7 @@ export async function claimPendingPrReviewActionsForThread(input: {
     }
   }
 
-  return claimed;
+  return [...canonical, ...claimed];
 }
 
 /**
@@ -274,22 +379,34 @@ export async function enableAutoHandlePrReviewFeedback(input: {
   repository: string;
   prNumber: number;
   userId: string;
+  sourceControlProvider?: SourceControlProvider;
+  host?: string | null;
+  repositoryId?: string | null;
+  sourceDestinationKey?: string | null;
 }): Promise<void> {
-  const updated = await db
-    .update(taskPullRequests)
-    .set({ autoHandleFeedbackByUserId: input.userId })
-    .where(
-      and(
-        eq(taskPullRequests.taskId, input.taskId),
-        eq(taskPullRequests.repository, input.repository),
-        eq(taskPullRequests.prNumber, input.prNumber),
-      ),
-    )
-    .returning({ id: taskPullRequests.id });
+  await upsertPrReviewAutoPreference({
+    sourceControlProvider: input.sourceControlProvider ?? 'github',
+    host: input.host,
+    repositoryId: input.repositoryId,
+    repository: input.repository,
+    prNumber: input.prNumber,
+    enabledByUserId: input.userId,
+    sourceTaskId: input.taskId,
+    sourceDestinationKey: input.sourceDestinationKey,
+  });
+}
 
-  if (updated.length === 0) {
-    throw new Error(
-      `Cannot enable automatic review handling because the linked pull request was not found for task ${input.taskId}`,
-    );
-  }
+export async function findAutoHandlePrReviewFeedbackPreference(input: {
+  sourceControlProvider: SourceControlProvider;
+  host?: string | null;
+  repositoryId?: string | null;
+  repository: string;
+  prNumber: number;
+}): Promise<{
+  taskId: string;
+  userId: string;
+  destinationKey: string | null;
+} | null> {
+  const preference = await findPrReviewAutoPreference(input);
+  return preference;
 }

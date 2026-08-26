@@ -981,7 +981,6 @@ export const taskPullRequests = pgTable(
     repositoryId: uuid('repository_id').references(() => repositories.id, {
       onDelete: 'set null',
     }),
-
     // PR details
     prUrl: text('pr_url').notNull(),
     prNumber: integer('pr_number'),
@@ -1166,6 +1165,207 @@ export const prReviewEventDeliveries = pgTable(
     check(
       'pr_review_event_deliveries_status_check',
       sql`${table.status} in ('pending', 'processing', 'delivered', 'suppressed')`,
+    ),
+  ],
+);
+
+/**
+ * One semantic PR feedback episode. New notification work is assigned here;
+ * the legacy event-delivery rows above remain for N-1 rollback and draining.
+ */
+export const prReviewNotificationUnits = pgTable(
+  'pr_review_notification_units',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    sourceControlProvider: text('source_control_provider')
+      .notNull()
+      .$type<SourceControlProvider>(),
+    host: text('host'),
+    repositoryId: uuid('repository_id').references(() => repositories.id, {
+      onDelete: 'set null',
+    }),
+    repositoryIdentityKey: text('repository_identity_key').notNull(),
+    repository: text('repository').notNull(),
+    prNumber: integer('pr_number').notNull(),
+    prUrl: text('pr_url').notNull(),
+    headSha: text('head_sha'),
+    headIdentityKey: text('head_identity_key').notNull(),
+    episodeKind: text('episode_kind')
+      .notNull()
+      .$type<'roomote_cycle' | 'human' | 'automated' | 'ci'>(),
+    episodeId: text('episode_id').notNull(),
+    dueAt: timestamp('due_at').notNull(),
+    firstObservedAt: timestamp('first_observed_at').notNull(),
+    lastObservedAt: timestamp('last_observed_at').notNull(),
+    sealedAt: timestamp('sealed_at'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('pr_review_notification_units_identity_unique').on(
+      table.sourceControlProvider,
+      table.repositoryIdentityKey,
+      table.prNumber,
+      table.headIdentityKey,
+      table.episodeKind,
+      table.episodeId,
+    ),
+    index('pr_review_notification_units_open_head_idx').on(
+      table.sourceControlProvider,
+      table.repository,
+      table.prNumber,
+      table.headSha,
+      table.sealedAt,
+    ),
+    check(
+      'pr_review_notification_units_episode_kind_check',
+      sql`${table.episodeKind} in ('roomote_cycle', 'human', 'automated', 'ci')`,
+    ),
+  ],
+);
+
+export const prReviewNotificationUnitEvents = pgTable(
+  'pr_review_notification_unit_events',
+  {
+    unitId: uuid('unit_id')
+      .notNull()
+      .references(() => prReviewNotificationUnits.id, { onDelete: 'cascade' }),
+    eventId: uuid('event_id')
+      .notNull()
+      .references(() => prReviewEvents.id, { onDelete: 'cascade' }),
+    attachedAt: timestamp('attached_at').notNull().defaultNow(),
+  },
+  (table) => [
+    primaryKey({
+      name: 'pr_review_notification_unit_events_pk',
+      columns: [table.unitId, table.eventId],
+    }),
+    uniqueIndex('pr_review_notification_unit_events_event_unique').on(
+      table.eventId,
+    ),
+  ],
+);
+
+export const prReviewNotificationDeliveries = pgTable(
+  'pr_review_notification_deliveries',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    notificationUnitId: uuid('notification_unit_id')
+      .notNull()
+      .references(() => prReviewNotificationUnits.id, {
+        onDelete: 'cascade',
+      }),
+    destinationKind: text('destination_kind')
+      .notNull()
+      .$type<'fast_conversation' | 'task'>(),
+    destinationKey: text('destination_key').notNull(),
+    taskId: text('task_id').references(() => tasks.id, {
+      onDelete: 'set null',
+    }),
+    status: text('status')
+      .notNull()
+      .default('pending')
+      .$type<
+        | 'pending'
+        | 'claimed'
+        | 'prepared'
+        | 'prompt_posting'
+        | 'awaiting_user_action'
+        | 'auto_dispatch_pending'
+        | 'completed'
+        | 'suppressed'
+        | 'dismissed'
+      >(),
+    dueAt: timestamp('due_at').notNull(),
+    deferrals: integer('deferrals').notNull().default(0),
+    attempt: integer('attempt').notNull().default(0),
+    leaseToken: uuid('lease_token'),
+    leaseExpiresAt: timestamp('lease_expires_at'),
+    routeProvider: text('route_provider').$type<
+      'slack' | 'teams' | 'telegram' | 'discord'
+    >(),
+    routeWorkspaceId: text('route_workspace_id'),
+    routeChannelId: text('route_channel_id'),
+    routeThreadId: text('route_thread_id'),
+    followUpPrompt: text('follow_up_prompt'),
+    targetTaskId: text('target_task_id').references(() => tasks.id, {
+      onDelete: 'set null',
+    }),
+    actingUserId: text('acting_user_id').references(() => users.id, {
+      onDelete: 'set null',
+    }),
+    providerMessageId: text('provider_message_id'),
+    actionClaimedAt: timestamp('action_claimed_at'),
+    dispatchKey: text('dispatch_key').notNull(),
+    dispatchedRunId: integer('dispatched_run_id'),
+    completedAt: timestamp('completed_at'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('pr_review_notification_deliveries_destination_unique').on(
+      table.notificationUnitId,
+      table.destinationKind,
+      table.destinationKey,
+    ),
+    uniqueIndex('pr_review_notification_deliveries_dispatch_key_unique').on(
+      table.dispatchKey,
+    ),
+    index('pr_review_notification_deliveries_due_idx').on(
+      table.status,
+      table.dueAt,
+      table.leaseExpiresAt,
+    ),
+    index('pr_review_notification_deliveries_destination_idx').on(
+      table.destinationKind,
+      table.destinationKey,
+    ),
+    check(
+      'pr_review_notification_deliveries_destination_kind_check',
+      sql`${table.destinationKind} in ('fast_conversation', 'task')`,
+    ),
+    check(
+      'pr_review_notification_deliveries_status_check',
+      sql`${table.status} in ('pending', 'claimed', 'prepared', 'prompt_posting', 'awaiting_user_action', 'auto_dispatch_pending', 'completed', 'suppressed', 'dismissed')`,
+    ),
+  ],
+);
+
+export const prReviewAutoPreferences = pgTable(
+  'pr_review_auto_preferences',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    sourceControlProvider: text('source_control_provider')
+      .notNull()
+      .$type<SourceControlProvider>(),
+    host: text('host'),
+    repositoryId: uuid('repository_id').references(() => repositories.id, {
+      onDelete: 'set null',
+    }),
+    repositoryIdentityKey: text('repository_identity_key').notNull(),
+    repository: text('repository').notNull(),
+    prNumber: integer('pr_number').notNull(),
+    enabledByUserId: text('enabled_by_user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    enabledAt: timestamp('enabled_at').notNull().defaultNow(),
+    sourceTaskId: text('source_task_id').references(() => tasks.id, {
+      onDelete: 'set null',
+    }),
+    sourceDestinationKey: text('source_destination_key'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('pr_review_auto_preferences_identity_unique').on(
+      table.sourceControlProvider,
+      table.repositoryIdentityKey,
+      table.prNumber,
+    ),
+    index('pr_review_auto_preferences_repository_idx').on(
+      table.sourceControlProvider,
+      table.repository,
+      table.prNumber,
     ),
   ],
 );

@@ -1,0 +1,729 @@
+import {
+  and,
+  attachCanonicalPrReviewActionMessage,
+  claimCanonicalPrReviewAction,
+  claimDueCanonicalPrReviewDeliveries,
+  completeCanonicalPrReviewActionDispatch,
+  db,
+  deferPrReviewDeliveries,
+  eq,
+  findPrReviewAutoPreference,
+  lockPrReviewReference,
+  persistPrReviewEvent,
+  prReviewAutoPreferences,
+  prReviewEvents,
+  prReviewNotificationDeliveries,
+  prReviewNotificationUnitEvents,
+  prReviewNotificationUnits,
+  runFactory,
+  taskFactory,
+  taskPullRequests,
+  tasks,
+  transitionCanonicalPrReviewDelivery,
+  upsertPrReviewAutoPreference,
+  userFactory,
+} from '../../server';
+import { RunStatus } from '@roomote/types';
+
+const CLAIM_AT = new Date('2099-01-01T00:00:00Z');
+
+function claimForRepository(repository: string, now: Date = CLAIM_AT) {
+  return claimDueCanonicalPrReviewDeliveries(now, { repository });
+}
+
+function eventInput(input: {
+  repository: string;
+  prNumber: number;
+  eventKey: string;
+  kind?: 'ci_failure' | 'review_comment' | 'review_summary';
+  batchId?: string | null;
+  headSha?: string;
+  roomoteAuthored?: boolean;
+  isSummary?: boolean;
+  observedAt?: Date;
+}) {
+  const kind = input.kind ?? 'review_comment';
+  const observedAt = input.observedAt ?? new Date();
+  return {
+    eventKey: input.eventKey,
+    sourceControlProvider: 'github' as const,
+    repository: input.repository,
+    prNumber: input.prNumber,
+    prUrl: `https://github.com/${input.repository}/pull/${input.prNumber}`,
+    event: {
+      kind,
+      authorLogin: input.roomoteAuthored ? 'roomote[bot]' : 'alice',
+      providerEventId: input.eventKey,
+      ...(input.headSha ? { reviewHeadSha: input.headSha } : {}),
+      ...(input.roomoteAuthored ? { roomoteAuthored: true } : {}),
+    },
+    batchKind: input.roomoteAuthored
+      ? ('roomote' as const)
+      : ('human' as const),
+    batchId: input.batchId ?? null,
+    dueAt: CLAIM_AT,
+    observedAt,
+    reviewHeadSha: input.headSha ?? null,
+    roomoteAuthored: input.roomoteAuthored,
+    isSummary: input.isSummary,
+  };
+}
+
+async function associate(taskId: string, repository: string, prNumber: number) {
+  await db.insert(taskPullRequests).values({
+    taskId,
+    sourceControlProvider: 'github',
+    repository,
+    prNumber,
+    prUrl: `https://github.com/${repository}/pull/${prNumber}`,
+  });
+}
+
+describe('canonical PR review notification ownership', () => {
+  it('deduplicates one provider event into one unit membership and delivery', async () => {
+    const task = await taskFactory.create();
+    const repository = `owner/canonical-dedupe-${task.id}`;
+    await associate(task.id, repository, 1);
+    const input = eventInput({
+      repository,
+      prNumber: 1,
+      eventKey: `event-${task.id}`,
+    });
+
+    await Promise.all([
+      persistPrReviewEvent(input),
+      persistPrReviewEvent(input),
+    ]);
+
+    const [unit] = await db
+      .select()
+      .from(prReviewNotificationUnits)
+      .where(eq(prReviewNotificationUnits.repository, repository));
+    expect(unit).toBeDefined();
+    expect(
+      await db
+        .select()
+        .from(prReviewNotificationUnitEvents)
+        .where(eq(prReviewNotificationUnitEvents.unitId, unit!.id)),
+    ).toHaveLength(1);
+    expect(
+      await db
+        .select()
+        .from(prReviewNotificationDeliveries)
+        .where(eq(prReviewNotificationDeliveries.notificationUnitId, unit!.id)),
+    ).toHaveLength(1);
+  });
+
+  it('coalesces CI-first activity into the sole unsealed Roomote cycle', async () => {
+    const task = await taskFactory.create();
+    const repository = `owner/ci-first-${task.id}`;
+    await associate(task.id, repository, 2);
+    const observedAt = new Date();
+    await persistPrReviewEvent(
+      eventInput({
+        repository,
+        prNumber: 2,
+        eventKey: `ci-${task.id}`,
+        kind: 'ci_failure',
+        headSha: 'same-head',
+        observedAt,
+      }),
+    );
+    await persistPrReviewEvent(
+      eventInput({
+        repository,
+        prNumber: 2,
+        eventKey: `summary-${task.id}`,
+        kind: 'review_summary',
+        batchId: 'cycle-1',
+        headSha: 'same-head',
+        roomoteAuthored: true,
+        isSummary: true,
+        observedAt: new Date(observedAt.getTime() + 1_000),
+      }),
+    );
+
+    const units = await db
+      .select()
+      .from(prReviewNotificationUnits)
+      .where(eq(prReviewNotificationUnits.repository, repository));
+    expect(units).toHaveLength(1);
+    expect(units[0]).toMatchObject({
+      episodeKind: 'roomote_cycle',
+      episodeId: 'cycle-1',
+    });
+    expect(
+      await db
+        .select()
+        .from(prReviewNotificationUnitEvents)
+        .where(eq(prReviewNotificationUnitEvents.unitId, units[0]!.id)),
+    ).toHaveLength(2);
+    expect(
+      await db
+        .select()
+        .from(prReviewNotificationDeliveries)
+        .where(
+          eq(prReviewNotificationDeliveries.notificationUnitId, units[0]!.id),
+        ),
+    ).toHaveLength(1);
+  });
+
+  it('keeps the same episode id separate across head SHAs', async () => {
+    const task = await taskFactory.create();
+    const repository = `owner/head-identity-${task.id}`;
+    await associate(task.id, repository, 11);
+    for (const headSha of ['head-a', 'head-b']) {
+      await persistPrReviewEvent(
+        eventInput({
+          repository,
+          prNumber: 11,
+          eventKey: `${headSha}-${task.id}`,
+          kind: 'review_summary',
+          batchId: 'same-cycle-id',
+          headSha,
+          roomoteAuthored: true,
+          isSummary: true,
+        }),
+      );
+    }
+
+    const units = await db
+      .select({
+        headSha: prReviewNotificationUnits.headSha,
+        headIdentityKey: prReviewNotificationUnits.headIdentityKey,
+      })
+      .from(prReviewNotificationUnits)
+      .where(eq(prReviewNotificationUnits.repository, repository));
+    expect(units).toEqual(
+      expect.arrayContaining([
+        { headSha: 'head-a', headIdentityKey: 'head-a' },
+        { headSha: 'head-b', headIdentityKey: 'head-b' },
+      ]),
+    );
+  });
+
+  it('maps sibling Fast tasks to one conversation destination', async () => {
+    const first = await taskFactory.create();
+    const second = await taskFactory.create();
+    const repository = `owner/fast-destination-${first.id}`;
+    const parent = {
+      sessionId: '11111111-1111-4111-8111-111111111111',
+      conversation: {
+        surface: 'slack' as const,
+        workspaceId: 'T123',
+        conversationId: 'C123:111.222',
+        replyTarget: { channelId: 'C123', threadId: '111.222' },
+      },
+    };
+    await Promise.all([
+      runFactory.create({
+        taskId: first.id,
+        payload: { fastAgentParent: parent },
+      }),
+      runFactory.create({
+        taskId: second.id,
+        payload: { fastAgentParent: parent },
+      }),
+      associate(first.id, repository, 3),
+      associate(second.id, repository, 3),
+    ]);
+
+    await persistPrReviewEvent(
+      eventInput({
+        repository,
+        prNumber: 3,
+        eventKey: `fast-${first.id}`,
+      }),
+    );
+
+    const [unit] = await db
+      .select()
+      .from(prReviewNotificationUnits)
+      .where(eq(prReviewNotificationUnits.repository, repository));
+    const deliveries = await db
+      .select()
+      .from(prReviewNotificationDeliveries)
+      .where(eq(prReviewNotificationDeliveries.notificationUnitId, unit!.id));
+    expect(deliveries).toHaveLength(1);
+    expect(deliveries[0]).toMatchObject({
+      destinationKind: 'fast_conversation',
+      destinationKey: '["slack","T123","C123:111.222"]',
+      routeProvider: 'slack',
+      routeChannelId: 'C123',
+      routeThreadId: '111.222',
+    });
+  });
+
+  it('allows one concurrent lease and rejects a stale completion fence', async () => {
+    const task = await taskFactory.create();
+    const repository = `owner/fenced-claim-${task.id}`;
+    await associate(task.id, repository, 4);
+    await persistPrReviewEvent(
+      eventInput({
+        repository,
+        prNumber: 4,
+        eventKey: `fence-${task.id}`,
+      }),
+    );
+
+    const concurrent = (
+      await Promise.all([
+        claimForRepository(repository),
+        claimForRepository(repository),
+      ])
+    )
+      .flat()
+      .filter(
+        ({ repository: claimedRepository }) => claimedRepository === repository,
+      );
+    expect(concurrent).toHaveLength(1);
+    const first = concurrent[0]!;
+    expect(first.ownershipVersion).toBe('canonical');
+    if (first.ownershipVersion !== 'canonical') throw new Error('canonical');
+
+    await db
+      .update(prReviewNotificationDeliveries)
+      .set({ leaseExpiresAt: new Date(0) })
+      .where(eq(prReviewNotificationDeliveries.id, first.deliveryId));
+    const second = (await claimForRepository(repository)).find(
+      ({ repository: claimedRepository }) => claimedRepository === repository,
+    )!;
+    expect(second.ownershipVersion).toBe('canonical');
+    if (second.ownershipVersion !== 'canonical') throw new Error('canonical');
+
+    await expect(
+      transitionCanonicalPrReviewDelivery({
+        deliveryId: first.deliveryId,
+        leaseToken: first.leaseToken,
+        expected: 'claimed',
+        status: 'prepared',
+      }),
+    ).resolves.toBe(false);
+    await expect(
+      transitionCanonicalPrReviewDelivery({
+        deliveryId: second.deliveryId,
+        leaseToken: second.leaseToken,
+        expected: 'claimed',
+        status: 'prepared',
+      }),
+    ).resolves.toBe(true);
+  });
+
+  it('does not seal while ingestion owns the PR advisory lock', async () => {
+    const task = await taskFactory.create();
+    const repository = `owner/ingestion-lock-${task.id}`;
+    await associate(task.id, repository, 12);
+    await persistPrReviewEvent(
+      eventInput({
+        repository,
+        prNumber: 12,
+        eventKey: `lock-${task.id}`,
+      }),
+    );
+
+    await db.transaction(async (tx) => {
+      await lockPrReviewReference(tx, 'github', repository, 12);
+      await expect(claimForRepository(repository)).resolves.toEqual([]);
+      await expect(
+        tx.query.prReviewNotificationUnits.findFirst({
+          where: eq(prReviewNotificationUnits.repository, repository),
+          columns: { sealedAt: true },
+        }),
+      ).resolves.toEqual({ sealedAt: null });
+    });
+
+    await expect(claimForRepository(repository)).resolves.toEqual([
+      expect.objectContaining({
+        ownershipVersion: 'canonical',
+        repository,
+      }),
+    ]);
+  });
+
+  it('does not attach later events to a sealed unit', async () => {
+    const task = await taskFactory.create();
+    const repository = `owner/sealed-unit-${task.id}`;
+    await associate(task.id, repository, 5);
+    await persistPrReviewEvent(
+      eventInput({
+        repository,
+        prNumber: 5,
+        eventKey: `first-${task.id}`,
+        batchId: 'review-1',
+      }),
+    );
+    await claimForRepository(repository);
+    await persistPrReviewEvent(
+      eventInput({
+        repository,
+        prNumber: 5,
+        eventKey: `late-${task.id}`,
+        batchId: 'review-1',
+      }),
+    );
+
+    const units = await db
+      .select()
+      .from(prReviewNotificationUnits)
+      .where(
+        and(
+          eq(prReviewNotificationUnits.repository, repository),
+          eq(prReviewNotificationUnits.prNumber, 5),
+        ),
+      );
+    expect(units).toHaveLength(2);
+    expect(units.map(({ episodeId }) => episodeId)).toEqual(
+      expect.arrayContaining([
+        'review-1',
+        expect.stringMatching(/^review-1:late:/),
+      ]),
+    );
+  });
+
+  it('reclaims deferred automatic work with the same delivery identity', async () => {
+    const task = await taskFactory.create();
+    const repository = `owner/deferred-canonical-${task.id}`;
+    await associate(task.id, repository, 8);
+    await persistPrReviewEvent(
+      eventInput({
+        repository,
+        prNumber: 8,
+        eventKey: `deferred-${task.id}`,
+      }),
+    );
+    const first = (await claimForRepository(repository)).find(
+      ({ repository: claimedRepository }) => claimedRepository === repository,
+    );
+    expect(first?.ownershipVersion).toBe('canonical');
+    if (!first || first.ownershipVersion !== 'canonical') {
+      throw new Error('expected canonical claim');
+    }
+    await transitionCanonicalPrReviewDelivery({
+      deliveryId: first.deliveryId,
+      leaseToken: first.leaseToken,
+      expected: 'claimed',
+      status: 'auto_dispatch_pending',
+      values: {
+        followUpPrompt: 'Resolve feedback.',
+        targetTaskId: task.id,
+      },
+    });
+    const dueAt = new Date(CLAIM_AT.getTime() + 60_000);
+    await deferPrReviewDeliveries(first, dueAt);
+
+    expect(
+      (
+        await claimForRepository(repository, new Date(dueAt.getTime() - 1))
+      ).some(
+        ({ repository: claimedRepository }) => claimedRepository === repository,
+      ),
+    ).toBe(false);
+    const reclaimed = (await claimForRepository(repository, dueAt)).find(
+      ({ repository: claimedRepository }) => claimedRepository === repository,
+    );
+    expect(reclaimed).toMatchObject({
+      ownershipVersion: 'canonical',
+      deliveryId: first.deliveryId,
+      state: 'auto_dispatch_pending',
+      followUpPrompt: 'Resolve feedback.',
+      targetTaskId: task.id,
+    });
+  });
+
+  it('preserves prepared state across lease reclaim', async () => {
+    const task = await taskFactory.create();
+    const repository = `owner/prepared-reclaim-${task.id}`;
+    await associate(task.id, repository, 9);
+    await persistPrReviewEvent(
+      eventInput({
+        repository,
+        prNumber: 9,
+        eventKey: `prepared-${task.id}`,
+      }),
+    );
+    const first = (await claimForRepository(repository)).find(
+      ({ repository: claimedRepository }) => claimedRepository === repository,
+    );
+    if (!first || first.ownershipVersion !== 'canonical') {
+      throw new Error('expected canonical claim');
+    }
+    await transitionCanonicalPrReviewDelivery({
+      deliveryId: first.deliveryId,
+      leaseToken: first.leaseToken,
+      expected: 'claimed',
+      status: 'prepared',
+      values: { followUpPrompt: 'Resolve feedback.' },
+    });
+    await db
+      .update(prReviewNotificationDeliveries)
+      .set({ leaseExpiresAt: new Date(0) })
+      .where(eq(prReviewNotificationDeliveries.id, first.deliveryId));
+
+    const reclaimed = (await claimForRepository(repository)).find(
+      ({ repository: claimedRepository }) => claimedRepository === repository,
+    );
+    expect(reclaimed).toMatchObject({
+      ownershipVersion: 'canonical',
+      deliveryId: first.deliveryId,
+      state: 'prepared',
+      followUpPrompt: 'Resolve feedback.',
+    });
+  });
+
+  it('suppresses a delivery whose unit has no live events', async () => {
+    const task = await taskFactory.create();
+    const repository = `owner/superseded-unit-${task.id}`;
+    await associate(task.id, repository, 10);
+    await persistPrReviewEvent(
+      eventInput({
+        repository,
+        prNumber: 10,
+        eventKey: `superseded-${task.id}`,
+      }),
+    );
+    await db
+      .update(prReviewEvents)
+      .set({ superseded: true })
+      .where(eq(prReviewEvents.repository, repository));
+
+    expect(
+      (await claimForRepository(repository)).some(
+        ({ repository: claimedRepository }) => claimedRepository === repository,
+      ),
+    ).toBe(false);
+    const [unit] = await db
+      .select({ id: prReviewNotificationUnits.id })
+      .from(prReviewNotificationUnits)
+      .where(eq(prReviewNotificationUnits.repository, repository));
+    await expect(
+      db.query.prReviewNotificationDeliveries.findFirst({
+        where: eq(prReviewNotificationDeliveries.notificationUnitId, unit!.id),
+        columns: { status: true },
+      }),
+    ).resolves.toEqual({ status: 'suppressed' });
+  });
+
+  it('falls back only to a live task in the same Fast destination', async () => {
+    const user = await userFactory.create();
+    const source = await taskFactory.create({ initiatorUserId: user.id });
+    const replacement = await taskFactory.create({ initiatorUserId: user.id });
+    const unrelated = await taskFactory.create({ initiatorUserId: user.id });
+    const repository = `owner/preference-${source.id}`;
+    const sharedParent = {
+      sessionId: '22222222-2222-4222-8222-222222222222',
+      conversation: {
+        surface: 'slack' as const,
+        workspaceId: 'T-pref',
+        conversationId: 'C-pref:1',
+        replyTarget: { channelId: 'C-pref', threadId: '1' },
+      },
+    };
+    const unrelatedParent = {
+      ...sharedParent,
+      conversation: {
+        ...sharedParent.conversation,
+        conversationId: 'C-pref:other',
+        replyTarget: { channelId: 'C-pref', threadId: 'other' },
+      },
+    };
+    await Promise.all([
+      associate(source.id, repository, 6),
+      associate(replacement.id, repository, 6),
+      associate(unrelated.id, repository, 6),
+      runFactory.create({
+        taskId: source.id,
+        payload: { fastAgentParent: sharedParent },
+      }),
+      runFactory.create({
+        taskId: replacement.id,
+        payload: { fastAgentParent: sharedParent },
+      }),
+      runFactory.create({
+        taskId: unrelated.id,
+        payload: { fastAgentParent: unrelatedParent },
+      }),
+    ]);
+    await upsertPrReviewAutoPreference({
+      sourceControlProvider: 'github',
+      repository,
+      prNumber: 6,
+      enabledByUserId: user.id,
+      sourceTaskId: source.id,
+      sourceDestinationKey: '["slack","T-pref","C-pref:1"]',
+    });
+    await db.delete(tasks).where(eq(tasks.id, source.id));
+
+    await expect(
+      findPrReviewAutoPreference({
+        sourceControlProvider: 'github',
+        repository,
+        prNumber: 6,
+      }),
+    ).resolves.toEqual({
+      taskId: replacement.id,
+      userId: user.id,
+      destinationKey: '["slack","T-pref","C-pref:1"]',
+    });
+  });
+
+  it('claims through a resumable Fast sibling when the original task cannot resume', async () => {
+    const original = await taskFactory.create();
+    const sibling = await taskFactory.create();
+    const repository = `owner/fast-resumable-sibling-${original.id}`;
+    const parent = {
+      sessionId: '33333333-3333-4333-8333-333333333333',
+      conversation: {
+        surface: 'slack' as const,
+        workspaceId: 'T-sibling',
+        conversationId: 'C-sibling:1',
+        replyTarget: { channelId: 'C-sibling', threadId: '1' },
+      },
+    };
+    await associate(original.id, repository, 13);
+    await associate(sibling.id, repository, 13);
+    await runFactory.create({
+      taskId: original.id,
+      status: RunStatus.Completed,
+      snapshotId: null,
+      payload: { fastAgentParent: parent },
+    });
+    await runFactory.create({
+      taskId: sibling.id,
+      status: RunStatus.Completed,
+      snapshotId: 'snapshot-sibling',
+      snapshotCreatedAt: new Date(),
+      payload: { fastAgentParent: parent },
+    });
+    await persistPrReviewEvent(
+      eventInput({
+        repository,
+        prNumber: 13,
+        eventKey: `sibling-${original.id}`,
+      }),
+    );
+    const [deliveryBeforeClaim] = await db
+      .select({ id: prReviewNotificationDeliveries.id })
+      .from(prReviewNotificationDeliveries)
+      .innerJoin(
+        prReviewNotificationUnits,
+        eq(
+          prReviewNotificationUnits.id,
+          prReviewNotificationDeliveries.notificationUnitId,
+        ),
+      )
+      .where(eq(prReviewNotificationUnits.repository, repository));
+    if (!deliveryBeforeClaim) throw new Error('expected canonical delivery');
+    await db
+      .update(prReviewNotificationDeliveries)
+      .set({ taskId: original.id })
+      .where(eq(prReviewNotificationDeliveries.id, deliveryBeforeClaim.id));
+
+    await expect(claimForRepository(repository)).resolves.toEqual([
+      expect.objectContaining({
+        ownershipVersion: 'canonical',
+        taskId: sibling.id,
+        repository,
+      }),
+    ]);
+    await expect(
+      db.query.prReviewNotificationDeliveries.findFirst({
+        where: eq(prReviewNotificationDeliveries.id, deliveryBeforeClaim.id),
+        columns: { taskId: true },
+      }),
+    ).resolves.toEqual({ taskId: sibling.id });
+  });
+
+  it('claims one canonical action and upserts Fix all atomically', async () => {
+    const user = await userFactory.create();
+    const task = await taskFactory.create({ initiatorUserId: user.id });
+    const repository = `owner/action-${task.id}`;
+    await associate(task.id, repository, 7);
+    await persistPrReviewEvent(
+      eventInput({
+        repository,
+        prNumber: 7,
+        eventKey: `action-${task.id}`,
+      }),
+    );
+    const claim = (await claimForRepository(repository)).find(
+      ({ repository: claimedRepository }) => claimedRepository === repository,
+    );
+    expect(claim?.ownershipVersion).toBe('canonical');
+    if (!claim || claim.ownershipVersion !== 'canonical') {
+      throw new Error('expected canonical claim');
+    }
+    await transitionCanonicalPrReviewDelivery({
+      deliveryId: claim.deliveryId,
+      leaseToken: claim.leaseToken,
+      expected: 'claimed',
+      status: 'prepared',
+    });
+    await transitionCanonicalPrReviewDelivery({
+      deliveryId: claim.deliveryId,
+      leaseToken: claim.leaseToken,
+      expected: 'prepared',
+      status: 'prompt_posting',
+      values: {
+        followUpPrompt: 'Resolve the feedback.',
+        routeProvider: 'slack',
+        routeWorkspaceId: 'T-action',
+        routeChannelId: 'C-action',
+        routeThreadId: '1',
+      },
+    });
+    await expect(
+      attachCanonicalPrReviewActionMessage(
+        claim.deliveryId,
+        'stale-message',
+        'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      ),
+    ).resolves.toBe(false);
+    await attachCanonicalPrReviewActionMessage(
+      claim.deliveryId,
+      '123.456',
+      claim.leaseToken,
+    );
+
+    await expect(
+      claimCanonicalPrReviewAction({
+        deliveryId: claim.deliveryId,
+        choice: 'auto',
+        actingUserId: user.id,
+        expectedSlackTeamId: 'T-action',
+      }),
+    ).resolves.toMatchObject({ taskId: task.id, repository, prNumber: 7 });
+    await expect(
+      completeCanonicalPrReviewActionDispatch({
+        deliveryId: claim.deliveryId,
+        runId: 123,
+      }),
+    ).resolves.toBe(true);
+    await expect(
+      claimCanonicalPrReviewAction({
+        deliveryId: claim.deliveryId,
+        choice: 'dismiss',
+      }),
+    ).resolves.toBeNull();
+    await expect(
+      db.query.prReviewNotificationDeliveries.findFirst({
+        where: eq(prReviewNotificationDeliveries.id, claim.deliveryId),
+        columns: { status: true, providerMessageId: true },
+      }),
+    ).resolves.toMatchObject({
+      status: 'completed',
+      providerMessageId: '123.456',
+    });
+    await expect(
+      db.query.prReviewAutoPreferences.findFirst({
+        where: and(
+          eq(prReviewAutoPreferences.repository, repository),
+          eq(prReviewAutoPreferences.prNumber, 7),
+        ),
+      }),
+    ).resolves.toMatchObject({
+      enabledByUserId: user.id,
+      sourceTaskId: task.id,
+      sourceDestinationKey: task.id,
+    });
+  });
+});

@@ -1,6 +1,7 @@
 const mocks = vi.hoisted(() => ({
   claimPending: vi.fn(),
   dispatchFollowUp: vi.fn(),
+  completeActionDispatch: vi.fn(),
   findMappedUser: vi.fn(),
   reply: vi.fn(),
 }));
@@ -9,6 +10,7 @@ vi.mock('@roomote/sdk/server', () => ({
   claimPendingPrReviewAction: mocks.claimPending,
   claimPendingPrReviewActionsForThread: vi.fn(),
   dispatchPrReviewFollowUp: mocks.dispatchFollowUp,
+  completePendingPrReviewActionDispatch: mocks.completeActionDispatch,
   enableAutoHandlePrReviewFeedback: vi.fn(),
   findDiscordMappedUserId: mocks.findMappedUser,
 }));
@@ -29,7 +31,7 @@ describe('handleDiscordPrReviewActionCallback', () => {
       threadId: 'thread-1',
       followUpPrompt: 'Address the feedback.',
     });
-    mocks.dispatchFollowUp.mockResolvedValue({ outcome: 'queued' });
+    mocks.dispatchFollowUp.mockResolvedValue({ outcome: 'queued', runId: 7 });
   });
 
   it('preserves the feedback card and renders auto-resolve as a regular message', async () => {

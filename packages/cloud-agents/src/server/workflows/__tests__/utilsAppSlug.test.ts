@@ -30,7 +30,7 @@ import {
 function makeReviewSummaryComment(login: string): Schemas.IssueComment {
   return {
     id: 1,
-    body: '<!-- roomote-review-summary sha=abc mode=initial -->\nReviewing.',
+    body: '<!-- roomote-review-summary sha=abc1234 mode=initial -->\nReviewing.',
     url: 'https://github.com/acme/repo/issues/1#issuecomment-1',
     user: { id: 100, login, type: 'Bot' },
     created_at: '2026-07-10T00:00:00Z',

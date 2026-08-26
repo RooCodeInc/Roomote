@@ -7,6 +7,7 @@ import {
 } from '@roomote/db/server';
 import {
   claimPendingPrReviewAction,
+  completePendingPrReviewActionDispatch,
   dispatchPrReviewFollowUp,
   enableAutoHandlePrReviewFeedback,
   type PendingPrReviewAction,
@@ -128,6 +129,8 @@ async function handleAcceptedPrReviewAction({
 
   const pending = await claimPendingPrReviewAction(nonce, {
     expectedSlackTeamId: payload.team.id,
+    choice: enableAutoHandle ? 'auto' : 'yes',
+    actingUserId: userId,
   });
 
   if (!pending) {
@@ -169,7 +172,7 @@ async function dispatchAcceptedPrReviewAction({
   userId: string;
   enableAutoHandle: boolean;
 }): Promise<void> {
-  if (enableAutoHandle) {
+  if (enableAutoHandle && !pending.canonicalDeliveryId) {
     await enableAutoHandlePrReviewFeedback({
       taskId: pending.taskId,
       repository: pending.repository,
@@ -187,6 +190,9 @@ async function dispatchAcceptedPrReviewAction({
     followUpPrompt: pending.followUpPrompt,
     actingUserId: userId,
     providerUserId: payload.user.id,
+    ...(pending.canonicalDeliveryId
+      ? { idempotencyKey: `pr-review-delivery:${pending.canonicalDeliveryId}` }
+      : {}),
   });
 
   if (dispatched.outcome === 'unavailable') {
@@ -200,6 +206,8 @@ async function dispatchAcceptedPrReviewAction({
     if (!enableAutoHandle) {
       return;
     }
+  } else {
+    await completePendingPrReviewActionDispatch(pending, dispatched.runId);
   }
 
   const resolution = enableAutoHandle
@@ -254,6 +262,7 @@ export async function handleSlackPrReviewActionDismiss(
 
   const pending = await claimPendingPrReviewAction(nonce, {
     expectedSlackTeamId: payload.team.id,
+    choice: 'dismiss',
   });
 
   if (!pending) {
