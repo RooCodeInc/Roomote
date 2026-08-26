@@ -6,7 +6,7 @@ import {
   wrapSlackTurnPolicy,
 } from '@roomote/cloud-agents';
 import { enqueueTask } from '@roomote/cloud-agents/server';
-import { db, eq, sql, taskRuns } from '@roomote/db/server';
+import { clearTaskResolution, db, eq, sql, taskRuns } from '@roomote/db/server';
 import {
   type ReasoningEffort,
   type SlackAppMentionTask,
@@ -246,6 +246,7 @@ export async function startSlackAppMentionTask(input: {
       }
     }
 
+    await clearTaskResolution(activeRun.taskId);
     await input.beforeTaskRunDispatch?.({
       id: activeRun.id,
       taskId: activeRun.taskId,

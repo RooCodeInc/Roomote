@@ -6,6 +6,7 @@ const {
   authAccountsFindManyMock,
   authUsersFindFirstMock,
   buildTeamsRoutingContextMock,
+  clearTaskResolutionMock,
   enqueueTaskMock,
   envMock,
   fetchMessageImageDataUrlsMock,
@@ -48,6 +49,7 @@ const {
   authAccountsFindManyMock: vi.fn(),
   authUsersFindFirstMock: vi.fn(),
   buildTeamsRoutingContextMock: vi.fn(),
+  clearTaskResolutionMock: vi.fn(),
   enqueueTaskMock: vi.fn(),
   envMock: {
     R_TEAMS_BOT_APP_ID: 'bot-app-id' as string | undefined,
@@ -132,6 +134,7 @@ vi.mock('../suggestion-start.js', () => ({
 
 vi.mock('@roomote/db/server', () => ({
   and: vi.fn((...conditions: unknown[]) => ({ and: conditions })),
+  clearTaskResolution: clearTaskResolutionMock,
   setTrustedRunActingUser: setTrustedRunActingUserMock,
   claimPendingOutOfBandTaskMessages: claimPendingOutOfBandMock,
   releaseClaimedOutOfBandTaskMessages: releaseClaimedOutOfBandMock,

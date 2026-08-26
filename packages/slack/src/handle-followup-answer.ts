@@ -7,6 +7,7 @@ import {
 import { Env } from '@roomote/env';
 import {
   db,
+  clearTaskResolution,
   type SlackInstallation,
   getTableColumns,
   inArray,
@@ -497,6 +498,7 @@ export async function handleFollowupAnswer(payload: SlackInteractivePayload) {
       return;
     }
 
+    await clearTaskResolution(activeRun.taskId);
     await setTrustedRunActingUser({
       runId: activeRun.id,
       userId: userMapping.userId,

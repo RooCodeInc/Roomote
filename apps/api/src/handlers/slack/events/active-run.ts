@@ -31,7 +31,10 @@ import {
   stripLeadingRawSlackMention,
   stripLeadingSlackProductMention,
 } from '@roomote/cloud-agents';
-import { setTrustedRunActingUserOnSuccess } from '@roomote/db/server';
+import {
+  clearTaskResolution,
+  setTrustedRunActingUserOnSuccess,
+} from '@roomote/db/server';
 
 import { apiLogger } from '../../../logging.js';
 import { retireSlackPrReviewOffersBestEffort } from '../pr-review-retire.js';
@@ -534,6 +537,9 @@ export async function processActiveRunMessage(
     const allImages = [...attachments.images, ...claimedImageUris];
 
     try {
+      if (activeRun.taskId) {
+        await clearTaskResolution(activeRun.taskId);
+      }
       // Trusted pre-queue actor switch: the worker only runs this message's
       // turn as `userId` if the server-side acting user already points at
       // them (run tokens can no longer write actingUserId themselves).

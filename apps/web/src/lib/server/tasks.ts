@@ -425,6 +425,8 @@ export const getTasks = async ({
       model: tasks.model,
       mode: tasks.mode,
       state: tasks.state,
+      requestedWorkKind: tasks.requestedWorkKind,
+      resolutionStatus: tasks.resolutionStatus,
       goalStatus: tasks.goalStatus,
       goalBlockedReason: tasks.goalBlockedReason,
       workflow: tasks.workflow,

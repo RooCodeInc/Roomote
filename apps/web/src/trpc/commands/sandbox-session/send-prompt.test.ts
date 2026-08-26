@@ -68,6 +68,7 @@ import {
   runFactory,
   taskFactory,
   taskRuns,
+  tasks,
   userFactory,
 } from '@roomote/db/server';
 import { RunStatus } from '@roomote/types';
@@ -180,6 +181,40 @@ describe('sendSandboxPromptCommand', () => {
         userName: 'Auth Fallback Name',
       }),
     );
+  });
+
+  it('clears task resolution before delivering a web follow-up', async () => {
+    const user = await userFactory.create({ name: 'DB User' });
+    const task = await taskFactory.create({
+      initiatorUserId: user.id,
+      resolutionStatus: 'awaiting_confirmation',
+      resolutionUpdatedAt: new Date(),
+    });
+
+    await runFactory.create({
+      actingUserId: user.id,
+      taskId: task.id,
+      status: RunStatus.Idle,
+      taskPhase: 'waiting_for_prompt',
+      sandboxServerUrl: 'http://sandbox.example.test',
+      result: {},
+    });
+    mockSendPromptMutate.mockImplementationOnce(async () => {
+      const currentTask = await db.query.tasks.findFirst({
+        where: eq(tasks.id, task.id),
+        columns: { resolutionStatus: true },
+      });
+      expect(currentTask?.resolutionStatus).toBeNull();
+      return { success: true };
+    });
+
+    await sendSandboxPromptCommand(buildMockAuth({ userId: user.id }), {
+      taskId: task.id,
+      prompt: 'Keep going.',
+      source: 'web',
+    });
+
+    expect(mockSendPromptMutate).toHaveBeenCalledOnce();
   });
 
   it('keeps the original user text separate from injected out-of-band context', async () => {

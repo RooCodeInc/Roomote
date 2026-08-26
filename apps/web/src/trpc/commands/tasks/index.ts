@@ -1,4 +1,5 @@
 export { getTaskByIdCommand } from './by-id';
+export { acknowledgeTaskResolutionCommand } from './acknowledge-resolution';
 export { deleteTasksCommand } from './delete';
 export { generateTaskSummaryCommand } from './generate-summary';
 export { getTasksCommand } from './list';

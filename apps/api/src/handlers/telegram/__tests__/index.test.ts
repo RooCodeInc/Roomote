@@ -7,6 +7,7 @@ const {
   authUsersFindFirstMock,
   buildTelegramRoutingContextMock,
   classifyFollowUpMock,
+  clearTaskResolutionMock,
   taskRunsFindFirstMock,
   consumeLinkCodeMock,
   createForumTopicMock,
@@ -46,6 +47,7 @@ const {
   authUsersFindFirstMock: vi.fn(),
   buildTelegramRoutingContextMock: vi.fn(),
   classifyFollowUpMock: vi.fn(),
+  clearTaskResolutionMock: vi.fn(),
   taskRunsFindFirstMock: vi.fn(),
   consumeLinkCodeMock: vi.fn(),
   createForumTopicMock: vi.fn(),
@@ -106,6 +108,7 @@ vi.mock('@roomote/redis', () => ({
 vi.mock('@roomote/db/server', () => ({
   and: vi.fn((...conditions: unknown[]) => ({ and: conditions })),
   asc: vi.fn((column: unknown) => ({ asc: column })),
+  clearTaskResolution: clearTaskResolutionMock,
   setTrustedRunActingUser: setTrustedRunActingUserMock,
   authUsers: {
     id: 'authUserId',

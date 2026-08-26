@@ -11,7 +11,10 @@ import {
   isSnapshotResumable,
   isDeploymentReadOnlyError,
 } from '@roomote/types';
-import { resolveTelegramRuntimeCredentials } from '@roomote/db/server';
+import {
+  clearTaskResolution,
+  resolveTelegramRuntimeCredentials,
+} from '@roomote/db/server';
 import {
   getTelegramUpdateCallbackQuery,
   getTelegramUpdateCommunicationMetadata,
@@ -507,6 +510,7 @@ telegram.post('/', async (c) => {
 
     // Trusted pre-queue actor switch; see acting-user-sync.ts. The worker
     // only runs the queued turn as this sender if the server actor matches.
+    await clearTaskResolution(activeRun.taskId);
     await syncActingUserForInboundMessage({
       logContext: 'telegram.activeRunMessage',
       runId: activeRun.id,

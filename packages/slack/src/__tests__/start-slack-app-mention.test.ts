@@ -1,4 +1,5 @@
 const {
+  clearTaskResolutionMock,
   dbUpdateSetMock,
   enqueueTaskMock,
   dbUpdateWhereMock,
@@ -8,6 +9,7 @@ const {
   resolveSlackReactionNamesMock,
   wrapSlackMessageMock,
 } = vi.hoisted(() => ({
+  clearTaskResolutionMock: vi.fn(),
   dbUpdateSetMock: vi.fn(),
   enqueueTaskMock: vi.fn(),
   dbUpdateWhereMock: vi.fn(),
@@ -36,6 +38,7 @@ vi.mock('@roomote/cloud-agents/server', () => ({
 }));
 
 vi.mock('@roomote/db/server', () => ({
+  clearTaskResolution: clearTaskResolutionMock,
   taskRuns: { id: 'id', payload: 'payload' },
   db: {
     update: vi.fn(() => ({

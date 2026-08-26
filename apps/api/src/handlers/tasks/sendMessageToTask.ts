@@ -9,6 +9,7 @@ import {
 } from '@roomote/sdk/server';
 import {
   and,
+  clearTaskResolution,
   db,
   eq,
   findReusableGitHubPrFollowUpOwner,
@@ -1036,6 +1037,8 @@ export async function sendMessageToTask({
     let didSwitchActingUser = false;
 
     try {
+      await clearTaskResolution(taskId);
+
       await maybeCreateSlackReplyQuoteContext({
         runId: run.id,
         payload: run.payload as Record<string, unknown> | null,
@@ -1222,6 +1225,8 @@ export async function steerMessageToTask({
     let didSwitchActingUser = false;
 
     try {
+      await clearTaskResolution(taskId);
+
       await maybeCreateSlackReplyQuoteContext({
         runId: run.id,
         payload: run.payload as Record<string, unknown> | null,

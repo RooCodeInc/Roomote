@@ -26,6 +26,7 @@ import {
 import {
   and,
   compareAndSetTrustedRunActingUser,
+  clearTaskResolution,
   db,
   environments,
   eq,
@@ -306,6 +307,8 @@ export async function sendSandboxPromptCommand(
   let discordReplyQuoteId: string | null = null;
 
   try {
+    await clearTaskResolution(parsed.taskId);
+
     // The actor switch must land before the prompt reaches the sandbox so the
     // worker's sender-vs-acting-user guard passes (critical for runs that
     // start without an acting user, e.g. automation-started tasks).

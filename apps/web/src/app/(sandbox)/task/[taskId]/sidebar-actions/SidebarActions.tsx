@@ -95,6 +95,7 @@ function SidebarActionsBase({
       <OverflowMenu
         taskId={taskId}
         taskRun={taskRun}
+        resolutionStatus={session.task?.resolutionStatus}
         disabled={disableSandboxActions}
       />
     </div>

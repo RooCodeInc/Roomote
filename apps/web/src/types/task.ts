@@ -1,8 +1,10 @@
 import { z } from 'zod';
 import type { TaskArtifactType } from '@roomote/types';
 import {
+  requestedWorkKinds,
   TASK_INITIATOR_KINDS,
   TASK_GOAL_STATUSES,
+  TASK_RESOLUTION_STATUSES,
   TASK_STATES,
   TASK_SURFACES,
   TASK_WORKFLOWS,
@@ -36,6 +38,8 @@ export const taskSchema = z.object({
   modelDisplayName: z.string().nullable().optional(),
   mode: z.string().nullable(),
   state: z.enum(TASK_STATES),
+  requestedWorkKind: z.enum(requestedWorkKinds),
+  resolutionStatus: z.enum(TASK_RESOLUTION_STATUSES).nullable(),
   goalStatus: z.enum(TASK_GOAL_STATUSES).nullable().optional(),
   goalBlockedReason: z.string().nullable().optional(),
   workflow: z.enum(TASK_WORKFLOWS).optional(),
