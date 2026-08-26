@@ -2,7 +2,7 @@ import { fireEvent, render, screen } from '@testing-library/react';
 
 import type { BrainSettings as BrainSettingsData } from '@/trpc/commands/brain';
 
-const { state, navigation } = vi.hoisted(() => ({
+const { state, navigation, mutations } = vi.hoisted(() => ({
   state: {
     query: {
       isPending: false,
@@ -15,6 +15,10 @@ const { state, navigation } = vi.hoisted(() => ({
   },
   navigation: {
     replace: vi.fn(),
+  },
+  mutations: {
+    backfill: vi.fn(),
+    retryFailed: vi.fn(),
   },
 }));
 
@@ -56,6 +60,11 @@ vi.mock('@tanstack/react-query', () => ({
     }
     return state.query;
   },
+  useQueryClient: () => ({ invalidateQueries: vi.fn() }),
+  useMutation: (options: { mutationKind?: string }) =>
+    options.mutationKind === 'retryFailed'
+      ? { isPending: false, mutate: mutations.retryFailed }
+      : { isPending: false, mutate: mutations.backfill },
 }));
 
 vi.mock('@/trpc/client', () => ({
@@ -63,6 +72,7 @@ vi.mock('@/trpc/client', () => ({
     brain: {
       get: {
         queryOptions: () => ({ queryKind: 'settings' }),
+        queryKey: () => ['brain', 'get'],
       },
       listPages: {
         queryOptions: () => ({ queryKind: 'list' }),
@@ -72,6 +82,12 @@ vi.mock('@/trpc/client', () => ({
           state.pageInputs.push(input);
           return { queryKind: 'page' };
         },
+      },
+      backfillTaskMemories: {
+        mutationOptions: () => ({ mutationKind: 'backfill' }),
+      },
+      retryFailedTaskMemories: {
+        mutationOptions: () => ({ mutationKind: 'retryFailed' }),
       },
     },
   }),
@@ -158,6 +174,8 @@ beforeEach(() => {
   state.pageInputs.length = 0;
   state.pagePending = true;
   navigation.replace.mockClear();
+  mutations.backfill.mockClear();
+  mutations.retryFailed.mockClear();
 });
 
 describe('BrainSettings', () => {
@@ -195,6 +213,7 @@ describe('BrainSettings', () => {
     expect(
       screen.queryByRole('heading', { name: 'Task memories' }),
     ).not.toBeInTheDocument();
+    expect(screen.queryByText('Memory issues')).not.toBeInTheDocument();
 
     const memoryStats = screen.getByText('Memory Stats');
     const browser = screen.getByText('Browser memories');
@@ -205,6 +224,33 @@ describe('BrainSettings', () => {
     expect(browser.compareDocumentPosition(configuration)).toBe(
       Node.DOCUMENT_POSITION_FOLLOWING,
     );
+  });
+
+  it('puts actionable memory issues first and keeps their repair controls', () => {
+    const settings = buildSettings();
+    state.query.data = {
+      ...settings,
+      taskMemories: {
+        ...settings.taskMemories,
+        byStatus: { ...settings.taskMemories.byStatus, failed: 2 },
+        recentCompletedRunsWithoutEvent: 3,
+        lastError: 'Memory service unavailable',
+      },
+    };
+
+    render(<BrainSettings />);
+
+    const issues = screen.getByText('Memory issues');
+    const stats = screen.getByText('Memory Stats');
+    expect(issues.compareDocumentPosition(stats)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+    expect(screen.getByText('Memory service unavailable')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByText('Queue missing memories'));
+    fireEvent.click(screen.getByText('Retry failed'));
+    expect(mutations.backfill).toHaveBeenCalledOnce();
+    expect(mutations.retryFailed).toHaveBeenCalledOnce();
   });
 
   it('selects recent and browsed memories with URL replace semantics', () => {

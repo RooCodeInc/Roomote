@@ -130,6 +130,10 @@ become canonical memory.
 
 **Settings → Memory** is the deployment-wide view of the memory, for admins.
 
+**Memory issues** appears first only when completed tasks are missing memories or
+memory writes exhausted their retries. Its repair actions queue missing memories
+and retry failed writes without bringing back the removed task-memory stats.
+
 **Memory Stats** breaks the corpus down by what each page came from, such as task
 memories, pull requests, Slack, meetings, and people, followed by a chart of the
 pages written over the last 30 days and the memories written most recently.

@@ -10,6 +10,7 @@ import { useTRPC } from '@/trpc/client';
 import { BrainConfigurationSection } from './BrainConfigurationSection';
 import { BrainCorpusSection } from './BrainCorpusSection';
 import { BrainBrowseSection } from './BrainBrowseSection';
+import { BrainMemoryIssuesSection } from './BrainMemoryIssuesSection';
 import { BrainSourcesSection } from './BrainSourcesSection';
 import { BrainStatusSection } from './BrainStatusSection';
 
@@ -74,6 +75,7 @@ export function BrainSettings() {
 
   return (
     <div className="space-y-6">
+      <BrainMemoryIssuesSection taskMemories={data.taskMemories} />
       <BrainCorpusSection corpus={data.corpus} onSelectMemory={selectMemory} />
       <BrainBrowseSection
         corpus={data.corpus}
