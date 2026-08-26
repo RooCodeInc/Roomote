@@ -361,20 +361,6 @@ export function Home({
       return;
     }
 
-    if (restoredWorkspace?.type === 'repository') {
-      form.setValue('repository', restoredWorkspace.value);
-      form.setValue('environmentId', undefined);
-      hasRestoredWorkspace.current = true;
-      return;
-    }
-
-    if (restoredWorkspace?.type === 'environment') {
-      form.setValue('repository', restoredWorkspace.id);
-      form.setValue('environmentId', restoredWorkspace.id);
-      hasRestoredWorkspace.current = true;
-      return;
-    }
-
     if (form.getValues('repository') !== AUTO_WORKSPACE_VALUE) {
       hasRestoredWorkspace.current = true;
       return;
@@ -388,6 +374,20 @@ export function Home({
       form.setValue('repository', FAST_EXECUTION);
       form.setValue('environmentId', undefined);
       form.setValue('branch', '');
+      hasRestoredWorkspace.current = true;
+      return;
+    }
+
+    if (restoredWorkspace?.type === 'repository') {
+      form.setValue('repository', restoredWorkspace.value);
+      form.setValue('environmentId', undefined);
+      hasRestoredWorkspace.current = true;
+      return;
+    }
+
+    if (restoredWorkspace?.type === 'environment') {
+      form.setValue('repository', restoredWorkspace.id);
+      form.setValue('environmentId', restoredWorkspace.id);
       hasRestoredWorkspace.current = true;
       return;
     }
