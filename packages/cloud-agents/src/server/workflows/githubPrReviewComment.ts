@@ -16,9 +16,10 @@ export const REVIEW_CHECKLIST_END_MARKER =
   '<!-- roomote-review-checklist:end -->';
 
 export type ReviewMetaPhase = 'Reviewing' | 'Reviewed';
+export const REVIEW_SUMMARY_MARKER_VERSION = '2';
 
 export function isReviewInProgressStatusLine(line: string): boolean {
-  return /^(Self-reviewing the PR(?: with fresh eyes)? now\.|Reviewing the PR now\.|Re-reviewing new commits now\.)/i.test(
+  return /^(Self-reviewing the PR(?: with fresh eyes)? now\.|Reviewing the PR now\.|Re-reviewing new commits now\.|I am reviewing the updated PR head now\.)/i.test(
     line.trim(),
   );
 }
@@ -46,6 +47,88 @@ export function getMarkedSection({
   }
 
   return content.slice(afterStart, endIndex).trim();
+}
+
+export function getReviewFooterPhase(
+  body: string,
+): ReviewMetaPhase | undefined {
+  const footer = body.trimEnd().split('\n').at(-1)?.trim();
+  const phase = footer?.match(/^<sub>\s*(Reviewing|Reviewed)(?:\s|<)/i)?.[1];
+
+  if (!phase) {
+    return undefined;
+  }
+
+  return phase.toLowerCase() === 'reviewing' ? 'Reviewing' : 'Reviewed';
+}
+
+export function getReviewSummaryMarkerPhase(
+  body: string,
+): ReviewMetaPhase | undefined {
+  const marker = body.match(/<!--\s*roomote-review-summary\b[^>]*-->/i)?.[0];
+  const version = marker?.match(/\bversion=(\d+)\b/i)?.[1];
+  const phase = marker?.match(/\bphase=(reviewing|reviewed)\b/i)?.[1];
+
+  if (version !== REVIEW_SUMMARY_MARKER_VERSION || !phase) {
+    return undefined;
+  }
+
+  return phase.toLowerCase() === 'reviewing' ? 'Reviewing' : 'Reviewed';
+}
+
+/**
+ * Uses the versioned hidden marker when present so presentation text cannot
+ * accidentally complete a review cycle. Footer and status parsing are retained
+ * only for comments created before marker phases were required.
+ */
+export function isReviewSummaryInProgress(body: string): boolean {
+  const markerPhase = getReviewSummaryMarkerPhase(body);
+
+  if (markerPhase) {
+    return markerPhase === 'Reviewing';
+  }
+
+  const metaPhase = getReviewFooterPhase(body);
+
+  if (metaPhase) {
+    return metaPhase === 'Reviewing';
+  }
+
+  const statusContent = getMarkedSection({
+    content: body,
+    startMarker: REVIEW_STATUS_START_MARKER,
+    endMarker: REVIEW_STATUS_END_MARKER,
+  });
+  const firstStatusLine = statusContent?.split('\n')[0] ?? '';
+
+  return isReviewInProgressStatusLine(firstStatusLine);
+}
+
+function withReviewSummaryMarkerPhase(
+  summaryMarker: string,
+  phase: ReviewMetaPhase,
+): string {
+  const markerPhase = phase.toLowerCase();
+  let marker = summaryMarker.replace(
+    /\bversion=\S+(?=\s|-->)/i,
+    `version=${REVIEW_SUMMARY_MARKER_VERSION}`,
+  );
+
+  if (!/\bversion=\S+(?=\s|-->)/i.test(marker)) {
+    marker = marker.replace(
+      /\s*-->$/,
+      ` version=${REVIEW_SUMMARY_MARKER_VERSION} -->`,
+    );
+  }
+
+  if (/\bphase=(?:reviewing|reviewed)\b/i.test(marker)) {
+    return marker.replace(
+      /\bphase=(?:reviewing|reviewed)\b/i,
+      `phase=${markerPhase}`,
+    );
+  }
+
+  return marker.replace(/\s*-->$/, ` phase=${markerPhase} -->`);
 }
 
 export function parseReviewSummaryMarkerSha(
@@ -134,6 +217,14 @@ export function buildReviewSummaryBody({
   repositoryFullName?: string | null;
   reviewedSha?: string;
 }): string {
+  const resolvedMetaPhase = resolveReviewMetaPhase({
+    statusContent,
+    metaPhase,
+  });
+  const versionedSummaryMarker = withReviewSummaryMarkerPhase(
+    summaryMarker,
+    resolvedMetaPhase,
+  );
   const sha = reviewedSha ?? parseReviewSummaryMarkerSha(summaryMarker);
   const resolvedCommitHref =
     (sha
@@ -144,14 +235,14 @@ export function buildReviewSummaryBody({
       : undefined) ?? commitHref;
   const metaFooter = sha
     ? buildReviewMetaFooter({
-        phase: resolveReviewMetaPhase({ statusContent, metaPhase }),
+        phase: resolvedMetaPhase,
         sha,
         commitHref: resolvedCommitHref,
       })
     : undefined;
 
   return [
-    summaryMarker,
+    versionedSummaryMarker,
     REVIEW_STATUS_START_MARKER,
     statusContent.trim(),
     REVIEW_STATUS_END_MARKER,
@@ -264,7 +355,7 @@ export function buildTerminalReviewSummaryBody({
     endMarker: REVIEW_STATUS_END_MARKER,
   });
 
-  if (!currentStatus || !isReviewInProgressStatusLine(currentStatus)) {
+  if (!currentStatus || !isReviewSummaryInProgress(trimmedBody)) {
     return null;
   }
 

@@ -5,7 +5,7 @@ import {
   REVIEW_STATUS_START_MARKER,
   REVIEW_SUMMARY_MARKER,
   getMarkedSection,
-  isReviewInProgressStatusLine,
+  isReviewSummaryInProgress,
 } from '@roomote/cloud-agents/server';
 import { Schemas as GitHubSchemas } from '@roomote/github';
 import {
@@ -276,8 +276,10 @@ function sanitizeReviewSummaryStatus(statusContent: string): string {
 
 /**
  * Parses the head SHA out of the review-summary marker line, e.g.
- * `<!-- roomote-review-summary sha=abc1234 mode=initial -->`. Requires at
- * least a short-sha (7 hex chars), matching parseReviewSummaryMarkerSha.
+ * `<!-- roomote-review-summary sha=abc1234 mode=initial version=2 phase=reviewed -->`.
+ * Requires at least a short-sha (7 hex chars), matching
+ * parseReviewSummaryMarkerSha. SHA remains the first attribute for mixed-version
+ * compatibility with older webhook consumers.
  */
 function getReviewSummaryMarkerSha(body: string): string | null {
   const match = body.match(
@@ -398,8 +400,7 @@ function buildPrReviewSummaryLifecycle(
     return null;
   }
 
-  const firstStatusLine = statusContent.split('\n')[0] ?? '';
-  const currentInProgress = isReviewInProgressStatusLine(firstStatusLine);
+  const currentInProgress = isReviewSummaryInProgress(body);
   const previousBody =
     'changes' in eventPayload ? eventPayload.changes.body?.from : undefined;
   const previousStatusLine =
@@ -407,8 +408,9 @@ function buildPrReviewSummaryLifecycle(
       ? getReviewStatusFirstLine(previousBody)
       : null;
   const previousInProgress =
+    typeof previousBody === 'string' &&
     previousStatusLine !== null &&
-    isReviewInProgressStatusLine(previousStatusLine);
+    isReviewSummaryInProgress(previousBody);
   const markerSha = getReviewSummaryMarkerSha(body);
   const reviewTaskId = getReviewTaskId(body);
   const revision = getIssueCommentRevision(eventPayload, context);
