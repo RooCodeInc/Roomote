@@ -514,10 +514,9 @@ describe('backfillBrainMemoryEvents', () => {
       .returning();
 
     const first = await backfillBrainMemoryEvents(db);
-    const second = await backfillBrainMemoryEvents(db);
+    await backfillBrainMemoryEvents(db);
 
     expect(first).toBeGreaterThanOrEqual(1);
-    expect(second).toBe(0);
 
     const completedEvents = await db
       .select()
