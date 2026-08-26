@@ -6,11 +6,7 @@ import {
   eq,
   fastAgentConversations,
   fastAgentMessages,
-  inArray,
-  isNull,
   sql,
-  taskRuns,
-  tasks,
   users,
 } from '@roomote/db/server';
 import type { FastAgentMessage } from '@roomote/db';
@@ -60,7 +56,6 @@ const fastSessionSelection = {
 
 const fastSessionDetailSelection = {
   ...fastSessionSelection,
-  legacyConversationIds: fastAgentConversations.legacyConversationIds,
 };
 
 function fastSessionScope(auth: FastSessionAuth) {
@@ -103,70 +98,34 @@ export async function getFastSessionById(
     return null;
   }
 
-  const lookupIds = [session.id, ...session.legacyConversationIds];
-  const latestRunPerTask = db.$with('latest_fast_session_task_runs').as(
-    db
-      .selectDistinctOn([taskRuns.taskId], {
-        taskId: taskRuns.taskId,
-        title: tasks.title,
-        status: taskRuns.status,
-        taskPhase: taskRuns.taskPhase,
-        createdAt: taskRuns.createdAt,
-      })
-      .from(taskRuns)
-      .innerJoin(tasks, eq(tasks.id, taskRuns.taskId))
-      .where(
-        and(
-          inArray(taskRuns.fastAgentSessionId, lookupIds),
-          eq(tasks.visibility, 'visible'),
-          isNull(tasks.deletedAt),
-        ),
-      )
-      .orderBy(taskRuns.taskId, desc(taskRuns.createdAt), desc(taskRuns.id)),
-  );
-  const [linkedTasks, messages] = await Promise.all([
-    db
-      .with(latestRunPerTask)
-      .select({
-        taskId: latestRunPerTask.taskId,
-        title: latestRunPerTask.title,
-        status: latestRunPerTask.status,
-        taskPhase: latestRunPerTask.taskPhase,
-        createdAt: latestRunPerTask.createdAt,
-      })
-      .from(latestRunPerTask)
-      .orderBy(desc(latestRunPerTask.createdAt)),
-    db
-      .select({
-        id: fastAgentMessages.id,
-        eventId: fastAgentMessages.eventId,
-        turnId: fastAgentMessages.turnId,
-        turnSeq: fastAgentMessages.turnSeq,
-        ts: fastAgentMessages.ts,
-        eventType: fastAgentMessages.eventType,
-        role: fastAgentMessages.role,
-        contentBlocks: fastAgentMessages.contentBlocks,
-        metadata: fastAgentMessages.metadata,
-        payload: fastAgentMessages.payload,
-        source: fastAgentMessages.source,
-        nativeSessionId: fastAgentMessages.nativeSessionId,
-        nativeMessageId: fastAgentMessages.nativeMessageId,
-        createdAt: fastAgentMessages.createdAt,
-      })
-      .from(fastAgentMessages)
-      .where(eq(fastAgentMessages.conversationId, session.id))
-      .orderBy(
-        asc(fastAgentMessages.ts),
-        asc(fastAgentMessages.turnSeq),
-        asc(fastAgentMessages.createdAt),
-        asc(fastAgentMessages.id),
-      ),
-  ]);
-  const { legacyConversationIds: _, ...details } = session;
+  const messages = await db
+    .select({
+      id: fastAgentMessages.id,
+      eventId: fastAgentMessages.eventId,
+      turnId: fastAgentMessages.turnId,
+      turnSeq: fastAgentMessages.turnSeq,
+      ts: fastAgentMessages.ts,
+      eventType: fastAgentMessages.eventType,
+      role: fastAgentMessages.role,
+      contentBlocks: fastAgentMessages.contentBlocks,
+      metadata: fastAgentMessages.metadata,
+      payload: fastAgentMessages.payload,
+      source: fastAgentMessages.source,
+      nativeSessionId: fastAgentMessages.nativeSessionId,
+      nativeMessageId: fastAgentMessages.nativeMessageId,
+      createdAt: fastAgentMessages.createdAt,
+    })
+    .from(fastAgentMessages)
+    .where(eq(fastAgentMessages.conversationId, session.id))
+    .orderBy(
+      asc(fastAgentMessages.ts),
+      asc(fastAgentMessages.turnSeq),
+      asc(fastAgentMessages.createdAt),
+      asc(fastAgentMessages.id),
+    );
 
   return {
-    ...details,
+    ...session,
     messages,
-    linkedTasks,
   };
 }

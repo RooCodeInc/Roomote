@@ -87,15 +87,6 @@ describe('Fast session detail page', () => {
           createdAt: new Date('2026-01-01T00:00:01.000Z'),
         },
       ],
-      linkedTasks: [
-        {
-          taskId: 'task-1',
-          title: 'Delegated task',
-          status: 'completed',
-          taskPhase: null,
-          createdAt: new Date('2026-01-01T01:00:00.000Z'),
-        },
-      ],
     });
 
     const html = renderToStaticMarkup(
@@ -106,9 +97,10 @@ describe('Fast session detail page', () => {
 
     expect(html).toContain('data-testid="workspace-surface"');
     expect(html).toContain('data-testid="workspace-header"');
-    expect(html).toContain('Fast OpenCode session');
-    expect(html).toContain('Delegated task');
-    expect(html).toContain('OpenCode workspace details unavailable');
+    expect(html).toContain('conversation-1');
+    expect(html).not.toContain('Delegated tasks');
+    expect(html).not.toContain('Session context');
+    expect(html).not.toContain('OpenCode workspace details unavailable');
     expect(transcriptMock).toHaveBeenCalledWith(
       expect.objectContaining({
         messages: expect.arrayContaining([

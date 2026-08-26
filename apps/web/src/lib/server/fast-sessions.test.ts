@@ -2,11 +2,8 @@ import {
   db,
   fastAgentConversations,
   fastAgentMessages,
-  runFactory,
-  taskFactory,
   userFactory,
 } from '@roomote/db/server';
-import { RunStatus } from '@roomote/types';
 
 import { getFastSessionById, getFastSessions } from './fast-sessions';
 
@@ -233,37 +230,5 @@ describe('Fast session queries', () => {
       toolName: 'send_chat_reply',
       status: 'completed',
     });
-  });
-
-  it('returns visible tasks delegated from the Fast session', async () => {
-    const owner = await userFactory.create();
-    const session = await createFastSession({
-      userId: owner.id,
-      conversationId: 'delegated-task-session',
-      updatedAt: new Date('2026-01-01T00:00:00.000Z'),
-    });
-    const task = await taskFactory.create({ title: 'Delegated task' });
-    await runFactory.create({
-      taskId: task.id,
-      status: RunStatus.Running,
-      payload: {
-        repo: 'roomote/roomote',
-        description: 'Delegated task',
-        fastAgentSessionId: session.id,
-      },
-    });
-
-    const result = await getFastSessionById(
-      { userId: owner.id, isAdmin: false },
-      session.id,
-    );
-
-    expect(result?.linkedTasks).toEqual([
-      expect.objectContaining({
-        taskId: task.id,
-        title: 'Delegated task',
-        status: RunStatus.Running,
-      }),
-    ]);
   });
 });
