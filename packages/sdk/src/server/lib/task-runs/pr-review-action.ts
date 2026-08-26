@@ -22,6 +22,19 @@ const PR_REVIEW_ACTION_ORDER_KEY = `${PR_REVIEW_ACTION_PREFIX}order`;
 // the offer as expired and the user falls back to replying in the thread.
 const PR_REVIEW_ACTION_TTL_SECONDS = 7 * 24 * 60 * 60;
 
+// A Fast-parent provider post can be retried with the same visible nonce.
+// Preserve the first attempt's ordering and retired state instead of reviving
+// or reordering it when the retry recreates pending state.
+const SET_PENDING_PR_REVIEW_ACTION_LUA = `
+if redis.call('exists', KEYS[1]) == 1 then return 0 end
+local pending = cjson.decode(ARGV[1])
+pending.createdOrder = redis.call('incr', KEYS[3])
+redis.call('set', KEYS[1], cjson.encode(pending), 'EX', ARGV[2])
+redis.call('sadd', KEYS[2], pending.nonce)
+redis.call('expire', KEYS[2], ARGV[2])
+return 1
+`;
+
 /**
  * Pending state behind a PR review-feedback notification's action buttons.
  * Keyed by a nonce carried in the button value; claimed atomically on the
@@ -190,23 +203,16 @@ export async function setPendingPrReviewAction(
 ): Promise<void> {
   const redis = getRedis();
   const threadKey = getPrReviewActionThreadKey(pending);
-  const createdOrder = await redis.incr(PR_REVIEW_ACTION_ORDER_KEY);
-  const stored = {
-    ...pending,
-    createdOrder,
-  };
 
-  await redis
-    .multi()
-    .set(
-      getPrReviewActionKey(pending.nonce),
-      JSON.stringify(stored),
-      'EX',
-      PR_REVIEW_ACTION_TTL_SECONDS,
-    )
-    .sadd(threadKey, pending.nonce)
-    .expire(threadKey, PR_REVIEW_ACTION_TTL_SECONDS)
-    .exec();
+  await redis.eval(
+    SET_PENDING_PR_REVIEW_ACTION_LUA,
+    3,
+    getPrReviewActionKey(pending.nonce),
+    threadKey,
+    PR_REVIEW_ACTION_ORDER_KEY,
+    JSON.stringify(pending),
+    String(PR_REVIEW_ACTION_TTL_SECONDS),
+  );
 }
 
 /**

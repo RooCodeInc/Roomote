@@ -1,10 +1,6 @@
 const {
   mockEval,
   mockGet,
-  mockIncr,
-  mockMulti,
-  mockMultiSet,
-  mockMultiExec,
   mockSrem,
   mockFindManySlackInstallations,
   mockUpdateReturning,
@@ -13,21 +9,9 @@ const {
   const mockUpdateReturning = vi.fn();
   const mockUpdateWhere = vi.fn(() => ({ returning: mockUpdateReturning }));
   const mockUpdateSet = vi.fn(() => ({ where: mockUpdateWhere }));
-  const mockMultiExec = vi.fn();
-  const multi: Record<string, ReturnType<typeof vi.fn>> = {};
-  const mockMultiSet = vi.fn((..._args: unknown[]) => multi);
-  multi.set = mockMultiSet;
-  multi.sadd = vi.fn(() => multi);
-  multi.expire = vi.fn(() => multi);
-  multi.exec = mockMultiExec;
-
   return {
     mockEval: vi.fn(),
     mockGet: vi.fn(),
-    mockIncr: vi.fn(),
-    mockMulti: vi.fn(() => multi),
-    mockMultiSet,
-    mockMultiExec,
     mockSrem: vi.fn(),
     mockFindManySlackInstallations: vi.fn(),
     mockUpdateReturning,
@@ -39,8 +23,6 @@ vi.mock('@roomote/redis', () => ({
   getRedis: () => ({
     eval: mockEval,
     get: mockGet,
-    incr: mockIncr,
-    multi: mockMulti,
     srem: mockSrem,
   }),
 }));
@@ -77,15 +59,13 @@ describe('PR review action state', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockGet.mockResolvedValue(null);
-    mockIncr.mockResolvedValue(1);
-    mockMultiExec.mockResolvedValue([]);
     mockSrem.mockResolvedValue(1);
     mockFindManySlackInstallations.mockResolvedValue([{ teamId: 'T1' }]);
     mockUpdateReturning.mockResolvedValue([{ id: 'link-1' }]);
   });
 
-  it('assigns each offer an atomic creation order before storing it', async () => {
-    mockIncr.mockResolvedValue(42);
+  it('creates and orders each nonce atomically without overwriting retries', async () => {
+    mockEval.mockResolvedValue(1);
 
     await setPendingPrReviewAction({
       nonce: 'nonce-1',
@@ -99,17 +79,20 @@ describe('PR review action state', () => {
       followUpPrompt: 'Address the feedback.',
     });
 
-    expect(mockIncr).toHaveBeenCalledWith('pr-review-action:order');
-    expect(mockMultiSet).toHaveBeenCalledWith(
+    expect(mockEval).toHaveBeenCalledWith(
+      expect.stringContaining(
+        "if redis.call('exists', KEYS[1]) == 1 then return 0 end",
+      ),
+      3,
       'pr-review-action:nonce-1',
-      expect.any(String),
-      'EX',
-      7 * 24 * 60 * 60,
+      'pr-review-action:thread:discord:channel-1:thread-1',
+      'pr-review-action:order',
+      expect.stringContaining('"nonce":"nonce-1"'),
+      String(7 * 24 * 60 * 60),
     );
-    expect(JSON.parse(mockMultiSet.mock.calls[0]![1] as string)).toMatchObject({
-      nonce: 'nonce-1',
-      createdOrder: 42,
-    });
+    expect(mockEval.mock.calls[0]?.[0]).toContain(
+      "pending.createdOrder = redis.call('incr', KEYS[3])",
+    );
   });
 
   it('does not consume an offer from another Slack workspace', async () => {
