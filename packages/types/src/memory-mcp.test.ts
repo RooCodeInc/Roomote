@@ -76,8 +76,8 @@ describe('memory MCP task guidance', () => {
 });
 
 describe('memory MCP conversation guidance', () => {
-  it('directs conversational saves through the save_memory native tool', () => {
-    const instructions = createMemoryMcpInstructions('supermemory', {
+  it('reserves the save_memory native tool for the Brain', () => {
+    const instructions = createMemoryMcpInstructions('gbrain', {
       surface: 'conversation',
     });
 
@@ -88,6 +88,18 @@ describe('memory MCP conversation guidance', () => {
       'durable preference, decision, correction, or fact',
     );
     expect(instructions).toContain('Do not save secrets, credentials');
+    expect(instructions).not.toContain('At task completion');
+  });
+
+  it('keeps non-Brain conversational stores on their own write tools', () => {
+    const instructions = createMemoryMcpInstructions('supermemory', {
+      surface: 'conversation',
+    });
+
+    expect(instructions).toContain(
+      "save it using this server's own memory-writing tool",
+    );
+    expect(instructions).not.toContain('save_memory');
     expect(instructions).not.toContain('At task completion');
   });
 

@@ -1,4 +1,4 @@
-import { eq, inArray, sql } from 'drizzle-orm';
+import { and, eq, inArray, sql } from 'drizzle-orm';
 import { FAST_AGENT_MEMORY_MAX_CHARS } from '@roomote/types';
 
 import { type DatabaseOrTransaction } from '../db';
@@ -121,6 +121,15 @@ export async function releaseFastAgentMemoryEvents(
     .where(inArray(fastAgentMemoryEvents.id, ids));
 }
 
+/**
+ * Terminal transitions ('done', 'skipped', 'failed') apply only while the row
+ * is still 'processing': a save_memory call landing between the claim and
+ * this mark resets the row to 'pending' with content the drainer's snapshot
+ * did not include, and completing it anyway would strand that newer fact as
+ * ingested-when-it-wasn't. The guarded update matches nothing then, so the
+ * row stays pending and the next tick re-ingests the full memory at the same
+ * idempotent slug.
+ */
 export async function markFastAgentMemoryEvent(
   database: DatabaseOrTransaction,
   id: string,
@@ -136,5 +145,12 @@ export async function markFastAgentMemoryEvent(
         status === 'done' || status === 'skipped' ? sql`now()` : null,
       updatedAt: sql`now()`,
     })
-    .where(eq(fastAgentMemoryEvents.id, id));
+    .where(
+      status === 'pending'
+        ? eq(fastAgentMemoryEvents.id, id)
+        : and(
+            eq(fastAgentMemoryEvents.id, id),
+            eq(fastAgentMemoryEvents.status, 'processing'),
+          ),
+    );
 }

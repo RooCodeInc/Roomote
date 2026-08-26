@@ -130,6 +130,37 @@ describe('claim/release/mark', () => {
     expect(row!.attempts).toBe(0);
   });
 
+  it('does not complete an event that gained a fact after the claim', async () => {
+    const conversation = await makeConversation();
+    await appendFastAgentMemory(db, conversation.id, 'first fact');
+    const [claimed] = await claimPendingFastAgentMemoryEvents(db, 10);
+
+    // A save lands between the claim and the drainer's completion: the row
+    // returns to pending with content the claimed snapshot did not include.
+    await appendFastAgentMemory(db, conversation.id, 'late fact');
+    await markFastAgentMemoryEvent(db, claimed!.id, 'done');
+
+    const [row] = await db
+      .select()
+      .from(fastAgentMemoryEvents)
+      .where(eq(fastAgentMemoryEvents.id, claimed!.id));
+
+    expect(row!.status).toBe('pending');
+    expect(row!.processedAt).toBeNull();
+    expect(row!.memory).toContain('late fact');
+
+    // The next tick re-claims it and completes normally.
+    const [reclaimed] = await claimPendingFastAgentMemoryEvents(db, 10);
+    await markFastAgentMemoryEvent(db, reclaimed!.id, 'done');
+
+    const [settled] = await db
+      .select()
+      .from(fastAgentMemoryEvents)
+      .where(eq(fastAgentMemoryEvents.id, claimed!.id));
+
+    expect(settled!.status).toBe('done');
+  });
+
   it('mark done stamps processedAt', async () => {
     const conversation = await makeConversation();
     await appendFastAgentMemory(db, conversation.id, 'a fact');
