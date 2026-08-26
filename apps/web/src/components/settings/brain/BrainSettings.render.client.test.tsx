@@ -193,7 +193,7 @@ describe('BrainSettings', () => {
     expect(screen.queryByText('Manage in Models')).not.toBeInTheDocument();
 
     expect(screen.getByText('Memory Stats')).toBeInTheDocument();
-    expect(screen.getByText('30 pages')).toBeInTheDocument();
+    expect(screen.getByText('30 memories')).toBeInTheDocument();
     expect(screen.getByText('Explore memories')).toBeInTheDocument();
     expect(
       screen.getByText('Memory activity (past 30 days)'),
@@ -305,7 +305,7 @@ describe('BrainSettings', () => {
     render(<BrainSettings />);
 
     expect(state.pageInputs).toContainEqual({ slug: 'tasks/direct-run' });
-    expect(screen.getByText('Page unavailable')).toBeInTheDocument();
+    expect(screen.getByText('Memory unavailable')).toBeInTheDocument();
   });
 
   it('reports an unreachable corpus without claiming the Brain is empty', () => {

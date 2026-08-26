@@ -27,7 +27,7 @@ function ActivityChart({
   if (total === 0) {
     return (
       <p className="text-xs text-muted-foreground">
-        No pages written in the last 30 days.
+        No memories written in the last 30 days.
       </p>
     );
   }
@@ -38,7 +38,7 @@ function ActivityChart({
         {days.map((day) => (
           <BasicTooltip
             key={day.date}
-            content={`${formatActivityDate(day.date)}: ${formatNumber(day.pages)} pages`}
+            content={`${formatActivityDate(day.date)}: ${formatNumber(day.pages)} memories`}
           >
             <div
               className="min-h-px flex-1 rounded-t-[2px]"
@@ -78,7 +78,7 @@ function CompositionBar({
       {segments.map((segment) => (
         <BasicTooltip
           key={segment.id}
-          content={`${segment.label}: ${formatNumber(segment.pages)} pages (${Math.round(segment.percent)}%)`}
+          content={`${segment.label}: ${formatNumber(segment.pages)} memories (${Math.round(segment.percent)}%)`}
         >
           <button
             type="button"
@@ -112,7 +112,7 @@ export function BrainCorpusSection({
       action={
         corpus.reachable && corpus.listedPages > 0 ? (
           <span className="text-sm font-normal text-muted-foreground">
-            {formatNumber(corpus.listedPages)} pages
+            {formatNumber(corpus.listedPages)} memories
           </span>
         ) : null
       }
@@ -126,7 +126,7 @@ export function BrainCorpusSection({
       ) : segments.length === 0 ? (
         <EmptyState
           title="Nothing collected yet"
-          description="Pages appear here as tasks complete and connected integrations are read."
+          description="Memories appear here as tasks complete and connected integrations are read."
         />
       ) : (
         <div className="space-y-4">
@@ -169,7 +169,7 @@ export function BrainCorpusSection({
                       0,
                     ),
                   )}{' '}
-                  pages
+                  memories
                 </span>
               </div>
               <ActivityChart days={corpus.activityByDay} />

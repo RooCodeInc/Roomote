@@ -1,6 +1,14 @@
 'use client';
 
-import { memo, useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type KeyboardEvent,
+} from 'react';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { BRAIN_NAMESPACES } from '@roomote/types';
 
@@ -29,6 +37,7 @@ type ListedPage = BrainPageListing['pages'][number];
 
 const PAGE_SIZE = 100;
 const SEARCH_DEBOUNCE_MS = 200;
+type PageEdge = 'first' | 'last';
 
 /** Registry position, so the filter chips keep a stable, meaningful order. */
 function namespaceRank(id: string): number {
@@ -62,6 +71,7 @@ const PageListRow = memo(function PageListRow({
     <button
       type="button"
       aria-current={selected ? 'page' : undefined}
+      data-memory-slug={page.slug}
       onClick={() => onSelect(page.slug)}
       className={cn(
         'w-full cursor-pointer rounded-lg px-3 py-2 text-left transition-colors',
@@ -98,8 +108,8 @@ function PagePreview({ slug }: { slug: string }) {
   if (!data) {
     return (
       <EmptyState
-        title="Page unavailable"
-        description="Memory did not answer for this page. It may have been removed, or Memory may be briefly unreachable."
+        title="Memory unavailable"
+        description="Memory did not answer for this memory. It may have been removed, or Memory may be briefly unreachable."
       />
     );
   }
@@ -124,16 +134,16 @@ function PagePreview({ slug }: { slug: string }) {
         </div>
       </div>
       {/*
-       * Brain pages are distilled from tasks and integrations: cross-user
+       * Brain memories are distilled from tasks and integrations: cross-user
        * content, rendered strictly as text.
        */}
       <div className="min-h-0 flex-1 overflow-y-auto scroll-thin rounded-lg bg-background/60 p-3">
         <pre className="font-mono text-xs whitespace-pre-wrap">
-          {data.content ?? 'This page has no stored content.'}
+          {data.content ?? 'This memory has no stored content.'}
         </pre>
         {data.contentTruncated ? (
           <p className="pt-2 text-xs text-muted-foreground">
-            Long page, preview cut. Agents still read the full page.
+            Long memory, preview cut. Agents still read the full memory.
           </p>
         ) : null}
       </div>
@@ -157,9 +167,17 @@ export function BrainBrowseSection({
   const trpc = useTRPC();
   const [search, setSearch] = useState('');
   const [offset, setOffset] = useState(0);
+  const [pendingPageSelection, setPendingPageSelection] = useState<{
+    edge: PageEdge;
+    offset: number;
+  } | null>(null);
+  const [keyboardTargetSlug, setKeyboardTargetSlug] = useState<string | null>(
+    null,
+  );
+  const listRef = useRef<HTMLDivElement>(null);
   const debouncedSearch = useDebouncedValue(search.trim(), SEARCH_DEBOUNCE_MS);
 
-  const { data, isPending } = useQuery(
+  const { data, isFetching, isPending } = useQuery(
     trpc.brain.listPages.queryOptions(
       {
         search: debouncedSearch || undefined,
@@ -184,6 +202,38 @@ export function BrainBrowseSection({
     setOffset(0);
   }, [debouncedSearch]);
 
+  useEffect(() => {
+    if (
+      !pendingPageSelection ||
+      isFetching ||
+      offset !== pendingPageSelection.offset
+    ) {
+      return;
+    }
+
+    const memory =
+      pendingPageSelection.edge === 'first' ? pages[0] : pages.at(-1);
+
+    if (memory) {
+      setKeyboardTargetSlug(memory.slug);
+      onSelectMemory(memory.slug);
+    }
+    setPendingPageSelection(null);
+  }, [isFetching, offset, onSelectMemory, pages, pendingPageSelection]);
+
+  useEffect(() => {
+    if (!keyboardTargetSlug || keyboardTargetSlug !== selectedSlug) {
+      return;
+    }
+
+    const selectedRow = [
+      ...(listRef.current?.querySelectorAll('button') ?? []),
+    ].find((row) => row.dataset.memorySlug === keyboardTargetSlug);
+
+    selectedRow?.focus();
+    setKeyboardTargetSlug(null);
+  }, [keyboardTargetSlug, pages, selectedSlug]);
+
   const selectNamespace = useCallback(
     (nextNamespaceId: string | null) => {
       onSelectNamespace(nextNamespaceId);
@@ -192,9 +242,49 @@ export function BrainBrowseSection({
     [onSelectNamespace],
   );
 
+  const handleListKeyDown = useCallback(
+    (event: KeyboardEvent<HTMLDivElement>) => {
+      if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') {
+        return;
+      }
+
+      const currentIndex = pages.findIndex(
+        (memory) => memory.slug === selectedSlug,
+      );
+      if (currentIndex === -1) {
+        return;
+      }
+
+      event.preventDefault();
+      const nextIndex = currentIndex + (event.key === 'ArrowDown' ? 1 : -1);
+      const nextOffset = data?.nextOffset;
+
+      if (nextIndex >= 0 && nextIndex < pages.length) {
+        const memory = pages[nextIndex]!;
+        setKeyboardTargetSlug(memory.slug);
+        onSelectMemory(memory.slug);
+        return;
+      }
+
+      if (event.key === 'ArrowDown' && nextOffset != null) {
+        setPendingPageSelection({ edge: 'first', offset: nextOffset });
+        setOffset(nextOffset);
+      } else if (event.key === 'ArrowUp' && offset > 0) {
+        const previousOffset = Math.max(0, offset - PAGE_SIZE);
+        setPendingPageSelection({ edge: 'last', offset: previousOffset });
+        setOffset(previousOffset);
+      }
+    },
+    [data?.nextOffset, offset, onSelectMemory, pages, selectedSlug],
+  );
+
   const pageList = (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="min-h-0 flex-1 space-y-0.5 overflow-y-auto scroll-thin pr-1">
+      <div
+        ref={listRef}
+        onKeyDown={handleListKeyDown}
+        className="min-h-0 flex-1 space-y-0.5 overflow-y-auto scroll-thin pr-1"
+      >
         {pages.map((page) => (
           <PageListRow
             key={page.slug}
@@ -208,14 +298,14 @@ export function BrainBrowseSection({
         <p className="pl-3 text-xs text-muted-foreground">
           {data && data.total > 0
             ? `${formatNumber(offset + 1)}-${formatNumber(offset + pages.length)} of ${formatNumber(data.total)}`
-            : '0 pages'}
+            : '0 memories'}
         </p>
         <div className="flex gap-1">
-          <BasicTooltip content="Previous page">
+          <BasicTooltip content="Previous memories">
             <Button
               variant="ghost"
               size="sm"
-              aria-label="Previous page"
+              aria-label="Previous memories"
               disabled={offset === 0}
               onClick={() =>
                 setOffset((current) => Math.max(0, current - PAGE_SIZE))
@@ -224,11 +314,11 @@ export function BrainBrowseSection({
               ←
             </Button>
           </BasicTooltip>
-          <BasicTooltip content="Next page">
+          <BasicTooltip content="Next memories">
             <Button
               variant="ghost"
               size="sm"
-              aria-label="Next page"
+              aria-label="Next memories"
               disabled={data?.nextOffset === null}
               onClick={() =>
                 data?.nextOffset !== null && setOffset(data?.nextOffset ?? 0)
@@ -245,19 +335,15 @@ export function BrainBrowseSection({
   return (
     <Section icon={BookOpenText} title="Explore memories">
       <div className="space-y-3">
-        <p className="text-sm text-muted-foreground">
-          Roomote learns from your interactions and conversations. Manage it
-          here.
-        </p>
         <div className="relative">
           <Search
             aria-hidden="true"
             className="absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground"
           />
           <Input
-            aria-label="Search pages"
+            aria-label="Search memories"
             className="pl-9"
-            placeholder="Search pages"
+            placeholder="Search memories"
             value={search}
             onChange={(event) => {
               setSearch(event.target.value);
@@ -318,11 +404,11 @@ export function BrainBrowseSection({
         ) : !data?.reachable ? (
           <EmptyState
             title="Corpus unavailable"
-            description="Memory did not answer, so its pages cannot be listed right now."
+            description="Memory did not answer, so its memories cannot be listed right now."
           />
         ) : data?.pages.length === 0 ? (
           <EmptyState
-            title="No matching pages"
+            title="No matching memories"
             description="Nothing in Memory matches this search."
           />
         ) : selectedSlug ? (

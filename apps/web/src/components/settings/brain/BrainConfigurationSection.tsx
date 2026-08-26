@@ -49,7 +49,7 @@ export function BrainConfigurationSection({
       <div className="space-y-4">
         <ConfigRow
           label="Synthesis model"
-          helper="Answers synthesize queries across pages, on the deployment's inference key. Set R_BRAIN_MODEL to change it; changes apply immediately."
+          helper="Answers synthesize queries across memories, on the deployment's inference key. Set R_BRAIN_MODEL to change it; changes apply immediately."
         >
           <code className="rounded bg-foreground/10 px-1.5 py-0.5 font-mono text-xs">
             {settings.models?.synthesisModel ?? 'Not resolved'}
@@ -61,7 +61,7 @@ export function BrainConfigurationSection({
 
         <ConfigRow
           label="Embedding model"
-          helper="Fixed when Memory was created. It sizes the vector store, and changing it requires a migration that re-embeds every page."
+          helper="Fixed when Memory was created. It sizes the vector store, and changing it requires a migration that re-embeds every memory."
         >
           <Lock className="size-3.5 text-muted-foreground" />
           <code className="rounded bg-foreground/10 px-1.5 py-0.5 font-mono text-xs">
