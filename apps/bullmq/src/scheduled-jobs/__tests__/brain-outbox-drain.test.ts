@@ -5,16 +5,24 @@ const {
   mockResolveBrainProvider,
   mockBackfillEvents,
   mockClaimEvents,
+  mockClaimFastEvents,
+  mockConversationRows,
   mockGetSyncState,
+  mockMarkFastEvent,
   mockPullRequestFacts,
+  mockReleaseFastEvents,
   mockRunBrainCollectors,
 } = vi.hoisted(() => ({
   mockResolveConnection: vi.fn(),
   mockResolveBrainProvider: vi.fn(),
   mockBackfillEvents: vi.fn(),
   mockClaimEvents: vi.fn(),
+  mockClaimFastEvents: vi.fn(),
+  mockConversationRows: vi.fn(),
   mockGetSyncState: vi.fn(),
+  mockMarkFastEvent: vi.fn(),
   mockPullRequestFacts: vi.fn(),
+  mockReleaseFastEvents: vi.fn(),
   mockRunBrainCollectors: vi.fn(),
 }));
 
@@ -37,11 +45,17 @@ vi.mock('@roomote/db/server', async (importOriginal) => {
           where: vi.fn(() => ({
             orderBy: vi.fn(() => ({ limit: mockPullRequestFacts })),
           })),
+          leftJoin: vi.fn(() => ({
+            where: vi.fn(() => ({ limit: mockConversationRows })),
+          })),
         })),
       })),
     },
     backfillBrainMemoryEvents: mockBackfillEvents,
     claimPendingBrainMemoryEvents: mockClaimEvents,
+    claimPendingFastAgentMemoryEvents: mockClaimFastEvents,
+    markFastAgentMemoryEvent: mockMarkFastEvent,
+    releaseFastAgentMemoryEvents: mockReleaseFastEvents,
     getBrainSyncState: mockGetSyncState,
     upsertBrainSyncState: vi.fn(),
   };
@@ -55,6 +69,8 @@ beforeEach(() => {
   vi.clearAllMocks();
   mockGetSyncState.mockResolvedValue(null);
   mockClaimEvents.mockResolvedValue([]);
+  mockClaimFastEvents.mockResolvedValue([]);
+  mockConversationRows.mockResolvedValue([]);
   mockPullRequestFacts.mockResolvedValue([]);
   mockRunBrainCollectors.mockResolvedValue({
     backfillProgressed: false,
@@ -65,6 +81,7 @@ beforeEach(() => {
 import {
   brainCollectorsJob,
   brainOutboxDrainJob,
+  buildFastMemoryPage,
   buildPullRequestFactPage,
   buildMemoryPage,
   callBrainWriteTool,
@@ -590,5 +607,153 @@ describe('Brain readiness gate', () => {
     await brainOutboxDrainJob();
 
     expect(mockClaimEvents).toHaveBeenCalled();
+    expect(mockClaimFastEvents).toHaveBeenCalled();
+  });
+});
+
+describe('fast conversation memory pages', () => {
+  const baseInput = {
+    conversationId: '11111111-2222-3333-4444-555555555555',
+    conversationTitle: 'Deploy preferences',
+    userName: 'Sam Lee',
+    userId: 'user-1',
+    surface: 'slack',
+    memory: '- prefers deploys on Fridays\n- calls staging "the sandbox"',
+    createdAt: new Date('2026-08-01T09:00:00Z'),
+    updatedAt: new Date('2026-08-20T10:00:00Z'),
+  };
+
+  it('files the page under the conversation-specific memories slug', () => {
+    const page = buildFastMemoryPage(baseInput);
+
+    expect(page.slug).toBe(
+      'memories/fast/11111111-2222-3333-4444-555555555555',
+    );
+    expect(page.content).toContain('type: conversation-memory');
+    expect(page.content).toContain('provenance: roomote-fast-memory');
+    expect(page.content).toContain('roomote_user_id: user-1');
+    expect(page.content).toContain('date: 2026-08-20');
+    expect(page.content).toContain('- prefers deploys on Fridays');
+  });
+
+  it('falls back to a stable title for an untitled conversation', () => {
+    const page = buildFastMemoryPage({
+      ...baseInput,
+      conversationTitle: null,
+      userName: null,
+    });
+
+    expect(page.title).toBe('Fast conversation 11111111');
+    expect(page.content).not.toContain('saved_by');
+  });
+
+  it('redacts credential-shaped strings before ingestion', () => {
+    const page = buildFastMemoryPage({
+      ...baseInput,
+      memory: '- the token is ghp_abcdefghijklmnopqrstuvwxyz012345',
+    });
+
+    expect(page.content).not.toContain('ghp_abcdefghijklmnopqrstuvwxyz');
+    expect(page.content).toContain('[REDACTED]');
+  });
+});
+
+describe('fast conversation memory drain', () => {
+  beforeEach(() => {
+    mockResolveConnection.mockResolvedValue({
+      baseUrl: 'http://brain.test',
+      token: 'ingest-token',
+    });
+    mockResolveBrainProvider.mockResolvedValue({
+      providerId: 'openrouter',
+      apiKey: 'sk-or',
+    });
+    mockGetSyncState.mockResolvedValue({ backfillCompletedAt: new Date() });
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  const event = {
+    id: 'event-1',
+    conversationId: 'conversation-1',
+    memory: '- prefers deploys on Fridays',
+    attempts: 1,
+    createdAt: new Date('2026-08-01T09:00:00Z'),
+    updatedAt: new Date('2026-08-20T10:00:00Z'),
+  };
+
+  it('writes the page with the ingest credential and marks the event done', async () => {
+    const fetchMock = vi.fn(async () => Response.json({ result: {} }));
+    vi.stubGlobal('fetch', fetchMock);
+    mockClaimFastEvents.mockResolvedValueOnce([event]).mockResolvedValue([]);
+    mockConversationRows.mockResolvedValue([
+      {
+        title: 'Deploy preferences',
+        surface: 'slack',
+        userId: 'user-1',
+        userName: 'Sam Lee',
+      },
+    ]);
+
+    await brainOutboxDrainJob();
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://brain.test/mcp',
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({
+          authorization: 'Bearer ingest-token',
+        }),
+        body: expect.stringContaining('memories/fast/conversation-1'),
+      }),
+    );
+    expect(mockMarkFastEvent).toHaveBeenCalledWith(
+      expect.anything(),
+      'event-1',
+      'done',
+    );
+  });
+
+  it('skips an event whose conversation no longer exists', async () => {
+    mockClaimFastEvents.mockResolvedValueOnce([event]).mockResolvedValue([]);
+    mockConversationRows.mockResolvedValue([]);
+
+    await brainOutboxDrainJob();
+
+    expect(mockMarkFastEvent).toHaveBeenCalledWith(
+      expect.anything(),
+      'event-1',
+      'skipped',
+      'conversation no longer exists',
+    );
+  });
+
+  it('hands the batch back on backpressure instead of burning retries', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response('rate limited', { status: 429 })),
+    );
+    const second = { ...event, id: 'event-2', conversationId: 'c-2' };
+    mockClaimFastEvents
+      .mockResolvedValueOnce([event, second])
+      .mockResolvedValue([]);
+    mockConversationRows.mockResolvedValue([
+      { title: null, surface: 'web', userId: 'user-1', userName: null },
+    ]);
+
+    await brainOutboxDrainJob();
+
+    expect(mockMarkFastEvent).toHaveBeenCalledWith(
+      expect.anything(),
+      'event-1',
+      'pending',
+      expect.stringContaining('rate limited'),
+    );
+    expect(mockReleaseFastEvents).toHaveBeenCalledWith(expect.anything(), [
+      'event-1',
+      'event-2',
+    ]);
   });
 });

@@ -7,6 +7,8 @@ const mocks = vi.hoisted(() => ({
   upsertMessage: vi.fn(),
   getEnvironments: vi.fn(),
   getTaskModelOptions: vi.fn(),
+  appendMemory: vi.fn(),
+  isBrainProviderConfigured: vi.fn(),
   generateText: vi.fn(),
   classifyInferenceError: vi.fn(),
   invalidateSession: vi.fn(),
@@ -43,6 +45,7 @@ const nativeToolNames = vi.hoisted(
       ignoreEvent: 'ignore_event',
       launchTask: 'launch_task',
       retryTaskStart: 'retry_task_start',
+      saveMemory: 'save_memory',
       sendChatReaction: 'send_chat_reaction',
       sendChatReply: 'send_chat_reply',
       sendTaskMessage: 'send_task_message',
@@ -69,6 +72,9 @@ vi.mock('../../router', () => ({
 
 vi.mock('@roomote/db/server', () => ({
   getDeploymentTaskModelOptions: mocks.getTaskModelOptions,
+  appendFastAgentMemory: mocks.appendMemory,
+  isBrainProviderConfigured: mocks.isBrainProviderConfigured,
+  db: {},
 }));
 
 vi.mock('../../non-task-provider-usage', () => ({
@@ -420,6 +426,91 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       sessionId: 'conversation-1',
       openCodeSessionId: 'opencode-session-1',
     });
+  });
+
+  it('saves a conversation memory through the outbox', async () => {
+    mocks.isBrainProviderConfigured.mockResolvedValue(true);
+    mocks.appendMemory.mockResolvedValue({ saved: true });
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        options.onModelResolved?.('openrouter/openai/gpt-5.4');
+        await options.onSessionReady('opencode-session-1');
+        options.onPromptStarted?.();
+        const result = await invokeTool(nativeToolNames.saveMemory, {
+          memory: 'Prefers deploys on Fridays',
+        });
+        expect(result).toMatchObject({ success: true, saved: true });
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'closeout',
+          message: 'Remembered.',
+        });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+
+    expect(mocks.appendMemory).toHaveBeenCalledWith(
+      expect.anything(),
+      'conversation-1',
+      'Prefers deploys on Fridays',
+    );
+  });
+
+  it('refuses a memory save when no Brain is configured', async () => {
+    mocks.isBrainProviderConfigured.mockResolvedValue(false);
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        options.onModelResolved?.('openrouter/openai/gpt-5.4');
+        await options.onSessionReady('opencode-session-1');
+        options.onPromptStarted?.();
+        const result = await invokeTool(nativeToolNames.saveMemory, {
+          memory: 'Prefers deploys on Fridays',
+        });
+        expect(result).toMatchObject({
+          success: false,
+          error: 'This deployment has no Brain configured.',
+        });
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'closeout',
+          message: 'No memory available here.',
+        });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+
+    expect(mocks.appendMemory).not.toHaveBeenCalled();
+  });
+
+  it('surfaces a full conversation memory as a tool failure', async () => {
+    mocks.isBrainProviderConfigured.mockResolvedValue(true);
+    mocks.appendMemory.mockResolvedValue({
+      saved: false,
+      reason: 'memory_full',
+    });
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        options.onModelResolved?.('openrouter/openai/gpt-5.4');
+        await options.onSessionReady('opencode-session-1');
+        options.onPromptStarted?.();
+        const result = await invokeTool(nativeToolNames.saveMemory, {
+          memory: 'One fact too many',
+        });
+        expect(result).toMatchObject({
+          success: false,
+          error: expect.stringContaining('memory is full'),
+        });
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'closeout',
+          message: 'Memory is full.',
+        });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
   });
 
   it('validates a durable session before resuming with the new turn', async () => {

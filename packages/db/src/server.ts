@@ -96,6 +96,7 @@ export * from './lib/fast-agent-pr-feedback-deliveries';
 export * from './lib/invocation-identities';
 export * from './lib/webhook-retention';
 export * from './lib/brain';
+export * from './lib/fast-agent-memory';
 export * from './lib/managed-access';
 
 export {
@@ -183,6 +184,7 @@ export {
   slackAuthTokensRelations,
   fastAgentConversations,
   fastAgentConversationsRelations,
+  fastAgentMemoryEvents,
   fastAgentMessages,
   fastAgentMessagesRelations,
   fastAgentPrFeedbackDeliveries,

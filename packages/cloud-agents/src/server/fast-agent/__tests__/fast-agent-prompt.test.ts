@@ -131,7 +131,9 @@ describe('buildFastAgentSystemPrompt', () => {
           id: 'gbrain',
           name: 'Brain',
           description: 'Deployment memory',
-          instructions: createMemoryMcpInstructions('gbrain'),
+          instructions: createMemoryMcpInstructions('gbrain', {
+            surface: 'conversation',
+          }),
           tools: [{ name: 'query' }],
         },
       ],
@@ -140,9 +142,12 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain('Brain [tool prefix: gbrain_]');
     expect(prompt).toContain('before any other context or work tool call');
     expect(prompt).toContain('remain visible in the session');
-    expect(prompt).toContain('proactively save concise durable learnings');
     expect(prompt).toContain('Treat Brain recall as a sequential preflight');
-    expect(prompt).toContain('save_task_memory');
+    expect(prompt).toContain(
+      'durable preference, decision, correction, or fact',
+    );
+    expect(prompt).toContain('save_memory');
+    expect(prompt).not.toContain('save_task_memory');
   });
 
   it('drives actionable messages through evidence and execution', () => {

@@ -105,18 +105,13 @@ describe('fast-agent integration broker', () => {
     });
   });
 
-  it('exposes the Fast Brain memory proxy when the Brain is configured', async () => {
+  it('exposes the read-only Brain proxy when the Brain is configured', async () => {
     mocks.configuredServers = {
       gbrain: {
         url: 'https://api.example.com/api/mcp/gbrain',
         headers: {},
       },
     };
-    mocks.listMcpTools.mockResolvedValueOnce([
-      { name: 'search', inputSchema: { type: 'object' } },
-      { name: 'recall', inputSchema: { type: 'object' } },
-      { name: 'remember', inputSchema: { type: 'object' } },
-    ]);
 
     const integrations = await listFastAgentIntegrations({
       userId: 'user-1',
@@ -130,18 +125,16 @@ describe('fast-agent integration broker', () => {
         instructions: expect.stringContaining(
           'make one normal Brain tool call before any other context or work tool call',
         ),
-        tools: [
-          { name: 'search', inputSchema: { type: 'object' } },
-          { name: 'recall', inputSchema: { type: 'object' } },
-          { name: 'remember', inputSchema: { type: 'object' } },
-        ],
+        tools: [{ name: 'search', inputSchema: { type: 'object' } }],
       }),
     ]);
     expect(integrations[0]?.instructions).toContain(
       'Treat Brain recall as a sequential preflight',
     );
+    expect(integrations[0]?.instructions).toContain('save_memory');
+    expect(integrations[0]?.instructions).not.toContain('save_task_memory');
     expect(mocks.listMcpTools).toHaveBeenCalledWith({
-      url: 'https://api.example.com/api/mcp/gbrain-fast',
+      url: 'https://api.example.com/api/mcp/gbrain',
       headers: { Authorization: 'Bearer control-plane-token' },
       signal: expect.any(AbortSignal),
     });

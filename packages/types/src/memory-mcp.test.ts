@@ -3,7 +3,7 @@ import {
   getMemoryMcpDisplayName,
   isMemoryMcpServer,
 } from './memory-mcp';
-import { BRAIN_MCP_INSTRUCTIONS } from './brain';
+import { BRAIN_MCP_FAST_INSTRUCTIONS, BRAIN_MCP_INSTRUCTIONS } from './brain';
 
 describe('memory MCP task guidance', () => {
   it.each([
@@ -72,5 +72,43 @@ describe('memory MCP task guidance', () => {
     expect(instructions).toContain(
       'Do not duplicate the same learning across memory stores',
     );
+  });
+});
+
+describe('memory MCP conversation guidance', () => {
+  it('directs conversational saves through the save_memory native tool', () => {
+    const instructions = createMemoryMcpInstructions('supermemory', {
+      surface: 'conversation',
+    });
+
+    expect(instructions).toContain(
+      'save it with the `save_memory` native tool',
+    );
+    expect(instructions).toContain(
+      'durable preference, decision, correction, or fact',
+    );
+    expect(instructions).toContain('Do not save secrets, credentials');
+    expect(instructions).not.toContain('At task completion');
+  });
+
+  it('appends the Fast Brain contract when gbrain is primary', () => {
+    const instructions = createMemoryMcpInstructions('gbrain', {
+      surface: 'conversation',
+    });
+
+    expect(instructions.endsWith(BRAIN_MCP_FAST_INSTRUCTIONS)).toBe(true);
+    expect(instructions).not.toContain('save_task_memory');
+  });
+
+  it('keeps a secondary conversational store free of task wording', () => {
+    const instructions = createMemoryMcpInstructions('supermemory', {
+      primary: false,
+      surface: 'conversation',
+    });
+
+    expect(instructions).toContain(
+      'Another installed memory server owns the required initial recall',
+    );
+    expect(instructions).not.toContain('At task completion');
   });
 });

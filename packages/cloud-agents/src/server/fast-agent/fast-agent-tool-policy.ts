@@ -3,6 +3,7 @@ export const FAST_AGENT_NATIVE_TOOL_NAMES = {
   ignoreEvent: 'ignore_event',
   launchTask: 'launch_task',
   retryTaskStart: 'retry_task_start',
+  saveMemory: 'save_memory',
   sendChatReaction: 'send_chat_reaction',
   sendChatReply: 'send_chat_reply',
   sendTaskMessage: 'send_task_message',
