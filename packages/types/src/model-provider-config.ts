@@ -473,27 +473,14 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       {
         id: 'efficient',
         label: 'Efficient',
+        // Reasoning efforts are intentionally unset so the shared per-role
+        // defaults apply, exactly as they do for a hand-configured model.
         roles: {
-          coding: {
-            modelId: 'openrouter/openai/gpt-5.6-luna',
-            reasoningEffort: 'medium',
-          },
-          helper: {
-            modelId: 'openrouter/openai/gpt-5.6-luna',
-            reasoningEffort: 'low',
-          },
-          codeReview: {
-            modelId: 'openrouter/openai/gpt-5.6-luna',
-            reasoningEffort: 'medium',
-          },
-          explore: {
-            modelId: 'openrouter/openai/gpt-5.6-luna',
-            reasoningEffort: 'low',
-          },
-          planning: {
-            modelId: 'openrouter/openai/gpt-5.6-luna',
-            reasoningEffort: 'medium',
-          },
+          coding: { modelId: 'openrouter/openai/gpt-5.6-luna' },
+          helper: { modelId: 'openrouter/openai/gpt-5.6-luna' },
+          codeReview: { modelId: 'openrouter/openai/gpt-5.6-luna' },
+          explore: { modelId: 'openrouter/openai/gpt-5.6-luna' },
+          planning: { modelId: 'openrouter/openai/gpt-5.6-luna' },
         },
       },
     ],

@@ -1055,6 +1055,7 @@ describe('buildRecommendedDeploymentModelConfig', () => {
   );
 
   it('builds the openrouter Efficient preset on the inexpensive model for every role', () => {
+    // Reasoning efforts stay null so the shared per-role defaults apply.
     expect(
       buildRecommendedDeploymentModelConfig(
         getSetupModelProvider('openrouter'),
@@ -1068,13 +1069,13 @@ describe('buildRecommendedDeploymentModelConfig', () => {
       roomoteCodeReviewModel: 'openrouter/openai/gpt-5.6-luna',
       roomoteExploreModel: 'openrouter/openai/gpt-5.6-luna',
       roomotePlanningModel: 'openrouter/openai/gpt-5.6-luna',
-      roomoteModelReasoningEffort: 'medium',
+      roomoteModelReasoningEffort: null,
       roomoteOrchestrationModelReasoningEffort: null,
-      roomoteSmallModelReasoningEffort: 'low',
+      roomoteSmallModelReasoningEffort: null,
       roomoteVisionModelReasoningEffort: null,
-      roomoteCodeReviewModelReasoningEffort: 'medium',
-      roomoteExploreModelReasoningEffort: 'low',
-      roomotePlanningModelReasoningEffort: 'medium',
+      roomoteCodeReviewModelReasoningEffort: null,
+      roomoteExploreModelReasoningEffort: null,
+      roomotePlanningModelReasoningEffort: null,
     });
   });
 
