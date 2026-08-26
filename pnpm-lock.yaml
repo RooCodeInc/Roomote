@@ -277,6 +277,9 @@ importers:
       '@roomote/env':
         specifier: workspace:^
         version: link:../../packages/env
+      '@roomote/github':
+        specifier: workspace:^
+        version: link:../../packages/github
       '@roomote/linear':
         specifier: workspace:^
         version: link:../../packages/linear

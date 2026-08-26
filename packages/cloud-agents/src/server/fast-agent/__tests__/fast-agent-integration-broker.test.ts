@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('@roomote/auth', () => ({
   createAuthToken: mocks.createAuthToken,
+  ROOMOTE_MCP_PATH: '/mcp',
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -127,7 +128,7 @@ describe('fast-agent integration broker', () => {
         id: 'gbrain',
         name: 'Brain',
         instructions: expect.stringContaining(
-          'Use Brain as lightweight conversational context',
+          'make one normal Brain tool call before any other context or work tool call',
         ),
         tools: [
           { name: 'search', inputSchema: { type: 'object' } },
@@ -136,6 +137,9 @@ describe('fast-agent integration broker', () => {
         ],
       }),
     ]);
+    expect(integrations[0]?.instructions).toContain(
+      'Treat Brain recall as a sequential preflight',
+    );
     expect(mocks.listMcpTools).toHaveBeenCalledWith({
       url: 'https://api.example.com/api/mcp/gbrain-fast',
       headers: { Authorization: 'Bearer control-plane-token' },
@@ -188,7 +192,7 @@ describe('fast-agent integration broker', () => {
         headers: { 'X-MCP-Client': 'Roomote' },
       },
       roomote: {
-        url: 'https://api.example.com/api/mcp-routing/roomote',
+        url: 'https://api.example.com/mcp',
         headers: {},
       },
     };
@@ -206,10 +210,91 @@ describe('fast-agent integration broker', () => {
     ]);
   });
 
+  it('does not infer memory guidance from a custom server name', async () => {
+    mocks.configuredServers = {
+      'team-memory': {
+        url: 'https://memory.example.test/mcp',
+        headers: {},
+      },
+    };
+
+    const integrations = await listFastAgentIntegrations({
+      userId: 'user-1',
+      apiBaseUrl: 'https://api.example.com',
+    });
+
+    expect(integrations).toEqual([
+      expect.objectContaining({
+        id: 'team-memory',
+        instructions: undefined,
+      }),
+    ]);
+  });
+
+  it('assigns the initial recall to only the first available memory server', async () => {
+    mocks.configuredServers = {
+      gbrain: {
+        url: 'https://api.example.com/api/mcp/gbrain',
+        headers: {},
+      },
+      supermemory: {
+        url: 'https://api.example.com/api/mcp/supermemory',
+        headers: {},
+      },
+    };
+
+    const integrations = await listFastAgentIntegrations({
+      userId: 'user-1',
+      apiBaseUrl: 'https://api.example.com',
+    });
+
+    expect(integrations[0]?.instructions).toContain(
+      'first normal context or work tool call',
+    );
+    expect(integrations[0]?.instructions).toContain(
+      'Treat Brain recall as a sequential preflight',
+    );
+    expect(integrations[1]?.instructions).toContain(
+      'Another installed memory server owns the required initial recall',
+    );
+    expect(integrations[1]?.instructions).not.toContain(
+      'Treat Brain recall as a sequential preflight',
+    );
+  });
+
+  it('discovers member Roomote tools for Fast with actor authorization', async () => {
+    mocks.configuredServers = {
+      roomote: {
+        url: 'https://app.example.test/mcp',
+        headers: {},
+      },
+    };
+    mocks.listMcpTools.mockResolvedValue([
+      { name: 'manage_tasks', inputSchema: { type: 'object' } },
+    ]);
+
+    const integrations = await listFastAgentIntegrations({
+      userId: 'user-1',
+      apiBaseUrl: 'https://app.example.test/_roomote-api',
+    });
+
+    expect(integrations).toEqual([
+      expect.objectContaining({
+        id: 'roomote',
+        tools: [{ name: 'manage_tasks', inputSchema: { type: 'object' } }],
+      }),
+    ]);
+    expect(mocks.listMcpTools).toHaveBeenCalledWith({
+      url: 'https://app.example.test/_roomote-api/mcp',
+      headers: { Authorization: 'Bearer control-plane-token' },
+      signal: expect.any(AbortSignal),
+    });
+  });
+
   it('injects the current user token into deployment proxies behind a reverse-proxy base path', async () => {
     mocks.configuredServers = {
       roomote: {
-        url: 'https://app.example.test/api/mcp-routing/roomote',
+        url: 'https://app.example.test/mcp',
         headers: { 'X-MCP-Client': 'Roomote' },
       },
     };
@@ -220,7 +305,7 @@ describe('fast-agent integration broker', () => {
     });
 
     expect(mocks.listMcpTools).toHaveBeenCalledWith({
-      url: 'https://app.example.test/_roomote-api/api/mcp-routing/roomote',
+      url: 'https://app.example.test/_roomote-api/mcp',
       headers: {
         'X-MCP-Client': 'Roomote',
         Authorization: 'Bearer control-plane-token',

@@ -6,7 +6,7 @@ import {
   waitFor,
 } from '@testing-library/react';
 
-import { ALL_REPOSITORIES } from '@roomote/types';
+import { ALL_REPOSITORIES, FAST_EXECUTION } from '@roomote/types';
 import type { RoutingDecision } from '@roomote/cloud-agents/server';
 import type { PromptInputMessage } from '@/components/ai-elements';
 import { AUTO_WORKSPACE_VALUE } from '@/components/tasks/constants';
@@ -31,6 +31,8 @@ const {
   mockUseLaunchTaskModels,
   mockUseRouteHomeTask,
   mockRouteHomeTask,
+  mockPreparePromptAttachments,
+  mockStartFastSession,
 } = vi.hoisted(() => ({
   mockPush: vi.fn(),
   mockToast: vi.fn(),
@@ -42,6 +44,8 @@ const {
   mockUseLaunchTaskModels: vi.fn(),
   mockUseRouteHomeTask: vi.fn(),
   mockRouteHomeTask: vi.fn(),
+  mockPreparePromptAttachments: vi.fn(),
+  mockStartFastSession: vi.fn(),
 }));
 
 vi.mock('next/navigation', () => ({
@@ -92,7 +96,22 @@ vi.mock('@/hooks/environments', () => ({
 vi.mock('@/hooks/task-runs', () => ({
   useCreateStandardTaskRun: mockUseCreateStandardTaskRun,
   useRouteHomeTask: mockUseRouteHomeTask,
+  useStartFastSession: () => ({
+    isPending: false,
+    mutateAsync: mockStartFastSession,
+  }),
 }));
+
+vi.mock('@/lib/prompt-attachments', async () => {
+  const actual = await vi.importActual<
+    typeof import('@/lib/prompt-attachments')
+  >('@/lib/prompt-attachments');
+
+  return {
+    ...actual,
+    preparePromptAttachments: mockPreparePromptAttachments,
+  };
+});
 
 vi.mock('@/hooks/task-models/useLaunchTaskModels', () => ({
   useLaunchTaskModels: mockUseLaunchTaskModels,
@@ -141,9 +160,11 @@ vi.mock('@/components/tasks', async () => {
     ...actual,
     SelectWorkspace: ({
       allowAuto,
+      allowFast,
       allowBranchSelection,
     }: {
       allowAuto?: boolean;
+      allowFast?: boolean;
       allowBranchSelection?: boolean;
     }) => {
       const { watch, setValue } = useFormContext();
@@ -178,6 +199,18 @@ vi.mock('@/components/tasks', async () => {
           >
             Use auto workspace
           </button>
+          {allowFast && (
+            <button
+              type="button"
+              onClick={() => {
+                setValue('repository', FAST_EXECUTION);
+                setValue('environmentId', undefined);
+                setValue('branch', '');
+              }}
+            >
+              Use Fast workspace
+            </button>
+          )}
           <button
             type="button"
             onClick={() => {
@@ -214,11 +247,13 @@ vi.mock('@/components/tasks', async () => {
     TaskPromptInput: ({
       onSubmit,
       onPromptTextChange,
+      promptText,
       placeholder,
       submitDisabledReason,
     }: {
       onSubmit: (message: PromptInputMessage) => Promise<void> | void;
       onPromptTextChange?: (value: string) => void;
+      promptText?: string;
       placeholder?: string;
       submitDisabledReason?: string;
     }) => (
@@ -237,6 +272,11 @@ vi.mock('@/components/tasks', async () => {
         }}
       >
         <div data-testid="prompt-placeholder">{placeholder}</div>
+        <textarea
+          aria-label="Task prompt"
+          value={promptText ?? ''}
+          onChange={(event) => onPromptTextChange?.(event.target.value)}
+        />
         <button type="submit" disabled={Boolean(submitDisabledReason)}>
           Submit prompt
         </button>
@@ -325,6 +365,10 @@ describe('Home', () => {
     vi.clearAllMocks();
 
     mockProcessImageFiles.mockResolvedValue([]);
+    mockPreparePromptAttachments.mockImplementation(
+      ({ text }: { text: string }) => Promise.resolve({ text }),
+    );
+    mockStartFastSession.mockResolvedValue({ sessionId: 'fast-session-1' });
     mockCreateStandardTaskRun.mockResolvedValue({
       success: true,
       id: 4,
@@ -382,6 +426,26 @@ describe('Home', () => {
     });
 
     expect(mockCreateStandardTaskRun).not.toHaveBeenCalled();
+  });
+
+  it('starts a Fast session with an image-only prompt', async () => {
+    mockPreparePromptAttachments.mockResolvedValueOnce({
+      text: '',
+      images: ['data:image/png;base64,image-1'],
+    });
+    render(<Home initialPlaceholderIndex={0} />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Use Fast workspace' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Submit prompt' }));
+
+    await waitFor(() => {
+      expect(mockStartFastSession).toHaveBeenCalledWith({
+        text: '',
+        images: ['data:image/png;base64,image-1'],
+        model: 'openrouter/openai/gpt-5.4',
+      });
+    });
+    expect(mockPush).toHaveBeenCalledWith('/sessions/fast-session-1');
   });
 
   it('renders the feedback prompt below the input and opens its dialog', async () => {
@@ -1111,6 +1175,45 @@ describe('Home', () => {
     );
     expect(persisted).not.toHaveProperty('harness');
     expect(persisted).not.toHaveProperty('harnessPreference');
+  });
+
+  it('prefills editable task details from the URL', async () => {
+    currentSearchParams = new URLSearchParams({
+      prompt: 'Fix the build',
+      model: 'openrouter/openai/gpt-5.4',
+      environmentId: 'env-created',
+    }).toString();
+
+    render(<Home initialPlaceholderIndex={0} />);
+
+    expect(screen.getByRole('textbox', { name: 'Task prompt' })).toHaveValue(
+      'Fix the build',
+    );
+    expect(screen.getByTestId('selected-model-id')).toHaveTextContent(
+      'openrouter/openai/gpt-5.4',
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('environment')).toHaveTextContent(
+        'env-created',
+      );
+    });
+
+    fireEvent.change(screen.getByRole('textbox', { name: 'Task prompt' }), {
+      target: { value: 'Fix the tests instead' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Model' }));
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Use single-repo environment' }),
+    );
+
+    expect(screen.getByRole('textbox', { name: 'Task prompt' })).toHaveValue(
+      'Fix the tests instead',
+    );
+    expect(screen.getByTestId('selected-model-id')).toHaveTextContent(
+      'openrouter/z-ai/glm-5.2',
+    );
+    expect(screen.getByTestId('environment')).toHaveTextContent('env-single');
   });
 
   it('defaults to the sole environment on load when workspace storage is Auto', async () => {

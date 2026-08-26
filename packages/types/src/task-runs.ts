@@ -1051,6 +1051,11 @@ const sharedTaskPayloadSchema = z.object({
   /** Provider event that caused this fresh launch; used for idempotent retries. */
   communicationSourceEventId: z.string().optional(),
   /**
+   * Stable caller-provided key for fresh launches that must recover the same
+   * durable task after an ambiguous response or concurrent retry.
+   */
+  launchIdempotencyKey: z.string().trim().min(1).max(256).optional(),
+  /**
    * Discord channel hosting the origin reaction target. Always a channel that
    * contains `discordReactionMessageId` (never an interaction id).
    */

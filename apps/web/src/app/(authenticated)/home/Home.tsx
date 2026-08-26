@@ -10,6 +10,7 @@ import { toast } from 'sonner';
 import {
   type ComputeProvider,
   ALL_REPOSITORIES,
+  FAST_EXECUTION,
   DEFAULT_LAUNCH_CODING_HARNESS,
   DEFAULT_MANAGED_DEPLOYMENT_ACCESS,
   pickPreferredConfiguredComputeProvider,
@@ -31,7 +32,11 @@ import {
   type WorkspaceSelection,
   useWorkspaceStorage,
 } from '@/hooks/useWorkspaceStorage';
-import { useCreateStandardTaskRun, useRouteHomeTask } from '@/hooks/task-runs';
+import {
+  useCreateStandardTaskRun,
+  useStartFastSession,
+  useRouteHomeTask,
+} from '@/hooks/task-runs';
 
 import {
   Alert,
@@ -52,7 +57,7 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
-  TriangleAlert,
+  VectorSquare,
 } from '@/components/system';
 import type { PromptInputMessage } from '@/components/ai-elements';
 import {
@@ -171,6 +176,7 @@ export function Home({
 
   const searchParams = useSearchParams();
   const promptParam = searchParams.get('prompt') ?? '';
+  const modelParam = searchParams.get('model')?.trim() || undefined;
   const environmentIdParam = searchParams.get('environmentId')?.trim() ?? '';
 
   const [promptText, setPromptText] = useState(promptParam);
@@ -178,8 +184,9 @@ export function Home({
   const [routingState, setRoutingState] = useState<RoutingFlowState>('idle');
   const [selectedComputeProvider, setSelectedComputeProvider] =
     useState<ComputeProvider>(initialComputeProvider);
-  const [selectedModelOverrideId, setSelectedModelOverrideId] =
-    useState<string>();
+  const [selectedModelOverrideId, setSelectedModelOverrideId] = useState<
+    string | undefined
+  >(modelParam);
   const [isBottomSheetExpanded, setIsBottomSheetExpanded] = useState(false);
   const [isFeedbackPromptVisible, setIsFeedbackPromptVisible] = useState(false);
   const [isFeedbackDialogOpen, setIsFeedbackDialogOpen] = useState(false);
@@ -202,6 +209,7 @@ export function Home({
   const routingRequestIdRef = useRef(0);
 
   useEffect(() => setPromptText(promptParam), [promptParam]);
+  useEffect(() => setSelectedModelOverrideId(modelParam), [modelParam]);
 
   useEffect(() => {
     setIsFeedbackPromptVisible(!isFeedbackPromptDismissed());
@@ -415,6 +423,34 @@ export function Home({
 
   const createStandardTaskRun = useCreateStandardTaskRun(mutationOptions);
   const routeHomeTask = useRouteHomeTask();
+  const startFastSessionMutation = useStartFastSession();
+
+  const startFastSession = useCallback(
+    async (payload: {
+      text: string;
+      images?: string[];
+      model?: string;
+    }): Promise<void> => {
+      // A second submit while the first is in flight would mint a second
+      // session and orphan one of them.
+      if (startFastSessionMutation.isPending) {
+        return;
+      }
+      try {
+        const { sessionId } =
+          await startFastSessionMutation.mutateAsync(payload);
+        setIsExiting(true);
+        router.push(`/sessions/${sessionId}`);
+      } catch (error) {
+        toast.error(
+          error instanceof Error
+            ? error.message
+            : 'Failed to start Fast session',
+        );
+      }
+    },
+    [startFastSessionMutation, router],
+  );
   const launchTaskModels = useLaunchTaskModels();
   const selectedModelId =
     selectedModelOverrideId ?? launchTaskModels.data?.defaultModelId;
@@ -481,6 +517,7 @@ export function Home({
 
   const isBusy =
     createStandardTaskRun.isPending ||
+    startFastSessionMutation.isPending ||
     routingState === 'routing_pending' ||
     routingState === 'launching';
 
@@ -606,6 +643,18 @@ export function Home({
         blank: preparedPrompt.text.length === 0,
       };
 
+      if (repository === FAST_EXECUTION) {
+        if (!submission.description && !submission.images?.length) {
+          return;
+        }
+        await startFastSession({
+          text: submission.description ?? '',
+          images: submission.images,
+          model: selectedModelId,
+        });
+        return;
+      }
+
       if (isAutoWorkspace) {
         await handleAutoSubmit(submission);
         return;
@@ -637,6 +686,8 @@ export function Home({
       setWorkspace,
       canSelectBranch,
       wiggleWorkspace,
+      startFastSession,
+      selectedModelId,
     ],
   );
 
@@ -671,6 +722,7 @@ export function Home({
               <div ref={workspaceRef}>
                 <SelectWorkspace
                   allowAuto
+                  allowFast
                   allowBranchSelection={canSelectBranch}
                 />
               </div>
@@ -733,28 +785,33 @@ export function Home({
                 animateContainer={false}
                 submitDisabledReason={submitDisabledReason}
               />
-              {showNoEnvironmentsWarning && (
-                <Alert variant="warning" className="mt-2">
-                  <TriangleAlert />
-                  <p>
-                    You haven&apos;t created any environments yet. Roomote can
-                    work directly on your repos, but it can&apos;t verify its
-                    work.{' '}
-                    <Link
-                      href={SETTINGS_PATHS.newEnvironment}
-                      className="text-primary font-semibold underline hover:no-underline"
-                    >
-                      Create an environment now{' '}
-                      <ArrowRight className="inline size-4" />
-                    </Link>
-                  </p>
-                </Alert>
-              )}
             </div>
 
+            {showNoEnvironmentsWarning && (
+              <Alert
+                variant="light"
+                className="mt-2 animate-[enter-down_1s_1_300ms_backwards]"
+              >
+                <VectorSquare />
+                <p>
+                  <span>You haven&apos;t created any environments yet. </span>
+                  <span className="block md:inline">
+                    Roomote can work directly on your repos, but it can&apos;t
+                    verify its work.{' '}
+                  </span>
+                  <Link
+                    href={SETTINGS_PATHS.newEnvironment}
+                    className="text-primary font-semibold underline hover:no-underline block md:inline"
+                  >
+                    Create your first <ArrowRight className="inline size-4" />
+                  </Link>
+                </p>
+              </Alert>
+            )}
+
             <div className="flex flex-col md:flex-row flex-wrap md:items-center gap-2 animate-[fade-in_1s_1_750ms_backwards]">
-              <OnboardingCard />
-              {isFeedbackPromptVisible ? (
+              {!showNoEnvironmentsWarning && <OnboardingCard />}
+              {!showNoEnvironmentsWarning && isFeedbackPromptVisible ? (
                 <button
                   type="button"
                   onClick={() => setIsFeedbackDialogOpen(true)}

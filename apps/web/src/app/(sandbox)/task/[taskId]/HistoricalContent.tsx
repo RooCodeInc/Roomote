@@ -5,7 +5,7 @@ import { RunStatus } from '@roomote/types';
 import { MessageSquareWarning, RotateCcw } from 'lucide-react';
 import { Button, Sun } from '@/components/system';
 import { Message, MessageContent, Shimmer } from '@/components/ai-elements';
-import { FramedSurface } from '@/components/layout';
+import { WorkspaceSurface } from '@/components/layout';
 
 import {
   type TaskSession,
@@ -102,43 +102,37 @@ export function HistoricalContent({ session, footer }: HistoricalContentProps) {
     >
       <PreviewPaneProvider>
         <ClosePreviewOnSleepEffect asleep={isAsleep} />
-        <div className="flex h-full min-h-0 min-w-0 flex-1">
-          <FramedSurface
-            frameClassName="pb-0 md:pb-2"
-            surfaceClassName="flex flex-col bg-transparent @container"
-          >
-            <PreviewPaneLayout session={session}>
-              <ArtifactLinkProvider session={session}>
-                <PreviewCommand
-                  taskRun={session.taskRun ?? null}
-                  asleep={isAsleep}
+        <WorkspaceSurface sideActions={<SidebarActions session={session} />}>
+          <PreviewPaneLayout session={session}>
+            <ArtifactLinkProvider session={session}>
+              <PreviewCommand
+                taskRun={session.taskRun ?? null}
+                asleep={isAsleep}
+              />
+              <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col rounded-r-3xl bg-background">
+                <Header session={session} />
+                <Messages
+                  session={session}
+                  initialScrollBehavior={messagesInitialScrollBehavior}
+                  footer={messagesFooter}
                 />
-                <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col rounded-r-3xl bg-background">
-                  <Header session={session} />
-                  <Messages
-                    session={session}
-                    initialScrollBehavior={messagesInitialScrollBehavior}
-                    footer={messagesFooter}
-                  />
-                  {shouldShowWakeTaskInput && taskRun ? (
-                    <HistoricalInputTray>
-                      <WakeTaskInput
-                        taskRun={taskRun}
-                        initialPrompt={draftPrompt ?? ''}
-                        embedded
-                      />
-                    </HistoricalInputTray>
-                  ) : isResuming && draftPrompt ? (
-                    <HistoricalInputTray>
-                      <DraftPromptBanner draftPrompt={draftPrompt} embedded />
-                    </HistoricalInputTray>
-                  ) : null}
-                </div>
-              </ArtifactLinkProvider>
-            </PreviewPaneLayout>
-          </FramedSurface>
-          <SidebarActions session={session} />
-        </div>
+                {shouldShowWakeTaskInput && taskRun ? (
+                  <HistoricalInputTray>
+                    <WakeTaskInput
+                      taskRun={taskRun}
+                      initialPrompt={draftPrompt ?? ''}
+                      embedded
+                    />
+                  </HistoricalInputTray>
+                ) : isResuming && draftPrompt ? (
+                  <HistoricalInputTray>
+                    <DraftPromptBanner draftPrompt={draftPrompt} embedded />
+                  </HistoricalInputTray>
+                ) : null}
+              </div>
+            </ArtifactLinkProvider>
+          </PreviewPaneLayout>
+        </WorkspaceSurface>
       </PreviewPaneProvider>
     </TaskSidePanelProvider>
   );

@@ -5,6 +5,7 @@ import {
   acquireFastAgentTurnLock,
   answerFastAgentQuestion,
   createFastAgentTaskLauncher,
+  createFastAgentWebTaskLauncher,
   fastAgentConversationRepository,
   resolveApiBaseUrl,
   type FastAgentTurnAdapter,
@@ -27,9 +28,15 @@ import { Env, getArtifactSigningKey } from '@roomote/env';
 import {
   buildSlackPrReviewActionBlocks,
   createFastAgentSlackLiveTaskLauncher,
+  postSlackThreadMessageWithFooterText,
   resolveSlackReactionNames,
   SlackNotifier,
 } from '@roomote/slack';
+import {
+  buildFastSessionReplyFooterText,
+  deliverManagedThreadReplyFooter,
+  getDiscordFooterlessFinalChunk,
+} from '@roomote/communication';
 import {
   ALL_REPOSITORIES,
   buildFastAgentChildTaskMetadata,
@@ -173,6 +180,15 @@ export type FastAgentParentEvent =
       pullRequest: FastAgentPullRequestContext;
       status: 'merged' | 'closed';
       actorLogin: string;
+    }
+  | {
+      type: 'pull_request_conflict_detected';
+      taskId: string;
+      runId: number;
+      taskUrl: string;
+      pullRequest: FastAgentPullRequestContext;
+      conflictDetectedAt: string;
+      message: string;
     };
 
 export async function listFastAgentPullRequestContexts(
@@ -292,6 +308,8 @@ function buildEventClientMessageSeed(event: FastAgentParentEvent): string {
       return `fast-parent-pr-feedback:${event.feedbackId}`;
     case 'pull_request_status_changed':
       return `fast-parent-pr-status:${event.taskId}:${event.pullRequest.url}:${event.status}`;
+    case 'pull_request_conflict_detected':
+      return `fast-parent-pr-conflict:${event.taskId}:${event.pullRequest.url}:${event.conflictDetectedAt}`;
     case 'task_settled':
       return `fast-parent-settle:${event.runId}`;
   }
@@ -396,6 +414,44 @@ async function createAutomationFastAgentParentTurn(params: {
         conversation: session.conversation,
         event: params.event,
       }),
+      postReply: async () => {
+        params.onReplyPosted();
+      },
+    },
+  };
+}
+
+async function createWebFastAgentParentTurn(params: {
+  parent: FastAgentParent;
+  event: FastAgentParentEvent;
+  onReplyPosted: () => void;
+}): Promise<FastAgentParentTurn> {
+  const fallbackConversation = params.parent.conversation;
+  if (fallbackConversation.surface !== 'web') {
+    throw new Error('Expected a web Fast parent conversation.');
+  }
+
+  const session = await fastAgentConversationRepository.findById({
+    id: params.parent.sessionId,
+    fallbackConversation,
+  });
+  if (!session || session.conversation.surface !== 'web') {
+    throw new FastAgentParentEventDeliveryError(
+      'Fast web parent session was not found.',
+      { replyPosted: false, permanent: true },
+    );
+  }
+
+  return {
+    userId: session.userId,
+    conversation: session.conversation,
+    adapter: {
+      launchTask: createFastAgentWebTaskLauncher({
+        userId: session.userId,
+        conversation: session.conversation,
+      }),
+      // Web replies are read from the canonical transcript; posting is the
+      // persistence the service already performs.
       postReply: async () => {
         params.onReplyPosted();
       },
@@ -529,11 +585,12 @@ async function createSlackFastAgentParentTurn(params: {
             followUpPrompt: action.followUpPrompt,
           });
         }
-        const messageTs = await slack.postMessage({
+        const messageTs = await postSlackThreadMessageWithFooterText({
+          slack,
           channel: conversation.replyTarget.channelId,
-          thread_ts: conversation.replyTarget.threadId,
+          threadTs: conversation.replyTarget.threadId,
           text: action ? `${message}\n${action.question}` : message,
-          blocks: action
+          bodyBlocks: action
             ? buildSlackPrReviewActionBlocks({
                 text: message,
                 question: action.question,
@@ -547,9 +604,11 @@ async function createSlackFastAgentParentTurn(params: {
                   alt_text: image.altText,
                 })),
               ],
-          unfurl_links: false,
-          unfurl_media: false,
-          client_msg_id: buildSlackClientMessageId(
+          footerText: buildFastSessionReplyFooterText({
+            provider: 'slack',
+            sessionId: params.parent.sessionId,
+          }),
+          clientMsgId: buildSlackClientMessageId(
             buildEventClientMessageSeed(params.event),
           ),
         });
@@ -567,7 +626,7 @@ async function createSlackFastAgentParentTurn(params: {
   };
 }
 
-function createFastAgentDiscordTaskLauncher(params: {
+export function createFastAgentDiscordTaskLauncher(params: {
   provider: NonNullable<
     Awaited<
       ReturnType<
@@ -629,6 +688,52 @@ function createFastAgentDiscordTaskLauncher(params: {
             : {}),
         },
       } satisfies StandardTask;
+    },
+  });
+}
+
+async function postDiscordFastParentMessageWithFooter(params: {
+  provider: NonNullable<
+    Awaited<
+      ReturnType<
+        typeof createDiscordCommunicationProviderFromRuntimeCredentials
+      >
+    >
+  >;
+  conversation: Extract<FastAgentConversation, { surface: 'discord' }>;
+  sessionId: string;
+  footerText: string;
+  textWithFooter: string;
+  post: () => Promise<{ messageId: string; lastTextMessageId?: string }>;
+}): Promise<{ messageId: string }> {
+  const channelId = params.conversation.replyTarget.channelId;
+  const footerStateThreadId =
+    params.conversation.replyTarget.threadId ?? 'root';
+
+  return deliverManagedThreadReplyFooter({
+    provider: 'discord',
+    providerLabel: 'Discord',
+    channelId,
+    footerStateThreadId,
+    lockKey: `discord:thread_reply_footer_lock:${channelId}:${footerStateThreadId}`,
+    logRef: `fast session ${params.sessionId}`,
+    logContext: 'fastAgentParentEvent',
+    postReplyWithFooter: async () => {
+      const result = await params.post();
+      return {
+        messageId: result.lastTextMessageId ?? result.messageId,
+        textWithoutFooter: getDiscordFooterlessFinalChunk({
+          textWithFooter: params.textWithFooter,
+          footerText: params.footerText,
+        }),
+      };
+    },
+    clearPreviousFooter: async (previousFooterRecord) => {
+      await params.provider.editMessage({
+        channelId: params.conversation.replyTarget.threadId ?? channelId,
+        messageId: previousFooterRecord.messageId,
+        text: previousFooterRecord.textWithoutFooter,
+      });
     },
   });
 }
@@ -719,46 +824,60 @@ async function createDiscordFastAgentParentTurn(params: {
           });
         }
 
-        const posted = await provider.postMessage({
-          ...conversation.replyTarget,
-          idempotencyKey: buildEventClientMessageSeed(params.event),
-          text: action ? `${message}\n${action.question}` : message,
-          textFormat: 'markdown',
-          images,
-          ...(action
-            ? {
-                buttons: [
-                  [
-                    {
-                      text: 'Resolve these issues',
-                      callbackData: buildPrReviewActionCallbackData(
-                        'yes',
-                        action.nonce,
-                      ),
-                    },
-                    {
-                      text: 'Auto-resolve on this PR',
-                      callbackData: buildPrReviewActionCallbackData(
-                        'auto',
-                        action.nonce,
-                      ),
-                    },
-                    {
-                      text: 'Dismiss',
-                      callbackData: buildPrReviewActionCallbackData(
-                        'dismiss',
-                        action.nonce,
-                      ),
-                    },
-                  ],
-                ],
-              }
-            : {}),
+        const footerText = buildFastSessionReplyFooterText({
+          provider: 'discord',
+          sessionId: params.parent.sessionId,
+        });
+        const bodyText = action ? `${message}\n${action.question}` : message;
+        const textWithFooter = `${bodyText}\n\n${footerText}`;
+        const posted = await postDiscordFastParentMessageWithFooter({
+          provider,
+          conversation,
+          sessionId: params.parent.sessionId,
+          footerText,
+          textWithFooter,
+          post: () =>
+            provider.postMessage({
+              ...conversation.replyTarget,
+              idempotencyKey: buildEventClientMessageSeed(params.event),
+              text: textWithFooter,
+              textFormat: 'markdown',
+              images,
+              ...(action
+                ? {
+                    buttons: [
+                      [
+                        {
+                          text: 'Resolve these issues',
+                          callbackData: buildPrReviewActionCallbackData(
+                            'yes',
+                            action.nonce,
+                          ),
+                        },
+                        {
+                          text: 'Auto-resolve on this PR',
+                          callbackData: buildPrReviewActionCallbackData(
+                            'auto',
+                            action.nonce,
+                          ),
+                        },
+                        {
+                          text: 'Dismiss',
+                          callbackData: buildPrReviewActionCallbackData(
+                            'dismiss',
+                            action.nonce,
+                          ),
+                        },
+                      ],
+                    ],
+                  }
+                : {}),
+            }),
         });
         if (action) {
           await attachPendingPrReviewActionMessage(
             action.nonce,
-            posted.lastTextMessageId ?? posted.messageId,
+            posted.messageId,
           );
         }
         params.onReplyPosted();
@@ -779,6 +898,8 @@ async function createFastAgentParentTurn(params: {
       return createDiscordFastAgentParentTurn(params);
     case 'automation':
       return createAutomationFastAgentParentTurn(params);
+    case 'web':
+      return createWebFastAgentParentTurn(params);
   }
 }
 
@@ -847,15 +968,18 @@ export async function deliverFastAgentParentEvent(params: {
       question: `<platform_event>${JSON.stringify(params.event)}</platform_event>`,
       userId: parentTurn.userId,
       conversation: parentTurn.conversation,
+      currentMessageId: buildEventClientMessageSeed(params.event),
       apiBaseUrl,
       signal: releaseTurnLock.signal,
       turnSource: 'platform_event',
       platformEventHandling:
-        params.event.type === 'pull_request_feedback'
+        params.event.type === 'pull_request_feedback' ||
+        params.event.type === 'pull_request_conflict_detected'
           ? 'present_only'
           : 'default',
       platformEventVisibility:
         params.event.type === 'pull_request_feedback' ||
+        params.event.type === 'pull_request_conflict_detected' ||
         params.event.type === 'automation_triggered'
           ? 'required'
           : 'optional',
@@ -870,7 +994,7 @@ export async function deliverFastAgentParentEvent(params: {
           resolveUserMcpServerConfigs({
             userId: parentTurn.userId,
             apiBaseUrl,
-            includeRoomote: true,
+            includeRoomoteMemberTools: true,
           }),
         ...(params.retryTaskStart
           ? { retryTaskStart: params.retryTaskStart }

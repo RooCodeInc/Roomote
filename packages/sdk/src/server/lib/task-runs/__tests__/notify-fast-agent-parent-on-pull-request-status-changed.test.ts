@@ -67,6 +67,7 @@ vi.mock('../../fast-agent-parent-event', () => ({
 }));
 
 import { notifyFastAgentParentOnPullRequestStatusChanged } from '../notify-fast-agent-parent-on-pull-request-status-changed';
+import { notifyFastAgentParentOnPullRequestConflict } from '../notify-fast-agent-parent-on-pull-request-conflict';
 
 const fastParent = {
   sessionId: '11111111-1111-4111-8111-111111111111',
@@ -159,5 +160,49 @@ describe('notifyFastAgentParentOnPullRequestStatusChanged', () => {
     });
 
     expect(mocks.deliverParentEvent).not.toHaveBeenCalled();
+  });
+});
+
+describe('notifyFastAgentParentOnPullRequestConflict', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.claimReturning.mockResolvedValue([{ id: 200 }]);
+    mocks.findClaimRun.mockResolvedValue({ id: 200 });
+    mocks.deliverParentEvent.mockResolvedValue('delivered');
+    mocks.recordLifecycle.mockResolvedValue(undefined);
+  });
+
+  it('passes a conflict generation to the Fast parent', async () => {
+    const conflictDetectedAt = new Date('2026-08-24T23:00:00.000Z');
+    const delivered = await notifyFastAgentParentOnPullRequestConflict({
+      run: makeRun({ fastAgentParent: fastParent }),
+      pullRequest: {
+        provider: pullRequest.provider,
+        host: pullRequest.host,
+        repository: pullRequest.repository,
+        number: pullRequest.number,
+        title: pullRequest.title,
+        url: pullRequest.url,
+      },
+      conflictDetectedAt,
+    });
+
+    expect(delivered).toBe(true);
+    expect(mocks.deliverParentEvent).toHaveBeenCalledWith({
+      parent: fastParent,
+      lockWaitMs: 30_000,
+      event: expect.objectContaining({
+        type: 'pull_request_conflict_detected',
+        taskId: 'child-task',
+        runId: 200,
+        conflictDetectedAt: conflictDetectedAt.toISOString(),
+        message:
+          '[Fix review feedback](https://github.com/acme/web/pull/42) now has merge conflicts. Update the branch or ask Roomote to resolve them.',
+        pullRequest: expect.objectContaining({
+          repository: 'acme/web',
+          number: 42,
+        }),
+      }),
+    });
   });
 });

@@ -13,7 +13,6 @@ import {
   computeProviders,
   environmentConfigSchema,
   workspaceRoutingSettingsSchema,
-  ENVIRONMENT_DEFINITION_SETUP_GUIDANCE_MAX_LENGTH,
   REASONING_EFFORT_VALUES,
   isTriggerableBackgroundAutomationKey,
   SCHEDULE_ONLY_BACKGROUND_AUTOMATION_IDS,
@@ -32,6 +31,14 @@ import {
   type ScheduleOnlyBackgroundAutomationFrequencyField,
 } from '@roomote/types';
 
+import {
+  replyToFastSessionCommand,
+  startFastSessionCommand,
+} from '../commands/fast-sessions';
+import {
+  replyToFastSessionInputSchema,
+  startFastSessionInputSchema,
+} from '../commands/fast-sessions/input';
 import {
   analyticsChartInputSchema,
   analyticsDetailsInputSchema,
@@ -272,6 +279,8 @@ import {
   completeSetupCommand,
   getSetupStatusCommand,
 } from '../commands/setup';
+import { completeSetupWithStarterTasksCommand } from '../commands/setup/starter-tasks';
+import { SETUP_STARTER_TASK_IDS } from '@/lib/setup-starter-tasks';
 import {
   getSetupNewStatusCommand,
   getSetupBootstrapStatusCommand,
@@ -285,12 +294,7 @@ import {
   saveSetupNewModelConfigCommand,
   saveSetupNewSourceControlConfigCommand,
   saveSetupNewSourceControlProviderChoiceCommand,
-  saveSetupNewSelectionCommand,
-  prefetchSetupRecommendationSignalsCommand,
   saveSetupNewQueuedTasksCommand,
-  startSetupNewOnboardingTaskCommand,
-  cancelSetupNewOnboardingTaskCommand,
-  resetSetupNewSelectionCommand,
   ensureSetupNewDefaultAgentsCommand,
   listSetupRecommendationsCommand,
   startSetupRecommendationsCommand,
@@ -462,6 +466,7 @@ const UPDATE_SETTINGS_SAVING_AUTOMATION_VALUES = [
   'channelAutoStart',
   'managerChannel',
   'managerStats',
+  'providerUsageLimit',
   'reviewer',
   'conflictResolver',
   'suggester',
@@ -556,6 +561,7 @@ const automationsRouter = createRouter({
         reviewerReviewAllPullRequestAuthors: z.boolean(),
         reviewerReviewOnCommit: z.boolean(),
         reviewerReviewDraftPrs: z.boolean(),
+        reviewerPublishGithubCheck: z.boolean(),
         reviewerInstructions: z.string().max(8_000).nullable().optional(),
         reviewerRelayReviewResultsToTask: z.boolean(),
         reviewerRelayUserIds: z.array(z.string()),
@@ -621,6 +627,22 @@ const automationsRouter = createRouter({
           .min(1)
           .max(160)
           .nullable(),
+        providerUsageLimitFrequency: z.enum(['off', 'every_hour']).optional(),
+        providerUsageLimitThreshold: z
+          .number()
+          .int()
+          .min(5)
+          .max(95)
+          .refine((value) => value % 5 === 0)
+          .optional(),
+        providerUsageLimitSlackChannel: z
+          .string()
+          .trim()
+          .min(1)
+          .max(160)
+          .nullable()
+          .optional(),
+        providerUsageLimitDiscordChannel: z.string().nullable().optional(),
         sentryTriageFrequency: z.enum(['off', 'daily', 'weekly']),
         sentryTriageSlackChannel: z.string().trim().min(1).max(160).nullable(),
         sentryTriageDiscordChannel: z
@@ -2508,6 +2530,21 @@ export const appRouter = createRouter({
       .mutation(({ ctx: { auth }, input }) =>
         completeSetupCommand(auth, input),
       ),
+
+    completeWithStarterTasks: protectedProcedure
+      .input(
+        z.object({
+          launchBatchId: z.string().uuid(),
+          selectedStarterTaskIds: z
+            .array(z.enum(SETUP_STARTER_TASK_IDS))
+            .max(SETUP_STARTER_TASK_IDS.length),
+          anonymousAnalyticsEnabled: z.boolean().optional(),
+          productUpdatesEnabled: z.boolean().optional(),
+        }),
+      )
+      .mutation(({ ctx: { auth }, input }) =>
+        completeSetupWithStarterTasksCommand(auth, input),
+      ),
   }),
 
   setupNew: createRouter({
@@ -2612,32 +2649,6 @@ export const appRouter = createRouter({
         saveSetupNewSourceControlConfigCommand(auth, input),
       ),
 
-    saveSelection: protectedProcedure
-      .input(
-        z.object({
-          repositoryIds: z.array(z.string().uuid()).min(1),
-          setupGuidance: z
-            .string()
-            .trim()
-            .max(ENVIRONMENT_DEFINITION_SETUP_GUIDANCE_MAX_LENGTH)
-            .optional(),
-          selectedModelId: z.string().trim().min(1).optional(),
-        }),
-      )
-      .mutation(({ ctx: { auth }, input }) =>
-        saveSetupNewSelectionCommand(auth, input),
-      ),
-
-    prefetchRecommendationSignals: protectedProcedure
-      .input(
-        z.object({
-          repositoryIds: z.array(z.string().uuid()).max(100),
-        }),
-      )
-      .mutation(({ ctx: { auth }, input }) =>
-        prefetchSetupRecommendationSignalsCommand(auth, input),
-      ),
-
     saveQueuedTasks: protectedProcedure
       .input(
         z.object({
@@ -2648,18 +2659,6 @@ export const appRouter = createRouter({
       .mutation(({ ctx: { auth }, input }) =>
         saveSetupNewQueuedTasksCommand(auth, input),
       ),
-
-    startOnboardingTask: protectedProcedure.mutation(({ ctx: { auth } }) =>
-      startSetupNewOnboardingTaskCommand(auth),
-    ),
-
-    cancelOnboardingTask: protectedProcedure.mutation(({ ctx: { auth } }) =>
-      cancelSetupNewOnboardingTaskCommand(auth),
-    ),
-
-    resetSelection: protectedProcedure.mutation(({ ctx: { auth } }) =>
-      resetSetupNewSelectionCommand(auth),
-    ),
 
     ensureDefaultAgents: protectedProcedure.mutation(({ ctx: { auth } }) =>
       ensureSetupNewDefaultAgentsCommand(auth),
@@ -2811,6 +2810,20 @@ export const appRouter = createRouter({
 
   backgroundAgents: automationsRouter,
   automations: automationsRouter,
+
+  fastSessions: createRouter({
+    start: protectedProcedure
+      .input(startFastSessionInputSchema)
+      .mutation(({ ctx: { auth }, input }) =>
+        startFastSessionCommand(auth, input),
+      ),
+
+    reply: protectedProcedure
+      .input(replyToFastSessionInputSchema)
+      .mutation(({ ctx: { auth }, input }) =>
+        replyToFastSessionCommand(auth, input),
+      ),
+  }),
 
   agentBehavior: createRouter({
     get: protectedProcedure.query(({ ctx: { auth } }) =>

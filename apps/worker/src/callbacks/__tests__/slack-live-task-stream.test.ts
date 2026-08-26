@@ -10,9 +10,15 @@ vi.mock('@roomote/sdk/client', () => ({
   },
 }));
 
-import { RunStatus, TaskPayloadKind } from '@roomote/types';
+import {
+  ACP_ENVELOPE_EVENT_TYPES,
+  RunStatus,
+  TaskPayloadKind,
+  type AcpPersistedEnvelope,
+} from '@roomote/types';
 import type { TaskRun } from '@roomote/sdk/client';
 
+import { fromRuntimeEnvelope } from '../../run-task/runtime-events/envelope';
 import {
   finishSlackLiveTaskStream,
   getSlackLiveTaskStreamRunTaskCallbacks,
@@ -316,7 +322,52 @@ describe('Slack live task card', () => {
     });
   });
 
-  it('queues a follow-up reopen behind an in-flight completion render', async () => {
+  it('does not render prompt events while the card is already active', async () => {
+    const taskRun = createTaskRun();
+    const context = {};
+
+    await updateSlackLiveTaskStream(
+      taskRun,
+      { type: 'turn_started', ts: 1000 },
+      context,
+    );
+    await updateSlackLiveTaskStream(
+      taskRun,
+      { type: 'turn_started', ts: 1001 },
+      context,
+    );
+
+    expect(mocks.renderCard).not.toHaveBeenCalled();
+  });
+
+  it('does not reopen completion for a stale prompt event', async () => {
+    const taskRun = createTaskRun();
+    const context = {};
+
+    await updateSlackLiveTaskStream(
+      taskRun,
+      { type: 'turn_started', ts: 1000 },
+      context,
+    );
+    await updateSlackLiveTaskStream(
+      taskRun,
+      { type: 'completion', ts: 1001, text: 'Ready for review.' },
+      context,
+    );
+    await updateSlackLiveTaskStream(
+      taskRun,
+      { type: 'turn_started', ts: 1000 },
+      context,
+    );
+
+    expect(mocks.renderCard).toHaveBeenCalledOnce();
+    expect(renderedCard(1)).toEqual({
+      status: 'complete',
+      output: 'Ready for review.',
+    });
+  });
+
+  it('queues a prompt-driven reopen behind an in-flight completion render', async () => {
     const taskRun = createTaskRun();
     const context = {};
     let releaseCompletion!: () => void;
@@ -334,11 +385,18 @@ describe('Slack live task card', () => {
     );
     await vi.waitFor(() => expect(mocks.renderCard).toHaveBeenCalledOnce());
 
-    const reopen = updateSlackLiveTaskStream(
-      taskRun,
-      { type: 'turn_started', ts: 1001 },
-      context,
-    );
+    const [turnStarted] = fromRuntimeEnvelope({
+      ts: 1001,
+      eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
+      role: 'user',
+      protocol: 'roomote_runtime',
+      contentBlocks: [{ type: 'text', text: 'Follow up.' }],
+      metadata: { sessionId: 'runtime-session-follow-up' },
+      payload: {},
+    } satisfies AcpPersistedEnvelope);
+    expect(turnStarted).toEqual({ type: 'turn_started', ts: 1001 });
+
+    const reopen = updateSlackLiveTaskStream(taskRun, turnStarted!, context);
     const firstFollowUp = updateSlackLiveTaskStream(
       taskRun,
       { type: 'text', ts: 1002, text: 'Checking the follow-up.' },

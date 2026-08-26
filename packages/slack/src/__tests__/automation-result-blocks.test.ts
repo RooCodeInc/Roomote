@@ -53,13 +53,8 @@ describe('automation result blocks', () => {
           ],
           [
             {
-              type: 'rich_text',
-              elements: [
-                {
-                  type: 'rich_text_section',
-                  elements: [{ type: 'text', text: 'Build' }],
-                },
-              ],
+              type: 'raw_text',
+              text: 'Build',
             },
             {
               type: 'rich_text',
@@ -124,6 +119,43 @@ describe('automation result blocks', () => {
     if (blocks[0]?.type !== 'table') return;
     expect(blocks[0].rows).toHaveLength(2);
     expect(JSON.stringify(blocks[0].rows[1])).toContain('a|b');
+  });
+
+  it('uses documented table cell objects inside automation containers', () => {
+    const [container] = buildAutomationResultBlocks({
+      title: 'Build report',
+      iconUrl: 'https://app.example.com/automation-icons/wrench.png',
+      configureUrl: 'https://app.example.com/automations#build-report',
+      contentText:
+        '| Name | Result | Details |\n| --- | --- | --- |\n| Build | **Passed** | [Logs](https://example.com/logs) |',
+    });
+
+    expect(container?.type).toBe('container');
+    if (container?.type !== 'container') return;
+    expect(container.child_blocks).toEqual([
+      expect.objectContaining({
+        type: 'table',
+        rows: [
+          expect.any(Array),
+          [
+            { type: 'raw_text', text: 'Build' },
+            expect.objectContaining({ type: 'rich_text' }),
+            expect.objectContaining({ type: 'rich_text' }),
+          ],
+        ],
+      }),
+      expect.objectContaining({ type: 'actions' }),
+    ]);
+  });
+
+  it('represents visually empty table cells with valid non-empty raw text', () => {
+    const [table] = buildAutomationResultContentBlocks(
+      '| Name | Result |\n| --- | --- |\n| Build | |',
+    );
+
+    expect(table?.type).toBe('table');
+    if (table?.type !== 'table') return;
+    expect(table.rows[1]?.[1]).toEqual({ type: 'raw_text', text: ' ' });
   });
 
   it('uses sections for oversized table fallbacks', () => {
@@ -235,6 +267,50 @@ describe('automation result blocks', () => {
         durationMs: 93_784_000,
       }),
     ).toBe('Weekly · GPT 5.6 Max · $0.00 · 1d 2h 3m 4s');
+  });
+
+  it('places additional actions before a custom Configure label', () => {
+    const [container] = buildAutomationResultBlocks({
+      title: 'Usage alert',
+      iconUrl: 'https://app.example.com/automation-icons/battery-warning.png',
+      configureUrl: 'https://app.example.com/automations#provider-usage-limit',
+      configureLabel: 'Configure alert',
+      additionalActions: [
+        {
+          type: 'button',
+          action_id: 'manage_models',
+          text: { type: 'plain_text', text: 'Manage models', emoji: false },
+          url: 'https://app.example.com/settings/models',
+        },
+      ],
+    });
+
+    expect(container?.type).toBe('container');
+    if (container?.type !== 'container') return;
+    expect(container.child_blocks).toEqual([
+      {
+        type: 'actions',
+        block_id: 'roomote_automation_result_actions',
+        elements: [
+          {
+            type: 'button',
+            action_id: 'manage_models',
+            text: { type: 'plain_text', text: 'Manage models', emoji: false },
+            url: 'https://app.example.com/settings/models',
+          },
+          {
+            type: 'button',
+            action_id: 'late_bound_automation_configure',
+            text: {
+              type: 'plain_text',
+              text: 'Configure alert',
+              emoji: false,
+            },
+            url: 'https://app.example.com/automations#provider-usage-limit',
+          },
+        ],
+      },
+    ]);
   });
 
   it('reserves action capacity for task and configure buttons', () => {

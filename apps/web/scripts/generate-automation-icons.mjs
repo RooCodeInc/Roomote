@@ -7,6 +7,7 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import {
   ChartColumnIncreasing,
+  BatteryWarning,
   GitMergeConflict,
   Lightbulb,
   Megaphone,
@@ -24,6 +25,7 @@ const outputDirectory = path.resolve(
 );
 
 const lucideIcons = {
+  'battery-warning': BatteryWarning,
   'chart-column-increasing': ChartColumnIncreasing,
   'git-merge-conflict': GitMergeConflict,
   lightbulb: Lightbulb,

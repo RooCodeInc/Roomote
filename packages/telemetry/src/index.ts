@@ -126,6 +126,7 @@ export type ActivationAutomation =
   | 'review_code'
   | 'conflict_resolver'
   | 'manager_stats'
+  | 'provider_usage_limit'
   | 'sentry_triage'
   | 'dependabot_triage'
   | 'codeql_triage'

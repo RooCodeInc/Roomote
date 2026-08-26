@@ -747,9 +747,16 @@ describe('roomote MCP tool descriptions', () => {
     ]) {
       expect(names).not.toContain(name);
     }
-    expect(
-      getRegisteredTool(registeredTools, 'send_chat_reply').config.description,
-    ).toContain('Fast-internal');
+    const description = getRegisteredTool(registeredTools, 'send_chat_reply')
+      .config.description;
+    expect(description).toContain('Fast-internal');
+    expect(description).toContain('do not send another generic ack');
+    expect(description).toContain('meaningful work milestones');
+    expect(description).toContain('roughly 10 minutes of silence');
+    expect(description).toContain(
+      'without labeling the message as a progress update',
+    );
+    expect(description).toContain('The raw message is never posted directly');
     expect(names).toContain('manage_artifacts');
   });
 

@@ -2,6 +2,68 @@
 
 This file tracks product releases for Roomote (single monorepo version). Automated release entries are prepended by `pnpm run version`.
 
+## 0.43.0 (2026-08-26)
+
+This release brings Fast conversations into the dashboard, introduces a streamlined Memory experience, launches useful starter tasks directly from setup, and adds optional GitHub review checks.
+
+### Highlights
+
+- Start and continue Fast sessions from the dashboard with generated titles and live canonical transcripts.
+- Browse and share individual memories from a streamlined Memory settings experience.
+- Launch preselected starter tasks as soon as setup completes.
+- Publish Review Code results as optional GitHub checks for branch protection and rulesets.
+
+### Minor changes
+
+- Start, title, inspect, and continue Fast sessions from the web dashboard with live canonical transcripts, while Slack and Discord replies link back to the same session view.
+- Publish Review Code results as an optional GitHub check that teams can use with branch protection and rulesets.
+- Use consistent Memory naming across Roomote and browse, focus, and share individual memories from a streamlined settings page with recovery controls when ingestion needs attention.
+- Replace the final setup step with preselected starter tasks (speed up CI, security scan, fix test flakes, update dependencies) that launch idempotently as standard tasks when setup completes.
+
+### Patch changes
+
+- Keep Slack pull request status and resumed task previews accurate across ordinary, Fast-delegated, retried, reopened, and completed task paths.
+- Keep Fast conversations useful across follow-ups and longer work by preserving native context through helper restarts, exposing deployment task inspection, responding naturally to corrections, and sharing concise progress when work takes time.
+- Make pull request feedback and review checks more reliable by coalescing duplicate actionable notifications, completing checks when reviews finish, and showing provisional findings sooner when a summary is delayed.
+- Render automation result tables in Slack with valid cell payloads, including tables with visually empty cells.
+- Show the first user message as a Fast session's temporary title instead of exposing a timestamp-like conversation identifier while title generation finishes.
+- Allow image-only prompts when starting or continuing Fast sessions while continuing to reject invalid images and empty messages.
+
+## 0.42.0 (2026-08-25)
+
+This release expands Fast and automation workflows, shortens initial setup, adds proactive usage and pull-request conflict alerts, and improves task recovery and chat reliability.
+
+### Highlights
+
+- Use current chat context and deployment-configured MCP tools directly from Fast, including automation management and all-repository delegation.
+- Run custom automations in Fast and trigger Roomote from Slack workflows and third-party apps.
+- Configure inference-provider usage alerts and notify originating conversations when Roomote-created GitHub pull requests conflict.
+- Finish initial setup sooner, recover failed task starts with a prefilled launcher, and keep chat-backed work more reliable.
+
+### Minor changes
+
+- Run custom automations in Fast mode with consistent Slack reports, easier command-palette discovery, and validation focused on the automation being saved.
+- Let Fast read the current chat context and use deployment-configured MCP tools directly, including custom automation management and delegation across all repositories.
+- Configure inference-provider usage alerts with adjustable thresholds, destinations, deduplication, and multi-provider delivery.
+- Notify the originating task conversation when a Roomote-created GitHub pull request becomes conflicted so the team can resolve it promptly.
+- Retry failed task starts through an editable new-task launcher prefilled with the original prompt, model, and environment.
+- Let Slack workflows and third-party apps trigger Roomote through explicit mentions.
+- Finish initial setup sooner by making environment creation optional, then guide teams to create an environment from Home when they want verified repository setup.
+
+### Patch changes
+
+- Reduce GitHub App rate-limit pressure by coalescing installation-token requests, briefly caching the PR-notification hot path with one fresh-token retry, reusing bootstrap credentials until their scheduled refresh, and honoring provider backoff signals.
+- Prevent chat-backed and Fast work from hanging during terminal delivery failures, provider recovery, or interrupted retries.
+- Keep ChatGPT subscription OAuth credentials on the control plane and out of task sandboxes and restored snapshots.
+- Deliver GitHub installation approval notifications to requesters who use Discord without Slack.
+- Include complete Fast parent and advisor or judge inference usage in Costs analytics.
+- Make empty Fast invocations respond contextually and keep updates focused on useful outcomes instead of orchestration details.
+- Preserve exact Slack or Discord source-message links in pull requests created by Fast-delegated tasks.
+- Stop pull-request review prompts from reappearing after a user selects automatic Fix all handling.
+- Move completed tasks to Done after their pull request merges and resume settled delegated work under the original task.
+- Restore each user's preferred Tasks layout and give Slack-launched tasks meaningful generated titles.
+- Keep oversized Fast integration results readable through conversation-scoped spill handles without exposing the service filesystem.
+
 ## 0.41.0 (2026-08-24)
 
 This release adds a shared task board, expands Fast delegation and preferences, delivers actionable pull-request CI updates and proactive operator alerts, clarifies inference costs, and gives the Brain richer pull-request context.

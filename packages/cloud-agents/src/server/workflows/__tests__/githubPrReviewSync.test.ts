@@ -6,7 +6,7 @@ describe('githubPrReviewSync', () => {
   describe('getMarkdownChecklist unit tests', () => {
     it('should extract checklist items and preserve checked state', () => {
       const markdown = `
-<!-- roomote-review-summary sha=abc123 mode=initial agent=agent_123 -->
+<!-- roomote-review-summary sha=abc1234 mode=initial agent=agent_123 -->
 Outstanding review items:
 - [ ] Add regression coverage
 - [x] Preserve existing wording
@@ -21,7 +21,7 @@ Outstanding review items:
 
     it('should preserve dismissed history bullets alongside checklist items', () => {
       const markdown = `
-<!-- roomote-review-summary sha=abc123 mode=sync agent=agent_123 -->
+<!-- roomote-review-summary sha=abc1234 mode=sync agent=agent_123 -->
 1 issue outstanding.
 - [ ] Keep unresolved issue visible
 - ~~Ignore optional skipped checks~~ — dismissed: checks already passed.
@@ -36,7 +36,7 @@ Outstanding review items:
 
     it('should ignore hidden status and checklist markers while extracting checklist history', () => {
       const markdown = `
-<!-- roomote-review-summary sha=abc123 mode=sync agent=agent_123 -->
+<!-- roomote-review-summary sha=abc1234 mode=sync agent=agent_123 -->
 <!-- roomote-review-status:start -->
 No actionable issues found.
 <!-- roomote-review-status:end -->
