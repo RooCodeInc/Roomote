@@ -5,7 +5,7 @@ import { BrainSettings } from '@/components/settings/brain/BrainSettings';
 
 export function BrainSettingsPage() {
   return (
-    <SettingsShell pageId="brain" adminOnly={true}>
+    <SettingsShell pageId="memory" adminOnly={true}>
       <BrainSettings />
     </SettingsShell>
   );
