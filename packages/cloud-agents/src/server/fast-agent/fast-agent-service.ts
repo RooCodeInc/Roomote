@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import type { ModelMessage } from 'ai';
 import {
   ACP_ENVELOPE_EVENT_TYPES,
+  ACP_UI_TOOL_OUTPUT_MAX_CHARS,
   ALL_REPOSITORIES,
   CHAT_CHANNEL_MESSAGES_TOOL,
   CHAT_MESSAGE_CONTEXT_TOOL,
@@ -95,6 +96,7 @@ import {
   type FastAgentTurnAdapter,
   type FastAgentTurnSource,
 } from './fast-agent-conversation';
+import { prepareShowWidget } from '../show-widget';
 
 export type FastAgentThreadMessage = SlackThreadPromptMessage;
 
@@ -106,6 +108,13 @@ const chatReplyArgsSchema = z.object({
 const chatReactionArgsSchema = z.object({
   name: z.string().trim().min(1),
   purpose: z.enum(['ack', 'closeout']),
+});
+const showWidgetArgsSchema = z.object({
+  html: z.string(),
+  title: z.string().optional(),
+  css: z.string().optional(),
+  height: z.number().optional(),
+  textFallback: z.string().optional(),
 });
 const FAST_AGENT_DEFAULT_SLACK_HISTORY_LOOKBACK_MS = 24 * 60 * 60 * 1000;
 const FAST_AGENT_CANONICAL_TOOL_OUTPUT_MAX_CHARS = 50_000;
@@ -155,18 +164,23 @@ function serializeFastAgentToolOutput(result: unknown): {
   output: string;
   truncated: boolean;
 } {
-  let output: string;
-  try {
-    output = JSON.stringify(result, null, 2) ?? String(result);
-  } catch {
-    output = String(result);
-  }
+  const output = stringifyFastAgentToolOutput(result);
 
   const { text, truncation } = truncateAcpOutputText(
     output,
     FAST_AGENT_CANONICAL_TOOL_OUTPUT_MAX_CHARS,
   );
   return { output: text, truncated: truncation !== null };
+}
+
+function stringifyFastAgentToolOutput(result: unknown): string {
+  let output: string;
+  try {
+    output = JSON.stringify(result, null, 2) ?? String(result);
+  } catch {
+    output = String(result);
+  }
+  return output;
 }
 
 function getFastAgentDefaultSlackHistoryOldest(latest?: string): string {
@@ -817,6 +831,7 @@ export async function answerFastAgentQuestion({
           isExecute: false,
           isRead: false,
           isMcp,
+          isRoomoteNativeTool: !isMcp,
           mcpServerName,
           mcpToolName,
           serverName: mcpServerName,
@@ -867,6 +882,7 @@ export async function answerFastAgentQuestion({
           status: failed ? 'failed' : 'completed',
           isExecute: false,
           isMcp: event.isMcp,
+          isRoomoteNativeTool: !event.isMcp,
           mcpServerName: event.mcpServerName,
           mcpToolName: event.mcpToolName,
           serverName: event.mcpServerName,
@@ -1407,6 +1423,48 @@ export async function answerFastAgentQuestion({
             visibleUpdatePosted = true;
             if (args.purpose === 'closeout') closed = true;
             return { success: true, delivered: true, closed };
+          }
+
+          case FAST_AGENT_NATIVE_TOOL_NAMES.showWidget: {
+            const args = showWidgetArgsSchema.parse(call.args);
+            const result = await prepareShowWidget(args);
+            if (!result.success) {
+              return result;
+            }
+
+            if (
+              stringifyFastAgentToolOutput(result).length >
+              ACP_UI_TOOL_OUTPUT_MAX_CHARS
+            ) {
+              return {
+                success: false,
+                error: `The sanitized widget exceeds the Fast transcript limit of ${ACP_UI_TOOL_OUTPUT_MAX_CHARS} characters.`,
+              };
+            }
+
+            if (
+              result.textFallback &&
+              (conversation.surface === 'slack' ||
+                conversation.surface === 'discord')
+            ) {
+              const signature = JSON.stringify([
+                'progress',
+                result.textFallback,
+                [],
+              ]);
+              if (!completedChatReplySignatures.has(signature)) {
+                throwIfTurnCancelled();
+                await postReply({
+                  purpose: 'progress',
+                  message: result.textFallback,
+                });
+                completedChatReplySignatures.add(signature);
+              }
+            } else if (conversation.surface === 'web') {
+              visibleUpdatePosted = true;
+            }
+
+            return result;
           }
 
           case FAST_AGENT_NATIVE_TOOL_NAMES.launchTask: {

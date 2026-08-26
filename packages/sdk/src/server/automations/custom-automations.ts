@@ -518,11 +518,17 @@ async function runFastCustomAutomation(params: {
           conversation.replyTarget.channelId,
           conversation.workspaceId,
         );
-        if (provider && route) {
+        const persistedDirectMessageServiceUrl = conversation.replyTarget
+          .threadId
+          ? undefined
+          : conversation.replyTarget.serviceUrl;
+        const serviceUrl =
+          route?.serviceUrl ?? persistedDirectMessageServiceUrl;
+        if (provider && serviceUrl) {
           await provider.updateMessage({
             channelId: conversation.replyTarget.channelId,
             messageId: rootMessageId,
-            serviceUrl: route.serviceUrl,
+            serviceUrl,
             text: message,
             textFormat: 'markdown',
           });
