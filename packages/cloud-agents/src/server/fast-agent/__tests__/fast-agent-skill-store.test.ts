@@ -94,6 +94,20 @@ describe('FastAgentSkillStore', () => {
         }),
       ]),
     );
+
+    repositorySkills.list.mockClear();
+    const packagedOnlyCatalog = await store.list();
+    expect(repositorySkills.list).not.toHaveBeenCalled();
+    expect(packagedOnlyCatalog.counts).toEqual({
+      packaged: FAST_AGENT_PACKAGED_SKILL_NAMES.length,
+      repository: 0,
+      total: FAST_AGENT_PACKAGED_SKILL_NAMES.length,
+    });
+    expect(packagedOnlyCatalog.skills).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ source: 'repository' }),
+      ]),
+    );
   });
 
   it('rejects traversal, non-Markdown files, symlinks, and unknown skills', async () => {

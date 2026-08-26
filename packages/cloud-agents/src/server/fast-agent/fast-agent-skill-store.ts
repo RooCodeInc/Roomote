@@ -182,7 +182,7 @@ export class FastAgentSkillStore {
       : resolveDefaultSkillRoot();
   }
 
-  async list(scope: FastAgentSkillScope): Promise<FastAgentSkillCatalog> {
+  async list(scope?: FastAgentSkillScope): Promise<FastAgentSkillCatalog> {
     const packaged = await Promise.all(
       FAST_AGENT_PACKAGED_SKILL_NAMES.map(async (name) => {
         const document = await this.readPackaged(name);
@@ -195,9 +195,10 @@ export class FastAgentSkillStore {
         };
       }),
     );
-    const repository = this.repositorySkills
-      ? await this.repositorySkills.list(scope)
-      : { skills: [], warnings: [] };
+    const repository =
+      this.repositorySkills && scope
+        ? await this.repositorySkills.list(scope)
+        : { skills: [], warnings: [] };
     return {
       counts: {
         packaged: packaged.length,

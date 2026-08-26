@@ -131,7 +131,10 @@ describe('Fast native OpenCode tool bridge', () => {
     );
     expect(skillListSource).toContain('environmentId: z.string()');
     expect(skillListSource).toContain('repositoryId: z.string()');
-    expect(skillListSource).toContain('Provide exactly one');
+    expect(skillListSource).toContain('Omit both scope fields');
+    expect(skillListSource).toContain(
+      'exactly one of environmentId or repositoryId',
+    );
     expect(skillSource).toContain('Exact skill ID returned by list_skills');
     expect(skillSource).not.toContain('"explore-and-act"');
     expect(skillSource).toContain(
@@ -265,9 +268,18 @@ describe('Fast native OpenCode tool bridge', () => {
         tool: FAST_AGENT_NATIVE_TOOL_NAMES.listSkills,
         args: {},
       });
-      expect(JSON.parse(unscopedCatalog.output)).toEqual({
-        success: false,
-        error: 'The requested skill catalog is unavailable.',
+      expect(JSON.parse(unscopedCatalog.output)).toMatchObject({
+        success: true,
+        result: {
+          counts: {
+            packaged: FAST_AGENT_PACKAGED_SKILL_NAMES.length,
+            repository: 0,
+            total: FAST_AGENT_PACKAGED_SKILL_NAMES.length,
+          },
+          skills: expect.arrayContaining([
+            expect.objectContaining({ id: 'packaged:security-review' }),
+          ]),
+        },
       });
 
       const ambiguousCatalog = await callBridge({
