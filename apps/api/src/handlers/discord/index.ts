@@ -995,6 +995,7 @@ async function processDiscordGatewayEvent(
       );
       // A typed reply supersedes any pending PR review offers here.
       retireDiscordPrReviewOffersBestEffort({
+        provider: resolved.provider,
         channelId: metadata.communicationChannelId,
         threadId: metadata.communicationThreadId ?? null,
       });
@@ -1108,6 +1109,7 @@ async function processDiscordGatewayEvent(
       });
       // A typed reply supersedes any pending PR review offers here.
       retireDiscordPrReviewOffersBestEffort({
+        provider: resolved.provider,
         channelId: metadata.communicationChannelId,
         threadId: metadata.communicationThreadId ?? null,
       });

@@ -19,6 +19,8 @@ const {
   mockDiscordPostMessage,
   mockStickyFooterPost,
   mockSetPendingPrReviewAction,
+  mockAttachPendingPrReviewActionMessage,
+  mockRetirePrReviewActionMessages,
   mockDispatchFollowUp,
   mockFindAutoHandlePrReviewFeedbackPreference,
   mockNotifyFastAgentParent,
@@ -47,6 +49,8 @@ const {
   mockDiscordPostMessage: vi.fn(),
   mockStickyFooterPost: vi.fn(),
   mockSetPendingPrReviewAction: vi.fn(),
+  mockAttachPendingPrReviewActionMessage: vi.fn(),
+  mockRetirePrReviewActionMessages: vi.fn(),
   mockDispatchFollowUp: vi.fn(),
   mockFindAutoHandlePrReviewFeedbackPreference: vi.fn(),
   mockNotifyFastAgentParent: vi.fn(),
@@ -185,6 +189,7 @@ vi.mock('@roomote/sdk/server', () => ({
   completeCanonicalPrReviewAutoDispatch: mockCompleteCanonicalAutoDispatch,
   recordPrReviewNotificationDeliveryBestEffort: mockRecordDelivery,
   setPendingPrReviewAction: mockSetPendingPrReviewAction,
+  retirePrReviewActionMessagesBestEffort: mockRetirePrReviewActionMessages,
   dispatchPrReviewFollowUp: mockDispatchFollowUp,
   findAutoHandlePrReviewFeedbackPreference:
     mockFindAutoHandlePrReviewFeedbackPreference,
@@ -193,7 +198,8 @@ vi.mock('@roomote/sdk/server', () => ({
   renewPrReviewNotificationRequestLease: mockRenewLease,
   isDurablePrReviewNotificationRequest: mockIsDurable,
   migrateLegacyPrReviewNotificationRequest: mockMigrateLegacy,
-  attachPendingPrReviewActionMessage: vi.fn().mockResolvedValue(true),
+  attachPendingPrReviewActionMessageWithRetirement:
+    mockAttachPendingPrReviewActionMessage,
 }));
 
 import type { Job } from 'bullmq';
@@ -263,6 +269,11 @@ describe('prReviewNotificationJob', () => {
     });
     mockRecordDelivery.mockResolvedValue(undefined);
     mockNotifyFastAgentParent.mockResolvedValue(false);
+    mockAttachPendingPrReviewActionMessage.mockResolvedValue({
+      attached: true,
+      superseded: [],
+    });
+    mockRetirePrReviewActionMessages.mockResolvedValue(undefined);
     mockFindAutoHandlePrReviewFeedbackPreference.mockResolvedValue(null);
     mockStickyFooterPost.mockResolvedValue('999.888');
     mockPostMessage.mockResolvedValue({
@@ -678,6 +689,22 @@ describe('prReviewNotificationJob', () => {
   });
 
   it('posts Yes/Dismiss action buttons and stores the pending offer when the triage produced a follow-up', async () => {
+    const superseded = {
+      nonce: 'old-nonce',
+      provider: 'slack',
+      taskId: 'task-1',
+      repository: 'owner/repo',
+      prNumber: 42,
+      prUrl: 'https://github.com/owner/repo/pull/42',
+      channelId: 'C123',
+      threadId: '111.222',
+      followUpPrompt: 'Old prompt',
+      messageId: '888.777',
+    };
+    mockAttachPendingPrReviewActionMessage.mockResolvedValue({
+      attached: true,
+      superseded: [superseded],
+    });
     mockPrepareDelivery.mockResolvedValue({
       post: true,
       route: {
@@ -736,6 +763,14 @@ describe('prReviewNotificationJob', () => {
     for (const element of actionsBlock.elements) {
       expect(JSON.parse(element.value)).toEqual({ nonce: storedNonce });
     }
+    expect(mockAttachPendingPrReviewActionMessage).toHaveBeenCalledWith(
+      storedNonce,
+      '999.888',
+      expect.objectContaining({
+        context: expect.objectContaining({ nonce: storedNonce }),
+      }),
+    );
+    expect(mockRetirePrReviewActionMessages).toHaveBeenCalledWith([superseded]);
 
     // The task-history record carries the question as trailing text.
     expect(mockRecordDelivery).toHaveBeenCalledWith(
@@ -789,6 +824,38 @@ describe('prReviewNotificationJob', () => {
             }),
           ],
         ],
+      }),
+    );
+  });
+
+  it('attaches Discord actions to the final button-bearing message', async () => {
+    mockPrepareDelivery.mockResolvedValue({
+      post: true,
+      route: {
+        provider: 'discord',
+        channelId: 'channel-1',
+        threadId: 'thread-1',
+      },
+      text: 'formatted-message',
+      followUpQuestion: 'Want me to take a look?',
+      followUpPrompt: 'Address the review feedback on owner/repo#42.',
+    });
+    mockDiscordPostMessage.mockResolvedValue({
+      provider: 'discord',
+      channelId: 'channel-1',
+      threadId: 'thread-1',
+      messageId: 'first-message',
+      lastTextMessageId: 'message-with-actions',
+    });
+
+    await prReviewNotificationJob(makeJob() as never);
+
+    const storedNonce = mockSetPendingPrReviewAction.mock.calls[0]?.[0]?.nonce;
+    expect(mockAttachPendingPrReviewActionMessage).toHaveBeenCalledWith(
+      storedNonce,
+      'message-with-actions',
+      expect.objectContaining({
+        context: expect.objectContaining({ nonce: storedNonce }),
       }),
     );
   });
