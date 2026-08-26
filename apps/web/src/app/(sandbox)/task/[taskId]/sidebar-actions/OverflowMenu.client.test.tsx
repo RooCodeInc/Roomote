@@ -6,6 +6,8 @@ const {
   cancelMutateAsyncMock,
   deleteMutateAsyncMock,
   requestSleepMutateAsyncMock,
+  acknowledgeMutateAsyncMock,
+  acknowledgeState,
   errorToastMock,
   successToastMock,
   authState,
@@ -14,6 +16,8 @@ const {
   cancelMutateAsyncMock: vi.fn(),
   deleteMutateAsyncMock: vi.fn(),
   requestSleepMutateAsyncMock: vi.fn(),
+  acknowledgeMutateAsyncMock: vi.fn(),
+  acknowledgeState: { isPending: false },
   errorToastMock: vi.fn(),
   successToastMock: vi.fn(),
   authState: {
@@ -81,12 +85,14 @@ vi.mock('@/components/system', () => ({
     className,
     variant,
     disabled,
+    'aria-label': ariaLabel,
   }: {
     children: ReactNode;
     onClick?: () => void;
     className?: string;
     variant?: string;
     disabled?: boolean;
+    'aria-label'?: string;
   }) => (
     <button
       type="button"
@@ -94,6 +100,7 @@ vi.mock('@/components/system', () => ({
       className={className}
       data-variant={variant}
       disabled={disabled}
+      aria-label={ariaLabel}
     >
       {children}
     </button>
@@ -111,6 +118,8 @@ vi.mock('@/components/system', () => ({
     <p>{children}</p>
   ),
   MoreVertical: () => <svg aria-hidden="true" />,
+  Check: () => <svg aria-hidden="true" />,
+  Loader2: () => <svg aria-hidden="true" />,
   Moon: () => <svg aria-hidden="true" />,
   Trash2: () => <svg aria-hidden="true" />,
   Pencil: () => <svg aria-hidden="true" />,
@@ -129,6 +138,12 @@ vi.mock('@/hooks/tasks', () => ({
     isPending: false,
   })),
   useTask: vi.fn(() => ({ data: null })),
+  isTaskResolutionActionable: (status?: string | null) =>
+    status === 'awaiting_confirmation' || status === 'needs_follow_up',
+  useAcknowledgeTaskResolution: vi.fn(() => ({
+    mutateAsync: acknowledgeMutateAsyncMock,
+    isPending: acknowledgeState.isPending,
+  })),
 }));
 
 vi.mock('@/hooks/task-runs', () => ({
@@ -161,7 +176,8 @@ function createTaskRun(overrides: Record<string, unknown> = {}) {
   return {
     id: 123,
     actingUserId: 'user-1',
-    status: 'running',
+    status: 'idle',
+    taskPhase: 'waiting_for_prompt',
     payloadKind: 'standard',
     vendor: 'modal',
     machineId: 'machine-1',
@@ -181,6 +197,11 @@ describe('OverflowMenu', () => {
     cancelMutateAsyncMock.mockResolvedValue({ success: true });
     deleteMutateAsyncMock.mockResolvedValue(undefined);
     requestSleepMutateAsyncMock.mockResolvedValue({ success: true });
+    acknowledgeMutateAsyncMock.mockResolvedValue({
+      success: true,
+      changed: true,
+    });
+    acknowledgeState.isPending = false;
   });
 
   it('does not render when auth context is unavailable', () => {
@@ -214,6 +235,83 @@ describe('OverflowMenu', () => {
     render(<OverflowMenu taskId="task-1" taskRun={createTaskRun()} />);
 
     expect(screen.getByRole('button', { name: 'Sleep' })).toBeInTheDocument();
+  });
+
+  it('marks actionable resolutions done from the task overflow menu', async () => {
+    render(
+      <OverflowMenu
+        taskId="task-1"
+        taskRun={createTaskRun()}
+        resolutionStatus="awaiting_confirmation"
+      />,
+    );
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Mark done' }));
+    });
+
+    expect(acknowledgeMutateAsyncMock).toHaveBeenCalledWith({
+      taskId: 'task-1',
+    });
+    expect(successToastMock).toHaveBeenCalledWith('Task marked done.');
+  });
+
+  it.each([
+    ['pending', null],
+    ['running', null],
+    ['running', 'running'],
+    ['idle', 'running'],
+  ])(
+    'hides stale acknowledgement while the task run is %s/%s',
+    (status, taskPhase) => {
+      render(
+        <OverflowMenu
+          taskId="task-1"
+          taskRun={createTaskRun({ status, taskPhase })}
+          resolutionStatus="awaiting_confirmation"
+        />,
+      );
+
+      expect(
+        screen.queryByRole('button', { name: 'Mark done' }),
+      ).not.toBeInTheDocument();
+    },
+  );
+
+  it('exposes an accessible pending state while marking done', () => {
+    acknowledgeState.isPending = true;
+
+    render(
+      <OverflowMenu
+        taskId="task-1"
+        taskRun={createTaskRun()}
+        resolutionStatus="needs_follow_up"
+      />,
+    );
+
+    expect(
+      screen.getByRole('button', { name: 'Marking task done' }),
+    ).toBeDisabled();
+  });
+
+  it('reports acknowledgement errors from the overflow menu', async () => {
+    acknowledgeMutateAsyncMock.mockRejectedValueOnce(
+      new Error('Could not update task'),
+    );
+
+    render(
+      <OverflowMenu
+        taskId="task-1"
+        taskRun={createTaskRun()}
+        resolutionStatus="awaiting_confirmation"
+      />,
+    );
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Mark done' }));
+    });
+
+    expect(errorToastMock).toHaveBeenCalledWith('Could not update task');
   });
 
   it('hides Sleep when the task is already asleep', () => {

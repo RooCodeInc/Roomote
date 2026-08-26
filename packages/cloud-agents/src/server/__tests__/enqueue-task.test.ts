@@ -1010,6 +1010,49 @@ describe('enqueueTask snapshot resume', () => {
     expect(runsForTask).toHaveLength(2);
   });
 
+  it('clears resolution when an accepted resume later has a bootstrap failure', async () => {
+    const userId = await createUser();
+    const freshRun = await launchFresh({
+      task: standardTaskInput({ computeProvider: 'modal' }),
+      initiator: { kind: 'user', userId },
+      workflow: 'standard',
+      surface: 'web',
+      trigger: 'manual',
+    });
+    await db
+      .update(tasks)
+      .set({
+        resolutionStatus: 'awaiting_confirmation',
+        resolutionUpdatedAt: new Date('2026-08-26T18:00:00.000Z'),
+      })
+      .where(eq(tasks.id, freshRun.taskId));
+
+    const resumeRun = await enqueueTask(
+      {
+        task: {
+          type: TaskPayloadKind.SnapshotResume,
+          payload: {
+            repo: 'acme/widgets',
+            sourceSnapshotId: 'snap-bootstrap-failure',
+            sourceRunId: freshRun.id,
+          },
+        } as SnapshotResumeTask,
+        actingUserId: userId,
+      },
+      { enqueue: false },
+    );
+    await db
+      .update(taskRuns)
+      .set({ status: RunStatus.Failed, error: 'resume bootstrap failed' })
+      .where(eq(taskRuns.id, resumeRun.id));
+
+    const task = await db.query.tasks.findFirst({
+      where: eq(tasks.id, freshRun.taskId),
+      columns: { resolutionStatus: true },
+    });
+    expect(task?.resolutionStatus).toBeNull();
+  });
+
   it('inherits source-control stamps from the source run payload', async () => {
     const userId = await createUser();
 

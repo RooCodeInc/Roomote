@@ -5,8 +5,10 @@ import {
   and,
   eq,
   isNull,
+  lockTaskResolution,
   ne,
   or,
+  resolveTaskResolutionFromLinkedPullRequests,
   syncTaskStateFromRuns,
 } from '@roomote/db/server';
 import { captureActivationPrMerged } from '@roomote/telemetry/server';
@@ -30,28 +32,25 @@ export async function updateTaskPrStatus(
   );
   const matchingStatus = and(
     matchingPullRequest,
-    ...(status === 'merged'
-      ? [
-          or(
-            isNull(taskPullRequests.status),
-            ne(taskPullRequests.status, 'merged'),
-          ),
-        ]
-      : []),
+    or(isNull(taskPullRequests.status), ne(taskPullRequests.status, 'merged')),
   );
 
   const updated = await db.transaction(async (tx) => {
-    if (status === 'merged') {
-      const linkedTasks = await tx
-        .select({ taskId: taskPullRequests.taskId })
-        .from(taskPullRequests)
-        .where(matchingPullRequest);
+    const linkedTasks = await tx
+      .select({ taskId: taskPullRequests.taskId })
+      .from(taskPullRequests)
+      .where(matchingPullRequest);
+    const linkedTaskIds = [
+      ...new Set(linkedTasks.map((row) => row.taskId)),
+    ].sort();
 
-      for (const taskId of [
-        ...new Set(linkedTasks.map((row) => row.taskId)),
-      ].sort()) {
-        // Match enqueue's task-before-PR lock order. Idle/running siblings
-        // still derive active, so legitimate follow-up tasks stay open.
+    for (const taskId of linkedTaskIds) {
+      // Lock tasks in stable order before PR rows. This serializes aggregate
+      // resolution and matches enqueue's task-before-PR lock order.
+      await lockTaskResolution(taskId, { executor: tx });
+      if (status === 'merged') {
+        // Idle/running siblings still derive active, so legitimate follow-up
+        // tasks stay open.
         await syncTaskStateFromRuns(tx, taskId);
       }
     }
@@ -64,6 +63,12 @@ export async function updateTaskPrStatus(
         taskId: taskPullRequests.taskId,
         createdByRoomote: taskPullRequests.createdByRoomote,
       });
+
+    for (const taskId of linkedTaskIds) {
+      await resolveTaskResolutionFromLinkedPullRequests(taskId, {
+        executor: tx,
+      });
+    }
 
     return updatedRows;
   });

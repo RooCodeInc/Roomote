@@ -1,6 +1,7 @@
 import { enqueueTask } from '@roomote/cloud-agents/server';
 import {
   and,
+  clearTaskResolution,
   db,
   desc,
   eq,
@@ -218,6 +219,7 @@ async function dispatchSlackFollowUp(input: {
   const activeRun = threadBoundActiveRun ?? fastAgentActiveRun;
 
   if (activeRun) {
+    await clearTaskResolution(input.taskId);
     await setTrustedRunActingUser({
       runId: activeRun.id,
       userId: input.actingUserId,
@@ -390,6 +392,7 @@ async function dispatchCommunicationFollowUp(input: {
   const activeRun = await findActiveCommunicationTaskRun(conversation);
 
   if (activeRun) {
+    await clearTaskResolution(input.taskId);
     await setTrustedRunActingUser({
       runId: activeRun.id,
       userId: input.actingUserId,

@@ -53,6 +53,7 @@ import {
   markTaskStartParallelCountEndedAt,
   projectPendingPrReviewEventsForAssociation,
   recordTaskStartParallelCount,
+  clearTaskResolution,
   syncTaskStateFromRuns,
   taskPullRequests,
   taskRuns,
@@ -2557,6 +2558,8 @@ async function enqueueSnapshotResume(
       if (existingResume) {
         throw new SnapshotResumeAlreadyExistsError(existingResume.id);
       }
+
+      await clearTaskResolution(sourceRun.taskId, { executor: tx });
 
       const [insertedRun] = await tx
         .insert(taskRuns)

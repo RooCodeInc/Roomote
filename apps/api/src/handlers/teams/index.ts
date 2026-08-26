@@ -36,6 +36,7 @@ import {
   and,
   authAccounts,
   authUsers,
+  clearTaskResolution,
   db,
   environments,
   eq,
@@ -1518,6 +1519,9 @@ async function resumePendingTeamsAuthToken(
   });
 
   if (activeRun) {
+    if (activeRun.taskId) {
+      await clearTaskResolution(activeRun.taskId);
+    }
     // Trusted pre-queue actor switch; see acting-user-sync.ts.
     await syncActingUserForInboundMessage({
       logContext: 'teams.pendingAuthActivity',
@@ -2254,6 +2258,9 @@ teams.post('/', async (c) => {
 
   let activeFollowUp: QueuedTeamsCommunicationMessage = queuedMessage;
   let outOfBandClaim: { messageIds: string[] } | null = null;
+  if (activeRun.taskId) {
+    await clearTaskResolution(activeRun.taskId);
+  }
   if (activeRun.taskId) {
     const attached = await attachOutOfBandContextToCommunicationMessage({
       taskId: activeRun.taskId,

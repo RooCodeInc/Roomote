@@ -3,18 +3,29 @@
 import { memo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
-import { Moon, MoreVertical, Trash2 } from '@/components/system';
+import {
+  Check,
+  Loader2,
+  Moon,
+  MoreVertical,
+  Trash2,
+} from '@/components/system';
 import { SideNavItem } from '@/components/layout/side-nav/SideNavItem';
 
 import {
   isExitedRunStatus,
   isResumableTaskPayloadKind,
+  isTaskExecutingTurn,
   isTaskResumeCapableComputeProvider,
   runningRunStatuses,
 } from '@roomote/types';
 
 import { useUser } from '@/hooks/useUser';
-import { useDeleteTasks } from '@/hooks/tasks';
+import {
+  isTaskResolutionActionable,
+  useAcknowledgeTaskResolution,
+  useDeleteTasks,
+} from '@/hooks/tasks';
 import { useCancelTaskRun } from '@/hooks/task-runs';
 import { useRequestTaskRunSleep } from '@/hooks/snapshots';
 
@@ -37,6 +48,7 @@ import { isTaskRunAsleep } from './utils';
 function OverflowMenuBase({
   taskId,
   taskRun,
+  resolutionStatus,
   disabled = false,
   onDeleteSuccess,
 }: OverflowMenuProps) {
@@ -56,6 +68,9 @@ function OverflowMenuBase({
     !taskRun.snapshotFailedAt &&
     isResumableTaskPayloadKind(taskRun.payloadKind) &&
     isTaskResumeCapableComputeProvider(taskRun.vendor);
+  const canAcknowledgeResolution =
+    isTaskResolutionActionable(resolutionStatus) &&
+    !isTaskExecutingTurn(taskRun?.status, taskRun?.taskPhase);
 
   const deleteTasks = useDeleteTasks({
     onSuccess: () => {
@@ -82,6 +97,7 @@ function OverflowMenuBase({
       toast.success('Task is going to sleep.');
     },
   });
+  const acknowledgeResolution = useAcknowledgeTaskResolution();
 
   if (!user) {
     return null;
@@ -123,6 +139,17 @@ function OverflowMenuBase({
     setShowDeleteDialog(false);
   };
 
+  const handleMarkDone = async () => {
+    try {
+      await acknowledgeResolution.mutateAsync({ taskId });
+      toast.success('Task marked done.');
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : 'Failed to mark task done.',
+      );
+    }
+  };
+
   return (
     <>
       <DropdownMenu>
@@ -132,6 +159,27 @@ function OverflowMenuBase({
           </SideNavItem>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" side="left">
+          {canAcknowledgeResolution ? (
+            <DropdownMenuItem
+              onClick={() => void handleMarkDone()}
+              disabled={acknowledgeResolution.isPending}
+              aria-label={
+                acknowledgeResolution.isPending
+                  ? 'Marking task done'
+                  : 'Mark done'
+              }
+              className="flex cursor-pointer items-center gap-2"
+            >
+              {acknowledgeResolution.isPending ? (
+                <Loader2 className="animate-spin" />
+              ) : (
+                <Check />
+              )}
+              {acknowledgeResolution.isPending
+                ? 'Marking done...'
+                : 'Mark done'}
+            </DropdownMenuItem>
+          ) : null}
           {canSleep ? (
             <DropdownMenuItem
               onClick={handleSleep}

@@ -24,6 +24,7 @@ import type {
   TaskTrigger,
   TaskVisibility,
   TaskState,
+  TaskResolutionStatus,
   TaskGoalStatus,
   TaskInitiatorKind,
   CommitAuthorKind,
@@ -738,6 +739,8 @@ export const tasks = pgTable(
       .default('system_default')
       .$type<RequestedWorkKindSource>(),
     requestedWorkKindConfidence: real('requested_work_kind_confidence'),
+    resolutionStatus: text('resolution_status').$type<TaskResolutionStatus>(),
+    resolutionUpdatedAt: timestamp('resolution_updated_at'),
     harnessInstructions: text('harness_instructions'),
     computeDurationMs: bigint('compute_duration_ms', {
       mode: 'number',
@@ -820,6 +823,10 @@ export const tasks = pgTable(
     check(
       'tasks_requested_work_kind_source_check',
       sql`${table.requestedWorkKindSource} in ('explicit_bootstrap', 'task_tool', 'llm_classifier', 'inherited', 'system_default')`,
+    ),
+    check(
+      'tasks_resolution_status_check',
+      sql`${table.resolutionStatus} IS NULL OR ${table.resolutionStatus} in ('awaiting_confirmation', 'acknowledged', 'needs_follow_up')`,
     ),
     check(
       'tasks_commit_author_kind_check',

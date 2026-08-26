@@ -1,5 +1,6 @@
 const {
   advancePendingSlackRequestUserInputQuestionMock,
+  clearTaskResolutionMock,
   clearPendingSlackRequestUserInputMock,
   findActiveSlackTaskRunMock,
   fetchThreadMessagesMock,
@@ -20,6 +21,7 @@ const {
   updateMessageMock,
 } = vi.hoisted(() => ({
   advancePendingSlackRequestUserInputQuestionMock: vi.fn(),
+  clearTaskResolutionMock: vi.fn(),
   clearPendingSlackRequestUserInputMock: vi.fn(),
   findActiveSlackTaskRunMock: vi.fn(),
   fetchThreadMessagesMock: vi.fn().mockResolvedValue([
@@ -57,6 +59,7 @@ const {
 
 vi.mock('@roomote/db/server', () => ({
   and: vi.fn((...args: unknown[]) => ({ and: args })),
+  clearTaskResolution: clearTaskResolutionMock,
   taskRuns: {
     id: 'task_run_id',
     taskId: 'task_id',

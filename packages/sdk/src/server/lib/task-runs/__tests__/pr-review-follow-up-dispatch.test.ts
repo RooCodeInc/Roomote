@@ -1,4 +1,5 @@
 const mocks = vi.hoisted(() => ({
+  clearTaskResolution: vi.fn(),
   clearLatestUserMessage: vi.fn(),
   dbSelectLimit: vi.fn(),
   enqueueTask: vi.fn(),
@@ -39,6 +40,7 @@ vi.mock('@roomote/db/server', () => {
   chain.orderBy.mockReturnValue(chain);
   return {
     and: vi.fn((...conditions: unknown[]) => ({ conditions })),
+    clearTaskResolution: mocks.clearTaskResolution,
     db: { select: vi.fn(() => chain) },
     desc: vi.fn((value: unknown) => value),
     eq: vi.fn((left: unknown, right: unknown) => ({ left, right })),
@@ -197,6 +199,10 @@ describe('dispatchPrReviewFollowUp', () => {
     expect(mocks.queueSlackMessage).toHaveBeenCalledWith(
       101,
       expect.objectContaining({ text: prompt, userId: 'user-1', user: 'U123' }),
+    );
+    expect(mocks.clearTaskResolution).toHaveBeenCalledWith(taskA);
+    expect(mocks.clearTaskResolution.mock.invocationCallOrder[0]!).toBeLessThan(
+      mocks.queueSlackMessage.mock.invocationCallOrder[0]!,
     );
   });
 
@@ -530,6 +536,10 @@ describe('dispatchPrReviewFollowUp', () => {
     });
 
     expect(result).toEqual({ outcome: 'queued', runId: 301 });
+    expect(mocks.clearTaskResolution).toHaveBeenCalledWith(taskA);
+    expect(mocks.clearTaskResolution.mock.invocationCallOrder[0]!).toBeLessThan(
+      mocks.queueCommunicationMessage.mock.invocationCallOrder[0]!,
+    );
     expect(mocks.findActiveCommunicationTaskRun).toHaveBeenCalledWith({
       provider: 'discord',
       taskId: taskA,

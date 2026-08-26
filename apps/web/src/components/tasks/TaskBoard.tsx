@@ -1,12 +1,22 @@
+'use client';
+
 import Link from 'next/link';
 import { formatDistanceToNow } from 'date-fns';
+import { toast } from 'sonner';
 
 import { PRODUCT_NAME } from '@roomote/types';
 
 import type { Task } from '@/lib/server';
 import { getUserDisplayName, stripHtmlTags, stripMarkdown } from '@/lib';
 import {
+  isTaskResolutionActionable,
+  useAcknowledgeTaskResolution,
+} from '@/hooks/tasks';
+import {
   Avatar,
+  Button,
+  Check,
+  Loader2,
   MessageSquareText,
   Skeleton,
   Tooltip,
@@ -35,7 +45,7 @@ const COLUMN_CONFIG: Array<{
   {
     id: 'needs-input',
     label: 'Needs input',
-    description: 'Waiting for a response',
+    description: 'Waiting on you',
     dotClassName: 'bg-amber-500',
   },
   {
@@ -52,7 +62,44 @@ const COLUMN_CONFIG: Array<{
   },
 ];
 
+function MarkDoneButton({ taskId }: { taskId: string }) {
+  const acknowledgeResolution = useAcknowledgeTaskResolution();
+
+  const handleMarkDone = async () => {
+    try {
+      await acknowledgeResolution.mutateAsync({ taskId });
+      toast.success('Task marked done.');
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : 'Failed to mark task done.',
+      );
+    }
+  };
+
+  return (
+    <Button
+      type="button"
+      variant="outline"
+      size="sm"
+      className="relative z-20 mt-2 w-full"
+      onClick={() => void handleMarkDone()}
+      disabled={acknowledgeResolution.isPending}
+      aria-label={
+        acknowledgeResolution.isPending ? 'Marking task done' : 'Mark done'
+      }
+    >
+      {acknowledgeResolution.isPending ? (
+        <Loader2 className="animate-spin" />
+      ) : (
+        <Check />
+      )}
+      {acknowledgeResolution.isPending ? 'Marking done...' : 'Mark done'}
+    </Button>
+  );
+}
+
 function BoardTaskCard({ task }: { task: Task }) {
+  const boardColumn = getTaskBoardColumn(task);
   const actorName =
     task.attributionLabel?.trim() ||
     getUserDisplayName(task.user) ||
@@ -89,7 +136,7 @@ function BoardTaskCard({ task }: { task: Task }) {
       <div className="text-base font-semibold leading-snug -mt-1">
         {stripMarkdown(stripHtmlTags(task.title))}
       </div>
-      {getTaskBoardColumn(task) === 'blocked' && task.goalBlockedReason && (
+      {boardColumn === 'blocked' && task.goalBlockedReason && (
         <p className="line-clamp-2 text-xs text-destructive">
           {task.goalBlockedReason}
         </p>
@@ -165,6 +212,10 @@ function BoardTaskCard({ task }: { task: Task }) {
           )}
         </div>
       </div>
+      {boardColumn !== 'active' &&
+      isTaskResolutionActionable(task.resolutionStatus) ? (
+        <MarkDoneButton taskId={task.id} />
+      ) : null}
     </div>
   );
 }

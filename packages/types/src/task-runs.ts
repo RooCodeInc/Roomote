@@ -115,6 +115,14 @@ export const TASK_STATES = [
 
 export type TaskState = (typeof TASK_STATES)[number];
 
+export const TASK_RESOLUTION_STATUSES = [
+  'awaiting_confirmation',
+  'acknowledged',
+  'needs_follow_up',
+] as const;
+
+export type TaskResolutionStatus = (typeof TASK_RESOLUTION_STATUSES)[number];
+
 export const TASK_GOAL_STATUSES = [
   'active',
   'complete',

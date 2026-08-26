@@ -17,6 +17,7 @@ import {
   TASK_TRIGGERS,
   TASK_VISIBILITIES,
   TASK_STATES,
+  TASK_RESOLUTION_STATUSES,
   COMMIT_AUTHOR_KINDS,
   RUN_KINDS,
   codingHarnesses,
@@ -128,6 +129,12 @@ describe('tasks classification CHECK constraints', () => {
       await createTask({ state });
     }
 
+    for (const resolutionStatus of TASK_RESOLUTION_STATUSES) {
+      await createTask({ resolutionStatus });
+    }
+
+    await createTask({ resolutionStatus: null });
+
     for (const harness of codingHarnesses) {
       await createTask({ harness });
     }
@@ -151,6 +158,7 @@ describe('tasks classification CHECK constraints', () => {
     ['trigger', 'tasks_trigger_check'],
     ['visibility', 'tasks_visibility_check'],
     ['state', 'tasks_state_check'],
+    ['resolutionStatus', 'tasks_resolution_status_check'],
     ['harness', 'tasks_harness_check'],
     ['requestedWorkKind', 'tasks_requested_work_kind_check'],
     ['requestedWorkKindSource', 'tasks_requested_work_kind_source_check'],

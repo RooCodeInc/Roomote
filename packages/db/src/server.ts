@@ -51,6 +51,7 @@ export * from './lib/work-item-claims';
 export * from './lib/task-start-parallel-counts';
 export * from './lib/tasks';
 export * from './lib/task-goals';
+export * from './lib/task-resolution';
 export * from './lib/source-control-provider';
 export * from './lib/sync-task-state';
 export * from './lib/cancel-task-run';

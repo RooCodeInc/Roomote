@@ -1,6 +1,7 @@
 const {
   mockCreateRunToken,
   mockCreateTRPCProxyClient,
+  mockClearTaskResolution,
   mockEnqueueTask,
   mockGetTaskChannelBindings,
   mockGetTaskGoalForRun,
@@ -23,6 +24,7 @@ const {
 } = vi.hoisted(() => ({
   mockCreateRunToken: vi.fn(),
   mockCreateTRPCProxyClient: vi.fn(),
+  mockClearTaskResolution: vi.fn(),
   mockEnqueueTask: vi.fn(),
   mockGetTaskChannelBindings: vi.fn(),
   mockGetTaskGoalForRun: vi.fn(),
@@ -122,6 +124,7 @@ vi.mock('@roomote/db/server', async (importOriginal) => {
 
   return {
     ...actual,
+    clearTaskResolution: mockClearTaskResolution,
     findReusableGitHubPrFollowUpOwner: mockFindReusableGitHubPrFollowUpOwner,
     getTaskGoalForRun: mockGetTaskGoalForRun,
     and: mockAnd,
@@ -198,6 +201,7 @@ describe('sendMessageToTask', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockCreateRunToken.mockResolvedValue('run-token');
+    mockClearTaskResolution.mockResolvedValue(false);
     mockCreateTRPCProxyClient.mockImplementation(() => ({
       commands: {
         sendPrompt: {
@@ -945,6 +949,10 @@ describe('sendMessageToTask', () => {
       previousActingUserId: 'user-1',
       attemptedActingUserId: 'user-2',
     });
+    expect(mockClearTaskResolution).toHaveBeenCalledWith('task-1');
+    expect(mockClearTaskResolution.mock.invocationCallOrder[0]!).toBeLessThan(
+      mockSendPromptMutate.mock.invocationCallOrder[0]!,
+    );
   });
 
   it('writes the acting user BEFORE delivering steering prompts to the sandbox', async () => {

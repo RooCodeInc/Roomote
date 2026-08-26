@@ -63,6 +63,7 @@ import {
 import { protectedProcedure, publicProcedure, createRouter } from '../init';
 
 import {
+  acknowledgeTaskResolutionCommand,
   getTasksCommand,
   generateTaskSummaryCommand,
   getTaskMessageEnvelopesCommand,
@@ -958,6 +959,12 @@ export const appRouter = createRouter({
         }),
       )
       .query(({ ctx: { auth }, input }) => getTaskByIdCommand(auth, input)),
+
+    acknowledgeResolution: protectedProcedure
+      .input(z.object({ taskId: z.string() }))
+      .mutation(({ ctx: { auth }, input }) =>
+        acknowledgeTaskResolutionCommand(auth, input),
+      ),
 
     messageEnvelopes: protectedProcedure
       .input(z.object({ taskId: z.string() }))
