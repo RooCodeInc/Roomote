@@ -421,6 +421,13 @@
       "when": 1787764680385,
       "tag": "0059_sturdy_starjammers",
       "breakpoints": true
+    },
+    {
+      "idx": 60,
+      "version": "7",
+      "when": 1787765765044,
+      "tag": "0060_organic_harrier",
+      "breakpoints": true
     }
   ]
 }

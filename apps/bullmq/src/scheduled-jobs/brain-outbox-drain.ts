@@ -9,6 +9,7 @@ import {
   fastAgentConversations,
   markBrainMemoryEvent,
   markFastAgentMemoryEvent,
+  settleBrainMemoryEvent,
   releaseBrainMemoryEvents,
   releaseFastAgentMemoryEvents,
   settleFastAgentMemoryEvent,
@@ -546,10 +547,17 @@ async function drainOneBatch(connection: {
       });
 
       await postToBrain(page, connection);
-      await markBrainMemoryEvent(db, event.id, 'done');
+      const settleResult = await settleBrainMemoryEvent(
+        db,
+        event.id,
+        event.revision,
+        'done',
+      );
 
       console.log(
-        `${LOG_PREFIX} ingested memory for run ${event.runId} (${page.slug})`,
+        settleResult === 'settled'
+          ? `${LOG_PREFIX} ingested memory for run ${event.runId} (${page.slug})`
+          : `${LOG_PREFIX} run ${event.runId} gained a newer summary mid-write; re-ingesting next tick (${page.slug})`,
       );
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -578,12 +586,17 @@ async function drainOneBatch(connection: {
 
       const terminal = event.attempts >= MAX_ATTEMPTS;
 
-      await markBrainMemoryEvent(
-        db,
-        event.id,
-        terminal ? 'failed' : 'pending',
-        message,
-      );
+      if (terminal) {
+        await settleBrainMemoryEvent(
+          db,
+          event.id,
+          event.revision,
+          'failed',
+          message,
+        );
+      } else {
+        await markBrainMemoryEvent(db, event.id, 'pending', message);
+      }
 
       console.warn(
         `${LOG_PREFIX} ${terminal ? 'permanently failed' : 'will retry'} run ${
