@@ -644,11 +644,11 @@ export function Home({
       };
 
       if (repository === FAST_EXECUTION) {
-        if (!submission.description) {
+        if (!submission.description && !submission.images?.length) {
           return;
         }
         await startFastSession({
-          text: submission.description,
+          text: submission.description ?? '',
           images: submission.images,
           model: selectedModelId,
         });

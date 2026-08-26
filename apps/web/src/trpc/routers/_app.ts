@@ -13,7 +13,6 @@ import {
   computeProviders,
   environmentConfigSchema,
   workspaceRoutingSettingsSchema,
-  ENVIRONMENT_DEFINITION_SETUP_GUIDANCE_MAX_LENGTH,
   REASONING_EFFORT_VALUES,
   isTriggerableBackgroundAutomationKey,
   SCHEDULE_ONLY_BACKGROUND_AUTOMATION_IDS,
@@ -36,6 +35,10 @@ import {
   replyToFastSessionCommand,
   startFastSessionCommand,
 } from '../commands/fast-sessions';
+import {
+  replyToFastSessionInputSchema,
+  startFastSessionInputSchema,
+} from '../commands/fast-sessions/input';
 import {
   analyticsChartInputSchema,
   analyticsDetailsInputSchema,
@@ -291,12 +294,7 @@ import {
   saveSetupNewModelConfigCommand,
   saveSetupNewSourceControlConfigCommand,
   saveSetupNewSourceControlProviderChoiceCommand,
-  saveSetupNewSelectionCommand,
-  prefetchSetupRecommendationSignalsCommand,
   saveSetupNewQueuedTasksCommand,
-  startSetupNewOnboardingTaskCommand,
-  cancelSetupNewOnboardingTaskCommand,
-  resetSetupNewSelectionCommand,
   ensureSetupNewDefaultAgentsCommand,
   listSetupRecommendationsCommand,
   startSetupRecommendationsCommand,
@@ -2651,32 +2649,6 @@ export const appRouter = createRouter({
         saveSetupNewSourceControlConfigCommand(auth, input),
       ),
 
-    saveSelection: protectedProcedure
-      .input(
-        z.object({
-          repositoryIds: z.array(z.string().uuid()).min(1),
-          setupGuidance: z
-            .string()
-            .trim()
-            .max(ENVIRONMENT_DEFINITION_SETUP_GUIDANCE_MAX_LENGTH)
-            .optional(),
-          selectedModelId: z.string().trim().min(1).optional(),
-        }),
-      )
-      .mutation(({ ctx: { auth }, input }) =>
-        saveSetupNewSelectionCommand(auth, input),
-      ),
-
-    prefetchRecommendationSignals: protectedProcedure
-      .input(
-        z.object({
-          repositoryIds: z.array(z.string().uuid()).max(100),
-        }),
-      )
-      .mutation(({ ctx: { auth }, input }) =>
-        prefetchSetupRecommendationSignalsCommand(auth, input),
-      ),
-
     saveQueuedTasks: protectedProcedure
       .input(
         z.object({
@@ -2687,18 +2659,6 @@ export const appRouter = createRouter({
       .mutation(({ ctx: { auth }, input }) =>
         saveSetupNewQueuedTasksCommand(auth, input),
       ),
-
-    startOnboardingTask: protectedProcedure.mutation(({ ctx: { auth } }) =>
-      startSetupNewOnboardingTaskCommand(auth),
-    ),
-
-    cancelOnboardingTask: protectedProcedure.mutation(({ ctx: { auth } }) =>
-      cancelSetupNewOnboardingTaskCommand(auth),
-    ),
-
-    resetSelection: protectedProcedure.mutation(({ ctx: { auth } }) =>
-      resetSetupNewSelectionCommand(auth),
-    ),
 
     ensureDefaultAgents: protectedProcedure.mutation(({ ctx: { auth } }) =>
       ensureSetupNewDefaultAgentsCommand(auth),
@@ -2853,34 +2813,13 @@ export const appRouter = createRouter({
 
   fastSessions: createRouter({
     start: protectedProcedure
-      .input(
-        z.object({
-          text: z.string().trim().min(1),
-          images: z.array(z.string()).optional(),
-          model: z.string().trim().min(1).nullable().optional(),
-          reasoningEffort: z
-            .enum(REASONING_EFFORT_VALUES)
-            .nullable()
-            .optional(),
-        }),
-      )
+      .input(startFastSessionInputSchema)
       .mutation(({ ctx: { auth }, input }) =>
         startFastSessionCommand(auth, input),
       ),
 
     reply: protectedProcedure
-      .input(
-        z.object({
-          sessionId: z.string().uuid(),
-          text: z.string().trim().min(1),
-          images: z.array(z.string()).optional(),
-          model: z.string().trim().min(1).nullable().optional(),
-          reasoningEffort: z
-            .enum(REASONING_EFFORT_VALUES)
-            .nullable()
-            .optional(),
-        }),
-      )
+      .input(replyToFastSessionInputSchema)
       .mutation(({ ctx: { auth }, input }) =>
         replyToFastSessionCommand(auth, input),
       ),
