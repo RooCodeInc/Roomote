@@ -4,18 +4,19 @@ This file tracks product releases for Roomote (single monorepo version). Automat
 
 ## 0.44.0 (2026-08-26)
 
-This release gives Fast durable shared memory and skill discovery, adds Slack direct-message delivery for automations, and improves session and pull request review reliability.
+This release gives Fast durable shared memory, skill discovery, and cross-provider automation delivery while improving session and pull request review reliability.
 
 ### Highlights
 
 - Ask Fast to remember durable context and recall it in later tasks or sessions through the deployment's connected memory providers.
-- Deliver Fast custom automation reports directly to their owners in Slack.
+- Deliver Fast automation reports across Slack, Discord, Microsoft Teams, and Telegram, with direct chat continuation where supported.
 - Keep Fast sessions moving through retryable provider failures and route follow-up instructions to active tasks sooner.
 - Discover and load packaged or repository-defined skills from Fast before delegating work.
 
 ### Minor changes
 
 - Let Fast save durable preferences, decisions, corrections, and facts to shared memory so they can be recalled in later sessions, while supporting pluggable memory providers and making concurrent memory ingestion more reliable.
+- Deliver Fast automation reports across Slack, Discord, Microsoft Teams, and Telegram channel or direct-message destinations, with web continuation everywhere and direct chat continuation where the provider supports Fast session identity.
 
 ### Patch changes
 
@@ -27,6 +28,9 @@ This release gives Fast durable shared memory and skill discovery, adds Slack di
 - Make Fast coding-task kickoffs clearer by describing the repository work and naming the target repository when it is known without exposing internal orchestration details.
 - Let Fast sessions discover and load packaged and repository-defined skill documents through bounded, session-safe tools without exposing filesystem access.
 - Keep pull request review threads clear by removing stale action buttons when newer feedback arrives or an action is handled, while preserving the latest actionable controls across Slack, Discord, and Telegram.
+- Honor each user's Fast response mode preference on the homepage by selecting Fast for new prompts unless an explicit workspace choice takes precedence.
+- Deliver completed pull request review findings reliably by tracking the review lifecycle with structured metadata instead of variable status wording. Thanks to @daniel-lxs for contributing this improvement.
+- Settle Slack task cards when work becomes idle or waits for input, then return them to an active state when work resumes without losing delayed final output.
 
 ## 0.43.0 (2026-08-26)
 
