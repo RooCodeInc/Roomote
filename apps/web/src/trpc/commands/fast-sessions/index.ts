@@ -56,10 +56,15 @@ async function resolveSessionModelSettings(
       .where(eq(fastAgentConversations.id, sessionId));
   }
 
+  // An explicit null is a reset: it must yield undefined for this turn too,
+  // not fall back to the stored override the update just cleared.
   return {
-    model: input.model ?? stored.model ?? undefined,
+    model:
+      (input.model === undefined ? stored.model : input.model) ?? undefined,
     reasoningEffort:
-      input.reasoningEffort ?? stored.reasoningEffort ?? undefined,
+      (input.reasoningEffort === undefined
+        ? stored.reasoningEffort
+        : input.reasoningEffort) ?? undefined,
   };
 }
 
