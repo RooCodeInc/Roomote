@@ -1614,30 +1614,36 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     expect(adapter.postReply).not.toHaveBeenCalled();
   });
 
-  it('uses native task tools after an acknowledgement', async () => {
+  it('steers an active task before posting a user-visible response', async () => {
     mocks.getActiveTasks.mockResolvedValue([
       { taskId: 'task-1', title: 'Checkout', status: 'running' },
     ]);
+    const order: string[] = [];
+    mocks.sendTaskMessage.mockImplementation(async () => {
+      order.push('steer');
+      return { success: true };
+    });
     mocks.generateText.mockImplementation(
       async (_params, _session, options) => {
         await options.onSessionReady('opencode-session-1');
-        await invokeTool(nativeToolNames.sendChatReply, {
-          purpose: 'ack',
-          message: 'I’ll update and stop it.',
-        });
-        await invokeTool(nativeToolNames.sendTaskMessage, {
-          taskId: 'task-1',
-          message: 'Include the failing test.',
-        });
-        await invokeTool(nativeToolNames.cancelTask, { taskId: 'task-1' });
+        await expect(
+          invokeTool(nativeToolNames.sendTaskMessage, {
+            taskId: 'task-1',
+            message: 'Include the failing test.',
+          }),
+        ).resolves.toEqual({ success: true });
         await invokeTool(nativeToolNames.sendChatReply, {
           purpose: 'closeout',
-          message: 'The task was updated and canceled.',
+          message: 'The task was updated.',
         });
         return '';
       },
     );
-    const adapter = callbacks();
+    const adapter = callbacks({
+      postReply: vi.fn(async () => {
+        order.push('reply');
+      }),
+    });
 
     await answerFastAgentQuestion({ ...baseParams, adapter });
 
@@ -1648,10 +1654,37 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         message: 'Include the failing test.',
       },
     );
-    expect(mocks.cancelTask).toHaveBeenCalledWith(
-      expect.objectContaining({ userId: 'user-1' }),
-      'task-1',
+    expect(order).toEqual(['steer', 'reply']);
+  });
+
+  it('still requires an acknowledgement before canceling a task', async () => {
+    mocks.getActiveTasks.mockResolvedValue([
+      { taskId: 'task-1', title: 'Checkout', status: 'running' },
+    ]);
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        await expect(
+          invokeTool(nativeToolNames.cancelTask, { taskId: 'task-1' }),
+        ).resolves.toEqual({
+          success: false,
+          error:
+            'Post an acknowledgement with send_chat_reply before this action.',
+        });
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'ack',
+          message: 'I’ll stop it.',
+        });
+        await expect(
+          invokeTool(nativeToolNames.cancelTask, { taskId: 'task-1' }),
+        ).resolves.toEqual({ success: true });
+        return '';
+      },
     );
+
+    await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+
+    expect(mocks.cancelTask).toHaveBeenCalledOnce();
   });
 
   it('ignores a platform event through a native terminal tool', async () => {
