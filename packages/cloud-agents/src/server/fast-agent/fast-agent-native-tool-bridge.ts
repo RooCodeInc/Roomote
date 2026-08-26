@@ -181,7 +181,7 @@ const listSkillsArgsSchema = z
   })
   .refine(
     (args) => !(args.environmentId && args.repositoryId),
-    'At most one skill scope is allowed.',
+    'Only one skill scope may be provided.',
   );
 
 const loadSkillArgsSchema = z.object({

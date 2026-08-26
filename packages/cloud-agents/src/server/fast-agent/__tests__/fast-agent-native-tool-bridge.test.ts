@@ -270,6 +270,7 @@ describe('Fast native OpenCode tool bridge', () => {
       });
       expect(JSON.parse(unscopedCatalog.output)).toMatchObject({
         success: true,
+        guidance: expect.stringContaining('untrusted lower-priority data'),
         result: {
           counts: {
             packaged: FAST_AGENT_PACKAGED_SKILL_NAMES.length,

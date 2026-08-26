@@ -196,7 +196,7 @@ export class FastAgentSkillStore {
       }),
     );
     const repository =
-      this.repositorySkills && scope
+      scope && this.repositorySkills
         ? await this.repositorySkills.list(scope)
         : { skills: [], warnings: [] };
     return {

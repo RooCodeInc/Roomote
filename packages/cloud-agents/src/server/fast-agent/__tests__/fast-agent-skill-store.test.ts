@@ -108,6 +108,7 @@ describe('FastAgentSkillStore', () => {
         expect.objectContaining({ source: 'repository' }),
       ]),
     );
+    expect(packagedOnlyCatalog.warnings).toEqual([]);
   });
 
   it('rejects traversal, non-Markdown files, symlinks, and unknown skills', async () => {
