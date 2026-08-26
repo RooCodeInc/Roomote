@@ -858,6 +858,7 @@ export async function deliverFastAgentParentEvent(params: {
       question: `<platform_event>${JSON.stringify(params.event)}</platform_event>`,
       userId: parentTurn.userId,
       conversation: parentTurn.conversation,
+      currentMessageId: buildEventClientMessageSeed(params.event),
       apiBaseUrl,
       signal: releaseTurnLock.signal,
       turnSource: 'platform_event',

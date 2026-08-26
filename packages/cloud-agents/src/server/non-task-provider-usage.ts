@@ -200,10 +200,20 @@ export type NonTaskOpenCodeSession = {
   id?: string;
 };
 
+export type NonTaskOpenCodeCompletedMessage = {
+  id: string | null;
+  sessionId: string;
+  createdAtMs: number | null;
+  completedAtMs: number | null;
+};
+
 export type NonTaskOpenCodeNativeSessionOptions = {
   directory: string;
   env?: Partial<Record<string, string>>;
   onModelResolved?: (model: string) => void;
+  onMessageCompleted?: (
+    message: NonTaskOpenCodeCompletedMessage,
+  ) => Promise<void> | void;
   onPromptStarted?: () => void;
   onSessionReady?: (sessionID: string) => Promise<void> | void;
   onSubagentSessionReady?: (sessionID: string) => Promise<void> | void;
@@ -755,6 +765,9 @@ async function runNonTaskSdkPrompt(
     ephemeral?: boolean;
     env?: Partial<Record<string, string>>;
     onPromptStarted?: () => void;
+    onMessageCompleted?: (
+      message: NonTaskOpenCodeCompletedMessage,
+    ) => Promise<void> | void;
     onSessionReady?: (sessionID: string) => Promise<void> | void;
     onSubagentSessionReady?: (sessionID: string) => Promise<void> | void;
     permission?: PermissionRuleset;
@@ -1207,6 +1220,21 @@ async function runNonTaskSdkPrompt(
         }
       }
 
+      try {
+        await options.onMessageCompleted?.({
+          id: asString(promptResult.data.info.id) ?? null,
+          sessionId,
+          createdAtMs:
+            asFiniteNumber(promptResult.data.info.time?.created) ?? null,
+          completedAtMs:
+            asFiniteNumber(promptResult.data.info.time?.completed) ?? null,
+        });
+      } catch (error) {
+        console.warn(
+          `[NonTaskProviderUsage] OpenCode completion observer failed: ${formatOpenCodeSdkError(error)}`,
+        );
+      }
+
       return promptResult.data;
     } catch (error) {
       // Aborting the HTTP request does not guarantee that an OpenCode server
@@ -1336,6 +1364,7 @@ export async function generateTrackedNonTaskTextInOpenCodeSession(
       directory: options.directory,
       env: options.env,
       onPromptStarted: options.onPromptStarted,
+      onMessageCompleted: options.onMessageCompleted,
       onSessionReady: options.onSessionReady,
       onSubagentSessionReady: options.onSubagentSessionReady,
       permission: options.permission,
