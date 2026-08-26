@@ -319,6 +319,7 @@ export const fastAgentConversationRepository: FastAgentConversationRepository =
             set: {
               turnId: message.turnId,
               turnSeq: message.turnSeq,
+              ts: message.ts,
               eventType: message.eventType,
               role: message.role ?? null,
               contentBlocks: message.contentBlocks ?? [],

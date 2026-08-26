@@ -39,6 +39,7 @@ async function createFastMessage({
   eventType = 'roomote_runtime.assistant_message',
   role = 'assistant',
   payload = {},
+  metadata = { visibleInTranscript: true },
 }: {
   conversationId: string;
   eventId: string;
@@ -47,6 +48,7 @@ async function createFastMessage({
   eventType?: `roomote_runtime.${string}`;
   role?: 'user' | 'assistant' | 'tool';
   payload?: Record<string, unknown>;
+  metadata?: Record<string, unknown>;
 }) {
   const [message] = await db
     .insert(fastAgentMessages)
@@ -59,7 +61,7 @@ async function createFastMessage({
       eventType,
       role,
       contentBlocks: [{ type: 'text', text: eventId }],
-      metadata: { visibleInTranscript: true },
+      metadata,
       payload,
       source: 'slack',
     })
@@ -230,5 +232,98 @@ describe('Fast session queries', () => {
       toolName: 'send_chat_reply',
       status: 'completed',
     });
+  });
+
+  it('grants participants access to shared conversations they spoke in', async () => {
+    const owner = await userFactory.create();
+    const participant = await userFactory.create();
+    const bystander = await userFactory.create();
+    const session = await createFastSession({
+      userId: owner.id,
+      conversationId: 'shared-thread',
+      updatedAt: new Date('2026-01-01T00:00:00.000Z'),
+    });
+    await createFastMessage({
+      conversationId: session.id,
+      eventId: 'turn-1:user',
+      turnSeq: 0,
+      role: 'user',
+      eventType: 'roomote_runtime.user_prompt',
+      metadata: { visibleInTranscript: true, userId: participant.id },
+    });
+
+    const participantAuth = { userId: participant.id, isAdmin: false };
+    await expect(
+      getFastSessionById(participantAuth, session.id),
+    ).resolves.toMatchObject({ id: session.id });
+    const participantList = await getFastSessions(participantAuth);
+    expect(participantList.map((row) => row.id)).toContain(session.id);
+
+    await expect(
+      getFastSessionById({ userId: bystander.id, isAdmin: false }, session.id),
+    ).resolves.toBeNull();
+  });
+
+  it('excludes transcript-hidden messages such as platform-event prompts', async () => {
+    const owner = await userFactory.create();
+    const session = await createFastSession({
+      userId: owner.id,
+      conversationId: 'platform-event-session',
+      updatedAt: new Date('2026-01-01T00:00:00.000Z'),
+    });
+    await createFastMessage({
+      conversationId: session.id,
+      eventId: 'turn-1:user',
+      turnSeq: 0,
+      role: 'user',
+      eventType: 'roomote_runtime.user_prompt',
+      metadata: { visibleInTranscript: false, turnSource: 'platform_event' },
+    });
+    await createFastMessage({
+      conversationId: session.id,
+      eventId: 'turn-1:assistant:0',
+      turnSeq: 1,
+    });
+
+    const result = await getFastSessionById(
+      { userId: owner.id, isAdmin: false },
+      session.id,
+    );
+
+    expect(result?.messages.map((message) => message.eventId)).toEqual([
+      'turn-1:assistant:0',
+    ]);
+  });
+
+  it('truncates oversized tool output at the read boundary', async () => {
+    const owner = await userFactory.create();
+    const session = await createFastSession({
+      userId: owner.id,
+      conversationId: 'oversized-output-session',
+      updatedAt: new Date('2026-01-01T00:00:00.000Z'),
+    });
+    const oversized = 'x'.repeat(30_000);
+    await createFastMessage({
+      conversationId: session.id,
+      eventId: 'turn-1:tool-result:0',
+      turnSeq: 2,
+      eventType: 'roomote_runtime.tool_result',
+      role: 'tool',
+      payload: {
+        toolCallId: 'turn-1:tool:0',
+        toolName: 'send_chat_reply',
+        status: 'completed',
+        output: oversized,
+      },
+    });
+
+    const result = await getFastSessionById(
+      { userId: owner.id, isAdmin: false },
+      session.id,
+    );
+
+    const payload = result?.messages[0]?.payload as Record<string, unknown>;
+    expect((payload.output as string).length).toBeLessThan(oversized.length);
+    expect(payload.output).toContain('[output truncated');
   });
 });

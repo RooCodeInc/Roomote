@@ -908,7 +908,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     );
   });
 
-  it('stops before inference when the canonical user prompt cannot persist', async () => {
+  it('still answers when the canonical user prompt cannot persist', async () => {
     mocks.upsertMessage.mockRejectedValue(new Error('database unavailable'));
 
     const adapter = callbacks();
@@ -917,9 +917,8 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         ...baseParams,
         adapter,
       }),
-    ).resolves.toContain('I hit an error');
-    expect(mocks.generateText).not.toHaveBeenCalled();
-    expect(adapter.postReply).toHaveBeenCalledOnce();
+    ).resolves.toBe('It coordinates incoming requests.');
+    expect(mocks.generateText).toHaveBeenCalledOnce();
   });
 
   it('does not repost when canonical persistence fails after a visible reply', async () => {
@@ -2367,7 +2366,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       ).not.toContain('Retrying in');
       const retryWrites = mocks.upsertMessage.mock.calls
         .map(([input]) => input.message)
-        .filter((message) => message.eventId === '100.2:retry-notice');
+        .filter((message) => message.eventId === '100.2:retry-notice:0');
       expect(retryWrites.length).toBeGreaterThan(1);
       expect(new Set(retryWrites.map((message) => message.eventId)).size).toBe(
         1,

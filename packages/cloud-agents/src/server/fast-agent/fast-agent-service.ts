@@ -12,6 +12,7 @@ import {
   activeRunStatuses,
   formatErrorForLog,
   resolveInferenceProviderRetryDelayMs,
+  truncateAcpOutputText,
   type RunStatus,
   type TaskMessageContentBlock,
 } from '@roomote/types';
@@ -150,14 +151,11 @@ function serializeFastAgentToolOutput(result: unknown): {
     output = String(result);
   }
 
-  if (output.length <= FAST_AGENT_CANONICAL_TOOL_OUTPUT_MAX_CHARS) {
-    return { output, truncated: false };
-  }
-
-  return {
-    output: `${output.slice(0, FAST_AGENT_CANONICAL_TOOL_OUTPUT_MAX_CHARS)}\n…`,
-    truncated: true,
-  };
+  const { text, truncation } = truncateAcpOutputText(
+    output,
+    FAST_AGENT_CANONICAL_TOOL_OUTPUT_MAX_CHARS,
+  );
+  return { output: text, truncated: truncation !== null };
 }
 
 function getFastAgentDefaultSlackHistoryOldest(latest?: string): string {
@@ -682,6 +680,7 @@ export async function answerFastAgentQuestion({
   let completedOpenCodeMessage: NonTaskOpenCodeCompletedMessage | null = null;
   let nextAssistantOrdinal = 0;
   let nextToolOrdinal = 0;
+  let nextRetryNoticeOrdinal = 0;
   let nextTurnSeq = 0;
 
   const allocateCanonicalEvent = (slot: string) => ({
@@ -726,10 +725,10 @@ export async function answerFastAgentQuestion({
       {
         ...event,
         turnId,
-        ts:
-          nativeMessage?.completedAtMs ??
-          nativeMessage?.createdAtMs ??
-          Date.now(),
+        // createdAtMs predates the turn's tool events and would sort the
+        // reply above the tool activity that produced it, so fall straight
+        // through to the persist-time clock when completion time is missing.
+        ts: nativeMessage?.completedAtMs ?? Date.now(),
         eventType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
         role: 'assistant',
         contentBlocks: [{ type: 'text', text: reply.message }],
@@ -929,25 +928,31 @@ export async function answerFastAgentQuestion({
     activeOpenCodeSessionId = session.openCodeSessionId;
     diagnostics.setCanonicalConversationId(session.id);
     const userEvent = allocateCanonicalEvent('user');
-    await persistCanonicalMessage({
-      ...userEvent,
-      turnId,
-      ts: Date.now(),
-      eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
-      role: 'user',
-      contentBlocks: buildFastAgentUserContentBlocks(
-        normalizeThreadText(question),
-        images,
-      ),
-      metadata: {
-        visibleInTranscript: true,
-        turnSource,
-        ...(senderDisplayName ? { senderDisplayName } : {}),
-        ...(senderExternalId ? { senderExternalId } : {}),
+    await persistCanonicalMessage(
+      {
+        ...userEvent,
+        turnId,
+        ts: Date.now(),
+        eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
+        role: 'user',
+        contentBlocks: buildFastAgentUserContentBlocks(
+          normalizeThreadText(question),
+          images,
+        ),
+        metadata: {
+          // Platform-event prompts are internal <platform_event> JSON, not
+          // something a person typed — keep them out of the transcript view.
+          visibleInTranscript: !platformEvent,
+          turnSource,
+          userId,
+          ...(senderDisplayName ? { senderDisplayName } : {}),
+          ...(senderExternalId ? { senderExternalId } : {}),
+        },
+        payload: {},
+        source: conversation.surface,
       },
-      payload: {},
-      source: conversation.surface,
-    });
+      true,
+    );
     const sessionActiveTasks = await getActiveFastAgentTasks(session.id);
     const resolvedActiveTasks = [
       ...new Map(
@@ -1066,7 +1071,11 @@ export async function answerFastAgentQuestion({
         inferenceRetryReply = (await adapter.postReply(reply)) || undefined;
         inferenceRetryMessageIndex = turnVisibleMessages.length;
         turnVisibleMessages.push(buildAssistantTextMessage(message));
-        inferenceRetryCanonicalEvent ??= allocateCanonicalEvent('retry-notice');
+        // Ordinal-suffixed so a second retry episode in the same turn gets
+        // its own row instead of overwriting the first notice's upsert slot.
+        inferenceRetryCanonicalEvent ??= allocateCanonicalEvent(
+          `retry-notice:${nextRetryNoticeOrdinal++}`,
+        );
         await persistAssistantReply({
           reply,
           event: inferenceRetryCanonicalEvent,

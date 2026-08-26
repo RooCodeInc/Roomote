@@ -1,11 +1,16 @@
 import {
+  ACP_UI_TOOL_OUTPUT_MAX_CHARS,
+  sanitizeEnvelopeFields,
+} from '@roomote/types';
+import {
   and,
-  asc,
   db,
   desc,
   eq,
+  exists,
   fastAgentConversations,
   fastAgentMessages,
+  or,
   sql,
   users,
 } from '@roomote/db/server';
@@ -33,6 +38,9 @@ export type FastSessionMessage = Pick<
   | 'createdAt'
 >;
 
+const FAST_SESSION_LIST_LIMIT = 200;
+const FAST_SESSION_TRANSCRIPT_MESSAGE_LIMIT = 1000;
+
 const fastSessionSelection = {
   id: fastAgentConversations.id,
   userId: fastAgentConversations.userId,
@@ -54,14 +62,29 @@ const fastSessionSelection = {
   updatedAt: fastAgentConversations.updatedAt,
 };
 
-const fastSessionDetailSelection = {
-  ...fastSessionSelection,
-};
-
 function fastSessionScope(auth: FastSessionAuth) {
-  return auth.isAdmin
-    ? undefined
-    : eq(fastAgentConversations.userId, auth.userId);
+  if (auth.isAdmin) {
+    return undefined;
+  }
+
+  // Shared-surface conversations (e.g. Slack channels/threads) are stamped
+  // with the first participant's userId, but every participant's prompts are
+  // persisted with their own userId in the message metadata — so a session is
+  // visible to its owner and to anyone who spoke in it.
+  return or(
+    eq(fastAgentConversations.userId, auth.userId),
+    exists(
+      db
+        .select({ one: sql`1` })
+        .from(fastAgentMessages)
+        .where(
+          and(
+            eq(fastAgentMessages.conversationId, fastAgentConversations.id),
+            sql`${fastAgentMessages.metadata} ->> 'userId' = ${auth.userId}`,
+          ),
+        ),
+    ),
+  );
 }
 
 export async function getFastSessions(auth: FastSessionAuth) {
@@ -73,7 +96,8 @@ export async function getFastSessions(auth: FastSessionAuth) {
     .orderBy(
       desc(fastAgentConversations.updatedAt),
       desc(fastAgentConversations.id),
-    );
+    )
+    .limit(FAST_SESSION_LIST_LIMIT);
 }
 
 export async function getFastSessionById(
@@ -81,16 +105,11 @@ export async function getFastSessionById(
   sessionId: string,
 ) {
   const [session] = await db
-    .select(fastSessionDetailSelection)
+    .select(fastSessionSelection)
     .from(fastAgentConversations)
     .innerJoin(users, eq(fastAgentConversations.userId, users.id))
     .where(
-      auth.isAdmin
-        ? eq(fastAgentConversations.id, sessionId)
-        : and(
-            eq(fastAgentConversations.id, sessionId),
-            eq(fastAgentConversations.userId, auth.userId),
-          ),
+      and(eq(fastAgentConversations.id, sessionId), fastSessionScope(auth)),
     )
     .limit(1);
 
@@ -98,7 +117,7 @@ export async function getFastSessionById(
     return null;
   }
 
-  const messages = await db
+  const rows = await db
     .select({
       id: fastAgentMessages.id,
       eventId: fastAgentMessages.eventId,
@@ -116,13 +135,39 @@ export async function getFastSessionById(
       createdAt: fastAgentMessages.createdAt,
     })
     .from(fastAgentMessages)
-    .where(eq(fastAgentMessages.conversationId, session.id))
+    .where(
+      and(
+        eq(fastAgentMessages.conversationId, session.id),
+        sql`coalesce(${fastAgentMessages.metadata} ->> 'visibleInTranscript', 'true') <> 'false'`,
+      ),
+    )
     .orderBy(
-      asc(fastAgentMessages.ts),
-      asc(fastAgentMessages.turnSeq),
-      asc(fastAgentMessages.createdAt),
-      asc(fastAgentMessages.id),
+      desc(fastAgentMessages.ts),
+      desc(fastAgentMessages.turnSeq),
+      desc(fastAgentMessages.createdAt),
+      desc(fastAgentMessages.id),
+    )
+    .limit(FAST_SESSION_TRANSCRIPT_MESSAGE_LIMIT);
+
+  // Sanitize at the read boundary, matching the task transcript path: the DB
+  // stores full payloads, but oversized tool output is truncated before it is
+  // serialized into the RSC payload.
+  const messages = rows.reverse().map((row): FastSessionMessage => {
+    const sanitized = sanitizeEnvelopeFields(
+      row.eventType,
+      row.contentBlocks,
+      (row.metadata as Record<string, unknown> | null) ?? null,
+      (row.payload as Record<string, unknown> | null) ?? null,
+      { maxOutputChars: ACP_UI_TOOL_OUTPUT_MAX_CHARS },
     );
+
+    return {
+      ...row,
+      contentBlocks: sanitized.contentBlocks,
+      metadata: sanitized.metadata,
+      payload: sanitized.payload ?? {},
+    };
+  });
 
   return {
     ...session,
