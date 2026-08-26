@@ -8,6 +8,7 @@ import { FAST_AGENT_MEMORY_MAX_CHARS } from '@roomote/types';
 import {
   db,
   eq,
+  sql,
   userFactory,
   fastAgentConversations,
   fastAgentMemoryEvents,
@@ -184,6 +185,61 @@ describe('claim/release/mark', () => {
       .where(eq(fastAgentMemoryEvents.id, claimed!.id));
 
     expect(settled!.status).toBe('done');
+  });
+
+  it('re-queues a settled row when a stale-reclaimed writer returns late', async () => {
+    const conversation = await makeConversation();
+    await appendFastAgentMemory(db, conversation.id, 'first fact');
+
+    // Writer A claims, then hangs in its page write past the reclaim window.
+    const [claimedA] = await claimPendingFastAgentMemoryEvents(db, 10);
+    await appendFastAgentMemory(db, conversation.id, 'late fact');
+    await db
+      .update(fastAgentMemoryEvents)
+      .set({ updatedAt: sql`now() - interval '16 minutes'` })
+      .where(eq(fastAgentMemoryEvents.id, claimedA!.id));
+
+    // Writer B stale-reclaims the newer revision, writes it, settles done.
+    const [claimedB] = await claimPendingFastAgentMemoryEvents(db, 10);
+    expect(claimedB!.revision).toBeGreaterThan(claimedA!.revision);
+    expect(
+      await settleFastAgentMemoryEvent(
+        db,
+        claimedB!.id,
+        claimedB!.revision,
+        'done',
+      ),
+    ).toBe('settled');
+
+    // A's stale page write finally lands and A settles: the fence miss must
+    // re-queue the row even though it is already 'done', so the next tick
+    // re-puts the newest content over A's stale snapshot.
+    expect(
+      await settleFastAgentMemoryEvent(
+        db,
+        claimedA!.id,
+        claimedA!.revision,
+        'done',
+      ),
+    ).toBe('superseded');
+
+    const [row] = await db
+      .select()
+      .from(fastAgentMemoryEvents)
+      .where(eq(fastAgentMemoryEvents.id, claimedA!.id));
+
+    expect(row!.status).toBe('pending');
+    expect(row!.processedAt).toBeNull();
+
+    const [reclaimed] = await claimPendingFastAgentMemoryEvents(db, 10);
+    expect(
+      await settleFastAgentMemoryEvent(
+        db,
+        reclaimed!.id,
+        reclaimed!.revision,
+        'done',
+      ),
+    ).toBe('settled');
   });
 
   it('settling done stamps processedAt', async () => {
