@@ -102,7 +102,7 @@ describe('Fast session detail page', () => {
     expect(transcriptMock).toHaveBeenCalledWith(
       expect.objectContaining({
         sessionId: 'session-1',
-        canReply: false,
+        canReply: true,
         fallbackTitle: 'conversation-1',
         initialMessages: expect.arrayContaining([
           expect.objectContaining({ eventId: 'turn-1:user' }),

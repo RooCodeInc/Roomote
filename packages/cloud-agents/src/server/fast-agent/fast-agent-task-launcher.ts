@@ -186,7 +186,7 @@ export function createFastAgentSlackTaskLauncher(
 export function createFastAgentWebTaskLauncher(params: {
   userId: string;
   conversation: {
-    surface: 'web';
+    surface: 'web' | 'automation';
     workspaceId: string;
     conversationId: string;
   };

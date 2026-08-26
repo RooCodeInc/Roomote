@@ -58,7 +58,7 @@ export default async function SessionDetailPage({
           sessionId={session.id}
           initialMessages={session.messages}
           hasOlderMessages={session.hasOlderMessages}
-          canReply={session.surface === 'web'}
+          canReply
           initialTitle={session.title}
           fallbackTitle={
             session.surface === 'web' ? 'Session' : session.conversationId

@@ -617,7 +617,7 @@ async function createSlackFastAgentParentTurn(params: {
   };
 }
 
-function createFastAgentDiscordTaskLauncher(params: {
+export function createFastAgentDiscordTaskLauncher(params: {
   provider: NonNullable<
     Awaited<
       ReturnType<

@@ -7,9 +7,17 @@ import {
   getOrCreateFastAgentSession,
   resolveApiBaseUrl,
 } from '@roomote/cloud-agents/server';
-import { resolveUserMcpServerConfigs } from '@roomote/sdk/server';
+import {
+  buildFastAgentSurfaceReplyDelivery,
+  resolveUserMcpServerConfigs,
+  type FastAgentSurfaceReplyDelivery,
+} from '@roomote/sdk/server';
 import { db, eq, fastAgentConversations } from '@roomote/db/server';
-import { formatErrorForLog, type ReasoningEffort } from '@roomote/types';
+import {
+  formatErrorForLog,
+  getUserDisplayName,
+  type ReasoningEffort,
+} from '@roomote/types';
 
 import type { UserAuthSuccess } from '@/types';
 import { findAccessibleFastSession } from '@/lib/server/fast-sessions';
@@ -62,26 +70,31 @@ type WebFastAgentConversation = {
 };
 
 /**
- * Run one Fast turn for a web-surface conversation. Fire-and-forget: the
- * caller returns immediately and the transcript view picks up canonical rows
- * as the turn persists them. The Redis turn lock serializes turns per
- * conversation, so queued replies simply wait their turn.
+ * Run one web-initiated Fast turn. Fire-and-forget: the caller returns
+ * immediately and the transcript view picks up canonical rows as the turn
+ * persists them. The Redis turn lock serializes turns per conversation, so
+ * queued replies simply wait their turn. The delivery's adapter routes agent
+ * replies to the conversation's home surface (Slack/Discord threads for
+ * sessions that live there; the canonical transcript alone for web).
  */
 async function runWebFastAgentTurn({
   userId,
-  conversation,
+  delivery,
   question,
   images,
   model,
   reasoningEffort,
+  senderDisplayName,
 }: {
   userId: string;
-  conversation: WebFastAgentConversation;
+  delivery: FastAgentSurfaceReplyDelivery;
   question: string;
   images?: string[];
   model?: string;
   reasoningEffort?: ReasoningEffort;
+  senderDisplayName?: string;
 }): Promise<void> {
+  const conversation = delivery.conversation;
   const release = await acquireFastAgentTurnLock({ conversation });
   if (!release) {
     console.error(
@@ -102,6 +115,7 @@ async function runWebFastAgentTurn({
       signal: release.signal,
       model,
       reasoningEffort,
+      senderDisplayName,
       adapter: {
         resolveMcpServerConfigs: () =>
           resolveUserMcpServerConfigs({
@@ -109,10 +123,7 @@ async function runWebFastAgentTurn({
             apiBaseUrl,
             includeRoomoteMemberTools: true,
           }),
-        launchTask: createFastAgentWebTaskLauncher({ userId, conversation }),
-        // Web has no side channel to post into: the canonical transcript the
-        // service persists is the reply surface.
-        postReply: async () => {},
+        ...delivery.adapter,
       },
     });
   } catch (error) {
@@ -150,7 +161,16 @@ export async function startFastSessionCommand(
 
   void runWebFastAgentTurn({
     userId: auth.userId,
-    conversation,
+    delivery: {
+      conversation,
+      adapter: {
+        launchTask: createFastAgentWebTaskLauncher({
+          userId: auth.userId,
+          conversation,
+        }),
+        postReply: async () => {},
+      },
+    },
     question: input.text,
     images: input.images,
     model: settings.model,
@@ -174,28 +194,35 @@ export async function replyToFastSessionCommand(
   if (!session) {
     throw new Error('Fast session not found');
   }
-  if (session.surface !== 'web') {
+
+  const senderDisplayName =
+    getUserDisplayName({ name: auth.name, email: auth.primaryEmail }) ?? null;
+  const [settings, delivery] = await Promise.all([
+    resolveSessionModelSettings(session.id, input, {
+      model: session.model,
+      reasoningEffort: session.reasoningEffort,
+    }),
+    buildFastAgentSurfaceReplyDelivery({
+      sessionId: session.id,
+      userId: auth.userId,
+      senderDisplayName,
+      question: input.text,
+    }),
+  ]);
+  if (!delivery) {
     throw new Error(
-      'This session lives on another surface. Reply in its original thread instead.',
+      "This session's chat surface is not connected, so replies cannot be delivered.",
     );
   }
 
-  const settings = await resolveSessionModelSettings(session.id, input, {
-    model: session.model,
-    reasoningEffort: session.reasoningEffort,
-  });
-
   void runWebFastAgentTurn({
     userId: auth.userId,
-    conversation: {
-      surface: 'web',
-      workspaceId: session.workspaceId,
-      conversationId: session.conversationId,
-    },
+    delivery,
     question: input.text,
     images: input.images,
     model: settings.model,
     reasoningEffort: settings.reasoningEffort,
+    ...(senderDisplayName ? { senderDisplayName } : {}),
   });
 
   return { success: true };
