@@ -179,7 +179,7 @@ describe('BrainSettings', () => {
   it('shows Memory stats, the embedded browser, sources, and configuration', () => {
     render(<BrainSettings />);
 
-    expect(screen.getAllByText('Connected')).toHaveLength(2);
+    expect(screen.getAllByText('Connected')).toHaveLength(1);
     expect(screen.queryByText('Endpoint')).not.toBeInTheDocument();
     expect(screen.queryByText('http://gbrain:8080')).not.toBeInTheDocument();
     expect(screen.getByText('OpenRouter')).toBeInTheDocument();
@@ -203,6 +203,11 @@ describe('BrainSettings', () => {
     expect(screen.getByText('Sources')).toBeInTheDocument();
     expect(screen.queryByText('1 of 2 connected')).not.toBeInTheDocument();
     expect(screen.queryByText('Ingesting')).not.toBeInTheDocument();
+    expect(
+      screen.getByRole('status', { name: 'Connected' }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/Last read/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/streams/)).not.toBeInTheDocument();
     expect(screen.queryByText('Not connected')).not.toBeInTheDocument();
     expect(screen.queryByText('Notion')).not.toBeInTheDocument();
 

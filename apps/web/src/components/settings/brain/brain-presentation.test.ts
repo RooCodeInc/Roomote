@@ -61,16 +61,16 @@ describe('describeBrainStatus', () => {
 });
 
 describe('describeSourceStatus', () => {
-  it('explains every state that is not simply working', () => {
+  it('provides a compact status label and dot color for every state', () => {
     expect(describeSourceStatus('ingesting')).toMatchObject({
       label: 'Connected',
-      hint: null,
+      dotClassName: 'bg-emerald-500',
     });
     expect(describeSourceStatus('backfilling').label).toBe('Backfilling');
     expect(describeSourceStatus('idle').label).toBe('Waiting');
 
     for (const status of ['backfilling', 'idle', 'not_connected'] as const) {
-      expect(describeSourceStatus(status).hint).toBeTruthy();
+      expect(describeSourceStatus(status).dotClassName).toBeTruthy();
     }
   });
 });

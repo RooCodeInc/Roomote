@@ -79,8 +79,14 @@ it('debounces server-side search and pages bounded results', async () => {
   );
 
   expect(screen.getByText('Explore memories')).toBeInTheDocument();
+  expect(
+    screen.getByText(
+      'Roomote learns from your interactions and conversations. Manage it here.',
+    ),
+  ).toBeInTheDocument();
   expect(screen.getByText('1-2 of 250')).toBeInTheDocument();
   expect(screen.queryByText('Select a page')).not.toBeInTheDocument();
+  expect(screen.queryByText('tasks/run-2')).not.toBeInTheDocument();
   expect(listInputs.at(-1)).toMatchObject({ offset: 0, limit: 100 });
 
   fireEvent.change(screen.getByLabelText('Search pages'), {

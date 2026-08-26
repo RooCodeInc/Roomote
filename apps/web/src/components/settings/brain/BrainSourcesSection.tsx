@@ -1,61 +1,42 @@
 'use client';
 
 import { Section } from '@/components/settings';
-import { Badge, Progress, RadioTower } from '@/components/system';
-import { formatDistanceToNowCompact, formatNumber } from '@/lib/formatters';
+import { BasicTooltip, RadioTower } from '@/components/system';
+import { cn } from '@/lib/utils';
 
-import type { BrainSourceSummary } from '@/trpc/commands/brain';
+import type {
+  BrainSourceStatus,
+  BrainSourceSummary,
+} from '@/trpc/commands/brain';
 import { describeSourceStatus } from './brain-presentation';
 
-function SourceRow({ source }: { source: BrainSourceSummary }) {
-  const status = describeSourceStatus(source.status);
-  const backfillPercent =
-    source.backfillProgress && source.backfillProgress.total > 0
-      ? (source.backfillProgress.read / source.backfillProgress.total) * 100
-      : null;
+function SourceStatusIndicator({ status }: { status: BrainSourceStatus }) {
+  const presentation = describeSourceStatus(status);
 
   return (
-    <div className="space-y-2 rounded-lg border bg-background/40 p-4">
-      <div className="flex items-center gap-2">
-        <span className="font-medium">{source.label}</span>
-        <Badge variant={status.variant} className="ml-auto">
-          {status.label}
-        </Badge>
-      </div>
+    <BasicTooltip content={presentation.label}>
+      <span
+        role="status"
+        aria-label={presentation.label}
+        tabIndex={0}
+        className="absolute top-4 right-4 inline-flex size-2 cursor-default focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+      >
+        <span
+          className={cn('size-2 rounded-full', presentation.dotClassName)}
+        />
+      </span>
+    </BasicTooltip>
+  );
+}
+
+function SourceRow({ source }: { source: BrainSourceSummary }) {
+  return (
+    <div className="relative space-y-2 rounded-lg border bg-background/40 p-4">
+      <SourceStatusIndicator status={source.status} />
+
+      <span className="font-medium">{source.label}</span>
 
       <p className="text-sm text-muted-foreground">{source.description}</p>
-
-      {status.hint ? (
-        <p className="text-xs text-muted-foreground">{status.hint}</p>
-      ) : null}
-
-      {source.status !== 'not_connected' ? (
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
-          <span>
-            {source.lastSyncedAt
-              ? `Last read ${formatDistanceToNowCompact(source.lastSyncedAt, {
-                  addSuffix: true,
-                })}`
-              : 'Not read yet'}
-          </span>
-          {source.trackedItems > 0 ? (
-            <span>{formatNumber(source.trackedItems)} tracked</span>
-          ) : null}
-          {source.streams > 1 ? (
-            <span>{formatNumber(source.streams)} streams</span>
-          ) : null}
-        </div>
-      ) : null}
-
-      {backfillPercent !== null && source.status === 'backfilling' ? (
-        <div className="space-y-1">
-          <Progress value={backfillPercent} />
-          <p className="text-xs text-muted-foreground">
-            History read for {source.backfillProgress!.read} of{' '}
-            {source.backfillProgress!.total} streams.
-          </p>
-        </div>
-      ) : null}
     </div>
   );
 }

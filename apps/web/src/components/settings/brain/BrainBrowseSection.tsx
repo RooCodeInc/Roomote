@@ -69,9 +69,12 @@ const PageListRow = memo(function PageListRow({
       )}
     >
       <p className="truncate text-sm font-medium">{page.title}</p>
-      <p className="truncate font-mono text-xs text-muted-foreground">
-        {page.slug}
-      </p>
+      {page.updatedAt ? (
+        <p className="truncate text-xs text-muted-foreground">
+          updated{' '}
+          {formatDistanceToNowCompact(page.updatedAt, { addSuffix: true })}
+        </p>
+      ) : null}
     </button>
   );
 });
@@ -84,7 +87,7 @@ function PagePreview({ slug }: { slug: string }) {
 
   if (isPending) {
     return (
-      <div className="space-y-2 p-4">
+      <div className="space-y-2 px-4">
         <Skeleton className="h-5 w-64" />
         <Skeleton className="h-4 w-40" />
         <Skeleton className="h-40 w-full" />
@@ -102,17 +105,22 @@ function PagePreview({ slug }: { slug: string }) {
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-3 p-4">
+    <div className="flex h-full min-h-0 flex-col gap-3 px-4">
       <div className="space-y-1">
         <p className="text-sm font-semibold">{data.title}</p>
-        <div className="flex items-center gap-2 text-xs text-muted-foreground">
-          <span className="font-mono">{data.slug}</span>
+        <div className="flex items-center gap-2 text-sm text-muted-foreground">
           {data.updatedAt ? (
-            <span>
-              updated{' '}
-              {formatDistanceToNowCompact(data.updatedAt, { addSuffix: true })}
-            </span>
+            <>
+              <span>
+                updated{' '}
+                {formatDistanceToNowCompact(data.updatedAt, {
+                  addSuffix: true,
+                })}
+              </span>
+              <span aria-hidden="true">·</span>
+            </>
           ) : null}
+          <span className="font-mono text-[0.9em]">{data.slug}</span>
         </div>
       </div>
       {/*
@@ -238,7 +246,8 @@ export function BrainBrowseSection({
     <Section icon={BookOpenText} title="Explore memories">
       <div className="space-y-3">
         <p className="text-sm text-muted-foreground">
-          What Memory has stored, page by page.
+          Roomote learns from your interactions and conversations. Manage it
+          here.
         </p>
         <div className="relative">
           <Search

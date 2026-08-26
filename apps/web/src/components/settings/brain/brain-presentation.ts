@@ -100,9 +100,7 @@ export function describeBrainStatus(
 
 type BrainSourceStatusPresentation = {
   label: string;
-  variant: 'success' | 'warning' | 'secondary' | 'outline';
-  /** Shown under the row when the state benefits from a word of context. */
-  hint: string | null;
+  dotClassName: string;
 };
 
 export function describeSourceStatus(
@@ -110,25 +108,22 @@ export function describeSourceStatus(
 ): BrainSourceStatusPresentation {
   switch (status) {
     case 'ingesting':
-      return { label: 'Connected', variant: 'success', hint: null };
+      return { label: 'Connected', dotClassName: 'bg-emerald-500' };
     case 'backfilling':
       return {
         label: 'Backfilling',
-        variant: 'warning',
-        hint: 'Reading history in bounded steps. New activity is already being collected.',
+        dotClassName: 'bg-yellow-500',
       };
     case 'idle':
       return {
         label: 'Waiting',
-        variant: 'secondary',
-        hint: 'Connected, but nothing has been collected yet.',
+        dotClassName: 'bg-muted-foreground',
       };
     case 'not_connected':
     default:
       return {
         label: 'Not connected',
-        variant: 'outline',
-        hint: 'Connect this integration to let Memory read it.',
+        dotClassName: 'bg-muted-foreground',
       };
   }
 }
