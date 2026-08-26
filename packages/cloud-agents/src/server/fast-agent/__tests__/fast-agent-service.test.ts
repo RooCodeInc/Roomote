@@ -353,7 +353,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     expect(mocks.upsertMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         message: expect.objectContaining({
-          eventId: '100.2:tool-call:0',
+          eventId: '100.2:tool:0',
           eventType: 'roomote_runtime.tool_call',
           metadata: { visibleInTranscript: true },
           payload: expect.objectContaining({
@@ -375,7 +375,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     expect(mocks.upsertMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         message: expect.objectContaining({
-          eventId: '100.2:tool-result:0',
+          eventId: '100.2:tool:0',
           eventType: 'roomote_runtime.tool_result',
           payload: expect.objectContaining({
             toolCallId: '100.2:tool:0',
@@ -384,6 +384,14 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         }),
       }),
     );
+    const toolWrites = mocks.upsertMessage.mock.calls
+      .map(([input]) => input.message)
+      .filter((message) => message.eventId === '100.2:tool:0');
+    expect(toolWrites.map((message) => message.eventType)).toEqual([
+      'roomote_runtime.tool_call',
+      'roomote_runtime.tool_result',
+    ]);
+    expect(new Set(toolWrites.map((message) => message.turnSeq)).size).toBe(1);
     expect(mocks.generateText).toHaveBeenCalledWith(
       expect.objectContaining({
         modelRole: 'orchestration',
@@ -1356,6 +1364,32 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     );
     expect(launchTask).toHaveBeenCalledWith(
       expect.objectContaining({ model: 'anthropic/claude-sonnet-5' }),
+    );
+    const canonicalWrites = mocks.upsertMessage.mock.calls.map(
+      ([input]) => input.message,
+    );
+    const toolCallIndex = canonicalWrites.findIndex(
+      (message) =>
+        message.eventId === '100.2:tool:0' &&
+        message.eventType === 'roomote_runtime.tool_call',
+    );
+    const kickoffIndex = canonicalWrites.findIndex(
+      (message) =>
+        message.eventType === 'roomote_runtime.assistant_message' &&
+        JSON.stringify(message.contentBlocks).includes(
+          'delegating the checkout fix',
+        ),
+    );
+    const toolResultIndex = canonicalWrites.findIndex(
+      (message) =>
+        message.eventId === '100.2:tool:0' &&
+        message.eventType === 'roomote_runtime.tool_result',
+    );
+    expect(toolCallIndex).toBeGreaterThanOrEqual(0);
+    expect(kickoffIndex).toBeGreaterThan(toolCallIndex);
+    expect(toolResultIndex).toBeGreaterThan(kickoffIndex);
+    expect(canonicalWrites[toolResultIndex]?.turnSeq).toBe(
+      canonicalWrites[toolCallIndex]?.turnSeq,
     );
   });
 

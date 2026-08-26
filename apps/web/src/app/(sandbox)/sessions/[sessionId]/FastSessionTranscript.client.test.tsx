@@ -80,43 +80,57 @@ describe('FastSessionTranscript', () => {
     expect(screen.getByText('Transcript limitation')).toBeInTheDocument();
   });
 
-  it('renders canonical native tool result payloads with the shared tool UI', () => {
-    render(
-      <FastSessionTranscript
-        messages={[
-          {
-            id: 'tool-result-1',
-            eventId: 'turn-1:tool-result:0',
-            turnId: 'turn-1',
-            turnSeq: 2,
-            ts: 3,
-            eventType: ACP_ENVELOPE_EVENT_TYPES.ToolResult,
-            role: 'tool',
-            contentBlocks: [{ type: 'text', text: '{"delivered":true}' }],
-            metadata: { visibleInTranscript: true },
-            payload: {
-              toolCallId: 'turn-1:tool:0',
-              title: 'launch_task',
-              kind: 'tool',
-              status: 'completed',
-              isExecute: false,
-              isMcp: false,
-              mcpServerName: null,
-              mcpToolName: null,
-              toolName: 'launch_task',
-              command: null,
-              exitCode: null,
-              output: '{"delivered":true}',
-              rawInput: { arguments: { prompt: 'Fix checkout' } },
-            },
-            source: 'slack',
-            nativeSessionId: 'opencode-1',
-            nativeMessageId: null,
-            createdAt: new Date('2026-01-01T00:00:02.000Z'),
-          },
-        ]}
-      />,
+  it('updates one canonical tool row from in-progress to completed', () => {
+    const baseMessage = {
+      id: 'tool-1',
+      eventId: 'turn-1:tool:0',
+      turnId: 'turn-1',
+      turnSeq: 1,
+      ts: 2,
+      role: 'tool' as const,
+      metadata: { visibleInTranscript: true },
+      source: 'slack',
+      nativeSessionId: 'opencode-1',
+      nativeMessageId: null,
+      createdAt: new Date('2026-01-01T00:00:01.000Z'),
+    };
+    const toolCall = {
+      ...baseMessage,
+      eventType: ACP_ENVELOPE_EVENT_TYPES.ToolCall,
+      contentBlocks: [],
+      payload: {
+        toolCallId: 'turn-1:tool:0',
+        title: 'launch_task',
+        kind: 'tool',
+        status: 'in_progress',
+        isExecute: false,
+        isRead: false,
+        isMcp: false,
+        mcpServerName: null,
+        mcpToolName: null,
+        toolName: 'launch_task',
+        command: null,
+        rawInput: { arguments: { prompt: 'Fix checkout' } },
+      },
+    };
+    const toolResult = {
+      ...baseMessage,
+      eventType: ACP_ENVELOPE_EVENT_TYPES.ToolResult,
+      contentBlocks: [{ type: 'text', text: '{"success":true}' }],
+      payload: {
+        ...toolCall.payload,
+        status: 'completed',
+        exitCode: null,
+        output: '{"success":true}',
+      },
+    };
+    const { rerender } = render(
+      <FastSessionTranscript messages={[toolCall]} />,
     );
+
+    expect(screen.getAllByText('launch_task')).toHaveLength(1);
+
+    rerender(<FastSessionTranscript messages={[toolResult]} />);
 
     expect(screen.getAllByText('launch_task')).toHaveLength(1);
   });

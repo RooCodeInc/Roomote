@@ -767,9 +767,10 @@ export async function answerFastAgentQuestion({
     const ordinal = nextToolOrdinal++;
     const toolCallId = `${turnId}:tool:${ordinal}`;
     const isMcp = Boolean(mcpServerName && mcpToolName);
+    const canonicalEvent = allocateCanonicalEvent(`tool:${ordinal}`);
     await persistCanonicalMessage(
       {
-        ...allocateCanonicalEvent(`tool-call:${ordinal}`),
+        ...canonicalEvent,
         turnId,
         ts: Date.now(),
         eventType: ACP_ENVELOPE_EVENT_TYPES.ToolCall,
@@ -804,6 +805,7 @@ export async function answerFastAgentQuestion({
       isMcp,
       mcpServerName,
       mcpToolName,
+      canonicalEvent,
     };
   };
   const finishCanonicalToolEvent = async (
@@ -819,7 +821,7 @@ export async function answerFastAgentQuestion({
       result.success === false;
     await persistCanonicalMessage(
       {
-        ...allocateCanonicalEvent(`tool-result:${event.ordinal}`),
+        ...event.canonicalEvent,
         turnId,
         ts: Date.now(),
         eventType: ACP_ENVELOPE_EVENT_TYPES.ToolResult,
