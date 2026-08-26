@@ -27,8 +27,8 @@ import { AttachmentsDisplay } from '../../task/[taskId]/prompt-input/Attachments
 import { SessionModelSwitcher } from './SessionModelSwitcher';
 
 export type SessionPromptSubmission = PromptInputMessage & {
-  model?: string;
-  reasoningEffort?: ReasoningEffort;
+  model: string | null;
+  reasoningEffort: ReasoningEffort | null;
 };
 
 function SessionSubmit({
@@ -53,14 +53,22 @@ function SessionSubmit({
 export function SessionPromptInput({
   isBusy,
   onSend,
+  initialModel = null,
+  initialReasoningEffort = null,
+  defaultModelId = null,
+  defaultReasoningEffort = null,
 }: {
   isBusy: boolean;
   onSend: (submission: SessionPromptSubmission) => void;
+  initialModel?: string | null;
+  initialReasoningEffort?: ReasoningEffort | null;
+  defaultModelId?: string | null;
+  defaultReasoningEffort?: ReasoningEffort | null;
 }) {
   const [prompt, setPrompt] = useState('');
-  const [model, setModel] = useState('');
+  const [model, setModel] = useState(initialModel ?? '');
   const [reasoningEffort, setReasoningEffort] =
-    useState<ReasoningEffort | null>(null);
+    useState<ReasoningEffort | null>(initialReasoningEffort);
   const voiceDictation = useVoiceDictation({
     onTranscript: (text) => setPrompt(text),
     getPrefix: () => prompt,
@@ -69,10 +77,12 @@ export function SessionPromptInput({
 
   const handleSubmit = (message: PromptInputMessage) => {
     setPrompt('');
+    // Always send the current picker state: it round-trips the persisted
+    // choice and clears it when the picker is reset to the default.
     onSend({
       ...message,
-      ...(model ? { model } : {}),
-      ...(reasoningEffort ? { reasoningEffort } : {}),
+      model: model || null,
+      reasoningEffort,
     });
   };
 
@@ -110,6 +120,8 @@ export function SessionPromptInput({
               onModelChange={setModel}
               reasoningEffort={reasoningEffort}
               onReasoningEffortChange={setReasoningEffort}
+              defaultModelId={defaultModelId}
+              defaultReasoningEffort={defaultReasoningEffort}
               disabled={isBusy}
             />
           </PromptInputTools>

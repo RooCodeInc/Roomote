@@ -294,6 +294,8 @@ describe('FastSessionTranscript', () => {
     expect(replyMutate).toHaveBeenCalledWith({
       sessionId: 'session-1',
       text: 'Follow up question',
+      model: null,
+      reasoningEffort: null,
     });
   });
 

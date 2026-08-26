@@ -16,8 +16,6 @@ import { ModelSelect } from '@/components/tasks/ModelSelect';
 import { ReasoningEffortSelect } from '@/components/tasks/ReasoningEffortSelect';
 import { useLaunchTaskModels } from '@/hooks/task-models/useLaunchTaskModels';
 
-const DEFAULT_SESSION_REASONING_EFFORT: ReasoningEffort = 'medium';
-
 /** Session composer model chip, mirroring the task composer's model switcher:
  * a ghost chip with the model and reasoning level that opens a popover with
  * the pickers. */
@@ -26,19 +24,24 @@ export function SessionModelSwitcher({
   onModelChange,
   reasoningEffort,
   onReasoningEffortChange,
+  defaultModelId,
+  defaultReasoningEffort,
   disabled,
 }: {
   model: string;
   onModelChange: (model: string) => void;
   reasoningEffort: ReasoningEffort | null;
   onReasoningEffortChange: (effort: ReasoningEffort | null) => void;
+  /** The deployment's effective Fast (orchestration) model. */
+  defaultModelId?: string | null;
+  defaultReasoningEffort?: ReasoningEffort | null;
   disabled?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const { data } = useLaunchTaskModels();
   const displayModelName = (modelId: string) =>
     data?.models.find(({ id }) => id === modelId)?.displayName ?? modelId;
-  const defaultModelId = data?.defaultModelId;
+  const effectiveDefaultEffort = defaultReasoningEffort ?? 'medium';
   const chipLabel = model
     ? displayModelName(model)
     : defaultModelId
@@ -59,7 +62,7 @@ export function SessionModelSwitcher({
             <span className="max-w-40 truncate">{chipLabel}</span>
             <span className="text-muted-foreground/70">
               {getReasoningEffortLabel(
-                reasoningEffort ?? DEFAULT_SESSION_REASONING_EFFORT,
+                reasoningEffort ?? effectiveDefaultEffort,
               )}
             </span>
             <ChevronDown className="size-3 shrink-0" />
@@ -77,7 +80,7 @@ export function SessionModelSwitcher({
           />
           <ReasoningEffortSelect
             value={reasoningEffort}
-            defaultEffort={DEFAULT_SESSION_REASONING_EFFORT}
+            defaultEffort={effectiveDefaultEffort}
             onChange={onReasoningEffortChange}
             disabled={disabled}
             ariaLabel="Session reasoning level"

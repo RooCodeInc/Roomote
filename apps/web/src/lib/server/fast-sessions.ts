@@ -51,6 +51,8 @@ const fastSessionSelection = {
   ownerEmail: users.email,
   ownerImageUrl: users.imageUrl,
   title: fastAgentConversations.title,
+  model: fastAgentConversations.model,
+  reasoningEffort: fastAgentConversations.reasoningEffort,
   surface: fastAgentConversations.surface,
   workspaceId: fastAgentConversations.workspaceId,
   conversationId: fastAgentConversations.conversationId,
@@ -105,6 +107,8 @@ export async function findAccessibleFastSession(
       surface: fastAgentConversations.surface,
       workspaceId: fastAgentConversations.workspaceId,
       conversationId: fastAgentConversations.conversationId,
+      model: fastAgentConversations.model,
+      reasoningEffort: fastAgentConversations.reasoningEffort,
     })
     .from(fastAgentConversations)
     .where(

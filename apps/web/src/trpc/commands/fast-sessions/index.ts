@@ -8,10 +8,52 @@ import {
   resolveApiBaseUrl,
 } from '@roomote/cloud-agents/server';
 import { resolveUserMcpServerConfigs } from '@roomote/sdk/server';
+import { db, eq, fastAgentConversations } from '@roomote/db/server';
 import { formatErrorForLog, type ReasoningEffort } from '@roomote/types';
 
 import type { UserAuthSuccess } from '@/types';
 import { findAccessibleFastSession } from '@/lib/server/fast-sessions';
+
+/**
+ * Persist the session's model settings when the caller sent an explicit
+ * choice, and return the effective settings for this turn. An omitted field
+ * falls back to what the session already stores, so the choice sticks across
+ * replies and reloads.
+ */
+async function resolveSessionModelSettings(
+  sessionId: string,
+  input: {
+    model?: string | null;
+    reasoningEffort?: ReasoningEffort | null;
+  },
+  stored: { model: string | null; reasoningEffort: ReasoningEffort | null },
+): Promise<{ model?: string; reasoningEffort?: ReasoningEffort }> {
+  const changes: Partial<{
+    model: string | null;
+    reasoningEffort: ReasoningEffort | null;
+  }> = {};
+  if (input.model !== undefined && input.model !== stored.model) {
+    changes.model = input.model || null;
+  }
+  if (
+    input.reasoningEffort !== undefined &&
+    input.reasoningEffort !== stored.reasoningEffort
+  ) {
+    changes.reasoningEffort = input.reasoningEffort || null;
+  }
+  if (Object.keys(changes).length > 0) {
+    await db
+      .update(fastAgentConversations)
+      .set(changes)
+      .where(eq(fastAgentConversations.id, sessionId));
+  }
+
+  return {
+    model: input.model ?? stored.model ?? undefined,
+    reasoningEffort:
+      input.reasoningEffort ?? stored.reasoningEffort ?? undefined,
+  };
+}
 
 type WebFastAgentConversation = {
   surface: 'web';
@@ -87,8 +129,8 @@ export async function startFastSessionCommand(
   input: {
     text: string;
     images?: string[];
-    model?: string;
-    reasoningEffort?: ReasoningEffort;
+    model?: string | null;
+    reasoningEffort?: ReasoningEffort | null;
   },
 ): Promise<{ sessionId: string }> {
   const conversation: WebFastAgentConversation = {
@@ -101,14 +143,18 @@ export async function startFastSessionCommand(
     userId: auth.userId,
     conversation,
   });
+  const settings = await resolveSessionModelSettings(session.id, input, {
+    model: null,
+    reasoningEffort: null,
+  });
 
   void runWebFastAgentTurn({
     userId: auth.userId,
     conversation,
     question: input.text,
     images: input.images,
-    model: input.model,
-    reasoningEffort: input.reasoningEffort,
+    model: settings.model,
+    reasoningEffort: settings.reasoningEffort,
   });
 
   return { sessionId: session.id };
@@ -120,8 +166,8 @@ export async function replyToFastSessionCommand(
     sessionId: string;
     text: string;
     images?: string[];
-    model?: string;
-    reasoningEffort?: ReasoningEffort;
+    model?: string | null;
+    reasoningEffort?: ReasoningEffort | null;
   },
 ): Promise<{ success: true }> {
   const session = await findAccessibleFastSession(auth, input.sessionId);
@@ -134,6 +180,11 @@ export async function replyToFastSessionCommand(
     );
   }
 
+  const settings = await resolveSessionModelSettings(session.id, input, {
+    model: session.model,
+    reasoningEffort: session.reasoningEffort,
+  });
+
   void runWebFastAgentTurn({
     userId: auth.userId,
     conversation: {
@@ -143,8 +194,8 @@ export async function replyToFastSessionCommand(
     },
     question: input.text,
     images: input.images,
-    model: input.model,
-    reasoningEffort: input.reasoningEffort,
+    model: settings.model,
+    reasoningEffort: settings.reasoningEffort,
   });
 
   return { success: true };

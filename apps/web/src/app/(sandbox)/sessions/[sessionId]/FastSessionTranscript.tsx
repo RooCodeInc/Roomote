@@ -6,6 +6,7 @@ import {
   getTextFromContentBlocks,
   inferAcpMessageKind,
   type AcpEventType,
+  type ReasoningEffort,
 } from '@roomote/types';
 
 import type { FastSessionMessage } from '@/lib/server/fast-sessions';
@@ -46,11 +47,19 @@ export function FastSessionTranscript({
   initialMessages,
   hasOlderMessages,
   canReply,
+  sessionModel = null,
+  sessionReasoningEffort = null,
+  defaultModelId = null,
+  defaultReasoningEffort = null,
 }: {
   sessionId: string;
   initialMessages: FastSessionMessage[];
   hasOlderMessages?: boolean;
   canReply?: boolean;
+  sessionModel?: string | null;
+  sessionReasoningEffort?: ReasoningEffort | null;
+  defaultModelId?: string | null;
+  defaultReasoningEffort?: ReasoningEffort | null;
 }) {
   const trpcClient = useTRPCClient();
   const [serverMessages, setServerMessages] = useState<
@@ -177,10 +186,8 @@ export function FastSessionTranscript({
           sessionId,
           text: prepared.text,
           ...(images.length > 0 ? { images } : {}),
-          ...(message.model ? { model: message.model } : {}),
-          ...(message.reasoningEffort
-            ? { reasoningEffort: message.reasoningEffort }
-            : {}),
+          model: message.model ?? null,
+          reasoningEffort: message.reasoningEffort ?? null,
         });
       } catch (error) {
         setOptimisticMessages((previous) =>
@@ -226,6 +233,10 @@ export function FastSessionTranscript({
           <SessionPromptInput
             isBusy={isSending}
             onSend={(submission) => void sendReply(submission)}
+            initialModel={sessionModel}
+            initialReasoningEffort={sessionReasoningEffort}
+            defaultModelId={defaultModelId}
+            defaultReasoningEffort={defaultReasoningEffort}
           />
           {replyError ? (
             <p className="px-4 pb-2 text-xs text-destructive">{replyError}</p>
