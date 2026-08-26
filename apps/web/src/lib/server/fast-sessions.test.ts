@@ -394,4 +394,38 @@ describe('Fast session queries', () => {
     // The newest messages are the ones kept.
     expect(result?.messages.at(-1)?.eventId).toBe('event-1009');
   });
+
+  it('keeps a partial newest turn when a single turn overflows the window', async () => {
+    const owner = await userFactory.create();
+    const session = await createFastSession({
+      userId: owner.id,
+      conversationId: 'giant-turn-session',
+      updatedAt: new Date('2026-01-01T00:00:00.000Z'),
+    });
+    // One turn with more visible events than the transcript window holds.
+    const rows = Array.from({ length: 1010 }, (_, index) => ({
+      conversationId: session.id,
+      eventId: `event-${index}`,
+      turnId: 'turn-0',
+      turnSeq: index,
+      ts: index + 1,
+      eventType: 'roomote_runtime.assistant_message' as const,
+      role: 'assistant' as const,
+      contentBlocks: [{ type: 'text' as const, text: `event-${index}` }],
+      metadata: { visibleInTranscript: true },
+      payload: {},
+      source: 'slack',
+    }));
+    await db.insert(fastAgentMessages).values(rows);
+
+    const result = await getFastSessionById(
+      { userId: owner.id, isAdmin: false },
+      session.id,
+    );
+
+    expect(result?.hasOlderMessages).toBe(true);
+    // The whole-turn trim must not empty the window; the newest events stay.
+    expect(result?.messages.length).toBe(1000);
+    expect(result?.messages.at(-1)?.eventId).toBe('event-1009');
+  });
 });

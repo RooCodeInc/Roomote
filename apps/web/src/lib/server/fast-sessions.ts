@@ -207,10 +207,16 @@ export async function getFastSessionById(
   let windowed = rows.slice(0, FAST_SESSION_TRANSCRIPT_MESSAGE_LIMIT);
   if (hasOlderMessages) {
     // The window boundary can land mid-turn; drop the partial turn at the old
-    // end so the transcript always starts on a turn boundary.
+    // end so the transcript starts on a turn boundary. If a single turn fills
+    // the whole window, keep it partial rather than rendering nothing — the
+    // truncation notice already tells the reader the transcript is incomplete.
     const boundaryTurnId = rows[FAST_SESSION_TRANSCRIPT_MESSAGE_LIMIT]!.turnId;
-    while (windowed.length > 0 && windowed.at(-1)!.turnId === boundaryTurnId) {
-      windowed = windowed.slice(0, -1);
+    let end = windowed.length;
+    while (end > 0 && windowed[end - 1]!.turnId === boundaryTurnId) {
+      end -= 1;
+    }
+    if (end > 0) {
+      windowed = windowed.slice(0, end);
     }
   }
 
