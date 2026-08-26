@@ -45,6 +45,9 @@ export type McpToolDefinition = {
   name: string;
   description?: string;
   inputSchema?: unknown;
+  annotations?: {
+    readOnlyHint?: boolean;
+  };
 };
 
 /** List the tools exposed by a streamable-http MCP server. */
@@ -59,15 +62,24 @@ export async function listMcpTools(options: {
     const definitions = await client.listTools({
       options: { signal: options.signal },
     });
-    return definitions.tools.map((definition) => ({
-      name: definition.name,
-      ...(definition.description
-        ? { description: definition.description }
-        : {}),
-      ...(definition.inputSchema
-        ? { inputSchema: definition.inputSchema }
-        : {}),
-    }));
+    return definitions.tools.map((definition) => {
+      const readOnlyHint = (
+        definition.annotations as { readOnlyHint?: unknown } | undefined
+      )?.readOnlyHint;
+
+      return {
+        name: definition.name,
+        ...(definition.description
+          ? { description: definition.description }
+          : {}),
+        ...(definition.inputSchema
+          ? { inputSchema: definition.inputSchema }
+          : {}),
+        ...(typeof readOnlyHint === 'boolean'
+          ? { annotations: { readOnlyHint } }
+          : {}),
+      };
+    });
   } finally {
     await client.close().catch(() => undefined);
   }

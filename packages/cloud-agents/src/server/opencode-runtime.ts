@@ -199,26 +199,31 @@ export const NON_TASK_TOOL_PERMISSION_DENIALS = {
   skill: 'deny',
 } as const;
 
-const PROMPT_ONLY_SUBAGENTS = {
-  [ROOMOTE_OPENCODE_ADVISOR_AGENT_NAME]: {
-    description: ROOMOTE_OPENCODE_ADVISOR_AGENT_DESCRIPTION,
-    mode: 'subagent',
-    prompt: createRoomoteAdvisorAgentPrompt({ contextOnly: true }),
-    permission: NON_TASK_TOOL_PERMISSION_DENIALS,
-    tools: FAST_AGENT_SUBAGENT_TOOL_FILTER,
-  },
-  [ROOMOTE_OPENCODE_JUDGE_AGENT_NAME]: {
-    description: ROOMOTE_OPENCODE_JUDGE_AGENT_DESCRIPTION,
-    mode: 'subagent',
-    prompt: createRoomoteJudgeAgentPrompt({ contextOnly: true }),
-    permission: NON_TASK_TOOL_PERMISSION_DENIALS,
-    tools: FAST_AGENT_SUBAGENT_TOOL_FILTER,
-  },
-} as const;
+function buildPromptOnlySubagents(
+  tools: Record<string, boolean> = FAST_AGENT_SUBAGENT_TOOL_FILTER,
+) {
+  return {
+    [ROOMOTE_OPENCODE_ADVISOR_AGENT_NAME]: {
+      description: ROOMOTE_OPENCODE_ADVISOR_AGENT_DESCRIPTION,
+      mode: 'subagent',
+      prompt: createRoomoteAdvisorAgentPrompt({ contextOnly: true }),
+      permission: NON_TASK_TOOL_PERMISSION_DENIALS,
+      tools,
+    },
+    [ROOMOTE_OPENCODE_JUDGE_AGENT_NAME]: {
+      description: ROOMOTE_OPENCODE_JUDGE_AGENT_DESCRIPTION,
+      mode: 'subagent',
+      prompt: createRoomoteJudgeAgentPrompt({ contextOnly: true }),
+      permission: NON_TASK_TOOL_PERMISSION_DENIALS,
+      tools,
+    },
+  } as const;
+}
 
 type NonTaskOpenCodeRuntimeOptions = {
   preserveReasoning?: boolean;
   promptOnlySubagents?: boolean;
+  promptOnlySubagentTools?: Record<string, boolean>;
 };
 
 function buildRestrictedNonTaskConfig(
@@ -229,7 +234,7 @@ function buildRestrictedNonTaskConfig(
   }
 
   return {
-    agent: PROMPT_ONLY_SUBAGENTS,
+    agent: buildPromptOnlySubagents(options.promptOnlySubagentTools),
     permission: { ...NON_TASK_TOOL_PERMISSION_DENIALS, task: 'allow' },
   };
 }
@@ -882,6 +887,7 @@ class OpenCodeSdkServerPool {
     ephemeral?: boolean;
     preserveReasoning?: boolean;
     promptOnlySubagents?: boolean;
+    promptOnlySubagentTools?: Record<string, boolean>;
     startTimeoutMs: number;
     useConfiguredServer?: boolean;
   }): Promise<OpenCodeSdkServerLease> {
@@ -902,6 +908,7 @@ class OpenCodeSdkServerPool {
     const cacheKey = buildOpenCodeSdkServerCacheKey(params.env, {
       preserveReasoning: params.preserveReasoning,
       promptOnlySubagents: params.promptOnlySubagents,
+      promptOnlySubagentTools: params.promptOnlySubagentTools,
     });
     const cached = this.cache.get(cacheKey);
 
@@ -918,6 +925,7 @@ class OpenCodeSdkServerPool {
         {
           preserveReasoning: params.preserveReasoning,
           promptOnlySubagents: params.promptOnlySubagents,
+          promptOnlySubagentTools: params.promptOnlySubagentTools,
         },
       )
         .then((server) => this.cacheStartedServer(cacheKey, server))
@@ -1057,6 +1065,8 @@ export function leaseOpenCodeSdkServer(params: {
   preserveReasoning?: boolean;
   /** Expose Roomote's controlled prompt-only subagents to Fast sessions. */
   promptOnlySubagents?: boolean;
+  /** Restrict the tools available to those prompt-only subagents. */
+  promptOnlySubagentTools?: Record<string, boolean>;
   startTimeoutMs: number;
   /**
    * Whether an operator-supplied OpenCode server may serve the request.

@@ -197,7 +197,15 @@ describe('buildOpenCodeCliEnv', () => {
           },
         }),
       },
-      { preserveReasoning: true, promptOnlySubagents: true },
+      {
+        preserveReasoning: true,
+        promptOnlySubagents: true,
+        promptOnlySubagentTools: {
+          '*': false,
+          github_search_code: true,
+          roomote_manage_tasks: true,
+        },
+      },
     );
     const config = JSON.parse(env.OPENCODE_CONFIG_CONTENT ?? '{}');
 
@@ -216,15 +224,14 @@ describe('buildOpenCodeCliEnv', () => {
         mode: 'subagent',
         permission: NON_TASK_TOOL_PERMISSION_DENIALS,
         tools: {
-          '*': true,
-          task: false,
-          roomote_manage_custom_automations: false,
-          send_chat_reply: false,
+          '*': false,
+          github_search_code: true,
+          roomote_manage_tasks: true,
         },
       });
       expect(agent.prompt).toEqual(
         expect.stringContaining(
-          'deployment integrations and read-only task inspection',
+          'read-only deployment integration tools and read-only task inspection',
         ),
       );
       expect(agent.prompt).toEqual(
