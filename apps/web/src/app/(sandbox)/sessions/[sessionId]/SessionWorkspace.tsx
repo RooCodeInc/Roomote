@@ -7,17 +7,13 @@ import { formatInferenceCost, getUserDisplayName } from '@/lib';
 import { useLaunchTaskModels } from '@/hooks/task-models/useLaunchTaskModels';
 import { WorkspaceSurface } from '@/components/layout';
 import { SideNavItem } from '@/components/layout/side-nav/SideNavItem';
+import { Avatar, BasicTooltip, DollarSign, Info } from '@/components/system';
+
+import { SandboxSidePanelHeader } from '../../SandboxSidePanelHeader';
 import {
-  Avatar,
-  BasicTooltip,
-  Button,
-  DollarSign,
-  Info,
-  ResizableDivider,
-  ResizablePanel,
-  ResizablePanelGroup,
-  X,
-} from '@/components/system';
+  ResponsiveWorkspacePanels,
+  SandboxSideActions,
+} from '../../SandboxWorkspacePanels';
 
 export type SessionInfo = {
   id: string;
@@ -70,19 +66,11 @@ function SessionInfoPanel({
 
   return (
     <>
-      <div className="flex shrink-0 items-center justify-between gap-2 border-b-2 border-card px-4 py-2">
-        <h2 className="text-sm font-medium">Session info</h2>
-        <BasicTooltip content="Close">
-          <Button
-            variant="ghost"
-            size="icon"
-            aria-label="Close session info"
-            onClick={onClose}
-          >
-            <X />
-          </Button>
-        </BasicTooltip>
-      </div>
+      <SandboxSidePanelHeader
+        title="Session info"
+        closeLabel="Close session info"
+        onClose={onClose}
+      />
       <div className="scroll-thin min-h-0 flex-1 overflow-y-auto px-4 py-4">
         <table className="text-sm">
           <tbody>
@@ -134,7 +122,10 @@ export function SessionWorkspace({
   return (
     <WorkspaceSurface
       sideActions={
-        <div className="flex h-full shrink-0 flex-col gap-2 overflow-y-auto bg-card py-3 pr-2">
+        <SandboxSideActions
+          isPanelOpen={isInfoOpen}
+          onShowMain={() => setIsInfoOpen(false)}
+        >
           <SideNavItem
             side="right"
             label="Session info"
@@ -143,33 +134,21 @@ export function SessionWorkspace({
             icon={Info}
             onClick={() => setIsInfoOpen((previous) => !previous)}
           />
-        </div>
+        </SandboxSideActions>
       }
     >
-      <ResizablePanelGroup direction="horizontal" className="min-h-0 flex-1">
-        <ResizablePanel
-          defaultSize={isInfoOpen ? 65 : 100}
-          minSize={30}
-          className="flex min-h-0 min-w-0 flex-col"
-        >
-          {children}
-        </ResizablePanel>
-        {isInfoOpen && (
-          <>
-            <ResizableDivider />
-            <ResizablePanel
-              defaultSize={35}
-              minSize={20}
-              className="flex min-h-0 min-w-0 flex-col border-l-2 border-card"
-            >
-              <SessionInfoPanel
-                session={session}
-                onClose={() => setIsInfoOpen(false)}
-              />
-            </ResizablePanel>
-          </>
-        )}
-      </ResizablePanelGroup>
+      <ResponsiveWorkspacePanels
+        isPanelOpen={isInfoOpen}
+        main={children}
+        mainSize={65}
+        panelSize={35}
+        panel={
+          <SessionInfoPanel
+            session={session}
+            onClose={() => setIsInfoOpen(false)}
+          />
+        }
+      />
     </WorkspaceSurface>
   );
 }
