@@ -13,7 +13,6 @@ import {
   computeProviders,
   environmentConfigSchema,
   workspaceRoutingSettingsSchema,
-  ENVIRONMENT_DEFINITION_SETUP_GUIDANCE_MAX_LENGTH,
   REASONING_EFFORT_VALUES,
   isTriggerableBackgroundAutomationKey,
   SCHEDULE_ONLY_BACKGROUND_AUTOMATION_IDS,
@@ -295,12 +294,7 @@ import {
   saveSetupNewModelConfigCommand,
   saveSetupNewSourceControlConfigCommand,
   saveSetupNewSourceControlProviderChoiceCommand,
-  saveSetupNewSelectionCommand,
-  prefetchSetupRecommendationSignalsCommand,
   saveSetupNewQueuedTasksCommand,
-  startSetupNewOnboardingTaskCommand,
-  cancelSetupNewOnboardingTaskCommand,
-  resetSetupNewSelectionCommand,
   ensureSetupNewDefaultAgentsCommand,
   listSetupRecommendationsCommand,
   startSetupRecommendationsCommand,
@@ -2655,32 +2649,6 @@ export const appRouter = createRouter({
         saveSetupNewSourceControlConfigCommand(auth, input),
       ),
 
-    saveSelection: protectedProcedure
-      .input(
-        z.object({
-          repositoryIds: z.array(z.string().uuid()).min(1),
-          setupGuidance: z
-            .string()
-            .trim()
-            .max(ENVIRONMENT_DEFINITION_SETUP_GUIDANCE_MAX_LENGTH)
-            .optional(),
-          selectedModelId: z.string().trim().min(1).optional(),
-        }),
-      )
-      .mutation(({ ctx: { auth }, input }) =>
-        saveSetupNewSelectionCommand(auth, input),
-      ),
-
-    prefetchRecommendationSignals: protectedProcedure
-      .input(
-        z.object({
-          repositoryIds: z.array(z.string().uuid()).max(100),
-        }),
-      )
-      .mutation(({ ctx: { auth }, input }) =>
-        prefetchSetupRecommendationSignalsCommand(auth, input),
-      ),
-
     saveQueuedTasks: protectedProcedure
       .input(
         z.object({
@@ -2691,18 +2659,6 @@ export const appRouter = createRouter({
       .mutation(({ ctx: { auth }, input }) =>
         saveSetupNewQueuedTasksCommand(auth, input),
       ),
-
-    startOnboardingTask: protectedProcedure.mutation(({ ctx: { auth } }) =>
-      startSetupNewOnboardingTaskCommand(auth),
-    ),
-
-    cancelOnboardingTask: protectedProcedure.mutation(({ ctx: { auth } }) =>
-      cancelSetupNewOnboardingTaskCommand(auth),
-    ),
-
-    resetSelection: protectedProcedure.mutation(({ ctx: { auth } }) =>
-      resetSetupNewSelectionCommand(auth),
-    ),
 
     ensureDefaultAgents: protectedProcedure.mutation(({ ctx: { auth } }) =>
       ensureSetupNewDefaultAgentsCommand(auth),
