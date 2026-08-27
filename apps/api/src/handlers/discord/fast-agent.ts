@@ -30,6 +30,7 @@ import {
 } from '@roomote/sdk/server';
 import { ALL_REPOSITORIES } from '@roomote/types';
 
+import { buildCommunicationTaskThreadName } from '../tasks/communication-task-thread.js';
 import { replyToDiscordEvent } from './replies.js';
 import {
   discordMetadataForChannel,
@@ -43,6 +44,8 @@ type DiscordInteractionReplyContext = {
   interaction: DiscordInteraction;
   interactionDeferred: boolean;
 };
+
+const DISCORD_MESSAGE_ANCHORED_CHANNEL_TYPES = new Set([0, 5]);
 
 export function getDiscordFastConversationId(
   channel: DiscordChannelContext,
@@ -81,17 +84,48 @@ export async function processDiscordFastAgentMessage(input: {
   channel: DiscordChannelContext;
   metadata: ReturnType<typeof discordMetadataForChannel>;
   conversationId: string;
+  createAnchoredThread?: boolean;
   interaction?: DiscordInteractionReplyContext;
   activeTasks?: { taskId: string }[];
 }): Promise<void> {
+  const message = getDiscordMessageCreate(input.event);
+  let channel = input.channel;
+  let metadata = input.metadata;
+  if (
+    message &&
+    input.createAnchoredThread !== false &&
+    !channel.isDirectMessage &&
+    !channel.isThread &&
+    DISCORD_MESSAGE_ANCHORED_CHANNEL_TYPES.has(channel.channelType)
+  ) {
+    const thread = await input.provider.createThreadFromMessage({
+      channelId: channel.channelId,
+      messageId: message.id,
+      name: buildCommunicationTaskThreadName(input.question),
+    });
+    channel = {
+      ...channel,
+      channelId: thread.channelId,
+      channelName: thread.name,
+      channelType: channel.channelType === 5 ? 10 : 11,
+      parentChannelId: thread.parentChannelId,
+      isThread: true,
+    };
+    metadata = {
+      ...metadata,
+      communicationChannelId: thread.parentChannelId,
+      communicationThreadId: thread.channelId,
+    };
+  }
+
   const conversation = {
     surface: 'discord' as const,
-    workspaceId: input.channel.guildId ?? 'dm',
+    workspaceId: channel.guildId ?? 'dm',
     conversationId: input.conversationId,
     replyTarget: {
-      channelId: input.metadata.communicationChannelId,
-      ...(input.metadata.communicationThreadId
-        ? { threadId: input.metadata.communicationThreadId }
+      channelId: metadata.communicationChannelId,
+      ...(metadata.communicationThreadId
+        ? { threadId: metadata.communicationThreadId }
         : {}),
     },
   };
@@ -114,7 +148,6 @@ export async function processDiscordFastAgentMessage(input: {
               : {}),
           })
         : [];
-    const message = getDiscordMessageCreate(input.event);
     // Resolved ahead of the turn so replies can carry the session footer;
     // the service's own getOrCreate finds this same row.
     const session = await getOrCreateFastAgentSession({
@@ -144,7 +177,7 @@ export async function processDiscordFastAgentMessage(input: {
           const posted = await replyToDiscordEvent({
             provider: input.provider,
             applicationId: input.applicationId,
-            channel: input.channel,
+            channel,
             ...(input.interaction ? { interaction: input.interaction } : {}),
             ...(message ? { replyToMessageId: message.id } : {}),
             text: textWithFooter,
@@ -240,15 +273,14 @@ export async function processDiscordFastAgentMessage(input: {
                 environmentId,
                 model,
               }),
-              channel: input.metadata.communicationChannelId,
-              ...(input.metadata.communicationThreadId
-                ? { threadTs: input.metadata.communicationThreadId }
+              channel: metadata.communicationChannelId,
+              ...(metadata.communicationThreadId
+                ? { threadTs: metadata.communicationThreadId }
                 : {}),
               turnPolicy: { reactionsAllowed: true },
             },
-            metadata: input.metadata,
-            channel: input.channel,
-            forceNewThread: true,
+            metadata,
+            channel,
             fastAgentSessionId: parentSessionId,
             fastAgentParent: {
               sessionId: parentSessionId,
@@ -312,7 +344,7 @@ export async function processDiscordFastAgentMessage(input: {
               if (replacementText.length > DISCORD_MAX_MESSAGE_LENGTH) {
                 const placeholder = 'Reconnected to the inference provider.';
                 await input.provider.editMessage({
-                  channelId: input.channel.channelId,
+                  channelId: channel.channelId,
                   messageId,
                   text: isFooterCarrier
                     ? `${placeholder}\n\n${footerText}`
@@ -333,7 +365,7 @@ export async function processDiscordFastAgentMessage(input: {
               }
 
               await input.provider.editMessage({
-                channelId: input.channel.channelId,
+                channelId: channel.channelId,
                 messageId,
                 text: replacementText,
               });
