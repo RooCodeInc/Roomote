@@ -14,6 +14,8 @@ import {
 } from '@roomote/db/server';
 import {
   OPENAI_COMPATIBLE_PROVIDER_ID,
+  ROOMOTE_INFERENCE_API_KEY_ENV_VAR_NAME,
+  ROOMOTE_INFERENCE_PROVIDER_ID,
   XAI_SUBSCRIPTION_PROVIDER_ID,
   TASK_MODEL_CATALOG,
   TASK_MODEL_ROLE_DESCRIPTORS,
@@ -585,6 +587,10 @@ export async function saveTaskModelProviderCommand(
 
   const provider = getSetupModelProvider(providerId);
 
+  if (provider.id === ROOMOTE_INFERENCE_PROVIDER_ID) {
+    throw new Error('Roomote inference is managed by your hosting provider.');
+  }
+
   if (provider.authKind === 'oauth') {
     throw new Error(
       `${provider.label} is connected with a subscription account from the Models settings page and does not use an API key.`,
@@ -913,6 +919,10 @@ export async function deleteTaskModelProviderCommand(
   assertAdmin(auth);
 
   const provider = getSetupModelProvider(input.provider);
+
+  if (provider.id === ROOMOTE_INFERENCE_PROVIDER_ID) {
+    throw new Error('Roomote inference is managed by your hosting provider.');
+  }
 
   if (provider.authKind === 'oauth') {
     throw new Error(
@@ -1506,18 +1516,25 @@ export async function lookupTaskModelCommand(
     );
   }
 
+  // Roomote inference routes through OpenRouter but has a separate model-id
+  // namespace so it can coexist with an operator's OpenRouter connection.
+  const roomoteInferenceModel = modelId.startsWith('roomote/');
+  const openRouterLookupModelId = roomoteInferenceModel
+    ? `openrouter/${modelId.slice('roomote/'.length)}`
+    : modelId;
+
   // Only the OpenRouter model API supports single-model lookup; every other
   // provider (Vercel AI Gateway and direct labs such as Anthropic) resolves
   // from the models.dev catalog.
-  if (!modelId.startsWith('openrouter/')) {
+  if (!openRouterLookupModelId.startsWith('openrouter/')) {
     return lookupModelFromModelsDevCatalog(modelId);
   }
 
-  // Shared runtime-first resolution, including the free-trial fallback key,
-  // so metadata lookups work on trial-only deployments.
-  const openRouterKey = await resolveModelProviderEnvValue([
-    'OPENROUTER_API_KEY',
-  ]);
+  const openRouterKey = await resolveModelProviderEnvValue(
+    roomoteInferenceModel
+      ? ROOMOTE_INFERENCE_API_KEY_ENV_VAR_NAME
+      : 'OPENROUTER_API_KEY',
+  );
 
   if (!openRouterKey) {
     return {
@@ -1528,7 +1545,9 @@ export async function lookupTaskModelCommand(
     };
   }
 
-  const openRouterModelSlug = modelId.slice('openrouter/'.length);
+  const openRouterModelSlug = openRouterLookupModelId.slice(
+    'openrouter/'.length,
+  );
   const [openRouterAuthor, ...openRouterSlugParts] =
     openRouterModelSlug.split('/');
   const openRouterSlug = openRouterSlugParts.join('/');

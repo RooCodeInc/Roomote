@@ -75,7 +75,10 @@ export async function resolveGatewayUpstream(
     return {
       ok: false,
       status: 404,
-      error: `No ${provider.name} API key is configured for this deployment`,
+      error:
+        provider.id === 'roomote'
+          ? 'Roomote inference is unavailable. Connect an inference provider to continue.'
+          : `No ${provider.name} API key is configured for this deployment`,
     };
   }
 

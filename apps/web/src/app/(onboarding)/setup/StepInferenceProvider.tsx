@@ -11,6 +11,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import {
   CHATGPT_SUBSCRIPTION_PROVIDER_ID,
+  ROOMOTE_INFERENCE_PROVIDER_ID,
   XAI_SUBSCRIPTION_PROVIDER_ID,
   OPENAI_COMPATIBLE_PROVIDER_ID,
   getDefaultAdditionalEnvValues,
@@ -212,11 +213,8 @@ export function StepInferenceProvider({
   const xaiSubscriptionConnected = Boolean(
     modelSetup.xaiSubscriptionConnected || xaiStatus?.connected,
   );
-  // A free-trial fallback key must not present the provider as configured
-  // via env: picking it from the list means connecting a real credential.
   const hasRuntimeProviderKey =
-    selectedProviderStatus?.runtimeApiKeySatisfied === true &&
-    selectedProviderStatus?.trialKeySatisfied !== true;
+    selectedProviderStatus?.runtimeApiKeySatisfied === true;
   const hasSavedProviderKey =
     selectedProviderStatus?.savedApiKeySatisfied === true;
   const primaryCredentialLabel =
@@ -226,9 +224,12 @@ export function StepInferenceProvider({
   // connected, so the picker only offers providers that can be selected.
   const sortedModelProviders = useMemo(
     () =>
-      [...modelSetup.providers].sort((left, right) =>
-        left.label.localeCompare(right.label),
-      ),
+      modelSetup.providers
+        .filter(
+          (provider) =>
+            !provider.hidden && provider.id !== ROOMOTE_INFERENCE_PROVIDER_ID,
+        )
+        .sort((left, right) => left.label.localeCompare(right.label)),
     [modelSetup.providers],
   );
   const shouldShowSavedValueMask =

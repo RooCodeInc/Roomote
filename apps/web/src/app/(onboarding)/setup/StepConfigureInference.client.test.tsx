@@ -111,7 +111,9 @@ describe('StepConfigureInference', () => {
     expect(screen.getByTestId('gift')).toBeInTheDocument();
     expect(screen.getByTestId('plug')).toBeInTheDocument();
     expect(
-      screen.getByText('Roomote trial inference goes through OpenRouter.'),
+      screen.getByText(
+        'Roomote inference includes a few free credits when it is available.',
+      ),
     ).toBeInTheDocument();
   });
 

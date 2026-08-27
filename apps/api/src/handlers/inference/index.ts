@@ -153,6 +153,29 @@ function buildInferenceResponseHeaders(upstreamHeaders: Headers): Headers {
   return headers;
 }
 
+function rewriteRoomoteRequestModel(bodyText: string): string {
+  try {
+    const body: unknown = JSON.parse(bodyText);
+
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      return bodyText;
+    }
+
+    const request = body as Record<string, unknown>;
+    const model = request.model;
+    if (typeof model !== 'string' || !model.startsWith('roomote/')) {
+      return bodyText;
+    }
+
+    return JSON.stringify({
+      ...request,
+      model: model.slice('roomote/'.length),
+    });
+  } catch {
+    return bodyText;
+  }
+}
+
 /**
  * The upstream path is everything after the provider segment. The router
  * only matches `/:provider/*`, so the marker is always present.
@@ -371,12 +394,21 @@ inference.on(['POST', 'GET'], '/:provider/*', async (c) => {
   let requestBody: BodyInit | null = c.req.raw.body;
   let useDuplexHalf = Boolean(c.req.raw.body);
 
-  if (providerId === 'github-copilot' && method === 'POST') {
+  if (
+    (providerId === 'github-copilot' || providerId === 'roomote') &&
+    method === 'POST'
+  ) {
     const bodyText = await c.req.text();
-    requestBody = bodyText;
+    requestBody =
+      providerId === 'roomote'
+        ? rewriteRoomoteRequestModel(bodyText)
+        : bodyText;
     useDuplexHalf = false;
 
-    if (copilotRequestBodyHasVisionContent(bodyText)) {
+    if (
+      providerId === 'github-copilot' &&
+      copilotRequestBodyHasVisionContent(bodyText)
+    ) {
       injectedHeaders['Copilot-Vision-Request'] = 'true';
     }
   }
@@ -417,6 +449,16 @@ inference.on(['POST', 'GET'], '/:provider/*', async (c) => {
           elapsedMs: Date.now() - startedAt,
         }),
       );
+
+      if (providerId === 'roomote' && upstreamResponse.status === 402) {
+        return c.json(
+          {
+            error:
+              'Roomote inference credits are exhausted. Connect an inference provider to continue.',
+          },
+          402,
+        );
+      }
     }
 
     return new Response(

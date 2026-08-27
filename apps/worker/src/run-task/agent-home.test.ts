@@ -398,6 +398,25 @@ describe('generateOpenCodeConfig provider support', () => {
     });
   });
 
+  it('rebases managed Roomote inference onto its separate gateway route', () => {
+    const result = generateOpenCodeConfig({
+      homeDir: createHomeDir(),
+      runtimeEnv: {
+        R_MODEL: 'roomote/openai/gpt-5.6-luna',
+        R_INFERENCE_GATEWAY_URL: 'https://api.example.com/api/inference',
+        R_INFERENCE_GATEWAY_KEYS: 'R_TRIAL_OPENROUTER_API_KEY',
+      },
+    });
+    const config = JSON.parse(result.configContent) as {
+      provider: { roomote: { options: Record<string, unknown> } };
+    };
+
+    expect(config.provider.roomote.options).toMatchObject({
+      baseURL: 'https://api.example.com/api/inference/roomote/v1',
+      apiKey: '{env:ROOMOTE_CLOUD_TOKEN}',
+    });
+  });
+
   it('binds OpenCode Go to its dedicated key in direct mode', () => {
     const result = generateOpenCodeConfig({
       homeDir: createHomeDir(),

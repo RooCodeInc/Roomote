@@ -6,6 +6,7 @@ import { toast } from 'sonner';
 import {
   CHATGPT_SUBSCRIPTION_PROVIDER_ID,
   OPENAI_COMPATIBLE_PROVIDER_ID,
+  ROOMOTE_INFERENCE_PROVIDER_ID,
   XAI_SUBSCRIPTION_PROVIDER_ID,
   getDefaultAdditionalEnvValues,
   getModelProviderLabel,
@@ -149,10 +150,21 @@ function ConnectedProviderRow({
   onEdit: () => void;
   onDelete: () => void;
 }) {
-  // A free-trial fallback key connects the provider but must not lock the
-  // row: saving an operator key over it is exactly how a trial ends.
-  const hasRuntimeKey =
-    provider.runtimeApiKeySatisfied && !provider.trialKeySatisfied;
+  if (provider.id === ROOMOTE_INFERENCE_PROVIDER_ID) {
+    return (
+      <div className={`${PROVIDER_GRID_ROW_CLASS} py-3 first:pt-0 last:pb-0`}>
+        <span className="min-w-0 truncate text-sm font-medium">
+          {provider.label}
+        </span>
+        <p className="text-sm text-muted-foreground">
+          Managed by Roomote with free credits. Add your own provider at any
+          time to continue after credits end.
+        </p>
+      </div>
+    );
+  }
+
+  const hasRuntimeKey = provider.runtimeApiKeySatisfied;
   const primaryCredentialLabel = provider.envVarLabel ?? 'API key';
   const runtimeKeyTooltip = provider.envVarName
     ? `Set by ${provider.envVarName}, not changeable in the UI.`
@@ -316,15 +328,11 @@ function ProviderCredentialsDialog({
       field.required &&
       (additionalEnvValues[field.envVarName]?.trim() ?? '').length === 0,
   );
-  // A free-trial fallback key is not an operator credential: editing a
-  // trial-only provider is exactly the save-your-own-key flow, so an empty
-  // form must stay unsubmittable (the server validator would reject it).
   const hasExistingPrimaryCredential = Boolean(
     mode === 'edit' &&
     selectedProvider &&
     (selectedProvider.savedApiKeySatisfied ||
-      (selectedProvider.runtimeApiKeySatisfied &&
-        !selectedProvider.trialKeySatisfied)),
+      selectedProvider.runtimeApiKeySatisfied),
   );
   const hasMissingPrimaryCredential =
     !hasExistingPrimaryCredential && apiKey.trim().length === 0;

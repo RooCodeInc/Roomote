@@ -18,9 +18,8 @@ const BLOCKED_WORKER_ENV_KEYS = new Set([
   'DASHBOARD_PASSWORD',
   'SETUP_TOKEN',
   'MODAL_TOKEN_SECRET',
-  // The free-trial OpenRouter key is inference-gateway-served like the
-  // primary OpenRouter credential; block it here too so no env passthrough
-  // can ever ship it into a sandbox.
+  // The hosting-managed Roomote inference key is gateway-served. Block it so
+  // no env passthrough can ever ship it into a sandbox.
   'R_TRIAL_OPENROUTER_API_KEY',
   ...DISABLED_MODEL_PROVIDER_ENV_VAR_NAMES,
 ]);

@@ -6,6 +6,7 @@ import { useMutation, useQuery } from '@tanstack/react-query';
 import {
   getSetupNewComputeProvisioningState,
   isSetupProvisionableComputeProvider,
+  ROOMOTE_INFERENCE_PROVIDER_ID,
   type SetupAuthProviderId,
 } from '@roomote/types';
 
@@ -396,12 +397,15 @@ export function useSetupFlow(
           );
         case 'inference': {
           const trialInferenceAvailable = status.modelSetup.providers?.some(
-            (provider) => provider.trialKeySatisfied === true,
+            (provider) =>
+              provider.id === ROOMOTE_INFERENCE_PROVIDER_ID &&
+              provider.runtimeApiKeySatisfied,
           );
           const operatorProviderConfigured = status.modelSetup.providers?.some(
             (provider) =>
-              provider.savedApiKeySatisfied ||
-              (provider.runtimeApiKeySatisfied && !provider.trialKeySatisfied),
+              provider.id !== ROOMOTE_INFERENCE_PROVIDER_ID &&
+              (provider.savedApiKeySatisfied ||
+                provider.runtimeApiKeySatisfied),
           );
 
           return (

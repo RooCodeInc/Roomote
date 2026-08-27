@@ -86,7 +86,7 @@ export function StepConfigureInference({
         </div>
 
         <p className="text-sm text-foreground/50">
-          Roomote trial inference goes through OpenRouter.
+          Roomote inference includes a few free credits when it is available.
         </p>
 
         <SetupFooter onBack={onBack} />

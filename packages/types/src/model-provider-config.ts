@@ -9,6 +9,7 @@ import {
 import {
   OPENROUTER_RECOMMENDED_TASK_MODEL_SLUGS,
   mapRecommendedTaskModels,
+  type RecommendedTaskModelSlugMap,
   type SuggestedTaskModel,
 } from './recommended-task-models';
 import {
@@ -46,6 +47,11 @@ export const CHATGPT_SUBSCRIPTION_PROVIDER_ID = 'chatgpt' as const;
  */
 export const XAI_SUBSCRIPTION_PROVIDER_ID = 'xai-subscription' as const;
 
+/** Hosting-managed inference backed by Roomote credits. */
+export const ROOMOTE_INFERENCE_PROVIDER_ID = 'roomote' as const;
+export const ROOMOTE_INFERENCE_API_KEY_ENV_VAR_NAME =
+  'R_TRIAL_OPENROUTER_API_KEY' as const;
+
 /**
  * Model-id prefix used when composing or looking up task models for a setup
  * catalog provider. Subscription connect surfaces are not prefixes: ChatGPT
@@ -69,6 +75,7 @@ export function getSetupProviderTaskModelPrefix(
 export const OPENCODE_GO_API_KEY_ENV_VAR_NAME = 'OPENCODE_GO_API_KEY' as const;
 
 export const SETUP_MODEL_PROVIDER_IDS = [
+  ROOMOTE_INFERENCE_PROVIDER_ID,
   'openrouter',
   ...ENABLED_DIRECT_TASK_MODEL_PROVIDER_IDS,
   CHATGPT_SUBSCRIPTION_PROVIDER_ID,
@@ -408,6 +415,39 @@ const OPENAI_RECOMMENDED_MODEL_PRESETS = [
 ] as const satisfies readonly RecommendedModelPreset[];
 
 export const SETUP_MODEL_PROVIDER_CATALOG = [
+  {
+    id: ROOMOTE_INFERENCE_PROVIDER_ID,
+    label: 'Roomote inference',
+    envVarName: ROOMOTE_INFERENCE_API_KEY_ENV_VAR_NAME,
+    defaultRoomoteModel: 'roomote/openai/gpt-5.6-luna',
+    authKind: 'api-key',
+    suggestedTaskModels: mapRecommendedTaskModels(
+      Object.fromEntries(
+        Object.entries(OPENROUTER_RECOMMENDED_TASK_MODEL_SLUGS).map(
+          ([modelId, openRouterModelId]) => [
+            modelId,
+            openRouterModelId.replace(/^openrouter\//u, 'roomote/'),
+          ],
+        ),
+      ) as RecommendedTaskModelSlugMap,
+    ),
+    recommendedPresets: [
+      {
+        id: 'efficient',
+        label: 'Efficient',
+        default: true,
+        roles: {
+          coding: { modelId: 'roomote/openai/gpt-5.6-luna' },
+          helper: { modelId: 'roomote/openai/gpt-5.6-luna' },
+          codeReview: { modelId: 'roomote/openai/gpt-5.6-luna' },
+          explore: { modelId: 'roomote/openai/gpt-5.6-luna' },
+          planning: { modelId: 'roomote/openai/gpt-5.6-luna' },
+        },
+      },
+    ],
+    // Only hosting can enable this provider. It is never a user connection.
+    hidden: true,
+  },
   {
     id: 'openrouter',
     label: 'OpenRouter',
@@ -1380,13 +1420,6 @@ export function getDefaultRecommendedModelPreset(
 export type SetupModelProviderStatus = SetupModelProviderDescriptor & {
   runtimeApiKeySatisfied: boolean;
   savedApiKeySatisfied: boolean;
-  /**
-   * True when `runtimeApiKeySatisfied` holds only because a free-trial
-   * fallback credential (`TRIAL_MODEL_PROVIDER_ENV_VAR_FALLBACKS`) is
-   * present. The UI keeps the connect/edit affordances in this state so an
-   * operator can save their own key, which then outranks the trial key.
-   */
-  trialKeySatisfied?: boolean;
   additionalEnvValues: Record<string, string>;
 };
 
@@ -1810,39 +1843,6 @@ export function isConfiguredEnvValue(
   return normalizeOptionalString(value) !== null;
 }
 
-/**
- * Free-trial fallback credentials, keyed by the provider credential they
- * stand in for. A hosting provisioner can inject a capped, Roomote-minted
- * key under the fallback name; it acts as the provider's credential only
- * when the primary name is configured nowhere (runtime env or saved), so
- * connecting a real key always wins. Runtime-env only by design: the values
- * are never persisted, never editable in Settings, and stay on the control
- * plane like any other inference-gateway-served key.
- */
-export const TRIAL_MODEL_PROVIDER_ENV_VAR_FALLBACKS: Readonly<
-  Partial<Record<string, string>>
-> = {
-  OPENROUTER_API_KEY: 'R_TRIAL_OPENROUTER_API_KEY',
-};
-
-export function getTrialModelProviderEnvVarName(
-  primaryEnvVarName: string,
-): string | undefined {
-  return TRIAL_MODEL_PROVIDER_ENV_VAR_FALLBACKS[primaryEnvVarName];
-}
-
-export function isTrialModelProviderEnvVarConfigured(
-  primaryEnvVarName: string,
-  runtimeEnv: Partial<Record<string, string | undefined>>,
-): boolean {
-  const trialEnvVarName = getTrialModelProviderEnvVarName(primaryEnvVarName);
-
-  return (
-    trialEnvVarName !== undefined &&
-    isConfiguredEnvValue(runtimeEnv[trialEnvVarName])
-  );
-}
-
 /** Legacy Google Vertex credential name, reserved and stripped while the provider is disabled. */
 const GOOGLE_APPLICATION_CREDENTIALS_ENV_VAR_NAME =
   'GOOGLE_APPLICATION_CREDENTIALS';
@@ -2024,7 +2024,6 @@ export function buildSetupModelStatus(input: {
         additionalEnvValues: {},
         runtimeApiKeySatisfied: false,
         savedApiKeySatisfied: oauthConnected,
-        trialKeySatisfied: false,
       };
     }
 
@@ -2036,11 +2035,8 @@ export function buildSetupModelStatus(input: {
     const requiredEnvVarNames =
       getSetupModelProviderRequiredEnvVarNames(provider);
     const hasRequiredEnvVars = requiredEnvVarNames.length > 0;
-    // A free-trial fallback credential satisfies its primary name at runtime
-    // so setup skips the inference step and the provider reads as connected.
     const isRuntimeConfigured = (name: string) =>
-      isConfiguredEnvValue(runtimeEnv[name]) ||
-      isTrialModelProviderEnvVarConfigured(name, runtimeEnv);
+      isConfiguredEnvValue(runtimeEnv[name]);
     const isPersisted = (name: string) => persistedEnvVarNameSet.has(name);
     const additionalEnvValues = Object.fromEntries(
       [
@@ -2076,21 +2072,11 @@ export function buildSetupModelStatus(input: {
         (name) => isPersisted(name) || isRuntimeConfigured(name),
       ) &&
       requiredEnvVarNames.some(isPersisted);
-    const trialKeySatisfied =
-      runtimeApiKeySatisfied &&
-      !savedApiKeySatisfied &&
-      requiredEnvVarNames.some(
-        (name) =>
-          !isConfiguredEnvValue(runtimeEnv[name]) &&
-          isTrialModelProviderEnvVarConfigured(name, runtimeEnv),
-      );
-
     return {
       ...provider,
       additionalEnvValues,
       runtimeApiKeySatisfied,
       savedApiKeySatisfied,
-      trialKeySatisfied,
     };
   };
 

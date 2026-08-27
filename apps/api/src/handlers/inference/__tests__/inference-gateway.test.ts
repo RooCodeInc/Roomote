@@ -260,6 +260,70 @@ describe('inference gateway', () => {
     }
   });
 
+  it('routes Roomote models through OpenRouter with only the managed key', async () => {
+    const fetchMock = stubUpstreamFetch();
+    const response = await appRequest(
+      createApp(createRunToken()),
+      '/api/inference/roomote/v1/chat/completions',
+      { model: 'roomote/openai/gpt-5.6-luna', messages: [] },
+    );
+
+    expect(response.status).toBe(200);
+    expect(mockResolveModelProviderEnvValue).toHaveBeenCalledWith([
+      'R_TRIAL_OPENROUTER_API_KEY',
+    ]);
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('https://openrouter.ai/api/v1/chat/completions');
+    expect(new Headers(init.headers).get('authorization')).toBe(
+      'Bearer provider-secret-key',
+    );
+    expect(JSON.parse(String(init.body))).toMatchObject({
+      model: 'openai/gpt-5.6-luna',
+    });
+  });
+
+  it('returns an actionable response when managed Roomote inference is unavailable', async () => {
+    mockResolveModelProviderEnvValue.mockResolvedValue(undefined);
+    const fetchMock = stubUpstreamFetch();
+
+    const response = await appRequest(
+      createApp(createRunToken()),
+      '/api/inference/roomote/v1/chat/completions',
+      { model: 'roomote/openai/gpt-5.6-luna', messages: [] },
+    );
+
+    expect(response.status).toBe(404);
+    await expect(response.json()).resolves.toMatchObject({
+      error:
+        'Roomote inference is unavailable. Connect an inference provider to continue.',
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('returns an actionable response when Roomote inference credits are exhausted', async () => {
+    stubUpstreamFetch(
+      new Response(
+        JSON.stringify({ error: { message: 'insufficient credits' } }),
+        {
+          status: 402,
+          headers: { 'content-type': 'application/json' },
+        },
+      ),
+    );
+
+    const response = await appRequest(
+      createApp(createRunToken()),
+      '/api/inference/roomote/v1/chat/completions',
+      { model: 'roomote/openai/gpt-5.6-luna', messages: [] },
+    );
+
+    expect(response.status).toBe(402);
+    await expect(response.json()).resolves.toMatchObject({
+      error:
+        'Roomote inference credits are exhausted. Connect an inference provider to continue.',
+    });
+  });
+
   it.each([
     [
       'azure',

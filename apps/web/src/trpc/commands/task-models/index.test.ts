@@ -124,6 +124,7 @@ import {
 } from './index';
 
 const PROVIDER_ENV_VAR_NAMES = [
+  'R_TRIAL_OPENROUTER_API_KEY',
   'OPENROUTER_API_KEY',
   'OPENAI_API_KEY',
   'AZURE_API_KEY',
@@ -469,6 +470,40 @@ describe('lookupTaskModelCommand', () => {
       expect.objectContaining({
         headers: expect.objectContaining({
           Authorization: 'Bearer saved-openrouter-key',
+        }),
+        signal: expect.any(AbortSignal),
+      }),
+    );
+  });
+
+  it('uses the managed Roomote key to look up Roomote model metadata through OpenRouter', async () => {
+    process.env.R_TRIAL_OPENROUTER_API_KEY = 'managed-roomote-key';
+    fetchMock.mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          data: {
+            id: 'openai/gpt-5.6-luna',
+            name: 'GPT 5.6 Luna',
+          },
+        }),
+        { headers: { 'content-type': 'application/json' } },
+      ),
+    );
+
+    await expect(
+      lookupTaskModelCommand(buildMockAuth(), {
+        modelId: 'roomote/openai/gpt-5.6-luna',
+      }),
+    ).resolves.toMatchObject({
+      modelId: 'roomote/openai/gpt-5.6-luna',
+      displayName: 'GPT 5.6 Luna',
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://openrouter.ai/api/v1/model/openai/gpt-5.6-luna',
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          Authorization: 'Bearer managed-roomote-key',
         }),
         signal: expect.any(AbortSignal),
       }),
@@ -1758,6 +1793,14 @@ describe('task model provider commands', () => {
     expect(txInsert).not.toHaveBeenCalled();
   });
 
+  it('rejects saving the hosting-managed Roomote provider', async () => {
+    await expect(
+      saveTaskModelProviderCommand(buildMockAuth(), { provider: 'roomote' }),
+    ).rejects.toThrow('Roomote inference is managed by your hosting provider.');
+
+    expect(mockUpsertDeploymentEnvironmentVariables).not.toHaveBeenCalled();
+  });
+
   it('saves the API key and seeds the recommended models for a newly connected provider', async () => {
     mockGetPersistedEnvironmentVariableNames
       .mockResolvedValueOnce([])
@@ -2118,6 +2161,14 @@ describe('task model provider commands', () => {
 
     expect(mockTxDelete).not.toHaveBeenCalled();
     expect(txOnConflictDoUpdate).not.toHaveBeenCalled();
+  });
+
+  it('rejects deleting the hosting-managed Roomote provider', async () => {
+    await expect(
+      deleteTaskModelProviderCommand(buildMockAuth(), { provider: 'roomote' }),
+    ).rejects.toThrow('Roomote inference is managed by your hosting provider.');
+
+    expect(mockTxDelete).not.toHaveBeenCalled();
   });
 
   it('deletes provider credentials and cascades removing provider models without deleting usage data', async () => {

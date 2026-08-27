@@ -8,7 +8,6 @@ import {
   getEnabledTaskModels,
   getModelProviderEnvKeyCandidates,
   getTaskModelCatalog,
-  getTrialModelProviderEnvVarName,
   INFERENCE_GATEWAY_CHATGPT_ENV_VAR_NAME,
   INFERENCE_GATEWAY_GITHUB_COPILOT_ENV_VAR_NAME,
   INFERENCE_GATEWAY_KEYS_ENV_VAR_NAME,
@@ -18,6 +17,8 @@ import {
   normalizeDeploymentModelConfig,
   normalizeOptionalReasoningEffort,
   parseModelProviderEnvKeys,
+  ROOMOTE_INFERENCE_API_KEY_ENV_VAR_NAME,
+  ROOMOTE_INFERENCE_PROVIDER_ID,
   resolveSetupModelProviderIdFromModel,
   TASK_MODEL_ROLE_DESCRIPTORS,
   TASK_MODEL_ROLES,
@@ -164,10 +165,7 @@ function resolveProviderKeyNames({
 /**
  * Resolve a single model-provider env value with the same precedence the task
  * runtime uses: the runtime process env first, then the persisted (encrypted)
- * deployment environment variables. When neither source configures a name,
- * its free-trial fallback (`TRIAL_MODEL_PROVIDER_ENV_VAR_FALLBACKS`) is
- * consulted last, from the runtime env only, so a Roomote-minted trial key
- * never outranks a credential the operator configured themselves.
+ * deployment environment variables.
  */
 export async function resolveModelProviderEnvValue(
   envVarNames: string | readonly string[],
@@ -198,17 +196,6 @@ export async function resolveModelProviderEnvValue(
 
     if (normalizedValue) {
       return normalizedValue;
-    }
-  }
-
-  for (const envVarName of names) {
-    const trialEnvVarName = getTrialModelProviderEnvVarName(envVarName);
-    const trialValue = trialEnvVarName
-      ? normalizeConfiguredValue(runtimeEnv[trialEnvVarName])
-      : undefined;
-
-    if (trialValue) {
-      return trialValue;
     }
   }
 
@@ -437,6 +424,14 @@ async function resolveModelRuntimeEnv(
       }),
     ]),
   ];
+  const managedRoomoteInferenceSelected = [
+    ...resolvedRoleModels,
+    ...gatewaySwitchableModelIds,
+  ].some(
+    (modelId) =>
+      resolveSetupModelProviderIdFromModel(modelId) ===
+      ROOMOTE_INFERENCE_PROVIDER_ID,
+  );
   // When the gateway is active, the configured provider keys it can serve
   // (OpenRouter, Anthropic, OpenAI, Gemini, the aggregators, Bedrock) stay on
   // the control plane and are advertised to the worker by name via
@@ -444,23 +439,14 @@ async function resolveModelRuntimeEnv(
   // gateway URL from its own platform URL and rebases exactly these providers.
   // Only configured keys are withheld; credentials for disabled providers are
   // filtered before this point and never flow to the task runtime.
-  // Free-trial fallback keys count as configured for gateway coverage and
-  // control-plane resolution, but only when the primary name is configured
-  // nowhere, matching `resolveModelProviderEnvValue`.
-  const resolveTrialFallbackValue = (name: string): string | undefined => {
-    const trialEnvVarName = getTrialModelProviderEnvVarName(name);
-
-    return trialEnvVarName
-      ? normalizeConfiguredValue(runtimeEnv[trialEnvVarName])
-      : undefined;
-  };
   const gatewayServedKeyNames = inferenceGateway
     ? gatewayProviderKeyNames.filter(
         (name) =>
           isInferenceGatewayCoveredEnvVar(name) &&
-          (normalizeConfiguredValue(runtimeEnv[name]) !== undefined ||
-            normalizeConfiguredValue(persistedEnvVars[name]) !== undefined ||
-            resolveTrialFallbackValue(name) !== undefined),
+          ((name === ROOMOTE_INFERENCE_API_KEY_ENV_VAR_NAME &&
+            managedRoomoteInferenceSelected) ||
+            normalizeConfiguredValue(runtimeEnv[name]) !== undefined ||
+            normalizeConfiguredValue(persistedEnvVars[name]) !== undefined),
       )
     : [];
   const gatewayServedKeyNameSet = new Set(gatewayServedKeyNames);
@@ -473,8 +459,7 @@ async function resolveModelRuntimeEnv(
 
       const value =
         normalizeConfiguredValue(runtimeEnv[envVarName]) ??
-        normalizeConfiguredValue(persistedEnvVars[envVarName]) ??
-        resolveTrialFallbackValue(envVarName);
+        normalizeConfiguredValue(persistedEnvVars[envVarName]);
 
       return value ? [[envVarName, value]] : [];
     }),

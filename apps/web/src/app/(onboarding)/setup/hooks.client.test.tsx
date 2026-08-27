@@ -175,20 +175,19 @@ function trialModelSetup(overrides: Partial<Record<string, unknown>> = {}) {
   return {
     runtimeRoomoteModel: null,
     runtimeRoomoteModelSatisfied: false,
-    runtimeProviderId: 'openrouter',
+    runtimeProviderId: 'roomote',
     persistedRoomoteModel: null,
     persistedProviderId: null,
-    preselectedProvider: 'openrouter',
+    preselectedProvider: 'roomote',
     setupSatisfied: true,
     setupSatisfiedByRuntimeEnv: true,
     chatgptConnected: false,
     providers: [
       {
-        id: 'openrouter',
-        label: 'OpenRouter',
+        id: 'roomote',
+        label: 'Roomote inference',
         runtimeApiKeySatisfied: true,
         savedApiKeySatisfied: false,
-        trialKeySatisfied: true,
       },
     ],
     ...overrides,
@@ -359,7 +358,7 @@ describe('useSetupFlow', () => {
       modelSetup: trialModelSetup(),
       setupNewState: {
         authProvider: null,
-        modelProvider: 'openrouter',
+        modelProvider: 'roomote',
         computeProvider: null,
         sourceControlProvider: null,
         selectedRepositoryIds: [],

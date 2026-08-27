@@ -57,6 +57,7 @@ import { formatMetadataSummary } from './model-metadata';
 import {
   CHATGPT_SUBSCRIPTION_PROVIDER_ID,
   DEFAULT_MODEL_ROLE_REASONING_EFFORTS,
+  ROOMOTE_INFERENCE_PROVIDER_ID,
   TASK_MODEL_ROLE_DESCRIPTORS,
   TASK_MODEL_ROLES,
   XAI_SUBSCRIPTION_PROVIDER_ID,
@@ -753,9 +754,9 @@ export function ModelSettingsSection({
   const settingsData = settingsQuery.data;
   const sortedConnectedProviders = useMemo(
     () =>
-      [...connectedProviders].sort((left, right) =>
-        left.label.localeCompare(right.label),
-      ),
+      connectedProviders
+        .filter((provider) => provider.id !== ROOMOTE_INFERENCE_PROVIDER_ID)
+        .sort((left, right) => left.label.localeCompare(right.label)),
     [connectedProviders],
   );
   const chatgptConnected = sortedConnectedProviders.some(

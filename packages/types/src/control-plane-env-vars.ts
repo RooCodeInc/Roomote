@@ -4,7 +4,7 @@ import { SETUP_SOURCE_CONTROL_PROVIDER_CATALOG } from './setup-source-control-co
 import { OPENCODE_AUTH_CONTENT_ENV_VAR_NAME } from './chatgpt-subscription';
 import {
   DISABLED_MODEL_PROVIDER_ENV_VAR_NAMES,
-  TRIAL_MODEL_PROVIDER_ENV_VAR_FALLBACKS,
+  ROOMOTE_INFERENCE_API_KEY_ENV_VAR_NAME,
 } from './model-provider-config';
 
 /**
@@ -151,14 +151,9 @@ export const CONTROL_PLANE_ENV_VAR_NAMES: ReadonlySet<string> = new Set<string>(
     ...MEDIA_PROVIDER_ENV_VAR_NAMES,
     ...DECLARATIVE_ENVIRONMENT_ENV_VAR_NAMES,
     ...DISABLED_MODEL_PROVIDER_ENV_VAR_NAMES,
-    // Free-trial fallback provider keys are injected by the hosting
-    // platform's deployment environment and served through the inference
-    // gateway; a persisted copy would flow into sandboxes through the
-    // generic env path, so the names are reserved from the editor and
-    // stripped from job env like the other control-plane credentials.
-    ...Object.values(TRIAL_MODEL_PROVIDER_ENV_VAR_FALLBACKS).filter(
-      (name): name is string => typeof name === 'string',
-    ),
+    // Hosting-managed Roomote inference is served only through the inference
+    // gateway, never configured through the generic environment editor.
+    ROOMOTE_INFERENCE_API_KEY_ENV_VAR_NAME,
   ],
 );
 

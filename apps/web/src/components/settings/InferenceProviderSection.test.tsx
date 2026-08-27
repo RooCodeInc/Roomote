@@ -160,8 +160,8 @@ import { InferenceProviderSection } from './InferenceProviderSection';
 function buildProviderSetup(
   overrides: {
     openrouterRuntimeKey?: boolean;
-    openrouterTrialKey?: boolean;
     openrouterSavedKey?: boolean;
+    managedRoomote?: boolean;
     openaiSavedKey?: boolean;
     anthropicSavedKey?: boolean;
     chatgptConnected?: boolean;
@@ -185,6 +185,22 @@ function buildProviderSetup(
       persistedProviderId: null,
       preselectedProvider: 'openrouter' as const,
       providers: [
+        ...(overrides.managedRoomote
+          ? [
+              {
+                id: 'roomote' as SetupModelProviderId,
+                label: 'Roomote inference',
+                envVarName: 'R_TRIAL_OPENROUTER_API_KEY',
+                defaultRoomoteModel: 'roomote/openai/gpt-5.6-luna',
+                authKind: 'api-key' as const,
+                suggestedTaskModels: [],
+                hidden: true,
+                runtimeApiKeySatisfied: true,
+                savedApiKeySatisfied: false,
+                additionalEnvValues: {} satisfies Record<string, string>,
+              },
+            ]
+          : []),
         {
           id: 'openrouter' as SetupModelProviderId,
           label: 'OpenRouter',
@@ -192,10 +208,7 @@ function buildProviderSetup(
           defaultRoomoteModel: 'openrouter/openai/gpt-5.4',
           authKind: 'api-key' as const,
           suggestedTaskModels: [],
-          runtimeApiKeySatisfied:
-            (overrides.openrouterRuntimeKey ?? false) ||
-            (overrides.openrouterTrialKey ?? false),
-          trialKeySatisfied: overrides.openrouterTrialKey ?? false,
+          runtimeApiKeySatisfied: overrides.openrouterRuntimeKey ?? false,
           savedApiKeySatisfied: overrides.openrouterSavedKey ?? false,
           additionalEnvValues: {} satisfies Record<string, string>,
         },
@@ -899,39 +912,25 @@ describe('InferenceProviderSection', () => {
     expect(mutateAsyncMock).toHaveBeenCalledWith({ provider: 'anthropic' });
   });
 
-  it('keeps a trial-satisfied key editable and requires a real key to save', async () => {
+  it('shows managed Roomote inference separately while OpenRouter remains addable', () => {
     providerSetupData.current = buildProviderSetup({
-      openrouterTrialKey: true,
+      managedRoomote: true,
     });
-    mutateAsyncMock.mockResolvedValue({});
 
     renderInferenceProviderSection();
 
-    // Trial keys are not presented as env-locked: the edit affordance stays.
-    const editButton = screen.getByRole('button', {
-      name: 'Edit OpenRouter API key',
-    });
-    fireEvent.click(editButton);
-
-    // The empty form must not be submittable: the trial key is not an
-    // operator credential, so saving requires typing a real key.
-    expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
-
-    await act(async () => {
-      fireEvent.change(screen.getByLabelText('New API key for OpenRouter'), {
-        target: { value: 'sk-or-own-key' },
-      });
-    });
-    expect(screen.getByRole('button', { name: 'Save' })).toBeEnabled();
-
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: 'Save' }));
-    });
-
-    expect(mutateAsyncMock).toHaveBeenCalledWith({
-      provider: 'openrouter',
-      apiKey: 'sk-or-own-key',
-    });
+    expect(screen.getByText('Roomote inference')).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: /edit roomote inference/i }),
+    ).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /Add provider/ }));
+    fireEvent.click(screen.getByRole('combobox', { name: 'Provider to add' }));
+    expect(
+      screen.getByRole('option', { name: 'OpenRouter' }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole('option', { name: 'Roomote inference' }),
+    ).not.toBeInTheDocument();
   });
 
   it('locks a runtime env-managed key behind a masked field and lock tooltip', () => {

@@ -6,6 +6,7 @@ import {
   OPENAI_COMPATIBLE_PROVIDER_ID,
   type OpenAiCompatibleProviderInstance,
 } from './openai-compatible-providers';
+import { ROOMOTE_INFERENCE_API_KEY_ENV_VAR_NAME } from './model-provider-config';
 
 /** Fallback direct-mode base URL for default and named OpenAI-compatible ids. */
 const OPENAI_COMPATIBLE_DEFAULT_FALLBACK_BASE_URL = 'http://127.0.0.1:4000/v1';
@@ -46,6 +47,14 @@ export function parseTaskModelContextWindows(
 }
 
 const STATIC_OPENAI_COMPATIBLE_PROVIDER_CONFIGS = {
+  roomote: {
+    name: 'Roomote inference',
+    baseUrlEnvVarName: 'ROOMOTE_INFERENCE_BASE_URL',
+    fallbackBaseUrl: 'https://openrouter.ai/api/v1',
+    apiKeyEnvVarName: ROOMOTE_INFERENCE_API_KEY_ENV_VAR_NAME,
+    keyless: false,
+    allowOpenAiEnvFallback: false,
+  },
   [OPENAI_COMPATIBLE_PROVIDER_ID]: {
     name: DEFAULT_OPENAI_COMPATIBLE_INSTANCE.label,
     baseUrlEnvVarName: DEFAULT_OPENAI_COMPATIBLE_INSTANCE.baseUrlEnvVarName,

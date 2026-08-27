@@ -1154,7 +1154,7 @@ describe('resolveEffectiveModelRuntimeEnv', () => {
   });
 });
 
-describe('free-trial fallback key', () => {
+describe('managed Roomote inference key', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockDecryptSecrets.mockImplementation(async (value) => value);
@@ -1165,9 +1165,9 @@ describe('free-trial fallback key', () => {
     mockGetFreshXaiAccessToken.mockResolvedValue(null);
   });
 
-  it('advertises OpenRouter as gateway-served without leaking the trial key', async () => {
+  it('advertises Roomote inference as gateway-served without leaking its key', async () => {
     mockDeploymentSettingsFindFirst.mockResolvedValue({
-      runtimeModelConfig: { roomoteModel: 'openrouter/openai/gpt-5.6-luna' },
+      runtimeModelConfig: { roomoteModel: 'roomote/openai/gpt-5.6-luna' },
       taskModelSettings: null,
     });
 
@@ -1177,16 +1177,33 @@ describe('free-trial fallback key', () => {
     });
 
     expect(env.R_INFERENCE_GATEWAY_KEYS?.split(',')).toContain(
-      'OPENROUTER_API_KEY',
+      'R_TRIAL_OPENROUTER_API_KEY',
     );
     expect(env).not.toHaveProperty('OPENROUTER_API_KEY');
     expect(env).not.toHaveProperty('R_TRIAL_OPENROUTER_API_KEY');
     expect(Object.values(env)).not.toContain('sk-trial');
   });
 
-  it('materializes the trial key on the control plane when nothing else is configured', async () => {
+  it('keeps an unavailable Roomote provider on the gateway for an actionable failure', async () => {
     mockDeploymentSettingsFindFirst.mockResolvedValue({
-      runtimeModelConfig: { roomoteModel: 'openrouter/openai/gpt-5.6-luna' },
+      runtimeModelConfig: { roomoteModel: 'roomote/openai/gpt-5.6-luna' },
+      taskModelSettings: null,
+    });
+
+    const env = await resolveSandboxModelRuntimeEnv({
+      runtimeEnv: {},
+      deploymentEnvVars: {},
+    });
+
+    expect(env.R_INFERENCE_GATEWAY_KEYS?.split(',')).toContain(
+      'R_TRIAL_OPENROUTER_API_KEY',
+    );
+    expect(env).not.toHaveProperty('R_TRIAL_OPENROUTER_API_KEY');
+  });
+
+  it('materializes the managed key on the control plane for Roomote models', async () => {
+    mockDeploymentSettingsFindFirst.mockResolvedValue({
+      runtimeModelConfig: { roomoteModel: 'roomote/openai/gpt-5.6-luna' },
       taskModelSettings: null,
     });
 
@@ -1195,13 +1212,13 @@ describe('free-trial fallback key', () => {
       deploymentEnvVars: {},
     });
 
-    expect(env.OPENROUTER_API_KEY).toBe('sk-trial');
-    expect(env).not.toHaveProperty('R_TRIAL_OPENROUTER_API_KEY');
+    expect(env.R_TRIAL_OPENROUTER_API_KEY).toBe('sk-trial');
+    expect(env).not.toHaveProperty('OPENROUTER_API_KEY');
   });
 
-  it('never outranks a saved operator key', async () => {
+  it('does not materialize an unrelated user-provided OpenRouter key', async () => {
     mockDeploymentSettingsFindFirst.mockResolvedValue({
-      runtimeModelConfig: { roomoteModel: 'openrouter/openai/gpt-5.6-luna' },
+      runtimeModelConfig: { roomoteModel: 'roomote/openai/gpt-5.6-luna' },
       taskModelSettings: null,
     });
 
@@ -1210,25 +1227,25 @@ describe('free-trial fallback key', () => {
       deploymentEnvVars: { OPENROUTER_API_KEY: 'sk-saved' },
     });
 
-    expect(env.OPENROUTER_API_KEY).toBe('sk-saved');
+    expect(env.R_TRIAL_OPENROUTER_API_KEY).toBe('sk-trial');
+    expect(env).not.toHaveProperty('OPENROUTER_API_KEY');
   });
 
-  it('resolveModelProviderEnvValue prefers runtime, then saved, then trial', async () => {
+  it('resolveModelProviderEnvValue only resolves the requested provider key', async () => {
     await expect(
-      resolveModelProviderEnvValue(['OPENROUTER_API_KEY'], {
+      resolveModelProviderEnvValue(['R_TRIAL_OPENROUTER_API_KEY'], {
         runtimeEnv: {
-          OPENROUTER_API_KEY: 'sk-runtime',
-          R_TRIAL_OPENROUTER_API_KEY: 'sk-trial',
+          R_TRIAL_OPENROUTER_API_KEY: 'sk-runtime',
         },
       }),
     ).resolves.toBe('sk-runtime');
 
     mockEnvironmentVariablesFindMany.mockResolvedValue([
-      { name: 'OPENROUTER_API_KEY', value: 'sk-saved' },
+      { name: 'R_TRIAL_OPENROUTER_API_KEY', value: 'sk-saved' },
     ]);
     await expect(
-      resolveModelProviderEnvValue(['OPENROUTER_API_KEY'], {
-        runtimeEnv: { R_TRIAL_OPENROUTER_API_KEY: 'sk-trial' },
+      resolveModelProviderEnvValue(['R_TRIAL_OPENROUTER_API_KEY'], {
+        runtimeEnv: {},
       }),
     ).resolves.toBe('sk-saved');
 
@@ -1237,7 +1254,7 @@ describe('free-trial fallback key', () => {
       resolveModelProviderEnvValue(['OPENROUTER_API_KEY'], {
         runtimeEnv: { R_TRIAL_OPENROUTER_API_KEY: 'sk-trial' },
       }),
-    ).resolves.toBe('sk-trial');
+    ).resolves.toBeUndefined();
   });
 });
 

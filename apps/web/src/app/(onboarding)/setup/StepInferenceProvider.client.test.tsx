@@ -785,7 +785,7 @@ describe('StepInferenceProvider ChatGPT subscription', () => {
   });
 });
 
-describe('StepInferenceProvider trial fallback', () => {
+describe('StepInferenceProvider managed Roomote inference', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockUseQueryClient.mockReturnValue({
@@ -795,20 +795,21 @@ describe('StepInferenceProvider trial fallback', () => {
     setupQueryMocks({ chatgptConnected: false });
   });
 
-  function trialOpenrouterProviderStatus(): SetupModelStatus['providers'][number] {
+  function managedRoomoteProviderStatus(): SetupModelStatus['providers'][number] {
     return {
       ...openrouterProviderStatus(),
+      id: 'roomote',
+      label: 'Roomote inference',
       runtimeApiKeySatisfied: true,
-      trialKeySatisfied: true,
     };
   }
 
-  it('keeps the API key field editable for a trial-satisfied provider', () => {
+  it('does not offer managed Roomote inference as a selectable connection', () => {
     render(
       <StepInferenceProvider
         modelSetup={buildModelSetup({
           providers: [
-            trialOpenrouterProviderStatus(),
+            managedRoomoteProviderStatus(),
             chatgptProviderStatus(false),
           ],
         })}
@@ -816,9 +817,8 @@ describe('StepInferenceProvider trial fallback', () => {
       />,
     );
 
-    selectProvider('openrouter');
-
-    const input = screen.getByPlaceholderText('API key for OpenRouter');
-    expect(input).toBeEnabled();
+    expect(
+      screen.queryByRole('button', { name: /roomote inference/i }),
+    ).not.toBeInTheDocument();
   });
 });

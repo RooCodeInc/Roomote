@@ -1393,7 +1393,7 @@ describe('chooseSetupTrialInferenceCommand', () => {
     vi.unstubAllEnvs();
   });
 
-  it('seeds the Efficient OpenRouter defaults and records the provider choice', async () => {
+  it('seeds the Efficient Roomote defaults and records the managed provider choice', async () => {
     vi.stubEnv('R_TRIAL_OPENROUTER_API_KEY', 'sk-trial');
     const { tx, inserted } = createTxStub({
       setupNewState: {},
@@ -1406,7 +1406,7 @@ describe('chooseSetupTrialInferenceCommand', () => {
 
     const result = await chooseSetupTrialInferenceCommand(buildMockAuth());
 
-    expect(result.setupNewState.modelProvider).toBe('openrouter');
+    expect(result.setupNewState.modelProvider).toBe('roomote');
     const runtimeModelConfigInsert = inserted.find(
       (values) => 'runtimeModelConfig' in values,
     );
@@ -1415,12 +1415,12 @@ describe('chooseSetupTrialInferenceCommand', () => {
     );
 
     expect(runtimeModelConfigInsert?.runtimeModelConfig).toMatchObject({
-      roomoteModel: 'openrouter/openai/gpt-5.6-luna',
-      roomoteSmallModel: 'openrouter/openai/gpt-5.6-luna',
-      roomotePlanningModel: 'openrouter/openai/gpt-5.6-luna',
+      roomoteModel: 'roomote/openai/gpt-5.6-luna',
+      roomoteSmallModel: 'roomote/openai/gpt-5.6-luna',
+      roomotePlanningModel: 'roomote/openai/gpt-5.6-luna',
     });
     expect(taskModelSettingsInsert?.taskModelSettings).toMatchObject({
-      defaultModelId: 'openrouter/openai/gpt-5.6-luna',
+      defaultModelId: 'roomote/openai/gpt-5.6-luna',
     });
   });
 
@@ -1455,8 +1455,8 @@ describe('chooseSetupTrialInferenceCommand', () => {
       setupNewState: {},
       runtimeModelConfig: null,
       taskModelSettings: {
-        allowedModelIds: ['openrouter/openai/gpt-5.6-terra'],
-        defaultModelId: 'openrouter/openai/gpt-5.6-terra',
+        allowedModelIds: ['roomote/openai/gpt-5.6-terra'],
+        defaultModelId: 'roomote/openai/gpt-5.6-terra',
       },
     });
     mockDbTransaction.mockImplementation(
@@ -1482,7 +1482,7 @@ describe('chooseSetupTrialInferenceCommand', () => {
 
     const result = await chooseSetupTrialInferenceCommand(buildMockAuth());
 
-    expect(result.setupNewState.modelProvider).toBe('openrouter');
+    expect(result.setupNewState.modelProvider).toBe('roomote');
     expect(
       inserted.find((values) => 'runtimeModelConfig' in values),
     ).toBeDefined();

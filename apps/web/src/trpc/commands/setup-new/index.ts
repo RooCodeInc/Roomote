@@ -54,6 +54,7 @@ import {
   buildSetupSourceControlStatus,
   CHATGPT_SUBSCRIPTION_PROVIDER_ID,
   XAI_SUBSCRIPTION_PROVIDER_ID,
+  ROOMOTE_INFERENCE_PROVIDER_ID,
   OPENAI_COMPATIBLE_PROVIDER_ID,
   collectSetupModelProviderCredentialValues,
   createEmptyDeploymentModelConfig,
@@ -79,7 +80,6 @@ import {
   isConfiguredEnvValue,
   isRequiredComputeField,
   normalizeTaskModelSettings,
-  DEFAULT_TASK_MODEL_SETTINGS,
   NON_SECRET_AUTH_ENV_VAR_NAMES,
   NON_SECRET_COMPUTE_ENV_VAR_NAMES,
   NON_SECRET_SOURCE_CONTROL_ENV_VAR_NAMES,
@@ -291,11 +291,9 @@ async function savePersistedTaskModelSettings(
 /**
  * Free-trial inference. A hosting provisioner can inject a capped,
  * Roomote-minted OpenRouter key as `R_TRIAL_OPENROUTER_API_KEY`. The setup
- * wizard's inference step then offers "start with free credits" alongside
- * connecting a provider; choosing it applies OpenRouter's "Efficient" preset
- * as ordinary editable config, so first tasks run on an inexpensive default
- * and every model and provider control keeps working because nothing is
- * pinned through env.
+ * wizard's inference step then offers managed Roomote inference alongside
+ * connecting a provider. It uses Roomote model ids so an operator's future
+ * OpenRouter connection remains entirely separate.
  *
  * This is an explicit operator choice, never an automatic seed: the command
  * no-ops once any inference choice exists (a selected provider, saved model
@@ -370,8 +368,8 @@ export async function chooseSetupTrialInferenceCommand(auth: UserAuthSuccess) {
     });
     const hasOperatorProvider = status.providers.some(
       (provider) =>
-        provider.savedApiKeySatisfied ||
-        (provider.runtimeApiKeySatisfied && !provider.trialKeySatisfied),
+        provider.id !== ROOMOTE_INFERENCE_PROVIDER_ID &&
+        (provider.savedApiKeySatisfied || provider.runtimeApiKeySatisfied),
     );
 
     if (hasOperatorProvider) {
@@ -380,12 +378,19 @@ export async function chooseSetupTrialInferenceCommand(auth: UserAuthSuccess) {
       );
     }
 
-    const provider = getSetupModelProvider('openrouter');
+    const provider = getSetupModelProvider(ROOMOTE_INFERENCE_PROVIDER_ID);
     const runtimeModelConfig = buildRecommendedDeploymentModelConfig(
       provider,
       TRIAL_PRESET_ID,
     );
     const defaultModelId = runtimeModelConfig.roomoteModel;
+    const trialModels = provider.suggestedTaskModels.map((suggestion) =>
+      buildTaskModelOption({
+        id: suggestion.id,
+        displayName: suggestion.displayName,
+        family: suggestion.family,
+      }),
+    );
     const setupNewState = normalizeSetupNewState({
       ...currentState,
       modelProvider: provider.id,
@@ -397,8 +402,9 @@ export async function chooseSetupTrialInferenceCommand(auth: UserAuthSuccess) {
       savePersistedRuntimeModelConfig(runtimeModelConfig, tx),
       savePersistedTaskModelSettings(
         normalizeTaskModelSettings({
-          ...DEFAULT_TASK_MODEL_SETTINGS,
-          ...(defaultModelId ? { defaultModelId } : {}),
+          models: trialModels,
+          allowedModelIds: trialModels.map((model) => model.id),
+          defaultModelId: defaultModelId ?? provider.defaultRoomoteModel,
         }),
         tx,
       ),
@@ -1463,6 +1469,9 @@ export async function saveSetupNewModelConfigCommand(
   }
 
   const provider = getSetupModelProvider(providerId);
+  if (provider.id === ROOMOTE_INFERENCE_PROVIDER_ID) {
+    throw new Error('Roomote inference is managed by your hosting provider.');
+  }
   const isOauthProvider = provider.authKind === 'oauth';
 
   const [chatgptConnected, githubCopilotConnected, xaiSubscriptionConnected] =
