@@ -297,12 +297,28 @@ export function TaskInfoPanel({
     task.attributionLabel?.trim() ||
     getUserDisplayName(task.user) ||
     PRODUCT_NAME;
+  const originalPrompt = task.prompt?.trim() ? task.prompt : null;
 
   return (
     <>
       <SidePanelHeader title="Task Info" onClose={onClose} />
       <div className="min-h-0 flex-1 overflow-y-auto scroll-thin px-4 py-4">
         <div className="space-y-6">
+          {originalPrompt ? (
+            <section>
+              <div className="mb-1 flex items-center gap-2">
+                <h3 className="text-sm font-medium">Original Prompt</h3>
+                <CopyIconButton
+                  content={originalPrompt}
+                  tooltip="Copy original prompt"
+                />
+              </div>
+              <p className="max-h-48 overflow-y-auto whitespace-pre-wrap wrap-break-word rounded-md bg-muted/50 p-3 text-sm">
+                {originalPrompt}
+              </p>
+            </section>
+          ) : null}
+
           <table className="text-sm">
             <tbody>
               <tr>
