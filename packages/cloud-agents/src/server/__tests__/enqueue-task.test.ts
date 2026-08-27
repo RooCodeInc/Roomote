@@ -1897,6 +1897,110 @@ describe('enqueueTask PR linkage', () => {
     ).resolves.toBe(reviewedSha);
   });
 
+  it('anchors past follow-up runs that carry no payload headSha', async () => {
+    const prNumber = 82;
+    const reviewedSha = '3'.repeat(40);
+    const pushedSha = '4'.repeat(40);
+    const prUrl = `https://github.com/acme/widgets/pull/${prNumber}`;
+    const makeLinkage = (prSha: string) => ({
+      provider: 'github' as const,
+      repository: 'acme/widgets',
+      prNumber,
+      prUrl,
+      prTitle: 'Anchor past follow-ups',
+      prSha,
+    });
+    const launch = (
+      task: FreshTaskLaunch['task'],
+      existingTaskId?: string,
+      prSha = reviewedSha,
+    ) =>
+      enqueueTask(
+        {
+          ...(existingTaskId ? { existingTaskId } : {}),
+          task,
+          initiator: { kind: 'automation', key: 'review_code' },
+          workflow: 'pr_review',
+          surface: 'github',
+          trigger: 'webhook',
+          prLinkage: makeLinkage(prSha),
+        },
+        { enqueue: false, skipEarlyTitleGeneration: true },
+      );
+    const finishRun = async (runId: number, taskId: string) => {
+      await db
+        .update(taskRuns)
+        .set({
+          status: RunStatus.Completed,
+          startedAt: new Date(),
+          completedAt: new Date(),
+        })
+        .where(eq(taskRuns.id, runId));
+      await db
+        .update(tasks)
+        .set({ state: 'completed' })
+        .where(eq(tasks.id, taskId));
+    };
+
+    const reviewRun = await launch({
+      type: TaskPayloadKind.GithubPrReview,
+      requestedWorkKindDecision: explicitWorkKind,
+      payload: {
+        repo: 'acme/widgets',
+        prNumber,
+        prTitle: 'Anchor past follow-ups',
+        prUrl,
+        headSha: reviewedSha,
+      },
+    } as FreshTaskLaunch['task']);
+    createdTaskIds.push(reviewRun.taskId);
+    await finishRun(reviewRun.id, reviewRun.taskId);
+
+    // A mention follow-up runs between the review and the next push. Its
+    // payload records no headSha, so it must not become the anchor.
+    const followUpRun = await launch(
+      {
+        type: TaskPayloadKind.GithubPrReviewFollowUp,
+        requestedWorkKindDecision: explicitWorkKind,
+        payload: {
+          repo: 'acme/widgets',
+          prNumber,
+          prTitle: 'Anchor past follow-ups',
+          commentBody: 'Please tweak the error message',
+        },
+      } as FreshTaskLaunch['task'],
+      reviewRun.taskId,
+    );
+    await finishRun(followUpRun.id, reviewRun.taskId);
+
+    const syncRun = await launch(
+      {
+        type: TaskPayloadKind.GithubPrReviewSync,
+        requestedWorkKindDecision: explicitWorkKind,
+        payload: {
+          repo: 'acme/widgets',
+          prNumber,
+          prTitle: 'Anchor past follow-ups',
+          prUrl,
+          headSha: pushedSha,
+        },
+      } as FreshTaskLaunch['task'],
+      reviewRun.taskId,
+      pushedSha,
+    );
+
+    // The newest sibling (the follow-up) has no payload headSha; falling
+    // back to the bumped linkage there would resurrect the "no new
+    // commits" bug. The anchor must skip to the run that recorded one.
+    await expect(
+      getPrSha({
+        currentRunId: syncRun.id,
+        repo: 'acme/widgets',
+        prNumber,
+      }),
+    ).resolves.toBe(reviewedSha);
+  });
+
   it('serializes concurrent first reviews into one durable PR task', async () => {
     const prNumber = 80;
     const prUrl = `https://github.com/acme/widgets/pull/${prNumber}`;

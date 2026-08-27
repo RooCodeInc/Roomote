@@ -896,18 +896,28 @@ export async function getPrSha({
     conditions.push(ne(taskRuns.id, currentRunId));
   }
 
+  // Anchor on a run's own payload headSha, immutable once launched. The
+  // linkage row's prSha is NOT a reliable anchor: a sync launched onto the
+  // existing review task updates that shared row to the incoming head
+  // before this query runs, so reading it through a sibling run returns
+  // the new head as the "previous" one — the sync then sees
+  // last_review_sha == current_head_sha and reports no new commits despite
+  // real pushes (observed on live sync reviews, 2026-08-27). Follow-up runs
+  // carry no payload headSha, so pick the newest sibling that has one; the
+  // linkage prSha is only a last resort when no run recorded a head.
+  const payloadHeadSha = sql<string | null>`${taskRuns.payload}->>'headSha'`;
+  const [anchored] = await db
+    .select({ headSha: payloadHeadSha })
+    .from(taskPullRequests)
+    .innerJoin(tasks, eq(tasks.id, taskPullRequests.taskId))
+    .innerJoin(taskRuns, eq(taskRuns.taskId, tasks.id))
+    .where(and(...conditions, isNotNull(payloadHeadSha)))
+    .orderBy(desc(taskRuns.createdAt))
+    .limit(1);
+  if (anchored?.headSha) return anchored.headSha;
+
   const [result] = await db
-    .select({
-      prSha: taskPullRequests.prSha,
-      // The run's own payload head, immutable once launched. The linkage
-      // row's prSha is NOT a reliable anchor: a sync launched onto the
-      // existing review task updates that shared row to the incoming head
-      // before this query runs, so reading it through a sibling run returns
-      // the new head as the "previous" one — the sync then sees
-      // last_review_sha == current_head_sha and reports no new commits
-      // despite real pushes (observed on live sync reviews, 2026-08-27).
-      payloadHeadSha: sql<string | null>`${taskRuns.payload}->>'headSha'`,
-    })
+    .select({ prSha: taskPullRequests.prSha })
     .from(taskPullRequests)
     .innerJoin(tasks, eq(tasks.id, taskPullRequests.taskId))
     .innerJoin(taskRuns, eq(taskRuns.taskId, tasks.id))
@@ -915,7 +925,7 @@ export async function getPrSha({
     .orderBy(desc(taskRuns.createdAt))
     .limit(1);
 
-  return result?.payloadHeadSha ?? result?.prSha ?? undefined;
+  return result?.prSha ?? undefined;
 }
 
 export async function getPrReviewCommentId({
