@@ -70,6 +70,23 @@ describe('SessionWorkspace', () => {
     expect(
       screen.getByRole('heading', { name: 'Session info' }),
     ).toBeInTheDocument();
+    const table = screen.getByRole('table');
+    const panel = table.parentElement!.parentElement!;
+
+    expect(panel).toHaveClass(
+      'flex',
+      'min-h-0',
+      'min-w-0',
+      'flex-1',
+      'flex-col',
+    );
+    expect(panel.parentElement).toHaveClass(
+      'flex',
+      'min-h-0',
+      'min-w-0',
+      'flex-1',
+      'flex-col',
+    );
     expect(
       screen.queryByRole('button', { name: 'Close session info' }),
     ).toBeNull();
