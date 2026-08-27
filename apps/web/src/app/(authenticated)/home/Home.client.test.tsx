@@ -19,6 +19,8 @@ let currentEnvironments: Array<{ id: string; name: string }> | undefined = [
   { id: 'env-2', name: 'Secondary Env' },
 ];
 let currentEnvironmentsPending = false;
+let currentCommunicationsFastModeDefault = false;
+let currentPersonalPreferencesLoading = false;
 
 const {
   mockPush,
@@ -93,6 +95,20 @@ vi.mock('@/hooks/environments', () => ({
   }),
 }));
 
+vi.mock('@/hooks/usePersonalPreferences', () => ({
+  usePersonalPreferences: () => ({
+    preferences: {
+      colorTheme: 'system',
+      mindReaderMode: false,
+      narrationMode: false,
+      communicationsFastModeDefault: currentCommunicationsFastModeDefault,
+    },
+    isLoading: currentPersonalPreferencesLoading,
+    isUpdating: false,
+    setPreferences: vi.fn(),
+  }),
+}));
+
 vi.mock('@/hooks/task-runs', () => ({
   useCreateStandardTaskRun: mockUseCreateStandardTaskRun,
   useRouteHomeTask: mockUseRouteHomeTask,
@@ -155,19 +171,27 @@ vi.mock('@/components/tasks', async () => {
   const { useEffect } = await vi.importActual<typeof import('react')>('react');
   const { useFormContext } =
     await vi.importActual<typeof import('react-hook-form')>('react-hook-form');
+  const { useWorkspaceStorage } = await vi.importActual<
+    typeof import('@/hooks/useWorkspaceStorage')
+  >('@/hooks/useWorkspaceStorage');
 
   return {
     ...actual,
     SelectWorkspace: ({
       allowAuto,
       allowFast,
+      autoSelectDefaultWorkspace,
+      onInvalidWorkspaceReset,
       allowBranchSelection,
     }: {
       allowAuto?: boolean;
       allowFast?: boolean;
+      autoSelectDefaultWorkspace?: boolean;
+      onInvalidWorkspaceReset?: () => void;
       allowBranchSelection?: boolean;
     }) => {
       const { watch, setValue } = useFormContext();
+      const { setWorkspace } = useWorkspaceStorage();
       const repository = watch('repository');
       const environmentId = watch('environmentId');
 
@@ -179,13 +203,24 @@ vi.mock('@/components/tasks', async () => {
         setValue('repository', AUTO_WORKSPACE_VALUE);
         setValue('environmentId', undefined);
         setValue('branch', '');
-      }, [allowAuto, environmentId, setValue]);
+        setWorkspace({ workspace: { type: 'auto' } });
+        onInvalidWorkspaceReset?.();
+      }, [
+        allowAuto,
+        environmentId,
+        onInvalidWorkspaceReset,
+        setValue,
+        setWorkspace,
+      ]);
 
       return (
         <div>
           <span data-testid="repository">{repository ?? ''}</span>
           <span data-testid="environment">{environmentId ?? ''}</span>
           <span data-testid="allow-auto">{String(Boolean(allowAuto))}</span>
+          <span data-testid="auto-select-default-workspace">
+            {String(Boolean(autoSelectDefaultWorkspace))}
+          </span>
           <span data-testid="allow-branch-selection">
             {String(Boolean(allowBranchSelection))}
           </span>
@@ -361,6 +396,8 @@ describe('Home', () => {
       { id: 'env-2', name: 'Secondary Env' },
     ];
     currentEnvironmentsPending = false;
+    currentCommunicationsFastModeDefault = false;
+    currentPersonalPreferencesLoading = false;
     localStorage.clear();
     vi.clearAllMocks();
 
@@ -426,6 +463,84 @@ describe('Home', () => {
     });
 
     expect(mockCreateStandardTaskRun).not.toHaveBeenCalled();
+  });
+
+  it('defaults to Fast when the personal preference is enabled', async () => {
+    currentCommunicationsFastModeDefault = true;
+
+    render(<Home initialPlaceholderIndex={0} />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('repository')).toHaveTextContent(
+        FAST_EXECUTION,
+      );
+    });
+    expect(
+      screen.getByTestId('auto-select-default-workspace'),
+    ).toHaveTextContent('false');
+  });
+
+  it('keeps the normal Auto default when the personal preference is disabled', async () => {
+    render(<Home initialPlaceholderIndex={0} />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('repository')).toHaveTextContent(
+        AUTO_WORKSPACE_VALUE,
+      );
+    });
+    expect(
+      screen.getByTestId('auto-select-default-workspace'),
+    ).toHaveTextContent('true');
+  });
+
+  it('waits for the preference before allowing another workspace default', async () => {
+    currentEnvironments = [{ id: 'env-sole', name: 'Only Env' }];
+    currentPersonalPreferencesLoading = true;
+
+    const { rerender } = render(<Home initialPlaceholderIndex={0} />);
+
+    expect(
+      screen.getByTestId('auto-select-default-workspace'),
+    ).toHaveTextContent('false');
+    expect(screen.getByTestId('repository')).toHaveTextContent(
+      AUTO_WORKSPACE_VALUE,
+    );
+
+    currentCommunicationsFastModeDefault = true;
+    currentPersonalPreferencesLoading = false;
+    rerender(<Home initialPlaceholderIndex={0} />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('repository')).toHaveTextContent(
+        FAST_EXECUTION,
+      );
+    });
+  });
+
+  it.each([
+    {
+      name: 'environment',
+      workspace: { type: 'environment', id: 'env-1' },
+    },
+    {
+      name: 'repository',
+      workspace: { type: 'repository', value: 'RooCodeInc/Roomote' },
+    },
+  ])('prefers Fast over a persisted $name workspace', async ({ workspace }) => {
+    currentCommunicationsFastModeDefault = true;
+    localStorage.setItem(
+      'roomote-workspace:deployment',
+      JSON.stringify({ workspace }),
+    );
+
+    render(<Home initialPlaceholderIndex={0} />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('repository')).toHaveTextContent(
+        FAST_EXECUTION,
+      );
+      expect(screen.getByTestId('environment')).toHaveTextContent('');
+    });
   });
 
   it('starts a Fast session with an image-only prompt', async () => {
@@ -1152,7 +1267,27 @@ describe('Home', () => {
     expect(mockCreateStandardTaskRun).not.toHaveBeenCalled();
   });
 
-  it('prefers environmentId from the URL when present', async () => {
+  it('restores the Fast preference after normalizing a stale persisted workspace', async () => {
+    currentCommunicationsFastModeDefault = true;
+    localStorage.setItem(
+      'roomote-workspace:deployment',
+      JSON.stringify({
+        workspace: { type: 'environment', id: 'env-stale' },
+      }),
+    );
+
+    render(<Home initialPlaceholderIndex={0} />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('repository')).toHaveTextContent(
+        FAST_EXECUTION,
+      );
+      expect(screen.getByTestId('environment')).toHaveTextContent('');
+    });
+  });
+
+  it('prefers environmentId from the URL when Fast is preferred', async () => {
+    currentCommunicationsFastModeDefault = true;
     currentSearchParams = 'environmentId=env-created';
 
     render(<Home initialPlaceholderIndex={0} />);

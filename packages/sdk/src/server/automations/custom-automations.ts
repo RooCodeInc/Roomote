@@ -17,13 +17,14 @@ import {
   releaseCustomAutomationLaunchClaim,
   tryClaimCustomAutomationLaunch,
   type CustomAutomation,
+  slackInstallationChannels,
   slackInstallations,
 } from '@roomote/db/server';
-import { SlackNotifier } from '@roomote/slack';
 import {
   ALL_REPOSITORIES,
   isConfiguredAutomationTarget,
   isBackgroundAutomationUserTargetKind,
+  isCommunicationAutomationTarget,
   resolveEvalHarnessSelection,
   TaskPayloadKind,
   type AutomationTarget,
@@ -34,7 +35,7 @@ import {
 import {
   buildDestinationPromptContext,
   buildDestinationTaskPayloadFields,
-  findTeamsConversationServiceUrl,
+  findTeamsConversationRoute,
   listConnectedCommunicationProviders,
   type ResolvedAutomationDestination,
 } from './destination';
@@ -53,12 +54,13 @@ import {
 } from './types';
 import { findUserDirectMessageDestination } from '../lib/user-direct-message';
 import { createDiscordCommunicationProviderFromRuntimeCredentials } from '../lib/discord-communication';
-import { buildCustomAutomationSlackMessage } from '../lib/manager-slack';
+import { createTeamsCommunicationProviderFromRuntimeCredentials } from '../lib/teams-communication';
+import { createTelegramCommunicationProviderFromRuntimeCredentials } from '../lib/telegram-communication';
 import {
-  buildSlackClientMessageId,
   deliverFastAgentParentEvent,
   type FastAgentParentEvent,
 } from '../lib/fast-agent-parent-event';
+import { recordFastAgentConversationMessage } from '../lib/fast-agent-provider-message';
 
 const LOG_PREFIX = '[custom-automations]';
 
@@ -113,24 +115,38 @@ async function resolveDestination(
       : null;
   }
 
-  if (provider === 'teams') {
-    const metadataServiceUrl =
-      typeof target.metadata?.serviceUrl === 'string'
-        ? target.metadata.serviceUrl.trim()
-        : '';
-    const serviceUrl =
-      metadataServiceUrl ||
-      (await findTeamsConversationServiceUrl(target.externalRef));
+  if (provider === 'slack') {
+    const channel = await db.query.slackInstallationChannels.findFirst({
+      where: eq(slackInstallationChannels.channelId, target.externalRef),
+      columns: { id: true },
+      with: {
+        slackInstallation: {
+          columns: { isActive: true, teamId: true },
+        },
+      },
+    });
+    return channel?.slackInstallation.isActive
+      ? {
+          provider,
+          channelId: target.externalRef,
+          teamId: channel.slackInstallation.teamId,
+          source: 'automation_target',
+        }
+      : null;
+  }
 
-    if (!serviceUrl) {
+  if (provider === 'teams') {
+    const route = await findTeamsConversationRoute(target.externalRef);
+    if (!route) {
       return null;
     }
 
     return {
       provider,
       channelId: target.externalRef,
+      teamId: route.workspaceId,
       source: 'automation_target',
-      serviceUrl,
+      serviceUrl: route.serviceUrl,
     };
   }
 
@@ -237,20 +253,16 @@ The ${promptContext.surfaceLabel} conversation above is available for reports th
 }
 
 function isFastDeliveryTarget(target: AutomationTarget): boolean {
-  return (
-    (target.provider === 'slack' &&
-      (target.targetKind === 'slack_channel' ||
-        target.targetKind === 'slack_user')) ||
-    (target.provider === 'discord' && target.targetKind === 'discord_channel')
-  );
+  return isCommunicationAutomationTarget(target);
 }
 
 async function buildFastAutomationConversation(params: {
   automation: CustomAutomation;
   eventId: string;
   destination: ResolvedAutomationDestination | null;
+  target: AutomationTarget | null;
 }): Promise<{ conversation: FastAgentConversation; rootMessageId?: string }> {
-  const { automation, destination, eventId } = params;
+  const { automation, destination, eventId, target } = params;
   if (!destination) {
     return {
       conversation: {
@@ -262,57 +274,55 @@ async function buildFastAutomationConversation(params: {
   }
 
   if (destination.provider === 'slack') {
+    if (!destination.teamId) {
+      throw new Error('Slack destination routing is incomplete.');
+    }
     const installation = await db.query.slackInstallations.findFirst({
-      where: destination.teamId
-        ? and(
-            eq(slackInstallations.isActive, true),
-            eq(slackInstallations.teamId, destination.teamId),
-          )
-        : eq(slackInstallations.isActive, true),
+      where: and(
+        eq(slackInstallations.isActive, true),
+        eq(slackInstallations.teamId, destination.teamId),
+      ),
       columns: { botAccessToken: true, teamId: true },
     });
     if (!installation?.botAccessToken) {
       throw new Error('Slack is not connected.');
     }
-    const slack = new SlackNotifier(installation.botAccessToken);
-    const kickoffText = `${automation.name} is running.`;
-    const rootMessageId = await slack.postMessage({
-      channel: destination.channelId,
-      ...buildCustomAutomationSlackMessage({
-        automationId: automation.id,
-        automationName: automation.name,
-        text: kickoffText,
-        contentBlocks: [
-          {
-            type: 'markdown',
-            text: `**${automation.name}** is running.`,
-          },
-        ],
-      }),
-      unfurl_links: false,
-      unfurl_media: false,
-      client_msg_id: buildSlackClientMessageId(
-        `fast-automation-root:${eventId}`,
-      ),
-    });
-    if (!rootMessageId) {
-      throw new Error('Slack did not create the Fast automation thread.');
-    }
     return {
-      rootMessageId,
       conversation: {
         surface: 'slack',
         workspaceId: installation.teamId,
-        conversationId: rootMessageId,
+        conversationId: eventId,
         replyTarget: {
           channelId: destination.channelId,
-          threadId: rootMessageId,
         },
       },
     };
   }
 
   if (destination.provider === 'discord') {
+    const provider =
+      await createDiscordCommunicationProviderFromRuntimeCredentials();
+    if (!provider) {
+      throw new Error('Discord is not connected.');
+    }
+    if (target?.targetKind === 'discord_user') {
+      const posted = await provider.postMessage({
+        channelId: destination.channelId,
+        text: `${automation.name} is running.`,
+        textFormat: 'markdown',
+        idempotencyKey: `fast-automation-root:${eventId}`,
+      });
+      return {
+        rootMessageId: posted.messageId,
+        conversation: {
+          surface: 'discord',
+          workspaceId: 'dm',
+          conversationId: eventId,
+          replyTarget: { channelId: destination.channelId },
+        },
+      };
+    }
+
     const channel = await db.query.discordInstallationChannels.findFirst({
       where: eq(discordInstallationChannels.channelId, destination.channelId),
       columns: { id: true },
@@ -322,11 +332,6 @@ async function buildFastAutomationConversation(params: {
     });
     if (!channel?.installation.isActive) {
       throw new Error('Discord destination is no longer available.');
-    }
-    const provider =
-      await createDiscordCommunicationProviderFromRuntimeCredentials();
-    if (!provider) {
-      throw new Error('Discord is not connected.');
     }
     const thread = await provider.createTaskThread({
       channelId: destination.channelId,
@@ -347,7 +352,54 @@ async function buildFastAutomationConversation(params: {
     };
   }
 
-  throw new Error('Fast channel delivery supports Slack and Discord only.');
+  if (destination.provider === 'teams') {
+    if (!destination.serviceUrl || !destination.teamId) {
+      throw new Error('Teams destination routing is incomplete.');
+    }
+    const provider =
+      await createTeamsCommunicationProviderFromRuntimeCredentials();
+    if (!provider) {
+      throw new Error('Teams is not connected.');
+    }
+    const posted = await provider.postMessage({
+      channelId: destination.channelId,
+      serviceUrl: destination.serviceUrl,
+      text: `${automation.name} is running.`,
+      textFormat: 'markdown',
+    });
+    const threaded = target?.targetKind === 'teams_channel';
+    return {
+      rootMessageId: posted.messageId,
+      conversation: {
+        surface: 'teams',
+        workspaceId: destination.teamId,
+        conversationId: eventId,
+        replyTarget: {
+          channelId: destination.channelId,
+          ...(threaded ? { threadId: posted.messageId } : {}),
+          serviceUrl: destination.serviceUrl,
+        },
+      },
+    };
+  }
+
+  if (destination.provider === 'telegram') {
+    const provider =
+      await createTelegramCommunicationProviderFromRuntimeCredentials();
+    if (!provider) {
+      throw new Error('Telegram is not connected.');
+    }
+    return {
+      conversation: {
+        surface: 'telegram',
+        workspaceId: destination.channelId,
+        conversationId: eventId,
+        replyTarget: { channelId: destination.channelId },
+      },
+    };
+  }
+
+  throw new Error('Fast delivery does not support this destination.');
 }
 
 async function runFastCustomAutomation(params: {
@@ -365,6 +417,9 @@ async function runFastCustomAutomation(params: {
       automation: params.automation,
       eventId,
       destination: params.destination,
+      target: isConfiguredAutomationTarget(params.automation.target)
+        ? params.automation.target
+        : null,
     },
   );
   try {
@@ -372,6 +427,13 @@ async function runFastCustomAutomation(params: {
       userId: params.automation.createdByUserId,
       conversation,
     });
+    if (rootMessageId) {
+      await recordFastAgentConversationMessage({
+        sessionId: session.id,
+        conversation,
+        messageId: rootMessageId,
+      });
+    }
     const event: FastAgentParentEvent = {
       type: 'automation_triggered',
       eventId,
@@ -391,23 +453,7 @@ async function runFastCustomAutomation(params: {
   } catch (error) {
     const message = `${params.automation.name} failed: ${error instanceof Error ? error.message : String(error)}`;
     try {
-      if (conversation.surface === 'slack' && rootMessageId) {
-        const installation = await db.query.slackInstallations.findFirst({
-          where: eq(slackInstallations.isActive, true),
-          columns: { botAccessToken: true },
-        });
-        if (installation?.botAccessToken) {
-          await new SlackNotifier(installation.botAccessToken).updateMessage({
-            channel: conversation.replyTarget.channelId,
-            ts: rootMessageId,
-            message: buildCustomAutomationSlackMessage({
-              automationId: params.automation.id,
-              automationName: params.automation.name,
-              text: message,
-            }),
-          });
-        }
-      } else if (conversation.surface === 'discord' && rootMessageId) {
+      if (conversation.surface === 'discord' && rootMessageId) {
         const provider =
           await createDiscordCommunicationProviderFromRuntimeCredentials();
         await provider?.editMessage({
@@ -416,6 +462,36 @@ async function runFastCustomAutomation(params: {
             conversation.replyTarget.channelId,
           messageId: rootMessageId,
           text: message,
+        });
+      } else if (conversation.surface === 'teams' && rootMessageId) {
+        const provider =
+          await createTeamsCommunicationProviderFromRuntimeCredentials();
+        const route = await findTeamsConversationRoute(
+          conversation.replyTarget.channelId,
+          conversation.workspaceId,
+        );
+        const persistedDirectMessageServiceUrl = conversation.replyTarget
+          .threadId
+          ? undefined
+          : conversation.replyTarget.serviceUrl;
+        const serviceUrl =
+          route?.serviceUrl ?? persistedDirectMessageServiceUrl;
+        if (provider && serviceUrl) {
+          await provider.updateMessage({
+            channelId: conversation.replyTarget.channelId,
+            messageId: rootMessageId,
+            serviceUrl,
+            text: message,
+            textFormat: 'markdown',
+          });
+        }
+      } else if (conversation.surface === 'telegram') {
+        const provider =
+          await createTelegramCommunicationProviderFromRuntimeCredentials();
+        await provider?.postMessage({
+          channelId: conversation.replyTarget.channelId,
+          text: message,
+          textFormat: 'markdown',
         });
       }
     } catch (updateError) {

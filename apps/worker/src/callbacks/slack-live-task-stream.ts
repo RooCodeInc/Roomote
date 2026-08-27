@@ -21,9 +21,9 @@ const updateQueues = new Map<number, Promise<void>>();
  * covered by the launcher's "Starting task…" placeholder). */
 const STARTUP_STATUS_MESSAGES: Partial<Record<RunStatus, string>> = {
   [RunStatus.Preparing]: 'Preparing the workspace…',
-  [RunStatus.Spawning]: 'Starting the agent…',
-  [RunStatus.Connecting]: 'Connecting to the agent…',
-  [RunStatus.Running]: 'Agent started, getting to work…',
+  [RunStatus.Spawning]: 'Starting the task…',
+  [RunStatus.Connecting]: 'Connecting to the task…',
+  [RunStatus.Running]: 'Task started, getting to work…',
 };
 
 const WAITING_FOR_INPUT_MESSAGE = 'Waiting for your input…';
@@ -367,6 +367,7 @@ export async function updateSlackLiveTaskStream(
   if (event.type === 'request_user_input_response') {
     state.status = 'in_progress';
     state.awaitingInput = false;
+    state.finalMessage = undefined;
     state.message = CONTINUING_MESSAGE;
     state.provisionalCompletion = false;
     await renderCard(taskRun, context);
@@ -388,15 +389,15 @@ export async function finishSlackLiveTaskStream(
   }
 
   if (status === RunStatus.Idle) {
-    if (
-      state.settled ||
-      state.awaitingInput ||
-      state.finalMessage === undefined
-    ) {
+    if (state.settled) {
       return;
     }
     state.status = 'complete';
-    state.message = state.finalMessage;
+    if (!state.awaitingInput) {
+      state.message =
+        state.finalMessage ?? SLACK_LIVE_TASK_CARD_MESSAGES.completed;
+      state.provisionalCompletion = state.finalMessage === undefined;
+    }
     await renderCard(taskRun, context, { settle: true });
     return;
   }

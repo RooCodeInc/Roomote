@@ -7,18 +7,15 @@ import { formatDistanceToNow } from 'date-fns';
 
 import { formatInferenceCost, getUserDisplayName } from '@/lib';
 import { useLaunchTaskModels } from '@/hooks/task-models/useLaunchTaskModels';
-import { useIsMobile } from '@/hooks/useIsMobile';
 import { WorkspaceSurface } from '@/components/layout';
 import { SideNavItem } from '@/components/layout/side-nav/SideNavItem';
 import {
+  ArrowLeftFromLine,
   Avatar,
   BasicTooltip,
   Button,
   DollarSign,
   Info,
-  ResizableDivider,
-  ResizablePanel,
-  ResizablePanelGroup,
   X,
   Rows4,
   Select,
@@ -26,12 +23,15 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
-  Drawer,
-  DrawerContent,
-  DrawerHeader,
-  DrawerTitle,
 } from '@/components/system';
 import type { SessionTaskSummary } from './SessionTaskCards';
+
+import { SandboxSidePanelHeader } from '../../SandboxSidePanelHeader';
+import {
+  ResponsiveWorkspacePanels,
+  SandboxSideActions,
+} from '../../SandboxWorkspacePanels';
+import { useSandboxLayout } from '../../use-sandbox-layout';
 
 export type SessionInfo = {
   id: string;
@@ -49,6 +49,8 @@ export type SessionInfo = {
 const SURFACE_LABELS: Record<string, string> = {
   slack: 'Slack',
   discord: 'Discord',
+  teams: 'Microsoft Teams',
+  telegram: 'Telegram',
   automation: 'Automation',
   web: 'Web',
 };
@@ -187,19 +189,11 @@ function SessionInfoPanel({
 
   return (
     <>
-      <div className="flex shrink-0 items-center justify-between gap-2 border-b-2 border-card px-4 py-2">
-        <h2 className="text-sm font-medium">Session info</h2>
-        <BasicTooltip content="Close">
-          <Button
-            variant="ghost"
-            size="icon"
-            aria-label="Close session info"
-            onClick={onClose}
-          >
-            <X />
-          </Button>
-        </BasicTooltip>
-      </div>
+      <SandboxSidePanelHeader
+        title="Session info"
+        closeLabel="Close session info"
+        onClose={onClose}
+      />
       <div className="scroll-thin min-h-0 flex-1 overflow-y-auto px-4 py-4">
         <table className="text-sm">
           <tbody>
@@ -247,7 +241,6 @@ export function SessionWorkspace({
   children: ReactNode;
 }) {
   const [isInfoOpen, setIsInfoOpen] = useState(false);
-  const isMobile = useIsMobile();
   const router = useRouter();
   const searchParams = useSearchParams();
   const selectedTaskId = searchParams.get('task');
@@ -288,75 +281,61 @@ export function SessionWorkspace({
   ) : (
     <SessionInfoPanel session={session} onClose={closePanel} />
   );
+  const { isSidebarVisible, toggleSidebar } = useSandboxLayout();
 
   return (
     <WorkspaceSurface
+      className="relative"
       sideActions={
-        <div className="flex h-full shrink-0 flex-col gap-2 overflow-y-auto bg-card py-3 pr-2">
-          <SideNavItem
-            side="right"
-            label="Session info"
-            tooltip="Session info"
-            active={isInfoOpen}
-            icon={Info}
-            onClick={() => setIsInfoOpen((previous) => !previous)}
-          />
-          {session.tasks.length ? (
+        <>
+          <SandboxSideActions isPanelOpen={panelOpen} onShowMain={closePanel}>
             <SideNavItem
               side="right"
-              label="Executions"
-              tooltip="Executions"
-              active={Boolean(selectedTask)}
-              icon={Rows4}
-              onClick={() =>
-                selectTask(selectedTask ? null : session.tasks[0]!.taskId)
-              }
+              label="Session info"
+              tooltip="Session info"
+              active={isInfoOpen && !selectedTask}
+              icon={Info}
+              onClick={() => {
+                selectTask(null);
+                setIsInfoOpen((previous) => !previous);
+              }}
             />
+            {session.tasks.length ? (
+              <SideNavItem
+                side="right"
+                label="Executions"
+                tooltip="Executions"
+                active={Boolean(selectedTask)}
+                icon={Rows4}
+                onClick={() => {
+                  setIsInfoOpen(false);
+                  selectTask(selectedTask ? null : session.tasks[0]!.taskId);
+                }}
+              />
+            ) : null}
+          </SandboxSideActions>
+          {!isSidebarVisible && !panelOpen ? (
+            <BasicTooltip content="Show sidebar">
+              <Button
+                variant="ghost"
+                className="absolute top-2.5 right-3 size-8 shrink-0 md:hidden"
+                aria-label="Show sidebar"
+                onClick={toggleSidebar}
+              >
+                <ArrowLeftFromLine className="size-4" />
+              </Button>
+            </BasicTooltip>
           ) : null}
-        </div>
+        </>
       }
     >
-      {isMobile ? (
-        <>
-          <div className="flex min-h-0 min-w-0 flex-1 flex-col">{children}</div>
-          <Drawer
-            direction="right"
-            open={panelOpen}
-            onOpenChange={(open) => {
-              if (!open) closePanel();
-            }}
-          >
-            <DrawerContent className="flex h-full w-[min(90vw,26rem)] flex-col">
-              <DrawerHeader className="sr-only">
-                <DrawerTitle>Session execution details</DrawerTitle>
-              </DrawerHeader>
-              {panelContent}
-            </DrawerContent>
-          </Drawer>
-        </>
-      ) : (
-        <ResizablePanelGroup direction="horizontal" className="min-h-0 flex-1">
-          <ResizablePanel
-            defaultSize={panelOpen ? 65 : 100}
-            minSize={30}
-            className="flex min-h-0 min-w-0 flex-col"
-          >
-            {children}
-          </ResizablePanel>
-          {panelOpen ? (
-            <>
-              <ResizableDivider />
-              <ResizablePanel
-                defaultSize={35}
-                minSize={20}
-                className="flex min-h-0 min-w-0 flex-col border-l-2 border-card"
-              >
-                {panelContent}
-              </ResizablePanel>
-            </>
-          ) : null}
-        </ResizablePanelGroup>
-      )}
+      <ResponsiveWorkspacePanels
+        isPanelOpen={panelOpen}
+        main={children}
+        mainSize={65}
+        panelSize={35}
+        panel={panelContent}
+      />
     </WorkspaceSurface>
   );
 }

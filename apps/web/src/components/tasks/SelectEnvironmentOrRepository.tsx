@@ -53,6 +53,8 @@ interface SelectEnvironmentOrRepositoryProps {
   lockedBranch?: string;
   allowAuto?: boolean;
   allowFast?: boolean;
+  autoSelectDefaultWorkspace?: boolean;
+  onInvalidWorkspaceReset?: () => void;
   onCreate: () => void;
   onCreateRepository?: () => void;
   onEdit: (e: React.MouseEvent, envId: string) => void;
@@ -64,6 +66,8 @@ export const SelectEnvironmentOrRepository = ({
   lockedBranch,
   allowAuto = false,
   allowFast = false,
+  autoSelectDefaultWorkspace = true,
+  onInvalidWorkspaceReset,
   onCreate,
   onCreateRepository,
   onEdit,
@@ -121,7 +125,11 @@ export const SelectEnvironmentOrRepository = ({
   );
 
   useEffect(() => {
-    if (environments.isPending || !environments.isSuccess) {
+    if (
+      !autoSelectDefaultWorkspace ||
+      environments.isPending ||
+      !environments.isSuccess
+    ) {
       return;
     }
 
@@ -184,6 +192,7 @@ export const SelectEnvironmentOrRepository = ({
     setHasAppliedDefaultWorkspace(true);
   }, [
     hasAppliedDefaultWorkspace,
+    autoSelectDefaultWorkspace,
     allowAuto,
     repositoryFilter,
     environments.isPending,
@@ -226,6 +235,7 @@ export const SelectEnvironmentOrRepository = ({
       setValue('repository', AUTO_WORKSPACE_VALUE);
       setValue('branch', '');
       setWorkspace({ workspace: { type: 'auto' } });
+      onInvalidWorkspaceReset?.();
       // Allow the sole remaining environment (if any) to become the default.
       setHasAppliedDefaultWorkspace(false);
       return;
@@ -255,6 +265,7 @@ export const SelectEnvironmentOrRepository = ({
     setValue('repository', AUTO_WORKSPACE_VALUE);
     setValue('branch', '');
     setWorkspace({ workspace: { type: 'auto' } });
+    onInvalidWorkspaceReset?.();
   }, [
     allowAuto,
     environmentId,
@@ -265,6 +276,7 @@ export const SelectEnvironmentOrRepository = ({
     repositories.isSuccess,
     repositories.data,
     repository,
+    onInvalidWorkspaceReset,
     setValue,
     setWorkspace,
   ]);

@@ -40,12 +40,12 @@ export function buildFastSessionReplyFooterText(params: {
     explicitMentionRequired: false,
     ...(params.provider === 'slack'
       ? { formatLink: (label: string, url: string) => `<${url}|${label}>` }
-      : params.provider === 'telegram'
-        ? { formatLink: (label: string, url: string) => `${label} (${url})` }
-        : {
+      : params.provider === 'discord'
+        ? {
             formatLink: formatMarkdownLink,
             formatFooterText: (text: string) => `-# ${text}`,
-          }),
+          }
+        : { formatLink: formatMarkdownLink }),
   });
 }
 

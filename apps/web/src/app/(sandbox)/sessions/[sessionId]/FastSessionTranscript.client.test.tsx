@@ -222,6 +222,63 @@ describe('FastSessionTranscript', () => {
     expect(screen.getAllByText('launch_task')).toHaveLength(1);
   });
 
+  it('renders trusted Fast show_widget results with the shared sandboxed preview', () => {
+    render(
+      <FastSessionTranscript
+        sessionId="session-1"
+        initialMessages={[
+          {
+            id: 'widget-1',
+            eventId: 'turn-1:tool:0',
+            turnId: 'turn-1',
+            turnSeq: 1,
+            ts: 2,
+            eventType: ACP_ENVELOPE_EVENT_TYPES.ToolResult,
+            role: 'tool',
+            contentBlocks: [],
+            metadata: { visibleInTranscript: true },
+            payload: {
+              toolCallId: 'turn-1:tool:0',
+              title: 'show_widget',
+              kind: 'tool',
+              status: 'completed',
+              isExecute: false,
+              isMcp: false,
+              isRoomoteNativeTool: true,
+              mcpServerName: null,
+              mcpToolName: null,
+              toolName: 'show_widget',
+              command: null,
+              exitCode: null,
+              output: JSON.stringify({
+                success: true,
+                shown: true,
+                title: 'Fast status',
+                html: '<p>Ready</p>',
+                css: null,
+                height: 240,
+                textFallback: null,
+              }),
+              rawInput: { arguments: { html: '<p>Ready</p>' } },
+            },
+            source: 'web',
+            nativeSessionId: 'opencode-1',
+            nativeMessageId: null,
+            createdAt: new Date('2026-01-01T00:00:01.000Z'),
+          },
+        ]}
+      />,
+    );
+
+    const iframe = screen.getByTitle('Fast status');
+    expect(iframe).toHaveAttribute('sandbox', '');
+    expect(iframe).toHaveAttribute('referrerpolicy', 'no-referrer');
+    expect(iframe).toHaveAttribute(
+      'srcdoc',
+      expect.stringContaining("default-src 'none'"),
+    );
+  });
+
   it('cold-loads one completed tool row before an intervening kickoff', () => {
     render(
       <FastSessionTranscript

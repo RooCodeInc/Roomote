@@ -23,10 +23,10 @@ import {
 import {
   ALL_REPOSITORIES,
   FAST_EXECUTION,
+  getCommunicationAutomationTargetKind,
   isScheduleOnlyBackgroundAutomationFrequency,
   type AutomationTarget,
   type BackgroundAutomationProvider,
-  type BackgroundAutomationTargetKind,
   type CustomAutomationScheduleMode,
   type OptionalAutomationTarget,
 } from '@roomote/types';
@@ -97,7 +97,6 @@ export type CustomAutomationWriteInput = {
   targetProvider?: 'slack' | 'discord' | 'teams' | 'telegram';
   targetMode?: 'channel' | 'direct_message';
   targetChannelId?: string;
-  targetServiceUrl?: string | null;
 };
 
 function toListItem(
@@ -158,38 +157,15 @@ function buildTarget(
     );
   }
 
-  const targetKindByProvider: Record<
-    NonNullable<CustomAutomationWriteInput['targetProvider']>,
-    BackgroundAutomationTargetKind
-  > = {
-    slack: 'slack_channel',
-    discord: 'discord_channel',
-    teams: 'teams_channel',
-    telegram: 'telegram_chat',
-  };
-  const userTargetKindByProvider: Record<
-    NonNullable<CustomAutomationWriteInput['targetProvider']>,
-    BackgroundAutomationTargetKind
-  > = {
-    slack: 'slack_user',
-    discord: 'discord_user',
-    teams: 'teams_user',
-    telegram: 'telegram_user',
-  };
-
   const provider = input.targetProvider as BackgroundAutomationProvider;
   const target: AutomationTarget = {
     provider,
-    targetKind: directMessage
-      ? userTargetKindByProvider[input.targetProvider]
-      : targetKindByProvider[input.targetProvider],
+    targetKind: getCommunicationAutomationTargetKind(
+      input.targetProvider,
+      directMessage ? 'direct_message' : 'channel',
+    ),
     externalRef,
   };
-
-  const serviceUrl = input.targetServiceUrl?.trim();
-  if (!directMessage && serviceUrl) {
-    target.metadata = { serviceUrl };
-  }
 
   return target;
 }

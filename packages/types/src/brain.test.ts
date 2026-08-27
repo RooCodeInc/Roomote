@@ -18,6 +18,9 @@ describe('Brain MCP instructions', () => {
     expect(BRAIN_MCP_READ_INSTRUCTIONS).toContain(
       "never expose Brain's `source` field or other internal provenance metadata",
     );
+    expect(BRAIN_MCP_READ_INSTRUCTIONS).toContain(
+      'When recalled context materially shapes the path or approach you choose, casually and concisely mention the specific insight that informed it; do not merely say that memory or history was helpful',
+    );
     expect(BRAIN_MCP_INSTRUCTIONS).toContain('save_task_memory');
   });
 });

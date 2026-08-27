@@ -101,9 +101,9 @@ describe('Slack live task card', () => {
     expect(mocks.renderCard).toHaveBeenCalledTimes(4);
     expect(mocks.renderCard.mock.calls.map((call) => call[0].message)).toEqual([
       'Preparing the workspace…',
-      'Starting the agent…',
-      'Connecting to the agent…',
-      'Agent started, getting to work…',
+      'Starting the task…',
+      'Connecting to the task…',
+      'Task started, getting to work…',
     ]);
     expect(renderedCard(1)).toMatchObject({ status: 'in_progress' });
   });
@@ -127,7 +127,7 @@ describe('Slack live task card', () => {
 
     expect(renderedCard(2)).toEqual({
       status: 'in_progress',
-      output: 'Agent started, getting to work…',
+      output: 'Task started, getting to work…',
     });
     expect(renderedCard(3)).toEqual({
       status: 'in_progress',
@@ -758,6 +758,86 @@ describe('Slack live task card', () => {
     });
   });
 
+  it('settles idle without a completion and re-opens when running', async () => {
+    const taskRun = createTaskRun();
+    const context = {};
+    await updateSlackLiveTaskStream(
+      taskRun,
+      { type: 'text', ts: 1000, text: 'Finishing the task.' },
+      context,
+    );
+
+    await reportSlackLiveTaskStatus(taskRun, RunStatus.Idle, context);
+    await reportSlackLiveTaskStatus(taskRun, RunStatus.Running, context);
+
+    expect(renderedCard(2)).toEqual({
+      status: 'complete',
+      output: 'Task completed.',
+    });
+    expect(renderedCard(3)).toEqual({
+      status: 'in_progress',
+      output: 'Task started, getting to work…',
+    });
+  });
+
+  it('keeps working when running resumes during an idle settle', async () => {
+    const taskRun = createTaskRun();
+    const context = {};
+    let releaseIdle!: () => void;
+    mocks.renderCard.mockImplementationOnce(
+      () =>
+        new Promise<{ card: boolean; updated: boolean }>((resolve) => {
+          releaseIdle = () => resolve({ card: true, updated: true });
+        }),
+    );
+
+    const idle = reportSlackLiveTaskStatus(taskRun, RunStatus.Idle, context);
+    await vi.waitFor(() => expect(mocks.renderCard).toHaveBeenCalledOnce());
+    const running = reportSlackLiveTaskStatus(
+      taskRun,
+      RunStatus.Running,
+      context,
+    );
+
+    releaseIdle();
+    await Promise.all([idle, running]);
+    await updateSlackLiveTaskStream(
+      taskRun,
+      { type: 'text', ts: 1000, text: 'Working again.' },
+      context,
+    );
+
+    expect(renderedCard(2)).toEqual({
+      status: 'in_progress',
+      output: 'Task started, getting to work…',
+    });
+    expect(renderedCard(3)).toEqual({
+      status: 'in_progress',
+      output: 'Working again.',
+    });
+  });
+
+  it('replaces a generic idle fallback with a delayed real completion', async () => {
+    const taskRun = createTaskRun();
+    const context = {};
+
+    await reportSlackLiveTaskStatus(taskRun, RunStatus.Idle, context);
+    await updateSlackLiveTaskStream(
+      taskRun,
+      { type: 'completion', ts: 1000, text: 'Ready for review.' },
+      context,
+    );
+
+    expect(renderedCard(1)).toEqual({
+      status: 'complete',
+      output: 'Task completed.',
+    });
+    expect(renderedCard(2)).toEqual({
+      status: 'complete',
+      output: 'Ready for review.',
+    });
+  });
+
   it('replaces a provisional idle completion with a delayed real completion', async () => {
     const taskRun = createTaskRun();
     const context = {};
@@ -876,7 +956,7 @@ describe('Slack live task card', () => {
     });
   });
 
-  it('keeps an idle card active when the task is waiting for user input', async () => {
+  it('settles while waiting for input and re-opens when the user answers', async () => {
     const taskRun = createTaskRun();
     const context = {};
     await updateSlackLiveTaskStream(
@@ -890,11 +970,30 @@ describe('Slack live task card', () => {
       context,
     );
     await reportSlackLiveTaskStatus(taskRun, RunStatus.Idle, context);
+    await updateSlackLiveTaskStream(
+      taskRun,
+      {
+        type: 'request_user_input_response',
+        ts: 1001,
+        response: {
+          requestId: 'request-1',
+          sessionId: 'session-1',
+          turnId: 'turn-1',
+          callId: 'call-1',
+          answers: {},
+          resolution: 'submitted',
+        },
+      },
+      context,
+    );
 
-    expect(mocks.renderCard).toHaveBeenCalledOnce();
-    expect(renderedCard(1)).toEqual({
-      status: 'in_progress',
+    expect(renderedCard(2)).toEqual({
+      status: 'complete',
       output: 'Waiting for your input…',
+    });
+    expect(renderedCard(3)).toEqual({
+      status: 'in_progress',
+      output: 'Continuing with your answer…',
     });
   });
 

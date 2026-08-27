@@ -40,6 +40,16 @@ type SettledStatus =
   | RunStatus.Canceled
   | RunStatus.Idle;
 
+function getCustomAutomationId(payload: unknown): string | undefined {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    return undefined;
+  }
+
+  const value = (payload as { customAutomationId?: unknown })
+    .customAutomationId;
+  return typeof value === 'string' && value ? value : undefined;
+}
+
 async function countFastAgentStartupRetries(
   run: TaskRun,
   parent: FastAgentParent,
@@ -182,6 +192,7 @@ export async function notifyFastAgentParentOnSettle(
 
   try {
     const pullRequests = await listFastAgentPullRequestContexts(run.taskId);
+    const customAutomationId = getCustomAutomationId(run.payload);
     let retryTaskStart:
       | (() => ReturnType<typeof retryFastAgentStartup>)
       | undefined;
@@ -205,6 +216,7 @@ export async function notifyFastAgentParentOnSettle(
         type: 'task_settled',
         taskId: run.taskId,
         runId: run.id,
+        ...(customAutomationId ? { customAutomationId } : {}),
         ...(taskTitle?.trim() ? { title: taskTitle.trim() } : {}),
         status,
         ...(status === RunStatus.Failed || status === RunStatus.Canceled

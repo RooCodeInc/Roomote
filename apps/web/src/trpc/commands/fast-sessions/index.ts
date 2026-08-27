@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { after } from 'next/server';
 
 import {
   acquireFastAgentTurnLock,
@@ -79,13 +80,23 @@ type WebFastAgentConversation = {
   conversationId: string;
 };
 
+type WebFastAgentTurnInput = {
+  userId: string;
+  delivery: FastAgentSurfaceReplyDelivery;
+  question: string;
+  images?: string[];
+  model?: string;
+  reasoningEffort?: ReasoningEffort;
+  senderDisplayName?: string;
+};
+
 /**
- * Run one web-initiated Fast turn. Fire-and-forget: the caller returns
- * immediately and the transcript view picks up canonical rows as the turn
- * persists them. The Redis turn lock serializes turns per conversation, so
- * queued replies simply wait their turn. The delivery's adapter routes agent
- * replies to the conversation's home surface (Slack/Discord threads for
- * sessions that live there; the canonical transcript alone for web).
+ * Run one web-initiated Fast turn after the caller's response is ready. The
+ * transcript view picks up canonical rows as the turn persists them. The Redis
+ * turn lock serializes turns per conversation, so queued replies simply wait
+ * their turn. The delivery's adapter routes agent replies to the conversation's
+ * home surface (Slack/Discord threads for sessions that live there; the
+ * canonical transcript alone for web).
  */
 async function runWebFastAgentTurn({
   userId,
@@ -95,15 +106,7 @@ async function runWebFastAgentTurn({
   model,
   reasoningEffort,
   senderDisplayName,
-}: {
-  userId: string;
-  delivery: FastAgentSurfaceReplyDelivery;
-  question: string;
-  images?: string[];
-  model?: string;
-  reasoningEffort?: ReasoningEffort;
-  senderDisplayName?: string;
-}): Promise<void> {
+}: WebFastAgentTurnInput): Promise<void> {
   const conversation = delivery.conversation;
   const release = await acquireFastAgentTurnLock({ conversation });
   if (!release) {
@@ -145,6 +148,12 @@ async function runWebFastAgentTurn({
   }
 }
 
+export function scheduleWebFastAgentTurn(input: WebFastAgentTurnInput): void {
+  // Keep the server invocation alive after tRPC returns the session to the UI.
+  // A detached promise can be suspended between a retry notice and its timer.
+  after(() => runWebFastAgentTurn(input));
+}
+
 export async function startFastSessionCommand(
   auth: UserAuthSuccess,
   input: {
@@ -169,7 +178,7 @@ export async function startFastSessionCommand(
     reasoningEffort: null,
   });
 
-  void runWebFastAgentTurn({
+  scheduleWebFastAgentTurn({
     userId: auth.userId,
     delivery: {
       conversation,
@@ -231,7 +240,7 @@ export async function replyToFastSessionCommand(
     );
   }
 
-  void runWebFastAgentTurn({
+  scheduleWebFastAgentTurn({
     userId: auth.userId,
     delivery,
     question: input.text,

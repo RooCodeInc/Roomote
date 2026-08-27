@@ -81,6 +81,25 @@ function buildIdentityWhere(conversation: FastAgentConversation) {
   );
 }
 
+function buildReplyTargetWhere(conversation: FastAgentConversation) {
+  if (!('replyTarget' in conversation) || !conversation.replyTarget.threadId) {
+    return null;
+  }
+
+  return and(
+    eq(fastAgentConversations.surface, conversation.surface),
+    eq(fastAgentConversations.workspaceId, conversation.workspaceId),
+    eq(
+      fastAgentConversations.currentReplyChannelId,
+      conversation.replyTarget.channelId,
+    ),
+    eq(
+      fastAgentConversations.currentReplyThreadId,
+      conversation.replyTarget.threadId,
+    ),
+  );
+}
+
 function identityMatches(
   record: Pick<
     typeof fastAgentConversations.$inferSelect,
@@ -103,6 +122,7 @@ function toConversation(
     | 'conversationId'
     | 'currentReplyChannelId'
     | 'currentReplyThreadId'
+    | 'currentReplyServiceUrl'
   >,
 ): FastAgentConversation | null {
   const parsed = fastAgentConversationSchema.safeParse(
@@ -120,6 +140,9 @@ function toConversation(
             channelId: record.currentReplyChannelId,
             ...(record.currentReplyThreadId
               ? { threadId: record.currentReplyThreadId }
+              : {}),
+            ...(record.currentReplyServiceUrl
+              ? { serviceUrl: record.currentReplyServiceUrl }
               : {}),
           },
         },
@@ -174,6 +197,13 @@ export const fastAgentConversationRepository: FastAgentConversationRepository =
           where: buildIdentityWhere(conversation),
         });
 
+        const replyTargetWhere = buildReplyTargetWhere(conversation);
+        if (!record && replyTargetWhere) {
+          record = await tx.query.fastAgentConversations.findFirst({
+            where: replyTargetWhere,
+          });
+        }
+
         if (!record) {
           await tx
             .insert(fastAgentConversations)
@@ -189,6 +219,10 @@ export const fastAgentConversationRepository: FastAgentConversationRepository =
               currentReplyThreadId:
                 'replyTarget' in conversation
                   ? conversation.replyTarget.threadId
+                  : null,
+              currentReplyServiceUrl:
+                'replyTarget' in conversation
+                  ? (conversation.replyTarget.serviceUrl ?? null)
                   : null,
               replyTargetVerified: true,
             })
@@ -214,6 +248,10 @@ export const fastAgentConversationRepository: FastAgentConversationRepository =
             currentReplyThreadId:
               'replyTarget' in conversation
                 ? (conversation.replyTarget.threadId ?? null)
+                : null,
+            currentReplyServiceUrl:
+              'replyTarget' in conversation
+                ? (conversation.replyTarget.serviceUrl ?? null)
                 : null,
             replyTargetVerified: true,
             updatedAt: sql`now()`,
@@ -254,6 +292,10 @@ export const fastAgentConversationRepository: FastAgentConversationRepository =
               'replyTarget' in fallbackConversation
                 ? (fallbackConversation.replyTarget.threadId ?? null)
                 : null,
+            currentReplyServiceUrl:
+              'replyTarget' in fallbackConversation
+                ? (fallbackConversation.replyTarget.serviceUrl ?? null)
+                : null,
             replyTargetVerified: true,
             updatedAt: sql`now()`,
           })
@@ -277,14 +319,24 @@ export const fastAgentConversationRepository: FastAgentConversationRepository =
     },
 
     async exists(conversation) {
-      const neutral = await db.query.fastAgentConversations.findFirst({
+      const exact = await db.query.fastAgentConversations.findFirst({
         where: buildIdentityWhere(conversation),
         columns: { id: true },
       });
-      if (neutral) {
+      if (exact) {
         return true;
       }
-      return false;
+
+      const replyTargetWhere = buildReplyTargetWhere(conversation);
+      if (!replyTargetWhere) {
+        return false;
+      }
+
+      const routed = await db.query.fastAgentConversations.findFirst({
+        where: replyTargetWhere,
+        columns: { id: true },
+      });
+      return Boolean(routed);
     },
 
     async appendVisibleMessages({ conversationId: requestedId, messages }) {

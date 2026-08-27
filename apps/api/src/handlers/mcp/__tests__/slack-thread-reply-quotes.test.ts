@@ -350,7 +350,7 @@ describe('Slack thread reply quotes', () => {
     );
   });
 
-  it('wraps a custom automation root report in the structured container', async () => {
+  it('preserves custom automation root report Markdown at the top level', async () => {
     taskRunFindFirstMock.mockResolvedValue({
       id: 42,
       actingUserId: null,
@@ -378,28 +378,27 @@ describe('Slack thread reply quotes', () => {
         channel: 'C123',
         blocks: [
           expect.objectContaining({
-            type: 'container',
-            title: expect.objectContaining({ text: 'Daily demo ideas' }),
-            subtitle: {
-              type: 'plain_text',
-              text: 'Daily · GPT 5.6 High · $0.56 · 02:37s',
-            },
-            icon: expect.objectContaining({
-              image_url: 'https://app.example.com/automation-icons/zap.png',
-            }),
-            child_blocks: expect.arrayContaining([
-              expect.objectContaining({ type: 'table' }),
+            type: 'context',
+            elements: expect.arrayContaining([
+              expect.objectContaining({ text: 'Daily demo ideas' }),
               expect.objectContaining({
-                type: 'actions',
-                elements: expect.arrayContaining([
-                  expect.objectContaining({
-                    action_id: 'late_bound_automation_view_task',
-                  }),
-                  expect.objectContaining({
-                    action_id: 'late_bound_automation_configure',
-                    url: 'https://app.example.com/automations#custom-automation-automation-1',
-                  }),
-                ]),
+                text: 'Daily · GPT 5.6 High · $0.56 · 02:37s',
+              }),
+            ]),
+          }),
+          {
+            type: 'markdown',
+            text: '**Summary**\n\n| Idea | Priority |\n| --- | --- |\n| Demo | High |',
+          },
+          expect.objectContaining({
+            type: 'actions',
+            elements: expect.arrayContaining([
+              expect.objectContaining({
+                action_id: 'late_bound_automation_view_task',
+              }),
+              expect.objectContaining({
+                action_id: 'late_bound_automation_configure',
+                url: 'https://app.example.com/automations#custom-automation-automation-1',
               }),
             ]),
           }),

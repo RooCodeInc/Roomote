@@ -39,11 +39,9 @@ async function getSlackTeamNotifier(teamId: string) {
 async function updateNotificationMessage({
   payload,
   resolution,
-  resolutionType,
 }: {
   payload: SlackInteractivePayload;
   resolution: string;
-  resolutionType?: 'context' | 'section';
 }): Promise<void> {
   try {
     const { slack } = await getSlackTeamNotifier(payload.team.id);
@@ -55,7 +53,6 @@ async function updateNotificationMessage({
         blocks: buildResolvedSlackPrReviewMessageBlocks(
           payload.message.blocks,
           resolution,
-          resolutionType,
         ),
       },
     });
@@ -229,7 +226,6 @@ async function dispatchAcceptedPrReviewAction({
   await updateNotificationMessage({
     payload,
     resolution,
-    ...(enableAutoHandle ? { resolutionType: 'section' } : {}),
   });
 }
 

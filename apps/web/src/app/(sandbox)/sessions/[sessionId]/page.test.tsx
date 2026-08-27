@@ -21,6 +21,13 @@ vi.mock('next/navigation', () => ({
 vi.mock('@/lib/server/fast-sessions', () => ({
   getFastSessionById: getFastSessionByIdMock,
 }));
+vi.mock('../../use-sandbox-layout', () => ({
+  useSandboxLayout: () => ({
+    isSidebarVisible: true,
+    setSidebarVisible: vi.fn(),
+    toggleSidebar: vi.fn(),
+  }),
+}));
 vi.mock('@/components/layout', () => ({
   WorkspaceHeader: ({ children }: { children: ReactNode }) => (
     <header data-testid="workspace-header">{children}</header>

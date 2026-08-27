@@ -218,6 +218,90 @@ describe('AcpToolDetails', () => {
     );
   });
 
+  it.each(['search', 'query'])(
+    'shows the sanitized Hippocampus %s query as structured input',
+    (toolName) => {
+      render(
+        <AcpToolDetails
+          msg={buildMessage({
+            kind: 'mcp',
+            title: toolName,
+            isMcp: true,
+            mcpServerName: 'gbrain',
+            mcpToolName: toolName,
+            serverName: 'gbrain',
+            toolName,
+            rawInput: {
+              query:
+                'Find /sandbox/repos/RooCodeInc/Roomote notes with api_key=synthetic-test-value',
+            },
+          } as Partial<AcpToolResultUiMessage['data']>)}
+        />,
+      );
+
+      expect(toolInputSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          input: {
+            query: 'Find RooCodeInc/Roomote notes with api_key=[redacted]',
+          },
+        }),
+      );
+      expect(codeBlockSpy).not.toHaveBeenCalled();
+    },
+  );
+
+  it('shows a sanitized send_task_message message from nested arguments', () => {
+    render(
+      <AcpToolDetails
+        msg={buildMessage({
+          kind: 'tool',
+          title: 'send_task_message',
+          toolName: 'send_task_message',
+          rawInput: {
+            arguments: {
+              taskId: 'task-1',
+              message:
+                'Review /sandbox/repos/RooCodeInc/Roomote and use password=synthetic-test-value',
+            },
+          },
+        } as Partial<AcpToolResultUiMessage['data']>)}
+      />,
+    );
+
+    expect(toolInputSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        input: {
+          message: 'Review RooCodeInc/Roomote and use password=[redacted]',
+        },
+      }),
+    );
+    expect(codeBlockSpy).not.toHaveBeenCalled();
+  });
+
+  it('does not fall back to unrelated input for recognized tools', () => {
+    render(
+      <AcpToolDetails
+        msg={buildMessage({
+          kind: 'mcp',
+          title: 'query',
+          isMcp: true,
+          mcpServerName: 'gbrain',
+          mcpToolName: 'query',
+          serverName: 'gbrain',
+          toolName: 'query',
+          rawInput: {
+            image: 'password=synthetic-test-value',
+          },
+        } as Partial<AcpToolResultUiMessage['data']>)}
+      />,
+    );
+
+    expect(toolInputSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ input: {} }),
+    );
+    expect(codeBlockSpy).not.toHaveBeenCalled();
+  });
+
   it('hides expanded details for Roomote Slack lifecycle tools', () => {
     const { container } = render(
       <AcpToolDetails

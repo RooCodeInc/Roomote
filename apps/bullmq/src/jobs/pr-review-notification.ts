@@ -166,12 +166,21 @@ function getFastParentButtonRoute(
 
   const conversation = parent.conversation;
   if (conversation.surface === 'slack') {
+    if (!conversation.replyTarget.threadId) {
+      return null;
+    }
     return {
       provider: 'slack',
       slackTeamId: conversation.workspaceId,
       channelId: conversation.replyTarget.channelId,
       threadId: conversation.replyTarget.threadId,
     };
+  }
+
+  // Teams and Telegram can receive the Fast parent event itself, but the PR
+  // action-button renderer does not yet have provider-native callbacks there.
+  if (conversation.surface !== 'discord') {
+    return null;
   }
 
   return {

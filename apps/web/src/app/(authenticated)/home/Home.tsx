@@ -26,6 +26,7 @@ import { cn } from '@/lib/utils';
 import { getTaskLaunchDisabledReason } from '@/lib/managed-access';
 
 import { useEnvironments } from '@/hooks/environments';
+import { usePersonalPreferences } from '@/hooks/usePersonalPreferences';
 import { useAuthorizedUser } from '@/hooks/useUser';
 import { useLaunchTaskModels } from '@/hooks/task-models/useLaunchTaskModels';
 import {
@@ -303,7 +304,14 @@ export function Home({
   const watchedRepository = form.watch('repository');
 
   const { workspace, setWorkspace } = useWorkspaceStorage();
+  const { preferences, isLoading: isPersonalPreferencesLoading } =
+    usePersonalPreferences();
   const hasRestoredWorkspace = useRef(false);
+  const shouldRestoreDefaultWorkspace = useRef(false);
+
+  const handleInvalidWorkspaceReset = useCallback(() => {
+    shouldRestoreDefaultWorkspace.current = true;
+  }, []);
 
   const clearRoutingState = useCallback(() => {
     setRoutingState('idle');
@@ -325,8 +333,21 @@ export function Home({
   }, [form, setWorkspace]);
 
   useEffect(() => {
+    const restoredWorkspace = workspace.workspace as
+      | WorkspaceSelection['workspace']
+      | undefined;
+
     if (hasRestoredWorkspace.current) {
-      return;
+      if (
+        !shouldRestoreDefaultWorkspace.current ||
+        restoredWorkspace?.type !== 'auto' ||
+        form.getValues('repository') !== AUTO_WORKSPACE_VALUE
+      ) {
+        return;
+      }
+
+      hasRestoredWorkspace.current = false;
+      shouldRestoreDefaultWorkspace.current = false;
     }
 
     if (environmentIdParam) {
@@ -342,9 +363,22 @@ export function Home({
       return;
     }
 
-    const restoredWorkspace = workspace.workspace as
-      | WorkspaceSelection['workspace']
-      | undefined;
+    if (form.getValues('repository') !== AUTO_WORKSPACE_VALUE) {
+      hasRestoredWorkspace.current = true;
+      return;
+    }
+
+    if (isPersonalPreferencesLoading) {
+      return;
+    }
+
+    if (preferences.communicationsFastModeDefault) {
+      form.setValue('repository', FAST_EXECUTION);
+      form.setValue('environmentId', undefined);
+      form.setValue('branch', '');
+      hasRestoredWorkspace.current = true;
+      return;
+    }
 
     if (restoredWorkspace?.type === 'repository') {
       form.setValue('repository', restoredWorkspace.value);
@@ -389,6 +423,8 @@ export function Home({
     environments.isPending,
     environments.isSuccess,
     form,
+    isPersonalPreferencesLoading,
+    preferences.communicationsFastModeDefault,
     setWorkspace,
     workspace,
   ]);
@@ -741,6 +777,11 @@ export function Home({
                 <SelectWorkspace
                   allowAuto
                   allowFast={!sessionsUiEnabled}
+                  autoSelectDefaultWorkspace={
+                    !isPersonalPreferencesLoading &&
+                    !preferences.communicationsFastModeDefault
+                  }
+                  onInvalidWorkspaceReset={handleInvalidWorkspaceReset}
                   allowBranchSelection={canSelectBranch}
                 />
               </div>
