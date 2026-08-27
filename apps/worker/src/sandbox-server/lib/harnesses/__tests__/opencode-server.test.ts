@@ -3440,7 +3440,7 @@ describe('OpenCodeServerHarness', () => {
             String(envelope.payload.text ?? '').includes(
               'Upstream connection closed unexpectedly.',
             ) &&
-            String(envelope.payload.text ?? '').includes('Retrying in 1s') &&
+            String(envelope.payload.text ?? '').includes('Retrying in 5s') &&
             asRecord(envelope.payload.providerRetryNotice)?.kind ===
               'provider_error',
         ),
@@ -3451,7 +3451,7 @@ describe('OpenCodeServerHarness', () => {
         properties: { sessionID: 'ses_1' },
       });
 
-      await vi.advanceTimersByTimeAsync(999);
+      await vi.advanceTimersByTimeAsync(4_999);
       expect(client.promptAsync).toHaveBeenCalledTimes(1);
       await vi.advanceTimersByTimeAsync(1);
       expect(client.promptAsync).toHaveBeenCalledTimes(2);
@@ -3473,7 +3473,7 @@ describe('OpenCodeServerHarness', () => {
           return (
             notice?.kind === 'provider_error' &&
             notice.attemptNumber === 2 &&
-            notice.delayMs === 2_000
+            notice.delayMs === 10_000
           );
         }),
       ).toBe(true);
@@ -3482,7 +3482,7 @@ describe('OpenCodeServerHarness', () => {
         type: 'session.idle',
         properties: { sessionID: 'ses_1' },
       });
-      await vi.advanceTimersByTimeAsync(1_999);
+      await vi.advanceTimersByTimeAsync(9_999);
       expect(client.promptAsync).toHaveBeenCalledTimes(2);
       await vi.advanceTimersByTimeAsync(1);
       expect(client.promptAsync).toHaveBeenCalledTimes(3);
