@@ -489,6 +489,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       'gemini-3-7-flash': 'vercel/google/gemini-3.7-flash',
       'deepseek-v4-flash-0731': 'vercel/deepseek/deepseek-v4-flash-0731',
       'deepseek-v4-pro-0813': 'vercel/deepseek/deepseek-v4-pro-0813',
+      'glm-5-3-flash': 'vercel/zai/glm-5.3-flash',
       'glm-5-3': 'vercel/zai/glm-5.3',
       'kimi-k3': 'vercel/moonshotai/kimi-k3',
       'kimi-k2-7-code': 'vercel/moonshotai/kimi-k2.7-code',
@@ -772,6 +773,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     suggestedTaskModels: mapRecommendedTaskModels({
       'deepseek-v4-flash-0731': 'opencode-go/deepseek-v4-flash',
       'deepseek-v4-pro-0813': 'opencode-go/deepseek-v4-pro',
+      'glm-5-3-flash': 'opencode-go/glm-5.3-flash',
       'glm-5-3': 'opencode-go/glm-5.3',
       'gpt-5-6-luna': 'opencode-go/gpt-5.6-luna',
       'grok-4-6': 'opencode-go/grok-4.6',
@@ -881,6 +883,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       },
     ],
     suggestedTaskModels: mapRecommendedTaskModels({
+      'glm-5-3-flash': 'zai/glm-5.3-flash',
       'glm-5-2': 'zai/glm-5.2',
     }),
     recommendedRoleModels: {
@@ -909,6 +912,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       },
     ],
     suggestedTaskModels: mapRecommendedTaskModels({
+      'glm-5-3-flash': 'zai-coding-plan/glm-5.3-flash',
       'glm-5-3': 'zai-coding-plan/glm-5.3',
     }),
     recommendedRoleModels: {

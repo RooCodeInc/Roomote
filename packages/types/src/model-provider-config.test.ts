@@ -468,6 +468,32 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
     ]);
   });
 
+  it('recommends GLM 5.3 Flash from every supported provider', () => {
+    const glm53FlashByProvider = SETUP_MODEL_PROVIDER_CATALOG.flatMap(
+      (provider) => {
+        const model = provider.suggestedTaskModels.find(
+          (suggestion) => suggestion.displayName === 'GLM 5.3 Flash',
+        );
+
+        return model ? [{ providerId: provider.id, modelId: model.id }] : [];
+      },
+    );
+
+    expect(glm53FlashByProvider).toEqual([
+      {
+        providerId: 'openrouter',
+        modelId: 'openrouter/z-ai/glm-5.3-flash',
+      },
+      { providerId: 'vercel', modelId: 'vercel/zai/glm-5.3-flash' },
+      { providerId: 'opencode-go', modelId: 'opencode-go/glm-5.3-flash' },
+      { providerId: 'zai', modelId: 'zai/glm-5.3-flash' },
+      {
+        providerId: 'zai-coding-plan',
+        modelId: 'zai-coding-plan/glm-5.3-flash',
+      },
+    ]);
+  });
+
   it.each([
     {
       displayName: 'GPT 5.6 Sol',
