@@ -360,6 +360,38 @@ describe('notifyPullRequestTerminalStatus', () => {
     });
   });
 
+  it('posts direct fallback only for the Fast task whose relay failed', async () => {
+    mockedGithubFind.mockResolvedValue({ id: 1 } as any);
+    mockedTaskPullRequestsFind.mockResolvedValue([
+      { taskId: 'task-1' },
+      { taskId: 'task-2' },
+    ] as any);
+    mockedTaskRunsFind.mockResolvedValue([
+      {
+        taskId: 'task-1',
+        payload: fastParentSlackPayload('C1', 'thread-1'),
+      },
+      {
+        taskId: 'task-2',
+        payload: fastParentSlackPayload('C2', 'thread-2'),
+      },
+    ] as any);
+    mockedSlackFind.mockResolvedValue({ botAccessToken: 'xoxb-token' } as any);
+
+    await notifyPullRequestTerminalStatus({
+      ...baseParams,
+      includeFastParentTaskIds: ['task-2'],
+    });
+
+    expect(mockStickyFooterPost).toHaveBeenCalledTimes(1);
+    expect(mockStickyFooterPost).toHaveBeenCalledWith(
+      expect.objectContaining({ channel: 'C2', threadTs: 'thread-2' }),
+    );
+    expect(mockStickyFooterPost).not.toHaveBeenCalledWith(
+      expect.objectContaining({ channel: 'C1', threadTs: 'thread-1' }),
+    );
+  });
+
   it('suppresses a task-row Slack binding that matches the Fast parent', async () => {
     mockedGithubFind.mockResolvedValue({ id: 1 } as any);
     mockedTaskPullRequestsFind.mockResolvedValue([{ taskId: 'task-1' }] as any);

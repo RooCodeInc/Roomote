@@ -9,6 +9,7 @@ import {
 } from '@roomote/github';
 import {
   recordPrStatusChangeInTaskHistory,
+  PrStatusFastDeliveryError,
   PrStatusHistoryRecordingError,
   updateTaskPrStatus,
   upsertGitHubPullRequestFactFromWebhook,
@@ -640,6 +641,7 @@ github.post('/', async (c) => {
         // Persist merged/closed status into linked task history so agents get
         // the same out-of-band context path as PR review-feedback notifications.
         let includeFastParentTargets = false;
+        let includeFastParentTaskIds: string[] = [];
         try {
           await recordPrStatusChangeInTaskHistory({
             sourceControlProvider: 'github',
@@ -654,9 +656,13 @@ github.post('/', async (c) => {
                 : null) || payload.sender.login,
           });
         } catch (error) {
-          includeFastParentTargets = !(
-            error instanceof PrStatusHistoryRecordingError
-          );
+          if (error instanceof PrStatusFastDeliveryError) {
+            includeFastParentTaskIds = error.taskIds;
+          } else {
+            includeFastParentTargets = !(
+              error instanceof PrStatusHistoryRecordingError
+            );
+          }
           console.warn(
             `[pull_request.closed] Failed to record PR status in task history for ${payload.repository.full_name}#${payload.pull_request.number}: ${
               error instanceof Error ? error.message : String(error)
@@ -666,7 +672,12 @@ github.post('/', async (c) => {
 
         // Skipped repositories suppress automated review work, not lifecycle
         // notifications for tasks that already track this pull request.
-        return handlePrMerge(payload, { includeFastParentTargets });
+        return handlePrMerge(payload, {
+          includeFastParentTargets,
+          ...(includeFastParentTaskIds.length
+            ? { includeFastParentTaskIds }
+            : {}),
+        });
       }),
     );
 

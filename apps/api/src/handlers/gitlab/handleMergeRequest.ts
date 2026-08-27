@@ -16,6 +16,7 @@ import {
 import { enqueueTask } from '@roomote/cloud-agents/server';
 import {
   recordPrStatusChangeInTaskHistory,
+  PrStatusFastDeliveryError,
   PrStatusHistoryRecordingError,
   updateTaskPrStatus,
 } from '@roomote/sdk/server';
@@ -61,6 +62,7 @@ async function notifyTerminalMergeRequestThreads(
   repoFullName: string,
   status: 'merged' | 'closed',
   includeFastParentTargets: boolean,
+  includeFastParentTaskIds: string[],
 ): Promise<void> {
   const webhookHost = toHostFromUrl(payload.object_attributes.url);
   const repositoryRows = await db.query.repositories.findMany({
@@ -90,6 +92,7 @@ async function notifyTerminalMergeRequestThreads(
       actorLogin:
         payload.user?.username ?? payload.user?.name ?? 'someone on GitLab',
       ...(includeFastParentTargets ? { includeFastParentTargets: true } : {}),
+      ...(includeFastParentTaskIds.length ? { includeFastParentTaskIds } : {}),
     },
     `MR !${payload.object_attributes.iid}`,
   );
@@ -132,6 +135,7 @@ export async function handleGitLabMergeRequest(
     });
 
     let includeFastParentTargets = false;
+    let includeFastParentTaskIds: string[] = [];
     try {
       await recordPrStatusChangeInTaskHistory({
         sourceControlProvider: 'gitlab',
@@ -144,9 +148,13 @@ export async function handleGitLabMergeRequest(
           payload.user?.username ?? payload.user?.name ?? 'someone on GitLab',
       });
     } catch (error) {
-      includeFastParentTargets = !(
-        error instanceof PrStatusHistoryRecordingError
-      );
+      if (error instanceof PrStatusFastDeliveryError) {
+        includeFastParentTaskIds = error.taskIds;
+      } else {
+        includeFastParentTargets = !(
+          error instanceof PrStatusHistoryRecordingError
+        );
+      }
       console.warn(
         `[handleGitLabMergeRequest] Failed to record PR status in task history for ${repoFullName}!${mergeRequest.iid}: ${
           error instanceof Error ? error.message : String(error)
@@ -160,6 +168,7 @@ export async function handleGitLabMergeRequest(
         repoFullName,
         status,
         includeFastParentTargets,
+        includeFastParentTaskIds,
       );
     }
 

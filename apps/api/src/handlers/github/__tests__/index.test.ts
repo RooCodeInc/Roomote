@@ -25,6 +25,7 @@ const {
   mockUpdateTaskPrStatus,
   mockUpsertGitHubPullRequestFactFromWebhook,
   mockRecordPrStatusChangeInTaskHistory,
+  MockPrStatusFastDeliveryError,
   MockPrStatusHistoryRecordingError,
   mockIsFromKnownInstallation,
   mockVerify,
@@ -62,6 +63,14 @@ const {
   mockUpdateTaskPrStatus: vi.fn(),
   mockUpsertGitHubPullRequestFactFromWebhook: vi.fn(),
   mockRecordPrStatusChangeInTaskHistory: vi.fn(),
+  MockPrStatusFastDeliveryError: class extends Error {
+    readonly taskIds: string[];
+
+    constructor(message: string, taskIds: string[]) {
+      super(message);
+      this.taskIds = taskIds;
+    }
+  },
   MockPrStatusHistoryRecordingError: class extends Error {},
   mockIsFromKnownInstallation: vi.fn(),
   mockVerify: vi.fn(),
@@ -122,6 +131,7 @@ vi.mock('@roomote/sdk/server', () => ({
   upsertGitHubPullRequestFactFromWebhook:
     mockUpsertGitHubPullRequestFactFromWebhook,
   recordPrStatusChangeInTaskHistory: mockRecordPrStatusChangeInTaskHistory,
+  PrStatusFastDeliveryError: MockPrStatusFastDeliveryError,
   PrStatusHistoryRecordingError: MockPrStatusHistoryRecordingError,
 }));
 
@@ -417,6 +427,32 @@ describe('github webhook router', () => {
     expect(response.status).toBe(200);
     expect(mockHandlePrMerge).toHaveBeenCalledWith(payload, {
       includeFastParentTargets: false,
+    });
+  });
+
+  it('restores direct fallback only for Fast tasks whose relay failed', async () => {
+    mockUpdateTaskPrStatus.mockResolvedValue(undefined);
+    mockUpsertGitHubPullRequestFactFromWebhook.mockResolvedValue(undefined);
+    mockRecordPrStatusChangeInTaskHistory.mockRejectedValue(
+      new MockPrStatusFastDeliveryError('relay unavailable', ['task-2']),
+    );
+    mockHandlePrMerge.mockResolvedValue({ status: 'ok' });
+    const payload = makePullRequestPayload('closed');
+
+    const response = await app.request('http://localhost/api/webhooks/github', {
+      method: 'POST',
+      headers: {
+        'x-github-delivery': 'delivery-fast-relay-failure',
+        'x-github-event': 'pull_request',
+        'x-hub-signature-256': 'sha256=test',
+      },
+      body: JSON.stringify(payload),
+    });
+
+    expect(response.status).toBe(200);
+    expect(mockHandlePrMerge).toHaveBeenCalledWith(payload, {
+      includeFastParentTargets: false,
+      includeFastParentTaskIds: ['task-2'],
     });
   });
 

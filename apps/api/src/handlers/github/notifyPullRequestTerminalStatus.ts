@@ -117,6 +117,8 @@ interface NotifyPullRequestTerminalStatusParams {
   /** Preserve the direct Fast-conversation fallback when status recording or
    * Fast event delivery failed before the terminal notifier was scheduled. */
   includeFastParentTargets?: boolean;
+  /** Restore direct fallback only for Fast tasks whose relay failed. */
+  includeFastParentTaskIds?: string[];
 }
 
 type SlackTarget = {
@@ -841,6 +843,7 @@ export async function notifyPullRequestTerminalStatus({
   actorLogin,
   mergedBy,
   includeFastParentTargets = false,
+  includeFastParentTaskIds = [],
 }: NotifyPullRequestTerminalStatusParams): Promise<void> {
   const resolvedActorLogin = actorLogin || mergedBy || 'someone';
 
@@ -926,10 +929,14 @@ export async function notifyPullRequestTerminalStatus({
 
     const slackTargets: SlackTarget[] = [];
     const linearSessionIds: string[] = [];
+    const fastFallbackTaskIds = new Set(includeFastParentTaskIds);
     const fastSlackConversationTargets = includeFastParentTargets
       ? new Set<string>()
       : new Set(
           linkedRuns.flatMap((run) => {
+            if (fastFallbackTaskIds.has(run.taskId)) {
+              return [];
+            }
             const conversation = getFastAgentParentFromPayload(
               run.payload,
             )?.conversation;
@@ -965,21 +972,40 @@ export async function notifyPullRequestTerminalStatus({
     slackTargets.push(
       ...linkedRuns
         .map((run) =>
-          getSlackTarget(run.taskId, run.payload, includeFastParentTargets),
+          getSlackTarget(
+            run.taskId,
+            run.payload,
+            includeFastParentTargets || fastFallbackTaskIds.has(run.taskId),
+          ),
         )
         .filter((target): target is SlackTarget => target !== null),
     );
 
     const teamsTargets = linkedRuns
-      .map((run) => getTeamsTarget(run.payload, includeFastParentTargets))
+      .map((run) =>
+        getTeamsTarget(
+          run.payload,
+          includeFastParentTargets || fastFallbackTaskIds.has(run.taskId),
+        ),
+      )
       .filter((target): target is TeamsTarget => target !== null);
 
     const telegramTargets = linkedRuns
-      .map((run) => getTelegramTarget(run.payload, includeFastParentTargets))
+      .map((run) =>
+        getTelegramTarget(
+          run.payload,
+          includeFastParentTargets || fastFallbackTaskIds.has(run.taskId),
+        ),
+      )
       .filter((target): target is TelegramTarget => target !== null);
 
     const discordTargets = linkedRuns
-      .map((run) => getDiscordTarget(run.payload, includeFastParentTargets))
+      .map((run) =>
+        getDiscordTarget(
+          run.payload,
+          includeFastParentTargets || fastFallbackTaskIds.has(run.taskId),
+        ),
+      )
       .filter((target): target is DiscordTarget => target !== null);
 
     if (

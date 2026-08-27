@@ -6,7 +6,10 @@ import { toHostFromUrl } from '../utils';
 
 export const handlePrMerge = async (
   { installation, repository, pull_request, sender }: WebhookPullRequestClosed,
-  options: { includeFastParentTargets?: boolean } = {},
+  options: {
+    includeFastParentTargets?: boolean;
+    includeFastParentTaskIds?: string[];
+  } = {},
 ): Promise<WebhookResponse> => {
   const status = pull_request.merged
     ? ('merged' as const)
@@ -30,6 +33,9 @@ export const handlePrMerge = async (
           sender.login,
         ...(options.includeFastParentTargets
           ? { includeFastParentTargets: true }
+          : {}),
+        ...(options.includeFastParentTaskIds?.length
+          ? { includeFastParentTaskIds: options.includeFastParentTaskIds }
           : {}),
       },
       `PR #${pull_request.number}`,

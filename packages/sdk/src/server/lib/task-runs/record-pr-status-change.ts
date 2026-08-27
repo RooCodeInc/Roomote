@@ -46,6 +46,17 @@ type RecordPrStatusChangeInTaskHistoryResult = {
  * conversation delivery, which would duplicate the already-posted event. */
 export class PrStatusHistoryRecordingError extends Error {}
 
+/** Fast delivery failed for specific linked tasks. Webhook callers can restore
+ * direct delivery only for these targets without duplicating earlier tasks. */
+export class PrStatusFastDeliveryError extends Error {
+  readonly taskIds: string[];
+
+  constructor(message: string, taskIds: string[], options?: ErrorOptions) {
+    super(message, options);
+    this.taskIds = taskIds;
+  }
+}
+
 /**
  * Provider-native shorthand for a pull/merge request number.
  * GitHub/Gitea/Bitbucket use `#n`, GitLab uses `!n`, Azure DevOps has no
@@ -162,6 +173,8 @@ export async function recordPrStatusChangeInTaskHistory(
   let claimedTaskCount = 0;
   let skippedAlreadyRecorded = 0;
   let historyError: PrStatusHistoryRecordingError | null = null;
+  let fastDeliveryCause: unknown;
+  const fastFallbackTaskIds: string[] = [];
 
   for (const taskId of taskIds) {
     const latestRun = await db.query.taskRuns.findFirst({
@@ -177,18 +190,23 @@ export async function recordPrStatusChangeInTaskHistory(
     // Fast delivery owns the user-visible event for Fast conversations and has
     // its own durable delivery claim. Complete it before history's Redis claim
     // so a Redis outage cannot suppress both the Fast event and direct fallback.
-    await notifyFastAgentParentOnPullRequestStatusChanged({
-      run: latestRun,
-      pullRequest: {
-        provider: sourceControlProvider,
-        repository: parsedInput.repository,
-        number: parsedInput.prNumber,
-        title: parsedInput.prTitle,
-        url: parsedInput.prUrl,
-        status: parsedInput.status,
-      },
-      actorLogin: parsedInput.actorLogin,
-    });
+    try {
+      await notifyFastAgentParentOnPullRequestStatusChanged({
+        run: latestRun,
+        pullRequest: {
+          provider: sourceControlProvider,
+          repository: parsedInput.repository,
+          number: parsedInput.prNumber,
+          title: parsedInput.prTitle,
+          url: parsedInput.prUrl,
+          status: parsedInput.status,
+        },
+        actorLogin: parsedInput.actorLogin,
+      });
+    } catch (error) {
+      fastDeliveryCause ??= error;
+      fastFallbackTaskIds.push(taskId);
+    }
 
     // Claim once per task so webhook redeliveries and mid-loop failures do not
     // rewrite history for tasks that already succeeded.
@@ -263,6 +281,16 @@ export async function recordPrStatusChangeInTaskHistory(
       );
       continue;
     }
+  }
+
+  if (fastFallbackTaskIds.length > 0) {
+    throw new PrStatusFastDeliveryError(
+      fastDeliveryCause instanceof Error
+        ? fastDeliveryCause.message
+        : String(fastDeliveryCause),
+      fastFallbackTaskIds,
+      { cause: fastDeliveryCause },
+    );
   }
 
   if (historyError) {

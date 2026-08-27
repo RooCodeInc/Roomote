@@ -53,6 +53,7 @@ import {
 import {
   formatPrStatusChangeTaskHistoryText,
   formatPullRequestReference,
+  PrStatusFastDeliveryError,
   PrStatusHistoryRecordingError,
   recordPrStatusChangeInTaskHistory,
 } from '../record-pr-status-change';
@@ -327,5 +328,27 @@ describe('recordPrStatusChangeInTaskHistory', () => {
       }),
     );
     expect(mockRecordTaskMessageEnvelope).toHaveBeenCalledTimes(2);
+  });
+
+  it('reports only the later task whose Fast relay failed', async () => {
+    mockFindManyTaskPullRequests.mockResolvedValue([
+      { taskId: 'task-1' },
+      { taskId: 'task-2' },
+    ]);
+    mockFindFirstTaskRun
+      .mockResolvedValueOnce({ id: 11, taskId: 'task-1', payload: {} })
+      .mockResolvedValueOnce({ id: 22, taskId: 'task-2', payload: {} });
+    mockNotifyFastAgentParent
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error('relay unavailable'));
+    mockRecordTaskMessageEnvelope.mockRejectedValueOnce(new Error('db down'));
+
+    const error = await recordPrStatusChangeInTaskHistory(baseInput).catch(
+      (caught) => caught,
+    );
+
+    expect(error).toBeInstanceOf(PrStatusFastDeliveryError);
+    expect(error.taskIds).toEqual(['task-2']);
+    expect(mockNotifyFastAgentParent).toHaveBeenCalledTimes(2);
   });
 });

@@ -16,6 +16,7 @@ import {
 import { enqueueTask } from '@roomote/cloud-agents/server';
 import {
   recordPrStatusChangeInTaskHistory,
+  PrStatusFastDeliveryError,
   PrStatusHistoryRecordingError,
   updateTaskPrStatus,
 } from '@roomote/sdk/server';
@@ -63,6 +64,7 @@ async function notifyTerminalPullRequestThreads(
   repoFullName: string,
   status: 'merged' | 'closed',
   includeFastParentTargets: boolean,
+  includeFastParentTaskIds: string[],
 ): Promise<void> {
   const prUrl = getBitbucketPullRequestUrl(payload);
   const webhookHost = toHostFromUrl(prUrl);
@@ -94,6 +96,7 @@ async function notifyTerminalPullRequestThreads(
       status,
       actorLogin: getBitbucketUsername(payload.actor) ?? 'someone on Bitbucket',
       ...(includeFastParentTargets ? { includeFastParentTargets: true } : {}),
+      ...(includeFastParentTaskIds.length ? { includeFastParentTaskIds } : {}),
     },
     `PR #${prNumber}`,
   );
@@ -135,6 +138,7 @@ export async function handleBitbucketPullRequest(
     });
 
     let includeFastParentTargets = false;
+    let includeFastParentTaskIds: string[] = [];
     try {
       await recordPrStatusChangeInTaskHistory({
         sourceControlProvider: 'bitbucket',
@@ -147,9 +151,13 @@ export async function handleBitbucketPullRequest(
           getBitbucketUsername(payload.actor) ?? 'someone on Bitbucket',
       });
     } catch (error) {
-      includeFastParentTargets = !(
-        error instanceof PrStatusHistoryRecordingError
-      );
+      if (error instanceof PrStatusFastDeliveryError) {
+        includeFastParentTaskIds = error.taskIds;
+      } else {
+        includeFastParentTargets = !(
+          error instanceof PrStatusHistoryRecordingError
+        );
+      }
       console.warn(
         `[handleBitbucketPullRequest] Failed to record PR status in task history for ${repoFullName}#${prNumber}: ${
           error instanceof Error ? error.message : String(error)
@@ -162,6 +170,7 @@ export async function handleBitbucketPullRequest(
       repoFullName,
       status,
       includeFastParentTargets,
+      includeFastParentTaskIds,
     );
 
     return { status: 'ok' };
