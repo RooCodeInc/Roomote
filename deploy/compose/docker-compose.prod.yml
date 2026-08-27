@@ -556,9 +556,12 @@ services:
       - no-new-privileges:true
 
   # Self-run embedding/reranking models for the Brain (opt-in, CPU).
-  # Enable with the `local-inference` compose profile, then set
-  # R_BRAIN_EMBEDDINGS_UPSTREAM_URL=http://infinity:7997 (and the rerank URL
-  # if serving a reranker). Serve models by pinned name and keep serving old
+  # Enable with the `local-inference` compose profile. The upstream URLs are
+  # NOT sufficient on their own: R_BRAIN_EMBEDDING_MODEL and
+  # R_BRAIN_EMBEDDING_DIMENSIONS must name what this server serves (gbrain's
+  # defaults name a provider model it does not serve), and the embedding pair
+  # is create-time — the full set is documented together in
+  # .env.production.example. Serve models by pinned name and keep serving old
   # names: every Brain is locked to its embedding model at creation.
   infinity:
     profiles:
