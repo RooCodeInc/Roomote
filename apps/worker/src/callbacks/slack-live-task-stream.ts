@@ -21,9 +21,9 @@ const updateQueues = new Map<number, Promise<void>>();
  * covered by the launcher's "Starting task…" placeholder). */
 const STARTUP_STATUS_MESSAGES: Partial<Record<RunStatus, string>> = {
   [RunStatus.Preparing]: 'Preparing the workspace…',
-  [RunStatus.Spawning]: 'Starting the agent…',
-  [RunStatus.Connecting]: 'Connecting to the agent…',
-  [RunStatus.Running]: 'Agent started, getting to work…',
+  [RunStatus.Spawning]: 'Starting the task…',
+  [RunStatus.Connecting]: 'Connecting to the task…',
+  [RunStatus.Running]: 'Task started, getting to work…',
 };
 
 const WAITING_FOR_INPUT_MESSAGE = 'Waiting for your input…';
