@@ -141,6 +141,7 @@ describe('findUserDirectMessageDestination', () => {
       findUserDirectMessageDestination('teams', 'user-1'),
     ).resolves.toEqual({
       channelId: 'teams-dm-1',
+      teamId: 'tenant-1',
       serviceUrl: 'https://smba.example.com/amer/',
     });
     expect(mockCreateTeamsDirectMessage).toHaveBeenCalledWith({

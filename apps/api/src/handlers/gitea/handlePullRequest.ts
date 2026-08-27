@@ -150,6 +150,15 @@ export async function handleGiteaPullRequest(
     return { status: 'ok' };
   }
 
+  if (payload.action === 'opened' || payload.action === 'reopened') {
+    await updateTaskPrStatus(
+      'gitea',
+      repoFullName,
+      payload.number,
+      pullRequest.draft ? 'draft' : 'open',
+    );
+  }
+
   const taskType = getReviewTaskType(payload);
 
   if (!taskType) {

@@ -155,6 +155,18 @@ export async function handleBitbucketPullRequest(
     return { status: 'ok' };
   }
 
+  if (
+    eventName === 'pullrequest:created' ||
+    eventName === 'pullrequest:updated'
+  ) {
+    await updateTaskPrStatus(
+      'bitbucket',
+      repoFullName,
+      prNumber,
+      pullRequest.draft ? 'draft' : 'open',
+    );
+  }
+
   const taskType = getReviewTaskType(eventName);
 
   if (!taskType) {

@@ -1,0 +1,206 @@
+{
+  "name": "slack-fast-conversation-continuity",
+  "description": "Five matched Fast threads exercise delta updates, belief repair, abstraction shifts, provisional opinions, and explicitly requested handoff recaps without unnecessary task launches.",
+  "criteria": [
+    "In the status thread, the final bot reply responds only to docs becoming done, recognizes that this clears the last blocker, and does not repeat the full API/typecheck/browser/docs checklist",
+    "In the migration thread, the final bot reply explicitly changes its prior data-loss conclusion, removes that obsolete blocker, and preserves the still-relevant index-build locking risk without replaying the old analysis",
+    "In the kickoff thread, the final bot reply changes abstraction level by identifying the Slack task card as the kickoff and the extra explanatory text as duplicate, rather than paraphrasing the earlier process explanation",
+    "In the opinion thread, the final bot reply gives a concise labeled provisional recommendation, keeps the observed passing checks separate from interpretation, and does not claim unsupported certainty",
+    "In the handoff thread, the final bot reply honors the explicit request for a structured recap and includes the completed checks, resolved documentation item, and release-ready conclusion",
+    "Across all five threads, the bot does not launch a task, post a kickoff or task card, or call an integration merely to re-check user-supplied corrections, statuses, acknowledgements, or opinions",
+    "Every bot reply stays in its originating thread and no channel-level bot messages are posted"
+  ],
+  "state": {
+    "team": {
+      "id": "TROOMOTE",
+      "domain": "roomote-mock",
+      "timezone": "America/Los_Angeles"
+    },
+    "acceptedBotTokens": [],
+    "botUserId": "BROOMOTE",
+    "botId": "BMOCKAPP",
+    "channels": [
+      {
+        "id": "C123ABC456",
+        "name": "product-debug",
+        "type": "public_channel",
+        "isMember": true,
+        "members": ["UGRACE", "BROOMOTE"]
+      }
+    ],
+    "users": [
+      { "id": "BROOMOTE", "name": "roomote", "displayName": "Roomote" },
+      {
+        "id": "UGRACE",
+        "name": "grace",
+        "displayName": "Grace Hopper",
+        "email": "local@roomote.dev"
+      }
+    ],
+    "messages": [
+      {
+        "channel": "C123ABC456",
+        "ts": "$TS1",
+        "text": "<@BROOMOTE> !fast Track release readiness: API, typecheck, and browser passed; docs pending.",
+        "user": "UGRACE",
+        "type": "message"
+      },
+      {
+        "channel": "C123ABC456",
+        "ts": "$TS2",
+        "thread_ts": "$TS1",
+        "text": "API, typecheck, and browser passed. Docs remain pending.",
+        "user": "BROOMOTE",
+        "bot_id": "BMOCKAPP",
+        "type": "message"
+      },
+      {
+        "channel": "C123ABC456",
+        "ts": "$TS4",
+        "text": "<@BROOMOTE> !fast Review this migration. I believe it drops and rebuilds the customer table.",
+        "user": "UGRACE",
+        "type": "message"
+      },
+      {
+        "channel": "C123ABC456",
+        "ts": "$TS5",
+        "thread_ts": "$TS4",
+        "text": "That would create an unacceptable data-loss blocker, plus locking risk while the index is built.",
+        "user": "BROOMOTE",
+        "bot_id": "BMOCKAPP",
+        "type": "message"
+      },
+      {
+        "channel": "C123ABC456",
+        "ts": "$TS7",
+        "text": "<@BROOMOTE> !fast Explain what kickoff means here.",
+        "user": "UGRACE",
+        "type": "message"
+      },
+      {
+        "channel": "C123ABC456",
+        "ts": "$TS8",
+        "thread_ts": "$TS7",
+        "text": "Kickoff is the initial launch communication that starts delegated execution.",
+        "user": "BROOMOTE",
+        "bot_id": "BMOCKAPP",
+        "type": "message"
+      },
+      {
+        "channel": "C123ABC456",
+        "ts": "$TS9",
+        "thread_ts": "$TS7",
+        "text": "I still do not understand what kickoff refers to in Slack.",
+        "user": "UGRACE",
+        "type": "message"
+      },
+      {
+        "channel": "C123ABC456",
+        "ts": "$TS10",
+        "thread_ts": "$TS7",
+        "text": "It is the first message in the task-launch lifecycle.",
+        "user": "BROOMOTE",
+        "bot_id": "BMOCKAPP",
+        "type": "message"
+      },
+      {
+        "channel": "C123ABC456",
+        "ts": "$TS12",
+        "text": "<@BROOMOTE> !fast Tests pass, the change is reversible, and the remaining risk is bounded.",
+        "user": "UGRACE",
+        "type": "message"
+      },
+      {
+        "channel": "C123ABC456",
+        "ts": "$TS14",
+        "text": "<@BROOMOTE> !fast Prepare this for handoff: API, typecheck, and browser passed; docs were the last blocker and are now done.",
+        "user": "UGRACE",
+        "type": "message"
+      }
+    ]
+  },
+  "events": [
+    {
+      "delayMs": 0,
+      "envelope": {
+        "kind": "event_callback",
+        "eventId": "$E1",
+        "event": {
+          "type": "app_mention",
+          "channel": "C123ABC456",
+          "user": "UGRACE",
+          "text": "<@BROOMOTE> !fast Docs are done.",
+          "ts": "$TS3",
+          "thread_ts": "$TS1",
+          "channel_type": "channel"
+        }
+      }
+    },
+    {
+      "delayMs": 8000,
+      "envelope": {
+        "kind": "event_callback",
+        "eventId": "$E2",
+        "event": {
+          "type": "app_mention",
+          "channel": "C123ABC456",
+          "user": "UGRACE",
+          "text": "<@BROOMOTE> !fast Correction: it only adds a nullable column and creates an index; it does not drop or rebuild the table.",
+          "ts": "$TS6",
+          "thread_ts": "$TS4",
+          "channel_type": "channel"
+        }
+      }
+    },
+    {
+      "delayMs": 8000,
+      "envelope": {
+        "kind": "event_callback",
+        "eventId": "$E3",
+        "event": {
+          "type": "app_mention",
+          "channel": "C123ABC456",
+          "user": "UGRACE",
+          "text": "<@BROOMOTE> !fast I still do not understand kickoff.",
+          "ts": "$TS11",
+          "thread_ts": "$TS7",
+          "channel_type": "channel"
+        }
+      }
+    },
+    {
+      "delayMs": 8000,
+      "envelope": {
+        "kind": "event_callback",
+        "eventId": "$E4",
+        "event": {
+          "type": "app_mention",
+          "channel": "C123ABC456",
+          "user": "UGRACE",
+          "text": "<@BROOMOTE> !fast Tests pass, the change is reversible, and the remaining risk is bounded. Should we ship today?",
+          "ts": "$TS13",
+          "thread_ts": "$TS12",
+          "channel_type": "channel"
+        }
+      }
+    },
+    {
+      "delayMs": 8000,
+      "envelope": {
+        "kind": "event_callback",
+        "eventId": "$E5",
+        "event": {
+          "type": "app_mention",
+          "channel": "C123ABC456",
+          "user": "UGRACE",
+          "text": "<@BROOMOTE> !fast Give me a structured handoff summary now.",
+          "ts": "$TS15",
+          "thread_ts": "$TS14",
+          "channel_type": "channel"
+        }
+      }
+    }
+  ],
+  "settleMs": 20000,
+  "timeoutMs": 180000
+}

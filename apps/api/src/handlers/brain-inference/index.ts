@@ -2,6 +2,8 @@ import { timingSafeEqual } from 'node:crypto';
 
 import { Hono } from 'hono';
 
+import { Env } from '@roomote/env';
+
 import {
   formatSingleLineLog,
   getInferenceGatewayProvider,
@@ -117,6 +119,35 @@ async function rewriteBody(
 }
 
 /**
+ * A self-run inference upstream for one gateway path. Embeddings and rerank
+ * are the Brain's bulk data paths (memory text in, vectors/scores out), so
+ * they are the ones a deployment may want on its own hardware; chat synthesis
+ * stays with the configured model provider. Model names pass through
+ * unrewritten — the upstream owns its own model registry, and every Brain is
+ * locked to its embedding model at creation, so the name must mean exactly
+ * one thing forever.
+ */
+function resolveLocalUpstream(
+  upstreamPath: string,
+): { baseUrl: string; apiKey?: string } | null {
+  const baseUrl =
+    upstreamPath === '/v1/embeddings'
+      ? Env.R_BRAIN_EMBEDDINGS_UPSTREAM_URL
+      : upstreamPath === '/v1/rerank'
+        ? Env.R_BRAIN_RERANK_UPSTREAM_URL
+        : undefined;
+
+  if (!baseUrl?.trim()) {
+    return null;
+  }
+
+  return {
+    baseUrl: baseUrl.trim().replace(/\/$/, ''),
+    apiKey: Env.R_BRAIN_INFERENCE_UPSTREAM_API_KEY?.trim() || undefined,
+  };
+}
+
+/**
  * Inference gateway for this deployment's Brain.
  *
  * The Brain container holds no provider credential. It is pointed at this
@@ -163,6 +194,64 @@ brainInference.post('/*', async (c) => {
     return c.json({ error: 'Path is not allowed through this gateway' }, 403);
   }
 
+  const localUpstream = resolveLocalUpstream(upstreamPath);
+
+  if (localUpstream) {
+    const headers = new Headers();
+
+    // Same denylist as the provider path: the gateway token in
+    // `authorization` must never reach any upstream.
+    for (const [name, value] of c.req.raw.headers.entries()) {
+      if (!REQUEST_HEADER_DENYLIST.has(name.toLowerCase())) {
+        headers.set(name, value);
+      }
+    }
+
+    if (localUpstream.apiKey) {
+      headers.set('authorization', `Bearer ${localUpstream.apiKey}`);
+    }
+
+    let upstream: Response;
+
+    try {
+      upstream = await fetch(
+        `${localUpstream.baseUrl}${upstreamPath}${requestUrl.search}`,
+        { method: 'POST', headers, body: await c.req.text() },
+      );
+    } catch (error) {
+      console.warn(
+        formatSingleLineLog(`${LOG_PREFIX} Local upstream request failed`, {
+          upstreamPath,
+          error: error instanceof Error ? error.message : String(error),
+        }),
+      );
+
+      return c.json({ error: 'Brain inference upstream is unreachable' }, 502);
+    }
+
+    if (!upstream.ok) {
+      console.warn(
+        formatSingleLineLog(`${LOG_PREFIX} Local upstream returned an error`, {
+          upstreamPath,
+          status: upstream.status,
+        }),
+      );
+    }
+
+    const responseHeaders = new Headers();
+
+    for (const [name, value] of upstream.headers.entries()) {
+      if (!RESPONSE_HEADER_DENYLIST.has(name.toLowerCase())) {
+        responseHeaders.set(name, value);
+      }
+    }
+
+    return new Response(upstream.body, {
+      status: upstream.status,
+      headers: responseHeaders,
+    });
+  }
+
   const resolved = await resolveBrainInferenceProvider();
 
   if (!resolved) {
@@ -185,7 +274,7 @@ brainInference.post('/*', async (c) => {
     return c.json(
       {
         error:
-          'Brain reranking requires an OpenRouter provider configured in Settings.',
+          'Brain reranking requires an OpenRouter provider configured in Settings, or a local rerank upstream (R_BRAIN_RERANK_UPSTREAM_URL).',
       },
       503,
     );

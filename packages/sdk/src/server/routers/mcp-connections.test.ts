@@ -254,17 +254,17 @@ describe('mcpConnectionsRouter.getMcpServerConfigs', () => {
     expect(mockGetValidAccessToken).not.toHaveBeenCalled();
   });
 
-  it('can include the API-hosted Roomote MCP for Fast user sessions', async () => {
+  it('includes the member-capable Roomote MCP for Fast user sessions', async () => {
     mockEnv.R_CURATED_INTEGRATIONS_DISABLED = true;
 
     const result = await resolveUserMcpServerConfigs({
       userId: 'user-1',
       apiBaseUrl: 'https://api.preview.roomote.run/_roomote-api',
-      includeRoomote: true,
+      includeRoomoteMemberTools: true,
     });
 
     expect(result.roomote).toEqual({
-      url: 'https://api.preview.roomote.run/api/mcp-routing/roomote',
+      url: 'https://api.preview.roomote.run/mcp',
       headers: {},
     });
   });

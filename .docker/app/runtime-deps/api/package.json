@@ -4,6 +4,8 @@
   "private": true,
   "packageManager": "pnpm@10.29.3",
   "dependencies": {
+    "dompurify": "3.4.13",
+    "jsdom": "26.1.0",
     "snowflake-sdk": "2.4.3",
     "zod": "3.25.76"
   },

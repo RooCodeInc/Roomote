@@ -7,6 +7,7 @@ import {
   TaskPayloadKind,
 } from '@roomote/types';
 import { enqueueTask } from '@roomote/cloud-agents/server';
+import { publishGithubPrReviewCheck } from '@roomote/sdk/server';
 
 import type { WebhookResponse } from '../../types';
 import { toHostFromUrl } from '../utils';
@@ -99,7 +100,7 @@ export async function handlePrOpen(
       reviewerSettings: target.settings,
     });
 
-    return enqueueTask({
+    const launch = await enqueueTask({
       task: {
         type: TaskPayloadKind.GithubPrReview,
         ...getBackgroundGithubTaskProperties(target.properties),
@@ -134,6 +135,19 @@ export async function handlePrOpen(
         prBaseSha: pr.base?.sha ?? null,
       },
     });
+
+    if (target.settings?.publishGithubCheck) {
+      await publishGithubPrReviewCheck({
+        installationId: installation!.id,
+        repository: repository.full_name,
+        prNumber: pr.number,
+        headSha,
+        taskId: launch.taskId,
+        runId: launch.id,
+      });
+    }
+
+    return launch;
   });
 
   return {

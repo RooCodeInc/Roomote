@@ -5,7 +5,7 @@ import {
   REVIEW_STATUS_START_MARKER,
   REVIEW_SUMMARY_MARKER,
   getMarkedSection,
-  isReviewInProgressStatusLine,
+  isReviewSummaryInProgress,
 } from '@roomote/cloud-agents/server';
 import {
   generateTrackedNonTaskObject,
@@ -26,6 +26,7 @@ import {
   ACP_ENVELOPE_EVENT_TYPES,
   getSourceControlProviderLabel,
   normalizeSourceControlProvider,
+  PR_CONFLICT_NOTIFICATION_TASK_MESSAGE_SOURCE,
   PR_REVIEW_NOTIFICATION_TASK_MESSAGE_SOURCE,
   ROOMOTE_RUNTIME_TASK_MESSAGE_PROTOCOL,
   type SourceControlProvider,
@@ -862,7 +863,8 @@ function sanitizeReviewStatus(status: string): string {
 
 function getReviewSummaryHeadSha(body: string): string | null {
   return (
-    body.match(/<!--\s*roomote-review-summary\s+sha=([0-9a-f]+)/i)?.[1] ?? null
+    body.match(/<!--\s*roomote-review-summary\s+sha=([0-9a-f]{7,})/i)?.[1] ??
+    null
   );
 }
 
@@ -932,8 +934,8 @@ async function fetchPrDiscussionSignals({
 
     if (status?.trim()) {
       latestReviewStatus = sanitizeReviewStatus(status);
-      latestTerminalReviewSummaryHeadSha = isReviewInProgressStatusLine(
-        status.trim().split('\n')[0] ?? '',
+      latestTerminalReviewSummaryHeadSha = isReviewSummaryInProgress(
+        comment.body,
       )
         ? null
         : getReviewSummaryHeadSha(comment.body);
@@ -1446,8 +1448,12 @@ export async function recordPrReviewNotificationDeliveryBestEffort(params: {
   text: string;
   route?: PrReviewNotificationRoute | null;
   messageTs?: string | null;
+  source?:
+    | typeof PR_REVIEW_NOTIFICATION_TASK_MESSAGE_SOURCE
+    | typeof PR_CONFLICT_NOTIFICATION_TASK_MESSAGE_SOURCE;
 }): Promise<void> {
   const route = params.route ?? null;
+  const source = params.source ?? PR_REVIEW_NOTIFICATION_TASK_MESSAGE_SOURCE;
   const operations: Array<{ label: string; promise: Promise<unknown> }> = [
     {
       label: 'persist task history',
@@ -1464,12 +1470,12 @@ export async function recordPrReviewNotificationDeliveryBestEffort(params: {
           protocol: ROOMOTE_RUNTIME_TASK_MESSAGE_PROTOCOL,
           contentBlocks: [{ type: 'text', text: params.text }],
           metadata: {
-            source: PR_REVIEW_NOTIFICATION_TASK_MESSAGE_SOURCE,
+            source,
             visibleInTranscript: true,
           },
           payload: {
             text: params.text,
-            source: PR_REVIEW_NOTIFICATION_TASK_MESSAGE_SOURCE,
+            source,
           },
           visibleInTranscript: true,
         },

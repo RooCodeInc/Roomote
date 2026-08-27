@@ -10,6 +10,8 @@ import type {
   DependabotTriageFrequency,
   IssueFixerFrequency,
   ManagerStatsFrequency,
+  ProviderUsageLimitFrequency,
+  ProviderUsageLimitThreshold,
   PrReviewSettings,
   SecurityAuditorFrequency,
   SentryTriageFrequency,
@@ -37,7 +39,8 @@ import type {
   repositories,
   slackAuthTokens,
   fastAgentConversations,
-  fastAgentConversationAliases,
+  fastAgentMessages,
+  fastAgentProviderMessages,
   slackInstallations,
   slackInstallationChannels,
   slackUserMappings,
@@ -47,7 +50,6 @@ import type {
   discordGatewaySessions,
   teamsInstallations,
   teamsUserMappings,
-  slackQuickAnswers,
   slackFastIntegrationCalls,
   linearPendingSelections,
   environmentVariables,
@@ -275,22 +277,18 @@ export type CreateFastAgentConversationRecord = Omit<
   Generated
 >;
 
-export type FastAgentConversationAlias =
-  typeof fastAgentConversationAliases.$inferSelect;
+export type FastAgentMessage = typeof fastAgentMessages.$inferSelect;
 
-export type CreateFastAgentConversationAlias = Omit<
-  typeof fastAgentConversationAliases.$inferInsert,
+export type CreateFastAgentMessage = Omit<
+  typeof fastAgentMessages.$inferInsert,
   Generated
 >;
 
-/**
- * slackQuickAnswers (renamed from fastAgentSessions in Stage 4)
- */
+export type FastAgentProviderMessage =
+  typeof fastAgentProviderMessages.$inferSelect;
 
-export type SlackQuickAnswer = typeof slackQuickAnswers.$inferSelect;
-
-export type CreateSlackQuickAnswer = Omit<
-  typeof slackQuickAnswers.$inferInsert,
+export type CreateFastAgentProviderMessage = Omit<
+  typeof fastAgentProviderMessages.$inferInsert,
   Generated
 >;
 
@@ -523,6 +521,11 @@ export type BackgroundAgentSettings = StoredBackgroundAgentSettings & {
   managerStatsSlackChannelId: string | null;
   managerStatsDiscordChannelId: string | null;
   managerStatsLastRunAt: Date | null;
+  providerUsageLimitFrequency: ProviderUsageLimitFrequency;
+  providerUsageLimitThreshold: ProviderUsageLimitThreshold;
+  providerUsageLimitSlackChannelId: string | null;
+  providerUsageLimitDiscordChannelId: string | null;
+  providerUsageLimitLastRunAt: Date | null;
   sentryTriageFrequency: SentryTriageFrequency;
   sentryTriageSlackChannelId: string | null;
   sentryTriageDiscordChannelId: string | null;

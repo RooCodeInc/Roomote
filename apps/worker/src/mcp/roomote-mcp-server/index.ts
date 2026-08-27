@@ -48,7 +48,12 @@ import {
   handleUpdateEnvironment,
 } from './create-environment.js';
 import { handleRequestEnvironmentVariables } from './request-environment-variables.js';
-import { handleShowWidget } from './show-widget.js';
+import {
+  handleShowWidget,
+  SHOW_WIDGET_FIXED_CANVAS_GUIDANCE,
+  SHOW_WIDGET_HEIGHT_DESCRIPTION,
+  SHOW_WIDGET_THEME_GUIDANCE,
+} from './show-widget.js';
 import { handleSendChatReply } from './send-chat-reply.js';
 import { handleRelayFastAgentChatReply } from './relay-fast-agent-chat-reply.js';
 import {
@@ -165,9 +170,10 @@ roomoteMcpServer.registerTool(
       'Use it when a structured or visual presentation is clearer than plain text, or to demonstrate how something would look. ' +
       'Examples include mock UI, status cards, tables, annotated plans, and other visual examples. ' +
       'HTML, CSS, and inline SVG are displayed in a sandboxed iframe with scripts disabled and network requests blocked. ' +
-      'Prefer semantic HTML with the built-in widget classes (`rw-card`, `rw-stack`, `rw-row`, `rw-grid`, `rw-stat`, `rw-badge`, `rw-callout`, `rw-muted`) so the widget follows the host task theme. ' +
-      'For custom CSS, use the provided `--rw-*` theme variables instead of hard-coded colors; omit css when the built-in styles are sufficient. ' +
-      'Keep widgets compact enough to fit without scrolling: use concise labels and a small number of cards, rows, or table entries, and choose a height that fully fits the expected content. Use ordinary prose or an artifact for long content. ' +
+      SHOW_WIDGET_THEME_GUIDANCE +
+      ' ' +
+      SHOW_WIDGET_FIXED_CANVAS_GUIDANCE +
+      ' ' +
       'Do not use it for ordinary prose or collecting user input; use request_user_input when you need answers. ' +
       'Optional textFallback is delivered to the originating chat surface (Slack/Teams/Telegram/Discord) when the task was started from chat.',
     inputSchema: {
@@ -184,12 +190,7 @@ roomoteMcpServer.registerTool(
         .describe(
           'Optional extra CSS injected after the built-in widget defaults. Prefer --rw-background, --rw-surface, --rw-surface-muted, --rw-text, --rw-text-muted, --rw-border, --rw-primary, --rw-accent, --rw-success, --rw-warning, and --rw-danger instead of hard-coded colors.',
         ),
-      height: z
-        .number()
-        .optional()
-        .describe(
-          'Optional widget iframe height in pixels (clamped to 120-800; default 320). Choose the smallest height that fully fits the expected content without a vertical scrollbar.',
-        ),
+      height: z.number().optional().describe(SHOW_WIDGET_HEIGHT_DESCRIPTION),
       textFallback: z
         .string()
         .optional()
@@ -1367,7 +1368,7 @@ if (shouldRegisterSlackThreadReplyTool() || isFastAgentChild()) {
     ? 'Use the optional suggestions parameter when the automation prompt explicitly asks for task suggestions, launchable follow-ups, or help taking concrete actions. Do not infer suggested-task intent from a request that only asks for a summary or action-item list. Suggestions are posted inside the originating conversation. Do not use suggestions for ordinary summary bullets, status updates, questions, speculative ideas, or work explicitly identified in the conversation as already underway. When suggestions are present, the tool automatically adds the surface-specific instruction for starting one; do not write a separate launch instruction. '
     : '';
   const chatReplyDescription = relaysThroughFastParent
-    ? 'Fast-internal: sends a lifecycle update privately to the Fast parent, which owns any user-visible reply. The raw message is never posted directly to the user. Use progress for new decision-useful state or silence prevention, closeout for the final result or blocker, and clarification when user input is needed. The Fast parent already posted the task kickoff, so use ack only when a new acknowledgement is genuinely useful. Ack and progress keep the coding task active.'
+    ? 'Fast-internal: sends a lifecycle update privately to the Fast parent, which owns any user-visible reply. The raw message is never posted directly to the user. The kickoff already acknowledged the request, so do not send another generic ack. Use progress to pass concrete findings, blockers, meaningful work milestones, required input, or a brief note after roughly 10 minutes of silence. Describe the work itself without labeling the message as a progress update or using policy vocabulary such as phase transition, checkpoint, lifecycle, or user-facing. Use closeout for the final result or blocker and clarification when user input is needed. Ack and progress keep the coding task active.'
     : `${chatReplySurfaceLabel}-visible: posts a lifecycle reply in the originating ${chatReplySurfaceLabel} thread. Choose the current ${chatReplySurfaceLabel} turn purpose before writing: ack, progress, closeout, or clarification. Use ack for the first visible response when work will continue; use progress only when the message adds new decision-useful state or prevents a 10-minute silence gap; use closeout for the answer, result, blocker, or handoff; use clarification for lightweight non-secret questions. Use closeout to finish a turn with an outcome; a clarification also ends the turn when the next step depends on the user's answer — do not follow it with a separate "waiting on your answer" message. Ack and progress keep the ${chatReplySurfaceLabel} turn open. Use it again on later ${chatReplySurfaceLabel} turns when they need another direct reply; an earlier thread reply does not count as the reply for the current turn. For routine successful closeouts, focus on the shipped change and any blocker or delivery outcome that changes the user's next step; do not include exact validation commands, passed-check ledgers, or proof-applicability narration unless the user asked or that detail materially changes what they should do next. ${chatReplyMarkdownGuidance}${chatReplySourceLinkingGuidance}${chatReplySuggestionGuidance}Write the message so its content clearly matches the selected purpose.`;
   roomoteMcpServer.registerTool(
     'send_chat_reply',
@@ -1379,12 +1380,12 @@ if (shouldRegisterSlackThreadReplyTool() || isFastAgentChild()) {
           .enum(['ack', 'progress', 'closeout', 'clarification'])
           .describe(
             relaysThroughFastParent
-              ? 'The lifecycle purpose of this private update to the Fast parent. Use progress for useful state or silence prevention, closeout for the final result or blocker, and clarification when user input is needed. The Fast parent already posted the task kickoff, so use ack only when new acknowledgement is genuinely useful.'
+              ? 'The lifecycle purpose of this private update to the Fast parent. The kickoff already acknowledged the request, so avoid another generic ack. Use progress for concrete findings, blockers, meaningful work milestones, required input, or a brief update after roughly 10 minutes of silence. Use closeout for the final result or blocker and clarification when user input is needed.'
               : `The lifecycle purpose for this ${chatReplySurfaceLabel}-visible reply. Choose ack for the first visible response before work that will not post to ${chatReplySurfaceLabel}, progress for new useful state or silence prevention, closeout for the final answer/result/blocker/handoff, or clarification for a lightweight question. Use closeout before final task completion.`,
           ),
         message: nonEmptyStringSchema.describe(
           (relaysThroughFastParent
-            ? 'Non-empty Markdown source text for the Fast parent. State concrete task progress or the needed handoff; the Fast parent will compose the user-visible message. '
+            ? 'Non-empty Markdown source text for the Fast parent. State concrete facts about the work or the needed handoff; the Fast parent will compose the user-visible message. '
             : `Non-empty Markdown text to post in the ${chatReplySurfaceLabel} thread. Match the selected purpose, lead with the useful takeaway, and keep it conversational like a teammate in a thread. `) +
             "For routine successful closeouts, focus on the shipped change and any blocker or delivery outcome that changes the user's next step instead of listing exact validation commands, passed checks, or proof-applicability notes unless the user asked for them or they materially change what the user should do next. " +
             chatReplyMessageMarkdownGuidance,

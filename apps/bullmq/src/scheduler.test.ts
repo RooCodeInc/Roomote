@@ -43,6 +43,7 @@ vi.mock('@roomote/sdk/server', () => ({
   customAutomationsJob: vi.fn(),
   dependabotTriageJob: vi.fn(),
   managerStatsJob: vi.fn(),
+  providerUsageLimitJob: vi.fn(),
   securityAuditorJob: vi.fn(),
   sentryTriageJob: vi.fn(),
   suggesterJob: vi.fn(),
@@ -63,7 +64,6 @@ vi.mock('./scheduled-jobs', () => ({
   brainOutboxDrainJob: vi.fn(),
   brainCollectorsJob: vi.fn(),
   brainMaintenanceJob: vi.fn(),
-  providerUsageLimitCheckJob: vi.fn(),
 }));
 
 import { ScheduledJobName } from './types';
@@ -114,12 +114,15 @@ describe('startScheduler', () => {
     );
   });
 
-  it('checks provider usage limits every 15 minutes', async () => {
+  it('checks provider usage limits every hour', async () => {
     await startScheduler();
 
+    expect(mocks.queue.removeJobScheduler).toHaveBeenCalledWith(
+      'ProviderUsageLimitCheck',
+    );
     expect(mocks.queue.upsertJobScheduler).toHaveBeenCalledWith(
-      ScheduledJobName.ProviderUsageLimitCheck,
-      { every: 15 * 60 * 1000 },
+      'provider_usage_limit',
+      { every: 60 * 60 * 1000 },
     );
   });
 });

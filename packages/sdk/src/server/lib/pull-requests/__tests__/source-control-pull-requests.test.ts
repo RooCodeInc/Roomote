@@ -1461,6 +1461,9 @@ describe('optional targetBranch', () => {
         communicationTeamDomain: 'acme',
         communicationChannelId: 'C123',
         communicationThreadId: '1234567890.000100',
+        communicationMessageId: '1234567890.000200',
+        slackConversationUrl:
+          'https://acme.slack.com/archives/C123/p1234567890000200?thread_ts=1234567890.000100&cid=C123',
       },
       {
         taskSurface: 'slack',
@@ -1468,8 +1471,10 @@ describe('optional targetBranch', () => {
         slackTeamDomain: 'acme',
         slackChannel: 'C123',
         slackThreadTs: '1234567890.000100',
+        slackConversationUrl:
+          'https://acme.slack.com/archives/C123/p1234567890000200?thread_ts=1234567890.000100&cid=C123',
       },
-      '[Slack](https://acme.slack.com/archives/C123/p1234567890000100)',
+      '[Slack](https://acme.slack.com/archives/C123/p1234567890000200?thread_ts=1234567890.000100&cid=C123)',
     ],
     [
       'Discord',

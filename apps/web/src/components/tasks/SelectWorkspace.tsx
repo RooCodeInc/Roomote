@@ -4,7 +4,7 @@ import { useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { useFormContext } from 'react-hook-form';
 
-import { ALL_REPOSITORIES } from '@roomote/types';
+import { ALL_REPOSITORIES, FAST_EXECUTION } from '@roomote/types';
 
 import type { CreateTaskFormValues } from '@/types';
 
@@ -21,6 +21,9 @@ export const SelectWorkspace = ({
   repositoryFilter,
   lockedBranch,
   allowAuto = false,
+  allowFast = false,
+  autoSelectDefaultWorkspace = true,
+  onInvalidWorkspaceReset,
   allowBranchSelection = true,
   environmentBranchRepositoryFullName,
   environmentBranchDefault,
@@ -28,6 +31,9 @@ export const SelectWorkspace = ({
   repositoryFilter?: string;
   lockedBranch?: string;
   allowAuto?: boolean;
+  allowFast?: boolean;
+  autoSelectDefaultWorkspace?: boolean;
+  onInvalidWorkspaceReset?: () => void;
   allowBranchSelection?: boolean;
   environmentBranchRepositoryFullName?: string;
   environmentBranchDefault?: string;
@@ -49,7 +55,8 @@ export const SelectWorkspace = ({
     !environmentId &&
     repository &&
     repository !== ALL_REPOSITORIES &&
-    repository !== AUTO_WORKSPACE_VALUE;
+    repository !== AUTO_WORKSPACE_VALUE &&
+    repository !== FAST_EXECUTION;
   const canSelectEnvironmentBranch =
     allowBranchSelection &&
     !lockedBranch &&
@@ -109,6 +116,9 @@ export const SelectWorkspace = ({
           repositoryFilter={repositoryFilter}
           lockedBranch={lockedBranch}
           allowAuto={allowAuto}
+          allowFast={allowFast}
+          autoSelectDefaultWorkspace={autoSelectDefaultWorkspace}
+          onInvalidWorkspaceReset={onInvalidWorkspaceReset}
           onCreate={handleCreateEnvironment}
           onCreateRepository={handleCreateRepository}
           onEdit={handleUpdateEnvironment}

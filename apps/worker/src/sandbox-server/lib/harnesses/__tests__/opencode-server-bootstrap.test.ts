@@ -158,6 +158,23 @@ describe('opencode-server bootstrap', () => {
     }
   });
 
+  it('keeps project config disabled in the parent worker harness', async () => {
+    const { prepareOpenCodeCommandEnv } =
+      await import('../opencode-server/bootstrap');
+
+    const homeDir = createTempHome();
+    const { commandEnv } = await prepareOpenCodeCommandEnv({
+      runtimeEnv: {
+        ...createDirectHarnessRuntimeEnv(homeDir),
+        OPENCODE_DISABLE_PROJECT_CONFIG: '0',
+      },
+      workspacePath: '/tmp/workspace',
+      logger: createLogger(),
+    });
+
+    expect(commandEnv.OPENCODE_DISABLE_PROJECT_CONFIG).toBe('1');
+  });
+
   it('moves literal remote MCP header values into env vars before preparing the runtime overlay', async () => {
     const { prepareOpenCodeCommandEnv } =
       await import('../opencode-server/bootstrap');
@@ -505,10 +522,12 @@ describe('opencode-server bootstrap', () => {
 
     const content = fs.readFileSync(integrationInstructionsPath, 'utf8');
 
-    expect(content).toContain('# Connected integration: Supermemory');
-    expect(content).toContain('Recall early');
-    expect(content).toContain('Save durable knowledge proactively');
-    expect(content).toContain('Do not wait for the user to ask');
+    expect(content).toContain('# Connected memory: Supermemory');
+    expect(content).toContain('first normal context or work tool call');
+    expect(content).toContain('remain visible in the session');
+    expect(content).toContain(
+      'At task completion, proactively save concise durable learnings',
+    );
   });
 
   it('skips the integration usage instructions file when attached MCP servers define none', async () => {

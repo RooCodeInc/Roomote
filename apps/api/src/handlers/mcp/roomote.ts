@@ -105,6 +105,12 @@ async function resolveRoomoteMcpAuth(
   }
 
   if (isRunTokenContext(authContext)) {
+    if (!options.allowLegacyAudience) {
+      throw new McpProxyError(
+        403,
+        'Forbidden: member tools require a user-scoped access token',
+      );
+    }
     await assertTaskRunTokenTargetExists(authContext);
 
     return {

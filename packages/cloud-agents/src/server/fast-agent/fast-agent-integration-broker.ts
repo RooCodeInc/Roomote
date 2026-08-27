@@ -1,4 +1,4 @@
-import { createAuthToken } from '@roomote/auth';
+import { createAuthToken, ROOMOTE_MCP_PATH } from '@roomote/auth';
 import {
   beginSlackFastIntegrationCall,
   completeSlackFastIntegrationCall,
@@ -7,12 +7,14 @@ import {
   isNull,
 } from '@roomote/db/server';
 import {
-  BRAIN_MCP_ID,
+  createMemoryMcpInstructions,
   MCP_INTEGRATION_PROXY_PATH_PREFIX,
   MCP_ROUTING_PROXY_PATH_PREFIX,
   ROOMOTE_MCP_ID,
   getMcpIntegration,
+  getMemoryMcpDisplayName,
   formatErrorForLog,
+  isMemoryMcpServer,
 } from '@roomote/types';
 
 import {
@@ -22,7 +24,6 @@ import {
 } from '../mcp-tool-client';
 import { isRouterMcpServerEnabled } from '../router/mcp-policy';
 import { resolveApiBaseUrl } from '../shared-utils';
-import { FAST_AGENT_BRAIN_INSTRUCTIONS } from './fast-agent-constants';
 import {
   getFastAgentConversationStorageWorkspaceId,
   type FastAgentMcpServerConfig,
@@ -193,12 +194,13 @@ function describeMcpServer(
         'Manage this Roomote deployment, including custom automations and other deployment capabilities.',
     };
   }
-  if (id === BRAIN_MCP_ID) {
+  if (isMemoryMcpServer(id)) {
     return {
-      name: 'Brain',
-      description:
-        "Read this deployment's shared memory of completed tasks and connected integration activity.",
-      instructions: FAST_AGENT_BRAIN_INSTRUCTIONS,
+      name: getMemoryMcpDisplayName(id),
+      description: 'Read and write persistent context shared across tasks.',
+      instructions: createMemoryMcpInstructions(id, {
+        surface: 'conversation',
+      }),
     };
   }
   const integration = getMcpIntegration(id);
@@ -207,12 +209,14 @@ function describeMcpServer(
     description:
       integration?.description ??
       'Use tools from this deployment-configured MCP server.',
+    instructions: integration?.instructions,
   };
 }
 
 function resolveFastMcpEndpoint(options: {
   apiBaseUrl: string;
   authToken: string;
+  integrationId: string;
   config: FastAgentMcpServerConfig;
 }) {
   const apiUrl = new URL(options.apiBaseUrl);
@@ -220,7 +224,9 @@ function resolveFastMcpEndpoint(options: {
   const isDeploymentProxy =
     configuredUrl.origin === apiUrl.origin &&
     (configuredUrl.pathname.startsWith(MCP_INTEGRATION_PROXY_PATH_PREFIX) ||
-      configuredUrl.pathname.startsWith(MCP_ROUTING_PROXY_PATH_PREFIX));
+      configuredUrl.pathname.startsWith(MCP_ROUTING_PROXY_PATH_PREFIX) ||
+      (options.integrationId === ROOMOTE_MCP_ID &&
+        configuredUrl.pathname === ROOMOTE_MCP_PATH));
 
   if (!isDeploymentProxy) {
     return {
@@ -294,7 +300,12 @@ export async function listFastAgentIntegrations(
   ).map(([id, config]) => ({
     id,
     ...describeMcpServer(id),
-    endpoint: resolveFastMcpEndpoint({ apiBaseUrl, authToken, config }),
+    endpoint: resolveFastMcpEndpoint({
+      apiBaseUrl,
+      authToken,
+      integrationId: id,
+      config,
+    }),
     disabledTools: new Set(config.disabledTools ?? []),
   }));
 
@@ -330,20 +341,34 @@ export async function listFastAgentIntegrations(
     })),
   );
 
-  return results.flatMap((result) =>
-    result.status === 'fulfilled' && result.value.tools.length > 0
-      ? [
-          {
-            id: result.value.id,
-            name: result.value.name,
-            description: result.value.description,
-            instructions: result.value.instructions,
-            tools: result.value.tools,
-            endpoint: result.value.endpoint,
-          },
-        ]
-      : [],
-  );
+  let hasPrimaryMemory = false;
+  return results.flatMap((result) => {
+    if (result.status !== 'fulfilled' || result.value.tools.length === 0) {
+      return [];
+    }
+
+    const isMemory = isMemoryMcpServer(result.value.id);
+    const primaryMemory = isMemory && !hasPrimaryMemory;
+    if (isMemory) {
+      hasPrimaryMemory = true;
+    }
+
+    return [
+      {
+        id: result.value.id,
+        name: result.value.name,
+        description: result.value.description,
+        instructions: isMemory
+          ? createMemoryMcpInstructions(result.value.id, {
+              primary: primaryMemory,
+              surface: 'conversation',
+            })
+          : result.value.instructions,
+        tools: result.value.tools,
+        endpoint: result.value.endpoint,
+      },
+    ];
+  });
 }
 
 function serializeAuditPreview(value: unknown, maxLength: number): string {

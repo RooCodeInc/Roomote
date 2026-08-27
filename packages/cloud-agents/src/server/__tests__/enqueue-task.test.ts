@@ -26,6 +26,7 @@ import {
 } from '@roomote/types';
 import {
   db,
+  and,
   eq,
   inArray,
   tasks,
@@ -48,6 +49,7 @@ import {
   enqueueTask,
   enqueueTaskRelaunch,
   DeploymentReadOnlyError,
+  SnapshotResumeAlreadyExistsError,
   persistEarlyGeneratedTaskTitle,
   PR_REVIEW_SYNC_DEBOUNCE_MS,
   resolveFreshTaskComputeProvider,
@@ -491,6 +493,58 @@ describe('enqueueTask initiator stamping', () => {
     });
   });
 
+  it('generates an early title from a Slack app mention', async () => {
+    const userId = await createUser();
+    mockGenerateLlmTaskTitle.mockResolvedValueOnce(
+      'Order more catnip from Amazon',
+    );
+
+    const run = await enqueueTask(
+      {
+        task: {
+          type: TaskPayloadKind.SlackAppMention,
+          requestedWorkKindDecision: explicitWorkKind,
+          payload: {
+            repo: 'acme/widgets',
+            channel: 'C123',
+            user: 'U123',
+            text: 'Could you order more catnip from Amazon?',
+            ts: '123.456',
+            thread_ts: '123.456',
+          },
+        },
+        initiator: { kind: 'user', userId },
+        workflow: 'standard',
+        surface: 'slack',
+        trigger: 'message',
+      },
+      { enqueue: false },
+    );
+    createdTaskIds.push(run.taskId);
+
+    await vi.waitFor(async () => {
+      const task = await db.query.tasks.findFirst({
+        where: eq(tasks.id, run.taskId),
+        columns: { title: true, llmTitleCheckpoint: true },
+      });
+
+      expect(mockGenerateLlmTaskTitle).toHaveBeenCalledWith({
+        userId,
+        taskId: run.taskId,
+        messages: [
+          {
+            role: 'user',
+            text: 'Could you order more catnip from Amazon?',
+          },
+        ],
+      });
+      expect(task).toEqual({
+        title: 'Order more catnip from Amazon',
+        llmTitleCheckpoint: 1,
+      });
+    });
+  });
+
   it('re-applies the newer canonical title when the checkpoint lock loses a race', async () => {
     const userId = await createUser();
     mockGenerateLlmTaskTitle.mockResolvedValueOnce('Early generated title');
@@ -856,6 +910,50 @@ describe('enqueueTask initiator stamping', () => {
 });
 
 describe('enqueueTask snapshot resume', () => {
+  it('atomically rejects concurrent resumes from the same source run', async () => {
+    const userId = await createUser();
+    const freshRun = await launchFresh({
+      task: standardTaskInput({ computeProvider: 'modal' }),
+      initiator: { kind: 'user', userId },
+      workflow: 'standard',
+      surface: 'web',
+      trigger: 'manual',
+    });
+    const createResume = () =>
+      enqueueTask(
+        {
+          task: {
+            type: TaskPayloadKind.SnapshotResume,
+            payload: {
+              repo: 'acme/widgets',
+              sourceSnapshotId: 'snap-concurrent',
+              sourceRunId: freshRun.id,
+            },
+          } as SnapshotResumeTask,
+          actingUserId: userId,
+        },
+        { enqueue: false },
+      );
+
+    const results = await Promise.allSettled([createResume(), createResume()]);
+
+    expect(
+      results.filter((result) => result.status === 'fulfilled'),
+    ).toHaveLength(1);
+    const [rejected] = results.filter(
+      (result): result is PromiseRejectedResult => result.status === 'rejected',
+    );
+    expect(rejected?.reason).toBeInstanceOf(SnapshotResumeAlreadyExistsError);
+
+    const resumeRuns = await db.query.taskRuns.findMany({
+      where: and(
+        eq(taskRuns.sourceRunId, freshRun.id),
+        eq(taskRuns.kind, 'resume'),
+      ),
+    });
+    expect(resumeRuns).toHaveLength(1);
+  });
+
   it('attaches a resume run to the source task without re-attribution', async () => {
     const initiatorUserId = await createUser();
     const resumerUserId = await createUser();

@@ -1,6 +1,13 @@
 import { z } from 'zod';
 
-export const fastAgentSurfaces = ['slack', 'discord', 'automation'] as const;
+export const fastAgentSurfaces = [
+  'slack',
+  'discord',
+  'teams',
+  'telegram',
+  'automation',
+  'web',
+] as const;
 export const fastAgentSurfaceSchema = z.enum(fastAgentSurfaces);
 
 export type FastAgentSurface = z.infer<typeof fastAgentSurfaceSchema>;
@@ -8,6 +15,8 @@ export type FastAgentSurface = z.infer<typeof fastAgentSurfaceSchema>;
 export const fastAgentReplyTargetSchema = z.object({
   channelId: z.string().min(1),
   threadId: z.string().min(1).optional(),
+  /** Mutable provider routing address, currently required by Microsoft Teams. */
+  serviceUrl: z.string().url().optional(),
 });
 
 export type FastAgentReplyTarget = z.infer<typeof fastAgentReplyTargetSchema>;
@@ -22,8 +31,7 @@ export const fastAgentConversationSchema = z.discriminatedUnion('surface', [
   z.object({
     surface: z.literal('slack'),
     ...fastAgentConversationIdentitySchema,
-    replyTarget: z.object({
-      channelId: z.string().min(1),
+    replyTarget: fastAgentReplyTargetSchema.extend({
       threadId: z.string().min(1),
     }),
   }),
@@ -34,12 +42,42 @@ export const fastAgentConversationSchema = z.discriminatedUnion('surface', [
     replyTarget: fastAgentReplyTargetSchema,
   }),
   z.object({
+    surface: z.literal('teams'),
+    ...fastAgentConversationIdentitySchema,
+    replyTarget: fastAgentReplyTargetSchema,
+  }),
+  z.object({
+    surface: z.literal('telegram'),
+    ...fastAgentConversationIdentitySchema,
+    replyTarget: fastAgentReplyTargetSchema,
+  }),
+  z.object({
     surface: z.literal('automation'),
+    ...fastAgentConversationIdentitySchema,
+  }),
+  z.object({
+    surface: z.literal('web'),
     ...fastAgentConversationIdentitySchema,
   }),
 ]);
 
 export type FastAgentConversation = z.infer<typeof fastAgentConversationSchema>;
+
+export type FastAgentCommunicationConversation = Extract<
+  FastAgentConversation,
+  { surface: 'slack' | 'discord' | 'teams' | 'telegram' }
+>;
+
+export function isFastAgentCommunicationConversation(
+  conversation: FastAgentConversation,
+): conversation is FastAgentCommunicationConversation {
+  return (
+    conversation.surface === 'slack' ||
+    conversation.surface === 'discord' ||
+    conversation.surface === 'teams' ||
+    conversation.surface === 'telegram'
+  );
+}
 
 export const fastAgentParentSchema = z.object({
   sessionId: z.string().uuid(),

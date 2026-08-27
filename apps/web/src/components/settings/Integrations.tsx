@@ -114,7 +114,7 @@ const DEEP_LINK_ENABLE_DESCRIPTIONS: Record<string, string> = {
   notion:
     'Roomote will use one deployment-wide Notion internal integration. Notion controls its capabilities and which pages and data sources it can access.',
   rippling:
-    "Roomote will keep Brain's employee directory and reporting structure current from one deployment-wide Rippling connection.",
+    "Roomote will keep Memory's employee directory and reporting structure current from one deployment-wide Rippling connection.",
   pylon:
     'Roomote will be able to inspect customer issues, message history, and account context.',
   posthog:
@@ -3007,8 +3007,8 @@ export function Integrations() {
         isLoading={isRipplingConnected && ripplingConnection.isPending}
         description={
           <>
-            Connect Rippling&apos;s read-only HRIS API so Brain can maintain the
-            employee roster and authoritative reporting structure. The token
+            Connect Rippling&apos;s read-only HRIS API so Memory can maintain
+            the employee roster and authoritative reporting structure. The token
             stays encrypted on the control plane and is never sent to agents.
           </>
         }
