@@ -566,7 +566,7 @@ services:
   infinity:
     profiles:
       - local-inference
-    image: michaelf34/infinity:0.0.76-cpu
+    image: michaelf34/infinity:0.0.76-cpu@sha256:2a464dcc06e659a277bc841b4be196100489076446482925481b2c5c120fce57
     restart: unless-stopped
     networks: [default]
     command:
