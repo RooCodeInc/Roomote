@@ -2,6 +2,8 @@ import {
   db,
   fastAgentConversations,
   fastAgentMessages,
+  runFactory,
+  taskFactory,
   userFactory,
 } from '@roomote/db/server';
 
@@ -9,6 +11,7 @@ import {
   encodeFastSessionCursor,
   findAccessibleFastSession,
   getFastSessionById,
+  getFastSessionTasks,
   getFastSessionMessagesSince,
   getFastSessions,
 } from './fast-sessions';
@@ -181,6 +184,31 @@ describe('Fast session queries', () => {
     await expect(
       getFastSessionById({ userId: otherUser.id, isAdmin: true }, session.id),
     ).resolves.toMatchObject({ id: session.id, userId: owner.id });
+  });
+
+  it('lists every task associated with a Fast session', async () => {
+    const owner = await userFactory.create();
+    const session = await createFastSession({
+      userId: owner.id,
+      conversationId: 'tasks-session',
+      updatedAt: new Date('2026-01-01T00:00:00.000Z'),
+    });
+    const delegatedTask = await taskFactory.create({
+      title: 'Delegated task',
+      state: 'active',
+    });
+    await runFactory.create({
+      taskId: delegatedTask.id,
+      payload: {
+        repo: 'acme/widgets',
+        description: 'Delegated Fast task',
+        fastAgentSessionId: session.id,
+      },
+    });
+
+    await expect(
+      getFastSessionTasks({ userId: owner.id, isAdmin: false }, session.id),
+    ).resolves.toEqual([{ taskId: delegatedTask.id, title: 'Delegated task' }]);
   });
 
   it('reads canonical messages in timestamp and turn sequence order', async () => {

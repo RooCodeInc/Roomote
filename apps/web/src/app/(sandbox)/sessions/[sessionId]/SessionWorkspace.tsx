@@ -62,6 +62,8 @@ export type SessionInfo = {
   createdAt: Date;
   status: string | null;
   tasks: SessionTaskSummary[];
+  taskSource?: 'unified' | 'fast';
+  taskCards?: Array<Pick<SessionTaskSummary, 'taskId' | 'title'>>;
 };
 
 const SURFACE_LABELS: Record<string, string> = {
@@ -218,7 +220,7 @@ function SessionTasksPanel({
   onOpenTask,
   onClose,
 }: {
-  tasks: SessionTaskSummary[];
+  tasks: Array<Pick<SessionTaskSummary, 'taskId' | 'title'>>;
   onOpenTask: (taskId: string) => void;
   onClose: () => void;
 }) {
@@ -363,15 +365,29 @@ export function SessionWorkspace({
   const trpc = useTRPC();
   const router = useRouter();
   const searchParams = useSearchParams();
+  const isFastTaskSource = session.taskSource === 'fast';
   const { data: currentSession } = useQuery(
     trpc.sessions.byId.queryOptions(
       { sessionId: session.id },
       {
+        enabled: !isFastTaskSource,
+        refetchInterval: 2_000,
+      },
+    ),
+  );
+  const { data: currentFastTasks } = useQuery(
+    trpc.fastSessions.tasks.queryOptions(
+      { sessionId: session.id },
+      {
+        enabled: isFastTaskSource,
         refetchInterval: 2_000,
       },
     ),
   );
   const sessionTasks = currentSession?.tasks ?? session.tasks;
+  const taskCards = isFastTaskSource
+    ? (currentFastTasks ?? session.taskCards ?? session.tasks)
+    : sessionTasks;
   const selectedTaskId = searchParams.get('task');
   const selectedTask = sessionTasks.find(
     (task) => task.taskId === selectedTaskId,
@@ -423,7 +439,7 @@ export function SessionWorkspace({
     />
   ) : isTasksOpen ? (
     <SessionTasksPanel
-      tasks={sessionTasks}
+      tasks={taskCards}
       onOpenTask={openTaskPanel}
       onClose={closePanel}
     />
@@ -457,7 +473,7 @@ export function SessionWorkspace({
                 label="Tasks"
                 tooltip="Tasks"
                 active={isTasksOpen}
-                disabled={sessionTasks.length === 0}
+                disabled={taskCards.length === 0}
                 icon={Rows4}
                 onClick={() => {
                   setNestedTaskId(null);

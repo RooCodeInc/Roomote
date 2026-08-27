@@ -13,9 +13,13 @@ import {
   fastAgentConversations,
   fastAgentMessages,
   llmUsageEvents,
+  inArray,
+  isNull,
   lt,
   or,
   sql,
+  taskRuns,
+  tasks,
   users,
 } from '@roomote/db/server';
 import type { FastAgentMessage } from '@roomote/db';
@@ -23,6 +27,11 @@ import type { FastAgentMessage } from '@roomote/db';
 import type { TimePeriodFilter, UserAuthSuccess } from '@/types';
 
 type FastSessionAuth = Pick<UserAuthSuccess, 'userId' | 'isAdmin'>;
+
+type FastSessionTaskSummary = {
+  taskId: string;
+  title: string;
+};
 
 export type FastSessionMessage = Pick<
   FastAgentMessage,
@@ -118,6 +127,56 @@ export async function findAccessibleFastSession(
     .limit(1);
 
   return session ?? null;
+}
+
+/**
+ * Fast conversations predate the unified Session tables. Their delegated tasks
+ * are linked directly from task runs, rather than through session_tasks.
+ */
+export async function getFastSessionTasks(
+  auth: FastSessionAuth,
+  sessionId: string,
+): Promise<FastSessionTaskSummary[] | null> {
+  const session = await findAccessibleFastSession(auth, sessionId);
+  if (!session) return null;
+
+  const [conversation] = await db
+    .select({
+      legacyConversationIds: fastAgentConversations.legacyConversationIds,
+    })
+    .from(fastAgentConversations)
+    .where(eq(fastAgentConversations.id, session.id))
+    .limit(1);
+  const lookupIds = [
+    session.id,
+    ...(conversation?.legacyConversationIds ?? []),
+  ];
+  const latestRunPerTask = db.$with('latest_fast_session_task_runs').as(
+    db
+      .selectDistinctOn([taskRuns.taskId], {
+        taskId: taskRuns.taskId,
+        title: tasks.title,
+        latestRunId: taskRuns.id,
+      })
+      .from(taskRuns)
+      .innerJoin(tasks, eq(tasks.id, taskRuns.taskId))
+      .where(
+        and(
+          inArray(taskRuns.fastAgentSessionId, lookupIds),
+          isNull(tasks.deletedAt),
+        ),
+      )
+      .orderBy(taskRuns.taskId, desc(taskRuns.id)),
+  );
+
+  return db
+    .with(latestRunPerTask)
+    .select({
+      taskId: latestRunPerTask.taskId,
+      title: latestRunPerTask.title,
+    })
+    .from(latestRunPerTask)
+    .orderBy(desc(latestRunPerTask.latestRunId));
 }
 
 function sanitizeFastSessionMessageRow<

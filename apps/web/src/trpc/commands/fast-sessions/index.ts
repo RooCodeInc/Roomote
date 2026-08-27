@@ -26,7 +26,10 @@ import {
 } from '@roomote/types';
 
 import type { UserAuthSuccess } from '@/types';
-import { findAccessibleFastSession } from '@/lib/server/fast-sessions';
+import {
+  findAccessibleFastSession,
+  getFastSessionTasks,
+} from '@/lib/server/fast-sessions';
 
 /**
  * Persist the session's model settings when the caller sent an explicit
@@ -203,6 +206,13 @@ export async function startFastSessionCommand(
     sessionId: unifiedSession?.id ?? session.id,
     fastConversationId: session.id,
   };
+}
+
+export async function getFastSessionTasksCommand(
+  auth: UserAuthSuccess,
+  sessionId: string,
+) {
+  return getFastSessionTasks(auth, sessionId);
 }
 
 export async function replyToFastSessionCommand(

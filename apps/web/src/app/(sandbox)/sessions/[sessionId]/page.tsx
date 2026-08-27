@@ -8,7 +8,10 @@ import {
 } from '@roomote/types';
 
 import { authorize } from '@/lib/server/auth-context';
-import { getFastSessionById } from '@/lib/server/fast-sessions';
+import {
+  getFastSessionById,
+  getFastSessionTasks,
+} from '@/lib/server/fast-sessions';
 import { getSessionByIdCommand } from '@/trpc/commands/sessions';
 import { Badge } from '@/components/system';
 import { WorkspaceHeader } from '@/components/layout';
@@ -153,6 +156,8 @@ export default async function SessionDetailPage({
     createdAt: session.createdAt,
     status: null,
     tasks: [],
+    taskSource: 'fast',
+    taskCards: (await getFastSessionTasks(authorizedUser, session.id)) ?? [],
   };
   const initialUserMessage = session.messages.find(
     (message) => message.role === 'user',

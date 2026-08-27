@@ -32,6 +32,7 @@ import {
 } from '@roomote/types';
 
 import {
+  getFastSessionTasksCommand,
   replyToFastSessionCommand,
   startFastSessionCommand,
 } from '../commands/fast-sessions';
@@ -2821,6 +2822,11 @@ export const appRouter = createRouter({
       .input(replyToFastSessionInputSchema)
       .mutation(({ ctx: { auth }, input }) =>
         replyToFastSessionCommand(auth, input),
+      ),
+    tasks: protectedProcedure
+      .input(z.object({ sessionId: z.string().uuid() }))
+      .query(({ ctx: { auth }, input }) =>
+        getFastSessionTasksCommand(auth, input.sessionId),
       ),
   }),
 

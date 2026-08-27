@@ -6,10 +6,13 @@ import { SandboxLayoutContext } from '../../use-sandbox-layout';
 import { SessionWorkspace, type SessionInfo } from './SessionWorkspace';
 import { useOpenSessionTaskPanel } from './session-task-panel-context';
 
-const { useMediaQueryMock, sessionQueryState } = vi.hoisted(() => ({
-  useMediaQueryMock: vi.fn(),
-  sessionQueryState: { data: null as unknown },
-}));
+const { useMediaQueryMock, sessionQueryState, fastTaskQueryState } = vi.hoisted(
+  () => ({
+    useMediaQueryMock: vi.fn(),
+    sessionQueryState: { data: null as unknown },
+    fastTaskQueryState: { data: null as unknown },
+  }),
+);
 
 vi.mock('usehooks-ts', () => ({
   useMediaQuery: useMediaQueryMock,
@@ -36,6 +39,18 @@ vi.mock('@/trpc/client', () => ({
         ) => ({
           queryKey: ['sessions', 'byId', input.sessionId],
           queryFn: async () => sessionQueryState.data,
+          ...options,
+        }),
+      },
+    },
+    fastSessions: {
+      tasks: {
+        queryOptions: (
+          input: { sessionId: string },
+          options?: Record<string, unknown>,
+        ) => ({
+          queryKey: ['fastSessions', 'tasks', input.sessionId],
+          queryFn: async () => fastTaskQueryState.data,
           ...options,
         }),
       },
@@ -104,11 +119,15 @@ function renderWorkspace({
   children = <div>Session transcript</div>,
   sessionOverride,
   queriedTasks,
+  queriedFastTasks,
 }: {
   isMobile: boolean;
   children?: ReactNode;
   sessionOverride?: Partial<SessionInfo>;
   queriedTasks?: SessionInfo['tasks'];
+  queriedFastTasks?: Array<
+    Pick<SessionInfo['tasks'][number], 'taskId' | 'title'>
+  >;
 }) {
   useMediaQueryMock.mockReturnValue(!isMobile);
   const initialSession = { ...session, ...sessionOverride };
@@ -116,6 +135,7 @@ function renderWorkspace({
     ...initialSession,
     tasks: queriedTasks ?? initialSession.tasks,
   };
+  fastTaskQueryState.data = queriedFastTasks ?? initialSession.taskCards ?? [];
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
@@ -243,7 +263,8 @@ describe('SessionWorkspace', () => {
     };
     renderWorkspace({
       isMobile: false,
-      queriedTasks: [delegatedTask],
+      sessionOverride: { taskSource: 'fast', taskCards: [] },
+      queriedFastTasks: [delegatedTask],
     });
 
     await waitFor(() => {
