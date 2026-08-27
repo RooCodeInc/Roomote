@@ -21,6 +21,11 @@
       "import": "./src/server/non-task-provider-usage.ts",
       "require": "./src/server/non-task-provider-usage.ts"
     },
+    "./show-widget": {
+      "types": "./src/server/show-widget.ts",
+      "import": "./src/server/show-widget.ts",
+      "require": "./src/server/show-widget.ts"
+    },
     "./router-mcp-policy": {
       "types": "./src/router-mcp-policy.ts",
       "import": "./src/router-mcp-policy.ts",
@@ -34,6 +39,9 @@
       ],
       "server/non-task-provider-usage": [
         "./src/server/non-task-provider-usage.ts"
+      ],
+      "show-widget": [
+        "./src/server/show-widget.ts"
       ],
       "router-mcp-policy": [
         "./src/router-mcp-policy.ts"
@@ -71,6 +79,8 @@
     "@roomote/telemetry": "workspace:^",
     "@roomote/types": "workspace:^",
     "ai": "^6.0.116",
+    "dompurify": "3.4.13",
+    "jsdom": "26.1.0",
     "jszip": "^3.10.1",
     "mammoth": "^1.11.0",
     "pdfjs-dist": "^6.2.108",
@@ -82,6 +92,7 @@
     "@roomote/config-typescript": "workspace:^",
     "@types/ioredis-mock": "^8.2.6",
     "@types/node": "^24.10.13",
+    "@types/jsdom": "21.1.7",
     "ioredis-mock": "^8.13.1",
     "vitest": "^4.1.1"
   }

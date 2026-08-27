@@ -39,6 +39,10 @@ const {
   claimPendingOutOfBandMock,
   releaseClaimedOutOfBandMock,
   callViaEmojiConfigMock,
+  continueFastReplyMock,
+  findFastReplySessionMock,
+  findTeamsConversationRouteMock,
+  isFastProviderMessageMock,
 } = vi.hoisted(() => ({
   authAccountsFindFirstMock: vi.fn(),
   authAccountsFindManyMock: vi.fn(),
@@ -97,6 +101,10 @@ const {
   claimPendingOutOfBandMock: vi.fn(),
   releaseClaimedOutOfBandMock: vi.fn(),
   callViaEmojiConfigMock: vi.fn(),
+  continueFastReplyMock: vi.fn(),
+  findFastReplySessionMock: vi.fn(),
+  findTeamsConversationRouteMock: vi.fn(),
+  isFastProviderMessageMock: vi.fn(),
 }));
 
 vi.mock('@roomote/env', () => ({
@@ -265,6 +273,7 @@ vi.mock('@roomote/communication/teams-provider', () => ({
 }));
 
 vi.mock('@roomote/sdk/server', () => ({
+  continueFastAgentSurfaceReply: continueFastReplyMock,
   createTeamsCommunicationProviderFromRuntimeCredentials: vi.fn(async () =>
     envMock.R_TEAMS_BOT_APP_ID && envMock.R_TEAMS_BOT_APP_PASSWORD
       ? {
@@ -275,6 +284,9 @@ vi.mock('@roomote/sdk/server', () => ({
         }
       : null,
   ),
+  findFastAgentSessionForProviderReply: findFastReplySessionMock,
+  findTeamsConversationRoute: findTeamsConversationRouteMock,
+  isFastAgentProviderMessage: isFastProviderMessageMock,
 }));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
@@ -354,6 +366,13 @@ function createJwtPayload(payload: Record<string, unknown>) {
 describe('Teams webhook handler', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    continueFastReplyMock.mockResolvedValue(true);
+    findFastReplySessionMock.mockResolvedValue(null);
+    findTeamsConversationRouteMock.mockResolvedValue({
+      serviceUrl: 'https://smba.trafficmanager.net/amer/',
+      workspaceId: 'tenant-1',
+    });
+    isFastProviderMessageMock.mockResolvedValue(false);
     envMock.R_TEAMS_BOT_APP_ID = 'bot-app-id';
     envMock.R_MICROSOFT_CLIENT_ID = 'microsoft-client-id';
     envMock.R_MICROSOFT_CLIENT_SECRET = 'microsoft-client-secret';
@@ -649,6 +668,167 @@ describe('Teams webhook handler', () => {
       runId: 77,
       userId: 'mapped-user-1',
     });
+  });
+
+  it('continues the bound Fast session before ordinary Teams task routing', async () => {
+    teamsUserMappingFindFirstMock.mockResolvedValueOnce({
+      userId: 'mapped-user-1',
+    });
+    findFastReplySessionMock.mockResolvedValue({
+      id: '11111111-1111-4111-8111-111111111111',
+      userId: 'mapped-user-1',
+      conversation: {
+        surface: 'teams',
+        workspaceId: 'tenant-1',
+        conversationId: 'automation-run-1',
+        replyTarget: {
+          channelId: '19:conversation@thread.v2',
+          threadId: 'activity-root',
+        },
+      },
+    });
+
+    const response = await createApp().request('/teams', {
+      method: 'POST',
+      headers: {
+        authorization: 'Bearer bot-framework-token',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify(
+        createTeamsActivity({
+          conversation: {
+            id: '19:conversation@thread.v2;messageid=activity-root',
+            tenantId: 'tenant-1',
+            conversationType: 'channel',
+          },
+          replyToId: 'fast-report-1',
+        }),
+      ),
+    });
+
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      fastAnswered: true,
+      fastContinued: true,
+    });
+    expect(findFastReplySessionMock).toHaveBeenCalledWith({
+      provider: 'teams',
+      workspaceId: 'tenant-1',
+      channelId: '19:conversation@thread.v2',
+      threadId: 'activity-root',
+      replyToMessageId: 'fast-report-1',
+    });
+    expect(findTeamsConversationRouteMock).toHaveBeenCalledWith(
+      '19:conversation@thread.v2',
+      'tenant-1',
+    );
+    expect(continueFastReplyMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: '11111111-1111-4111-8111-111111111111',
+        userId: 'mapped-user-1',
+        question: 'continue',
+        currentMessageId: 'activity-2',
+      }),
+    );
+    expect(findFirstMock).not.toHaveBeenCalled();
+    expect(queueCommunicationMessageMock).not.toHaveBeenCalled();
+  });
+
+  it('fails closed when a different linked Teams user replies to a Fast message', async () => {
+    teamsUserMappingFindFirstMock.mockResolvedValueOnce({
+      userId: 'mapped-user-2',
+    });
+    findFastReplySessionMock.mockResolvedValue({
+      id: '11111111-1111-4111-8111-111111111111',
+      userId: 'mapped-user-1',
+      conversation: {
+        surface: 'teams',
+        workspaceId: 'tenant-1',
+        conversationId: 'automation-run-1',
+        replyTarget: {
+          channelId: '19:conversation@thread.v2',
+          threadId: 'activity-root',
+        },
+      },
+    });
+
+    const response = await createApp().request('/teams', {
+      method: 'POST',
+      headers: {
+        authorization: 'Bearer bot-framework-token',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify(createTeamsActivity()),
+    });
+
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      queued: false,
+      reason: 'fast_session_user_mismatch',
+    });
+    expect(continueFastReplyMock).not.toHaveBeenCalled();
+    expect(queueCommunicationMessageMock).not.toHaveBeenCalled();
+  });
+
+  it('does not fall through when a Fast message is replayed from another Teams route', async () => {
+    teamsUserMappingFindFirstMock.mockResolvedValueOnce({
+      userId: 'mapped-user-1',
+    });
+    isFastProviderMessageMock.mockResolvedValue(true);
+
+    const response = await createApp().request('/teams', {
+      method: 'POST',
+      headers: {
+        authorization: 'Bearer bot-framework-token',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify(createTeamsActivity()),
+    });
+
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      queued: false,
+      reason: 'fast_session_route_mismatch',
+    });
+    expect(continueFastReplyMock).not.toHaveBeenCalled();
+    expect(queueCommunicationMessageMock).not.toHaveBeenCalled();
+  });
+
+  it('fails closed when the Fast session no longer has an active Teams installation route', async () => {
+    teamsUserMappingFindFirstMock.mockResolvedValueOnce({
+      userId: 'mapped-user-1',
+    });
+    findFastReplySessionMock.mockResolvedValue({
+      id: '11111111-1111-4111-8111-111111111111',
+      userId: 'mapped-user-1',
+      conversation: {
+        surface: 'teams',
+        workspaceId: 'tenant-1',
+        conversationId: 'automation-run-1',
+        replyTarget: {
+          channelId: '19:conversation@thread.v2',
+          threadId: 'activity-root',
+        },
+      },
+    });
+    findTeamsConversationRouteMock.mockResolvedValue(null);
+
+    const response = await createApp().request('/teams', {
+      method: 'POST',
+      headers: {
+        authorization: 'Bearer bot-framework-token',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify(createTeamsActivity()),
+    });
+
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      queued: false,
+      reason: 'fast_session_installation_unavailable',
+    });
+    expect(continueFastReplyMock).not.toHaveBeenCalled();
+    expect(queueCommunicationMessageMock).not.toHaveBeenCalled();
   });
 
   it('queues untagged Teams thread replies for matching active task runs using the root thread id', async () => {

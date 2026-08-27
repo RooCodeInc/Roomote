@@ -54,8 +54,14 @@ export {
 } from './lib/task-runs/record-task-message-envelope';
 export { ensureSnapshotResumeGitHubFollowUpFallback } from './lib/task-runs/ensure-snapshot-resume-github-follow-up-fallback';
 export {
+  ACTIVE_PR_REVIEW_FOLLOW_UP_ATTEMPTS,
   ACTIVE_PR_REVIEW_FOLLOW_UP_DEBOUNCE_MS,
+  ACTIVE_PR_REVIEW_FOLLOW_UP_DEDUPLICATION_TTL_MS,
+  ACTIVE_PR_REVIEW_FOLLOW_UP_JOB_OPTIONS,
   ACTIVE_PR_REVIEW_FOLLOW_UP_QUEUE_NAME,
+  ACTIVE_PR_REVIEW_FOLLOW_UP_RETRY_DELAY_MS,
+  ACTIVE_PR_REVIEW_FOLLOW_UP_RETRY_WINDOW_MS,
+  ACTIVE_PR_REVIEW_FOLLOW_UP_SETTLEMENT_WINDOW_MS,
   activePrReviewFollowUpRequestSchema,
   enqueueActivePrReviewFollowUp,
   type ActivePrReviewFollowUpRequest,
@@ -281,6 +287,7 @@ export {
 export * from './lib/task-runs/pr-review-action';
 export * from './lib/task-runs/pr-review-follow-up-dispatch';
 export * from './lib/fast-agent-surface-reply';
+export * from './lib/fast-agent-provider-message';
 export * from './lib/task-runs/notify-fast-agent-parent-on-pr-feedback';
 export * from './lib/task-runs/notify-fast-agent-parent-on-pull-request-conflict';
 

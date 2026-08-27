@@ -48,7 +48,12 @@ import {
   handleUpdateEnvironment,
 } from './create-environment.js';
 import { handleRequestEnvironmentVariables } from './request-environment-variables.js';
-import { handleShowWidget } from './show-widget.js';
+import {
+  handleShowWidget,
+  SHOW_WIDGET_FIXED_CANVAS_GUIDANCE,
+  SHOW_WIDGET_HEIGHT_DESCRIPTION,
+  SHOW_WIDGET_THEME_GUIDANCE,
+} from './show-widget.js';
 import { handleSendChatReply } from './send-chat-reply.js';
 import { handleRelayFastAgentChatReply } from './relay-fast-agent-chat-reply.js';
 import {
@@ -165,9 +170,10 @@ roomoteMcpServer.registerTool(
       'Use it when a structured or visual presentation is clearer than plain text, or to demonstrate how something would look. ' +
       'Examples include mock UI, status cards, tables, annotated plans, and other visual examples. ' +
       'HTML, CSS, and inline SVG are displayed in a sandboxed iframe with scripts disabled and network requests blocked. ' +
-      'Prefer semantic HTML with the built-in widget classes (`rw-card`, `rw-stack`, `rw-row`, `rw-grid`, `rw-stat`, `rw-badge`, `rw-callout`, `rw-muted`) so the widget follows the host task theme. ' +
-      'For custom CSS, use the provided `--rw-*` theme variables instead of hard-coded colors; omit css when the built-in styles are sufficient. ' +
-      'Keep widgets compact enough to fit without scrolling: use concise labels and a small number of cards, rows, or table entries, and choose a height that fully fits the expected content. Use ordinary prose or an artifact for long content. ' +
+      SHOW_WIDGET_THEME_GUIDANCE +
+      ' ' +
+      SHOW_WIDGET_FIXED_CANVAS_GUIDANCE +
+      ' ' +
       'Do not use it for ordinary prose or collecting user input; use request_user_input when you need answers. ' +
       'Optional textFallback is delivered to the originating chat surface (Slack/Teams/Telegram/Discord) when the task was started from chat.',
     inputSchema: {
@@ -184,12 +190,7 @@ roomoteMcpServer.registerTool(
         .describe(
           'Optional extra CSS injected after the built-in widget defaults. Prefer --rw-background, --rw-surface, --rw-surface-muted, --rw-text, --rw-text-muted, --rw-border, --rw-primary, --rw-accent, --rw-success, --rw-warning, and --rw-danger instead of hard-coded colors.',
         ),
-      height: z
-        .number()
-        .optional()
-        .describe(
-          'Optional widget iframe height in pixels (clamped to 120-800; default 320). Choose the smallest height that fully fits the expected content without a vertical scrollbar.',
-        ),
+      height: z.number().optional().describe(SHOW_WIDGET_HEIGHT_DESCRIPTION),
       textFallback: z
         .string()
         .optional()

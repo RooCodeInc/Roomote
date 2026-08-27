@@ -61,10 +61,31 @@ vi.mock('@roomote/cloud-agents/server', () => ({
 
     return content.slice(afterStart, endIndex).trim();
   },
-  isReviewInProgressStatusLine: (line: string) =>
-    /^(Self-reviewing the PR(?: with fresh eyes)? now\.|Reviewing the PR now\.|Re-reviewing new commits now\.)/i.test(
-      line.trim(),
-    ),
+  isReviewSummaryInProgress: (body: string) => {
+    const marker = body.match(/<!--\s*roomote-review-summary\b[^>]*-->/i)?.[0];
+    const markerVersion = marker?.match(/\bversion=(\d+)\b/i)?.[1];
+    const markerPhase = marker?.match(/\bphase=(reviewing|reviewed)\b/i)?.[1];
+
+    if (markerVersion === '2' && markerPhase) {
+      return markerPhase.toLowerCase() === 'reviewing';
+    }
+
+    const footer = body.trimEnd().split('\n').at(-1)?.trim();
+    const phase = footer?.match(/^<sub>\s*(Reviewing|Reviewed)(?:\s|<)/i)?.[1];
+
+    if (phase) {
+      return phase.toLowerCase() === 'reviewing';
+    }
+
+    const status = body.match(
+      /<!-- roomote-review-status:start -->([\s\S]*?)<!-- roomote-review-status:end -->/,
+    )?.[1];
+    const firstLine = status?.trim().split('\n')[0] ?? '';
+
+    return /^(Self-reviewing the PR(?: with fresh eyes)? now\.|Reviewing the PR now\.|Re-reviewing new commits now\.|I am reviewing the updated PR head now\.)/i.test(
+      firstLine,
+    );
+  },
 }));
 
 import { setConfiguredGitHubAppSlugCache } from '@roomote/github';
@@ -552,6 +573,14 @@ const IN_PROGRESS_SUMMARY_BODY = [
   '<!-- roomote-review-status:end -->',
 ].join('\n');
 
+const NATURAL_IN_PROGRESS_SUMMARY_BODY = [
+  '<!-- roomote-review-summary sha=f0c89ce4 mode=sync version=2 phase=reviewing -->',
+  '<!-- roomote-review-status:start -->',
+  'I am reviewing the updated PR head now. [See task](https://roomote.dev/task/x)',
+  '<!-- roomote-review-status:end -->',
+  '<sub>Reviewing f0c89ce</sub>',
+].join('\n');
+
 const ALL_ADDRESSED_SUMMARY_BODY = [
   '<!-- roomote-review-summary sha=abcdef01 mode=initial -->',
   '<!-- roomote-review-status:start -->',
@@ -660,6 +689,27 @@ describe('buildPrReviewSummaryNotification', () => {
     );
 
     expect(notification?.input.event).toMatchObject({
+      kind: 'review_summary',
+      summary: '1 minor doc note; no blocking issues.',
+      roomoteAuthored: true,
+    });
+  });
+
+  it('uses the review footer when in-progress status prose varies', () => {
+    expect(
+      buildPrReviewSummaryNotification(
+        summaryPayload({ body: NATURAL_IN_PROGRESS_SUMMARY_BODY }),
+      ),
+    ).toBeNull();
+
+    expect(
+      buildPrReviewSummaryNotification(
+        summaryPayload({
+          body: TERMINAL_SUMMARY_BODY,
+          previousBody: NATURAL_IN_PROGRESS_SUMMARY_BODY,
+        }),
+      )?.input.event,
+    ).toMatchObject({
       kind: 'review_summary',
       summary: '1 minor doc note; no blocking issues.',
       roomoteAuthored: true,
@@ -875,6 +925,28 @@ describe('queuePrReviewSummaryNotification', () => {
       reviewHeadSha,
       reviewSummaryBody: TERMINAL_SUMMARY_BODY,
     });
+  });
+
+  it('opens and completes a cycle when in-progress status prose varies', async () => {
+    await queuePrReviewSummaryNotification(
+      summaryPayload({ body: NATURAL_IN_PROGRESS_SUMMARY_BODY }),
+    );
+    await queuePrReviewSummaryNotification(
+      summaryPayload({
+        body: TERMINAL_SUMMARY_BODY,
+        previousBody: NATURAL_IN_PROGRESS_SUMMARY_BODY,
+      }),
+    );
+
+    expect(mockStartPrReviewNotificationCycle).toHaveBeenCalledOnce();
+    expect(mockEnqueuePrReviewNotification).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: expect.objectContaining({
+          kind: 'review_summary',
+          summary: '1 minor doc note; no blocking issues.',
+        }),
+      }),
+    );
   });
 
   it('opens a distinct cycle when the same SHA is reviewed again', async () => {

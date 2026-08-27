@@ -39,6 +39,19 @@ import {
   type FastAgentSkillDocument,
 } from './fast-agent-skill-store';
 import type { FastAgentIntegration } from './fast-agent-integration-broker';
+import {
+  SHOW_WIDGET_FIXED_CANVAS_GUIDANCE,
+  SHOW_WIDGET_HEIGHT_DESCRIPTION,
+  SHOW_WIDGET_MAX_CSS_CHARS,
+  SHOW_WIDGET_MAX_HTML_CHARS,
+  SHOW_WIDGET_MAX_TEXT_FALLBACK_CHARS,
+  SHOW_WIDGET_MAX_TITLE_CHARS,
+  SHOW_WIDGET_THEME_GUIDANCE,
+} from '../show-widget';
+import {
+  isRoomoteTaskSandboxHost,
+  shouldOverrideFastProjectConfigForTaskSandbox,
+} from './fast-agent-runtime-context';
 
 export {
   FAST_AGENT_NATIVE_TOOL_FILTER,
@@ -189,6 +202,19 @@ const loadSkillArgsSchema = z.object({
   resource: z.string().min(1).optional(),
 });
 
+function normalizeTaskSandboxSkillArgs(
+  args: Record<string, unknown>,
+  optionalKeys: string[],
+): Record<string, unknown> {
+  if (!isRoomoteTaskSandboxHost()) return args;
+
+  const normalized = { ...args };
+  for (const key of optionalKeys) {
+    if (normalized[key] === null) delete normalized[key];
+  }
+  return normalized;
+}
+
 const FAST_AGENT_NATIVE_TOOL_BRIDGE_SOURCE = String.raw`
 export const invoke = async (name, args, context) => {
   const url = process.env.ROOMOTE_FAST_TOOL_BRIDGE_URL
@@ -273,6 +299,25 @@ export default {
     message: z.string().min(1),
   },
   execute: (args, context) => invoke("send_task_message", args, context),
+}
+`,
+
+    [FAST_AGENT_NATIVE_TOOL_NAMES.showWidget]: String.raw`
+import { z } from "zod"
+import { invoke } from "../roomote-fast-tool-bridge.js"
+
+export default {
+  description: ${JSON.stringify(
+    `Render presentational HTML in the web transcript. ${SHOW_WIDGET_THEME_GUIDANCE} ${SHOW_WIDGET_FIXED_CANVAS_GUIDANCE} On Slack or Discord, textFallback is posted instead; use request_user_input for questions.`,
+  )},
+  args: {
+    html: z.string().min(1).max(${SHOW_WIDGET_MAX_HTML_CHARS}).describe("Compact semantic HTML that fully fits the fixed canvas; avoid long prose, large lists, and dense data"),
+    title: z.string().max(${SHOW_WIDGET_MAX_TITLE_CHARS}).optional(),
+    css: z.string().max(${SHOW_WIDGET_MAX_CSS_CHARS}).optional().describe("Optional CSS using --rw-* theme variables; do not mask overflow with clipping or scroll containers"),
+    height: z.number().finite().optional().describe(${JSON.stringify(SHOW_WIDGET_HEIGHT_DESCRIPTION)}),
+    textFallback: z.string().max(${SHOW_WIDGET_MAX_TEXT_FALLBACK_CHARS}).optional(),
+  },
+  execute: (args, context) => invoke("show_widget", args, context),
 }
 `,
 
@@ -875,7 +920,12 @@ async function startBridge(): Promise<FastAgentNativeToolBridge> {
       }
       if (parsed.tool === FAST_AGENT_NATIVE_TOOL_NAMES.listSkills) {
         try {
-          const args = listSkillsArgsSchema.parse(parsed.args);
+          const args = listSkillsArgsSchema.parse(
+            normalizeTaskSandboxSkillArgs(parsed.args, [
+              'environmentId',
+              'repositoryId',
+            ]),
+          );
           const catalog = await activeExecutor.skillStore.list(
             args.environmentId
               ? { environmentId: args.environmentId }
@@ -914,7 +964,9 @@ async function startBridge(): Promise<FastAgentNativeToolBridge> {
       if (parsed.tool === FAST_AGENT_NATIVE_TOOL_NAMES.loadSkill) {
         let document: FastAgentSkillDocument;
         try {
-          const args = loadSkillArgsSchema.parse(parsed.args);
+          const args = loadSkillArgsSchema.parse(
+            normalizeTaskSandboxSkillArgs(parsed.args, ['resource']),
+          );
           document = await activeExecutor.skillStore.read(
             args.id,
             args.resource,
@@ -1111,9 +1163,19 @@ export async function getFastAgentNativeToolRuntime(
   const bridge = await bridgePromise;
   let runtime = sessionRuntimes.get(sessionId);
   if (!runtime) {
+    const enableGeneratedProjectConfig =
+      shouldOverrideFastProjectConfigForTaskSandbox();
     runtime = {
       directory: createRuntimeDirectory(sessionId),
-      env: bridge.env,
+      env: {
+        ...bridge.env,
+        // Only Roomote-on-Roomote hosts inherit the outer coding harness's
+        // project-config restriction. Their Fast child runs from a private,
+        // Roomote-generated directory and must discover its generated tools.
+        ...(enableGeneratedProjectConfig
+          ? { OPENCODE_DISABLE_PROJECT_CONFIG: '0' }
+          : {}),
+      },
       mcpCapability: randomBytes(32).toString('hex'),
     };
     sessionRuntimes.set(sessionId, runtime);

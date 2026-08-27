@@ -10,7 +10,7 @@ import {
 import {
   getMarkedSection,
   getTaskUrl,
-  isReviewInProgressStatusLine,
+  isReviewSummaryInProgress,
   isSafetyNetReviewStatusLine,
   parseReviewSummaryMarkerSha,
   REVIEW_CHECKLIST_END_MARKER,
@@ -66,7 +66,7 @@ function classifyReviewSummary(input: {
     startMarker: REVIEW_STATUS_START_MARKER,
     endMarker: REVIEW_STATUS_END_MARKER,
   });
-  if (!reviewStatus || isReviewInProgressStatusLine(reviewStatus)) {
+  if (!reviewStatus || isReviewSummaryInProgress(input.reviewSummaryBody)) {
     return { kind: 'pending' };
   }
 

@@ -8,16 +8,20 @@ import { useLaunchTaskModels } from '@/hooks/task-models/useLaunchTaskModels';
 import { WorkspaceSurface } from '@/components/layout';
 import { SideNavItem } from '@/components/layout/side-nav/SideNavItem';
 import {
+  ArrowLeftFromLine,
   Avatar,
   BasicTooltip,
   Button,
   DollarSign,
   Info,
-  ResizableDivider,
-  ResizablePanel,
-  ResizablePanelGroup,
-  X,
 } from '@/components/system';
+
+import { SandboxSidePanelHeader } from '../../SandboxSidePanelHeader';
+import {
+  ResponsiveWorkspacePanels,
+  SandboxSideActions,
+} from '../../SandboxWorkspacePanels';
+import { useSandboxLayout } from '../../use-sandbox-layout';
 
 export type SessionInfo = {
   id: string;
@@ -34,6 +38,8 @@ export type SessionInfo = {
 const SURFACE_LABELS: Record<string, string> = {
   slack: 'Slack',
   discord: 'Discord',
+  teams: 'Microsoft Teams',
+  telegram: 'Telegram',
   automation: 'Automation',
   web: 'Web',
 };
@@ -67,20 +73,12 @@ function SessionInfoPanel({
   const inferenceCostLabel = formatInferenceCost(session.inferenceCostMicroUsd);
 
   return (
-    <>
-      <div className="flex shrink-0 items-center justify-between gap-2 border-b-2 border-card px-4 py-2">
-        <h2 className="text-sm font-medium">Session info</h2>
-        <BasicTooltip content="Close">
-          <Button
-            variant="ghost"
-            size="icon"
-            aria-label="Close session info"
-            onClick={onClose}
-          >
-            <X />
-          </Button>
-        </BasicTooltip>
-      </div>
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+      <SandboxSidePanelHeader
+        title="Session info"
+        closeLabel="Close session info"
+        onClose={onClose}
+      />
       <div className="scroll-thin min-h-0 flex-1 overflow-y-auto px-4 py-4">
         <table className="text-sm">
           <tbody>
@@ -116,7 +114,7 @@ function SessionInfoPanel({
           </tbody>
         </table>
       </div>
-    </>
+    </div>
   );
 }
 
@@ -128,46 +126,53 @@ export function SessionWorkspace({
   children: ReactNode;
 }) {
   const [isInfoOpen, setIsInfoOpen] = useState(false);
+  const { isSidebarVisible, toggleSidebar } = useSandboxLayout();
 
   return (
     <WorkspaceSurface
+      className="relative"
       sideActions={
-        <div className="flex h-full shrink-0 flex-col gap-2 overflow-y-auto bg-card py-3 pr-2">
-          <SideNavItem
-            side="right"
-            label="Session info"
-            tooltip="Session info"
-            active={isInfoOpen}
-            icon={Info}
-            onClick={() => setIsInfoOpen((previous) => !previous)}
-          />
-        </div>
+        <>
+          <SandboxSideActions
+            isPanelOpen={isInfoOpen}
+            onShowMain={() => setIsInfoOpen(false)}
+          >
+            <SideNavItem
+              side="right"
+              label="Session info"
+              tooltip="Session info"
+              active={isInfoOpen}
+              icon={Info}
+              onClick={() => setIsInfoOpen((previous) => !previous)}
+            />
+          </SandboxSideActions>
+          {!isSidebarVisible && !isInfoOpen ? (
+            <BasicTooltip content="Show sidebar">
+              <Button
+                variant="ghost"
+                className="absolute top-2.5 right-3 size-8 shrink-0 md:hidden"
+                aria-label="Show sidebar"
+                onClick={toggleSidebar}
+              >
+                <ArrowLeftFromLine className="size-4" />
+              </Button>
+            </BasicTooltip>
+          ) : null}
+        </>
       }
     >
-      <ResizablePanelGroup direction="horizontal" className="min-h-0 flex-1">
-        <ResizablePanel
-          defaultSize={isInfoOpen ? 65 : 100}
-          minSize={30}
-          className="flex min-h-0 min-w-0 flex-col"
-        >
-          {children}
-        </ResizablePanel>
-        {isInfoOpen && (
-          <>
-            <ResizableDivider />
-            <ResizablePanel
-              defaultSize={35}
-              minSize={20}
-              className="flex min-h-0 min-w-0 flex-col border-l-2 border-card"
-            >
-              <SessionInfoPanel
-                session={session}
-                onClose={() => setIsInfoOpen(false)}
-              />
-            </ResizablePanel>
-          </>
-        )}
-      </ResizablePanelGroup>
+      <ResponsiveWorkspacePanels
+        isPanelOpen={isInfoOpen}
+        main={children}
+        mainSize={65}
+        panelSize={35}
+        panel={
+          <SessionInfoPanel
+            session={session}
+            onClose={() => setIsInfoOpen(false)}
+          />
+        }
+      />
     </WorkspaceSurface>
   );
 }

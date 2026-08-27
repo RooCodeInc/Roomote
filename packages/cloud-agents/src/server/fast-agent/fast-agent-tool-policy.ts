@@ -9,6 +9,7 @@ export const FAST_AGENT_NATIVE_TOOL_NAMES = {
   sendTaskMessage: 'send_task_message',
   listSkills: 'list_skills',
   loadSkill: 'load_skill',
+  showWidget: 'show_widget',
   spillGrep: 'spill_grep',
   spillRead: 'spill_read',
 } as const;

@@ -438,7 +438,9 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
     expect(glm53ByProvider).toEqual([
       { providerId: 'openrouter', modelId: 'openrouter/z-ai/glm-5.3' },
       { providerId: 'vercel', modelId: 'vercel/zai/glm-5.3' },
+      { providerId: 'requesty', modelId: 'requesty/glm-5.3' },
       { providerId: 'opencode-go', modelId: 'opencode-go/glm-5.3' },
+      { providerId: 'zai', modelId: 'zai/glm-5.3' },
       {
         providerId: 'zai-coding-plan',
         modelId: 'zai-coding-plan/glm-5.3',
@@ -450,7 +452,7 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
     expect(
       buildRecommendedDeploymentModelConfig(getSetupModelProvider('zai'))
         .roomoteModel,
-    ).toBe('zai/glm-5.2');
+    ).toBe('zai/glm-5.3');
     expect(
       SETUP_MODEL_PROVIDER_CATALOG.flatMap((provider) => {
         const model = provider.suggestedTaskModels.find(
@@ -460,11 +462,36 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
         return model ? [{ providerId: provider.id, modelId: model.id }] : [];
       }),
     ).toEqual([
-      { providerId: 'requesty', modelId: 'requesty/glm-5.2' },
       { providerId: 'baseten', modelId: 'baseten/zai-org/GLM-5.2' },
       { providerId: 'togetherai', modelId: 'togetherai/zai-org/GLM-5.2' },
       { providerId: 'opencode', modelId: 'opencode/glm-5.2' },
-      { providerId: 'zai', modelId: 'zai/glm-5.2' },
+    ]);
+  });
+
+  it('recommends GLM 5.3 Flash from every supported provider', () => {
+    const glm53FlashByProvider = SETUP_MODEL_PROVIDER_CATALOG.flatMap(
+      (provider) => {
+        const model = provider.suggestedTaskModels.find(
+          (suggestion) => suggestion.displayName === 'GLM 5.3 Flash',
+        );
+
+        return model ? [{ providerId: provider.id, modelId: model.id }] : [];
+      },
+    );
+
+    expect(glm53FlashByProvider).toEqual([
+      {
+        providerId: 'openrouter',
+        modelId: 'openrouter/z-ai/glm-5.3-flash',
+      },
+      { providerId: 'vercel', modelId: 'vercel/zai/glm-5.3-flash' },
+      { providerId: 'requesty', modelId: 'requesty/glm-5.3-flash' },
+      { providerId: 'opencode-go', modelId: 'opencode-go/glm-5.3-flash' },
+      { providerId: 'zai', modelId: 'zai/glm-5.3-flash' },
+      {
+        providerId: 'zai-coding-plan',
+        modelId: 'zai-coding-plan/glm-5.3-flash',
+      },
     ]);
   });
 
@@ -894,7 +921,8 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
       'requesty/gpt-5.6-luna@eu',
       'requesty/gemini-3.7-flash',
       'requesty/deepseek-v4-flash-0731',
-      'requesty/glm-5.2',
+      'requesty/glm-5.3-flash',
+      'requesty/glm-5.3',
       'requesty/kimi-k3',
       'requesty/grok-4.6',
     ]);

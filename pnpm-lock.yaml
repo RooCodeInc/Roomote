@@ -213,12 +213,18 @@ importers:
       '@trpc/server':
         specifier: ^11.15.0
         version: 11.15.0(typescript@5.9.3)
+      dompurify:
+        specifier: 3.4.13
+        version: 3.4.13
       hono:
         specifier: 4.12.34
         version: 4.12.34
       jose:
         specifier: ^6.2.3
         version: 6.2.3
+      jsdom:
+        specifier: 26.1.0
+        version: 26.1.0(bufferutil@4.1.0)(utf-8-validate@6.0.6)
       p-map:
         specifier: ^7.0.4
         version: 7.0.4
@@ -949,9 +955,6 @@ importers:
       commander:
         specifier: ^14.0.2
         version: 14.0.3
-      dompurify:
-        specifier: 3.4.13
-        version: 3.4.13
       execa:
         specifier: 9.6.1
         version: 9.6.1
@@ -964,9 +967,6 @@ importers:
       ignore:
         specifier: ^7.0.5
         version: 7.0.5
-      jsdom:
-        specifier: 26.1.0
-        version: 26.1.0(bufferutil@4.1.0)(utf-8-validate@6.0.6)
       jsonwebtoken:
         specifier: ^9.0.3
         version: 9.0.3
@@ -1007,9 +1007,6 @@ importers:
       '@types/http-proxy':
         specifier: ^1.17.17
         version: 1.17.17
-      '@types/jsdom':
-        specifier: 21.1.7
-        version: 21.1.7
       '@types/jsonwebtoken':
         specifier: ^9.0.10
         version: 9.0.10
@@ -1160,6 +1157,12 @@ importers:
       ai:
         specifier: ^6.0.116
         version: 6.0.116(zod@3.25.76)
+      dompurify:
+        specifier: 3.4.13
+        version: 3.4.13
+      jsdom:
+        specifier: 26.1.0
+        version: 26.1.0(bufferutil@4.1.0)(utf-8-validate@6.0.6)
       jszip:
         specifier: ^3.10.1
         version: 3.10.1
@@ -1185,6 +1188,9 @@ importers:
       '@types/ioredis-mock':
         specifier: ^8.2.6
         version: 8.2.6(ioredis@5.10.1)
+      '@types/jsdom':
+        specifier: 21.1.7
+        version: 21.1.7
       '@types/node':
         specifier: ^24.10.13
         version: 24.12.4

@@ -51,7 +51,13 @@ export async function postBrainToolCall(
       ? { signal: AbortSignal.timeout(options.timeoutMs) }
       : {}),
   });
-  const body = await response.text().catch(() => '');
+  // A body-read rejection is a transport failure (the connection dropped
+  // while gbrain streamed its response), not an empty response. Swallowing
+  // it here made mid-stream disconnects surface downstream as JSON-RPC
+  // parse errors — misclassified as payload problems. Callers already
+  // handle pre-header transport throws, so body-read throws propagate the
+  // same way.
+  const body = await response.text();
 
   return { status: response.status, ok: response.ok, body };
 }
