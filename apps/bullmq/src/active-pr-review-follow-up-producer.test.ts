@@ -23,7 +23,9 @@ import {
   ACTIVE_PR_REVIEW_FOLLOW_UP_JOB_OPTIONS,
   ACTIVE_PR_REVIEW_FOLLOW_UP_QUEUE_NAME,
   ACTIVE_PR_REVIEW_FOLLOW_UP_RETRY_WINDOW_MS,
+  ACTIVE_PR_REVIEW_FOLLOW_UP_SETTLEMENT_WINDOW_MS,
   enqueueActivePrReviewFollowUp,
+  SANDBOX_SERVER_RPC_TIMEOUT_MS,
 } from '@roomote/sdk/server';
 import { WORKER_HEARTBEAT_STALE_MS } from '@roomote/types';
 
@@ -83,6 +85,7 @@ describe('enqueueActivePrReviewFollowUp', () => {
           ttl: ACTIVE_PR_REVIEW_FOLLOW_UP_DEDUPLICATION_TTL_MS,
           extend: true,
           replace: true,
+          keepLastIfActive: true,
         },
       },
     );
@@ -94,7 +97,7 @@ describe('enqueueActivePrReviewFollowUp', () => {
     );
   });
 
-  it('replaces a retry-delayed follow-up with the newest pushed head', async () => {
+  it('retains the newest pushed head through final-attempt settlement', async () => {
     const latestRequest = {
       ...request,
       eventHeadSha: 'newest-head',
@@ -127,11 +130,19 @@ describe('enqueueActivePrReviewFollowUp', () => {
           ttl: ACTIVE_PR_REVIEW_FOLLOW_UP_DEDUPLICATION_TTL_MS,
           extend: true,
           replace: true,
+          keepLastIfActive: true,
         },
       },
     );
-    expect(ACTIVE_PR_REVIEW_FOLLOW_UP_DEDUPLICATION_TTL_MS).toBeGreaterThan(
-      ACTIVE_PR_REVIEW_FOLLOW_UP_RETRY_WINDOW_MS,
+    expect(ACTIVE_PR_REVIEW_FOLLOW_UP_SETTLEMENT_WINDOW_MS).toBeGreaterThan(
+      SANDBOX_SERVER_RPC_TIMEOUT_MS,
+    );
+    expect(
+      ACTIVE_PR_REVIEW_FOLLOW_UP_DEDUPLICATION_TTL_MS,
+    ).toBeGreaterThanOrEqual(
+      ACTIVE_PR_REVIEW_FOLLOW_UP_DEBOUNCE_MS +
+        ACTIVE_PR_REVIEW_FOLLOW_UP_RETRY_WINDOW_MS +
+        SANDBOX_SERVER_RPC_TIMEOUT_MS,
     );
   });
 });

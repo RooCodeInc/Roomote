@@ -7,6 +7,8 @@ import {
   sourceControlProviderSchema,
 } from '@roomote/types';
 
+import { SANDBOX_SERVER_RPC_TIMEOUT_MS } from '../auth/sandbox-server-rpc';
+
 export const ACTIVE_PR_REVIEW_FOLLOW_UP_QUEUE_NAME =
   'active-pr-review-follow-up-jobs';
 export const ACTIVE_PR_REVIEW_FOLLOW_UP_DEBOUNCE_MS = 5_000;
@@ -17,9 +19,12 @@ export const ACTIVE_PR_REVIEW_FOLLOW_UP_RETRY_DELAY_MS = 15_000;
 export const ACTIVE_PR_REVIEW_FOLLOW_UP_RETRY_WINDOW_MS =
   (ACTIVE_PR_REVIEW_FOLLOW_UP_ATTEMPTS - 1) *
   ACTIVE_PR_REVIEW_FOLLOW_UP_RETRY_DELAY_MS;
+export const ACTIVE_PR_REVIEW_FOLLOW_UP_SETTLEMENT_WINDOW_MS =
+  SANDBOX_SERVER_RPC_TIMEOUT_MS + ACTIVE_PR_REVIEW_FOLLOW_UP_DEBOUNCE_MS;
 export const ACTIVE_PR_REVIEW_FOLLOW_UP_DEDUPLICATION_TTL_MS =
   ACTIVE_PR_REVIEW_FOLLOW_UP_DEBOUNCE_MS +
-  ACTIVE_PR_REVIEW_FOLLOW_UP_RETRY_WINDOW_MS;
+  ACTIVE_PR_REVIEW_FOLLOW_UP_RETRY_WINDOW_MS +
+  ACTIVE_PR_REVIEW_FOLLOW_UP_SETTLEMENT_WINDOW_MS;
 export const ACTIVE_PR_REVIEW_FOLLOW_UP_JOB_OPTIONS = {
   attempts: ACTIVE_PR_REVIEW_FOLLOW_UP_ATTEMPTS,
   backoff: {
@@ -103,6 +108,7 @@ export async function enqueueActivePrReviewFollowUp(
         ttl: ACTIVE_PR_REVIEW_FOLLOW_UP_DEDUPLICATION_TTL_MS,
         extend: true,
         replace: true,
+        keepLastIfActive: true,
       },
     },
   );
