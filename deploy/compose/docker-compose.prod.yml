@@ -25,6 +25,12 @@ x-roomote-base-env: &roomote-base-env
   R_BRAIN_EMBEDDING_MODEL: ${R_BRAIN_EMBEDDING_MODEL:-}
   R_BRAIN_EMBEDDING_DIMENSIONS: ${R_BRAIN_EMBEDDING_DIMENSIONS:-}
   R_BRAIN_RERANKER_MODEL: ${R_BRAIN_RERANKER_MODEL:-}
+  # Optional self-run inference: point embeddings/rerank at the bundled
+  # `infinity` service (profile local-inference) or any OpenAI-compatible
+  # server. Chat synthesis keeps flowing to the configured model provider.
+  R_BRAIN_EMBEDDINGS_UPSTREAM_URL: ${R_BRAIN_EMBEDDINGS_UPSTREAM_URL:-}
+  R_BRAIN_RERANK_UPSTREAM_URL: ${R_BRAIN_RERANK_UPSTREAM_URL:-}
+  R_BRAIN_INFERENCE_UPSTREAM_API_KEY: ${R_BRAIN_INFERENCE_UPSTREAM_API_KEY:-}
   R_GBRAIN_URL: ${R_GBRAIN_URL:-http://gbrain:8931}
   R_GBRAIN_ADMIN_TOKEN_FILE: /gbrain-data/admin-bootstrap-token
   # Written by the Brain on first boot when no token was supplied, so a stack
@@ -549,6 +555,37 @@ services:
     security_opt:
       - no-new-privileges:true
 
+  # Self-run embedding/reranking models for the Brain (opt-in, CPU).
+  # Enable with the `local-inference` compose profile. The upstream URLs are
+  # NOT sufficient on their own: R_BRAIN_EMBEDDING_MODEL and
+  # R_BRAIN_EMBEDDING_DIMENSIONS must name what this server serves (gbrain's
+  # defaults name a provider model it does not serve), and the embedding pair
+  # is create-time — the full set is documented together in
+  # .env.production.example. Serve models by pinned name and keep serving old
+  # names: every Brain is locked to its embedding model at creation.
+  infinity:
+    profiles:
+      - local-inference
+    image: michaelf34/infinity:0.0.76-cpu
+    restart: unless-stopped
+    networks: [default]
+    command:
+      - v2
+      - --device
+      - cpu
+      - --url-prefix
+      - /v1
+      - --port
+      - '7997'
+      - --model-id
+      - ${INFINITY_EMBEDDING_MODEL:-BAAI/bge-small-en-v1.5}
+      - --model-id
+      - ${INFINITY_RERANKER_MODEL:-BAAI/bge-reranker-base}
+    volumes:
+      - infinity_cache:/app/.cache
+    security_opt:
+      - no-new-privileges:true
+
   preview-proxy:
     <<: *roomote-service
     image: *roomote-app-image
@@ -604,6 +641,7 @@ volumes:
   caddy_data:
   caddy_config:
   gbrain_data:
+  infinity_cache:
 
 networks:
   default:
