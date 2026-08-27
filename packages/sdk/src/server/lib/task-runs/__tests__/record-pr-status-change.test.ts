@@ -304,4 +304,28 @@ describe('recordPrStatusChangeInTaskHistory', () => {
 
     expect(mockRedisDel).toHaveBeenCalled();
   });
+
+  it('continues Fast delivery for later tasks after a history failure', async () => {
+    mockFindManyTaskPullRequests.mockResolvedValue([
+      { taskId: 'task-1' },
+      { taskId: 'task-2' },
+    ]);
+    mockFindFirstTaskRun
+      .mockResolvedValueOnce({ id: 11, taskId: 'task-1', payload: {} })
+      .mockResolvedValueOnce({ id: 22, taskId: 'task-2', payload: {} });
+    mockRecordTaskMessageEnvelope.mockRejectedValueOnce(new Error('db down'));
+
+    await expect(recordPrStatusChangeInTaskHistory(baseInput)).rejects.toThrow(
+      PrStatusHistoryRecordingError,
+    );
+
+    expect(mockNotifyFastAgentParent).toHaveBeenCalledTimes(2);
+    expect(mockNotifyFastAgentParent).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        run: { id: 22, taskId: 'task-2', payload: {} },
+      }),
+    );
+    expect(mockRecordTaskMessageEnvelope).toHaveBeenCalledTimes(2);
+  });
 });

@@ -161,6 +161,7 @@ export async function recordPrStatusChangeInTaskHistory(
   let recordedTaskCount = 0;
   let claimedTaskCount = 0;
   let skippedAlreadyRecorded = 0;
+  let historyError: PrStatusHistoryRecordingError | null = null;
 
   for (const taskId of taskIds) {
     const latestRun = await db.query.taskRuns.findFirst({
@@ -208,10 +209,11 @@ export async function recordPrStatusChangeInTaskHistory(
         'NX',
       );
     } catch (error) {
-      throw new PrStatusHistoryRecordingError(
+      historyError ??= new PrStatusHistoryRecordingError(
         error instanceof Error ? error.message : String(error),
         { cause: error },
       );
+      continue;
     }
 
     if (claim !== 'OK') {
@@ -255,11 +257,16 @@ export async function recordPrStatusChangeInTaskHistory(
       // Release so a later webhook delivery can retry this task instead of
       // staying silent for the full TTL after a transient write failure.
       await redis.del(claimKey).catch(() => undefined);
-      throw new PrStatusHistoryRecordingError(
+      historyError ??= new PrStatusHistoryRecordingError(
         error instanceof Error ? error.message : String(error),
         { cause: error },
       );
+      continue;
     }
+  }
+
+  if (historyError) {
+    throw historyError;
   }
 
   if (recordedTaskCount === 0) {
