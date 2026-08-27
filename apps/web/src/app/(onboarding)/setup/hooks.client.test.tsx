@@ -186,8 +186,10 @@ function trialModelSetup(overrides: Partial<Record<string, unknown>> = {}) {
       {
         id: 'roomote',
         label: 'Roomote inference',
-        runtimeApiKeySatisfied: true,
-        savedApiKeySatisfied: false,
+        // The imported Settings row, not the hosting-injected env variable,
+        // is what connects the provider.
+        runtimeApiKeySatisfied: false,
+        savedApiKeySatisfied: true,
       },
     ],
     ...overrides,

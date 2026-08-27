@@ -399,7 +399,7 @@ export function useSetupFlow(
           const trialInferenceAvailable = status.modelSetup.providers?.some(
             (provider) =>
               provider.id === ROOMOTE_INFERENCE_PROVIDER_ID &&
-              provider.runtimeApiKeySatisfied,
+              provider.savedApiKeySatisfied,
           );
           const operatorProviderConfigured = status.modelSetup.providers?.some(
             (provider) =>

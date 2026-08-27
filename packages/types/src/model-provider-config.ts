@@ -2053,8 +2053,15 @@ export function buildSetupModelStatus(input: {
     const requiredEnvVarNames =
       getSetupModelProviderRequiredEnvVarNames(provider);
     const hasRequiredEnvVars = requiredEnvVarNames.length > 0;
-    const isRuntimeConfigured = (name: string) =>
-      isConfiguredEnvValue(runtimeEnv[name]);
+    // The hosting-injected Roomote inference variable is a delivery
+    // mechanism, not a credential: setup imports it into encrypted Settings
+    // storage once, and only the stored key connects the provider. Counting
+    // the env value here would resurrect a provider whose stored key the
+    // operator deleted to disable the trial.
+    const isRuntimeConfigured =
+      provider.id === ROOMOTE_INFERENCE_PROVIDER_ID
+        ? () => false
+        : (name: string) => isConfiguredEnvValue(runtimeEnv[name]);
     const isPersisted = (name: string) => persistedEnvVarNameSet.has(name);
     const additionalEnvValues = Object.fromEntries(
       [

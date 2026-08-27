@@ -165,7 +165,11 @@ function resolveProviderKeyNames({
 /**
  * Resolve a single model-provider env value with the same precedence the task
  * runtime uses: the runtime process env first, then the persisted (encrypted)
- * deployment environment variables.
+ * deployment environment variables. The Roomote inference key is the one
+ * exception: its env variable is only the hosting platform's delivery
+ * mechanism (setup imports it into Settings storage once), so it resolves
+ * from the persisted store alone — deleting the stored key disables the
+ * provider even while hosting keeps injecting the variable.
  */
 export async function resolveModelProviderEnvValue(
   envVarNames: string | readonly string[],
@@ -178,6 +182,7 @@ export async function resolveModelProviderEnvValue(
   const names = typeof envVarNames === 'string' ? [envVarNames] : envVarNames;
 
   for (const envVarName of names) {
+    if (envVarName === ROOMOTE_INFERENCE_API_KEY_ENV_VAR_NAME) continue;
     const runtimeValue = normalizeConfiguredValue(runtimeEnv[envVarName]);
 
     if (runtimeValue) {
@@ -458,7 +463,9 @@ async function resolveModelRuntimeEnv(
       }
 
       const value =
-        normalizeConfiguredValue(runtimeEnv[envVarName]) ??
+        (envVarName === ROOMOTE_INFERENCE_API_KEY_ENV_VAR_NAME
+          ? undefined
+          : normalizeConfiguredValue(runtimeEnv[envVarName])) ??
         normalizeConfiguredValue(persistedEnvVars[envVarName]);
 
       return value ? [[envVarName, value]] : [];

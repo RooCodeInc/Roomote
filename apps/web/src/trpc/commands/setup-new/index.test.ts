@@ -260,6 +260,7 @@ import {
   trackSetupCommsStateCommand,
   trackSetupWelcomeSeenCommand,
   chooseSetupTrialInferenceCommand,
+  importTrialInferenceKeyIfNeeded,
 } from './index';
 import {
   DEFAULT_MODEL_PROVIDER_CREDENTIAL_ENV_VAR_NAMES,
@@ -1395,6 +1396,9 @@ describe('chooseSetupTrialInferenceCommand', () => {
 
   it('seeds the Efficient Roomote defaults and records the managed provider choice', async () => {
     vi.stubEnv('R_TRIAL_OPENROUTER_API_KEY', 'sk-trial');
+    mockGetPersistedEnvironmentVariableNames.mockResolvedValue([
+      'R_TRIAL_OPENROUTER_API_KEY',
+    ]);
     const { tx, inserted } = createTxStub({
       setupNewState: {},
       runtimeModelConfig: null,
@@ -1424,15 +1428,67 @@ describe('chooseSetupTrialInferenceCommand', () => {
     });
   });
 
-  it('refuses when the trial key is not in the environment', async () => {
+  it('refuses when no trial key was ever delivered or stored', async () => {
+    const { tx } = createTxStub({
+      setupNewState: {},
+      runtimeModelConfig: null,
+      taskModelSettings: null,
+    });
+    mockDbTransaction.mockImplementation(
+      async (callback: (tx: unknown) => Promise<unknown>) => callback(tx),
+    );
+
     await expect(
       chooseSetupTrialInferenceCommand(buildMockAuth()),
     ).rejects.toThrow('Free trial inference is not available');
-    expect(mockDbTransaction).not.toHaveBeenCalled();
+  });
+
+  it('refuses after the stored key was deleted, even with the variable still injected', async () => {
+    // Disabling the trial = deleting the Roomote inference provider's stored
+    // key. The import marker keeps the still-injected env variable from
+    // resurrecting it.
+    vi.stubEnv('R_TRIAL_OPENROUTER_API_KEY', 'sk-trial');
+    const { tx } = createTxStub({
+      setupNewState: { trialInferenceKeyImportedAt: '2026-08-27T00:00:00Z' },
+      runtimeModelConfig: null,
+      taskModelSettings: null,
+    });
+    mockDbTransaction.mockImplementation(
+      async (callback: (tx: unknown) => Promise<unknown>) => callback(tx),
+    );
+
+    await expect(
+      chooseSetupTrialInferenceCommand(buildMockAuth()),
+    ).rejects.toThrow('Free trial inference is not available');
+    expect(mockUpsertDeploymentEnvironmentVariables).not.toHaveBeenCalled();
+  });
+
+  it('imports the delivered key into Settings storage exactly once', async () => {
+    vi.stubEnv('R_TRIAL_OPENROUTER_API_KEY', 'sk-trial');
+    const { tx } = createTxStub({
+      setupNewState: {},
+      runtimeModelConfig: null,
+      taskModelSettings: null,
+    });
+    mockDbTransaction.mockImplementation(
+      async (callback: (tx: unknown) => Promise<unknown>) => callback(tx),
+    );
+
+    await importTrialInferenceKeyIfNeeded('setup-test-user');
+
+    expect(mockUpsertDeploymentEnvironmentVariables).toHaveBeenCalledWith(
+      tx,
+      expect.objectContaining({
+        values: [{ name: 'R_TRIAL_OPENROUTER_API_KEY', value: 'sk-trial' }],
+      }),
+    );
   });
 
   it('refuses when an operator provider is already connected', async () => {
     vi.stubEnv('R_TRIAL_OPENROUTER_API_KEY', 'sk-trial');
+    mockGetPersistedEnvironmentVariableNames.mockResolvedValue([
+      'R_TRIAL_OPENROUTER_API_KEY',
+    ]);
     vi.stubEnv('OPENROUTER_API_KEY', 'sk-operator');
     const { tx, inserted } = createTxStub({
       setupNewState: {},
@@ -1451,6 +1507,9 @@ describe('chooseSetupTrialInferenceCommand', () => {
 
   it('no-ops when model choices already exist', async () => {
     vi.stubEnv('R_TRIAL_OPENROUTER_API_KEY', 'sk-trial');
+    mockGetPersistedEnvironmentVariableNames.mockResolvedValue([
+      'R_TRIAL_OPENROUTER_API_KEY',
+    ]);
     const { tx, inserted } = createTxStub({
       setupNewState: {},
       runtimeModelConfig: null,
@@ -1470,6 +1529,9 @@ describe('chooseSetupTrialInferenceCommand', () => {
 
   it('seeds despite a role-model env override, which keeps winning at runtime', async () => {
     vi.stubEnv('R_TRIAL_OPENROUTER_API_KEY', 'sk-trial');
+    mockGetPersistedEnvironmentVariableNames.mockResolvedValue([
+      'R_TRIAL_OPENROUTER_API_KEY',
+    ]);
     vi.stubEnv('R_PLANNING_MODEL', 'anthropic/claude-opus-5');
     const { tx, inserted } = createTxStub({
       setupNewState: {},

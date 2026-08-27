@@ -1558,6 +1558,29 @@ describe('reasoning effort labels', () => {
 });
 
 describe('buildSetupModelStatus', () => {
+  it('connects Roomote inference only through the stored key, never the env variable', () => {
+    const envOnly = buildSetupModelStatus({
+      runtimeEnv: { R_TRIAL_OPENROUTER_API_KEY: 'sk-trial' },
+      persistedEnvVarNames: [],
+    });
+    // Hidden and unconnected: the env value alone must not surface the
+    // provider, or deleting the stored key could not disable the trial.
+    expect(
+      envOnly.providers.find((provider) => provider.id === 'roomote'),
+    ).toBeUndefined();
+
+    const stored = buildSetupModelStatus({
+      runtimeEnv: {},
+      persistedEnvVarNames: ['R_TRIAL_OPENROUTER_API_KEY'],
+    });
+    expect(
+      stored.providers.find((provider) => provider.id === 'roomote'),
+    ).toMatchObject({
+      runtimeApiKeySatisfied: false,
+      savedApiKeySatisfied: true,
+    });
+  });
+
   it('treats runtime env as the highest-precedence satisfied setup source', () => {
     const status = buildSetupModelStatus({
       runtimeEnv: {
@@ -1643,23 +1666,21 @@ describe('buildSetupModelStatus', () => {
 
   it('treats Roomote inference as a distinct hosting-managed provider', () => {
     const status = buildSetupModelStatus({
-      runtimeEnv: {
-        R_TRIAL_OPENROUTER_API_KEY: 'sk-trial',
-      },
+      runtimeEnv: {},
       persistedModelConfig: {
         roomoteModel: 'roomote/openai/gpt-5.6-luna',
         roomoteSmallModel: null,
         roomoteVisionModel: null,
       },
-      persistedEnvVarNames: [],
+      persistedEnvVarNames: ['R_TRIAL_OPENROUTER_API_KEY'],
     });
 
     expect(status.setupSatisfied).toBe(true);
     expect(
       status.providers.find((provider) => provider.id === 'roomote'),
     ).toMatchObject({
-      runtimeApiKeySatisfied: true,
-      savedApiKeySatisfied: false,
+      runtimeApiKeySatisfied: false,
+      savedApiKeySatisfied: true,
     });
     expect(
       status.providers.find((provider) => provider.id === 'openrouter'),

@@ -54,6 +54,7 @@ import {
   buildSetupSourceControlStatus,
   CHATGPT_SUBSCRIPTION_PROVIDER_ID,
   XAI_SUBSCRIPTION_PROVIDER_ID,
+  ROOMOTE_INFERENCE_API_KEY_ENV_VAR_NAME,
   ROOMOTE_INFERENCE_PROVIDER_ID,
   ROOMOTE_TRIAL_MODEL_PRESET_ID,
   OPENAI_COMPATIBLE_PROVIDER_ID,
@@ -301,16 +302,67 @@ async function savePersistedTaskModelSettings(
  * config, or task model settings) and refuses when a real provider is
  * already connected, so it can never overwrite configuration.
  */
+/**
+ * Imports the hosting-injected Roomote inference key from the process
+ * environment into encrypted Settings storage, once. The env variable is
+ * only the delivery mechanism: after this import, every runtime read (the
+ * inference gateway, credit balance, provider status) resolves the stored
+ * key, so deleting the Roomote inference provider disables the trial even
+ * though hosting keeps injecting the variable — the stamped
+ * `trialInferenceKeyImportedAt` marker guarantees it is never re-imported.
+ */
+export async function importTrialInferenceKeyIfNeeded(
+  userId: string | null,
+): Promise<void> {
+  if (
+    !isConfiguredEnvValue(process.env[ROOMOTE_INFERENCE_API_KEY_ENV_VAR_NAME])
+  ) {
+    return;
+  }
+
+  await db.transaction(async (tx) => {
+    await tx
+      .insert(deploymentSettings)
+      .values({ id: 'default' })
+      .onConflictDoUpdate({
+        target: deploymentSettings.id,
+        set: { updatedAt: new Date() },
+      });
+    await tx
+      .select({ id: deploymentSettings.id })
+      .from(deploymentSettings)
+      .where(eq(deploymentSettings.id, 'default'))
+      .for('update');
+
+    const currentState = await getPersistedSetupNewState(tx);
+    if (currentState.trialInferenceKeyImportedAt !== null) {
+      return;
+    }
+
+    await upsertDeploymentEnvironmentVariables(tx, {
+      userId,
+      values: [
+        {
+          name: ROOMOTE_INFERENCE_API_KEY_ENV_VAR_NAME,
+          value: process.env[ROOMOTE_INFERENCE_API_KEY_ENV_VAR_NAME]!.trim(),
+        },
+      ],
+    });
+    await savePersistedSetupNewState(
+      normalizeSetupNewState({
+        ...currentState,
+        trialInferenceKeyImportedAt: new Date().toISOString(),
+      }),
+      tx,
+    );
+  });
+}
+
 export async function chooseSetupTrialInferenceCommand(auth: UserAuthSuccess) {
   assertAdmin(auth);
 
   const { userId } = auth;
-
-  if (!isConfiguredEnvValue(process.env.R_TRIAL_OPENROUTER_API_KEY)) {
-    throw new Error(
-      'Free trial inference is not available on this deployment.',
-    );
-  }
+  await importTrialInferenceKeyIfNeeded(userId);
 
   return db.transaction(async (tx) => {
     // Serialize against concurrent configuration writes: every check below
@@ -365,6 +417,18 @@ export async function chooseSetupTrialInferenceCommand(auth: UserAuthSuccess) {
       githubCopilotConnected,
       xaiSubscriptionConnected,
     });
+    const trialKeyStored = status.providers.some(
+      (provider) =>
+        provider.id === ROOMOTE_INFERENCE_PROVIDER_ID &&
+        provider.savedApiKeySatisfied,
+    );
+
+    if (!trialKeyStored) {
+      throw new Error(
+        'Free trial inference is not available on this deployment.',
+      );
+    }
+
     const hasOperatorProvider = status.providers.some(
       (provider) =>
         provider.id !== ROOMOTE_INFERENCE_PROVIDER_ID &&
@@ -1226,6 +1290,7 @@ export async function getSetupNewStatusCommand(auth: UserAuthSuccess) {
 
   const { userId } = auth;
   await purgeSavedDeploymentWorkerImage();
+  await importTrialInferenceKeyIfNeeded(userId);
 
   const [
     baseStatus,
