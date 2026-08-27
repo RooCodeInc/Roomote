@@ -14,6 +14,12 @@ export const ACTIVE_PR_REVIEW_FOLLOW_UP_DEBOUNCE_MS = 5_000;
 // margin for run finalization before falling through to resume or relaunch.
 export const ACTIVE_PR_REVIEW_FOLLOW_UP_ATTEMPTS = 20;
 export const ACTIVE_PR_REVIEW_FOLLOW_UP_RETRY_DELAY_MS = 15_000;
+export const ACTIVE_PR_REVIEW_FOLLOW_UP_RETRY_WINDOW_MS =
+  (ACTIVE_PR_REVIEW_FOLLOW_UP_ATTEMPTS - 1) *
+  ACTIVE_PR_REVIEW_FOLLOW_UP_RETRY_DELAY_MS;
+export const ACTIVE_PR_REVIEW_FOLLOW_UP_DEDUPLICATION_TTL_MS =
+  ACTIVE_PR_REVIEW_FOLLOW_UP_DEBOUNCE_MS +
+  ACTIVE_PR_REVIEW_FOLLOW_UP_RETRY_WINDOW_MS;
 export const ACTIVE_PR_REVIEW_FOLLOW_UP_JOB_OPTIONS = {
   attempts: ACTIVE_PR_REVIEW_FOLLOW_UP_ATTEMPTS,
   backoff: {
@@ -94,7 +100,7 @@ export async function enqueueActivePrReviewFollowUp(
       delay: ACTIVE_PR_REVIEW_FOLLOW_UP_DEBOUNCE_MS,
       deduplication: {
         id: deduplicationId,
-        ttl: ACTIVE_PR_REVIEW_FOLLOW_UP_DEBOUNCE_MS,
+        ttl: ACTIVE_PR_REVIEW_FOLLOW_UP_DEDUPLICATION_TTL_MS,
         extend: true,
         replace: true,
       },

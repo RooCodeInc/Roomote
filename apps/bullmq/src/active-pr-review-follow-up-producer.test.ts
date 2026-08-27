@@ -18,11 +18,11 @@ vi.mock('bullmq', () => ({
 }));
 
 import {
-  ACTIVE_PR_REVIEW_FOLLOW_UP_ATTEMPTS,
   ACTIVE_PR_REVIEW_FOLLOW_UP_DEBOUNCE_MS,
+  ACTIVE_PR_REVIEW_FOLLOW_UP_DEDUPLICATION_TTL_MS,
   ACTIVE_PR_REVIEW_FOLLOW_UP_JOB_OPTIONS,
   ACTIVE_PR_REVIEW_FOLLOW_UP_QUEUE_NAME,
-  ACTIVE_PR_REVIEW_FOLLOW_UP_RETRY_DELAY_MS,
+  ACTIVE_PR_REVIEW_FOLLOW_UP_RETRY_WINDOW_MS,
   enqueueActivePrReviewFollowUp,
 } from '@roomote/sdk/server';
 import { WORKER_HEARTBEAT_STALE_MS } from '@roomote/types';
@@ -80,7 +80,7 @@ describe('enqueueActivePrReviewFollowUp', () => {
         delay: ACTIVE_PR_REVIEW_FOLLOW_UP_DEBOUNCE_MS,
         deduplication: {
           id: 'active-pr-review-follow-up:100',
-          ttl: ACTIVE_PR_REVIEW_FOLLOW_UP_DEBOUNCE_MS,
+          ttl: ACTIVE_PR_REVIEW_FOLLOW_UP_DEDUPLICATION_TTL_MS,
           extend: true,
           replace: true,
         },
@@ -89,12 +89,49 @@ describe('enqueueActivePrReviewFollowUp', () => {
   });
 
   it('retries beyond stale-worker detection and its scheduler cadence', () => {
-    const retryHorizonMs =
-      (ACTIVE_PR_REVIEW_FOLLOW_UP_ATTEMPTS - 1) *
-      ACTIVE_PR_REVIEW_FOLLOW_UP_RETRY_DELAY_MS;
-
-    expect(retryHorizonMs).toBeGreaterThanOrEqual(
+    expect(ACTIVE_PR_REVIEW_FOLLOW_UP_RETRY_WINDOW_MS).toBeGreaterThanOrEqual(
       WORKER_HEARTBEAT_STALE_MS + 2 * 60 * 1000,
+    );
+  });
+
+  it('replaces a retry-delayed follow-up with the newest pushed head', async () => {
+    const latestRequest = {
+      ...request,
+      eventHeadSha: 'newest-head',
+      fallback: {
+        ...request.fallback,
+        task: {
+          ...request.fallback.task,
+          payload: {
+            ...request.fallback.task.payload,
+            headSha: 'newest-head',
+          },
+        },
+        prLinkage: {
+          ...request.fallback.prLinkage,
+          prSha: 'newest-head',
+        },
+      },
+    };
+
+    await enqueueActivePrReviewFollowUp(request);
+    await enqueueActivePrReviewFollowUp(latestRequest);
+
+    expect(mockQueueAdd).toHaveBeenLastCalledWith(
+      'queue-active-pr-review-follow-up',
+      latestRequest,
+      {
+        delay: ACTIVE_PR_REVIEW_FOLLOW_UP_DEBOUNCE_MS,
+        deduplication: {
+          id: 'active-pr-review-follow-up:100',
+          ttl: ACTIVE_PR_REVIEW_FOLLOW_UP_DEDUPLICATION_TTL_MS,
+          extend: true,
+          replace: true,
+        },
+      },
+    );
+    expect(ACTIVE_PR_REVIEW_FOLLOW_UP_DEDUPLICATION_TTL_MS).toBeGreaterThan(
+      ACTIVE_PR_REVIEW_FOLLOW_UP_RETRY_WINDOW_MS,
     );
   });
 });
