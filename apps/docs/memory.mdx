@@ -89,8 +89,8 @@ embeddings and synthesis, and Roomote forwards them under the Memory key.
 Changing that key later takes effect on Memory's next request, with no
 redeploy.
 
-OpenRouter and OpenAI both support Memory's embedding and synthesis calls,
-but search reranking requires OpenRouter.
+OpenRouter and OpenAI both support Memory's embedding and synthesis calls.
+Search reranking requires OpenRouter or a configured self-run rerank upstream.
 
 Without a Memory key, Memory stays inert. Agents are not told it exists,
 and nothing is ingested.
@@ -172,6 +172,10 @@ a slug it controls, after scrubbing credential-shaped strings. An agent can
 therefore contribute what only it knows without being able to touch any other
 page.
 
+The save tool result shows the structured memory the agent submitted after
+credential-shaped values are redacted, so task reviewers can inspect what was
+recorded from the transcript.
+
 Fast sessions use the same pipeline. Ask Fast to remember something — or
 state a durable preference, decision, or correction — and it saves the fact to
 the session's own memory entry, which the platform redacts and files just
@@ -196,16 +200,17 @@ Three settings pick Memory's models:
 | ----------------------------- | ----------------- | --------------------------------- | --------------------- |
 | `R_BRAIN_MODEL`               | Sourced synthesis | your provider's naming            | any time              |
 | `R_BRAIN_EMBEDDING_MODEL`     | Semantic recall   | a plain model id                  | before the first boot |
-| `R_BRAIN_RERANKER_MODEL`      | Search precision  | `openrouter:<provider>/<model-id>` | after a restart       |
+| `R_BRAIN_RERANKER_MODEL`      | Search precision  | provider or upstream model id      | after a restart       |
 
 Leave the first two unset and Memory uses OpenAI's `gpt-5.6-luna` and
 `text-embedding-3-small` through whichever provider you configured.
 
 The reranker defaults to OpenRouter's `voyageai/rerank-2.5-lite`. Set
 `R_BRAIN_RERANKER_MODEL` to choose another model from
-OpenRouter's reranker catalog. Reranking requires an OpenRouter key; with only
-OpenAI configured, gbrain keeps the unreranked results instead of failing the
-search.
+OpenRouter's reranker catalog, using the
+`openrouter:<provider>/<model-id>` format. Reranking requires an OpenRouter key;
+with only OpenAI configured, gbrain keeps the unreranked results instead of
+failing the search.
 
 The synthesis model is applied by Roomote when it forwards the call and passed
 to the provider as written, so use that provider's naming
@@ -228,6 +233,26 @@ it takes effect on the next request with nothing to restart.
   the whole corpus with `gbrain migrate embeddings`.
 </Warning>
 
+### Self-run embeddings and reranking
+
+Production Compose deployments can keep Memory embeddings and reranking on
+their own hardware while synthesis continues through the configured Memory
+provider. Enable the `brain,local-inference` Compose profiles and configure:
+
+```sh
+R_BRAIN_EMBEDDINGS_UPSTREAM_URL=http://infinity:7997
+R_BRAIN_RERANK_UPSTREAM_URL=http://infinity:7997
+R_BRAIN_EMBEDDING_MODEL=BAAI/bge-m3
+R_BRAIN_EMBEDDING_DIMENSIONS=1024
+R_BRAIN_RERANKER_MODEL=BAAI/bge-reranker-v2-m3
+```
+
+The bundled service defaults to these multilingual models so recall can cross
+language boundaries. Set the embedding model and dimensions before Memory's
+first boot. Self-run model names pass through unchanged, so use the exact ids
+served by the upstream. Set `R_BRAIN_INFERENCE_UPSTREAM_API_KEY` as well when
+the upstream requires bearer authentication.
+
 ## If you turned Memory on later
 
 Memory that first boots without a provider key is created with semantic
@@ -243,13 +268,13 @@ matching on keywords alone.
 
 ## Operating it
 
-- **Back up the Memory volume.** The Railway template schedules daily and
-  weekly backups for it. On other platforms, include `/data/brain` in the
-  deployment's normal volume backups. That directory is the Markdown corpus,
-  including pages produced by nightly synthesis. Postgres holds the searchable
-  index, extracted facts, and durable maintenance jobs; keeping it in the
-  normal database backup makes restores faster, but it is not the only copy of
-  the source pages.
+- **Back up both Memory stores together.** `roomote backup` includes the
+  `gbrain_data` volume and the `gbrain` Postgres database. The volume holds the
+  Markdown corpus, while the database holds the searchable index, extracted
+  facts, and durable maintenance jobs. For platform-managed backups, preserve
+  both at the same consistency point; restoring only the volume can leave its
+  storage-layout marker paired with an empty index that is not rebuilt
+  automatically.
 - **Losing Memory is recoverable but not free.** If the volume or isolated
   `gbrain` database is recreated, Roomote re-registers its clients, resets its
   ingestion checkpoints, and backfills task history and integration sources.

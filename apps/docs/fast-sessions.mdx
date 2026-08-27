@@ -16,6 +16,10 @@ On the home page, open the workspace selector next to the prompt box and choose
 Roomote takes you straight to the session view, where the response streams in
 as it is produced.
 
+You can attach images to a Fast prompt, including sending an image without
+accompanying text. Other document attachments continue through normal Roomote
+tasks.
+
 Use Fast when you want an answer, a decision, or a delegation rather than a
 full sandbox run. Fast can still launch tasks on your behalf; delegated tasks
 appear in the transcript with links to their task pages.
@@ -47,3 +51,8 @@ messages also continue the same session after Roomote verifies the tenant,
 installation, conversation, and linked user. Telegram currently uses the
 session view for Fast follow-ups because its inbound webhook route does not yet
 carry Fast session identity.
+
+For longer delegated work, Fast posts concise findings, blockers, meaningful
+milestones, and requests for input, including a brief update after roughly ten
+minutes without a message. New instructions for an active task are forwarded
+before Fast posts its confirmation.

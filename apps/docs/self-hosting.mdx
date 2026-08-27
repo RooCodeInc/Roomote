@@ -96,7 +96,8 @@ roomote logs      # tail service logs
 `roomote backup` prompts for a passphrase and writes a versioned `.roomote`
 bundle under `/opt/roomote/backups`. The bundle contains PostgreSQL, the
 deployment configuration and encryption/signing keys, local MinIO artifacts,
-schema metadata, and the exact deployed image identities. Store the passphrase
+the Memory Markdown volume and index database when Memory is enabled, schema
+metadata, and the exact deployed image identities. Store the passphrase
 separately in your secret manager; the backup cannot be restored without it.
 
 Use `roomote backup --include-redis` when queued work, BullMQ schedules,
