@@ -61,6 +61,13 @@ const PROVIDER_GRID_ROW_CLASS =
 
 type InferenceProviderSectionProps = {
   providerSetup: SetupModelStatus | null;
+  /**
+   * Whether the Roomote trial is actually in use (chosen or seeded), as
+   * opposed to merely having its key imported. Mirrors the server-side
+   * delete guard: a merely-imported trial row must not count as a provider
+   * that keeps other providers deletable.
+   */
+  trialInferenceActive?: boolean;
   providerSetupPending: boolean;
   connectedProviders: SetupModelProviderStatus[];
   availableProviders: SetupModelProviderStatus[];
@@ -862,6 +869,7 @@ function DeleteProviderDialog({
 
 export function InferenceProviderSection({
   providerSetup,
+  trialInferenceActive = false,
   providerSetupPending,
   connectedProviders,
   availableProviders,
@@ -1267,8 +1275,16 @@ export function InferenceProviderSection({
   const canAddProvider = sortedAddableProviders.length > 0;
   // Count key rows and subscription rows independently so dual-path xAI
   // (API key + SuperGrok) can delete the key while the subscription remains.
-  const connectedProviderCount =
-    sortedApiKeyConnectedProviders.length +
+  // Mirrors the server-side delete guard: a row is deletable only while at
+  // least one other connected provider remains, and a merely-imported (never
+  // chosen) Roomote trial row does not count as one.
+  const countOtherConnectedProviders = (excludedProviderId: string) =>
+    sortedApiKeyConnectedProviders.filter(
+      (candidate) =>
+        candidate.id !== excludedProviderId &&
+        (candidate.id !== ROOMOTE_INFERENCE_PROVIDER_ID ||
+          trialInferenceActive),
+    ).length +
     (chatgptHasRecord ? 1 : 0) +
     (githubCopilotHasRecord ? 1 : 0) +
     (xaiHasRecord ? 1 : 0);
@@ -1400,7 +1416,7 @@ export function InferenceProviderSection({
                     : undefined
                 }
                 isSaving={savingProviderId === provider.id}
-                canDelete={connectedProviderCount > 1}
+                canDelete={countOtherConnectedProviders(provider.id) >= 1}
                 onEdit={() =>
                   setProviderDialog({ mode: 'edit', providerId: provider.id })
                 }

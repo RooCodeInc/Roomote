@@ -365,12 +365,16 @@ const serverSchema = {
   // Brain at a different embedding path.
   R_BRAIN_OPENAI_API_KEY: z.string().min(1).optional(),
   // Free-trial OpenRouter credential a hosting provisioner injects for new
-  // cloud deployments: a Roomote-minted key with a hard spend limit, used as
-  // the OpenRouter credential only while no operator key is configured
-  // (runtime or saved), so connecting a real key always wins. Runtime-env
-  // only: never persisted, never editable in Settings, and served through
-  // the inference gateway like any other provider key, so it never reaches
-  // a sandbox.
+  // cloud deployments: a Roomote-minted key with a hard spend limit. The env
+  // variable is only hosting's delivery mechanism — setup imports its value
+  // into encrypted Settings storage, and every runtime read (inference
+  // gateway, credit balance, provider status) resolves the stored key, never
+  // this variable. Activating the trial is an explicit operator choice in
+  // the setup wizard; deleting the Roomote provider in Settings removes the
+  // stored key and disables the trial even while hosting keeps injecting
+  // this variable. Rotating the injected value re-imports it only while the
+  // stored key still exists. Served through the inference gateway like any
+  // other provider key, so it never reaches a sandbox.
   R_TRIAL_OPENROUTER_API_KEY: z.string().min(1).optional(),
   // Optional self-run inference upstreams for the Brain gateway. When set,
   // the gateway routes that path's requests there instead of the configured

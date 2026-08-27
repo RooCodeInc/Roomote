@@ -291,32 +291,32 @@ async function savePersistedTaskModelSettings(
 // settings commands and imported from '../compute'.
 
 /**
- * Free-trial inference. A hosting provisioner can inject a capped,
- * Roomote-minted OpenRouter key as `R_TRIAL_OPENROUTER_API_KEY`. The setup
- * wizard's inference step then offers managed Roomote inference alongside
- * connecting a provider. It uses Roomote model ids so an operator's future
- * OpenRouter connection remains entirely separate.
- *
- * This is an explicit operator choice, never an automatic seed: the command
- * no-ops once any inference choice exists (a selected provider, saved model
- * config, or task model settings) and refuses when a real provider is
- * already connected, so it can never overwrite configuration.
- */
-/**
  * Imports the hosting-injected Roomote inference key from the process
- * environment into encrypted Settings storage, once. The env variable is
- * only the delivery mechanism: after this import, every runtime read (the
- * inference gateway, credit balance, provider status) resolves the stored
- * key, so deleting the Roomote inference provider disables the trial even
- * though hosting keeps injecting the variable — the stamped
- * `trialInferenceKeyImportedAt` marker guarantees it is never re-imported.
+ * environment into encrypted Settings storage. The env variable is only the
+ * delivery mechanism: every runtime read (the inference gateway, credit
+ * balance, provider status) resolves the stored key, so deleting the Roomote
+ * inference provider disables the trial even though hosting keeps injecting
+ * the variable — once the `trialInferenceKeyImportedAt` marker is stamped, a
+ * missing stored key is an operator's explicit disable and is never
+ * re-created. A *rotated* injected value on a deployment whose stored key
+ * still exists is re-imported, so hosting can replace a revoked trial key.
  */
 export async function importTrialInferenceKeyIfNeeded(
   userId: string | null,
 ): Promise<void> {
+  const injectedValue =
+    process.env[ROOMOTE_INFERENCE_API_KEY_ENV_VAR_NAME]?.trim();
+
   if (
     !isConfiguredEnvValue(process.env[ROOMOTE_INFERENCE_API_KEY_ENV_VAR_NAME])
   ) {
+    return;
+  }
+
+  // Lock-free pre-check: this runs on every setup-status read, so the common
+  // "already imported" case must not open a write transaction or take the
+  // deploymentSettings row lock.
+  if (await trialInferenceImportUpToDate(db, injectedValue!)) {
     return;
   }
 
@@ -324,40 +324,79 @@ export async function importTrialInferenceKeyIfNeeded(
     await tx
       .insert(deploymentSettings)
       .values({ id: 'default' })
-      .onConflictDoUpdate({
-        target: deploymentSettings.id,
-        set: { updatedAt: new Date() },
-      });
+      .onConflictDoNothing();
     await tx
       .select({ id: deploymentSettings.id })
       .from(deploymentSettings)
       .where(eq(deploymentSettings.id, 'default'))
       .for('update');
 
-    const currentState = await getPersistedSetupNewState(tx);
-    if (currentState.trialInferenceKeyImportedAt !== null) {
+    // Re-check under the lock: a concurrent status read may have imported.
+    if (await trialInferenceImportUpToDate(tx, injectedValue!)) {
       return;
     }
+
+    const currentState = await getPersistedSetupNewState(tx);
 
     await upsertDeploymentEnvironmentVariables(tx, {
       userId,
       values: [
         {
           name: ROOMOTE_INFERENCE_API_KEY_ENV_VAR_NAME,
-          value: process.env[ROOMOTE_INFERENCE_API_KEY_ENV_VAR_NAME]!.trim(),
+          value: injectedValue!,
         },
       ],
     });
-    await savePersistedSetupNewState(
-      normalizeSetupNewState({
-        ...currentState,
-        trialInferenceKeyImportedAt: new Date().toISOString(),
-      }),
-      tx,
-    );
+
+    if (currentState.trialInferenceKeyImportedAt === null) {
+      await savePersistedSetupNewState(
+        normalizeSetupNewState({
+          ...currentState,
+          trialInferenceKeyImportedAt: new Date().toISOString(),
+        }),
+        tx,
+      );
+    }
   });
 }
 
+/**
+ * Whether the injected trial key needs no import work: it was already
+ * imported and either the operator has since deleted the stored key
+ * (disabling the trial — never re-create it) or the stored value already
+ * matches the injected one.
+ */
+async function trialInferenceImportUpToDate(
+  executor: DatabaseOrTransaction,
+  injectedValue: string,
+): Promise<boolean> {
+  const currentState = await getPersistedSetupNewState(executor);
+
+  if (currentState.trialInferenceKeyImportedAt === null) {
+    return false;
+  }
+
+  const storedValue = await resolveDeploymentEnvVar(
+    ROOMOTE_INFERENCE_API_KEY_ENV_VAR_NAME,
+    executor,
+    {},
+  );
+
+  return !storedValue || storedValue === injectedValue;
+}
+
+/**
+ * Free-trial inference. A hosting provisioner can inject a capped,
+ * Roomote-minted OpenRouter key as `R_TRIAL_OPENROUTER_API_KEY`. The setup
+ * wizard's inference step then offers managed Roomote inference alongside
+ * connecting a provider. It uses Roomote model ids so an operator's future
+ * OpenRouter connection remains entirely separate.
+ *
+ * This is an explicit operator choice, never an automatic seed: the command
+ * no-ops once any inference choice exists (a selected provider or saved
+ * model config) and refuses when a real provider is already connected, so it
+ * can never overwrite configuration.
+ */
 export async function chooseSetupTrialInferenceCommand(auth: UserAuthSuccess) {
   assertAdmin(auth);
 
@@ -381,7 +420,6 @@ export async function chooseSetupTrialInferenceCommand(auth: UserAuthSuccess) {
     const [
       currentState,
       persistedModelConfig,
-      persistedTaskModelSettings,
       persistedEnvVarNames,
       chatgptConnected,
       githubCopilotConnected,
@@ -389,7 +427,6 @@ export async function chooseSetupTrialInferenceCommand(auth: UserAuthSuccess) {
     ] = await Promise.all([
       getPersistedSetupNewState(tx),
       getPersistedRuntimeModelConfig(tx),
-      getPersistedRawTaskModelSettings(tx),
       getPersistedEnvironmentVariableNames(tx),
       isChatGptSubscriptionConnected(),
       isGitHubCopilotSubscriptionConnected(),
@@ -397,10 +434,16 @@ export async function chooseSetupTrialInferenceCommand(auth: UserAuthSuccess) {
     ]);
 
     // Any prior inference choice wins: a repeat click (or a stale wizard tab)
-    // must not reset models an operator has since adjusted.
+    // must not reset models an operator has since adjusted. A bare
+    // task-model-settings row is deliberately NOT counted as a choice:
+    // deleting the last provider leaves one behind (normalization re-inflates
+    // it to the default catalog), and treating that leftover as a choice
+    // would make this command silently no-op — the wizard would advance with
+    // no usable models seeded at all. Settings an operator actually uses are
+    // always accompanied by a selected provider, a connected provider (which
+    // the check below refuses on), or a saved role model.
     const hasModelChoices =
       currentState.modelProvider !== null ||
-      persistedTaskModelSettings !== null ||
       Object.values(persistedModelConfig).some((value) => value !== null);
 
     if (hasModelChoices) {

@@ -15,6 +15,7 @@ import {
   mergeOpenCodeChatGptFastModeOptions,
   mergeOpenRouterVariantAliasModels,
   normalizeOptionalReasoningEffort,
+  SETTINGS_ONLY_MODEL_PROVIDER_ENV_VAR_NAMES,
   stripOpenCodeModelReasoningOptions,
   toBedrockMantleRuntimeModelId,
   type OpenRouterVariantModelAlias,
@@ -460,6 +461,20 @@ export function buildOpenCodeCliEnv(
 
   for (const [envVarName, value] of Object.entries(extraEnv ?? {})) {
     if (value === undefined) {
+      delete env[envVarName];
+    }
+  }
+
+  // Settings-only credentials (the Roomote trial key) must never be inherited
+  // from the process environment: the injected variable is only hosting's
+  // delivery mechanism, and honoring it here would keep the trial working in
+  // helper model processes after an operator deleted the stored key to
+  // disable it. The legitimate value, when the trial is active, arrives via
+  // `extraEnv` from the persisted-store resolver. Stripped before the
+  // model-backed config builder below so the value cannot reach provider
+  // config content either.
+  for (const envVarName of SETTINGS_ONLY_MODEL_PROVIDER_ENV_VAR_NAMES) {
+    if (extraEnv?.[envVarName] === undefined) {
       delete env[envVarName];
     }
   }

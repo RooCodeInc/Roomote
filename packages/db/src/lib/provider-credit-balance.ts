@@ -184,10 +184,17 @@ async function fetchOpenRouterKeyPayload(
   return { apiKey, payload };
 }
 
-export async function fetchOpenRouterCreditBalance(
-  options: BalanceFetchOptions = {},
+/**
+ * Both balances come from OpenRouter's key endpoint — the Roomote trial is a
+ * Roomote-minted OpenRouter key — so they share one fetcher and differ only
+ * in which env var holds the credential and which provider row they report.
+ */
+async function fetchOpenRouterBackedCreditBalance(
+  providerId: ProviderCreditBalance['providerId'],
+  envVarName: string,
+  options: BalanceFetchOptions,
 ): Promise<ProviderCreditBalance | null> {
-  const response = await fetchOpenRouterKeyPayload(options);
+  const response = await fetchOpenRouterKeyPayload(options, envVarName);
   if (!response) {
     return null;
   }
@@ -198,33 +205,30 @@ export async function fetchOpenRouterCreditBalance(
   }
 
   return {
-    providerId: 'openrouter',
+    providerId,
     ...parsed,
     fetchedAt: new Date().toISOString(),
   };
 }
 
+export async function fetchOpenRouterCreditBalance(
+  options: BalanceFetchOptions = {},
+): Promise<ProviderCreditBalance | null> {
+  return fetchOpenRouterBackedCreditBalance(
+    'openrouter',
+    'OPENROUTER_API_KEY',
+    options,
+  );
+}
+
 export async function fetchRoomoteCreditBalance(
   options: BalanceFetchOptions = {},
 ): Promise<ProviderCreditBalance | null> {
-  const response = await fetchOpenRouterKeyPayload(
-    options,
+  return fetchOpenRouterBackedCreditBalance(
+    'roomote',
     ROOMOTE_INFERENCE_API_KEY_ENV_VAR_NAME,
+    options,
   );
-  if (!response) {
-    return null;
-  }
-
-  const parsed = parseOpenRouterKeyBalance(response.payload);
-  if (!parsed) {
-    return null;
-  }
-
-  return {
-    providerId: 'roomote',
-    ...parsed,
-    fetchedAt: new Date().toISOString(),
-  };
 }
 
 /**

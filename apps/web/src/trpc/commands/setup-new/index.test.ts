@@ -1372,6 +1372,11 @@ describe('chooseSetupTrialInferenceCommand', () => {
       })),
     };
 
+    // The import's lock-free pre-check reads setup state through the plain
+    // `db` handle (whose `select` is mockTxSelect) before any transaction
+    // opens, so serve it the same row the transaction stub returns.
+    mockTxSelect.mockImplementation(() => tx.select());
+
     return { tx, inserted };
   }
 
@@ -1506,12 +1511,16 @@ describe('chooseSetupTrialInferenceCommand', () => {
   });
 
   it('no-ops when model choices already exist', async () => {
+    // A repeat click: the trial was already chosen (`modelProvider` recorded)
+    // and its models seeded. A bare task-model-settings row alone is NOT a
+    // choice — deleting the last provider leaves one behind, and treating it
+    // as a choice would silently skip seeding.
     vi.stubEnv('R_TRIAL_OPENROUTER_API_KEY', 'sk-trial');
     mockGetPersistedEnvironmentVariableNames.mockResolvedValue([
       'R_TRIAL_OPENROUTER_API_KEY',
     ]);
     const { tx, inserted } = createTxStub({
-      setupNewState: {},
+      setupNewState: { modelProvider: 'roomote' },
       runtimeModelConfig: null,
       taskModelSettings: {
         allowedModelIds: ['roomote/openai/gpt-5.6-terra'],
@@ -1525,6 +1534,58 @@ describe('chooseSetupTrialInferenceCommand', () => {
     await chooseSetupTrialInferenceCommand(buildMockAuth());
 
     expect(inserted).toEqual([]);
+  });
+
+  it('seeds over a leftover task-model-settings row after the last provider was deleted', async () => {
+    // Deleting the last provider nulls `modelProvider` and role config but
+    // leaves a task-model-settings row behind; the trial choice must still
+    // seed rather than silently no-op with a success payload.
+    vi.stubEnv('R_TRIAL_OPENROUTER_API_KEY', 'sk-trial');
+    mockGetPersistedEnvironmentVariableNames.mockResolvedValue([
+      'R_TRIAL_OPENROUTER_API_KEY',
+    ]);
+    const { tx, inserted } = createTxStub({
+      setupNewState: { trialInferenceKeyImportedAt: '2026-08-27T00:00:00Z' },
+      runtimeModelConfig: null,
+      taskModelSettings: {
+        models: [],
+        allowedModelIds: [],
+        defaultModelId: '',
+      },
+    });
+    mockResolveDeploymentEnvVar.mockResolvedValue('sk-trial');
+    mockDbTransaction.mockImplementation(
+      async (callback: (tx: unknown) => Promise<unknown>) => callback(tx),
+    );
+
+    const result = await chooseSetupTrialInferenceCommand(buildMockAuth());
+
+    expect(result.setupNewState.modelProvider).toBe('roomote');
+    expect(
+      inserted.find((values) => 'taskModelSettings' in values),
+    ).toBeDefined();
+  });
+
+  it('re-imports a rotated injected key while the stored key still exists', async () => {
+    vi.stubEnv('R_TRIAL_OPENROUTER_API_KEY', 'sk-rotated');
+    const { tx } = createTxStub({
+      setupNewState: { trialInferenceKeyImportedAt: '2026-08-27T00:00:00Z' },
+      runtimeModelConfig: null,
+      taskModelSettings: null,
+    });
+    mockResolveDeploymentEnvVar.mockResolvedValue('sk-old');
+    mockDbTransaction.mockImplementation(
+      async (callback: (tx: unknown) => Promise<unknown>) => callback(tx),
+    );
+
+    await importTrialInferenceKeyIfNeeded('setup-test-user');
+
+    expect(mockUpsertDeploymentEnvironmentVariables).toHaveBeenCalledWith(
+      tx,
+      expect.objectContaining({
+        values: [{ name: 'R_TRIAL_OPENROUTER_API_KEY', value: 'sk-rotated' }],
+      }),
+    );
   });
 
   it('seeds despite a role-model env override, which keeps winning at runtime', async () => {

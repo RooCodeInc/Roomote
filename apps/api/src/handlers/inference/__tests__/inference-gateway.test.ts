@@ -38,6 +38,7 @@ vi.mock('@roomote/sdk/server', () => ({
 }));
 
 import { inference } from '../index';
+import { resetRoomoteInferenceKeyCache } from '../registry';
 
 function createApp(authContext: Variables['authContext']) {
   const app = new Hono<{ Variables: Variables }>();
@@ -116,6 +117,9 @@ describe('inference gateway', () => {
     vi.clearAllMocks();
     vi.unstubAllGlobals();
     vi.unstubAllEnvs();
+    // The Roomote trial key resolution is cached with a TTL; drop it so each
+    // test observes its own mockResolveModelProviderEnvValue behavior.
+    resetRoomoteInferenceKeyCache();
     mockFindTaskRun.mockResolvedValue({ id: 42 });
     mockGetGitHubCopilotAccessToken.mockResolvedValue(null);
     mockGetFreshXaiAccessToken.mockResolvedValue(null);

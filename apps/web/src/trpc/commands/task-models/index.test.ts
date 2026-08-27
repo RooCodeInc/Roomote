@@ -75,13 +75,18 @@ vi.mock('@roomote/db/server', () => ({
   isXaiSubscriptionConnected: mockIsXaiSubscriptionConnected,
   isNull: vi.fn((column) => ({ isNull: column })),
   // Mirrors the real runtime-first-then-persisted precedence through the
-  // persisted-values mock this file already controls.
+  // persisted-values mock this file already controls, including the
+  // settings-only exception: the Roomote trial key never resolves from the
+  // runtime env (see SETTINGS_ONLY_MODEL_PROVIDER_ENV_VAR_NAMES).
   resolveModelProviderEnvValue: vi.fn(
     async (envVarNames: string | readonly string[]) => {
       const names =
         typeof envVarNames === 'string' ? [envVarNames] : envVarNames;
 
       for (const name of names) {
+        if (name === 'R_TRIAL_OPENROUTER_API_KEY') {
+          continue;
+        }
         const value = process.env[name]?.trim();
         if (value) {
           return value;
@@ -478,7 +483,11 @@ describe('lookupTaskModelCommand', () => {
   });
 
   it('uses the managed Roomote key to look up Roomote model metadata through OpenRouter', async () => {
-    process.env.R_TRIAL_OPENROUTER_API_KEY = 'managed-roomote-key';
+    // The trial key is settings-only: production resolves it from the
+    // persisted store, never the runtime env, so the test stores it there.
+    mockGetPersistedEnvironmentVariableValues.mockResolvedValue({
+      R_TRIAL_OPENROUTER_API_KEY: 'managed-roomote-key',
+    });
     fetchMock.mockResolvedValue(
       new Response(
         JSON.stringify({

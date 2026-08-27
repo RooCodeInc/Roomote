@@ -54,6 +54,24 @@ export const ROOMOTE_INFERENCE_API_KEY_ENV_VAR_NAME =
 export const ROOMOTE_TRIAL_MODEL_PRESET_ID = 'trial' as const;
 
 /**
+ * Provider env vars that are hosting delivery mechanisms, not credentials:
+ * setup imports the injected value into encrypted Settings storage, and only
+ * the stored value ever satisfies or authenticates the provider. Every
+ * runtime read must go through this predicate — reading the process value
+ * directly would resurrect a provider whose stored key the operator deleted
+ * to disable it.
+ */
+export const SETTINGS_ONLY_MODEL_PROVIDER_ENV_VAR_NAMES = [
+  ROOMOTE_INFERENCE_API_KEY_ENV_VAR_NAME,
+] as const;
+
+export function isSettingsOnlyProviderEnvVar(name: string): boolean {
+  return SETTINGS_ONLY_MODEL_PROVIDER_ENV_VAR_NAMES.includes(
+    name as (typeof SETTINGS_ONLY_MODEL_PROVIDER_ENV_VAR_NAMES)[number],
+  );
+}
+
+/**
  * Model-id prefix used when composing or looking up task models for a setup
  * catalog provider. Subscription connect surfaces are not prefixes: ChatGPT
  * serves `openai/`, SuperGrok serves `xai/`.
@@ -429,8 +447,26 @@ const OPENROUTER_EFFICIENT_MODEL_PRESET = {
   },
 } as const satisfies RecommendedModelPreset;
 
+/**
+ * Roomote inference is an aliased namespace over OpenRouter: `roomote/<slug>`
+ * serves OpenRouter's `<slug>` through the trial key while staying separate
+ * from an operator's own OpenRouter connection. These two helpers are the
+ * only home of that translation — the gateway's request rewrite, model
+ * lookup, and catalog seeding all import them instead of re-deriving the
+ * prefix.
+ */
 function rebaseOpenRouterModelIdForRoomote(modelId: string): string {
   return modelId.replace(/^openrouter\//u, `${ROOMOTE_INFERENCE_PROVIDER_ID}/`);
+}
+
+/**
+ * The upstream (OpenRouter-side) slug for a `roomote/`-prefixed model id, or
+ * null when the id is not in the Roomote namespace.
+ */
+export function rebaseRoomoteModelIdToUpstream(modelId: string): string | null {
+  const prefix = `${ROOMOTE_INFERENCE_PROVIDER_ID}/`;
+
+  return modelId.startsWith(prefix) ? modelId.slice(prefix.length) : null;
 }
 
 function rebaseOpenRouterPresetForRoomote(
@@ -2053,15 +2089,12 @@ export function buildSetupModelStatus(input: {
     const requiredEnvVarNames =
       getSetupModelProviderRequiredEnvVarNames(provider);
     const hasRequiredEnvVars = requiredEnvVarNames.length > 0;
-    // The hosting-injected Roomote inference variable is a delivery
-    // mechanism, not a credential: setup imports it into encrypted Settings
-    // storage once, and only the stored key connects the provider. Counting
-    // the env value here would resurrect a provider whose stored key the
-    // operator deleted to disable the trial.
-    const isRuntimeConfigured =
-      provider.id === ROOMOTE_INFERENCE_PROVIDER_ID
-        ? () => false
-        : (name: string) => isConfiguredEnvValue(runtimeEnv[name]);
+    // Settings-only vars (the Roomote trial key) are delivery mechanisms,
+    // not credentials: only the stored key connects the provider. See
+    // `SETTINGS_ONLY_MODEL_PROVIDER_ENV_VAR_NAMES`.
+    const isRuntimeConfigured = (name: string) =>
+      !isSettingsOnlyProviderEnvVar(name) &&
+      isConfiguredEnvValue(runtimeEnv[name]);
     const isPersisted = (name: string) => persistedEnvVarNameSet.has(name);
     const additionalEnvValues = Object.fromEntries(
       [

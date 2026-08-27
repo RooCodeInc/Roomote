@@ -11,7 +11,6 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import {
   CHATGPT_SUBSCRIPTION_PROVIDER_ID,
-  ROOMOTE_INFERENCE_PROVIDER_ID,
   XAI_SUBSCRIPTION_PROVIDER_ID,
   OPENAI_COMPATIBLE_PROVIDER_ID,
   getDefaultAdditionalEnvValues,
@@ -220,15 +219,12 @@ export function StepInferenceProvider({
   const primaryCredentialLabel =
     selectedProviderStatus?.envVarLabel ?? 'API key';
   const additionalEnvFields = selectedProviderStatus?.additionalEnvFields ?? [];
-  // The server status list already excludes hidden providers that are not
-  // connected, so the picker only offers providers that can be selected.
+  // Hidden (hosting-managed) providers are never user-selectable, even when
+  // connected — the catalog `hidden` flag is the single source of that rule.
   const sortedModelProviders = useMemo(
     () =>
       modelSetup.providers
-        .filter(
-          (provider) =>
-            !provider.hidden && provider.id !== ROOMOTE_INFERENCE_PROVIDER_ID,
-        )
+        .filter((provider) => !provider.hidden)
         .sort((left, right) => left.label.localeCompare(right.label)),
     [modelSetup.providers],
   );

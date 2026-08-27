@@ -57,7 +57,6 @@ import { formatMetadataSummary } from './model-metadata';
 import {
   CHATGPT_SUBSCRIPTION_PROVIDER_ID,
   DEFAULT_MODEL_ROLE_REASONING_EFFORTS,
-  ROOMOTE_INFERENCE_PROVIDER_ID,
   TASK_MODEL_ROLE_DESCRIPTORS,
   TASK_MODEL_ROLES,
   XAI_SUBSCRIPTION_PROVIDER_ID,
@@ -752,10 +751,12 @@ export function ModelSettingsSection({
     EMPTY_SUGGESTION_STATE,
   );
   const settingsData = settingsQuery.data;
+  // Hidden (hosting-managed) providers like the Roomote trial expose no
+  // add-model surface; their models are managed by the trial seeding.
   const sortedConnectedProviders = useMemo(
     () =>
       connectedProviders
-        .filter((provider) => provider.id !== ROOMOTE_INFERENCE_PROVIDER_ID)
+        .filter((provider) => !provider.hidden)
         .sort((left, right) => left.label.localeCompare(right.label)),
     [connectedProviders],
   );

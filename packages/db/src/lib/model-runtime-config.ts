@@ -14,6 +14,7 @@ import {
   INFERENCE_GATEWAY_XAI_ENV_VAR_NAME,
   isConfiguredEnvValue,
   isInferenceGatewayCoveredEnvVar,
+  isSettingsOnlyProviderEnvVar,
   normalizeDeploymentModelConfig,
   normalizeOptionalReasoningEffort,
   parseModelProviderEnvKeys,
@@ -165,9 +166,10 @@ function resolveProviderKeyNames({
 /**
  * Resolve a single model-provider env value with the same precedence the task
  * runtime uses: the runtime process env first, then the persisted (encrypted)
- * deployment environment variables. The Roomote inference key is the one
- * exception: its env variable is only the hosting platform's delivery
- * mechanism (setup imports it into Settings storage once), so it resolves
+ * deployment environment variables. Settings-only vars (see
+ * `SETTINGS_ONLY_MODEL_PROVIDER_ENV_VAR_NAMES`) are the exception: their env
+ * variables are only the hosting platform's delivery mechanism (setup
+ * imports them into Settings storage), so they resolve
  * from the persisted store alone — deleting the stored key disables the
  * provider even while hosting keeps injecting the variable.
  */
@@ -182,7 +184,7 @@ export async function resolveModelProviderEnvValue(
   const names = typeof envVarNames === 'string' ? [envVarNames] : envVarNames;
 
   for (const envVarName of names) {
-    if (envVarName === ROOMOTE_INFERENCE_API_KEY_ENV_VAR_NAME) continue;
+    if (isSettingsOnlyProviderEnvVar(envVarName)) continue;
     const runtimeValue = normalizeConfiguredValue(runtimeEnv[envVarName]);
 
     if (runtimeValue) {
@@ -463,7 +465,7 @@ async function resolveModelRuntimeEnv(
       }
 
       const value =
-        (envVarName === ROOMOTE_INFERENCE_API_KEY_ENV_VAR_NAME
+        (isSettingsOnlyProviderEnvVar(envVarName)
           ? undefined
           : normalizeConfiguredValue(runtimeEnv[envVarName])) ??
         normalizeConfiguredValue(persistedEnvVars[envVarName]);
