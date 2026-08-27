@@ -2,6 +2,40 @@
 
 This file tracks product releases for Roomote (single monorepo version). Automated release entries are prepended by `pnpm run version`.
 
+## 0.45.0 (2026-08-27)
+
+This release adds secure hosted trial inference and self-run Brain model options, expands GLM 5.3 support, and improves reliability across Fast sessions, pull-request reviews, Memory, and chat.
+
+### Highlights
+
+- Start hosted deployments with secure, spend-capped Roomote trial inference and accurate cost reporting.
+- Run Brain embeddings and reranking on self-hosted infrastructure with multilingual bundled defaults.
+- Use GLM 5.3 and GLM 5.3 Flash across more existing inference providers.
+- Keep Fast sessions, pull-request re-reviews, Memory ingestion, and chat reporting reliable through retries and resumptions.
+
+### Minor changes
+
+- Expand GLM 5.3 and GLM 5.3 Flash availability and recommendations across OpenRouter, Vercel AI Gateway, Requesty, OpenCode Go, Z.AI, and Z.AI Coding Plan.
+- Offer secure, spend-capped Roomote trial inference during hosted setup, record its real model costs in task and cost analytics, and present the option with clearer onboarding copy.
+- Let self-hosted deployments run Brain embeddings and reranking through their own OpenAI-compatible upstream, including an opt-in bundled CPU service with multilingual model defaults.
+
+### Patch changes
+
+- Include the Brain's memory volume and database state in supported self-hosted backup and restore bundles so memories survive host recovery consistently.
+- Treat temporary Brain network outages as queue backpressure so infrastructure restarts do not exhaust individual memory write retries or require manual repair.
+- Render Fast replies as rich Markdown in Discord guild channels instead of falling back to plain unformatted messages.
+- Make suggested tasks in Fast automation reports launch reliably across Slack, Discord, Microsoft Teams, and Telegram while keeping each suggestion card's state in sync.
+- Preserve the full Fast conversation context across resumed turns so follow-up answers continue from the existing thread instead of losing earlier messages.
+- Keep Fast session sidebars and information panels usable on mobile by switching them to the same single-panel layout as task workspaces.
+- Discover Notion pages and database rows that inherit integration access through shared parents, even when Notion search does not return them.
+- Keep automatic pull-request re-reviews running after their previous sandbox shuts down and anchor each sync review on the head commit that was actually reviewed.
+- Keep Standard tasks and Fast web sessions running through retryable inference-provider failures instead of ending the work prematurely.
+- Briefly name the recalled insight that materially influenced an agent's approach without exposing internal memory provenance or identifiers.
+- Keep Fast and standard agents identified as Roomote by removing OpenCode's conflicting injected identity prefix from their system prompts.
+- Render automation report Markdown correctly in Slack while preserving the report's replyable thread footer.
+- Use task-specific wording in Slack inline status updates so progress messages describe the work instead of exposing generic agent terminology.
+- Make transcript tool activity easier to inspect by showing sanitized inputs and readable YAML details without hiding the corresponding tool results.
+
 ## 0.44.0 (2026-08-26)
 
 This release adds shared memory, skill discovery, and presentational widgets to Fast sessions, expands automation delivery across chat providers, and improves session and pull request review reliability.
