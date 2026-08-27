@@ -615,11 +615,11 @@ describe('Notion traversal discovery', () => {
       limit: 100,
     });
 
-    // 12-request budget: 1 list + 5 ingests (2 requests each) = 11; the
-    // sixth candidate must not start. No page overshoot, and the node
+    // 24-request budget: 1 list + 11 ingests (2 requests each) = 23; the
+    // twelfth candidate must not start. No page overshoot, and the node
     // re-queues with the same cursor so the retry resumes exactly here.
-    expect(mockNotionApiRequestJson.mock.calls.length).toBeLessThanOrEqual(12);
-    expect(result.pages.length).toBeLessThanOrEqual(6);
+    expect(mockNotionApiRequestJson.mock.calls.length).toBeLessThanOrEqual(24);
+    expect(result.pages.length).toBeLessThanOrEqual(12);
     const cursor = JSON.parse(result.stateUpdates![0]!.cursor as string) as {
       mode: string;
       traverse?: { pending: { kind: string; id: string }[] };
@@ -676,6 +676,52 @@ describe('Notion traversal discovery', () => {
     expect(result.pages).toHaveLength(2);
     expect(JSON.parse(result.stateUpdates![0]!.cursor as string)).toMatchObject(
       { mode: 'traverse' },
+    );
+  });
+
+  it('skims fresh edits each traversal tick instead of pausing freshness', async () => {
+    const editedPage = 'cccc9999-0000-0000-0000-000000000001';
+    const watermark = new Date('2026-08-27T00:00:00Z');
+    mockedListCollectorItemsAfter.mockResolvedValue([]);
+    mockNotionApiRequestJson.mockImplementation(async ({ path }) => {
+      if (path === 'search') {
+        return {
+          results: [
+            {
+              ...pageObject(editedPage, 'Edited during traversal'),
+              last_edited_time: '2026-08-27T00:10:00.000Z',
+            },
+            {
+              // Older than the watermark: proves the skim caught up.
+              ...pageObject('cccc9999-0000-0000-0000-000000000002', 'Old page'),
+              last_edited_time: '2026-08-26T00:00:00.000Z',
+            },
+          ],
+          has_more: false,
+        };
+      }
+      if (path === `pages/${encodeURIComponent(editedPage)}/markdown`) {
+        return { markdown: 'Updated body' };
+      }
+      throw new Error(`unexpected path ${path}`);
+    });
+
+    const result = await collectNotionTraversal({
+      config,
+      saved: savedTraverse,
+      limit: 10,
+      watermark,
+    });
+
+    // The edited page re-ingests during the walk, and the watermark advances
+    // because the skim provably reached pre-watermark territory.
+    expect(result.pages.map((page) => page.title)).toEqual([
+      'Edited during traversal',
+    ]);
+    expect(result.stateUpdates![0]!.watermark).toBeInstanceOf(Date);
+    // Traversal completed (empty inventory) despite the skim running first.
+    expect(JSON.parse(result.stateUpdates![0]!.cursor as string)).toMatchObject(
+      { mode: 'idle' },
     );
   });
 

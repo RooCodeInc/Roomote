@@ -83,7 +83,7 @@ const NOTION_MAX_SEARCH_REQUESTS_PER_PASS = 10;
  * tree and data sources of every inventoried page, discovering
  * inheritance-shared pages the search index missed.
  */
-const NOTION_MAX_TRAVERSAL_REQUESTS_PER_PASS = 12;
+const NOTION_MAX_TRAVERSAL_REQUESTS_PER_PASS = 24;
 const NOTION_TRAVERSAL_SEED_BATCH = 25;
 const NOTION_TRAVERSAL_BLOCK_PAGE_SIZE = 100;
 const NOTION_TRAVERSAL_QUERY_PAGE_SIZE = 50;
@@ -928,6 +928,7 @@ export async function collectNotionTraversal(input: {
   config: McpConnectionNotionConfig;
   saved: NotionScanCursor;
   limit: number;
+  watermark?: Date | null;
 }): Promise<CollectorResult> {
   const scanStartedAt = parseDate(input.saved.scanStartedAt) ?? new Date();
   const state: NotionTraverseState = input.saved.traverse ?? {
@@ -1008,6 +1009,51 @@ export async function collectNotionTraversal(input: {
       pushPending({ kind: 'blocks', id: pageId, depth: 0 });
     }
   };
+
+  // Freshness skim: a traversal cycle spans hours of ticks, and routing
+  // every tick here would pause incremental scanning for the whole walk —
+  // turning minutes of edit-to-Brain latency into hours, daily. One
+  // newest-first search page per tick keeps recent edits flowing; anything
+  // deeper than a page waits for the post-traversal incremental pass, whose
+  // watermark only advances here when the skim provably caught up.
+  let watermarkUpdate: Date | undefined;
+  if (input.watermark && requests < NOTION_MAX_TRAVERSAL_REQUESTS_PER_PASS) {
+    const skimStartedAt = new Date();
+    requests++;
+    const skim = await searchNotionPages({
+      config: input.config,
+      cursor: null,
+      pageSize: NOTION_SEARCH_PAGE_SIZE,
+    });
+    const edited = skim.pages.filter((page) => {
+      const updatedAt = parseDate(page.last_edited_time);
+      return (
+        updatedAt && updatedAt > input.watermark! && updatedAt <= skimStartedAt
+      );
+    });
+    const caughtUp = skim.pages.some((page) => {
+      const updatedAt = parseDate(page.last_edited_time);
+      return updatedAt ? updatedAt <= input.watermark! : false;
+    });
+    for (const page of edited) {
+      if (
+        requests + 1 > NOTION_MAX_TRAVERSAL_REQUESTS_PER_PASS ||
+        pages.length >= input.limit
+      ) {
+        break;
+      }
+      const mapped = await fetchNotionPage(input.config, page);
+      requests++;
+      if (mapped) {
+        pages.push(mapped);
+        itemUpdates.push(notionItemUpdate(page, mapped.slug, skimStartedAt));
+        seenThisPass.add(page.id);
+      }
+    }
+    if (caughtUp && edited.length > 0) {
+      watermarkUpdate = skimStartedAt;
+    }
+  }
 
   while (
     requests < NOTION_MAX_TRAVERSAL_REQUESTS_PER_PASS &&
@@ -1181,6 +1227,7 @@ export async function collectNotionTraversal(input: {
     stateUpdates: [
       {
         collectorId: NOTION_INCREMENTAL_STATE_ID,
+        ...(watermarkUpdate ? { watermark: watermarkUpdate } : {}),
         cursor: serializeNotionScanCursor(
           complete
             ? { mode: 'idle', lastSweepAt: input.saved.lastSweepAt }
@@ -1363,6 +1410,7 @@ async function collectNotionPages(input: {
       config: input.config,
       saved,
       limit: input.limit,
+      watermark: state?.watermark ?? null,
     });
   }
   const savedSweepAt = saved.lastSweepAt ? parseDate(saved.lastSweepAt) : null;
