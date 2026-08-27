@@ -1035,11 +1035,15 @@ export async function collectNotionTraversal(input: {
       const updatedAt = parseDate(page.last_edited_time);
       return updatedAt ? updatedAt <= input.watermark! : false;
     });
+    let skimIngestedAll = true;
     for (const page of edited) {
       if (
         requests + 1 > NOTION_MAX_TRAVERSAL_REQUESTS_PER_PASS ||
         pages.length >= input.limit
       ) {
+        // Edits past this point were seen but not emitted; the watermark
+        // must not move past them or they would never ingest at all.
+        skimIngestedAll = false;
         break;
       }
       const mapped = await fetchNotionPage(input.config, page);
@@ -1050,7 +1054,7 @@ export async function collectNotionTraversal(input: {
         seenThisPass.add(page.id);
       }
     }
-    if (caughtUp && edited.length > 0) {
+    if (caughtUp && skimIngestedAll && edited.length > 0) {
       watermarkUpdate = skimStartedAt;
     }
   }

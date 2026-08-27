@@ -725,6 +725,44 @@ describe('Notion traversal discovery', () => {
     );
   });
 
+  it('holds the watermark when the skim cannot emit every edit', async () => {
+    const watermark = new Date('2026-08-27T00:00:00Z');
+    const edits = [
+      'dddd0000-0000-0000-0000-000000000001',
+      'dddd0000-0000-0000-0000-000000000002',
+      'dddd0000-0000-0000-0000-000000000003',
+    ];
+    mockedListCollectorItemsAfter.mockResolvedValue([]);
+    mockNotionApiRequestJson.mockImplementation(async ({ path }) => {
+      if (path === 'search') {
+        return {
+          results: edits.map((id) => ({
+            ...pageObject(id, 'Edited page'),
+            last_edited_time: '2026-08-27T00:10:00.000Z',
+          })),
+          has_more: false,
+        };
+      }
+      if (path.endsWith('/markdown')) {
+        return { markdown: 'Body' };
+      }
+      throw new Error(`unexpected path ${path}`);
+    });
+
+    const result = await collectNotionTraversal({
+      config,
+      saved: savedTraverse,
+      // limit 2 forces the skim to stop before the third edit is emitted.
+      limit: 2,
+      watermark,
+    });
+
+    expect(result.pages).toHaveLength(2);
+    // The unemitted third edit means the watermark must not advance — the
+    // post-traversal incremental pass still owes it.
+    expect(result.stateUpdates![0]!.watermark).toBeUndefined();
+  });
+
   it('completes back to idle when the inventory is exhausted', async () => {
     mockedListCollectorItemsAfter.mockResolvedValue([]);
 
