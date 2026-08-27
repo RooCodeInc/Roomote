@@ -392,6 +392,32 @@ describe('notifyPullRequestTerminalStatus', () => {
     );
   });
 
+  it('does not fall back when a successful task shares the same Fast parent', async () => {
+    mockedGithubFind.mockResolvedValue({ id: 1 } as any);
+    mockedTaskPullRequestsFind.mockResolvedValue([
+      { taskId: 'task-1' },
+      { taskId: 'task-2' },
+    ] as any);
+    mockedTaskRunsFind.mockResolvedValue([
+      {
+        taskId: 'task-1',
+        payload: fastParentSlackPayload('C1', 'shared-thread'),
+      },
+      {
+        taskId: 'task-2',
+        payload: fastParentSlackPayload('C1', 'shared-thread'),
+      },
+    ] as any);
+
+    await notifyPullRequestTerminalStatus({
+      ...baseParams,
+      includeFastParentTaskIds: ['task-2'],
+    });
+
+    expect(mockStickyFooterPost).not.toHaveBeenCalled();
+    expect(mockAddReaction).not.toHaveBeenCalled();
+  });
+
   it('suppresses a task-row Slack binding that matches the Fast parent', async () => {
     mockedGithubFind.mockResolvedValue({ id: 1 } as any);
     mockedTaskPullRequestsFind.mockResolvedValue([{ taskId: 'task-1' }] as any);

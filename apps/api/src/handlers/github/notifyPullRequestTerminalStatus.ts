@@ -153,6 +153,23 @@ function isFastParentConversationTarget(params: {
   );
 }
 
+function getFastParentConversationTargetKey(payload: unknown): string | null {
+  const conversation = getFastAgentParentFromPayload(payload)?.conversation;
+  if (
+    !conversation ||
+    conversation.surface === 'web' ||
+    conversation.surface === 'automation'
+  ) {
+    return null;
+  }
+
+  return [
+    conversation.surface,
+    conversation.replyTarget.channelId,
+    conversation.replyTarget.threadId ?? '',
+  ].join('\0');
+}
+
 function resolveSlackReplyTarget(
   payload: unknown,
   includeFastParentTargets: boolean,
@@ -930,6 +947,27 @@ export async function notifyPullRequestTerminalStatus({
     const slackTargets: SlackTarget[] = [];
     const linearSessionIds: string[] = [];
     const fastFallbackTaskIds = new Set(includeFastParentTaskIds);
+    const successfulFastConversationTargets = new Set(
+      includeFastParentTargets
+        ? []
+        : linkedRuns.flatMap((run) => {
+            if (fastFallbackTaskIds.has(run.taskId)) {
+              return [];
+            }
+            const targetKey = getFastParentConversationTargetKey(run.payload);
+            return targetKey ? [targetKey] : [];
+          }),
+    );
+    const includeFastFallbackForRun = (run: (typeof linkedRuns)[number]) => {
+      if (includeFastParentTargets) {
+        return true;
+      }
+      if (!fastFallbackTaskIds.has(run.taskId)) {
+        return false;
+      }
+      const targetKey = getFastParentConversationTargetKey(run.payload);
+      return !targetKey || !successfulFastConversationTargets.has(targetKey);
+    };
     const fastSlackConversationTargets = includeFastParentTargets
       ? new Set<string>()
       : new Set(
@@ -975,36 +1013,25 @@ export async function notifyPullRequestTerminalStatus({
           getSlackTarget(
             run.taskId,
             run.payload,
-            includeFastParentTargets || fastFallbackTaskIds.has(run.taskId),
+            includeFastFallbackForRun(run),
           ),
         )
         .filter((target): target is SlackTarget => target !== null),
     );
 
     const teamsTargets = linkedRuns
-      .map((run) =>
-        getTeamsTarget(
-          run.payload,
-          includeFastParentTargets || fastFallbackTaskIds.has(run.taskId),
-        ),
-      )
+      .map((run) => getTeamsTarget(run.payload, includeFastFallbackForRun(run)))
       .filter((target): target is TeamsTarget => target !== null);
 
     const telegramTargets = linkedRuns
       .map((run) =>
-        getTelegramTarget(
-          run.payload,
-          includeFastParentTargets || fastFallbackTaskIds.has(run.taskId),
-        ),
+        getTelegramTarget(run.payload, includeFastFallbackForRun(run)),
       )
       .filter((target): target is TelegramTarget => target !== null);
 
     const discordTargets = linkedRuns
       .map((run) =>
-        getDiscordTarget(
-          run.payload,
-          includeFastParentTargets || fastFallbackTaskIds.has(run.taskId),
-        ),
+        getDiscordTarget(run.payload, includeFastFallbackForRun(run)),
       )
       .filter((target): target is DiscordTarget => target !== null);
 
