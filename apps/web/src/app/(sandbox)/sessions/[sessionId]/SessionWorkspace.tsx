@@ -7,7 +7,7 @@ import { getReasoningEffortLabel, type ReasoningEffort } from '@roomote/types';
 
 import { formatInferenceCost, getUserDisplayName } from '@/lib';
 import { useLaunchTaskModels } from '@/hooks/task-models/useLaunchTaskModels';
-import { WorkspaceSurface } from '@/components/layout';
+import { FramedSurface, WorkspaceSurface } from '@/components/layout';
 import { SideNavItem } from '@/components/layout/side-nav/SideNavItem';
 import {
   ArrowLeftFromLine,
@@ -240,72 +240,77 @@ function SessionInfoPanel({
   const surfaceBrandIcon = SURFACE_BRAND_ICONS[session.surface];
 
   return (
-    <SandboxInfoPanel
-      title="Session Info"
-      closeLabel="Close session info"
-      onClose={onClose}
+    <FramedSurface
+      frameClassName="p-0"
+      surfaceClassName="relative flex flex-col overflow-hidden"
     >
-      <SandboxInfoTable>
-        <SandboxInfoRow label="Creator">
-          <span className="inline-flex items-center gap-2">
-            <Avatar
-              imageUrl={session.ownerImageUrl}
-              name={ownerDisplayName}
-              email={session.ownerEmail ?? undefined}
-              size="sm"
-              alt={ownerDisplayName}
-            />
-            {ownerDisplayName}
-          </span>
-        </SandboxInfoRow>
-        <SandboxInfoRow label="Model">
-          <span className="inline-flex items-center gap-1.5">
-            <Brain className="size-3.5 shrink-0 text-muted-foreground" />
-            <span className="truncate">{modelAndReasoningLabel}</span>
-          </span>
-        </SandboxInfoRow>
-        <SandboxInfoRow label="Inference Cost">
-          <span className="inline-flex items-center gap-1.5">
-            <DollarSign className="size-3.5 shrink-0 text-muted-foreground" />
-            {inferenceCostLabel}
-          </span>
-        </SandboxInfoRow>
-        <SandboxInfoRow label="Started At">
-          <span className="inline-flex items-center gap-1.5">
-            <Calendar className="size-3.5 shrink-0 text-muted-foreground" />
-            <span className="truncate">
-              {session.createdAt.toLocaleString(undefined, {
-                dateStyle: 'medium',
-                timeStyle: 'short',
-              })}
-            </span>
-          </span>
-        </SandboxInfoRow>
-        <SandboxInfoRow label="Started From">
-          <span className="inline-flex items-center gap-1.5">
-            {session.surface === 'slack' ? (
-              <Slack className="size-3.5 shrink-0 text-muted-foreground" />
-            ) : surfaceBrandIcon ? (
-              <BrandIcon
-                icon={surfaceBrandIcon}
-                name={surfaceLabel}
-                className="size-3.5 shrink-0 text-muted-foreground"
+      <SandboxInfoPanel
+        title="Session Info"
+        closeLabel="Close session info"
+        onClose={onClose}
+      >
+        <SandboxInfoTable>
+          <SandboxInfoRow label="Creator">
+            <span className="inline-flex items-center gap-2">
+              <Avatar
+                imageUrl={session.ownerImageUrl}
+                name={ownerDisplayName}
+                email={session.ownerEmail ?? undefined}
+                size="sm"
+                alt={ownerDisplayName}
               />
-            ) : (
-              <Globe className="size-3.5 shrink-0 text-muted-foreground" />
-            )}
-            <span className="truncate">{surfaceLabel}</span>
-          </span>
-        </SandboxInfoRow>
-        {session.status ? (
-          <SandboxInfoRow label="Status">
-            <Badge variant={getSessionStatusVariant(session.status)}>
-              {session.status.replace('_', ' ')}
-            </Badge>
+              {ownerDisplayName}
+            </span>
           </SandboxInfoRow>
-        ) : null}
-      </SandboxInfoTable>
-    </SandboxInfoPanel>
+          <SandboxInfoRow label="Model">
+            <span className="inline-flex items-center gap-1.5">
+              <Brain className="size-3.5 shrink-0 text-muted-foreground" />
+              <span className="truncate">{modelAndReasoningLabel}</span>
+            </span>
+          </SandboxInfoRow>
+          <SandboxInfoRow label="Inference Cost">
+            <span className="inline-flex items-center gap-1.5">
+              <DollarSign className="size-3.5 shrink-0 text-muted-foreground" />
+              {inferenceCostLabel}
+            </span>
+          </SandboxInfoRow>
+          <SandboxInfoRow label="Started At">
+            <span className="inline-flex items-center gap-1.5">
+              <Calendar className="size-3.5 shrink-0 text-muted-foreground" />
+              <span className="truncate">
+                {session.createdAt.toLocaleString(undefined, {
+                  dateStyle: 'medium',
+                  timeStyle: 'short',
+                })}
+              </span>
+            </span>
+          </SandboxInfoRow>
+          <SandboxInfoRow label="Started From">
+            <span className="inline-flex items-center gap-1.5">
+              {session.surface === 'slack' ? (
+                <Slack className="size-3.5 shrink-0 text-muted-foreground" />
+              ) : surfaceBrandIcon ? (
+                <BrandIcon
+                  icon={surfaceBrandIcon}
+                  name={surfaceLabel}
+                  className="size-3.5 shrink-0 text-muted-foreground"
+                />
+              ) : (
+                <Globe className="size-3.5 shrink-0 text-muted-foreground" />
+              )}
+              <span className="truncate">{surfaceLabel}</span>
+            </span>
+          </SandboxInfoRow>
+          {session.status ? (
+            <SandboxInfoRow label="Status">
+              <Badge variant={getSessionStatusVariant(session.status)}>
+                {session.status.replace('_', ' ')}
+              </Badge>
+            </SandboxInfoRow>
+          ) : null}
+        </SandboxInfoTable>
+      </SandboxInfoPanel>
+    </FramedSurface>
   );
 }
 
