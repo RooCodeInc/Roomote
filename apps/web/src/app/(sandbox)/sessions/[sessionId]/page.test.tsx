@@ -1,17 +1,25 @@
 import type { ReactNode } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 
-const { authorizeMock, getFastSessionByIdMock, transcriptMock } = vi.hoisted(
-  () => ({
-    authorizeMock: vi.fn(),
-    getFastSessionByIdMock: vi.fn(),
-    transcriptMock: vi.fn(
-      ({ footer }: { messages: unknown[]; footer?: ReactNode }) => (
-        <div data-testid="transcript">{footer}</div>
-      ),
+const {
+  authorizeMock,
+  getFastSessionByIdMock,
+  getSessionByIdCommandMock,
+  transcriptMock,
+  sessionWorkspaceMock,
+} = vi.hoisted(() => ({
+  authorizeMock: vi.fn(),
+  getFastSessionByIdMock: vi.fn(),
+  getSessionByIdCommandMock: vi.fn(),
+  transcriptMock: vi.fn(
+    ({ footer }: { messages: unknown[]; footer?: ReactNode }) => (
+      <div data-testid="transcript">{footer}</div>
     ),
-  }),
-);
+  ),
+  sessionWorkspaceMock: vi.fn(({ children }: { children: ReactNode }) => (
+    <main data-testid="workspace-surface">{children}</main>
+  )),
+}));
 
 vi.mock('@/lib/server/auth-context', () => ({ authorize: authorizeMock }));
 vi.mock('next/navigation', () => ({
@@ -20,6 +28,9 @@ vi.mock('next/navigation', () => ({
 }));
 vi.mock('@/lib/server/fast-sessions', () => ({
   getFastSessionById: getFastSessionByIdMock,
+}));
+vi.mock('@/trpc/commands/sessions', () => ({
+  getSessionByIdCommand: getSessionByIdCommandMock,
 }));
 vi.mock('../../use-sandbox-layout', () => ({
   useSandboxLayout: () => ({
@@ -39,10 +50,21 @@ vi.mock('@/components/layout', () => ({
 vi.mock('./FastSessionTranscript', () => ({
   FastSessionTranscript: transcriptMock,
 }));
+vi.mock('./SessionWorkspace', () => ({
+  SessionWorkspace: sessionWorkspaceMock,
+}));
+vi.mock('./SessionReadTracker', () => ({
+  SessionReadTracker: () => null,
+}));
 
 import SessionDetailPage from './page';
 
 describe('Fast session detail page', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    getSessionByIdCommandMock.mockResolvedValue(null);
+  });
+
   it('uses the shared task workspace and renders supported session data', async () => {
     authorizeMock.mockResolvedValue({
       success: true,
@@ -161,6 +183,65 @@ describe('Fast session detail page', () => {
         canReply: true,
         initialTitle: 'Rotate the API keys',
         fallbackTitle: 'Session',
+      }),
+      undefined,
+    );
+  });
+
+  it('loads linked tasks for Fast session URLs when Sessions UI is disabled', async () => {
+    authorizeMock.mockResolvedValue({
+      success: true,
+      userId: 'user-1',
+      isAdmin: false,
+      featureFlags: { sessions_ui: false },
+    });
+    getSessionByIdCommandMock.mockResolvedValue({
+      id: 'unified-session-1',
+      title: 'Session title',
+      ownerName: 'User',
+      ownerEmail: 'user@example.com',
+      ownerImageUrl: null,
+      sourceSurface: 'slack',
+      fastConversationId: 'fast-session-3',
+      inferenceCostMicroUsd: 0,
+      createdAt: new Date('2026-01-01T00:00:00.000Z'),
+      status: 'active',
+      tasks: [
+        {
+          taskId: 'task-1',
+          title: 'Delegated task',
+        },
+      ],
+    });
+    getFastSessionByIdMock.mockResolvedValue({
+      id: 'fast-session-3',
+      ownerName: 'User',
+      ownerEmail: 'user@example.com',
+      surface: 'slack',
+      model: null,
+      reasoningEffort: null,
+      inferenceCostMicroUsd: 0,
+      createdAt: new Date('2026-01-01T00:00:00.000Z'),
+      messages: [],
+      hasOlderMessages: false,
+    });
+
+    renderToStaticMarkup(
+      await SessionDetailPage({
+        params: Promise.resolve({ sessionId: 'fast-session-3' }),
+      }),
+    );
+
+    expect(getSessionByIdCommandMock).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: 'user-1' }),
+      'fast-session-3',
+    );
+    expect(sessionWorkspaceMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        session: expect.objectContaining({
+          id: 'unified-session-1',
+          tasks: [expect.objectContaining({ taskId: 'task-1' })],
+        }),
       }),
       undefined,
     );

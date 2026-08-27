@@ -419,6 +419,24 @@ export async function findAccessibleSession(
   return session ?? null;
 }
 
+async function findAccessibleSessionByFastConversationId(
+  auth: SessionAuth,
+  fastConversationId: string,
+) {
+  const [session] = await db
+    .select(baseSelection)
+    .from(sessions)
+    .leftJoin(users, eq(users.id, sessions.ownerUserId))
+    .where(
+      and(
+        eq(sessions.fastConversationId, fastConversationId),
+        sessionScope(auth),
+      ),
+    )
+    .limit(1);
+  return session ?? null;
+}
+
 async function getSessionTasks(sessionId: string) {
   const linked = await db
     .select({
@@ -506,10 +524,12 @@ async function getSessionTasks(sessionId: string) {
 }
 
 export async function getSessionById(auth: SessionAuth, sessionId: string) {
-  const session = await findAccessibleSession(auth, sessionId);
+  const session =
+    (await findAccessibleSession(auth, sessionId)) ??
+    (await findAccessibleSessionByFastConversationId(auth, sessionId));
   if (!session) return null;
   const [hydrated] = await hydrateSessionRows(auth, [session]);
-  const sessionTaskDetails = await getSessionTasks(sessionId);
+  const sessionTaskDetails = await getSessionTasks(session.id);
   const liveStatus = deriveSessionStatus({
     conversationResponding:
       Boolean(session.fastConversationId) && session.cachedStatus === 'active',

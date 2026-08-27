@@ -31,9 +31,7 @@ export default async function SessionDetailPage({
     notFound();
   }
 
-  const unifiedSession = authorizedUser.featureFlags?.sessions_ui
-    ? await getSessionByIdCommand(authorizedUser, sessionId)
-    : null;
+  const unifiedSession = await getSessionByIdCommand(authorizedUser, sessionId);
   const session = unifiedSession?.fastConversationId
     ? await getFastSessionById(
         authorizedUser,
