@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
-import { mergeOpenAiCompatibleProviderConfig } from '../opencode-provider-config';
+import {
+  mergeOpenAiCompatibleProviderConfig,
+  parseTaskModelCosts,
+} from '../opencode-provider-config';
 
 describe('mergeOpenAiCompatibleProviderConfig', () => {
   it('materializes managed Roomote models as an isolated OpenAI-compatible provider', () => {
@@ -93,6 +96,46 @@ describe('mergeOpenAiCompatibleProviderConfig', () => {
       'limit',
       'input',
     ]);
+  });
+
+  it('writes per-model cost so OpenCode reports real trial spend', () => {
+    const config = mergeOpenAiCompatibleProviderConfig(
+      {},
+      { R_TRIAL_OPENROUTER_API_KEY: 'sk-or-trial' },
+      ['roomote/openai/gpt-5.6-luna', 'roomote/unknown'],
+      undefined,
+      {},
+      { 'roomote/openai/gpt-5.6-luna': { input: 2, output: 10 } },
+    );
+
+    expect(config).toMatchObject({
+      roomote: {
+        models: {
+          'openai/gpt-5.6-luna': {
+            cost: { input: 2, output: 10 },
+          },
+          // No pricing known: no cost block rather than a fabricated zero,
+          // which OpenCode would report as free.
+          unknown: { name: 'unknown' },
+        },
+      },
+    });
+    expect(config).not.toHaveProperty(['roomote', 'models', 'unknown', 'cost']);
+  });
+
+  it('parses only well-formed cost maps', () => {
+    expect(parseTaskModelCosts(undefined)).toEqual({});
+    expect(parseTaskModelCosts('not json')).toEqual({});
+    expect(
+      parseTaskModelCosts(
+        JSON.stringify({
+          'roomote/openai/gpt-5.6-luna': { input: 2, output: 10 },
+          'bad-id': { input: 1, output: 1 },
+          'roomote/negative': { input: -1, output: 1 },
+          'roomote/partial': { input: 1 },
+        }),
+      ),
+    ).toEqual({ 'roomote/openai/gpt-5.6-luna': { input: 2, output: 10 } });
   });
 
   it('preserves independently configured input limits', () => {

@@ -1201,6 +1201,42 @@ describe('managed Roomote inference key', () => {
     expect(env).not.toHaveProperty('R_TRIAL_OPENROUTER_API_KEY');
   });
 
+  it('emits per-model costs for the sandbox from catalog metadata', async () => {
+    mockDeploymentSettingsFindFirst.mockResolvedValue({
+      runtimeModelConfig: { roomoteModel: 'roomote/openai/gpt-5.6-luna' },
+      taskModelSettings: {
+        models: [
+          {
+            id: 'roomote/openai/gpt-5.6-luna',
+            displayName: 'GPT 5.6 Luna',
+            family: 'GPT',
+            metadata: {
+              contextWindow: 400_000,
+              inputTypes: ['text'],
+              inputPricePerToken: 0.000002,
+              outputPricePerToken: 0.00001,
+              lastRefreshedAt: '2026-08-27T00:00:00.000Z',
+            },
+          },
+        ],
+        allowedModelIds: ['roomote/openai/gpt-5.6-luna'],
+        defaultModelId: 'roomote/openai/gpt-5.6-luna',
+      },
+    });
+
+    const env = await resolveSandboxModelRuntimeEnv({
+      runtimeEnv: {},
+      deploymentEnvVars: { R_TRIAL_OPENROUTER_API_KEY: 'sk-trial' },
+    });
+
+    expect(JSON.parse(env.R_TASK_MODEL_COSTS ?? '{}')).toEqual({
+      'roomote/openai/gpt-5.6-luna': { input: 2, output: 10 },
+    });
+    expect(JSON.parse(env.R_TASK_MODEL_CONTEXT_WINDOWS ?? '{}')).toEqual({
+      'roomote/openai/gpt-5.6-luna': 400_000,
+    });
+  });
+
   it('materializes the stored key on the control plane for Roomote models', async () => {
     mockDeploymentSettingsFindFirst.mockResolvedValue({
       runtimeModelConfig: { roomoteModel: 'roomote/openai/gpt-5.6-luna' },
