@@ -185,7 +185,7 @@ export const Header = ({ session: { taskRun, task, taskId } }: HeaderProps) => {
       {parentSession ? (
         <TaskSessionReadTracker sessionId={parentSession.sessionId} />
       ) : null}
-      <WorkspaceHeader>
+      <WorkspaceHeader contentClassName="flex-row items-center justify-between gap-4">
         {parentSession ? (
           <Breadcrumb className="min-w-0">
             <BreadcrumbList className="flex-nowrap text-xs">
