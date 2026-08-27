@@ -1,4 +1,7 @@
-const mockQueueAdd = vi.fn();
+const { mockQueueAdd, mockQueueConstructor } = vi.hoisted(() => ({
+  mockQueueAdd: vi.fn(),
+  mockQueueConstructor: vi.fn(),
+}));
 
 vi.mock('@roomote/redis', () => ({
   getRedis: vi.fn(() => ({})),
@@ -6,14 +9,23 @@ vi.mock('@roomote/redis', () => ({
 
 vi.mock('bullmq', () => ({
   Queue: class MockQueue {
+    constructor(...args: unknown[]) {
+      mockQueueConstructor(...args);
+    }
+
     add = (...args: unknown[]) => mockQueueAdd(...args);
   },
 }));
 
 import {
+  ACTIVE_PR_REVIEW_FOLLOW_UP_ATTEMPTS,
   ACTIVE_PR_REVIEW_FOLLOW_UP_DEBOUNCE_MS,
+  ACTIVE_PR_REVIEW_FOLLOW_UP_JOB_OPTIONS,
+  ACTIVE_PR_REVIEW_FOLLOW_UP_QUEUE_NAME,
+  ACTIVE_PR_REVIEW_FOLLOW_UP_RETRY_DELAY_MS,
   enqueueActivePrReviewFollowUp,
 } from '@roomote/sdk/server';
+import { WORKER_HEARTBEAT_STALE_MS } from '@roomote/types';
 
 const request = {
   runId: 100,
@@ -54,6 +66,13 @@ describe('enqueueActivePrReviewFollowUp', () => {
   it('uses trailing-edge replacement for one active review run', async () => {
     await enqueueActivePrReviewFollowUp(request);
 
+    expect(mockQueueConstructor).toHaveBeenCalledWith(
+      ACTIVE_PR_REVIEW_FOLLOW_UP_QUEUE_NAME,
+      expect.objectContaining({
+        defaultJobOptions: ACTIVE_PR_REVIEW_FOLLOW_UP_JOB_OPTIONS,
+      }),
+    );
+
     expect(mockQueueAdd).toHaveBeenCalledWith(
       'queue-active-pr-review-follow-up',
       request,
@@ -66,6 +85,16 @@ describe('enqueueActivePrReviewFollowUp', () => {
           replace: true,
         },
       },
+    );
+  });
+
+  it('retries beyond stale-worker detection and its scheduler cadence', () => {
+    const retryHorizonMs =
+      (ACTIVE_PR_REVIEW_FOLLOW_UP_ATTEMPTS - 1) *
+      ACTIVE_PR_REVIEW_FOLLOW_UP_RETRY_DELAY_MS;
+
+    expect(retryHorizonMs).toBeGreaterThanOrEqual(
+      WORKER_HEARTBEAT_STALE_MS + 2 * 60 * 1000,
     );
   });
 });
