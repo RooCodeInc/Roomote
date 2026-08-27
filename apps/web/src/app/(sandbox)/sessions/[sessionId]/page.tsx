@@ -60,8 +60,10 @@ export default async function SessionDetailPage({
       ownerImageUrl: unifiedSession.ownerImageUrl,
       surface: unifiedSession.sourceSurface,
       model: session?.model ?? defaultModelId,
+      reasoningEffort: session?.reasoningEffort ?? defaultReasoningEffort,
       inferenceCostMicroUsd: unifiedSession.inferenceCostMicroUsd,
       createdAt: unifiedSession.createdAt,
+      status: unifiedSession.status,
       tasks: unifiedSession.tasks,
     };
     const statusVariant =
@@ -148,8 +150,10 @@ export default async function SessionDetailPage({
     ownerImageUrl: session.ownerImageUrl,
     surface: session.surface,
     model: session.model ?? defaultModelId,
+    reasoningEffort: session.reasoningEffort ?? defaultReasoningEffort,
     inferenceCostMicroUsd: session.inferenceCostMicroUsd,
     createdAt: session.createdAt,
+    status: null,
     tasks: [],
   };
   const initialUserMessage = session.messages.find(

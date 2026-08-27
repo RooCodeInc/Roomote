@@ -37,8 +37,10 @@ const session: SessionInfo = {
   ownerImageUrl: null,
   surface: 'slack',
   model: 'model-1',
+  reasoningEffort: null,
   inferenceCostMicroUsd: 1_000_000,
   createdAt: new Date('2026-01-01T00:00:00.000Z'),
+  status: 'needs_input',
   tasks: [],
 };
 
@@ -95,8 +97,9 @@ describe('SessionWorkspace', () => {
 
     expect(screen.queryByText('Session transcript')).not.toBeInTheDocument();
     expect(
-      screen.getByRole('heading', { name: 'Session info' }),
+      screen.getByRole('heading', { name: 'Session Info' }),
     ).toBeInTheDocument();
+    expect(screen.getByText('needs input')).toBeInTheDocument();
     expect(
       screen.queryByRole('button', { name: 'Close session info' }),
     ).toBeNull();
@@ -116,7 +119,7 @@ describe('SessionWorkspace', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Session info' }));
 
     expect(
-      screen.getByRole('heading', { name: 'Session info' }),
+      screen.getByRole('heading', { name: 'Session Info' }),
     ).toBeInTheDocument();
   });
 

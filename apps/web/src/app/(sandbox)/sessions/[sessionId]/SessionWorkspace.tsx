@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { formatDistanceToNow } from 'date-fns';
+import { getReasoningEffortLabel, type ReasoningEffort } from '@roomote/types';
 
 import { formatInferenceCost, getUserDisplayName } from '@/lib';
 import { useLaunchTaskModels } from '@/hooks/task-models/useLaunchTaskModels';
@@ -13,9 +13,15 @@ import {
   ArrowLeftFromLine,
   Avatar,
   BasicTooltip,
+  Badge,
+  BrandIcon,
+  Brain,
   Button,
+  Calendar,
   DollarSign,
+  Globe,
   Info,
+  Slack,
   X,
   Rows4,
   Select,
@@ -27,6 +33,11 @@ import {
 import type { SessionTaskSummary } from './SessionTaskCards';
 
 import { SandboxSidePanelHeader } from '../../SandboxSidePanelHeader';
+import {
+  SandboxInfoPanel,
+  SandboxInfoRow,
+  SandboxInfoTable,
+} from '../../SandboxInfoPanel';
 import {
   ResponsiveWorkspacePanels,
   SandboxSideActions,
@@ -43,27 +54,56 @@ export type SessionInfo = {
   surface: string;
   /** Effective model for the session's turns (stored override or default). */
   model: string | null;
+  reasoningEffort: ReasoningEffort | null;
   inferenceCostMicroUsd: number;
   createdAt: Date;
+  status: string | null;
   tasks: SessionTaskSummary[];
 };
 
 const SURFACE_LABELS: Record<string, string> = {
   slack: 'Slack',
+  linear: 'Linear',
+  github: 'GitHub',
+  gitlab: 'GitLab',
+  gitea: 'Gitea',
+  bitbucket: 'Bitbucket',
+  ado: 'Azure DevOps',
   discord: 'Discord',
-  teams: 'Microsoft Teams',
+  teams: 'Teams',
   telegram: 'Telegram',
   automation: 'Automation',
   web: 'Web',
 };
 
-function InfoRow({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <tr>
-      <td className="py-1 pr-4 align-top whitespace-nowrap">{label}</td>
-      <td className="ph-no-capture min-w-0 py-1 break-all">{children}</td>
-    </tr>
-  );
+type SessionSurfaceBrandIcon =
+  | 'linear'
+  | 'github'
+  | 'gitlab'
+  | 'gitea'
+  | 'bitbucket'
+  | 'ado'
+  | 'discord'
+  | 'teams'
+  | 'telegram';
+
+const SURFACE_BRAND_ICONS: Partial<Record<string, SessionSurfaceBrandIcon>> = {
+  linear: 'linear',
+  github: 'github',
+  gitlab: 'gitlab',
+  gitea: 'gitea',
+  bitbucket: 'bitbucket',
+  ado: 'ado',
+  discord: 'discord',
+  teams: 'teams',
+  telegram: 'telegram',
+};
+
+function getSessionStatusVariant(status: string) {
+  if (status === 'active') return 'success';
+  if (status === 'needs_input') return 'warning';
+  if (status === 'blocked') return 'destructive';
+  return 'secondary';
 }
 
 function SessionTaskPanel({
@@ -187,51 +227,85 @@ function SessionInfoPanel({
     ? (modelData?.models.find(({ id }) => id === session.model)?.displayName ??
       session.model)
     : null;
+  const modelAndReasoningLabel = [
+    modelLabel ?? 'Default model',
+    session.reasoningEffort
+      ? getReasoningEffortLabel(session.reasoningEffort)
+      : null,
+  ]
+    .filter(Boolean)
+    .join(' • ');
   const inferenceCostLabel = formatInferenceCost(session.inferenceCostMicroUsd);
+  const surfaceLabel = SURFACE_LABELS[session.surface] ?? session.surface;
+  const surfaceBrandIcon = SURFACE_BRAND_ICONS[session.surface];
 
   return (
-    <>
-      <SandboxSidePanelHeader
-        title="Session info"
-        closeLabel="Close session info"
-        onClose={onClose}
-      />
-      <div className="scroll-thin min-h-0 flex-1 overflow-y-auto px-4 py-4">
-        <table className="text-sm">
-          <tbody>
-            <InfoRow label="Creator">
-              <span className="inline-flex items-center gap-2">
-                <Avatar
-                  imageUrl={session.ownerImageUrl}
-                  name={ownerDisplayName}
-                  email={session.ownerEmail ?? undefined}
-                  size="sm"
-                  alt={ownerDisplayName}
-                />
-                {ownerDisplayName}
-              </span>
-            </InfoRow>
-            <InfoRow label="Model">{modelLabel ?? 'Default model'}</InfoRow>
-            <InfoRow label="Inference cost">
-              <span className="inline-flex items-center gap-1">
-                <DollarSign className="size-3 shrink-0" />
-                {inferenceCostLabel}
-              </span>
-            </InfoRow>
-            <InfoRow label="Started at">
-              <BasicTooltip content={session.createdAt.toLocaleString()}>
-                <span className="cursor-default">
-                  {formatDistanceToNow(session.createdAt, { addSuffix: true })}
-                </span>
-              </BasicTooltip>
-            </InfoRow>
-            <InfoRow label="Started from">
-              {SURFACE_LABELS[session.surface] ?? session.surface}
-            </InfoRow>
-          </tbody>
-        </table>
-      </div>
-    </>
+    <SandboxInfoPanel
+      title="Session Info"
+      closeLabel="Close session info"
+      onClose={onClose}
+    >
+      <SandboxInfoTable>
+        <SandboxInfoRow label="Creator">
+          <span className="inline-flex items-center gap-2">
+            <Avatar
+              imageUrl={session.ownerImageUrl}
+              name={ownerDisplayName}
+              email={session.ownerEmail ?? undefined}
+              size="sm"
+              alt={ownerDisplayName}
+            />
+            {ownerDisplayName}
+          </span>
+        </SandboxInfoRow>
+        <SandboxInfoRow label="Model">
+          <span className="inline-flex items-center gap-1.5">
+            <Brain className="size-3.5 shrink-0 text-muted-foreground" />
+            <span className="truncate">{modelAndReasoningLabel}</span>
+          </span>
+        </SandboxInfoRow>
+        <SandboxInfoRow label="Inference Cost">
+          <span className="inline-flex items-center gap-1.5">
+            <DollarSign className="size-3.5 shrink-0 text-muted-foreground" />
+            {inferenceCostLabel}
+          </span>
+        </SandboxInfoRow>
+        <SandboxInfoRow label="Started At">
+          <span className="inline-flex items-center gap-1.5">
+            <Calendar className="size-3.5 shrink-0 text-muted-foreground" />
+            <span className="truncate">
+              {session.createdAt.toLocaleString(undefined, {
+                dateStyle: 'medium',
+                timeStyle: 'short',
+              })}
+            </span>
+          </span>
+        </SandboxInfoRow>
+        <SandboxInfoRow label="Started From">
+          <span className="inline-flex items-center gap-1.5">
+            {session.surface === 'slack' ? (
+              <Slack className="size-3.5 shrink-0 text-muted-foreground" />
+            ) : surfaceBrandIcon ? (
+              <BrandIcon
+                icon={surfaceBrandIcon}
+                name={surfaceLabel}
+                className="size-3.5 shrink-0 text-muted-foreground"
+              />
+            ) : (
+              <Globe className="size-3.5 shrink-0 text-muted-foreground" />
+            )}
+            <span className="truncate">{surfaceLabel}</span>
+          </span>
+        </SandboxInfoRow>
+        {session.status ? (
+          <SandboxInfoRow label="Status">
+            <Badge variant={getSessionStatusVariant(session.status)}>
+              {session.status.replace('_', ' ')}
+            </Badge>
+          </SandboxInfoRow>
+        ) : null}
+      </SandboxInfoTable>
+    </SandboxInfoPanel>
   );
 }
 
