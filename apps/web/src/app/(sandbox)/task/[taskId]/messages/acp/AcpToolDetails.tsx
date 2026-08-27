@@ -116,27 +116,31 @@ function formatToolDetails(
   visibleToolInput: Record<string, string> | null,
 ): { code: string; isStructured: boolean } | undefined {
   if (!text) return undefined;
+  const hasVisibleToolInput =
+    visibleToolInput && Object.keys(visibleToolInput).length > 0;
+  let result: unknown = text;
 
   try {
-    const result = JSON.parse(text) as unknown;
-    if (!result || typeof result !== 'object') {
-      return { code: text, isStructured: false };
-    }
-
-    const details =
-      !Array.isArray(result) &&
-      visibleToolInput &&
-      Object.keys(visibleToolInput).length > 0
-        ? { ...(result as Record<string, unknown>), ...visibleToolInput }
-        : result;
-
-    return {
-      code: YAML.stringify(details, { indent: 2, lineWidth: 0 }).trimEnd(),
-      isStructured: true,
-    };
+    result = JSON.parse(text) as unknown;
   } catch {
-    return { code: text, isStructured: false };
+    // Keep unparseable output intact below.
   }
+
+  const details =
+    result && typeof result === 'object'
+      ? !Array.isArray(result) && hasVisibleToolInput
+        ? { ...(result as Record<string, unknown>), ...visibleToolInput }
+        : result
+      : hasVisibleToolInput
+        ? { ...visibleToolInput, output: result }
+        : null;
+
+  if (!details) return { code: text, isStructured: false };
+
+  return {
+    code: YAML.stringify(details, { indent: 2, lineWidth: 0 }).trimEnd(),
+    isStructured: true,
+  };
 }
 
 function getVisibleToolInput(

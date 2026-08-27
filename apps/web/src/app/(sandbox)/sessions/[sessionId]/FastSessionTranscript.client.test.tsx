@@ -222,6 +222,109 @@ describe('FastSessionTranscript', () => {
     expect(screen.getAllByText('launch_task')).toHaveLength(1);
   });
 
+  it('renders persisted Fast Brain entity and truncated query results as YAML', () => {
+    const entityOutput = JSON.stringify(
+      {
+        success: true,
+        result: { found: true, title: 'Roomote' },
+      },
+      null,
+      2,
+    );
+    const queryOutput = [
+      '{',
+      '  "success": true,',
+      '  "result": [',
+      '    { "title": "First result" },',
+      '... [output truncated: kept 50000 of 72000 chars] ...',
+      '    { "title": "Last result" }',
+      '  ]',
+      '}',
+    ].join('\n');
+    const buildBrainResult = ({
+      eventId,
+      toolName,
+      args,
+      output,
+      truncated,
+    }: {
+      eventId: string;
+      toolName: 'entity' | 'query';
+      args: Record<string, unknown>;
+      output: string;
+      truncated: boolean;
+    }) => ({
+      id: eventId,
+      eventId,
+      turnId: eventId,
+      turnSeq: 1,
+      ts: toolName === 'entity' ? 1 : 2,
+      eventType: ACP_ENVELOPE_EVENT_TYPES.ToolResult,
+      role: 'tool' as const,
+      contentBlocks: [{ type: 'text' as const, text: output }],
+      metadata: { visibleInTranscript: true, truncated },
+      payload: {
+        toolCallId: eventId,
+        title: toolName,
+        kind: 'tool',
+        status: 'completed',
+        isExecute: false,
+        isMcp: true,
+        isRoomoteNativeTool: false,
+        mcpServerName: 'gbrain',
+        mcpToolName: toolName,
+        serverName: 'gbrain',
+        toolName,
+        command: null,
+        exitCode: null,
+        output,
+        rawInput: { arguments: args },
+      },
+      source: 'slack',
+      nativeSessionId: 'opencode-1',
+      nativeMessageId: null,
+      createdAt: new Date('2026-01-01T00:00:01.000Z'),
+    });
+
+    const { container } = render(
+      <FastSessionTranscript
+        sessionId="session-1"
+        initialMessages={[
+          buildBrainResult({
+            eventId: 'turn-1:tool:0',
+            toolName: 'entity',
+            args: { name: 'Roomote' },
+            output: entityOutput,
+            truncated: false,
+          }),
+          buildBrainResult({
+            eventId: 'turn-2:tool:0',
+            toolName: 'query',
+            args: { query: 'Fast transcript payload shape' },
+            output: queryOutput,
+            truncated: true,
+          }),
+        ]}
+      />,
+    );
+
+    fireEvent.click(screen.getByText('Entity'));
+    fireEvent.click(screen.getByText('Query'));
+
+    const details = Array.from(container.querySelectorAll('code')).map(
+      (element) => element.textContent,
+    );
+    const entityDetails = details.find((text) => text?.includes('Roomote'));
+    expect(entityDetails).toContain('success: true');
+    expect(entityDetails).not.toContain('"success"');
+
+    const queryDetails = details.find((text) =>
+      text?.includes('[output truncated'),
+    );
+    expect(queryDetails).toContain('query: Fast transcript payload shape');
+    expect(queryDetails).toContain('output: |-');
+  });
+
   it('renders trusted Fast show_widget results with the shared sandboxed preview', () => {
     render(
       <FastSessionTranscript
