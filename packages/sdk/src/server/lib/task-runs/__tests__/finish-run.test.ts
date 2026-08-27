@@ -2330,6 +2330,46 @@ describe('finishRun', () => {
       );
     });
 
+    it('fails the check and finalizes the summary when the provider fails before review output', async () => {
+      mockFindFirstRun.mockResolvedValue(
+        makeRun(
+          { payloadKind: TaskPayloadKind.GithubPrReview },
+          { workflow: 'pr_review', surface: 'github' },
+        ),
+      );
+      mockFindManyTaskPullRequests.mockResolvedValue([reviewPrRow]);
+      mockFinalizeGithubPrReviewComment.mockResolvedValueOnce({
+        finalized: true,
+        body: '<!-- roomote-review-summary sha=abc1234 -->',
+      });
+
+      await finishRun({
+        id: 1,
+        status: RunStatus.Failed,
+        error:
+          'The provider returned an error: Our servers are currently overloaded. Please try again later.',
+      });
+
+      expect(mockBuildTerminalReviewStatus).toHaveBeenCalledWith({
+        outcome: 'failed',
+        taskUrl: 'https://example.com/task',
+      });
+      expect(mockFinalizeGithubPrReviewComment).toHaveBeenCalledWith(
+        expect.objectContaining({
+          commentId: 456,
+          terminalStatus: 'terminal-status',
+        }),
+      );
+      expect(mockUpdateCheckRun).toHaveBeenCalledWith(
+        'github-token',
+        expect.objectContaining({
+          check_run_id: 123,
+          status: 'completed',
+          conclusion: 'failure',
+        }),
+      );
+    });
+
     it('refreshes a missing check id when publication races with finalization', async () => {
       mockFindFirstRun.mockResolvedValue(
         makeRun(

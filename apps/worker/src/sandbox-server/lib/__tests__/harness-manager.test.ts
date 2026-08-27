@@ -128,6 +128,7 @@ function createManager(
     sandboxTimeoutMs?: number;
     sandboxExpiresAtMs?: number;
     nativeTurnSteering?: boolean;
+    terminalProviderErrorsAreFatal?: boolean;
     runId?: number;
     taskId?: string | null;
   } & HarnessManagerCallbacks = {},
@@ -144,6 +145,7 @@ function createManager(
     sandboxTimeoutMs,
     sandboxExpiresAtMs,
     nativeTurnSteering,
+    terminalProviderErrorsAreFatal,
     runId,
     taskId,
     ...callbacks
@@ -156,6 +158,7 @@ function createManager(
   const manager = new HarnessManager({
     harness,
     keepaliveMs,
+    terminalProviderErrorsAreFatal,
     sandboxTimeoutMs,
     sandboxExpiresAtMs,
     runId,
@@ -3342,6 +3345,52 @@ describe('HarnessManager error status', () => {
       manager.dispose();
       harness.dispose();
       vi.useRealTimers();
+    }
+  });
+
+  it('shuts down immediately when terminal provider errors are fatal', async () => {
+    const { harness, manager } = createManager({
+      keepaliveMs: 60_000,
+      terminalProviderErrorsAreFatal: true,
+    });
+
+    try {
+      manager.initializeWithoutPrompt();
+      manager.startNewTaskFromPrompt({ prompt: 'Review the pull request.' });
+      harness.emitTaskEvent({
+        eventName: TaskEventName.TaskStarted,
+        payload: ['task-provider-overload'],
+      } as TaskEvent);
+      harness.emitTaskEvent({
+        eventName: TaskEventName.Message,
+        payload: [
+          {
+            taskId: 'task-provider-overload',
+            action: 'created',
+            message: {
+              ts: Date.now(),
+              type: 'say',
+              say: 'terminal_provider_error',
+              text: 'The provider returned an error: Our servers are currently overloaded. Please try again later.',
+            },
+          },
+        ],
+      } as TaskEvent);
+      harness.emitTaskEvent({
+        eventName: TaskEventName.TaskAborted,
+        payload: ['task-provider-overload'],
+      } as TaskEvent);
+
+      await expect(manager.waitForShutdown()).resolves.toMatchObject({
+        lastErrorMessage:
+          'The provider returned an error: Our servers are currently overloaded. Please try again later.',
+        taskAbortedAt: undefined,
+      });
+      expect(manager.getStatus().phase).toBe('shutting_down');
+      expect(manager.getSleepAt()).toBeNull();
+    } finally {
+      manager.dispose();
+      harness.dispose();
     }
   });
 

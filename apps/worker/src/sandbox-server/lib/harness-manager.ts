@@ -159,6 +159,8 @@ export type HarnessManagerCompletionDecision =
 interface HarnessManagerConfig {
   harness: Harness;
   keepaliveMs: number;
+  /** End the session instead of retaining it for follow-ups after a terminal provider error. */
+  terminalProviderErrorsAreFatal?: boolean;
   /** Sandbox hard-deadline override. Defaults to {@link SANDBOX_TIMEOUT_MS}. */
   sandboxTimeoutMs?: number;
   /** Absolute machine expiry deadline in epoch milliseconds, if known. */
@@ -228,6 +230,7 @@ export class HarnessManager extends EventEmitter<HarnessManagerEvents> {
   private runtimeQueuedMessagesCount = 0;
   private deferredTurnSettlement: DeferredTurnSettlement | null = null;
   private terminalProviderErrorPending = false;
+  private terminalProviderErrorsAreFatal: boolean;
   private completionDecisionPending = false;
   private completionDecisionSequence = 0;
   private continuationStartPending = false;
@@ -242,6 +245,8 @@ export class HarnessManager extends EventEmitter<HarnessManagerEvents> {
 
     this.harness = config.harness;
     this.keepaliveMs = config.keepaliveMs;
+    this.terminalProviderErrorsAreFatal =
+      config.terminalProviderErrorsAreFatal ?? false;
     this.sandboxTimeoutMs = config.sandboxTimeoutMs ?? SANDBOX_TIMEOUT_MS;
     this.sandboxExpiresAtMs = config.sandboxExpiresAtMs;
     this.runId = config.runId;
@@ -764,7 +769,8 @@ export class HarnessManager extends EventEmitter<HarnessManagerEvents> {
       this.phase === 'shutting_down' &&
       this.state.lastErrorMessage &&
       !this.state.taskFinishedAt &&
-      !this.terminalProviderErrorPending
+      (!this.terminalProviderErrorPending ||
+        this.terminalProviderErrorsAreFatal)
     ) {
       return null;
     }
@@ -1078,6 +1084,14 @@ export class HarnessManager extends EventEmitter<HarnessManagerEvents> {
   // finalizeTaskCompletion() which fires both callbacks.
   private finalizeTaskAbort(): void {
     this.deferredTurnSettlement = null;
+
+    if (
+      this.terminalProviderErrorPending &&
+      this.terminalProviderErrorsAreFatal
+    ) {
+      this.triggerShutdown();
+      return;
+    }
 
     if (this.phase !== 'stopped') {
       this.setPhase(
