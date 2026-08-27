@@ -3,6 +3,7 @@ import {
   sanitizeSandboxPathString,
 } from '@/lib';
 import { redactSecrets } from '@roomote/communication/redact-secrets';
+import YAML from 'yaml';
 
 import {
   CodeBlock,
@@ -44,10 +45,7 @@ export function AcpToolDetails({
   const sanitizedText = msg.text
     ? sanitizeSandboxPathString(msg.text)
     : msg.text;
-  const textWithVisibleToolInput = addVisibleToolInput(
-    sanitizedText,
-    visibleToolInput,
-  );
+  const formattedText = formatToolDetails(sanitizedText, visibleToolInput);
   const isSubagent = isSubagentToolPayload(msg.data);
   const subagentPrompt = getSubagentPrompt(msg);
   const subagentLastMessage = getSubagentLastMessage(msg);
@@ -93,10 +91,10 @@ export function AcpToolDetails({
     );
   }
 
-  return textWithVisibleToolInput ? (
+  return formattedText ? (
     <CodeBlock
-      code={textWithVisibleToolInput}
-      language="bash"
+      code={formattedText.code}
+      language={formattedText.isStructured ? 'yaml' : 'bash'}
       maxHeight={maxHeight}
       variant="compact"
       highlight={false}
@@ -113,30 +111,31 @@ export function AcpToolDetails({
   );
 }
 
-function addVisibleToolInput(
+function formatToolDetails(
   text: string | undefined,
   visibleToolInput: Record<string, string> | null,
-): string | undefined {
-  if (
-    !text ||
-    !visibleToolInput ||
-    Object.keys(visibleToolInput).length === 0
-  ) {
-    return text;
-  }
+): { code: string; isStructured: boolean } | undefined {
+  if (!text) return undefined;
 
   try {
     const result = JSON.parse(text) as unknown;
-    if (!result || typeof result !== 'object' || Array.isArray(result)) {
-      return text;
+    if (!result || typeof result !== 'object') {
+      return { code: text, isStructured: false };
     }
 
-    return JSON.stringify({
-      ...(result as Record<string, unknown>),
-      ...visibleToolInput,
-    });
+    const details =
+      !Array.isArray(result) &&
+      visibleToolInput &&
+      Object.keys(visibleToolInput).length > 0
+        ? { ...(result as Record<string, unknown>), ...visibleToolInput }
+        : result;
+
+    return {
+      code: YAML.stringify(details, { indent: 2, lineWidth: 0 }).trimEnd(),
+      isStructured: true,
+    };
   } catch {
-    return text;
+    return { code: text, isStructured: false };
   }
 }
 
