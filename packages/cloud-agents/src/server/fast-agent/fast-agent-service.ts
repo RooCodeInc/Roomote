@@ -28,10 +28,9 @@ import {
   touchSessionActivity,
 } from '@roomote/db/server';
 import {
+  evaluateDeploymentFeatureFlag,
   FeatureFlag,
-  getFeatureFlagEvaluator,
 } from '@roomote/feature-flags/server';
-import { getRedis } from '@roomote/redis';
 import { Env } from '@roomote/env';
 import { z } from 'zod';
 
@@ -1478,11 +1477,9 @@ export async function answerFastAgentQuestion({
               let linkedSession: Awaited<ReturnType<typeof getSessionForTask>> =
                 null;
               try {
-                sessionCommsEnabled = await getFeatureFlagEvaluator(
-                  getRedis(),
-                ).evaluate(FeatureFlag.SessionsComms, {
-                  isDeploymentContext: true,
-                });
+                sessionCommsEnabled = await evaluateDeploymentFeatureFlag(
+                  FeatureFlag.SessionsComms,
+                );
                 linkedSession = sessionCommsEnabled
                   ? await getSessionForTask(db, task.taskId)
                   : null;

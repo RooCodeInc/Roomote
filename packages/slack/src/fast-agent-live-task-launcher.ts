@@ -7,10 +7,9 @@ import { RunStatus } from '@roomote/types';
 import { Env } from '@roomote/env';
 import { db, getSessionForTask } from '@roomote/db/server';
 import {
+  evaluateDeploymentFeatureFlag,
   FeatureFlag,
-  getFeatureFlagEvaluator,
 } from '@roomote/feature-flags/server';
-import { getRedis } from '@roomote/redis';
 import {
   buildSlackLiveTaskCardBlocks,
   SLACK_LIVE_TASK_CARD_MESSAGES,
@@ -89,9 +88,8 @@ export function createFastAgentSlackLiveTaskLauncher(
     let destinationUrl = context.taskUrl;
 
     try {
-      sessionMode = await getFeatureFlagEvaluator(getRedis()).evaluate(
+      sessionMode = await evaluateDeploymentFeatureFlag(
         FeatureFlag.SessionsComms,
-        { isDeploymentContext: true },
       );
       const linkedSession = sessionMode
         ? await getSessionForTask(db, taskRun.taskId)

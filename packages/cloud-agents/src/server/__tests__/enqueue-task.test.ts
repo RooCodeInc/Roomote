@@ -44,8 +44,6 @@ import {
   environmentFactory,
   repositoryFactory,
 } from '@roomote/db/server';
-import { getFeatureFlagEvaluator } from '@roomote/feature-flags/server';
-import { getRedis } from '@roomote/redis';
 
 import {
   TaskRunQueue,
@@ -921,7 +919,6 @@ describe('enqueueTask Session linkage', () => {
         target: deploymentSettings.id,
         set: { metadata: { sessions_data: true } },
       });
-    await getFeatureFlagEvaluator(getRedis()).invalidateDeploymentCache();
   });
 
   afterEach(async () => {
@@ -929,7 +926,6 @@ describe('enqueueTask Session linkage', () => {
       .update(deploymentSettings)
       .set({ metadata: {} })
       .where(eq(deploymentSettings.id, 'default'));
-    await getFeatureFlagEvaluator(getRedis()).invalidateDeploymentCache();
   });
 
   it('creates exactly one Session link for a visible fresh task', async () => {

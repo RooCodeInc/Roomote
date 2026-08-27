@@ -15,10 +15,9 @@ import {
   type DatabaseOrTransaction,
 } from '@roomote/db/server';
 import {
+  evaluateDeploymentFeatureFlag,
   FeatureFlag,
-  getFeatureFlagEvaluator,
 } from '@roomote/feature-flags/server';
-import { getRedis } from '@roomote/redis';
 import { fastAgentConversationSchema } from '@roomote/types';
 
 import type { FastAgentConversation } from './fast-agent-conversation';
@@ -67,12 +66,7 @@ export interface FastAgentConversationRepository {
 }
 
 async function sessionsDataEnabled(): Promise<boolean> {
-  return getFeatureFlagEvaluator(getRedis()).evaluate(
-    FeatureFlag.SessionsData,
-    {
-      isDeploymentContext: true,
-    },
-  );
+  return evaluateDeploymentFeatureFlag(FeatureFlag.SessionsData);
 }
 
 function buildIdentityKey(conversation: FastAgentConversation): string {

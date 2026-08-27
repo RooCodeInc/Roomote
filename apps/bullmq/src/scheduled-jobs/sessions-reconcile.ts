@@ -18,11 +18,9 @@ import {
   touchSessionActivity,
 } from '@roomote/db/server';
 import {
+  evaluateDeploymentFeatureFlag,
   FeatureFlag,
-  getFeatureFlagEvaluator,
 } from '@roomote/feature-flags/server';
-
-import { getRedis } from '../redis';
 
 const LOG_PREFIX = '[sessions]';
 const BACKFILL_KEY = 'unified-sessions-v1';
@@ -214,10 +212,7 @@ async function reconcileRecentSessions(): Promise<void> {
 }
 
 export async function sessionsReconcileJob(): Promise<void> {
-  const enabled = await getFeatureFlagEvaluator(getRedis()).evaluate(
-    FeatureFlag.SessionsData,
-    { isDeploymentContext: true },
-  );
+  const enabled = await evaluateDeploymentFeatureFlag(FeatureFlag.SessionsData);
   if (!enabled) return;
 
   const state = await db.query.sessionBackfillState.findFirst({

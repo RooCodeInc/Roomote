@@ -73,8 +73,8 @@ import {
   sql,
 } from '@roomote/db/server';
 import {
+  evaluateDeploymentFeatureFlag,
   FeatureFlag,
-  getFeatureFlagEvaluator,
 } from '@roomote/feature-flags/server';
 import { type Redis, getRedis } from '@roomote/redis';
 import {
@@ -1390,9 +1390,9 @@ async function enqueueFreshLaunch(
   const { task, initiator, workflow, surface, trigger } = input;
   const visibility: TaskVisibility = input.visibility ?? 'visible';
   const linkedUserId = getTaskInitiatorLinkedUserId(initiator);
-  const sessionsDataEnabled = await getFeatureFlagEvaluator(
-    getRedis(),
-  ).evaluate(FeatureFlag.SessionsData, { isDeploymentContext: true });
+  const sessionsDataEnabled = await evaluateDeploymentFeatureFlag(
+    FeatureFlag.SessionsData,
+  );
 
   await assertUserIsNotDeleted(linkedUserId);
 

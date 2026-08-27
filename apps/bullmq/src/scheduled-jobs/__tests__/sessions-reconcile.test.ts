@@ -8,9 +8,6 @@ import {
   taskFactory,
   userFactory,
 } from '@roomote/db/server';
-import { getFeatureFlagEvaluator } from '@roomote/feature-flags/server';
-
-import { getRedis } from '../../redis';
 import { sessionsReconcileJob } from '../sessions-reconcile';
 
 describe('sessionsReconcileJob', () => {
@@ -22,7 +19,6 @@ describe('sessionsReconcileJob', () => {
         target: deploymentSettings.id,
         set: { metadata: { sessions_data: true } },
       });
-    await getFeatureFlagEvaluator(getRedis()).invalidateDeploymentCache();
   });
 
   afterEach(async () => {
@@ -30,7 +26,6 @@ describe('sessionsReconcileJob', () => {
       .update(deploymentSettings)
       .set({ metadata: {} })
       .where(eq(deploymentSettings.id, 'default'));
-    await getFeatureFlagEvaluator(getRedis()).invalidateDeploymentCache();
   });
 
   it('backfills Fast conversations and visible tasks idempotently', async () => {
