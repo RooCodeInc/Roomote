@@ -182,7 +182,7 @@ describe('Fast session detail page', () => {
         sessionId: 'session-2',
         canReply: true,
         initialTitle: 'Rotate the API keys',
-        fallbackTitle: 'Session',
+        fallbackTitle: 'New session',
       }),
       undefined,
     );

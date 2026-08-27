@@ -159,7 +159,7 @@ export default async function SessionDetailPage({
   );
   const fallbackTitle =
     getTextFromContentBlocks(initialUserMessage?.contentBlocks ?? [])?.trim() ||
-    'Session';
+    'New session';
 
   return (
     <SessionWorkspace session={sessionInfo}>

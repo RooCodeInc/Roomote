@@ -39,7 +39,7 @@ export function FastSessionCard({
   const activityDate = new Date(session.updatedAt);
   const title =
     session.title ??
-    (session.surface === 'web' ? 'Session' : session.conversationId);
+    (session.surface === 'web' ? 'New session' : session.conversationId);
 
   return (
     <div

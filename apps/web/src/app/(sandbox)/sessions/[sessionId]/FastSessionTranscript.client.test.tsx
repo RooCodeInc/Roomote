@@ -551,11 +551,11 @@ describe('FastSessionTranscript', () => {
       <FastSessionTranscript
         sessionId="session-1"
         initialMessages={[]}
-        fallbackTitle="Session"
+        fallbackTitle="New session"
       />,
     );
 
-    expect(screen.getByText('Session')).toBeInTheDocument();
+    expect(screen.getByText('New session')).toBeInTheDocument();
 
     act(() => {
       FakeEventSource.instances[0]!.emit('session', {

@@ -64,7 +64,7 @@ export function FastSessionTranscript({
   hasOlderMessages,
   canReply,
   initialTitle = null,
-  fallbackTitle = 'Session',
+  fallbackTitle = 'New session',
   sessionModel = null,
   sessionReasoningEffort = null,
   defaultModelId = null,
