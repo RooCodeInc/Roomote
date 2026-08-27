@@ -551,7 +551,9 @@ describe('InferenceProviderSection', () => {
     renderInferenceProviderSection();
 
     // Locale-independent: currency separators and symbols vary by environment.
-    expect(screen.getByText(/Credits:.*left/i)).toBeInTheDocument();
+    expect(
+      screen.getByText(/12[.,]50.*of.*50[.,]00.*left/i),
+    ).toBeInTheDocument();
     expect(
       screen.getByRole('progressbar', { name: 'Credit balance' }),
     ).toBeInTheDocument();
@@ -680,7 +682,9 @@ describe('InferenceProviderSection', () => {
 
     expect(screen.getByText('xAI (Grok subscription)')).toBeInTheDocument();
     expect(screen.getByText('xAI')).toBeInTheDocument();
-    expect(screen.getByLabelText('API key for xAI')).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Edit xAI API key' }),
+    ).toBeInTheDocument();
     expect(
       screen.getByText(/subscription is preferred at runtime/i),
     ).toBeInTheDocument();
@@ -779,17 +783,13 @@ describe('InferenceProviderSection', () => {
     ).not.toBeInTheDocument();
   });
 
-  it('masks a saved key on a connected row and allows rotating it', async () => {
+  it('opens an edit dialog for a saved key and allows rotating it', async () => {
     providerSetupData.current = buildProviderSetup({
       anthropicSavedKey: true,
     });
     mutateAsyncMock.mockResolvedValue({});
 
     renderInferenceProviderSection();
-
-    expect(screen.getByLabelText('API key for Anthropic')).toHaveValue(
-      '••••••••••••••••••••••••••••',
-    );
 
     fireEvent.click(
       screen.getByRole('button', { name: 'Edit Anthropic API key' }),
@@ -929,7 +929,7 @@ describe('InferenceProviderSection', () => {
     renderInferenceProviderSection();
 
     expect(screen.getByText('Roomote inference')).toBeInTheDocument();
-    expect(screen.getByText(/Credits:.*left/i)).toBeInTheDocument();
+    expect(screen.getByText(/3[.,]00.*of.*5[.,]00.*left/i)).toBeInTheDocument();
     expect(
       screen.getByRole('progressbar', { name: 'Credit balance' }),
     ).toBeInTheDocument();
@@ -946,17 +946,13 @@ describe('InferenceProviderSection', () => {
     ).not.toBeInTheDocument();
   });
 
-  it('locks a runtime env-managed key behind a masked field and lock tooltip', () => {
+  it('locks a runtime env-managed key behind a lock tooltip', () => {
     providerSetupData.current = buildProviderSetup({
       openrouterRuntimeKey: true,
     });
 
     renderInferenceProviderSection();
 
-    expect(screen.getByLabelText('API key for OpenRouter')).toHaveValue(
-      '••••••••••••••••••••••••••••',
-    );
-    expect(screen.getByLabelText('API key for OpenRouter')).toBeDisabled();
     expect(
       screen.getByLabelText(
         'OpenRouter API key is managed by OPENROUTER_API_KEY',
