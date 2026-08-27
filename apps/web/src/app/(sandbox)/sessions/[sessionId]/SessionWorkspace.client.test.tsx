@@ -47,6 +47,14 @@ function SandboxLayoutProvider({ children }: { children: ReactNode }) {
 
 function renderWorkspace({ isMobile }: { isMobile: boolean }) {
   useMediaQueryMock.mockReturnValue(!isMobile);
+  Object.defineProperty(window, 'matchMedia', {
+    writable: true,
+    value: vi.fn().mockImplementation(() => ({
+      matches: isMobile,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    })),
+  });
 
   render(
     <SandboxLayoutProvider>
@@ -62,6 +70,10 @@ describe('SessionWorkspace', () => {
     renderWorkspace({ isMobile: true });
 
     expect(screen.getByText('Session transcript')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Chat' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Session info' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Show sidebar' }));
+
     expect(screen.getByRole('button', { name: 'Chat' })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Session info' }));
@@ -113,6 +125,7 @@ describe('SessionWorkspace', () => {
   it('preserves the split panel and close control on desktop', () => {
     renderWorkspace({ isMobile: false });
 
+    expect(screen.getByRole('button', { name: 'Session info' })).toBeVisible();
     fireEvent.click(screen.getByRole('button', { name: 'Session info' }));
 
     expect(screen.getByText('Session transcript')).toBeInTheDocument();

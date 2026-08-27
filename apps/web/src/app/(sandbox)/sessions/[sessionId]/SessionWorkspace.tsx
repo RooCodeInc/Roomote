@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, type ReactNode } from 'react';
+import { useLayoutEffect, useState, type ReactNode } from 'react';
 import { formatDistanceToNow } from 'date-fns';
 
 import { formatInferenceCost, getUserDisplayName } from '@/lib';
@@ -126,7 +126,28 @@ export function SessionWorkspace({
   children: ReactNode;
 }) {
   const [isInfoOpen, setIsInfoOpen] = useState(false);
-  const { isSidebarVisible, toggleSidebar } = useSandboxLayout();
+  const { isSidebarVisible, setSidebarVisible, toggleSidebar } =
+    useSandboxLayout();
+
+  useLayoutEffect(() => {
+    const mobileQuery = window.matchMedia?.('(max-width: 767px)');
+
+    if (!mobileQuery?.matches) {
+      return;
+    }
+
+    setSidebarVisible(false);
+
+    const handleViewportChange = (event: MediaQueryListEvent) =>
+      setSidebarVisible(!event.matches);
+
+    mobileQuery.addEventListener('change', handleViewportChange);
+
+    return () => {
+      mobileQuery.removeEventListener('change', handleViewportChange);
+      setSidebarVisible(true);
+    };
+  }, [session.id, setSidebarVisible]);
 
   return (
     <WorkspaceSurface
