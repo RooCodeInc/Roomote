@@ -577,10 +577,16 @@ services:
       - /v1
       - --port
       - '7997'
+      # Multilingual defaults: memories arrive in whatever language the
+      # workspace speaks, and cross-lingual recall (an English query hitting
+      # a German Slack thread) needs a multilingual embedding space. On a
+      # smaller CPU host, Alibaba-NLP/gte-multilingual-base (768 dims) is a
+      # lighter alternative with close retrieval quality — pick before the
+      # Brain's first boot; the embedding choice is create-time.
       - --model-id
-      - ${INFINITY_EMBEDDING_MODEL:-BAAI/bge-small-en-v1.5}
+      - ${INFINITY_EMBEDDING_MODEL:-BAAI/bge-m3}
       - --model-id
-      - ${INFINITY_RERANKER_MODEL:-BAAI/bge-reranker-base}
+      - ${INFINITY_RERANKER_MODEL:-BAAI/bge-reranker-v2-m3}
     volumes:
       - infinity_cache:/app/.cache
     security_opt:
