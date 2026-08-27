@@ -281,7 +281,6 @@ export async function processDiscordFastAgentMessage(input: {
             },
             metadata,
             channel,
-            forceNewThread: true,
             fastAgentSessionId: parentSessionId,
             fastAgentParent: {
               sessionId: parentSessionId,

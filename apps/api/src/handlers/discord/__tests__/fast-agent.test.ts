@@ -186,7 +186,28 @@ describe('processDiscordFastAgentMessage', () => {
         }),
         editMessage: vi.fn().mockResolvedValue(undefined),
       };
-      mocks.answerQuestion.mockResolvedValueOnce('A quick answer');
+      mocks.answerQuestion.mockImplementationOnce(
+        async ({
+          adapter,
+        }: {
+          adapter: {
+            launchTask: (input: {
+              prompt: string;
+              environmentId: string;
+              parentSessionId: string;
+              postKickoff: () => Promise<void>;
+            }) => Promise<unknown>;
+          };
+        }) => {
+          await adapter.launchTask({
+            prompt: 'Fix the flaky tests',
+            environmentId: ALL_REPOSITORIES,
+            parentSessionId: 'session-1',
+            postKickoff: vi.fn().mockResolvedValue(undefined),
+          });
+          return 'A quick answer';
+        },
+      );
 
       await processDiscordFastAgentMessage({
         event: { eventId: 'source-1' } as never,
@@ -237,6 +258,22 @@ describe('processDiscordFastAgentMessage', () => {
           }),
           replyToMessageId: 'source-1',
         }),
+      );
+      expect(mocks.startTask).toHaveBeenCalledWith(
+        expect.objectContaining({
+          channel: expect.objectContaining({
+            channelId: 'source-1',
+            parentChannelId: 'channel-1',
+            isThread: true,
+          }),
+          metadata: expect.objectContaining({
+            communicationChannelId: 'channel-1',
+            communicationThreadId: 'source-1',
+          }),
+        }),
+      );
+      expect(mocks.startTask.mock.calls[0]?.[0]).not.toHaveProperty(
+        'forceNewThread',
       );
     },
   );
