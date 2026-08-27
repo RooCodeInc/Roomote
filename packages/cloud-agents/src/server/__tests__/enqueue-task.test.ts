@@ -24,6 +24,7 @@ import {
   TASK_KICKOFF_MESSAGE_SOURCE,
   ACP_ENVELOPE_EVENT_TYPES,
   ROOMOTE_RUNTIME_TASK_MESSAGE_PROTOCOL,
+  buildFastAgentChildTaskMetadata,
 } from '@roomote/types';
 import {
   db,
@@ -36,6 +37,7 @@ import {
   taskPullRequests,
   taskRunEvents,
   deploymentSettings,
+  sessions,
   users,
   environments,
   environmentRepositoryMappings,
@@ -63,6 +65,7 @@ import {
 } from '../task-run-queue';
 import { LLM_TITLE_LOCKED_CHECKPOINT } from '../llm-task-title';
 import { applyTaskModelSelectionToRun } from '../task-model-selection';
+import { fastAgentConversationRepository } from '../fast-agent/fast-agent-conversation-repository';
 
 const createdTaskIds: string[] = [];
 const createdUserIds: string[] = [];
@@ -961,6 +964,53 @@ describe('enqueueTask Session linkage', () => {
     await expect(
       db.select().from(sessionTasks).where(eq(sessionTasks.taskId, run.taskId)),
     ).resolves.toEqual([]);
+  });
+
+  it('links a delegated Fast task when the general Sessions data rollout is off', async () => {
+    await db
+      .update(deploymentSettings)
+      .set({ metadata: {} })
+      .where(eq(deploymentSettings.id, 'default'));
+    invalidateDeploymentFeatureFlagCache();
+
+    const userId = await createUser();
+    const conversation = {
+      surface: 'web' as const,
+      workspaceId: userId,
+      conversationId: `session-link-${userId}`,
+    };
+    const fastSession = await fastAgentConversationRepository.getOrCreate({
+      userId,
+      conversation,
+    });
+    const run = await launchFresh({
+      task: standardTaskInput({
+        payload: {
+          repo: 'acme/widgets',
+          description: 'Delegated Fast task',
+          ...buildFastAgentChildTaskMetadata({
+            sessionId: fastSession.id,
+            conversation,
+          }),
+        },
+      }),
+      initiator: { kind: 'user', userId },
+      workflow: 'standard',
+      surface: 'web',
+      trigger: 'message',
+    });
+
+    const [link] = await db
+      .select()
+      .from(sessionTasks)
+      .where(eq(sessionTasks.taskId, run.taskId));
+    const [session] = await db
+      .select({ fastConversationId: sessions.fastConversationId })
+      .from(sessions)
+      .where(eq(sessions.id, link!.sessionId));
+
+    expect(link?.origin).toBe('fast_delegation');
+    expect(session?.fastConversationId).toBe(fastSession.id);
   });
 });
 

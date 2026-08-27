@@ -51,6 +51,7 @@ import {
   ensureSessionForTask,
   isChatGptSubscriptionConnected,
   createTaskWithRetry,
+  fastAgentConversations,
   markTaskStartParallelCountEndedAt,
   projectPendingPrReviewEventsForAssociation,
   recordTaskStartParallelCount,
@@ -1487,6 +1488,19 @@ async function enqueueFreshLaunch(
     });
 
   const repositoryName = taskWithHarnessOverrides.payload.repo || null;
+  const fastParent = getFastAgentParentFromPayload(
+    taskWithHarnessOverrides.payload,
+  );
+  const hasFastParent = fastParent
+    ? await db.query.fastAgentConversations.findFirst({
+        where: eq(fastAgentConversations.id, fastParent.sessionId),
+        columns: { id: true },
+      })
+    : null;
+  const fastConversationId = hasFastParent ? fastParent?.sessionId : null;
+  // Fast task cards are part of the primary Sessions UI, so their relationship
+  // must be available immediately even while the general data rollout is off.
+  const shouldLinkSession = sessionsDataEnabled || fastConversationId !== null;
   const resolvedTaskPolicy = resolveTaskRuntimePolicy({
     taskType: taskWithHarnessOverrides.type,
     launchClass:
@@ -1645,12 +1659,10 @@ async function enqueueFreshLaunch(
         });
 
         if (activeRun) {
-          if (sessionsDataEnabled) {
+          if (shouldLinkSession) {
             await ensureSessionForTask(tx, {
               taskId: existingTask.id,
-              fastConversationId:
-                getFastAgentParentFromPayload(taskWithHarnessOverrides.payload)
-                  ?.sessionId ?? null,
+              fastConversationId,
               origin: 'follow_up',
               existingTaskReused: true,
             });
@@ -1704,13 +1716,10 @@ async function enqueueFreshLaunch(
         taskId = createdTask.id;
       }
 
-      if (sessionsDataEnabled) {
-        const fastParent = getFastAgentParentFromPayload(
-          taskWithHarnessOverrides.payload,
-        );
+      if (shouldLinkSession) {
         await ensureSessionForTask(tx, {
           taskId,
-          fastConversationId: fastParent?.sessionId ?? null,
+          fastConversationId,
           origin: fastParent
             ? 'fast_delegation'
             : existingTask
