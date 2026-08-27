@@ -1,6 +1,8 @@
 const mocks = vi.hoisted(() => ({
   acquireTurnLock: vi.fn(),
+  acquireRootBindingLock: vi.fn(),
   releaseTurnLock: vi.fn(),
+  releaseRootBindingLock: vi.fn(),
   answerQuestion: vi.fn(),
   createLauncher: vi.fn(),
   launchTask: vi.fn(),
@@ -111,6 +113,7 @@ vi.mock('@roomote/env', () => ({
 
 vi.mock('@roomote/slack', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@roomote/slack')>()),
+  acquireSlackFastRootBindingLock: mocks.acquireRootBindingLock,
   SlackNotifier: class SlackNotifier {
     postMessage = mocks.postMessage;
     updateMessage = mocks.updateMessage;
@@ -194,7 +197,11 @@ describe('deliverFastAgentParentEvent', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.acquireTurnLock.mockResolvedValue(mocks.releaseTurnLock);
+    mocks.acquireRootBindingLock.mockResolvedValue(
+      mocks.releaseRootBindingLock,
+    );
     mocks.releaseTurnLock.mockResolvedValue(undefined);
+    mocks.releaseRootBindingLock.mockResolvedValue(undefined);
     mocks.findSession.mockImplementation(
       async ({ fallbackConversation }: { fallbackConversation: unknown }) => ({
         id: parent.sessionId,
@@ -548,6 +555,15 @@ describe('deliverFastAgentParentEvent', () => {
         replyTarget: { channelId: 'C123', threadId: '101.001' },
       },
     });
+    expect(
+      mocks.acquireRootBindingLock.mock.invocationCallOrder[0],
+    ).toBeLessThan(mocks.postMessage.mock.invocationCallOrder[0]!);
+    expect(mocks.postMessage.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.bindConversation.mock.invocationCallOrder[0]!,
+    );
+    expect(mocks.bindConversation.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.releaseRootBindingLock.mock.invocationCallOrder[0]!,
+    );
   });
 
   it('keeps a failed pending Fast automation silent in Slack', async () => {

@@ -27,6 +27,7 @@ import {
 } from '@roomote/db/server';
 import { Env, getArtifactSigningKey } from '@roomote/env';
 import {
+  acquireSlackFastRootBindingLock,
   buildSlackPrReviewActionBlocks,
   createFastAgentSlackLiveTaskLauncher,
   postSlackThreadMessageWithFooterText,
@@ -611,36 +612,47 @@ async function createSlackFastAgentParentTurn(params: {
             return;
           }
 
-          const messageTs = await slack.postMessage({
-            channel: conversation.replyTarget.channelId,
-            ...buildCustomAutomationSlackMessage({
-              automationId: customAutomationId,
-              automationName,
-              text: message,
-              contentBlocks,
-              ...(params.event.type === 'task_settled'
-                ? { taskUrl: params.event.taskUrl }
-                : {}),
-            }),
-            unfurl_links: false,
-            unfurl_media: false,
-            client_msg_id: buildSlackClientMessageId(
-              `fast-automation-root:${conversation.conversationId}`,
-            ),
+          const releaseRootBindingLock = await acquireSlackFastRootBindingLock({
+            teamId: conversation.workspaceId,
+            channelId: conversation.replyTarget.channelId,
           });
-          if (!messageTs) {
-            throw new Error('Slack did not create the Fast automation result.');
-          }
-          await fastAgentConversationRepository.getOrCreate({
-            userId: session.userId,
-            conversation: {
-              ...conversation,
-              replyTarget: {
-                ...conversation.replyTarget,
-                threadId: messageTs,
+          let messageTs: string | undefined;
+          try {
+            messageTs = await slack.postMessage({
+              channel: conversation.replyTarget.channelId,
+              ...buildCustomAutomationSlackMessage({
+                automationId: customAutomationId,
+                automationName,
+                text: message,
+                contentBlocks,
+                ...(params.event.type === 'task_settled'
+                  ? { taskUrl: params.event.taskUrl }
+                  : {}),
+              }),
+              unfurl_links: false,
+              unfurl_media: false,
+              client_msg_id: buildSlackClientMessageId(
+                `fast-automation-root:${conversation.conversationId}`,
+              ),
+            });
+            if (!messageTs) {
+              throw new Error(
+                'Slack did not create the Fast automation result.',
+              );
+            }
+            await fastAgentConversationRepository.getOrCreate({
+              userId: session.userId,
+              conversation: {
+                ...conversation,
+                replyTarget: {
+                  ...conversation.replyTarget,
+                  threadId: messageTs,
+                },
               },
-            },
-          });
+            });
+          } finally {
+            await releaseRootBindingLock().catch(() => {});
+          }
           params.onReplyPosted();
           return { messageId: messageTs };
         }

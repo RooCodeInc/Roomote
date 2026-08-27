@@ -8,6 +8,7 @@ import {
 } from '@roomote/cloud-agents/server';
 import { buildFastSessionReplyFooterText } from '@roomote/communication';
 import {
+  acquireSlackFastRootBindingLock,
   buildSlackThreadReplyFooterBlock,
   getSlackThreadReplyFooterMessageTs,
   withSlackThreadReplyFooterLock,
@@ -117,13 +118,25 @@ export async function processFastAgentMessage(params: {
     // Resolve route-based aliases only after serializing the inbound Slack
     // thread. Delayed automation roots retain their original conversation
     // identity, so their canonical session has a separate turn lock.
-    const hasExistingConversation =
-      isExistingConversation ||
-      (await hasFastAgentSession(incomingConversation));
-    const session = await getOrCreateFastAgentSession({
-      userId,
-      conversation: incomingConversation,
+    const releaseRootBindingLock = await acquireSlackFastRootBindingLock({
+      teamId,
+      channelId: event.channel,
     });
+    const { hasExistingConversation, session } = await (async () => {
+      try {
+        return {
+          hasExistingConversation:
+            isExistingConversation ||
+            (await hasFastAgentSession(incomingConversation)),
+          session: await getOrCreateFastAgentSession({
+            userId,
+            conversation: incomingConversation,
+          }),
+        };
+      } finally {
+        await releaseRootBindingLock().catch(() => {});
+      }
+    })();
     const conversation = session.conversation;
     if (
       conversation.surface !== incomingConversation.surface ||

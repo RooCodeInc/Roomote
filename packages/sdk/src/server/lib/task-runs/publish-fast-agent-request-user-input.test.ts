@@ -4,6 +4,8 @@ const mocks = vi.hoisted(() => ({
   bindSession: vi.fn(),
   findInstallation: vi.fn(),
   findCustomAutomation: vi.fn(),
+  acquireRootBindingLock: vi.fn(),
+  releaseRootBindingLock: vi.fn(),
   acquireLock: vi.fn(),
   releaseLock: vi.fn(),
   getPending: vi.fn(),
@@ -45,6 +47,7 @@ vi.mock('@roomote/redis', () => ({
 
 vi.mock('@roomote/slack', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@roomote/slack')>()),
+  acquireSlackFastRootBindingLock: mocks.acquireRootBindingLock,
   buildSlackRequestUserInputBlocks: mocks.buildBlocks,
   getPendingSlackRequestUserInput: mocks.getPending,
   setPendingSlackRequestUserInput: mocks.setPending,
@@ -101,6 +104,10 @@ describe('publishFastAgentRequestUserInput', () => {
       id: 'automation-1',
       name: 'Weekly scan',
     });
+    mocks.acquireRootBindingLock.mockResolvedValue(
+      mocks.releaseRootBindingLock,
+    );
+    mocks.releaseRootBindingLock.mockResolvedValue(undefined);
     mocks.bindSession.mockResolvedValue(undefined);
     mocks.acquireLock.mockResolvedValue(mocks.releaseLock);
     mocks.releaseLock.mockResolvedValue(undefined);
@@ -221,6 +228,15 @@ describe('publishFastAgentRequestUserInput', () => {
     expect(mocks.setPending).toHaveBeenLastCalledWith(
       '100.001',
       expect.objectContaining({ promptMessageTs: '101.001' }),
+    );
+    expect(
+      mocks.acquireRootBindingLock.mock.invocationCallOrder[0],
+    ).toBeLessThan(mocks.postMessage.mock.invocationCallOrder[0]!);
+    expect(mocks.postMessage.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.bindSession.mock.invocationCallOrder[0]!,
+    );
+    expect(mocks.bindSession.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.releaseRootBindingLock.mock.invocationCallOrder[0]!,
     );
   });
 
