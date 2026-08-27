@@ -5,6 +5,7 @@ import {
   taskPullRequests,
   taskRuns,
   tasks,
+  desc,
   eq,
   and,
   inArray,
@@ -938,19 +939,29 @@ export async function notifyPullRequestTerminalStatus({
       db.query.taskRuns.findMany({
         where: inArray(taskRuns.taskId, taskIds),
         columns: {
+          id: true,
           taskId: true,
           payload: true,
         },
+        orderBy: [desc(taskRuns.createdAt), desc(taskRuns.id)],
       }),
     ]);
 
     const slackTargets: SlackTarget[] = [];
     const linearSessionIds: string[] = [];
     const fastFallbackTaskIds = new Set(includeFastParentTaskIds);
+    const latestRunByTaskId = new Map<string, (typeof linkedRuns)[number]>();
+    for (const run of linkedRuns) {
+      if (!latestRunByTaskId.has(run.taskId)) {
+        latestRunByTaskId.set(run.taskId, run);
+      }
+    }
+    const latestRuns = [...latestRunByTaskId.values()];
+    const latestRunIds = new Set(latestRuns.map((run) => run.id));
     const successfulFastConversationTargets = new Set(
       includeFastParentTargets
         ? []
-        : linkedRuns.flatMap((run) => {
+        : latestRuns.flatMap((run) => {
             if (fastFallbackTaskIds.has(run.taskId)) {
               return [];
             }
@@ -965,13 +976,16 @@ export async function notifyPullRequestTerminalStatus({
       if (!fastFallbackTaskIds.has(run.taskId)) {
         return false;
       }
+      if (!latestRunIds.has(run.id)) {
+        return false;
+      }
       const targetKey = getFastParentConversationTargetKey(run.payload);
       return !targetKey || !successfulFastConversationTargets.has(targetKey);
     };
     const fastSlackConversationTargets = includeFastParentTargets
       ? new Set<string>()
       : new Set(
-          linkedRuns.flatMap((run) => {
+          latestRuns.flatMap((run) => {
             if (fastFallbackTaskIds.has(run.taskId)) {
               return [];
             }

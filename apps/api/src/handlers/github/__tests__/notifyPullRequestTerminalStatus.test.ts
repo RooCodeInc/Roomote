@@ -85,6 +85,7 @@ vi.mock('@roomote/db/server', () => ({
   slackInstallations: {},
   githubInstallations: {},
   taskPullRequests: {},
+  desc: vi.fn((column: unknown) => ({ desc: column })),
   eq: vi.fn((...args: unknown[]) => ({ eq: args })),
   and: vi.fn((...args: unknown[]) => ({ and: args })),
   inArray: vi.fn((...args: unknown[]) => ({ inArray: args })),
@@ -416,6 +417,48 @@ describe('notifyPullRequestTerminalStatus', () => {
 
     expect(mockStickyFooterPost).not.toHaveBeenCalled();
     expect(mockAddReaction).not.toHaveBeenCalled();
+  });
+
+  it('ignores an older Fast payload when the latest run is no longer Fast', async () => {
+    mockedGithubFind.mockResolvedValue({ id: 1 } as any);
+    mockedTaskPullRequestsFind.mockResolvedValue([
+      { taskId: 'task-1' },
+      { taskId: 'task-2' },
+    ] as any);
+    mockedTaskRunsFind.mockResolvedValue([
+      {
+        id: 3,
+        taskId: 'task-1',
+        payload: {
+          communicationProvider: 'slack',
+          communicationChannelId: 'C-current',
+          communicationThreadId: 'current-thread',
+        },
+      },
+      {
+        id: 2,
+        taskId: 'task-2',
+        payload: fastParentSlackPayload('C-shared', 'shared-thread'),
+      },
+      {
+        id: 1,
+        taskId: 'task-1',
+        payload: fastParentSlackPayload('C-shared', 'shared-thread'),
+      },
+    ] as any);
+    mockedSlackFind.mockResolvedValue({ botAccessToken: 'xoxb-token' } as any);
+
+    await notifyPullRequestTerminalStatus({
+      ...baseParams,
+      includeFastParentTaskIds: ['task-2'],
+    });
+
+    expect(mockStickyFooterPost).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channel: 'C-shared',
+        threadTs: 'shared-thread',
+      }),
+    );
   });
 
   it('suppresses a task-row Slack binding that matches the Fast parent', async () => {

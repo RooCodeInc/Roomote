@@ -179,7 +179,7 @@ export async function recordPrStatusChangeInTaskHistory(
   for (const taskId of taskIds) {
     const latestRun = await db.query.taskRuns.findFirst({
       where: eq(taskRuns.taskId, taskId),
-      orderBy: [desc(taskRuns.createdAt)],
+      orderBy: [desc(taskRuns.createdAt), desc(taskRuns.id)],
       columns: { id: true, taskId: true, payload: true },
     });
 
