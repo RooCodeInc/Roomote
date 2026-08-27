@@ -377,6 +377,9 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).not.toContain(
       'attributes on the current `<slack_message>` identify its sender',
     );
+    expect(prompt).toContain(
+      '`sender_name` and `sender_github` fields identify the human sender',
+    );
   });
 
   it('uses native terminal tools for delegated-task platform events', () => {
