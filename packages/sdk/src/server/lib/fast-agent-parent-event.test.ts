@@ -158,7 +158,10 @@ vi.mock('../routers/mcp-connections', () => ({
   resolveUserMcpServerConfigs: mocks.resolveUserMcpServerConfigs,
 }));
 
-import { deliverFastAgentParentEvent } from './fast-agent-parent-event';
+import {
+  deliverFastAgentParentEvent,
+  resolveFastAgentPlatformEventPolicy,
+} from './fast-agent-parent-event';
 
 const parent = {
   sessionId: '11111111-1111-4111-8111-111111111111',
@@ -183,6 +186,28 @@ const event = {
       'https://roomote.example/task/task-1/artifacts/proof/result.png?v=1',
   },
 };
+
+describe('resolveFastAgentPlatformEventPolicy', () => {
+  it.each([
+    ['pull_request_opened', 'slack', 'default', 'optional'],
+    ['pull_request_feedback', 'slack', 'present_only', 'required'],
+    ['pull_request_conflict_detected', 'discord', 'present_only', 'required'],
+    ['pull_request_status_changed', 'slack', 'ingest_only', 'optional'],
+    ['pull_request_status_changed', 'teams', 'ingest_only', 'optional'],
+    ['pull_request_status_changed', 'telegram', 'ingest_only', 'optional'],
+    ['pull_request_status_changed', 'discord', 'ingest_only', 'optional'],
+    ['pull_request_status_changed', 'web', 'default', 'optional'],
+    ['pull_request_status_changed', 'automation', 'default', 'optional'],
+    ['automation_triggered', 'automation', 'default', 'required'],
+  ] as const)(
+    'routes %s on %s as %s/%s',
+    (eventType, surface, handling, visibility) => {
+      expect(
+        resolveFastAgentPlatformEventPolicy({ eventType, surface }),
+      ).toEqual({ handling, visibility });
+    },
+  );
+});
 
 describe('deliverFastAgentParentEvent', () => {
   beforeEach(() => {
@@ -1343,7 +1368,7 @@ describe('deliverFastAgentParentEvent', () => {
     );
   });
 
-  it('delivers a pull request status event with a stable idempotency key', async () => {
+  it('ingests a pull request status event without asking Fast to present it', async () => {
     const statusEvent = {
       type: 'pull_request_status_changed' as const,
       taskId: 'task-1',
@@ -1361,24 +1386,12 @@ describe('deliverFastAgentParentEvent', () => {
       status: 'merged' as const,
       actorLogin: 'alice',
     };
-    mocks.answerQuestion.mockImplementation(
-      async ({
-        adapter,
-      }: {
-        adapter: { postReply: (reply: unknown) => unknown };
-      }) =>
-        adapter.postReply({
-          purpose: 'closeout',
-          message: 'The pull request was merged.',
-        }),
-    );
+    mocks.answerQuestion.mockResolvedValue(undefined);
 
     await deliverFastAgentParentEvent({
       parent,
       event: { ...statusEvent, runId: 43 },
     });
-    const firstClientMessageId =
-      mocks.postMessage.mock.calls[0]?.[0]?.client_msg_id;
     await deliverFastAgentParentEvent({ parent, event: statusEvent });
 
     expect(mocks.answerQuestion).toHaveBeenCalledWith(
@@ -1387,12 +1400,11 @@ describe('deliverFastAgentParentEvent', () => {
           '"type":"pull_request_status_changed"',
         ),
         turnSource: 'platform_event',
+        platformEventHandling: 'ingest_only',
+        platformEventVisibility: 'optional',
       }),
     );
-    expect(firstClientMessageId).toEqual(expect.any(String));
-    expect(mocks.postMessage.mock.calls[1]?.[0]?.client_msg_id).toBe(
-      firstClientMessageId,
-    );
+    expect(mocks.postMessage).not.toHaveBeenCalled();
 
     await deliverFastAgentParentEvent({
       parent,

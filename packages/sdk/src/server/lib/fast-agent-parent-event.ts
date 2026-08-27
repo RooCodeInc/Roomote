@@ -8,6 +8,8 @@ import {
   createFastAgentWebTaskLauncher,
   fastAgentConversationRepository,
   resolveApiBaseUrl,
+  type FastAgentPlatformEventHandling,
+  type FastAgentPlatformEventVisibility,
   type FastAgentTurnAdapter,
   type LaunchFastAgentTask,
 } from '@roomote/cloud-agents/server';
@@ -195,6 +197,37 @@ export type FastAgentParentEvent =
       conflictDetectedAt: string;
       message: string;
     };
+
+export function resolveFastAgentPlatformEventPolicy(params: {
+  eventType: FastAgentParentEvent['type'];
+  surface: FastAgentConversation['surface'];
+}): {
+  handling: FastAgentPlatformEventHandling;
+  visibility: FastAgentPlatformEventVisibility;
+} {
+  // Communication adapters already post terminal PR status and reactions to
+  // their conversations. Fast still ingests the event for session context.
+  if (
+    params.eventType === 'pull_request_status_changed' &&
+    params.surface !== 'web' &&
+    params.surface !== 'automation'
+  ) {
+    return { handling: 'ingest_only', visibility: 'optional' };
+  }
+
+  if (
+    params.eventType === 'pull_request_feedback' ||
+    params.eventType === 'pull_request_conflict_detected'
+  ) {
+    return { handling: 'present_only', visibility: 'required' };
+  }
+
+  return {
+    handling: 'default',
+    visibility:
+      params.eventType === 'automation_triggered' ? 'required' : 'optional',
+  };
+}
 
 export async function listFastAgentPullRequestContexts(
   taskId: string,
@@ -1193,6 +1226,10 @@ export async function deliverFastAgentParentEvent(params: {
     // origin matches its own apiBaseUrl, so a mismatched pair silently drops
     // every deployment MCP server from parent-event turns.
     const apiBaseUrl = resolveApiBaseUrl() ?? undefined;
+    const eventPolicy = resolveFastAgentPlatformEventPolicy({
+      eventType: params.event.type,
+      surface: parentTurn.conversation.surface,
+    });
     await answerFastAgentQuestion({
       question: `<platform_event>${JSON.stringify(params.event)}</platform_event>`,
       userId: parentTurn.userId,
@@ -1201,17 +1238,8 @@ export async function deliverFastAgentParentEvent(params: {
       apiBaseUrl,
       signal: releaseTurnLock.signal,
       turnSource: 'platform_event',
-      platformEventHandling:
-        params.event.type === 'pull_request_feedback' ||
-        params.event.type === 'pull_request_conflict_detected'
-          ? 'present_only'
-          : 'default',
-      platformEventVisibility:
-        params.event.type === 'pull_request_feedback' ||
-        params.event.type === 'pull_request_conflict_detected' ||
-        params.event.type === 'automation_triggered'
-          ? 'required'
-          : 'optional',
+      platformEventHandling: eventPolicy.handling,
+      platformEventVisibility: eventPolicy.visibility,
       platformEventKind:
         params.event.type === 'automation_triggered'
           ? 'automation'
