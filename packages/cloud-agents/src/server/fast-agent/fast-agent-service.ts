@@ -551,11 +551,18 @@ function wrapFastAgentMessage(
     return text;
   }
 
-  return `<current_message>\n${JSON.stringify({
+  return `<current_message>\n${escapeFastAgentEnvelopeJson({
     ...(sender.displayName ? { sender_name: sender.displayName } : {}),
     ...(sender.githubLogin ? { sender_github: sender.githubLogin } : {}),
     text,
   })}\n</current_message>`;
+}
+
+function escapeFastAgentEnvelopeJson(value: Record<string, string>): string {
+  return JSON.stringify(value)
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;');
 }
 
 function wrapFastAgentThreadContext(
@@ -565,7 +572,7 @@ function wrapFastAgentThreadContext(
     const text = normalizeThreadText(message.text);
     if (!text) return [];
     return [
-      JSON.stringify({
+      escapeFastAgentEnvelopeJson({
         sender_name: message.username?.trim() || message.user,
         message_id: message.ts,
         text,
