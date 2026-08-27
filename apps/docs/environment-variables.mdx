@@ -225,7 +225,7 @@ as per-task auth tokens or workspace paths.
 | `R_BRAIN_MODEL`                        | Optional     | Memory synthesis model in the configured provider's naming. Changes apply immediately.                                                  |
 | `R_BRAIN_EMBEDDING_MODEL`              | Before first Memory boot | Embedding model id that sizes Memory's vector storage. Changing it later requires re-embedding.                              |
 | `R_BRAIN_EMBEDDING_DIMENSIONS`         | Before first Memory boot | Output width for `R_BRAIN_EMBEDDING_MODEL`; it must match the served model.                                                   |
-| `R_BRAIN_RERANKER_MODEL`               | Optional     | Memory reranker model. Use the `openrouter:` prefix for OpenRouter or a configured self-run rerank upstream.                              |
+| `R_BRAIN_RERANKER_MODEL`               | Optional     | Memory reranker model. Use OpenRouter's model id for OpenRouter, or the exact bare model id served by a self-run rerank upstream.           |
 | `R_BRAIN_EMBEDDINGS_UPSTREAM_URL`      | Optional     | OpenAI-compatible embeddings endpoint used instead of the Memory provider.                                                               |
 | `R_BRAIN_RERANK_UPSTREAM_URL`          | Optional     | OpenAI-compatible rerank endpoint used instead of OpenRouter.                                                                            |
 | `R_BRAIN_INFERENCE_UPSTREAM_API_KEY`   | Optional     | Bearer key shared by the self-run embeddings and rerank upstreams; omit it for a trusted private-network service.                         |

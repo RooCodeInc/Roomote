@@ -105,7 +105,7 @@ R_BRAIN_EMBEDDINGS_UPSTREAM_URL=http://infinity:7997
 R_BRAIN_RERANK_UPSTREAM_URL=http://infinity:7997
 R_BRAIN_EMBEDDING_MODEL=BAAI/bge-m3
 R_BRAIN_EMBEDDING_DIMENSIONS=1024
-R_BRAIN_RERANKER_MODEL=openrouter:BAAI/bge-reranker-v2-m3
+R_BRAIN_RERANKER_MODEL=BAAI/bge-reranker-v2-m3
 ```
 
 The bundled CPU service uses multilingual models so recall can cross languages.
@@ -116,9 +116,9 @@ re-embedding the corpus.
 
 The two upstream URLs can instead target any OpenAI-compatible embedding and
 rerank server. Set `R_BRAIN_INFERENCE_UPSTREAM_API_KEY` when that server requires
-a bearer key. The upstream must serve the exact model names configured above,
-and `R_BRAIN_RERANKER_MODEL` keeps the `openrouter:` prefix because Roomote
-removes it when forwarding to the rerank upstream.
+a bearer key. Roomote forwards model names unchanged to self-run upstreams, so
+`R_BRAIN_EMBEDDING_MODEL` and `R_BRAIN_RERANKER_MODEL` must exactly match the
+models that server exposes, without a provider prefix.
 
 Without a Memory key, Memory stays inert. Agents are not told it exists,
 and nothing is ingested.
@@ -224,7 +224,7 @@ Three settings pick Memory's models:
 | ----------------------------- | ----------------- | --------------------------------- | --------------------- |
 | `R_BRAIN_MODEL`               | Sourced synthesis | your provider's naming            | any time              |
 | `R_BRAIN_EMBEDDING_MODEL`     | Semantic recall   | a plain model id                  | before the first boot |
-| `R_BRAIN_RERANKER_MODEL`      | Search precision  | `openrouter:<provider>/<model-id>` | after a restart       |
+| `R_BRAIN_RERANKER_MODEL`      | Search precision  | provider or upstream naming        | after a restart       |
 
 Leave the first two unset and Memory uses OpenAI's `gpt-5.6-luna` and
 `text-embedding-3-small` through whichever provider you configured.
@@ -233,7 +233,8 @@ The reranker defaults to OpenRouter's `voyageai/rerank-2.5-lite`. Set
 `R_BRAIN_RERANKER_MODEL` to choose another model from
 OpenRouter's reranker catalog. Reranking requires an OpenRouter key; with only
 OpenAI configured, gbrain keeps the unreranked results instead of failing the
-search.
+search. When `R_BRAIN_RERANK_UPSTREAM_URL` is set, use the exact bare model id
+served by that upstream instead.
 
 The synthesis model is applied by Roomote when it forwards the call and passed
 to the provider as written, so use that provider's naming
