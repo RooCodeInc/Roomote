@@ -81,7 +81,7 @@ export async function processFastAgentMessage(params: {
     isExistingConversation = false,
   } = params;
   const threadId = event.thread_ts || event.ts;
-  const conversation = {
+  const incomingConversation = {
     surface: 'slack' as const,
     workspaceId: teamId,
     conversationId: threadId,
@@ -91,7 +91,7 @@ export async function processFastAgentMessage(params: {
     },
   };
   const releaseFastAgentLock = await acquireFastAgentTurnLock({
-    conversation,
+    conversation: incomingConversation,
   });
 
   if (!releaseFastAgentLock) {
@@ -109,11 +109,38 @@ export async function processFastAgentMessage(params: {
   const question = extractFastQuestion(normalizedText, continuation) ?? '';
 
   let didAddProcessingReaction = false;
+  let releaseCanonicalFastAgentLock: Awaited<
+    ReturnType<typeof acquireFastAgentTurnLock>
+  > = null;
 
   try {
-    // A false routing result can become stale while waiting for the turn lock.
+    // Resolve route-based aliases only after serializing the inbound Slack
+    // thread. Delayed automation roots retain their original conversation
+    // identity, so their canonical session has a separate turn lock.
     const hasExistingConversation =
-      isExistingConversation || (await hasFastAgentSession(conversation));
+      isExistingConversation ||
+      (await hasFastAgentSession(incomingConversation));
+    const session = await getOrCreateFastAgentSession({
+      userId,
+      conversation: incomingConversation,
+    });
+    const conversation = session.conversation;
+    if (
+      conversation.surface !== incomingConversation.surface ||
+      conversation.workspaceId !== incomingConversation.workspaceId ||
+      conversation.conversationId !== incomingConversation.conversationId
+    ) {
+      releaseCanonicalFastAgentLock = await acquireFastAgentTurnLock({
+        conversation,
+      });
+      if (!releaseCanonicalFastAgentLock) {
+        console.error(
+          `[SlackWebhook] Canonical Fast turn lock did not become available for session ${session.id}`,
+        );
+        return;
+      }
+    }
+
     if (!hasExistingConversation) {
       didAddProcessingReaction = await slack.addReaction({
         channel: event.channel,
@@ -121,10 +148,6 @@ export async function processFastAgentMessage(params: {
         name: processingReactionName,
       });
     }
-
-    // Resolved ahead of the turn so replies can carry the session footer;
-    // the service's own getOrCreate finds this same row.
-    const session = await getOrCreateFastAgentSession({ userId, conversation });
 
     let threadContext: Awaited<ReturnType<typeof slack.fetchThreadMessages>> =
       [];
@@ -179,7 +202,7 @@ export async function processFastAgentMessage(params: {
       apiBaseUrl,
       conversation,
       currentMessageId: event.ts,
-      signal: releaseFastAgentLock.signal,
+      signal: (releaseCanonicalFastAgentLock ?? releaseFastAgentLock).signal,
       senderExternalId: event.user,
       senderDisplayName:
         currentMessage?.user === event.user
@@ -318,6 +341,7 @@ export async function processFastAgentMessage(params: {
         })
         .catch(() => {});
     }
+    await releaseCanonicalFastAgentLock?.().catch(() => {});
     await releaseFastAgentLock().catch(() => {});
   }
 }

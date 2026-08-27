@@ -17,6 +17,7 @@ import type { FastAgentMessageWrite } from './fast-agent-conversation-repository
 
 type FastAgentSessionRecord = {
   id: string;
+  conversation: FastAgentConversation;
   compatibilityMessages: ModelMessage[];
   openCodeSessionId: string | null;
 };

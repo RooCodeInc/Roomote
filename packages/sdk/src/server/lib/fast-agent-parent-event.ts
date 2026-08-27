@@ -593,6 +593,13 @@ async function createSlackFastAgentParentTurn(params: {
             alt_text: image.altText,
           })),
         ];
+        if (
+          params.event.type === 'task_settled' &&
+          customAutomationId &&
+          params.event.status !== 'completed'
+        ) {
+          return;
+        }
 
         if (pendingAutomationRoot) {
           const shouldPostResult =
@@ -638,15 +645,25 @@ async function createSlackFastAgentParentTurn(params: {
           return { messageId: messageTs };
         }
 
-        if (params.event.type === 'automation_triggered' && !kickoff) {
+        if (
+          !kickoff &&
+          (params.event.type === 'automation_triggered' ||
+            (params.event.type === 'task_settled' && customAutomationId))
+        ) {
           const updated = await slack.updateMessage({
             channel: conversation.replyTarget.channelId,
-            ts: params.event.rootMessageId ?? threadId!,
+            ts:
+              params.event.type === 'automation_triggered'
+                ? (params.event.rootMessageId ?? threadId!)
+                : threadId!,
             message: buildCustomAutomationSlackMessage({
-              automationId: params.event.automationId,
-              automationName: params.event.automationName,
+              automationId: customAutomationId!,
+              automationName,
               text: message,
               contentBlocks,
+              ...(params.event.type === 'task_settled'
+                ? { taskUrl: params.event.taskUrl }
+                : {}),
             }),
           });
           if (!updated) {

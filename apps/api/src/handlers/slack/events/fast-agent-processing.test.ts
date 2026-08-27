@@ -3,6 +3,7 @@ const mocks = vi.hoisted(() => ({
   hasSession: vi.fn(),
   releaseLock: vi.fn(),
   answerQuestion: vi.fn(),
+  getSession: vi.fn(),
   postThreadMessage: vi.fn(),
 }));
 
@@ -25,9 +26,7 @@ vi.mock('@roomote/cloud-agents/server', () => ({
   acquireFastAgentTurnLock: mocks.acquireLock,
   answerFastAgentQuestion: mocks.answerQuestion,
   hasFastAgentSession: mocks.hasSession,
-  getOrCreateFastAgentSession: vi
-    .fn()
-    .mockResolvedValue({ id: 'fast-session-1' }),
+  getOrCreateFastAgentSession: mocks.getSession,
 }));
 
 vi.mock('@roomote/cloud-agents', () => ({
@@ -53,6 +52,12 @@ describe('processFastAgentMessage', () => {
     vi.clearAllMocks();
     mocks.acquireLock.mockResolvedValue(mocks.releaseLock);
     mocks.hasSession.mockResolvedValue(false);
+    mocks.getSession.mockImplementation(
+      async ({ conversation }: { conversation: unknown }) => ({
+        id: 'fast-session-1',
+        conversation,
+      }),
+    );
     mocks.releaseLock.mockResolvedValue(undefined);
     mocks.postThreadMessage.mockResolvedValue({
       status: 'posted',
@@ -166,6 +171,48 @@ describe('processFastAgentMessage', () => {
           { taskId: 'task-2', title: 'Update docs' },
         ],
       }),
+    );
+  });
+
+  it('resumes the canonical Fast session bound to a delayed Slack root', async () => {
+    const canonicalConversation = {
+      surface: 'slack' as const,
+      workspaceId: 'T123',
+      conversationId: 'automation-1:occurrence-1',
+      replyTarget: { channelId: 'C123', threadId: '100.001' },
+    };
+    mocks.hasSession.mockResolvedValue(true);
+    mocks.getSession.mockResolvedValue({
+      id: 'fast-session-1',
+      conversation: canonicalConversation,
+    });
+    const slack = {
+      addReaction: vi.fn().mockResolvedValue(true),
+      removeReaction: vi.fn().mockResolvedValue(true),
+      normalizeIncomingText: vi.fn(async (text: string) => text),
+      fetchThreadMessages: vi.fn(async () => []),
+    };
+
+    await processFastAgentMessage({
+      event: {
+        type: 'message',
+        channel: 'C123',
+        user: 'U123',
+        text: 'continue',
+        thread_ts: '100.001',
+        ts: '100.002',
+      } as never,
+      slack: slack as never,
+      userId: 'user-1',
+      teamId: 'T123',
+      continuation: true,
+    });
+
+    expect(mocks.acquireLock).toHaveBeenCalledWith({
+      conversation: canonicalConversation,
+    });
+    expect(mocks.answerQuestion).toHaveBeenCalledWith(
+      expect.objectContaining({ conversation: canonicalConversation }),
     );
   });
 

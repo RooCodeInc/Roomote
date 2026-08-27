@@ -580,6 +580,41 @@ describe('deliverFastAgentParentEvent', () => {
     expect(mocks.bindConversation).not.toHaveBeenCalled();
   });
 
+  it('replaces an input root with the completed automation result', async () => {
+    await deliverFastAgentParentEvent({
+      parent,
+      event: {
+        type: 'task_settled',
+        taskId: 'child-task-1',
+        runId: 42,
+        customAutomationId: 'automation-1',
+        status: 'completed',
+        taskUrl: 'https://roomote.example/task/child-task-1',
+        pullRequests: [],
+      },
+    });
+
+    expect(mocks.updateMessage).toHaveBeenCalledWith({
+      channel: 'C123',
+      ts: '100.001',
+      message: expect.objectContaining({
+        text: 'The proof is ready.',
+        blocks: expect.arrayContaining([
+          { type: 'markdown', text: 'The proof is ready.' },
+          expect.objectContaining({
+            type: 'actions',
+            elements: expect.arrayContaining([
+              expect.objectContaining({
+                action_id: 'late_bound_automation_view_task',
+              }),
+            ]),
+          }),
+        ]),
+      }),
+    });
+    expect(mocks.postMessage).not.toHaveBeenCalled();
+  });
+
   it('relays child lifecycle events into a stored automation conversation', async () => {
     const automationParent = {
       sessionId: parent.sessionId,

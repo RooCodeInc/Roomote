@@ -1,5 +1,15 @@
-import { fastAgentConversationRepository } from '@roomote/cloud-agents/server';
-import { and, db, eq, slackInstallations, taskRuns } from '@roomote/db/server';
+import {
+  fastAgentConversationRepository,
+  getTaskUrl,
+} from '@roomote/cloud-agents/server';
+import {
+  and,
+  db,
+  eq,
+  getCustomAutomationById,
+  slackInstallations,
+  taskRuns,
+} from '@roomote/db/server';
 import { acquireRedisLock } from '@roomote/redis';
 import {
   buildSlackRequestUserInputBlocks,
@@ -13,6 +23,7 @@ import {
 } from '@roomote/types';
 
 import { buildSlackClientMessageId } from '../fast-agent-parent-event';
+import { buildCustomAutomationSlackMessage } from '../manager-slack';
 
 const PUBLISH_LOCK_TTL_SECONDS = 10;
 const PUBLISH_LOCK_ATTEMPTS = 20;
@@ -20,6 +31,16 @@ const PUBLISH_LOCK_RETRY_MS = 100;
 
 async function waitForPublishRetry(): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, PUBLISH_LOCK_RETRY_MS));
+}
+
+function getCustomAutomationId(payload: unknown): string | null {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    return null;
+  }
+
+  const value = (payload as { customAutomationId?: unknown })
+    .customAutomationId;
+  return typeof value === 'string' && value ? value : null;
 }
 
 /**
@@ -66,9 +87,51 @@ export async function publishFastAgentRequestUserInput(input: {
   }
 
   const { workspaceId, replyTarget } = session.conversation;
-  const { channelId, threadId } = replyTarget;
+  const { channelId } = replyTarget;
+  let { threadId } = replyTarget;
+  const slack = new SlackNotifier(installation.botAccessToken);
   if (!threadId) {
-    return { published: false };
+    const customAutomationId = getCustomAutomationId(run.payload);
+    const automation = customAutomationId
+      ? await getCustomAutomationById(customAutomationId)
+      : null;
+    if (!customAutomationId || !automation) {
+      return { published: false };
+    }
+
+    const text = `${automation.name} needs input to continue.`;
+    threadId = await slack.postMessage({
+      channel: channelId,
+      ...buildCustomAutomationSlackMessage({
+        automationId: customAutomationId,
+        automationName: automation.name,
+        text,
+        contentBlocks: [{ type: 'markdown', text }],
+        taskUrl: getTaskUrl({
+          taskId: input.taskId,
+          utm: {
+            source: 'slack',
+            campaign: 'fast-automation-request-input',
+          },
+        }),
+      }),
+      unfurl_links: false,
+      unfurl_media: false,
+      client_msg_id: buildSlackClientMessageId(
+        `fast-automation-input-root:${session.id}`,
+      ),
+    });
+    if (!threadId) {
+      throw new Error('Slack did not create the Fast automation input thread.');
+    }
+
+    await fastAgentConversationRepository.getOrCreate({
+      userId: session.userId,
+      conversation: {
+        ...session.conversation,
+        replyTarget: { ...replyTarget, threadId },
+      },
+    });
   }
 
   const lockKey = `fast-agent:request-user-input:publish:${workspaceId}:${channelId}:${threadId}`;
@@ -122,7 +185,6 @@ export async function publishFastAgentRequestUserInput(input: {
 
     await setPendingSlackRequestUserInput(threadId, pendingRequest);
 
-    const slack = new SlackNotifier(installation.botAccessToken);
     const blocks = buildSlackRequestUserInputBlocks({
       requestId: input.requestId,
       questions: input.questions,
