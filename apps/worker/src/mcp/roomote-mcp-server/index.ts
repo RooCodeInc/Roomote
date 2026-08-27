@@ -967,6 +967,7 @@ roomoteMcpServer.registerTool(
         limit: params.limit,
         threadId: params.threadId,
         commentId: params.commentId,
+        reviewId: params.reviewId,
         resolved: params.resolved,
         reviewEvent: params.reviewEvent,
         path: params.path,
