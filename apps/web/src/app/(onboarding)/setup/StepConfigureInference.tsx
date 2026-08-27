@@ -55,7 +55,6 @@ export function StepConfigureInference({
         <div className="space-y-0.5 max-w-sm">
           <Button
             type="button"
-            size="sm"
             variant="default"
             className={choiceButtonClassName}
             disabled={chooseTrialInference.isPending}
@@ -73,7 +72,6 @@ export function StepConfigureInference({
           </Button>
           <Button
             type="button"
-            size="sm"
             variant="default"
             className={choiceButtonClassName}
             disabled={chooseTrialInference.isPending}
