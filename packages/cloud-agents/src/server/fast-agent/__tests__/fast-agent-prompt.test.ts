@@ -491,21 +491,6 @@ describe('buildFastAgentSystemPrompt', () => {
     );
   });
 
-  it('requires ingest-only platform events to remain silent', () => {
-    const prompt = buildFastAgentSystemPrompt({
-      availableEnvironments: [],
-      turnSource: 'platform_event',
-      platformEventHandling: 'ingest_only',
-    });
-
-    expect(prompt).toContain(
-      'This event has already been reported to the conversation by the owning platform automation',
-    );
-    expect(prompt).toContain('call "ignore_event"');
-    expect(prompt).toContain('do not post a reply or take any other action');
-    expect(prompt).not.toContain('This event is presentation-only');
-  });
-
   it('does not offer retry when the platform event is ineligible', () => {
     const prompt = buildFastAgentSystemPrompt({
       availableEnvironments: [],

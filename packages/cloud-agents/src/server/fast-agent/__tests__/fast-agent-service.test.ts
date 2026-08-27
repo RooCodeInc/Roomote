@@ -2017,59 +2017,6 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     });
   });
 
-  it('ingests a platform event without allowing a session-owned reply', async () => {
-    mocks.generateText.mockImplementation(
-      async (_params, _session, options) => {
-        await options.onSessionReady('opencode-session-1');
-        expect(
-          await invokeTool(nativeToolNames.sendChatReply, {
-            purpose: 'closeout',
-            message: 'The pull request was merged.',
-          }),
-        ).toEqual({
-          success: false,
-          error:
-            'This platform event is ingest-only and cannot post replies or take actions.',
-        });
-        expect(
-          await invokeTool(nativeToolNames.ignoreEvent, {
-            reason: 'already reported by the platform',
-          }),
-        ).toEqual({ success: true, ignored: true, closed: true });
-        return 'This final text must not be posted.';
-      },
-    );
-    const adapter = callbacks();
-
-    await answerFastAgentQuestion({
-      ...baseParams,
-      turnSource: 'platform_event',
-      platformEventHandling: 'ingest_only',
-      adapter,
-    });
-
-    expect(adapter.postReply).not.toHaveBeenCalled();
-  });
-
-  it('keeps ingest-only events silent when the model returns plain text', async () => {
-    mocks.generateText.mockImplementation(
-      async (_params, _session, options) => {
-        await options.onSessionReady('opencode-session-1');
-        return 'The pull request was merged.';
-      },
-    );
-    const adapter = callbacks();
-
-    await answerFastAgentQuestion({
-      ...baseParams,
-      turnSource: 'platform_event',
-      platformEventHandling: 'ingest_only',
-      adapter,
-    });
-
-    expect(adapter.postReply).not.toHaveBeenCalled();
-  });
-
   it('retries eligible task startup through a native tool', async () => {
     const retryTaskStart = vi.fn().mockResolvedValue({
       success: true,

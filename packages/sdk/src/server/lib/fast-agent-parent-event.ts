@@ -205,16 +205,6 @@ export function resolveFastAgentPlatformEventPolicy(params: {
   handling: FastAgentPlatformEventHandling;
   visibility: FastAgentPlatformEventVisibility;
 } {
-  // Communication adapters already post terminal PR status and reactions to
-  // their conversations. Fast still ingests the event for session context.
-  if (
-    params.eventType === 'pull_request_status_changed' &&
-    params.surface !== 'web' &&
-    params.surface !== 'automation'
-  ) {
-    return { handling: 'ingest_only', visibility: 'optional' };
-  }
-
   if (
     params.eventType === 'pull_request_feedback' ||
     params.eventType === 'pull_request_conflict_detected'
@@ -1162,6 +1152,34 @@ async function createFastAgentParentTurn(params: {
       return createAutomationFastAgentParentTurn(params);
     case 'web':
       return createWebFastAgentParentTurn(params);
+  }
+}
+
+/** Post a deterministic fallback only when the Fast inference path failed
+ * before producing a reply. Normal platform events should use the model turn. */
+export async function postFastAgentParentEventFallbackReply(params: {
+  parent: FastAgentParent;
+  event: FastAgentParentEvent;
+  message: string;
+}): Promise<void> {
+  let replyPosted = false;
+  try {
+    const parentTurn = await createFastAgentParentTurn({
+      parent: params.parent,
+      event: params.event,
+      onReplyPosted: () => {
+        replyPosted = true;
+      },
+    });
+    await parentTurn.adapter.postReply({
+      purpose: 'closeout',
+      message: params.message,
+    });
+  } catch (error) {
+    throw new FastAgentParentEventDeliveryError(
+      error instanceof Error ? error.message : String(error),
+      { cause: error, replyPosted },
+    );
   }
 }
 

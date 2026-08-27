@@ -127,24 +127,48 @@ type SlackReplyTarget = {
   threadId: string;
 };
 
-function resolveSlackReplyTarget(payload: unknown): SlackReplyTarget | null {
-  const directReplyTarget =
-    getCommunicationProviderFromTaskPayload(payload) === 'slack'
-      ? {
-          channelId: getCommunicationChannelFromTaskPayload(payload),
-          threadId: getCommunicationThreadIdFromTaskPayload(payload),
-        }
-      : null;
-  const fastConversation = getFastAgentParentFromPayload(payload)?.conversation;
-  const fastReplyTarget =
-    fastConversation?.surface === 'slack' ? fastConversation.replyTarget : null;
+type DirectCommunicationProvider = 'slack' | 'teams' | 'telegram' | 'discord';
+
+function isFastParentConversationTarget(params: {
+  payload: unknown;
+  provider: DirectCommunicationProvider;
+  channelId: string;
+  threadId?: string;
+}): boolean {
+  const conversation = getFastAgentParentFromPayload(
+    params.payload,
+  )?.conversation;
+  if (!conversation || conversation.surface !== params.provider) {
+    return false;
+  }
 
   return (
-    [directReplyTarget, fastReplyTarget].find(
-      (target): target is SlackReplyTarget =>
-        Boolean(target?.channelId && target.threadId),
-    ) ?? null
+    conversation.replyTarget.channelId === params.channelId &&
+    conversation.replyTarget.threadId === params.threadId
   );
+}
+
+function resolveSlackReplyTarget(payload: unknown): SlackReplyTarget | null {
+  if (getCommunicationProviderFromTaskPayload(payload) !== 'slack') {
+    return null;
+  }
+
+  const channelId = getCommunicationChannelFromTaskPayload(payload);
+  const threadId = getCommunicationThreadIdFromTaskPayload(payload);
+  if (
+    !channelId ||
+    !threadId ||
+    isFastParentConversationTarget({
+      payload,
+      provider: 'slack',
+      channelId,
+      threadId,
+    })
+  ) {
+    return null;
+  }
+
+  return { channelId, threadId };
 }
 
 function getSlackTarget(taskId: string, payload: unknown): SlackTarget | null {
@@ -197,6 +221,16 @@ function getTeamsTarget(payload: unknown): TeamsTarget | null {
   }
 
   const threadId = getCommunicationThreadIdFromTaskPayload(payload);
+  if (
+    isFastParentConversationTarget({
+      payload,
+      provider: 'teams',
+      channelId,
+      ...(threadId ? { threadId } : {}),
+    })
+  ) {
+    return null;
+  }
 
   return {
     channelId,
@@ -222,6 +256,16 @@ function getTelegramTarget(payload: unknown): TelegramTarget | null {
 
   const threadId = getCommunicationThreadIdFromTaskPayload(payload);
   const replyToMessageId = getCommunicationMessageIdFromTaskPayload(payload);
+  if (
+    isFastParentConversationTarget({
+      payload,
+      provider: 'telegram',
+      channelId: chatId,
+      ...(threadId ? { threadId } : {}),
+    })
+  ) {
+    return null;
+  }
 
   return {
     chatId,
@@ -247,6 +291,16 @@ function getDiscordTarget(payload: unknown): DiscordTarget | null {
 
   const threadId = getCommunicationThreadIdFromTaskPayload(payload);
   const reactionTarget = getDiscordReactionTargetFromTaskPayload(payload);
+  if (
+    isFastParentConversationTarget({
+      payload,
+      provider: 'discord',
+      channelId,
+      ...(threadId ? { threadId } : {}),
+    })
+  ) {
+    return null;
+  }
 
   return {
     channelId,
@@ -834,9 +888,28 @@ export async function notifyPullRequestTerminalStatus({
 
     const slackTargets: SlackTarget[] = [];
     const linearSessionIds: string[] = [];
+    const fastSlackConversationTargets = new Set(
+      linkedRuns.flatMap((run) => {
+        const conversation = getFastAgentParentFromPayload(
+          run.payload,
+        )?.conversation;
+        return conversation?.surface === 'slack' &&
+          conversation.replyTarget.threadId
+          ? [
+              `${conversation.replyTarget.channelId}\0${conversation.replyTarget.threadId}`,
+            ]
+          : [];
+      }),
+    );
 
     for (const task of linkedTasks) {
-      if (task.slackThreadTs && task.slackChannelId) {
+      if (
+        task.slackThreadTs &&
+        task.slackChannelId &&
+        !fastSlackConversationTargets.has(
+          `${task.slackChannelId}\0${task.slackThreadTs}`,
+        )
+      ) {
         slackTargets.push({
           taskId: task.id,
           slackThreadTs: task.slackThreadTs,

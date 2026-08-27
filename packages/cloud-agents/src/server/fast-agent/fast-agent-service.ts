@@ -1194,13 +1194,11 @@ export async function answerFastAgentQuestion({
         if (ownershipError) return ownershipError;
         nativeToolInvoked = true;
 
-        if (platformEventHandling !== 'default') {
+        if (platformEventHandling === 'present_only') {
           return {
             success: false,
             error:
-              platformEventHandling === 'present_only'
-                ? 'This platform event may only be presented to the user with a closeout.'
-                : 'This platform event is ingest-only and cannot post replies or take actions.',
+              'This platform event may only be presented to the user with a closeout.',
           };
         }
 
@@ -1320,16 +1318,6 @@ export async function answerFastAgentQuestion({
             success: false,
             error:
               'This platform event may only be presented to the user with a closeout.',
-          };
-        }
-        if (
-          platformEventHandling === 'ingest_only' &&
-          call.name !== FAST_AGENT_NATIVE_TOOL_NAMES.ignoreEvent
-        ) {
-          return {
-            success: false,
-            error:
-              'This platform event is ingest-only and cannot post replies or take actions.',
           };
         }
 
@@ -1933,9 +1921,7 @@ export async function answerFastAgentQuestion({
     });
 
     throwIfTurnCancelled();
-    if (!closed && platformEventHandling === 'ingest_only') {
-      closed = true;
-    } else if (!closed) {
+    if (!closed) {
       const message = promptText.trim();
       if (message) {
         await postReply(

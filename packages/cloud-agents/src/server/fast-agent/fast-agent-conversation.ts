@@ -20,10 +20,7 @@ export type FastAgentTurnSource = 'human' | 'platform_event';
 
 export type FastAgentPlatformEventVisibility = 'optional' | 'required';
 
-export type FastAgentPlatformEventHandling =
-  | 'default'
-  | 'present_only'
-  | 'ingest_only';
+export type FastAgentPlatformEventHandling = 'default' | 'present_only';
 
 export type FastAgentPlatformEventKind = 'delegated_task' | 'automation';
 

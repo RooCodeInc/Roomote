@@ -160,6 +160,7 @@ vi.mock('../routers/mcp-connections', () => ({
 
 import {
   deliverFastAgentParentEvent,
+  postFastAgentParentEventFallbackReply,
   resolveFastAgentPlatformEventPolicy,
 } from './fast-agent-parent-event';
 
@@ -192,10 +193,10 @@ describe('resolveFastAgentPlatformEventPolicy', () => {
     ['pull_request_opened', 'slack', 'default', 'optional'],
     ['pull_request_feedback', 'slack', 'present_only', 'required'],
     ['pull_request_conflict_detected', 'discord', 'present_only', 'required'],
-    ['pull_request_status_changed', 'slack', 'ingest_only', 'optional'],
-    ['pull_request_status_changed', 'teams', 'ingest_only', 'optional'],
-    ['pull_request_status_changed', 'telegram', 'ingest_only', 'optional'],
-    ['pull_request_status_changed', 'discord', 'ingest_only', 'optional'],
+    ['pull_request_status_changed', 'slack', 'default', 'optional'],
+    ['pull_request_status_changed', 'teams', 'default', 'optional'],
+    ['pull_request_status_changed', 'telegram', 'default', 'optional'],
+    ['pull_request_status_changed', 'discord', 'default', 'optional'],
     ['pull_request_status_changed', 'web', 'default', 'optional'],
     ['pull_request_status_changed', 'automation', 'default', 'optional'],
     ['automation_triggered', 'automation', 'default', 'required'],
@@ -1368,7 +1369,7 @@ describe('deliverFastAgentParentEvent', () => {
     );
   });
 
-  it('ingests a pull request status event without asking Fast to present it', async () => {
+  it('delivers a pull request status event with a stable idempotency key', async () => {
     const statusEvent = {
       type: 'pull_request_status_changed' as const,
       taskId: 'task-1',
@@ -1386,12 +1387,24 @@ describe('deliverFastAgentParentEvent', () => {
       status: 'merged' as const,
       actorLogin: 'alice',
     };
-    mocks.answerQuestion.mockResolvedValue(undefined);
+    mocks.answerQuestion.mockImplementation(
+      async ({
+        adapter,
+      }: {
+        adapter: { postReply: (reply: unknown) => unknown };
+      }) =>
+        adapter.postReply({
+          purpose: 'closeout',
+          message: 'The pull request was merged.',
+        }),
+    );
 
     await deliverFastAgentParentEvent({
       parent,
       event: { ...statusEvent, runId: 43 },
     });
+    const firstClientMessageId =
+      mocks.postMessage.mock.calls[0]?.[0]?.client_msg_id;
     await deliverFastAgentParentEvent({ parent, event: statusEvent });
 
     expect(mocks.answerQuestion).toHaveBeenCalledWith(
@@ -1400,11 +1413,14 @@ describe('deliverFastAgentParentEvent', () => {
           '"type":"pull_request_status_changed"',
         ),
         turnSource: 'platform_event',
-        platformEventHandling: 'ingest_only',
+        platformEventHandling: 'default',
         platformEventVisibility: 'optional',
       }),
     );
-    expect(mocks.postMessage).not.toHaveBeenCalled();
+    expect(firstClientMessageId).toEqual(expect.any(String));
+    expect(mocks.postMessage.mock.calls[1]?.[0]?.client_msg_id).toBe(
+      firstClientMessageId,
+    );
 
     await deliverFastAgentParentEvent({
       parent,
@@ -1453,6 +1469,42 @@ describe('deliverFastAgentParentEvent', () => {
       timestamp: '100.001',
       name: 'white_check_mark',
     });
+  });
+
+  it('posts a terminal fallback through the Fast conversation adapter', async () => {
+    const statusEvent = {
+      type: 'pull_request_status_changed' as const,
+      taskId: 'task-1',
+      runId: 42,
+      taskUrl: 'https://roomote.example/task/task-1',
+      pullRequest: {
+        provider: 'github' as const,
+        host: 'github.com',
+        repository: 'acme/web',
+        number: 42,
+        title: 'Fix review feedback',
+        url: 'https://github.com/acme/web/pull/42',
+        status: 'merged' as const,
+      },
+      status: 'merged' as const,
+      actorLogin: 'alice',
+    };
+
+    await postFastAgentParentEventFallbackReply({
+      parent,
+      event: statusEvent,
+      message: 'The pull request was merged by alice.',
+    });
+
+    expect(mocks.answerQuestion).not.toHaveBeenCalled();
+    expect(mocks.postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channel: 'C123',
+        thread_ts: '100.001',
+        text: expect.stringContaining('The pull request was merged by alice.'),
+        client_msg_id: expect.any(String),
+      }),
+    );
   });
 
   it('lets a settled task event re-query the remaining active task set', async () => {

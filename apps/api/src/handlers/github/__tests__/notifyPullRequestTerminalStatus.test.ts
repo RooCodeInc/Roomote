@@ -132,14 +132,22 @@ const discordPayload = {
 };
 
 function fastParentSlackPayload(channelId: string, threadId: string) {
+  return fastParentPayload('slack', channelId, threadId);
+}
+
+function fastParentPayload(
+  surface: 'slack' | 'teams' | 'telegram' | 'discord',
+  channelId: string,
+  threadId?: string,
+) {
   return {
     fastAgentParent: {
       sessionId: '00000000-0000-4000-8000-000000000001',
       conversation: {
-        surface: 'slack',
+        surface,
         workspaceId: 'T123',
-        conversationId: threadId,
-        replyTarget: { channelId, threadId },
+        conversationId: threadId ?? channelId,
+        replyTarget: { channelId, ...(threadId ? { threadId } : {}) },
       },
     },
   };
@@ -270,60 +278,59 @@ describe('notifyPullRequestTerminalStatus', () => {
     expect(SLACK_PR_CLOSED_REACTION_EMOJI).toBe('-1');
   });
 
-  it.each([
-    {
-      label: 'direct task-run',
-      payload: {
-        communicationProvider: 'slack',
-        communicationChannelId: 'CSHARED',
-        communicationThreadId: 'shared-thread-ts',
+  it('normalizes a direct task-run Slack binding through the delivery path', async () => {
+    mockedGithubFind.mockResolvedValue({ id: 1 } as any);
+    mockedTaskPullRequestsFind.mockResolvedValue([{ taskId: 'task-1' }] as any);
+    mockedTaskRunsFind.mockResolvedValue([
+      {
+        taskId: 'task-1',
+        payload: {
+          communicationProvider: 'slack',
+          communicationChannelId: 'CSHARED',
+          communicationThreadId: 'shared-thread-ts',
+        },
       },
-    },
-    {
-      label: 'Fast-parent',
-      payload: fastParentSlackPayload('CSHARED', 'shared-thread-ts'),
-    },
-  ])(
-    'normalizes $label Slack bindings through one delivery path',
-    async ({ payload }) => {
-      mockedGithubFind.mockResolvedValue({ id: 1 } as any);
-      mockedTaskPullRequestsFind.mockResolvedValue([
-        { taskId: 'task-1' },
-      ] as any);
-      mockedTaskRunsFind.mockResolvedValue([
-        { taskId: 'task-1', payload },
-      ] as any);
-      mockedSlackFind.mockResolvedValue({
-        botAccessToken: 'xoxb-token',
-      } as any);
+    ] as any);
+    mockedSlackFind.mockResolvedValue({ botAccessToken: 'xoxb-token' } as any);
 
-      await notifyPullRequestTerminalStatus({
-        ...baseParams,
-        status: 'closed',
-        actorLogin: 'closer',
-      });
+    await notifyPullRequestTerminalStatus({
+      ...baseParams,
+      status: 'closed',
+      actorLogin: 'closer',
+    });
 
-      expect(mockStickyFooterPost).toHaveBeenCalledWith(
-        expect.objectContaining({
-          channel: 'CSHARED',
-          threadTs: 'shared-thread-ts',
-          taskId: 'task-1',
-        }),
-      );
-      expect(mockAddReaction).toHaveBeenCalledWith({
+    expect(mockStickyFooterPost).toHaveBeenCalledWith(
+      expect.objectContaining({
         channel: 'CSHARED',
-        timestamp: 'shared-thread-ts',
-        name: SLACK_PR_CLOSED_REACTION_EMOJI,
-      });
-      expect(mockRemoveReaction).toHaveBeenCalledWith({
-        channel: 'CSHARED',
-        timestamp: 'shared-thread-ts',
-        name: 'eyes',
-      });
-    },
-  );
+        threadTs: 'shared-thread-ts',
+        taskId: 'task-1',
+      }),
+    );
+  });
 
-  it('deduplicates an overlapping Fast-parent binding when cleanup rejects', async () => {
+  it('does not post the canned status directly to a Fast parent conversation', async () => {
+    mockedGithubFind.mockResolvedValue({ id: 1 } as any);
+    mockedTaskPullRequestsFind.mockResolvedValue([{ taskId: 'task-1' }] as any);
+    mockedTaskRunsFind.mockResolvedValue([
+      {
+        taskId: 'task-1',
+        payload: {
+          communicationProvider: 'slack',
+          communicationChannelId: 'CSHARED',
+          communicationThreadId: 'shared-thread-ts',
+          ...fastParentSlackPayload('CSHARED', 'shared-thread-ts'),
+        },
+      },
+    ] as any);
+
+    await notifyPullRequestTerminalStatus(baseParams);
+
+    expect(mockStickyFooterPost).not.toHaveBeenCalled();
+    expect(mockAddReaction).not.toHaveBeenCalled();
+    expect(mockRemoveReaction).not.toHaveBeenCalled();
+  });
+
+  it('suppresses a task-row Slack binding that matches the Fast parent', async () => {
     mockedGithubFind.mockResolvedValue({ id: 1 } as any);
     mockedTaskPullRequestsFind.mockResolvedValue([{ taskId: 'task-1' }] as any);
     mockedTasksFind.mockResolvedValue([
@@ -340,14 +347,38 @@ describe('notifyPullRequestTerminalStatus', () => {
         payload: fastParentSlackPayload('C123', 'thread-ts-1'),
       },
     ] as any);
-    mockedSlackFind.mockResolvedValue({ botAccessToken: 'xoxb-token' } as any);
-    mockRemoveReaction.mockRejectedValueOnce(new Error('Slack unavailable'));
 
     await notifyPullRequestTerminalStatus(baseParams);
 
-    expect(mockStickyFooterPost).toHaveBeenCalledTimes(1);
-    expect(mockAddReaction).toHaveBeenCalledTimes(1);
-    expect(mockRemoveReaction).toHaveBeenCalledTimes(1);
+    expect(mockStickyFooterPost).not.toHaveBeenCalled();
+    expect(mockAddReaction).not.toHaveBeenCalled();
+    expect(mockRemoveReaction).not.toHaveBeenCalled();
+  });
+
+  it('keeps a child-task Slack thread distinct from the Fast parent conversation', async () => {
+    mockedGithubFind.mockResolvedValue({ id: 1 } as any);
+    mockedTaskPullRequestsFind.mockResolvedValue([{ taskId: 'task-1' }] as any);
+    mockedTaskRunsFind.mockResolvedValue([
+      {
+        taskId: 'task-1',
+        payload: {
+          communicationProvider: 'slack',
+          communicationChannelId: 'C123',
+          communicationThreadId: 'child-thread',
+          ...fastParentSlackPayload('C123', 'parent-thread'),
+        },
+      },
+    ] as any);
+    mockedSlackFind.mockResolvedValue({ botAccessToken: 'xoxb-token' } as any);
+
+    await notifyPullRequestTerminalStatus(baseParams);
+
+    expect(mockStickyFooterPost).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channel: 'C123',
+        threadTs: 'child-thread',
+      }),
+    );
   });
 
   it('reports a rejected terminal reaction without failing the status post', async () => {
@@ -451,6 +482,60 @@ describe('notifyPullRequestTerminalStatus', () => {
       messageId: 'origin-msg-1',
       name: 'eyes',
     });
+  });
+
+  it('does not post provider-canned statuses to Fast parent conversations', async () => {
+    mockedGithubFind.mockResolvedValue({ id: 1 } as any);
+    mockedTaskPullRequestsFind.mockResolvedValue([{ taskId: 'task-1' }] as any);
+    mockedTaskRunsFind.mockResolvedValue([
+      {
+        payload: {
+          ...teamsPayload,
+          ...fastParentPayload('teams', 'conversation-1', 'thread-1'),
+        },
+      },
+      {
+        payload: {
+          ...telegramPayload,
+          ...fastParentPayload('telegram', 'chat-1', 'thread-1'),
+        },
+      },
+      {
+        payload: {
+          ...discordPayload,
+          ...fastParentPayload('discord', 'channel-1', 'discord-thread-1'),
+        },
+      },
+    ] as any);
+
+    await notifyPullRequestTerminalStatus(baseParams);
+
+    expect(mockGetCommunicationProviderAdapter).not.toHaveBeenCalled();
+    expect(mockPostMessage).not.toHaveBeenCalled();
+    expect(mockAddReaction).not.toHaveBeenCalled();
+    expect(mockRemoveReaction).not.toHaveBeenCalled();
+  });
+
+  it('keeps a Discord child-task thread distinct from its Fast parent', async () => {
+    mockedGithubFind.mockResolvedValue({ id: 1 } as any);
+    mockedTaskPullRequestsFind.mockResolvedValue([{ taskId: 'task-1' }] as any);
+    mockedTaskRunsFind.mockResolvedValue([
+      {
+        payload: {
+          ...discordPayload,
+          ...fastParentPayload('discord', 'channel-1', 'parent-thread'),
+        },
+      },
+    ] as any);
+
+    await notifyPullRequestTerminalStatus(baseParams);
+
+    expect(mockPostMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channelId: 'channel-1',
+        threadId: 'discord-thread-1',
+      }),
+    );
   });
 
   it('keeps a bracketed PR tag outside the Discord link label', async () => {
