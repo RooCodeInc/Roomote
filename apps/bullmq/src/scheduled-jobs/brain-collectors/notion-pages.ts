@@ -916,19 +916,6 @@ function isNotionBlock(value: unknown): value is NotionBlock {
   return !!block && asString(block.id) !== undefined;
 }
 
-/** Block containers worth descending into for child pages. */
-const NOTION_CONTAINER_BLOCK_TYPES = new Set([
-  'toggle',
-  'column_list',
-  'column',
-  'synced_block',
-  'callout',
-  'quote',
-  'bulleted_list_item',
-  'numbered_list_item',
-  'table',
-]);
-
 /**
  * Walk the inventory's block trees and data sources, emitting pages the
  * search-based sweep never surfaced. The seed side iterates
@@ -963,6 +950,17 @@ export async function collectNotionTraversal(input: {
     }
     pending.push(node);
   };
+
+  /**
+   * An ingest costs two requests (page object + markdown). Refusing to start
+   * one that cannot finish keeps the pass inside its budget, and stopping at
+   * the page limit prevents an overshoot the engine would answer by
+   * withholding state persistence — which would retry this same traversal
+   * state forever.
+   */
+  const canIngestAnotherPage = () =>
+    requests + 2 <= NOTION_MAX_TRAVERSAL_REQUESTS_PER_PASS &&
+    pages.length < input.limit;
 
   const isKnownPage = async (pageId: string): Promise<boolean> => {
     if (seenThisPass.has(pageId)) {
@@ -1053,21 +1051,46 @@ export async function collectNotionTraversal(input: {
         }
         throw error;
       }
+      // Containers found in this response are committed only if the whole
+      // response is processed. On a mid-response stop the node re-queues
+      // with the same cursor, so committing eagerly would duplicate these
+      // pushes when the response is re-listed next pass. Ingest-driven
+      // pushes (a discovered page's own subtree) stay immediate: a page
+      // ingests exactly once, so they cannot repeat.
+      const discoveredContainers: NotionTraverseNode[] = [];
+      let stoppedMidResponse = false;
       for (const raw of listed.results ?? []) {
         if (!isNotionBlock(raw) || !raw.id) {
           continue;
         }
         if (raw.type === 'child_page') {
+          if (!canIngestAnotherPage()) {
+            stoppedMidResponse = true;
+            break;
+          }
           await ingestDiscoveredPage(raw.id);
         } else if (raw.type === 'child_database') {
-          pushPending({ kind: 'database', id: raw.id });
+          discoveredContainers.push({ kind: 'database', id: raw.id });
         } else if (
           raw.has_children &&
-          node.depth < NOTION_TRAVERSAL_MAX_BLOCK_DEPTH &&
-          (raw.type === undefined || NOTION_CONTAINER_BLOCK_TYPES.has(raw.type))
+          node.depth < NOTION_TRAVERSAL_MAX_BLOCK_DEPTH
         ) {
-          pushPending({ kind: 'blocks', id: raw.id, depth: node.depth + 1 });
+          // Any block Notion reports as having children can hide a child
+          // page (paragraph indents, to-dos, toggleable headings, …); an
+          // allowlist here is exactly the discovery gap this phase closes.
+          discoveredContainers.push({
+            kind: 'blocks',
+            id: raw.id,
+            depth: node.depth + 1,
+          });
         }
+      }
+      if (stoppedMidResponse) {
+        pushPending(node);
+        break;
+      }
+      for (const container of discoveredContainers) {
+        pushPending(container);
       }
       if (listed.has_more && asString(listed.next_cursor)) {
         pushPending({ ...node, cursor: listed.next_cursor!.trim() });
@@ -1122,11 +1145,23 @@ export async function collectNotionTraversal(input: {
       }
       throw error;
     }
+    let stoppedMidRows = false;
     for (const raw of queried.results ?? []) {
       const id = asString(asObject(raw)?.id);
-      if (id) {
-        await ingestDiscoveredPage(id);
+      if (!id) {
+        continue;
       }
+      if (!canIngestAnotherPage()) {
+        stoppedMidRows = true;
+        break;
+      }
+      await ingestDiscoveredPage(id);
+    }
+    if (stoppedMidRows) {
+      // Re-query the same row page next pass; already-ingested rows skip via
+      // the inventory check, so the retry converges.
+      pushPending(node);
+      break;
     }
     if (queried.has_more && asString(queried.next_cursor)) {
       pushPending({ ...node, cursor: queried.next_cursor!.trim() });

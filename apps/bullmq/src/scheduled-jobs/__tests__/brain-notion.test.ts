@@ -521,6 +521,164 @@ describe('Notion traversal discovery', () => {
     expect(result.pages.map((page) => page.title)).toEqual(['Row page']);
   });
 
+  it('descends into any block with children, not just a container allowlist', async () => {
+    const parent = 'ffff6666-0000-0000-0000-000000000001';
+    const paragraph = 'ffff6666-0000-0000-0000-0000000000b1';
+    const child = 'ffff6666-0000-0000-0000-000000000002';
+    mockedListCollectorItemsAfter
+      .mockResolvedValueOnce([itemRow(parent)])
+      .mockResolvedValue([]);
+    mockedListCollectorItemsBySlugPrefix.mockResolvedValue([]);
+    mockNotionApiRequestJson.mockImplementation(async ({ path }) => {
+      if (path === `blocks/${encodeURIComponent(parent)}/children`) {
+        // A child page hiding under an indented paragraph — a block type no
+        // container allowlist would name.
+        return {
+          results: [
+            {
+              object: 'block',
+              id: paragraph,
+              type: 'paragraph',
+              has_children: true,
+            },
+          ],
+          has_more: false,
+        };
+      }
+      if (path === `blocks/${encodeURIComponent(paragraph)}/children`) {
+        return {
+          results: [{ object: 'block', id: child, type: 'child_page' }],
+          has_more: false,
+        };
+      }
+      if (path === `pages/${encodeURIComponent(child)}`) {
+        return pageObject(child, 'Indented child page');
+      }
+      if (path === `pages/${encodeURIComponent(child)}/markdown`) {
+        return { markdown: 'Body' };
+      }
+      if (path.startsWith('blocks/')) {
+        return { results: [], has_more: false };
+      }
+      throw new Error(`unexpected path ${path}`);
+    });
+
+    const result = await collectNotionTraversal({
+      config,
+      saved: savedTraverse,
+      limit: 10,
+    });
+
+    expect(result.pages.map((page) => page.title)).toEqual([
+      'Indented child page',
+    ]);
+  });
+
+  it('stops mid-response at the request budget instead of overshooting', async () => {
+    const parent = 'aaaa7777-0000-0000-0000-000000000001';
+    const children = Array.from(
+      { length: 40 },
+      (_, index) =>
+        `aaaa7777-0000-0000-0000-0000000001${String(index).padStart(2, '0')}`,
+    );
+    mockedListCollectorItemsAfter
+      .mockResolvedValueOnce([itemRow(parent)])
+      .mockResolvedValue([]);
+    mockedListCollectorItemsBySlugPrefix.mockResolvedValue([]);
+    mockNotionApiRequestJson.mockImplementation(async ({ path }) => {
+      if (path === `blocks/${encodeURIComponent(parent)}/children`) {
+        return {
+          results: children.map((id) => ({
+            object: 'block',
+            id,
+            type: 'child_page',
+          })),
+          has_more: false,
+        };
+      }
+      const pageMatch = /^pages\/([^/]+)$/.exec(path);
+      if (pageMatch) {
+        return pageObject(decodeURIComponent(pageMatch[1]!), 'Bulk child');
+      }
+      if (path.endsWith('/markdown')) {
+        return { markdown: 'Body' };
+      }
+      if (path.startsWith('blocks/')) {
+        return { results: [], has_more: false };
+      }
+      throw new Error(`unexpected path ${path}`);
+    });
+
+    const result = await collectNotionTraversal({
+      config,
+      saved: savedTraverse,
+      limit: 100,
+    });
+
+    // 12-request budget: 1 list + 5 ingests (2 requests each) = 11; the
+    // sixth candidate must not start. No page overshoot, and the node
+    // re-queues with the same cursor so the retry resumes exactly here.
+    expect(mockNotionApiRequestJson.mock.calls.length).toBeLessThanOrEqual(12);
+    expect(result.pages.length).toBeLessThanOrEqual(6);
+    const cursor = JSON.parse(result.stateUpdates![0]!.cursor as string) as {
+      mode: string;
+      traverse?: { pending: { kind: string; id: string }[] };
+    };
+    expect(cursor.mode).toBe('traverse');
+    expect(
+      cursor.traverse!.pending.some(
+        (node) => node.kind === 'blocks' && node.id === parent,
+      ),
+    ).toBe(true);
+  });
+
+  it('caps emitted pages at the collector limit', async () => {
+    const parent = 'bbbb8888-0000-0000-0000-000000000001';
+    const children = [
+      'bbbb8888-0000-0000-0000-000000000101',
+      'bbbb8888-0000-0000-0000-000000000102',
+      'bbbb8888-0000-0000-0000-000000000103',
+    ];
+    mockedListCollectorItemsAfter
+      .mockResolvedValueOnce([itemRow(parent)])
+      .mockResolvedValue([]);
+    mockedListCollectorItemsBySlugPrefix.mockResolvedValue([]);
+    mockNotionApiRequestJson.mockImplementation(async ({ path }) => {
+      if (path === `blocks/${encodeURIComponent(parent)}/children`) {
+        return {
+          results: children.map((id) => ({
+            object: 'block',
+            id,
+            type: 'child_page',
+          })),
+          has_more: false,
+        };
+      }
+      const pageMatch = /^pages\/([^/]+)$/.exec(path);
+      if (pageMatch) {
+        return pageObject(decodeURIComponent(pageMatch[1]!), 'Limited child');
+      }
+      if (path.endsWith('/markdown')) {
+        return { markdown: 'Body' };
+      }
+      if (path.startsWith('blocks/')) {
+        return { results: [], has_more: false };
+      }
+      throw new Error(`unexpected path ${path}`);
+    });
+
+    const result = await collectNotionTraversal({
+      config,
+      saved: savedTraverse,
+      limit: 2,
+    });
+
+    expect(result.pages).toHaveLength(2);
+    expect(JSON.parse(result.stateUpdates![0]!.cursor as string)).toMatchObject(
+      { mode: 'traverse' },
+    );
+  });
+
   it('completes back to idle when the inventory is exhausted', async () => {
     mockedListCollectorItemsAfter.mockResolvedValue([]);
 
