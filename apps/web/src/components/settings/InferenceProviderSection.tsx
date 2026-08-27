@@ -55,9 +55,7 @@ import { GitHubCopilotConnectDialog } from '@/components/settings/GitHubCopilotC
 import { XaiConnectDialog } from '@/components/settings/XaiConnectDialog';
 import { ProviderCreditBalanceLine } from '@/components/settings/ProviderCreditBalanceLine';
 import { SubscriptionUsageLine } from '@/components/settings/SubscriptionUsageLine';
-import { Secret } from 'modal';
 
-const MASKED_VALUE = '••••••••••••••••••••••••••••';
 const PROVIDER_GRID_ROW_CLASS =
   'grid gap-2 md:grid-cols-[minmax(160px,220px)_minmax(0,1fr)]';
 
@@ -179,12 +177,6 @@ function ConnectedProviderRow({
   const runtimeKeyLabel = provider.envVarName
     ? `${provider.label} API key is managed by ${provider.envVarName}`
     : `${provider.label} API key is managed by an environment variable`;
-  const inputValue =
-    provider.authKind === 'endpoint'
-      ? (provider.additionalEnvValues[provider.envVarName ?? ''] ??
-        'Configured endpoint')
-      : MASKED_VALUE;
-
   return (
     <div className={`${PROVIDER_GRID_ROW_CLASS} py-3 first:pt-0 last:pb-0`}>
       <div className="flex min-w-0 gap-2">
