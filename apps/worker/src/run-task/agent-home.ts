@@ -5,6 +5,7 @@ import * as path from 'node:path';
 import {
   createRoomoteAdvisorAgentPrompt,
   createRoomoteJudgeAgentPrompt,
+  OPENCODE_IDENTITY_PLUGIN_SCRIPT,
   ROOMOTE_OPENCODE_ADVISOR_AGENT_DESCRIPTION,
   ROOMOTE_OPENCODE_ADVISOR_AGENT_NAME,
   ROOMOTE_OPENCODE_JUDGE_AGENT_DESCRIPTION,
@@ -179,6 +180,8 @@ const ROOMOTE_OPENCODE_CHATGPT_GATEWAY_PLUGIN_FILE_NAME =
   'roomote-chatgpt-gateway.js';
 
 const ROOMOTE_OPENCODE_TOOL_SAFETY_PLUGIN_FILE_NAME = 'roomote-tool-safety.js';
+
+const ROOMOTE_OPENCODE_IDENTITY_PLUGIN_FILE_NAME = 'roomote-identity.js';
 
 const OPENCODE_ALLOW_ALL_PERMISSION = {
   read: 'allow',
@@ -653,6 +656,10 @@ function writeOpenCodeManagedFiles(openCodeConfigDir: string): void {
     pluginsDir,
     ROOMOTE_OPENCODE_TOOL_SAFETY_PLUGIN_FILE_NAME,
   );
+  const identityPluginPath = path.join(
+    pluginsDir,
+    ROOMOTE_OPENCODE_IDENTITY_PLUGIN_FILE_NAME,
+  );
   const silenceHookPath = path.join(
     openCodeConfigDir,
     ROOMOTE_OPENCODE_SLACK_SILENCE_HOOK_FILE_NAME,
@@ -674,6 +681,7 @@ function writeOpenCodeManagedFiles(openCodeConfigDir: string): void {
     OPENCODE_TOOL_SAFETY_PLUGIN_SCRIPT,
     'utf8',
   );
+  fs.writeFileSync(identityPluginPath, OPENCODE_IDENTITY_PLUGIN_SCRIPT, 'utf8');
   fs.writeFileSync(silenceHookPath, SLACK_SILENCE_HOOK_SCRIPT, 'utf8');
   fs.writeFileSync(stopHookPath, SLACK_STOP_HOOK_SCRIPT, 'utf8');
   fs.chmodSync(silenceHookPath, 0o755);
