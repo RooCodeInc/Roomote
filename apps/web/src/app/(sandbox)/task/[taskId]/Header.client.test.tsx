@@ -6,13 +6,11 @@ const {
   useTRPCMock,
   updateTitleMutationMock,
   parentSessionQueryMock,
-  featureFlagState,
 } = vi.hoisted(() => ({
   useSandboxLayoutMock: vi.fn(),
   useTRPCMock: vi.fn(),
   updateTitleMutationMock: vi.fn(async () => undefined),
   parentSessionQueryMock: vi.fn(),
-  featureFlagState: { sessionsUiEnabled: false },
 }));
 
 vi.mock('../../use-sandbox-layout', () => ({
@@ -21,12 +19,6 @@ vi.mock('../../use-sandbox-layout', () => ({
 
 vi.mock('@/trpc/client', () => ({
   useTRPC: useTRPCMock,
-}));
-
-vi.mock('@/hooks/useUser', () => ({
-  useAuthorizedUser: () => ({
-    featureFlags: { sessions_ui: featureFlagState.sessionsUiEnabled },
-  }),
 }));
 
 vi.mock('./TaskSessionReadTracker', () => ({
@@ -95,7 +87,6 @@ function renderHeader(
 describe('Header', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    featureFlagState.sessionsUiEnabled = false;
     parentSessionQueryMock.mockResolvedValue({
       sessionId: 'session-1',
       title: 'Parent Session',
@@ -176,17 +167,7 @@ describe('Header', () => {
     expect(screen.queryByText('OpenCode')).not.toBeInTheDocument();
   });
 
-  it('does not query or render Session breadcrumbs while Sessions UI is disabled', () => {
-    renderHeader();
-
-    expect(parentSessionQueryMock).not.toHaveBeenCalled();
-    expect(screen.queryByRole('link', { name: 'Sessions' })).toBeNull();
-    expect(screen.queryByRole('link', { name: /Go to session/ })).toBeNull();
-  });
-
-  it('renders Session breadcrumbs while Sessions UI is enabled', async () => {
-    featureFlagState.sessionsUiEnabled = true;
-
+  it('renders the parent session link regardless of the Sessions UI flag', async () => {
     renderHeader();
 
     expect(
@@ -196,6 +177,24 @@ describe('Header', () => {
       'href',
       '/sessions/session-1?task=task-123',
     );
+  });
+
+  it('links to the Fast session when the task has no unified session', async () => {
+    parentSessionQueryMock.mockResolvedValue(null);
+
+    renderHeader({
+      taskRun: {
+        payload: {
+          environmentId: 'env-1',
+          fastAgentSessionId: '00000000-0000-4000-8000-000000000001',
+        },
+        harness: 'opencode-server',
+      } as never,
+    });
+
+    expect(
+      await screen.findByRole('link', { name: /Go to session/ }),
+    ).toHaveAttribute('href', '/sessions/00000000-0000-4000-8000-000000000001');
   });
 
   it('refreshes task lists after renaming a task', async () => {
