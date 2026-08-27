@@ -154,6 +154,51 @@ describe('Fast conversation repository', () => {
     expect(resolved?.conversation).toEqual(movedConversation);
   });
 
+  it('resolves a delayed Slack root to the original Fast session', async () => {
+    const user = await createUser();
+    const pendingConversation = {
+      surface: 'slack' as const,
+      workspaceId: 'team-delayed-root',
+      conversationId: 'automation-1:occurrence-1',
+      replyTarget: { channelId: 'channel-delayed-root' },
+    };
+    const pending = await fastAgentConversationRepository.getOrCreate({
+      userId: user.id,
+      conversation: pendingConversation,
+    });
+    await fastAgentConversationRepository.getOrCreate({
+      userId: user.id,
+      conversation: {
+        ...pendingConversation,
+        replyTarget: {
+          ...pendingConversation.replyTarget,
+          threadId: 'root-delayed-root',
+        },
+      },
+    });
+    const inboundConversation = {
+      surface: 'slack' as const,
+      workspaceId: pendingConversation.workspaceId,
+      conversationId: 'root-delayed-root',
+      replyTarget: {
+        channelId: pendingConversation.replyTarget.channelId,
+        threadId: 'root-delayed-root',
+      },
+    };
+
+    expect(await hasFastAgentSession(inboundConversation)).toBe(true);
+    const resumed = await fastAgentConversationRepository.getOrCreate({
+      userId: user.id,
+      conversation: inboundConversation,
+    });
+
+    expect(resumed.id).toBe(pending.id);
+    expect(resumed.conversation).toMatchObject({
+      conversationId: pendingConversation.conversationId,
+      replyTarget: inboundConversation.replyTarget,
+    });
+  });
+
   it('isolates identical external identities by provider', async () => {
     const user = await createUser();
     const slack = await fastAgentConversationRepository.getOrCreate({
