@@ -89,6 +89,7 @@ import {
   buildPullRequestFactPage,
   buildMemoryPage,
   callBrainWriteTool,
+  isBrainUnreachable,
   drainBrainHistoricalIngestion,
   getPullRequestFactsResumeCursor,
   isBrainNotReady,
@@ -559,6 +560,56 @@ describe('postToBrain failure classification', () => {
     await expect(postToBrain(page, connection)).rejects.toSatisfy(
       isBrainRateLimited,
     );
+  });
+
+  it('classifies a transport-level failure as backpressure, not a page failure', async () => {
+    // undici's contract: fetch rejects with TypeError('fetch failed') and the
+    // real network error under `cause` — the shape produced when gbrain is
+    // mid-restart during a fleet image roll.
+    const cause = Object.assign(new Error('connect ECONNREFUSED'), {
+      code: 'ECONNREFUSED',
+    });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        throw new TypeError('fetch failed', { cause });
+      }),
+    );
+
+    await expect(postToBrain(page, connection)).rejects.toSatisfy(
+      isBrainNotReady,
+    );
+  });
+
+  it('keeps an HTTP error from a reachable brain as a per-page failure', async () => {
+    stubUpstream('internal error', 500);
+
+    const error = await postToBrain(page, connection).catch(
+      (thrown: unknown) => thrown,
+    );
+
+    // A reachable server rejecting one payload must keep consuming that
+    // page's attempts, or a poison memory would block the queue forever.
+    expect(isBrainNotReady(error)).toBe(false);
+    expect(isBrainRateLimited(error)).toBe(false);
+    expect(error).toBeInstanceOf(Error);
+  });
+
+  it('recognizes network-level causes at any nesting depth', () => {
+    expect(
+      isBrainUnreachable(
+        new TypeError('fetch failed', {
+          cause: Object.assign(new Error('read ECONNRESET'), {
+            code: 'ECONNRESET',
+          }),
+        }),
+      ),
+    ).toBe(true);
+    expect(isBrainUnreachable(new Error('socket hang up'))).toBe(true);
+    expect(isBrainUnreachable(new Error('gbrain put_page failed: 500'))).toBe(
+      false,
+    );
+    expect(isBrainUnreachable('fetch failed')).toBe(false);
   });
 
   it('calls supported gbrain write operations with the ingest credential', async () => {

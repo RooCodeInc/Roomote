@@ -109,6 +109,52 @@ export function isBrainNotReady(error: unknown): boolean {
   return error instanceof BrainNotReadyError;
 }
 
+const NETWORK_ERROR_CODES = new Set([
+  'ECONNREFUSED',
+  'ECONNRESET',
+  'ETIMEDOUT',
+  'EAI_AGAIN',
+  'ENOTFOUND',
+  'EPIPE',
+  'UND_ERR_CONNECT_TIMEOUT',
+  'UND_ERR_SOCKET',
+]);
+
+/**
+ * A throw from the transport itself — fetch rejects only when no HTTP
+ * response exists (connection refused during a gbrain deploy swap, DNS,
+ * reset), and undici wraps the real cause under `error.cause` with the
+ * top-level message being just "fetch failed". This is a property of the
+ * moment, not of the page being written, so it must never consume a
+ * memory's retry budget: with staging rolling images on every develop
+ * build, a two-minute restart window would otherwise walk perfectly good
+ * memories into a terminal state (observed 2026-08-27: 29 memories
+ * "exhausted their attempts. fetch failed").
+ */
+export function isBrainUnreachable(error: unknown): boolean {
+  let current: unknown = error;
+
+  for (let depth = 0; current && depth < 5; depth++) {
+    if (current instanceof Error) {
+      const code = (current as NodeJS.ErrnoException).code;
+      if (code && NETWORK_ERROR_CODES.has(code)) {
+        return true;
+      }
+      if (
+        current.message === 'fetch failed' ||
+        /socket hang up|other side closed/i.test(current.message)
+      ) {
+        return true;
+      }
+      current = current.cause;
+    } else {
+      break;
+    }
+  }
+
+  return false;
+}
+
 export async function callBrainWriteTool(
   connection: { baseUrl: string; token: string },
   name: string,
@@ -117,7 +163,22 @@ export async function callBrainWriteTool(
   // Shared transport; the backpressure classification below is this write
   // path's own and deliberately stays here. No timeout: put_page embeds
   // synchronously and a slow embed is backpressure, not a failure.
-  const { status, ok, body } = await postBrainToolCall(connection, name, args);
+  let response: Awaited<ReturnType<typeof postBrainToolCall>>;
+
+  try {
+    response = await postBrainToolCall(connection, name, args);
+  } catch (error) {
+    if (isBrainUnreachable(error)) {
+      throw new BrainNotReadyError(
+        `gbrain ${name} unreachable: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
+    throw error;
+  }
+
+  const { status, ok, body } = response;
 
   if (status === 429) {
     throw new BrainRateLimitedError(
@@ -555,7 +616,9 @@ async function drainOneBatch(connection: {
         ]);
         console.log(
           `${LOG_PREFIX} ${
-            isBrainRateLimited(error) ? 'rate limited by' : 'cannot embed into'
+            isBrainRateLimited(error)
+              ? 'rate limited by'
+              : 'cannot reach or embed into'
           } the brain; pausing until next tick`,
         );
         return false;
@@ -713,7 +776,9 @@ async function drainOneFastMemoryBatch(connection: {
         ]);
         console.log(
           `${LOG_PREFIX} ${
-            isBrainRateLimited(error) ? 'rate limited by' : 'cannot embed into'
+            isBrainRateLimited(error)
+              ? 'rate limited by'
+              : 'cannot reach or embed into'
           } the brain; pausing conversation-memory drain until next tick`,
         );
         return false;
