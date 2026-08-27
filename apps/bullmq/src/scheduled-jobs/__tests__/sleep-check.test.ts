@@ -496,7 +496,17 @@ describe('sleepCheckJob', () => {
       status: RunStatus.Completed,
       error: 'Auto-snapshot could not run because instance sb-1 was stopped.',
     });
-    expect(mockRecordTaskRunEvent).toHaveBeenCalled();
+    expect(mockRecordTaskRunEvent).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        runId: 42,
+        eventType: 'completed',
+        message: 'Completed idle task run #42 without a snapshot.',
+        details: expect.objectContaining({
+          decision: 'complete_without_snapshot',
+        }),
+      }),
+    );
     expect(warnSpy).not.toHaveBeenCalled();
   });
 
