@@ -120,7 +120,6 @@ vi.mock('../../mcp/roomote-mcp-server/chat-reply-satisfaction', () => ({
 type FakeHarnessManager = EventEmitter & {
   currentIsConnected: boolean;
   currentSleepAt: number | null;
-  terminalProviderErrorsAreFatal: boolean;
   callbacks?: HarnessManagerCallbacks;
   getStatus: ReturnType<typeof vi.fn>;
   resumeTask: ReturnType<typeof vi.fn>;
@@ -200,7 +199,6 @@ vi.mock('../../sandbox-server', () => ({
   HarnessManager: class FakeHarnessManager extends EventEmitter {
     currentIsConnected = true;
     currentSleepAt: number | null = null;
-    terminalProviderErrorsAreFatal = false;
     callbacks?: HarnessManagerCallbacks;
     getStatus = vi.fn(() => ({
       isConnected: this.currentIsConnected,
@@ -214,14 +212,9 @@ vi.mock('../../sandbox-server', () => ({
     cancelTask = vi.fn();
     dispose = vi.fn();
 
-    constructor(config?: {
-      callbacks?: HarnessManagerCallbacks;
-      terminalProviderErrorsAreFatal?: boolean;
-    }) {
+    constructor(config?: { callbacks?: HarnessManagerCallbacks }) {
       super();
       this.callbacks = config?.callbacks;
-      this.terminalProviderErrorsAreFatal =
-        config?.terminalProviderErrorsAreFatal ?? false;
       harnessManagerInstances.push(this as FakeHarnessManager);
     }
 
@@ -1585,9 +1578,6 @@ describe('runTask', () => {
       expect.objectContaining({
         taskType: TaskPayloadKind.GithubPrReview,
       }),
-    );
-    expect(harnessManagerInstances.at(-1)?.terminalProviderErrorsAreFatal).toBe(
-      true,
     );
   });
 

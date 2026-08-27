@@ -61,6 +61,7 @@ import {
   createTaskRunGitHubToken,
   createIssueComment,
   deleteReaction,
+  getCheckRun,
   updateCheckRun,
 } from '@roomote/github';
 import { revokeTaskRunScopedGitLabTokens } from '@roomote/gitlab';
@@ -77,7 +78,10 @@ import { settleSlackLiveTaskCardOnExit } from './settle-slack-live-task-card-on-
 import { refreshTaskTitleOnCompletion } from './record-task-message-envelope';
 import { getRedis } from '@roomote/redis';
 import { resolveSlackTaskRunRouting } from './slack-task-run-routing';
-import { getGithubPrReviewCheckResult } from './github-pr-review-check';
+import {
+  getGithubPrReviewCheckResult,
+  getTerminalReviewSummaryResult,
+} from './github-pr-review-check';
 import {
   SlackNotifier,
   buildTaskFailedMessage,
@@ -818,19 +822,40 @@ async function cleanupGithubPrReviewArtifacts(
       if (checkRunId) {
         try {
           token ??= await createTaskRunGitHubToken(run);
-          const checkResult = getGithubPrReviewCheckResult({
-            runStatus: status,
-            reviewSummaryBody: reviewSummary.body,
-            safetyNetFinalized: reviewSummary.finalized,
-            expectedHeadSha:
-              'latestObservedHeadSha' in run.payload &&
-              typeof run.payload.latestObservedHeadSha === 'string'
-                ? run.payload.latestObservedHeadSha
-                : 'headSha' in run.payload &&
-                    typeof run.payload.headSha === 'string'
-                  ? run.payload.headSha
-                  : undefined,
-          });
+          if (status === RunStatus.Canceled) {
+            const { data: currentCheckRun } = await getCheckRun(token, {
+              owner,
+              repo,
+              check_run_id: checkRunId,
+            });
+            if (currentCheckRun.status === 'completed') {
+              continue;
+            }
+          }
+
+          const expectedHeadSha =
+            'latestObservedHeadSha' in run.payload &&
+            typeof run.payload.latestObservedHeadSha === 'string'
+              ? run.payload.latestObservedHeadSha
+              : 'headSha' in run.payload &&
+                  typeof run.payload.headSha === 'string'
+                ? run.payload.headSha
+                : undefined;
+          const terminalSummaryResult =
+            status === RunStatus.Canceled && expectedHeadSha
+              ? getTerminalReviewSummaryResult({
+                  reviewSummaryBody: reviewSummary.body,
+                  expectedHeadSha,
+                })
+              : null;
+          const checkResult =
+            terminalSummaryResult ??
+            getGithubPrReviewCheckResult({
+              runStatus: status,
+              reviewSummaryBody: reviewSummary.body,
+              safetyNetFinalized: reviewSummary.finalized,
+              expectedHeadSha,
+            });
           const taskUrl = getTaskUrl({
             taskId: run.taskId,
             utm: {

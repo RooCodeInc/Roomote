@@ -1404,9 +1404,6 @@ export const runTask = async ({
     harnessManager = new HarnessManager({
       harness,
       keepaliveMs,
-      terminalProviderErrorsAreFatal:
-        taskRun.payloadKind === TaskPayloadKind.GithubPrReview ||
-        taskRun.payloadKind === TaskPayloadKind.GithubPrReviewSync,
       sandboxTimeoutMs,
       sandboxExpiresAtMs: Number.isFinite(sandboxExpiresAtMs)
         ? sandboxExpiresAtMs

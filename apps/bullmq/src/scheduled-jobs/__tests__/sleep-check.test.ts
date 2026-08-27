@@ -500,6 +500,34 @@ describe('sleepCheckJob', () => {
     expect(warnSpy).not.toHaveBeenCalled();
   });
 
+  it('cancels an active unfinished review when its due instance is already stopped', async () => {
+    mockJobQueries({
+      dueJobs: [
+        {
+          id: 105,
+          machineId: 'sb-review-stopped',
+          payloadKind: TaskPayloadKind.GithubPrReviewSync,
+          status: RunStatus.Running,
+          taskPhase: 'waiting_for_prompt',
+          vendor: 'modal',
+          snapshotId: null,
+          sleepRequestedAt: null,
+          snapshotRequestedAt: null,
+        },
+      ],
+    });
+    mockGetInstanceStatus.mockResolvedValue({ status: 'stopped' });
+
+    await sleepCheckJob();
+
+    expect(mockFinishRun).toHaveBeenCalledWith({
+      id: 105,
+      status: RunStatus.Canceled,
+      error:
+        'Due sleep handling found active instance sb-review-stopped in status stopped',
+    });
+  });
+
   it('skips idle completion when another process already claimed the row', async () => {
     mockJobQueries({
       dueJobs: [
@@ -928,7 +956,7 @@ describe('sleepCheckJob', () => {
     );
   });
 
-  it('shuts down due non-resumable jobs', async () => {
+  it('cancels an unfinished review when its due sandbox is shut down', async () => {
     const mockJob = {
       id: 99,
       machineId: 'sb-2',
@@ -964,15 +992,22 @@ describe('sleepCheckJob', () => {
     expect(setFn).toHaveBeenNthCalledWith(1, {
       sleepRequestedAt: expect.any(Date),
     });
-    expect(setFn).toHaveBeenNthCalledWith(2, {
-      sleepAt: null,
-      taskPhase: null,
-      status: RunStatus.Completed,
-      completedAt: expect.any(Date),
+    expect(mockFinishRun).toHaveBeenCalledWith({
+      id: 99,
+      status: RunStatus.Canceled,
+      error:
+        'Due sleep handling terminated the review sandbox before the review completed',
     });
-    expect(mockMaybeEnqueueBrainMemoryForCompletedRun).toHaveBeenCalledWith(
+    expect(mockMaybeEnqueueBrainMemoryForCompletedRun).not.toHaveBeenCalled();
+    expect(mockRecordTaskRunEvent).toHaveBeenCalledWith(
       expect.anything(),
-      99,
+      expect.objectContaining({
+        runId: 99,
+        eventType: 'decision',
+        details: expect.objectContaining({
+          decision: 'cancel_unfinished_review_on_sandbox_termination',
+        }),
+      }),
     );
     expect(mockRecordComputeProviderUsage).toHaveBeenCalledWith({
       runId: 99,
@@ -987,6 +1022,33 @@ describe('sleepCheckJob', () => {
       }),
     });
     expect(captureBullMqMessageMock).not.toHaveBeenCalled();
+  });
+
+  it('releases the shutdown claim when review finalization fails', async () => {
+    const mockJob = {
+      id: 104,
+      machineId: 'sb-review-finalize-retry',
+      payloadKind: TaskPayloadKind.GithubPrReview,
+      status: RunStatus.Idle,
+      taskPhase: 'waiting_for_prompt',
+      vendor: 'modal',
+      taskId: 'task-review-finalize-retry',
+      snapshotId: null,
+      sleepRequestedAt: null,
+      snapshotRequestedAt: null,
+    };
+
+    mockJobQueries({ dueJobs: [mockJob] });
+    mockGetInstanceStatus.mockResolvedValue({
+      status: 'running',
+      timeoutRemainingMs: 5 * 60 * 60 * 1_000,
+    });
+    returningFn.mockResolvedValue([{ id: 104 }]);
+    mockFinishRun.mockRejectedValueOnce(new Error('finalization failed'));
+
+    await sleepCheckJob();
+
+    expect(setFn).toHaveBeenCalledWith({ sleepRequestedAt: null });
   });
 
   it('reports provider-timeout backstop shutdowns to Sentry', async () => {
@@ -1070,6 +1132,38 @@ describe('sleepCheckJob', () => {
     });
     expect(mockDestroyInstance).not.toHaveBeenCalled();
     expect(mockEnterStandby).not.toHaveBeenCalled();
+  });
+
+  it('cancels an unfinished review whose provider instance no longer exists', async () => {
+    mockJobQueries({
+      hardLimitJobs: [
+        {
+          id: 106,
+          machineId: 'sb-review-missing',
+          payloadKind: TaskPayloadKind.GithubPrReview,
+          status: RunStatus.Running,
+          taskPhase: 'waiting_for_prompt',
+          vendor: 'azure',
+          snapshotId: null,
+          sleepRequestedAt: null,
+          snapshotRequestedAt: null,
+          sleepAt: new Date(Date.now() + 30 * 60 * 1_000),
+        },
+      ],
+    });
+    const { AzureDataPlaneError } = await import('@roomote/compute-providers');
+    mockGetInstanceStatus.mockRejectedValue(
+      new AzureDataPlaneError('Requested document not found.', 404),
+    );
+
+    await sleepCheckJob();
+
+    expect(mockFinishRun).toHaveBeenCalledWith({
+      id: 106,
+      status: RunStatus.Canceled,
+      error:
+        'Provider-timeout backstop found that instance sb-review-missing no longer exists',
+    });
   });
 
   it('completes an idle run whose azure instance no longer exists', async () => {
@@ -1696,6 +1790,35 @@ describe('sleepCheckJob', () => {
     );
   });
 
+  it('cancels an idle unfinished review when its stale sandbox is already gone', async () => {
+    const mockJob = {
+      id: 103,
+      machineId: 'sb-review-gone',
+      payloadKind: TaskPayloadKind.GithubPrReview,
+      status: RunStatus.Idle,
+      taskPhase: 'waiting_for_prompt',
+      vendor: 'modal',
+      workerHeartbeatAt: new Date(Date.now() - 5 * 60 * 1_000),
+      snapshotId: null,
+      sleepRequestedAt: null,
+      snapshotRequestedAt: null,
+      sleepAt: null,
+    };
+
+    mockJobQueries({ staleJobs: [mockJob] });
+    mockGetInstanceStatus.mockResolvedValue({ status: 'stopped' });
+    returningFn.mockResolvedValueOnce([{ id: 103 }]);
+
+    await sleepCheckJob();
+
+    expect(mockFinishRun).toHaveBeenCalledWith({
+      id: 103,
+      status: RunStatus.Canceled,
+      error:
+        'Idle session could not be snapshotted because instance sb-review-gone was stopped.',
+    });
+  });
+
   it('cancels preparing jobs with a stale heartbeat and stop request when the sandbox is gone', async () => {
     const mockJob = {
       id: 101,
@@ -1813,7 +1936,7 @@ describe('sleepCheckJob', () => {
     );
   });
 
-  it('destroys and fails stale non-resumable jobs', async () => {
+  it('destroys and cancels stale unfinished reviews', async () => {
     const mockJob = {
       id: 92,
       machineId: 'sb-non-resumable-stale',
@@ -1846,7 +1969,7 @@ describe('sleepCheckJob', () => {
     });
     expect(mockFinishRun).toHaveBeenCalledWith({
       id: 92,
-      status: RunStatus.Failed,
+      status: RunStatus.Canceled,
       error: 'Worker heartbeat stale for instance sb-non-resumable-stale',
     });
     expect(mockCreateComputeProviderMutationEventRecorder).toHaveBeenCalledWith(
@@ -1948,7 +2071,7 @@ describe('sleepCheckJob', () => {
     );
   });
 
-  it('destroys and fails non-resumable booting jobs that miss their initial heartbeat', async () => {
+  it('destroys and cancels booting reviews that miss their initial heartbeat', async () => {
     const mockJob = {
       id: 98,
       machineId: 'sb-non-resumable-booting',
@@ -1982,7 +2105,7 @@ describe('sleepCheckJob', () => {
     });
     expect(mockFinishRun).toHaveBeenCalledWith({
       id: 98,
-      status: RunStatus.Failed,
+      status: RunStatus.Canceled,
       error:
         'Initial worker heartbeat missing for instance sb-non-resumable-booting',
     });

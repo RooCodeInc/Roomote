@@ -14,6 +14,7 @@ const {
   mockTaskRunsFindFirst,
   mockNotifySourceRunOnSettle,
   mockCaptureTaskSettled,
+  mockFinishRun,
 } = vi.hoisted(() => ({
   mockDecryptSecrets: vi.fn(),
   mockEnvironmentVariablesFindMany: vi.fn(),
@@ -27,6 +28,7 @@ const {
   mockTaskRunsFindFirst: vi.fn(),
   mockNotifySourceRunOnSettle: vi.fn(),
   mockCaptureTaskSettled: vi.fn(),
+  mockFinishRun: vi.fn(),
 }));
 
 vi.mock('@roomote/db/encryption', () => ({
@@ -114,15 +116,40 @@ vi.mock('../notify-fast-agent-parent-on-settle', () => ({
   notifyFastAgentParentOnSettle: vi.fn().mockResolvedValue(undefined),
 }));
 
+vi.mock('../finish-run', () => ({
+  finishRun: (...args: unknown[]) => mockFinishRun(...args),
+}));
+
 import { resolveWorkspaceSourceControlProvider } from '@roomote/db/server';
 
 import {
+  cancelAndReleaseTaskRun,
   createSourceControlTokenForTaskRun,
   fetchResolvedRuntimeEnvVars,
   notifyCanceledTaskRunOnSettle,
   redactControlPlaneEnvVars,
   redactSourceControlProviderEnvVars,
 } from '../dequeue-helpers';
+
+describe('cancelAndReleaseTaskRun', () => {
+  it('uses the terminal finalizer so linked review artifacts cannot remain pending', async () => {
+    const taskRun = {
+      ...makeTaskRun({ repo: 'owner/repo' }),
+      payloadKind: TaskPayloadKind.GithubPrReview,
+    } as TaskRun;
+
+    await cancelAndReleaseTaskRun(
+      taskRun,
+      'Failed to create source control token.',
+    );
+
+    expect(mockFinishRun).toHaveBeenCalledWith({
+      id: taskRun.id,
+      status: RunStatus.Canceled,
+      error: 'Failed to create source control token.',
+    });
+  });
+});
 
 function makeTaskRun(payload: TaskRun['payload']): TaskRun {
   return {

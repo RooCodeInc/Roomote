@@ -2231,6 +2231,15 @@ export async function createCheckRun(
 
 type UpdateCheck = Checks['update'];
 
+type GetCheck = Checks['get'];
+
+export async function getCheckRun(
+  token: string,
+  params: GetCheck['parameters'],
+): Promise<GetCheck['response']> {
+  return getOctokit(token).rest.checks.get(params);
+}
+
 export async function updateCheckRun(
   token: string,
   params: UpdateCheck['parameters'],
