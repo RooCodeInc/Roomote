@@ -74,6 +74,7 @@ import {
   isBrainProviderConfigured,
   resetBrainProviderConfiguredCache,
   resolveEffectiveModelRuntimeEnv,
+  resolveModelProviderEnvValue,
   resolveSandboxModelRuntimeEnv,
 } from './model-runtime-config';
 import { TASK_MODEL_ROLE_DESCRIPTORS, TASK_MODEL_ROLES } from '@roomote/types';
@@ -1150,6 +1151,132 @@ describe('resolveEffectiveModelRuntimeEnv', () => {
       expect(env).not.toHaveProperty('LITELLM_API_KEY');
       expect(env).not.toHaveProperty('LITELLM_BASE_URL');
     });
+  });
+});
+
+describe('managed Roomote inference key', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockDecryptSecrets.mockImplementation(async (value) => value);
+    mockEnvironmentVariablesFindMany.mockResolvedValue([]);
+    mockResolveGitHubCopilotOpenCodeAuthContent.mockResolvedValue(null);
+    mockResolveOpenCodeAuthContent.mockResolvedValue(null);
+    mockIsChatGptSubscriptionFastModeEnabled.mockResolvedValue(false);
+    mockGetFreshXaiAccessToken.mockResolvedValue(null);
+  });
+
+  it('advertises Roomote inference as gateway-served without leaking its key', async () => {
+    mockDeploymentSettingsFindFirst.mockResolvedValue({
+      runtimeModelConfig: { roomoteModel: 'roomote/openai/gpt-5.6-luna' },
+      taskModelSettings: null,
+    });
+
+    const env = await resolveSandboxModelRuntimeEnv({
+      runtimeEnv: {},
+      deploymentEnvVars: { R_TRIAL_OPENROUTER_API_KEY: 'sk-trial' },
+    });
+
+    expect(env.R_INFERENCE_GATEWAY_KEYS?.split(',')).toContain(
+      'R_TRIAL_OPENROUTER_API_KEY',
+    );
+    expect(env).not.toHaveProperty('OPENROUTER_API_KEY');
+    expect(env).not.toHaveProperty('R_TRIAL_OPENROUTER_API_KEY');
+    expect(Object.values(env)).not.toContain('sk-trial');
+  });
+
+  it('keeps an unavailable Roomote provider on the gateway for an actionable failure', async () => {
+    mockDeploymentSettingsFindFirst.mockResolvedValue({
+      runtimeModelConfig: { roomoteModel: 'roomote/openai/gpt-5.6-luna' },
+      taskModelSettings: null,
+    });
+
+    const env = await resolveSandboxModelRuntimeEnv({
+      runtimeEnv: {},
+      deploymentEnvVars: {},
+    });
+
+    expect(env.R_INFERENCE_GATEWAY_KEYS?.split(',')).toContain(
+      'R_TRIAL_OPENROUTER_API_KEY',
+    );
+    expect(env).not.toHaveProperty('R_TRIAL_OPENROUTER_API_KEY');
+  });
+
+  it('materializes the stored key on the control plane for Roomote models', async () => {
+    mockDeploymentSettingsFindFirst.mockResolvedValue({
+      runtimeModelConfig: { roomoteModel: 'roomote/openai/gpt-5.6-luna' },
+      taskModelSettings: null,
+    });
+
+    const env = await resolveEffectiveModelRuntimeEnv({
+      runtimeEnv: {},
+      deploymentEnvVars: { R_TRIAL_OPENROUTER_API_KEY: 'sk-trial' },
+    });
+
+    expect(env.R_TRIAL_OPENROUTER_API_KEY).toBe('sk-trial');
+    expect(env).not.toHaveProperty('OPENROUTER_API_KEY');
+  });
+
+  it('never materializes the Roomote key from the process environment', async () => {
+    // The hosting-injected variable is a delivery mechanism only: setup
+    // imports it into Settings storage, and deleting that stored key must
+    // disable the provider even while hosting keeps injecting the variable.
+    mockDeploymentSettingsFindFirst.mockResolvedValue({
+      runtimeModelConfig: { roomoteModel: 'roomote/openai/gpt-5.6-luna' },
+      taskModelSettings: null,
+    });
+
+    const env = await resolveEffectiveModelRuntimeEnv({
+      runtimeEnv: { R_TRIAL_OPENROUTER_API_KEY: 'sk-trial' },
+      deploymentEnvVars: {},
+    });
+
+    expect(env).not.toHaveProperty('R_TRIAL_OPENROUTER_API_KEY');
+  });
+
+  it('does not materialize an unrelated user-provided OpenRouter key', async () => {
+    mockDeploymentSettingsFindFirst.mockResolvedValue({
+      runtimeModelConfig: { roomoteModel: 'roomote/openai/gpt-5.6-luna' },
+      taskModelSettings: null,
+    });
+
+    const env = await resolveEffectiveModelRuntimeEnv({
+      runtimeEnv: {},
+      deploymentEnvVars: {
+        R_TRIAL_OPENROUTER_API_KEY: 'sk-trial',
+        OPENROUTER_API_KEY: 'sk-saved',
+      },
+    });
+
+    expect(env.R_TRIAL_OPENROUTER_API_KEY).toBe('sk-trial');
+    expect(env).not.toHaveProperty('OPENROUTER_API_KEY');
+  });
+
+  it('resolveModelProviderEnvValue resolves the Roomote key from storage only', async () => {
+    // The runtime env value is hosting's delivery mechanism, not a live
+    // credential: only the imported Settings row counts.
+    await expect(
+      resolveModelProviderEnvValue(['R_TRIAL_OPENROUTER_API_KEY'], {
+        runtimeEnv: {
+          R_TRIAL_OPENROUTER_API_KEY: 'sk-runtime',
+        },
+      }),
+    ).resolves.toBeUndefined();
+
+    mockEnvironmentVariablesFindMany.mockResolvedValue([
+      { name: 'R_TRIAL_OPENROUTER_API_KEY', value: 'sk-saved' },
+    ]);
+    await expect(
+      resolveModelProviderEnvValue(['R_TRIAL_OPENROUTER_API_KEY'], {
+        runtimeEnv: {},
+      }),
+    ).resolves.toBe('sk-saved');
+
+    mockEnvironmentVariablesFindMany.mockResolvedValue([]);
+    await expect(
+      resolveModelProviderEnvValue(['OPENROUTER_API_KEY'], {
+        runtimeEnv: { R_TRIAL_OPENROUTER_API_KEY: 'sk-trial' },
+      }),
+    ).resolves.toBeUndefined();
   });
 });
 

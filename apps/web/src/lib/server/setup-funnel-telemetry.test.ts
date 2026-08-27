@@ -53,7 +53,7 @@ describe('setup funnel telemetry', () => {
     const setupNewState = {
       ...createEmptySetupNewState(),
       authProvider: 'slack' as const,
-      modelProvider: 'openai' as const,
+      modelProvider: 'roomote' as const,
       sourceControlProvider: 'github' as const,
       computeProvider: 'modal' as const,
     };
@@ -64,9 +64,9 @@ describe('setup funnel telemetry', () => {
     } as unknown as SetupAuthStatus;
     const modelSetup = {
       setupSatisfied: true,
-      persistedProviderId: 'openai',
+      persistedProviderId: 'roomote',
       runtimeProviderId: null,
-      preselectedProvider: 'openai',
+      preselectedProvider: 'roomote',
     } as unknown as SetupModelStatus;
     const sourceControlSetup = {
       selectedProvider: 'github',
@@ -107,7 +107,7 @@ describe('setup funnel telemetry', () => {
       },
       {
         milestone: 'inference_configured',
-        provider: 'openai',
+        provider: 'roomote',
         preexisting: false,
       },
       {

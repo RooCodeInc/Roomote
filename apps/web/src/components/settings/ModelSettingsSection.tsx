@@ -751,11 +751,13 @@ export function ModelSettingsSection({
     EMPTY_SUGGESTION_STATE,
   );
   const settingsData = settingsQuery.data;
+  // Hidden (hosting-managed) providers like the Roomote trial expose no
+  // add-model surface; their models are managed by the trial seeding.
   const sortedConnectedProviders = useMemo(
     () =>
-      [...connectedProviders].sort((left, right) =>
-        left.label.localeCompare(right.label),
-      ),
+      connectedProviders
+        .filter((provider) => !provider.hidden)
+        .sort((left, right) => left.label.localeCompare(right.label)),
     [connectedProviders],
   );
   const chatgptConnected = sortedConnectedProviders.some(

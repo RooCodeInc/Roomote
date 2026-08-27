@@ -6,6 +6,7 @@ import { useMutation, useQuery } from '@tanstack/react-query';
 import {
   getSetupNewComputeProvisioningState,
   isSetupProvisionableComputeProvider,
+  ROOMOTE_INFERENCE_PROVIDER_ID,
   type SetupAuthProviderId,
 } from '@roomote/types';
 
@@ -47,6 +48,7 @@ const PINNABLE_SETUP_STEPS: readonly SetupStep[] = [
   'auth-provider',
   'auth-env-vars',
   'slack',
+  'inference',
   'env-vars',
   'source-control-provider',
   'source-control-config',
@@ -393,6 +395,27 @@ export function useSetupFlow(
             )?.setupSatisfied ??
               false)
           );
+        case 'inference': {
+          const trialInferenceAvailable = status.modelSetup.providers?.some(
+            (provider) =>
+              provider.id === ROOMOTE_INFERENCE_PROVIDER_ID &&
+              provider.savedApiKeySatisfied,
+          );
+          const operatorProviderConfigured = status.modelSetup.providers?.some(
+            (provider) =>
+              provider.id !== ROOMOTE_INFERENCE_PROVIDER_ID &&
+              (provider.savedApiKeySatisfied ||
+                provider.runtimeApiKeySatisfied),
+          );
+
+          return (
+            !trialInferenceAvailable ||
+            operatorProviderConfigured ||
+            status.modelSetup.runtimeRoomoteModelSatisfied ||
+            status.modelSetup.persistedRoomoteModel !== null ||
+            status.setupNewState.modelProvider !== null
+          );
+        }
         case 'env-vars':
           return status.modelSetup.setupSatisfied;
         case 'source-control-provider':

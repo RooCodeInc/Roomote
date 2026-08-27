@@ -13,6 +13,7 @@ import {
   getReasoningEffortLabel,
   getRecommendedModelPresets,
   getSetupModelProvider,
+  ROOMOTE_TRIAL_MODEL_PRESET_ID,
   getSetupProviderTaskModelPrefix,
   normalizeDeploymentModelConfig,
   REASONING_EFFORT_OPTIONS,
@@ -270,36 +271,78 @@ describe('normalizeDeploymentModelConfig', () => {
 });
 
 describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
+  const userSelectableProviders = SETUP_MODEL_PROVIDER_CATALOG.filter(
+    (provider) => !('hidden' in provider && provider.hidden),
+  );
+
   it('exposes the supported setup providers for the onboarding UI', () => {
-    expect(SETUP_MODEL_PROVIDER_CATALOG.map((provider) => provider.id)).toEqual(
-      [
-        'openrouter',
-        'vercel',
-        'requesty',
-        'baseten',
-        'togetherai',
-        'openai',
-        'azure',
-        'azure-cognitive-services',
-        'anthropic',
-        'moonshotai',
-        'kimi-for-coding',
-        'minimax',
-        'opencode',
-        'opencode-go',
-        'amazon-bedrock',
-        'google',
-        'xai',
-        'zai',
-        'zai-coding-plan',
-        'github-copilot',
-        'openai-compatible',
-        'litellm',
-        'ollama',
-        'vllm',
-        'chatgpt',
-        'xai-subscription',
-      ],
+    expect(userSelectableProviders.map((provider) => provider.id)).toEqual([
+      'openrouter',
+      'vercel',
+      'requesty',
+      'baseten',
+      'togetherai',
+      'openai',
+      'azure',
+      'azure-cognitive-services',
+      'anthropic',
+      'moonshotai',
+      'kimi-for-coding',
+      'minimax',
+      'opencode',
+      'opencode-go',
+      'amazon-bedrock',
+      'google',
+      'xai',
+      'zai',
+      'zai-coding-plan',
+      'github-copilot',
+      'openai-compatible',
+      'litellm',
+      'ollama',
+      'vllm',
+      'chatgpt',
+      'xai-subscription',
+    ]);
+  });
+
+  it('keeps Roomote inference hidden and maps its curated models to roomote IDs', () => {
+    expect(getSetupModelProvider('roomote')).toMatchObject({
+      id: 'roomote',
+      hidden: true,
+      envVarName: 'R_TRIAL_OPENROUTER_API_KEY',
+      defaultRoomoteModel: 'roomote/openai/gpt-5.6-luna',
+    });
+    expect(
+      getSetupModelProvider('roomote').suggestedTaskModels.every((model) =>
+        model.id.startsWith('roomote/'),
+      ),
+    ).toBe(true);
+  });
+
+  it('derives the Roomote Trial preset from OpenRouter Efficient with Roomote model IDs', () => {
+    const openRouterEfficient = getRecommendedModelPresets(
+      getSetupModelProvider('openrouter'),
+    ).find((preset) => preset.id === 'efficient');
+    const roomoteTrial = getRecommendedModelPresets(
+      getSetupModelProvider('roomote'),
+    ).find((preset) => preset.id === ROOMOTE_TRIAL_MODEL_PRESET_ID);
+
+    expect(roomoteTrial).toMatchObject({
+      id: ROOMOTE_TRIAL_MODEL_PRESET_ID,
+      label: 'Roomote Trial',
+      default: true,
+    });
+    expect(roomoteTrial?.roles).toEqual(
+      Object.fromEntries(
+        Object.entries(openRouterEfficient!.roles).map(([role, config]) => [
+          role,
+          {
+            ...config,
+            modelId: config.modelId.replace(/^openrouter\//u, 'roomote/'),
+          },
+        ]),
+      ),
     );
   });
 
@@ -369,15 +412,13 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
   });
 
   it('recommends Kimi K3 only from supported providers', () => {
-    const kimiK3ByProvider = SETUP_MODEL_PROVIDER_CATALOG.flatMap(
-      (provider) => {
-        const model = provider.suggestedTaskModels.find(
-          (suggestion) => suggestion.displayName === 'Kimi K3',
-        );
+    const kimiK3ByProvider = userSelectableProviders.flatMap((provider) => {
+      const model = provider.suggestedTaskModels.find(
+        (suggestion) => suggestion.displayName === 'Kimi K3',
+      );
 
-        return model ? [{ providerId: provider.id, modelId: model.id }] : [];
-      },
-    );
+      return model ? [{ providerId: provider.id, modelId: model.id }] : [];
+    });
 
     expect(kimiK3ByProvider).toEqual([
       { providerId: 'openrouter', modelId: 'openrouter/moonshotai/kimi-k3' },
@@ -394,15 +435,13 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
   });
 
   it('recommends Qwen3.8 Max only from supported providers', () => {
-    const providersByModel = SETUP_MODEL_PROVIDER_CATALOG.flatMap(
-      (provider) => {
-        const model = provider.suggestedTaskModels.find(
-          (suggestion) => suggestion.displayName === 'Qwen3.8 Max',
-        );
+    const providersByModel = userSelectableProviders.flatMap((provider) => {
+      const model = provider.suggestedTaskModels.find(
+        (suggestion) => suggestion.displayName === 'Qwen3.8 Max',
+      );
 
-        return model ? [{ providerId: provider.id, modelId: model.id }] : [];
-      },
-    );
+      return model ? [{ providerId: provider.id, modelId: model.id }] : [];
+    });
 
     expect(providersByModel).toEqual([
       { providerId: 'openrouter', modelId: 'openrouter/qwen/qwen3.8-max' },
@@ -427,7 +466,7 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
   });
 
   it('recommends GLM 5.3 where available and retains GLM 5.2 elsewhere', () => {
-    const glm53ByProvider = SETUP_MODEL_PROVIDER_CATALOG.flatMap((provider) => {
+    const glm53ByProvider = userSelectableProviders.flatMap((provider) => {
       const model = provider.suggestedTaskModels.find(
         (suggestion) => suggestion.displayName === 'GLM 5.3',
       );
@@ -454,7 +493,7 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
         .roomoteModel,
     ).toBe('zai/glm-5.3');
     expect(
-      SETUP_MODEL_PROVIDER_CATALOG.flatMap((provider) => {
+      userSelectableProviders.flatMap((provider) => {
         const model = provider.suggestedTaskModels.find(
           (suggestion) => suggestion.displayName === 'GLM 5.2',
         );
@@ -469,15 +508,13 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
   });
 
   it('recommends GLM 5.3 Flash from every supported provider', () => {
-    const glm53FlashByProvider = SETUP_MODEL_PROVIDER_CATALOG.flatMap(
-      (provider) => {
-        const model = provider.suggestedTaskModels.find(
-          (suggestion) => suggestion.displayName === 'GLM 5.3 Flash',
-        );
+    const glm53FlashByProvider = userSelectableProviders.flatMap((provider) => {
+      const model = provider.suggestedTaskModels.find(
+        (suggestion) => suggestion.displayName === 'GLM 5.3 Flash',
+      );
 
-        return model ? [{ providerId: provider.id, modelId: model.id }] : [];
-      },
-    );
+      return model ? [{ providerId: provider.id, modelId: model.id }] : [];
+    });
 
     expect(glm53FlashByProvider).toEqual([
       {
@@ -511,15 +548,13 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
   ])(
     'recommends $displayName only from providers that support it',
     ({ displayName, modelId }) => {
-      const providersByModel = SETUP_MODEL_PROVIDER_CATALOG.flatMap(
-        (provider) => {
-          const model = provider.suggestedTaskModels.find(
-            (suggestion) => suggestion.displayName === displayName,
-          );
+      const providersByModel = userSelectableProviders.flatMap((provider) => {
+        const model = provider.suggestedTaskModels.find(
+          (suggestion) => suggestion.displayName === displayName,
+        );
 
-          return model ? [{ providerId: provider.id, modelId: model.id }] : [];
-        },
-      );
+        return model ? [{ providerId: provider.id, modelId: model.id }] : [];
+      });
 
       expect(providersByModel).toEqual([
         { providerId: 'openrouter', modelId: `openrouter/openai/${modelId}` },
@@ -551,7 +586,7 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
   );
 
   it('recommends Gemini 3.7 Flash from every provider that offered 3.6', () => {
-    const geminiFlashByProvider = SETUP_MODEL_PROVIDER_CATALOG.flatMap(
+    const geminiFlashByProvider = userSelectableProviders.flatMap(
       (provider) => {
         const model = provider.suggestedTaskModels.find(
           (suggestion) => suggestion.displayName === 'Gemini 3.7 Flash',
@@ -574,7 +609,7 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
   });
 
   it("uses each provider's DeepSeek V4 Flash 0731 model slug", () => {
-    const deepSeekFlashByProvider = SETUP_MODEL_PROVIDER_CATALOG.flatMap(
+    const deepSeekFlashByProvider = userSelectableProviders.flatMap(
       (provider) => {
         const model = provider.suggestedTaskModels.find(
           (suggestion) => suggestion.displayName === 'DeepSeek V4 Flash 0731',
@@ -613,7 +648,7 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
   });
 
   it("uses each provider's DeepSeek V4 Pro 0813 model slug", () => {
-    const deepSeekProByProvider = SETUP_MODEL_PROVIDER_CATALOG.flatMap(
+    const deepSeekProByProvider = userSelectableProviders.flatMap(
       (provider) => {
         const model = provider.suggestedTaskModels.find(
           (suggestion) => suggestion.displayName === 'DeepSeek V4 Pro 0813',
@@ -1082,6 +1117,31 @@ describe('buildRecommendedDeploymentModelConfig', () => {
     },
   );
 
+  it('builds the openrouter Efficient preset on the inexpensive model for every role', () => {
+    // Reasoning efforts stay null so the shared per-role defaults apply.
+    expect(
+      buildRecommendedDeploymentModelConfig(
+        getSetupModelProvider('openrouter'),
+        'efficient',
+      ),
+    ).toEqual({
+      roomoteModel: 'openrouter/openai/gpt-5.6-luna',
+      roomoteOrchestrationModel: null,
+      roomoteSmallModel: 'openrouter/openai/gpt-5.6-luna',
+      roomoteVisionModel: null,
+      roomoteCodeReviewModel: 'openrouter/openai/gpt-5.6-luna',
+      roomoteExploreModel: 'openrouter/openai/gpt-5.6-luna',
+      roomotePlanningModel: 'openrouter/openai/gpt-5.6-luna',
+      roomoteModelReasoningEffort: null,
+      roomoteOrchestrationModelReasoningEffort: null,
+      roomoteSmallModelReasoningEffort: null,
+      roomoteVisionModelReasoningEffort: null,
+      roomoteCodeReviewModelReasoningEffort: null,
+      roomoteExploreModelReasoningEffort: null,
+      roomotePlanningModelReasoningEffort: null,
+    });
+  });
+
   it('maps the provider default to coding and recommended models to their roles', () => {
     expect(
       buildRecommendedDeploymentModelConfig(getSetupModelProvider('anthropic')),
@@ -1498,6 +1558,29 @@ describe('reasoning effort labels', () => {
 });
 
 describe('buildSetupModelStatus', () => {
+  it('connects Roomote inference only through the stored key, never the env variable', () => {
+    const envOnly = buildSetupModelStatus({
+      runtimeEnv: { R_TRIAL_OPENROUTER_API_KEY: 'sk-trial' },
+      persistedEnvVarNames: [],
+    });
+    // Hidden and unconnected: the env value alone must not surface the
+    // provider, or deleting the stored key could not disable the trial.
+    expect(
+      envOnly.providers.find((provider) => provider.id === 'roomote'),
+    ).toBeUndefined();
+
+    const stored = buildSetupModelStatus({
+      runtimeEnv: {},
+      persistedEnvVarNames: ['R_TRIAL_OPENROUTER_API_KEY'],
+    });
+    expect(
+      stored.providers.find((provider) => provider.id === 'roomote'),
+    ).toMatchObject({
+      runtimeApiKeySatisfied: false,
+      savedApiKeySatisfied: true,
+    });
+  });
+
   it('treats runtime env as the highest-precedence satisfied setup source', () => {
     const status = buildSetupModelStatus({
       runtimeEnv: {
@@ -1579,6 +1662,45 @@ describe('buildSetupModelStatus', () => {
 
     expect(status.setupSatisfiedByRuntimeEnv).toBe(false);
     expect(status.setupSatisfied).toBe(true);
+  });
+
+  it('treats Roomote inference as a distinct hosting-managed provider', () => {
+    const status = buildSetupModelStatus({
+      runtimeEnv: {},
+      persistedModelConfig: {
+        roomoteModel: 'roomote/openai/gpt-5.6-luna',
+        roomoteSmallModel: null,
+        roomoteVisionModel: null,
+      },
+      persistedEnvVarNames: ['R_TRIAL_OPENROUTER_API_KEY'],
+    });
+
+    expect(status.setupSatisfied).toBe(true);
+    expect(
+      status.providers.find((provider) => provider.id === 'roomote'),
+    ).toMatchObject({
+      runtimeApiKeySatisfied: false,
+      savedApiKeySatisfied: true,
+    });
+    expect(
+      status.providers.find((provider) => provider.id === 'openrouter'),
+    ).toMatchObject({ runtimeApiKeySatisfied: false });
+  });
+
+  it('keeps OpenRouter separate from the hosting-managed Roomote key', () => {
+    const status = buildSetupModelStatus({
+      runtimeEnv: {
+        R_TRIAL_OPENROUTER_API_KEY: 'sk-trial',
+      },
+      persistedEnvVarNames: [],
+    });
+
+    expect(
+      status.providers.find((provider) => provider.id === 'openrouter'),
+    ).toMatchObject({
+      runtimeApiKeySatisfied: false,
+      savedApiKeySatisfied: false,
+    });
   });
 
   it('resolves the vercel provider from a runtime AI Gateway model id', () => {

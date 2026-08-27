@@ -219,13 +219,13 @@ export function StepInferenceProvider({
   const primaryCredentialLabel =
     selectedProviderStatus?.envVarLabel ?? 'API key';
   const additionalEnvFields = selectedProviderStatus?.additionalEnvFields ?? [];
-  // The server status list already excludes hidden providers that are not
-  // connected, so the picker only offers providers that can be selected.
+  // Hidden (hosting-managed) providers are never user-selectable, even when
+  // connected — the catalog `hidden` flag is the single source of that rule.
   const sortedModelProviders = useMemo(
     () =>
-      [...modelSetup.providers].sort((left, right) =>
-        left.label.localeCompare(right.label),
-      ),
+      modelSetup.providers
+        .filter((provider) => !provider.hidden)
+        .sort((left, right) => left.label.localeCompare(right.label)),
     [modelSetup.providers],
   );
   const shouldShowSavedValueMask =

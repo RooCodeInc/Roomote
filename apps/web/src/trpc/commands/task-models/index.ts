@@ -9,10 +9,14 @@ import {
   isGitHubCopilotSubscriptionConnected,
   isXaiSubscriptionConnected,
   isNull,
+  resolveModelProviderEnvValue,
   type DatabaseOrTransaction,
 } from '@roomote/db/server';
 import {
   OPENAI_COMPATIBLE_PROVIDER_ID,
+  rebaseRoomoteModelIdToUpstream,
+  ROOMOTE_INFERENCE_API_KEY_ENV_VAR_NAME,
+  ROOMOTE_INFERENCE_PROVIDER_ID,
   XAI_SUBSCRIPTION_PROVIDER_ID,
   TASK_MODEL_CATALOG,
   TASK_MODEL_ROLE_DESCRIPTORS,
@@ -369,7 +373,7 @@ export async function getPersistedRawTaskModelSettings(
  */
 export async function getTaskModelProviderSetupCommand(
   auth: UserAuthSuccess,
-): Promise<{ providerSetup: SetupModelStatus }> {
+): Promise<{ providerSetup: SetupModelStatus; trialInferenceActive: boolean }> {
   assertAdmin(auth);
 
   const [
@@ -379,6 +383,7 @@ export async function getTaskModelProviderSetupCommand(
     chatgptConnected,
     githubCopilotConnected,
     xaiSubscriptionConnected,
+    persistedTaskModelSettings,
   ] = await Promise.all([
     getDeploymentRuntimeModelConfig(),
     getPersistedEnvironmentVariableNames(),
@@ -386,6 +391,7 @@ export async function getTaskModelProviderSetupCommand(
     isChatGptSubscriptionConnected(),
     isGitHubCopilotSubscriptionConnected(),
     isXaiSubscriptionConnected(),
+    getDeploymentTaskModelSettings(),
   ]);
 
   // Include non-secret OpenAI-compatible env values (base URLs + connection
@@ -428,7 +434,14 @@ export async function getTaskModelProviderSetupCommand(
     xaiSubscriptionConnected,
   });
 
-  return { providerSetup };
+  return {
+    providerSetup,
+    trialInferenceActive: isTrialInferenceActive({
+      modelProvider: setupNewState.modelProvider,
+      taskModelSettings: persistedTaskModelSettings,
+      runtimeModelConfig: persistedRuntimeModelConfig,
+    }),
+  };
 }
 
 /**
@@ -583,6 +596,10 @@ export async function saveTaskModelProviderCommand(
   }
 
   const provider = getSetupModelProvider(providerId);
+
+  if (provider.id === ROOMOTE_INFERENCE_PROVIDER_ID) {
+    throw new Error('Roomote inference is managed by your hosting provider.');
+  }
 
   if (provider.authKind === 'oauth') {
     throw new Error(
@@ -826,13 +843,56 @@ export async function saveTaskModelProviderCommand(
   };
 }
 
-function getConnectedModelProviderCount(providerSetup: SetupModelStatus) {
-  // A connected ChatGPT subscription is already represented by the `chatgpt`
-  // catalog entry (`savedApiKeySatisfied` mirrors `chatgptConnected`), so the
-  // filter below counts it; do not add it separately.
+/**
+ * Whether the Roomote trial is actually in use — the operator chose it, so
+ * roomote models are selected or seeded. The imported trial key alone does
+ * not count: hosting delivers it to every eligible deployment before any
+ * operator decision, so a merely-imported key must not make the hidden
+ * roomote provider satisfy connectivity guards.
+ */
+function isTrialInferenceActive({
+  modelProvider,
+  taskModelSettings,
+  runtimeModelConfig,
+}: {
+  modelProvider: SetupModelProviderId | null;
+  taskModelSettings: ReturnType<typeof normalizeTaskModelSettings>;
+  runtimeModelConfig: DeploymentModelConfig;
+}): boolean {
+  return (
+    modelProvider === ROOMOTE_INFERENCE_PROVIDER_ID ||
+    (taskModelSettings.models ?? []).some((model) =>
+      isModelIdForProvider(model.id, ROOMOTE_INFERENCE_PROVIDER_ID),
+    ) ||
+    TASK_MODEL_ROLES.some((role) => {
+      const modelId =
+        runtimeModelConfig[TASK_MODEL_ROLE_DESCRIPTORS[role].modelConfigKey];
+
+      return (
+        modelId !== null &&
+        isModelIdForProvider(modelId, ROOMOTE_INFERENCE_PROVIDER_ID)
+      );
+    })
+  );
+}
+
+/**
+ * Connected providers that would remain after deleting `deletingProviderId`.
+ * A connected ChatGPT subscription is already represented by the `chatgpt`
+ * catalog entry (`savedApiKeySatisfied` mirrors `chatgptConnected`), so the
+ * filter below counts it; do not add it separately. The hidden roomote row
+ * counts only while the trial is actually in use — see
+ * `isTrialInferenceActive`.
+ */
+function countRemainingConnectedModelProviders(
+  providerSetup: SetupModelStatus,
+  options: { deletingProviderId: SetupModelProviderId; trialActive: boolean },
+) {
   return providerSetup.providers.filter(
     (provider) =>
-      provider.runtimeApiKeySatisfied || provider.savedApiKeySatisfied,
+      provider.id !== options.deletingProviderId &&
+      (provider.runtimeApiKeySatisfied || provider.savedApiKeySatisfied) &&
+      (provider.id !== ROOMOTE_INFERENCE_PROVIDER_ID || options.trialActive),
   ).length;
 }
 
@@ -913,6 +973,10 @@ export async function deleteTaskModelProviderCommand(
 
   const provider = getSetupModelProvider(input.provider);
 
+  // Roomote inference deletes like any stored-key provider: its credential
+  // is the imported Settings row, and removing it is the one supported way
+  // to disable the trial. The import marker in setup state keeps the
+  // hosting-injected variable from ever re-creating it.
   if (provider.authKind === 'oauth') {
     throw new Error(
       `${provider.label} is connected with a subscription account and cannot be deleted here.`,
@@ -925,6 +989,7 @@ export async function deleteTaskModelProviderCommand(
       persistedEnvVarNames,
       setupNewState,
       chatgptConnected,
+      githubCopilotConnected,
       xaiSubscriptionConnected,
       persistedTaskModelSettings,
     ] = await Promise.all([
@@ -932,6 +997,7 @@ export async function deleteTaskModelProviderCommand(
       getPersistedEnvironmentVariableNames(tx),
       getDeploymentSetupNewState(tx),
       isChatGptSubscriptionConnected(),
+      isGitHubCopilotSubscriptionConnected(),
       isXaiSubscriptionConnected(),
       getDeploymentTaskModelSettings(),
     ]);
@@ -942,6 +1008,7 @@ export async function deleteTaskModelProviderCommand(
       persistedEnvVarNames,
       selectedProvider: setupNewState.modelProvider,
       chatgptConnected,
+      githubCopilotConnected,
       xaiSubscriptionConnected,
     });
     const providerStatus = providerSetup.providers.find(
@@ -962,9 +1029,18 @@ export async function deleteTaskModelProviderCommand(
 
     // Key-only xAI delete is allowed even when the catalog shows a single
     // connected `xai` entry, because the subscription remains as a provider.
+    const trialActive = isTrialInferenceActive({
+      modelProvider: setupNewState.modelProvider,
+      taskModelSettings: persistedTaskModelSettings,
+      runtimeModelConfig: persistedRuntimeModelConfig,
+    });
+
     if (
       !xaiKeyOnlyDelete &&
-      getConnectedModelProviderCount(providerSetup) <= 1
+      countRemainingConnectedModelProviders(providerSetup, {
+        deletingProviderId: provider.id,
+        trialActive,
+      }) < 1
     ) {
       throw new Error('Keep at least one inference provider connected.');
     }
@@ -1505,18 +1581,26 @@ export async function lookupTaskModelCommand(
     );
   }
 
+  // Roomote inference routes through OpenRouter but has a separate model-id
+  // namespace so it can coexist with an operator's OpenRouter connection.
+  const roomoteUpstreamSlug = rebaseRoomoteModelIdToUpstream(modelId);
+  const roomoteInferenceModel = roomoteUpstreamSlug !== null;
+  const openRouterLookupModelId = roomoteInferenceModel
+    ? `openrouter/${roomoteUpstreamSlug}`
+    : modelId;
+
   // Only the OpenRouter model API supports single-model lookup; every other
   // provider (Vercel AI Gateway and direct labs such as Anthropic) resolves
   // from the models.dev catalog.
-  if (!modelId.startsWith('openrouter/')) {
+  if (!openRouterLookupModelId.startsWith('openrouter/')) {
     return lookupModelFromModelsDevCatalog(modelId);
   }
 
-  const runtimeOpenRouterKey = process.env.OPENROUTER_API_KEY?.trim();
-  const openRouterKey = runtimeOpenRouterKey
-    ? runtimeOpenRouterKey
-    : (await getPersistedEnvironmentVariableValues(['OPENROUTER_API_KEY']))
-        .OPENROUTER_API_KEY;
+  const openRouterKey = await resolveModelProviderEnvValue(
+    roomoteInferenceModel
+      ? ROOMOTE_INFERENCE_API_KEY_ENV_VAR_NAME
+      : 'OPENROUTER_API_KEY',
+  );
 
   if (!openRouterKey) {
     return {
@@ -1527,7 +1611,9 @@ export async function lookupTaskModelCommand(
     };
   }
 
-  const openRouterModelSlug = modelId.slice('openrouter/'.length);
+  const openRouterModelSlug = openRouterLookupModelId.slice(
+    'openrouter/'.length,
+  );
   const [openRouterAuthor, ...openRouterSlugParts] =
     openRouterModelSlug.split('/');
   const openRouterSlug = openRouterSlugParts.join('/');

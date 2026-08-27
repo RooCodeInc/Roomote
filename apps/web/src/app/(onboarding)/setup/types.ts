@@ -23,6 +23,10 @@ const SETUP_STEP_DEFINITIONS = [
     title: 'Connect Slack',
   },
   {
+    id: 'inference',
+    title: 'Configure inference',
+  },
+  {
     id: 'env-vars',
     title: 'Configure inference provider',
   },
