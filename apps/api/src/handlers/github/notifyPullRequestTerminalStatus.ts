@@ -832,10 +832,24 @@ export async function notifyPullRequestTerminalStatus({
       }),
     ]);
 
+    // Fast reports terminal PR events through its parent session, so direct
+    // webhook delivery would duplicate the message in the same conversation.
+    const fastTaskIds = new Set(
+      linkedRuns
+        .filter((run) => getFastAgentParentFromPayload(run.payload) !== null)
+        .map((run) => run.taskId),
+    );
+    const notificationRuns = linkedRuns.filter(
+      (run) => !fastTaskIds.has(run.taskId),
+    );
     const slackTargets: SlackTarget[] = [];
     const linearSessionIds: string[] = [];
 
     for (const task of linkedTasks) {
+      if (fastTaskIds.has(task.id)) {
+        continue;
+      }
+
       if (task.slackThreadTs && task.slackChannelId) {
         slackTargets.push({
           taskId: task.id,
@@ -850,20 +864,20 @@ export async function notifyPullRequestTerminalStatus({
     }
 
     slackTargets.push(
-      ...linkedRuns
+      ...notificationRuns
         .map((run) => getSlackTarget(run.taskId, run.payload))
         .filter((target): target is SlackTarget => target !== null),
     );
 
-    const teamsTargets = linkedRuns
+    const teamsTargets = notificationRuns
       .map((run) => getTeamsTarget(run.payload))
       .filter((target): target is TeamsTarget => target !== null);
 
-    const telegramTargets = linkedRuns
+    const telegramTargets = notificationRuns
       .map((run) => getTelegramTarget(run.payload))
       .filter((target): target is TelegramTarget => target !== null);
 
-    const discordTargets = linkedRuns
+    const discordTargets = notificationRuns
       .map((run) => getDiscordTarget(run.payload))
       .filter((target): target is DiscordTarget => target !== null);
 

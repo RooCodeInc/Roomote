@@ -270,60 +270,47 @@ describe('notifyPullRequestTerminalStatus', () => {
     expect(SLACK_PR_CLOSED_REACTION_EMOJI).toBe('-1');
   });
 
-  it.each([
-    {
-      label: 'direct task-run',
-      payload: {
-        communicationProvider: 'slack',
-        communicationChannelId: 'CSHARED',
-        communicationThreadId: 'shared-thread-ts',
+  it('normalizes direct task-run Slack bindings through one delivery path', async () => {
+    mockedGithubFind.mockResolvedValue({ id: 1 } as any);
+    mockedTaskPullRequestsFind.mockResolvedValue([{ taskId: 'task-1' }] as any);
+    mockedTaskRunsFind.mockResolvedValue([
+      {
+        taskId: 'task-1',
+        payload: {
+          communicationProvider: 'slack',
+          communicationChannelId: 'CSHARED',
+          communicationThreadId: 'shared-thread-ts',
+        },
       },
-    },
-    {
-      label: 'Fast-parent',
-      payload: fastParentSlackPayload('CSHARED', 'shared-thread-ts'),
-    },
-  ])(
-    'normalizes $label Slack bindings through one delivery path',
-    async ({ payload }) => {
-      mockedGithubFind.mockResolvedValue({ id: 1 } as any);
-      mockedTaskPullRequestsFind.mockResolvedValue([
-        { taskId: 'task-1' },
-      ] as any);
-      mockedTaskRunsFind.mockResolvedValue([
-        { taskId: 'task-1', payload },
-      ] as any);
-      mockedSlackFind.mockResolvedValue({
-        botAccessToken: 'xoxb-token',
-      } as any);
+    ] as any);
+    mockedSlackFind.mockResolvedValue({ botAccessToken: 'xoxb-token' } as any);
 
-      await notifyPullRequestTerminalStatus({
-        ...baseParams,
-        status: 'closed',
-        actorLogin: 'closer',
-      });
+    await notifyPullRequestTerminalStatus({
+      ...baseParams,
+      status: 'closed',
+      actorLogin: 'closer',
+    });
 
-      expect(mockStickyFooterPost).toHaveBeenCalledWith(
-        expect.objectContaining({
-          channel: 'CSHARED',
-          threadTs: 'shared-thread-ts',
-          taskId: 'task-1',
-        }),
-      );
-      expect(mockAddReaction).toHaveBeenCalledWith({
+    expect(mockStickyFooterPost).toHaveBeenCalledWith(
+      expect.objectContaining({
         channel: 'CSHARED',
-        timestamp: 'shared-thread-ts',
-        name: SLACK_PR_CLOSED_REACTION_EMOJI,
-      });
-      expect(mockRemoveReaction).toHaveBeenCalledWith({
-        channel: 'CSHARED',
-        timestamp: 'shared-thread-ts',
-        name: 'eyes',
-      });
-    },
-  );
+        threadTs: 'shared-thread-ts',
+        taskId: 'task-1',
+      }),
+    );
+    expect(mockAddReaction).toHaveBeenCalledWith({
+      channel: 'CSHARED',
+      timestamp: 'shared-thread-ts',
+      name: SLACK_PR_CLOSED_REACTION_EMOJI,
+    });
+    expect(mockRemoveReaction).toHaveBeenCalledWith({
+      channel: 'CSHARED',
+      timestamp: 'shared-thread-ts',
+      name: 'eyes',
+    });
+  });
 
-  it('deduplicates an overlapping Fast-parent binding when cleanup rejects', async () => {
+  it('suppresses direct notifications for a Fast-associated task', async () => {
     mockedGithubFind.mockResolvedValue({ id: 1 } as any);
     mockedTaskPullRequestsFind.mockResolvedValue([{ taskId: 'task-1' }] as any);
     mockedTasksFind.mockResolvedValue([
@@ -331,7 +318,7 @@ describe('notifyPullRequestTerminalStatus', () => {
         id: 'task-1',
         slackThreadTs: 'thread-ts-1',
         slackChannelId: 'C123',
-        linearSessionId: null,
+        linearSessionId: 'linear-session-1',
       },
     ] as any);
     mockedTaskRunsFind.mockResolvedValue([
@@ -339,15 +326,89 @@ describe('notifyPullRequestTerminalStatus', () => {
         taskId: 'task-1',
         payload: fastParentSlackPayload('C123', 'thread-ts-1'),
       },
+      { taskId: 'task-1', payload: teamsPayload },
+      { taskId: 'task-1', payload: telegramPayload },
+      { taskId: 'task-1', payload: discordPayload },
+    ] as any);
+
+    await notifyPullRequestTerminalStatus(baseParams);
+
+    expect(mockStickyFooterPost).not.toHaveBeenCalled();
+    expect(mockAddReaction).not.toHaveBeenCalled();
+    expect(mockRemoveReaction).not.toHaveBeenCalled();
+    expect(mockGetCommunicationProviderAdapter).not.toHaveBeenCalled();
+    expect(mockPostMessage).not.toHaveBeenCalled();
+    expect(mockLinearEmitResponse).not.toHaveBeenCalled();
+  });
+
+  it('does not suppress notifications for malformed Fast metadata', async () => {
+    mockedGithubFind.mockResolvedValue({ id: 1 } as any);
+    mockedTaskPullRequestsFind.mockResolvedValue([{ taskId: 'task-1' }] as any);
+    mockedTaskRunsFind.mockResolvedValue([
+      {
+        taskId: 'task-1',
+        payload: {
+          communicationProvider: 'slack',
+          communicationChannelId: 'C123',
+          communicationThreadId: 'thread-ts-1',
+          fastAgentParent: {
+            sessionId: 'not-a-session-id',
+          },
+        },
+      },
     ] as any);
     mockedSlackFind.mockResolvedValue({ botAccessToken: 'xoxb-token' } as any);
-    mockRemoveReaction.mockRejectedValueOnce(new Error('Slack unavailable'));
 
     await notifyPullRequestTerminalStatus(baseParams);
 
     expect(mockStickyFooterPost).toHaveBeenCalledTimes(1);
-    expect(mockAddReaction).toHaveBeenCalledTimes(1);
-    expect(mockRemoveReaction).toHaveBeenCalledTimes(1);
+  });
+
+  it('still notifies ordinary tasks linked to the same PR as a Fast task', async () => {
+    mockedGithubFind.mockResolvedValue({ id: 1 } as any);
+    mockedTaskPullRequestsFind.mockResolvedValue([
+      { taskId: 'fast-task' },
+      { taskId: 'ordinary-task' },
+    ] as any);
+    mockedTasksFind.mockResolvedValue([
+      {
+        id: 'fast-task',
+        slackThreadTs: 'fast-thread',
+        slackChannelId: 'CFAST',
+        linearSessionId: 'fast-linear-session',
+      },
+      {
+        id: 'ordinary-task',
+        slackThreadTs: 'ordinary-thread',
+        slackChannelId: 'CORDINARY',
+        linearSessionId: 'ordinary-linear-session',
+      },
+    ] as any);
+    mockedTaskRunsFind.mockResolvedValue([
+      {
+        taskId: 'fast-task',
+        payload: fastParentSlackPayload('CFAST', 'fast-thread'),
+      },
+      { taskId: 'ordinary-task', payload: teamsPayload },
+    ] as any);
+    mockedSlackFind.mockResolvedValue({ botAccessToken: 'xoxb-token' } as any);
+
+    await notifyPullRequestTerminalStatus(baseParams);
+
+    expect(mockStickyFooterPost).toHaveBeenCalledTimes(1);
+    expect(mockStickyFooterPost).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channel: 'CORDINARY',
+        threadTs: 'ordinary-thread',
+        taskId: 'ordinary-task',
+      }),
+    );
+    expect(mockPostMessage).toHaveBeenCalledTimes(1);
+    expect(mockLinearEmitResponse).toHaveBeenCalledTimes(1);
+    expect(mockLinearEmitResponse).toHaveBeenCalledWith(
+      'ordinary-linear-session',
+      expect.any(String),
+    );
   });
 
   it('reports a rejected terminal reaction without failing the status post', async () => {
