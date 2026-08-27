@@ -67,6 +67,22 @@ const {
   })),
 }));
 
+const { mockFetchModelsDevCatalog, mockLookupModelMetadataFromCatalog } =
+  vi.hoisted(() => ({
+    mockFetchModelsDevCatalog: vi.fn(async () => null),
+    mockLookupModelMetadataFromCatalog: vi.fn(() => ({ metadata: {} })),
+  }));
+
+vi.mock('../task-models/models-dev', async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import('../task-models/models-dev')>();
+  return {
+    ...actual,
+    fetchModelsDevCatalog: mockFetchModelsDevCatalog,
+    lookupModelMetadataFromCatalog: mockLookupModelMetadataFromCatalog,
+  };
+});
+
 vi.mock('../task-models/provider-validation', () => ({
   validateSetupModelProviderCredentials:
     mockValidateSetupModelProviderCredentials,
@@ -1430,6 +1446,51 @@ describe('chooseSetupTrialInferenceCommand', () => {
     });
     expect(taskModelSettingsInsert?.taskModelSettings).toMatchObject({
       defaultModelId: 'roomote/openai/gpt-5.6-luna',
+    });
+  });
+
+  it('seeds trial models with catalog metadata when the catalog is reachable', async () => {
+    vi.stubEnv('R_TRIAL_OPENROUTER_API_KEY', 'sk-trial');
+    mockGetPersistedEnvironmentVariableNames.mockResolvedValue([
+      'R_TRIAL_OPENROUTER_API_KEY',
+    ]);
+    mockFetchModelsDevCatalog.mockResolvedValueOnce({
+      models: {},
+      providers: {},
+      gatewayModelsByLowerSlug: {},
+    } as never);
+    mockLookupModelMetadataFromCatalog.mockImplementation((_c, modelId) =>
+      modelId === 'roomote/openai/gpt-5.6-luna'
+        ? {
+            metadata: {
+              contextWindow: 400_000,
+              inputPricePerToken: 0.000002,
+              outputPricePerToken: 0.00001,
+            },
+          }
+        : { metadata: {} },
+    );
+    const { tx, inserted } = createTxStub({
+      setupNewState: {},
+      runtimeModelConfig: null,
+      taskModelSettings: null,
+    });
+    mockDbTransaction.mockImplementation(
+      async (callback: (tx: unknown) => Promise<unknown>) => callback(tx),
+    );
+
+    await chooseSetupTrialInferenceCommand(buildMockAuth());
+
+    const settingsInsert = inserted.find(
+      (values) => 'taskModelSettings' in values,
+    ) as { taskModelSettings?: { models?: Array<Record<string, unknown>> } };
+    const luna = settingsInsert.taskModelSettings?.models?.find(
+      (model) => model.id === 'roomote/openai/gpt-5.6-luna',
+    );
+    expect(luna?.metadata).toMatchObject({
+      contextWindow: 400_000,
+      inputPricePerToken: 0.000002,
+      outputPricePerToken: 0.00001,
     });
   });
 

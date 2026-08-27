@@ -958,6 +958,32 @@ describe('generateOpenCodeConfig provider support', () => {
     expect(result.configContent).toContain('litellm');
   });
 
+  it('writes catalog pricing into custom-provider model config', () => {
+    const runtimeEnv = {
+      R_MODEL: 'roomote/openai/gpt-5.6-luna',
+      R_TRIAL_OPENROUTER_API_KEY: 'sk-or-trial',
+      R_TASK_MODEL_COSTS: JSON.stringify({
+        'roomote/openai/gpt-5.6-luna': { input: 2, output: 10 },
+      }),
+      R_INFERENCE_GATEWAY_URL: 'https://api.example.com/api/inference/',
+    };
+    const result = generateOpenCodeConfig({
+      homeDir: createHomeDir(),
+      runtimeEnv,
+    });
+    const config = JSON.parse(result.configContent) as {
+      provider: Record<
+        string,
+        { models: Record<string, { cost?: Record<string, number> }> }
+      >;
+    };
+
+    expect(
+      config.provider.roomote?.models['openai/gpt-5.6-luna']?.cost,
+    ).toEqual({ input: 2, output: 10 });
+    expect(runtimeEnv).not.toHaveProperty('R_TASK_MODEL_COSTS');
+  });
+
   it('configures trusted LiteLLM context limits for proactive compaction', () => {
     const runtimeEnv = {
       R_MODEL: 'openrouter/openai/gpt-5.4',

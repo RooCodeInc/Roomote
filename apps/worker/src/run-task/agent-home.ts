@@ -49,12 +49,14 @@ import {
   normalizeOptionalReasoningEffort,
   parseInferenceGatewayKeys,
   parseTaskModelContextWindows,
+  parseTaskModelCosts,
   renderManualSkillMarkdown,
   resolveOpenRouterVariantModelAlias,
   toBedrockMantleRuntimeModelId,
   OPENCODE_ARCHITECT_AGENT,
   OPENCODE_GO_API_KEY_ENV_VAR_NAME,
   TASK_MODEL_CONTEXT_WINDOWS_ENV_VAR_NAME,
+  TASK_MODEL_COSTS_ENV_VAR_NAME,
   TaskPayloadKind,
   type EnvironmentManualSkill,
   type OpenRouterVariantModelAlias,
@@ -1305,6 +1307,10 @@ function resolveModelBackedOpenCodeConfig(
     runtimeEnv[TASK_MODEL_CONTEXT_WINDOWS_ENV_VAR_NAME],
   );
   delete runtimeEnv[TASK_MODEL_CONTEXT_WINDOWS_ENV_VAR_NAME];
+  const modelCosts = parseTaskModelCosts(
+    runtimeEnv[TASK_MODEL_COSTS_ENV_VAR_NAME],
+  );
+  delete runtimeEnv[TASK_MODEL_COSTS_ENV_VAR_NAME];
   const rawModel = applyImplicitLiteLlmModelPrefix(
     runtimeEnv.R_MODEL?.trim() ?? '',
     isLiteLlmConfigured,
@@ -1626,6 +1632,7 @@ function resolveModelBackedOpenCodeConfig(
                 openAiCompatibleModelIds,
                 visionModel ?? effectiveCodingModel,
                 modelContextWindows,
+                modelCosts,
               ),
               runtimeEnv,
               configuredModelIds,

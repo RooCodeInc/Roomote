@@ -168,6 +168,11 @@ import {
 } from '../source-control';
 import { getPersistedRawTaskModelSettings } from '../task-models';
 import {
+  fetchModelsDevCatalog,
+  lookupModelMetadataFromCatalog,
+  mergeMetadata,
+} from '../task-models/models-dev';
+import {
   buildAutoAddedTaskModelSettings,
   collectConnectedTaskModelProviderIds,
 } from '../task-models/auto-add-models';
@@ -490,13 +495,27 @@ export async function chooseSetupTrialInferenceCommand(auth: UserAuthSuccess) {
       ROOMOTE_TRIAL_MODEL_PRESET_ID,
     );
     const defaultModelId = runtimeModelConfig.roomoteModel;
-    const trialModels = provider.suggestedTaskModels.map((suggestion) =>
-      buildTaskModelOption({
+    // Best-effort metadata for the seeded catalog: without pricing and
+    // context windows every trial message records zero cost and models run
+    // on default limits. The roomote-aware catalog lookup resolves each
+    // model through its OpenRouter upstream; a failed fetch seeds without
+    // metadata, exactly as before, and the Settings refresh backfills.
+    const metadataCatalog = await fetchModelsDevCatalog(
+      AbortSignal.timeout(10_000),
+    ).catch(() => null);
+    const trialModels = provider.suggestedTaskModels.map((suggestion) => {
+      const lookup = metadataCatalog
+        ? lookupModelMetadataFromCatalog(metadataCatalog, suggestion.id)
+        : null;
+      return buildTaskModelOption({
         id: suggestion.id,
         displayName: suggestion.displayName,
         family: suggestion.family,
-      }),
-    );
+        ...(lookup?.metadata && Object.keys(lookup.metadata).length > 0
+          ? { metadata: mergeMetadata(null, lookup.metadata) }
+          : {}),
+      });
+    });
     const setupNewState = normalizeSetupNewState({
       ...currentState,
       modelProvider: provider.id,
