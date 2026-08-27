@@ -238,6 +238,25 @@ export async function listBrainCollectorItemsBefore(
     .limit(limit);
 }
 
+export async function listBrainCollectorItemsAfter(
+  database: DatabaseOrTransaction,
+  collectorId: string,
+  afterItemId: string,
+  limit: number,
+): Promise<BrainCollectorItemRow[]> {
+  return database
+    .select()
+    .from(brainCollectorItems)
+    .where(
+      and(
+        eq(brainCollectorItems.collectorId, collectorId),
+        gt(brainCollectorItems.itemId, afterItemId),
+      ),
+    )
+    .orderBy(brainCollectorItems.itemId)
+    .limit(limit);
+}
+
 export async function listBrainCollectorItems(
   database: DatabaseOrTransaction,
   collectorId: string,
