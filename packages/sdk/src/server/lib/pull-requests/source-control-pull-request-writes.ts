@@ -1,5 +1,5 @@
 import { createGitHubToken } from '@roomote/auth';
-import { getOctokit } from '@roomote/github';
+import { getOctokit, Schemas as GitHubSchemas } from '@roomote/github';
 import { type TaskRun } from '@roomote/db/server';
 import {
   getSourceControlProviderLabel,
@@ -759,12 +759,32 @@ async function writeGitHubPullRequest({
     }
     case 'dismiss_pull_request_review': {
       const reviewId = requireReviewId(input);
+      const body = requireBody(input);
+      const numericReviewId = Number(reviewId);
+      const { data: review } = await octokit.rest.pulls.getReview({
+        owner,
+        repo,
+        pull_number: input.prNumber,
+        review_id: numericReviewId,
+      });
+      const reviewAuthor = review.user?.login;
+
+      if (
+        review.state !== 'CHANGES_REQUESTED' ||
+        !reviewAuthor ||
+        !GitHubSchemas.isManagedRoomoteGitHubLogin(reviewAuthor)
+      ) {
+        throw new Error(
+          `GitHub review ${reviewId} is not a Roomote-authored CHANGES_REQUESTED review.`,
+        );
+      }
+
       const { data } = await octokit.rest.pulls.dismissReview({
         owner,
         repo,
         pull_number: input.prNumber,
-        review_id: Number(reviewId),
-        message: requireBody(input),
+        review_id: numericReviewId,
+        message: body,
       });
 
       return buildWriteResult({
