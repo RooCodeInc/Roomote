@@ -765,6 +765,15 @@ cmd_backup() {
   log "Quiescing Roomote application writers"
   compose stop web api controller bullmq preview-proxy
   stop_task_workers
+  # The Brain (opt-in `brain` profile) writes its own volume and its Postgres
+  # index; stopping it here keeps the markdown files and the database dump on
+  # one consistency point. `compose stop` on an absent service is an error,
+  # so probe for the container first.
+  brain_included='false'
+  if [ -n "$(compose ps -aq gbrain 2>/dev/null)" ]; then
+    brain_included='true'
+    compose stop gbrain
+  fi
   services_stopped='true'
 
   log "Dumping PostgreSQL"
@@ -798,6 +807,12 @@ cmd_backup() {
     archive_volume "$redis_volume" "$staging_dir" redis-data.tar
   fi
 
+  if [ "$brain_included" = 'true' ]; then
+    log "Snapshotting the Brain memory volume"
+    gbrain_volume="$(container_volume_name gbrain /data)"
+    archive_volume "$gbrain_volume" "$staging_dir" gbrain-data.tar
+  fi
+
   roomote_version="$(read_env_value ROOMOTE_VERSION)"
   created_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   cat >"$staging_dir/manifest.json" <<EOF
@@ -819,6 +834,10 @@ cmd_backup() {
   "redis": {
     "included": $include_redis,
     "consistency": "application-quiesced volume snapshot"
+  },
+  "brain": {
+    "included": $brain_included,
+    "consistency": "gbrain stopped with application writers; markdown volume and Postgres index share the dump's consistency point"
   }
 }
 EOF
@@ -965,6 +984,17 @@ cmd_restore() {
     validate_volume_archive "$staging_dir/redis-data.tar"
     redis_included='true'
   fi
+  brain_included='false'
+  if awk '
+    /"brain"[[:space:]]*:/ { in_brain = 1; next }
+    in_brain && /"included"[[:space:]]*:[[:space:]]*true/ { found = 1; exit }
+    in_brain && /}/ { exit }
+    END { exit !found }
+  ' "$staging_dir/manifest.json"; then
+    [ -f "$staging_dir/gbrain-data.tar" ] || die "the Brain is marked as included but its snapshot is missing"
+    validate_volume_archive "$staging_dir/gbrain-data.tar"
+    brain_included='true'
+  fi
   if grep -Eq '"mode"[[:space:]]*:[[:space:]]*"local-minio"' "$staging_dir/manifest.json"; then
     [ -f "$staging_dir/minio-data.tar" ] || die "local MinIO data is missing"
     validate_volume_archive "$staging_dir/minio-data.tar"
@@ -1007,6 +1037,16 @@ cmd_restore() {
     minio_volume="$(container_volume_name minio /data)"
     log "Restoring local MinIO artifacts"
     restore_volume "$minio_volume" "$staging_dir" minio-data.tar
+  fi
+
+  if [ "$brain_included" = 'true' ]; then
+    # The restored .env carries the same profile set that made the backup, so
+    # the gbrain service definition is present whenever the bundle says the
+    # Brain was included.
+    compose create gbrain >/dev/null
+    gbrain_volume="$(container_volume_name gbrain /data)"
+    log "Restoring the Brain memory volume"
+    restore_volume "$gbrain_volume" "$staging_dir" gbrain-data.tar
   fi
 
   log "Starting deployment infrastructure"
