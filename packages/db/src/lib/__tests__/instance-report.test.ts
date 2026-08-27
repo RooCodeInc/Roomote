@@ -508,9 +508,13 @@ describe('collectInstanceReportStats pullRequests7d isolation', () => {
 
 describe('collectInstanceReportStats task usage isolation', () => {
   it('excludes environment snapshots from task usage aggregates', async () => {
-    // Keep this aggregate assertion isolated from test files sharing the database.
-    const now = new Date('2040-01-01T00:00:00.000Z');
-    const baseline = await collectInstanceReportStats(now);
+    // The report window is [now - 24h, ∞) with no upper bound, and other test
+    // files write/delete rows in the shared database concurrently (some with
+    // timestamps as late as 2099). Pick a `now` whose window no other suite's
+    // timestamps can reach so the aggregates below cover exactly the rows this
+    // test creates, letting us assert exact values instead of racy baseline
+    // deltas.
+    const now = new Date('2200-01-01T00:00:00.000Z');
     const suffix = Date.now().toString();
     const productModel = `product-model-${suffix}`;
     const snapshotModel = `snapshot-model-${suffix}`;
@@ -570,24 +574,24 @@ describe('collectInstanceReportStats task usage isolation', () => {
 
     const report = await collectInstanceReportStats(now);
 
-    expect(report.tasks24h.created).toBe(baseline.tasks24h.created + 1);
-    expect(report.tasks24h.completed).toBe(baseline.tasks24h.completed + 1);
-    expect(report.tasks24h.byHarness['opencode-server']).toBe(
-      (baseline.tasks24h.byHarness['opencode-server'] ?? 0) + 1,
-    );
-    expect(report.tasks24h.byModel).toContainEqual({
-      provider: 'openai',
-      model: productModel,
-      count: 1,
-    });
+    expect(report.tasks24h.created).toBe(1);
+    expect(report.tasks24h.completed).toBe(1);
+    expect(report.tasks24h.byHarness).toEqual({ 'opencode-server': 1 });
+    expect(report.tasks24h.byModel).toEqual([
+      {
+        provider: 'openai',
+        model: productModel,
+        count: 1,
+      },
+    ]);
     expect(report.tasks24h.byModel).not.toContainEqual(
       expect.objectContaining({ model: snapshotModel }),
     );
     expect(report.tasks24h.tokens).toEqual({
-      input: baseline.tasks24h.tokens.input + 10,
-      output: baseline.tasks24h.tokens.output + 20,
-      total: baseline.tasks24h.tokens.total + 30,
-      costMicroUsd: baseline.tasks24h.tokens.costMicroUsd + 40,
+      input: 10,
+      output: 20,
+      total: 30,
+      costMicroUsd: 40,
     });
   });
 });
