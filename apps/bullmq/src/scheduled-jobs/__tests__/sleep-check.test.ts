@@ -1800,7 +1800,7 @@ describe('sleepCheckJob', () => {
     );
   });
 
-  it('cancels an idle unfinished review when its stale sandbox is already gone', async () => {
+  it('completes an idle review when its stale sandbox is already gone', async () => {
     const mockJob = {
       id: 103,
       machineId: 'sb-review-gone',
@@ -1823,7 +1823,7 @@ describe('sleepCheckJob', () => {
 
     expect(mockFinishRun).toHaveBeenCalledWith({
       id: 103,
-      status: RunStatus.Canceled,
+      status: RunStatus.Completed,
       error:
         'Idle session could not be snapshotted because instance sb-review-gone was stopped.',
     });
@@ -1831,13 +1831,77 @@ describe('sleepCheckJob', () => {
       expect.anything(),
       expect.objectContaining({
         runId: 103,
-        eventType: 'decision',
-        message: 'Canceled idle review task run #103 without a snapshot.',
+        eventType: 'completed',
+        message: 'Completed idle task run #103 without a snapshot.',
         details: expect.objectContaining({
-          decision: 'cancel_unfinished_review_without_snapshot',
+          decision: 'complete_without_snapshot',
         }),
       }),
     );
+  });
+
+  it('completes an idle review when its due sandbox is shut down', async () => {
+    const mockJob = {
+      id: 107,
+      machineId: 'sb-idle-review',
+      payloadKind: TaskPayloadKind.GithubPrReview,
+      status: RunStatus.Idle,
+      taskPhase: 'waiting_for_prompt',
+      vendor: 'modal',
+      taskId: 'task-idle-review',
+      snapshotId: null,
+      sleepRequestedAt: null,
+      snapshotRequestedAt: null,
+    };
+
+    mockJobQueries({ dueJobs: [mockJob] });
+    mockGetInstanceStatus.mockResolvedValue({
+      status: 'running',
+      timeoutRemainingMs: 5 * 60 * 60 * 1_000,
+    });
+    returningFn.mockResolvedValue([{ id: 107 }]);
+
+    await sleepCheckJob();
+
+    expect(mockFinishRun).toHaveBeenCalledWith({
+      id: 107,
+      status: RunStatus.Completed,
+    });
+    expect(mockMaybeEnqueueBrainMemoryForCompletedRun).not.toHaveBeenCalled();
+  });
+
+  it('cancels an idle review when its due sandbox is shut down after a stop request', async () => {
+    const mockJob = {
+      id: 108,
+      machineId: 'sb-stopped-idle-review',
+      payloadKind: TaskPayloadKind.GithubPrReview,
+      status: RunStatus.Idle,
+      taskPhase: 'waiting_for_prompt',
+      vendor: 'modal',
+      taskId: 'task-stopped-idle-review',
+      snapshotId: null,
+      sleepRequestedAt: null,
+      snapshotRequestedAt: null,
+    };
+
+    mockJobQueries({ dueJobs: [mockJob] });
+    mockGetInstanceStatus.mockResolvedValue({
+      status: 'running',
+      timeoutRemainingMs: 5 * 60 * 60 * 1_000,
+    });
+    mockDbQueryTaskRunsFindFirst.mockResolvedValue({
+      cancelRequestedAt: new Date(),
+    });
+    returningFn.mockResolvedValue([{ id: 108 }]);
+
+    await sleepCheckJob();
+
+    expect(mockFinishRun).toHaveBeenCalledWith({
+      id: 108,
+      status: RunStatus.Canceled,
+      error:
+        'Due sleep handling terminated the review sandbox before the review completed',
+    });
   });
 
   it('cancels preparing jobs with a stale heartbeat and stop request when the sandbox is gone', async () => {

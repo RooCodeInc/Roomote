@@ -103,7 +103,17 @@ function resolveSandboxTerminationStatus(
   job: SleepCheckJob,
   fallback: RunStatus.Completed | RunStatus.Failed | RunStatus.Canceled,
 ): RunStatus.Completed | RunStatus.Failed | RunStatus.Canceled {
-  return isGithubPrReviewJob(job) ? RunStatus.Canceled : fallback;
+  if (!isGithubPrReviewJob(job)) {
+    return fallback;
+  }
+
+  if (fallback === RunStatus.Canceled) {
+    return RunStatus.Canceled;
+  }
+
+  return job.status === RunStatus.Idle
+    ? RunStatus.Completed
+    : RunStatus.Canceled;
 }
 
 const SENTRY_DESTROY_INSTANCE_REASONS = new Set<DestroyInstanceReason>([
@@ -1254,13 +1264,27 @@ async function handleTimedSleepCandidate(params: {
     'sleepCheck',
   );
 
-  const reviewCanceled = isGithubPrReviewJob(job);
-  if (reviewCanceled) {
+  const reviewJob = isGithubPrReviewJob(job);
+  const reviewFallback = reviewJob
+    ? await resolveSweptJobFinalStatus(job.id)
+    : RunStatus.Completed;
+  const reviewStatus = resolveSandboxTerminationStatus(
+    job,
+    reviewFallback === RunStatus.Canceled
+      ? RunStatus.Canceled
+      : RunStatus.Completed,
+  );
+  const reviewCanceled = reviewStatus === RunStatus.Canceled;
+  if (reviewJob) {
     try {
       await finishRun({
         id: job.id,
-        status: RunStatus.Canceled,
-        error: `${describeSleepCheckPath(path)} terminated the review sandbox before the review completed`,
+        status: reviewStatus,
+        ...(reviewCanceled
+          ? {
+              error: `${describeSleepCheckPath(path)} terminated the review sandbox before the review completed`,
+            }
+          : {}),
       });
     } catch (error) {
       await db
@@ -1824,7 +1848,15 @@ async function completeIdleJobWithoutSnapshot(
     },
   );
 
-  const finalStatus = resolveSandboxTerminationStatus(job, RunStatus.Completed);
+  const reviewFallback = isGithubPrReviewJob(job)
+    ? await resolveSweptJobFinalStatus(job.id)
+    : RunStatus.Completed;
+  const finalStatus = resolveSandboxTerminationStatus(
+    job,
+    reviewFallback === RunStatus.Canceled
+      ? RunStatus.Canceled
+      : RunStatus.Completed,
+  );
 
   try {
     await finishRun({
