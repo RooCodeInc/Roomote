@@ -142,7 +142,9 @@ export function isBrainUnreachable(error: unknown): boolean {
       }
       if (
         current.message === 'fetch failed' ||
-        /socket hang up|other side closed/i.test(current.message)
+        /socket hang up|other side closed|terminated|premature close/i.test(
+          current.message,
+        )
       ) {
         return true;
       }

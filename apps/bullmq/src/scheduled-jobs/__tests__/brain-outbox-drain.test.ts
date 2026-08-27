@@ -581,6 +581,29 @@ describe('postToBrain failure classification', () => {
     );
   });
 
+  it('classifies a mid-stream disconnect while reading the body as backpressure', async () => {
+    // The connection dropped while gbrain streamed its MCP response: headers
+    // arrived, the body read rejects with undici's terminated shape.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({
+        status: 200,
+        ok: true,
+        text: async () => {
+          throw new TypeError('terminated', {
+            cause: Object.assign(new Error('other side closed'), {
+              code: 'UND_ERR_SOCKET',
+            }),
+          });
+        },
+      })),
+    );
+
+    await expect(postToBrain(page, connection)).rejects.toSatisfy(
+      isBrainNotReady,
+    );
+  });
+
   it('keeps an HTTP error from a reachable brain as a per-page failure', async () => {
     stubUpstream('internal error', 500);
 
