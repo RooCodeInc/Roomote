@@ -9,9 +9,9 @@ import type {
   FastAgentTurnSource,
 } from './fast-agent-conversation';
 
-export const FAST_AGENT_CONTEXT_MANIFEST_VERSION = 1;
+const FAST_AGENT_CONTEXT_MANIFEST_VERSION = 1;
 
-export type FastAgentSessionPath =
+type FastAgentSessionPath =
   | 'warm'
   | 'cold_resume'
   | 'cold_rebuild'
