@@ -5,10 +5,11 @@ import {
   REVIEW_STATUS_START_MARKER,
   REVIEW_SUMMARY_MARKER,
   getMarkedSection,
-  isReviewInProgressStatusLine,
+  isReviewSummaryInProgress,
 } from '@roomote/cloud-agents/server';
 import { Schemas as GitHubSchemas } from '@roomote/github';
 import {
+  completeGithubPrReviewCheckFromSummary,
   enqueuePrReviewNotification,
   startPrReviewNotificationCycle,
   type EnqueuePrReviewNotificationInput,
@@ -43,6 +44,15 @@ function getReviewBody(value: string | null | undefined): string | undefined {
   return body ? body.slice(0, MAX_REVIEW_BODY_LENGTH) : undefined;
 }
 
+function isExternalBotAuthor(
+  user: { login?: string; type?: string } | null | undefined,
+): boolean {
+  return (
+    user?.type === 'Bot' &&
+    (!user.login || !GitHubSchemas.isManagedRoomoteGitHubLogin(user.login))
+  );
+}
+
 function getAutomatedAuthorMetadata(
   user: { id?: number; type?: string } | null | undefined,
 ): { automatedAuthorId: string } | Record<string, never> {
@@ -55,6 +65,10 @@ function getObservedAt(value: string | null | undefined): number {
   const parsed = value ? Date.parse(value) : Number.NaN;
 
   return Number.isFinite(parsed) ? parsed : Date.now();
+}
+
+function getReviewTaskId(body: string): string | undefined {
+  return body.match(/\/task\/([a-z0-9]+)(?:[/?#)]|$)/i)?.[1];
 }
 
 function getIssueCommentRevision(
@@ -108,19 +122,31 @@ export function buildPrReviewActivityNotificationInput(
   eventPayload: PrReviewActivityWebhookPayload,
   context: GitHubWebhookContext = {},
 ): EnqueuePrReviewNotificationInput | null {
+  const author =
+    'issue' in eventPayload
+      ? eventPayload.comment.user
+      : 'review' in eventPayload
+        ? eventPayload.review.user
+        : eventPayload.comment.user;
+
+  if (isExternalBotAuthor(author)) {
+    return null;
+  }
+
   if ('issue' in eventPayload) {
     if (!eventPayload.issue.pull_request) {
       return null;
     }
 
     const comment = eventPayload.comment;
+
     const revision = getIssueCommentRevision(eventPayload, context);
     const authorLogin = comment.user?.login;
     const body = getReviewBody(comment.body);
 
     if (
       !authorLogin ||
-      GitHubSchemas.isRoomoteGitHubLogin(authorLogin) ||
+      GitHubSchemas.isManagedRoomoteGitHubLogin(authorLogin) ||
       isMention({ body: comment.body ?? '', user: { login: authorLogin } })
     ) {
       return null;
@@ -183,7 +209,7 @@ export function buildPrReviewActivityNotificationInput(
         ...(review.submitted_at
           ? { observedAt: getObservedAt(review.submitted_at) }
           : {}),
-        ...(GitHubSchemas.isRoomoteGitHubLogin(authorLogin)
+        ...(GitHubSchemas.isManagedRoomoteGitHubLogin(authorLogin)
           ? { roomoteAuthored: true }
           : {}),
       },
@@ -204,7 +230,7 @@ export function buildPrReviewActivityNotificationInput(
 
   if (
     comment.in_reply_to_id &&
-    GitHubSchemas.isRoomoteGitHubLogin(authorLogin)
+    GitHubSchemas.isManagedRoomoteGitHubLogin(authorLogin)
   ) {
     return null;
   }
@@ -226,7 +252,7 @@ export function buildPrReviewActivityNotificationInput(
         : {}),
       ...(comment.html_url ? { url: comment.html_url } : {}),
       observedAt: getObservedAt(comment.created_at),
-      ...(GitHubSchemas.isRoomoteGitHubLogin(authorLogin)
+      ...(GitHubSchemas.isManagedRoomoteGitHubLogin(authorLogin)
         ? { roomoteAuthored: true }
         : {}),
     },
@@ -250,12 +276,59 @@ function sanitizeReviewSummaryStatus(statusContent: string): string {
 
 /**
  * Parses the head SHA out of the review-summary marker line, e.g.
- * `<!-- roomote-review-summary sha=abc123 mode=initial -->`.
+ * `<!-- roomote-review-summary sha=abc1234 mode=initial version=2 phase=reviewed -->`.
+ * Requires at least a short-sha (7 hex chars), matching
+ * parseReviewSummaryMarkerSha. SHA remains the first attribute for mixed-version
+ * compatibility with older webhook consumers.
  */
 function getReviewSummaryMarkerSha(body: string): string | null {
-  const match = body.match(/<!--\s*roomote-review-summary\s+sha=([0-9a-f]+)/i);
+  const match = body.match(
+    /<!--\s*roomote-review-summary\s+sha=([0-9a-f]{7,})/i,
+  );
 
   return match?.[1] ?? null;
+}
+
+function getReviewSummaryMarkerMode(body: string): 'initial' | 'sync' | null {
+  const mode = body.match(
+    /<!--\s*roomote-review-summary\s+[^>]*mode=(initial|sync)\b/i,
+  )?.[1];
+  return mode === 'initial' || mode === 'sync' ? mode : null;
+}
+
+function getReviewFindingCount(body: string, summary: string): number | null {
+  const uncheckedCount = body.match(/^- \[ \] /gm)?.length ?? 0;
+  if (uncheckedCount > 0) {
+    return uncheckedCount;
+  }
+
+  const statedCount = summary.match(/\b(\d+)\s+issues?\s+outstanding\b/i)?.[1];
+  return statedCount === undefined ? null : Number.parseInt(statedCount, 10);
+}
+
+function getReviewOutcome(
+  summary: string,
+  findingCount: number | null,
+): string | null {
+  if ((findingCount ?? 0) > 0) {
+    return 'findings_remain';
+  }
+  if (
+    /\bno (?:code|new) issues? found\b/i.test(summary) ||
+    /\ball \d+ issues? addressed\b/i.test(summary)
+  ) {
+    return 'clean';
+  }
+  return null;
+}
+
+function getReviewApprovalStatus(
+  summary: string,
+): 'approved' | 'skipped' | null {
+  if (/\bapproval\s+skipped\b/i.test(summary)) {
+    return 'skipped';
+  }
+  return /\bapproved\b/i.test(summary) ? 'approved' : null;
 }
 
 type PrReviewSummaryNotification = {
@@ -307,7 +380,7 @@ function buildPrReviewSummaryLifecycle(
   const comment = eventPayload.comment;
   const authorLogin = comment.user?.login;
 
-  if (!authorLogin || !GitHubSchemas.isRoomoteGitHubLogin(authorLogin)) {
+  if (!authorLogin || !GitHubSchemas.isManagedRoomoteGitHubLogin(authorLogin)) {
     return null;
   }
 
@@ -327,8 +400,7 @@ function buildPrReviewSummaryLifecycle(
     return null;
   }
 
-  const firstStatusLine = statusContent.split('\n')[0] ?? '';
-  const currentInProgress = isReviewInProgressStatusLine(firstStatusLine);
+  const currentInProgress = isReviewSummaryInProgress(body);
   const previousBody =
     'changes' in eventPayload ? eventPayload.changes.body?.from : undefined;
   const previousStatusLine =
@@ -336,9 +408,11 @@ function buildPrReviewSummaryLifecycle(
       ? getReviewStatusFirstLine(previousBody)
       : null;
   const previousInProgress =
+    typeof previousBody === 'string' &&
     previousStatusLine !== null &&
-    isReviewInProgressStatusLine(previousStatusLine);
+    isReviewSummaryInProgress(previousBody);
   const markerSha = getReviewSummaryMarkerSha(body);
+  const reviewTaskId = getReviewTaskId(body);
   const revision = getIssueCommentRevision(eventPayload, context);
   const observedAt = getObservedAt(comment.updated_at ?? comment.created_at);
 
@@ -379,6 +453,7 @@ function buildPrReviewSummaryLifecycle(
   if (!summary) {
     return null;
   }
+  const findingCount = getReviewFindingCount(body, summary);
 
   return {
     kind: 'completed',
@@ -395,6 +470,14 @@ function buildPrReviewSummaryLifecycle(
           providerEventId: `github-review-summary:${comment.id}:${revision}`,
           authorLogin,
           ...(markerSha ? { reviewHeadSha: markerSha } : {}),
+          ...(reviewTaskId ? { reviewTaskId } : {}),
+          reviewResult: {
+            reviewKind: getReviewSummaryMarkerMode(body),
+            outcome: getReviewOutcome(summary, findingCount),
+            findingCount,
+            approvalStatus: getReviewApprovalStatus(summary),
+            headSha: markerSha,
+          },
           ...(!comment.updated_at && typeof previousBody === 'string'
             ? {
                 batchId: getTimestampLessSummaryCycleId(
@@ -436,23 +519,57 @@ export async function queuePrReviewSummaryNotification(
     return;
   }
 
-  const operation =
-    lifecycle.kind === 'started'
-      ? startPrReviewNotificationCycle(lifecycle.input)
-      : enqueuePrReviewNotification(lifecycle.notification.input);
   const reference =
     lifecycle.kind === 'started'
       ? lifecycle.input
       : lifecycle.notification.input;
 
-  await operation.catch((error) => {
+  try {
+    if (lifecycle.kind === 'started') {
+      await startPrReviewNotificationCycle(lifecycle.input);
+      return;
+    }
+
+    const { event } = lifecycle.notification.input;
+    const operations: Promise<unknown>[] = [
+      enqueuePrReviewNotification(lifecycle.notification.input),
+    ];
+    if (
+      eventPayload.installation?.id &&
+      event.reviewTaskId &&
+      event.reviewHeadSha
+    ) {
+      operations.push(
+        completeGithubPrReviewCheckFromSummary({
+          installationId: eventPayload.installation.id,
+          repository: lifecycle.notification.input.repository,
+          prNumber: lifecycle.notification.input.prNumber,
+          taskId: event.reviewTaskId,
+          reviewHeadSha: event.reviewHeadSha,
+          reviewSummaryBody: eventPayload.comment.body ?? '',
+        }),
+      );
+    } else {
+      const missing = [
+        !eventPayload.installation?.id && 'installation id',
+        !event.reviewTaskId && 'task link',
+        !event.reviewHeadSha && 'head sha marker',
+      ]
+        .filter(Boolean)
+        .join(', ');
+      console.warn(
+        `[queuePrReviewSummaryNotification] Skipping check completion for ${reference.repository}#${reference.prNumber}: summary is missing ${missing}`,
+      );
+    }
+    await Promise.all(operations);
+  } catch (error) {
     console.warn(
       `[queuePrReviewSummaryNotification] Failed to record review-summary lifecycle for ${reference.repository}#${reference.prNumber}: ${
         error instanceof Error ? error.message : String(error)
       }`,
     );
     throw error;
-  });
+  }
 }
 
 /**

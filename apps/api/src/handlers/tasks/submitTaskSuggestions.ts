@@ -20,7 +20,10 @@ import {
   workspaceReadinessSchema,
   type WorkspaceReadiness,
 } from '@roomote/types';
-import { SlackNotifier } from '@roomote/slack';
+import {
+  buildTaskSuggestionMessageMetadata,
+  SlackNotifier,
+} from '@roomote/slack';
 import { SETUP_SUGGESTIONS_THREAD_INTRO_TEXT } from '@roomote/communication/chat-messages';
 import { findEnvironmentForRepo } from '@roomote/cloud-agents/server';
 import {
@@ -36,7 +39,9 @@ import {
   db,
   environments,
   eq,
+  findTrackedSuggestionWorkItemIds,
   inArray,
+  registerTrackedSuggestionCards,
   repositories,
   resolveRepositorySelectionByIds,
   slackInstallationChannels,
@@ -101,9 +106,6 @@ const submitTaskSuggestionsBodySchema = z.object({
   delivery: z.literal('current_thread').optional(),
   submissionKey: z.string().trim().min(1).max(200).optional(),
 });
-
-const SETUP_ONBOARDING_SUGGESTION_METADATA_EVENT_TYPE =
-  'roomote.setup_onboarding_suggestion';
 
 type SuggestedTasksPayload = TaskPayload<typeof TaskPayloadKind.Scan>;
 
@@ -177,29 +179,23 @@ type SuggestionCardMessageRow = {
   createdByUserId: string | null;
 };
 
-/**
- * Map Slack suggestion-card rows to `tracked_messages` insert values. The
- * launch state lives on the referenced `work_items` row; the tracked message
- * carries only registry metadata (suggestion type + key) and dedups on
- * `(kind, dedupeKey)` where dedupeKey is `${channelId}:${messageTs}`.
- */
-function buildSlackSuggestionCardValues(
+function registerSlackSuggestionMessageRows(
   rows: SuggestionCardMessageRow[],
-): (typeof trackedMessages.$inferInsert)[] {
-  return rows.map((row) => ({
-    surface: 'slack' as const,
-    kind: 'suggestion_card' as const,
-    dedupeKey: `${row.channelId}:${row.messageTs}`,
-    channelId: row.channelId,
-    messageTs: row.messageTs,
-    workItemId: row.workItemId,
-    createdByUserId: row.createdByUserId,
-    metadata: {
+  executor?: Parameters<typeof registerTrackedSuggestionCards>[1],
+): Promise<void> {
+  return registerTrackedSuggestionCards(
+    rows.map((row) => ({
+      surface: 'slack',
+      channelId: row.channelId,
+      messageTs: row.messageTs,
+      workItemId: row.workItemId,
+      createdByUserId: row.createdByUserId,
       suggestionType: row.suggestionType,
       suggestionKey: row.suggestionKey,
-      ...(row.launchRouting ? { launchRouting: row.launchRouting } : {}),
-    },
-  }));
+      launchRouting: row.launchRouting,
+    })),
+    executor,
+  );
 }
 
 function buildSuggestionMessageKey(params: {
@@ -207,20 +203,6 @@ function buildSuggestionMessageKey(params: {
   suggestionId: string;
 }): string {
   return `${params.sourceTaskId}:${params.suggestionId}`;
-}
-
-function buildSuggestionMessageMetadata(params: {
-  sourceTaskId: string;
-  suggestionId: string;
-}) {
-  return {
-    event_type: SETUP_ONBOARDING_SUGGESTION_METADATA_EVENT_TYPE,
-    event_payload: {
-      sourceTaskId: params.sourceTaskId,
-      suggestionId: params.suggestionId,
-      schemaVersion: 1,
-    },
-  };
 }
 
 function buildSuggestedTasksSummaryLockKey(params: {
@@ -787,7 +769,7 @@ async function postTaskSuggestionsThreadToSlack(params: {
       thread_ts: rootMessageTs,
       text,
       blocks,
-      metadata: buildSuggestionMessageMetadata({
+      metadata: buildTaskSuggestionMessageMetadata({
         sourceTaskId: params.sourceTaskId,
         suggestionId: suggestion.id,
       }),
@@ -864,12 +846,7 @@ async function postCurrentThreadSuggestionsToSlack(params: {
     existingRootMessageTs: params.slackThreadTs,
     suggestions: missingSuggestions,
     insertSuggestionMessages: async (suggestionMessageRows) => {
-      await db
-        .insert(trackedMessages)
-        .values(buildSlackSuggestionCardValues(suggestionMessageRows))
-        .onConflictDoNothing({
-          target: [trackedMessages.kind, trackedMessages.dedupeKey],
-        });
+      await registerSlackSuggestionMessageRows(suggestionMessageRows);
     },
   });
 
@@ -887,24 +864,10 @@ async function getMissingTrackedSuggestions(
     return [];
   }
 
-  const existingSuggestionCards = await db
-    .select({ workItemId: trackedMessages.workItemId })
-    .from(trackedMessages)
-    .where(
-      and(
-        eq(trackedMessages.surface, surface),
-        eq(trackedMessages.kind, 'suggestion_card'),
-        inArray(
-          trackedMessages.workItemId,
-          suggestions.map((suggestion) => suggestion.id),
-        ),
-      ),
-    );
-  const deliveredWorkItemIds = new Set(
-    existingSuggestionCards
-      .map((card) => card.workItemId)
-      .filter((workItemId): workItemId is string => Boolean(workItemId)),
-  );
+  const deliveredWorkItemIds = await findTrackedSuggestionWorkItemIds({
+    surface,
+    workItemIds: suggestions.map((suggestion) => suggestion.id),
+  });
   const missingSuggestions = suggestions.filter(
     (suggestion) => !deliveredWorkItemIds.has(suggestion.id),
   );
@@ -970,12 +933,7 @@ async function postSetupTaskSuggestionsToSlack(params: {
     rootText: introText,
     suggestions: missingSuggestions,
     insertSuggestionMessages: async (suggestionMessageRows) => {
-      await db
-        .insert(trackedMessages)
-        .values(buildSlackSuggestionCardValues(suggestionMessageRows))
-        .onConflictDoNothing({
-          target: [trackedMessages.kind, trackedMessages.dedupeKey],
-        });
+      await registerSlackSuggestionMessageRows(suggestionMessageRows);
     },
   });
 
@@ -1141,12 +1099,7 @@ async function postSuggestedTasksSummaryToSlack(params: {
         : null,
       suggestions: missingSuggestions,
       insertSuggestionMessages: async (suggestionMessageRows) => {
-        await tx
-          .insert(trackedMessages)
-          .values(buildSlackSuggestionCardValues(suggestionMessageRows))
-          .onConflictDoNothing({
-            target: [trackedMessages.kind, trackedMessages.dedupeKey],
-          });
+        await registerSlackSuggestionMessageRows(suggestionMessageRows, tx);
       },
     });
 

@@ -102,6 +102,7 @@ export async function startNewDiscordTask(input: {
     initiator: TaskInitiator;
   };
   forceNewThread?: boolean;
+  model?: string | null;
   fastAgentSessionId?: string;
   fastAgentParent?: FastAgentParent;
   /** Fast owns the visible acknowledgement and must post it before the child
@@ -375,6 +376,7 @@ export async function startNewDiscordTask(input: {
       channel: input.channel,
       workspace,
       forceNewThread: input.forceNewThread,
+      ...(input.model ? { model: input.model } : {}),
       ...(input.fastAgentSessionId
         ? { fastAgentSessionId: input.fastAgentSessionId }
         : {}),

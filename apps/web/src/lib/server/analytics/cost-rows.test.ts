@@ -114,6 +114,7 @@ describe('getCostAnalyticsRows', () => {
       .values([
         {
           eventKey: `cost-analytics-task-${crypto.randomUUID()}`,
+          source: 'task_title_generation',
           costSource: 'missing',
           taskId: task.id,
           runId: run.id,
@@ -140,7 +141,64 @@ describe('getCostAnalyticsRows', () => {
     const row = rows.find((candidate) => candidate.id === usageEvents[0]!.id);
 
     expect(row?.dimensions.project?.label).toBe(environment.name);
+    expect(row?.dimensions.source).toEqual({
+      key: 'task_title_generation',
+      label: 'task_title_generation',
+    });
+    expect(row?.details.values.source).toBe('task_title_generation');
     expect(row?.meta?.prKeys).toEqual(['github:github.com:roomote/test#42']);
+  });
+
+  it('includes Fast parent and advisor/judge usage in Costs', async () => {
+    const user = await userFactory.create();
+    userIds.push(user.id);
+    const insertedEvents = await db
+      .insert(llmUsageEvents)
+      .values(
+        ['build', 'advisor', 'judge'].map((agent, index) => ({
+          eventKey: `fast-cost-analytics-${agent}-${crypto.randomUUID()}`,
+          source: 'fast_agent',
+          userId: user.id,
+          harnessSessionId: `fast-session-${agent}`,
+          messageId: `fast-message-${agent}`,
+          providerId: 'openrouter',
+          modelId: 'openai/gpt-5.4',
+          agent,
+          costSource: 'opencode_message' as const,
+          costMicroUsd: (index + 1) * 1_000,
+          messageCompletedAt: new Date(`2026-07-15T12:00:0${index}.000Z`),
+        })),
+      )
+      .returning({ id: llmUsageEvents.id });
+    usageEventIds.push(...insertedEvents.map((event) => event.id));
+
+    const rows = await getCostAnalyticsRows(
+      {} as UserAuthSuccess,
+      'all',
+      new Date('2026-07-16T16:00:00.000Z'),
+    );
+    const fastRows = rows.filter((row) =>
+      insertedEvents.some((event) => event.id === row.id),
+    );
+
+    expect(fastRows).toHaveLength(3);
+    expect(
+      fastRows.map((row) => row.value).reduce((sum, cost) => sum + cost),
+    ).toBe(0.006);
+    expect(fastRows).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          dimensions: expect.objectContaining({
+            source: { key: 'fast_agent', label: 'fast_agent' },
+            taskType: {
+              key: 'Non-task inference',
+              label: 'Non-task inference',
+            },
+            user: expect.objectContaining({ key: `user:${user.id}` }),
+          }),
+        }),
+      ]),
+    );
   });
 });
 
@@ -169,6 +227,7 @@ describe('aggregateCostAnalyticsRowsByTask', () => {
           date: timestamp,
           taskType: taskId ? 'Manual' : 'Non-task inference',
           project: 'Roomote',
+          source: 'opencode',
           provider: 'openai',
           model,
           cost: cost.toFixed(2),

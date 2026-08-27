@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+
 import { Octokit } from '@octokit/rest';
 import jwt from 'jsonwebtoken';
 import { z } from 'zod';
@@ -32,10 +34,227 @@ export type CreateGitHubTokenOptions = z.infer<
   typeof createGitHubTokenOptionsSchema
 >;
 
+export type GitHubAppCredentials = { appId: string; privateKey: string };
+
+export type GitHubTokenMetadata = {
+  token: string;
+  expiresAt: Date | null;
+};
+
+export type CreateGitHubTokenRuntimeOptions = {
+  /** Reuse a valid token for this exact app, installation, and repo scope. */
+  cache?: boolean;
+  /** Ignore and replace any cached token for this scope. */
+  forceRefresh?: boolean;
+  /** Upper bound on token reuse, independent of the provider expiry. */
+  maxCacheAgeMs?: number;
+  /** Called only when this process sends a token-mint POST to GitHub. */
+  onTokenMintRequest?: () => void;
+};
+
+const GITHUB_TOKEN_CACHE_REFRESH_BUFFER_MS = 5 * 60 * 1000;
+const GITHUB_TOKEN_CACHE_MAX_AGE_MS = 15 * 60 * 1000;
+const GITHUB_TOKEN_CACHE_MAX_ENTRIES = 500;
+
+const githubTokenCache = new Map<
+  string,
+  { metadata: GitHubTokenMetadata; storedAt: number }
+>();
+const githubTokenMintsInFlight = new Map<
+  string,
+  Promise<GitHubTokenMetadata>
+>();
+
+function normalizeRepositoryIds(repositoryIds?: number[]): number[] {
+  return [...new Set(repositoryIds ?? [])].sort((left, right) => left - right);
+}
+
+function getCredentialFingerprint(credentials: GitHubAppCredentials): string {
+  return createHash('sha256')
+    .update(credentials.appId)
+    .update('\0')
+    .update(normalizePemEnvValue(credentials.privateKey))
+    .digest('hex');
+}
+
+function getGitHubTokenCacheKey({
+  credentials,
+  installationId,
+  repositoryIds,
+}: {
+  credentials: GitHubAppCredentials;
+  installationId: number;
+  repositoryIds: number[];
+}): string {
+  return [
+    getCredentialFingerprint(credentials),
+    String(installationId),
+    repositoryIds.join(','),
+  ].join(':');
+}
+
+function getCachedGitHubToken(
+  cacheKey: string,
+  maxCacheAgeMs: number,
+  now = Date.now(),
+): GitHubTokenMetadata | null {
+  const cached = githubTokenCache.get(cacheKey);
+
+  if (
+    !cached?.metadata.expiresAt ||
+    cached.metadata.expiresAt.getTime() -
+      GITHUB_TOKEN_CACHE_REFRESH_BUFFER_MS <=
+      now ||
+    cached.storedAt + maxCacheAgeMs <= now
+  ) {
+    githubTokenCache.delete(cacheKey);
+    return null;
+  }
+
+  // Refresh insertion order so the bounded cache evicts the least recently
+  // used scope first.
+  githubTokenCache.delete(cacheKey);
+  githubTokenCache.set(cacheKey, cached);
+  return cached.metadata;
+}
+
+function cacheGitHubToken(
+  cacheKey: string,
+  metadata: GitHubTokenMetadata,
+): void {
+  if (!metadata.expiresAt) {
+    return;
+  }
+
+  githubTokenCache.delete(cacheKey);
+  githubTokenCache.set(cacheKey, { metadata, storedAt: Date.now() });
+
+  while (githubTokenCache.size > GITHUB_TOKEN_CACHE_MAX_ENTRIES) {
+    const oldestKey = githubTokenCache.keys().next().value;
+    if (typeof oldestKey !== 'string') {
+      break;
+    }
+    githubTokenCache.delete(oldestKey);
+  }
+}
+
+function getErrorHeader(error: unknown, name: string): string | null {
+  if (
+    typeof error !== 'object' ||
+    error === null ||
+    !('response' in error) ||
+    typeof error.response !== 'object' ||
+    error.response === null ||
+    !('headers' in error.response) ||
+    typeof error.response.headers !== 'object' ||
+    error.response.headers === null
+  ) {
+    return null;
+  }
+
+  const entry = Object.entries(
+    error.response.headers as Record<string, unknown>,
+  ).find(([key]) => key.toLowerCase() === name.toLowerCase());
+  const value = entry?.[1];
+
+  return typeof value === 'string' || typeof value === 'number'
+    ? String(value)
+    : null;
+}
+
+function getErrorStatus(error: unknown): number | null {
+  if (typeof error !== 'object' || error === null || !('status' in error)) {
+    return null;
+  }
+
+  const status = Number(error.status);
+  return Number.isFinite(status) ? status : null;
+}
+
+function getRateLimitResetAt(error: unknown): string | null {
+  const resetSeconds = Number(getErrorHeader(error, 'x-ratelimit-reset'));
+  return Number.isFinite(resetSeconds) && resetSeconds > 0
+    ? new Date(resetSeconds * 1000).toISOString()
+    : null;
+}
+
+async function mintGitHubToken({
+  installationId,
+  repositoryIds,
+  appCredentials,
+  runtimeOptions,
+}: {
+  installationId: number;
+  repositoryIds: number[];
+  appCredentials: GitHubAppCredentials;
+  runtimeOptions?: CreateGitHubTokenRuntimeOptions;
+}): Promise<GitHubTokenMetadata> {
+  const startedAt = Date.now();
+  runtimeOptions?.onTokenMintRequest?.();
+
+  try {
+    const {
+      data: { token, expires_at: expiresAtValue },
+    } = await getOctokit(
+      appCredentials,
+    ).rest.apps.createInstallationAccessToken({
+      installation_id: installationId,
+      ...(repositoryIds.length > 0 ? { repository_ids: repositoryIds } : {}),
+    });
+    const parsedExpiresAt = expiresAtValue ? new Date(expiresAtValue) : null;
+    const expiresAt =
+      parsedExpiresAt && !Number.isNaN(parsedExpiresAt.getTime())
+        ? parsedExpiresAt
+        : null;
+
+    console.log(
+      JSON.stringify({
+        event: 'github_installation_token_mint',
+        outcome: 'success',
+        installationId,
+        repositoryCount: repositoryIds.length,
+        expiresAt: expiresAt?.toISOString() ?? null,
+        durationMs: Date.now() - startedAt,
+      }),
+    );
+
+    return { token, expiresAt };
+  } catch (error) {
+    console.warn(
+      JSON.stringify({
+        event: 'github_installation_token_mint',
+        outcome: 'error',
+        installationId,
+        repositoryCount: repositoryIds.length,
+        status: getErrorStatus(error),
+        remaining: getErrorHeader(error, 'x-ratelimit-remaining'),
+        resetAt: getRateLimitResetAt(error),
+        retryAfter: getErrorHeader(error, 'retry-after'),
+        durationMs: Date.now() - startedAt,
+      }),
+    );
+    throw error;
+  }
+}
+
 export async function createGitHubToken(
   options: CreateGitHubTokenOptions,
   octokitOptions?: GitHubAppCredentials,
+  runtimeOptions?: CreateGitHubTokenRuntimeOptions,
 ): Promise<string> {
+  const metadata = await createGitHubTokenWithMetadata(
+    options,
+    octokitOptions,
+    runtimeOptions,
+  );
+  return metadata.token;
+}
+
+export async function createGitHubTokenWithMetadata(
+  options: CreateGitHubTokenOptions,
+  octokitOptions?: GitHubAppCredentials,
+  runtimeOptions?: CreateGitHubTokenRuntimeOptions,
+): Promise<GitHubTokenMetadata> {
   let installation: GitHubInstallation | undefined;
 
   if (options.type === 'activeInstallation') {
@@ -91,22 +310,61 @@ export async function createGitHubToken(
 
   // Scope the token to specific repositories when the caller supplied them, so
   // a task token cannot read or write other repositories in the installation.
-  const repositoryIds =
-    options.type === 'installationId' ? options.repositoryIds : undefined;
-
-  const {
-    data: { token },
-  } = await getOctokit(appCredentials).rest.apps.createInstallationAccessToken({
-    installation_id: installation.installationId,
-    ...(repositoryIds && repositoryIds.length > 0
-      ? { repository_ids: repositoryIds }
-      : {}),
+  const repositoryIds = normalizeRepositoryIds(
+    options.type === 'installationId' ? options.repositoryIds : undefined,
+  );
+  const cacheKey = getGitHubTokenCacheKey({
+    credentials: appCredentials,
+    installationId: installation.installationId,
+    repositoryIds,
   });
+  const cacheEnabled = runtimeOptions?.cache === true;
+  const forceRefresh = runtimeOptions?.forceRefresh === true;
+  const maxCacheAgeMs = Math.max(
+    0,
+    runtimeOptions?.maxCacheAgeMs ?? GITHUB_TOKEN_CACHE_MAX_AGE_MS,
+  );
 
-  return token;
+  if (cacheEnabled && forceRefresh) {
+    githubTokenCache.delete(cacheKey);
+  }
+
+  if (cacheEnabled && !forceRefresh) {
+    const cached = getCachedGitHubToken(cacheKey, maxCacheAgeMs);
+    if (cached) {
+      return cached;
+    }
+  }
+
+  const existingMint = githubTokenMintsInFlight.get(cacheKey);
+  if (existingMint) {
+    return existingMint;
+  }
+
+  const mint = mintGitHubToken({
+    installationId: installation.installationId,
+    repositoryIds,
+    appCredentials,
+    runtimeOptions,
+  })
+    .then((metadata) => {
+      if (cacheEnabled) {
+        cacheGitHubToken(cacheKey, metadata);
+      }
+      return metadata;
+    })
+    .finally(() => {
+      githubTokenMintsInFlight.delete(cacheKey);
+    });
+  githubTokenMintsInFlight.set(cacheKey, mint);
+
+  return mint;
 }
 
-export type GitHubAppCredentials = { appId: string; privateKey: string };
+export function clearGitHubTokenCacheForTesting(): void {
+  githubTokenCache.clear();
+  githubTokenMintsInFlight.clear();
+}
 
 export function resolveGitHubAppCredentials(
   options?: GitHubAppCredentials,

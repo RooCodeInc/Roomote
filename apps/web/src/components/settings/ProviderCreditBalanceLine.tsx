@@ -59,22 +59,22 @@ export function ProviderCreditBalanceLine({
   const remainingLabel = formatMoney(balance.remaining, currency);
   const label =
     balance.limit !== undefined
-      ? `Credits: ${remainingLabel} of ${formatMoney(balance.limit, currency)} left`
-      : `Credits: ${remainingLabel} left`;
+      ? `${remainingLabel} of ${formatMoney(balance.limit, currency)} left`
+      : `${remainingLabel} left`;
 
   const usedPercent = getUsedPercent(balance);
 
   return (
-    <div className={cn('min-w-0 space-y-1', className)}>
-      <p className="min-w-0 truncate text-xs text-muted-foreground">{label}</p>
+    <div className={cn('min-w-0 space-y-1.5', className)}>
       {usedPercent !== undefined ? (
         <Progress
           value={usedPercent}
-          className="h-1.5 bg-muted"
+          className="h-2 bg-muted"
           barClassName={barClassName(usedPercent)}
           aria-label="Credit balance"
         />
       ) : null}
+      <p className="min-w-0 truncate text-xs text-muted-foreground">{label}</p>
     </div>
   );
 }

@@ -6,6 +6,7 @@ import { toast } from 'sonner';
 import {
   CHATGPT_SUBSCRIPTION_PROVIDER_ID,
   OPENAI_COMPATIBLE_PROVIDER_ID,
+  ROOMOTE_INFERENCE_PROVIDER_ID,
   XAI_SUBSCRIPTION_PROVIDER_ID,
   getDefaultAdditionalEnvValues,
   getModelProviderLabel,
@@ -55,12 +56,18 @@ import { XaiConnectDialog } from '@/components/settings/XaiConnectDialog';
 import { ProviderCreditBalanceLine } from '@/components/settings/ProviderCreditBalanceLine';
 import { SubscriptionUsageLine } from '@/components/settings/SubscriptionUsageLine';
 
-const MASKED_VALUE = '••••••••••••••••••••••••••••';
 const PROVIDER_GRID_ROW_CLASS =
-  'grid gap-2 md:grid-cols-[minmax(160px,220px)_minmax(0,1fr)] md:items-center';
+  'grid gap-2 md:grid-cols-[minmax(160px,220px)_minmax(0,1fr)]';
 
 type InferenceProviderSectionProps = {
   providerSetup: SetupModelStatus | null;
+  /**
+   * Whether the Roomote trial is actually in use (chosen or seeded), as
+   * opposed to merely having its key imported. Mirrors the server-side
+   * delete guard: a merely-imported trial row must not count as a provider
+   * that keeps other providers deletable.
+   */
+  trialInferenceActive?: boolean;
   providerSetupPending: boolean;
   connectedProviders: SetupModelProviderStatus[];
   availableProviders: SetupModelProviderStatus[];
@@ -149,6 +156,47 @@ function ConnectedProviderRow({
   onEdit: () => void;
   onDelete: () => void;
 }) {
+  if (provider.id === ROOMOTE_INFERENCE_PROVIDER_ID) {
+    return (
+      <div className={`${PROVIDER_GRID_ROW_CLASS} py-3 first:pt-0 last:pb-0`}>
+        <span className="min-w-0 truncate text-sm font-medium">
+          {provider.label}
+        </span>
+        <div className="flex min-w-0 items-start justify-between gap-2">
+          <div className="min-w-0">
+            <p className="text-sm text-muted-foreground mb-2">
+              Managed by Roomote with free trial credits. Add your own provider
+              at any time to continue after credits end.
+            </p>
+            <ProviderCreditBalanceLine
+              balance={creditBalance}
+              className="max-w-md"
+            />
+          </div>
+          <BasicTooltip
+            content={
+              canDelete
+                ? 'Delete Roomote inference. This disables the free trial permanently.'
+                : 'Keep at least one inference provider connected'
+            }
+          >
+            <span>
+              <Button
+                size="icon"
+                variant="ghost"
+                onClick={onDelete}
+                disabled={isSaving || !canDelete}
+                aria-label={`Delete ${provider.label} provider`}
+              >
+                <Trash2 />
+              </Button>
+            </span>
+          </BasicTooltip>
+        </div>
+      </div>
+    );
+  }
+
   const hasRuntimeKey = provider.runtimeApiKeySatisfied;
   const primaryCredentialLabel = provider.envVarLabel ?? 'API key';
   const runtimeKeyTooltip = provider.envVarName
@@ -157,15 +205,9 @@ function ConnectedProviderRow({
   const runtimeKeyLabel = provider.envVarName
     ? `${provider.label} API key is managed by ${provider.envVarName}`
     : `${provider.label} API key is managed by an environment variable`;
-  const inputValue =
-    provider.authKind === 'endpoint'
-      ? (provider.additionalEnvValues[provider.envVarName ?? ''] ??
-        'Configured endpoint')
-      : MASKED_VALUE;
-
   return (
     <div className={`${PROVIDER_GRID_ROW_CLASS} py-3 first:pt-0 last:pb-0`}>
-      <div className="flex min-w-0 items-center gap-2">
+      <div className="flex min-w-0 gap-2">
         <span className="min-w-0 truncate text-sm font-medium">
           {provider.label}
         </span>
@@ -173,16 +215,8 @@ function ConnectedProviderRow({
 
       <div className="flex min-w-0 items-center justify-between gap-2">
         <div className="w-full max-w-md">
-          <Input
-            className="min-w-0 w-full font-mono"
-            value={inputValue}
-            readOnly
-            disabled
-            aria-label={`${primaryCredentialLabel} for ${provider.label}`}
-            data-1p-ignore
-          />
           <SubscriptionUsageLine usage={usage} className="mt-1" />
-          <ProviderCreditBalanceLine balance={creditBalance} className="mt-1" />
+          <ProviderCreditBalanceLine balance={creditBalance} className="mt-2" />
         </div>
 
         {hasRuntimeKey ? (
@@ -835,6 +869,7 @@ function DeleteProviderDialog({
 
 export function InferenceProviderSection({
   providerSetup,
+  trialInferenceActive = false,
   providerSetupPending,
   connectedProviders,
   availableProviders,
@@ -1240,8 +1275,16 @@ export function InferenceProviderSection({
   const canAddProvider = sortedAddableProviders.length > 0;
   // Count key rows and subscription rows independently so dual-path xAI
   // (API key + SuperGrok) can delete the key while the subscription remains.
-  const connectedProviderCount =
-    sortedApiKeyConnectedProviders.length +
+  // Mirrors the server-side delete guard: a row is deletable only while at
+  // least one other connected provider remains, and a merely-imported (never
+  // chosen) Roomote trial row does not count as one.
+  const countOtherConnectedProviders = (excludedProviderId: string) =>
+    sortedApiKeyConnectedProviders.filter(
+      (candidate) =>
+        candidate.id !== excludedProviderId &&
+        (candidate.id !== ROOMOTE_INFERENCE_PROVIDER_ID ||
+          trialInferenceActive),
+    ).length +
     (chatgptHasRecord ? 1 : 0) +
     (githubCopilotHasRecord ? 1 : 0) +
     (xaiHasRecord ? 1 : 0);
@@ -1367,12 +1410,13 @@ export function InferenceProviderSection({
                     : undefined
                 }
                 creditBalance={
-                  provider.id === 'openrouter'
-                    ? creditBalanceByProvider.get('openrouter')
+                  provider.id === 'openrouter' ||
+                  provider.id === ROOMOTE_INFERENCE_PROVIDER_ID
+                    ? creditBalanceByProvider.get(provider.id)
                     : undefined
                 }
                 isSaving={savingProviderId === provider.id}
-                canDelete={connectedProviderCount > 1}
+                canDelete={countOtherConnectedProviders(provider.id) >= 1}
                 onEdit={() =>
                   setProviderDialog({ mode: 'edit', providerId: provider.id })
                 }

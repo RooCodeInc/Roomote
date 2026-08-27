@@ -42,14 +42,10 @@ export function GitHubSourceControlConfig({ onBack }: { onBack?: () => void }) {
     <>
       <div className="space-y-3 max-w-xl">
         <p>
-          Because Roomote is self-hosted, we can&apos;t offer you an out-of-the-
-          box GitHub app - you need to create your own.
+          Because Roomote is self-hosted, we can&apos;t offer you an
+          out-of-the-box GitHub app - you need to create your own.
         </p>
-        <p>
-          Roomote can create it for you automatically. You&apos;ll pick the
-          account or organization to install it on during the GitHub install
-          step.
-        </p>
+        <p>But it&apos;s super easy.</p>
       </div>
 
       <div className="space-y-2 max-w-xl mt-6">

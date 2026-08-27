@@ -42,10 +42,12 @@ vi.mock('@roomote/redis', () => ({
 }));
 
 import {
+  clearNextSlackReplyQuoteSuppressionIfId,
   clearLatestUserMessage,
   clearSlackThreadExplicitMentionRequired,
   getLatestSlackBotReply,
   getLatestUserMessage,
+  getNextSlackReplyQuoteSuppression,
   getSlackMessages,
   hasSlackThreadReplyContext,
   isSlackThreadExplicitMentionRequired,
@@ -53,6 +55,7 @@ import {
   prependSlackMessages,
   setLatestSlackBotReply,
   setLatestUserMessage,
+  suppressNextSlackReplyQuote,
   trackLatestUserMessageForSlackQuote,
   trackSlackBotReply,
 } from '../slack-messages';
@@ -212,6 +215,32 @@ describe('slack-messages', () => {
       text: 'Need a follow-up',
       userName: 'Brock',
     });
+  });
+
+  it('persists and conditionally clears next-reply quote suppression', async () => {
+    const suppressionId = await suppressNextSlackReplyQuote(42);
+
+    expect(setMock).toHaveBeenCalledWith(
+      'slack:next_reply_quote_suppression:42',
+      suppressionId,
+      'EX',
+      30 * 24 * 60 * 60,
+    );
+
+    getMock.mockResolvedValueOnce(suppressionId);
+    await expect(getNextSlackReplyQuoteSuppression(42)).resolves.toBe(
+      suppressionId,
+    );
+
+    await expect(
+      clearNextSlackReplyQuoteSuppressionIfId(42, suppressionId),
+    ).resolves.toBe(true);
+    expect(evalMock).toHaveBeenCalledWith(
+      expect.stringContaining('if current ~= ARGV[1]'),
+      1,
+      'slack:next_reply_quote_suppression:42',
+      suppressionId,
+    );
   });
 
   it('tracks the latest user message for Slack quotes', async () => {

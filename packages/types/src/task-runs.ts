@@ -236,6 +236,8 @@ export type SuggestionCategory =
   | 'improvement';
 
 export type SuggestionPriority = 'P0' | 'P1' | 'P2' | 'P3';
+export const TASK_SUGGESTION_MESSAGE_METADATA_EVENT_TYPE =
+  'roomote.setup_onboarding_suggestion';
 export const TASK_SUGGESTION_SOURCES = [
   'suggest_ideas',
   'sentry_triage',
@@ -1042,10 +1044,19 @@ const sharedTaskPayloadSchema = z.object({
   communicationContextInherited: z.boolean().optional(),
   /** Runless Fast parent that owns this task's user-visible lifecycle. */
   fastAgentParent: fastAgentParentSchema.optional(),
+  /** Native Slack task card in the parent thread of a Fast-mode delegation.
+   * Inherited onto every snapshot resume by the queue so the card follows
+   * the task. */
+  liveTaskStream: z.boolean().optional(),
   /** Runless Fast conversation that delegated this task on any chat provider. */
   fastAgentSessionId: z.string().uuid().optional(),
   /** Provider event that caused this fresh launch; used for idempotent retries. */
   communicationSourceEventId: z.string().optional(),
+  /**
+   * Stable caller-provided key for fresh launches that must recover the same
+   * durable task after an ambiguous response or concurrent retry.
+   */
+  launchIdempotencyKey: z.string().trim().min(1).max(256).optional(),
   /**
    * Discord channel hosting the origin reaction target. Always a channel that
    * contains `discordReactionMessageId` (never an interaction id).
@@ -1179,11 +1190,22 @@ export const githubPullRequestReviewOpenSchema = sharedTaskSchema.extend({
     prTitle: z.string(),
     prUrl: z.string(),
     headSha: z.string(),
+    /**
+     * Newest head observed for this PR while the review was already running.
+     * Stamped by the synchronize handler before the debounced follow-up is
+     * queued, so a review that finishes inside that window can still be
+     * recognized as reporting on a superseded head. `headSha` stays the head
+     * the review actually started from.
+     */
+    latestObservedHeadSha: z.string().optional(),
     branchName: z.string().optional(),
     targetBranch: z.string().optional(),
     relayReviewResultsToTask: z.boolean().optional(),
     linkedTaskId: z.string().optional(),
     linkedTaskRelayLookupPending: z.boolean().optional(),
+    linkedReviewHandoffTarget: z
+      .enum(['fast_parent', 'implementation_task'])
+      .optional(),
   }),
 });
 
@@ -1198,11 +1220,22 @@ export const githubPullRequestReviewSyncSchema = sharedTaskSchema.extend({
     prTitle: z.string(),
     prUrl: z.string(),
     headSha: z.string(),
+    /**
+     * Newest head observed for this PR while the review was already running.
+     * Stamped by the synchronize handler before the debounced follow-up is
+     * queued, so a review that finishes inside that window can still be
+     * recognized as reporting on a superseded head. `headSha` stays the head
+     * the review actually started from.
+     */
+    latestObservedHeadSha: z.string().optional(),
     branchName: z.string().optional(),
     targetBranch: z.string().optional(),
     relayReviewResultsToTask: z.boolean().optional(),
     linkedTaskId: z.string().optional(),
     linkedTaskRelayLookupPending: z.boolean().optional(),
+    linkedReviewHandoffTarget: z
+      .enum(['fast_parent', 'implementation_task'])
+      .optional(),
   }),
 });
 

@@ -41,7 +41,6 @@ describe('personal account capabilities', () => {
     await expect(getPersonalAccountCapabilitiesCommand(auth)).resolves.toEqual({
       canChangePassword: false,
       canSetPassword: true,
-      communicationsFastModeDefaultAvailable: false,
     });
   });
 
@@ -51,7 +50,6 @@ describe('personal account capabilities', () => {
     await expect(getPersonalAccountCapabilitiesCommand(auth)).resolves.toEqual({
       canChangePassword: true,
       canSetPassword: false,
-      communicationsFastModeDefaultAvailable: false,
     });
   });
 

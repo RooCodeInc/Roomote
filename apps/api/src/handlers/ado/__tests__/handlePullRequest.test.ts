@@ -255,6 +255,25 @@ describe('handleAdoPullRequest', () => {
     expect('sourceControlHost' in task.payload).toBe(false);
   });
 
+  it('restores tracked draft status from active status-only updates', async () => {
+    const result = await handleAdoPullRequest(
+      makePayload('git.pullrequest.updated', { isDraft: true }),
+      { updatedNotificationType: 'StatusUpdateNotification' },
+    );
+
+    expect(result).toEqual({
+      status: 'ok',
+      message: 'unsupported_ado_pull_request_event:git.pullrequest.updated',
+    });
+    expect(mockUpdateTaskPrStatus).toHaveBeenCalledWith(
+      'ado',
+      'acme/Platform/backend',
+      42,
+      'draft',
+    );
+    expect(mockEnqueueTask).not.toHaveBeenCalled();
+  });
+
   it('selects and stamps the webhook host among same-name repositories on multiple hosts', async () => {
     // Two active rows share the repository identity; only the host differs.
     const rows = [
@@ -478,6 +497,7 @@ describe('handleAdoPullRequest', () => {
       pullRequest: {
         number: 42,
         title: 'Update backend',
+        body: null,
         url: 'https://dev.azure.com/acme/Platform/_git/backend/pullrequest/42',
         authorLogin: 'roomote-bot@acme.example',
         state: 'merged',

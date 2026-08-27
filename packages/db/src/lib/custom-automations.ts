@@ -5,12 +5,14 @@ import {
   isConfiguredAutomationTarget,
   isScheduleOnlyBackgroundAutomationFrequency,
   type CustomAutomationScheduleMode,
+  type CustomAutomationExecutionMode,
   type OptionalAutomationTarget,
   type ScheduleOnlyBackgroundAutomationFrequency,
   CUSTOM_AUTOMATION_NAME_MAX_LENGTH,
   CUSTOM_AUTOMATION_PROMPT_MAX_LENGTH,
   CUSTOM_AUTOMATION_CRON_MAX_LENGTH,
   CUSTOM_AUTOMATION_MODEL_MAX_LENGTH,
+  FAST_EXECUTION,
   MAX_CUSTOM_AUTOMATIONS,
 } from '@roomote/types';
 
@@ -41,6 +43,18 @@ export type CustomAutomationWriteInput = {
   target: OptionalAutomationTarget;
   createdByUserId?: string | null;
 };
+
+function getExecutionTarget(environmentId: string): {
+  executionMode: CustomAutomationExecutionMode;
+  allRepositories: boolean;
+} {
+  return environmentId === FAST_EXECUTION
+    ? { executionMode: 'fast', allRepositories: false }
+    : {
+        executionMode: 'sandbox_task',
+        allRepositories: environmentId === ALL_REPOSITORIES,
+      };
+}
 
 function normalizeName(name: string): string {
   return name.trim().replace(/\s+/g, ' ');
@@ -184,15 +198,18 @@ export async function createCustomAutomation(
     );
   }
 
-  const allRepositories = input.environmentId === ALL_REPOSITORIES;
-  const environment = allRepositories
-    ? null
-    : await client.query.environments.findFirst({
-        columns: { id: true },
-        where: eq(environments.id, input.environmentId),
-      });
+  const { executionMode, allRepositories } = getExecutionTarget(
+    input.environmentId,
+  );
+  const environment =
+    allRepositories || executionMode === 'fast'
+      ? null
+      : await client.query.environments.findFirst({
+          columns: { id: true },
+          where: eq(environments.id, input.environmentId),
+        });
 
-  if (!allRepositories && !environment) {
+  if (executionMode === 'sandbox_task' && !allRepositories && !environment) {
     throw new Error('Selected environment was not found.');
   }
 
@@ -205,8 +222,12 @@ export async function createCustomAutomation(
       scheduleMode: input.scheduleMode,
       cronExpression,
       model,
-      environmentId: allRepositories ? null : input.environmentId,
+      environmentId:
+        allRepositories || executionMode === 'fast'
+          ? null
+          : input.environmentId,
       allRepositories,
+      executionMode,
       target: input.target,
       createdByUserId: input.createdByUserId ?? null,
     })
@@ -231,15 +252,18 @@ export async function updateCustomAutomation(
     throw new Error('Custom automation was not found.');
   }
 
-  const allRepositories = input.environmentId === ALL_REPOSITORIES;
-  const environment = allRepositories
-    ? null
-    : await client.query.environments.findFirst({
-        columns: { id: true },
-        where: eq(environments.id, input.environmentId),
-      });
+  const { executionMode, allRepositories } = getExecutionTarget(
+    input.environmentId,
+  );
+  const environment =
+    allRepositories || executionMode === 'fast'
+      ? null
+      : await client.query.environments.findFirst({
+          columns: { id: true },
+          where: eq(environments.id, input.environmentId),
+        });
 
-  if (!allRepositories && !environment) {
+  if (executionMode === 'sandbox_task' && !allRepositories && !environment) {
     throw new Error('Selected environment was not found.');
   }
 
@@ -252,8 +276,12 @@ export async function updateCustomAutomation(
       scheduleMode: input.scheduleMode,
       cronExpression,
       model,
-      environmentId: allRepositories ? null : input.environmentId,
+      environmentId:
+        allRepositories || executionMode === 'fast'
+          ? null
+          : input.environmentId,
       allRepositories,
+      executionMode,
       target: input.target,
       updatedAt: new Date(),
     })

@@ -981,6 +981,8 @@ export interface AcpToolCallPayload {
   isExecute: boolean;
   isRead: boolean;
   isMcp: boolean;
+  /** Trusted Roomote-native tool output persisted by the Fast runtime. */
+  isRoomoteNativeTool?: boolean;
   mcpServerName: string | null;
   mcpToolName: string | null;
   command: string | null;
@@ -1005,6 +1007,8 @@ export interface AcpToolResultPayload {
   title: string | null;
   isExecute: boolean;
   isMcp: boolean;
+  /** Trusted Roomote-native tool output persisted by the Fast runtime. */
+  isRoomoteNativeTool?: boolean;
   mcpServerName: string | null;
   mcpToolName: string | null;
   command: string | null;

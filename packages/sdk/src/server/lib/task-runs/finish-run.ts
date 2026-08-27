@@ -73,9 +73,11 @@ import {
 import { cleanupSandboxOidcTargetsForTaskRun } from '../sandbox-oidc';
 import { notifySourceRunOnSettle } from './notify-source-run-on-settle';
 import { notifyFastAgentParentOnSettle } from './notify-fast-agent-parent-on-settle';
+import { settleSlackLiveTaskCardOnExit } from './settle-slack-live-task-card-on-exit';
 import { refreshTaskTitleOnCompletion } from './record-task-message-envelope';
 import { getRedis } from '@roomote/redis';
 import { resolveSlackTaskRunRouting } from './slack-task-run-routing';
+import { getGithubPrReviewCheckResult } from './github-pr-review-check';
 import {
   SlackNotifier,
   buildTaskFailedMessage,
@@ -352,8 +354,8 @@ export const finishRun = async ({
     // completion or not at all, so no completed task can silently skip
     // memory ingestion. Deployments without a Brain never enqueue; skip
     // rules and DLP live in the bullmq drainer, not here.
-    if (status === RunStatus.Completed && isBrainConfigured(Env)) {
-      await maybeEnqueueBrainMemoryEvent(tx, id);
+    if (status === RunStatus.Completed) {
+      await maybeEnqueueBrainMemoryForCompletedRun(tx, id);
     }
   });
 
@@ -415,6 +417,9 @@ export const finishRun = async ({
     status,
     run.task.title,
   );
+  // The worker settles its own card on exit; this covers runs finalized
+  // here without one (reaper, failed bootstrap). Never throws.
+  void settleSlackLiveTaskCardOnExit(run, status, run.task.title);
 
   // Anonymous analytics (no-op unless enabled): terminal task outcome with
   // non-identifying routing facts only.
@@ -615,6 +620,19 @@ export const finishRun = async ({
 };
 
 /**
+ * Keep every direct completion writer on the same Brain activation guard.
+ * The caller supplies its transaction so completion and enqueue stay atomic.
+ */
+export async function maybeEnqueueBrainMemoryForCompletedRun(
+  tx: Parameters<typeof maybeEnqueueBrainMemoryEvent>[0],
+  runId: number,
+): Promise<void> {
+  if (isBrainConfigured(Env)) {
+    await maybeEnqueueBrainMemoryEvent(tx, runId);
+  }
+}
+
+/**
  * Flip this snapshot run's environment_snapshots row from 'pending' to
  * 'failed'. The match built from the run's payload attachment (or, for legacy
  * payloads, the run's createdAt upper bound) keeps the update scoped to the
@@ -722,26 +740,6 @@ async function cleanupGithubPrReviewArtifacts(
       }
     }
 
-    if (prRow.githubCheckRunId) {
-      try {
-        const token = await createTaskRunGitHubToken(run);
-
-        await updateCheckRun(token, {
-          owner,
-          repo,
-          check_run_id: prRow.githubCheckRunId,
-          status: 'completed',
-          conclusion: 'success',
-        });
-      } catch (error) {
-        console.error(
-          `[finishRun] Failed to complete check run for run ${run.id}: ${
-            error instanceof Error ? error.message : String(error)
-          }`,
-        );
-      }
-    }
-
     // GitHub PR review summary comment finalization (safety net).
     // The review-code skill is responsible for patching the summary comment's
     // in-progress status to a terminal result, but when it doesn't (the run
@@ -751,8 +749,13 @@ async function cleanupGithubPrReviewArtifacts(
     // a real agent completion (it only patches comments still showing an
     // in-progress status line).
     if (status !== RunStatus.Idle) {
+      let token: string | undefined;
+      let reviewSummary: { finalized: boolean; body?: string } = {
+        finalized: false,
+      };
+
       try {
-        const token = await createTaskRunGitHubToken(run);
+        token = await createTaskRunGitHubToken(run);
         // A user-stopped run arrives here already normalized to Canceled (see
         // finishRun), so the review outcome maps naturally.
         const outcome =
@@ -773,7 +776,7 @@ async function cleanupGithubPrReviewArtifacts(
           }),
         });
 
-        const finalized = await finalizeGithubPrReviewComment({
+        reviewSummary = await finalizeGithubPrReviewComment({
           gitHubToken: token,
           owner,
           repo,
@@ -782,7 +785,7 @@ async function cleanupGithubPrReviewArtifacts(
           terminalStatus,
         });
 
-        if (finalized) {
+        if (reviewSummary.finalized) {
           console.log(
             `[finishRun] Finalized stale PR review summary comment for run ${run.id} on ${prRow.repository}#${prRow.prNumber}`,
           );
@@ -793,6 +796,70 @@ async function cleanupGithubPrReviewArtifacts(
             error instanceof Error ? error.message : String(error)
           }`,
         );
+      }
+
+      let checkRunId = prRow.githubCheckRunId;
+      if (!checkRunId) {
+        try {
+          const refreshedLinkage = await db.query.taskPullRequests.findFirst({
+            where: eq(taskPullRequests.id, prRow.id),
+            columns: { githubCheckRunId: true },
+          });
+          checkRunId = refreshedLinkage?.githubCheckRunId ?? null;
+        } catch (error) {
+          console.error(
+            `[finishRun] Failed to refresh PR review check linkage for run ${run.id}: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          );
+        }
+      }
+
+      if (checkRunId) {
+        try {
+          token ??= await createTaskRunGitHubToken(run);
+          const checkResult = getGithubPrReviewCheckResult({
+            runStatus: status,
+            reviewSummaryBody: reviewSummary.body,
+            safetyNetFinalized: reviewSummary.finalized,
+            expectedHeadSha:
+              'latestObservedHeadSha' in run.payload &&
+              typeof run.payload.latestObservedHeadSha === 'string'
+                ? run.payload.latestObservedHeadSha
+                : 'headSha' in run.payload &&
+                    typeof run.payload.headSha === 'string'
+                  ? run.payload.headSha
+                  : undefined,
+          });
+          const taskUrl = getTaskUrl({
+            taskId: run.taskId,
+            utm: {
+              source: 'github-check',
+              medium: 'link',
+              campaign: 'github.pr.review',
+            },
+          });
+
+          await updateCheckRun(token, {
+            owner,
+            repo,
+            check_run_id: checkRunId,
+            status: 'completed',
+            conclusion: checkResult.conclusion,
+            completed_at: new Date().toISOString(),
+            details_url: taskUrl,
+            output: {
+              title: checkResult.title,
+              summary: `${checkResult.summary} [Open the task](${taskUrl}).`,
+            },
+          });
+        } catch (error) {
+          console.error(
+            `[finishRun] Failed to complete PR review check for run ${run.id}: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          );
+        }
       }
     }
   }

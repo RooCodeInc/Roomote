@@ -3,7 +3,11 @@
 // agents write their own narrative through a separate path, so both must
 // converge on exactly one memory candidate per completed run.
 
-import { RunStatus, TaskPayloadKind } from '@roomote/types';
+import {
+  BRAIN_COLLECTOR_IDS,
+  RunStatus,
+  TaskPayloadKind,
+} from '@roomote/types';
 
 import {
   db,
@@ -19,6 +23,7 @@ import {
   claimPendingBrainMemoryEvents,
   markBrainMemoryEvent,
   releaseBrainMemoryEvents,
+  settleBrainMemoryEvent,
   maybeEnqueueBrainMemoryEvent,
   saveBrainAgentSummary,
   resetBrainIngestionState,
@@ -26,6 +31,7 @@ import {
   deleteBrainCollectorItems,
   deleteBrainSyncStateFamily,
   getBrainSyncState,
+  getBrainMemoryEventSummary,
   renameBrainSyncStateFamilyPrefix,
   listBrainCollectorItems,
   listBrainCollectorItemsBefore,
@@ -33,8 +39,10 @@ import {
   seedBrainCollectorItems,
   upsertBrainCollectorItems,
   upsertBrainSyncState,
+  sql,
 } from '../../server';
 import type { CreateTaskRun } from '../../types';
+import { runMemoryOutboxLifecycleContract } from './memory-outbox-lifecycle.contract';
 
 const createdTaskIds: string[] = [];
 
@@ -80,7 +88,7 @@ describe('resetBrainIngestionState', () => {
     const run = await makeCompletedRun();
     await maybeEnqueueBrainMemoryEvent(db, run.id);
     const [claimed] = await claimPendingBrainMemoryEvents(db, 10);
-    await markBrainMemoryEvent(db, claimed!.id, 'done');
+    await settleBrainMemoryEvent(db, claimed!.id, claimed!.revision, 'done');
     await upsertBrainSyncState(db, 'granola-meetings', {
       watermark: new Date('2026-08-01T00:00:00Z'),
       backfillCompletedAt: new Date('2026-08-01T01:00:00Z'),
@@ -459,7 +467,7 @@ describe('saveBrainAgentSummary', () => {
     const run = await makeCompletedRun();
     await maybeEnqueueBrainMemoryEvent(db, run.id);
     const [claimed] = await claimPendingBrainMemoryEvents(db, 10);
-    await markBrainMemoryEvent(db, claimed!.id, 'done');
+    await settleBrainMemoryEvent(db, claimed!.id, claimed!.revision, 'done');
 
     await saveBrainAgentSummary(db, run.id, 'agent narrative');
 
@@ -471,6 +479,113 @@ describe('saveBrainAgentSummary', () => {
     expect(event?.status).toBe('pending');
     expect(event?.attempts).toBe(0);
     expect(event?.agentSummary).toBe('agent narrative');
+  });
+
+  it('keeps a claimed row with a single writer and fences its completion', async () => {
+    const run = await makeCompletedRun();
+    await maybeEnqueueBrainMemoryEvent(db, run.id);
+    const claimed = (await claimPendingBrainMemoryEvents(db, 10)).find(
+      (candidate) => candidate.runId === run.id,
+    );
+
+    // A save lands between the claim and the drainer's completion: the row
+    // stays 'processing' (no second claimer can pick it up) but its revision
+    // moves past the drainer's snapshot.
+    await saveBrainAgentSummary(db, run.id, 'late richer narrative');
+
+    const [held] = await db
+      .select()
+      .from(brainMemoryEvents)
+      .where(eq(brainMemoryEvents.id, claimed!.id));
+    expect(held!.status).toBe('processing');
+    expect(held!.revision).toBe(claimed!.revision + 1);
+
+    // The stale-revision settle fails the fence and hands the row back.
+    const outcome = await settleBrainMemoryEvent(
+      db,
+      claimed!.id,
+      claimed!.revision,
+      'done',
+    );
+    expect(outcome).toBe('superseded');
+
+    const [row] = await db
+      .select()
+      .from(brainMemoryEvents)
+      .where(eq(brainMemoryEvents.id, claimed!.id));
+
+    expect(row!.status).toBe('pending');
+    expect(row!.processedAt).toBeNull();
+    expect(row!.agentSummary).toBe('late richer narrative');
+
+    // The next tick re-claims it and completes normally.
+    const reclaimed = (await claimPendingBrainMemoryEvents(db, 10)).find(
+      (candidate) => candidate.id === claimed!.id,
+    );
+    expect(
+      await settleBrainMemoryEvent(
+        db,
+        reclaimed!.id,
+        reclaimed!.revision,
+        'done',
+      ),
+    ).toBe('settled');
+
+    const [settled] = await db
+      .select()
+      .from(brainMemoryEvents)
+      .where(eq(brainMemoryEvents.id, claimed!.id));
+
+    expect(settled!.status).toBe('done');
+  });
+
+  it('re-queues a settled row when a stale-reclaimed writer returns late', async () => {
+    const run = await makeCompletedRun();
+    await maybeEnqueueBrainMemoryEvent(db, run.id);
+
+    // Writer A claims, then hangs in its page write past the reclaim window.
+    const claimedA = (await claimPendingBrainMemoryEvents(db, 10)).find(
+      (candidate) => candidate.runId === run.id,
+    );
+    await saveBrainAgentSummary(db, run.id, 'newer narrative');
+    await db
+      .update(brainMemoryEvents)
+      .set({ updatedAt: new Date(Date.now() - 16 * 60 * 1000) })
+      .where(eq(brainMemoryEvents.id, claimedA!.id));
+
+    // Writer B stale-reclaims the newer revision, writes it, settles done.
+    const claimedB = (await claimPendingBrainMemoryEvents(db, 10)).find(
+      (candidate) => candidate.id === claimedA!.id,
+    );
+    expect(claimedB!.revision).toBeGreaterThan(claimedA!.revision);
+    expect(
+      await settleBrainMemoryEvent(
+        db,
+        claimedB!.id,
+        claimedB!.revision,
+        'done',
+      ),
+    ).toBe('settled');
+
+    // A's stale page write finally lands and A settles: the fence miss must
+    // re-queue the row even though it is already 'done', so the next tick
+    // re-puts the newest content over A's stale snapshot.
+    expect(
+      await settleBrainMemoryEvent(
+        db,
+        claimedA!.id,
+        claimedA!.revision,
+        'done',
+      ),
+    ).toBe('superseded');
+
+    const [row] = await db
+      .select()
+      .from(brainMemoryEvents)
+      .where(eq(brainMemoryEvents.id, claimedA!.id));
+
+    expect(row!.status).toBe('pending');
+    expect(row!.processedAt).toBeNull();
   });
 
   it('keeps the summary when the completion path enqueues afterwards', async () => {
@@ -509,10 +624,9 @@ describe('backfillBrainMemoryEvents', () => {
       .returning();
 
     const first = await backfillBrainMemoryEvents(db);
-    const second = await backfillBrainMemoryEvents(db);
+    await backfillBrainMemoryEvents(db);
 
     expect(first).toBeGreaterThanOrEqual(1);
-    expect(second).toBe(0);
 
     const completedEvents = await db
       .select()
@@ -530,11 +644,9 @@ describe('backfillBrainMemoryEvents', () => {
   it('requeues completed memories for a one-time metadata replay', async () => {
     const completed = await makeCompletedRun();
     await saveBrainAgentSummary(db, completed.id, 'Keep this summary.');
-    const [event] = await db
-      .select()
-      .from(brainMemoryEvents)
-      .where(eq(brainMemoryEvents.runId, completed.id));
-    await markBrainMemoryEvent(db, event!.id, 'done');
+    const claimed = await claimPendingBrainMemoryEvents(db, 10);
+    const event = claimed.find((row) => row.runId === completed.id);
+    await settleBrainMemoryEvent(db, event!.id, event!.revision, 'done');
 
     await backfillBrainMemoryEvents(db, { requeueCompleted: true });
 
@@ -548,6 +660,27 @@ describe('backfillBrainMemoryEvents', () => {
       lastError: null,
       agentSummary: 'Keep this summary.',
     });
+  });
+});
+
+describe('getBrainMemoryEventSummary', () => {
+  it('separates pre-backfill history from current recording gaps', async () => {
+    await makeCompletedRun(new Date('2099-08-12T12:00:00Z'));
+    const recorded = await makeCompletedRun(new Date('2099-08-14T11:00:00Z'));
+    await makeCompletedRun(new Date('2101-08-14T12:00:00Z'));
+    await maybeEnqueueBrainMemoryEvent(db, recorded.id);
+    await upsertBrainSyncState(db, BRAIN_COLLECTOR_IDS.taskMemories, {
+      backfillCompletedAt: new Date('2100-01-01T00:00:00Z'),
+    });
+
+    const summary = await getBrainMemoryEventSummary(db);
+
+    // Other real-DB test files share this database and can leave unrelated
+    // legacy completed runs visible while Vitest executes them concurrently.
+    expect(summary.historicalCompletedRunsWithoutEvent).toBeGreaterThanOrEqual(
+      1,
+    );
+    expect(summary.recentCompletedRunsWithoutEvent).toBe(1);
   });
 });
 
@@ -659,4 +792,40 @@ describe('stranded claim recovery', () => {
   it('ignores an empty release', async () => {
     await expect(releaseBrainMemoryEvents(db, [])).resolves.toBeUndefined();
   });
+});
+
+runMemoryOutboxLifecycleContract('task memory', () => {
+  let runId: number | null = null;
+
+  return {
+    async createEvent() {
+      const run = await makeCompletedRun();
+      runId = run.id;
+      await maybeEnqueueBrainMemoryEvent(db, run.id);
+      const [event] = await db
+        .select()
+        .from(brainMemoryEvents)
+        .where(eq(brainMemoryEvents.runId, run.id));
+      return event!;
+    },
+    claim: () => claimPendingBrainMemoryEvents(db, 10),
+    release: (ids) => releaseBrainMemoryEvents(db, ids),
+    mark: (id, status, error) => markBrainMemoryEvent(db, id, status, error),
+    settle: (id, revision, outcome, error) =>
+      settleBrainMemoryEvent(db, id, revision, outcome, error),
+    revise: () => saveBrainAgentSummary(db, runId!, 'newer summary'),
+    async age(id) {
+      await db
+        .update(brainMemoryEvents)
+        .set({ updatedAt: sql`now() - interval '16 minutes'` })
+        .where(eq(brainMemoryEvents.id, id));
+    },
+    async read(id) {
+      const [row] = await db
+        .select()
+        .from(brainMemoryEvents)
+        .where(eq(brainMemoryEvents.id, id));
+      return row!;
+    },
+  };
 });

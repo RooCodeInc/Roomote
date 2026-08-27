@@ -556,6 +556,9 @@ describe('platform-managed draft state', () => {
     finishNotification();
     const result = await resultPromise;
 
+    expect(mockGetOctokit).toHaveBeenCalledWith('github-token', {
+      retryRateLimits: true,
+    });
     expect(octokit.rest.pulls.create).toHaveBeenCalledWith(
       expect.objectContaining({ draft: true }),
     );
@@ -1447,6 +1450,111 @@ describe('optional targetBranch', () => {
     },
   );
 
+  it.each([
+    [
+      'Slack',
+      {
+        repo: 'acme/web',
+        communicationContextInherited: true,
+        communicationProvider: 'slack',
+        communicationTeamId: 'T123',
+        communicationTeamDomain: 'acme',
+        communicationChannelId: 'C123',
+        communicationThreadId: '1234567890.000100',
+        communicationMessageId: '1234567890.000200',
+        slackConversationUrl:
+          'https://acme.slack.com/archives/C123/p1234567890000200?thread_ts=1234567890.000100&cid=C123',
+      },
+      {
+        taskSurface: 'slack',
+        slackTeamId: 'T123',
+        slackTeamDomain: 'acme',
+        slackChannel: 'C123',
+        slackThreadTs: '1234567890.000100',
+        slackConversationUrl:
+          'https://acme.slack.com/archives/C123/p1234567890000200?thread_ts=1234567890.000100&cid=C123',
+      },
+      '[Slack](https://acme.slack.com/archives/C123/p1234567890000200?thread_ts=1234567890.000100&cid=C123)',
+    ],
+    [
+      'Discord',
+      {
+        repo: 'acme/web',
+        communicationContextInherited: true,
+        communicationProvider: 'discord',
+        communicationGuildId: '123',
+        communicationChannelId: '456',
+        communicationThreadId: '789',
+        communicationMessageId: '101112',
+      },
+      {
+        taskSurface: 'discord',
+        discordGuildId: '123',
+        discordChannelId: '789',
+        discordMessageId: '101112',
+      },
+      '[Discord](https://discord.com/channels/123/789/101112)',
+    ],
+  ] as const)(
+    'keeps inherited %s provenance during the final provider mutation',
+    async (_label, payload, expectedMetadata, conversationLink) => {
+      const canonicalAttribution = attributionBody(
+        'Created by Roomote.',
+        `Follow up by mentioning @roomote or in ${conversationLink}.`,
+      );
+      const octokit = makeOctokit({
+        list: [],
+        created: {
+          number: 13,
+          node_id: 'node-13',
+          html_url: 'https://github.com/acme/web/pull/13',
+          title: '[Feature] X',
+          draft: true,
+          base: { ref: 'develop' },
+        },
+      });
+      mockRepositoriesFindFirst.mockResolvedValue({
+        installationId: 555,
+        externalRepoId: null,
+        fullName: 'acme/web',
+        htmlUrl: 'https://github.com/acme/web',
+        private: false,
+      });
+      mockGetPrBodyAttributionLine.mockReturnValueOnce(canonicalAttribution);
+      mockTasksFindFirst.mockResolvedValue({
+        surface: 'web',
+        slackChannelId: null,
+        slackThreadTs: null,
+      });
+
+      await createOrUpdateSourceControlPullRequestForTaskRun({
+        taskRun: makeTaskRun(payload),
+        input: {
+          ...baseInput,
+          targetBranch: 'develop',
+          body: `${attributionBody('Created by Roomote.')}
+
+## What changed
+
+Done.`,
+        },
+      });
+
+      expect(mockGetPrBodyAttributionLine).toHaveBeenCalledWith(
+        expect.objectContaining(expectedMetadata),
+      );
+      expect(octokit.rest.pulls.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          body: `${canonicalAttribution}
+
+## What changed
+
+Done.`,
+        }),
+      );
+    },
+  );
+
   it('passes canonical web metadata instead of parsing the input opener', async () => {
     makeOctokit({
       list: [],
@@ -1571,6 +1679,75 @@ describe('optional targetBranch', () => {
     expect(octokit.rest.pulls.create).toHaveBeenCalledWith(
       expect.objectContaining({
         body: `${attributionBody('Created by Roomote.')}\n\nDone.`,
+      }),
+    );
+  });
+
+  it('does not duplicate entity-prefixed harness attribution when the canonical line uses a zero-width space', async () => {
+    const octokit = makeOctokit({
+      list: [],
+      created: {
+        number: 13,
+        node_id: 'node-13',
+        html_url: 'https://github.com/acme/web/pull/13',
+        title: '[Feature] X',
+        draft: true,
+        base: { ref: 'develop' },
+      },
+    });
+    const harnessAttribution =
+      '> &#8203;<!-- roomote:pr-attribution:start -->Created by Roomote.<!-- roomote:pr-attribution:end --> [View the task](https://example.com/task/1) or mention @roomote-roomote for follow-up asks.';
+    const canonicalAttribution =
+      '> \u200B<!-- roomote:pr-attribution:start -->Created by Roomote.<!-- roomote:pr-attribution:end --> Follow up by mentioning @roomote-roomote or in [the web UI](https://example.com/task/1).';
+    mockGetPrBodyAttributionLine.mockReturnValueOnce(canonicalAttribution);
+
+    await createOrUpdateSourceControlPullRequestForTaskRun({
+      taskRun: makeTaskRun({ repo: 'acme/web' }),
+      input: {
+        ...baseInput,
+        targetBranch: 'develop',
+        body: `${harnessAttribution}\n\n## What changed\n\nDone.`,
+      },
+    });
+
+    expect(octokit.rest.pulls.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        body: `${canonicalAttribution}\n\n## What changed\n\nDone.`,
+      }),
+    );
+  });
+
+  it('collapses the exact duplicated PR attribution shape to one canonical line', async () => {
+    const harnessAttribution =
+      '> &#8203;<!-- roomote:pr-attribution:start -->Created by Roomote.<!-- roomote:pr-attribution:end --> [View the task](https://example.com/task/1) or mention @roomote-roomote for follow-up asks.';
+    const staleCanonicalAttribution =
+      '> \u200B<!-- roomote:pr-attribution:start -->Created by Roomote.<!-- roomote:pr-attribution:end --> Follow up by mentioning @roomote-roomote or in [the web UI](https://example.com/task/1).';
+    const duplicatedBody = `${harnessAttribution}\n\n${staleCanonicalAttribution}\n\n## What changed\n\nDone.`;
+    const existing = {
+      number: 13,
+      node_id: 'node-13',
+      html_url: 'https://github.com/acme/web/pull/13',
+      title: '[Feature] X',
+      draft: true,
+      base: { ref: 'develop' },
+      body: duplicatedBody,
+    };
+    const octokit = makeOctokit({ list: [existing], updated: existing });
+    const canonicalAttribution = attributionBody('Created by Roomote.');
+    mockGetPrBodyAttributionLine.mockReturnValueOnce(canonicalAttribution);
+
+    await createOrUpdateSourceControlPullRequestForTaskRun({
+      taskRun: makeTaskRun({ repo: 'acme/web' }),
+      input: {
+        ...baseInput,
+        targetBranch: 'develop',
+        body: duplicatedBody,
+      },
+    });
+
+    expect(octokit.rest.pulls.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        body: `${canonicalAttribution}\n\n## What changed\n\nDone.`,
       }),
     );
   });

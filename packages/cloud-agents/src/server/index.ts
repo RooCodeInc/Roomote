@@ -24,6 +24,10 @@ export * from './automation-root-summary';
 export * from './audio-transcription';
 export * from './file-attachments';
 export * from './fast-agent';
+// Canonical API base URL fallback chain (explicit -> TRPC_URL -> R_APP_URL).
+// Fast surfaces must derive apiBaseUrl through this so the broker's
+// deployment-proxy origin check matches the resolver-built proxy URLs.
+export { resolveApiBaseUrl } from './shared-utils';
 export * from './github-message-instructions';
 export * from './github-pr-follow-up-context';
 export * from './untrusted-content';

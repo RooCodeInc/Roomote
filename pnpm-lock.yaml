@@ -213,12 +213,18 @@ importers:
       '@trpc/server':
         specifier: ^11.15.0
         version: 11.15.0(typescript@5.9.3)
+      dompurify:
+        specifier: 3.4.13
+        version: 3.4.13
       hono:
         specifier: 4.12.34
         version: 4.12.34
       jose:
         specifier: ^6.2.3
         version: 6.2.3
+      jsdom:
+        specifier: 26.1.0
+        version: 26.1.0(bufferutil@4.1.0)(utf-8-validate@6.0.6)
       p-map:
         specifier: ^7.0.4
         version: 7.0.4
@@ -232,9 +238,6 @@ importers:
         specifier: ^3.25.76
         version: 3.25.76
     devDependencies:
-      '@roomote/config-eslint':
-        specifier: workspace:^
-        version: link:../../packages/config-eslint
       '@roomote/config-typescript':
         specifier: workspace:^
         version: link:../../packages/config-typescript
@@ -280,6 +283,9 @@ importers:
       '@roomote/env':
         specifier: workspace:^
         version: link:../../packages/env
+      '@roomote/github':
+        specifier: workspace:^
+        version: link:../../packages/github
       '@roomote/linear':
         specifier: workspace:^
         version: link:../../packages/linear
@@ -311,9 +317,6 @@ importers:
         specifier: ^3.25.76
         version: 3.25.76
     devDependencies:
-      '@roomote/config-eslint':
-        specifier: workspace:^
-        version: link:../../packages/config-eslint
       '@roomote/config-typescript':
         specifier: workspace:^
         version: link:../../packages/config-typescript
@@ -360,9 +363,6 @@ importers:
         specifier: 4.0.6
         version: 4.0.6
     devDependencies:
-      '@roomote/config-eslint':
-        specifier: workspace:^
-        version: link:../../packages/config-eslint
       '@roomote/config-typescript':
         specifier: workspace:^
         version: link:../../packages/config-typescript
@@ -403,9 +403,6 @@ importers:
         specifier: ^8.2.0
         version: 8.2.0
     devDependencies:
-      '@roomote/config-eslint':
-        specifier: workspace:^
-        version: link:../../packages/config-eslint
       '@roomote/config-typescript':
         specifier: workspace:^
         version: link:../../packages/config-typescript
@@ -440,9 +437,6 @@ importers:
       '@roomote/communication':
         specifier: workspace:*
         version: link:../../packages/communication
-      '@roomote/config-eslint':
-        specifier: workspace:^
-        version: link:../../packages/config-eslint
       '@roomote/config-typescript':
         specifier: workspace:^
         version: link:../../packages/config-typescript
@@ -498,9 +492,6 @@ importers:
         specifier: ^3.25.76
         version: 3.25.76
     devDependencies:
-      '@roomote/config-eslint':
-        specifier: workspace:^
-        version: link:../../packages/config-eslint
       '@roomote/config-typescript':
         specifier: workspace:^
         version: link:../../packages/config-typescript
@@ -964,9 +955,6 @@ importers:
       commander:
         specifier: ^14.0.2
         version: 14.0.3
-      dompurify:
-        specifier: 3.4.13
-        version: 3.4.13
       execa:
         specifier: 9.6.1
         version: 9.6.1
@@ -979,9 +967,6 @@ importers:
       ignore:
         specifier: ^7.0.5
         version: 7.0.5
-      jsdom:
-        specifier: 26.1.0
-        version: 26.1.0(bufferutil@4.1.0)(utf-8-validate@6.0.6)
       jsonwebtoken:
         specifier: ^9.0.3
         version: 9.0.3
@@ -1022,9 +1007,6 @@ importers:
       '@types/http-proxy':
         specifier: ^1.17.17
         version: 1.17.17
-      '@types/jsdom':
-        specifier: 21.1.7
-        version: 21.1.7
       '@types/jsonwebtoken':
         specifier: ^9.0.10
         version: 9.0.10
@@ -1056,9 +1038,6 @@ importers:
         specifier: ^3.25.76
         version: 3.25.76
     devDependencies:
-      '@roomote/config-eslint':
-        specifier: workspace:^
-        version: link:../config-eslint
       '@roomote/config-typescript':
         specifier: workspace:^
         version: link:../config-typescript
@@ -1090,9 +1069,6 @@ importers:
         specifier: ^3.25.76
         version: 3.25.76
     devDependencies:
-      '@roomote/config-eslint':
-        specifier: workspace:^
-        version: link:../config-eslint
       '@roomote/config-typescript':
         specifier: workspace:^
         version: link:../config-typescript
@@ -1121,9 +1097,6 @@ importers:
         specifier: ^3.25.76
         version: 3.25.76
     devDependencies:
-      '@roomote/config-eslint':
-        specifier: workspace:^
-        version: link:../config-eslint
       '@roomote/config-typescript':
         specifier: workspace:^
         version: link:../config-typescript
@@ -1145,18 +1118,33 @@ importers:
       '@opencode-ai/sdk':
         specifier: 1.18.10
         version: 1.18.10
+      '@roomote/ado':
+        specifier: workspace:^
+        version: link:../ado
       '@roomote/auth':
         specifier: workspace:^
         version: link:../auth
+      '@roomote/bitbucket':
+        specifier: workspace:^
+        version: link:../bitbucket
+      '@roomote/communication':
+        specifier: workspace:^
+        version: link:../communication
       '@roomote/db':
         specifier: workspace:^
         version: link:../db
       '@roomote/env':
         specifier: workspace:^
         version: link:../env
+      '@roomote/gitea':
+        specifier: workspace:^
+        version: link:../gitea
       '@roomote/github':
         specifier: workspace:^
         version: link:../github
+      '@roomote/gitlab':
+        specifier: workspace:^
+        version: link:../gitlab
       '@roomote/redis':
         specifier: workspace:^
         version: link:../redis
@@ -1169,6 +1157,12 @@ importers:
       ai:
         specifier: ^6.0.116
         version: 6.0.116(zod@3.25.76)
+      dompurify:
+        specifier: 3.4.13
+        version: 3.4.13
+      jsdom:
+        specifier: 26.1.0
+        version: 26.1.0(bufferutil@4.1.0)(utf-8-validate@6.0.6)
       jszip:
         specifier: ^3.10.1
         version: 3.10.1
@@ -1188,15 +1182,15 @@ importers:
         specifier: 3.25.1
         version: 3.25.1(zod@3.25.76)
     devDependencies:
-      '@roomote/config-eslint':
-        specifier: workspace:^
-        version: link:../config-eslint
       '@roomote/config-typescript':
         specifier: workspace:^
         version: link:../config-typescript
       '@types/ioredis-mock':
         specifier: ^8.2.6
         version: 8.2.6(ioredis@5.10.1)
+      '@types/jsdom':
+        specifier: 21.1.7
+        version: 21.1.7
       '@types/node':
         specifier: ^24.10.13
         version: 24.12.4
@@ -1225,9 +1219,6 @@ importers:
         specifier: ^3.25.76
         version: 3.25.76
     devDependencies:
-      '@roomote/config-eslint':
-        specifier: workspace:^
-        version: link:../config-eslint
       '@roomote/config-typescript':
         specifier: workspace:^
         version: link:../config-typescript
@@ -1268,9 +1259,6 @@ importers:
         specifier: ^0.7.6
         version: 0.7.6
     devDependencies:
-      '@roomote/config-eslint':
-        specifier: workspace:^
-        version: link:../config-eslint
       '@roomote/config-typescript':
         specifier: workspace:^
         version: link:../config-typescript
@@ -1349,9 +1337,6 @@ importers:
       '@faker-js/faker':
         specifier: ^8.4.1
         version: 8.4.1
-      '@roomote/config-eslint':
-        specifier: workspace:^
-        version: link:../config-eslint
       '@roomote/config-typescript':
         specifier: workspace:^
         version: link:../config-typescript
@@ -1386,9 +1371,6 @@ importers:
         specifier: ^3.25.76
         version: 3.25.76
     devDependencies:
-      '@roomote/config-eslint':
-        specifier: workspace:^
-        version: link:../config-eslint
       '@roomote/config-typescript':
         specifier: workspace:^
         version: link:../config-typescript
@@ -1408,9 +1390,6 @@ importers:
         specifier: 5.10.1
         version: 5.10.1
     devDependencies:
-      '@roomote/config-eslint':
-        specifier: workspace:^
-        version: link:../config-eslint
       '@roomote/config-typescript':
         specifier: workspace:^
         version: link:../config-typescript
@@ -1436,9 +1415,6 @@ importers:
         specifier: ^3.25.76
         version: 3.25.76
     devDependencies:
-      '@roomote/config-eslint':
-        specifier: workspace:^
-        version: link:../config-eslint
       '@roomote/config-typescript':
         specifier: workspace:^
         version: link:../config-typescript
@@ -1479,9 +1455,6 @@ importers:
         specifier: ^3.25.76
         version: 3.25.76
     devDependencies:
-      '@roomote/config-eslint':
-        specifier: workspace:^
-        version: link:../config-eslint
       '@roomote/config-typescript':
         specifier: workspace:^
         version: link:../config-typescript
@@ -1510,9 +1483,6 @@ importers:
         specifier: ^3.25.76
         version: 3.25.76
     devDependencies:
-      '@roomote/config-eslint':
-        specifier: workspace:^
-        version: link:../config-eslint
       '@roomote/config-typescript':
         specifier: workspace:^
         version: link:../config-typescript
@@ -1547,9 +1517,6 @@ importers:
         specifier: ^3.25.76
         version: 3.25.76
     devDependencies:
-      '@roomote/config-eslint':
-        specifier: workspace:^
-        version: link:../config-eslint
       '@roomote/config-typescript':
         specifier: workspace:^
         version: link:../config-typescript
@@ -1569,9 +1536,6 @@ importers:
         specifier: 5.10.1
         version: 5.10.1
     devDependencies:
-      '@roomote/config-eslint':
-        specifier: workspace:^
-        version: link:../config-eslint
       '@roomote/config-typescript':
         specifier: workspace:^
         version: link:../config-typescript
@@ -1657,9 +1621,6 @@ importers:
         specifier: ^3.25.76
         version: 3.25.76
     devDependencies:
-      '@roomote/config-eslint':
-        specifier: workspace:^
-        version: link:../config-eslint
       '@roomote/config-typescript':
         specifier: workspace:^
         version: link:../config-typescript
@@ -1697,9 +1658,6 @@ importers:
         specifier: ^3.25.76
         version: 3.25.76
     devDependencies:
-      '@roomote/config-eslint':
-        specifier: workspace:^
-        version: link:../config-eslint
       '@roomote/config-typescript':
         specifier: workspace:^
         version: link:../config-typescript
@@ -1712,9 +1670,6 @@ importers:
 
   packages/source-control-oauth:
     devDependencies:
-      '@roomote/config-eslint':
-        specifier: workspace:^
-        version: link:../config-eslint
       '@roomote/config-typescript':
         specifier: workspace:^
         version: link:../config-typescript
@@ -1737,9 +1692,6 @@ importers:
         specifier: workspace:^
         version: link:../feature-flags
     devDependencies:
-      '@roomote/config-eslint':
-        specifier: workspace:^
-        version: link:../config-eslint
       '@roomote/config-typescript':
         specifier: workspace:^
         version: link:../config-typescript
@@ -1759,9 +1711,6 @@ importers:
         specifier: ^3.25.76
         version: 3.25.76
     devDependencies:
-      '@roomote/config-eslint':
-        specifier: workspace:^
-        version: link:../config-eslint
       '@roomote/config-typescript':
         specifier: workspace:^
         version: link:../config-typescript

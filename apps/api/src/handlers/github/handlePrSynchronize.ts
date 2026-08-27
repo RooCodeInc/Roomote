@@ -25,7 +25,10 @@ import {
 } from '@roomote/db/server';
 import { enqueueTask } from '@roomote/cloud-agents/server';
 import { acquireRedisLock } from '@roomote/redis';
-import { enqueueActivePrReviewFollowUp } from '@roomote/sdk/server';
+import {
+  enqueueActivePrReviewFollowUp,
+  publishGithubPrReviewCheck,
+} from '@roomote/sdk/server';
 
 import type { WebhookResponse } from '../../types';
 import { toHostFromUrl } from '../utils';
@@ -284,6 +287,18 @@ export async function handlePrSynchronize({
         }
 
         if (followUpRun) {
+          // Record the superseding head before the debounced follow-up is
+          // queued. `prSha` stays the head this review last covered because
+          // it seeds `previous_review_head_sha` in the follow-up prompt, so
+          // the newest observed head needs its own field for a review that
+          // finishes before the relay lands.
+          await db
+            .update(taskRuns)
+            .set({
+              payload: sql`coalesce(${taskRuns.payload}, '{}'::jsonb) || jsonb_build_object('latestObservedHeadSha', ${headSha}::text)`,
+            })
+            .where(eq(taskRuns.id, followUpRun.id));
+
           const relayPayload = await getReviewTaskRelayPayload({
             repository: repository.full_name,
             prNumber: pr.number,
@@ -335,6 +350,17 @@ export async function handlePrSynchronize({
               },
             },
           });
+          if (currentTarget.settings?.publishGithubCheck) {
+            await publishGithubPrReviewCheck({
+              installationId: installation!.id,
+              repository: repository.full_name,
+              prNumber: pr.number,
+              headSha,
+              taskId: followUpRun.taskId,
+              runId: followUpRun.id,
+              status: 'in_progress',
+            });
+          }
           queuedActiveReviewFollowUp = true;
         }
 
@@ -386,7 +412,7 @@ export async function handlePrSynchronize({
         reviewerSettings: currentTarget.settings,
       });
 
-      return enqueueTask({
+      const launch = await enqueueTask({
         existingTaskId: existingReviewTask?.taskId,
         task: {
           type: shouldRunSyncReview
@@ -430,6 +456,19 @@ export async function handlePrSynchronize({
           prBaseSha: pr.base?.sha ?? null,
         },
       });
+
+      if (currentTarget.settings?.publishGithubCheck) {
+        await publishGithubPrReviewCheck({
+          installationId: installation!.id,
+          repository: repository.full_name,
+          prNumber: pr.number,
+          headSha,
+          taskId: launch.taskId,
+          runId: launch.id,
+        });
+      }
+
+      return launch;
     } finally {
       await releaseLaunchLock();
     }

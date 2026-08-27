@@ -165,6 +165,12 @@ describe('UserPreferencesSection', () => {
       ),
     ).toBeInTheDocument();
     expect(screen.getByLabelText('Toggle narration mode')).toBeChecked();
+    expect(screen.getByText('Fast response mode')).toHaveClass('font-semibold');
+    expect(
+      screen.getByText(
+        'Use fast responses by default for homepage prompts and linked Slack and Discord messages. GitHub, Teams, and Telegram are unaffected; `!fast` remains available in Slack.',
+      ),
+    ).toBeInTheDocument();
   });
 
   it('disables controls while the corresponding preference is loading or updating', () => {
@@ -221,24 +227,12 @@ describe('UserPreferencesSection', () => {
     );
   });
 
-  it('hides the communications fast mode default when it is unavailable', () => {
-    render(<UserPreferencesSection />);
-
-    expect(
-      screen.queryByLabelText('Toggle communications fast mode default'),
-    ).not.toBeInTheDocument();
-  });
-
-  it('updates the communications fast mode default when it is available', () => {
+  it('updates the fast response mode default', () => {
     personalPreferencesState.preferences.communicationsFastModeDefault = true;
 
-    render(
-      <UserPreferencesSection communicationsFastModeDefaultAvailable={true} />,
-    );
+    render(<UserPreferencesSection />);
 
-    const toggle = screen.getByLabelText(
-      'Toggle communications fast mode default',
-    );
+    const toggle = screen.getByLabelText('Toggle fast response mode');
     expect(toggle).toBeChecked();
 
     fireEvent.click(toggle);

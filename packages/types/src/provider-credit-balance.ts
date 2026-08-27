@@ -1,13 +1,13 @@
 /**
  * Normalized credit/spend remaining data for API-key inference providers that
- * expose a key-readable balance endpoint (currently OpenRouter), displayed on
- * the Models settings page under the connected provider row.
+ * expose a key-readable balance endpoint, displayed on the Models settings
+ * page under the connected provider row.
  *
  * Missing balance is a non-error: the UI simply omits the balance line.
  */
 
 /** Setup-catalog provider ids that report credit balance. */
-export type ProviderCreditBalanceProviderId = 'openrouter';
+export type ProviderCreditBalanceProviderId = 'openrouter' | 'roomote';
 
 export interface ProviderCreditBalance {
   providerId: ProviderCreditBalanceProviderId;

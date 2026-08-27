@@ -2,6 +2,8 @@ import {
   sanitizeSandboxPathsForDisplay,
   sanitizeSandboxPathString,
 } from '@/lib';
+import { redactSecrets } from '@roomote/communication/redact-secrets';
+import YAML from 'yaml';
 
 import {
   CodeBlock,
@@ -39,9 +41,11 @@ export function AcpToolDetails({
   }
 
   const sanitizedToolData = sanitizeSandboxPathsForDisplay(msg.data);
+  const visibleToolInput = getVisibleToolInput(msg.data);
   const sanitizedText = msg.text
     ? sanitizeSandboxPathString(msg.text)
     : msg.text;
+  const formattedText = formatToolDetails(sanitizedText, visibleToolInput);
   const isSubagent = isSubagentToolPayload(msg.data);
   const subagentPrompt = getSubagentPrompt(msg);
   const subagentLastMessage = getSubagentLastMessage(msg);
@@ -87,10 +91,10 @@ export function AcpToolDetails({
     );
   }
 
-  return sanitizedText ? (
+  return formattedText ? (
     <CodeBlock
-      code={sanitizedText}
-      language="bash"
+      code={formattedText.code}
+      language={formattedText.isStructured ? 'yaml' : 'bash'}
       maxHeight={maxHeight}
       variant="compact"
       highlight={false}
@@ -105,4 +109,79 @@ export function AcpToolDetails({
       }}
     />
   );
+}
+
+function formatToolDetails(
+  text: string | undefined,
+  visibleToolInput: Record<string, string> | null,
+): { code: string; isStructured: boolean } | undefined {
+  if (!text) return undefined;
+
+  try {
+    const result = JSON.parse(text) as unknown;
+    if (!result || typeof result !== 'object') {
+      return { code: text, isStructured: false };
+    }
+
+    const details =
+      !Array.isArray(result) &&
+      visibleToolInput &&
+      Object.keys(visibleToolInput).length > 0
+        ? { ...(result as Record<string, unknown>), ...visibleToolInput }
+        : result;
+
+    return {
+      code: YAML.stringify(details, { indent: 2, lineWidth: 0 }).trimEnd(),
+      isStructured: true,
+    };
+  } catch {
+    return { code: text, isStructured: false };
+  }
+}
+
+function getVisibleToolInput(
+  data: AcpToolCallUiMessage['data'] | AcpToolResultUiMessage['data'],
+): Record<string, string> | null {
+  const record = data as unknown as Record<string, unknown>;
+  const serverName = (
+    data.serverName ??
+    data.mcpServerName ??
+    ''
+  ).toLowerCase();
+  const toolName = (data.toolName ?? data.mcpToolName ?? data.title ?? '')
+    .toLowerCase()
+    .replace(/^.*[.:/]/, '');
+
+  const visibleField =
+    serverName === 'gbrain' && (toolName === 'search' || toolName === 'query')
+      ? 'query'
+      : toolName === 'send_task_message'
+        ? 'message'
+        : null;
+  if (!visibleField) {
+    return null;
+  }
+
+  const rawInput = record.rawInput;
+  if (!rawInput || typeof rawInput !== 'object' || Array.isArray(rawInput)) {
+    return {};
+  }
+
+  const rawInputRecord = rawInput as Record<string, unknown>;
+  const nestedArguments = rawInputRecord.arguments;
+  const args =
+    nestedArguments &&
+    typeof nestedArguments === 'object' &&
+    !Array.isArray(nestedArguments)
+      ? (nestedArguments as Record<string, unknown>)
+      : rawInputRecord;
+  const value = args[visibleField];
+
+  if (typeof value !== 'string' || value.trim().length === 0) {
+    return {};
+  }
+
+  return {
+    [visibleField]: sanitizeSandboxPathString(redactSecrets(value)),
+  };
 }

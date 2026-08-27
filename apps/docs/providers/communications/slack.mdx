@@ -165,7 +165,8 @@ payloads.
 Roomote-created apps enable Slack's current **Agent messaging experience**
 (`features.agent_view`). This keeps conversations in the app's Messages tab,
 opens Fast-mode responses in threads, and allows Slack to render native loading
-states and streamed task cards.
+states and streamed task cards. Tasks delegated by Fast appear as native cards
+that stream coding progress and settle to their final result in the same thread.
 
 For an existing app, use **Update app** in Settings → Communications to apply
 these settings. You can also configure them manually by enabling the **Agents**
@@ -180,9 +181,17 @@ Mention the app and use `!fast <request>` to ask the fast orchestrator a
 question or delegate work into a task. For example: `@Roomote !fast summarize
 this thread` or `@Roomote !fast fix the failing CI job`.
 
-When your deployment exposes **Default messages to fast mode**, enable it under
-**Settings > Personal** to send ordinary Slack and Discord messages through the
-fast orchestrator without an explicit command.
+Enable **Fast response mode** under **Settings > Personal** to send ordinary
+messages from your linked Slack and Discord accounts through the fast
+orchestrator without an explicit command.
+
+Fast can read a bounded history from the current Slack channel, use MCP servers
+and user-scoped integrations that you are allowed to access, and delegate
+repository work to Roomote tasks. Deployment admins can also manage custom
+automations through Fast. Fast does not read other channels implicitly or
+inspect repository contents without delegating the work to a task. When the
+request spans every repository, Fast can delegate it to the deployment's
+all-repositories environment.
 
 ## Local URL changes
 

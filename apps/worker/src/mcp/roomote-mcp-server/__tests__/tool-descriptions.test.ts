@@ -3,6 +3,12 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { z } from 'zod';
+import {
+  SHOW_WIDGET_FIXED_CANVAS_GUIDANCE,
+  SHOW_WIDGET_HEIGHT_DESCRIPTION,
+  SHOW_WIDGET_THEME_GUIDANCE,
+} from '@roomote/cloud-agents/show-widget';
+import { MANAGE_CUSTOM_AUTOMATIONS_TOOL } from '@roomote/types';
 
 const thisFilePath = fileURLToPath(import.meta.url);
 const thisDirPath = path.dirname(thisFilePath);
@@ -11,6 +17,7 @@ const originalEnv = { ...process.env };
 type RegisteredTool = {
   name: string;
   config: {
+    title?: string;
     description: string;
     inputSchema: Record<string, { description?: string; options?: string[] }>;
     annotations?: {
@@ -158,6 +165,36 @@ describe('roomote MCP tool descriptions', () => {
     expect(scheduleDescription).toContain(
       'Prefer a built-in preset when it matches the requested cadence.',
     );
+  });
+
+  it('registers the shared custom automation descriptor unchanged', async () => {
+    const { registeredTools } = await importRoomoteMcpServer();
+    const automationsTool = getRegisteredTool(
+      registeredTools,
+      MANAGE_CUSTOM_AUTOMATIONS_TOOL.name,
+    );
+
+    expect(automationsTool.config.description).toBe(
+      MANAGE_CUSTOM_AUTOMATIONS_TOOL.description,
+    );
+    expect(automationsTool.config.title).toBe(
+      MANAGE_CUSTOM_AUTOMATIONS_TOOL.title,
+    );
+    expect(automationsTool.config.annotations).toEqual(
+      MANAGE_CUSTOM_AUTOMATIONS_TOOL.annotations,
+    );
+    expect(Object.keys(automationsTool.config.inputSchema)).toEqual(
+      Object.keys(MANAGE_CUSTOM_AUTOMATIONS_TOOL.inputSchema),
+    );
+    for (const fieldName of Object.keys(
+      MANAGE_CUSTOM_AUTOMATIONS_TOOL.inputSchema,
+    )) {
+      expect(automationsTool.config.inputSchema[fieldName]?.description).toBe(
+        MANAGE_CUSTOM_AUTOMATIONS_TOOL.inputSchema[
+          fieldName as keyof typeof MANAGE_CUSTOM_AUTOMATIONS_TOOL.inputSchema
+        ].description,
+      );
+    }
   });
 
   it('keeps cadence out of generated custom automation prompts', async () => {
@@ -323,10 +360,9 @@ describe('roomote MCP tool descriptions', () => {
     expect(tool.config.description).toContain(
       'Do not use it for ordinary prose',
     );
-    expect(tool.config.description).toContain('rw-card');
-    expect(tool.config.description).toContain('`--rw-*` theme variables');
+    expect(tool.config.description).toContain(SHOW_WIDGET_THEME_GUIDANCE);
     expect(tool.config.description).toContain(
-      'Keep widgets compact enough to fit without scrolling',
+      SHOW_WIDGET_FIXED_CANVAS_GUIDANCE,
     );
     expect(tool.config.description).toContain(
       'HTML, CSS, and inline SVG are displayed in a sandboxed iframe',
@@ -342,8 +378,8 @@ describe('roomote MCP tool descriptions', () => {
     expect(getInputSchemaField(tool, 'css').description).toContain(
       '--rw-surface',
     );
-    expect(getInputSchemaField(tool, 'height').description).toContain(
-      'without a vertical scrollbar',
+    expect(getInputSchemaField(tool, 'height').description).toBe(
+      SHOW_WIDGET_HEIGHT_DESCRIPTION,
     );
     expect(getInputSchemaField(tool, 'textFallback').description).toContain(
       'originating chat surface',
@@ -715,9 +751,16 @@ describe('roomote MCP tool descriptions', () => {
     ]) {
       expect(names).not.toContain(name);
     }
-    expect(
-      getRegisteredTool(registeredTools, 'send_chat_reply').config.description,
-    ).toContain('Fast-internal');
+    const description = getRegisteredTool(registeredTools, 'send_chat_reply')
+      .config.description;
+    expect(description).toContain('Fast-internal');
+    expect(description).toContain('do not send another generic ack');
+    expect(description).toContain('meaningful work milestones');
+    expect(description).toContain('roughly 10 minutes of silence');
+    expect(description).toContain(
+      'without labeling the message as a progress update',
+    );
+    expect(description).toContain('The raw message is never posted directly');
     expect(names).toContain('manage_artifacts');
   });
 

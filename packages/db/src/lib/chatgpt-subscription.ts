@@ -23,9 +23,9 @@ import { deploymentSecrets } from '../schema';
 
 /**
  * Server-side lifecycle for the deployment-wide ChatGPT subscription OAuth
- * credential. Roomote owns token refresh; the inner opencode harness only
- * needs the auth record delivered (via `OPENCODE_AUTH_CONTENT` or a
- * materialized `auth.json`).
+ * credential. Roomote owns token refresh; control-plane OpenCode helpers use
+ * `OPENCODE_AUTH_CONTENT`, while task sandboxes authenticate through the
+ * inference gateway and never receive the OAuth record.
  *
  * The OAuth mechanics (issuer, client id, device-code + refresh grant shapes,
  * JWT `accountId` extraction) mirror opencode's built-in Codex auth plugin so
@@ -470,10 +470,10 @@ export function buildOpenCodeAuthContent(input: {
 }
 
 /**
- * Resolve a fresh `OPENCODE_AUTH_CONTENT` value for the harness when a
- * ChatGPT subscription is connected, or `null` when it is not connected or
- * refresh failed. Performs a central refresh when the access token is near
- * expiry.
+ * Resolve a fresh `OPENCODE_AUTH_CONTENT` value for control-plane OpenCode
+ * when a ChatGPT subscription is connected, or `null` when it is not
+ * connected or refresh failed. Performs a central refresh when the access
+ * token is near expiry.
  */
 export async function resolveOpenCodeAuthContent(
   options: {

@@ -23,8 +23,12 @@ const SETUP_STEP_DEFINITIONS = [
     title: 'Connect Slack',
   },
   {
-    id: 'env-vars',
+    id: 'inference',
     title: 'Configure inference',
+  },
+  {
+    id: 'env-vars',
+    title: 'Configure inference provider',
   },
   {
     id: 'source-control-provider',
@@ -49,10 +53,6 @@ const SETUP_STEP_DEFINITIONS = [
   {
     id: 'compute-config',
     title: 'Configure sandboxes',
-  },
-  {
-    id: 'repo-selection',
-    title: 'Set up environment',
   },
   {
     id: 'invoke',

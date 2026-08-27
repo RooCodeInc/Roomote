@@ -8,6 +8,7 @@ import { conflictScanJob } from './conflict-scan';
 import { dependabotTriageJob } from './dependabot-triage';
 import { issueFixerJob } from './issue-fixer';
 import { managerStatsJob } from './manager-stats';
+import { providerUsageLimitJob } from './provider-usage-limit';
 import { securityAuditorJob } from './security-auditor';
 import { sentryTriageJob } from './sentry-triage';
 import { suggesterJob } from './suggester';
@@ -25,6 +26,7 @@ const AUTOMATION_RUNNERS: Record<
   suggester: suggesterJob,
   announcer: announcerJob,
   manager_stats: managerStatsJob,
+  provider_usage_limit: providerUsageLimitJob,
   sentry_triage: sentryTriageJob,
   dependabot_triage: dependabotTriageJob,
   codeql_triage: codeqlTriageJob,

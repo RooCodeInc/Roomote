@@ -799,7 +799,11 @@ async function createGitHubWriteClient(
     installationId: repository.installationId,
   });
 
-  return { octokit: getOctokit(token), owner, repo };
+  return {
+    octokit: getOctokit(token, { retryRateLimits: true }),
+    owner,
+    repo,
+  };
 }
 
 async function writeGitLabMergeRequest({

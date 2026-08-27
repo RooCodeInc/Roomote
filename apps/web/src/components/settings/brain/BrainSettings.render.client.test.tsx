@@ -2,13 +2,20 @@ import { fireEvent, render, screen } from '@testing-library/react';
 
 import type { BrainSettings as BrainSettingsData } from '@/trpc/commands/brain';
 
-const { state, mutations } = vi.hoisted(() => ({
+const { state, navigation, mutations } = vi.hoisted(() => ({
   state: {
     query: {
       isPending: false,
       isError: false,
       data: null as BrainSettingsData | null,
     },
+    searchParams: new URLSearchParams(),
+    pageInputs: [] as Array<{ slug: string }>,
+    listInputs: [] as Array<Record<string, unknown>>,
+    pagePending: true,
+  },
+  navigation: {
+    replace: vi.fn(),
   },
   mutations: {
     backfill: vi.fn(),
@@ -16,17 +23,44 @@ const { state, mutations } = vi.hoisted(() => ({
   },
 }));
 
+vi.mock('next/navigation', () => ({
+  usePathname: () => '/settings/memory',
+  useRouter: () => ({ replace: navigation.replace }),
+  useSearchParams: () => state.searchParams,
+}));
+
 vi.mock('sonner', () => ({
   toast: { success: vi.fn(), error: vi.fn() },
 }));
 
 vi.mock('@tanstack/react-query', () => ({
-  // The browse dialog issues its own queries; those stay idle here so the
-  // page-level fixtures never leak into the dialog's typed results.
-  useQuery: (options: { queryKey?: unknown[] }) =>
-    Array.isArray(options?.queryKey) && options.queryKey[1] !== 'get'
-      ? { isPending: true, isError: false, data: undefined }
-      : state.query,
+  keepPreviousData: (previousData: unknown) => previousData,
+  useQuery: (options: { queryKind?: string }) => {
+    if (options.queryKind === 'list') {
+      return {
+        isPending: false,
+        isError: false,
+        data: {
+          reachable: true,
+          total: 1,
+          nextOffset: null,
+          pages: [
+            {
+              slug: 'tasks/run-9',
+              title: 'Reworked the outbox drainer',
+              namespaceId: 'tasks',
+              namespaceLabel: 'Task memories',
+              updatedAt: new Date('2026-01-02T00:00:00Z'),
+            },
+          ],
+        },
+      };
+    }
+    if (options.queryKind === 'page') {
+      return { isPending: state.pagePending, isError: false, data: undefined };
+    }
+    return state.query;
+  },
   useQueryClient: () => ({ invalidateQueries: vi.fn() }),
   useMutation: (options: { mutationKind?: string }) =>
     options.mutationKind === 'retryFailed'
@@ -38,14 +72,20 @@ vi.mock('@/trpc/client', () => ({
   useTRPC: () => ({
     brain: {
       get: {
-        queryOptions: () => ({ queryKey: ['brain', 'get'] }),
+        queryOptions: () => ({ queryKind: 'settings' }),
         queryKey: () => ['brain', 'get'],
       },
       listPages: {
-        queryOptions: () => ({ queryKey: ['brain', 'listPages'] }),
+        queryOptions: (input: Record<string, unknown>) => {
+          state.listInputs.push(input);
+          return { queryKind: 'list' };
+        },
       },
       getPage: {
-        queryOptions: () => ({ queryKey: ['brain', 'getPage'] }),
+        queryOptions: (input: { slug: string }) => {
+          state.pageInputs.push(input);
+          return { queryKind: 'page' };
+        },
       },
       backfillTaskMemories: {
         mutationOptions: () => ({ mutationKind: 'backfill' }),
@@ -77,8 +117,7 @@ function buildSettings(
     },
     corpus: {
       reachable: true,
-      sampledPages: 30,
-      truncated: false,
+      listedPages: 30,
       totalPages: null,
       namespaces: [
         { id: 'slack', label: 'Slack', pages: 20 },
@@ -87,14 +126,6 @@ function buildSettings(
       activityByDay: [
         { date: '2026-01-01', pages: 12 },
         { date: '2026-01-02', pages: 6 },
-      ],
-      recentPages: [
-        {
-          slug: 'tasks/run-9',
-          title: 'Reworked the outbox drainer',
-          namespaceLabel: 'Task memories',
-          updatedAt: new Date('2026-01-02T00:00:00Z'),
-        },
       ],
     },
     sources: [
@@ -126,7 +157,8 @@ function buildSettings(
       total: 11,
       lastProcessedAt: new Date('2026-01-02T00:00:00Z'),
       lastError: null,
-      completedRunsWithoutEvent: 0,
+      historicalCompletedRunsWithoutEvent: 0,
+      recentCompletedRunsWithoutEvent: 0,
     },
     ...overrides,
   };
@@ -134,90 +166,146 @@ function buildSettings(
 
 beforeEach(() => {
   state.query = { isPending: false, isError: false, data: buildSettings() };
+  state.searchParams = new URLSearchParams();
+  state.pageInputs.length = 0;
+  state.listInputs.length = 0;
+  state.pagePending = true;
+  navigation.replace.mockClear();
   mutations.backfill.mockClear();
   mutations.retryFailed.mockClear();
 });
 
 describe('BrainSettings', () => {
-  it('shows what the Brain holds, where it learns from, and what it recorded', () => {
+  it('shows Memory stats, the embedded browser, sources, and configuration', () => {
     render(<BrainSettings />);
 
-    expect(screen.getByText('Connected')).toBeInTheDocument();
-    expect(screen.getByText('http://gbrain:8080')).toBeInTheDocument();
+    expect(screen.getAllByText('Connected')).toHaveLength(1);
+    expect(screen.queryByText('Endpoint')).not.toBeInTheDocument();
+    expect(screen.queryByText('http://gbrain:8080')).not.toBeInTheDocument();
     expect(screen.getByText('OpenRouter')).toBeInTheDocument();
     expect(screen.getByText('Semantic + keyword')).toBeInTheDocument();
-
-    expect(screen.getByText('Pages stored')).toBeInTheDocument();
 
     expect(screen.getByText('Configuration')).toBeInTheDocument();
     expect(screen.getByText('openai/gpt-5.6-luna')).toBeInTheDocument();
     expect(
       screen.getByText('openai/text-embedding-3-small'),
     ).toBeInTheDocument();
-    expect(screen.getByText('Manage in Models')).toBeInTheDocument();
+    expect(screen.queryByText('Manage in Models')).not.toBeInTheDocument();
 
-    expect(screen.getByText('What the Brain knows')).toBeInTheDocument();
-    expect(screen.getByText('30 pages')).toBeInTheDocument();
-    expect(screen.getByText('Browse memory')).toBeInTheDocument();
-    expect(screen.getByText('Pages written, last 30 days')).toBeInTheDocument();
+    expect(screen.getByText('Memory Stats')).toBeInTheDocument();
+    expect(screen.getByText('30 memories')).toBeInTheDocument();
+    expect(screen.getByText('Explore memories')).toBeInTheDocument();
+    expect(
+      screen.getByText('Memory activity (past 30 days)'),
+    ).toBeInTheDocument();
     expect(screen.getByText('Reworked the outbox drainer')).toBeInTheDocument();
 
-    expect(screen.getByText('1 of 2 connected')).toBeInTheDocument();
-    expect(screen.getByText('Ingesting')).toBeInTheDocument();
-    expect(screen.getByText('Not connected')).toBeInTheDocument();
-
-    expect(screen.getByText('Recorded')).toBeInTheDocument();
-    expect(screen.getByText('Queued')).toBeInTheDocument();
-  });
-
-  it('says the corpus is a recent sample rather than a total when it is', () => {
-    const settings = buildSettings();
-    state.query.data = {
-      ...settings,
-      corpus: { ...settings.corpus, truncated: true },
-    };
-
-    render(<BrainSettings />);
-
-    expect(screen.getByText('30 most recent pages')).toBeInTheDocument();
+    expect(screen.getByText('Sources')).toBeInTheDocument();
+    expect(screen.queryByText('1 of 2 connected')).not.toBeInTheDocument();
+    expect(screen.queryByText('Ingesting')).not.toBeInTheDocument();
     expect(
-      screen.getByText(/describes what it has learned lately/),
+      screen.getByRole('status', { name: 'Connected' }),
     ).toBeInTheDocument();
+    expect(screen.queryByText(/Last read/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/streams/)).not.toBeInTheDocument();
+    expect(screen.queryByText('Not connected')).not.toBeInTheDocument();
+    expect(screen.queryByText('Notion')).not.toBeInTheDocument();
+
+    expect(
+      screen.queryByRole('heading', { name: 'Task memories' }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText('Memory issues')).not.toBeInTheDocument();
+
+    const memoryStats = screen.getByText('Memory Stats');
+    const browser = screen.getByText('Explore memories');
+    const configuration = screen.getByText('Configuration');
+    expect(memoryStats.compareDocumentPosition(browser)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+    expect(browser.compareDocumentPosition(configuration)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
   });
 
-  it('offers to ingest history only when completed tasks are missing a memory', () => {
-    render(<BrainSettings />);
-    expect(screen.queryByText('Ingest task history')).not.toBeInTheDocument();
-
-    const settings = buildSettings();
-    state.query.data = {
-      ...settings,
-      taskMemories: { ...settings.taskMemories, completedRunsWithoutEvent: 12 },
-    };
-
-    render(<BrainSettings />);
-
-    fireEvent.click(screen.getByText('Ingest task history'));
-    expect(mutations.backfill).toHaveBeenCalled();
-  });
-
-  it('surfaces the failing error next to the retry it explains', () => {
+  it('puts actionable memory issues first and keeps their repair controls', () => {
     const settings = buildSettings();
     state.query.data = {
       ...settings,
       taskMemories: {
         ...settings.taskMemories,
-        byStatus: { ...settings.taskMemories.byStatus, failed: 3 },
-        lastError: 'gbrain put_page failed: 503',
+        byStatus: { ...settings.taskMemories.byStatus, failed: 2 },
+        recentCompletedRunsWithoutEvent: 3,
+        lastError: 'Memory service unavailable',
       },
     };
 
     render(<BrainSettings />);
 
-    expect(screen.getByText('gbrain put_page failed: 503')).toBeInTheDocument();
+    const issues = screen.getByText('Memory issues');
+    const stats = screen.getByText('Memory Stats');
+    expect(issues.compareDocumentPosition(stats)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+    expect(screen.getByText('Memory service unavailable')).toBeInTheDocument();
 
+    fireEvent.click(screen.getByText('Queue missing memories'));
     fireEvent.click(screen.getByText('Retry failed'));
-    expect(mutations.retryFailed).toHaveBeenCalled();
+    expect(mutations.backfill).toHaveBeenCalledOnce();
+    expect(mutations.retryFailed).toHaveBeenCalledOnce();
+  });
+
+  it('selects browsed memories with URL replace semantics', () => {
+    render(<BrainSettings />);
+    fireEvent.click(screen.getByText('Reworked the outbox drainer'));
+
+    expect(navigation.replace).toHaveBeenCalledTimes(1);
+    expect(navigation.replace).toHaveBeenLastCalledWith(
+      '/settings/memory?memory=tasks%2Frun-9',
+      { scroll: false },
+    );
+  });
+
+  it('filters Explore memories when a stats category is selected', () => {
+    render(<BrainSettings />);
+
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: 'Filter Explore memories by Slack',
+      }),
+    );
+
+    expect(state.listInputs.at(-1)).toMatchObject({ namespaceId: 'slack' });
+  });
+
+  it('keeps the activity chart visible for a newly active corpus', () => {
+    const settings = buildSettings();
+    state.query.data = {
+      ...settings,
+      corpus: {
+        ...settings.corpus,
+        activityByDay: [
+          { date: '2026-01-01', pages: 0 },
+          { date: '2026-01-02', pages: 4 },
+        ],
+      },
+    };
+
+    render(<BrainSettings />);
+
+    expect(
+      screen.getByRole('img', { name: 'Memory activity chart' }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/Ingestion started/)).not.toBeInTheDocument();
+  });
+
+  it('opens a directly linked memory from the query parameter', () => {
+    state.searchParams = new URLSearchParams('memory=tasks%2Fdirect-run');
+    state.pagePending = false;
+
+    render(<BrainSettings />);
+
+    expect(state.pageInputs).toContainEqual({ slug: 'tasks/direct-run' });
+    expect(screen.getByText('Memory unavailable')).toBeInTheDocument();
   });
 
   it('reports an unreachable corpus without claiming the Brain is empty', () => {
@@ -225,15 +313,13 @@ describe('BrainSettings', () => {
     state.query.data = {
       ...settings,
       status: 'unreachable',
-      statusDetail: 'The Brain did not answer.',
+      statusDetail: 'Memory did not answer.',
       corpus: {
         reachable: false,
-        sampledPages: 0,
-        truncated: false,
+        listedPages: 0,
         totalPages: null,
         namespaces: [],
         activityByDay: [],
-        recentPages: [],
       },
     };
 
@@ -244,48 +330,45 @@ describe('BrainSettings', () => {
     expect(screen.queryByText('Nothing collected yet')).not.toBeInTheDocument();
   });
 
-  it('prefers the measured census: exact totals and measured recall', () => {
+  it('prefers measured recall over provider inference', () => {
     const settings = buildSettings();
     state.query.data = {
       ...settings,
       recall: { mode: 'keyword-only', embeddedCount: 0, chunkCount: 771 },
-      corpus: { ...settings.corpus, totalPages: 625, truncated: true },
+      corpus: { ...settings.corpus, totalPages: 625 },
     };
 
     render(<BrainSettings />);
 
-    // The census total replaces the sampled "N+" reading on the tile.
-    expect(screen.getByText('625')).toBeInTheDocument();
     // Measured keyword-only wins over the provider-presence inference, which
     // would have said semantic here (an OpenRouter provider resolves).
     expect(screen.getByText('Keyword only')).toBeInTheDocument();
     expect(screen.queryByText('Semantic + keyword')).not.toBeInTheDocument();
   });
 
-  it('shows the namespace badge only when it differs from the source label', () => {
+  it('omits source badges and disconnected sources', () => {
     render(<BrainSettings />);
 
-    // "Slack public channels" carries its "Slack" namespace badge (the other
-    // "Slack" is the composition legend's namespace entry)...
+    // The stats legend and browser filter keep the Slack label; source cards
+    // have no namespace badge.
     expect(screen.getAllByText('Slack')).toHaveLength(2);
-    // ...while a source whose namespace repeats its own name gets no badge:
-    // exactly one "Notion" (the row title), not a second badge copy.
-    expect(screen.getAllByText('Notion')).toHaveLength(1);
+    // Disconnected sources are omitted from the list entirely.
+    expect(screen.queryByText('Notion')).not.toBeInTheDocument();
   });
 
   it('stops at the explanation on a deployment with no Brain', () => {
     state.query.data = buildSettings({
       status: 'not_configured',
-      statusDetail: 'This deployment has no Brain.',
+      statusDetail: 'Memory is not configured for this deployment.',
     });
 
     render(<BrainSettings />);
 
     expect(screen.getByText('Not configured')).toBeInTheDocument();
     expect(
-      screen.getByText('This deployment has no Brain.'),
+      screen.getByText('Memory is not configured for this deployment.'),
     ).toBeInTheDocument();
-    expect(screen.queryByText('What the Brain knows')).not.toBeInTheDocument();
+    expect(screen.queryByText('Memory Stats')).not.toBeInTheDocument();
     expect(screen.queryByText('Task memories')).not.toBeInTheDocument();
   });
 });

@@ -1,12 +1,18 @@
 // pnpm --filter @roomote/api test src/handlers/github/__tests__/notifyPrReviewActivity.test.ts
 
-const { mockEnqueuePrReviewNotification, mockStartPrReviewNotificationCycle } =
-  vi.hoisted(() => ({
-    mockEnqueuePrReviewNotification: vi.fn().mockResolvedValue({
-      notifiedTaskCount: 1,
-    }),
-    mockStartPrReviewNotificationCycle: vi.fn().mockResolvedValue(undefined),
-  }));
+const {
+  mockCompleteGithubPrReviewCheckFromSummary,
+  mockEnqueuePrReviewNotification,
+  mockStartPrReviewNotificationCycle,
+} = vi.hoisted(() => ({
+  mockCompleteGithubPrReviewCheckFromSummary: vi
+    .fn()
+    .mockResolvedValue(undefined),
+  mockEnqueuePrReviewNotification: vi.fn().mockResolvedValue({
+    notifiedTaskCount: 1,
+  }),
+  mockStartPrReviewNotificationCycle: vi.fn().mockResolvedValue(undefined),
+}));
 
 vi.mock('@roomote/env', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@roomote/env')>();
@@ -15,11 +21,14 @@ vi.mock('@roomote/env', async (importOriginal) => {
     ...actual,
     Env: {
       R_GITHUB_APP_SLUG: 'roomote',
+      R_GITHUB_ADDITIONAL_APP_SLUGS: 'review-helper, roomote-community',
     },
   };
 });
 
 vi.mock('@roomote/sdk/server', () => ({
+  completeGithubPrReviewCheckFromSummary:
+    mockCompleteGithubPrReviewCheckFromSummary,
   enqueuePrReviewNotification: mockEnqueuePrReviewNotification,
   startPrReviewNotificationCycle: mockStartPrReviewNotificationCycle,
 }));
@@ -52,10 +61,31 @@ vi.mock('@roomote/cloud-agents/server', () => ({
 
     return content.slice(afterStart, endIndex).trim();
   },
-  isReviewInProgressStatusLine: (line: string) =>
-    /^(Self-reviewing the PR(?: with fresh eyes)? now\.|Reviewing the PR now\.|Re-reviewing new commits now\.)/i.test(
-      line.trim(),
-    ),
+  isReviewSummaryInProgress: (body: string) => {
+    const marker = body.match(/<!--\s*roomote-review-summary\b[^>]*-->/i)?.[0];
+    const markerVersion = marker?.match(/\bversion=(\d+)\b/i)?.[1];
+    const markerPhase = marker?.match(/\bphase=(reviewing|reviewed)\b/i)?.[1];
+
+    if (markerVersion === '2' && markerPhase) {
+      return markerPhase.toLowerCase() === 'reviewing';
+    }
+
+    const footer = body.trimEnd().split('\n').at(-1)?.trim();
+    const phase = footer?.match(/^<sub>\s*(Reviewing|Reviewed)(?:\s|<)/i)?.[1];
+
+    if (phase) {
+      return phase.toLowerCase() === 'reviewing';
+    }
+
+    const status = body.match(
+      /<!-- roomote-review-status:start -->([\s\S]*?)<!-- roomote-review-status:end -->/,
+    )?.[1];
+    const firstLine = status?.trim().split('\n')[0] ?? '';
+
+    return /^(Self-reviewing the PR(?: with fresh eyes)? now\.|Reviewing the PR now\.|Re-reviewing new commits now\.|I am reviewing the updated PR head now\.)/i.test(
+      firstLine,
+    );
+  },
 }));
 
 import { setConfiguredGitHubAppSlugCache } from '@roomote/github';
@@ -293,6 +323,33 @@ describe('buildPrReviewActivityNotificationInput', () => {
     });
   });
 
+  it('skips top-level PR comments authored by bots', () => {
+    expect(
+      buildPrReviewActivityNotificationInput(
+        issueCommentPayload({
+          body: 'The preview deployment is ready.',
+          login: 'vercel[bot]',
+          userId: 35613825,
+          userType: 'Bot',
+        }),
+      ),
+    ).toBeNull();
+  });
+
+  it('skips edited bot comments before resolving their revision', () => {
+    expect(
+      buildPrReviewActivityNotificationInput(
+        issueCommentPayload({
+          body: 'Updated deployment status.',
+          edited: true,
+          login: 'deployment-bot[bot]',
+          userId: 9002,
+          userType: 'Bot',
+        }),
+      ),
+    ).toBeNull();
+  });
+
   it('uses the webhook delivery as the revision when an edit omits updated_at', () => {
     const payload = issueCommentPayload({
       body: 'Edited without a timestamp',
@@ -319,27 +376,36 @@ describe('buildPrReviewActivityNotificationInput', () => {
     );
   });
 
-  it('maps one external bot identity across summary and review activity', () => {
+  it('skips submitted reviews and inline comments from external bots', () => {
     const bot = {
       login: 'reviewer[bot]',
       userId: 9001,
       userType: 'Bot',
     };
-    const events = [
-      issueCommentPayload(bot),
-      reviewPayload(bot),
-      reviewCommentPayload(bot),
-    ].map((payload) => buildPrReviewActivityNotificationInput(payload));
+    const events = [reviewPayload(bot), reviewCommentPayload(bot)].map(
+      (payload) => buildPrReviewActivityNotificationInput(payload),
+    );
 
-    expect(events).toEqual(
-      Array.from({ length: 3 }, () =>
-        expect.objectContaining({
-          event: expect.objectContaining({
-            automatedAuthorId: 'github:9001',
-          }),
+    expect(events).toEqual([null, null]);
+  });
+
+  it('keeps submitted reviews authored by Roomote', () => {
+    expect(
+      buildPrReviewActivityNotificationInput(
+        reviewPayload({
+          body: 'I found an issue.',
+          login: 'roomote[bot]',
+          userId: 9001,
+          userType: 'Bot',
         }),
       ),
-    );
+    ).toMatchObject({
+      event: {
+        kind: 'review',
+        authorLogin: 'roomote[bot]',
+        roomoteAuthored: true,
+      },
+    });
   });
 
   it('skips top-level PR comments handled by the mention flow', () => {
@@ -375,6 +441,36 @@ describe('buildPrReviewActivityNotificationInput', () => {
         roomoteAuthored: true,
       },
     });
+  });
+
+  it('keeps review threads from an explicitly configured additional app', () => {
+    expect(
+      buildPrReviewActivityNotificationInput(
+        reviewCommentPayload({
+          login: 'roomote-community[bot]',
+          userId: 9002,
+          userType: 'Bot',
+        }),
+      ),
+    ).toMatchObject({
+      event: {
+        kind: 'review_comment',
+        authorLogin: 'roomote-community[bot]',
+        roomoteAuthored: true,
+      },
+    });
+  });
+
+  it('skips review threads from an untrusted roomote-prefixed bot', () => {
+    expect(
+      buildPrReviewActivityNotificationInput(
+        reviewCommentPayload({
+          login: 'roomote-unknown[bot]',
+          userId: 9003,
+          userType: 'Bot',
+        }),
+      ),
+    ).toBeNull();
   });
 
   it('skips Roomote-authored replies to existing review threads', () => {
@@ -477,6 +573,14 @@ const IN_PROGRESS_SUMMARY_BODY = [
   '<!-- roomote-review-status:end -->',
 ].join('\n');
 
+const NATURAL_IN_PROGRESS_SUMMARY_BODY = [
+  '<!-- roomote-review-summary sha=f0c89ce4 mode=sync version=2 phase=reviewing -->',
+  '<!-- roomote-review-status:start -->',
+  'I am reviewing the updated PR head now. [See task](https://roomote.dev/task/x)',
+  '<!-- roomote-review-status:end -->',
+  '<sub>Reviewing f0c89ce</sub>',
+].join('\n');
+
 const ALL_ADDRESSED_SUMMARY_BODY = [
   '<!-- roomote-review-summary sha=abcdef01 mode=initial -->',
   '<!-- roomote-review-status:start -->',
@@ -514,6 +618,7 @@ function summaryPayload({
   updatedAt?: string | null;
 } = {}): any {
   return {
+    installation: { id: 1 },
     repository,
     issue: {
       number: 42,
@@ -559,6 +664,14 @@ describe('buildPrReviewSummaryNotification', () => {
         providerEventId: 'github-review-summary:99:2026-08-10T19:30:00.000Z',
         authorLogin: 'roomote[bot]',
         reviewHeadSha,
+        reviewTaskId: 'x',
+        reviewResult: {
+          reviewKind: 'initial',
+          outcome: 'findings_remain',
+          findingCount: 1,
+          approvalStatus: null,
+          headSha: reviewHeadSha,
+        },
         summary: '1 minor doc note; no blocking issues.',
         url: 'https://github.com/owner/repo/pull/42#issuecomment-99',
         observedAt,
@@ -576,6 +689,27 @@ describe('buildPrReviewSummaryNotification', () => {
     );
 
     expect(notification?.input.event).toMatchObject({
+      kind: 'review_summary',
+      summary: '1 minor doc note; no blocking issues.',
+      roomoteAuthored: true,
+    });
+  });
+
+  it('uses the review footer when in-progress status prose varies', () => {
+    expect(
+      buildPrReviewSummaryNotification(
+        summaryPayload({ body: NATURAL_IN_PROGRESS_SUMMARY_BODY }),
+      ),
+    ).toBeNull();
+
+    expect(
+      buildPrReviewSummaryNotification(
+        summaryPayload({
+          body: TERMINAL_SUMMARY_BODY,
+          previousBody: NATURAL_IN_PROGRESS_SUMMARY_BODY,
+        }),
+      )?.input.event,
+    ).toMatchObject({
       kind: 'review_summary',
       summary: '1 minor doc note; no blocking issues.',
       roomoteAuthored: true,
@@ -681,6 +815,27 @@ describe('with a database-configured app slug', () => {
     ).toBeNull();
   });
 
+  it('does not treat the process-env fallback bot as Roomote-authored', () => {
+    expect(
+      buildPrReviewSummaryNotification(
+        summaryPayload({ login: 'roomote[bot]' }),
+      ),
+    ).toBeNull();
+  });
+
+  it('marks additional trusted app activity as roomote-authored', () => {
+    expect(
+      buildPrReviewActivityNotificationInput(
+        reviewCommentPayload({ login: 'review-helper[bot]' }),
+      ),
+    ).toMatchObject({
+      event: {
+        authorLogin: 'review-helper[bot]',
+        roomoteAuthored: true,
+      },
+    });
+  });
+
   it('marks new review threads from the configured bot as roomote-authored', () => {
     expect(
       buildPrReviewActivityNotificationInput(
@@ -721,6 +876,8 @@ describe('queuePrReviewSummaryNotification', () => {
     mockEnqueuePrReviewNotification.mockResolvedValue({ notifiedTaskCount: 1 });
     mockStartPrReviewNotificationCycle.mockClear();
     mockStartPrReviewNotificationCycle.mockResolvedValue(undefined);
+    mockCompleteGithubPrReviewCheckFromSummary.mockClear();
+    mockCompleteGithubPrReviewCheckFromSummary.mockResolvedValue(undefined);
   });
 
   it('opens an explicit cycle when the Roomote summary enters in-progress state', async () => {
@@ -754,10 +911,41 @@ describe('queuePrReviewSummaryNotification', () => {
           event: expect.objectContaining({
             kind: 'review_summary',
             reviewHeadSha,
+            reviewTaskId: 'x',
             observedAt,
           }),
         }),
       ),
+    );
+    expect(mockCompleteGithubPrReviewCheckFromSummary).toHaveBeenCalledWith({
+      installationId: 1,
+      repository: 'owner/repo',
+      prNumber: 42,
+      taskId: 'x',
+      reviewHeadSha,
+      reviewSummaryBody: TERMINAL_SUMMARY_BODY,
+    });
+  });
+
+  it('opens and completes a cycle when in-progress status prose varies', async () => {
+    await queuePrReviewSummaryNotification(
+      summaryPayload({ body: NATURAL_IN_PROGRESS_SUMMARY_BODY }),
+    );
+    await queuePrReviewSummaryNotification(
+      summaryPayload({
+        body: TERMINAL_SUMMARY_BODY,
+        previousBody: NATURAL_IN_PROGRESS_SUMMARY_BODY,
+      }),
+    );
+
+    expect(mockStartPrReviewNotificationCycle).toHaveBeenCalledOnce();
+    expect(mockEnqueuePrReviewNotification).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: expect.objectContaining({
+          kind: 'review_summary',
+          summary: '1 minor doc note; no blocking issues.',
+        }),
+      }),
     );
   });
 

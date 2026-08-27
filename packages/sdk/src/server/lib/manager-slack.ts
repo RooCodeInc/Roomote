@@ -13,6 +13,7 @@ import {
   SENTRY_TRIAGE_SETTINGS_HASH,
   SUGGEST_IDEAS_SETTINGS_HASH,
   SUMMARIZE_MERGED_PRS_SETTINGS_HASH,
+  type SlackBlock,
 } from '@roomote/types';
 import {
   buildAutomationResultBlocks,
@@ -67,10 +68,36 @@ export function buildCustomAutomationSettingsUrl(automationId: string) {
   ).toString();
 }
 
+export function buildCustomAutomationSlackMessage(params: {
+  automationId: string;
+  automationName: string;
+  text: string;
+  contentBlocks?: SlackBlock[];
+}): SlackAutomationSettingsMessage {
+  return {
+    text: params.text,
+    blocks: buildAutomationResultBlocks({
+      title: params.automationName,
+      iconUrl: buildAutomationIconUrl('zap'),
+      configureUrl: buildCustomAutomationSettingsUrl(params.automationId),
+      contentBlocks: params.contentBlocks ?? [
+        { type: 'markdown', text: params.text },
+      ],
+    }),
+  };
+}
+
 export function buildManagerSlackSettingsUrl(
   hash = MANAGER_CHANNEL_SETTINGS_HASH,
 ) {
   return buildAutomationsSettingsUrl(hash).toString();
+}
+
+export function buildModelsSettingsUrl() {
+  return new URL(
+    '/settings/models',
+    process.env.R_APP_URL || DEFAULT_LOCAL_R_APP_URL,
+  ).toString();
 }
 
 export function buildManagerSlackFooterText(

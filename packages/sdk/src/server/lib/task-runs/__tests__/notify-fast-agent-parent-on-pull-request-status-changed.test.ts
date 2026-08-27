@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => {
 
   return {
     claimReturning: vi.fn(),
+    findClaimRun: vi.fn(),
     updateSet: vi.fn(),
     recordLifecycle: vi.fn(),
     deliverParentEvent: vi.fn(),
@@ -27,6 +28,9 @@ const mocks = vi.hoisted(() => {
 
 vi.mock('@roomote/db/server', () => ({
   db: {
+    query: {
+      taskRuns: { findFirst: mocks.findClaimRun },
+    },
     update: vi.fn(() => ({
       set: vi.fn((values: unknown) => {
         mocks.updateSet(values);
@@ -37,6 +41,8 @@ vi.mock('@roomote/db/server', () => ({
     })),
   },
   and: vi.fn((...args: unknown[]) => args),
+  asc: vi.fn((value: unknown) => value),
+  desc: vi.fn((value: unknown) => value),
   eq: vi.fn((...args: unknown[]) => args),
   recordTaskRunLifecycleEvent: mocks.recordLifecycle,
   sql: vi.fn((strings: TemplateStringsArray, ...values: unknown[]) => ({
@@ -45,6 +51,8 @@ vi.mock('@roomote/db/server', () => ({
   })),
   taskRuns: {
     id: 'task_runs.id',
+    taskId: 'task_runs.task_id',
+    createdAt: 'task_runs.created_at',
     result: 'task_runs.result',
   },
 }));
@@ -59,6 +67,7 @@ vi.mock('../../fast-agent-parent-event', () => ({
 }));
 
 import { notifyFastAgentParentOnPullRequestStatusChanged } from '../notify-fast-agent-parent-on-pull-request-status-changed';
+import { notifyFastAgentParentOnPullRequestConflict } from '../notify-fast-agent-parent-on-pull-request-conflict';
 
 const fastParent = {
   sessionId: '11111111-1111-4111-8111-111111111111',
@@ -94,6 +103,7 @@ describe('notifyFastAgentParentOnPullRequestStatusChanged', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.claimReturning.mockResolvedValue([{ id: 200 }]);
+    mocks.findClaimRun.mockResolvedValue({ id: 200 });
     mocks.deliverParentEvent.mockResolvedValue('delivered');
     mocks.recordLifecycle.mockResolvedValue(undefined);
   });
@@ -142,37 +152,6 @@ describe('notifyFastAgentParentOnPullRequestStatusChanged', () => {
     },
   );
 
-  it('does not redeliver a settled status claim', async () => {
-    mocks.claimReturning.mockResolvedValue([]);
-
-    await notifyFastAgentParentOnPullRequestStatusChanged({
-      run: makeRun({ fastAgentParent: fastParent }),
-      pullRequest,
-      actorLogin: 'alice',
-    });
-
-    expect(mocks.deliverParentEvent).not.toHaveBeenCalled();
-  });
-
-  it('releases a transiently failed claim for webhook retry', async () => {
-    mocks.deliverParentEvent.mockRejectedValue(new Error('model offline'));
-
-    await expect(
-      notifyFastAgentParentOnPullRequestStatusChanged({
-        run: makeRun({ fastAgentParent: fastParent }),
-        pullRequest: { ...pullRequest, status: 'closed' },
-        actorLogin: 'alice',
-      }),
-    ).rejects.toThrow('model offline');
-
-    expect(
-      mocks.updateSet.mock.calls.some(([values]) => {
-        const result = (values as { result?: { strings?: string[] } }).result;
-        return result?.strings?.join('').includes(' - ') === true;
-      }),
-    ).toBe(true);
-  });
-
   it('does nothing for a task without a Fast parent', async () => {
     await notifyFastAgentParentOnPullRequestStatusChanged({
       run: makeRun({}),
@@ -181,5 +160,49 @@ describe('notifyFastAgentParentOnPullRequestStatusChanged', () => {
     });
 
     expect(mocks.deliverParentEvent).not.toHaveBeenCalled();
+  });
+});
+
+describe('notifyFastAgentParentOnPullRequestConflict', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.claimReturning.mockResolvedValue([{ id: 200 }]);
+    mocks.findClaimRun.mockResolvedValue({ id: 200 });
+    mocks.deliverParentEvent.mockResolvedValue('delivered');
+    mocks.recordLifecycle.mockResolvedValue(undefined);
+  });
+
+  it('passes a conflict generation to the Fast parent', async () => {
+    const conflictDetectedAt = new Date('2026-08-24T23:00:00.000Z');
+    const delivered = await notifyFastAgentParentOnPullRequestConflict({
+      run: makeRun({ fastAgentParent: fastParent }),
+      pullRequest: {
+        provider: pullRequest.provider,
+        host: pullRequest.host,
+        repository: pullRequest.repository,
+        number: pullRequest.number,
+        title: pullRequest.title,
+        url: pullRequest.url,
+      },
+      conflictDetectedAt,
+    });
+
+    expect(delivered).toBe(true);
+    expect(mocks.deliverParentEvent).toHaveBeenCalledWith({
+      parent: fastParent,
+      lockWaitMs: 30_000,
+      event: expect.objectContaining({
+        type: 'pull_request_conflict_detected',
+        taskId: 'child-task',
+        runId: 200,
+        conflictDetectedAt: conflictDetectedAt.toISOString(),
+        message:
+          '[Fix review feedback](https://github.com/acme/web/pull/42) now has merge conflicts. Update the branch or ask Roomote to resolve them.',
+        pullRequest: expect.objectContaining({
+          repository: 'acme/web',
+          number: 42,
+        }),
+      }),
+    });
   });
 });

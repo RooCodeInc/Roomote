@@ -47,7 +47,7 @@ vi.mock('@/components/ai-elements', () => ({
 }));
 
 vi.mock('@/components/layout', () => ({
-  FramedSurface: ({ children }: { children: ReactNode }) => (
+  WorkspaceSurface: ({ children }: { children: ReactNode }) => (
     <div>{children}</div>
   ),
 }));

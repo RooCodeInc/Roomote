@@ -26,6 +26,7 @@ import {
 } from '@roomote/types';
 import {
   db,
+  and,
   eq,
   inArray,
   tasks,
@@ -48,6 +49,7 @@ import {
   enqueueTask,
   enqueueTaskRelaunch,
   DeploymentReadOnlyError,
+  SnapshotResumeAlreadyExistsError,
   persistEarlyGeneratedTaskTitle,
   PR_REVIEW_SYNC_DEBOUNCE_MS,
   resolveFreshTaskComputeProvider,
@@ -59,6 +61,7 @@ import {
 } from '../task-run-queue';
 import { LLM_TITLE_LOCKED_CHECKPOINT } from '../llm-task-title';
 import { applyTaskModelSelectionToRun } from '../task-model-selection';
+import { getPrSha } from '../workflows/utils';
 
 const createdTaskIds: string[] = [];
 const createdUserIds: string[] = [];
@@ -491,6 +494,58 @@ describe('enqueueTask initiator stamping', () => {
     });
   });
 
+  it('generates an early title from a Slack app mention', async () => {
+    const userId = await createUser();
+    mockGenerateLlmTaskTitle.mockResolvedValueOnce(
+      'Order more catnip from Amazon',
+    );
+
+    const run = await enqueueTask(
+      {
+        task: {
+          type: TaskPayloadKind.SlackAppMention,
+          requestedWorkKindDecision: explicitWorkKind,
+          payload: {
+            repo: 'acme/widgets',
+            channel: 'C123',
+            user: 'U123',
+            text: 'Could you order more catnip from Amazon?',
+            ts: '123.456',
+            thread_ts: '123.456',
+          },
+        },
+        initiator: { kind: 'user', userId },
+        workflow: 'standard',
+        surface: 'slack',
+        trigger: 'message',
+      },
+      { enqueue: false },
+    );
+    createdTaskIds.push(run.taskId);
+
+    await vi.waitFor(async () => {
+      const task = await db.query.tasks.findFirst({
+        where: eq(tasks.id, run.taskId),
+        columns: { title: true, llmTitleCheckpoint: true },
+      });
+
+      expect(mockGenerateLlmTaskTitle).toHaveBeenCalledWith({
+        userId,
+        taskId: run.taskId,
+        messages: [
+          {
+            role: 'user',
+            text: 'Could you order more catnip from Amazon?',
+          },
+        ],
+      });
+      expect(task).toEqual({
+        title: 'Order more catnip from Amazon',
+        llmTitleCheckpoint: 1,
+      });
+    });
+  });
+
   it('re-applies the newer canonical title when the checkpoint lock loses a race', async () => {
     const userId = await createUser();
     mockGenerateLlmTaskTitle.mockResolvedValueOnce('Early generated title');
@@ -856,6 +911,50 @@ describe('enqueueTask initiator stamping', () => {
 });
 
 describe('enqueueTask snapshot resume', () => {
+  it('atomically rejects concurrent resumes from the same source run', async () => {
+    const userId = await createUser();
+    const freshRun = await launchFresh({
+      task: standardTaskInput({ computeProvider: 'modal' }),
+      initiator: { kind: 'user', userId },
+      workflow: 'standard',
+      surface: 'web',
+      trigger: 'manual',
+    });
+    const createResume = () =>
+      enqueueTask(
+        {
+          task: {
+            type: TaskPayloadKind.SnapshotResume,
+            payload: {
+              repo: 'acme/widgets',
+              sourceSnapshotId: 'snap-concurrent',
+              sourceRunId: freshRun.id,
+            },
+          } as SnapshotResumeTask,
+          actingUserId: userId,
+        },
+        { enqueue: false },
+      );
+
+    const results = await Promise.allSettled([createResume(), createResume()]);
+
+    expect(
+      results.filter((result) => result.status === 'fulfilled'),
+    ).toHaveLength(1);
+    const [rejected] = results.filter(
+      (result): result is PromiseRejectedResult => result.status === 'rejected',
+    );
+    expect(rejected?.reason).toBeInstanceOf(SnapshotResumeAlreadyExistsError);
+
+    const resumeRuns = await db.query.taskRuns.findMany({
+      where: and(
+        eq(taskRuns.sourceRunId, freshRun.id),
+        eq(taskRuns.kind, 'resume'),
+      ),
+    });
+    expect(resumeRuns).toHaveLength(1);
+  });
+
   it('attaches a resume run to the source task without re-attribution', async () => {
     const initiatorUserId = await createUser();
     const resumerUserId = await createUser();
@@ -1709,6 +1808,197 @@ describe('enqueueTask PR linkage', () => {
     expect(persistedLinkage?.githubReactionId).toBe(101);
     expect(persistedLinkage?.githubCheckRunId).toBe(202);
     expect(persistedLinkage?.githubReviewCommentId).toBe(303);
+  });
+
+  it('anchors getPrSha on the previously reviewed head, not the bumped linkage', async () => {
+    const prNumber = 81;
+    const reviewedSha = '1'.repeat(40);
+    const pushedSha = '2'.repeat(40);
+    const prUrl = `https://github.com/acme/widgets/pull/${prNumber}`;
+    const makeTask = (headSha: string) =>
+      ({
+        type:
+          headSha === reviewedSha
+            ? TaskPayloadKind.GithubPrReview
+            : TaskPayloadKind.GithubPrReviewSync,
+        requestedWorkKindDecision: explicitWorkKind,
+        payload: {
+          repo: 'acme/widgets',
+          prNumber,
+          prTitle: 'Anchor on the reviewed head',
+          prUrl,
+          headSha,
+        },
+      }) as FreshTaskLaunch['task'];
+    const makeLinkage = (prSha: string) => ({
+      provider: 'github' as const,
+      repository: 'acme/widgets',
+      prNumber,
+      prUrl,
+      prTitle: 'Anchor on the reviewed head',
+      prSha,
+    });
+
+    const reviewRun = await enqueueTask(
+      {
+        task: makeTask(reviewedSha),
+        initiator: { kind: 'automation', key: 'review_code' },
+        workflow: 'pr_review',
+        surface: 'github',
+        trigger: 'webhook',
+        prLinkage: makeLinkage(reviewedSha),
+      },
+      { enqueue: false, skipEarlyTitleGeneration: true },
+    );
+    createdTaskIds.push(reviewRun.taskId);
+
+    await db
+      .update(taskRuns)
+      .set({
+        status: RunStatus.Completed,
+        startedAt: new Date(),
+        completedAt: new Date(),
+      })
+      .where(eq(taskRuns.id, reviewRun.id));
+    await db
+      .update(tasks)
+      .set({ state: 'completed' })
+      .where(eq(tasks.id, reviewRun.taskId));
+
+    // A push launches the sync onto the same task and bumps the shared
+    // linkage row to the new head before the sync run builds its prompt.
+    const syncRun = await enqueueTask(
+      {
+        existingTaskId: reviewRun.taskId,
+        task: makeTask(pushedSha),
+        initiator: { kind: 'automation', key: 'review_code' },
+        workflow: 'pr_review',
+        surface: 'github',
+        trigger: 'webhook',
+        prLinkage: makeLinkage(pushedSha),
+      },
+      { enqueue: false, skipEarlyTitleGeneration: true },
+    );
+
+    const linkage = await db.query.taskPullRequests.findFirst({
+      where: eq(taskPullRequests.taskId, reviewRun.taskId),
+    });
+    expect(linkage?.prSha).toBe(pushedSha);
+
+    // The sync's anchor must be the head the prior review actually covered.
+    // Reading the bumped linkage here made last_review_sha equal the fresh
+    // head, so syncs reported "no new commits" despite real pushes.
+    await expect(
+      getPrSha({
+        currentRunId: syncRun.id,
+        repo: 'acme/widgets',
+        prNumber,
+      }),
+    ).resolves.toBe(reviewedSha);
+  });
+
+  it('anchors past follow-up runs that carry no payload headSha', async () => {
+    const prNumber = 82;
+    const reviewedSha = '3'.repeat(40);
+    const pushedSha = '4'.repeat(40);
+    const prUrl = `https://github.com/acme/widgets/pull/${prNumber}`;
+    const makeLinkage = (prSha: string) => ({
+      provider: 'github' as const,
+      repository: 'acme/widgets',
+      prNumber,
+      prUrl,
+      prTitle: 'Anchor past follow-ups',
+      prSha,
+    });
+    const launch = (
+      task: FreshTaskLaunch['task'],
+      existingTaskId?: string,
+      prSha = reviewedSha,
+    ) =>
+      enqueueTask(
+        {
+          ...(existingTaskId ? { existingTaskId } : {}),
+          task,
+          initiator: { kind: 'automation', key: 'review_code' },
+          workflow: 'pr_review',
+          surface: 'github',
+          trigger: 'webhook',
+          prLinkage: makeLinkage(prSha),
+        },
+        { enqueue: false, skipEarlyTitleGeneration: true },
+      );
+    const finishRun = async (runId: number, taskId: string) => {
+      await db
+        .update(taskRuns)
+        .set({
+          status: RunStatus.Completed,
+          startedAt: new Date(),
+          completedAt: new Date(),
+        })
+        .where(eq(taskRuns.id, runId));
+      await db
+        .update(tasks)
+        .set({ state: 'completed' })
+        .where(eq(tasks.id, taskId));
+    };
+
+    const reviewRun = await launch({
+      type: TaskPayloadKind.GithubPrReview,
+      requestedWorkKindDecision: explicitWorkKind,
+      payload: {
+        repo: 'acme/widgets',
+        prNumber,
+        prTitle: 'Anchor past follow-ups',
+        prUrl,
+        headSha: reviewedSha,
+      },
+    } as FreshTaskLaunch['task']);
+    createdTaskIds.push(reviewRun.taskId);
+    await finishRun(reviewRun.id, reviewRun.taskId);
+
+    // A mention follow-up runs between the review and the next push. Its
+    // payload records no headSha, so it must not become the anchor.
+    const followUpRun = await launch(
+      {
+        type: TaskPayloadKind.GithubPrReviewFollowUp,
+        requestedWorkKindDecision: explicitWorkKind,
+        payload: {
+          repo: 'acme/widgets',
+          prNumber,
+          prTitle: 'Anchor past follow-ups',
+          commentBody: 'Please tweak the error message',
+        },
+      } as FreshTaskLaunch['task'],
+      reviewRun.taskId,
+    );
+    await finishRun(followUpRun.id, reviewRun.taskId);
+
+    const syncRun = await launch(
+      {
+        type: TaskPayloadKind.GithubPrReviewSync,
+        requestedWorkKindDecision: explicitWorkKind,
+        payload: {
+          repo: 'acme/widgets',
+          prNumber,
+          prTitle: 'Anchor past follow-ups',
+          prUrl,
+          headSha: pushedSha,
+        },
+      } as FreshTaskLaunch['task'],
+      reviewRun.taskId,
+      pushedSha,
+    );
+
+    // The newest sibling (the follow-up) has no payload headSha; falling
+    // back to the bumped linkage there would resurrect the "no new
+    // commits" bug. The anchor must skip to the run that recorded one.
+    await expect(
+      getPrSha({
+        currentRunId: syncRun.id,
+        repo: 'acme/widgets',
+        prNumber,
+      }),
+    ).resolves.toBe(reviewedSha);
   });
 
   it('serializes concurrent first reviews into one durable PR task', async () => {

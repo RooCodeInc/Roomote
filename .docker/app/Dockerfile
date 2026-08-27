@@ -178,12 +178,14 @@ RUN cd /roomote && pnpm dlx esbuild@0.25.5 packages/db/src/run-migrations.ts \
 # Runtime-only dependency tree for the externals tsup does not bundle. Install
 # from its standalone lockfile so unrelated workspace packages stay excluded.
 COPY .docker/app/runtime-deps/api /runtime-deps/
-# The zod parity check guards the Fast agent's native tool runtime: it
-# symlinks an on-disk zod into each generated OpenCode tool directory via
-# require.resolve, which the api bundle (noExternal) cannot satisfy on its
-# own. A version drifting from the workspace would silently change what the
-# generated tool sources execute against.
+# Version parity keeps API externals aligned with the workspace. Zod also
+# guards the Fast agent's native tool runtime, which symlinks it into each
+# generated OpenCode tool directory via require.resolve.
 RUN cd /runtime-deps && pnpm install --prod --frozen-lockfile && \
+  test "$(node -p "require(require('node:path').join(require('node:path').dirname(require.resolve('dompurify')), '../package.json')).version")" = \
+    "$(cd /roomote/apps/api && node -p "require(require('node:path').join(require('node:path').dirname(require.resolve('dompurify')), '../package.json')).version")" && \
+  test "$(node -p "require('jsdom/package.json').version")" = \
+    "$(cd /roomote/apps/api && node -p "require('jsdom/package.json').version")" && \
   test "$(node -p "require('snowflake-sdk/package.json').version")" = \
     "$(cd /roomote/apps/api && node -p "require('snowflake-sdk/package.json').version")" && \
   test "$(node -p "require('zod/package.json').version")" = \
@@ -230,8 +232,9 @@ RUN mkdir -p /runtime-deps && cd /runtime-deps && npm init -y >/dev/null && \
     "form-data@$(cd /roomote/apps/controller && node -p "require('form-data/package.json').version")"
 
 # ---------------------------------------------------------------------------
-# bullmq: bundled dist plus the bull-board UI package, which serves its static
-# dashboard assets from the package directory at runtime.
+# bullmq: bundled dist plus runtime packages that must remain resolvable from
+# disk. Bull-board serves static assets from its package directory, while Fast
+# native tools symlink zod into generated OpenCode tool directories.
 # ---------------------------------------------------------------------------
 FROM base AS build-bullmq
 
@@ -245,7 +248,10 @@ RUN find dist -type f -name '*.map' -delete
 
 RUN mkdir -p /runtime-deps && cd /runtime-deps && npm init -y >/dev/null && \
   npm install --omit=dev --no-audit --no-fund \
-    "@bull-board/ui@$(cd /roomote/apps/bullmq && node -p "require('@bull-board/ui/package.json').version")"
+    "@bull-board/ui@$(cd /roomote/apps/bullmq && node -p "require('@bull-board/ui/package.json').version")" \
+    "zod@$(cd /roomote/apps/bullmq && node -p "require('zod/package.json').version")" && \
+  test "$(node -p "require('zod/package.json').version")" = \
+    "$(cd /roomote/apps/bullmq && node -p "require('zod/package.json').version")"
 
 # ---------------------------------------------------------------------------
 # preview-proxy: bundled dist plus the pino transports tsup keeps external.
@@ -305,6 +311,12 @@ ENTRYPOINT ["/usr/bin/tini", "--", "/roomote/.docker/app/entrypoint.sh"]
 FROM runtime-base AS runtime-inference-base
 
 ARG OPENCODE_CLI_VERSION=1.18.10
+
+# Fast mode uses bounded, temporary partial Git fetches to discover
+# repository-defined skills without exposing a checkout to the model.
+RUN apt -qq update && \
+  apt -qq install -y git && \
+  rm -rf /var/lib/apt/lists/*
 
 # The install and version check run as root; with the image's HOME=/tmp they
 # would bake root-owned dotdirs (npm cache, OpenCode's data/config/cache
@@ -372,6 +384,7 @@ COPY --chown=roomote-app:roomote-app --from=build-web /roomote/apps/docs ./apps/
 COPY --from=build-api /roomote/apps/api/package.json ./apps/api/
 COPY --from=build-api /roomote/apps/api/dist ./apps/api/dist/
 COPY --from=build-api /runtime-deps/node_modules ./apps/api/node_modules/
+COPY --chown=roomote-app:roomote-app --from=build-api /roomote/packages/cloud-agents/src/server/workflows/skills/standard ./skills/standard/
 COPY --from=build-api /migrate /roomote/migrate/
 COPY --from=build-controller /roomote/releases /roomote/releases/
 COPY --from=build-controller /roomote/apps/controller/package.json ./apps/controller/
@@ -384,7 +397,10 @@ COPY --from=build-preview-proxy /roomote/apps/preview-proxy/package.json ./apps/
 COPY --from=build-preview-proxy /roomote/apps/preview-proxy/dist ./apps/preview-proxy/dist/
 COPY --from=build-preview-proxy /runtime-deps/node_modules ./apps/preview-proxy/node_modules/
 COPY --from=github-cli /usr/bin/gh /usr/local/bin/gh
-RUN command -v gh >/dev/null && command -v opencode >/dev/null
+RUN command -v git >/dev/null && command -v gh >/dev/null && \
+  command -v opencode >/dev/null && \
+  cd /roomote/apps/bullmq && node -e "require.resolve('zod/package.json')" && \
+  ls -d /roomote/node_modules/.pnpm/zod@*/node_modules/zod >/dev/null
 
 USER roomote-app:roomote-app
 EXPOSE 3000 3001 3002 8081

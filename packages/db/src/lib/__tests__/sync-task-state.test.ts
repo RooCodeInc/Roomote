@@ -135,6 +135,19 @@ describe('deriveTaskStateFromRuns', () => {
 });
 
 describe('syncTaskStateFromRuns', () => {
+  it('repairs a stale active task when its runs have completed', async () => {
+    const task = await makeTask('active');
+    await insertRun({
+      taskId: task.id,
+      status: RunStatus.Completed,
+      startedAt: new Date(),
+    });
+
+    await syncTaskStateFromRuns(db, task.id);
+
+    expect((await readTask(task.id)).state).toBe('completed');
+  });
+
   it('keeps the task active when an idle sibling outlives a completed run', async () => {
     const task = await makeTask('completed');
     await insertRun({

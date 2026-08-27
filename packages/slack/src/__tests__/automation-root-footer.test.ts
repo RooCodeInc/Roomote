@@ -138,4 +138,56 @@ describe('refreshAutomationRootFooter', () => {
       actionIds.filter((id: string | undefined) => id?.includes('view_pr')),
     ).toHaveLength(24);
   });
+
+  it('preserves top-level Markdown while refreshing automation actions', async () => {
+    resolveThreadReplyLinkedPrsMock.mockResolvedValue([]);
+    const updateMessage = vi.fn().mockResolvedValue(true);
+    const markdown =
+      '  ## Report\n- [Finding](<https://x.com/example/status/1>)\n\n| Item | Result |\n| --- | --- |\n| Link | Found |  ';
+
+    await expect(
+      refreshAutomationRootFooter({
+        slack: {
+          getMessageBlocks: vi.fn().mockResolvedValue([
+            {
+              type: 'context',
+              block_id: 'roomote_automation_result_header',
+              elements: [
+                { type: 'image', image_url: 'https://example.com/zap.png' },
+                { type: 'plain_text', text: 'Audit' },
+                { type: 'plain_text', text: 'Saved metadata' },
+              ],
+            },
+            { type: 'markdown', text: markdown },
+            {
+              type: 'actions',
+              block_id: 'roomote_automation_result_actions',
+              elements: [],
+            },
+          ]),
+          updateMessage,
+        },
+        channelId: 'C123',
+        messageTs: '1700000000.000001',
+        automationLabel: 'Audit',
+        automationIconUrl: 'https://example.com/zap.png',
+        configureUrl: 'https://example.com/automations#audit',
+      }),
+    ).resolves.toBe(true);
+
+    const blocks = updateMessage.mock.calls[0]?.[0]?.message?.blocks ?? [];
+    expect(blocks).toContainEqual({ type: 'markdown', text: markdown });
+    expect(blocks[0]).toMatchObject({
+      type: 'context',
+      elements: expect.arrayContaining([
+        { type: 'plain_text', text: 'Saved metadata' },
+      ]),
+    });
+    expect(
+      blocks.filter(
+        (block: { block_id?: string }) =>
+          block.block_id === 'roomote_automation_result_actions',
+      ),
+    ).toHaveLength(1);
+  });
 });

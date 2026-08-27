@@ -14,11 +14,12 @@ import {
 } from '@roomote/db/server';
 import {
   describeBrainModels,
-  readBrainCorpusSample,
+  readBrainCorpus,
   readBrainPage,
   readBrainStats,
   resolveBrainSourceRequirements,
   resolveBrainInferenceProvider,
+  type BrainCorpusSnapshot,
   type BrainModelSummary,
 } from '@roomote/sdk/server';
 import {
@@ -41,20 +42,14 @@ import { Env } from '@/lib/server/env';
 
 import { assertAdmin } from '../setup/shared';
 
-/**
- * How many recently written pages the Settings page lists under the
- * composition chart. Enough to recognise what the Brain has been learning
- * lately, short enough to stay a glance rather than a log.
- */
-const RECENT_PAGE_LIMIT = 8;
-
 const EMPTY_MEMORY_SUMMARY: Awaited<
   ReturnType<typeof getBrainMemoryEventSummary>
 > = {
   byStatus: { pending: 0, processing: 0, done: 0, skipped: 0, failed: 0 },
   lastProcessedAt: null,
   lastError: null,
-  completedRunsWithoutEvent: 0,
+  historicalCompletedRunsWithoutEvent: 0,
+  recentCompletedRunsWithoutEvent: 0,
 };
 
 /**
@@ -103,29 +98,19 @@ export type BrainNamespaceSummary = {
 
 export type BrainCorpusSummary = {
   reachable: boolean;
-  /** Pages in the sample, which is the whole corpus unless `truncated`. */
-  sampledPages: number;
-  truncated: boolean;
+  /** Pages in the exhaustive cached corpus listing. */
+  listedPages: number;
   /**
    * The corpus's exact page count from gbrain's admin census, or null when
-   * the admin API did not answer. The sample above stays authoritative for
-   * composition; this keeps the total honest past the sample bound.
+   * the admin API did not answer.
    */
   totalPages: number | null;
   namespaces: BrainNamespaceSummary[];
   /**
    * Pages written per UTC day over the trailing window, oldest first,
-   * zero-filled. Computed from the same recency-sorted sample as the rest of
-   * the summary, so on a `truncated` corpus it undercounts the oldest days
-   * rather than the newest.
+   * zero-filled. Computed from the exhaustive corpus listing.
    */
   activityByDay: Array<{ date: string; pages: number }>;
-  recentPages: Array<{
-    slug: string;
-    title: string;
-    namespaceLabel: string;
-    updatedAt: Date | null;
-  }>;
 };
 
 export type BrainSettings = {
@@ -163,7 +148,8 @@ export type BrainSettings = {
     total: number;
     lastProcessedAt: Date | null;
     lastError: string | null;
-    completedRunsWithoutEvent: number;
+    historicalCompletedRunsWithoutEvent: number;
+    recentCompletedRunsWithoutEvent: number;
   };
 };
 
@@ -201,17 +187,15 @@ function buildActivityByDay(
 }
 
 function summarizeCorpus(
-  snapshot: Awaited<ReturnType<typeof readBrainCorpusSample>>,
+  snapshot: Awaited<ReturnType<typeof readBrainCorpus>>,
 ): BrainCorpusSummary {
   if (!snapshot) {
     return {
       reachable: false,
-      sampledPages: 0,
-      truncated: false,
+      listedPages: 0,
       totalPages: null,
       namespaces: [],
       activityByDay: [],
-      recentPages: [],
     };
   }
 
@@ -232,28 +216,12 @@ function summarizeCorpus(
       return right.pages - left.pages || left.label.localeCompare(right.label);
     });
 
-  const recentPages = snapshot.pages
-    .filter((page) => page.updatedAt)
-    .sort(
-      (left, right) =>
-        (right.updatedAt?.getTime() ?? 0) - (left.updatedAt?.getTime() ?? 0),
-    )
-    .slice(0, RECENT_PAGE_LIMIT)
-    .map((page) => ({
-      slug: page.slug,
-      title: page.title ?? page.slug,
-      namespaceLabel: brainNamespaceLabel(resolveBrainNamespaceId(page.slug)),
-      updatedAt: page.updatedAt,
-    }));
-
   return {
     reachable: true,
-    sampledPages: snapshot.pages.length,
-    truncated: snapshot.truncated,
+    listedPages: snapshot.pages.length,
     totalPages: null,
     namespaces,
     activityByDay: buildActivityByDay(snapshot.pages),
-    recentPages,
   };
 }
 
@@ -428,7 +396,7 @@ export async function getBrainSettingsCommand(
     requirements,
   ] = await Promise.all([
     resolveBrainInferenceProvider(),
-    configured ? readBrainCorpusSample() : null,
+    configured ? readBrainCorpus() : null,
     configured ? readBrainStats() : null,
     configured ? listBrainSyncStates(db) : [],
     configured ? countBrainCollectorItemsByCollector(db) : [],
@@ -482,7 +450,7 @@ export async function getBrainSettingsCommand(
       return {
         status: 'not_configured',
         statusDetail:
-          'This deployment has no Brain. Set a Brain provider key to give agents shared memory.',
+          'Memory is not configured for this deployment. Set a Memory provider key to give agents shared memory.',
       };
     }
 
@@ -490,7 +458,7 @@ export async function getBrainSettingsCommand(
       return {
         status: 'incomplete',
         statusDetail:
-          'A Brain provider key is set, but no Brain service URL is configured, so there is nowhere to store memories.',
+          'A Memory provider key is set, but no Memory service URL is configured, so there is nowhere to store memories.',
       };
     }
 
@@ -498,7 +466,7 @@ export async function getBrainSettingsCommand(
       return {
         status: 'incomplete',
         statusDetail:
-          'The Brain has no inference provider, so it can only match keywords. Configure a Brain provider key to enable semantic recall.',
+          'Memory has no inference provider, so it can only match keywords. Configure a Memory provider key to enable semantic recall.',
       };
     }
 
@@ -510,14 +478,14 @@ export async function getBrainSettingsCommand(
       return {
         status: 'incomplete',
         statusDetail:
-          'Roomote has not been able to provision its Brain credentials yet. This resolves on its own once the Brain has started.',
+          'Roomote has not been able to provision its Memory credentials yet. This resolves on its own once Memory has started.',
       };
     }
 
     return {
       status: 'unreachable',
       statusDetail:
-        'The Brain did not answer. Ingestion holds its position while it is down, so nothing is lost.',
+        'Memory did not answer. Ingestion holds its position while it is down, so nothing is lost.',
     };
   })();
 
@@ -542,7 +510,9 @@ export async function getBrainSettingsCommand(
       total: memoryTotal,
       lastProcessedAt: memories.lastProcessedAt,
       lastError: memories.lastError,
-      completedRunsWithoutEvent: memories.completedRunsWithoutEvent,
+      historicalCompletedRunsWithoutEvent:
+        memories.historicalCompletedRunsWithoutEvent,
+      recentCompletedRunsWithoutEvent: memories.recentCompletedRunsWithoutEvent,
     },
   };
 }
@@ -570,7 +540,8 @@ export async function retryFailedBrainTaskMemoriesCommand(
 
 export type BrainPageListing = {
   reachable: boolean;
-  truncated: boolean;
+  total: number;
+  nextOffset: number | null;
   pages: Array<{
     slug: string;
     title: string;
@@ -596,30 +567,64 @@ function toListedPage(page: {
   };
 }
 
+/** Exported for focused command tests; the command below owns auth and I/O. */
+export function paginateBrainCorpus(
+  snapshot: BrainCorpusSnapshot,
+  input: {
+    search?: string;
+    namespaceId?: string;
+    offset: number;
+    limit: number;
+  },
+): Omit<BrainPageListing, 'reachable'> {
+  const needle = input.search?.trim().toLowerCase() ?? '';
+  const filtered = snapshot.pages.filter((page) => {
+    const namespaceId = resolveBrainNamespaceId(page.slug);
+
+    return (
+      (!input.namespaceId || namespaceId === input.namespaceId) &&
+      (!needle ||
+        page.slug.toLowerCase().includes(needle) ||
+        page.title?.toLowerCase().includes(needle))
+    );
+  });
+  const pages = filtered
+    .slice(input.offset, input.offset + input.limit)
+    .map(toListedPage);
+
+  return {
+    total: filtered.length,
+    nextOffset:
+      input.offset + pages.length < filtered.length
+        ? input.offset + pages.length
+        : null,
+    pages,
+  };
+}
+
 /**
- * The recency-sorted page sample for the browse dialog. Same cached read and
- * same bound as the composition chart, so the two agree about what the Brain
- * holds; the dialog filters and searches it client-side.
+ * One server-filtered page from the exhaustive cached corpus. The browser only
+ * renders this bounded result, so searching a large Brain does not ship or
+ * repeatedly filter the full listing on every keystroke.
  */
 export async function listBrainPagesCommand(
   auth: UserAuthSuccess,
+  input: {
+    search?: string;
+    namespaceId?: string;
+    offset: number;
+    limit: number;
+  },
 ): Promise<BrainPageListing> {
   assertAdmin(auth);
 
-  const snapshot = await readBrainCorpusSample();
+  const snapshot = await readBrainCorpus();
 
   if (!snapshot) {
-    return { reachable: false, truncated: false, pages: [] };
+    return { reachable: false, total: 0, nextOffset: null, pages: [] };
   }
 
-  const pages = [...snapshot.pages]
-    .sort(
-      (left, right) =>
-        (right.updatedAt?.getTime() ?? 0) - (left.updatedAt?.getTime() ?? 0),
-    )
-    .map(toListedPage);
-
-  return { reachable: true, truncated: snapshot.truncated, pages };
+  return { reachable: true, ...paginateBrainCorpus(snapshot, input) };
 }
 
 /**

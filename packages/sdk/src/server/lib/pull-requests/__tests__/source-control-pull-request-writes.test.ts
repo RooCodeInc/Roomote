@@ -414,7 +414,9 @@ describe('writeSourceControlPullRequestForTaskRun', () => {
       type: 'installationId',
       installationId: 'installation-1',
     });
-    expect(mockGetOctokit).toHaveBeenCalledWith('github-token');
+    expect(mockGetOctokit).toHaveBeenCalledWith('github-token', {
+      retryRateLimits: true,
+    });
     expect(createReview).toHaveBeenCalledWith({
       owner: 'acme',
       repo: 'backend',

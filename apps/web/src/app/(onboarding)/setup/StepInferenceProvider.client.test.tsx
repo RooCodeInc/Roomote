@@ -9,8 +9,9 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { SetupModelProviderId, SetupModelStatus } from '@roomote/types';
 import { toast } from 'sonner';
 
-const { mutateAsyncMock } = vi.hoisted(() => ({
+const { mutateAsyncMock, mutateMock } = vi.hoisted(() => ({
   mutateAsyncMock: vi.fn(),
+  mutateMock: vi.fn(),
 }));
 
 vi.mock('sonner', () => ({
@@ -111,6 +112,7 @@ vi.mock('@/components/system', () => ({
     </button>
   ),
   Check: (props: SVGProps<SVGSVGElement>) => <svg {...props} />,
+  Lock: (props: SVGProps<SVGSVGElement>) => <svg {...props} />,
   Input: ({
     secret: _secret,
     ...props
@@ -271,9 +273,11 @@ function buildModelSetup(
 function setupMutationMock() {
   mutateAsyncMock.mockReset();
   mutateAsyncMock.mockResolvedValue(undefined);
+  mutateMock.mockReset();
 
   mockUseMutation.mockReturnValue({
     mutateAsync: mutateAsyncMock,
+    mutate: mutateMock,
     isPending: false,
   } as unknown as ReturnType<typeof mockUseMutation>);
 }
@@ -368,7 +372,7 @@ describe('StepInferenceProvider configured API key display', () => {
     expect(screen.getByRole('button', { name: /continue/i })).toBeDisabled();
     expect(
       screen.getByText(
-        'Popular choices are ChatGPT subscriptions and OpenRouter.',
+        /popular choices are chatgpt subscriptions and openrouter/i,
       ),
     ).toBeInTheDocument();
 
@@ -778,5 +782,43 @@ describe('StepInferenceProvider ChatGPT subscription', () => {
       | undefined;
     await options?.onSuccess?.();
     expect(onContinue).toHaveBeenCalled();
+  });
+});
+
+describe('StepInferenceProvider managed Roomote inference', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockUseQueryClient.mockReturnValue({
+      invalidateQueries: vi.fn(),
+    } as unknown as ReturnType<typeof mockUseQueryClient>);
+    setupMutationMock();
+    setupQueryMocks({ chatgptConnected: false });
+  });
+
+  function managedRoomoteProviderStatus(): SetupModelStatus['providers'][number] {
+    return {
+      ...openrouterProviderStatus(),
+      id: 'roomote',
+      label: 'Roomote inference',
+      runtimeApiKeySatisfied: true,
+    };
+  }
+
+  it('does not offer managed Roomote inference as a selectable connection', () => {
+    render(
+      <StepInferenceProvider
+        modelSetup={buildModelSetup({
+          providers: [
+            managedRoomoteProviderStatus(),
+            chatgptProviderStatus(false),
+          ],
+        })}
+        onContinue={vi.fn()}
+      />,
+    );
+
+    expect(
+      screen.queryByRole('button', { name: /roomote inference/i }),
+    ).not.toBeInTheDocument();
   });
 });

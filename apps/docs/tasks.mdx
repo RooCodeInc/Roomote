@@ -24,6 +24,28 @@ Before you dive into details, check the basics:
 - whether the end state matches the kind of outcome you wanted: answer, plan,
   patch, branch, or PR
 
+## Task board
+
+Use the board view on the Tasks page to scan shared work by lifecycle. Roomote
+places tasks in **Active**, **Needs input**, **Blocked / failed**, or **Done**
+from their current task, goal, and run state, so your team does not need to
+maintain a separate status field.
+
+Each card shows who started the task, participant avatars, recent activity, and
+available workspace or pull-request context. The Done column keeps the six most
+recent completed tasks so finished work does not overwhelm active work. Board
+and list choices remain in the URL so views are shareable. Roomote also restores
+the most recently selected layout from browser storage when you return; if
+browser storage is unavailable, the Tasks page falls back to list view.
+
+## Recover from a failed start
+
+When a task cannot start, select **Try in a new task** to open an editable task
+launcher prefilled with the original text prompt, selected model, and linked
+environment. Review or change those values before starting it. This creates a
+new task instead of retrying the failed task, and attachments are not copied, so
+reattach any files the new task needs.
+
 ## Task view
 
 The task view gives you the working context for a run:
@@ -94,6 +116,11 @@ without needing to enter the sandbox workspace.
 You can send follow-up instructions while a task is active. If a task has
 completed and Roomote has a restorable snapshot, a follow-up can resume from
 that prior workspace instead of starting over.
+
+When a task delegated from a Fast session asks for input, reply naturally in
+the originating session. If one input request is pending, Roomote
+applies a matching reply to that request instead of treating it as a separate
+task instruction.
 
 For an objective that may need several agent turns, use
 [Goal Mode](/goal-mode). It keeps the complete outcome in context and can

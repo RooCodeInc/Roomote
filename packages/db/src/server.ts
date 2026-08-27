@@ -39,13 +39,16 @@ export * from './db';
 
 export * from './lib/map-raw-row';
 export * from './lib/legacy-task-inference-usage';
+export * from './lib/llm-usage';
 export * from './lib/deployment-auth-keypairs';
 export * from './lib/environment-variables';
 export * from './lib/task-id';
 export * from './lib/task-activity-timestamp';
+export * from './lib/task-run-continuation';
 export * from './lib/acting-user';
 export * from './lib/task-suggestion-content-hash';
 export * from './lib/work-item-claims';
+export * from './lib/tracked-suggestion-cards';
 export * from './lib/task-start-parallel-counts';
 export * from './lib/tasks';
 export * from './lib/task-goals';
@@ -68,6 +71,7 @@ export * from './lib/github-copilot-subscription';
 export * from './lib/xai-subscription';
 export * from './lib/subscription-provider-usage';
 export * from './lib/provider-credit-balance';
+export * from './lib/provider-usage-limits';
 export * from './lib/preview-runtime-config';
 export * from './lib/out-of-band-task-messages';
 export * from './lib/record-task-kickoff-message';
@@ -87,9 +91,13 @@ export * from './lib/instance-report';
 export * from './lib/deployment-license';
 export * from './lib/license-usage-observations';
 export * from './lib/pr-review-events';
+export * from './lib/pr-review-notification-units';
+export * from './lib/pull-request-mergeability';
+export * from './lib/fast-agent-pr-feedback-deliveries';
 export * from './lib/invocation-identities';
 export * from './lib/webhook-retention';
 export * from './lib/brain';
+export * from './lib/fast-agent-memory';
 export * from './lib/managed-access';
 
 export {
@@ -119,6 +127,10 @@ export {
   prReviewEvents,
   prReviewCycles,
   prReviewEventDeliveries,
+  prReviewNotificationUnits,
+  prReviewNotificationUnitEvents,
+  prReviewNotificationDeliveries,
+  prReviewAutoPreferences,
   taskRuns,
   taskRunsRelations,
   taskRunEvents,
@@ -173,12 +185,15 @@ export {
   slackAuthTokensRelations,
   fastAgentConversations,
   fastAgentConversationsRelations,
-  fastAgentConversationAliases,
-  fastAgentConversationAliasesRelations,
+  fastAgentMemoryEvents,
+  fastAgentMessages,
+  fastAgentMessagesRelations,
+  fastAgentProviderMessages,
+  fastAgentProviderMessagesRelations,
+  fastAgentPrFeedbackDeliveries,
+  fastAgentPrFeedbackDeliveriesRelations,
   slackConversationMessages,
   slackConversationMessagesRelations,
-  slackQuickAnswers,
-  slackQuickAnswersRelations,
   slackFastIntegrationCalls,
   slackFastIntegrationCallsRelations,
   linearPendingSelections,

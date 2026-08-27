@@ -26,6 +26,7 @@ export {
   Bug,
   Calendar,
   Camera,
+  ChartColumn,
   ChartColumnIncreasing,
   Check,
   CheckCircle2,
@@ -46,6 +47,7 @@ export {
   CircleUserRound,
   Clock,
   CloudIcon,
+  Columns3,
   Code2,
   Container,
   Copy,
@@ -109,6 +111,7 @@ export {
   Link as LucideLink,
   ListEnd,
   ListChecks,
+  List,
   Loader2,
   Loader2Icon,
   LoaderCircle,
@@ -158,7 +161,6 @@ export {
   RotateCcw,
   History as RotateCcwClock,
   RotateCcwKey,
-  RotateCw,
   ScrollText,
   Rows4,
   ScanFace,
@@ -214,6 +216,7 @@ export {
   XIcon,
   Zap,
   BellElectric,
+  BatteryWarning,
 } from 'lucide-react';
 
 export type { LucideIcon } from 'lucide-react';

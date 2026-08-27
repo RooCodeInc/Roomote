@@ -1,5 +1,23 @@
-import { and, count, desc, eq, inArray, like, lt, max, sql } from 'drizzle-orm';
-import { MISSING_MEMORY_EVENT_COUNT_CAP, RunStatus } from '@roomote/types';
+import {
+  and,
+  count,
+  desc,
+  eq,
+  gt,
+  inArray,
+  isNull,
+  like,
+  lt,
+  lte,
+  max,
+  or,
+  sql,
+} from 'drizzle-orm';
+import {
+  BRAIN_COLLECTOR_IDS,
+  MISSING_MEMORY_EVENT_COUNT_CAP,
+  RunStatus,
+} from '@roomote/types';
 
 import { type DatabaseOrTransaction } from '../db';
 import {
@@ -9,6 +27,7 @@ import {
   taskRuns,
 } from '../schema';
 import { runInTransactionIfAvailable } from './transaction-utils';
+import { createMemoryOutboxLifecycle } from './memory-outbox-lifecycle';
 
 export type BrainSyncStateRow = typeof brainSyncState.$inferSelect;
 export type BrainCollectorItemRow = typeof brainCollectorItems.$inferSelect;
@@ -220,6 +239,25 @@ export async function listBrainCollectorItemsBefore(
     .limit(limit);
 }
 
+export async function listBrainCollectorItemsAfter(
+  database: DatabaseOrTransaction,
+  collectorId: string,
+  afterItemId: string,
+  limit: number,
+): Promise<BrainCollectorItemRow[]> {
+  return database
+    .select()
+    .from(brainCollectorItems)
+    .where(
+      and(
+        eq(brainCollectorItems.collectorId, collectorId),
+        gt(brainCollectorItems.itemId, afterItemId),
+      ),
+    )
+    .orderBy(brainCollectorItems.itemId)
+    .limit(limit);
+}
+
 export async function listBrainCollectorItems(
   database: DatabaseOrTransaction,
   collectorId: string,
@@ -325,6 +363,9 @@ export async function resetBrainIngestionState(
 
 export type BrainMemoryEventRow = typeof brainMemoryEvents.$inferSelect;
 
+const brainMemoryOutboxLifecycle =
+  createMemoryOutboxLifecycle<BrainMemoryEventRow>(brainMemoryEvents);
+
 /**
  * Transactional-outbox insert for a completed run's memory candidate. Called
  * inside the same transaction that marks the run Completed so the event and
@@ -350,10 +391,15 @@ export async function maybeEnqueueBrainMemoryEvent(
  * drainer stays the single writer to the brain and the per-run slug,
  * redaction, and provenance remain server-controlled.
  *
- * Status resets to 'pending' so a memory already ingested is re-written with
- * richer content at the same run-specific slug, and the row is
- * created if the run has not finished yet — the completion path's
- * onConflictDoNothing then leaves this summary intact.
+ * Every save bumps `revision`, which the drainer fences its completion on.
+ * A settled row ('done'/'skipped'/'failed') returns to 'pending' with a fresh
+ * retry budget so the richer content re-ingests at the same run-specific
+ * slug, and the row is created if the run has not finished yet — the
+ * completion path's onConflictDoNothing then leaves this summary intact. A
+ * row the drainer currently holds ('processing') keeps its status and budget:
+ * leaving it claimed guarantees a single in-flight page writer per run, and
+ * the drainer's revision fence hands the row back when its snapshot went
+ * stale mid-write.
  */
 export async function saveBrainAgentSummary(
   database: DatabaseOrTransaction,
@@ -367,8 +413,9 @@ export async function saveBrainAgentSummary(
       target: brainMemoryEvents.runId,
       set: {
         agentSummary,
-        status: 'pending',
-        attempts: 0,
+        revision: sql`${brainMemoryEvents.revision} + 1`,
+        status: sql`case when ${brainMemoryEvents.status} = 'processing' then 'processing' else 'pending' end`,
+        attempts: sql`case when ${brainMemoryEvents.status} = 'processing' then ${brainMemoryEvents.attempts} else 0 end`,
         lastError: null,
         updatedAt: sql`now()`,
       },
@@ -432,15 +479,9 @@ export async function claimPendingBrainMemoryEvents(
   database: DatabaseOrTransaction,
   limit: number,
 ): Promise<BrainMemoryEventRow[]> {
-  const rows = await database
-    .update(brainMemoryEvents)
-    .set({
-      status: 'processing',
-      attempts: sql`${brainMemoryEvents.attempts} + 1`,
-      updatedAt: sql`now()`,
-    })
-    .where(
-      sql`${brainMemoryEvents.id} IN (
+  return brainMemoryOutboxLifecycle.claim(
+    database,
+    sql`
         SELECT event.id
         FROM ${brainMemoryEvents} AS event
         LEFT JOIN ${taskRuns} AS run ON run.id = event.run_id
@@ -452,11 +493,8 @@ export async function claimPendingBrainMemoryEvents(
         ORDER BY run.completed_at DESC NULLS LAST, event.run_id DESC
         LIMIT ${limit}
         FOR UPDATE OF event SKIP LOCKED
-      )`,
-    )
-    .returning();
-
-  return rows;
+    `,
+  );
 }
 
 /**
@@ -468,18 +506,7 @@ export async function releaseBrainMemoryEvents(
   database: DatabaseOrTransaction,
   ids: string[],
 ): Promise<void> {
-  if (ids.length === 0) {
-    return;
-  }
-
-  await database
-    .update(brainMemoryEvents)
-    .set({
-      status: 'pending',
-      attempts: sql`greatest(${brainMemoryEvents.attempts} - 1, 0)`,
-      updatedAt: sql`now()`,
-    })
-    .where(inArray(brainMemoryEvents.id, ids));
+  await brainMemoryOutboxLifecycle.release(database, ids);
 }
 
 export type BrainMemoryEventStatus = BrainMemoryEventRow['status'];
@@ -495,7 +522,9 @@ export type BrainMemoryEventSummary = {
    * predates the Brain (or a backfill has not been run), which is a state an
    * admin can act on rather than a fault.
    */
-  completedRunsWithoutEvent: number;
+  historicalCompletedRunsWithoutEvent: number;
+  /** Completed after the one-time backfill but missing their automatic row. */
+  recentCompletedRunsWithoutEvent: number;
 };
 
 const EMPTY_MEMORY_EVENT_STATUS_COUNTS: Record<BrainMemoryEventStatus, number> =
@@ -515,7 +544,22 @@ const EMPTY_MEMORY_EVENT_STATUS_COUNTS: Record<BrainMemoryEventStatus, number> =
 export async function getBrainMemoryEventSummary(
   database: DatabaseOrTransaction,
 ): Promise<BrainMemoryEventSummary> {
-  const [statusRows, processedRow, failureRow, missingRow] = await Promise.all([
+  const taskMemoryState = await getBrainSyncState(
+    database,
+    BRAIN_COLLECTOR_IDS.taskMemories,
+  );
+  const historyCutoff = taskMemoryState?.backfillCompletedAt ?? null;
+  const missingEvent = sql`NOT EXISTS (
+    SELECT 1 FROM ${brainMemoryEvents}
+    WHERE ${brainMemoryEvents.runId} = ${taskRuns.id}
+  )`;
+  const [
+    statusRows,
+    processedRow,
+    failureRow,
+    historicalMissingRows,
+    recentMissingRows,
+  ] = await Promise.all([
     database
       .select({
         status: brainMemoryEvents.status,
@@ -532,22 +576,37 @@ export async function getBrainMemoryEventSummary(
       .where(eq(brainMemoryEvents.status, 'failed'))
       .orderBy(desc(brainMemoryEvents.updatedAt))
       .limit(1),
-    // Capped rather than counted: the page only needs "how many are missing,
-    // roughly" to offer the history backfill, and an uncapped anti-join over
-    // all completed runs grows with total run history forever.
+    // Before the first backfill checkpoint, every missing row is history. Once
+    // it exists, only runs completed on or before it belong in that banner.
     database
       .select({ id: taskRuns.id })
       .from(taskRuns)
       .where(
         and(
           eq(taskRuns.status, RunStatus.Completed),
-          sql`NOT EXISTS (
-            SELECT 1 FROM ${brainMemoryEvents}
-            WHERE ${brainMemoryEvents.runId} = ${taskRuns.id}
-          )`,
+          missingEvent,
+          historyCutoff
+            ? or(
+                isNull(taskRuns.completedAt),
+                lte(taskRuns.completedAt, historyCutoff),
+              )
+            : undefined,
         ),
       )
       .limit(MISSING_MEMORY_EVENT_COUNT_CAP),
+    historyCutoff
+      ? database
+          .select({ id: taskRuns.id })
+          .from(taskRuns)
+          .where(
+            and(
+              eq(taskRuns.status, RunStatus.Completed),
+              gt(taskRuns.completedAt, historyCutoff),
+              missingEvent,
+            ),
+          )
+          .limit(MISSING_MEMORY_EVENT_COUNT_CAP)
+      : Promise.resolve([]),
   ]);
 
   const byStatus = { ...EMPTY_MEMORY_EVENT_STATUS_COUNTS };
@@ -560,7 +619,8 @@ export async function getBrainMemoryEventSummary(
     byStatus,
     lastProcessedAt: processedRow[0]?.lastProcessedAt ?? null,
     lastError: failureRow[0]?.lastError ?? null,
-    completedRunsWithoutEvent: missingRow.length,
+    historicalCompletedRunsWithoutEvent: historicalMissingRows.length,
+    recentCompletedRunsWithoutEvent: recentMissingRows.length,
   };
 }
 
@@ -610,20 +670,47 @@ export async function countBrainCollectorItemsByCollector(
     .groupBy(brainCollectorItems.collectorId);
 }
 
+/**
+ * Non-terminal transitions. 'pending' hands a claimed row back unguarded;
+ * 'skipped' (the run no longer exists or settled without completing) applies
+ * only while the row is still 'processing', so a concurrent reclaim is not
+ * clobbered.
+ */
 export async function markBrainMemoryEvent(
   database: DatabaseOrTransaction,
   id: string,
-  status: 'pending' | 'done' | 'skipped' | 'failed',
+  status: 'pending' | 'skipped',
   lastError?: string,
 ): Promise<void> {
-  await database
-    .update(brainMemoryEvents)
-    .set({
-      status,
-      lastError: lastError ?? null,
-      processedAt:
-        status === 'done' || status === 'skipped' ? sql`now()` : null,
-      updatedAt: sql`now()`,
-    })
-    .where(eq(brainMemoryEvents.id, id));
+  await brainMemoryOutboxLifecycle.mark(database, id, status, lastError);
+}
+
+/**
+ * Settle a claimed event after the page write, fenced on the revision the
+ * drainer claimed. The fence is what makes overlapping writers safe: gbrain
+ * page writes carry no timeout, so an older in-flight `put_page` can land
+ * after a newer one. A writer whose fence misses forces the row back to
+ * 'pending' UNCONDITIONALLY — even over a 'done' another claim settled in
+ * the meantime — because its own external write just landed with unknown
+ * ordering relative to the newer one, and the only safe response is a fresh
+ * re-put of the latest content at the same idempotent slug. This is what
+ * heals the stale-reclaim ordering: A claims and hangs past the reclaim
+ * window, B claims the newer revision, writes it, and settles 'done'; when
+ * A's older write finally lands, A's fence miss re-queues the row and the
+ * next tick re-puts the newest content over A's stale snapshot.
+ */
+export async function settleBrainMemoryEvent(
+  database: DatabaseOrTransaction,
+  id: string,
+  claimedRevision: number,
+  outcome: 'done' | 'failed',
+  lastError?: string,
+): Promise<'settled' | 'superseded'> {
+  return brainMemoryOutboxLifecycle.settle(
+    database,
+    id,
+    claimedRevision,
+    outcome,
+    lastError,
+  );
 }

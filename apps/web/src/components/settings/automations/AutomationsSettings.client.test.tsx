@@ -37,6 +37,7 @@ const baseFormState: FormState = {
   reviewerReviewAllPullRequestAuthors: false,
   reviewerReviewOnCommit: true,
   reviewerReviewDraftPrs: true,
+  reviewerPublishGithubCheck: false,
   reviewerInstructions: '',
   reviewerRelayReviewResultsToTask: false,
   reviewerRelayUserIds: [] as string[],
@@ -48,6 +49,10 @@ const baseFormState: FormState = {
   managerSlackChannel: '',
   managerDiscordChannel: '',
   managerStatsFrequency: 'off' as const,
+  providerUsageLimitFrequency: 'every_hour' as const,
+  providerUsageLimitThreshold: 85,
+  providerUsageLimitSlackChannel: '',
+  providerUsageLimitDiscordChannel: '',
   managerStatsSlackChannel: '',
   managerStatsDiscordChannel: '',
   sentryTriageFrequency: 'off' as const,
@@ -82,6 +87,7 @@ const baseFormState: FormState = {
   announcerSlackChannel: '',
   announcerDiscordChannel: '',
   announcerInstructions: '',
+  platformIssueAlertsEnabled: true,
   platformIssueSlackChannel: '',
   platformIssueDiscordChannel: '',
 };
@@ -421,6 +427,43 @@ describe('Automations selection helpers', () => {
     expect(saveInput.managerStatsSlackChannel).toBeNull();
   });
 
+  it('includes provider usage enablement, threshold, and channel destination', () => {
+    const saveInput = buildAutomationSettingsSaveInput(
+      {
+        ...baseFormState,
+        providerUsageLimitFrequency: 'every_hour',
+        providerUsageLimitThreshold: 70,
+        providerUsageLimitSlackChannel: ' #provider-alerts ',
+      },
+      baseFormState,
+      'providerUsageLimit',
+    );
+
+    expect(saveInput).toMatchObject({
+      savingAutomation: 'providerUsageLimit',
+      providerUsageLimitFrequency: 'every_hour',
+      providerUsageLimitThreshold: 70,
+      providerUsageLimitSlackChannel: '#provider-alerts',
+      providerUsageLimitDiscordChannel: null,
+    });
+  });
+
+  it('includes the provider usage Discord destination in the API save input', () => {
+    const saveInput = buildAutomationSettingsSaveInput(
+      {
+        ...baseFormState,
+        providerUsageLimitFrequency: 'every_hour',
+        providerUsageLimitSlackChannel: '',
+        providerUsageLimitDiscordChannel: ' 123456789 ',
+      },
+      baseFormState,
+      'providerUsageLimit',
+    );
+
+    expect(saveInput.providerUsageLimitDiscordChannel).toBe('123456789');
+    expect(saveInput.providerUsageLimitSlackChannel).toBeNull();
+  });
+
   it('includes the Discord manager destination in the API save input', () => {
     const saveInput = buildAutomationSettingsSaveInput(
       {
@@ -447,6 +490,19 @@ describe('Automations selection helpers', () => {
     );
 
     expect(saveInput.reviewerReviewAllPullRequestAuthors).toBe(true);
+  });
+
+  it('includes GitHub check publication when saving Review Code', () => {
+    const saveInput = buildAutomationSettingsSaveInput(
+      {
+        ...baseFormState,
+        reviewerPublishGithubCheck: true,
+      },
+      baseFormState,
+      'reviewer',
+    );
+
+    expect(saveInput.reviewerPublishGithubCheck).toBe(true);
   });
 
   it('creates a prefilled channel auto-start row from a template', () => {
@@ -668,37 +724,21 @@ describe('Automations selection helpers', () => {
     );
   });
 
-  it('treats platform issue alerts as disabled without a selected channel', () => {
+  it('treats platform issue alerts as enabled without a selected channel', () => {
     expect(
       isPlatformIssueAlertsEnabled({
-        platformIssueSlackChannel: '',
-        platformIssueDiscordChannel: '',
-      }),
-    ).toBe(false);
-    expect(
-      isPlatformIssueAlertsEnabled({
-        platformIssueSlackChannel: '   ',
-        platformIssueDiscordChannel: '   ',
-      }),
-    ).toBe(false);
-  });
-
-  it('treats platform issue alerts as enabled when a Slack channel is selected', () => {
-    expect(
-      isPlatformIssueAlertsEnabled({
-        platformIssueSlackChannel: 'C123',
-        platformIssueDiscordChannel: '',
+        platformIssueAlertsEnabled: true,
       }),
     ).toBe(true);
+    expect(isPlatformIssueAlertsEnabled(undefined)).toBe(true);
   });
 
-  it('treats platform issue alerts as enabled when a Discord channel is selected', () => {
+  it('treats platform issue alerts as disabled only after explicit opt-out', () => {
     expect(
       isPlatformIssueAlertsEnabled({
-        platformIssueSlackChannel: '',
-        platformIssueDiscordChannel: '111222333444555666',
+        platformIssueAlertsEnabled: false,
       }),
-    ).toBe(true);
+    ).toBe(false);
   });
 
   it('requires a Sentry connection before selecting an enabled Sentry triage schedule', () => {

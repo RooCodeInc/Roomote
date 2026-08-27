@@ -19,8 +19,7 @@ import { cn } from '@/lib/utils';
 
 import { useAuthorizedUser } from '@/hooks/useUser';
 import {
-  useTasks,
-  useTaskPagination,
+  useInfiniteTasks,
   useDeleteTasks,
   useTaskFilterState,
 } from '@/hooks/tasks';
@@ -30,6 +29,8 @@ import {
   Trash2,
   AlertTriangle,
   ListChecks,
+  Columns3,
+  List,
   X,
   FunnelX,
   Button,
@@ -41,21 +42,45 @@ import {
   DialogHeader,
   DialogTitle,
   Label,
-  CursorPagination,
   Empty,
   EmptyHeader,
   EmptyDescription,
+  Spinner,
 } from '@/components/system';
 import {
   TaskFilters,
   TaskCard,
   TaskCardSkeleton,
   TaskCardError,
+  TaskBoard,
+  TaskBoardSkeleton,
 } from '@/components/tasks';
 import {
   parseTaskTypeFilterParam,
   serializeTaskTypeFilterParam,
 } from '@/components/tasks/taskTypeFilter';
+
+type TasksView = 'list' | 'board';
+
+const TASKS_VIEW_STORAGE_KEY = 'roomote-tasks-view';
+
+function readStoredTasksView(): TasksView {
+  try {
+    return window.localStorage.getItem(TASKS_VIEW_STORAGE_KEY) === 'board'
+      ? 'board'
+      : 'list';
+  } catch {
+    return 'list';
+  }
+}
+
+function writeStoredTasksView(view: TasksView): void {
+  try {
+    window.localStorage.setItem(TASKS_VIEW_STORAGE_KEY, view);
+  } catch {
+    // Ignore localStorage failures.
+  }
+}
 
 export const Tasks = () => {
   const { userId, isAdmin } = useAuthorizedUser();
@@ -63,6 +88,13 @@ export const Tasks = () => {
 
   const router = useRouter();
   const searchParams = useSearchParams();
+  const [storedView, setStoredView] = useState<TasksView>('list');
+  const isBoardView =
+    searchParams.get('view') === 'board' || storedView === 'board';
+
+  useEffect(() => {
+    setStoredView(readStoredTasksView());
+  }, []);
 
   /**
    * Filters
@@ -338,17 +370,21 @@ export const Tasks = () => {
   });
 
   /**
-   * Tasks (Graceful Loading + Polling + Pagination)
+   * Tasks (Graceful Loading + Polling)
    */
 
-  const { data, isPending, isError, pagination } = useTasks({
+  const infiniteTasks = useInfiniteTasks({
     filters: effectiveFilters,
     timePeriod,
+    pageSize: 50,
   });
 
-  const tasks = data?.tasks || [];
-
-  useTaskPagination(pagination, effectiveFilters, timePeriod, data?.nextCursor);
+  const tasks = useMemo(
+    () => infiniteTasks.data?.pages.flatMap((page) => page.tasks) ?? [],
+    [infiniteTasks.data],
+  );
+  const isPending = infiniteTasks.isPending;
+  const isError = infiniteTasks.isError && !infiniteTasks.data;
 
   const { showContent } = useGracefulLoading({
     isPending,
@@ -437,16 +473,39 @@ export const Tasks = () => {
     setIsSelectionMode(!isSelectionMode);
   };
 
+  const handleViewChange = (view: TasksView) => {
+    if (view === 'board') {
+      setSelectedTasks(new Set());
+      setIsSelectionMode(false);
+    }
+
+    setStoredView(view);
+    writeStoredTasksView(view);
+
+    const params = new URLSearchParams(searchParams.toString());
+
+    if (view === 'board') {
+      params.set('view', 'board');
+    } else {
+      params.delete('view');
+    }
+
+    router.replace(
+      params.toString() ? `?${params.toString()}` : window.location.pathname,
+      { scroll: false },
+    );
+  };
+
   // Preserve only selections that still exist in the current task list when
   // tasks change.
   useEffect(() => {
-    if (data?.tasks && data.tasks.length > 0 && selectedTasks.size > 0) {
+    if (tasks.length > 0 && selectedTasks.size > 0) {
       setSelectedTasks((prev) => {
-        const taskIds = new Set(data.tasks.map((t) => t.id));
+        const taskIds = new Set(tasks.map((task) => task.id));
         return new Set([...prev].filter((id) => taskIds.has(id)));
       });
     }
-  }, [data?.tasks, selectedTasks.size]);
+  }, [tasks, selectedTasks.size]);
 
   /**
    * Derived State
@@ -463,11 +522,10 @@ export const Tasks = () => {
     ) || timePeriod !== 'all';
 
   const canSelect = tasks.length > 0 && !isSelectionMode && !isLoading;
-
   return (
     <div className="flex h-full min-h-0 w-full flex-col bg-card">
       <div className="bg-background border-b-4 border-b-card p-4">
-        <div className="flex items-center justify-between bg-b">
+        <div className="flex flex-wrap items-center justify-between gap-3 bg-b">
           <TaskFilters
             userId={effectiveFilterUserId}
             defaultUserId={defaultsToAnyUser ? undefined : userId}
@@ -486,7 +544,7 @@ export const Tasks = () => {
             showTaskType={showTaskTypeFilter}
           />
 
-          <div className="flex items-center justify-between gap-2">
+          <div className="flex flex-wrap items-center justify-between gap-2">
             {!isSelectionMode ? (
               <>
                 {isFiltering && (
@@ -500,20 +558,22 @@ export const Tasks = () => {
                     <FunnelX className="size-4" />
                   </Button>
                 )}
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  disabled={!canSelect}
-                  onClick={toggleSelectionMode}
-                  className={cn('size-8', isSelectionMode && 'opacity-0')}
-                  title={
-                    isSelectionMode
-                      ? 'Exit selection mode'
-                      : 'Enter selection mode'
-                  }
-                >
-                  <ListChecks className="size-4" />
-                </Button>
+                {!isBoardView && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    disabled={!canSelect}
+                    onClick={toggleSelectionMode}
+                    className={cn('size-8', isSelectionMode && 'opacity-0')}
+                    title={
+                      isSelectionMode
+                        ? 'Exit selection mode'
+                        : 'Enter selection mode'
+                    }
+                  >
+                    <ListChecks className="size-4" />
+                  </Button>
+                )}
               </>
             ) : (
               <div className="flex items-center gap-2">
@@ -555,6 +615,28 @@ export const Tasks = () => {
                 </Button>
               </div>
             )}
+            <div className="flex items-center rounded-lg border border-border p-0.5">
+              <Button
+                variant={isBoardView ? 'ghost' : 'default'}
+                size="sm"
+                onClick={() => handleViewChange('list')}
+                aria-pressed={!isBoardView}
+                title="List view"
+                className="rounded-r-none"
+              >
+                <List />
+              </Button>
+              <Button
+                variant={isBoardView ? 'default' : 'ghost'}
+                size="sm"
+                onClick={() => handleViewChange('board')}
+                aria-pressed={isBoardView}
+                title="Board view"
+                className="rounded-l-none"
+              >
+                <Columns3 />
+              </Button>
+            </div>
           </div>
         </div>
       </div>
@@ -562,7 +644,7 @@ export const Tasks = () => {
       {/* Content area: loading, error, or tasks */}
       {isLoading ? (
         <div className="flex min-h-0 flex-1 bg-background">
-          <TaskCardSkeleton />
+          {isBoardView ? <TaskBoardSkeleton /> : <TaskCardSkeleton />}
         </div>
       ) : isError ? (
         <div className="flex min-h-0 flex-1 bg-background">
@@ -640,25 +722,41 @@ export const Tasks = () => {
           <div className="flex min-h-0 flex-1 flex-col bg-background">
             <div
               ref={tasksListRef}
-              className="min-h-0 flex-1 divide-y divide-card overflow-y-auto overflow-x-hidden"
+              className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden"
             >
-              {tasks.map((task) => (
-                <TaskCard
-                  key={task.id}
-                  task={task}
-                  filterState={taskFilterState}
-                  isSelected={selectedTasks.has(task.id)}
-                  inSelectionMode={isSelectionMode}
-                  onSelectionChange={
-                    isSelectionMode ? handleSelectionChange : undefined
-                  }
-                />
-              ))}
-
-              <CursorPagination
-                pagination={pagination}
-                scrollTargetRef={tasksListRef}
-              />
+              {isBoardView ? (
+                <TaskBoard tasks={tasks} />
+              ) : (
+                <div className="divide-y divide-card">
+                  {tasks.map((task) => (
+                    <TaskCard
+                      key={task.id}
+                      task={task}
+                      filterState={taskFilterState}
+                      isSelected={selectedTasks.has(task.id)}
+                      inSelectionMode={isSelectionMode}
+                      onSelectionChange={
+                        isSelectionMode ? handleSelectionChange : undefined
+                      }
+                    />
+                  ))}
+                </div>
+              )}
+              {infiniteTasks.hasNextPage && (
+                <div className="flex justify-center py-4">
+                  <Button
+                    variant="outline"
+                    onClick={() => infiniteTasks.fetchNextPage()}
+                    disabled={infiniteTasks.isFetchingNextPage}
+                  >
+                    {infiniteTasks.isFetchingNextPage ? (
+                      <Spinner />
+                    ) : (
+                      'Load more'
+                    )}
+                  </Button>
+                </div>
+              )}
             </div>
           </div>
         </>

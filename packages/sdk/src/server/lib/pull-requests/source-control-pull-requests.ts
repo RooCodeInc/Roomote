@@ -25,12 +25,14 @@ import {
 import {
   buildPullRequestUrl,
   getSourceControlProviderLabel,
-  findPrBodyAttributionLine,
+  findPrBodyAttributionMarkers,
   preservePrBodyAttribution,
   getCommunicationProviderFromTaskPayload,
   getCommunicationGuildIdFromTaskPayload,
   getCommunicationTenantIdFromTaskPayload,
   getCommunicationChannelFromTaskPayload,
+  getCommunicationTeamDomainFromTaskPayload,
+  getCommunicationTeamIdFromTaskPayload,
   getCommunicationThreadIdFromTaskPayload,
   getCommunicationMessageIdFromTaskPayload,
   getSlackChannelFromTaskPayload,
@@ -258,6 +260,16 @@ export async function createOrUpdateSourceControlPullRequestForTaskRun({
   const communicationProvider = getCommunicationProviderFromTaskPayload(
     taskRun.payload,
   );
+  const inheritedChatProvider =
+    payloadRecord.communicationContextInherited === true
+      ? communicationProvider
+      : null;
+  const communicationChannelId = getCommunicationChannelFromTaskPayload(
+    taskRun.payload,
+  );
+  const communicationThreadId = getCommunicationThreadIdFromTaskPayload(
+    taskRun.payload,
+  );
   const telegramBotUsername =
     communicationProvider === 'telegram'
       ? (await resolveTelegramRuntimeCredentials()).botUsername
@@ -269,30 +281,42 @@ export async function createOrUpdateSourceControlPullRequestForTaskRun({
     attribution: canonicalAttribution,
     taskUrl: buildPrAttributionTaskUrl(taskRun),
     taskSurface:
-      task?.surface === 'system' || task?.surface === 'api'
+      inheritedChatProvider ??
+      (task?.surface === 'system' || task?.surface === 'api'
         ? 'web'
-        : (task?.surface ?? communicationProvider ?? 'web'),
+        : (task?.surface ?? communicationProvider ?? 'web')),
     slackTeamDomain:
-      getSlackTeamDomainFromTaskPayload(taskRun.payload) ?? undefined,
-    slackTeamId: getSlackTeamIdFromTaskPayload(taskRun.payload) ?? undefined,
+      getSlackTeamDomainFromTaskPayload(taskRun.payload) ??
+      (communicationProvider === 'slack'
+        ? (getCommunicationTeamDomainFromTaskPayload(taskRun.payload) ??
+          undefined)
+        : undefined),
+    slackTeamId:
+      getSlackTeamIdFromTaskPayload(taskRun.payload) ??
+      (communicationProvider === 'slack'
+        ? (getCommunicationTeamIdFromTaskPayload(taskRun.payload) ?? undefined)
+        : undefined),
     slackConversationUrl:
       getSlackConversationUrlFromTaskPayload(taskRun.payload) ?? undefined,
     slackChannel:
       getSlackChannelFromTaskPayload(taskRun.payload) ??
       task?.slackChannelId ??
-      undefined,
+      (communicationProvider === 'slack'
+        ? (communicationChannelId ?? undefined)
+        : undefined),
     slackThreadTs:
       getSlackThreadTsFromTaskPayload(taskRun.payload) ??
       task?.slackThreadTs ??
-      undefined,
+      (communicationProvider === 'slack'
+        ? (communicationThreadId ?? undefined)
+        : undefined),
     telegramChatId:
       communicationProvider === 'telegram'
-        ? (getCommunicationChannelFromTaskPayload(taskRun.payload) ?? undefined)
+        ? (communicationChannelId ?? undefined)
         : undefined,
     telegramThreadId:
       communicationProvider === 'telegram'
-        ? (getCommunicationThreadIdFromTaskPayload(taskRun.payload) ??
-          undefined)
+        ? (communicationThreadId ?? undefined)
         : undefined,
     telegramMessageId:
       communicationProvider === 'telegram'
@@ -302,7 +326,7 @@ export async function createOrUpdateSourceControlPullRequestForTaskRun({
     telegramBotUsername: telegramBotUsername ?? undefined,
     teamsConversationId:
       communicationProvider === 'teams'
-        ? (getCommunicationChannelFromTaskPayload(taskRun.payload) ?? undefined)
+        ? (communicationChannelId ?? undefined)
         : undefined,
     teamsMessageId:
       communicationProvider === 'teams'
@@ -316,7 +340,7 @@ export async function createOrUpdateSourceControlPullRequestForTaskRun({
       getCommunicationGuildIdFromTaskPayload(taskRun.payload) ?? undefined,
     discordChannelId:
       communicationProvider === 'discord'
-        ? (getCommunicationChannelFromTaskPayload(taskRun.payload) ?? undefined)
+        ? (communicationThreadId ?? communicationChannelId ?? undefined)
         : undefined,
     discordMessageId:
       communicationProvider === 'discord'
@@ -555,7 +579,7 @@ async function createOrUpdateGitHubPullRequest({
     type: 'installationId',
     installationId: repository.installationId,
   });
-  const octokit = getOctokit(token);
+  const octokit = getOctokit(token, { retryRateLimits: true });
 
   const { data: existingPullRequests } = await octokit.rest.pulls.list({
     owner,
@@ -666,22 +690,31 @@ function buildPrAttributionTaskUrl(taskRun: TaskRun): string {
 }
 
 function prependCanonicalPrAttribution(body: string, line: string): string {
-  const firstLineEnd = body.indexOf('\n');
-  const firstLine = body.slice(
+  let remainingBody = body.trimStart();
+
+  while (remainingBody) {
+    const markers = findPrBodyAttributionMarkers(remainingBody);
+    if (!markers || remainingBody.slice(0, markers.lineStart).trim()) {
+      break;
+    }
+
+    remainingBody = remainingBody.slice(markers.lineEnd).trimStart();
+  }
+
+  const firstLineEnd = remainingBody.indexOf('\n');
+  const firstLine = remainingBody.slice(
     0,
-    firstLineEnd === -1 ? body.length : firstLineEnd,
+    firstLineEnd === -1 ? remainingBody.length : firstLineEnd,
   );
-  const normalizedFirstLine = firstLine.trimStart();
-  const hasLeadingAttribution =
-    findPrBodyAttributionLine(firstLine) !== null ||
+  if (
     /^> (?:Opened on behalf of .+\.|Created by Roomote\.) (?:Follow up by mentioning @|\[View the task\]\().+$/u.test(
-      normalizedFirstLine,
-    );
-  const remainingBody = hasLeadingAttribution
-    ? body
-        .slice(firstLineEnd === -1 ? body.length : firstLineEnd + 1)
-        .trimStart()
-    : body.trimStart();
+      firstLine.trimStart(),
+    )
+  ) {
+    remainingBody = remainingBody
+      .slice(firstLineEnd === -1 ? remainingBody.length : firstLineEnd + 1)
+      .trimStart();
+  }
 
   return remainingBody ? `${line}\n\n${remainingBody}` : line;
 }

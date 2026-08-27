@@ -11,6 +11,9 @@ import {
 import { appRouter as router } from '@/trpc/routers/_app';
 
 export const runtime = 'nodejs';
+// Fast session turns continue with after() and use a five-minute recovery
+// deadline, so leave enough room to persist their terminal state.
+export const maxDuration = 800;
 
 const handler = async (req: Request) => {
   // Taken before anything else in the handler so the delta against the

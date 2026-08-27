@@ -1,5 +1,4 @@
 import {
-  buildMemorySegments,
   buildNamespaceSegments,
   describeBrainStatus,
   describeSourceStatus,
@@ -62,50 +61,16 @@ describe('describeBrainStatus', () => {
 });
 
 describe('describeSourceStatus', () => {
-  it('explains every state that is not simply working', () => {
-    expect(describeSourceStatus('ingesting').hint).toBeNull();
+  it('provides a compact status label and dot color for every state', () => {
+    expect(describeSourceStatus('ingesting')).toMatchObject({
+      label: 'Connected',
+      dotClassName: 'bg-emerald-500',
+    });
+    expect(describeSourceStatus('backfilling').label).toBe('Backfilling');
+    expect(describeSourceStatus('idle').label).toBe('Waiting');
 
     for (const status of ['backfilling', 'idle', 'not_connected'] as const) {
-      expect(describeSourceStatus(status).hint).toBeTruthy();
+      expect(describeSourceStatus(status).dotClassName).toBeTruthy();
     }
-  });
-});
-
-describe('buildMemorySegments', () => {
-  const byStatus = {
-    pending: 3,
-    processing: 1,
-    done: 12,
-    skipped: 2,
-    failed: 2,
-  };
-
-  it('folds the drainer’s in-flight claim into the queue', () => {
-    const queued = buildMemorySegments(byStatus).find(
-      (segment) => segment.id === 'queued',
-    );
-
-    expect(queued?.count).toBe(4);
-  });
-
-  it('reports shares of the whole outbox', () => {
-    const segments = buildMemorySegments(byStatus);
-
-    expect(segments.map((segment) => segment.count)).toEqual([12, 4, 2, 2]);
-    expect(
-      segments.reduce((total, segment) => total + segment.percent, 0),
-    ).toBeCloseTo(100);
-  });
-
-  it('does not divide by zero on a deployment with no memories', () => {
-    const segments = buildMemorySegments({
-      pending: 0,
-      processing: 0,
-      done: 0,
-      skipped: 0,
-      failed: 0,
-    });
-
-    expect(segments.every((segment) => segment.percent === 0)).toBe(true);
   });
 });

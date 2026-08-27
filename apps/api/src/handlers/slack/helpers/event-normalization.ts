@@ -11,6 +11,7 @@ import type {
   AutomatedSlackAppMentionEvent,
   SlackWebhookEvent,
 } from '../types.js';
+import { mentionsSlackBot } from './mention-routing.js';
 
 function normalizeSlackReactionName(reaction: string): string {
   return reaction.trim().toLowerCase().split('::')[0] ?? '';
@@ -210,8 +211,14 @@ export function isRoutableAutomatedSlackAppMention(
   event: SlackWebhookEvent,
   slackInstallation: SlackInstallation,
 ): event is AutomatedSlackAppMentionEvent {
+  const isAppMention = event.type === 'app_mention';
+  const isBotMessageMention =
+    event.type === 'message' &&
+    getSlackEventStringField(event, 'subtype') === 'bot_message' &&
+    mentionsSlackBot(event, slackInstallation.botUserId);
+
   if (
-    event.type !== 'app_mention' ||
+    (!isAppMention && !isBotMessageMention) ||
     !isAppAuthoredSlackEvent(event) ||
     isRoomoteAuthoredSlackEvent(event, slackInstallation)
   ) {

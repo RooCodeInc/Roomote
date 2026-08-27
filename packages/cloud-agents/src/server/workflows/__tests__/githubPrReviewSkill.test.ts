@@ -120,7 +120,10 @@ describe('review-code GitHub workflow paths', () => {
     expect(skillContent).not.toContain('gh issue view');
     expect(skillContent).not.toContain('gh api');
     expect(skillContent).toContain(
-      '<!-- roomote-review-summary sha=[HEAD_SHA] mode=initial agent=[CLOUD_AGENT_ID] -->',
+      '<!-- roomote-review-summary sha=[HEAD_SHA] mode=initial agent=[CLOUD_AGENT_ID] version=2 phase=[reviewing|reviewed] -->',
+    );
+    expect(skillContent).toContain(
+      'this marker phase is the authoritative lifecycle signal',
     );
     expect(skillContent).toContain(
       'If no marker-based summary comment exists, use a backward-compatible legacy fallback',
@@ -330,7 +333,7 @@ describe('review-code GitHub workflow paths', () => {
     );
     expect(skillContent).toContain('Re-reviewing new commits now.');
     expect(skillContent).toContain(
-      'Rewrite only the content inside the hidden `<!-- roomote-review-status:start -->` and `<!-- roomote-review-status:end -->` markers when they exist, and otherwise normalize the comment into the hidden status/checklist block format before continuing.',
+      'patch its hidden summary marker to `version=2 phase=reviewing` and update its status block immediately',
     );
     expect(skillContent).toContain(
       '`<!-- roomote-review-status:start -->` and `<!-- roomote-review-status:end -->`',
@@ -351,7 +354,7 @@ describe('review-code GitHub workflow paths', () => {
       'resolve that thread as part of this sync review closeout',
     );
     expect(skillContent).toContain(
-      'Treat Roomote-managed logins as ineligible for approval, including the configured app slug in `[bot]` or `app/...` form, `roomote[bot]`, `app/roomote`, `roomote-dev[bot]`, `app/roomote-dev`, and any login starting with `roomote-` or `app/roomote-`.',
+      'Treat the configured GitHub App slug and any explicitly configured additional trusted app slugs in `[bot]` or `app/...` form as the only Roomote-managed logins ineligible for approval.',
     );
     expect(skillContent).not.toContain(
       'End the comment with the configured footer line (task link).',

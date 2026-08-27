@@ -1,24 +1,15 @@
 'use client';
 
-import { useState } from 'react';
-
 import { Section } from '@/components/settings';
 import {
-  Badge,
   BasicTooltip,
-  Button,
-  Database,
+  ChartColumn,
   EmptyState,
   TriangleAlert,
 } from '@/components/system';
-import {
-  formatDistanceToNowCompact,
-  formatNumber,
-  formatShortDate,
-} from '@/lib/formatters';
+import { formatNumber, formatShortDate } from '@/lib/formatters';
 
 import type { BrainCorpusSummary } from '@/trpc/commands/brain';
-import { BrainBrowseDialog } from './BrainBrowseDialog';
 import { buildNamespaceSegments } from './brain-presentation';
 
 function formatActivityDate(date: string): string {
@@ -27,10 +18,8 @@ function formatActivityDate(date: string): string {
 
 function ActivityChart({
   days,
-  sampleTruncated,
 }: {
   days: BrainCorpusSummary['activityByDay'];
-  sampleTruncated: boolean;
 }) {
   const max = Math.max(...days.map((day) => day.pages), 1);
   const total = days.reduce((sum, day) => sum + day.pages, 0);
@@ -38,47 +27,18 @@ function ActivityChart({
   if (total === 0) {
     return (
       <p className="text-xs text-muted-foreground">
-        No pages written in the last 30 days.
-      </p>
-    );
-  }
-
-  // A freshly enabled Brain has all of its activity in the last day or two,
-  // which renders as one tower over 29 empty days and reads as a broken
-  // chart rather than a young corpus. Say what is actually happening.
-  const firstActiveIndex = days.findIndex((day) => day.pages > 0);
-
-  if (firstActiveIndex >= days.length - 2) {
-    // On a truncated sample this shape means the recency window is shallow
-    // (a burst of writes), not that the Brain is new: a corpus holding
-    // months of history looks exactly like this after a replay. Only an
-    // untruncated sample proves the corpus itself is young.
-    if (sampleTruncated) {
-      return (
-        <p className="text-xs text-muted-foreground">
-          The {formatNumber(total)} most recent pages were all written in the
-          last two days, which is as far back as this sample reaches.
-        </p>
-      );
-    }
-
-    return (
-      <p className="text-xs text-muted-foreground">
-        Ingestion started{' '}
-        {firstActiveIndex === days.length - 1 ? 'today' : 'yesterday'}.{' '}
-        {formatNumber(total)} pages written so far; the chart appears as history
-        accumulates.
+        No memories written in the last 30 days.
       </p>
     );
   }
 
   return (
-    <div className="space-y-1">
+    <div role="img" aria-label="Memory activity chart" className="space-y-1">
       <div className="flex h-20 items-end gap-[3px] border-b border-foreground/10">
         {days.map((day) => (
           <BasicTooltip
             key={day.date}
-            content={`${formatActivityDate(day.date)}: ${formatNumber(day.pages)} pages`}
+            content={`${formatActivityDate(day.date)}: ${formatNumber(day.pages)} memories`}
           >
             <div
               className="min-h-px flex-1 rounded-t-[2px]"
@@ -108,18 +68,23 @@ const MIN_SEGMENT_PERCENT = 1.5;
 
 function CompositionBar({
   segments,
+  onSelectNamespace,
 }: {
   segments: ReturnType<typeof buildNamespaceSegments>;
+  onSelectNamespace: (namespaceId: string) => void;
 }) {
   return (
     <div className="flex h-3 w-full overflow-hidden rounded-full bg-background">
       {segments.map((segment) => (
         <BasicTooltip
           key={segment.id}
-          content={`${segment.label}: ${formatNumber(segment.pages)} pages (${Math.round(segment.percent)}%)`}
+          content={`${segment.label}: ${formatNumber(segment.pages)} memories (${Math.round(segment.percent)}%)`}
         >
-          <div
-            className="h-full first:rounded-l-full last:rounded-r-full"
+          <button
+            type="button"
+            aria-label={`Filter Explore memories by ${segment.label}`}
+            className="h-full cursor-pointer first:rounded-l-full last:rounded-r-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+            onClick={() => onSelectNamespace(segment.id)}
             style={{
               width: `${Math.max(segment.percent, MIN_SEGMENT_PERCENT)}%`,
               backgroundColor: segment.color,
@@ -131,29 +96,23 @@ function CompositionBar({
   );
 }
 
-export function BrainCorpusSection({ corpus }: { corpus: BrainCorpusSummary }) {
+export function BrainCorpusSection({
+  corpus,
+  onSelectNamespace,
+}: {
+  corpus: BrainCorpusSummary;
+  onSelectNamespace: (namespaceId: string) => void;
+}) {
   const segments = buildNamespaceSegments(corpus.namespaces);
-  const [browseOpen, setBrowseOpen] = useState(false);
 
   return (
     <Section
-      icon={Database}
-      title="What the Brain knows"
+      icon={ChartColumn}
+      title="Memory Stats"
       action={
-        corpus.reachable && corpus.sampledPages > 0 ? (
-          <span className="flex items-center gap-3">
-            <span className="text-sm font-normal text-muted-foreground">
-              {corpus.truncated
-                ? `${formatNumber(corpus.sampledPages)} most recent pages`
-                : `${formatNumber(corpus.sampledPages)} pages`}
-            </span>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setBrowseOpen(true)}
-            >
-              Browse memory
-            </Button>
+        corpus.reachable && corpus.listedPages > 0 ? (
+          <span className="text-sm font-normal text-muted-foreground">
+            {formatNumber(corpus.listedPages)} memories
           </span>
         ) : null
       }
@@ -162,20 +121,28 @@ export function BrainCorpusSection({ corpus }: { corpus: BrainCorpusSummary }) {
         <EmptyState
           icon={<TriangleAlert className="size-6 text-warning" />}
           title="Corpus unavailable"
-          description="The Brain did not answer, so its contents cannot be shown. Collectors keep their position while it is down."
+          description="Memory did not answer, so its contents cannot be shown. Collectors keep their position while it is down."
         />
       ) : segments.length === 0 ? (
         <EmptyState
           title="Nothing collected yet"
-          description="Pages appear here as tasks complete and connected integrations are read."
+          description="Memories appear here as tasks complete and connected integrations are read."
         />
       ) : (
         <div className="space-y-4">
-          <CompositionBar segments={segments} />
+          <CompositionBar
+            segments={segments}
+            onSelectNamespace={onSelectNamespace}
+          />
 
           <div className="grid grid-cols-2 gap-x-6 gap-y-2 sm:grid-cols-3">
             {segments.map((segment) => (
-              <div key={segment.id} className="flex items-center gap-2 text-sm">
+              <button
+                key={segment.id}
+                type="button"
+                className="flex cursor-pointer items-center gap-2 rounded-md px-1 text-left text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                onClick={() => onSelectNamespace(segment.id)}
+              >
                 <span
                   aria-hidden="true"
                   className="size-2 shrink-0 rounded-full"
@@ -185,22 +152,15 @@ export function BrainCorpusSection({ corpus }: { corpus: BrainCorpusSummary }) {
                 <span className="ml-auto tabular-nums text-muted-foreground">
                   {formatNumber(segment.pages)}
                 </span>
-              </div>
+              </button>
             ))}
           </div>
-
-          {corpus.truncated ? (
-            <p className="text-xs text-muted-foreground">
-              The Brain lists its most recent pages, so this describes what it
-              has learned lately rather than everything it holds.
-            </p>
-          ) : null}
 
           {corpus.activityByDay.length > 0 ? (
             <div className="space-y-2 border-t pt-4">
               <div className="flex items-baseline justify-between">
                 <p className="text-sm font-medium">
-                  Pages written, last 30 days
+                  Memory activity (past 30 days)
                 </p>
                 <span className="text-xs text-muted-foreground">
                   {formatNumber(
@@ -209,43 +169,14 @@ export function BrainCorpusSection({ corpus }: { corpus: BrainCorpusSummary }) {
                       0,
                     ),
                   )}{' '}
-                  pages
+                  memories
                 </span>
               </div>
-              <ActivityChart
-                days={corpus.activityByDay}
-                sampleTruncated={corpus.truncated}
-              />
-            </div>
-          ) : null}
-
-          {corpus.recentPages.length > 0 ? (
-            <div className="space-y-2 border-t pt-4">
-              <p className="text-sm font-medium">Recently learned</p>
-              <ul className="space-y-2">
-                {corpus.recentPages.map((page) => (
-                  <li
-                    key={page.slug}
-                    className="flex items-center gap-3 text-sm"
-                  >
-                    <span className="truncate">{page.title}</span>
-                    <Badge variant="outline">{page.namespaceLabel}</Badge>
-                    {page.updatedAt ? (
-                      <span className="ml-auto shrink-0 text-xs text-muted-foreground">
-                        {formatDistanceToNowCompact(page.updatedAt, {
-                          addSuffix: true,
-                        })}
-                      </span>
-                    ) : null}
-                  </li>
-                ))}
-              </ul>
+              <ActivityChart days={corpus.activityByDay} />
             </div>
           ) : null}
         </div>
       )}
-
-      <BrainBrowseDialog open={browseOpen} onOpenChange={setBrowseOpen} />
     </Section>
   );
 }

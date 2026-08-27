@@ -3,6 +3,28 @@ import { describe, expect, it } from 'vitest';
 import { mergeOpenAiCompatibleProviderConfig } from '../opencode-provider-config';
 
 describe('mergeOpenAiCompatibleProviderConfig', () => {
+  it('materializes managed Roomote models as an isolated OpenAI-compatible provider', () => {
+    expect(
+      mergeOpenAiCompatibleProviderConfig(
+        {},
+        { R_TRIAL_OPENROUTER_API_KEY: 'managed-key' },
+        ['roomote/openai/gpt-5.6-luna'],
+      ),
+    ).toMatchObject({
+      roomote: {
+        npm: '@ai-sdk/openai-compatible',
+        name: 'Roomote inference',
+        options: {
+          baseURL: 'https://openrouter.ai/api/v1',
+          apiKey: '{env:R_TRIAL_OPENROUTER_API_KEY}',
+        },
+        models: {
+          'openai/gpt-5.6-luna': { name: 'openai/gpt-5.6-luna' },
+        },
+      },
+    });
+  });
+
   it('materializes LiteLLM provider metadata for selected models', () => {
     expect(
       mergeOpenAiCompatibleProviderConfig(

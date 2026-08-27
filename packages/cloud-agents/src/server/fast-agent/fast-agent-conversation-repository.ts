@@ -1,35 +1,35 @@
 import type { ModelMessage } from 'ai';
-import { randomUUID } from 'node:crypto';
 import {
   and,
-  asc,
+  type CreateFastAgentMessage,
   db,
   eq,
-  fastAgentConversationAliases,
   fastAgentConversations,
-  slackQuickAnswers,
+  fastAgentMessages,
   sql,
   type DatabaseOrTransaction,
-  type DatabaseTransaction,
 } from '@roomote/db/server';
 import { fastAgentConversationSchema } from '@roomote/types';
 
-import {
-  getFastAgentConversationStorageWorkspaceId,
-  type FastAgentConversation,
-} from './fast-agent-conversation';
+import type { FastAgentConversation } from './fast-agent-conversation';
 
 export type FastAgentConversationRecord = {
   id: string;
   userId: string;
   conversation: FastAgentConversation;
   /**
-   * Visible N-1 compatibility history. OpenCode, not this field, owns the
-   * live warm transcript; this is only a cold-start fallback while the old
-   * application release must remain rollback-compatible.
+   * Durable visible history for cold starts and provider retries. OpenCode,
+   * not this field, owns the live warm transcript.
    */
   compatibilityMessages: ModelMessage[];
+  /** Last successfully completed native session; validated before cold resume. */
+  openCodeSessionId: string | null;
 };
+
+export type FastAgentMessageWrite = Omit<
+  CreateFastAgentMessage,
+  'conversationId'
+>;
 
 export interface FastAgentConversationRepository {
   getOrCreate(input: {
@@ -46,6 +46,14 @@ export interface FastAgentConversationRepository {
     conversationId: string;
     messages: ModelMessage[];
   }): Promise<void>;
+  upsertMessage(input: {
+    conversationId: string;
+    message: FastAgentMessageWrite;
+  }): Promise<void>;
+  setOpenCodeSession(input: {
+    conversationId: string;
+    openCodeSessionId: string;
+  }): Promise<void>;
 }
 
 function buildIdentityKey(conversation: FastAgentConversation): string {
@@ -58,10 +66,6 @@ function buildIdentityWhere(conversation: FastAgentConversation) {
     eq(fastAgentConversations.workspaceId, conversation.workspaceId),
     eq(fastAgentConversations.conversationId, conversation.conversationId),
   );
-}
-
-function buildLegacyChannelKey(conversation: FastAgentConversation): string {
-  return `${getFastAgentConversationStorageWorkspaceId(conversation)}:${conversation.replyTarget.channelId}`;
 }
 
 function identityMatches(
@@ -86,72 +90,45 @@ function toConversation(
     | 'conversationId'
     | 'currentReplyChannelId'
     | 'currentReplyThreadId'
+    | 'currentReplyServiceUrl'
   >,
 ): FastAgentConversation | null {
-  const parsed = fastAgentConversationSchema.safeParse({
-    surface: record.surface,
-    workspaceId: record.workspaceId,
-    conversationId: record.conversationId,
-    replyTarget: {
-      channelId: record.currentReplyChannelId,
-      ...(record.currentReplyThreadId
-        ? { threadId: record.currentReplyThreadId }
-        : {}),
-    },
-  });
+  const parsed = fastAgentConversationSchema.safeParse(
+    record.surface === 'automation' || record.surface === 'web'
+      ? {
+          surface: record.surface,
+          workspaceId: record.workspaceId,
+          conversationId: record.conversationId,
+        }
+      : {
+          surface: record.surface,
+          workspaceId: record.workspaceId,
+          conversationId: record.conversationId,
+          replyTarget: {
+            channelId: record.currentReplyChannelId,
+            ...(record.currentReplyThreadId
+              ? { threadId: record.currentReplyThreadId }
+              : {}),
+            ...(record.currentReplyServiceUrl
+              ? { serviceUrl: record.currentReplyServiceUrl }
+              : {}),
+          },
+        },
+  );
 
   return parsed.success ? parsed.data : null;
-}
-
-async function findLegacyByCoordinates(
-  database: DatabaseOrTransaction,
-  conversation: FastAgentConversation,
-) {
-  return database.query.slackQuickAnswers.findFirst({
-    where: and(
-      eq(slackQuickAnswers.slackChannel, buildLegacyChannelKey(conversation)),
-      eq(slackQuickAnswers.slackThreadTs, conversation.conversationId),
-    ),
-  });
 }
 
 async function resolveCanonicalId(
   database: DatabaseOrTransaction,
   requestedId: string,
 ): Promise<string> {
-  const alias = await database.query.fastAgentConversationAliases.findFirst({
-    where: eq(fastAgentConversationAliases.legacyConversationId, requestedId),
-    columns: { conversationId: true },
+  const aliased = await database.query.fastAgentConversations.findFirst({
+    where: sql`${requestedId} = ANY(${fastAgentConversations.legacyConversationIds})`,
+    columns: { id: true },
   });
 
-  return alias?.conversationId ?? requestedId;
-}
-
-async function loadCompatibilityMessages(
-  database: DatabaseOrTransaction,
-  conversationId: string,
-  conversation: FastAgentConversation,
-): Promise<ModelMessage[]> {
-  const currentLegacy = await findLegacyByCoordinates(database, conversation);
-  if (currentLegacy) {
-    return currentLegacy.messages as ModelMessage[];
-  }
-
-  const [fallbackLegacy] = await database
-    .select({ messages: slackQuickAnswers.messages })
-    .from(fastAgentConversationAliases)
-    .innerJoin(
-      slackQuickAnswers,
-      eq(
-        slackQuickAnswers.id,
-        fastAgentConversationAliases.legacyConversationId,
-      ),
-    )
-    .where(eq(fastAgentConversationAliases.conversationId, conversationId))
-    .orderBy(asc(fastAgentConversationAliases.createdAt))
-    .limit(1);
-
-  return (fallbackLegacy?.messages ?? []) as ModelMessage[];
+  return aliased?.id ?? requestedId;
 }
 
 async function loadConversationRecord(
@@ -170,79 +147,9 @@ async function loadConversationRecord(
     id: record.id,
     userId: record.userId,
     conversation,
-    compatibilityMessages: await loadCompatibilityMessages(
-      database,
-      record.id,
-      conversation,
-    ),
+    compatibilityMessages: record.compatibilityMessages as ModelMessage[],
+    openCodeSessionId: record.openCodeSessionId,
   };
-}
-
-async function ensureLegacyAlias(
-  tx: DatabaseTransaction,
-  record: typeof fastAgentConversations.$inferSelect,
-  conversation: FastAgentConversation,
-) {
-  const canonicalLegacy = await tx.query.slackQuickAnswers.findFirst({
-    where: eq(slackQuickAnswers.id, record.id),
-  });
-  if (canonicalLegacy) {
-    await tx
-      .insert(fastAgentConversationAliases)
-      .values({
-        legacyConversationId: canonicalLegacy.id,
-        conversationId: record.id,
-      })
-      .onConflictDoNothing();
-  }
-
-  let legacy = await findLegacyByCoordinates(tx, conversation);
-
-  if (!legacy) {
-    const compatibilityMessages = await loadCompatibilityMessages(
-      tx,
-      record.id,
-      conversation,
-    );
-    const [created] = await tx
-      .insert(slackQuickAnswers)
-      .values({
-        id: canonicalLegacy ? undefined : record.id,
-        userId: record.userId,
-        slackChannel: buildLegacyChannelKey(conversation),
-        slackThreadTs: conversation.conversationId,
-        messages: compatibilityMessages as Record<string, unknown>[],
-      })
-      .onConflictDoNothing({
-        target: [
-          slackQuickAnswers.slackChannel,
-          slackQuickAnswers.slackThreadTs,
-        ],
-      })
-      .returning();
-    legacy =
-      created ?? (await findLegacyByCoordinates(tx, conversation)) ?? undefined;
-  }
-
-  if (!legacy) {
-    throw new Error('Failed to create or load legacy Fast conversation.');
-  }
-
-  await tx
-    .insert(fastAgentConversationAliases)
-    .values({
-      legacyConversationId: legacy.id,
-      conversationId: record.id,
-    })
-    .onConflictDoNothing();
-  const alias = await tx.query.fastAgentConversationAliases.findFirst({
-    where: eq(fastAgentConversationAliases.legacyConversationId, legacy.id),
-  });
-  if (!alias || alias.conversationId !== record.id) {
-    throw new Error('Legacy Fast conversation alias points elsewhere.');
-  }
-
-  return legacy;
 }
 
 export const fastAgentConversationRepository: FastAgentConversationRepository =
@@ -256,20 +163,27 @@ export const fastAgentConversationRepository: FastAgentConversationRepository =
         let record = await tx.query.fastAgentConversations.findFirst({
           where: buildIdentityWhere(conversation),
         });
-        const existingLegacy = await findLegacyByCoordinates(tx, conversation);
 
         if (!record) {
-          const conversationId = existingLegacy?.id ?? randomUUID();
           await tx
             .insert(fastAgentConversations)
             .values({
-              id: conversationId,
-              userId: existingLegacy?.userId ?? userId,
+              userId,
               surface: conversation.surface,
               workspaceId: conversation.workspaceId,
               conversationId: conversation.conversationId,
-              currentReplyChannelId: conversation.replyTarget.channelId,
-              currentReplyThreadId: conversation.replyTarget.threadId,
+              currentReplyChannelId:
+                'replyTarget' in conversation
+                  ? conversation.replyTarget.channelId
+                  : null,
+              currentReplyThreadId:
+                'replyTarget' in conversation
+                  ? conversation.replyTarget.threadId
+                  : null,
+              currentReplyServiceUrl:
+                'replyTarget' in conversation
+                  ? (conversation.replyTarget.serviceUrl ?? null)
+                  : null,
               replyTargetVerified: true,
             })
             .onConflictDoNothing();
@@ -284,12 +198,21 @@ export const fastAgentConversationRepository: FastAgentConversationRepository =
         await tx.execute(
           sql`select pg_advisory_xact_lock(hashtextextended(${`fast-agent-conversation:${record.id}`}, 0))`,
         );
-        await ensureLegacyAlias(tx, record, conversation);
         const [updated] = await tx
           .update(fastAgentConversations)
           .set({
-            currentReplyChannelId: conversation.replyTarget.channelId,
-            currentReplyThreadId: conversation.replyTarget.threadId ?? null,
+            currentReplyChannelId:
+              'replyTarget' in conversation
+                ? conversation.replyTarget.channelId
+                : null,
+            currentReplyThreadId:
+              'replyTarget' in conversation
+                ? (conversation.replyTarget.threadId ?? null)
+                : null,
+            currentReplyServiceUrl:
+              'replyTarget' in conversation
+                ? (conversation.replyTarget.serviceUrl ?? null)
+                : null,
             replyTargetVerified: true,
             updatedAt: sql`now()`,
           })
@@ -301,33 +224,10 @@ export const fastAgentConversationRepository: FastAgentConversationRepository =
     },
 
     async findById({ id, fallbackConversation }) {
-      let conversationId = await resolveCanonicalId(db, id);
+      const conversationId = await resolveCanonicalId(db, id);
       let record = await db.query.fastAgentConversations.findFirst({
         where: eq(fastAgentConversations.id, conversationId),
       });
-
-      if (!record && fallbackConversation) {
-        const legacy = await db.query.slackQuickAnswers.findFirst({
-          where: eq(slackQuickAnswers.id, id),
-        });
-        if (legacy) {
-          const migrated = await fastAgentConversationRepository.getOrCreate({
-            userId: legacy.userId,
-            conversation: fallbackConversation,
-          });
-          await db
-            .insert(fastAgentConversationAliases)
-            .values({
-              legacyConversationId: legacy.id,
-              conversationId: migrated.id,
-            })
-            .onConflictDoNothing();
-          conversationId = migrated.id;
-          record = await db.query.fastAgentConversations.findFirst({
-            where: eq(fastAgentConversations.id, conversationId),
-          });
-        }
-      }
 
       if (
         !record ||
@@ -340,9 +240,18 @@ export const fastAgentConversationRepository: FastAgentConversationRepository =
         const [updated] = await db
           .update(fastAgentConversations)
           .set({
-            currentReplyChannelId: fallbackConversation.replyTarget.channelId,
+            currentReplyChannelId:
+              'replyTarget' in fallbackConversation
+                ? fallbackConversation.replyTarget.channelId
+                : null,
             currentReplyThreadId:
-              fallbackConversation.replyTarget.threadId ?? null,
+              'replyTarget' in fallbackConversation
+                ? (fallbackConversation.replyTarget.threadId ?? null)
+                : null,
+            currentReplyServiceUrl:
+              'replyTarget' in fallbackConversation
+                ? (fallbackConversation.replyTarget.serviceUrl ?? null)
+                : null,
             replyTargetVerified: true,
             updatedAt: sql`now()`,
           })
@@ -356,15 +265,12 @@ export const fastAgentConversationRepository: FastAgentConversationRepository =
 
     async getLookupIds(id) {
       const conversationId = await resolveCanonicalId(db, id);
-      const aliases = await db.query.fastAgentConversationAliases.findMany({
-        where: eq(fastAgentConversationAliases.conversationId, conversationId),
-        columns: { legacyConversationId: true },
+      const record = await db.query.fastAgentConversations.findFirst({
+        where: eq(fastAgentConversations.id, conversationId),
+        columns: { legacyConversationIds: true },
       });
       return [
-        ...new Set([
-          conversationId,
-          ...aliases.map(({ legacyConversationId }) => legacyConversationId),
-        ]),
+        ...new Set([conversationId, ...(record?.legacyConversationIds ?? [])]),
       ];
     },
 
@@ -376,16 +282,7 @@ export const fastAgentConversationRepository: FastAgentConversationRepository =
       if (neutral) {
         return true;
       }
-
-      const legacy = await findLegacyByCoordinates(db, conversation);
-      if (!legacy) {
-        return false;
-      }
-      await fastAgentConversationRepository.getOrCreate({
-        userId: legacy.userId,
-        conversation,
-      });
-      return true;
+      return false;
     },
 
     async appendVisibleMessages({ conversationId: requestedId, messages }) {
@@ -398,29 +295,83 @@ export const fastAgentConversationRepository: FastAgentConversationRepository =
         await tx.execute(
           sql`select pg_advisory_xact_lock(hashtextextended(${`fast-agent-conversation:${conversationId}`}, 0))`,
         );
-        const aliases = await tx.query.fastAgentConversationAliases.findMany({
-          where: eq(
-            fastAgentConversationAliases.conversationId,
-            conversationId,
-          ),
-          columns: { legacyConversationId: true },
-        });
-        const legacyIds = aliases
-          .map(({ legacyConversationId }) => legacyConversationId)
-          .sort();
-        if (legacyIds.length === 0) {
-          throw new Error('Fast conversation compatibility row is missing.');
+        const [updated] = await tx
+          .update(fastAgentConversations)
+          .set({
+            compatibilityMessages: sql`${fastAgentConversations.compatibilityMessages} || ${JSON.stringify(messages)}::jsonb`,
+            updatedAt: sql`now()`,
+          })
+          .where(eq(fastAgentConversations.id, conversationId))
+          .returning({ id: fastAgentConversations.id });
+        if (!updated) {
+          throw new Error('Fast conversation was not found.');
+        }
+      });
+    },
+
+    async upsertMessage({ conversationId: requestedId, message }) {
+      await db.transaction(async (tx) => {
+        const conversationId = await resolveCanonicalId(tx, requestedId);
+        await tx.execute(
+          sql`select pg_advisory_xact_lock(hashtextextended(${`fast-agent-conversation:${conversationId}`}, 0))`,
+        );
+        const [conversation] = await tx
+          .select({ id: fastAgentConversations.id })
+          .from(fastAgentConversations)
+          .where(eq(fastAgentConversations.id, conversationId))
+          .limit(1);
+        if (!conversation) {
+          throw new Error('Fast conversation was not found.');
         }
 
-        for (const legacyId of legacyIds) {
-          await tx
-            .update(slackQuickAnswers)
-            .set({
-              messages: sql`${slackQuickAnswers.messages} || ${JSON.stringify(messages)}::jsonb`,
+        await tx
+          .insert(fastAgentMessages)
+          .values({ conversationId, ...message })
+          .onConflictDoUpdate({
+            target: [
+              fastAgentMessages.conversationId,
+              fastAgentMessages.eventId,
+            ],
+            set: {
+              turnId: message.turnId,
+              turnSeq: message.turnSeq,
+              ts: message.ts,
+              eventType: message.eventType,
+              role: message.role ?? null,
+              contentBlocks: message.contentBlocks ?? [],
+              metadata: message.metadata ?? null,
+              payload: message.payload ?? {},
+              source: message.source ?? null,
+              nativeSessionId: message.nativeSessionId ?? null,
+              nativeMessageId: message.nativeMessageId ?? null,
               updatedAt: sql`now()`,
-            })
-            .where(eq(slackQuickAnswers.id, legacyId));
-        }
+            },
+          });
+        await tx
+          .update(fastAgentConversations)
+          .set({ updatedAt: sql`now()` })
+          .where(eq(fastAgentConversations.id, conversationId));
+      });
+    },
+
+    async setOpenCodeSession({
+      conversationId: requestedId,
+      openCodeSessionId,
+    }) {
+      await db.transaction(async (tx) => {
+        const conversationId = await resolveCanonicalId(tx, requestedId);
+        await tx.execute(
+          sql`select pg_advisory_xact_lock(hashtextextended(${`fast-agent-conversation:${conversationId}`}, 0))`,
+        );
+        const [updated] = await tx
+          .update(fastAgentConversations)
+          .set({
+            openCodeSessionId,
+            updatedAt: sql`now()`,
+          })
+          .where(eq(fastAgentConversations.id, conversationId))
+          .returning({ id: fastAgentConversations.id });
+        if (!updated) throw new Error('Fast conversation was not found.');
       });
     },
   };

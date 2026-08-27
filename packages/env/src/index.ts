@@ -124,8 +124,6 @@ const serverSchema = {
   // Roomote Cloud-only analytics and support integrations. These values are
   // intentionally not used by self-hosted deployments.
   R_CLOUD_ENABLED: optInBoolean(),
-  // Exposes the per-user setting that defaults communications messages to fast mode.
-  R_COMMUNICATIONS_FAST_MODE_SETTING_ENABLED: optInBoolean(),
   // Operator policy for the curated Settings > Integrations catalog. Enabled
   // by default; operators opt out explicitly. Existing connections remain
   // stored but cannot be configured or used while disabled.
@@ -159,12 +157,14 @@ const serverSchema = {
   RELEASE_PRODUCT_VERSION: z.string().min(1).optional(),
   TRPC_URL: z.string().min(1),
   R_MODEL: z.string().min(1).optional(),
+  R_ORCHESTRATION_MODEL: z.string().min(1).optional(),
   R_SMALL_MODEL: z.string().min(1).optional(),
   R_VISION_MODEL: z.string().min(1).optional(),
   R_CODE_REVIEW_MODEL: z.string().min(1).optional(),
   R_EXPLORE_MODEL: z.string().min(1).optional(),
   R_PLANNING_MODEL: z.string().min(1).optional(),
   R_MODEL_REASONING_EFFORT: z.string().min(1).optional(),
+  R_ORCHESTRATION_MODEL_REASONING_EFFORT: z.string().min(1).optional(),
   R_SMALL_MODEL_REASONING_EFFORT: z.string().min(1).optional(),
   R_VISION_MODEL_REASONING_EFFORT: z.string().min(1).optional(),
   R_CODE_REVIEW_MODEL_REASONING_EFFORT: z.string().min(1).optional(),
@@ -183,6 +183,7 @@ const serverSchema = {
   SANDBOX_OIDC_PUBLIC_KEY_SECONDARY: z.string().min(1).optional(),
   R_GITHUB_APP_ID: emptyStringDefault(),
   R_GITHUB_APP_SLUG: z.string().min(1).default('roomote'),
+  R_GITHUB_ADDITIONAL_APP_SLUGS: z.string().optional(),
   R_GITHUB_APP_PRIVATE_KEY: emptyStringDefault(),
   R_GITHUB_CLIENT_ID: emptyStringDefault(),
   R_GITHUB_CLIENT_SECRET: emptyStringDefault(),
@@ -363,6 +364,29 @@ const serverSchema = {
   // an OpenAI key for something else never silently re-points an existing
   // Brain at a different embedding path.
   R_BRAIN_OPENAI_API_KEY: z.string().min(1).optional(),
+  // Free-trial OpenRouter credential a hosting provisioner injects for new
+  // cloud deployments: a Roomote-minted key with a hard spend limit. The env
+  // variable is only hosting's delivery mechanism — setup imports its value
+  // into encrypted Settings storage, and every runtime read (inference
+  // gateway, credit balance, provider status) resolves the stored key, never
+  // this variable. Activating the trial is an explicit operator choice in
+  // the setup wizard; deleting the Roomote provider in Settings removes the
+  // stored key and disables the trial even while hosting keeps injecting
+  // this variable. Rotating the injected value re-imports it only while the
+  // stored key still exists. Served through the inference gateway like any
+  // other provider key, so it never reaches a sandbox.
+  R_TRIAL_OPENROUTER_API_KEY: z.string().min(1).optional(),
+  // Optional self-run inference upstreams for the Brain gateway. When set,
+  // the gateway routes that path's requests there instead of the configured
+  // model provider — embeddings and rerank can move to a local or fleet
+  // inference service while chat synthesis keeps flowing to the provider.
+  // Model names pass through unrewritten: the upstream owns its own names.
+  R_BRAIN_EMBEDDINGS_UPSTREAM_URL: z.string().url().optional(),
+  R_BRAIN_RERANK_UPSTREAM_URL: z.string().url().optional(),
+  // One key for both paths: they are the same service in every planned
+  // deployment shape. Optional because a compose-network upstream may have
+  // no auth at all.
+  R_BRAIN_INFERENCE_UPSTREAM_API_KEY: z.string().min(1).optional(),
   // Shared secret between this deployment and its Brain container, so the
   // Brain can reach /api/brain/inference without holding a provider key of
   // its own. It is the Brain's whole credential: the real provider key stays
@@ -514,6 +538,10 @@ const OPTIONAL_NON_EMPTY_KEYS = new Set([
   'R_GBRAIN_ADMIN_TOKEN_FILE',
   'R_BRAIN_OPENROUTER_API_KEY',
   'R_BRAIN_OPENAI_API_KEY',
+  'R_TRIAL_OPENROUTER_API_KEY',
+  'R_BRAIN_EMBEDDINGS_UPSTREAM_URL',
+  'R_BRAIN_RERANK_UPSTREAM_URL',
+  'R_BRAIN_INFERENCE_UPSTREAM_API_KEY',
   'R_BRAIN_GATEWAY_TOKEN',
   'R_BRAIN_GATEWAY_TOKEN_FILE',
   'R_BRAIN_MODEL',
@@ -629,12 +657,14 @@ const OPTIONAL_NON_EMPTY_KEYS = new Set([
   'GITHUB_AUTOMATED_SKIP_REPOS',
   'GITHUB_AUTOMATED_SKIP_OWNERS',
   'R_MODEL',
+  'R_ORCHESTRATION_MODEL',
   'R_SMALL_MODEL',
   'R_VISION_MODEL',
   'R_CODE_REVIEW_MODEL',
   'R_EXPLORE_MODEL',
   'R_PLANNING_MODEL',
   'R_MODEL_REASONING_EFFORT',
+  'R_ORCHESTRATION_MODEL_REASONING_EFFORT',
   'R_SMALL_MODEL_REASONING_EFFORT',
   'R_VISION_MODEL_REASONING_EFFORT',
   'R_CODE_REVIEW_MODEL_REASONING_EFFORT',
@@ -682,9 +712,9 @@ export function isRoomoteCloudEnabled(
 /**
  * Whether this deployment *might* have a Brain: some Brain wiring exists in
  * the environment. This is deliberately a superset question, not activation.
- * The Render and Coolify templates auto-generate the gateway token as
- * plumbing between the gbrain service and the inference gateway, so a set
- * token means "a Brain could be wired here", never "an operator turned the
+ * Deployment templates supply the gateway token directly or by file as
+ * plumbing between the gbrain service and the inference gateway, so either
+ * signal means "a Brain could be wired here", never "an operator turned the
  * Brain on". Activation — everything user-visible, from delivering the
  * gbrain MCP server to agents to running ingestion — additionally requires
  * an explicit R_BRAIN_* provider key and lives in isBrainProviderConfigured
@@ -704,11 +734,16 @@ export function isRoomoteCloudEnabled(
  */
 export function isBrainConfigured(env: {
   R_BRAIN_GATEWAY_TOKEN?: string;
+  R_BRAIN_GATEWAY_TOKEN_FILE?: string;
   R_BRAIN_OPENROUTER_API_KEY?: string;
   R_BRAIN_OPENAI_API_KEY?: string;
+  R_BRAIN_EMBEDDINGS_UPSTREAM_URL?: string;
+  R_BRAIN_RERANK_UPSTREAM_URL?: string;
+  R_BRAIN_INFERENCE_UPSTREAM_API_KEY?: string;
 }): boolean {
   return Boolean(
     env.R_BRAIN_GATEWAY_TOKEN?.trim() ||
+    env.R_BRAIN_GATEWAY_TOKEN_FILE?.trim() ||
     env.R_BRAIN_OPENROUTER_API_KEY?.trim() ||
     env.R_BRAIN_OPENAI_API_KEY?.trim(),
   );

@@ -15,6 +15,7 @@ const {
   mockResolveAdoToken,
   mockResolveAdoBaseUrl,
   mockBuildAdoOrganizationApiBaseUrl,
+  mockGetGitHubRateLimitRetryAfterMs,
 } = vi.hoisted(() => ({
   mockCreateGitHubToken: vi.fn(),
   mockGetOctokit: vi.fn(),
@@ -27,6 +28,7 @@ const {
   mockResolveAdoToken: vi.fn(),
   mockResolveAdoBaseUrl: vi.fn(),
   mockBuildAdoOrganizationApiBaseUrl: vi.fn(),
+  mockGetGitHubRateLimitRetryAfterMs: vi.fn(),
 }));
 
 vi.mock('@roomote/auth', () => ({
@@ -35,6 +37,13 @@ vi.mock('@roomote/auth', () => ({
 
 vi.mock('@roomote/github', () => ({
   getOctokit: (...args: unknown[]) => mockGetOctokit(...args),
+  getGitHubRateLimitRetryAfterMs: (...args: unknown[]) =>
+    mockGetGitHubRateLimitRetryAfterMs(...args),
+  isGitHubUnauthorizedError: (error: unknown) =>
+    typeof error === 'object' &&
+    error !== null &&
+    'status' in error &&
+    Number(error.status) === 401,
 }));
 
 vi.mock('@roomote/gitlab', () => ({
@@ -139,6 +148,143 @@ describe('readSourceControlPullRequestForTaskRun', () => {
     mockBuildAdoOrganizationApiBaseUrl.mockReturnValue(
       'https://dev.azure.com/acme',
     );
+    mockGetGitHubRateLimitRetryAfterMs.mockReturnValue(null);
+  });
+
+  it('uses ETags for review-drain GitHub comment polling reads', async () => {
+    mockRepositoriesFindFirst.mockResolvedValue({
+      installationId: 'installation-etag',
+      externalRepoId: null,
+      fullName: 'acme/etag-backend',
+      htmlUrl: 'https://github.com/acme/etag-backend',
+    });
+    mockCreateGitHubToken.mockResolvedValue('github-token');
+    const notModified = () =>
+      Object.assign(new Error('Not modified'), {
+        status: 304,
+        response: { headers: {} },
+      });
+    const listReviewComments = vi
+      .fn()
+      .mockResolvedValueOnce({
+        data: [],
+        headers: { etag: '"reviews-v1"' },
+        status: 200,
+      })
+      .mockRejectedValueOnce(notModified());
+    const listReviews = vi
+      .fn()
+      .mockResolvedValueOnce({
+        data: [],
+        headers: { etag: '"pull-reviews-v1"' },
+        status: 200,
+      })
+      .mockRejectedValueOnce(notModified());
+    const listComments = vi
+      .fn()
+      .mockResolvedValueOnce({
+        data: [
+          {
+            id: 1,
+            user: { login: 'alice' },
+            body: 'First page',
+            created_at: '2026-08-22T00:00:00Z',
+            html_url: null,
+          },
+        ],
+        headers: {
+          etag: '"issues-page-1"',
+          link: '<https://api.github.com/page=2>; rel="next"',
+        },
+        status: 200,
+      })
+      .mockResolvedValueOnce({
+        data: [
+          {
+            id: 2,
+            user: { login: 'bob' },
+            body: 'Second page',
+            created_at: '2026-08-22T00:01:00Z',
+            html_url: null,
+          },
+        ],
+        headers: { etag: '"issues-page-2"' },
+        status: 200,
+      })
+      .mockRejectedValueOnce(notModified())
+      .mockRejectedValueOnce(notModified());
+    const graphql = vi.fn().mockResolvedValue({
+      repository: {
+        pullRequest: {
+          reviewThreads: {
+            nodes: [],
+            pageInfo: { hasNextPage: false, endCursor: null },
+          },
+        },
+      },
+    });
+    mockGetOctokit.mockReturnValue({
+      graphql,
+      paginate: vi.fn(),
+      rest: {
+        pulls: { listReviewComments, listReviews },
+        issues: { listComments },
+      },
+    });
+    const input = {
+      action: 'list_pull_request_comments' as const,
+      repositoryFullName: 'acme/etag-backend',
+      prNumber: 55,
+      sourceControlProvider: 'github' as const,
+    };
+    const taskRun = makeTaskRun({
+      repo: 'acme/etag-backend',
+      sourceControlProvider: 'github',
+    });
+
+    const cachedResult = await readSourceControlPullRequestForTaskRun({
+      taskRun,
+      input,
+      useGitHubConditionalRequests: true,
+    });
+    await readSourceControlPullRequestForTaskRun({
+      taskRun,
+      input,
+      useGitHubConditionalRequests: true,
+    });
+
+    expect(listReviewComments).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        request: { headers: { 'if-none-match': '"reviews-v1"' } },
+      }),
+    );
+    expect(listReviews).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        request: { headers: { 'if-none-match': '"pull-reviews-v1"' } },
+      }),
+    );
+    expect(listComments).toHaveBeenNthCalledWith(
+      3,
+      expect.objectContaining({
+        page: 1,
+        request: { headers: { 'if-none-match': '"issues-page-1"' } },
+      }),
+    );
+    expect(listComments).toHaveBeenNthCalledWith(
+      4,
+      expect.objectContaining({
+        page: 2,
+        request: { headers: { 'if-none-match': '"issues-page-2"' } },
+      }),
+    );
+    expect(
+      'issueComments' in cachedResult && cachedResult.issueComments,
+    ).toEqual([
+      expect.objectContaining({ id: '1' }),
+      expect.objectContaining({ id: '2' }),
+    ]);
   });
 
   it('reads GitHub pull request details through the installation token', async () => {
@@ -379,7 +525,7 @@ describe('readSourceControlPullRequestForTaskRun', () => {
                   nodes: [
                     {
                       databaseId: 1,
-                      author: { login: 'roomote-dev[bot]' },
+                      author: { login: 'review-bot[bot]' },
                       body: 'Missing error handling here.',
                       createdAt: '2026-08-01T00:00:00Z',
                       url: null,
@@ -398,7 +544,7 @@ describe('readSourceControlPullRequestForTaskRun', () => {
                   nodes: [
                     {
                       databaseId: 2,
-                      author: { login: 'roomote-dev[bot]' },
+                      author: { login: 'review-bot[bot]' },
                       body: 'This comparison uses the wrong field.',
                       createdAt: '2026-08-01T00:00:00Z',
                       url: null,
@@ -478,6 +624,81 @@ describe('readSourceControlPullRequestForTaskRun', () => {
         url: 'https://github.com/acme/backend/pull/55#pullrequestreview-900',
       },
     ]);
+  });
+
+  it('propagates GitHub rate limits from review-thread pagination', async () => {
+    mockRepositoriesFindFirst.mockResolvedValue({
+      installationId: 'installation-1',
+      externalRepoId: null,
+      fullName: 'acme/backend',
+      htmlUrl: 'https://github.com/acme/backend',
+    });
+    mockCreateGitHubToken.mockResolvedValue('github-token');
+    const rateLimitError = Object.assign(new Error('API rate limit exceeded'), {
+      status: 403,
+    });
+    mockGetGitHubRateLimitRetryAfterMs.mockImplementation((error: unknown) =>
+      error === rateLimitError ? 900_000 : null,
+    );
+    mockGetOctokit.mockReturnValue({
+      graphql: vi.fn().mockRejectedValue(rateLimitError),
+      paginate: vi.fn().mockResolvedValue([]),
+      rest: {
+        pulls: { listReviewComments: vi.fn() },
+        issues: { listComments: vi.fn() },
+      },
+    });
+
+    await expect(
+      readSourceControlPullRequestForTaskRun({
+        taskRun: makeTaskRun({
+          repo: 'acme/backend',
+          sourceControlProvider: 'github',
+        }),
+        input: {
+          action: 'list_pull_request_comments',
+          repositoryFullName: 'acme/backend',
+          prNumber: 55,
+          sourceControlProvider: 'github',
+        },
+      }),
+    ).rejects.toBe(rateLimitError);
+  });
+
+  it('propagates GitHub 401s so a task-scoped caller can refresh once', async () => {
+    mockRepositoriesFindFirst.mockResolvedValue({
+      installationId: 'installation-1',
+      externalRepoId: null,
+      fullName: 'acme/backend',
+      htmlUrl: 'https://github.com/acme/backend',
+    });
+    const unauthorized = Object.assign(new Error('Bad credentials'), {
+      status: 401,
+    });
+    mockGetOctokit.mockReturnValue({
+      graphql: vi.fn().mockRejectedValue(unauthorized),
+      paginate: vi.fn().mockResolvedValue([]),
+      rest: {
+        pulls: { listReviewComments: vi.fn() },
+        issues: { listComments: vi.fn() },
+      },
+    });
+
+    await expect(
+      readSourceControlPullRequestForTaskRun({
+        taskRun: makeTaskRun({
+          repo: 'acme/backend',
+          sourceControlProvider: 'github',
+        }),
+        input: {
+          action: 'list_pull_request_comments',
+          repositoryFullName: 'acme/backend',
+          prNumber: 55,
+          sourceControlProvider: 'github',
+        },
+        githubToken: 'github-token',
+      }),
+    ).rejects.toBe(unauthorized);
   });
 
   it('paginates every GitHub review thread and every comment in a thread', async () => {
@@ -1107,6 +1328,7 @@ describe('readSourceControlPullRequestForTaskRun', () => {
         externalId: 5501,
         url: 'https://github.com/acme/backend/pull/55',
         title: '[Fix] Read surface',
+        body: null,
         state: 'open',
         draft: false,
         sourceBranch: 'codex/read-surface',
@@ -1193,6 +1415,7 @@ describe('readSourceControlPullRequestForTaskRun', () => {
         externalId: null,
         url: 'https://gitlab.com/acme/backend/-/merge_requests/42',
         title: 'Conflicting MR',
+        body: null,
         state: 'open',
         draft: false,
         sourceBranch: 'feature/work',
@@ -1327,6 +1550,7 @@ describe('readSourceControlPullRequestForTaskRun', () => {
         externalId: null,
         url: 'https://git.example.com/acme/backend/pulls/8',
         title: 'WIP: Gitea PR',
+        body: null,
         state: 'open',
         draft: true,
         sourceBranch: 'feature/work',
@@ -1434,7 +1658,8 @@ describe('readSourceControlPullRequestForTaskRun', () => {
     ).toEqual([3, 2]);
     expect(result.pullRequests[0]).toMatchObject({
       author: { id: '{u-1}', login: 'bb-user' },
-      labels: [],
+      // Bitbucket's PR list carries no labels: unknown, not empty.
+      labels: null,
       mergeable: null,
       mergeStateDescription: null,
       headSha: 'head-sha',
@@ -1516,7 +1741,8 @@ describe('readSourceControlPullRequestForTaskRun', () => {
       author: { id: 'user-guid', login: 'author@acme.com' },
       updatedAt: null,
       createdAt: '2026-06-30T00:00:00Z',
-      labels: [],
+      // ADO omitted labels from this list payload: unknown, not empty.
+      labels: null,
       headSha: 'head-sha',
       baseSha: 'base-sha',
       mergeable: false,
