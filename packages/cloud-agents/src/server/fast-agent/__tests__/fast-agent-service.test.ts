@@ -1639,6 +1639,89 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     );
   });
 
+  it('passes structured suggestions through an automation closeout', async () => {
+    const adapter = callbacks();
+    const suggestions = [
+      {
+        title: 'Investigate checkout latency',
+        brief: 'Trace the slow payment-provider requests.',
+      },
+    ];
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        await expect(
+          invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'closeout',
+            message: 'Checkout latency increased this week.',
+            suggestions,
+          }),
+        ).resolves.toMatchObject({ success: true, closed: true });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({
+      ...baseParams,
+      adapter,
+      turnSource: 'platform_event',
+      platformEventKind: 'automation',
+      platformEventVisibility: 'required',
+    });
+
+    expect(adapter.postReply).toHaveBeenCalledWith({
+      purpose: 'closeout',
+      message: 'Checkout latency increased this week.',
+      suggestions,
+    });
+  });
+
+  it('rejects structured suggestions outside automation reports', async () => {
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        await expect(
+          invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'closeout',
+            message: 'Try this next.',
+            suggestions: [{ title: 'Follow up', brief: 'Inspect the issue.' }],
+          }),
+        ).resolves.toEqual({
+          success: false,
+          error:
+            'Launchable suggestions are available only on Slack or Discord automation closeouts.',
+        });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+  });
+
+  it('rejects structured suggestions on an automation clarification', async () => {
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        await expect(
+          invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'clarification',
+            message: 'Which follow-up should run?',
+            suggestions: [{ title: 'Follow up', brief: 'Inspect the issue.' }],
+          }),
+        ).resolves.toMatchObject({ success: false });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({
+      ...baseParams,
+      adapter: callbacks(),
+      turnSource: 'platform_event',
+      platformEventKind: 'automation',
+      platformEventVisibility: 'required',
+    });
+  });
+
   it('launches two tasks, keeps the turn open, messages a child, and posts a closeout', async () => {
     let taskNumber = 0;
     const order: string[] = [];

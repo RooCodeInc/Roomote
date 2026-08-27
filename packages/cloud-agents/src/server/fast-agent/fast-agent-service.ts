@@ -104,6 +104,15 @@ const chatReplyArgsSchema = z.object({
   message: z.string().trim().min(1),
   purpose: z.enum(['ack', 'progress', 'closeout', 'clarification']),
   imageArtifactIds: z.array(z.string()).optional(),
+  suggestions: z
+    .array(
+      z.object({
+        title: z.string().trim().min(1).max(140),
+        brief: z.string().trim().min(1).max(2000),
+      }),
+    )
+    .max(10)
+    .optional(),
 });
 const chatReactionArgsSchema = z.object({
   name: z.string().trim().min(1),
@@ -1325,6 +1334,20 @@ export async function answerFastAgentQuestion({
           case FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReply: {
             const args = chatReplyArgsSchema.parse(call.args);
             if (
+              args.suggestions?.length &&
+              (args.purpose !== 'closeout' ||
+                !platformEvent ||
+                platformEventKind !== 'automation' ||
+                (conversation.surface !== 'slack' &&
+                  conversation.surface !== 'discord'))
+            ) {
+              return {
+                success: false,
+                error:
+                  'Launchable suggestions are available only on Slack or Discord automation closeouts.',
+              };
+            }
+            if (
               platformEventHandling === 'present_only' &&
               args.purpose !== 'closeout'
             ) {
@@ -1363,6 +1386,9 @@ export async function answerFastAgentQuestion({
               message: args.message,
               ...(args.imageArtifactIds?.length
                 ? { imageArtifactIds: args.imageArtifactIds }
+                : {}),
+              ...(args.suggestions?.length
+                ? { suggestions: args.suggestions }
                 : {}),
             });
             completedChatReplySignatures.add(signature);

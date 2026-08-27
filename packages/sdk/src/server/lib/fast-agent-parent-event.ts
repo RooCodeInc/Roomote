@@ -54,6 +54,11 @@ import {
 
 import { resolveUserMcpServerConfigs } from '../routers/mcp-connections';
 import { buildCustomAutomationSlackMessage } from './manager-slack';
+import {
+  appendFastAutomationSuggestionInstruction,
+  postFastAutomationSuggestionsToDiscord,
+  postFastAutomationSuggestionsToSlack,
+} from './fast-automation-suggestions';
 
 import {
   buildSignedArtifactRawUrl,
@@ -534,7 +539,12 @@ async function createSlackFastAgentParentTurn(params: {
         channelId: conversation.replyTarget.channelId,
         threadTs: conversation.replyTarget.threadId,
       }),
-      postReply: async ({ message, imageArtifactIds = [], kickoff }) => {
+      postReply: async ({
+        message,
+        imageArtifactIds = [],
+        suggestions = [],
+        kickoff,
+      }) => {
         const images = await buildSelectedImages({
           artifactIds: imageArtifactIds,
           event: params.event,
@@ -557,8 +567,13 @@ async function createSlackFastAgentParentTurn(params: {
             : null;
 
         if (params.event.type === 'automation_triggered' && !kickoff) {
+          const reportMessage = appendFastAutomationSuggestionInstruction(
+            message,
+            'slack',
+            suggestions.length > 0,
+          );
           const contentBlocks = [
-            { type: 'markdown' as const, text: message },
+            { type: 'markdown' as const, text: reportMessage },
             ...images.map((image) => ({
               type: 'image' as const,
               image_url: image.url,
@@ -571,12 +586,23 @@ async function createSlackFastAgentParentTurn(params: {
             message: buildCustomAutomationSlackMessage({
               automationId: params.event.automationId,
               automationName: params.event.automationName,
-              text: message,
+              text: reportMessage,
               contentBlocks,
             }),
           });
           if (!updated) {
             throw new Error('Slack did not update the Fast automation root.');
+          }
+          if (suggestions.length > 0) {
+            await postFastAutomationSuggestionsToSlack({
+              slack,
+              channelId: conversation.replyTarget.channelId,
+              threadTs:
+                params.event.rootMessageId ?? conversation.replyTarget.threadId,
+              eventId: params.event.eventId,
+              createdByUserId: session.userId,
+              suggestions,
+            });
           }
           params.onReplyPosted();
           return;
@@ -833,7 +859,12 @@ async function createDiscordFastAgentParentTurn(params: {
         userId: session.userId,
         conversation,
       }),
-      postReply: async ({ message, imageArtifactIds = [], kickoff }) => {
+      postReply: async ({
+        message,
+        imageArtifactIds = [],
+        suggestions = [],
+        kickoff,
+      }) => {
         const images = await buildSelectedImages({
           artifactIds: imageArtifactIds,
           event: params.event,
@@ -855,23 +886,53 @@ async function createDiscordFastAgentParentTurn(params: {
               }
             : null;
 
-        if (
-          params.event.type === 'automation_triggered' &&
-          params.event.rootMessageId &&
-          !kickoff
-        ) {
-          await provider.editMessage({
-            channelId:
-              conversation.replyTarget.threadId ??
-              conversation.replyTarget.channelId,
-            messageId: params.event.rootMessageId,
-            text: message,
-          });
+        if (params.event.type === 'automation_triggered' && !kickoff) {
+          const reportMessage = appendFastAutomationSuggestionInstruction(
+            message,
+            'discord',
+            suggestions.length > 0,
+          );
+          let reportMessageId = params.event.rootMessageId;
+          if (params.event.rootMessageId) {
+            await provider.editMessage({
+              channelId:
+                conversation.replyTarget.threadId ??
+                conversation.replyTarget.channelId,
+              messageId: params.event.rootMessageId,
+              text: reportMessage,
+            });
+          } else {
+            const posted = await provider.postMessage({
+              ...conversation.replyTarget,
+              idempotencyKey: buildEventClientMessageSeed(params.event),
+              text: reportMessage,
+              textFormat: 'markdown',
+              images,
+            });
+            reportMessageId = posted.messageId;
+          }
+          if (!reportMessageId) {
+            throw new Error(
+              'Discord did not return a Fast automation report message id.',
+            );
+          }
           await recordFastAgentConversationMessageBestEffort({
             sessionId: session.id,
             conversation,
-            messageId: params.event.rootMessageId,
+            messageId: reportMessageId,
           });
+          if (suggestions.length > 0) {
+            await postFastAutomationSuggestionsToDiscord({
+              provider,
+              channelId: conversation.replyTarget.channelId,
+              ...(conversation.replyTarget.threadId
+                ? { threadId: conversation.replyTarget.threadId }
+                : {}),
+              eventId: params.event.eventId,
+              createdByUserId: session.userId,
+              suggestions,
+            });
+          }
           params.onReplyPosted();
           return;
         }

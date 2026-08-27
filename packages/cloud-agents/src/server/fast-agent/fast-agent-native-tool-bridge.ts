@@ -248,11 +248,15 @@ import { z } from "zod"
 import { invoke } from "../roomote-fast-tool-bridge.js"
 
 export default {
-  description: "Post a user-visible reply in the current Slack or Discord conversation.",
+  description: "Post a user-visible reply. Fast automation reports may attach launchable suggested tasks on Slack or Discord.",
   args: {
     message: z.string().min(1).describe("Markdown reply text"),
     purpose: z.enum(["ack", "progress", "closeout", "clarification"]),
     imageArtifactIds: z.array(z.string()).optional(),
+    suggestions: z.array(z.object({
+      title: z.string().min(1).max(140),
+      brief: z.string().min(1).max(2000),
+    })).max(10).optional().describe("Launchable follow-ups for a Slack or Discord automation report only"),
   },
   execute: (args, context) => invoke("send_chat_reply", args, context),
 }
