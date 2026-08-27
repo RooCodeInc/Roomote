@@ -364,6 +364,29 @@ const serverSchema = {
   // an OpenAI key for something else never silently re-points an existing
   // Brain at a different embedding path.
   R_BRAIN_OPENAI_API_KEY: z.string().min(1).optional(),
+  // Free-trial OpenRouter credential a hosting provisioner injects for new
+  // cloud deployments: a Roomote-minted key with a hard spend limit. The env
+  // variable is only hosting's delivery mechanism — setup imports its value
+  // into encrypted Settings storage, and every runtime read (inference
+  // gateway, credit balance, provider status) resolves the stored key, never
+  // this variable. Activating the trial is an explicit operator choice in
+  // the setup wizard; deleting the Roomote provider in Settings removes the
+  // stored key and disables the trial even while hosting keeps injecting
+  // this variable. Rotating the injected value re-imports it only while the
+  // stored key still exists. Served through the inference gateway like any
+  // other provider key, so it never reaches a sandbox.
+  R_TRIAL_OPENROUTER_API_KEY: z.string().min(1).optional(),
+  // Optional self-run inference upstreams for the Brain gateway. When set,
+  // the gateway routes that path's requests there instead of the configured
+  // model provider — embeddings and rerank can move to a local or fleet
+  // inference service while chat synthesis keeps flowing to the provider.
+  // Model names pass through unrewritten: the upstream owns its own names.
+  R_BRAIN_EMBEDDINGS_UPSTREAM_URL: z.string().url().optional(),
+  R_BRAIN_RERANK_UPSTREAM_URL: z.string().url().optional(),
+  // One key for both paths: they are the same service in every planned
+  // deployment shape. Optional because a compose-network upstream may have
+  // no auth at all.
+  R_BRAIN_INFERENCE_UPSTREAM_API_KEY: z.string().min(1).optional(),
   // Shared secret between this deployment and its Brain container, so the
   // Brain can reach /api/brain/inference without holding a provider key of
   // its own. It is the Brain's whole credential: the real provider key stays
@@ -515,6 +538,10 @@ const OPTIONAL_NON_EMPTY_KEYS = new Set([
   'R_GBRAIN_ADMIN_TOKEN_FILE',
   'R_BRAIN_OPENROUTER_API_KEY',
   'R_BRAIN_OPENAI_API_KEY',
+  'R_TRIAL_OPENROUTER_API_KEY',
+  'R_BRAIN_EMBEDDINGS_UPSTREAM_URL',
+  'R_BRAIN_RERANK_UPSTREAM_URL',
+  'R_BRAIN_INFERENCE_UPSTREAM_API_KEY',
   'R_BRAIN_GATEWAY_TOKEN',
   'R_BRAIN_GATEWAY_TOKEN_FILE',
   'R_BRAIN_MODEL',
@@ -710,6 +737,9 @@ export function isBrainConfigured(env: {
   R_BRAIN_GATEWAY_TOKEN_FILE?: string;
   R_BRAIN_OPENROUTER_API_KEY?: string;
   R_BRAIN_OPENAI_API_KEY?: string;
+  R_BRAIN_EMBEDDINGS_UPSTREAM_URL?: string;
+  R_BRAIN_RERANK_UPSTREAM_URL?: string;
+  R_BRAIN_INFERENCE_UPSTREAM_API_KEY?: string;
 }): boolean {
   return Boolean(
     env.R_BRAIN_GATEWAY_TOKEN?.trim() ||

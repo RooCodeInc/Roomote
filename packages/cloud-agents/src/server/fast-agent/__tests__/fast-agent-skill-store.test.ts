@@ -8,13 +8,89 @@ import {
 } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 import {
   FAST_AGENT_PACKAGED_SKILL_NAMES,
   FastAgentSkillStore,
+  getDefaultSkillRootCandidates,
+  resolveDefaultSkillRoot,
 } from '../fast-agent-skill-store';
 
 describe('FastAgentSkillStore', () => {
+  it('finds checkout skills from a bundled local-development service directory', async () => {
+    const workspaceRoot = resolve(import.meta.dirname, '../../../../../..');
+    const bundledEntry = pathToFileURL(
+      join(workspaceRoot, 'apps/api/dist/index.js'),
+    ).href;
+    const serviceDirectory = join(workspaceRoot, 'apps/api');
+
+    await expect(
+      resolveDefaultSkillRoot(bundledEntry, serviceDirectory, {
+        NODE_ENV: 'development',
+      }),
+    ).resolves.toBe(
+      join(
+        workspaceRoot,
+        'packages/cloud-agents/src/server/workflows/skills/standard',
+      ),
+    );
+  });
+
+  it('finds checkout skills for Roomote-on-Roomote even with production-like app settings', async () => {
+    const workspaceRoot = resolve(import.meta.dirname, '../../../../../..');
+    const bundledEntry = pathToFileURL(
+      join(workspaceRoot, 'apps/api/dist/index.js'),
+    ).href;
+    const serviceDirectory = join(workspaceRoot, 'apps/api');
+
+    await expect(
+      resolveDefaultSkillRoot(bundledEntry, serviceDirectory, {
+        NODE_ENV: 'production',
+        ROOMOTE_TASK_ID: 'outer-coding-task',
+      }),
+    ).resolves.toBe(
+      join(
+        workspaceRoot,
+        'packages/cloud-agents/src/server/workflows/skills/standard',
+      ),
+    );
+  });
+
+  it('keeps the ordinary production candidate order unchanged', () => {
+    const candidates = getDefaultSkillRootCandidates(
+      pathToFileURL('/roomote/apps/api/dist/index.js').href,
+      '/roomote/apps/api',
+      {},
+    );
+
+    expect(candidates).toEqual([
+      '/roomote/apps/api/workflows/skills/standard',
+      '/roomote/skills/standard',
+    ]);
+  });
+
+  it('does not add checkout paths to any production process run from source', () => {
+    const workspaceRoot = resolve(import.meta.dirname, '../../../../../..');
+    for (const env of [
+      { NODE_ENV: 'production' },
+      { R_APP_ENV: 'production' },
+      { APP_ENV: 'production' },
+      { ROOMOTE_APP_ENV: 'production' },
+    ]) {
+      const candidates = getDefaultSkillRootCandidates(
+        pathToFileURL(join(workspaceRoot, 'apps/api/dist/index.js')).href,
+        join(workspaceRoot, 'apps/api'),
+        env,
+      );
+
+      expect(candidates).toEqual([
+        join(workspaceRoot, 'apps/api/workflows/skills/standard'),
+        join(workspaceRoot, 'skills/standard'),
+      ]);
+    }
+  });
+
   it('keeps the allowlist synchronized with shipped skill directories', async () => {
     const skillRoot = resolve(
       import.meta.dirname,

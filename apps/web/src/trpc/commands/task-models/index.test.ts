@@ -1,4 +1,5 @@
 import {
+  DEFAULT_MODEL_PROVIDER_CREDENTIAL_ENV_VAR_NAMES,
   normalizeTaskModelId,
   TASK_MODEL_ROLE_DESCRIPTORS,
   TASK_MODEL_ROLES,
@@ -73,6 +74,39 @@ vi.mock('@roomote/db/server', () => ({
     mockIsGitHubCopilotSubscriptionConnected,
   isXaiSubscriptionConnected: mockIsXaiSubscriptionConnected,
   isNull: vi.fn((column) => ({ isNull: column })),
+  // Mirrors the real runtime-first-then-persisted precedence through the
+  // persisted-values mock this file already controls, including the
+  // settings-only exception: the Roomote trial key never resolves from the
+  // runtime env (see SETTINGS_ONLY_MODEL_PROVIDER_ENV_VAR_NAMES).
+  resolveModelProviderEnvValue: vi.fn(
+    async (envVarNames: string | readonly string[]) => {
+      const names =
+        typeof envVarNames === 'string' ? [envVarNames] : envVarNames;
+
+      for (const name of names) {
+        if (name === 'R_TRIAL_OPENROUTER_API_KEY') {
+          continue;
+        }
+        const value = process.env[name]?.trim();
+        if (value) {
+          return value;
+        }
+      }
+
+      const persisted = (await mockGetPersistedEnvironmentVariableValues(
+        names,
+      )) as Partial<Record<string, string>> | undefined;
+
+      for (const name of names) {
+        const value = persisted?.[name]?.trim();
+        if (value) {
+          return value;
+        }
+      }
+
+      return undefined;
+    },
+  ),
 }));
 
 vi.mock('../environment-variables', () => ({
@@ -96,6 +130,7 @@ import {
 } from './index';
 
 const PROVIDER_ENV_VAR_NAMES = [
+  'R_TRIAL_OPENROUTER_API_KEY',
   'OPENROUTER_API_KEY',
   'OPENAI_API_KEY',
   'AZURE_API_KEY',
@@ -441,6 +476,44 @@ describe('lookupTaskModelCommand', () => {
       expect.objectContaining({
         headers: expect.objectContaining({
           Authorization: 'Bearer saved-openrouter-key',
+        }),
+        signal: expect.any(AbortSignal),
+      }),
+    );
+  });
+
+  it('uses the managed Roomote key to look up Roomote model metadata through OpenRouter', async () => {
+    // The trial key is settings-only: production resolves it from the
+    // persisted store, never the runtime env, so the test stores it there.
+    mockGetPersistedEnvironmentVariableValues.mockResolvedValue({
+      R_TRIAL_OPENROUTER_API_KEY: 'managed-roomote-key',
+    });
+    fetchMock.mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          data: {
+            id: 'openai/gpt-5.6-luna',
+            name: 'GPT 5.6 Luna',
+          },
+        }),
+        { headers: { 'content-type': 'application/json' } },
+      ),
+    );
+
+    await expect(
+      lookupTaskModelCommand(buildMockAuth(), {
+        modelId: 'roomote/openai/gpt-5.6-luna',
+      }),
+    ).resolves.toMatchObject({
+      modelId: 'roomote/openai/gpt-5.6-luna',
+      displayName: 'GPT 5.6 Luna',
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://openrouter.ai/api/v1/model/openai/gpt-5.6-luna',
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          Authorization: 'Bearer managed-roomote-key',
         }),
         signal: expect.any(AbortSignal),
       }),
@@ -1730,6 +1803,14 @@ describe('task model provider commands', () => {
     expect(txInsert).not.toHaveBeenCalled();
   });
 
+  it('rejects saving the hosting-managed Roomote provider', async () => {
+    await expect(
+      saveTaskModelProviderCommand(buildMockAuth(), { provider: 'roomote' }),
+    ).rejects.toThrow('Roomote inference is managed by your hosting provider.');
+
+    expect(mockUpsertDeploymentEnvironmentVariables).not.toHaveBeenCalled();
+  });
+
   it('saves the API key and seeds the recommended models for a newly connected provider', async () => {
     mockGetPersistedEnvironmentVariableNames
       .mockResolvedValueOnce([])
@@ -2017,6 +2098,59 @@ describe('task model provider commands', () => {
     expect(mockTxDelete).toHaveBeenCalled();
   });
 
+  it('deletes Roomote inference to disable the trial when another provider remains', async () => {
+    // Hermetic: host provider keys must not change the last-provider count.
+    for (const name of DEFAULT_MODEL_PROVIDER_CREDENTIAL_ENV_VAR_NAMES) {
+      vi.stubEnv(name, '');
+    }
+    vi.stubEnv('R_TRIAL_OPENROUTER_API_KEY', '');
+    try {
+      mockIsChatGptSubscriptionConnected.mockResolvedValue(false);
+      mockIsGitHubCopilotSubscriptionConnected.mockResolvedValue(false);
+      mockIsXaiSubscriptionConnected.mockResolvedValue(false);
+      mockGetPersistedEnvironmentVariableNames.mockResolvedValue([
+        'R_TRIAL_OPENROUTER_API_KEY',
+        'ANTHROPIC_API_KEY',
+      ]);
+
+      await deleteTaskModelProviderCommand(buildMockAuth(), {
+        provider: 'roomote',
+      });
+
+      expect(txDeleteWhere).toHaveBeenCalledWith({
+        and: [
+          { isNull: 'env.user_id' },
+          { column: 'env.name', values: ['R_TRIAL_OPENROUTER_API_KEY'] },
+        ],
+      });
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it('keeps Roomote inference while it is the only connected provider', async () => {
+    for (const name of DEFAULT_MODEL_PROVIDER_CREDENTIAL_ENV_VAR_NAMES) {
+      vi.stubEnv(name, '');
+    }
+    vi.stubEnv('R_TRIAL_OPENROUTER_API_KEY', '');
+    try {
+      mockIsChatGptSubscriptionConnected.mockResolvedValue(false);
+      mockIsGitHubCopilotSubscriptionConnected.mockResolvedValue(false);
+      mockIsXaiSubscriptionConnected.mockResolvedValue(false);
+      mockGetPersistedEnvironmentVariableNames.mockResolvedValue([
+        'R_TRIAL_OPENROUTER_API_KEY',
+      ]);
+
+      await expect(
+        deleteTaskModelProviderCommand(buildMockAuth(), {
+          provider: 'roomote',
+        }),
+      ).rejects.toThrow('Keep at least one inference provider connected.');
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
   it('removes only the xAI API key when a Grok subscription remains connected', async () => {
     // Dual-path xAI shares catalog id `xai`. Deleting the key must not strip
     // xai/* models while SuperGrok is still connected.
@@ -2090,6 +2224,16 @@ describe('task model provider commands', () => {
 
     expect(mockTxDelete).not.toHaveBeenCalled();
     expect(txOnConflictDoUpdate).not.toHaveBeenCalled();
+  });
+
+  it('rejects deleting Roomote inference when no key was ever imported', async () => {
+    // Deletion is the supported way to disable the trial, but it operates on
+    // the imported Settings row; without one there is nothing to remove.
+    await expect(
+      deleteTaskModelProviderCommand(buildMockAuth(), { provider: 'roomote' }),
+    ).rejects.toThrow('does not have saved credentials');
+
+    expect(mockTxDelete).not.toHaveBeenCalled();
   });
 
   it('deletes provider credentials and cascades removing provider models without deleting usage data', async () => {

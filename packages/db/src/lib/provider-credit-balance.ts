@@ -1,5 +1,6 @@
 import {
   OPENROUTER_KEY_ENDPOINT,
+  ROOMOTE_INFERENCE_API_KEY_ENV_VAR_NAME,
   type ProviderCreditBalance,
 } from '@roomote/types';
 
@@ -164,9 +165,10 @@ export async function fetchOpenRouterKeyDetails(
 
 async function fetchOpenRouterKeyPayload(
   options: BalanceFetchOptions,
+  envVarName = 'OPENROUTER_API_KEY',
 ): Promise<{ apiKey: string; payload: unknown } | null> {
   const fetchImpl = options.fetchImpl ?? fetch;
-  const apiKey = await resolveModelProviderEnvValue(['OPENROUTER_API_KEY'], {
+  const apiKey = await resolveModelProviderEnvValue(envVarName, {
     ...(options.runtimeEnv && { runtimeEnv: options.runtimeEnv }),
     ...(options.executor && { executor: options.executor }),
   });
@@ -182,10 +184,17 @@ async function fetchOpenRouterKeyPayload(
   return { apiKey, payload };
 }
 
-export async function fetchOpenRouterCreditBalance(
-  options: BalanceFetchOptions = {},
+/**
+ * Both balances come from OpenRouter's key endpoint — the Roomote trial is a
+ * Roomote-minted OpenRouter key — so they share one fetcher and differ only
+ * in which env var holds the credential and which provider row they report.
+ */
+async function fetchOpenRouterBackedCreditBalance(
+  providerId: ProviderCreditBalance['providerId'],
+  envVarName: string,
+  options: BalanceFetchOptions,
 ): Promise<ProviderCreditBalance | null> {
-  const response = await fetchOpenRouterKeyPayload(options);
+  const response = await fetchOpenRouterKeyPayload(options, envVarName);
   if (!response) {
     return null;
   }
@@ -196,10 +205,30 @@ export async function fetchOpenRouterCreditBalance(
   }
 
   return {
-    providerId: 'openrouter',
+    providerId,
     ...parsed,
     fetchedAt: new Date().toISOString(),
   };
+}
+
+export async function fetchOpenRouterCreditBalance(
+  options: BalanceFetchOptions = {},
+): Promise<ProviderCreditBalance | null> {
+  return fetchOpenRouterBackedCreditBalance(
+    'openrouter',
+    'OPENROUTER_API_KEY',
+    options,
+  );
+}
+
+export async function fetchRoomoteCreditBalance(
+  options: BalanceFetchOptions = {},
+): Promise<ProviderCreditBalance | null> {
+  return fetchOpenRouterBackedCreditBalance(
+    'roomote',
+    ROOMOTE_INFERENCE_API_KEY_ENV_VAR_NAME,
+    options,
+  );
 }
 
 /**
@@ -211,6 +240,7 @@ export async function getProviderCreditBalances(
 ): Promise<ProviderCreditBalance[]> {
   const results = await Promise.allSettled([
     fetchOpenRouterCreditBalance(options),
+    fetchRoomoteCreditBalance(options),
   ]);
 
   return results.flatMap((result) =>

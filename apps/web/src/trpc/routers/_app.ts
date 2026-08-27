@@ -287,6 +287,7 @@ import {
   createSetupBootstrapSlackAppFromManifestCommand,
   saveSetupBootstrapAuthConfigCommand,
   saveSetupBootstrapAuthProviderChoiceCommand,
+  chooseSetupTrialInferenceCommand,
   saveSetupNewAuthConfigCommand,
   saveSetupNewAuthProviderChoiceCommand,
   saveSetupNewComputeConfigCommand,
@@ -2592,6 +2593,10 @@ export const appRouter = createRouter({
           provider: input.provider,
         }),
       ),
+
+    chooseTrialInference: protectedProcedure.mutation(({ ctx: { auth } }) =>
+      chooseSetupTrialInferenceCommand(auth),
+    ),
 
     saveComputeProviderChoice: protectedProcedure
       .input(

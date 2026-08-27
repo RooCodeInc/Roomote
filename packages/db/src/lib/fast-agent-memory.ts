@@ -1,11 +1,15 @@
-import { and, eq, inArray, sql } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import { FAST_AGENT_MEMORY_MAX_CHARS } from '@roomote/types';
 
 import { type DatabaseOrTransaction } from '../db';
 import { fastAgentMemoryEvents } from '../schema';
 import { runInTransactionIfAvailable } from './transaction-utils';
+import { createMemoryOutboxLifecycle } from './memory-outbox-lifecycle';
 
 export type FastAgentMemoryEventRow = typeof fastAgentMemoryEvents.$inferSelect;
+
+const fastAgentMemoryOutboxLifecycle =
+  createMemoryOutboxLifecycle<FastAgentMemoryEventRow>(fastAgentMemoryEvents);
 
 const PROCESSING_RECLAIM_INTERVAL = '15 minutes';
 
@@ -79,15 +83,9 @@ export async function claimPendingFastAgentMemoryEvents(
   database: DatabaseOrTransaction,
   limit: number,
 ): Promise<FastAgentMemoryEventRow[]> {
-  const rows = await database
-    .update(fastAgentMemoryEvents)
-    .set({
-      status: 'processing',
-      attempts: sql`${fastAgentMemoryEvents.attempts} + 1`,
-      updatedAt: sql`now()`,
-    })
-    .where(
-      sql`${fastAgentMemoryEvents.id} IN (
+  return fastAgentMemoryOutboxLifecycle.claim(
+    database,
+    sql`
         SELECT event.id
         FROM ${fastAgentMemoryEvents} AS event
         WHERE event.status = 'pending'
@@ -98,11 +96,8 @@ export async function claimPendingFastAgentMemoryEvents(
         ORDER BY event.updated_at DESC, event.id DESC
         LIMIT ${limit}
         FOR UPDATE OF event SKIP LOCKED
-      )`,
-    )
-    .returning();
-
-  return rows;
+    `,
+  );
 }
 
 /**
@@ -113,18 +108,7 @@ export async function releaseFastAgentMemoryEvents(
   database: DatabaseOrTransaction,
   ids: string[],
 ): Promise<void> {
-  if (ids.length === 0) {
-    return;
-  }
-
-  await database
-    .update(fastAgentMemoryEvents)
-    .set({
-      status: 'pending',
-      attempts: sql`greatest(${fastAgentMemoryEvents.attempts} - 1, 0)`,
-      updatedAt: sql`now()`,
-    })
-    .where(inArray(fastAgentMemoryEvents.id, ids));
+  await fastAgentMemoryOutboxLifecycle.release(database, ids);
 }
 
 /**
@@ -138,22 +122,7 @@ export async function markFastAgentMemoryEvent(
   status: 'pending' | 'skipped',
   lastError?: string,
 ): Promise<void> {
-  await database
-    .update(fastAgentMemoryEvents)
-    .set({
-      status,
-      lastError: lastError ?? null,
-      processedAt: status === 'skipped' ? sql`now()` : null,
-      updatedAt: sql`now()`,
-    })
-    .where(
-      status === 'pending'
-        ? eq(fastAgentMemoryEvents.id, id)
-        : and(
-            eq(fastAgentMemoryEvents.id, id),
-            eq(fastAgentMemoryEvents.status, 'processing'),
-          ),
-    );
+  await fastAgentMemoryOutboxLifecycle.mark(database, id, status, lastError);
 }
 
 /**
@@ -177,31 +146,11 @@ export async function settleFastAgentMemoryEvent(
   outcome: 'done' | 'failed',
   lastError?: string,
 ): Promise<'settled' | 'superseded'> {
-  const settled = await database
-    .update(fastAgentMemoryEvents)
-    .set({
-      status: outcome,
-      lastError: lastError ?? null,
-      processedAt: outcome === 'done' ? sql`now()` : null,
-      updatedAt: sql`now()`,
-    })
-    .where(
-      and(
-        eq(fastAgentMemoryEvents.id, id),
-        eq(fastAgentMemoryEvents.status, 'processing'),
-        eq(fastAgentMemoryEvents.revision, claimedRevision),
-      ),
-    )
-    .returning({ id: fastAgentMemoryEvents.id });
-
-  if (settled.length > 0) {
-    return 'settled';
-  }
-
-  await database
-    .update(fastAgentMemoryEvents)
-    .set({ status: 'pending', processedAt: null, updatedAt: sql`now()` })
-    .where(eq(fastAgentMemoryEvents.id, id));
-
-  return 'superseded';
+  return fastAgentMemoryOutboxLifecycle.settle(
+    database,
+    id,
+    claimedRevision,
+    outcome,
+    lastError,
+  );
 }

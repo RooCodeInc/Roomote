@@ -14,6 +14,7 @@ import {
   generateOpenCodeConfig,
   seedRuntimeHomeMiseGlobalConfig,
 } from './agent-home';
+import { OPENCODE_IDENTITY_PLUGIN_SCRIPT } from '@roomote/cloud-agents';
 
 describe('createIntegrationMcpInstructions', () => {
   it.each(['gbrain', 'supermemory'])(
@@ -112,6 +113,23 @@ describe('generateOpenCodeConfig provider support', () => {
     tempDirs.push(homeDir);
     return homeDir;
   }
+
+  it('installs the Roomote identity plugin for standard task sessions', () => {
+    const result = generateOpenCodeConfig({
+      homeDir: createHomeDir(),
+      runtimeEnv: {
+        R_MODEL: 'openrouter/openai/gpt-5.6-terra',
+        OPENROUTER_API_KEY: 'openrouter-key',
+      },
+    });
+
+    expect(
+      readFileSync(
+        join(result.openCodeConfigDir, 'plugins', 'roomote-identity.js'),
+        'utf8',
+      ),
+    ).toBe(OPENCODE_IDENTITY_PLUGIN_SCRIPT);
+  });
 
   it('applies the per-task reasoning effort to a launch-time model override', () => {
     const result = generateOpenCodeConfig({
@@ -395,6 +413,25 @@ describe('generateOpenCodeConfig provider support', () => {
       baseURL: 'https://api.example.com/api/inference/openrouter/v1',
       apiKey: '{env:ROOMOTE_CLOUD_TOKEN}',
       headers: expect.objectContaining({}) as Record<string, string>,
+    });
+  });
+
+  it('rebases managed Roomote inference onto its separate gateway route', () => {
+    const result = generateOpenCodeConfig({
+      homeDir: createHomeDir(),
+      runtimeEnv: {
+        R_MODEL: 'roomote/openai/gpt-5.6-luna',
+        R_INFERENCE_GATEWAY_URL: 'https://api.example.com/api/inference',
+        R_INFERENCE_GATEWAY_KEYS: 'R_TRIAL_OPENROUTER_API_KEY',
+      },
+    });
+    const config = JSON.parse(result.configContent) as {
+      provider: { roomote: { options: Record<string, unknown> } };
+    };
+
+    expect(config.provider.roomote.options).toMatchObject({
+      baseURL: 'https://api.example.com/api/inference/roomote/v1',
+      apiKey: '{env:ROOMOTE_CLOUD_TOKEN}',
     });
   });
 
@@ -919,6 +956,59 @@ describe('generateOpenCodeConfig provider support', () => {
       coding: { name: 'coding' },
     });
     expect(result.configContent).toContain('litellm');
+  });
+
+  it('writes catalog pricing into custom-provider model config', () => {
+    const runtimeEnv = {
+      R_MODEL: 'roomote/openai/gpt-5.6-luna',
+      R_TRIAL_OPENROUTER_API_KEY: 'sk-or-trial',
+      R_TASK_MODEL_COSTS: JSON.stringify({
+        'roomote/openai/gpt-5.6-luna': { input: 2, output: 10 },
+      }),
+      R_INFERENCE_GATEWAY_URL: 'https://api.example.com/api/inference/',
+    };
+    const result = generateOpenCodeConfig({
+      homeDir: createHomeDir(),
+      runtimeEnv,
+    });
+    const config = JSON.parse(result.configContent) as {
+      provider: Record<
+        string,
+        { models: Record<string, { cost?: Record<string, number> }> }
+      >;
+    };
+
+    expect(
+      config.provider.roomote?.models['openai/gpt-5.6-luna']?.cost,
+    ).toEqual({ input: 2, output: 10 });
+    expect(runtimeEnv).not.toHaveProperty('R_TASK_MODEL_COSTS');
+  });
+
+  it('creates a model entry for a price-only switchable model', () => {
+    // Known by pricing alone (no context-window metadata): the entry must
+    // still be generated so the cost block lands.
+    const runtimeEnv = {
+      R_MODEL: 'roomote/openai/gpt-5.6-luna',
+      R_TRIAL_OPENROUTER_API_KEY: 'sk-or-trial',
+      R_TASK_MODEL_COSTS: JSON.stringify({
+        'roomote/openai/gpt-5.6-terra': { input: 4, output: 16 },
+      }),
+      R_INFERENCE_GATEWAY_URL: 'https://api.example.com/api/inference/',
+    };
+    const result = generateOpenCodeConfig({
+      homeDir: createHomeDir(),
+      runtimeEnv,
+    });
+    const config = JSON.parse(result.configContent) as {
+      provider: Record<
+        string,
+        { models: Record<string, { cost?: Record<string, number> }> }
+      >;
+    };
+
+    expect(
+      config.provider.roomote?.models['openai/gpt-5.6-terra']?.cost,
+    ).toEqual({ input: 4, output: 16 });
   });
 
   it('configures trusted LiteLLM context limits for proactive compaction', () => {

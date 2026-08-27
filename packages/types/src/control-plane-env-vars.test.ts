@@ -27,6 +27,7 @@ describe('CONTROL_PLANE_ENV_VAR_NAMES', () => {
       'DATABASE_URL',
       'S3_SECRET_ACCESS_KEY',
       'R_LICENSE_KEY',
+      'R_TRIAL_OPENROUTER_API_KEY',
       'R_ELEVENLABS_API_KEY',
       'R_ELEVENLABS_VOICE_ID',
     ]) {

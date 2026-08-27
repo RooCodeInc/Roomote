@@ -27,6 +27,7 @@ import {
   taskRuns,
 } from '../schema';
 import { runInTransactionIfAvailable } from './transaction-utils';
+import { createMemoryOutboxLifecycle } from './memory-outbox-lifecycle';
 
 export type BrainSyncStateRow = typeof brainSyncState.$inferSelect;
 export type BrainCollectorItemRow = typeof brainCollectorItems.$inferSelect;
@@ -238,6 +239,25 @@ export async function listBrainCollectorItemsBefore(
     .limit(limit);
 }
 
+export async function listBrainCollectorItemsAfter(
+  database: DatabaseOrTransaction,
+  collectorId: string,
+  afterItemId: string,
+  limit: number,
+): Promise<BrainCollectorItemRow[]> {
+  return database
+    .select()
+    .from(brainCollectorItems)
+    .where(
+      and(
+        eq(brainCollectorItems.collectorId, collectorId),
+        gt(brainCollectorItems.itemId, afterItemId),
+      ),
+    )
+    .orderBy(brainCollectorItems.itemId)
+    .limit(limit);
+}
+
 export async function listBrainCollectorItems(
   database: DatabaseOrTransaction,
   collectorId: string,
@@ -342,6 +362,9 @@ export async function resetBrainIngestionState(
 }
 
 export type BrainMemoryEventRow = typeof brainMemoryEvents.$inferSelect;
+
+const brainMemoryOutboxLifecycle =
+  createMemoryOutboxLifecycle<BrainMemoryEventRow>(brainMemoryEvents);
 
 /**
  * Transactional-outbox insert for a completed run's memory candidate. Called
@@ -456,15 +479,9 @@ export async function claimPendingBrainMemoryEvents(
   database: DatabaseOrTransaction,
   limit: number,
 ): Promise<BrainMemoryEventRow[]> {
-  const rows = await database
-    .update(brainMemoryEvents)
-    .set({
-      status: 'processing',
-      attempts: sql`${brainMemoryEvents.attempts} + 1`,
-      updatedAt: sql`now()`,
-    })
-    .where(
-      sql`${brainMemoryEvents.id} IN (
+  return brainMemoryOutboxLifecycle.claim(
+    database,
+    sql`
         SELECT event.id
         FROM ${brainMemoryEvents} AS event
         LEFT JOIN ${taskRuns} AS run ON run.id = event.run_id
@@ -476,11 +493,8 @@ export async function claimPendingBrainMemoryEvents(
         ORDER BY run.completed_at DESC NULLS LAST, event.run_id DESC
         LIMIT ${limit}
         FOR UPDATE OF event SKIP LOCKED
-      )`,
-    )
-    .returning();
-
-  return rows;
+    `,
+  );
 }
 
 /**
@@ -492,18 +506,7 @@ export async function releaseBrainMemoryEvents(
   database: DatabaseOrTransaction,
   ids: string[],
 ): Promise<void> {
-  if (ids.length === 0) {
-    return;
-  }
-
-  await database
-    .update(brainMemoryEvents)
-    .set({
-      status: 'pending',
-      attempts: sql`greatest(${brainMemoryEvents.attempts} - 1, 0)`,
-      updatedAt: sql`now()`,
-    })
-    .where(inArray(brainMemoryEvents.id, ids));
+  await brainMemoryOutboxLifecycle.release(database, ids);
 }
 
 export type BrainMemoryEventStatus = BrainMemoryEventRow['status'];
@@ -679,22 +682,7 @@ export async function markBrainMemoryEvent(
   status: 'pending' | 'skipped',
   lastError?: string,
 ): Promise<void> {
-  await database
-    .update(brainMemoryEvents)
-    .set({
-      status,
-      lastError: lastError ?? null,
-      processedAt: status === 'skipped' ? sql`now()` : null,
-      updatedAt: sql`now()`,
-    })
-    .where(
-      status === 'pending'
-        ? eq(brainMemoryEvents.id, id)
-        : and(
-            eq(brainMemoryEvents.id, id),
-            eq(brainMemoryEvents.status, 'processing'),
-          ),
-    );
+  await brainMemoryOutboxLifecycle.mark(database, id, status, lastError);
 }
 
 /**
@@ -718,31 +706,11 @@ export async function settleBrainMemoryEvent(
   outcome: 'done' | 'failed',
   lastError?: string,
 ): Promise<'settled' | 'superseded'> {
-  const settled = await database
-    .update(brainMemoryEvents)
-    .set({
-      status: outcome,
-      lastError: lastError ?? null,
-      processedAt: outcome === 'done' ? sql`now()` : null,
-      updatedAt: sql`now()`,
-    })
-    .where(
-      and(
-        eq(brainMemoryEvents.id, id),
-        eq(brainMemoryEvents.status, 'processing'),
-        eq(brainMemoryEvents.revision, claimedRevision),
-      ),
-    )
-    .returning({ id: brainMemoryEvents.id });
-
-  if (settled.length > 0) {
-    return 'settled';
-  }
-
-  await database
-    .update(brainMemoryEvents)
-    .set({ status: 'pending', processedAt: null, updatedAt: sql`now()` })
-    .where(eq(brainMemoryEvents.id, id));
-
-  return 'superseded';
+  return brainMemoryOutboxLifecycle.settle(
+    database,
+    id,
+    claimedRevision,
+    outcome,
+    lastError,
+  );
 }

@@ -101,9 +101,9 @@ describe('Slack live task card', () => {
     expect(mocks.renderCard).toHaveBeenCalledTimes(4);
     expect(mocks.renderCard.mock.calls.map((call) => call[0].message)).toEqual([
       'Preparing the workspace…',
-      'Starting the agent…',
-      'Connecting to the agent…',
-      'Agent started, getting to work…',
+      'Starting the task…',
+      'Connecting to the task…',
+      'Task started, getting to work…',
     ]);
     expect(renderedCard(1)).toMatchObject({ status: 'in_progress' });
   });
@@ -127,7 +127,7 @@ describe('Slack live task card', () => {
 
     expect(renderedCard(2)).toEqual({
       status: 'in_progress',
-      output: 'Agent started, getting to work…',
+      output: 'Task started, getting to work…',
     });
     expect(renderedCard(3)).toEqual({
       status: 'in_progress',
@@ -776,7 +776,7 @@ describe('Slack live task card', () => {
     });
     expect(renderedCard(3)).toEqual({
       status: 'in_progress',
-      output: 'Agent started, getting to work…',
+      output: 'Task started, getting to work…',
     });
   });
 
@@ -809,7 +809,7 @@ describe('Slack live task card', () => {
 
     expect(renderedCard(2)).toEqual({
       status: 'in_progress',
-      output: 'Agent started, getting to work…',
+      output: 'Task started, getting to work…',
     });
     expect(renderedCard(3)).toEqual({
       status: 'in_progress',

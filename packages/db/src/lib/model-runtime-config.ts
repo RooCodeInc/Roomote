@@ -14,13 +14,17 @@ import {
   INFERENCE_GATEWAY_XAI_ENV_VAR_NAME,
   isConfiguredEnvValue,
   isInferenceGatewayCoveredEnvVar,
+  isSettingsOnlyProviderEnvVar,
   normalizeDeploymentModelConfig,
   normalizeOptionalReasoningEffort,
   parseModelProviderEnvKeys,
+  ROOMOTE_INFERENCE_API_KEY_ENV_VAR_NAME,
+  ROOMOTE_INFERENCE_PROVIDER_ID,
   resolveSetupModelProviderIdFromModel,
   TASK_MODEL_ROLE_DESCRIPTORS,
   TASK_MODEL_ROLES,
   TASK_MODEL_CONTEXT_WINDOWS_ENV_VAR_NAME,
+  TASK_MODEL_COSTS_ENV_VAR_NAME,
   XAI_OPENCODE_PROVIDER_ID,
   type TaskModelRole,
   type TaskModelOption,
@@ -163,7 +167,12 @@ function resolveProviderKeyNames({
 /**
  * Resolve a single model-provider env value with the same precedence the task
  * runtime uses: the runtime process env first, then the persisted (encrypted)
- * deployment environment variables.
+ * deployment environment variables. Settings-only vars (see
+ * `SETTINGS_ONLY_MODEL_PROVIDER_ENV_VAR_NAMES`) are the exception: their env
+ * variables are only the hosting platform's delivery mechanism (setup
+ * imports them into Settings storage), so they resolve
+ * from the persisted store alone — deleting the stored key disables the
+ * provider even while hosting keeps injecting the variable.
  */
 export async function resolveModelProviderEnvValue(
   envVarNames: string | readonly string[],
@@ -176,6 +185,7 @@ export async function resolveModelProviderEnvValue(
   const names = typeof envVarNames === 'string' ? [envVarNames] : envVarNames;
 
   for (const envVarName of names) {
+    if (isSettingsOnlyProviderEnvVar(envVarName)) continue;
     const runtimeValue = normalizeConfiguredValue(runtimeEnv[envVarName]);
 
     if (runtimeValue) {
@@ -414,6 +424,35 @@ async function resolveModelRuntimeEnv(
         }),
       )
     : {};
+  // Per-model pricing for the generated OpenCode config, in USD per million
+  // tokens. Custom providers (Roomote inference included) are invisible to
+  // OpenCode's own models.dev pricing, so without this every message on them
+  // records zero cost in the task usage ledger.
+  const taskModelCosts = inferenceGateway
+    ? Object.fromEntries(
+        enabledCatalogModels.flatMap((model) => {
+          const inputPricePerToken = model.metadata?.inputPricePerToken;
+          const outputPricePerToken = model.metadata?.outputPricePerToken;
+
+          return typeof inputPricePerToken === 'number' &&
+            Number.isFinite(inputPricePerToken) &&
+            inputPricePerToken >= 0 &&
+            typeof outputPricePerToken === 'number' &&
+            Number.isFinite(outputPricePerToken) &&
+            outputPricePerToken >= 0
+            ? [
+                [
+                  model.id,
+                  {
+                    input: inputPricePerToken * 1_000_000,
+                    output: outputPricePerToken * 1_000_000,
+                  },
+                ],
+              ]
+            : [];
+        }),
+      )
+    : {};
   const gatewayProviderKeyNames = [
     ...new Set([
       ...providerKeyNames,
@@ -422,6 +461,14 @@ async function resolveModelRuntimeEnv(
       }),
     ]),
   ];
+  const managedRoomoteInferenceSelected = [
+    ...resolvedRoleModels,
+    ...gatewaySwitchableModelIds,
+  ].some(
+    (modelId) =>
+      resolveSetupModelProviderIdFromModel(modelId) ===
+      ROOMOTE_INFERENCE_PROVIDER_ID,
+  );
   // When the gateway is active, the configured provider keys it can serve
   // (OpenRouter, Anthropic, OpenAI, Gemini, the aggregators, Bedrock) stay on
   // the control plane and are advertised to the worker by name via
@@ -433,7 +480,9 @@ async function resolveModelRuntimeEnv(
     ? gatewayProviderKeyNames.filter(
         (name) =>
           isInferenceGatewayCoveredEnvVar(name) &&
-          (normalizeConfiguredValue(runtimeEnv[name]) !== undefined ||
+          ((name === ROOMOTE_INFERENCE_API_KEY_ENV_VAR_NAME &&
+            managedRoomoteInferenceSelected) ||
+            normalizeConfiguredValue(runtimeEnv[name]) !== undefined ||
             normalizeConfiguredValue(persistedEnvVars[name]) !== undefined),
       )
     : [];
@@ -446,7 +495,9 @@ async function resolveModelRuntimeEnv(
       }
 
       const value =
-        normalizeConfiguredValue(runtimeEnv[envVarName]) ??
+        (isSettingsOnlyProviderEnvVar(envVarName)
+          ? undefined
+          : normalizeConfiguredValue(runtimeEnv[envVarName])) ??
         normalizeConfiguredValue(persistedEnvVars[envVarName]);
 
       return value ? [[envVarName, value]] : [];
@@ -566,6 +617,9 @@ async function resolveModelRuntimeEnv(
       [TASK_MODEL_CONTEXT_WINDOWS_ENV_VAR_NAME]: JSON.stringify(
         taskModelContextWindows,
       ),
+    }),
+    ...(Object.keys(taskModelCosts).length > 0 && {
+      [TASK_MODEL_COSTS_ENV_VAR_NAME]: JSON.stringify(taskModelCosts),
     }),
     ...(routeChatGptThroughGateway
       ? { [INFERENCE_GATEWAY_CHATGPT_ENV_VAR_NAME]: '1' }

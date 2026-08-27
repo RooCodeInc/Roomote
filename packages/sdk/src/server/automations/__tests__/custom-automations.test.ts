@@ -301,25 +301,19 @@ describe('customAutomationsJob', () => {
         text: 'Flaky tests is running.',
         blocks: [
           expect.objectContaining({
-            type: 'container',
-            title: expect.objectContaining({ text: 'Flaky tests' }),
-            has_header_divider: true,
-            child_blocks: expect.arrayContaining([
-              expect.objectContaining({
-                type: 'section',
-                text: expect.objectContaining({
-                  text: '*Flaky tests* is running.',
-                }),
-              }),
-              expect.objectContaining({
-                type: 'actions',
-                elements: [
-                  expect.objectContaining({
-                    action_id: 'late_bound_automation_configure',
-                  }),
-                ],
-              }),
+            type: 'context',
+            elements: expect.arrayContaining([
+              expect.objectContaining({ text: 'Flaky tests' }),
             ]),
+          }),
+          { type: 'markdown', text: '**Flaky tests** is running.' },
+          expect.objectContaining({
+            type: 'actions',
+            elements: [
+              expect.objectContaining({
+                action_id: 'late_bound_automation_configure',
+              }),
+            ],
           }),
         ],
       }),

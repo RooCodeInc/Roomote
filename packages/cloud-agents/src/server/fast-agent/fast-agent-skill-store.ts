@@ -1,9 +1,10 @@
-import { constants } from 'node:fs';
+import { constants, existsSync } from 'node:fs';
 import { open, readdir, stat } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 
 import { FAST_AGENT_SPILL_MAX_FILE_BYTES } from './fast-agent-spill-store';
+import { shouldUseCheckoutSkillRoots } from './fast-agent-runtime-context';
 
 export const FAST_AGENT_PACKAGED_SKILL_NAMES = [
   'address-pr-feedback',
@@ -90,12 +91,6 @@ export type FastAgentRepositorySkillSource = {
 const FAST_AGENT_PACKAGED_SKILL_NAME_SET = new Set<string>(
   FAST_AGENT_PACKAGED_SKILL_NAMES,
 );
-const SOURCE_SKILL_ROOT = resolve(
-  dirname(fileURLToPath(import.meta.url)),
-  '../workflows/skills/standard',
-);
-const RUNTIME_SKILL_ROOT = resolve(process.cwd(), '../../skills/standard');
-
 async function directoryExists(path: string): Promise<boolean> {
   try {
     return (await stat(path)).isDirectory();
@@ -104,8 +99,46 @@ async function directoryExists(path: string): Promise<boolean> {
   }
 }
 
-async function resolveDefaultSkillRoot(): Promise<string> {
-  for (const candidate of [SOURCE_SKILL_ROOT, RUNTIME_SKILL_ROOT]) {
+export function getDefaultSkillRootCandidates(
+  moduleUrl = import.meta.url,
+  cwd = process.cwd(),
+  env: NodeJS.ProcessEnv = process.env,
+): string[] {
+  const candidates = [
+    // Unbundled package source (tests and direct TypeScript execution).
+    resolve(dirname(fileURLToPath(moduleUrl)), '../workflows/skills/standard'),
+  ];
+  const checkoutCandidates = [
+    resolve(cwd, 'packages/cloud-agents/src/server/workflows/skills/standard'),
+    resolve(
+      cwd,
+      '../../packages/cloud-agents/src/server/workflows/skills/standard',
+    ),
+  ];
+
+  if (
+    shouldUseCheckoutSkillRoots(env, () =>
+      checkoutCandidates.some((candidate) => existsSync(candidate)),
+    )
+  ) {
+    // A Roomote checkout started inside another Roomote task runs bundled
+    // services from apps/<service>, while ordinary local development needs
+    // the same checkout path. Production keeps the original candidates.
+    candidates.push(...checkoutCandidates);
+  }
+
+  // Existing runtime-app image layout: /roomote/apps/<service> ->
+  // /roomote/skills/standard.
+  candidates.push(resolve(cwd, '../../skills/standard'));
+  return candidates;
+}
+
+export async function resolveDefaultSkillRoot(
+  moduleUrl = import.meta.url,
+  cwd = process.cwd(),
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<string> {
+  for (const candidate of getDefaultSkillRootCandidates(moduleUrl, cwd, env)) {
     if (await directoryExists(candidate)) return candidate;
   }
   throw new Error('Packaged Fast skills are unavailable in this runtime.');

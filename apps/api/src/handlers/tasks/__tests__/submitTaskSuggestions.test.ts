@@ -163,6 +163,12 @@ const tx = {
 };
 
 vi.mock('@roomote/slack', () => ({
+  buildTaskSuggestionMessageMetadata: vi.fn(
+    ({ sourceTaskId, suggestionId }) => ({
+      event_type: 'roomote.setup_onboarding_suggestion',
+      event_payload: { sourceTaskId, suggestionId, schemaVersion: 1 },
+    }),
+  ),
   SlackNotifier: class {
     postMessage = mockPostMessage;
   },
@@ -234,6 +240,46 @@ vi.mock('@roomote/db/server', () => ({
     raw: (value: unknown) => value,
   }),
   buildTaskSuggestionContentHash: vi.fn(() => 'fingerprint'),
+  findTrackedSuggestionWorkItemIds: vi.fn(async () => new Set()),
+  registerTrackedSuggestionCards: vi.fn(
+    async (
+      registrations: Array<{
+        surface: string;
+        channelId: string;
+        messageTs: string;
+        threadTs?: string;
+        workItemId: string;
+        createdByUserId: string | null;
+        suggestionType: string;
+        suggestionKey: string;
+        suggestionGroupKey?: string;
+        launchRouting?: 'router';
+      }>,
+    ) => {
+      insertedTrackedMessageValues.push(
+        ...registrations.map((registration) => ({
+          surface: registration.surface,
+          kind: 'suggestion_card',
+          dedupeKey: `${registration.channelId}:${registration.messageTs}`,
+          channelId: registration.channelId,
+          messageTs: registration.messageTs,
+          ...(registration.threadTs ? { threadTs: registration.threadTs } : {}),
+          workItemId: registration.workItemId,
+          createdByUserId: registration.createdByUserId,
+          metadata: {
+            suggestionType: registration.suggestionType,
+            suggestionKey: registration.suggestionKey,
+            ...(registration.suggestionGroupKey
+              ? { suggestionGroupKey: registration.suggestionGroupKey }
+              : {}),
+            ...(registration.launchRouting
+              ? { launchRouting: registration.launchRouting }
+              : {}),
+          },
+        })),
+      );
+    },
+  ),
   resolveRepositorySelectionByIds: vi.fn(),
   upsertBackgroundAutomationSlackThread: vi.fn(),
   getAutomationRuntime: vi.fn(async () => ({ slackChannelId: 'C-AUTO' })),
