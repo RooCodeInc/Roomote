@@ -155,15 +155,36 @@ function ConnectedProviderRow({
         <span className="min-w-0 truncate text-sm font-medium">
           {provider.label}
         </span>
-        <div>
-          <p className="text-sm text-muted-foreground mb-2">
-            Managed by Roomote with free trial credits. Add your own provider at
-            any time to continue after credits end.
-          </p>
-          <ProviderCreditBalanceLine
-            balance={creditBalance}
-            className="max-w-md"
-          />
+        <div className="flex min-w-0 items-start justify-between gap-2">
+          <div className="min-w-0">
+            <p className="text-sm text-muted-foreground mb-2">
+              Managed by Roomote with free trial credits. Add your own provider
+              at any time to continue after credits end.
+            </p>
+            <ProviderCreditBalanceLine
+              balance={creditBalance}
+              className="max-w-md"
+            />
+          </div>
+          <BasicTooltip
+            content={
+              canDelete
+                ? 'Delete Roomote inference. This disables the free trial permanently.'
+                : 'Keep at least one inference provider connected'
+            }
+          >
+            <span>
+              <Button
+                size="icon"
+                variant="ghost"
+                onClick={onDelete}
+                disabled={isSaving || !canDelete}
+                aria-label={`Delete ${provider.label} provider`}
+              >
+                <Trash2 />
+              </Button>
+            </span>
+          </BasicTooltip>
         </div>
       </div>
     );

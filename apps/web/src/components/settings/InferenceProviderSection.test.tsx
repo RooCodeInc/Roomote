@@ -195,8 +195,10 @@ function buildProviderSetup(
                 authKind: 'api-key' as const,
                 suggestedTaskModels: [],
                 hidden: true,
-                runtimeApiKeySatisfied: true,
-                savedApiKeySatisfied: false,
+                // The imported Settings row, not the hosting-injected env
+                // variable, is what connects the provider.
+                runtimeApiKeySatisfied: false,
+                savedApiKeySatisfied: true,
                 additionalEnvValues: {} satisfies Record<string, string>,
               },
             ]
@@ -944,6 +946,37 @@ describe('InferenceProviderSection', () => {
     expect(
       screen.queryByRole('option', { name: 'Roomote inference' }),
     ).not.toBeInTheDocument();
+  });
+
+  it('offers deleting Roomote inference once another provider is connected', () => {
+    providerSetupData.current = buildProviderSetup({
+      managedRoomote: true,
+      anthropicSavedKey: true,
+    });
+
+    renderInferenceProviderSection();
+
+    const deleteButton = screen.getByRole('button', {
+      name: 'Delete Roomote inference provider',
+    });
+    expect(deleteButton).toBeEnabled();
+
+    fireEvent.click(deleteButton);
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+  });
+
+  it('blocks deleting Roomote inference while it is the only provider', () => {
+    providerSetupData.current = buildProviderSetup({
+      managedRoomote: true,
+    });
+
+    renderInferenceProviderSection();
+
+    expect(
+      screen.getByRole('button', {
+        name: 'Delete Roomote inference provider',
+      }),
+    ).toBeDisabled();
   });
 
   it('locks a runtime env-managed key behind a lock tooltip', () => {

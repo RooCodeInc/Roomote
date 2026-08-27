@@ -920,10 +920,10 @@ export async function deleteTaskModelProviderCommand(
 
   const provider = getSetupModelProvider(input.provider);
 
-  if (provider.id === ROOMOTE_INFERENCE_PROVIDER_ID) {
-    throw new Error('Roomote inference is managed by your hosting provider.');
-  }
-
+  // Roomote inference deletes like any stored-key provider: its credential
+  // is the imported Settings row, and removing it is the one supported way
+  // to disable the trial. The import marker in setup state keeps the
+  // hosting-injected variable from ever re-creating it.
   if (provider.authKind === 'oauth') {
     throw new Error(
       `${provider.label} is connected with a subscription account and cannot be deleted here.`,
