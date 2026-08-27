@@ -171,6 +171,30 @@ function mockStatus(overrides: Partial<Record<string, unknown>> = {}) {
   } as unknown as ReturnType<typeof mockUseQuery>);
 }
 
+function trialModelSetup(overrides: Partial<Record<string, unknown>> = {}) {
+  return {
+    runtimeRoomoteModel: null,
+    runtimeRoomoteModelSatisfied: false,
+    runtimeProviderId: 'openrouter',
+    persistedRoomoteModel: null,
+    persistedProviderId: null,
+    preselectedProvider: 'openrouter',
+    setupSatisfied: true,
+    setupSatisfiedByRuntimeEnv: true,
+    chatgptConnected: false,
+    providers: [
+      {
+        id: 'openrouter',
+        label: 'OpenRouter',
+        runtimeApiKeySatisfied: true,
+        savedApiKeySatisfied: false,
+        trialKeySatisfied: true,
+      },
+    ],
+    ...overrides,
+  };
+}
+
 function mockReadyForRepository({
   onboardingTaskId = null,
   selectedRepositoryIds = [],
@@ -290,6 +314,67 @@ describe('useSetupFlow', () => {
       result.current.goToNextStep();
     });
     expect(result.current.step).toBe('env-vars');
+  });
+
+  it('shows the inference choice before provider configuration when trial inference is available', async () => {
+    mockStatus({ modelSetup: trialModelSetup() });
+
+    const { result } = renderHook(() => useSetupFlow());
+
+    await waitFor(() => {
+      expect(result.current.step).toBe('welcome');
+    });
+
+    act(() => {
+      result.current.goToNextStep();
+    });
+
+    expect(result.current.step).toBe('inference');
+  });
+
+  it('returns from custom provider configuration to the trial choice', async () => {
+    markSetupWelcomeSeen();
+    mockStatus({ modelSetup: trialModelSetup() });
+
+    const { result } = renderHook(() => useSetupFlow());
+
+    await waitFor(() => {
+      expect(result.current.step).toBe('inference');
+    });
+
+    act(() => {
+      result.current.goToStep('env-vars', { revisit: true });
+    });
+    expect(result.current.step).toBe('env-vars');
+
+    act(() => {
+      result.current.goToPreviousStep();
+    });
+    expect(result.current.step).toBe('inference');
+  });
+
+  it('skips custom provider configuration after trial inference is chosen', async () => {
+    markSetupWelcomeSeen();
+    mockStatus({
+      modelSetup: trialModelSetup(),
+      setupNewState: {
+        authProvider: null,
+        modelProvider: 'openrouter',
+        computeProvider: null,
+        sourceControlProvider: null,
+        selectedRepositoryIds: [],
+        onboardingTaskId: null,
+        onboardingTaskStartedAt: null,
+        slackChannel: null,
+        slackThreadTs: null,
+      },
+    });
+
+    const { result } = renderHook(() => useSetupFlow());
+
+    await waitFor(() => {
+      expect(result.current.step).toBe('source-control-provider');
+    });
   });
 
   it('skips the wizard welcome when the bootstrap flow already showed it', async () => {

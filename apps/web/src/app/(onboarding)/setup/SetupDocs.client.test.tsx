@@ -18,6 +18,7 @@ describe('SetupDocs', () => {
     expect(getSetupDocsPath('slack', { authProvider: 'microsoft' })).toBe(
       'providers/communications/microsoft-teams',
     );
+    expect(getSetupDocsPath('inference')).toBe('models');
     expect(
       getSetupDocsPath('source-control-connect', {
         sourceControlProvider: 'github',

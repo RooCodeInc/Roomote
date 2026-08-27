@@ -31,6 +31,7 @@ import {
 import { StepTelegramSetup } from './StepTelegramSetup';
 import { StepDiscordSetup } from './StepDiscordSetup';
 import { StepInferenceProvider } from './StepInferenceProvider';
+import { StepConfigureInference } from './StepConfigureInference';
 import { StepComputeProvider } from './StepComputeProvider';
 import { StepComputeConfig } from './StepComputeConfig';
 import { StepSourceControlProvider } from './StepSourceControlProvider';
@@ -352,6 +353,14 @@ export function SetupSignedInFlow() {
                 bootstrapMode={false}
               />
             ))}
+          {step === 'inference' && (
+            <StepConfigureInference
+              onUseTrial={goToNextStep}
+              onConfigureProvider={() =>
+                goToStep('env-vars', { revisit: true })
+              }
+            />
+          )}
           {step === 'env-vars' && (
             <StepInferenceProvider
               modelSetup={status.modelSetup}
