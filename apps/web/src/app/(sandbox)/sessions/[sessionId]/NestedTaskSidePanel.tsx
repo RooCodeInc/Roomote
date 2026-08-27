@@ -10,6 +10,7 @@ import {
   ExternalLink,
   Skeleton,
 } from '@/components/system';
+import { FramedSurface } from '@/components/layout';
 
 import { ArtifactLinkProvider } from '../../task/[taskId]/hooks/ArtifactLinkProvider';
 import { HistoricalSandboxProvider } from '../../task/[taskId]/hooks/HistoricalSandboxProvider';
@@ -103,7 +104,10 @@ export function NestedTaskSidePanel({
   const title = session.task?.title?.trim() || 'Task';
 
   return (
-    <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background">
+    <FramedSurface
+      frameClassName="p-0"
+      surfaceClassName="relative flex flex-col overflow-hidden"
+    >
       <SidePanelHeader
         title={title}
         onClose={onClose}
@@ -119,6 +123,6 @@ export function NestedTaskSidePanel({
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
         <NestedTaskTranscript session={session} />
       </div>
-    </div>
+    </FramedSurface>
   );
 }
