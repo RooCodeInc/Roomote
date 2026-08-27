@@ -2,13 +2,10 @@
 
 import { memo } from 'react';
 
-import { ArrowRightToLine, MessagesSquare } from '@/components/system';
-import { SideNavItem } from '@/components/layout/side-nav/SideNavItem';
-
 import type { TaskSession } from '../hooks';
 import { useTaskSidePanel } from '../hooks';
 
-import { useSandboxLayout } from '../../../use-sandbox-layout';
+import { SandboxSideActions } from '../../../SandboxWorkspacePanels';
 
 import { DiffButton } from './DiffButton';
 import { LivePreviewButton } from './LivePreviewButton';
@@ -38,27 +35,20 @@ function SidebarActionsBase({
   const disableSandboxActions =
     sessionState === 'booting' || sessionState === 'resuming';
 
-  const { isSidebarVisible, toggleSidebar } = useSandboxLayout();
   const { activeView, closeSidePanel } = useTaskSidePanel();
 
-  return isSidebarVisible ? (
-    <div className="flex h-full shrink-0 flex-col gap-2 overflow-y-auto bg-card pr-2 py-3">
-      <SideNavItem
-        side="right"
-        label="Hide sidebar"
-        onClick={toggleSidebar}
-        className="md:hidden"
-        icon={ArrowRightToLine}
-      />
-      <SideNavItem
-        side="right"
-        label="Chat"
-        tooltip="Chat"
-        active={activeView === null}
-        onClick={closeSidePanel}
-        className="md:hidden"
-        icon={MessagesSquare}
-      />
+  return (
+    <SandboxSideActions
+      isPanelOpen={activeView !== null}
+      onShowMain={closeSidePanel}
+      footer={
+        <OverflowMenu
+          taskId={taskId}
+          taskRun={taskRun}
+          disabled={disableSandboxActions}
+        />
+      }
+    >
       {taskRun && (
         <LivePreviewButton
           taskId={taskId}
@@ -90,15 +80,8 @@ function SidebarActionsBase({
         <LogsButton taskId={taskId} taskRun={taskRun} />
       ) : null}
       <TaskInfoButton session={session} disabled={disableSandboxActions} />
-
-      <div className="grow" />
-      <OverflowMenu
-        taskId={taskId}
-        taskRun={taskRun}
-        disabled={disableSandboxActions}
-      />
-    </div>
-  ) : null;
+    </SandboxSideActions>
+  );
 }
 
 export const SidebarActions = memo(SidebarActionsBase);
