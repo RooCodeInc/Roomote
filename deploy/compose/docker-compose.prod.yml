@@ -566,11 +566,13 @@ services:
   infinity:
     profiles:
       - local-inference
-    image: michaelf34/infinity:0.0.76
+    image: michaelf34/infinity:0.0.76-cpu
     restart: unless-stopped
     networks: [default]
     command:
       - v2
+      - --device
+      - cpu
       - --url-prefix
       - /v1
       - --port
