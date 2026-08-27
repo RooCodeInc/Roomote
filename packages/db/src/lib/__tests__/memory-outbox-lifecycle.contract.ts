@@ -1,4 +1,4 @@
-export type MemoryOutboxContractRow = {
+type MemoryOutboxContractRow = {
   id: string;
   revision: number;
   attempts: number;
@@ -7,7 +7,7 @@ export type MemoryOutboxContractRow = {
   processedAt: Date | null;
 };
 
-export type MemoryOutboxContractHarness = {
+type MemoryOutboxContractHarness = {
   createEvent: () => Promise<MemoryOutboxContractRow>;
   claim: () => Promise<MemoryOutboxContractRow[]>;
   release: (ids: string[]) => Promise<void>;

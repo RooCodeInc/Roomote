@@ -13,7 +13,7 @@ type MemoryOutboxTable = AnyPgTable & {
   updatedAt: AnyPgColumn;
 };
 
-export type MemoryOutboxLifecycle<TRow> = {
+type MemoryOutboxLifecycle<TRow> = {
   claim(database: DatabaseOrTransaction, candidateIds: SQL): Promise<TRow[]>;
   release(database: DatabaseOrTransaction, ids: string[]): Promise<void>;
   mark(
