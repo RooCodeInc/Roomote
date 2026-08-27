@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 
 import { RunStatus } from '@roomote/types';
 
@@ -40,6 +40,18 @@ vi.mock('@/components/system', () => ({
       {children}
     </button>
   ),
+  CopyIconButton: ({
+    content,
+    ...props
+  }: {
+    content: string;
+    'aria-label'?: string;
+  }) => (
+    <button type="button" data-content={content} {...props}>
+      Copy
+    </button>
+  ),
+  Loader2: () => null,
   BotMessageSquare: () => null,
   Plug: () => null,
   Ghost: () => null,
@@ -128,39 +140,38 @@ describe('StartupSequence', () => {
     expect(screen.getByText('Warming up my GPUs')).toBeInTheDocument();
   });
 
-  it('links startup failures to a pre-filled new task', () => {
+  it('retries failed starts inline and keeps the original prompt copyable', () => {
+    const onRetry = vi.fn();
     render(
       <StartupSequence
         steps={[{ status: RunStatus.Failed, completed: true }]}
         error="Workspace has exceeded its spend limit"
-        newTaskHref="/?prompt=Fix+the+build&model=openrouter%2Fopenai%2Fgpt-5.4&environmentId=env-1"
+        prompt="Fix the build"
+        onRetry={onRetry}
       />,
     );
 
-    expect(
-      screen.getByRole('link', { name: 'Try in a new task' }),
-    ).toHaveAttribute(
-      'href',
-      '/?prompt=Fix+the+build&model=openrouter%2Fopenai%2Fgpt-5.4&environmentId=env-1',
+    expect(screen.getByText('Original prompt')).toBeInTheDocument();
+    expect(screen.getByText('Fix the build')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Copy prompt' })).toHaveAttribute(
+      'data-content',
+      'Fix the build',
     );
-    expect(
-      screen.queryByRole('button', { name: 'Retry' }),
-    ).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    expect(onRetry).toHaveBeenCalledOnce();
+    expect(screen.queryByText('Try in a new task')).not.toBeInTheDocument();
   });
 
-  it('does not render the removed prompt preview for failed starts', () => {
+  it('disables Retry while replacement creation is pending', () => {
     render(
       <StartupSequence
         steps={[{ status: RunStatus.Failed, completed: true }]}
-        newTaskHref="/?prompt=Fix+the+build"
+        onRetry={vi.fn()}
+        retryPending
       />,
     );
 
-    expect(screen.queryByText('Your prompt')).not.toBeInTheDocument();
-    expect(screen.queryByText('Fix the build')).not.toBeInTheDocument();
-    expect(
-      screen.getByRole('link', { name: 'Try in a new task' }),
-    ).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Retry' })).toBeDisabled();
   });
 
   it('renders startup content inline without its own scroll surface', () => {

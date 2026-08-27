@@ -114,6 +114,7 @@ import {
 } from '../commands/source-control';
 import {
   routeHomeTaskCommand,
+  createFailedStartReplacementTaskRunCommand,
   createStandardTaskRunCommand,
   cancelTaskRunCommand,
   retryFailedTaskStartCommand,
@@ -1065,11 +1066,22 @@ export const appRouter = createRouter({
           sourceArtifactId: z.string().uuid().optional(),
           sourceArtifactPath: z.string().optional(),
           sourceArtifactVersion: z.number().int().optional(),
-          payload: standardTaskPayloadSchema,
+          payload: standardTaskPayloadSchema.omit({
+            communicationContextInherited: true,
+            fastAgentParent: true,
+            fastAgentSessionId: true,
+            launchIdempotencyKey: true,
+          }),
         }),
       )
       .mutation(({ ctx: { auth }, input }) =>
         createStandardTaskRunCommand(auth, input),
+      ),
+
+    replaceFailedStart: protectedProcedure
+      .input(z.object({ runId: z.number().int().positive() }))
+      .mutation(({ ctx: { auth }, input }) =>
+        createFailedStartReplacementTaskRunCommand(auth, input),
       ),
 
     cancel: protectedProcedure

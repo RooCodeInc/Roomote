@@ -14,7 +14,6 @@ import { CircleSlash, TriangleAlert } from '@/components/system';
 import {
   TaskPayloadKind,
   DEFAULT_CODING_HARNESS,
-  getLinkedEnvironmentIdFromPayload,
   type TaskPhase,
 } from '@roomote/types';
 
@@ -76,24 +75,6 @@ export default function SandboxPage() {
         images: session.prompt?.images,
       }
     : null;
-  const newTaskSearchParams = new URLSearchParams();
-
-  if (startupPrompt?.text) {
-    newTaskSearchParams.set('prompt', startupPrompt.text);
-  }
-
-  if (task?.model) {
-    newTaskSearchParams.set('model', task.model);
-  }
-
-  const environmentId = getLinkedEnvironmentIdFromPayload(taskRun?.payload);
-
-  if (environmentId) {
-    newTaskSearchParams.set('environmentId', environmentId);
-  }
-
-  const newTaskQuery = newTaskSearchParams.toString();
-  const newTaskHref = newTaskQuery ? `/?${newTaskQuery}` : '/';
   const shouldRenderBootingTranscript =
     sessionState === 'booting' &&
     (hasTranscriptHistory || hasVisibleSessionPrompt);
@@ -291,12 +272,7 @@ export default function SandboxPage() {
         <HistoricalContent
           session={session}
           footer={
-            taskRun ? (
-              <SnapshotResumeFailureFooter
-                taskRun={taskRun}
-                newTaskHref={newTaskHref}
-              />
-            ) : null
+            taskRun ? <SnapshotResumeFailureFooter taskRun={taskRun} /> : null
           }
         />
       </HistoricalSandboxProvider>
@@ -312,7 +288,7 @@ export default function SandboxPage() {
             <Startup
               runId={taskRun.id}
               initialTaskRun={taskRun}
-              newTaskHref={newTaskHref}
+              prompt={startupPrompt?.text}
               onStatusChange={handleBootStatusChange}
             />
           </div>
@@ -330,7 +306,6 @@ export default function SandboxPage() {
             <Startup
               runId={taskRun.id}
               initialTaskRun={taskRun}
-              newTaskHref={newTaskHref}
               onStatusChange={handleBootStatusChange}
             />
             <ProductTips />
@@ -357,7 +332,6 @@ export default function SandboxPage() {
     >
       <MemoizedLiveContent
         session={session}
-        newTaskHref={newTaskHref}
         onBootStatusChange={handleBootStatusChange}
         onTaskPhaseChange={setLiveTaskPhase}
       />

@@ -1,12 +1,14 @@
 'use client';
 
 import { useCallback } from 'react';
+import { useRouter } from 'next/navigation';
 import { SSEProvider } from 'react-hooks-sse';
 
 import type { RunStatus as RunStatusValue } from '@roomote/types';
 import type { TaskRun } from '@roomote/db';
 
 import { getTaskRunError } from '@/lib/task-run-errors';
+import { useReplaceFailedTaskStart } from '@/hooks/task-runs';
 
 import { StartupFailureMessage, StartupSequence } from './StartupMessage';
 import { useStartupProgress } from './useStartupProgress';
@@ -14,16 +16,20 @@ import { useStartupProgress } from './useStartupProgress';
 interface StartupProps {
   runId: number;
   initialTaskRun?: TaskRun;
-  newTaskHref: string;
+  prompt?: string;
   onStatusChange?: (status: RunStatusValue) => void;
 }
 
 export const Startup = ({
   runId,
   initialTaskRun,
-  newTaskHref,
+  prompt,
   onStatusChange,
 }: StartupProps) => {
+  const router = useRouter();
+  const replaceFailedStart = useReplaceFailedTaskStart({
+    onSuccess: ({ taskId }) => router.push(`/task/${taskId}`),
+  });
   const eventSource = useCallback(() => {
     const eventSource = new EventSource(`/api/task-runs/${runId}/stream`, {
       withCredentials: true,
@@ -39,7 +45,9 @@ export const Startup = ({
       <StartupInner
         runId={runId}
         initialTaskRun={initialTaskRun}
-        newTaskHref={newTaskHref}
+        prompt={prompt}
+        onRetry={() => replaceFailedStart.mutate({ runId })}
+        retryPending={replaceFailedStart.isPending}
         onStatusChange={onStatusChange}
       />
     </SSEProvider>
@@ -49,14 +57,18 @@ export const Startup = ({
 interface StartupInnerProps {
   runId: number;
   initialTaskRun?: TaskRun;
-  newTaskHref: string;
+  prompt?: string;
+  onRetry: () => void;
+  retryPending: boolean;
   onStatusChange?: (status: RunStatusValue) => void;
 }
 
 const StartupInner = ({
   runId,
   initialTaskRun,
-  newTaskHref,
+  prompt,
+  onRetry,
+  retryPending,
   onStatusChange,
 }: StartupInnerProps) => {
   const {
@@ -77,23 +89,22 @@ const StartupInner = ({
       logs={showLogs ? sandboxLogs : undefined}
       logsConnected={logsConnected}
       logsError={logsError}
-      newTaskHref={newTaskHref}
+      prompt={prompt}
+      onRetry={onRetry}
+      retryPending={retryPending}
     />
   );
 };
 
 interface SnapshotResumeFailureFooterProps {
   taskRun: Pick<TaskRun, 'error' | 'result' | 'status'>;
-  newTaskHref: string;
 }
 
 export const SnapshotResumeFailureFooter = ({
   taskRun,
-  newTaskHref,
 }: SnapshotResumeFailureFooterProps) => (
   <StartupFailureMessage
     status={taskRun.status}
     error={getTaskRunError(taskRun)}
-    newTaskHref={newTaskHref}
   />
 );

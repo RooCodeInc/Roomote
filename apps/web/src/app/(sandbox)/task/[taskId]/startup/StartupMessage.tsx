@@ -1,19 +1,19 @@
 'use client';
 
-import Link from 'next/link';
-
 import type { LucideIcon } from '@/components/system';
 import {
   Check,
   HardDriveUpload,
   Hourglass,
   Button,
+  CopyIconButton,
   BotMessageSquare,
   Plug,
   Ghost,
   Drum,
   ThumbsDown,
   SquareDashedMousePointer,
+  Loader2,
 } from '@/components/system';
 
 import { RunStatus } from '@roomote/types';
@@ -126,14 +126,46 @@ interface StartupErrorMessageProps {
   error?: string;
   /** Machine-readable failure category persisted with the run. */
   errorCode?: string | null;
-  newTaskHref?: string;
+  prompt?: string;
+  onRetry?: () => void;
+  retryPending?: boolean;
 }
+
+const FailedStartActions = ({
+  prompt,
+  onRetry,
+  retryPending = false,
+}: Pick<StartupErrorMessageProps, 'prompt' | 'onRetry' | 'retryPending'>) => (
+  <div className="space-y-3 pt-1">
+    {prompt ? (
+      <div className="rounded-md border border-border bg-muted/40 p-3 text-foreground">
+        <div className="mb-2 flex items-center justify-between gap-3 text-xs font-medium text-muted-foreground">
+          <span>Original prompt</span>
+          <CopyIconButton
+            content={prompt}
+            tooltip="Copy prompt"
+            aria-label="Copy prompt"
+          />
+        </div>
+        <div className="whitespace-pre-wrap wrap-break-word">{prompt}</div>
+      </div>
+    ) : null}
+    {onRetry ? (
+      <Button size="sm" onClick={onRetry} disabled={retryPending}>
+        {retryPending ? <Loader2 className="size-4 animate-spin" /> : null}
+        Retry
+      </Button>
+    ) : null}
+  </div>
+);
 
 export const StartupFailureMessage = ({
   status,
   error,
   errorCode,
-  newTaskHref,
+  prompt,
+  onRetry,
+  retryPending,
 }: StartupErrorMessageProps) => {
   const isFailed = status === RunStatus.Failed;
   const isCanceled = status === RunStatus.Canceled;
@@ -150,13 +182,13 @@ export const StartupFailureMessage = ({
               <div className="text-foreground whitespace-pre-wrap wrap-break-word">
                 {displayError}
               </div>
-              {newTaskHref && (
-                <div className="pt-1">
-                  <Button size="sm" asChild>
-                    <Link href={newTaskHref}>Try in a new task</Link>
-                  </Button>
-                </div>
-              )}
+              {isFailed ? (
+                <FailedStartActions
+                  prompt={prompt}
+                  onRetry={onRetry}
+                  retryPending={retryPending}
+                />
+              ) : null}
             </div>
           </div>
         </MessageContent>
@@ -172,13 +204,11 @@ export const StartupFailureMessage = ({
             <MessageSquareWarning className="size-4 mt-0.5 shrink-0" />
             <div className="min-w-0 space-y-2">
               <div>There was an error starting this environment:</div>
-              {newTaskHref && (
-                <div className="pt-1">
-                  <Button size="sm" asChild>
-                    <Link href={newTaskHref}>Try in a new task</Link>
-                  </Button>
-                </div>
-              )}
+              <FailedStartActions
+                prompt={prompt}
+                onRetry={onRetry}
+                retryPending={retryPending}
+              />
             </div>
           </div>
         </MessageContent>
@@ -213,7 +243,9 @@ interface StartupSequenceProps {
   logs?: SandboxLogEntry[];
   logsConnected?: boolean;
   logsError?: string | null;
-  newTaskHref?: string;
+  prompt?: string;
+  onRetry?: () => void;
+  retryPending?: boolean;
 }
 
 export const StartupSequence = ({
@@ -223,7 +255,9 @@ export const StartupSequence = ({
   logs,
   logsConnected = true,
   logsError = null,
-  newTaskHref,
+  prompt,
+  onRetry,
+  retryPending,
 }: StartupSequenceProps) => {
   const lastStep = steps[steps.length - 1];
   const status = lastStep?.status ?? RunStatus.Pending;
@@ -275,7 +309,9 @@ export const StartupSequence = ({
         status={status}
         error={error}
         errorCode={errorCode}
-        newTaskHref={newTaskHref}
+        prompt={prompt}
+        onRetry={onRetry}
+        retryPending={retryPending}
       />
     </div>
   );

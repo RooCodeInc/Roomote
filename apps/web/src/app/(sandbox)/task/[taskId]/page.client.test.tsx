@@ -83,16 +83,14 @@ vi.mock('./hooks', () => ({
 }));
 
 vi.mock('./startup', () => ({
-  Startup: ({ newTaskHref }: { newTaskHref: string }) => (
-    <a data-testid="startup" href={newTaskHref}>
+  Startup: ({ prompt }: { prompt?: string }) => (
+    <div data-testid="startup" data-prompt={prompt}>
       Startup
-    </a>
+    </div>
   ),
   ProductTips: () => <div data-testid="product-tips" />,
-  SnapshotResumeFailureFooter: ({ newTaskHref }: { newTaskHref: string }) => (
-    <a data-testid="snapshot-resume-failure-footer" href={newTaskHref}>
-      Startup failure
-    </a>
+  SnapshotResumeFailureFooter: () => (
+    <div data-testid="snapshot-resume-failure-footer">Startup failure</div>
   ),
 }));
 
@@ -341,8 +339,8 @@ describe('SandboxPage', () => {
     renderPage();
 
     expect(screen.getByTestId('startup')).toHaveAttribute(
-      'href',
-      '/?prompt=Fix+the+build&model=openrouter%2Fopenai%2Fgpt-5.4&environmentId=env-1',
+      'data-prompt',
+      'Fix the build',
     );
     expect(screen.queryByTestId('product-tips')).not.toBeInTheDocument();
     expect(screen.queryByTestId('draft-prompt-banner')).not.toBeInTheDocument();
