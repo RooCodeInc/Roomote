@@ -280,7 +280,8 @@ on the old settings, and the next turn (including its sub-agents) uses the new
 ones. Overrides persist for the life of the task, including snapshot resumes,
 and **Reset to defaults** returns every role to the deployment configuration.
 
-You can also just ask the agent — for example "switch to Fable 5 with max
+When a message continues an existing task from the web or a connected chat,
+you can also just ask the agent — for example "switch to Fable 5 with max
 reasoning for the rest of this task". The agent applies the same change
 through its task-management tool, subject to the same allowed-models list.
 
@@ -292,6 +293,11 @@ omit the choice to use the deployment default. An unavailable model is rejected
 before launch, so Fast can correct the selection without consuming its launch
 attempt. The chosen model applies to the delegated task just as if it had been
 selected when starting a task from the web app.
+
+In a direct message or channel, include the model and reasoning level in the
+request — for example "use Fable 5 with max reasoning for this task". Fast
+applies that choice to the repository task it delegates. It does not change
+Fast's own orchestration model or the deployment defaults.
 
 A single Fast turn can launch multiple independent tasks, so one request can
 delegate separate workstreams without waiting for each task to finish first.
