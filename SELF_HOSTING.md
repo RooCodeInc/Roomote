@@ -956,9 +956,12 @@ Backups should include at minimum:
 - The Redis volume if you need queue/session recovery across host loss.
 - The MinIO `minio_data` volume, or the external object store bucket if you
   replace bundled MinIO.
-- The `gbrain_data` volume when the Brain is enabled — it is the memory
-  system of record (markdown files); the `gbrain` Postgres database is a
-  rebuildable index over it.
+- The `gbrain_data` volume AND the `gbrain` Postgres database when the Brain
+  is enabled. The volume holds the memory system of record (markdown files);
+  the database holds the index, extracted facts, and durable jobs — and the
+  volume's storage-layout marker means gbrain will not rebuild the database
+  on its own after a restore, so both must travel together (`roomote backup`
+  bundles both).
 - `.env.production` in your secret store.
 - Caddy volumes `caddy_data` and `caddy_config`.
 - Any Docker worker containers you intentionally keep for debugging are

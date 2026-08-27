@@ -807,10 +807,25 @@ cmd_backup() {
     archive_volume "$redis_volume" "$staging_dir" redis-data.tar
   fi
 
+  brain_database_included='false'
   if [ "$brain_included" = 'true' ]; then
     log "Snapshotting the Brain memory volume"
     gbrain_volume="$(container_volume_name gbrain /data)"
     archive_volume "$gbrain_volume" "$staging_dir" gbrain-data.tar
+    # The gbrain entrypoint keeps its index, extracted facts, and durable
+    # jobs in a separate database on the same server, and the restored
+    # volume's storage-layout marker stops it from reinitializing — so a
+    # volume-only bundle would restore into an empty index the entrypoint
+    # never rebuilds. Dump it on the same consistency point (gbrain is
+    # already stopped above). The database name is validated by the
+    # entrypoint to [A-Za-z0-9_], which is what makes the URL surgery safe.
+    if postgres_command '' 'GB="${GBRAIN_DATABASE_NAME:-gbrain}"; psql "$DATABASE_URL" -Atqc "SELECT 1 FROM pg_database WHERE datname = '\''$GB'\''" | grep -q 1'; then
+      log "Dumping the Brain index database"
+      postgres_command '' 'GB="${GBRAIN_DATABASE_NAME:-gbrain}"; pg_dump --clean --if-exists --no-owner --no-privileges "${DATABASE_URL%/*}/$GB"'         >"$staging_dir/gbrain.sql"
+      brain_database_included='true'
+    else
+      log "The Brain index database does not exist yet; bundling the volume only"
+    fi
   fi
 
   roomote_version="$(read_env_value ROOMOTE_VERSION)"
@@ -837,6 +852,7 @@ cmd_backup() {
   },
   "brain": {
     "included": $brain_included,
+    "databaseIncluded": $brain_database_included,
     "consistency": "gbrain stopped with application writers; markdown volume and Postgres index share the dump's consistency point"
   }
 }
@@ -995,6 +1011,16 @@ cmd_restore() {
     validate_volume_archive "$staging_dir/gbrain-data.tar"
     brain_included='true'
   fi
+  brain_database_included='false'
+  if awk '
+    /"brain"[[:space:]]*:/ { in_brain = 1; next }
+    in_brain && /"databaseIncluded"[[:space:]]*:[[:space:]]*true/ { found = 1; exit }
+    in_brain && /}/ { exit }
+    END { exit !found }
+  ' "$staging_dir/manifest.json"; then
+    [ -f "$staging_dir/gbrain.sql" ] || die "the Brain index database is marked as included but its dump is missing"
+    brain_database_included='true'
+  fi
   if grep -Eq '"mode"[[:space:]]*:[[:space:]]*"local-minio"' "$staging_dir/manifest.json"; then
     [ -f "$staging_dir/minio-data.tar" ] || die "local MinIO data is missing"
     validate_volume_archive "$staging_dir/minio-data.tar"
@@ -1059,6 +1085,15 @@ cmd_restore() {
   log "Restoring PostgreSQL"
   postgres_command '' 'psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c "DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public;"'
   postgres_command "$staging_dir/postgres.sql" 'psql "$DATABASE_URL" -v ON_ERROR_STOP=1'
+
+  if [ "$brain_database_included" = 'true' ]; then
+    # Loaded before gbrain first starts: the restored volume carries the
+    # storage-layout marker, so the entrypoint will trust — not rebuild —
+    # whatever this database contains.
+    log "Restoring the Brain index database"
+    postgres_command '' 'GB="${GBRAIN_DATABASE_NAME:-gbrain}"; psql "$DATABASE_URL" -Atqc "SELECT 1 FROM pg_database WHERE datname = '\''$GB'\''" | grep -q 1 || psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c "CREATE DATABASE \"$GB\""'
+    postgres_command "$staging_dir/gbrain.sql" 'GB="${GBRAIN_DATABASE_NAME:-gbrain}"; psql "${DATABASE_URL%/*}/$GB" -v ON_ERROR_STOP=1'
+  fi
 
   log "Starting the restored Roomote release"
   compose up -d --wait --wait-timeout 600
