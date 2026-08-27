@@ -31,7 +31,9 @@ export const fastAgentConversationSchema = z.discriminatedUnion('surface', [
   z.object({
     surface: z.literal('slack'),
     ...fastAgentConversationIdentitySchema,
-    replyTarget: fastAgentReplyTargetSchema,
+    replyTarget: fastAgentReplyTargetSchema.extend({
+      threadId: z.string().min(1),
+    }),
   }),
   z.object({
     surface: z.literal('discord'),
