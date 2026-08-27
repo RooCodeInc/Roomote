@@ -73,7 +73,7 @@ function SessionInfoPanel({
   const inferenceCostLabel = formatInferenceCost(session.inferenceCostMicroUsd);
 
   return (
-    <>
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
       <SandboxSidePanelHeader
         title="Session info"
         closeLabel="Close session info"
@@ -114,7 +114,7 @@ function SessionInfoPanel({
           </tbody>
         </table>
       </div>
-    </>
+    </div>
   );
 }
 
