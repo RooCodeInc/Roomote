@@ -61,6 +61,7 @@ import {
 } from '../task-run-queue';
 import { LLM_TITLE_LOCKED_CHECKPOINT } from '../llm-task-title';
 import { applyTaskModelSelectionToRun } from '../task-model-selection';
+import { getPrSha } from '../workflows/utils';
 
 const createdTaskIds: string[] = [];
 const createdUserIds: string[] = [];
@@ -1807,6 +1808,93 @@ describe('enqueueTask PR linkage', () => {
     expect(persistedLinkage?.githubReactionId).toBe(101);
     expect(persistedLinkage?.githubCheckRunId).toBe(202);
     expect(persistedLinkage?.githubReviewCommentId).toBe(303);
+  });
+
+  it('anchors getPrSha on the previously reviewed head, not the bumped linkage', async () => {
+    const prNumber = 81;
+    const reviewedSha = '1'.repeat(40);
+    const pushedSha = '2'.repeat(40);
+    const prUrl = `https://github.com/acme/widgets/pull/${prNumber}`;
+    const makeTask = (headSha: string) =>
+      ({
+        type:
+          headSha === reviewedSha
+            ? TaskPayloadKind.GithubPrReview
+            : TaskPayloadKind.GithubPrReviewSync,
+        requestedWorkKindDecision: explicitWorkKind,
+        payload: {
+          repo: 'acme/widgets',
+          prNumber,
+          prTitle: 'Anchor on the reviewed head',
+          prUrl,
+          headSha,
+        },
+      }) as FreshTaskLaunch['task'];
+    const makeLinkage = (prSha: string) => ({
+      provider: 'github' as const,
+      repository: 'acme/widgets',
+      prNumber,
+      prUrl,
+      prTitle: 'Anchor on the reviewed head',
+      prSha,
+    });
+
+    const reviewRun = await enqueueTask(
+      {
+        task: makeTask(reviewedSha),
+        initiator: { kind: 'automation', key: 'review_code' },
+        workflow: 'pr_review',
+        surface: 'github',
+        trigger: 'webhook',
+        prLinkage: makeLinkage(reviewedSha),
+      },
+      { enqueue: false, skipEarlyTitleGeneration: true },
+    );
+    createdTaskIds.push(reviewRun.taskId);
+
+    await db
+      .update(taskRuns)
+      .set({
+        status: RunStatus.Completed,
+        startedAt: new Date(),
+        completedAt: new Date(),
+      })
+      .where(eq(taskRuns.id, reviewRun.id));
+    await db
+      .update(tasks)
+      .set({ state: 'completed' })
+      .where(eq(tasks.id, reviewRun.taskId));
+
+    // A push launches the sync onto the same task and bumps the shared
+    // linkage row to the new head before the sync run builds its prompt.
+    const syncRun = await enqueueTask(
+      {
+        existingTaskId: reviewRun.taskId,
+        task: makeTask(pushedSha),
+        initiator: { kind: 'automation', key: 'review_code' },
+        workflow: 'pr_review',
+        surface: 'github',
+        trigger: 'webhook',
+        prLinkage: makeLinkage(pushedSha),
+      },
+      { enqueue: false, skipEarlyTitleGeneration: true },
+    );
+
+    const linkage = await db.query.taskPullRequests.findFirst({
+      where: eq(taskPullRequests.taskId, reviewRun.taskId),
+    });
+    expect(linkage?.prSha).toBe(pushedSha);
+
+    // The sync's anchor must be the head the prior review actually covered.
+    // Reading the bumped linkage here made last_review_sha equal the fresh
+    // head, so syncs reported "no new commits" despite real pushes.
+    await expect(
+      getPrSha({
+        currentRunId: syncRun.id,
+        repo: 'acme/widgets',
+        prNumber,
+      }),
+    ).resolves.toBe(reviewedSha);
   });
 
   it('serializes concurrent first reviews into one durable PR task', async () => {

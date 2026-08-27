@@ -23,6 +23,7 @@ import {
   isNotNull,
   desc,
   asc,
+  sql,
 } from '@roomote/db/server';
 import {
   Schemas,
@@ -896,7 +897,17 @@ export async function getPrSha({
   }
 
   const [result] = await db
-    .select({ prSha: taskPullRequests.prSha })
+    .select({
+      prSha: taskPullRequests.prSha,
+      // The run's own payload head, immutable once launched. The linkage
+      // row's prSha is NOT a reliable anchor: a sync launched onto the
+      // existing review task updates that shared row to the incoming head
+      // before this query runs, so reading it through a sibling run returns
+      // the new head as the "previous" one — the sync then sees
+      // last_review_sha == current_head_sha and reports no new commits
+      // despite real pushes (observed on live sync reviews, 2026-08-27).
+      payloadHeadSha: sql<string | null>`${taskRuns.payload}->>'headSha'`,
+    })
     .from(taskPullRequests)
     .innerJoin(tasks, eq(tasks.id, taskPullRequests.taskId))
     .innerJoin(taskRuns, eq(taskRuns.taskId, tasks.id))
@@ -904,7 +915,7 @@ export async function getPrSha({
     .orderBy(desc(taskRuns.createdAt))
     .limit(1);
 
-  return result?.prSha ?? undefined;
+  return result?.payloadHeadSha ?? result?.prSha ?? undefined;
 }
 
 export async function getPrReviewCommentId({
