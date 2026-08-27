@@ -195,6 +195,7 @@ export function createFastAgentWebTaskLauncher(params: {
     userId: params.userId,
     surface: 'web',
     taskUrlCampaign: 'fast-delegation',
+    rendersTaskLink: true,
     buildTask: ({ prompt, environmentId, model, parentSessionId }) => ({
       type: TaskPayloadKind.StandardTask,
       payload: {

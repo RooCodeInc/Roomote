@@ -2,7 +2,7 @@
 
 import { useQuery } from '@tanstack/react-query';
 
-import { Bot, ChevronRight, Skeleton } from '@/components/system';
+import { ChevronRight, Skeleton } from '@/components/system';
 import { TaskStatusIndicator } from '@/components/sandbox';
 import { useTRPC } from '@/trpc/client';
 
@@ -29,16 +29,13 @@ export function DelegatedTaskCard({
   return (
     <button
       type="button"
-      className="group my-2 flex w-full items-center gap-3 rounded-xl border bg-card px-4 py-3 text-left transition-colors hover:bg-accent/50"
+      className="group my-2 flex w-full cursor-pointer items-center gap-3 rounded-xl bg-card px-4 py-3 text-left transition-colors hover:bg-accent/50"
       onClick={() => onOpen(taskId)}
-      aria-label={`View delegated task: ${title}`}
+      aria-label={`View coding task: ${title}`}
     >
-      <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground">
-        <Bot className="size-4" />
-      </span>
       <span className="min-w-0 flex-1">
         <span className="block text-xs text-muted-foreground">
-          Delegated task
+          Started coding task
         </span>
         {isPending ? (
           <Skeleton className="mt-1 h-4 w-2/3" />

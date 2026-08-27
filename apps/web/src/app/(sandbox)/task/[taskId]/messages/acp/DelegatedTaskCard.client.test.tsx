@@ -43,9 +43,10 @@ describe('DelegatedTaskCard', () => {
     );
 
     expect(screen.getByText('Fix checkout')).toBeInTheDocument();
+    expect(screen.getByText('Started coding task')).toBeInTheDocument();
     expect(screen.getByText('Working')).toBeInTheDocument();
     fireEvent.click(
-      screen.getByRole('button', { name: 'View delegated task: Fix checkout' }),
+      screen.getByRole('button', { name: 'View coding task: Fix checkout' }),
     );
     expect(onOpen).toHaveBeenCalledWith('child-1');
 
