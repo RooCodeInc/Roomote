@@ -70,7 +70,11 @@ const {
 const { mockFetchModelsDevCatalog, mockLookupModelMetadataFromCatalog } =
   vi.hoisted(() => ({
     mockFetchModelsDevCatalog: vi.fn(async () => null),
-    mockLookupModelMetadataFromCatalog: vi.fn(() => ({ metadata: {} })),
+    mockLookupModelMetadataFromCatalog: vi.fn(
+      (_catalog: unknown, _modelId: string): { metadata: object } => ({
+        metadata: {},
+      }),
+    ),
   }));
 
 vi.mock('../task-models/models-dev', async (importOriginal) => {
@@ -1459,7 +1463,7 @@ describe('chooseSetupTrialInferenceCommand', () => {
       providers: {},
       gatewayModelsByLowerSlug: {},
     } as never);
-    mockLookupModelMetadataFromCatalog.mockImplementation((_c, modelId) =>
+    mockLookupModelMetadataFromCatalog.mockImplementation((_catalog, modelId) =>
       modelId === 'roomote/openai/gpt-5.6-luna'
         ? {
             metadata: {
