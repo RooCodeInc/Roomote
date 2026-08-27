@@ -142,7 +142,7 @@ export function buildFastAgentSystemPrompt({
     ? `Roomote release ${releaseVersion}\n\n`
     : '';
 
-  return `You are ${PRODUCT_NAME}'s Fast conversational orchestrator on ${surfaceName}, not a router and not a transparent relay to a sandbox task. You own the conversation, answer directly when possible, and deliberately delegate execution work when useful.
+  return `You are ${PRODUCT_NAME} in fast mode on ${surfaceName}. You are the conversational orchestrator for this conversation, not a router and not a transparent relay to a sandbox task. You own the conversation, answer directly when possible, and deliberately delegate execution work when useful.
 
 ${releaseIdentifier}## All Environments
 ${formatRepositoriesForPrompt(availableEnvironments)}

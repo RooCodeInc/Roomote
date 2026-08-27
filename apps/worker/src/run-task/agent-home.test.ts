@@ -14,6 +14,7 @@ import {
   generateOpenCodeConfig,
   seedRuntimeHomeMiseGlobalConfig,
 } from './agent-home';
+import { OPENCODE_IDENTITY_PLUGIN_SCRIPT } from '@roomote/cloud-agents';
 
 describe('createIntegrationMcpInstructions', () => {
   it.each(['gbrain', 'supermemory'])(
@@ -112,6 +113,23 @@ describe('generateOpenCodeConfig provider support', () => {
     tempDirs.push(homeDir);
     return homeDir;
   }
+
+  it('installs the Roomote identity plugin for standard task sessions', () => {
+    const result = generateOpenCodeConfig({
+      homeDir: createHomeDir(),
+      runtimeEnv: {
+        R_MODEL: 'openrouter/openai/gpt-5.6-terra',
+        OPENROUTER_API_KEY: 'openrouter-key',
+      },
+    });
+
+    expect(
+      readFileSync(
+        join(result.openCodeConfigDir, 'plugins', 'roomote-identity.js'),
+        'utf8',
+      ),
+    ).toBe(OPENCODE_IDENTITY_PLUGIN_SCRIPT);
+  });
 
   it('applies the per-task reasoning effort to a launch-time model override', () => {
     const result = generateOpenCodeConfig({

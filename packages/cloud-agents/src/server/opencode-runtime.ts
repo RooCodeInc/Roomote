@@ -1,6 +1,10 @@
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { createHash } from 'node:crypto';
+import { mkdtempSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 import {
   collectOpenRouterVariantModelAlias,
@@ -28,6 +32,7 @@ import {
   ROOMOTE_OPENCODE_JUDGE_AGENT_DESCRIPTION,
   ROOMOTE_OPENCODE_JUDGE_AGENT_NAME,
 } from '../opencode-prompt-subagents';
+import { OPENCODE_IDENTITY_PLUGIN_SCRIPT } from '../opencode-identity-plugin';
 import { FAST_AGENT_SUBAGENT_TOOL_FILTER } from './fast-agent/fast-agent-tool-policy';
 
 const ESCAPE_CHARACTER = String.fromCharCode(27);
@@ -221,6 +226,23 @@ type NonTaskOpenCodeRuntimeOptions = {
   promptOnlySubagents?: boolean;
 };
 
+let openCodeIdentityPluginUrl: string | undefined;
+
+function getOpenCodeIdentityPluginUrl(): string {
+  if (openCodeIdentityPluginUrl) {
+    return openCodeIdentityPluginUrl;
+  }
+
+  const directory = mkdtempSync(join(tmpdir(), 'roomote-opencode-identity-'));
+  const pluginPath = join(directory, 'roomote-identity.mjs');
+  writeFileSync(pluginPath, OPENCODE_IDENTITY_PLUGIN_SCRIPT, {
+    encoding: 'utf8',
+    mode: 0o600,
+  });
+  openCodeIdentityPluginUrl = pathToFileURL(pluginPath).href;
+  return openCodeIdentityPluginUrl;
+}
+
 function buildRestrictedNonTaskConfig(
   options: NonTaskOpenCodeRuntimeOptions,
 ): Record<string, unknown> {
@@ -230,6 +252,7 @@ function buildRestrictedNonTaskConfig(
 
   return {
     agent: PROMPT_ONLY_SUBAGENTS,
+    plugin: [getOpenCodeIdentityPluginUrl()],
     permission: { ...NON_TASK_TOOL_PERMISSION_DENIALS, task: 'allow' },
   };
 }

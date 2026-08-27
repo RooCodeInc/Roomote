@@ -208,6 +208,9 @@ describe('buildOpenCodeCliEnv', () => {
       ...NON_TASK_TOOL_PERMISSION_DENIALS,
       task: 'allow',
     });
+    expect(config.plugin).toEqual([
+      expect.stringMatching(/^file:\/\/.*roomote-identity\.mjs$/u),
+    ]);
     expect(Object.keys(config.agent)).toEqual(['advisor', 'judge']);
 
     for (const agentName of ['advisor', 'judge']) {
