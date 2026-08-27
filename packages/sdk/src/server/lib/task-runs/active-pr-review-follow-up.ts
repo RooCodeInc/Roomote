@@ -10,6 +10,19 @@ import {
 export const ACTIVE_PR_REVIEW_FOLLOW_UP_QUEUE_NAME =
   'active-pr-review-follow-up-jobs';
 export const ACTIVE_PR_REVIEW_FOLLOW_UP_DEBOUNCE_MS = 5_000;
+// Cover stale-heartbeat detection, the scheduled recovery pass, and enough
+// margin for run finalization before falling through to resume or relaunch.
+export const ACTIVE_PR_REVIEW_FOLLOW_UP_ATTEMPTS = 20;
+export const ACTIVE_PR_REVIEW_FOLLOW_UP_RETRY_DELAY_MS = 15_000;
+export const ACTIVE_PR_REVIEW_FOLLOW_UP_JOB_OPTIONS = {
+  attempts: ACTIVE_PR_REVIEW_FOLLOW_UP_ATTEMPTS,
+  backoff: {
+    type: 'fixed' as const,
+    delay: ACTIVE_PR_REVIEW_FOLLOW_UP_RETRY_DELAY_MS,
+  },
+  removeOnComplete: { age: 3600, count: 100 },
+  removeOnFail: { age: 24 * 3600 },
+};
 
 const taskPrLinkageSchema = z.object({
   provider: sourceControlProviderSchema,
@@ -55,12 +68,7 @@ function getActivePrReviewFollowUpQueue(): Queue<ActivePrReviewFollowUpRequest> 
       ACTIVE_PR_REVIEW_FOLLOW_UP_QUEUE_NAME,
       {
         connection: getRedis(),
-        defaultJobOptions: {
-          attempts: 3,
-          backoff: { type: 'exponential', delay: 2000 },
-          removeOnComplete: { age: 3600, count: 100 },
-          removeOnFail: { age: 24 * 3600 },
-        },
+        defaultJobOptions: ACTIVE_PR_REVIEW_FOLLOW_UP_JOB_OPTIONS,
       },
     );
   }
