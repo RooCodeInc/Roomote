@@ -45,6 +45,7 @@ import {
 import { useSandboxLayout } from '../../use-sandbox-layout';
 import { NestedTaskSidePanel } from './NestedTaskSidePanel';
 import { OpenSessionTaskPanelContext } from './session-task-panel-context';
+import { DelegatedTaskCard } from '../../task/[taskId]/messages/acp/DelegatedTaskCard';
 
 export type SessionInfo = {
   id: string;
@@ -210,6 +211,39 @@ function SessionTaskPanel({
   );
 }
 
+function SessionTasksPanel({
+  tasks,
+  onOpenTask,
+  onClose,
+}: {
+  tasks: SessionTaskSummary[];
+  onOpenTask: (taskId: string) => void;
+  onClose: () => void;
+}) {
+  return (
+    <FramedSurface
+      frameClassName="p-0"
+      surfaceClassName="relative flex flex-col overflow-hidden"
+    >
+      <SandboxSidePanelHeader
+        title="Tasks"
+        closeLabel="Close tasks"
+        onClose={onClose}
+      />
+      <div className="scroll-thin min-h-0 flex-1 overflow-y-auto px-4 py-2">
+        {tasks.map((task) => (
+          <DelegatedTaskCard
+            key={task.taskId}
+            taskId={task.taskId}
+            prompt={task.title}
+            onOpen={onOpenTask}
+          />
+        ))}
+      </div>
+    </FramedSurface>
+  );
+}
+
 function SessionInfoPanel({
   session,
   onClose,
@@ -322,6 +356,7 @@ export function SessionWorkspace({
   children: ReactNode;
 }) {
   const [isInfoOpen, setIsInfoOpen] = useState(false);
+  const [isTasksOpen, setIsTasksOpen] = useState(false);
   const [nestedTaskId, setNestedTaskId] = useState<string | null>(null);
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -330,7 +365,7 @@ export function SessionWorkspace({
     (task) => task.taskId === selectedTaskId,
   );
   const panelOpen =
-    isInfoOpen || Boolean(selectedTask) || Boolean(nestedTaskId);
+    isInfoOpen || isTasksOpen || Boolean(selectedTask) || Boolean(nestedTaskId);
 
   const selectTask = useCallback(
     (taskId: string | null) => {
@@ -344,14 +379,15 @@ export function SessionWorkspace({
   );
 
   useEffect(() => {
-    if (!selectedTaskId && session.tasks.length === 1) {
+    if (!isTasksOpen && !selectedTaskId && session.tasks.length === 1) {
       selectTask(session.tasks[0]!.taskId);
     }
-  }, [selectTask, selectedTaskId, session.tasks]);
+  }, [isTasksOpen, selectTask, selectedTaskId, session.tasks]);
 
   const openTaskPanel = useCallback(
     (taskId: string) => {
       setIsInfoOpen(false);
+      setIsTasksOpen(false);
       setNestedTaskId(taskId);
       selectTask(null);
     },
@@ -359,6 +395,7 @@ export function SessionWorkspace({
   );
   const closePanel = () => {
     setIsInfoOpen(false);
+    setIsTasksOpen(false);
     setNestedTaskId(null);
     selectTask(null);
   };
@@ -370,6 +407,12 @@ export function SessionWorkspace({
       task={selectedTask}
       tasks={session.tasks}
       onSelect={selectTask}
+      onClose={closePanel}
+    />
+  ) : isTasksOpen ? (
+    <SessionTasksPanel
+      tasks={session.tasks}
+      onOpenTask={openTaskPanel}
       onClose={closePanel}
     />
   ) : (
@@ -391,25 +434,26 @@ export function SessionWorkspace({
                 active={isInfoOpen && !selectedTask && !nestedTaskId}
                 icon={Info}
                 onClick={() => {
+                  setIsTasksOpen(false);
                   setNestedTaskId(null);
                   selectTask(null);
                   setIsInfoOpen((previous) => !previous);
                 }}
               />
-              {session.tasks.length ? (
-                <SideNavItem
-                  side="right"
-                  label="Executions"
-                  tooltip="Executions"
-                  active={Boolean(selectedTask)}
-                  icon={Rows4}
-                  onClick={() => {
-                    setNestedTaskId(null);
-                    setIsInfoOpen(false);
-                    selectTask(selectedTask ? null : session.tasks[0]!.taskId);
-                  }}
-                />
-              ) : null}
+              <SideNavItem
+                side="right"
+                label="Tasks"
+                tooltip="Tasks"
+                active={isTasksOpen}
+                disabled={session.tasks.length === 0}
+                icon={Rows4}
+                onClick={() => {
+                  setNestedTaskId(null);
+                  setIsInfoOpen(false);
+                  selectTask(null);
+                  setIsTasksOpen((previous) => !previous);
+                }}
+              />
             </SandboxSideActions>
             {!isSidebarVisible && !panelOpen ? (
               <BasicTooltip content="Show sidebar">

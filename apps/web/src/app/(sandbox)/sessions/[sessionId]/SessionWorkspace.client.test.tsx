@@ -30,6 +30,26 @@ vi.mock('./NestedTaskSidePanel', () => ({
   ),
 }));
 
+vi.mock('../../task/[taskId]/messages/acp/DelegatedTaskCard', () => ({
+  DelegatedTaskCard: ({
+    taskId,
+    prompt,
+    onOpen,
+  }: {
+    taskId: string;
+    prompt: string | null;
+    onOpen: (taskId: string) => void;
+  }) => (
+    <button
+      type="button"
+      aria-label={`View coding task: ${prompt}`}
+      onClick={() => onOpen(taskId)}
+    >
+      {prompt}
+    </button>
+  ),
+}));
+
 const session: SessionInfo = {
   id: 'session-1',
   ownerName: 'Test User',
@@ -63,15 +83,19 @@ function SandboxLayoutProvider({ children }: { children: ReactNode }) {
 function renderWorkspace({
   isMobile,
   children = <div>Session transcript</div>,
+  sessionOverride,
 }: {
   isMobile: boolean;
   children?: ReactNode;
+  sessionOverride?: Partial<SessionInfo>;
 }) {
   useMediaQueryMock.mockReturnValue(!isMobile);
 
   render(
     <SandboxLayoutProvider>
-      <SessionWorkspace session={session}>{children}</SessionWorkspace>
+      <SessionWorkspace session={{ ...session, ...sessionOverride }}>
+        {children}
+      </SessionWorkspace>
     </SandboxLayoutProvider>,
   );
 }
@@ -132,6 +156,46 @@ describe('SessionWorkspace', () => {
     expect(
       screen.getByRole('button', { name: 'Close session info' }),
     ).toBeInTheDocument();
+  });
+
+  it('disables the Tasks panel button until the session has a task', () => {
+    renderWorkspace({ isMobile: false });
+
+    expect(screen.getByRole('button', { name: 'Tasks' })).toBeDisabled();
+  });
+
+  it('lists session tasks with delegated task cards', () => {
+    renderWorkspace({
+      isMobile: false,
+      sessionOverride: {
+        tasks: [
+          {
+            taskId: 'task-1',
+            title: 'Update homepage background',
+            workflow: 'standard',
+            state: 'active',
+            repositoryName: null,
+            latestOutput: null,
+            inferenceCostMicroUsd: 0,
+            canAccessDetails: true,
+            latestRun: null,
+            artifacts: [],
+            pullRequests: [],
+          },
+        ],
+      },
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Tasks' }));
+
+    expect(screen.getByRole('heading', { name: 'Tasks' })).toBeInTheDocument();
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: 'View coding task: Update homepage background',
+      }),
+    );
+
+    expect(screen.getByText('Nested panel task-1')).toBeInTheDocument();
   });
 
   it('opens delegated tasks in the existing session side-panel slot', () => {
