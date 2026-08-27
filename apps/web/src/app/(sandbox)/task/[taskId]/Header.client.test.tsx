@@ -181,6 +181,7 @@ describe('Header', () => {
 
     expect(parentSessionQueryMock).not.toHaveBeenCalled();
     expect(screen.queryByRole('link', { name: 'Sessions' })).toBeNull();
+    expect(screen.queryByRole('link', { name: /Go to session/ })).toBeNull();
   });
 
   it('renders Session breadcrumbs while Sessions UI is enabled', async () => {
@@ -191,6 +192,10 @@ describe('Header', () => {
     expect(
       await screen.findByRole('link', { name: 'Parent Session' }),
     ).toHaveAttribute('href', '/sessions/session-1?task=task-123');
+    expect(screen.getByRole('link', { name: /Go to session/ })).toHaveAttribute(
+      'href',
+      '/sessions/session-1?task=task-123',
+    );
   });
 
   it('refreshes task lists after renaming a task', async () => {

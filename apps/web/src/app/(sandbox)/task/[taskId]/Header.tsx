@@ -8,6 +8,7 @@ import { toast } from 'sonner';
 import {
   ArrowLeftFromLine,
   Button,
+  ExternalLink,
   Dialog,
   DialogContent,
   DialogFooter,
@@ -241,6 +242,14 @@ export const Header = ({ session: { taskRun, task, taskId } }: HeaderProps) => {
             ))}
           </div>
         )}
+        {parentSession ? (
+          <Button asChild variant="ghost" size="sm" className="shrink-0">
+            <Link href={`/sessions/${parentSession.sessionId}?task=${taskId}`}>
+              Go to session
+              <ExternalLink />
+            </Link>
+          </Button>
+        ) : null}
         {!isSidebarVisible && (
           <Button
             variant="ghost"
