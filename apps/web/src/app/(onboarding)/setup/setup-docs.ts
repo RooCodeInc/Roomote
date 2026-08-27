@@ -18,6 +18,7 @@ const SETUP_DOC_PATHS: Record<SetupDocsStep, string | null> = {
   'auth-provider': 'communications',
   'auth-env-vars': 'communications',
   slack: 'providers/communications/slack',
+  inference: 'models',
   'env-vars': 'models',
   'source-control-provider': 'source-control',
   'source-control-config': 'source-control',

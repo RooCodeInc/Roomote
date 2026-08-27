@@ -47,6 +47,7 @@ const PINNABLE_SETUP_STEPS: readonly SetupStep[] = [
   'auth-provider',
   'auth-env-vars',
   'slack',
+  'inference',
   'env-vars',
   'source-control-provider',
   'source-control-config',
@@ -393,6 +394,24 @@ export function useSetupFlow(
             )?.setupSatisfied ??
               false)
           );
+        case 'inference': {
+          const trialInferenceAvailable = status.modelSetup.providers?.some(
+            (provider) => provider.trialKeySatisfied === true,
+          );
+          const operatorProviderConfigured = status.modelSetup.providers?.some(
+            (provider) =>
+              provider.savedApiKeySatisfied ||
+              (provider.runtimeApiKeySatisfied && !provider.trialKeySatisfied),
+          );
+
+          return (
+            !trialInferenceAvailable ||
+            operatorProviderConfigured ||
+            status.modelSetup.runtimeRoomoteModelSatisfied ||
+            status.modelSetup.persistedRoomoteModel !== null ||
+            status.setupNewState.modelProvider !== null
+          );
+        }
         case 'env-vars':
           return status.modelSetup.setupSatisfied;
         case 'source-control-provider':
