@@ -457,6 +457,54 @@ describe('useSetupFlow', () => {
     expect(result.current.step).toBe('source-control-provider');
   });
 
+  it('returns from the trial inference choice to communication setup', async () => {
+    mockStatus({
+      authSetup: {
+        setupSatisfiedByRuntimeEnv: false,
+        selectedProvider: 'slack',
+        preselectedProvider: 'slack',
+        runtimeConfiguredProvider: null,
+        runtimeConfiguredProviders: [],
+        lockReason: null,
+        providers: [
+          {
+            id: 'slack',
+            label: 'Slack',
+            fields: [],
+            runtimeSatisfied: false,
+            savedSatisfied: false,
+            setupSatisfied: false,
+          },
+        ],
+      },
+      modelSetup: trialModelSetup(),
+      setupNewState: {
+        authProvider: 'slack',
+        modelProvider: null,
+        selectedRepositoryIds: [],
+        onboardingTaskId: null,
+        onboardingTaskStartedAt: null,
+        slackChannel: null,
+        slackThreadTs: null,
+      },
+    });
+
+    const { result } = renderHook(() => useSetupFlow());
+
+    await waitFor(() => {
+      expect(result.current.step).toBe('auth-env-vars');
+    });
+
+    act(() => result.current.goToNextStep());
+    expect(result.current.step).toBe('slack');
+
+    act(() => result.current.goToNextStep());
+    expect(result.current.step).toBe('inference');
+
+    act(() => result.current.goToPreviousStep());
+    expect(result.current.step).toBe('slack');
+  });
+
   it('offers communication setup after source control for email/password auth', async () => {
     markSetupWelcomeSeen();
     mockStatus();

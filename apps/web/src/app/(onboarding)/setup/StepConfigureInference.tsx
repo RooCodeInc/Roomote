@@ -9,6 +9,7 @@ import { ArrowRight, Button, Spinner } from '@/components/system';
 import { cn } from '@/lib/utils';
 
 import { StepTitle } from './StepTitle';
+import { SetupFooter } from './SetupFooter';
 import { getSetupStepDefinition } from './types';
 
 const INFERENCE_STEP = getSetupStepDefinition('inference');
@@ -16,9 +17,11 @@ const INFERENCE_STEP = getSetupStepDefinition('inference');
 export function StepConfigureInference({
   onUseTrial,
   onConfigureProvider,
+  onBack,
 }: {
   onUseTrial: () => void;
   onConfigureProvider: () => void;
+  onBack?: () => void;
 }) {
   const trpc = useTRPC();
   const queryClient = useQueryClient();
@@ -87,6 +90,8 @@ export function StepConfigureInference({
         <p className="text-sm text-foreground/50">
           Roomote trial inference goes through OpenRouter.
         </p>
+
+        <SetupFooter onBack={onBack} />
       </div>
     </div>
   );

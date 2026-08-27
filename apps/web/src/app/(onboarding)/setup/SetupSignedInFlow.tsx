@@ -359,6 +359,7 @@ export function SetupSignedInFlow() {
               onConfigureProvider={() =>
                 goToStep('env-vars', { revisit: true })
               }
+              onBack={canGoBack ? goToPreviousStep : undefined}
             />
           )}
           {step === 'env-vars' && (

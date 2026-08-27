@@ -60,6 +60,15 @@ vi.mock('./StepTitle', () => ({
   StepTitle: ({ text }: { text: string }) => <h1>{text}</h1>,
 }));
 
+vi.mock('./SetupFooter', () => ({
+  SetupFooter: ({ onBack }: { onBack?: () => void }) =>
+    onBack ? (
+      <button type="button" onClick={onBack}>
+        Back
+      </button>
+    ) : null,
+}));
+
 const mockUseMutation = vi.mocked(useMutation);
 const mockUseQueryClient = vi.mocked(useQueryClient);
 
@@ -145,5 +154,20 @@ describe('StepConfigureInference', () => {
 
     expect(onConfigureProvider).toHaveBeenCalledOnce();
     expect(mutateMock).not.toHaveBeenCalled();
+  });
+
+  it('returns to the preceding setup step', () => {
+    const onBack = vi.fn();
+    render(
+      <StepConfigureInference
+        onUseTrial={vi.fn()}
+        onConfigureProvider={vi.fn()}
+        onBack={onBack}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+
+    expect(onBack).toHaveBeenCalledOnce();
   });
 });
