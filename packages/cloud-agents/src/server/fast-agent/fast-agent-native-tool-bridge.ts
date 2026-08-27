@@ -48,6 +48,10 @@ import {
   SHOW_WIDGET_MAX_TITLE_CHARS,
   SHOW_WIDGET_THEME_GUIDANCE,
 } from '../show-widget';
+import {
+  isRoomoteTaskSandboxHost,
+  shouldOverrideFastProjectConfigForTaskSandbox,
+} from './fast-agent-runtime-context';
 
 export {
   FAST_AGENT_NATIVE_TOOL_FILTER,
@@ -197,6 +201,19 @@ const loadSkillArgsSchema = z.object({
   id: z.string().min(1),
   resource: z.string().min(1).optional(),
 });
+
+function normalizeTaskSandboxSkillArgs(
+  args: Record<string, unknown>,
+  optionalKeys: string[],
+): Record<string, unknown> {
+  if (!isRoomoteTaskSandboxHost()) return args;
+
+  const normalized = { ...args };
+  for (const key of optionalKeys) {
+    if (normalized[key] === null) delete normalized[key];
+  }
+  return normalized;
+}
 
 const FAST_AGENT_NATIVE_TOOL_BRIDGE_SOURCE = String.raw`
 export const invoke = async (name, args, context) => {
@@ -903,7 +920,12 @@ async function startBridge(): Promise<FastAgentNativeToolBridge> {
       }
       if (parsed.tool === FAST_AGENT_NATIVE_TOOL_NAMES.listSkills) {
         try {
-          const args = listSkillsArgsSchema.parse(parsed.args);
+          const args = listSkillsArgsSchema.parse(
+            normalizeTaskSandboxSkillArgs(parsed.args, [
+              'environmentId',
+              'repositoryId',
+            ]),
+          );
           const catalog = await activeExecutor.skillStore.list(
             args.environmentId
               ? { environmentId: args.environmentId }
@@ -942,7 +964,9 @@ async function startBridge(): Promise<FastAgentNativeToolBridge> {
       if (parsed.tool === FAST_AGENT_NATIVE_TOOL_NAMES.loadSkill) {
         let document: FastAgentSkillDocument;
         try {
-          const args = loadSkillArgsSchema.parse(parsed.args);
+          const args = loadSkillArgsSchema.parse(
+            normalizeTaskSandboxSkillArgs(parsed.args, ['resource']),
+          );
           document = await activeExecutor.skillStore.read(
             args.id,
             args.resource,
@@ -1139,9 +1163,19 @@ export async function getFastAgentNativeToolRuntime(
   const bridge = await bridgePromise;
   let runtime = sessionRuntimes.get(sessionId);
   if (!runtime) {
+    const enableGeneratedProjectConfig =
+      shouldOverrideFastProjectConfigForTaskSandbox();
     runtime = {
       directory: createRuntimeDirectory(sessionId),
-      env: bridge.env,
+      env: {
+        ...bridge.env,
+        // Only Roomote-on-Roomote hosts inherit the outer coding harness's
+        // project-config restriction. Their Fast child runs from a private,
+        // Roomote-generated directory and must discover its generated tools.
+        ...(enableGeneratedProjectConfig
+          ? { OPENCODE_DISABLE_PROJECT_CONFIG: '0' }
+          : {}),
+      },
       mcpCapability: randomBytes(32).toString('hex'),
     };
     sessionRuntimes.set(sessionId, runtime);

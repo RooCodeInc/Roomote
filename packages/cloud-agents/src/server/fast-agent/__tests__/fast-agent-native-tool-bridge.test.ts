@@ -41,6 +41,7 @@ import {
   FastAgentSkillStore,
 } from '../fast-agent-skill-store';
 import { callMcpTool, listMcpTools } from '../../mcp-tool-client';
+import { buildOpenCodeCliEnv } from '../../opencode-runtime';
 import { buildFastAgentToolFilter } from '../fast-agent-tool-policy';
 
 function stringWithSerializedByteLength(byteLength: number): string {
@@ -200,6 +201,117 @@ describe('Fast native OpenCode tool bridge', () => {
       FAST_AGENT_NATIVE_TOOL_NAMES.spillRead,
     ]) {
       expect(FAST_AGENT_SUBAGENT_TOOL_FILTER[parentOnlyTool]).not.toBe(true);
+    }
+  });
+
+  it('overrides inherited project config only for a Roomote-on-Roomote Fast host', async () => {
+    const inheritedProjectConfigMode =
+      process.env.OPENCODE_DISABLE_PROJECT_CONFIG;
+    const inheritedTaskId = process.env.ROOMOTE_TASK_ID;
+    process.env.OPENCODE_DISABLE_PROJECT_CONFIG = '1';
+    delete process.env.ROOMOTE_TASK_ID;
+    try {
+      const ordinaryRuntime = await getFastAgentNativeToolRuntime(
+        'ordinary-project-config-child',
+        [],
+      );
+      expect(ordinaryRuntime.env).not.toHaveProperty(
+        'OPENCODE_DISABLE_PROJECT_CONFIG',
+      );
+      expect(
+        buildOpenCodeCliEnv(ordinaryRuntime.env)
+          .OPENCODE_DISABLE_PROJECT_CONFIG,
+      ).toBe('1');
+
+      process.env.ROOMOTE_TASK_ID = 'outer-coding-task';
+      const nestedRuntime = await getFastAgentNativeToolRuntime(
+        'roomote-on-roomote-project-config-child',
+        [],
+      );
+
+      expect(nestedRuntime.directory).toMatch(
+        /roomote-fast-opencode\/[a-f0-9]{64}$/u,
+      );
+      expect(nestedRuntime.env.OPENCODE_DISABLE_PROJECT_CONFIG).toBe('0');
+      expect(
+        buildOpenCodeCliEnv(nestedRuntime.env).OPENCODE_DISABLE_PROJECT_CONFIG,
+      ).toBe('0');
+      expect(process.env.OPENCODE_DISABLE_PROJECT_CONFIG).toBe('1');
+    } finally {
+      if (inheritedProjectConfigMode === undefined) {
+        delete process.env.OPENCODE_DISABLE_PROJECT_CONFIG;
+      } else {
+        process.env.OPENCODE_DISABLE_PROJECT_CONFIG =
+          inheritedProjectConfigMode;
+      }
+      if (inheritedTaskId === undefined) {
+        delete process.env.ROOMOTE_TASK_ID;
+      } else {
+        process.env.ROOMOTE_TASK_ID = inheritedTaskId;
+      }
+    }
+  });
+
+  it('normalizes null skill arguments only for a Roomote-on-Roomote Fast host', async () => {
+    const inheritedTaskId = process.env.ROOMOTE_TASK_ID;
+    delete process.env.ROOMOTE_TASK_ID;
+    const runtime = await getFastAgentNativeToolRuntime(
+      'roomote-on-roomote-null-skill-args',
+      [],
+    );
+    const sessionId = 'roomote-on-roomote-null-skill-args-parent';
+    const unbind = bindFastAgentNativeToolExecutor(
+      sessionId,
+      'roomote-on-roomote-null-skill-args-conversation',
+      async () => null,
+      { allowSkillAccess: true, allowSpillRecovery: true },
+    );
+    const callBridge = (tool: string, args: Record<string, unknown>) =>
+      fetch(runtime.env.ROOMOTE_FAST_TOOL_BRIDGE_URL!, {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${runtime.env.ROOMOTE_FAST_TOOL_BRIDGE_TOKEN}`,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({ sessionID: sessionId, tool, args }),
+      })
+        .then((response) => response.json())
+        .then((payload) => JSON.parse(payload.output));
+
+    try {
+      await expect(
+        callBridge(FAST_AGENT_NATIVE_TOOL_NAMES.listSkills, {
+          environmentId: null,
+          repositoryId: null,
+        }),
+      ).resolves.toEqual({
+        success: false,
+        error: 'The requested skill catalog is unavailable.',
+      });
+
+      process.env.ROOMOTE_TASK_ID = 'outer-coding-task';
+      await expect(
+        callBridge(FAST_AGENT_NATIVE_TOOL_NAMES.listSkills, {
+          environmentId: null,
+          repositoryId: null,
+        }),
+      ).resolves.toMatchObject({ success: true });
+      await expect(
+        callBridge(FAST_AGENT_NATIVE_TOOL_NAMES.loadSkill, {
+          id: 'packaged:security-review',
+          resource: null,
+        }),
+      ).resolves.toMatchObject({
+        success: true,
+        result: { resource: 'SKILL.md' },
+      });
+    } finally {
+      unbind();
+      if (inheritedTaskId === undefined) {
+        delete process.env.ROOMOTE_TASK_ID;
+      } else {
+        process.env.ROOMOTE_TASK_ID = inheritedTaskId;
+      }
     }
   });
 
