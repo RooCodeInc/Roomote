@@ -33,21 +33,40 @@ describe('OPENCODE_IDENTITY_PLUGIN_SCRIPT', () => {
     }
   }
 
-  it.each(['OpenCode', 'opencode'])(
-    'removes only the leading %s identity declaration',
-    async (productName) => {
+  it.each([
+    {
+      name: 'default prompt',
+      prompt:
+        'You are opencode, an interactive CLI tool that helps users with software engineering tasks. Use the instructions below and the tools available to you to assist the user.',
+      expected:
+        'an interactive CLI tool that helps users with software engineering tasks. Use the instructions below and the tools available to you to assist the user.',
+    },
+    {
+      name: 'Anthropic prompt',
+      prompt:
+        'You are OpenCode, the best coding agent on the planet.\n\nYou are an interactive CLI tool that helps users with software engineering tasks.',
+      expected:
+        'the best coding agent on the planet.\n\nYou are an interactive CLI tool that helps users with software engineering tasks.',
+    },
+    {
+      name: 'GPT prompt',
+      prompt:
+        "You are OpenCode, You and the user share the same workspace and collaborate to achieve the user's goals.",
+      expected:
+        "You and the user share the same workspace and collaborate to achieve the user's goals.",
+    },
+  ])(
+    'removes only the leading identity declaration from the $name',
+    async ({ prompt, expected }) => {
       const transform = await loadSystemTransformHook();
       const output = {
-        system: [
-          `You are ${productName}, You and the user share the same workspace.\n\n## Editing Approach`,
-          'You are Roomote in fast mode.',
-        ],
+        system: [prompt, 'You are Roomote in fast mode.'],
       };
 
       await transform({}, output);
 
       expect(output.system).toEqual([
-        'You and the user share the same workspace.\n\n## Editing Approach',
+        expected,
         'You are Roomote in fast mode.',
       ]);
     },
