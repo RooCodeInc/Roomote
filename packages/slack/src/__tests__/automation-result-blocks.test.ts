@@ -210,4 +210,30 @@ describe('automation result blocks', () => {
       'late_bound_automation_configure',
     ]);
   });
+
+  it('reserves top-level block capacity for automation chrome', () => {
+    const blocks = buildAutomationResultBlocks({
+      title: 'Audit',
+      iconUrl: 'https://app.example.com/automation-icons/wrench.png',
+      configureUrl: 'https://app.example.com/automations#audit',
+      contentBlocks: [
+        { type: 'markdown', text: '## Summary' },
+        ...Array.from({ length: 48 }, (_, index) => ({
+          type: 'image' as const,
+          image_url: `https://app.example.com/proof-${index + 1}.png`,
+          alt_text: `Proof ${index + 1}`,
+        })),
+      ],
+    });
+
+    expect(blocks).toHaveLength(50);
+    expect(blocks[0]?.type).toBe('context');
+    expect(blocks[1]).toEqual({ type: 'markdown', text: '## Summary' });
+    expect(blocks.at(-1)?.type).toBe('actions');
+    expect(blocks).not.toContainEqual(
+      expect.objectContaining({
+        image_url: 'https://app.example.com/proof-48.png',
+      }),
+    );
+  });
 });

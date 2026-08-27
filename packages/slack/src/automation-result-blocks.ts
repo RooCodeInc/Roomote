@@ -10,6 +10,7 @@ export const AUTOMATION_RESULT_HEADER_BLOCK_ID =
   'roomote_automation_result_header';
 
 const MAX_CONTAINER_CHILDREN = 10;
+const MAX_MESSAGE_BLOCKS = 50;
 
 export function buildAutomationResultContentBlocks(text: string): SlackBlock[] {
   return text.trim() ? [{ type: 'markdown', text }] : [];
@@ -151,6 +152,11 @@ export function buildAutomationResultBlocks(params: {
     }));
   }
 
+  const topLevelContentBlocks = contentBlocks.slice(
+    0,
+    Math.max(0, MAX_MESSAGE_BLOCKS - 1 - actionGroups.length),
+  );
+
   return [
     {
       type: 'context',
@@ -165,7 +171,7 @@ export function buildAutomationResultBlocks(params: {
         ...(params.subtitle ? [params.subtitle] : []),
       ],
     },
-    ...contentBlocks,
+    ...topLevelContentBlocks,
     ...actionGroups.map((elements, actionIndex) => ({
       type: 'actions' as const,
       block_id:
