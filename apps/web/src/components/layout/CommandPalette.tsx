@@ -113,8 +113,8 @@ function AuthorizedCommandPalette() {
       { icon: Plus, label: 'New Task', href: '/' },
       {
         icon: GalleryVerticalEnd,
-        label: user?.featureFlags?.sessions_ui ? 'Sessions' : 'Tasks',
-        href: user?.featureFlags?.sessions_ui ? '/sessions' : '/tasks',
+        label: 'Sessions',
+        href: '/sessions',
       },
       { icon: Settings, label: 'Settings', href: '/settings' },
       { icon: HelpCircle, label: 'Help', action: 'contact-support' },
@@ -137,7 +137,7 @@ function AuthorizedCommandPalette() {
       );
     }
     return items;
-  }, [user?.featureFlags?.sessions_ui, user?.isAdmin]);
+  }, [user?.isAdmin]);
 
   // Debounce search input
   useEffect(() => {

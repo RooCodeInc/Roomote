@@ -201,10 +201,10 @@ describe('CommandPalette', () => {
   it('navigates using static navigation items', () => {
     render(<CommandPalette />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Tasks' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Sessions' }));
 
     expect(setOpen).toHaveBeenCalledWith(false);
-    expect(push).toHaveBeenCalledWith('/tasks');
+    expect(push).toHaveBeenCalledWith('/sessions');
   });
 
   it('lists navigation items in the expected order', () => {
@@ -216,7 +216,7 @@ describe('CommandPalette', () => {
       .filter((label): label is string =>
         [
           'New Task',
-          'Tasks',
+          'Sessions',
           'Automations',
           'Analytics',
           'Settings',
@@ -224,7 +224,7 @@ describe('CommandPalette', () => {
         ].includes(label ?? ''),
       );
 
-    expect(navItems).toEqual(['New Task', 'Tasks', 'Settings', 'Help']);
+    expect(navItems).toEqual(['New Task', 'Sessions', 'Settings', 'Help']);
   });
 
   it('lets admins find and open recurring automations', () => {
@@ -247,7 +247,7 @@ describe('CommandPalette', () => {
       .filter((label): label is string =>
         [
           'New Task',
-          'Tasks',
+          'Sessions',
           'Automations',
           'Analytics',
           'Settings',
@@ -256,7 +256,7 @@ describe('CommandPalette', () => {
       );
     expect(navItems).toEqual([
       'New Task',
-      'Tasks',
+      'Sessions',
       'Automations',
       'Analytics',
       'Settings',

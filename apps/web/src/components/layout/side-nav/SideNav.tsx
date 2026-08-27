@@ -71,7 +71,7 @@ export const SideNav = () => {
 
   const pathname = usePathname();
   const { setOpen: openCommandPalette } = useCommandPalette();
-  const { isAdmin, featureFlags } = useAuthorizedUser();
+  const { isAdmin } = useAuthorizedUser();
   const hasHydrated = useLayoutStore((state) => state.hasHydrated);
   const persistedIsSideNavExpanded = useLayoutStore(
     (state) => state.isSideNavExpanded,
@@ -204,12 +204,8 @@ export const SideNav = () => {
     return Array.from(groups.values());
   }, [environmentNameById, nonPinnedQuickAccessTasks]);
   const visibleNavItems = useMemo(
-    () =>
-      getVisiblePrimaryNavItems({
-        isAdmin,
-        sessionsUi: featureFlags?.sessions_ui === true,
-      }),
-    [featureFlags?.sessions_ui, isAdmin],
+    () => getVisiblePrimaryNavItems({ isAdmin }),
+    [isAdmin],
   );
 
   return (

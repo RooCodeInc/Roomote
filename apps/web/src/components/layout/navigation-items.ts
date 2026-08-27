@@ -23,11 +23,11 @@ const PRIMARY_NAV_ITEMS: PrimaryNavItem[] = [
   },
   {
     icon: Rows4,
-    href: '/tasks',
-    label: 'Tasks',
-    description: 'View current and past tasks',
+    href: '/sessions',
+    label: 'Sessions',
+    description: 'View conversations and delegated work',
     matchExact: false,
-    matchPaths: ['/tasks', '/cloud-agents'],
+    matchPaths: ['/sessions', '/tasks', '/cloud-agents'],
   },
   {
     icon: Zap,
@@ -51,17 +51,6 @@ const PRIMARY_NAV_ITEMS: PrimaryNavItem[] = [
 
 export function getVisiblePrimaryNavItems(opts: {
   isAdmin: boolean;
-  sessionsUi?: boolean;
 }): PrimaryNavItem[] {
-  return PRIMARY_NAV_ITEMS.map((item) =>
-    item.href === '/tasks' && opts.sessionsUi
-      ? {
-          ...item,
-          href: '/sessions',
-          label: 'Sessions',
-          description: 'View conversations and delegated work',
-          matchPaths: ['/sessions', '/tasks', '/cloud-agents'],
-        }
-      : item,
-  ).filter((item) => !item.adminOnly || opts.isAdmin);
+  return PRIMARY_NAV_ITEMS.filter((item) => !item.adminOnly || opts.isAdmin);
 }
