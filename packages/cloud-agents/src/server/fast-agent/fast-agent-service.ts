@@ -1417,13 +1417,14 @@ export async function answerFastAgentQuestion({
               (args.purpose !== 'closeout' ||
                 !platformEvent ||
                 platformEventKind !== 'automation' ||
-                (conversation.surface !== 'slack' &&
-                  conversation.surface !== 'discord'))
+                !['slack', 'discord', 'teams', 'telegram'].includes(
+                  conversation.surface,
+                ))
             ) {
               return {
                 success: false,
                 error:
-                  'Launchable suggestions are available only on Slack or Discord automation closeouts.',
+                  'Launchable suggestions are available only on chat automation closeouts.',
               };
             }
             if (

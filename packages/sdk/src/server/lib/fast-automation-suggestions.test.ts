@@ -11,6 +11,8 @@ import {
   appendFastAutomationSuggestionInstruction,
   postFastAutomationSuggestionsToDiscord,
   postFastAutomationSuggestionsToSlack,
+  postFastAutomationSuggestionsToTeams,
+  postFastAutomationSuggestionsToTelegram,
 } from './fast-automation-suggestions';
 
 describe('Fast automation suggestions', () => {
@@ -130,6 +132,93 @@ describe('Fast automation suggestions', () => {
     });
   });
 
+  it('persists and tracks reaction-launchable Teams suggestion cards', async () => {
+    const user = await userFactory.create();
+    const postMessage = vi.fn().mockResolvedValue({
+      provider: 'teams',
+      channelId: 'conversation-1',
+      threadId: 'thread-1',
+      messageId: 'message-1',
+    });
+
+    await postFastAutomationSuggestionsToTeams({
+      provider: { postMessage },
+      channelId: 'conversation-1',
+      serviceUrl: 'https://smba.example.com/amer/',
+      threadId: 'thread-1',
+      eventId: 'automation-teams',
+      createdByUserId: user.id,
+      suggestions: [
+        { title: 'Verify Teams retries', brief: 'Exercise the failure path.' },
+      ],
+    });
+
+    expect(postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channelId: 'conversation-1',
+        serviceUrl: 'https://smba.example.com/amer/',
+        threadId: 'thread-1',
+      }),
+    );
+    const [tracked] = await db
+      .select()
+      .from(trackedMessages)
+      .where(eq(trackedMessages.surface, 'teams'));
+    expect(tracked).toMatchObject({
+      channelId: 'conversation-1',
+      messageTs: 'message-1',
+      threadTs: 'thread-1',
+      createdByUserId: user.id,
+      metadata: expect.objectContaining({ launchRouting: 'router' }),
+    });
+  });
+
+  it('persists and tracks button-launchable Telegram suggestion cards', async () => {
+    const user = await userFactory.create();
+    const postMessage = vi.fn().mockResolvedValue({
+      provider: 'telegram',
+      channelId: 'chat-1',
+      messageId: 'message-1',
+    });
+
+    await postFastAutomationSuggestionsToTelegram({
+      provider: { postMessage },
+      channelId: 'chat-1',
+      eventId: 'automation-telegram',
+      createdByUserId: user.id,
+      suggestions: [
+        {
+          title: 'Verify Telegram retries',
+          brief: 'Exercise the failure path.',
+        },
+      ],
+    });
+
+    expect(postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channelId: 'chat-1',
+        buttons: [
+          [
+            {
+              text: 'Start',
+              callbackData: expect.stringMatching(/^idea:/),
+            },
+          ],
+        ],
+      }),
+    );
+    const [tracked] = await db
+      .select()
+      .from(trackedMessages)
+      .where(eq(trackedMessages.surface, 'telegram'));
+    expect(tracked).toMatchObject({
+      channelId: 'chat-1',
+      messageTs: 'message-1',
+      createdByUserId: user.id,
+      metadata: expect.objectContaining({ launchRouting: 'router' }),
+    });
+  });
+
   it('serializes concurrent persistence retries for one automation event', async () => {
     const user = await userFactory.create();
     const postMessage = vi.fn().mockResolvedValue('400.001');
@@ -166,5 +255,8 @@ describe('Fast automation suggestions', () => {
     expect(
       appendFastAutomationSuggestionInstruction('Report', 'slack', false),
     ).toBe('Report');
+    expect(
+      appendFastAutomationSuggestionInstruction('Report', 'telegram', true),
+    ).toContain('Tap Start');
   });
 });

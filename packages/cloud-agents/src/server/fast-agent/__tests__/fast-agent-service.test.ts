@@ -1919,42 +1919,46 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     );
   });
 
-  it('passes structured suggestions through an automation closeout', async () => {
-    const adapter = callbacks();
-    const suggestions = [
-      {
-        title: 'Investigate checkout latency',
-        brief: 'Trace the slow payment-provider requests.',
-      },
-    ];
-    mocks.generateText.mockImplementation(
-      async (_params, _session, options) => {
-        await options.onSessionReady('opencode-session-1');
-        await expect(
-          invokeTool(nativeToolNames.sendChatReply, {
-            purpose: 'closeout',
-            message: 'Checkout latency increased this week.',
-            suggestions,
-          }),
-        ).resolves.toMatchObject({ success: true, closed: true });
-        return '';
-      },
-    );
+  it.each(['slack', 'discord', 'teams', 'telegram'] as const)(
+    'passes structured suggestions through a %s automation closeout',
+    async (surface) => {
+      const adapter = callbacks();
+      const suggestions = [
+        {
+          title: 'Investigate checkout latency',
+          brief: 'Trace the slow payment-provider requests.',
+        },
+      ];
+      mocks.generateText.mockImplementation(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          await expect(
+            invokeTool(nativeToolNames.sendChatReply, {
+              purpose: 'closeout',
+              message: 'Checkout latency increased this week.',
+              suggestions,
+            }),
+          ).resolves.toMatchObject({ success: true, closed: true });
+          return '';
+        },
+      );
 
-    await answerFastAgentQuestion({
-      ...baseParams,
-      adapter,
-      turnSource: 'platform_event',
-      platformEventKind: 'automation',
-      platformEventVisibility: 'required',
-    });
+      await answerFastAgentQuestion({
+        ...baseParams,
+        conversation: { ...baseParams.conversation, surface },
+        adapter,
+        turnSource: 'platform_event',
+        platformEventKind: 'automation',
+        platformEventVisibility: 'required',
+      });
 
-    expect(adapter.postReply).toHaveBeenCalledWith({
-      purpose: 'closeout',
-      message: 'Checkout latency increased this week.',
-      suggestions,
-    });
-  });
+      expect(adapter.postReply).toHaveBeenCalledWith({
+        purpose: 'closeout',
+        message: 'Checkout latency increased this week.',
+        suggestions,
+      });
+    },
+  );
 
   it('rejects structured suggestions outside automation reports', async () => {
     mocks.generateText.mockImplementation(
@@ -1969,7 +1973,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         ).resolves.toEqual({
           success: false,
           error:
-            'Launchable suggestions are available only on Slack or Discord automation closeouts.',
+            'Launchable suggestions are available only on chat automation closeouts.',
         });
         return '';
       },

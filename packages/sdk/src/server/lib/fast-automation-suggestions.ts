@@ -1,6 +1,8 @@
 import { createHash } from 'node:crypto';
 
 import type { DiscordCommunicationProvider } from '@roomote/communication/discord-provider';
+import type { TeamsCommunicationProvider } from '@roomote/communication/teams-provider';
+import type { TelegramCommunicationProvider } from '@roomote/communication/telegram-provider';
 import {
   and,
   asc,
@@ -28,7 +30,7 @@ type PersistedFastAutomationSuggestion = FastAutomationSuggestion & {
 
 export function appendFastAutomationSuggestionInstruction(
   message: string,
-  surface: 'slack' | 'discord',
+  surface: 'slack' | 'discord' | 'teams' | 'telegram',
   hasSuggestions: boolean,
 ): string {
   if (!hasSuggestions) return message;
@@ -36,7 +38,9 @@ export function appendFastAutomationSuggestionInstruction(
   const instruction =
     surface === 'slack'
       ? "Want me to take one of these on? React with a :thumbsup: on a suggested task below and I'll start it."
-      : "Want me to take one of these on? React with a 👍 on a suggested task below and I'll start it.";
+      : surface === 'telegram'
+        ? "Want me to take one of these on? Tap Start on a suggested task below and I'll launch it."
+        : "Want me to take one of these on? React with a 👍 on a suggested task below and I'll start it.";
   return message.includes(instruction)
     ? message
     : `${message}\n\n${instruction}`;
@@ -148,7 +152,7 @@ function formatSuggestion(
 }
 
 async function trackSuggestion(params: {
-  surface: 'slack' | 'discord';
+  surface: 'slack' | 'discord' | 'teams' | 'telegram';
   channelId: string;
   messageId: string;
   threadId?: string;
@@ -245,6 +249,79 @@ export async function postFastAutomationSuggestionsToDiscord(params: {
     await trackSuggestion({
       surface: 'discord',
       channelId: posted.threadId ?? posted.channelId,
+      messageId: posted.messageId,
+      ...(posted.threadId ? { threadId: posted.threadId } : {}),
+      workItemId: suggestion.id,
+      createdByUserId: params.createdByUserId,
+      eventId: params.eventId,
+    });
+  }
+}
+
+export async function postFastAutomationSuggestionsToTeams(params: {
+  provider: Pick<TeamsCommunicationProvider, 'postMessage'>;
+  channelId: string;
+  serviceUrl: string;
+  threadId?: string;
+  eventId: string;
+  createdByUserId: string;
+  suggestions: FastAutomationSuggestion[];
+}): Promise<void> {
+  const suggestions = await persistFastAutomationSuggestions(params);
+  const trackedWorkItemIds = await findTrackedSuggestionWorkItemIds({
+    surface: 'teams',
+    workItemIds: suggestions.map((suggestion) => suggestion.id),
+  });
+  for (const suggestion of suggestions) {
+    if (trackedWorkItemIds.has(suggestion.id)) continue;
+
+    const posted = await params.provider.postMessage({
+      channelId: params.channelId,
+      serviceUrl: params.serviceUrl,
+      ...(params.threadId
+        ? { threadId: params.threadId, replyToMessageId: params.threadId }
+        : {}),
+      text: formatSuggestion(suggestion),
+      textFormat: 'markdown',
+    });
+    await trackSuggestion({
+      surface: 'teams',
+      channelId: posted.channelId,
+      messageId: posted.messageId,
+      ...(posted.threadId ? { threadId: posted.threadId } : {}),
+      workItemId: suggestion.id,
+      createdByUserId: params.createdByUserId,
+      eventId: params.eventId,
+    });
+  }
+}
+
+export async function postFastAutomationSuggestionsToTelegram(params: {
+  provider: Pick<TelegramCommunicationProvider, 'postMessage'>;
+  channelId: string;
+  threadId?: string;
+  eventId: string;
+  createdByUserId: string;
+  suggestions: FastAutomationSuggestion[];
+}): Promise<void> {
+  const suggestions = await persistFastAutomationSuggestions(params);
+  const trackedWorkItemIds = await findTrackedSuggestionWorkItemIds({
+    surface: 'telegram',
+    workItemIds: suggestions.map((suggestion) => suggestion.id),
+  });
+  for (const suggestion of suggestions) {
+    if (trackedWorkItemIds.has(suggestion.id)) continue;
+
+    const posted = await params.provider.postMessage({
+      channelId: params.channelId,
+      ...(params.threadId ? { threadId: params.threadId } : {}),
+      text: formatSuggestion(suggestion),
+      textFormat: 'markdown',
+      buttons: [[{ text: 'Start', callbackData: `idea:${suggestion.id}` }]],
+    });
+    await trackSuggestion({
+      surface: 'telegram',
+      channelId: posted.channelId,
       messageId: posted.messageId,
       ...(posted.threadId ? { threadId: posted.threadId } : {}),
       workItemId: suggestion.id,

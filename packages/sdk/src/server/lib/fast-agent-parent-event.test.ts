@@ -33,6 +33,8 @@ const mocks = vi.hoisted(() => ({
   appendSuggestionInstruction: vi.fn((message: string) => message),
   postSlackSuggestions: vi.fn(),
   postDiscordSuggestions: vi.fn(),
+  postTeamsSuggestions: vi.fn(),
+  postTelegramSuggestions: vi.fn(),
 }));
 
 vi.mock('@roomote/redis', async (importOriginal) => {
@@ -166,6 +168,8 @@ vi.mock('./fast-automation-suggestions', () => ({
   appendFastAutomationSuggestionInstruction: mocks.appendSuggestionInstruction,
   postFastAutomationSuggestionsToSlack: mocks.postSlackSuggestions,
   postFastAutomationSuggestionsToDiscord: mocks.postDiscordSuggestions,
+  postFastAutomationSuggestionsToTeams: mocks.postTeamsSuggestions,
+  postFastAutomationSuggestionsToTelegram: mocks.postTelegramSuggestions,
 }));
 
 import { deliverFastAgentParentEvent } from './fast-agent-parent-event';
@@ -233,6 +237,8 @@ describe('deliverFastAgentParentEvent', () => {
     mocks.resolveUserMcpServerConfigs.mockResolvedValue({});
     mocks.postSlackSuggestions.mockResolvedValue(undefined);
     mocks.postDiscordSuggestions.mockResolvedValue(undefined);
+    mocks.postTeamsSuggestions.mockResolvedValue(undefined);
+    mocks.postTelegramSuggestions.mockResolvedValue(undefined);
     mocks.setPendingPrReviewAction.mockResolvedValue(undefined);
     mocks.attachPendingPrReviewActionMessage.mockResolvedValue({
       attached: true,
@@ -857,6 +863,92 @@ describe('deliverFastAgentParentEvent', () => {
     );
     expect(mocks.teamsPostMessage).not.toHaveBeenCalled();
   });
+
+  it.each([
+    {
+      surface: 'teams' as const,
+      workspaceId: 'tenant-1',
+      channelId: 'teams-channel-1',
+      threadId: 'teams-root-1',
+      rootMessageId: 'teams-root-1',
+      postSuggestions: mocks.postTeamsSuggestions,
+    },
+    {
+      surface: 'teams' as const,
+      workspaceId: 'tenant-1',
+      channelId: 'teams-channel-1',
+      threadId: undefined,
+      rootMessageId: undefined,
+      postSuggestions: mocks.postTeamsSuggestions,
+    },
+    {
+      surface: 'telegram' as const,
+      workspaceId: 'telegram-chat-1',
+      channelId: 'telegram-chat-1',
+      threadId: undefined,
+      rootMessageId: undefined,
+      postSuggestions: mocks.postTelegramSuggestions,
+    },
+  ])(
+    'posts structured suggestions beneath a Fast $surface automation report',
+    async ({
+      surface,
+      workspaceId,
+      channelId,
+      threadId,
+      rootMessageId,
+      postSuggestions,
+    }) => {
+      const suggestions = [
+        { title: 'Verify retry behavior', brief: 'Exercise the failure path.' },
+      ];
+      mocks.answerQuestion.mockImplementationOnce(
+        async ({
+          adapter,
+        }: {
+          adapter: { postReply: (reply: unknown) => unknown };
+        }) =>
+          adapter.postReply({
+            purpose: 'closeout',
+            message: 'Retry failures increased.',
+            suggestions,
+          }),
+      );
+
+      await deliverFastAgentParentEvent({
+        parent: {
+          ...parent,
+          conversation: {
+            surface,
+            workspaceId,
+            conversationId: `${surface}-occurrence-1`,
+            replyTarget: {
+              channelId,
+              ...(threadId ? { threadId } : {}),
+            },
+          },
+        },
+        event: {
+          type: 'automation_triggered',
+          eventId: `${surface}-occurrence-1`,
+          automationId: 'automation-1',
+          automationName: 'Retry scan',
+          prompt: 'Find actionable retry failures.',
+          trigger: 'schedule',
+          ...(rootMessageId ? { rootMessageId } : {}),
+        },
+      });
+
+      expect(postSuggestions).toHaveBeenCalledWith(
+        expect.objectContaining({
+          channelId,
+          eventId: `${surface}-occurrence-1`,
+          createdByUserId: 'u1',
+          suggestions,
+        }),
+      );
+    },
+  );
 
   it("refreshes Teams routing from the persisted session's current channel", async () => {
     const fallbackConversation = {

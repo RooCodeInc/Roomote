@@ -58,6 +58,8 @@ import {
   appendFastAutomationSuggestionInstruction,
   postFastAutomationSuggestionsToDiscord,
   postFastAutomationSuggestionsToSlack,
+  postFastAutomationSuggestionsToTeams,
+  postFastAutomationSuggestionsToTelegram,
 } from './fast-automation-suggestions';
 
 import {
@@ -1068,12 +1070,25 @@ async function createTeamsFastAgentParentTurn(params: {
         conversation,
         serviceUrl,
       }),
-      postReply: async ({ message, imageArtifactIds = [], kickoff }) => {
+      postReply: async ({
+        message,
+        imageArtifactIds = [],
+        suggestions = [],
+        kickoff,
+      }) => {
         const images = await buildSelectedImages({
           artifactIds: imageArtifactIds,
           event: params.event,
         });
-        const text = `${message}\n\n${buildFastSessionReplyFooterText({ provider: 'teams', sessionId: params.parent.sessionId })}`;
+        const reportMessage =
+          params.event.type === 'automation_triggered' && !kickoff
+            ? appendFastAutomationSuggestionInstruction(
+                message,
+                'teams',
+                suggestions.length > 0,
+              )
+            : message;
+        const text = `${reportMessage}\n\n${buildFastSessionReplyFooterText({ provider: 'teams', sessionId: params.parent.sessionId })}`;
         if (
           params.event.type === 'automation_triggered' &&
           params.event.rootMessageId &&
@@ -1092,6 +1107,19 @@ async function createTeamsFastAgentParentTurn(params: {
             conversation,
             messageId: params.event.rootMessageId,
           });
+          if (suggestions.length > 0) {
+            await postFastAutomationSuggestionsToTeams({
+              provider,
+              channelId: conversation.replyTarget.channelId,
+              serviceUrl,
+              ...(conversation.replyTarget.threadId
+                ? { threadId: conversation.replyTarget.threadId }
+                : {}),
+              eventId: params.event.eventId,
+              createdByUserId: session.userId,
+              suggestions,
+            });
+          }
           params.onReplyPosted();
           return { messageId: params.event.rootMessageId };
         }
@@ -1108,6 +1136,23 @@ async function createTeamsFastAgentParentTurn(params: {
           textFormat: 'markdown',
           images,
         });
+        if (
+          params.event.type === 'automation_triggered' &&
+          !kickoff &&
+          suggestions.length > 0
+        ) {
+          await postFastAutomationSuggestionsToTeams({
+            provider,
+            channelId: conversation.replyTarget.channelId,
+            serviceUrl,
+            ...(conversation.replyTarget.threadId
+              ? { threadId: conversation.replyTarget.threadId }
+              : {}),
+            eventId: params.event.eventId,
+            createdByUserId: session.userId,
+            suggestions,
+          });
+        }
         await recordFastAgentConversationMessageBestEffort({
           sessionId: session.id,
           conversation,
@@ -1151,20 +1196,49 @@ async function createTelegramFastAgentParentTurn(params: {
         userId: session.userId,
         conversation,
       }),
-      postReply: async ({ message, imageArtifactIds = [] }) => {
+      postReply: async ({
+        message,
+        imageArtifactIds = [],
+        suggestions = [],
+        kickoff,
+      }) => {
         const images = await buildSelectedImages({
           artifactIds: imageArtifactIds,
           event: params.event,
         });
+        const reportMessage =
+          params.event.type === 'automation_triggered' && !kickoff
+            ? appendFastAutomationSuggestionInstruction(
+                message,
+                'telegram',
+                suggestions.length > 0,
+              )
+            : message;
         const posted = await provider.postMessage({
           channelId: conversation.replyTarget.channelId,
           ...(conversation.replyTarget.threadId
             ? { threadId: conversation.replyTarget.threadId }
             : {}),
-          text: `${message}\n\n${buildFastSessionReplyFooterText({ provider: 'telegram', sessionId: params.parent.sessionId })}`,
+          text: `${reportMessage}\n\n${buildFastSessionReplyFooterText({ provider: 'telegram', sessionId: params.parent.sessionId })}`,
           textFormat: 'markdown',
           images,
         });
+        if (
+          params.event.type === 'automation_triggered' &&
+          !kickoff &&
+          suggestions.length > 0
+        ) {
+          await postFastAutomationSuggestionsToTelegram({
+            provider,
+            channelId: conversation.replyTarget.channelId,
+            ...(conversation.replyTarget.threadId
+              ? { threadId: conversation.replyTarget.threadId }
+              : {}),
+            eventId: params.event.eventId,
+            createdByUserId: session.userId,
+            suggestions,
+          });
+        }
         params.onReplyPosted();
         return { messageId: posted.messageId };
       },
