@@ -524,7 +524,8 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       'gpt-5-6-luna': 'requesty/gpt-5.6-luna@eu',
       'gemini-3-7-flash': 'requesty/gemini-3.7-flash',
       'deepseek-v4-flash-0731': 'requesty/deepseek-v4-flash-0731',
-      'glm-5-2': 'requesty/glm-5.2',
+      'glm-5-3-flash': 'requesty/glm-5.3-flash',
+      'glm-5-3': 'requesty/glm-5.3',
       'kimi-k3': 'requesty/kimi-k3',
       'grok-4-6': 'requesty/grok-4.6',
     }),
@@ -866,7 +867,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     id: 'zai',
     label: 'Z.AI',
     envVarName: 'ZAI_API_KEY',
-    defaultRoomoteModel: 'zai/glm-5.2',
+    defaultRoomoteModel: 'zai/glm-5.3',
     authKind: 'api-key',
     credentialHelp: {
       text: 'Paste a platform API key for the selected region. International keys come from the Z.AI API console; China keys come from the Zhipu / BigModel console. Coding Plan membership keys belong on Z.AI Coding Plan, not here.',
@@ -884,7 +885,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     ],
     suggestedTaskModels: mapRecommendedTaskModels({
       'glm-5-3-flash': 'zai/glm-5.3-flash',
-      'glm-5-2': 'zai/glm-5.2',
+      'glm-5-3': 'zai/glm-5.3',
     }),
     recommendedRoleModels: {
       vision: 'zai/glm-5v-turbo',
