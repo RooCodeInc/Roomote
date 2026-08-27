@@ -3,10 +3,12 @@
 import Link from 'next/link';
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
+import { useQuery } from '@tanstack/react-query';
 import { getReasoningEffortLabel, type ReasoningEffort } from '@roomote/types';
 
 import { formatInferenceCost, getUserDisplayName } from '@/lib';
 import { useLaunchTaskModels } from '@/hooks/task-models/useLaunchTaskModels';
+import { useTRPC } from '@/trpc/client';
 import { FramedSurface, WorkspaceSurface } from '@/components/layout';
 import { SideNavItem } from '@/components/layout/side-nav/SideNavItem';
 import {
@@ -358,10 +360,20 @@ export function SessionWorkspace({
   const [isInfoOpen, setIsInfoOpen] = useState(false);
   const [isTasksOpen, setIsTasksOpen] = useState(false);
   const [nestedTaskId, setNestedTaskId] = useState<string | null>(null);
+  const trpc = useTRPC();
   const router = useRouter();
   const searchParams = useSearchParams();
+  const { data: currentSession } = useQuery(
+    trpc.sessions.byId.queryOptions(
+      { sessionId: session.id },
+      {
+        refetchInterval: 2_000,
+      },
+    ),
+  );
+  const sessionTasks = currentSession?.tasks ?? session.tasks;
   const selectedTaskId = searchParams.get('task');
-  const selectedTask = session.tasks.find(
+  const selectedTask = sessionTasks.find(
     (task) => task.taskId === selectedTaskId,
   );
   const panelOpen =
@@ -405,13 +417,13 @@ export function SessionWorkspace({
     <SessionTaskPanel
       sessionId={session.id}
       task={selectedTask}
-      tasks={session.tasks}
+      tasks={sessionTasks}
       onSelect={selectTask}
       onClose={closePanel}
     />
   ) : isTasksOpen ? (
     <SessionTasksPanel
-      tasks={session.tasks}
+      tasks={sessionTasks}
       onOpenTask={openTaskPanel}
       onClose={closePanel}
     />
@@ -445,7 +457,7 @@ export function SessionWorkspace({
                 label="Tasks"
                 tooltip="Tasks"
                 active={isTasksOpen}
-                disabled={session.tasks.length === 0}
+                disabled={sessionTasks.length === 0}
                 icon={Rows4}
                 onClick={() => {
                   setNestedTaskId(null);

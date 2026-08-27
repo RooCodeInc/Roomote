@@ -1,12 +1,14 @@
 import { useState, type ReactNode } from 'react';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 
 import { SandboxLayoutContext } from '../../use-sandbox-layout';
 import { SessionWorkspace, type SessionInfo } from './SessionWorkspace';
 import { useOpenSessionTaskPanel } from './session-task-panel-context';
 
-const { useMediaQueryMock } = vi.hoisted(() => ({
+const { useMediaQueryMock, sessionQueryState } = vi.hoisted(() => ({
   useMediaQueryMock: vi.fn(),
+  sessionQueryState: { data: null as unknown },
 }));
 
 vi.mock('usehooks-ts', () => ({
@@ -21,6 +23,23 @@ vi.mock('next/navigation', () => ({
 vi.mock('@/hooks/task-models/useLaunchTaskModels', () => ({
   useLaunchTaskModels: () => ({
     data: { models: [{ id: 'model-1', displayName: 'Model One' }] },
+  }),
+}));
+
+vi.mock('@/trpc/client', () => ({
+  useTRPC: () => ({
+    sessions: {
+      byId: {
+        queryOptions: (
+          input: { sessionId: string },
+          options?: Record<string, unknown>,
+        ) => ({
+          queryKey: ['sessions', 'byId', input.sessionId],
+          queryFn: async () => sessionQueryState.data,
+          ...options,
+        }),
+      },
+    },
   }),
 }));
 
@@ -84,19 +103,29 @@ function renderWorkspace({
   isMobile,
   children = <div>Session transcript</div>,
   sessionOverride,
+  queriedTasks,
 }: {
   isMobile: boolean;
   children?: ReactNode;
   sessionOverride?: Partial<SessionInfo>;
+  queriedTasks?: SessionInfo['tasks'];
 }) {
   useMediaQueryMock.mockReturnValue(!isMobile);
+  const initialSession = { ...session, ...sessionOverride };
+  sessionQueryState.data = {
+    ...initialSession,
+    tasks: queriedTasks ?? initialSession.tasks,
+  };
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
 
   render(
-    <SandboxLayoutProvider>
-      <SessionWorkspace session={{ ...session, ...sessionOverride }}>
-        {children}
-      </SessionWorkspace>
-    </SandboxLayoutProvider>,
+    <QueryClientProvider client={queryClient}>
+      <SandboxLayoutProvider>
+        <SessionWorkspace session={initialSession}>{children}</SessionWorkspace>
+      </SandboxLayoutProvider>
+    </QueryClientProvider>,
   );
 }
 
@@ -196,6 +225,37 @@ describe('SessionWorkspace', () => {
     );
 
     expect(screen.getByText('Nested panel task-1')).toBeInTheDocument();
+  });
+
+  it('enables and populates the Tasks panel from refreshed session tasks', async () => {
+    const delegatedTask = {
+      taskId: 'task-2',
+      title: 'Refreshed coding task',
+      workflow: 'standard',
+      state: 'active',
+      repositoryName: null,
+      latestOutput: null,
+      inferenceCostMicroUsd: 0,
+      canAccessDetails: true,
+      latestRun: null,
+      artifacts: [],
+      pullRequests: [],
+    };
+    renderWorkspace({
+      isMobile: false,
+      queriedTasks: [delegatedTask],
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Tasks' })).toBeEnabled();
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Tasks' }));
+
+    expect(
+      screen.getByRole('button', {
+        name: 'View coding task: Refreshed coding task',
+      }),
+    ).toBeInTheDocument();
   });
 
   it('opens delegated tasks in the existing session side-panel slot', () => {
