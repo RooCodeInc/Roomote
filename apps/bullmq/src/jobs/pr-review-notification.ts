@@ -166,9 +166,6 @@ function getFastParentButtonRoute(
 
   const conversation = parent.conversation;
   if (conversation.surface === 'slack') {
-    if (!conversation.replyTarget.threadId) {
-      return null;
-    }
     return {
       provider: 'slack',
       slackTeamId: conversation.workspaceId,

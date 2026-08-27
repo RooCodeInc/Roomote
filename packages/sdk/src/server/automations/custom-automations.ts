@@ -20,6 +20,7 @@ import {
   slackInstallationChannels,
   slackInstallations,
 } from '@roomote/db/server';
+import { SlackNotifier } from '@roomote/slack';
 import {
   ALL_REPOSITORIES,
   isConfiguredAutomationTarget,
@@ -56,7 +57,9 @@ import { findUserDirectMessageDestination } from '../lib/user-direct-message';
 import { createDiscordCommunicationProviderFromRuntimeCredentials } from '../lib/discord-communication';
 import { createTeamsCommunicationProviderFromRuntimeCredentials } from '../lib/teams-communication';
 import { createTelegramCommunicationProviderFromRuntimeCredentials } from '../lib/telegram-communication';
+import { buildCustomAutomationSlackMessage } from '../lib/manager-slack';
 import {
+  buildSlackClientMessageId,
   deliverFastAgentParentEvent,
   type FastAgentParentEvent,
 } from '../lib/fast-agent-parent-event';
@@ -287,13 +290,39 @@ async function buildFastAutomationConversation(params: {
     if (!installation?.botAccessToken) {
       throw new Error('Slack is not connected.');
     }
+    const slack = new SlackNotifier(installation.botAccessToken);
+    const kickoffText = `${automation.name} is running.`;
+    const rootMessageId = await slack.postMessage({
+      channel: destination.channelId,
+      ...buildCustomAutomationSlackMessage({
+        automationId: automation.id,
+        automationName: automation.name,
+        text: kickoffText,
+        contentBlocks: [
+          {
+            type: 'markdown',
+            text: `**${automation.name}** is running.`,
+          },
+        ],
+      }),
+      unfurl_links: false,
+      unfurl_media: false,
+      client_msg_id: buildSlackClientMessageId(
+        `fast-automation-root:${eventId}`,
+      ),
+    });
+    if (!rootMessageId) {
+      throw new Error('Slack did not create the Fast automation thread.');
+    }
     return {
+      rootMessageId,
       conversation: {
         surface: 'slack',
         workspaceId: installation.teamId,
-        conversationId: eventId,
+        conversationId: rootMessageId,
         replyTarget: {
           channelId: destination.channelId,
+          threadId: rootMessageId,
         },
       },
     };
@@ -453,7 +482,26 @@ async function runFastCustomAutomation(params: {
   } catch (error) {
     const message = `${params.automation.name} failed: ${error instanceof Error ? error.message : String(error)}`;
     try {
-      if (conversation.surface === 'discord' && rootMessageId) {
+      if (conversation.surface === 'slack' && rootMessageId) {
+        const installation = await db.query.slackInstallations.findFirst({
+          where: and(
+            eq(slackInstallations.isActive, true),
+            eq(slackInstallations.teamId, conversation.workspaceId),
+          ),
+          columns: { botAccessToken: true },
+        });
+        if (installation?.botAccessToken) {
+          await new SlackNotifier(installation.botAccessToken).updateMessage({
+            channel: conversation.replyTarget.channelId,
+            ts: rootMessageId,
+            message: buildCustomAutomationSlackMessage({
+              automationId: params.automation.id,
+              automationName: params.automation.name,
+              text: message,
+            }),
+          });
+        }
+      } else if (conversation.surface === 'discord' && rootMessageId) {
         const provider =
           await createDiscordCommunicationProviderFromRuntimeCredentials();
         await provider?.editMessage({
