@@ -225,6 +225,12 @@ postgres_command() {
   fi
 }
 
+# Derives the Brain database URL from DATABASE_URL inside the pg container
+# shell, preserving any query string (sslmode=…): the path segment is swapped,
+# nothing else. GBRAIN_DATABASE_NAME is validated by the gbrain entrypoint to
+# [A-Za-z0-9_], which is what makes this surgery safe.
+gbrain_url_snippet='GB="${GBRAIN_DATABASE_NAME:-gbrain}"; case "$DATABASE_URL" in *\?*) GB_QUERY="?${DATABASE_URL#*\?}"; GB_BASE="${DATABASE_URL%%\?*}" ;; *) GB_QUERY=""; GB_BASE="$DATABASE_URL" ;; esac; GBRAIN_URL="${GB_BASE%/*}/${GB}${GB_QUERY}"'
+
 github_curl() {
   if [ -n "${GITHUB_TOKEN:-}" ]; then
     curl -fsSL -H "Authorization: Bearer $GITHUB_TOKEN" "$@"
@@ -821,7 +827,7 @@ cmd_backup() {
     # entrypoint to [A-Za-z0-9_], which is what makes the URL surgery safe.
     if postgres_command '' 'GB="${GBRAIN_DATABASE_NAME:-gbrain}"; psql "$DATABASE_URL" -Atqc "SELECT 1 FROM pg_database WHERE datname = '\''$GB'\''" | grep -q 1'; then
       log "Dumping the Brain index database"
-      postgres_command '' 'GB="${GBRAIN_DATABASE_NAME:-gbrain}"; pg_dump --clean --if-exists --no-owner --no-privileges "${DATABASE_URL%/*}/$GB"'         >"$staging_dir/gbrain.sql"
+      postgres_command '' "$gbrain_url_snippet"'; pg_dump --clean --if-exists --no-owner --no-privileges "$GBRAIN_URL"' >"$staging_dir/gbrain.sql"
       brain_database_included='true'
     else
       log "The Brain index database does not exist yet; bundling the volume only"
@@ -1092,7 +1098,7 @@ cmd_restore() {
     # whatever this database contains.
     log "Restoring the Brain index database"
     postgres_command '' 'GB="${GBRAIN_DATABASE_NAME:-gbrain}"; psql "$DATABASE_URL" -Atqc "SELECT 1 FROM pg_database WHERE datname = '\''$GB'\''" | grep -q 1 || psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c "CREATE DATABASE \"$GB\""'
-    postgres_command "$staging_dir/gbrain.sql" 'GB="${GBRAIN_DATABASE_NAME:-gbrain}"; psql "${DATABASE_URL%/*}/$GB" -v ON_ERROR_STOP=1'
+    postgres_command "$staging_dir/gbrain.sql" "$gbrain_url_snippet"'; psql "$GBRAIN_URL" -v ON_ERROR_STOP=1'
   fi
 
   log "Starting the restored Roomote release"
