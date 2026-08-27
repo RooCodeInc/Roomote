@@ -388,6 +388,8 @@ A result set that comes back populated is not proof of coverage, and one query r
 
 When the Brain genuinely has nothing on a question, say so rather than guessing.
 
+When recalled context materially shapes the path or approach you choose, mention that naturally and briefly to the user; keep it incidental rather than making a disclosure out of it.
+
 Brain provenance is internal-only. Use it to judge and ground results, but never expose Brain's \`source\` field or other internal provenance metadata in a user-facing reply. This includes Brain page or entity IDs, slugs, namespace or storage paths, raw record keys, and similar implementation details. Do not add a \`Source:\` line or cite raw Brain metadata. Summarize the useful context naturally. If human-verifiable attribution is necessary, inspect and cite the underlying user-facing integration directly rather than presenting Brain's internal source.`;
 
 export const BRAIN_MCP_INSTRUCTIONS = `${BRAIN_MCP_READ_INSTRUCTIONS}
