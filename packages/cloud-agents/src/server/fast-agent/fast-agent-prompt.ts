@@ -137,7 +137,9 @@ export function buildFastAgentSystemPrompt({
   const senderIdentityGuidance =
     surface === 'slack'
       ? '- The `sender_*` attributes on the current `<slack_message>` identify its sender. Resolve "I", "me", "my", and "on my side" to that sender. If an account-specific request needs a GitHub identity and `sender_github` is absent, ask instead of inferring one.\n'
-      : '';
+      : surface === 'automation'
+        ? ''
+        : '- When the current input includes a `<current_message>` envelope, its `sender_name` and `sender_github` fields identify the human sender. Resolve "I", "me", "my", and "on my side" to that sender. If an account-specific request needs a GitHub identity and `sender_github` is absent, ask instead of inferring one.\n';
   const releaseIdentifier = releaseVersion
     ? `Roomote release ${releaseVersion}\n\n`
     : '';

@@ -14,6 +14,7 @@ import {
   buildInferenceProviderRecoveryPrompt,
   formatErrorForLog,
   resolveInferenceProviderRetryDelayMs,
+  isMemoryMcpServer,
   truncateAcpOutputText,
   type ReasoningEffort,
   type RunStatus,
@@ -83,6 +84,10 @@ import {
 } from './fast-agent-tasks';
 import { getFastAgentUserIdentity } from './fast-agent-user-identity';
 import { FastAgentTurnDiagnostics } from './fast-agent-turn-diagnostics';
+import {
+  captureFastAgentInferenceContext,
+  type FastAgentPromptKind,
+} from './fast-agent-context-telemetry';
 import { RemoteFastAgentRepositorySkillSource } from './fast-agent-repository-skill-source';
 import { FastAgentSkillStore } from './fast-agent-skill-store';
 import {
@@ -496,13 +501,15 @@ function extractModelMessageText(message: ModelMessage): string[] {
 }
 
 function buildSupplementalThreadContext({
-  question,
   threadContext,
   compatibilityMessages,
+  currentMessageTs,
+  surface,
 }: {
-  question: string;
   threadContext: FastAgentThreadMessage[];
   compatibilityMessages: ModelMessage[];
+  currentMessageTs?: string;
+  surface: FastAgentConversation['surface'];
 }): string | undefined {
   const persistedMessageCounts = new Map<string, number>();
   for (const message of compatibilityMessages) {
@@ -517,28 +524,70 @@ function buildSupplementalThreadContext({
     }
   }
 
-  const normalizedQuestion = normalizeThreadText(question);
-  return wrapSlackThreadContext(
-    threadContext
-      .filter((message) => {
-        const normalizedText = normalizeThreadText(message.text);
-        if (!normalizedText || normalizedText === normalizedQuestion) {
-          return false;
-        }
-        const key = `${message.bot_id ? 'assistant' : 'user'}:${normalizedText}`;
-        const remaining = persistedMessageCounts.get(key) ?? 0;
-        if (remaining > 0) {
-          persistedMessageCounts.set(key, remaining - 1);
-          return false;
-        }
-        return true;
-      })
-      .map((message) => ({
-        displayName: message.username?.trim() || message.user,
-        text: message.text,
-        ts: message.ts,
-      })),
-  );
+  const supplementalMessages = threadContext.filter((message) => {
+    const normalizedText = normalizeThreadText(message.text);
+    if (!normalizedText || message.ts === currentMessageTs) {
+      return false;
+    }
+    const key = `${message.bot_id ? 'assistant' : 'user'}:${normalizedText}`;
+    const remaining = persistedMessageCounts.get(key) ?? 0;
+    if (remaining > 0) {
+      persistedMessageCounts.set(key, remaining - 1);
+      return false;
+    }
+    return true;
+  });
+
+  const text =
+    surface === 'slack'
+      ? wrapSlackThreadContext(
+          supplementalMessages.map((message) => ({
+            displayName: message.username?.trim() || message.user,
+            text: message.text,
+            ts: message.ts,
+          })),
+        )
+      : wrapFastAgentThreadContext(supplementalMessages);
+
+  return text;
+}
+
+function wrapFastAgentMessage(
+  text: string,
+  sender?: { displayName?: string; githubLogin?: string },
+): string {
+  return `<current_message>\n${escapeFastAgentEnvelopeJson({
+    ...(sender?.displayName ? { sender_name: sender.displayName } : {}),
+    ...(sender?.githubLogin ? { sender_github: sender.githubLogin } : {}),
+    text,
+  })}\n</current_message>`;
+}
+
+function escapeFastAgentEnvelopeJson(value: Record<string, string>): string {
+  return JSON.stringify(value)
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;');
+}
+
+function wrapFastAgentThreadContext(
+  threadContext: FastAgentThreadMessage[],
+): string | undefined {
+  const messages = threadContext.flatMap((message) => {
+    const text = normalizeThreadText(message.text);
+    if (!text) return [];
+    return [
+      escapeFastAgentEnvelopeJson({
+        sender_name: message.username?.trim() || message.user,
+        message_id: message.ts,
+        text,
+      }),
+    ];
+  });
+
+  return messages.length > 0
+    ? `<thread_context>\n${messages.join('\n')}\n</thread_context>`
+    : undefined;
 }
 
 function buildFastAgentMessages({
@@ -548,6 +597,8 @@ function buildFastAgentMessages({
   compatibilityMessages,
   currentMessageTs,
   currentMessageSender,
+  surface,
+  turnSource,
 }: {
   question: string;
   currentMessageAgentContext?: string;
@@ -559,51 +610,60 @@ function buildFastAgentMessages({
     displayName?: string;
     githubLogin?: string;
   };
-}): { bootstrapMessages: ModelMessage[]; turnMessage: ModelMessage } {
+  surface: FastAgentConversation['surface'];
+  turnSource: FastAgentTurnSource;
+}): {
+  bootstrapMessages: ModelMessage[];
+  turnMessages: ModelMessage[];
+  bootstrapThreadContextPresent: boolean;
+  turnThreadContextPresent: boolean;
+} {
   const normalizedQuestion = normalizeThreadText(question);
-  const currentUserMessageText = currentMessageTs
-    ? wrapSlackMessage(normalizedQuestion, {
-        ts: currentMessageTs,
-        senderSlackId: currentMessageSender?.slackUserId,
-        senderName: currentMessageSender?.displayName,
-        senderGithub: currentMessageSender?.githubLogin,
-        agentContext: currentMessageAgentContext,
-      })
-    : normalizedQuestion;
+  const currentUserMessageText =
+    surface === 'slack'
+      ? currentMessageTs
+        ? wrapSlackMessage(normalizedQuestion, {
+            ts: currentMessageTs,
+            senderSlackId: currentMessageSender?.slackUserId,
+            senderName: currentMessageSender?.displayName,
+            senderGithub: currentMessageSender?.githubLogin,
+            agentContext: currentMessageAgentContext,
+          })
+        : normalizedQuestion
+      : turnSource === 'human'
+        ? wrapFastAgentMessage(normalizedQuestion, currentMessageSender)
+        : normalizedQuestion;
   const turnMessage = buildUserTextMessage(currentUserMessageText);
 
   if (compatibilityMessages.length > 0) {
     const supplementalThreadContext = buildSupplementalThreadContext({
-      question,
       threadContext,
       compatibilityMessages,
+      currentMessageTs,
+      surface,
     });
-    return {
-      bootstrapMessages: [
-        ...compatibilityMessages,
-        ...(supplementalThreadContext
-          ? [buildUserTextMessage(supplementalThreadContext)]
-          : []),
-        turnMessage,
-      ],
+    const turnMessages = [
+      ...(supplementalThreadContext
+        ? [buildUserTextMessage(supplementalThreadContext)]
+        : []),
       turnMessage,
+    ];
+    return {
+      bootstrapMessages: [...compatibilityMessages, ...turnMessages],
+      turnMessages,
+      bootstrapThreadContextPresent: Boolean(supplementalThreadContext),
+      turnThreadContextPresent: Boolean(supplementalThreadContext),
     };
   }
 
   const { threadContext: serializedThreadContext, replyingTo } =
-    currentMessageTs
+    currentMessageTs && surface === 'slack'
       ? buildSlackThreadPromptBlocks({
           threadMessages: threadContext,
           currentMessageTs,
         })
       : {
-          threadContext: wrapSlackThreadContext(
-            threadContext.map((message) => ({
-              displayName: message.username?.trim() || message.user,
-              text: message.text,
-              ts: message.ts,
-            })),
-          ),
+          threadContext: wrapFastAgentThreadContext(threadContext),
           replyingTo: undefined,
         };
   const bootstrapText = [
@@ -615,7 +675,9 @@ function buildFastAgentMessages({
     .join('\n\n');
   return {
     bootstrapMessages: [buildUserTextMessage(bootstrapText)],
-    turnMessage,
+    turnMessages: [turnMessage],
+    bootstrapThreadContextPresent: Boolean(serializedThreadContext),
+    turnThreadContextPresent: false,
   };
 }
 
@@ -738,6 +800,7 @@ export async function answerFastAgentQuestion({
   let nextToolOrdinal = 0;
   let nextRetryNoticeOrdinal = 0;
   let nextTurnSeq = 0;
+  const degradedContextComponents = new Set<string>();
 
   const allocateCanonicalEvent = (slot: string) => ({
     eventId: `${turnId}:${slot}`,
@@ -959,6 +1022,7 @@ export async function answerFastAgentQuestion({
     ] = await Promise.all([
       getAvailableEnvironments(),
       getDeploymentTaskModelOptions().catch((error) => {
+        degradedContextComponents.add('task_model_catalog');
         console.warn(
           `[Fast Agent] Task model options unavailable: ${formatErrorForLog(error)}`,
         );
@@ -969,17 +1033,21 @@ export async function answerFastAgentQuestion({
         { userId, apiBaseUrl },
         adapter.resolveMcpServerConfigs,
       ).catch((error) => {
+        degradedContextComponents.add('integration_catalog');
         console.warn(
           `[Fast Agent] Deployment MCP servers unavailable: ${formatErrorForLog(error)}`,
         );
         return [];
       }),
-      getFastAgentUserIdentity(userId).catch((error) => {
-        console.warn(
-          `[Fast Agent] User identity unavailable: ${formatErrorForLog(error)}`,
-        );
-        return { displayName: null, githubLogin: null };
-      }),
+      platformEvent
+        ? Promise.resolve({ displayName: null, githubLogin: null })
+        : getFastAgentUserIdentity(userId).catch((error) => {
+            degradedContextComponents.add('user_identity');
+            console.warn(
+              `[Fast Agent] User identity unavailable: ${formatErrorForLog(error)}`,
+            );
+            return { displayName: null, githubLogin: null };
+          }),
     ]);
     canonicalConversationId = session.id;
     durableOpenCodeSessionId = session.openCodeSessionId;
@@ -1026,19 +1094,34 @@ export async function answerFastAgentQuestion({
     const currentTasks = new Map(
       resolvedActiveTasks.map((task) => [task.taskId, task]),
     );
-    const { bootstrapMessages, turnMessage } = buildFastAgentMessages({
+    const currentMessageSender = platformEvent
+      ? undefined
+      : {
+          slackUserId: senderExternalId,
+          displayName:
+            senderDisplayName?.trim() || currentUser.displayName || undefined,
+          githubLogin: currentUser.githubLogin || undefined,
+        };
+    const {
+      bootstrapMessages,
+      turnMessages,
+      bootstrapThreadContextPresent,
+      turnThreadContextPresent,
+    } = buildFastAgentMessages({
       question,
       currentMessageAgentContext,
       threadContext,
       compatibilityMessages: session.compatibilityMessages,
       currentMessageTs: currentMessageId,
-      currentMessageSender: {
-        slackUserId: senderExternalId,
-        displayName:
-          senderDisplayName?.trim() || currentUser.displayName || undefined,
-        githubLogin: currentUser.githubLogin || undefined,
-      },
+      currentMessageSender,
+      surface: conversation.surface,
+      turnSource,
     });
+    const releaseVersion = resolveRoomoteReleaseVersion(
+      Env.RELEASE_PRODUCT_VERSION,
+      Env.RELEASE_VERSION,
+      packageJson.version,
+    );
     const system = buildFastAgentSystemPrompt({
       availableEnvironments,
       availableTaskModels: taskModelOptions.models,
@@ -1051,11 +1134,7 @@ export async function answerFastAgentQuestion({
       platformEventVisibility,
       platformEventKind,
       retryTaskStartAvailable: Boolean(adapter.retryTaskStart),
-      releaseVersion: resolveRoomoteReleaseVersion(
-        Env.RELEASE_PRODUCT_VERSION,
-        Env.RELEASE_VERSION,
-        packageJson.version,
-      ),
+      releaseVersion,
     });
     const integrationCallSignatures = new Set<string>();
     const completedChatReactionSignatures = new Set<string>();
@@ -1724,9 +1803,10 @@ export async function answerFastAgentQuestion({
     };
 
     const imageFiles = getFastAgentImageFiles(images);
-    const serializedTurnPrompt = serializeFastAgentMessages([turnMessage]);
+    const serializedTurnPrompt = serializeFastAgentMessages(turnMessages);
     const serializedBootstrapPrompt =
       serializeFastAgentMessages(bootstrapMessages);
+    let inferenceAttemptNumber = 0;
     const persistOpenCodeSession = async (openCodeSessionId: string) => {
       if (durableOpenCodeSessionId === openCodeSessionId) return;
       await setFastAgentOpenCodeSession({
@@ -1745,7 +1825,11 @@ export async function answerFastAgentQuestion({
       onPathSelected: (path) => {
         console.info(`[Fast Agent] OpenCode session path=${path}.`);
       },
-      execute: async (openCodeSession, selectedPrompt, { validateSession }) => {
+      execute: async (
+        openCodeSession,
+        selectedPrompt,
+        { path: sessionPath, validateSession },
+      ) => {
         diagnostics.markInferenceSetupStarted();
         const spillBudget = createFastAgentSpillTurnBudget();
         const skillStore = new FastAgentSkillStore(
@@ -1769,7 +1853,59 @@ export async function answerFastAgentQuestion({
         };
         let promptForAttempt = selectedPrompt;
         let imageFilesForAttempt = imageFiles;
+        let promptKind: FastAgentPromptKind =
+          sessionPath === 'warm' || sessionPath === 'cold_resume'
+            ? 'turn_delta'
+            : 'bootstrap';
         let promptTimeoutMs: number | null = null;
+        const captureInferenceContext = (
+          attemptScope: 'prompt_submission' | 'provider_retry',
+          providerRetryAttempt?: number,
+        ) => {
+          captureFastAgentInferenceContext({
+            userId,
+            systemPrompt: system,
+            surface: conversation.surface,
+            turnSource,
+            platformEventHandling,
+            platformEventKind,
+            sessionPath,
+            promptKind,
+            attemptNumber: inferenceAttemptNumber,
+            attemptScope,
+            providerRetryAttempt,
+            releasePresent: Boolean(releaseVersion),
+            environmentCount: availableEnvironments.length,
+            taskModelCount: taskModelOptions.models.length,
+            activeTaskCount: resolvedActiveTasks.length,
+            integrationCount: availableIntegrations.length,
+            integrationToolCount: availableIntegrations.reduce(
+              (count, integration) => count + integration.tools.length,
+              0,
+            ),
+            memoryIntegrationCount: availableIntegrations.filter(
+              (integration) => isMemoryMcpServer(integration.id),
+            ).length,
+            compatibilityMessageCount: session.compatibilityMessages.length,
+            suppliedThreadMessageCount: threadContext.length,
+            threadContextAttached:
+              promptKind === 'bootstrap' ||
+              promptKind === 'clean_retry_bootstrap'
+                ? bootstrapThreadContextPresent
+                : promptKind === 'turn_delta'
+                  ? turnThreadContextPresent
+                  : false,
+            senderContextPresent: Boolean(
+              currentMessageSender?.slackUserId ||
+              currentMessageSender?.displayName ||
+              currentMessageSender?.githubLogin,
+            ),
+            agentContextPresent: Boolean(currentMessageAgentContext),
+            inputImageCount: imageFiles.length,
+            attachedImageCount: imageFilesForAttempt.length,
+            degradedComponents: [...degradedContextComponents],
+          });
+        };
         const unbindMcpExecutor = bindFastAgentMcpToolExecutor(
           nativeRuntime.mcpCapability,
           executeMcpTool,
@@ -1785,6 +1921,8 @@ export async function answerFastAgentQuestion({
                 | ReturnType<typeof setTimeout>
                 | undefined;
               try {
+                inferenceAttemptNumber += 1;
+                captureInferenceContext('prompt_submission');
                 return await generateTrackedNonTaskTextInOpenCodeSession(
                   {
                     userId,
@@ -1798,6 +1936,7 @@ export async function answerFastAgentQuestion({
                     system,
                     prompt: promptForAttempt,
                     onProviderRetry: async (event) => {
+                      captureInferenceContext('provider_retry', event.attempt);
                       // Initial turns stay unbounded unless the provider enters
                       // recovery. Start this deadline once so repeated provider
                       // retry events cannot extend the conversation lock.
@@ -1910,6 +2049,7 @@ export async function answerFastAgentQuestion({
                 if (nativeToolInvoked && openCodeSession.id) {
                   promptForAttempt = FAST_AGENT_PROVIDER_RECOVERY_PROMPT;
                   imageFilesForAttempt = [];
+                  promptKind = 'side_effect_retry_recovery';
                 } else {
                   // OpenCode persists the user message before inference starts.
                   // Before tools run, rebuild from visible history rather than
@@ -1917,6 +2057,7 @@ export async function answerFastAgentQuestion({
                   openCodeSession.id = undefined;
                   promptForAttempt = serializedBootstrapPrompt;
                   imageFilesForAttempt = imageFiles;
+                  promptKind = 'clean_retry_bootstrap';
                 }
                 // Keep every recovery attempt bounded so it cannot hold the
                 // conversation lock forever if the provider stalls again.
