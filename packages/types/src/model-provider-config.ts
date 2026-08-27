@@ -51,6 +51,7 @@ export const XAI_SUBSCRIPTION_PROVIDER_ID = 'xai-subscription' as const;
 export const ROOMOTE_INFERENCE_PROVIDER_ID = 'roomote' as const;
 export const ROOMOTE_INFERENCE_API_KEY_ENV_VAR_NAME =
   'R_TRIAL_OPENROUTER_API_KEY' as const;
+export const ROOMOTE_TRIAL_MODEL_PRESET_ID = 'trial' as const;
 
 /**
  * Model-id prefix used when composing or looking up task models for a setup
@@ -414,37 +415,66 @@ const OPENAI_RECOMMENDED_MODEL_PRESETS = [
   },
 ] as const satisfies readonly RecommendedModelPreset[];
 
+const OPENROUTER_EFFICIENT_MODEL_PRESET = {
+  id: 'efficient',
+  label: 'Efficient',
+  // Reasoning efforts are intentionally unset so the shared per-role
+  // defaults apply, exactly as they do for a hand-configured model.
+  roles: {
+    coding: { modelId: 'openrouter/openai/gpt-5.6-luna' },
+    helper: { modelId: 'openrouter/openai/gpt-5.6-luna' },
+    codeReview: { modelId: 'openrouter/openai/gpt-5.6-luna' },
+    explore: { modelId: 'openrouter/openai/gpt-5.6-luna' },
+    planning: { modelId: 'openrouter/openai/gpt-5.6-luna' },
+  },
+} as const satisfies RecommendedModelPreset;
+
+function rebaseOpenRouterModelIdForRoomote(modelId: string): string {
+  return modelId.replace(/^openrouter\//u, `${ROOMOTE_INFERENCE_PROVIDER_ID}/`);
+}
+
+function rebaseOpenRouterPresetForRoomote(
+  preset: RecommendedModelPreset,
+): RecommendedModelPreset {
+  return {
+    ...preset,
+    roles: Object.fromEntries(
+      Object.entries(preset.roles).map(([role, config]) => [
+        role,
+        {
+          ...config,
+          modelId: rebaseOpenRouterModelIdForRoomote(config.modelId),
+        },
+      ]),
+    ) as RecommendedModelPreset['roles'],
+  };
+}
+
+const ROOMOTE_TRIAL_MODEL_PRESET = {
+  ...rebaseOpenRouterPresetForRoomote(OPENROUTER_EFFICIENT_MODEL_PRESET),
+  id: ROOMOTE_TRIAL_MODEL_PRESET_ID,
+  label: 'Roomote Trial',
+  default: true,
+} as const satisfies RecommendedModelPreset;
+
 export const SETUP_MODEL_PROVIDER_CATALOG = [
   {
     id: ROOMOTE_INFERENCE_PROVIDER_ID,
     label: 'Roomote inference',
     envVarName: ROOMOTE_INFERENCE_API_KEY_ENV_VAR_NAME,
-    defaultRoomoteModel: 'roomote/openai/gpt-5.6-luna',
+    defaultRoomoteModel: ROOMOTE_TRIAL_MODEL_PRESET.roles.coding!.modelId,
     authKind: 'api-key',
     suggestedTaskModels: mapRecommendedTaskModels(
       Object.fromEntries(
         Object.entries(OPENROUTER_RECOMMENDED_TASK_MODEL_SLUGS).map(
           ([modelId, openRouterModelId]) => [
             modelId,
-            openRouterModelId.replace(/^openrouter\//u, 'roomote/'),
+            rebaseOpenRouterModelIdForRoomote(openRouterModelId),
           ],
         ),
       ) as RecommendedTaskModelSlugMap,
     ),
-    recommendedPresets: [
-      {
-        id: 'efficient',
-        label: 'Efficient',
-        default: true,
-        roles: {
-          coding: { modelId: 'roomote/openai/gpt-5.6-luna' },
-          helper: { modelId: 'roomote/openai/gpt-5.6-luna' },
-          codeReview: { modelId: 'roomote/openai/gpt-5.6-luna' },
-          explore: { modelId: 'roomote/openai/gpt-5.6-luna' },
-          planning: { modelId: 'roomote/openai/gpt-5.6-luna' },
-        },
-      },
-    ],
+    recommendedPresets: [ROOMOTE_TRIAL_MODEL_PRESET],
     // Only hosting can enable this provider. It is never a user connection.
     hidden: true,
   },
@@ -510,19 +540,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
           },
         },
       },
-      {
-        id: 'efficient',
-        label: 'Efficient',
-        // Reasoning efforts are intentionally unset so the shared per-role
-        // defaults apply, exactly as they do for a hand-configured model.
-        roles: {
-          coding: { modelId: 'openrouter/openai/gpt-5.6-luna' },
-          helper: { modelId: 'openrouter/openai/gpt-5.6-luna' },
-          codeReview: { modelId: 'openrouter/openai/gpt-5.6-luna' },
-          explore: { modelId: 'openrouter/openai/gpt-5.6-luna' },
-          planning: { modelId: 'openrouter/openai/gpt-5.6-luna' },
-        },
-      },
+      OPENROUTER_EFFICIENT_MODEL_PRESET,
     ],
   },
   {

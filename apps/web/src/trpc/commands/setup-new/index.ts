@@ -55,6 +55,7 @@ import {
   CHATGPT_SUBSCRIPTION_PROVIDER_ID,
   XAI_SUBSCRIPTION_PROVIDER_ID,
   ROOMOTE_INFERENCE_PROVIDER_ID,
+  ROOMOTE_TRIAL_MODEL_PRESET_ID,
   OPENAI_COMPATIBLE_PROVIDER_ID,
   collectSetupModelProviderCredentialValues,
   createEmptyDeploymentModelConfig,
@@ -300,8 +301,6 @@ async function savePersistedTaskModelSettings(
  * config, or task model settings) and refuses when a real provider is
  * already connected, so it can never overwrite configuration.
  */
-const TRIAL_PRESET_ID = 'efficient';
-
 export async function chooseSetupTrialInferenceCommand(auth: UserAuthSuccess) {
   assertAdmin(auth);
 
@@ -381,7 +380,7 @@ export async function chooseSetupTrialInferenceCommand(auth: UserAuthSuccess) {
     const provider = getSetupModelProvider(ROOMOTE_INFERENCE_PROVIDER_ID);
     const runtimeModelConfig = buildRecommendedDeploymentModelConfig(
       provider,
-      TRIAL_PRESET_ID,
+      ROOMOTE_TRIAL_MODEL_PRESET_ID,
     );
     const defaultModelId = runtimeModelConfig.roomoteModel;
     const trialModels = provider.suggestedTaskModels.map((suggestion) =>

@@ -13,6 +13,7 @@ import {
   getReasoningEffortLabel,
   getRecommendedModelPresets,
   getSetupModelProvider,
+  ROOMOTE_TRIAL_MODEL_PRESET_ID,
   getSetupProviderTaskModelPrefix,
   normalizeDeploymentModelConfig,
   REASONING_EFFORT_OPTIONS,
@@ -317,6 +318,32 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
         model.id.startsWith('roomote/'),
       ),
     ).toBe(true);
+  });
+
+  it('derives the Roomote Trial preset from OpenRouter Efficient with Roomote model IDs', () => {
+    const openRouterEfficient = getRecommendedModelPresets(
+      getSetupModelProvider('openrouter'),
+    ).find((preset) => preset.id === 'efficient');
+    const roomoteTrial = getRecommendedModelPresets(
+      getSetupModelProvider('roomote'),
+    ).find((preset) => preset.id === ROOMOTE_TRIAL_MODEL_PRESET_ID);
+
+    expect(roomoteTrial).toMatchObject({
+      id: ROOMOTE_TRIAL_MODEL_PRESET_ID,
+      label: 'Roomote Trial',
+      default: true,
+    });
+    expect(roomoteTrial?.roles).toEqual(
+      Object.fromEntries(
+        Object.entries(openRouterEfficient!.roles).map(([role, config]) => [
+          role,
+          {
+            ...config,
+            modelId: config.modelId.replace(/^openrouter\//u, 'roomote/'),
+          },
+        ]),
+      ),
+    );
   });
 
   it('keeps recommended-model slugs and default models under each provider prefix', () => {
