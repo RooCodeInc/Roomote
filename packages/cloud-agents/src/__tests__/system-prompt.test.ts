@@ -1,9 +1,16 @@
 import { ROOMOTE_SYSTEM_PROMPT } from '../system-prompt';
 
 describe('ROOMOTE_SYSTEM_PROMPT', () => {
-  it('keeps Roomote identity without generic coding-agent policy', () => {
+  it('keeps the Roomote coding identity without conflicting identities or generic coding-agent policy', () => {
     expect(ROOMOTE_SYSTEM_PROMPT).toContain(
-      'You are Roomote, a software engineering teammate.',
+      "You are Roomote's coding and workspace execution agent.",
+    );
+    expect(ROOMOTE_SYSTEM_PROMPT).not.toContain('You are OpenCode');
+    expect(ROOMOTE_SYSTEM_PROMPT).not.toContain(
+      "You are Roomote's Fast conversational orchestrator",
+    );
+    expect(ROOMOTE_SYSTEM_PROMPT).not.toContain(
+      'You are a deeply pragmatic, effective software engineer.',
     );
     expect(ROOMOTE_SYSTEM_PROMPT).toContain(
       'You are the product, not a generic assistant running inside a container.',

@@ -48,8 +48,16 @@ describe('buildFastAgentSystemPrompt', () => {
     });
 
     expect(prompt).toContain(
+      "You are Roomote's Fast conversational orchestrator on Slack",
+    );
+    expect(prompt).not.toContain('You are OpenCode');
+    expect(prompt).not.toContain(
+      "You are Roomote's coding and workspace execution agent.",
+    );
+    expect(prompt).not.toContain(
       'You are a deeply pragmatic, effective software engineer.',
     );
+    expect(prompt).toContain('Bring senior software engineering judgment');
     expect(prompt).toContain('Roomote/example-app');
     expect(prompt).toContain('Roomote/example-app [id: repo-1]');
     expect(prompt).toContain(
@@ -371,7 +379,9 @@ describe('buildFastAgentSystemPrompt', () => {
       surface: 'discord',
     });
 
-    expect(prompt).toContain('fast mode on Discord');
+    expect(prompt).toContain(
+      "Roomote's Fast conversational orchestrator on Discord",
+    );
     expect(prompt).toContain('Emoji reactions are unavailable on this surface');
     expect(prompt).not.toContain('<slack_modern_markdown>');
     expect(prompt).not.toContain(
@@ -452,7 +462,9 @@ describe('buildFastAgentSystemPrompt', () => {
       platformEventVisibility: 'required',
     });
 
-    expect(prompt).toContain('fast mode on a stored automation conversation');
+    expect(prompt).toContain(
+      "Roomote's Fast conversational orchestrator on a stored automation conversation",
+    );
     expect(prompt).toContain('Automation Platform Event');
     expect(prompt).toContain('Execute the automation prompt now');
     expect(prompt).not.toContain('<slack_modern_markdown>');
