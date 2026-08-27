@@ -85,10 +85,6 @@ export function StepConfigureInference({
           </Button>
         </div>
 
-        <p className="text-sm text-foreground/50">
-          Roomote inference includes a few free credits when it is available.
-        </p>
-
         <SetupFooter onBack={onBack} />
       </div>
     </div>
