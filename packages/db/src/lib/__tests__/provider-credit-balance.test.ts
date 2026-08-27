@@ -7,6 +7,7 @@ vi.mock('../../encryption', () => ({
 
 import {
   fetchOpenRouterCreditBalance,
+  fetchRoomoteCreditBalance,
   getProviderCreditBalances,
   parseOpenRouterKeyBalance,
   parseOpenRouterKeyDetails,
@@ -63,6 +64,35 @@ describe('parseOpenRouterKeyBalance', () => {
     expect(parseOpenRouterKeyBalance(null)).toBeNull();
     expect(parseOpenRouterKeyBalance({})).toBeNull();
     expect(parseOpenRouterKeyBalance({ data: {} })).toBeNull();
+  });
+});
+
+describe('fetchRoomoteCreditBalance', () => {
+  it('uses the managed Roomote key against the OpenRouter balance endpoint', async () => {
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValue(
+        jsonResponse({ data: { limit: 5, limit_remaining: 3 } }),
+      );
+
+    await expect(
+      fetchRoomoteCreditBalance({
+        runtimeEnv: { R_TRIAL_OPENROUTER_API_KEY: 'managed-key' },
+        fetchImpl,
+      }),
+    ).resolves.toMatchObject({
+      providerId: 'roomote',
+      remaining: 3,
+      limit: 5,
+    });
+    expect(fetchImpl).toHaveBeenCalledWith(
+      'https://openrouter.ai/api/v1/key',
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          authorization: 'Bearer managed-key',
+        }),
+      }),
+    );
   });
 });
 

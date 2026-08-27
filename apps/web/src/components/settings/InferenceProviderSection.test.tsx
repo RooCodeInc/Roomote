@@ -916,10 +916,23 @@ describe('InferenceProviderSection', () => {
     providerSetupData.current = buildProviderSetup({
       managedRoomote: true,
     });
+    providerCreditsData.current = [
+      {
+        providerId: 'roomote',
+        remaining: 3,
+        limit: 5,
+        currency: 'USD',
+        fetchedAt: new Date().toISOString(),
+      },
+    ];
 
     renderInferenceProviderSection();
 
     expect(screen.getByText('Roomote inference')).toBeInTheDocument();
+    expect(screen.getByText(/Credits:.*left/i)).toBeInTheDocument();
+    expect(
+      screen.getByRole('progressbar', { name: 'Credit balance' }),
+    ).toBeInTheDocument();
     expect(
       screen.queryByRole('button', { name: /edit roomote inference/i }),
     ).not.toBeInTheDocument();

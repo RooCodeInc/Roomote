@@ -55,10 +55,11 @@ import { GitHubCopilotConnectDialog } from '@/components/settings/GitHubCopilotC
 import { XaiConnectDialog } from '@/components/settings/XaiConnectDialog';
 import { ProviderCreditBalanceLine } from '@/components/settings/ProviderCreditBalanceLine';
 import { SubscriptionUsageLine } from '@/components/settings/SubscriptionUsageLine';
+import { Secret } from 'modal';
 
 const MASKED_VALUE = '••••••••••••••••••••••••••••';
 const PROVIDER_GRID_ROW_CLASS =
-  'grid gap-2 md:grid-cols-[minmax(160px,220px)_minmax(0,1fr)] md:items-center';
+  'grid gap-2 md:grid-cols-[minmax(160px,220px)_minmax(0,1fr)]';
 
 type InferenceProviderSectionProps = {
   providerSetup: SetupModelStatus | null;
@@ -156,10 +157,16 @@ function ConnectedProviderRow({
         <span className="min-w-0 truncate text-sm font-medium">
           {provider.label}
         </span>
-        <p className="text-sm text-muted-foreground">
-          Managed by Roomote with free credits. Add your own provider at any
-          time to continue after credits end.
-        </p>
+        <div>
+          <p className="text-sm text-muted-foreground mb-2">
+            Managed by Roomote with free trial credits. Add your own provider at
+            any time to continue after credits end.
+          </p>
+          <ProviderCreditBalanceLine
+            balance={creditBalance}
+            className="max-w-md"
+          />
+        </div>
       </div>
     );
   }
@@ -180,7 +187,7 @@ function ConnectedProviderRow({
 
   return (
     <div className={`${PROVIDER_GRID_ROW_CLASS} py-3 first:pt-0 last:pb-0`}>
-      <div className="flex min-w-0 items-center gap-2">
+      <div className="flex min-w-0 gap-2">
         <span className="min-w-0 truncate text-sm font-medium">
           {provider.label}
         </span>
@@ -188,16 +195,8 @@ function ConnectedProviderRow({
 
       <div className="flex min-w-0 items-center justify-between gap-2">
         <div className="w-full max-w-md">
-          <Input
-            className="min-w-0 w-full font-mono"
-            value={inputValue}
-            readOnly
-            disabled
-            aria-label={`${primaryCredentialLabel} for ${provider.label}`}
-            data-1p-ignore
-          />
           <SubscriptionUsageLine usage={usage} className="mt-1" />
-          <ProviderCreditBalanceLine balance={creditBalance} className="mt-1" />
+          <ProviderCreditBalanceLine balance={creditBalance} className="mt-2" />
         </div>
 
         {hasRuntimeKey ? (
@@ -1382,8 +1381,9 @@ export function InferenceProviderSection({
                     : undefined
                 }
                 creditBalance={
-                  provider.id === 'openrouter'
-                    ? creditBalanceByProvider.get('openrouter')
+                  provider.id === 'openrouter' ||
+                  provider.id === ROOMOTE_INFERENCE_PROVIDER_ID
+                    ? creditBalanceByProvider.get(provider.id)
                     : undefined
                 }
                 isSaving={savingProviderId === provider.id}

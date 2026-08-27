@@ -1,5 +1,6 @@
 import {
   OPENROUTER_KEY_ENDPOINT,
+  ROOMOTE_INFERENCE_API_KEY_ENV_VAR_NAME,
   type ProviderCreditBalance,
 } from '@roomote/types';
 
@@ -164,9 +165,10 @@ export async function fetchOpenRouterKeyDetails(
 
 async function fetchOpenRouterKeyPayload(
   options: BalanceFetchOptions,
+  envVarName = 'OPENROUTER_API_KEY',
 ): Promise<{ apiKey: string; payload: unknown } | null> {
   const fetchImpl = options.fetchImpl ?? fetch;
-  const apiKey = await resolveModelProviderEnvValue(['OPENROUTER_API_KEY'], {
+  const apiKey = await resolveModelProviderEnvValue(envVarName, {
     ...(options.runtimeEnv && { runtimeEnv: options.runtimeEnv }),
     ...(options.executor && { executor: options.executor }),
   });
@@ -202,6 +204,29 @@ export async function fetchOpenRouterCreditBalance(
   };
 }
 
+export async function fetchRoomoteCreditBalance(
+  options: BalanceFetchOptions = {},
+): Promise<ProviderCreditBalance | null> {
+  const response = await fetchOpenRouterKeyPayload(
+    options,
+    ROOMOTE_INFERENCE_API_KEY_ENV_VAR_NAME,
+  );
+  if (!response) {
+    return null;
+  }
+
+  const parsed = parseOpenRouterKeyBalance(response.payload);
+  if (!parsed) {
+    return null;
+  }
+
+  return {
+    providerId: 'roomote',
+    ...parsed,
+    fetchedAt: new Date().toISOString(),
+  };
+}
+
 /**
  * Fetch credit balances for every supported keyed provider. Providers that are
  * not connected, fail to respond, or return nothing displayable are omitted.
@@ -211,6 +236,7 @@ export async function getProviderCreditBalances(
 ): Promise<ProviderCreditBalance[]> {
   const results = await Promise.allSettled([
     fetchOpenRouterCreditBalance(options),
+    fetchRoomoteCreditBalance(options),
   ]);
 
   return results.flatMap((result) =>
