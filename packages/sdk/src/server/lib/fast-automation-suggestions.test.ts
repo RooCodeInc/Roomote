@@ -219,6 +219,75 @@ describe('Fast automation suggestions', () => {
     });
   });
 
+  it.each([
+    {
+      surface: 'teams' as const,
+      post: postFastAutomationSuggestionsToTeams,
+      providerResult: {
+        provider: 'teams' as const,
+        channelId: 'conversation-retry',
+        messageId: 'teams-message-retry',
+      },
+      extra: {
+        serviceUrl: 'https://smba.example.com/amer/',
+      },
+    },
+    {
+      surface: 'telegram' as const,
+      post: postFastAutomationSuggestionsToTelegram,
+      providerResult: {
+        provider: 'telegram' as const,
+        channelId: 'conversation-retry',
+        messageId: 'telegram-message-retry',
+      },
+      extra: {},
+    },
+  ])(
+    'does not duplicate $surface cards when the provider outcome is unknown',
+    async ({ post, providerResult, extra }) => {
+      const user = await userFactory.create();
+      const postMessage = vi
+        .fn()
+        .mockRejectedValueOnce(new Error('provider response lost'))
+        .mockResolvedValue(providerResult);
+      const params = {
+        provider: { postMessage },
+        channelId: 'conversation-retry',
+        eventId: `automation-retry-${providerResult.provider}`,
+        createdByUserId: user.id,
+        suggestions: [
+          {
+            title: 'Retry-safe delivery',
+            brief: 'Do not post this card twice.',
+          },
+        ],
+        ...extra,
+      };
+
+      await expect(post(params as never)).rejects.toThrow(
+        'provider response lost',
+      );
+      await post(params as never);
+
+      expect(postMessage).toHaveBeenCalledOnce();
+      const [claim] = await db
+        .select()
+        .from(trackedMessages)
+        .where(
+          and(
+            eq(trackedMessages.surface, providerResult.provider),
+            eq(trackedMessages.channelId, 'conversation-retry'),
+          ),
+        );
+      expect(claim).toMatchObject({
+        channelId: 'conversation-retry',
+        messageTs: null,
+        createdByUserId: user.id,
+        metadata: expect.objectContaining({ launchRouting: 'router' }),
+      });
+    },
+  );
+
   it('serializes concurrent persistence retries for one automation event', async () => {
     const user = await userFactory.create();
     const postMessage = vi.fn().mockResolvedValue('400.001');

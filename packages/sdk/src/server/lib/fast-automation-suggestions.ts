@@ -12,6 +12,7 @@ import {
   inArray,
   registerTrackedSuggestionCards,
   sql,
+  trackedMessages,
   workItems,
 } from '@roomote/db/server';
 import {
@@ -176,6 +177,56 @@ async function trackSuggestion(params: {
   ]);
 }
 
+async function claimSuggestionSend(params: {
+  surface: 'teams' | 'telegram';
+  channelId: string;
+  threadId?: string;
+  workItemId: string;
+  createdByUserId: string;
+  eventId: string;
+}): Promise<string | null> {
+  const [claim] = await db
+    .insert(trackedMessages)
+    .values({
+      surface: params.surface,
+      kind: 'suggestion_card',
+      dedupeKey: `${params.surface}:${params.channelId}:${params.eventId}:${params.workItemId}`,
+      channelId: params.channelId,
+      ...(params.threadId ? { threadTs: params.threadId } : {}),
+      workItemId: params.workItemId,
+      createdByUserId: params.createdByUserId,
+      metadata: {
+        suggestionType: 'suggested_tasks',
+        suggestionKey: `${params.eventId}:${params.workItemId}`,
+        suggestionGroupKey: params.eventId,
+        launchRouting: 'router',
+      },
+    })
+    .onConflictDoNothing({
+      target: [trackedMessages.kind, trackedMessages.dedupeKey],
+    })
+    .returning({ id: trackedMessages.id });
+  return claim?.id ?? null;
+}
+
+async function finalizeSuggestionSend(params: {
+  claimId: string;
+  channelId: string;
+  messageId: string;
+  threadId?: string;
+}): Promise<void> {
+  await db
+    .update(trackedMessages)
+    .set({
+      dedupeKey: `${params.channelId}:${params.messageId}`,
+      channelId: params.channelId,
+      messageTs: params.messageId,
+      threadTs: params.threadId ?? null,
+      updatedAt: new Date(),
+    })
+    .where(eq(trackedMessages.id, params.claimId));
+}
+
 export async function postFastAutomationSuggestionsToSlack(params: {
   slack: Pick<SlackNotifier, 'postMessage'>;
   channelId: string;
@@ -275,6 +326,16 @@ export async function postFastAutomationSuggestionsToTeams(params: {
   for (const suggestion of suggestions) {
     if (trackedWorkItemIds.has(suggestion.id)) continue;
 
+    const claimId = await claimSuggestionSend({
+      surface: 'teams',
+      channelId: params.channelId,
+      ...(params.threadId ? { threadId: params.threadId } : {}),
+      workItemId: suggestion.id,
+      createdByUserId: params.createdByUserId,
+      eventId: params.eventId,
+    });
+    if (!claimId) continue;
+
     const posted = await params.provider.postMessage({
       channelId: params.channelId,
       serviceUrl: params.serviceUrl,
@@ -284,14 +345,11 @@ export async function postFastAutomationSuggestionsToTeams(params: {
       text: formatSuggestion(suggestion),
       textFormat: 'markdown',
     });
-    await trackSuggestion({
-      surface: 'teams',
+    await finalizeSuggestionSend({
+      claimId,
       channelId: posted.channelId,
       messageId: posted.messageId,
       ...(posted.threadId ? { threadId: posted.threadId } : {}),
-      workItemId: suggestion.id,
-      createdByUserId: params.createdByUserId,
-      eventId: params.eventId,
     });
   }
 }
@@ -312,6 +370,16 @@ export async function postFastAutomationSuggestionsToTelegram(params: {
   for (const suggestion of suggestions) {
     if (trackedWorkItemIds.has(suggestion.id)) continue;
 
+    const claimId = await claimSuggestionSend({
+      surface: 'telegram',
+      channelId: params.channelId,
+      ...(params.threadId ? { threadId: params.threadId } : {}),
+      workItemId: suggestion.id,
+      createdByUserId: params.createdByUserId,
+      eventId: params.eventId,
+    });
+    if (!claimId) continue;
+
     const posted = await params.provider.postMessage({
       channelId: params.channelId,
       ...(params.threadId ? { threadId: params.threadId } : {}),
@@ -319,14 +387,11 @@ export async function postFastAutomationSuggestionsToTelegram(params: {
       textFormat: 'markdown',
       buttons: [[{ text: 'Start', callbackData: `idea:${suggestion.id}` }]],
     });
-    await trackSuggestion({
-      surface: 'telegram',
+    await finalizeSuggestionSend({
+      claimId,
       channelId: posted.channelId,
       messageId: posted.messageId,
       ...(posted.threadId ? { threadId: posted.threadId } : {}),
-      workItemId: suggestion.id,
-      createdByUserId: params.createdByUserId,
-      eventId: params.eventId,
     });
   }
 }
