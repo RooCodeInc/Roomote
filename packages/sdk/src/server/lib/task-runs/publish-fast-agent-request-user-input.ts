@@ -67,6 +67,9 @@ export async function publishFastAgentRequestUserInput(input: {
 
   const { workspaceId, replyTarget } = session.conversation;
   const { channelId, threadId } = replyTarget;
+  if (!threadId) {
+    return { published: false };
+  }
 
   const lockKey = `fast-agent:request-user-input:publish:${workspaceId}:${channelId}:${threadId}`;
   let releaseLock: Awaited<ReturnType<typeof acquireRedisLock>> = null;

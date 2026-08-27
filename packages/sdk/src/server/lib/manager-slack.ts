@@ -73,6 +73,7 @@ export function buildCustomAutomationSlackMessage(params: {
   automationName: string;
   text: string;
   contentBlocks?: SlackBlock[];
+  taskUrl?: string;
 }): SlackAutomationSettingsMessage {
   return {
     text: params.text,
@@ -83,6 +84,7 @@ export function buildCustomAutomationSlackMessage(params: {
       contentBlocks: params.contentBlocks ?? [
         { type: 'markdown', text: params.text },
       ],
+      ...(params.taskUrl ? { taskUrl: params.taskUrl } : {}),
     }),
   };
 }
