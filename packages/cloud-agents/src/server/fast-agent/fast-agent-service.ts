@@ -547,13 +547,9 @@ function wrapFastAgentMessage(
   text: string,
   sender?: { displayName?: string; githubLogin?: string },
 ): string {
-  if (!sender?.displayName && !sender?.githubLogin) {
-    return text;
-  }
-
   return `<current_message>\n${escapeFastAgentEnvelopeJson({
-    ...(sender.displayName ? { sender_name: sender.displayName } : {}),
-    ...(sender.githubLogin ? { sender_github: sender.githubLogin } : {}),
+    ...(sender?.displayName ? { sender_name: sender.displayName } : {}),
+    ...(sender?.githubLogin ? { sender_github: sender.githubLogin } : {}),
     text,
   })}\n</current_message>`;
 }
@@ -593,6 +589,7 @@ function buildFastAgentMessages({
   currentMessageTs,
   currentMessageSender,
   surface,
+  turnSource,
 }: {
   question: string;
   currentMessageAgentContext?: string;
@@ -605,6 +602,7 @@ function buildFastAgentMessages({
     githubLogin?: string;
   };
   surface: FastAgentConversation['surface'];
+  turnSource: FastAgentTurnSource;
 }): {
   bootstrapMessages: ModelMessage[];
   turnMessages: ModelMessage[];
@@ -613,15 +611,19 @@ function buildFastAgentMessages({
 } {
   const normalizedQuestion = normalizeThreadText(question);
   const currentUserMessageText =
-    currentMessageTs && surface === 'slack'
-      ? wrapSlackMessage(normalizedQuestion, {
-          ts: currentMessageTs,
-          senderSlackId: currentMessageSender?.slackUserId,
-          senderName: currentMessageSender?.displayName,
-          senderGithub: currentMessageSender?.githubLogin,
-          agentContext: currentMessageAgentContext,
-        })
-      : wrapFastAgentMessage(normalizedQuestion, currentMessageSender);
+    surface === 'slack'
+      ? currentMessageTs
+        ? wrapSlackMessage(normalizedQuestion, {
+            ts: currentMessageTs,
+            senderSlackId: currentMessageSender?.slackUserId,
+            senderName: currentMessageSender?.displayName,
+            senderGithub: currentMessageSender?.githubLogin,
+            agentContext: currentMessageAgentContext,
+          })
+        : normalizedQuestion
+      : turnSource === 'human'
+        ? wrapFastAgentMessage(normalizedQuestion, currentMessageSender)
+        : normalizedQuestion;
   const turnMessage = buildUserTextMessage(currentUserMessageText);
 
   if (compatibilityMessages.length > 0) {
@@ -1104,6 +1106,7 @@ export async function answerFastAgentQuestion({
       currentMessageTs: currentMessageId,
       currentMessageSender,
       surface: conversation.surface,
+      turnSource,
     });
     const releaseVersion = resolveRoomoteReleaseVersion(
       Env.RELEASE_PRODUCT_VERSION,
