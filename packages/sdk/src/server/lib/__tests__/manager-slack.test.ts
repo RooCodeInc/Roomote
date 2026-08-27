@@ -88,38 +88,54 @@ describe('manager slack helpers', () => {
     expect(message).toEqual({
       text: 'Found two regressions.',
       blocks: [
-        expect.objectContaining({
-          type: 'container',
-          width: 'full',
-          title: {
-            type: 'plain_text',
-            text: 'Weekly scan',
-            emoji: false,
-          },
-          icon: {
-            type: 'image',
-            image_url: 'https://app.example.com/automation-icons/zap.png',
-            alt_text: 'Weekly scan automation icon',
-          },
-          has_header_divider: true,
-          child_blocks: [
+        {
+          type: 'context',
+          block_id: 'roomote_automation_result_header',
+          elements: [
             {
-              type: 'section',
-              text: { type: 'mrkdwn', text: 'Found two regressions.' },
+              type: 'image',
+              image_url: 'https://app.example.com/automation-icons/zap.png',
+              alt_text: 'Weekly scan automation icon',
             },
+            {
+              type: 'plain_text',
+              text: 'Weekly scan',
+              emoji: false,
+            },
+          ],
+        },
+        { type: 'markdown', text: 'Found two regressions.' },
+        {
+          type: 'actions',
+          block_id: 'roomote_automation_result_actions',
+          elements: [
             expect.objectContaining({
-              type: 'actions',
-              elements: [
-                expect.objectContaining({
-                  action_id: 'late_bound_automation_configure',
-                  url: 'https://app.example.com/automations#custom-automation-automation-1',
-                }),
-              ],
+              action_id: 'late_bound_automation_configure',
+              url: 'https://app.example.com/automations#custom-automation-automation-1',
             }),
           ],
-        }),
+        },
       ],
     });
+  });
+
+  it('preserves custom automation Markdown without entity escaping', () => {
+    const text = [
+      '## Report',
+      '- [Finding](<https://x.com/example/status/1>)',
+      '',
+      '| Item | Result |',
+      '| --- | --- |',
+      '| Link | **Found** |',
+    ].join('\n');
+
+    expect(
+      buildCustomAutomationSlackMessage({
+        automationId: 'automation-1',
+        automationName: 'Weekly scan',
+        text,
+      }).blocks,
+    ).toContainEqual({ type: 'markdown', text });
   });
 
   it('joins a generated summary with an optional action footer', () => {
