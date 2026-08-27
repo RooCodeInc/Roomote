@@ -433,11 +433,10 @@ async function getSessionTasks(sessionId: string) {
       repositoryName: tasks.repositoryName,
       model: tasks.model,
       activityAt: tasks.activityAt,
-      deletedAt: tasks.deletedAt,
     })
     .from(sessionTasks)
     .innerJoin(tasks, eq(tasks.id, sessionTasks.taskId))
-    .where(eq(sessionTasks.sessionId, sessionId))
+    .where(and(eq(sessionTasks.sessionId, sessionId), isNull(tasks.deletedAt)))
     .orderBy(sessionTasks.attachedAt);
 
   return Promise.all(

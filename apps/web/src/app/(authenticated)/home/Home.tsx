@@ -569,9 +569,13 @@ export function Home({
   const hasAnyEnvironments = (environments.data?.length ?? 0) > 0;
   const showNoEnvironmentsWarning =
     isAdmin && !environments.isPending && !hasAnyEnvironments;
+  const autoRoutingNeedsEnvironment =
+    !sessionsUiEnabled &&
+    !hasAnyEnvironments &&
+    watchedRepository === AUTO_WORKSPACE_VALUE;
   const submitDisabledReason =
     getTaskLaunchDisabledReason(managedAccess) ??
-    (!hasAnyEnvironments && watchedRepository === AUTO_WORKSPACE_VALUE
+    (autoRoutingNeedsEnvironment
       ? 'Auto routing needs an environment. Create one, or select All Repositories to work without one.'
       : undefined);
 

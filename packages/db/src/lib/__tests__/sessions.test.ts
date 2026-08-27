@@ -148,6 +148,28 @@ describe('session helpers', () => {
     );
   });
 
+  it('excludes soft-deleted tasks when recomputing cached status', async () => {
+    const session = await sessionFactory.create({
+      activityAt: 100,
+      cachedStatus: 'blocked',
+    });
+    createdSessionIds.push(session.id);
+    const task = await taskFactory.create({
+      state: 'failed',
+      deletedAt: new Date(),
+    });
+    createdTaskIds.push(task.id);
+    await db.insert(sessionTasks).values({
+      sessionId: session.id,
+      taskId: task.id,
+      origin: 'direct_launch',
+    });
+
+    const updated = await touchSessionActivity(db, session.id, 100);
+
+    expect(updated.cachedStatus).toBe('ready');
+  });
+
   it('serializes concurrent status refreshes before reading linked tasks', async () => {
     const session = await sessionFactory.create({
       activityAt: 100,

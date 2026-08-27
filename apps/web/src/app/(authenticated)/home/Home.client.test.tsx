@@ -21,6 +21,7 @@ let currentEnvironments: Array<{ id: string; name: string }> | undefined = [
 let currentEnvironmentsPending = false;
 let currentCommunicationsFastModeDefault = false;
 let currentPersonalPreferencesLoading = false;
+let currentSessionsUiEnabled = false;
 
 const {
   mockPush,
@@ -74,6 +75,7 @@ vi.mock('@/hooks/useUser', () => ({
     name: 'Test User',
     primaryEmail: 'test@example.com',
     cloudEnabled: currentCloudEnabled,
+    featureFlags: { sessions_ui: currentSessionsUiEnabled },
     resource: {
       username: 'tester',
       fullName: 'Test User',
@@ -398,6 +400,7 @@ describe('Home', () => {
     currentEnvironmentsPending = false;
     currentCommunicationsFastModeDefault = false;
     currentPersonalPreferencesLoading = false;
+    currentSessionsUiEnabled = false;
     localStorage.clear();
     vi.clearAllMocks();
 
@@ -1137,6 +1140,27 @@ describe('Home', () => {
     expect(
       screen.getByRole('button', { name: 'Submit prompt' }),
     ).toBeDisabled();
+  });
+
+  it('starts an Auto Session without an environment when Sessions UI is enabled', async () => {
+    currentEnvironments = [];
+    currentSessionsUiEnabled = true;
+
+    render(<Home initialPlaceholderIndex={0} />);
+
+    const submitButton = screen.getByRole('button', { name: 'Submit prompt' });
+    expect(submitButton).toBeEnabled();
+    fireEvent.click(submitButton);
+
+    await waitFor(() => {
+      expect(mockStartFastSession).toHaveBeenCalledWith({
+        text: 'Test prompt',
+        images: undefined,
+        model: 'openrouter/openai/gpt-5.4',
+      });
+    });
+    expect(mockRouteHomeTask).not.toHaveBeenCalled();
+    expect(mockCreateStandardTaskRun).not.toHaveBeenCalled();
   });
 
   it('does not show the empty-environments warning while environments are loading', () => {

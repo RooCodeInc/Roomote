@@ -1,12 +1,19 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
-const { useSandboxLayoutMock, useTRPCMock, updateTitleMutationMock } =
-  vi.hoisted(() => ({
-    useSandboxLayoutMock: vi.fn(),
-    useTRPCMock: vi.fn(),
-    updateTitleMutationMock: vi.fn(async () => undefined),
-  }));
+const {
+  useSandboxLayoutMock,
+  useTRPCMock,
+  updateTitleMutationMock,
+  parentSessionQueryMock,
+  featureFlagState,
+} = vi.hoisted(() => ({
+  useSandboxLayoutMock: vi.fn(),
+  useTRPCMock: vi.fn(),
+  updateTitleMutationMock: vi.fn(async () => undefined),
+  parentSessionQueryMock: vi.fn(),
+  featureFlagState: { sessionsUiEnabled: false },
+}));
 
 vi.mock('../../use-sandbox-layout', () => ({
   useSandboxLayout: useSandboxLayoutMock,
@@ -14,6 +21,16 @@ vi.mock('../../use-sandbox-layout', () => ({
 
 vi.mock('@/trpc/client', () => ({
   useTRPC: useTRPCMock,
+}));
+
+vi.mock('@/hooks/useUser', () => ({
+  useAuthorizedUser: () => ({
+    featureFlags: { sessions_ui: featureFlagState.sessionsUiEnabled },
+  }),
+}));
+
+vi.mock('./TaskSessionReadTracker', () => ({
+  TaskSessionReadTracker: () => null,
 }));
 
 vi.mock('@/components/sandbox', () => ({
@@ -78,6 +95,11 @@ function renderHeader(
 describe('Header', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    featureFlagState.sessionsUiEnabled = false;
+    parentSessionQueryMock.mockResolvedValue({
+      sessionId: 'session-1',
+      title: 'Parent Session',
+    });
 
     useSandboxLayoutMock.mockReturnValue({
       isSidebarVisible: true,
@@ -91,6 +113,18 @@ describe('Header', () => {
             'sandboxSession.byTaskId',
             taskId,
           ],
+        },
+      },
+      sessions: {
+        forTask: {
+          queryOptions: (
+            _input: { taskId: string },
+            options?: { enabled?: boolean },
+          ) => ({
+            queryKey: ['sessions.forTask'],
+            queryFn: parentSessionQueryMock,
+            enabled: options?.enabled,
+          }),
         },
       },
       tasks: {
@@ -140,6 +174,23 @@ describe('Header', () => {
     });
 
     expect(screen.queryByText('OpenCode')).not.toBeInTheDocument();
+  });
+
+  it('does not query or render Session breadcrumbs while Sessions UI is disabled', () => {
+    renderHeader();
+
+    expect(parentSessionQueryMock).not.toHaveBeenCalled();
+    expect(screen.queryByRole('link', { name: 'Sessions' })).toBeNull();
+  });
+
+  it('renders Session breadcrumbs while Sessions UI is enabled', async () => {
+    featureFlagState.sessionsUiEnabled = true;
+
+    renderHeader();
+
+    expect(
+      await screen.findByRole('link', { name: 'Parent Session' }),
+    ).toHaveAttribute('href', '/sessions/session-1?task=task-123');
   });
 
   it('refreshes task lists after renaming a task', async () => {

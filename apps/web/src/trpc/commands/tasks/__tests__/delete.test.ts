@@ -3,6 +3,8 @@ import type { UserAuthSuccess } from '@/types';
 const {
   mockDeleteArtifactsBatch,
   mockMarkParallelCounts,
+  mockGetSessionForTask,
+  mockTouchSessionActivity,
   tasksTable,
   taskArtifactsTable,
   deleteCalls,
@@ -10,6 +12,8 @@ const {
 } = vi.hoisted(() => ({
   mockDeleteArtifactsBatch: vi.fn(),
   mockMarkParallelCounts: vi.fn(),
+  mockGetSessionForTask: vi.fn(),
+  mockTouchSessionActivity: vi.fn(),
   tasksTable: { id: 'tasks.id', deletedAt: 'tasks.deletedAt' },
   taskArtifactsTable: {
     id: 'taskArtifacts.id',
@@ -64,6 +68,8 @@ vi.mock('@roomote/db/server', () => ({
   tasks: tasksTable,
   taskArtifacts: taskArtifactsTable,
   markTaskStartParallelCountsEndedAtForTaskIds: mockMarkParallelCounts,
+  getSessionForTask: mockGetSessionForTask,
+  touchSessionActivity: mockTouchSessionActivity,
   and: (...conditions: unknown[]) => ({ and: conditions }),
   inArray: (column: unknown, values: unknown) => ({
     inArray: [column, values],
@@ -89,6 +95,10 @@ describe('deleteTasksCommand', () => {
     vi.clearAllMocks();
     deleteCalls.length = 0;
     mockDeleteArtifactsBatch.mockResolvedValue({ deleted: 1, errors: 0 });
+    mockGetSessionForTask.mockResolvedValue({
+      id: 'session-1',
+      activityAt: 100,
+    });
   });
 
   it('deletes taskArtifacts rows inside the soft-delete transaction', async () => {
@@ -114,5 +124,11 @@ describe('deleteTasksCommand', () => {
         (call as { table: unknown }).table === taskArtifactsTable,
     );
     expect(artifactDelete).toBeDefined();
+    expect(mockGetSessionForTask).toHaveBeenCalledWith(fakeTx, 'task-1');
+    expect(mockTouchSessionActivity).toHaveBeenCalledWith(
+      fakeTx,
+      'session-1',
+      100,
+    );
   });
 });

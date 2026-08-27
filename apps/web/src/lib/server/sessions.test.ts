@@ -116,6 +116,40 @@ describe('unified Session queries', () => {
     expect(taskEvent).not.toHaveProperty('task.pullRequests');
   });
 
+  it('excludes soft-deleted tasks from Session detail, timeline, and live status', async () => {
+    const owner = await userFactory.create();
+    const session = await sessionFactory.create({
+      ownerKind: 'user',
+      ownerUserId: owner.id,
+      cachedStatus: 'blocked',
+    });
+    const task = await taskFactory.create({
+      initiatorUserId: owner.id,
+      state: 'failed',
+      deletedAt: new Date(),
+    });
+    await db.insert(sessionTasks).values({
+      sessionId: session.id,
+      taskId: task.id,
+      origin: 'direct_launch',
+    });
+
+    const detail = await getSessionById(
+      { userId: owner.id, isAdmin: false },
+      session.id,
+    );
+    const timeline = await getSessionTimeline(
+      { userId: owner.id, isAdmin: false },
+      session.id,
+    );
+
+    expect(detail?.tasks).toEqual([]);
+    expect(detail?.status).toBe('ready');
+    expect(
+      timeline?.events.some((event) => event.id.startsWith(`task:${task.id}:`)),
+    ).toBe(false);
+  });
+
   it('keeps metadata changes owner-only and stores per-user pins', async () => {
     const owner = await userFactory.create();
     const stranger = await userFactory.create();

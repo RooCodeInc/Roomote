@@ -2,6 +2,8 @@ import {
   db,
   tasks,
   markTaskStartParallelCountsEndedAtForTaskIds,
+  getSessionForTask,
+  touchSessionActivity,
   taskArtifacts,
   and,
   inArray,
@@ -94,6 +96,18 @@ export async function deleteTasksCommand(
       .set({ deletedAt: endedAt, updatedAt: endedAt })
       .where(and(...whereConditions))
       .returning({ id: tasks.id });
+
+    const affectedSessions = new Map<
+      string,
+      NonNullable<Awaited<ReturnType<typeof getSessionForTask>>>
+    >();
+    for (const deletedTask of deletedTasksResult) {
+      const session = await getSessionForTask(tx, deletedTask.id);
+      if (session) affectedSessions.set(session.id, session);
+    }
+    for (const session of affectedSessions.values()) {
+      await touchSessionActivity(tx, session.id, session.activityAt);
+    }
 
     return {
       deletedTasks: deletedTasksResult,

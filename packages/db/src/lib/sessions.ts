@@ -1,4 +1,4 @@
-import { and, desc, eq, or, sql } from 'drizzle-orm';
+import { and, desc, eq, isNull, or, sql } from 'drizzle-orm';
 
 import type { TaskGoalStatus, TaskState } from '@roomote/types';
 
@@ -96,7 +96,7 @@ async function refreshLockedSession(
     .from(sessionTasks)
     .innerJoin(tasks, eq(tasks.id, sessionTasks.taskId))
     .leftJoin(taskRuns, eq(taskRuns.taskId, tasks.id))
-    .where(eq(sessionTasks.sessionId, sessionId))
+    .where(and(eq(sessionTasks.sessionId, sessionId), isNull(tasks.deletedAt)))
     .orderBy(tasks.id, desc(taskRuns.id));
 
   const [updated] = await tx
