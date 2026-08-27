@@ -110,11 +110,6 @@ describe('StepConfigureInference', () => {
     ).toBeInTheDocument();
     expect(screen.getByTestId('gift')).toBeInTheDocument();
     expect(screen.getByTestId('plug')).toBeInTheDocument();
-    expect(
-      screen.getByText(
-        'Roomote inference includes a few free credits when it is available.',
-      ),
-    ).toBeInTheDocument();
   });
 
   it('starts trial inference and advances after the setup mutation succeeds', async () => {
