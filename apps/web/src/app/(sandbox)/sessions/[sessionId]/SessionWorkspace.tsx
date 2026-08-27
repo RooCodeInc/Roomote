@@ -350,8 +350,6 @@ export function SessionWorkspace({
         <ResponsiveWorkspacePanels
           isPanelOpen={panelOpen}
           main={children}
-          mainSize={65}
-          panelSize={35}
           panel={panelContent}
         />
       </WorkspaceSurface>
