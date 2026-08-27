@@ -219,63 +219,83 @@ describe('AcpToolDetails', () => {
   });
 
   it.each(['search', 'query'])(
-    'shows the sanitized Hippocampus %s query as structured input',
+    'adds the sanitized Hippocampus %s query to the existing result JSON',
     (toolName) => {
+      const result = {
+        matches: [{ title: 'Existing result', score: 0.98 }],
+      };
       render(
         <AcpToolDetails
-          msg={buildMessage({
-            kind: 'mcp',
-            title: toolName,
-            isMcp: true,
-            mcpServerName: 'gbrain',
-            mcpToolName: toolName,
-            serverName: 'gbrain',
-            toolName,
-            rawInput: {
-              query:
-                'Find /sandbox/repos/RooCodeInc/Roomote notes with api_key=synthetic-test-value',
-            },
-          } as Partial<AcpToolResultUiMessage['data']>)}
+          msg={{
+            ...buildMessage({
+              kind: 'mcp',
+              title: toolName,
+              isMcp: true,
+              mcpServerName: 'gbrain',
+              mcpToolName: toolName,
+              serverName: 'gbrain',
+              toolName,
+              rawInput: {
+                query:
+                  'Find /sandbox/repos/RooCodeInc/Roomote notes with api_key=synthetic-test-value',
+              },
+              output: JSON.stringify(result),
+            } as Partial<AcpToolResultUiMessage['data']>),
+            text: JSON.stringify(result),
+          }}
         />,
       );
 
-      expect(toolInputSpy).toHaveBeenCalledWith(
+      expect(codeBlockSpy).toHaveBeenCalledWith(
         expect.objectContaining({
-          input: {
+          code: JSON.stringify({
+            ...result,
             query: 'Find RooCodeInc/Roomote notes with api_key=[redacted]',
-          },
+          }),
+          variant: 'compact',
+          highlight: false,
+          className: expect.stringContaining('bg-transparent'),
         }),
       );
-      expect(codeBlockSpy).not.toHaveBeenCalled();
+      expect(toolInputSpy).not.toHaveBeenCalled();
     },
   );
 
-  it('shows a sanitized send_task_message message from nested arguments', () => {
+  it('adds a sanitized send_task_message message to the existing result JSON', () => {
+    const result = { delivered: true, taskId: 'task-1' };
     render(
       <AcpToolDetails
-        msg={buildMessage({
-          kind: 'tool',
-          title: 'send_task_message',
-          toolName: 'send_task_message',
-          rawInput: {
-            arguments: {
-              taskId: 'task-1',
-              message:
-                'Review /sandbox/repos/RooCodeInc/Roomote and use password=synthetic-test-value',
+        msg={{
+          ...buildMessage({
+            kind: 'tool',
+            title: 'send_task_message',
+            toolName: 'send_task_message',
+            rawInput: {
+              arguments: {
+                taskId: 'task-1',
+                message:
+                  'Review /sandbox/repos/RooCodeInc/Roomote and use password=synthetic-test-value',
+              },
             },
-          },
-        } as Partial<AcpToolResultUiMessage['data']>)}
+            output: JSON.stringify(result),
+          } as Partial<AcpToolResultUiMessage['data']>),
+          text: JSON.stringify(result),
+        }}
       />,
     );
 
-    expect(toolInputSpy).toHaveBeenCalledWith(
+    expect(codeBlockSpy).toHaveBeenCalledWith(
       expect.objectContaining({
-        input: {
+        code: JSON.stringify({
+          ...result,
           message: 'Review RooCodeInc/Roomote and use password=[redacted]',
-        },
+        }),
+        variant: 'compact',
+        highlight: false,
+        className: expect.stringContaining('bg-transparent'),
       }),
     );
-    expect(codeBlockSpy).not.toHaveBeenCalled();
+    expect(toolInputSpy).not.toHaveBeenCalled();
   });
 
   it('does not fall back to unrelated input for recognized tools', () => {
@@ -296,10 +316,10 @@ describe('AcpToolDetails', () => {
       />,
     );
 
-    expect(toolInputSpy).toHaveBeenCalledWith(
-      expect.objectContaining({ input: {} }),
+    expect(codeBlockSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ code: 'Spawning subagent' }),
     );
-    expect(codeBlockSpy).not.toHaveBeenCalled();
+    expect(toolInputSpy).not.toHaveBeenCalled();
   });
 
   it('hides expanded details for Roomote Slack lifecycle tools', () => {

@@ -44,6 +44,10 @@ export function AcpToolDetails({
   const sanitizedText = msg.text
     ? sanitizeSandboxPathString(msg.text)
     : msg.text;
+  const textWithVisibleToolInput = addVisibleToolInput(
+    sanitizedText,
+    visibleToolInput,
+  );
   const isSubagent = isSubagentToolPayload(msg.data);
   const subagentPrompt = getSubagentPrompt(msg);
   const subagentLastMessage = getSubagentLastMessage(msg);
@@ -89,21 +93,9 @@ export function AcpToolDetails({
     );
   }
 
-  if (visibleToolInput) {
-    return (
-      <ToolInput
-        input={visibleToolInput}
-        style={{
-          maxHeight,
-          overflow: 'auto',
-        }}
-      />
-    );
-  }
-
-  return sanitizedText ? (
+  return textWithVisibleToolInput ? (
     <CodeBlock
-      code={sanitizedText}
+      code={textWithVisibleToolInput}
       language="bash"
       maxHeight={maxHeight}
       variant="compact"
@@ -119,6 +111,33 @@ export function AcpToolDetails({
       }}
     />
   );
+}
+
+function addVisibleToolInput(
+  text: string | undefined,
+  visibleToolInput: Record<string, string> | null,
+): string | undefined {
+  if (
+    !text ||
+    !visibleToolInput ||
+    Object.keys(visibleToolInput).length === 0
+  ) {
+    return text;
+  }
+
+  try {
+    const result = JSON.parse(text) as unknown;
+    if (!result || typeof result !== 'object' || Array.isArray(result)) {
+      return text;
+    }
+
+    return JSON.stringify({
+      ...(result as Record<string, unknown>),
+      ...visibleToolInput,
+    });
+  } catch {
+    return text;
+  }
 }
 
 function getVisibleToolInput(
