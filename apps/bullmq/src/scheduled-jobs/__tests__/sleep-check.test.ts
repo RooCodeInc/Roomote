@@ -1817,6 +1817,17 @@ describe('sleepCheckJob', () => {
       error:
         'Idle session could not be snapshotted because instance sb-review-gone was stopped.',
     });
+    expect(mockRecordTaskRunEvent).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        runId: 103,
+        eventType: 'decision',
+        message: 'Canceled idle review task run #103 without a snapshot.',
+        details: expect.objectContaining({
+          decision: 'cancel_unfinished_review_without_snapshot',
+        }),
+      }),
+    );
   });
 
   it('cancels preparing jobs with a stale heartbeat and stop request when the sandbox is gone', async () => {

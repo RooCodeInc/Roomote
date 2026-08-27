@@ -1824,10 +1824,12 @@ async function completeIdleJobWithoutSnapshot(
     },
   );
 
+  const finalStatus = resolveSandboxTerminationStatus(job, RunStatus.Completed);
+
   try {
     await finishRun({
       id: job.id,
-      status: resolveSandboxTerminationStatus(job, RunStatus.Completed),
+      status: finalStatus,
       error: errorMessage,
     });
   } catch (error) {
@@ -1845,11 +1847,16 @@ async function completeIdleJobWithoutSnapshot(
 
   await recordSleepCheckEvent(
     job,
-    'completed',
-    `Completed idle task run #${job.id} without a snapshot.`,
+    finalStatus === RunStatus.Canceled ? 'decision' : 'completed',
+    finalStatus === RunStatus.Canceled
+      ? `Canceled idle review task run #${job.id} without a snapshot.`
+      : `Completed idle task run #${job.id} without a snapshot.`,
     {
       ...details,
-      decision: 'complete_without_snapshot',
+      decision:
+        finalStatus === RunStatus.Canceled
+          ? 'cancel_unfinished_review_without_snapshot'
+          : 'complete_without_snapshot',
       snapshotFailedAt: snapshotFailedAt.toISOString(),
       error: errorMessage,
     },
