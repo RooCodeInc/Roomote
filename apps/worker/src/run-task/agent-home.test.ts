@@ -984,6 +984,33 @@ describe('generateOpenCodeConfig provider support', () => {
     expect(runtimeEnv).not.toHaveProperty('R_TASK_MODEL_COSTS');
   });
 
+  it('creates a model entry for a price-only switchable model', () => {
+    // Known by pricing alone (no context-window metadata): the entry must
+    // still be generated so the cost block lands.
+    const runtimeEnv = {
+      R_MODEL: 'roomote/openai/gpt-5.6-luna',
+      R_TRIAL_OPENROUTER_API_KEY: 'sk-or-trial',
+      R_TASK_MODEL_COSTS: JSON.stringify({
+        'roomote/openai/gpt-5.6-terra': { input: 4, output: 16 },
+      }),
+      R_INFERENCE_GATEWAY_URL: 'https://api.example.com/api/inference/',
+    };
+    const result = generateOpenCodeConfig({
+      homeDir: createHomeDir(),
+      runtimeEnv,
+    });
+    const config = JSON.parse(result.configContent) as {
+      provider: Record<
+        string,
+        { models: Record<string, { cost?: Record<string, number> }> }
+      >;
+    };
+
+    expect(
+      config.provider.roomote?.models['openai/gpt-5.6-terra']?.cost,
+    ).toEqual({ input: 4, output: 16 });
+  });
+
   it('configures trusted LiteLLM context limits for proactive compaction', () => {
     const runtimeEnv = {
       R_MODEL: 'openrouter/openai/gpt-5.4',

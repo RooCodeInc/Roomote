@@ -1610,6 +1610,9 @@ function resolveModelBackedOpenCodeConfig(
   const openAiCompatibleModelIds = [
     ...configuredModelIds,
     ...Object.keys(modelContextWindows),
+    // A switchable model may be known only by its pricing; it still needs a
+    // config entry or its cost block is silently dropped.
+    ...Object.keys(modelCosts),
   ];
   const providerModelConfig = chatGptFastMode
     ? mergeOpenCodeChatGptFastModeOptions(
