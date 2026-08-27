@@ -219,11 +219,15 @@ Once the app is installed and an environment maps the repository:
 Issue mentions use the environment mapped to the repository. Map the repository
 to an environment before mentioning Roomote on issues.
 
-When a task delegated from a Fast session in Slack or Discord opens a pull
-request, actionable review feedback returns to that same session. Use
-**Resolve these issues** to address the current feedback, **Auto-resolve on this
-PR** to handle later actionable feedback automatically, or **Dismiss** to take
-no action.
+When a task delegated from a Fast session opens a pull request, actionable
+review feedback returns to that same session on the web or in Slack, Discord,
+Microsoft Teams, or Telegram. Slack, Discord, and Telegram offer **Resolve
+these issues** to address the current feedback, **Auto-resolve on this PR** to
+handle later actionable feedback automatically, and **Dismiss** to take no
+action; Teams receives the feedback without those action controls. Handled or
+superseded controls are retired so only current feedback remains actionable. If
+Roomote's final review summary is delayed, provisional inline findings are
+delivered after five minutes rather than being hidden indefinitely.
 
 Failed GitHub checks also return to every Roomote task linked to the pull
 request and to the conversation that started the work. Roomote consolidates a
