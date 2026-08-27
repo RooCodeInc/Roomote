@@ -104,7 +104,10 @@ export default async function SessionDetailPage({
             />
           ) : (
             <>
-              <WorkspaceHeader contentClassName="flex-row items-center gap-3">
+              <WorkspaceHeader
+                className="py-4"
+                contentClassName="flex-row items-center gap-3"
+              >
                 <h1 className="min-w-0 flex-1 truncate text-sm font-medium">
                   {unifiedSession.title}
                 </h1>
