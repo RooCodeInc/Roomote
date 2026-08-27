@@ -4,6 +4,7 @@
 // stamping, resume semantics, enqueue-time PR linkage, and pr_review queue
 // scope dedup.
 import Redis from 'ioredis-mock';
+import { invalidateDeploymentFeatureFlagCache } from '@roomote/feature-flags/server';
 
 const { mockGenerateLlmTaskTitle } = vi.hoisted(() => ({
   mockGenerateLlmTaskTitle: vi.fn().mockResolvedValue('Generated title'),
@@ -919,6 +920,7 @@ describe('enqueueTask Session linkage', () => {
         target: deploymentSettings.id,
         set: { metadata: { sessions_data: true } },
       });
+    invalidateDeploymentFeatureFlagCache();
   });
 
   afterEach(async () => {
@@ -926,6 +928,7 @@ describe('enqueueTask Session linkage', () => {
       .update(deploymentSettings)
       .set({ metadata: {} })
       .where(eq(deploymentSettings.id, 'default'));
+    invalidateDeploymentFeatureFlagCache();
   });
 
   it('creates exactly one Session link for a visible fresh task', async () => {

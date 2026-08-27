@@ -4,5 +4,8 @@ export {
   resetFeatureFlagEvaluatorForTests,
 } from '../evaluator';
 export { MetadataCache } from '../cache';
-export { evaluateDeploymentFeatureFlag } from './deployment';
+export {
+  evaluateDeploymentFeatureFlag,
+  invalidateDeploymentFeatureFlagCache,
+} from './deployment';
 export * from '../index';
