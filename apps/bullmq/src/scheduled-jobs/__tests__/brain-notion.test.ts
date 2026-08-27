@@ -1,6 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { listBrainCollectorItemsBefore } from '@roomote/db/server';
+import {
+  listBrainCollectorItemsAfter,
+  listBrainCollectorItemsBefore,
+  listBrainCollectorItemsBySlugPrefix,
+} from '@roomote/db/server';
 import { NotionApiError } from '@roomote/sdk/server/notion-api';
 
 import {
@@ -10,6 +14,7 @@ import {
   buildNotionUserReferences,
   buildUnavailableNotionPage,
   collectNotionReconciliation,
+  collectNotionTraversal,
   type NotionSearchPage,
   type NotionUserIdentity,
 } from '../brain-collectors/notion-pages';
@@ -24,12 +29,25 @@ vi.mock('@roomote/sdk/server/notion-api', async (importOriginal) => {
 });
 vi.mock('@roomote/db/server', async (importOriginal) => {
   const original = await importOriginal<typeof import('@roomote/db/server')>();
-  return { ...original, listBrainCollectorItemsBefore: vi.fn(async () => []) };
+  return {
+    ...original,
+    listBrainCollectorItemsBefore: vi.fn(async () => []),
+    listBrainCollectorItemsAfter: vi.fn(async () => []),
+    listBrainCollectorItemsBySlugPrefix: vi.fn(async () => []),
+  };
 });
 const mockedListCollectorItemsBefore = vi.mocked(listBrainCollectorItemsBefore);
+const mockedListCollectorItemsAfter = vi.mocked(listBrainCollectorItemsAfter);
+const mockedListCollectorItemsBySlugPrefix = vi.mocked(
+  listBrainCollectorItemsBySlugPrefix,
+);
 beforeEach(() => {
   mockedListCollectorItemsBefore.mockReset();
   mockedListCollectorItemsBefore.mockResolvedValue([]);
+  mockedListCollectorItemsAfter.mockReset();
+  mockedListCollectorItemsAfter.mockResolvedValue([]);
+  mockedListCollectorItemsBySlugPrefix.mockReset();
+  mockedListCollectorItemsBySlugPrefix.mockResolvedValue([]);
   mockNotionApiRequestJson.mockReset();
 });
 
@@ -277,9 +295,13 @@ describe('Notion page mapping', () => {
     expect(result.itemDeletes).toEqual([
       { collectorId: 'notion-pages', itemIds: [page.id] },
     ]);
+    // A completed reconcile now hands off to the traversal phase, which
+    // hunts pages Notion's search index never surfaced before going idle.
     expect(JSON.parse(result.stateUpdates?.[0]?.cursor ?? '{}')).toEqual({
-      mode: 'idle',
+      mode: 'traverse',
       lastSweepAt: '2026-08-15T00:00:00.000Z',
+      scanStartedAt: '2026-08-15T00:00:00.000Z',
+      traverse: { afterItemId: '', pending: [] },
     });
   });
 
@@ -321,5 +343,196 @@ describe('Notion page mapping', () => {
         lastSeenAt: new Date('2026-08-15T00:00:00Z'),
       }),
     ]);
+  });
+});
+
+describe('Notion traversal discovery', () => {
+  const config = { token: 'secret' } as never;
+  const itemRow = (itemId: string) => ({
+    collectorId: 'notion-pages',
+    itemId,
+    slug: `notion/${itemId.replace(/-/g, '')}`,
+    lastSeenAt: new Date('2026-08-27T00:00:00Z'),
+    createdAt: new Date('2026-08-01T00:00:00Z'),
+    updatedAt: new Date('2026-08-27T00:00:00Z'),
+  });
+  const savedTraverse = {
+    mode: 'traverse' as const,
+    lastSweepAt: '2026-08-27T00:00:00.000Z',
+    scanStartedAt: '2026-08-27T00:00:00.000Z',
+    traverse: { afterItemId: '', pending: [] },
+  };
+  const pageObject = (id: string, title: string) => ({
+    object: 'page',
+    id,
+    created_time: '2026-08-01T00:00:00.000Z',
+    last_edited_time: '2026-08-02T00:00:00.000Z',
+    properties: { Name: { type: 'title', title: [{ plain_text: title }] } },
+  });
+
+  it('discovers and ingests a child page absent from search results', async () => {
+    const parent = 'aaaa1111-0000-0000-0000-000000000001';
+    const child = 'eeee5555-0000-0000-0000-000000000002';
+    mockedListCollectorItemsAfter
+      .mockResolvedValueOnce([itemRow(parent)])
+      .mockResolvedValue([]);
+    // The child is unknown to the inventory (search never returned it).
+    mockedListCollectorItemsBySlugPrefix.mockResolvedValue([]);
+    mockNotionApiRequestJson.mockImplementation(async ({ path }) => {
+      if (path === `blocks/${encodeURIComponent(parent)}/children`) {
+        return {
+          results: [{ object: 'block', id: child, type: 'child_page' }],
+          has_more: false,
+        };
+      }
+      if (path === `pages/${encodeURIComponent(child)}`) {
+        return pageObject(child, 'Inherited incident page');
+      }
+      if (path === `pages/${encodeURIComponent(child)}/markdown`) {
+        return { markdown: 'Postmortem body' };
+      }
+      if (path.startsWith('blocks/')) {
+        return { results: [], has_more: false };
+      }
+      throw new Error(`unexpected path ${path}`);
+    });
+
+    const result = await collectNotionTraversal({
+      config,
+      saved: savedTraverse,
+      limit: 10,
+    });
+
+    expect(result.pages.map((page) => page.title)).toEqual([
+      'Inherited incident page',
+    ]);
+    expect(result.itemUpdates).toEqual([
+      expect.objectContaining({
+        collectorId: 'notion-pages',
+        itemId: child,
+        slug: 'notion/eeee5555000000000000000000000002',
+      }),
+    ]);
+  });
+
+  it('does not re-ingest a page the inventory already tracks', async () => {
+    const parent = 'aaaa1111-0000-0000-0000-000000000001';
+    const child = 'bbbb2222-0000-0000-0000-000000000002';
+    mockedListCollectorItemsAfter
+      .mockResolvedValueOnce([itemRow(parent)])
+      .mockResolvedValue([]);
+    // Search already found this child during the sweep.
+    mockedListCollectorItemsBySlugPrefix.mockResolvedValue([itemRow(child)]);
+    mockNotionApiRequestJson.mockImplementation(async ({ path }) => {
+      if (path.startsWith('blocks/')) {
+        return {
+          results: [{ object: 'block', id: child, type: 'child_page' }],
+          has_more: false,
+        };
+      }
+      throw new Error(`unexpected page fetch ${path}`);
+    });
+
+    const result = await collectNotionTraversal({
+      config,
+      saved: savedTraverse,
+      limit: 10,
+    });
+
+    expect(result.pages).toEqual([]);
+    expect(
+      mockNotionApiRequestJson.mock.calls.filter(([request]) =>
+        (request as { path: string }).path.startsWith('pages/'),
+      ),
+    ).toHaveLength(0);
+  });
+
+  it('persists its cursor when the request budget ends a pass mid-tree', async () => {
+    const parents = Array.from({ length: 25 }, (_, index) =>
+      itemRow(
+        `cccc3333-0000-0000-0000-0000000000${String(index).padStart(2, '0')}`,
+      ),
+    );
+    mockedListCollectorItemsAfter.mockResolvedValueOnce(parents);
+    mockNotionApiRequestJson.mockImplementation(async ({ path }) => {
+      if (path.startsWith('blocks/')) {
+        return { results: [], has_more: false };
+      }
+      throw new Error(`unexpected path ${path}`);
+    });
+
+    const result = await collectNotionTraversal({
+      config,
+      saved: savedTraverse,
+      limit: 10,
+    });
+
+    const cursor = JSON.parse(result.stateUpdates![0]!.cursor as string) as {
+      mode: string;
+      traverse?: { afterItemId: string; pending: unknown[] };
+    };
+    // 12-request budget over 25 seeded parents: still traversing, with the
+    // remaining parents carried in pending and the seed cursor advanced.
+    expect(cursor.mode).toBe('traverse');
+    expect(cursor.traverse!.pending.length).toBeGreaterThan(0);
+    expect(cursor.traverse!.afterItemId).toBe(parents[24]!.itemId);
+  });
+
+  it('queries data sources behind child databases', async () => {
+    const parent = 'dddd4444-0000-0000-0000-000000000001';
+    const database = 'dddd4444-0000-0000-0000-0000000000db';
+    const dataSource = 'dddd4444-0000-0000-0000-0000000000d5';
+    const row = 'dddd4444-0000-0000-0000-00000000r0w1';
+    mockedListCollectorItemsAfter
+      .mockResolvedValueOnce([itemRow(parent)])
+      .mockResolvedValue([]);
+    mockedListCollectorItemsBySlugPrefix.mockResolvedValue([]);
+    mockNotionApiRequestJson.mockImplementation(async ({ path }) => {
+      if (path === `blocks/${encodeURIComponent(parent)}/children`) {
+        return {
+          results: [{ object: 'block', id: database, type: 'child_database' }],
+          has_more: false,
+        };
+      }
+      if (path === `databases/${encodeURIComponent(database)}`) {
+        return { data_sources: [{ id: dataSource }] };
+      }
+      if (path === `data_sources/${encodeURIComponent(dataSource)}/query`) {
+        return { results: [pageObject(row, 'Row page')], has_more: false };
+      }
+      if (path === `pages/${encodeURIComponent(row)}`) {
+        return pageObject(row, 'Row page');
+      }
+      if (path === `pages/${encodeURIComponent(row)}/markdown`) {
+        return { markdown: 'Row body' };
+      }
+      if (path.startsWith('blocks/')) {
+        return { results: [], has_more: false };
+      }
+      throw new Error(`unexpected path ${path}`);
+    });
+
+    const result = await collectNotionTraversal({
+      config,
+      saved: savedTraverse,
+      limit: 10,
+    });
+
+    expect(result.pages.map((page) => page.title)).toEqual(['Row page']);
+  });
+
+  it('completes back to idle when the inventory is exhausted', async () => {
+    mockedListCollectorItemsAfter.mockResolvedValue([]);
+
+    const result = await collectNotionTraversal({
+      config,
+      saved: savedTraverse,
+      limit: 10,
+    });
+
+    expect(result.pages).toEqual([]);
+    expect(JSON.parse(result.stateUpdates![0]!.cursor as string)).toMatchObject(
+      { mode: 'idle', lastSweepAt: '2026-08-27T00:00:00.000Z' },
+    );
   });
 });

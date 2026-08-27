@@ -6,7 +6,9 @@ import {
   eq,
   getBrainSyncState,
   listBrainCollectorItems,
+  listBrainCollectorItemsAfter,
   listBrainCollectorItemsBefore,
+  listBrainCollectorItemsBySlugPrefix,
   lt,
   notionDirectoryUsers,
 } from '@roomote/db/server';
@@ -71,6 +73,29 @@ const NOTION_USERS_MAX_REQUESTS_PER_PASS = 5;
 const NOTION_FULL_SWEEP_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const NOTION_REQUEST_INTERVAL_MS = process.env.NODE_ENV === 'test' ? 0 : 350;
 const NOTION_MAX_SEARCH_REQUESTS_PER_PASS = 10;
+/**
+ * Traversal phase budgets. Notion's search API is documented as not
+ * guaranteed to return everything the integration can access — only
+ * directly-shared content is guaranteed; children reachable through a shared
+ * parent may never appear (see
+ * https://developers.notion.com/reference/search-optimizations-and-limitations).
+ * After each sweep+reconcile cycle the collector therefore walks the block
+ * tree and data sources of every inventoried page, discovering
+ * inheritance-shared pages the search index missed.
+ */
+const NOTION_MAX_TRAVERSAL_REQUESTS_PER_PASS = 12;
+const NOTION_TRAVERSAL_SEED_BATCH = 25;
+const NOTION_TRAVERSAL_BLOCK_PAGE_SIZE = 100;
+const NOTION_TRAVERSAL_QUERY_PAGE_SIZE = 50;
+/** Block-container nesting to follow (toggles, columns) below a page. */
+const NOTION_TRAVERSAL_MAX_BLOCK_DEPTH = 3;
+/**
+ * Ceiling on carried-over traversal work between passes. The seed side needs
+ * no queue (it iterates the inventory by durable id cursor); this bounds only
+ * discovered-but-unexpanded containers, and dropping past the cap trades a
+ * deeper corner of the tree for a bounded cursor row — logged, never silent.
+ */
+const NOTION_TRAVERSAL_MAX_PENDING = 300;
 
 let notionRequestAvailableAt = 0;
 
@@ -768,12 +793,25 @@ async function fetchNotionPage(
   }
 }
 
+type NotionTraverseNode =
+  | { kind: 'blocks'; id: string; depth: number; cursor?: string }
+  | { kind: 'database'; id: string }
+  | { kind: 'data_source'; id: string; cursor?: string };
+
+type NotionTraverseState = {
+  /** Durable iteration cursor over the inventory being walked. */
+  afterItemId: string;
+  /** Discovered containers awaiting expansion, bounded. */
+  pending: NotionTraverseNode[];
+};
+
 type NotionScanCursor = {
-  mode: 'idle' | 'incremental' | 'sweep' | 'reconcile';
+  mode: 'idle' | 'incremental' | 'sweep' | 'reconcile' | 'traverse';
   lastSweepAt: string | null;
   upstreamCursor?: string;
   since?: string;
   scanStartedAt?: string;
+  traverse?: NotionTraverseState;
 };
 
 function parseNotionScanCursor(raw: string | null): NotionScanCursor {
@@ -784,7 +822,8 @@ function parseNotionScanCursor(raw: string | null): NotionScanCursor {
         parsed.mode === 'idle' ||
         parsed.mode === 'incremental' ||
         parsed.mode === 'sweep' ||
-        parsed.mode === 'reconcile'
+        parsed.mode === 'reconcile' ||
+        parsed.mode === 'traverse'
       ) {
         return {
           mode: parsed.mode,
@@ -796,6 +835,12 @@ function parseNotionScanCursor(raw: string | null): NotionScanCursor {
           ...(typeof parsed.since === 'string' ? { since: parsed.since } : {}),
           ...(typeof parsed.scanStartedAt === 'string'
             ? { scanStartedAt: parsed.scanStartedAt }
+            : {}),
+          ...(parsed.traverse &&
+          typeof parsed.traverse === 'object' &&
+          typeof parsed.traverse.afterItemId === 'string' &&
+          Array.isArray(parsed.traverse.pending)
+            ? { traverse: parsed.traverse as NotionTraverseState }
             : {}),
         };
       }
@@ -850,6 +895,272 @@ export function buildUnavailableNotionPage(item: {
     content:
       page?.content ??
       `---\ntype: notion-page\nstatus: unavailable\nprovenance: roomote-notion\n---\n\n# Unavailable Notion page\n\nThis page is no longer available to the Notion integration.\n`,
+  };
+}
+
+type NotionBlock = {
+  object?: string;
+  id?: string;
+  type?: string;
+  has_children?: boolean;
+};
+
+type NotionListResponse<T> = {
+  results?: T[];
+  has_more?: boolean;
+  next_cursor?: string | null;
+};
+
+function isNotionBlock(value: unknown): value is NotionBlock {
+  const block = asObject(value);
+  return !!block && asString(block.id) !== undefined;
+}
+
+/** Block containers worth descending into for child pages. */
+const NOTION_CONTAINER_BLOCK_TYPES = new Set([
+  'toggle',
+  'column_list',
+  'column',
+  'synced_block',
+  'callout',
+  'quote',
+  'bulleted_list_item',
+  'numbered_list_item',
+  'table',
+]);
+
+/**
+ * Walk the inventory's block trees and data sources, emitting pages the
+ * search-based sweep never surfaced. The seed side iterates
+ * brain_collector_items by durable id cursor (no queue growth); only
+ * discovered containers carry over between passes, bounded by
+ * NOTION_TRAVERSAL_MAX_PENDING. A pass ends when its request budget or page
+ * limit is spent; completion flips the scan back to idle.
+ */
+export async function collectNotionTraversal(input: {
+  config: McpConnectionNotionConfig;
+  saved: NotionScanCursor;
+  limit: number;
+}): Promise<CollectorResult> {
+  const scanStartedAt = parseDate(input.saved.scanStartedAt) ?? new Date();
+  const state: NotionTraverseState = input.saved.traverse ?? {
+    afterItemId: '',
+    pending: [],
+  };
+  let afterItemId = state.afterItemId;
+  const pending: NotionTraverseNode[] = [...state.pending];
+  const pages: CollectorPage[] = [];
+  const itemUpdates: CollectorItemUpdate[] = [];
+  const seenThisPass = new Set<string>();
+  let requests = 0;
+  let complete = false;
+  let droppedNodes = 0;
+
+  const pushPending = (node: NotionTraverseNode) => {
+    if (pending.length >= NOTION_TRAVERSAL_MAX_PENDING) {
+      droppedNodes++;
+      return;
+    }
+    pending.push(node);
+  };
+
+  const isKnownPage = async (pageId: string): Promise<boolean> => {
+    if (seenThisPass.has(pageId)) {
+      return true;
+    }
+    const rows = await listBrainCollectorItemsBySlugPrefix(
+      db,
+      NOTION_PAGES_COLLECTOR_ID,
+      pageId,
+      1,
+    );
+    return rows.length > 0 && rows[0]!.itemId === pageId;
+  };
+
+  const ingestDiscoveredPage = async (pageId: string): Promise<void> => {
+    if (await isKnownPage(pageId)) {
+      return;
+    }
+    seenThisPass.add(pageId);
+    let page: unknown;
+    try {
+      requests++;
+      page = await notionCollectorRequest<unknown>({
+        config: input.config,
+        path: `pages/${encodeURIComponent(pageId)}`,
+      });
+    } catch (error) {
+      // A child_page block whose page the integration cannot read (or that
+      // moved to the trash between listing and fetch) is not a traversal
+      // failure; the rest of the tree still counts.
+      if (error instanceof NotionApiError && error.status === 404) {
+        return;
+      }
+      throw error;
+    }
+    if (!isNotionSearchPage(page)) {
+      return;
+    }
+    const mapped = await fetchNotionPage(input.config, page);
+    requests++;
+    if (mapped) {
+      pages.push(mapped);
+      itemUpdates.push(notionItemUpdate(page, mapped.slug, scanStartedAt));
+      // The new page's own subtree may hide further pages.
+      pushPending({ kind: 'blocks', id: pageId, depth: 0 });
+    }
+  };
+
+  while (
+    requests < NOTION_MAX_TRAVERSAL_REQUESTS_PER_PASS &&
+    pages.length < input.limit
+  ) {
+    const node = pending.shift();
+
+    if (!node) {
+      const batch = await listBrainCollectorItemsAfter(
+        db,
+        NOTION_PAGES_COLLECTOR_ID,
+        afterItemId,
+        NOTION_TRAVERSAL_SEED_BATCH,
+      );
+      if (batch.length === 0) {
+        complete = true;
+        break;
+      }
+      for (const item of batch) {
+        pushPending({ kind: 'blocks', id: item.itemId, depth: 0 });
+      }
+      afterItemId = batch[batch.length - 1]!.itemId;
+      continue;
+    }
+
+    if (node.kind === 'blocks') {
+      let listed: NotionListResponse<unknown>;
+      try {
+        requests++;
+        listed = await notionCollectorRequest<NotionListResponse<unknown>>({
+          config: input.config,
+          path: `blocks/${encodeURIComponent(node.id)}/children`,
+          query: {
+            page_size: NOTION_TRAVERSAL_BLOCK_PAGE_SIZE,
+            ...(node.cursor ? { start_cursor: node.cursor } : {}),
+          },
+        });
+      } catch (error) {
+        if (error instanceof NotionApiError && error.status === 404) {
+          continue;
+        }
+        throw error;
+      }
+      for (const raw of listed.results ?? []) {
+        if (!isNotionBlock(raw) || !raw.id) {
+          continue;
+        }
+        if (raw.type === 'child_page') {
+          await ingestDiscoveredPage(raw.id);
+        } else if (raw.type === 'child_database') {
+          pushPending({ kind: 'database', id: raw.id });
+        } else if (
+          raw.has_children &&
+          node.depth < NOTION_TRAVERSAL_MAX_BLOCK_DEPTH &&
+          (raw.type === undefined || NOTION_CONTAINER_BLOCK_TYPES.has(raw.type))
+        ) {
+          pushPending({ kind: 'blocks', id: raw.id, depth: node.depth + 1 });
+        }
+      }
+      if (listed.has_more && asString(listed.next_cursor)) {
+        pushPending({ ...node, cursor: listed.next_cursor!.trim() });
+      }
+      continue;
+    }
+
+    if (node.kind === 'database') {
+      let database: Record<string, unknown> | null | undefined;
+      try {
+        requests++;
+        database = asObject(
+          await notionCollectorRequest<unknown>({
+            config: input.config,
+            path: `databases/${encodeURIComponent(node.id)}`,
+          }),
+        );
+      } catch (error) {
+        if (error instanceof NotionApiError && error.status === 404) {
+          continue;
+        }
+        throw error;
+      }
+      const dataSources = Array.isArray(database?.data_sources)
+        ? database!.data_sources
+        : [];
+      for (const raw of dataSources) {
+        const id = asString(asObject(raw)?.id);
+        if (id) {
+          pushPending({ kind: 'data_source', id });
+        }
+      }
+      continue;
+    }
+
+    // node.kind === 'data_source' — Notion's recommended enumeration path.
+    let queried: NotionListResponse<unknown>;
+    try {
+      requests++;
+      queried = await notionCollectorRequest<NotionListResponse<unknown>>({
+        config: input.config,
+        path: `data_sources/${encodeURIComponent(node.id)}/query`,
+        method: 'POST',
+        body: {
+          page_size: NOTION_TRAVERSAL_QUERY_PAGE_SIZE,
+          ...(node.cursor ? { start_cursor: node.cursor } : {}),
+        },
+      });
+    } catch (error) {
+      if (error instanceof NotionApiError && error.status === 404) {
+        continue;
+      }
+      throw error;
+    }
+    for (const raw of queried.results ?? []) {
+      const id = asString(asObject(raw)?.id);
+      if (id) {
+        await ingestDiscoveredPage(id);
+      }
+    }
+    if (queried.has_more && asString(queried.next_cursor)) {
+      pushPending({ ...node, cursor: queried.next_cursor!.trim() });
+    }
+  }
+
+  if (droppedNodes > 0) {
+    console.warn(
+      `${LOG_PREFIX} notion traversal dropped ${droppedNodes} discovered container(s) past the pending cap; they are revisited on the next cycle`,
+    );
+  }
+
+  return {
+    pages,
+    nextSince: null,
+    itemUpdates,
+    stateUpdates: [
+      {
+        collectorId: NOTION_INCREMENTAL_STATE_ID,
+        cursor: serializeNotionScanCursor(
+          complete
+            ? { mode: 'idle', lastSweepAt: input.saved.lastSweepAt }
+            : {
+                mode: 'traverse',
+                lastSweepAt: input.saved.lastSweepAt,
+                scanStartedAt: scanStartedAt.toISOString(),
+                traverse: {
+                  afterItemId,
+                  pending: pending.slice(0, NOTION_TRAVERSAL_MAX_PENDING),
+                },
+              },
+        ),
+      },
+    ],
   };
 }
 
@@ -913,8 +1224,12 @@ export async function collectNotionReconciliation(input: {
         cursor: serializeNotionScanCursor(
           complete
             ? {
-                mode: 'idle',
+                // Reconcile settles the sweep's watermark; traversal then
+                // hunts the pages Notion's search index never surfaced.
+                mode: 'traverse',
                 lastSweepAt: scanStartedAt.toISOString(),
+                scanStartedAt: scanStartedAt.toISOString(),
+                traverse: { afterItemId: '', pending: [] },
               }
             : {
                 mode: 'reconcile',
@@ -1003,6 +1318,13 @@ async function collectNotionPages(input: {
   const saved = parseNotionScanCursor(state?.backfillCursor ?? null);
   if (saved.mode === 'reconcile') {
     return collectNotionReconciliation({
+      config: input.config,
+      saved,
+      limit: input.limit,
+    });
+  }
+  if (saved.mode === 'traverse') {
+    return collectNotionTraversal({
       config: input.config,
       saved,
       limit: input.limit,
