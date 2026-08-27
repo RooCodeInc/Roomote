@@ -16,6 +16,7 @@ import {
 import { enqueueTask } from '@roomote/cloud-agents/server';
 import {
   recordPrStatusChangeInTaskHistory,
+  PrStatusHistoryRecordingError,
   updateTaskPrStatus,
 } from '@roomote/sdk/server';
 
@@ -59,6 +60,7 @@ async function notifyTerminalMergeRequestThreads(
   payload: GitLabMergeRequestWebhook,
   repoFullName: string,
   status: 'merged' | 'closed',
+  includeFastParentTargets: boolean,
 ): Promise<void> {
   const webhookHost = toHostFromUrl(payload.object_attributes.url);
   const repositoryRows = await db.query.repositories.findMany({
@@ -87,6 +89,7 @@ async function notifyTerminalMergeRequestThreads(
       status,
       actorLogin:
         payload.user?.username ?? payload.user?.name ?? 'someone on GitLab',
+      ...(includeFastParentTargets ? { includeFastParentTargets: true } : {}),
     },
     `MR !${payload.object_attributes.iid}`,
   );
@@ -128,8 +131,9 @@ export async function handleGitLabMergeRequest(
       },
     });
 
-    await Promise.resolve(
-      recordPrStatusChangeInTaskHistory({
+    let includeFastParentTargets = false;
+    try {
+      await recordPrStatusChangeInTaskHistory({
         sourceControlProvider: 'gitlab',
         repository: repoFullName,
         prNumber: mergeRequest.iid,
@@ -138,17 +142,25 @@ export async function handleGitLabMergeRequest(
         status,
         actorLogin:
           payload.user?.username ?? payload.user?.name ?? 'someone on GitLab',
-      }),
-    ).catch((error) => {
+      });
+    } catch (error) {
+      includeFastParentTargets = !(
+        error instanceof PrStatusHistoryRecordingError
+      );
       console.warn(
         `[handleGitLabMergeRequest] Failed to record PR status in task history for ${repoFullName}!${mergeRequest.iid}: ${
           error instanceof Error ? error.message : String(error)
         }`,
       );
-    });
+    }
 
     if (mergeRequest.action === 'merge' || mergeRequest.action === 'close') {
-      await notifyTerminalMergeRequestThreads(payload, repoFullName, status);
+      await notifyTerminalMergeRequestThreads(
+        payload,
+        repoFullName,
+        status,
+        includeFastParentTargets,
+      );
     }
 
     return { status: 'ok' };

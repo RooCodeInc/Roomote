@@ -4,12 +4,10 @@ import type { WebhookPullRequestClosed } from './types';
 import { scheduleNotifyPullRequestTerminalStatus } from './notifyPullRequestTerminalStatus';
 import { toHostFromUrl } from '../utils';
 
-export const handlePrMerge = async ({
-  installation,
-  repository,
-  pull_request,
-  sender,
-}: WebhookPullRequestClosed): Promise<WebhookResponse> => {
+export const handlePrMerge = async (
+  { installation, repository, pull_request, sender }: WebhookPullRequestClosed,
+  options: { includeFastParentTargets?: boolean } = {},
+): Promise<WebhookResponse> => {
   const status = pull_request.merged
     ? ('merged' as const)
     : ('closed' as const);
@@ -30,6 +28,9 @@ export const handlePrMerge = async ({
         actorLogin:
           (pull_request.merged ? pull_request.merged_by?.login : null) ||
           sender.login,
+        ...(options.includeFastParentTargets
+          ? { includeFastParentTargets: true }
+          : {}),
       },
       `PR #${pull_request.number}`,
     );

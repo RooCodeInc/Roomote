@@ -294,6 +294,7 @@ export * from './lib/task-runs/notify-fast-agent-parent-on-pull-request-conflict
 export {
   formatPrStatusChangeTaskHistoryText,
   formatPullRequestReference,
+  PrStatusHistoryRecordingError,
   recordPrStatusChangeInTaskHistory,
   recordPrStatusChangeInTaskHistoryInputSchema,
   type RecordPrStatusChangeInTaskHistoryInput,

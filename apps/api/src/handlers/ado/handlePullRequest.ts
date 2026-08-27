@@ -22,6 +22,7 @@ import {
 import { enqueueTask } from '@roomote/cloud-agents/server';
 import {
   recordPrStatusChangeInTaskHistory,
+  PrStatusHistoryRecordingError,
   updateTaskPrStatus,
 } from '@roomote/sdk/server';
 
@@ -79,6 +80,7 @@ async function notifyTerminalPullRequestThreads(
   payload: AdoPullRequestWebhook,
   repoFullName: string,
   status: 'merged' | 'closed',
+  includeFastParentTargets: boolean,
 ): Promise<void> {
   const prUrl = getAdoPullRequestUrl({
     resourceContainers: payload.resourceContainers,
@@ -113,6 +115,7 @@ async function notifyTerminalPullRequestThreads(
       actorLogin:
         getAdoIdentityName(payload.resource.closedBy) ??
         'someone in Azure DevOps',
+      ...(includeFastParentTargets ? { includeFastParentTargets: true } : {}),
     },
     `PR #${payload.resource.pullRequestId}`,
   );
@@ -251,8 +254,9 @@ export async function handleAdoPullRequest(
 
     scheduleAdoPullRequestFactSync(payload, repoFullName, 'closed');
 
-    await Promise.resolve(
-      recordPrStatusChangeInTaskHistory({
+    let includeFastParentTargets = false;
+    try {
+      await recordPrStatusChangeInTaskHistory({
         sourceControlProvider: 'ado',
         repository: repoFullName,
         prNumber: pullRequest.pullRequestId,
@@ -266,16 +270,24 @@ export async function handleAdoPullRequest(
         actorLogin:
           getAdoIdentityName(payload.resource.closedBy) ??
           'someone in Azure DevOps',
-      }),
-    ).catch((error) => {
+      });
+    } catch (error) {
+      includeFastParentTargets = !(
+        error instanceof PrStatusHistoryRecordingError
+      );
       console.warn(
         `[handleAdoPullRequest] Failed to record PR status in task history for ${repoFullName}#${pullRequest.pullRequestId}: ${
           error instanceof Error ? error.message : String(error)
         }`,
       );
-    });
+    }
 
-    await notifyTerminalPullRequestThreads(payload, repoFullName, 'closed');
+    await notifyTerminalPullRequestThreads(
+      payload,
+      repoFullName,
+      'closed',
+      includeFastParentTargets,
+    );
 
     return { status: 'ok' };
   }
@@ -297,8 +309,9 @@ export async function handleAdoPullRequest(
 
     scheduleAdoPullRequestFactSync(payload, repoFullName, 'merged');
 
-    await Promise.resolve(
-      recordPrStatusChangeInTaskHistory({
+    let includeFastParentTargets = false;
+    try {
+      await recordPrStatusChangeInTaskHistory({
         sourceControlProvider: 'ado',
         repository: repoFullName,
         prNumber: pullRequest.pullRequestId,
@@ -312,16 +325,24 @@ export async function handleAdoPullRequest(
         actorLogin:
           getAdoIdentityName(payload.resource.closedBy) ??
           'someone in Azure DevOps',
-      }),
-    ).catch((error) => {
+      });
+    } catch (error) {
+      includeFastParentTargets = !(
+        error instanceof PrStatusHistoryRecordingError
+      );
       console.warn(
         `[handleAdoPullRequest] Failed to record PR status in task history for ${repoFullName}#${pullRequest.pullRequestId}: ${
           error instanceof Error ? error.message : String(error)
         }`,
       );
-    });
+    }
 
-    await notifyTerminalPullRequestThreads(payload, repoFullName, 'merged');
+    await notifyTerminalPullRequestThreads(
+      payload,
+      repoFullName,
+      'merged',
+      includeFastParentTargets,
+    );
 
     return { status: 'ok' };
   }

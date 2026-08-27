@@ -114,6 +114,9 @@ interface NotifyPullRequestTerminalStatusParams {
    * not been updated yet.
    */
   mergedBy?: string;
+  /** Preserve the direct Fast-conversation fallback when status recording or
+   * Fast event delivery failed before the terminal notifier was scheduled. */
+  includeFastParentTargets?: boolean;
 }
 
 type SlackTarget = {
@@ -148,31 +151,53 @@ function isFastParentConversationTarget(params: {
   );
 }
 
-function resolveSlackReplyTarget(payload: unknown): SlackReplyTarget | null {
-  if (getCommunicationProviderFromTaskPayload(payload) !== 'slack') {
-    return null;
+function resolveSlackReplyTarget(
+  payload: unknown,
+  includeFastParentTargets: boolean,
+): SlackReplyTarget | null {
+  const isDirectSlackTarget =
+    getCommunicationProviderFromTaskPayload(payload) === 'slack';
+  const channelId = isDirectSlackTarget
+    ? getCommunicationChannelFromTaskPayload(payload)
+    : undefined;
+  const threadId = isDirectSlackTarget
+    ? getCommunicationThreadIdFromTaskPayload(payload)
+    : undefined;
+  if (channelId && threadId) {
+    if (
+      !includeFastParentTargets &&
+      isFastParentConversationTarget({
+        payload,
+        provider: 'slack',
+        channelId,
+        threadId,
+      })
+    ) {
+      return null;
+    }
+    return { channelId, threadId };
   }
 
-  const channelId = getCommunicationChannelFromTaskPayload(payload);
-  const threadId = getCommunicationThreadIdFromTaskPayload(payload);
-  if (
-    !channelId ||
-    !threadId ||
-    isFastParentConversationTarget({
-      payload,
-      provider: 'slack',
-      channelId,
-      threadId,
-    })
-  ) {
-    return null;
-  }
-
-  return { channelId, threadId };
+  const conversation = getFastAgentParentFromPayload(payload)?.conversation;
+  return includeFastParentTargets &&
+    conversation?.surface === 'slack' &&
+    conversation.replyTarget.threadId
+    ? {
+        channelId: conversation.replyTarget.channelId,
+        threadId: conversation.replyTarget.threadId,
+      }
+    : null;
 }
 
-function getSlackTarget(taskId: string, payload: unknown): SlackTarget | null {
-  const replyTarget = resolveSlackReplyTarget(payload);
+function getSlackTarget(
+  taskId: string,
+  payload: unknown,
+  includeFastParentTargets: boolean,
+): SlackTarget | null {
+  const replyTarget = resolveSlackReplyTarget(
+    payload,
+    includeFastParentTargets,
+  );
   if (!replyTarget) return null;
 
   return {
@@ -204,7 +229,10 @@ type DiscordTarget = {
   };
 };
 
-function getTeamsTarget(payload: unknown): TeamsTarget | null {
+function getTeamsTarget(
+  payload: unknown,
+  includeFastParentTargets: boolean,
+): TeamsTarget | null {
   if (
     !payload ||
     typeof payload !== 'object' ||
@@ -222,6 +250,7 @@ function getTeamsTarget(payload: unknown): TeamsTarget | null {
 
   const threadId = getCommunicationThreadIdFromTaskPayload(payload);
   if (
+    !includeFastParentTargets &&
     isFastParentConversationTarget({
       payload,
       provider: 'teams',
@@ -239,7 +268,10 @@ function getTeamsTarget(payload: unknown): TeamsTarget | null {
   };
 }
 
-function getTelegramTarget(payload: unknown): TelegramTarget | null {
+function getTelegramTarget(
+  payload: unknown,
+  includeFastParentTargets: boolean,
+): TelegramTarget | null {
   if (
     !payload ||
     typeof payload !== 'object' ||
@@ -257,6 +289,7 @@ function getTelegramTarget(payload: unknown): TelegramTarget | null {
   const threadId = getCommunicationThreadIdFromTaskPayload(payload);
   const replyToMessageId = getCommunicationMessageIdFromTaskPayload(payload);
   if (
+    !includeFastParentTargets &&
     isFastParentConversationTarget({
       payload,
       provider: 'telegram',
@@ -274,7 +307,10 @@ function getTelegramTarget(payload: unknown): TelegramTarget | null {
   };
 }
 
-function getDiscordTarget(payload: unknown): DiscordTarget | null {
+function getDiscordTarget(
+  payload: unknown,
+  includeFastParentTargets: boolean,
+): DiscordTarget | null {
   if (
     !payload ||
     typeof payload !== 'object' ||
@@ -292,6 +328,7 @@ function getDiscordTarget(payload: unknown): DiscordTarget | null {
   const threadId = getCommunicationThreadIdFromTaskPayload(payload);
   const reactionTarget = getDiscordReactionTargetFromTaskPayload(payload);
   if (
+    !includeFastParentTargets &&
     isFastParentConversationTarget({
       payload,
       provider: 'discord',
@@ -803,6 +840,7 @@ export async function notifyPullRequestTerminalStatus({
   status = 'merged',
   actorLogin,
   mergedBy,
+  includeFastParentTargets = false,
 }: NotifyPullRequestTerminalStatusParams): Promise<void> {
   const resolvedActorLogin = actorLogin || mergedBy || 'someone';
 
@@ -888,19 +926,21 @@ export async function notifyPullRequestTerminalStatus({
 
     const slackTargets: SlackTarget[] = [];
     const linearSessionIds: string[] = [];
-    const fastSlackConversationTargets = new Set(
-      linkedRuns.flatMap((run) => {
-        const conversation = getFastAgentParentFromPayload(
-          run.payload,
-        )?.conversation;
-        return conversation?.surface === 'slack' &&
-          conversation.replyTarget.threadId
-          ? [
-              `${conversation.replyTarget.channelId}\0${conversation.replyTarget.threadId}`,
-            ]
-          : [];
-      }),
-    );
+    const fastSlackConversationTargets = includeFastParentTargets
+      ? new Set<string>()
+      : new Set(
+          linkedRuns.flatMap((run) => {
+            const conversation = getFastAgentParentFromPayload(
+              run.payload,
+            )?.conversation;
+            return conversation?.surface === 'slack' &&
+              conversation.replyTarget.threadId
+              ? [
+                  `${conversation.replyTarget.channelId}\0${conversation.replyTarget.threadId}`,
+                ]
+              : [];
+          }),
+        );
 
     for (const task of linkedTasks) {
       if (
@@ -924,20 +964,22 @@ export async function notifyPullRequestTerminalStatus({
 
     slackTargets.push(
       ...linkedRuns
-        .map((run) => getSlackTarget(run.taskId, run.payload))
+        .map((run) =>
+          getSlackTarget(run.taskId, run.payload, includeFastParentTargets),
+        )
         .filter((target): target is SlackTarget => target !== null),
     );
 
     const teamsTargets = linkedRuns
-      .map((run) => getTeamsTarget(run.payload))
+      .map((run) => getTeamsTarget(run.payload, includeFastParentTargets))
       .filter((target): target is TeamsTarget => target !== null);
 
     const telegramTargets = linkedRuns
-      .map((run) => getTelegramTarget(run.payload))
+      .map((run) => getTelegramTarget(run.payload, includeFastParentTargets))
       .filter((target): target is TelegramTarget => target !== null);
 
     const discordTargets = linkedRuns
-      .map((run) => getDiscordTarget(run.payload))
+      .map((run) => getDiscordTarget(run.payload, includeFastParentTargets))
       .filter((target): target is DiscordTarget => target !== null);
 
     if (

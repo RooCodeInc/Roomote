@@ -16,6 +16,7 @@ import {
 import { enqueueTask } from '@roomote/cloud-agents/server';
 import {
   recordPrStatusChangeInTaskHistory,
+  PrStatusHistoryRecordingError,
   updateTaskPrStatus,
 } from '@roomote/sdk/server';
 
@@ -64,6 +65,7 @@ async function notifyTerminalPullRequestThreads(
   payload: GiteaPullRequestWebhook,
   repoFullName: string,
   status: 'merged' | 'closed',
+  includeFastParentTargets: boolean,
 ): Promise<void> {
   const prUrl = getPullRequestUrl(payload);
   const webhookHost = toHostFromUrl(prUrl);
@@ -92,6 +94,7 @@ async function notifyTerminalPullRequestThreads(
       prUrl,
       status,
       actorLogin: getGiteaUsername(payload.sender) ?? 'someone on Gitea',
+      ...(includeFastParentTargets ? { includeFastParentTargets: true } : {}),
     },
     `PR #${payload.number}`,
   );
@@ -127,8 +130,9 @@ export async function handleGiteaPullRequest(
       },
     });
 
-    await Promise.resolve(
-      recordPrStatusChangeInTaskHistory({
+    let includeFastParentTargets = false;
+    try {
+      await recordPrStatusChangeInTaskHistory({
         sourceControlProvider: 'gitea',
         repository: repoFullName,
         prNumber: payload.number,
@@ -136,16 +140,24 @@ export async function handleGiteaPullRequest(
         prUrl: getPullRequestUrl(payload),
         status,
         actorLogin: getGiteaUsername(payload.sender) ?? 'someone on Gitea',
-      }),
-    ).catch((error) => {
+      });
+    } catch (error) {
+      includeFastParentTargets = !(
+        error instanceof PrStatusHistoryRecordingError
+      );
       console.warn(
         `[handleGiteaPullRequest] Failed to record PR status in task history for ${repoFullName}#${payload.number}: ${
           error instanceof Error ? error.message : String(error)
         }`,
       );
-    });
+    }
 
-    await notifyTerminalPullRequestThreads(payload, repoFullName, status);
+    await notifyTerminalPullRequestThreads(
+      payload,
+      repoFullName,
+      status,
+      includeFastParentTargets,
+    );
 
     return { status: 'ok' };
   }

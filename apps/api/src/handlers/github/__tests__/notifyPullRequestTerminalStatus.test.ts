@@ -330,6 +330,36 @@ describe('notifyPullRequestTerminalStatus', () => {
     expect(mockRemoveReaction).not.toHaveBeenCalled();
   });
 
+  it('posts directly to the Fast parent when status recording failed', async () => {
+    mockedGithubFind.mockResolvedValue({ id: 1 } as any);
+    mockedTaskPullRequestsFind.mockResolvedValue([{ taskId: 'task-1' }] as any);
+    mockedTaskRunsFind.mockResolvedValue([
+      {
+        taskId: 'task-1',
+        payload: fastParentSlackPayload('CSHARED', 'shared-thread-ts'),
+      },
+    ] as any);
+    mockedSlackFind.mockResolvedValue({ botAccessToken: 'xoxb-token' } as any);
+
+    await notifyPullRequestTerminalStatus({
+      ...baseParams,
+      includeFastParentTargets: true,
+    });
+
+    expect(mockStickyFooterPost).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channel: 'CSHARED',
+        threadTs: 'shared-thread-ts',
+        text: 'Test PR was merged by merger',
+      }),
+    );
+    expect(mockAddReaction).toHaveBeenCalledWith({
+      channel: 'CSHARED',
+      timestamp: 'shared-thread-ts',
+      name: 'white_check_mark',
+    });
+  });
+
   it('suppresses a task-row Slack binding that matches the Fast parent', async () => {
     mockedGithubFind.mockResolvedValue({ id: 1 } as any);
     mockedTaskPullRequestsFind.mockResolvedValue([{ taskId: 'task-1' }] as any);

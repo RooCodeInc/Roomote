@@ -1,7 +1,4 @@
 import {
-  INFERENCE_PROVIDER_ERROR_BASE_DELAY_MS,
-  INFERENCE_PROVIDER_ERROR_MAX_DELAY_MS,
-  INFERENCE_PROVIDER_MAX_RETRIES,
   asFiniteNumber,
   asRecord,
   asString,
@@ -9,13 +6,10 @@ import {
   resolveInferenceProviderRetryDelayMs,
 } from '@roomote/types';
 
-const DEFAULT_OPENCODE_PROVIDER_ERROR_MAX_RETRIES =
-  INFERENCE_PROVIDER_MAX_RETRIES;
+const DEFAULT_OPENCODE_PROVIDER_ERROR_MAX_RETRIES = 6;
 const DEFAULT_OPENCODE_POLICY_REFUSAL_MAX_RETRIES = 2;
-export const DEFAULT_OPENCODE_PROVIDER_ERROR_BASE_DELAY_MS =
-  INFERENCE_PROVIDER_ERROR_BASE_DELAY_MS;
-export const DEFAULT_OPENCODE_PROVIDER_ERROR_MAX_DELAY_MS =
-  INFERENCE_PROVIDER_ERROR_MAX_DELAY_MS;
+export const DEFAULT_OPENCODE_PROVIDER_ERROR_BASE_DELAY_MS = 5_000;
+export const DEFAULT_OPENCODE_PROVIDER_ERROR_MAX_DELAY_MS = 60_000;
 
 const OPENCODE_PROVIDER_ERROR_RETRY_PROMPT_TEXT =
   buildInferenceProviderRecoveryPrompt();
@@ -171,8 +165,9 @@ export function isOpenCodeTerminalProviderError(error: unknown): boolean {
 /**
  * Provider session errors are recoverable by default because they normally
  * invalidate one model turn, not the OpenCode session or Roomote task. Keep a
- * small bounded retry budget, while explicit auth/configuration failures fail
- * immediately instead of burning requests that cannot succeed.
+ * bounded retry budget with enough backoff for transient overloads to clear,
+ * while explicit auth/configuration failures fail immediately instead of
+ * burning requests that cannot succeed.
  */
 export function getOpenCodeProviderErrorRecovery(
   error: unknown,
@@ -206,8 +201,10 @@ export function resolveOpenCodeProviderErrorRetryDelayMs(options: {
   return resolveInferenceProviderRetryDelayMs({
     attemptNumber: options.attemptNumber,
     rateLimited: false,
-    baseDelayMs: options.baseDelayMs,
-    maxDelayMs: options.maxDelayMs,
+    baseDelayMs:
+      options.baseDelayMs ?? DEFAULT_OPENCODE_PROVIDER_ERROR_BASE_DELAY_MS,
+    maxDelayMs:
+      options.maxDelayMs ?? DEFAULT_OPENCODE_PROVIDER_ERROR_MAX_DELAY_MS,
   });
 }
 

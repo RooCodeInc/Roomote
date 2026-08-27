@@ -106,4 +106,15 @@ describe('handlePrMerge', () => {
     expect(result.status).toBe('ok');
     expect(mockedScheduleNotify).not.toHaveBeenCalled();
   });
+
+  it('includes Fast parent targets when status recording failed', async () => {
+    const payload = makePayload();
+
+    await handlePrMerge(payload, { includeFastParentTargets: true });
+
+    expect(mockedScheduleNotify).toHaveBeenCalledWith(
+      expect.objectContaining({ includeFastParentTargets: true }),
+      'PR #42',
+    );
+  });
 });

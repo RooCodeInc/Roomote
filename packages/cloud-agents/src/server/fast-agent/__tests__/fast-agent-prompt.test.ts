@@ -455,6 +455,8 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain('fast mode on a stored automation conversation');
     expect(prompt).toContain('Automation Platform Event');
     expect(prompt).toContain('Execute the automation prompt now');
+    expect(prompt).toContain("closeout's `suggestions` array");
+    expect(prompt).toContain('do not promise reaction-triggered launching');
     expect(prompt).not.toContain('<slack_modern_markdown>');
   });
 

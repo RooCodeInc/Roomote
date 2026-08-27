@@ -39,8 +39,10 @@ import {
   seedBrainCollectorItems,
   upsertBrainCollectorItems,
   upsertBrainSyncState,
+  sql,
 } from '../../server';
 import type { CreateTaskRun } from '../../types';
+import { runMemoryOutboxLifecycleContract } from './memory-outbox-lifecycle.contract';
 
 const createdTaskIds: string[] = [];
 
@@ -790,4 +792,40 @@ describe('stranded claim recovery', () => {
   it('ignores an empty release', async () => {
     await expect(releaseBrainMemoryEvents(db, [])).resolves.toBeUndefined();
   });
+});
+
+runMemoryOutboxLifecycleContract('task memory', () => {
+  let runId: number | null = null;
+
+  return {
+    async createEvent() {
+      const run = await makeCompletedRun();
+      runId = run.id;
+      await maybeEnqueueBrainMemoryEvent(db, run.id);
+      const [event] = await db
+        .select()
+        .from(brainMemoryEvents)
+        .where(eq(brainMemoryEvents.runId, run.id));
+      return event!;
+    },
+    claim: () => claimPendingBrainMemoryEvents(db, 10),
+    release: (ids) => releaseBrainMemoryEvents(db, ids),
+    mark: (id, status, error) => markBrainMemoryEvent(db, id, status, error),
+    settle: (id, revision, outcome, error) =>
+      settleBrainMemoryEvent(db, id, revision, outcome, error),
+    revise: () => saveBrainAgentSummary(db, runId!, 'newer summary'),
+    async age(id) {
+      await db
+        .update(brainMemoryEvents)
+        .set({ updatedAt: sql`now() - interval '16 minutes'` })
+        .where(eq(brainMemoryEvents.id, id));
+    },
+    async read(id) {
+      const [row] = await db
+        .select()
+        .from(brainMemoryEvents)
+        .where(eq(brainMemoryEvents.id, id));
+      return row!;
+    },
+  };
 });

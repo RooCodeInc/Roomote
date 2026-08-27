@@ -16,6 +16,7 @@ import {
 import { enqueueTask } from '@roomote/cloud-agents/server';
 import {
   recordPrStatusChangeInTaskHistory,
+  PrStatusHistoryRecordingError,
   updateTaskPrStatus,
 } from '@roomote/sdk/server';
 
@@ -61,6 +62,7 @@ async function notifyTerminalPullRequestThreads(
   payload: BitbucketPullRequestWebhook,
   repoFullName: string,
   status: 'merged' | 'closed',
+  includeFastParentTargets: boolean,
 ): Promise<void> {
   const prUrl = getBitbucketPullRequestUrl(payload);
   const webhookHost = toHostFromUrl(prUrl);
@@ -91,6 +93,7 @@ async function notifyTerminalPullRequestThreads(
       prUrl,
       status,
       actorLogin: getBitbucketUsername(payload.actor) ?? 'someone on Bitbucket',
+      ...(includeFastParentTargets ? { includeFastParentTargets: true } : {}),
     },
     `PR #${prNumber}`,
   );
@@ -131,8 +134,9 @@ export async function handleBitbucketPullRequest(
       },
     });
 
-    await Promise.resolve(
-      recordPrStatusChangeInTaskHistory({
+    let includeFastParentTargets = false;
+    try {
+      await recordPrStatusChangeInTaskHistory({
         sourceControlProvider: 'bitbucket',
         repository: repoFullName,
         prNumber,
@@ -141,16 +145,24 @@ export async function handleBitbucketPullRequest(
         status,
         actorLogin:
           getBitbucketUsername(payload.actor) ?? 'someone on Bitbucket',
-      }),
-    ).catch((error) => {
+      });
+    } catch (error) {
+      includeFastParentTargets = !(
+        error instanceof PrStatusHistoryRecordingError
+      );
       console.warn(
         `[handleBitbucketPullRequest] Failed to record PR status in task history for ${repoFullName}#${prNumber}: ${
           error instanceof Error ? error.message : String(error)
         }`,
       );
-    });
+    }
 
-    await notifyTerminalPullRequestThreads(payload, repoFullName, status);
+    await notifyTerminalPullRequestThreads(
+      payload,
+      repoFullName,
+      status,
+      includeFastParentTargets,
+    );
 
     return { status: 'ok' };
   }

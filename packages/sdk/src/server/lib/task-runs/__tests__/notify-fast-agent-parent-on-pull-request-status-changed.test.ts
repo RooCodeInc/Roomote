@@ -21,7 +21,6 @@ const mocks = vi.hoisted(() => {
     updateSet: vi.fn(),
     recordLifecycle: vi.fn(),
     deliverParentEvent: vi.fn(),
-    postFallbackReply: vi.fn(),
     getTaskUrl: vi.fn(() => 'https://roomote.example/task/child-task'),
     FastAgentParentEventDeliveryError,
   };
@@ -65,7 +64,6 @@ vi.mock('@roomote/cloud-agents/server', () => ({
 vi.mock('../../fast-agent-parent-event', () => ({
   deliverFastAgentParentEvent: mocks.deliverParentEvent,
   FastAgentParentEventDeliveryError: mocks.FastAgentParentEventDeliveryError,
-  postFastAgentParentEventFallbackReply: mocks.postFallbackReply,
 }));
 
 import { notifyFastAgentParentOnPullRequestStatusChanged } from '../notify-fast-agent-parent-on-pull-request-status-changed';
@@ -107,7 +105,6 @@ describe('notifyFastAgentParentOnPullRequestStatusChanged', () => {
     mocks.claimReturning.mockResolvedValue([{ id: 200 }]);
     mocks.findClaimRun.mockResolvedValue({ id: 200 });
     mocks.deliverParentEvent.mockResolvedValue('delivered');
-    mocks.postFallbackReply.mockResolvedValue(undefined);
     mocks.recordLifecycle.mockResolvedValue(undefined);
   });
 
@@ -164,75 +161,6 @@ describe('notifyFastAgentParentOnPullRequestStatusChanged', () => {
 
     expect(mocks.deliverParentEvent).not.toHaveBeenCalled();
   });
-
-  it('posts a deterministic fallback when Fast fails before replying', async () => {
-    mocks.deliverParentEvent.mockRejectedValue(
-      new mocks.FastAgentParentEventDeliveryError('provider unavailable', {
-        replyPosted: false,
-      }),
-    );
-
-    await notifyFastAgentParentOnPullRequestStatusChanged({
-      run: makeRun({ fastAgentParent: fastParent }),
-      pullRequest,
-      actorLogin: 'alice',
-    });
-
-    expect(mocks.postFallbackReply).toHaveBeenCalledWith({
-      parent: fastParent,
-      event: expect.objectContaining({
-        type: 'pull_request_status_changed',
-        status: 'merged',
-      }),
-      message:
-        '[Fix review feedback](https://github.com/acme/web/pull/42) was **merged** by alice',
-    });
-    expect(mocks.recordLifecycle).toHaveBeenCalled();
-  });
-
-  it('does not fall back after Fast already posted a reply', async () => {
-    mocks.deliverParentEvent.mockRejectedValue(
-      new mocks.FastAgentParentEventDeliveryError('persistence failed', {
-        replyPosted: true,
-      }),
-    );
-
-    await notifyFastAgentParentOnPullRequestStatusChanged({
-      run: makeRun({ fastAgentParent: fastParent }),
-      pullRequest,
-      actorLogin: 'alice',
-    });
-
-    expect(mocks.postFallbackReply).not.toHaveBeenCalled();
-  });
-
-  it.each(['web', 'automation'] as const)(
-    'does not use a canned fallback for a %s Fast session',
-    async (surface) => {
-      mocks.deliverParentEvent.mockRejectedValue(
-        new mocks.FastAgentParentEventDeliveryError('provider unavailable', {
-          replyPosted: false,
-        }),
-      );
-      const parent = {
-        sessionId: fastParent.sessionId,
-        conversation: {
-          surface,
-          workspaceId: 'workspace-1',
-          conversationId: 'conversation-1',
-        },
-      };
-
-      await expect(
-        notifyFastAgentParentOnPullRequestStatusChanged({
-          run: makeRun({ fastAgentParent: parent }),
-          pullRequest,
-          actorLogin: 'alice',
-        }),
-      ).rejects.toThrow('provider unavailable');
-      expect(mocks.postFallbackReply).not.toHaveBeenCalled();
-    },
-  );
 });
 
 describe('notifyFastAgentParentOnPullRequestConflict', () => {

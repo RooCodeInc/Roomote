@@ -2,10 +2,6 @@ import { createHash } from 'node:crypto';
 
 import { getTaskUrl } from '@roomote/cloud-agents/server';
 import {
-  buildPullRequestStatusNotificationText,
-  formatMarkdownLink,
-} from '@roomote/communication/chat-messages';
-import {
   type TaskRun,
   db,
   recordTaskRunLifecycleEvent,
@@ -17,8 +13,6 @@ import {
 
 import {
   deliverFastAgentParentEvent,
-  FastAgentParentEventDeliveryError,
-  postFastAgentParentEventFallbackReply,
   type FastAgentPullRequestContext,
 } from '../fast-agent-parent-event';
 import { deliverFastAgentParentPrEvent } from './deliver-fast-agent-parent-pr-event';
@@ -68,59 +62,31 @@ export async function notifyFastAgentParentOnPullRequestStatusChanged(params: {
     url: params.pullRequest.url,
     status: params.pullRequest.status,
   };
-  const event = {
-    type: 'pull_request_status_changed' as const,
-    taskId: params.run.taskId,
-    runId: params.run.id,
-    taskUrl: getTaskUrl({
-      taskId: params.run.taskId,
-      utm: {
-        source: parent.conversation.surface,
-        campaign: 'fast-delegation-pr-status',
-      },
-    }),
-    pullRequest,
-    status: params.pullRequest.status,
-    actorLogin: params.actorLogin,
-  };
 
   await deliverFastAgentParentPrEvent({
     run: params.run,
     deliveryKey: notifiedResultKey,
     logPrefix: 'notifyFastAgentParentOnPullRequestStatusChanged',
-    deliver: async () => {
-      try {
-        return await deliverFastAgentParentEvent({
-          parent,
-          event,
-          lockWaitMs: PR_STATUS_DELIVERY_LOCK_WAIT_MS,
-        });
-      } catch (error) {
-        if (
-          !(error instanceof FastAgentParentEventDeliveryError) ||
-          error.replyPosted ||
-          parent.conversation.surface === 'web' ||
-          parent.conversation.surface === 'automation'
-        ) {
-          throw error;
-        }
-
-        const fallback = buildPullRequestStatusNotificationText({
-          prTitle: params.pullRequest.title,
-          prUrl: params.pullRequest.url,
+    deliver: () =>
+      deliverFastAgentParentEvent({
+        parent,
+        event: {
+          type: 'pull_request_status_changed',
+          taskId: params.run.taskId,
+          runId: params.run.id,
+          taskUrl: getTaskUrl({
+            taskId: params.run.taskId,
+            utm: {
+              source: parent.conversation.surface,
+              campaign: 'fast-delegation-pr-status',
+            },
+          }),
+          pullRequest,
           status: params.pullRequest.status,
           actorLogin: params.actorLogin,
-          formatLink: formatMarkdownLink,
-          formatStatus: (value) => `**${value}**`,
-        });
-        await postFastAgentParentEventFallbackReply({
-          parent,
-          event,
-          message: fallback.bodyText,
-        });
-        return 'delivered';
-      }
-    },
+        },
+        lockWaitMs: PR_STATUS_DELIVERY_LOCK_WAIT_MS,
+      }),
     recordLifecycle: () =>
       recordTaskRunLifecycleEvent(db, {
         runId: params.run.id,

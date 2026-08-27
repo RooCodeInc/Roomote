@@ -1,4 +1,5 @@
 import { Env } from '@roomote/env';
+import { TASK_SUGGESTION_MESSAGE_METADATA_EVENT_TYPE } from '@roomote/types';
 
 const UNFURL_ALLOWED_DOMAIN_SUFFIXES = new Set(
   (Env.SLACK_UNFURL_ALLOWED_DOMAINS ?? new URL(Env.R_APP_URL).hostname)
@@ -32,7 +33,7 @@ export const TASK_SUGGESTION_TYPES = [
   SUGGESTED_TASKS_SUGGESTION_TYPE,
 ] as const;
 export const SETUP_ONBOARDING_SUGGESTION_METADATA_EVENT_TYPE =
-  'roomote.setup_onboarding_suggestion';
+  TASK_SUGGESTION_MESSAGE_METADATA_EVENT_TYPE;
 export const THUMBS_UP_REACTIONS = new Set(['+1', 'thumbsup']);
 
 export const isAllowedUnfurlDomain = (domain: string): boolean => {
