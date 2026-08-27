@@ -953,6 +953,23 @@ export async function collectNotionTraversal(input: {
   };
 
   /**
+   * Resume/continuation nodes carry the current container's remaining
+   * children; dropping one at the cap silently skips those children until
+   * the next daily cycle. They go to the FRONT of the queue (finish current
+   * work before opening new frontier) and, at the cap, evict a discovered
+   * container from the tail instead of being dropped — the evicted
+   * container is re-discovered when its parent is re-listed, the resume
+   * node is not.
+   */
+  const pushResume = (node: NotionTraverseNode) => {
+    if (pending.length >= NOTION_TRAVERSAL_MAX_PENDING) {
+      pending.pop();
+      droppedNodes++;
+    }
+    pending.unshift(node);
+  };
+
+  /**
    * An ingest costs two requests (page object + markdown). Refusing to start
    * one that cannot finish keeps the pass inside its budget, and stopping at
    * the page limit prevents an overshoot the engine would answer by
@@ -1136,14 +1153,14 @@ export async function collectNotionTraversal(input: {
         }
       }
       if (stoppedMidResponse) {
-        pushPending(node);
+        pushResume(node);
         break;
       }
       for (const container of discoveredContainers) {
         pushPending(container);
       }
       if (listed.has_more && asString(listed.next_cursor)) {
-        pushPending({ ...node, cursor: listed.next_cursor!.trim() });
+        pushResume({ ...node, cursor: listed.next_cursor!.trim() });
       }
       continue;
     }
@@ -1210,11 +1227,11 @@ export async function collectNotionTraversal(input: {
     if (stoppedMidRows) {
       // Re-query the same row page next pass; already-ingested rows skip via
       // the inventory check, so the retry converges.
-      pushPending(node);
+      pushResume(node);
       break;
     }
     if (queried.has_more && asString(queried.next_cursor)) {
-      pushPending({ ...node, cursor: queried.next_cursor!.trim() });
+      pushResume({ ...node, cursor: queried.next_cursor!.trim() });
     }
   }
 

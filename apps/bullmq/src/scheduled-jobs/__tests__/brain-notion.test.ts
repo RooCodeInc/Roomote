@@ -763,6 +763,61 @@ describe('Notion traversal discovery', () => {
     expect(result.stateUpdates![0]!.watermark).toBeUndefined();
   });
 
+  it('never drops the resume node at the pending cap', async () => {
+    const parent = 'eeee0000-0000-0000-0000-000000000001';
+    // Fill pending to the cap with pre-existing containers.
+    const fullPending = Array.from({ length: 300 }, (_, index) => ({
+      kind: 'blocks' as const,
+      id: `feed0000-0000-0000-0000-${String(index).padStart(12, '0')}`,
+      depth: 1,
+    }));
+    const child = 'eeee0000-0000-0000-0000-000000000101';
+    mockedListCollectorItemsBySlugPrefix.mockResolvedValue([]);
+    mockNotionApiRequestJson.mockImplementation(async ({ path }) => {
+      if (path === `blocks/${encodeURIComponent(parent)}/children`) {
+        return {
+          results: Array.from({ length: 30 }, (_, index) => ({
+            object: 'block',
+            id: `${child.slice(0, -3)}${String(index).padStart(3, '0')}`,
+            type: 'child_page',
+          })),
+          has_more: false,
+        };
+      }
+      const pageMatch = /^pages\/([^/]+)$/.exec(path);
+      if (pageMatch) {
+        return pageObject(decodeURIComponent(pageMatch[1]!), 'Capped child');
+      }
+      if (path.endsWith('/markdown')) {
+        return { markdown: 'Body' };
+      }
+      if (path.startsWith('blocks/')) {
+        return { results: [], has_more: false };
+      }
+      throw new Error(`unexpected path ${path}`);
+    });
+
+    const result = await collectNotionTraversal({
+      config,
+      saved: {
+        ...savedTraverse,
+        traverse: {
+          afterItemId: '',
+          pending: [{ kind: 'blocks', id: parent, depth: 0 }, ...fullPending],
+        },
+      },
+      limit: 5,
+    });
+
+    const cursor = JSON.parse(result.stateUpdates![0]!.cursor as string) as {
+      traverse: { pending: { id: string }[] };
+    };
+    // The budget stops mid-response with the queue at capacity; the resume
+    // node must survive at the front, not be silently dropped.
+    expect(cursor.traverse.pending[0]!.id).toBe(parent);
+    expect(cursor.traverse.pending.length).toBeLessThanOrEqual(300);
+  });
+
   it('completes back to idle when the inventory is exhausted', async () => {
     mockedListCollectorItemsAfter.mockResolvedValue([]);
 
