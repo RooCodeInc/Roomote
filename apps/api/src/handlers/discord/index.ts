@@ -810,6 +810,7 @@ async function processDiscordGatewayEvent(
         metadata,
         conversationId:
           repliedFastSession?.conversation.conversationId ?? channel.channelId,
+        ...(repliedFastSession ? { createAnchoredThread: false } : {}),
         activeTasks: activeRun ? [{ taskId: activeRun.taskId }] : [],
       });
       return { ok: true, fastAnswered: true, fastContinued: true };
