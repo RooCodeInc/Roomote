@@ -37,10 +37,19 @@ describe('standardTask reporting consumer', () => {
     expect(harnessInstructions).toContain(
       '<scope>The report is a concise factual summary organized by the required sections.</scope>',
     );
-    const reportingContext = harnessInstructions.match(
-      /<reporting_context>[\s\S]*?<\/reporting_context>/,
-    )?.[0];
-    expect(reportingContext).toBeDefined();
+    const reportingContextStart = harnessInstructions.indexOf(
+      '<reporting_context>',
+    );
+    const reportingContextEnd = harnessInstructions.indexOf(
+      '</reporting_context>',
+      reportingContextStart,
+    );
+    expect(reportingContextStart).toBeGreaterThanOrEqual(0);
+    expect(reportingContextEnd).toBeGreaterThan(reportingContextStart);
+    const reportingContext = harnessInstructions.slice(
+      reportingContextStart,
+      reportingContextEnd + '</reporting_context>'.length,
+    );
     expect(reportingContext).not.toContain('Do not');
     expect(reportingContext).not.toContain('not user-facing');
     expect(reportingContext).not.toContain('not transcript-like');
