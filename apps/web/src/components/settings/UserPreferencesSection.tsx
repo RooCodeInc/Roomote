@@ -3,7 +3,6 @@
 import { useColorTheme } from '@/hooks/useColorTheme';
 import { useMindReaderMode } from '@/hooks/useMindReaderMode';
 import { useNarrationMode } from '@/hooks/useNarrationMode';
-import { usePersonalPreferences } from '@/hooks/usePersonalPreferences';
 import type { PersonalColorTheme } from '@/types/preferences';
 
 import {
@@ -28,11 +27,7 @@ const COLOR_THEME_OPTIONS: ReadonlyArray<{
   { label: 'Auto', value: 'system' },
 ];
 
-export function UserPreferencesSection({
-  communicationsFastModeDefaultAvailable = false,
-}: {
-  communicationsFastModeDefaultAvailable?: boolean;
-}) {
+export function UserPreferencesSection() {
   const {
     colorTheme,
     isLoading: isThemeLoading,
@@ -51,15 +46,6 @@ export function UserPreferencesSection({
     isUpdating: isNarrationModeUpdating,
     setEnabled: setNarrationModeEnabled,
   } = useNarrationMode();
-  const {
-    preferences,
-    isLoading: isCommunicationsFastModeDefaultLoading,
-    isUpdating: isCommunicationsFastModeDefaultUpdating,
-    setPreferences,
-  } = usePersonalPreferences({
-    enabled: communicationsFastModeDefaultAvailable,
-    errorMessage: 'Failed to update the communications fast mode default.',
-  });
   const isThemeDisabled = isThemeLoading || isThemeUpdating;
 
   return (
@@ -127,30 +113,6 @@ export function UserPreferencesSection({
             </p>
           </div>
         </div>
-
-        {communicationsFastModeDefaultAvailable ? (
-          <div className="flex gap-3">
-            <Switch
-              aria-label="Toggle communications fast mode default"
-              checked={preferences.communicationsFastModeDefault}
-              disabled={
-                isCommunicationsFastModeDefaultLoading ||
-                isCommunicationsFastModeDefaultUpdating
-              }
-              onCheckedChange={(enabled) =>
-                setPreferences({ communicationsFastModeDefault: enabled })
-              }
-            />
-            <div className="space-y-1">
-              <p className="text-sm font-semibold text-foreground">
-                Default messages to fast mode
-              </p>
-              <p className="text-sm text-foreground">
-                Use fast mode by default for supported communications messages.
-              </p>
-            </div>
-          </div>
-        ) : null}
       </div>
     </Section>
   );

@@ -81,6 +81,7 @@ const RUN_HISTORY_KEYS: BackgroundAutomationKey[] = [
   'suggester',
   'announcer',
   'manager_stats',
+  'provider_usage_limit',
   'sentry_triage',
   'dependabot_triage',
   'codeql_triage',
@@ -220,10 +221,15 @@ async function resolveAutomationDestinations(params: {
   const entries = await Promise.all(
     MANAGER_REPORTING_AUTOMATION_KEYS.map(async (key) => {
       const runtime = runtimes[key];
-      const destination = await resolveAutomationRuntimeDestination({
-        runtime,
-        slackConnected: params.slackConnected,
-      });
+      // Platform issue alerts use deployment-admin DMs as their final tail;
+      // unlike scheduled automations, they never post to a primary channel.
+      const destination =
+        key === 'platform_issue_alerts'
+          ? runtime.destination
+          : await resolveAutomationRuntimeDestination({
+              runtime,
+              slackConnected: params.slackConnected,
+            });
 
       if (!destination) {
         return [key, null] as const;
@@ -262,6 +268,7 @@ export async function getBackgroundAgentSettingsCommand(
     reviewAllPullRequestAuthors: boolean;
     reviewOnCommit: boolean;
     reviewDraftPrs: boolean;
+    publishGithubCheck: boolean;
     relayReviewResultsToTask: boolean;
     relayUsers: ReviewerRelayUser[];
     approvePr: boolean;
@@ -280,6 +287,7 @@ export async function getBackgroundAgentSettingsCommand(
   slackChannelAccessWarnings: {
     channelAutoStartSlackChannels: string[];
     managerStatsSlackChannel: string | null;
+    providerUsageLimitSlackChannel: string | null;
     suggesterSlackChannel: string | null;
     announcerSlackChannel: string | null;
     platformIssueSlackChannel: string | null;
@@ -358,6 +366,8 @@ export async function getBackgroundAgentSettingsCommand(
           ({ channelId }) => channelId,
         ),
       managerStatsSlackChannelId: visibleSettings.managerStatsSlackChannelId,
+      providerUsageLimitSlackChannelId:
+        visibleSettings.providerUsageLimitSlackChannelId,
       suggesterSlackChannelId: visibleSettings.suggesterSlackChannelId,
       announcerSlackChannelId: visibleSettings.announcerSlackChannelId,
       platformIssueSlackChannelId: visibleSettings.platformIssueSlackChannelId,
@@ -380,6 +390,8 @@ export async function getBackgroundAgentSettingsCommand(
         ),
       managerSlackChannelId: visibleSettings.managerSlackChannelId,
       managerStatsSlackChannelId: visibleSettings.managerStatsSlackChannelId,
+      providerUsageLimitSlackChannelId:
+        visibleSettings.providerUsageLimitSlackChannelId,
       suggesterSlackChannelId: visibleSettings.suggesterSlackChannelId,
       announcerSlackChannelId: visibleSettings.announcerSlackChannelId,
       platformIssueSlackChannelId: visibleSettings.platformIssueSlackChannelId,

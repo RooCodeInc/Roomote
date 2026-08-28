@@ -1,5 +1,9 @@
 import { createGitHubToken } from '@roomote/auth';
-import { getOctokit } from '@roomote/github';
+import {
+  getGitHubRateLimitRetryAfterMs,
+  getOctokit,
+  isGitHubUnauthorizedError,
+} from '@roomote/github';
 import { type TaskRun } from '@roomote/db/server';
 import {
   buildPullRequestUrl,
@@ -8,6 +12,10 @@ import {
   type SourceControlProvider,
 } from '@roomote/types';
 import { z } from 'zod';
+import {
+  prReviewGitHubConditionalRequestCache,
+  type GitHubRestResponse,
+} from './github-conditional-request-cache';
 import { requestSourceControlJson } from './source-control-pull-request-http';
 import {
   resolveAdoProviderContext,
@@ -150,6 +158,15 @@ type SourceControlPullRequestCommentThread = {
   comments: SourceControlPullRequestComment[];
 };
 
+type SourceControlPullRequestReview = {
+  reviewId: string;
+  author: string | null;
+  state: string;
+  body: string;
+  submittedAt: string | null;
+  url: string | null;
+};
+
 export type SourceControlPullRequestCommentsResult = {
   success: true;
   provider: SourceControlProvider;
@@ -157,6 +174,8 @@ export type SourceControlPullRequestCommentsResult = {
   number: number;
   threads: SourceControlPullRequestCommentThread[];
   issueComments: SourceControlPullRequestComment[];
+  /** Present when the provider exposes top-level review state (currently GitHub). */
+  reviews?: SourceControlPullRequestReview[];
   warnings: string[];
 };
 
@@ -170,6 +189,8 @@ export type SourceControlPullRequestSummary = {
   externalId: number | null;
   url: string;
   title: string;
+  /** The description as the list payload carries it; null when the provider's list omits it. */
+  body: string | null;
   state: 'open' | 'closed' | 'merged';
   draft: boolean;
   sourceBranch: string;
@@ -182,7 +203,12 @@ export type SourceControlPullRequestSummary = {
   mergedAt: string | null;
   /** Null for open PRs and when the provider exposes no close timestamp (Bitbucket). */
   closedAt: string | null;
-  labels: string[];
+  /**
+   * Null when the provider's list payload carries no labels at all (Azure
+   * DevOps), which is distinct from an explicitly empty label set: a writer
+   * that does not know the labels must not erase stored ones.
+   */
+  labels: string[] | null;
   headSha: string | null;
   baseSha: string | null;
   /** Null when the provider's list payload carries no mergeability signal. */
@@ -551,6 +577,7 @@ const gitLabMergeRequestListItemSchema = z
     id: z.number().int().optional(),
     iid: z.number().int(),
     title: z.string(),
+    description: z.string().nullable().optional(),
     state: z.string(),
     merged_at: z.string().nullable().optional(),
     closed_at: z.string().nullable().optional(),
@@ -636,10 +663,17 @@ export async function readSourceControlPullRequestForTaskRun({
   taskRun,
   input,
   fetchImpl = fetch,
+  useGitHubConditionalRequests = false,
+  onGitHubApiRequest,
+  githubToken,
 }: {
   taskRun: TaskRun;
   input: SourceControlPullRequestReadInput;
   fetchImpl?: FetchImpl;
+  useGitHubConditionalRequests?: boolean;
+  onGitHubApiRequest?: () => void;
+  /** Optional task-scoped token reused by a larger GitHub read workflow. */
+  githubToken?: string;
 }): Promise<SourceControlPullRequestReadResult> {
   const payloadRecord = getPayloadRecord(taskRun.payload);
   const payloadProvider = resolveSourceControlProviderForRepositoryFromPayload(
@@ -697,7 +731,14 @@ export async function readSourceControlPullRequestForTaskRun({
 
   switch (provider) {
     case 'github':
-      return listGitHubPullRequestComments({ prNumber, repository, provider });
+      return listGitHubPullRequestComments({
+        prNumber,
+        repository,
+        provider,
+        useConditionalRequests: useGitHubConditionalRequests,
+        onGitHubApiRequest,
+        githubToken,
+      });
     case 'gitlab':
       return listGitLabMergeRequestComments({
         prNumber,
@@ -979,31 +1020,89 @@ async function listGitHubPullRequestComments({
   prNumber,
   repository,
   provider,
+  useConditionalRequests,
+  onGitHubApiRequest,
+  githubToken,
 }: {
   prNumber: number;
   repository: RepositoryRow;
   provider: 'github';
+  useConditionalRequests: boolean;
+  onGitHubApiRequest?: () => void;
+  githubToken?: string;
 }): Promise<SourceControlPullRequestCommentsResult> {
-  const { octokit, owner, repo } = await createGitHubReadClient(
-    repository,
-    provider,
-  );
+  const [owner, repo] = splitRepositoryFullName(repository.fullName, provider);
+  const octokit = githubToken
+    ? getOctokit(githubToken)
+    : (await createGitHubReadClient(repository, provider)).octokit;
   const warnings: string[] = [];
 
-  const [reviewComments, restIssueComments] = await Promise.all([
-    octokit.paginate(octokit.rest.pulls.listReviewComments, {
-      owner,
-      repo,
-      pull_number: prNumber,
-      per_page: 100,
-    }),
-    octokit.paginate(octokit.rest.issues.listComments, {
-      owner,
-      repo,
-      issue_number: prNumber,
-      per_page: 100,
-    }),
-  ]);
+  const [reviewComments, restIssueComments, restReviews] =
+    useConditionalRequests
+      ? await Promise.all([
+          listConditionalGitHubPages({
+            cacheKey: `review-comments:${repository.installationId}:${repository.fullName}#${prNumber}`,
+            requestPage: (page, headers) => {
+              onGitHubApiRequest?.();
+              return octokit.rest.pulls.listReviewComments({
+                owner,
+                repo,
+                pull_number: prNumber,
+                per_page: 100,
+                page,
+                request: { headers },
+              });
+            },
+          }),
+          listConditionalGitHubPages({
+            cacheKey: `issue-comments:${repository.installationId}:${repository.fullName}#${prNumber}`,
+            requestPage: (page, headers) => {
+              onGitHubApiRequest?.();
+              return octokit.rest.issues.listComments({
+                owner,
+                repo,
+                issue_number: prNumber,
+                per_page: 100,
+                page,
+                request: { headers },
+              });
+            },
+          }),
+          listConditionalGitHubPages({
+            cacheKey: `reviews:${repository.installationId}:${repository.fullName}#${prNumber}`,
+            requestPage: (page, headers) => {
+              onGitHubApiRequest?.();
+              return octokit.rest.pulls.listReviews({
+                owner,
+                repo,
+                pull_number: prNumber,
+                per_page: 100,
+                page,
+                request: { headers },
+              });
+            },
+          }),
+        ])
+      : await Promise.all([
+          octokit.paginate(octokit.rest.pulls.listReviewComments, {
+            owner,
+            repo,
+            pull_number: prNumber,
+            per_page: 100,
+          }),
+          octokit.paginate(octokit.rest.issues.listComments, {
+            owner,
+            repo,
+            issue_number: prNumber,
+            per_page: 100,
+          }),
+          octokit.paginate(octokit.rest.pulls.listReviews, {
+            owner,
+            repo,
+            pull_number: prNumber,
+            per_page: 100,
+          }),
+        ]);
 
   const issueComments: SourceControlPullRequestComment[] =
     restIssueComments.map((comment) => ({
@@ -1022,8 +1121,15 @@ async function listGitHubPullRequestComments({
       owner,
       repo,
       prNumber: prNumber,
+      onGitHubApiRequest,
     });
   } catch (error) {
+    if (
+      isGitHubUnauthorizedError(error) ||
+      getGitHubRateLimitRetryAfterMs(error) !== null
+    ) {
+      throw error;
+    }
     warnings.push(
       `GitHub review thread resolution could not be fetched (${
         error instanceof Error ? error.message : String(error)
@@ -1039,8 +1145,42 @@ async function listGitHubPullRequestComments({
     number: prNumber,
     threads,
     issueComments,
+    reviews: restReviews.map((review) => ({
+      reviewId: String(review.id),
+      author: review.user?.login ?? null,
+      state: review.state,
+      body: review.body ?? '',
+      submittedAt: review.submitted_at ?? null,
+      url: review.html_url ?? null,
+    })),
     warnings,
   };
+}
+
+async function listConditionalGitHubPages<T>({
+  cacheKey,
+  requestPage,
+}: {
+  cacheKey: string;
+  requestPage: (
+    page: number,
+    headers: Record<string, string>,
+  ) => Promise<GitHubRestResponse<T[]>>;
+}): Promise<T[]> {
+  const items: T[] = [];
+
+  for (let page = 1; ; page += 1) {
+    const response = await prReviewGitHubConditionalRequestCache.request(
+      `${cacheKey}:page:${page}`,
+      (headers) => requestPage(page, headers),
+    );
+    items.push(...response.data);
+
+    const link = response.headers.link;
+    if (typeof link !== 'string' || !link.includes('rel="next"')) break;
+  }
+
+  return items;
 }
 
 async function createGitHubReadClient(
@@ -1071,16 +1211,19 @@ async function fetchGitHubReviewThreadsViaGraphql({
   owner,
   repo,
   prNumber,
+  onGitHubApiRequest,
 }: {
   octokit: ReturnType<typeof getOctokit>;
   owner: string;
   repo: string;
   prNumber: number;
+  onGitHubApiRequest?: () => void;
 }): Promise<SourceControlPullRequestCommentThread[]> {
   const threads: z.infer<typeof gitHubReviewThreadSchema>[] = [];
   let cursor: string | null = null;
 
   do {
+    onGitHubApiRequest?.();
     const response = await octokit.graphql(
       `query PullRequestReviewThreads($owner: String!, $name: String!, $number: Int!, $cursor: String) {
       repository(owner: $owner, name: $name) {
@@ -1140,6 +1283,7 @@ async function fetchGitHubReviewThreadsViaGraphql({
     }
 
     while (commentCursor) {
+      onGitHubApiRequest?.();
       const response = await octokit.graphql(
         `query PullRequestReviewThreadComments($threadId: ID!, $cursor: String!) {
           node(id: $threadId) {
@@ -2020,6 +2164,7 @@ async function listGitHubPullRequests({
       externalId: pull.id ?? null,
       url: pull.html_url,
       title: pull.title,
+      body: pull.body ?? null,
       state: mapProviderPullRequestState({
         merged: Boolean(pull.merged_at),
         closed: pull.state === 'closed',
@@ -2125,6 +2270,7 @@ async function listGitLabMergeRequests({
           number: mergeRequest.iid,
         }),
       title: mergeRequest.title,
+      body: mergeRequest.description ?? null,
       state: mapProviderPullRequestState({
         merged: mergeRequest.state === 'merged',
         closed: mergeRequest.state === 'closed',
@@ -2247,6 +2393,7 @@ async function listGiteaPullRequests({
             number,
           }),
         title,
+        body: pullRequest.body ?? null,
         state: mapProviderPullRequestState({
           merged: Boolean(pullRequest.merged),
           closed: pullRequest.state === 'closed',
@@ -2378,6 +2525,7 @@ async function listBitbucketPullRequests({
             number: pullRequest.id,
           }),
         title,
+        body: pullRequest.description ?? null,
         state: mapProviderPullRequestState({
           merged: state === 'MERGED',
           closed: state === 'DECLINED' || state === 'SUPERSEDED',
@@ -2399,7 +2547,9 @@ async function listBitbucketPullRequests({
         createdAt: pullRequest.created_on ?? null,
         mergedAt: null,
         closedAt: null,
-        labels: [],
+        // Bitbucket's pull request list carries no labels; null says "not
+        // known" so a stored label set is preserved rather than cleared.
+        labels: null,
         headSha: pullRequest.source?.commit?.hash ?? null,
         baseSha: pullRequest.destination?.commit?.hash ?? null,
         mergeable: null,
@@ -2491,6 +2641,7 @@ async function listAdoPullRequests({
         number: pullRequest.pullRequestId,
       }),
       title: pullRequest.title,
+      body: pullRequest.description ?? null,
       state: mapProviderPullRequestState({
         merged: pullRequest.status === 'completed',
         closed: pullRequest.status === 'abandoned',
@@ -2515,9 +2666,13 @@ async function listAdoPullRequests({
           ? (pullRequest.closedDate ?? null)
           : null,
       closedAt: pullRequest.closedDate ?? null,
-      labels: (pullRequest.labels ?? [])
-        .map((label) => label.name)
-        .filter((name): name is string => Boolean(name)),
+      // Azure DevOps omits labels from some list responses (see the warning
+      // this listing emits); an omission is unknown, not an empty set.
+      labels: pullRequest.labels
+        ? pullRequest.labels
+            .map((label) => label.name)
+            .filter((name): name is string => Boolean(name))
+        : null,
       headSha: pullRequest.lastMergeSourceCommit?.commitId ?? null,
       baseSha: pullRequest.lastMergeTargetCommit?.commitId ?? null,
       mergeable:

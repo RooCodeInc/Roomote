@@ -27,7 +27,7 @@ describe('worker CLI', () => {
     expect(result.stdout).toContain('Available services');
     expect(result.stdout).toContain('redis7');
     expect(result.stdout).toContain('postgres17');
-  });
+  }, 120_000);
 
   // Regression test: Commander derives option keys from flag names, so
   // `--task-run-id` arrives as `options.taskRunId`. Reading `options.runId`

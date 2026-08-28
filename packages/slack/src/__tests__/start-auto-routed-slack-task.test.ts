@@ -1428,7 +1428,8 @@ describe('startAutoRoutedSlackTask', () => {
       status: 'not_started',
       code: 'deployment_read_only',
       threadId: '120.000',
-      message: 'This deployment is read-only. New task launches are paused.',
+      message:
+        'New tasks are paused due to a billing issue. Please check billing.',
       routingResult: expect.any(Object),
     });
     expect(finishRoutedStartMock).not.toHaveBeenCalled();

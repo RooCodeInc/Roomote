@@ -3,7 +3,11 @@
 // agents write their own narrative through a separate path, so both must
 // converge on exactly one memory candidate per completed run.
 
-import { RunStatus, TaskPayloadKind } from '@roomote/types';
+import {
+  BRAIN_COLLECTOR_IDS,
+  RunStatus,
+  TaskPayloadKind,
+} from '@roomote/types';
 
 import {
   db,
@@ -15,19 +19,30 @@ import {
   brainCollectorItems,
   brainSyncState,
   backfillBrainMemoryEvents,
+  canonicalizeBrainCollectorItemSlugsAndResetSyncState,
   claimPendingBrainMemoryEvents,
   markBrainMemoryEvent,
   releaseBrainMemoryEvents,
+  settleBrainMemoryEvent,
   maybeEnqueueBrainMemoryEvent,
   saveBrainAgentSummary,
   resetBrainIngestionState,
+  canonicalizeBrainCollectorItemSlugs,
   deleteBrainCollectorItems,
+  deleteBrainSyncStateFamily,
+  getBrainSyncState,
+  getBrainMemoryEventSummary,
+  renameBrainSyncStateFamilyPrefix,
   listBrainCollectorItems,
   listBrainCollectorItemsBefore,
+  listBrainCollectorItemsBySlugPrefix,
+  seedBrainCollectorItems,
   upsertBrainCollectorItems,
   upsertBrainSyncState,
+  sql,
 } from '../../server';
 import type { CreateTaskRun } from '../../types';
+import { runMemoryOutboxLifecycleContract } from './memory-outbox-lifecycle.contract';
 
 const createdTaskIds: string[] = [];
 
@@ -73,7 +88,7 @@ describe('resetBrainIngestionState', () => {
     const run = await makeCompletedRun();
     await maybeEnqueueBrainMemoryEvent(db, run.id);
     const [claimed] = await claimPendingBrainMemoryEvents(db, 10);
-    await markBrainMemoryEvent(db, claimed!.id, 'done');
+    await settleBrainMemoryEvent(db, claimed!.id, claimed!.revision, 'done');
     await upsertBrainSyncState(db, 'granola-meetings', {
       watermark: new Date('2026-08-01T00:00:00Z'),
       backfillCompletedAt: new Date('2026-08-01T01:00:00Z'),
@@ -142,6 +157,278 @@ describe('Brain collector item inventory', () => {
     const remaining = await listBrainCollectorItems(db, 'notion-pages', 100);
     expect(remaining.map((item) => item.itemId)).toEqual(['still-shared']);
   });
+
+  it('seeding never overwrites a row the live collector already wrote', async () => {
+    const liveSeenAt = new Date('2026-08-15T00:00:00Z');
+    await upsertBrainCollectorItems(db, 'slack-public-channels:day-pages', [
+      {
+        itemId: 'slack/T1/C1/2026-08-13/1-0-2-0',
+        slug: 'slack/T1/C1/2026-08-13/1-0-2-0',
+        lastSeenAt: liveSeenAt,
+      },
+    ]);
+
+    await seedBrainCollectorItems(db, 'slack-public-channels:day-pages', [
+      {
+        itemId: 'slack/T1/C1/2026-08-13/1-0-2-0',
+        slug: 'slack/T1/C1/2026-08-13/1-0-2-0',
+        lastSeenAt: new Date(0),
+      },
+      {
+        itemId: 'slack/T1/C1/2026-08-12/3-0-4-0',
+        slug: 'slack/T1/C1/2026-08-12/3-0-4-0',
+        lastSeenAt: new Date(0),
+      },
+    ]);
+
+    const rows = await listBrainCollectorItems(
+      db,
+      'slack-public-channels:day-pages',
+      100,
+    );
+    expect(rows.map((row) => [row.itemId, row.lastSeenAt.getTime()])).toEqual([
+      ['slack/T1/C1/2026-08-12/3-0-4-0', 0],
+      ['slack/T1/C1/2026-08-13/1-0-2-0', liveSeenAt.getTime()],
+    ]);
+  });
+
+  it('canonicalizes mixed-case rows, merging by freshest lastSeenAt', async () => {
+    const fresh = new Date('2026-08-20T12:00:00Z');
+    await upsertBrainCollectorItems(db, 'slack-public-channels:day-pages', [
+      // A mixed-case row whose lowercase twin already exists with an older
+      // timestamp: merge keeps the freshest.
+      {
+        itemId: 'slack/T1/C1/2026-08-13/1-0-2-0',
+        slug: 'slack/T1/C1/2026-08-13/1-0-2-0',
+        lastSeenAt: fresh,
+      },
+      {
+        itemId: 'slack/t1/c1/2026-08-13/1-0-2-0',
+        slug: 'slack/t1/c1/2026-08-13/1-0-2-0',
+        lastSeenAt: new Date(0),
+      },
+      // A mixed-case row with no twin: simply rewritten.
+      {
+        itemId: 'slack/T1/C1/2026-08-14/3-0-4-0',
+        slug: 'slack/T1/C1/2026-08-14/3-0-4-0',
+        lastSeenAt: new Date('2026-08-20T13:00:00Z'),
+      },
+      // Already canonical: untouched.
+      {
+        itemId: 'slack/t1/c1/2026-08-15/5-0-6-0',
+        slug: 'slack/t1/c1/2026-08-15/5-0-6-0',
+        lastSeenAt: new Date('2026-08-20T14:00:00Z'),
+      },
+    ]);
+
+    const rewritten = await canonicalizeBrainCollectorItemSlugs(
+      db,
+      'slack-public-channels:day-pages',
+    );
+    const rows = await listBrainCollectorItems(
+      db,
+      'slack-public-channels:day-pages',
+      100,
+    );
+
+    expect(rewritten).toBe(2);
+    expect(rows.map((row) => [row.itemId, row.lastSeenAt.getTime()])).toEqual([
+      ['slack/t1/c1/2026-08-13/1-0-2-0', fresh.getTime()],
+      ['slack/t1/c1/2026-08-14/3-0-4-0', Date.parse('2026-08-20T13:00:00Z')],
+      ['slack/t1/c1/2026-08-15/5-0-6-0', Date.parse('2026-08-20T14:00:00Z')],
+    ]);
+
+    // Already canonical: the second pass is a no-op.
+    expect(
+      await canonicalizeBrainCollectorItemSlugs(
+        db,
+        'slack-public-channels:day-pages',
+      ),
+    ).toBe(0);
+  });
+
+  it('atomically canonicalizes inventory and resets its replay', async () => {
+    const inventoryId = 'slack-public-channels:day-pages';
+    const replayId = 'slack-public-channels:entity-timeline-v3';
+    const mixedCaseSlug = 'slack/T1/C1/2026-08-13/1-0-2-0';
+    await upsertBrainCollectorItems(db, inventoryId, [
+      {
+        itemId: mixedCaseSlug,
+        slug: mixedCaseSlug,
+        lastSeenAt: new Date('2026-08-20T12:00:00Z'),
+      },
+    ]);
+    await upsertBrainSyncState(db, replayId, {
+      backfillCursor: '{"completed":["C1"]}',
+      backfillCompletedAt: new Date('2026-08-20T13:00:00Z'),
+    });
+
+    await expect(
+      db.transaction(async (tx) => {
+        await canonicalizeBrainCollectorItemSlugsAndResetSyncState(
+          tx,
+          inventoryId,
+          replayId,
+        );
+        throw new Error('force maintenance rollback');
+      }),
+    ).rejects.toThrow('force maintenance rollback');
+
+    expect(
+      (await listBrainCollectorItems(db, inventoryId, 100)).map(
+        (row) => row.itemId,
+      ),
+    ).toEqual([mixedCaseSlug]);
+    expect(await getBrainSyncState(db, replayId)).toMatchObject({
+      backfillCursor: '{"completed":["C1"]}',
+      backfillCompletedAt: new Date('2026-08-20T13:00:00Z'),
+    });
+
+    expect(
+      await canonicalizeBrainCollectorItemSlugsAndResetSyncState(
+        db,
+        inventoryId,
+        replayId,
+      ),
+    ).toBe(1);
+    expect(
+      (await listBrainCollectorItems(db, inventoryId, 100)).map(
+        (row) => row.itemId,
+      ),
+    ).toEqual([mixedCaseSlug.toLowerCase()]);
+    expect(await getBrainSyncState(db, replayId)).toMatchObject({
+      backfillCursor: null,
+      backfillCompletedAt: null,
+    });
+  });
+
+  it('deletes a superseded collector version with its child partitions', async () => {
+    await upsertBrainSyncState(db, 'slack-public-channels:entity-timeline-v2', {
+      backfillCursor: '{"completed":[]}',
+    });
+    await upsertBrainSyncState(
+      db,
+      'slack-public-channels:entity-timeline-v2:T1/C1',
+      { watermark: new Date('2026-08-20T00:00:00Z') },
+    );
+    await upsertBrainSyncState(db, 'slack-public-channels:entity-timeline-v3', {
+      backfillCursor: '{"completed":[]}',
+    });
+    // A different family sharing no prefix boundary stays.
+    await upsertBrainSyncState(db, 'slack-public-channels:day-pages:census', {
+      backfillCompletedAt: new Date('2026-08-20T00:00:00Z'),
+    });
+
+    await deleteBrainSyncStateFamily(
+      db,
+      'slack-public-channels:entity-timeline-v2',
+    );
+
+    expect(
+      await getBrainSyncState(db, 'slack-public-channels:entity-timeline-v2'),
+    ).toBeNull();
+    expect(
+      await getBrainSyncState(
+        db,
+        'slack-public-channels:entity-timeline-v2:T1/C1',
+      ),
+    ).toBeNull();
+    expect(
+      await getBrainSyncState(db, 'slack-public-channels:entity-timeline-v3'),
+    ).not.toBeNull();
+    expect(
+      await getBrainSyncState(db, 'slack-public-channels:day-pages:census'),
+    ).not.toBeNull();
+  });
+
+  it('renames a stream family under a new prefix, keeping positions', async () => {
+    const watermark = new Date('2026-08-20T18:55:00Z');
+    await upsertBrainSyncState(db, 'github-issues:occurrence-date-v2:acme/a', {
+      watermark,
+      backfillCursor: '{"boundary":"2026-08-14"}',
+    });
+    await upsertBrainSyncState(db, 'github-issues:occurrence-date-v2:acme/b', {
+      watermark,
+    });
+    // The new writer already created acme/b under the new id: its row wins.
+    await upsertBrainSyncState(db, 'github-issues:occurrence-date-v3:acme/b', {
+      watermark: new Date('2026-08-20T19:00:00Z'),
+    });
+    // The parent (exact id) is not part of the family rename.
+    await upsertBrainSyncState(db, 'github-issues:occurrence-date-v2', {
+      backfillCursor: '{"completed":[]}',
+    });
+
+    await renameBrainSyncStateFamilyPrefix(
+      db,
+      'github-issues:occurrence-date-v2',
+      'github-issues:occurrence-date-v3',
+    );
+
+    const moved = await getBrainSyncState(
+      db,
+      'github-issues:occurrence-date-v3:acme/a',
+    );
+    expect(moved).toMatchObject({
+      watermark,
+      backfillCursor: '{"boundary":"2026-08-14"}',
+    });
+    expect(
+      (await getBrainSyncState(db, 'github-issues:occurrence-date-v3:acme/b'))
+        ?.watermark,
+    ).toEqual(new Date('2026-08-20T19:00:00Z'));
+    expect(
+      await getBrainSyncState(db, 'github-issues:occurrence-date-v2:acme/a'),
+    ).toBeNull();
+    expect(
+      await getBrainSyncState(db, 'github-issues:occurrence-date-v2:acme/b'),
+    ).toBeNull();
+    expect(
+      await getBrainSyncState(db, 'github-issues:occurrence-date-v2'),
+    ).not.toBeNull();
+  });
+
+  it('lists items under a literal slug prefix', async () => {
+    await upsertBrainCollectorItems(db, 'slack-public-channels:day-pages', [
+      {
+        itemId: 'slack/T1/C1/2026-08-13/1-0-2-0',
+        slug: 'slack/T1/C1/2026-08-13/1-0-2-0',
+        lastSeenAt: new Date('2026-08-15T00:00:00Z'),
+      },
+      {
+        itemId: 'slack/T1/C1/2026-08-14/5-0-6-0',
+        slug: 'slack/T1/C1/2026-08-14/5-0-6-0',
+        lastSeenAt: new Date('2026-08-15T00:00:00Z'),
+      },
+      // LIKE metacharacters in the stored id must not widen the prefix.
+      {
+        itemId: 'slack/T_/C1/2026-08-13/7-0-8-0',
+        slug: 'slack/T_/C1/2026-08-13/7-0-8-0',
+        lastSeenAt: new Date('2026-08-15T00:00:00Z'),
+      },
+    ]);
+
+    const day = await listBrainCollectorItemsBySlugPrefix(
+      db,
+      'slack-public-channels:day-pages',
+      'slack/T1/C1/2026-08-13/',
+      100,
+    );
+    expect(day.map((item) => item.itemId)).toEqual([
+      'slack/T1/C1/2026-08-13/1-0-2-0',
+    ]);
+
+    // An underscore in the requested prefix matches itself, not any char.
+    const underscored = await listBrainCollectorItemsBySlugPrefix(
+      db,
+      'slack-public-channels:day-pages',
+      'slack/T_/',
+      100,
+    );
+    expect(underscored.map((item) => item.itemId)).toEqual([
+      'slack/T_/C1/2026-08-13/7-0-8-0',
+    ]);
+  });
 });
 
 describe('maybeEnqueueBrainMemoryEvent', () => {
@@ -180,7 +467,7 @@ describe('saveBrainAgentSummary', () => {
     const run = await makeCompletedRun();
     await maybeEnqueueBrainMemoryEvent(db, run.id);
     const [claimed] = await claimPendingBrainMemoryEvents(db, 10);
-    await markBrainMemoryEvent(db, claimed!.id, 'done');
+    await settleBrainMemoryEvent(db, claimed!.id, claimed!.revision, 'done');
 
     await saveBrainAgentSummary(db, run.id, 'agent narrative');
 
@@ -192,6 +479,113 @@ describe('saveBrainAgentSummary', () => {
     expect(event?.status).toBe('pending');
     expect(event?.attempts).toBe(0);
     expect(event?.agentSummary).toBe('agent narrative');
+  });
+
+  it('keeps a claimed row with a single writer and fences its completion', async () => {
+    const run = await makeCompletedRun();
+    await maybeEnqueueBrainMemoryEvent(db, run.id);
+    const claimed = (await claimPendingBrainMemoryEvents(db, 10)).find(
+      (candidate) => candidate.runId === run.id,
+    );
+
+    // A save lands between the claim and the drainer's completion: the row
+    // stays 'processing' (no second claimer can pick it up) but its revision
+    // moves past the drainer's snapshot.
+    await saveBrainAgentSummary(db, run.id, 'late richer narrative');
+
+    const [held] = await db
+      .select()
+      .from(brainMemoryEvents)
+      .where(eq(brainMemoryEvents.id, claimed!.id));
+    expect(held!.status).toBe('processing');
+    expect(held!.revision).toBe(claimed!.revision + 1);
+
+    // The stale-revision settle fails the fence and hands the row back.
+    const outcome = await settleBrainMemoryEvent(
+      db,
+      claimed!.id,
+      claimed!.revision,
+      'done',
+    );
+    expect(outcome).toBe('superseded');
+
+    const [row] = await db
+      .select()
+      .from(brainMemoryEvents)
+      .where(eq(brainMemoryEvents.id, claimed!.id));
+
+    expect(row!.status).toBe('pending');
+    expect(row!.processedAt).toBeNull();
+    expect(row!.agentSummary).toBe('late richer narrative');
+
+    // The next tick re-claims it and completes normally.
+    const reclaimed = (await claimPendingBrainMemoryEvents(db, 10)).find(
+      (candidate) => candidate.id === claimed!.id,
+    );
+    expect(
+      await settleBrainMemoryEvent(
+        db,
+        reclaimed!.id,
+        reclaimed!.revision,
+        'done',
+      ),
+    ).toBe('settled');
+
+    const [settled] = await db
+      .select()
+      .from(brainMemoryEvents)
+      .where(eq(brainMemoryEvents.id, claimed!.id));
+
+    expect(settled!.status).toBe('done');
+  });
+
+  it('re-queues a settled row when a stale-reclaimed writer returns late', async () => {
+    const run = await makeCompletedRun();
+    await maybeEnqueueBrainMemoryEvent(db, run.id);
+
+    // Writer A claims, then hangs in its page write past the reclaim window.
+    const claimedA = (await claimPendingBrainMemoryEvents(db, 10)).find(
+      (candidate) => candidate.runId === run.id,
+    );
+    await saveBrainAgentSummary(db, run.id, 'newer narrative');
+    await db
+      .update(brainMemoryEvents)
+      .set({ updatedAt: new Date(Date.now() - 16 * 60 * 1000) })
+      .where(eq(brainMemoryEvents.id, claimedA!.id));
+
+    // Writer B stale-reclaims the newer revision, writes it, settles done.
+    const claimedB = (await claimPendingBrainMemoryEvents(db, 10)).find(
+      (candidate) => candidate.id === claimedA!.id,
+    );
+    expect(claimedB!.revision).toBeGreaterThan(claimedA!.revision);
+    expect(
+      await settleBrainMemoryEvent(
+        db,
+        claimedB!.id,
+        claimedB!.revision,
+        'done',
+      ),
+    ).toBe('settled');
+
+    // A's stale page write finally lands and A settles: the fence miss must
+    // re-queue the row even though it is already 'done', so the next tick
+    // re-puts the newest content over A's stale snapshot.
+    expect(
+      await settleBrainMemoryEvent(
+        db,
+        claimedA!.id,
+        claimedA!.revision,
+        'done',
+      ),
+    ).toBe('superseded');
+
+    const [row] = await db
+      .select()
+      .from(brainMemoryEvents)
+      .where(eq(brainMemoryEvents.id, claimedA!.id));
+
+    expect(row!.status).toBe('pending');
+    expect(row!.processedAt).toBeNull();
   });
 
   it('keeps the summary when the completion path enqueues afterwards', async () => {
@@ -230,10 +624,9 @@ describe('backfillBrainMemoryEvents', () => {
       .returning();
 
     const first = await backfillBrainMemoryEvents(db);
-    const second = await backfillBrainMemoryEvents(db);
+    await backfillBrainMemoryEvents(db);
 
     expect(first).toBeGreaterThanOrEqual(1);
-    expect(second).toBe(0);
 
     const completedEvents = await db
       .select()
@@ -251,11 +644,9 @@ describe('backfillBrainMemoryEvents', () => {
   it('requeues completed memories for a one-time metadata replay', async () => {
     const completed = await makeCompletedRun();
     await saveBrainAgentSummary(db, completed.id, 'Keep this summary.');
-    const [event] = await db
-      .select()
-      .from(brainMemoryEvents)
-      .where(eq(brainMemoryEvents.runId, completed.id));
-    await markBrainMemoryEvent(db, event!.id, 'done');
+    const claimed = await claimPendingBrainMemoryEvents(db, 10);
+    const event = claimed.find((row) => row.runId === completed.id);
+    await settleBrainMemoryEvent(db, event!.id, event!.revision, 'done');
 
     await backfillBrainMemoryEvents(db, { requeueCompleted: true });
 
@@ -269,6 +660,27 @@ describe('backfillBrainMemoryEvents', () => {
       lastError: null,
       agentSummary: 'Keep this summary.',
     });
+  });
+});
+
+describe('getBrainMemoryEventSummary', () => {
+  it('separates pre-backfill history from current recording gaps', async () => {
+    await makeCompletedRun(new Date('2099-08-12T12:00:00Z'));
+    const recorded = await makeCompletedRun(new Date('2099-08-14T11:00:00Z'));
+    await makeCompletedRun(new Date('2101-08-14T12:00:00Z'));
+    await maybeEnqueueBrainMemoryEvent(db, recorded.id);
+    await upsertBrainSyncState(db, BRAIN_COLLECTOR_IDS.taskMemories, {
+      backfillCompletedAt: new Date('2100-01-01T00:00:00Z'),
+    });
+
+    const summary = await getBrainMemoryEventSummary(db);
+
+    // Other real-DB test files share this database and can leave unrelated
+    // legacy completed runs visible while Vitest executes them concurrently.
+    expect(summary.historicalCompletedRunsWithoutEvent).toBeGreaterThanOrEqual(
+      1,
+    );
+    expect(summary.recentCompletedRunsWithoutEvent).toBe(1);
   });
 });
 
@@ -380,4 +792,40 @@ describe('stranded claim recovery', () => {
   it('ignores an empty release', async () => {
     await expect(releaseBrainMemoryEvents(db, [])).resolves.toBeUndefined();
   });
+});
+
+runMemoryOutboxLifecycleContract('task memory', () => {
+  let runId: number | null = null;
+
+  return {
+    async createEvent() {
+      const run = await makeCompletedRun();
+      runId = run.id;
+      await maybeEnqueueBrainMemoryEvent(db, run.id);
+      const [event] = await db
+        .select()
+        .from(brainMemoryEvents)
+        .where(eq(brainMemoryEvents.runId, run.id));
+      return event!;
+    },
+    claim: () => claimPendingBrainMemoryEvents(db, 10),
+    release: (ids) => releaseBrainMemoryEvents(db, ids),
+    mark: (id, status, error) => markBrainMemoryEvent(db, id, status, error),
+    settle: (id, revision, outcome, error) =>
+      settleBrainMemoryEvent(db, id, revision, outcome, error),
+    revise: () => saveBrainAgentSummary(db, runId!, 'newer summary'),
+    async age(id) {
+      await db
+        .update(brainMemoryEvents)
+        .set({ updatedAt: sql`now() - interval '16 minutes'` })
+        .where(eq(brainMemoryEvents.id, id));
+    },
+    async read(id) {
+      const [row] = await db
+        .select()
+        .from(brainMemoryEvents)
+        .where(eq(brainMemoryEvents.id, id));
+      return row!;
+    },
+  };
 });

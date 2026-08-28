@@ -1,8 +1,8 @@
 import {
   db,
   eq,
+  fastAgentConversations,
   slackFastIntegrationCalls,
-  slackQuickAnswers,
   userFactory,
   users,
 } from '../../server';
@@ -24,18 +24,21 @@ describe('Slack fast integration call audit', () => {
   it('persists the executing call before recording its terminal result', async () => {
     const user = await userFactory.create();
     createdUserIds.push(user.id);
-    const [session] = await db
-      .insert(slackQuickAnswers)
+    const [conversation] = await db
+      .insert(fastAgentConversations)
       .values({
         userId: user.id,
-        slackChannel: 'C123',
-        slackThreadTs: '100.1',
+        surface: 'slack',
+        workspaceId: 'T123',
+        conversationId: '100.1',
+        currentReplyChannelId: 'C123',
+        currentReplyThreadId: '100.1',
       })
-      .returning({ id: slackQuickAnswers.id });
+      .returning({ id: fastAgentConversations.id });
 
-    expect(session).toBeDefined();
+    expect(conversation).toBeDefined();
     const started = await beginSlackFastIntegrationCall({
-      slackQuickAnswerId: session!.id,
+      fastAgentConversationId: conversation!.id,
       userId: user.id,
       slackTeamId: 'T123',
       slackChannel: 'C123',
@@ -51,7 +54,7 @@ describe('Slack fast integration call audit', () => {
       .from(slackFastIntegrationCalls)
       .where(eq(slackFastIntegrationCalls.id, started.id));
     expect(executing).toMatchObject({
-      slackQuickAnswerId: session!.id,
+      fastAgentConversationId: conversation!.id,
       userId: user.id,
       slackTeamId: 'T123',
       slackChannel: 'C123',

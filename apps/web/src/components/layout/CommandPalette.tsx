@@ -17,10 +17,12 @@ import {
   Settings,
   HelpCircle,
   Plus,
+  Zap,
 } from '@/components/system';
 
 import { WorkspaceBadge } from '@/components/sandbox/WorkspaceBadge';
 import { formatDistanceToNowCompact } from '@/lib/formatters';
+import { SETTINGS_PATHS } from '@/lib/settings';
 import { SUPPORT_MAILTO } from '@/lib/support';
 import { useRecentTasks } from '@/hooks/useRecentTasks';
 import { useUser } from '@/hooks/useUser';
@@ -79,8 +81,20 @@ function useShouldDisableCommandPaletteAutoFocus() {
 }
 
 type NavItem =
-  | { icon: typeof House; label: string; href: string; action?: undefined }
-  | { icon: typeof House; label: string; action: string; href?: undefined };
+  | {
+      icon: typeof House;
+      label: string;
+      href: string;
+      action?: undefined;
+      keywords?: string[];
+    }
+  | {
+      icon: typeof House;
+      label: string;
+      action: string;
+      href?: undefined;
+      keywords?: string[];
+    };
 
 function AuthorizedCommandPalette() {
   const { open, setOpen, commands } = useCommandPalette();
@@ -97,16 +111,30 @@ function AuthorizedCommandPalette() {
   const navItems = useMemo<NavItem[]>(() => {
     const items: NavItem[] = [
       { icon: Plus, label: 'New Task', href: '/' },
-      { icon: GalleryVerticalEnd, label: 'Tasks', href: '/tasks' },
+      {
+        icon: GalleryVerticalEnd,
+        label: 'Sessions',
+        href: '/sessions',
+      },
       { icon: Settings, label: 'Settings', href: '/settings' },
       { icon: HelpCircle, label: 'Help', action: 'contact-support' },
     ];
     if (user?.isAdmin) {
-      items.splice(2, 0, {
-        icon: ChartColumnIncreasing,
-        label: 'Analytics',
-        href: '/analytics',
-      });
+      items.splice(
+        2,
+        0,
+        {
+          icon: Zap,
+          label: 'Automations',
+          href: SETTINGS_PATHS.automations,
+          keywords: ['recurring', 'scheduled', 'prompts'],
+        },
+        {
+          icon: ChartColumnIncreasing,
+          label: 'Analytics',
+          href: '/analytics',
+        },
+      );
     }
     return items;
   }, [user?.isAdmin]);
@@ -133,6 +161,11 @@ function AuthorizedCommandPalette() {
       { enabled: open },
     ),
   );
+  const sessionSearchOptions = trpc.sessions.search.queryOptions(
+    { query: debouncedSearch, limit: SEARCH_TASKS_LIMIT },
+    { enabled: open },
+  );
+  const { data: sessionResults } = useQuery(sessionSearchOptions);
 
   // Promote recently-visited tasks to the top of the list
   const sortedTasks = useMemo(() => {
@@ -257,6 +290,23 @@ function AuthorizedCommandPalette() {
           </>
         )}
 
+        {(sessionResults?.sessions?.length ?? 0) > 0 ? (
+          <CommandGroup heading="Sessions">
+            {sessionResults!.sessions.map((session) => (
+              <CommandItem
+                key={session.id}
+                value={`${session.title}-${session.id}`}
+                onSelect={() => navigate(`/sessions/${session.id}`)}
+              >
+                <span className="truncate">{session.title}</span>
+                <span className="ml-auto text-xs text-muted-foreground">
+                  {session.executionCount} executions
+                </span>
+              </CommandItem>
+            ))}
+          </CommandGroup>
+        ) : null}
+
         {commandGroups.size > 0 &&
           Array.from(commandGroups.entries()).map(([group, cmds]) => (
             <CommandGroup key={group} heading={group}>
@@ -281,6 +331,7 @@ function AuthorizedCommandPalette() {
           {navItems.map((item) => (
             <CommandItem
               key={item.href ?? item.action}
+              keywords={item.keywords}
               onSelect={() => {
                 if (item.href) {
                   navigate(item.href);

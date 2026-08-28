@@ -151,10 +151,7 @@ describe('launchClaimedTeamsSuggestion', () => {
 
     expect(outcome).toEqual({ result: 'started', runId: 7 });
     expect(launchTask).toHaveBeenCalledWith(
-      expect.stringContaining('Start this suggested task: Fix the flaky test'),
-    );
-    expect(launchTask).toHaveBeenCalledWith(
-      expect.stringContaining('Target repository: acme/app'),
+      'Fix the flaky test\n\nThe retry loop never terminates.\n\nTarget repository: acme/app',
     );
     expect(finalizeWorkItemLaunchedMock).toHaveBeenCalledTimes(1);
     expect(finalizeWorkItemLaunchedMock).toHaveBeenCalledWith(
@@ -298,7 +295,7 @@ describe('launchClaimedTeamsSuggestion', () => {
       claimedAt: CLAIMED_AT,
     });
     expect(postMessage).toHaveBeenCalledWith(
-      'This deployment is read-only. New task launches are paused.',
+      'New tasks are paused due to a billing issue. Please check billing.',
     );
   });
 });

@@ -30,7 +30,7 @@ export function parseSlackPrReviewActionButtonValue(
  * Dismiss buttons. The caller appends the sticky thread footer.
  */
 export function buildSlackPrReviewActionBlocks(params: {
-  /** Summary text already converted to Slack mrkdwn link syntax. */
+  /** Summary text in standard Markdown for Slack's modern markdown block. */
   text: string;
   question: string;
   nonce: string;
@@ -39,11 +39,8 @@ export function buildSlackPrReviewActionBlocks(params: {
 
   return [
     {
-      type: 'section',
-      text: {
-        type: 'mrkdwn',
-        text: params.text,
-      },
+      type: 'markdown',
+      text: params.text,
     },
     {
       type: 'section',
@@ -99,18 +96,11 @@ const ACTIONS_BLOCK_ID = 'pr_review_action';
 export function buildResolvedSlackPrReviewMessageBlocks(
   originalBlocks: unknown[] | undefined | null,
   resolution: string,
-  resolutionType: 'context' | 'section' = 'context',
 ): unknown[] {
-  const resolutionBlock =
-    resolutionType === 'section'
-      ? {
-          type: 'section',
-          text: { type: 'mrkdwn', text: resolution },
-        }
-      : {
-          type: 'context',
-          elements: [{ type: 'mrkdwn', text: resolution }],
-        };
+  const resolutionBlock = {
+    type: 'context',
+    elements: [{ type: 'mrkdwn', text: `_${resolution}_` }],
+  };
 
   if (!originalBlocks || originalBlocks.length === 0) {
     return [resolutionBlock];

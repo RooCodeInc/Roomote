@@ -140,4 +140,21 @@ describe('implement-changes PR fixer appendix', () => {
       'When the pushed fixer result changed repository files, the workflow continued in the current task/session by handing that shipped result to `capture-visual-proof`, kept browser tooling contained inside that delegated proof path, and carried the delegated proof result or blocker honestly into PR metadata refresh.',
     );
   });
+
+  it('prevents redundant manual review requests after fixer pushes', () => {
+    const thisFilePath = fileURLToPath(import.meta.url);
+    const thisDirPath = path.dirname(thisFilePath);
+    const skillPath = path.resolve(
+      thisDirPath,
+      '../skills/standard/fix-pr/SKILL.md',
+    );
+    const skillContent = fs.readFileSync(skillPath, 'utf8');
+
+    expect(skillContent).toContain(
+      'After pushing fixes, do not post an `@roomote` self-mention or manually request a fresh review because eligible pushes trigger automatic review through source-control synchronize handling.',
+    );
+    expect(skillContent).toContain(
+      'The only exception is when the user explicitly asks for a manual review request and automatic review-on-commit is unavailable.',
+    );
+  });
 });

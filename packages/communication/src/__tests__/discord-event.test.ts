@@ -343,7 +343,7 @@ describe('Discord Gateway event normalization', () => {
     expect(discordEventToQueuedCommunicationMessage(event)).toBeNull();
   });
 
-  it('parses fast commands without queueing them as ordinary messages', () => {
+  it('does not treat removed fast interactions as task entry', () => {
     const event = parse({
       op: 0,
       t: 'INTERACTION_CREATE',
@@ -354,18 +354,11 @@ describe('Discord Gateway event normalization', () => {
         token: 'token',
         channel_id: 'channel-1',
         user: { id: 'user-1', username: 'matt' },
-        data: {
-          name: 'FAST',
-          options: [{ name: 'request', type: 3, value: '  Summarize this  ' }],
-        },
+        data: { name: 'FAST' },
       },
     });
 
-    expect(getDiscordInteractionCommand(event)).toEqual({
-      name: 'fast',
-      request: 'Summarize this',
-    });
-    expect(isDiscordTaskEntryEvent(event)).toBe(true);
+    expect(isDiscordTaskEntryEvent(event)).toBe(false);
     expect(discordEventToQueuedCommunicationMessage(event)).toBeNull();
   });
 });

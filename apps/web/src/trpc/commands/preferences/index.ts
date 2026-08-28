@@ -3,7 +3,6 @@ import { headers } from 'next/headers';
 
 import type { UserAuthSuccess } from '@/types';
 import { getAuth } from '@/lib/server/auth';
-import { Env } from '@/lib/server/env';
 import { userHasCredentialAccount } from '@/lib/server/user-management';
 import {
   DEFAULT_PERSONAL_PREFERENCES,
@@ -37,9 +36,6 @@ function normalizePersonalPreferences(
       typeof metadata.narration_mode === 'boolean'
         ? metadata.narration_mode
         : DEFAULT_PERSONAL_PREFERENCES.narrationMode,
-    communicationsFastModeDefault:
-      Env.R_COMMUNICATIONS_FAST_MODE_SETTING_ENABLED === true &&
-      metadata.communications_fast_mode_default === true,
   };
 }
 
@@ -66,8 +62,6 @@ export async function getPersonalAccountCapabilitiesCommand(
   return {
     canChangePassword: hasCredentialAccount,
     canSetPassword: !hasCredentialAccount,
-    communicationsFastModeDefaultAvailable:
-      Env.R_COMMUNICATIONS_FAST_MODE_SETTING_ENABLED === true,
   };
 }
 
@@ -119,15 +113,6 @@ export async function updatePersonalPreferencesCommand(
 ): Promise<PersonalPreferences> {
   const nextMetadataRecord: UserMetadataRecord = {};
 
-  if (
-    input.communicationsFastModeDefault !== undefined &&
-    Env.R_COMMUNICATIONS_FAST_MODE_SETTING_ENABLED !== true
-  ) {
-    throw new Error(
-      'The communications fast mode default setting is not enabled for this deployment.',
-    );
-  }
-
   if (input.colorTheme !== undefined) {
     nextMetadataRecord.color_theme = input.colorTheme;
   }
@@ -138,11 +123,6 @@ export async function updatePersonalPreferencesCommand(
 
   if (input.narrationMode !== undefined) {
     nextMetadataRecord.narration_mode = input.narrationMode;
-  }
-
-  if (input.communicationsFastModeDefault !== undefined) {
-    nextMetadataRecord.communications_fast_mode_default =
-      input.communicationsFastModeDefault;
   }
 
   if (Object.keys(nextMetadataRecord).length === 0) {

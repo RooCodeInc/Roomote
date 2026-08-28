@@ -207,6 +207,7 @@ function scheduleAdoPullRequestFactSync(
     pullRequest: {
       number: pullRequest.pullRequestId,
       title: pullRequest.title,
+      body: pullRequest.description ?? null,
       url: getAdoPullRequestUrl({
         resourceContainers: payload.resourceContainers,
         pullRequest,
@@ -323,6 +324,19 @@ export async function handleAdoPullRequest(
     await notifyTerminalPullRequestThreads(payload, repoFullName, 'merged');
 
     return { status: 'ok' };
+  }
+
+  if (
+    pullRequest.status === 'active' &&
+    (payload.eventType === 'git.pullrequest.created' ||
+      payload.eventType === 'git.pullrequest.updated')
+  ) {
+    await updateTaskPrStatus(
+      'ado',
+      repoFullName,
+      pullRequest.pullRequestId,
+      pullRequest.isDraft ? 'draft' : 'open',
+    );
   }
 
   const taskType = getReviewTaskType(payload, context);

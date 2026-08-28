@@ -14,6 +14,7 @@ import {
   db,
   eq,
   getDeploymentGitHubRoomoteMentionEnabled,
+  getSessionForTask,
   resolveTelegramRuntimeCredentials,
   tasks,
   taskRuns,
@@ -25,12 +26,14 @@ import {
 import {
   buildPullRequestUrl,
   getSourceControlProviderLabel,
-  findPrBodyAttributionLine,
+  findPrBodyAttributionMarkers,
   preservePrBodyAttribution,
   getCommunicationProviderFromTaskPayload,
   getCommunicationGuildIdFromTaskPayload,
   getCommunicationTenantIdFromTaskPayload,
   getCommunicationChannelFromTaskPayload,
+  getCommunicationTeamDomainFromTaskPayload,
+  getCommunicationTeamIdFromTaskPayload,
   getCommunicationThreadIdFromTaskPayload,
   getCommunicationMessageIdFromTaskPayload,
   getSlackChannelFromTaskPayload,
@@ -258,6 +261,16 @@ export async function createOrUpdateSourceControlPullRequestForTaskRun({
   const communicationProvider = getCommunicationProviderFromTaskPayload(
     taskRun.payload,
   );
+  const inheritedChatProvider =
+    payloadRecord.communicationContextInherited === true
+      ? communicationProvider
+      : null;
+  const communicationChannelId = getCommunicationChannelFromTaskPayload(
+    taskRun.payload,
+  );
+  const communicationThreadId = getCommunicationThreadIdFromTaskPayload(
+    taskRun.payload,
+  );
   const telegramBotUsername =
     communicationProvider === 'telegram'
       ? (await resolveTelegramRuntimeCredentials()).botUsername
@@ -265,34 +278,49 @@ export async function createOrUpdateSourceControlPullRequestForTaskRun({
   const canonicalAttribution = displayName
     ? { ...attribution, displayName }
     : DEFAULT_ROOMOTE_COMMIT_AUTHOR;
+  const taskUrl =
+    (await buildPrAttributionFastSessionUrl(taskRun)) ??
+    buildPrAttributionTaskUrl(taskRun);
   const attributionLine = getPrBodyAttributionLine({
     attribution: canonicalAttribution,
-    taskUrl: buildPrAttributionTaskUrl(taskRun),
+    taskUrl,
     taskSurface:
-      task?.surface === 'system' || task?.surface === 'api'
+      inheritedChatProvider ??
+      (task?.surface === 'system' || task?.surface === 'api'
         ? 'web'
-        : (task?.surface ?? communicationProvider ?? 'web'),
+        : (task?.surface ?? communicationProvider ?? 'web')),
     slackTeamDomain:
-      getSlackTeamDomainFromTaskPayload(taskRun.payload) ?? undefined,
-    slackTeamId: getSlackTeamIdFromTaskPayload(taskRun.payload) ?? undefined,
+      getSlackTeamDomainFromTaskPayload(taskRun.payload) ??
+      (communicationProvider === 'slack'
+        ? (getCommunicationTeamDomainFromTaskPayload(taskRun.payload) ??
+          undefined)
+        : undefined),
+    slackTeamId:
+      getSlackTeamIdFromTaskPayload(taskRun.payload) ??
+      (communicationProvider === 'slack'
+        ? (getCommunicationTeamIdFromTaskPayload(taskRun.payload) ?? undefined)
+        : undefined),
     slackConversationUrl:
       getSlackConversationUrlFromTaskPayload(taskRun.payload) ?? undefined,
     slackChannel:
       getSlackChannelFromTaskPayload(taskRun.payload) ??
       task?.slackChannelId ??
-      undefined,
+      (communicationProvider === 'slack'
+        ? (communicationChannelId ?? undefined)
+        : undefined),
     slackThreadTs:
       getSlackThreadTsFromTaskPayload(taskRun.payload) ??
       task?.slackThreadTs ??
-      undefined,
+      (communicationProvider === 'slack'
+        ? (communicationThreadId ?? undefined)
+        : undefined),
     telegramChatId:
       communicationProvider === 'telegram'
-        ? (getCommunicationChannelFromTaskPayload(taskRun.payload) ?? undefined)
+        ? (communicationChannelId ?? undefined)
         : undefined,
     telegramThreadId:
       communicationProvider === 'telegram'
-        ? (getCommunicationThreadIdFromTaskPayload(taskRun.payload) ??
-          undefined)
+        ? (communicationThreadId ?? undefined)
         : undefined,
     telegramMessageId:
       communicationProvider === 'telegram'
@@ -302,7 +330,7 @@ export async function createOrUpdateSourceControlPullRequestForTaskRun({
     telegramBotUsername: telegramBotUsername ?? undefined,
     teamsConversationId:
       communicationProvider === 'teams'
-        ? (getCommunicationChannelFromTaskPayload(taskRun.payload) ?? undefined)
+        ? (communicationChannelId ?? undefined)
         : undefined,
     teamsMessageId:
       communicationProvider === 'teams'
@@ -316,7 +344,7 @@ export async function createOrUpdateSourceControlPullRequestForTaskRun({
       getCommunicationGuildIdFromTaskPayload(taskRun.payload) ?? undefined,
     discordChannelId:
       communicationProvider === 'discord'
-        ? (getCommunicationChannelFromTaskPayload(taskRun.payload) ?? undefined)
+        ? (communicationThreadId ?? communicationChannelId ?? undefined)
         : undefined,
     discordMessageId:
       communicationProvider === 'discord'
@@ -406,6 +434,9 @@ export async function createOrUpdateSourceControlPullRequestForTaskRun({
   // attempt finds this PR, updates it, and re-enters the deduplicated notifier.
   await notifyFastAgentParentOnPullRequestOpened({
     run: taskRun,
+    ...(input.body.trim()
+      ? { untrustedTaskGeneratedContext: input.body.trim() }
+      : {}),
     pullRequest: {
       provider: result.provider,
       host: repository.host,
@@ -552,7 +583,7 @@ async function createOrUpdateGitHubPullRequest({
     type: 'installationId',
     installationId: repository.installationId,
   });
-  const octokit = getOctokit(token);
+  const octokit = getOctokit(token, { retryRateLimits: true });
 
   const { data: existingPullRequests } = await octokit.rest.pulls.list({
     owner,
@@ -662,23 +693,57 @@ function buildPrAttributionTaskUrl(taskRun: TaskRun): string {
   return url.toString();
 }
 
+async function buildPrAttributionFastSessionUrl(
+  taskRun: TaskRun,
+): Promise<string | undefined> {
+  const fastAgentSessionId = getPayloadRecord(
+    taskRun.payload,
+  ).fastAgentSessionId;
+  if (typeof fastAgentSessionId !== 'string') {
+    return undefined;
+  }
+
+  const session = await getSessionForTask(db, taskRun.taskId);
+  if (
+    session?.visibility !== 'visible' ||
+    session.fastConversationId !== fastAgentSessionId
+  ) {
+    return undefined;
+  }
+
+  const url = new URL(`/sessions/${session.id}`, Env.R_APP_URL);
+  url.searchParams.set('utm_source', 'github-comment');
+  url.searchParams.set('utm_medium', 'link');
+  url.searchParams.set('utm_campaign', taskRun.payloadKind);
+  return url.toString();
+}
+
 function prependCanonicalPrAttribution(body: string, line: string): string {
-  const firstLineEnd = body.indexOf('\n');
-  const firstLine = body.slice(
+  let remainingBody = body.trimStart();
+
+  while (remainingBody) {
+    const markers = findPrBodyAttributionMarkers(remainingBody);
+    if (!markers || remainingBody.slice(0, markers.lineStart).trim()) {
+      break;
+    }
+
+    remainingBody = remainingBody.slice(markers.lineEnd).trimStart();
+  }
+
+  const firstLineEnd = remainingBody.indexOf('\n');
+  const firstLine = remainingBody.slice(
     0,
-    firstLineEnd === -1 ? body.length : firstLineEnd,
+    firstLineEnd === -1 ? remainingBody.length : firstLineEnd,
   );
-  const normalizedFirstLine = firstLine.trimStart();
-  const hasLeadingAttribution =
-    findPrBodyAttributionLine(firstLine) !== null ||
+  if (
     /^> (?:Opened on behalf of .+\.|Created by Roomote\.) (?:Follow up by mentioning @|\[View the task\]\().+$/u.test(
-      normalizedFirstLine,
-    );
-  const remainingBody = hasLeadingAttribution
-    ? body
-        .slice(firstLineEnd === -1 ? body.length : firstLineEnd + 1)
-        .trimStart()
-    : body.trimStart();
+      firstLine.trimStart(),
+    )
+  ) {
+    remainingBody = remainingBody
+      .slice(firstLineEnd === -1 ? remainingBody.length : firstLineEnd + 1)
+      .trimStart();
+  }
 
   return remainingBody ? `${line}\n\n${remainingBody}` : line;
 }
@@ -830,6 +895,17 @@ async function createOrUpdateGiteaPullRequest({
       : createDraft,
     'gitea',
   );
+  const assignees =
+    input.assignees.length > 0
+      ? [
+          ...new Set([
+            ...(existing?.assignees
+              ?.map((assignee) => assignee.login)
+              .filter((login): login is string => Boolean(login)) ?? []),
+            ...input.assignees,
+          ]),
+        ]
+      : [];
   const pullRequest = existing
     ? await requestJson({
         fetchImpl,
@@ -842,7 +918,11 @@ async function createOrUpdateGiteaPullRequest({
           {},
         ),
         tokenHeader: { name: 'Authorization', value: `token ${token}` },
-        body: { title, body: input.body },
+        body: {
+          title,
+          body: input.body,
+          ...(assignees.length > 0 ? { assignees } : {}),
+        },
         schema: giteaPullRequestSchema,
       })
     : await requestJson({
@@ -861,7 +941,7 @@ async function createOrUpdateGiteaPullRequest({
           head: input.sourceBranch,
           title,
           body: input.body,
-          ...(input.assignees.length > 0 ? { assignees: input.assignees } : {}),
+          ...(assignees.length > 0 ? { assignees } : {}),
         },
         schema: giteaPullRequestSchema,
       });

@@ -23,7 +23,10 @@ access list in Notion whenever the page hierarchy changes.
    create an internal integration for Roomote.
 2. In the integration's **Configuration** tab, enable only the capabilities
    Roomote should have: read, update, insert, and comment access are controlled
-   independently by Notion.
+   independently by Notion. If Memory should link Notion identities to
+   Roomote members, also grant the user-information capability that includes
+   email addresses; without it, Memory keeps stable but unlinked Notion
+   user references.
 3. In Notion, share only the approved pages and data sources with the new
    integration. You can manage this from the integration's **Content access**
    settings or a page's **Connections** menu.
@@ -33,13 +36,21 @@ access list in Notion whenever the page hierarchy changes.
 
 The secret is encrypted server-side and is never sent to task sandboxes.
 
-When the Brain is enabled, Roomote also backfills the pages shared with this
+When Memory is enabled, Roomote also backfills the pages shared with this
 integration and keeps their Markdown snapshots current. Notion pages are
 stored under the `notion/` namespace. New and edited pages are picked up on
-regular Brain collector ticks, and a daily full sweep discovers older pages
+regular Memory collector ticks, and a daily full sweep discovers older pages
 that were newly shared without being edited. The same sweep replaces pages
 that are no longer shared with unavailable tombstones, so their former
-content is no longer retained in Brain search results.
+content is no longer retained in Memory search results.
+
+When the integration's capabilities allow listing users, Memory also
+refreshes the workspace user directory once a day to link page authors,
+people properties, and mentions to people cards. Verified email addresses
+are used only to match Notion users to Roomote members and are never copied
+into Memory pages. Users removed from the workspace have their Notion
+identity cards marked deleted on the next daily refresh, and revoking the
+user-information capability retracts the whole directory the same way.
 
 Roomote agents can read and update page content as enhanced Markdown, move
 regular pages beneath another page or into a data source, and create blocks at
@@ -54,8 +65,10 @@ a block's ID while recreating it in another position is also unsupported.
 Roomote's deployment-wide integration is not a proxy for Notion's hosted MCP.
 Hosted-only features such as connected-source search, attachment helpers,
 database and view creation, page duplication, folders, meeting-note queries,
-and workspace team or user lookup are not currently exposed. Roomote instead
-provides the direct public-API operations that work with a restricted internal
+and workspace team or user lookup are not currently exposed as agent tools.
+(Memory's identity linking reads the workspace user directory directly
+through the public API, as described above.) Roomote instead provides the
+direct public-API operations that work with a restricted internal
 integration token.
 
 <Note>

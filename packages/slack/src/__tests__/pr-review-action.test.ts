@@ -4,6 +4,19 @@ import {
 } from '../pr-review-action';
 
 describe('PR review action blocks', () => {
+  it('renders the review summary as modern Slack markdown', () => {
+    const blocks = buildSlackPrReviewActionBlocks({
+      text: 'Review [PR #42](https://github.com/owner/repo/pull/42)',
+      question: 'Should I resolve these?',
+      nonce: 'nonce-1',
+    });
+
+    expect(blocks[0]).toEqual({
+      type: 'markdown',
+      text: 'Review [PR #42](https://github.com/owner/repo/pull/42)',
+    });
+  });
+
   it('uses neutral styling for every response button', () => {
     const blocks = buildSlackPrReviewActionBlocks({
       text: 'Review summary',
@@ -28,17 +41,16 @@ describe('PR review action blocks', () => {
     );
   });
 
-  it('can render a resolution as a regular message', () => {
+  it('renders a resolution as an italicized context note', () => {
     expect(
       buildResolvedSlackPrReviewMessageBlocks(
         [{ type: 'actions', block_id: 'pr_review_action', elements: [] }],
         'Resolution',
-        'section',
       ),
     ).toEqual([
       {
-        type: 'section',
-        text: { type: 'mrkdwn', text: 'Resolution' },
+        type: 'context',
+        elements: [{ type: 'mrkdwn', text: '_Resolution_' }],
       },
     ]);
   });

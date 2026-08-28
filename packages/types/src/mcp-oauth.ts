@@ -343,6 +343,8 @@ export type McpIntegrationServerMode =
   | 'native'
   | 'credential_only';
 
+export type McpIntegrationCategory = 'memory';
+
 export type McpIntegrationOAuthClientEnv = {
   clientIdEnv: string;
   clientSecretEnv?: string;
@@ -367,6 +369,8 @@ export type McpIntegration = {
   url?: string;
   description: string;
   icon: string;
+  /** Optional behavioral category used for shared task guidance. */
+  category?: McpIntegrationCategory;
   /**
    * Optional agent-facing usage guidance. When this integration's MCP server
    * is attached to a task, the worker injects this text into the agent's
@@ -412,6 +416,16 @@ export const RESEND_DEFAULT_DISABLED_TOOL_NAMES = [
   'create-webhook',
   'update-webhook',
 ] as const;
+
+/**
+ * Path prefixes of the API-hosted MCP proxy mounts. URL producers build proxy
+ * URLs from these, and consumers (e.g. the Fast integration broker) use the
+ * same constants to recognize deployment-proxied MCP endpoints — keep both
+ * sides on these rather than string literals so a mount move cannot silently
+ * break the recognition.
+ */
+export const MCP_INTEGRATION_PROXY_PATH_PREFIX = '/api/mcp/';
+export const MCP_ROUTING_PROXY_PATH_PREFIX = '/api/mcp-routing/';
 
 export const MCP_INTEGRATIONS: McpIntegration[] = [
   {
@@ -628,25 +642,8 @@ export const MCP_INTEGRATIONS: McpIntegration[] = [
     url: 'https://mcp.supermemory.ai/mcp',
     description: `Enable Supermemory so this deployment can save and recall shared memories across ${PRODUCT_NAME} tasks.`,
     icon: 'supermemory',
+    category: 'memory',
     connectionScope: 'deployment',
-    instructions: [
-      'The Supermemory MCP tools share one persistent memory store across every task in this deployment.',
-      '',
-      'Recall early: when starting substantive work, use the Supermemory recall tool to check for relevant context such as team preferences, repository conventions, and decisions from earlier tasks before assuming that context does not exist. Recall is read-only and cheap; prefer one recall pass near the start of a task over skipping it.',
-      '',
-      'Save durable knowledge proactively: prefer writing useful shared memories when they appear. Do not wait for the user to ask you to save. Supermemory is designed to surface the relevant memories later, so missing durable context is worse than saving a few concise reusable facts.',
-      '',
-      'Save when you learn something future tasks should inherit, for example:',
-      '- user or team preferences and durable corrections (for example "always open draft PRs")',
-      '- deployment-wide conventions or workflow norms',
-      '- lasting product or architecture decisions with rationale that future tasks must respect',
-      '- recurring operational gotchas that cost real effort and will matter again',
-      '- stable "how we do X here" guidance that is not already encoded in the repository',
-      '',
-      'When such knowledge appears mid-task, save it promptly as a short standalone fact. Near task closeout, do one final memory check and save any remaining durable findings from this task. Prefer concise reusable wording over conversation dumps.',
-      '',
-      'Never save task status or progress notes, code snippets or file contents, secrets or credentials, private one-task details, or anything easily rederivable from the repository. Do not dump transcripts or large blobs.',
-    ].join('\n'),
   },
   {
     id: 'x',

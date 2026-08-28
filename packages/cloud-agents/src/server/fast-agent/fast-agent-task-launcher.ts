@@ -1,73 +1,159 @@
 import {
   ALL_REPOSITORIES,
   buildFastAgentChildTaskMetadata,
+  buildSlackThreadPermalink,
   TaskPayloadKind,
-  type FastAgentSurface,
   type StandardTask,
+  type TaskInitiator,
+  type TaskSurface,
+  type TaskTrigger,
 } from '@roomote/types';
 
 import { enqueueTask } from '../task-run-queue';
 import { getTaskUrl } from '../task-url';
 import type { LaunchFastAgentTask } from './fast-agent-conversation';
 
-export function createFastAgentTaskLauncher(params: {
-  userId: string;
-  surface: FastAgentSurface;
-  taskUrlCampaign: string;
-  buildTask: (input: {
-    prompt: string;
-    environmentId: string | null;
-    parentSessionId: string;
-  }) => StandardTask | Promise<StandardTask>;
-}): LaunchFastAgentTask {
-  return async ({ prompt, environmentId, parentSessionId, postKickoff }) => {
-    const task = await params.buildTask({
+export type FastAgentTaskLaunchHooks = {
+  /**
+   * Runs inside the launch gate, after the parent kickoff has been posted and
+   * before the child becomes runnable. Throwing cancels the launch.
+   */
+  afterKickoff?: (
+    taskRun: { id: number; taskId: string },
+    context: { prompt: string; taskUrl: string },
+  ) => Promise<void>;
+  /** Runs when queueing fails after afterKickoff completed. */
+  onQueueFailure?: (taskRun: { id: number; taskId: string }) => Promise<void>;
+  /** The launcher renders the task link itself (for example on a card), so
+   * the parent kickoff message should not include one. */
+  rendersTaskLink?: boolean;
+};
+
+export function createFastAgentTaskLauncher(
+  params: {
+    userId: string;
+    surface: TaskSurface;
+    initiator?: TaskInitiator;
+    trigger?: TaskTrigger;
+    taskUrlCampaign: string;
+    buildTask: (input: {
+      prompt: string;
+      environmentId: string | null;
+      model?: string | null;
+      parentSessionId: string;
+    }) => StandardTask | Promise<StandardTask>;
+  } & FastAgentTaskLaunchHooks,
+): LaunchFastAgentTask {
+  return async ({
+    prompt,
+    images,
+    environmentId,
+    model,
+    parentSessionId,
+    postKickoff,
+  }) => {
+    const builtTask = await params.buildTask({
       prompt,
       environmentId,
+      model,
       parentSessionId,
     });
+    const task = images?.length
+      ? {
+          ...builtTask,
+          payload: {
+            ...builtTask.payload,
+            images,
+          },
+        }
+      : builtTask;
     let taskUrl: string | undefined;
+    let preparedTaskRun: { id: number; taskId: string } | undefined;
+
     const launch = await enqueueTask(
       {
         task,
-        initiator: { kind: 'user', userId: params.userId },
+        initiator: params.initiator ?? { kind: 'user', userId: params.userId },
         workflow: 'standard',
         surface: params.surface,
-        trigger: 'message',
+        trigger: params.trigger ?? 'message',
       },
       {
         beforeEnqueue: async (taskRun) => {
-          taskUrl = getTaskUrl({
+          const resolvedTaskUrl = getTaskUrl({
             taskId: taskRun.taskId,
             utm: {
               source: params.surface,
               campaign: params.taskUrlCampaign,
             },
           });
-          await postKickoff({ taskId: taskRun.taskId, taskUrl });
+          taskUrl = resolvedTaskUrl;
+          await postKickoff({
+            taskId: taskRun.taskId,
+            taskUrl,
+            ...(params.rendersTaskLink ? { taskLinkRendered: true } : {}),
+          });
+          await params.afterKickoff?.(
+            { id: taskRun.id, taskId: taskRun.taskId },
+            { prompt, taskUrl: resolvedTaskUrl },
+          );
+          preparedTaskRun = { id: taskRun.id, taskId: taskRun.taskId };
         },
       },
-    );
+    ).catch(async (error: unknown) => {
+      if (preparedTaskRun && params.onQueueFailure) {
+        try {
+          await params.onQueueFailure(preparedTaskRun);
+        } catch (settleError) {
+          console.error(
+            `[Fast Agent] Failed to settle task ${preparedTaskRun.taskId} after queueing failed: ${settleError instanceof Error ? settleError.message : String(settleError)}`,
+          );
+        }
+      }
+      throw error;
+    });
 
-    return launch.taskId
-      ? { success: true, taskId: launch.taskId, taskUrl }
-      : { success: false, error: 'The task launch did not return a task ID.' };
+    if (!launch.taskId) {
+      return {
+        success: false,
+        error: 'The task launch did not return a task ID.',
+      };
+    }
+
+    return { success: true, taskId: launch.taskId, taskUrl };
   };
 }
 
-export function createFastAgentSlackTaskLauncher(params: {
+export type FastAgentSlackTaskLauncherParams = {
   userId: string;
   teamId: string;
   teamDomain?: string;
   channelId: string;
   threadTs: string;
   messageId?: string;
-}): LaunchFastAgentTask {
+  /** Opt the child into the native Slack task card in the parent thread. */
+  liveTaskStream?: boolean;
+} & FastAgentTaskLaunchHooks;
+
+export function createFastAgentSlackTaskLauncher(
+  params: FastAgentSlackTaskLauncherParams,
+): LaunchFastAgentTask {
+  const slackConversationUrl = buildSlackThreadPermalink({
+    slackWorkspaceDomain: params.teamDomain,
+    slackTeamId: params.teamId,
+    slackChannelId: params.channelId,
+    threadTs: params.threadTs,
+    messageTs: params.messageId,
+  });
+
   return createFastAgentTaskLauncher({
     userId: params.userId,
     surface: 'slack',
     taskUrlCampaign: 'fast-delegation',
-    buildTask: ({ prompt, environmentId, parentSessionId }) => ({
+    afterKickoff: params.afterKickoff,
+    onQueueFailure: params.onQueueFailure,
+    rendersTaskLink: params.rendersTaskLink,
+    buildTask: ({ prompt, environmentId, model, parentSessionId }) => ({
       type: TaskPayloadKind.StandardTask,
       payload: {
         repo: ALL_REPOSITORIES,
@@ -82,6 +168,7 @@ export function createFastAgentSlackTaskLauncher(params: {
         ...(params.messageId
           ? { communicationMessageId: params.messageId }
           : {}),
+        ...(slackConversationUrl ? { slackConversationUrl } : {}),
         ...buildFastAgentChildTaskMetadata({
           sessionId: parentSessionId,
           conversation: {
@@ -94,8 +181,45 @@ export function createFastAgentSlackTaskLauncher(params: {
             },
           },
         }),
+        ...(params.liveTaskStream ? { liveTaskStream: true } : {}),
         ...(environmentId && environmentId !== ALL_REPOSITORIES
           ? { environmentId }
+          : {}),
+        ...(model
+          ? { harnessModelOverrides: { 'opencode-server': model } }
+          : {}),
+      },
+    }),
+  });
+}
+
+export function createFastAgentWebTaskLauncher(params: {
+  userId: string;
+  conversation: {
+    surface: 'web' | 'automation';
+    workspaceId: string;
+    conversationId: string;
+  };
+}): LaunchFastAgentTask {
+  return createFastAgentTaskLauncher({
+    userId: params.userId,
+    surface: 'web',
+    taskUrlCampaign: 'fast-delegation',
+    rendersTaskLink: true,
+    buildTask: ({ prompt, environmentId, model, parentSessionId }) => ({
+      type: TaskPayloadKind.StandardTask,
+      payload: {
+        repo: ALL_REPOSITORIES,
+        description: prompt,
+        ...buildFastAgentChildTaskMetadata({
+          sessionId: parentSessionId,
+          conversation: params.conversation,
+        }),
+        ...(environmentId && environmentId !== ALL_REPOSITORIES
+          ? { environmentId }
+          : {}),
+        ...(model
+          ? { harnessModelOverrides: { 'opencode-server': model } }
           : {}),
       },
     }),

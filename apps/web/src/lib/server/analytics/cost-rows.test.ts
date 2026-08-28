@@ -2,6 +2,8 @@ import {
   db,
   environmentFactory,
   environments,
+  fastAgentConversations,
+  fastAgentMessages,
   inArray,
   llmUsageEvents,
   runFactory,
@@ -19,6 +21,8 @@ import {
   aggregateCostAnalyticsRowsByTask,
   getCostAnalyticsRows,
 } from './cost-rows';
+import { buildChartData } from './chart';
+import { applyDimensionFilters, buildFilterOptions } from './dimensions';
 import type { AnalyticsRow } from './types';
 
 describe('getCostAnalyticsRows', () => {
@@ -26,6 +30,7 @@ describe('getCostAnalyticsRows', () => {
   const taskIds: string[] = [];
   const environmentIds: string[] = [];
   const userIds: string[] = [];
+  const fastSessionIds: string[] = [];
 
   afterEach(async () => {
     if (usageEventIds.length > 0) {
@@ -37,6 +42,12 @@ describe('getCostAnalyticsRows', () => {
     if (taskIds.length > 0) {
       await db.delete(tasks).where(inArray(tasks.id, taskIds));
       taskIds.length = 0;
+    }
+    if (fastSessionIds.length > 0) {
+      await db
+        .delete(fastAgentConversations)
+        .where(inArray(fastAgentConversations.id, fastSessionIds));
+      fastSessionIds.length = 0;
     }
     if (environmentIds.length > 0) {
       await db
@@ -114,6 +125,7 @@ describe('getCostAnalyticsRows', () => {
       .values([
         {
           eventKey: `cost-analytics-task-${crypto.randomUUID()}`,
+          source: 'task_title_generation',
           costSource: 'missing',
           taskId: task.id,
           runId: run.id,
@@ -140,7 +152,253 @@ describe('getCostAnalyticsRows', () => {
     const row = rows.find((candidate) => candidate.id === usageEvents[0]!.id);
 
     expect(row?.dimensions.project?.label).toBe(environment.name);
+    expect(row?.dimensions.source).toEqual({
+      key: 'task_title_generation',
+      label: 'task_title_generation',
+    });
+    expect(row?.details.values.source).toBe('task_title_generation');
     expect(row?.meta?.prKeys).toEqual(['github:github.com:roomote/test#42']);
+  });
+
+  it('includes Fast parent and advisor/judge usage in Costs', async () => {
+    const user = await userFactory.create();
+    userIds.push(user.id);
+    const insertedEvents = await db
+      .insert(llmUsageEvents)
+      .values(
+        ['build', 'advisor', 'judge'].map((agent, index) => ({
+          eventKey: `fast-cost-analytics-${agent}-${crypto.randomUUID()}`,
+          source: 'fast_agent',
+          userId: user.id,
+          harnessSessionId: `fast-session-${agent}`,
+          messageId: `fast-message-${agent}`,
+          providerId: 'openrouter',
+          modelId: 'openai/gpt-5.4',
+          agent,
+          costSource: 'opencode_message' as const,
+          costMicroUsd: (index + 1) * 1_000,
+          messageCompletedAt: new Date(`2026-07-15T12:00:0${index}.000Z`),
+        })),
+      )
+      .returning({ id: llmUsageEvents.id });
+    usageEventIds.push(...insertedEvents.map((event) => event.id));
+
+    const rows = await getCostAnalyticsRows(
+      {} as UserAuthSuccess,
+      'all',
+      new Date('2026-07-16T16:00:00.000Z'),
+    );
+    const fastRows = rows.filter((row) =>
+      insertedEvents.some((event) => event.id === row.id),
+    );
+
+    expect(fastRows).toHaveLength(3);
+    expect(
+      fastRows.map((row) => row.value).reduce((sum, cost) => sum + cost),
+    ).toBe(0.006);
+    expect(fastRows).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          dimensions: expect.objectContaining({
+            source: { key: 'fast_agent', label: 'fast_agent' },
+            taskType: {
+              key: 'Non-task inference',
+              label: 'Non-task inference',
+            },
+            user: expect.objectContaining({ key: `user:${user.id}` }),
+          }),
+        }),
+      ]),
+    );
+  });
+
+  it('classifies Session and Memories costs without double counting task usage', async () => {
+    const user = await userFactory.create();
+    userIds.push(user.id);
+    const currentNativeSessionId = `native-current-${crypto.randomUUID()}`;
+    const previousNativeSessionId = `native-previous-${crypto.randomUUID()}`;
+    const [session] = await db
+      .insert(fastAgentConversations)
+      .values({
+        userId: user.id,
+        surface: 'web',
+        workspaceId: `workspace-${crypto.randomUUID()}`,
+        conversationId: `conversation-${crypto.randomUUID()}`,
+        openCodeSessionId: currentNativeSessionId,
+        title: 'Session cost attribution',
+      })
+      .returning();
+    fastSessionIds.push(session!.id);
+    await db.insert(fastAgentMessages).values([
+      {
+        conversationId: session!.id,
+        eventId: `event-${crypto.randomUUID()}`,
+        turnId: 'turn-1',
+        turnSeq: 0,
+        ts: 1,
+        eventType: 'roomote_runtime.assistant_message',
+        role: 'assistant',
+        nativeSessionId: previousNativeSessionId,
+      },
+      {
+        conversationId: session!.id,
+        eventId: `event-${crypto.randomUUID()}`,
+        turnId: 'turn-1',
+        turnSeq: 1,
+        ts: 2,
+        eventType: 'roomote_runtime.assistant_message',
+        role: 'assistant',
+        nativeSessionId: previousNativeSessionId,
+      },
+    ]);
+    const task = await taskFactory.create({ initiatorUserId: user.id });
+    taskIds.push(task.id);
+    const run = await runFactory.create({
+      taskId: task.id,
+      actingUserId: user.id,
+      payloadKind: TaskPayloadKind.StandardTask,
+      payload: {
+        repo: 'roomote/test',
+        description: 'Delegated Session task',
+        fastAgentSessionId: session!.id,
+      },
+    });
+    const insertedEvents = await db
+      .insert(llmUsageEvents)
+      .values([
+        {
+          eventKey: `fast-previous-${crypto.randomUUID()}`,
+          source: 'fast_agent',
+          userId: user.id,
+          harnessSessionId: previousNativeSessionId,
+          messageId: `message-${crypto.randomUUID()}`,
+          costSource: 'opencode_message',
+          costMicroUsd: 1_000,
+        },
+        {
+          eventKey: `fast-current-${crypto.randomUUID()}`,
+          source: 'fast_agent',
+          userId: user.id,
+          harnessSessionId: currentNativeSessionId,
+          messageId: `message-${crypto.randomUUID()}`,
+          costSource: 'opencode_message',
+          costMicroUsd: 2_000,
+        },
+        {
+          eventKey: `delegated-run-${crypto.randomUUID()}`,
+          source: 'brain_synthesis',
+          taskId: task.id,
+          runId: run.id,
+          costSource: 'opencode_message',
+          costMicroUsd: 3_000,
+        },
+        {
+          eventKey: `delegated-task-${crypto.randomUUID()}`,
+          taskId: task.id,
+          costSource: 'opencode_message',
+          costMicroUsd: 4_000,
+        },
+        {
+          eventKey: `unattributed-${crypto.randomUUID()}`,
+          costSource: 'missing',
+          costMicroUsd: 5_000,
+        },
+        {
+          eventKey: `brain-synthesis-${crypto.randomUUID()}`,
+          source: 'brain_synthesis',
+          harnessSessionId: currentNativeSessionId,
+          messageId: `message-${crypto.randomUUID()}`,
+          costSource: 'opencode_message',
+          costMicroUsd: 6_000,
+        },
+      ])
+      .returning({ id: llmUsageEvents.id });
+    usageEventIds.push(...insertedEvents.map((event) => event.id));
+
+    const rows = await getCostAnalyticsRows(
+      {} as UserAuthSuccess,
+      'all',
+      new Date(),
+    );
+    const insertedRows = rows.filter((row) =>
+      insertedEvents.some((event) => event.id === row.id),
+    );
+    const rowsById = new Map(insertedRows.map((row) => [row.id, row]));
+    const sessionRows = insertedEvents
+      .slice(0, 2)
+      .map((event) => rowsById.get(event.id)!);
+    const delegatedTaskRows = insertedEvents
+      .slice(2, 4)
+      .map((event) => rowsById.get(event.id)!);
+    const unattributedRow = rowsById.get(insertedEvents[4]!.id)!;
+    const memoryRow = rowsById.get(insertedEvents[5]!.id)!;
+
+    expect(insertedRows).toHaveLength(6);
+    expect(insertedRows.reduce((sum, row) => sum + row.value, 0)).toBeCloseTo(
+      0.021,
+    );
+    expect(sessionRows.reduce((sum, row) => sum + row.value, 0)).toBe(0.003);
+    expect(sessionRows.map((row) => row.dimensions.taskType?.label)).toEqual([
+      'Session',
+      'Session',
+    ]);
+    expect(sessionRows.map((row) => row.details.values.taskTitle)).toEqual([
+      'Session',
+      'Session',
+    ]);
+    expect(delegatedTaskRows.reduce((sum, row) => sum + row.value, 0)).toBe(
+      0.007,
+    );
+    expect(
+      delegatedTaskRows.map((row) => row.dimensions.taskType?.label),
+    ).toEqual(['Manual Task', 'Manual Task']);
+    expect(unattributedRow.dimensions.taskType?.label).toBe(
+      'Non-task inference',
+    );
+    expect(memoryRow.dimensions.taskType).toEqual({
+      key: 'Memories',
+      label: 'Memories',
+    });
+    expect(memoryRow.details.values.taskTitle).toBe('Memories');
+
+    const filterOptions = buildFilterOptions(insertedRows, 'costs', {});
+    expect(filterOptions.filters.taskType).toContainEqual({
+      value: 'Memories',
+      label: 'Memories',
+    });
+    const filteredRows = applyDimensionFilters(insertedRows, {
+      taskType: ['Memories'],
+    });
+    expect(filteredRows.map((row) => row.id)).toEqual([memoryRow.id]);
+
+    const chart = buildChartData(
+      insertedRows,
+      'costs',
+      'taskType',
+      'cost',
+      'all',
+      'day',
+      new Date(),
+    );
+    expect(chart.total).toBeCloseTo(0.021);
+    expect(chart.costSummary?.totalInferenceCost).toBeCloseTo(0.021);
+    expect(chart.series).toContainEqual(
+      expect.objectContaining({
+        key: 'Memories',
+        label: 'Memories',
+        total: expect.closeTo(0.006),
+      }),
+    );
+    expect(
+      chart.buckets.reduce(
+        (sum, bucket) => sum + (bucket.segments.Memories ?? 0),
+        0,
+      ),
+    ).toBeCloseTo(0.006);
+    for (const row of insertedRows) {
+      expect(row.dimensions).not.toHaveProperty('session');
+      expect(row.details.links?.session).toBeUndefined();
+    }
   });
 });
 
@@ -167,8 +425,9 @@ describe('aggregateCostAnalyticsRowsByTask', () => {
         id,
         values: {
           date: timestamp,
-          taskType: taskId ? 'Manual' : 'Non-task inference',
+          taskType: taskId ? 'Manual Task' : 'Non-task inference',
           project: 'Roomote',
+          source: 'opencode',
           provider: 'openai',
           model,
           cost: cost.toFixed(2),

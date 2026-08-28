@@ -5,9 +5,11 @@ import type { Variables } from '../../../types';
 
 const {
   buildThreadReplyImageBlocksMock,
+  clearNextSlackReplyQuoteSuppressionIfIdMock,
   clearLatestUserMessageForReplyQuoteIfIdMock,
   clearLatestUserMessageMock,
   getLatestUserMessageMock,
+  getNextSlackReplyQuoteSuppressionMock,
   getActiveSlackRunReplyTargetMock,
   getCustomAutomationByIdMock,
   getTaskChannelBindingsMock,
@@ -15,12 +17,15 @@ const {
   postMessageDetailedMock,
   resolveAutomationResultSubtitleMock,
   slackInstallationFindFirstMock,
+  suppressNextSlackReplyQuoteMock,
   taskRunFindFirstMock,
 } = vi.hoisted(() => ({
   buildThreadReplyImageBlocksMock: vi.fn(),
+  clearNextSlackReplyQuoteSuppressionIfIdMock: vi.fn(),
   clearLatestUserMessageForReplyQuoteIfIdMock: vi.fn(),
   clearLatestUserMessageMock: vi.fn(),
   getLatestUserMessageMock: vi.fn(),
+  getNextSlackReplyQuoteSuppressionMock: vi.fn(),
   getActiveSlackRunReplyTargetMock: vi.fn(),
   getCustomAutomationByIdMock: vi.fn(),
   getTaskChannelBindingsMock: vi.fn(),
@@ -28,6 +33,7 @@ const {
   postMessageDetailedMock: vi.fn(),
   resolveAutomationResultSubtitleMock: vi.fn(),
   slackInstallationFindFirstMock: vi.fn(),
+  suppressNextSlackReplyQuoteMock: vi.fn(),
   taskRunFindFirstMock: vi.fn(),
 }));
 
@@ -68,9 +74,12 @@ vi.mock('@roomote/slack', async (importOriginal) => {
       block_id: 'footer',
       elements: [{ type: 'mrkdwn', text: footerText }],
     })),
+    clearNextSlackReplyQuoteSuppressionIfId:
+      clearNextSlackReplyQuoteSuppressionIfIdMock,
     clearLatestUserMessage: clearLatestUserMessageMock,
     clearSlackThreadReplyFooterMessageTs: vi.fn(),
     getLatestUserMessage: getLatestUserMessageMock,
+    getNextSlackReplyQuoteSuppression: getNextSlackReplyQuoteSuppressionMock,
     getActiveSlackRunReplyTarget: getActiveSlackRunReplyTargetMock,
     getSlackThreadReplyFooterMessageTs: vi.fn().mockResolvedValue(null),
     removeSlackThreadReplyFooter: vi.fn(),
@@ -87,6 +96,7 @@ vi.mock('@roomote/slack', async (importOriginal) => {
         postMessageDetailed = postMessageDetailedMock;
       },
     ),
+    suppressNextSlackReplyQuote: suppressNextSlackReplyQuoteMock,
     trackLatestUserMessageForSlackQuote: vi.fn(),
     trackSlackBotReply: vi.fn().mockResolvedValue(undefined),
     withSlackThreadReplyFooterLock: vi.fn(
@@ -194,6 +204,7 @@ describe('Slack thread reply quotes', () => {
       text: 'Take a screenshot',
       userName: 'Brock',
     });
+    getNextSlackReplyQuoteSuppressionMock.mockResolvedValue(null);
     buildThreadReplyImageBlocksMock.mockResolvedValue([
       {
         type: 'image',
@@ -203,6 +214,8 @@ describe('Slack thread reply quotes', () => {
     ]);
     postMessageDetailedMock.mockResolvedValue({ ts: '333.444' });
     clearLatestUserMessageForReplyQuoteIfIdMock.mockResolvedValue(true);
+    clearNextSlackReplyQuoteSuppressionIfIdMock.mockResolvedValue(true);
+    suppressNextSlackReplyQuoteMock.mockResolvedValue('suppression-1');
   });
 
   it('renders a pending quote on text replies and clears that exact record', async () => {
@@ -235,6 +248,50 @@ describe('Slack thread reply quotes', () => {
       42,
       'quote-image',
     );
+  });
+
+  it('consumes an older pending quote without rendering it when the turn is suppressed', async () => {
+    buildThreadReplyImageBlocksMock.mockResolvedValue([]);
+    getNextSlackReplyQuoteSuppressionMock.mockResolvedValue('suppression-1');
+
+    const response = await createApp().request('/mcp/thread_reply', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ text: 'Fast orchestration reply' }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(postMessageDetailedMock.mock.calls[0]?.[0]?.blocks).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          block_id: 'roomote_thread_reply_quote',
+        }),
+      ]),
+    );
+    expect(clearLatestUserMessageForReplyQuoteIfIdMock).toHaveBeenCalledWith(
+      'slack',
+      42,
+      'quote-image',
+    );
+    expect(clearNextSlackReplyQuoteSuppressionIfIdMock).toHaveBeenCalledWith(
+      42,
+      'suppression-1',
+    );
+  });
+
+  it('persists quote suppression for the authenticated task run', async () => {
+    const response = await createApp().request('/mcp/suppress_reply_quote', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ runId: 42 }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      success: true,
+      quoteId: 'suppression-1',
+    });
+    expect(suppressNextSlackReplyQuoteMock).toHaveBeenCalledWith(42);
   });
 
   it('replies to the active turn target instead of the task source thread', async () => {
@@ -293,7 +350,7 @@ describe('Slack thread reply quotes', () => {
     );
   });
 
-  it('wraps a custom automation root report in the structured container', async () => {
+  it('preserves custom automation root report Markdown at the top level', async () => {
     taskRunFindFirstMock.mockResolvedValue({
       id: 42,
       actingUserId: null,
@@ -321,28 +378,27 @@ describe('Slack thread reply quotes', () => {
         channel: 'C123',
         blocks: [
           expect.objectContaining({
-            type: 'container',
-            title: expect.objectContaining({ text: 'Daily demo ideas' }),
-            subtitle: {
-              type: 'plain_text',
-              text: 'Daily · GPT 5.6 High · $0.56 · 02:37s',
-            },
-            icon: expect.objectContaining({
-              image_url: 'https://app.example.com/automation-icons/zap.png',
-            }),
-            child_blocks: expect.arrayContaining([
-              expect.objectContaining({ type: 'table' }),
+            type: 'context',
+            elements: expect.arrayContaining([
+              expect.objectContaining({ text: 'Daily demo ideas' }),
               expect.objectContaining({
-                type: 'actions',
-                elements: expect.arrayContaining([
-                  expect.objectContaining({
-                    action_id: 'late_bound_automation_view_task',
-                  }),
-                  expect.objectContaining({
-                    action_id: 'late_bound_automation_configure',
-                    url: 'https://app.example.com/automations#custom-automation-automation-1',
-                  }),
-                ]),
+                text: 'Daily · GPT 5.6 High · $0.56 · 02:37s',
+              }),
+            ]),
+          }),
+          {
+            type: 'markdown',
+            text: '**Summary**\n\n| Idea | Priority |\n| --- | --- |\n| Demo | High |',
+          },
+          expect.objectContaining({
+            type: 'actions',
+            elements: expect.arrayContaining([
+              expect.objectContaining({
+                action_id: 'late_bound_automation_view_task',
+              }),
+              expect.objectContaining({
+                action_id: 'late_bound_automation_configure',
+                url: 'https://app.example.com/automations#custom-automation-automation-1',
               }),
             ]),
           }),
@@ -423,6 +479,7 @@ describe('Slack thread reply quotes', () => {
 
   it('keeps the pending quote when Slack delivery fails', async () => {
     buildThreadReplyImageBlocksMock.mockResolvedValue([]);
+    getNextSlackReplyQuoteSuppressionMock.mockResolvedValue('suppression-1');
     postMessageDetailedMock.mockRejectedValueOnce(
       new Error('Slack unavailable'),
     );
@@ -435,6 +492,7 @@ describe('Slack thread reply quotes', () => {
 
     expect(response.status).toBe(500);
     expect(clearLatestUserMessageForReplyQuoteIfIdMock).not.toHaveBeenCalled();
+    expect(clearNextSlackReplyQuoteSuppressionIfIdMock).not.toHaveBeenCalled();
   });
 
   it('maps a permanent Slack posting error to a non-retryable structured response', async () => {
@@ -503,6 +561,10 @@ describe('Slack thread reply quotes', () => {
     expect(response.status).toBe(200);
     expect(clearLatestUserMessageForReplyQuoteIfIdMock).toHaveBeenCalledWith(
       'slack',
+      42,
+      'quote-1',
+    );
+    expect(clearNextSlackReplyQuoteSuppressionIfIdMock).toHaveBeenCalledWith(
       42,
       'quote-1',
     );

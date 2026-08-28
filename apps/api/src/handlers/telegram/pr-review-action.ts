@@ -2,6 +2,7 @@ import type { TelegramCallbackQuery } from '@roomote/communication/telegram-upda
 import {
   claimPendingPrReviewAction,
   claimPendingPrReviewActionsForThread,
+  completePendingPrReviewActionDispatch,
   dispatchPrReviewFollowUp,
   enableAutoHandlePrReviewFeedback,
 } from '@roomote/sdk/server';
@@ -57,14 +58,24 @@ export async function handleTelegramPrReviewActionCallback(params: {
     return;
   }
 
-  const pending = await claimPendingPrReviewAction(nonce);
+  const pending = await claimPendingPrReviewAction(nonce, {
+    choice,
+    actingUserId: senderUserId ?? undefined,
+  });
 
   if (!pending) {
     await answerTelegramCallbackQueryBestEffort({
       callbackQueryId: query.id,
       text: 'This offer was already handled or has expired.',
     });
+    if (chatId && messageId) {
+      await clearTelegramMessageButtonsBestEffort({ chatId, messageId });
+    }
     return;
+  }
+
+  if (chatId && messageId) {
+    await clearTelegramMessageButtonsBestEffort({ chatId, messageId });
   }
 
   if (choice === 'dismiss') {
@@ -73,15 +84,11 @@ export async function handleTelegramPrReviewActionCallback(params: {
       text: 'Dismissed.',
     });
 
-    if (chatId && messageId) {
-      await clearTelegramMessageButtonsBestEffort({ chatId, messageId });
-    }
-
     return;
   }
 
   try {
-    if (choice === 'auto') {
+    if (choice === 'auto' && !pending.canonicalDeliveryId) {
       await enableAutoHandlePrReviewFeedback({
         taskId: pending.taskId,
         repository: pending.repository,
@@ -98,6 +105,11 @@ export async function handleTelegramPrReviewActionCallback(params: {
       followUpPrompt: pending.followUpPrompt,
       actingUserId: senderUserId!,
       providerUserId: query.from?.id ? String(query.from.id) : undefined,
+      ...(pending.canonicalDeliveryId
+        ? {
+            idempotencyKey: `pr-review-delivery:${pending.canonicalDeliveryId}`,
+          }
+        : {}),
     });
 
     if (dispatched.outcome === 'unavailable') {
@@ -123,14 +135,16 @@ export async function handleTelegramPrReviewActionCallback(params: {
       }
     }
 
+    if (dispatched.outcome !== 'unavailable') {
+      await completePendingPrReviewActionDispatch(pending, dispatched.runId);
+    }
+
     await answerTelegramCallbackQueryBestEffort({
       callbackQueryId: query.id,
       text: choice === 'auto' ? 'Auto-resolve enabled.' : 'On it.',
     });
 
     if (chatId && messageId) {
-      await clearTelegramMessageButtonsBestEffort({ chatId, messageId });
-
       if (dispatched.outcome !== 'unavailable') {
         await postTelegramMessageBestEffort({
           chatId,

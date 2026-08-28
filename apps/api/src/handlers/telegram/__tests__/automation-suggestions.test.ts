@@ -8,6 +8,7 @@ const {
   persistAutomationTelegramTopicThreadMock,
   createTelegramForumTopicBestEffortMock,
   postTelegramMessageBestEffortMock,
+  registerTrackedSuggestionCardsMock,
   insertMock,
   insertOnConflictDoNothingMock,
   insertValuesMock,
@@ -23,6 +24,7 @@ const {
   persistAutomationTelegramTopicThreadMock: vi.fn(),
   createTelegramForumTopicBestEffortMock: vi.fn(),
   postTelegramMessageBestEffortMock: vi.fn(),
+  registerTrackedSuggestionCardsMock: vi.fn(),
   insertMock: vi.fn(),
   insertOnConflictDoNothingMock: vi.fn(),
   insertValuesMock: vi.fn(),
@@ -57,6 +59,7 @@ vi.mock('@roomote/db/server', () => ({
   getAutomationTelegramTopicThreadId: getAutomationTelegramTopicThreadIdMock,
   persistAutomationTelegramTopicThread:
     persistAutomationTelegramTopicThreadMock,
+  registerTrackedSuggestionCards: registerTrackedSuggestionCardsMock,
   db: {
     insert: insertMock,
     select: vi.fn(() => ({
@@ -125,6 +128,20 @@ describe('postScheduledSuggestionsToTelegram', () => {
     selectLimitMock.mockResolvedValue([]);
   });
 
+  it('does not post a Dependabot summary without remediation suggestions', async () => {
+    const delivered = await postScheduledSuggestionsToTelegram({
+      sourceTaskId: 'dependabot-zero-alerts',
+      createdByUserId: null,
+      suggestionSource: 'dependabot_triage',
+      suggestions: [],
+    });
+
+    expect(delivered).toBe(false);
+    expect(buildRootMessageMock).not.toHaveBeenCalled();
+    expect(createTelegramForumTopicBestEffortMock).not.toHaveBeenCalled();
+    expect(postTelegramMessageBestEffortMock).not.toHaveBeenCalled();
+  });
+
   it('posts current-thread suggestions without creating a topic', async () => {
     postTelegramMessageBestEffortMock
       .mockResolvedValueOnce({ messageId: '950' })
@@ -152,14 +169,12 @@ describe('postScheduledSuggestionsToTelegram', () => {
         buttons: [[expect.objectContaining({ callbackData: 'idea:aaa' })]],
       }),
     );
-    expect(insertValuesMock).toHaveBeenNthCalledWith(
-      1,
+    expect(registerTrackedSuggestionCardsMock).toHaveBeenNthCalledWith(1, [
       expect.objectContaining({ messageTs: '950', workItemId: 'aaa' }),
-    );
-    expect(insertValuesMock).toHaveBeenNthCalledWith(
-      2,
+    ]);
+    expect(registerTrackedSuggestionCardsMock).toHaveBeenNthCalledWith(2, [
       expect.objectContaining({ messageTs: '951', workItemId: 'bbb' }),
-    );
+    ]);
   });
 
   it('posts one summary message with start buttons per suggestion', async () => {

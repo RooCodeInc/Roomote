@@ -18,9 +18,20 @@ import type { SourceControlProvider } from '@roomote/types';
 
 import { db, type DatabaseOrTransaction } from '../db';
 import {
+  assignPrReviewNotificationUnit,
+  claimDueCanonicalPrReviewDeliveries,
+  deferCanonicalPrReviewDelivery,
+  projectPrReviewUnitForAssociation,
+  releaseCanonicalPrReviewDelivery,
+  renewCanonicalPrReviewDeliveryClaim,
+  transitionCanonicalPrReviewDelivery,
+  type CanonicalPrReviewDeliveryClaim,
+} from './pr-review-notification-units';
+import {
   prReviewCycles,
   prReviewEventDeliveries,
   prReviewEvents,
+  prReviewNotificationUnitEvents,
   taskPullRequests,
 } from '../schema';
 
@@ -43,9 +54,12 @@ export type DurablePrReviewEvent = {
   reviewHeadSha?: string | null;
   roomoteAuthored?: boolean;
   isSummary?: boolean;
+  /** Only for jobs queued before canonical notification ownership deployed. */
+  legacyOwnership?: boolean;
 };
 
-export type ClaimedPrReviewDelivery = {
+export type LegacyClaimedPrReviewDelivery = {
+  ownershipVersion: 'legacy';
   deliveryIds: string[];
   leaseToken: string;
   taskId: string;
@@ -58,6 +72,17 @@ export type ClaimedPrReviewDelivery = {
   deferrals: number;
   events: Record<string, unknown>[];
 };
+
+export type ClaimedPrReviewDelivery =
+  | LegacyClaimedPrReviewDelivery
+  | CanonicalPrReviewDeliveryClaim;
+
+type PrReviewDeliveryClaimReference =
+  | Pick<LegacyClaimedPrReviewDelivery, 'deliveryIds' | 'leaseToken'>
+  | Pick<
+      CanonicalPrReviewDeliveryClaim,
+      'ownershipVersion' | 'deliveryId' | 'deliveryIds' | 'leaseToken'
+    >;
 
 /**
  * The external post and the database completion cannot be one transaction.
@@ -135,22 +160,6 @@ function cycleIdentity(input: {
     cycleHeadReference(input),
     eq(prReviewCycles.cycleId, input.cycleId),
   );
-}
-
-async function projectEventToTasks(
-  executor: DatabaseOrTransaction,
-  eventId: string,
-  dueAt: Date,
-  taskIds: string[],
-): Promise<number> {
-  if (taskIds.length === 0) return 0;
-
-  const inserted = await executor
-    .insert(prReviewEventDeliveries)
-    .values(taskIds.map((taskId) => ({ eventId, taskId, dueAt })))
-    .onConflictDoNothing()
-    .returning({ id: prReviewEventDeliveries.id });
-  return inserted.length;
 }
 
 async function suppressRoomoteActivity(
@@ -457,22 +466,40 @@ export async function persistPrReviewEventInTransaction(
     };
   }
 
-  const links = await executor.query.taskPullRequests.findMany({
-    where: and(
-      eq(taskPullRequests.sourceControlProvider, input.sourceControlProvider),
-      eq(taskPullRequests.repository, input.repository),
-      eq(taskPullRequests.prNumber, input.prNumber),
-    ),
-    columns: { taskId: true },
-  });
-  const taskIds = [...new Set(links.map(({ taskId }) => taskId))];
-  const projectedTaskCount = await projectEventToTasks(
+  if (input.legacyOwnership) {
+    const links = await executor.query.taskPullRequests.findMany({
+      where: and(
+        eq(taskPullRequests.sourceControlProvider, input.sourceControlProvider),
+        eq(taskPullRequests.repository, input.repository),
+        eq(taskPullRequests.prNumber, input.prNumber),
+      ),
+      columns: { taskId: true },
+    });
+    const taskIds = [...new Set(links.map(({ taskId }) => taskId))];
+    if (taskIds.length > 0) {
+      await executor
+        .insert(prReviewEventDeliveries)
+        .values(
+          taskIds.map((taskId) => ({
+            eventId: stored.id,
+            taskId,
+            dueAt: input.dueAt,
+          })),
+        )
+        .onConflictDoNothing();
+    }
+    return { projectedTaskCount: taskIds.length, event: eventPayload };
+  }
+
+  const assigned = await assignPrReviewNotificationUnit(
     executor,
+    { ...input, batchId, event: eventPayload },
     stored.id,
-    input.dueAt,
-    taskIds,
   );
-  return { projectedTaskCount, event: eventPayload };
+  return {
+    projectedTaskCount: assigned.projectedTaskCount,
+    event: eventPayload,
+  };
 }
 
 export async function persistPrReviewEvent(input: DurablePrReviewEvent) {
@@ -571,21 +598,41 @@ export async function projectPendingPrReviewEventsForAssociation(
     );
   if (events.length === 0) return;
 
-  await executor
-    .insert(prReviewEventDeliveries)
-    .values(
-      events.map(({ id, availableAt }) => ({
-        eventId: id,
-        taskId: input.taskId,
-        dueAt: availableAt,
-      })),
-    )
-    .onConflictDoNothing();
+  await projectPrReviewUnitForAssociation(executor, {
+    taskId: input.taskId,
+    eventIds: events.map(({ id }) => id),
+  });
+
+  // N-1 compatibility: events without a canonical membership were created by
+  // the pre-cutover path and must continue through legacy task deliveries.
+  const canonicalEventIds = await executor
+    .select({ eventId: prReviewNotificationUnitEvents.eventId })
+    .from(prReviewNotificationUnitEvents)
+    .where(
+      inArray(
+        prReviewNotificationUnitEvents.eventId,
+        events.map(({ id }) => id),
+      ),
+    );
+  const canonicalSet = new Set(canonicalEventIds.map(({ eventId }) => eventId));
+  const legacyEvents = events.filter(({ id }) => !canonicalSet.has(id));
+  if (legacyEvents.length > 0) {
+    await executor
+      .insert(prReviewEventDeliveries)
+      .values(
+        legacyEvents.map(({ id, availableAt }) => ({
+          eventId: id,
+          taskId: input.taskId,
+          dueAt: availableAt,
+        })),
+      )
+      .onConflictDoNothing();
+  }
 }
 
-export async function claimDuePrReviewDeliveries(
+async function claimDueLegacyPrReviewDeliveries(
   now: Date = new Date(),
-): Promise<ClaimedPrReviewDelivery[]> {
+): Promise<LegacyClaimedPrReviewDelivery[]> {
   return db.transaction(async (tx) => {
     const leaseToken = randomUUID();
     const leaseExpiresAt = new Date(now.getTime() + DELIVERY_LEASE_MS);
@@ -693,7 +740,7 @@ export async function claimDuePrReviewDeliveries(
       order by u.id
     `);
 
-    const groups = new Map<string, ClaimedPrReviewDelivery>();
+    const groups = new Map<string, LegacyClaimedPrReviewDelivery>();
     for (const row of rows) {
       const key = [
         row.task_id,
@@ -710,6 +757,7 @@ export async function claimDuePrReviewDeliveries(
         group.deferrals = Math.max(group.deferrals, row.deferrals);
       } else {
         groups.set(key, {
+          ownershipVersion: 'legacy',
           deliveryIds: [row.id],
           leaseToken,
           taskId: row.task_id,
@@ -728,6 +776,17 @@ export async function claimDuePrReviewDeliveries(
   });
 }
 
+export async function claimDuePrReviewDeliveries(
+  now: Date = new Date(),
+): Promise<ClaimedPrReviewDelivery[]> {
+  const canonical = await claimDueCanonicalPrReviewDeliveries(now);
+  const legacy =
+    canonical.length < CLAIM_LIMIT
+      ? await claimDueLegacyPrReviewDeliveries(now)
+      : [];
+  return [...canonical, ...legacy.slice(0, CLAIM_LIMIT - canonical.length)];
+}
+
 async function updateClaimedDeliveries(
   claim: Pick<ClaimedPrReviewDelivery, 'deliveryIds' | 'leaseToken'>,
   values: Partial<typeof prReviewEventDeliveries.$inferInsert>,
@@ -744,9 +803,23 @@ async function updateClaimedDeliveries(
 }
 
 export async function completePrReviewDeliveries(
-  claim: Pick<ClaimedPrReviewDelivery, 'deliveryIds' | 'leaseToken'>,
+  claim: PrReviewDeliveryClaimReference,
   status: 'delivered' | 'suppressed' = 'delivered',
 ): Promise<void> {
+  if ('ownershipVersion' in claim && claim.ownershipVersion === 'canonical') {
+    await transitionCanonicalPrReviewDelivery({
+      deliveryId: claim.deliveryId,
+      leaseToken: claim.leaseToken,
+      expected: [
+        'claimed',
+        'prepared',
+        'prompt_posting',
+        'auto_dispatch_pending',
+      ],
+      status: status === 'delivered' ? 'completed' : 'suppressed',
+    });
+    return;
+  }
   await updateClaimedDeliveries(claim, {
     status,
     leaseToken: null,
@@ -755,8 +828,14 @@ export async function completePrReviewDeliveries(
 }
 
 export async function renewPrReviewDeliveryClaim(
-  claim: Pick<ClaimedPrReviewDelivery, 'deliveryIds' | 'leaseToken'>,
+  claim: PrReviewDeliveryClaimReference,
 ): Promise<boolean> {
+  if ('ownershipVersion' in claim && claim.ownershipVersion === 'canonical') {
+    return renewCanonicalPrReviewDeliveryClaim({
+      deliveryId: claim.deliveryId,
+      leaseToken: claim.leaseToken,
+    });
+  }
   const now = new Date();
   const leaseExpiresAt = new Date(now.getTime() + DELIVERY_LEASE_MS);
 
@@ -791,15 +870,28 @@ export async function renewPrReviewDeliveryClaim(
 }
 
 export async function deferPrReviewDeliveries(
-  claim: Pick<ClaimedPrReviewDelivery, 'deliveryIds' | 'leaseToken'>,
+  claim: PrReviewDeliveryClaimReference,
   dueAt: Date,
+  options: { incrementDeferrals?: boolean } = {},
 ): Promise<void> {
+  if ('ownershipVersion' in claim && claim.ownershipVersion === 'canonical') {
+    await deferCanonicalPrReviewDelivery({
+      deliveryId: claim.deliveryId,
+      leaseToken: claim.leaseToken,
+      dueAt,
+      incrementDeferrals: options.incrementDeferrals,
+    });
+    return;
+  }
+  const incrementDeferrals = options.incrementDeferrals ?? true;
   await db
     .update(prReviewEventDeliveries)
     .set({
       status: 'pending',
       dueAt,
-      deferrals: sql`${prReviewEventDeliveries.deferrals} + 1`,
+      ...(incrementDeferrals
+        ? { deferrals: sql`${prReviewEventDeliveries.deferrals} + 1` }
+        : {}),
       leaseToken: null,
       leaseExpiresAt: null,
     })
@@ -812,8 +904,15 @@ export async function deferPrReviewDeliveries(
 }
 
 export async function releasePrReviewDeliveries(
-  claim: Pick<ClaimedPrReviewDelivery, 'deliveryIds' | 'leaseToken'>,
+  claim: PrReviewDeliveryClaimReference,
 ): Promise<void> {
+  if ('ownershipVersion' in claim && claim.ownershipVersion === 'canonical') {
+    await releaseCanonicalPrReviewDelivery({
+      deliveryId: claim.deliveryId,
+      leaseToken: claim.leaseToken,
+    });
+    return;
+  }
   await updateClaimedDeliveries(claim, {
     status: 'pending',
     leaseToken: null,

@@ -18,6 +18,7 @@ describe('SetupDocs', () => {
     expect(getSetupDocsPath('slack', { authProvider: 'microsoft' })).toBe(
       'providers/communications/microsoft-teams',
     );
+    expect(getSetupDocsPath('inference')).toBe('models');
     expect(
       getSetupDocsPath('source-control-connect', {
         sourceControlProvider: 'github',
@@ -32,7 +33,6 @@ describe('SetupDocs', () => {
     expect(getSetupDocsPath('env-vars', { modelProvider: 'vllm' })).toBe(
       'providers/inference/vllm',
     );
-    expect(getSetupDocsPath('repo-selection')).toBe('environments');
     expect(getSetupDocsPath('welcome')).toBeNull();
     expect(getSetupDocsStep('email-account')).toBe('email-account');
     expect(getSetupDocsStep(null)).toBe('welcome');

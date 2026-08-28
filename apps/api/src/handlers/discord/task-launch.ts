@@ -365,8 +365,16 @@ export async function launchDiscordTask(input: {
   workspace: DiscordWorkspaceSelection;
   /** `/new` in an existing task thread creates a sibling, never a second run in-place. */
   forceNewThread?: boolean;
+  /** Exact deployment-enabled model selected by the Fast orchestrator. */
+  model?: string;
   fastAgentSessionId?: string;
   fastAgentParent?: FastAgentParent;
+  /** Post the Fast model-authored kickoff before enqueueing and suppress the
+   * generic Discord task acknowledgement. */
+  beforeEnqueueKickoff?: (task: {
+    taskId: string;
+    taskUrl?: string;
+  }) => Promise<void>;
   /**
    * An already-posted message to turn into the acknowledgement instead of
    * posting a new one — a routing card sitting in the task thread becomes the
@@ -452,6 +460,9 @@ export async function launchDiscordTask(input: {
         ...(input.agentPromptText?.trim()
           ? { agentPromptText: input.agentPromptText.trim() }
           : {}),
+        ...(input.model
+          ? { harnessModelOverrides: { 'opencode-server': input.model } }
+          : {}),
         ...(input.queuedMessage.images?.length
           ? { images: input.queuedMessage.images }
           : {}),
@@ -494,7 +505,9 @@ export async function launchDiscordTask(input: {
   }
 
   const titleThreadId = createdThread?.channelId;
+  const beforeEnqueueKickoff = input.beforeEnqueueKickoff;
 
+  let taskUrl: string | undefined;
   const launchResult = await enqueueTask(
     {
       task,
@@ -561,10 +574,24 @@ export async function launchDiscordTask(input: {
             },
           }
         : {}),
+      ...(beforeEnqueueKickoff
+        ? {
+            beforeEnqueue: async (taskRun: { taskId: string }) => {
+              taskUrl = getTaskUrl({
+                taskId: taskRun.taskId,
+                utm: { source: 'discord', campaign: 'discord.thread_start' },
+              });
+              await beforeEnqueueKickoff({
+                taskId: taskRun.taskId,
+                ...(taskUrl ? { taskUrl } : {}),
+              });
+            },
+          }
+        : {}),
     },
   );
 
-  const taskUrl = getTaskUrl({
+  taskUrl ??= getTaskUrl({
     taskId: launchResult.taskId,
     utm: { source: 'discord', campaign: 'discord.thread_start' },
   });
@@ -578,23 +605,25 @@ export async function launchDiscordTask(input: {
   };
   // Replacing already falls back to posting when the original message cannot
   // be edited, so the task is acknowledged either way.
-  const acknowledgement = input.replaceMessage
-    ? await replaceOrPostDiscordMessage({
-        provider: input.provider,
-        replace: input.replaceMessage,
-        ...acknowledgementMessage,
-      })
-    : await input.provider.postMessage({
-        channelId: communicationChannelId,
-        ...(communicationThreadId ? { threadId: communicationThreadId } : {}),
-        ...acknowledgementMessage,
-      });
+  const acknowledgement = beforeEnqueueKickoff
+    ? null
+    : input.replaceMessage
+      ? await replaceOrPostDiscordMessage({
+          provider: input.provider,
+          replace: input.replaceMessage,
+          ...acknowledgementMessage,
+        })
+      : await input.provider.postMessage({
+          channelId: communicationChannelId,
+          ...(communicationThreadId ? { threadId: communicationThreadId } : {}),
+          ...acknowledgementMessage,
+        });
 
   // Interaction launches (`/new`) have no MESSAGE_CREATE origin. Persist the
   // acknowledgement message so terminal/cancel reactions have a valid target.
   // Do not pin 👀 here: intake eyes are MESSAGE_CREATE-only, and post-enqueue
   // eyes race worker onStart cleanup (which can already have run).
-  if (!originReaction && acknowledgement.messageId) {
+  if (!originReaction && acknowledgement?.messageId) {
     reactionTarget = {
       channelId: communicationThreadId ?? communicationChannelId,
       messageId: acknowledgement.messageId,

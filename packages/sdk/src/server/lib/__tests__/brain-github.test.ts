@@ -2,7 +2,11 @@ const githubMocks = vi.hoisted(() => ({
   repositories: [] as Array<{ fullName: string; installationId: number }>,
   syncState: new Map<
     string,
-    { watermark: Date | null; backfillCursor?: string | null }
+    {
+      watermark: Date | null;
+      backfillCursor?: string | null;
+      backfillCompletedAt?: Date | null;
+    }
   >(),
   listForRepo: vi.fn(),
   listComments: vi.fn(),
@@ -165,10 +169,10 @@ describe('GitHub issue collector progress', () => {
       { fullName: 'acme/a', installationId: 1 },
       { fullName: 'acme/b', installationId: 2 },
     ];
-    githubMocks.syncState.set('github-issues:occurrence-date-v2:acme/a', {
+    githubMocks.syncState.set('github-issues:occurrence-date-v3:acme/a', {
       watermark: start,
     });
-    githubMocks.syncState.set('github-issues:occurrence-date-v2:acme/b', {
+    githubMocks.syncState.set('github-issues:occurrence-date-v3:acme/b', {
       watermark: start,
     });
     githubMocks.listForRepo.mockImplementation(
@@ -201,11 +205,11 @@ describe('GitHub issue collector progress', () => {
     const first = await collectBrainGithubIssues({ now, limit: 100 });
     expect(first.pages).toHaveLength(100);
     expect(first.stateUpdates.map((update) => update.collectorId)).toEqual([
-      'github-issues:occurrence-date-v2:acme/a',
+      'github-issues:occurrence-date-v3:acme/a',
     ]);
     for (const update of first.stateUpdates) {
       githubMocks.syncState.set(update.collectorId, {
-        watermark: update.watermark,
+        watermark: update.watermark ?? null,
         backfillCursor: update.cursor,
       });
     }
@@ -224,7 +228,7 @@ describe('GitHub issue collector progress', () => {
     const tiedAt = '2026-08-02T00:00:00Z';
     const now = new Date('2026-08-15T00:00:00Z');
     githubMocks.repositories = [{ fullName: 'acme/a', installationId: 1 }];
-    githubMocks.syncState.set('github-issues:occurrence-date-v2:acme/a', {
+    githubMocks.syncState.set('github-issues:occurrence-date-v3:acme/a', {
       watermark: start,
     });
     githubMocks.listForRepo.mockImplementation(
@@ -240,7 +244,7 @@ describe('GitHub issue collector progress', () => {
 
     const first = await collectBrainGithubIssues({ now, limit: 100 });
     expect(first.stateUpdates[0]).toMatchObject({
-      collectorId: 'github-issues:occurrence-date-v2:acme/a',
+      collectorId: 'github-issues:occurrence-date-v3:acme/a',
       watermark: new Date(tiedAt),
     });
     const firstCursor = JSON.parse(first.stateUpdates[0]!.cursor!) as {
@@ -251,8 +255,8 @@ describe('GitHub issue collector progress', () => {
     expect(firstCursor.seen.map(([number]) => number)).toEqual(
       Array.from({ length: 100 }, (_, index) => index + 1),
     );
-    githubMocks.syncState.set('github-issues:occurrence-date-v2:acme/a', {
-      watermark: first.stateUpdates[0]!.watermark,
+    githubMocks.syncState.set('github-issues:occurrence-date-v3:acme/a', {
+      watermark: first.stateUpdates[0]!.watermark ?? null,
       backfillCursor: first.stateUpdates[0]!.cursor,
     });
 
@@ -268,7 +272,7 @@ describe('GitHub issue collector progress', () => {
       page: 2,
     });
     expect(second.stateUpdates[0]).toMatchObject({
-      collectorId: 'github-issues:occurrence-date-v2:acme/a',
+      collectorId: 'github-issues:occurrence-date-v3:acme/a',
       watermark: new Date(now.getTime() - 1000),
     });
     expect(second.stateUpdates[0]?.cursor).not.toBeNull();
@@ -281,7 +285,7 @@ describe('GitHub issue collector progress', () => {
       new Date(start.getTime() + (index + 1) * 60_000).toISOString(),
     );
     githubMocks.repositories = [{ fullName: 'acme/a', installationId: 1 }];
-    githubMocks.syncState.set('github-issues:occurrence-date-v2:acme/a', {
+    githubMocks.syncState.set('github-issues:occurrence-date-v3:acme/a', {
       watermark: start,
     });
     githubMocks.listForRepo
@@ -302,8 +306,8 @@ describe('GitHub issue collector progress', () => {
       });
 
     const first = await collectBrainGithubIssues({ now, limit: 100 });
-    githubMocks.syncState.set('github-issues:occurrence-date-v2:acme/a', {
-      watermark: first.stateUpdates[0]!.watermark,
+    githubMocks.syncState.set('github-issues:occurrence-date-v3:acme/a', {
+      watermark: first.stateUpdates[0]!.watermark ?? null,
       backfillCursor: first.stateUpdates[0]!.cursor,
     });
 
@@ -329,7 +333,7 @@ describe('GitHub issue collector progress', () => {
       makeIssue(index + 2, tiedAt),
     );
     githubMocks.repositories = [{ fullName: 'acme/a', installationId: 1 }];
-    githubMocks.syncState.set('github-issues:occurrence-date-v2:acme/a', {
+    githubMocks.syncState.set('github-issues:occurrence-date-v3:acme/a', {
       watermark: start,
     });
     githubMocks.listForRepo
@@ -344,16 +348,16 @@ describe('GitHub issue collector progress', () => {
       .mockResolvedValueOnce({ data: [] });
 
     const first = await collectBrainGithubIssues({ now, limit: 100 });
-    githubMocks.syncState.set('github-issues:occurrence-date-v2:acme/a', {
-      watermark: first.stateUpdates[0]!.watermark,
+    githubMocks.syncState.set('github-issues:occurrence-date-v3:acme/a', {
+      watermark: first.stateUpdates[0]!.watermark ?? null,
       backfillCursor: first.stateUpdates[0]!.cursor,
     });
 
     const missed = await collectBrainGithubIssues({ now, limit: 100 });
     expect(missed.pages).toEqual([]);
     expect(missed.stateUpdates[0]?.cursor).not.toBeNull();
-    githubMocks.syncState.set('github-issues:occurrence-date-v2:acme/a', {
-      watermark: missed.stateUpdates[0]!.watermark,
+    githubMocks.syncState.set('github-issues:occurrence-date-v3:acme/a', {
+      watermark: missed.stateUpdates[0]!.watermark ?? null,
       backfillCursor: missed.stateUpdates[0]!.cursor,
     });
 
@@ -369,7 +373,7 @@ describe('GitHub issue collector progress', () => {
     const original = makeIssue(7, boundary.toISOString());
     const changed = { ...original, comments: 1 };
     githubMocks.repositories = [{ fullName: 'acme/a', installationId: 1 }];
-    githubMocks.syncState.set('github-issues:occurrence-date-v2:acme/a', {
+    githubMocks.syncState.set('github-issues:occurrence-date-v3:acme/a', {
       watermark: boundary,
       backfillCursor: JSON.stringify({
         boundary: boundary.toISOString(),
@@ -399,7 +403,7 @@ describe('GitHub issue collector progress', () => {
       'github/acme/a/issues/7',
     ]);
     expect(result.stateUpdates[0]).toMatchObject({
-      collectorId: 'github-issues:occurrence-date-v2:acme/a',
+      collectorId: 'github-issues:occurrence-date-v3:acme/a',
       watermark: new Date(now.getTime() - 1000),
     });
     expect(result.stateUpdates[0]?.cursor).not.toBeNull();
@@ -427,7 +431,7 @@ describe('GitHub issue collector progress', () => {
       [],
     ]);
     githubMocks.repositories = [{ fullName: 'acme/a', installationId: 1 }];
-    githubMocks.syncState.set('github-issues:occurrence-date-v2:acme/a', {
+    githubMocks.syncState.set('github-issues:occurrence-date-v3:acme/a', {
       watermark: boundary,
       backfillCursor: JSON.stringify({
         boundary: boundary.toISOString(),
@@ -462,7 +466,7 @@ describe('GitHub issue collector progress', () => {
       comments: 1,
     }));
     githubMocks.repositories = [{ fullName: 'acme/a', installationId: 1 }];
-    githubMocks.syncState.set('github-issues:occurrence-date-v2:acme/a', {
+    githubMocks.syncState.set('github-issues:occurrence-date-v3:acme/a', {
       watermark: boundary,
       backfillCursor: JSON.stringify({
         boundary: boundary.toISOString(),
@@ -517,7 +521,7 @@ describe('GitHub issue collector progress', () => {
     );
     const newerIssue = makeIssue(32, nextBoundary.toISOString());
     githubMocks.repositories = [{ fullName: 'acme/a', installationId: 1 }];
-    githubMocks.syncState.set('github-issues:occurrence-date-v2:acme/a', {
+    githubMocks.syncState.set('github-issues:occurrence-date-v3:acme/a', {
       watermark: boundary,
       backfillCursor: JSON.stringify({
         boundary: boundary.toISOString(),
@@ -547,8 +551,8 @@ describe('GitHub issue collector progress', () => {
       boundary: boundary.toISOString(),
       commentProbeOffset: 30,
     });
-    githubMocks.syncState.set('github-issues:occurrence-date-v2:acme/a', {
-      watermark: first.stateUpdates[0]!.watermark,
+    githubMocks.syncState.set('github-issues:occurrence-date-v3:acme/a', {
+      watermark: first.stateUpdates[0]!.watermark ?? null,
       backfillCursor: first.stateUpdates[0]!.cursor,
     });
 
@@ -576,7 +580,7 @@ describe('GitHub issue collector progress', () => {
       [],
     ]);
     githubMocks.repositories = [{ fullName: 'acme/a', installationId: 1 }];
-    githubMocks.syncState.set('github-issues:occurrence-date-v2:acme/a', {
+    githubMocks.syncState.set('github-issues:occurrence-date-v3:acme/a', {
       watermark: boundary,
       backfillCursor: JSON.stringify({
         boundary: boundary.toISOString(),
@@ -605,8 +609,8 @@ describe('GitHub issue collector progress', () => {
       boundary: boundary.toISOString(),
       commentProbeOffset: 0,
     });
-    githubMocks.syncState.set('github-issues:occurrence-date-v2:acme/a', {
-      watermark: first.stateUpdates[0]!.watermark,
+    githubMocks.syncState.set('github-issues:occurrence-date-v3:acme/a', {
+      watermark: first.stateUpdates[0]!.watermark ?? null,
       backfillCursor: first.stateUpdates[0]!.cursor,
     });
 
@@ -636,5 +640,84 @@ describe('GitHub issue collector progress', () => {
     });
     expect(second.pages[0]?.slug).toBe('github/acme/b/issues/7');
     expect(second.done).toBe(false);
+  });
+});
+
+describe('deep backfill completion and re-arming', () => {
+  beforeEach(() => {
+    githubMocks.syncState.clear();
+    githubMocks.listForRepo.mockReset();
+    githubMocks.listComments.mockReset();
+  });
+
+  it('reports done once every eligible repository has been read', async () => {
+    githubMocks.repositories = [{ fullName: 'acme/a', installationId: 1 }];
+
+    const step = await backfillBrainGithubIssuesStep({
+      cursor: JSON.stringify({
+        completed: ['acme/a'],
+        repository: null,
+        page: 1,
+      }),
+    });
+
+    // Honest completion, with the completed-repository set preserved in the
+    // final cursor so a later re-arm resumes instead of re-reading.
+    expect(step.done).toBe(true);
+    expect(JSON.parse(step.nextCursor!)).toMatchObject({
+      completed: ['acme/a'],
+    });
+  });
+
+  it('re-arms a completed backfill when an unread repository appears', async () => {
+    githubMocks.repositories = [
+      { fullName: 'acme/a', installationId: 1 },
+      { fullName: 'acme/connected-later', installationId: 1 },
+    ];
+    githubMocks.syncState.set('github-issues:occurrence-date-v3', {
+      watermark: null,
+      backfillCursor: JSON.stringify({
+        completed: ['acme/a'],
+        repository: null,
+        page: 1,
+      }),
+      backfillCompletedAt: new Date('2026-08-19T00:00:00Z'),
+    });
+    githubMocks.listForRepo.mockResolvedValue({ data: [] });
+
+    const result = await collectBrainGithubIssues({
+      now: new Date('2026-08-20T00:00:00Z'),
+      limit: 100,
+    });
+
+    expect(result.stateUpdates).toContainEqual({
+      collectorId: 'github-issues:occurrence-date-v3',
+      backfillCompletedAt: null,
+    });
+  });
+
+  it('leaves a completed backfill alone while it covers every repository', async () => {
+    githubMocks.repositories = [{ fullName: 'acme/a', installationId: 1 }];
+    githubMocks.syncState.set('github-issues:occurrence-date-v3', {
+      watermark: null,
+      backfillCursor: JSON.stringify({
+        completed: ['acme/a'],
+        repository: null,
+        page: 1,
+      }),
+      backfillCompletedAt: new Date('2026-08-19T00:00:00Z'),
+    });
+    githubMocks.listForRepo.mockResolvedValue({ data: [] });
+
+    const result = await collectBrainGithubIssues({
+      now: new Date('2026-08-20T00:00:00Z'),
+      limit: 100,
+    });
+
+    expect(
+      result.stateUpdates.filter(
+        (update) => update.collectorId === 'github-issues:occurrence-date-v3',
+      ),
+    ).toEqual([]);
   });
 });

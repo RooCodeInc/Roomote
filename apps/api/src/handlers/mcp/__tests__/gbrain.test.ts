@@ -2,7 +2,10 @@ import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 
 import { Hono } from 'hono';
-import type { RunTokenContext } from '@roomote/types';
+import {
+  BRAIN_MCP_READ_INSTRUCTIONS,
+  type RunTokenContext,
+} from '@roomote/types';
 
 import type { Variables } from '../../../types';
 
@@ -15,8 +18,6 @@ vi.mock('@roomote/sdk/server', () => ({
   resolveBrainConnection: mockResolveConnection,
   resolveBrainInferenceProvider: mockResolveBrainProvider,
 }));
-
-import { BRAIN_MCP_INSTRUCTIONS } from '@roomote/types';
 
 import { createGbrainMcpProxy, GBRAIN_READ_TOOL_NAMES } from '../gbrain';
 
@@ -198,16 +199,11 @@ describe('createGbrainMcpProxy', () => {
   );
 });
 
-describe('allowlist and instructions stay in step', () => {
-  it('names every exposed tool in the agent instructions, and exposes every named one', () => {
-    // A tool exposed but unexplained is chosen from gbrain's own description,
-    // which is written for a different product; a tool explained but not
-    // exposed sends the agent at something that 403s.
-    const named = GBRAIN_READ_TOOL_NAMES.filter((tool) =>
-      BRAIN_MCP_INSTRUCTIONS.includes(`\`${tool}\``),
-    );
-
-    expect(named).toEqual([...GBRAIN_READ_TOOL_NAMES]);
+describe('Brain agent allowlist', () => {
+  it('keeps the specialized read instructions aligned with exposed tools', () => {
+    for (const tool of GBRAIN_READ_TOOL_NAMES) {
+      expect(BRAIN_MCP_READ_INSTRUCTIONS).toContain(`\`${tool}\``);
+    }
   });
 
   it('exposes no write or admin surface', () => {

@@ -117,6 +117,7 @@ export async function handleGiteaPullRequest(
         number: payload.number,
         externalId: pullRequest.id ?? null,
         title: pullRequest.title,
+        body: pullRequest.body ?? null,
         url: getPullRequestUrl(payload),
         authorLogin: getGiteaUsername(pullRequest.user) ?? null,
         state: status,
@@ -147,6 +148,15 @@ export async function handleGiteaPullRequest(
     await notifyTerminalPullRequestThreads(payload, repoFullName, status);
 
     return { status: 'ok' };
+  }
+
+  if (payload.action === 'opened' || payload.action === 'reopened') {
+    await updateTaskPrStatus(
+      'gitea',
+      repoFullName,
+      payload.number,
+      pullRequest.draft ? 'draft' : 'open',
+    );
   }
 
   const taskType = getReviewTaskType(payload);

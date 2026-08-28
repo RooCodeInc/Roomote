@@ -21,10 +21,11 @@ const state = vi.hoisted(() => ({
     scheduleMode: 'daily' | 'weekly' | 'cron';
     cronExpression: string | null;
     model: null;
+    executionMode?: 'sandbox_task' | 'fast';
     environmentId: string;
     target: {
-      provider: 'slack' | 'discord' | 'teams' | 'telegram';
-      externalRef: string;
+      provider?: 'slack' | 'discord' | 'teams' | 'telegram';
+      externalRef?: string;
       targetKind?:
         | 'slack_channel'
         | 'slack_user'
@@ -44,6 +45,7 @@ const state = vi.hoisted(() => ({
     createdByName: string;
     createdAt: Date;
     updatedAt: Date;
+    latestFastResult?: string | null;
   }>,
   environments: [] as Array<{ id: string; name: string }>,
   nextUpdateSettingsResult: null as {
@@ -74,6 +76,7 @@ const state = vi.hoisted(() => ({
           reviewAllPullRequestAuthors: false,
           reviewOnCommit: true,
           reviewDraftPrs: true,
+          publishGithubCheck: false,
           relayReviewResultsToTask: false,
           relayUsers: [],
         },
@@ -98,6 +101,10 @@ const state = vi.hoisted(() => ({
         managerStatsFrequency: 'off' as const,
         managerStatsSlackChannelId: null,
         managerStatsDiscordChannelId: null,
+        providerUsageLimitFrequency: 'every_hour' as const,
+        providerUsageLimitThreshold: 85,
+        providerUsageLimitSlackChannelId: null,
+        providerUsageLimitDiscordChannelId: null,
         sentryTriageFrequency: 'off' as const,
         sentryTriageSlackChannelId: null,
         sentryTriageDiscordChannelId: null,
@@ -132,6 +139,7 @@ const state = vi.hoisted(() => ({
         announcerInstructions: null,
         platformIssueSlackChannelId: null,
         platformIssueDiscordChannelId: null,
+        platformIssueAlertsEnabled: true,
       },
       slackChannelDisplayNames: {
         channelAutoStartSlackChannels: {
@@ -139,6 +147,7 @@ const state = vi.hoisted(() => ({
         },
         managerSlackChannel: '#roomote-managers',
         managerStatsSlackChannel: null,
+        providerUsageLimitSlackChannel: null,
         suggesterSlackChannel: null,
         announcerSlackChannel: null,
         platformIssueSlackChannel: null,
@@ -154,6 +163,7 @@ const state = vi.hoisted(() => ({
         channelAutoStartSlackChannels: [],
         managerSlackChannel: null,
         managerStatsSlackChannel: null,
+        providerUsageLimitSlackChannel: null,
         suggesterSlackChannel: null,
         announcerSlackChannel: null,
         platformIssueSlackChannel: null,
@@ -172,12 +182,14 @@ const state = vi.hoisted(() => ({
         reviewAllPullRequestAuthors: false,
         reviewOnCommit: true,
         reviewDraftPrs: true,
+        publishGithubCheck: false,
         relayReviewResultsToTask: false,
         relayUsers: [],
       },
       resolvedDestinations: Object.fromEntries(
         [
           'manager_stats',
+          'provider_usage_limit',
           'sentry_triage',
           'dependabot_triage',
           'codeql_triage',
@@ -568,6 +580,7 @@ describe('AutomationsSettings', () => {
     state.settingsQuery.data.settings.reviewer.reviewAllPullRequestAuthors = false;
     state.settingsQuery.data.reviewer.reviewOnCommit = true;
     state.settingsQuery.data.reviewer.reviewDraftPrs = true;
+    state.settingsQuery.data.reviewer.publishGithubCheck = false;
     state.settingsQuery.data.settings.reviewCodeInstructions = null;
     state.settingsQuery.data.reviewer.relayReviewResultsToTask = false;
     state.settingsQuery.data.reviewer.relayUsers = [];
@@ -598,6 +611,27 @@ describe('AutomationsSettings', () => {
       }),
     ).toBeInTheDocument();
     expect(screen.queryByText('Beta')).not.toBeInTheDocument();
+  });
+
+  it('shows provider usage alert enablement, channel destination, and threshold controls', async () => {
+    render(<AutomationsSettings />);
+
+    fireEvent.click(
+      await screen.findByRole('button', {
+        name: 'Configure Inference Provider Usage Alerts',
+      }),
+    );
+
+    expect(screen.getByRole('switch', { name: 'Enabled' })).toBeChecked();
+    expect(
+      screen.getByLabelText('Post alerts to this Slack channel'),
+    ).toBeInTheDocument();
+    const thresholdSlider = screen.getByRole('slider', {
+      name: 'Provider usage alert threshold',
+    });
+    expect(thresholdSlider).toHaveAttribute('aria-valuemin', '5');
+    expect(thresholdSlider).toHaveAttribute('aria-valuenow', '85');
+    expect(screen.getByText('85%')).toBeInTheDocument();
   });
 
   it('configures Call Roomote via emoji with a name and instructions', async () => {
@@ -633,6 +667,25 @@ describe('AutomationsSettings', () => {
     expect(screen.getByLabelText('Additional instructions')).toHaveValue(
       'Focus on authorization boundaries.',
     );
+  });
+
+  it('explains that GitHub controls whether the review check is required', async () => {
+    state.settingsQuery.data.reviewer.enabled = true;
+    state.settingsQuery.data.settings.reviewer.enabled = true;
+
+    render(<AutomationsSettings />);
+    await openReviewerCard();
+
+    expect(
+      screen.getByRole('switch', {
+        name: 'Publish review results as a GitHub check',
+      }),
+    ).not.toBeChecked();
+    expect(
+      screen.getByText(
+        'GitHub branch protection or rulesets control whether this check is required for merging.',
+      ),
+    ).toBeVisible();
   });
 
   it('shows per-automation Slack destinations without requiring a manager channel', async () => {
@@ -790,6 +843,26 @@ describe('AutomationsSettings', () => {
     expect(
       screen.getByText('#automation-reports (Discord)'),
     ).toBeInTheDocument();
+    expect(
+      screen.getByRole('switch', { name: 'Alert on Config Errors enabled' }),
+    ).toBeChecked();
+  });
+
+  it('shows the deployment-admin DM fallback for unconfigured platform issue alerts', async () => {
+    state.settingsQuery.data.resolvedDestinations.platform_issue_alerts = null;
+    render(<AutomationsSettings />);
+
+    fireEvent.click(
+      await screen.findByRole('button', {
+        name: /(?:Set up|Configure) Alert on Config Errors/,
+      }),
+    );
+
+    expect(
+      screen.getByText(
+        'Reports to deployment admins via direct message (automatic).',
+      ),
+    ).toBeInTheDocument();
   });
 
   it('hides the launch mode picker when decision mode is disabled', async () => {
@@ -896,6 +969,10 @@ describe('AutomationsSettings', () => {
     expect(getAutomationHistoryHref('managerChannel')).toBeNull();
   });
 
+  it('does not add task history to provider usage alerts', () => {
+    expect(getAutomationHistoryHref('providerUsageLimit')).toBeNull();
+  });
+
   it('filters available automations by category and provider-aware search', async () => {
     render(<AutomationsSettings />);
 
@@ -943,7 +1020,7 @@ describe('AutomationsSettings', () => {
     ).toHaveLength(17);
   });
 
-  it('uses plain text empty states for built-in and custom automations', async () => {
+  it('keeps platform issue alerts enabled by default while showing the custom empty state', async () => {
     state.settingsQuery.data.settings.channelAutoStartSlackChannels = [];
     state.settingsQuery.data.settings.managerSlackChannelId = null as never;
     state.settingsQuery.data.slackChannelDisplayNames.managerSlackChannel =
@@ -951,11 +1028,14 @@ describe('AutomationsSettings', () => {
 
     render(<AutomationsSettings />);
 
-    const builtInEmptyState = await screen.findByText(
-      'No built-in automations enabled yet.',
-    );
-    expect(builtInEmptyState.tagName).toBe('P');
-    expect(builtInEmptyState).toHaveClass('text-sm', 'text-muted-foreground');
+    expect(
+      screen.queryByText('No built-in automations enabled yet.'),
+    ).not.toBeInTheDocument();
+    expect(
+      await screen.findByRole('button', {
+        name: 'Configure Alert on Config Errors',
+      }),
+    ).toBeInTheDocument();
     const customEmptyState = screen.getByText(
       'No custom automations created yet.',
     );
@@ -1144,6 +1224,57 @@ describe('AutomationsSettings', () => {
     ).toBeInTheDocument();
   });
 
+  it('offers Fast in the Environment menu and explains channel-less output', async () => {
+    state.customAutomations = [
+      {
+        id: 'automation-fast',
+        name: 'Fast daily digest',
+        prompt: 'Summarize priorities.',
+        enabled: true,
+        scheduleMode: 'daily',
+        cronExpression: null,
+        model: null,
+        executionMode: 'fast',
+        environmentId: '__fast__',
+        target: {},
+        lastRunAt: null,
+        lastSucceededAt: null,
+        lastFailedAt: null,
+        lastError: null,
+        lastLaunchedTaskId: null,
+        createdByName: 'Ada',
+        createdAt: new Date('2026-01-01T00:00:00Z'),
+        updatedAt: new Date('2026-01-01T00:00:00Z'),
+        latestFastResult: 'No actionable regressions found.',
+      },
+    ];
+
+    render(<AutomationsSettings />);
+
+    expect(await screen.findByText('Daily, in Fast →')).toBeInTheDocument();
+    expect(
+      screen.getByText('No actionable regressions found.'),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole('link', {
+        name: 'View previous runs for Fast daily digest',
+      }),
+    ).not.toBeInTheDocument();
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Configure Fast daily digest' }),
+    );
+    expect(screen.getByText('Delegated task model')).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        'This run is stored as a Fast conversation without posting to chat.',
+      ),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('combobox', { name: 'Environment' }));
+    expect(
+      screen.getByRole('option', { name: 'Fast (no sandbox)' }),
+    ).toBeInTheDocument();
+  });
+
   it('humanizes custom schedules and shows the last run when available', async () => {
     state.environments = [{ id: 'env-1', name: 'Production' }];
     state.customAutomations = [
@@ -1192,7 +1323,8 @@ describe('AutomationsSettings', () => {
         scheduleMode: 'daily',
         cronExpression: null,
         model: null,
-        environmentId: 'env-1',
+        executionMode: 'fast',
+        environmentId: '__fast__',
         target: {
           provider: 'slack',
           targetKind: 'slack_user',
@@ -1223,6 +1355,11 @@ describe('AutomationsSettings', () => {
         'Results are sent privately to your linked Slack account.',
       ),
     ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        'Each Fast run posts here, and replies continue the Fast session.',
+      ),
+    ).toBeInTheDocument();
   });
 
   it('shows DM me for non-Slack custom automation destinations', async () => {
@@ -1237,7 +1374,8 @@ describe('AutomationsSettings', () => {
         scheduleMode: 'daily',
         cronExpression: null,
         model: null,
-        environmentId: 'env-1',
+        executionMode: 'fast',
+        environmentId: '__fast__',
         target: {
           provider: 'discord',
           targetKind: 'discord_user',
@@ -1266,6 +1404,54 @@ describe('AutomationsSettings', () => {
     expect(
       screen.getByText(
         'Results are sent privately to your linked Discord account.',
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        'Each Fast run posts here, and replies continue the Fast session.',
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it('explains that Teams replies continue the Fast session', async () => {
+    state.settingsQuery.data.capabilities.teamsConnected = true;
+    state.customAutomations = [
+      {
+        id: 'automation-teams-fast',
+        name: 'Teams daily brief',
+        prompt: 'Summarize my priorities.',
+        enabled: true,
+        scheduleMode: 'daily',
+        cronExpression: null,
+        model: null,
+        executionMode: 'fast',
+        environmentId: '__fast__',
+        target: {
+          provider: 'teams',
+          targetKind: 'teams_user',
+          externalRef: 'user-1',
+        },
+        lastRunAt: null,
+        lastSucceededAt: null,
+        lastFailedAt: null,
+        lastError: null,
+        lastLaunchedTaskId: null,
+        createdByName: 'Ada',
+        createdAt: new Date('2026-01-01T00:00:00Z'),
+        updatedAt: new Date('2026-01-01T00:00:00Z'),
+      },
+    ];
+
+    render(<AutomationsSettings />);
+    fireEvent.click(
+      await screen.findByRole('button', {
+        name: 'Configure Teams daily brief',
+      }),
+    );
+
+    expect(
+      screen.getByText(
+        'Each Fast run posts here, and replies continue the Fast session.',
       ),
     ).toBeInTheDocument();
   });

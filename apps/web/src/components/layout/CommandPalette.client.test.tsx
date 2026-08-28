@@ -62,11 +62,17 @@ vi.mock('@/components/system', () => ({
   CommandItem: ({
     children,
     onSelect,
+    keywords,
   }: {
     children: React.ReactNode;
     onSelect?: () => void;
+    keywords?: string[];
   }) => (
-    <button type="button" onClick={() => onSelect?.()}>
+    <button
+      type="button"
+      data-keywords={keywords?.join(' ')}
+      onClick={() => onSelect?.()}
+    >
       {children}
     </button>
   ),
@@ -79,6 +85,7 @@ vi.mock('@/components/system', () => ({
   Settings: Icon,
   HelpCircle: Icon,
   Plus: Icon,
+  Zap: Icon,
 }));
 
 vi.mock('@/components/sandbox/WorkspaceBadge', () => ({
@@ -113,6 +120,15 @@ vi.mock('@/trpc/client', () => ({
     tasks: {
       search: {
         queryOptions,
+      },
+    },
+    sessions: {
+      search: {
+        queryOptions: vi.fn((input, options) => ({
+          queryKey: ['sessions', 'search', input],
+          queryFn: async () => null,
+          ...options,
+        })),
       },
     },
   }),
@@ -194,10 +210,10 @@ describe('CommandPalette', () => {
   it('navigates using static navigation items', () => {
     render(<CommandPalette />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Tasks' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Sessions' }));
 
     expect(setOpen).toHaveBeenCalledWith(false);
-    expect(push).toHaveBeenCalledWith('/tasks');
+    expect(push).toHaveBeenCalledWith('/sessions');
   });
 
   it('lists navigation items in the expected order', () => {
@@ -207,9 +223,58 @@ describe('CommandPalette', () => {
       .getAllByRole('button')
       .map((button) => button.textContent?.trim())
       .filter((label): label is string =>
-        ['New Task', 'Tasks', 'Settings', 'Help'].includes(label ?? ''),
+        [
+          'New Task',
+          'Sessions',
+          'Automations',
+          'Analytics',
+          'Settings',
+          'Help',
+        ].includes(label ?? ''),
       );
 
-    expect(navItems).toEqual(['New Task', 'Tasks', 'Settings', 'Help']);
+    expect(navItems).toEqual(['New Task', 'Sessions', 'Settings', 'Help']);
+  });
+
+  it('lets admins find and open recurring automations', () => {
+    useUserMock.mockReturnValue({
+      isSignedIn: true,
+      user: { isAdmin: true },
+    });
+
+    render(<CommandPalette />);
+
+    const automations = screen.getByRole('button', { name: 'Automations' });
+    expect(automations).toHaveAttribute(
+      'data-keywords',
+      'recurring scheduled prompts',
+    );
+
+    const navItems = screen
+      .getAllByRole('button')
+      .map((button) => button.textContent?.trim())
+      .filter((label): label is string =>
+        [
+          'New Task',
+          'Sessions',
+          'Automations',
+          'Analytics',
+          'Settings',
+          'Help',
+        ].includes(label ?? ''),
+      );
+    expect(navItems).toEqual([
+      'New Task',
+      'Sessions',
+      'Automations',
+      'Analytics',
+      'Settings',
+      'Help',
+    ]);
+
+    fireEvent.click(automations);
+
+    expect(setOpen).toHaveBeenCalledWith(false);
+    expect(push).toHaveBeenCalledWith('/automations');
   });
 });

@@ -1,15 +1,34 @@
-const { mockGetGitHubAutomationTargets, mockGetInstallationOctokit } =
-  vi.hoisted(() => ({
-    mockGetGitHubAutomationTargets: vi.fn(),
-    mockGetInstallationOctokit: vi.fn(),
-  }));
+const {
+  mockGetGitHubAutomationTargets,
+  mockGetInstallationOctokit,
+  mockEnqueueTask,
+  mockFindLatestTaskRun,
+  mockGetTaskChannelBindings,
+  mockPublishGithubPrReviewCheck,
+  mockAcquireGithubPrReviewLifecycleLock,
+  mockReleaseGithubPrReviewLifecycleLock,
+  MockSnapshotResumeAlreadyExistsError,
+} = vi.hoisted(() => ({
+  mockGetGitHubAutomationTargets: vi.fn(),
+  mockGetInstallationOctokit: vi.fn(),
+  mockEnqueueTask: vi.fn(),
+  mockFindLatestTaskRun: vi.fn(),
+  mockGetTaskChannelBindings: vi.fn(),
+  mockPublishGithubPrReviewCheck: vi.fn(),
+  mockAcquireGithubPrReviewLifecycleLock: vi.fn(),
+  mockReleaseGithubPrReviewLifecycleLock: Object.assign(vi.fn(), {
+    signal: new AbortController().signal,
+  }),
+  MockSnapshotResumeAlreadyExistsError: class extends Error {},
+}));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
   buildGitHubExistingTaskFollowUpMessage: vi.fn(),
   buildGitHubRoutingContext: vi.fn(),
-  enqueueTask: vi.fn(),
+  enqueueTask: mockEnqueueTask,
   getTaskUrl: vi.fn(),
   routeGitHubTask: vi.fn(),
+  SnapshotResumeAlreadyExistsError: MockSnapshotResumeAlreadyExistsError,
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -27,7 +46,9 @@ vi.mock('@roomote/github', () => ({
 }));
 
 vi.mock('@roomote/sdk/server', () => ({
+  acquireGithubPrReviewLifecycleLock: mockAcquireGithubPrReviewLifecycleLock,
   ensureSnapshotResumeGitHubFollowUpFallback: vi.fn(),
+  publishGithubPrReviewCheck: mockPublishGithubPrReviewCheck,
 }));
 
 vi.mock('../getGitHubAutomationTargets', async () => {
@@ -42,7 +63,8 @@ vi.mock('../getGitHubAutomationTargets', async () => {
 });
 
 vi.mock('../../tasks/helpers', () => ({
-  findLatestTaskRun: vi.fn(),
+  findLatestTaskRun: mockFindLatestTaskRun,
+  getTaskChannelBindings: mockGetTaskChannelBindings,
 }));
 
 vi.mock('../../tasks/sendMessageToTask', () => ({
@@ -58,7 +80,10 @@ vi.mock('@roomote/env', () => ({
   },
 }));
 
-import { handlePrComment } from '../handlePrComment';
+import {
+  handlePrComment,
+  resumeExistingTaskAndDeliverFollowUp,
+} from '../handlePrComment';
 import type { WebhookIssueCommentCreated } from '../types';
 
 function makePayload(): WebhookIssueCommentCreated {
@@ -112,6 +137,50 @@ describe('handlePrComment', () => {
         },
       },
       request: vi.fn(),
+    });
+    mockGetTaskChannelBindings.mockResolvedValue(null);
+    mockAcquireGithubPrReviewLifecycleLock.mockResolvedValue(
+      mockReleaseGithubPrReviewLifecycleLock,
+    );
+  });
+
+  it('returns a normal delivery failure when another GitHub resume wins', async () => {
+    mockFindLatestTaskRun.mockResolvedValue({
+      id: 42,
+      status: 'completed',
+      taskPhase: null,
+      snapshotId: 'snapshot-1',
+      snapshotCreatedAt: new Date(),
+      payload: { repo: 'acme/api' },
+      port: null,
+      actingUserId: 'user-1',
+    });
+    mockEnqueueTask.mockRejectedValueOnce(
+      new MockSnapshotResumeAlreadyExistsError(),
+    );
+
+    const result = await resumeExistingTaskAndDeliverFollowUp({
+      taskId: 'task-1',
+      userId: 'user-1',
+      sourceRunId: 42,
+      message: 'Handle the second comment.',
+      resumePromptFallbackTask: {
+        type: 'github_pr_review_follow_up',
+        userId: 'user-1',
+        payload: {
+          repo: 'acme/api',
+          prNumber: 42,
+          prTitle: 'Ship it',
+          commentBody: 'Handle the second comment.',
+          followUpSource: 'github_mention',
+        },
+      },
+    });
+
+    expect(result).toEqual({
+      success: false,
+      error: 'Reusable PR owner is already resuming',
+      status: 409,
     });
   });
 

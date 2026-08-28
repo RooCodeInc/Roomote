@@ -51,10 +51,6 @@ function mergeResultForUpdatedFields(
       updates.narrationMode === undefined
         ? mergedPreferences.narrationMode
         : result.narrationMode,
-    communicationsFastModeDefault:
-      updates.communicationsFastModeDefault === undefined
-        ? mergedPreferences.communicationsFastModeDefault
-        : result.communicationsFastModeDefault,
   };
 }
 
@@ -85,12 +81,6 @@ function rollbackUpdatedFields(
       mergedPreferences.narrationMode === optimisticPreferences.narrationMode
         ? previousPreferences.narrationMode
         : mergedPreferences.narrationMode,
-    communicationsFastModeDefault:
-      updates.communicationsFastModeDefault !== undefined &&
-      mergedPreferences.communicationsFastModeDefault ===
-        optimisticPreferences.communicationsFastModeDefault
-        ? previousPreferences.communicationsFastModeDefault
-        : mergedPreferences.communicationsFastModeDefault,
   };
 }
 

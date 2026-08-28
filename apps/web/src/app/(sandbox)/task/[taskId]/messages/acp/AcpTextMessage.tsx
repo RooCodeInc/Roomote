@@ -1,5 +1,4 @@
 import { useState, type ComponentType } from 'react';
-import Image from 'next/image';
 import {
   ACP_ENVELOPE_EVENT_TYPES,
   type AcpRequestUserInputPayload,
@@ -12,6 +11,7 @@ import {
 import { cn } from '@/lib/utils';
 
 import {
+  Avatar,
   BasicTooltip,
   Button,
   ChevronDownIcon,
@@ -147,7 +147,7 @@ function getRequestUserInputResponseDisplay(
     .filter((text) => text.length > 0);
 
   return {
-    title: data.resolution === 'cancelled' ? 'Cancelled requested input' : null,
+    title: data.resolution === 'cancelled' ? 'Cancelled input request' : null,
     questionTexts,
   };
 }
@@ -223,15 +223,15 @@ export function AcpTextMessage({ msg }: AcpTextMessageProps) {
       <div
         className={cn('flex items-start gap-2', isUser && 'flex-row-reverse')}
       >
-        {isUser && msg.userImageUrl ? (
+        {isUser ? (
           <BasicTooltip content={userTooltipContent}>
             <div className="shrink-0 pt-1 mt-8">
-              <Image
-                src={msg.userImageUrl}
-                alt={msg.userName ?? 'User'}
-                width={24}
-                height={24}
-                className="size-6 rounded-full"
+              <Avatar
+                imageUrl={msg.userImageUrl}
+                name={msg.userName}
+                email={msg.userEmail}
+                size="sm"
+                alt={msg.userName ?? msg.userEmail ?? 'User'}
               />
             </div>
           </BasicTooltip>

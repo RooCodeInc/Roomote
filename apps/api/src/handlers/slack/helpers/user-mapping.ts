@@ -8,9 +8,7 @@ import {
 } from '@roomote/db/server';
 
 type SlackUserMappingLookup = {
-  activeMapping:
-    | (SlackUserMapping & { communicationsFastModeDefault: boolean })
-    | null;
+  activeMapping: SlackUserMapping | null;
   hasInactiveMapping: boolean;
 };
 
@@ -28,7 +26,6 @@ export async function lookupSlackUserMapping(params: {
       updatedAt: slackUserMappings.updatedAt,
       matchedUserId: users.id,
       userDeletedAt: users.deletedAt,
-      userMetadata: users.metadata,
     })
     .from(slackUserMappings)
     .leftJoin(users, eq(users.id, slackUserMappings.userId))
@@ -62,12 +59,6 @@ export async function lookupSlackUserMapping(params: {
       userId: row.userId,
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
-      communicationsFastModeDefault:
-        typeof row.userMetadata === 'object' &&
-        row.userMetadata !== null &&
-        !Array.isArray(row.userMetadata) &&
-        (row.userMetadata as Record<string, unknown>)
-          .communications_fast_mode_default === true,
     },
     hasInactiveMapping: false,
   };

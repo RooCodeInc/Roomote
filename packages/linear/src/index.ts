@@ -4,6 +4,8 @@ export type {
   AgentSessionEventAction,
   HumanToAgentSignal,
   LinearIssue,
+  LinearBrainIssue,
+  LinearBrainIssuePage,
   LinearComment,
   LinearUser,
   AgentGuidance,

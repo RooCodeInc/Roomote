@@ -6,6 +6,7 @@ import {
   deploymentSettings,
   eq,
   invites,
+  isBrainEnabled,
   recordLicenseUsageObservation,
   users,
 } from '@roomote/db/server';
@@ -29,7 +30,7 @@ import {
 } from '@/types';
 
 import { bootstrapWebRuntimeEnv } from './bootstrap-runtime-env';
-import { Env, isRoomoteCloudEnabled } from './env';
+import { Env, isBrainConfigured, isRoomoteCloudEnabled } from './env';
 import { setSentryUserContext } from './sentry-context';
 import { getAuth } from './auth';
 import {
@@ -442,6 +443,10 @@ export async function authorize(): Promise<UserAuthSuccess | AuthError> {
     featureFlags,
     anonymousAnalyticsEnabled,
     cloudEnabled: isRoomoteCloudEnabled(Env.R_CLOUD_ENABLED),
+    // Drives the Memory item in Settings navigation. Wiring presence, not
+    // just the effective toggle: an admin must be able to reach the Memory
+    // page to turn a wired-but-disabled Brain on.
+    brainConfigured: isBrainConfigured(Env) || (await isBrainEnabled()),
     cookieConsentedAt: authContext.cookieConsentedAt,
     managedAccess: getManagedDeploymentAccessFromMetadata(
       authContext.deploymentMetadata,

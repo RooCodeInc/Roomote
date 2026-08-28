@@ -2,6 +2,7 @@
 // This barrel centralizes icon imports so consumers import from '@/components/system'
 // instead of directly from 'lucide-react'.
 export {
+  Activity,
   AlertCircle,
   AlertCircleIcon,
   AlertTriangle,
@@ -25,6 +26,7 @@ export {
   Bug,
   Calendar,
   Camera,
+  ChartColumn,
   ChartColumnIncreasing,
   Check,
   CheckCircle2,
@@ -45,6 +47,7 @@ export {
   CircleUserRound,
   Clock,
   CloudIcon,
+  Columns3,
   Code2,
   Container,
   Copy,
@@ -60,7 +63,6 @@ export {
   ExternalLink,
   Eye,
   EyeOff,
-  File,
   FileBox,
   FileCode,
   FileDiffIcon,
@@ -101,12 +103,14 @@ export {
   Info,
   KeyboardIcon,
   KeyRound,
+  Layers,
   LifeBuoyIcon,
   ListChevronsUpDown,
   Lightbulb,
   Link as LucideLink,
   ListEnd,
   ListChecks,
+  List,
   Loader2,
   Loader2Icon,
   LoaderCircle,
@@ -156,7 +160,6 @@ export {
   RotateCcw,
   History as RotateCcwClock,
   RotateCcwKey,
-  RotateCw,
   ScrollText,
   Rows4,
   ScanFace,
@@ -186,6 +189,7 @@ export {
   SquareSlashIcon,
   Stethoscope,
   Sun,
+  Target,
   Terminal,
   TerminalIcon,
   ThumbsDown,
@@ -212,6 +216,7 @@ export {
   XIcon,
   Zap,
   BellElectric,
+  BatteryWarning,
 } from 'lucide-react';
 
 export type { LucideIcon } from 'lucide-react';

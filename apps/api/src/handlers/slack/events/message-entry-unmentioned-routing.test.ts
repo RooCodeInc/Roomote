@@ -26,7 +26,6 @@ vi.mock('@roomote/env', () => ({
 
 vi.mock('@roomote/cloud-agents/server', () => ({
   ROUTING_AUTO_CONFIRM_TIMEOUT_MS: 0,
-  createFastAgentSlackTaskLauncher: vi.fn(() => vi.fn()),
   hasFastAgentSession: hasFastAgentSessionMock,
 }));
 
@@ -37,6 +36,7 @@ vi.mock('@roomote/cloud-agents', () => ({
 
 vi.mock('@roomote/slack', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@roomote/slack')>()),
+  createFastAgentSlackLiveTaskLauncher: vi.fn(() => vi.fn()),
   hasPendingRoutingConfirmation: hasPendingRoutingConfirmationMock,
   markSlackThreadExplicitMentionRequired:
     markSlackThreadExplicitMentionRequiredMock,
@@ -130,7 +130,7 @@ describe('shouldRouteUnmentionedSlackThreadReplyToAgent', () => {
     hasFastAgentSessionMock.mockResolvedValue(true);
     findRoomoteOwnedSlackThreadMock.mockResolvedValue(null);
     fetchThreadMessagesMock.mockResolvedValue([
-      humanMessage('U111', THREAD_TS, '<@UBOT> /fast hi'),
+      humanMessage('U111', THREAD_TS, '<@UBOT> !fast hi'),
       botMessage('101.000', 'Hi there.'),
     ]);
 
@@ -156,7 +156,7 @@ describe('shouldRouteUnmentionedSlackThreadReplyToAgent', () => {
     hasFastAgentSessionMock.mockResolvedValue(true);
     findRoomoteOwnedSlackThreadMock.mockResolvedValue(null);
     fetchThreadMessagesMock.mockResolvedValue([
-      humanMessage('UDAN', THREAD_TS, '<@UBOT> /fast hi'),
+      humanMessage('UDAN', THREAD_TS, '<@UBOT> !fast hi'),
       botMessage('101.000', 'Hi Dan.'),
     ]);
 
@@ -191,7 +191,7 @@ describe('shouldRouteUnmentionedSlackThreadReplyToAgent', () => {
     hasFastAgentSessionMock.mockResolvedValue(true);
     findRoomoteOwnedSlackThreadMock.mockResolvedValue(null);
     fetchThreadMessagesMock.mockResolvedValue([
-      humanMessage('U111', THREAD_TS, '<@UBOT> /fast hi'),
+      humanMessage('U111', THREAD_TS, '<@UBOT> !fast hi'),
       botMessage('101.000', 'Hi there.'),
       humanMessage('U222', '102.000', 'I think that is probably right'),
     ]);

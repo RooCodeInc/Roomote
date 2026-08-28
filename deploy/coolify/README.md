@@ -138,7 +138,7 @@ Notes:
   `gbrain` container needs a key in its own environment and cannot read
   Roomote's encrypted store. They are separate from the provider keys you
   enter in `/setup` for task models; the two can be different keys. Leave
-  both empty to run without a Brain. See "Enabling the Brain" below.
+  both empty to run without Memory. See "Enabling Memory" below.
 - Leave `PREVIEW_PROXY_BASE_URL` and `PREVIEW_DOMAINS` unset unless you
   enable live previews. Roomote boots without them; previews report as not
   configured in the task page's preview pane until set.
@@ -231,7 +231,7 @@ wildcard-capable TLS setup on the Coolify proxy:
    hostname. Previews are always enabled and publish for every environment
    that defines preview ports.
 
-## Enabling the Brain (optional)
+## Enabling Memory (optional)
 
 The `gbrain` service gives this deployment shared memory: completed tasks
 and activity from connected integrations (pull requests, public Slack
@@ -239,20 +239,20 @@ channels, meeting notes, GitHub issues) become pages that agents consult
 with citations, and agents record what they decided and why when they
 finish substantial work.
 
-One variable turns it on. Add it to the resource's environment variables
-panel in Coolify:
+One variable turns it on:
 
-1. Configure a model provider under **Settings → Models** after first boot,
-   if you have not already. The gbrain service holds no provider key; it asks
-   the api service for embeddings and synthesis, and the api service uses the
-   key your deployment already has. Changing it later needs no redeploy.
-2. To bill the Brain separately from task inference, set
-   `R_BRAIN_OPENROUTER_API_KEY` or `R_BRAIN_OPENAI_API_KEY` in the
-   resource's environment variables panel. Those take precedence.
+1. Set `R_BRAIN_OPENROUTER_API_KEY` or `R_BRAIN_OPENAI_API_KEY` in the
+   resource's environment variables panel. The explicit `R_BRAIN_*` name is
+   the on switch for Memory: a deployment that only configured task models
+   under **Settings → Models** keeps no Memory, no ingestion, and agents are
+   never told one exists. The value can be the same key you use for tasks,
+   or a separate one to bill Memory independently. The gbrain service
+   holds no provider key; it asks the api service for embeddings and
+   synthesis using this key, and changing it later needs no redeploy.
 2. Redeploy the resource. Within a minute the deployment registers its own
-   scoped clients against the Brain (read-only agent access, ingestion, and
+   scoped clients against Memory (read-only agent access, ingestion, and
    maintenance), backfills the task history it already has,
-   and starts delivering the Brain to new tasks. Watch the `bullmq` service
+   and starts delivering Memory to new tasks. Watch the `bullmq` service
    logs for `[brain] provisioned scoped clients`.
 
 `R_GBRAIN_ADMIN_TOKEN` is generated for you as
@@ -267,24 +267,23 @@ access only.
 Unlike the compose and Railway deployments, the service runs whether or not
 the key is set, because Coolify's compose parser does not honour `profiles`.
 That is a supported state and costs about 370 MB of idle memory. With the
-key empty, agents are told nothing about the Brain and no ingestion runs.
+key empty, agents are told nothing about Memory and no ingestion runs.
 Deployments that want no memory at all can delete the `gbrain` service and
 the `gbrain_data` corpus volume from the compose file before deploying.
 
 Two operational notes:
 
-- **Back up the Brain volume.** `gbrain_data` holds the Markdown corpus,
+- **Back up the Memory volume.** `gbrain_data` holds the Markdown corpus,
   including pages produced by nightly synthesis. The isolated `gbrain`
   database in Postgres holds its searchable index, extracted facts, and
   durable jobs, so keep it in the normal `pg_data` backup too.
 - **Model choice is a variable, not a rebuild.** `R_BRAIN_MODEL` selects the
-  synthesis model, `R_BRAIN_EMBEDDING_MODEL` the embedding model, and
-  `R_BRAIN_RERANKER_MODEL` the reranker. Set them on the app services. Leave
-  them empty for the defaults. The synthesis model can change at any time;
-  the reranker changes after a gbrain restart; the embedding model
-  sizes the Brain's vector storage when it is first created, so set it (with
+  synthesis model and `R_BRAIN_EMBEDDING_MODEL` the embedding model. Set them
+  on the app services. Leave them empty for the defaults. The synthesis model
+  can change at any time; the embedding model
+  sizes Memory's vector storage when it is first created, so set it (with
   `R_BRAIN_EMBEDDING_DIMENSIONS`) before first boot or not at all. A later
-  change is ignored and reported in the Brain's logs rather than silently
+  change is ignored and reported in Memory's logs rather than silently
   applied.
 
 ## Upgrades, backups, and costs
@@ -325,6 +324,6 @@ Its first-boot verification has two extra items: confirm that
 gbrain service and the app services (a mismatch shows up as
 `Brain admin login failed (401)` in the `bullmq` logs), and that the api
 service can reach `http://gbrain:8931/health` on the `roomote_default`
-network. Both failure modes are contained: a Brain that never provisions
-leaves the rest of the deployment working, because every Brain code path is
+network. Both failure modes are contained: Memory that never provisions
+leaves the rest of the deployment working, because every Memory code path is
 already conditional on the key being present.

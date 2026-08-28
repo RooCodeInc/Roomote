@@ -1,15 +1,16 @@
 import { describe, expect, it, vi } from 'vitest';
 
-vi.mock('../../encryption', () => ({
-  encryptJSON: (value: unknown) => JSON.stringify(value),
-  decryptSecrets: async (value: string) => JSON.parse(value) as unknown,
-}));
+import { eq } from 'drizzle-orm';
 
 import {
   fetchOpenRouterCreditBalance,
+  fetchRoomoteCreditBalance,
   getProviderCreditBalances,
   parseOpenRouterKeyBalance,
+  parseOpenRouterKeyDetails,
 } from '../provider-credit-balance';
+import { db } from '../../db';
+import { environmentVariables } from '../../schema';
 
 function jsonResponse(payload: unknown, status = 200) {
   return new Response(JSON.stringify(payload), { status });
@@ -62,6 +63,62 @@ describe('parseOpenRouterKeyBalance', () => {
     expect(parseOpenRouterKeyBalance(null)).toBeNull();
     expect(parseOpenRouterKeyBalance({})).toBeNull();
     expect(parseOpenRouterKeyBalance({ data: {} })).toBeNull();
+  });
+});
+
+describe('fetchRoomoteCreditBalance', () => {
+  it('uses the stored Roomote key against the OpenRouter balance endpoint', async () => {
+    // The hosting-injected env variable is a delivery mechanism only; the
+    // balance is read with the key setup imported into Settings storage.
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValue(
+        jsonResponse({ data: { limit: 5, limit_remaining: 3 } }),
+      );
+    await db.insert(environmentVariables).values({
+      name: 'R_TRIAL_OPENROUTER_API_KEY',
+      value: 'managed-key',
+      userId: null,
+    });
+
+    try {
+      await expect(
+        fetchRoomoteCreditBalance({
+          // Present at runtime, as on a hosted deployment: it must be the
+          // stored row, not this value, that reaches the balance endpoint.
+          runtimeEnv: { R_TRIAL_OPENROUTER_API_KEY: 'env-delivery-value' },
+          fetchImpl,
+        }),
+      ).resolves.toMatchObject({
+        providerId: 'roomote',
+        remaining: 3,
+        limit: 5,
+      });
+      expect(fetchImpl).toHaveBeenCalledWith(
+        'https://openrouter.ai/api/v1/key',
+        expect.objectContaining({
+          headers: expect.objectContaining({
+            authorization: 'Bearer managed-key',
+          }),
+        }),
+      );
+    } finally {
+      await db
+        .delete(environmentVariables)
+        .where(eq(environmentVariables.name, 'R_TRIAL_OPENROUTER_API_KEY'));
+    }
+  });
+
+  it('returns null when no Roomote key is stored, whatever the env says', async () => {
+    const fetchImpl = vi.fn();
+
+    await expect(
+      fetchRoomoteCreditBalance({
+        runtimeEnv: { R_TRIAL_OPENROUTER_API_KEY: 'env-delivery-value' },
+        fetchImpl,
+      }),
+    ).resolves.toBeNull();
+    expect(fetchImpl).not.toHaveBeenCalled();
   });
 });
 
@@ -131,6 +188,39 @@ describe('fetchOpenRouterCreditBalance', () => {
         fetchImpl,
       }),
     ).resolves.toBeNull();
+  });
+});
+
+describe('parseOpenRouterKeyDetails', () => {
+  it('parses the key label and reset cadence used by usage warnings', () => {
+    expect(
+      parseOpenRouterKeyDetails({
+        data: {
+          label: 'Production reviews',
+          limit: 500,
+          limit_remaining: 75,
+          limit_reset: 'weekly',
+          usage: 900,
+        },
+      }),
+    ).toEqual({
+      label: 'Production reviews',
+      limit: 500,
+      limitRemaining: 75,
+      limitReset: 'weekly',
+      usage: 900,
+    });
+  });
+
+  it('rejects unlimited and invalid limits', () => {
+    expect(
+      parseOpenRouterKeyDetails({
+        data: { limit: null, limit_remaining: null },
+      }),
+    ).toBeNull();
+    expect(
+      parseOpenRouterKeyDetails({ data: { limit: 0, limit_remaining: 0 } }),
+    ).toBeNull();
   });
 });
 

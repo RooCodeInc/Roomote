@@ -11,6 +11,7 @@ import {
 import { recordChatTurnStart } from '../../mcp/roomote-mcp-server/chat-reply-satisfaction';
 import { isActiveTaskPhase } from '../../sandbox-server/lib/harness-manager';
 import type { ListenerOptions } from '../types';
+import { isMissingSlackReplyTargetProcedureError } from '../slack-reply-target';
 import {
   logPollingTransportError,
   runPollingSdkCall,
@@ -131,21 +132,36 @@ export function createSlackMessageInterval({
           }
 
           if (answer.channel && answer.threadTs) {
-            const activated = await runPollingSdkCall({
-              execute: () =>
-                sdk.taskRuns.activateSlackReplyTarget({
+            let activated:
+              | Awaited<
+                  ReturnType<typeof sdk.taskRuns.activateSlackReplyTarget>
+                >
+              | undefined;
+            try {
+              activated = await sdk.taskRuns.activateSlackReplyTarget({
+                runId: taskRun.id,
+                messageTs: answer.ts,
+              });
+            } catch (error) {
+              if (isMissingSlackReplyTargetProcedureError(error)) {
+                activated = false;
+                logger.warn(
+                  `[listenForSlackEvents] Slack reply target procedures are unavailable on this API (rolled-back release?); delivering request_user_input answer with canonical routing`,
+                );
+              } else {
+                logPollingTransportError({
+                  error,
+                  stage: 'listenForSlackEvents',
                   runId: taskRun.id,
-                  messageTs: answer.ts,
-                }),
-              stage: 'listenForSlackEvents',
-              runId: taskRun.id,
-              sessionId: state.sessionId,
-              sdkMethod: 'taskRuns.activateSlackReplyTarget',
-              failurePoint: 'slackReplyTargetActivation',
-              logger,
-              message: `[listenForSlackEvents] Failed to activate Slack reply target for request_user_input answer on job ${taskRun.id}`,
-            });
-            if (activated === null) {
+                  sessionId: state.sessionId,
+                  sdkMethod: 'taskRuns.activateSlackReplyTarget',
+                  failurePoint: 'slackReplyTargetActivation',
+                  logger,
+                  message: `[listenForSlackEvents] Failed to activate Slack reply target for request_user_input answer on job ${taskRun.id}`,
+                });
+              }
+            }
+            if (activated === undefined) {
               await requeueSlackRequestUserInputAnswers(
                 taskRun.id,
                 queuedAnswers,

@@ -10,12 +10,12 @@ import { toast } from 'sonner';
 import {
   type ComputeProvider,
   ALL_REPOSITORIES,
+  FAST_EXECUTION,
   DEFAULT_LAUNCH_CODING_HARNESS,
   DEFAULT_MANAGED_DEPLOYMENT_ACCESS,
   pickPreferredConfiguredComputeProvider,
   SETUP_COMPUTE_PROVIDER_CATALOG,
 } from '@roomote/types';
-import type { RoutingDecision } from '@roomote/cloud-agents/server';
 
 import { type CreateTaskFormValues, createTaskFormSchema } from '@/types';
 
@@ -31,7 +31,10 @@ import {
   type WorkspaceSelection,
   useWorkspaceStorage,
 } from '@/hooks/useWorkspaceStorage';
-import { useCreateStandardTaskRun, useRouteHomeTask } from '@/hooks/task-runs';
+import {
+  useCreateStandardTaskRun,
+  useStartFastSession,
+} from '@/hooks/task-runs';
 
 import {
   Alert,
@@ -44,7 +47,6 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-  Loader2,
   Mail,
   MessageCirclePlus,
   Select,
@@ -52,7 +54,7 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
-  TriangleAlert,
+  VectorSquare,
 } from '@/components/system';
 import type { PromptInputMessage } from '@/components/ai-elements';
 import {
@@ -61,6 +63,7 @@ import {
   TaskPromptInput,
   AUTO_WORKSPACE_VALUE,
 } from '@/components/tasks';
+import { useTaskLaunchConfig } from '@/components/tasks/TaskLaunchConfig';
 
 import { OnboardingCard } from './OnboardingCard';
 import { BottomSheetTabs } from './BottomSheetTabs';
@@ -95,12 +98,11 @@ function persistFeedbackPromptDismissal(): void {
   }
 }
 
-type RoutingFlowState = 'idle' | 'routing_pending' | 'launching';
-
 type SubmissionSnapshot = {
   branch?: string;
   description?: string;
   images?: string[];
+  attachmentTexts?: string[];
   blank: boolean;
 };
 
@@ -133,11 +135,28 @@ type HomeProps = {
   availableComputeProviders?: readonly ComputeProvider[];
 };
 
-export function Home({
+type NewTaskFormProps = HomeProps & {
+  presentation?: 'home' | 'dialog';
+  onTaskStarted?: () => void;
+};
+
+export function Home(props: HomeProps) {
+  return <NewTaskForm {...props} />;
+}
+
+export function NewTaskForm({
   initialPlaceholderIndex,
-  defaultComputeProvider = 'docker',
+  defaultComputeProvider: defaultComputeProviderOverride,
   availableComputeProviders,
-}: HomeProps) {
+  presentation = 'home',
+  onTaskStarted,
+}: NewTaskFormProps) {
+  const taskLaunchConfig = useTaskLaunchConfig();
+  const defaultComputeProvider =
+    defaultComputeProviderOverride ?? taskLaunchConfig.defaultComputeProvider;
+  const resolvedAvailableComputeProviders =
+    availableComputeProviders ?? taskLaunchConfig.availableComputeProviders;
+  const isHomePresentation = presentation === 'home';
   const router = useRouter();
   const environments = useEnvironments();
   const {
@@ -154,11 +173,11 @@ export function Home({
     (descriptor) => descriptor.provider,
   );
   const computeProviderOptions =
-    availableComputeProviders === undefined
+    resolvedAvailableComputeProviders === undefined
       ? catalogComputeProviders
-      : availableComputeProviders.length > 0
+      : resolvedAvailableComputeProviders.length > 0
         ? catalogComputeProviders.filter((provider) =>
-            availableComputeProviders.includes(provider),
+            resolvedAvailableComputeProviders.includes(provider),
           )
         : [defaultComputeProvider];
   const computeProviderDescriptors = SETUP_COMPUTE_PROVIDER_CATALOG.filter(
@@ -171,15 +190,16 @@ export function Home({
 
   const searchParams = useSearchParams();
   const promptParam = searchParams.get('prompt') ?? '';
+  const modelParam = searchParams.get('model')?.trim() || undefined;
   const environmentIdParam = searchParams.get('environmentId')?.trim() ?? '';
 
   const [promptText, setPromptText] = useState(promptParam);
   const [isExiting, setIsExiting] = useState(false);
-  const [routingState, setRoutingState] = useState<RoutingFlowState>('idle');
   const [selectedComputeProvider, setSelectedComputeProvider] =
     useState<ComputeProvider>(initialComputeProvider);
-  const [selectedModelOverrideId, setSelectedModelOverrideId] =
-    useState<string>();
+  const [selectedModelOverrideId, setSelectedModelOverrideId] = useState<
+    string | undefined
+  >(modelParam);
   const [isBottomSheetExpanded, setIsBottomSheetExpanded] = useState(false);
   const [isFeedbackPromptVisible, setIsFeedbackPromptVisible] = useState(false);
   const [isFeedbackDialogOpen, setIsFeedbackDialogOpen] = useState(false);
@@ -199,13 +219,16 @@ export function Home({
     number | undefined
   >(undefined);
 
-  const routingRequestIdRef = useRef(0);
-
   useEffect(() => setPromptText(promptParam), [promptParam]);
+  useEffect(() => setSelectedModelOverrideId(modelParam), [modelParam]);
 
   useEffect(() => {
+    if (!isHomePresentation) {
+      return;
+    }
+
     setIsFeedbackPromptVisible(!isFeedbackPromptDismissed());
-  }, []);
+  }, [isHomePresentation]);
 
   useEffect(() => {
     setPlaceholderIndex(
@@ -232,6 +255,10 @@ export function Home({
   // Dynamically compute the max textarea height so it can grow to fill the
   // available space without pushing the bottom-sheet tabs off screen.
   useEffect(() => {
+    if (!isHomePresentation) {
+      return;
+    }
+
     const column = contentColumnRef.current;
     const card = promptCardRef.current;
 
@@ -284,39 +311,37 @@ export function Home({
       observer.disconnect();
       window.removeEventListener('resize', compute);
     };
-  }, []);
+  }, [isHomePresentation]);
 
   const form = useForm<CreateTaskFormValues>({
     resolver: zodResolver(createTaskFormSchema),
     defaultValues: DEFAULT_FORM_VALUES,
   });
-  const watchedRepository = form.watch('repository');
 
   const { workspace, setWorkspace } = useWorkspaceStorage();
   const hasRestoredWorkspace = useRef(false);
+  const shouldRestoreDefaultWorkspace = useRef(false);
 
-  const clearRoutingState = useCallback(() => {
-    setRoutingState('idle');
+  const handleInvalidWorkspaceReset = useCallback(() => {
+    shouldRestoreDefaultWorkspace.current = true;
   }, []);
 
-  const cancelRoutingInFlight = useCallback(() => {
-    routingRequestIdRef.current += 1;
-    clearRoutingState();
-  }, [clearRoutingState]);
-
-  const resetToAutoWorkspace = useCallback(() => {
-    setWorkspace({
-      workspace: { type: 'auto' },
-    });
-
-    form.setValue('repository', AUTO_WORKSPACE_VALUE);
-    form.setValue('environmentId', undefined);
-    form.setValue('branch', '');
-  }, [form, setWorkspace]);
-
   useEffect(() => {
+    const restoredWorkspace = workspace.workspace as
+      | WorkspaceSelection['workspace']
+      | undefined;
+
     if (hasRestoredWorkspace.current) {
-      return;
+      if (
+        !shouldRestoreDefaultWorkspace.current ||
+        restoredWorkspace?.type !== 'auto' ||
+        form.getValues('repository') !== AUTO_WORKSPACE_VALUE
+      ) {
+        return;
+      }
+
+      hasRestoredWorkspace.current = false;
+      shouldRestoreDefaultWorkspace.current = false;
     }
 
     if (environmentIdParam) {
@@ -332,56 +357,17 @@ export function Home({
       return;
     }
 
-    const restoredWorkspace = workspace.workspace as
-      | WorkspaceSelection['workspace']
-      | undefined;
-
-    if (restoredWorkspace?.type === 'repository') {
-      form.setValue('repository', restoredWorkspace.value);
-      form.setValue('environmentId', undefined);
+    if (form.getValues('repository') !== AUTO_WORKSPACE_VALUE) {
       hasRestoredWorkspace.current = true;
       return;
     }
 
-    if (restoredWorkspace?.type === 'environment') {
-      form.setValue('repository', restoredWorkspace.id);
-      form.setValue('environmentId', restoredWorkspace.id);
-      hasRestoredWorkspace.current = true;
-      return;
-    }
-
-    // Auto (or unset) stored preference: wait for environments so we can
-    // default the sole environment instead of writing Auto over the selector.
-    if (environments.isPending || !environments.isSuccess) {
-      return;
-    }
-
-    const soleEnvironment =
-      environments.data?.length === 1 ? environments.data[0] : undefined;
-
-    if (soleEnvironment) {
-      form.setValue('repository', soleEnvironment.id);
-      form.setValue('environmentId', soleEnvironment.id);
-      form.setValue('branch', '');
-      setWorkspace({
-        workspace: { type: 'environment', id: soleEnvironment.id },
-      });
-    } else {
-      form.setValue('repository', AUTO_WORKSPACE_VALUE);
-      form.setValue('environmentId', undefined);
-      form.setValue('branch', '');
-    }
-
+    // Fast mode is always the default workspace for new prompts.
+    form.setValue('repository', FAST_EXECUTION);
+    form.setValue('environmentId', undefined);
+    form.setValue('branch', '');
     hasRestoredWorkspace.current = true;
-  }, [
-    environmentIdParam,
-    environments.data,
-    environments.isPending,
-    environments.isSuccess,
-    form,
-    setWorkspace,
-    workspace,
-  ]);
+  }, [environmentIdParam, form, setWorkspace, workspace]);
 
   const wiggleWorkspace = useCallback(() => {
     const el = workspaceRef.current;
@@ -398,11 +384,17 @@ export function Home({
   const navigateToTaskRun = (result: {
     success: boolean;
     taskId?: string;
+    sessionId?: string;
     error?: string;
   }) => {
     if (result.success && 'taskId' in result) {
+      onTaskStarted?.();
       setIsExiting(true);
-      router.push(`/task/${result.taskId}`);
+      router.push(
+        result.sessionId
+          ? `/sessions/${result.sessionId}?task=${result.taskId}`
+          : `/task/${result.taskId}`,
+      );
     } else if ('error' in result) {
       toast.error(result.error);
     }
@@ -414,7 +406,36 @@ export function Home({
   };
 
   const createStandardTaskRun = useCreateStandardTaskRun(mutationOptions);
-  const routeHomeTask = useRouteHomeTask();
+  const startFastSessionMutation = useStartFastSession();
+
+  const startFastSession = useCallback(
+    async (payload: {
+      text: string;
+      images?: string[];
+      attachmentTexts?: string[];
+      model?: string;
+    }): Promise<void> => {
+      // A second submit while the first is in flight would mint a second
+      // session and orphan one of them.
+      if (startFastSessionMutation.isPending) {
+        return;
+      }
+      try {
+        const { sessionId } =
+          await startFastSessionMutation.mutateAsync(payload);
+        onTaskStarted?.();
+        setIsExiting(true);
+        router.push(`/sessions/${sessionId}`);
+      } catch (error) {
+        toast.error(
+          error instanceof Error
+            ? error.message
+            : 'Failed to start Fast session',
+        );
+      }
+    },
+    [onTaskStarted, startFastSessionMutation, router],
+  );
   const launchTaskModels = useLaunchTaskModels();
   const selectedModelId =
     selectedModelOverrideId ?? launchTaskModels.data?.defaultModelId;
@@ -446,26 +467,6 @@ export function Home({
   );
 
   useEffect(() => {
-    if (routingState !== 'routing_pending') {
-      return;
-    }
-
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape') {
-        return;
-      }
-
-      event.preventDefault();
-      cancelRoutingInFlight();
-      resetToAutoWorkspace();
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [cancelRoutingInFlight, resetToAutoWorkspace, routingState]);
-
-  useEffect(() => {
     const mediaQuery = window.matchMedia('(max-height: 80rem)');
     const syncViewportHeight = () => {
       setIsShortViewport(mediaQuery.matches);
@@ -480,106 +481,13 @@ export function Home({
   }, []);
 
   const isBusy =
-    createStandardTaskRun.isPending ||
-    routingState === 'routing_pending' ||
-    routingState === 'launching';
+    createStandardTaskRun.isPending || startFastSessionMutation.isPending;
 
-  const showRoutingSpinner = routingState === 'routing_pending';
   const shouldDimMainForm = isBottomSheetExpanded && isShortViewport;
   const hasAnyEnvironments = (environments.data?.length ?? 0) > 0;
   const showNoEnvironmentsWarning =
     isAdmin && !environments.isPending && !hasAnyEnvironments;
-  const submitDisabledReason =
-    getTaskLaunchDisabledReason(managedAccess) ??
-    (!hasAnyEnvironments && watchedRepository === AUTO_WORKSPACE_VALUE
-      ? 'Auto routing needs an environment. Create one, or select All Repositories to work without one.'
-      : undefined);
-
-  const handleAutoSubmit = useCallback(
-    async (submission: SubmissionSnapshot) => {
-      cancelRoutingInFlight();
-      setRoutingState('routing_pending');
-      const routingRequestId = routingRequestIdRef.current + 1;
-      routingRequestIdRef.current = routingRequestId;
-
-      let routedResult: RoutingDecision;
-
-      try {
-        routedResult = await routeHomeTask.mutateAsync({
-          description: submission.description ?? '',
-          ...(submission.images?.length ? { images: submission.images } : {}),
-        });
-      } catch (error) {
-        toast.error(
-          error instanceof Error
-            ? error.message
-            : 'Could not auto-route this task.',
-        );
-        clearRoutingState();
-        return;
-      }
-
-      if (routingRequestId !== routingRequestIdRef.current) {
-        return;
-      }
-
-      if (routedResult.status === 'platform_answer') {
-        toast(routedResult.result.answer);
-        clearRoutingState();
-        return;
-      }
-
-      if (routedResult.status === 'fallback') {
-        toast.error("Couldn't auto-route this task.");
-        clearRoutingState();
-        return;
-      }
-
-      if (routedResult.result.workspace.type === 'environment') {
-        if (!routedResult.result.workspace.id.trim()) {
-          toast.error('Could not determine a routed environment.');
-          clearRoutingState();
-          return;
-        }
-      } else {
-        toast.error('Auto routing requires an environment-backed workspace.');
-        clearRoutingState();
-        return;
-      }
-
-      setRoutingState('launching');
-      const routedModelId =
-        routedResult.result.model?.source === 'preference'
-          ? routedResult.result.model.id
-          : undefined;
-
-      const didLaunch = await launchTask({
-        repo: ALL_REPOSITORIES,
-        branch: submission.branch,
-        environmentId:
-          routedResult.result.workspace.type === 'environment'
-            ? routedResult.result.workspace.id
-            : undefined,
-        description: submission.description,
-        images: submission.images,
-        modelId: routedModelId,
-        blank: submission.blank,
-      });
-
-      if (didLaunch) {
-        resetToAutoWorkspace();
-      }
-
-      clearRoutingState();
-    },
-    [
-      cancelRoutingInFlight,
-      clearRoutingState,
-      launchTask,
-      resetToAutoWorkspace,
-      routeHomeTask,
-    ],
-  );
+  const submitDisabledReason = getTaskLaunchDisabledReason(managedAccess);
 
   const handleSubmit = useCallback(
     async (message: PromptInputMessage) => {
@@ -603,11 +511,33 @@ export function Home({
         description:
           preparedPrompt.text.length > 0 ? preparedPrompt.text : undefined,
         images: preparedPrompt.images,
+        attachmentTexts: preparedPrompt.attachmentTexts,
         blank: preparedPrompt.text.length === 0,
       };
 
+      if (repository === FAST_EXECUTION) {
+        if (!submission.description && !submission.images?.length) {
+          return;
+        }
+        await startFastSession({
+          text: submission.description ?? '',
+          images: submission.images,
+          attachmentTexts: submission.attachmentTexts,
+          model: selectedModelId,
+        });
+        return;
+      }
+
+      // Auto is no longer offered in the picker, but stored workspace
+      // preferences may still restore it; treat it as Fast.
       if (isAutoWorkspace) {
-        await handleAutoSubmit(submission);
+        if (!submission.description && !submission.images?.length) return;
+        await startFastSession({
+          text: submission.description ?? '',
+          images: submission.images,
+          attachmentTexts: submission.attachmentTexts,
+          model: selectedModelId,
+        });
         return;
       }
 
@@ -632,37 +562,44 @@ export function Home({
     },
     [
       form,
-      handleAutoSubmit,
       launchTask,
       setWorkspace,
       canSelectBranch,
       wiggleWorkspace,
+      startFastSession,
+      selectedModelId,
     ],
   );
 
   return (
     <FormProvider {...form}>
-      <div className="flex flex-1 md:items-center justify-center h-[calc(var(--effective-viewport-height)-4rem)] md:h-[calc(var(--effective-viewport-height)-1rem)]">
+      <div
+        className={cn(
+          isHomePresentation &&
+            'flex flex-1 md:items-center justify-center h-[calc(var(--effective-viewport-height)-4rem)] md:h-[calc(var(--effective-viewport-height)-1rem)]',
+        )}
+      >
         <div
           className={cn(
-            'flex w-full max-w-3xl flex-col px-4 justify-center h-full',
+            'flex w-full max-w-3xl flex-col justify-center',
+            isHomePresentation && 'px-4 h-full',
             isExiting && 'animate-[exit-right_500ms_1_forwards]',
           )}
         >
           <div
             ref={contentColumnRef}
             className={cn(
-              'flex flex-col gap-4 md:gap-3 grow flex-1 min-h-0 overflow-y-auto md:overflow-visible md:h-full justify-start md:justify-center transition-all duration-500',
+              'flex flex-col gap-4 md:gap-3 justify-start',
+              isHomePresentation &&
+                'grow flex-1 min-h-0 overflow-y-auto md:overflow-visible md:h-full md:justify-center transition-all duration-500',
               shouldDimMainForm && 'scale-90 blur-[3px] opacity-70',
             )}
           >
-            <h1 className="text-2xl tracking-tight font-bold animate-[enter-down_1s_1] pt-10 md:pt-0">
-              {promptParam ? (
-                <>Let&apos;s do this</>
-              ) : (
-                <>Let&apos;s get started</>
-              )}
-            </h1>
+            {isHomePresentation && (
+              <h1 className="text-2xl tracking-tight font-bold animate-[enter-down_1s_1] pt-10 md:pt-0">
+                New Session
+              </h1>
+            )}
 
             <div
               data-testid="home-top-controls"
@@ -670,7 +607,9 @@ export function Home({
             >
               <div ref={workspaceRef}>
                 <SelectWorkspace
-                  allowAuto
+                  allowFast
+                  autoSelectDefaultWorkspace={false}
+                  onInvalidWorkspaceReset={handleInvalidWorkspaceReset}
                   allowBranchSelection={canSelectBranch}
                 />
               </div>
@@ -702,19 +641,6 @@ export function Home({
                   </SelectContent>
                 </Select>
               )}
-
-              {showRoutingSpinner && (
-                <div
-                  aria-live="polite"
-                  className="inline-flex items-center gap-2 text-sm text-muted-foreground"
-                >
-                  <Loader2
-                    className="size-3.5 animate-spin"
-                    aria-hidden="true"
-                  />
-                  <span className="sr-only">Routing...</span>
-                </div>
-              )}
             </div>
 
             <div
@@ -733,113 +659,128 @@ export function Home({
                 animateContainer={false}
                 submitDisabledReason={submitDisabledReason}
               />
-              {showNoEnvironmentsWarning && (
-                <Alert variant="warning" className="mt-2">
-                  <TriangleAlert />
-                  <p>
-                    You haven&apos;t created any environments yet. Roomote can
-                    work directly on your repos, but it can&apos;t verify its
-                    work.{' '}
-                    <Link
-                      href={SETTINGS_PATHS.newEnvironment}
-                      className="text-primary font-semibold underline hover:no-underline"
-                    >
-                      Create an environment now{' '}
-                      <ArrowRight className="inline size-4" />
-                    </Link>
-                  </p>
-                </Alert>
-              )}
             </div>
 
-            <div className="flex flex-col md:flex-row flex-wrap md:items-center gap-2 animate-[fade-in_1s_1_750ms_backwards]">
-              <OnboardingCard />
-              {isFeedbackPromptVisible ? (
-                <button
-                  type="button"
-                  onClick={() => setIsFeedbackDialogOpen(true)}
-                  className="inline-flex cursor-pointer items-center font-semibold whitespace-nowrap text-sm text-muted-foreground/80 hover:text-accent-foreground md:ml-auto"
-                >
-                  <MessageCirclePlus className="mr-1.5 size-4 shrink-0" />
-                  Feedback, please!
-                </button>
-              ) : null}
+            {showNoEnvironmentsWarning && (
+              <Alert
+                variant="light"
+                className="mt-2 animate-[enter-down_1s_1_300ms_backwards]"
+              >
+                <VectorSquare />
+                <p>
+                  <span>You haven&apos;t created any environments yet. </span>
+                  <span className="block md:inline">
+                    Roomote can work directly on your repos, but it can&apos;t
+                    verify its work.{' '}
+                  </span>
+                  <Link
+                    href={SETTINGS_PATHS.newEnvironment}
+                    className="text-primary font-semibold underline hover:no-underline block md:inline"
+                  >
+                    Create your first <ArrowRight className="inline size-4" />
+                  </Link>
+                </p>
+              </Alert>
+            )}
+
+            {isHomePresentation && (
+              <div className="flex flex-col md:flex-row flex-wrap md:items-center gap-2 animate-[fade-in_1s_1_750ms_backwards]">
+                {!showNoEnvironmentsWarning && <OnboardingCard />}
+                {!showNoEnvironmentsWarning && isFeedbackPromptVisible ? (
+                  <button
+                    type="button"
+                    onClick={() => setIsFeedbackDialogOpen(true)}
+                    className="inline-flex cursor-pointer items-center font-semibold whitespace-nowrap text-sm text-muted-foreground/80 hover:text-accent-foreground md:ml-auto"
+                  >
+                    <MessageCirclePlus className="mr-1.5 size-4 shrink-0" />
+                    Feedback, please!
+                  </button>
+                ) : null}
+              </div>
+            )}
+          </div>
+          {isHomePresentation && (
+            <div className="shrink-0 pb-[env(safe-area-inset-bottom)]">
+              <BottomSheetTabs onExpandedChange={setIsBottomSheetExpanded} />
             </div>
-          </div>
-          <div className="shrink-0 pb-[env(safe-area-inset-bottom)]">
-            <BottomSheetTabs onExpandedChange={setIsBottomSheetExpanded} />
-          </div>
+          )}
         </div>
       </div>
 
-      <Dialog
-        open={isFeedbackDialogOpen}
-        onOpenChange={setIsFeedbackDialogOpen}
-      >
-        <DialogContent size="xl">
-          <DialogHeader>
-            <DialogTitle>What do you think of Roomote so far?</DialogTitle>
-            <DialogDescription>
-              We&apos;d love to hear about your experience. Anything helps.
-            </DialogDescription>
-          </DialogHeader>
+      {isHomePresentation && (
+        <Dialog
+          open={isFeedbackDialogOpen}
+          onOpenChange={setIsFeedbackDialogOpen}
+        >
+          <DialogContent size="xl">
+            <DialogHeader>
+              <DialogTitle>What do you think of Roomote so far?</DialogTitle>
+              <DialogDescription>
+                We&apos;d love to hear about your experience. Anything helps.
+              </DialogDescription>
+            </DialogHeader>
 
-          <div className="relative my-4 flex flex-col gap-2">
-            <Button
-              asChild
-              variant="default"
-              className="md:max-w-xs md:justify-start"
-            >
-              <a href={FEEDBACK_CALENDLY_URL} target="_blank" rel="noreferrer">
-                <Calendar className="size-3.5" />
-                Schedule time with the team
-              </a>
-            </Button>
-            <Button
-              asChild
-              variant="default"
-              className="md:max-w-xs md:justify-start"
-            >
-              <a href={FEEDBACK_EMAIL_URL}>
-                <Mail className="size-3.5" />
-                Email us
-              </a>
-            </Button>
-            <Button
-              asChild
-              variant="default"
-              className="md:max-w-xs md:justify-start"
-            >
-              <a href={FEEDBACK_DISCORD_URL} target="_blank" rel="noreferrer">
-                <DiscordLogoIcon className="size-3.5" />
-                Join the discord
-              </a>
-            </Button>
-            <Image
-              src="/elements/feedback.png"
-              alt=""
-              width={150}
-              height={150}
-              className="absolute -top-9 right-0 hidden size-44 md:block"
-            />
-          </div>
+            <div className="relative my-4 flex flex-col gap-2">
+              <Button
+                asChild
+                variant="default"
+                className="md:max-w-xs md:justify-start"
+              >
+                <a
+                  href={FEEDBACK_CALENDLY_URL}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  <Calendar className="size-3.5" />
+                  Schedule time with the team
+                </a>
+              </Button>
+              <Button
+                asChild
+                variant="default"
+                className="md:max-w-xs md:justify-start"
+              >
+                <a href={FEEDBACK_EMAIL_URL}>
+                  <Mail className="size-3.5" />
+                  Email us
+                </a>
+              </Button>
+              <Button
+                asChild
+                variant="default"
+                className="md:max-w-xs md:justify-start"
+              >
+                <a href={FEEDBACK_DISCORD_URL} target="_blank" rel="noreferrer">
+                  <DiscordLogoIcon className="size-3.5" />
+                  Join the discord
+                </a>
+              </Button>
+              <Image
+                src="/elements/feedback.png"
+                alt=""
+                width={150}
+                height={150}
+                className="absolute -top-9 right-0 hidden size-44 md:block"
+              />
+            </div>
 
-          <DialogFooter className="md:justify-between">
-            <Button
-              type="button"
-              variant="link"
-              size="sm"
-              onClick={() => {
-                persistFeedbackPromptDismissal();
-                setIsFeedbackPromptVisible(false);
-              }}
-              aria-label="Dismiss feedback prompt"
-            >
-              Don&apos;t show this again
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+            <DialogFooter className="md:justify-between">
+              <Button
+                type="button"
+                variant="link"
+                size="sm"
+                onClick={() => {
+                  persistFeedbackPromptDismissal();
+                  setIsFeedbackPromptVisible(false);
+                }}
+                aria-label="Dismiss feedback prompt"
+              >
+                Don&apos;t show this again
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
     </FormProvider>
   );
 }

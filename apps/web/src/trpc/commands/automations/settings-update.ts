@@ -2,8 +2,11 @@ import {
   DEFAULT_CONFLICT_RESOLUTION_MAX_PR_AGE_DAYS,
   DEFAULT_CHANNEL_AUTO_START_LAUNCH_MODE,
   DEFAULT_PR_REVIEW_SETTINGS,
+  DEFAULT_PROVIDER_USAGE_LIMIT_FREQUENCY,
+  DEFAULT_PROVIDER_USAGE_LIMIT_THRESHOLD,
   getTriggerableBackgroundAutomationDescriptorByKey,
   isConflictResolverMaxPrAgeDays,
+  isProviderUsageLimitThreshold,
   type AutomationTarget,
   type PrReviewSettings,
   type TriggerableBackgroundAutomationKey,
@@ -12,7 +15,9 @@ import {
   db,
   DEFAULT_CONFLICT_RESOLVER_LABEL,
   deploymentSettings,
+  getAutomationByKey,
   getAutomationRuntime,
+  getAutomationSlackChannelTarget,
   getBackgroundAgentSettingsForDeployment,
   MANAGER_CHANNEL_STARTER_AUTOMATION_SETTINGS,
   upsertAutomation,
@@ -108,6 +113,10 @@ function getAutomationActivations(
       enabled: settings.managerStatsFrequency !== 'off',
     },
     {
+      automation: 'provider_usage_limit',
+      enabled: settings.providerUsageLimitFrequency !== 'off',
+    },
+    {
       automation: 'sentry_triage',
       enabled: settings.sentryTriageFrequency !== 'off',
     },
@@ -145,9 +154,7 @@ function getAutomationActivations(
     },
     {
       automation: 'platform_issue_alerts',
-      enabled:
-        settings.platformIssueSlackChannelId !== null ||
-        settings.platformIssueDiscordChannelId !== null,
+      enabled: settings.platformIssueAlertsEnabled,
     },
   ];
 }
@@ -285,6 +292,7 @@ export async function updateBackgroundAgentSettingsCommand(
         reviewAllPullRequestAuthors: boolean;
         reviewOnCommit: boolean;
         reviewDraftPrs: boolean;
+        publishGithubCheck: boolean;
         relayReviewResultsToTask: boolean;
         relayUsers: ReviewerRelayUser[];
         approvePr: boolean;
@@ -293,6 +301,7 @@ export async function updateBackgroundAgentSettingsCommand(
         channelAutoStartSlackChannels: string[];
         managerSlackChannel: string | null;
         managerStatsSlackChannel: string | null;
+        providerUsageLimitSlackChannel: string | null;
         suggesterSlackChannel: string | null;
         announcerSlackChannel: string | null;
         platformIssueSlackChannel: string | null;
@@ -312,7 +321,16 @@ export async function updateBackgroundAgentSettingsCommand(
 > {
   assertAdmin(auth);
   const fieldErrors: BackgroundAgentFieldErrors = {};
-  const existingSettings = await getBackgroundAgentSettingsForDeployment();
+  const [existingSettings, existingProviderUsageLimitAutomation] =
+    await Promise.all([
+      getBackgroundAgentSettingsForDeployment(),
+      getAutomationByKey('provider_usage_limit'),
+    ]);
+  const platformIssueAlertsEnabled =
+    input.savingAutomation === 'platformIssueAlerts'
+      ? (input.platformIssueAlertsEnabled ??
+        existingSettings.platformIssueAlertsEnabled)
+      : existingSettings.platformIssueAlertsEnabled;
   const shouldUpdateCallRoomoteViaEmoji =
     input.savingAutomation === 'callRoomoteViaEmoji';
   const callRoomoteViaEmojiEnabled = shouldUpdateCallRoomoteViaEmoji
@@ -456,6 +474,20 @@ export async function updateBackgroundAgentSettingsCommand(
     ? submittedManagerDiscordChannel
     : null;
   const managerStatsFrequency = input.managerStatsFrequency ?? 'off';
+  const providerUsageLimitFrequency =
+    (input.providerUsageLimitFrequency ??
+      existingSettings.providerUsageLimitFrequency) === 'off'
+      ? 'off'
+      : DEFAULT_PROVIDER_USAGE_LIMIT_FREQUENCY;
+  const providerUsageLimitThreshold =
+    input.providerUsageLimitThreshold ??
+    existingSettings.providerUsageLimitThreshold ??
+    DEFAULT_PROVIDER_USAGE_LIMIT_THRESHOLD;
+
+  if (!isProviderUsageLimitThreshold(providerUsageLimitThreshold)) {
+    fieldErrors.general =
+      'Provider usage threshold must be between 5% and 95% in 5% increments.';
+  }
   const channelAutoStartRequiresSlackInstallation =
     shouldUpdateChannelAutoStart &&
     channelAutoStartRows.some((row) => Boolean(row.slackChannel));
@@ -463,8 +495,10 @@ export async function updateBackgroundAgentSettingsCommand(
   const requiresSlackInstallation =
     channelAutoStartRequiresSlackInstallation ||
     Boolean(managerSlackChannel) ||
-    destinationDescriptors.some((descriptor) =>
-      Boolean(submittedDestinations[descriptor.automationId].slackChannel),
+    destinationDescriptors.some(
+      (descriptor) =>
+        input.savingAutomation === descriptor.automationId &&
+        Boolean(submittedDestinations[descriptor.automationId].slackChannel),
     );
 
   const slackInstallation = requiresSlackInstallation
@@ -534,10 +568,14 @@ export async function updateBackgroundAgentSettingsCommand(
               notifier,
             })
           : keepPersistedSlackChannel(
-              getPersistedSlackChannelForDestination(
-                descriptor,
-                existingSettings,
-              ),
+              descriptor.automationKey === 'provider_usage_limit'
+                ? getAutomationSlackChannelTarget(
+                    existingProviderUsageLimitAutomation ?? undefined,
+                  )
+                : getPersistedSlackChannelForDestination(
+                    descriptor,
+                    existingSettings,
+                  ),
             ),
         shouldUpdate && submitted.resolveDiscord
           ? resolveDiscordChannelId({
@@ -574,6 +612,8 @@ export async function updateBackgroundAgentSettingsCommand(
   >;
 
   const managerStatsChannelResult = destinationResults.managerStats.slack;
+  const providerUsageLimitChannelResult =
+    destinationResults.providerUsageLimit.slack;
   const sentryTriageChannelResult = destinationResults.sentryTriage.slack;
   const dependabotTriageChannelResult =
     destinationResults.dependabotTriage.slack;
@@ -587,6 +627,8 @@ export async function updateBackgroundAgentSettingsCommand(
     destinationResults.codeQualityAuditor.slack;
   const ciFailureTriageChannelResult = destinationResults.ciFailureTriage.slack;
   const managerStatsDiscordResult = destinationResults.managerStats.discord;
+  const providerUsageLimitDiscordResult =
+    destinationResults.providerUsageLimit.discord;
   const sentryTriageDiscordResult = destinationResults.sentryTriage.discord;
   const dependabotTriageDiscordResult =
     destinationResults.dependabotTriage.discord;
@@ -599,8 +641,6 @@ export async function updateBackgroundAgentSettingsCommand(
     destinationResults.ciFailureTriage.discord;
   const suggesterDiscordResult = destinationResults.suggester.discord;
   const announcerDiscordResult = destinationResults.announcer.discord;
-  const platformIssueDiscordResult =
-    destinationResults.platformIssueAlerts.discord;
 
   // Suggest Ideas may target Telegram (sticky topic) or Teams (primary
   // conversation) as one-of destinations alongside Slack/Discord channels.
@@ -736,6 +776,7 @@ export async function updateBackgroundAgentSettingsCommand(
   for (const result of [
     managerChannelResult,
     managerStatsChannelResult,
+    providerUsageLimitChannelResult,
     sentryTriageChannelResult,
     dependabotTriageChannelResult,
     codeqlTriageChannelResult,
@@ -884,11 +925,13 @@ export async function updateBackgroundAgentSettingsCommand(
   const sharedManagerChannelId =
     managerChannelResult.channelId ?? managerDiscordChannelResult.channelId;
   const managerChannelAutomationValidations: Array<{
+    automationId: UpdateBackgroundAgentSettingsInput['savingAutomation'];
     key: TriggerableBackgroundAutomationKey;
     frequency: string;
     channelId: string | null;
     field:
       | 'managerStatsSlackChannel'
+      | 'providerUsageLimitSlackChannel'
       | 'sentryTriageSlackChannel'
       | 'dependabotTriageSlackChannel'
       | 'codeqlTriageSlackChannel'
@@ -901,6 +944,7 @@ export async function updateBackgroundAgentSettingsCommand(
     // A per-automation Discord destination satisfies the channel requirement
     // just like a per-automation Slack channel does.
     {
+      automationId: 'suggester',
       key: 'suggester',
       frequency: effectiveSuggesterFrequency,
       channelId:
@@ -912,6 +956,7 @@ export async function updateBackgroundAgentSettingsCommand(
       field: 'suggesterSlackChannel',
     },
     {
+      automationId: 'announcer',
       key: 'announcer',
       frequency: effectiveAnnouncerFrequency,
       channelId:
@@ -919,6 +964,7 @@ export async function updateBackgroundAgentSettingsCommand(
       field: 'announcerSlackChannel',
     },
     {
+      automationId: 'managerStats',
       key: 'manager_stats',
       frequency: effectiveManagerStatsFrequency,
       channelId:
@@ -927,6 +973,16 @@ export async function updateBackgroundAgentSettingsCommand(
       field: 'managerStatsSlackChannel',
     },
     {
+      automationId: 'providerUsageLimit',
+      key: 'provider_usage_limit',
+      frequency: providerUsageLimitFrequency,
+      channelId:
+        providerUsageLimitChannelResult.channelId ??
+        providerUsageLimitDiscordResult.channelId,
+      field: 'providerUsageLimitSlackChannel',
+    },
+    {
+      automationId: 'sentryTriage',
       key: 'sentry_triage',
       frequency: sentryTriageFrequency,
       channelId:
@@ -935,6 +991,7 @@ export async function updateBackgroundAgentSettingsCommand(
       field: 'sentryTriageSlackChannel',
     },
     {
+      automationId: 'dependabotTriage',
       key: 'dependabot_triage',
       frequency: dependabotTriageFrequency,
       channelId:
@@ -943,6 +1000,7 @@ export async function updateBackgroundAgentSettingsCommand(
       field: 'dependabotTriageSlackChannel',
     },
     {
+      automationId: 'codeqlTriage',
       key: 'codeql_triage',
       frequency: codeqlTriageFrequency,
       channelId:
@@ -951,6 +1009,7 @@ export async function updateBackgroundAgentSettingsCommand(
       field: 'codeqlTriageSlackChannel',
     },
     {
+      automationId: 'securityAuditor',
       key: 'security_auditor',
       frequency: securityAuditorFrequency,
       channelId:
@@ -959,6 +1018,7 @@ export async function updateBackgroundAgentSettingsCommand(
       field: 'securityAuditorSlackChannel',
     },
     {
+      automationId: 'codeQualityAuditor',
       key: 'code_quality_auditor',
       frequency: codeQualityAuditorFrequency,
       channelId:
@@ -967,6 +1027,7 @@ export async function updateBackgroundAgentSettingsCommand(
       field: 'codeQualityAuditorSlackChannel',
     },
     {
+      automationId: 'ciFailureTriage',
       key: 'ci_failure_triage',
       frequency: ciFailureTriageFrequency,
       channelId:
@@ -977,7 +1038,20 @@ export async function updateBackgroundAgentSettingsCommand(
   ];
 
   for (const validation of managerChannelAutomationValidations) {
-    if (validation.frequency === 'off') {
+    if (
+      input.savingAutomation !== validation.automationId ||
+      validation.frequency === 'off'
+    ) {
+      continue;
+    }
+
+    if (
+      validation.key === 'provider_usage_limit' &&
+      !validation.channelId &&
+      !managerChannelResult.channelId
+    ) {
+      fieldErrors[validation.field] =
+        'Choose a Slack channel before enabling Inference Provider Usage Alerts.';
       continue;
     }
 
@@ -1014,6 +1088,7 @@ export async function updateBackgroundAgentSettingsCommand(
   }
 
   if (
+    input.savingAutomation === 'sentryTriage' &&
     sentryTriageFrequency !== 'off' &&
     !(await hasActiveSentryIntegration())
   ) {
@@ -1023,6 +1098,7 @@ export async function updateBackgroundAgentSettingsCommand(
   }
 
   if (
+    input.savingAutomation === 'dependabotTriage' &&
     dependabotTriageFrequency !== 'off' &&
     !(await hasActiveGitHubInstallation())
   ) {
@@ -1031,13 +1107,18 @@ export async function updateBackgroundAgentSettingsCommand(
       'Connect GitHub before enabling Triage Dependabot Alerts.';
   }
 
-  if (dependabotTriageFrequency !== 'off' && !(await hasActiveRepository())) {
+  if (
+    input.savingAutomation === 'dependabotTriage' &&
+    dependabotTriageFrequency !== 'off' &&
+    !(await hasActiveRepository())
+  ) {
     fieldErrors.general =
       fieldErrors.general ||
       'Add at least one active repository before enabling Triage Dependabot Alerts.';
   }
 
   if (
+    input.savingAutomation === 'codeqlTriage' &&
     codeqlTriageFrequency !== 'off' &&
     !(await hasActiveGitHubInstallation())
   ) {
@@ -1046,7 +1127,11 @@ export async function updateBackgroundAgentSettingsCommand(
       'Connect GitHub before enabling Triage CodeQL Alerts.';
   }
 
-  if (codeqlTriageFrequency !== 'off' && !(await hasActiveRepository())) {
+  if (
+    input.savingAutomation === 'codeqlTriage' &&
+    codeqlTriageFrequency !== 'off' &&
+    !(await hasActiveRepository())
+  ) {
     fieldErrors.general =
       fieldErrors.general ||
       'Add at least one active repository before enabling Triage CodeQL Alerts.';
@@ -1057,6 +1142,7 @@ export async function updateBackgroundAgentSettingsCommand(
       ?.supportedSourceControlProviders ?? [];
 
   if (
+    input.savingAutomation === 'issueFixer' &&
     issueFixerFrequency !== 'off' &&
     !(await hasActiveRepository(issueFixerProviders))
   ) {
@@ -1082,6 +1168,7 @@ export async function updateBackgroundAgentSettingsCommand(
     reviewAllPullRequestAuthors: input.reviewerReviewAllPullRequestAuthors,
     reviewOnCommit: input.reviewerReviewOnCommit,
     reviewDraftPrs: input.reviewerReviewDraftPrs,
+    publishGithubCheck: input.reviewerPublishGithubCheck,
     relayReviewResultsToTask: false,
     relayEligibleCreatorIds: [],
     approvePr: false,
@@ -1248,6 +1335,15 @@ export async function updateBackgroundAgentSettingsCommand(
     });
 
     await upsertAutomation(tx, {
+      key: 'provider_usage_limit',
+      enabled: providerUsageLimitFrequency !== 'off',
+      schedule: { mode: providerUsageLimitFrequency },
+      settings: { threshold: providerUsageLimitThreshold },
+      ...destinationUpsertFields('providerUsageLimit'),
+      updatedAt: now,
+    });
+
+    await upsertAutomation(tx, {
       key: 'sentry_triage',
       enabled: sentryTriageFrequency !== 'off',
       schedule: { mode: sentryTriageFrequency },
@@ -1341,9 +1437,8 @@ export async function updateBackgroundAgentSettingsCommand(
 
     await upsertAutomation(tx, {
       key: 'platform_issue_alerts',
-      enabled:
-        platformIssueChannelResult.channelId != null ||
-        platformIssueDiscordResult.channelId != null,
+      enabled: platformIssueAlertsEnabled,
+      settings: { optedOut: !platformIssueAlertsEnabled },
       ...destinationUpsertFields('platformIssueAlerts'),
       updatedAt: now,
     });
@@ -1406,6 +1501,8 @@ export async function updateBackgroundAgentSettingsCommand(
     notifier: postSaveNotifier,
     channelAutoStartSlackChannelIds: updatedChannelAutoStartSlackChannelIds,
     managerStatsSlackChannelId: updatedSettings.managerStatsSlackChannelId,
+    providerUsageLimitSlackChannelId:
+      updatedSettings.providerUsageLimitSlackChannelId,
     suggesterSlackChannelId: updatedSettings.suggesterSlackChannelId,
     announcerSlackChannelId: updatedSettings.announcerSlackChannelId,
     platformIssueSlackChannelId: updatedSettings.platformIssueSlackChannelId,
@@ -1425,6 +1522,8 @@ export async function updateBackgroundAgentSettingsCommand(
     channelAutoStartSlackChannelIds: updatedChannelAutoStartSlackChannelIds,
     managerSlackChannelId: updatedSettings.managerSlackChannelId,
     managerStatsSlackChannelId: updatedSettings.managerStatsSlackChannelId,
+    providerUsageLimitSlackChannelId:
+      updatedSettings.providerUsageLimitSlackChannelId,
     suggesterSlackChannelId: updatedSettings.suggesterSlackChannelId,
     announcerSlackChannelId: updatedSettings.announcerSlackChannelId,
     platformIssueSlackChannelId: updatedSettings.platformIssueSlackChannelId,

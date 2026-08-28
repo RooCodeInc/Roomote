@@ -10,6 +10,7 @@ export const SETTINGS_PATHS = {
   comms: '/settings/comms',
   compute: '/settings/sandboxes',
   models: '/settings/models',
+  memory: '/settings/memory',
   skills: '/settings/skills',
   experimental: '/settings/experimental',
   misc: '/settings/misc',

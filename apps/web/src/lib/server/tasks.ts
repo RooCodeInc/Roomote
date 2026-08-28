@@ -9,16 +9,20 @@ import {
   type SQL,
   db,
   tasks,
+  taskMessages,
   taskRuns,
   taskPullRequests,
   taskInferenceUsageEvents,
+  users,
   eq,
   and,
   desc,
+  asc,
   inArray,
   like,
   lt,
   isNull,
+  isNotNull,
   sql,
 } from '@roomote/db/server';
 
@@ -267,6 +271,7 @@ export type Task = SimpleTask & {
   modelDisplayName?: string | null;
   user: SimpleUser | null;
   taskRun: SimpleTaskRun;
+  participants: SimpleUser[];
   inferenceUsage?: TaskInferenceUsageSummary;
 };
 
@@ -307,6 +312,52 @@ async function getTaskInferenceUsageByTaskIds(
   }
 
   return usageByTaskId;
+}
+
+async function getTaskParticipantsByTaskIds(
+  taskIds: string[],
+): Promise<Record<string, SimpleUser[]>> {
+  if (taskIds.length === 0) {
+    return {};
+  }
+
+  const results = await db
+    .selectDistinctOn([taskMessages.taskId, taskMessages.userId], {
+      taskId: taskMessages.taskId,
+      id: users.id,
+      name: users.name,
+      email: users.email,
+      imageUrl: users.imageUrl,
+    })
+    .from(taskMessages)
+    .innerJoin(users, eq(users.id, taskMessages.userId))
+    .where(
+      and(
+        inArray(taskMessages.taskId, taskIds),
+        eq(taskMessages.role, 'user'),
+        isNotNull(taskMessages.userId),
+      ),
+    )
+    .orderBy(
+      asc(taskMessages.taskId),
+      asc(taskMessages.userId),
+      asc(taskMessages.createdAt),
+    );
+
+  const participantsByTaskId: Record<string, SimpleUser[]> = {};
+
+  for (const participant of results) {
+    const participants = participantsByTaskId[participant.taskId] ?? [];
+    participants.push({
+      id: participant.id,
+      name: participant.name,
+      email: participant.email,
+      imageUrl: participant.imageUrl,
+    });
+    participantsByTaskId[participant.taskId] = participants;
+  }
+
+  return participantsByTaskId;
 }
 
 export const getTasks = async ({
@@ -374,7 +425,10 @@ export const getTasks = async ({
       model: tasks.model,
       mode: tasks.mode,
       state: tasks.state,
+      goalStatus: tasks.goalStatus,
+      goalBlockedReason: tasks.goalBlockedReason,
       workflow: tasks.workflow,
+      surface: tasks.surface,
       timestamp: tasks.timestamp,
       activityAt: tasks.activityAt,
       repositoryUrl: tasks.repositoryUrl,
@@ -401,11 +455,13 @@ export const getTasks = async ({
     usersById,
     taskRunsByTaskId,
     inferenceUsageByTaskId,
+    participantsByTaskId,
     modelDisplayNames,
   ] = await Promise.all([
     getUsersById(userIds),
     getLatestTaskRunsByTaskId(taskIds),
     getTaskInferenceUsageByTaskIds(taskIds),
+    getTaskParticipantsByTaskIds(taskIds),
     getTaskModelDisplayNameMap(taskResults.map((task) => task.model)),
   ]);
 
@@ -429,6 +485,9 @@ export const getTasks = async ({
         attributionKind: creator.kind,
         modelDisplayName: task.model ? modelDisplayNames.get(task.model) : null,
         taskRun,
+        participants: (participantsByTaskId[task.id] ?? []).filter(
+          (participant) => participant.id !== task.initiatorUserId,
+        ),
         inferenceUsage: inferenceUsageByTaskId[task.id],
       };
     })

@@ -10,10 +10,11 @@ its work, and returns reviewable pull requests with previews when they apply.
 Run the same single-tenant product on Roomote Cloud or infrastructure you
 control.
 
-Choose the fastest path for your team. In every deployment, you connect a
-ChatGPT subscription or inference provider API key, plus source control and a
-sandbox provider. Connect communications providers and other tools when your
-team needs them.
+Choose the fastest path for your team. Every deployment needs model inference:
+use hosting-provisioned Roomote inference when it is offered, or connect a
+ChatGPT subscription or inference provider API key. You also need source control
+and a sandbox provider. Connect communications providers and other tools when
+your team needs them.
 
 <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: "8px" }}>
   <a href="https://cloud.roomote.dev/sign-up"><img src="https://roomote.dev/images/deploy-button.png" alt="Deploy on Roomote Cloud" style={{ height: "40px", width: "auto" }} /></a>
@@ -35,8 +36,8 @@ Running Roomote on Proxmox or another server at home? Follow the
 public ingress, and a prompt that a local agent can follow.
 
 By the end of setup, you should have a reachable Roomote URL, sign-in, a
-source-control provider, a ChatGPT subscription or inference provider, at least
-one environment, and a first reviewable Roomote task.
+source-control provider, managed Roomote inference or a connected inference
+provider, at least one environment, and a first reviewable Roomote task.
 
 The canonical, always up-to-date guide for operating your own server lives in
 [`SELF_HOSTING.md`](https://github.com/RooCodeInc/Roomote/blob/main/SELF_HOSTING.md)
@@ -51,9 +52,10 @@ curl -fsSL https://get.roomote.dev | bash
 ```
 
 The installer brings up the full stack from published images and prints a setup
-link. Open it in a browser and the wizard walks you through the rest: sign-in
-provider, source-control provider, a ChatGPT subscription or inference provider
-API key, communications provider, repositories, and a first task.
+link. For this self-hosted path, open it in a browser and the wizard walks you
+through the rest: sign-in provider, source-control provider, a ChatGPT
+subscription or inference provider API key, communications provider,
+repositories, and a first task.
 
 No DNS setup is needed to try it out; pass `--domain roomote.example.com` for a
 production install on your own domain.
@@ -77,7 +79,7 @@ Have these ready before the wizard asks for them:
 - a source-control provider account with permission to install or configure the
   app for the repositories Roomote should reach
 - a ChatGPT subscription or inference provider API key, such as OpenRouter,
-  Anthropic, or OpenAI
+  Anthropic, or OpenAI, unless your host already provisioned Roomote inference
 - a communications provider workspace, such as Slack, Microsoft Teams,
   Telegram, or Discord, if your team wants to start work from chat
 - at least one repository that can become the first Roomote environment
@@ -96,8 +98,10 @@ roomote logs      # tail service logs
 `roomote backup` prompts for a passphrase and writes a versioned `.roomote`
 bundle under `/opt/roomote/backups`. The bundle contains PostgreSQL, the
 deployment configuration and encryption/signing keys, local MinIO artifacts,
-schema metadata, and the exact deployed image identities. Store the passphrase
-separately in your secret manager; the backup cannot be restored without it.
+schema metadata, the exact deployed image identities, and both the Memory volume
+and isolated Memory database when the `brain` profile is enabled. Store the
+passphrase separately in your secret manager; the backup cannot be restored
+without it.
 
 Use `roomote backup --include-redis` when queued work, BullMQ schedules,
 sessions, and other transient Redis state must survive. Backups briefly stop
@@ -170,8 +174,8 @@ After you upgrade, Roomote can surface the new release in the web app:
 
 ## Requirements
 
-- A ChatGPT subscription or inference provider API key (OpenRouter, Anthropic,
-  OpenAI, and others).
+- Managed Roomote inference from an eligible host, or a ChatGPT subscription or
+  inference provider API key (OpenRouter, Anthropic, OpenAI, and others).
 - An account with a supported source-control provider. For GitHub, the setup
   wizard creates the GitHub App; other providers use their documented OAuth or
   credential flow.
@@ -181,8 +185,14 @@ After you upgrade, Roomote can surface the new release in the web app:
 
 ## Verify the deployment
 
-After setup, run a small task that uses the first environment. A healthy
-deployment should let you:
+The final setup step offers a small set of preselected starter tasks. Keep the
+ones you want, clear any you do not want to run yet, then select **Go**. If you
+start one task, Roomote opens it directly; if you start several, Roomote opens
+the task list. You can also clear every selection and finish setup without
+starting a task.
+
+After setup, run a small task that uses the first environment if you did not
+start one from the starter list. A healthy deployment should let you:
 
 - sign in from the public Roomote URL
 - connect source control and see the expected repositories

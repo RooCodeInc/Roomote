@@ -1,12 +1,5 @@
-import { buildFastAgentSessionChannelKey } from '@roomote/cloud-agents/server';
-import {
-  and,
-  db,
-  eq,
-  slackInstallations,
-  slackQuickAnswers,
-  taskRuns,
-} from '@roomote/db/server';
+import { fastAgentConversationRepository } from '@roomote/cloud-agents/server';
+import { and, db, eq, slackInstallations, taskRuns } from '@roomote/db/server';
 import { acquireRedisLock } from '@roomote/redis';
 import {
   buildSlackRequestUserInputBlocks,
@@ -50,30 +43,30 @@ export async function publishFastAgentRequestUserInput(input: {
     return { published: false };
   }
 
-  const { workspaceId, replyTarget } = parent.conversation;
-  const { channelId, threadId } = replyTarget;
-  const scopedChannel = buildFastAgentSessionChannelKey(parent.conversation);
   const [session, installation] = await Promise.all([
-    db.query.slackQuickAnswers.findFirst({
-      where: and(
-        eq(slackQuickAnswers.id, parent.sessionId),
-        eq(slackQuickAnswers.slackChannel, scopedChannel),
-        eq(slackQuickAnswers.slackThreadTs, threadId),
-      ),
-      columns: { id: true },
+    fastAgentConversationRepository.findById({
+      id: parent.sessionId,
+      fallbackConversation: parent.conversation,
     }),
     db.query.slackInstallations.findFirst({
       where: and(
         eq(slackInstallations.isActive, true),
-        eq(slackInstallations.teamId, workspaceId),
+        eq(slackInstallations.teamId, parent.conversation.workspaceId),
       ),
       columns: { botAccessToken: true },
     }),
   ]);
 
-  if (!session || !installation?.botAccessToken) {
+  if (
+    !session ||
+    session.conversation.surface !== 'slack' ||
+    !installation?.botAccessToken
+  ) {
     return { published: false };
   }
+
+  const { workspaceId, replyTarget } = session.conversation;
+  const { channelId, threadId } = replyTarget;
 
   const lockKey = `fast-agent:request-user-input:publish:${workspaceId}:${channelId}:${threadId}`;
   let releaseLock: Awaited<ReturnType<typeof acquireRedisLock>> = null;

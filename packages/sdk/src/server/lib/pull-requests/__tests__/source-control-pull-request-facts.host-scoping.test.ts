@@ -53,6 +53,8 @@ async function createGitLabRepository(params: {
 function makeSnapshot(host: string) {
   return {
     authorLogin: 'gitlab-user',
+    body: null,
+    labels: [],
     closedAt: '2026-07-10T00:00:00Z',
     createdAt: '2026-07-01T00:00:00Z',
     externalPullRequestId: 900,

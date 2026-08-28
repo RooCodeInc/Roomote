@@ -23,6 +23,7 @@ import {
 import type { WorkspaceConfig } from '../../workspace';
 import type { RepoLocalSkill } from '../../workspace/repo-local-skills';
 import { callbackMap } from '../../callbacks';
+import { getSlackLiveTaskStreamRunTaskCallbacks } from '../../callbacks/slack-live-task-stream';
 import {
   getCommunicationRunTaskCallbacks,
   mergeRunTaskCallbacks,
@@ -346,6 +347,7 @@ export async function executeTaskRun<TPrepared extends PreparedTaskRunBase>({
     callbacks = mergeRunTaskCallbacks(
       callbackMap[taskRun.payloadKind as TaskPayloadKind] ?? {},
       getCommunicationRunTaskCallbacks(taskRun),
+      getSlackLiveTaskStreamRunTaskCallbacks(taskRun),
     );
 
     workerEnv = WorkerEnv.fromProcessEnv(process.env);
@@ -484,6 +486,7 @@ export async function executeTaskRun<TPrepared extends PreparedTaskRunBase>({
       id: taskRun.id,
       status: RunStatus.Preparing,
     });
+    await callbacks.onStatus?.(taskRun, RunStatus.Preparing, context);
 
     const workspace = await recordWorkerPhase({
       label: 'resolveWorkspaceConfig',

@@ -2,6 +2,8 @@ import {
   sanitizeSandboxPathsForDisplay,
   sanitizeSandboxPathString,
 } from '@/lib';
+import { redactSecrets } from '@roomote/communication/redact-secrets';
+import YAML from 'yaml';
 
 import {
   CodeBlock,
@@ -39,9 +41,7 @@ export function AcpToolDetails({
   }
 
   const sanitizedToolData = sanitizeSandboxPathsForDisplay(msg.data);
-  const sanitizedText = msg.text
-    ? sanitizeSandboxPathString(msg.text)
-    : msg.text;
+  const visibleToolInput = getVisibleToolInput(msg.data);
   const isSubagent = isSubagentToolPayload(msg.data);
   const subagentPrompt = getSubagentPrompt(msg);
   const subagentLastMessage = getSubagentLastMessage(msg);
@@ -87,16 +87,45 @@ export function AcpToolDetails({
     );
   }
 
-  return sanitizedText ? (
-    <CodeBlock
-      code={sanitizedText}
-      language="bash"
-      maxHeight={maxHeight}
-      variant="compact"
-      highlight={false}
-      className="[&>div]:rounded-none [&>div]:bg-transparent [&_pre]:px-0 [&_pre]:py-0"
-    />
-  ) : (
+  const rawResult =
+    msg.kind === 'tool_result'
+      ? msg.data.output || msg.text
+      : visibleToolInput
+        ? undefined
+        : msg.text;
+  const sanitizedResult = rawResult
+    ? sanitizeSandboxPathString(rawResult)
+    : undefined;
+  const formattedInput = formatStructuredValue(visibleToolInput);
+  const formattedResult = formatToolResult(
+    sanitizedResult,
+    Boolean(formattedInput),
+  );
+
+  if (formattedInput || formattedResult) {
+    return (
+      <div className="space-y-3">
+        {formattedInput ? (
+          <ToolDetailSection
+            label="Input"
+            code={formattedInput.code}
+            language="yaml"
+            maxHeight={maxHeight}
+          />
+        ) : null}
+        {formattedResult ? (
+          <ToolDetailSection
+            label="Result"
+            code={formattedResult.code}
+            language={formattedResult.isStructured ? 'yaml' : 'bash'}
+            maxHeight={maxHeight}
+          />
+        ) : null}
+      </div>
+    );
+  }
+
+  return (
     <ToolInput
       input={sanitizedToolData}
       style={{
@@ -105,4 +134,113 @@ export function AcpToolDetails({
       }}
     />
   );
+}
+
+function ToolDetailSection({
+  label,
+  code,
+  language,
+  maxHeight,
+}: {
+  label: string;
+  code: string;
+  language: 'yaml' | 'bash';
+  maxHeight: number;
+}) {
+  return (
+    <section className="space-y-1.5">
+      <div className="text-xs font-medium text-muted-foreground">{label}</div>
+      <CodeBlock
+        code={code}
+        language={language}
+        maxHeight={maxHeight}
+        variant="compact"
+        highlight={false}
+        className="[&>div]:rounded-none [&>div]:bg-transparent [&_pre]:px-0 [&_pre]:py-0"
+      />
+    </section>
+  );
+}
+
+function formatStructuredValue(
+  value: Record<string, string> | null,
+): { code: string } | undefined {
+  if (!value || Object.keys(value).length === 0) return undefined;
+
+  return {
+    code: YAML.stringify(value, { indent: 2, lineWidth: 0 }).trimEnd(),
+  };
+}
+
+function formatToolResult(
+  text: string | undefined,
+  hasVisibleInput: boolean,
+): { code: string; isStructured: boolean } | undefined {
+  if (!text) return undefined;
+
+  try {
+    const result = JSON.parse(text) as unknown;
+    if (!result || typeof result !== 'object') {
+      return { code: text, isStructured: false };
+    }
+
+    return {
+      code: YAML.stringify(result, { indent: 2, lineWidth: 0 }).trimEnd(),
+      isStructured: true,
+    };
+  } catch {
+    return hasVisibleInput
+      ? {
+          code: YAML.stringify(text, { lineWidth: 0 }).trimEnd(),
+          isStructured: true,
+        }
+      : { code: text, isStructured: false };
+  }
+}
+
+function getVisibleToolInput(
+  data: AcpToolCallUiMessage['data'] | AcpToolResultUiMessage['data'],
+): Record<string, string> | null {
+  const record = data as unknown as Record<string, unknown>;
+  const serverName = (
+    data.serverName ??
+    data.mcpServerName ??
+    ''
+  ).toLowerCase();
+  const toolName = (data.toolName ?? data.mcpToolName ?? data.title ?? '')
+    .toLowerCase()
+    .replace(/^.*[.:/]/, '');
+
+  const visibleField =
+    serverName === 'gbrain' && (toolName === 'search' || toolName === 'query')
+      ? 'query'
+      : toolName === 'send_task_message'
+        ? 'message'
+        : null;
+  if (!visibleField) {
+    return null;
+  }
+
+  const rawInput = record.rawInput;
+  if (!rawInput || typeof rawInput !== 'object' || Array.isArray(rawInput)) {
+    return {};
+  }
+
+  const rawInputRecord = rawInput as Record<string, unknown>;
+  const nestedArguments = rawInputRecord.arguments;
+  const args =
+    nestedArguments &&
+    typeof nestedArguments === 'object' &&
+    !Array.isArray(nestedArguments)
+      ? (nestedArguments as Record<string, unknown>)
+      : rawInputRecord;
+  const value = args[visibleField];
+
+  if (typeof value !== 'string' || value.trim().length === 0) {
+    return {};
+  }
+
+  return {
+    [visibleField]: sanitizeSandboxPathString(redactSecrets(value)),
+  };
 }

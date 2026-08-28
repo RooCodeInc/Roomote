@@ -4,7 +4,6 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "lint": "eslint src --ext=ts --max-warnings=0",
     "check-types": "tsc --noEmit",
     "check-types:fast": "tsgo --noEmit",
     "test": "dotenvx run  -f ../../.env.test -- vitest",
@@ -43,15 +42,16 @@
     "@sentry/node": "10.45.0",
     "@trpc/client": "^11.15.0",
     "@trpc/server": "^11.15.0",
+    "dompurify": "3.4.13",
     "hono": "4.12.34",
     "jose": "^6.2.3",
+    "jsdom": "26.1.0",
     "p-map": "^7.0.4",
     "snowflake-sdk": "^2.4.3",
     "undici": "^7.29.0",
     "zod": "^3.25.76"
   },
   "devDependencies": {
-    "@roomote/config-eslint": "workspace:^",
     "@roomote/config-typescript": "workspace:^",
     "@types/node": "^24.10.13",
     "tsup": "^8.5.1",

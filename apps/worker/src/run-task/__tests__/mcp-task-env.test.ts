@@ -164,6 +164,27 @@ describe('getCommunicationReplyContext', () => {
 });
 
 describe('buildMcpTaskEnv', () => {
+  it('enables lifecycle satisfaction hooks for a Fast child relay', () => {
+    const result = buildMcpTaskEnv({
+      runtimeEnv: {
+        HOME: '/home/worker',
+        ROOMOTE_TASK_ID: 'task-1',
+        ROOMOTE_FAST_AGENT_CHILD: 'true',
+      },
+      unsanitizedEnv: {},
+      slackReplyContext: null,
+      communicationReplyContext: null,
+    });
+
+    expect(result).toEqual({
+      HOME: '/home/worker',
+      ROOMOTE_TASK_ID: 'task-1',
+      ROOMOTE_FAST_AGENT_CHILD: 'true',
+      ROOMOTE_SLACK_REPLY_SATISFACTION_STATE_FILE:
+        '/home/worker/.config/opencode/roomote-slack-reply-satisfaction.json',
+    });
+  });
+
   it('removes leaked Slack reply env for non-Slack jobs', () => {
     const result = buildMcpTaskEnv({
       runtimeEnv: {

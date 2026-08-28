@@ -16,6 +16,7 @@ export type ConflictResolverFrequency =
 export type SuggesterFrequency = 'off' | 'daily' | 'weekly';
 export type AnnouncerFrequency = 'off' | 'daily' | 'weekly';
 export type ManagerStatsFrequency = 'off' | 'weekly';
+export type ProviderUsageLimitFrequency = 'off' | 'every_hour';
 export type SentryTriageFrequency = 'off' | 'daily' | 'weekly';
 export type DependabotTriageFrequency = 'off' | 'daily' | 'weekly';
 export type CodeqlTriageFrequency = 'off' | 'daily' | 'weekly';
@@ -76,6 +77,7 @@ export type FormState = {
   reviewerReviewAllPullRequestAuthors: boolean;
   reviewerReviewOnCommit: boolean;
   reviewerReviewDraftPrs: boolean;
+  reviewerPublishGithubCheck: boolean;
   reviewerInstructions: string;
   reviewerRelayReviewResultsToTask: boolean;
   reviewerRelayUserIds: string[];
@@ -89,6 +91,8 @@ export type FormState = {
   managerSlackChannel: string;
   managerDiscordChannel: string;
   managerStatsFrequency: ManagerStatsFrequency;
+  providerUsageLimitFrequency: ProviderUsageLimitFrequency;
+  providerUsageLimitThreshold: number;
   sentryTriageFrequency: SentryTriageFrequency;
   sentryTriageProjectSlugs: string;
   dependabotTriageFrequency: DependabotTriageFrequency;
@@ -107,6 +111,7 @@ export type FormState = {
   suggesterUseTeams: boolean;
   announcerFrequency: AnnouncerFrequency;
   announcerInstructions: string;
+  platformIssueAlertsEnabled: boolean;
 } & DestinationChannelFormFields &
   ScheduleOnlyAutomationFormFields;
 
@@ -115,6 +120,7 @@ export type AutomationId =
   | 'channelAutoStart'
   | 'managerChannel'
   | 'managerStats'
+  | 'providerUsageLimit'
   | 'sentryTriage'
   | 'dependabotTriage'
   | 'codeqlTriage'
@@ -135,6 +141,7 @@ const REVIEWER_FIELDS: Array<keyof FormState> = [
   'reviewerReviewAllPullRequestAuthors',
   'reviewerReviewOnCommit',
   'reviewerReviewDraftPrs',
+  'reviewerPublishGithubCheck',
   'reviewerInstructions',
   'reviewerRelayReviewResultsToTask',
   'reviewerRelayUserIds',
@@ -167,6 +174,12 @@ const MANAGER_STATS_FIELDS: Array<keyof FormState> = [
   ...DESTINATION_CHANNEL_FIELDS_BY_AUTOMATION_ID.managerStats,
 ];
 
+const PROVIDER_USAGE_LIMIT_FIELDS: Array<keyof FormState> = [
+  'providerUsageLimitFrequency',
+  'providerUsageLimitThreshold',
+  ...DESTINATION_CHANNEL_FIELDS_BY_AUTOMATION_ID.providerUsageLimit,
+];
+
 const SENTRY_TRIAGE_FIELDS: Array<keyof FormState> = [
   'sentryTriageFrequency',
   ...DESTINATION_CHANNEL_FIELDS_BY_AUTOMATION_ID.sentryTriage,
@@ -197,8 +210,10 @@ const ANNOUNCER_FIELDS: Array<keyof FormState> = [
   'announcerInstructions',
 ];
 
-const PLATFORM_ISSUE_ALERT_FIELDS: Array<keyof FormState> =
-  DESTINATION_CHANNEL_FIELDS_BY_AUTOMATION_ID.platformIssueAlerts;
+const PLATFORM_ISSUE_ALERT_FIELDS: Array<keyof FormState> = [
+  'platformIssueAlertsEnabled',
+  ...DESTINATION_CHANNEL_FIELDS_BY_AUTOMATION_ID.platformIssueAlerts,
+];
 
 const SCHEDULE_ONLY_AUTOMATION_FIELDS = Object.fromEntries(
   SCHEDULE_ONLY_BACKGROUND_AUTOMATION_LIST.map((automation) => [
@@ -220,6 +235,7 @@ const AUTOMATION_FIELDS: Record<AutomationId, Array<keyof FormState>> = {
   channelAutoStart: CHANNEL_AUTO_START_FIELDS,
   managerChannel: MANAGER_CHANNEL_FIELDS,
   managerStats: MANAGER_STATS_FIELDS,
+  providerUsageLimit: PROVIDER_USAGE_LIMIT_FIELDS,
   sentryTriage: SENTRY_TRIAGE_FIELDS,
   dependabotTriage: DEPENDABOT_TRIAGE_FIELDS,
   codeqlTriage: CODEQL_TRIAGE_FIELDS,
@@ -329,6 +345,7 @@ export function buildAutomationSettingsSaveInput(
       stateToSave.reviewerReviewAllPullRequestAuthors,
     reviewerReviewOnCommit: stateToSave.reviewerReviewOnCommit,
     reviewerReviewDraftPrs: stateToSave.reviewerReviewDraftPrs,
+    reviewerPublishGithubCheck: stateToSave.reviewerPublishGithubCheck,
     reviewerInstructions: stateToSave.reviewerInstructions.trim() || null,
     reviewerRelayReviewResultsToTask:
       stateToSave.reviewerRelayReviewResultsToTask,
@@ -360,6 +377,8 @@ export function buildAutomationSettingsSaveInput(
     managerSlackChannel: stateToSave.managerSlackChannel.trim() || null,
     managerDiscordChannel: stateToSave.managerDiscordChannel.trim() || null,
     managerStatsFrequency: stateToSave.managerStatsFrequency,
+    providerUsageLimitFrequency: stateToSave.providerUsageLimitFrequency,
+    providerUsageLimitThreshold: stateToSave.providerUsageLimitThreshold,
     sentryTriageFrequency: stateToSave.sentryTriageFrequency,
     sentryTriageProjectSlugs:
       stateToSave.sentryTriageProjectSlugs.trim() || null,
@@ -373,6 +392,7 @@ export function buildAutomationSettingsSaveInput(
     suggesterUseTeams: stateToSave.suggesterUseTeams,
     announcerFrequency: stateToSave.announcerFrequency,
     announcerInstructions: stateToSave.announcerInstructions.trim() || null,
+    platformIssueAlertsEnabled: stateToSave.platformIssueAlertsEnabled,
     ...buildDestinationChannelSaveInput(stateToSave),
   };
 }

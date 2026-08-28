@@ -5,21 +5,20 @@ import {
   db,
   eq,
   inArray,
+  isTaskRunFollowUpCandidate,
   isNull,
-  slackQuickAnswers,
-  sql,
   taskRuns,
   tasks,
-  type SlackQuickAnswer,
 } from '@roomote/db/server';
-import { activeRunStatuses, type RunStatus } from '@roomote/types';
-import {
-  getFastAgentConversationStorageWorkspaceId,
-  type FastAgentConversation,
-} from './fast-agent-conversation';
+import type { RunStatus } from '@roomote/types';
+import type { FastAgentConversation } from './fast-agent-conversation';
+import { fastAgentConversationRepository } from './fast-agent-conversation-repository';
+import type { FastAgentMessageWrite } from './fast-agent-conversation-repository';
 
-type FastAgentSessionRecord = Pick<SlackQuickAnswer, 'id'> & {
-  messages: ModelMessage[];
+type FastAgentSessionRecord = {
+  id: string;
+  compatibilityMessages: ModelMessage[];
+  openCodeSessionId: string | null;
 };
 
 export type FastAgentActiveTask = {
@@ -28,23 +27,6 @@ export type FastAgentActiveTask = {
   status?: RunStatus;
 };
 
-function buildFastAgentSessionWhere(conversation: FastAgentConversation) {
-  const scopedSlackChannel = buildFastAgentSessionChannelKey(conversation);
-
-  return and(
-    eq(slackQuickAnswers.slackChannel, scopedSlackChannel),
-    eq(slackQuickAnswers.slackThreadTs, conversation.conversationId),
-  );
-}
-
-export function buildFastAgentSessionChannelKey(
-  conversation: FastAgentConversation,
-): string {
-  // The existing column and unique index predate multi-workspace scoping.
-  // Qualifying the value keeps N-1 rollback compatibility without a migration.
-  return `${getFastAgentConversationStorageWorkspaceId(conversation)}:${conversation.replyTarget.channelId}`;
-}
-
 export async function getOrCreateFastAgentSession({
   userId,
   conversation,
@@ -52,79 +34,20 @@ export async function getOrCreateFastAgentSession({
   userId: string;
   conversation: FastAgentConversation;
 }): Promise<FastAgentSessionRecord> {
-  const where = buildFastAgentSessionWhere(conversation);
-  const scopedSlackChannel = buildFastAgentSessionChannelKey(conversation);
-
-  const existingSession = await db.query.slackQuickAnswers.findFirst({
-    where,
-    columns: {
-      id: true,
-      messages: true,
-    },
-  });
-
-  if (existingSession) {
-    return {
-      id: existingSession.id,
-      messages: existingSession.messages as ModelMessage[],
-    };
-  }
-
-  const [createdSession] = await db
-    .insert(slackQuickAnswers)
-    .values({
-      userId,
-      slackChannel: scopedSlackChannel,
-      slackThreadTs: conversation.conversationId,
-      messages: [],
-    })
-    .onConflictDoNothing({
-      target: [slackQuickAnswers.slackChannel, slackQuickAnswers.slackThreadTs],
-    })
-    .returning({
-      id: slackQuickAnswers.id,
-      messages: slackQuickAnswers.messages,
-    });
-
-  if (createdSession) {
-    return {
-      id: createdSession.id,
-      messages: createdSession.messages as ModelMessage[],
-    };
-  }
-
-  const concurrentSession = await db.query.slackQuickAnswers.findFirst({
-    where,
-    columns: {
-      id: true,
-      messages: true,
-    },
-  });
-
-  if (!concurrentSession) {
-    throw new Error('Failed to create or load fast-agent session.');
-  }
-
-  return {
-    id: concurrentSession.id,
-    messages: concurrentSession.messages as ModelMessage[],
-  };
+  return fastAgentConversationRepository.getOrCreate({ userId, conversation });
 }
 
 export async function hasFastAgentSession(
   conversation: FastAgentConversation,
 ): Promise<boolean> {
-  const session = await db.query.slackQuickAnswers.findFirst({
-    where: buildFastAgentSessionWhere(conversation),
-    columns: { id: true },
-  });
-
-  return Boolean(session);
+  return fastAgentConversationRepository.exists(conversation);
 }
 
 export async function getActiveFastAgentTasks(
   sessionId: string,
 ): Promise<FastAgentActiveTask[]> {
+  const lookupIds =
+    await fastAgentConversationRepository.getLookupIds(sessionId);
   const latestRunPerTask = db.$with('latest_fast_agent_task_runs').as(
     db
       .selectDistinctOn([taskRuns.taskId], {
@@ -134,12 +57,15 @@ export async function getActiveFastAgentTasks(
         title: tasks.title,
         status: taskRuns.status,
         canceledAt: taskRuns.canceledAt,
+        snapshotId: taskRuns.snapshotId,
+        snapshotCreatedAt: taskRuns.snapshotCreatedAt,
+        snapshotFailedAt: taskRuns.snapshotFailedAt,
       })
       .from(taskRuns)
       .innerJoin(tasks, eq(tasks.id, taskRuns.taskId))
       .where(
         and(
-          eq(taskRuns.fastAgentSessionId, sessionId),
+          inArray(taskRuns.fastAgentSessionId, lookupIds),
           isNull(tasks.deletedAt),
         ),
       )
@@ -155,15 +81,18 @@ export async function getActiveFastAgentTasks(
     })
     .from(latestRunPerTask)
     .where(
-      and(
-        inArray(latestRunPerTask.status, [...activeRunStatuses]),
-        isNull(latestRunPerTask.canceledAt),
-      ),
+      isTaskRunFollowUpCandidate({
+        status: latestRunPerTask.status,
+        canceledAt: latestRunPerTask.canceledAt,
+        snapshotId: latestRunPerTask.snapshotId,
+        snapshotCreatedAt: latestRunPerTask.snapshotCreatedAt,
+        snapshotFailedAt: latestRunPerTask.snapshotFailedAt,
+      }),
     )
     .orderBy(desc(latestRunPerTask.createdAt));
 }
 
-export async function appendFastAgentSessionMessages({
+export async function appendFastAgentVisibleMessages({
   sessionId,
   messages,
 }: {
@@ -174,11 +103,45 @@ export async function appendFastAgentSessionMessages({
     return;
   }
 
-  await db
-    .update(slackQuickAnswers)
-    .set({
-      messages: sql`${slackQuickAnswers.messages} || ${JSON.stringify(messages)}::jsonb`,
-      updatedAt: sql`now()`,
-    })
-    .where(eq(slackQuickAnswers.id, sessionId));
+  await fastAgentConversationRepository.appendVisibleMessages({
+    conversationId: sessionId,
+    messages,
+  });
+}
+
+export async function upsertFastAgentMessage({
+  sessionId,
+  message,
+}: {
+  sessionId: string;
+  message: FastAgentMessageWrite;
+}): Promise<void> {
+  let lastError: unknown;
+
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      await fastAgentConversationRepository.upsertMessage({
+        conversationId: sessionId,
+        message,
+      });
+      return;
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  throw lastError;
+}
+
+export async function setFastAgentOpenCodeSession({
+  sessionId,
+  openCodeSessionId,
+}: {
+  sessionId: string;
+  openCodeSessionId: string;
+}): Promise<void> {
+  await fastAgentConversationRepository.setOpenCodeSession({
+    conversationId: sessionId,
+    openCodeSessionId,
+  });
 }

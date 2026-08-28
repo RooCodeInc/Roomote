@@ -22,7 +22,6 @@ x-roomote-env: &roomote-env
   R_APP_URL: ${R_PUBLIC_URL:-http://localhost:13000}
   R_INSTANCE_ID: ${R_INSTANCE_ID:-}
   R_CURATED_INTEGRATIONS_DISABLED: ${R_CURATED_INTEGRATIONS_DISABLED:-false}
-  R_COMMUNICATIONS_FAST_MODE_SETTING_ENABLED: ${R_COMMUNICATIONS_FAST_MODE_SETTING_ENABLED:-false}
   # The Brain: supplying this key gives the deployment shared memory that
   # agents consult. It powers the brain service's embeddings and is the
   # single activation signal — there is no Settings UI for it.
@@ -37,7 +36,6 @@ x-roomote-env: &roomote-env
   R_BRAIN_MODEL: ${R_BRAIN_MODEL:-}
   R_BRAIN_EMBEDDING_MODEL: ${R_BRAIN_EMBEDDING_MODEL:-}
   R_BRAIN_EMBEDDING_DIMENSIONS: ${R_BRAIN_EMBEDDING_DIMENSIONS:-}
-  R_BRAIN_RERANKER_MODEL: ${R_BRAIN_RERANKER_MODEL:-}
   R_GBRAIN_URL: ${R_GBRAIN_URL:-http://gbrain:8931}
   # Roomote reads the brain's bootstrap token once to register its own
   # scoped clients; api and bullmq mount the brain volume read-only.
@@ -94,6 +92,7 @@ x-roomote-env: &roomote-env
   R_LINEAR_CLIENT_SECRET: ${R_LINEAR_CLIENT_SECRET:-}
   R_LINEAR_WEBHOOK_SECRET: ${R_LINEAR_WEBHOOK_SECRET:-}
   R_GITHUB_APP_SLUG: ${R_GITHUB_APP_SLUG:-}
+  R_GITHUB_ADDITIONAL_APP_SLUGS: ${R_GITHUB_ADDITIONAL_APP_SLUGS:-}
   SETUP_TOKEN: ${SETUP_TOKEN:-}
   DEFAULT_COMPUTE_PROVIDER: ${DEFAULT_COMPUTE_PROVIDER:-docker}
   BL_API_KEY: ${BL_API_KEY:-}
@@ -299,7 +298,6 @@ services:
       # provider key below instead makes the Brain call the provider directly.
       OPENAI_BASE_URL: ${GBRAIN_OPENAI_BASE_URL:-http://api:3001/api/brain/inference}
       OPENAI_API_KEY: ${R_BRAIN_GATEWAY_TOKEN:-}
-      GBRAIN_RERANKER_MODEL: ${R_BRAIN_RERANKER_MODEL:-}
       # Create-time, and it has to be the container that receives these: the
       # embedding model and its width are decided when the Brain is created,
       # and the gateway must never substitute a different one afterwards.

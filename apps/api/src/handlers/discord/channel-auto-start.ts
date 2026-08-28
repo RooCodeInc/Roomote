@@ -24,7 +24,6 @@ import {
 } from '@roomote/types';
 
 import { apiLogger } from '../../logging.js';
-import { hasCommunicationsFastModeDefault } from '../fast-agent-entry.js';
 import { checkAutoStartChannelCache } from '../shared/auto-start-cache.js';
 import {
   CHANNEL_AUTO_START_FAILURE_MESSAGE,
@@ -279,10 +278,7 @@ export async function maybeHandleDiscordChannelAutoStart(input: {
       getDiscordMessageContent(message),
       botUserId,
     );
-    if (
-      defaultFastQuestion &&
-      (await hasCommunicationsFastModeDefault(mappedUserId))
-    ) {
+    if (defaultFastQuestion) {
       void processDiscordFastAgentMessage({
         event,
         question: defaultFastQuestion,

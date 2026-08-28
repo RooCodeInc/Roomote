@@ -10,10 +10,12 @@ import {
   CHAT_CHANNELS_TOOL,
   CHAT_CHANNEL_MESSAGES_TOOL,
   CHAT_MESSAGE_CONTEXT_TOOL,
-  SCHEDULE_ONLY_BACKGROUND_AUTOMATION_FREQUENCIES,
+  MANAGE_CUSTOM_AUTOMATIONS_TOOL,
   TaskPayloadKind,
   createTaskEnvVarRequestBaseSchema,
   PRODUCT_NAME,
+  ROOMOTE_TASK_INSPECTION_ACTIONS,
+  roomoteTaskInspectionFieldSchemas,
   sourceControlProviderSchema,
   taskArtifactTypeSchema,
   workspaceReadinessSchema,
@@ -46,8 +48,14 @@ import {
   handleUpdateEnvironment,
 } from './create-environment.js';
 import { handleRequestEnvironmentVariables } from './request-environment-variables.js';
-import { handleShowWidget } from './show-widget.js';
+import {
+  handleShowWidget,
+  SHOW_WIDGET_FIXED_CANVAS_GUIDANCE,
+  SHOW_WIDGET_HEIGHT_DESCRIPTION,
+  SHOW_WIDGET_THEME_GUIDANCE,
+} from './show-widget.js';
 import { handleSendChatReply } from './send-chat-reply.js';
+import { handleRelayFastAgentChatReply } from './relay-fast-agent-chat-reply.js';
 import {
   type ChatReplyPurpose,
   recordChatReplyDeliveryFailure,
@@ -100,69 +108,12 @@ const uuidStringSchema = z
   });
 
 roomoteMcpServer.registerTool(
-  'manage_custom_automations',
+  MANAGE_CUSTOM_AUTOMATIONS_TOOL.name,
   {
-    title: 'Manage Custom Automations',
-    description:
-      'Admin-only management of deployment custom automations. List existing automations or enabled task models, resolve a cron or natural-language schedule, create or update an automation, delete an automation by exact ID, or run an enabled automation now. Use list_models before setting a model override; create and update accept only exact model IDs returned by that action. Model IDs encode the inference route: for example, openrouter/... targets OpenRouter, while openai/... uses the deployment OpenAI route, including a connected ChatGPT subscription when configured. When the user asks an automation to DM them, set their preferred connected targetProvider and targetMode to direct_message; no targetChannelId is needed. Natural-language schedules are converted to validated five-field cron in the deployment scheduling timezone. Keep cadence only in the schedule field; do not repeat it in the stored prompt. When a user asks an automation to offer help, suggest tasks, make follow-ups actionable or launchable, or turn findings or action items into tasks, encode that intent in product language by instructing the automation to post concrete actions as launchable suggested tasks alongside its report. Do not expose runtime tool names or parameter syntax in the stored prompt. A request only to summarize or list action items is not suggested-task intent. Only promise launchable suggested tasks when the automation has both a configured chat report destination and a repository or environment for executable work; otherwise keep actions as report text and explain the missing capability. After successfully creating an automation in response to a conversational request, ask the user whether they want to run it now to test it.',
-    inputSchema: {
-      action: z.enum([
-        'list',
-        'list_models',
-        'resolve_schedule',
-        'create',
-        'update',
-        'delete',
-        'run_now',
-      ]),
-      automationId: z
-        .string()
-        .optional()
-        .describe('Required for update, delete, and run_now.'),
-      name: z.string().optional(),
-      prompt: z
-        .string()
-        .optional()
-        .describe(
-          'Automation instructions written in product language. Do not include the automation cadence; keep it only in the schedule field. When the user intends actionable or launchable follow-up tasks and the automation has both a chat report destination and an executable workspace, instruct it to post qualifying actions as launchable suggested tasks alongside the report; otherwise keep actions as report text. Do not mention internal tool names or parameters.',
-        ),
-      enabled: z.boolean().optional(),
-      schedule: z
-        .string()
-        .optional()
-        .describe(
-          `A five-field cron expression, natural-language recurring schedule, or one of these built-in presets: ${SCHEDULE_ONLY_BACKGROUND_AUTOMATION_FREQUENCIES.join(', ')}. Prefer a built-in preset when it matches the requested cadence.`,
-        ),
-      model: z
-        .string()
-        .nullable()
-        .describe(
-          'Optional provider/model launch override. Call list_models first and pass an exact returned model ID. The ID prefix selects the configured inference route; openai/... includes connected ChatGPT subscription routing. Omit to keep the deployment default; pass null on update to clear an existing override.',
-        )
-        .optional(),
-      environmentId: z.string().optional(),
-      targetProvider: z
-        .enum(['slack', 'discord', 'teams', 'telegram'])
-        .nullable()
-        .describe(
-          'Destination provider. Pass null on update to clear the report destination.',
-        )
-        .optional(),
-      targetMode: z
-        .enum(['channel', 'direct_message'])
-        .describe(
-          'Destination mode. Use direct_message to send reports privately to the automation owner through the selected connected provider.',
-        )
-        .optional(),
-      targetChannelId: z.string().optional(),
-      targetServiceUrl: z.string().optional(),
-    },
-    annotations: {
-      readOnlyHint: false,
-      destructiveHint: true,
-      idempotentHint: false,
-      openWorldHint: false,
-    },
+    title: MANAGE_CUSTOM_AUTOMATIONS_TOOL.title,
+    description: MANAGE_CUSTOM_AUTOMATIONS_TOOL.description,
+    inputSchema: MANAGE_CUSTOM_AUTOMATIONS_TOOL.inputSchema,
+    annotations: MANAGE_CUSTOM_AUTOMATIONS_TOOL.annotations,
   },
   async (params): Promise<ToolResult> => {
     const config = getRoomoteConfig();
@@ -219,9 +170,10 @@ roomoteMcpServer.registerTool(
       'Use it when a structured or visual presentation is clearer than plain text, or to demonstrate how something would look. ' +
       'Examples include mock UI, status cards, tables, annotated plans, and other visual examples. ' +
       'HTML, CSS, and inline SVG are displayed in a sandboxed iframe with scripts disabled and network requests blocked. ' +
-      'Prefer semantic HTML with the built-in widget classes (`rw-card`, `rw-stack`, `rw-row`, `rw-grid`, `rw-stat`, `rw-badge`, `rw-callout`, `rw-muted`) so the widget follows the host task theme. ' +
-      'For custom CSS, use the provided `--rw-*` theme variables instead of hard-coded colors; omit css when the built-in styles are sufficient. ' +
-      'Keep widgets compact enough to fit without scrolling: use concise labels and a small number of cards, rows, or table entries, and choose a height that fully fits the expected content. Use ordinary prose or an artifact for long content. ' +
+      SHOW_WIDGET_THEME_GUIDANCE +
+      ' ' +
+      SHOW_WIDGET_FIXED_CANVAS_GUIDANCE +
+      ' ' +
       'Do not use it for ordinary prose or collecting user input; use request_user_input when you need answers. ' +
       'Optional textFallback is delivered to the originating chat surface (Slack/Teams/Telegram/Discord) when the task was started from chat.',
     inputSchema: {
@@ -238,12 +190,7 @@ roomoteMcpServer.registerTool(
         .describe(
           'Optional extra CSS injected after the built-in widget defaults. Prefer --rw-background, --rw-surface, --rw-surface-muted, --rw-text, --rw-text-muted, --rw-border, --rw-primary, --rw-accent, --rw-success, --rw-warning, and --rw-danger instead of hard-coded colors.',
         ),
-      height: z
-        .number()
-        .optional()
-        .describe(
-          'Optional widget iframe height in pixels (clamped to 120-800; default 320). Choose the smallest height that fully fits the expected content without a vertical scrollbar.',
-        ),
+      height: z.number().optional().describe(SHOW_WIDGET_HEIGHT_DESCRIPTION),
       textFallback: z
         .string()
         .optional()
@@ -564,20 +511,17 @@ const manageTasksToolDescription =
   'Use action "search" to find tasks by query or status. ' +
   `Use action "get_summary" to inspect a specific task's latest status and failure details (requires taskId). ` +
   'Use action "get_compute_logs" to fetch all compute logs for a task, including per-job command output for compute providers that support output lookup when the job has both a machine id and sandbox command id (requires taskId). ' +
-  'Use action "get_messages" to retrieve the latest message history for a task (requires taskId, returns newest first). ' +
+  'Use action "get_messages" to retrieve the latest message history for a task or Fast session (requires taskId, returns newest first). For a Fast session, pass its canonical session ID as taskId. ' +
   `Use action "launch" to create and start a new task against an environment using ${PRODUCT_NAME}'s default standard workflow (requires prompt and environmentId). ` +
   'Use action "cancel" to cancel an active task (requires taskId). ' +
-  'Use action "send_message" to send a follow-up message to a running task (requires taskId and message). ' +
+  'Use action "send_message" to send a follow-up message to a running task or Fast session (requires taskId and message). For a Fast session, pass its canonical session ID as taskId. ' +
   'Use action "list_models" to list the enabled model IDs available for task model selection. Call it before "update_models" when resolving a requested model name to an exact ID. ' +
   'Use action "update_models" ONLY when the user explicitly asks to change the model or reasoning level for a task (requires role; taskId defaults to the current task). Pass the desired model id and/or reasoningEffort; omit both to reset the role to the deployment default. Users usually phrase both together: in "switch to Luna Max" or "use GPT 5.4 medium", the trailing low/medium/high/extra high/max word is the reasoningEffort and the rest names the model — set BOTH fields in one call. Changes apply from the next turn, so a change to the current task does not affect the turn that is already running.';
 
 const manageTasksInputSchema = {
   action: z
     .enum([
-      'search',
-      'get_summary',
-      'get_compute_logs',
-      'get_messages',
+      ...ROOMOTE_TASK_INSPECTION_ACTIONS,
       'launch',
       'cancel',
       'send_message',
@@ -588,11 +532,12 @@ const manageTasksInputSchema = {
     .describe(
       'The task action to perform. Call "list_environments" immediately before "launch".',
     ),
+  ...roomoteTaskInspectionFieldSchemas,
   taskId: z
     .string()
     .optional()
     .describe(
-      'The task ID (required for get_summary, get_compute_logs, get_messages, cancel, and send_message)',
+      'The task ID; for get_messages and send_message this may instead be a canonical Fast session ID',
     ),
   message: z
     .string()
@@ -600,34 +545,6 @@ const manageTasksInputSchema = {
     .describe(
       'Follow-up message text to send to a running task (required for send_message)',
     ),
-  query: z
-    .string()
-    .optional()
-    .describe('Text to search for in task prompts (for search action)'),
-  status: z
-    .enum(['active', 'completed', 'all'])
-    .optional()
-    .describe('Filter by task status (for search action)'),
-  pullRequest: z
-    .string()
-    .optional()
-    .describe(
-      'Filter by pull request for search action: "__has_pr__" for any linked PR or "owner/repo#123" for a specific PR',
-    ),
-  limit: z
-    .number()
-    .int()
-    .refine((value) => value >= 1 && value <= 1000, {
-      message: 'Limit must be between 1 and 1,000.',
-    })
-    .optional()
-    .describe(
-      'Positive result limit: 1 to 100 for search (default 20), or 1 to 1000 for get_messages',
-    ),
-  cursor: z
-    .string()
-    .optional()
-    .describe('Pagination cursor from a previous search response (nextCursor)'),
   prompt: z
     .string()
     .optional()
@@ -847,10 +764,10 @@ roomoteMcpServer.registerTool(
       'when an open PR/MR already exists for sourceBranch, targetBranch may be omitted and defaults to its current base. ' +
       'Use action "get_pull_request" to read PR/MR details (state, branches, head/base SHAs), ' +
       '"list_pull_requests" to list open PRs/MRs in a repository (summaries with branches, labels, and mergeability where the provider exposes it), and ' +
-      '"list_pull_request_comments" to read review threads (with resolution state) and issue comments. ' +
+      '"list_pull_request_comments" to read review threads, top-level reviews, and issue comments. ' +
       'Use "reply_to_pull_request_comment" to answer a review thread, "create_pull_request_comment" for a top-level comment, ' +
       '"create_pull_request_review_comment" for a new inline comment anchored to a file and line of the current diff, ' +
-      '"resolve_pull_request_thread" to resolve or reopen a thread, and "submit_pull_request_review" to approve, request changes, or leave a review comment. ' +
+      '"resolve_pull_request_thread" to resolve or reopen a thread, "submit_pull_request_review" to approve, request changes, or leave a review comment, and "dismiss_pull_request_review" to dismiss a GitHub review. ' +
       'Provider gaps are reported as warnings with applied:false instead of errors. ' +
       'For the PR diff, use local git against the returned SHAs instead of a provider CLI. ' +
       'The platform resolves the current task source-control provider and keeps provider tokens server-side.',
@@ -866,13 +783,14 @@ roomoteMcpServer.registerTool(
           'create_pull_request_review_comment',
           'resolve_pull_request_thread',
           'submit_pull_request_review',
+          'dismiss_pull_request_review',
           'update_pull_request_comment',
           'get_issue',
           'list_issue_comments',
           'create_issue_comment',
         ])
         .describe(
-          'get_issue reads a plain issue; list_issue_comments reads its comments; create_issue_comment posts a top-level issue comment. create_or_update_pull_request creates or refreshes the PR/MR for a branch; get_pull_request reads PR/MR details; list_pull_requests lists open PRs/MRs in the repository; list_pull_request_comments reads review threads and issue comments; reply_to_pull_request_comment answers a review thread; create_pull_request_comment posts a top-level PR comment; create_pull_request_review_comment posts one new inline review comment anchored to a file and line of the current diff (one finding per call); resolve_pull_request_thread resolves or reopens a thread; submit_pull_request_review approves, requests changes, or leaves a review comment; update_pull_request_comment edits an existing comment in place.',
+          'get_issue reads a plain issue; list_issue_comments reads its comments; create_issue_comment posts a top-level issue comment. create_or_update_pull_request creates or refreshes the PR/MR for a branch; get_pull_request reads PR/MR details; list_pull_requests lists open PRs/MRs in the repository; list_pull_request_comments reads review threads, top-level reviews, and issue comments; reply_to_pull_request_comment answers a review thread; create_pull_request_comment posts a top-level PR comment; create_pull_request_review_comment posts one new inline review comment anchored to a file and line of the current diff (one finding per call); resolve_pull_request_thread resolves or reopens a thread; submit_pull_request_review approves, requests changes, or leaves a review comment; dismiss_pull_request_review dismisses a GitHub review; update_pull_request_comment edits an existing comment in place.',
         ),
       repositoryFullName: z
         .string()
@@ -926,6 +844,12 @@ roomoteMcpServer.registerTool(
         .optional()
         .describe(
           'Required for update_pull_request_comment: the comment id from list_pull_request_comments or a prior write result.',
+        ),
+      reviewId: z
+        .string()
+        .optional()
+        .describe(
+          'Required for dismiss_pull_request_review: the review id from list_pull_request_comments.',
         ),
       resolved: z
         .boolean()
@@ -997,7 +921,7 @@ roomoteMcpServer.registerTool(
         .string()
         .optional()
         .describe(
-          'The text content: the PR/MR description for create_or_update_pull_request, the comment text for issue/PR reply or create actions, or the optional review body for submit_pull_request_review.',
+          'The text content: the PR/MR description for create_or_update_pull_request, the comment text for issue/PR reply or create actions, the optional review body for submit_pull_request_review, or the required dismissal reason for dismiss_pull_request_review.',
         ),
       labels: z
         .array(z.string())
@@ -1043,6 +967,7 @@ roomoteMcpServer.registerTool(
         limit: params.limit,
         threadId: params.threadId,
         commentId: params.commentId,
+        reviewId: params.reviewId,
         resolved: params.resolved,
         reviewEvent: params.reviewEvent,
         path: params.path,
@@ -1385,8 +1310,9 @@ if (!isFastAgentChild()) {
   );
 }
 
-if (shouldRegisterSlackThreadReplyTool()) {
+if (shouldRegisterSlackThreadReplyTool() || isFastAgentChild()) {
   const chatReplySurfaceLabel = getChatReplySurfaceLabel();
+  const relaysThroughFastParent = isFastAgentChild();
   const supportsChatReplySuggestions =
     process.env.ROOMOTE_AUTOMATION_TASK === 'true';
   const usesPinnedSuggestionContract =
@@ -1449,28 +1375,26 @@ if (shouldRegisterSlackThreadReplyTool()) {
   const chatReplySuggestionGuidance = supportsChatReplySuggestions
     ? 'Use the optional suggestions parameter when the automation prompt explicitly asks for task suggestions, launchable follow-ups, or help taking concrete actions. Do not infer suggested-task intent from a request that only asks for a summary or action-item list. Suggestions are posted inside the originating conversation. Do not use suggestions for ordinary summary bullets, status updates, questions, speculative ideas, or work explicitly identified in the conversation as already underway. When suggestions are present, the tool automatically adds the surface-specific instruction for starting one; do not write a separate launch instruction. '
     : '';
+  const chatReplyDescription = relaysThroughFastParent
+    ? 'Fast-internal: sends a lifecycle update privately to the Fast parent, which owns any user-visible reply. The raw message is never posted directly to the user. The kickoff already acknowledged the request, so do not send another generic ack. Use progress to pass concrete findings, blockers, meaningful work milestones, required input, or a brief note after roughly 10 minutes of silence. Describe the work itself without labeling the message as a progress update or using policy vocabulary such as phase transition, checkpoint, lifecycle, or user-facing. Use closeout for the final result or blocker and clarification when user input is needed. Ack and progress keep the coding task active.'
+    : `${chatReplySurfaceLabel}-visible: posts a lifecycle reply in the originating ${chatReplySurfaceLabel} thread. Choose the current ${chatReplySurfaceLabel} turn purpose before writing: ack, progress, closeout, or clarification. Use ack for the first visible response when work will continue; use progress only when the message adds new decision-useful state or prevents a 10-minute silence gap; use closeout for the answer, result, blocker, or handoff; use clarification for lightweight non-secret questions. Use closeout to finish a turn with an outcome; a clarification also ends the turn when the next step depends on the user's answer — do not follow it with a separate "waiting on your answer" message. Ack and progress keep the ${chatReplySurfaceLabel} turn open. Use it again on later ${chatReplySurfaceLabel} turns when they need another direct reply; an earlier thread reply does not count as the reply for the current turn. For routine successful closeouts, focus on the shipped change and any blocker or delivery outcome that changes the user's next step; do not include exact validation commands, passed-check ledgers, or proof-applicability narration unless the user asked or that detail materially changes what they should do next. ${chatReplyMarkdownGuidance}${chatReplySourceLinkingGuidance}${chatReplySuggestionGuidance}Write the message so its content clearly matches the selected purpose.`;
   roomoteMcpServer.registerTool(
     'send_chat_reply',
     {
       title: 'Send Chat Reply',
-      description:
-        `${chatReplySurfaceLabel}-visible: posts a lifecycle reply in the originating ${chatReplySurfaceLabel} thread. ` +
-        `Choose the current ${chatReplySurfaceLabel} turn purpose before writing: ack, progress, closeout, or clarification. ` +
-        `Use ack for the first visible response when work will continue; use progress only when the message adds new decision-useful state or prevents a 10-minute silence gap; use closeout for the answer, result, blocker, or handoff; use clarification for lightweight non-secret questions. Use closeout to finish a turn with an outcome; a clarification also ends the turn when the next step depends on the user's answer — do not follow it with a separate "waiting on your answer" message. Ack and progress keep the ${chatReplySurfaceLabel} turn open. ` +
-        `Use it again on later ${chatReplySurfaceLabel} turns when they need another direct reply; an earlier thread reply does not count as the reply for the current turn. ` +
-        "For routine successful closeouts, focus on the shipped change and any blocker or delivery outcome that changes the user's next step; do not include exact validation commands, passed-check ledgers, or proof-applicability narration unless the user asked or that detail materially changes what they should do next. " +
-        chatReplyMarkdownGuidance +
-        chatReplySourceLinkingGuidance +
-        chatReplySuggestionGuidance +
-        'Write the message so its content clearly matches the selected purpose.',
+      description: chatReplyDescription,
       inputSchema: {
         purpose: z
           .enum(['ack', 'progress', 'closeout', 'clarification'])
           .describe(
-            `The lifecycle purpose for this ${chatReplySurfaceLabel}-visible reply. Choose ack for the first visible response before work that will not post to ${chatReplySurfaceLabel}, progress for new useful state or silence prevention, closeout for the final answer/result/blocker/handoff, or clarification for a lightweight question. Use closeout before final task completion.`,
+            relaysThroughFastParent
+              ? 'The lifecycle purpose of this private update to the Fast parent. The kickoff already acknowledged the request, so avoid another generic ack. Use progress for concrete findings, blockers, meaningful work milestones, required input, or a brief update after roughly 10 minutes of silence. Use closeout for the final result or blocker and clarification when user input is needed.'
+              : `The lifecycle purpose for this ${chatReplySurfaceLabel}-visible reply. Choose ack for the first visible response before work that will not post to ${chatReplySurfaceLabel}, progress for new useful state or silence prevention, closeout for the final answer/result/blocker/handoff, or clarification for a lightweight question. Use closeout before final task completion.`,
           ),
         message: nonEmptyStringSchema.describe(
-          `Non-empty Markdown text to post in the ${chatReplySurfaceLabel} thread. Match the selected purpose, lead with the useful takeaway, and keep it conversational like a teammate in a thread. ` +
+          (relaysThroughFastParent
+            ? 'Non-empty Markdown source text for the Fast parent. State concrete facts about the work or the needed handoff; the Fast parent will compose the user-visible message. '
+            : `Non-empty Markdown text to post in the ${chatReplySurfaceLabel} thread. Match the selected purpose, lead with the useful takeaway, and keep it conversational like a teammate in a thread. `) +
             "For routine successful closeouts, focus on the shipped change and any blocker or delivery outcome that changes the user's next step instead of listing exact validation commands, passed checks, or proof-applicability notes unless the user asked for them or they materially change what the user should do next. " +
             chatReplyMessageMarkdownGuidance,
         ),
@@ -1519,28 +1443,43 @@ if (shouldRegisterSlackThreadReplyTool()) {
         return errorResult('ROOMOTE_CLOUD_TOKEN environment variable not set');
       }
 
-      const roomoteConfig = getRoomoteConfig();
-      if (!roomoteConfig) {
-        return errorResult('ROOMOTE_CLOUD_TOKEN environment variable not set');
-      }
-
       const taskId = process.env.ROOMOTE_TASK_ID;
       if (!taskId?.trim()) {
         return errorResult('ROOMOTE_TASK_ID environment variable not set');
       }
 
-      const result = await handleSendChatReply(
-        {
-          taskId,
-          summary: params.message,
-          imagePaths: params.imagePaths,
-          imageArtifactIds: params.imageArtifactIds,
-          suggestions: params.suggestions,
-          chatReplySurface: chatReplySurfaceLabel,
-        },
-        artifactConfig,
-        roomoteConfig,
-      );
+      const result = relaysThroughFastParent
+        ? await handleRelayFastAgentChatReply(
+            {
+              runId: Number(process.env.ROOMOTE_TASK_RUN_ID),
+              taskId,
+              purpose: params.purpose,
+              message: params.message,
+              imagePaths: params.imagePaths,
+              imageArtifactIds: params.imageArtifactIds,
+            },
+            artifactConfig,
+          )
+        : await (async () => {
+            const roomoteConfig = getRoomoteConfig();
+            if (!roomoteConfig) {
+              return errorResult(
+                'ROOMOTE_CLOUD_TOKEN environment variable not set',
+              );
+            }
+            return handleSendChatReply(
+              {
+                taskId,
+                summary: params.message,
+                imagePaths: params.imagePaths,
+                imageArtifactIds: params.imageArtifactIds,
+                suggestions: params.suggestions,
+                chatReplySurface: chatReplySurfaceLabel,
+              },
+              artifactConfig,
+              roomoteConfig,
+            );
+          })();
 
       if (
         params.suggestions &&
@@ -1583,11 +1522,19 @@ function recordSuccessfulSlackTurnSatisfactionResult(
     const parsed = JSON.parse(text) as {
       success?: unknown;
       messageTs?: unknown;
+      relayed?: unknown;
+      relayId?: unknown;
     };
 
-    if (parsed.success === true && typeof parsed.messageTs === 'string') {
+    const satisfactionId =
+      typeof parsed.messageTs === 'string'
+        ? parsed.messageTs
+        : parsed.relayed === true && typeof parsed.relayId === 'string'
+          ? parsed.relayId
+          : null;
+    if (parsed.success === true && satisfactionId) {
       recordChatReplySatisfaction({
-        messageTs: parsed.messageTs,
+        messageTs: satisfactionId,
         tool,
         replyPurpose: options.replyPurpose,
         sessionId: options.sessionId,

@@ -24,7 +24,7 @@ does not require an inbound webhook or public callback URL.
    token, and save.
 
 Roomote reads the bot and application identity from the token and registers
-the `/new`, `/goal`, `/fast`, `/link`, and `/help` commands automatically. You
+the `/new`, `/goal`, `/link`, and `/help` commands automatically. You
 do not need to copy an application ID or bot name into Roomote.
 
 <Warning>
@@ -59,12 +59,19 @@ automatically. If every tag is moderated, the bot needs Manage Threads to
 apply one.
 
 <Warning>
-  Unlike a Slack workspace, a Discord server can be public or shared with
+Unlike a Slack workspace, a Discord server can be public or shared with
   people outside your team. Task threads are visible to everyone who can see
   the channel, including repository names, task descriptions, and PR links.
   Only add Roomote to servers whose members you trust with that context, and
   use private channels for sensitive work.
 </Warning>
+
+When deployment Memory is enabled, Roomote also collects message history from
+server channels visible to `@everyone` where the bot has **View Channel** and
+**Read Message History**. Active public threads and forum posts are included;
+private channels, private threads, and DMs are not. Removing public visibility
+or the bot's read access removes that channel's collected pages after the next
+successful permission scan.
 
 If Roomote cannot see the server or channel, confirm that the bot was added to
 the server and that its role and channel overrides grant the permissions above.
@@ -113,12 +120,9 @@ under **Settings > Automations**, the same way you would pick a Slack channel.
   current one
 - use `/goal objective:<objective>` to keep working toward an objective across
   multiple turns in an active task thread or DM; this does not create a new task
-- use `/fast request:<request>` to ask the fast orchestrator a question or
-  delegate work into a new task; unlike `/goal`, it does not require an active
-  task
-- when your deployment exposes **Default messages to fast mode**, enable it
-  under **Settings > Personal** to send ordinary Discord DMs, mentions, and
-  eligible thread replies through the same fast orchestrator without `/fast`
+- ordinary Discord DMs, mentions, and eligible thread replies from your linked
+  account are always answered in Fast mode, which can delegate repository work
+  into tasks
 - when Roomote asks where to run a task, use a button or reply naturally in the
   same thread or DM; `yes`, `never mind`, and `use API instead` confirm, cancel,
   or revise the pending route
@@ -129,6 +133,14 @@ under **Settings > Automations**, the same way you would pick a Slack channel.
   task so the agent can pull that message and nearby channel/thread context
   (lookups outside the originating task thread require a linked Discord account)
 - use `/help` to see the available commands
+
+Fast can read bounded context from the current Discord thread or channel, use
+MCP servers and user-scoped integrations that you are allowed to access, and
+delegate repository work to Roomote tasks. Deployment admins can also manage
+custom automations through Fast. Fast does not read other channels implicitly
+or inspect repository contents without delegating the work to a task. When the
+request spans every repository, Fast can delegate it to the deployment's
+all-repositories environment.
 
 Roomote does not quote every message it answers. In a task thread, the
 conversation itself supplies the context. When you start a task by tagging

@@ -3,7 +3,6 @@ import {
   applyImplicitLiteLlmModelPrefix,
   CHATGPT_FAST_MODE_ENV_VAR_NAME,
   CHATGPT_OPENCODE_PROVIDER_ID,
-  DEFAULT_MODEL_ROLE_REASONING_EFFORTS,
   DISABLED_MODEL_PROVIDER_ENV_VAR_NAMES,
   getDefaultTaskModelId,
   getEnabledTaskModels,
@@ -15,12 +14,19 @@ import {
   INFERENCE_GATEWAY_XAI_ENV_VAR_NAME,
   isConfiguredEnvValue,
   isInferenceGatewayCoveredEnvVar,
+  isSettingsOnlyProviderEnvVar,
   normalizeDeploymentModelConfig,
   normalizeOptionalReasoningEffort,
   parseModelProviderEnvKeys,
+  ROOMOTE_INFERENCE_API_KEY_ENV_VAR_NAME,
+  ROOMOTE_INFERENCE_PROVIDER_ID,
   resolveSetupModelProviderIdFromModel,
+  TASK_MODEL_ROLE_DESCRIPTORS,
+  TASK_MODEL_ROLES,
   TASK_MODEL_CONTEXT_WINDOWS_ENV_VAR_NAME,
+  TASK_MODEL_COSTS_ENV_VAR_NAME,
   XAI_OPENCODE_PROVIDER_ID,
+  type TaskModelRole,
   type TaskModelOption,
 } from '@roomote/types';
 
@@ -161,7 +167,12 @@ function resolveProviderKeyNames({
 /**
  * Resolve a single model-provider env value with the same precedence the task
  * runtime uses: the runtime process env first, then the persisted (encrypted)
- * deployment environment variables.
+ * deployment environment variables. Settings-only vars (see
+ * `SETTINGS_ONLY_MODEL_PROVIDER_ENV_VAR_NAMES`) are the exception: their env
+ * variables are only the hosting platform's delivery mechanism (setup
+ * imports them into Settings storage), so they resolve
+ * from the persisted store alone — deleting the stored key disables the
+ * provider even while hosting keeps injecting the variable.
  */
 export async function resolveModelProviderEnvValue(
   envVarNames: string | readonly string[],
@@ -174,6 +185,7 @@ export async function resolveModelProviderEnvValue(
   const names = typeof envVarNames === 'string' ? [envVarNames] : envVarNames;
 
   for (const envVarName of names) {
+    if (isSettingsOnlyProviderEnvVar(envVarName)) continue;
     const runtimeValue = normalizeConfiguredValue(runtimeEnv[envVarName]);
 
     if (runtimeValue) {
@@ -196,6 +208,148 @@ export async function resolveModelProviderEnvValue(
   }
 
   return undefined;
+}
+
+/**
+ * The R_BRAIN_* names alone, in Settings or the environment, are the Brain's
+ * activation signal. The general provider keys (OPENROUTER_API_KEY,
+ * OPENAI_API_KEY) exist on nearly every deployment because they run tasks,
+ * and some platform templates auto-generate the Brain's gateway token and
+ * URL as plumbing, so none of those can carry an operator's intent to turn
+ * the Brain on. Setting a brain-specific key is the one signal that cannot
+ * happen by accident.
+ */
+const EXPLICIT_BRAIN_PROVIDER_ENV_VAR_NAMES = [
+  'R_BRAIN_OPENROUTER_API_KEY',
+  'R_BRAIN_OPENAI_API_KEY',
+] as const;
+
+/**
+ * Cached like the Brain provider resolution in @roomote/sdk and for the same
+ * reason: this predicate sits in front of per-event paths (sandbox MCP
+ * delivery, fast-agent integration listing) and per-minute scheduled jobs,
+ * and the answer only changes when an admin edits Settings.
+ */
+const BRAIN_PROVIDER_CONFIGURED_CACHE_TTL_MS = 30_000;
+
+let brainProviderConfiguredCache: {
+  value: boolean;
+  expiresAtMs: number;
+} | null = null;
+
+/** Drop the cached answer, so the next call re-reads settings. */
+export function resetBrainProviderConfiguredCache(): void {
+  brainProviderConfiguredCache = null;
+}
+
+/**
+ * Whether an operator explicitly enabled the Brain by configuring a
+ * brain-specific provider key.
+ *
+ * This is the legacy activation signal, kept as the fallback inside
+ * `resolveBrainEnabledState` for deployments that opted in before the
+ * `brainEnabled` Settings toggle existed. New code gates on `isBrainEnabled`.
+ * It is deliberately narrower than the Brain's inference-provider resolution,
+ * whose general-key fallback exists so an already-enabled Brain can bill
+ * through the deployment's regular provider key; counting that fallback (or
+ * template-generated plumbing) as activation would turn the Brain on for
+ * deployments that never asked for one.
+ */
+export async function isBrainProviderConfigured(): Promise<boolean> {
+  const cached = brainProviderConfiguredCache;
+
+  if (cached && cached.expiresAtMs > Date.now()) {
+    return cached.value;
+  }
+
+  const value = Boolean(
+    (
+      await resolveModelProviderEnvValue(EXPLICIT_BRAIN_PROVIDER_ENV_VAR_NAMES)
+    )?.trim(),
+  );
+
+  brainProviderConfiguredCache = {
+    value,
+    expiresAtMs: Date.now() + BRAIN_PROVIDER_CONFIGURED_CACHE_TTL_MS,
+  };
+
+  return value;
+}
+
+export type BrainEnabledState = {
+  enabled: boolean;
+  /**
+   * True when no explicit choice is stored and the legacy activation signal
+   * (an explicit R_BRAIN_* provider key) decided the answer.
+   */
+  fromLegacyKey: boolean;
+};
+
+let brainEnabledCache: {
+  value: BrainEnabledState;
+  expiresAtMs: number;
+} | null = null;
+
+/** Drop the cached answer, so the next call re-reads settings. */
+export function invalidateBrainEnabledCache(): void {
+  brainEnabledCache = null;
+}
+
+/**
+ * Whether the Brain is on for this deployment, with its provenance. This is
+ * the activation predicate for everything user-visible: delivering the gbrain
+ * MCP server to sandboxes, listing the Brain as a fast-agent integration,
+ * resolving Brain connections, and accepting task memories.
+ *
+ * The stored Settings toggle wins when set (either way). A null/missing value
+ * falls back to `isBrainProviderConfigured()` so deployments that opted in
+ * with an explicit R_BRAIN_* key before the toggle existed stay enabled
+ * without a backfill. Cached like the legacy predicate and for the same
+ * reason: it fronts per-event paths, and the answer only changes when an
+ * admin edits Settings.
+ */
+export async function resolveBrainEnabledState(): Promise<BrainEnabledState> {
+  const cached = brainEnabledCache;
+
+  if (cached && cached.expiresAtMs > Date.now()) {
+    return cached.value;
+  }
+
+  const deployment = await db.query.deploymentSettings.findFirst({
+    where: eq(deploymentSettings.id, DEFAULT_DEPLOYMENT_ID),
+    columns: { brainEnabled: true },
+  });
+  const stored = deployment?.brainEnabled ?? null;
+  const value: BrainEnabledState =
+    stored === null
+      ? { enabled: await isBrainProviderConfigured(), fromLegacyKey: true }
+      : { enabled: stored, fromLegacyKey: false };
+
+  brainEnabledCache = {
+    value,
+    expiresAtMs: Date.now() + BRAIN_PROVIDER_CONFIGURED_CACHE_TTL_MS,
+  };
+
+  return value;
+}
+
+export async function isBrainEnabled(): Promise<boolean> {
+  return (await resolveBrainEnabledState()).enabled;
+}
+
+/** Persist an explicit Brain on/off choice and drop the cached answer. */
+export async function setBrainEnabled(value: boolean): Promise<void> {
+  const now = new Date();
+
+  await db
+    .insert(deploymentSettings)
+    .values({ id: DEFAULT_DEPLOYMENT_ID, brainEnabled: value, updatedAt: now })
+    .onConflictDoUpdate({
+      target: deploymentSettings.id,
+      set: { brainEnabled: value, updatedAt: now },
+    });
+
+  invalidateBrainEnabledCache();
 }
 
 type ModelRuntimeEnvOptions = {
@@ -245,14 +399,14 @@ async function resolveModelRuntimeEnv(
     loadPersistedRuntimeModelConfig(executor),
   ]);
   const persistedRuntimeModelConfig = runtimeModelConfig;
-  const runtimeOverrideModelConfig = normalizeDeploymentModelConfig({
-    roomoteModel: runtimeEnv.R_MODEL,
-    roomoteSmallModel: runtimeEnv.R_SMALL_MODEL,
-    roomoteVisionModel: runtimeEnv.R_VISION_MODEL,
-    roomoteCodeReviewModel: runtimeEnv.R_CODE_REVIEW_MODEL,
-    roomoteExploreModel: runtimeEnv.R_EXPLORE_MODEL,
-    roomotePlanningModel: runtimeEnv.R_PLANNING_MODEL,
-  });
+  const runtimeOverrideModelConfig = normalizeDeploymentModelConfig(
+    Object.fromEntries(
+      TASK_MODEL_ROLES.map((role) => {
+        const descriptor = TASK_MODEL_ROLE_DESCRIPTORS[role];
+        return [descriptor.modelConfigKey, runtimeEnv[descriptor.modelEnvVar]];
+      }),
+    ),
+  );
   // Bare R_MODEL values are valid LiteLLM route names when a LiteLLM endpoint
   // is configured; rewrite them to OpenCode's litellm/<name> form before key
   // resolution so provider credentials and sandbox validation stay aligned.
@@ -264,34 +418,20 @@ async function resolveModelRuntimeEnv(
     modelId
       ? applyImplicitLiteLlmModelPrefix(modelId, isLiteLlmConfigured)
       : undefined;
-  const resolvedRoomoteModel = withLiteLlmPrefix(
-    runtimeOverrideModelConfig.roomoteModel ??
-      normalizeConfiguredValue(persistedRuntimeModelConfig.roomoteModel),
-  );
-  const resolvedRoomoteSmallModel = withLiteLlmPrefix(
-    runtimeOverrideModelConfig.roomoteSmallModel ??
-      normalizeConfiguredValue(persistedRuntimeModelConfig.roomoteSmallModel),
-  );
-  const resolvedRoomoteVisionModel = withLiteLlmPrefix(
-    runtimeOverrideModelConfig.roomoteVisionModel ??
-      normalizeConfiguredValue(persistedRuntimeModelConfig.roomoteVisionModel),
-  );
-  const resolvedRoomoteCodeReviewModel = withLiteLlmPrefix(
-    runtimeOverrideModelConfig.roomoteCodeReviewModel ??
-      normalizeConfiguredValue(
-        persistedRuntimeModelConfig.roomoteCodeReviewModel,
-      ),
-  );
-  const resolvedRoomoteExploreModel = withLiteLlmPrefix(
-    runtimeOverrideModelConfig.roomoteExploreModel ??
-      normalizeConfiguredValue(persistedRuntimeModelConfig.roomoteExploreModel),
-  );
-  const resolvedRoomotePlanningModel = withLiteLlmPrefix(
-    runtimeOverrideModelConfig.roomotePlanningModel ??
-      normalizeConfiguredValue(
-        persistedRuntimeModelConfig.roomotePlanningModel,
-      ),
-  );
+  const resolvedModels = Object.fromEntries(
+    TASK_MODEL_ROLES.map((role) => {
+      const descriptor = TASK_MODEL_ROLE_DESCRIPTORS[role];
+      return [
+        role,
+        withLiteLlmPrefix(
+          runtimeOverrideModelConfig[descriptor.modelConfigKey] ??
+            normalizeConfiguredValue(
+              persistedRuntimeModelConfig[descriptor.modelConfigKey],
+            ),
+        ),
+      ];
+    }),
+  ) as Record<TaskModelRole, string | undefined>;
   // Roomote applies per-role reasoning defaults when no explicit level is
   // configured, but only for models that are not known to lack configurable
   // reasoning support (unknown support keeps the default, matching the UI).
@@ -306,67 +446,34 @@ async function resolveModelRuntimeEnv(
 
     return catalogModel?.metadata?.supportsReasoning !== false;
   };
-  const resolvedRoomoteModelReasoningEffort =
-    normalizeConfiguredReasoningEffort(runtimeEnv.R_MODEL_REASONING_EFFORT) ??
-    persistedRuntimeModelConfig.roomoteModelReasoningEffort ??
-    (modelSupportsReasoning(resolvedRoomoteModel)
-      ? DEFAULT_MODEL_ROLE_REASONING_EFFORTS.coding
-      : undefined);
-  const resolvedRoomoteSmallModelReasoningEffort =
-    normalizeConfiguredReasoningEffort(
-      runtimeEnv.R_SMALL_MODEL_REASONING_EFFORT,
-    ) ??
-    persistedRuntimeModelConfig.roomoteSmallModelReasoningEffort ??
-    (modelSupportsReasoning(resolvedRoomoteSmallModel ?? resolvedRoomoteModel)
-      ? DEFAULT_MODEL_ROLE_REASONING_EFFORTS.helper
-      : undefined);
-  const resolvedRoomoteVisionModelReasoningEffort =
-    normalizeConfiguredReasoningEffort(
-      runtimeEnv.R_VISION_MODEL_REASONING_EFFORT,
-    ) ??
-    persistedRuntimeModelConfig.roomoteVisionModelReasoningEffort ??
-    (resolvedRoomoteVisionModel &&
-    modelSupportsReasoning(resolvedRoomoteVisionModel)
-      ? DEFAULT_MODEL_ROLE_REASONING_EFFORTS.vision
-      : undefined);
-  const resolvedRoomoteCodeReviewModelReasoningEffort =
-    normalizeConfiguredReasoningEffort(
-      runtimeEnv.R_CODE_REVIEW_MODEL_REASONING_EFFORT,
-    ) ??
-    persistedRuntimeModelConfig.roomoteCodeReviewModelReasoningEffort ??
-    (modelSupportsReasoning(
-      resolvedRoomoteCodeReviewModel ?? resolvedRoomoteModel,
-    )
-      ? DEFAULT_MODEL_ROLE_REASONING_EFFORTS.codeReview
-      : undefined);
-  const resolvedRoomoteExploreModelReasoningEffort =
-    normalizeConfiguredReasoningEffort(
-      runtimeEnv.R_EXPLORE_MODEL_REASONING_EFFORT,
-    ) ??
-    persistedRuntimeModelConfig.roomoteExploreModelReasoningEffort ??
-    (modelSupportsReasoning(resolvedRoomoteExploreModel ?? resolvedRoomoteModel)
-      ? DEFAULT_MODEL_ROLE_REASONING_EFFORTS.explore
-      : undefined);
-  const resolvedRoomotePlanningModelReasoningEffort =
-    normalizeConfiguredReasoningEffort(
-      runtimeEnv.R_PLANNING_MODEL_REASONING_EFFORT,
-    ) ??
-    persistedRuntimeModelConfig.roomotePlanningModelReasoningEffort ??
-    (modelSupportsReasoning(
-      resolvedRoomotePlanningModel ?? resolvedRoomoteModel,
-    )
-      ? DEFAULT_MODEL_ROLE_REASONING_EFFORTS.planning
-      : undefined);
+  const resolvedReasoningEfforts = Object.fromEntries(
+    TASK_MODEL_ROLES.map((role) => {
+      const descriptor = TASK_MODEL_ROLE_DESCRIPTORS[role];
+      const reasoningModel =
+        descriptor.reasoningModelFallback === 'coding'
+          ? (resolvedModels[role] ?? resolvedModels.coding)
+          : resolvedModels[role];
+
+      return [
+        role,
+        normalizeConfiguredReasoningEffort(
+          runtimeEnv[descriptor.reasoningEnvVar],
+        ) ??
+          persistedRuntimeModelConfig[descriptor.reasoningConfigKey] ??
+          (modelSupportsReasoning(reasoningModel)
+            ? descriptor.defaultReasoningEffort
+            : undefined),
+      ];
+    }),
+  ) as Record<TaskModelRole, string | undefined>;
   const configuredRoomoteModelEnvKeys =
     normalizeConfiguredValue(runtimeEnv.R_MODEL_ENV_KEYS) ??
     normalizeConfiguredValue(persistedEnvVars.R_MODEL_ENV_KEYS);
   const resolvedRoleModels = [
-    resolvedRoomoteModel,
-    resolvedRoomoteSmallModel,
-    resolvedRoomoteVisionModel,
-    resolvedRoomoteCodeReviewModel,
-    resolvedRoomoteExploreModel,
-    resolvedRoomotePlanningModel,
+    ...TASK_MODEL_ROLES.filter(
+      (role) =>
+        !inferenceGateway || TASK_MODEL_ROLE_DESCRIPTORS[role].includeInSandbox,
+    ).map((role) => resolvedModels[role]),
   ];
   const providerKeyNames = resolveProviderKeyNames({
     runtimeRoomoteModelEnvKeys: configuredRoomoteModelEnvKeys,
@@ -393,6 +500,35 @@ async function resolveModelRuntimeEnv(
         }),
       )
     : {};
+  // Per-model pricing for the generated OpenCode config, in USD per million
+  // tokens. Custom providers (Roomote inference included) are invisible to
+  // OpenCode's own models.dev pricing, so without this every message on them
+  // records zero cost in the task usage ledger.
+  const taskModelCosts = inferenceGateway
+    ? Object.fromEntries(
+        enabledCatalogModels.flatMap((model) => {
+          const inputPricePerToken = model.metadata?.inputPricePerToken;
+          const outputPricePerToken = model.metadata?.outputPricePerToken;
+
+          return typeof inputPricePerToken === 'number' &&
+            Number.isFinite(inputPricePerToken) &&
+            inputPricePerToken >= 0 &&
+            typeof outputPricePerToken === 'number' &&
+            Number.isFinite(outputPricePerToken) &&
+            outputPricePerToken >= 0
+            ? [
+                [
+                  model.id,
+                  {
+                    input: inputPricePerToken * 1_000_000,
+                    output: outputPricePerToken * 1_000_000,
+                  },
+                ],
+              ]
+            : [];
+        }),
+      )
+    : {};
   const gatewayProviderKeyNames = [
     ...new Set([
       ...providerKeyNames,
@@ -401,6 +537,14 @@ async function resolveModelRuntimeEnv(
       }),
     ]),
   ];
+  const managedRoomoteInferenceSelected = [
+    ...resolvedRoleModels,
+    ...gatewaySwitchableModelIds,
+  ].some(
+    (modelId) =>
+      resolveSetupModelProviderIdFromModel(modelId) ===
+      ROOMOTE_INFERENCE_PROVIDER_ID,
+  );
   // When the gateway is active, the configured provider keys it can serve
   // (OpenRouter, Anthropic, OpenAI, Gemini, the aggregators, Bedrock) stay on
   // the control plane and are advertised to the worker by name via
@@ -412,7 +556,9 @@ async function resolveModelRuntimeEnv(
     ? gatewayProviderKeyNames.filter(
         (name) =>
           isInferenceGatewayCoveredEnvVar(name) &&
-          (normalizeConfiguredValue(runtimeEnv[name]) !== undefined ||
+          ((name === ROOMOTE_INFERENCE_API_KEY_ENV_VAR_NAME &&
+            managedRoomoteInferenceSelected) ||
+            normalizeConfiguredValue(runtimeEnv[name]) !== undefined ||
             normalizeConfiguredValue(persistedEnvVars[name]) !== undefined),
       )
     : [];
@@ -425,7 +571,9 @@ async function resolveModelRuntimeEnv(
       }
 
       const value =
-        normalizeConfiguredValue(runtimeEnv[envVarName]) ??
+        (isSettingsOnlyProviderEnvVar(envVarName)
+          ? undefined
+          : normalizeConfiguredValue(runtimeEnv[envVarName])) ??
         normalizeConfiguredValue(persistedEnvVars[envVarName]);
 
       return value ? [[envVarName, value]] : [];
@@ -512,45 +660,26 @@ async function resolveModelRuntimeEnv(
       ? [...gatewayServedKeyNames, 'XAI_API_KEY']
       : gatewayServedKeyNames;
 
+  const resolvedRoleEnv = Object.fromEntries(
+    TASK_MODEL_ROLES.flatMap((role) => {
+      const descriptor = TASK_MODEL_ROLE_DESCRIPTORS[role];
+      if (inferenceGateway && !descriptor.includeInSandbox) {
+        return [];
+      }
+
+      return [
+        ...(resolvedModels[role]
+          ? [[descriptor.modelEnvVar, resolvedModels[role]]]
+          : []),
+        ...(resolvedReasoningEfforts[role]
+          ? [[descriptor.reasoningEnvVar, resolvedReasoningEfforts[role]]]
+          : []),
+      ];
+    }),
+  );
+
   return {
-    ...(resolvedRoomoteModel && { R_MODEL: resolvedRoomoteModel }),
-    ...(resolvedRoomoteSmallModel && {
-      R_SMALL_MODEL: resolvedRoomoteSmallModel,
-    }),
-    ...(resolvedRoomoteVisionModel && {
-      R_VISION_MODEL: resolvedRoomoteVisionModel,
-    }),
-    ...(resolvedRoomoteCodeReviewModel && {
-      R_CODE_REVIEW_MODEL: resolvedRoomoteCodeReviewModel,
-    }),
-    ...(resolvedRoomoteExploreModel && {
-      R_EXPLORE_MODEL: resolvedRoomoteExploreModel,
-    }),
-    ...(resolvedRoomotePlanningModel && {
-      R_PLANNING_MODEL: resolvedRoomotePlanningModel,
-    }),
-    ...(resolvedRoomoteModelReasoningEffort && {
-      R_MODEL_REASONING_EFFORT: resolvedRoomoteModelReasoningEffort,
-    }),
-    ...(resolvedRoomoteSmallModelReasoningEffort && {
-      R_SMALL_MODEL_REASONING_EFFORT: resolvedRoomoteSmallModelReasoningEffort,
-    }),
-    ...(resolvedRoomoteVisionModelReasoningEffort && {
-      R_VISION_MODEL_REASONING_EFFORT:
-        resolvedRoomoteVisionModelReasoningEffort,
-    }),
-    ...(resolvedRoomoteCodeReviewModelReasoningEffort && {
-      R_CODE_REVIEW_MODEL_REASONING_EFFORT:
-        resolvedRoomoteCodeReviewModelReasoningEffort,
-    }),
-    ...(resolvedRoomoteExploreModelReasoningEffort && {
-      R_EXPLORE_MODEL_REASONING_EFFORT:
-        resolvedRoomoteExploreModelReasoningEffort,
-    }),
-    ...(resolvedRoomotePlanningModelReasoningEffort && {
-      R_PLANNING_MODEL_REASONING_EFFORT:
-        resolvedRoomotePlanningModelReasoningEffort,
-    }),
+    ...resolvedRoleEnv,
     ...(providerKeyNames.length > 0 && {
       R_MODEL_ENV_KEYS: providerKeyNames.join(','),
     }),
@@ -564,6 +693,9 @@ async function resolveModelRuntimeEnv(
       [TASK_MODEL_CONTEXT_WINDOWS_ENV_VAR_NAME]: JSON.stringify(
         taskModelContextWindows,
       ),
+    }),
+    ...(Object.keys(taskModelCosts).length > 0 && {
+      [TASK_MODEL_COSTS_ENV_VAR_NAME]: JSON.stringify(taskModelCosts),
     }),
     ...(routeChatGptThroughGateway
       ? { [INFERENCE_GATEWAY_CHATGPT_ENV_VAR_NAME]: '1' }

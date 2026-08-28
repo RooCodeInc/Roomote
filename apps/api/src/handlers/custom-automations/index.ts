@@ -22,8 +22,9 @@ import {
 } from '@roomote/sdk/server';
 import {
   ALL_REPOSITORIES,
+  FAST_EXECUTION,
+  getCommunicationAutomationTargetKind,
   type BackgroundAutomationProvider,
-  type BackgroundAutomationTargetKind,
   type CustomAutomationScheduleMode,
   type OptionalAutomationTarget,
 } from '@roomote/types';
@@ -50,6 +51,7 @@ const modelSchema = z
 const environmentTargetSchema = z.union([
   z.string().uuid(),
   z.literal(ALL_REPOSITORIES),
+  z.literal(FAST_EXECUTION),
 ]);
 
 const writeSchema = z.object({
@@ -62,7 +64,6 @@ const writeSchema = z.object({
   targetProvider: z.enum(['slack', 'discord', 'teams', 'telegram']).optional(),
   targetMode: z.enum(['channel', 'direct_message']).optional(),
   targetChannelId: z.string().trim().min(1).max(160).optional(),
-  targetServiceUrl: z.string().trim().min(1).max(500).optional(),
 });
 
 const updateSchema = z.object({
@@ -78,7 +79,6 @@ const updateSchema = z.object({
     .optional(),
   targetMode: z.enum(['channel', 'direct_message']).optional(),
   targetChannelId: z.string().trim().min(1).max(160).optional(),
-  targetServiceUrl: z.string().trim().min(1).max(500).optional(),
 });
 
 const UNIQUE_VIOLATION_CODE = '23505';
@@ -216,7 +216,7 @@ async function requireAdmin(auth: McpAuth): Promise<string | null> {
 function buildTarget(
   input: Pick<
     z.infer<typeof writeSchema>,
-    'targetProvider' | 'targetMode' | 'targetChannelId' | 'targetServiceUrl'
+    'targetProvider' | 'targetMode' | 'targetChannelId'
   >,
   ownerUserId: string,
 ): OptionalAutomationTarget {
@@ -226,27 +226,13 @@ function buildTarget(
     throw new Error('targetChannelId is required when targetProvider is set.');
   }
 
-  const kinds: Record<string, BackgroundAutomationTargetKind> = {
-    slack: 'slack_channel',
-    discord: 'discord_channel',
-    teams: 'teams_channel',
-    telegram: 'telegram_chat',
-  };
-  const userKinds: Record<string, BackgroundAutomationTargetKind> = {
-    slack: 'slack_user',
-    discord: 'discord_user',
-    teams: 'teams_user',
-    telegram: 'telegram_user',
-  };
   return {
     provider: input.targetProvider as BackgroundAutomationProvider,
-    targetKind: directMessage
-      ? userKinds[input.targetProvider]!
-      : kinds[input.targetProvider]!,
+    targetKind: getCommunicationAutomationTargetKind(
+      input.targetProvider,
+      directMessage ? 'direct_message' : 'channel',
+    ),
     externalRef: directMessage ? ownerUserId : input.targetChannelId!,
-    ...(!directMessage && input.targetServiceUrl
-      ? { metadata: { serviceUrl: input.targetServiceUrl } }
-      : {}),
   };
 }
 
@@ -308,13 +294,20 @@ async function assertEnabledModel(model: string | null | undefined) {
 }
 
 function toApiAutomation<
-  T extends { allRepositories: boolean; environmentId: string | null },
+  T extends {
+    allRepositories: boolean;
+    environmentId: string | null;
+    executionMode: 'sandbox_task' | 'fast';
+  },
 >(automation: T): Omit<T, 'environmentId'> & { environmentId: string | null } {
   return {
     ...automation,
-    environmentId: automation.allRepositories
-      ? ALL_REPOSITORIES
-      : automation.environmentId,
+    environmentId:
+      automation.executionMode === 'fast'
+        ? FAST_EXECUTION
+        : automation.allRepositories
+          ? ALL_REPOSITORIES
+          : automation.environmentId,
   };
 }
 
@@ -456,8 +449,7 @@ customAutomationsRouter.patch('/:id', async (c) => {
     const destinationChanged =
       parsed.data.targetProvider !== undefined ||
       parsed.data.targetMode !== undefined ||
-      parsed.data.targetChannelId !== undefined ||
-      parsed.data.targetServiceUrl !== undefined;
+      parsed.data.targetChannelId !== undefined;
     if (
       !clearTarget &&
       destinationChanged &&
@@ -469,10 +461,6 @@ customAutomationsRouter.patch('/:id', async (c) => {
         'targetChannelId is required when targetProvider is set.',
       );
     }
-    const existingServiceUrl =
-      typeof existingTarget.metadata?.serviceUrl === 'string'
-        ? existingTarget.metadata.serviceUrl
-        : undefined;
     const automation = await updateCustomAutomation(c.req.param('id'), {
       name: parsed.data.name ?? existing.name,
       prompt: parsed.data.prompt ?? existing.prompt,
@@ -486,9 +474,11 @@ customAutomationsRouter.patch('/:id', async (c) => {
           : (parsed.data.model ?? existing.model),
       environmentId:
         parsed.data.environmentId ??
-        (existing.allRepositories
-          ? ALL_REPOSITORIES
-          : (existing.environmentId ?? '')),
+        (existing.executionMode === 'fast'
+          ? FAST_EXECUTION
+          : existing.allRepositories
+            ? ALL_REPOSITORIES
+            : (existing.environmentId ?? '')),
       target: clearTarget
         ? {}
         : targetProvider && (targetMode === 'direct_message' || targetChannelId)
@@ -497,8 +487,6 @@ customAutomationsRouter.patch('/:id', async (c) => {
                 targetProvider,
                 targetMode,
                 targetChannelId,
-                targetServiceUrl:
-                  parsed.data.targetServiceUrl ?? existingServiceUrl,
               },
               existing.createdByUserId ?? adminId(c),
             )

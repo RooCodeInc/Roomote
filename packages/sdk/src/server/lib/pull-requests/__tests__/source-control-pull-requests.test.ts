@@ -24,6 +24,7 @@ const {
   mockResolveConfiguredGitHubAppSlugIfConfigured,
   mockResolveTelegramRuntimeCredentials,
   mockGetPrBodyAttributionLine,
+  mockGetSessionForTask,
   mockTasksFindFirst,
   mockResolveLaunchTaskCommitAuthor,
   mockResolveRunCommitAuthor,
@@ -46,6 +47,7 @@ const {
   mockResolveConfiguredGitHubAppSlugIfConfigured: vi.fn(),
   mockResolveTelegramRuntimeCredentials: vi.fn(),
   mockGetPrBodyAttributionLine: vi.fn(),
+  mockGetSessionForTask: vi.fn(),
   mockTasksFindFirst: vi.fn(),
   mockResolveLaunchTaskCommitAuthor: vi.fn(),
   mockResolveRunCommitAuthor: vi.fn(),
@@ -127,6 +129,7 @@ vi.mock('@roomote/db/server', () => ({
     mockGetDeploymentGitHubRoomoteMentionEnabled(...args),
   getDeploymentPrAction: (...args: unknown[]) =>
     mockGetDeploymentPrAction(...args),
+  getSessionForTask: (...args: unknown[]) => mockGetSessionForTask(...args),
   resolveTelegramRuntimeCredentials: (...args: unknown[]) =>
     mockResolveTelegramRuntimeCredentials(...args),
   db: {
@@ -270,6 +273,7 @@ describe('createOrUpdateSourceControlPullRequestForTaskRun', () => {
     });
     mockGetDeploymentPrAction.mockResolvedValue('draft');
     mockEnvironmentsFindFirst.mockResolvedValue(null);
+    mockGetSessionForTask.mockResolvedValue(null);
     mockResolveGitLabToken.mockResolvedValue('gitlab-token');
     mockResolveGiteaToken.mockResolvedValue('gitea-token');
     mockResolveGiteaBaseUrl.mockResolvedValue('https://git.example.com');
@@ -437,6 +441,7 @@ describe('createOrUpdateSourceControlPullRequestForTaskRun', () => {
     expect(result.warnings).toEqual([]);
     expect(mockNotifyFastAgentParentOnPullRequestOpened).toHaveBeenCalledWith({
       run: expect.objectContaining({ id: 123, taskId: 'task-123' }),
+      untrustedTaskGeneratedContext: 'Body',
       pullRequest: expect.objectContaining({
         provider: 'ado',
         repository: 'acme/Platform/backend',
@@ -555,6 +560,9 @@ describe('platform-managed draft state', () => {
     finishNotification();
     const result = await resultPromise;
 
+    expect(mockGetOctokit).toHaveBeenCalledWith('github-token', {
+      retryRateLimits: true,
+    });
     expect(octokit.rest.pulls.create).toHaveBeenCalledWith(
       expect.objectContaining({ draft: true }),
     );
@@ -563,6 +571,7 @@ describe('platform-managed draft state', () => {
     expect(result.warnings).toEqual([]);
     expect(mockNotifyFastAgentParentOnPullRequestOpened).toHaveBeenCalledWith({
       run: expect.objectContaining({ id: 123, taskId: 'task-123' }),
+      untrustedTaskGeneratedContext: 'Body',
       pullRequest: {
         provider: 'github',
         host: undefined,
@@ -1445,6 +1454,111 @@ describe('optional targetBranch', () => {
     },
   );
 
+  it.each([
+    [
+      'Slack',
+      {
+        repo: 'acme/web',
+        communicationContextInherited: true,
+        communicationProvider: 'slack',
+        communicationTeamId: 'T123',
+        communicationTeamDomain: 'acme',
+        communicationChannelId: 'C123',
+        communicationThreadId: '1234567890.000100',
+        communicationMessageId: '1234567890.000200',
+        slackConversationUrl:
+          'https://acme.slack.com/archives/C123/p1234567890000200?thread_ts=1234567890.000100&cid=C123',
+      },
+      {
+        taskSurface: 'slack',
+        slackTeamId: 'T123',
+        slackTeamDomain: 'acme',
+        slackChannel: 'C123',
+        slackThreadTs: '1234567890.000100',
+        slackConversationUrl:
+          'https://acme.slack.com/archives/C123/p1234567890000200?thread_ts=1234567890.000100&cid=C123',
+      },
+      '[Slack](https://acme.slack.com/archives/C123/p1234567890000200?thread_ts=1234567890.000100&cid=C123)',
+    ],
+    [
+      'Discord',
+      {
+        repo: 'acme/web',
+        communicationContextInherited: true,
+        communicationProvider: 'discord',
+        communicationGuildId: '123',
+        communicationChannelId: '456',
+        communicationThreadId: '789',
+        communicationMessageId: '101112',
+      },
+      {
+        taskSurface: 'discord',
+        discordGuildId: '123',
+        discordChannelId: '789',
+        discordMessageId: '101112',
+      },
+      '[Discord](https://discord.com/channels/123/789/101112)',
+    ],
+  ] as const)(
+    'keeps inherited %s provenance during the final provider mutation',
+    async (_label, payload, expectedMetadata, conversationLink) => {
+      const canonicalAttribution = attributionBody(
+        'Created by Roomote.',
+        `Follow up by mentioning @roomote or in ${conversationLink}.`,
+      );
+      const octokit = makeOctokit({
+        list: [],
+        created: {
+          number: 13,
+          node_id: 'node-13',
+          html_url: 'https://github.com/acme/web/pull/13',
+          title: '[Feature] X',
+          draft: true,
+          base: { ref: 'develop' },
+        },
+      });
+      mockRepositoriesFindFirst.mockResolvedValue({
+        installationId: 555,
+        externalRepoId: null,
+        fullName: 'acme/web',
+        htmlUrl: 'https://github.com/acme/web',
+        private: false,
+      });
+      mockGetPrBodyAttributionLine.mockReturnValueOnce(canonicalAttribution);
+      mockTasksFindFirst.mockResolvedValue({
+        surface: 'web',
+        slackChannelId: null,
+        slackThreadTs: null,
+      });
+
+      await createOrUpdateSourceControlPullRequestForTaskRun({
+        taskRun: makeTaskRun(payload),
+        input: {
+          ...baseInput,
+          targetBranch: 'develop',
+          body: `${attributionBody('Created by Roomote.')}
+
+## What changed
+
+Done.`,
+        },
+      });
+
+      expect(mockGetPrBodyAttributionLine).toHaveBeenCalledWith(
+        expect.objectContaining(expectedMetadata),
+      );
+      expect(octokit.rest.pulls.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          body: `${canonicalAttribution}
+
+## What changed
+
+Done.`,
+        }),
+      );
+    },
+  );
+
   it('passes canonical web metadata instead of parsing the input opener', async () => {
     makeOctokit({
       list: [],
@@ -1487,6 +1601,117 @@ describe('optional targetBranch', () => {
           'https://example.com/task/task-123?utm_source=github-comment&utm_medium=link&utm_campaign=standard',
       }),
     );
+  });
+
+  it.each([
+    {
+      label: 'uses the associated Fast session as the primary web link',
+      payload: {
+        repo: 'acme/web',
+        fastAgentSessionId: '11111111-1111-4111-8111-111111111111',
+      },
+      linkedSession: {
+        id: '22222222-2222-4222-8222-222222222222',
+        visibility: 'visible',
+        fastConversationId: '11111111-1111-4111-8111-111111111111',
+      },
+      expectedTaskUrl:
+        'https://example.com/sessions/22222222-2222-4222-8222-222222222222?utm_source=github-comment&utm_medium=link&utm_campaign=standard',
+      queriesSession: true,
+    },
+    {
+      label: 'keeps the task link for a direct coding task',
+      payload: { repo: 'acme/web' },
+      linkedSession: null,
+      expectedTaskUrl:
+        'https://example.com/task/task-123?utm_source=github-comment&utm_medium=link&utm_campaign=standard',
+      queriesSession: false,
+    },
+    {
+      label: 'falls back to the task link when the Fast session is absent',
+      payload: {
+        repo: 'acme/web',
+        fastAgentSessionId: '11111111-1111-4111-8111-111111111111',
+      },
+      linkedSession: null,
+      expectedTaskUrl:
+        'https://example.com/task/task-123?utm_source=github-comment&utm_medium=link&utm_campaign=standard',
+      queriesSession: true,
+    },
+    {
+      label:
+        'falls back to the task link when the Fast session association does not match',
+      payload: {
+        repo: 'acme/web',
+        fastAgentSessionId: '11111111-1111-4111-8111-111111111111',
+      },
+      linkedSession: {
+        id: '22222222-2222-4222-8222-222222222222',
+        visibility: 'visible',
+        fastConversationId: '33333333-3333-4333-8333-333333333333',
+      },
+      expectedTaskUrl:
+        'https://example.com/task/task-123?utm_source=github-comment&utm_medium=link&utm_campaign=standard',
+      queriesSession: true,
+    },
+    {
+      label: 'falls back to the task link when the Fast session is hidden',
+      payload: {
+        repo: 'acme/web',
+        fastAgentSessionId: '11111111-1111-4111-8111-111111111111',
+      },
+      linkedSession: {
+        id: '22222222-2222-4222-8222-222222222222',
+        visibility: 'hidden',
+        fastConversationId: '11111111-1111-4111-8111-111111111111',
+      },
+      expectedTaskUrl:
+        'https://example.com/task/task-123?utm_source=github-comment&utm_medium=link&utm_campaign=standard',
+      queriesSession: true,
+    },
+  ])('$label', async (testCase) => {
+    makeOctokit({
+      list: [],
+      created: {
+        number: 13,
+        node_id: 'node-13',
+        html_url: 'https://github.com/acme/web/pull/13',
+        title: '[Feature] X',
+        draft: true,
+        base: { ref: 'develop' },
+      },
+    });
+    mockRepositoriesFindFirst.mockResolvedValue({
+      installationId: 555,
+      externalRepoId: null,
+      fullName: 'acme/web',
+      htmlUrl: 'https://github.com/acme/web',
+      private: false,
+    });
+    mockGetSessionForTask.mockResolvedValue(testCase.linkedSession);
+
+    await createOrUpdateSourceControlPullRequestForTaskRun({
+      taskRun: makeTaskRun(testCase.payload),
+      input: {
+        ...baseInput,
+        targetBranch: 'develop',
+        body: '## What changed\n\nDone.',
+      },
+    });
+
+    expect(mockGetPrBodyAttributionLine).toHaveBeenCalledWith(
+      expect.objectContaining({
+        taskUrl: testCase.expectedTaskUrl,
+      }),
+    );
+    if (testCase.queriesSession) {
+      expect(mockGetSessionForTask).toHaveBeenCalledWith(
+        expect.anything(),
+        'task-123',
+      );
+    } else {
+      expect(mockGetSessionForTask).not.toHaveBeenCalled();
+    }
   });
 
   it('prepends canonical attribution without changing non-opener body content', async () => {
@@ -1569,6 +1794,75 @@ describe('optional targetBranch', () => {
     expect(octokit.rest.pulls.create).toHaveBeenCalledWith(
       expect.objectContaining({
         body: `${attributionBody('Created by Roomote.')}\n\nDone.`,
+      }),
+    );
+  });
+
+  it('does not duplicate entity-prefixed harness attribution when the canonical line uses a zero-width space', async () => {
+    const octokit = makeOctokit({
+      list: [],
+      created: {
+        number: 13,
+        node_id: 'node-13',
+        html_url: 'https://github.com/acme/web/pull/13',
+        title: '[Feature] X',
+        draft: true,
+        base: { ref: 'develop' },
+      },
+    });
+    const harnessAttribution =
+      '> &#8203;<!-- roomote:pr-attribution:start -->Created by Roomote.<!-- roomote:pr-attribution:end --> [View the task](https://example.com/task/1) or mention @roomote-roomote for follow-up asks.';
+    const canonicalAttribution =
+      '> \u200B<!-- roomote:pr-attribution:start -->Created by Roomote.<!-- roomote:pr-attribution:end --> Follow up by mentioning @roomote-roomote or in [the web UI](https://example.com/task/1).';
+    mockGetPrBodyAttributionLine.mockReturnValueOnce(canonicalAttribution);
+
+    await createOrUpdateSourceControlPullRequestForTaskRun({
+      taskRun: makeTaskRun({ repo: 'acme/web' }),
+      input: {
+        ...baseInput,
+        targetBranch: 'develop',
+        body: `${harnessAttribution}\n\n## What changed\n\nDone.`,
+      },
+    });
+
+    expect(octokit.rest.pulls.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        body: `${canonicalAttribution}\n\n## What changed\n\nDone.`,
+      }),
+    );
+  });
+
+  it('collapses the exact duplicated PR attribution shape to one canonical line', async () => {
+    const harnessAttribution =
+      '> &#8203;<!-- roomote:pr-attribution:start -->Created by Roomote.<!-- roomote:pr-attribution:end --> [View the task](https://example.com/task/1) or mention @roomote-roomote for follow-up asks.';
+    const staleCanonicalAttribution =
+      '> \u200B<!-- roomote:pr-attribution:start -->Created by Roomote.<!-- roomote:pr-attribution:end --> Follow up by mentioning @roomote-roomote or in [the web UI](https://example.com/task/1).';
+    const duplicatedBody = `${harnessAttribution}\n\n${staleCanonicalAttribution}\n\n## What changed\n\nDone.`;
+    const existing = {
+      number: 13,
+      node_id: 'node-13',
+      html_url: 'https://github.com/acme/web/pull/13',
+      title: '[Feature] X',
+      draft: true,
+      base: { ref: 'develop' },
+      body: duplicatedBody,
+    };
+    const octokit = makeOctokit({ list: [existing], updated: existing });
+    const canonicalAttribution = attributionBody('Created by Roomote.');
+    mockGetPrBodyAttributionLine.mockReturnValueOnce(canonicalAttribution);
+
+    await createOrUpdateSourceControlPullRequestForTaskRun({
+      taskRun: makeTaskRun({ repo: 'acme/web' }),
+      input: {
+        ...baseInput,
+        targetBranch: 'develop',
+        body: duplicatedBody,
+      },
+    });
+
+    expect(octokit.rest.pulls.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        body: `${canonicalAttribution}\n\n## What changed\n\nDone.`,
       }),
     );
   });
@@ -1957,6 +2251,7 @@ describe('optional targetBranch', () => {
             draft: false,
             head: { ref: 'feature/x' },
             base: { ref: 'develop' },
+            assignees: [{ login: 'existing-reviewer' }],
           },
         ]),
       )
@@ -1978,11 +2273,15 @@ describe('optional targetBranch', () => {
         ...baseInput,
         repositoryFullName: 'acme/tools',
         sourceControlProvider: 'gitea' as const,
+        assignees: ['monalisa'],
       },
       fetchImpl,
     });
 
     expect(fetchImpl.mock.calls[1]?.[1]).toMatchObject({ method: 'PATCH' });
+    expect(
+      JSON.parse((fetchImpl.mock.calls[1]?.[1] as { body: string }).body),
+    ).toMatchObject({ assignees: ['existing-reviewer', 'monalisa'] });
     expect(result).toMatchObject({
       action: 'updated',
       targetBranch: 'develop',

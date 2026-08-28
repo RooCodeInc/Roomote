@@ -389,6 +389,13 @@ export function getTeamsConversationMessageIdSuffix(
   );
 }
 
+export function getTeamsBaseConversationId(conversationId: string): string {
+  const separatorIndex = conversationId.indexOf(';messageid=');
+  return separatorIndex === -1
+    ? conversationId
+    : conversationId.slice(0, separatorIndex);
+}
+
 export function getTeamsActivityThreadId(
   activity: TeamsActivity,
 ): string | undefined {
