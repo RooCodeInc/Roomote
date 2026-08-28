@@ -2043,9 +2043,15 @@ async function stampWorkspaceSourceControlProviders(
   payload: FreshTask['payload'],
   workspace: ReturnType<typeof resolveTaskWorkspace>,
 ): Promise<void> {
-  const [repositoryProviders, workspaceHost] = await Promise.all([
+  const [repositoryProviders, workspaceHost, environment] = await Promise.all([
     resolveWorkspaceRepositoryProviders(db, workspace),
     resolveWorkspaceSourceControlHost(db, workspace),
+    workspace.type === 'environment'
+      ? db.query.environments.findFirst({
+          where: eq(environments.id, workspace.environmentId),
+          columns: { config: true },
+        })
+      : null,
   ]);
   const isAggregateWorkspace =
     workspace.type === 'repository_set' ||
@@ -2055,9 +2061,15 @@ async function stampWorkspaceSourceControlProviders(
   const expectedRepositoryCount =
     workspace.type === 'repository_set'
       ? new Set(workspace.repositories).size
-      : undefined;
+      : workspace.type === 'environment'
+        ? new Set(
+            environment?.config.repositories.map(
+              (repository) => repository.repository,
+            ) ?? [],
+          ).size
+        : undefined;
 
-  if (isAggregateWorkspace) {
+  if (requiresCompleteCoverage) {
     payload.repositoryProviders = repositoryProviders;
   }
 
@@ -2075,14 +2087,11 @@ async function stampWorkspaceSourceControlProviders(
   const providers = Object.values(repositoryProviders);
   const spansProviders = new Set(providers).size > 1;
 
-  if (
-    (isAggregateWorkspace || workspace.type === 'environment') &&
-    !spansProviders
-  ) {
+  if (requiresCompleteCoverage && !spansProviders) {
     payload.sourceControlHost = workspaceHost;
   }
 
-  if (spansProviders && !isAggregateWorkspace) {
+  if (spansProviders && !requiresCompleteCoverage) {
     payload.repositoryProviders = repositoryProviders;
   }
 

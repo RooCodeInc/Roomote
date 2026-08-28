@@ -2167,19 +2167,18 @@ describe('enqueueTask source-control provider stamping', () => {
       provider: 'gitea',
       host: 'gitea.example.com',
     });
-    expect(
-      (persistedRun!.payload as { repositoryProviders?: unknown })
-        .repositoryProviders,
-    ).toBeUndefined();
+    expect(persistedRun!.payload.repositoryProviders).toEqual({
+      'group/project': 'gitea',
+    });
   });
 
-  it('clears attribution for incomplete environment repository coverage', async () => {
+  it('fails closed when an environment repository mapping is incomplete', async () => {
     const userId = await createUser();
     const repository = await repositoryFactory.create({
       sourceControlProvider: 'gitea',
       host: 'gitea.example.com',
       linkedByUserId: userId,
-      fullName: 'group/environment-api',
+      fullName: 'group/mapped-project',
       isActive: true,
     });
     createdRepositoryIds.push(repository.id);
@@ -2189,8 +2188,8 @@ describe('enqueueTask source-control provider stamping', () => {
       config: {
         name: 'Incomplete Gitea environment',
         repositories: [
-          { repository: 'group/environment-api' },
-          { repository: 'group/environment-web' },
+          { repository: 'group/mapped-project' },
+          { repository: 'group/missing-project' },
         ],
       },
     });
@@ -2208,7 +2207,7 @@ describe('enqueueTask source-control provider stamping', () => {
           environmentId: environment.id,
           sourceControlProvider: 'gitea',
           sourceControlHost: 'gitea.example.com',
-          description: 'Work in an incompletely mapped environment',
+          description: 'Work in the incomplete Gitea environment',
         },
       }),
       initiator: { kind: 'user', userId },
@@ -2217,6 +2216,9 @@ describe('enqueueTask source-control provider stamping', () => {
       trigger: 'manual',
     });
 
+    expect(run.payload.repositoryProviders).toEqual({
+      'group/mapped-project': 'gitea',
+    });
     expect(run.payload.sourceControlProvider).toBeUndefined();
     expect(run.payload.sourceControlHost).toBeUndefined();
     expect(resolveAggregateSourceControl(run.payload)).toBeUndefined();
