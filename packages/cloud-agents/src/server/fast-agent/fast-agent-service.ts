@@ -84,11 +84,7 @@ import {
 } from './fast-agent-tasks';
 import { getFastAgentUserIdentity } from './fast-agent-user-identity';
 import { FastAgentTurnDiagnostics } from './fast-agent-turn-diagnostics';
-import {
-  captureFastAgentInferenceAttemptOutcome,
-  captureFastAgentInferenceContext,
-  type FastAgentPromptKind,
-} from './fast-agent-context-telemetry';
+import type { FastAgentPromptKind } from './fast-agent-context-telemetry';
 import { RemoteFastAgentRepositorySkillSource } from './fast-agent-repository-skill-source';
 import { FastAgentSkillStore } from './fast-agent-skill-store';
 import {
@@ -1229,7 +1225,6 @@ export async function answerFastAgentQuestion({
     const reportProviderRetryEvent = async (
       event: NonTaskProviderRetryEvent,
     ) => {
-      diagnostics.recordOpenCodeProviderRetry(event.attempt, event.message);
       await reportInferenceRetry({
         failure: classifyNonTaskInferenceError(new Error(event.message)),
         attemptNumber: event.attempt,
@@ -1813,7 +1808,38 @@ export async function answerFastAgentQuestion({
     const serializedTurnPrompt = serializeFastAgentMessages(turnMessages);
     const serializedBootstrapPrompt =
       serializeFastAgentMessages(bootstrapMessages);
-    let inferenceAttemptNumber = 0;
+    const inferenceContext = {
+      userId,
+      sessionId: session.id,
+      turnId,
+      systemPrompt: system,
+      surface: conversation.surface,
+      turnSource,
+      platformEventHandling,
+      platformEventKind,
+      releasePresent: Boolean(releaseVersion),
+      environmentCount: availableEnvironments.length,
+      taskModelCount: taskModelOptions.models.length,
+      activeTaskCount: resolvedActiveTasks.length,
+      integrationCount: availableIntegrations.length,
+      integrationToolCount: availableIntegrations.reduce(
+        (count, integration) => count + integration.tools.length,
+        0,
+      ),
+      memoryIntegrationCount: availableIntegrations.filter((integration) =>
+        isMemoryMcpServer(integration.id),
+      ).length,
+      compatibilityMessageCount: session.compatibilityMessages.length,
+      suppliedThreadMessageCount: threadContext.length,
+      senderContextPresent: Boolean(
+        currentMessageSender?.slackUserId ||
+        currentMessageSender?.displayName ||
+        currentMessageSender?.githubLogin,
+      ),
+      agentContextPresent: Boolean(currentMessageAgentContext),
+      inputImageCount: imageFiles.length,
+      degradedComponents: [...degradedContextComponents],
+    };
     const persistOpenCodeSession = async (openCodeSessionId: string) => {
       if (durableOpenCodeSessionId === openCodeSessionId) return;
       await setFastAgentOpenCodeSession({
@@ -1867,57 +1893,6 @@ export async function answerFastAgentQuestion({
             : 'bootstrap';
         let attemptSessionPath = sessionPath;
         let promptTimeoutMs: number | null = null;
-        let resolvedInferenceModel: string | undefined;
-        const captureInferenceContext = (
-          attemptScope: 'prompt_submission' | 'provider_retry',
-          providerRetryAttempt?: number,
-        ) => {
-          captureFastAgentInferenceContext({
-            userId,
-            sessionId: session.id,
-            turnId,
-            systemPrompt: system,
-            surface: conversation.surface,
-            turnSource,
-            platformEventHandling,
-            platformEventKind,
-            sessionPath: attemptSessionPath,
-            promptKind,
-            attemptNumber: inferenceAttemptNumber,
-            attemptScope,
-            providerRetryAttempt,
-            releasePresent: Boolean(releaseVersion),
-            environmentCount: availableEnvironments.length,
-            taskModelCount: taskModelOptions.models.length,
-            activeTaskCount: resolvedActiveTasks.length,
-            integrationCount: availableIntegrations.length,
-            integrationToolCount: availableIntegrations.reduce(
-              (count, integration) => count + integration.tools.length,
-              0,
-            ),
-            memoryIntegrationCount: availableIntegrations.filter(
-              (integration) => isMemoryMcpServer(integration.id),
-            ).length,
-            compatibilityMessageCount: session.compatibilityMessages.length,
-            suppliedThreadMessageCount: threadContext.length,
-            threadContextAttached:
-              promptKind === 'bootstrap' ||
-              promptKind === 'clean_retry_bootstrap'
-                ? bootstrapThreadContextPresent
-                : promptKind === 'turn_delta'
-                  ? turnThreadContextPresent
-                  : false,
-            senderContextPresent: Boolean(
-              currentMessageSender?.slackUserId ||
-              currentMessageSender?.displayName ||
-              currentMessageSender?.githubLogin,
-            ),
-            agentContextPresent: Boolean(currentMessageAgentContext),
-            inputImageCount: imageFiles.length,
-            attachedImageCount: imageFilesForAttempt.length,
-            degradedComponents: [...degradedContextComponents],
-          });
-        };
         const unbindMcpExecutor = bindFastAgentMcpToolExecutor(
           nativeRuntime.mcpCapability,
           executeMcpTool,
@@ -1932,13 +1907,20 @@ export async function answerFastAgentQuestion({
               let providerRetryTimeout:
                 | ReturnType<typeof setTimeout>
                 | undefined;
-              const attemptStartedAt = Date.now();
-              let promptStarted = false;
-              let providerRetryEventCount = 0;
+              const attemptDiagnostics = diagnostics.beginInferenceAttempt({
+                ...inferenceContext,
+                sessionPath: attemptSessionPath,
+                promptKind,
+                threadContextAttached:
+                  promptKind === 'bootstrap' ||
+                  promptKind === 'clean_retry_bootstrap'
+                    ? bootstrapThreadContextPresent
+                    : promptKind === 'turn_delta'
+                      ? turnThreadContextPresent
+                      : false,
+                attachedImageCount: imageFilesForAttempt.length,
+              });
               try {
-                inferenceAttemptNumber += 1;
-                resolvedInferenceModel = undefined;
-                captureInferenceContext('prompt_submission');
                 const resultPromise =
                   generateTrackedNonTaskTextInOpenCodeSession(
                     {
@@ -1954,10 +1936,9 @@ export async function answerFastAgentQuestion({
                       system,
                       prompt: promptForAttempt,
                       onProviderRetry: async (event) => {
-                        providerRetryEventCount += 1;
-                        captureInferenceContext(
-                          'provider_retry',
+                        attemptDiagnostics.recordProviderRetry(
                           event.attempt,
+                          event.message,
                         );
                         // Initial turns stay unbounded unless the provider enters
                         // recovery. Start this deadline once so repeated provider
@@ -1999,15 +1980,13 @@ export async function answerFastAgentQuestion({
                         ),
                       ),
                       onModelResolved: (model) => {
-                        resolvedInferenceModel = model;
-                        diagnostics.recordModelResolved(model);
+                        attemptDiagnostics.recordModelResolved(model);
                       },
                       onMessageCompleted: (message) => {
                         completedOpenCodeMessage = message;
                       },
                       onPromptStarted: () => {
-                        promptStarted = true;
-                        diagnostics.markInferenceStarted();
+                        attemptDiagnostics.recordPromptStarted();
                       },
                       onSessionReady: async (openCodeSessionID) => {
                         activeOpenCodeSessionId = openCodeSessionID;
@@ -2055,57 +2034,13 @@ export async function answerFastAgentQuestion({
                     },
                   );
                 const result = await resultPromise;
-                captureFastAgentInferenceAttemptOutcome({
-                  userId,
-                  sessionId: session.id,
-                  turnId,
-                  surface: conversation.surface,
-                  sessionPath: attemptSessionPath,
-                  promptKind,
-                  attemptNumber: inferenceAttemptNumber,
-                  outcome: 'success',
-                  stage: !resolvedInferenceModel
-                    ? 'model_resolution'
-                    : promptStarted
-                      ? 'model_generation'
-                      : 'opencode_setup',
-                  elapsedMs: Date.now() - attemptStartedAt,
-                  resolvedModel: resolvedInferenceModel,
-                  providerRetryEventCount,
-                });
+                attemptDiagnostics.recordSuccess();
                 return result;
               } catch (error) {
                 const failure = classifyNonTaskInferenceError(error);
-                const attemptStage = !resolvedInferenceModel
-                  ? 'model_resolution'
-                  : promptStarted
-                    ? 'model_generation'
-                    : 'opencode_setup';
-                const attemptElapsedMs = Date.now() - attemptStartedAt;
-                captureFastAgentInferenceAttemptOutcome({
-                  userId,
-                  sessionId: session.id,
-                  turnId,
-                  surface: conversation.surface,
-                  sessionPath: attemptSessionPath,
-                  promptKind,
-                  attemptNumber: inferenceAttemptNumber,
-                  outcome: 'failure',
-                  stage: attemptStage,
-                  elapsedMs: attemptElapsedMs,
-                  failureReason: failure.reason,
-                  failureRetryable: failure.retryable,
-                  resolvedModel: resolvedInferenceModel,
-                  providerRetryEventCount,
-                });
-                diagnostics.recordInferenceAttemptFailure({
-                  attemptNumber: inferenceAttemptNumber,
-                  promptKind,
-                  stage: attemptStage,
-                  elapsedMs: attemptElapsedMs,
+                attemptDiagnostics.recordFailure({
                   reason: failure.reason,
                   retryable: failure.retryable,
-                  providerRetryEventCount,
                   error,
                 });
                 throw error;
@@ -2141,7 +2076,6 @@ export async function answerFastAgentQuestion({
                   imageFilesForAttempt = imageFiles;
                   promptKind = 'clean_retry_bootstrap';
                   attemptSessionPath = 'cold_rebuild';
-                  diagnostics.recordSessionPath(attemptSessionPath);
                 }
                 // Keep every recovery attempt bounded so it cannot hold the
                 // conversation lock forever if the provider stalls again.

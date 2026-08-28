@@ -2483,7 +2483,12 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
   });
 
   it('posts an error closeout when the native OpenCode prompt fails', async () => {
-    mocks.generateText.mockRejectedValue(new Error('OpenCode unavailable'));
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        options.onModelResolved?.('openrouter/openai/gpt-5.4');
+        throw new Error('OpenCode unavailable');
+      },
+    );
     const adapter = callbacks();
 
     await expect(
@@ -2493,6 +2498,13 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       expect.objectContaining({ purpose: 'closeout' }),
     );
     expect(mocks.invalidateSession).toHaveBeenCalledWith('conversation-1');
+    expect(mocks.captureInferenceAttemptOutcome).toHaveBeenCalledWith(
+      expect.objectContaining({
+        outcome: 'failure',
+        stage: 'opencode_setup',
+        resolvedModel: 'openrouter/openai/gpt-5.4',
+      }),
+    );
   });
 
   it('retries a gateway block from a clean compatibility bootstrap', async () => {
@@ -3012,6 +3024,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
   it('reports OpenCode internal provider retries while the prompt is pending', async () => {
     mocks.generateText.mockImplementationOnce(
       async (params, _session, options) => {
+        options.onModelResolved?.('openrouter/openai/gpt-5.4');
         await options.onSessionReady('opencode-session-1');
         options.onPromptStarted?.();
         await params.onProviderRetry?.({
@@ -3051,6 +3064,13 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         attemptScope: 'provider_retry',
         attemptNumber: 1,
         providerRetryAttempt: 1,
+      }),
+    );
+    expect(mocks.captureInferenceAttemptOutcome).toHaveBeenCalledWith(
+      expect.objectContaining({
+        outcome: 'success',
+        stage: 'model_generation',
+        providerRetryEventCount: 1,
       }),
     );
   });

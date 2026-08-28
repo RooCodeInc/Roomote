@@ -10,6 +10,11 @@ import type {
   FastAgentConversation,
   FastAgentTurnSource,
 } from './fast-agent-conversation';
+import {
+  captureFastAgentInferenceAttemptOutcome,
+  captureFastAgentInferenceContext,
+  type CaptureFastAgentInferenceContextInput,
+} from './fast-agent-context-telemetry';
 
 const MAX_TERMINAL_ERROR_LENGTH = 4_000;
 
@@ -33,6 +38,23 @@ type NativeToolStats = {
   count: number;
   totalDurationMs: number;
   maxDurationMs: number;
+};
+
+type FastAgentInferenceAttemptContext = Omit<
+  CaptureFastAgentInferenceContextInput,
+  'attemptNumber' | 'attemptScope' | 'providerRetryAttempt'
+>;
+
+export type FastAgentInferenceAttemptDiagnostics = {
+  recordModelResolved: (model: string) => void;
+  recordPromptStarted: () => void;
+  recordProviderRetry: (attempt: number, error?: unknown) => void;
+  recordSuccess: () => void;
+  recordFailure: (input: {
+    reason: string;
+    retryable: boolean;
+    error: unknown;
+  }) => void;
 };
 
 function formatTerminalError(error: unknown): string {
@@ -71,6 +93,7 @@ export class FastAgentTurnDiagnostics {
   private firstOpenCodeProviderRetryElapsedMs: number | undefined;
   private lastOpenCodeProviderRetryElapsedMs: number | undefined;
   private lastOpenCodeProviderRetryAttempt: number | undefined;
+  private inferenceAttemptCount = 0;
   private roomoteInferenceRetryCount = 0;
   private nativeToolCallCount = 0;
   private readonly nativeToolStats: Partial<
@@ -103,10 +126,6 @@ export class FastAgentTurnDiagnostics {
     this.visibleReplyCount += 1;
   }
 
-  recordModelResolved(model: string): void {
-    this.resolvedModel = model;
-  }
-
   recordSessionPath(path: string): void {
     this.sessionPath = path;
   }
@@ -125,7 +144,7 @@ export class FastAgentTurnDiagnostics {
     this.inferenceSetupStartedAt ??= setupStartedAt;
   }
 
-  markInferenceStarted(): void {
+  private markInferenceStarted(): void {
     const inferenceStartedAt = this.now();
     this.inferenceQueuedAt ??= inferenceStartedAt;
     this.inferenceSetupStartedAt ??= inferenceStartedAt;
@@ -138,7 +157,134 @@ export class FastAgentTurnDiagnostics {
     }
   }
 
-  recordOpenCodeProviderRetry(attempt: number, error?: unknown): void {
+  beginInferenceAttempt(
+    context: FastAgentInferenceAttemptContext,
+  ): FastAgentInferenceAttemptDiagnostics {
+    const attemptNumber = ++this.inferenceAttemptCount;
+    const attemptStartedAt = this.now();
+    let resolvedModel: string | undefined;
+    let promptStarted = false;
+    let providerRetryEventCount = 0;
+    let finished = false;
+
+    this.sessionPath = context.sessionPath;
+    this.captureInferenceContext(context, attemptNumber, 'prompt_submission');
+
+    const finish = (
+      outcome:
+        | { type: 'success' }
+        | {
+            type: 'failure';
+            reason: string;
+            retryable: boolean;
+            error: unknown;
+          },
+    ) => {
+      if (finished) return;
+      finished = true;
+
+      const stage = !resolvedModel
+        ? 'model_resolution'
+        : promptStarted
+          ? 'model_generation'
+          : 'opencode_setup';
+      const elapsedMs = this.now() - attemptStartedAt;
+      this.captureDiagnostic(() =>
+        captureFastAgentInferenceAttemptOutcome({
+          userId: context.userId,
+          sessionId: context.sessionId,
+          turnId: context.turnId,
+          surface: context.surface,
+          sessionPath: context.sessionPath,
+          promptKind: context.promptKind,
+          attemptNumber,
+          outcome: outcome.type,
+          stage,
+          elapsedMs,
+          ...(outcome.type === 'failure'
+            ? {
+                failureReason: outcome.reason,
+                failureRetryable: outcome.retryable,
+              }
+            : {}),
+          resolvedModel,
+          providerRetryEventCount,
+        }),
+      );
+
+      if (outcome.type === 'failure') {
+        this.captureDiagnostic(() =>
+          this.writeInferenceAttemptFailure({
+            attemptNumber,
+            promptKind: context.promptKind,
+            stage,
+            elapsedMs,
+            reason: outcome.reason,
+            retryable: outcome.retryable,
+            providerRetryEventCount,
+            error: outcome.error,
+          }),
+        );
+      }
+    };
+
+    return {
+      recordModelResolved: (model) => {
+        resolvedModel = model;
+        this.resolvedModel = model;
+      },
+      recordPromptStarted: () => {
+        promptStarted = true;
+        this.markInferenceStarted();
+      },
+      recordProviderRetry: (attempt, error) => {
+        providerRetryEventCount += 1;
+        this.captureInferenceContext(
+          context,
+          attemptNumber,
+          'provider_retry',
+          attempt,
+        );
+        this.captureDiagnostic(() =>
+          this.writeOpenCodeProviderRetry(attempt, error),
+        );
+      },
+      recordSuccess: () => finish({ type: 'success' }),
+      recordFailure: (input) => finish({ type: 'failure', ...input }),
+    };
+  }
+
+  private captureInferenceContext(
+    context: FastAgentInferenceAttemptContext,
+    attemptNumber: number,
+    attemptScope: 'prompt_submission' | 'provider_retry',
+    providerRetryAttempt?: number,
+  ): void {
+    this.captureDiagnostic(() =>
+      captureFastAgentInferenceContext({
+        ...context,
+        attemptNumber,
+        attemptScope,
+        providerRetryAttempt,
+      }),
+    );
+  }
+
+  private captureDiagnostic(capture: () => void): void {
+    try {
+      capture();
+    } catch (error) {
+      try {
+        this.logger.warn(
+          `[Fast Agent] Failed to record inference diagnostics: ${formatTerminalError(error)}`,
+        );
+      } catch {
+        // Diagnostics must never replace the Fast turn's product result.
+      }
+    }
+  }
+
+  private writeOpenCodeProviderRetry(attempt: number, error?: unknown): void {
     this.openCodeProviderRetryEventCount += 1;
     this.lastOpenCodeProviderRetryAttempt = attempt;
 
@@ -166,7 +312,7 @@ export class FastAgentTurnDiagnostics {
     );
   }
 
-  recordInferenceAttemptFailure(input: {
+  private writeInferenceAttemptFailure(input: {
     attemptNumber: number;
     promptKind: string;
     stage: string;

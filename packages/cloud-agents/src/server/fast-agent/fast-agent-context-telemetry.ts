@@ -11,7 +11,7 @@ import type {
 
 const FAST_AGENT_CONTEXT_MANIFEST_VERSION = 1;
 
-type FastAgentSessionPath =
+export type FastAgentSessionPath =
   | 'warm'
   | 'cold_resume'
   | 'cold_rebuild'
@@ -35,7 +35,7 @@ const REQUIRED_SYSTEM_COMPONENTS = [
   'task_model_catalog',
 ] as const;
 
-type CaptureFastAgentInferenceContextInput = {
+export type CaptureFastAgentInferenceContextInput = {
   userId: string;
   sessionId: string;
   turnId: string;
@@ -151,7 +151,7 @@ export function captureFastAgentInferenceContext(
   });
 }
 
-export function captureFastAgentInferenceAttemptOutcome(input: {
+export type CaptureFastAgentInferenceAttemptOutcomeInput = {
   userId: string;
   sessionId: string;
   turnId: string;
@@ -166,7 +166,11 @@ export function captureFastAgentInferenceAttemptOutcome(input: {
   failureRetryable?: boolean;
   resolvedModel?: string;
   providerRetryEventCount: number;
-}): void {
+};
+
+export function captureFastAgentInferenceAttemptOutcome(
+  input: CaptureFastAgentInferenceAttemptOutcomeInput,
+): void {
   void captureEvent('fast_agent_inference_attempt_outcome', {
     userId: input.userId,
     properties: {
