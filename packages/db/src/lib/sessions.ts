@@ -177,6 +177,8 @@ export async function ensureSessionForFastConversation(
       userId: fastAgentConversations.userId,
       surface: fastAgentConversations.surface,
       title: fastAgentConversations.title,
+      titleEditedByUserAt: fastAgentConversations.titleEditedByUserAt,
+      llmTitleCheckpoint: fastAgentConversations.llmTitleCheckpoint,
       updatedAt: fastAgentConversations.updatedAt,
     })
     .from(fastAgentConversations)
@@ -197,6 +199,8 @@ export async function ensureSessionForFastConversation(
     .insert(sessions)
     .values({
       title: conversation.title?.trim() || 'New session',
+      titleEditedByUserAt: conversation.titleEditedByUserAt,
+      llmTitleCheckpoint: conversation.llmTitleCheckpoint,
       ownerKind: 'user',
       ownerUserId: conversation.userId,
       sourceSurface: conversation.surface,
@@ -394,30 +398,6 @@ export async function getSessionForTask(
     .limit(1);
 
   return session?.session ?? null;
-}
-
-export async function syncTaskSessionTitle(
-  tx: DatabaseOrTransaction,
-  input: { taskId: string; previousTitle: string; title: string },
-): Promise<boolean> {
-  const session = await getSessionForTask(tx, input.taskId);
-  if (!session || session.fastConversationId) {
-    return false;
-  }
-
-  const [updated] = await tx
-    .update(sessions)
-    .set({ title: input.title, updatedAt: new Date() })
-    .where(
-      and(
-        eq(sessions.id, session.id),
-        isNull(sessions.fastConversationId),
-        eq(sessions.title, input.previousTitle),
-      ),
-    )
-    .returning({ id: sessions.id });
-
-  return Boolean(updated);
 }
 
 export async function getSessionForFastConversation(

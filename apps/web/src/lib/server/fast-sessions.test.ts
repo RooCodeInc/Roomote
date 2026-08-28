@@ -1,8 +1,11 @@
 import {
   db,
+  ensureSessionForFastConversation,
+  eq,
   fastAgentConversations,
   fastAgentMessages,
   runFactory,
+  sessions,
   taskFactory,
   userFactory,
 } from '@roomote/db/server';
@@ -12,6 +15,7 @@ import {
   getFastSessionById,
   getFastSessionTasks,
   getFastSessionMessagesSince,
+  getFastSessionDisplayTitle,
 } from './fast-sessions';
 
 async function createFastSession({
@@ -78,6 +82,34 @@ async function createFastMessage({
 }
 
 describe('Fast session queries', () => {
+  it('prefers the unified Session title for live Fast updates', async () => {
+    const owner = await userFactory.create();
+    const conversation = await createFastSession({
+      userId: owner.id,
+      conversationId: 'unified-display-title',
+      updatedAt: new Date('2026-01-01T00:00:00.000Z'),
+    });
+    const session = await ensureSessionForFastConversation(db, conversation.id);
+    await db
+      .update(sessions)
+      .set({
+        title: 'Manual unified title',
+        titleEditedByUserAt: new Date(),
+      })
+      .where(eq(sessions.id, session.id));
+    await db
+      .update(fastAgentConversations)
+      .set({ title: 'Generated conversation title' })
+      .where(eq(fastAgentConversations.id, conversation.id));
+
+    await expect(
+      getFastSessionDisplayTitle(
+        conversation.id,
+        'Generated conversation title',
+      ),
+    ).resolves.toBe('Manual unified title');
+  });
+
   it('applies the caller scope to detail lookups', async () => {
     const owner = await userFactory.create();
     const otherUser = await userFactory.create();

@@ -197,6 +197,8 @@ function listConditions(auth: SessionAuth, input: SessionListInput) {
 const baseSelection = {
   id: sessions.id,
   title: sessions.title,
+  titleEditedByUserAt: sessions.titleEditedByUserAt,
+  llmTitleCheckpoint: sessions.llmTitleCheckpoint,
   ownerKind: sessions.ownerKind,
   ownerUserId: sessions.ownerUserId,
   ownerAutomation: sessions.ownerAutomation,
@@ -715,9 +717,16 @@ export async function updateSessionMetadata(
   sessionId: string,
   changes: { title?: string; archivedAt?: Date | null },
 ) {
+  const updatedAt = new Date();
   const [updated] = await db
     .update(sessions)
-    .set({ ...changes, updatedAt: new Date() })
+    .set({
+      ...changes,
+      ...(changes.title === undefined
+        ? {}
+        : { titleEditedByUserAt: updatedAt }),
+      updatedAt,
+    })
     .where(
       and(
         eq(sessions.id, sessionId),

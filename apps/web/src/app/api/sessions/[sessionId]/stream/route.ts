@@ -8,6 +8,7 @@ import { authorizeUserToken } from '@/lib/server';
 import {
   findAccessibleFastSession,
   getFastSessionMessagesSince,
+  getFastSessionDisplayTitle,
 } from '@/lib/server/fast-sessions';
 
 export const runtime = 'nodejs';
@@ -75,9 +76,13 @@ export async function GET(
           where: eq(fastAgentConversations.id, session.id),
           columns: { title: true },
         });
-        if (conversation && conversation.title !== lastTitle) {
-          lastTitle = conversation.title;
-          await sseSession.push({ title: conversation.title }, 'session');
+        const title = await getFastSessionDisplayTitle(
+          session.id,
+          conversation?.title ?? null,
+        );
+        if (title && title !== lastTitle) {
+          lastTitle = title;
+          await sseSession.push({ title }, 'session');
         }
       } catch {
         break;

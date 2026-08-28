@@ -20,7 +20,6 @@ import {
   deriveSessionStatus,
   ensureSessionForFastConversation,
   ensureSessionForTask,
-  syncTaskSessionTitle,
   touchSessionActivity,
 } from '../sessions';
 
@@ -100,80 +99,6 @@ describe('deriveSessionStatus', () => {
 });
 
 describe('session helpers', () => {
-  it('syncs task-only session titles without overwriting a later rename', async () => {
-    const task = await taskFactory.create({ title: 'New session' });
-    createdTaskIds.push(task.id);
-    const session = await ensureSessionForTask(db, { taskId: task.id });
-    if (!session) throw new Error('Failed to create task session');
-    createdSessionIds.push(session.id);
-
-    await expect(
-      syncTaskSessionTitle(db, {
-        taskId: task.id,
-        previousTitle: 'New session',
-        title: 'Generated task title',
-      }),
-    ).resolves.toBe(true);
-
-    await db
-      .update(sessions)
-      .set({ title: 'Manual session title' })
-      .where(eq(sessions.id, session.id));
-
-    await expect(
-      syncTaskSessionTitle(db, {
-        taskId: task.id,
-        previousTitle: 'Generated task title',
-        title: 'Later generated title',
-      }),
-    ).resolves.toBe(false);
-
-    const unchanged = await db.query.sessions.findFirst({
-      where: eq(sessions.id, session.id),
-      columns: { title: true },
-    });
-    expect(unchanged?.title).toBe('Manual session title');
-  });
-
-  it('does not sync a child task title onto a Fast conversation session', async () => {
-    const user = await userFactory.create();
-    createdUserIds.push(user.id);
-    const [conversation] = await db
-      .insert(fastAgentConversations)
-      .values({
-        userId: user.id,
-        surface: 'web',
-        workspaceId: `workspace-${crypto.randomUUID()}`,
-        conversationId: `conversation-${crypto.randomUUID()}`,
-      })
-      .returning();
-    createdConversationIds.push(conversation!.id);
-
-    const task = await taskFactory.create({ title: 'New session' });
-    createdTaskIds.push(task.id);
-    const session = await ensureSessionForTask(db, {
-      taskId: task.id,
-      fastConversationId: conversation!.id,
-      origin: 'fast_delegation',
-    });
-    if (!session) throw new Error('Failed to create Fast session');
-    createdSessionIds.push(session.id);
-
-    await expect(
-      syncTaskSessionTitle(db, {
-        taskId: task.id,
-        previousTitle: 'New session',
-        title: 'Generated child task title',
-      }),
-    ).resolves.toBe(false);
-
-    const unchanged = await db.query.sessions.findFirst({
-      where: eq(sessions.id, session.id),
-      columns: { title: true },
-    });
-    expect(unchanged?.title).toBe('New session');
-  });
-
   it('updates activity monotonically', async () => {
     const session = await sessionFactory.create({ activityAt: 100 });
     createdSessionIds.push(session.id);

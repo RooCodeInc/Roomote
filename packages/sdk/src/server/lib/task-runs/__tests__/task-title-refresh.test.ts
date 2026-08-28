@@ -1,8 +1,6 @@
 import {
   db,
-  ensureSessionForTask,
   eq,
-  sessions,
   taskFactory,
   taskMessages,
   taskRuns,
@@ -16,12 +14,15 @@ import {
   refreshTaskTitleOnCompletion,
 } from '../record-task-message-envelope';
 
-const { mockGenerateLlmTaskTitle, mockSyncTaskThreadTitle } = vi.hoisted(
-  () => ({
-    mockGenerateLlmTaskTitle: vi.fn(),
-    mockSyncTaskThreadTitle: vi.fn(),
-  }),
-);
+const {
+  mockGenerateLlmTaskTitle,
+  mockRefreshTaskSessionTitle,
+  mockSyncTaskThreadTitle,
+} = vi.hoisted(() => ({
+  mockGenerateLlmTaskTitle: vi.fn(),
+  mockRefreshTaskSessionTitle: vi.fn(),
+  mockSyncTaskThreadTitle: vi.fn(),
+}));
 
 vi.mock('@roomote/cloud-agents/server', async (importOriginal) => {
   const actual =
@@ -30,6 +31,7 @@ vi.mock('@roomote/cloud-agents/server', async (importOriginal) => {
   return {
     ...actual,
     generateLlmTaskTitle: mockGenerateLlmTaskTitle,
+    refreshTaskSessionTitle: mockRefreshTaskSessionTitle,
   };
 });
 
@@ -93,38 +95,37 @@ describe('task title refresh', () => {
     vi.clearAllMocks();
     mockGenerateLlmTaskTitle.mockReset();
     mockGenerateLlmTaskTitle.mockResolvedValue('Generated summary title');
+    mockRefreshTaskSessionTitle.mockReset();
+    mockRefreshTaskSessionTitle.mockResolvedValue(undefined);
     mockSyncTaskThreadTitle.mockResolvedValue(undefined);
   });
 
   it('regenerates the title from the transcript when the job completes', async () => {
-    const taskId = 'task-title-final';
     const runId = await seedTaskWithPrompt({
-      taskId,
+      taskId: 'task-title-final',
       title: 'Early truncated title',
       llmTitleCheckpoint: 1,
     });
-    const session = await ensureSessionForTask(db, { taskId });
-    if (!session) throw new Error('Failed to create task session');
 
     await refreshTaskTitleOnCompletion({
-      taskId,
+      taskId: 'task-title-final',
       runId,
     });
 
     const task = await db.query.tasks.findFirst({
-      where: eq(tasks.id, taskId),
+      where: eq(tasks.id, 'task-title-final'),
       columns: { title: true, llmTitleCheckpoint: true },
-    });
-    const updatedSession = await db.query.sessions.findFirst({
-      where: eq(sessions.id, session.id),
-      columns: { title: true },
     });
 
     expect(task?.title).toBe('Generated summary title');
     expect(task?.llmTitleCheckpoint).toBe(LLM_TITLE_LOCKED_CHECKPOINT);
-    expect(updatedSession?.title).toBe('Generated summary title');
     expect(mockSyncTaskThreadTitle).toHaveBeenCalledWith({
-      taskId,
+      taskId: 'task-title-final',
+    });
+    expect(mockRefreshTaskSessionTitle).toHaveBeenCalledWith({
+      taskId: 'task-title-final',
+      userId: undefined,
+      mode: 'final',
     });
   });
 
@@ -260,6 +261,11 @@ describe('task title refresh', () => {
 
     await vi.waitFor(() => {
       expect(mockSyncTaskThreadTitle).toHaveBeenCalledWith({ taskId });
+      expect(mockRefreshTaskSessionTitle).toHaveBeenCalledWith({
+        taskId,
+        userId: undefined,
+        mode: 'checkpoint',
+      });
     });
     expect(mockGenerateLlmTaskTitle).not.toHaveBeenCalled();
   });
