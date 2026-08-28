@@ -7,6 +7,7 @@ import {
   isCommunicationProvider,
   isSourceControlTaskSurface,
   PRODUCT_NAME,
+  type TaskReportConsumer,
 } from '@roomote/types';
 import { isRepoSkipped } from '@roomote/github';
 import type { ResolvedTaskCommitAuthor } from '../commit-author';
@@ -82,6 +83,7 @@ export function standardTask({
   codeReviewReviewDraftPrs = true,
   sourceControlProvider,
   prAction,
+  reportConsumer = 'direct-user',
 }: {
   description: string;
   repo: string;
@@ -140,6 +142,7 @@ export function standardTask({
   codeReviewReviewDraftPrs?: boolean;
   sourceControlProvider?: SourceControlProvider;
   prAction?: PrAction;
+  reportConsumer?: TaskReportConsumer;
 }) {
   const hintedDescription = description;
   const isAllRepositoriesSelection = repo === ALL_REPOSITORIES;
@@ -253,7 +256,8 @@ export function standardTask({
   const primaryImplementationExpectation = interactiveMode
     ? 'In Interactive mode, repository-changing runs keep the active `implement-changes` workflow open so that, after implementation and before any final delivery pause, any repository-file change transitions into `capture-visual-proof`, then continue through validation and self-review and pause before push or pull request actions. If the run later transitions into `fix-pr`, let that child skill own push state, delegated proof before PR metadata refresh, and PR-fixer closeout.'
     : `In Autonomous mode, repository-changing runs keep the active \`implement-changes\` workflow open so that, after implementation and before delivery, any repository-file change transitions into \`capture-visual-proof\`, then ${autonomousFinishSummary}. ${fixPrOwnershipInstruction}`;
-  const requestUserInputGuidance = getRequestUserInputGuidance();
+  const requestUserInputGuidance =
+    reportConsumer === 'direct-user' ? getRequestUserInputGuidance() : '';
   const linkedWorkItemSection = renderLinkedWorkItemsSection(linkedWorkItems);
   const linkedWorkItemInstructions = linkedWorkItemSection
     ? `
@@ -371,8 +375,27 @@ ${buildGitHubMessageInstructions()}`
     }
   </source_control_context>`
     : '';
+  const reportingContext =
+    reportConsumer === 'fast-orchestrator'
+      ? `
+  <reporting_context>
+    <consumer>fast-orchestrator</consumer>
+    <ownership>Fast owns acknowledgements, progress updates, clarification, and final user communication. Do not send user-facing lifecycle messages or address the end user directly.</ownership>
+    <final_report_contract>
+      <rule>Before settlement, send Fast one internal closeout report using \`send_chat_reply\` with purpose \`closeout\`. This report is private orchestration input, not user-facing communication.</rule>
+      <rule>Include the outcome: what was accomplished, or the precise blocker.</rule>
+      <rule>Include changes: files or components changed and important behavioral decisions.</rule>
+      <rule>Include validation: commands or checks run, their outcomes, and material checks not run.</rule>
+      <rule>Include artifacts: commits, branches, pull requests, previews, screenshots, or other outputs that exist.</rule>
+      <rule>Include risks and caveats: unresolved uncertainty, regressions to watch, assumptions, and confidence gaps.</rule>
+      <rule>Include recommended follow-ups with concrete next actions and reasons only when warranted.</rule>
+      <rule>Be complete but not transcript-like. Exclude routine lifecycle narration, exploratory reads, unchanged files, superseded intermediate failures, command-by-command history, reasoning traces, and polished user-oriented framing.</rule>
+      <rule>Do not send internal acknowledgements, progress updates, or clarification messages to Fast unless a concrete blocker requires parent action; the final closeout should normally contain everything Fast needs without task-management inspection.</rule>
+    </final_report_contract>
+  </reporting_context>`
+      : '';
   const codeReviewSelfReviewCloseoutContext =
-    automaticSelfReviewNoticeGuidanceEnabled
+    automaticSelfReviewNoticeGuidanceEnabled && reportConsumer === 'direct-user'
       ? `
   <code_review_self_review_closeout>
     <rule>Code Reviewer is enabled for this deployment, and automatic open/push self-reviews on ${sourceControlPlatformLabel} can run for eligible pull requests. Draft automatic review is ${draftAutoReviewStatus} for this deployment. Results can relay back into this conversation when configured.</rule>
@@ -383,6 +406,23 @@ ${buildGitHubMessageInstructions()}`
     <rule>Skip this expectation note when the closeout has no PR or merge request link, when you are only refreshing without re-sharing the link, or when the delivered PR/MR is not auto-review eligible (including draft PRs while draft automatic review is disabled).</rule>${skippedGitHubRepoNotice}
   </code_review_self_review_closeout>`
       : '';
+  const modeSwitchingContext =
+    reportConsumer === 'fast-orchestrator'
+      ? `<mode_switching>
+      <rule>Allow switching between Autonomous and Interactive modes when Fast explicitly directs a mode change.</rule>
+      <rule>Honor the most recent explicit mode instruction without sending a user-facing acknowledgement.</rule>
+      <rule>Autonomous-by-default applies unless Fast explicitly requests Interactive execution.</rule>
+      <rule>If mode intent is unclear near push or pull-request actions, report the precise decision needed to Fast instead of addressing the end user.</rule>
+    </mode_switching>`
+      : `<mode_switching>
+      <rule>Allow switching between Autonomous and Interactive modes at any time in the thread.</rule>
+      <rule>Honor the most recent explicit user instruction as the active mode.</rule>
+      <rule>Autonomous-by-default applies unless the user explicitly requests Interactive execution in the initial request or a later interjection.</rule>
+      <rule>When an explicit mode switch happens, acknowledge it immediately to the user before continuing task work.</rule>
+      <rule>Interactive-mode acknowledgment format: "Switched to Interactive mode. I will pause before final push/PR actions. Say \`resume autonomous\` to switch back."</rule>
+      <rule>Autonomous-mode acknowledgment format: "Switched to Autonomous mode. I will continue without waiting for extra confirmations. Say \`switch to interactive\` any time."</rule>
+      <rule>If mode intent is unclear near push/PR actions, ask one focused clarification question before proceeding.</rule>
+    </mode_switching>`;
   const proofStep =
     'If the implementation changed repository files, transition into `capture-visual-proof` after implementation and before delivery or any final delivery pause so the delegated proof flow can decide whether screenshots, screencasts, both, or no browser proof apply, unless the active path has transitioned into `fix-pr`, in which case that child skill owns the proof handoff before PR metadata refresh';
   const deliveryStep = interactiveMode
@@ -415,6 +455,7 @@ ${buildGitHubMessageInstructions()}`
   ${sourceContext}
   ${sourceControlContext}
   ${codeReviewSelfReviewCloseoutContext}
+  ${reportingContext}
 
   <todo_policy>
     <purpose>The shared todo discipline lives in the global system prompt. This workflow-owned policy adds the seeding, routing, delegation, and delivery-specific todo semantics that the generic prompt cannot infer on its own.</purpose>
@@ -468,15 +509,7 @@ ${initialTodoSeed}
       <behavior>In Interactive mode, stop at meaningful checkpoints and wait for user direction before irreversible actions such as push or pull request creation.${interactiveMode ? ' Interactive mode is active for this run unless the user explicitly switches back.' : ''}</behavior>
       <explicit_command_override>When the user explicitly invokes a Roomote-shipped packaged-skill command (for example "$push", "$create-pr", or "$create-draft-pr"), treat that invocation as explicit user approval for all actions defined in that skill's workflow, including push and PR creation. Do not gate those actions behind an additional Interactive-mode confirmation — the user already requested them directly.</explicit_command_override>
     </interactive_mode>
-    <mode_switching>
-      <rule>Allow switching between Autonomous and Interactive modes at any time in the thread.</rule>
-      <rule>Honor the most recent explicit user instruction as the active mode.</rule>
-      <rule>Autonomous-by-default applies unless the user explicitly requests Interactive execution in the initial request or a later interjection.</rule>
-      <rule>When an explicit mode switch happens, acknowledge it immediately to the user before continuing task work.</rule>
-      <rule>Interactive-mode acknowledgment format: "Switched to Interactive mode. I will pause before final push/PR actions. Say \`resume autonomous\` to switch back."</rule>
-      <rule>Autonomous-mode acknowledgment format: "Switched to Autonomous mode. I will continue without waiting for extra confirmations. Say \`switch to interactive\` any time."</rule>
-      <rule>If mode intent is unclear near push/PR actions, ask one focused clarification question before proceeding.</rule>
-    </mode_switching>
+    ${modeSwitchingContext}
   </execution_mode_policy>
 
   <skill_delegation>

@@ -89,6 +89,7 @@ describe('createFastAgentSlackTaskLauncher', () => {
             slackConversationUrl:
               'https://acme.slack.com/archives/C123/p100002?thread_ts=100.001&cid=C123',
             communicationContextInherited: true,
+            reportConsumer: 'fast-orchestrator',
             fastAgentSessionId: '11111111-1111-4111-8111-111111111111',
             fastAgentParent: {
               sessionId: '11111111-1111-4111-8111-111111111111',

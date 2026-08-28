@@ -1131,6 +1131,7 @@ describe('enqueueTask snapshot resume', () => {
           communicationChannelId: 'C123',
           communicationThreadId: '111.222',
           communicationContextInherited: true,
+          reportConsumer: 'fast-orchestrator',
           fastAgentSessionId,
           fastAgentParent,
         },
@@ -1156,6 +1157,7 @@ describe('enqueueTask snapshot resume', () => {
     const resumePayload = resumeRun.payload as Record<string, unknown>;
 
     expect(resumePayload.communicationContextInherited).toBe(true);
+    expect(resumePayload.reportConsumer).toBe('fast-orchestrator');
     expect(resumePayload.fastAgentParent).toEqual(fastAgentParent);
     expect(resumePayload.fastAgentSessionId).toBe(fastAgentSessionId);
   });
@@ -1263,6 +1265,7 @@ describe('enqueueTask snapshot resume', () => {
     const resumePayload = resumeRun.payload as Record<string, unknown>;
 
     expect(resumePayload.communicationContextInherited).toBe(true);
+    expect(resumePayload.reportConsumer).toBe('fast-orchestrator');
     expect(resumePayload.fastAgentParent).toEqual(fastAgentParent);
   });
 

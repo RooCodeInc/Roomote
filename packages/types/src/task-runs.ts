@@ -11,7 +11,7 @@ import {
   type CommunicationProvider,
   queuedCommunicationMessageSchema,
 } from './communication';
-import { fastAgentParentSchema } from './fast-agent';
+import { fastAgentParentSchema, taskReportConsumerSchema } from './fast-agent';
 import { SANDBOX_SNAPSHOT_EXPIRY_MS } from './compute-providers/worker-runtime';
 import { prActions } from './cloud-agents';
 import { ALL_REPOSITORIES } from './constants';
@@ -1045,6 +1045,8 @@ const sharedTaskPayloadSchema = z.object({
   communicationContextInherited: z.boolean().optional(),
   /** Runless Fast parent that owns this task's user-visible lifecycle. */
   fastAgentParent: fastAgentParentSchema.optional(),
+  /** Explicit consumer for the coding agent's completion report. */
+  reportConsumer: taskReportConsumerSchema.optional(),
   /** Native Slack task card in the parent thread of a Fast-mode delegation.
    * Inherited onto every snapshot resume by the queue so the card follows
    * the task. */

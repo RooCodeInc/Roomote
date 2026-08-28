@@ -17,6 +17,7 @@ import {
   getSlackTeamDomainFromTaskPayload,
   getSlackTeamIdFromTaskPayload,
   getSlackThreadTsFromTaskPayload,
+  getTaskReportConsumerFromPayload,
   resolveSourceControlHostFromPayload,
 } from '@roomote/types';
 import {
@@ -349,6 +350,7 @@ export async function generatePrompt({
       );
       const inheritedCommunicationContext =
         taskSpec.payload.communicationContextInherited === true;
+      const reportConsumer = getTaskReportConsumerFromPayload(taskSpec.payload);
       const activeSlackChannel = inheritedCommunicationContext
         ? null
         : slackChannel;
@@ -474,6 +476,7 @@ export async function generatePrompt({
         codeReviewReviewDraftPrs,
         sourceControlProvider: targetSourceControl?.provider,
         prAction,
+        reportConsumer,
       });
 
       if (!inheritedCommunicationContext && slackChannel && slackThreadTs) {
