@@ -1,4 +1,4 @@
-import { ACP_TOOL_KINDS } from '@roomote/types';
+import { ACP_TOOL_KINDS, FAST_AGENT_NATIVE_TOOL_CATALOG } from '@roomote/types';
 
 import {
   FAST_AGENT_NATIVE_TOOL_NAMES,
@@ -6,6 +6,13 @@ import {
 } from '../fast-agent-tool-policy';
 
 describe('getFastAgentNativeAcpKind', () => {
+  it.each(FAST_AGENT_NATIVE_TOOL_CATALOG)(
+    'maps every catalogued tool (%s) to its ACP kind',
+    ({ name, kind }) => {
+      expect(getFastAgentNativeAcpKind(name)).toBe(kind);
+    },
+  );
+
   it.each([
     [FAST_AGENT_NATIVE_TOOL_NAMES.spillRead, ACP_TOOL_KINDS.read],
     [FAST_AGENT_NATIVE_TOOL_NAMES.loadSkill, ACP_TOOL_KINDS.read],
