@@ -17,7 +17,11 @@ describe('personal preferences', () => {
 
     await expect(
       getPersonalPreferencesCommand(buildAuth(user.id)),
-    ).resolves.toEqual(expect.objectContaining({ mindReaderMode: false }));
+    ).resolves.toEqual(
+      expect.objectContaining({
+        mindReaderMode: false,
+      }),
+    );
   });
 
   it('persists mind reader mode without replacing other metadata', async () => {
@@ -58,39 +62,6 @@ describe('personal preferences', () => {
         mindReaderMode: true,
         narrationMode: true,
       }),
-    );
-  });
-
-  it('persists communications fast mode updates', async () => {
-    const user = await userFactory.create();
-
-    await expect(
-      updatePersonalPreferencesCommand(buildAuth(user.id), {
-        communicationsFastModeDefault: true,
-      }),
-    ).resolves.toEqual(
-      expect.objectContaining({ communicationsFastModeDefault: true }),
-    );
-
-    const storedUser = await db.query.users.findFirst({
-      where: eq(users.id, user.id),
-      columns: { metadata: true },
-    });
-
-    expect(storedUser?.metadata).toEqual(
-      expect.objectContaining({ communications_fast_mode_default: true }),
-    );
-  });
-
-  it('exposes a stored communications fast mode default', async () => {
-    const user = await userFactory.create({
-      metadata: { communications_fast_mode_default: true },
-    });
-
-    await expect(
-      getPersonalPreferencesCommand(buildAuth(user.id)),
-    ).resolves.toEqual(
-      expect.objectContaining({ communicationsFastModeDefault: true }),
     );
   });
 });

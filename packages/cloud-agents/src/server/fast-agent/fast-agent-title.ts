@@ -5,8 +5,10 @@ import {
   eq,
   fastAgentConversations,
   fastAgentMessages,
+  inArray,
   isNull,
   lt,
+  sessions,
   sql,
 } from '@roomote/db/server';
 import {
@@ -57,6 +59,7 @@ export async function refreshFastAgentSessionTitle({
       where: eq(fastAgentConversations.id, sessionId),
       columns: {
         id: true,
+        title: true,
         titleEditedByUserAt: true,
         llmTitleCheckpoint: true,
       },
@@ -117,16 +120,52 @@ export async function refreshFastAgentSessionTitle({
       return;
     }
 
-    await db
-      .update(fastAgentConversations)
-      .set({ title, llmTitleCheckpoint: checkpoint })
-      .where(
-        and(
-          eq(fastAgentConversations.id, sessionId),
-          isNull(fastAgentConversations.titleEditedByUserAt),
-          lt(fastAgentConversations.llmTitleCheckpoint, checkpoint),
-        ),
-      );
+    await db.transaction(async (tx) => {
+      // Re-read the conversation title under a row lock: the pre-generation
+      // snapshot may be stale by now, and the session guard below must match
+      // the title the session was actually seeded/synced from.
+      const [current] = await tx
+        .select({ title: fastAgentConversations.title })
+        .from(fastAgentConversations)
+        .where(eq(fastAgentConversations.id, sessionId))
+        .for('update');
+      if (!current) return;
+
+      const [updatedConversation] = await tx
+        .update(fastAgentConversations)
+        .set({ title, llmTitleCheckpoint: checkpoint })
+        .where(
+          and(
+            eq(fastAgentConversations.id, sessionId),
+            isNull(fastAgentConversations.titleEditedByUserAt),
+            lt(fastAgentConversations.llmTitleCheckpoint, checkpoint),
+          ),
+        )
+        .returning({ id: fastAgentConversations.id });
+      if (!updatedConversation) return;
+
+      // Keep the unified Session's title in step with the generated
+      // conversation title, but never clobber a manual Session rename: only
+      // overwrite the creation placeholder or the previous conversation
+      // title (session titles are seeded trimmed, so match both forms).
+      const previousTitleCandidates = new Set(['New session']);
+      if (current.title) {
+        previousTitleCandidates.add(current.title);
+        const trimmed = current.title.trim();
+        if (trimmed) {
+          previousTitleCandidates.add(trimmed);
+        }
+      }
+      await tx
+        .update(sessions)
+        .set({ title, updatedAt: new Date() })
+        .where(
+          and(
+            eq(sessions.fastConversationId, sessionId),
+            inArray(sessions.title, [...previousTitleCandidates]),
+          ),
+        );
+    });
   } catch (error) {
     console.error(
       `[Fast Agent] Failed to refresh session title session=${sessionId}: ${formatErrorForLog(error)}`,

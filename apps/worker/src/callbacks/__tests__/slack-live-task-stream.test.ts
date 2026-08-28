@@ -135,7 +135,7 @@ describe('Slack live task card', () => {
     });
     expect(renderedCard(4)).toEqual({
       status: 'complete',
-      output: 'Task completed.',
+      output: 'Ready.',
     });
   });
 
@@ -585,7 +585,7 @@ describe('Slack live task card', () => {
 
     expect(renderedCard(1)).toMatchObject({
       status: 'error',
-      output: 'Task canceled.',
+      output: 'Stopped.',
     });
   });
 
@@ -640,7 +640,7 @@ describe('Slack live task card', () => {
 
     expect(renderedCard(2)).toMatchObject({
       status: 'error',
-      output: 'The task stopped because of an error.',
+      output: 'Stopped because of an error.',
     });
 
     // The next run of the task flips the card back to in progress.
@@ -715,7 +715,7 @@ describe('Slack live task card', () => {
     // The last narration line is never promoted to the final result.
     expect(renderedCard(2)).toMatchObject({
       status: 'complete',
-      output: 'Task completed.',
+      output: 'Ready.',
     });
   });
 
@@ -772,7 +772,7 @@ describe('Slack live task card', () => {
 
     expect(renderedCard(2)).toEqual({
       status: 'complete',
-      output: 'Task completed.',
+      output: 'Ready.',
     });
     expect(renderedCard(3)).toEqual({
       status: 'in_progress',
@@ -830,7 +830,7 @@ describe('Slack live task card', () => {
 
     expect(renderedCard(1)).toEqual({
       status: 'complete',
-      output: 'Task completed.',
+      output: 'Ready.',
     });
     expect(renderedCard(2)).toEqual({
       status: 'complete',
@@ -898,7 +898,7 @@ describe('Slack live task card', () => {
     expect(mocks.renderCard).toHaveBeenCalledOnce();
     expect(renderedCard(1)).toEqual({
       status: 'error',
-      output: 'The task stopped because of an error.',
+      output: 'Stopped because of an error.',
     });
   });
 
@@ -914,7 +914,7 @@ describe('Slack live task card', () => {
     expect(mocks.renderCard).toHaveBeenCalledTimes(2);
     expect(renderedCard(1)).toEqual({
       status: 'error',
-      output: 'The task stopped because of an error.',
+      output: 'Stopped because of an error.',
     });
     expect(renderedCard(2)).toEqual(renderedCard(1));
   });
@@ -952,7 +952,7 @@ describe('Slack live task card', () => {
     expect(mocks.renderCard).toHaveBeenCalledOnce();
     expect(renderedCard(1)).toEqual({
       status: 'error',
-      output: 'The task stopped because of an error.',
+      output: 'Stopped because of an error.',
     });
   });
 

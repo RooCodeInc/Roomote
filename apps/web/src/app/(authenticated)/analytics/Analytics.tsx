@@ -56,6 +56,8 @@ const analyticsFilterKeys = [
   'taskType',
   'provider',
   'model',
+  'ownerKind',
+  'hasExecution',
 ] as const;
 
 type SelectedAnalyticsSegment = {
@@ -65,7 +67,11 @@ type SelectedAnalyticsSegment = {
   seriesLabel: string;
 };
 
-const GENERIC_ANALYTICS_OBJECTS: AnalyticsObject[] = ['tasks', 'pullRequests'];
+const GENERIC_ANALYTICS_OBJECTS: AnalyticsObject[] = [
+  'tasks',
+  'sessions',
+  'pullRequests',
+];
 
 function parseAnalyticsObject(
   value: string | null,
@@ -75,7 +81,7 @@ function parseAnalyticsObject(
     return value as AnalyticsObject;
   }
 
-  return allowedObjects[0] ?? analyticsObjects[0];
+  return allowedObjects[0] ?? analyticsObjects[0] ?? 'tasks';
 }
 
 function getFiltersFromSearchParams(

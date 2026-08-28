@@ -48,6 +48,7 @@ import {
   db,
   deploymentSettings,
   ensureAutomationRowsOnce,
+  ensureSessionForTask,
   isChatGptSubscriptionConnected,
   createTaskWithRetry,
   markTaskStartParallelCountEndedAt,
@@ -1386,7 +1387,6 @@ async function enqueueFreshLaunch(
   const { task, initiator, workflow, surface, trigger } = input;
   const visibility: TaskVisibility = input.visibility ?? 'visible';
   const linkedUserId = getTaskInitiatorLinkedUserId(initiator);
-
   await assertUserIsNotDeleted(linkedUserId);
 
   const requestedExistingTask = input.existingTaskId
@@ -1638,6 +1638,14 @@ async function enqueueFreshLaunch(
         });
 
         if (activeRun) {
+          await ensureSessionForTask(tx, {
+            taskId: existingTask.id,
+            fastConversationId:
+              getFastAgentParentFromPayload(taskWithHarnessOverrides.payload)
+                ?.sessionId ?? null,
+            origin: 'follow_up',
+            existingTaskReused: true,
+          });
           return { taskRun: activeRun, createdRun: false, reusedTask: true };
         }
 
@@ -1686,6 +1694,20 @@ async function enqueueFreshLaunch(
         );
         taskId = createdTask.id;
       }
+
+      const fastParent = getFastAgentParentFromPayload(
+        taskWithHarnessOverrides.payload,
+      );
+      await ensureSessionForTask(tx, {
+        taskId,
+        fastConversationId: fastParent?.sessionId ?? null,
+        origin: fastParent
+          ? 'fast_delegation'
+          : existingTask
+            ? 'follow_up'
+            : 'direct_launch',
+        existingTaskReused: Boolean(existingTask),
+      });
 
       if (input.prLinkage) {
         const prLinkage = {
@@ -1802,6 +1824,15 @@ async function enqueueFreshLaunch(
   if (!createdRun) {
     return taskRun;
   }
+
+  const delegated = Boolean(
+    reusedTask ||
+    getFastAgentParentFromPayload(taskWithHarnessOverrides.payload),
+  );
+  void captureEvent(delegated ? 'session_task_delegated' : 'session_created', {
+    ...(linkedUserId ? { userId: linkedUserId } : {}),
+    properties: { surface, outcome: 'created' },
+  });
 
   if (shouldCaptureTaskCreatedEvent(taskRun.payloadKind)) {
     // Anonymous analytics (no-op unless enabled): task creation with

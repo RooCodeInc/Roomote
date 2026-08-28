@@ -142,16 +142,19 @@ function buildGroup(): GroupedToolCallRenderBlock {
 
 describe('AcpGroupedToolMessage anchors', () => {
   it('keeps per-item anchors mounted even when tool content is collapsed', () => {
+    // The compact grouped layout renders anchors as standalone hidden divs
+    // (no collapsed ToolContent container anymore); scroll targets must stay
+    // in the DOM while per-item detail stays unmounted.
     render(<AcpGroupedToolMessage group={buildGroup()} />);
-
-    const collapsedContent = screen.getByTestId('collapsed-tool-content');
 
     expect(document.getElementById('msg-101')).toBeTruthy();
     expect(document.getElementById('msg-102')).toBeTruthy();
-    expect(collapsedContent.querySelector('#msg-101')).toBeNull();
-    expect(collapsedContent.querySelector('#msg-102')).toBeNull();
+    expect(document.getElementById('msg-101')).toHaveAttribute(
+      'aria-hidden',
+      'true',
+    );
 
-    // Subheadings live inside ToolContent and should not be mounted in collapsed mode.
+    // Subheadings only mount with expanded tool detail.
     expect(screen.queryByText('file_b.txt')).toBeNull();
     expect(screen.queryByText('file_c.txt')).toBeNull();
   });

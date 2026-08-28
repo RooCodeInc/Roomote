@@ -85,14 +85,23 @@ export async function processDiscordFastAgentMessage(input: {
   metadata: ReturnType<typeof discordMetadataForChannel>;
   conversationId: string;
   createAnchoredThread?: boolean;
+  /**
+   * The real Discord message replies and anchored threads attach to. Defaults
+   * to the inbound message's own id; reaction summons pass the reacted-on
+   * message because their synthesized message id is not a real Discord
+   * message.
+   */
+  anchorMessageId?: string;
   interaction?: DiscordInteractionReplyContext;
   activeTasks?: { taskId: string }[];
 }): Promise<void> {
   const message = getDiscordMessageCreate(input.event);
+  const anchorMessageId = input.anchorMessageId ?? message?.id;
   let channel = input.channel;
   let metadata = input.metadata;
   if (
     message &&
+    anchorMessageId &&
     input.createAnchoredThread !== false &&
     !channel.isDirectMessage &&
     !channel.isThread &&
@@ -100,7 +109,7 @@ export async function processDiscordFastAgentMessage(input: {
   ) {
     const thread = await input.provider.createThreadFromMessage({
       channelId: channel.channelId,
-      messageId: message.id,
+      messageId: anchorMessageId,
       name: buildCommunicationTaskThreadName(input.question),
     });
     channel = {
@@ -179,7 +188,7 @@ export async function processDiscordFastAgentMessage(input: {
             applicationId: input.applicationId,
             channel,
             ...(input.interaction ? { interaction: input.interaction } : {}),
-            ...(message ? { replyToMessageId: message.id } : {}),
+            ...(anchorMessageId ? { replyToMessageId: anchorMessageId } : {}),
             text: textWithFooter,
           });
           await recordFastAgentConversationMessageBestEffort({
@@ -218,7 +227,7 @@ export async function processDiscordFastAgentMessage(input: {
       userId: input.senderUserId,
       apiBaseUrl,
       conversation,
-      currentMessageId: message?.id ?? input.interaction?.interaction.id,
+      currentMessageId: anchorMessageId ?? input.interaction?.interaction.id,
       signal: releaseFastAgentLock.signal,
       senderDisplayName:
         input.interaction?.interaction.member?.nick ??

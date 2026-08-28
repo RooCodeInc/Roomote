@@ -16,6 +16,8 @@ type AnalyticsShellItemId = AnalyticsObject;
 
 export function getAnalyticsHref(itemId: AnalyticsShellItemId) {
   switch (itemId) {
+    case 'sessions':
+      return '/analytics?object=sessions';
     case 'tasks':
       return '/analytics';
     case 'pullRequests':
@@ -26,6 +28,7 @@ export function getAnalyticsHref(itemId: AnalyticsShellItemId) {
 }
 
 const ANALYTICS_SHELL_ITEMS = [
+  { id: 'sessions', label: 'Sessions', icon: ChartColumnIncreasing },
   { id: 'tasks', label: 'Tasks', icon: ChartColumnIncreasing },
   { id: 'costs', label: 'Costs', icon: CircleDollarSign },
 ] as const satisfies Array<{
@@ -35,6 +38,7 @@ const ANALYTICS_SHELL_ITEMS = [
 }>;
 
 const ANALYTICS_DESCRIPTIONS: Record<AnalyticsShellItemId, string> = {
+  sessions: 'Track Session activity by owner, status, and source.',
   pullRequests:
     'Track pull request activity by user, status, repository, and author.',
   tasks: 'Track task activity by user, environment, source, and task type.',

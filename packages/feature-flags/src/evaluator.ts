@@ -13,6 +13,7 @@ import {
   normalizeMetadataRecord,
 } from './index';
 import { MetadataCache } from './cache';
+import { invalidateDeploymentFeatureFlagCache } from './server/deployment';
 import type {
   FeatureFlag,
   FeatureFlagContext,
@@ -72,6 +73,7 @@ export class FeatureFlagEvaluator {
   }
 
   async invalidateDeploymentCache(): Promise<void> {
+    invalidateDeploymentFeatureFlagCache();
     await this.cache.invalidate('deployment', 'default');
   }
 }
@@ -85,4 +87,5 @@ export function getFeatureFlagEvaluator(redis: Redis): FeatureFlagEvaluator {
 
 export function resetFeatureFlagEvaluatorForTests(): void {
   evaluatorInstance = null;
+  invalidateDeploymentFeatureFlagCache();
 }

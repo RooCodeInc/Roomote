@@ -23,6 +23,11 @@ import type {
   deploymentSettings,
   tasks,
   taskPins,
+  sessions,
+  sessionTasks,
+  sessionParticipants,
+  sessionPins,
+  sessionBackfillState,
   taskPullRequests,
   taskRuns,
   taskRunEvents,
@@ -99,6 +104,31 @@ export type CreateTask = typeof tasks.$inferInsert;
 export type TaskPin = typeof taskPins.$inferSelect;
 
 export type CreateTaskPin = Omit<typeof taskPins.$inferInsert, Generated>;
+
+/**
+ * sessions
+ */
+
+export type Session = typeof sessions.$inferSelect;
+
+export type CreateSession = Omit<typeof sessions.$inferInsert, Generated>;
+
+export type SessionTask = typeof sessionTasks.$inferSelect;
+
+export type CreateSessionTask = Omit<
+  typeof sessionTasks.$inferInsert,
+  'attachedAt'
+>;
+
+export type SessionParticipant = typeof sessionParticipants.$inferSelect;
+
+export type CreateSessionParticipant = Omit<
+  typeof sessionParticipants.$inferInsert,
+  Generated
+>;
+
+export type SessionBackfillState = typeof sessionBackfillState.$inferSelect;
+export type SessionPin = typeof sessionPins.$inferSelect;
 
 /**
  * taskPullRequests

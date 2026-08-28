@@ -16,7 +16,6 @@ import {
   pickPreferredConfiguredComputeProvider,
   SETUP_COMPUTE_PROVIDER_CATALOG,
 } from '@roomote/types';
-import type { RoutingDecision } from '@roomote/cloud-agents/server';
 
 import { type CreateTaskFormValues, createTaskFormSchema } from '@/types';
 
@@ -26,7 +25,6 @@ import { cn } from '@/lib/utils';
 import { getTaskLaunchDisabledReason } from '@/lib/managed-access';
 
 import { useEnvironments } from '@/hooks/environments';
-import { usePersonalPreferences } from '@/hooks/usePersonalPreferences';
 import { useAuthorizedUser } from '@/hooks/useUser';
 import { useLaunchTaskModels } from '@/hooks/task-models/useLaunchTaskModels';
 import {
@@ -36,7 +34,6 @@ import {
 import {
   useCreateStandardTaskRun,
   useStartFastSession,
-  useRouteHomeTask,
 } from '@/hooks/task-runs';
 
 import {
@@ -50,7 +47,6 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-  Loader2,
   Mail,
   MessageCirclePlus,
   Select,
@@ -100,8 +96,6 @@ function persistFeedbackPromptDismissal(): void {
     // Ignore storage failures; the prompt can still be dismissed for this session.
   }
 }
-
-type RoutingFlowState = 'idle' | 'routing_pending' | 'launching';
 
 type SubmissionSnapshot = {
   branch?: string;
@@ -182,7 +176,6 @@ export function Home({
 
   const [promptText, setPromptText] = useState(promptParam);
   const [isExiting, setIsExiting] = useState(false);
-  const [routingState, setRoutingState] = useState<RoutingFlowState>('idle');
   const [selectedComputeProvider, setSelectedComputeProvider] =
     useState<ComputeProvider>(initialComputeProvider);
   const [selectedModelOverrideId, setSelectedModelOverrideId] = useState<
@@ -206,8 +199,6 @@ export function Home({
   const [textareaMaxHeight, setTextareaMaxHeight] = useState<
     number | undefined
   >(undefined);
-
-  const routingRequestIdRef = useRef(0);
 
   useEffect(() => setPromptText(promptParam), [promptParam]);
   useEffect(() => setSelectedModelOverrideId(modelParam), [modelParam]);
@@ -299,36 +290,14 @@ export function Home({
     resolver: zodResolver(createTaskFormSchema),
     defaultValues: DEFAULT_FORM_VALUES,
   });
-  const watchedRepository = form.watch('repository');
 
   const { workspace, setWorkspace } = useWorkspaceStorage();
-  const { preferences, isLoading: isPersonalPreferencesLoading } =
-    usePersonalPreferences();
   const hasRestoredWorkspace = useRef(false);
   const shouldRestoreDefaultWorkspace = useRef(false);
 
   const handleInvalidWorkspaceReset = useCallback(() => {
     shouldRestoreDefaultWorkspace.current = true;
   }, []);
-
-  const clearRoutingState = useCallback(() => {
-    setRoutingState('idle');
-  }, []);
-
-  const cancelRoutingInFlight = useCallback(() => {
-    routingRequestIdRef.current += 1;
-    clearRoutingState();
-  }, [clearRoutingState]);
-
-  const resetToAutoWorkspace = useCallback(() => {
-    setWorkspace({
-      workspace: { type: 'auto' },
-    });
-
-    form.setValue('repository', AUTO_WORKSPACE_VALUE);
-    form.setValue('environmentId', undefined);
-    form.setValue('branch', '');
-  }, [form, setWorkspace]);
 
   useEffect(() => {
     const restoredWorkspace = workspace.workspace as
@@ -366,66 +335,12 @@ export function Home({
       return;
     }
 
-    if (isPersonalPreferencesLoading) {
-      return;
-    }
-
-    if (preferences.communicationsFastModeDefault) {
-      form.setValue('repository', FAST_EXECUTION);
-      form.setValue('environmentId', undefined);
-      form.setValue('branch', '');
-      hasRestoredWorkspace.current = true;
-      return;
-    }
-
-    if (restoredWorkspace?.type === 'repository') {
-      form.setValue('repository', restoredWorkspace.value);
-      form.setValue('environmentId', undefined);
-      hasRestoredWorkspace.current = true;
-      return;
-    }
-
-    if (restoredWorkspace?.type === 'environment') {
-      form.setValue('repository', restoredWorkspace.id);
-      form.setValue('environmentId', restoredWorkspace.id);
-      hasRestoredWorkspace.current = true;
-      return;
-    }
-
-    // Auto (or unset) stored preference: wait for environments so we can
-    // default the sole environment instead of writing Auto over the selector.
-    if (environments.isPending || !environments.isSuccess) {
-      return;
-    }
-
-    const soleEnvironment =
-      environments.data?.length === 1 ? environments.data[0] : undefined;
-
-    if (soleEnvironment) {
-      form.setValue('repository', soleEnvironment.id);
-      form.setValue('environmentId', soleEnvironment.id);
-      form.setValue('branch', '');
-      setWorkspace({
-        workspace: { type: 'environment', id: soleEnvironment.id },
-      });
-    } else {
-      form.setValue('repository', AUTO_WORKSPACE_VALUE);
-      form.setValue('environmentId', undefined);
-      form.setValue('branch', '');
-    }
-
+    // Fast mode is always the default workspace for new prompts.
+    form.setValue('repository', FAST_EXECUTION);
+    form.setValue('environmentId', undefined);
+    form.setValue('branch', '');
     hasRestoredWorkspace.current = true;
-  }, [
-    environmentIdParam,
-    environments.data,
-    environments.isPending,
-    environments.isSuccess,
-    form,
-    isPersonalPreferencesLoading,
-    preferences.communicationsFastModeDefault,
-    setWorkspace,
-    workspace,
-  ]);
+  }, [environmentIdParam, form, setWorkspace, workspace]);
 
   const wiggleWorkspace = useCallback(() => {
     const el = workspaceRef.current;
@@ -442,11 +357,16 @@ export function Home({
   const navigateToTaskRun = (result: {
     success: boolean;
     taskId?: string;
+    sessionId?: string;
     error?: string;
   }) => {
     if (result.success && 'taskId' in result) {
       setIsExiting(true);
-      router.push(`/task/${result.taskId}`);
+      router.push(
+        result.sessionId
+          ? `/sessions/${result.sessionId}?task=${result.taskId}`
+          : `/task/${result.taskId}`,
+      );
     } else if ('error' in result) {
       toast.error(result.error);
     }
@@ -458,7 +378,6 @@ export function Home({
   };
 
   const createStandardTaskRun = useCreateStandardTaskRun(mutationOptions);
-  const routeHomeTask = useRouteHomeTask();
   const startFastSessionMutation = useStartFastSession();
 
   const startFastSession = useCallback(
@@ -518,26 +437,6 @@ export function Home({
   );
 
   useEffect(() => {
-    if (routingState !== 'routing_pending') {
-      return;
-    }
-
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape') {
-        return;
-      }
-
-      event.preventDefault();
-      cancelRoutingInFlight();
-      resetToAutoWorkspace();
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [cancelRoutingInFlight, resetToAutoWorkspace, routingState]);
-
-  useEffect(() => {
     const mediaQuery = window.matchMedia('(max-height: 80rem)');
     const syncViewportHeight = () => {
       setIsShortViewport(mediaQuery.matches);
@@ -552,107 +451,13 @@ export function Home({
   }, []);
 
   const isBusy =
-    createStandardTaskRun.isPending ||
-    startFastSessionMutation.isPending ||
-    routingState === 'routing_pending' ||
-    routingState === 'launching';
+    createStandardTaskRun.isPending || startFastSessionMutation.isPending;
 
-  const showRoutingSpinner = routingState === 'routing_pending';
   const shouldDimMainForm = isBottomSheetExpanded && isShortViewport;
   const hasAnyEnvironments = (environments.data?.length ?? 0) > 0;
   const showNoEnvironmentsWarning =
     isAdmin && !environments.isPending && !hasAnyEnvironments;
-  const submitDisabledReason =
-    getTaskLaunchDisabledReason(managedAccess) ??
-    (!hasAnyEnvironments && watchedRepository === AUTO_WORKSPACE_VALUE
-      ? 'Auto routing needs an environment. Create one, or select All Repositories to work without one.'
-      : undefined);
-
-  const handleAutoSubmit = useCallback(
-    async (submission: SubmissionSnapshot) => {
-      cancelRoutingInFlight();
-      setRoutingState('routing_pending');
-      const routingRequestId = routingRequestIdRef.current + 1;
-      routingRequestIdRef.current = routingRequestId;
-
-      let routedResult: RoutingDecision;
-
-      try {
-        routedResult = await routeHomeTask.mutateAsync({
-          description: submission.description ?? '',
-          ...(submission.images?.length ? { images: submission.images } : {}),
-        });
-      } catch (error) {
-        toast.error(
-          error instanceof Error
-            ? error.message
-            : 'Could not auto-route this task.',
-        );
-        clearRoutingState();
-        return;
-      }
-
-      if (routingRequestId !== routingRequestIdRef.current) {
-        return;
-      }
-
-      if (routedResult.status === 'platform_answer') {
-        toast(routedResult.result.answer);
-        clearRoutingState();
-        return;
-      }
-
-      if (routedResult.status === 'fallback') {
-        toast.error("Couldn't auto-route this task.");
-        clearRoutingState();
-        return;
-      }
-
-      if (routedResult.result.workspace.type === 'environment') {
-        if (!routedResult.result.workspace.id.trim()) {
-          toast.error('Could not determine a routed environment.');
-          clearRoutingState();
-          return;
-        }
-      } else {
-        toast.error('Auto routing requires an environment-backed workspace.');
-        clearRoutingState();
-        return;
-      }
-
-      setRoutingState('launching');
-      const routedModelId =
-        routedResult.result.model?.source === 'preference'
-          ? routedResult.result.model.id
-          : undefined;
-
-      const didLaunch = await launchTask({
-        repo: ALL_REPOSITORIES,
-        branch: submission.branch,
-        environmentId:
-          routedResult.result.workspace.type === 'environment'
-            ? routedResult.result.workspace.id
-            : undefined,
-        description: submission.description,
-        images: submission.images,
-        modelId: routedModelId,
-        blank: submission.blank,
-      });
-
-      if (didLaunch) {
-        resetToAutoWorkspace();
-      }
-
-      clearRoutingState();
-    },
-    [
-      cancelRoutingInFlight,
-      clearRoutingState,
-      launchTask,
-      resetToAutoWorkspace,
-      routeHomeTask,
-    ],
-  );
+  const submitDisabledReason = getTaskLaunchDisabledReason(managedAccess);
 
   const handleSubmit = useCallback(
     async (message: PromptInputMessage) => {
@@ -691,8 +496,15 @@ export function Home({
         return;
       }
 
+      // Auto is no longer offered in the picker, but stored workspace
+      // preferences may still restore it; treat it as Fast.
       if (isAutoWorkspace) {
-        await handleAutoSubmit(submission);
+        if (!submission.description && !submission.images?.length) return;
+        await startFastSession({
+          text: submission.description ?? '',
+          images: submission.images,
+          model: selectedModelId,
+        });
         return;
       }
 
@@ -717,7 +529,6 @@ export function Home({
     },
     [
       form,
-      handleAutoSubmit,
       launchTask,
       setWorkspace,
       canSelectBranch,
@@ -757,12 +568,8 @@ export function Home({
             >
               <div ref={workspaceRef}>
                 <SelectWorkspace
-                  allowAuto
                   allowFast
-                  autoSelectDefaultWorkspace={
-                    !isPersonalPreferencesLoading &&
-                    !preferences.communicationsFastModeDefault
-                  }
+                  autoSelectDefaultWorkspace={false}
                   onInvalidWorkspaceReset={handleInvalidWorkspaceReset}
                   allowBranchSelection={canSelectBranch}
                 />
@@ -794,19 +601,6 @@ export function Home({
                     ))}
                   </SelectContent>
                 </Select>
-              )}
-
-              {showRoutingSpinner && (
-                <div
-                  aria-live="polite"
-                  className="inline-flex items-center gap-2 text-sm text-muted-foreground"
-                >
-                  <Loader2
-                    className="size-3.5 animate-spin"
-                    aria-hidden="true"
-                  />
-                  <span className="sr-only">Routing...</span>
-                </div>
               )}
             </div>
 

@@ -96,7 +96,7 @@ describe('NavbarDrawer', () => {
         .getAllByRole('link')
         .map((link) => link.textContent?.trim())
         .filter(Boolean),
-    ).toEqual(['Home', 'Tasks', 'Automations', 'Analytics', 'Settings']);
+    ).toEqual(['Home', 'Sessions', 'Automations', 'Analytics', 'Settings']);
     expect(
       screen.queryByRole('button', { name: /support/i }),
     ).not.toBeInTheDocument();
