@@ -14,6 +14,7 @@ export type ClaimedCurrentThreadSuggestion = {
   investigationContext: string | null;
   targetRepositoryFullName: string | null;
   targetEnvironmentId?: string | null;
+  usesRouterLaunch?: boolean;
   launchClaimedAt: Date;
 };
 
@@ -90,6 +91,7 @@ export async function claimCurrentThreadSuggestionByMessage(
         ? null
         : claimed.targetRepositoryFullName,
       targetEnvironmentId: routed ? null : claimed.targetEnvironmentId,
+      usesRouterLaunch: routed,
       launchClaimedAt: claimed.launchClaimedAt,
     },
   };

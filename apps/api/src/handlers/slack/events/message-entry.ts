@@ -1589,7 +1589,7 @@ async function startAutomatedAppMentionTaskWithLock(params: {
   return true;
 }
 
-function startFastAgentResponse(params: {
+export function startFastAgentResponse(params: {
   event: SlackEvent;
   slackInstallation: SlackInstallation;
   userMapping: SlackUserMapping;

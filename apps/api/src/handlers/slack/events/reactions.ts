@@ -35,6 +35,7 @@ import {
 
 import { apiLogger } from '../../../logging.js';
 import { getCallRoomoteViaEmojiConfiguration } from '../../call-roomote-via-emoji.js';
+import { resolveFastAgentEntryMode } from '../../fast-agent-entry.js';
 import { cancelOrphanedWorkItemRunBestEffort } from '../../tasks/orphaned-work-item-run.js';
 import {
   SLACK_SETUP_SUGGESTION_LOCK_PREFIX,
@@ -49,7 +50,10 @@ import {
   type TaskSuggestionReactionLaunchResult,
   type TaskSuggestionReactionState,
 } from './task-suggestion-reaction-contention.js';
-import { handleMessageOrAppMentionEvent } from './message-entry.js';
+import {
+  handleMessageOrAppMentionEvent,
+  startFastAgentResponse,
+} from './message-entry.js';
 
 export async function maybeCallRoomoteViaEmoji(params: {
   context: SlackWebhookContext;
@@ -505,7 +509,36 @@ async function launchTaskSuggestionTaskFromReaction({
         : {}),
     };
 
-    if (usesRouterLaunch) {
+    const activeUserMapping = reactingUserMapping.activeMapping;
+    const fastAgentEntryMode = resolveFastAgentEntryMode({
+      explicitInvocation: false,
+      userDefaultEnabled:
+        activeUserMapping?.communicationsFastModeDefault === true,
+      fastAvailable: Boolean(activeUserMapping),
+    });
+
+    if (usesRouterLaunch && fastAgentEntryMode && activeUserMapping) {
+      startFastAgentResponse({
+        event: {
+          type: 'app_mention',
+          channel: channelId,
+          user: reactionEvent.user,
+          text: `Start this suggested task: ${workItem.title}\n\n${suggestionBrief}`,
+          agentContext: suggestionTaskPrompt,
+          ts: seededThreadTs,
+          thread_ts: seededThreadTs,
+        },
+        slackInstallation,
+        userMapping: activeUserMapping,
+        slack,
+        userId: activeUserMapping.userId,
+        teamId,
+        continuation: fastAgentEntryMode === 'default',
+        processingReactionName: ackEmoji,
+        errorLogPrefix: `Failed to start Fast suggestion response for work item ${workItemId}:`,
+      });
+      taskRun = { id: null, taskId: null };
+    } else if (usesRouterLaunch) {
       const routedLaunch = await startAutoRoutedSlackTask({
         slackInstallation,
         slack,

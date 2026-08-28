@@ -8,7 +8,32 @@ vi.mock('@roomote/db/server', () => ({
   users: { id: 'users.id' },
 }));
 
-import { hasCommunicationsFastModeDefault } from './fast-agent-entry';
+import {
+  hasCommunicationsFastModeDefault,
+  resolveFastAgentEntryMode,
+} from './fast-agent-entry';
+
+describe('resolveFastAgentEntryMode', () => {
+  it('uses Fast for an available configured default', () => {
+    expect(
+      resolveFastAgentEntryMode({
+        explicitInvocation: false,
+        userDefaultEnabled: true,
+        fastAvailable: true,
+      }),
+    ).toBe('default');
+  });
+
+  it('keeps coding behavior when Fast is unavailable', () => {
+    expect(
+      resolveFastAgentEntryMode({
+        explicitInvocation: false,
+        userDefaultEnabled: true,
+        fastAvailable: false,
+      }),
+    ).toBeNull();
+  });
+});
 
 describe('hasCommunicationsFastModeDefault', () => {
   beforeEach(() => {

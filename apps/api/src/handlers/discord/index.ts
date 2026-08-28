@@ -46,7 +46,10 @@ import {
 } from '@roomote/sdk/server';
 
 import { apiLogger } from '../../logging.js';
-import { hasCommunicationsFastModeDefault } from '../fast-agent-entry.js';
+import {
+  hasCommunicationsFastModeDefault,
+  resolveFastAgentEntryMode,
+} from '../fast-agent-entry.js';
 import { getCallRoomoteViaEmojiConfiguration } from '../call-roomote-via-emoji.js';
 import { syncActingUserForInboundMessage } from '../tasks/acting-user-sync.js';
 import {
@@ -748,7 +751,11 @@ async function processDiscordGatewayEvent(
   const defaultFastMessage =
     message != null &&
     command == null &&
-    (await hasCommunicationsFastModeDefault(senderUserId))
+    resolveFastAgentEntryMode({
+      explicitInvocation: false,
+      userDefaultEnabled: await hasCommunicationsFastModeDefault(senderUserId),
+      fastAvailable: true,
+    })
       ? message
       : null;
 

@@ -5,12 +5,15 @@ type FastAgentEntryMode = 'explicit' | 'default';
 export function resolveFastAgentEntryMode(params: {
   explicitInvocation: boolean;
   userDefaultEnabled: boolean;
+  fastAvailable?: boolean;
 }): FastAgentEntryMode | null {
   if (params.explicitInvocation) {
     return 'explicit';
   }
 
-  return params.userDefaultEnabled ? 'default' : null;
+  return params.userDefaultEnabled && params.fastAvailable !== false
+    ? 'default'
+    : null;
 }
 
 export async function hasCommunicationsFastModeDefault(

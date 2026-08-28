@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   lookupSlackUserMapping: vi.fn(),
   startAutoRoutedSlackTask: vi.fn(),
   startSlackAppMentionTask: vi.fn(),
+  startFastAgentResponse: vi.fn(),
   postStartedMessage: vi.fn(),
   getConfiguration: vi.fn(),
 }));
@@ -122,6 +123,7 @@ vi.mock('../../tasks/orphaned-work-item-run.js', () => ({
 
 vi.mock('./message-entry.js', () => ({
   handleMessageOrAppMentionEvent: vi.fn(),
+  startFastAgentResponse: mocks.startFastAgentResponse,
 }));
 
 vi.mock('./task-suggestion-reaction-contention.js', () => ({
@@ -144,7 +146,10 @@ describe('chat reply suggestion reactions', () => {
     });
     mocks.lookupSlackUserMapping.mockResolvedValue({
       hasInactiveMapping: false,
-      activeMapping: { userId: 'user-1' },
+      activeMapping: {
+        userId: 'user-1',
+        communicationsFastModeDefault: false,
+      },
     });
     mocks.claimWorkItem.mockResolvedValue({ launchClaimedAt: claimedAt });
     mocks.finalizeWorkItemLaunched.mockResolvedValue(true);
@@ -168,7 +173,7 @@ describe('chat reply suggestion reactions', () => {
     });
   });
 
-  it('starts and records a task when a user approves a chat reply suggestion', async () => {
+  it('starts and records a coding task when coding is the user default', async () => {
     const slack = {
       postMessage: vi.fn(async () => 'seeded-thread-ts'),
       deleteMessage: vi.fn(async () => undefined),
@@ -199,6 +204,7 @@ describe('chat reply suggestion reactions', () => {
       }),
     );
     expect(mocks.startSlackAppMentionTask).not.toHaveBeenCalled();
+    expect(mocks.startFastAgentResponse).not.toHaveBeenCalled();
     expect(mocks.finalizeWorkItemLaunched).toHaveBeenCalledWith(
       expect.anything(),
       {
@@ -208,6 +214,53 @@ describe('chat reply suggestion reactions', () => {
       },
     );
     expect(mocks.postStartedMessage).not.toHaveBeenCalled();
+  });
+
+  it('starts a Fast session when Fast is the user default', async () => {
+    mocks.lookupSlackUserMapping.mockResolvedValue({
+      hasInactiveMapping: false,
+      activeMapping: {
+        userId: 'user-1',
+        communicationsFastModeDefault: true,
+      },
+    });
+    const slack = {
+      postMessage: vi.fn(async () => 'seeded-thread-ts'),
+      deleteMessage: vi.fn(async () => undefined),
+      getMessageMetadata: vi.fn(),
+    };
+
+    await handleReactionAddedEvent({
+      context: {
+        teamId: 'T1',
+        slackInstallation: { botUserId: 'UROOMOTE', teamId: 'T1' },
+        slack,
+      } as never,
+      event: {
+        type: 'reaction_added',
+        user: 'U1',
+        reaction: 'thumbsup',
+        item: { type: 'message', channel: 'C1', ts: 'card-ts' },
+        event_ts: 'event-ts',
+      },
+    });
+
+    expect(mocks.startFastAgentResponse).toHaveBeenCalledWith(
+      expect.objectContaining({
+        continuation: true,
+        userId: 'user-1',
+        event: expect.objectContaining({
+          channel: 'C1',
+          thread_ts: 'seeded-thread-ts',
+          agentContext: 'implementation prompt',
+        }),
+      }),
+    );
+    expect(mocks.startAutoRoutedSlackTask).not.toHaveBeenCalled();
+    expect(mocks.finalizeWorkItemLaunched).toHaveBeenCalledWith(
+      expect.anything(),
+      { id: 'work-item-1', taskId: null, claimedAt },
+    );
   });
 
   it('releases the suggestion when routing cannot choose a workspace', async () => {

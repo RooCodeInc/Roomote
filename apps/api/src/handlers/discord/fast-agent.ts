@@ -74,21 +74,30 @@ export function getDiscordFastLaunchSourceEventId(input: {
   return `${input.eventId}:fast-launch:${digest}`;
 }
 
-export async function processDiscordFastAgentMessage(input: {
-  event: DiscordGatewayEvent;
-  question: string;
-  sender: DiscordUser;
-  senderUserId: string;
-  provider: DiscordCommunicationProvider;
-  applicationId: string;
-  channel: DiscordChannelContext;
-  metadata: ReturnType<typeof discordMetadataForChannel>;
-  conversationId: string;
-  createAnchoredThread?: boolean;
-  interaction?: DiscordInteractionReplyContext;
-  activeTasks?: { taskId: string }[];
-}): Promise<void> {
-  const message = getDiscordMessageCreate(input.event);
+type DiscordFastAgentSource =
+  | { event: DiscordGatewayEvent; eventId?: never }
+  | { event?: never; eventId: string };
+
+export async function processDiscordFastAgentMessage(
+  input: {
+    question: string;
+    sender: DiscordUser;
+    senderUserId: string;
+    provider: DiscordCommunicationProvider;
+    applicationId: string;
+    channel: DiscordChannelContext;
+    metadata: ReturnType<typeof discordMetadataForChannel>;
+    conversationId: string;
+    createAnchoredThread?: boolean;
+    interaction?: DiscordInteractionReplyContext;
+    activeTasks?: { taskId: string }[];
+  } & DiscordFastAgentSource,
+): Promise<boolean> {
+  const message = input.event ? getDiscordMessageCreate(input.event) : null;
+  const eventId = 'eventId' in input ? input.eventId : input.event.eventId;
+  if (!eventId) {
+    throw new Error('Discord Fast entry requires a source event id.');
+  }
   let channel = input.channel;
   let metadata = input.metadata;
   if (
@@ -134,7 +143,7 @@ export async function processDiscordFastAgentMessage(input: {
     console.error(
       `[Discord] Fast turn lock did not become available for ${conversation.workspaceId}:${conversation.conversationId}`,
     );
-    return;
+    return false;
   }
 
   try {
@@ -268,7 +277,7 @@ export async function processDiscordFastAgentMessage(input: {
               user: input.sender.global_name?.trim() || input.sender.username,
               userId: input.senderUserId,
               ts: getDiscordFastLaunchSourceEventId({
-                eventId: input.event.eventId,
+                eventId,
                 prompt,
                 environmentId,
                 model,
@@ -399,4 +408,5 @@ export async function processDiscordFastAgentMessage(input: {
   } finally {
     await releaseFastAgentLock().catch(() => {});
   }
+  return true;
 }

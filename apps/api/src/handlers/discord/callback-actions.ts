@@ -25,6 +25,10 @@ import { findDiscordMappedUserId } from '@roomote/sdk/server';
 import { parsePrReviewActionCallbackData } from '@roomote/types';
 
 import { apiLogger } from '../../logging.js';
+import {
+  hasCommunicationsFastModeDefault,
+  resolveFastAgentEntryMode,
+} from '../fast-agent-entry.js';
 import { cancelOrphanedWorkItemRunBestEffort } from '../tasks/orphaned-work-item-run.js';
 import {
   claimCurrentThreadSuggestionByMessage,
@@ -49,6 +53,10 @@ import {
 } from './task-launch.js';
 import { claimDiscordSuggestionLaunch } from './setup-suggestions.js';
 import { startNewDiscordTask } from './task-orchestration.js';
+import {
+  getDiscordFastConversationId,
+  processDiscordFastAgentMessage,
+} from './fast-agent.js';
 
 /** Match Slack cancel reaction (`DEFAULT_SLACK_CANCEL_EMOJI`). */
 const DISCORD_CANCEL_REACTION_EMOJI = 'x';
@@ -325,6 +333,56 @@ async function launchClaimedDiscordSuggestion(input: {
         ? ['', `Context: ${suggestion.investigationContext}`]
         : []),
     ].join('\n');
+    const fastAgentEntryMode = suggestion.usesRouterLaunch
+      ? resolveFastAgentEntryMode({
+          explicitInvocation: false,
+          userDefaultEnabled: await hasCommunicationsFastModeDefault(
+            input.senderUserId,
+          ),
+          fastAvailable: true,
+        })
+      : null;
+    if (fastAgentEntryMode) {
+      const fastAccepted = await processDiscordFastAgentMessage({
+        eventId: input.triggerId,
+        question: promptText,
+        sender: input.sender,
+        senderUserId: input.senderUserId,
+        provider: input.provider,
+        applicationId: input.applicationId,
+        channel: input.channel,
+        metadata: discordMetadataForChannel({
+          channel: input.channel,
+          messageId: input.triggerId,
+        }),
+        conversationId: getDiscordFastConversationId(
+          input.channel,
+          input.triggerId,
+        ),
+        createAnchoredThread: false,
+      });
+      if (!fastAccepted) {
+        throw new Error('The Fast session is busy.');
+      }
+      const finalized = await finalizeWorkItemLaunched(db, {
+        id: suggestion.id,
+        taskId: null,
+        claimedAt,
+      });
+      if (!finalized) {
+        apiLogger.warn(
+          `[discord] Lost suggestion launch fence for ${suggestion.id} after starting a Fast session`,
+        );
+        await input.provider.postMessage({
+          channelId: input.channel.parentChannelId ?? input.channel.channelId,
+          ...(input.channel.parentChannelId
+            ? { threadId: input.channel.channelId }
+            : {}),
+          text: `“${suggestion.title}” was already started elsewhere.`,
+        });
+      }
+      return;
+    }
     const queuedMessage: QueuedCommunicationMessage = {
       provider: 'discord',
       text: promptText,

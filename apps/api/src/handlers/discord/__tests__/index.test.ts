@@ -192,6 +192,11 @@ vi.mock('@roomote/cloud-agents/server', () => ({
 
 vi.mock('../../fast-agent-entry.js', () => ({
   hasCommunicationsFastModeDefault: mocks.hasFastDefault,
+  resolveFastAgentEntryMode: ({
+    userDefaultEnabled,
+  }: {
+    userDefaultEnabled: boolean;
+  }) => (userDefaultEnabled ? 'default' : null),
 }));
 
 import { discord, discordGatewayEventProcessingTimeout } from '../index.js';
