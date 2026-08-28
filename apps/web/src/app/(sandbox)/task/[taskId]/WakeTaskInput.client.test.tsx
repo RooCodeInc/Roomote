@@ -9,6 +9,7 @@ const {
   removeOptimisticQueuedMessageMock,
   restoreMutateAsyncMock,
   toastErrorMock,
+  useAuthorizedUserMock,
   useSandboxCurrentUserInfoMock,
 } = vi.hoisted(() => ({
   appendOptimisticAcpEventMock: vi.fn(),
@@ -18,6 +19,7 @@ const {
   removeOptimisticQueuedMessageMock: vi.fn(),
   restoreMutateAsyncMock: vi.fn(),
   toastErrorMock: vi.fn(),
+  useAuthorizedUserMock: vi.fn(),
   useSandboxCurrentUserInfoMock: vi.fn(),
 }));
 
@@ -55,16 +57,7 @@ vi.mock('@/hooks/snapshots', () => ({
 }));
 
 vi.mock('@/hooks/useUser', () => ({
-  useAuthorizedUser: () => ({
-    managedAccess: {
-      state: 'active',
-      reason: null,
-      revision: 1,
-      effectiveAt: '2026-01-01T00:00:00.000Z',
-      restrictionStartsAt: null,
-      remediationUrl: null,
-    },
-  }),
+  useAuthorizedUser: useAuthorizedUserMock,
 }));
 
 vi.mock('@/trpc/client', () => ({
@@ -219,6 +212,16 @@ describe('WakeTaskInput', () => {
       runId: 84,
       taskId: 'task-42',
     });
+    useAuthorizedUserMock.mockReturnValue({
+      managedAccess: {
+        state: 'active',
+        reason: null,
+        revision: 1,
+        effectiveAt: '2026-01-01T00:00:00.000Z',
+        restrictionStartsAt: null,
+        remediationUrl: null,
+      },
+    });
     useSandboxCurrentUserInfoMock.mockReturnValue(null);
   });
 
@@ -339,6 +342,43 @@ describe('WakeTaskInput', () => {
         text: '$simplify',
       }),
     );
+  });
+
+  it('disables task tools when managed access blocks waking the task', () => {
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        queries: { retry: false },
+      },
+    });
+    useAuthorizedUserMock.mockReturnValue({
+      managedAccess: {
+        state: 'read_only',
+        reason: 'billing_required',
+        revision: 2,
+        effectiveAt: '2026-01-02T00:00:00.000Z',
+        restrictionStartsAt: null,
+        remediationUrl: null,
+      },
+    });
+
+    renderWithQueryClient(
+      <WakeTaskInput
+        taskRun={{
+          id: 42,
+          snapshotId: 'snap-42',
+          taskId: 'task-42',
+          harness: 'opencode-server',
+          payloadKind: 'standard',
+        }}
+      />,
+      queryClient,
+    );
+
+    expect(screen.getByRole('button', { name: 'Task Tools' })).toBeDisabled();
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Simplify changed code' }),
+    );
+    expect(restoreMutateAsyncMock).not.toHaveBeenCalled();
   });
 
   it('prefills the sleeping draft, appends an optimistic transcript row, and resumes the task with a deferred prompt', async () => {

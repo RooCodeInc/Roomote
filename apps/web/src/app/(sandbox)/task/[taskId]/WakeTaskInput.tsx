@@ -167,7 +167,7 @@ export function WakeTaskInput({
             {shouldShowTaskToolsActions(taskRun.payloadKind) && (
               <TaskToolsMenu
                 onSelect={handleTaskToolSelect}
-                disabled={isBusy}
+                disabled={isBusy || Boolean(taskLaunchDisabledReason)}
               />
             )}
             {taskRun.harness === 'opencode-server' && (
