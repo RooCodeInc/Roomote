@@ -24,6 +24,7 @@ import {
   getSessionSurfaceLabel,
 } from '@/components/sessions/session-surfaces';
 import { useLaunchTaskModels } from '@/hooks/task-models/useLaunchTaskModels';
+import { useTask } from '@/hooks/tasks/useTask';
 import { useTRPC } from '@/trpc/client';
 import { FramedSurface, WorkspaceSurface } from '@/components/layout';
 import { SideNavItem } from '@/components/layout/side-nav/SideNavItem';
@@ -36,6 +37,7 @@ import {
   Button,
   Calendar,
   DollarSign,
+  ErrorState,
   Globe,
   Info,
   Slack,
@@ -164,7 +166,7 @@ function SessionTaskPanel({
 }: {
   sessionId: string;
   task: SessionTaskSummary;
-  tasks: SessionTaskSummary[];
+  tasks: Array<Pick<SessionTaskSummary, 'taskId' | 'title'>>;
   onSelect: (taskId: string) => void;
   onClose: () => void;
 }) {
@@ -261,6 +263,118 @@ function SessionTaskPanel({
         )}
       </div>
     </>
+  );
+}
+
+function getLatestTaskOutput(result: unknown) {
+  if (!result || typeof result !== 'object') return null;
+
+  return (
+    String(
+      (result as Record<string, unknown>).summary ??
+        (result as Record<string, unknown>).message ??
+        '',
+    )
+      .trim()
+      .slice(0, 240) || null
+  );
+}
+
+function FastSessionTaskPanel({
+  sessionId,
+  taskId,
+  tasks,
+  onSelect,
+  onClose,
+}: {
+  sessionId: string;
+  taskId: string;
+  tasks: Array<Pick<SessionTaskSummary, 'taskId' | 'title'>>;
+  onSelect: (taskId: string) => void;
+  onClose: () => void;
+}) {
+  const taskQuery = useTask(taskId, true, { refetchInterval: 2_000 });
+  const task = taskQuery.data;
+
+  if (taskQuery.isPending) {
+    return (
+      <>
+        <SandboxSidePanelHeader
+          title="Execution details"
+          closeLabel="Close execution details"
+          onClose={onClose}
+        />
+        <div className="space-y-3 p-4" aria-label="Loading execution details">
+          <Skeleton className="h-5 w-2/3" />
+          <Skeleton className="h-4 w-1/3" />
+          <Skeleton className="h-20 w-full" />
+        </div>
+      </>
+    );
+  }
+
+  if (taskQuery.isError || !task) {
+    return (
+      <>
+        <SandboxSidePanelHeader
+          title="Execution details"
+          closeLabel="Close execution details"
+          onClose={onClose}
+        />
+        <ErrorState title="Execution details unavailable" />
+      </>
+    );
+  }
+
+  const taskRun = task.taskRun;
+  const pullRequests = (taskRun?.pullRequests ?? []).flatMap((pullRequest) =>
+    pullRequest.prUrl
+      ? [
+          {
+            id: pullRequest.prUrl,
+            url: pullRequest.prUrl,
+            number: pullRequest.prNumber,
+            title: null,
+            repository: pullRequest.repository,
+            status: null,
+          },
+        ]
+      : [],
+  );
+  const taskSummary: SessionTaskSummary = {
+    taskId: task.id,
+    title: task.title,
+    workflow: task.workflow ?? 'standard',
+    state: task.state,
+    repositoryName: task.repositoryName ?? null,
+    latestOutput: getLatestTaskOutput(taskRun?.result),
+    inferenceCostMicroUsd: task.inferenceUsage?.costMicroUsd ?? 0,
+    canAccessDetails: true,
+    latestRun: taskRun
+      ? {
+          id: taskRun.id,
+          status: taskRun.status,
+          taskPhase: taskRun.taskPhase,
+          error: taskRun.error,
+          result: taskRun.result,
+        }
+      : null,
+    artifacts: (task.artifacts ?? []).map(({ id, path, artifactType }) => ({
+      id,
+      path,
+      artifactType,
+    })),
+    pullRequests,
+  };
+
+  return (
+    <SessionTaskPanel
+      sessionId={sessionId}
+      task={taskSummary}
+      tasks={tasks}
+      onSelect={onSelect}
+      onClose={onClose}
+    />
   );
 }
 
@@ -451,7 +565,11 @@ export function SessionWorkspace({
   const selectedTask = sessionTasks.find(
     (task) => task.taskId === selectedTaskId,
   );
-  const panelOpen = panel !== null || Boolean(selectedTask);
+  const selectedFastTask = isFastTaskSource
+    ? taskCards.find((task) => task.taskId === selectedTaskId)
+    : undefined;
+  const panelOpen =
+    panel !== null || Boolean(selectedTask) || Boolean(selectedFastTask);
 
   const selectTask = useCallback(
     (taskId: string | null) => {
@@ -498,12 +616,20 @@ export function SessionWorkspace({
       onSelect={selectTask}
       onClose={closePanel}
     />
+  ) : selectedFastTask ? (
+    <FastSessionTaskPanel
+      sessionId={session.id}
+      taskId={selectedFastTask.taskId}
+      tasks={taskCards}
+      onSelect={selectTask}
+      onClose={closePanel}
+    />
   ) : panel?.kind === 'nested' ? (
     <NestedTaskSidePanel taskId={panel.taskId} onClose={closePanel} />
   ) : panel?.kind === 'tasks' ? (
     <SessionTasksPanel
       tasks={taskCards}
-      onOpenTask={openTaskPanel}
+      onOpenTask={isFastTaskSource ? selectTask : openTaskPanel}
       onClose={closePanel}
     />
   ) : (
@@ -523,7 +649,9 @@ export function SessionWorkspace({
                 side="right"
                 label="Session info"
                 tooltip="Session info"
-                active={panel?.kind === 'info' && !selectedTask}
+                active={
+                  panel?.kind === 'info' && !selectedTask && !selectedFastTask
+                }
                 icon={Info}
                 onClick={() => togglePanel('info')}
               />
@@ -531,7 +659,9 @@ export function SessionWorkspace({
                 side="right"
                 label="Tasks"
                 tooltip="Tasks"
-                active={panel?.kind === 'tasks' && !selectedTask}
+                active={
+                  panel?.kind === 'tasks' && !selectedTask && !selectedFastTask
+                }
                 disabled={taskCards.length === 0}
                 icon={Rows4}
                 onClick={() => togglePanel('tasks')}

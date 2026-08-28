@@ -18,12 +18,14 @@ const {
   fastTaskQueryState,
   searchParamsRef,
   useTaskSummaryMock,
+  useTaskMock,
 } = vi.hoisted(() => ({
   useMediaQueryMock: vi.fn(),
   sessionQueryState: { data: null as unknown },
   fastTaskQueryState: { data: null as unknown },
   searchParamsRef: { current: new URLSearchParams() },
   useTaskSummaryMock: vi.fn(),
+  useTaskMock: vi.fn(),
 }));
 
 vi.mock('usehooks-ts', () => ({
@@ -45,6 +47,10 @@ vi.mock('@streamdown/cjk', () => ({ cjk: () => null }));
 
 vi.mock('../../task/[taskId]/hooks/use-task-summary', () => ({
   useTaskSummary: useTaskSummaryMock,
+}));
+
+vi.mock('@/hooks/tasks/useTask', () => ({
+  useTask: useTaskMock,
 }));
 
 vi.mock('@/hooks/task-models/useLaunchTaskModels', () => ({
@@ -227,6 +233,11 @@ describe('SessionWorkspace', () => {
       isSummaryStale: false,
       regenerateSummary: vi.fn(),
     });
+    useTaskMock.mockReturnValue({
+      data: null,
+      isPending: false,
+      isError: false,
+    });
   });
 
   it('matches the task sidebar replacement behavior and controls on mobile', () => {
@@ -397,6 +408,56 @@ describe('SessionWorkspace', () => {
       ),
     ).toBeInTheDocument();
     expect(useTaskSummaryMock).toHaveBeenCalledWith('task-1');
+  });
+
+  it('shows execution details for a selected Fast-only session task', () => {
+    useTaskSummaryMock.mockReturnValue({
+      enabled: true,
+      summary: 'The Fast task completed its delegated work.',
+      isLoadingSummary: false,
+      errorMessage: null,
+      isSummaryStale: false,
+      regenerateSummary: vi.fn(),
+    });
+    useTaskMock.mockReturnValue({
+      data: {
+        id: 'task-1',
+        title: 'Fast delegated task',
+        workflow: 'standard',
+        state: 'completed',
+        repositoryName: 'RooCodeInc/Roomote',
+        taskRun: {
+          id: 1,
+          status: 'completed',
+          taskPhase: null,
+          error: null,
+          result: null,
+          pullRequests: [],
+        },
+        artifacts: [],
+        inferenceUsage: { eventCount: 1, costMicroUsd: 100 },
+      },
+      isPending: false,
+      isError: false,
+    });
+
+    renderWorkspace({
+      isMobile: false,
+      selectedTaskId: 'task-1',
+      sessionOverride: {
+        taskSource: 'fast',
+        tasks: [],
+        taskCards: [{ taskId: 'task-1', title: 'Fast delegated task' }],
+      },
+    });
+
+    expect(
+      screen.getByText('The Fast task completed its delegated work.'),
+    ).toBeInTheDocument();
+    expect(useTaskSummaryMock).toHaveBeenCalledWith('task-1');
+    expect(useTaskMock).toHaveBeenCalledWith('task-1', true, {
+      refetchInterval: 2_000,
+    });
   });
 
   it('shows loading and retryable error states for task summaries', () => {
