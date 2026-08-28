@@ -12,7 +12,7 @@ export const roomoteTaskInspectionFieldSchemas = {
     .string()
     .optional()
     .describe(
-      'The task ID (required for get_summary, get_compute_logs, and get_messages)',
+      'The task ID; get_messages and send_message also accept a canonical Fast session ID when those actions are available',
     ),
   query: z
     .string()
@@ -36,7 +36,7 @@ export const roomoteTaskInspectionFieldSchemas = {
     })
     .optional()
     .describe(
-      'Positive result limit: 1 to 100 for search (default 20), or 1 to 1000 for get_messages',
+      'Positive result limit: 1 to 100 for search (default 20), or 1 to 1000 for get_messages (task or Fast session)',
     ),
   cursor: z
     .string()

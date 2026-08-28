@@ -18,7 +18,6 @@ import type {
   TaskSummaryResponse,
   TaskComputeLogsResponse,
   TaskMessagesResponse,
-  FastSessionMessagesResponse,
   LaunchTaskResponse,
   CancelTaskResponse,
   StopTaskResponse,
@@ -211,37 +210,6 @@ export async function getTaskMessages(
     `/api/mcp/tasks/${encodeURIComponent(taskId)}/messages${qs}`,
     {},
     'Failed to get task messages',
-  );
-}
-
-export async function getFastSessionMessages(
-  config: RoomoteConfig,
-  sessionId: string,
-  params?: { limit?: number },
-): Promise<FastSessionMessagesResponse> {
-  const qs = buildSearchParams({ limit: params?.limit });
-  return apiFetch(
-    config,
-    `/api/mcp/fast-sessions/${encodeURIComponent(sessionId)}/messages${qs}`,
-    {},
-    'Failed to get Fast session messages',
-  );
-}
-
-export async function sendMessageToFastSession(
-  config: RoomoteConfig,
-  sessionId: string,
-  params: { message: string },
-): Promise<SendMessageResponse> {
-  return apiFetch(
-    config,
-    `/api/mcp/fast-sessions/${encodeURIComponent(sessionId)}/send_message`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(params),
-    },
-    'Failed to send Fast session message',
   );
 }
 
