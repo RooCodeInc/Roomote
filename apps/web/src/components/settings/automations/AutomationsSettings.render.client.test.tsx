@@ -1456,6 +1456,49 @@ describe('AutomationsSettings', () => {
     ).toBeInTheDocument();
   });
 
+  it('explains that Telegram replies continue the Fast session', async () => {
+    state.settingsQuery.data.capabilities.telegramConnected = true;
+    state.customAutomations = [
+      {
+        id: 'automation-telegram-fast',
+        name: 'Telegram daily brief',
+        prompt: 'Summarize my priorities.',
+        enabled: true,
+        scheduleMode: 'daily',
+        cronExpression: null,
+        model: null,
+        executionMode: 'fast',
+        environmentId: '__fast__',
+        target: {
+          provider: 'telegram',
+          targetKind: 'telegram_user',
+          externalRef: 'user-1',
+        },
+        lastRunAt: null,
+        lastSucceededAt: null,
+        lastFailedAt: null,
+        lastError: null,
+        lastLaunchedTaskId: null,
+        createdByName: 'Ada',
+        createdAt: new Date('2026-01-01T00:00:00Z'),
+        updatedAt: new Date('2026-01-01T00:00:00Z'),
+      },
+    ];
+
+    render(<AutomationsSettings />);
+    fireEvent.click(
+      await screen.findByRole('button', {
+        name: 'Configure Telegram daily brief',
+      }),
+    );
+
+    expect(
+      screen.getByText(
+        'Each Fast run posts here, and replies continue the Fast session.',
+      ),
+    ).toBeInTheDocument();
+  });
+
   it('only offers connected providers as custom automation destinations', async () => {
     state.settingsQuery.data.capabilities.slackConnected = false;
     state.settingsQuery.data.capabilities.discordConnected = true;

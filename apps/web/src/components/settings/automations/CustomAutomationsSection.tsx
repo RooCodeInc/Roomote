@@ -921,9 +921,7 @@ export function CustomAutomationsSection() {
             <p className="text-sm text-muted-foreground">
               {form.targetProvider === 'none'
                 ? 'This run is stored as a Fast conversation without posting to chat.'
-                : form.targetProvider === 'telegram'
-                  ? 'Each Fast run posts here. Continue the session from the web app; chat replies on this provider do not resume Fast yet.'
-                  : 'Each Fast run posts here, and replies continue the Fast session.'}
+                : 'Each Fast run posts here, and replies continue the Fast session.'}
             </p>
           ) : null}
         </div>

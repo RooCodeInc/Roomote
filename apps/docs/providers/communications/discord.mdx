@@ -121,8 +121,7 @@ under **Settings > Automations**, the same way you would pick a Slack channel.
 - use `/goal objective:<objective>` to keep working toward an objective across
   multiple turns in an active task thread or DM; this does not create a new task
 - ordinary Discord DMs, mentions, and eligible thread replies from your linked
-  account are always answered in Fast mode, which can delegate repository work
-  into tasks
+  account are answered in Fast
 - replies in a Fast-owned DM or thread continue that Fast session; replies in
   an existing task-only conversation continue or resume the task
 - when Roomote asks where to run a task, use a button or reply naturally in the
@@ -135,18 +134,6 @@ under **Settings > Automations**, the same way you would pick a Slack channel.
   task so the agent can pull that message and nearby channel/thread context
   (lookups outside the originating task thread require a linked Discord account)
 - use `/help` to see the available commands
-
-Fast can read bounded context from the current Discord thread or channel, use
-MCP servers and user-scoped integrations that you are allowed to access, and
-delegate repository work to Roomote tasks. Deployment admins can also manage
-custom automations through Fast. Fast does not read other channels implicitly
-or inspect repository contents without delegating the work to a task. When the
-request spans every repository, Fast can delegate it to the deployment's
-all-repositories environment.
-
-Fast automation reports can be delivered to configured Discord channels or the
-automation owner's DM. Replies continue the report's Fast session in Discord,
-and the footer also links to the same session in the web app.
 
 Roomote does not quote every message it answers. In a task thread, the
 conversation itself supplies the context. When you start a task by tagging
@@ -200,9 +187,9 @@ setup UI are detected automatically without a restart.
    Gateway
 2. confirm **Message Content intent** and **Slash commands** pass their checks
 3. link your personal Discord account
-4. mention the bot with a small request and confirm Roomote creates a task
-   thread or forum post
-5. reply in that conversation and confirm the same task continues
+4. mention the bot with a small request and confirm Roomote answers in Fast with
+   a web continuation link
+5. reply in that conversation and confirm the same Session continues
 
 If the Gateway remains disconnected, verify BullMQ is running and has access to
 the same Redis, database, token, and internal secret as the API. If natural

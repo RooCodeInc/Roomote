@@ -181,19 +181,11 @@ Mention the app and use `!fast <request>` to ask the fast orchestrator a
 question or delegate work into a task. For example: `@Roomote !fast summarize
 this thread` or `@Roomote !fast fix the failing CI job`.
 
-**Fast response mode** is always on across Slack, Discord, Microsoft Teams, and
-Telegram: ordinary messages from your linked account go through the Fast
-orchestrator, which can delegate work into tasks. `!fast` remains available for
-an explicit Slack Fast request. Replies in a Fast-owned Slack thread continue
-that Fast session; replies in an existing task-only thread continue the task.
-
-Fast can read a bounded history from the current Slack channel, use MCP servers
-and user-scoped integrations that you are allowed to access, and delegate
-repository work to Roomote tasks. Deployment admins can also manage custom
-automations through Fast. Fast does not read other channels implicitly or
-inspect repository contents without delegating the work to a task. When the
-request spans every repository, Fast can delegate it to the deployment's
-all-repositories environment.
+Ordinary messages from your linked Slack account go through Fast. `!fast`
+remains available for an explicit Slack Fast request. Replies in a Fast-owned
+Slack thread continue that Session; replies in an existing task-only thread
+continue the task. Fast can use bounded history from the current Slack channel
+as conversation context.
 
 ## Local URL changes
 

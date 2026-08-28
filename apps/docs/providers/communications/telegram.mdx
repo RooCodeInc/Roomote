@@ -116,11 +116,7 @@ an explicit fresh-task command: it bypasses Fast and snapshot resume so the
 request starts a normal task, creating a topic when Telegram supports it.
 
 Existing task-only chats and topics keep their active-task,
-`request_user_input`, routing-confirmation, and resumable-snapshot behavior. If
-Fast cannot initialize a new session, Roomote safely falls back to that existing
-task router. Fast automation reports can target a Telegram chat, topic, or owner
-direct message; replies continue the report's Fast session, and its footer opens
-the same session in the web app.
+`request_user_input`, routing-confirmation, and resumable-snapshot behavior.
 
 Photos are passed to Fast or the task as image input. Supported text documents
 are downloaded server-side and their extracted content is added to the request;
