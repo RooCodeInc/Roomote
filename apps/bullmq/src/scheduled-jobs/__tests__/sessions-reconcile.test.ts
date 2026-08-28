@@ -2,6 +2,7 @@ import {
   db,
   eq,
   fastAgentConversations,
+  fastAgentMessages,
   inArray,
   sessionBackfillState,
   sessionFactory,
@@ -207,5 +208,72 @@ describe('sessionsReconcileJob', () => {
     expect(healed?.cachedStatus).toBe('ready');
 
     await db.delete(sessions).where(eq(sessions.id, wedged.id));
+  });
+
+  it('reconciles persisted retry notices after the responding lease expires', async () => {
+    await sessionsReconcileJob();
+    await sessionsReconcileJob();
+
+    const user = await userFactory.create();
+    const [conversation] = await db
+      .insert(fastAgentConversations)
+      .values({
+        userId: user.id,
+        surface: 'web',
+        workspaceId: user.id,
+        conversationId: crypto.randomUUID(),
+      })
+      .returning();
+    await sessionsReconcileJob();
+    await db.insert(fastAgentMessages).values({
+      conversationId: conversation!.id,
+      eventId: 'interrupted-turn:retry-notice:0',
+      turnId: 'interrupted-turn',
+      turnSeq: 1,
+      ts: Date.now(),
+      eventType: 'roomote_runtime.assistant_message',
+      role: 'assistant',
+      contentBlocks: [
+        {
+          type: 'text',
+          text: 'The inference provider returned a temporary error. Retrying in 1s (attempt 1/6).',
+        },
+      ],
+      metadata: {
+        visibleInTranscript: true,
+        purpose: 'progress',
+        inferenceRetryNotice: true,
+        inferenceRetryActive: true,
+      },
+      payload: { purpose: 'progress' },
+      source: 'web',
+    });
+    await db
+      .update(sessions)
+      .set({
+        cachedStatus: 'ready',
+        respondingUntil: new Date(Date.now() - 60_000),
+      })
+      .where(eq(sessions.fastConversationId, conversation!.id));
+
+    await sessionsReconcileJob();
+
+    const [notice] = await db
+      .select({
+        contentBlocks: fastAgentMessages.contentBlocks,
+        metadata: fastAgentMessages.metadata,
+      })
+      .from(fastAgentMessages)
+      .where(eq(fastAgentMessages.conversationId, conversation!.id));
+    expect(notice?.contentBlocks).toEqual([
+      {
+        type: 'text',
+        text: 'The inference retry was interrupted before it completed. Please send the request again.',
+      },
+    ]);
+    expect(notice?.metadata).toMatchObject({
+      purpose: 'closeout',
+      inferenceRetryActive: false,
+    });
   });
 });

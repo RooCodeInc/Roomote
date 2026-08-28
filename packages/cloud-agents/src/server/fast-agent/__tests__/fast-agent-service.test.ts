@@ -23,6 +23,7 @@ const mocks = vi.hoisted(() => ({
   captureInferenceContext: vi.fn(),
   captureInferenceAttemptOutcome: vi.fn(),
   revokeMcpCapabilities: vi.fn(),
+  reconcileRetryNotices: vi.fn(),
   nativeExecutor: undefined as
     | ((call: {
         agent?: string;
@@ -69,6 +70,12 @@ vi.mock('../fast-agent-session', () => ({
   getOrCreateFastAgentSession: mocks.getSession,
   setFastAgentOpenCodeSession: mocks.setOpenCodeSession,
   upsertFastAgentMessage: mocks.upsertMessage,
+}));
+
+vi.mock('../fast-agent-conversation-repository', () => ({
+  INTERRUPTED_INFERENCE_RETRY_MESSAGE:
+    'The inference retry was interrupted before it completed. Please send the request again.',
+  reconcileFastAgentInferenceRetryNotices: mocks.reconcileRetryNotices,
 }));
 
 vi.mock('../../router', () => ({
@@ -267,6 +274,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     });
     mocks.setOpenCodeSession.mockResolvedValue(undefined);
     mocks.upsertMessage.mockResolvedValue(undefined);
+    mocks.reconcileRetryNotices.mockResolvedValue(0);
     mocks.getActiveTasks.mockResolvedValue([]);
     mocks.getEnvironments.mockResolvedValue([
       {
@@ -3349,6 +3357,15 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       expect(retryWrites.at(-1)?.contentBlocks).toEqual([
         { type: 'text', text: 'Connection restored.' },
       ]);
+      expect(retryWrites[0]?.metadata).toMatchObject({
+        inferenceRetryNotice: true,
+        inferenceRetryActive: true,
+      });
+      expect(retryWrites.at(-1)?.metadata).toMatchObject({
+        purpose: 'closeout',
+        inferenceRetryNotice: true,
+        inferenceRetryActive: false,
+      });
     } finally {
       vi.useRealTimers();
     }
@@ -3425,6 +3442,18 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       expect(consoleWarn).toHaveBeenCalledWith(
         expect.stringContaining('Failed to replace inference retry notice'),
       );
+      const retryWrites = mocks.upsertMessage.mock.calls
+        .map(([input]) => input.message)
+        .filter((message) => message.eventId === '100.2:retry-notice:0');
+      expect(retryWrites.at(-1)?.metadata).toMatchObject({
+        visibleInTranscript: false,
+        purpose: 'closeout',
+        inferenceRetryNotice: true,
+        inferenceRetryActive: false,
+      });
+      expect(
+        JSON.stringify(mocks.appendVisibleMessages.mock.lastCall),
+      ).not.toContain('Retrying in');
     } finally {
       consoleWarn.mockRestore();
       vi.useRealTimers();

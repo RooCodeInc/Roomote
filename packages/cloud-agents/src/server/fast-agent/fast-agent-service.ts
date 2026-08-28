@@ -72,6 +72,10 @@ import {
 } from '../non-task-provider-usage';
 import { fastAgentOpenCodeSessionManager } from './fast-agent-opencode-session';
 import {
+  INTERRUPTED_INFERENCE_RETRY_MESSAGE,
+  reconcileFastAgentInferenceRetryNotices,
+} from './fast-agent-conversation-repository';
+import {
   bindFastAgentNativeToolExecutor,
   createFastAgentSpillTurnBudget,
   bindFastAgentMcpToolExecutor,
@@ -861,11 +865,15 @@ export async function answerFastAgentQuestion({
     event,
     platformMessageId,
     nativeMessage,
+    inferenceRetryNotice = false,
+    visibleInTranscript = true,
   }: {
     reply: FastAgentReply;
     event: { eventId: string; turnSeq: number };
     platformMessageId?: string;
     nativeMessage?: NonTaskOpenCodeCompletedMessage | null;
+    inferenceRetryNotice?: boolean;
+    visibleInTranscript?: boolean;
   }) =>
     persistCanonicalMessage(
       {
@@ -879,8 +887,14 @@ export async function answerFastAgentQuestion({
         role: 'assistant',
         contentBlocks: [{ type: 'text', text: reply.message }],
         metadata: {
-          visibleInTranscript: true,
+          visibleInTranscript,
           purpose: reply.purpose,
+          ...(inferenceRetryNotice
+            ? {
+                inferenceRetryNotice: true,
+                inferenceRetryActive: reply.purpose === 'progress',
+              }
+            : {}),
           ...(platformMessageId ? { platformMessageId } : {}),
         },
         payload: {
@@ -1006,7 +1020,25 @@ export async function answerFastAgentQuestion({
     reply: FastAgentReply,
     bestEffort = false,
   ): Promise<boolean> => {
+    if (!inferenceRetryCanonicalEvent) {
+      return false;
+    }
+
+    const retryEvent = inferenceRetryCanonicalEvent;
+    const retryMessageIndex = inferenceRetryMessageIndex;
     if (!inferenceRetryReply || !adapter.replaceReply) {
+      if (
+        retryMessageIndex !== undefined &&
+        retryMessageIndex >= mirroredMessageCount
+      ) {
+        turnVisibleMessages.splice(retryMessageIndex, 1);
+      }
+      await persistAssistantReply({
+        reply,
+        event: retryEvent,
+        inferenceRetryNotice: true,
+        visibleInTranscript: false,
+      });
       return false;
     }
 
@@ -1015,14 +1047,28 @@ export async function answerFastAgentQuestion({
       replacement = await adapter.replaceReply(inferenceRetryReply, reply);
     } catch (error) {
       if (!bestEffort) {
+        await persistAssistantReply({
+          reply,
+          event: retryEvent,
+          inferenceRetryNotice: true,
+        });
         throw error;
       }
       console.warn(
         `[Fast Agent] Failed to replace inference retry notice: ${formatErrorForLog(error)}`,
       );
-      inferenceRetryReply = undefined;
-      inferenceRetryMessageIndex = undefined;
-      inferenceRetryCanonicalEvent = undefined;
+      if (
+        retryMessageIndex !== undefined &&
+        retryMessageIndex >= mirroredMessageCount
+      ) {
+        turnVisibleMessages.splice(retryMessageIndex, 1);
+      }
+      await persistAssistantReply({
+        reply,
+        event: retryEvent,
+        inferenceRetryNotice: true,
+        visibleInTranscript: false,
+      });
       return false;
     }
     inferenceRetryReply = replacement || inferenceRetryReply;
@@ -1033,8 +1079,9 @@ export async function answerFastAgentQuestion({
     if (inferenceRetryCanonicalEvent) {
       await persistAssistantReply({
         reply,
-        event: inferenceRetryCanonicalEvent,
+        event: retryEvent,
         platformMessageId: inferenceRetryReply.messageId,
+        inferenceRetryNotice: true,
       });
     }
     return true;
@@ -1081,6 +1128,11 @@ export async function answerFastAgentQuestion({
           }),
     ]);
     canonicalConversationId = session.id;
+    await reconcileFastAgentInferenceRetryNotices(session.id).catch((error) => {
+      console.warn(
+        `[Fast Agent] Failed to reconcile interrupted inference retry notices: ${formatErrorForLog(error)}`,
+      );
+    });
     await setFastSessionResponding(session.id, true).catch((error) => {
       console.warn(
         `[sessions] Failed to mark Fast Session active: ${formatErrorForLog(error)}`,
@@ -1259,6 +1311,7 @@ export async function answerFastAgentQuestion({
           reply,
           event: inferenceRetryCanonicalEvent,
           platformMessageId: inferenceRetryReply?.messageId,
+          inferenceRetryNotice: true,
         });
       }
       diagnostics.recordVisibleReply();
@@ -2281,8 +2334,7 @@ export async function answerFastAgentQuestion({
         await replaceInferenceRetryReply(
           {
             purpose: 'closeout',
-            message:
-              'The inference retry was interrupted before it completed. Please send the request again.',
+            message: INTERRUPTED_INFERENCE_RETRY_MESSAGE,
           },
           true,
         );
@@ -2351,6 +2403,15 @@ export async function answerFastAgentQuestion({
           );
         },
       );
+      if (inferenceRetryAttempted) {
+        await reconcileFastAgentInferenceRetryNotices(
+          canonicalConversationId,
+        ).catch((error) => {
+          console.warn(
+            `[Fast Agent] Failed to reconcile settled inference retry notices: ${formatErrorForLog(error)}`,
+          );
+        });
+      }
     }
     diagnostics.finish();
   }
