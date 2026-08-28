@@ -88,6 +88,7 @@ type WebFastAgentTurnInput = {
   delivery: FastAgentSurfaceReplyDelivery;
   question: string;
   images?: string[];
+  attachmentTexts?: string[];
   model?: string;
   reasoningEffort?: ReasoningEffort;
   senderDisplayName?: string;
@@ -106,6 +107,7 @@ async function runWebFastAgentTurn({
   delivery,
   question,
   images,
+  attachmentTexts,
   model,
   reasoningEffort,
   senderDisplayName,
@@ -124,6 +126,7 @@ async function runWebFastAgentTurn({
     await answerFastAgentQuestion({
       question,
       images,
+      attachmentTexts,
       userId,
       apiBaseUrl,
       conversation,
@@ -162,6 +165,7 @@ export async function startFastSessionCommand(
   input: {
     text: string;
     images?: string[];
+    attachmentTexts?: string[];
     model?: string | null;
     reasoningEffort?: ReasoningEffort | null;
   },
@@ -195,6 +199,7 @@ export async function startFastSessionCommand(
     },
     question: input.text,
     images: input.images,
+    attachmentTexts: input.attachmentTexts,
     model: settings.model,
     reasoningEffort: settings.reasoningEffort,
   });
@@ -219,6 +224,7 @@ export async function replyToFastSessionCommand(
     sessionId: string;
     text: string;
     images?: string[];
+    attachmentTexts?: string[];
     model?: string | null;
     reasoningEffort?: ReasoningEffort | null;
   },
@@ -253,6 +259,7 @@ export async function replyToFastSessionCommand(
     delivery,
     question: input.text,
     images: input.images,
+    attachmentTexts: input.attachmentTexts,
     model: settings.model,
     reasoningEffort: settings.reasoningEffort,
     ...(senderDisplayName ? { senderDisplayName } : {}),
