@@ -44,6 +44,7 @@ const ALL_CONNECTED = {
   notion: true,
   granola: true,
   rippling: false,
+  linear: true,
 } as const;
 
 function summarize(
@@ -176,9 +177,10 @@ describe('summarizeSources', () => {
   });
 
   it('reports a disconnected requirement over any sync state', () => {
-    const sources = summarize([]);
+    const sources = summarize([], { linear: false });
 
     expect(sourceOf(sources, 'rippling-workers').status).toBe('not_connected');
+    expect(sourceOf(sources, 'linear-issues').status).toBe('not_connected');
     expect(sourceOf(sources, 'task-memories').status).toBe('ingesting');
     expect(sourceOf(sources, 'task-memories').lastSyncedAt).toEqual(
       new Date('2026-08-20T18:50:00Z'),

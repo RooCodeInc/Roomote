@@ -6,6 +6,7 @@ import type {
   AgentSessionPlanStep,
   AgentSessionUpdateResult,
   LinearComment,
+  LinearBrainIssuePage,
   LinearOrganization,
   LinearViewer,
 } from './types';
@@ -43,6 +44,171 @@ export class LinearClient {
       id: org.id,
       name: org.name,
       urlKey: org.urlKey,
+    };
+  }
+
+  /**
+   * Read one bounded issue page for durable Brain ingestion. Comments are
+   * fetched in the same GraphQL request so collection does not create an N+1
+   * request pattern.
+   */
+  async listIssuesForBrain(input: {
+    first: number;
+    after?: string | null;
+    orderBy?: 'createdAt' | 'updatedAt';
+    createdBefore?: string | null;
+    updatedAfter?: string | null;
+    updatedBefore?: string | null;
+  }): Promise<LinearBrainIssuePage> {
+    const query = `
+      query BrainIssues(
+        $first: Int!
+        $after: String
+        $filter: IssueFilter
+      ) {
+        issues(
+          first: $first
+          after: $after
+          orderBy: ${input.orderBy ?? 'updatedAt'}
+          includeArchived: true
+          filter: $filter
+        ) {
+          nodes {
+            id
+            identifier
+            title
+            description
+            url
+            priority
+            priorityLabel
+            createdAt
+            updatedAt
+            completedAt
+            canceledAt
+            archivedAt
+            dueDate
+            state { name type }
+            team { key name }
+            project { name }
+            creator { name }
+            assignee { name }
+            labels { nodes { name } }
+            comments(last: 20, orderBy: createdAt) {
+              nodes {
+                id
+                body
+                createdAt
+                updatedAt
+                user { name }
+                externalUser { name }
+                botActor { name }
+              }
+            }
+          }
+          pageInfo { hasNextPage endCursor }
+        }
+      }
+    `;
+    const response = await this.client.client.rawRequest(query, {
+      first: Math.max(1, Math.min(input.first, 100)),
+      after: input.after ?? null,
+      filter:
+        input.createdBefore || input.updatedAfter || input.updatedBefore
+          ? {
+              ...(input.createdBefore
+                ? { createdAt: { lte: input.createdBefore } }
+                : {}),
+              ...(input.updatedAfter || input.updatedBefore
+                ? {
+                    updatedAt: {
+                      ...(input.updatedAfter
+                        ? { gte: input.updatedAfter }
+                        : {}),
+                      ...(input.updatedBefore
+                        ? { lte: input.updatedBefore }
+                        : {}),
+                    },
+                  }
+                : {}),
+            }
+          : null,
+    });
+    const data = response.data as {
+      issues?: {
+        nodes?: Array<{
+          id: string;
+          identifier: string;
+          title: string;
+          description?: string | null;
+          url: string;
+          priority?: number | null;
+          priorityLabel?: string | null;
+          createdAt: string;
+          updatedAt: string;
+          completedAt?: string | null;
+          canceledAt?: string | null;
+          archivedAt?: string | null;
+          dueDate?: string | null;
+          state?: { name: string; type: string } | null;
+          team?: { key: string; name: string } | null;
+          project?: { name: string } | null;
+          creator?: { name: string } | null;
+          assignee?: { name: string } | null;
+          labels?: { nodes?: Array<{ name: string }> };
+          comments?: {
+            nodes?: Array<{
+              id: string;
+              body: string;
+              createdAt: string;
+              updatedAt: string;
+              user?: { name: string } | null;
+              externalUser?: { name: string } | null;
+              botActor?: { name: string } | null;
+            }>;
+          };
+        }>;
+        pageInfo?: { hasNextPage?: boolean; endCursor?: string | null };
+      };
+    };
+    const connection = data.issues;
+
+    return {
+      issues: (connection?.nodes ?? []).map((issue) => ({
+        id: issue.id,
+        identifier: issue.identifier,
+        title: issue.title,
+        description: issue.description ?? null,
+        url: issue.url,
+        priority: issue.priority ?? null,
+        priorityLabel: issue.priorityLabel ?? null,
+        createdAt: issue.createdAt,
+        updatedAt: issue.updatedAt,
+        completedAt: issue.completedAt ?? null,
+        canceledAt: issue.canceledAt ?? null,
+        archivedAt: issue.archivedAt ?? null,
+        dueDate: issue.dueDate ?? null,
+        state: issue.state ?? null,
+        team: issue.team ?? null,
+        project: issue.project ?? null,
+        creator: issue.creator ?? null,
+        assignee: issue.assignee ?? null,
+        labels: (issue.labels?.nodes ?? []).map((label) => label.name),
+        comments: (issue.comments?.nodes ?? []).map((comment) => ({
+          id: comment.id,
+          body: comment.body,
+          createdAt: comment.createdAt,
+          updatedAt: comment.updatedAt,
+          author:
+            comment.user?.name ??
+            comment.externalUser?.name ??
+            comment.botActor?.name ??
+            null,
+        })),
+      })),
+      pageInfo: {
+        hasNextPage: connection?.pageInfo?.hasNextPage ?? false,
+        endCursor: connection?.pageInfo?.endCursor ?? null,
+      },
     };
   }
 
