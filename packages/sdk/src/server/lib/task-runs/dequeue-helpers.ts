@@ -43,7 +43,6 @@ import { createTaskRunGiteaCredentials } from '@roomote/gitea';
 import { createTaskRunAdoCredentials } from '@roomote/ado';
 import {
   DEFAULT_ROOMOTE_COMMIT_AUTHOR,
-  releaseTaskRun,
   resolvePublicGitAuthor,
   resolveRunCommitAuthor,
 } from '@roomote/cloud-agents/server';
@@ -52,6 +51,7 @@ import { withBootstrapFailureSignal } from '../../../bootstrap-failure-signal';
 import { notifySourceRunOnSettle } from './notify-source-run-on-settle';
 import { notifyFastAgentParentOnSettle } from './notify-fast-agent-parent-on-settle';
 import { settleSlackLiveTaskCardOnExit } from './settle-slack-live-task-card-on-exit';
+import { finishRun } from './finish-run';
 
 /**
  * Resolved git author identity for commits made by the worker.
@@ -342,43 +342,12 @@ async function loadPersistedDeploymentEnvVarsFromDb(): Promise<
 export async function cancelAndReleaseTaskRun(
   taskRun: TaskRun,
   errorMessage: string,
-  logPrefix: string,
 ): Promise<void> {
-  const endedAt = new Date();
-
-  await db.transaction(async (tx) => {
-    await tx
-      .update(taskRuns)
-      .set({
-        status: RunStatus.Canceled,
-        canceledAt: endedAt,
-        error: errorMessage,
-      })
-      .where(eq(taskRuns.id, taskRun.id));
-
-    // Derive the owning task's state from all its runs. finishRun never
-    // runs for runs canceled before/at dequeue, so without this sync the task
-    // would stay 'active' forever. The shared helper deprioritizes this
-    // never-started cancel, so an earlier completed sibling still wins.
-    await syncTaskStateFromRuns(tx, taskRun.taskId);
-
-    await markTaskStartParallelCountEndedAt(tx, {
-      runId: taskRun.id,
-      endedAt,
-    });
+  await finishRun({
+    id: taskRun.id,
+    status: RunStatus.Canceled,
+    error: errorMessage,
   });
-
-  try {
-    await releaseTaskRun(taskRun);
-  } catch (error) {
-    console.error(
-      `${logPrefix} Failed to release lock for run ${taskRun.id}: ${
-        error instanceof Error ? error.message : String(error)
-      }`,
-    );
-  }
-
-  await notifyCanceledTaskRunOnSettle(taskRun, errorMessage);
 }
 
 /**

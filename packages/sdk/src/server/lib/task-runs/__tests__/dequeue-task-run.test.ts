@@ -605,7 +605,6 @@ describe('dequeueTaskRun', () => {
     expect(mockCancelAndReleaseTaskRun).toHaveBeenCalledWith(
       taskRun,
       'Failed to create source control token.',
-      expect.any(String),
     );
   });
 
@@ -742,7 +741,10 @@ describe('dequeueTaskRun', () => {
         existingArtifacts: taskRun.artifacts,
       }),
     );
-    expect(mockNotifyCanceledTaskRunOnSettle).toHaveBeenCalledWith(taskRun);
+    expect(mockCancelAndReleaseTaskRun).toHaveBeenCalledWith(
+      taskRun,
+      'Task run is not valid.',
+    );
   });
 
   it('cancels the task run when launch metadata persistence fails for PR review runs', async () => {
@@ -771,7 +773,6 @@ describe('dequeueTaskRun', () => {
     expect(mockCancelAndReleaseTaskRun).toHaveBeenCalledWith(
       taskRun,
       expect.stringContaining('Failed to persist launch metadata'),
-      '[dequeueTaskRun]',
     );
   });
 });

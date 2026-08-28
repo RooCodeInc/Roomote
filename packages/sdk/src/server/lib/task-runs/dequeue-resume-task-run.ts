@@ -412,7 +412,6 @@ export const dequeueResumeTaskRun = async (
       await cancelAndReleaseTaskRun(
         result.taskRun,
         'Failed to create source control token.',
-        tag,
       );
 
       return undefined;
@@ -447,7 +446,7 @@ export const dequeueResumeTaskRun = async (
         },
       });
 
-      await cancelAndReleaseTaskRun(result.taskRun, message, tag);
+      await cancelAndReleaseTaskRun(result.taskRun, message);
       return undefined;
     }
 

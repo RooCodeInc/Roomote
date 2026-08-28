@@ -20,7 +20,7 @@ import {
   and,
   eq,
 } from '@roomote/db/server';
-import { releaseTaskRun, generatePrompt } from '@roomote/cloud-agents/server';
+import { generatePrompt } from '@roomote/cloud-agents/server';
 
 import {
   type GitAuthor,
@@ -31,7 +31,6 @@ import {
   createSourceControlTokenForTaskRun,
   type SourceControlRuntimeToken,
   cancelTaskRun,
-  notifyCanceledTaskRunOnSettle,
   reportBootstrapFailure,
   resolveGitAuthor,
   claimJobById,
@@ -291,7 +290,7 @@ export const dequeueTaskRun = async (
     const tag = '[dequeueTaskRun]';
 
     type TransactionResult =
-      | { error: true; taskRun?: TaskRun }
+      | { error: true; taskRun?: TaskRun; errorMessage?: string }
       | {
           error: false;
           taskRun: TaskRun;
@@ -326,7 +325,11 @@ export const dequeueTaskRun = async (
 
       if (!taskRun) {
         console.error(`${tag} Task run not found: ${JSON.stringify(dequeued)}`);
-        return { error: true, taskRun };
+        return {
+          error: true,
+          taskRun,
+          errorMessage: 'Task run is not valid.',
+        };
       }
 
       const task = taskRun.task;
@@ -364,7 +367,11 @@ export const dequeueTaskRun = async (
           bootstrapFailureReason: 'schema_validation_failed',
           existingArtifacts: taskRun.artifacts,
         });
-        return { error: true, taskRun };
+        return {
+          error: true,
+          taskRun,
+          errorMessage: 'Task run is not valid.',
+        };
       }
 
       const gitAuthor = await resolveGitAuthor(tx, taskRun);
@@ -418,17 +425,10 @@ export const dequeueTaskRun = async (
       const { taskRun } = txResult;
 
       if (taskRun) {
-        try {
-          await releaseTaskRun(taskRun);
-        } catch (error) {
-          console.error(
-            `${tag} Failed to release lock for run ${taskRun.id}: ${
-              error instanceof Error ? error.message : String(error)
-            }`,
-          );
-        }
-
-        await notifyCanceledTaskRunOnSettle(taskRun);
+        await cancelAndReleaseTaskRun(
+          taskRun,
+          txResult.errorMessage ?? 'Task run was canceled during dequeue.',
+        );
       }
 
       return undefined;
@@ -475,7 +475,6 @@ export const dequeueTaskRun = async (
       await cancelAndReleaseTaskRun(
         txResult.taskRun,
         'Failed to create source control token.',
-        tag,
       );
       return undefined;
     }
@@ -548,7 +547,7 @@ export const dequeueTaskRun = async (
       } catch (error) {
         const message = `${tag} Failed to generate prompt for task run ${txResult.taskRun.id}: ${error instanceof Error ? error.message : String(error)}`;
         console.error(message);
-        await cancelAndReleaseTaskRun(txResult.taskRun, message, tag);
+        await cancelAndReleaseTaskRun(txResult.taskRun, message);
         return undefined;
       }
     }
@@ -574,7 +573,7 @@ export const dequeueTaskRun = async (
         error instanceof Error
           ? error.message
           : 'Failed to resolve harness runtime credentials.';
-      await cancelAndReleaseTaskRun(txResult.taskRun, message, tag);
+      await cancelAndReleaseTaskRun(txResult.taskRun, message);
       return undefined;
     }
 
@@ -633,7 +632,7 @@ export const dequeueTaskRun = async (
         error instanceof Error ? error.message : String(error)
       }`;
       console.error(message);
-      await cancelAndReleaseTaskRun(result.taskRun, message, tag);
+      await cancelAndReleaseTaskRun(result.taskRun, message);
       return undefined;
     }
 

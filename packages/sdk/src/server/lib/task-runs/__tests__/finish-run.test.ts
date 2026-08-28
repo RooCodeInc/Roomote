@@ -195,6 +195,12 @@ vi.mock('@roomote/cloud-agents/server', () => ({
     /<!-- roomote-review-status:start -->\s*(?:Self-reviewing the PR(?: with fresh eyes)? now\.|Reviewing the PR now\.|Re-reviewing new commits now\.)/i.test(
       body,
     ),
+  isSafetyNetReviewStatusLine: (line: string) =>
+    [
+      'Review complete.',
+      'Review could not be completed.',
+      'Review was canceled.',
+    ].some((message) => line.trim().startsWith(message)),
   parseReviewSummaryMarkerSha: (body: string) =>
     body.match(/roomote-review-summary\s+sha=([0-9a-f]+)/i)?.[1],
   getMarkedSection: ({
@@ -226,12 +232,14 @@ vi.mock('@roomote/telemetry/server', () => ({
 }));
 
 const mockCreateIssueComment = vi.fn().mockResolvedValue(undefined);
+const mockGetCheckRun = vi.fn();
 const mockUpdateCheckRun = vi.fn().mockResolvedValue(undefined);
 
 vi.mock('@roomote/github', () => ({
   createTaskRunGitHubToken: vi.fn().mockResolvedValue('github-token'),
   createIssueComment: (...args: unknown[]) => mockCreateIssueComment(...args),
   deleteReaction: vi.fn(),
+  getCheckRun: (...args: unknown[]) => mockGetCheckRun(...args),
   updateCheckRun: (...args: unknown[]) => mockUpdateCheckRun(...args),
 }));
 
@@ -438,6 +446,7 @@ describe('finishRun', () => {
     mockUpdateMessage.mockResolvedValue(true);
     mockDbExecute.mockResolvedValue([]);
     mockResolveDefaultComputeProvider.mockResolvedValue('modal');
+    mockGetCheckRun.mockResolvedValue({ data: { status: 'in_progress' } });
     mockUpdatePendingEnvironmentSnapshot.mockResolvedValue(true);
     syncRunRows = [];
     mockDbTransaction.mockImplementation(
@@ -2328,6 +2337,106 @@ describe('finishRun', () => {
           conclusion: 'failure',
         }),
       );
+    });
+
+    it.each(['queued', 'in_progress'] as const)(
+      'cancels a %s check and finalizes a pending summary when the review sandbox terminates',
+      async (checkStatus) => {
+        mockFindFirstRun.mockResolvedValue(
+          makeRun(
+            {
+              payloadKind: TaskPayloadKind.GithubPrReview,
+              payload: { repo: 'owner/repo', headSha: 'abc1234' },
+            },
+            { workflow: 'pr_review', surface: 'github' },
+          ),
+        );
+        mockFindManyTaskPullRequests.mockResolvedValue([reviewPrRow]);
+        mockFinalizeGithubPrReviewComment.mockResolvedValueOnce({
+          finalized: true,
+          body: '<!-- roomote-review-summary sha=abc1234 -->',
+        });
+        mockGetCheckRun.mockResolvedValueOnce({
+          data: { status: checkStatus },
+        });
+
+        await finishRun({
+          id: 1,
+          status: RunStatus.Canceled,
+          error: 'Review sandbox terminated before the review completed.',
+        });
+
+        expect(mockBuildTerminalReviewStatus).toHaveBeenCalledWith({
+          outcome: 'canceled',
+          taskUrl: 'https://example.com/task',
+        });
+        expect(mockFinalizeGithubPrReviewComment).toHaveBeenCalledWith(
+          expect.objectContaining({
+            commentId: 456,
+            terminalStatus: 'terminal-status',
+          }),
+        );
+        expect(mockUpdateCheckRun).toHaveBeenCalledWith(
+          'github-token',
+          expect.objectContaining({
+            check_run_id: 123,
+            status: 'completed',
+            conclusion: 'cancelled',
+          }),
+        );
+      },
+    );
+
+    it('preserves a canonical successful review when the sandbox later terminates', async () => {
+      mockFindFirstRun.mockResolvedValue(
+        makeRun(
+          {
+            payloadKind: TaskPayloadKind.GithubPrReview,
+            payload: { repo: 'owner/repo', headSha: 'abc1234' },
+          },
+          { workflow: 'pr_review', surface: 'github' },
+        ),
+      );
+      mockFindManyTaskPullRequests.mockResolvedValue([reviewPrRow]);
+      mockFinalizeGithubPrReviewComment.mockResolvedValueOnce({
+        finalized: false,
+        body: '<!-- roomote-review-summary sha=abc1234 -->\n<!-- roomote-review-status:start -->\nNo issues found.\n<!-- roomote-review-status:end -->\n<!-- roomote-review-checklist:start -->\n<!-- roomote-review-checklist:end -->',
+      });
+
+      await finishRun({ id: 1, status: RunStatus.Canceled });
+
+      expect(mockUpdateCheckRun).toHaveBeenCalledWith(
+        'github-token',
+        expect.objectContaining({
+          check_run_id: 123,
+          status: 'completed',
+          conclusion: 'success',
+        }),
+      );
+    });
+
+    it('does not overwrite an already completed review check during sandbox termination', async () => {
+      mockFindFirstRun.mockResolvedValue(
+        makeRun(
+          {
+            payloadKind: TaskPayloadKind.GithubPrReview,
+            payload: { repo: 'owner/repo', headSha: 'abc1234' },
+          },
+          { workflow: 'pr_review', surface: 'github' },
+        ),
+      );
+      mockFindManyTaskPullRequests.mockResolvedValue([reviewPrRow]);
+      mockFinalizeGithubPrReviewComment.mockResolvedValueOnce({
+        finalized: false,
+        body: '<!-- roomote-review-summary sha=abc1234 -->\n<!-- roomote-review-status:start -->\nNo issues found.\n<!-- roomote-review-status:end -->',
+      });
+      mockGetCheckRun.mockResolvedValueOnce({
+        data: { status: 'completed', conclusion: 'success' },
+      });
+
+      await finishRun({ id: 1, status: RunStatus.Canceled });
+
+      expect(mockUpdateCheckRun).not.toHaveBeenCalled();
     });
 
     it('refreshes a missing check id when publication races with finalization', async () => {

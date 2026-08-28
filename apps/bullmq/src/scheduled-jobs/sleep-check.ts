@@ -2,6 +2,7 @@ import {
   type ComputeProvider,
   type TaskPhase,
   RunStatus,
+  TaskPayloadKind,
   sleepCheckManagedComputeProviders,
   isStandbyResumeCapableComputeProvider,
   isTaskResumeCapableComputeProvider,
@@ -90,6 +91,30 @@ type SleepCheckJob = Pick<
   | 'startedAt'
   | 'workerHeartbeatAt'
 >;
+
+function isGithubPrReviewJob(job: SleepCheckJob): boolean {
+  return (
+    job.payloadKind === TaskPayloadKind.GithubPrReview ||
+    job.payloadKind === TaskPayloadKind.GithubPrReviewSync
+  );
+}
+
+function resolveSandboxTerminationStatus(
+  job: SleepCheckJob,
+  fallback: RunStatus.Completed | RunStatus.Failed | RunStatus.Canceled,
+): RunStatus.Completed | RunStatus.Failed | RunStatus.Canceled {
+  if (!isGithubPrReviewJob(job)) {
+    return fallback;
+  }
+
+  if (fallback === RunStatus.Canceled) {
+    return RunStatus.Canceled;
+  }
+
+  return job.status === RunStatus.Idle
+    ? RunStatus.Completed
+    : RunStatus.Canceled;
+}
 
 const SENTRY_DESTROY_INSTANCE_REASONS = new Set<DestroyInstanceReason>([
   'provider_timeout_backstop',
@@ -1005,7 +1030,10 @@ async function finalizeRunForMissingInstance(
     return;
   }
 
-  const finalStatus = await resolveSweptJobFinalStatus(job.id);
+  const finalStatus = resolveSandboxTerminationStatus(
+    job,
+    await resolveSweptJobFinalStatus(job.id),
+  );
 
   await recordSleepCheckEvent(
     job,
@@ -1065,13 +1093,16 @@ async function handleTimedSleepCandidate(params: {
       return { snapshotted: 0, shutDown: 0, failed: 0 };
     }
 
-    const finalStatus = await resolveSweptJobFinalStatus(job.id);
+    const finalStatus = resolveSandboxTerminationStatus(
+      job,
+      await resolveSweptJobFinalStatus(job.id),
+    );
 
     await recordSleepCheckEvent(
       job,
       finalStatus === RunStatus.Canceled ? 'decision' : 'failed',
       finalStatus === RunStatus.Canceled
-        ? `${describeSleepCheckPath(path)} found active instance ${job.machineId} in status ${status}; finalizing task run #${job.id} as canceled after its stop request.`
+        ? `${describeSleepCheckPath(path)} found active instance ${job.machineId} in status ${status}; finalizing task run #${job.id} as canceled.`
         : `${describeSleepCheckPath(path)} found active instance ${job.machineId} in status ${status}; failing the task run.`,
       details,
     );
@@ -1233,29 +1264,61 @@ async function handleTimedSleepCandidate(params: {
     'sleepCheck',
   );
 
-  const endedAt = new Date();
+  const reviewJob = isGithubPrReviewJob(job);
+  const reviewFallback = reviewJob
+    ? await resolveSweptJobFinalStatus(job.id)
+    : RunStatus.Completed;
+  const reviewStatus = resolveSandboxTerminationStatus(
+    job,
+    reviewFallback === RunStatus.Canceled
+      ? RunStatus.Canceled
+      : RunStatus.Completed,
+  );
+  const reviewCanceled = reviewStatus === RunStatus.Canceled;
+  if (reviewJob) {
+    try {
+      await finishRun({
+        id: job.id,
+        status: reviewStatus,
+        ...(reviewCanceled
+          ? {
+              error: `${describeSleepCheckPath(path)} terminated the review sandbox before the review completed`,
+            }
+          : {}),
+      });
+    } catch (error) {
+      await db
+        .update(taskRuns)
+        .set({ sleepRequestedAt: null })
+        .where(eq(taskRuns.id, job.id))
+        .catch(() => {});
+      throw error;
+    }
+  } else {
+    const endedAt = new Date();
 
-  await db.transaction(async (tx) => {
-    await tx
-      .update(taskRuns)
-      .set({
-        sleepAt: null,
-        taskPhase: null,
-        status: RunStatus.Completed,
-        completedAt: endedAt,
-      })
-      .where(eq(taskRuns.id, job.id));
+    await db.transaction(async (tx) => {
+      await tx
+        .update(taskRuns)
+        .set({
+          sleepAt: null,
+          taskPhase: null,
+          status: RunStatus.Completed,
+          completedAt: endedAt,
+        })
+        .where(eq(taskRuns.id, job.id));
 
-    // Direct-completion path (not via finishRun): derive the task state
-    // from all its runs now that this run is completed.
-    await syncTaskStateFromRuns(tx, job.taskId);
-    await maybeEnqueueBrainMemoryForCompletedRun(tx, job.id);
+      // Direct-completion path (not via finishRun): derive the task state
+      // from all its runs now that this run is completed.
+      await syncTaskStateFromRuns(tx, job.taskId);
+      await maybeEnqueueBrainMemoryForCompletedRun(tx, job.id);
 
-    await markTaskStartParallelCountEndedAt(tx, {
-      runId: job.id,
-      endedAt,
+      await markTaskStartParallelCountEndedAt(tx, {
+        runId: job.id,
+        endedAt,
+      });
     });
-  });
+  }
 
   if (job.taskId) {
     try {
@@ -1274,12 +1337,15 @@ async function handleTimedSleepCandidate(params: {
 
   await recordSleepCheckEvent(
     job,
-    'completed',
-    `Shut down instance ${job.machineId} for non-resumable task run #${job.id}${path === 'hard_limit' ? ' due to provider-timeout backstop' : ''}.`,
+    reviewCanceled ? 'decision' : 'completed',
+    reviewCanceled
+      ? `Shut down instance ${job.machineId} and canceled unfinished review task run #${job.id}.`
+      : `Shut down instance ${job.machineId} for non-resumable task run #${job.id}${path === 'hard_limit' ? ' due to provider-timeout backstop' : ''}.`,
     {
       path,
-      decision:
-        path === 'hard_limit'
+      decision: reviewCanceled
+        ? 'cancel_unfinished_review_on_sandbox_termination'
+        : path === 'hard_limit'
           ? 'complete_hard_limit_non_resumable_shutdown'
           : 'complete_non_resumable_shutdown',
       ...buildSleepCheckDetails(job),
@@ -1416,7 +1482,10 @@ async function handleHeartbeatRecoveryCandidate(params: {
       return { snapshotted: 0, failed: 0 };
     }
 
-    const finalStatus = await resolveSweptJobFinalStatus(job.id);
+    const finalStatus = resolveSandboxTerminationStatus(
+      job,
+      await resolveSweptJobFinalStatus(job.id),
+    );
 
     await finishRun({
       id: job.id,
@@ -1509,7 +1578,10 @@ async function handleHeartbeatRecoveryCandidate(params: {
     'sleepCheck',
   );
 
-  const finalStatus = await resolveSweptJobFinalStatus(job.id);
+  const finalStatus = resolveSandboxTerminationStatus(
+    job,
+    await resolveSweptJobFinalStatus(job.id),
+  );
 
   await finishRun({
     id: job.id,
@@ -1776,10 +1848,20 @@ async function completeIdleJobWithoutSnapshot(
     },
   );
 
+  const reviewFallback = isGithubPrReviewJob(job)
+    ? await resolveSweptJobFinalStatus(job.id)
+    : RunStatus.Completed;
+  const finalStatus = resolveSandboxTerminationStatus(
+    job,
+    reviewFallback === RunStatus.Canceled
+      ? RunStatus.Canceled
+      : RunStatus.Completed,
+  );
+
   try {
     await finishRun({
       id: job.id,
-      status: RunStatus.Completed,
+      status: finalStatus,
       error: errorMessage,
     });
   } catch (error) {
@@ -1797,11 +1879,16 @@ async function completeIdleJobWithoutSnapshot(
 
   await recordSleepCheckEvent(
     job,
-    'completed',
-    `Completed idle task run #${job.id} without a snapshot.`,
+    finalStatus === RunStatus.Canceled ? 'decision' : 'completed',
+    finalStatus === RunStatus.Canceled
+      ? `Canceled idle review task run #${job.id} without a snapshot.`
+      : `Completed idle task run #${job.id} without a snapshot.`,
     {
       ...details,
-      decision: 'complete_without_snapshot',
+      decision:
+        finalStatus === RunStatus.Canceled
+          ? 'cancel_unfinished_review_without_snapshot'
+          : 'complete_without_snapshot',
       snapshotFailedAt: snapshotFailedAt.toISOString(),
       error: errorMessage,
     },
