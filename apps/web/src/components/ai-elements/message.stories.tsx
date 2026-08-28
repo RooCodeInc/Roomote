@@ -2,13 +2,13 @@
 
 import type { Meta, StoryObj } from '@storybook/nextjs-vite';
 import {
+  ACP_TOOL_KINDS,
+  FAST_AGENT_NATIVE_TOOL_CATALOG,
+  type KnownAcpToolKind,
+} from '@roomote/types';
+import {
   CopyIcon,
-  Database,
-  GlobeIcon,
-  SquarePen,
   RefreshCwIcon,
-  SearchIcon,
-  TerminalIcon,
   ThumbsDownIcon,
   ThumbsUpIcon,
 } from '@/components/system';
@@ -33,6 +33,7 @@ import {
 import { CollapsibleContent } from './collapsible-content';
 import { Reasoning, ReasoningContent, ReasoningTrigger } from './reasoning';
 import { AcpCommandOutputMessage } from '@/app/(sandbox)/task/[taskId]/messages/acp/AcpCommandOutputMessage';
+import { AcpMessageItem } from '@/app/(sandbox)/task/[taskId]/messages/acp/AcpMessageItem';
 import { AcpTodoSectionMessage } from '@/app/(sandbox)/task/[taskId]/messages/acp/AcpTodoSectionMessage';
 import type {
   AcpTodoSectionUiMessage,
@@ -51,7 +52,6 @@ import {
   TodoListSectionLabel,
   TodoListSectionTrigger,
 } from './todo-list';
-import { Tool, ToolContent, ToolHeader, ToolInput } from './tool';
 
 const meta: Meta = {
   title: 'Patterns/AI Elements/Conversation/Message',
@@ -70,6 +70,165 @@ const meta: Meta = {
 
 export default meta;
 type Story = StoryObj<typeof meta>;
+
+type StoryToolDefinition = {
+  name: string;
+  kind: KnownAcpToolKind;
+  command?: string;
+  isMcp?: boolean;
+  provider?: string;
+  rawInput?: Record<string, unknown>;
+};
+
+const EXTERNAL_MCP_TOOL_CALL = {
+  name: 'search_issues',
+  kind: ACP_TOOL_KINDS.mcp,
+  isMcp: true,
+  provider: 'linear',
+  rawInput: { query: 'conversation rendering' },
+} as const satisfies StoryToolDefinition;
+
+const SESSION_TOOL_CALL_CATALOG = [
+  ...FAST_AGENT_NATIVE_TOOL_CATALOG,
+  EXTERNAL_MCP_TOOL_CALL,
+] as const satisfies readonly StoryToolDefinition[];
+
+const TASK_TOOL_CALL_CATALOG = {
+  [ACP_TOOL_KINDS.execute]: {
+    name: 'execute_command',
+    kind: ACP_TOOL_KINDS.execute,
+    command: 'pnpm check-types',
+  },
+  [ACP_TOOL_KINDS.read]: {
+    name: 'read_file',
+    kind: ACP_TOOL_KINDS.read,
+    rawInput: { path: 'apps/web/src/components/ai-elements/message.tsx' },
+  },
+  [ACP_TOOL_KINDS.search]: {
+    name: 'search_files',
+    kind: ACP_TOOL_KINDS.search,
+    rawInput: { query: 'ToolHeader' },
+  },
+  [ACP_TOOL_KINDS.list]: {
+    name: 'list_files',
+    kind: ACP_TOOL_KINDS.list,
+    rawInput: { path: 'apps/web/src/components/ai-elements' },
+  },
+  [ACP_TOOL_KINDS.edit]: {
+    name: 'edit_file',
+    kind: ACP_TOOL_KINDS.edit,
+    rawInput: {
+      path: 'apps/web/src/components/ai-elements/message.stories.tsx',
+    },
+  },
+  [ACP_TOOL_KINDS.subagent]: {
+    name: 'task',
+    kind: ACP_TOOL_KINDS.subagent,
+    rawInput: { prompt: 'Inspect the conversation renderer.' },
+  },
+  [ACP_TOOL_KINDS.task]: {
+    name: 'manage_tasks',
+    kind: ACP_TOOL_KINDS.task,
+    isMcp: true,
+    provider: 'roomote',
+    rawInput: { action: 'get_summary', taskId: 'task-storybook' },
+  },
+  [ACP_TOOL_KINDS.communication]: {
+    name: 'send_chat_reply',
+    kind: ACP_TOOL_KINDS.communication,
+    isMcp: true,
+    provider: 'roomote',
+    rawInput: { message: 'The implementation is complete.' },
+  },
+  [ACP_TOOL_KINDS.memory]: {
+    name: 'save_task_memory',
+    kind: ACP_TOOL_KINDS.memory,
+    isMcp: true,
+    provider: 'roomote',
+    rawInput: { outcome: 'Documented the transcript rendering behavior.' },
+  },
+  [ACP_TOOL_KINDS.artifact]: {
+    name: 'manage_artifacts',
+    kind: ACP_TOOL_KINDS.artifact,
+    isMcp: true,
+    provider: 'roomote',
+    rawInput: { action: 'list' },
+  },
+  [ACP_TOOL_KINDS.widget]: {
+    name: 'show_widget',
+    kind: ACP_TOOL_KINDS.widget,
+    isMcp: true,
+    provider: 'roomote',
+    rawInput: { html: '<p>Tool preview</p>', title: 'Tool preview' },
+  },
+  [ACP_TOOL_KINDS.mcp]: EXTERNAL_MCP_TOOL_CALL,
+  [ACP_TOOL_KINDS.tool]: {
+    name: 'request_environment_variables',
+    kind: ACP_TOOL_KINDS.tool,
+    isMcp: true,
+    provider: 'roomote',
+    rawInput: { variables: ['STORYBOOK_TOKEN'] },
+  },
+} as const satisfies Record<KnownAcpToolKind, StoryToolDefinition>;
+
+function toolResultMessage(
+  tool: StoryToolDefinition,
+  surface: 'session' | 'task',
+  index: number,
+): AcpToolResultUiMessage {
+  const isExecute = tool.kind === ACP_TOOL_KINDS.execute;
+  const isMcp = tool.isMcp ?? false;
+
+  return {
+    id: `${surface}-tool-${index}`,
+    ts: index + 1,
+    role: 'tool',
+    partial: false,
+    sessionId: `${surface}-storybook`,
+    updateType: 'roomote_runtime.tool_result',
+    kind: 'tool_result',
+    text: '{}',
+    data: {
+      toolCallId: `${surface}-tool-call-${index}`,
+      kind: tool.kind,
+      title: tool.name,
+      status: 'completed',
+      isExecute,
+      isRead: tool.kind === ACP_TOOL_KINDS.read,
+      isMcp,
+      mcpServerName: isMcp ? (tool.provider ?? 'roomote') : null,
+      mcpToolName: isMcp ? tool.name : null,
+      serverName: isMcp ? (tool.provider ?? 'roomote') : null,
+      toolName: tool.name,
+      command: tool.command ?? null,
+      exitCode: isExecute ? 0 : null,
+      output: '{}',
+      ...(tool.kind === ACP_TOOL_KINDS.subagent
+        ? { isSubagentSpawn: true, prompt: tool.rawInput?.prompt }
+        : {}),
+      ...(tool.rawInput ? { rawInput: tool.rawInput } : {}),
+    } as AcpToolResultUiMessage['data'],
+  };
+}
+
+function ToolCallInventory({
+  tools,
+  surface,
+}: {
+  tools: readonly StoryToolDefinition[];
+  surface: 'session' | 'task';
+}) {
+  return (
+    <div className="flex flex-col gap-2">
+      {tools.map((tool, index) => (
+        <AcpMessageItem
+          key={`${surface}:${tool.name}`}
+          msg={toolResultMessage(tool, surface, index)}
+        />
+      ))}
+    </div>
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Full Conversations
@@ -97,7 +256,7 @@ export const FullConversationKitchenSink: Story = {
           </MessageActions>
         </Message>
 
-        {/* Assistant reasons, uses tools, shows todo, and responds */}
+        {/* Assistant reasons, updates the plan, and responds. */}
         <Message from="assistant">
           <Reasoning defaultOpen={false} duration={4200}>
             <ReasoningTrigger />
@@ -111,52 +270,6 @@ export const FullConversationKitchenSink: Story = {
             </ReasoningContent>
           </Reasoning>
           <MessageContent>
-            <Tool>
-              <ToolHeader
-                action="Read"
-                object="src/lib/auth.ts"
-                icon={SearchIcon}
-                state="output-available"
-              />
-            </Tool>
-            <Tool>
-              <ToolHeader
-                action="Edit"
-                object="src/lib/jwt.ts"
-                icon={SquarePen}
-                state="output-available"
-                additions={42}
-                deletions={0}
-              />
-            </Tool>
-            <AcpCommandOutputMessage
-              msg={cmdMsg({
-                command: 'pnpm test src/lib/auth',
-                text: `✓ should generate a valid JWT (3ms)
-✓ should verify a valid token (1ms)
-✓ should reject expired tokens (2ms)
-✓ should extract payload correctly (1ms)
-✓ middleware should reject unauthenticated requests (4ms)
-✓ middleware should pass valid JWT through (2ms)
-
-Test Suites: 2 passed, 2 total
-Tests:       6 passed, 6 total
-Time:        0.38s`,
-                exitCode: 0,
-              })}
-              ts={1700000020000}
-              status="completed"
-            />
-            <Tool>
-              <ToolHeader
-                action="Edit"
-                object="src/middleware.ts"
-                icon={SquarePen}
-                state="output-available"
-                additions={8}
-                deletions={12}
-              />
-            </Tool>
             <MessageResponse>
               {`I've created the JWT service and updated the middleware. Here's a summary:
 
@@ -203,7 +316,7 @@ I'm now working on refresh token rotation. Would you like me to continue?`}
           </MessageActions>
         </Message>
 
-        {/* Assistant thinks, runs tests, and queries via MCP */}
+        {/* Assistant reasons about the validation result. */}
         <Message from="assistant">
           <Reasoning isStreaming={false} defaultOpen={false} duration={2100}>
             <ReasoningTrigger />
@@ -217,70 +330,6 @@ I should:
             </ReasoningContent>
           </Reasoning>
           <MessageContent>
-            <Tool>
-              <ToolHeader
-                action="Execute"
-                object="pnpm test src/lib/auth"
-                icon={TerminalIcon}
-                state="output-available"
-                collapsible={false}
-              />
-            </Tool>
-            <AcpCommandOutputMessage
-              msg={cmdMsg({
-                command: 'pnpm test src/lib/auth',
-                text: `✓ should generate a valid JWT (3ms)
-✓ should verify a valid token (1ms)
-✓ should reject expired tokens (2ms)
-✓ should extract payload correctly (1ms)
-✓ middleware should reject unauthenticated requests (4ms)
-✓ middleware should pass valid JWT through (2ms)
-
-Test Suites: 2 passed, 2 total
-Tests:       6 passed, 6 total
-Time:        0.38s`,
-                exitCode: 0,
-              })}
-              ts={1700000020000}
-              status="completed"
-            />
-            <Tool>
-              <ToolHeader
-                action="Query"
-                object="count_active_sessions"
-                suffix="PostgreSQL"
-                icon={Database}
-                state="output-available"
-              />
-              <ToolContent>
-                <ToolInput
-                  input={{
-                    query:
-                      'SELECT COUNT(*) as active_sessions FROM sessions WHERE expires_at > NOW()',
-                  }}
-                />
-              </ToolContent>
-            </Tool>
-            <Tool>
-              <ToolHeader
-                action="Fetch"
-                object="GET /repos/acme/app/actions/runs"
-                suffix="GitHub"
-                icon={GlobeIcon}
-                state="output-available"
-              />
-              <ToolContent>
-                <ToolInput
-                  input={{
-                    owner: 'acme',
-                    repo: 'app',
-                    workflow_id: 'ci.yml',
-                    per_page: 1,
-                    status: 'completed',
-                  }}
-                />
-              </ToolContent>
-            </Tool>
             <MessageResponse>
               {`All 6 tests pass. I also checked the database — there are **142 active sessions** that will need to be migrated. The latest CI run on GitHub is green.
 
@@ -1256,125 +1305,23 @@ Let me start with the token generation service.`}
 };
 
 // ---------------------------------------------------------------------------
-// Tool Use
+// Product Tool Calls
 // ---------------------------------------------------------------------------
 
-export const WithToolUse: Story = {
-  name: 'Assistant – With Tool Use',
+export const FastSessionToolCalls: Story = {
+  name: 'Fast Session – All Tool Calls',
   render: () => (
-    <Message from="assistant">
-      <MessageContent>
-        <Tool>
-          <ToolHeader
-            action="Read"
-            object="src/lib/auth.ts"
-            icon={SearchIcon}
-            state="output-available"
-          />
-          <ToolContent>
-            <ToolInput
-              input={{
-                path: 'src/lib/auth.ts',
-                startLine: 1,
-                endLine: 50,
-              }}
-            />
-          </ToolContent>
-        </Tool>
-        <Tool>
-          <ToolHeader
-            action="Edit"
-            object="src/lib/jwt.ts"
-            icon={SquarePen}
-            state="output-available"
-            additions={24}
-            deletions={0}
-          />
-          <ToolContent>
-            <ToolInput
-              input={{
-                path: 'src/lib/jwt.ts',
-                content:
-                  'import jwt from "jsonwebtoken";\n\nexport function generateToken(payload) { ... }',
-              }}
-            />
-          </ToolContent>
-        </Tool>
-        <Tool>
-          <ToolHeader
-            action="Execute"
-            object="npm test"
-            icon={TerminalIcon}
-            state="output-available"
-            collapsible={false}
-          />
-        </Tool>
-        <MessageResponse>
-          {`I've read the existing auth module and created a new JWT service. All tests are passing.`}
-        </MessageResponse>
-      </MessageContent>
-    </Message>
+    <ToolCallInventory tools={SESSION_TOOL_CALL_CATALOG} surface="session" />
   ),
 };
 
-// ---------------------------------------------------------------------------
-// MCP Tool Calls
-// ---------------------------------------------------------------------------
-
-export const WithMcpToolCalls: Story = {
-  name: 'Assistant – With MCP Tool Calls',
+export const TaskToolCalls: Story = {
+  name: 'Task – All Tool Call Kinds',
   render: () => (
-    <Message from="assistant">
-      <MessageContent>
-        <Tool>
-          <ToolHeader
-            action="Query"
-            object="get_user_by_email"
-            suffix="PostgreSQL"
-            icon={Database}
-            state="output-available"
-          />
-          <ToolContent>
-            <ToolInput
-              input={{
-                query:
-                  "SELECT * FROM users WHERE email = 'alice@example.com' LIMIT 1",
-              }}
-            />
-          </ToolContent>
-        </Tool>
-        <Tool>
-          <ToolHeader
-            action="Fetch"
-            object="GET /api/v1/repos"
-            suffix="GitHub"
-            icon={GlobeIcon}
-            state="output-available"
-          />
-          <ToolContent>
-            <ToolInput
-              input={{
-                owner: 'acme-corp',
-                per_page: 5,
-                sort: 'updated',
-              }}
-            />
-          </ToolContent>
-        </Tool>
-        <Tool>
-          <ToolHeader
-            action="Search"
-            object="find_issues"
-            suffix="Linear"
-            icon={SearchIcon}
-            state="input-available"
-          />
-        </Tool>
-        <MessageResponse>
-          {`I found the user record and their linked repositories. The Linear search is still running — once it completes I'll cross-reference the open issues with recent commits.`}
-        </MessageResponse>
-      </MessageContent>
-    </Message>
+    <ToolCallInventory
+      tools={Object.values(TASK_TOOL_CALL_CATALOG)}
+      surface="task"
+    />
   ),
 };
 

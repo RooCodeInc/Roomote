@@ -4,48 +4,24 @@ import {
   normalizeTranscriptUserText,
 } from '@roomote/types';
 
-import {
-  isInternalDebugToolCallMessage,
-  shouldHideAcpMessage,
-} from '../../message-visibility';
+import { shouldHideAcpMessage } from '../../message-visibility';
 
 import type {
   AcpToolCallUiMessage,
   AcpToolResultUiMessage,
   AcpUiMessage,
 } from './types';
+import { isSubagentToolMessage, isSubagentToolPayload } from './subagent-tool';
 import {
-  isSubagentSpawnRowMessage,
-  isSubagentToolMessage,
-  isSubagentToolPayload,
-} from './subagent-tool';
-import { resolveShowWidgetForToolMessage } from './show-widget-tool-result';
-import { getDelegatedTaskDetails } from './delegated-task';
+  resolveToolPresentation,
+  summarizeToolGroup,
+  type ToolPresentationCategory,
+} from './tool-presentation';
+import { resolveToolPresentationPolicy } from './tool-presentation-policy';
 
-export type ExplorationStepKind = 'list' | 'read' | 'search';
+type ExplorationStepKind = 'list' | 'read' | 'search';
 
-export type GroupedToolDisplayKind =
-  | ExplorationStepKind
-  | 'execute'
-  | 'edit'
-  | 'tool';
-
-const EXPLORATION_TOOL_NAMES: Record<ExplorationStepKind, Set<string>> = {
-  search: new Set(['search', 'search_file', 'search_files']),
-  list: new Set(['glob', 'list', 'list_dir', 'list_directory', 'list_files']),
-  read: new Set(['read', 'read_file']),
-};
-
-const STEP_KIND_ORDER: ExplorationStepKind[] = ['search', 'list', 'read'];
-
-const STEP_KIND_LABELS: Record<
-  ExplorationStepKind,
-  { singular: string; plural: string }
-> = {
-  search: { singular: 'search', plural: 'searches' },
-  list: { singular: 'listing', plural: 'listings' },
-  read: { singular: 'file', plural: 'files' },
-};
+export type GroupedToolDisplayKind = ToolPresentationCategory;
 
 const STEP_KIND_DATA_KEYS: Record<ExplorationStepKind, string[]> = {
   search: [
@@ -289,45 +265,6 @@ function extractLabelFromToolData(
   return extractStringByKeys(argumentsRecord as Record<string, unknown>, keys);
 }
 
-function isExecuteToolMessage(
-  msg: AcpToolCallUiMessage | AcpToolResultUiMessage,
-): boolean {
-  const data = msg.data as unknown as Record<string, unknown>;
-  return (
-    msg.data.kind === 'execute' ||
-    msg.data.kind === 'execute_command' ||
-    data.isExecute === true
-  );
-}
-
-function resolveExplorationStepKind(
-  msg: AcpToolCallUiMessage | AcpToolResultUiMessage,
-): ExplorationStepKind | null {
-  const toolName = (msg.data.toolName ?? msg.data.mcpToolName ?? '')
-    .trim()
-    .toLowerCase();
-
-  for (const stepKind of STEP_KIND_ORDER) {
-    if (toolName && EXPLORATION_TOOL_NAMES[stepKind].has(toolName)) {
-      return stepKind;
-    }
-  }
-
-  if (msg.data.kind === 'search') {
-    return 'search';
-  }
-
-  if (msg.data.kind === 'list') {
-    return 'list';
-  }
-
-  if (msg.data.kind === 'read') {
-    return 'read';
-  }
-
-  return null;
-}
-
 /**
  * Stable identity for consecutive same-type collapsing. Different tools never
  * share a key, even when both are MCP exploration-style helpers.
@@ -340,49 +277,14 @@ function resolveToolGroupKey(
     return null;
   }
 
-  if (isExecuteToolMessage(msg)) {
-    return 'execute';
-  }
-
-  const toolName = (msg.data.toolName ?? msg.data.mcpToolName ?? '')
-    .trim()
-    .toLowerCase();
-  const serverName = (msg.data.serverName ?? msg.data.mcpServerName ?? '')
-    .trim()
-    .toLowerCase();
-
-  if (toolName) {
-    return serverName ? `mcp:${serverName}:${toolName}` : `tool:${toolName}`;
-  }
-
-  const kind = (msg.data.kind ?? '').trim().toLowerCase();
-
-  if (kind && kind !== 'mcp') {
-    return `kind:${kind}`;
-  }
-
-  return null;
+  return resolveToolPresentation(msg.data, msg.partial).groupKey;
 }
 
 function resolveGroupedToolDisplayKind(
   msg: AcpToolCallUiMessage | AcpToolResultUiMessage,
-  groupKey: string,
+  _groupKey: string,
 ): GroupedToolDisplayKind {
-  if (groupKey === 'execute' || isExecuteToolMessage(msg)) {
-    return 'execute';
-  }
-
-  const explorationStep = resolveExplorationStepKind(msg);
-
-  if (explorationStep) {
-    return explorationStep;
-  }
-
-  if (msg.data.kind === 'edit') {
-    return 'edit';
-  }
-
-  return 'tool';
+  return resolveToolPresentation(msg.data, msg.partial).category;
 }
 
 function isSettledToolMessage(
@@ -393,10 +295,6 @@ function isSettledToolMessage(
   }
 
   return msg.data.status === 'completed' || msg.data.status === 'failed';
-}
-
-function formatGenericToolLabel(value: string): string {
-  return value.split(/[_-]+/).filter(Boolean).join(' ').toLowerCase();
 }
 
 const TITLE_PREFIX_RE =
@@ -437,53 +335,14 @@ function extractObjectLabel(
 function summarizeSameTypeGroup(
   items: GroupedToolCallItem[],
   displayKind: GroupedToolDisplayKind,
-  groupKey: string,
+  _groupKey: string,
 ): { action: string; objectSummary: string } {
-  const count = items.length;
-
-  if (displayKind === 'execute') {
-    return {
-      action: 'Ran',
-      objectSummary: `${count} ${count === 1 ? 'command' : 'commands'}`,
-    };
-  }
-
-  if (
-    displayKind === 'search' ||
-    displayKind === 'list' ||
-    displayKind === 'read'
-  ) {
-    const labels = STEP_KIND_LABELS[displayKind];
-    return {
-      action: 'Exploring',
-      objectSummary: `${count} ${count === 1 ? labels.singular : labels.plural}`,
-    };
-  }
-
-  if (displayKind === 'edit') {
-    return {
-      action: 'Edited',
-      objectSummary: `${count} ${count === 1 ? 'file' : 'files'}`,
-    };
-  }
-
-  const toolNameMatch = /^(?:mcp:[^:]+:|tool:)(.+)$/.exec(groupKey);
-  const toolLabel = toolNameMatch?.[1]
-    ? formatGenericToolLabel(toolNameMatch[1])
-    : null;
-
-  if (toolLabel) {
-    return {
-      action: 'Used',
-      objectSummary:
-        count === 1 ? `1 ${toolLabel}` : `${count} ${toolLabel} calls`,
-    };
-  }
-
-  return {
-    action: 'Used',
-    objectSummary: `${count} ${count === 1 ? 'tool' : 'tools'}`,
-  };
+  const presentation = resolveToolPresentation(items[0]!.msg.data);
+  return summarizeToolGroup(
+    displayKind,
+    items.length,
+    presentation.displayName,
+  );
 }
 
 function buildGroupedToolItem(
@@ -682,12 +541,6 @@ function resolveMessageRenderState(
   options: BuildAcpRenderBlocksOptions,
   hideCurrentFirstUserPrompt: boolean,
 ): MessageRenderState {
-  const shouldShowInternalMessageInNarration =
-    options.showInternalMessages === true &&
-    (isSubagentToolMessage(msg) || isInternalDebugToolCallMessage(msg));
-  const shouldShowWidgetInNarration =
-    isToolMessage(msg) && resolveShowWidgetForToolMessage(msg) !== null;
-
   if (options.suppressedMessageIds?.has(msg.id)) {
     return {
       visibility: 'hidden',
@@ -702,32 +555,18 @@ function resolveMessageRenderState(
     };
   }
 
-  if (
-    options.showInternalMessages === false &&
-    (isSubagentToolMessage(msg) || isInternalDebugToolCallMessage(msg)) &&
-    // Spawn rows render inline even without debug UI. Keyed on the stable
-    // payload shape, never on live-only activity data: activity does not
-    // survive a transcript rebuild, and a row that vanishes on refresh reads
-    // as a lost subagent.
-    !isSubagentSpawnRowMessage(msg)
-  ) {
-    return {
-      visibility: 'hidden',
-      behavior: 'boundary',
-    };
-  }
-
-  if (
-    options.displayMode === 'narration' &&
-    isToolMessage(msg) &&
-    !shouldShowInternalMessageInNarration &&
-    !shouldShowWidgetInNarration &&
-    !isSubagentToolMessage(msg)
-  ) {
-    return {
-      visibility: 'hidden',
-      behavior: 'boundary',
-    };
+  if (isToolMessage(msg)) {
+    const policy = resolveToolPresentationPolicy(msg, {
+      delegatedTaskCardsEnabled: options.keepDelegatedTasksVisible,
+      displayMode: options.displayMode,
+      showInternalMessages: options.showInternalMessages,
+    });
+    if (policy.rowVisibility !== 'visible') {
+      return {
+        visibility: 'hidden',
+        behavior: policy.hiddenBehavior,
+      };
+    }
   }
 
   if (isEmptyCompletedTextMessage(msg)) {
@@ -759,12 +598,16 @@ function resolveMessageRenderState(
     };
   }
 
+  const policy = resolveToolPresentationPolicy(msg, {
+    delegatedTaskCardsEnabled: options.keepDelegatedTasksVisible,
+    displayMode: options.displayMode,
+    showInternalMessages: options.showInternalMessages,
+  });
+
   return {
     visibility: 'render',
     groupKey:
-      options.keepDelegatedTasksVisible && getDelegatedTaskDetails(msg)
-        ? null
-        : resolveToolGroupKey(msg),
+      policy.groupingMode === 'standalone' ? null : resolveToolGroupKey(msg),
   };
 }
 

@@ -32,6 +32,7 @@ import {
 } from './SessionPromptInput';
 import { preparePromptAttachments } from '@/lib/prompt-attachments';
 import { useOpenSessionTaskPanel } from './session-task-panel-context';
+import { useNarrationMode } from '@/hooks/useNarrationMode';
 
 import {
   AcpTranscriptBlockList,
@@ -87,6 +88,8 @@ export function FastSessionTranscript({
 }) {
   const trpcClient = useTRPCClient();
   const openTaskPanel = useOpenSessionTaskPanel();
+  const { enabled: narrationModeEnabled } = useNarrationMode();
+  const displayMode = narrationModeEnabled ? 'narration' : 'default';
   const [serverMessages, setServerMessages] = useState<
     Map<string, TranscriptMessage>
   >(
@@ -182,7 +185,7 @@ export function FastSessionTranscript({
   const { renderBlocks, suppressMessage } = useAcpTranscriptBlocks({
     messages: uiMessages,
     artifacts: [],
-    displayMode: 'default',
+    displayMode,
     initialPrompt: null,
     shouldHideFirstMessage: false,
     showInternalMessages: false,
@@ -268,7 +271,7 @@ export function FastSessionTranscript({
   );
 
   return (
-    <MessageUiOptionsProvider>
+    <MessageUiOptionsProvider value={{ displayMode }}>
       <WorkspaceHeader
         className="py-4.25"
         contentClassName="flex-row items-center gap-3"

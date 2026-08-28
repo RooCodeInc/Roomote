@@ -76,7 +76,10 @@ import {
   type FastAgentMcpToolCall,
   type FastAgentNativeToolCall,
 } from './fast-agent-native-tool-bridge';
-import { buildFastAgentToolFilter } from './fast-agent-tool-policy';
+import {
+  buildFastAgentToolFilter,
+  getFastAgentNativeAcpKind,
+} from './fast-agent-tool-policy';
 import {
   callFastAgentIntegration,
   listFastAgentIntegrations,
@@ -895,12 +898,14 @@ export async function answerFastAgentQuestion({
     nativeSessionId,
     mcpServerName = null,
     mcpToolName = null,
+    kind = mcpServerName && mcpToolName ? 'mcp' : 'tool',
   }: {
     title: string;
     args: Record<string, unknown>;
     nativeSessionId?: string | null;
     mcpServerName?: string | null;
     mcpToolName?: string | null;
+    kind?: string;
   }) => {
     const ordinal = nextToolOrdinal++;
     const toolCallId = `${turnId}:tool:${ordinal}`;
@@ -918,10 +923,10 @@ export async function answerFastAgentQuestion({
         payload: {
           toolCallId,
           title,
-          kind: 'tool',
+          kind,
           status: 'in_progress',
           isExecute: false,
-          isRead: false,
+          isRead: kind === 'read',
           isMcp,
           isRoomoteNativeTool: !isMcp,
           mcpServerName,
@@ -944,6 +949,7 @@ export async function answerFastAgentQuestion({
       isMcp,
       mcpServerName,
       mcpToolName,
+      kind,
       canonicalEvent,
     };
   };
@@ -970,9 +976,10 @@ export async function answerFastAgentQuestion({
         payload: {
           toolCallId: event.toolCallId,
           title: event.title,
-          kind: 'tool',
+          kind: event.kind,
           status: failed ? 'failed' : 'completed',
           isExecute: false,
+          isRead: event.kind === 'read',
           isMcp: event.isMcp,
           isRoomoteNativeTool: !event.isMcp,
           mcpServerName: event.mcpServerName,
@@ -1096,6 +1103,7 @@ export async function answerFastAgentQuestion({
           visibleInTranscript: !platformEvent,
           turnSource,
           userId,
+          ...(senderDisplayName ? { userName: senderDisplayName } : {}),
           ...(senderDisplayName ? { senderDisplayName } : {}),
           ...(senderExternalId ? { senderExternalId } : {}),
         },
@@ -1827,6 +1835,7 @@ export async function answerFastAgentQuestion({
         title: call.name,
         args: call.args,
         nativeSessionId: call.sessionId,
+        kind: getFastAgentNativeAcpKind(call.name),
       });
       try {
         const result = await executeNativeToolInner(call);

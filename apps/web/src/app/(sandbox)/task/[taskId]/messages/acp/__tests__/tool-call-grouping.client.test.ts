@@ -820,7 +820,7 @@ describe('buildAcpRenderBlocks', () => {
       kind: 'tool_group',
       action: 'Used',
       objectSummary: '2 get issue calls',
-      displayKind: 'tool',
+      displayKind: 'generic',
     });
   });
 
@@ -2033,6 +2033,57 @@ describe('buildAcpRenderBlocks', () => {
       [delegatedTask('child-1', 1), delegatedTask('child-2', 2)],
       { keepDelegatedTasksVisible: true },
     );
+
+    expect(entries).toHaveLength(2);
+    expect(entries.every((entry) => entry.kind === 'message')).toBe(true);
+  });
+
+  it('keeps adjacent widget previews standalone', () => {
+    const widget = (id: string, ts: number) =>
+      explorationToolMessage({
+        id,
+        ts,
+        title: 'show_widget',
+        kind: 'mcp',
+        toolName: 'show_widget',
+        text: JSON.stringify({
+          success: true,
+          shown: true,
+          html: `<p>${id}</p>`,
+          height: 240,
+        }),
+      });
+
+    const entries = buildAcpRenderBlocks([
+      widget('widget-1', 1),
+      widget('widget-2', 2),
+    ]);
+
+    expect(entries).toHaveLength(2);
+    expect(entries.every((entry) => entry.kind === 'message')).toBe(true);
+  });
+
+  it('keeps adjacent visual-proof uploads standalone', () => {
+    const proof = (id: string, ts: number) =>
+      explorationToolMessage({
+        id,
+        ts,
+        title: 'manage_artifacts',
+        kind: 'mcp',
+        toolName: 'manage_artifacts',
+        text: JSON.stringify({
+          success: true,
+          artifactId: id,
+          artifactType: 'visual-proof',
+          viewUrl: `https://example.com/task/task-1/artifacts/${id}.png`,
+          rawUrl: `https://example.com/${id}.png`,
+        }),
+      });
+
+    const entries = buildAcpRenderBlocks([
+      proof('proof-1', 1),
+      proof('proof-2', 2),
+    ]);
 
     expect(entries).toHaveLength(2);
     expect(entries.every((entry) => entry.kind === 'message')).toBe(true);

@@ -8,9 +8,7 @@ import type {
   AcpUiMessage,
 } from './types';
 import type { AcpRenderBlock } from './render-blocks';
-import { resolveShowWidgetForToolMessage } from './show-widget-tool-result';
-import { resolveVisualProofMediaForToolMessage } from './visual-proof-tool-result';
-import { getDelegatedTaskDetails } from './delegated-task';
+import { resolveToolPresentationPolicy } from './tool-presentation-policy';
 
 const COLLAPSIBLE_ACP_MESSAGE_KINDS = [
   'reasoning',
@@ -21,10 +19,6 @@ const COLLAPSIBLE_ACP_MESSAGE_KINDS = [
 const COLLAPSIBLE_ACP_MESSAGE_KIND_SET = new Set<string>(
   COLLAPSIBLE_ACP_MESSAGE_KINDS,
 );
-
-const MANAGE_ARTIFACTS_TOOL_NAME = 'manage_artifacts';
-const SHOW_WIDGET_TOOL_NAME = 'show_widget';
-const ROOMOTE_MCP_SERVER_NAME = 'roomote';
 
 export interface AcpActivityGroupRenderBlock {
   kind: 'activity_group';
@@ -94,48 +88,6 @@ function isActivityBoundaryBlock(block: AcpRenderBlock): boolean {
   return isTextBoundaryBlock(block) || isProgressBoundaryBlock(block);
 }
 
-function getToolName(
-  msg: AcpToolCallUiMessage | AcpToolResultUiMessage,
-): string | null {
-  const rawName = msg.data.toolName ?? msg.data.mcpToolName;
-  const normalized = rawName?.trim().toLowerCase();
-
-  return normalized && normalized.length > 0 ? normalized : null;
-}
-
-function getServerName(
-  msg: AcpToolCallUiMessage | AcpToolResultUiMessage,
-): string | null {
-  const rawName = msg.data.serverName ?? msg.data.mcpServerName;
-  const normalized = rawName?.trim().toLowerCase();
-  return normalized && normalized.length > 0 ? normalized : null;
-}
-
-function isArtifactToolMessage(
-  msg: AcpToolCallUiMessage | AcpToolResultUiMessage,
-  artifacts: readonly TaskArtifact[] | null | undefined,
-): boolean {
-  const toolName = getToolName(msg);
-  const serverName = getServerName(msg);
-
-  if (toolName === MANAGE_ARTIFACTS_TOOL_NAME) {
-    return true;
-  }
-
-  if (
-    toolName === SHOW_WIDGET_TOOL_NAME &&
-    serverName === ROOMOTE_MCP_SERVER_NAME
-  ) {
-    return true;
-  }
-
-  if (resolveShowWidgetForToolMessage(msg) !== null) {
-    return true;
-  }
-
-  return resolveVisualProofMediaForToolMessage(msg, artifacts).length > 0;
-}
-
 function isLivePartialBlock(block: AcpRenderBlock): boolean {
   if (block.kind === 'tool_group') {
     return block.items.some(
@@ -163,8 +115,12 @@ export function isActivityCollapsibleBlock(
   }
 
   if (block.kind === 'tool_group') {
-    return !block.items.some((item) =>
-      isArtifactToolMessage(item.msg, artifacts),
+    return !block.items.some(
+      (item) =>
+        resolveToolPresentationPolicy(item.msg, {
+          artifacts,
+          delegatedTaskCardsEnabled: keepDelegatedTasksVisible,
+        }).activityMode === 'keep-visible',
     );
   }
 
@@ -178,16 +134,13 @@ export function isActivityCollapsibleBlock(
     return false;
   }
 
-  if (isToolMessage(msg) && isArtifactToolMessage(msg, artifacts)) {
-    return false;
-  }
-
-  if (
-    keepDelegatedTasksVisible &&
-    isToolMessage(msg) &&
-    getDelegatedTaskDetails(msg)
-  ) {
-    return false;
+  if (isToolMessage(msg)) {
+    return (
+      resolveToolPresentationPolicy(msg, {
+        artifacts,
+        delegatedTaskCardsEnabled: keepDelegatedTasksVisible,
+      }).activityMode === 'collapsible'
+    );
   }
 
   return true;
