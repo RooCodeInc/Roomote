@@ -1,5 +1,7 @@
 import type { AcpToolCallPayload, AcpToolResultPayload } from '@roomote/types';
 
+import { sanitizeSandboxPathString } from '@/lib';
+
 export type ToolPresentationCategory =
   | 'execute'
   | 'read'
@@ -123,7 +125,7 @@ export function resolveToolPresentation(
   });
   const displayName = toolName
     ? formatToolIdentifier(toolName)
-    : (data.title ?? 'Tool');
+    : sanitizeSandboxPathString(data.title ?? 'Tool');
   const providerLabel = serverName
     ? formatToolIdentifier(serverName)
     : undefined;

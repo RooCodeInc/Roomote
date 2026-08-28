@@ -84,6 +84,22 @@ describe('tool presentation resolver', () => {
       ),
     ).toMatchObject({ verb: 'Failed to Start', object: 'Coding Task' });
   });
+
+  it('sanitizes native fallback titles without using them for identity', () => {
+    expect(
+      resolveToolPresentation(
+        toolData({
+          title: 'Read /sandbox/repos/RooCodeInc/Roomote/apps/web/package.json',
+          toolName: null,
+        }),
+      ),
+    ).toMatchObject({
+      displayName: 'Read RooCodeInc/Roomote/apps/web/package.json',
+      object: 'Read RooCodeInc/Roomote/apps/web/package.json',
+      identity: { toolName: null },
+      groupKey: 'kind:tool',
+    });
+  });
 });
 
 describe('tool presentation policy', () => {
