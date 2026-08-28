@@ -62,8 +62,8 @@ import {
   ModelSelect,
   TaskPromptInput,
   AUTO_WORKSPACE_VALUE,
-  useTaskLaunchConfig,
 } from '@/components/tasks';
+import { useTaskLaunchConfig } from '@/components/tasks/TaskLaunchConfig';
 
 import { OnboardingCard } from './OnboardingCard';
 import { BottomSheetTabs } from './BottomSheetTabs';

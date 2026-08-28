@@ -7,8 +7,3 @@ export { TaskFilters } from './TaskFilters';
 export { TaskCardSkeleton } from './TaskCardSkeleton';
 export { TaskCardError } from './TaskCardError';
 export { TaskBoard, TaskBoardSkeleton } from './TaskBoard';
-export {
-  TaskLaunchConfigProvider,
-  useTaskLaunchConfig,
-  type TaskLaunchConfig,
-} from './TaskLaunchConfig';
