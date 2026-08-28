@@ -18,7 +18,7 @@ export ENCRYPTION_KEY=12345678901234567890123456789012
 export ARTIFACT_SIGNING_KEY=12345678901234567890123456789012
 export DASHBOARD_PASSWORD=test-dashboard-password
 
-docker compose -f "$compose_file" config --format json >"$rendered_config"
+docker compose --profile local-inference -f "$compose_file" config --format json >"$rendered_config"
 
 jq -e '
   def hardened:
@@ -49,6 +49,15 @@ jq -e '
   (.services.controller.networks | has("docker-api")) and
   (.services["docker-proxy"].networks | has("docker-api")) and
   (.networks["docker-api"].internal == true) and
+
+  (.services.infinity.image == "michaelf34/infinity:0.0.76-cpu@sha256:2a464dcc06e659a277bc841b4be196100489076446482925481b2c5c120fce57") and
+  (.services.infinity.environment.INFINITY_ANONYMOUS_USAGE_STATS == "0") and
+  (.services.infinity.volumes == [{
+    "type": "volume",
+    "source": "infinity_cache",
+    "target": "/app/.cache",
+    "volume": {}
+  }]) and
 
   (.services["docker-proxy"].environment == {
     "ALLOW_START": "1",
