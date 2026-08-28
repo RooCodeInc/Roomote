@@ -39,6 +39,7 @@ function row(
 
 const ALL_CONNECTED = {
   slack: true,
+  discord: true,
   github: true,
   notion: true,
   granola: true,
