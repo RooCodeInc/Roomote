@@ -432,10 +432,9 @@ Two operational notes:
   no longer recognizes them — but the deployment starts cold until that
   finishes.
 - **Model choice is a variable, not a rebuild.** `R_BRAIN_MODEL` selects the
-  synthesis model, `R_BRAIN_EMBEDDING_MODEL` the embedding model, and
-  `R_BRAIN_RERANKER_MODEL` the reranker, all set on **api**. Leave them empty
-  for the defaults. The synthesis model can change at any time; the reranker
-  changes after a gbrain restart; the embedding model
+  synthesis model and `R_BRAIN_EMBEDDING_MODEL` the embedding model, both set
+  on **api**. Leave them empty for the defaults. The synthesis model can
+  change at any time; the embedding model
   sizes Memory's vector storage when it is first created, so set it (with
   `R_BRAIN_EMBEDDING_DIMENSIONS`) before first boot or not at all. A later
   change is ignored and reported in Memory's logs rather than silently

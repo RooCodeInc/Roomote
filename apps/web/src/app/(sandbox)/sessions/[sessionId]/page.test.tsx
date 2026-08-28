@@ -33,6 +33,7 @@ vi.mock('@/trpc/commands/sessions', () => ({
   getSessionByIdCommand: getSessionByIdCommandMock,
 }));
 vi.mock('../../use-sandbox-layout', () => ({
+  useResponsiveSandboxSidebar: vi.fn(),
   useSandboxLayout: () => ({
     isSidebarVisible: true,
     setSidebarVisible: vi.fn(),

@@ -5,6 +5,7 @@ import * as path from 'node:path';
 import {
   createRoomoteAdvisorAgentPrompt,
   createRoomoteJudgeAgentPrompt,
+  OPENCODE_IDENTITY_PLUGIN_SCRIPT,
   ROOMOTE_OPENCODE_ADVISOR_AGENT_DESCRIPTION,
   ROOMOTE_OPENCODE_ADVISOR_AGENT_NAME,
   ROOMOTE_OPENCODE_JUDGE_AGENT_DESCRIPTION,
@@ -48,12 +49,14 @@ import {
   normalizeOptionalReasoningEffort,
   parseInferenceGatewayKeys,
   parseTaskModelContextWindows,
+  parseTaskModelCosts,
   renderManualSkillMarkdown,
   resolveOpenRouterVariantModelAlias,
   toBedrockMantleRuntimeModelId,
   OPENCODE_ARCHITECT_AGENT,
   OPENCODE_GO_API_KEY_ENV_VAR_NAME,
   TASK_MODEL_CONTEXT_WINDOWS_ENV_VAR_NAME,
+  TASK_MODEL_COSTS_ENV_VAR_NAME,
   TaskPayloadKind,
   type EnvironmentManualSkill,
   type OpenRouterVariantModelAlias,
@@ -179,6 +182,8 @@ const ROOMOTE_OPENCODE_CHATGPT_GATEWAY_PLUGIN_FILE_NAME =
   'roomote-chatgpt-gateway.js';
 
 const ROOMOTE_OPENCODE_TOOL_SAFETY_PLUGIN_FILE_NAME = 'roomote-tool-safety.js';
+
+const ROOMOTE_OPENCODE_IDENTITY_PLUGIN_FILE_NAME = 'roomote-identity.js';
 
 const OPENCODE_ALLOW_ALL_PERMISSION = {
   read: 'allow',
@@ -653,6 +658,10 @@ function writeOpenCodeManagedFiles(openCodeConfigDir: string): void {
     pluginsDir,
     ROOMOTE_OPENCODE_TOOL_SAFETY_PLUGIN_FILE_NAME,
   );
+  const identityPluginPath = path.join(
+    pluginsDir,
+    ROOMOTE_OPENCODE_IDENTITY_PLUGIN_FILE_NAME,
+  );
   const silenceHookPath = path.join(
     openCodeConfigDir,
     ROOMOTE_OPENCODE_SLACK_SILENCE_HOOK_FILE_NAME,
@@ -674,6 +683,7 @@ function writeOpenCodeManagedFiles(openCodeConfigDir: string): void {
     OPENCODE_TOOL_SAFETY_PLUGIN_SCRIPT,
     'utf8',
   );
+  fs.writeFileSync(identityPluginPath, OPENCODE_IDENTITY_PLUGIN_SCRIPT, 'utf8');
   fs.writeFileSync(silenceHookPath, SLACK_SILENCE_HOOK_SCRIPT, 'utf8');
   fs.writeFileSync(stopHookPath, SLACK_STOP_HOOK_SCRIPT, 'utf8');
   fs.chmodSync(silenceHookPath, 0o755);
@@ -1297,6 +1307,10 @@ function resolveModelBackedOpenCodeConfig(
     runtimeEnv[TASK_MODEL_CONTEXT_WINDOWS_ENV_VAR_NAME],
   );
   delete runtimeEnv[TASK_MODEL_CONTEXT_WINDOWS_ENV_VAR_NAME];
+  const modelCosts = parseTaskModelCosts(
+    runtimeEnv[TASK_MODEL_COSTS_ENV_VAR_NAME],
+  );
+  delete runtimeEnv[TASK_MODEL_COSTS_ENV_VAR_NAME];
   const rawModel = applyImplicitLiteLlmModelPrefix(
     runtimeEnv.R_MODEL?.trim() ?? '',
     isLiteLlmConfigured,
@@ -1596,6 +1610,9 @@ function resolveModelBackedOpenCodeConfig(
   const openAiCompatibleModelIds = [
     ...configuredModelIds,
     ...Object.keys(modelContextWindows),
+    // A switchable model may be known only by its pricing; it still needs a
+    // config entry or its cost block is silently dropped.
+    ...Object.keys(modelCosts),
   ];
   const providerModelConfig = chatGptFastMode
     ? mergeOpenCodeChatGptFastModeOptions(
@@ -1618,6 +1635,7 @@ function resolveModelBackedOpenCodeConfig(
                 openAiCompatibleModelIds,
                 visionModel ?? effectiveCodingModel,
                 modelContextWindows,
+                modelCosts,
               ),
               runtimeEnv,
               configuredModelIds,

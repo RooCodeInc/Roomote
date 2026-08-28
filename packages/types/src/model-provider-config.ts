@@ -9,6 +9,7 @@ import {
 import {
   OPENROUTER_RECOMMENDED_TASK_MODEL_SLUGS,
   mapRecommendedTaskModels,
+  type RecommendedTaskModelSlugMap,
   type SuggestedTaskModel,
 } from './recommended-task-models';
 import {
@@ -46,6 +47,30 @@ export const CHATGPT_SUBSCRIPTION_PROVIDER_ID = 'chatgpt' as const;
  */
 export const XAI_SUBSCRIPTION_PROVIDER_ID = 'xai-subscription' as const;
 
+/** Hosting-managed inference backed by Roomote credits. */
+export const ROOMOTE_INFERENCE_PROVIDER_ID = 'roomote' as const;
+export const ROOMOTE_INFERENCE_API_KEY_ENV_VAR_NAME =
+  'R_TRIAL_OPENROUTER_API_KEY' as const;
+export const ROOMOTE_TRIAL_MODEL_PRESET_ID = 'trial' as const;
+
+/**
+ * Provider env vars that are hosting delivery mechanisms, not credentials:
+ * setup imports the injected value into encrypted Settings storage, and only
+ * the stored value ever satisfies or authenticates the provider. Every
+ * runtime read must go through this predicate — reading the process value
+ * directly would resurrect a provider whose stored key the operator deleted
+ * to disable it.
+ */
+export const SETTINGS_ONLY_MODEL_PROVIDER_ENV_VAR_NAMES = [
+  ROOMOTE_INFERENCE_API_KEY_ENV_VAR_NAME,
+] as const;
+
+export function isSettingsOnlyProviderEnvVar(name: string): boolean {
+  return SETTINGS_ONLY_MODEL_PROVIDER_ENV_VAR_NAMES.includes(
+    name as (typeof SETTINGS_ONLY_MODEL_PROVIDER_ENV_VAR_NAMES)[number],
+  );
+}
+
 /**
  * Model-id prefix used when composing or looking up task models for a setup
  * catalog provider. Subscription connect surfaces are not prefixes: ChatGPT
@@ -69,6 +94,7 @@ export function getSetupProviderTaskModelPrefix(
 export const OPENCODE_GO_API_KEY_ENV_VAR_NAME = 'OPENCODE_GO_API_KEY' as const;
 
 export const SETUP_MODEL_PROVIDER_IDS = [
+  ROOMOTE_INFERENCE_PROVIDER_ID,
   'openrouter',
   ...ENABLED_DIRECT_TASK_MODEL_PROVIDER_IDS,
   CHATGPT_SUBSCRIPTION_PROVIDER_ID,
@@ -407,7 +433,87 @@ const OPENAI_RECOMMENDED_MODEL_PRESETS = [
   },
 ] as const satisfies readonly RecommendedModelPreset[];
 
+const OPENROUTER_EFFICIENT_MODEL_PRESET = {
+  id: 'efficient',
+  label: 'Efficient',
+  // Reasoning efforts are intentionally unset so the shared per-role
+  // defaults apply, exactly as they do for a hand-configured model.
+  roles: {
+    coding: { modelId: 'openrouter/openai/gpt-5.6-luna' },
+    helper: { modelId: 'openrouter/openai/gpt-5.6-luna' },
+    codeReview: { modelId: 'openrouter/openai/gpt-5.6-luna' },
+    explore: { modelId: 'openrouter/openai/gpt-5.6-luna' },
+    planning: { modelId: 'openrouter/openai/gpt-5.6-luna' },
+  },
+} as const satisfies RecommendedModelPreset;
+
+/**
+ * Roomote inference is an aliased namespace over OpenRouter: `roomote/<slug>`
+ * serves OpenRouter's `<slug>` through the trial key while staying separate
+ * from an operator's own OpenRouter connection. These two helpers are the
+ * only home of that translation — the gateway's request rewrite, model
+ * lookup, and catalog seeding all import them instead of re-deriving the
+ * prefix.
+ */
+function rebaseOpenRouterModelIdForRoomote(modelId: string): string {
+  return modelId.replace(/^openrouter\//u, `${ROOMOTE_INFERENCE_PROVIDER_ID}/`);
+}
+
+/**
+ * The upstream (OpenRouter-side) slug for a `roomote/`-prefixed model id, or
+ * null when the id is not in the Roomote namespace.
+ */
+export function rebaseRoomoteModelIdToUpstream(modelId: string): string | null {
+  const prefix = `${ROOMOTE_INFERENCE_PROVIDER_ID}/`;
+
+  return modelId.startsWith(prefix) ? modelId.slice(prefix.length) : null;
+}
+
+function rebaseOpenRouterPresetForRoomote(
+  preset: RecommendedModelPreset,
+): RecommendedModelPreset {
+  return {
+    ...preset,
+    roles: Object.fromEntries(
+      Object.entries(preset.roles).map(([role, config]) => [
+        role,
+        {
+          ...config,
+          modelId: rebaseOpenRouterModelIdForRoomote(config.modelId),
+        },
+      ]),
+    ) as RecommendedModelPreset['roles'],
+  };
+}
+
+const ROOMOTE_TRIAL_MODEL_PRESET = {
+  ...rebaseOpenRouterPresetForRoomote(OPENROUTER_EFFICIENT_MODEL_PRESET),
+  id: ROOMOTE_TRIAL_MODEL_PRESET_ID,
+  label: 'Roomote Trial',
+  default: true,
+} as const satisfies RecommendedModelPreset;
+
 export const SETUP_MODEL_PROVIDER_CATALOG = [
+  {
+    id: ROOMOTE_INFERENCE_PROVIDER_ID,
+    label: 'Roomote inference',
+    envVarName: ROOMOTE_INFERENCE_API_KEY_ENV_VAR_NAME,
+    defaultRoomoteModel: ROOMOTE_TRIAL_MODEL_PRESET.roles.coding!.modelId,
+    authKind: 'api-key',
+    suggestedTaskModels: mapRecommendedTaskModels(
+      Object.fromEntries(
+        Object.entries(OPENROUTER_RECOMMENDED_TASK_MODEL_SLUGS).map(
+          ([modelId, openRouterModelId]) => [
+            modelId,
+            rebaseOpenRouterModelIdForRoomote(openRouterModelId),
+          ],
+        ),
+      ) as RecommendedTaskModelSlugMap,
+    ),
+    recommendedPresets: [ROOMOTE_TRIAL_MODEL_PRESET],
+    // Only hosting can enable this provider. It is never a user connection.
+    hidden: true,
+  },
   {
     id: 'openrouter',
     label: 'OpenRouter',
@@ -470,6 +576,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
           },
         },
       },
+      OPENROUTER_EFFICIENT_MODEL_PRESET,
     ],
   },
   {
@@ -1982,7 +2089,11 @@ export function buildSetupModelStatus(input: {
     const requiredEnvVarNames =
       getSetupModelProviderRequiredEnvVarNames(provider);
     const hasRequiredEnvVars = requiredEnvVarNames.length > 0;
+    // Settings-only vars (the Roomote trial key) are delivery mechanisms,
+    // not credentials: only the stored key connects the provider. See
+    // `SETTINGS_ONLY_MODEL_PROVIDER_ENV_VAR_NAMES`.
     const isRuntimeConfigured = (name: string) =>
+      !isSettingsOnlyProviderEnvVar(name) &&
       isConfiguredEnvValue(runtimeEnv[name]);
     const isPersisted = (name: string) => persistedEnvVarNameSet.has(name);
     const additionalEnvValues = Object.fromEntries(
@@ -2019,7 +2130,6 @@ export function buildSetupModelStatus(input: {
         (name) => isPersisted(name) || isRuntimeConfigured(name),
       ) &&
       requiredEnvVarNames.some(isPersisted);
-
     return {
       ...provider,
       additionalEnvValues,

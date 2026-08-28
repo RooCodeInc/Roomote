@@ -1,6 +1,12 @@
 import { useState, type ReactNode } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from '@testing-library/react';
 
 import { SandboxLayoutContext } from '../../use-sandbox-layout';
 import { SessionWorkspace, type SessionInfo } from './SessionWorkspace';
@@ -130,6 +136,24 @@ function renderWorkspace({
   >;
 }) {
   useMediaQueryMock.mockReturnValue(!isMobile);
+  let viewportChangeListener: ((event: MediaQueryListEvent) => void) | null =
+    null;
+  const mediaQuery = {
+    matches: isMobile,
+    addEventListener: vi.fn(
+      (event: string, listener: (event: MediaQueryListEvent) => void) => {
+        if (event === 'change') {
+          viewportChangeListener = listener;
+        }
+      },
+    ),
+    removeEventListener: vi.fn(),
+  };
+  Object.defineProperty(window, 'matchMedia', {
+    writable: true,
+    value: vi.fn().mockReturnValue(mediaQuery),
+  });
+
   const initialSession = { ...session, ...sessionOverride };
   sessionQueryState.data = {
     ...initialSession,
@@ -140,13 +164,23 @@ function renderWorkspace({
     defaultOptions: { queries: { retry: false } },
   });
 
-  render(
+  const result = render(
     <QueryClientProvider client={queryClient}>
       <SandboxLayoutProvider>
         <SessionWorkspace session={initialSession}>{children}</SessionWorkspace>
       </SandboxLayoutProvider>
     </QueryClientProvider>,
   );
+
+  return {
+    ...result,
+    resizeToMobile() {
+      mediaQuery.matches = true;
+      act(() =>
+        viewportChangeListener?.({ matches: true } as MediaQueryListEvent),
+      );
+    },
+  };
 }
 
 function OpenNestedTask() {
@@ -164,6 +198,10 @@ describe('SessionWorkspace', () => {
     renderWorkspace({ isMobile: true });
 
     expect(screen.getByText('Session transcript')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Chat' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Session info' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Show sidebar' }));
+
     expect(screen.getByRole('button', { name: 'Chat' })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Session info' }));
@@ -199,6 +237,7 @@ describe('SessionWorkspace', () => {
   it('preserves the split panel and close control on desktop', () => {
     renderWorkspace({ isMobile: false });
 
+    expect(screen.getByRole('button', { name: 'Session info' })).toBeVisible();
     fireEvent.click(screen.getByRole('button', { name: 'Session info' }));
 
     expect(screen.getByText('Session transcript')).toBeInTheDocument();
@@ -285,5 +324,16 @@ describe('SessionWorkspace', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Open child' }));
 
     expect(screen.getByText('Nested panel child-1')).toBeInTheDocument();
+  });
+
+  it('collapses the right rail when the viewport changes from desktop to mobile', () => {
+    const { resizeToMobile } = renderWorkspace({ isMobile: false });
+
+    expect(screen.getByRole('button', { name: 'Session info' })).toBeVisible();
+
+    resizeToMobile();
+
+    expect(screen.queryByRole('button', { name: 'Session info' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Show sidebar' })).toBeVisible();
   });
 });

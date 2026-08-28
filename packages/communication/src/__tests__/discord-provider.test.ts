@@ -314,6 +314,28 @@ describe('DiscordCommunicationProvider', () => {
     });
   });
 
+  it('lists active guild threads for bounded collector discovery', async () => {
+    const { server, provider } = createHarness();
+    server.addChannel({
+      id: '400000000000000002',
+      guild_id: server.guildId,
+      parent_id: '400000000000000001',
+      name: 'public-thread',
+      type: 11,
+    });
+
+    await expect(
+      provider.listGuildActiveThreads(server.guildId),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        id: '400000000000000002',
+        parentId: '400000000000000001',
+        name: 'public-thread',
+        type: 11,
+      }),
+    ]);
+  });
+
   it('treats a denied add_reactions overwrite as missing required channel permission', async () => {
     const { server, provider } = createHarness();
     const channelId = '400000000000000001';
@@ -493,6 +515,14 @@ describe('DiscordCommunicationProvider', () => {
         channelIds: [publicChannelId, privateChannelId],
       }),
     ).resolves.toEqual([publicChannelId]);
+    await expect(
+      provider.listPublicReadableGuildChannels({
+        guildId: server.guildId,
+        userId: server.bot.id,
+      }),
+    ).resolves.toEqual([
+      expect.objectContaining({ id: publicChannelId, name: 'public' }),
+    ]);
   });
 
   it('applies the everyone overwrite separately from member role overwrites', async () => {

@@ -160,6 +160,8 @@ Roomote handles the work that pulls you off your main project:
   migration files, boilerplate.
 - **Build small features.** "Add a dark mode toggle to settings." It writes the
   code, runs the app, takes a screenshot, and opens a PR with a preview link.
+- **Start from scratch.** Create an empty GitHub repository from Roomote, then
+  use the first task to build the project in an isolated environment.
 - **Triage issues.** Connect Linear, Jira, or GitHub Issues. It reads new
   tickets, asks clarifying questions, and starts working.
 

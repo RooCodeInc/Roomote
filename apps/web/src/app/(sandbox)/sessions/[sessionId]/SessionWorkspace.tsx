@@ -44,7 +44,10 @@ import {
   ResponsiveWorkspacePanels,
   SandboxSideActions,
 } from '../../SandboxWorkspacePanels';
-import { useSandboxLayout } from '../../use-sandbox-layout';
+import {
+  useResponsiveSandboxSidebar,
+  useSandboxLayout,
+} from '../../use-sandbox-layout';
 import { NestedTaskSidePanel } from './NestedTaskSidePanel';
 import { OpenSessionTaskPanelContext } from './session-task-panel-context';
 import { DelegatedTaskCard } from '../../task/[taskId]/messages/acp/DelegatedTaskCard';
@@ -447,6 +450,7 @@ export function SessionWorkspace({
     <SessionInfoPanel session={session} onClose={closePanel} />
   );
   const { isSidebarVisible, toggleSidebar } = useSandboxLayout();
+  useResponsiveSandboxSidebar(session.id);
 
   return (
     <OpenSessionTaskPanelContext.Provider value={openTaskPanel}>

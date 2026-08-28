@@ -20,6 +20,7 @@ const { state, navigation, mutations } = vi.hoisted(() => ({
   mutations: {
     backfill: vi.fn(),
     retryFailed: vi.fn(),
+    setEnabled: vi.fn(),
   },
 }));
 
@@ -65,7 +66,9 @@ vi.mock('@tanstack/react-query', () => ({
   useMutation: (options: { mutationKind?: string }) =>
     options.mutationKind === 'retryFailed'
       ? { isPending: false, mutate: mutations.retryFailed }
-      : { isPending: false, mutate: mutations.backfill },
+      : options.mutationKind === 'setEnabled'
+        ? { isPending: false, mutate: mutations.setEnabled }
+        : { isPending: false, mutate: mutations.backfill },
 }));
 
 vi.mock('@/trpc/client', () => ({
@@ -93,6 +96,9 @@ vi.mock('@/trpc/client', () => ({
       retryFailedTaskMemories: {
         mutationOptions: () => ({ mutationKind: 'retryFailed' }),
       },
+      setMemoryEnabled: {
+        mutationOptions: () => ({ mutationKind: 'setEnabled' }),
+      },
     },
   }),
 }));
@@ -105,16 +111,12 @@ function buildSettings(
   return {
     status: 'connected',
     statusDetail: null,
+    enabled: true,
+    enabledFromLegacyKey: false,
     url: 'http://gbrain:8080',
     inferenceProvider: 'openrouter',
     keySource: 'brain',
     recall: { mode: 'semantic', embeddedCount: 771, chunkCount: 771 },
-    models: {
-      synthesisModel: 'openai/gpt-5.6-luna',
-      synthesisSource: 'default',
-      embeddingModel: 'openai/text-embedding-3-small',
-      embeddingDimensions: 1536,
-    },
     corpus: {
       reachable: true,
       listedPages: 30,
@@ -173,10 +175,11 @@ beforeEach(() => {
   navigation.replace.mockClear();
   mutations.backfill.mockClear();
   mutations.retryFailed.mockClear();
+  mutations.setEnabled.mockClear();
 });
 
 describe('BrainSettings', () => {
-  it('shows Memory stats, the embedded browser, sources, and configuration', () => {
+  it('shows Memory stats, the embedded browser, and sources', () => {
     render(<BrainSettings />);
 
     expect(screen.getAllByText('Connected')).toHaveLength(1);
@@ -185,12 +188,10 @@ describe('BrainSettings', () => {
     expect(screen.getByText('OpenRouter')).toBeInTheDocument();
     expect(screen.getByText('Semantic + keyword')).toBeInTheDocument();
 
-    expect(screen.getByText('Configuration')).toBeInTheDocument();
-    expect(screen.getByText('openai/gpt-5.6-luna')).toBeInTheDocument();
-    expect(
-      screen.getByText('openai/text-embedding-3-small'),
-    ).toBeInTheDocument();
-    expect(screen.queryByText('Manage in Models')).not.toBeInTheDocument();
+    // The model Configuration section is gone: the synthesis model is the
+    // deployment helper model and the embedding pair is create-time — neither
+    // is a per-page setting worth displaying here.
+    expect(screen.queryByText('Configuration')).not.toBeInTheDocument();
 
     expect(screen.getByText('Memory Stats')).toBeInTheDocument();
     expect(screen.getByText('30 memories')).toBeInTheDocument();
@@ -218,11 +219,7 @@ describe('BrainSettings', () => {
 
     const memoryStats = screen.getByText('Memory Stats');
     const browser = screen.getByText('Explore memories');
-    const configuration = screen.getByText('Configuration');
     expect(memoryStats.compareDocumentPosition(browser)).toBe(
-      Node.DOCUMENT_POSITION_FOLLOWING,
-    );
-    expect(browser.compareDocumentPosition(configuration)).toBe(
       Node.DOCUMENT_POSITION_FOLLOWING,
     );
   });
@@ -354,6 +351,37 @@ describe('BrainSettings', () => {
     expect(screen.getAllByText('Slack')).toHaveLength(2);
     // Disconnected sources are omitted from the list entirely.
     expect(screen.queryByText('Notion')).not.toBeInTheDocument();
+  });
+
+  it('shows only the toggle and its explanation while Memory is disabled', () => {
+    state.query.data = buildSettings({
+      enabled: false,
+      status: 'not_configured',
+      statusDetail: 'Memory is turned off for this deployment.',
+    });
+
+    render(<BrainSettings />);
+
+    expect(
+      screen.getByRole('switch', { name: 'Enable Memory' }),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/Memory is off/)).toBeInTheDocument();
+    expect(screen.queryByText('Memory Stats')).not.toBeInTheDocument();
+    expect(screen.queryByText('Status')).not.toBeInTheDocument();
+    expect(screen.queryByText('Sources')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('switch', { name: 'Enable Memory' }));
+    expect(mutations.setEnabled).toHaveBeenCalledWith({ enabled: true });
+  });
+
+  it('notes when enablement still comes from the legacy provider key', () => {
+    state.query.data = buildSettings({ enabledFromLegacyKey: true });
+
+    render(<BrainSettings />);
+
+    expect(
+      screen.getByText(/enabled by a configured Memory provider key/),
+    ).toBeInTheDocument();
   });
 
   it('stops at the explanation on a deployment with no Brain', () => {

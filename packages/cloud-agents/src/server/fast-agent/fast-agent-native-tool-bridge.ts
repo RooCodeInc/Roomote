@@ -248,11 +248,15 @@ import { z } from "zod"
 import { invoke } from "../roomote-fast-tool-bridge.js"
 
 export default {
-  description: "Post a user-visible reply in the current Slack or Discord conversation.",
+  description: "Post a user-visible reply. Fast automation reports may attach launchable suggested tasks on Slack or Discord.",
   args: {
     message: z.string().min(1).describe("Markdown reply text"),
     purpose: z.enum(["ack", "progress", "closeout", "clarification"]),
     imageArtifactIds: z.array(z.string()).optional(),
+    suggestions: z.array(z.object({
+      title: z.string().min(1).max(140),
+      brief: z.string().min(1).max(2000),
+    })).max(10).optional().describe("Launchable follow-ups for a Slack or Discord automation report only"),
   },
   execute: (args, context) => invoke("send_chat_reply", args, context),
 }
@@ -277,11 +281,12 @@ import { z } from "zod"
 import { invoke } from "../roomote-fast-tool-bridge.js"
 
 export default {
-  description: "Delegate new repository or workspace execution work to a Roomote task, optionally using an exact deployment-enabled model ID from the system prompt.",
+  description: "Delegate new repository or workspace execution work to a Roomote task, optionally using an exact deployment-enabled model ID. Current-turn images are attached only when includeImages is true.",
   args: {
     prompt: z.string().min(1).describe("Complete task instruction"),
     environmentId: z.string().nullable().optional().describe(${JSON.stringify(`Exact environment ID from the system prompt; omit, pass null, or pass "${ALL_REPOSITORIES}" to run against all active repositories`)}),
     model: z.string().min(1).nullable().optional().describe("Exact deployment-enabled model ID; omit or pass null to use the deployment default"),
+    includeImages: z.boolean().optional().describe("Set true to attach supported images from the active conversation turn; defaults to false"),
     kickoffMessage: z.string().min(1).describe("Brief user-facing description of the work now underway; do not mention delegation, launching, or queue state"),
   },
   execute: (args, context) => invoke("launch_task", args, context),
@@ -293,10 +298,11 @@ import { z } from "zod"
 import { invoke } from "../roomote-fast-tool-bridge.js"
 
 export default {
-  description: "Send a new instruction to an active or resumable task delegated by this Fast conversation.",
+  description: "Send a new instruction to an active or resumable task delegated by this Fast conversation. Current-turn images are attached only when includeImages is true.",
   args: {
     taskId: z.string().nullable().optional(),
     message: z.string().min(1),
+    includeImages: z.boolean().optional().describe("Set true to attach supported images from the active conversation turn; defaults to false"),
   },
   execute: (args, context) => invoke("send_task_message", args, context),
 }

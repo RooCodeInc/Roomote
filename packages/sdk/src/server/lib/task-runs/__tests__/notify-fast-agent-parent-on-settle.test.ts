@@ -157,25 +157,6 @@ describe('notifyFastAgentParentOnSettle', () => {
     );
   });
 
-  it('carries custom automation identity into the settlement event', async () => {
-    await notifyFastAgentParentOnSettle(
-      makeRun({
-        fastAgentParent: fastParent,
-        customAutomationId: 'automation-1',
-      }),
-      RunStatus.Completed,
-    );
-
-    expect(mocks.deliverParentEvent).toHaveBeenCalledWith(
-      expect.objectContaining({
-        event: expect.objectContaining({
-          type: 'task_settled',
-          customAutomationId: 'automation-1',
-        }),
-      }),
-    );
-  });
-
   it('passes current pull request context with the completion event', async () => {
     mocks.listPullRequests.mockResolvedValueOnce([
       {

@@ -38,7 +38,7 @@ export function StepBootstrapAccount({
         <ul className="pl-5 list-disc">
           <li>Simple email + password</li>
           <li>
-            Auth with Slack or Teams (best if you plan on talkign to Roomote
+            Auth with Slack or Teams (best if you plan on talking to Roomote
             using either of those)
           </li>
         </ul>

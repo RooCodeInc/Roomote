@@ -301,6 +301,7 @@ import {
   createSetupBootstrapSlackAppFromManifestCommand,
   saveSetupBootstrapAuthConfigCommand,
   saveSetupBootstrapAuthProviderChoiceCommand,
+  chooseSetupTrialInferenceCommand,
   saveSetupNewAuthConfigCommand,
   saveSetupNewAuthProviderChoiceCommand,
   saveSetupNewComputeConfigCommand,
@@ -457,6 +458,7 @@ import {
   getBrainSettingsCommand,
   listBrainPagesCommand,
   retryFailedBrainTaskMemoriesCommand,
+  setMemoryEnabledCommand,
 } from '../commands/brain';
 import {
   getReleaseNotesCommand,
@@ -2607,6 +2609,10 @@ export const appRouter = createRouter({
         }),
       ),
 
+    chooseTrialInference: protectedProcedure.mutation(({ ctx: { auth } }) =>
+      chooseSetupTrialInferenceCommand(auth),
+    ),
+
     saveComputeProviderChoice: protectedProcedure
       .input(
         z.object({
@@ -3079,6 +3085,12 @@ export const appRouter = createRouter({
     getPage: protectedProcedure
       .input(z.object({ slug: z.string().min(1).max(512) }))
       .query(({ ctx: { auth }, input }) => getBrainPageCommand(auth, input)),
+
+    setMemoryEnabled: protectedProcedure
+      .input(z.object({ enabled: z.boolean() }))
+      .mutation(({ ctx: { auth }, input }) =>
+        setMemoryEnabledCommand(auth, input),
+      ),
 
     backfillTaskMemories: protectedProcedure.mutation(({ ctx: { auth } }) =>
       backfillBrainTaskMemoriesCommand(auth),

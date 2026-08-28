@@ -26,7 +26,9 @@ import {
   writeCollectorPages,
 } from './brain-collectors/write-pages';
 import { githubIssuesCollector } from './brain-collectors/github-issues';
+import { discordPublicChannelsCollector } from './brain-collectors/discord-public-channels';
 import { granolaMeetingsCollector } from './brain-collectors/granola-meetings';
+import { linearIssuesCollector } from './brain-collectors/linear-issues';
 import {
   notionPagesCollector,
   notionUsersCollector,
@@ -315,6 +317,19 @@ async function drainCollectorBackfill(input: {
       connection,
       retireSink,
     );
+    for (const update of step.stateUpdates ?? []) {
+      await upsertBrainSyncState(db, update.collectorId, {
+        ...(update.watermark !== undefined
+          ? { watermark: update.watermark }
+          : {}),
+        ...(update.cursor !== undefined
+          ? { backfillCursor: update.cursor }
+          : {}),
+        ...(update.backfillCompletedAt !== undefined
+          ? { backfillCompletedAt: update.backfillCompletedAt }
+          : {}),
+      });
+    }
 
     budget -= step.pages.length;
     ingested += step.pages.length;
@@ -360,8 +375,10 @@ const BRAIN_COLLECTORS: BrainCollector[] = [
   personIdentitiesCollector,
   ripplingWorkersCollector,
   slackPublicChannelsCollector,
+  discordPublicChannelsCollector,
   notionUsersCollector,
   notionPagesCollector,
   granolaMeetingsCollector,
   githubIssuesCollector,
+  linearIssuesCollector,
 ];

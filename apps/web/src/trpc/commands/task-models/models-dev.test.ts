@@ -106,6 +106,34 @@ describe('lookupModelMetadataFromCatalog', () => {
     expect(result.displayName).toBe('GLM 5.2');
   });
 
+  it('resolves Roomote inference models through their OpenRouter upstream', () => {
+    const catalog = buildCatalog({
+      gatewayModelsByLowerSlug: {
+        openrouter: {
+          'openai/gpt-5.6-luna': {
+            id: 'openai/gpt-5.6-luna',
+            name: 'GPT 5.6 Luna',
+            modalities: { input: ['text'] },
+            limit: { context: 400000, output: 32768 },
+            cost: { input: 2, output: 10 },
+          },
+        },
+      },
+    });
+
+    const result = lookupModelMetadataFromCatalog(
+      catalog,
+      'roomote/openai/gpt-5.6-luna',
+    );
+
+    expect(result.metadata).toEqual({
+      contextWindow: 400000,
+      inputTypes: ['text'],
+      inputPricePerToken: 2 / 1_000_000,
+      outputPricePerToken: 10 / 1_000_000,
+    });
+  });
+
   it('matches case-insensitively for mixed-case slugs', () => {
     const catalog = buildCatalog({
       gatewayModelsByLowerSlug: {

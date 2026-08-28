@@ -127,6 +127,11 @@ describe('buildFastAgentSystemPrompt', () => {
       'Call it immediately, before an acknowledgement or other user-visible response',
     );
     expect(prompt).toContain('kickoffMessage');
+    expect(prompt).toContain('"includeImages"');
+    expect(prompt).toContain('images are not attached by default');
+    expect(prompt).toContain(
+      'supported images from the active conversation turn are relevant to that instruction',
+    );
     expect(prompt).toContain("describing the user's work now underway");
     expect(prompt).toContain(
       'The kickoff acknowledges the request, but it is not the only communication expected while longer work continues',
@@ -377,6 +382,9 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).not.toContain(
       'attributes on the current `<slack_message>` identify its sender',
     );
+    expect(prompt).toContain(
+      '`sender_name` and `sender_github` fields identify the human sender',
+    );
   });
 
   it('uses native terminal tools for delegated-task platform events', () => {
@@ -455,6 +463,8 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain('fast mode on a stored automation conversation');
     expect(prompt).toContain('Automation Platform Event');
     expect(prompt).toContain('Execute the automation prompt now');
+    expect(prompt).toContain("closeout's `suggestions` array");
+    expect(prompt).toContain('do not promise reaction-triggered launching');
     expect(prompt).not.toContain('<slack_modern_markdown>');
   });
 

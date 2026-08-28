@@ -2,10 +2,12 @@ import {
   and,
   db,
   deploymentMcpEnablements,
+  discordInstallations,
   eq,
   isNull,
   mcpConnections,
   slackInstallations,
+  resolveDiscordRuntimeCredentials,
 } from '@roomote/db/server';
 import {
   BRAIN_SOURCES,
@@ -20,6 +22,10 @@ import {
 } from '@roomote/types';
 
 import { hasBrainGithubSources } from './brain-github';
+import {
+  findLinearDeploymentMcpConnection,
+  getLinearDeploymentMetadata,
+} from './mcp/linear-connections';
 
 type BrainMcpSourceId = 'granola' | 'notion' | 'rippling';
 type BrainMcpSourceConfig =
@@ -96,10 +102,26 @@ const BRAIN_SOURCE_AVAILABILITY = {
     });
     return Boolean(installation);
   },
+  discord: async () => {
+    const [credentials, installation] = await Promise.all([
+      resolveDiscordRuntimeCredentials(),
+      db.query.discordInstallations.findFirst({
+        columns: { id: true },
+        where: eq(discordInstallations.isActive, true),
+      }),
+    ]);
+    return Boolean(credentials.botToken && installation);
+  },
   notion: async () => Boolean(await findBrainSourceConnectionConfig('notion')),
   granola: async () =>
     Boolean(await findBrainSourceConnectionConfig('granola')),
   github: hasBrainGithubSources,
+  linear: async () => {
+    const connection = await findLinearDeploymentMcpConnection();
+    return Boolean(
+      connection && getLinearDeploymentMetadata(connection.authConfig),
+    );
+  },
   rippling: async () =>
     Boolean(await findBrainSourceConnectionConfig('rippling')),
 } satisfies Record<BrainSourceRequirement, () => Promise<boolean>>;

@@ -1,15 +1,11 @@
 const mocks = vi.hoisted(() => ({
   acquireTurnLock: vi.fn(),
-  acquireRootBindingLock: vi.fn(),
   releaseTurnLock: vi.fn(),
-  releaseRootBindingLock: vi.fn(),
   answerQuestion: vi.fn(),
   createLauncher: vi.fn(),
   launchTask: vi.fn(),
   findSession: vi.fn(),
-  bindConversation: vi.fn(),
   findInstallation: vi.fn(),
-  findCustomAutomation: vi.fn(),
   findArtifacts: vi.fn(),
   findTaskRun: vi.fn(),
   postMessage: vi.fn(),
@@ -18,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   resolveSlackReactionNames: vi.fn(),
   createDiscordProvider: vi.fn(),
   discordPostMessage: vi.fn(),
+  discordEditMessage: vi.fn(),
   createDiscordThread: vi.fn(),
   createTeamsProvider: vi.fn(),
   teamsPostMessage: vi.fn(),
@@ -33,6 +30,11 @@ const mocks = vi.hoisted(() => ({
   retirePrReviewActionMessagesBestEffort: vi.fn(),
   buildSlackPrReviewActionBlocks: vi.fn(),
   resolveUserMcpServerConfigs: vi.fn(),
+  appendSuggestionInstruction: vi.fn((message: string) => message),
+  postSlackSuggestions: vi.fn(),
+  postDiscordSuggestions: vi.fn(),
+  postTeamsSuggestions: vi.fn(),
+  postTelegramSuggestions: vi.fn(),
 }));
 
 vi.mock('@roomote/redis', async (importOriginal) => {
@@ -53,10 +55,7 @@ vi.mock('@roomote/cloud-agents/server', () => ({
   acquireFastAgentTurnLock: mocks.acquireTurnLock,
   answerFastAgentQuestion: mocks.answerQuestion,
   resolveApiBaseUrl: () => 'https://roomote.example.com',
-  fastAgentConversationRepository: {
-    findById: mocks.findSession,
-    getOrCreate: mocks.bindConversation,
-  },
+  fastAgentConversationRepository: { findById: mocks.findSession },
   createFastAgentTaskLauncher:
     ({
       buildTask,
@@ -97,7 +96,6 @@ vi.mock('@roomote/db/server', () => ({
   and: vi.fn((...args: unknown[]) => args),
   eq: vi.fn((...args: unknown[]) => args),
   inArray: vi.fn((...args: unknown[]) => args),
-  getCustomAutomationById: mocks.findCustomAutomation,
   slackInstallations: {
     isActive: 'slack_installations.is_active',
     teamId: 'slack_installations.team_id',
@@ -113,7 +111,6 @@ vi.mock('@roomote/env', () => ({
 
 vi.mock('@roomote/slack', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@roomote/slack')>()),
-  acquireSlackFastRootBindingLock: mocks.acquireRootBindingLock,
   SlackNotifier: class SlackNotifier {
     postMessage = mocks.postMessage;
     updateMessage = mocks.updateMessage;
@@ -167,6 +164,14 @@ vi.mock('../routers/mcp-connections', () => ({
   resolveUserMcpServerConfigs: mocks.resolveUserMcpServerConfigs,
 }));
 
+vi.mock('./fast-automation-suggestions', () => ({
+  appendFastAutomationSuggestionInstruction: mocks.appendSuggestionInstruction,
+  postFastAutomationSuggestionsToSlack: mocks.postSlackSuggestions,
+  postFastAutomationSuggestionsToDiscord: mocks.postDiscordSuggestions,
+  postFastAutomationSuggestionsToTeams: mocks.postTeamsSuggestions,
+  postFastAutomationSuggestionsToTelegram: mocks.postTelegramSuggestions,
+}));
+
 import { deliverFastAgentParentEvent } from './fast-agent-parent-event';
 
 const parent = {
@@ -197,11 +202,7 @@ describe('deliverFastAgentParentEvent', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.acquireTurnLock.mockResolvedValue(mocks.releaseTurnLock);
-    mocks.acquireRootBindingLock.mockResolvedValue(
-      mocks.releaseRootBindingLock,
-    );
     mocks.releaseTurnLock.mockResolvedValue(undefined);
-    mocks.releaseRootBindingLock.mockResolvedValue(undefined);
     mocks.findSession.mockImplementation(
       async ({ fallbackConversation }: { fallbackConversation: unknown }) => ({
         id: parent.sessionId,
@@ -214,19 +215,6 @@ describe('deliverFastAgentParentEvent', () => {
       botAccessToken: 'xoxb-test',
       teamDomain: 'acme',
     });
-    mocks.findCustomAutomation.mockResolvedValue({
-      id: 'automation-1',
-      name: 'Weekly scan',
-    });
-    mocks.bindConversation.mockImplementation(
-      async ({ conversation }: { conversation: unknown }) => ({
-        id: parent.sessionId,
-        userId: 'u1',
-        conversation,
-        compatibilityMessages: [],
-        openCodeSessionId: null,
-      }),
-    );
     mocks.createLauncher.mockReturnValue(mocks.launchTask);
     mocks.findArtifacts.mockResolvedValue([
       {
@@ -247,6 +235,10 @@ describe('deliverFastAgentParentEvent', () => {
       completionEmoji: 'white_check_mark',
     });
     mocks.resolveUserMcpServerConfigs.mockResolvedValue({});
+    mocks.postSlackSuggestions.mockResolvedValue(undefined);
+    mocks.postDiscordSuggestions.mockResolvedValue(undefined);
+    mocks.postTeamsSuggestions.mockResolvedValue(undefined);
+    mocks.postTelegramSuggestions.mockResolvedValue(undefined);
     mocks.setPendingPrReviewAction.mockResolvedValue(undefined);
     mocks.attachPendingPrReviewActionMessage.mockResolvedValue({
       attached: true,
@@ -279,6 +271,7 @@ describe('deliverFastAgentParentEvent', () => {
     });
     mocks.createDiscordProvider.mockResolvedValue({
       postMessage: mocks.discordPostMessage,
+      editMessage: mocks.discordEditMessage,
       createTaskThread: mocks.createDiscordThread,
     });
     mocks.teamsPostMessage.mockResolvedValue({
@@ -496,139 +489,113 @@ describe('deliverFastAgentParentEvent', () => {
     expect(mocks.postMessage).not.toHaveBeenCalled();
   });
 
-  it('creates the first Slack message when a pending Fast automation settles', async () => {
-    const pendingParent = {
-      sessionId: parent.sessionId,
-      conversation: {
-        surface: 'slack' as const,
-        workspaceId: 'T123',
-        conversationId: 'automation-1:occurrence-1',
-        replyTarget: { channelId: 'C123' },
+  it('posts structured suggestions beneath a Fast Slack automation report', async () => {
+    const suggestions = [
+      {
+        title: 'Investigate checkout latency',
+        brief: 'Trace the slow payment-provider requests.',
       },
-    };
-
-    await deliverFastAgentParentEvent({
-      parent: pendingParent,
-      event: {
-        type: 'task_settled',
-        taskId: 'child-task-1',
-        runId: 42,
-        customAutomationId: 'automation-1',
-        status: 'completed',
-        taskUrl: 'https://roomote.example/task/child-task-1',
-        pullRequests: [],
-      },
-    });
-
-    expect(mocks.postMessage).toHaveBeenCalledWith(
-      expect.objectContaining({
-        channel: 'C123',
-        client_msg_id: expect.any(String),
-        text: 'The proof is ready.',
-        blocks: [
-          expect.objectContaining({
-            type: 'context',
-            elements: expect.arrayContaining([
-              expect.objectContaining({ text: 'Weekly scan' }),
-            ]),
-          }),
-          { type: 'markdown', text: 'The proof is ready.' },
-          expect.objectContaining({
-            type: 'actions',
-            elements: expect.arrayContaining([
-              expect.objectContaining({
-                action_id: 'late_bound_automation_view_task',
-              }),
-              expect.objectContaining({
-                action_id: 'late_bound_automation_configure',
-              }),
-            ]),
-          }),
-        ],
-      }),
+    ];
+    mocks.answerQuestion.mockImplementationOnce(
+      async ({
+        adapter,
+      }: {
+        adapter: { postReply: (reply: unknown) => unknown };
+      }) =>
+        adapter.postReply({
+          purpose: 'closeout',
+          message: 'Checkout latency increased this week.',
+          suggestions,
+        }),
     );
-    expect(mocks.updateMessage).not.toHaveBeenCalled();
-    expect(mocks.bindConversation).toHaveBeenCalledWith({
-      userId: 'u1',
-      conversation: {
-        ...pendingParent.conversation,
-        replyTarget: { channelId: 'C123', threadId: '101.001' },
-      },
-    });
-    expect(
-      mocks.acquireRootBindingLock.mock.invocationCallOrder[0],
-    ).toBeLessThan(mocks.postMessage.mock.invocationCallOrder[0]!);
-    expect(mocks.postMessage.mock.invocationCallOrder[0]).toBeLessThan(
-      mocks.bindConversation.mock.invocationCallOrder[0]!,
-    );
-    expect(mocks.bindConversation.mock.invocationCallOrder[0]).toBeLessThan(
-      mocks.releaseRootBindingLock.mock.invocationCallOrder[0]!,
-    );
-  });
 
-  it('keeps a failed pending Fast automation silent in Slack', async () => {
-    const pendingParent = {
-      sessionId: parent.sessionId,
-      conversation: {
-        surface: 'slack' as const,
-        workspaceId: 'T123',
-        conversationId: 'automation-1:occurrence-1',
-        replyTarget: { channelId: 'C123' },
-      },
-    };
-
-    await deliverFastAgentParentEvent({
-      parent: pendingParent,
-      event: {
-        type: 'task_settled',
-        taskId: 'child-task-1',
-        runId: 42,
-        customAutomationId: 'automation-1',
-        status: 'failed',
-        error: 'Sandbox startup failed.',
-        taskUrl: 'https://roomote.example/task/child-task-1',
-        pullRequests: [],
-      },
-    });
-
-    expect(mocks.postMessage).not.toHaveBeenCalled();
-    expect(mocks.updateMessage).not.toHaveBeenCalled();
-    expect(mocks.bindConversation).not.toHaveBeenCalled();
-  });
-
-  it('replaces an input root with the completed automation result', async () => {
     await deliverFastAgentParentEvent({
       parent,
       event: {
-        type: 'task_settled',
-        taskId: 'child-task-1',
-        runId: 42,
-        customAutomationId: 'automation-1',
-        status: 'completed',
-        taskUrl: 'https://roomote.example/task/child-task-1',
-        pullRequests: [],
+        type: 'automation_triggered',
+        eventId: 'occurrence-1',
+        automationId: 'automation-1',
+        automationName: 'Weekly scan',
+        prompt: 'Find actionable regressions.',
+        trigger: 'schedule',
+        rootMessageId: '100.001',
       },
     });
 
-    expect(mocks.updateMessage).toHaveBeenCalledWith({
-      channel: 'C123',
-      ts: '100.001',
-      message: expect.objectContaining({
-        text: 'The proof is ready.',
-        blocks: expect.arrayContaining([
-          { type: 'markdown', text: 'The proof is ready.' },
-          expect.objectContaining({
-            type: 'actions',
-            elements: expect.arrayContaining([
-              expect.objectContaining({
-                action_id: 'late_bound_automation_view_task',
-              }),
-            ]),
-          }),
-        ]),
-      }),
+    expect(mocks.appendSuggestionInstruction).toHaveBeenCalledWith(
+      'Checkout latency increased this week.',
+      'slack',
+      true,
+    );
+    expect(mocks.postSlackSuggestions).toHaveBeenCalledWith({
+      slack: expect.any(Object),
+      channelId: 'C123',
+      threadTs: '100.001',
+      eventId: 'occurrence-1',
+      createdByUserId: 'u1',
+      suggestions,
     });
-    expect(mocks.postMessage).not.toHaveBeenCalled();
+  });
+
+  it('posts Discord automation suggestions when no editable root message exists', async () => {
+    const discordParent = {
+      ...parent,
+      conversation: {
+        surface: 'discord' as const,
+        workspaceId: 'guild-1',
+        conversationId: 'thread-1',
+        replyTarget: { channelId: 'channel-1', threadId: 'thread-1' },
+      },
+    };
+    const suggestions = [
+      { title: 'Verify retry behavior', brief: 'Exercise the failure path.' },
+    ];
+    mocks.answerQuestion.mockImplementationOnce(
+      async ({
+        adapter,
+      }: {
+        adapter: { postReply: (reply: unknown) => unknown };
+      }) =>
+        adapter.postReply({
+          purpose: 'closeout',
+          message: 'Retry failures increased.',
+          suggestions,
+        }),
+    );
+
+    await deliverFastAgentParentEvent({
+      parent: discordParent,
+      event: {
+        type: 'automation_triggered',
+        eventId: 'occurrence-2',
+        automationId: 'automation-2',
+        automationName: 'Retry scan',
+        prompt: 'Find actionable retry failures.',
+        trigger: 'schedule',
+      },
+    });
+
+    expect(mocks.discordEditMessage).not.toHaveBeenCalled();
+    expect(mocks.discordPostMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channelId: 'channel-1',
+        threadId: 'thread-1',
+        text: 'Retry failures increased.',
+      }),
+    );
+    expect(mocks.postDiscordSuggestions).toHaveBeenCalledWith({
+      provider: expect.any(Object),
+      channelId: 'channel-1',
+      threadId: 'thread-1',
+      eventId: 'occurrence-2',
+      createdByUserId: 'u1',
+      suggestions,
+    });
+    expect(mocks.recordProviderMessage).toHaveBeenCalledWith({
+      sessionId: parent.sessionId,
+      conversation: discordParent.conversation,
+      messageId: 'message-1',
+    });
   });
 
   it('relays child lifecycle events into a stored automation conversation', async () => {
@@ -896,6 +863,92 @@ describe('deliverFastAgentParentEvent', () => {
     );
     expect(mocks.teamsPostMessage).not.toHaveBeenCalled();
   });
+
+  it.each([
+    {
+      surface: 'teams' as const,
+      workspaceId: 'tenant-1',
+      channelId: 'teams-channel-1',
+      threadId: 'teams-root-1',
+      rootMessageId: 'teams-root-1',
+      postSuggestions: mocks.postTeamsSuggestions,
+    },
+    {
+      surface: 'teams' as const,
+      workspaceId: 'tenant-1',
+      channelId: 'teams-channel-1',
+      threadId: undefined,
+      rootMessageId: undefined,
+      postSuggestions: mocks.postTeamsSuggestions,
+    },
+    {
+      surface: 'telegram' as const,
+      workspaceId: 'telegram-chat-1',
+      channelId: 'telegram-chat-1',
+      threadId: undefined,
+      rootMessageId: undefined,
+      postSuggestions: mocks.postTelegramSuggestions,
+    },
+  ])(
+    'posts structured suggestions beneath a Fast $surface automation report',
+    async ({
+      surface,
+      workspaceId,
+      channelId,
+      threadId,
+      rootMessageId,
+      postSuggestions,
+    }) => {
+      const suggestions = [
+        { title: 'Verify retry behavior', brief: 'Exercise the failure path.' },
+      ];
+      mocks.answerQuestion.mockImplementationOnce(
+        async ({
+          adapter,
+        }: {
+          adapter: { postReply: (reply: unknown) => unknown };
+        }) =>
+          adapter.postReply({
+            purpose: 'closeout',
+            message: 'Retry failures increased.',
+            suggestions,
+          }),
+      );
+
+      await deliverFastAgentParentEvent({
+        parent: {
+          ...parent,
+          conversation: {
+            surface,
+            workspaceId,
+            conversationId: `${surface}-occurrence-1`,
+            replyTarget: {
+              channelId,
+              ...(threadId ? { threadId } : {}),
+            },
+          },
+        },
+        event: {
+          type: 'automation_triggered',
+          eventId: `${surface}-occurrence-1`,
+          automationId: 'automation-1',
+          automationName: 'Retry scan',
+          prompt: 'Find actionable retry failures.',
+          trigger: 'schedule',
+          ...(rootMessageId ? { rootMessageId } : {}),
+        },
+      });
+
+      expect(postSuggestions).toHaveBeenCalledWith(
+        expect.objectContaining({
+          channelId,
+          eventId: `${surface}-occurrence-1`,
+          createdByUserId: 'u1',
+          suggestions,
+        }),
+      );
+    },
+  );
 
   it("refreshes Teams routing from the persisted session's current channel", async () => {
     const fallbackConversation = {

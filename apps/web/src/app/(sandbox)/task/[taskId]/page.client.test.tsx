@@ -7,7 +7,7 @@ import { RunStatus, TaskPayloadKind } from '@roomote/types';
 const {
   replaceMock,
   recordVisitMock,
-  setSidebarVisibleMock,
+  useResponsiveSandboxSidebarMock,
   useTaskSessionMock,
   usePathnameMock,
   usePageTitleMock,
@@ -20,7 +20,7 @@ const {
 } = vi.hoisted(() => ({
   replaceMock: vi.fn(),
   recordVisitMock: vi.fn(),
-  setSidebarVisibleMock: vi.fn(),
+  useResponsiveSandboxSidebarMock: vi.fn(),
   useTaskSessionMock: vi.fn(),
   usePathnameMock: vi.fn(() => '/task/route-task'),
   usePageTitleMock: vi.fn(),
@@ -65,9 +65,7 @@ vi.mock('@/hooks/useRecentTasks', () => ({
 }));
 
 vi.mock('../../use-sandbox-layout', () => ({
-  useSandboxLayout: () => ({
-    setSidebarVisible: setSidebarVisibleMock,
-  }),
+  useResponsiveSandboxSidebar: useResponsiveSandboxSidebarMock,
 }));
 
 vi.mock('./hooks', () => ({
@@ -189,6 +187,7 @@ describe('SandboxPage', () => {
     expect(useTaskMessageEnvelopesMock).toHaveBeenCalledWith('route-task', {
       enabled: true,
     });
+    expect(useResponsiveSandboxSidebarMock).toHaveBeenCalledWith('route-task');
     expect(screen.getByTestId('sandbox-provider')).toBeInTheDocument();
     expect(screen.getByTestId('live-content')).toBeInTheDocument();
     expect(screen.queryByTestId('startup')).not.toBeInTheDocument();

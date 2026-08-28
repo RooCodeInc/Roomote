@@ -52,6 +52,18 @@ describe('review-code GitHub workflow paths', () => {
     );
   });
 
+  it('publishes findings as comments instead of change-request reviews', () => {
+    expect(skillContent).toContain(
+      'Do not submit a `request_changes` review in any pull-request review path.',
+    );
+    expect(skillContent).toContain(
+      'Publish actionable findings as inline comments plus the canonical summary',
+    );
+    expect(skillContent).toContain(
+      'reserve `submit_pull_request_review` for `approve` only in the approval-enabled clean paths.',
+    );
+  });
+
   it('keeps the consolidated GitHub review paths in review-code', () => {
     expect(skillContent).toContain(
       '<appendix name="review-github-pr" id="appendix-review-github-pr">',
@@ -98,7 +110,7 @@ describe('review-code GitHub workflow paths', () => {
       );
     }
     expect(skillContent).toContain(
-      'When `existing_review_comments` or `issue_comments` are missing, or when current thread or top-level discussion state must be revalidated before a side effect, call `mcp__roomote__manage_source_control` with `action: "list_pull_request_comments"`.',
+      'When `existing_review_comments` or `issue_comments` are missing, or when current thread, top-level review, or discussion state must be revalidated before a side effect, call `mcp__roomote__manage_source_control` with `action: "list_pull_request_comments"`.',
     );
     expect(skillContent).not.toContain('gh pr view');
     expect(skillContent).not.toContain('gh pr diff');
@@ -187,6 +199,16 @@ describe('review-code GitHub workflow paths', () => {
     expect(skillContent).toContain(
       'On providers where approval maps to a vote or is not permitted for the token identity, the tool reports `applied: false` with warnings; report that gap honestly instead of claiming the pull request was approved.',
     );
+    expect(skillContent).toContain(
+      'top-level `reviews` with review ids and states when exposed',
+    );
+    expect(skillContent).toContain(
+      'dismiss each unique top-level review whose `state` is `CHANGES_REQUESTED` and whose author matches the normalized Roomote-managed login set',
+    );
+    expect(skillContent).toContain(
+      '`action: "dismiss_pull_request_review"`, that review\'s `reviewId`, and body `Requested changes have been addressed.`',
+    );
+    expect(skillContent).toContain("Never dismiss another reviewer's review.");
     expect(skillContent).toContain(
       '<summary>Use when you need actionable pull-request review findings, live provider context discovery, and one canonical summary comment without approval.</summary>',
     );

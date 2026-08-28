@@ -40,6 +40,9 @@ export function TaskModelSettingsPage() {
         <div className="md:hidden">{recommendationsCallout}</div>
         <InferenceProviderSection
           providerSetup={providerSetup}
+          trialInferenceActive={Boolean(
+            providerSetupQuery.data?.trialInferenceActive,
+          )}
           providerSetupPending={providerSetupQuery.isPending}
           connectedProviders={connectedProviders}
           availableProviders={availableProviders}

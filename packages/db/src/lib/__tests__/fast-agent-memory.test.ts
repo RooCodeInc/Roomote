@@ -18,6 +18,7 @@ import {
   releaseFastAgentMemoryEvents,
   settleFastAgentMemoryEvent,
 } from '../../server';
+import { runMemoryOutboxLifecycleContract } from './memory-outbox-lifecycle.contract';
 
 const createdUserIds: string[] = [];
 
@@ -295,4 +296,43 @@ describe('claim/release/mark', () => {
         .where(eq(fastAgentMemoryEvents.conversationId, conversation.id)),
     ).toHaveLength(0);
   });
+});
+
+runMemoryOutboxLifecycleContract('Fast memory', () => {
+  let conversationId: string | null = null;
+
+  return {
+    async createEvent() {
+      const conversation = await makeConversation();
+      conversationId = conversation.id;
+      await appendFastAgentMemory(db, conversation.id, 'first fact');
+      const [event] = await db
+        .select()
+        .from(fastAgentMemoryEvents)
+        .where(eq(fastAgentMemoryEvents.conversationId, conversation.id));
+      return event!;
+    },
+    claim: () => claimPendingFastAgentMemoryEvents(db, 10),
+    release: (ids) => releaseFastAgentMemoryEvents(db, ids),
+    mark: (id, status, error) =>
+      markFastAgentMemoryEvent(db, id, status, error),
+    settle: (id, revision, outcome, error) =>
+      settleFastAgentMemoryEvent(db, id, revision, outcome, error),
+    async revise() {
+      await appendFastAgentMemory(db, conversationId!, 'newer fact');
+    },
+    async age(id) {
+      await db
+        .update(fastAgentMemoryEvents)
+        .set({ updatedAt: sql`now() - interval '16 minutes'` })
+        .where(eq(fastAgentMemoryEvents.id, id));
+    },
+    async read(id) {
+      const [row] = await db
+        .select()
+        .from(fastAgentMemoryEvents)
+        .where(eq(fastAgentMemoryEvents.id, id));
+      return row!;
+    },
+  };
 });

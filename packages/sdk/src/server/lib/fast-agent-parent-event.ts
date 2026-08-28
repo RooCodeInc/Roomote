@@ -18,7 +18,6 @@ import {
   db,
   customAutomations,
   eq,
-  getCustomAutomationById,
   inArray,
   slackInstallations,
   taskArtifacts,
@@ -27,7 +26,6 @@ import {
 } from '@roomote/db/server';
 import { Env, getArtifactSigningKey } from '@roomote/env';
 import {
-  acquireSlackFastRootBindingLock,
   buildSlackPrReviewActionBlocks,
   createFastAgentSlackLiveTaskLauncher,
   postSlackThreadMessageWithFooterText,
@@ -56,6 +54,13 @@ import {
 
 import { resolveUserMcpServerConfigs } from '../routers/mcp-connections';
 import { buildCustomAutomationSlackMessage } from './manager-slack';
+import {
+  appendFastAutomationSuggestionInstruction,
+  postFastAutomationSuggestionsToDiscord,
+  postFastAutomationSuggestionsToSlack,
+  postFastAutomationSuggestionsToTeams,
+  postFastAutomationSuggestionsToTelegram,
+} from './fast-automation-suggestions';
 
 import {
   buildSignedArtifactRawUrl,
@@ -146,7 +151,6 @@ export type FastAgentParentEvent =
       type: 'task_settled';
       taskId: string;
       runId: number;
-      customAutomationId?: string;
       title?: string;
       status: string;
       error?: string;
@@ -337,11 +341,14 @@ type FastAgentParentTurn = {
 
 function createFastAgentAutomationTaskLauncher(params: {
   userId: string;
-  conversation: FastAgentConversation;
-  automationId: string;
-  automationName: string;
+  conversation: Extract<FastAgentConversation, { surface: 'automation' }>;
   event: FastAgentParentEvent;
 }): LaunchFastAgentTask {
+  const automationName =
+    params.event.type === 'automation_triggered'
+      ? params.event.automationName
+      : 'Custom automation';
+
   return createFastAgentTaskLauncher({
     userId: params.userId,
     surface: 'system',
@@ -354,15 +361,15 @@ function createFastAgentAutomationTaskLauncher(params: {
       kind: 'automation',
       key: 'custom_automation',
       actor: {
-        externalId: params.automationId,
-        displayName: params.automationName,
+        externalId: params.conversation.workspaceId,
+        displayName: automationName,
       },
     },
     afterKickoff: async (taskRun) => {
       await db
         .update(customAutomations)
         .set({ lastLaunchedTaskId: taskRun.taskId })
-        .where(eq(customAutomations.id, params.automationId));
+        .where(eq(customAutomations.id, params.conversation.workspaceId));
     },
     onQueueFailure: async (taskRun) => {
       await db
@@ -370,7 +377,7 @@ function createFastAgentAutomationTaskLauncher(params: {
         .set({ lastLaunchedTaskId: null })
         .where(
           and(
-            eq(customAutomations.id, params.automationId),
+            eq(customAutomations.id, params.conversation.workspaceId),
             eq(customAutomations.lastLaunchedTaskId, taskRun.taskId),
           ),
         );
@@ -380,7 +387,6 @@ function createFastAgentAutomationTaskLauncher(params: {
       payload: {
         repo: ALL_REPOSITORIES,
         description: prompt,
-        customAutomationId: params.automationId,
         ...buildFastAgentChildTaskMetadata({
           sessionId: parentSessionId,
           conversation: params.conversation,
@@ -424,11 +430,6 @@ async function createAutomationFastAgentParentTurn(params: {
       launchTask: createFastAgentAutomationTaskLauncher({
         userId: session.userId,
         conversation: session.conversation,
-        automationId: session.conversation.workspaceId,
-        automationName:
-          params.event.type === 'automation_triggered'
-            ? params.event.automationName
-            : 'Custom automation',
         event: params.event,
       }),
       postReply: async () => {
@@ -513,24 +514,8 @@ async function createSlackFastAgentParentTurn(params: {
 
   const conversation = session.conversation;
   const slack = new SlackNotifier(installation.botAccessToken);
-  const threadId = conversation.replyTarget.threadId;
-  const pendingAutomationRoot = !threadId;
-  const customAutomationId =
-    params.event.type === 'automation_triggered'
-      ? params.event.automationId
-      : params.event.type === 'task_settled'
-        ? params.event.customAutomationId
-        : undefined;
-  const customAutomation = customAutomationId
-    ? await getCustomAutomationById(customAutomationId)
-    : null;
-  const automationName =
-    params.event.type === 'automation_triggered'
-      ? params.event.automationName
-      : (customAutomation?.name ?? 'Custom automation');
 
   if (
-    conversation.replyTarget.threadId &&
     params.event.type === 'pull_request_status_changed' &&
     params.event.status === 'merged'
   ) {
@@ -546,25 +531,22 @@ async function createSlackFastAgentParentTurn(params: {
     userId: session.userId,
     conversation,
     adapter: {
-      launchTask: pendingAutomationRoot
-        ? createFastAgentAutomationTaskLauncher({
-            userId: session.userId,
-            conversation,
-            automationId: customAutomationId ?? conversation.conversationId,
-            automationName,
-            event: params.event,
-          })
-        : createFastAgentSlackLiveTaskLauncher({
-            slack,
-            userId: session.userId,
-            teamId: conversation.workspaceId,
-            ...(installation.teamDomain
-              ? { teamDomain: installation.teamDomain }
-              : {}),
-            channelId: conversation.replyTarget.channelId,
-            threadTs: threadId!,
-          }),
-      postReply: async ({ message, imageArtifactIds = [], kickoff }) => {
+      launchTask: createFastAgentSlackLiveTaskLauncher({
+        slack,
+        userId: session.userId,
+        teamId: conversation.workspaceId,
+        ...(installation.teamDomain
+          ? { teamDomain: installation.teamDomain }
+          : {}),
+        channelId: conversation.replyTarget.channelId,
+        threadTs: conversation.replyTarget.threadId,
+      }),
+      postReply: async ({
+        message,
+        imageArtifactIds = [],
+        suggestions = [],
+        kickoff,
+      }) => {
         const images = await buildSelectedImages({
           artifactIds: imageArtifactIds,
           event: params.event,
@@ -586,100 +568,43 @@ async function createSlackFastAgentParentTurn(params: {
               }
             : null;
 
-        const contentBlocks = [
-          { type: 'markdown' as const, text: message },
-          ...images.map((image) => ({
-            type: 'image' as const,
-            image_url: image.url,
-            alt_text: image.altText,
-          })),
-        ];
-        if (
-          params.event.type === 'task_settled' &&
-          customAutomationId &&
-          params.event.status !== 'completed'
-        ) {
-          return;
-        }
-
-        if (pendingAutomationRoot) {
-          const shouldPostResult =
-            !kickoff &&
-            (params.event.type === 'automation_triggered' ||
-              (params.event.type === 'task_settled' &&
-                params.event.status === 'completed'));
-          if (!shouldPostResult || !customAutomationId) {
-            return;
-          }
-
-          const releaseRootBindingLock = await acquireSlackFastRootBindingLock({
-            teamId: conversation.workspaceId,
-            channelId: conversation.replyTarget.channelId,
-          });
-          let messageTs: string | undefined;
-          try {
-            messageTs = await slack.postMessage({
-              channel: conversation.replyTarget.channelId,
-              ...buildCustomAutomationSlackMessage({
-                automationId: customAutomationId,
-                automationName,
-                text: message,
-                contentBlocks,
-                ...(params.event.type === 'task_settled'
-                  ? { taskUrl: params.event.taskUrl }
-                  : {}),
-              }),
-              unfurl_links: false,
-              unfurl_media: false,
-              client_msg_id: buildSlackClientMessageId(
-                `fast-automation-root:${conversation.conversationId}`,
-              ),
-            });
-            if (!messageTs) {
-              throw new Error(
-                'Slack did not create the Fast automation result.',
-              );
-            }
-            await fastAgentConversationRepository.getOrCreate({
-              userId: session.userId,
-              conversation: {
-                ...conversation,
-                replyTarget: {
-                  ...conversation.replyTarget,
-                  threadId: messageTs,
-                },
-              },
-            });
-          } finally {
-            await releaseRootBindingLock().catch(() => {});
-          }
-          params.onReplyPosted();
-          return { messageId: messageTs };
-        }
-
-        if (
-          !kickoff &&
-          (params.event.type === 'automation_triggered' ||
-            (params.event.type === 'task_settled' && customAutomationId))
-        ) {
+        if (params.event.type === 'automation_triggered' && !kickoff) {
+          const reportMessage = appendFastAutomationSuggestionInstruction(
+            message,
+            'slack',
+            suggestions.length > 0,
+          );
+          const contentBlocks = [
+            { type: 'markdown' as const, text: reportMessage },
+            ...images.map((image) => ({
+              type: 'image' as const,
+              image_url: image.url,
+              alt_text: image.altText,
+            })),
+          ];
           const updated = await slack.updateMessage({
             channel: conversation.replyTarget.channelId,
-            ts:
-              params.event.type === 'automation_triggered'
-                ? (params.event.rootMessageId ?? threadId!)
-                : threadId!,
+            ts: params.event.rootMessageId ?? conversation.replyTarget.threadId,
             message: buildCustomAutomationSlackMessage({
-              automationId: customAutomationId!,
-              automationName,
-              text: message,
+              automationId: params.event.automationId,
+              automationName: params.event.automationName,
+              text: reportMessage,
               contentBlocks,
-              ...(params.event.type === 'task_settled'
-                ? { taskUrl: params.event.taskUrl }
-                : {}),
             }),
           });
           if (!updated) {
             throw new Error('Slack did not update the Fast automation root.');
+          }
+          if (suggestions.length > 0) {
+            await postFastAutomationSuggestionsToSlack({
+              slack,
+              channelId: conversation.replyTarget.channelId,
+              threadTs:
+                params.event.rootMessageId ?? conversation.replyTarget.threadId,
+              eventId: params.event.eventId,
+              createdByUserId: session.userId,
+              suggestions,
+            });
           }
           params.onReplyPosted();
           return;
@@ -695,14 +620,14 @@ async function createSlackFastAgentParentTurn(params: {
             prNumber: action.prNumber,
             prUrl: action.prUrl,
             channelId: conversation.replyTarget.channelId,
-            threadId: threadId ?? null,
+            threadId: conversation.replyTarget.threadId,
             followUpPrompt: action.followUpPrompt,
           });
         }
         const messageTs = await postSlackThreadMessageWithFooterText({
           slack,
           channel: conversation.replyTarget.channelId,
-          threadTs: threadId!,
+          threadTs: conversation.replyTarget.threadId,
           text: action ? `${message}\n${action.question}` : message,
           bodyBlocks: action
             ? buildSlackPrReviewActionBlocks({
@@ -936,7 +861,12 @@ async function createDiscordFastAgentParentTurn(params: {
         userId: session.userId,
         conversation,
       }),
-      postReply: async ({ message, imageArtifactIds = [], kickoff }) => {
+      postReply: async ({
+        message,
+        imageArtifactIds = [],
+        suggestions = [],
+        kickoff,
+      }) => {
         const images = await buildSelectedImages({
           artifactIds: imageArtifactIds,
           event: params.event,
@@ -958,23 +888,53 @@ async function createDiscordFastAgentParentTurn(params: {
               }
             : null;
 
-        if (
-          params.event.type === 'automation_triggered' &&
-          params.event.rootMessageId &&
-          !kickoff
-        ) {
-          await provider.editMessage({
-            channelId:
-              conversation.replyTarget.threadId ??
-              conversation.replyTarget.channelId,
-            messageId: params.event.rootMessageId,
-            text: message,
-          });
+        if (params.event.type === 'automation_triggered' && !kickoff) {
+          const reportMessage = appendFastAutomationSuggestionInstruction(
+            message,
+            'discord',
+            suggestions.length > 0,
+          );
+          let reportMessageId = params.event.rootMessageId;
+          if (params.event.rootMessageId) {
+            await provider.editMessage({
+              channelId:
+                conversation.replyTarget.threadId ??
+                conversation.replyTarget.channelId,
+              messageId: params.event.rootMessageId,
+              text: reportMessage,
+            });
+          } else {
+            const posted = await provider.postMessage({
+              ...conversation.replyTarget,
+              idempotencyKey: buildEventClientMessageSeed(params.event),
+              text: reportMessage,
+              textFormat: 'markdown',
+              images,
+            });
+            reportMessageId = posted.messageId;
+          }
+          if (!reportMessageId) {
+            throw new Error(
+              'Discord did not return a Fast automation report message id.',
+            );
+          }
           await recordFastAgentConversationMessageBestEffort({
             sessionId: session.id,
             conversation,
-            messageId: params.event.rootMessageId,
+            messageId: reportMessageId,
           });
+          if (suggestions.length > 0) {
+            await postFastAutomationSuggestionsToDiscord({
+              provider,
+              channelId: conversation.replyTarget.channelId,
+              ...(conversation.replyTarget.threadId
+                ? { threadId: conversation.replyTarget.threadId }
+                : {}),
+              eventId: params.event.eventId,
+              createdByUserId: session.userId,
+              suggestions,
+            });
+          }
           params.onReplyPosted();
           return;
         }
@@ -1110,12 +1070,25 @@ async function createTeamsFastAgentParentTurn(params: {
         conversation,
         serviceUrl,
       }),
-      postReply: async ({ message, imageArtifactIds = [], kickoff }) => {
+      postReply: async ({
+        message,
+        imageArtifactIds = [],
+        suggestions = [],
+        kickoff,
+      }) => {
         const images = await buildSelectedImages({
           artifactIds: imageArtifactIds,
           event: params.event,
         });
-        const text = `${message}\n\n${buildFastSessionReplyFooterText({ provider: 'teams', sessionId: params.parent.sessionId })}`;
+        const reportMessage =
+          params.event.type === 'automation_triggered' && !kickoff
+            ? appendFastAutomationSuggestionInstruction(
+                message,
+                'teams',
+                suggestions.length > 0,
+              )
+            : message;
+        const text = `${reportMessage}\n\n${buildFastSessionReplyFooterText({ provider: 'teams', sessionId: params.parent.sessionId })}`;
         if (
           params.event.type === 'automation_triggered' &&
           params.event.rootMessageId &&
@@ -1134,6 +1107,19 @@ async function createTeamsFastAgentParentTurn(params: {
             conversation,
             messageId: params.event.rootMessageId,
           });
+          if (suggestions.length > 0) {
+            await postFastAutomationSuggestionsToTeams({
+              provider,
+              channelId: conversation.replyTarget.channelId,
+              serviceUrl,
+              ...(conversation.replyTarget.threadId
+                ? { threadId: conversation.replyTarget.threadId }
+                : {}),
+              eventId: params.event.eventId,
+              createdByUserId: session.userId,
+              suggestions,
+            });
+          }
           params.onReplyPosted();
           return { messageId: params.event.rootMessageId };
         }
@@ -1150,6 +1136,23 @@ async function createTeamsFastAgentParentTurn(params: {
           textFormat: 'markdown',
           images,
         });
+        if (
+          params.event.type === 'automation_triggered' &&
+          !kickoff &&
+          suggestions.length > 0
+        ) {
+          await postFastAutomationSuggestionsToTeams({
+            provider,
+            channelId: conversation.replyTarget.channelId,
+            serviceUrl,
+            ...(conversation.replyTarget.threadId
+              ? { threadId: conversation.replyTarget.threadId }
+              : {}),
+            eventId: params.event.eventId,
+            createdByUserId: session.userId,
+            suggestions,
+          });
+        }
         await recordFastAgentConversationMessageBestEffort({
           sessionId: session.id,
           conversation,
@@ -1193,20 +1196,49 @@ async function createTelegramFastAgentParentTurn(params: {
         userId: session.userId,
         conversation,
       }),
-      postReply: async ({ message, imageArtifactIds = [] }) => {
+      postReply: async ({
+        message,
+        imageArtifactIds = [],
+        suggestions = [],
+        kickoff,
+      }) => {
         const images = await buildSelectedImages({
           artifactIds: imageArtifactIds,
           event: params.event,
         });
+        const reportMessage =
+          params.event.type === 'automation_triggered' && !kickoff
+            ? appendFastAutomationSuggestionInstruction(
+                message,
+                'telegram',
+                suggestions.length > 0,
+              )
+            : message;
         const posted = await provider.postMessage({
           channelId: conversation.replyTarget.channelId,
           ...(conversation.replyTarget.threadId
             ? { threadId: conversation.replyTarget.threadId }
             : {}),
-          text: `${message}\n\n${buildFastSessionReplyFooterText({ provider: 'telegram', sessionId: params.parent.sessionId })}`,
+          text: `${reportMessage}\n\n${buildFastSessionReplyFooterText({ provider: 'telegram', sessionId: params.parent.sessionId })}`,
           textFormat: 'markdown',
           images,
         });
+        if (
+          params.event.type === 'automation_triggered' &&
+          !kickoff &&
+          suggestions.length > 0
+        ) {
+          await postFastAutomationSuggestionsToTelegram({
+            provider,
+            channelId: conversation.replyTarget.channelId,
+            ...(conversation.replyTarget.threadId
+              ? { threadId: conversation.replyTarget.threadId }
+              : {}),
+            eventId: params.event.eventId,
+            createdByUserId: session.userId,
+            suggestions,
+          });
+        }
         params.onReplyPosted();
         return { messageId: posted.messageId };
       },

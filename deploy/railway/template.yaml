@@ -144,7 +144,6 @@ services:
       # goes over the public origin, exactly as TRPC_URL already does.
       OPENAI_BASE_URL: https://${{api.RAILWAY_PUBLIC_DOMAIN}}/api/brain/inference
       OPENAI_API_KEY: ${{api.R_BRAIN_GATEWAY_TOKEN}}
-      GBRAIN_RERANKER_MODEL: ${{api.R_BRAIN_RERANKER_MODEL}}
       # Create-time, and it has to be the container that receives these: the
       # embedding model and its width are decided when the Brain is created,
       # and the gateway must never substitute a different one afterwards.
@@ -214,7 +213,6 @@ services:
       R_BRAIN_MODEL: ''
       R_BRAIN_EMBEDDING_MODEL: ''
       R_BRAIN_EMBEDDING_DIMENSIONS: ''
-      R_BRAIN_RERANKER_MODEL: ''
       # Railway's private network is IPv6-only and never leaves the project,
       # so the Brain is unreachable from the internet by construction.
       R_GBRAIN_URL: http://${{gbrain.RAILWAY_PRIVATE_DOMAIN}}:8931
@@ -262,7 +260,6 @@ services:
       R_BRAIN_GATEWAY_TOKEN: ${{api.R_BRAIN_GATEWAY_TOKEN}}
       R_BRAIN_MODEL: ${{api.R_BRAIN_MODEL}}
       R_BRAIN_EMBEDDING_MODEL: ${{api.R_BRAIN_EMBEDDING_MODEL}}
-      R_BRAIN_RERANKER_MODEL: ${{api.R_BRAIN_RERANKER_MODEL}}
       R_GBRAIN_URL: ${{api.R_GBRAIN_URL}}
       R_GBRAIN_ADMIN_TOKEN: ${{api.R_GBRAIN_ADMIN_TOKEN}}
       R_APP_ENV: ${{api.R_APP_ENV}}

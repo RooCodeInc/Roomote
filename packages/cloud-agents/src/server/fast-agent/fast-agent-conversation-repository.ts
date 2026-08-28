@@ -81,25 +81,6 @@ function buildIdentityWhere(conversation: FastAgentConversation) {
   );
 }
 
-function buildReplyTargetWhere(conversation: FastAgentConversation) {
-  if (!('replyTarget' in conversation) || !conversation.replyTarget.threadId) {
-    return null;
-  }
-
-  return and(
-    eq(fastAgentConversations.surface, conversation.surface),
-    eq(fastAgentConversations.workspaceId, conversation.workspaceId),
-    eq(
-      fastAgentConversations.currentReplyChannelId,
-      conversation.replyTarget.channelId,
-    ),
-    eq(
-      fastAgentConversations.currentReplyThreadId,
-      conversation.replyTarget.threadId,
-    ),
-  );
-}
-
 function identityMatches(
   record: Pick<
     typeof fastAgentConversations.$inferSelect,
@@ -196,13 +177,6 @@ export const fastAgentConversationRepository: FastAgentConversationRepository =
         let record = await tx.query.fastAgentConversations.findFirst({
           where: buildIdentityWhere(conversation),
         });
-
-        const replyTargetWhere = buildReplyTargetWhere(conversation);
-        if (!record && replyTargetWhere) {
-          record = await tx.query.fastAgentConversations.findFirst({
-            where: replyTargetWhere,
-          });
-        }
 
         if (!record) {
           await tx
@@ -319,24 +293,14 @@ export const fastAgentConversationRepository: FastAgentConversationRepository =
     },
 
     async exists(conversation) {
-      const exact = await db.query.fastAgentConversations.findFirst({
+      const neutral = await db.query.fastAgentConversations.findFirst({
         where: buildIdentityWhere(conversation),
         columns: { id: true },
       });
-      if (exact) {
+      if (neutral) {
         return true;
       }
-
-      const replyTargetWhere = buildReplyTargetWhere(conversation);
-      if (!replyTargetWhere) {
-        return false;
-      }
-
-      const routed = await db.query.fastAgentConversations.findFirst({
-        where: replyTargetWhere,
-        columns: { id: true },
-      });
-      return Boolean(routed);
+      return false;
     },
 
     async appendVisibleMessages({ conversationId: requestedId, messages }) {
