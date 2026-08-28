@@ -74,6 +74,7 @@ import {
   formatAudioAttachmentWarning,
   formatAudioTranscriptionResult,
   getTaskUrl,
+  getOrCreateFastAgentSession,
   resolveAudioTranscriptionMimeType,
   routeTask,
   transcribeAudioAttachment,
@@ -2266,6 +2267,61 @@ teams.post('/', async (c) => {
 
         apiLogger.warn(
           `[teams] Failed to resume Teams task from snapshot for conversation ${metadata.communicationChannelId}: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      }
+    }
+
+    if (tenantId) {
+      const conversation = {
+        surface: 'teams' as const,
+        workspaceId: tenantId,
+        conversationId:
+          metadata.communicationThreadId ??
+          (activity.conversation.conversationType === 'personal'
+            ? fastChannelId
+            : queuedMessage.ts),
+        replyTarget: {
+          channelId: fastChannelId,
+          ...(metadata.communicationThreadId
+            ? { threadId: metadata.communicationThreadId }
+            : {}),
+        },
+      };
+
+      try {
+        const session = await getOrCreateFastAgentSession({
+          userId: mappedUserId,
+          conversation,
+        });
+        void continueFastAgentSurfaceReply({
+          sessionId: session.id,
+          userId: mappedUserId,
+          senderDisplayName: activity.from?.name?.trim() || null,
+          question: queuedMessage.text.trim(),
+          currentMessageId: queuedMessage.ts,
+          ...(queuedMessage.images ? { images: queuedMessage.images } : {}),
+        })
+          .then((continued) => {
+            if (!continued) {
+              apiLogger.warn(
+                `[teams] Default Fast session ${session.id} could not resolve an active delivery route`,
+              );
+            }
+          })
+          .catch((error) => {
+            apiLogger.error(
+              `[teams] Default Fast response failed: ${
+                error instanceof Error ? error.message : String(error)
+              }`,
+            );
+          });
+
+        return c.json({ ok: true, fastAnswered: true, fastDefaulted: true });
+      } catch (error) {
+        apiLogger.warn(
+          `[teams] Failed to initialize the default Fast session; falling back to task routing: ${
             error instanceof Error ? error.message : String(error)
           }`,
         );
