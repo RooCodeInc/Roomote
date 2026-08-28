@@ -1,14 +1,18 @@
+import { cache } from 'react';
+import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 import { z } from 'zod';
 
 import { resolveEffectiveModelRuntimeEnv } from '@roomote/db/server';
 import {
   getTextFromContentBlocks,
+  PRODUCT_NAME,
   REASONING_EFFORT_VALUES,
   type ReasoningEffort,
 } from '@roomote/types';
 
 import { authorize } from '@/lib/server/auth-context';
+import { truncatePageTitle } from '@/lib/page-title';
 import {
   getFastSessionById,
   getFastSessionTasks,
@@ -22,15 +26,8 @@ import { SessionWorkspace, type SessionInfo } from './SessionWorkspace';
 import { SessionTaskCards } from './SessionTaskCards';
 import { SessionReadTracker } from './SessionReadTracker';
 
-export default async function SessionDetailPage({
-  params,
-}: {
-  params: Promise<{ sessionId: string }>;
-}) {
-  const [{ sessionId }, authorizedUser] = await Promise.all([
-    params,
-    authorize(),
-  ]);
+const getSessionPageData = cache(async (sessionId: string) => {
+  const authorizedUser = await authorize();
   if (!authorizedUser.success) {
     notFound();
   }
@@ -52,6 +49,42 @@ export default async function SessionDetailPage({
     : unifiedSession
       ? null
       : await getFastSessionById(authorizedUser, sessionId);
+
+  if (!unifiedSession && !session) {
+    notFound();
+  }
+
+  return { authorizedUser, unifiedSession, session };
+});
+
+type SessionDetailPageProps = {
+  params: Promise<{ sessionId: string }>;
+};
+
+export async function generateMetadata({
+  params,
+}: SessionDetailPageProps): Promise<Metadata> {
+  const { sessionId } = await params;
+  const { unifiedSession, session } = await getSessionPageData(sessionId);
+  const initialUserMessage = session?.messages.find(
+    (message) => message.role === 'user',
+  );
+  const fallbackTitle =
+    getTextFromContentBlocks(initialUserMessage?.contentBlocks ?? [])?.trim() ||
+    'New session';
+  const title = truncatePageTitle(
+    unifiedSession?.title ?? session?.title ?? fallbackTitle,
+  );
+
+  return { title: `${title} | ${PRODUCT_NAME}` };
+}
+
+export default async function SessionDetailPage({
+  params,
+}: SessionDetailPageProps) {
+  const { sessionId } = await params;
+  const { authorizedUser, unifiedSession, session } =
+    await getSessionPageData(sessionId);
   // The chip's "default" must reflect what Fast actually runs with: the
   // deployment's orchestration model, not the task launch default.
   const modelEnv: Record<string, string> =
@@ -127,9 +160,7 @@ export default async function SessionDetailPage({
       </SessionWorkspace>
     );
   }
-  if (!session) {
-    notFound();
-  }
+  if (!session) notFound();
 
   const sessionInfo: SessionInfo = {
     id: session.id,

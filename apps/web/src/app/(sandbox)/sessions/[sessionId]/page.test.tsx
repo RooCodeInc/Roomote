@@ -67,13 +67,38 @@ vi.mock('./SessionTaskCards', () => ({
   SessionTaskCards: () => <div data-testid="session-task-cards" />,
 }));
 
-import SessionDetailPage from './page';
+import SessionDetailPage, { generateMetadata } from './page';
 
 describe('Session detail page', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     getSessionByIdCommandMock.mockResolvedValue(null);
     getFastSessionTasksMock.mockResolvedValue([]);
+  });
+
+  it('uses the Session title in the initial route metadata', async () => {
+    authorizeMock.mockResolvedValue({
+      success: true,
+      userId: 'user-1',
+      isAdmin: false,
+    });
+    getSessionByIdCommandMock.mockResolvedValue({
+      id: '6a1f8f1e-0000-4000-8000-000000000006',
+      title:
+        'Rotate the API keys across every production environment without downtime',
+      fastConversationId: null,
+    });
+
+    await expect(
+      generateMetadata({
+        params: Promise.resolve({
+          sessionId: '6a1f8f1e-0000-4000-8000-000000000006',
+        }),
+      }),
+    ).resolves.toEqual({
+      title:
+        'Rotate the API keys across every production environment with... | Roomote',
+    });
   });
 
   it('uses the shared task workspace and renders supported session data', async () => {

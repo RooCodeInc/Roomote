@@ -33,6 +33,8 @@ import {
 import { preparePromptAttachments } from '@/lib/prompt-attachments';
 import { useOpenSessionTaskPanel } from './session-task-panel-context';
 import { useNarrationMode } from '@/hooks/useNarrationMode';
+import { usePageTitle } from '@/hooks/usePageTitle';
+import { truncatePageTitle } from '@/lib/page-title';
 
 import {
   AcpTranscriptBlockList,
@@ -102,6 +104,7 @@ export function FastSessionTranscript({
   const [isSending, setIsSending] = useState(false);
   const [replyError, setReplyError] = useState<string | null>(null);
   const [title, setTitle] = useState<string | null>(initialTitle);
+  usePageTitle(truncatePageTitle(title ?? fallbackTitle));
 
   useEffect(() => {
     const source = new EventSource(`/api/sessions/${sessionId}/stream`);
