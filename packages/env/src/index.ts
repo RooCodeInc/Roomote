@@ -378,11 +378,10 @@ const serverSchema = {
   R_TRIAL_OPENROUTER_API_KEY: z.string().min(1).optional(),
   // Optional self-run inference upstreams for the Brain gateway. When set,
   // the gateway routes that path's requests there instead of the configured
-  // model provider — embeddings and rerank can move to a local or fleet
+  // model provider — embeddings can move to a local or fleet
   // inference service while chat synthesis keeps flowing to the provider.
   // Model names pass through unrewritten: the upstream owns its own names.
   R_BRAIN_EMBEDDINGS_UPSTREAM_URL: z.string().url().optional(),
-  R_BRAIN_RERANK_UPSTREAM_URL: z.string().url().optional(),
   // One key for both paths: they are the same service in every planned
   // deployment shape. Optional because a compose-network upstream may have
   // no auth at all.
@@ -540,7 +539,6 @@ const OPTIONAL_NON_EMPTY_KEYS = new Set([
   'R_BRAIN_OPENAI_API_KEY',
   'R_TRIAL_OPENROUTER_API_KEY',
   'R_BRAIN_EMBEDDINGS_UPSTREAM_URL',
-  'R_BRAIN_RERANK_UPSTREAM_URL',
   'R_BRAIN_INFERENCE_UPSTREAM_API_KEY',
   'R_BRAIN_GATEWAY_TOKEN',
   'R_BRAIN_GATEWAY_TOKEN_FILE',
@@ -738,7 +736,6 @@ export function isBrainConfigured(env: {
   R_BRAIN_OPENROUTER_API_KEY?: string;
   R_BRAIN_OPENAI_API_KEY?: string;
   R_BRAIN_EMBEDDINGS_UPSTREAM_URL?: string;
-  R_BRAIN_RERANK_UPSTREAM_URL?: string;
   R_BRAIN_INFERENCE_UPSTREAM_API_KEY?: string;
 }): boolean {
   return Boolean(
