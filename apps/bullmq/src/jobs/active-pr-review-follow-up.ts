@@ -27,7 +27,6 @@ import {
 import {
   isExitedRunStatus,
   isSnapshotResumable,
-  RunStatus,
   type TaskPayload,
   TaskPayloadKind,
 } from '@roomote/types';
@@ -104,26 +103,10 @@ async function launchFallbackWithCheckTransfer(
         sql`${taskRuns.payload}->>'launchIdempotencyKey' = ${launchIdempotencyKey}`,
         isNull(taskRuns.canceledAt),
       ),
-      columns: { id: true, status: true },
+      columns: { id: true },
     });
-    if (existingFallback?.status === RunStatus.Canceled) {
-      await db
-        .update(taskRuns)
-        .set({
-          payload: sql`${taskRuns.payload} - 'launchIdempotencyKey'`,
-        })
-        .where(
-          and(
-            eq(taskRuns.id, existingFallback.id),
-            eq(taskRuns.status, RunStatus.Canceled),
-            sql`${taskRuns.payload}->>'launchIdempotencyKey' = ${launchIdempotencyKey}`,
-          ),
-        );
-    }
     const fallbackRun =
-      existingFallback && existingFallback.status !== RunStatus.Canceled
-        ? existingFallback
-        : await launch(launchIdempotencyKey);
+      existingFallback ?? (await launch(launchIdempotencyKey));
     releaseLifecycleLock.signal.throwIfAborted();
 
     await transferGithubPrReviewCheckToRun({
