@@ -809,6 +809,7 @@ export async function answerFastAgentQuestion({
     hasImages: images.length > 0,
     modelRole: FAST_AGENT_MODEL_ROLE,
     turnSource,
+    userId,
   });
   const platformEvent = turnSource === 'platform_event';
   const turnVisibleMessages: ModelMessage[] = [];
@@ -1312,7 +1313,7 @@ export async function answerFastAgentQuestion({
           inferenceRetryNotice: true,
         });
       }
-      diagnostics.recordVisibleReply();
+      diagnostics.recordVisibleReply({ assistantResponse: false });
     };
     const reportProviderRetryEvent = async (
       event: NonTaskProviderRetryEvent,
