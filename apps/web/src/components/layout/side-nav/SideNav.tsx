@@ -1,6 +1,6 @@
 'use client';
 
-import { type ComponentProps, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
@@ -8,18 +8,12 @@ import { keepPreviousData, useQuery } from '@tanstack/react-query';
 
 import {
   Button,
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleIconTrigger,
-  CollapsibleTrigger,
   ListChevronsUpDown,
   Settings,
   Search,
   PanelLeftClose,
   PanelLeftOpen,
   Plus,
-  VectorSquare,
-  SquareDashed,
 } from '@/components/system';
 import { ChatWidgetSideNavItem } from '@/components/layout/ChatWidgetButton';
 import { ReleaseNoticeSideNavItem } from '@/components/layout/release-notices';
@@ -34,37 +28,28 @@ import {
   useHydrateLayoutStore,
   useLayoutStore,
 } from '@/hooks/useLayoutOptions';
-import { useRecentTasks } from '@/hooks/useRecentTasks';
+import { useRecentSessions } from '@/hooks/useRecentSessions';
 import { useAuthorizedUser } from '@/hooks/useUser';
 import { useLiveTaskStatus, useTaskPins } from '@/hooks/tasks';
 import { useTRPC } from '@/trpc/client';
-import { sortTasksByLastActive } from '@/lib/task-order';
 import { cn } from '@/lib/utils';
 import { NewTaskDialog } from '@/components/tasks/NewTaskDialog';
 
 import { getVisiblePrimaryNavItems } from '../navigation-items';
 import { SideNavItem } from './SideNavItem';
+import { SideNavSessionItem } from './SideNavSessionItem';
 import { SideNavTaskItem } from './SideNavTaskItem';
 
-const SIDE_NAV_MAX_VISIBLE_TASKS = 20;
-const SIDE_NAV_INCLUDE_IDS_LIMIT = 20;
+const SIDE_NAV_MAX_VISIBLE_SESSIONS = 20;
 const SIDEBAR_LOGO_SRC = '/logos/r.svg';
-const NO_ENVIRONMENT_GROUP_KEY = '__no_environment__';
-const NO_ENVIRONMENT_GROUP_LABEL = 'No Environment';
-type SideNavQuickAccessTask = ComponentProps<typeof SideNavTaskItem>['task'];
-
-type SideNavTaskGroup = {
-  key: string;
-  label: string;
-  tasks: SideNavQuickAccessTask[];
-};
-
-function getMissingEnvironmentLabel(environmentId: string): string {
-  return `Environment ${environmentId.slice(0, 8)}`;
-}
 
 export function getTaskIdFromPathname(pathname: string): string | null {
   const match = pathname.match(/^\/task\/([^/]+)/);
+  return match?.[1] ?? null;
+}
+
+export function getSessionIdFromPathname(pathname: string): string | null {
+  const match = pathname.match(/^\/sessions\/([^/]+)/);
   return match?.[1] ?? null;
 }
 
@@ -83,7 +68,7 @@ export const SideNav = () => {
   );
   const isSideNavExpanded = hasHydrated && persistedIsSideNavExpanded;
   const trpc = useTRPC();
-  const { recentTaskIds } = useRecentTasks();
+  const { recentSessionIds } = useRecentSessions();
   const [isNewTaskDialogOpen, setIsNewTaskDialogOpen] = useState(false);
   const { pinnedTaskIds, setTaskPinned, isTaskPinMutationPending } =
     useTaskPins();
@@ -92,120 +77,62 @@ export const SideNav = () => {
     () => getTaskIdFromPathname(pathname),
     [pathname],
   );
-  const activeLiveTaskStatus = useLiveTaskStatus(currentTaskId);
-
-  const includeIds = useMemo(
-    () =>
-      [...new Set([...pinnedTaskIds, ...recentTaskIds])].slice(
-        0,
-        SIDE_NAV_INCLUDE_IDS_LIMIT,
-      ),
-    [pinnedTaskIds, recentTaskIds],
+  const currentSessionId = useMemo(
+    () => getSessionIdFromPathname(pathname),
+    [pathname],
   );
+  const activeLiveTaskStatus = useLiveTaskStatus(currentTaskId);
 
   const { data: searchedTasks = [] } = useQuery(
     trpc.tasks.search.queryOptions(
       {
-        limit: SIDE_NAV_MAX_VISIBLE_TASKS,
-        includeIds: includeIds.length > 0 ? includeIds : undefined,
+        limit: Math.max(pinnedTaskIds.length, 1),
+        includeIds: pinnedTaskIds.length > 0 ? pinnedTaskIds : undefined,
       },
       {
-        enabled: isSideNavExpanded,
+        enabled: isSideNavExpanded && pinnedTaskIds.length > 0,
         placeholderData: keepPreviousData,
       },
     ),
   );
 
-  const quickAccessTasks = useMemo(() => {
-    if (searchedTasks.length === 0) {
-      return [];
-    }
-
-    const tasksById = new Map(
-      sortTasksByLastActive(searchedTasks).map((task) => [task.id, task]),
-    );
-    const pinnedSet = new Set(pinnedTaskIds);
-
-    const pinnedTasks = pinnedTaskIds
+  const pinnedQuickAccessTasks = useMemo(() => {
+    const tasksById = new Map(searchedTasks.map((task) => [task.id, task]));
+    return pinnedTaskIds
       .map((taskId) => tasksById.get(taskId))
       .filter((task): task is NonNullable<typeof task> => !!task);
-
-    const remainingTasks = sortTasksByLastActive(searchedTasks).filter(
-      (task) => !pinnedSet.has(task.id),
-    );
-
-    return [...pinnedTasks, ...remainingTasks].slice(
-      0,
-      SIDE_NAV_MAX_VISIBLE_TASKS,
-    );
   }, [searchedTasks, pinnedTaskIds]);
-
   const pinnedTaskIdSet = useMemo(
     () => new Set(pinnedTaskIds),
     [pinnedTaskIds],
   );
-  const pinnedQuickAccessTasks = useMemo(
-    () => quickAccessTasks.filter((task) => pinnedTaskIdSet.has(task.id)),
-    [pinnedTaskIdSet, quickAccessTasks],
+  const recentSessionIdsForQuery = useMemo(
+    () => recentSessionIds.slice(0, SIDE_NAV_MAX_VISIBLE_SESSIONS),
+    [recentSessionIds],
   );
-  const nonPinnedQuickAccessTasks = useMemo(
-    () => quickAccessTasks.filter((task) => !pinnedTaskIdSet.has(task.id)),
-    [pinnedTaskIdSet, quickAccessTasks],
-  );
-  const groupedEnvironmentIds = useMemo(
-    () => [
-      ...new Set(
-        nonPinnedQuickAccessTasks
-          .map((task) => task.taskRun?.payload?.environmentId)
-          .filter((id): id is string => !!id),
-      ),
-    ],
-    [nonPinnedQuickAccessTasks],
-  );
-  const { data: groupedEnvironments = [] } = useQuery(
-    trpc.environments.namesByIds.queryOptions(
-      { ids: groupedEnvironmentIds },
+  const { data: recentSessionsResult } = useQuery(
+    trpc.sessions.list.queryOptions(
       {
-        enabled: isSideNavExpanded && groupedEnvironmentIds.length > 0,
+        ids: recentSessionIdsForQuery,
+        limit: SIDE_NAV_MAX_VISIBLE_SESSIONS,
+      },
+      {
+        enabled: isSideNavExpanded && recentSessionIdsForQuery.length > 0,
         placeholderData: keepPreviousData,
       },
     ),
   );
-  const environmentNameById = useMemo(
-    () =>
-      new Map(
-        groupedEnvironments.map((environment) => [
-          environment.id,
-          environment.name,
-        ]),
-      ),
-    [groupedEnvironments],
-  );
-  const groupedRecentQuickAccessTasks = useMemo(() => {
-    const groups = new Map<string, SideNavTaskGroup>();
-
-    for (const task of nonPinnedQuickAccessTasks) {
-      const environmentId = task.taskRun?.payload?.environmentId ?? null;
-      const groupKey = environmentId ?? NO_ENVIRONMENT_GROUP_KEY;
-      const existingGroup = groups.get(groupKey);
-
-      if (existingGroup) {
-        existingGroup.tasks.push(task);
-        continue;
-      }
-
-      groups.set(groupKey, {
-        key: groupKey,
-        label: environmentId
-          ? (environmentNameById.get(environmentId) ??
-            getMissingEnvironmentLabel(environmentId))
-          : NO_ENVIRONMENT_GROUP_LABEL,
-        tasks: [task],
-      });
-    }
-
-    return Array.from(groups.values());
-  }, [environmentNameById, nonPinnedQuickAccessTasks]);
+  const recentSessions = useMemo(() => {
+    const sessionsById = new Map(
+      (recentSessionsResult?.sessions ?? []).map((session) => [
+        session.id,
+        session,
+      ]),
+    );
+    return recentSessionIdsForQuery
+      .map((sessionId) => sessionsById.get(sessionId))
+      .filter((session): session is NonNullable<typeof session> => !!session);
+  }, [recentSessionIdsForQuery, recentSessionsResult?.sessions]);
   const visibleNavItems = useMemo(
     () => getVisiblePrimaryNavItems({ isAdmin }),
     [isAdmin],
@@ -329,7 +256,7 @@ export const SideNav = () => {
             icon={ListChevronsUpDown}
             label="Expand sidebar"
             tooltip="Expand sidebar"
-            description="Access recent tasks from here"
+            description="Access recent sessions from here"
             expanded={false}
             active={false}
             aria-label="Expand sidebar"
@@ -339,84 +266,53 @@ export const SideNav = () => {
       </div>
 
       <div className="min-h-0 flex-1 overflow-clip">
-        {isSideNavExpanded && quickAccessTasks.length > 0 && (
-          <div className="flex h-full min-h-0 flex-col pt-4 w-(--sidebar-width)">
-            <div className="min-h-0 flex-1 overflow-x-clip overflow-y-auto scroll-thin pr-1 space-y-4">
-              {pinnedQuickAccessTasks.length > 0 && (
-                <div className="flex flex-col gap-1">
-                  <h3 className="text-sm font-semibold pl-2 py-1">
-                    Pinned tasks
-                  </h3>
-                  {pinnedQuickAccessTasks.map((task) => (
-                    <SideNavTaskItem
-                      key={task.id}
-                      task={task}
-                      liveStatus={
-                        currentTaskId === task.id ? activeLiveTaskStatus : null
-                      }
-                      isActive={currentTaskId === task.id}
-                      isPinned={pinnedTaskIdSet.has(task.id)}
-                      isPinPending={isTaskPinMutationPending(task.id)}
-                      expanded
-                      onTogglePin={(nextPinned) =>
-                        setTaskPinned(task.id, nextPinned)
-                      }
-                    />
-                  ))}
-                </div>
-              )}
+        {isSideNavExpanded &&
+          (pinnedQuickAccessTasks.length > 0 || recentSessions.length > 0) && (
+            <div className="flex h-full min-h-0 flex-col pt-4 w-(--sidebar-width)">
+              <div className="min-h-0 flex-1 overflow-x-clip overflow-y-auto scroll-thin pr-1 space-y-4">
+                {pinnedQuickAccessTasks.length > 0 && (
+                  <div className="flex flex-col gap-1">
+                    <h3 className="text-sm font-semibold pl-2 py-1">
+                      Pinned tasks
+                    </h3>
+                    {pinnedQuickAccessTasks.map((task) => (
+                      <SideNavTaskItem
+                        key={task.id}
+                        task={task}
+                        liveStatus={
+                          currentTaskId === task.id
+                            ? activeLiveTaskStatus
+                            : null
+                        }
+                        isActive={currentTaskId === task.id}
+                        isPinned={pinnedTaskIdSet.has(task.id)}
+                        isPinPending={isTaskPinMutationPending(task.id)}
+                        expanded
+                        onTogglePin={(nextPinned) =>
+                          setTaskPinned(task.id, nextPinned)
+                        }
+                      />
+                    ))}
+                  </div>
+                )}
 
-              {groupedRecentQuickAccessTasks.length > 0 && (
-                <div className="flex flex-col">
-                  <h3 className="text-sm font-semibold pl-2 py-1">
-                    Recent tasks
-                  </h3>
-                  {groupedRecentQuickAccessTasks.map((group) => (
-                    <Collapsible key={group.key} defaultOpen className="group">
-                      <CollapsibleTrigger className="flex h-6 w-full cursor-pointer items-center rounded-lg px-2 mt-1 text-left text-foreground/50 transition-colors hover:text-accent-foreground">
-                        <span className="flex min-w-0 items-center gap-2 w-full">
-                          <CollapsibleIconTrigger
-                            icon={
-                              group.key === NO_ENVIRONMENT_GROUP_KEY
-                                ? SquareDashed
-                                : VectorSquare
-                            }
-                            className="size-3.5"
-                            iconClassName="size-3.5"
-                          />
-                          <span className="truncate text-sm grow">
-                            {group.label}
-                          </span>
-                        </span>
-                      </CollapsibleTrigger>
-
-                      <CollapsibleContent className="mx-2">
-                        {group.tasks.map((task) => (
-                          <SideNavTaskItem
-                            key={task.id}
-                            task={task}
-                            liveStatus={
-                              currentTaskId === task.id
-                                ? activeLiveTaskStatus
-                                : null
-                            }
-                            isActive={currentTaskId === task.id}
-                            isPinned={pinnedTaskIdSet.has(task.id)}
-                            isPinPending={isTaskPinMutationPending(task.id)}
-                            expanded
-                            onTogglePin={(nextPinned) =>
-                              setTaskPinned(task.id, nextPinned)
-                            }
-                          />
-                        ))}
-                      </CollapsibleContent>
-                    </Collapsible>
-                  ))}
-                </div>
-              )}
+                {recentSessions.length > 0 && (
+                  <div className="flex flex-col">
+                    <h3 className="text-sm font-semibold pl-2 py-1">
+                      Recent sessions
+                    </h3>
+                    {recentSessions.map((session) => (
+                      <SideNavSessionItem
+                        key={session.id}
+                        session={session}
+                        isActive={currentSessionId === session.id}
+                      />
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
-          </div>
-        )}
+          )}
       </div>
 
       <div className="relative z-10 w-full shrink-0 bg-card">

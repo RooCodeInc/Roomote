@@ -45,6 +45,7 @@ type SessionListInput = {
   model?: string | null;
   period?: number | 'all';
   q?: string | null;
+  ids?: string[];
   before?: string | null;
   limit?: number;
 };
@@ -122,6 +123,7 @@ function listConditions(auth: SessionAuth, input: SessionListInput) {
     sessionScope(auth),
     eq(sessions.visibility, 'visible'),
     isNull(sessions.archivedAt),
+    input.ids ? inArray(sessions.id, input.ids) : undefined,
     input.status ? eq(sessions.cachedStatus, input.status) : undefined,
     input.user ? eq(sessions.ownerUserId, input.user) : undefined,
     input.source
