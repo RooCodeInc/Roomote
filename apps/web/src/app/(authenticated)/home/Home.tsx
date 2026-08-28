@@ -62,6 +62,7 @@ import {
   ModelSelect,
   TaskPromptInput,
   AUTO_WORKSPACE_VALUE,
+  useTaskLaunchConfig,
 } from '@/components/tasks';
 
 import { OnboardingCard } from './OnboardingCard';
@@ -133,11 +134,28 @@ type HomeProps = {
   availableComputeProviders?: readonly ComputeProvider[];
 };
 
-export function Home({
+type NewTaskFormProps = HomeProps & {
+  presentation?: 'home' | 'dialog';
+  onTaskStarted?: () => void;
+};
+
+export function Home(props: HomeProps) {
+  return <NewTaskForm {...props} />;
+}
+
+export function NewTaskForm({
   initialPlaceholderIndex,
-  defaultComputeProvider = 'docker',
+  defaultComputeProvider: defaultComputeProviderOverride,
   availableComputeProviders,
-}: HomeProps) {
+  presentation = 'home',
+  onTaskStarted,
+}: NewTaskFormProps) {
+  const taskLaunchConfig = useTaskLaunchConfig();
+  const defaultComputeProvider =
+    defaultComputeProviderOverride ?? taskLaunchConfig.defaultComputeProvider;
+  const resolvedAvailableComputeProviders =
+    availableComputeProviders ?? taskLaunchConfig.availableComputeProviders;
+  const isHomePresentation = presentation === 'home';
   const router = useRouter();
   const environments = useEnvironments();
   const {
@@ -154,11 +172,11 @@ export function Home({
     (descriptor) => descriptor.provider,
   );
   const computeProviderOptions =
-    availableComputeProviders === undefined
+    resolvedAvailableComputeProviders === undefined
       ? catalogComputeProviders
-      : availableComputeProviders.length > 0
+      : resolvedAvailableComputeProviders.length > 0
         ? catalogComputeProviders.filter((provider) =>
-            availableComputeProviders.includes(provider),
+            resolvedAvailableComputeProviders.includes(provider),
           )
         : [defaultComputeProvider];
   const computeProviderDescriptors = SETUP_COMPUTE_PROVIDER_CATALOG.filter(
@@ -204,8 +222,12 @@ export function Home({
   useEffect(() => setSelectedModelOverrideId(modelParam), [modelParam]);
 
   useEffect(() => {
+    if (!isHomePresentation) {
+      return;
+    }
+
     setIsFeedbackPromptVisible(!isFeedbackPromptDismissed());
-  }, []);
+  }, [isHomePresentation]);
 
   useEffect(() => {
     setPlaceholderIndex(
@@ -232,6 +254,10 @@ export function Home({
   // Dynamically compute the max textarea height so it can grow to fill the
   // available space without pushing the bottom-sheet tabs off screen.
   useEffect(() => {
+    if (!isHomePresentation) {
+      return;
+    }
+
     const column = contentColumnRef.current;
     const card = promptCardRef.current;
 
@@ -284,7 +310,7 @@ export function Home({
       observer.disconnect();
       window.removeEventListener('resize', compute);
     };
-  }, []);
+  }, [isHomePresentation]);
 
   const form = useForm<CreateTaskFormValues>({
     resolver: zodResolver(createTaskFormSchema),
@@ -361,6 +387,7 @@ export function Home({
     error?: string;
   }) => {
     if (result.success && 'taskId' in result) {
+      onTaskStarted?.();
       setIsExiting(true);
       router.push(
         result.sessionId
@@ -394,6 +421,7 @@ export function Home({
       try {
         const { sessionId } =
           await startFastSessionMutation.mutateAsync(payload);
+        onTaskStarted?.();
         setIsExiting(true);
         router.push(`/sessions/${sessionId}`);
       } catch (error) {
@@ -404,7 +432,7 @@ export function Home({
         );
       }
     },
-    [startFastSessionMutation, router],
+    [onTaskStarted, startFastSessionMutation, router],
   );
   const launchTaskModels = useLaunchTaskModels();
   const selectedModelId =
@@ -540,27 +568,33 @@ export function Home({
 
   return (
     <FormProvider {...form}>
-      <div className="flex flex-1 md:items-center justify-center h-[calc(var(--effective-viewport-height)-4rem)] md:h-[calc(var(--effective-viewport-height)-1rem)]">
+      <div
+        className={cn(
+          isHomePresentation &&
+            'flex flex-1 md:items-center justify-center h-[calc(var(--effective-viewport-height)-4rem)] md:h-[calc(var(--effective-viewport-height)-1rem)]',
+        )}
+      >
         <div
           className={cn(
-            'flex w-full max-w-3xl flex-col px-4 justify-center h-full',
+            'flex w-full max-w-3xl flex-col justify-center',
+            isHomePresentation && 'px-4 h-full',
             isExiting && 'animate-[exit-right_500ms_1_forwards]',
           )}
         >
           <div
             ref={contentColumnRef}
             className={cn(
-              'flex flex-col gap-4 md:gap-3 grow flex-1 min-h-0 overflow-y-auto md:overflow-visible md:h-full justify-start md:justify-center transition-all duration-500',
+              'flex flex-col gap-4 md:gap-3 justify-start',
+              isHomePresentation &&
+                'grow flex-1 min-h-0 overflow-y-auto md:overflow-visible md:h-full md:justify-center transition-all duration-500',
               shouldDimMainForm && 'scale-90 blur-[3px] opacity-70',
             )}
           >
-            <h1 className="text-2xl tracking-tight font-bold animate-[enter-down_1s_1] pt-10 md:pt-0">
-              {promptParam ? (
-                <>Let&apos;s do this</>
-              ) : (
-                <>Let&apos;s get started</>
-              )}
-            </h1>
+            {isHomePresentation && (
+              <h1 className="text-2xl tracking-tight font-bold animate-[enter-down_1s_1] pt-10 md:pt-0">
+                New Session
+              </h1>
+            )}
 
             <div
               data-testid="home-top-controls"
@@ -644,94 +678,104 @@ export function Home({
               </Alert>
             )}
 
-            <div className="flex flex-col md:flex-row flex-wrap md:items-center gap-2 animate-[fade-in_1s_1_750ms_backwards]">
-              {!showNoEnvironmentsWarning && <OnboardingCard />}
-              {!showNoEnvironmentsWarning && isFeedbackPromptVisible ? (
-                <button
-                  type="button"
-                  onClick={() => setIsFeedbackDialogOpen(true)}
-                  className="inline-flex cursor-pointer items-center font-semibold whitespace-nowrap text-sm text-muted-foreground/80 hover:text-accent-foreground md:ml-auto"
-                >
-                  <MessageCirclePlus className="mr-1.5 size-4 shrink-0" />
-                  Feedback, please!
-                </button>
-              ) : null}
+            {isHomePresentation && (
+              <div className="flex flex-col md:flex-row flex-wrap md:items-center gap-2 animate-[fade-in_1s_1_750ms_backwards]">
+                {!showNoEnvironmentsWarning && <OnboardingCard />}
+                {!showNoEnvironmentsWarning && isFeedbackPromptVisible ? (
+                  <button
+                    type="button"
+                    onClick={() => setIsFeedbackDialogOpen(true)}
+                    className="inline-flex cursor-pointer items-center font-semibold whitespace-nowrap text-sm text-muted-foreground/80 hover:text-accent-foreground md:ml-auto"
+                  >
+                    <MessageCirclePlus className="mr-1.5 size-4 shrink-0" />
+                    Feedback, please!
+                  </button>
+                ) : null}
+              </div>
+            )}
+          </div>
+          {isHomePresentation && (
+            <div className="shrink-0 pb-[env(safe-area-inset-bottom)]">
+              <BottomSheetTabs onExpandedChange={setIsBottomSheetExpanded} />
             </div>
-          </div>
-          <div className="shrink-0 pb-[env(safe-area-inset-bottom)]">
-            <BottomSheetTabs onExpandedChange={setIsBottomSheetExpanded} />
-          </div>
+          )}
         </div>
       </div>
 
-      <Dialog
-        open={isFeedbackDialogOpen}
-        onOpenChange={setIsFeedbackDialogOpen}
-      >
-        <DialogContent size="xl">
-          <DialogHeader>
-            <DialogTitle>What do you think of Roomote so far?</DialogTitle>
-            <DialogDescription>
-              We&apos;d love to hear about your experience. Anything helps.
-            </DialogDescription>
-          </DialogHeader>
+      {isHomePresentation && (
+        <Dialog
+          open={isFeedbackDialogOpen}
+          onOpenChange={setIsFeedbackDialogOpen}
+        >
+          <DialogContent size="xl">
+            <DialogHeader>
+              <DialogTitle>What do you think of Roomote so far?</DialogTitle>
+              <DialogDescription>
+                We&apos;d love to hear about your experience. Anything helps.
+              </DialogDescription>
+            </DialogHeader>
 
-          <div className="relative my-4 flex flex-col gap-2">
-            <Button
-              asChild
-              variant="default"
-              className="md:max-w-xs md:justify-start"
-            >
-              <a href={FEEDBACK_CALENDLY_URL} target="_blank" rel="noreferrer">
-                <Calendar className="size-3.5" />
-                Schedule time with the team
-              </a>
-            </Button>
-            <Button
-              asChild
-              variant="default"
-              className="md:max-w-xs md:justify-start"
-            >
-              <a href={FEEDBACK_EMAIL_URL}>
-                <Mail className="size-3.5" />
-                Email us
-              </a>
-            </Button>
-            <Button
-              asChild
-              variant="default"
-              className="md:max-w-xs md:justify-start"
-            >
-              <a href={FEEDBACK_DISCORD_URL} target="_blank" rel="noreferrer">
-                <DiscordLogoIcon className="size-3.5" />
-                Join the discord
-              </a>
-            </Button>
-            <Image
-              src="/elements/feedback.png"
-              alt=""
-              width={150}
-              height={150}
-              className="absolute -top-9 right-0 hidden size-44 md:block"
-            />
-          </div>
+            <div className="relative my-4 flex flex-col gap-2">
+              <Button
+                asChild
+                variant="default"
+                className="md:max-w-xs md:justify-start"
+              >
+                <a
+                  href={FEEDBACK_CALENDLY_URL}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  <Calendar className="size-3.5" />
+                  Schedule time with the team
+                </a>
+              </Button>
+              <Button
+                asChild
+                variant="default"
+                className="md:max-w-xs md:justify-start"
+              >
+                <a href={FEEDBACK_EMAIL_URL}>
+                  <Mail className="size-3.5" />
+                  Email us
+                </a>
+              </Button>
+              <Button
+                asChild
+                variant="default"
+                className="md:max-w-xs md:justify-start"
+              >
+                <a href={FEEDBACK_DISCORD_URL} target="_blank" rel="noreferrer">
+                  <DiscordLogoIcon className="size-3.5" />
+                  Join the discord
+                </a>
+              </Button>
+              <Image
+                src="/elements/feedback.png"
+                alt=""
+                width={150}
+                height={150}
+                className="absolute -top-9 right-0 hidden size-44 md:block"
+              />
+            </div>
 
-          <DialogFooter className="md:justify-between">
-            <Button
-              type="button"
-              variant="link"
-              size="sm"
-              onClick={() => {
-                persistFeedbackPromptDismissal();
-                setIsFeedbackPromptVisible(false);
-              }}
-              aria-label="Dismiss feedback prompt"
-            >
-              Don&apos;t show this again
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+            <DialogFooter className="md:justify-between">
+              <Button
+                type="button"
+                variant="link"
+                size="sm"
+                onClick={() => {
+                  persistFeedbackPromptDismissal();
+                  setIsFeedbackPromptVisible(false);
+                }}
+                aria-label="Dismiss feedback prompt"
+              >
+                Don&apos;t show this again
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
     </FormProvider>
   );
 }

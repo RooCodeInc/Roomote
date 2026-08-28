@@ -128,7 +128,7 @@ vi.mock('./BottomSheetTabs', () => ({
   BottomSheetTabs: () => <div>Tabs</div>,
 }));
 
-import { Home } from './Home';
+import { Home, NewTaskForm } from './Home';
 
 vi.mock('@/components/tasks', async () => {
   const actual =
@@ -354,6 +354,9 @@ describe('Home', () => {
   it('renders without an agent selector and starts a Fast session for Auto submissions', async () => {
     render(<Home initialPlaceholderIndex={0} />);
 
+    expect(
+      screen.getByRole('heading', { name: 'New Session' }),
+    ).toBeInTheDocument();
     expect(screen.queryByText(/Select agent /)).not.toBeInTheDocument();
     // Auto was retired from the picker (identical to Fast); Fast is offered.
     expect(screen.getByTestId('allow-auto')).toHaveTextContent('false');
@@ -372,6 +375,29 @@ describe('Home', () => {
 
     expect(mockCreateStandardTaskRun).not.toHaveBeenCalled();
     expect(mockPush).toHaveBeenCalledWith('/sessions/fast-session-1');
+  });
+
+  it('reuses the launch form without Home-only content in dialogs', async () => {
+    const onTaskStarted = vi.fn();
+
+    render(
+      <NewTaskForm
+        initialPlaceholderIndex={0}
+        presentation="dialog"
+        onTaskStarted={onTaskStarted}
+      />,
+    );
+
+    expect(
+      screen.queryByRole('heading', { name: 'New Session' }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText('Onboarding')).not.toBeInTheDocument();
+    expect(screen.queryByText('Tabs')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Use Fast workspace' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Submit prompt' }));
+
+    await waitFor(() => expect(onTaskStarted).toHaveBeenCalledOnce());
   });
 
   it('always defaults to Fast execution', async () => {
