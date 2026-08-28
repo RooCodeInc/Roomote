@@ -61,13 +61,14 @@ async function addMessage(input: {
   userId?: string;
   visible?: boolean;
   text?: string;
+  ts?: number;
 }) {
   await db.insert(fastAgentMessages).values({
     conversationId: input.sessionId,
     eventId: input.eventId,
     turnId: input.eventId,
     turnSeq: 0,
-    ts: Date.now(),
+    ts: input.ts ?? Date.now(),
     eventType: 'roomote_runtime.user_prompt',
     role: 'user',
     contentBlocks: [{ type: 'text', text: input.text ?? input.eventId }],
@@ -109,21 +110,34 @@ describe('Fast session communication through task routes', () => {
       eventId: 'participant-message',
       userId: participant.id,
       text: 'Participant text',
+      ts: 1,
+    });
+    await addMessage({
+      sessionId: session.id,
+      eventId: 'newest-message',
+      text: 'Newest text',
+      ts: 3,
     });
     await addMessage({
       sessionId: session.id,
       eventId: 'hidden-message',
       visible: false,
+      ts: 2,
     });
 
     for (const userId of [owner.id, participant.id]) {
       const response = await createApp(userAuth(userId)).request(
-        `/tasks/${session.id}/messages?order=desc`,
+        `/tasks/${session.id}/messages`,
       );
       expect(response.status).toBe(200);
       await expect(response.json()).resolves.toMatchObject({
-        returned: 1,
+        returned: 2,
         messages: [
+          {
+            taskId: session.id,
+            text: 'Newest text',
+            visibleInTranscript: true,
+          },
           {
             taskId: session.id,
             text: 'Participant text',

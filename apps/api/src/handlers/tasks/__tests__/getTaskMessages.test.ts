@@ -213,7 +213,7 @@ describe('getTaskMessages', () => {
     ]);
 
     const response = await createApp(authContext).request(
-      'http://localhost/tasks/fast-session-1/messages?order=desc&limit=5',
+      'http://localhost/tasks/fast-session-1/messages',
     );
 
     expect(response.status).toBe(200);
@@ -224,7 +224,7 @@ describe('getTaskMessages', () => {
     expect(mockGetFastSessionMessagesForUser).toHaveBeenCalledWith({
       sessionId: 'fast-session-1',
       userId: 'user-1',
-      limit: 5,
+      limit: undefined,
       order: 'desc',
     });
   });

@@ -79,7 +79,7 @@ export async function getTaskMessages(
           sessionId: taskId,
           userId,
           limit,
-          order,
+          order: 'desc',
         });
         if (messages) {
           return c.json({ messages, returned: messages.length });
