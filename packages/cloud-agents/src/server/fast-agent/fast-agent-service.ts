@@ -221,6 +221,7 @@ const launchTaskArgsSchema = z.object({
 const taskMessageArgsSchema = z.object({
   taskId: z.string().trim().min(1).nullable().optional(),
   message: z.string().trim().min(1),
+  includeImages: z.boolean().optional().default(false),
 });
 const taskIdArgsSchema = z.object({
   taskId: z.string().trim().min(1).nullable().optional(),
@@ -1670,7 +1671,11 @@ export async function answerFastAgentQuestion({
             throwIfTurnCancelled();
             const result = await sendFastAgentTaskMessage(
               { userId, apiBaseUrl },
-              { taskId: target.taskId, message: args.message },
+              {
+                taskId: target.taskId,
+                message: args.message,
+                ...(args.includeImages && images.length > 0 ? { images } : {}),
+              },
             );
             return result;
           }

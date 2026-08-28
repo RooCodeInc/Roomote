@@ -80,6 +80,10 @@ describe('Fast native OpenCode tool bridge', () => {
       join(toolsDirectory, 'launch_task.js'),
       'utf8',
     );
+    const sendTaskMessageSource = await readFile(
+      join(toolsDirectory, 'send_task_message.js'),
+      'utf8',
+    );
     const showWidgetSource = await readFile(
       join(toolsDirectory, 'show_widget.js'),
       'utf8',
@@ -130,6 +134,13 @@ describe('Fast native OpenCode tool bridge', () => {
     expect(launchTaskSource).toContain(
       'to run against all active repositories',
     );
+    expect(sendTaskMessageSource).toContain(
+      'includeImages: z.boolean().optional()',
+    );
+    expect(sendTaskMessageSource).toContain(
+      'Current-turn images are attached only when includeImages is true',
+    );
+    expect(sendTaskMessageSource).toContain('defaults to false');
     expect(showWidgetSource).toContain('invoke("show_widget"');
     expect(showWidgetSource).toContain('textFallback: z.string().max(4000)');
     expect(showWidgetSource).toContain(

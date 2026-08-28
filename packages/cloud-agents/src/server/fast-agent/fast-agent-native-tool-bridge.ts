@@ -298,10 +298,11 @@ import { z } from "zod"
 import { invoke } from "../roomote-fast-tool-bridge.js"
 
 export default {
-  description: "Send a new instruction to an active or resumable task delegated by this Fast conversation.",
+  description: "Send a new instruction to an active or resumable task delegated by this Fast conversation. Current-turn images are attached only when includeImages is true.",
   args: {
     taskId: z.string().nullable().optional(),
     message: z.string().min(1),
+    includeImages: z.boolean().optional().describe("Set true to attach supported images from the active conversation turn; defaults to false"),
   },
   execute: (args, context) => invoke("send_task_message", args, context),
 }

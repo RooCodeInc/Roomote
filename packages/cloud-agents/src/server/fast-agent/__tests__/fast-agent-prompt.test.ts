@@ -129,6 +129,9 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain('kickoffMessage');
     expect(prompt).toContain('"includeImages"');
     expect(prompt).toContain('images are not attached by default');
+    expect(prompt).toContain(
+      'supported images from the active conversation turn are relevant to that instruction',
+    );
     expect(prompt).toContain("describing the user's work now underway");
     expect(prompt).toContain(
       'The kickoff acknowledges the request, but it is not the only communication expected while longer work continues',
