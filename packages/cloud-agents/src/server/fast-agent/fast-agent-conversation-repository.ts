@@ -44,16 +44,18 @@ export type FastAgentMessageWrite = Omit<
 export const INTERRUPTED_INFERENCE_RETRY_MESSAGE =
   'The inference retry was interrupted before it completed. Please send the request again.';
 
-const activeInferenceRetryNoticeWhere = and(
-  // The event slot also matches notices written before retry lifecycle
-  // metadata was introduced, so existing stale transcripts self-heal.
-  sql`${fastAgentMessages.eventId} LIKE ${'%:retry-notice%'}`,
-  sql`${fastAgentMessages.metadata}->>'purpose' = 'progress'`,
-  or(
-    sql`${fastAgentMessages.metadata}->>'inferenceRetryActive' = 'true'`,
-    sql`${fastAgentMessages.metadata}->>'inferenceRetryActive' IS NULL`,
-  ),
-);
+function activeInferenceRetryNoticeWhere() {
+  return and(
+    // The event slot also matches notices written before retry lifecycle
+    // metadata was introduced, so existing stale transcripts self-heal.
+    sql`${fastAgentMessages.eventId} LIKE ${'%:retry-notice%'}`,
+    sql`${fastAgentMessages.metadata}->>'purpose' = 'progress'`,
+    or(
+      sql`${fastAgentMessages.metadata}->>'inferenceRetryActive' = 'true'`,
+      sql`${fastAgentMessages.metadata}->>'inferenceRetryActive' IS NULL`,
+    ),
+  );
+}
 
 async function reconcileInferenceRetryNotices(
   database: DatabaseOrTransaction,
@@ -84,7 +86,7 @@ async function reconcileInferenceRetryNotices(
     .where(
       and(
         eq(fastAgentMessages.conversationId, conversationId),
-        activeInferenceRetryNoticeWhere,
+        activeInferenceRetryNoticeWhere(),
       ),
     );
 
@@ -131,7 +133,7 @@ export async function reconcileExpiredFastAgentInferenceRetryNotices(
     )
     .where(
       and(
-        activeInferenceRetryNoticeWhere,
+        activeInferenceRetryNoticeWhere(),
         or(
           isNull(sessions.respondingUntil),
           lt(sessions.respondingUntil, new Date()),
