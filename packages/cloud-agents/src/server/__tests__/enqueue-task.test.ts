@@ -2173,6 +2173,55 @@ describe('enqueueTask source-control provider stamping', () => {
     ).toBeUndefined();
   });
 
+  it('clears attribution for incomplete environment repository coverage', async () => {
+    const userId = await createUser();
+    const repository = await repositoryFactory.create({
+      sourceControlProvider: 'gitea',
+      host: 'gitea.example.com',
+      linkedByUserId: userId,
+      fullName: 'group/environment-api',
+      isActive: true,
+    });
+    createdRepositoryIds.push(repository.id);
+
+    const environment = await environmentFactory.create({
+      createdByUserId: userId,
+      config: {
+        name: 'Incomplete Gitea environment',
+        repositories: [
+          { repository: 'group/environment-api' },
+          { repository: 'group/environment-web' },
+        ],
+      },
+    });
+    createdEnvironmentIds.push(environment.id);
+
+    await db.insert(environmentRepositoryMappings).values({
+      environmentId: environment.id,
+      repositoryId: repository.id,
+    });
+
+    const run = await launchFresh({
+      task: standardTaskInput({
+        payload: {
+          repo: ALL_REPOSITORIES,
+          environmentId: environment.id,
+          sourceControlProvider: 'gitea',
+          sourceControlHost: 'gitea.example.com',
+          description: 'Work in an incompletely mapped environment',
+        },
+      }),
+      initiator: { kind: 'user', userId },
+      workflow: 'standard',
+      surface: 'web',
+      trigger: 'manual',
+    });
+
+    expect(run.payload.sourceControlProvider).toBeUndefined();
+    expect(run.payload.sourceControlHost).toBeUndefined();
+    expect(resolveAggregateSourceControl(run.payload)).toBeUndefined();
+  });
+
   it('stamps a provider map and the first repository provider for a mixed environment', async () => {
     const userId = await createUser();
     const primaryRepository = await repositoryFactory.create({

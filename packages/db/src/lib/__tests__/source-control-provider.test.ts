@@ -182,6 +182,24 @@ describe('resolveWorkspaceSourceControlProvider', () => {
     });
   });
 
+  it('returns no providers when environment mapping coverage is incomplete', async () => {
+    mockEnvironmentRepositories = ['group/web', 'octo/api'];
+    mockRows = [
+      {
+        fullName: 'group/web',
+        host: 'gitea.example.com',
+        sourceControlProvider: 'gitea',
+      },
+    ];
+
+    await expect(
+      resolveWorkspaceRepositoryProviders(dbOrTx, {
+        type: 'environment',
+        environmentId: 'env-1',
+      }),
+    ).resolves.toEqual({});
+  });
+
   it('resolves the provider from a single repository workspace', async () => {
     mockRows = [
       {

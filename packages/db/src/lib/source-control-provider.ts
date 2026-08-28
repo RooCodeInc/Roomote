@@ -190,10 +190,18 @@ async function resolveEnvironmentProviders(
       asc(environmentRepositoryMappings.id),
     );
 
-  return toRepositoryProviderMap(
-    rows,
-    environment.config.repositories.map((repository) => repository.repository),
-  );
+  const repositoryNames = [
+    ...new Set(
+      environment.config.repositories.map(
+        (repository) => repository.repository,
+      ),
+    ),
+  ];
+  const providers = toRepositoryProviderMap(rows, repositoryNames);
+
+  return Object.keys(providers).length === repositoryNames.length
+    ? providers
+    : {};
 }
 
 async function resolveAllRepositoriesProviders(

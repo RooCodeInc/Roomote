@@ -2050,6 +2050,8 @@ async function stampWorkspaceSourceControlProviders(
   const isAggregateWorkspace =
     workspace.type === 'repository_set' ||
     workspace.type === 'all_repositories';
+  const requiresCompleteCoverage =
+    isAggregateWorkspace || workspace.type === 'environment';
   const expectedRepositoryCount =
     workspace.type === 'repository_set'
       ? new Set(workspace.repositories).size
@@ -2060,7 +2062,7 @@ async function stampWorkspaceSourceControlProviders(
   }
 
   if (
-    isAggregateWorkspace &&
+    requiresCompleteCoverage &&
     (Object.keys(repositoryProviders).length === 0 ||
       (expectedRepositoryCount !== undefined &&
         Object.keys(repositoryProviders).length !== expectedRepositoryCount))
