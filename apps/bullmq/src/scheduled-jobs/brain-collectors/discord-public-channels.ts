@@ -516,6 +516,10 @@ async function collectInaccessiblePageRetirements(
       const parsed = parseInventoryEntry(item.slug);
       if (!parsed) return false;
       if (!discovery) return false;
+      if (!discovery.activeGuildIds.has(parsed.guildId)) {
+        ineligibleKeys.add(`${parsed.guildId}/${parsed.channelId}`);
+        return true;
+      }
       if (!discovery.scannedGuildIds.has(parsed.guildId)) return false;
       if (active.has(`${parsed.guildId}/${parsed.channelId}`)) return false;
       if (parsed.isThread && parsed.parentChannelId) {

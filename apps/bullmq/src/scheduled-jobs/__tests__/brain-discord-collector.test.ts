@@ -486,6 +486,43 @@ describe('Discord public-channel Brain collector', () => {
     expect(provider.listGuildActiveThreads).not.toHaveBeenCalledWith('101');
   });
 
+  it('retires indexed pages when a Discord installation is deactivated', async () => {
+    workspace.guilds = [
+      { id: '100', name: 'Active', icon: null },
+      { id: '101', name: 'Inactive', icon: null },
+    ];
+    workspace.installations = [{ guildId: '100' }];
+    workspace.tracked = [
+      {
+        collectorId: 'discord-public-channels:day-pages',
+        itemId: 'discord/101/301/2026-08-20/000',
+        slug: 'discord/101/301/2026-08-20/000',
+        lastSeenAt: new Date('2026-08-20T00:00:00Z'),
+      },
+    ];
+    const { discordPublicChannelsCollector } =
+      await import('../brain-collectors/discord-public-channels');
+
+    const result = await discordPublicChannelsCollector.collect({
+      since: null,
+      now: new Date('2026-08-28T12:00:00Z'),
+      limit: 100,
+    });
+
+    expect(result.pageRetirements).toContainEqual({
+      collectorId: 'discord-public-channels:day-pages',
+      itemId: 'discord/101/301/2026-08-20/000',
+      slug: 'discord/101/301/2026-08-20/000',
+    });
+    const revoked = result.stateUpdates?.find(
+      (update) =>
+        update.collectorId === 'discord-public-channels:revoked-partitions-v1',
+    );
+    expect(JSON.parse(revoked?.cursor ?? '{}')).toEqual({
+      keys: ['101/301'],
+    });
+  });
+
   it('prunes pending backfill for deactivated installations', async () => {
     workspace.installations = [{ guildId: '100' }];
     workspace.syncState.set('discord-public-channels:backfill-pending-v1', {
