@@ -148,6 +148,7 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
   userId: string;
   senderDisplayName: string | null;
   question: string;
+  currentMessageId?: string;
 }): Promise<FastAgentSurfaceReplyDelivery | null> {
   const session = await fastAgentConversationRepository.findById({
     id: params.sessionId,
@@ -439,8 +440,16 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
             ...(conversation.replyTarget.threadId
               ? { threadId: conversation.replyTarget.threadId }
               : {}),
+            ...(params.currentMessageId
+              ? { replyToMessageId: params.currentMessageId }
+              : {}),
             text: `${message}\n\n${buildFastSessionReplyFooterText({ provider: 'telegram', sessionId: session.id })}`,
             textFormat: 'markdown',
+          });
+          await recordFastAgentConversationMessageBestEffort({
+            sessionId: session.id,
+            conversation,
+            messageId: posted.messageId,
           });
           return { messageId: posted.messageId };
         },
@@ -450,6 +459,11 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
             messageId: handle.messageId,
             text: `${message}\n\n${buildFastSessionReplyFooterText({ provider: 'telegram', sessionId: session.id })}`,
             textFormat: 'markdown',
+          });
+          await recordFastAgentConversationMessageBestEffort({
+            sessionId: session.id,
+            conversation,
+            messageId: handle.messageId,
           });
           return handle;
         },

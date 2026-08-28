@@ -3177,7 +3177,9 @@ export const fastAgentProviderMessages = pgTable(
     conversationId: uuid('conversation_id')
       .notNull()
       .references(() => fastAgentConversations.id, { onDelete: 'cascade' }),
-    provider: text('provider').notNull().$type<'discord' | 'teams'>(),
+    provider: text('provider')
+      .notNull()
+      .$type<'discord' | 'teams' | 'telegram'>(),
     workspaceId: text('workspace_id').notNull(),
     channelId: text('channel_id').notNull(),
     threadId: text('thread_id'),
@@ -3203,7 +3205,7 @@ export const fastAgentProviderMessages = pgTable(
     ),
     check(
       'fast_agent_provider_messages_provider_check',
-      sql`${table.provider} in ('discord', 'teams')`,
+      sql`${table.provider} in ('discord', 'teams', 'telegram')`,
     ),
   ],
 );

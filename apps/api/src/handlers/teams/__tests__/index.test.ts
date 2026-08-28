@@ -42,6 +42,7 @@ const {
   continueFastReplyMock,
   findFastReplySessionMock,
   findTeamsConversationRouteMock,
+  getFastSessionMock,
   isFastProviderMessageMock,
 } = vi.hoisted(() => ({
   authAccountsFindFirstMock: vi.fn(),
@@ -104,6 +105,7 @@ const {
   continueFastReplyMock: vi.fn(),
   findFastReplySessionMock: vi.fn(),
   findTeamsConversationRouteMock: vi.fn(),
+  getFastSessionMock: vi.fn(),
   isFastProviderMessageMock: vi.fn(),
 }));
 
@@ -292,6 +294,7 @@ vi.mock('@roomote/sdk/server', () => ({
 vi.mock('@roomote/cloud-agents/server', () => ({
   buildTeamsRoutingContext: buildTeamsRoutingContextMock,
   enqueueTask: enqueueTaskMock,
+  getOrCreateFastAgentSession: getFastSessionMock,
   getTaskUrl: getTaskUrlMock,
   routeTask: routeTaskMock,
 }));
@@ -368,6 +371,9 @@ describe('Teams webhook handler', () => {
     vi.clearAllMocks();
     continueFastReplyMock.mockResolvedValue(true);
     findFastReplySessionMock.mockResolvedValue(null);
+    getFastSessionMock.mockResolvedValue({
+      id: '11111111-1111-4111-8111-111111111111',
+    });
     findTeamsConversationRouteMock.mockResolvedValue({
       serviceUrl: 'https://smba.trafficmanager.net/amer/',
       workspaceId: 'tenant-1',
@@ -717,6 +723,7 @@ describe('Teams webhook handler', () => {
       channelId: '19:conversation@thread.v2',
       threadId: 'activity-root',
       replyToMessageId: 'fast-report-1',
+      userId: 'mapped-user-1',
     });
     expect(findTeamsConversationRouteMock).toHaveBeenCalledWith(
       '19:conversation@thread.v2',
@@ -1232,8 +1239,8 @@ describe('Teams webhook handler', () => {
     expect(queueCommunicationMessageMock).not.toHaveBeenCalled();
   });
 
-  it('starts a new Teams task when the bot is mentioned without an active task run', async () => {
-    findFirstMock.mockResolvedValueOnce(null).mockResolvedValueOnce(null);
+  it('uses Fast for a linked Teams task entry', async () => {
+    findFirstMock.mockResolvedValueOnce(null);
     teamsUserMappingFindFirstMock.mockResolvedValueOnce({
       userId: 'mapped-user-1',
     });
@@ -1248,48 +1255,57 @@ describe('Teams webhook handler', () => {
 
     await expect(response.json()).resolves.toEqual({
       ok: true,
+      fastAnswered: true,
+      fastDefaulted: true,
+    });
+    expect(getFastSessionMock).toHaveBeenCalledWith({
+      userId: 'mapped-user-1',
+      conversation: {
+        surface: 'teams',
+        workspaceId: 'tenant-1',
+        conversationId: 'activity-root:user:mapped-user-1',
+        replyTarget: {
+          channelId: '19:conversation@thread.v2',
+          threadId: 'activity-root',
+        },
+      },
+    });
+    expect(continueFastReplyMock).toHaveBeenCalledWith({
+      sessionId: '11111111-1111-4111-8111-111111111111',
+      userId: 'mapped-user-1',
+      senderDisplayName: 'Ada Lovelace',
+      question: 'continue',
+      currentMessageId: 'activity-2',
+    });
+    expect(enqueueTaskMock).not.toHaveBeenCalled();
+  });
+
+  it('falls back to normal Teams task routing when Fast session setup fails', async () => {
+    findFirstMock.mockResolvedValueOnce(null).mockResolvedValueOnce(null);
+    teamsUserMappingFindFirstMock.mockResolvedValueOnce({
+      userId: 'mapped-user-1',
+    });
+    getFastSessionMock.mockRejectedValueOnce(new Error('session unavailable'));
+
+    const response = await createApp().request('/teams', {
+      method: 'POST',
+      headers: {
+        authorization: 'Bearer bot-framework-token',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify(createTeamsActivity()),
+    });
+
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
       started: true,
       runId: 88,
     });
-    expect(response.status).toBe(200);
-    expect(buildTeamsRoutingContextMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        userId: 'mapped-user-1',
-        taskDescription: 'continue',
-      }),
-    );
-    expect(enqueueTaskMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        task: expect.objectContaining({
-          type: 'standard',
-          payload: expect.objectContaining({
-            repo: '__all_repositories__',
-            description: 'continue',
-            communicationProvider: 'teams',
-            communicationChannelId: '19:conversation@thread.v2',
-            communicationThreadId: 'activity-root',
-            communicationServiceUrl: 'https://smba.trafficmanager.net/amer/',
-          }),
-        }),
-        initiator: { kind: 'user', userId: 'mapped-user-1' },
-        workflow: 'standard',
-        surface: 'teams',
-        trigger: 'message',
-      }),
-      expect.objectContaining({
-        launchClass: 'human',
-      }),
-    );
-    expect(postMessageMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        channelId: '19:conversation@thread.v2',
-        replyToMessageId: 'activity-root',
-        text: expect.stringContaining('Started a task'),
-      }),
-    );
+    expect(buildTeamsRoutingContextMock).toHaveBeenCalled();
+    expect(enqueueTaskMock).toHaveBeenCalled();
   });
 
-  it('starts new Teams tasks with image attachments as prompt images', async () => {
+  it('starts Fast with Teams image attachments', async () => {
     findFirstMock.mockResolvedValueOnce(null).mockResolvedValueOnce(null);
     teamsUserMappingFindFirstMock.mockResolvedValueOnce({
       userId: 'mapped-user-1',
@@ -1315,8 +1331,8 @@ describe('Teams webhook handler', () => {
 
     await expect(response.json()).resolves.toEqual({
       ok: true,
-      started: true,
-      runId: 88,
+      fastAnswered: true,
+      fastDefaulted: true,
     });
     expect(processImageAttachmentsMock).toHaveBeenCalledWith(
       [
@@ -1328,33 +1344,16 @@ describe('Teams webhook handler', () => {
       ],
       { serviceUrl: 'https://smba.trafficmanager.net/amer/' },
     );
-    expect(buildTeamsRoutingContextMock).toHaveBeenCalledWith(
+    expect(continueFastReplyMock).toHaveBeenCalledWith(
       expect.objectContaining({
+        question: 'continue',
         images: ['data:image/png;base64,abc123'],
       }),
     );
-    expect(enqueueTaskMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        task: expect.objectContaining({
-          type: 'standard',
-          payload: expect.objectContaining({
-            description: 'continue',
-            images: ['data:image/png;base64,abc123'],
-            communicationProvider: 'teams',
-          }),
-        }),
-        initiator: { kind: 'user', userId: 'mapped-user-1' },
-        workflow: 'standard',
-        surface: 'teams',
-        trigger: 'message',
-      }),
-      expect.objectContaining({
-        launchClass: 'human',
-      }),
-    );
+    expect(enqueueTaskMock).not.toHaveBeenCalled();
   });
 
-  it('starts new Teams tasks from image-only task-entry activities', async () => {
+  it('starts Fast from image-only Teams task-entry activities', async () => {
     findFirstMock.mockResolvedValueOnce(null).mockResolvedValueOnce(null);
     teamsUserMappingFindFirstMock.mockResolvedValueOnce({
       userId: 'mapped-user-1',
@@ -1381,28 +1380,16 @@ describe('Teams webhook handler', () => {
 
     await expect(response.json()).resolves.toEqual({
       ok: true,
-      started: true,
-      runId: 88,
+      fastAnswered: true,
+      fastDefaulted: true,
     });
-    expect(enqueueTaskMock).toHaveBeenCalledWith(
+    expect(continueFastReplyMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        task: expect.objectContaining({
-          type: 'standard',
-          payload: expect.objectContaining({
-            description: 'Image attachment',
-            images: ['data:image/png;base64,abc123'],
-            communicationProvider: 'teams',
-          }),
-        }),
-        initiator: { kind: 'user', userId: 'mapped-user-1' },
-        workflow: 'standard',
-        surface: 'teams',
-        trigger: 'message',
-      }),
-      expect.objectContaining({
-        launchClass: 'human',
+        question: 'Image attachment',
+        images: ['data:image/png;base64,abc123'],
       }),
     );
+    expect(enqueueTaskMock).not.toHaveBeenCalled();
   });
 
   it('prompts task-entry Teams users to link accounts before starting work', async () => {
@@ -1606,7 +1593,7 @@ describe('Teams webhook handler', () => {
     expect(queueCommunicationMessageMock).not.toHaveBeenCalled();
   });
 
-  it('starts personal chat tasks without unstable activity thread metadata', async () => {
+  it('uses a stable personal chat identity for Fast sessions', async () => {
     findFirstMock.mockResolvedValueOnce(null).mockResolvedValueOnce(null);
     teamsUserMappingFindFirstMock.mockResolvedValueOnce({
       userId: 'mapped-user-1',
@@ -1634,25 +1621,19 @@ describe('Teams webhook handler', () => {
 
     await expect(response.json()).resolves.toEqual({
       ok: true,
-      started: true,
-      runId: 88,
+      fastAnswered: true,
+      fastDefaulted: true,
     });
-    const { task } = enqueueTaskMock.mock.calls[0]?.[0] as {
-      task: { payload: Record<string, unknown> };
-    };
-    expect(task.payload).toMatchObject({
-      communicationProvider: 'teams',
-      communicationChannelId: 'a:personal-conversation',
-      communicationMessageId: 'personal-activity-1',
+    expect(getFastSessionMock).toHaveBeenCalledWith({
+      userId: 'mapped-user-1',
+      conversation: {
+        surface: 'teams',
+        workspaceId: 'tenant-1',
+        conversationId: 'a:personal-conversation:user:mapped-user-1',
+        replyTarget: { channelId: 'a:personal-conversation' },
+      },
     });
-    expect(task.payload).not.toHaveProperty('communicationThreadId');
-    expect(task.payload).not.toHaveProperty('teamsThreadId');
-    const reply = postMessageMock.mock.calls[0]?.[0] as Record<string, unknown>;
-    expect(reply).toMatchObject({
-      channelId: 'a:personal-conversation',
-      text: expect.stringContaining('Started a task'),
-    });
-    expect(reply).not.toHaveProperty('replyToMessageId');
+    expect(enqueueTaskMock).not.toHaveBeenCalled();
   });
 
   it('ignores channel messages without a bot mention when no active task run exists', async () => {
@@ -1685,7 +1666,7 @@ describe('Teams webhook handler', () => {
     expect(enqueueTaskMock).not.toHaveBeenCalled();
   });
 
-  it('starts a task for an unmentioned thread reply when the unmentioned-reply gate routes it', async () => {
+  it('starts Fast for an unmentioned thread reply when the gate routes it', async () => {
     findFirstMock.mockResolvedValueOnce(null).mockResolvedValueOnce(null);
     teamsUserMappingFindFirstMock.mockResolvedValueOnce({
       userId: 'mapped-user-1',
@@ -1707,8 +1688,8 @@ describe('Teams webhook handler', () => {
 
     await expect(response.json()).resolves.toEqual({
       ok: true,
-      started: true,
-      runId: 88,
+      fastAnswered: true,
+      fastDefaulted: true,
     });
     expect(response.status).toBe(200);
     expect(shouldRouteUnmentionedReplyMock).toHaveBeenCalledWith(
@@ -1722,22 +1703,12 @@ describe('Teams webhook handler', () => {
         }),
       }),
     );
-    expect(enqueueTaskMock).toHaveBeenCalledWith(
+    expect(continueFastReplyMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        task: expect.objectContaining({
-          type: 'standard',
-          payload: expect.objectContaining({
-            description: 'sounds good, keep going',
-            communicationProvider: 'teams',
-          }),
-        }),
-        initiator: { kind: 'user', userId: 'mapped-user-1' },
-        workflow: 'standard',
-        surface: 'teams',
-        trigger: 'message',
+        question: 'sounds good, keep going',
       }),
-      expect.objectContaining({ launchClass: 'human' }),
     );
+    expect(enqueueTaskMock).not.toHaveBeenCalled();
   });
 
   it('resumes a completed Teams task from a snapshot for an unmentioned thread reply the gate routes', async () => {
@@ -1841,7 +1812,7 @@ describe('Teams webhook handler', () => {
     );
   });
 
-  it('resumes a completed Teams task from a snapshot when it wins the resume lock', async () => {
+  it('resumes a completed Teams task before starting a new Fast session', async () => {
     findFirstMock.mockResolvedValueOnce(null).mockResolvedValueOnce({
       id: 77,
       userId: 'user-1',
@@ -1892,6 +1863,7 @@ describe('Teams webhook handler', () => {
         replyToMessageId: 'activity-root',
       }),
     );
+    expect(getFastSessionMock).not.toHaveBeenCalled();
   });
 
   it('queues the follow-up to the leader resume task run when the resume lock is contended', async () => {

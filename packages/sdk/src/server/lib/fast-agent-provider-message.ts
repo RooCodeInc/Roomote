@@ -11,7 +11,7 @@ import {
   type FastAgentConversationRecord,
 } from '@roomote/cloud-agents/server';
 
-export type FastAgentReplyProvider = 'discord' | 'teams';
+export type FastAgentReplyProvider = 'discord' | 'teams' | 'telegram';
 
 type ProviderRoute = {
   provider: FastAgentReplyProvider;
@@ -70,7 +70,11 @@ export async function recordFastAgentConversationMessage(input: {
   messageId: string;
 }): Promise<boolean> {
   const { conversation } = input;
-  if (conversation.surface !== 'discord' && conversation.surface !== 'teams') {
+  if (
+    conversation.surface !== 'discord' &&
+    conversation.surface !== 'teams' &&
+    conversation.surface !== 'telegram'
+  ) {
     return false;
   }
 
@@ -99,7 +103,7 @@ export async function recordFastAgentConversationMessageBestEffort(
 }
 
 export async function findFastAgentSessionForProviderReply(
-  input: ProviderRoute & { replyToMessageId?: string },
+  input: ProviderRoute & { replyToMessageId?: string; userId?: string },
 ): Promise<FastAgentConversationRecord | null> {
   let conversationId: string | null = null;
   let matchedProviderMessage = false;
@@ -125,6 +129,9 @@ export async function findFastAgentSessionForProviderReply(
         eq(fastAgentConversations.workspaceId, input.workspaceId),
         eq(fastAgentConversations.currentReplyChannelId, input.channelId),
         eq(fastAgentConversations.currentReplyThreadId, input.threadId),
+        ...(input.userId
+          ? [eq(fastAgentConversations.userId, input.userId)]
+          : []),
       ),
       columns: { id: true },
     });
@@ -139,6 +146,7 @@ export async function findFastAgentSessionForProviderReply(
     id: conversationId,
   });
   return session &&
+    (!input.userId || session.userId === input.userId) &&
     matchesProviderRoute(session, input, !matchedProviderMessage)
     ? session
     : null;
@@ -147,11 +155,19 @@ export async function findFastAgentSessionForProviderReply(
 export async function isFastAgentProviderMessage(input: {
   provider: FastAgentReplyProvider;
   messageId: string;
+  workspaceId?: string;
+  channelId?: string;
 }): Promise<boolean> {
   const binding = await db.query.fastAgentProviderMessages.findFirst({
     where: and(
       eq(fastAgentProviderMessages.provider, input.provider),
       eq(fastAgentProviderMessages.messageId, input.messageId),
+      ...(input.workspaceId
+        ? [eq(fastAgentProviderMessages.workspaceId, input.workspaceId)]
+        : []),
+      ...(input.channelId
+        ? [eq(fastAgentProviderMessages.channelId, input.channelId)]
+        : []),
     ),
     columns: { id: true },
   });

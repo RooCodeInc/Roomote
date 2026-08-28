@@ -947,6 +947,13 @@ describe('deliverFastAgentParentEvent', () => {
           suggestions,
         }),
       );
+      expect(mocks.recordProviderMessage).toHaveBeenCalledWith({
+        sessionId: parent.sessionId,
+        conversation: expect.objectContaining({ surface }),
+        messageId:
+          rootMessageId ??
+          (surface === 'teams' ? 'teams-message-1' : 'telegram-message-1'),
+      });
     },
   );
 

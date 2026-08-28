@@ -123,6 +123,8 @@ under **Settings > Automations**, the same way you would pick a Slack channel.
 - ordinary Discord DMs, mentions, and eligible thread replies from your linked
   account are always answered in Fast mode, which can delegate repository work
   into tasks
+- replies in a Fast-owned DM or thread continue that Fast session; replies in
+  an existing task-only conversation continue or resume the task
 - when Roomote asks where to run a task, use a button or reply naturally in the
   same thread or DM; `yes`, `never mind`, and `use API instead` confirm, cancel,
   or revise the pending route
@@ -141,6 +143,10 @@ custom automations through Fast. Fast does not read other channels implicitly
 or inspect repository contents without delegating the work to a task. When the
 request spans every repository, Fast can delegate it to the deployment's
 all-repositories environment.
+
+Fast automation reports can be delivered to configured Discord channels or the
+automation owner's DM. Replies continue the report's Fast session in Discord,
+and the footer also links to the same session in the web app.
 
 Roomote does not quote every message it answers. In a task thread, the
 conversation itself supplies the context. When you start a task by tagging

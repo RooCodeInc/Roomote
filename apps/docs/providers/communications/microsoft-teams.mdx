@@ -146,8 +146,28 @@ personally to test DMs, and add it to a team or group chat to test mentions.
 
 1. run Roomote with the public URL you entered in Azure
 2. send a direct message to the bot, or mention the bot in a channel or group chat
-3. confirm Roomote starts a task and posts a Teams reply with the task link
-4. reply in the same Teams conversation to send a follow-up to the task
+3. confirm Roomote answers in Fast and includes a web continuation link
+4. reply to the Fast answer, or reply in the same Fast-owned thread, and confirm
+   the same Fast session continues
+
+Ordinary task-entry messages from linked users start in Fast in personal chats,
+group chats, and team channels. Channel and group-chat starts require the same
+mention or eligible thread-reply signals used for task entry. Sessions are
+isolated by linked Roomote user even when several people share one Teams thread.
+Unlinked senders receive the account-link prompt instead of starting work.
+
+Replies to Fast messages continue the bound Fast session. Existing task-only
+conversations keep their active-task and resumable-snapshot behavior, and Fast
+can delegate repository work into those normal Roomote tasks. If Fast cannot
+initialize a new session, Roomote safely falls back to the existing task router.
+Bot Framework and Microsoft Graph images, image-only messages, and transcribed
+audio continue through the same attachment handling.
+
+When a task calls `request_user_input`, Teams accepts a text reply in the same
+conversation. Sensitive input remains in the web app; Teams does not currently
+render interactive answer buttons. Fast automation reports can target a Teams
+channel, chat, or owner direct message. Replies continue the report's Fast
+session, and its footer opens the same session in the web app.
 
 The first verified Teams message also captures the conversation Roomote uses
 for proactive output. When Slack and Telegram are not connected, setup

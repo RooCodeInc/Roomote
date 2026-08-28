@@ -1,0 +1,2 @@
+ALTER TABLE "fast_agent_provider_messages" DROP CONSTRAINT "fast_agent_provider_messages_provider_check";--> statement-breakpoint
+ALTER TABLE "fast_agent_provider_messages" ADD CONSTRAINT "fast_agent_provider_messages_provider_check" CHECK ("fast_agent_provider_messages"."provider" in ('discord', 'teams', 'telegram'));
