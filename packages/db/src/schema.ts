@@ -3204,7 +3204,7 @@ export const fastAgentProviderMessages = pgTable(
       table.threadId,
     ),
     check(
-      'fast_agent_provider_messages_provider_check',
+      'fast_agent_provider_messages_provider_v2_check',
       sql`${table.provider} in ('discord', 'teams', 'telegram')`,
     ),
   ],

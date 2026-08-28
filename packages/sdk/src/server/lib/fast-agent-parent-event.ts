@@ -1229,7 +1229,7 @@ async function createTelegramFastAgentParentTurn(
         await recordFastAgentConversationMessageBestEffort({
           sessionId: session.id,
           conversation,
-          messageId: posted.messageId,
+          messageId: posted.lastTextMessageId ?? posted.messageId,
         });
         if (
           params.event.type === 'automation_triggered' &&

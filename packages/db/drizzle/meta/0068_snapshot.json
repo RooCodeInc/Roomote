@@ -1,5 +1,5 @@
 {
-  "id": "6ad97454-34d3-4148-b2e0-c92d5030db05",
+  "id": "da289938-b40d-4e70-a034-7a5b6adbc822",
   "prevId": "5ec65fda-1612-4060-893e-4f4333bb2b5c",
   "version": "7",
   "dialect": "postgresql",
@@ -3832,8 +3832,8 @@
       "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {
-        "fast_agent_provider_messages_provider_check": {
-          "name": "fast_agent_provider_messages_provider_check",
+        "fast_agent_provider_messages_provider_v2_check": {
+          "name": "fast_agent_provider_messages_provider_v2_check",
           "value": "\"fast_agent_provider_messages\".\"provider\" in ('discord', 'teams', 'telegram')"
         }
       },

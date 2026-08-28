@@ -459,7 +459,7 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
           await recordFastAgentConversationMessageBestEffort({
             sessionId: session.id,
             conversation,
-            messageId: posted.messageId,
+            messageId: posted.lastTextMessageId ?? posted.messageId,
           });
           return { messageId: posted.messageId };
         },

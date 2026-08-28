@@ -294,6 +294,7 @@ describe('deliverFastAgentParentEvent', () => {
       provider: 'telegram',
       channelId: 'telegram-chat-1',
       messageId: 'telegram-message-1',
+      lastTextMessageId: 'telegram-message-2',
     });
     mocks.createTelegramProvider.mockResolvedValue({
       postMessage: mocks.telegramPostMessage,
@@ -959,7 +960,7 @@ describe('deliverFastAgentParentEvent', () => {
         conversation: expect.objectContaining({ surface }),
         messageId:
           rootMessageId ??
-          (surface === 'teams' ? 'teams-message-1' : 'telegram-message-1'),
+          (surface === 'teams' ? 'teams-message-1' : 'telegram-message-2'),
       });
     },
   );

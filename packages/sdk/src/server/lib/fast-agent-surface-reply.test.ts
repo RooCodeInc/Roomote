@@ -70,6 +70,7 @@ describe('buildFastAgentSurfaceReplyDelivery', () => {
       provider: 'telegram',
       channelId: 'telegram-chat-1',
       messageId: 'telegram-message-1',
+      lastTextMessageId: 'telegram-message-2',
     });
     mocks.createTelegramProvider.mockResolvedValue({
       postMessage: mocks.telegramPostMessage,
@@ -263,7 +264,7 @@ describe('buildFastAgentSurfaceReplyDelivery', () => {
         }),
       );
       expect(binding?.messageId).toBe(
-        surface === 'teams' ? 'teams-message-1' : 'telegram-message-1',
+        surface === 'teams' ? 'teams-message-1' : 'telegram-message-2',
       );
       expect(replace).toHaveBeenCalledWith(
         expect.objectContaining({
