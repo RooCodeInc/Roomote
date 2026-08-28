@@ -127,6 +127,8 @@ describe('buildFastAgentSystemPrompt', () => {
       'Call it immediately, before an acknowledgement or other user-visible response',
     );
     expect(prompt).toContain('kickoffMessage');
+    expect(prompt).toContain('"includeImages"');
+    expect(prompt).toContain('images are not attached by default');
     expect(prompt).toContain("describing the user's work now underway");
     expect(prompt).toContain(
       'The kickoff acknowledges the request, but it is not the only communication expected while longer work continues',

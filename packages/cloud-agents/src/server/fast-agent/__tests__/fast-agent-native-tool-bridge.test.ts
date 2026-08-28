@@ -112,6 +112,11 @@ describe('Fast native OpenCode tool bridge', () => {
     expect(replySource).toContain('Launchable follow-ups');
     expect(launchTaskSource).toContain('model: z.string().min(1)');
     expect(launchTaskSource).toContain('deployment-enabled model ID');
+    expect(launchTaskSource).toContain('includeImages: z.boolean().optional()');
+    expect(launchTaskSource).toContain(
+      'Current-turn images are attached only when includeImages is true',
+    );
+    expect(launchTaskSource).toContain('defaults to false');
     expect(launchTaskSource).toContain(
       'Brief user-facing description of the work now underway',
     );

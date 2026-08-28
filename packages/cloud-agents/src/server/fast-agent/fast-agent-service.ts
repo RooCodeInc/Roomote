@@ -215,6 +215,7 @@ const launchTaskArgsSchema = z.object({
   prompt: z.string().trim().min(1),
   environmentId: z.string().trim().min(1).nullable().optional(),
   model: z.string().trim().min(1).nullable().optional(),
+  includeImages: z.boolean().optional().default(false),
   kickoffMessage: z.string().trim().min(1),
 });
 const taskMessageArgsSchema = z.object({
@@ -1601,6 +1602,7 @@ export async function answerFastAgentQuestion({
               args.prompt,
               args.environmentId ?? null,
               args.model ?? null,
+              args.includeImages,
             ])}`;
             if (completedTaskActions.has(signature)) {
               return {
@@ -1635,7 +1637,7 @@ export async function answerFastAgentQuestion({
             throwIfTurnCancelled();
             const result = await adapter.launchTask({
               prompt: args.prompt,
-              ...(images.length > 0 ? { images } : {}),
+              ...(args.includeImages && images.length > 0 ? { images } : {}),
               environmentId: args.environmentId ?? null,
               model: args.model ?? null,
               parentSessionId: session.id,

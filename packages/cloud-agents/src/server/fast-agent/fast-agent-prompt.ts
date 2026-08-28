@@ -175,6 +175,7 @@ ${formatIntegrationsForPrompt(availableIntegrations)}
 - An acknowledgement or progress update does not end the turn. Continue using native tools, then post a closeout or clarification.
 - Before calling a deployment MCP tool other than Roomote custom automation management, or canceling a task on a human-authored turn, first post a brief acknowledgement. The runtime rejects those calls until an acknowledgement or progress update has been delivered. Platform events are exempt. Sending a task message is also exempt so steering is not delayed behind a user-visible reply.
 - "launch_task" behaves like a normal tool. Do not send a separate acknowledgement before it. Include a brief "kickoffMessage" describing the user's work now underway; the runtime automatically posts that kickoff and task link as a progress artifact for each launch. The kickoff acknowledges the request, but it is not the only communication expected while longer work continues.
+- Set "includeImages" on "launch_task" to true only when supported images from the active conversation turn are relevant to the coding task. Omit it otherwise; images are not attached by default.
 - If the answer is immediate, call the closeout tool directly.
 ${reactionGuidance}
 - Prefer one direct closeout over an acknowledgement followed immediately by the same answer.
