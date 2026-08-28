@@ -218,7 +218,6 @@ export function TaskModelSwitcher({
     : 'Model';
 
   const [resetting, setResetting] = useState(false);
-  const isPending = updateModelSelection.isPending || resetting;
 
   // Reset clears roles sequentially: firing the per-role mutations
   // concurrently would race their payload read-modify-writes (the server
@@ -423,7 +422,7 @@ export function TaskModelSwitcher({
               size="sm"
               className="text-xs font-medium"
               onClick={() => void handleReset()}
-              disabled={disabled || isPending}
+              disabled={disabled || updateModelSelection.isPending || resetting}
             >
               <RotateCcw />
               Defaults

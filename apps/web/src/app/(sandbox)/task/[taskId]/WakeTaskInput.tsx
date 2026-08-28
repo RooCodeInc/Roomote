@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
 
 import {
@@ -51,10 +51,6 @@ export function WakeTaskInput({
     onSuccess: () => setPromptText(''),
   });
   const isBusy = sending || restore.isPending || modelSettingsPending;
-  const handleModelSettingsPendingChange = useCallback(
-    (pending: boolean) => setModelSettingsPending(pending),
-    [],
-  );
 
   useEffect(() => {
     setPromptText(initialPrompt);
@@ -174,7 +170,7 @@ export function WakeTaskInput({
               <TaskModelSwitcher
                 taskRun={taskRun}
                 disabled={isBusy}
-                onPendingChange={handleModelSettingsPendingChange}
+                onPendingChange={setModelSettingsPending}
               />
             )}
           </>
