@@ -15,6 +15,7 @@ import {
   inArray,
   isNull,
   or,
+  sessions,
   sql,
   taskRuns,
   tasks,
@@ -124,6 +125,18 @@ export async function findAccessibleFastSession(
     .limit(1);
 
   return session ?? null;
+}
+
+export async function getFastSessionDisplayTitle(
+  fastConversationId: string,
+  fallbackTitle: string | null,
+): Promise<string | null> {
+  const [session] = await db
+    .select({ title: sessions.title })
+    .from(sessions)
+    .where(eq(sessions.fastConversationId, fastConversationId))
+    .limit(1);
+  return session?.title ?? fallbackTitle;
 }
 
 /**

@@ -231,7 +231,10 @@ describe('unified Session queries', () => {
       updateSessionMetadata({ userId: owner.id, isAdmin: false }, session.id, {
         title: 'Renamed',
       }),
-    ).resolves.toMatchObject({ title: 'Renamed' });
+    ).resolves.toMatchObject({
+      title: 'Renamed',
+      titleEditedByUserAt: expect.any(Date),
+    });
     await expect(
       setSessionPinned(
         { userId: owner.id, isAdmin: false },

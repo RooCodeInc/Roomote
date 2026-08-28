@@ -177,6 +177,8 @@ export async function ensureSessionForFastConversation(
       userId: fastAgentConversations.userId,
       surface: fastAgentConversations.surface,
       title: fastAgentConversations.title,
+      titleEditedByUserAt: fastAgentConversations.titleEditedByUserAt,
+      llmTitleCheckpoint: fastAgentConversations.llmTitleCheckpoint,
       updatedAt: fastAgentConversations.updatedAt,
     })
     .from(fastAgentConversations)
@@ -197,6 +199,8 @@ export async function ensureSessionForFastConversation(
     .insert(sessions)
     .values({
       title: conversation.title?.trim() || 'New session',
+      titleEditedByUserAt: conversation.titleEditedByUserAt,
+      llmTitleCheckpoint: conversation.llmTitleCheckpoint,
       ownerKind: 'user',
       ownerUserId: conversation.userId,
       sourceSurface: conversation.surface,

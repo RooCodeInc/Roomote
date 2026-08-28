@@ -3556,6 +3556,8 @@ export const sessions = pgTable(
   {
     id: uuid('id').primaryKey().defaultRandom(),
     title: text('title').notNull(),
+    titleEditedByUserAt: timestamp('title_edited_by_user_at'),
+    llmTitleCheckpoint: integer('llm_title_checkpoint').notNull().default(0),
     ownerKind: text('owner_kind').notNull().$type<SessionOwnerKind>(),
     ownerUserId: text('owner_user_id').references(() => users.id, {
       onDelete: 'set null',
