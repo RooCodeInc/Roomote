@@ -3233,7 +3233,12 @@ describe('runTask', () => {
         taskId: 'task-151',
         payloadKind: TaskPayloadKind.StandardTask,
         harness: 'opencode-server',
-        payload: {},
+        payload: {
+          images: [
+            'data:image/png;base64,c2NyZWVuc2hvdC0x',
+            'data:image/webp;base64,c2NyZWVuc2hvdC0y',
+          ],
+        },
         result: null,
       } as never,
       envVars: {},
@@ -3282,7 +3287,10 @@ describe('runTask', () => {
     const harnessManager = harnessManagerInstances.at(0);
     expect(harnessManager?.startNewTask).toHaveBeenCalledWith({
       prompt: 'Fix the failing test',
-      images: undefined,
+      images: [
+        'data:image/png;base64,c2NyZWVuc2hvdC0x',
+        'data:image/webp;base64,c2NyZWVuc2hvdC0y',
+      ],
       visibleInTranscript: false,
     });
     expect(harnessManager?.initializeWithoutPrompt).not.toHaveBeenCalled();

@@ -216,11 +216,13 @@ const launchTaskArgsSchema = z.object({
   prompt: z.string().trim().min(1),
   environmentId: z.string().trim().min(1).nullable().optional(),
   model: z.string().trim().min(1).nullable().optional(),
+  includeImages: z.boolean().optional().default(false),
   kickoffMessage: z.string().trim().min(1),
 });
 const taskMessageArgsSchema = z.object({
   taskId: z.string().trim().min(1).nullable().optional(),
   message: z.string().trim().min(1),
+  includeImages: z.boolean().optional().default(false),
 });
 const taskIdArgsSchema = z.object({
   taskId: z.string().trim().min(1).nullable().optional(),
@@ -1599,6 +1601,7 @@ export async function answerFastAgentQuestion({
               args.prompt,
               args.environmentId ?? null,
               args.model ?? null,
+              args.includeImages,
             ])}`;
             if (completedTaskActions.has(signature)) {
               return {
@@ -1633,6 +1636,7 @@ export async function answerFastAgentQuestion({
             throwIfTurnCancelled();
             const result = await adapter.launchTask({
               prompt: args.prompt,
+              ...(args.includeImages && images.length > 0 ? { images } : {}),
               environmentId: args.environmentId ?? null,
               model: args.model ?? null,
               parentSessionId: session.id,
@@ -1665,7 +1669,11 @@ export async function answerFastAgentQuestion({
             throwIfTurnCancelled();
             const result = await sendFastAgentTaskMessage(
               { userId, apiBaseUrl },
-              { taskId: target.taskId, message: args.message },
+              {
+                taskId: target.taskId,
+                message: args.message,
+                ...(args.includeImages && images.length > 0 ? { images } : {}),
+              },
             );
             return result;
           }

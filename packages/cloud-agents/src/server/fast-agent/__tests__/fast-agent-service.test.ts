@@ -1847,6 +1847,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
           prompt: 'Fix checkout.',
           environmentId: 'env-1',
           model: 'anthropic/claude-sonnet-5',
+          includeImages: true,
           kickoffMessage: 'I’m delegating the checkout fix.',
         });
         expect(result).toEqual(
@@ -1859,6 +1860,10 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     const result = await answerFastAgentQuestion({
       ...baseParams,
       question: 'Fix checkout.',
+      images: [
+        'data:image/png;base64,c2NyZWVuc2hvdC0x',
+        'data:image/gif;base64,c2NyZWVuc2hvdC0y',
+      ],
       adapter,
     });
 
@@ -1871,6 +1876,10 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     );
     expect(launchTask).toHaveBeenCalledWith(
       expect.objectContaining({
+        images: [
+          'data:image/png;base64,c2NyZWVuc2hvdC0x',
+          'data:image/gif;base64,c2NyZWVuc2hvdC0y',
+        ],
         model: 'anthropic/claude-sonnet-5',
         prompt: 'Fix checkout.',
       }),
@@ -1923,11 +1932,16 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       },
     );
 
-    await answerFastAgentQuestion({ ...baseParams, adapter });
+    await answerFastAgentQuestion({
+      ...baseParams,
+      images: ['data:image/png;base64,bm90LWZvcndhcmRlZA=='],
+      adapter,
+    });
 
     expect(launchTask).toHaveBeenCalledWith(
       expect.objectContaining({ environmentId: ALL_REPOSITORIES }),
     );
+    expect(launchTask.mock.calls[0]?.[0]).not.toHaveProperty('images');
   });
 
   it.each(['slack', 'discord', 'teams', 'telegram'] as const)(
@@ -2225,6 +2239,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
           invokeTool(nativeToolNames.sendTaskMessage, {
             taskId: 'task-1',
             message: 'Include the failing test.',
+            includeImages: true,
           }),
         ).resolves.toEqual({ success: true });
         await invokeTool(nativeToolNames.sendChatReply, {
@@ -2240,7 +2255,53 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       }),
     });
 
-    await answerFastAgentQuestion({ ...baseParams, adapter });
+    await answerFastAgentQuestion({
+      ...baseParams,
+      images: [
+        'data:image/png;base64,c2NyZWVuc2hvdC0x',
+        'data:image/webp;base64,c2NyZWVuc2hvdC0y',
+      ],
+      adapter,
+    });
+
+    expect(mocks.sendTaskMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: 'user-1' }),
+      {
+        taskId: 'task-1',
+        message: 'Include the failing test.',
+        images: [
+          'data:image/png;base64,c2NyZWVuc2hvdC0x',
+          'data:image/webp;base64,c2NyZWVuc2hvdC0y',
+        ],
+      },
+    );
+    expect(order).toEqual(['steer', 'reply']);
+  });
+
+  it('does not attach current-turn images to a task message without opt-in', async () => {
+    mocks.getActiveTasks.mockResolvedValue([
+      { taskId: 'task-1', title: 'Checkout', status: 'running' },
+    ]);
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        await invokeTool(nativeToolNames.sendTaskMessage, {
+          taskId: 'task-1',
+          message: 'Include the failing test.',
+        });
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'closeout',
+          message: 'The task was updated.',
+        });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({
+      ...baseParams,
+      images: ['data:image/png;base64,bm90LWZvcndhcmRlZA=='],
+      adapter: callbacks(),
+    });
 
     expect(mocks.sendTaskMessage).toHaveBeenCalledWith(
       expect.objectContaining({ userId: 'user-1' }),
@@ -2249,7 +2310,6 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         message: 'Include the failing test.',
       },
     );
-    expect(order).toEqual(['steer', 'reply']);
   });
 
   it('still requires an acknowledgement before canceling a task', async () => {
