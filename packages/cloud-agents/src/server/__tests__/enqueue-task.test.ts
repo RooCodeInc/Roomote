@@ -955,6 +955,46 @@ describe('enqueueTask snapshot resume', () => {
     expect(resumeRuns).toHaveLength(1);
   });
 
+  it('allows a replacement resume after the previous resume was canceled', async () => {
+    const userId = await createUser();
+    const freshRun = await launchFresh({
+      task: standardTaskInput({ computeProvider: 'modal' }),
+      initiator: { kind: 'user', userId },
+      workflow: 'standard',
+      surface: 'web',
+      trigger: 'manual',
+    });
+    const resumeInput = {
+      task: {
+        type: TaskPayloadKind.SnapshotResume,
+        payload: {
+          repo: 'acme/widgets',
+          sourceSnapshotId: 'snap-canceled',
+          sourceRunId: freshRun.id,
+        },
+      } as SnapshotResumeTask,
+      actingUserId: userId,
+    };
+    const canceledResume = await enqueueTask(resumeInput, { enqueue: false });
+    await db
+      .update(taskRuns)
+      .set({ status: RunStatus.Canceled })
+      .where(eq(taskRuns.id, canceledResume.id));
+
+    const replacementResume = await enqueueTask(resumeInput, {
+      enqueue: false,
+    });
+
+    expect(replacementResume.id).not.toBe(canceledResume.id);
+    const resumeRuns = await db.query.taskRuns.findMany({
+      where: and(
+        eq(taskRuns.sourceRunId, freshRun.id),
+        eq(taskRuns.kind, 'resume'),
+      ),
+    });
+    expect(resumeRuns).toHaveLength(2);
+  });
+
   it('attaches a resume run to the source task without re-attribution', async () => {
     const initiatorUserId = await createUser();
     const resumerUserId = await createUser();

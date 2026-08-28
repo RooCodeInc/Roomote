@@ -50,7 +50,7 @@ vi.mock('@roomote/db/server', () => ({
     query: {
       taskRuns: {
         findFirst: (input: { columns?: Record<string, boolean> }) =>
-          input.columns && Object.keys(input.columns).length === 1
+          input.columns && !('sandboxServerUrl' in input.columns)
             ? mockFindFallbackRun(input)
             : mockFindFirstRun(input),
       },
@@ -74,6 +74,7 @@ vi.mock('@roomote/db/server', () => ({
     id: 'taskRuns.id',
     taskId: 'taskRuns.taskId',
     payload: 'taskRuns.payload',
+    status: 'taskRuns.status',
   },
 }));
 
@@ -493,6 +494,42 @@ describe('activePrReviewFollowUpJob', () => {
       expect.objectContaining({ newRunId: 200 }),
     );
   });
+
+  it.each([
+    ['no snapshot', null],
+    ['snapshot resume', 'snapshot-100'],
+  ])(
+    'replaces canceled fallback B and transfers ownership to C (%s)',
+    async (_label, snapshotId) => {
+      mockFindFirstRun.mockResolvedValue({
+        id: 100,
+        taskId: 'task-100',
+        status: RunStatus.Completed,
+        sandboxServerUrl: null,
+        snapshotId,
+        snapshotCreatedAt: snapshotId ? new Date() : null,
+        port: snapshotId ? 3000 : null,
+        payload: { repo: 'owner/repo' },
+        actingUserId: 'user-1',
+      });
+      mockFindFallbackRun.mockResolvedValueOnce({
+        id: 200,
+        status: RunStatus.Canceled,
+      });
+      mockEnqueueTask.mockResolvedValueOnce({ id: 201 });
+
+      await activePrReviewFollowUpJob(makeJob());
+
+      expect(mockEnqueueTask).toHaveBeenCalledOnce();
+      expect(mockTransferGithubPrReviewCheckToRun).toHaveBeenCalledWith(
+        expect.objectContaining({ newRunId: 201 }),
+      );
+      expect(mockReconcileGithubPrReviewCheckForRun).toHaveBeenCalledWith(
+        expect.objectContaining({ runId: 201 }),
+      );
+      expect(mockUpdateWhere).toHaveBeenCalledTimes(2);
+    },
+  );
 
   it('resolves installation context for legacy jobs before launching fallback B', async () => {
     mockFindFirstRun.mockResolvedValue({

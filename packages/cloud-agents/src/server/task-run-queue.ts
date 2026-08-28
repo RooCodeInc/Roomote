@@ -2551,6 +2551,7 @@ async function enqueueSnapshotResume(
         where: and(
           eq(taskRuns.sourceRunId, sourceRun.id),
           eq(taskRuns.kind, 'resume'),
+          sql`${taskRuns.status} != ${RunStatus.Canceled}`,
         ),
         columns: { id: true },
       });
