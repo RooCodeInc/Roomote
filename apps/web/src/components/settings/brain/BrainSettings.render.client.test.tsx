@@ -20,6 +20,7 @@ const { state, navigation, mutations } = vi.hoisted(() => ({
   mutations: {
     backfill: vi.fn(),
     retryFailed: vi.fn(),
+    setEnabled: vi.fn(),
   },
 }));
 
@@ -65,7 +66,9 @@ vi.mock('@tanstack/react-query', () => ({
   useMutation: (options: { mutationKind?: string }) =>
     options.mutationKind === 'retryFailed'
       ? { isPending: false, mutate: mutations.retryFailed }
-      : { isPending: false, mutate: mutations.backfill },
+      : options.mutationKind === 'setEnabled'
+        ? { isPending: false, mutate: mutations.setEnabled }
+        : { isPending: false, mutate: mutations.backfill },
 }));
 
 vi.mock('@/trpc/client', () => ({
@@ -93,6 +96,9 @@ vi.mock('@/trpc/client', () => ({
       retryFailedTaskMemories: {
         mutationOptions: () => ({ mutationKind: 'retryFailed' }),
       },
+      setMemoryEnabled: {
+        mutationOptions: () => ({ mutationKind: 'setEnabled' }),
+      },
     },
   }),
 }));
@@ -105,6 +111,8 @@ function buildSettings(
   return {
     status: 'connected',
     statusDetail: null,
+    enabled: true,
+    enabledFromLegacyKey: false,
     url: 'http://gbrain:8080',
     inferenceProvider: 'openrouter',
     keySource: 'brain',
@@ -173,6 +181,7 @@ beforeEach(() => {
   navigation.replace.mockClear();
   mutations.backfill.mockClear();
   mutations.retryFailed.mockClear();
+  mutations.setEnabled.mockClear();
 });
 
 describe('BrainSettings', () => {
@@ -354,6 +363,37 @@ describe('BrainSettings', () => {
     expect(screen.getAllByText('Slack')).toHaveLength(2);
     // Disconnected sources are omitted from the list entirely.
     expect(screen.queryByText('Notion')).not.toBeInTheDocument();
+  });
+
+  it('shows only the toggle and its explanation while Memory is disabled', () => {
+    state.query.data = buildSettings({
+      enabled: false,
+      status: 'not_configured',
+      statusDetail: 'Memory is turned off for this deployment.',
+    });
+
+    render(<BrainSettings />);
+
+    expect(
+      screen.getByRole('switch', { name: 'Enable Memory' }),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/Memory is off/)).toBeInTheDocument();
+    expect(screen.queryByText('Memory Stats')).not.toBeInTheDocument();
+    expect(screen.queryByText('Status')).not.toBeInTheDocument();
+    expect(screen.queryByText('Sources')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('switch', { name: 'Enable Memory' }));
+    expect(mutations.setEnabled).toHaveBeenCalledWith({ enabled: true });
+  });
+
+  it('notes when enablement still comes from the legacy provider key', () => {
+    state.query.data = buildSettings({ enabledFromLegacyKey: true });
+
+    render(<BrainSettings />);
+
+    expect(
+      screen.getByText(/enabled by a configured Memory provider key/),
+    ).toBeInTheDocument();
   });
 
   it('stops at the explanation on a deployment with no Brain', () => {

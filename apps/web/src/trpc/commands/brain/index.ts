@@ -5,12 +5,13 @@ import {
   db,
   eq,
   getBrainMemoryEventSummary,
-  isBrainProviderConfigured,
   isNull,
+  resolveBrainEnabledState,
   resolveModelProviderEnvValue,
   listBrainSyncStates,
   mcpConnections,
   requeueFailedBrainMemoryEvents,
+  setBrainEnabled,
 } from '@roomote/db/server';
 import {
   describeBrainModels,
@@ -117,6 +118,13 @@ export type BrainSettings = {
   status: BrainStatus;
   /** Why the status is not `connected`, in one sentence, or null. */
   statusDetail: string | null;
+  /** Effective Brain on/off state, as the Settings toggle should render it. */
+  enabled: boolean;
+  /**
+   * True when `enabled` comes from the legacy activation signal (an explicit
+   * R_BRAIN_* provider key) rather than an explicit Settings choice.
+   */
+  enabledFromLegacyKey: boolean;
   url: string | null;
   inferenceProvider: 'openrouter' | 'openai' | null;
   /**
@@ -377,10 +385,12 @@ export async function getBrainSettingsCommand(
 ): Promise<BrainSettings> {
   assertAdmin(auth);
 
-  // Activation is the explicit brain-specific provider key, in Settings or
-  // the environment. The gateway token and R_GBRAIN_URL exist as plumbing on
-  // deployments that never opted in, so neither can mean "the Brain is on".
-  const configured = await isBrainProviderConfigured();
+  // Activation is the Settings toggle, falling back to the legacy explicit
+  // brain-specific provider key. The gateway token and R_GBRAIN_URL exist as
+  // plumbing on deployments that never opted in, so neither can mean "the
+  // Brain is on".
+  const enabledState = await resolveBrainEnabledState();
+  const configured = enabledState.enabled;
   const url = Env.R_GBRAIN_URL ?? null;
 
   // The rollups only describe a Brain that exists; on an unconfigured
@@ -450,7 +460,7 @@ export async function getBrainSettingsCommand(
       return {
         status: 'not_configured',
         statusDetail:
-          'Memory is not configured for this deployment. Set a Memory provider key to give agents shared memory.',
+          'Memory is turned off for this deployment. Enable it to give agents shared memory.',
       };
     }
 
@@ -462,11 +472,14 @@ export async function getBrainSettingsCommand(
       };
     }
 
-    if (!inference) {
+    // Synthesis rides the deployment's helper model in gateway mode, but
+    // semantic recall still needs embeddings: a provider key or a configured
+    // embeddings upstream.
+    if (!inference && !Env.R_BRAIN_EMBEDDINGS_UPSTREAM_URL) {
       return {
         status: 'incomplete',
         statusDetail:
-          'Memory has no inference provider, so it can only match keywords. Configure a Memory provider key to enable semantic recall.',
+          'Memory has no embeddings provider, so it can only match keywords. Configure a provider key or an embeddings upstream to enable semantic recall.',
       };
     }
 
@@ -492,6 +505,8 @@ export async function getBrainSettingsCommand(
   return {
     status,
     statusDetail,
+    enabled: enabledState.enabled,
+    enabledFromLegacyKey: enabledState.enabled && enabledState.fromLegacyKey,
     url,
     inferenceProvider: inference?.providerId ?? null,
     keySource,
@@ -515,6 +530,22 @@ export async function getBrainSettingsCommand(
       recentCompletedRunsWithoutEvent: memories.recentCompletedRunsWithoutEvent,
     },
   };
+}
+
+/**
+ * Turn the Brain on or off for the deployment. Writes the explicit Settings
+ * choice, which from then on wins over the legacy R_BRAIN_* key fallback in
+ * both directions.
+ */
+export async function setMemoryEnabledCommand(
+  auth: UserAuthSuccess,
+  input: { enabled: boolean },
+): Promise<{ enabled: boolean }> {
+  assertAdmin(auth);
+
+  await setBrainEnabled(input.enabled);
+
+  return { enabled: input.enabled };
 }
 
 /**

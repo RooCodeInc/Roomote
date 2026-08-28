@@ -1,11 +1,7 @@
 import type { Context } from 'hono';
 import { z } from 'zod';
 
-import {
-  db,
-  isBrainProviderConfigured,
-  saveBrainAgentSummary,
-} from '@roomote/db/server';
+import { db, isBrainEnabled, saveBrainAgentSummary } from '@roomote/db/server';
 
 import type { Variables } from '../../types';
 import type { McpAuth } from '../mcp/middleware';
@@ -80,7 +76,7 @@ export async function saveTaskMemory(
     );
   }
 
-  if (!(await isBrainProviderConfigured())) {
+  if (!(await isBrainEnabled())) {
     return c.json(
       { saved: false, reason: 'This deployment has no Brain configured.' },
       200,

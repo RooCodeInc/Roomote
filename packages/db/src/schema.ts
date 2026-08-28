@@ -184,6 +184,12 @@ export const deploymentSettings = pgTable('deployment_settings', {
     'runtime_compute_config',
   ).$type<DeploymentComputeConfig>(),
   accessPolicy: jsonb('access_policy').$type<DeploymentAccessPolicy>(),
+  // Whether the Brain (Memory) is on for this deployment. Deliberately
+  // nullable with no default: null means "no explicit choice", and readers
+  // fall back to the legacy activation signal (an explicit R_BRAIN_* provider
+  // key) so deployments enabled before this toggle existed stay enabled
+  // without a backfill.
+  brainEnabled: boolean('brain_enabled'),
   // Signed Roomote license key (RMLK1.<payload>.<signature>) raising the
   // deployment's seat limit above the free tier; null for unlicensed
   // deployments. Verified at read time, never trusted as stored.

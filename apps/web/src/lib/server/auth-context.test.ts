@@ -41,7 +41,7 @@ vi.mock('next/headers', () => ({
 
 vi.mock('@roomote/db/server', () => ({
   recordLicenseUsageObservation: vi.fn(async () => undefined),
-  isBrainProviderConfigured: vi.fn(async () => false),
+  isBrainEnabled: vi.fn(async () => false),
   db: {
     query: {
       deploymentSettings: {
@@ -107,6 +107,7 @@ vi.mock('./env', () => ({
   Env: {
     R_ALLOWED_EMAILS: '',
   },
+  isBrainConfigured: () => false,
   isRoomoteCloudEnabled: () => false,
 }));
 

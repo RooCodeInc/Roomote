@@ -10,6 +10,7 @@ import { useTRPC } from '@/trpc/client';
 import { BrainConfigurationSection } from './BrainConfigurationSection';
 import { BrainCorpusSection } from './BrainCorpusSection';
 import { BrainBrowseSection } from './BrainBrowseSection';
+import { BrainEnableSection } from './BrainEnableSection';
 import { BrainMemoryIssuesSection } from './BrainMemoryIssuesSection';
 import { BrainSourcesSection } from './BrainSourcesSection';
 import { BrainStatusSection } from './BrainStatusSection';
@@ -68,6 +69,19 @@ export function BrainSettings() {
   }
 
   /*
+   * A disabled Brain has nothing worth reading: the toggle plus its short
+   * explanation is the whole page, because rendering empty stats and status
+   * sections would read as breakage rather than as an off switch.
+   */
+  if (!data.enabled) {
+    return (
+      <div className="space-y-6">
+        <BrainEnableSection settings={data} />
+      </div>
+    );
+  }
+
+  /*
    * A deployment without a Brain has no corpus, no collector checkpoints,
    * and no outbox worth reading: those sections would all render the same
    * empty state, which reads as breakage rather than as an unconfigured
@@ -78,6 +92,7 @@ export function BrainSettings() {
   if (data.status === 'not_configured' || !data.url) {
     return (
       <div className="space-y-6">
+        <BrainEnableSection settings={data} />
         <BrainStatusSection settings={data} />
       </div>
     );
@@ -85,6 +100,7 @@ export function BrainSettings() {
 
   return (
     <div className="space-y-6">
+      <BrainEnableSection settings={data} />
       <BrainMemoryIssuesSection taskMemories={data.taskMemories} />
       <BrainCorpusSection
         corpus={data.corpus}

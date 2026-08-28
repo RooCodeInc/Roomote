@@ -715,8 +715,10 @@ export function isRoomoteCloudEnabled(
  * signal means "a Brain could be wired here", never "an operator turned the
  * Brain on". Activation — everything user-visible, from delivering the
  * gbrain MCP server to agents to running ingestion — additionally requires
- * an explicit R_BRAIN_* provider key and lives in isBrainProviderConfigured
- * (@roomote/db), which also reads Settings.
+ * the Brain to be enabled: the `brainEnabled` Settings toggle, falling back
+ * to an explicit R_BRAIN_* provider key for deployments that opted in
+ * before the toggle existed. That predicate lives in isBrainEnabled
+ * (@roomote/db).
  *
  * Not R_GBRAIN_URL, which every compose file defaults to a service address
  * whether or not that service runs. Keying on a defaulted value made this
@@ -726,8 +728,8 @@ export function isRoomoteCloudEnabled(
  * The split exists because this gates the cheap, synchronous paths that only
  * need to know a Brain might exist, above all the outbox insert inside the
  * run-completion transaction, which must not do a database lookup of its
- * own. Enqueuing memories for a Brain that has no key yet is intentional:
- * the drainer holds them until one is configured, so turning the Brain on
+ * own. Enqueuing memories for a Brain that is not enabled yet is
+ * intentional: the drainer holds them until it is, so turning the Brain on
  * later picks up the history rather than starting from that moment.
  */
 export function isBrainConfigured(env: {

@@ -95,6 +95,7 @@ export type NonTaskInferenceTrackingInput = {
 };
 
 export const NON_TASK_INFERENCE_SURFACES = {
+  brainSynthesis: 'brain_synthesis',
   chatAudioTranscription: 'chat_audio_transcription',
   chatVideoDescription: 'chat_video_description',
   customAutomationScheduleResolution: 'custom_automation_schedule_resolution',
