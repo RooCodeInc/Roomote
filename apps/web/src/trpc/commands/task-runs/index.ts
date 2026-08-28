@@ -1,6 +1,8 @@
 import {
   ALL_REPOSITORIES,
   activeRunStatuses,
+  buildFastAgentChildTaskMetadata,
+  getFastAgentParentFromPayload,
   type TaskPayload,
   type ComputeProvider,
   type LaunchCodingHarness,
@@ -14,8 +16,10 @@ import {
 import {
   type RoutingDecision,
   buildSlackRoutingContext,
+  canRetryFailedStart,
   DeploymentReadOnlyError,
   enqueueTask,
+  fastAgentConversationRepository,
   getTaskUrl,
   routeTask,
 } from '@roomote/cloud-agents/server';
@@ -29,6 +33,7 @@ import {
   markTaskStartParallelCountEndedAt,
   prepareTaskGoalActivation,
   slackInstallations,
+  sql,
   taskRuns,
   tasks,
 } from '@roomote/db/server';
@@ -119,12 +124,155 @@ type CreateStandardTaskRunInput = {
   harness?: LaunchCodingHarness;
   model?: string;
   computeProvider?: ComputeProvider;
+  failedStartSourceRunId?: number;
   sourceTaskId?: string;
   sourceArtifactId?: string;
   sourceArtifactPath?: string;
   sourceArtifactVersion?: number;
   payload: TaskPayload<typeof TaskPayloadKind.StandardTask>;
 };
+
+function stripClientFastAgentLinkage(
+  payload: TaskPayload<typeof TaskPayloadKind.StandardTask>,
+): TaskPayload<typeof TaskPayloadKind.StandardTask> {
+  const sanitized = { ...payload };
+  delete sanitized.fastAgentParent;
+  delete sanitized.fastAgentSessionId;
+  delete sanitized.communicationContextInherited;
+  return sanitized;
+}
+
+function getFailedStartReplacementKey(sourceRunId: number): string {
+  return `failed-start-replacement:${sourceRunId}`;
+}
+
+async function findFailedStartReplacement(
+  launchIdempotencyKey: string,
+): Promise<CreateTaskRunResult | null> {
+  const existing = await db.query.taskRuns.findFirst({
+    where: sql`${taskRuns.payload}->>'launchIdempotencyKey' = ${launchIdempotencyKey}`,
+    columns: { id: true, taskId: true },
+  });
+
+  return existing
+    ? { success: true, id: existing.id, taskId: existing.taskId }
+    : null;
+}
+
+async function resolveFailedStartFastAgentMetadata({
+  auth,
+  sourceRunId,
+}: {
+  auth: UserAuthSuccess;
+  sourceRunId?: number;
+}): Promise<ReturnType<typeof buildFastAgentChildTaskMetadata> | null> {
+  if (sourceRunId === undefined) {
+    return null;
+  }
+
+  const sourceRun = await db.query.taskRuns.findFirst({
+    where: eq(taskRuns.id, sourceRunId),
+    columns: {
+      taskId: true,
+      status: true,
+      payloadKind: true,
+      payload: true,
+      error: true,
+      result: true,
+    },
+  });
+
+  if (
+    !sourceRun ||
+    sourceRun.payloadKind !== TaskPayloadKind.StandardTask ||
+    sourceRun.status !== RunStatus.Failed
+  ) {
+    throw new Error('Failed task start not found.');
+  }
+
+  const sourceTaskAccess = await resolveTaskByIdAccessCommand(auth, {
+    taskId: sourceRun.taskId,
+  });
+  if (sourceTaskAccess.kind !== 'resolved') {
+    throw new Error('Failed task start not found.');
+  }
+
+  const parent = getFastAgentParentFromPayload(sourceRun.payload);
+  if (!parent) {
+    return null;
+  }
+
+  const session = await fastAgentConversationRepository.findById({
+    id: parent.sessionId,
+    fallbackConversation: parent.conversation,
+  });
+  if (!session || session.userId !== auth.userId) {
+    throw new Error('Failed task start is not linked to your Fast session.');
+  }
+
+  return buildFastAgentChildTaskMetadata({
+    sessionId: session.id,
+    conversation: session.conversation,
+  });
+}
+
+export async function createFailedStartReplacementTaskRunCommand(
+  auth: UserAuthSuccess,
+  input: { runId: number },
+): Promise<CreateTaskRunResult> {
+  try {
+    const sourceRun = await db.query.taskRuns.findFirst({
+      where: eq(taskRuns.id, input.runId),
+    });
+    if (
+      !sourceRun ||
+      sourceRun.payloadKind !== TaskPayloadKind.StandardTask ||
+      !(await canRetryFailedStart(sourceRun))
+    ) {
+      return { success: false, error: 'Failed task start not found.' };
+    }
+
+    const sourceTaskAccess = await resolveTaskByIdAccessCommand(auth, {
+      taskId: sourceRun.taskId,
+    });
+    if (sourceTaskAccess.kind !== 'resolved') {
+      return { success: false, error: 'Failed task start not found.' };
+    }
+    if (!sourceTaskAccess.task.model) {
+      return { success: false, error: 'Failed task model not found.' };
+    }
+
+    const payload = { ...sourceRun.payload };
+    delete payload.communicationSourceEventId;
+    const launchIdempotencyKey = getFailedStartReplacementKey(sourceRun.id);
+    payload.launchIdempotencyKey = launchIdempotencyKey;
+
+    const existingReplacement =
+      await findFailedStartReplacement(launchIdempotencyKey);
+    if (existingReplacement) {
+      return existingReplacement;
+    }
+
+    const result = await createStandardTaskRunCommand(auth, {
+      harness: sourceRun.harness,
+      model: sourceTaskAccess.task.model,
+      computeProvider: sourceRun.vendor ?? undefined,
+      failedStartSourceRunId: sourceRun.id,
+      payload,
+    });
+
+    if (result.success) {
+      return result;
+    }
+
+    return (await findFailedStartReplacement(launchIdempotencyKey)) ?? result;
+  } catch (error) {
+    console.error(error);
+    return error instanceof Error
+      ? { success: false, error: error.message }
+      : { success: false, error: 'An unknown error occurred.' };
+  }
+}
 
 function getManualTaskRepositoryFullNames(
   payload: TaskPayload<typeof TaskPayloadKind.StandardTask>,
@@ -403,7 +551,9 @@ export async function createStandardTaskRunCommand(
   input: CreateStandardTaskRunInput,
 ): Promise<CreateTaskRunResult> {
   try {
-    if (!input.payload.environmentId && !input.payload.repo) {
+    const payload = stripClientFastAgentLinkage(input.payload);
+
+    if (!payload.environmentId && !payload.repo) {
       return {
         success: false,
         error: 'Select an environment before starting a task.',
@@ -419,9 +569,8 @@ export async function createStandardTaskRunCommand(
       throw new Error(evalSelection.error);
     }
 
-    const selectedRepositoryFullNames = getManualTaskRepositoryFullNames(
-      input.payload,
-    );
+    const selectedRepositoryFullNames =
+      getManualTaskRepositoryFullNames(payload);
     const availableRepositories =
       selectedRepositoryFullNames.length === 0
         ? []
@@ -430,26 +579,29 @@ export async function createStandardTaskRunCommand(
       selectedRepositoryFullNames.includes(repository.fullName),
     );
     const sourceControlProvider =
-      input.payload.sourceControlProvider ??
+      payload.sourceControlProvider ??
       resolveSelectedRepositorySourceControlProvider(
         selectedRepositories,
         selectedRepositoryFullNames,
       ) ??
-      (await resolveEnvironmentSourceControlProvider(
-        input.payload.environmentId,
-      ));
+      (await resolveEnvironmentSourceControlProvider(payload.environmentId));
+    const fastAgentMetadata = await resolveFailedStartFastAgentMetadata({
+      auth,
+      sourceRunId: input.failedStartSourceRunId,
+    });
 
     const task: StandardTask = {
       harness: evalSelection.harness ?? input.harness,
       computeProvider: input.computeProvider,
       type: TaskPayloadKind.StandardTask,
       payload: {
-        ...input.payload,
+        ...payload,
+        ...(fastAgentMetadata ?? {}),
         ...(sourceControlProvider ? { sourceControlProvider } : {}),
         ...(evalSelection.harnessModelOverrides
           ? {
               harnessModelOverrides: {
-                ...(input.payload.harnessModelOverrides ?? {}),
+                ...(payload.harnessModelOverrides ?? {}),
                 ...evalSelection.harnessModelOverrides,
               },
             }

@@ -36,14 +36,12 @@ import { ProductTips, Startup } from './startup';
 
 interface LiveContentProps {
   session: TaskSession;
-  newTaskHref: string;
   onBootStatusChange?: () => void;
   onTaskPhaseChange?: (phase: TaskPhase | null) => void;
 }
 
 function LiveContent({
   session,
-  newTaskHref,
   onBootStatusChange,
   onTaskPhaseChange,
 }: LiveContentProps) {
@@ -54,7 +52,6 @@ function LiveContent({
     >
       <LiveContentInner
         session={session}
-        newTaskHref={newTaskHref}
         onBootStatusChange={onBootStatusChange}
         onTaskPhaseChange={onTaskPhaseChange}
       />
@@ -64,7 +61,6 @@ function LiveContent({
 
 function LiveContentInner({
   session,
-  newTaskHref,
   onBootStatusChange,
   onTaskPhaseChange,
 }: LiveContentProps) {
@@ -271,7 +267,6 @@ function LiveContentInner({
                         <Startup
                           runId={bootingTaskRun.id}
                           initialTaskRun={bootingTaskRun}
-                          newTaskHref={newTaskHref}
                           onStatusChange={onBootStatusChange}
                         />
                         <ProductTips />

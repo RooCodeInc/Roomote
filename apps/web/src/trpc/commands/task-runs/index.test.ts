@@ -1,9 +1,13 @@
-import { ALL_REPOSITORIES, TaskPayloadKind } from '@roomote/types';
+import { ALL_REPOSITORIES, RunStatus, TaskPayloadKind } from '@roomote/types';
 
 import type { UserAuthSuccess } from '@/types';
 
 const {
   mockEnqueueTask,
+  mockCanRetryFailedStart,
+  mockFindFastSession,
+  mockFindReplacement,
+  mockFindTaskRun,
   mockGetRepositories,
   mockDbWhere,
   mockDbSelect,
@@ -15,6 +19,10 @@ const {
   mockSendSandboxPrompt,
 } = vi.hoisted(() => ({
   mockEnqueueTask: vi.fn(),
+  mockCanRetryFailedStart: vi.fn(),
+  mockFindFastSession: vi.fn(),
+  mockFindReplacement: vi.fn(),
+  mockFindTaskRun: vi.fn(),
   mockGetRepositories: vi.fn(),
   mockDbWhere: vi.fn(),
   mockDbSelect: vi.fn(),
@@ -28,7 +36,14 @@ const {
 
 vi.mock('@roomote/cloud-agents/server', () => ({
   buildSlackRoutingContext: vi.fn(),
+  canRetryFailedStart: (...args: unknown[]) => mockCanRetryFailedStart(...args),
+  DeploymentReadOnlyError: class DeploymentReadOnlyError extends Error {
+    code = 'DEPLOYMENT_READ_ONLY';
+  },
   enqueueTask: (...args: unknown[]) => mockEnqueueTask(...args),
+  fastAgentConversationRepository: {
+    findById: (...args: unknown[]) => mockFindFastSession(...args),
+  },
   getTaskUrl: vi.fn(() => 'https://roomote.test/tasks/task-123'),
   routeTask: vi.fn(),
 }));
@@ -41,7 +56,16 @@ vi.mock('@roomote/db/server', () => ({
         findFirst: vi.fn(async () => null),
       },
       taskRuns: {
-        findFirst: vi.fn(async () => null),
+        findFirst: (...args: unknown[]) => {
+          const options = args[0] as
+            | { columns?: Record<string, boolean> }
+            | undefined;
+          return options?.columns?.id === true &&
+            options.columns.taskId === true &&
+            Object.keys(options.columns).length === 2
+            ? mockFindReplacement(...args)
+            : mockFindTaskRun(...args);
+        },
         findMany: vi.fn(async () => []),
       },
       slackInstallations: {
@@ -116,7 +140,11 @@ vi.mock('../sandbox-session', () => ({
     mockSendSandboxPrompt(...args),
 }));
 
-import { createStandardTaskRunCommand, startTaskGoalCommand } from './index';
+import {
+  createFailedStartReplacementTaskRunCommand,
+  createStandardTaskRunCommand,
+  startTaskGoalCommand,
+} from './index';
 
 const auth = {
   success: true,
@@ -259,6 +287,10 @@ describe('createStandardTaskRunCommand', () => {
     mockDbWhere.mockResolvedValue([]);
     // Shared resolver defaults to unresolved; the environment test overrides it.
     mockResolveWorkspaceProvider.mockResolvedValue({});
+    mockFindTaskRun.mockResolvedValue(null);
+    mockFindFastSession.mockResolvedValue(null);
+    mockFindReplacement.mockResolvedValue(null);
+    mockCanRetryFailedStart.mockResolvedValue(true);
     mockSuccessfulEnqueue();
   });
 
@@ -478,5 +510,230 @@ describe('createStandardTaskRunCommand', () => {
         }),
       }),
     );
+  });
+
+  it('creates an immediate replacement with original launch settings and canonical Fast metadata', async () => {
+    const sourceConversation = {
+      surface: 'slack' as const,
+      workspaceId: 'workspace-1',
+      conversationId: 'thread-1',
+      replyTarget: { channelId: 'channel-1', threadId: 'thread-1' },
+    };
+    const canonicalConversation = {
+      ...sourceConversation,
+      replyTarget: { channelId: 'channel-2', threadId: 'thread-1' },
+    };
+    mockFindTaskRun.mockResolvedValue({
+      id: 77,
+      taskId: 'source-task',
+      status: RunStatus.Failed,
+      payloadKind: TaskPayloadKind.StandardTask,
+      harness: 'opencode-server',
+      vendor: 'modal',
+      payload: {
+        repo: ALL_REPOSITORIES,
+        environmentId: 'original-environment',
+        description: 'Original prompt',
+        communicationSourceEventId: 'gateway-event-1',
+        launchIdempotencyKey: 'original-launch',
+        fastAgentSessionId: '11111111-1111-4111-8111-111111111111',
+        fastAgentParent: {
+          sessionId: '11111111-1111-4111-8111-111111111111',
+          conversation: sourceConversation,
+        },
+      },
+      error: 'Provider failed to start',
+      result: null,
+    });
+    mockResolveTaskByIdAccess.mockResolvedValue({
+      kind: 'resolved',
+      task: {
+        id: 'source-task',
+        model: 'openrouter/openai/gpt-5.4',
+      },
+    });
+    mockFindFastSession.mockResolvedValue({
+      id: '22222222-2222-4222-8222-222222222222',
+      userId: auth.userId,
+      conversation: canonicalConversation,
+    });
+
+    const result = await createFailedStartReplacementTaskRunCommand(auth, {
+      runId: 77,
+    });
+
+    expect(result.success).toBe(true);
+    expect(mockFindFastSession).toHaveBeenCalledWith({
+      id: '11111111-1111-4111-8111-111111111111',
+      fallbackConversation: sourceConversation,
+    });
+    expect(mockEnqueueTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        task: expect.objectContaining({
+          computeProvider: 'modal',
+          payload: expect.objectContaining({
+            environmentId: 'original-environment',
+            description: 'Original prompt',
+            communicationContextInherited: true,
+            fastAgentSessionId: '22222222-2222-4222-8222-222222222222',
+            fastAgentParent: {
+              sessionId: '22222222-2222-4222-8222-222222222222',
+              conversation: canonicalConversation,
+            },
+            harnessModelOverrides: expect.objectContaining({
+              'opencode-server': 'openrouter/openai/gpt-5.4',
+            }),
+          }),
+        }),
+      }),
+    );
+    const enqueuedPayload = mockEnqueueTask.mock.calls[0]?.[0]?.task?.payload;
+    expect(enqueuedPayload).not.toHaveProperty('communicationSourceEventId');
+    expect(enqueuedPayload).toHaveProperty(
+      'launchIdempotencyKey',
+      'failed-start-replacement:77',
+    );
+  });
+
+  it('strips client-supplied Fast linkage from ordinary web launches', async () => {
+    await createStandardTaskRunCommand(auth, {
+      payload: {
+        repo: ALL_REPOSITORIES,
+        description: 'Spoof linkage',
+        communicationContextInherited: true,
+        fastAgentSessionId: '11111111-1111-4111-8111-111111111111',
+        fastAgentParent: {
+          sessionId: '11111111-1111-4111-8111-111111111111',
+          conversation: {
+            surface: 'web',
+            workspaceId: 'other-user',
+            conversationId: 'other-session',
+          },
+        },
+      },
+    });
+
+    const enqueuedPayload = mockEnqueueTask.mock.calls[0]?.[0]?.task?.payload;
+    expect(enqueuedPayload).not.toHaveProperty('communicationContextInherited');
+    expect(enqueuedPayload).not.toHaveProperty('fastAgentSessionId');
+    expect(enqueuedPayload).not.toHaveProperty('fastAgentParent');
+  });
+
+  it('rejects recovery linkage to another user Fast session', async () => {
+    mockFindTaskRun.mockResolvedValue({
+      id: 77,
+      taskId: 'source-task',
+      status: RunStatus.Failed,
+      payloadKind: TaskPayloadKind.StandardTask,
+      harness: 'opencode-server',
+      vendor: 'modal',
+      payload: {
+        repo: ALL_REPOSITORIES,
+        description: 'Retry',
+        fastAgentParent: {
+          sessionId: '11111111-1111-4111-8111-111111111111',
+          conversation: {
+            surface: 'web',
+            workspaceId: 'workspace-1',
+            conversationId: 'session-1',
+          },
+        },
+      },
+      error: 'Provider failed to start',
+      result: null,
+    });
+    mockResolveTaskByIdAccess.mockResolvedValue({
+      kind: 'resolved',
+      task: {
+        id: 'source-task',
+        model: 'openrouter/openai/gpt-5.4',
+      },
+    });
+    mockFindFastSession.mockResolvedValue({
+      id: '11111111-1111-4111-8111-111111111111',
+      userId: 'other-user',
+      conversation: {
+        surface: 'web',
+        workspaceId: 'workspace-1',
+        conversationId: 'session-1',
+      },
+    });
+
+    await expect(
+      createFailedStartReplacementTaskRunCommand(auth, { runId: 77 }),
+    ).resolves.toEqual({
+      success: false,
+      error: 'Failed task start is not linked to your Fast session.',
+    });
+    expect(mockEnqueueTask).not.toHaveBeenCalled();
+  });
+
+  it('returns an existing replacement instead of launching a duplicate', async () => {
+    mockFindTaskRun.mockResolvedValue({
+      id: 77,
+      taskId: 'source-task',
+      status: RunStatus.Failed,
+      payloadKind: TaskPayloadKind.StandardTask,
+      harness: 'opencode-server',
+      vendor: 'modal',
+      payload: {
+        repo: ALL_REPOSITORIES,
+        description: 'Original prompt',
+      },
+    });
+    mockResolveTaskByIdAccess.mockResolvedValue({
+      kind: 'resolved',
+      task: {
+        id: 'source-task',
+        model: 'openrouter/openai/gpt-5.4',
+      },
+    });
+    mockFindReplacement.mockResolvedValue({
+      id: 88,
+      taskId: 'replacement-task',
+    });
+
+    await expect(
+      createFailedStartReplacementTaskRunCommand(auth, { runId: 77 }),
+    ).resolves.toEqual({
+      success: true,
+      id: 88,
+      taskId: 'replacement-task',
+    });
+    expect(mockEnqueueTask).not.toHaveBeenCalled();
+  });
+
+  it('recovers the winning replacement after a concurrent uniqueness race', async () => {
+    mockFindTaskRun.mockResolvedValue({
+      id: 77,
+      taskId: 'source-task',
+      status: RunStatus.Failed,
+      payloadKind: TaskPayloadKind.StandardTask,
+      harness: 'opencode-server',
+      vendor: 'modal',
+      payload: {
+        repo: ALL_REPOSITORIES,
+        description: 'Original prompt',
+      },
+    });
+    mockResolveTaskByIdAccess.mockResolvedValue({
+      kind: 'resolved',
+      task: {
+        id: 'source-task',
+        model: 'openrouter/openai/gpt-5.4',
+      },
+    });
+    mockFindReplacement
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({ id: 88, taskId: 'replacement-task' });
+    mockEnqueueTask.mockRejectedValue(new Error('duplicate key'));
+
+    await expect(
+      createFailedStartReplacementTaskRunCommand(auth, { runId: 77 }),
+    ).resolves.toEqual({
+      success: true,
+      id: 88,
+      taskId: 'replacement-task',
+    });
   });
 });
