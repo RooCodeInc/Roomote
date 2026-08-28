@@ -972,6 +972,28 @@ export async function beginCanonicalPrReviewWebAutoDispatch(input: {
   });
 }
 
+export async function releaseCanonicalPrReviewWebAutoDispatch(
+  request: PrReviewNotificationRequest,
+): Promise<boolean> {
+  if (
+    request.ownershipVersion !== 'canonical' ||
+    !request.deliveryId ||
+    !request.leaseToken
+  ) {
+    return true;
+  }
+  return transitionCanonicalPrReviewDelivery({
+    deliveryId: request.deliveryId,
+    leaseToken: request.leaseToken,
+    expected: 'auto_dispatch_pending',
+    status: 'prepared',
+    values: {
+      targetTaskId: null,
+      actingUserId: null,
+    },
+  });
+}
+
 export async function completeCanonicalPrReviewAutoDispatch(input: {
   request: PrReviewNotificationRequest;
   runId: number;

@@ -13,7 +13,7 @@ const mocks = vi.hoisted(() => ({
   queueCommunicationMessage: vi.fn(),
   queueSlackMessage: vi.fn(),
   resumeCommunicationTaskFromSnapshot: vi.fn(),
-  sendFastAgentTaskMessage: vi.fn(),
+  sendFastAgentTaskMessageOnce: vi.fn(),
   setTrustedRunActingUser: vi.fn(),
   withContention: vi.fn(),
   where: vi.fn(),
@@ -22,7 +22,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock('@roomote/cloud-agents/server', () => ({
   enqueueTask: mocks.enqueueTask,
   resolveApiBaseUrl: () => 'https://roomote.example',
-  sendFastAgentTaskMessage: mocks.sendFastAgentTaskMessage,
+  sendFastAgentTaskMessageOnce: mocks.sendFastAgentTaskMessageOnce,
 }));
 
 vi.mock('@roomote/communication', () => ({
@@ -116,7 +116,7 @@ describe('web Fast review follow-up dispatch', () => {
   beforeEach(() => vi.clearAllMocks());
 
   it('steers the owning task and returns its latest run', async () => {
-    mocks.sendFastAgentTaskMessage.mockResolvedValue({ success: true });
+    mocks.sendFastAgentTaskMessageOnce.mockResolvedValue({ success: true });
     mocks.findLatestTaskRun.mockResolvedValue({ id: 71 });
 
     await expect(
@@ -125,19 +125,24 @@ describe('web Fast review follow-up dispatch', () => {
         taskId: taskA,
         followUpPrompt: prompt,
         actingUserId: 'user-1',
+        idempotencyKey: 'pr-review-delivery:1',
       }),
     ).resolves.toEqual({ outcome: 'queued', runId: 71 });
-    expect(mocks.sendFastAgentTaskMessage).toHaveBeenCalledWith(
+    expect(mocks.sendFastAgentTaskMessageOnce).toHaveBeenCalledWith(
       {
         userId: 'user-1',
         apiBaseUrl: 'https://roomote.example',
       },
-      { taskId: taskA, message: prompt },
+      {
+        taskId: taskA,
+        message: prompt,
+        clientMessageId: 'pr-review-delivery:1',
+      },
     );
   });
 
   it('reports an unavailable task without inventing a run', async () => {
-    mocks.sendFastAgentTaskMessage.mockResolvedValue({
+    mocks.sendFastAgentTaskMessageOnce.mockResolvedValue({
       success: false,
       error: 'Task unavailable',
     });
@@ -148,6 +153,7 @@ describe('web Fast review follow-up dispatch', () => {
         taskId: taskA,
         followUpPrompt: prompt,
         actingUserId: 'user-1',
+        idempotencyKey: 'pr-review-delivery:1',
       }),
     ).resolves.toEqual({ outcome: 'unavailable' });
     expect(mocks.findLatestTaskRun).not.toHaveBeenCalled();

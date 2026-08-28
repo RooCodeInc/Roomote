@@ -263,6 +263,7 @@ export {
   finalizePrReviewNotificationRequest,
   isDurablePrReviewNotificationRequest,
   renewPrReviewNotificationRequestLease,
+  releaseCanonicalPrReviewWebAutoDispatch,
   hasPrReviewNotificationThreadContext,
   migrateLegacyPrReviewNotificationRequest,
   prepareCanonicalPrReviewNotificationRequest,

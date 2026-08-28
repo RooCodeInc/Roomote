@@ -1,7 +1,7 @@
 import {
   enqueueTask,
   resolveApiBaseUrl,
-  sendFastAgentTaskMessage,
+  sendFastAgentTaskMessageOnce,
 } from '@roomote/cloud-agents/server';
 import {
   and,
@@ -64,7 +64,12 @@ type PrReviewFollowUpDispatchInput = {
   slackTeamId?: string;
   idempotencyKey?: string;
 } & (
-  | { provider: 'web'; channelId?: never; threadId?: never }
+  | {
+      provider: 'web';
+      channelId?: never;
+      threadId?: never;
+      idempotencyKey: string;
+    }
   | {
       provider: PrReviewActionProvider;
       channelId: string;
@@ -194,13 +199,18 @@ async function dispatchWebFollowUp(input: {
   taskId: string;
   followUpPrompt: string;
   actingUserId: string;
+  idempotencyKey: string;
 }): Promise<PrReviewFollowUpDispatchResult> {
-  const dispatched = await sendFastAgentTaskMessage(
+  const dispatched = await sendFastAgentTaskMessageOnce(
     {
       userId: input.actingUserId,
       apiBaseUrl: resolveApiBaseUrl() ?? undefined,
     },
-    { taskId: input.taskId, message: input.followUpPrompt },
+    {
+      taskId: input.taskId,
+      message: input.followUpPrompt,
+      clientMessageId: input.idempotencyKey,
+    },
   );
   if (!dispatched.success) return { outcome: 'unavailable' };
 
