@@ -518,6 +518,72 @@ export async function transferGithubPrReviewCheckToRun(input: {
   }
 }
 
+export async function reconcileGithubPrReviewCheckForRun(input: {
+  installationId: number;
+  repository: string;
+  prNumber: number;
+  taskId: string;
+  runId: number;
+  signal?: AbortSignal;
+}): Promise<void> {
+  const run = await db.query.taskRuns.findFirst({
+    where: eq(taskRuns.id, input.runId),
+    columns: { status: true },
+  });
+  if (
+    !run ||
+    (run.status !== RunStatus.Completed &&
+      run.status !== RunStatus.Failed &&
+      run.status !== RunStatus.Canceled)
+  ) {
+    return;
+  }
+
+  const repository = splitRepository(input.repository);
+  if (!repository) return;
+  const linkage = await findGithubPrLinkage(input);
+  if (!linkage?.githubCheckRunId) return;
+
+  input.signal?.throwIfAborted();
+  const octokit = await getInstallationOctokit({
+    installationId: input.installationId,
+  });
+  const { data: checkRun } = await octokit.rest.checks.get({
+    ...repository,
+    check_run_id: linkage.githubCheckRunId,
+    ...(input.signal ? { request: { signal: input.signal } } : {}),
+  });
+  const owningRunId = Number(
+    /^roomote-review:(\d+)$/.exec(checkRun.external_id ?? '')?.[1],
+  );
+  if (checkRun.status === 'completed' || owningRunId !== input.runId) return;
+
+  let reviewSummaryBody: string | undefined;
+  if (run.status === RunStatus.Completed && linkage.githubReviewCommentId) {
+    const { data: comment } = await octokit.rest.issues.getComment({
+      ...repository,
+      comment_id: linkage.githubReviewCommentId,
+      ...(input.signal ? { request: { signal: input.signal } } : {}),
+    });
+    reviewSummaryBody = comment.body ?? undefined;
+  }
+
+  const result = getGithubPrReviewCheckResult({
+    runStatus: run.status,
+    reviewSummaryBody,
+    safetyNetFinalized: false,
+    expectedHeadSha: checkRun.head_sha,
+  });
+  await completeCheckRunWithResult({
+    octokit,
+    repository,
+    checkRunId: linkage.githubCheckRunId,
+    result,
+    taskUrl: getReviewTaskUrl(input.taskId),
+    signal: input.signal,
+  });
+}
+
 export async function completeGithubPrReviewCheckFromSummary(input: {
   installationId: number;
   repository: string;

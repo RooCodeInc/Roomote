@@ -18,6 +18,7 @@ import {
 import {
   acquireGithubPrReviewLifecycleLock,
   activePrReviewFollowUpRequestSchema,
+  reconcileGithubPrReviewCheckForRun,
   type ActivePrReviewFollowUpRequest,
   transferGithubPrReviewCheckToRun,
   withSandboxServerRpcClient,
@@ -113,6 +114,14 @@ async function launchFallbackWithCheckTransfer(
       taskId: data.taskId,
       previousRunId: data.runId,
       newRunId: fallbackRun.id,
+      signal: releaseLifecycleLock.signal,
+    });
+    await reconcileGithubPrReviewCheckForRun({
+      installationId,
+      repository: data.repository,
+      prNumber: data.prNumber,
+      taskId: data.taskId,
+      runId: fallbackRun.id,
       signal: releaseLifecycleLock.signal,
     });
 

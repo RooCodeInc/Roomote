@@ -13,6 +13,7 @@ const {
   mockAcquireGithubPrReviewLifecycleLock,
   mockReleaseGithubPrReviewLifecycleLock,
   mockTransferGithubPrReviewCheckToRun,
+  mockReconcileGithubPrReviewCheckForRun,
   MockSnapshotResumeAlreadyExistsError,
 } = vi.hoisted(() => ({
   mockBuildPrompt: vi.fn(),
@@ -29,6 +30,7 @@ const {
     signal: new AbortController().signal,
   }),
   mockTransferGithubPrReviewCheckToRun: vi.fn(),
+  mockReconcileGithubPrReviewCheckForRun: vi.fn(),
   MockSnapshotResumeAlreadyExistsError: class extends Error {
     constructor(public readonly existingRunId: number) {
       super(`Snapshot resume run ${existingRunId} already exists.`);
@@ -91,6 +93,8 @@ vi.mock('@roomote/sdk/server', () => ({
     mockAcquireGithubPrReviewLifecycleLock(...args),
   transferGithubPrReviewCheckToRun: (...args: unknown[]) =>
     mockTransferGithubPrReviewCheckToRun(...args),
+  reconcileGithubPrReviewCheckForRun: (...args: unknown[]) =>
+    mockReconcileGithubPrReviewCheckForRun(...args),
   withSandboxServerRpcClient: (...args: unknown[]) =>
     mockWithSandboxServerRpcClient(...args),
 }));
@@ -156,6 +160,7 @@ describe('activePrReviewFollowUpJob', () => {
       mockReleaseGithubPrReviewLifecycleLock,
     );
     mockTransferGithubPrReviewCheckToRun.mockResolvedValue(undefined);
+    mockReconcileGithubPrReviewCheckForRun.mockResolvedValue(undefined);
     mockFindFallbackRun.mockResolvedValue(null);
     mockFindFirstRepository.mockResolvedValue({
       id: 'repo-id',
@@ -429,6 +434,9 @@ describe('activePrReviewFollowUpJob', () => {
       expect(mockTransferGithubPrReviewCheckToRun).toHaveBeenLastCalledWith(
         expect.objectContaining({ newRunId: 200 }),
       );
+      expect(mockReconcileGithubPrReviewCheckForRun).toHaveBeenCalledWith(
+        expect.objectContaining({ runId: 200 }),
+      );
       expect(mockUpdateWhere).toHaveBeenCalledOnce();
     },
   );
@@ -459,6 +467,7 @@ describe('activePrReviewFollowUpJob', () => {
 
     expect(mockEnqueueTask).toHaveBeenCalledOnce();
     expect(mockTransferGithubPrReviewCheckToRun).toHaveBeenCalledTimes(2);
+    expect(mockReconcileGithubPrReviewCheckForRun).toHaveBeenCalledTimes(2);
     expect(mockUpdateWhere).toHaveBeenCalledTimes(2);
   });
 

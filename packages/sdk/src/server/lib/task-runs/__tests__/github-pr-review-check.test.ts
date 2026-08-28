@@ -97,6 +97,7 @@ import {
   GithubPrReviewLifecycleLockLostError,
   markGithubPrReviewCheckInProgress,
   publishGithubPrReviewCheck,
+  reconcileGithubPrReviewCheckForRun,
   transferGithubPrReviewCheckToRun,
 } from '../github-pr-review-check';
 
@@ -369,6 +370,59 @@ describe('GitHub PR review check lifecycle', () => {
     expect(mockDbUpdateSet).toHaveBeenCalledWith(
       expect.objectContaining({ githubCheckRunId: 30 }),
     );
+  });
+
+  it('reconciles a clean terminal fallback after late ownership transfer', async () => {
+    mockFindFirstRun.mockResolvedValueOnce({ status: RunStatus.Completed });
+    mockFindFirstLinkage.mockResolvedValue({
+      id: 'linkage-1',
+      githubCheckRunId: 20,
+      githubReviewCommentId: 30,
+      repository: 'owner/repo',
+    });
+    mockGetCheck.mockResolvedValueOnce({
+      data: {
+        external_id: 'roomote-review:200',
+        head_sha: '789abcd',
+        status: 'in_progress',
+      },
+    });
+    mockGetIssueComment.mockResolvedValueOnce({
+      data: {
+        body: '<!-- roomote-review-summary sha=789abcd -->\n<!-- roomote-review-status:start -->\nNo issues found.\n<!-- roomote-review-status:end -->\n<!-- roomote-review-checklist:start -->\n<!-- roomote-review-checklist:end -->',
+      },
+    });
+
+    await reconcileGithubPrReviewCheckForRun({
+      installationId: 1,
+      repository: 'owner/repo',
+      prNumber: 42,
+      taskId: 'task-1',
+      runId: 200,
+    });
+
+    expect(mockUpdateInstallationCheck).toHaveBeenCalledWith(
+      expect.objectContaining({
+        check_run_id: 20,
+        status: 'completed',
+        conclusion: 'success',
+      }),
+    );
+  });
+
+  it('does not reconcile a fallback that is still active', async () => {
+    mockFindFirstRun.mockResolvedValueOnce({ status: RunStatus.Running });
+
+    await reconcileGithubPrReviewCheckForRun({
+      installationId: 1,
+      repository: 'owner/repo',
+      prNumber: 42,
+      taskId: 'task-1',
+      runId: 200,
+    });
+
+    expect(mockGetCheck).not.toHaveBeenCalled();
+    expect(mockUpdateInstallationCheck).not.toHaveBeenCalled();
   });
 
   it('reconciles a worker that started before the queued check id was persisted', async () => {
