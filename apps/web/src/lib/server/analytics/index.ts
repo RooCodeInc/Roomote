@@ -59,7 +59,7 @@ function getAnalyticsDetailsColumns(
         { key: 'user', label: 'User' },
         { key: 'project', label: 'Environment' },
         { key: 'source', label: 'Source' },
-        { key: 'taskType', label: 'Task Type' },
+        { key: 'taskType', label: 'Type' },
         { key: 'taskTitle', label: 'Task Title' },
         { key: 'task', label: 'Task Link' },
       ];
@@ -87,7 +87,7 @@ function getAnalyticsDetailsColumns(
       return [
         { key: 'date', label: 'Date' },
         { key: 'user', label: 'User' },
-        { key: 'taskType', label: 'Task Type' },
+        { key: 'taskType', label: 'Type' },
         { key: 'project', label: 'Environment' },
         { key: 'source', label: 'Source' },
         { key: 'provider', label: 'Provider' },

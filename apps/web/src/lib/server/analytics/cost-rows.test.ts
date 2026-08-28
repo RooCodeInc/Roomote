@@ -2,6 +2,8 @@ import {
   db,
   environmentFactory,
   environments,
+  fastAgentConversations,
+  fastAgentMessages,
   inArray,
   llmUsageEvents,
   runFactory,
@@ -26,6 +28,7 @@ describe('getCostAnalyticsRows', () => {
   const taskIds: string[] = [];
   const environmentIds: string[] = [];
   const userIds: string[] = [];
+  const fastSessionIds: string[] = [];
 
   afterEach(async () => {
     if (usageEventIds.length > 0) {
@@ -37,6 +40,12 @@ describe('getCostAnalyticsRows', () => {
     if (taskIds.length > 0) {
       await db.delete(tasks).where(inArray(tasks.id, taskIds));
       taskIds.length = 0;
+    }
+    if (fastSessionIds.length > 0) {
+      await db
+        .delete(fastAgentConversations)
+        .where(inArray(fastAgentConversations.id, fastSessionIds));
+      fastSessionIds.length = 0;
     }
     if (environmentIds.length > 0) {
       await db
@@ -200,6 +209,143 @@ describe('getCostAnalyticsRows', () => {
       ]),
     );
   });
+
+  it('classifies Session orchestration separately without double counting delegated task costs', async () => {
+    const user = await userFactory.create();
+    userIds.push(user.id);
+    const currentNativeSessionId = `native-current-${crypto.randomUUID()}`;
+    const previousNativeSessionId = `native-previous-${crypto.randomUUID()}`;
+    const [session] = await db
+      .insert(fastAgentConversations)
+      .values({
+        userId: user.id,
+        surface: 'web',
+        workspaceId: `workspace-${crypto.randomUUID()}`,
+        conversationId: `conversation-${crypto.randomUUID()}`,
+        openCodeSessionId: currentNativeSessionId,
+        title: 'Session cost attribution',
+      })
+      .returning();
+    fastSessionIds.push(session!.id);
+    await db.insert(fastAgentMessages).values([
+      {
+        conversationId: session!.id,
+        eventId: `event-${crypto.randomUUID()}`,
+        turnId: 'turn-1',
+        turnSeq: 0,
+        ts: 1,
+        eventType: 'roomote_runtime.assistant_message',
+        role: 'assistant',
+        nativeSessionId: previousNativeSessionId,
+      },
+      {
+        conversationId: session!.id,
+        eventId: `event-${crypto.randomUUID()}`,
+        turnId: 'turn-1',
+        turnSeq: 1,
+        ts: 2,
+        eventType: 'roomote_runtime.assistant_message',
+        role: 'assistant',
+        nativeSessionId: previousNativeSessionId,
+      },
+    ]);
+    const task = await taskFactory.create({ initiatorUserId: user.id });
+    taskIds.push(task.id);
+    const run = await runFactory.create({
+      taskId: task.id,
+      actingUserId: user.id,
+      payloadKind: TaskPayloadKind.StandardTask,
+      payload: {
+        repo: 'roomote/test',
+        description: 'Delegated Session task',
+        fastAgentSessionId: session!.id,
+      },
+    });
+    const insertedEvents = await db
+      .insert(llmUsageEvents)
+      .values([
+        {
+          eventKey: `fast-previous-${crypto.randomUUID()}`,
+          source: 'fast_agent',
+          userId: user.id,
+          harnessSessionId: previousNativeSessionId,
+          messageId: `message-${crypto.randomUUID()}`,
+          costSource: 'opencode_message',
+          costMicroUsd: 1_000,
+        },
+        {
+          eventKey: `fast-current-${crypto.randomUUID()}`,
+          source: 'fast_agent',
+          userId: user.id,
+          harnessSessionId: currentNativeSessionId,
+          messageId: `message-${crypto.randomUUID()}`,
+          costSource: 'opencode_message',
+          costMicroUsd: 2_000,
+        },
+        {
+          eventKey: `delegated-run-${crypto.randomUUID()}`,
+          taskId: task.id,
+          runId: run.id,
+          costSource: 'opencode_message',
+          costMicroUsd: 3_000,
+        },
+        {
+          eventKey: `delegated-task-${crypto.randomUUID()}`,
+          taskId: task.id,
+          costSource: 'opencode_message',
+          costMicroUsd: 4_000,
+        },
+        {
+          eventKey: `unattributed-${crypto.randomUUID()}`,
+          costSource: 'missing',
+          costMicroUsd: 5_000,
+        },
+      ])
+      .returning({ id: llmUsageEvents.id });
+    usageEventIds.push(...insertedEvents.map((event) => event.id));
+
+    const rows = await getCostAnalyticsRows(
+      {} as UserAuthSuccess,
+      'all',
+      new Date(),
+    );
+    const insertedRows = rows.filter((row) =>
+      insertedEvents.some((event) => event.id === row.id),
+    );
+    const rowsById = new Map(insertedRows.map((row) => [row.id, row]));
+    const sessionRows = insertedEvents
+      .slice(0, 2)
+      .map((event) => rowsById.get(event.id)!);
+    const delegatedTaskRows = insertedEvents
+      .slice(2, 4)
+      .map((event) => rowsById.get(event.id)!);
+    const unattributedRow = rowsById.get(insertedEvents[4]!.id)!;
+
+    expect(insertedRows).toHaveLength(5);
+    expect(insertedRows.reduce((sum, row) => sum + row.value, 0)).toBe(0.015);
+    expect(sessionRows.reduce((sum, row) => sum + row.value, 0)).toBe(0.003);
+    expect(sessionRows.map((row) => row.dimensions.taskType?.label)).toEqual([
+      'Session',
+      'Session',
+    ]);
+    expect(sessionRows.map((row) => row.details.values.taskTitle)).toEqual([
+      'Session',
+      'Session',
+    ]);
+    expect(delegatedTaskRows.reduce((sum, row) => sum + row.value, 0)).toBe(
+      0.007,
+    );
+    expect(
+      delegatedTaskRows.map((row) => row.dimensions.taskType?.label),
+    ).toEqual(['Manual Task', 'Manual Task']);
+    expect(unattributedRow.dimensions.taskType?.label).toBe(
+      'Non-task inference',
+    );
+    for (const row of insertedRows) {
+      expect(row.dimensions).not.toHaveProperty('session');
+      expect(row.details.links?.session).toBeUndefined();
+    }
+  });
 });
 
 describe('aggregateCostAnalyticsRowsByTask', () => {
@@ -225,7 +371,7 @@ describe('aggregateCostAnalyticsRowsByTask', () => {
         id,
         values: {
           date: timestamp,
-          taskType: taskId ? 'Manual' : 'Non-task inference',
+          taskType: taskId ? 'Manual Task' : 'Non-task inference',
           project: 'Roomote',
           source: 'opencode',
           provider: 'openai',

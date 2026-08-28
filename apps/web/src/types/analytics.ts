@@ -283,7 +283,7 @@ export const ANALYTICS_DIMENSION_LABELS: Record<AnalyticsDimension, string> = {
   status: 'Status',
   repo: 'Repo',
   author: 'Author',
-  taskType: 'Task Type',
+  taskType: 'Type',
   provider: 'Provider',
   model: 'Model',
 };
