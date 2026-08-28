@@ -2,6 +2,7 @@ import {
   and,
   db,
   eq,
+  ensureAutomationRowsOnce,
   fastAgentConversations,
   fastAgentMessages,
   userFactory,
@@ -12,6 +13,7 @@ import { fastAgentConversationRepository } from '../fast-agent-conversation-repo
 import { hasFastAgentSession } from '../fast-agent-session';
 
 const createdUserIds: string[] = [];
+const createdConversationIds: string[] = [];
 
 async function createUser() {
   const user = await userFactory.create();
@@ -30,6 +32,11 @@ const slackConversation = {
 };
 
 afterEach(async () => {
+  for (const conversationId of createdConversationIds.splice(0)) {
+    await db
+      .delete(fastAgentConversations)
+      .where(eq(fastAgentConversations.id, conversationId));
+  }
   for (const userId of createdUserIds.splice(0)) {
     await db.delete(users).where(eq(users.id, userId));
   }
@@ -54,6 +61,7 @@ describe('Fast conversation repository', () => {
     });
 
     expect(stored?.conversation).toEqual(conversation);
+    expect(stored?.owner).toEqual({ kind: 'user', userId: user.id });
     expect(stored?.openCodeSessionId).toBeNull();
     const [row] = await db
       .select({
@@ -63,6 +71,42 @@ describe('Fast conversation repository', () => {
       .from(fastAgentConversations)
       .where(eq(fastAgentConversations.id, session.id));
     expect(row).toEqual({ channelId: null, surface: 'automation' });
+  });
+
+  it('reads a staged automation-owned conversation without enabling writes', async () => {
+    await ensureAutomationRowsOnce();
+    const conversation = {
+      surface: 'automation' as const,
+      workspaceId: 'staged-automation-owner',
+      conversationId: 'staged-automation-occurrence',
+    };
+    const [inserted] = await db
+      .insert(fastAgentConversations)
+      .values({
+        userId: null,
+        ownerAutomation: 'custom_automation',
+        surface: conversation.surface,
+        workspaceId: conversation.workspaceId,
+        conversationId: conversation.conversationId,
+      })
+      .returning({ id: fastAgentConversations.id });
+    createdConversationIds.push(inserted!.id);
+
+    await expect(
+      fastAgentConversationRepository.findById({ id: inserted!.id }),
+    ).resolves.toMatchObject({
+      userId: null,
+      owner: { kind: 'automation', automationKey: 'custom_automation' },
+      conversation,
+    });
+
+    const user = await createUser();
+    await expect(
+      fastAgentConversationRepository.getOrCreate({
+        userId: user.id,
+        conversation,
+      }),
+    ).rejects.toThrow('owner does not match');
   });
 
   it.each(['teams', 'telegram'] as const)(

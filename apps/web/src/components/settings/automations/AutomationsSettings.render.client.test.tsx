@@ -22,6 +22,7 @@ const state = vi.hoisted(() => ({
     cronExpression: string | null;
     model: null;
     executionMode?: 'sandbox_task' | 'fast';
+    launchMode?: 'fast_session' | 'legacy_sandbox_task' | 'unavailable';
     environmentId: string;
     target: {
       provider?: 'slack' | 'discord' | 'teams' | 'telegram';
@@ -280,7 +281,11 @@ const mutations = vi.hoisted(() => ({
     ) => void;
   } | null,
   latestCustomTriggerOptions: null as {
-    onSuccess?: (result: { outcome: 'launched'; taskId: string }) => void;
+    onSuccess?: (
+      result:
+        | { outcome: 'launched'; taskId: string }
+        | { outcome: 'completed' },
+    ) => void;
   } | null,
 }));
 
@@ -1082,6 +1087,7 @@ describe('AutomationsSettings', () => {
         scheduleMode: 'weekly',
         cronExpression: null,
         model: null,
+        launchMode: 'fast_session',
         environmentId: 'env-1',
         target: { provider: 'slack', externalRef: 'C123MANAGER' },
         lastRunAt: null,
@@ -1108,13 +1114,10 @@ describe('AutomationsSettings', () => {
       screen.getByRole('button', { name: 'Run Weekly flaky-test scan now' }),
     ).toBeEnabled();
     expect(
-      screen.getByRole('link', {
+      screen.queryByRole('link', {
         name: 'View previous runs for Weekly flaky-test scan',
       }),
-    ).toHaveAttribute(
-      'href',
-      '/tasks?userId=automation%3Acustom_automation%3Aautomation-1',
-    );
+    ).not.toBeInTheDocument();
     fireEvent.click(
       screen.getByRole('button', { name: 'Run Weekly flaky-test scan now' }),
     );
@@ -1123,15 +1126,11 @@ describe('AutomationsSettings', () => {
     });
     act(() => {
       mutations.latestCustomTriggerOptions?.onSuccess?.({
-        outcome: 'launched',
-        taskId: 'task-custom-1',
+        outcome: 'completed',
       });
     });
     expect(toast.success).toHaveBeenCalledWith(
-      'Running Weekly flaky-test scan now',
-      expect.objectContaining({
-        action: expect.objectContaining({ label: 'View task' }),
-      }),
+      'Weekly flaky-test scan ran successfully.',
     );
 
     state.customAutomations.push({
@@ -1161,10 +1160,10 @@ describe('AutomationsSettings', () => {
       }),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole('link', {
+      screen.queryByRole('link', {
         name: 'View previous runs for Weekly flaky-test scan',
       }),
-    ).toBeInTheDocument();
+    ).not.toBeInTheDocument();
     expect(
       screen.getByRole('button', { name: 'Delete Weekly flaky-test scan' }),
     ).toBeInTheDocument();
@@ -1199,6 +1198,7 @@ describe('AutomationsSettings', () => {
         scheduleMode: 'daily',
         cronExpression: null,
         model: null,
+        launchMode: 'fast_session',
         environmentId: '__all_repositories__',
         target: { provider: 'slack', externalRef: 'C123MANAGER' },
         lastRunAt: null,
@@ -1218,7 +1218,9 @@ describe('AutomationsSettings', () => {
       await screen.findByText('Daily, in All repositories →'),
     ).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'New' }));
-    fireEvent.click(screen.getByRole('combobox', { name: 'Environment' }));
+    fireEvent.click(
+      screen.getByRole('combobox', { name: 'Delegated task environment' }),
+    );
     expect(
       screen.getByRole('option', { name: 'All repositories' }),
     ).toBeInTheDocument();
@@ -1235,6 +1237,7 @@ describe('AutomationsSettings', () => {
         cronExpression: null,
         model: null,
         executionMode: 'fast',
+        launchMode: 'fast_session',
         environmentId: '__fast__',
         target: {},
         lastRunAt: null,
@@ -1251,7 +1254,11 @@ describe('AutomationsSettings', () => {
 
     render(<AutomationsSettings />);
 
-    expect(await screen.findByText('Daily, in Fast →')).toBeInTheDocument();
+    expect(
+      await screen.findByText(
+        'Daily, in Fast with no default task environment →',
+      ),
+    ).toBeInTheDocument();
     expect(
       screen.getByText('No actionable regressions found.'),
     ).toBeInTheDocument();
@@ -1266,13 +1273,57 @@ describe('AutomationsSettings', () => {
     expect(screen.getByText('Delegated task model')).toBeInTheDocument();
     expect(
       screen.getByText(
-        'This run is stored as a Fast conversation without posting to chat.',
+        'Each run starts as a stored Fast session. A sandbox task uses the selected environment only when workspace execution is required.',
       ),
     ).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('combobox', { name: 'Environment' }));
+    fireEvent.click(
+      screen.getByRole('combobox', { name: 'Delegated task environment' }),
+    );
     expect(
-      screen.getByRole('option', { name: 'Fast (no sandbox)' }),
+      screen.getByRole('option', { name: 'No default task environment' }),
     ).toBeInTheDocument();
+  });
+
+  it('keeps an owner-deleted Fast automation unavailable until it is claimed', async () => {
+    state.customAutomations = [
+      {
+        id: 'automation-unavailable',
+        name: 'Ownerless Fast digest',
+        prompt: 'Summarize priorities.',
+        enabled: true,
+        scheduleMode: 'daily',
+        cronExpression: null,
+        model: null,
+        executionMode: 'fast',
+        launchMode: 'unavailable',
+        environmentId: '__fast__',
+        target: {},
+        lastRunAt: null,
+        lastSucceededAt: null,
+        lastFailedAt: null,
+        lastError: null,
+        lastLaunchedTaskId: null,
+        createdByName: 'Unknown',
+        createdAt: new Date('2026-01-01T00:00:00Z'),
+        updatedAt: new Date('2026-01-01T00:00:00Z'),
+      },
+    ];
+
+    render(<AutomationsSettings />);
+
+    expect(
+      await screen.findByText(
+        'Owner unavailable. Configure and save to claim this automation before running it.',
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Run Ownerless Fast digest now' }),
+    ).toBeDisabled();
+    expect(
+      screen.getByRole('button', {
+        name: 'Configure Ownerless Fast digest',
+      }),
+    ).toBeEnabled();
   });
 
   it('humanizes custom schedules and shows the last run when available', async () => {
@@ -1357,7 +1408,7 @@ describe('AutomationsSettings', () => {
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        'Each Fast run posts here, and replies continue the Fast session.',
+        'Each run starts as Fast and posts here; replies continue the Fast session.',
       ),
     ).toBeInTheDocument();
   });
@@ -1408,7 +1459,7 @@ describe('AutomationsSettings', () => {
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        'Each Fast run posts here, and replies continue the Fast session.',
+        'Each run starts as Fast and posts here; replies continue the Fast session.',
       ),
     ).toBeInTheDocument();
   });
@@ -1451,7 +1502,7 @@ describe('AutomationsSettings', () => {
 
     expect(
       screen.getByText(
-        'Each Fast run posts here, and replies continue the Fast session.',
+        'Each run starts as Fast and posts here; replies continue the Fast session.',
       ),
     ).toBeInTheDocument();
   });

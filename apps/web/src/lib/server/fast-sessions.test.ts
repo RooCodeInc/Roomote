@@ -1,5 +1,6 @@
 import {
   db,
+  ensureAutomationRowsOnce,
   fastAgentConversations,
   fastAgentMessages,
   userFactory,
@@ -138,6 +139,49 @@ describe('Fast session queries', () => {
     expect(sessions.map((session) => session.id)).toEqual(
       expect.arrayContaining([adminSession.id, otherSession.id]),
     );
+  });
+
+  it('shows staged automation-owned sessions only to admins', async () => {
+    const admin = await userFactory.create();
+    const member = await userFactory.create();
+    await ensureAutomationRowsOnce();
+    const [automationSession] = await db
+      .insert(fastAgentConversations)
+      .values({
+        userId: null,
+        ownerAutomation: 'announcer',
+        surface: 'automation',
+        workspaceId: 'announcer',
+        conversationId: 'staged-announcer-session',
+      })
+      .returning();
+
+    const memberSessions = await getFastSessions({
+      userId: member.id,
+      isAdmin: false,
+    });
+    expect(memberSessions.sessions).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: automationSession!.id }),
+      ]),
+    );
+    await expect(
+      getFastSessionById(
+        { userId: member.id, isAdmin: false },
+        automationSession!.id,
+      ),
+    ).resolves.toBeNull();
+    await expect(
+      getFastSessionById(
+        { userId: admin.id, isAdmin: true },
+        automationSession!.id,
+      ),
+    ).resolves.toMatchObject({
+      id: automationSession!.id,
+      userId: null,
+      ownerAutomation: 'announcer',
+      ownerName: null,
+    });
   });
 
   it('pages older sessions with a keyset cursor', async () => {

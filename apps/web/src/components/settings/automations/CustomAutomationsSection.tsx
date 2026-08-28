@@ -326,7 +326,7 @@ export function CustomAutomationsSection() {
 
   const environmentOptions = useMemo(
     () => [
-      { id: FAST_EXECUTION, name: 'Fast (no sandbox)' },
+      { id: FAST_EXECUTION, name: 'No default task environment' },
       { id: ALL_REPOSITORIES, name: 'All repositories' },
       ...(environmentsQuery.data ?? []).map((environment) => ({
         id: environment.id,
@@ -727,7 +727,9 @@ export function CustomAutomationsSection() {
 
         <div className="flex flex-col gap-4 sm:flex-row">
           <div className="space-y-2 sm:w-52">
-            <Label htmlFor="custom-automation-environment">Environment</Label>
+            <Label htmlFor="custom-automation-environment">
+              Delegated task environment
+            </Label>
             <Select
               value={form.environmentId || undefined}
               disabled={busy || environmentOptions.length === 0}
@@ -755,20 +757,12 @@ export function CustomAutomationsSection() {
           </div>
 
           <div className="space-y-2">
-            <Label>
-              {form.environmentId === FAST_EXECUTION
-                ? 'Delegated task model'
-                : 'Model'}
-            </Label>
+            <Label>Delegated task model</Label>
             <ModelSelect
               size="default"
               ariaLabel="Automation model"
               value={form.model}
-              emptyOptionLabel={
-                form.environmentId === FAST_EXECUTION
-                  ? 'Default delegated task model'
-                  : 'Default coding model'
-              }
+              emptyOptionLabel="Default delegated task model"
               disabled={busy}
               onValueChange={(value) =>
                 setForm((current) => ({ ...current, model: value }))
@@ -917,15 +911,13 @@ export function CustomAutomationsSection() {
               </div>
             )}
           </div>
-          {form.environmentId === FAST_EXECUTION ? (
-            <p className="text-sm text-muted-foreground">
-              {form.targetProvider === 'none'
-                ? 'This run is stored as a Fast conversation without posting to chat.'
-                : form.targetProvider === 'telegram'
-                  ? 'Each Fast run posts here. Continue the session from the web app; chat replies on this provider do not resume Fast yet.'
-                  : 'Each Fast run posts here, and replies continue the Fast session.'}
-            </p>
-          ) : null}
+          <p className="text-sm text-muted-foreground">
+            {form.targetProvider === 'none'
+              ? 'Each run starts as a stored Fast session. A sandbox task uses the selected environment only when workspace execution is required.'
+              : form.targetProvider === 'telegram'
+                ? 'Each run starts as Fast and posts here. Continue the session from the web app; chat replies on this provider do not resume Fast yet.'
+                : 'Each run starts as Fast and posts here; replies continue the Fast session.'}
+          </p>
         </div>
 
         <div className="flex items-center justify-between gap-3">
@@ -1049,9 +1041,14 @@ export function CustomAutomationsSection() {
           <CardContent>
             <div className="divide-y divide-background">
               {rows.map((row) => {
+                const launchMode =
+                  row.launchMode ??
+                  (row.executionMode === 'fast'
+                    ? 'fast_session'
+                    : 'legacy_sandbox_task');
                 const environmentName =
                   row.executionMode === 'fast'
-                    ? 'Fast'
+                    ? 'Fast with no default task environment'
                     : (environmentOptions.find(
                         (environment) => environment.id === row.environmentId,
                       )?.name ?? 'Environment missing');
@@ -1135,14 +1132,20 @@ export function CustomAutomationsSection() {
                           </>
                         ) : null}
                       </p>
-                      {row.executionMode === 'fast' && row.latestFastResult ? (
+                      {launchMode === 'unavailable' ? (
+                        <p className="text-xs text-destructive">
+                          Owner unavailable. Configure and save to claim this
+                          automation before running it.
+                        </p>
+                      ) : null}
+                      {launchMode === 'fast_session' && row.latestFastResult ? (
                         <p className="line-clamp-2 text-xs text-muted-foreground">
                           {row.latestFastResult}
                         </p>
                       ) : null}
                     </div>
                     <div className="col-start-2 row-start-2 flex shrink-0 items-center gap-1 sm:col-start-3 sm:row-start-1">
-                      {row.executionMode !== 'fast' ? (
+                      {launchMode === 'legacy_sandbox_task' ? (
                         <BasicTooltip content="View previous runs">
                           <Button asChild size="icon" variant="ghost">
                             <Link
@@ -1156,7 +1159,7 @@ export function CustomAutomationsSection() {
                       ) : null}
                       <CustomAutomationRunButton
                         automation={row}
-                        disabled={busy}
+                        disabled={busy || launchMode === 'unavailable'}
                       />
                       <BasicTooltip content="Configure">
                         <Button

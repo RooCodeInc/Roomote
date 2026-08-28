@@ -17,6 +17,7 @@ import {
   environments,
   eq,
   taskFactory,
+  userFactory,
 } from '../../server';
 
 describe('custom automations helpers', () => {
@@ -34,6 +35,31 @@ describe('custom automations helpers', () => {
     expect(created.environmentId).toBeNull();
     expect(created.allRepositories).toBe(false);
 
+    await deleteCustomAutomation(created.id);
+  });
+
+  it('lets an admin claim an owner-deleted Fast automation on update', async () => {
+    const created = await createCustomAutomation({
+      name: `Ownerless Fast digest ${Date.now()}`,
+      prompt: 'Summarize actionable work using Fast.',
+      enabled: true,
+      scheduleMode: 'daily',
+      environmentId: FAST_EXECUTION,
+      target: {},
+    });
+    const owner = await userFactory.create();
+
+    const updated = await updateCustomAutomation(created.id, {
+      name: created.name,
+      prompt: created.prompt,
+      enabled: created.enabled,
+      scheduleMode: 'daily',
+      environmentId: FAST_EXECUTION,
+      target: {},
+      createdByUserId: owner.id,
+    });
+
+    expect(updated.createdByUserId).toBe(owner.id);
     await deleteCustomAutomation(created.id);
   });
 

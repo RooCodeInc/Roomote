@@ -131,7 +131,6 @@ import {
   runCustomAutomationNow,
 } from '../custom-automations';
 import {
-  buildDestinationTaskPayloadFields,
   findTeamsConversationRoute,
   listConnectedCommunicationProviders,
 } from '../destination';
@@ -151,7 +150,7 @@ const automation = {
     targetKind: 'slack_channel',
     externalRef: 'C123',
   },
-  createdByUserId: null,
+  createdByUserId: 'user-1',
   lastRunAt: null,
   lastSucceededAt: null,
   lastFailedAt: null,
@@ -184,9 +183,10 @@ describe('customAutomationsJob', () => {
       id: 'slack-installation-channel-1',
       slackInstallation: { isActive: true, teamId: 'T123' },
     } as never);
-    vi.mocked(db.query.slackInstallations.findFirst).mockResolvedValue(
-      undefined,
-    );
+    vi.mocked(db.query.slackInstallations.findFirst).mockResolvedValue({
+      botAccessToken: 'xoxb-test',
+      teamId: 'T123',
+    } as never);
     vi.mocked(enqueueTask).mockResolvedValue({
       taskId: 'task_abc',
     } as never);
@@ -748,10 +748,11 @@ describe('customAutomationsJob', () => {
     });
   });
 
-  it('launches a StandardTask for due automations', async () => {
+  it('starts a scheduled legacy sandbox automation as a Fast Session', async () => {
     const result = await customAutomationsJob();
 
-    expect(result.launchedTaskId).toBe('task_abc');
+    expect(result.completed).toBe(true);
+    expect(result.launchedTaskId).toBeNull();
     expect(tryClaimCustomAutomationLaunch).toHaveBeenCalledWith(
       automation.id,
       automation.lastRunAt,
@@ -762,19 +763,44 @@ describe('customAutomationsJob', () => {
         scheduleHourLocal: 3,
       }),
     );
+    expect(enqueueTask).not.toHaveBeenCalled();
+    expect(fastMocks.getSession).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: 'user-1' }),
+    );
+    expect(fastMocks.deliverParentEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: expect.objectContaining({
+          type: 'automation_triggered',
+          automationId: automation.id,
+          prompt: automation.prompt,
+          trigger: 'schedule',
+          taskEnvironmentId: automation.environmentId,
+        }),
+      }),
+    );
+    expect(recordCustomAutomationRunOutcome).toHaveBeenCalledWith(
+      db,
+      expect.objectContaining({
+        id: automation.id,
+        status: 'succeeded',
+        launchClaimedAt: expect.any(Date),
+      }),
+    );
+  });
+
+  it('keeps an ownerless legacy sandbox automation on the direct task path', async () => {
+    vi.mocked(listEnabledCustomAutomations).mockResolvedValue([
+      { ...automation, createdByUserId: null } as never,
+    ]);
+
+    const result = await customAutomationsJob();
+
+    expect(result.launchedTaskId).toBe('task_abc');
+    expect(fastMocks.getSession).not.toHaveBeenCalled();
+    expect(fastMocks.deliverParentEvent).not.toHaveBeenCalled();
     expect(enqueueTask).toHaveBeenCalledWith(
       expect.objectContaining({
-        task: expect.objectContaining({
-          type: TaskPayloadKind.StandardTask,
-          payload: expect.objectContaining({
-            environmentId: automation.environmentId,
-            description: expect.stringContaining(automation.prompt),
-            repo: '',
-            customAutomationId: automation.id,
-            channel: 'C123',
-            slackChannel: 'C123',
-          }),
-        }),
+        trigger: 'schedule',
         initiator: {
           kind: 'automation',
           key: 'custom_automation',
@@ -783,25 +809,18 @@ describe('customAutomationsJob', () => {
             displayName: automation.name,
           },
         },
-        title: automation.name,
-        workflow: 'standard',
-        surface: 'system',
-        trigger: 'schedule',
-        channels: { slackChannelId: 'C123' },
-      }),
-    );
-    expect(recordCustomAutomationRunOutcome).toHaveBeenCalledWith(
-      db,
-      expect.objectContaining({
-        id: automation.id,
-        status: 'succeeded',
-        lastLaunchedTaskId: 'task_abc',
-        launchClaimedAt: expect.any(Date),
+        task: expect.objectContaining({
+          type: TaskPayloadKind.StandardTask,
+          payload: expect.objectContaining({
+            environmentId: automation.environmentId,
+            description: expect.stringContaining(automation.prompt),
+          }),
+        }),
       }),
     );
   });
 
-  it('launches all-repositories automations without a named environment', async () => {
+  it('preserves all-repositories scope on the Fast automation event', async () => {
     vi.mocked(listEnabledCustomAutomations).mockResolvedValue([
       {
         ...automation,
@@ -812,100 +831,44 @@ describe('customAutomationsJob', () => {
 
     const result = await customAutomationsJob();
 
-    expect(result.launchedTaskId).toBe('task_abc');
+    expect(result.completed).toBe(true);
     expect(db.query.environments.findFirst).not.toHaveBeenCalled();
-    expect(enqueueTask).toHaveBeenCalledWith(
+    expect(enqueueTask).not.toHaveBeenCalled();
+    expect(fastMocks.deliverParentEvent).toHaveBeenCalledWith(
       expect.objectContaining({
-        task: expect.objectContaining({
-          payload: expect.objectContaining({ repo: ALL_REPOSITORIES }),
+        event: expect.objectContaining({
+          taskEnvironmentId: ALL_REPOSITORIES,
         }),
       }),
     );
-    const enqueued = vi.mocked(enqueueTask).mock.calls[0]?.[0] as {
-      task: { payload: Record<string, unknown> & { description: string } };
-    };
-    expect(enqueued.task.payload).not.toHaveProperty('environmentId');
-    expect(enqueued.task.payload.description).toContain(
-      'must include the concrete `targetRepositoryFullName`',
-    );
   });
 
-  it('passes a model override through to the launch', async () => {
+  it('passes a valid model override to delegated tasks through Fast', async () => {
     vi.mocked(listEnabledCustomAutomations).mockResolvedValue([
       { ...automation, model: 'anthropic/claude-sonnet-5' } as never,
     ]);
 
     await customAutomationsJob();
 
-    expect(enqueueTask).toHaveBeenCalledWith(
+    expect(fastMocks.deliverParentEvent).toHaveBeenCalledWith(
       expect.objectContaining({
-        task: expect.objectContaining({
-          harness: 'opencode-server',
-          payload: expect.objectContaining({
-            harnessModelOverrides: {
-              'opencode-server': 'anthropic/claude-sonnet-5',
-            },
-          }),
+        event: expect.objectContaining({
+          defaultTaskModel: 'anthropic/claude-sonnet-5',
         }),
       }),
     );
   });
 
-  it('launches on the deployment default when a persisted model is invalid', async () => {
+  it('uses the delegated-task default when a persisted model is invalid', async () => {
     vi.mocked(listEnabledCustomAutomations).mockResolvedValue([
       { ...automation, model: 'not-a-model' } as never,
     ]);
 
     const result = await customAutomationsJob();
 
-    expect(result.launchedTaskId).toBe('task_abc');
-    const enqueued = vi.mocked(enqueueTask).mock.calls[0]?.[0] as {
-      task: { harness?: string; payload: Record<string, unknown> };
-    };
-    expect(enqueued.task.harness).toBeUndefined();
-    expect(enqueued.task.payload.harnessModelOverrides).toBeUndefined();
-  });
-
-  it('makes the configured channel available for interruption-worthy reports', async () => {
-    await customAutomationsJob();
-
-    const enqueued = vi.mocked(enqueueTask).mock.calls[0]?.[0] as {
-      task: { payload: { description: string } };
-    };
-    expect(enqueued.task.payload.description).toContain(
-      '<slack_channel_id>C123</slack_channel_id>',
-    );
-    expect(enqueued.task.payload.description).toContain('send_chat_reply');
-    expect(enqueued.task.payload.description).toContain(
-      'do not post progress updates',
-    );
-    expect(enqueued.task.payload.description).toContain(
-      'Default to finishing silently',
-    );
-    expect(enqueued.task.payload.description).toContain(
-      'a concrete actionable or important finding',
-    );
-    expect(enqueued.task.payload.description).toContain(
-      'Routine success, healthy status, no-change results',
-    );
-    expect(enqueued.task.payload.description).toContain(
-      'do not mention this automation',
-    );
-    expect(enqueued.task.payload.description).toContain(
-      '<default_report_presentation>',
-    );
-    expect(enqueued.task.payload.description).toContain(
-      'On any conflict, follow the request',
-    );
-    expect(enqueued.task.payload.description).toContain(
-      'normally no more than about 250 words',
-    );
-    expect(enqueued.task.payload.description).toContain(
-      'send the detail in follow-up replies in the same thread',
-    );
-    expect(enqueued.task.payload.description.indexOf(automation.prompt)).toBe(
-      0,
-    );
+    expect(result.completed).toBe(true);
+    const event = fastMocks.deliverParentEvent.mock.calls[0]?.[0]?.event;
+    expect(event).not.toHaveProperty('defaultTaskModel');
   });
 
   it('resolves a Slack DM target for the automation owner', async () => {
@@ -923,22 +886,17 @@ describe('customAutomationsJob', () => {
 
     const result = await customAutomationsJob();
 
-    expect(result.launchedTaskId).toBe('task_abc');
+    expect(result.completed).toBe(true);
     expect(findUserDirectMessageDestination).toHaveBeenCalledWith(
       'slack',
       'user-1',
     );
-    expect(enqueueTask).toHaveBeenCalledWith(
+    expect(fastMocks.getSession).toHaveBeenCalledWith(
       expect.objectContaining({
-        task: expect.objectContaining({
-          payload: expect.objectContaining({
-            channel: 'D123',
-            slackChannel: 'D123',
-            teamId: 'T123',
-            slackTeamId: 'T123',
-          }),
+        conversation: expect.objectContaining({
+          surface: 'slack',
+          replyTarget: { channelId: 'D123', threadId: '100.001' },
         }),
-        channels: { slackChannelId: 'D123' },
       }),
     );
   });
@@ -970,6 +928,7 @@ describe('customAutomationsJob', () => {
       'teams_user',
       {
         channelId: 'teams-dm-1',
+        teamId: 'tenant-1',
         serviceUrl: 'https://smba.example.com/amer/',
       },
     ],
@@ -998,83 +957,33 @@ describe('customAutomationsJob', () => {
 
       const result = await customAutomationsJob();
 
-      expect(result.launchedTaskId).toBe('task_abc');
+      expect(result.completed).toBe(true);
       expect(findUserDirectMessageDestination).toHaveBeenCalledWith(
         provider,
         'user-1',
       );
-      expect(buildDestinationTaskPayloadFields).toHaveBeenCalledWith(
+      expect(fastMocks.getSession).toHaveBeenCalledWith(
         expect.objectContaining({
-          provider,
-          ...resolvedDestination,
+          conversation: expect.objectContaining({ surface: provider }),
         }),
       );
     },
   );
 
-  it('adds presentation defaults without channel anchoring when no report channel is configured', async () => {
+  it('uses a stored Fast conversation when no report destination is configured', async () => {
     vi.mocked(listEnabledCustomAutomations).mockResolvedValue([
       { ...automation, target: {} } as never,
     ]);
 
     const result = await customAutomationsJob();
 
-    expect(result.launchedTaskId).toBe('task_abc');
-    const enqueued = vi.mocked(enqueueTask).mock.calls[0]?.[0] as {
-      task: { payload: Record<string, unknown> };
-      channels?: unknown;
-    };
-    expect(enqueued.task.payload.description).toEqual(
-      expect.stringContaining(automation.prompt),
-    );
-    expect(enqueued.task.payload.description).toEqual(
-      expect.stringContaining('<default_report_presentation>'),
-    );
-    expect(enqueued.task.payload.description).toEqual(
-      expect.stringContaining('On any conflict, follow the request'),
-    );
-    expect(enqueued.task.payload.description).not.toEqual(
-      expect.stringContaining('send_chat_reply'),
-    );
-    expect(
-      String(enqueued.task.payload.description).indexOf(automation.prompt),
-    ).toBe(0);
-    expect(enqueued.task.payload.customAutomationId).toBeUndefined();
-    expect(enqueued.task.payload.channel).toBeUndefined();
-    expect(enqueued.channels).toBeUndefined();
-    expect(buildDestinationTaskPayloadFields).not.toHaveBeenCalled();
-  });
-
-  it("falls back to the enabling admin's DM when no report channel is configured", async () => {
-    vi.mocked(listEnabledCustomAutomations).mockResolvedValue([
-      {
-        ...automation,
-        target: {},
-        createdByUserId: 'user-1',
-      } as never,
-    ]);
-
-    const result = await customAutomationsJob();
-
-    expect(result.launchedTaskId).toBe('task_abc');
-    expect(findUserDirectMessageDestination).toHaveBeenCalledWith(
-      'slack',
-      'user-1',
-    );
-    expect(enqueueTask).toHaveBeenCalledWith(
-      expect.objectContaining({
-        task: expect.objectContaining({
-          payload: expect.objectContaining({
-            customAutomationId: automation.id,
-            channel: 'D123',
-            slackChannel: 'D123',
-            teamId: 'T123',
-            slackTeamId: 'T123',
-          }),
-        }),
-        channels: { slackChannelId: 'D123' },
-      }),
-    );
+    expect(result.completed).toBe(true);
+    expect(enqueueTask).not.toHaveBeenCalled();
+    expect(findUserDirectMessageDestination).not.toHaveBeenCalled();
+    expect(fastMocks.getSession).toHaveBeenCalledWith({
+      userId: 'user-1',
+      conversation: expect.objectContaining({ surface: 'automation' }),
+    });
   });
 
   it('uses hour-0 boundary for hourly schedules', async () => {
@@ -1125,23 +1034,19 @@ describe('customAutomationsJob', () => {
       serviceUrl: 'https://smba.trafficmanager.net/amer/',
       workspaceId: 'tenant-1',
     });
-    vi.mocked(buildDestinationTaskPayloadFields).mockReturnValue({
-      communicationProvider: 'teams',
-      communicationChannelId: '19:abc@thread.tacv2',
-      communicationServiceUrl: 'https://smba.trafficmanager.net/amer/',
-    });
 
     const result = await customAutomationsJob();
 
-    expect(result.launchedTaskId).toBe('task_abc');
+    expect(result.completed).toBe(true);
     expect(findTeamsConversationRoute).toHaveBeenCalledWith(
       '19:abc@thread.tacv2',
     );
-    expect(enqueueTask).toHaveBeenCalledWith(
+    expect(fastMocks.getSession).toHaveBeenCalledWith(
       expect.objectContaining({
-        task: expect.objectContaining({
-          payload: expect.objectContaining({
-            communicationServiceUrl: 'https://smba.trafficmanager.net/amer/',
+        conversation: expect.objectContaining({
+          surface: 'teams',
+          replyTarget: expect.objectContaining({
+            serviceUrl: 'https://smba.trafficmanager.net/amer/',
           }),
         }),
       }),
@@ -1178,39 +1083,59 @@ describe('customAutomationsJob', () => {
 describe('runCustomAutomationNow', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(getCustomAutomationById).mockResolvedValue(automation as never);
+    vi.mocked(getCustomAutomationById).mockResolvedValue({
+      ...automation,
+      target: {},
+    } as never);
     vi.mocked(getCustomAutomationFrequency).mockReturnValue('daily');
     vi.mocked(tryClaimCustomAutomationLaunch).mockResolvedValue(new Date());
     vi.mocked(db.query.environments.findFirst).mockResolvedValue({
       id: automation.environmentId,
     } as never);
-    vi.mocked(enqueueTask).mockResolvedValue({
-      taskId: 'task_manual',
-    } as never);
+    fastMocks.getSession.mockResolvedValue({
+      id: '33333333-3333-4333-8333-333333333333',
+      compatibilityMessages: [],
+    });
+    fastMocks.deliverParentEvent.mockResolvedValue('delivered');
   });
 
-  it('launches with a manual trigger', async () => {
+  it('starts a Fast Session with a manual trigger and configured scope', async () => {
     const result = await runCustomAutomationNow(automation.id);
 
-    expect(result).toEqual({
-      outcome: 'launched',
-      taskId: 'task_manual',
-    });
+    expect(result).toEqual({ outcome: 'completed' });
     expect(tryClaimCustomAutomationLaunch).toHaveBeenCalledWith(
       automation.id,
       automation.lastRunAt,
     );
-    expect(enqueueTask).toHaveBeenCalledWith(
+    expect(enqueueTask).not.toHaveBeenCalled();
+    expect(fastMocks.deliverParentEvent).toHaveBeenCalledWith(
       expect.objectContaining({
-        trigger: 'manual',
-        task: expect.objectContaining({
-          payload: expect.objectContaining({
-            description: expect.stringContaining(
-              '<default_report_presentation>',
-            ),
-          }),
+        event: expect.objectContaining({
+          type: 'automation_triggered',
+          trigger: 'manual',
+          taskEnvironmentId: automation.environmentId,
         }),
       }),
+    );
+  });
+
+  it('keeps an ownerless manual run on the legacy sandbox path', async () => {
+    vi.mocked(getCustomAutomationById).mockResolvedValue({
+      ...automation,
+      createdByUserId: null,
+      target: {},
+    } as never);
+    vi.mocked(enqueueTask).mockResolvedValue({
+      taskId: 'task_manual',
+    } as never);
+
+    const result = await runCustomAutomationNow(automation.id);
+
+    expect(result).toEqual({ outcome: 'launched', taskId: 'task_manual' });
+    expect(fastMocks.getSession).not.toHaveBeenCalled();
+    expect(fastMocks.deliverParentEvent).not.toHaveBeenCalled();
+    expect(enqueueTask).toHaveBeenCalledWith(
+      expect.objectContaining({ trigger: 'manual' }),
     );
   });
 
@@ -1226,10 +1151,10 @@ describe('runCustomAutomationNow', () => {
     expect(enqueueTask).not.toHaveBeenCalled();
   });
 
-  it('releases the launch claim when enqueue fails', async () => {
+  it('releases the launch claim when Fast delivery fails', async () => {
     const claimAt = new Date('2026-07-21T00:00:00.000Z');
     vi.mocked(tryClaimCustomAutomationLaunch).mockResolvedValue(claimAt);
-    vi.mocked(enqueueTask).mockRejectedValue(new Error('queue down'));
+    fastMocks.deliverParentEvent.mockRejectedValue(new Error('inference down'));
 
     const result = await runCustomAutomationNow(automation.id);
 

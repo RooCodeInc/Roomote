@@ -26,6 +26,7 @@ import {
   isConfiguredAutomationTarget,
   isBackgroundAutomationUserTargetKind,
   isCommunicationAutomationTarget,
+  resolveAutomationTaskLaunchMode,
   resolveEvalHarnessSelection,
   TaskPayloadKind,
   type AutomationTarget,
@@ -163,14 +164,15 @@ async function resolveDestination(
   };
 }
 
-function buildDefaultReportPresentationGuidance(
-  hasDestination: boolean,
+function buildLegacySandboxDescription(
+  prompt: string,
+  destination: ResolvedAutomationDestination | null,
+  allRepositories: boolean,
 ): string {
-  const channelGuidance = hasDestination
+  const channelGuidance = destination
     ? '\n- The first `send_chat_reply` is the report root and must stand alone. If important supporting detail would make it too long, keep the root concise and send the detail in follow-up replies in the same thread with clear headings. Keep essential conclusions and required actions in the root.'
     : '';
-
-  return `<default_report_presentation>
+  const presentationGuidance = `<default_report_presentation>
 These are defaults, not requirements that override the automation request above. Before applying them, check the request for explicit guidance about format, structure, length, tone, audience, or where details should appear. On any conflict, follow the request. Apply these defaults only where the request is silent.
 
 - Lead with the result or most important takeaway in 1-2 sentences.
@@ -181,56 +183,6 @@ These are defaults, not requirements that override the automation request above.
 - If the request explicitly requires a clean or no-action report, say so briefly and include only the most useful supporting evidence or caveats.
 - Use inline links with descriptive labels instead of raw URLs when possible.${channelGuidance}
 </default_report_presentation>`;
-}
-
-/**
- * Adds default reporting guidance to every custom automation prompt and,
- * when configured, makes its destination conversation available for
- * interruption-worthy results.
- *
- * A custom automation may intentionally omit a report destination. When it
- * does, prefer the admin who created/enabled it as a private fallback so an
- * enabled automation does not disappear from the communication surface.
- */
-async function resolveOwnerFallbackDestination(
-  ownerUserId: string | null,
-): Promise<ResolvedAutomationDestination | null> {
-  if (!ownerUserId) {
-    return null;
-  }
-
-  const connectedProviders = await listConnectedCommunicationProviders();
-  for (const provider of connectedProviders) {
-    try {
-      const destination = await findUserDirectMessageDestination(
-        provider,
-        ownerUserId,
-      );
-      if (destination) {
-        return {
-          provider,
-          ...destination,
-          source: 'automation_target',
-        };
-      }
-    } catch (error) {
-      console.warn(
-        `${LOG_PREFIX} Failed to resolve owner DM on ${provider}: ${error instanceof Error ? error.message : String(error)}`,
-      );
-    }
-  }
-
-  return null;
-}
-
-function buildCustomAutomationDescription(
-  prompt: string,
-  destination: ResolvedAutomationDestination | null,
-  options: { allRepositories: boolean },
-): string {
-  const presentationGuidance = buildDefaultReportPresentationGuidance(
-    destination !== null,
-  );
 
   if (!destination) {
     return `${prompt}
@@ -239,7 +191,7 @@ ${presentationGuidance}`;
   }
 
   const promptContext = buildDestinationPromptContext(destination);
-  const orgWideSuggestionInstruction = options.allRepositories
+  const orgWideSuggestionInstruction = allRepositories
     ? ' This run spans all active repositories. Every launchable suggestion must include the concrete `targetRepositoryFullName` that owns the work so Roomote can start it in the matching environment.'
     : '';
 
@@ -436,6 +388,7 @@ async function runFastCustomAutomation(params: {
   destination: ResolvedAutomationDestination | null;
   launchClaimedAt: Date;
   trigger: 'schedule' | 'manual';
+  defaultTaskModel?: string;
 }): Promise<void> {
   if (!params.automation.createdByUserId) {
     throw new Error('Fast automation run-as user is not configured.');
@@ -470,9 +423,14 @@ async function runFastCustomAutomation(params: {
       automationName: params.automation.name,
       prompt: params.automation.prompt,
       trigger: params.trigger,
-      ...(params.automation.model
-        ? { defaultTaskModel: params.automation.model }
+      ...(params.defaultTaskModel
+        ? { defaultTaskModel: params.defaultTaskModel }
         : {}),
+      ...(params.automation.allRepositories
+        ? { taskEnvironmentId: ALL_REPOSITORIES }
+        : params.automation.environmentId
+          ? { taskEnvironmentId: params.automation.environmentId }
+          : {}),
       ...(rootMessageId ? { rootMessageId } : {}),
     };
     await deliverFastAgentParentEvent({
@@ -558,7 +516,13 @@ async function launchCustomAutomationRow(
 ): Promise<AutomationJobResult> {
   const result = emptyJobResult();
   const frequency = getCustomAutomationFrequency(automation);
-  const fastExecution = automation.executionMode === 'fast';
+  const hasUnconfiguredTaskScope = automation.executionMode === 'fast';
+  const useLegacySandboxFallback =
+    automation.executionMode === 'sandbox_task' &&
+    resolveAutomationTaskLaunchMode({
+      policyId: 'custom_automation',
+      runAsUserId: automation.createdByUserId,
+    }) === 'sandbox_task';
 
   if (automation.scheduleMode !== 'cron' && frequency === 'off') {
     result.skippedReason = 'Automation is disabled.';
@@ -612,7 +576,7 @@ async function launchCustomAutomationRow(
   }
 
   if (
-    fastExecution &&
+    !useLegacySandboxFallback &&
     automation.launchClaimedAt &&
     Date.now() - automation.launchClaimedAt.getTime() >=
       CUSTOM_AUTOMATION_LAUNCH_STALE_CLAIM_MS
@@ -631,7 +595,7 @@ async function launchCustomAutomationRow(
   }
 
   if (
-    !fastExecution &&
+    !hasUnconfiguredTaskScope &&
     !automation.allRepositories &&
     !automation.environmentId
   ) {
@@ -646,14 +610,18 @@ async function launchCustomAutomationRow(
   }
 
   const environment =
-    fastExecution || automation.allRepositories
+    hasUnconfiguredTaskScope || automation.allRepositories
       ? null
       : await db.query.environments.findFirst({
           columns: { id: true },
           where: eq(environments.id, automation.environmentId!),
         });
 
-  if (!fastExecution && !automation.allRepositories && !environment) {
+  if (
+    !hasUnconfiguredTaskScope &&
+    !automation.allRepositories &&
+    !environment
+  ) {
     result.skippedReason = 'Environment no longer exists.';
     result.errors.push('Environment no longer exists.');
     await recordCustomAutomationRunOutcome(db, {
@@ -664,12 +632,11 @@ async function launchCustomAutomationRow(
     return result;
   }
 
-  // A report destination is optional. Prefer a private DM to the admin who
-  // created/enabled the automation so an enabled run still has a chat-facing
-  // result; if that admin has no linked DM, preserve the task-UI fallback.
+  // A report destination is optional. Fast runs without one retain their
+  // result in the stored automation conversation.
   let destination: ResolvedAutomationDestination | null = null;
   if (isConfiguredAutomationTarget(automation.target)) {
-    if (fastExecution && !isFastDeliveryTarget(automation.target)) {
+    if (!useLegacySandboxFallback && !isFastDeliveryTarget(automation.target)) {
       const message = `${PROVIDER_LABELS[automation.target.provider as CommunicationProvider]} report destinations of this type are not supported in Fast mode.`;
       result.skippedReason = message;
       result.errors.push(message);
@@ -712,14 +679,10 @@ async function launchCustomAutomationRow(
       });
       return result;
     }
-  } else if (!fastExecution) {
-    destination = await resolveOwnerFallbackDestination(
-      automation.createdByUserId,
-    );
   }
 
   // The short claim fence prevents concurrent launchers from double-launching
-  // without blocking a due run behind a previous task that still appears active.
+  // without blocking a due run behind a previous run that still appears active.
   const launchClaimedAt = await tryClaimCustomAutomationLaunch(
     automation.id,
     automation.lastRunAt,
@@ -743,99 +706,91 @@ async function launchCustomAutomationRow(
   const modelOverride = modelSelection?.ok ? modelSelection : null;
 
   try {
-    if (fastExecution) {
-      await db
-        .update(customAutomations)
-        .set({ lastLaunchedTaskId: null })
-        .where(
-          and(
-            eq(customAutomations.id, automation.id),
-            eq(customAutomations.launchClaimedAt, launchClaimedAt),
-          ),
-        );
-      await runFastCustomAutomation({
-        automation,
-        destination,
-        launchClaimedAt,
+    if (useLegacySandboxFallback) {
+      const launchResult = await enqueueTask({
+        task: {
+          type: TaskPayloadKind.StandardTask,
+          ...(modelOverride?.harness ? { harness: modelOverride.harness } : {}),
+          payload: {
+            repo: automation.allRepositories ? ALL_REPOSITORIES : '',
+            ...(automation.environmentId
+              ? { environmentId: automation.environmentId }
+              : {}),
+            description: buildLegacySandboxDescription(
+              automation.prompt,
+              destination,
+              automation.allRepositories,
+            ),
+            ...(destination
+              ? buildDestinationTaskPayloadFields(destination)
+              : {}),
+            ...(destination ? { customAutomationId: automation.id } : {}),
+            ...(destination?.provider === 'slack'
+              ? {
+                  channel: destination.channelId,
+                  slackChannel: destination.channelId,
+                  ...(destination.teamId
+                    ? {
+                        teamId: destination.teamId,
+                        slackTeamId: destination.teamId,
+                      }
+                    : {}),
+                }
+              : {}),
+            ...(modelOverride?.harnessModelOverrides
+              ? { harnessModelOverrides: modelOverride.harnessModelOverrides }
+              : {}),
+          },
+        },
+        title: automation.name,
+        initiator: {
+          kind: 'automation',
+          key: 'custom_automation',
+          actor: {
+            externalId: automation.id,
+            displayName: automation.name,
+          },
+        },
+        workflow: 'standard',
+        surface: 'system',
         trigger: opts.manualTrigger ? 'manual' : 'schedule',
+        ...(destination?.provider === 'slack'
+          ? { channels: { slackChannelId: destination.channelId } }
+          : {}),
       });
+
       await recordCustomAutomationRunOutcome(db, {
         id: automation.id,
         status: 'succeeded',
+        lastLaunchedTaskId: launchResult.taskId,
         launchClaimedAt,
       });
+      result.launchedTaskId = launchResult.taskId;
       result.completed = true;
       return result;
     }
 
-    const launchResult = await enqueueTask({
-      task: {
-        type: TaskPayloadKind.StandardTask,
-        ...(modelOverride?.harness ? { harness: modelOverride.harness } : {}),
-        payload: {
-          repo: automation.allRepositories ? ALL_REPOSITORIES : '',
-          ...(automation.environmentId
-            ? { environmentId: automation.environmentId }
-            : {}),
-          description: buildCustomAutomationDescription(
-            automation.prompt,
-            destination,
-            {
-              allRepositories: automation.allRepositories,
-            },
-          ),
-          ...(destination
-            ? buildDestinationTaskPayloadFields(destination)
-            : {}),
-          // customAutomationId authorizes the Slack late-bound thread flow:
-          // the run's first send_chat_reply posts a root message in the
-          // destination channel and binds it as the task thread, so later
-          // updates continue the thread and user replies route back into the
-          // task. The channel/slackChannel payload fields give the sandbox
-          // its Slack reply context (ROOMOTE_SLACK_CHANNEL).
-          ...(destination ? { customAutomationId: automation.id } : {}),
-          ...(destination?.provider === 'slack'
-            ? {
-                channel: destination.channelId,
-                slackChannel: destination.channelId,
-                ...(destination.teamId
-                  ? {
-                      teamId: destination.teamId,
-                      slackTeamId: destination.teamId,
-                    }
-                  : {}),
-              }
-            : {}),
-          ...(modelOverride?.harnessModelOverrides
-            ? { harnessModelOverrides: modelOverride.harnessModelOverrides }
-            : {}),
-        },
-      },
-      title: automation.name,
-      initiator: {
-        kind: 'automation',
-        key: 'custom_automation',
-        actor: {
-          externalId: automation.id,
-          displayName: automation.name,
-        },
-      },
-      workflow: 'standard',
-      surface: 'system',
+    await db
+      .update(customAutomations)
+      .set({ lastLaunchedTaskId: null })
+      .where(
+        and(
+          eq(customAutomations.id, automation.id),
+          eq(customAutomations.launchClaimedAt, launchClaimedAt),
+        ),
+      );
+    await runFastCustomAutomation({
+      automation,
+      destination,
+      launchClaimedAt,
       trigger: opts.manualTrigger ? 'manual' : 'schedule',
-      ...(destination?.provider === 'slack'
-        ? { channels: { slackChannelId: destination.channelId } }
-        : {}),
+      ...(modelOverride ? { defaultTaskModel: automation.model! } : {}),
     });
-
     await recordCustomAutomationRunOutcome(db, {
       id: automation.id,
       status: 'succeeded',
-      lastLaunchedTaskId: launchResult.taskId,
       launchClaimedAt,
     });
-
-    result.launchedTaskId = launchResult.taskId;
     result.completed = true;
     return result;
   } catch (error) {

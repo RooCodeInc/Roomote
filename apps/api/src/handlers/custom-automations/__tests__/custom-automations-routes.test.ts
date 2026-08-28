@@ -684,6 +684,39 @@ describe('custom-automations MCP routes', () => {
       );
     });
 
+    it('rebinds an ownerless DM target when a partial update claims ownership', async () => {
+      const { app } = createApp();
+      mockGetCustomAutomationById.mockResolvedValue({
+        ...existing,
+        createdByUserId: null,
+        target: {
+          provider: 'telegram',
+          targetKind: 'telegram_user',
+          externalRef: 'deleted-owner',
+        },
+      });
+      mockUpdateCustomAutomation.mockResolvedValue({ id: 'automation-1' });
+
+      const res = await app.request('/custom-automations/automation-1', {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ enabled: false }),
+      });
+
+      expect(res.status).toBe(200);
+      expect(mockUpdateCustomAutomation).toHaveBeenCalledWith(
+        'automation-1',
+        expect.objectContaining({
+          createdByUserId: 'admin-1',
+          target: {
+            provider: 'telegram',
+            targetKind: 'telegram_user',
+            externalRef: 'admin-1',
+          },
+        }),
+      );
+    });
+
     it('rejects switching a DM target to channel mode without a channel', async () => {
       const { app } = createApp();
       mockGetCustomAutomationById.mockResolvedValue({

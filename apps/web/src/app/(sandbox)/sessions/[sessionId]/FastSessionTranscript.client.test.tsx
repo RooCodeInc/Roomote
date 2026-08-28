@@ -373,6 +373,26 @@ describe('FastSessionTranscript', () => {
     });
   });
 
+  it('shows staged automation sessions as read-only without a composer', () => {
+    render(
+      <FastSessionTranscript
+        sessionId="automation-session"
+        initialMessages={[]}
+        canReply={false}
+        readOnlyReason="Automation-owned sessions are read-only until the next release."
+      />,
+    );
+
+    expect(
+      screen.getByText(
+        'Automation-owned sessions are read-only until the next release.',
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByPlaceholderText('Message agent'),
+    ).not.toBeInTheDocument();
+  });
+
   it('sends an image-only reply', async () => {
     preparePromptAttachments.mockResolvedValueOnce({
       text: '',

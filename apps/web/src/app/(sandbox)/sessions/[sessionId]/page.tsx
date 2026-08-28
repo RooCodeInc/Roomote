@@ -68,7 +68,12 @@ export default async function SessionDetailPage({
           sessionId={session.id}
           initialMessages={session.messages}
           hasOlderMessages={session.hasOlderMessages}
-          canReply
+          canReply={!session.ownerAutomation}
+          readOnlyReason={
+            session.ownerAutomation
+              ? 'Automation-owned sessions are read-only until the next release.'
+              : undefined
+          }
           initialTitle={session.title}
           fallbackTitle={fallbackTitle}
           sessionModel={session.model}
