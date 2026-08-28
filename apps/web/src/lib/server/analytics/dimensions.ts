@@ -369,20 +369,21 @@ export function getTaskTypeDimensionValue(task: {
   actorDisplayName?: string | null;
 }) {
   if (!task.initiatorKind) {
-    return createLabelBackedDimensionValue('Unknown');
+    return createLabelBackedDimensionValue('Unknown Task');
   }
 
   if (task.initiatorKind === 'automation') {
     const key = task.initiatorAutomation ?? 'unknown';
+    const label = task.initiatorAutomation
+      ? formatAutomationLabel(task.initiatorAutomation, {
+          actorDisplayName: task.actorDisplayName,
+        })
+      : 'Unknown';
     return createDimensionValue(
       `automation:${key}`,
-      task.initiatorAutomation
-        ? formatAutomationLabel(task.initiatorAutomation, {
-            actorDisplayName: task.actorDisplayName,
-          })
-        : 'Unknown',
+      label === 'Automation' ? label : `${label} Task`,
     );
   }
 
-  return createLabelBackedDimensionValue('Manual');
+  return createLabelBackedDimensionValue('Manual Task');
 }
