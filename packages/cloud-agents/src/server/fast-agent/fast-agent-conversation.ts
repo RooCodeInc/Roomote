@@ -1,6 +1,10 @@
 import type { FastAgentConversation } from '@roomote/types';
 
-export type { FastAgentConversation, FastAgentSurface } from '@roomote/types';
+export {
+  isFastAgentCommunicationConversation,
+  type FastAgentConversation,
+  type FastAgentSurface,
+} from '@roomote/types';
 
 /** Build the N-1 Slack-shaped compatibility namespace. New persistence and
  * turn locks use surface/workspace/conversation identity fields directly. */
@@ -18,10 +22,19 @@ export type FastAgentPlatformEventVisibility = 'optional' | 'required';
 
 export type FastAgentPlatformEventHandling = 'default' | 'present_only';
 
+export type FastAgentPlatformEventKind = 'delegated_task' | 'automation';
+
+export type FastAgentSuggestedTask = {
+  title: string;
+  brief: string;
+};
+
 export type FastAgentReply = {
   purpose: 'ack' | 'progress' | 'closeout' | 'clarification';
   message: string;
   imageArtifactIds?: string[];
+  /** Launchable follow-ups attached to a Fast automation report. */
+  suggestions?: FastAgentSuggestedTask[];
   /** True for the parent-owned task kickoff. Deliverers must treat anything
    * short of a visible, durable post (including deliberate suppression) as a
    * failure so the launch gate never opens without its kickoff. */
@@ -66,6 +79,12 @@ export type RetryFastAgentTaskStart = () => Promise<
   { success: true; runId: number } | { success: false; error: string }
 >;
 
+export type FastAgentMcpServerConfig = {
+  url: string;
+  headers: Record<string, string>;
+  disabledTools?: string[];
+};
+
 /** Surface adapter for side effects available during one Fast turn. */
 export type FastAgentTurnAdapter = {
   launchTask: LaunchFastAgentTask;
@@ -76,4 +95,7 @@ export type FastAgentTurnAdapter = {
   ) => Promise<FastAgentReplyHandle | void>;
   postReaction?: (reaction: FastAgentReaction) => Promise<void>;
   retryTaskStart?: RetryFastAgentTaskStart;
+  resolveMcpServerConfigs?: () => Promise<
+    Record<string, FastAgentMcpServerConfig>
+  >;
 };

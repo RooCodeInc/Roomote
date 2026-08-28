@@ -33,7 +33,10 @@ import {
 } from '@roomote/db/server';
 import { captureTaskSettled } from '@roomote/telemetry/server';
 import { decryptSecrets } from '@roomote/db/encryption';
-import { createTaskRunWorkerGitHubToken } from '@roomote/github';
+import {
+  createTaskRunWorkerGitHubTokenWithMetadata,
+  getGitHubRateLimitRetryAfterMs,
+} from '@roomote/github';
 import { createTaskRunScopedGitLabTokens } from '@roomote/gitlab';
 import { createTaskRunBitbucketCredentials } from '@roomote/bitbucket';
 import { createTaskRunGiteaCredentials } from '@roomote/gitea';
@@ -428,6 +431,7 @@ export async function notifyCanceledTaskRunOnSettle(
 
 const SOURCE_CONTROL_TOKEN_MAX_RETRIES = 3;
 const SOURCE_CONTROL_TOKEN_BASE_DELAY_MS = 1_000;
+const GITHUB_TOKEN_MAX_INLINE_RATE_LIMIT_DELAY_MS = 30 * 1_000;
 
 export type SourceControlRuntimeToken = SourceControlTokenMetadata & {
   source: 'user' | 'app';
@@ -511,11 +515,12 @@ async function createProviderToken(
 ): Promise<SourceControlRuntimeToken> {
   switch (provider) {
     case 'github': {
-      const token = await createTaskRunWorkerGitHubToken(taskRun);
+      const metadata =
+        await createTaskRunWorkerGitHubTokenWithMetadata(taskRun);
       return {
-        ...buildSourceControlTokenMetadata(provider, token),
-        source: 'app',
-        expiresAt: null,
+        ...buildSourceControlTokenMetadata(provider, metadata.token),
+        source: metadata.source,
+        expiresAt: metadata.expiresAt,
       };
     }
     case 'gitlab': {
@@ -640,12 +645,47 @@ async function createProviderTokenWithRetry(
   baseDelayMs: number,
 ): Promise<SourceControlRuntimeToken | null> {
   const label = getSourceControlProviderLabel(provider);
+  let githubInlineRateLimitRetries = 0;
 
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
       return await createProviderToken(taskRun, provider);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      const githubRetryAfterMs =
+        provider === 'github' ? getGitHubRateLimitRetryAfterMs(error) : null;
+
+      if (githubRetryAfterMs !== null) {
+        const canRetryInline =
+          githubInlineRateLimitRetries === 0 &&
+          attempt < maxRetries &&
+          githubRetryAfterMs <= GITHUB_TOKEN_MAX_INLINE_RATE_LIMIT_DELAY_MS;
+        const log = canRetryInline ? console.warn : console.error;
+        log(
+          JSON.stringify({
+            event: 'source_control_token_creation_rate_limited',
+            provider,
+            taskRunId: taskRun.id,
+            attempt,
+            maxRetries,
+            retryAfterMs: githubRetryAfterMs,
+            action: canRetryInline ? 'retry' : 'abort',
+          }),
+        );
+
+        if (canRetryInline) {
+          githubInlineRateLimitRetries += 1;
+          await new Promise((resolve) =>
+            setTimeout(resolve, githubRetryAfterMs),
+          );
+          continue;
+        }
+
+        // A dequeue cannot safely hold a run claim for a provider-directed
+        // delay that may last minutes. Stop immediately instead of converting
+        // one rate-limited POST into two more premature retries.
+        return null;
+      }
 
       if (attempt < maxRetries) {
         const delayMs = baseDelayMs * 2 ** (attempt - 1);

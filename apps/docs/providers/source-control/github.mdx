@@ -219,11 +219,19 @@ Once the app is installed and an environment maps the repository:
 Issue mentions use the environment mapped to the repository. Map the repository
 to an environment before mentioning Roomote on issues.
 
-When a task delegated from a Fast Slack or Discord conversation opens a pull
-request, actionable review feedback returns to that same conversation. Use
+When a task delegated from a Fast session in Slack or Discord opens a pull
+request, actionable review feedback returns to that same session. Use
 **Resolve these issues** to address the current feedback, **Auto-resolve on this
 PR** to handle later actionable feedback automatically, or **Dismiss** to take
 no action.
+
+Failed GitHub checks also return to every Roomote task linked to the pull
+request and to the conversation that started the work. Roomote consolidates a
+burst of failures into one actionable notification with the check names and
+links. It suppresses failures from an outdated head commit and stays silent for
+successful or non-failing conclusions. Keep the **Checks** permission and
+**Check run** event enabled so these notifications reach Roomote, including for
+pull requests opened from forks.
 
 ## Verify setup
 

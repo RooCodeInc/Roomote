@@ -36,6 +36,7 @@ const mocks = vi.hoisted(() => ({
   addReaction: vi.fn(),
   removeReaction: vi.fn(),
   createDirectMessage: vi.fn(),
+  createThreadFromMessage: vi.fn(),
   postMessage: vi.fn(),
   channelAutoStart: vi.fn(),
   findPendingRoutingReply: vi.fn(),
@@ -61,6 +62,9 @@ const mocks = vi.hoisted(() => ({
   answerFast: vi.fn(),
   hasFastDefault: vi.fn(),
   hasFastSession: vi.fn(),
+  findFastReplySession: vi.fn(),
+  isFastProviderMessage: vi.fn(),
+  recordProviderMessage: vi.fn(),
 }));
 
 vi.mock('../../account-link-help.js', () => ({
@@ -106,6 +110,10 @@ vi.mock('@roomote/sdk/server', () => ({
   upsertDiscordInstallation: mocks.upsertInstallation,
   enqueueDiscordGatewayEvent: mocks.enqueueGatewayEvent,
   claimPendingPrReviewActionsForThread: vi.fn(async () => []),
+  findFastAgentSessionForProviderReply: mocks.findFastReplySession,
+  isFastAgentProviderMessage: mocks.isFastProviderMessage,
+  recordFastAgentConversationMessageBestEffort: mocks.recordProviderMessage,
+  resolveUserMcpServerConfigs: vi.fn(async () => ({})),
 }));
 
 vi.mock('@roomote/sdk/server/communication', () => ({
@@ -174,8 +182,12 @@ vi.mock('../callback-actions.js', () => ({
 vi.mock('@roomote/cloud-agents/server', () => ({
   acquireFastAgentTurnLock: mocks.acquireFastTurnLock,
   answerFastAgentQuestion: mocks.answerFast,
+  resolveApiBaseUrl: () => 'https://roomote.example.com',
   getTaskUrl: mocks.getTaskUrl,
   hasFastAgentSession: mocks.hasFastSession,
+  getOrCreateFastAgentSession: vi
+    .fn()
+    .mockResolvedValue({ id: 'fast-session-1' }),
 }));
 
 vi.mock('../../fast-agent-entry.js', () => ({
@@ -193,6 +205,7 @@ const provider = {
   addReaction: mocks.addReaction,
   removeReaction: mocks.removeReaction,
   createDirectMessage: mocks.createDirectMessage,
+  createThreadFromMessage: mocks.createThreadFromMessage,
   postMessage: mocks.postMessage,
 };
 
@@ -295,8 +308,18 @@ describe('Discord Gateway event handler', () => {
     mocks.answerFast.mockResolvedValue('A quick answer');
     mocks.hasFastDefault.mockResolvedValue(false);
     mocks.hasFastSession.mockResolvedValue(false);
+    mocks.findFastReplySession.mockResolvedValue(null);
+    mocks.isFastProviderMessage.mockResolvedValue(false);
+    mocks.recordProviderMessage.mockResolvedValue(true);
     mocks.reply.mockResolvedValue({ messageId: 'reply-1' });
     mocks.createDirectMessage.mockResolvedValue({ id: 'dm-private-1' });
+    mocks.createThreadFromMessage.mockResolvedValue({
+      channelId: 'message-1',
+      parentChannelId: 'channel-1',
+      name: 'Fix the flaky tests',
+      kind: 'thread',
+      messageId: 'message-1',
+    });
     mocks.postMessage.mockResolvedValue({ messageId: 'dm-msg-1' });
     mocks.redisSet.mockResolvedValue('OK');
     mocks.redisEval.mockResolvedValue(1);
@@ -765,11 +788,66 @@ describe('Discord Gateway event handler', () => {
     expect(mocks.reply).toHaveBeenCalledWith(
       expect.objectContaining({
         replyToMessageId: 'message-1',
-        text: 'A quick answer',
+        text: expect.stringMatching(
+          /^A quick answer\n\n-# Reply or use the \[web app\]\(.*\/sessions\/fast-session-1.*\)\.$/,
+        ),
       }),
     );
     expect(mocks.startNewTask).not.toHaveBeenCalled();
     expect(mocks.queueMessage).not.toHaveBeenCalled();
+  });
+
+  it('starts a new guild-channel Fast conversation in an anchored thread', async () => {
+    mocks.hasFastDefault.mockResolvedValue(true);
+    mocks.getChannel.mockResolvedValue({
+      id: 'channel-1',
+      name: 'general',
+      type: 0,
+      guildId: 'guild-1',
+    });
+
+    const response = await postEvent(
+      envelope(
+        message({
+          channel_id: 'channel-1',
+          guild_id: 'guild-1',
+          content: '<@bot-1> Fix the flaky tests',
+          mentions: [{ id: 'bot-1', username: 'Roomote' }],
+        }),
+      ),
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      fastAnswered: true,
+      fastDefaulted: true,
+    });
+    expect(mocks.createThreadFromMessage).toHaveBeenCalledWith({
+      channelId: 'channel-1',
+      messageId: 'message-1',
+      name: 'Fix the flaky tests',
+    });
+    expect(mocks.answerFast).toHaveBeenCalledWith(
+      expect.objectContaining({
+        conversation: {
+          surface: 'discord',
+          workspaceId: 'guild-1',
+          conversationId: 'message-1',
+          replyTarget: { channelId: 'channel-1', threadId: 'message-1' },
+        },
+      }),
+    );
+    expect(mocks.reply).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channel: expect.objectContaining({
+          channelId: 'message-1',
+          parentChannelId: 'channel-1',
+          isThread: true,
+        }),
+      }),
+    );
+    expect(mocks.startNewTask).not.toHaveBeenCalled();
   });
 
   it('passes the model-authored Fast kickoff through the Discord enqueue gate', async () => {
@@ -1432,6 +1510,135 @@ describe('Discord Gateway event handler', () => {
         },
       }),
     );
+    expect(mocks.startNewTask).not.toHaveBeenCalled();
+  });
+
+  it('continues the Fast session bound to a Discord DM report reply', async () => {
+    mocks.findFastReplySession.mockResolvedValue({
+      id: '11111111-1111-4111-8111-111111111111',
+      userId: 'roomote-user-1',
+      conversation: {
+        surface: 'discord',
+        workspaceId: 'dm',
+        conversationId: 'automation-run-1',
+        replyTarget: { channelId: 'dm-1' },
+      },
+    });
+
+    const response = await postEvent(
+      envelope(
+        message({
+          content: 'Investigate the second finding',
+          message_reference: { message_id: 'fast-report-1' },
+        }),
+      ),
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual(
+      expect.objectContaining({ fastAnswered: true, fastContinued: true }),
+    );
+    expect(mocks.findFastReplySession).toHaveBeenCalledWith({
+      provider: 'discord',
+      workspaceId: 'dm',
+      channelId: 'dm-1',
+      replyToMessageId: 'fast-report-1',
+    });
+    expect(mocks.answerFast).toHaveBeenCalledWith(
+      expect.objectContaining({
+        question: 'Investigate the second finding',
+        conversation: expect.objectContaining({
+          conversationId: 'automation-run-1',
+        }),
+      }),
+    );
+    expect(mocks.findAutomationReportRun).not.toHaveBeenCalled();
+    expect(mocks.startNewTask).not.toHaveBeenCalled();
+  });
+
+  it('preserves the root channel for a provider-bound guild Fast continuation', async () => {
+    mocks.getChannel.mockResolvedValue({
+      id: 'channel-1',
+      guildId: 'guild-1',
+      name: 'general',
+      type: 0,
+    });
+    mocks.findFastReplySession.mockResolvedValue({
+      id: '11111111-1111-4111-8111-111111111111',
+      userId: 'roomote-user-1',
+      conversation: {
+        surface: 'discord',
+        workspaceId: 'guild-1',
+        conversationId: 'automation-run-1',
+        replyTarget: { channelId: 'channel-1' },
+      },
+    });
+
+    const response = await postEvent(
+      envelope(
+        message({
+          channel_id: 'channel-1',
+          guild_id: 'guild-1',
+          content: '<@bot-1> Investigate the second finding',
+          mentions: [{ id: 'bot-1', username: 'Roomote' }],
+          message_reference: { message_id: 'fast-report-1' },
+        }),
+      ),
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual(
+      expect.objectContaining({ fastAnswered: true, fastContinued: true }),
+    );
+    expect(mocks.createThreadFromMessage).not.toHaveBeenCalled();
+    expect(mocks.answerFast).toHaveBeenCalledWith(
+      expect.objectContaining({
+        conversation: {
+          surface: 'discord',
+          workspaceId: 'guild-1',
+          conversationId: 'automation-run-1',
+          replyTarget: { channelId: 'channel-1' },
+        },
+      }),
+    );
+  });
+
+  it('fails closed when a different Discord DM user replies to a Fast report', async () => {
+    mocks.findFastReplySession.mockResolvedValue({
+      id: '11111111-1111-4111-8111-111111111111',
+      userId: 'another-roomote-user',
+      conversation: {
+        surface: 'discord',
+        workspaceId: 'dm',
+        conversationId: 'automation-run-1',
+        replyTarget: { channelId: 'dm-1' },
+      },
+    });
+
+    const response = await postEvent(
+      envelope(message({ message_reference: { message_id: 'fast-report-1' } })),
+    );
+
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      ignored: 'discord_fast_session_user_mismatch',
+    });
+    expect(mocks.answerFast).not.toHaveBeenCalled();
+    expect(mocks.startNewTask).not.toHaveBeenCalled();
+  });
+
+  it('does not fall through when a Discord Fast message is replayed from another route', async () => {
+    mocks.isFastProviderMessage.mockResolvedValue(true);
+
+    const response = await postEvent(
+      envelope(message({ message_reference: { message_id: 'fast-report-1' } })),
+    );
+
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      ignored: 'discord_fast_session_route_mismatch',
+    });
+    expect(mocks.findAutomationReportRun).not.toHaveBeenCalled();
     expect(mocks.startNewTask).not.toHaveBeenCalled();
   });
 

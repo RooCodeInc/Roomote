@@ -4,13 +4,17 @@ import {
   enqueueTask,
   getTaskUrl,
   routeGitHubTask,
+  SnapshotResumeAlreadyExistsError,
 } from '@roomote/cloud-agents/server';
 import {
   findActiveGitHubPrReviewTask,
   findReusableGitHubPrFollowUpOwner,
 } from '@roomote/db/server';
 import { getInstallationOctokit } from '@roomote/github';
-import { ensureSnapshotResumeGitHubFollowUpFallback } from '@roomote/sdk/server';
+import {
+  ensureSnapshotResumeGitHubFollowUpFallback,
+  publishGithubPrReviewCheck,
+} from '@roomote/sdk/server';
 import {
   type TaskPayload,
   RunStatus,
@@ -931,7 +935,7 @@ async function deliverFollowUpToExistingTask({
   });
 }
 
-async function resumeExistingTaskAndDeliverFollowUp({
+export async function resumeExistingTaskAndDeliverFollowUp({
   taskId,
   userId,
   sourceRunId,
@@ -1048,18 +1052,32 @@ async function resumeExistingTaskAndDeliverFollowUp({
 
   // Resumes never create tasks and never re-attribute; the resuming human
   // becomes the new run's acting user.
-  const resumeLaunch = await enqueueTask(
-    {
-      task: {
-        type: TaskPayloadKind.SnapshotResume,
-        sourceSnapshotId: sourceRun.snapshotId,
-        sourceRunId: sourceRun.id,
-        payload: resumePayload,
+  let resumeLaunch: Awaited<ReturnType<typeof enqueueTask>>;
+  try {
+    resumeLaunch = await enqueueTask(
+      {
+        task: {
+          type: TaskPayloadKind.SnapshotResume,
+          sourceSnapshotId: sourceRun.snapshotId,
+          sourceRunId: sourceRun.id,
+          payload: resumePayload,
+        },
+        actingUserId: senderUserId,
       },
-      actingUserId: senderUserId,
-    },
-    {},
-  );
+      {},
+    );
+  } catch (error) {
+    if (error instanceof SnapshotResumeAlreadyExistsError) {
+      // Continue through the normal fallback path so this distinct instruction
+      // gets its own linked follow-up task and response instead of being lost.
+      return {
+        success: false as const,
+        error: 'Reusable PR owner is already resuming',
+        status: 409,
+      };
+    }
+    throw error;
+  }
 
   const accepted = await waitForResumeRunToAcceptDeferredPrompt({
     taskId,
@@ -1355,6 +1373,16 @@ export async function handlePrComment(
             prSha: headSha,
           },
         });
+        if (reviewer.settings?.publishGithubCheck) {
+          await publishGithubPrReviewCheck({
+            installationId: githubInstallationId,
+            repository: repository.full_name,
+            prNumber: pr.number,
+            headSha,
+            taskId: reviewLaunch.taskId,
+            runId: reviewLaunch.id,
+          });
+        }
         reviewLaunches.push(reviewLaunch);
       } catch (error) {
         failedReviewerIds.push(reviewer.id);

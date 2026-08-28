@@ -6,6 +6,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import {
   ALL_REPOSITORIES,
+  FAST_EXECUTION,
   isBackgroundAutomationUserTargetKind,
   MAX_CUSTOM_AUTOMATIONS,
   type CustomAutomationScheduleMode,
@@ -60,7 +61,6 @@ type CustomAutomationFormState = {
   targetProvider: 'none' | 'slack' | 'discord' | 'teams' | 'telegram';
   targetMode: 'channel' | 'direct_message';
   targetChannelId: string;
-  targetServiceUrl: string;
 };
 
 type AutomationDestinationProvider = Exclude<
@@ -79,7 +79,6 @@ const EMPTY_FORM: CustomAutomationFormState = {
   targetProvider: 'slack',
   targetMode: 'channel',
   targetChannelId: '',
-  targetServiceUrl: '',
 };
 
 const SCHEDULE_OPTIONS: Array<{
@@ -186,14 +185,12 @@ function targetFromRow(row: CustomAutomationListItem): {
   provider: CustomAutomationFormState['targetProvider'];
   mode: CustomAutomationFormState['targetMode'];
   channelId: string;
-  serviceUrl: string;
 } {
   if (!row.target.provider || !row.target.externalRef) {
     return {
       provider: 'none',
       mode: 'channel',
       channelId: '',
-      serviceUrl: '',
     };
   }
 
@@ -203,10 +200,6 @@ function targetFromRow(row: CustomAutomationListItem): {
     row.target.provider === 'telegram'
       ? row.target.provider
       : 'slack';
-  const serviceUrl =
-    typeof row.target.metadata?.serviceUrl === 'string'
-      ? row.target.metadata.serviceUrl
-      : '';
   return {
     provider,
     mode: isBackgroundAutomationUserTargetKind(row.target.targetKind)
@@ -215,7 +208,6 @@ function targetFromRow(row: CustomAutomationListItem): {
     channelId: isBackgroundAutomationUserTargetKind(row.target.targetKind)
       ? ''
       : (row.target.externalRef ?? ''),
-    serviceUrl,
   };
 }
 
@@ -239,7 +231,6 @@ function formFromRow(
     targetProvider: targetIsConnected ? target.provider : 'none',
     targetMode: target.mode,
     targetChannelId: targetIsConnected ? target.channelId : '',
-    targetServiceUrl: targetIsConnected ? target.serviceUrl : '',
   };
 }
 
@@ -262,11 +253,6 @@ function writeInputFromRow(row: CustomAutomationListItem) {
             ? { targetChannelId: target.channelId }
             : {}),
         }
-      : {}),
-    ...(target.provider === 'teams' &&
-    target.mode === 'channel' &&
-    target.serviceUrl
-      ? { targetServiceUrl: target.serviceUrl }
       : {}),
   };
 }
@@ -340,6 +326,7 @@ export function CustomAutomationsSection() {
 
   const environmentOptions = useMemo(
     () => [
+      { id: FAST_EXECUTION, name: 'Fast (no sandbox)' },
       { id: ALL_REPOSITORIES, name: 'All repositories' },
       ...(environmentsQuery.data ?? []).map((environment) => ({
         id: environment.id,
@@ -566,7 +553,6 @@ export function CustomAutomationsSection() {
             targetProvider: 'none',
             targetMode: 'channel',
             targetChannelId: '',
-            targetServiceUrl: '',
           },
     );
   }, [capabilitiesLoaded, connectedDestinationProviders]);
@@ -612,11 +598,6 @@ export function CustomAutomationsSection() {
               ? { targetChannelId: form.targetChannelId }
               : {}),
           }
-        : {}),
-      ...(form.targetProvider === 'teams' &&
-      form.targetMode === 'channel' &&
-      form.targetServiceUrl.trim()
-        ? { targetServiceUrl: form.targetServiceUrl.trim() }
         : {}),
     };
 
@@ -774,12 +755,20 @@ export function CustomAutomationsSection() {
           </div>
 
           <div className="space-y-2">
-            <Label>Model</Label>
+            <Label>
+              {form.environmentId === FAST_EXECUTION
+                ? 'Delegated task model'
+                : 'Model'}
+            </Label>
             <ModelSelect
               size="default"
               ariaLabel="Automation model"
               value={form.model}
-              emptyOptionLabel="Default coding model"
+              emptyOptionLabel={
+                form.environmentId === FAST_EXECUTION
+                  ? 'Default delegated task model'
+                  : 'Default coding model'
+              }
               disabled={busy}
               onValueChange={(value) =>
                 setForm((current) => ({ ...current, model: value }))
@@ -806,7 +795,6 @@ export function CustomAutomationsSection() {
                       : value === 'discord'
                         ? managerDiscordChannelId
                         : '',
-                  targetServiceUrl: '',
                 }))
               }
             >
@@ -849,8 +837,6 @@ export function CustomAutomationsSection() {
                               ? managerDiscordChannelId
                               : ''
                           : '',
-                      targetServiceUrl:
-                        value === 'channel' ? current.targetServiceUrl : '',
                     }))
                   }
                 >
@@ -930,31 +916,16 @@ export function CustomAutomationsSection() {
                 )}
               </div>
             )}
-            {form.targetProvider === 'teams' &&
-            form.targetMode === 'channel' ? (
-              <div className="flex min-w-0 flex-1 items-center gap-2">
-                <Label
-                  htmlFor="custom-automation-service-url"
-                  className="shrink-0"
-                >
-                  Service URL
-                </Label>
-                <Input
-                  id="custom-automation-service-url"
-                  className="flex-1"
-                  value={form.targetServiceUrl}
-                  disabled={busy}
-                  onChange={(event) =>
-                    setForm((current) => ({
-                      ...current,
-                      targetServiceUrl: event.target.value,
-                    }))
-                  }
-                  placeholder="Optional"
-                />
-              </div>
-            ) : null}
           </div>
+          {form.environmentId === FAST_EXECUTION ? (
+            <p className="text-sm text-muted-foreground">
+              {form.targetProvider === 'none'
+                ? 'This run is stored as a Fast conversation without posting to chat.'
+                : form.targetProvider === 'telegram'
+                  ? 'Each Fast run posts here. Continue the session from the web app; chat replies on this provider do not resume Fast yet.'
+                  : 'Each Fast run posts here, and replies continue the Fast session.'}
+            </p>
+          ) : null}
         </div>
 
         <div className="flex items-center justify-between gap-3">
@@ -1079,9 +1050,11 @@ export function CustomAutomationsSection() {
             <div className="divide-y divide-background">
               {rows.map((row) => {
                 const environmentName =
-                  environmentOptions.find(
-                    (environment) => environment.id === row.environmentId,
-                  )?.name ?? 'Environment missing';
+                  row.executionMode === 'fast'
+                    ? 'Fast'
+                    : (environmentOptions.find(
+                        (environment) => environment.id === row.environmentId,
+                      )?.name ?? 'Environment missing');
                 const target = targetFromRow(row);
                 const destinationName =
                   DESTINATION_OPTIONS.find(
@@ -1162,18 +1135,25 @@ export function CustomAutomationsSection() {
                           </>
                         ) : null}
                       </p>
+                      {row.executionMode === 'fast' && row.latestFastResult ? (
+                        <p className="line-clamp-2 text-xs text-muted-foreground">
+                          {row.latestFastResult}
+                        </p>
+                      ) : null}
                     </div>
                     <div className="col-start-2 row-start-2 flex shrink-0 items-center gap-1 sm:col-start-3 sm:row-start-1">
-                      <BasicTooltip content="View previous runs">
-                        <Button asChild size="icon" variant="ghost">
-                          <Link
-                            href={`/tasks?userId=${encodeURIComponent(historyFilter!)}`}
-                            aria-label={`View previous runs for ${row.name}`}
-                          >
-                            <RotateCcwClock />
-                          </Link>
-                        </Button>
-                      </BasicTooltip>
+                      {row.executionMode !== 'fast' ? (
+                        <BasicTooltip content="View previous runs">
+                          <Button asChild size="icon" variant="ghost">
+                            <Link
+                              href={`/tasks?userId=${encodeURIComponent(historyFilter!)}`}
+                              aria-label={`View previous runs for ${row.name}`}
+                            >
+                              <RotateCcwClock />
+                            </Link>
+                          </Button>
+                        </BasicTooltip>
+                      ) : null}
                       <CustomAutomationRunButton
                         automation={row}
                         disabled={busy}

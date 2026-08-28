@@ -3,6 +3,7 @@ import {
   db,
   eq,
   fastAgentConversations,
+  fastAgentMessages,
   userFactory,
   users,
 } from '@roomote/db/server';
@@ -35,6 +36,63 @@ afterEach(async () => {
 });
 
 describe('Fast conversation repository', () => {
+  it('persists a channel-less automation conversation', async () => {
+    const user = await createUser();
+    const conversation = {
+      surface: 'automation' as const,
+      workspaceId: 'automation-repository-test',
+      conversationId: 'occurrence-repository-test',
+    };
+
+    const session = await fastAgentConversationRepository.getOrCreate({
+      userId: user.id,
+      conversation,
+    });
+    const stored = await fastAgentConversationRepository.findById({
+      id: session.id,
+      fallbackConversation: conversation,
+    });
+
+    expect(stored?.conversation).toEqual(conversation);
+    expect(stored?.openCodeSessionId).toBeNull();
+    const [row] = await db
+      .select({
+        channelId: fastAgentConversations.currentReplyChannelId,
+        surface: fastAgentConversations.surface,
+      })
+      .from(fastAgentConversations)
+      .where(eq(fastAgentConversations.id, session.id));
+    expect(row).toEqual({ channelId: null, surface: 'automation' });
+  });
+
+  it.each(['teams', 'telegram'] as const)(
+    'persists and reconstructs a %s Fast conversation reply target',
+    async (surface) => {
+      const user = await createUser();
+      const conversation = {
+        surface,
+        workspaceId: `${surface}-workspace-repository-test`,
+        conversationId: `${surface}-conversation-repository-test`,
+        replyTarget: {
+          channelId: `${surface}-channel-repository-test`,
+          threadId: `${surface}-thread-repository-test`,
+          ...(surface === 'teams'
+            ? { serviceUrl: 'https://smba.example.com/amer/' }
+            : {}),
+        },
+      };
+
+      const session = await fastAgentConversationRepository.getOrCreate({
+        userId: user.id,
+        conversation,
+      });
+
+      await expect(
+        fastAgentConversationRepository.findById({ id: session.id }),
+      ).resolves.toMatchObject({ conversation });
+    },
+  );
+
   it('converges concurrent creation on one provider-neutral row', async () => {
     const user = await createUser();
     const sessions = await Promise.all(
@@ -198,21 +256,25 @@ describe('Fast conversation repository', () => {
     ).resolves.toMatchObject({ compatibilityMessages: visibleHistory });
   });
 
-  it('persists the OpenCode session used by a Fast conversation', async () => {
+  it('persists the canonical OpenCode session identity', async () => {
     const user = await createUser();
     const session = await fastAgentConversationRepository.getOrCreate({
       userId: user.id,
       conversation: slackConversation,
     });
 
-    await fastAgentConversationRepository.setOpenCodeSessionId({
-      conversationId: session.id,
-      openCodeSessionId: 'opencode-session-1',
-    });
+    await expect(
+      fastAgentConversationRepository.setOpenCodeSession({
+        conversationId: session.id,
+        openCodeSessionId: 'opencode-session-1',
+      }),
+    ).resolves.toBeUndefined();
 
     await expect(
       fastAgentConversationRepository.findById({ id: session.id }),
-    ).resolves.toMatchObject({ openCodeSessionId: 'opencode-session-1' });
+    ).resolves.toMatchObject({
+      openCodeSessionId: 'opencode-session-1',
+    });
   });
 
   it('resolves retained legacy IDs without consulting the alias table', async () => {
@@ -305,5 +367,55 @@ describe('Fast conversation repository', () => {
       columns: { replyTargetVerified: true },
     });
     expect(row?.replyTargetVerified).toBe(true);
+  });
+
+  it('upserts canonical messages idempotently by conversation and event', async () => {
+    const user = await createUser();
+    const session = await fastAgentConversationRepository.getOrCreate({
+      userId: user.id,
+      conversation: slackConversation,
+    });
+    const baseMessage = {
+      eventId: 'turn-1:retry-notice',
+      turnId: 'turn-1',
+      turnSeq: 1,
+      ts: 100,
+      eventType: 'roomote_runtime.assistant_message' as const,
+      role: 'assistant' as const,
+      contentBlocks: [{ type: 'text', text: 'Retrying' }],
+      metadata: { visibleInTranscript: true },
+      payload: { purpose: 'progress' },
+      source: 'slack',
+    };
+
+    await Promise.all([
+      fastAgentConversationRepository.upsertMessage({
+        conversationId: session.id,
+        message: baseMessage,
+      }),
+      fastAgentConversationRepository.upsertMessage({
+        conversationId: session.id,
+        message: {
+          ...baseMessage,
+          contentBlocks: [{ type: 'text', text: 'Recovered' }],
+        },
+      }),
+    ]);
+
+    const rows = await db
+      .select()
+      .from(fastAgentMessages)
+      .where(eq(fastAgentMessages.conversationId, session.id));
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.eventId).toBe(baseMessage.eventId);
+    expect(rows[0]?.ts).toBe(100);
+    expect(
+      rows[0]?.contentBlocks.some(
+        (block) => block.type === 'text' && block.text === 'Recovered',
+      ) ||
+        rows[0]?.contentBlocks.some(
+          (block) => block.type === 'text' && block.text === 'Retrying',
+        ),
+    ).toBe(true);
   });
 });

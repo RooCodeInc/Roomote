@@ -685,6 +685,38 @@ describe('runBrainCollectors deep backfill', () => {
     });
   });
 
+  it('persists dependent backfill state only after the step pages land', async () => {
+    const auxiliaryId = uniqueId('backfill-pending');
+    const backfill = vi
+      .fn<NonNullable<BrainCollector['backfill']>>()
+      .mockImplementation(async ({ cursor }) =>
+        cursor === null
+          ? {
+              pages: makePages(1, 'queued'),
+              nextCursor: 'c1',
+              done: false,
+              stateUpdates: [{ collectorId: auxiliaryId, cursor: 'remaining' }],
+            }
+          : { pages: [], nextCursor: cursor, done: false },
+      );
+    const collector = makeCollector({ backfill });
+
+    await runBrainCollectors(connection, {
+      sink: vi.fn(async () => {
+        throw new Error('write failed');
+      }),
+      collectors: [collector],
+    });
+    expect(syncStateStore.get(auxiliaryId)).toBeUndefined();
+
+    await runBrainCollectors(connection, {
+      sink: vi.fn(async () => {}),
+      collectors: [collector],
+    });
+    expect(syncStateStore.get(auxiliaryId)?.backfillCursor).toBe('remaining');
+    expect(syncStateStore.get(collector.id)?.backfillCursor).toBe('c1');
+  });
+
   it('keeps the last landed cursor when the sink 429s mid-backfill', async () => {
     const backfill = vi
       .fn<NonNullable<BrainCollector['backfill']>>()

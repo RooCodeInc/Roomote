@@ -1,6 +1,10 @@
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { createHash } from 'node:crypto';
+import { mkdtempSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 import {
   collectOpenRouterVariantModelAlias,
@@ -15,6 +19,7 @@ import {
   mergeOpenCodeChatGptFastModeOptions,
   mergeOpenRouterVariantAliasModels,
   normalizeOptionalReasoningEffort,
+  SETTINGS_ONLY_MODEL_PROVIDER_ENV_VAR_NAMES,
   stripOpenCodeModelReasoningOptions,
   toBedrockMantleRuntimeModelId,
   type OpenRouterVariantModelAlias,
@@ -28,6 +33,7 @@ import {
   ROOMOTE_OPENCODE_JUDGE_AGENT_DESCRIPTION,
   ROOMOTE_OPENCODE_JUDGE_AGENT_NAME,
 } from '../opencode-prompt-subagents';
+import { OPENCODE_IDENTITY_PLUGIN_SCRIPT } from '../opencode-identity-plugin';
 import { FAST_AGENT_SUBAGENT_TOOL_FILTER } from './fast-agent/fast-agent-tool-policy';
 
 const ESCAPE_CHARACTER = String.fromCharCode(27);
@@ -221,6 +227,23 @@ type NonTaskOpenCodeRuntimeOptions = {
   promptOnlySubagents?: boolean;
 };
 
+let openCodeIdentityPluginUrl: string | undefined;
+
+function getOpenCodeIdentityPluginUrl(): string {
+  if (openCodeIdentityPluginUrl) {
+    return openCodeIdentityPluginUrl;
+  }
+
+  const directory = mkdtempSync(join(tmpdir(), 'roomote-opencode-identity-'));
+  const pluginPath = join(directory, 'roomote-identity.mjs');
+  writeFileSync(pluginPath, OPENCODE_IDENTITY_PLUGIN_SCRIPT, {
+    encoding: 'utf8',
+    mode: 0o600,
+  });
+  openCodeIdentityPluginUrl = pathToFileURL(pluginPath).href;
+  return openCodeIdentityPluginUrl;
+}
+
 function buildRestrictedNonTaskConfig(
   options: NonTaskOpenCodeRuntimeOptions,
 ): Record<string, unknown> {
@@ -230,6 +253,7 @@ function buildRestrictedNonTaskConfig(
 
   return {
     agent: PROMPT_ONLY_SUBAGENTS,
+    plugin: [getOpenCodeIdentityPluginUrl()],
     permission: { ...NON_TASK_TOOL_PERMISSION_DENIALS, task: 'allow' },
   };
 }
@@ -464,6 +488,20 @@ export function buildOpenCodeCliEnv(
     }
   }
 
+  // Settings-only credentials (the Roomote trial key) must never be inherited
+  // from the process environment: the injected variable is only hosting's
+  // delivery mechanism, and honoring it here would keep the trial working in
+  // helper model processes after an operator deleted the stored key to
+  // disable it. The legitimate value, when the trial is active, arrives via
+  // `extraEnv` from the persisted-store resolver. Stripped before the
+  // model-backed config builder below so the value cannot reach provider
+  // config content either.
+  for (const envVarName of SETTINGS_ONLY_MODEL_PROVIDER_ENV_VAR_NAMES) {
+    if (extraEnv?.[envVarName] === undefined) {
+      delete env[envVarName];
+    }
+  }
+
   for (const modelEnvVarName of [
     'R_MODEL',
     'R_SMALL_MODEL',
@@ -636,7 +674,7 @@ type OpenCodeSdkServerLease = {
   url: string;
 };
 
-export function getOpenCodeSdkServerIdleTtlMs(): number {
+function getOpenCodeSdkServerIdleTtlMs(): number {
   const configured = Number.parseInt(
     process.env.OPENCODE_SDK_SERVER_IDLE_TTL_MS ?? '',
     10,

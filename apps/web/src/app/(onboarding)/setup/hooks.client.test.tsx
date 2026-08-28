@@ -171,6 +171,31 @@ function mockStatus(overrides: Partial<Record<string, unknown>> = {}) {
   } as unknown as ReturnType<typeof mockUseQuery>);
 }
 
+function trialModelSetup(overrides: Partial<Record<string, unknown>> = {}) {
+  return {
+    runtimeRoomoteModel: null,
+    runtimeRoomoteModelSatisfied: false,
+    runtimeProviderId: 'roomote',
+    persistedRoomoteModel: null,
+    persistedProviderId: null,
+    preselectedProvider: 'roomote',
+    setupSatisfied: true,
+    setupSatisfiedByRuntimeEnv: true,
+    chatgptConnected: false,
+    providers: [
+      {
+        id: 'roomote',
+        label: 'Roomote inference',
+        // The imported Settings row, not the hosting-injected env variable,
+        // is what connects the provider.
+        runtimeApiKeySatisfied: false,
+        savedApiKeySatisfied: true,
+      },
+    ],
+    ...overrides,
+  };
+}
+
 function mockReadyForRepository({
   onboardingTaskId = null,
   selectedRepositoryIds = [],
@@ -292,6 +317,67 @@ describe('useSetupFlow', () => {
     expect(result.current.step).toBe('env-vars');
   });
 
+  it('shows the inference choice before provider configuration when trial inference is available', async () => {
+    mockStatus({ modelSetup: trialModelSetup() });
+
+    const { result } = renderHook(() => useSetupFlow());
+
+    await waitFor(() => {
+      expect(result.current.step).toBe('welcome');
+    });
+
+    act(() => {
+      result.current.goToNextStep();
+    });
+
+    expect(result.current.step).toBe('inference');
+  });
+
+  it('returns from custom provider configuration to the trial choice', async () => {
+    markSetupWelcomeSeen();
+    mockStatus({ modelSetup: trialModelSetup() });
+
+    const { result } = renderHook(() => useSetupFlow());
+
+    await waitFor(() => {
+      expect(result.current.step).toBe('inference');
+    });
+
+    act(() => {
+      result.current.goToStep('env-vars', { revisit: true });
+    });
+    expect(result.current.step).toBe('env-vars');
+
+    act(() => {
+      result.current.goToPreviousStep();
+    });
+    expect(result.current.step).toBe('inference');
+  });
+
+  it('skips custom provider configuration after trial inference is chosen', async () => {
+    markSetupWelcomeSeen();
+    mockStatus({
+      modelSetup: trialModelSetup(),
+      setupNewState: {
+        authProvider: null,
+        modelProvider: 'roomote',
+        computeProvider: null,
+        sourceControlProvider: null,
+        selectedRepositoryIds: [],
+        onboardingTaskId: null,
+        onboardingTaskStartedAt: null,
+        slackChannel: null,
+        slackThreadTs: null,
+      },
+    });
+
+    const { result } = renderHook(() => useSetupFlow());
+
+    await waitFor(() => {
+      expect(result.current.step).toBe('source-control-provider');
+    });
+  });
+
   it('skips the wizard welcome when the bootstrap flow already showed it', async () => {
     // The signed-out bootstrap flow marks the welcome screen as seen when
     // "Get started" is clicked; after account creation the signed-in wizard
@@ -370,6 +456,54 @@ describe('useSetupFlow', () => {
       result.current.goToNextStep();
     });
     expect(result.current.step).toBe('source-control-provider');
+  });
+
+  it('returns from the trial inference choice to communication setup', async () => {
+    mockStatus({
+      authSetup: {
+        setupSatisfiedByRuntimeEnv: false,
+        selectedProvider: 'slack',
+        preselectedProvider: 'slack',
+        runtimeConfiguredProvider: null,
+        runtimeConfiguredProviders: [],
+        lockReason: null,
+        providers: [
+          {
+            id: 'slack',
+            label: 'Slack',
+            fields: [],
+            runtimeSatisfied: false,
+            savedSatisfied: false,
+            setupSatisfied: false,
+          },
+        ],
+      },
+      modelSetup: trialModelSetup(),
+      setupNewState: {
+        authProvider: 'slack',
+        modelProvider: null,
+        selectedRepositoryIds: [],
+        onboardingTaskId: null,
+        onboardingTaskStartedAt: null,
+        slackChannel: null,
+        slackThreadTs: null,
+      },
+    });
+
+    const { result } = renderHook(() => useSetupFlow());
+
+    await waitFor(() => {
+      expect(result.current.step).toBe('auth-env-vars');
+    });
+
+    act(() => result.current.goToNextStep());
+    expect(result.current.step).toBe('slack');
+
+    act(() => result.current.goToNextStep());
+    expect(result.current.step).toBe('inference');
+
+    act(() => result.current.goToPreviousStep());
+    expect(result.current.step).toBe('slack');
   });
 
   it('offers communication setup after source control for email/password auth', async () => {
@@ -470,7 +604,7 @@ describe('useSetupFlow', () => {
     expect(result.current.step).toBe('compute-provider');
   });
 
-  it('moves from automation recommendations to the environment explainer when compute is already configured', async () => {
+  it('moves from automation recommendations to invoke when compute is already configured', async () => {
     mockReadyForRepository({
       automationRecommendations: null,
     });
@@ -485,7 +619,7 @@ describe('useSetupFlow', () => {
       result.current.goToNextStep();
     });
 
-    expect(result.current.step).toBe('environment-explainer');
+    expect(result.current.step).toBe('invoke');
   });
 
   it('requires a new choice when the saved compute provider is excluded', async () => {
@@ -1284,11 +1418,11 @@ describe('useSetupFlow', () => {
     const { result } = renderHook(() => useSetupFlow());
 
     await waitFor(() => {
-      expect(result.current.step).toBe('environment-explainer');
+      expect(result.current.step).toBe('invoke');
     });
   });
 
-  it('shows recommendations before environment setup', async () => {
+  it('shows recommendations before setup completion', async () => {
     setupSessionState.session = {
       ...setupSessionState.session,
       communicationStep: {
@@ -1371,13 +1505,13 @@ describe('useSetupFlow', () => {
     });
   });
 
-  it('keeps a saved selection without a task recoverable at repository selection', async () => {
+  it('ignores a legacy saved repository selection', async () => {
     mockReadyForRepository({ selectedRepositoryIds: ['repo-1'] });
 
     const { result } = renderHook(() => useSetupFlow());
 
     await waitFor(() => {
-      expect(result.current.step).toBe('repo-selection');
+      expect(result.current.step).toBe('invoke');
     });
   });
 
@@ -1394,7 +1528,7 @@ describe('useSetupFlow', () => {
     });
   });
 
-  it('returns a failed onboarding task to repository selection', async () => {
+  it('allows setup completion after a legacy onboarding task failed', async () => {
     mockReadyForRepository({
       selectedRepositoryIds: ['repo-1'],
       onboardingTaskId: 'task-failed',
@@ -1404,7 +1538,7 @@ describe('useSetupFlow', () => {
     const { result } = renderHook(() => useSetupFlow());
 
     await waitFor(() => {
-      expect(result.current.step).toBe('repo-selection');
+      expect(result.current.step).toBe('invoke');
     });
   });
 
@@ -1907,7 +2041,7 @@ describe('useSetupFlow', () => {
     expect(result.current.canGoBack).toBe(false);
 
     act(() => {
-      result.current.goToStep('repo-selection');
+      result.current.goToStep('invoke');
     });
 
     expect(result.current.canGoBack).toBe(true);

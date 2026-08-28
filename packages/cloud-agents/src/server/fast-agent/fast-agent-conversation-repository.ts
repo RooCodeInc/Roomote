@@ -1,9 +1,11 @@
 import type { ModelMessage } from 'ai';
 import {
   and,
+  type CreateFastAgentMessage,
   db,
   eq,
   fastAgentConversations,
+  fastAgentMessages,
   sql,
   type DatabaseOrTransaction,
 } from '@roomote/db/server';
@@ -16,12 +18,18 @@ export type FastAgentConversationRecord = {
   userId: string;
   conversation: FastAgentConversation;
   /**
-   * Durable visible history for the last-resort reconstruction path. OpenCode,
-   * not this field, owns the native transcript.
+   * Durable visible history for cold starts and provider retries. OpenCode,
+   * not this field, owns the live warm transcript.
    */
   compatibilityMessages: ModelMessage[];
+  /** Last successfully completed native session; validated before cold resume. */
   openCodeSessionId: string | null;
 };
+
+export type FastAgentMessageWrite = Omit<
+  CreateFastAgentMessage,
+  'conversationId'
+>;
 
 export interface FastAgentConversationRepository {
   getOrCreate(input: {
@@ -38,7 +46,11 @@ export interface FastAgentConversationRepository {
     conversationId: string;
     messages: ModelMessage[];
   }): Promise<void>;
-  setOpenCodeSessionId(input: {
+  upsertMessage(input: {
+    conversationId: string;
+    message: FastAgentMessageWrite;
+  }): Promise<void>;
+  setOpenCodeSession(input: {
     conversationId: string;
     openCodeSessionId: string;
   }): Promise<void>;
@@ -78,19 +90,31 @@ function toConversation(
     | 'conversationId'
     | 'currentReplyChannelId'
     | 'currentReplyThreadId'
+    | 'currentReplyServiceUrl'
   >,
 ): FastAgentConversation | null {
-  const parsed = fastAgentConversationSchema.safeParse({
-    surface: record.surface,
-    workspaceId: record.workspaceId,
-    conversationId: record.conversationId,
-    replyTarget: {
-      channelId: record.currentReplyChannelId,
-      ...(record.currentReplyThreadId
-        ? { threadId: record.currentReplyThreadId }
-        : {}),
-    },
-  });
+  const parsed = fastAgentConversationSchema.safeParse(
+    record.surface === 'automation' || record.surface === 'web'
+      ? {
+          surface: record.surface,
+          workspaceId: record.workspaceId,
+          conversationId: record.conversationId,
+        }
+      : {
+          surface: record.surface,
+          workspaceId: record.workspaceId,
+          conversationId: record.conversationId,
+          replyTarget: {
+            channelId: record.currentReplyChannelId,
+            ...(record.currentReplyThreadId
+              ? { threadId: record.currentReplyThreadId }
+              : {}),
+            ...(record.currentReplyServiceUrl
+              ? { serviceUrl: record.currentReplyServiceUrl }
+              : {}),
+          },
+        },
+  );
 
   return parsed.success ? parsed.data : null;
 }
@@ -148,8 +172,18 @@ export const fastAgentConversationRepository: FastAgentConversationRepository =
               surface: conversation.surface,
               workspaceId: conversation.workspaceId,
               conversationId: conversation.conversationId,
-              currentReplyChannelId: conversation.replyTarget.channelId,
-              currentReplyThreadId: conversation.replyTarget.threadId,
+              currentReplyChannelId:
+                'replyTarget' in conversation
+                  ? conversation.replyTarget.channelId
+                  : null,
+              currentReplyThreadId:
+                'replyTarget' in conversation
+                  ? conversation.replyTarget.threadId
+                  : null,
+              currentReplyServiceUrl:
+                'replyTarget' in conversation
+                  ? (conversation.replyTarget.serviceUrl ?? null)
+                  : null,
               replyTargetVerified: true,
             })
             .onConflictDoNothing();
@@ -167,8 +201,18 @@ export const fastAgentConversationRepository: FastAgentConversationRepository =
         const [updated] = await tx
           .update(fastAgentConversations)
           .set({
-            currentReplyChannelId: conversation.replyTarget.channelId,
-            currentReplyThreadId: conversation.replyTarget.threadId ?? null,
+            currentReplyChannelId:
+              'replyTarget' in conversation
+                ? conversation.replyTarget.channelId
+                : null,
+            currentReplyThreadId:
+              'replyTarget' in conversation
+                ? (conversation.replyTarget.threadId ?? null)
+                : null,
+            currentReplyServiceUrl:
+              'replyTarget' in conversation
+                ? (conversation.replyTarget.serviceUrl ?? null)
+                : null,
             replyTargetVerified: true,
             updatedAt: sql`now()`,
           })
@@ -196,9 +240,18 @@ export const fastAgentConversationRepository: FastAgentConversationRepository =
         const [updated] = await db
           .update(fastAgentConversations)
           .set({
-            currentReplyChannelId: fallbackConversation.replyTarget.channelId,
+            currentReplyChannelId:
+              'replyTarget' in fallbackConversation
+                ? fallbackConversation.replyTarget.channelId
+                : null,
             currentReplyThreadId:
-              fallbackConversation.replyTarget.threadId ?? null,
+              'replyTarget' in fallbackConversation
+                ? (fallbackConversation.replyTarget.threadId ?? null)
+                : null,
+            currentReplyServiceUrl:
+              'replyTarget' in fallbackConversation
+                ? (fallbackConversation.replyTarget.serviceUrl ?? null)
+                : null,
             replyTargetVerified: true,
             updatedAt: sql`now()`,
           })
@@ -256,18 +309,69 @@ export const fastAgentConversationRepository: FastAgentConversationRepository =
       });
     },
 
-    async setOpenCodeSessionId({
+    async upsertMessage({ conversationId: requestedId, message }) {
+      await db.transaction(async (tx) => {
+        const conversationId = await resolveCanonicalId(tx, requestedId);
+        await tx.execute(
+          sql`select pg_advisory_xact_lock(hashtextextended(${`fast-agent-conversation:${conversationId}`}, 0))`,
+        );
+        const [conversation] = await tx
+          .select({ id: fastAgentConversations.id })
+          .from(fastAgentConversations)
+          .where(eq(fastAgentConversations.id, conversationId))
+          .limit(1);
+        if (!conversation) {
+          throw new Error('Fast conversation was not found.');
+        }
+
+        await tx
+          .insert(fastAgentMessages)
+          .values({ conversationId, ...message })
+          .onConflictDoUpdate({
+            target: [
+              fastAgentMessages.conversationId,
+              fastAgentMessages.eventId,
+            ],
+            set: {
+              turnId: message.turnId,
+              turnSeq: message.turnSeq,
+              ts: message.ts,
+              eventType: message.eventType,
+              role: message.role ?? null,
+              contentBlocks: message.contentBlocks ?? [],
+              metadata: message.metadata ?? null,
+              payload: message.payload ?? {},
+              source: message.source ?? null,
+              nativeSessionId: message.nativeSessionId ?? null,
+              nativeMessageId: message.nativeMessageId ?? null,
+              updatedAt: sql`now()`,
+            },
+          });
+        await tx
+          .update(fastAgentConversations)
+          .set({ updatedAt: sql`now()` })
+          .where(eq(fastAgentConversations.id, conversationId));
+      });
+    },
+
+    async setOpenCodeSession({
       conversationId: requestedId,
       openCodeSessionId,
     }) {
-      const conversationId = await resolveCanonicalId(db, requestedId);
-      const [updated] = await db
-        .update(fastAgentConversations)
-        .set({ openCodeSessionId, updatedAt: sql`now()` })
-        .where(eq(fastAgentConversations.id, conversationId))
-        .returning({ id: fastAgentConversations.id });
-      if (!updated) {
-        throw new Error('Fast conversation was not found.');
-      }
+      await db.transaction(async (tx) => {
+        const conversationId = await resolveCanonicalId(tx, requestedId);
+        await tx.execute(
+          sql`select pg_advisory_xact_lock(hashtextextended(${`fast-agent-conversation:${conversationId}`}, 0))`,
+        );
+        const [updated] = await tx
+          .update(fastAgentConversations)
+          .set({
+            openCodeSessionId,
+            updatedAt: sql`now()`,
+          })
+          .where(eq(fastAgentConversations.id, conversationId))
+          .returning({ id: fastAgentConversations.id });
+        if (!updated) throw new Error('Fast conversation was not found.');
+      });
     },
   };

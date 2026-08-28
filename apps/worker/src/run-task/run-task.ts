@@ -23,9 +23,12 @@ import {
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
+import packageJson from '../../../../package.json';
+
 import { validateToken } from '@roomote/auth/client';
 import {
-  ROOMOTE_SYSTEM_PROMPT,
+  buildRoomoteSystemPrompt,
+  resolveRoomoteReleaseVersion,
   stripLeadingSlackProductMention,
   wrapSlackMessage,
 } from '@roomote/cloud-agents';
@@ -650,6 +653,7 @@ function getQueuedSnapshotResumeLinearMessages(
 
 export const runTask = async ({
   taskRun,
+  sourceControlToken,
   envVars,
   userEnvVars,
   workspacePath,
@@ -801,6 +805,10 @@ export const runTask = async ({
     const inferenceGatewayXai =
       unsanitizedEnv[INFERENCE_GATEWAY_XAI_ENV_VAR_NAME] === '1';
 
+    // Task sandboxes are gateway-only. Strip legacy direct OAuth content even
+    // when it came from an old worker snapshot or conflicting deployment env.
+    delete runtimeEnv[OPENCODE_AUTH_CONTENT_ENV_VAR_NAME];
+
     if (
       inferenceGatewayServedKeys.length > 0 ||
       inferenceGatewayChatGpt ||
@@ -824,20 +832,16 @@ export const runTask = async ({
 
       if (inferenceGatewayChatGpt) {
         runtimeEnv[INFERENCE_GATEWAY_CHATGPT_ENV_VAR_NAME] = '1';
-        // Gateway mode holds the OAuth record; it must never reach the sandbox.
-        delete runtimeEnv[OPENCODE_AUTH_CONTENT_ENV_VAR_NAME];
       } else {
         delete runtimeEnv[INFERENCE_GATEWAY_CHATGPT_ENV_VAR_NAME];
       }
       if (inferenceGatewayGitHubCopilot) {
         runtimeEnv[INFERENCE_GATEWAY_GITHUB_COPILOT_ENV_VAR_NAME] = '1';
-        delete runtimeEnv[OPENCODE_AUTH_CONTENT_ENV_VAR_NAME];
       } else {
         delete runtimeEnv[INFERENCE_GATEWAY_GITHUB_COPILOT_ENV_VAR_NAME];
       }
       if (inferenceGatewayXai) {
         runtimeEnv[INFERENCE_GATEWAY_XAI_ENV_VAR_NAME] = '1';
-        delete runtimeEnv[OPENCODE_AUTH_CONTENT_ENV_VAR_NAME];
       } else {
         delete runtimeEnv[INFERENCE_GATEWAY_XAI_ENV_VAR_NAME];
       }
@@ -1036,7 +1040,17 @@ export const runTask = async ({
     // OpenCode consumes Roomote's identity, workflow, and runtime guidance
     // through its developer-instructions layer.
     const harnessDeveloperInstructions =
-      [ROOMOTE_SYSTEM_PROMPT, harnessInstructions, environmentInstructions]
+      [
+        buildRoomoteSystemPrompt(
+          resolveRoomoteReleaseVersion(
+            process.env.RELEASE_PRODUCT_VERSION,
+            process.env.RELEASE_VERSION,
+            packageJson.version,
+          ),
+        ),
+        harnessInstructions,
+        environmentInstructions,
+      ]
         .filter((value): value is string => Boolean(value))
         .join('\n\n') || undefined;
 
@@ -1331,6 +1345,7 @@ export const runTask = async ({
       harness,
       getSubprocess,
       unsubscribe: unsubscribeHarness,
+      flushPendingCompletionEvents,
     } = await createHarness({
       harnessType,
       workspacePath,
@@ -1517,10 +1532,12 @@ export const runTask = async ({
             eventType: 'decision',
             message: `Worker onExit finished runtime-state flush for task run #${taskRun.id}.`,
           });
+          await flushPendingCompletionEvents();
           await sdk.taskRuns.done({
             id: taskRun.id,
             status: RunStatus.Idle,
           });
+          await callbacks.onStatus?.(taskRun, RunStatus.Idle, context);
         },
       },
     });
@@ -2275,6 +2292,7 @@ export const runTask = async ({
     // (syncPollingState was already called above, before task start/resume.)
     startPolling({
       taskRun,
+      sourceControlTokenExpiresAt: sourceControlToken?.expiresAt,
       task,
       state: pollingState,
       logger,

@@ -64,6 +64,7 @@ vi.mock('../slack-task-run-routing', () => ({
 
 import {
   PR_REVIEW_NOTIFICATION_DEBOUNCE_MS,
+  PR_REVIEW_NOTIFICATION_ROOMOTE_FALLBACK_MS,
   consumePendingPrReviewActivity,
   dispatchDuePrReviewNotifications,
   enqueuePrReviewNotification,
@@ -148,11 +149,12 @@ describe('durable PR review notification ownership', () => {
     vi.useRealTimers();
   });
 
-  it('commits the normalized event without creating Redis ownership state', async () => {
+  it('keeps human review feedback on the one-minute debounce', async () => {
     await expect(enqueuePrReviewNotification(baseInput)).resolves.toEqual({
       notifiedTaskCount: 1,
     });
 
+    expect(PR_REVIEW_NOTIFICATION_DEBOUNCE_MS).toBe(1 * 60 * 1000);
     expect(mockPersistPrReviewEvent).toHaveBeenCalledWith(
       expect.objectContaining({
         repository: 'owner/repo',
@@ -161,6 +163,56 @@ describe('durable PR review notification ownership', () => {
       }),
     );
     expect(mockQueueAdd).not.toHaveBeenCalled();
+  });
+
+  it('delays provisional Roomote inline findings by five minutes', async () => {
+    await enqueuePrReviewNotification({
+      ...baseInput,
+      event: {
+        kind: 'review_comment',
+        providerEventId: 'github-review-comment:roomote-inline',
+        authorLogin: 'roomote[bot]',
+        roomoteAuthored: true,
+        reviewHeadSha: 'abc123',
+        batchId: 'cycle-1',
+        observedAt: 100,
+      },
+    });
+
+    expect(PR_REVIEW_NOTIFICATION_ROOMOTE_FALLBACK_MS).toBe(5 * 60 * 1000);
+    expect(mockPersistPrReviewEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        batchKind: 'roomote',
+        batchId: 'cycle-1',
+        dueAt: new Date(1_000 + PR_REVIEW_NOTIFICATION_ROOMOTE_FALLBACK_MS),
+        isSummary: false,
+      }),
+    );
+  });
+
+  it('promotes completed Roomote review summaries immediately', async () => {
+    await enqueuePrReviewNotification({
+      ...baseInput,
+      event: {
+        kind: 'review_summary',
+        providerEventId: 'github-review-summary:cycle-1',
+        authorLogin: 'roomote[bot]',
+        roomoteAuthored: true,
+        reviewHeadSha: 'abc123',
+        batchId: 'cycle-1',
+        observedAt: 100,
+      },
+    });
+
+    expect(mockPersistPrReviewEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        batchKind: 'roomote',
+        batchId: 'cycle-1',
+        dueAt: new Date(1_000),
+        isSummary: true,
+      }),
+    );
+    expect(mockClaimDuePrReviewDeliveries).toHaveBeenCalled();
   });
 
   it('debounces CI failures through the same durable notification batch', async () => {

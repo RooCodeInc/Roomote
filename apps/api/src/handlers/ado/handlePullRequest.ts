@@ -326,6 +326,19 @@ export async function handleAdoPullRequest(
     return { status: 'ok' };
   }
 
+  if (
+    pullRequest.status === 'active' &&
+    (payload.eventType === 'git.pullrequest.created' ||
+      payload.eventType === 'git.pullrequest.updated')
+  ) {
+    await updateTaskPrStatus(
+      'ado',
+      repoFullName,
+      pullRequest.pullRequestId,
+      pullRequest.isDraft ? 'draft' : 'open',
+    );
+  }
+
   const taskType = getReviewTaskType(payload, context);
 
   if (!taskType) {

@@ -2,6 +2,8 @@ import { timingSafeEqual } from 'node:crypto';
 
 import { Hono } from 'hono';
 
+import { Env } from '@roomote/env';
+
 import {
   formatSingleLineLog,
   getInferenceGatewayProvider,
@@ -18,14 +20,15 @@ import type { Variables } from '../../types';
 const LOG_PREFIX = '[Brain Inference]';
 
 /**
- * The Brain's whole inference surface: embeddings for recall, reranking for
- * precision, and chat for sourced synthesis and query expansion. Deliberately
- * narrower than the task-sandbox gateway's allowlist, because this credential
- * is a static deployment secret rather than a short-lived run token.
+ * The Brain's whole inference surface: embeddings for recall and chat for
+ * sourced synthesis and query expansion. Deliberately narrower than the
+ * task-sandbox gateway's allowlist, because this credential is a static
+ * deployment secret rather than a short-lived run token. Reranking is not
+ * part of the Brain: retrieval is hybrid RRF, and the reranker is disabled
+ * per-brain by the gbrain entrypoint.
  */
 const BRAIN_ALLOWED_PATHS = new Set([
   '/v1/embeddings',
-  '/v1/rerank',
   '/v1/chat/completions',
   '/v1/responses',
 ]);
@@ -117,6 +120,33 @@ async function rewriteBody(
 }
 
 /**
+ * A self-run inference upstream for one gateway path. Embeddings are the
+ * Brain's bulk data path (memory text in, vectors out), so they are the one
+ * a deployment may want on its own hardware; chat synthesis stays with the
+ * configured model provider. Model names pass through unrewritten — the
+ * upstream owns its own model registry, and every Brain is locked to its
+ * embedding model at creation, so the name must mean exactly one thing
+ * forever.
+ */
+function resolveLocalUpstream(
+  upstreamPath: string,
+): { baseUrl: string; apiKey?: string } | null {
+  const baseUrl =
+    upstreamPath === '/v1/embeddings'
+      ? Env.R_BRAIN_EMBEDDINGS_UPSTREAM_URL
+      : undefined;
+
+  if (!baseUrl?.trim()) {
+    return null;
+  }
+
+  return {
+    baseUrl: baseUrl.trim().replace(/\/$/, ''),
+    apiKey: Env.R_BRAIN_INFERENCE_UPSTREAM_API_KEY?.trim() || undefined,
+  };
+}
+
+/**
  * Inference gateway for this deployment's Brain.
  *
  * The Brain container holds no provider credential. It is pointed at this
@@ -163,6 +193,64 @@ brainInference.post('/*', async (c) => {
     return c.json({ error: 'Path is not allowed through this gateway' }, 403);
   }
 
+  const localUpstream = resolveLocalUpstream(upstreamPath);
+
+  if (localUpstream) {
+    const headers = new Headers();
+
+    // Same denylist as the provider path: the gateway token in
+    // `authorization` must never reach any upstream.
+    for (const [name, value] of c.req.raw.headers.entries()) {
+      if (!REQUEST_HEADER_DENYLIST.has(name.toLowerCase())) {
+        headers.set(name, value);
+      }
+    }
+
+    if (localUpstream.apiKey) {
+      headers.set('authorization', `Bearer ${localUpstream.apiKey}`);
+    }
+
+    let upstream: Response;
+
+    try {
+      upstream = await fetch(
+        `${localUpstream.baseUrl}${upstreamPath}${requestUrl.search}`,
+        { method: 'POST', headers, body: await c.req.text() },
+      );
+    } catch (error) {
+      console.warn(
+        formatSingleLineLog(`${LOG_PREFIX} Local upstream request failed`, {
+          upstreamPath,
+          error: error instanceof Error ? error.message : String(error),
+        }),
+      );
+
+      return c.json({ error: 'Brain inference upstream is unreachable' }, 502);
+    }
+
+    if (!upstream.ok) {
+      console.warn(
+        formatSingleLineLog(`${LOG_PREFIX} Local upstream returned an error`, {
+          upstreamPath,
+          status: upstream.status,
+        }),
+      );
+    }
+
+    const responseHeaders = new Headers();
+
+    for (const [name, value] of upstream.headers.entries()) {
+      if (!RESPONSE_HEADER_DENYLIST.has(name.toLowerCase())) {
+        responseHeaders.set(name, value);
+      }
+    }
+
+    return new Response(upstream.body, {
+      status: upstream.status,
+      headers: responseHeaders,
+    });
+  }
+
   const resolved = await resolveBrainInferenceProvider();
 
   if (!resolved) {
@@ -172,20 +260,6 @@ brainInference.post('/*', async (c) => {
       {
         error:
           'No model provider is configured for this deployment. Add a provider key in Settings to enable the Brain.',
-      },
-      503,
-    );
-  }
-
-  // gbrain's OpenRouter reranker speaks the same authenticated gateway
-  // contract as embeddings and chat, but OpenAI itself has no compatible
-  // rerank endpoint. Fail explicitly instead of forwarding a doomed request
-  // to api.openai.com and obscuring the missing capability as a 404.
-  if (upstreamPath === '/v1/rerank' && resolved.providerId !== 'openrouter') {
-    return c.json(
-      {
-        error:
-          'Brain reranking requires an OpenRouter provider configured in Settings.',
       },
       503,
     );

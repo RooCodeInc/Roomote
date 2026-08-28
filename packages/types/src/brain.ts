@@ -28,9 +28,12 @@ export const BRAIN_PROXY_PATH = '/api/mcp/gbrain';
 export const BRAIN_NAMESPACES = [
   { id: 'people', prefix: 'people/', label: 'People' },
   { id: 'tasks', prefix: 'tasks/', label: 'Task memories' },
+  { id: 'memories', prefix: 'memories/', label: 'Conversation memories' },
   { id: 'prs', prefix: 'prs/', label: 'Pull requests' },
   { id: 'github', prefix: 'github/', label: 'GitHub issues' },
+  { id: 'linear', prefix: 'linear/', label: 'Linear issues' },
   { id: 'slack', prefix: 'slack/', label: 'Slack' },
+  { id: 'discord', prefix: 'discord/', label: 'Discord' },
   { id: 'notion', prefix: 'notion/', label: 'Notion' },
   { id: 'meetings', prefix: 'meetings/', label: 'Meetings' },
   { id: 'daily', prefix: 'daily/', label: 'Daily digests' },
@@ -46,6 +49,17 @@ export type BrainNamespaceId = (typeof BRAIN_NAMESPACES)[number]['id'];
  * so the query that stops counting and the UI that renders the `+` agree.
  */
 export const MISSING_MEMORY_EVENT_COUNT_CAP = 1_000;
+
+/**
+ * Ceiling on one Fast conversation's accumulated memory text. A
+ * conversation's memory is a distillation, not a transcript; the cap keeps a
+ * chatty or adversarial conversation from turning its Brain page into a
+ * dumping ground.
+ */
+export const FAST_AGENT_MEMORY_MAX_CHARS = 20_000;
+
+/** One saved Fast memory fact; enforced by the save_memory tool schema. */
+export const FAST_AGENT_MEMORY_FACT_MAX_CHARS = 1_000;
 
 /** Bucket for a slug written under a prefix this registry does not name. */
 export const BRAIN_OTHER_NAMESPACE_ID = 'other';
@@ -106,7 +120,9 @@ export const BRAIN_COLLECTOR_IDS = {
   ripplingWorkers: 'rippling-workers',
   slackPersonDirectory: 'slack-person-directory:occurrence-date-v2',
   slackPublicChannels: 'slack-public-channels:entity-timeline-v3',
+  discordPublicChannels: 'discord-public-channels:entity-timeline-v1',
   githubIssues: 'github-issues:occurrence-date-v3',
+  linearIssues: 'linear-issues:entity-census-v1',
   notionPages: 'notion-pages',
   granolaMeetings: 'granola-meetings:entity-timeline-v3',
 } as const;
@@ -120,9 +136,12 @@ export const BRAIN_COLLECTOR_IDS = {
  */
 export const BRAIN_PAGE_TYPES = {
   taskMemory: 'task-memory',
+  conversationMemory: 'conversation-memory',
   pullRequest: 'pull-request',
   githubIssue: 'github-issue',
+  linearIssue: 'linear-issue',
   slackDay: 'slack',
+  discordDay: 'discord',
   meeting: 'meeting',
   notionPage: 'notion-page',
   person: 'person',
@@ -236,6 +255,18 @@ export const BRAIN_SOURCES = [
     requires: 'slack',
   },
   {
+    id: 'discord-public-channels',
+    label: 'Discord public channels',
+    description:
+      'History of public server channels and active public threads the Roomote bot can read. Private channels and DMs are never read.',
+    namespaceId: 'discord',
+    collectorIdPrefix: 'discord-public-channels',
+    collectorIds: [
+      BRAIN_COLLECTOR_IDS.discordPublicChannels,
+    ] as readonly string[],
+    requires: 'discord',
+  },
+  {
     id: 'github-issues',
     label: 'GitHub issues',
     description:
@@ -246,10 +277,20 @@ export const BRAIN_SOURCES = [
     requires: 'github',
   },
   {
+    id: 'linear-issues',
+    label: 'Linear issues',
+    description:
+      'Issues and bounded discussion from the connected Linear workspace, refreshed as they change upstream.',
+    namespaceId: 'linear',
+    collectorIdPrefix: 'linear-issues',
+    collectorIds: [BRAIN_COLLECTOR_IDS.linearIssues] as readonly string[],
+    requires: 'linear',
+  },
+  {
     id: 'notion-pages',
     label: 'Notion',
     description:
-      'Pages the connected Notion integration can reach, refreshed as they change upstream.',
+      'Memories the connected Notion integration can reach, refreshed as they change upstream.',
     namespaceId: 'notion',
     collectorIdPrefix: 'notion-pages',
     collectorIds: [BRAIN_COLLECTOR_IDS.notionPages] as readonly string[],
@@ -352,7 +393,7 @@ export function parseBrainBackfillCompletedCount(
  * chosen from gbrain's own description, which is written for a different
  * product and routes to tools this deployment does not expose.
  */
-export const BRAIN_MCP_READ_INSTRUCTIONS = `The \`gbrain\` server is this deployment's shared memory (the Brain). It holds memories distilled from completed tasks plus activity from connected integrations (pull requests, Slack channels, meeting notes, GitHub issues), each stored as a page with citations.
+export const BRAIN_MCP_READ_INSTRUCTIONS = `The \`gbrain\` server is this deployment's shared memory (the Brain). It holds memories distilled from completed tasks plus activity from connected integrations (pull requests, Slack and Discord channels, meeting notes, GitHub issues, Linear issues), each stored as a page with citations.
 
 ## Using what it knows
 
@@ -366,7 +407,7 @@ Which tool:
 - \`query\` when you are describing a concept and do not know how the Brain words it. It expands your phrasing into related queries, so it finds pages that talk about the same thing in different language. This is the default, and the right choice for that first pass.
 - \`search\` when you already know the exact token: a slug, a repository name, an error string, a person's handle. Cheaper than \`query\` because it skips the expansion step.
 - \`entity\` for one known person. It resolves names and linked provider handles against canonical deployment-member cards without an LLM call.
-- \`list_pages\` to enumerate rather than guess, and to answer "what is in the Brain" or "what happened recently" (it sorts by recency). Use it before ever concluding the Brain is empty. Pages are namespaced: \`people/\`, \`tasks/\`, \`prs/\`, \`slack/\`, \`notion/\`, \`meetings/\`, \`github/\`.
+- \`list_pages\` to enumerate rather than guess, and to answer "what is in the Brain" or "what happened recently" (it sorts by recency). Use it before ever concluding the Brain is empty. Pages are namespaced: \`people/\`, \`tasks/\`, \`prs/\`, \`slack/\`, \`discord/\`, \`notion/\`, \`meetings/\`, \`github/\`, \`linear/\`.
 - \`get_page\` on a slug for a page's full text, once a search result looks relevant.
 
 A result set that comes back populated is not proof of coverage, and one query returning nothing is not proof of absence. If the answer matters, try the other phrasing or list the namespace before deciding the Brain has nothing.
@@ -374,6 +415,8 @@ A result set that comes back populated is not proof of coverage, and one query r
 \`synthesize\` reasons across many pages and returns a cited answer with gap analysis, but it makes LLM calls on this deployment's own provider key and can take a minute. You are usually the better reasoner: prefer pulling the handful of pages you need with \`query\` and \`get_page\` and reasoning yourself. Reach for \`synthesize\` only when a question genuinely spans more pages than you want to read into context, and say when you used it.
 
 When the Brain genuinely has nothing on a question, say so rather than guessing.
+
+When recalled context materially shapes the path or approach you choose, casually and concisely mention the specific insight that informed it; do not merely say that memory or history was helpful, and keep it incidental rather than making a disclosure out of it.
 
 Brain provenance is internal-only. Use it to judge and ground results, but never expose Brain's \`source\` field or other internal provenance metadata in a user-facing reply. This includes Brain page or entity IDs, slugs, namespace or storage paths, raw record keys, and similar implementation details. Do not add a \`Source:\` line or cite raw Brain metadata. Summarize the useful context naturally. If human-verifiable attribution is necessary, inspect and cite the underlying user-facing integration directly rather than presenting Brain's internal source.`;
 
@@ -397,3 +440,21 @@ Work that ended without a fix is worth recording too. Knowing that an approach d
 Call it as soon as the outcome is clear rather than saving it for the last moment. A later call replaces the earlier one, so you can refine the memory if more emerges.
 
 Keep it concise and reusable: a few sentences a future agent can act on. Never include secrets or credentials, file contents or long code blocks, a step-by-step narration of what you did, or anything a future agent could read straight out of the repository or the pull request.`;
+
+/**
+ * The Fast (conversational) variant of the Brain instructions. Fast reads the
+ * Brain through the same read-only proxy tasks use, but writes through the
+ * `save_memory` native tool: the memory is parked on this conversation's
+ * outbox row and the server-side ingestion pipeline redacts it and files it
+ * as a page, so Fast never holds a write credential and saved facts come back
+ * through the same \`query\`/\`search\` reads as everything else.
+ */
+export const BRAIN_MCP_FAST_INSTRUCTIONS = `${BRAIN_MCP_READ_INSTRUCTIONS}
+
+## Remembering for future conversations
+
+Save a memory by calling the \`save_memory\` native tool (not a Brain tool). Roomote redacts it and files it into the Brain under this conversation's own entry, where later \`query\` and \`search\` calls will find it after the next ingestion pass — it is durable, but not instantly retrievable.
+
+Save when the user explicitly asks you to remember something, or states a durable preference, decision, correction, or fact that will materially help future conversations. Keep each memory concise and self-contained: one fact per call, phrased so a future agent can act on it without this conversation's context.
+
+Do not save secrets or credentials, transient requests, casual chatter, speculative conclusions, or facts already durable in a connected source the Brain ingests. When you save, tell the user plainly that you have remembered it; do not promise instant recall.`;

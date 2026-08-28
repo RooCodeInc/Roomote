@@ -31,6 +31,8 @@ import {
   getCommunicationGuildIdFromTaskPayload,
   getCommunicationTenantIdFromTaskPayload,
   getCommunicationChannelFromTaskPayload,
+  getCommunicationTeamDomainFromTaskPayload,
+  getCommunicationTeamIdFromTaskPayload,
   getCommunicationThreadIdFromTaskPayload,
   getCommunicationMessageIdFromTaskPayload,
   getSlackChannelFromTaskPayload,
@@ -258,6 +260,16 @@ export async function createOrUpdateSourceControlPullRequestForTaskRun({
   const communicationProvider = getCommunicationProviderFromTaskPayload(
     taskRun.payload,
   );
+  const inheritedChatProvider =
+    payloadRecord.communicationContextInherited === true
+      ? communicationProvider
+      : null;
+  const communicationChannelId = getCommunicationChannelFromTaskPayload(
+    taskRun.payload,
+  );
+  const communicationThreadId = getCommunicationThreadIdFromTaskPayload(
+    taskRun.payload,
+  );
   const telegramBotUsername =
     communicationProvider === 'telegram'
       ? (await resolveTelegramRuntimeCredentials()).botUsername
@@ -269,30 +281,42 @@ export async function createOrUpdateSourceControlPullRequestForTaskRun({
     attribution: canonicalAttribution,
     taskUrl: buildPrAttributionTaskUrl(taskRun),
     taskSurface:
-      task?.surface === 'system' || task?.surface === 'api'
+      inheritedChatProvider ??
+      (task?.surface === 'system' || task?.surface === 'api'
         ? 'web'
-        : (task?.surface ?? communicationProvider ?? 'web'),
+        : (task?.surface ?? communicationProvider ?? 'web')),
     slackTeamDomain:
-      getSlackTeamDomainFromTaskPayload(taskRun.payload) ?? undefined,
-    slackTeamId: getSlackTeamIdFromTaskPayload(taskRun.payload) ?? undefined,
+      getSlackTeamDomainFromTaskPayload(taskRun.payload) ??
+      (communicationProvider === 'slack'
+        ? (getCommunicationTeamDomainFromTaskPayload(taskRun.payload) ??
+          undefined)
+        : undefined),
+    slackTeamId:
+      getSlackTeamIdFromTaskPayload(taskRun.payload) ??
+      (communicationProvider === 'slack'
+        ? (getCommunicationTeamIdFromTaskPayload(taskRun.payload) ?? undefined)
+        : undefined),
     slackConversationUrl:
       getSlackConversationUrlFromTaskPayload(taskRun.payload) ?? undefined,
     slackChannel:
       getSlackChannelFromTaskPayload(taskRun.payload) ??
       task?.slackChannelId ??
-      undefined,
+      (communicationProvider === 'slack'
+        ? (communicationChannelId ?? undefined)
+        : undefined),
     slackThreadTs:
       getSlackThreadTsFromTaskPayload(taskRun.payload) ??
       task?.slackThreadTs ??
-      undefined,
+      (communicationProvider === 'slack'
+        ? (communicationThreadId ?? undefined)
+        : undefined),
     telegramChatId:
       communicationProvider === 'telegram'
-        ? (getCommunicationChannelFromTaskPayload(taskRun.payload) ?? undefined)
+        ? (communicationChannelId ?? undefined)
         : undefined,
     telegramThreadId:
       communicationProvider === 'telegram'
-        ? (getCommunicationThreadIdFromTaskPayload(taskRun.payload) ??
-          undefined)
+        ? (communicationThreadId ?? undefined)
         : undefined,
     telegramMessageId:
       communicationProvider === 'telegram'
@@ -302,7 +326,7 @@ export async function createOrUpdateSourceControlPullRequestForTaskRun({
     telegramBotUsername: telegramBotUsername ?? undefined,
     teamsConversationId:
       communicationProvider === 'teams'
-        ? (getCommunicationChannelFromTaskPayload(taskRun.payload) ?? undefined)
+        ? (communicationChannelId ?? undefined)
         : undefined,
     teamsMessageId:
       communicationProvider === 'teams'
@@ -316,7 +340,7 @@ export async function createOrUpdateSourceControlPullRequestForTaskRun({
       getCommunicationGuildIdFromTaskPayload(taskRun.payload) ?? undefined,
     discordChannelId:
       communicationProvider === 'discord'
-        ? (getCommunicationChannelFromTaskPayload(taskRun.payload) ?? undefined)
+        ? (communicationThreadId ?? communicationChannelId ?? undefined)
         : undefined,
     discordMessageId:
       communicationProvider === 'discord'

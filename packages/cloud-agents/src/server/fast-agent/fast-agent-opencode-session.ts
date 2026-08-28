@@ -2,13 +2,15 @@ import {
   isNonTaskOpenCodeSessionNotFoundError,
   type NonTaskOpenCodeSession,
 } from '../non-task-provider-usage';
-import { getOpenCodeSdkServerIdleTtlMs } from '../opencode-runtime';
+import { revokeFastAgentMcpCapabilitiesForConversation } from './fast-agent-native-tool-bridge';
+import { fastAgentSpillStore } from './fast-agent-spill-store';
 
 const DEFAULT_FAST_AGENT_OPENCODE_SESSION_LIMIT = 250;
 
 type SessionEntry = {
   session: NonTaskOpenCodeSession;
   resumeValidationPending: boolean;
+  generation: number;
   lastUsedAt: number;
   pending: number;
   tail: Promise<void>;
@@ -37,24 +39,36 @@ type FastAgentOpenCodeSessionManagerOptions = {
   idleTtlMs?: number;
   maxEntries?: number;
   now?: () => number;
+  onConversationEnd?: (conversationId: string) => Promise<void> | void;
 };
 
 /**
  * Process-local ownership for warm Fast OpenCode conversations. The map is
- * deliberately disposable: Roomote durably persists the OpenCode session id,
- * while OpenCode owns the native transcript behind it.
+ * deliberately disposable: Roomote persists the last known session id, while
+ * OpenCode owns the native transcript in its best-effort local storage.
  */
 export class FastAgentOpenCodeSessionManager {
   private readonly entries = new Map<string, SessionEntry>();
   private readonly idleTtlMs: number;
   private readonly maxEntries: number;
   private readonly now: () => number;
+  private readonly onConversationEnd: (
+    conversationId: string,
+  ) => Promise<void> | void;
 
   constructor(options: FastAgentOpenCodeSessionManagerOptions = {}) {
-    this.idleTtlMs = options.idleTtlMs ?? getOpenCodeSdkServerIdleTtlMs();
+    // The OpenCode server can restart after its own idle timeout without
+    // losing sessions. Keep their ids until bounded LRU eviction instead.
+    this.idleTtlMs = options.idleTtlMs ?? Number.POSITIVE_INFINITY;
     this.maxEntries =
       options.maxEntries ?? DEFAULT_FAST_AGENT_OPENCODE_SESSION_LIMIT;
     this.now = options.now ?? Date.now;
+    this.onConversationEnd =
+      options.onConversationEnd ??
+      (async (conversationId) => {
+        revokeFastAgentMcpCapabilitiesForConversation(conversationId);
+        await fastAgentSpillStore.cleanupConversation(conversationId);
+      });
   }
 
   async run<T>({
@@ -65,7 +79,8 @@ export class FastAgentOpenCodeSessionManager {
     execute,
     onPathSelected,
   }: FastAgentOpenCodeSessionRunInput<T>): Promise<T> {
-    const entry = this.acquire(conversationId, persistedSessionId);
+    const entry = this.acquire(conversationId);
+    const generationAtAcquire = entry.generation;
     const previous = entry.tail;
     let release!: () => void;
     entry.tail = new Promise<void>((resolve) => {
@@ -76,10 +91,13 @@ export class FastAgentOpenCodeSessionManager {
     await previous;
 
     try {
-      if (persistedSessionId && persistedSessionId !== entry.session.id) {
-        entry.session.id = persistedSessionId;
-        entry.resumeValidationPending = true;
+      if (entry.generation === generationAtAcquire) {
+        if (persistedSessionId && entry.session.id !== persistedSessionId) {
+          entry.session.id = persistedSessionId;
+          entry.resumeValidationPending = true;
+        }
       }
+
       const validateSession = entry.resumeValidationPending;
       const path: FastAgentOpenCodeSessionPath = entry.session.id
         ? validateSession
@@ -88,10 +106,27 @@ export class FastAgentOpenCodeSessionManager {
         : 'cold_rebuild';
       entry.resumeValidationPending = false;
       onPathSelected?.(path);
+      const executeAndInvalidateOnFailure = async (
+        nextPrompt: string,
+        context: {
+          path: FastAgentOpenCodeSessionPath;
+          validateSession: boolean;
+        },
+      ): Promise<T> => {
+        try {
+          return await execute(entry.session, nextPrompt, context);
+        } catch (error) {
+          // OpenCode persists the user turn before inference. Clear the failed
+          // session before releasing queued work so the next turn cannot send
+          // a delta into a poisoned transcript.
+          entry.session.id = undefined;
+          this.endConversation(conversationId);
+          throw error;
+        }
+      };
 
       try {
-        return await execute(
-          entry.session,
+        return await executeAndInvalidateOnFailure(
           entry.session.id ? prompt : bootstrapPrompt,
           { path, validateSession },
         );
@@ -100,15 +135,15 @@ export class FastAgentOpenCodeSessionManager {
           throw error;
         }
 
-        entry.session.id = undefined;
         onPathSelected?.('fallback_rebuild');
-        return await execute(entry.session, bootstrapPrompt, {
+        return await executeAndInvalidateOnFailure(bootstrapPrompt, {
           path: 'fallback_rebuild',
           validateSession: false,
         });
       }
     } finally {
       entry.pending -= 1;
+      entry.generation += 1;
       entry.lastUsedAt = this.now();
       this.touch(conversationId, entry);
       release();
@@ -117,17 +152,21 @@ export class FastAgentOpenCodeSessionManager {
   }
 
   clear(): void {
+    for (const conversationId of this.entries.keys()) {
+      this.endConversation(conversationId);
+    }
     this.entries.clear();
   }
 
   /**
-   * Drop process-local ownership without deleting the durable session id. The
-   * next run validates that id before deciding whether to resume or rebuild.
+   * Discard a failed live transcript without disturbing queued turns. The next
+   * run will rebuild the conversation from Roomote's compatibility history.
    */
   invalidate(conversationId: string): void {
     const entry = this.entries.get(conversationId);
-    if (entry?.session.id) {
-      entry.resumeValidationPending = true;
+    if (entry) {
+      entry.session.id = undefined;
+      this.endConversation(conversationId);
     }
   }
 
@@ -135,10 +174,7 @@ export class FastAgentOpenCodeSessionManager {
     return this.entries.size;
   }
 
-  private acquire(
-    conversationId: string,
-    persistedSessionId?: string | null,
-  ): SessionEntry {
+  private acquire(conversationId: string): SessionEntry {
     this.evict();
     const existing = this.entries.get(conversationId);
     if (existing) {
@@ -146,8 +182,9 @@ export class FastAgentOpenCodeSessionManager {
     }
 
     const entry: SessionEntry = {
-      session: { id: persistedSessionId ?? undefined },
-      resumeValidationPending: Boolean(persistedSessionId),
+      session: {},
+      resumeValidationPending: false,
+      generation: 0,
       lastUsedAt: this.now(),
       pending: 0,
       tail: Promise.resolve(),
@@ -171,6 +208,7 @@ export class FastAgentOpenCodeSessionManager {
     for (const [key, entry] of this.entries) {
       if (entry.pending === 0 && now - entry.lastUsedAt >= this.idleTtlMs) {
         this.entries.delete(key);
+        this.endConversation(key);
       }
     }
 
@@ -184,8 +222,20 @@ export class FastAgentOpenCodeSessionManager {
       }
       if (entry.pending === 0) {
         this.entries.delete(key);
+        this.endConversation(key);
       }
     }
+  }
+
+  private endConversation(conversationId: string): void {
+    void Promise.resolve(this.onConversationEnd(conversationId)).catch(
+      (error) => {
+        console.error(
+          '[Fast Agent] Failed to clean conversation spill data.',
+          error,
+        );
+      },
+    );
   }
 }
 

@@ -87,6 +87,10 @@ export type CallbackEvent =
       type: 'completion';
       text: string;
       ts: number;
+      /** True when idle settlement inferred completion from the latest
+       * finalized assistant message before the authoritative turn-completed
+       * event arrived. */
+      provisional?: boolean;
     }
   | {
       type: 'followup';
@@ -176,6 +180,8 @@ export type CallbackDeliveryContext = {
 
 export type RunTaskOptions = {
   taskRun: DequeuedTaskRun['taskRun'];
+  /** Source-control credential metadata returned by dequeue/resume. */
+  sourceControlToken?: DequeuedTaskRun['sourceControlToken'];
   envVars: Record<string, string | undefined>;
   /**
    * Snapshot of the dequeue-provided env vars taken before injectEnvVars adds
@@ -293,6 +299,8 @@ export type RunTaskState = TaskState &
 
 export interface ListenerOptions {
   taskRun: DequeuedTaskRun['taskRun'];
+  /** Expiry of the already-installed bootstrap credential, when known. */
+  sourceControlTokenExpiresAt?: Date | string | null;
   /**
    * Task-level channel bindings from the SDK dequeue/resume response.
    * Preferred over payload-derived extraction when deciding which polling

@@ -1,0 +1,156 @@
+import { eq, sql } from 'drizzle-orm';
+import { FAST_AGENT_MEMORY_MAX_CHARS } from '@roomote/types';
+
+import { type DatabaseOrTransaction } from '../db';
+import { fastAgentMemoryEvents } from '../schema';
+import { runInTransactionIfAvailable } from './transaction-utils';
+import { createMemoryOutboxLifecycle } from './memory-outbox-lifecycle';
+
+export type FastAgentMemoryEventRow = typeof fastAgentMemoryEvents.$inferSelect;
+
+const fastAgentMemoryOutboxLifecycle =
+  createMemoryOutboxLifecycle<FastAgentMemoryEventRow>(fastAgentMemoryEvents);
+
+const PROCESSING_RECLAIM_INTERVAL = '15 minutes';
+
+export type AppendFastAgentMemoryResult =
+  | { saved: true }
+  | { saved: false; reason: 'memory_full' };
+
+/**
+ * Append one remembered fact to a conversation's memory outbox row. The agent
+ * authors the fact; the server places it: the row is drained by the Brain
+ * ingestion pipeline, which owns the slug, redaction, and provenance, so Fast
+ * never reaches the Brain directly.
+ *
+ * Every append bumps `revision`, which the drainer fences its completion on.
+ * A settled row ('done'/'skipped'/'failed') returns to 'pending' with a fresh
+ * retry budget so the richer content re-ingests at the same slug. A row the
+ * drainer currently holds ('processing') keeps its status and budget: leaving
+ * it claimed guarantees a single in-flight page writer per conversation, and
+ * the drainer's revision fence hands the row back when its snapshot went
+ * stale mid-write.
+ */
+export async function appendFastAgentMemory(
+  database: DatabaseOrTransaction,
+  conversationId: string,
+  fact: string,
+): Promise<AppendFastAgentMemoryResult> {
+  const line = `- ${fact.trim()}`;
+
+  return runInTransactionIfAvailable(database, async (tx) => {
+    const [existing] = await tx
+      .select({ memory: fastAgentMemoryEvents.memory })
+      .from(fastAgentMemoryEvents)
+      .where(eq(fastAgentMemoryEvents.conversationId, conversationId))
+      .for('update');
+
+    if (
+      existing &&
+      existing.memory.length + line.length + 1 > FAST_AGENT_MEMORY_MAX_CHARS
+    ) {
+      return { saved: false, reason: 'memory_full' };
+    }
+
+    await tx
+      .insert(fastAgentMemoryEvents)
+      .values({ conversationId, memory: line })
+      .onConflictDoUpdate({
+        target: fastAgentMemoryEvents.conversationId,
+        set: {
+          memory: sql`${fastAgentMemoryEvents.memory} || E'\n' || ${line}`,
+          revision: sql`${fastAgentMemoryEvents.revision} + 1`,
+          status: sql`case when ${fastAgentMemoryEvents.status} = 'processing' then 'processing' else 'pending' end`,
+          attempts: sql`case when ${fastAgentMemoryEvents.status} = 'processing' then ${fastAgentMemoryEvents.attempts} else 0 end`,
+          lastError: null,
+          updatedAt: sql`now()`,
+        },
+      });
+
+    return { saved: true };
+  });
+}
+
+/**
+ * Claim up to `limit` conversation-memory events for processing. Mirrors
+ * claimPendingBrainMemoryEvents: FOR UPDATE SKIP LOCKED so concurrent
+ * drainers never double-claim, stale 'processing' rows come back after the
+ * reclaim interval, and attempts climb across reclaims so a poisonous row
+ * still terminates. Most recently updated first: the freshest memories are
+ * the ones a next conversation is most likely to need.
+ */
+export async function claimPendingFastAgentMemoryEvents(
+  database: DatabaseOrTransaction,
+  limit: number,
+): Promise<FastAgentMemoryEventRow[]> {
+  return fastAgentMemoryOutboxLifecycle.claim(
+    database,
+    sql`
+        SELECT event.id
+        FROM ${fastAgentMemoryEvents} AS event
+        WHERE event.status = 'pending'
+           OR (
+             event.status = 'processing'
+             AND event.updated_at < now() - ${sql.raw(`interval '${PROCESSING_RECLAIM_INTERVAL}'`)}
+           )
+        ORDER BY event.updated_at DESC, event.id DESC
+        LIMIT ${limit}
+        FOR UPDATE OF event SKIP LOCKED
+    `,
+  );
+}
+
+/**
+ * Hand back events claimed but not processed, refunding the attempt:
+ * backpressure is not a failed try.
+ */
+export async function releaseFastAgentMemoryEvents(
+  database: DatabaseOrTransaction,
+  ids: string[],
+): Promise<void> {
+  await fastAgentMemoryOutboxLifecycle.release(database, ids);
+}
+
+/**
+ * Non-terminal transitions. 'pending' hands a claimed row back unguarded;
+ * 'skipped' (the conversation no longer exists) applies only while the row is
+ * still 'processing', so a concurrent reclaim is not clobbered.
+ */
+export async function markFastAgentMemoryEvent(
+  database: DatabaseOrTransaction,
+  id: string,
+  status: 'pending' | 'skipped',
+  lastError?: string,
+): Promise<void> {
+  await fastAgentMemoryOutboxLifecycle.mark(database, id, status, lastError);
+}
+
+/**
+ * Settle a claimed event after the page write, fenced on the revision the
+ * drainer claimed. The fence is what makes overlapping writers safe: gbrain
+ * page writes carry no timeout, so an older in-flight `put_page` can land
+ * after a newer one. A writer whose fence misses forces the row back to
+ * 'pending' UNCONDITIONALLY — even over a 'done' another claim settled in
+ * the meantime — because its own external write just landed with unknown
+ * ordering relative to the newer one, and the only safe response is a fresh
+ * re-put of the latest content at the same idempotent slug. This is what
+ * heals the stale-reclaim ordering: A claims and hangs past the reclaim
+ * window, B claims the newer revision, writes it, and settles 'done'; when
+ * A's older write finally lands, A's fence miss re-queues the row and the
+ * next tick re-puts the newest content over A's stale snapshot.
+ */
+export async function settleFastAgentMemoryEvent(
+  database: DatabaseOrTransaction,
+  id: string,
+  claimedRevision: number,
+  outcome: 'done' | 'failed',
+  lastError?: string,
+): Promise<'settled' | 'superseded'> {
+  return fastAgentMemoryOutboxLifecycle.settle(
+    database,
+    id,
+    claimedRevision,
+    outcome,
+    lastError,
+  );
+}

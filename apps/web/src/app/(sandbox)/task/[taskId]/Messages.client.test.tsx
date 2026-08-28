@@ -1,8 +1,15 @@
 import type { ReactNode } from 'react';
 import { act, render, screen } from '@testing-library/react';
+import type { TaskArtifact } from '@/types';
+import type { AcpConversationRenderBlock } from './messages/acp/activity-groups';
+import type { AcpRenderBlock } from './messages/acp/render-blocks';
+import type { AcpUiMessage } from './messages/acp/types';
 
 const { mockBuildAcpRenderBlocks } = vi.hoisted(() => ({
-  mockBuildAcpRenderBlocks: vi.fn(() => []),
+  mockBuildAcpRenderBlocks: vi.fn(
+    (_messages: unknown[], _options: Record<string, unknown>) =>
+      [] as AcpRenderBlock[],
+  ),
 }));
 
 const narrationModeState = vi.hoisted(() => ({
@@ -87,27 +94,75 @@ vi.mock('./messages/index', () => ({
   SleepWakeMessages: () => <div>Sleep rows</div>,
 }));
 
-vi.mock('./messages/acp', () => ({
-  AcpMessageItem: ({ msg }: { msg: { id: string } }) => <div>{msg.id}</div>,
-  AcpGroupedToolMessage: () => null,
-  AcpActivityGroupMessage: ({
-    group,
-    children,
-  }: {
-    group: { ts: number; endTs: number };
-    children: ReactNode;
-  }) => (
-    <div>
-      <button type="button">
-        Worked for {Math.round((group.endTs - group.ts) / 1000)}s
-      </button>
-      <div>{children}</div>
-    </div>
-  ),
-  AcpTextMessage: ({ msg }: { msg: { text?: string } }) => (
-    <div>{msg.text}</div>
-  ),
-}));
+vi.mock('./messages/acp', async () => {
+  const { buildAcpActivityRenderBlocks } =
+    await import('./messages/acp/activity-groups');
+  const hasAssistantOutput = (blocks: AcpConversationRenderBlock[]): boolean =>
+    blocks.some((block) =>
+      block.kind === 'activity_group'
+        ? hasAssistantOutput(block.blocks)
+        : block.kind === 'tool_group'
+          ? false
+          : block.msg.role === 'assistant' ||
+            hasAssistantOutput(block.childBlocks ?? []),
+    );
+  const renderBlock = (block: AcpConversationRenderBlock): ReactNode => {
+    if (block.kind === 'activity_group') {
+      return (
+        <div key={block.id}>
+          <button type="button">
+            Worked for {Math.round((block.endTs - block.ts) / 1000)}s
+          </button>
+          <div>{block.blocks.map(renderBlock)}</div>
+        </div>
+      );
+    }
+    if (block.kind === 'tool_group') return null;
+    return (
+      <div key={block.msg.id}>
+        {block.msg.id}
+        {block.childBlocks?.map(renderBlock)}
+      </div>
+    );
+  };
+
+  return {
+    AcpTextMessage: ({ msg }: { msg: { text?: string } }) => (
+      <div>{msg.text}</div>
+    ),
+    AcpTranscriptBlockList: ({
+      blocks,
+    }: {
+      blocks: AcpConversationRenderBlock[];
+    }) => <>{blocks.map(renderBlock)}</>,
+    hasVisibleAssistantOutput: hasAssistantOutput,
+    useAcpTranscriptBlocks: (options: {
+      messages: AcpUiMessage[];
+      artifacts: TaskArtifact[];
+      displayMode: 'default' | 'narration';
+      initialPrompt: AcpUiMessage | null;
+      shouldHideFirstMessage: boolean;
+      showInternalMessages: boolean;
+      hasLeadingTextBoundary: boolean;
+    }) => {
+      const blocks = mockBuildAcpRenderBlocks(options.messages, {
+        displayMode: options.displayMode,
+        initialPrompt: options.initialPrompt,
+        shouldHideFirstMessage: options.shouldHideFirstMessage,
+        showInternalMessages: options.showInternalMessages,
+        suppressedMessageIds: new Set(),
+      });
+      return {
+        renderBlocks: buildAcpActivityRenderBlocks(blocks, {
+          artifacts: options.artifacts,
+          displayMode: options.displayMode,
+          hasLeadingTextBoundary: options.hasLeadingTextBoundary,
+        }),
+        suppressMessage: vi.fn(),
+      };
+    },
+  };
+});
 
 vi.mock('./messages/acp/render-blocks', () => ({
   buildAcpRenderBlocks: mockBuildAcpRenderBlocks,

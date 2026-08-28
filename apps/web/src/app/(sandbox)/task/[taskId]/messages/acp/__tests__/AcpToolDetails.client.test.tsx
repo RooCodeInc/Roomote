@@ -10,6 +10,7 @@ const toolInputSpy = vi.fn();
 vi.mock('@/components/ai-elements', () => ({
   CodeBlock: (props: {
     code: string;
+    language: string;
     variant?: string;
     highlight?: boolean;
     className?: string;
@@ -211,11 +212,181 @@ describe('AcpToolDetails', () => {
     expect(codeBlockSpy).toHaveBeenCalledWith(
       expect.objectContaining({
         code: 'Spawning subagent',
+        language: 'bash',
         variant: 'compact',
         highlight: false,
         className: expect.stringContaining('bg-transparent'),
       }),
     );
+  });
+
+  it('renders structured tool details as YAML instead of raw JSON', () => {
+    render(
+      <AcpToolDetails
+        msg={{
+          ...buildMessage({
+            kind: 'tool',
+            title: 'inspect_task',
+            isSubagentSpawn: false,
+          }),
+          text: JSON.stringify({
+            taskId: 'task-1',
+            details: { status: 'running', attempts: 2 },
+            steps: ['inspect', 'report'],
+          }),
+        }}
+      />,
+    );
+
+    const code = [
+      'taskId: task-1',
+      'details:',
+      '  status: running',
+      '  attempts: 2',
+      'steps:',
+      '  - inspect',
+      '  - report',
+    ].join('\n');
+    const renderedCode = codeBlockSpy.mock.calls[0]?.[0].code;
+    expect(renderedCode).toBe(code);
+    expect(renderedCode).not.toContain('{"');
+    expect(codeBlockSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ language: 'yaml' }),
+    );
+    expect(toolInputSpy).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['a JSON string', '"already formatted"'],
+    ['a JSON primitive', '42'],
+    ['invalid JSON', '{not valid json}'],
+    ['already-formatted YAML', 'taskId: task-1\nstatus: running'],
+  ])('preserves %s tool detail payload', (_label, text) => {
+    render(
+      <AcpToolDetails
+        msg={{
+          ...buildMessage({
+            kind: 'tool',
+            title: 'inspect_task',
+            isSubagentSpawn: false,
+          }),
+          text,
+        }}
+      />,
+    );
+
+    expect(codeBlockSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ code: text, language: 'bash' }),
+    );
+  });
+
+  it.each(['search', 'query'])(
+    'adds the sanitized Hippocampus %s query to the existing result YAML',
+    (toolName) => {
+      const result = {
+        matches: [{ title: 'Existing result', score: 0.98 }],
+      };
+      render(
+        <AcpToolDetails
+          msg={{
+            ...buildMessage({
+              kind: 'mcp',
+              title: toolName,
+              isMcp: true,
+              mcpServerName: 'gbrain',
+              mcpToolName: toolName,
+              serverName: 'gbrain',
+              toolName,
+              rawInput: {
+                query:
+                  'Find /sandbox/repos/RooCodeInc/Roomote notes with api_key=synthetic-test-value',
+              },
+              output: JSON.stringify(result),
+            } as Partial<AcpToolResultUiMessage['data']>),
+            text: JSON.stringify(result),
+          }}
+        />,
+      );
+
+      expect(codeBlockSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          code: [
+            'matches:',
+            '  - title: Existing result',
+            '    score: 0.98',
+            'query: Find RooCodeInc/Roomote notes with api_key=[redacted]',
+          ].join('\n'),
+          language: 'yaml',
+          variant: 'compact',
+          highlight: false,
+          className: expect.stringContaining('bg-transparent'),
+        }),
+      );
+      expect(toolInputSpy).not.toHaveBeenCalled();
+    },
+  );
+
+  it('adds a sanitized send_task_message message to the existing result YAML', () => {
+    const result = { delivered: true, taskId: 'task-1' };
+    render(
+      <AcpToolDetails
+        msg={{
+          ...buildMessage({
+            kind: 'tool',
+            title: 'send_task_message',
+            toolName: 'send_task_message',
+            rawInput: {
+              arguments: {
+                taskId: 'task-1',
+                message:
+                  'Review /sandbox/repos/RooCodeInc/Roomote and use password=synthetic-test-value',
+              },
+            },
+            output: JSON.stringify(result),
+          } as Partial<AcpToolResultUiMessage['data']>),
+          text: JSON.stringify(result),
+        }}
+      />,
+    );
+
+    expect(codeBlockSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        code: [
+          'delivered: true',
+          'taskId: task-1',
+          'message: Review RooCodeInc/Roomote and use password=[redacted]',
+        ].join('\n'),
+        language: 'yaml',
+        variant: 'compact',
+        highlight: false,
+        className: expect.stringContaining('bg-transparent'),
+      }),
+    );
+    expect(toolInputSpy).not.toHaveBeenCalled();
+  });
+
+  it('does not fall back to unrelated input for recognized tools', () => {
+    render(
+      <AcpToolDetails
+        msg={buildMessage({
+          kind: 'mcp',
+          title: 'query',
+          isMcp: true,
+          mcpServerName: 'gbrain',
+          mcpToolName: 'query',
+          serverName: 'gbrain',
+          toolName: 'query',
+          rawInput: {
+            image: 'password=synthetic-test-value',
+          },
+        } as Partial<AcpToolResultUiMessage['data']>)}
+      />,
+    );
+
+    expect(codeBlockSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ code: 'Spawning subagent' }),
+    );
+    expect(toolInputSpy).not.toHaveBeenCalled();
   });
 
   it('hides expanded details for Roomote Slack lifecycle tools', () => {

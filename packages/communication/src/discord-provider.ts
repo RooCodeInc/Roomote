@@ -63,6 +63,11 @@ export type DiscordGuild = {
   permissions?: string;
 };
 
+export type DiscordGuildPage = {
+  guilds: DiscordGuild[];
+  nextAfter: string | null;
+};
+
 type DiscordApiGuild = {
   id: string;
   name: string;
@@ -158,6 +163,7 @@ type DiscordApiMessage = {
     };
   }>;
   thread?: { id: string };
+  message_reference?: { message_id?: string };
 };
 
 type DiscordPermissionOverwrite = {
@@ -399,6 +405,9 @@ function toCommunicationMessage(
     text,
     channelId: message.channel_id,
     ...(message.thread?.id ? { threadId: message.thread.id } : {}),
+    ...(message.message_reference?.message_id
+      ? { replyToMessageId: message.message_reference.message_id }
+      : {}),
     fileCount: files.length,
     ...(files.length ? { files } : {}),
   };
@@ -1262,27 +1271,45 @@ export class DiscordCommunicationProvider implements CommunicationProviderAdapte
     return this.normalizeChannel(channel);
   }
 
+  async listGuildsPage(input?: {
+    after?: string;
+    limit?: number;
+  }): Promise<DiscordGuildPage> {
+    const limit = Math.min(200, Math.max(1, input?.limit ?? 200));
+    const query = new URLSearchParams({ limit: String(limit) });
+    if (input?.after) query.set('after', input.after);
+    const page = await this.request<DiscordApiGuild[]>(
+      'GET',
+      `/users/@me/guilds?${query.toString()}`,
+      undefined,
+      { retryNetworkErrors: true, retryServerErrors: true },
+    );
+    const guilds = page.map((guild) => ({
+      id: guild.id,
+      name: guild.name,
+      icon: guild.icon ?? null,
+      ...(guild.owner === undefined ? {} : { owner: guild.owner }),
+      ...(guild.permissions ? { permissions: guild.permissions } : {}),
+    }));
+    return {
+      guilds,
+      nextAfter: page.length === limit ? (page.at(-1)?.id ?? null) : null,
+    };
+  }
+
   async listGuilds(): Promise<DiscordGuild[]> {
-    const guilds: DiscordApiGuild[] = [];
+    const guilds: DiscordGuild[] = [];
     const seenCursors = new Set<string>();
     let after: string | null = null;
 
     while (true) {
-      const query = new URLSearchParams({ limit: '200' });
-      if (after) query.set('after', after);
-      const page = await this.request<DiscordApiGuild[]>(
-        'GET',
-        `/users/@me/guilds?${query.toString()}`,
-        undefined,
-        { retryNetworkErrors: true, retryServerErrors: true },
-      );
-      guilds.push(...page);
-
-      if (page.length < 200) {
-        break;
-      }
-
-      const nextCursor = page.at(-1)?.id;
+      const page = await this.listGuildsPage({
+        ...(after ? { after } : {}),
+        limit: 200,
+      });
+      guilds.push(...page.guilds);
+      const nextCursor = page.nextAfter;
+      if (!nextCursor) break;
       if (!nextCursor || seenCursors.has(nextCursor)) {
         throw new Error('Discord guild pagination cursor did not advance.');
       }
@@ -1290,15 +1317,7 @@ export class DiscordCommunicationProvider implements CommunicationProviderAdapte
       after = nextCursor;
     }
 
-    return [...new Map(guilds.map((guild) => [guild.id, guild])).values()].map(
-      (guild) => ({
-        id: guild.id,
-        name: guild.name,
-        icon: guild.icon ?? null,
-        ...(guild.owner === undefined ? {} : { owner: guild.owner }),
-        ...(guild.permissions ? { permissions: guild.permissions } : {}),
-      }),
-    );
+    return [...new Map(guilds.map((guild) => [guild.id, guild])).values()];
   }
 
   async listGuildChannels(guildId: string): Promise<DiscordChannel[]> {
@@ -1309,6 +1328,72 @@ export class DiscordCommunicationProvider implements CommunicationProviderAdapte
       { retryNetworkErrors: true, retryServerErrors: true },
     );
     return channels.map((channel) => this.normalizeChannel(channel));
+  }
+
+  async listGuildActiveThreads(guildId: string): Promise<DiscordChannel[]> {
+    const response = await this.request<{ threads?: DiscordApiChannel[] }>(
+      'GET',
+      `/guilds/${guildId}/threads/active`,
+      undefined,
+      { retryNetworkErrors: true, retryServerErrors: true },
+    );
+    return (response.threads ?? []).map((thread) =>
+      this.normalizeChannel(thread),
+    );
+  }
+
+  /**
+   * Returns channels visible to @everyone that the selected guild member can
+   * also read. One guild snapshot avoids per-channel permission API calls.
+   */
+  async listPublicReadableGuildChannels(input: {
+    guildId: string;
+    userId: string;
+  }): Promise<DiscordChannel[]> {
+    const [member, roles, channels] = await Promise.all([
+      this.request<{ roles?: string[] }>(
+        'GET',
+        `/guilds/${input.guildId}/members/${input.userId}`,
+        undefined,
+        { retryNetworkErrors: true, retryServerErrors: true },
+      ),
+      this.request<Array<{ id: string; permissions: string }>>(
+        'GET',
+        `/guilds/${input.guildId}/roles`,
+        undefined,
+        { retryNetworkErrors: true, retryServerErrors: true },
+      ),
+      this.request<DiscordApiChannel[]>(
+        'GET',
+        `/guilds/${input.guildId}/channels`,
+        undefined,
+        { retryNetworkErrors: true, retryServerErrors: true },
+      ),
+    ]);
+    const memberRoleIds = new Set([input.guildId, ...(member.roles ?? [])]);
+
+    return channels.flatMap((channel) => {
+      const everyone = this.resolveEveryoneChannelPermissions({
+        guildId: input.guildId,
+        roles,
+        channel,
+      });
+      const memberPermissions = this.resolveMemberChannelPermissions({
+        guildId: input.guildId,
+        userId: input.userId,
+        memberRoleIds,
+        roles,
+        channel,
+      });
+      const required =
+        DISCORD_PERMISSION_BITS.view_channel |
+        DISCORD_PERMISSION_BITS.read_message_history;
+
+      return (everyone & DISCORD_PERMISSION_BITS.view_channel) !== 0n &&
+        (memberPermissions & required) === required
+        ? [this.normalizeChannel(channel)]
+        : [];
+    });
   }
 
   async getChannel(channelId: string): Promise<DiscordChannel> {

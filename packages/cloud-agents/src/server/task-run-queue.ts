@@ -101,6 +101,15 @@ enum TaskRunQueueKeys {
   Scopes = 'queue:cloud-jobs:v2:scopes',
 }
 
+const SNAPSHOT_RESUME_ADVISORY_LOCK_NAMESPACE = 0x52534d45;
+
+export class SnapshotResumeAlreadyExistsError extends Error {
+  constructor(public readonly existingRunId: number) {
+    super(`Snapshot resume run ${existingRunId} already exists.`);
+    this.name = 'SnapshotResumeAlreadyExistsError';
+  }
+}
+
 export function resolveFreshTaskComputeProvider(
   provider: string | null | undefined,
   fallback: ComputeProvider,
@@ -1845,23 +1854,19 @@ async function enqueueFreshLaunch(
   // Fire-and-forget: generate an LLM title from the initial prompt during
   // startup so the user sees a meaningful title before the worker records
   // the first envelope. Titles live on tasks only.
-  const description =
-    'description' in task.payload ? task.payload.description : undefined;
-
   if (
     !options.skipEarlyTitleGeneration &&
     !reusedTask &&
     !explicitTitle &&
     !hasDeterministicTaskRunTitle(task.type) &&
-    typeof description === 'string' &&
-    description.trim()
+    initialPrompt?.trim()
   ) {
     void (async () => {
       try {
         const generatedTitle = await generateLlmTaskTitle({
           userId: linkedUserId,
           taskId: taskRun.taskId,
-          messages: [{ role: 'user', text: description }],
+          messages: [{ role: 'user', text: initialPrompt }],
         });
         if (isFallbackTaskTitle(generatedTitle)) {
           return;
@@ -2538,6 +2543,21 @@ async function enqueueSnapshotResume(
 
   try {
     taskRun = await db.transaction(async (tx) => {
+      await tx.execute(
+        sql`SELECT pg_advisory_xact_lock(${SNAPSHOT_RESUME_ADVISORY_LOCK_NAMESPACE}, ${sourceRun.id})`,
+      );
+
+      const existingResume = await tx.query.taskRuns.findFirst({
+        where: and(
+          eq(taskRuns.sourceRunId, sourceRun.id),
+          eq(taskRuns.kind, 'resume'),
+        ),
+        columns: { id: true },
+      });
+      if (existingResume) {
+        throw new SnapshotResumeAlreadyExistsError(existingResume.id);
+      }
+
       const [insertedRun] = await tx
         .insert(taskRuns)
         .values({

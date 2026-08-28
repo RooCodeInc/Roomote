@@ -62,6 +62,7 @@ export const startPolling = (options: ListenerOptions) => {
   state.githubTokenRefreshInterval = createGitHubTokenRefreshInterval({
     runId: taskRun.id,
     logger,
+    initialExpiresAt: options.sourceControlTokenExpiresAt,
   });
 };
 

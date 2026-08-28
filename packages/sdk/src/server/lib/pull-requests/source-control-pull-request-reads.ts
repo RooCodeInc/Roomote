@@ -1,5 +1,9 @@
 import { createGitHubToken } from '@roomote/auth';
-import { getGitHubRateLimitRetryAfterMs, getOctokit } from '@roomote/github';
+import {
+  getGitHubRateLimitRetryAfterMs,
+  getOctokit,
+  isGitHubUnauthorizedError,
+} from '@roomote/github';
 import { type TaskRun } from '@roomote/db/server';
 import {
   buildPullRequestUrl,
@@ -154,6 +158,15 @@ type SourceControlPullRequestCommentThread = {
   comments: SourceControlPullRequestComment[];
 };
 
+type SourceControlPullRequestReview = {
+  reviewId: string;
+  author: string | null;
+  state: string;
+  body: string;
+  submittedAt: string | null;
+  url: string | null;
+};
+
 export type SourceControlPullRequestCommentsResult = {
   success: true;
   provider: SourceControlProvider;
@@ -161,6 +174,8 @@ export type SourceControlPullRequestCommentsResult = {
   number: number;
   threads: SourceControlPullRequestCommentThread[];
   issueComments: SourceControlPullRequestComment[];
+  /** Present when the provider exposes top-level review state (currently GitHub). */
+  reviews?: SourceControlPullRequestReview[];
   warnings: string[];
 };
 
@@ -650,12 +665,15 @@ export async function readSourceControlPullRequestForTaskRun({
   fetchImpl = fetch,
   useGitHubConditionalRequests = false,
   onGitHubApiRequest,
+  githubToken,
 }: {
   taskRun: TaskRun;
   input: SourceControlPullRequestReadInput;
   fetchImpl?: FetchImpl;
   useGitHubConditionalRequests?: boolean;
   onGitHubApiRequest?: () => void;
+  /** Optional task-scoped token reused by a larger GitHub read workflow. */
+  githubToken?: string;
 }): Promise<SourceControlPullRequestReadResult> {
   const payloadRecord = getPayloadRecord(taskRun.payload);
   const payloadProvider = resolveSourceControlProviderForRepositoryFromPayload(
@@ -719,6 +737,7 @@ export async function readSourceControlPullRequestForTaskRun({
         provider,
         useConditionalRequests: useGitHubConditionalRequests,
         onGitHubApiRequest,
+        githubToken,
       });
     case 'gitlab':
       return listGitLabMergeRequestComments({
@@ -1003,64 +1022,87 @@ async function listGitHubPullRequestComments({
   provider,
   useConditionalRequests,
   onGitHubApiRequest,
+  githubToken,
 }: {
   prNumber: number;
   repository: RepositoryRow;
   provider: 'github';
   useConditionalRequests: boolean;
   onGitHubApiRequest?: () => void;
+  githubToken?: string;
 }): Promise<SourceControlPullRequestCommentsResult> {
-  const { octokit, owner, repo } = await createGitHubReadClient(
-    repository,
-    provider,
-  );
+  const [owner, repo] = splitRepositoryFullName(repository.fullName, provider);
+  const octokit = githubToken
+    ? getOctokit(githubToken)
+    : (await createGitHubReadClient(repository, provider)).octokit;
   const warnings: string[] = [];
 
-  const [reviewComments, restIssueComments] = useConditionalRequests
-    ? await Promise.all([
-        listConditionalGitHubPages({
-          cacheKey: `review-comments:${repository.installationId}:${repository.fullName}#${prNumber}`,
-          requestPage: (page, headers) => {
-            onGitHubApiRequest?.();
-            return octokit.rest.pulls.listReviewComments({
-              owner,
-              repo,
-              pull_number: prNumber,
-              per_page: 100,
-              page,
-              request: { headers },
-            });
-          },
-        }),
-        listConditionalGitHubPages({
-          cacheKey: `issue-comments:${repository.installationId}:${repository.fullName}#${prNumber}`,
-          requestPage: (page, headers) => {
-            onGitHubApiRequest?.();
-            return octokit.rest.issues.listComments({
-              owner,
-              repo,
-              issue_number: prNumber,
-              per_page: 100,
-              page,
-              request: { headers },
-            });
-          },
-        }),
-      ])
-    : await Promise.all([
-        octokit.paginate(octokit.rest.pulls.listReviewComments, {
-          owner,
-          repo,
-          pull_number: prNumber,
-          per_page: 100,
-        }),
-        octokit.paginate(octokit.rest.issues.listComments, {
-          owner,
-          repo,
-          issue_number: prNumber,
-          per_page: 100,
-        }),
-      ]);
+  const [reviewComments, restIssueComments, restReviews] =
+    useConditionalRequests
+      ? await Promise.all([
+          listConditionalGitHubPages({
+            cacheKey: `review-comments:${repository.installationId}:${repository.fullName}#${prNumber}`,
+            requestPage: (page, headers) => {
+              onGitHubApiRequest?.();
+              return octokit.rest.pulls.listReviewComments({
+                owner,
+                repo,
+                pull_number: prNumber,
+                per_page: 100,
+                page,
+                request: { headers },
+              });
+            },
+          }),
+          listConditionalGitHubPages({
+            cacheKey: `issue-comments:${repository.installationId}:${repository.fullName}#${prNumber}`,
+            requestPage: (page, headers) => {
+              onGitHubApiRequest?.();
+              return octokit.rest.issues.listComments({
+                owner,
+                repo,
+                issue_number: prNumber,
+                per_page: 100,
+                page,
+                request: { headers },
+              });
+            },
+          }),
+          listConditionalGitHubPages({
+            cacheKey: `reviews:${repository.installationId}:${repository.fullName}#${prNumber}`,
+            requestPage: (page, headers) => {
+              onGitHubApiRequest?.();
+              return octokit.rest.pulls.listReviews({
+                owner,
+                repo,
+                pull_number: prNumber,
+                per_page: 100,
+                page,
+                request: { headers },
+              });
+            },
+          }),
+        ])
+      : await Promise.all([
+          octokit.paginate(octokit.rest.pulls.listReviewComments, {
+            owner,
+            repo,
+            pull_number: prNumber,
+            per_page: 100,
+          }),
+          octokit.paginate(octokit.rest.issues.listComments, {
+            owner,
+            repo,
+            issue_number: prNumber,
+            per_page: 100,
+          }),
+          octokit.paginate(octokit.rest.pulls.listReviews, {
+            owner,
+            repo,
+            pull_number: prNumber,
+            per_page: 100,
+          }),
+        ]);
 
   const issueComments: SourceControlPullRequestComment[] =
     restIssueComments.map((comment) => ({
@@ -1082,7 +1124,10 @@ async function listGitHubPullRequestComments({
       onGitHubApiRequest,
     });
   } catch (error) {
-    if (getGitHubRateLimitRetryAfterMs(error) !== null) {
+    if (
+      isGitHubUnauthorizedError(error) ||
+      getGitHubRateLimitRetryAfterMs(error) !== null
+    ) {
       throw error;
     }
     warnings.push(
@@ -1100,6 +1145,14 @@ async function listGitHubPullRequestComments({
     number: prNumber,
     threads,
     issueComments,
+    reviews: restReviews.map((review) => ({
+      reviewId: String(review.id),
+      author: review.user?.login ?? null,
+      state: review.state,
+      body: review.body ?? '',
+      submittedAt: review.submitted_at ?? null,
+      url: review.html_url ?? null,
+    })),
     warnings,
   };
 }

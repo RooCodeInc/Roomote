@@ -59,8 +59,11 @@ vi.mock('@roomote/cloud-agents/server', () => ({
 
     return content.slice(start + startMarker.length, end);
   },
-  isReviewInProgressStatusLine: (line: string) =>
-    /^(Self-reviewing|Reviewing|Re-reviewing)/i.test(line.trim()),
+  isReviewSummaryInProgress: (body: string) =>
+    body.includes('version=2 phase=reviewing') ||
+    /<!-- roomote-review-status:start -->\s*(?:Self-reviewing|Reviewing|Re-reviewing)/i.test(
+      body,
+    ),
 }));
 
 vi.mock('../../pull-requests/source-control-pull-request-reads', () => ({
@@ -111,6 +114,16 @@ vi.mock('@roomote/github', () => ({
   }),
   getGitHubRateLimitRetryAfterMs: (...args: unknown[]) =>
     mockGetGitHubRateLimitRetryAfterMs(...args),
+  isGitHubUnauthorizedError: (error: unknown) =>
+    typeof error === 'object' &&
+    error !== null &&
+    'status' in error &&
+    Number(error.status) === 401,
+  withTaskRunGitHubTokenRetry: async (
+    taskRun: unknown,
+    operation: (token: string) => Promise<unknown>,
+    runtimeOptions?: unknown,
+  ) => operation(await mockCreateTaskRunGitHubToken(taskRun, runtimeOptions)),
 }));
 
 import type { TaskRun } from '@roomote/db/server';
@@ -163,7 +176,15 @@ beforeEach(() => {
 });
 
 function mockGreenCiChecks() {
-  mockCreateTaskRunGitHubToken.mockResolvedValue('github-token');
+  mockCreateTaskRunGitHubToken.mockImplementation(
+    async (
+      _taskRun: unknown,
+      runtimeOptions?: { onTokenMintRequest?: () => void },
+    ) => {
+      runtimeOptions?.onTokenMintRequest?.();
+      return 'github-token';
+    },
+  );
   mockPullsGet.mockResolvedValue({
     data: { head: { sha: 'abc123' }, mergeable: true },
   });
@@ -203,7 +224,7 @@ describe('preparePrReviewNotificationDelivery', () => {
         {
           id: 'c1',
           author: 'roomote[bot]',
-          body: '<!-- roomote-review-summary sha=abc mode=initial -->\n<!-- roomote-review-status:start -->\n**All 1 issue addressed.** [See task](https://example.com)\n<!-- roomote-review-status:end -->',
+          body: '<!-- roomote-review-summary sha=abc1234 mode=initial -->\n<!-- roomote-review-status:start -->\n**All 1 issue addressed.** [See task](https://example.com)\n<!-- roomote-review-status:end -->',
           createdAt: null,
           url: null,
         },
@@ -431,7 +452,7 @@ describe('preparePrReviewNotificationDelivery', () => {
             kind: 'review_comment',
             authorLogin: 'roomote[bot]',
             roomoteAuthored: true,
-            reviewHeadSha: 'abc',
+            reviewHeadSha: 'abc1234',
           },
         ],
       }),
@@ -450,12 +471,12 @@ describe('preparePrReviewNotificationDelivery', () => {
           kind: 'review_comment',
           authorLogin: 'roomote[bot]',
           roomoteAuthored: true,
-          reviewHeadSha: 'abc',
+          reviewHeadSha: 'abc1234',
         },
         {
           kind: 'review_comment',
           authorLogin: 'alice',
-          reviewHeadSha: 'abc',
+          reviewHeadSha: 'abc1234',
         },
       ],
     });
@@ -494,7 +515,7 @@ describe('preparePrReviewNotificationDelivery', () => {
         {
           id: 'c1',
           author: 'roomote[bot]',
-          body: '<!-- roomote-review-summary sha=abc mode=initial -->\n<!-- roomote-review-status:start -->\nReviewing the PR now.\n<!-- roomote-review-status:end -->',
+          body: '<!-- roomote-review-summary sha=abc1234 mode=initial version=2 phase=reviewing -->\n<!-- roomote-review-status:start -->\nI am inspecting the updated head.\n<!-- roomote-review-status:end -->',
           createdAt: null,
           url: null,
         },
@@ -510,7 +531,7 @@ describe('preparePrReviewNotificationDelivery', () => {
           kind: 'review_comment',
           authorLogin: 'roomote[bot]',
           roomoteAuthored: true,
-          reviewHeadSha: 'abc',
+          reviewHeadSha: 'abc1234',
         },
       ],
     });
@@ -529,7 +550,7 @@ describe('preparePrReviewNotificationDelivery', () => {
         {
           id: 'c1',
           author: 'alice',
-          body: '<!-- roomote-review-summary sha=abc mode=initial -->\n<!-- roomote-review-status:start -->\n1 issue outstanding.\n<!-- roomote-review-status:end -->',
+          body: '<!-- roomote-review-summary sha=abc1234 mode=initial -->\n<!-- roomote-review-status:start -->\n1 issue outstanding.\n<!-- roomote-review-status:end -->',
           createdAt: null,
           url: null,
         },
@@ -545,7 +566,7 @@ describe('preparePrReviewNotificationDelivery', () => {
           kind: 'review_comment',
           authorLogin: 'roomote[bot]',
           roomoteAuthored: true,
-          reviewHeadSha: 'abc',
+          reviewHeadSha: 'abc1234',
         },
       ],
     });
@@ -929,7 +950,7 @@ describe('preparePrReviewNotificationDelivery', () => {
         {
           id: 'c1',
           author: 'acme[bot]',
-          body: '<!-- roomote-review-summary sha=abc mode=initial -->\n<!-- roomote-review-status:start -->\n1 issue outstanding.\n<!-- roomote-review-status:end -->',
+          body: '<!-- roomote-review-summary sha=abc1234 mode=initial -->\n<!-- roomote-review-status:start -->\n1 issue outstanding.\n<!-- roomote-review-status:end -->',
           createdAt: null,
           url: null,
         },
@@ -946,7 +967,7 @@ describe('preparePrReviewNotificationDelivery', () => {
             kind: 'review_comment',
             authorLogin: 'acme[bot]',
             roomoteAuthored: true,
-            reviewHeadSha: 'abc',
+            reviewHeadSha: 'abc1234',
           },
         ],
       }),
@@ -1120,8 +1141,8 @@ describe('triagePrReviewActivity', () => {
         unresolvedThreadCount: 2,
         latestReviewStatus: '2 issues outstanding.',
         latestReviewSummaryComment:
-          '<!-- roomote-review-summary sha=abc mode=initial -->\n<!-- roomote-review-checklist:start -->\n- [ ] `apps/api/src/foo.ts:10` - Handle null actor ids\n- [ ] `apps/api/src/bar.ts:20` - Rename the helper to match its return shape\n<!-- roomote-review-checklist:end -->',
-        latestTerminalReviewSummaryHeadSha: 'abc',
+          '<!-- roomote-review-summary sha=abc1234 mode=initial -->\n<!-- roomote-review-checklist:start -->\n- [ ] `apps/api/src/foo.ts:10` - Handle null actor ids\n- [ ] `apps/api/src/bar.ts:20` - Rename the helper to match its return shape\n<!-- roomote-review-checklist:end -->',
+        latestTerminalReviewSummaryHeadSha: 'abc1234',
         ciStatus: {
           checks: [
             { name: 'CI / Lint', status: 'success' },
@@ -1285,7 +1306,7 @@ describe('gatherPrReviewTriageContext', () => {
         {
           id: 'c1',
           author: 'roomote[bot]',
-          body: '<!-- roomote-review-summary sha=abc mode=initial -->\n<!-- roomote-review-status:start -->\n**All 1 issue addressed.** [See task](https://example.com)\n<!-- roomote-review-status:end -->',
+          body: '<!-- roomote-review-summary sha=abc1234 mode=initial -->\n<!-- roomote-review-status:start -->\n**All 1 issue addressed.** [See task](https://example.com)\n<!-- roomote-review-status:end -->',
           createdAt: null,
           url: null,
         },
@@ -1296,10 +1317,12 @@ describe('gatherPrReviewTriageContext', () => {
   });
 
   it('collects thread counts and the latest review status', async () => {
+    const telemetry = createPrReviewNotificationTelemetry(1);
     const context = await gatherPrReviewTriageContext({
       taskRun,
       repository: request.repository,
       prNumber: request.prNumber,
+      telemetry,
     });
 
     expect(context).toEqual({
@@ -1307,8 +1330,8 @@ describe('gatherPrReviewTriageContext', () => {
       unresolvedThreadCount: 1,
       latestReviewStatus: 'All 1 issue addressed. See task',
       latestReviewSummaryComment:
-        '<!-- roomote-review-summary sha=abc mode=initial -->\n<!-- roomote-review-status:start -->\n**All 1 issue addressed.** [See task](https://example.com)\n<!-- roomote-review-status:end -->',
-      latestTerminalReviewSummaryHeadSha: 'abc',
+        '<!-- roomote-review-summary sha=abc1234 mode=initial -->\n<!-- roomote-review-status:start -->\n**All 1 issue addressed.** [See task](https://example.com)\n<!-- roomote-review-status:end -->',
+      latestTerminalReviewSummaryHeadSha: 'abc1234',
       currentHeadSha: 'abc123',
       reviewThreads: [
         { resolved: true, outdated: undefined, commentIds: [] },
@@ -1324,8 +1347,13 @@ describe('gatherPrReviewTriageContext', () => {
       mergeable: true,
     });
     expect(mockReadSourceControlPullRequest).toHaveBeenCalledWith(
-      expect.objectContaining({ useGitHubConditionalRequests: true }),
+      expect.objectContaining({
+        useGitHubConditionalRequests: true,
+        githubToken: 'github-token',
+      }),
     );
+    expect(mockCreateTaskRunGitHubToken).toHaveBeenCalledTimes(1);
+    expect(telemetry.githubTokenMintRequests).toBe(1);
   });
 
   it('uses ETags for every GitHub live-head polling read', async () => {

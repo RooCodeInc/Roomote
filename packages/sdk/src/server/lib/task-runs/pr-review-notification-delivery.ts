@@ -5,7 +5,7 @@ import {
   REVIEW_STATUS_START_MARKER,
   REVIEW_SUMMARY_MARKER,
   getMarkedSection,
-  isReviewInProgressStatusLine,
+  isReviewSummaryInProgress,
 } from '@roomote/cloud-agents/server';
 import {
   generateTrackedNonTaskObject,
@@ -17,13 +17,16 @@ import {
   createTaskRunGitHubToken,
   getGitHubRateLimitRetryAfterMs,
   getOctokit,
+  isGitHubUnauthorizedError,
   resolveConfiguredGitHubAppSlug,
+  withTaskRunGitHubTokenRetry,
 } from '@roomote/github';
 import { setLatestSlackBotReply, trackSlackBotReply } from '@roomote/slack';
 import {
   ACP_ENVELOPE_EVENT_TYPES,
   getSourceControlProviderLabel,
   normalizeSourceControlProvider,
+  PR_CONFLICT_NOTIFICATION_TASK_MESSAGE_SOURCE,
   PR_REVIEW_NOTIFICATION_TASK_MESSAGE_SOURCE,
   ROOMOTE_RUNTIME_TASK_MESSAGE_PROTOCOL,
   type SourceControlProvider,
@@ -51,6 +54,7 @@ const PR_REVIEW_TRIAGE_CACHE_MAX_ENTRIES = 500;
 
 type PrReviewNotificationTelemetry = {
   githubApiCalls: number;
+  githubTokenMintRequests: number;
   eventsReceived: number;
   eventsTriaged: number;
   triageInvoked: boolean;
@@ -81,6 +85,7 @@ export function createPrReviewNotificationTelemetry(
 ): PrReviewNotificationTelemetry {
   return {
     githubApiCalls: 0,
+    githubTokenMintRequests: 0,
     eventsReceived,
     eventsTriaged: 0,
     triageInvoked: false,
@@ -148,6 +153,10 @@ function rethrowGitHubRateLimit(
   error: unknown,
   telemetry: PrReviewNotificationTelemetry,
 ): void {
+  if (isGitHubUnauthorizedError(error)) {
+    throw error;
+  }
+
   if (error instanceof PrReviewNotificationRateLimitError) {
     throw error;
   }
@@ -430,12 +439,14 @@ async function fetchPrReviewLiveHeadState({
   prNumber,
   sourceControlProvider,
   telemetry,
+  githubToken,
 }: {
   taskRun: TaskRun;
   repository: string;
   prNumber: number;
   sourceControlProvider?: SourceControlProvider;
   telemetry: PrReviewNotificationTelemetry;
+  githubToken?: string;
 }): Promise<PrReviewLiveHeadState> {
   const provider = normalizeSourceControlProvider(sourceControlProvider);
 
@@ -450,7 +461,7 @@ async function fetchPrReviewLiveHeadState({
   }
 
   try {
-    const token = await createTaskRunGitHubToken(taskRun);
+    const token = githubToken ?? (await createTaskRunGitHubToken(taskRun));
     const octokit = getOctokit(token);
 
     const { data: pullRequest } =
@@ -852,7 +863,8 @@ function sanitizeReviewStatus(status: string): string {
 
 function getReviewSummaryHeadSha(body: string): string | null {
   return (
-    body.match(/<!--\s*roomote-review-summary\s+sha=([0-9a-f]+)/i)?.[1] ?? null
+    body.match(/<!--\s*roomote-review-summary\s+sha=([0-9a-f]{7,})/i)?.[1] ??
+    null
   );
 }
 
@@ -861,11 +873,13 @@ async function fetchPrDiscussionSignals({
   repository,
   prNumber,
   telemetry,
+  githubToken,
 }: {
   taskRun: TaskRun;
   repository: string;
   prNumber: number;
   telemetry: PrReviewNotificationTelemetry;
+  githubToken?: string;
 }): Promise<Omit<PrReviewTriageContext, 'ciStatus' | 'mergeable'>> {
   const result = await readSourceControlPullRequestForTaskRun({
     taskRun,
@@ -878,6 +892,7 @@ async function fetchPrDiscussionSignals({
     onGitHubApiRequest: () => {
       telemetry.githubApiCalls += 1;
     },
+    githubToken,
   });
 
   if (!('threads' in result)) {
@@ -919,8 +934,8 @@ async function fetchPrDiscussionSignals({
 
     if (status?.trim()) {
       latestReviewStatus = sanitizeReviewStatus(status);
-      latestTerminalReviewSummaryHeadSha = isReviewInProgressStatusLine(
-        status.trim().split('\n')[0] ?? '',
+      latestTerminalReviewSummaryHeadSha = isReviewSummaryInProgress(
+        comment.body,
       )
         ? null
         : getReviewSummaryHeadSha(comment.body);
@@ -972,25 +987,77 @@ export async function gatherPrReviewTriageContext({
   sourceControlProvider?: SourceControlProvider;
   telemetry?: PrReviewNotificationTelemetry;
 }): Promise<PrReviewTriageContext> {
-  let discussionResult: Omit<PrReviewTriageContext, 'ciStatus' | 'mergeable'>;
-  try {
-    discussionResult = await fetchPrDiscussionSignals({
+  const provider = normalizeSourceControlProvider(sourceControlProvider);
+  const gatherWithToken = async (
+    githubToken?: string,
+  ): Promise<PrReviewTriageContext> => {
+    let discussionResult: Omit<PrReviewTriageContext, 'ciStatus' | 'mergeable'>;
+    try {
+      discussionResult = await fetchPrDiscussionSignals({
+        taskRun,
+        repository,
+        prNumber,
+        telemetry,
+        githubToken,
+      });
+    } catch (error) {
+      if (provider === 'github') {
+        rethrowGitHubRateLimit(error, telemetry);
+      }
+      console.warn(
+        `[PrReviewNotification] Could not fetch PR discussion signals for ${repository}#${prNumber}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+
+      discussionResult = {
+        resolvedThreadCount: null,
+        unresolvedThreadCount: null,
+        latestReviewStatus: null,
+        latestReviewSummaryComment: null,
+        latestTerminalReviewSummaryHeadSha: null,
+        currentHeadSha: null,
+        reviewThreads: [],
+      };
+    }
+
+    // Avoid starting the live-head request burst when discussion reads have
+    // already established that the installation is rate limited.
+    const liveHeadState = await fetchPrReviewLiveHeadState({
       taskRun,
       repository,
       prNumber,
+      sourceControlProvider,
       telemetry,
+      githubToken,
+    });
+
+    return {
+      ...discussionResult,
+      currentHeadSha: liveHeadState.currentHeadSha,
+      ciStatus: liveHeadState.ciStatus,
+      mergeable: liveHeadState.mergeable,
+    };
+  };
+
+  if (provider !== 'github') {
+    return gatherWithToken();
+  }
+
+  try {
+    return await withTaskRunGitHubTokenRetry(taskRun, gatherWithToken, {
+      onTokenMintRequest: () => {
+        telemetry.githubTokenMintRequests += 1;
+      },
     });
   } catch (error) {
-    if (normalizeSourceControlProvider(sourceControlProvider) === 'github') {
-      rethrowGitHubRateLimit(error, telemetry);
-    }
+    rethrowGitHubRateLimit(error, telemetry);
     console.warn(
-      `[PrReviewNotification] Could not fetch PR discussion signals for ${repository}#${prNumber}: ${
+      `[PrReviewNotification] Could not create task-scoped GitHub client for ${repository}#${prNumber}: ${
         error instanceof Error ? error.message : String(error)
       }`,
     );
-
-    discussionResult = {
+    return {
       resolvedThreadCount: null,
       unresolvedThreadCount: null,
       latestReviewStatus: null,
@@ -998,25 +1065,10 @@ export async function gatherPrReviewTriageContext({
       latestTerminalReviewSummaryHeadSha: null,
       currentHeadSha: null,
       reviewThreads: [],
+      ciStatus: null,
+      mergeable: null,
     };
   }
-
-  // Avoid starting the live-head request burst when discussion reads have
-  // already established that the installation is rate limited.
-  const liveHeadState = await fetchPrReviewLiveHeadState({
-    taskRun,
-    repository,
-    prNumber,
-    sourceControlProvider,
-    telemetry,
-  });
-
-  return {
-    ...discussionResult,
-    currentHeadSha: liveHeadState.currentHeadSha,
-    ciStatus: liveHeadState.ciStatus,
-    mergeable: liveHeadState.mergeable,
-  };
 }
 
 function buildCiContextLines(context: PrReviewTriageContext): string[] {
@@ -1396,8 +1448,12 @@ export async function recordPrReviewNotificationDeliveryBestEffort(params: {
   text: string;
   route?: PrReviewNotificationRoute | null;
   messageTs?: string | null;
+  source?:
+    | typeof PR_REVIEW_NOTIFICATION_TASK_MESSAGE_SOURCE
+    | typeof PR_CONFLICT_NOTIFICATION_TASK_MESSAGE_SOURCE;
 }): Promise<void> {
   const route = params.route ?? null;
+  const source = params.source ?? PR_REVIEW_NOTIFICATION_TASK_MESSAGE_SOURCE;
   const operations: Array<{ label: string; promise: Promise<unknown> }> = [
     {
       label: 'persist task history',
@@ -1414,12 +1470,12 @@ export async function recordPrReviewNotificationDeliveryBestEffort(params: {
           protocol: ROOMOTE_RUNTIME_TASK_MESSAGE_PROTOCOL,
           contentBlocks: [{ type: 'text', text: params.text }],
           metadata: {
-            source: PR_REVIEW_NOTIFICATION_TASK_MESSAGE_SOURCE,
+            source,
             visibleInTranscript: true,
           },
           payload: {
             text: params.text,
-            source: PR_REVIEW_NOTIFICATION_TASK_MESSAGE_SOURCE,
+            source,
           },
           visibleInTranscript: true,
         },

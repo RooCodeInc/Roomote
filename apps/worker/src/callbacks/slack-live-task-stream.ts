@@ -10,22 +10,20 @@ import type {
   RunTaskCallbacks,
   RunTaskContext,
 } from '../run-task';
+import { isEligibleProvisionalCompletionText } from '../run-task/provisional-completion';
 import { captureWorkerException } from '../monitoring/sentry';
 import { getCallbackEventKey } from './utils';
 
 const updateQueues = new Map<number, Promise<void>>();
-
-/** Harness status noise that reads as an error but resolves on its own. */
-const TRANSIENT_NARRATION_PATTERN = /^(provider error|retrying)\b/i;
 
 /** Startup progress shown while the sandbox comes up, mirroring the web
  * launcher's booting steps (the controller-side Pending/Dequeued stretch is
  * covered by the launcher's "Starting task…" placeholder). */
 const STARTUP_STATUS_MESSAGES: Partial<Record<RunStatus, string>> = {
   [RunStatus.Preparing]: 'Preparing the workspace…',
-  [RunStatus.Spawning]: 'Starting the agent…',
-  [RunStatus.Connecting]: 'Connecting to the agent…',
-  [RunStatus.Running]: 'Agent started, getting to work…',
+  [RunStatus.Spawning]: 'Starting the task…',
+  [RunStatus.Connecting]: 'Connecting to the task…',
+  [RunStatus.Running]: 'Task started, getting to work…',
 };
 
 const WAITING_FOR_INPUT_MESSAGE = 'Waiting for your input…';
@@ -59,6 +57,9 @@ type SlackLiveTaskCardState = {
   awaitingInput?: boolean;
   /** Set once a settling render was delivered; later events are ignored. */
   settled?: boolean;
+  /** The idle transition inferred completion before the authoritative
+   * turn-completed event arrived. */
+  provisionalCompletion?: boolean;
 };
 
 /** What the next render must do; merged across coalesced requests. */
@@ -194,11 +195,12 @@ async function renderCard(
 
     const state = { ...getCardState(context) };
 
-    // Nothing new since the last confirmed render. Settling renders always
-    // go out so the terminal state is never skipped.
+    // Nothing new since the last confirmed render. Settling renders retry
+    // until confirmed, then queued duplicates collapse.
+    const deliveredState = getDeliveredCardState(context);
     if (
-      !request.settle &&
-      isSameCardState(getDeliveredCardState(context), state)
+      isSameCardState(deliveredState, state) &&
+      (!request.settle || getCardState(context).settled === true)
     ) {
       return;
     }
@@ -228,16 +230,25 @@ export async function reportSlackLiveTaskStatus(
   status: RunStatus,
   context: RunTaskContext,
 ): Promise<void> {
+  if (status === RunStatus.Idle) {
+    await finishSlackLiveTaskStream(taskRun, status, context);
+    return;
+  }
+
   const message = STARTUP_STATUS_MESSAGES[status];
   if (!message) {
     return;
   }
 
   const state = getCardState(context);
+  if (state.status === 'error') {
+    return;
+  }
   state.status = 'in_progress';
   state.finalMessage = undefined;
   state.awaitingInput = false;
   state.settled = false;
+  state.provisionalCompletion = false;
   state.message = message;
   await renderCard(taskRun, context);
 }
@@ -250,9 +261,13 @@ export async function startSlackLiveTaskStream(
   // the generated task title from here on, so render right away. A run
   // resumed after a settled turn also flips the card back to in progress.
   const state = getCardState(context);
+  if (state.status === 'error') {
+    return;
+  }
   state.status = 'in_progress';
   state.settled = false;
   state.awaitingInput = false;
+  state.provisionalCompletion = false;
   await renderCard(taskRun, context);
 }
 
@@ -264,6 +279,9 @@ export async function updateSlackLiveTaskStream(
   const state = getCardState(context);
 
   if (event.type === 'turn_started') {
+    if (state.status === 'error' || !shouldProcessEvent(event, context)) {
+      return;
+    }
     if (!state.settled && state.status !== 'complete') {
       return;
     }
@@ -272,6 +290,7 @@ export async function updateSlackLiveTaskStream(
     state.message = undefined;
     state.finalMessage = undefined;
     state.settled = false;
+    state.provisionalCompletion = false;
     await renderCard(taskRun, context);
     return;
   }
@@ -282,15 +301,31 @@ export async function updateSlackLiveTaskStream(
     return;
   }
 
+  if (state.status === 'error') {
+    return;
+  }
+
   if (state.settled) {
+    // Idle settlement may use the latest finalized assistant message before
+    // the authoritative completion callback arrives. Let only that callback
+    // replace a provisional or generic result; terminal errors and real final
+    // output remain immutable.
     if (
+      event.type === 'completion' &&
+      event.provisional !== true &&
+      state.status === 'complete' &&
+      (state.provisionalCompletion === true || state.finalMessage === undefined)
+    ) {
+      state.settled = false;
+    } else if (
       event.type !== 'followup' &&
       event.type !== 'request_user_input' &&
       event.type !== 'request_user_input_response'
     ) {
       return;
+    } else {
+      state.settled = false;
     }
-    state.settled = false;
   }
 
   if (event.type === 'completion') {
@@ -298,6 +333,7 @@ export async function updateSlackLiveTaskStream(
     state.awaitingInput = false;
     state.finalMessage = event.text;
     state.message = event.text;
+    state.provisionalCompletion = event.provisional === true;
     await renderCard(taskRun, context, { settle: true });
     return;
   }
@@ -305,12 +341,13 @@ export async function updateSlackLiveTaskStream(
   if (event.type === 'text') {
     const text = event.text.trim();
     // Transient status lines (provider retries) never reach the card.
-    if (!text || TRANSIENT_NARRATION_PATTERN.test(text)) {
+    if (!isEligibleProvisionalCompletionText(text)) {
       return;
     }
     state.status = 'in_progress';
     state.awaitingInput = false;
     state.message = text;
+    state.provisionalCompletion = false;
     await renderCard(taskRun, context);
     return;
   }
@@ -322,6 +359,7 @@ export async function updateSlackLiveTaskStream(
     state.status = 'in_progress';
     state.awaitingInput = true;
     state.message = WAITING_FOR_INPUT_MESSAGE;
+    state.provisionalCompletion = false;
     await renderCard(taskRun, context);
     return;
   }
@@ -329,7 +367,9 @@ export async function updateSlackLiveTaskStream(
   if (event.type === 'request_user_input_response') {
     state.status = 'in_progress';
     state.awaitingInput = false;
+    state.finalMessage = undefined;
     state.message = CONTINUING_MESSAGE;
+    state.provisionalCompletion = false;
     await renderCard(taskRun, context);
   }
 }
@@ -339,24 +379,42 @@ export async function finishSlackLiveTaskStream(
   status: RunStatus,
   context: RunTaskContext,
 ): Promise<void> {
-  // Idle runs retain the card for a later resume.
-  if (status === RunStatus.Idle) {
+  const state = getCardState(context);
+
+  if (state.status === 'error') {
+    if (!state.settled) {
+      await renderCard(taskRun, context, { settle: true });
+    }
     return;
   }
 
-  const state = getCardState(context);
+  if (status === RunStatus.Idle) {
+    if (state.settled) {
+      return;
+    }
+    state.status = 'complete';
+    if (!state.awaitingInput) {
+      state.message =
+        state.finalMessage ?? SLACK_LIVE_TASK_CARD_MESSAGES.completed;
+      state.provisionalCompletion = state.finalMessage === undefined;
+    }
+    await renderCard(taskRun, context, { settle: true });
+    return;
+  }
 
   if (status === RunStatus.Completed) {
     // Usually a no-op: the completion CallbackEvent already settled the
     // card with the real output. This fallback guarantees the card cannot
-    // stay spinning when that event is lost (or its render was rejected),
-    // and never promotes the last narration line to the final result.
+    // stay spinning when that event is lost, rejected, or the resumable run
+    // first settles as idle. Never promote narration to the final result or
+    // overwrite a card that is genuinely waiting for user input.
     if (state.settled || state.awaitingInput) {
       return;
     }
     state.status = 'complete';
     state.message =
       state.finalMessage ?? SLACK_LIVE_TASK_CARD_MESSAGES.completed;
+    state.provisionalCompletion = false;
     await renderCard(taskRun, context, { settle: true });
     return;
   }
@@ -364,6 +422,7 @@ export async function finishSlackLiveTaskStream(
   if (status === RunStatus.Canceled) {
     state.status = 'error';
     state.message = SLACK_LIVE_TASK_CARD_MESSAGES.canceled;
+    state.provisionalCompletion = false;
     await renderCard(taskRun, context, { settle: true });
     return;
   }
@@ -372,6 +431,7 @@ export async function finishSlackLiveTaskStream(
   // the next run (a follow-up or a retry) keeps driving this same card.
   state.status = 'error';
   state.message = SLACK_LIVE_TASK_CARD_MESSAGES.failed;
+  state.provisionalCompletion = false;
   await renderCard(taskRun, context, { settle: true });
 }
 
@@ -420,9 +480,17 @@ export function getSlackLiveTaskStreamRunTaskCallbacks(
       }
     },
     onStatus: async (run, status, context) => {
-      void reportSlackLiveTaskStatus(run, status, context).catch((error) =>
-        reportCardCallbackError(error, 'slackLiveTaskStream.onStatus', run.id),
+      const update = reportSlackLiveTaskStatus(run, status, context).catch(
+        (error) =>
+          reportCardCallbackError(
+            error,
+            'slackLiveTaskStream.onStatus',
+            run.id,
+          ),
       );
+      if (status === RunStatus.Idle) {
+        await update;
+      }
     },
   };
 }

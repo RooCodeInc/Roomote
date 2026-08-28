@@ -169,6 +169,79 @@ describe('activePrReviewFollowUpJob', () => {
     );
   });
 
+  it('keeps a failed live delivery retryable without advancing the PR head', async () => {
+    mockFindFirstRun.mockResolvedValue({
+      id: 100,
+      taskId: 'task-100',
+      status: RunStatus.Running,
+      sandboxServerUrl: 'https://sandbox.example.test',
+      snapshotId: null,
+      snapshotCreatedAt: null,
+      port: null,
+      payload: { repo: 'owner/repo' },
+      actingUserId: null,
+    });
+    mockWithSandboxServerRpcClient.mockRejectedValue(
+      new TypeError('fetch failed'),
+    );
+
+    await expect(activePrReviewFollowUpJob(makeJob())).rejects.toThrow(
+      'fetch failed',
+    );
+
+    expect(mockUpdateWhere).not.toHaveBeenCalled();
+    expect(mockEnqueueTask).not.toHaveBeenCalled();
+  });
+
+  it('resumes after a retry observes that the unreachable run finished', async () => {
+    mockFindFirstRun
+      .mockResolvedValueOnce({
+        id: 100,
+        taskId: 'task-100',
+        status: RunStatus.Running,
+        sandboxServerUrl: 'https://sandbox.example.test',
+        snapshotId: null,
+        snapshotCreatedAt: null,
+        port: null,
+        payload: { repo: 'owner/repo' },
+        actingUserId: null,
+      })
+      .mockResolvedValueOnce({
+        id: 100,
+        taskId: 'task-100',
+        status: RunStatus.Completed,
+        sandboxServerUrl: null,
+        snapshotId: 'snapshot-100',
+        snapshotCreatedAt: new Date(),
+        port: 3000,
+        payload: { repo: 'owner/repo' },
+        actingUserId: 'user-1',
+      });
+    mockWithSandboxServerRpcClient.mockRejectedValueOnce(
+      new TypeError('fetch failed'),
+    );
+
+    await expect(activePrReviewFollowUpJob(makeJob())).rejects.toThrow(
+      'fetch failed',
+    );
+    await activePrReviewFollowUpJob(makeJob());
+
+    expect(mockEnqueueTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        task: expect.objectContaining({
+          type: TaskPayloadKind.SnapshotResume,
+          sourceRunId: 100,
+          payload: expect.objectContaining({
+            sourceSnapshotId: 'snapshot-100',
+            resumePromptClientMessageId:
+              'github-pr-synchronize:100:owner/repo:42',
+          }),
+        }),
+      }),
+    );
+    expect(mockUpdateWhere).toHaveBeenCalledOnce();
+  });
+
   it('resumes the same task when the active review finishes during debounce', async () => {
     mockFindFirstRun.mockResolvedValue({
       id: 100,

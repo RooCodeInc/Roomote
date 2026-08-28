@@ -1,8 +1,11 @@
 const mocks = vi.hoisted(() => ({
   findConnection: vi.fn(),
+  findDiscordInstallation: vi.fn(),
   findEnablement: vi.fn(),
   findSlackInstallation: vi.fn(),
   hasGithubSources: vi.fn(),
+  findLinearConnection: vi.fn(),
+  resolveDiscordCredentials: vi.fn(),
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -10,11 +13,13 @@ vi.mock('@roomote/db/server', () => ({
   db: {
     query: {
       deploymentMcpEnablements: { findFirst: mocks.findEnablement },
+      discordInstallations: { findFirst: mocks.findDiscordInstallation },
       mcpConnections: { findFirst: mocks.findConnection },
       slackInstallations: { findFirst: mocks.findSlackInstallation },
     },
   },
   deploymentMcpEnablements: { enabled: {}, mcpId: {} },
+  discordInstallations: { isActive: {} },
   eq: vi.fn(),
   isNull: vi.fn(),
   mcpConnections: {
@@ -24,10 +29,17 @@ vi.mock('@roomote/db/server', () => ({
     userId: {},
   },
   slackInstallations: { isActive: {} },
+  resolveDiscordRuntimeCredentials: mocks.resolveDiscordCredentials,
 }));
 
 vi.mock('../brain-github', () => ({
   hasBrainGithubSources: mocks.hasGithubSources,
+}));
+
+vi.mock('../mcp/linear-connections', () => ({
+  findLinearDeploymentMcpConnection: mocks.findLinearConnection,
+  getLinearDeploymentMetadata: (config: Record<string, unknown> | null) =>
+    typeof config?.linearOrganizationId === 'string' ? config : null,
 }));
 
 import type { BrainSourceRequirement } from '@roomote/types';
@@ -46,8 +58,10 @@ describe('resolveBrainSourceRequirements', () => {
   it('resolves every reported source through the collector availability policy', async () => {
     const availability: Record<BrainSourceRequirement, boolean> = {
       github: true,
+      discord: true,
       granola: false,
       notion: true,
+      linear: true,
       rippling: false,
       slack: true,
     };
@@ -61,8 +75,10 @@ describe('resolveBrainSourceRequirements', () => {
     expect(new Set(resolveRequirement.mock.calls.flat())).toEqual(
       new Set<BrainSourceRequirement>([
         'github',
+        'discord',
         'granola',
         'notion',
+        'linear',
         'rippling',
         'slack',
       ]),
@@ -126,5 +142,25 @@ describe('isBrainSourceAvailable', () => {
 
     await expect(isBrainSourceAvailable('slack')).resolves.toBe(true);
     await expect(isBrainSourceAvailable('github')).resolves.toBe(true);
+  });
+
+  it('requires an authenticated Linear workspace connection with organization metadata', async () => {
+    mocks.findLinearConnection.mockResolvedValue({
+      authConfig: { linearOrganizationId: 'org-1' },
+    });
+    await expect(isBrainSourceAvailable('linear')).resolves.toBe(true);
+
+    mocks.findLinearConnection.mockResolvedValue({ authConfig: {} });
+    await expect(isBrainSourceAvailable('linear')).resolves.toBe(false);
+  });
+
+  it('requires Discord credentials and an active guild installation', async () => {
+    mocks.resolveDiscordCredentials.mockResolvedValue({ botToken: 'token' });
+    mocks.findDiscordInstallation.mockResolvedValue({ id: 'installation-id' });
+
+    await expect(isBrainSourceAvailable('discord')).resolves.toBe(true);
+
+    mocks.findDiscordInstallation.mockResolvedValue(null);
+    await expect(isBrainSourceAvailable('discord')).resolves.toBe(false);
   });
 });

@@ -236,6 +236,8 @@ export type SuggestionCategory =
   | 'improvement';
 
 export type SuggestionPriority = 'P0' | 'P1' | 'P2' | 'P3';
+export const TASK_SUGGESTION_MESSAGE_METADATA_EVENT_TYPE =
+  'roomote.setup_onboarding_suggestion';
 export const TASK_SUGGESTION_SOURCES = [
   'suggest_ideas',
   'sentry_triage',
@@ -1050,6 +1052,11 @@ const sharedTaskPayloadSchema = z.object({
   fastAgentSessionId: z.string().uuid().optional(),
   /** Provider event that caused this fresh launch; used for idempotent retries. */
   communicationSourceEventId: z.string().optional(),
+  /**
+   * Stable caller-provided key for fresh launches that must recover the same
+   * durable task after an ambiguous response or concurrent retry.
+   */
+  launchIdempotencyKey: z.string().trim().min(1).max(256).optional(),
   /**
    * Discord channel hosting the origin reaction target. Always a channel that
    * contains `discordReactionMessageId` (never an interaction id).

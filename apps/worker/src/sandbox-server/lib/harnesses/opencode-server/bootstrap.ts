@@ -12,7 +12,6 @@ import {
 import type { HarnessLogger } from '../../../../logging';
 import {
   DISABLED_MODEL_PROVIDER_ENV_VAR_NAMES,
-  INFERENCE_GATEWAY_CHATGPT_ENV_VAR_NAME,
   isReservedRuntimeMcpEnvVarName,
   OPENCODE_AUTH_CONTENT_ENV_VAR_NAME,
   redactReservedOpenCodeEnvReferences,
@@ -256,14 +255,10 @@ export async function prepareOpenCodeCommandEnv(options: {
     commandEnv.ROOMOTE_SLACK_HOOK_DEBUG = '1';
   }
 
-  // Materialize the ChatGPT subscription OAuth record into the opencode
-  // harness `auth.json` and strip the env var. With the file in place,
-  // opencode's built-in Codex plugin self-refreshes the access token once
-  // per expiry and persists rotated tokens for the sandbox lifetime. Leaving
-  // the env var set would make `Auth.all()` always return the static env
-  // content, so every request after the first hour would re-refresh and
-  // discard rotated tokens.
-  await materializeOpenCodeAuthJson({
+  // Task sandboxes are gateway-only. Remove both legacy direct OAuth env and
+  // any auth file restored from a pre-gateway snapshot before OpenCode starts.
+  delete commandEnv[OPENCODE_AUTH_CONTENT_ENV_VAR_NAME];
+  await removeOpenCodeAuthJson({
     commandEnv,
     homeDir,
     logger: options.logger,
@@ -336,7 +331,7 @@ async function materializeOpenCodeBashEnvOverlay(options: {
   commandEnv.BASH_ENV = overlayPath;
 }
 
-async function removeOpenCodeAuthJsonForChatGptGateway(options: {
+async function removeOpenCodeAuthJson(options: {
   commandEnv: Record<string, string>;
   homeDir: string;
   logger: HarnessLogger;
@@ -351,7 +346,7 @@ async function removeOpenCodeAuthJsonForChatGptGateway(options: {
     // reactivate the built-in Codex fetch hook and bypass Roomote's gateway.
     await fs.rm(authFilePath, { force: true });
     options.logger.info(
-      `Ensured OpenCode auth.json is absent for ChatGPT gateway mode at ${authFilePath}`,
+      `Ensured OpenCode auth.json is absent from task sandbox at ${authFilePath}`,
     );
   } catch (error) {
     const message =
@@ -360,62 +355,8 @@ async function removeOpenCodeAuthJsonForChatGptGateway(options: {
     // Fail closed. Starting OpenCode with a stale OAuth record would put the
     // long-lived subscription credential back in use inside the sandbox.
     throw new Error(
-      `Failed to remove OpenCode auth.json for ChatGPT gateway mode: ${message}`,
+      `Failed to remove OpenCode auth.json from task sandbox: ${message}`,
       { cause: error },
-    );
-  }
-}
-
-/**
- * In direct-subscription mode, write the OAuth record delivered as
- * `OPENCODE_AUTH_CONTENT` to the harness `auth.json` so OpenCode can refresh
- * it during long tasks. In gateway mode, remove any snapshotted auth file and
- * fail closed if that cleanup cannot be completed before OpenCode starts.
- */
-async function materializeOpenCodeAuthJson(options: {
-  commandEnv: Record<string, string>;
-  homeDir: string;
-  logger: HarnessLogger;
-}): Promise<void> {
-  const { commandEnv, homeDir, logger } = options;
-  const routeChatGptThroughGateway =
-    commandEnv[INFERENCE_GATEWAY_CHATGPT_ENV_VAR_NAME] === '1';
-  const routeGitHubCopilotThroughGateway =
-    commandEnv.R_INFERENCE_GATEWAY_GITHUB_COPILOT === '1';
-  const routeXaiThroughGateway = commandEnv.R_INFERENCE_GATEWAY_XAI === '1';
-
-  if (
-    routeChatGptThroughGateway ||
-    routeGitHubCopilotThroughGateway ||
-    routeXaiThroughGateway
-  ) {
-    // Defense in depth: dequeue and run-task already omit this value, but a
-    // conflicting deployment env must not survive into the OpenCode process.
-    delete commandEnv[OPENCODE_AUTH_CONTENT_ENV_VAR_NAME];
-    await removeOpenCodeAuthJsonForChatGptGateway(options);
-    return;
-  }
-
-  const authContent = commandEnv[OPENCODE_AUTH_CONTENT_ENV_VAR_NAME];
-
-  if (!authContent) {
-    return;
-  }
-
-  try {
-    const dataDir = resolveOpenCodeDataDir(homeDir, commandEnv);
-    await fs.mkdir(dataDir, { recursive: true });
-    const authFilePath = path.join(dataDir, OPENCODE_AUTH_FILE_NAME);
-    await fs.writeFile(authFilePath, authContent, { mode: 0o600 });
-    delete commandEnv[OPENCODE_AUTH_CONTENT_ENV_VAR_NAME];
-    logger.info(
-      `Materialized ChatGPT subscription auth.json at ${authFilePath}`,
-    );
-  } catch (error) {
-    const message =
-      error instanceof Error ? error.message : 'Unknown auth.json write error';
-    logger.info(
-      `Failed to materialize ChatGPT subscription auth.json; falling back to ${OPENCODE_AUTH_CONTENT_ENV_VAR_NAME} env var: ${message}`,
     );
   }
 }

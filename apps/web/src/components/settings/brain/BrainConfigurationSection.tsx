@@ -1,10 +1,7 @@
 'use client';
 
-import Link from 'next/link';
-
 import { Section } from '@/components/settings';
 import { Badge, Lock, Settings2 } from '@/components/system';
-import { SETTINGS_PATHS } from '@/lib/settings';
 
 import type { BrainSettings } from '@/trpc/commands/brain';
 import { BRAIN_INFERENCE_PROVIDER_LABELS } from './brain-presentation';
@@ -52,7 +49,7 @@ export function BrainConfigurationSection({
       <div className="space-y-4">
         <ConfigRow
           label="Synthesis model"
-          helper="Answers synthesize queries across pages, on the deployment's inference key. Set R_BRAIN_MODEL to change it; changes apply immediately."
+          helper="Answers synthesize queries across memories, on the deployment's inference key. Set R_BRAIN_MODEL to change it; changes apply immediately."
         >
           <code className="rounded bg-foreground/10 px-1.5 py-0.5 font-mono text-xs">
             {settings.models?.synthesisModel ?? 'Not resolved'}
@@ -64,7 +61,7 @@ export function BrainConfigurationSection({
 
         <ConfigRow
           label="Embedding model"
-          helper="Fixed when this Brain was created. It sizes the vector store, and changing it requires a migration that re-embeds every page."
+          helper="Fixed when Memory was created. It sizes the vector store, and changing it requires a migration that re-embeds every memory."
         >
           <Lock className="size-3.5 text-muted-foreground" />
           <code className="rounded bg-foreground/10 px-1.5 py-0.5 font-mono text-xs">
@@ -79,21 +76,15 @@ export function BrainConfigurationSection({
 
         <ConfigRow
           label="Inference key"
-          helper="The Brain holds no provider credential. Every call routes through Roomote, so rotating the key applies on the next call with no restart."
+          helper="Memory holds no provider credential. Every call routes through Roomote, so rotating the key applies on the next call with no restart."
         >
           <span>
             {providerLabel
               ? settings.keySource === 'brain'
-                ? `Brain-specific ${providerLabel} key`
+                ? `Memory-specific ${providerLabel} key`
                 : `The deployment's ${providerLabel} key`
               : 'No provider key resolves'}
           </span>
-          <Link
-            className="text-secondary-foreground underline-offset-4 hover:underline"
-            href={SETTINGS_PATHS.models}
-          >
-            Manage in Models
-          </Link>
         </ConfigRow>
       </div>
     </Section>

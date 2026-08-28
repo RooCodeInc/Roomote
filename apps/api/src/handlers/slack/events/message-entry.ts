@@ -1248,8 +1248,6 @@ async function maybeHandleChannelAutoStart(params: {
           explicitInvocation: isBareFastCommandInvocation(
             channelAutoStartEvent.authoredText ?? channelAutoStartEvent.text,
           ),
-          deploymentSettingEnabled:
-            Env.R_COMMUNICATIONS_FAST_MODE_SETTING_ENABLED === true,
           userDefaultEnabled:
             userMapping.communicationsFastModeDefault &&
             !isRemovedEvalCommandInvocation(
@@ -1266,7 +1264,6 @@ async function maybeHandleChannelAutoStart(params: {
       slack: context.slack,
       userId: userMapping.userId,
       teamId: context.teamId,
-      usageText: 'Use `!fast <question>` in this channel.',
       continuation: fastAgentEntryMode === 'default',
       processingReactionName: ackEmoji,
       errorLogPrefix: `❌ Background fast-agent response failed for auto-start thread ${channelAutoStartEvent.ts}:`,
@@ -1599,7 +1596,6 @@ function startFastAgentResponse(params: {
   slack: SlackNotifier;
   userId: string;
   teamId: string;
-  usageText?: string;
   continuation?: boolean;
   activeTasks?: { taskId: string }[];
   resolveActiveTasks?: () => Promise<{ taskId: string }[]>;
@@ -1737,8 +1733,6 @@ async function handleSlackEntryEvent(params: {
   const authoredEventText = event.authoredText ?? event.text;
   const fastAgentEntryMode = resolveFastAgentEntryMode({
     explicitInvocation: isFastCommandInvocation(authoredEventText),
-    deploymentSettingEnabled:
-      Env.R_COMMUNICATIONS_FAST_MODE_SETTING_ENABLED === true,
     userDefaultEnabled:
       userMapping.communicationsFastModeDefault &&
       !isRemovedEvalCommandInvocation(authoredEventText),
@@ -2017,8 +2011,17 @@ export async function handleMessageOrAppMentionEvent(params: {
 }): Promise<void> {
   const { event, context } = params;
   enrichSlackMessageEvent(event);
+  const automatedAppMentionEvent = isRoutableAutomatedSlackAppMention(
+    event,
+    context.slackInstallation,
+  )
+    ? event
+    : null;
   const redis = getRedis();
-  if (await maybeHandleChannelAutoStart({ event, context, redis })) {
+  if (
+    !automatedAppMentionEvent &&
+    (await maybeHandleChannelAutoStart({ event, context, redis }))
+  ) {
     return;
   }
 
@@ -2028,12 +2031,6 @@ export async function handleMessageOrAppMentionEvent(params: {
     botUserId: context.slackInstallation.botUserId,
   });
 
-  const automatedAppMentionEvent = isRoutableAutomatedSlackAppMention(
-    event,
-    context.slackInstallation,
-  )
-    ? event
-    : null;
   const mentionedThreadAliasTaskId =
     await resolveMentionedSlackThreadAliasTaskId({
       event,
@@ -2057,7 +2054,8 @@ export async function handleMessageOrAppMentionEvent(params: {
   if (
     event.type === 'message' &&
     event.channel_type !== 'im' &&
-    !unmentionedThreadReplyRouting.shouldRoute
+    !unmentionedThreadReplyRouting.shouldRoute &&
+    !automatedAppMentionEvent
   ) {
     await maybeRecordTrackedAutomationThreadReply({
       event,

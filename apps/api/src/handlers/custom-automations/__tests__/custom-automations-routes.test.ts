@@ -1,10 +1,20 @@
 import { Hono } from 'hono';
 import type { Context } from 'hono';
-import type { AuthTokenContext } from '@roomote/types';
-import { ALL_REPOSITORIES } from '@roomote/types';
+import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type {
+  AuthTokenContext,
+  ManageCustomAutomationsInput,
+  RunTokenContext,
+} from '@roomote/types';
+import {
+  ALL_REPOSITORIES,
+  FAST_EXECUTION,
+  MANAGE_CUSTOM_AUTOMATIONS_TOOL,
+} from '@roomote/types';
 
 import type { Variables } from '../../../types';
 import type { McpAuth } from '../../mcp/middleware';
+import { registerRoomoteCustomAutomationsTool } from '../../mcp/roomote-custom-automations-tool';
 import {
   customAutomationsRouter,
   DUPLICATE_AUTOMATION_NAME_ERROR,
@@ -63,7 +73,8 @@ vi.mock('@roomote/telemetry/server', () => ({
     mockCaptureActivationCustomAutomationChanged,
 }));
 
-vi.mock('../../mcp/proxy-utils', () => ({
+vi.mock('../../mcp/proxy-utils', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../mcp/proxy-utils')>()),
   resolveActingUserIdOrNull: mockResolveActingUserIdOrNull,
 }));
 
@@ -127,6 +138,29 @@ function postCreate(
   });
 }
 
+function registerApiHostedTool(auth: McpAuth) {
+  let handler:
+    | ((params: ManageCustomAutomationsInput) => Promise<unknown>)
+    | undefined;
+  const registerTool = vi.fn(
+    (
+      _name: string,
+      _config: unknown,
+      toolHandler: (params: ManageCustomAutomationsInput) => Promise<unknown>,
+    ) => {
+      handler = toolHandler;
+    },
+  );
+
+  registerRoomoteCustomAutomationsTool(
+    { registerTool } as unknown as McpServer,
+    auth,
+  );
+
+  expect(handler).toBeDefined();
+  return { handler: handler!, registerTool };
+}
+
 describe('custom-automations MCP routes', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -136,6 +170,111 @@ describe('custom-automations MCP routes', () => {
     mockGetDeploymentTaskModelOptions.mockResolvedValue({
       models: ENABLED_MODELS,
       defaultModelId: 'openai/gpt-5.6-luna',
+    });
+  });
+
+  describe('API-hosted Roomote MCP tool', () => {
+    it('invokes the authoritative router with run-token acting-user authorization', async () => {
+      const authContext: RunTokenContext = {
+        tokenType: 'run',
+        runId: 42,
+        userId: 'token-user',
+        principal: 'user',
+        version: 1,
+      };
+      const { handler, registerTool } = registerApiHostedTool({
+        userId: 'admin-1',
+        authContext,
+      });
+      mockListCustomAutomations.mockResolvedValue([]);
+
+      const result = await handler({ action: 'list' });
+
+      expect(mockResolveActingUserIdOrNull).toHaveBeenCalledWith({
+        userId: 'admin-1',
+        tokenType: 'run',
+        runId: 42,
+      });
+      expect(mockUsersFindFirst).toHaveBeenCalledOnce();
+      expect(mockListCustomAutomations).toHaveBeenCalledOnce();
+      expect(registerTool).toHaveBeenCalledWith(
+        MANAGE_CUSTOM_AUTOMATIONS_TOOL.name,
+        expect.objectContaining({
+          description: MANAGE_CUSTOM_AUTOMATIONS_TOOL.description,
+          inputSchema: MANAGE_CUSTOM_AUTOMATIONS_TOOL.inputSchema,
+        }),
+        expect.any(Function),
+      );
+      expect(result).toMatchObject({
+        structuredContent: { automations: [] },
+      });
+    });
+
+    it('routes create actions through the existing custom automation domain handler', async () => {
+      const authContext: AuthTokenContext = {
+        userId: 'admin-1',
+        tokenType: 'auth',
+        version: 1,
+      };
+      const { handler } = registerApiHostedTool({
+        userId: 'admin-1',
+        authContext,
+      });
+      mockCreateCustomAutomation.mockResolvedValue({
+        id: 'automation-1',
+        environmentId: ENVIRONMENT_ID,
+        allRepositories: false,
+      });
+
+      const result = await handler({
+        action: 'create',
+        name: 'Nightly report',
+        prompt: 'Summarize yesterday.',
+        schedule: 'daily',
+        environmentId: ENVIRONMENT_ID,
+      });
+
+      expect(mockCreateCustomAutomation).toHaveBeenCalledWith(
+        expect.objectContaining({
+          name: 'Nightly report',
+          prompt: 'Summarize yesterday.',
+          environmentId: ENVIRONMENT_ID,
+          createdByUserId: 'admin-1',
+        }),
+      );
+      expect(result).toMatchObject({
+        structuredContent: {
+          automation: {
+            id: 'automation-1',
+            environmentId: ENVIRONMENT_ID,
+          },
+        },
+      });
+    });
+
+    it('returns an MCP tool error when the router rejects a non-admin user', async () => {
+      const authContext: AuthTokenContext = {
+        userId: 'member-1',
+        tokenType: 'auth',
+        version: 1,
+      };
+      const { handler } = registerApiHostedTool({
+        userId: 'member-1',
+        authContext,
+      });
+      mockResolveActingUserIdOrNull.mockResolvedValue('member-1');
+      mockUsersFindFirst.mockResolvedValue(null);
+
+      const result = await handler({ action: 'list' });
+
+      expect(mockListCustomAutomations).not.toHaveBeenCalled();
+      expect(result).toMatchObject({
+        isError: true,
+        structuredContent: {
+          status: 403,
+          error: 'Admin access required',
+        },
+      });
     });
   });
 
@@ -214,6 +353,35 @@ describe('custom-automations MCP routes', () => {
       );
       await expect(res.json()).resolves.toMatchObject({
         automation: { environmentId: ALL_REPOSITORIES },
+      });
+    });
+
+    it('accepts Fast from the environment target contract', async () => {
+      const { app } = createApp();
+      mockResolveCustomAutomationSchedule.mockResolvedValue({
+        status: 'resolved',
+        scheduleMode: 'daily',
+        cronExpression: null,
+        resolution: null,
+      });
+      mockCreateCustomAutomation.mockResolvedValue({
+        id: 'automation-fast',
+        environmentId: null,
+        allRepositories: false,
+        executionMode: 'fast',
+      });
+
+      const res = await postCreate(
+        app,
+        createBody({ environmentId: FAST_EXECUTION }),
+      );
+
+      expect(res.status).toBe(201);
+      expect(mockCreateCustomAutomation).toHaveBeenCalledWith(
+        expect.objectContaining({ environmentId: FAST_EXECUTION }),
+      );
+      await expect(res.json()).resolves.toMatchObject({
+        automation: { environmentId: FAST_EXECUTION, executionMode: 'fast' },
       });
     });
 

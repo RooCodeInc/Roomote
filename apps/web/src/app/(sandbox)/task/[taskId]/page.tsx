@@ -1,12 +1,6 @@
 'use client';
 
-import {
-  useCallback,
-  useEffect,
-  useLayoutEffect,
-  useRef,
-  useState,
-} from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { useQueryClient } from '@tanstack/react-query';
 import { CircleSlash, TriangleAlert } from '@/components/system';
@@ -14,6 +8,7 @@ import { CircleSlash, TriangleAlert } from '@/components/system';
 import {
   TaskPayloadKind,
   DEFAULT_CODING_HARNESS,
+  getLinkedEnvironmentIdFromPayload,
   type TaskPhase,
 } from '@roomote/types';
 
@@ -24,7 +19,7 @@ import { useRecentTasks } from '@/hooks/useRecentTasks';
 import { FramedSurface } from '@/components/layout';
 import { EmptyState } from '@/components/system';
 
-import { useSandboxLayout } from '../../use-sandbox-layout';
+import { useResponsiveSandboxSidebar } from '../../use-sandbox-layout';
 
 import {
   HistoricalSandboxProvider,
@@ -44,7 +39,7 @@ import { TaskWorkspaceSkeleton } from './TaskWorkspaceSkeleton';
 
 export default function SandboxPage() {
   const { taskId: unresolvedTaskId } = useParams<{ taskId: string }>();
-  const { setSidebarVisible } = useSandboxLayout();
+  useResponsiveSandboxSidebar(unresolvedTaskId);
 
   const trpc = useTRPC();
   const queryClient = useQueryClient();
@@ -75,6 +70,24 @@ export default function SandboxPage() {
         images: session.prompt?.images,
       }
     : null;
+  const newTaskSearchParams = new URLSearchParams();
+
+  if (startupPrompt?.text) {
+    newTaskSearchParams.set('prompt', startupPrompt.text);
+  }
+
+  if (task?.model) {
+    newTaskSearchParams.set('model', task.model);
+  }
+
+  const environmentId = getLinkedEnvironmentIdFromPayload(taskRun?.payload);
+
+  if (environmentId) {
+    newTaskSearchParams.set('environmentId', environmentId);
+  }
+
+  const newTaskQuery = newTaskSearchParams.toString();
+  const newTaskHref = newTaskQuery ? `/?${newTaskQuery}` : '/';
   const shouldRenderBootingTranscript =
     sessionState === 'booting' &&
     (hasTranscriptHistory || hasVisibleSessionPrompt);
@@ -87,26 +100,6 @@ export default function SandboxPage() {
       queryKey: trpc.sandboxSession.byTaskId.queryKey(),
     });
   }, [queryClient, trpc]);
-
-  useLayoutEffect(() => {
-    const mobileQuery = window.matchMedia?.('(max-width: 767px)');
-
-    if (!mobileQuery?.matches) {
-      return;
-    }
-
-    setSidebarVisible(false);
-
-    const handleViewportChange = (event: MediaQueryListEvent) =>
-      setSidebarVisible(!event.matches);
-
-    mobileQuery.addEventListener('change', handleViewportChange);
-
-    return () => {
-      mobileQuery.removeEventListener('change', handleViewportChange);
-      setSidebarVisible(true);
-    };
-  }, [setSidebarVisible, unresolvedTaskId]);
 
   // Track this task as recently visited for command palette ordering.
   // Record immediately with the URL param so visits are captured even when the
@@ -274,9 +267,8 @@ export default function SandboxPage() {
           footer={
             taskRun ? (
               <SnapshotResumeFailureFooter
-                taskId={taskId}
                 taskRun={taskRun}
-                prompt={startupPrompt}
+                newTaskHref={newTaskHref}
               />
             ) : null
           }
@@ -293,16 +285,12 @@ export default function SandboxPage() {
           <div className="mx-auto flex w-full max-w-4xl flex-col gap-2">
             <Startup
               runId={taskRun.id}
-              taskId={taskId}
               initialTaskRun={taskRun}
-              prompt={startupPrompt}
+              newTaskHref={newTaskHref}
               onStatusChange={handleBootStatusChange}
             />
           </div>
         </div>
-        {session.draftPrompt && (
-          <DraftPromptBanner draftPrompt={session.draftPrompt} />
-        )}
       </div>
     );
   }
@@ -315,9 +303,8 @@ export default function SandboxPage() {
           <div className="mx-auto flex w-full max-w-4xl flex-col gap-2">
             <Startup
               runId={taskRun.id}
-              taskId={taskId}
               initialTaskRun={taskRun}
-              prompt={startupPrompt}
+              newTaskHref={newTaskHref}
               onStatusChange={handleBootStatusChange}
             />
             <ProductTips />
@@ -344,6 +331,7 @@ export default function SandboxPage() {
     >
       <MemoizedLiveContent
         session={session}
+        newTaskHref={newTaskHref}
         onBootStatusChange={handleBootStatusChange}
         onTaskPhaseChange={setLiveTaskPhase}
       />

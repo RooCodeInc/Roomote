@@ -3,6 +3,7 @@ import {
   buildAutomationRootSummaryText,
   buildAutomationSettingsContextText,
   buildAutomationSettingsMessage,
+  buildCustomAutomationSlackMessage,
   degradeSlackMrkdwnToMarkdown,
   SENTRY_TRIAGE_SETTINGS_HASH,
   SUGGEST_IDEAS_SETTINGS_HASH,
@@ -75,6 +76,66 @@ describe('manager slack helpers', () => {
         ],
       }),
     ]);
+  });
+
+  it('uses the standard automation chrome for custom automation reports', () => {
+    const message = buildCustomAutomationSlackMessage({
+      automationId: 'automation-1',
+      automationName: 'Weekly scan',
+      text: 'Found two regressions.',
+    });
+
+    expect(message).toEqual({
+      text: 'Found two regressions.',
+      blocks: [
+        {
+          type: 'context',
+          block_id: 'roomote_automation_result_header',
+          elements: [
+            {
+              type: 'image',
+              image_url: 'https://app.example.com/automation-icons/zap.png',
+              alt_text: 'Weekly scan automation icon',
+            },
+            {
+              type: 'plain_text',
+              text: 'Weekly scan',
+              emoji: false,
+            },
+          ],
+        },
+        { type: 'markdown', text: 'Found two regressions.' },
+        {
+          type: 'actions',
+          block_id: 'roomote_automation_result_actions',
+          elements: [
+            expect.objectContaining({
+              action_id: 'late_bound_automation_configure',
+              url: 'https://app.example.com/automations#custom-automation-automation-1',
+            }),
+          ],
+        },
+      ],
+    });
+  });
+
+  it('preserves custom automation Markdown without entity escaping', () => {
+    const text = [
+      '## Report',
+      '- [Finding](<https://x.com/example/status/1>)',
+      '',
+      '| Item | Result |',
+      '| --- | --- |',
+      '| Link | **Found** |',
+    ].join('\n');
+
+    expect(
+      buildCustomAutomationSlackMessage({
+        automationId: 'automation-1',
+        automationName: 'Weekly scan',
+        text,
+      }).blocks,
+    ).toContainEqual({ type: 'markdown', text });
   });
 
   it('joins a generated summary with an optional action footer', () => {

@@ -138,7 +138,7 @@ describe('subscribeHarnessCallbacks', () => {
     mockDeliverShowWidgetFallback.mockClear();
   });
 
-  it('persists Roomote runtime user prompt envelopes to task_messages', async () => {
+  it('persists user prompts and forwards them as turn starts', async () => {
     const { harness, emitEnvelope } = createRuntimeHarness();
 
     const callbacks = { onMessage: vi.fn().mockResolvedValue(undefined) };
@@ -175,8 +175,15 @@ describe('subscribeHarnessCallbacks', () => {
       taskId: '17294o7tqi124',
       envelope: userPromptEnvelope,
     });
-    // User prompts are persisted but not forwarded to callbacks.
-    expect(callbacks.onMessage).not.toHaveBeenCalled();
+    expect(callbacks.onMessage).toHaveBeenCalledWith(
+      { id: 45, taskId: '17294o7tqi124' },
+      'runtime-session-1',
+      {
+        type: 'turn_started',
+        ts: 1772823376000,
+      },
+      {},
+    );
 
     await unsubscribe();
   });
@@ -392,19 +399,26 @@ describe('subscribeHarnessCallbacks', () => {
       text: 'done',
     });
 
-    expect(callbacks.onMessage).not.toHaveBeenCalled();
+    expect(callbacks.onMessage).toHaveBeenCalledOnce();
+    expect(callbacks.onMessage).toHaveBeenCalledWith(
+      { id: 46, taskId: 'task-fallback' },
+      'runtime-session-2',
+      { type: 'turn_started', ts: 1772823376999 },
+      {},
+    );
 
     emitTaskEvent({
       eventName: TaskEventName.TaskCompleted,
       payload: ['runtime-session-2', {}, {}, {}],
     } as TaskEvent);
 
-    expect(callbacks.onMessage).not.toHaveBeenCalled();
+    expect(callbacks.onMessage).toHaveBeenCalledOnce();
 
     resolvePersist?.();
 
     await vi.waitFor(() => {
-      expect(callbacks.onMessage).toHaveBeenCalledWith(
+      expect(callbacks.onMessage).toHaveBeenNthCalledWith(
+        2,
         { id: 46, taskId: 'task-fallback' },
         'runtime-session-2',
         {
@@ -421,6 +435,108 @@ describe('subscribeHarnessCallbacks', () => {
       taskId: 'task-fallback',
       envelope: pendingEnvelope,
     });
+
+    await unsubscribe();
+  });
+
+  it('emits the latest finalized assistant message before idle settlement', async () => {
+    const { harness, emitEnvelope } = createRuntimeHarness();
+    const callbacks = { onMessage: vi.fn().mockResolvedValue(undefined) };
+    const unsubscribe = subscribeHarnessCallbacks({
+      harness: harness as never,
+      taskRun: { id: 47, taskId: 'task-idle-completion' } as never,
+      callbacks,
+      context: {},
+      logger: {
+        runId: 47,
+        filePath: '/tmp/test.log',
+        info: vi.fn(),
+        warn: vi.fn(),
+        error: vi.fn(),
+        log: vi.fn(),
+      },
+    });
+
+    emitEnvelope({
+      ts: 1772823377100,
+      eventType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+      role: 'assistant',
+      protocol: 'roomote_runtime',
+      contentBlocks: [{ type: 'text', text: 'Ready for review.' }],
+      metadata: {
+        source: 'assistant_message',
+        sessionId: 'runtime-session-idle',
+      },
+      payload: {},
+    });
+
+    await unsubscribe.flushPendingCompletionEvents();
+
+    expect(callbacks.onMessage).toHaveBeenLastCalledWith(
+      { id: 47, taskId: 'task-idle-completion' },
+      'runtime-session-idle',
+      {
+        type: 'completion',
+        text: 'Ready for review.',
+        ts: 1772823377100,
+        provisional: true,
+      },
+      {},
+    );
+
+    await unsubscribe();
+  });
+
+  it('settles filtered transient assistant output with a safe idle fallback', async () => {
+    const { harness, emitEnvelope } = createRuntimeHarness();
+    const callbacks = { onMessage: vi.fn().mockResolvedValue(undefined) };
+    const unsubscribe = subscribeHarnessCallbacks({
+      harness: harness as never,
+      taskRun: { id: 147, taskId: 'task-transient-idle' } as never,
+      callbacks,
+      context: {},
+      logger: {
+        runId: 147,
+        filePath: '/tmp/test.log',
+        info: vi.fn(),
+        warn: vi.fn(),
+        error: vi.fn(),
+        log: vi.fn(),
+      },
+    });
+
+    emitEnvelope({
+      ts: 1772823377200,
+      eventType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+      role: 'assistant',
+      protocol: 'roomote_runtime',
+      contentBlocks: [{ type: 'text', text: 'Preparing the result.' }],
+      metadata: { sessionId: 'runtime-session-transient' },
+      payload: {},
+    });
+    emitEnvelope({
+      ts: 1772823377201,
+      eventType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+      role: 'assistant',
+      protocol: 'roomote_runtime',
+      contentBlocks: [{ type: 'text', text: 'Provider error: retrying.' }],
+      metadata: { sessionId: 'runtime-session-transient' },
+      payload: {},
+    });
+
+    await unsubscribe.flushPendingCompletionEvents();
+
+    expect(callbacks.onMessage).toHaveBeenLastCalledWith(
+      { id: 147, taskId: 'task-transient-idle' },
+      'runtime-session-transient',
+      {
+        type: 'completion',
+        text: 'Task completed.',
+        ts: expect.any(Number),
+        provisional: true,
+      },
+      {},
+    );
 
     await unsubscribe();
   });

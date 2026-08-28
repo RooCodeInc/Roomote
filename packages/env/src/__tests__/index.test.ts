@@ -248,22 +248,6 @@ describe('Env', () => {
     expect(areCuratedIntegrationsDisabled('0')).toBe(false);
   });
 
-  it('keeps the communications fast mode setting opt-in', () => {
-    const runtimeEnv = { ...process.env };
-    delete runtimeEnv.SKIP_ENV_VALIDATION;
-    delete runtimeEnv.R_COMMUNICATIONS_FAST_MODE_SETTING_ENABLED;
-
-    expect(
-      createRoomoteEnv(runtimeEnv).R_COMMUNICATIONS_FAST_MODE_SETTING_ENABLED,
-    ).toBe(false);
-    expect(
-      createRoomoteEnv({
-        ...runtimeEnv,
-        R_COMMUNICATIONS_FAST_MODE_SETTING_ENABLED: 'true',
-      }).R_COMMUNICATIONS_FAST_MODE_SETTING_ENABLED,
-    ).toBe(true);
-  });
-
   it('accepts valid Ping instance IDs and rejects invalid ones', () => {
     const runtimeEnv = { ...process.env };
     delete runtimeEnv.SKIP_ENV_VALIDATION;

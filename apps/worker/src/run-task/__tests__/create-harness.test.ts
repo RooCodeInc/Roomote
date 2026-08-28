@@ -11,7 +11,14 @@ const {
   taskRunsStampMilestoneMock: vi.fn().mockResolvedValue(undefined),
   getHarnessModelOverrideMock: vi.fn(),
   resolveBuiltInMcpServersMock: vi.fn(() => []),
-  subscribeHarnessCallbacksMock: vi.fn(() => async () => {}),
+  subscribeHarnessCallbacksMock: vi.fn(() =>
+    Object.assign(
+      vi.fn(async () => {}),
+      {
+        flushPendingCompletionEvents: vi.fn(async () => {}),
+      },
+    ),
+  ),
   startOpenCodeServerHarnessMock: vi.fn(),
 }));
 
@@ -517,6 +524,7 @@ describe('createHarness', () => {
       }),
     );
     expect(result.getSubprocess()).toBe(initialSubprocess);
+    expect(result.flushPendingCompletionEvents).toBeTypeOf('function');
 
     integrations.userMcpServers = {
       roomote: {

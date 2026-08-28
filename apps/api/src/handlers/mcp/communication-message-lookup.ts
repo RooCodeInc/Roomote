@@ -55,10 +55,34 @@ function assertMatchingReferences(
   }
 }
 
+function resolveLookupProvider(options: {
+  reference?: ParsedCommunicationReference | null;
+  provider?: SupportedCommunicationLookupProvider;
+  taskRun?: CommunicationLookupTaskRun | null;
+}): SupportedCommunicationLookupProvider | null {
+  if (
+    options.reference &&
+    options.provider &&
+    options.reference.provider !== options.provider
+  ) {
+    throw new McpProxyError(
+      400,
+      'The supplied message or channel link does not match the communication provider',
+    );
+  }
+
+  return (
+    options.reference?.provider ??
+    options.provider ??
+    getTaskLookupProvider(options.taskRun)
+  );
+}
+
 export async function lookupCommunicationMessageContext(options: {
   channel?: string;
   messageId?: string;
   messageLink?: string;
+  provider?: SupportedCommunicationLookupProvider;
   taskRun?: CommunicationLookupTaskRun | null;
   actingUserId?: string | null;
 }): Promise<CommunicationMessageContextPayload> {
@@ -100,8 +124,11 @@ export async function lookupCommunicationMessageContext(options: {
     );
   }
 
-  const provider =
-    reference?.provider ?? getTaskLookupProvider(options.taskRun);
+  const provider = resolveLookupProvider({
+    reference,
+    provider: options.provider,
+    taskRun: options.taskRun,
+  });
   if (!provider) {
     throw new McpProxyError(
       400,
@@ -130,13 +157,17 @@ export async function lookupCommunicationChannelMessages(options: {
   channel?: string;
   oldest?: string;
   latest?: string;
+  provider?: SupportedCommunicationLookupProvider;
   taskRun?: CommunicationLookupTaskRun | null;
   actingUserId?: string | null;
 }): Promise<CommunicationChannelMessagesPayload> {
   const channel = options.channel?.trim();
   const reference = channel ? parseReference(channel) : null;
-  const provider =
-    reference?.provider ?? getTaskLookupProvider(options.taskRun);
+  const provider = resolveLookupProvider({
+    reference,
+    provider: options.provider,
+    taskRun: options.taskRun,
+  });
   if (!provider) {
     throw new McpProxyError(
       400,

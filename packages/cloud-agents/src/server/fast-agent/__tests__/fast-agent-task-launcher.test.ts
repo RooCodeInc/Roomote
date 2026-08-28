@@ -83,6 +83,8 @@ describe('createFastAgentSlackTaskLauncher', () => {
             communicationChannelId: 'C123',
             communicationThreadId: '100.001',
             communicationMessageId: '100.002',
+            slackConversationUrl:
+              'https://acme.slack.com/archives/C123/p100002?thread_ts=100.001&cid=C123',
             communicationContextInherited: true,
             fastAgentSessionId: '11111111-1111-4111-8111-111111111111',
             fastAgentParent: {
@@ -135,7 +137,30 @@ describe('createFastAgentSlackTaskLauncher', () => {
     const task = mocks.enqueueTask.mock.calls[0]?.[0]?.task;
     expect(task.payload).not.toHaveProperty('communicationMessageId');
     expect(task.payload).not.toHaveProperty('communicationTeamDomain');
+    expect(task.payload.slackConversationUrl).toBe(
+      'https://slack.com/app_redirect?channel=C123&team=T123',
+    );
     expect(task.payload).not.toHaveProperty('liveTaskStream');
+  });
+
+  it('treats the all-repositories sentinel like an omitted environment', async () => {
+    const launchTask = createFastAgentSlackTaskLauncher({
+      userId: 'user-1',
+      teamId: 'T123',
+      channelId: 'C123',
+      threadTs: '100.001',
+    });
+
+    await launchTask({
+      prompt: 'Update every repository',
+      environmentId: ALL_REPOSITORIES,
+      parentSessionId: '11111111-1111-4111-8111-111111111111',
+      postKickoff: vi.fn(),
+    });
+
+    const task = mocks.enqueueTask.mock.calls[0]?.[0]?.task;
+    expect(task.payload).toMatchObject({ repo: ALL_REPOSITORIES });
+    expect(task.payload).not.toHaveProperty('environmentId');
   });
 
   it('runs afterKickoff inside the launch gate', async () => {

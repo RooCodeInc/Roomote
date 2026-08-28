@@ -30,7 +30,6 @@ export type SlackConversationLogInput = SlackConversationSubject & {
   metadata?: Record<string, unknown>;
   taskId?: string | null;
   runId?: number | null;
-  slackQuickAnswerId?: string | null;
 };
 
 function toSlackMessageAt(messageTs: string): Date {
@@ -93,7 +92,6 @@ export async function recordSlackConversationMessage(
       metadata: input.metadata ?? {},
       taskId: input.taskId ?? null,
       runId: input.runId ?? null,
-      slackQuickAnswerId: input.slackQuickAnswerId ?? null,
     })
     .onConflictDoNothing();
 }

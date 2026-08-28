@@ -126,11 +126,14 @@ export const TaskFilters = ({
     return () => clearTimeout(handle);
   }, [prSearch]);
 
-  const { data: userOptions = [] } = useUsersForFilter({
-    repositoryName,
-    category,
-    timePeriod,
-  });
+  const { data: userOptions = [] } = useUsersForFilter(
+    {
+      repositoryName,
+      category,
+      timePeriod,
+    },
+    { enabled: showUser },
+  );
 
   const { humanUserOptions, automationUserOptions } = useMemo(() => {
     const humans: typeof userOptions = [];
@@ -147,11 +150,14 @@ export const TaskFilters = ({
     return { humanUserOptions: humans, automationUserOptions: automations };
   }, [userOptions]);
 
-  const { data: rawRepositories = [] } = useRepositoriesForFilter({
-    userId: userIdForOptionQueries,
-    category,
-    timePeriod,
-  });
+  const { data: rawRepositories = [] } = useRepositoriesForFilter(
+    {
+      userId: userIdForOptionQueries,
+      category,
+      timePeriod,
+    },
+    { enabled: showRepository },
+  );
 
   // Filter out the __all_repositories__ sentinel — it's not a real repository.
   const repositories = useMemo(
@@ -159,21 +165,29 @@ export const TaskFilters = ({
     [rawRepositories],
   );
 
-  const { data: environmentOptions = [] } = useEnvironmentsForFilter();
-  const { data: modelOptions = [] } = useModelsForFilter({
-    userId: userIdForOptionQueries,
-    category,
-    repositoryName,
-    timePeriod,
+  const { data: environmentOptions = [] } = useEnvironmentsForFilter({
+    enabled: showRepository,
   });
+  const { data: modelOptions = [] } = useModelsForFilter(
+    {
+      userId: userIdForOptionQueries,
+      category,
+      repositoryName,
+      timePeriod,
+    },
+    { enabled: showModel },
+  );
 
-  const { data: pullRequests = [] } = usePullRequestsForFilter({
-    userId: userIdForOptionQueries,
-    category,
-    repositoryName,
-    timePeriod,
-    search: debouncedPrSearch,
-  });
+  const { data: pullRequests = [] } = usePullRequestsForFilter(
+    {
+      userId: userIdForOptionQueries,
+      category,
+      repositoryName,
+      timePeriod,
+      search: debouncedPrSearch,
+    },
+    { enabled: showPullRequest },
+  );
 
   useEffect(() => {
     if (!pullRequest) {

@@ -6,10 +6,28 @@ const mocks = vi.hoisted(() => ({
   postThreadMessage: vi.fn(),
 }));
 
+vi.mock('@roomote/redis', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@roomote/redis')>();
+  return {
+    ...actual,
+    // The sticky-footer state lives in Redis; unit tests run without a
+    // server (a real client would wait on commands forever), so serve
+    // empty state.
+    getRedis: () => ({
+      set: async () => 'OK',
+      get: async () => null,
+      eval: async () => 1,
+    }),
+  };
+});
+
 vi.mock('@roomote/cloud-agents/server', () => ({
   acquireFastAgentTurnLock: mocks.acquireLock,
   answerFastAgentQuestion: mocks.answerQuestion,
   hasFastAgentSession: mocks.hasSession,
+  getOrCreateFastAgentSession: vi
+    .fn()
+    .mockResolvedValue({ id: 'fast-session-1' }),
 }));
 
 vi.mock('@roomote/cloud-agents', () => ({
@@ -148,6 +166,67 @@ describe('processFastAgentMessage', () => {
           { taskId: 'task-2', title: 'Update docs' },
         ],
       }),
+    );
+  });
+
+  it('lets the Fast model answer a bare !fast invocation', async () => {
+    const slack = {
+      addReaction: vi.fn().mockResolvedValue(true),
+      removeReaction: vi.fn().mockResolvedValue(true),
+      normalizeIncomingText: vi.fn(async (text: string) => text),
+      fetchThreadMessages: vi.fn(async () => []),
+    };
+
+    await processFastAgentMessage({
+      event: {
+        type: 'message',
+        channel: 'D123',
+        user: 'U123',
+        text: '!fast',
+        ts: '100.001',
+      } as never,
+      slack: slack as never,
+      userId: 'user-1',
+      teamId: 'T123',
+    });
+
+    expect(mocks.answerQuestion).toHaveBeenCalledWith(
+      expect.objectContaining({ question: '' }),
+    );
+    expect(mocks.postThreadMessage).toHaveBeenCalledOnce();
+    expect(mocks.postThreadMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ text: 'Doing well.' }),
+    );
+  });
+
+  it('lets the Fast model answer an empty default-mode invocation', async () => {
+    const slack = {
+      addReaction: vi.fn().mockResolvedValue(true),
+      removeReaction: vi.fn().mockResolvedValue(true),
+      normalizeIncomingText: vi.fn(async (text: string) => text),
+      fetchThreadMessages: vi.fn(async () => []),
+    };
+
+    await processFastAgentMessage({
+      event: {
+        type: 'app_mention',
+        channel: 'C123',
+        user: 'U123',
+        text: '',
+        ts: '100.001',
+      } as never,
+      slack: slack as never,
+      userId: 'user-1',
+      teamId: 'T123',
+      continuation: true,
+    });
+
+    expect(mocks.answerQuestion).toHaveBeenCalledWith(
+      expect.objectContaining({ question: '' }),
+    );
+    expect(mocks.postThreadMessage).toHaveBeenCalledOnce();
+    expect(mocks.postThreadMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ text: 'Doing well.' }),
     );
   });
 
