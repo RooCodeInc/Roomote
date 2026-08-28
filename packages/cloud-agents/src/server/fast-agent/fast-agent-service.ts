@@ -85,6 +85,7 @@ import {
 import { getFastAgentUserIdentity } from './fast-agent-user-identity';
 import { FastAgentTurnDiagnostics } from './fast-agent-turn-diagnostics';
 import {
+  captureFastAgentInferenceAttemptOutcome,
   captureFastAgentInferenceContext,
   type FastAgentPromptKind,
 } from './fast-agent-context-telemetry';
@@ -448,9 +449,6 @@ async function runFastAgentInferenceWithRetries<T>(
         error,
         failure,
         attemptNumber,
-      );
-      console.warn(
-        `[Fast Agent] Retrying inference failure attempt=${attemptNumber}/${maxRetries} delayMs=${delayMs} reason=${failure.reason}: ${formatErrorForLog(error)}`,
       );
       try {
         await onRetry?.({
@@ -1229,7 +1227,7 @@ export async function answerFastAgentQuestion({
     const reportProviderRetryEvent = async (
       event: NonTaskProviderRetryEvent,
     ) => {
-      diagnostics.recordOpenCodeProviderRetry(event.attempt);
+      diagnostics.recordOpenCodeProviderRetry(event.attempt, event.message);
       await reportInferenceRetry({
         failure: classifyNonTaskInferenceError(new Error(event.message)),
         attemptNumber: event.attempt,
@@ -1824,6 +1822,7 @@ export async function answerFastAgentQuestion({
       prompt: serializedTurnPrompt,
       bootstrapPrompt: serializedBootstrapPrompt,
       onPathSelected: (path) => {
+        diagnostics.recordSessionPath(path);
         console.info(`[Fast Agent] OpenCode session path=${path}.`);
       },
       execute: async (
@@ -1858,19 +1857,23 @@ export async function answerFastAgentQuestion({
           sessionPath === 'warm' || sessionPath === 'cold_resume'
             ? 'turn_delta'
             : 'bootstrap';
+        let attemptSessionPath = sessionPath;
         let promptTimeoutMs: number | null = null;
+        let resolvedInferenceModel: string | undefined;
         const captureInferenceContext = (
           attemptScope: 'prompt_submission' | 'provider_retry',
           providerRetryAttempt?: number,
         ) => {
           captureFastAgentInferenceContext({
             userId,
+            sessionId: session.id,
+            turnId,
             systemPrompt: system,
             surface: conversation.surface,
             turnSource,
             platformEventHandling,
             platformEventKind,
-            sessionPath,
+            sessionPath: attemptSessionPath,
             promptKind,
             attemptNumber: inferenceAttemptNumber,
             attemptScope,
@@ -1921,113 +1924,183 @@ export async function answerFastAgentQuestion({
               let providerRetryTimeout:
                 | ReturnType<typeof setTimeout>
                 | undefined;
+              const attemptStartedAt = Date.now();
+              let promptStarted = false;
+              let providerRetryEventCount = 0;
               try {
                 inferenceAttemptNumber += 1;
+                resolvedInferenceModel = undefined;
                 captureInferenceContext('prompt_submission');
-                return await generateTrackedNonTaskTextInOpenCodeSession(
-                  {
-                    userId,
-                    surface:
-                      NON_TASK_INFERENCE_SURFACES.fastAgentQuestionAnswering,
-                    modelRole: FAST_AGENT_MODEL_ROLE,
-                    ...(model ? { model } : {}),
-                    ...(reasoningEffort ? { reasoningEffort } : {}),
-                    timeoutMs: promptTimeoutMs,
-                    maxProviderRetryAttempts: FAST_AGENT_INFERENCE_MAX_RETRIES,
-                    system,
-                    prompt: promptForAttempt,
-                    onProviderRetry: async (event) => {
-                      captureInferenceContext('provider_retry', event.attempt);
-                      // Initial turns stay unbounded unless the provider enters
-                      // recovery. Start this deadline once so repeated provider
-                      // retry events cannot extend the conversation lock.
-                      if (
-                        promptTimeoutMs === null &&
-                        providerRetryTimeout === undefined
-                      ) {
-                        providerRetryTimeout = setTimeout(() => {
-                          providerRetryAbortController.abort(
-                            new NonTaskOpenCodePromptTimeoutError(
-                              FAST_AGENT_INFERENCE_RETRY_ATTEMPT_TIMEOUT_MS,
-                            ),
-                          );
-                        }, FAST_AGENT_INFERENCE_RETRY_ATTEMPT_TIMEOUT_MS);
-                        providerRetryTimeout.unref();
-                      }
-                      await reportProviderRetryEvent(event);
-                    },
-                    ...(imageFilesForAttempt.length
-                      ? {
-                          files: imageFilesForAttempt,
-                          requiredInputModality: 'image' as const,
+                const resultPromise =
+                  generateTrackedNonTaskTextInOpenCodeSession(
+                    {
+                      userId,
+                      surface:
+                        NON_TASK_INFERENCE_SURFACES.fastAgentQuestionAnswering,
+                      modelRole: FAST_AGENT_MODEL_ROLE,
+                      ...(model ? { model } : {}),
+                      ...(reasoningEffort ? { reasoningEffort } : {}),
+                      timeoutMs: promptTimeoutMs,
+                      maxProviderRetryAttempts:
+                        FAST_AGENT_INFERENCE_MAX_RETRIES,
+                      system,
+                      prompt: promptForAttempt,
+                      onProviderRetry: async (event) => {
+                        providerRetryEventCount += 1;
+                        captureInferenceContext(
+                          'provider_retry',
+                          event.attempt,
+                        );
+                        // Initial turns stay unbounded unless the provider enters
+                        // recovery. Start this deadline once so repeated provider
+                        // retry events cannot extend the conversation lock.
+                        if (
+                          promptTimeoutMs === null &&
+                          providerRetryTimeout === undefined
+                        ) {
+                          providerRetryTimeout = setTimeout(() => {
+                            providerRetryAbortController.abort(
+                              new NonTaskOpenCodePromptTimeoutError(
+                                FAST_AGENT_INFERENCE_RETRY_ATTEMPT_TIMEOUT_MS,
+                              ),
+                            );
+                          }, FAST_AGENT_INFERENCE_RETRY_ATTEMPT_TIMEOUT_MS);
+                          providerRetryTimeout.unref();
                         }
-                      : {}),
-                  },
-                  openCodeSession,
-                  {
-                    directory: nativeRuntime.directory,
-                    env: nativeRuntime.env,
-                    permission: FAST_AGENT_SESSION_PERMISSIONS,
-                    signal: promptSignal,
-                    promptOnlySubagents: true,
-                    trackSessionTreeUsage: true,
-                    validateSession,
-                    tools: buildFastAgentToolFilter(
-                      availableIntegrations.map(
-                        (integration) => integration.id,
+                        await reportProviderRetryEvent(event);
+                      },
+                      ...(imageFilesForAttempt.length
+                        ? {
+                            files: imageFilesForAttempt,
+                            requiredInputModality: 'image' as const,
+                          }
+                        : {}),
+                    },
+                    openCodeSession,
+                    {
+                      directory: nativeRuntime.directory,
+                      env: nativeRuntime.env,
+                      permission: FAST_AGENT_SESSION_PERMISSIONS,
+                      signal: promptSignal,
+                      promptOnlySubagents: true,
+                      trackSessionTreeUsage: true,
+                      validateSession,
+                      tools: buildFastAgentToolFilter(
+                        availableIntegrations.map(
+                          (integration) => integration.id,
+                        ),
                       ),
-                    ),
-                    onModelResolved: (model) => {
-                      diagnostics.recordModelResolved(model);
-                    },
-                    onMessageCompleted: (message) => {
-                      completedOpenCodeMessage = message;
-                    },
-                    onPromptStarted: () => {
-                      diagnostics.markInferenceStarted();
-                    },
-                    onSessionReady: async (openCodeSessionID) => {
-                      activeOpenCodeSessionId = openCodeSessionID;
-                      unbindAllExecutors();
-                      unbindExecutors.add(
-                        bindFastAgentNativeToolExecutor(
+                      onModelResolved: (model) => {
+                        resolvedInferenceModel = model;
+                        diagnostics.recordModelResolved(model);
+                      },
+                      onMessageCompleted: (message) => {
+                        completedOpenCodeMessage = message;
+                      },
+                      onPromptStarted: () => {
+                        promptStarted = true;
+                        diagnostics.markInferenceStarted();
+                      },
+                      onSessionReady: async (openCodeSessionID) => {
+                        activeOpenCodeSessionId = openCodeSessionID;
+                        diagnostics.recordOpenCodeSessionReady(
                           openCodeSessionID,
-                          session.id,
-                          executeNativeTool,
-                          {
-                            allowSkillAccess: true,
-                            allowSpillRecovery: true,
-                            skillStore,
-                            spillBudget,
-                          },
-                        ),
-                      );
+                        );
+                        unbindAllExecutors();
+                        unbindExecutors.add(
+                          bindFastAgentNativeToolExecutor(
+                            openCodeSessionID,
+                            session.id,
+                            executeNativeTool,
+                            {
+                              allowSkillAccess: true,
+                              allowSpillRecovery: true,
+                              skillStore,
+                              spillBudget,
+                            },
+                          ),
+                        );
+                      },
+                      onSubagentSessionReady: (subagentSessionID) => {
+                        if (boundSubagentSessionIDs.has(subagentSessionID))
+                          return;
+                        boundSubagentSessionIDs.add(subagentSessionID);
+                        unbindExecutors.add(
+                          bindFastAgentNativeToolExecutor(
+                            subagentSessionID,
+                            session.id,
+                            () =>
+                              Promise.resolve({
+                                success: false,
+                                error:
+                                  'That tool is reserved for the Fast parent agent.',
+                              }),
+                            {
+                              allowSkillAccess: false,
+                              allowSpillRecovery: false,
+                              skillStore,
+                              spillBudget,
+                            },
+                          ),
+                        );
+                      },
                     },
-                    onSubagentSessionReady: (subagentSessionID) => {
-                      if (boundSubagentSessionIDs.has(subagentSessionID))
-                        return;
-                      boundSubagentSessionIDs.add(subagentSessionID);
-                      unbindExecutors.add(
-                        bindFastAgentNativeToolExecutor(
-                          subagentSessionID,
-                          session.id,
-                          () =>
-                            Promise.resolve({
-                              success: false,
-                              error:
-                                'That tool is reserved for the Fast parent agent.',
-                            }),
-                          {
-                            allowSkillAccess: false,
-                            allowSpillRecovery: false,
-                            skillStore,
-                            spillBudget,
-                          },
-                        ),
-                      );
-                    },
-                  },
-                );
+                  );
+                const result = await resultPromise;
+                captureFastAgentInferenceAttemptOutcome({
+                  userId,
+                  sessionId: session.id,
+                  turnId,
+                  surface: conversation.surface,
+                  sessionPath: attemptSessionPath,
+                  promptKind,
+                  attemptNumber: inferenceAttemptNumber,
+                  outcome: 'success',
+                  stage: !resolvedInferenceModel
+                    ? 'model_resolution'
+                    : promptStarted
+                      ? 'model_generation'
+                      : 'opencode_setup',
+                  elapsedMs: Date.now() - attemptStartedAt,
+                  resolvedModel: resolvedInferenceModel,
+                  providerRetryEventCount,
+                });
+                return result;
+              } catch (error) {
+                const failure = classifyNonTaskInferenceError(error);
+                const attemptStage = !resolvedInferenceModel
+                  ? 'model_resolution'
+                  : promptStarted
+                    ? 'model_generation'
+                    : 'opencode_setup';
+                const attemptElapsedMs = Date.now() - attemptStartedAt;
+                captureFastAgentInferenceAttemptOutcome({
+                  userId,
+                  sessionId: session.id,
+                  turnId,
+                  surface: conversation.surface,
+                  sessionPath: attemptSessionPath,
+                  promptKind,
+                  attemptNumber: inferenceAttemptNumber,
+                  outcome: 'failure',
+                  stage: attemptStage,
+                  elapsedMs: attemptElapsedMs,
+                  failureReason: failure.reason,
+                  failureRetryable: failure.retryable,
+                  resolvedModel: resolvedInferenceModel,
+                  providerRetryEventCount,
+                });
+                diagnostics.recordInferenceAttemptFailure({
+                  attemptNumber: inferenceAttemptNumber,
+                  promptKind,
+                  stage: attemptStage,
+                  elapsedMs: attemptElapsedMs,
+                  reason: failure.reason,
+                  retryable: failure.retryable,
+                  providerRetryEventCount,
+                  error,
+                });
+                throw error;
               } finally {
                 if (providerRetryTimeout) {
                   clearTimeout(providerRetryTimeout);
@@ -2059,6 +2132,8 @@ export async function answerFastAgentQuestion({
                   promptForAttempt = serializedBootstrapPrompt;
                   imageFilesForAttempt = imageFiles;
                   promptKind = 'clean_retry_bootstrap';
+                  attemptSessionPath = 'cold_rebuild';
+                  diagnostics.recordSessionPath(attemptSessionPath);
                 }
                 // Keep every recovery attempt bounded so it cannot hold the
                 // conversation lock forever if the provider stalls again.

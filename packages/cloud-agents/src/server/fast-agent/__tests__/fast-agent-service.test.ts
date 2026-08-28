@@ -21,6 +21,7 @@ const mocks = vi.hoisted(() => ({
   bindExecutor: vi.fn(),
   bindMcpExecutor: vi.fn(),
   captureInferenceContext: vi.fn(),
+  captureInferenceAttemptOutcome: vi.fn(),
   revokeMcpCapabilities: vi.fn(),
   nativeExecutor: undefined as
     | ((call: {
@@ -133,6 +134,7 @@ vi.mock('../fast-agent-integration-broker', () => ({
 
 vi.mock('../fast-agent-context-telemetry', () => ({
   captureFastAgentInferenceContext: mocks.captureInferenceContext,
+  captureFastAgentInferenceAttemptOutcome: mocks.captureInferenceAttemptOutcome,
 }));
 
 vi.mock('../fast-agent-tasks', () => ({
@@ -379,6 +381,15 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         inputImageCount: 0,
         attachedImageCount: 0,
         degradedComponents: [],
+      }),
+    );
+    expect(mocks.captureInferenceAttemptOutcome).toHaveBeenCalledWith(
+      expect.objectContaining({
+        outcome: 'success',
+        stage: 'model_generation',
+        attemptNumber: 1,
+        resolvedModel: 'openrouter/openai/gpt-5.4',
+        providerRetryEventCount: 0,
       }),
     );
     expect(mocks.upsertMessage).toHaveBeenCalledWith(
@@ -2547,10 +2558,29 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
           attachedImageCount: 1,
         }),
       );
+      expect(mocks.captureInferenceAttemptOutcome).toHaveBeenNthCalledWith(
+        1,
+        expect.objectContaining({
+          outcome: 'failure',
+          attemptNumber: 1,
+          failureReason: 'endpoint_unreachable',
+          failureRetryable: true,
+          providerRetryEventCount: 0,
+        }),
+      );
+      expect(mocks.captureInferenceAttemptOutcome).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({
+          outcome: 'success',
+          attemptNumber: 2,
+          providerRetryEventCount: 0,
+        }),
+      );
       expect(mocks.captureInferenceContext).toHaveBeenNthCalledWith(
         2,
         expect.objectContaining({
           promptKind: 'side_effect_retry_recovery',
+          sessionPath: 'warm',
           attemptNumber: 2,
           inputImageCount: 1,
           attachedImageCount: 0,
@@ -2786,8 +2816,18 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         2,
         expect.objectContaining({
           promptKind: 'clean_retry_bootstrap',
+          sessionPath: 'cold_rebuild',
           attemptNumber: 2,
           attachedImageCount: 1,
+        }),
+      );
+      expect(mocks.captureInferenceAttemptOutcome).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({
+          promptKind: 'clean_retry_bootstrap',
+          sessionPath: 'cold_rebuild',
+          attemptNumber: 2,
+          outcome: 'success',
         }),
       );
       expect(adapter.postReply).toHaveBeenNthCalledWith(1, {

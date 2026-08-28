@@ -61,6 +61,8 @@ export class FastAgentTurnDiagnostics {
   private terminalError: unknown;
   private visibleReplyCount = 0;
   private resolvedModel: string | undefined;
+  private sessionPath: string | undefined;
+  private openCodeSessionId: string | undefined;
   private inferenceQueuedAt: number | undefined;
   private inferenceSetupStartedAt: number | undefined;
   private inferenceStartedAt: number | undefined;
@@ -105,6 +107,14 @@ export class FastAgentTurnDiagnostics {
     this.resolvedModel = model;
   }
 
+  recordSessionPath(path: string): void {
+    this.sessionPath = path;
+  }
+
+  recordOpenCodeSessionReady(sessionId: string): void {
+    this.openCodeSessionId = sessionId;
+  }
+
   markInferenceQueued(): void {
     this.inferenceQueuedAt ??= this.now();
   }
@@ -128,7 +138,7 @@ export class FastAgentTurnDiagnostics {
     }
   }
 
-  recordOpenCodeProviderRetry(attempt: number): void {
+  recordOpenCodeProviderRetry(attempt: number, error?: unknown): void {
     this.openCodeProviderRetryEventCount += 1;
     this.lastOpenCodeProviderRetryAttempt = attempt;
 
@@ -139,6 +149,52 @@ export class FastAgentTurnDiagnostics {
     const elapsedMs = this.now() - this.inferenceStartedAt;
     this.firstOpenCodeProviderRetryElapsedMs ??= elapsedMs;
     this.lastOpenCodeProviderRetryElapsedMs = elapsedMs;
+
+    this.logger.warn(
+      formatSingleLineLog('[Fast Agent] OpenCode provider retry.', {
+        surface: this.context.conversation.surface,
+        conversationId: this.context.conversation.conversationId,
+        messageId: this.context.currentMessageId,
+        canonicalConversationId: this.canonicalConversationId,
+        sessionPath: this.sessionPath,
+        openCodeSessionId: this.openCodeSessionId,
+        resolvedModel: this.resolvedModel,
+        attempt,
+        elapsedMs,
+        error: error === undefined ? undefined : formatTerminalError(error),
+      }),
+    );
+  }
+
+  recordInferenceAttemptFailure(input: {
+    attemptNumber: number;
+    promptKind: string;
+    stage: string;
+    elapsedMs: number;
+    reason: string;
+    retryable: boolean;
+    providerRetryEventCount: number;
+    error: unknown;
+  }): void {
+    this.logger.warn(
+      formatSingleLineLog('[Fast Agent] Inference attempt failed.', {
+        surface: this.context.conversation.surface,
+        conversationId: this.context.conversation.conversationId,
+        messageId: this.context.currentMessageId,
+        canonicalConversationId: this.canonicalConversationId,
+        sessionPath: this.sessionPath,
+        openCodeSessionId: this.openCodeSessionId,
+        resolvedModel: this.resolvedModel,
+        attemptNumber: input.attemptNumber,
+        promptKind: input.promptKind,
+        stage: input.stage,
+        elapsedMs: input.elapsedMs,
+        reason: input.reason,
+        retryable: input.retryable,
+        providerRetryEventCount: input.providerRetryEventCount,
+        error: formatTerminalError(input.error),
+      }),
+    );
   }
 
   recordRoomoteInferenceRetry(): void {
@@ -219,6 +275,8 @@ export class FastAgentTurnDiagnostics {
       turnSource: this.context.turnSource,
       modelRole: this.context.modelRole,
       resolvedModel: this.resolvedModel,
+      sessionPath: this.sessionPath,
+      openCodeSessionId: this.openCodeSessionId,
       release: this.deployMarker.roomote_release,
       releaseSource: this.deployMarker.roomote_release_source,
       outcome: this.failed ? 'failure' : 'success',
@@ -252,6 +310,10 @@ export class FastAgentTurnDiagnostics {
         this.lastOpenCodeProviderRetryElapsedMs,
       lastOpenCodeProviderRetryAttempt: this.lastOpenCodeProviderRetryAttempt,
       roomoteInferenceRetryCount: this.roomoteInferenceRetryCount,
+      recoveredAfterOpenCodeProviderRetry:
+        !this.failed && this.openCodeProviderRetryEventCount > 0,
+      recoveredAfterRoomoteInferenceRetry:
+        !this.failed && this.roomoteInferenceRetryCount > 0,
       nativeToolCallCount: this.nativeToolCallCount,
       completedNativeToolCallCount,
       nativeToolStats:
