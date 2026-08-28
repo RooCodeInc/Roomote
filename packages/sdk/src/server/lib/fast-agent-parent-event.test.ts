@@ -84,6 +84,7 @@ vi.mock('@roomote/cloud-agents/server', () => ({
       await mocks.enqueueTask({ task });
       return { success: true, taskId: 'child-task-1', taskUrl };
     },
+  createFastAgentWebTaskLauncher: vi.fn(() => mocks.launchTask),
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -329,6 +330,54 @@ describe('deliverFastAgentParentEvent', () => {
           message: 'The proof is ready.',
           imageArtifactIds: ['artifact-1', 'artifact-1'],
         }),
+    );
+  });
+
+  it('passes a canonical review offer into the web transcript payload', async () => {
+    const webParent = {
+      sessionId: parent.sessionId,
+      conversation: {
+        surface: 'web' as const,
+        workspaceId: 'user-1',
+        conversationId: 'session-1',
+      },
+    };
+    mocks.answerQuestion.mockResolvedValue('Presented feedback');
+
+    await deliverFastAgentParentEvent({
+      parent: webParent,
+      event: {
+        type: 'pull_request_feedback',
+        feedbackId: 'feedback-1',
+        taskId: 'task-1',
+        runId: 42,
+        taskUrl: 'https://roomote.example/task/task-1',
+        pullRequest: {
+          provider: 'github',
+          host: 'github.com',
+          repository: 'acme/web',
+          number: 42,
+          title: 'Fix review feedback',
+          url: 'https://github.com/acme/web/pull/42',
+          status: 'open',
+        },
+        summary: 'Review feedback remains.',
+        suggestedActionQuestion: 'Resolve these issues?',
+        suggestedActionPrompt: 'Resolve the review feedback.',
+        reviewActionDeliveryId: '22222222-2222-4222-8222-222222222222',
+      },
+    });
+
+    expect(mocks.answerQuestion).toHaveBeenCalledWith(
+      expect.objectContaining({
+        platformEventTranscriptPayload: {
+          prReviewAction: {
+            deliveryId: '22222222-2222-4222-8222-222222222222',
+            question: 'Resolve these issues?',
+            status: 'pending',
+          },
+        },
+      }),
     );
   });
 

@@ -13,6 +13,8 @@ import {
   getImageUrisFromContentBlocks,
   getTextFromContentBlocks,
   inferAcpMessageKind,
+  parsePrReviewActionOffer,
+  type PrReviewActionChoice,
   type AcpEventType,
   type ReasoningEffort,
 } from '@roomote/types';
@@ -35,6 +37,7 @@ import { useOpenSessionTaskPanel } from './session-task-panel-context';
 import { useNarrationMode } from '@/hooks/useNarrationMode';
 import { usePageTitle } from '@/hooks/usePageTitle';
 import { truncatePageTitle } from '@/lib/page-title';
+import { PrReviewActionOffer } from './PrReviewActionOffer';
 
 import {
   AcpTranscriptBlockList,
@@ -185,6 +188,14 @@ export function FastSessionTranscript({
       ),
     [messages],
   );
+  const reviewOffers = useMemo(
+    () =>
+      messages.flatMap((message) => {
+        const offer = parsePrReviewActionOffer(message.payload);
+        return offer ? [offer] : [];
+      }),
+    [messages],
+  );
   const { renderBlocks, suppressMessage } = useAcpTranscriptBlocks({
     messages: uiMessages,
     artifacts: [],
@@ -276,6 +287,18 @@ export function FastSessionTranscript({
     [isSending, sessionId, trpcClient],
   );
 
+  const handleReviewAction = useCallback(
+    async (deliveryId: string, choice: PrReviewActionChoice) => {
+      const result = await trpcClient.fastSessions.reviewAction.mutate({
+        sessionId,
+        deliveryId,
+        choice,
+      });
+      return result.status;
+    },
+    [sessionId, trpcClient],
+  );
+
   return (
     <MessageUiOptionsProvider value={{ displayMode }}>
       <WorkspaceHeader
@@ -301,6 +324,20 @@ export function FastSessionTranscript({
             onSuppress={suppressMessage}
             onOpenDelegatedTask={openTaskPanel ?? undefined}
           />
+          {reviewOffers.map((offer) => (
+            <div
+              key={offer.deliveryId}
+              className="mt-3 rounded-lg border border-border/70 bg-muted/40 px-3 py-3"
+            >
+              <p className="mb-2 text-sm">{offer.question}</p>
+              <PrReviewActionOffer
+                offer={offer}
+                onAction={(choice) =>
+                  handleReviewAction(offer.deliveryId, choice)
+                }
+              />
+            </div>
+          ))}
         </ConversationContent>
         <ConversationScrollButton />
       </Conversation>

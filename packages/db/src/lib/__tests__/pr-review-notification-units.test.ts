@@ -15,6 +15,7 @@ import {
   prReviewNotificationDeliveries,
   prReviewNotificationUnitEvents,
   prReviewNotificationUnits,
+  releaseCanonicalPrReviewActionDispatch,
   runFactory,
   taskFactory,
   taskPullRequests,
@@ -847,6 +848,115 @@ describe('canonical PR review notification ownership', () => {
       enabledByUserId: user.id,
       sourceTaskId: task.id,
       sourceDestinationKey: task.id,
+    });
+  });
+
+  it('authorizes and atomically claims a web Fast action by destination', async () => {
+    const user = await userFactory.create();
+    const task = await taskFactory.create({ initiatorUserId: user.id });
+    const repository = `owner/web-action-${task.id}`;
+    const destinationKey = '["web","user-1","session-1"]';
+    await Promise.all([
+      runFactory.create({
+        taskId: task.id,
+        payload: {
+          fastAgentParent: {
+            sessionId: '11111111-1111-4111-8111-111111111111',
+            conversation: {
+              surface: 'web',
+              workspaceId: 'user-1',
+              conversationId: 'session-1',
+            },
+          },
+        },
+      }),
+      associate(task.id, repository, 8),
+    ]);
+    await persistPrReviewEvent(
+      eventInput({
+        repository,
+        prNumber: 8,
+        eventKey: `web-action-${task.id}`,
+      }),
+    );
+    const claim = (await claimForRepository(repository)).find(
+      ({ repository: claimedRepository }) => claimedRepository === repository,
+    );
+    expect(claim?.ownershipVersion).toBe('canonical');
+    if (!claim || claim.ownershipVersion !== 'canonical') {
+      throw new Error('expected canonical claim');
+    }
+    await transitionCanonicalPrReviewDelivery({
+      deliveryId: claim.deliveryId,
+      leaseToken: claim.leaseToken,
+      expected: 'claimed',
+      status: 'prepared',
+    });
+    await transitionCanonicalPrReviewDelivery({
+      deliveryId: claim.deliveryId,
+      leaseToken: claim.leaseToken,
+      expected: 'prepared',
+      status: 'prompt_posting',
+      values: { followUpPrompt: 'Resolve the feedback.' },
+    });
+    await attachCanonicalPrReviewActionMessage(
+      claim.deliveryId,
+      claim.deliveryId,
+      claim.leaseToken,
+    );
+
+    await expect(
+      claimCanonicalPrReviewAction({
+        deliveryId: claim.deliveryId,
+        choice: 'yes',
+        actingUserId: user.id,
+        expectedDestinationKind: 'fast_conversation',
+        expectedDestinationKey: '["web","other","session"]',
+      }),
+    ).resolves.toBeNull();
+    await expect(
+      claimCanonicalPrReviewAction({
+        deliveryId: claim.deliveryId,
+        choice: 'yes',
+        actingUserId: user.id,
+        expectedDestinationKind: 'fast_conversation',
+        expectedDestinationKey: destinationKey,
+      }),
+    ).resolves.toMatchObject({ taskId: task.id });
+    await expect(
+      releaseCanonicalPrReviewActionDispatch(claim.deliveryId),
+    ).resolves.toBe(true);
+    await expect(
+      db.query.prReviewNotificationDeliveries.findFirst({
+        where: eq(prReviewNotificationDeliveries.id, claim.deliveryId),
+        columns: { status: true, actingUserId: true, targetTaskId: true },
+      }),
+    ).resolves.toEqual({
+      status: 'awaiting_user_action',
+      actingUserId: null,
+      targetTaskId: null,
+    });
+    const concurrent = await Promise.all([
+      claimCanonicalPrReviewAction({
+        deliveryId: claim.deliveryId,
+        choice: 'yes',
+        actingUserId: user.id,
+        expectedDestinationKind: 'fast_conversation',
+        expectedDestinationKey: destinationKey,
+      }),
+      claimCanonicalPrReviewAction({
+        deliveryId: claim.deliveryId,
+        choice: 'yes',
+        actingUserId: user.id,
+        expectedDestinationKind: 'fast_conversation',
+        expectedDestinationKey: destinationKey,
+      }),
+    ]);
+    expect(concurrent.filter(Boolean)).toHaveLength(1);
+    expect(concurrent.find(Boolean)).toMatchObject({
+      destinationKind: 'fast_conversation',
+      destinationKey,
+      taskId: task.id,
     });
   });
 });

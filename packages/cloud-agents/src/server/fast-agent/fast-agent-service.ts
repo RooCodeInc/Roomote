@@ -774,6 +774,7 @@ export async function answerFastAgentQuestion({
   platformEventHandling = 'default',
   platformEventVisibility = 'optional',
   platformEventKind = 'delegated_task',
+  platformEventTranscriptPayload,
 }: {
   question: string;
   images?: string[];
@@ -797,6 +798,7 @@ export async function answerFastAgentQuestion({
   platformEventHandling?: FastAgentPlatformEventHandling;
   platformEventVisibility?: FastAgentPlatformEventVisibility;
   platformEventKind?: FastAgentPlatformEventKind;
+  platformEventTranscriptPayload?: Record<string, unknown>;
 }): Promise<string> {
   const turnId = buildFastAgentTurnId({
     currentMessageId,
@@ -897,6 +899,7 @@ export async function answerFastAgentQuestion({
         },
         payload: {
           purpose: reply.purpose,
+          ...(platformEventTranscriptPayload ?? {}),
           ...(reply.imageArtifactIds?.length
             ? { imageArtifactIds: reply.imageArtifactIds }
             : {}),

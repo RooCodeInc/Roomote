@@ -43,6 +43,7 @@ import {
   ALL_REPOSITORIES,
   buildFastAgentChildTaskMetadata,
   buildPrReviewActionCallbackData,
+  PR_REVIEW_ACTION_LABELS,
   TaskPayloadKind,
   exitedRunStatuses,
   type FastAgentConversation,
@@ -178,6 +179,7 @@ export type FastAgentParentEvent =
       summary: string;
       suggestedActionQuestion?: string;
       suggestedActionPrompt?: string;
+      reviewActionDeliveryId?: string;
       reviewResult?: {
         reviewKind: 'initial' | 'sync' | null;
         outcome: string | null;
@@ -984,21 +986,21 @@ async function createDiscordFastAgentParentTurn(
                     buttons: [
                       [
                         {
-                          text: 'Resolve these issues',
+                          text: PR_REVIEW_ACTION_LABELS.yes,
                           callbackData: buildPrReviewActionCallbackData(
                             'yes',
                             action.nonce,
                           ),
                         },
                         {
-                          text: 'Auto-resolve on this PR',
+                          text: PR_REVIEW_ACTION_LABELS.auto,
                           callbackData: buildPrReviewActionCallbackData(
                             'auto',
                             action.nonce,
                           ),
                         },
                         {
-                          text: 'Dismiss',
+                          text: PR_REVIEW_ACTION_LABELS.dismiss,
                           callbackData: buildPrReviewActionCallbackData(
                             'dismiss',
                             action.nonce,
@@ -1377,6 +1379,19 @@ export async function deliverFastAgentParentEvent(params: {
         params.event.type === 'automation_triggered'
           ? 'automation'
           : 'delegated_task',
+      ...(params.event.type === 'pull_request_feedback' &&
+      params.event.reviewActionDeliveryId &&
+      params.event.suggestedActionQuestion
+        ? {
+            platformEventTranscriptPayload: {
+              prReviewAction: {
+                deliveryId: params.event.reviewActionDeliveryId,
+                question: params.event.suggestedActionQuestion,
+                status: 'pending',
+              },
+            },
+          }
+        : {}),
       adapter: {
         ...parentTurn.adapter,
         launchTask,

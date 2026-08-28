@@ -202,6 +202,25 @@ export async function sendFastAgentTaskMessage(
   });
 }
 
+export async function sendFastAgentTaskMessageOnce(
+  context: FastAgentTaskApiContext,
+  params: {
+    taskId: string;
+    message: string;
+    clientMessageId: string;
+  },
+): Promise<FastAgentTaskToolResult> {
+  return callFastAgentTaskApi({
+    ...context,
+    method: 'POST',
+    path: `${FAST_AGENT_TASKS_API_PATH}/${params.taskId}/send_message`,
+    body: {
+      message: params.message,
+      clientMessageId: params.clientMessageId,
+    },
+  });
+}
+
 export async function cancelFastAgentTask(
   context: FastAgentTaskApiContext,
   taskId: string,

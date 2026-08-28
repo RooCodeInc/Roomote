@@ -1,5 +1,6 @@
 import {
   ACP_UI_TOOL_OUTPUT_MAX_CHARS,
+  type PrReviewActionOfferStatus,
   sanitizeEnvelopeFields,
 } from '@roomote/types';
 import {
@@ -49,6 +50,42 @@ export type FastSessionMessage = Pick<
   | 'nativeMessageId'
   | 'createdAt'
 >;
+
+export function buildFastSessionPrReviewDestinationKey(session: {
+  surface: string;
+  workspaceId: string;
+  conversationId: string;
+}): string {
+  return JSON.stringify([
+    session.surface,
+    session.workspaceId,
+    session.conversationId,
+  ]);
+}
+
+export async function updateFastSessionPrReviewOfferStatus(
+  sessionId: string,
+  deliveryIds: string[],
+  status: PrReviewActionOfferStatus,
+): Promise<void> {
+  if (deliveryIds.length === 0) return;
+
+  await db
+    .update(fastAgentMessages)
+    .set({
+      payload: sql`jsonb_set(coalesce(${fastAgentMessages.payload}, '{}'::jsonb), '{prReviewAction,status}', to_jsonb(${status}::text), true)`,
+      updatedAt: sql`now()`,
+    })
+    .where(
+      and(
+        eq(fastAgentMessages.conversationId, sessionId),
+        inArray(
+          sql<string>`${fastAgentMessages.payload} -> 'prReviewAction' ->> 'deliveryId'`,
+          deliveryIds,
+        ),
+      ),
+    );
+}
 
 const FAST_SESSION_TRANSCRIPT_MESSAGE_LIMIT = 1000;
 

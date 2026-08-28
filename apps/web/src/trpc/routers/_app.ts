@@ -33,12 +33,14 @@ import {
 
 import {
   getFastSessionTasksCommand,
+  handleFastSessionPrReviewActionCommand,
   replyToFastSessionCommand,
   startFastSessionCommand,
   updateFastSessionModelSelectionCommand,
 } from '../commands/fast-sessions';
 import {
   replyToFastSessionInputSchema,
+  fastSessionPrReviewActionInputSchema,
   startFastSessionInputSchema,
   updateFastSessionModelSelectionInputSchema,
 } from '../commands/fast-sessions/input';
@@ -2816,6 +2818,11 @@ export const appRouter = createRouter({
       .input(replyToFastSessionInputSchema)
       .mutation(({ ctx: { auth }, input }) =>
         replyToFastSessionCommand(auth, input),
+      ),
+    reviewAction: protectedProcedure
+      .input(fastSessionPrReviewActionInputSchema)
+      .mutation(({ ctx: { auth }, input }) =>
+        handleFastSessionPrReviewActionCommand(auth, input),
       ),
     updateModelSelection: protectedProcedure
       .input(updateFastSessionModelSelectionInputSchema)
