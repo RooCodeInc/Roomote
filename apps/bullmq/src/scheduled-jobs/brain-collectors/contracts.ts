@@ -65,6 +65,7 @@ export interface BrainCollector {
     pages: CollectorPage[];
     nextCursor: string | null;
     done: boolean;
+    stateUpdates?: CollectorStateUpdate[];
     itemUpdates?: CollectorItemUpdate[];
     pageRetirements?: CollectorPageRetirement[];
   }>;

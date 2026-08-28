@@ -32,6 +32,7 @@ export const BRAIN_NAMESPACES = [
   { id: 'prs', prefix: 'prs/', label: 'Pull requests' },
   { id: 'github', prefix: 'github/', label: 'GitHub issues' },
   { id: 'slack', prefix: 'slack/', label: 'Slack' },
+  { id: 'discord', prefix: 'discord/', label: 'Discord' },
   { id: 'notion', prefix: 'notion/', label: 'Notion' },
   { id: 'meetings', prefix: 'meetings/', label: 'Meetings' },
   { id: 'daily', prefix: 'daily/', label: 'Daily digests' },
@@ -118,6 +119,7 @@ export const BRAIN_COLLECTOR_IDS = {
   ripplingWorkers: 'rippling-workers',
   slackPersonDirectory: 'slack-person-directory:occurrence-date-v2',
   slackPublicChannels: 'slack-public-channels:entity-timeline-v3',
+  discordPublicChannels: 'discord-public-channels:entity-timeline-v1',
   githubIssues: 'github-issues:occurrence-date-v3',
   notionPages: 'notion-pages',
   granolaMeetings: 'granola-meetings:entity-timeline-v3',
@@ -136,6 +138,7 @@ export const BRAIN_PAGE_TYPES = {
   pullRequest: 'pull-request',
   githubIssue: 'github-issue',
   slackDay: 'slack',
+  discordDay: 'discord',
   meeting: 'meeting',
   notionPage: 'notion-page',
   person: 'person',
@@ -247,6 +250,18 @@ export const BRAIN_SOURCES = [
       BRAIN_COLLECTOR_IDS.slackPublicChannels,
     ] as readonly string[],
     requires: 'slack',
+  },
+  {
+    id: 'discord-public-channels',
+    label: 'Discord public channels',
+    description:
+      'History of public server channels and active public threads the Roomote bot can read. Private channels and DMs are never read.',
+    namespaceId: 'discord',
+    collectorIdPrefix: 'discord-public-channels',
+    collectorIds: [
+      BRAIN_COLLECTOR_IDS.discordPublicChannels,
+    ] as readonly string[],
+    requires: 'discord',
   },
   {
     id: 'github-issues',
@@ -365,7 +380,7 @@ export function parseBrainBackfillCompletedCount(
  * chosen from gbrain's own description, which is written for a different
  * product and routes to tools this deployment does not expose.
  */
-export const BRAIN_MCP_READ_INSTRUCTIONS = `The \`gbrain\` server is this deployment's shared memory (the Brain). It holds memories distilled from completed tasks plus activity from connected integrations (pull requests, Slack channels, meeting notes, GitHub issues), each stored as a page with citations.
+export const BRAIN_MCP_READ_INSTRUCTIONS = `The \`gbrain\` server is this deployment's shared memory (the Brain). It holds memories distilled from completed tasks plus activity from connected integrations (pull requests, Slack and Discord channels, meeting notes, GitHub issues), each stored as a page with citations.
 
 ## Using what it knows
 
@@ -379,7 +394,7 @@ Which tool:
 - \`query\` when you are describing a concept and do not know how the Brain words it. It expands your phrasing into related queries, so it finds pages that talk about the same thing in different language. This is the default, and the right choice for that first pass.
 - \`search\` when you already know the exact token: a slug, a repository name, an error string, a person's handle. Cheaper than \`query\` because it skips the expansion step.
 - \`entity\` for one known person. It resolves names and linked provider handles against canonical deployment-member cards without an LLM call.
-- \`list_pages\` to enumerate rather than guess, and to answer "what is in the Brain" or "what happened recently" (it sorts by recency). Use it before ever concluding the Brain is empty. Pages are namespaced: \`people/\`, \`tasks/\`, \`prs/\`, \`slack/\`, \`notion/\`, \`meetings/\`, \`github/\`.
+- \`list_pages\` to enumerate rather than guess, and to answer "what is in the Brain" or "what happened recently" (it sorts by recency). Use it before ever concluding the Brain is empty. Pages are namespaced: \`people/\`, \`tasks/\`, \`prs/\`, \`slack/\`, \`discord/\`, \`notion/\`, \`meetings/\`, \`github/\`.
 - \`get_page\` on a slug for a page's full text, once a search result looks relevant.
 
 A result set that comes back populated is not proof of coverage, and one query returning nothing is not proof of absence. If the answer matters, try the other phrasing or list the namespace before deciding the Brain has nothing.

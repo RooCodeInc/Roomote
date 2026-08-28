@@ -21,6 +21,8 @@ Roomote fills Memory from what it can already see:
   its own work: what it decided, why, and what is still open
 - **pull requests** from your connected source-control provider
 - **public Slack channels** the Roomote bot has been added to
+- **public Discord server channels and active public threads** the Roomote bot
+  can read
 - **GitHub issues** in connected repositories
 - **Notion pages** explicitly shared with the deployment's Notion integration
 - **meeting notes** from Granola, when that integration is connected
@@ -60,6 +62,15 @@ public channel is what designates that channel as a source, so the corpus stays
 inside what your team has already made visible company-wide. Slack directory
 cards contain names, handles, and job titles, but never copy profile email,
 status, timezone, or avatar fields into Memory.
+
+Discord collection follows the server's permission model: Roomote includes only
+channels visible to the server's `@everyone` role where the bot also has **View
+Channel** and **Read Message History**. Private channels, private threads, group
+DMs, and direct messages are never collected. Active public threads and forum
+posts inherit the visibility of their public parent channel. Roomote re-reads a
+bounded recent window so edits and deletions are reflected, and removes stored
+pages when an authoritative permission scan shows that a channel is no longer
+publicly accessible.
 
 Notion only returns pages explicitly shared with its integration. Workspace
 guests and restricted users may omit email addresses, and some integration
