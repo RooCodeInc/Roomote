@@ -296,6 +296,32 @@ describe('createArtifactRecord', () => {
       expect.any(Object),
     );
   });
+
+  it('uses the generic endpoint for architecture snapshots', async () => {
+    global.fetch = vi.fn().mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        id: 'art-snapshot',
+        version: 1,
+        uploadUrl: 'https://s3.example.com/upload',
+        viewUrl: 'https://test-api.example.com/view',
+        artifactType: 'architecture-snapshot',
+      }),
+    });
+
+    await createArtifactRecord(config, {
+      taskId: 'task-1',
+      path: 'architecture-snapshots/current.json',
+      artifactType: 'architecture-snapshot',
+      contentType: 'application/json',
+      size: 100,
+    });
+
+    expect(fetch).toHaveBeenCalledWith(
+      'https://test-api.example.com/api/artifacts',
+      expect.any(Object),
+    );
+  });
 });
 
 describe('uploadToPresignedUrl', () => {

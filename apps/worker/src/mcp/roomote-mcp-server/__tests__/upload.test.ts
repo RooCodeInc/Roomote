@@ -62,6 +62,8 @@ describe('handleUpload', () => {
     expect(parsed.success).toBe(true);
     expect(parsed.artifactId).toBe('art-1');
     expect(parsed.artifactType).toBe('general');
+    expect(parsed.version).toBe(1);
+    expect(parsed.path).toBe('test.md');
     expect(parsed.viewUrl).toBe('https://test-api.example.com/view');
     expect(parsed.rawUrl).toBeUndefined();
   });
@@ -170,6 +172,96 @@ describe('handleUpload', () => {
     expect(parsed.artifactType).toBe('visual-proof');
     expect(parsed.rawUrl).toBe(
       'https://test-api.example.com/api/artifacts/art-proof/raw',
+    );
+  });
+
+  it('validates architecture snapshot content before uploading', async () => {
+    await writeFile(
+      join(testDir, 'architecture.json'),
+      JSON.stringify({
+        schemaVersion: 1,
+        title: 'Artifact flow',
+        mermaid: 'flowchart LR\n  Agent --> API',
+        sources: [
+          {
+            repository: 'RooCodeInc/Roomote',
+            path: 'apps/api/src/handlers/artifacts/create.ts',
+          },
+        ],
+      }),
+    );
+
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          id: 'art-snapshot',
+          version: 1,
+          uploadUrl: 'https://s3.example.com/upload',
+          viewUrl: 'https://test-api.example.com/view',
+          artifactType: 'architecture-snapshot',
+        }),
+      })
+      .mockResolvedValueOnce(successfulS3UploadResponse())
+      .mockResolvedValueOnce({ ok: true });
+    global.fetch = fetchMock;
+
+    const result = await handleUpload(
+      {
+        path: 'architecture.json',
+        taskId: 'task-1',
+        artifactType: 'architecture-snapshot',
+      },
+      { ...config, workspacePath: testDir },
+    );
+
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(
+      JSON.parse(fetchMock.mock.calls[0]![1]!.body as string),
+    ).toMatchObject({ artifactType: 'architecture-snapshot' });
+    expect(JSON.parse(result.content[0]!.text)).toMatchObject({
+      success: true,
+      artifactId: 'art-snapshot',
+      artifactType: 'architecture-snapshot',
+      version: 1,
+      path: 'architecture.json',
+    });
+  });
+
+  it('does not start an upload for an invalid architecture snapshot', async () => {
+    await writeFile(
+      join(testDir, 'architecture.json'),
+      JSON.stringify({
+        schemaVersion: 1,
+        title: 'Unsafe reference',
+        mermaid: 'flowchart LR\n  A --> B',
+        sources: [
+          {
+            repository: 'RooCodeInc/Roomote',
+            path: '../outside.ts',
+          },
+        ],
+      }),
+    );
+    const fetchMock = vi.fn();
+    global.fetch = fetchMock;
+
+    const result = await handleUpload(
+      {
+        path: 'architecture.json',
+        taskId: 'task-1',
+        artifactType: 'architecture-snapshot',
+      },
+      { ...config, workspacePath: testDir },
+    );
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(JSON.parse(result.content[0]!.text)).toMatchObject({
+      success: false,
+    });
+    expect(result.content[0]!.text).toContain(
+      'Path must be a repository-relative file path',
     );
   });
 

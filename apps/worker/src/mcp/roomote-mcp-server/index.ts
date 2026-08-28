@@ -91,7 +91,11 @@ export const roomoteMcpServer = new McpServer({
 });
 
 let hasSubmittedAutomationSlackSummary = false;
-const manageArtifactsUploadTypeSchema = z.enum(['general', 'visual-proof']);
+const manageArtifactsUploadTypeSchema = z.enum([
+  'general',
+  'visual-proof',
+  'architecture-snapshot',
+]);
 const nonEmptyStringSchema = z.string().refine((value) => value.length > 0, {
   message: 'Value must be non-empty.',
 });
@@ -271,6 +275,7 @@ roomoteMcpServer.registerTool(
       'Use action "create_plan" to create a markdown plan artifact (requires title and content). Returns viewUrl for sharing. ' +
       'Use action "upload" to upload a workspace-relative file or an absolute file under /tmp (requires path and type). Use type "general" for ordinary files. ' +
       'Use type "visual-proof" for uploaded screenshots or proof artifacts that should be treated as visual proof. Visual-proof uploads are not posted to chat automatically; when the image should appear in the originating thread, pass returned artifact IDs to `send_chat_reply` via `imageArtifactIds` (or share `viewUrl`/`rawUrl` in the reply text for non-images). ' +
+      'Use type "architecture-snapshot" for JSON shaped as {"schemaVersion":1,"title":string,"mermaid":string,"sources":[{"repository":string,"path":string,"lineStart"?:number,"lineEnd"?:number,"description"?:string}]}. Source paths must be repository-relative. Architecture snapshots are optional generated explanatory evidence, not authoritative architecture documentation, and upload failures must not block task completion. ' +
       'Returns rawUrl for direct embedding (for example PR <img src>). ' +
       'Use action "download" to retrieve an artifact by task ID and artifact path (requires taskId and path). Downloads may target the current task or another task, so artifacts such as plans published by earlier tasks can be retrieved. ' +
       'For download, the path must include the category prefix exactly as stored in Roomote (e.g., "plans/my-plan.md" or "tmp/capture.png", not just the filename). ' +
@@ -296,12 +301,12 @@ roomoteMcpServer.registerTool(
       type: manageArtifactsUploadTypeSchema
         .optional()
         .describe(
-          'Artifact type for upload. Required for upload; use "general" for ordinary files and "visual-proof" for visual proof. Visual-proof uploads are not posted to chat automatically.',
+          'Artifact type for upload. Required for upload; use "general" for ordinary files, "visual-proof" for visual proof, and "architecture-snapshot" for a valid architecture snapshot JSON artifact. Visual-proof uploads are not posted to chat automatically.',
         ),
       artifactType: taskArtifactTypeSchema
         .optional()
         .describe(
-          'Optional artifact type filter for list (one of "general", "plan", "visual-proof"). Omit to list all artifact types.',
+          'Optional artifact type filter for list (one of "general", "plan", "visual-proof", "architecture-snapshot"). Omit to list all artifact types.',
         ),
       taskId: z
         .string()

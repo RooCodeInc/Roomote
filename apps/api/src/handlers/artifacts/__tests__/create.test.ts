@@ -111,4 +111,37 @@ describe('createArtifact', () => {
       signingKey: 'signing-key',
     });
   });
+
+  it('accepts architecture snapshots through the generic artifact route', async () => {
+    mockCreateTaskArtifactRecord.mockResolvedValue({
+      id: 'art-snapshot',
+      version: 2,
+      artifactType: 'architecture-snapshot',
+    });
+
+    const response = await createApp().request('http://localhost/artifacts', {
+      method: 'POST',
+      body: JSON.stringify({
+        taskId: 'task-1',
+        artifactType: 'architecture-snapshot',
+        contentType: 'application/json',
+        path: 'architecture-snapshots/current.json',
+        size: 100,
+      }),
+      headers: { 'content-type': 'application/json' },
+    });
+
+    expect(response.status).toBe(200);
+    expect(mockCreateTaskArtifactRecord).toHaveBeenCalledWith(
+      expect.objectContaining({
+        artifactType: 'architecture-snapshot',
+        path: 'architecture-snapshots/current.json',
+      }),
+    );
+    expect(await response.json()).toMatchObject({
+      id: 'art-snapshot',
+      version: 2,
+      artifactType: 'architecture-snapshot',
+    });
+  });
 });

@@ -51,6 +51,7 @@ vi.mock('@streamdown/math', () => ({
 }));
 
 vi.mock('@streamdown/mermaid', () => ({
+  createMermaidPlugin: vi.fn(() => ({})),
   mermaid: {},
 }));
 
@@ -62,19 +63,23 @@ vi.mock('sonner', () => ({
   },
 }));
 
-vi.mock('@roomote/types', () => ({
-  ALL_REPOSITORIES: [],
-  DEFAULT_MANAGED_DEPLOYMENT_ACCESS: {
-    state: 'active',
-    reason: null,
-    revision: 1,
-    effectiveAt: '2026-01-01T00:00:00.000Z',
-    restrictionStartsAt: null,
-    remediationUrl: null,
-  },
-  MANAGED_DEPLOYMENT_READ_ONLY_MESSAGE:
-    'New tasks are paused due to a billing issue. Please check billing.',
-}));
+vi.mock('@roomote/types', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@roomote/types')>();
+  return {
+    ...actual,
+    ALL_REPOSITORIES: [],
+    DEFAULT_MANAGED_DEPLOYMENT_ACCESS: {
+      state: 'active',
+      reason: null,
+      revision: 1,
+      effectiveAt: '2026-01-01T00:00:00.000Z',
+      restrictionStartsAt: null,
+      remediationUrl: null,
+    },
+    MANAGED_DEPLOYMENT_READ_ONLY_MESSAGE:
+      'New tasks are paused due to a billing issue. Please check billing.',
+  };
+});
 
 vi.mock('@/trpc/client', () => ({
   useTRPC: () => ({
@@ -180,6 +185,12 @@ vi.mock('@/components/system', () => ({
   ),
   BasicTooltip: ({ children }: { children: ReactNode }) => <>{children}</>,
   MediaViewerImage: () => <div>image</div>,
+  Alert: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+  AlertTitle: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+  AlertDescription: ({ children }: { children: ReactNode }) => (
+    <div>{children}</div>
+  ),
+  Badge: ({ children }: { children: ReactNode }) => <span>{children}</span>,
 }));
 
 vi.mock('@/components/ai-elements', () => ({
@@ -251,6 +262,41 @@ describe('ArtifactViewerContent', () => {
     expect(screen.getByText('Raw')).toBeInTheDocument();
 
     expect(screen.queryByText('Type: visual-proof')).not.toBeInTheDocument();
+  });
+
+  it('renders architecture snapshots in the artifact evidence viewer', () => {
+    render(
+      <ArtifactViewerContent
+        taskId="task-1"
+        artifact={{
+          id: 'artifact-snapshot',
+          taskId: 'task-1',
+          path: 'architecture-snapshots/current.json',
+          version: 2,
+          artifactType: 'architecture-snapshot',
+          contentType: 'application/json',
+          size: 512,
+          createdAt: new Date('2026-08-28T00:00:00.000Z'),
+          downloadUrl: 'https://example.test/architecture.json',
+          content: JSON.stringify({
+            schemaVersion: 1,
+            title: 'Artifact flow',
+            mermaid: 'flowchart LR\n  Agent --> API',
+            sources: [
+              {
+                repository: 'RooCodeInc/Roomote',
+                path: 'apps/api/src/handlers/artifacts/create.ts',
+              },
+            ],
+          }),
+        }}
+      />,
+    );
+
+    expect(screen.getByText('Generated explanatory evidence')).toBeVisible();
+    expect(screen.getByText('Source references')).toBeVisible();
+    expect(screen.getByText('Raw')).toBeVisible();
+    expect(screen.queryByText('Build this')).not.toBeInTheDocument();
   });
 
   it('hides the Build action when a markdown plan has no fetched content', () => {

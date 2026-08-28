@@ -412,6 +412,27 @@ describe('roomote MCP tool descriptions', () => {
     );
   });
 
+  it('documents optional architecture snapshot publication', async () => {
+    const { registeredTools } = await importRoomoteMcpServer();
+    const artifactsTool = getRegisteredTool(
+      registeredTools,
+      'manage_artifacts',
+    );
+
+    expect(artifactsTool.config.description).toContain(
+      'Use type "architecture-snapshot" for JSON shaped as',
+    );
+    expect(artifactsTool.config.description).toContain(
+      'Source paths must be repository-relative.',
+    );
+    expect(artifactsTool.config.description).toContain(
+      'optional generated explanatory evidence, not authoritative architecture documentation',
+    );
+    expect(artifactsTool.config.description).toContain(
+      'upload failures must not block task completion',
+    );
+  });
+
   it('documents the artifact list action on manage_artifacts', async () => {
     const { registeredTools } = await importRoomoteMcpServer();
     const artifactsTool = getRegisteredTool(
@@ -437,7 +458,7 @@ describe('roomote MCP tool descriptions', () => {
       'Use it to reuse previously uploaded artifact links (for example visual-proof links) instead of relying on transcript memory or re-uploading.',
     );
     expect(artifactTypeField.description).toBe(
-      'Optional artifact type filter for list (one of "general", "plan", "visual-proof"). Omit to list all artifact types.',
+      'Optional artifact type filter for list (one of "general", "plan", "visual-proof", "architecture-snapshot"). Omit to list all artifact types.',
     );
   });
 

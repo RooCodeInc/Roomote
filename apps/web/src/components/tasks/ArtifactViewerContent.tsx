@@ -48,6 +48,7 @@ import {
 } from '@/components/ai-elements';
 
 import { BuildArtifactConfirmDialog } from './BuildArtifactConfirmDialog';
+import { ArchitectureSnapshotContent } from './ArchitectureSnapshotContent';
 
 const extensionToLanguage: Record<string, BundledLanguage> = {
   json: 'json',
@@ -227,16 +228,24 @@ export function ArtifactViewerContent({
 
   const isMarkdown =
     artifact.contentType.includes('markdown') || artifact.path.endsWith('.md');
+  const isArchitectureSnapshot =
+    artifact.artifactType === 'architecture-snapshot';
   const isImage = artifact.contentType.startsWith('image/');
   const isVideo = artifact.contentType.startsWith('video/');
   const isPDF = artifact.contentType === 'application/pdf';
   const isText =
-    !isMarkdown && !isImage && !isVideo && !isPDF && !!artifact.content;
+    !isMarkdown &&
+    !isArchitectureSnapshot &&
+    !isImage &&
+    !isVideo &&
+    !isPDF &&
+    !!artifact.content;
   const language = getLanguageFromPath(artifact.path);
 
   const canRender =
     isText ||
     (isMarkdown && artifact.content) ||
+    (isArchitectureSnapshot && artifact.content) ||
     ((isImage || isVideo || isPDF) && artifact.downloadUrl);
 
   const taskPayload = task?.taskRun?.payload as TaskPayload | undefined;
@@ -399,7 +408,7 @@ export function ArtifactViewerContent({
             </div>
 
             <div className="ml-auto flex items-center gap-3">
-              {canRender && isMarkdown && (
+              {canRender && (isMarkdown || isArchitectureSnapshot) && (
                 <div className="flex items-center gap-2">
                   <Label htmlFor="raw-mode" className="cursor-pointer text-xs">
                     Raw
@@ -418,7 +427,9 @@ export function ArtifactViewerContent({
         <div
           className={cn(
             'ph-no-capture flex-1 min-h-0 bg-card overflow-y-auto h-full',
-            (isMarkdown && !isRaw) || isPDF || isVideo
+            ((isMarkdown || isArchitectureSnapshot) && !isRaw) ||
+              isPDF ||
+              isVideo
               ? 'overflow-x-hidden'
               : 'overflow-x-auto',
           )}
@@ -445,15 +456,20 @@ export function ArtifactViewerContent({
                 </div>
               )}
 
-              {((isMarkdown && isRaw) || isText) && artifact.content && (
-                <div className="min-w-0 overflow-x-auto p-2 text-sm leading-relaxed text-foreground">
-                  <CodeBlock
-                    code={artifact.content}
-                    language={language}
-                    className="w-max min-w-full max-w-none border-none bg-transparent"
-                  />
-                </div>
+              {isArchitectureSnapshot && !isRaw && artifact.content && (
+                <ArchitectureSnapshotContent content={artifact.content} />
               )}
+
+              {(((isMarkdown || isArchitectureSnapshot) && isRaw) || isText) &&
+                artifact.content && (
+                  <div className="min-w-0 overflow-x-auto p-2 text-sm leading-relaxed text-foreground">
+                    <CodeBlock
+                      code={artifact.content}
+                      language={language}
+                      className="w-max min-w-full max-w-none border-none bg-transparent"
+                    />
+                  </div>
+                )}
 
               {isImage && (
                 <MediaViewerImage

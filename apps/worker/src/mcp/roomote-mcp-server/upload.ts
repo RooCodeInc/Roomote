@@ -1,4 +1,7 @@
-import type { TaskArtifactType } from '@roomote/types';
+import {
+  parseArchitectureSnapshot,
+  type TaskArtifactType,
+} from '@roomote/types';
 
 import {
   deletePreparedLocalArtifact,
@@ -10,7 +13,7 @@ import type { ArtifactConfig, ToolResult } from './types.js';
 
 type ManageArtifactsUploadType = Extract<
   TaskArtifactType,
-  'general' | 'visual-proof'
+  'general' | 'visual-proof' | 'architecture-snapshot'
 >;
 
 export async function handleUpload(
@@ -31,6 +34,16 @@ export async function handleUpload(
       input.path,
       config.workspacePath,
     );
+    if (input.artifactType === 'architecture-snapshot') {
+      const snapshot = parseArchitectureSnapshot(
+        preparedArtifact.content.toString('utf8'),
+      );
+      if (!snapshot.success) {
+        return errorResult(
+          `Invalid architecture snapshot: ${snapshot.error.issues[0]?.message ?? 'Invalid contract'}`,
+        );
+      }
+    }
     const result = await uploadPreparedArtifact(config, {
       taskId: input.taskId,
       artifactType: input.artifactType,
@@ -44,6 +57,8 @@ export async function handleUpload(
     return successResult({
       artifactId: result.artifactId,
       artifactType: result.artifactType,
+      version: result.version,
+      path: preparedArtifact.artifactPath,
       viewUrl: result.viewUrl,
       ...(result.rawUrl && { rawUrl: result.rawUrl }),
       ...(input.deleteAfterUpload && { deleted: true }),
