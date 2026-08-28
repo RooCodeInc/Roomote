@@ -24,6 +24,7 @@ const {
   mockResolveConfiguredGitHubAppSlugIfConfigured,
   mockResolveTelegramRuntimeCredentials,
   mockGetPrBodyAttributionLine,
+  mockGetSessionForTask,
   mockTasksFindFirst,
   mockResolveLaunchTaskCommitAuthor,
   mockResolveRunCommitAuthor,
@@ -46,6 +47,7 @@ const {
   mockResolveConfiguredGitHubAppSlugIfConfigured: vi.fn(),
   mockResolveTelegramRuntimeCredentials: vi.fn(),
   mockGetPrBodyAttributionLine: vi.fn(),
+  mockGetSessionForTask: vi.fn(),
   mockTasksFindFirst: vi.fn(),
   mockResolveLaunchTaskCommitAuthor: vi.fn(),
   mockResolveRunCommitAuthor: vi.fn(),
@@ -127,6 +129,7 @@ vi.mock('@roomote/db/server', () => ({
     mockGetDeploymentGitHubRoomoteMentionEnabled(...args),
   getDeploymentPrAction: (...args: unknown[]) =>
     mockGetDeploymentPrAction(...args),
+  getSessionForTask: (...args: unknown[]) => mockGetSessionForTask(...args),
   resolveTelegramRuntimeCredentials: (...args: unknown[]) =>
     mockResolveTelegramRuntimeCredentials(...args),
   db: {
@@ -270,6 +273,7 @@ describe('createOrUpdateSourceControlPullRequestForTaskRun', () => {
     });
     mockGetDeploymentPrAction.mockResolvedValue('draft');
     mockEnvironmentsFindFirst.mockResolvedValue(null);
+    mockGetSessionForTask.mockResolvedValue(null);
     mockResolveGitLabToken.mockResolvedValue('gitlab-token');
     mockResolveGiteaToken.mockResolvedValue('gitea-token');
     mockResolveGiteaBaseUrl.mockResolvedValue('https://git.example.com');
@@ -1597,6 +1601,115 @@ Done.`,
           'https://example.com/task/task-123?utm_source=github-comment&utm_medium=link&utm_campaign=standard',
       }),
     );
+  });
+
+  it.each([
+    {
+      label: 'uses the associated Fast session as the primary web link',
+      payload: {
+        repo: 'acme/web',
+        fastAgentSessionId: '11111111-1111-4111-8111-111111111111',
+      },
+      linkedSession: {
+        id: '22222222-2222-4222-8222-222222222222',
+        visibility: 'visible',
+        fastConversationId: '11111111-1111-4111-8111-111111111111',
+      },
+      expectedSessionUrl:
+        'https://example.com/sessions/22222222-2222-4222-8222-222222222222?utm_source=github-comment&utm_medium=link&utm_campaign=standard',
+      queriesSession: true,
+    },
+    {
+      label: 'keeps the task link for a direct coding task',
+      payload: { repo: 'acme/web' },
+      linkedSession: null,
+      expectedSessionUrl: undefined,
+      queriesSession: false,
+    },
+    {
+      label: 'falls back to the task link when the Fast session is absent',
+      payload: {
+        repo: 'acme/web',
+        fastAgentSessionId: '11111111-1111-4111-8111-111111111111',
+      },
+      linkedSession: null,
+      expectedSessionUrl: undefined,
+      queriesSession: true,
+    },
+    {
+      label:
+        'falls back to the task link when the Fast session association does not match',
+      payload: {
+        repo: 'acme/web',
+        fastAgentSessionId: '11111111-1111-4111-8111-111111111111',
+      },
+      linkedSession: {
+        id: '22222222-2222-4222-8222-222222222222',
+        visibility: 'visible',
+        fastConversationId: '33333333-3333-4333-8333-333333333333',
+      },
+      expectedSessionUrl: undefined,
+      queriesSession: true,
+    },
+    {
+      label: 'falls back to the task link when the Fast session is hidden',
+      payload: {
+        repo: 'acme/web',
+        fastAgentSessionId: '11111111-1111-4111-8111-111111111111',
+      },
+      linkedSession: {
+        id: '22222222-2222-4222-8222-222222222222',
+        visibility: 'hidden',
+        fastConversationId: '11111111-1111-4111-8111-111111111111',
+      },
+      expectedSessionUrl: undefined,
+      queriesSession: true,
+    },
+  ])('$label', async (testCase) => {
+    makeOctokit({
+      list: [],
+      created: {
+        number: 13,
+        node_id: 'node-13',
+        html_url: 'https://github.com/acme/web/pull/13',
+        title: '[Feature] X',
+        draft: true,
+        base: { ref: 'develop' },
+      },
+    });
+    mockRepositoriesFindFirst.mockResolvedValue({
+      installationId: 555,
+      externalRepoId: null,
+      fullName: 'acme/web',
+      htmlUrl: 'https://github.com/acme/web',
+      private: false,
+    });
+    mockGetSessionForTask.mockResolvedValue(testCase.linkedSession);
+
+    await createOrUpdateSourceControlPullRequestForTaskRun({
+      taskRun: makeTaskRun(testCase.payload),
+      input: {
+        ...baseInput,
+        targetBranch: 'develop',
+        body: '## What changed\n\nDone.',
+      },
+    });
+
+    expect(mockGetPrBodyAttributionLine).toHaveBeenCalledWith(
+      expect.objectContaining({
+        taskUrl:
+          'https://example.com/task/task-123?utm_source=github-comment&utm_medium=link&utm_campaign=standard',
+        sessionUrl: testCase.expectedSessionUrl,
+      }),
+    );
+    if (testCase.queriesSession) {
+      expect(mockGetSessionForTask).toHaveBeenCalledWith(
+        expect.anything(),
+        'task-123',
+      );
+    } else {
+      expect(mockGetSessionForTask).not.toHaveBeenCalled();
+    }
   });
 
   it('prepends canonical attribution without changing non-opener body content', async () => {

@@ -141,4 +141,17 @@ describe('getPrBodyAttributionLine', () => {
     expect(line).toContain('@acme');
     expect(line).not.toContain('@roomote');
   });
+
+  it('uses a Fast session as the primary link and keeps task execution details secondary', () => {
+    const line = getPrBodyAttributionLine({
+      attribution: DEFAULT_ROOMOTE_COMMIT_AUTHOR,
+      taskUrl: 'https://app.roomote.dev/task/task-123',
+      sessionUrl: 'https://app.roomote.dev/sessions/session-123',
+      taskSurface: 'web',
+    });
+
+    expect(line).toContain(
+      'Follow up by mentioning @roomote or in [the Fast session](https://app.roomote.dev/sessions/session-123). [View execution details](https://app.roomote.dev/task/task-123).',
+    );
+  });
 });
