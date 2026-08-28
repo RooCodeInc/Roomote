@@ -119,6 +119,7 @@ export async function drainLinearMessagesToResumeRun(
       : undefined;
   const payloadForResume: TaskPayload<typeof TaskPayloadKind.SnapshotResume> = {
     repo,
+    reportConsumer: 'direct-user',
     environmentId,
     selectedRepositories: scopedSelectedRepositories,
     port: sourceRun.port ?? undefined,

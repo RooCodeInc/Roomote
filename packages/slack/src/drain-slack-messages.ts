@@ -136,6 +136,7 @@ export async function drainSlackMessagesToResumeRun(
 
     const payload: TaskPayload<typeof TaskPayloadKind.SnapshotResume> = {
       repo,
+      reportConsumer: 'direct-user',
       environmentId,
       selectedRepositories: scopedSelectedRepositories,
       port: sourceRun.port ?? undefined,

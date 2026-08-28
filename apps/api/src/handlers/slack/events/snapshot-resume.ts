@@ -210,6 +210,7 @@ export async function processSnapshotResume(
     };
     const payloadBase = {
       repo,
+      reportConsumer: 'direct-user' as const,
       environmentId,
       port: completedRun.port ?? undefined,
       sourceSnapshotId: completedRun.snapshotId!,

@@ -806,6 +806,7 @@ async function handleAgentSessionEvent(
           typeof TaskPayloadKind.SnapshotResume
         > = {
           repo,
+          reportConsumer: 'direct-user',
           environmentId,
           port: completedRun.port ?? undefined,
           sourceSnapshotId: completedRun.snapshotId,

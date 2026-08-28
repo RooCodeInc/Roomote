@@ -1069,6 +1069,7 @@ async function resumeTeamsTaskFromSnapshot(input: {
       const resumePayload: TaskPayload<typeof TaskPayloadKind.SnapshotResume> =
         {
           repo,
+          reportConsumer: 'direct-user',
           ...(environmentId ? { environmentId } : {}),
           ...(completedRun.port ? { port: completedRun.port } : {}),
           sourceSnapshotId,

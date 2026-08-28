@@ -80,6 +80,7 @@ export async function resumeCommunicationTaskFromSnapshot(input: {
 
   const resumePayload: TaskPayload<typeof TaskPayloadKind.SnapshotResume> = {
     repo,
+    reportConsumer: 'direct-user',
     ...(environmentId ? { environmentId } : {}),
     ...(input.completedRun.port ? { port: input.completedRun.port } : {}),
     sourceSnapshotId: input.completedRun.snapshotId,

@@ -474,6 +474,7 @@ export async function restoreTaskRunSnapshotCommand(
 
     const payload: TaskPayload<typeof TaskPayloadKind.SnapshotResume> = {
       repo: sourceRun.payload.repo,
+      reportConsumer: 'direct-user',
       environmentId: sourceRun.payload.environmentId,
       port: sourceRun.port ?? undefined,
       sourceSnapshotId: input.sourceSnapshotId,

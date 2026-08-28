@@ -1031,6 +1031,7 @@ export async function resumeExistingTaskAndDeliverFollowUp({
 
   const resumePayload = {
     repo: asString(sourcePayload.repo) ?? '',
+    reportConsumer: 'direct-user' as const,
     environmentId: asString(sourcePayload.environmentId),
     port: sourceRun.port ?? undefined,
     sourceSnapshotId: sourceRun.snapshotId,

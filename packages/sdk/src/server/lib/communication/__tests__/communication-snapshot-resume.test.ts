@@ -46,7 +46,6 @@ describe('resumeCommunicationTaskFromSnapshot', () => {
         provider: 'discord',
         text: 'Make one more change',
         user: 'Matt',
-        userId: 'user-1',
         ts: 'message-resume',
       },
       channelId: 'channel-1',
@@ -67,8 +66,10 @@ describe('resumeCommunicationTaskFromSnapshot', () => {
           payload: expect.objectContaining({
             communicationProvider: 'discord',
             communicationSourceEventId: 'message-resume',
+            reportConsumer: 'direct-user',
           }),
         }),
+        actingUserId: null,
       }),
       { launchClass: 'human' },
     );
