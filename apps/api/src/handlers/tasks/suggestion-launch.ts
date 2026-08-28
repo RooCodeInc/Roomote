@@ -8,9 +8,9 @@ import { isDeploymentReadOnlyError } from '@roomote/types';
 import { resolveFastAgentEntryMode } from '../fast-agent-entry.js';
 import { cancelOrphanedWorkItemRunBestEffort } from './orphaned-work-item-run.js';
 
-export type SuggestedTaskLaunchMode = 'fast' | 'coding';
+type SuggestedTaskLaunchMode = 'fast' | 'coding';
 
-export type SuggestedTaskLaunchAttempt =
+type SuggestedTaskLaunchAttempt =
   | {
       accepted: true;
       runId: number | null;
@@ -21,7 +21,7 @@ export type SuggestedTaskLaunchAttempt =
       reason?: string;
     };
 
-export type SuggestedTaskLaunchResult =
+type SuggestedTaskLaunchResult =
   | {
       status: 'started';
       mode: SuggestedTaskLaunchMode;
