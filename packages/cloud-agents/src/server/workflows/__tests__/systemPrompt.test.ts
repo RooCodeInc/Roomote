@@ -50,4 +50,17 @@ describe('ROOMOTE_SYSTEM_PROMPT', () => {
     expect(prompt).not.toContain('never patronize or dismiss');
     expect(prompt).not.toContain('Fast');
   });
+
+  it('uses an automation identity for automation-owned reports', () => {
+    const prompt = buildRoomoteSystemPrompt('0.40.2', {
+      reportConsumer: 'automation',
+    });
+
+    expect(prompt).toContain(
+      'You are Roomote, a software engineering agent executing an automation with a defined reporting contract.',
+    );
+    expect(prompt).toContain('# Engineering Approach');
+    expect(prompt).not.toContain('# Personality');
+    expect(prompt).not.toContain('delegated by an orchestrator');
+  });
 });

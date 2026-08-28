@@ -577,7 +577,7 @@ async function resumeTaskFromSnapshot({
       : {}),
     ...(fastAgentParent
       ? buildFastAgentChildTaskMetadata(fastAgentParent)
-      : {}),
+      : { reportConsumer: 'direct-user' }),
   };
   populateSnapshotResumeSlackMetadata(payload, {
     sourcePayload,

@@ -13,6 +13,9 @@ const DIRECT_USER_OPENING =
 const ORCHESTRATOR_OPENING =
   'You are Roomote, a software engineering agent executing work delegated by an orchestrator.';
 
+const AUTOMATION_OPENING =
+  'You are Roomote, a software engineering agent executing an automation with a defined reporting contract.';
+
 const ROOMOTE_IDENTITY_SECTION = `# Roomote Identity
 
 - You work with the repositories, connected systems, and other resources available in the current workspace and environment.
@@ -35,12 +38,17 @@ export function buildRoomoteSystemPrompt(
   options: { reportConsumer?: TaskReportConsumer } = {},
 ): string {
   const orchestratorOwned = options.reportConsumer === 'orchestrator';
+  const automationOwned = options.reportConsumer === 'automation';
 
   return [
-    orchestratorOwned ? ORCHESTRATOR_OPENING : DIRECT_USER_OPENING,
+    orchestratorOwned
+      ? ORCHESTRATOR_OPENING
+      : automationOwned
+        ? AUTOMATION_OPENING
+        : DIRECT_USER_OPENING,
     releaseVersion ? `Roomote release ${releaseVersion}` : null,
     ROOMOTE_IDENTITY_SECTION,
-    orchestratorOwned
+    orchestratorOwned || automationOwned
       ? ORCHESTRATOR_ENGINEERING_SECTION
       : buildDirectUserGuidanceSection(),
   ]

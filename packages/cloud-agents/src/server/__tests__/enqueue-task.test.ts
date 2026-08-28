@@ -884,6 +884,7 @@ describe('enqueueTask initiator stamping', () => {
     expect(task!.prAssigneeLogin).toBeNull();
 
     expect(run.actingUserId).toBeNull();
+    expect(run.payload.reportConsumer).toBe('automation');
   });
 
   it('promotes matchedUserId to initiatorUserId while keeping actor context', async () => {

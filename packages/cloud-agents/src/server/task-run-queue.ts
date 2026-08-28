@@ -27,6 +27,7 @@ import {
   getDisplayModelProviderId,
   getTaskInitiatorLinkedUserId,
   getFastAgentParentFromPayload,
+  getTaskReportConsumerFromPayload,
   getPrimaryPortFromConfig,
   isConfiguredEnvValue,
   isReasoningEffort,
@@ -1418,6 +1419,16 @@ async function enqueueFreshLaunch(
   // agent can see where the parent conversation started.
   await inheritSourceCommunicationMetadata(task);
 
+  if (
+    initiator.kind === 'automation' &&
+    (task.type === TaskPayloadKind.StandardTask ||
+      task.type === TaskPayloadKind.Scan ||
+      task.type === TaskPayloadKind.McpRecommendations) &&
+    !task.payload.reportConsumer
+  ) {
+    task.payload.reportConsumer = 'automation';
+  }
+
   if (PR_LINKAGE_REQUIRED_WORKFLOWS.has(workflow) && !input.prLinkage) {
     throw new Error(
       `A '${workflow}' launch requires prLinkage so the pull request row can be created with the task.`,
@@ -2392,6 +2403,20 @@ function inheritSnapshotResumeFastAgentParent(
   }
 }
 
+function inheritSnapshotResumeReportConsumer(
+  payload: SnapshotResumeTask['payload'],
+  sourcePayload: unknown,
+): void {
+  if (payload.reportConsumer) {
+    return;
+  }
+
+  const sourceConsumer = getTaskReportConsumerFromPayload(sourcePayload);
+  if (sourceConsumer !== 'direct-user') {
+    payload.reportConsumer = sourceConsumer;
+  }
+}
+
 function inheritSnapshotResumeFastAgentSession(
   payload: SnapshotResumeTask['payload'],
   sourcePayload: unknown,
@@ -2475,6 +2500,7 @@ async function enqueueSnapshotResume(
 
   inheritSnapshotResumeSourceControlStamps(task.payload, sourceRun.payload);
   inheritSnapshotResumeFastAgentParent(task.payload, sourceRun.payload);
+  inheritSnapshotResumeReportConsumer(task.payload, sourceRun.payload);
   inheritSnapshotResumeFastAgentSession(task.payload, sourceRun.payload);
   inheritSnapshotResumeCommunicationContext(task.payload, sourceRun.payload);
 

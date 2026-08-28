@@ -11,6 +11,19 @@ describe('standardTask reporting consumer', () => {
     ).toBe('orchestrator');
   });
 
+  it('recovers the automation consumer from legacy payload markers', () => {
+    expect(
+      getTaskReportConsumerFromPayload({
+        customAutomationId: 'automation-1',
+      }),
+    ).toBe('automation');
+    expect(
+      getTaskReportConsumerFromPayload({
+        backgroundAutomationKey: 'announcer',
+      }),
+    ).toBe('automation');
+  });
+
   it('gives orchestrator-owned coding tasks an internal factual report contract', () => {
     const { harnessInstructions } = standardTask({
       description: 'Implement the delegated change',
@@ -92,5 +105,34 @@ describe('standardTask reporting consumer', () => {
       'acknowledge it immediately to the user',
     );
     expect(harnessInstructions).toContain('<user_input_elicitation>');
+  });
+
+  it('keeps initial automation reports quiet without overriding final delivery', () => {
+    const { harnessInstructions } = standardTask({
+      description: 'Scan repositories and report actionable findings',
+      repo: 'Roomote/example-app',
+      taskSurface: 'slack',
+      reportConsumer: 'automation',
+    });
+
+    expect(harnessInstructions).toContain('<consumer>automation</consumer>');
+    expect(harnessInstructions).toContain(
+      'Its initial turn was not directed by a chat user.',
+    );
+    expect(harnessInstructions).toContain(
+      'Keep initial acknowledgements, reactions, progress updates, partial findings, and routine status in the web task.',
+    );
+    expect(harnessInstructions).toContain(
+      'The automation-specific prompt is authoritative for whether to report, where to report, which communication tools to use, and the number and shape of final messages.',
+    );
+    expect(harnessInstructions).toContain(
+      'A directed user follow-up starts a normal channel lifecycle for that turn',
+    );
+    expect(harnessInstructions).not.toContain(
+      '<consumer>orchestrator</consumer>',
+    );
+    expect(harnessInstructions).not.toContain(
+      'This run was launched from a Slack conversation surface',
+    );
   });
 });

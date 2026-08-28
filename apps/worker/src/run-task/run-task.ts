@@ -303,51 +303,6 @@ function shouldAllowEmojiReactionOnInitialTurn(taskRun: {
   return !isCommunicationLaunchPayload(taskRun.payload);
 }
 
-function hasAutomationWorkItemId(taskRun: { payload: unknown }): boolean {
-  if (!taskRun.payload || typeof taskRun.payload !== 'object') {
-    return false;
-  }
-
-  const payload = taskRun.payload as {
-    automationWorkItemId?: unknown;
-  };
-
-  return (
-    typeof payload.automationWorkItemId === 'string' &&
-    payload.automationWorkItemId.trim().length > 0
-  );
-}
-
-function hasCustomAutomationId(taskRun: { payload: unknown }): boolean {
-  if (!taskRun.payload || typeof taskRun.payload !== 'object') {
-    return false;
-  }
-
-  const payload = taskRun.payload as {
-    customAutomationId?: unknown;
-  };
-
-  return (
-    typeof payload.customAutomationId === 'string' &&
-    payload.customAutomationId.trim().length > 0
-  );
-}
-
-function hasScheduledAutomationSource(taskRun: { payload: unknown }): boolean {
-  if (!taskRun.payload || typeof taskRun.payload !== 'object') {
-    return false;
-  }
-
-  const payload = taskRun.payload as {
-    suggestionSource?: unknown;
-  };
-
-  return (
-    typeof payload.suggestionSource === 'string' &&
-    payload.suggestionSource.trim().length > 0
-  );
-}
-
 /**
  * Channel-only automation launches stay silent until they have a result or
  * blocker. Scheduled scan tasks have no inbound message to acknowledge, and
@@ -356,11 +311,7 @@ function hasScheduledAutomationSource(taskRun: { payload: unknown }): boolean {
 function isSilentChannelAutomationLaunch(taskRun: {
   payload: unknown;
 }): boolean {
-  return (
-    hasAutomationWorkItemId(taskRun) ||
-    hasCustomAutomationId(taskRun) ||
-    hasScheduledAutomationSource(taskRun)
-  );
+  return getTaskReportConsumerFromPayload(taskRun.payload) === 'automation';
 }
 
 function shouldRequireInitialAckOnInitialTurn(taskRun: {

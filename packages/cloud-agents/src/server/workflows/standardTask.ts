@@ -341,6 +341,20 @@ ${buildGitHubMessageInstructions()}`
     <rule>If a workflow or packaged skill distinguishes web dashboard tasks from other surfaces, treat this run as a web dashboard task.</rule>
     <rule>When a secure web-task flow exists for the current step, prefer that flow over asking the user to paste secrets into chat or make local-only task edits.</rule>
   </task_surface_context>`;
+  const isChatReportDestination =
+    taskSurface === 'slack' ||
+    taskSurface === 'teams' ||
+    taskSurface === 'telegram' ||
+    taskSurface === 'discord';
+  const effectiveTaskSurfaceContext =
+    reportConsumer === 'automation' && isChatReportDestination
+      ? `
+  <task_surface_context>
+    <rule>This automation run has ${taskSurface} as its report destination and also has a Roomote web task view. Its initial turn was not directed by a chat user.</rule>
+    <rule>Keep initial acknowledgements, reactions, progress updates, partial findings, and routine status in the web task. Use the report destination only at a reporting boundary defined by the automation prompt.</rule>
+    <rule>A directed user follow-up creates a normal conversational lifecycle for that new turn.</rule>
+  </task_surface_context>`
+      : taskSurfaceContext;
   const sourceContext =
     sourceProvider && (sourceChannelId || sourceThreadId || sourceMessageId)
       ? `
@@ -394,7 +408,16 @@ ${buildGitHubMessageInstructions()}`
       <scope>The report is a concise factual summary organized by the required sections.</scope>
     </final_report_contract>
   </reporting_context>`
-      : '';
+      : reportConsumer === 'automation'
+        ? `
+  <reporting_context>
+    <consumer>automation</consumer>
+    <role>You are executing an automation with its own reporting contract.</role>
+    <destination>Intermediate task communication stays in the Roomote web task. The configured report destination receives results, durable blockers, or concrete input requests at the automation's reporting boundary.</destination>
+    <delivery>The automation-specific prompt is authoritative for whether to report, where to report, which communication tools to use, and the number and shape of final messages.</delivery>
+    <conversation>A directed user follow-up starts a normal channel lifecycle for that turn, including an acknowledgement or progress update when useful.</conversation>
+  </reporting_context>`
+        : '';
   const codeReviewSelfReviewCloseoutContext =
     automaticSelfReviewNoticeGuidanceEnabled && reportConsumer === 'direct-user'
       ? `
@@ -452,7 +475,7 @@ ${buildGitHubMessageInstructions()}`
     <visual_proof_context>Screencast auto-classification is disabled for this task.</visual_proof_context>
   </task_context>
 
-  ${taskSurfaceContext}
+  ${effectiveTaskSurfaceContext}
   ${sourceContext}
   ${sourceControlContext}
   ${codeReviewSelfReviewCloseoutContext}

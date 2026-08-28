@@ -86,10 +86,10 @@ export const fastAgentParentSchema = z.object({
 
 export type FastAgentParent = z.infer<typeof fastAgentParentSchema>;
 
-export type TaskReportConsumer = 'direct-user' | 'orchestrator';
+export type TaskReportConsumer = 'direct-user' | 'orchestrator' | 'automation';
 
 export const taskReportConsumerSchema = z
-  .enum(['direct-user', 'orchestrator', 'fast-orchestrator'])
+  .enum(['direct-user', 'orchestrator', 'automation', 'fast-orchestrator'])
   .transform(
     (consumer): TaskReportConsumer =>
       consumer === 'fast-orchestrator' ? 'orchestrator' : consumer,
@@ -142,7 +142,28 @@ export function getTaskReportConsumerFromPayload(
 
   // Existing orchestrator-owned tasks still need the report contract when
   // they resume or settle after an upgrade.
-  return getFastAgentParentFromPayload(payload)
-    ? 'orchestrator'
-    : 'direct-user';
+  if (getFastAgentParentFromPayload(payload)) {
+    return 'orchestrator';
+  }
+
+  // Existing automation runs predate the explicit reporting contract. Their
+  // stable payload markers keep initial channel delivery result-only after an
+  // upgrade or snapshot resume.
+  if (payload && typeof payload === 'object' && !Array.isArray(payload)) {
+    const record = payload as Record<string, unknown>;
+    if (
+      [
+        'automationWorkItemId',
+        'customAutomationId',
+        'backgroundAutomationKey',
+        'suggestionSource',
+      ].some(
+        (key) => typeof record[key] === 'string' && record[key].trim() !== '',
+      )
+    ) {
+      return 'automation';
+    }
+  }
+
+  return 'direct-user';
 }

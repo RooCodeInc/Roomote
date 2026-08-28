@@ -351,6 +351,7 @@ describe('taskSpecSchema', () => {
       payload: {
         repo: '',
         description: 'Scan for flaky tests.',
+        reportConsumer: 'automation',
         customAutomationId: 'custom-automation-1',
         channel: 'C123',
         slackChannel: 'C123',
@@ -364,6 +365,7 @@ describe('taskSpecSchema', () => {
     }
 
     expect(parsed.payload.customAutomationId).toBe('custom-automation-1');
+    expect(parsed.payload.reportConsumer).toBe('automation');
     expect(parsed.payload.channel).toBe('C123');
     expect(parsed.payload.slackChannel).toBe('C123');
   });

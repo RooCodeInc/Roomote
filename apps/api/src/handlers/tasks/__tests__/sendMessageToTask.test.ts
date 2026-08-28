@@ -1079,6 +1079,7 @@ describe('sendMessageToTask', () => {
         sourceRunId: null,
         payload: {
           repo: 'acme/app',
+          reportConsumer: 'automation',
           slackChannel: 'C123',
         },
       }),
@@ -1112,6 +1113,7 @@ describe('sendMessageToTask', () => {
             resumePrompt: 'Resume and use the same thread.',
             resumePromptSource: 'web',
             resumePromptClientMessageId: 'client-2',
+            reportConsumer: 'direct-user',
           }),
         }),
         // The follow-up sender becomes the resume run's acting user.
@@ -1159,6 +1161,7 @@ describe('sendMessageToTask', () => {
         task: expect.objectContaining({
           payload: expect.objectContaining({
             communicationContextInherited: true,
+            reportConsumer: 'orchestrator',
             fastAgentSessionId: fastAgentParent.sessionId,
             fastAgentParent,
           }),
