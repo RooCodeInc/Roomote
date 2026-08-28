@@ -25,5 +25,5 @@ export const DEFAULT_PERSONAL_PREFERENCES: PersonalPreferences = {
   colorTheme: 'system',
   mindReaderMode: false,
   narrationMode: false,
-  communicationsFastModeDefault: false,
+  communicationsFastModeDefault: true,
 };

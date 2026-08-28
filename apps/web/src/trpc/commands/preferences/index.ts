@@ -37,7 +37,9 @@ function normalizePersonalPreferences(
         ? metadata.narration_mode
         : DEFAULT_PERSONAL_PREFERENCES.narrationMode,
     communicationsFastModeDefault:
-      metadata.communications_fast_mode_default === true,
+      typeof metadata.communications_fast_mode_default === 'boolean'
+        ? metadata.communications_fast_mode_default
+        : DEFAULT_PERSONAL_PREFERENCES.communicationsFastModeDefault,
   };
 }
 
