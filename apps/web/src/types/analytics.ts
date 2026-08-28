@@ -3,10 +3,10 @@ import { z } from 'zod';
 import { timePeriodFilterSchema, type TimePeriodFilter } from './time-period';
 
 export const analyticsObjects = [
-  'sessions',
+  'costs',
   'tasks',
   'pullRequests',
-  'costs',
+  'sessions',
 ] as const;
 export const analyticsObjectSchema = z.enum(analyticsObjects);
 export type AnalyticsObject = z.infer<typeof analyticsObjectSchema>;
