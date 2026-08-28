@@ -599,6 +599,7 @@ async function createSlackFastAgentParentTurn(
               automationName: params.event.automationName,
               text: reportMessage,
               contentBlocks,
+              sessionId: params.parent.sessionId,
             }),
           });
           if (!updated) {

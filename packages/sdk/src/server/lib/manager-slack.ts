@@ -19,6 +19,7 @@ import {
   buildAutomationResultBlocks,
   convertSlackLinksToMarkdown,
 } from '@roomote/slack';
+import { buildFastSessionUrl } from '@roomote/communication';
 
 const DEFAULT_LOCAL_R_APP_URL = 'http://localhost:13000';
 
@@ -73,6 +74,7 @@ export function buildCustomAutomationSlackMessage(params: {
   automationName: string;
   text: string;
   contentBlocks?: SlackBlock[];
+  sessionId?: string;
 }): SlackAutomationSettingsMessage {
   return {
     text: params.text,
@@ -83,6 +85,20 @@ export function buildCustomAutomationSlackMessage(params: {
       contentBlocks: params.contentBlocks ?? [
         { type: 'markdown', text: params.text },
       ],
+      additionalActions: params.sessionId
+        ? [
+            {
+              type: 'button',
+              action_id: 'late_bound_automation_view_session',
+              text: {
+                type: 'plain_text',
+                text: 'Inspect session',
+                emoji: false,
+              },
+              url: buildFastSessionUrl('slack', params.sessionId),
+            },
+          ]
+        : undefined,
     }),
   };
 }

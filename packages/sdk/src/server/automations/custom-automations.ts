@@ -264,7 +264,11 @@ async function buildFastAutomationConversation(params: {
   eventId: string;
   destination: ResolvedAutomationDestination | null;
   target: AutomationTarget | null;
-}): Promise<{ conversation: FastAgentConversation; rootMessageId?: string }> {
+}): Promise<{
+  conversation: FastAgentConversation;
+  rootMessageId?: string;
+  updateSlackRootWithSession?: (sessionId: string) => Promise<boolean>;
+}> {
   const { automation, destination, eventId, target } = params;
   if (!destination) {
     return {
@@ -316,6 +320,23 @@ async function buildFastAutomationConversation(params: {
     }
     return {
       rootMessageId,
+      updateSlackRootWithSession: (sessionId) =>
+        slack.updateMessage({
+          channel: destination.channelId,
+          ts: rootMessageId,
+          message: buildCustomAutomationSlackMessage({
+            automationId: automation.id,
+            automationName: automation.name,
+            text: kickoffText,
+            contentBlocks: [
+              {
+                type: 'markdown',
+                text: `**${automation.name}** is running.`,
+              },
+            ],
+            sessionId,
+          }),
+        }),
       conversation: {
         surface: 'slack',
         workspaceId: installation.teamId,
@@ -441,21 +462,37 @@ async function runFastCustomAutomation(params: {
     throw new Error('Fast automation run-as user is not configured.');
   }
   const eventId = `${params.automation.id}:${params.launchClaimedAt.toISOString()}`;
-  const { conversation, rootMessageId } = await buildFastAutomationConversation(
-    {
+  const { conversation, rootMessageId, updateSlackRootWithSession } =
+    await buildFastAutomationConversation({
       automation: params.automation,
       eventId,
       destination: params.destination,
       target: isConfiguredAutomationTarget(params.automation.target)
         ? params.automation.target
         : null,
-    },
-  );
+    });
+  let sessionId: string | undefined;
   try {
     const session = await getOrCreateFastAgentSession({
       userId: params.automation.createdByUserId,
       conversation,
     });
+    sessionId = session.id;
+    if (updateSlackRootWithSession) {
+      try {
+        const updated = await updateSlackRootWithSession(session.id);
+        if (!updated) {
+          console.warn(
+            `${LOG_PREFIX} Failed to add the session link to automation ${params.automation.id}.`,
+          );
+        }
+      } catch (error) {
+        console.warn(
+          `${LOG_PREFIX} Failed to add the session link to automation ${params.automation.id}:`,
+          error,
+        );
+      }
+    }
     if (rootMessageId) {
       await recordFastAgentConversationMessage({
         sessionId: session.id,
@@ -498,6 +535,7 @@ async function runFastCustomAutomation(params: {
               automationId: params.automation.id,
               automationName: params.automation.name,
               text: message,
+              sessionId,
             }),
           });
         }
