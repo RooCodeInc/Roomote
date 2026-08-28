@@ -198,8 +198,7 @@ describe('chat reply suggestion reactions', () => {
     expect(mocks.startAutoRoutedSlackTask).toHaveBeenCalledWith(
       expect.objectContaining({
         channel: 'C1',
-        prompt:
-          'Start this suggested task: Add retry telemetry\n\nInstrument retry exhaustion.',
+        prompt: 'Add retry telemetry\n\nInstrument retry exhaustion.',
         agentPromptTextOverride: 'implementation prompt',
       }),
     );

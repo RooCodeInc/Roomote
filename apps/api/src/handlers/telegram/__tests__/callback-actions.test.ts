@@ -204,6 +204,7 @@ describe('handleTelegramCallbackQuery suggestion launch lifecycle', () => {
       expect.objectContaining({
         launchOwnerUserId: 'user-1',
         queuedMessage: expect.objectContaining({
+          text: 'Fix the flaky test\n\nThe retry loop never terminates.',
           user: 'Matt',
           userId: 'user-1',
         }),

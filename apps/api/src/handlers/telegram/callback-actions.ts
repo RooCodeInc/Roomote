@@ -225,7 +225,7 @@ async function handleSuggestionLaunchCallback(params: {
   }
 
   const promptText = [
-    `Start this suggested task: ${suggestion.title}`,
+    suggestion.title,
     '',
     suggestion.brief,
     ...(suggestion.targetRepositoryFullName
