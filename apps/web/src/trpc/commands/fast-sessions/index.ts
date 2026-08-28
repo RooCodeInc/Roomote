@@ -7,6 +7,7 @@ import {
   createFastAgentWebTaskLauncher,
   getOrCreateFastAgentSession,
   resolveApiBaseUrl,
+  sendFastAgentTaskMessage,
 } from '@roomote/cloud-agents/server';
 import {
   buildFastAgentSurfaceReplyDelivery,
@@ -15,9 +16,14 @@ import {
 } from '@roomote/sdk/server';
 import {
   db,
+  claimCanonicalPrReviewAction,
+  completeCanonicalPrReviewActionDispatch,
+  desc,
   eq,
   fastAgentConversations,
   getSessionForFastConversation,
+  retireCanonicalPrReviewActionsForDestinationKey,
+  taskRuns,
 } from '@roomote/db/server';
 import {
   formatErrorForLog,
@@ -28,7 +34,9 @@ import {
 import type { UserAuthSuccess } from '@/types';
 import {
   findAccessibleFastSession,
+  buildFastSessionPrReviewDestinationKey,
   getFastSessionTasks,
+  updateFastSessionPrReviewOfferStatus,
 } from '@/lib/server/fast-sessions';
 
 /**
@@ -254,6 +262,17 @@ export async function replyToFastSessionCommand(
     );
   }
 
+  const retiredDeliveryIds =
+    await retireCanonicalPrReviewActionsForDestinationKey({
+      destinationKind: 'fast_conversation',
+      destinationKey: buildFastSessionPrReviewDestinationKey(session),
+    });
+  await updateFastSessionPrReviewOfferStatus(
+    session.id,
+    retiredDeliveryIds,
+    'dismissed',
+  );
+
   scheduleWebFastAgentTurn({
     userId: auth.userId,
     delivery,
@@ -266,4 +285,75 @@ export async function replyToFastSessionCommand(
   });
 
   return { success: true };
+}
+
+export async function handleFastSessionPrReviewActionCommand(
+  auth: UserAuthSuccess,
+  input: {
+    sessionId: string;
+    deliveryId: string;
+    choice: 'yes' | 'auto' | 'dismiss';
+  },
+): Promise<{
+  status: 'resolved' | 'auto_resolved' | 'dismissed' | 'stale';
+}> {
+  const session = await findAccessibleFastSession(auth, input.sessionId);
+  if (!session) throw new Error('Fast session not found');
+
+  const action = await claimCanonicalPrReviewAction({
+    deliveryId: input.deliveryId,
+    choice: input.choice,
+    actingUserId: auth.userId,
+    expectedDestinationKind: 'fast_conversation',
+    expectedDestinationKey: buildFastSessionPrReviewDestinationKey(session),
+  });
+  if (!action) {
+    await updateFastSessionPrReviewOfferStatus(
+      session.id,
+      [input.deliveryId],
+      'stale',
+    );
+    return { status: 'stale' };
+  }
+
+  if (input.choice === 'dismiss') {
+    await updateFastSessionPrReviewOfferStatus(
+      session.id,
+      [input.deliveryId],
+      'dismissed',
+    );
+    return { status: 'dismissed' };
+  }
+
+  const dispatched = await sendFastAgentTaskMessage(
+    { userId: auth.userId, apiBaseUrl: resolveApiBaseUrl() ?? undefined },
+    { taskId: action.taskId!, message: action.followUpPrompt! },
+  );
+  const status = input.choice === 'auto' ? 'auto_resolved' : 'resolved';
+  if (!dispatched.success) {
+    await updateFastSessionPrReviewOfferStatus(
+      session.id,
+      [input.deliveryId],
+      input.choice === 'auto' ? status : 'stale',
+    );
+    return { status: input.choice === 'auto' ? status : 'stale' };
+  }
+
+  const latestRun = await db.query.taskRuns.findFirst({
+    where: eq(taskRuns.taskId, action.taskId!),
+    orderBy: [desc(taskRuns.createdAt)],
+    columns: { id: true },
+  });
+  if (latestRun) {
+    await completeCanonicalPrReviewActionDispatch({
+      deliveryId: input.deliveryId,
+      runId: latestRun.id,
+    });
+  }
+  await updateFastSessionPrReviewOfferStatus(
+    session.id,
+    [input.deliveryId],
+    status,
+  );
+  return { status };
 }

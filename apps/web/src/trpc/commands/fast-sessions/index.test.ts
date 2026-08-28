@@ -2,6 +2,14 @@ const mocks = vi.hoisted(() => ({
   after: vi.fn(),
   acquireTurnLock: vi.fn(),
   answerQuestion: vi.fn(),
+  sendTaskMessage: vi.fn(),
+  findAccessibleSession: vi.fn(),
+  claimReviewAction: vi.fn(),
+  completeReviewAction: vi.fn(),
+  retireReviewActions: vi.fn(),
+  updateOfferStatus: vi.fn(),
+  buildReplyDelivery: vi.fn(),
+  findLatestRun: vi.fn(),
 }));
 
 vi.mock('next/server', () => ({ after: mocks.after }));
@@ -12,24 +20,55 @@ vi.mock('@roomote/cloud-agents/server', () => ({
   createFastAgentWebTaskLauncher: vi.fn(),
   getOrCreateFastAgentSession: vi.fn(),
   resolveApiBaseUrl: vi.fn(),
+  sendFastAgentTaskMessage: mocks.sendTaskMessage,
 }));
 
 vi.mock('@roomote/sdk/server', () => ({
-  buildFastAgentSurfaceReplyDelivery: vi.fn(),
+  buildFastAgentSurfaceReplyDelivery: mocks.buildReplyDelivery,
   resolveUserMcpServerConfigs: vi.fn(),
 }));
 
 vi.mock('@roomote/db/server', () => ({
-  db: {},
+  db: { query: { taskRuns: { findFirst: mocks.findLatestRun } } },
+  claimCanonicalPrReviewAction: mocks.claimReviewAction,
+  completeCanonicalPrReviewActionDispatch: mocks.completeReviewAction,
+  retireCanonicalPrReviewActionsForDestinationKey: mocks.retireReviewActions,
+  desc: vi.fn(),
   eq: vi.fn(),
   fastAgentConversations: {},
+  getSessionForFastConversation: vi.fn(),
+  taskRuns: { taskId: 'taskId', createdAt: 'createdAt' },
 }));
 
 vi.mock('@/lib/server/fast-sessions', () => ({
-  findAccessibleFastSession: vi.fn(),
+  findAccessibleFastSession: mocks.findAccessibleSession,
+  buildFastSessionPrReviewDestinationKey: () => '["web","user-1","session-1"]',
+  getFastSessionTasks: vi.fn(),
+  updateFastSessionPrReviewOfferStatus: mocks.updateOfferStatus,
 }));
 
-import { scheduleWebFastAgentTurn } from './index';
+import {
+  handleFastSessionPrReviewActionCommand,
+  replyToFastSessionCommand,
+  scheduleWebFastAgentTurn,
+} from './index';
+
+const auth = {
+  userId: 'user-1',
+  isAdmin: false,
+  name: 'User One',
+  primaryEmail: 'user@example.com',
+} as never;
+
+const session = {
+  id: '22222222-2222-4222-8222-222222222222',
+  userId: 'user-1',
+  surface: 'web',
+  workspaceId: 'user-1',
+  conversationId: 'session-1',
+  model: null,
+  reasoningEffort: null,
+};
 
 describe('scheduleWebFastAgentTurn', () => {
   beforeEach(() => {
@@ -67,5 +106,91 @@ describe('scheduleWebFastAgentTurn', () => {
 
     expect(mocks.answerQuestion).toHaveBeenCalledOnce();
     expect(release).toHaveBeenCalledOnce();
+  });
+});
+
+describe('Fast session PR review actions', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.findAccessibleSession.mockResolvedValue(session);
+    mocks.updateOfferStatus.mockResolvedValue(undefined);
+  });
+
+  it('claims and dispatches a canonical offer once', async () => {
+    mocks.claimReviewAction.mockResolvedValue({
+      taskId: 'task-1',
+      followUpPrompt: 'Resolve the feedback.',
+    });
+    mocks.sendTaskMessage.mockResolvedValue({ success: true });
+    mocks.findLatestRun.mockResolvedValue({ id: 42 });
+
+    await expect(
+      handleFastSessionPrReviewActionCommand(auth, {
+        sessionId: session.id,
+        deliveryId: '11111111-1111-4111-8111-111111111111',
+        choice: 'yes',
+      }),
+    ).resolves.toEqual({ status: 'resolved' });
+    expect(mocks.claimReviewAction).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actingUserId: 'user-1',
+        expectedDestinationKind: 'fast_conversation',
+        expectedDestinationKey: '["web","user-1","session-1"]',
+      }),
+    );
+    expect(mocks.sendTaskMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: 'user-1' }),
+      { taskId: 'task-1', message: 'Resolve the feedback.' },
+    );
+    expect(mocks.completeReviewAction).toHaveBeenCalledWith({
+      deliveryId: '11111111-1111-4111-8111-111111111111',
+      runId: 42,
+    });
+  });
+
+  it('retires a duplicate or late action without dispatching', async () => {
+    mocks.claimReviewAction.mockResolvedValue(null);
+    await expect(
+      handleFastSessionPrReviewActionCommand(auth, {
+        sessionId: session.id,
+        deliveryId: '11111111-1111-4111-8111-111111111111',
+        choice: 'dismiss',
+      }),
+    ).resolves.toEqual({ status: 'stale' });
+    expect(mocks.sendTaskMessage).not.toHaveBeenCalled();
+    expect(mocks.updateOfferStatus).toHaveBeenCalledWith(
+      session.id,
+      ['11111111-1111-4111-8111-111111111111'],
+      'stale',
+    );
+  });
+
+  it('retires open offers when the user types a reply', async () => {
+    mocks.retireReviewActions.mockResolvedValue([
+      '11111111-1111-4111-8111-111111111111',
+    ]);
+    mocks.buildReplyDelivery.mockResolvedValue({
+      conversation: {
+        surface: 'web',
+        workspaceId: 'user-1',
+        conversationId: 'session-1',
+      },
+      adapter: { launchTask: vi.fn(), postReply: vi.fn() },
+    });
+
+    await replyToFastSessionCommand(auth, {
+      sessionId: session.id,
+      text: 'I will handle this another way.',
+    });
+
+    expect(mocks.retireReviewActions).toHaveBeenCalledWith({
+      destinationKind: 'fast_conversation',
+      destinationKey: '["web","user-1","session-1"]',
+    });
+    expect(mocks.updateOfferStatus).toHaveBeenCalledWith(
+      session.id,
+      ['11111111-1111-4111-8111-111111111111'],
+      'dismissed',
+    );
   });
 });

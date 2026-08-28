@@ -10,6 +10,7 @@ const {
   mockPrepareDelivery,
   mockPrepareCanonical,
   mockBeginCanonicalPrompt,
+  mockBeginCanonicalWebPrompt,
   mockBeginCanonicalAutoDispatch,
   mockCompleteCanonicalAutoDispatch,
   mockRecordDelivery,
@@ -40,6 +41,7 @@ const {
   mockPrepareDelivery: vi.fn(),
   mockPrepareCanonical: vi.fn(),
   mockBeginCanonicalPrompt: vi.fn(),
+  mockBeginCanonicalWebPrompt: vi.fn(),
   mockBeginCanonicalAutoDispatch: vi.fn(),
   mockCompleteCanonicalAutoDispatch: vi.fn(),
   mockRecordDelivery: vi.fn(),
@@ -185,6 +187,7 @@ vi.mock('@roomote/sdk/server', () => ({
   preparePrReviewNotificationDelivery: mockPrepareDelivery,
   prepareCanonicalPrReviewNotificationRequest: mockPrepareCanonical,
   beginCanonicalPrReviewPrompt: mockBeginCanonicalPrompt,
+  beginCanonicalPrReviewWebPrompt: mockBeginCanonicalWebPrompt,
   beginCanonicalPrReviewAutoDispatch: mockBeginCanonicalAutoDispatch,
   completeCanonicalPrReviewAutoDispatch: mockCompleteCanonicalAutoDispatch,
   recordPrReviewNotificationDeliveryBestEffort: mockRecordDelivery,
@@ -231,6 +234,7 @@ describe('prReviewNotificationJob', () => {
     mockRenewLease.mockResolvedValue(true);
     mockPrepareCanonical.mockResolvedValue(true);
     mockBeginCanonicalPrompt.mockResolvedValue(true);
+    mockBeginCanonicalWebPrompt.mockResolvedValue(true);
     mockBeginCanonicalAutoDispatch.mockResolvedValue(true);
     mockCompleteCanonicalAutoDispatch.mockResolvedValue(true);
 
@@ -1580,6 +1584,64 @@ describe('prReviewNotificationJob', () => {
         nonce: deliveryId,
         canonicalDeliveryId: deliveryId,
       }),
+    );
+    expect(mockFinalize).not.toHaveBeenCalled();
+  });
+
+  it('publishes a canonical action offer for a web Fast parent', async () => {
+    const deliveryId = '77777777-7777-4777-8777-777777777777';
+    const leaseToken = '88888888-8888-4888-8888-888888888888';
+    mockFindFirstTaskRun.mockResolvedValue({
+      id: 1,
+      taskId: 'task-1',
+      payload: {
+        fastAgentParent: {
+          sessionId: '99999999-9999-4999-8999-999999999999',
+          conversation: {
+            surface: 'web',
+            workspaceId: 'user-1',
+            conversationId: 'session-1',
+          },
+        },
+      },
+      status: RunStatus.Idle,
+      taskPhase: 'waiting_for_prompt',
+      workerHeartbeatAt: new Date(),
+    });
+    mockPrepareDelivery.mockResolvedValue({
+      post: true,
+      route: null,
+      text: 'Review feedback remains.',
+      followUpQuestion: 'Resolve it?',
+      followUpPrompt: 'Resolve the review feedback.',
+    });
+    mockNotifyFastAgentParent.mockResolvedValue(true);
+
+    await prReviewNotificationJob(
+      makeJob({
+        ownershipVersion: 'canonical',
+        deliveryId,
+        notificationUnitId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+        deliveryState: 'claimed',
+        destinationKey: '["web","user-1","session-1"]',
+        dispatchKey: `pr-review-delivery:${deliveryId}`,
+        deliveryIds: [deliveryId],
+        leaseToken,
+        events,
+      }) as never,
+    );
+
+    expect(mockBeginCanonicalWebPrompt).toHaveBeenCalledWith({
+      request: expect.objectContaining({ deliveryId }),
+      followUpPrompt: 'Resolve the review feedback.',
+    });
+    expect(mockNotifyFastAgentParent).toHaveBeenCalledWith(
+      expect.objectContaining({ reviewActionDeliveryId: deliveryId }),
+    );
+    expect(mockAttachPendingPrReviewActionMessage).toHaveBeenCalledWith(
+      deliveryId,
+      deliveryId,
+      { leaseToken },
     );
     expect(mockFinalize).not.toHaveBeenCalled();
   });

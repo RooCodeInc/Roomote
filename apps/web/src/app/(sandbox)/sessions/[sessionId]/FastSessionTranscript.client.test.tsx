@@ -9,13 +9,19 @@ import { ACP_ENVELOPE_EVENT_TYPES } from '@roomote/types';
 
 import { FastSessionTranscript } from './FastSessionTranscript';
 
-const { replyMutate, preparePromptAttachments, openTaskPanel, narrationState } =
-  vi.hoisted(() => ({
-    replyMutate: vi.fn(),
-    preparePromptAttachments: vi.fn(),
-    openTaskPanel: vi.fn(),
-    narrationState: { enabled: false },
-  }));
+const {
+  replyMutate,
+  reviewActionMutate,
+  preparePromptAttachments,
+  openTaskPanel,
+  narrationState,
+} = vi.hoisted(() => ({
+  replyMutate: vi.fn(),
+  reviewActionMutate: vi.fn(),
+  preparePromptAttachments: vi.fn(),
+  openTaskPanel: vi.fn(),
+  narrationState: { enabled: false },
+}));
 
 vi.mock('@/hooks/useNarrationMode', () => ({
   useNarrationMode: () => ({ enabled: narrationState.enabled }),
@@ -23,7 +29,10 @@ vi.mock('@/hooks/useNarrationMode', () => ({
 
 vi.mock('@/trpc/client', () => ({
   useTRPCClient: () => ({
-    fastSessions: { reply: { mutate: replyMutate } },
+    fastSessions: {
+      reply: { mutate: replyMutate },
+      reviewAction: { mutate: reviewActionMutate },
+    },
   }),
 }));
 
@@ -93,6 +102,7 @@ class FakeEventSource {
 beforeEach(() => {
   FakeEventSource.instances = [];
   replyMutate.mockReset();
+  reviewActionMutate.mockReset();
   preparePromptAttachments.mockImplementation(({ text }: { text: string }) =>
     Promise.resolve({ text }),
   );
@@ -106,6 +116,82 @@ afterEach(() => {
 });
 
 describe('FastSessionTranscript', () => {
+  const reviewOfferMessage = (status = 'pending') => ({
+    id: 'offer-1',
+    eventId: 'turn-offer:assistant:0',
+    turnId: 'turn-offer',
+    turnSeq: 1,
+    ts: 2,
+    eventType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+    role: 'assistant' as const,
+    contentBlocks: [
+      { type: 'text' as const, text: 'Review feedback remains.' },
+    ],
+    metadata: { visibleInTranscript: true },
+    payload: {
+      prReviewAction: {
+        deliveryId: '11111111-1111-4111-8111-111111111111',
+        question: 'Would you like me to resolve these issues?',
+        status,
+      },
+    },
+    source: 'web',
+    nativeSessionId: 'opencode-1',
+    nativeMessageId: null,
+    createdAt: new Date('2026-01-01T00:00:01.000Z'),
+  });
+
+  it('renders and dispatches a persisted review action offer', async () => {
+    reviewActionMutate.mockResolvedValue({ status: 'resolved' });
+    render(
+      <FastSessionTranscript
+        sessionId="22222222-2222-4222-8222-222222222222"
+        initialMessages={[reviewOfferMessage()]}
+      />,
+    );
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Resolve these issues' }),
+    );
+    await waitFor(() =>
+      expect(reviewActionMutate).toHaveBeenCalledWith({
+        sessionId: '22222222-2222-4222-8222-222222222222',
+        deliveryId: '11111111-1111-4111-8111-111111111111',
+        choice: 'yes',
+      }),
+    );
+    expect(
+      await screen.findByText('Resolving the current review issues.'),
+    ).toBeInTheDocument();
+  });
+
+  it('renders retired and late-click states without actionable controls', async () => {
+    const { rerender } = render(
+      <FastSessionTranscript
+        sessionId="22222222-2222-4222-8222-222222222222"
+        initialMessages={[reviewOfferMessage('dismissed')]}
+      />,
+    );
+    expect(screen.getByText('Review action dismissed.')).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Resolve these issues' }),
+    ).not.toBeInTheDocument();
+
+    rerender(
+      <FastSessionTranscript
+        sessionId="22222222-2222-4222-8222-222222222222"
+        initialMessages={[reviewOfferMessage()]}
+      />,
+    );
+    act(() => {
+      FakeEventSource.instances.at(-1)?.emit('messages', {
+        messages: [reviewOfferMessage('stale')],
+      });
+    });
+    expect(
+      await screen.findByText('This offer was already handled or has expired.'),
+    ).toBeInTheDocument();
+  });
   it('renders persisted user and assistant text with task transcript primitives', () => {
     render(
       <FastSessionTranscript

@@ -252,6 +252,7 @@ export {
   buildPrReviewNotificationPostInput,
   beginCanonicalPrReviewAutoDispatch,
   beginCanonicalPrReviewPrompt,
+  beginCanonicalPrReviewWebPrompt,
   completeCanonicalPrReviewAutoDispatch,
   consumePendingPrReviewActivity,
   dispatchDuePrReviewNotifications,

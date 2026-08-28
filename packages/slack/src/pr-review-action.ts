@@ -1,4 +1,4 @@
-import type { SlackBlock } from '@roomote/types';
+import { PR_REVIEW_ACTION_LABELS, type SlackBlock } from '@roomote/types';
 
 export const PR_REVIEW_ACTION_YES_ACTION_ID = 'pr_review_action_yes';
 export const PR_REVIEW_ACTION_AUTO_ACTION_ID = 'pr_review_action_auto';
@@ -59,7 +59,7 @@ export function buildSlackPrReviewActionBlocks(params: {
           action_id: PR_REVIEW_ACTION_YES_ACTION_ID,
           text: {
             type: 'plain_text',
-            text: 'Resolve these issues',
+            text: PR_REVIEW_ACTION_LABELS.yes,
             emoji: true,
           },
           value,
@@ -69,7 +69,7 @@ export function buildSlackPrReviewActionBlocks(params: {
           action_id: PR_REVIEW_ACTION_AUTO_ACTION_ID,
           text: {
             type: 'plain_text',
-            text: 'Auto-resolve on this PR',
+            text: PR_REVIEW_ACTION_LABELS.auto,
             emoji: true,
           },
           value,
@@ -77,7 +77,11 @@ export function buildSlackPrReviewActionBlocks(params: {
         {
           type: 'button',
           action_id: PR_REVIEW_ACTION_DISMISS_ACTION_ID,
-          text: { type: 'plain_text', text: 'Dismiss', emoji: true },
+          text: {
+            type: 'plain_text',
+            text: PR_REVIEW_ACTION_LABELS.dismiss,
+            emoji: true,
+          },
           value,
         },
       ],

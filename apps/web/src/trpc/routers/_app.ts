@@ -33,11 +33,13 @@ import {
 
 import {
   getFastSessionTasksCommand,
+  handleFastSessionPrReviewActionCommand,
   replyToFastSessionCommand,
   startFastSessionCommand,
 } from '../commands/fast-sessions';
 import {
   replyToFastSessionInputSchema,
+  fastSessionPrReviewActionInputSchema,
   startFastSessionInputSchema,
 } from '../commands/fast-sessions/input';
 import {
@@ -2814,6 +2816,11 @@ export const appRouter = createRouter({
       .input(replyToFastSessionInputSchema)
       .mutation(({ ctx: { auth }, input }) =>
         replyToFastSessionCommand(auth, input),
+      ),
+    reviewAction: protectedProcedure
+      .input(fastSessionPrReviewActionInputSchema)
+      .mutation(({ ctx: { auth }, input }) =>
+        handleFastSessionPrReviewActionCommand(auth, input),
       ),
     tasks: protectedProcedure
       .input(z.object({ sessionId: z.string().uuid() }))

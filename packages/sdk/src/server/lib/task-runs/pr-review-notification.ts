@@ -892,6 +892,27 @@ export async function beginCanonicalPrReviewPrompt(input: {
   });
 }
 
+export async function beginCanonicalPrReviewWebPrompt(input: {
+  request: PrReviewNotificationRequest;
+  followUpPrompt: string;
+}): Promise<boolean> {
+  const { request } = input;
+  if (
+    request.ownershipVersion !== 'canonical' ||
+    !request.deliveryId ||
+    !request.leaseToken
+  ) {
+    return true;
+  }
+  return transitionCanonicalPrReviewDelivery({
+    deliveryId: request.deliveryId,
+    leaseToken: request.leaseToken,
+    expected: ['prepared', 'prompt_posting'],
+    status: 'prompt_posting',
+    values: { followUpPrompt: input.followUpPrompt },
+  });
+}
+
 export async function beginCanonicalPrReviewAutoDispatch(input: {
   request: PrReviewNotificationRequest;
   followUpPrompt: string;
