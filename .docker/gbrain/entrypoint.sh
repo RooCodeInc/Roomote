@@ -175,11 +175,24 @@ elif [ -n "${OPENAI_API_KEY:-}" ]; then
   DEFAULT_CHAT_MODEL="openai:gpt-5.6-luna"
 else
   # No credential: the server still boots and serves, it just cannot embed or
-  # synthesize. Roomote gates every Brain code path on the same keys, so it
+  # synthesize. Roomote gates every Brain code path on the same signal, so it
   # will not talk to this container either.
   BRAIN_PROVIDER="none"
   DEFAULT_EMBEDDING_MODEL=""
   DEFAULT_CHAT_MODEL=""
+fi
+
+# Gateway mode holds no real provider key, so chat defaults to the
+# `roomote/helper` sentinel: the Roomote gateway answers it with the
+# deployment's helper model instead of forwarding to a provider, which is what
+# frees synthesis from needing a Brain provider key. Convergence rule: the
+# chat model is a plain env export re-derived on every boot (env wins over
+# anything the brain stored at init), so a brain that previously defaulted to
+# gpt-5.6-luna picks this up on its next boot — while an operator's explicit
+# GBRAIN_MODEL (below) or R_BRAIN_MODEL (applied by the gateway per request)
+# still wins over the default.
+if [ -n "${OPENAI_BASE_URL:-}" ] && [ "$BRAIN_PROVIDER" != "none" ]; then
+  DEFAULT_CHAT_MODEL="${BRAIN_PROVIDER}:roomote/helper"
 fi
 
 # An operator-chosen embedding model arrives as a bare id (text-embedding-3-large)

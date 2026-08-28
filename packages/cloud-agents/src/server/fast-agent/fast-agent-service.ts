@@ -24,7 +24,7 @@ import {
   appendFastAgentMemory,
   db,
   getDeploymentTaskModelOptions,
-  isBrainProviderConfigured,
+  isBrainEnabled,
 } from '@roomote/db/server';
 import { Env } from '@roomote/env';
 import { z } from 'zod';
@@ -1724,7 +1724,7 @@ export async function answerFastAgentQuestion({
 
           case FAST_AGENT_NATIVE_TOOL_NAMES.saveMemory: {
             const args = saveMemoryArgsSchema.parse(call.args);
-            if (!(await isBrainProviderConfigured())) {
+            if (!(await isBrainEnabled())) {
               return {
                 success: false,
                 error: 'This deployment has no Brain configured.',

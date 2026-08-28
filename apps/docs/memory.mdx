@@ -87,20 +87,23 @@ Memory runs as its own service alongside Roomote, reachable only on your
 deployment's internal network. On the hosted templates (Railway, Render,
 Coolify) that service is already there after a deploy, sitting idle.
 
-Setting a Memory provider key, `R_BRAIN_OPENROUTER_API_KEY` or
-`R_BRAIN_OPENAI_API_KEY`, is what turns it on. Set either one as an
-environment variable or a Settings environment value; the value can be the
-same key you already use for tasks, or a separate one to bill Memory
-independently. The explicit `R_BRAIN_*` name is the opt-in: the general
-provider keys your deployment uses for tasks never activate Memory on
-their own, so configuring task models leaves Memory off.
+The **Enable Memory** toggle at the top of **Settings → Memory** is what
+turns it on; no provider key is required for that. Synthesis runs through
+your deployment's helper model — the same small model that already writes
+task titles and summaries. Deployments that enabled Memory before the toggle
+existed, by setting `R_BRAIN_OPENROUTER_API_KEY` or `R_BRAIN_OPENAI_API_KEY`,
+stay enabled without doing anything; using the toggle stores an explicit
+choice that wins over the key from then on.
 
-The Memory service holds no provider key of its own. It asks Roomote for
-embeddings and synthesis, and Roomote forwards them under the Memory key.
-Changing that key later takes effect on Memory's next request, with no
-redeploy.
+Semantic recall still needs embeddings. Those come from an OpenRouter or
+OpenAI key — a Memory-specific `R_BRAIN_*` key to bill Memory separately, or
+the deployment's general provider key once Memory is enabled — or from a
+self-run embeddings upstream (below). The Memory service holds no provider
+key of its own: it asks Roomote for embeddings and synthesis, and Roomote
+forwards them. Changing a key later takes effect on Memory's next request,
+with no redeploy.
 
-OpenRouter and OpenAI both support Memory's embedding and synthesis calls.
+OpenRouter and OpenAI both support Memory's embedding calls.
 
 ### Run embeddings locally
 
@@ -127,7 +130,7 @@ key. Roomote forwards model names unchanged to self-run upstreams, so
 `R_BRAIN_EMBEDDING_MODEL` must exactly match a model that server exposes,
 without a provider prefix.
 
-Without a Memory key, Memory stays inert. Agents are not told it exists,
+While Memory is disabled, it stays inert. Agents are not told it exists,
 and nothing is ingested.
 
 Roomote schedules one maintenance pass each night. It retrieves a bounded,
@@ -156,9 +159,10 @@ that upstream feature requires an operator review workflow before proposals
 become canonical memory.
 
 <Note>
-  Self-hosted Compose deployments start Memory from the `brain`
-  profile, so set a Memory key in your environment file to bring the container
-  up. Everything after that is the same.
+  Self-hosted Compose deployments start Memory from the `brain` profile, so
+  add `brain` to `COMPOSE_PROFILES` in your environment file to bring the
+  container up, then enable Memory in Settings. Everything after that is the
+  same.
 </Note>
 
 ## Seeing what it knows
@@ -294,6 +298,6 @@ matching on keywords alone.
 - **Memory has no public service route.** It is never exposed to the internet,
   and task sandboxes reach it only through Roomote's API with their run token,
   which grants read access only.
-- **To run with no memory at all**, leave both provider keys unset. Deployments
-  that want to reclaim the resources entirely can delete the Memory service
-  from their compose file or template.
+- **To run with no memory at all**, leave Memory disabled in Settings.
+  Deployments that want to reclaim the resources entirely can delete the
+  Memory service from their compose file or template.

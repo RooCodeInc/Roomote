@@ -6,11 +6,13 @@ const {
   mockGetBrainGatewayToken,
   mockResolveBrainInferenceProvider,
   mockMapBrainModelName,
+  mockGenerateTrackedNonTaskText,
   mockEnv,
 } = vi.hoisted(() => ({
   mockGetBrainGatewayToken: vi.fn(),
   mockResolveBrainInferenceProvider: vi.fn(),
   mockMapBrainModelName: vi.fn(),
+  mockGenerateTrackedNonTaskText: vi.fn(),
   mockEnv: {} as Record<string, string | undefined>,
 }));
 
@@ -22,7 +24,12 @@ vi.mock('@roomote/sdk/server', () => ({
   mapBrainModelName: mockMapBrainModelName,
 }));
 
-const { brainInference } = await import('../index');
+vi.mock('@roomote/cloud-agents/server/non-task-provider-usage', () => ({
+  generateTrackedNonTaskText: mockGenerateTrackedNonTaskText,
+  NON_TASK_INFERENCE_SURFACES: { brainSynthesis: 'brain_synthesis' },
+}));
+
+const { brainInference, BRAIN_HELPER_MODEL_ID } = await import('../index');
 
 const GATEWAY_TOKEN = 'brain-gateway-token-value-0123456789';
 
@@ -286,5 +293,166 @@ describe('local inference upstreams', () => {
 
     expect(response.status).toBe(401);
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('helper-model synthesis', () => {
+  it('answers the sentinel with the deployment helper model, never a provider', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    mockGenerateTrackedNonTaskText.mockResolvedValue('a sourced answer');
+
+    const response = await post('/v1/chat/completions', {
+      token: GATEWAY_TOKEN,
+      body: {
+        model: BRAIN_HELPER_MODEL_ID,
+        max_tokens: 512,
+        messages: [
+          { role: 'system', content: 'You cite sources.' },
+          { role: 'user', content: 'What changed last week?' },
+          { role: 'assistant', content: 'Let me look.' },
+          {
+            role: 'user',
+            content: [
+              { type: 'text', text: 'Focus on the API.' },
+              { type: 'image_url', image_url: { url: 'ignored' } },
+            ],
+          },
+        ],
+      },
+    });
+
+    expect(response.status).toBe(200);
+    const payload = (await response.json()) as Record<string, unknown>;
+    expect(payload).toMatchObject({
+      object: 'chat.completion',
+      model: BRAIN_HELPER_MODEL_ID,
+      choices: [
+        {
+          index: 0,
+          message: { role: 'assistant', content: 'a sourced answer' },
+          finish_reason: 'stop',
+        },
+      ],
+      usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+    });
+    expect(payload.id).toMatch(/^brain-helper-/);
+
+    expect(mockGenerateTrackedNonTaskText).toHaveBeenCalledExactlyOnceWith({
+      surface: 'brain_synthesis',
+      modelRole: 'small',
+      system: 'You cite sources.',
+      prompt:
+        'What changed last week?\n\nAssistant: Let me look.\n\nFocus on the API.',
+      maxOutputTokens: 512,
+      timeoutMs: 120_000,
+    });
+
+    // No provider must be involved: this path exists for deployments with no
+    // Brain provider key at all.
+    expect(mockResolveBrainInferenceProvider).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects streaming sentinel requests instead of faking SSE', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    const response = await post('/v1/chat/completions', {
+      token: GATEWAY_TOKEN,
+      body: {
+        model: BRAIN_HELPER_MODEL_ID,
+        stream: true,
+        messages: [{ role: 'user', content: 'hello' }],
+      },
+    });
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({
+      error: expect.stringContaining('streaming'),
+    });
+    expect(mockGenerateTrackedNonTaskText).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('translates response_format into a strict JSON instruction', async () => {
+    mockGenerateTrackedNonTaskText.mockResolvedValue('{"ok":true}');
+
+    const response = await post('/v1/chat/completions', {
+      token: GATEWAY_TOKEN,
+      body: {
+        model: BRAIN_HELPER_MODEL_ID,
+        messages: [{ role: 'user', content: 'summarize' }],
+        response_format: {
+          type: 'json_schema',
+          json_schema: { name: 'summary', schema: { type: 'object' } },
+        },
+      },
+    });
+
+    expect(response.status).toBe(200);
+    const call = mockGenerateTrackedNonTaskText.mock.calls[0]![0] as {
+      system?: string;
+    };
+    expect(call.system).toContain('only valid JSON');
+    expect(call.system).toContain('"type":"object"');
+  });
+
+  it('reports a helper failure as 502 without a stack', async () => {
+    mockGenerateTrackedNonTaskText.mockRejectedValue(
+      new Error('Model configuration is required\nfor non-task model calls.'),
+    );
+
+    const response = await post('/v1/chat/completions', {
+      token: GATEWAY_TOKEN,
+      body: {
+        model: BRAIN_HELPER_MODEL_ID,
+        messages: [{ role: 'user', content: 'hello' }],
+      },
+    });
+
+    expect(response.status).toBe(502);
+    const payload = (await response.json()) as { error: string };
+    expect(payload.error).toContain('Brain helper-model synthesis failed');
+    expect(payload.error).not.toContain('\n');
+  });
+
+  it('forwards to the provider when R_BRAIN_MODEL overrides the sentinel', async () => {
+    mockEnv.R_BRAIN_MODEL = 'openai/gpt-5.6-mini';
+    const fetchMock = vi.fn(
+      async (_url: string, _init: RequestInit) =>
+        new Response(JSON.stringify({ choices: [] }), { status: 200 }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const response = await post('/v1/chat/completions', {
+      token: GATEWAY_TOKEN,
+      body: {
+        model: BRAIN_HELPER_MODEL_ID,
+        messages: [{ role: 'user', content: 'hello' }],
+      },
+    });
+
+    expect(response.status).toBe(200);
+    expect(mockGenerateTrackedNonTaskText).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const init = fetchMock.mock.calls[0]![1];
+    expect(JSON.parse(init.body as string).model).toBe('openai/gpt-5.6-mini');
+  });
+
+  it('leaves non-sentinel chat models on the provider path', async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ choices: [] }), { status: 200 }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await post('/v1/chat/completions', {
+      token: GATEWAY_TOKEN,
+      body: { model: 'openai/gpt-5.6-luna', messages: [] },
+    });
+
+    expect(mockGenerateTrackedNonTaskText).not.toHaveBeenCalled();
+    expect(mockResolveBrainInferenceProvider).toHaveBeenCalled();
   });
 });

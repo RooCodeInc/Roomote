@@ -246,10 +246,10 @@ export function resetBrainProviderConfiguredCache(): void {
  * Whether an operator explicitly enabled the Brain by configuring a
  * brain-specific provider key.
  *
- * This is the activation predicate for everything user-visible: delivering
- * the gbrain MCP server to sandboxes, listing the Brain as a fast-agent
- * integration, resolving Brain connections, and accepting task memories. It
- * is deliberately narrower than the Brain's inference-provider resolution,
+ * This is the legacy activation signal, kept as the fallback inside
+ * `resolveBrainEnabledState` for deployments that opted in before the
+ * `brainEnabled` Settings toggle existed. New code gates on `isBrainEnabled`.
+ * It is deliberately narrower than the Brain's inference-provider resolution,
  * whose general-key fallback exists so an already-enabled Brain can bill
  * through the deployment's regular provider key; counting that fallback (or
  * template-generated plumbing) as activation would turn the Brain on for
@@ -274,6 +274,82 @@ export async function isBrainProviderConfigured(): Promise<boolean> {
   };
 
   return value;
+}
+
+export type BrainEnabledState = {
+  enabled: boolean;
+  /**
+   * True when no explicit choice is stored and the legacy activation signal
+   * (an explicit R_BRAIN_* provider key) decided the answer.
+   */
+  fromLegacyKey: boolean;
+};
+
+let brainEnabledCache: {
+  value: BrainEnabledState;
+  expiresAtMs: number;
+} | null = null;
+
+/** Drop the cached answer, so the next call re-reads settings. */
+export function invalidateBrainEnabledCache(): void {
+  brainEnabledCache = null;
+}
+
+/**
+ * Whether the Brain is on for this deployment, with its provenance. This is
+ * the activation predicate for everything user-visible: delivering the gbrain
+ * MCP server to sandboxes, listing the Brain as a fast-agent integration,
+ * resolving Brain connections, and accepting task memories.
+ *
+ * The stored Settings toggle wins when set (either way). A null/missing value
+ * falls back to `isBrainProviderConfigured()` so deployments that opted in
+ * with an explicit R_BRAIN_* key before the toggle existed stay enabled
+ * without a backfill. Cached like the legacy predicate and for the same
+ * reason: it fronts per-event paths, and the answer only changes when an
+ * admin edits Settings.
+ */
+export async function resolveBrainEnabledState(): Promise<BrainEnabledState> {
+  const cached = brainEnabledCache;
+
+  if (cached && cached.expiresAtMs > Date.now()) {
+    return cached.value;
+  }
+
+  const deployment = await db.query.deploymentSettings.findFirst({
+    where: eq(deploymentSettings.id, DEFAULT_DEPLOYMENT_ID),
+    columns: { brainEnabled: true },
+  });
+  const stored = deployment?.brainEnabled ?? null;
+  const value: BrainEnabledState =
+    stored === null
+      ? { enabled: await isBrainProviderConfigured(), fromLegacyKey: true }
+      : { enabled: stored, fromLegacyKey: false };
+
+  brainEnabledCache = {
+    value,
+    expiresAtMs: Date.now() + BRAIN_PROVIDER_CONFIGURED_CACHE_TTL_MS,
+  };
+
+  return value;
+}
+
+export async function isBrainEnabled(): Promise<boolean> {
+  return (await resolveBrainEnabledState()).enabled;
+}
+
+/** Persist an explicit Brain on/off choice and drop the cached answer. */
+export async function setBrainEnabled(value: boolean): Promise<void> {
+  const now = new Date();
+
+  await db
+    .insert(deploymentSettings)
+    .values({ id: DEFAULT_DEPLOYMENT_ID, brainEnabled: value, updatedAt: now })
+    .onConflictDoUpdate({
+      target: deploymentSettings.id,
+      set: { brainEnabled: value, updatedAt: now },
+    });
+
+  invalidateBrainEnabledCache();
 }
 
 type ModelRuntimeEnvOptions = {

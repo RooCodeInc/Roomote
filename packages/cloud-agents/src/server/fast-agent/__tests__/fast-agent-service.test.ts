@@ -8,7 +8,7 @@ const mocks = vi.hoisted(() => ({
   getEnvironments: vi.fn(),
   getTaskModelOptions: vi.fn(),
   appendMemory: vi.fn(),
-  isBrainProviderConfigured: vi.fn(),
+  isBrainEnabled: vi.fn(),
   generateText: vi.fn(),
   classifyInferenceError: vi.fn(),
   invalidateSession: vi.fn(),
@@ -78,7 +78,7 @@ vi.mock('../../router', () => ({
 vi.mock('@roomote/db/server', () => ({
   getDeploymentTaskModelOptions: mocks.getTaskModelOptions,
   appendFastAgentMemory: mocks.appendMemory,
-  isBrainProviderConfigured: mocks.isBrainProviderConfigured,
+  isBrainEnabled: mocks.isBrainEnabled,
   db: {},
 }));
 
@@ -843,7 +843,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
   });
 
   it('saves a conversation memory through the outbox', async () => {
-    mocks.isBrainProviderConfigured.mockResolvedValue(true);
+    mocks.isBrainEnabled.mockResolvedValue(true);
     mocks.appendMemory.mockResolvedValue({ saved: true });
     mocks.generateText.mockImplementation(
       async (_params, _session, options) => {
@@ -872,7 +872,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
   });
 
   it('refuses a memory save when no Brain is configured', async () => {
-    mocks.isBrainProviderConfigured.mockResolvedValue(false);
+    mocks.isBrainEnabled.mockResolvedValue(false);
     mocks.generateText.mockImplementation(
       async (_params, _session, options) => {
         options.onModelResolved?.('openrouter/openai/gpt-5.4');
@@ -899,7 +899,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
   });
 
   it('surfaces a full conversation memory as a tool failure', async () => {
-    mocks.isBrainProviderConfigured.mockResolvedValue(true);
+    mocks.isBrainEnabled.mockResolvedValue(true);
     mocks.appendMemory.mockResolvedValue({
       saved: false,
       reason: 'memory_full',

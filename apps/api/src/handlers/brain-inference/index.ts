@@ -1,7 +1,11 @@
-import { timingSafeEqual } from 'node:crypto';
+import { randomUUID, timingSafeEqual } from 'node:crypto';
 
 import { Hono } from 'hono';
 
+import {
+  generateTrackedNonTaskText,
+  NON_TASK_INFERENCE_SURFACES,
+} from '@roomote/cloud-agents/server/non-task-provider-usage';
 import { Env } from '@roomote/env';
 
 import {
@@ -18,6 +22,24 @@ import {
 import type { Variables } from '../../types';
 
 const LOG_PREFIX = '[Brain Inference]';
+
+/**
+ * Sentinel chat-model id the Brain requests in gateway mode. It is not a real
+ * provider model: the gateway answers it itself through the deployment's
+ * helper ("small") model, which is what lets a Brain synthesize without any
+ * Brain-specific provider key. An operator's `R_BRAIN_MODEL` still wins — the
+ * sentinel is only the default the gbrain entrypoint configures.
+ */
+export const BRAIN_HELPER_MODEL_ID = 'roomote/helper';
+
+/** How long a helper-model synthesis call may run before failing the request. */
+const HELPER_SYNTHESIS_TIMEOUT_MS = 120_000;
+
+/**
+ * gbrain caps its own synthesis output; when it does not say, stay modest —
+ * the helper model is a summarizer, not a long-form writer.
+ */
+const HELPER_SYNTHESIS_DEFAULT_MAX_OUTPUT_TOKENS = 2048;
 
 /**
  * The Brain's whole inference surface: embeddings for recall and chat for
@@ -147,6 +169,95 @@ function resolveLocalUpstream(
 }
 
 /**
+ * Flatten OpenAI-style message content to plain text. Array content keeps its
+ * text parts (joined) and drops the rest; the helper path is text-only.
+ */
+function messageContentText(content: unknown): string {
+  if (typeof content === 'string') {
+    return content;
+  }
+
+  if (Array.isArray(content)) {
+    return content
+      .flatMap((part) => {
+        const record =
+          part && typeof part === 'object'
+            ? (part as Record<string, unknown>)
+            : undefined;
+
+        return typeof record?.text === 'string' ? [record.text] : [];
+      })
+      .join('\n');
+  }
+
+  return '';
+}
+
+/**
+ * Convert an OpenAI chat request into the system/prompt pair
+ * generateTrackedNonTaskText speaks. System messages concatenate into the
+ * system string; everything else concatenates in order into the prompt, with
+ * non-user roles labeled so multi-turn context stays attributable.
+ */
+function toHelperPromptParts(messages: unknown): {
+  system: string;
+  prompt: string;
+} {
+  const systemParts: string[] = [];
+  const promptParts: string[] = [];
+
+  for (const message of Array.isArray(messages) ? messages : []) {
+    const record =
+      message && typeof message === 'object'
+        ? (message as Record<string, unknown>)
+        : undefined;
+    const role = typeof record?.role === 'string' ? record.role : 'user';
+    const text = messageContentText(record?.content);
+
+    if (!text.trim()) {
+      continue;
+    }
+
+    if (role === 'system') {
+      systemParts.push(text);
+    } else if (role === 'user') {
+      promptParts.push(text);
+    } else {
+      promptParts.push(
+        `${role.charAt(0).toUpperCase()}${role.slice(1)}: ${text}`,
+      );
+    }
+  }
+
+  return {
+    system: systemParts.join('\n\n'),
+    prompt: promptParts.join('\n\n'),
+  };
+}
+
+/**
+ * gbrain relies on `response_format` for its structured synthesis calls, but
+ * the helper path runs through a plain-text prompt; translate the contract
+ * into a strict instruction instead of dropping it silently.
+ */
+function jsonResponseInstruction(responseFormat: unknown): string | null {
+  const record =
+    responseFormat && typeof responseFormat === 'object'
+      ? (responseFormat as Record<string, unknown>)
+      : undefined;
+
+  if (record?.type === 'json_object') {
+    return 'Respond with only valid JSON. No prose, no code fences.';
+  }
+
+  if (record?.type === 'json_schema') {
+    return `Respond with only valid JSON that conforms to this JSON Schema. No prose, no code fences.\n${JSON.stringify(record.json_schema ?? {})}`;
+  }
+
+  return null;
+}
+
+/**
  * Inference gateway for this deployment's Brain.
  *
  * The Brain container holds no provider credential. It is pointed at this
@@ -191,6 +302,107 @@ brainInference.post('/*', async (c) => {
     );
 
     return c.json({ error: 'Path is not allowed through this gateway' }, 403);
+  }
+
+  // The helper-model sentinel is answered here, before provider resolution,
+  // because it exists precisely for deployments with no Brain provider key:
+  // synthesis rides the deployment's helper model instead. An operator's
+  // R_BRAIN_MODEL still wins — the sentinel is rewritten to it and forwarded
+  // through the ordinary provider path below.
+  let helperOverrideBody: string | undefined;
+
+  if (upstreamPath === '/v1/chat/completions') {
+    let parsedBody: Record<string, unknown> | undefined;
+
+    try {
+      const candidate = JSON.parse(await c.req.text()) as unknown;
+
+      parsedBody =
+        candidate && typeof candidate === 'object' && !Array.isArray(candidate)
+          ? (candidate as Record<string, unknown>)
+          : undefined;
+    } catch {
+      // Not JSON we understand; the provider path forwards it untouched.
+    }
+
+    if (parsedBody?.model === BRAIN_HELPER_MODEL_ID) {
+      const overrideModel = Env.R_BRAIN_MODEL?.trim();
+
+      if (overrideModel) {
+        helperOverrideBody = JSON.stringify({
+          ...parsedBody,
+          model: overrideModel,
+        });
+      } else {
+        if (parsedBody.stream === true) {
+          // gbrain's gateway chat is non-streaming by design; refuse rather
+          // than pretend an SSE stream that would never come.
+          return c.json(
+            {
+              error:
+                'The Brain helper model does not support streaming. Retry without stream.',
+            },
+            400,
+          );
+        }
+
+        const { system, prompt } = toHelperPromptParts(parsedBody.messages);
+        const jsonInstruction = jsonResponseInstruction(
+          parsedBody.response_format,
+        );
+        const systemWithFormat = [system, jsonInstruction]
+          .filter((part): part is string => Boolean(part))
+          .join('\n\n');
+
+        try {
+          const text = await generateTrackedNonTaskText({
+            surface: NON_TASK_INFERENCE_SURFACES.brainSynthesis,
+            modelRole: 'small',
+            system: systemWithFormat || undefined,
+            prompt,
+            maxOutputTokens:
+              typeof parsedBody.max_tokens === 'number' &&
+              Number.isFinite(parsedBody.max_tokens) &&
+              parsedBody.max_tokens > 0
+                ? parsedBody.max_tokens
+                : HELPER_SYNTHESIS_DEFAULT_MAX_OUTPUT_TOKENS,
+            timeoutMs: HELPER_SYNTHESIS_TIMEOUT_MS,
+          });
+
+          return c.json({
+            id: `brain-helper-${randomUUID()}`,
+            object: 'chat.completion',
+            created: Math.floor(Date.now() / 1000),
+            model: BRAIN_HELPER_MODEL_ID,
+            choices: [
+              {
+                index: 0,
+                message: { role: 'assistant', content: text },
+                finish_reason: 'stop',
+              },
+            ],
+            // Advisory only: gbrain logs usage but never bills from it, and
+            // the real usage is already recorded by the tracked call above.
+            usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+          });
+        } catch (error) {
+          const detail = (
+            error instanceof Error ? error.message : String(error)
+          ).replace(/\s+/g, ' ');
+
+          console.warn(
+            formatSingleLineLog(`${LOG_PREFIX} Helper synthesis failed`, {
+              error: detail,
+            }),
+          );
+
+          return c.json(
+            { error: `Brain helper-model synthesis failed: ${detail}` },
+            502,
+          );
+        }
+      }
+    }
   }
 
   const localUpstream = resolveLocalUpstream(upstreamPath);
@@ -292,7 +504,10 @@ brainInference.post('/*', async (c) => {
       : resolved.apiKey,
   );
 
-  const body = await rewriteBody(await c.req.text(), resolved);
+  const body = await rewriteBody(
+    helperOverrideBody ?? (await c.req.text()),
+    resolved,
+  );
   const startedAt = Date.now();
 
   let upstream: Response;
