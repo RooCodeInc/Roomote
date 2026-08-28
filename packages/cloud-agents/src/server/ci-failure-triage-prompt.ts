@@ -182,6 +182,8 @@ If it is real:
 4. Open a draft PR.
 5. If it does not reproduce, no-op with evidence — do not change code.
 
+If the failure depends on external provider state or access that is unavailable in this environment, close out with the evidence and one concrete operator handoff: name the system, the exact log or access needed, and the next check to run. Do not propose a speculative repository change.
+
 ${reporting}
 ${environmentSection}`;
 }

@@ -33,6 +33,13 @@ describe('buildCiFailureTriagePrompt', () => {
       'Reproduce the failing job commands in this environment',
     );
     expect(prompt).toContain('Open a draft PR');
+    expect(prompt).toContain(
+      'name the system, the exact log or access needed, and the next check to run',
+    );
+    expect(prompt).toContain(
+      'external provider state or access that is unavailable in this environment',
+    );
+    expect(prompt).toContain('Do not propose a speculative repository change');
     expect(prompt).not.toContain('<triggering_run>');
     expect(prompt).not.toContain('submit_automation_work_items');
     expect(prompt).not.toContain('work item');
