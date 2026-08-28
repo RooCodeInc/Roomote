@@ -4,7 +4,9 @@ import {
   type AcpToolResultPayload,
 } from '@roomote/types';
 
-import { sanitizeSandboxPathString } from '@/lib';
+// Direct import: the @/lib barrel drags icon-bearing modules into any test
+// that mocks @/components/system.
+import { sanitizeSandboxPathString } from '@/lib/sandbox-paths';
 
 export type ToolPresentationCategory =
   | 'execute'
