@@ -75,10 +75,10 @@ function parseCommunicationReferences(
   externalReference?: string | null,
 ): CommunicationReference[] {
   const candidates = [
-    ...(taskDescription.match(/https?:\/\/[^\s<>'"\])}]+/gi) ?? []),
     ...(externalReference
       ? (externalReference.match(/https?:\/\/[^\s<>'"\])}]+/gi) ?? [])
       : []),
+    ...(taskDescription.match(/https?:\/\/[^\s<>'"\])}]+/gi) ?? []),
   ];
   const references: CommunicationReference[] = [];
   const seen = new Set<string>();

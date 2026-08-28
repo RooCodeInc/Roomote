@@ -87,6 +87,34 @@ describe('gatherExternalCommunicationContext', () => {
     expect(callRouterMcpTool).toHaveBeenCalledTimes(2);
   });
 
+  it('fetches the model-selected link before applying the lookup cap', async () => {
+    const firstLink = 'https://discord.com/channels/1/2/3';
+    const secondLink = 'https://discord.com/channels/4/5/6';
+    const selectedLink = 'https://discord.com/channels/7/8/9';
+    vi.mocked(callRouterMcpTool).mockResolvedValue({ messages: [] });
+
+    await gatherExternalCommunicationContext(
+      createContext([firstLink, secondLink, selectedLink].join(' ')),
+      selectedLink,
+    );
+
+    expect(callRouterMcpTool).toHaveBeenCalledTimes(2);
+    expect(callRouterMcpTool).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        toolName: CHAT_MESSAGE_CONTEXT_TOOL.name,
+        args: { messageLink: selectedLink },
+      }),
+    );
+    expect(callRouterMcpTool).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        toolName: CHAT_MESSAGE_CONTEXT_TOOL.name,
+        args: { messageLink: firstLink },
+      }),
+    );
+  });
+
   it('continues routing when communication context cannot be fetched', async () => {
     vi.mocked(callRouterMcpTool).mockRejectedValue(new Error('Not accessible'));
 
