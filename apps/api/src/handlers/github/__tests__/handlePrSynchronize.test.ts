@@ -277,6 +277,7 @@ describe('handlePrSynchronize', () => {
       taskId: 'task-100',
       runId: 100,
       status: 'in_progress',
+      signal: mockReleaseLock.signal,
     });
     expect(mockReleaseLock).toHaveBeenCalledOnce();
   });
@@ -404,6 +405,7 @@ describe('handlePrSynchronize', () => {
       headSha: 'new-head',
       taskId: 'task-100',
       runId: 200,
+      signal: mockReleaseLock.signal,
     });
     expect(mockReleaseLock).toHaveBeenCalledOnce();
   });

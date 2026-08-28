@@ -160,6 +160,7 @@ export async function handlePrOpen(
           headSha,
           taskId: launch.taskId,
           runId: launch.id,
+          signal: releaseLifecycleLock.signal,
         });
       }
 

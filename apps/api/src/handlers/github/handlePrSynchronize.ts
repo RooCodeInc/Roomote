@@ -345,6 +345,7 @@ export async function handlePrSynchronize({
               taskId: followUpRun.taskId,
               runId: followUpRun.id,
               status: 'in_progress',
+              signal: releaseLaunchLock.signal,
             });
           }
           queuedActiveReviewFollowUp = true;
@@ -452,6 +453,7 @@ export async function handlePrSynchronize({
           headSha,
           taskId: launch.taskId,
           runId: launch.id,
+          signal: releaseLaunchLock.signal,
         });
       }
 

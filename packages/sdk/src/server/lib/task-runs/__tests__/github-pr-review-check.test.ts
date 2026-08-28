@@ -6,6 +6,7 @@ const {
   mockDbUpdate,
   mockDbUpdateSet,
   mockDbUpdateWhere,
+  mockDbUpdateReturning,
   mockCreateCheck,
   mockGetCheck,
   mockGetIssueComment,
@@ -22,6 +23,7 @@ const {
     mockDbUpdate: vi.fn(),
     mockDbUpdateSet: vi.fn(),
     mockDbUpdateWhere: vi.fn(),
+    mockDbUpdateReturning: vi.fn(),
     mockCreateCheck: vi.fn(),
     mockGetCheck: vi.fn(),
     mockGetIssueComment: vi.fn(),
@@ -99,7 +101,8 @@ describe('GitHub PR review check lifecycle', () => {
     vi.clearAllMocks();
     mockDbUpdate.mockReturnValue({ set: mockDbUpdateSet });
     mockDbUpdateSet.mockReturnValue({ where: mockDbUpdateWhere });
-    mockDbUpdateWhere.mockResolvedValue(undefined);
+    mockDbUpdateWhere.mockReturnValue({ returning: mockDbUpdateReturning });
+    mockDbUpdateReturning.mockResolvedValue([{ id: 'linkage-1' }]);
     mockFindFirstRun.mockResolvedValue(undefined);
     mockGetCheck.mockResolvedValue({
       data: { head_sha: '789abcd', status: 'in_progress' },
@@ -201,6 +204,50 @@ describe('GitHub PR review check lifecycle', () => {
         conclusion: 'cancelled',
       }),
     );
+  });
+
+  it('does not overwrite linkage when a newer publisher wins during check creation', async () => {
+    mockFindFirstLinkage.mockResolvedValue({ githubCheckRunId: 10 });
+    mockCreateCheck.mockResolvedValue({ data: { id: 20 } });
+    mockDbUpdateReturning.mockResolvedValueOnce([]);
+
+    await publishGithubPrReviewCheck({
+      installationId: 1,
+      repository: 'owner/repo',
+      prNumber: 42,
+      headSha: '789abcd',
+      taskId: 'task-1',
+      runId: 2,
+    });
+
+    expect(mockDbUpdateReturning).toHaveBeenCalledOnce();
+    expect(mockUpdateInstallationCheck).not.toHaveBeenCalled();
+  });
+
+  it('does not persist a check after publication loses lifecycle ownership', async () => {
+    const ownership = new AbortController();
+    mockFindFirstLinkage.mockResolvedValue({ githubCheckRunId: 10 });
+    mockCreateCheck.mockImplementationOnce(async () => {
+      ownership.abort(new GithubPrReviewLifecycleLockLostError());
+      return { data: { id: 20 } };
+    });
+
+    await publishGithubPrReviewCheck({
+      installationId: 1,
+      repository: 'owner/repo',
+      prNumber: 42,
+      headSha: '789abcd',
+      taskId: 'task-1',
+      runId: 2,
+      signal: ownership.signal,
+    });
+
+    expect(mockCreateCheck).toHaveBeenCalledWith(
+      expect.objectContaining({
+        request: { signal: ownership.signal },
+      }),
+    );
+    expect(mockDbUpdate).not.toHaveBeenCalled();
   });
 
   it('marks the persisted check in progress when its worker starts', async () => {

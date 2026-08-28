@@ -1395,6 +1395,7 @@ export async function handlePrComment(
               headSha,
               taskId: reviewLaunch.taskId,
               runId: reviewLaunch.id,
+              signal: releaseLifecycleLock.signal,
             });
           }
           reviewLaunches.push(reviewLaunch);
