@@ -866,6 +866,17 @@ async function createOrUpdateGiteaPullRequest({
       : createDraft,
     'gitea',
   );
+  const assignees =
+    input.assignees.length > 0
+      ? [
+          ...new Set([
+            ...(existing?.assignees
+              ?.map((assignee) => assignee.login)
+              .filter((login): login is string => Boolean(login)) ?? []),
+            ...input.assignees,
+          ]),
+        ]
+      : [];
   const pullRequest = existing
     ? await requestJson({
         fetchImpl,
@@ -878,7 +889,11 @@ async function createOrUpdateGiteaPullRequest({
           {},
         ),
         tokenHeader: { name: 'Authorization', value: `token ${token}` },
-        body: { title, body: input.body },
+        body: {
+          title,
+          body: input.body,
+          ...(assignees.length > 0 ? { assignees } : {}),
+        },
         schema: giteaPullRequestSchema,
       })
     : await requestJson({
@@ -897,7 +912,7 @@ async function createOrUpdateGiteaPullRequest({
           head: input.sourceBranch,
           title,
           body: input.body,
-          ...(input.assignees.length > 0 ? { assignees: input.assignees } : {}),
+          ...(assignees.length > 0 ? { assignees } : {}),
         },
         schema: giteaPullRequestSchema,
       });

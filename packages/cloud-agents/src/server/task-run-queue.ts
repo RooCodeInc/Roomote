@@ -69,6 +69,7 @@ import {
   recordSnapshotResumeEvent,
   resolveDefaultComputeProvider,
   resolveWorkspaceRepositoryProviders,
+  resolveWorkspaceSourceControlHost,
   sql,
 } from '@roomote/db/server';
 import { type Redis, getRedis } from '@roomote/redis';
@@ -2042,14 +2043,43 @@ async function stampWorkspaceSourceControlProviders(
   payload: FreshTask['payload'],
   workspace: ReturnType<typeof resolveTaskWorkspace>,
 ): Promise<void> {
-  const repositoryProviders = await resolveWorkspaceRepositoryProviders(
-    db,
-    workspace,
-  );
+  const [repositoryProviders, workspaceHost] = await Promise.all([
+    resolveWorkspaceRepositoryProviders(db, workspace),
+    resolveWorkspaceSourceControlHost(db, workspace),
+  ]);
+  const isAggregateWorkspace =
+    workspace.type === 'repository_set' ||
+    workspace.type === 'all_repositories';
+  const requiresCompleteCoverage =
+    isAggregateWorkspace || workspace.type === 'environment';
+  const expectedRepositoryCount =
+    workspace.type === 'repository_set'
+      ? new Set(workspace.repositories).size
+      : undefined;
+
+  if (requiresCompleteCoverage) {
+    payload.repositoryProviders = repositoryProviders;
+  }
+
+  if (
+    requiresCompleteCoverage &&
+    (Object.keys(repositoryProviders).length === 0 ||
+      (expectedRepositoryCount !== undefined &&
+        Object.keys(repositoryProviders).length !== expectedRepositoryCount))
+  ) {
+    payload.sourceControlProvider = undefined;
+    payload.sourceControlHost = undefined;
+    return;
+  }
+
   const providers = Object.values(repositoryProviders);
   const spansProviders = new Set(providers).size > 1;
 
-  if (spansProviders) {
+  if (requiresCompleteCoverage && !spansProviders) {
+    payload.sourceControlHost = workspaceHost;
+  }
+
+  if (spansProviders && !requiresCompleteCoverage) {
     payload.repositoryProviders = repositoryProviders;
   }
 

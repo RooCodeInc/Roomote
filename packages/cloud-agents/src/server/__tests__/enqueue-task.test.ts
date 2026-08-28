@@ -59,6 +59,7 @@ import {
   shouldCaptureTaskCreatedEvent,
   type FreshTaskLaunch,
 } from '../task-run-queue';
+import { resolveAggregateSourceControl } from '../cloud-agent-workflow';
 import { LLM_TITLE_LOCKED_CHECKPOINT } from '../llm-task-title';
 import { applyTaskModelSelectionToRun } from '../task-model-selection';
 import { getPrSha } from '../workflows/utils';
@@ -2112,10 +2113,11 @@ describe('enqueueTask source-control provider stamping', () => {
     }
   });
 
-  it('stamps gitlab on an environment-workspace launch for a gitlab-only deployment', async () => {
+  it('stamps the provider and host on a homogeneous environment-workspace launch', async () => {
     const userId = await createUser();
     const repository = await repositoryFactory.create({
-      sourceControlProvider: 'gitlab',
+      sourceControlProvider: 'gitea',
+      host: 'gitea.example.com',
       linkedByUserId: userId,
       fullName: 'group/project',
       isActive: true,
@@ -2125,7 +2127,7 @@ describe('enqueueTask source-control provider stamping', () => {
     const environment = await environmentFactory.create({
       createdByUserId: userId,
       config: {
-        name: 'GitLab environment',
+        name: 'Gitea environment',
         repositories: [{ repository: 'group/project' }],
       },
     });
@@ -2140,11 +2142,10 @@ describe('enqueueTask source-control provider stamping', () => {
       task: standardTaskInput({
         payload: {
           // environmentId makes this an environment workspace regardless of
-          // repo, so the provider must resolve via the environment-repository
-          // mapping (this repo is intentionally not in the repositories table).
-          repo: 'unmapped/repo',
+          // repo. The web UI uses the aggregate sentinel for these launches.
+          repo: ALL_REPOSITORIES,
           environmentId: environment.id,
-          description: 'Work in the gitlab environment',
+          description: 'Work in the Gitea environment',
         },
       }),
       initiator: { kind: 'user', userId },
@@ -2160,11 +2161,64 @@ describe('enqueueTask source-control provider stamping', () => {
     expect(
       (persistedRun!.payload as { sourceControlProvider?: string })
         .sourceControlProvider,
-    ).toBe('gitlab');
-    expect(
-      (persistedRun!.payload as { repositoryProviders?: unknown })
-        .repositoryProviders,
-    ).toBeUndefined();
+    ).toBe('gitea');
+    expect(persistedRun!.payload.sourceControlHost).toBe('gitea.example.com');
+    expect(resolveAggregateSourceControl(persistedRun!.payload)).toEqual({
+      provider: 'gitea',
+      host: 'gitea.example.com',
+    });
+    expect(persistedRun!.payload.repositoryProviders).toEqual({
+      'group/project': 'gitea',
+    });
+  });
+
+  it('clears attribution for incomplete environment repository coverage', async () => {
+    const userId = await createUser();
+    const repository = await repositoryFactory.create({
+      sourceControlProvider: 'gitea',
+      host: 'gitea.example.com',
+      linkedByUserId: userId,
+      fullName: 'group/environment-api',
+      isActive: true,
+    });
+    createdRepositoryIds.push(repository.id);
+
+    const environment = await environmentFactory.create({
+      createdByUserId: userId,
+      config: {
+        name: 'Incomplete Gitea environment',
+        repositories: [
+          { repository: 'group/environment-api' },
+          { repository: 'group/environment-web' },
+        ],
+      },
+    });
+    createdEnvironmentIds.push(environment.id);
+
+    await db.insert(environmentRepositoryMappings).values({
+      environmentId: environment.id,
+      repositoryId: repository.id,
+    });
+
+    const run = await launchFresh({
+      task: standardTaskInput({
+        payload: {
+          repo: ALL_REPOSITORIES,
+          environmentId: environment.id,
+          sourceControlProvider: 'gitea',
+          sourceControlHost: 'gitea.example.com',
+          description: 'Work in an incompletely mapped environment',
+        },
+      }),
+      initiator: { kind: 'user', userId },
+      workflow: 'standard',
+      surface: 'web',
+      trigger: 'manual',
+    });
+
+    expect(run.payload.sourceControlProvider).toBeUndefined();
+    expect(run.payload.sourceControlHost).toBeUndefined();
+    expect(resolveAggregateSourceControl(run.payload)).toBeUndefined();
   });
 
   it('stamps a provider map and the first repository provider for a mixed environment', async () => {
@@ -2272,6 +2326,85 @@ describe('enqueueTask source-control provider stamping', () => {
         'acme/Platform/selected-api': 'ado',
       },
     });
+  });
+
+  it('stamps complete provider coverage for homogeneous selected repositories', async () => {
+    const userId = await createUser();
+    const apiRepository = await repositoryFactory.create({
+      sourceControlProvider: 'gitea',
+      host: 'gitea.example.com',
+      linkedByUserId: userId,
+      fullName: 'group/homogeneous-api',
+      isActive: true,
+    });
+    const webRepository = await repositoryFactory.create({
+      sourceControlProvider: 'gitea',
+      host: 'gitea.example.com',
+      linkedByUserId: userId,
+      fullName: 'group/homogeneous-web',
+      isActive: true,
+    });
+    createdRepositoryIds.push(apiRepository.id, webRepository.id);
+
+    const run = await launchFresh({
+      task: standardTaskInput({
+        payload: {
+          repo: ALL_REPOSITORIES,
+          selectedRepositories: [
+            'group/homogeneous-api',
+            'group/homogeneous-web',
+          ],
+          description: 'Work across homogeneous repositories',
+        },
+      }),
+      initiator: { kind: 'user', userId },
+      workflow: 'standard',
+      surface: 'web',
+      trigger: 'manual',
+    });
+
+    expect(run.payload).toMatchObject({
+      sourceControlProvider: 'gitea',
+      sourceControlHost: 'gitea.example.com',
+      repositoryProviders: {
+        'group/homogeneous-api': 'gitea',
+        'group/homogeneous-web': 'gitea',
+      },
+    });
+    expect(resolveAggregateSourceControl(run.payload)).toEqual({
+      provider: 'gitea',
+      host: 'gitea.example.com',
+    });
+  });
+
+  it('does not stamp a provider for incomplete selected repository coverage', async () => {
+    const userId = await createUser();
+    const repository = await repositoryFactory.create({
+      sourceControlProvider: 'gitea',
+      linkedByUserId: userId,
+      fullName: 'group/resolved-api',
+      isActive: true,
+    });
+    createdRepositoryIds.push(repository.id);
+
+    const run = await launchFresh({
+      task: standardTaskInput({
+        payload: {
+          repo: ALL_REPOSITORIES,
+          selectedRepositories: ['group/resolved-api', 'group/missing-web'],
+          description: 'Work across an incomplete repository selection',
+        },
+      }),
+      initiator: { kind: 'user', userId },
+      workflow: 'standard',
+      surface: 'web',
+      trigger: 'manual',
+    });
+
+    expect(run.payload.repositoryProviders).toEqual({
+      'group/resolved-api': 'gitea',
+    });
+    expect(run.payload.sourceControlProvider).toBeUndefined();
   });
 
   it('re-stamps a PR launch after auto-resolving a mixed environment', async () => {
