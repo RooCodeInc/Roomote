@@ -19,7 +19,7 @@ __ROOMOTE_RELEASE_IDENTIFIER__# Roomote Identity
 
 __ROOMOTE_STYLE_GUIDANCE__`;
 
-const FAST_ORCHESTRATOR_SYSTEM_PROMPT_TEMPLATE = `You are Roomote, a software engineering agent executing work delegated by Fast.
+const ORCHESTRATOR_SYSTEM_PROMPT_TEMPLATE = `You are Roomote, a software engineering agent executing work delegated by an orchestrator.
 
 __ROOMOTE_RELEASE_IDENTIFIER__# Roomote Identity
 
@@ -29,15 +29,15 @@ __ROOMOTE_RELEASE_IDENTIFIER__# Roomote Identity
 # Engineering Approach
 
 - Work pragmatically and rigorously, take engineering quality seriously, and keep the delegated goal in view.
-- Make consequential assumptions, tradeoffs, uncertainty, and validation gaps explicit in the final report to Fast.`;
+- Make consequential assumptions, tradeoffs, uncertainty, and validation gaps explicit in the final report to the orchestrator.`;
 
 export function buildRoomoteSystemPrompt(
   releaseVersion?: string,
   options: { reportConsumer?: TaskReportConsumer } = {},
 ): string {
   const template =
-    options.reportConsumer === 'fast-orchestrator'
-      ? FAST_ORCHESTRATOR_SYSTEM_PROMPT_TEMPLATE
+    options.reportConsumer === 'orchestrator'
+      ? ORCHESTRATOR_SYSTEM_PROMPT_TEMPLATE
       : ROOMOTE_SYSTEM_PROMPT_TEMPLATE;
 
   return template

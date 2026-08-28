@@ -1,25 +1,23 @@
 import { standardTask } from '../standardTask';
 
 describe('standardTask reporting consumer', () => {
-  it('gives Fast-owned coding tasks an internal factual report contract', () => {
+  it('gives orchestrator-owned coding tasks an internal factual report contract', () => {
     const { harnessInstructions } = standardTask({
       description: 'Implement the delegated change',
       repo: 'Roomote/example-app',
-      reportConsumer: 'fast-orchestrator',
+      reportConsumer: 'orchestrator',
       codeReviewsEnabled: true,
     });
 
+    expect(harnessInstructions).toContain('<consumer>orchestrator</consumer>');
     expect(harnessInstructions).toContain(
-      '<consumer>fast-orchestrator</consumer>',
+      '<role>You are the coding executor for an orchestrator-owned task.</role>',
     );
     expect(harnessInstructions).toContain(
-      '<role>You are the coding executor for a Fast-owned task.</role>',
+      '<destination>All task communication is private input to the orchestrator. The orchestrator owns acknowledgements, progress updates, clarification, and final user communication.</destination>',
     );
     expect(harnessInstructions).toContain(
-      '<destination>All task communication is private orchestrator input to Fast. Fast owns acknowledgements, progress updates, clarification, and final user communication.</destination>',
-    );
-    expect(harnessInstructions).toContain(
-      '<delivery>Before settlement, send one report to Fast using `send_chat_reply` with purpose `closeout`.</delivery>',
+      '<delivery>Before settlement, send one report to the orchestrator using `send_chat_reply` with purpose `closeout`.</delivery>',
     );
     for (const section of [
       'Outcome',
@@ -32,7 +30,7 @@ describe('standardTask reporting consumer', () => {
       expect(harnessInstructions).toContain(`<section name="${section}">`);
     }
     expect(harnessInstructions).toContain(
-      '<scope>The report covers the final consequential state and gives Fast enough factual context to close out the task without further inspection.</scope>',
+      '<scope>The report covers the final consequential state and gives the orchestrator enough factual context to close out the task without further inspection.</scope>',
     );
     expect(harnessInstructions).toContain(
       '<scope>The report is a concise factual summary organized by the required sections.</scope>',
@@ -55,6 +53,7 @@ describe('standardTask reporting consumer', () => {
     expect(reportingContext).not.toContain('not transcript-like');
     expect(reportingContext).not.toContain('unless');
     expect(reportingContext).not.toContain('outside the report scope');
+    expect(reportingContext).not.toContain('Fast');
     expect(harnessInstructions).not.toContain('Slack-visible closeout');
     expect(harnessInstructions).not.toContain('Discord-visible closeout');
     expect(harnessInstructions).not.toContain(
@@ -73,9 +72,11 @@ describe('standardTask reporting consumer', () => {
     });
 
     expect(harnessInstructions).not.toContain('<reporting_context>');
-    expect(harnessInstructions).not.toContain('fast-orchestrator');
     expect(harnessInstructions).not.toContain(
-      'Fast owns acknowledgements, progress updates, clarification, and final user communication.',
+      '<consumer>orchestrator</consumer>',
+    );
+    expect(harnessInstructions).not.toContain(
+      'The orchestrator owns acknowledgements, progress updates, clarification, and final user communication.',
     );
     expect(harnessInstructions).toContain(
       'acknowledge it immediately to the user',

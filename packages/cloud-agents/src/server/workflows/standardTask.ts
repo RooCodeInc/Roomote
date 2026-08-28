@@ -376,13 +376,13 @@ ${buildGitHubMessageInstructions()}`
   </source_control_context>`
     : '';
   const reportingContext =
-    reportConsumer === 'fast-orchestrator'
+    reportConsumer === 'orchestrator'
       ? `
   <reporting_context>
-    <consumer>fast-orchestrator</consumer>
-    <role>You are the coding executor for a Fast-owned task.</role>
-    <destination>All task communication is private orchestrator input to Fast. Fast owns acknowledgements, progress updates, clarification, and final user communication.</destination>
-    <delivery>Before settlement, send one report to Fast using \`send_chat_reply\` with purpose \`closeout\`.</delivery>
+    <consumer>orchestrator</consumer>
+    <role>You are the coding executor for an orchestrator-owned task.</role>
+    <destination>All task communication is private input to the orchestrator. The orchestrator owns acknowledgements, progress updates, clarification, and final user communication.</destination>
+    <delivery>Before settlement, send one report to the orchestrator using \`send_chat_reply\` with purpose \`closeout\`.</delivery>
     <final_report_contract>
       <section name="Outcome">State what was accomplished or the precise blocker.</section>
       <section name="Changes">List changed files or components and important behavioral decisions.</section>
@@ -390,7 +390,7 @@ ${buildGitHubMessageInstructions()}`
       <section name="Artifacts">List available commits, branches, pull requests, previews, screenshots, and other outputs.</section>
       <section name="Risks and caveats">State unresolved uncertainty, regressions to watch, assumptions, and confidence gaps.</section>
       <section name="Recommended follow-ups">When follow-up work is warranted, give concrete next actions and the reason for each.</section>
-      <scope>The report covers the final consequential state and gives Fast enough factual context to close out the task without further inspection.</scope>
+      <scope>The report covers the final consequential state and gives the orchestrator enough factual context to close out the task without further inspection.</scope>
       <scope>The report is a concise factual summary organized by the required sections.</scope>
     </final_report_contract>
   </reporting_context>`
@@ -408,12 +408,12 @@ ${buildGitHubMessageInstructions()}`
   </code_review_self_review_closeout>`
       : '';
   const modeSwitchingContext =
-    reportConsumer === 'fast-orchestrator'
+    reportConsumer === 'orchestrator'
       ? `<mode_switching>
-      <rule>Allow switching between Autonomous and Interactive modes when Fast explicitly directs a mode change.</rule>
+      <rule>Allow switching between Autonomous and Interactive modes when the orchestrator explicitly directs a mode change.</rule>
       <rule>Honor the most recent explicit mode instruction without sending a user-facing acknowledgement.</rule>
-      <rule>Autonomous-by-default applies unless Fast explicitly requests Interactive execution.</rule>
-      <rule>If mode intent is unclear near push or pull-request actions, report the precise decision needed to Fast instead of addressing the end user.</rule>
+      <rule>Autonomous-by-default applies unless the orchestrator explicitly requests Interactive execution.</rule>
+      <rule>If mode intent is unclear near push or pull-request actions, report the precise decision needed to the orchestrator instead of addressing the end user.</rule>
     </mode_switching>`
       : `<mode_switching>
       <rule>Allow switching between Autonomous and Interactive modes at any time in the thread.</rule>

@@ -31,13 +31,13 @@ describe('ROOMOTE_SYSTEM_PROMPT', () => {
     expect(buildRoomoteSystemPrompt()).not.toContain('Roomote release');
   });
 
-  it('replaces user-facing personality guidance for Fast-owned coding tasks', () => {
+  it('replaces user-facing personality guidance for orchestrator-owned coding tasks', () => {
     const prompt = buildRoomoteSystemPrompt('0.40.2', {
-      reportConsumer: 'fast-orchestrator',
+      reportConsumer: 'orchestrator',
     });
 
     expect(prompt).toContain(
-      'You are Roomote, a software engineering agent executing work delegated by Fast.',
+      'You are Roomote, a software engineering agent executing work delegated by an orchestrator.',
     );
     expect(prompt).toContain('# Engineering Approach');
     expect(prompt).toContain('take engineering quality seriously');
@@ -45,5 +45,6 @@ describe('ROOMOTE_SYSTEM_PROMPT', () => {
     expect(prompt).not.toContain(DEFAULT_ROOMOTE_STYLE_GUIDANCE);
     expect(prompt).not.toContain('sound lightly conversational');
     expect(prompt).not.toContain('never patronize or dismiss');
+    expect(prompt).not.toContain('Fast');
   });
 });
