@@ -18,7 +18,7 @@ export ENCRYPTION_KEY=12345678901234567890123456789012
 export ARTIFACT_SIGNING_KEY=12345678901234567890123456789012
 export DASHBOARD_PASSWORD=test-dashboard-password
 
-docker compose -f "$compose_file" config --format json >"$rendered_config"
+docker compose --profile local-inference -f "$compose_file" config --format json >"$rendered_config"
 
 jq -e '
   def hardened:
