@@ -46,7 +46,6 @@ const nativeToolNames = vi.hoisted(
     ({
       cancelTask: 'cancel_task',
       ignoreEvent: 'ignore_event',
-      ignoreMessage: 'ignore_message',
       launchTask: 'launch_task',
       retryTaskStart: 'retry_task_start',
       saveMemory: 'save_memory',
@@ -730,7 +729,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       async (_params, _session, options) => {
         await options.onSessionReady('opencode-session-1');
         await expect(
-          invokeTool(nativeToolNames.ignoreMessage, {
+          invokeTool(nativeToolNames.ignoreEvent, {
             reason: 'The participants are talking to each other.',
           }),
         ).resolves.toEqual({ success: true, ignored: true, closed: true });
@@ -750,17 +749,18 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     expect(adapter.postReply).not.toHaveBeenCalled();
   });
 
-  it('rejects ignore_message for directed human turns', async () => {
+  it('rejects ignore_event for directed human turns', async () => {
     mocks.generateText.mockImplementationOnce(
       async (_params, _session, options) => {
         await options.onSessionReady('opencode-session-1');
         await expect(
-          invokeTool(nativeToolNames.ignoreMessage, {
+          invokeTool(nativeToolNames.ignoreEvent, {
             reason: 'No response needed.',
           }),
         ).resolves.toEqual({
           success: false,
-          error: 'Only an eligible ambient human message may be ignored.',
+          error:
+            'Only an optional platform event or eligible ambient human message may be ignored.',
         });
         await invokeTool(nativeToolNames.sendChatReply, {
           purpose: 'closeout',

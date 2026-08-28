@@ -397,10 +397,10 @@ describe('buildFastAgentSystemPrompt', () => {
     });
 
     expect(ambientPrompt).toContain(
-      'If it is ambient conversation between people rather than a request, reply, or answer directed at Roomote, call `ignore_message` and stop',
+      'If it is ambient conversation between people rather than a request, reply, or answer directed at Roomote, call `ignore_event` and stop',
     );
     expect(directedPrompt).toContain(
-      '`ignore_message`, `ignore_event`, and `retry_task_start` are invalid for this human-authored turn',
+      '`ignore_event` and `retry_task_start` are invalid for this human-authored turn',
     );
   });
 

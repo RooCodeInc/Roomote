@@ -255,7 +255,6 @@ const taskIdArgsSchema = z.object({
   taskId: z.string().trim().min(1).nullable().optional(),
 });
 const ignoreEventArgsSchema = z.object({ reason: z.string().trim().min(1) });
-const ignoreMessageArgsSchema = z.object({ reason: z.string().trim().min(1) });
 const saveMemoryArgsSchema = z.object({
   memory: z.string().trim().min(1).max(FAST_AGENT_MEMORY_FACT_MAX_CHARS),
 });
@@ -1881,28 +1880,17 @@ export async function answerFastAgentQuestion({
 
           case FAST_AGENT_NATIVE_TOOL_NAMES.ignoreEvent: {
             ignoreEventArgsSchema.parse(call.args);
-            if (!platformEvent) {
+            if (!platformEvent && !allowSilentAmbientReply) {
               return {
                 success: false,
-                error: 'Only a platform event can be ignored.',
+                error:
+                  'Only an optional platform event or eligible ambient human message may be ignored.',
               };
             }
-            if (platformEventVisibility === 'required') {
+            if (platformEvent && platformEventVisibility === 'required') {
               return {
                 success: false,
                 error: 'This platform event requires a user-visible closeout.',
-              };
-            }
-            closed = true;
-            return { success: true, ignored: true, closed: true };
-          }
-
-          case FAST_AGENT_NATIVE_TOOL_NAMES.ignoreMessage: {
-            ignoreMessageArgsSchema.parse(call.args);
-            if (platformEvent || !allowSilentAmbientReply) {
-              return {
-                success: false,
-                error: 'Only an eligible ambient human message may be ignored.',
               };
             }
             closed = true;
