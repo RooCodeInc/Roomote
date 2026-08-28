@@ -35,8 +35,7 @@ import {
 
 import { apiLogger } from '../../../logging.js';
 import { getCallRoomoteViaEmojiConfiguration } from '../../call-roomote-via-emoji.js';
-import { resolveFastAgentEntryMode } from '../../fast-agent-entry.js';
-import { cancelOrphanedWorkItemRunBestEffort } from '../../tasks/orphaned-work-item-run.js';
+import { launchClaimedSuggestedTask } from '../../tasks/suggestion-launch.js';
 import {
   SLACK_SETUP_SUGGESTION_LOCK_PREFIX,
   TASK_SUGGESTION_TYPES,
@@ -500,6 +499,7 @@ async function launchTaskSuggestionTaskFromReaction({
       );
       return false;
     }
+    const launchThreadTs = seededThreadTs;
 
     const initiator = {
       kind: 'user' as const,
@@ -510,135 +510,151 @@ async function launchTaskSuggestionTaskFromReaction({
     };
 
     const activeUserMapping = reactingUserMapping.activeMapping;
-    const fastAgentEntryMode = resolveFastAgentEntryMode({
-      explicitInvocation: false,
-      userDefaultEnabled:
-        activeUserMapping?.communicationsFastModeDefault === true,
-      fastAvailable: Boolean(activeUserMapping),
+    const launchResult = await launchClaimedSuggestedTask({
+      suggestion: { id: workItemId, launchClaimedAt: claimedAt },
+      policy: {
+        usesRouterLaunch,
+        userDefaultEnabled:
+          activeUserMapping?.communicationsFastModeDefault === true,
+        fastAvailable: Boolean(activeUserMapping),
+      },
+      launch: async (launchMode) => {
+        if (launchMode === 'fast') {
+          if (!activeUserMapping) {
+            return { accepted: false, reason: 'Fast mode is unavailable.' };
+          }
+          const fastStart = await startFastAgentResponse({
+            event: {
+              type: 'app_mention',
+              channel: channelId,
+              user: reactionEvent.user,
+              text: `Start this suggested task: ${workItem.title}\n\n${suggestionBrief}`,
+              agentContext: suggestionTaskPrompt,
+              ts: launchThreadTs,
+              thread_ts: launchThreadTs,
+            },
+            slackInstallation,
+            userMapping: activeUserMapping,
+            slack,
+            userId: activeUserMapping.userId,
+            teamId,
+            continuation: true,
+            processingReactionName: ackEmoji,
+            errorLogPrefix: `Failed to start Fast suggestion response for work item ${workItemId}:`,
+          });
+          return fastStart.accepted
+            ? { accepted: true, runId: null, taskId: null }
+            : fastStart;
+        }
+
+        if (usesRouterLaunch) {
+          const routedLaunch = await startAutoRoutedSlackTask({
+            slackInstallation,
+            slack,
+            initiator,
+            trigger: 'manual',
+            launchUserId: activeUserMapping?.userId,
+            slackUserId: reactionEvent.user,
+            persistedSlackUserId: reactionEvent.user,
+            initiatingSlackUserId: reactionEvent.user,
+            channel: channelId,
+            prompt: `Start this suggested task: ${workItem.title}\n\n${suggestionBrief}`,
+            threadTs: launchThreadTs,
+            originMessageTs: launchThreadTs,
+            agentPromptTextOverride: suggestionTaskPrompt,
+            skipMcpSetupSuggestion: true,
+          });
+          return routedLaunch.status === 'started'
+            ? {
+                accepted: true,
+                runId: routedLaunch.runId,
+                taskId: routedLaunch.taskId,
+              }
+            : {
+                accepted: false,
+                reason:
+                  routedLaunch.message ||
+                  "I couldn't determine which workspace should run this suggestion.",
+              };
+        }
+
+        if (!suggestionWorkspace) {
+          throw new Error('Setup suggestion workspace was not resolved.');
+        }
+        const directLaunch = await startSlackAppMentionTask({
+          initiator,
+          trigger: 'manual',
+          channel: channelId,
+          teamId,
+          slackUserId: reactionEvent.user,
+          text: suggestionSlackText,
+          agentPromptText: suggestionTaskPrompt,
+          ts: launchThreadTs,
+          threadTs: launchThreadTs,
+          repo: suggestionWorkspace.repoForPayload,
+          environmentId: suggestionWorkspace.environmentId,
+          readinessMessage: suggestionWorkspace.readinessMessage ?? undefined,
+          webPath: suggestionType === 'setup_onboarding' ? '/setup' : undefined,
+          ackEmoji,
+          completionEmoji,
+          queuedStartedMessage: {
+            ts: launchThreadTs,
+            agentName: AGENT_DISPLAY_NAME,
+            initiatingSlackUserId: reactionEvent.user,
+            workspaceDisplayName: suggestionWorkspace.workspaceDisplayName,
+            workspaceOnly: false,
+          },
+        });
+        return {
+          accepted: true,
+          runId: directLaunch.id,
+          taskId: directLaunch.taskId,
+        };
+      },
+      finalize: (taskId) =>
+        markWorkItemLaunched({
+          workItemId,
+          trackedMessageId: suggestionCard.id,
+          taskId,
+          claimedAt,
+          launchedThreadTs: seededThreadTs,
+        }),
     });
 
-    if (usesRouterLaunch && fastAgentEntryMode && activeUserMapping) {
-      startFastAgentResponse({
-        event: {
-          type: 'app_mention',
-          channel: channelId,
-          user: reactionEvent.user,
-          text: `Start this suggested task: ${workItem.title}\n\n${suggestionBrief}`,
-          agentContext: suggestionTaskPrompt,
-          ts: seededThreadTs,
-          thread_ts: seededThreadTs,
-        },
-        slackInstallation,
-        userMapping: activeUserMapping,
+    if (
+      launchResult.status === 'rejected' ||
+      launchResult.status === 'failed'
+    ) {
+      await slack
+        .deleteMessage({ channel: channelId, ts: seededThreadTs })
+        .catch(() => {});
+      await postSuggestionLaunchFailureMessage({
         slack,
-        userId: activeUserMapping.userId,
-        teamId,
-        continuation: fastAgentEntryMode === 'default',
-        processingReactionName: ackEmoji,
-        errorLogPrefix: `Failed to start Fast suggestion response for work item ${workItemId}:`,
+        channelId,
+        title: workItem.title,
+        brief: suggestionBrief,
+        reason:
+          launchResult.status === 'rejected'
+            ? (launchResult.reason ?? 'The suggestion could not be started.')
+            : formatErrorForLog(launchResult.error),
       });
-      taskRun = { id: null, taskId: null };
-    } else if (usesRouterLaunch) {
-      const routedLaunch = await startAutoRoutedSlackTask({
-        slackInstallation,
-        slack,
-        initiator,
-        trigger: 'manual',
-        launchUserId: reactingUserMapping.activeMapping?.userId,
-        slackUserId: reactionEvent.user,
-        persistedSlackUserId: reactionEvent.user,
-        initiatingSlackUserId: reactionEvent.user,
-        channel: channelId,
-        prompt: `Start this suggested task: ${workItem.title}\n\n${suggestionBrief}`,
-        threadTs: seededThreadTs,
-        originMessageTs: seededThreadTs,
-        agentPromptTextOverride: suggestionTaskPrompt,
-        skipMcpSetupSuggestion: true,
-      });
-
-      if (routedLaunch.status !== 'started') {
-        await releaseWorkItemClaim(db, { id: workItemId, claimedAt });
-        await slack
-          .deleteMessage({ channel: channelId, ts: seededThreadTs })
-          .catch(() => {});
-        await postSuggestionLaunchFailureMessage({
-          slack,
-          channelId,
-          title: workItem.title,
-          brief: suggestionBrief,
-          reason:
-            routedLaunch.message ||
-            "I couldn't determine which workspace should run this suggestion.",
-        });
-        return true;
-      }
-
-      taskRun = {
-        id: routedLaunch.runId,
-        taskId: routedLaunch.taskId,
-      };
-    } else {
-      if (!suggestionWorkspace) {
-        throw new Error('Setup suggestion workspace was not resolved.');
-      }
-
-      taskRun = await startSlackAppMentionTask({
-        initiator,
-        trigger: 'manual',
-        channel: channelId,
-        teamId,
-        slackUserId: reactionEvent.user,
-        text: suggestionSlackText,
-        agentPromptText: suggestionTaskPrompt,
-        ts: seededThreadTs,
-        threadTs: seededThreadTs,
-        repo: suggestionWorkspace.repoForPayload,
-        environmentId: suggestionWorkspace.environmentId,
-        readinessMessage: suggestionWorkspace.readinessMessage ?? undefined,
-        webPath: suggestionType === 'setup_onboarding' ? '/setup' : undefined,
-        ackEmoji,
-        completionEmoji,
-        queuedStartedMessage: {
-          ts: seededThreadTs,
-          agentName: AGENT_DISPLAY_NAME,
-          initiatingSlackUserId: reactionEvent.user,
-          workspaceDisplayName: suggestionWorkspace.workspaceDisplayName,
-          workspaceOnly: false,
-        },
-      });
+      return true;
     }
 
-    const launched = await markWorkItemLaunched({
-      workItemId,
-      trackedMessageId: suggestionCard.id,
-      taskId: taskRun.taskId,
-      claimedAt,
-      launchedThreadTs: seededThreadTs,
-    });
-
-    if (!launched) {
-      // The task was already enqueued but the fencing guard rejected the
-      // finalize (our stale claim was reclaimed by another launcher), so this
-      // run is orphaned from the work item. Best-effort cancel it while it is
-      // still pre-sandbox; log loudly either way with the cancel outcome.
-      const cancelNote =
-        taskRun.id !== null
-          ? await cancelOrphanedWorkItemRunBestEffort(taskRun.id)
-          : 'no run id to cancel (reused an existing job)';
-
+    if (
+      launchResult.status === 'finalize_lost' ||
+      launchResult.status === 'finalize_failed'
+    ) {
       apiLogger.warn(
-        `${logPrefix} finalize lost the fencing guard for work item ${workItemId}; task ${taskRun.taskId ?? 'null'} (run ${taskRun.id ?? 'null'}) was orphaned — ${cancelNote}`,
+        `${logPrefix} failed to finalize work item ${workItemId}; task ${launchResult.taskId ?? 'null'} (run ${launchResult.runId ?? 'null'}) — ${launchResult.cancelNote}`,
       );
-
-      // Mirror the claim-lose path: this duplicate must leave no user-visible
-      // trace. Never post the started message for the canceled orphan, and
-      // remove the seeded root message so no dangling thread points at it;
-      // the winning launcher owns the visible lifecycle.
       await slack
         .deleteMessage({ channel: channelId, ts: seededThreadTs })
         .catch(() => {});
       return true;
     }
+
+    taskRun = { id: launchResult.runId, taskId: launchResult.taskId };
 
     if (!usesRouterLaunch && directWorkspaceName) {
       await postTaskSuggestionStartedMessage({
@@ -649,6 +665,10 @@ async function launchTaskSuggestionTaskFromReaction({
         runId: taskRun.id,
         initiatingSlackUserId: reactionEvent.user,
         taskId: taskRun.taskId,
+      }).catch((error) => {
+        apiLogger.warn(
+          `${logPrefix} failed to post started message: ${formatErrorForLog(error)}`,
+        );
       });
     }
 
@@ -657,97 +677,15 @@ async function launchTaskSuggestionTaskFromReaction({
     );
     return true;
   } catch (error) {
-    if (!taskRun) {
-      if (seededThreadTs) {
-        await slack
-          .deleteMessage({ channel: channelId, ts: seededThreadTs })
-          .catch(() => {});
-      }
-
-      await releaseWorkItemClaim(db, { id: workItemId, claimedAt });
-      apiLogger.debug(
-        `${logPrefix} reaction launch failed before task run start; claim released`,
-      );
-      throw error;
+    if (seededThreadTs) {
+      await slack
+        .deleteMessage({ channel: channelId, ts: seededThreadTs })
+        .catch(() => {});
     }
-
-    try {
-      const recovered = await markWorkItemLaunched({
-        workItemId,
-        trackedMessageId: suggestionCard.id,
-        taskId: taskRun.taskId,
-        claimedAt,
-        launchedThreadTs: seededThreadTs,
-      });
-
-      if (!recovered) {
-        // Same orphan case as the happy path: the task is enqueued but the
-        // fencing guard rejected the finalize (claim reclaimed). Best-effort
-        // cancel the orphaned run; log loudly either way with the outcome.
-        const cancelNote =
-          taskRun.id !== null
-            ? await cancelOrphanedWorkItemRunBestEffort(taskRun.id)
-            : 'no run id to cancel (reused an existing job)';
-
-        apiLogger.warn(
-          `${logPrefix} finalize lost the fencing guard during post-enqueue recovery for work item ${workItemId}; task ${taskRun.taskId ?? 'null'} (run ${taskRun.id ?? 'null'}) was orphaned — ${cancelNote}`,
-        );
-
-        // Mirror the claim-lose path: never post the started message for the
-        // canceled orphan, and remove the seeded root message so no dangling
-        // thread points at it; the winning launcher owns the visible
-        // lifecycle.
-        if (seededThreadTs) {
-          await slack
-            .deleteMessage({ channel: channelId, ts: seededThreadTs })
-            .catch(() => {});
-        }
-
-        return true;
-      }
-
-      apiLogger.debug(
-        `${logPrefix} reaction launch recovered after post-enqueue failure taskId=${taskRun.taskId} launchedThreadTs=${seededThreadTs ?? 'unknown'}`,
-      );
-
-      if (!usesRouterLaunch) {
-        if (seededThreadTs && directWorkspaceName) {
-          await postTaskSuggestionStartedMessage({
-            slack,
-            channelId,
-            threadTs: seededThreadTs,
-            workspaceName: directWorkspaceName,
-            runId: taskRun.id,
-            initiatingSlackUserId: reactionEvent.user,
-            taskId: taskRun.taskId,
-          });
-        } else {
-          console.warn(
-            `${logPrefix} recovered direct launch missing seeded thread or workspace; started message skipped`,
-          );
-        }
-      }
-
-      apiLogger.debug(
-        `${logPrefix} completed reaction launch lifecycle taskId=${taskRun.taskId ?? 'null'} launchedThreadTs=${seededThreadTs ?? 'unknown'}`,
-      );
-
-      return true;
-    } catch (recoveryError) {
-      try {
-        await releaseWorkItemClaim(db, { id: workItemId, claimedAt });
-      } catch (releaseError) {
-        console.warn(
-          `${logPrefix} failed to release claim after recovery failure: ${formatErrorForLog(releaseError)}`,
-        );
-      }
-
-      console.warn(
-        `${logPrefix} failed to backfill launch tracking after post-enqueue failure; claim released for retry: ${formatErrorForLog(recoveryError)}`,
-      );
-
-      throw error;
-    }
+    await releaseWorkItemClaim(db, { id: workItemId, claimedAt }).catch(
+      () => undefined,
+    );
+    throw error;
   }
 }
 

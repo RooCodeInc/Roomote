@@ -153,6 +153,8 @@ describe('chat reply suggestion reactions', () => {
     });
     mocks.claimWorkItem.mockResolvedValue({ launchClaimedAt: claimedAt });
     mocks.finalizeWorkItemLaunched.mockResolvedValue(true);
+    mocks.releaseWorkItemClaim.mockResolvedValue(true);
+    mocks.postStartedMessage.mockResolvedValue(undefined);
     mocks.resolveWorkspace.mockResolvedValue({
       workspace: {
         repoForPayload: 'acme/app',
@@ -171,6 +173,7 @@ describe('chat reply suggestion reactions', () => {
       id: 42,
       taskId: 'task-new',
     });
+    mocks.startFastAgentResponse.mockResolvedValue({ accepted: true });
   });
 
   it('starts and records a coding task when coding is the user default', async () => {
@@ -260,6 +263,103 @@ describe('chat reply suggestion reactions', () => {
     expect(mocks.finalizeWorkItemLaunched).toHaveBeenCalledWith(
       expect.anything(),
       { id: 'work-item-1', taskId: null, claimedAt },
+    );
+  });
+
+  it('releases the claim when the Fast turn lock is busy', async () => {
+    mocks.lookupSlackUserMapping.mockResolvedValue({
+      hasInactiveMapping: false,
+      activeMapping: {
+        userId: 'user-1',
+        communicationsFastModeDefault: true,
+      },
+    });
+    mocks.startFastAgentResponse.mockResolvedValue({
+      accepted: false,
+      reason: 'Fast session is busy.',
+    });
+    const slack = {
+      postMessage: vi
+        .fn()
+        .mockResolvedValueOnce('seeded-thread-ts')
+        .mockResolvedValueOnce('failure-ts'),
+      deleteMessage: vi.fn(async () => undefined),
+      getMessageMetadata: vi.fn(),
+    };
+
+    await handleReactionAddedEvent({
+      context: {
+        teamId: 'T1',
+        slackInstallation: { botUserId: 'UROOMOTE', teamId: 'T1' },
+        slack,
+      } as never,
+      event: {
+        type: 'reaction_added',
+        user: 'U1',
+        reaction: 'thumbsup',
+        item: { type: 'message', channel: 'C1', ts: 'card-ts' },
+        event_ts: 'event-ts',
+      },
+    });
+
+    expect(mocks.releaseWorkItemClaim).toHaveBeenCalledWith(expect.anything(), {
+      id: 'work-item-1',
+      claimedAt,
+    });
+    expect(mocks.finalizeWorkItemLaunched).not.toHaveBeenCalled();
+    expect(slack.deleteMessage).toHaveBeenCalledWith({
+      channel: 'C1',
+      ts: 'seeded-thread-ts',
+    });
+    expect(slack.postMessage).toHaveBeenLastCalledWith(
+      expect.objectContaining({ text: expect.stringContaining('busy') }),
+    );
+  });
+
+  it('releases the claim when Fast startup fails before acceptance', async () => {
+    mocks.lookupSlackUserMapping.mockResolvedValue({
+      hasInactiveMapping: false,
+      activeMapping: {
+        userId: 'user-1',
+        communicationsFastModeDefault: true,
+      },
+    });
+    mocks.startFastAgentResponse.mockRejectedValue(
+      new Error('Fast startup failed'),
+    );
+    const slack = {
+      postMessage: vi
+        .fn()
+        .mockResolvedValueOnce('seeded-thread-ts')
+        .mockResolvedValueOnce('failure-ts'),
+      deleteMessage: vi.fn(async () => undefined),
+      getMessageMetadata: vi.fn(),
+    };
+
+    await handleReactionAddedEvent({
+      context: {
+        teamId: 'T1',
+        slackInstallation: { botUserId: 'UROOMOTE', teamId: 'T1' },
+        slack,
+      } as never,
+      event: {
+        type: 'reaction_added',
+        user: 'U1',
+        reaction: 'thumbsup',
+        item: { type: 'message', channel: 'C1', ts: 'card-ts' },
+        event_ts: 'event-ts',
+      },
+    });
+
+    expect(mocks.releaseWorkItemClaim).toHaveBeenCalledWith(expect.anything(), {
+      id: 'work-item-1',
+      claimedAt,
+    });
+    expect(mocks.finalizeWorkItemLaunched).not.toHaveBeenCalled();
+    expect(slack.postMessage).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        text: expect.stringContaining('Fast startup failed'),
+      }),
     );
   });
 

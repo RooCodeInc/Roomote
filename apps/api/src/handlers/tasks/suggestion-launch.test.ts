@@ -1,0 +1,165 @@
+const mocks = vi.hoisted(() => ({
+  finalize: vi.fn(),
+  release: vi.fn(),
+  cancel: vi.fn(),
+}));
+
+vi.mock('@roomote/db/server', () => ({
+  db: {},
+  finalizeWorkItemLaunched: mocks.finalize,
+  releaseWorkItemClaim: mocks.release,
+}));
+
+vi.mock('./orphaned-work-item-run.js', () => ({
+  cancelOrphanedWorkItemRunBestEffort: mocks.cancel,
+}));
+
+vi.mock('../fast-agent-entry.js', () => ({
+  resolveFastAgentEntryMode: ({
+    userDefaultEnabled,
+    fastAvailable,
+  }: {
+    userDefaultEnabled: boolean;
+    fastAvailable?: boolean;
+  }) => (userDefaultEnabled && fastAvailable !== false ? 'default' : null),
+}));
+
+import {
+  launchClaimedSuggestedTask,
+  resolveSuggestedTaskLaunchMode,
+} from './suggestion-launch';
+
+const claimedAt = new Date('2026-08-28T00:00:00.000Z');
+const suggestion = { id: 'suggestion-1', launchClaimedAt: claimedAt };
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  mocks.finalize.mockResolvedValue(true);
+  mocks.release.mockResolvedValue(true);
+  mocks.cancel.mockResolvedValue('orphaned run canceled');
+});
+
+describe('resolveSuggestedTaskLaunchMode', () => {
+  it('selects Fast only for router-backed suggestions when Fast is available and default', () => {
+    expect(
+      resolveSuggestedTaskLaunchMode({
+        usesRouterLaunch: true,
+        userDefaultEnabled: true,
+        fastAvailable: true,
+      }),
+    ).toBe('fast');
+    expect(
+      resolveSuggestedTaskLaunchMode({
+        usesRouterLaunch: true,
+        userDefaultEnabled: true,
+        fastAvailable: false,
+      }),
+    ).toBe('coding');
+    expect(
+      resolveSuggestedTaskLaunchMode({
+        usesRouterLaunch: false,
+        userDefaultEnabled: true,
+        fastAvailable: true,
+      }),
+    ).toBe('coding');
+  });
+});
+
+describe('launchClaimedSuggestedTask', () => {
+  it('finalizes an accepted launch with its task link', async () => {
+    await expect(
+      launchClaimedSuggestedTask({
+        suggestion,
+        policy: {
+          usesRouterLaunch: true,
+          userDefaultEnabled: false,
+          fastAvailable: true,
+        },
+        launch: async () => ({
+          accepted: true,
+          runId: 7,
+          taskId: 'task-1',
+        }),
+      }),
+    ).resolves.toEqual({
+      status: 'started',
+      mode: 'coding',
+      runId: 7,
+      taskId: 'task-1',
+    });
+    expect(mocks.finalize).toHaveBeenCalledWith(expect.anything(), {
+      id: suggestion.id,
+      taskId: 'task-1',
+      claimedAt,
+    });
+  });
+
+  it('releases a rejected launch for retry', async () => {
+    await expect(
+      launchClaimedSuggestedTask({
+        suggestion,
+        policy: {
+          usesRouterLaunch: true,
+          userDefaultEnabled: true,
+          fastAvailable: true,
+        },
+        launch: async () => ({ accepted: false, reason: 'busy' }),
+      }),
+    ).resolves.toEqual({
+      status: 'rejected',
+      mode: 'fast',
+      reason: 'busy',
+    });
+    expect(mocks.release).toHaveBeenCalledWith(expect.anything(), {
+      id: suggestion.id,
+      claimedAt,
+    });
+    expect(mocks.finalize).not.toHaveBeenCalled();
+  });
+
+  it('releases a startup failure and classifies it as failed', async () => {
+    const error = new Error('startup failed');
+    await expect(
+      launchClaimedSuggestedTask({
+        suggestion,
+        policy: {
+          usesRouterLaunch: true,
+          userDefaultEnabled: true,
+          fastAvailable: true,
+        },
+        launch: async () => {
+          throw error;
+        },
+      }),
+    ).resolves.toMatchObject({ status: 'failed', mode: 'fast', error });
+    expect(mocks.release).toHaveBeenCalled();
+    expect(mocks.finalize).not.toHaveBeenCalled();
+  });
+
+  it('cancels an orphaned coding run when finalization loses the fence', async () => {
+    mocks.finalize.mockResolvedValue(false);
+    await expect(
+      launchClaimedSuggestedTask({
+        suggestion,
+        policy: {
+          usesRouterLaunch: true,
+          userDefaultEnabled: false,
+          fastAvailable: true,
+        },
+        launch: async () => ({
+          accepted: true,
+          runId: 7,
+          taskId: 'task-1',
+        }),
+      }),
+    ).resolves.toEqual({
+      status: 'finalize_lost',
+      mode: 'coding',
+      runId: 7,
+      taskId: 'task-1',
+      cancelNote: 'orphaned run canceled',
+    });
+    expect(mocks.cancel).toHaveBeenCalledWith(7);
+    expect(mocks.release).not.toHaveBeenCalled();
+  });
+});

@@ -59,7 +59,11 @@ import {
   isFastCommandInvocation,
   processFastAgentMessage,
 } from './fast-agent.js';
-import { resolveFastAgentEntryMode } from '../../fast-agent-entry.js';
+import {
+  resolveFastAgentEntryMode,
+  startAcceptedFastAgentTurn,
+  type FastAgentStartResult,
+} from '../../fast-agent-entry.js';
 import { processSnapshotResume } from './snapshot-resume.js';
 import {
   dispatchSlackThreadFollowUp,
@@ -1257,7 +1261,7 @@ async function maybeHandleChannelAutoStart(params: {
       : null;
 
   if (fastAgentEntryMode && userMapping) {
-    startFastAgentResponse({
+    void startFastAgentResponse({
       event: { ...channelAutoStartEvent, user: channelAutoStartEvent.user },
       slackInstallation: context.slackInstallation,
       userMapping,
@@ -1602,28 +1606,33 @@ export function startFastAgentResponse(params: {
   processingReactionName: string;
   isExistingConversation?: boolean;
   errorLogPrefix: string;
-}): void {
+}): Promise<FastAgentStartResult> {
   const { errorLogPrefix, ...fastAgentParams } = params;
-
-  processFastAgentMessage({
-    ...fastAgentParams,
-    apiBaseUrl: Env.TRPC_URL ?? Env.R_APP_URL,
-    launchTask: createFastAgentSlackLiveTaskLauncher({
-      slack: params.slack,
-      userId: params.userId,
-      teamId: params.teamId,
-      ...(params.slackInstallation.teamDomain
-        ? { teamDomain: params.slackInstallation.teamDomain }
-        : {}),
-      channelId: params.event.channel,
-      threadTs: params.event.thread_ts || params.event.ts,
-      messageId: params.event.ts,
-    }),
-  }).catch((error) => {
-    console.error(
-      errorLogPrefix,
-      error instanceof Error ? error.message : String(error),
-    );
+  return startAcceptedFastAgentTurn({
+    run: ({ onAccepted, onRejected }) =>
+      processFastAgentMessage({
+        ...fastAgentParams,
+        apiBaseUrl: Env.TRPC_URL ?? Env.R_APP_URL,
+        launchTask: createFastAgentSlackLiveTaskLauncher({
+          slack: params.slack,
+          userId: params.userId,
+          teamId: params.teamId,
+          ...(params.slackInstallation.teamDomain
+            ? { teamDomain: params.slackInstallation.teamDomain }
+            : {}),
+          channelId: params.event.channel,
+          threadTs: params.event.thread_ts || params.event.ts,
+          messageId: params.event.ts,
+        }),
+        onAccepted,
+        onRejected,
+      }),
+    onError: (error) => {
+      console.error(
+        errorLogPrefix,
+        error instanceof Error ? error.message : String(error),
+      );
+    },
   });
 }
 
@@ -1739,7 +1748,7 @@ async function handleSlackEntryEvent(params: {
   });
 
   if (fastAgentEntryMode) {
-    startFastAgentResponse({
+    void startFastAgentResponse({
       event,
       slackInstallation,
       userMapping,
@@ -1774,7 +1783,7 @@ async function handleSlackEntryEvent(params: {
       });
 
   if (isFastAgentContinuation) {
-    startFastAgentResponse({
+    void startFastAgentResponse({
       event,
       slackInstallation,
       userMapping,

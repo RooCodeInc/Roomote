@@ -65,7 +65,7 @@ vi.mock('../fast-agent.js', () => ({
     (channel: { channelId: string }, eventId: string) =>
       channel.channelId || eventId,
   ),
-  processDiscordFastAgentMessage: mocks.processFastAgentMessage,
+  startDiscordFastAgentResponse: mocks.processFastAgentMessage,
 }));
 vi.mock('../task-launch.js', () => ({
   resolveDiscordChannelContext: mocks.resolveChannel,
@@ -95,7 +95,7 @@ describe('Discord component callbacks', () => {
     mocks.findMappedUser.mockResolvedValue('user-1');
     mocks.findSuggestionByMessage.mockResolvedValue('suggestion-1');
     mocks.hasFastDefault.mockResolvedValue(false);
-    mocks.processFastAgentMessage.mockResolvedValue(true);
+    mocks.processFastAgentMessage.mockResolvedValue({ accepted: true });
     mocks.releaseWorkItem.mockResolvedValue(true);
     mocks.resolveWorkspace.mockResolvedValue({
       environmentId: 'env-1',
@@ -295,7 +295,10 @@ describe('Discord component callbacks', () => {
   it('releases the suggestion when the Fast session is busy', async () => {
     const claimedAt = new Date('2026-08-28T00:00:00.000Z');
     mocks.hasFastDefault.mockResolvedValue(true);
-    mocks.processFastAgentMessage.mockResolvedValue(false);
+    mocks.processFastAgentMessage.mockResolvedValue({
+      accepted: false,
+      reason: 'Fast session is busy.',
+    });
     mocks.claimSuggestionByMessage.mockResolvedValue({
       outcome: 'claimed',
       suggestion: {

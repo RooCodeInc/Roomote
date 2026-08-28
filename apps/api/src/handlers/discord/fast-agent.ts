@@ -31,6 +31,10 @@ import {
 import { ALL_REPOSITORIES } from '@roomote/types';
 
 import { buildCommunicationTaskThreadName } from '../tasks/communication-task-thread.js';
+import {
+  startAcceptedFastAgentTurn,
+  type FastAgentStartResult,
+} from '../fast-agent-entry.js';
 import { replyToDiscordEvent } from './replies.js';
 import {
   discordMetadataForChannel,
@@ -91,6 +95,8 @@ export async function processDiscordFastAgentMessage(
     createAnchoredThread?: boolean;
     interaction?: DiscordInteractionReplyContext;
     activeTasks?: { taskId: string }[];
+    onAccepted?: () => void;
+    onRejected?: () => void;
   } & DiscordFastAgentSource,
 ): Promise<boolean> {
   const message = input.event ? getDiscordMessageCreate(input.event) : null;
@@ -140,6 +146,7 @@ export async function processDiscordFastAgentMessage(
   };
   const releaseFastAgentLock = await acquireFastAgentTurnLock({ conversation });
   if (!releaseFastAgentLock) {
+    input.onRejected?.();
     console.error(
       `[Discord] Fast turn lock did not become available for ${conversation.workspaceId}:${conversation.conversationId}`,
     );
@@ -163,6 +170,7 @@ export async function processDiscordFastAgentMessage(
       userId: input.senderUserId,
       conversation,
     });
+    input.onAccepted?.();
     const postFastReplyWithFooter = async (text: string) => {
       const footerText = buildFastSessionReplyFooterText({
         provider: 'discord',
@@ -409,4 +417,22 @@ export async function processDiscordFastAgentMessage(
     await releaseFastAgentLock().catch(() => {});
   }
   return true;
+}
+
+export function startDiscordFastAgentResponse(
+  input: Parameters<typeof processDiscordFastAgentMessage>[0],
+): Promise<FastAgentStartResult> {
+  return startAcceptedFastAgentTurn({
+    run: ({ onAccepted, onRejected }) =>
+      processDiscordFastAgentMessage({
+        ...input,
+        onAccepted,
+        onRejected,
+      }),
+    onError: (error) => {
+      console.error(
+        `[Discord] Fast suggestion response failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    },
+  });
 }
