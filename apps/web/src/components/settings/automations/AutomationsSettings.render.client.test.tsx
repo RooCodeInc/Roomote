@@ -1284,6 +1284,48 @@ describe('AutomationsSettings', () => {
     ).toBeInTheDocument();
   });
 
+  it('keeps an owner-deleted Fast automation unavailable until it is claimed', async () => {
+    state.customAutomations = [
+      {
+        id: 'automation-unavailable',
+        name: 'Ownerless Fast digest',
+        prompt: 'Summarize priorities.',
+        enabled: true,
+        scheduleMode: 'daily',
+        cronExpression: null,
+        model: null,
+        executionMode: 'fast',
+        launchMode: 'unavailable',
+        environmentId: '__fast__',
+        target: {},
+        lastRunAt: null,
+        lastSucceededAt: null,
+        lastFailedAt: null,
+        lastError: null,
+        lastLaunchedTaskId: null,
+        createdByName: 'Unknown',
+        createdAt: new Date('2026-01-01T00:00:00Z'),
+        updatedAt: new Date('2026-01-01T00:00:00Z'),
+      },
+    ];
+
+    render(<AutomationsSettings />);
+
+    expect(
+      await screen.findByText(
+        'Owner unavailable. Configure and save to claim this automation before running it.',
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Run Ownerless Fast digest now' }),
+    ).toBeDisabled();
+    expect(
+      screen.getByRole('button', {
+        name: 'Configure Ownerless Fast digest',
+      }),
+    ).toBeEnabled();
+  });
+
   it('humanizes custom schedules and shows the last run when available', async () => {
     state.environments = [{ id: 'env-1', name: 'Production' }];
     state.customAutomations = [

@@ -491,6 +491,7 @@ customAutomationsRouter.patch('/:id', async (c) => {
               existing.createdByUserId ?? adminId(c),
             )
           : existingTarget,
+      createdByUserId: existing.createdByUserId ?? adminId(c),
     });
     return c.json({
       automation: toApiAutomation(automation),

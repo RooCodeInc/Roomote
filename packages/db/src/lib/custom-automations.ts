@@ -283,6 +283,8 @@ export async function updateCustomAutomation(
       allRepositories,
       executionMode,
       target: input.target,
+      createdByUserId:
+        existing.createdByUserId ?? input.createdByUserId ?? null,
       updatedAt: new Date(),
     })
     .where(eq(customAutomations.id, id))

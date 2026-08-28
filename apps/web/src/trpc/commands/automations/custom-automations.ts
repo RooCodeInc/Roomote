@@ -307,6 +307,7 @@ export async function updateCustomAutomationCommand(
     model: input.model ?? null,
     environmentId: input.environmentId,
     target: buildTarget(input, existing.createdByUserId ?? auth.userId),
+    createdByUserId: existing.createdByUserId ?? auth.userId,
   });
 
   return toListItem(updated);

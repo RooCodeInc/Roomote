@@ -1132,6 +1132,12 @@ export function CustomAutomationsSection() {
                           </>
                         ) : null}
                       </p>
+                      {launchMode === 'unavailable' ? (
+                        <p className="text-xs text-destructive">
+                          Owner unavailable. Configure and save to claim this
+                          automation before running it.
+                        </p>
+                      ) : null}
                       {launchMode === 'fast_session' && row.latestFastResult ? (
                         <p className="line-clamp-2 text-xs text-muted-foreground">
                           {row.latestFastResult}
@@ -1153,7 +1159,7 @@ export function CustomAutomationsSection() {
                       ) : null}
                       <CustomAutomationRunButton
                         automation={row}
-                        disabled={busy}
+                        disabled={busy || launchMode === 'unavailable'}
                       />
                       <BasicTooltip content="Configure">
                         <Button
