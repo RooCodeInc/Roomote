@@ -27,8 +27,6 @@ import {
 import {
   and,
   compareAndSetTrustedRunActingUser,
-  claimCanonicalPrReviewAction,
-  completeCanonicalPrReviewActionDispatch,
   db,
   environments,
   eq,
@@ -38,7 +36,6 @@ import {
   getCanonicalPrReviewAction,
   not,
   resolveEffectivePreviewRuntimeConfig,
-  releaseCanonicalPrReviewActionDispatch,
   retireCanonicalPrReviewActionsForDestinationKey,
   taskMessages,
   taskRuns,
@@ -48,7 +45,6 @@ import { httpBatchLink, TRPCClientError } from '@trpc/client';
 import { TRPCError } from '@trpc/server';
 import { createSandboxServerRpcClient } from '@roomote/sdk/sandbox-router';
 import {
-  dispatchPrReviewFollowUp,
   getTaskPrReviewOfferStatus,
   updateTaskPrReviewOfferStatus,
 } from '@roomote/sdk/server';
@@ -66,6 +62,7 @@ import {
   withOutOfBandContext,
 } from '@/lib/server/out-of-band-context';
 import { getUserDisplayName } from '@/lib/user-display-name';
+import { handleWebPrReviewAction } from '@/lib/server/pr-review-actions';
 
 import { restoreSnapshotResumeVisiblePromptFields } from '../snapshot-visible-prompt';
 import {
@@ -126,6 +123,27 @@ async function assertSandboxRpcEndpointReachable(sandboxServerUrl: string) {
     });
   } finally {
     clearTimeout(timeoutId);
+  }
+}
+
+async function retireTaskPrReviewOffersAfterReply(taskId: string) {
+  try {
+    const retiredDeliveryIds =
+      await retireCanonicalPrReviewActionsForDestinationKey({
+        destinationKind: 'task',
+        destinationKey: taskId,
+      });
+    await updateTaskPrReviewOfferStatus({
+      taskId,
+      deliveryIds: retiredDeliveryIds,
+      status: 'dismissed',
+    });
+  } catch (error) {
+    // The prompt is already in the sandbox at this point. Cleanup must not
+    // make a successful user reply look failed and invite duplicate delivery.
+    console.warn(
+      `[sendSandboxPromptCommand] Failed to retire PR review offers for task ${taskId}: ${error instanceof Error ? error.message : String(error)}`,
+    );
   }
 }
 
@@ -193,61 +211,24 @@ export async function handlePrReviewNotificationActionCommand(
     throw new TRPCError({ code: 'NOT_FOUND', message: 'Task not found.' });
   }
 
-  const action = await claimCanonicalPrReviewAction({
+  return handleWebPrReviewAction({
     deliveryId: parsed.deliveryId,
     choice: parsed.choice,
     actingUserId: auth.userId,
     expectedDestinationKind: 'task',
     expectedDestinationKey: taskId,
+    getOfferStatus: () =>
+      getTaskPrReviewOfferStatus({
+        taskId,
+        deliveryId: parsed.deliveryId,
+      }),
+    updateOfferStatus: (status) =>
+      updateTaskPrReviewOfferStatus({
+        taskId,
+        deliveryIds: [parsed.deliveryId],
+        status,
+      }),
   });
-  if (!action) {
-    const status = await getTaskPrReviewOfferStatus({
-      taskId,
-      deliveryId: parsed.deliveryId,
-    });
-    return { status: status ?? 'stale' };
-  }
-
-  if (parsed.choice === 'dismiss') {
-    await updateTaskPrReviewOfferStatus({
-      taskId,
-      deliveryIds: [parsed.deliveryId],
-      status: 'dismissed',
-    });
-    return { status: 'dismissed' };
-  }
-
-  const dispatched = await dispatchPrReviewFollowUp({
-    provider: 'web',
-    taskId,
-    followUpPrompt: action.followUpPrompt!,
-    actingUserId: auth.userId,
-    idempotencyKey: `pr-review-delivery:${parsed.deliveryId}`,
-  });
-  if (dispatched.outcome === 'unavailable') {
-    const released = await releaseCanonicalPrReviewActionDispatch(
-      parsed.deliveryId,
-    );
-    const status = released ? 'pending' : 'stale';
-    await updateTaskPrReviewOfferStatus({
-      taskId,
-      deliveryIds: [parsed.deliveryId],
-      status,
-    });
-    return { status };
-  }
-
-  const status = parsed.choice === 'auto' ? 'auto_resolved' : 'resolved';
-  await completeCanonicalPrReviewActionDispatch({
-    deliveryId: parsed.deliveryId,
-    runId: dispatched.runId,
-  });
-  await updateTaskPrReviewOfferStatus({
-    taskId,
-    deliveryIds: [parsed.deliveryId],
-    status,
-  });
-  return { status };
 }
 
 /**
@@ -362,19 +343,6 @@ export async function sendSandboxPromptCommand(
 
   await assertSandboxRpcEndpointReachable(taskRun.sandboxServerUrl);
 
-  if (typeof parsed.prompt === 'string' && parsed.prompt.trim().length > 0) {
-    const retiredDeliveryIds =
-      await retireCanonicalPrReviewActionsForDestinationKey({
-        destinationKind: 'task',
-        destinationKey: parsed.taskId,
-      });
-    await updateTaskPrReviewOfferStatus({
-      taskId: parsed.taskId,
-      deliveryIds: retiredDeliveryIds,
-      status: 'dismissed',
-    });
-  }
-
   const authToken = await createRunToken({
     runId: taskRun.id,
     userId: auth.userId,
@@ -468,6 +436,10 @@ export async function sendSandboxPromptCommand(
         : parsed.autoSteerWhenQueued,
       goalContext,
     });
+
+    if (typeof parsed.prompt === 'string' && parsed.prompt.trim().length > 0) {
+      await retireTaskPrReviewOffersAfterReply(parsed.taskId);
+    }
 
     if (
       parsed.source === 'web' &&

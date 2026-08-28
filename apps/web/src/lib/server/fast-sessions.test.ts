@@ -12,6 +12,7 @@ import {
 
 import {
   findAccessibleFastSession,
+  getFastSessionPrReviewOfferStatus,
   getFastSessionById,
   getFastSessionTasks,
   getFastSessionMessagesSince,
@@ -431,6 +432,9 @@ describe('Fast session queries', () => {
       },
     });
     const first = await getFastSessionMessagesSince(session.id, 0);
+    await expect(
+      getFastSessionPrReviewOfferStatus(session.id, deliveryId),
+    ).resolves.toBe('pending');
 
     await updateFastSessionPrReviewOfferStatus(
       session.id,
@@ -443,6 +447,9 @@ describe('Fast session queries', () => {
     expect(second.messages[0]?.payload).toMatchObject({
       prReviewAction: { deliveryId, status: 'dismissed' },
     });
+    await expect(
+      getFastSessionPrReviewOfferStatus(session.id, deliveryId),
+    ).resolves.toBe('dismissed');
   });
 
   it('finds sessions for owners and participants but not bystanders', async () => {

@@ -42,7 +42,7 @@ import { messageAnchorId } from '../message-anchor';
 import type { AcpUiMessage } from './types';
 import { ProviderRetryNoticeMessage } from './ProviderRetryNoticeMessage';
 import { TerminalProviderErrorMessage } from './TerminalProviderErrorMessage';
-import { PrReviewActionOffer } from '@/app/(sandbox)/sessions/[sessionId]/PrReviewActionOffer';
+import { PrReviewActionOffer } from '@/components/ai-elements/pr-review-action-offer';
 import { useMessageUiOptions } from '@/components/ai-elements/message-ui-options';
 
 const UserMessageToggle = ({

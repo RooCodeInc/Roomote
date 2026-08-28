@@ -37,7 +37,7 @@ import { useOpenSessionTaskPanel } from './session-task-panel-context';
 import { useNarrationMode } from '@/hooks/useNarrationMode';
 import { usePageTitle } from '@/hooks/usePageTitle';
 import { truncatePageTitle } from '@/lib/page-title';
-import { PrReviewActionOffer } from './PrReviewActionOffer';
+import { PrReviewActionOffer } from '@/components/ai-elements/pr-review-action-offer';
 
 import {
   AcpTranscriptBlockList,
