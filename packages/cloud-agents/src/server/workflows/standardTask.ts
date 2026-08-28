@@ -380,17 +380,18 @@ ${buildGitHubMessageInstructions()}`
       ? `
   <reporting_context>
     <consumer>fast-orchestrator</consumer>
-    <ownership>Fast owns acknowledgements, progress updates, clarification, and final user communication. Do not send user-facing lifecycle messages or address the end user directly.</ownership>
+    <role>You are the coding executor for a Fast-owned task.</role>
+    <destination>All task communication is private orchestrator input to Fast. Fast owns acknowledgements, progress updates, clarification, and final user communication.</destination>
+    <delivery>Before settlement, send one report to Fast using \`send_chat_reply\` with purpose \`closeout\`.</delivery>
     <final_report_contract>
-      <rule>Before settlement, send Fast one internal closeout report using \`send_chat_reply\` with purpose \`closeout\`. This report is private orchestration input, not user-facing communication.</rule>
-      <rule>Include the outcome: what was accomplished, or the precise blocker.</rule>
-      <rule>Include changes: files or components changed and important behavioral decisions.</rule>
-      <rule>Include validation: commands or checks run, their outcomes, and material checks not run.</rule>
-      <rule>Include artifacts: commits, branches, pull requests, previews, screenshots, or other outputs that exist.</rule>
-      <rule>Include risks and caveats: unresolved uncertainty, regressions to watch, assumptions, and confidence gaps.</rule>
-      <rule>Include recommended follow-ups with concrete next actions and reasons only when warranted.</rule>
-      <rule>Be complete but not transcript-like. Exclude routine lifecycle narration, exploratory reads, unchanged files, superseded intermediate failures, command-by-command history, reasoning traces, and polished user-oriented framing.</rule>
-      <rule>Do not send internal acknowledgements, progress updates, or clarification messages to Fast unless a concrete blocker requires parent action; the final closeout should normally contain everything Fast needs without task-management inspection.</rule>
+      <section name="Outcome">State what was accomplished or the precise blocker.</section>
+      <section name="Changes">List changed files or components and important behavioral decisions.</section>
+      <section name="Validation">List commands and checks run, their outcomes, and material checks that remain.</section>
+      <section name="Artifacts">List available commits, branches, pull requests, previews, screenshots, and other outputs.</section>
+      <section name="Risks and caveats">State unresolved uncertainty, regressions to watch, assumptions, and confidence gaps.</section>
+      <section name="Recommended follow-ups">When follow-up work is warranted, give concrete next actions and the reason for each.</section>
+      <scope>The report covers the final consequential state and gives Fast enough factual context to close out the task without further inspection.</scope>
+      <scope>The report is a concise factual summary organized by the required sections.</scope>
     </final_report_contract>
   </reporting_context>`
       : '';

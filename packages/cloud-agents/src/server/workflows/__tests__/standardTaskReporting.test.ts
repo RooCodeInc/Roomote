@@ -13,17 +13,39 @@ describe('standardTask reporting consumer', () => {
       '<consumer>fast-orchestrator</consumer>',
     );
     expect(harnessInstructions).toContain(
-      'Fast owns acknowledgements, progress updates, clarification, and final user communication.',
+      '<role>You are the coding executor for a Fast-owned task.</role>',
     );
     expect(harnessInstructions).toContain(
-      'send Fast one internal closeout report using `send_chat_reply` with purpose `closeout`',
+      '<destination>All task communication is private orchestrator input to Fast. Fast owns acknowledgements, progress updates, clarification, and final user communication.</destination>',
     );
     expect(harnessInstructions).toContain(
-      'Include validation: commands or checks run, their outcomes, and material checks not run.',
+      '<delivery>Before settlement, send one report to Fast using `send_chat_reply` with purpose `closeout`.</delivery>',
+    );
+    for (const section of [
+      'Outcome',
+      'Changes',
+      'Validation',
+      'Artifacts',
+      'Risks and caveats',
+      'Recommended follow-ups',
+    ]) {
+      expect(harnessInstructions).toContain(`<section name="${section}">`);
+    }
+    expect(harnessInstructions).toContain(
+      '<scope>The report covers the final consequential state and gives Fast enough factual context to close out the task without further inspection.</scope>',
     );
     expect(harnessInstructions).toContain(
-      'Be complete but not transcript-like.',
+      '<scope>The report is a concise factual summary organized by the required sections.</scope>',
     );
+    const reportingContext = harnessInstructions.match(
+      /<reporting_context>[\s\S]*?<\/reporting_context>/,
+    )?.[0];
+    expect(reportingContext).toBeDefined();
+    expect(reportingContext).not.toContain('Do not');
+    expect(reportingContext).not.toContain('not user-facing');
+    expect(reportingContext).not.toContain('not transcript-like');
+    expect(reportingContext).not.toContain('unless');
+    expect(reportingContext).not.toContain('outside the report scope');
     expect(harnessInstructions).not.toContain('Slack-visible closeout');
     expect(harnessInstructions).not.toContain('Discord-visible closeout');
     expect(harnessInstructions).not.toContain(
