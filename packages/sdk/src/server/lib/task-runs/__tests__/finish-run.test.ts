@@ -226,12 +226,17 @@ vi.mock('@roomote/telemetry/server', () => ({
 }));
 
 const mockCreateIssueComment = vi.fn().mockResolvedValue(undefined);
+const mockDeleteReaction = vi.fn().mockResolvedValue(undefined);
+const mockGetCheckRun = vi.fn().mockResolvedValue({
+  data: { external_id: 'roomote-review:1' },
+});
 const mockUpdateCheckRun = vi.fn().mockResolvedValue(undefined);
 
 vi.mock('@roomote/github', () => ({
   createTaskRunGitHubToken: vi.fn().mockResolvedValue('github-token'),
   createIssueComment: (...args: unknown[]) => mockCreateIssueComment(...args),
-  deleteReaction: vi.fn(),
+  deleteReaction: (...args: unknown[]) => mockDeleteReaction(...args),
+  getCheckRun: (...args: unknown[]) => mockGetCheckRun(...args),
   updateCheckRun: (...args: unknown[]) => mockUpdateCheckRun(...args),
 }));
 
@@ -2280,6 +2285,12 @@ describe('finishRun', () => {
       githubReviewCommentId: 456,
     };
 
+    beforeEach(() => {
+      mockFindFirstTaskPullRequest.mockResolvedValue({
+        githubCheckRunId: 123,
+      });
+    });
+
     it('passes the check when the canonical review summary is clean', async () => {
       mockFindFirstRun.mockResolvedValue(
         makeRun(
@@ -2328,6 +2339,47 @@ describe('finishRun', () => {
           conclusion: 'failure',
         }),
       );
+    });
+
+    it('does not let a stale run finalize a newer review cycle', async () => {
+      mockFindFirstRun.mockResolvedValue(
+        makeRun(
+          { payloadKind: TaskPayloadKind.GithubPrReview },
+          { workflow: 'pr_review', surface: 'github' },
+        ),
+      );
+      mockFindManyTaskPullRequests.mockResolvedValue([
+        { ...reviewPrRow, githubReactionId: 789 },
+      ]);
+      mockGetCheckRun.mockResolvedValueOnce({
+        data: { external_id: 'roomote-review:2' },
+      });
+
+      await finishRun({ id: 1, status: RunStatus.Failed });
+
+      expect(mockGetCheckRun).toHaveBeenCalledWith(
+        'github-token',
+        expect.objectContaining({ check_run_id: 123 }),
+      );
+      expect(mockDeleteReaction).not.toHaveBeenCalled();
+      expect(mockFinalizeGithubPrReviewComment).not.toHaveBeenCalled();
+      expect(mockUpdateCheckRun).not.toHaveBeenCalled();
+    });
+
+    it('does not finalize a review cycle with unknown check ownership', async () => {
+      mockFindFirstRun.mockResolvedValue(
+        makeRun(
+          { payloadKind: TaskPayloadKind.GithubPrReview },
+          { workflow: 'pr_review', surface: 'github' },
+        ),
+      );
+      mockFindManyTaskPullRequests.mockResolvedValue([reviewPrRow]);
+      mockGetCheckRun.mockResolvedValueOnce({ data: { external_id: null } });
+
+      await finishRun({ id: 1, status: RunStatus.Failed });
+
+      expect(mockFinalizeGithubPrReviewComment).not.toHaveBeenCalled();
+      expect(mockUpdateCheckRun).not.toHaveBeenCalled();
     });
 
     it('refreshes a missing check id when publication races with finalization', async () => {

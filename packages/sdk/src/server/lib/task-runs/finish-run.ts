@@ -61,6 +61,7 @@ import {
   createTaskRunGitHubToken,
   createIssueComment,
   deleteReaction,
+  getCheckRun,
   updateCheckRun,
 } from '@roomote/github';
 import { revokeTaskRunScopedGitLabTokens } from '@roomote/gitlab';
@@ -716,9 +717,54 @@ async function cleanupGithubPrReviewArtifacts(
       continue;
     }
 
+    let token: string | undefined;
+    let checkRunId = prRow.githubCheckRunId;
+    try {
+      const currentLinkage = await db.query.taskPullRequests.findFirst({
+        where: eq(taskPullRequests.id, prRow.id),
+        columns: { githubCheckRunId: true },
+      });
+      checkRunId = currentLinkage?.githubCheckRunId ?? null;
+    } catch (error) {
+      console.error(
+        `[finishRun] Failed to refresh PR review check linkage for run ${run.id}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      continue;
+    }
+
+    if (checkRunId) {
+      try {
+        token = await createTaskRunGitHubToken(run);
+        const { data: checkRun } = await getCheckRun(token, {
+          owner,
+          repo,
+          check_run_id: checkRunId,
+        });
+        const owningRunId = Number(
+          /^roomote-review:(\d+)$/.exec(checkRun.external_id ?? '')?.[1],
+        );
+
+        if (!Number.isFinite(owningRunId) || owningRunId !== run.id) {
+          console.log(
+            `[finishRun] Skipping PR review cleanup for run ${run.id}; check ${checkRunId} belongs to ${Number.isFinite(owningRunId) ? `run ${owningRunId}` : 'an unknown run'}`,
+          );
+          continue;
+        }
+      } catch (error) {
+        console.error(
+          `[finishRun] Failed to verify PR review check ownership for run ${run.id}: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+        continue;
+      }
+    }
+
     if (prRow.githubReactionId) {
       try {
-        const token = await createTaskRunGitHubToken(run);
+        token ??= await createTaskRunGitHubToken(run);
 
         await deleteReaction(token, {
           reaction_id: prRow.githubReactionId,
@@ -749,7 +795,6 @@ async function cleanupGithubPrReviewArtifacts(
     // a real agent completion (it only patches comments still showing an
     // in-progress status line).
     if (status !== RunStatus.Idle) {
-      let token: string | undefined;
       let reviewSummary: { finalized: boolean; body?: string } = {
         finalized: false,
       };
@@ -796,23 +841,6 @@ async function cleanupGithubPrReviewArtifacts(
             error instanceof Error ? error.message : String(error)
           }`,
         );
-      }
-
-      let checkRunId = prRow.githubCheckRunId;
-      if (!checkRunId) {
-        try {
-          const refreshedLinkage = await db.query.taskPullRequests.findFirst({
-            where: eq(taskPullRequests.id, prRow.id),
-            columns: { githubCheckRunId: true },
-          });
-          checkRunId = refreshedLinkage?.githubCheckRunId ?? null;
-        } catch (error) {
-          console.error(
-            `[finishRun] Failed to refresh PR review check linkage for run ${run.id}: ${
-              error instanceof Error ? error.message : String(error)
-            }`,
-          );
-        }
       }
 
       if (checkRunId) {
