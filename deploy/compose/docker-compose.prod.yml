@@ -587,6 +587,10 @@ services:
       - ${INFINITY_EMBEDDING_MODEL:-BAAI/bge-m3}
       - --model-id
       - ${INFINITY_RERANKER_MODEL:-BAAI/bge-reranker-v2-m3}
+    environment:
+      # Infinity posts an anonymous hardware/config fingerprint to PostHog
+      # on startup; a self-hosted stack should not phone home.
+      DO_NOT_TRACK: '1'
     volumes:
       - infinity_cache:/app/.cache
     security_opt:
