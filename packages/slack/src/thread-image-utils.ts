@@ -14,7 +14,6 @@ export const MAX_THREAD_ATTACHMENT_FILES = 20;
 export function isSlackImageFile(file: SlackFile): boolean {
   return (
     isRoomoteImageAttachment({
-      filename: file.name,
       mimeType: file.mimetype,
     }) && file.size < MAX_SLACK_IMAGE_FILE_SIZE_BYTES
   );

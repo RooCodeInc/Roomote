@@ -1635,6 +1635,7 @@ export async function answerFastAgentQuestion({
             throwIfTurnCancelled();
             const result = await adapter.launchTask({
               prompt: args.prompt,
+              ...(images.length > 0 ? { images } : {}),
               environmentId: args.environmentId ?? null,
               model: args.model ?? null,
               parentSessionId: session.id,

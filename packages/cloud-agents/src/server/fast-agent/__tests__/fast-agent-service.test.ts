@@ -1848,6 +1848,10 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     const result = await answerFastAgentQuestion({
       ...baseParams,
       question: 'Fix checkout.',
+      images: [
+        'data:image/png;base64,c2NyZWVuc2hvdC0x',
+        'data:image/gif;base64,c2NyZWVuc2hvdC0y',
+      ],
       adapter,
     });
 
@@ -1860,6 +1864,10 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     );
     expect(launchTask).toHaveBeenCalledWith(
       expect.objectContaining({
+        images: [
+          'data:image/png;base64,c2NyZWVuc2hvdC0x',
+          'data:image/gif;base64,c2NyZWVuc2hvdC0y',
+        ],
         model: 'anthropic/claude-sonnet-5',
         prompt: 'Fix checkout.',
       }),
