@@ -946,6 +946,42 @@ describe('processFastAgentMessage', () => {
     );
   });
 
+  it.each(['im', 'mpim'] as const)(
+    'requires a response in a Slack %s conversation',
+    async (channelType) => {
+      const slack = {
+        addReaction: vi.fn().mockResolvedValue(true),
+        removeReaction: vi.fn().mockResolvedValue(true),
+        normalizeIncomingText: vi.fn(async (text: string) => text),
+        fetchThreadMessages: vi.fn(async () => [
+          { user: 'U111', username: 'Dan', text: 'Earlier', ts: '100.000' },
+          { user: 'U222', username: 'Matt', text: 'Help', ts: '100.002' },
+        ]),
+      };
+
+      await processFastAgentMessage({
+        event: {
+          type: 'message',
+          channel: 'D123',
+          channel_type: channelType,
+          user: 'U222',
+          text: 'Help',
+          ts: '100.002',
+          thread_ts: '100.000',
+        } as never,
+        slack: slack as never,
+        userId: 'user-2',
+        teamId: 'T123',
+        continuation: true,
+        isExistingConversation: true,
+      });
+
+      expect(mocks.answerQuestion).toHaveBeenCalledWith(
+        expect.objectContaining({ allowSilentAmbientReply: false }),
+      );
+    },
+  );
+
   it('requires a response for a directed turn with another human participant', async () => {
     const slack = {
       addReaction: vi.fn().mockResolvedValue(true),

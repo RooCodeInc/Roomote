@@ -220,7 +220,11 @@ export async function processFastAgentMessage(params: {
           ? currentMessage.username
           : undefined,
       activeTasks: resolvedActiveTasks,
-      allowSilentAmbientReply: hasOtherHumanParticipant && !directedAtRoomote,
+      allowSilentAmbientReply:
+        event.channel_type !== 'im' &&
+        event.channel_type !== 'mpim' &&
+        hasOtherHumanParticipant &&
+        !directedAtRoomote,
       adapter: {
         resolveMcpServerConfigs: () =>
           resolveUserMcpServerConfigs({
