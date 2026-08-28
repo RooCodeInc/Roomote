@@ -973,6 +973,7 @@ describe('enqueueTask snapshot resume', () => {
               repo: 'acme/widgets',
               sourceSnapshotId: 'snap-retry',
               sourceRunId: freshRun.id,
+              launchIdempotencyKey: `snapshot-resume-retry:${freshRun.id}`,
             },
           } as SnapshotResumeTask,
           actingUserId: userId,

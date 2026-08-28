@@ -1588,7 +1588,9 @@ export const taskRuns = pgTable(
       ),
     uniqueIndex('task_runs_launch_idempotency_key_unique')
       .on(sql`(${table.payload}->>'launchIdempotencyKey')`)
-      .where(sql`${table.payload}->>'launchIdempotencyKey' IS NOT NULL`),
+      .where(
+        sql`${table.payload}->>'launchIdempotencyKey' IS NOT NULL AND ${table.canceledAt} IS NULL`,
+      ),
     index('task_runs_first_assistant_output_at_idx').on(
       table.firstAssistantOutputAt,
     ),
