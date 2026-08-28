@@ -242,6 +242,7 @@ describe('handlePrSynchronize', () => {
 
     expect(mockEnqueueActivePrReviewFollowUp).toHaveBeenCalledWith(
       expect.objectContaining({
+        installationId: 1,
         runId: 100,
         taskId: 'task-100',
         sandboxServerUrl: 'http://sandbox.test',
@@ -312,6 +313,7 @@ describe('handlePrSynchronize', () => {
 
     expect(mockEnqueueActivePrReviewFollowUp).toHaveBeenCalledWith(
       expect.objectContaining({
+        installationId: 1,
         runId: 100,
         taskId: 'task-100',
         eventHeadSha: 'new-head',

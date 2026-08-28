@@ -8,6 +8,9 @@ const {
   mockSendPrompt,
   mockUpdateWhere,
   mockWithSandboxServerRpcClient,
+  mockAcquireGithubPrReviewLifecycleLock,
+  mockReleaseGithubPrReviewLifecycleLock,
+  mockTransferGithubPrReviewCheckToRun,
 } = vi.hoisted(() => ({
   mockBuildPrompt: vi.fn(),
   mockEnqueueTask: vi.fn(),
@@ -16,6 +19,11 @@ const {
   mockSendPrompt: vi.fn(),
   mockUpdateWhere: vi.fn(),
   mockWithSandboxServerRpcClient: vi.fn(),
+  mockAcquireGithubPrReviewLifecycleLock: vi.fn(),
+  mockReleaseGithubPrReviewLifecycleLock: Object.assign(vi.fn(), {
+    signal: new AbortController().signal,
+  }),
+  mockTransferGithubPrReviewCheckToRun: vi.fn(),
 }));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
@@ -45,6 +53,7 @@ vi.mock('@roomote/db/server', () => ({
 
 vi.mock('@roomote/sdk/server', () => ({
   activePrReviewFollowUpRequestSchema: z.object({
+    installationId: z.number().optional(),
     runId: z.number(),
     taskId: z.string(),
     sandboxServerUrl: z.string(),
@@ -54,6 +63,10 @@ vi.mock('@roomote/sdk/server', () => ({
     eventHeadSha: z.string(),
     fallback: z.any(),
   }),
+  acquireGithubPrReviewLifecycleLock: (...args: unknown[]) =>
+    mockAcquireGithubPrReviewLifecycleLock(...args),
+  transferGithubPrReviewCheckToRun: (...args: unknown[]) =>
+    mockTransferGithubPrReviewCheckToRun(...args),
   withSandboxServerRpcClient: (...args: unknown[]) =>
     mockWithSandboxServerRpcClient(...args),
 }));
@@ -65,6 +78,7 @@ import { RunStatus, TaskPayloadKind } from '@roomote/types';
 import { activePrReviewFollowUpJob } from './active-pr-review-follow-up';
 
 const data = {
+  installationId: 1,
   runId: 100,
   taskId: 'task-100',
   sandboxServerUrl: 'https://sandbox.example.test',
@@ -111,6 +125,10 @@ describe('activePrReviewFollowUpJob', () => {
       ({ call }: { call: (client: unknown) => Promise<unknown> }) =>
         call({ commands: { sendPrompt: { mutate: mockSendPrompt } } }),
     );
+    mockAcquireGithubPrReviewLifecycleLock.mockResolvedValue(
+      mockReleaseGithubPrReviewLifecycleLock,
+    );
+    mockTransferGithubPrReviewCheckToRun.mockResolvedValue(undefined);
   });
 
   it('sends a hidden follow-up that keeps the active task alive', async () => {
@@ -136,6 +154,7 @@ describe('activePrReviewFollowUpJob', () => {
     });
     expect(mockUpdateWhere).toHaveBeenCalledOnce();
     expect(mockEnqueueTask).not.toHaveBeenCalled();
+    expect(mockTransferGithubPrReviewCheckToRun).not.toHaveBeenCalled();
   });
 
   it('includes active goal context in a live review follow-up', async () => {
@@ -240,6 +259,23 @@ describe('activePrReviewFollowUpJob', () => {
       }),
     );
     expect(mockUpdateWhere).toHaveBeenCalledOnce();
+    expect(mockTransferGithubPrReviewCheckToRun).toHaveBeenCalledWith({
+      installationId: 1,
+      repository: 'owner/repo',
+      prNumber: 42,
+      taskId: 'task-100',
+      previousRunId: 100,
+      newRunId: 200,
+      signal: mockReleaseGithubPrReviewLifecycleLock.signal,
+    });
+    expect(mockEnqueueTask.mock.invocationCallOrder[0]).toBeLessThan(
+      mockTransferGithubPrReviewCheckToRun.mock.invocationCallOrder[0]!,
+    );
+    expect(
+      mockTransferGithubPrReviewCheckToRun.mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      mockReleaseGithubPrReviewLifecycleLock.mock.invocationCallOrder[0]!,
+    );
   });
 
   it('resumes the same task when the active review finishes during debounce', async () => {
@@ -271,6 +307,12 @@ describe('activePrReviewFollowUpJob', () => {
       }),
     );
     expect(mockUpdateWhere).toHaveBeenCalledOnce();
+    expect(mockTransferGithubPrReviewCheckToRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        previousRunId: 100,
+        newRunId: 200,
+      }),
+    );
     expect(mockSendPrompt).not.toHaveBeenCalled();
   });
 
@@ -302,6 +344,37 @@ describe('activePrReviewFollowUpJob', () => {
       trigger: 'webhook',
       prLinkage: data.fallback.prLinkage,
     });
-    expect(mockUpdateWhere).not.toHaveBeenCalled();
+    expect(mockUpdateWhere).toHaveBeenCalledOnce();
+    expect(mockTransferGithubPrReviewCheckToRun).toHaveBeenCalledWith({
+      installationId: 1,
+      repository: 'owner/repo',
+      prNumber: 42,
+      taskId: 'task-100',
+      previousRunId: 100,
+      newRunId: 200,
+      signal: mockReleaseGithubPrReviewLifecycleLock.signal,
+    });
+  });
+
+  it('retries when fallback ownership cannot acquire the lifecycle lock', async () => {
+    mockFindFirstRun.mockResolvedValue({
+      id: 100,
+      taskId: 'task-100',
+      status: RunStatus.Completed,
+      sandboxServerUrl: null,
+      snapshotId: null,
+      snapshotCreatedAt: null,
+      port: null,
+      payload: { repo: 'owner/repo' },
+      actingUserId: null,
+    });
+    mockAcquireGithubPrReviewLifecycleLock.mockResolvedValueOnce(null);
+
+    await expect(activePrReviewFollowUpJob(makeJob())).rejects.toThrow(
+      'Timed out serializing PR review fallback for owner/repo#42',
+    );
+
+    expect(mockEnqueueTask).not.toHaveBeenCalled();
+    expect(mockTransferGithubPrReviewCheckToRun).not.toHaveBeenCalled();
   });
 });

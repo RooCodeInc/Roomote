@@ -20,7 +20,11 @@ import {
   REVIEW_STATUS_START_MARKER,
   REVIEW_SUMMARY_MARKER,
 } from '@roomote/cloud-agents/server';
-import { getInstallationOctokit, updateCheckRun } from '@roomote/github';
+import {
+  getCheckRun,
+  getInstallationOctokit,
+  updateCheckRun,
+} from '@roomote/github';
 import { acquireRedisLock } from '@roomote/redis';
 
 export const GITHUB_PR_REVIEW_CHECK_NAME = 'Roomote code review';
@@ -430,6 +434,90 @@ export async function publishGithubPrReviewCheck(input: {
   }
 }
 
+export async function transferGithubPrReviewCheckToRun(input: {
+  installationId: number;
+  repository: string;
+  prNumber: number;
+  taskId: string;
+  previousRunId: number;
+  newRunId: number;
+  signal?: AbortSignal;
+}): Promise<void> {
+  const repository = splitRepository(input.repository);
+  if (!repository) return;
+
+  input.signal?.throwIfAborted();
+  const linkage = await findGithubPrLinkage(input);
+  if (!linkage?.githubCheckRunId) return;
+
+  const octokit = await getInstallationOctokit({
+    installationId: input.installationId,
+  });
+  const { data: currentCheck } = await octokit.rest.checks.get({
+    ...repository,
+    check_run_id: linkage.githubCheckRunId,
+    ...(input.signal ? { request: { signal: input.signal } } : {}),
+  });
+  input.signal?.throwIfAborted();
+
+  const owningRunId = Number(
+    /^roomote-review:(\d+)$/.exec(currentCheck.external_id ?? '')?.[1],
+  );
+  if (owningRunId === input.newRunId) return;
+  if (owningRunId !== input.previousRunId) {
+    console.log(
+      `[githubPrReviewCheck] Skipping transfer from run ${input.previousRunId} to ${input.newRunId}; check ${linkage.githubCheckRunId} belongs to ${Number.isFinite(owningRunId) ? `run ${owningRunId}` : 'an unknown run'}`,
+    );
+    return;
+  }
+
+  const taskUrl = getReviewTaskUrl(input.taskId);
+  if (currentCheck.status !== 'completed') {
+    await octokit.rest.checks.update({
+      ...repository,
+      check_run_id: linkage.githubCheckRunId,
+      external_id: `roomote-review:${input.newRunId}`,
+      details_url: taskUrl,
+      ...(input.signal ? { request: { signal: input.signal } } : {}),
+    });
+    return;
+  }
+
+  input.signal?.throwIfAborted();
+  const { data: replacementCheck } = await octokit.rest.checks.create({
+    ...repository,
+    name: GITHUB_PR_REVIEW_CHECK_NAME,
+    head_sha: currentCheck.head_sha,
+    status: 'in_progress',
+    started_at: new Date().toISOString(),
+    details_url: taskUrl,
+    external_id: `roomote-review:${input.newRunId}`,
+    output: {
+      title: 'Roomote review in progress',
+      summary: `Roomote is reviewing this commit. [Open the task](${taskUrl}).`,
+    },
+    ...(input.signal ? { request: { signal: input.signal } } : {}),
+  });
+
+  input.signal?.throwIfAborted();
+  const claimedLinkage = await db
+    .update(taskPullRequests)
+    .set({ githubCheckRunId: replacementCheck.id, updatedAt: new Date() })
+    .where(
+      and(
+        eq(taskPullRequests.id, linkage.id),
+        eq(taskPullRequests.githubCheckRunId, linkage.githubCheckRunId),
+      ),
+    )
+    .returning({ id: taskPullRequests.id });
+
+  if (claimedLinkage.length === 0) {
+    console.log(
+      `[githubPrReviewCheck] Skipping replacement check ${replacementCheck.id}; linkage changed during transfer to run ${input.newRunId}`,
+    );
+  }
+}
+
 export async function completeGithubPrReviewCheckFromSummary(input: {
   installationId: number;
   repository: string;
@@ -545,6 +633,7 @@ export async function completeGithubPrReviewCheckFromSummary(input: {
 
 export async function markGithubPrReviewCheckInProgress(input: {
   taskId: string;
+  runId: number;
   gitHubToken: string;
 }): Promise<void> {
   try {
@@ -559,6 +648,17 @@ export async function markGithubPrReviewCheckInProgress(input: {
     }
 
     const taskUrl = getReviewTaskUrl(input.taskId);
+    const { data: checkRun } = await getCheckRun(input.gitHubToken, {
+      ...repository,
+      check_run_id: linkage.githubCheckRunId,
+    });
+    const owningRunId = Number(
+      /^roomote-review:(\d+)$/.exec(checkRun.external_id ?? '')?.[1],
+    );
+    if (checkRun.status === 'completed' || owningRunId !== input.runId) {
+      return;
+    }
+
     await updateCheckRun(input.gitHubToken, {
       ...repository,
       check_run_id: linkage.githubCheckRunId,

@@ -49,6 +49,7 @@ const taskPrLinkageSchema = z.object({
 });
 
 export const activePrReviewFollowUpRequestSchema = z.object({
+  installationId: z.number().int().positive().optional(),
   runId: z.number().int().positive(),
   taskId: z.string(),
   sandboxServerUrl: z.string(),

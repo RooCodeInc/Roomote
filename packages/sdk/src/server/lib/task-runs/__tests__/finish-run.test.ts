@@ -447,6 +447,9 @@ describe('finishRun', () => {
     }));
     mockRedisSet.mockResolvedValue('OK');
     mockRedisDel.mockResolvedValue(1);
+    mockGetCheckRun.mockResolvedValue({
+      data: { external_id: 'roomote-review:1' },
+    });
     mockAcquireRedisLock.mockResolvedValue(mockReleaseRedisLock);
     mockUpdateMessage.mockResolvedValue(true);
     mockDbExecute.mockResolvedValue([]);
@@ -2447,6 +2450,50 @@ describe('finishRun', () => {
       expect(mockFinalizeGithubPrReviewComment).not.toHaveBeenCalled();
       expect(mockUpdateCheckRun).not.toHaveBeenCalled();
     });
+
+    it.each([
+      TaskPayloadKind.GithubPrReviewSync,
+      TaskPayloadKind.SnapshotResume,
+    ])(
+      'lets fallback run B finish clean after ownership transfers from failed run A (%s)',
+      async (fallbackPayloadKind) => {
+        mockFindManyTaskPullRequests.mockResolvedValue([reviewPrRow]);
+        mockGetCheckRun.mockResolvedValue({
+          data: { external_id: 'roomote-review:200' },
+        });
+        mockFindFirstRun
+          .mockResolvedValueOnce(
+            makeRun(
+              { id: 100, payloadKind: TaskPayloadKind.GithubPrReviewSync },
+              { workflow: 'pr_review', surface: 'github' },
+            ),
+          )
+          .mockResolvedValueOnce(
+            makeRun(
+              { id: 200, payloadKind: fallbackPayloadKind },
+              { workflow: 'pr_review', surface: 'github' },
+            ),
+          );
+
+        await finishRun({ id: 100, status: RunStatus.Failed });
+        expect(mockFinalizeGithubPrReviewComment).not.toHaveBeenCalled();
+        expect(mockUpdateCheckRun).not.toHaveBeenCalled();
+
+        mockFinalizeGithubPrReviewComment.mockResolvedValueOnce({
+          finalized: false,
+          body: '<!-- roomote-review-summary sha=abc1234 -->\n<!-- roomote-review-status:start -->\nNo issues found.\n<!-- roomote-review-status:end -->\n<!-- roomote-review-checklist:start -->\n<!-- roomote-review-checklist:end -->',
+        });
+        await finishRun({ id: 200, status: RunStatus.Completed });
+
+        expect(mockUpdateCheckRun).toHaveBeenCalledWith(
+          'github-token',
+          expect.objectContaining({
+            check_run_id: 123,
+            conclusion: 'success',
+          }),
+        );
+      },
+    );
 
     it('does not finalize a review cycle with unknown check ownership', async () => {
       mockFindFirstRun.mockResolvedValue(

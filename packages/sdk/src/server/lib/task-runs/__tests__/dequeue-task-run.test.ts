@@ -26,6 +26,7 @@ const {
   mockGetRedis,
   mockResolveSlackTaskRunRouting,
   mockResolveTaskRunSourceControlProviders,
+  mockMarkGithubPrReviewCheckInProgress,
   onBootstrapFailureMock,
 } = vi.hoisted(() => ({
   mockDbTransaction: vi.fn(),
@@ -52,6 +53,7 @@ const {
   mockGetRedis: vi.fn(() => 'redis-client'),
   mockResolveSlackTaskRunRouting: vi.fn(),
   mockResolveTaskRunSourceControlProviders: vi.fn(),
+  mockMarkGithubPrReviewCheckInProgress: vi.fn(),
   onBootstrapFailureMock: vi.fn(),
 }));
 
@@ -103,6 +105,11 @@ vi.mock('../dequeue-helpers', () => ({
   resolveGitAuthor: (...args: unknown[]) => mockResolveGitAuthor(...args),
   resolveTaskRunSourceControlProviders: (...args: unknown[]) =>
     mockResolveTaskRunSourceControlProviders(...args),
+}));
+
+vi.mock('../github-pr-review-check', () => ({
+  markGithubPrReviewCheckInProgress: (...args: unknown[]) =>
+    mockMarkGithubPrReviewCheckInProgress(...args),
 }));
 
 import { dequeueTaskRun } from '../dequeue-task-run';
@@ -743,6 +750,32 @@ describe('dequeueTaskRun', () => {
       }),
     );
     expect(mockNotifyCanceledTaskRunOnSettle).toHaveBeenCalledWith(taskRun);
+  });
+
+  it('starts only the check owned by the dequeued PR review run', async () => {
+    const taskRun = makeStandardTaskRun({
+      payloadKind: TaskPayloadKind.GithubPrReview,
+      task: makeTaskRow({ workflow: 'pr_review', surface: 'github' }),
+      payload: {
+        repo: 'owner/repo',
+        prNumber: 42,
+        prTitle: 'Fix it',
+        prUrl: 'https://github.com/owner/repo/pull/42',
+        headSha: '1234567890abcdef1234567890abcdef12345678',
+      },
+    });
+    mockTxExecute.mockResolvedValue([{ id: taskRun.id }]);
+    mockTxFindFirstTaskRuns.mockResolvedValue(taskRun);
+
+    await dequeueTaskRun({ orgId: 'org-1' } as never, {
+      runId: taskRun.id,
+    });
+
+    expect(mockMarkGithubPrReviewCheckInProgress).toHaveBeenCalledWith({
+      taskId: taskRun.taskId,
+      runId: taskRun.id,
+      gitHubToken: 'gh-token',
+    });
   });
 
   it('cancels the task run when launch metadata persistence fails for PR review runs', async () => {

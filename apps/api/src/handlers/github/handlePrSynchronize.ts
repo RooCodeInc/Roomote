@@ -293,6 +293,7 @@ export async function handlePrSynchronize({
           });
 
           await enqueueActivePrReviewFollowUp({
+            installationId: installation!.id,
             runId: followUpRun.id,
             taskId: followUpRun.taskId,
             sandboxServerUrl: followUpRun.sandboxServerUrl!,

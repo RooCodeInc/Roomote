@@ -71,6 +71,7 @@ export {
   completeGithubPrReviewCheckFromSummary,
   GITHUB_PR_REVIEW_CHECK_NAME,
   publishGithubPrReviewCheck,
+  transferGithubPrReviewCheckToRun,
 } from './lib/task-runs/github-pr-review-check';
 export {
   PULL_REQUEST_MERGEABILITY_CHECK_QUEUE_NAME,

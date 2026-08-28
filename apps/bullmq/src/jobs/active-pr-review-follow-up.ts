@@ -12,8 +12,10 @@ import {
   taskRuns,
 } from '@roomote/db/server';
 import {
+  acquireGithubPrReviewLifecycleLock,
   activePrReviewFollowUpRequestSchema,
   type ActivePrReviewFollowUpRequest,
+  transferGithubPrReviewCheckToRun,
   withSandboxServerRpcClient,
 } from '@roomote/sdk/server';
 import {
@@ -45,6 +47,43 @@ async function updateLinkedHead(
     .update(taskPullRequests)
     .set({ prSha: headSha })
     .where(eq(taskPullRequests.taskId, taskId));
+}
+
+async function launchFallbackWithCheckTransfer(
+  data: ActivePrReviewFollowUpRequest,
+  launch: () => Promise<{ id: number }>,
+): Promise<void> {
+  const releaseLifecycleLock = await acquireGithubPrReviewLifecycleLock(
+    data.repository,
+    data.prNumber,
+  );
+  if (!releaseLifecycleLock) {
+    throw new Error(
+      `Timed out serializing PR review fallback for ${data.repository}#${data.prNumber}`,
+    );
+  }
+
+  try {
+    releaseLifecycleLock.signal.throwIfAborted();
+    const fallbackRun = await launch();
+    releaseLifecycleLock.signal.throwIfAborted();
+
+    if (data.installationId) {
+      await transferGithubPrReviewCheckToRun({
+        installationId: data.installationId,
+        repository: data.repository,
+        prNumber: data.prNumber,
+        taskId: data.taskId,
+        previousRunId: data.runId,
+        newRunId: fallbackRun.id,
+        signal: releaseLifecycleLock.signal,
+      });
+    }
+
+    await updateLinkedHead(data.taskId, data.eventHeadSha);
+  } finally {
+    await releaseLifecycleLock();
+  }
 }
 
 export const activePrReviewFollowUpJob = async (
@@ -120,30 +159,33 @@ export const activePrReviewFollowUpJob = async (
       resumePromptClientMessageId: buildClientMessageId(data),
     } satisfies TaskPayload<typeof TaskPayloadKind.SnapshotResume>;
 
-    await enqueueTask({
-      task: {
-        type: TaskPayloadKind.SnapshotResume,
-        sourceSnapshotId: run.snapshotId,
-        sourceRunId: run.id,
-        payload: resumePayload,
-      },
-      actingUserId: run.actingUserId,
-    });
-    await updateLinkedHead(run.taskId, data.eventHeadSha);
+    await launchFallbackWithCheckTransfer(data, () =>
+      enqueueTask({
+        task: {
+          type: TaskPayloadKind.SnapshotResume,
+          sourceSnapshotId: run.snapshotId!,
+          sourceRunId: run.id,
+          payload: resumePayload,
+        },
+        actingUserId: run.actingUserId,
+      }),
+    );
     return;
   }
 
-  await enqueueTask({
-    existingTaskId: run.taskId,
-    task: data.fallback.task,
-    initiator: {
-      kind: 'automation',
-      key: 'review_code',
-      actor: data.fallback.initiatorActor,
-    },
-    workflow: 'pr_review',
-    surface: 'github',
-    trigger: 'webhook',
-    prLinkage: data.fallback.prLinkage,
-  });
+  await launchFallbackWithCheckTransfer(data, () =>
+    enqueueTask({
+      existingTaskId: run.taskId,
+      task: data.fallback.task,
+      initiator: {
+        kind: 'automation',
+        key: 'review_code',
+        actor: data.fallback.initiatorActor,
+      },
+      workflow: 'pr_review',
+      surface: 'github',
+      trigger: 'webhook',
+      prLinkage: data.fallback.prLinkage,
+    }),
+  );
 };
