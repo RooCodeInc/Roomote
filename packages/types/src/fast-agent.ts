@@ -1,5 +1,7 @@
 import { z } from 'zod';
 
+import { BACKGROUND_AUTOMATION_KEYS } from './background-agents';
+
 export const fastAgentSurfaces = [
   'slack',
   'discord',
@@ -11,6 +13,18 @@ export const fastAgentSurfaces = [
 export const fastAgentSurfaceSchema = z.enum(fastAgentSurfaces);
 
 export type FastAgentSurface = z.infer<typeof fastAgentSurfaceSchema>;
+
+export const fastAgentConversationOwnerSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('user'), userId: z.string().min(1) }),
+  z.object({
+    kind: z.literal('automation'),
+    automationKey: z.enum(BACKGROUND_AUTOMATION_KEYS),
+  }),
+]);
+
+export type FastAgentConversationOwner = z.infer<
+  typeof fastAgentConversationOwnerSchema
+>;
 
 export const fastAgentReplyTargetSchema = z.object({
   channelId: z.string().min(1),

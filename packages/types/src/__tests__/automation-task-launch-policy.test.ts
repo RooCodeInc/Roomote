@@ -1,11 +1,16 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  AUTOMATION_OWNED_FAST_SESSION_WRITES_ENABLED,
   AUTOMATION_TASK_LAUNCH_POLICIES,
   resolveAutomationTaskLaunchMode,
 } from '../automation-task-launch-policy';
 
 describe('automation task launch policies', () => {
+  it('keeps automation-owned Fast Session writes disabled for release N', () => {
+    expect(AUTOMATION_OWNED_FAST_SESSION_WRITES_ENABLED).toBe(false);
+  });
+
   it('keeps a complete, uniquely identified launcher inventory', () => {
     expect(AUTOMATION_TASK_LAUNCH_POLICIES.map(({ id }) => id)).toEqual([
       'custom_automation',

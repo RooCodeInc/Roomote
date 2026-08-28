@@ -9,13 +9,17 @@ import {
   sql,
   type DatabaseOrTransaction,
 } from '@roomote/db/server';
-import { fastAgentConversationSchema } from '@roomote/types';
+import {
+  fastAgentConversationSchema,
+  type FastAgentConversationOwner,
+} from '@roomote/types';
 
 import type { FastAgentConversation } from './fast-agent-conversation';
 
 export type FastAgentConversationRecord = {
   id: string;
-  userId: string;
+  userId: string | null;
+  owner: FastAgentConversationOwner;
   conversation: FastAgentConversation;
   /**
    * Durable visible history for cold starts and provider retries. OpenCode,
@@ -142,10 +146,18 @@ async function loadConversationRecord(
   if (!record || !conversation) {
     throw new Error('Fast conversation has an invalid reply target.');
   }
+  const owner: FastAgentConversationOwner = record.userId
+    ? { kind: 'user', userId: record.userId }
+    : record.ownerAutomation
+      ? { kind: 'automation', automationKey: record.ownerAutomation }
+      : (() => {
+          throw new Error('Fast conversation has an invalid owner.');
+        })();
 
   return {
     id: record.id,
     userId: record.userId,
+    owner,
     conversation,
     compatibilityMessages: record.compatibilityMessages as ModelMessage[],
     openCodeSessionId: record.openCodeSessionId,
@@ -193,6 +205,9 @@ export const fastAgentConversationRepository: FastAgentConversationRepository =
         }
         if (!record) {
           throw new Error('Failed to create or load Fast conversation.');
+        }
+        if (record.userId !== userId || record.ownerAutomation !== null) {
+          throw new Error('Fast conversation owner does not match the caller.');
         }
 
         await tx.execute(

@@ -447,6 +447,45 @@ describe('deliverFastAgentParentEvent', () => {
     expect(mocks.createDiscordProvider).not.toHaveBeenCalled();
   });
 
+  it('fails closed when a staged automation-owned session reaches execution', async () => {
+    mocks.findSession.mockResolvedValueOnce({
+      id: parent.sessionId,
+      userId: null,
+      owner: { kind: 'automation', automationKey: 'announcer' },
+      conversation: {
+        surface: 'automation',
+        workspaceId: 'announcer',
+        conversationId: 'occurrence-1',
+      },
+      compatibilityMessages: [],
+      openCodeSessionId: null,
+    });
+
+    await expect(
+      deliverFastAgentParentEvent({
+        parent: {
+          sessionId: parent.sessionId,
+          conversation: {
+            surface: 'automation',
+            workspaceId: 'announcer',
+            conversationId: 'occurrence-1',
+          },
+        },
+        event: {
+          type: 'automation_triggered',
+          eventId: 'occurrence-1',
+          automationId: 'announcer',
+          automationName: 'Summarize merged PRs',
+          prompt: 'Summarize merged pull requests.',
+          trigger: 'schedule',
+        },
+      }),
+    ).rejects.toThrow(
+      'Automation-owned Fast execution is staged for the next release.',
+    );
+    expect(mocks.answerQuestion).not.toHaveBeenCalled();
+  });
+
   it('updates the Slack root for a channel-backed automation turn', async () => {
     await deliverFastAgentParentEvent({
       parent,

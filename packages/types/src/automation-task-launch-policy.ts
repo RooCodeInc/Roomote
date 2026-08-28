@@ -1,5 +1,8 @@
 import type { BackgroundAutomationKey } from './background-agents';
 
+/** Release-N gate: schema/read support ships now; ownerless writes start N+1. */
+export const AUTOMATION_OWNED_FAST_SESSION_WRITES_ENABLED = false;
+
 export type AutomationTaskLaunchPolicyId =
   | 'custom_automation'
   | 'scheduled_triage_scan'

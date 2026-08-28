@@ -9,6 +9,7 @@ import {
   fastAgentConversationRepository,
   resolveApiBaseUrl,
   type FastAgentTurnAdapter,
+  type FastAgentConversationRecord,
   type LaunchFastAgentTask,
 } from '@roomote/cloud-agents/server';
 import { buildCommunicationTaskThreadName } from '@roomote/communication/task-thread-title';
@@ -78,6 +79,18 @@ import {
 } from './task-runs/pr-review-action';
 
 const EXITED_RUN_STATUSES = new Set<RunStatus>(exitedRunStatuses);
+
+function requireFastAgentHumanUserId(
+  session: FastAgentConversationRecord,
+): string {
+  if (!session.userId) {
+    throw new FastAgentParentEventDeliveryError(
+      'Automation-owned Fast execution is staged for the next release.',
+      { replyPosted: false, permanent: true },
+    );
+  }
+  return session.userId;
+}
 
 /** Deterministic uuid-shaped Slack client_msg_id so a retried delivery of the
  * same event posts with the same idempotency key instead of duplicating. */
@@ -417,11 +430,11 @@ async function createAutomationFastAgentParentTurn(params: {
   }
 
   return {
-    userId: session.userId,
+    userId: requireFastAgentHumanUserId(session),
     conversation: session.conversation,
     adapter: {
       launchTask: createFastAgentAutomationTaskLauncher({
-        userId: session.userId,
+        userId: requireFastAgentHumanUserId(session),
         conversation: session.conversation,
         event: params.event,
       }),
@@ -454,11 +467,11 @@ async function createWebFastAgentParentTurn(params: {
   }
 
   return {
-    userId: session.userId,
+    userId: requireFastAgentHumanUserId(session),
     conversation: session.conversation,
     adapter: {
       launchTask: createFastAgentWebTaskLauncher({
-        userId: session.userId,
+        userId: requireFastAgentHumanUserId(session),
         conversation: session.conversation,
       }),
       // Web replies are read from the canonical transcript; posting is the
@@ -521,12 +534,12 @@ async function createSlackFastAgentParentTurn(params: {
   }
 
   return {
-    userId: session.userId,
+    userId: requireFastAgentHumanUserId(session),
     conversation,
     adapter: {
       launchTask: createFastAgentSlackLiveTaskLauncher({
         slack,
-        userId: session.userId,
+        userId: requireFastAgentHumanUserId(session),
         teamId: conversation.workspaceId,
         ...(installation.teamDomain
           ? { teamDomain: installation.teamDomain }
@@ -595,7 +608,7 @@ async function createSlackFastAgentParentTurn(params: {
               threadTs:
                 params.event.rootMessageId ?? conversation.replyTarget.threadId,
               eventId: params.event.eventId,
-              createdByUserId: session.userId,
+              createdByUserId: requireFastAgentHumanUserId(session),
               suggestions,
             });
           }
@@ -846,12 +859,12 @@ async function createDiscordFastAgentParentTurn(params: {
 
   const conversation = session.conversation;
   return {
-    userId: session.userId,
+    userId: requireFastAgentHumanUserId(session),
     conversation,
     adapter: {
       launchTask: createFastAgentDiscordTaskLauncher({
         provider,
-        userId: session.userId,
+        userId: requireFastAgentHumanUserId(session),
         conversation,
       }),
       postReply: async ({
@@ -924,7 +937,7 @@ async function createDiscordFastAgentParentTurn(params: {
                 ? { threadId: conversation.replyTarget.threadId }
                 : {}),
               eventId: params.event.eventId,
-              createdByUserId: session.userId,
+              createdByUserId: requireFastAgentHumanUserId(session),
               suggestions,
             });
           }
@@ -1055,11 +1068,11 @@ async function createTeamsFastAgentParentTurn(params: {
     );
   }
   return {
-    userId: session.userId,
+    userId: requireFastAgentHumanUserId(session),
     conversation,
     adapter: {
       launchTask: createFastAgentCommunicationTaskLauncher({
-        userId: session.userId,
+        userId: requireFastAgentHumanUserId(session),
         conversation,
         serviceUrl,
       }),
@@ -1109,7 +1122,7 @@ async function createTeamsFastAgentParentTurn(params: {
                 ? { threadId: conversation.replyTarget.threadId }
                 : {}),
               eventId: params.event.eventId,
-              createdByUserId: session.userId,
+              createdByUserId: requireFastAgentHumanUserId(session),
               suggestions,
             });
           }
@@ -1142,7 +1155,7 @@ async function createTeamsFastAgentParentTurn(params: {
               ? { threadId: conversation.replyTarget.threadId }
               : {}),
             eventId: params.event.eventId,
-            createdByUserId: session.userId,
+            createdByUserId: requireFastAgentHumanUserId(session),
             suggestions,
           });
         }
@@ -1182,11 +1195,11 @@ async function createTelegramFastAgentParentTurn(params: {
   }
   const conversation = session.conversation;
   return {
-    userId: session.userId,
+    userId: requireFastAgentHumanUserId(session),
     conversation,
     adapter: {
       launchTask: createFastAgentCommunicationTaskLauncher({
-        userId: session.userId,
+        userId: requireFastAgentHumanUserId(session),
         conversation,
       }),
       postReply: async ({
@@ -1228,7 +1241,7 @@ async function createTelegramFastAgentParentTurn(params: {
               ? { threadId: conversation.replyTarget.threadId }
               : {}),
             eventId: params.event.eventId,
-            createdByUserId: session.userId,
+            createdByUserId: requireFastAgentHumanUserId(session),
             suggestions,
           });
         }

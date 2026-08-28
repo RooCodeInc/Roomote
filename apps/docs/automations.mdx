@@ -92,6 +92,14 @@ structured results consumed by another Roomote workflow, or require a sandbox
 by definition. Deterministic alert and stats automations that do not need an
 agent post their result directly without launching a task.
 
+Roomote is rolling out automation-owned Fast sessions in two releases. This
+release adds the principal-aware storage, read, and authorization shape, but
+continues writing only human-owned Fast sessions. Built-in and integration
+automation principals therefore keep their existing direct-task behavior until
+the follow-up release enables deployment-principal capabilities and Session
+writes. This keeps one-release rollback safe: the previous version never sees a
+new ownerless Session row.
+
 ## Custom automations
 
 Create arbitrary scheduled agent runs with:

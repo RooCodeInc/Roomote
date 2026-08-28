@@ -3060,9 +3060,16 @@ export const fastAgentConversations = pgTable(
   'fast_agent_conversations',
   {
     id: uuid('id').primaryKey().defaultRandom(),
-    userId: text('user_id')
-      .notNull()
-      .references(() => users.id, { onDelete: 'cascade' }),
+    userId: text('user_id').references(() => users.id, {
+      onDelete: 'cascade',
+    }),
+    /**
+     * Release-N compatibility field. Automation-owned rows are readable now,
+     * but are not written until N+1 capability routing ships.
+     */
+    ownerAutomation: text('owner_automation')
+      .$type<BackgroundAutomationKey>()
+      .references(() => automations.key, { onDelete: 'cascade' }),
     surface: text('surface').notNull().$type<FastAgentSurface>(),
     workspaceId: text('workspace_id').notNull(),
     conversationId: text('conversation_id').notNull(),
@@ -3096,6 +3103,17 @@ export const fastAgentConversations = pgTable(
       table.conversationId,
     ),
     index('fast_agent_conversations_user_idx').on(table.userId),
+    index('fast_agent_conversations_owner_automation_idx').on(
+      table.ownerAutomation,
+    ),
+    check(
+      'fast_agent_conversations_owner_shape_check',
+      sql`(
+        (${table.userId} is not null and ${table.ownerAutomation} is null)
+        or
+        (${table.userId} is null and ${table.ownerAutomation} is not null)
+      )`,
+    ),
     index('fast_agent_conversations_legacy_ids_idx').using(
       'gin',
       table.legacyConversationIds,
