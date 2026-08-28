@@ -10,6 +10,7 @@ const {
   mockReleaseCanonicalPrReviewActionDispatch,
   mockRetireCanonicalPrReviewActions,
   mockDispatchPrReviewFollowUp,
+  mockGetTaskPrReviewOfferStatus,
   mockUpdateTaskPrReviewOfferStatus,
 } = vi.hoisted(() => ({
   mockCreateRunToken: vi.fn(),
@@ -23,6 +24,7 @@ const {
   mockReleaseCanonicalPrReviewActionDispatch: vi.fn(),
   mockRetireCanonicalPrReviewActions: vi.fn(),
   mockDispatchPrReviewFollowUp: vi.fn(),
+  mockGetTaskPrReviewOfferStatus: vi.fn(),
   mockUpdateTaskPrReviewOfferStatus: vi.fn(),
 }));
 
@@ -51,6 +53,7 @@ vi.mock('@roomote/sdk/server', async () => {
   return {
     ...actual,
     dispatchPrReviewFollowUp: mockDispatchPrReviewFollowUp,
+    getTaskPrReviewOfferStatus: mockGetTaskPrReviewOfferStatus,
     updateTaskPrReviewOfferStatus: mockUpdateTaskPrReviewOfferStatus,
   };
 });
@@ -345,6 +348,34 @@ describe('sendSandboxPromptCommand', () => {
       deliveryIds: [deliveryId],
       status: 'pending',
     });
+  });
+
+  it('preserves the persisted status when a duplicate action loses its claim', async () => {
+    const user = await userFactory.create({ name: 'DB User' });
+    const task = await taskFactory.create({ initiatorUserId: user.id });
+    const deliveryId = '44444444-4444-4444-8444-444444444444';
+    mockGetCanonicalPrReviewAction.mockResolvedValue({
+      deliveryId,
+      destinationKind: 'task',
+      destinationKey: task.id,
+      taskId: task.id,
+    });
+    mockClaimCanonicalPrReviewAction.mockResolvedValue(null);
+    mockGetTaskPrReviewOfferStatus.mockResolvedValue('dismissed');
+
+    await expect(
+      handlePrReviewNotificationActionCommand(
+        buildMockAuth({ userId: user.id }),
+        { deliveryId, choice: 'yes' },
+      ),
+    ).resolves.toEqual({ status: 'dismissed' });
+
+    expect(mockGetTaskPrReviewOfferStatus).toHaveBeenCalledWith({
+      taskId: task.id,
+      deliveryId,
+    });
+    expect(mockUpdateTaskPrReviewOfferStatus).not.toHaveBeenCalled();
+    expect(mockDispatchPrReviewFollowUp).not.toHaveBeenCalled();
   });
 
   it('keeps the original user text separate from injected out-of-band context', async () => {

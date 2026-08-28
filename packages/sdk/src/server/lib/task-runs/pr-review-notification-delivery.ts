@@ -37,6 +37,7 @@ import {
   PR_CONFLICT_NOTIFICATION_TASK_MESSAGE_SOURCE,
   PR_REVIEW_NOTIFICATION_TASK_MESSAGE_SOURCE,
   ROOMOTE_RUNTIME_TASK_MESSAGE_PROTOCOL,
+  parsePrReviewActionOffer,
   type PrReviewActionOfferStatus,
   type SourceControlProvider,
 } from '@roomote/types';
@@ -1569,4 +1570,21 @@ export async function updateTaskPrReviewOfferStatus(input: {
         ),
       ),
     );
+}
+
+export async function getTaskPrReviewOfferStatus(input: {
+  taskId: string;
+  deliveryId: string;
+}): Promise<PrReviewActionOfferStatus | null> {
+  const [message] = await db
+    .select({ payload: taskMessages.payload })
+    .from(taskMessages)
+    .where(
+      and(
+        eq(taskMessages.taskId, input.taskId),
+        sql`${taskMessages.payload} -> 'prReviewAction' ->> 'deliveryId' = ${input.deliveryId}`,
+      ),
+    )
+    .limit(1);
+  return parsePrReviewActionOffer(message?.payload)?.status ?? null;
 }

@@ -49,6 +49,7 @@ import { TRPCError } from '@trpc/server';
 import { createSandboxServerRpcClient } from '@roomote/sdk/sandbox-router';
 import {
   dispatchPrReviewFollowUp,
+  getTaskPrReviewOfferStatus,
   updateTaskPrReviewOfferStatus,
 } from '@roomote/sdk/server';
 import superjson from 'superjson';
@@ -200,12 +201,11 @@ export async function handlePrReviewNotificationActionCommand(
     expectedDestinationKey: taskId,
   });
   if (!action) {
-    await updateTaskPrReviewOfferStatus({
+    const status = await getTaskPrReviewOfferStatus({
       taskId,
-      deliveryIds: [parsed.deliveryId],
-      status: 'stale',
+      deliveryId: parsed.deliveryId,
     });
-    return { status: 'stale' };
+    return { status: status ?? 'stale' };
   }
 
   if (parsed.choice === 'dismiss') {
