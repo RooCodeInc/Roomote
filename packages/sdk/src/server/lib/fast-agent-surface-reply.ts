@@ -3,6 +3,7 @@ import {
   answerFastAgentQuestion,
   createFastAgentWebTaskLauncher,
   fastAgentConversationRepository,
+  getActiveFastAgentTasks,
   resolveApiBaseUrl,
   type FastAgentConversation,
   type FastAgentTurnAdapter,
@@ -19,6 +20,7 @@ import {
   buildFastSessionReplyFooterText,
   deliverManagedThreadReplyFooter,
   getDiscordFooterlessFinalChunk,
+  resolveFastSessionReplyFooterContext,
 } from '@roomote/communication';
 import {
   createFastAgentSlackLiveTaskLauncher,
@@ -181,6 +183,11 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
     };
   }
 
+  const activeTasks = await getActiveFastAgentTasks(session.id);
+  const footerContext = await resolveFastSessionReplyFooterContext({
+    taskIds: activeTasks.map((task) => task.taskId),
+  });
+
   if (conversation.surface === 'slack') {
     const installation = await db.query.slackInstallations.findFirst({
       where: and(
@@ -235,6 +242,7 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
             footerText: buildFastSessionReplyFooterText({
               provider: 'slack',
               sessionId: session.id,
+              ...footerContext,
             }),
           });
           if (!messageTs) {
@@ -267,6 +275,7 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
                             footerText: buildFastSessionReplyFooterText({
                               provider: 'slack',
                               sessionId: session.id,
+                              ...footerContext,
                             }),
                           }),
                         ]
@@ -311,6 +320,7 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
           const footerText = buildFastSessionReplyFooterText({
             provider: 'discord',
             sessionId: session.id,
+            ...footerContext,
           });
           const bodyText = quote ? `${quote}\n\n${message}` : message;
           const textWithFooter = `${bodyText}\n\n${footerText}`;
@@ -391,7 +401,7 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
                   replyToMessageId: conversation.replyTarget.threadId,
                 }
               : {}),
-            text: `${message}\n\n${buildFastSessionReplyFooterText({ provider: 'teams', sessionId: session.id })}`,
+            text: `${message}\n\n${buildFastSessionReplyFooterText({ provider: 'teams', sessionId: session.id, ...footerContext })}`,
             textFormat: 'markdown',
           });
           await recordFastAgentConversationMessageBestEffort({
@@ -406,7 +416,7 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
             channelId: conversation.replyTarget.channelId,
             messageId: handle.messageId,
             serviceUrl,
-            text: `${message}\n\n${buildFastSessionReplyFooterText({ provider: 'teams', sessionId: session.id })}`,
+            text: `${message}\n\n${buildFastSessionReplyFooterText({ provider: 'teams', sessionId: session.id, ...footerContext })}`,
             textFormat: 'markdown',
           });
           await recordFastAgentConversationMessageBestEffort({
@@ -439,7 +449,7 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
             ...(conversation.replyTarget.threadId
               ? { threadId: conversation.replyTarget.threadId }
               : {}),
-            text: `${message}\n\n${buildFastSessionReplyFooterText({ provider: 'telegram', sessionId: session.id })}`,
+            text: `${message}\n\n${buildFastSessionReplyFooterText({ provider: 'telegram', sessionId: session.id, ...footerContext })}`,
             textFormat: 'markdown',
           });
           return { messageId: posted.messageId };
@@ -448,7 +458,7 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
           await provider.editMessageText({
             channelId: conversation.replyTarget.channelId,
             messageId: handle.messageId,
-            text: `${message}\n\n${buildFastSessionReplyFooterText({ provider: 'telegram', sessionId: session.id })}`,
+            text: `${message}\n\n${buildFastSessionReplyFooterText({ provider: 'telegram', sessionId: session.id, ...footerContext })}`,
             textFormat: 'markdown',
           });
           return handle;

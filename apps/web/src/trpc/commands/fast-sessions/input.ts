@@ -67,3 +67,9 @@ export const fastSessionPrReviewActionInputSchema = z.object({
   deliveryId: z.string().uuid(),
   choice: z.enum(['yes', 'auto', 'dismiss']),
 });
+
+export const updateFastSessionModelSelectionInputSchema = z.object({
+  sessionId: z.string().uuid(),
+  model: fastSessionMessageInputShape.model,
+  reasoningEffort: fastSessionMessageInputShape.reasoningEffort,
+});
