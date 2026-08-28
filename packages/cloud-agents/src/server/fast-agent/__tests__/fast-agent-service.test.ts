@@ -46,6 +46,7 @@ const nativeToolNames = vi.hoisted(
     ({
       cancelTask: 'cancel_task',
       ignoreEvent: 'ignore_event',
+      ignoreMessage: 'ignore_message',
       launchTask: 'launch_task',
       retryTaskStart: 'retry_task_start',
       saveMemory: 'save_memory',
@@ -722,6 +723,57 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         threadContextAttached: true,
       }),
     );
+  });
+
+  it('allows only eligible ambient human turns to close silently', async () => {
+    mocks.generateText.mockImplementationOnce(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        await expect(
+          invokeTool(nativeToolNames.ignoreMessage, {
+            reason: 'The participants are talking to each other.',
+          }),
+        ).resolves.toEqual({ success: true, ignored: true, closed: true });
+        return '';
+      },
+    );
+    const adapter = callbacks();
+
+    await expect(
+      answerFastAgentQuestion({
+        ...baseParams,
+        allowSilentAmbientReply: true,
+        adapter,
+      }),
+    ).resolves.toBe('');
+
+    expect(adapter.postReply).not.toHaveBeenCalled();
+  });
+
+  it('rejects ignore_message for directed human turns', async () => {
+    mocks.generateText.mockImplementationOnce(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        await expect(
+          invokeTool(nativeToolNames.ignoreMessage, {
+            reason: 'No response needed.',
+          }),
+        ).resolves.toEqual({
+          success: false,
+          error: 'Only an eligible ambient human message may be ignored.',
+        });
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'closeout',
+          message: 'It coordinates incoming requests.',
+        });
+        return '';
+      },
+    );
+    const adapter = callbacks();
+
+    await answerFastAgentQuestion({ ...baseParams, adapter });
+
+    expect(adapter.postReply).toHaveBeenCalledOnce();
   });
 
   it('records context loader failures as degraded inference components', async () => {

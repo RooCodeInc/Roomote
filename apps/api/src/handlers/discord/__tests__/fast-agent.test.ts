@@ -170,6 +170,76 @@ describe('processDiscordFastAgentMessage', () => {
     expect(mocks.releaseLock).toHaveBeenCalledOnce();
   });
 
+  it('allows silence only for an undirected turn with another human participant', async () => {
+    mocks.fetchHistory.mockResolvedValue([
+      { id: '100', user: 'discord-user-2', text: 'Hi', attachments: [] },
+      {
+        id: '101',
+        user: 'application-1',
+        botId: 'application-1',
+        text: 'Hello',
+        attachments: [],
+      },
+    ]);
+    const provider = { editMessage: vi.fn().mockResolvedValue(undefined) };
+
+    await processDiscordFastAgentMessage({
+      event: { eventId: 'event-1' } as never,
+      question: 'Makes sense',
+      sender: { id: 'discord-user-1', username: 'matt' } as never,
+      senderUserId: 'user-1',
+      provider: provider as never,
+      applicationId: 'application-1',
+      channel: {
+        channelId: 'channel-1',
+        guildId: 'guild-1',
+        isDirectMessage: false,
+        isThread: true,
+      } as never,
+      metadata: {
+        communicationChannelId: 'parent-1',
+        communicationThreadId: 'channel-1',
+      } as never,
+      conversationId: 'channel-1',
+    });
+
+    expect(mocks.answerQuestion).toHaveBeenCalledWith(
+      expect.objectContaining({ allowSilentAmbientReply: true }),
+    );
+  });
+
+  it('requires a response for a directed turn with another human participant', async () => {
+    mocks.fetchHistory.mockResolvedValue([
+      { id: '100', user: 'discord-user-2', text: 'Hi', attachments: [] },
+    ]);
+    const provider = { editMessage: vi.fn().mockResolvedValue(undefined) };
+
+    await processDiscordFastAgentMessage({
+      event: { eventId: 'event-1' } as never,
+      question: 'Can you expand on that?',
+      sender: { id: 'discord-user-1', username: 'matt' } as never,
+      senderUserId: 'user-1',
+      provider: provider as never,
+      applicationId: 'application-1',
+      channel: {
+        channelId: 'channel-1',
+        guildId: 'guild-1',
+        isDirectMessage: false,
+        isThread: true,
+      } as never,
+      metadata: {
+        communicationChannelId: 'parent-1',
+        communicationThreadId: 'channel-1',
+      } as never,
+      conversationId: 'channel-1',
+      directedAtRoomote: true,
+    });
+
+    expect(mocks.answerQuestion).toHaveBeenCalledWith(
+      expect.objectContaining({ allowSilentAmbientReply: false }),
+    );
+  });
+
   it.each([
     { channelType: 0, threadType: 11, label: 'text' },
     { channelType: 5, threadType: 10, label: 'announcement' },

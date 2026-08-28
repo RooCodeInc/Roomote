@@ -906,4 +906,76 @@ describe('processFastAgentMessage', () => {
       expect.objectContaining({ question: 'Good, tired' }),
     );
   });
+
+  it('allows silence for an unmentioned turn with another human participant', async () => {
+    const slack = {
+      addReaction: vi.fn().mockResolvedValue(true),
+      removeReaction: vi.fn().mockResolvedValue(true),
+      normalizeIncomingText: vi.fn(async (text: string) => text),
+      fetchThreadMessages: vi.fn(async () => [
+        { user: 'U111', username: 'Dan', text: '!fast hi', ts: '100.000' },
+        {
+          user: 'UBOT',
+          username: 'Roomote',
+          bot_id: 'B999',
+          text: 'Hi Dan.',
+          ts: '100.001',
+        },
+        { user: 'U222', username: 'Matt', text: 'Makes sense', ts: '100.002' },
+      ]),
+    };
+
+    await processFastAgentMessage({
+      event: {
+        type: 'message',
+        channel: 'C123',
+        user: 'U222',
+        text: 'Makes sense',
+        ts: '100.002',
+        thread_ts: '100.000',
+      } as never,
+      slack: slack as never,
+      userId: 'user-2',
+      teamId: 'T123',
+      continuation: true,
+      isExistingConversation: true,
+    });
+
+    expect(mocks.answerQuestion).toHaveBeenCalledWith(
+      expect.objectContaining({ allowSilentAmbientReply: true }),
+    );
+  });
+
+  it('requires a response for a directed turn with another human participant', async () => {
+    const slack = {
+      addReaction: vi.fn().mockResolvedValue(true),
+      removeReaction: vi.fn().mockResolvedValue(true),
+      normalizeIncomingText: vi.fn(async (text: string) => text),
+      fetchThreadMessages: vi.fn(async () => [
+        { user: 'U111', username: 'Dan', text: 'Earlier', ts: '100.000' },
+        { user: 'U222', username: 'Matt', text: '!fast help', ts: '100.002' },
+      ]),
+    };
+
+    await processFastAgentMessage({
+      event: {
+        type: 'message',
+        channel: 'C123',
+        user: 'U222',
+        text: '!fast help',
+        ts: '100.002',
+        thread_ts: '100.000',
+      } as never,
+      slack: slack as never,
+      userId: 'user-2',
+      teamId: 'T123',
+      continuation: true,
+      isExistingConversation: true,
+      directedAtRoomote: true,
+    });
+
+    expect(mocks.answerQuestion).toHaveBeenCalledWith(
+      expect.objectContaining({ allowSilentAmbientReply: false }),
+    );
+  });
 });

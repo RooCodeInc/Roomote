@@ -70,6 +70,7 @@ export async function processFastAgentMessage(params: {
   launchTask: LaunchFastAgentTask;
   processingReactionName?: string;
   isExistingConversation?: boolean;
+  directedAtRoomote?: boolean;
   onAccepted?: (abort: () => Promise<void>) => void;
   onRejected?: () => void;
 }): Promise<void> {
@@ -85,6 +86,7 @@ export async function processFastAgentMessage(params: {
     launchTask,
     processingReactionName = 'eyes',
     isExistingConversation = false,
+    directedAtRoomote = false,
   } = params;
   const threadId = event.thread_ts || event.ts;
   const conversation = {
@@ -184,6 +186,13 @@ export async function processFastAgentMessage(params: {
         ts: message.ts,
         bot_id: message.bot_id,
       }));
+    const hasOtherHumanParticipant = threadContext.some(
+      (message) =>
+        message.ts !== event.ts &&
+        !message.bot_id &&
+        Boolean(message.user) &&
+        message.user !== event.user,
+    );
 
     const resolvedActiveTasks = resolveActiveTasks
       ? await resolveActiveTasks()
@@ -205,6 +214,7 @@ export async function processFastAgentMessage(params: {
           ? currentMessage.username
           : undefined,
       activeTasks: resolvedActiveTasks,
+      allowSilentAmbientReply: hasOtherHumanParticipant && !directedAtRoomote,
       adapter: {
         resolveMcpServerConfigs: () =>
           resolveUserMcpServerConfigs({

@@ -255,6 +255,7 @@ const taskIdArgsSchema = z.object({
   taskId: z.string().trim().min(1).nullable().optional(),
 });
 const ignoreEventArgsSchema = z.object({ reason: z.string().trim().min(1) });
+const ignoreMessageArgsSchema = z.object({ reason: z.string().trim().min(1) });
 const saveMemoryArgsSchema = z.object({
   memory: z.string().trim().min(1).max(FAST_AGENT_MEMORY_FACT_MAX_CHARS),
 });
@@ -766,8 +767,6 @@ export async function answerFastAgentQuestion({
   senderDisplayName,
   senderExternalId,
   activeTasks = [],
-  multiParticipantThread = false,
-  directedAtRoomote = false,
   adapter,
   signal,
   model,
@@ -776,6 +775,7 @@ export async function answerFastAgentQuestion({
   platformEventHandling = 'default',
   platformEventVisibility = 'optional',
   platformEventKind = 'delegated_task',
+  allowSilentAmbientReply = false,
 }: {
   question: string;
   images?: string[];
@@ -789,10 +789,6 @@ export async function answerFastAgentQuestion({
   senderDisplayName?: string;
   senderExternalId?: string;
   activeTasks?: FastAgentActiveTask[];
-  /** True when another human participant is present in the conversation. */
-  multiParticipantThread?: boolean;
-  /** True when the current message explicitly addressed Roomote. */
-  directedAtRoomote?: boolean;
   adapter: FastAgentTurnAdapter;
   signal?: AbortSignal;
   /** Explicit model override for this turn; defaults to the deployment's
@@ -803,6 +799,8 @@ export async function answerFastAgentQuestion({
   platformEventHandling?: FastAgentPlatformEventHandling;
   platformEventVisibility?: FastAgentPlatformEventVisibility;
   platformEventKind?: FastAgentPlatformEventKind;
+  /** True only for an unmentioned turn in a multi-human Fast conversation. */
+  allowSilentAmbientReply?: boolean;
 }): Promise<string> {
   const turnId = buildFastAgentTurnId({
     currentMessageId,
@@ -1227,6 +1225,7 @@ export async function answerFastAgentQuestion({
       platformEventVisibility,
       platformEventKind,
       retryTaskStartAvailable: Boolean(adapter.retryTaskStart),
+      allowSilentAmbientReply,
       releaseVersion,
     });
     const integrationCallSignatures = new Set<string>();
@@ -1892,6 +1891,18 @@ export async function answerFastAgentQuestion({
               return {
                 success: false,
                 error: 'This platform event requires a user-visible closeout.',
+              };
+            }
+            closed = true;
+            return { success: true, ignored: true, closed: true };
+          }
+
+          case FAST_AGENT_NATIVE_TOOL_NAMES.ignoreMessage: {
+            ignoreMessageArgsSchema.parse(call.args);
+            if (platformEvent || !allowSilentAmbientReply) {
+              return {
+                success: false,
+                error: 'Only an eligible ambient human message may be ignored.',
               };
             }
             closed = true;

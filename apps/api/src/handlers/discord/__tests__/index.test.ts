@@ -1064,6 +1064,7 @@ describe('Discord Gateway event handler', () => {
     const response = await postEvent(envelope(message()));
 
     expect(response.status).toBe(200);
+    expect(mocks.shouldRouteUnmentioned).not.toHaveBeenCalled();
     expect(mocks.answerFast).toHaveBeenCalledWith(
       expect.objectContaining({ activeTasks: [{ taskId: 'task-23' }] }),
     );
@@ -1616,6 +1617,7 @@ describe('Discord Gateway event handler', () => {
     expect(mocks.answerFast).toHaveBeenCalledWith(
       expect.objectContaining({
         question: 'Investigate the second finding',
+        allowSilentAmbientReply: false,
         conversation: expect.objectContaining({
           conversationId: 'automation-run-1',
         }),
@@ -1623,6 +1625,51 @@ describe('Discord Gateway event handler', () => {
     );
     expect(mocks.findAutomationReportRun).not.toHaveBeenCalled();
     expect(mocks.startNewTask).not.toHaveBeenCalled();
+  });
+
+  it('requires a response for a native reply to Roomote in a shared Fast thread', async () => {
+    mocks.getChannel.mockResolvedValue({
+      id: 'thread-1',
+      guildId: 'guild-1',
+      parentId: 'channel-1',
+      name: 'fast-thread',
+      type: 11,
+    });
+    mocks.findFastReplySession.mockResolvedValue({
+      id: '11111111-1111-4111-8111-111111111111',
+      userId: 'roomote-user-1',
+      conversation: {
+        surface: 'discord',
+        workspaceId: 'guild-1',
+        conversationId: 'thread-1',
+        replyTarget: { channelId: 'channel-1', threadId: 'thread-1' },
+      },
+    });
+    mocks.shouldRouteUnmentioned.mockResolvedValue(false);
+    mocks.fetchThreadHistory.mockResolvedValue([
+      {
+        id: 'earlier-message',
+        user: 'discord-user-2',
+        text: 'Earlier participant message',
+        attachments: [],
+      },
+    ]);
+
+    const response = await postEvent(
+      envelope(
+        message({
+          channel_id: 'thread-1',
+          guild_id: 'guild-1',
+          content: 'Can you expand on that?',
+          message_reference: { message_id: 'fast-reply-1' },
+        }),
+      ),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.answerFast).toHaveBeenCalledWith(
+      expect.objectContaining({ allowSilentAmbientReply: false }),
+    );
   });
 
   it('preserves the root channel for a provider-bound guild Fast continuation', async () => {

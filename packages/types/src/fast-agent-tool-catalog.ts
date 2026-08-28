@@ -7,6 +7,7 @@ import { ACP_TOOL_KINDS, type KnownAcpToolKind } from './acp';
 export const FAST_AGENT_NATIVE_TOOL_NAMES = {
   cancelTask: 'cancel_task',
   ignoreEvent: 'ignore_event',
+  ignoreMessage: 'ignore_message',
   launchTask: 'launch_task',
   retryTaskStart: 'retry_task_start',
   saveMemory: 'save_memory',
@@ -27,6 +28,10 @@ export const FAST_AGENT_NATIVE_TOOL_CATALOG = [
   { name: FAST_AGENT_NATIVE_TOOL_NAMES.cancelTask, kind: ACP_TOOL_KINDS.task },
   {
     name: FAST_AGENT_NATIVE_TOOL_NAMES.ignoreEvent,
+    kind: ACP_TOOL_KINDS.communication,
+  },
+  {
+    name: FAST_AGENT_NATIVE_TOOL_NAMES.ignoreMessage,
     kind: ACP_TOOL_KINDS.communication,
   },
   { name: FAST_AGENT_NATIVE_TOOL_NAMES.launchTask, kind: ACP_TOOL_KINDS.task },

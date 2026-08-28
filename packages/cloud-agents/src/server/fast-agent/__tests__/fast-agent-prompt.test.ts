@@ -387,6 +387,23 @@ describe('buildFastAgentSystemPrompt', () => {
     );
   });
 
+  it('permits silence only for eligible ambient human turns', () => {
+    const ambientPrompt = buildFastAgentSystemPrompt({
+      availableEnvironments: [],
+      allowSilentAmbientReply: true,
+    });
+    const directedPrompt = buildFastAgentSystemPrompt({
+      availableEnvironments: [],
+    });
+
+    expect(ambientPrompt).toContain(
+      'If it is ambient conversation between people rather than a request, reply, or answer directed at Roomote, call `ignore_message` and stop',
+    );
+    expect(directedPrompt).toContain(
+      '`ignore_message`, `ignore_event`, and `retry_task_start` are invalid for this human-authored turn',
+    );
+  });
+
   it('uses native terminal tools for delegated-task platform events', () => {
     const prompt = buildFastAgentSystemPrompt({
       availableEnvironments: [],

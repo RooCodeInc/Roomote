@@ -1609,6 +1609,7 @@ export function startFastAgentResponse(params: {
   resolveActiveTasks?: () => Promise<{ taskId: string }[]>;
   processingReactionName: string;
   isExistingConversation?: boolean;
+  directedAtRoomote?: boolean;
   errorLogPrefix: string;
 }): Promise<FastAgentStartResult> {
   const { errorLogPrefix, ...fastAgentParams } = params;
