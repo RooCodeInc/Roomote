@@ -300,7 +300,9 @@ export function FastSessionTranscript({
   );
 
   return (
-    <MessageUiOptionsProvider value={{ displayMode }}>
+    <MessageUiOptionsProvider
+      value={{ displayMode, hidePrReviewActions: true }}
+    >
       <WorkspaceHeader
         className="py-4.25"
         contentClassName="flex-row items-center gap-3"

@@ -4,13 +4,56 @@ const {
   mockClaimOutOfBandContext,
   mockSetLatestUserMessageForReplyQuote,
   mockClearLatestUserMessageForReplyQuoteIfId,
+  mockGetCanonicalPrReviewAction,
+  mockClaimCanonicalPrReviewAction,
+  mockCompleteCanonicalPrReviewActionDispatch,
+  mockReleaseCanonicalPrReviewActionDispatch,
+  mockRetireCanonicalPrReviewActions,
+  mockDispatchPrReviewFollowUp,
+  mockUpdateTaskPrReviewOfferStatus,
 } = vi.hoisted(() => ({
   mockCreateRunToken: vi.fn(),
   mockSendPromptMutate: vi.fn(),
   mockClaimOutOfBandContext: vi.fn(),
   mockSetLatestUserMessageForReplyQuote: vi.fn(),
   mockClearLatestUserMessageForReplyQuoteIfId: vi.fn(),
+  mockGetCanonicalPrReviewAction: vi.fn(),
+  mockClaimCanonicalPrReviewAction: vi.fn(),
+  mockCompleteCanonicalPrReviewActionDispatch: vi.fn(),
+  mockReleaseCanonicalPrReviewActionDispatch: vi.fn(),
+  mockRetireCanonicalPrReviewActions: vi.fn(),
+  mockDispatchPrReviewFollowUp: vi.fn(),
+  mockUpdateTaskPrReviewOfferStatus: vi.fn(),
 }));
+
+vi.mock('@roomote/db/server', async () => {
+  const actual =
+    await vi.importActual<typeof import('@roomote/db/server')>(
+      '@roomote/db/server',
+    );
+  return {
+    ...actual,
+    getCanonicalPrReviewAction: mockGetCanonicalPrReviewAction,
+    claimCanonicalPrReviewAction: mockClaimCanonicalPrReviewAction,
+    completeCanonicalPrReviewActionDispatch:
+      mockCompleteCanonicalPrReviewActionDispatch,
+    releaseCanonicalPrReviewActionDispatch:
+      mockReleaseCanonicalPrReviewActionDispatch,
+    retireCanonicalPrReviewActionsForDestinationKey:
+      mockRetireCanonicalPrReviewActions,
+  };
+});
+
+vi.mock('@roomote/sdk/server', async () => {
+  const actual = await vi.importActual<typeof import('@roomote/sdk/server')>(
+    '@roomote/sdk/server',
+  );
+  return {
+    ...actual,
+    dispatchPrReviewFollowUp: mockDispatchPrReviewFollowUp,
+    updateTaskPrReviewOfferStatus: mockUpdateTaskPrReviewOfferStatus,
+  };
+});
 
 vi.mock('@roomote/communication/messages', async () => {
   const actual = await vi.importActual<
@@ -75,6 +118,7 @@ import { RunStatus } from '@roomote/types';
 import type { UserAuthSuccess } from '@/types';
 
 import {
+  handlePrReviewNotificationActionCommand,
   sendSandboxPromptCommand,
   sendSandboxPromptInputSchema,
 } from './index';
@@ -125,6 +169,8 @@ describe('sendSandboxPromptCommand', () => {
       userName: 'Test User',
     });
     mockClearLatestUserMessageForReplyQuoteIfId.mockResolvedValue(true);
+    mockRetireCanonicalPrReviewActions.mockResolvedValue([]);
+    mockUpdateTaskPrReviewOfferStatus.mockResolvedValue(undefined);
   });
 
   afterEach(() => {
@@ -180,6 +226,125 @@ describe('sendSandboxPromptCommand', () => {
         userName: 'Auth Fallback Name',
       }),
     );
+  });
+
+  it('retires pending review offers when the user types a reply', async () => {
+    const user = await userFactory.create({ name: 'DB User' });
+    const task = await taskFactory.create({ initiatorUserId: user.id });
+    await runFactory.create({
+      actingUserId: user.id,
+      taskId: task.id,
+      status: RunStatus.Running,
+      sandboxServerUrl: 'http://sandbox.example.test',
+      result: {},
+    });
+    const deliveryId = '33333333-3333-4333-8333-333333333333';
+    mockRetireCanonicalPrReviewActions.mockResolvedValue([deliveryId]);
+
+    await sendSandboxPromptCommand(buildMockAuth({ userId: user.id }), {
+      taskId: task.id,
+      prompt: 'I will handle this another way.',
+      source: 'web',
+    });
+
+    expect(mockRetireCanonicalPrReviewActions).toHaveBeenCalledWith({
+      destinationKind: 'task',
+      destinationKey: task.id,
+    });
+    expect(mockUpdateTaskPrReviewOfferStatus).toHaveBeenCalledWith({
+      taskId: task.id,
+      deliveryIds: [deliveryId],
+      status: 'dismissed',
+    });
+  });
+
+  it('claims and dispatches a canonical web task review action', async () => {
+    const user = await userFactory.create({ name: 'DB User' });
+    const task = await taskFactory.create({ initiatorUserId: user.id });
+    const deliveryId = '11111111-1111-4111-8111-111111111111';
+    mockGetCanonicalPrReviewAction.mockResolvedValue({
+      deliveryId,
+      destinationKind: 'task',
+      destinationKey: task.id,
+      taskId: task.id,
+    });
+    mockClaimCanonicalPrReviewAction.mockResolvedValue({
+      deliveryId,
+      taskId: task.id,
+      followUpPrompt: 'Resolve the feedback.',
+    });
+    mockDispatchPrReviewFollowUp.mockResolvedValue({
+      outcome: 'queued',
+      runId: 42,
+    });
+    mockCompleteCanonicalPrReviewActionDispatch.mockResolvedValue(true);
+
+    await expect(
+      handlePrReviewNotificationActionCommand(
+        buildMockAuth({ userId: user.id }),
+        { deliveryId, choice: 'yes' },
+      ),
+    ).resolves.toEqual({ status: 'resolved' });
+
+    expect(mockClaimCanonicalPrReviewAction).toHaveBeenCalledWith({
+      deliveryId,
+      choice: 'yes',
+      actingUserId: user.id,
+      expectedDestinationKind: 'task',
+      expectedDestinationKey: task.id,
+    });
+    expect(mockDispatchPrReviewFollowUp).toHaveBeenCalledWith({
+      provider: 'web',
+      taskId: task.id,
+      followUpPrompt: 'Resolve the feedback.',
+      actingUserId: user.id,
+      idempotencyKey: `pr-review-delivery:${deliveryId}`,
+    });
+    expect(mockCompleteCanonicalPrReviewActionDispatch).toHaveBeenCalledWith({
+      deliveryId,
+      runId: 42,
+    });
+    expect(mockUpdateTaskPrReviewOfferStatus).toHaveBeenCalledWith({
+      taskId: task.id,
+      deliveryIds: [deliveryId],
+      status: 'resolved',
+    });
+  });
+
+  it('releases a web task review action when dispatch is unavailable', async () => {
+    const user = await userFactory.create({ name: 'DB User' });
+    const task = await taskFactory.create({ initiatorUserId: user.id });
+    const deliveryId = '22222222-2222-4222-8222-222222222222';
+    mockGetCanonicalPrReviewAction.mockResolvedValue({
+      deliveryId,
+      destinationKind: 'task',
+      destinationKey: task.id,
+      taskId: task.id,
+    });
+    mockClaimCanonicalPrReviewAction.mockResolvedValue({
+      deliveryId,
+      taskId: task.id,
+      followUpPrompt: 'Resolve the feedback.',
+    });
+    mockDispatchPrReviewFollowUp.mockResolvedValue({ outcome: 'unavailable' });
+    mockReleaseCanonicalPrReviewActionDispatch.mockResolvedValue(true);
+
+    await expect(
+      handlePrReviewNotificationActionCommand(
+        buildMockAuth({ userId: user.id }),
+        { deliveryId, choice: 'yes' },
+      ),
+    ).resolves.toEqual({ status: 'pending' });
+
+    expect(mockReleaseCanonicalPrReviewActionDispatch).toHaveBeenCalledWith(
+      deliveryId,
+    );
+    expect(mockCompleteCanonicalPrReviewActionDispatch).not.toHaveBeenCalled();
+    expect(mockUpdateTaskPrReviewOfferStatus).toHaveBeenCalledWith({
+      taskId: task.id,
+      deliveryIds: [deliveryId],
+      status: 'pending',
+    });
   });
 
   it('keeps the original user text separate from injected out-of-band context', async () => {

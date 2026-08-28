@@ -5,6 +5,7 @@ import {
 } from '@roomote/cloud-agents/server';
 import {
   REASONING_EFFORT_VALUES,
+  type PrReviewActionOfferStatus,
   RunStatus,
   TaskPayloadKind,
   activeRunStatuses,
@@ -26,14 +27,19 @@ import {
 import {
   and,
   compareAndSetTrustedRunActingUser,
+  claimCanonicalPrReviewAction,
+  completeCanonicalPrReviewActionDispatch,
   db,
   environments,
   eq,
   inArray,
   isNotNull,
   getTaskGoalForRun,
+  getCanonicalPrReviewAction,
   not,
   resolveEffectivePreviewRuntimeConfig,
+  releaseCanonicalPrReviewActionDispatch,
+  retireCanonicalPrReviewActionsForDestinationKey,
   taskMessages,
   taskRuns,
   tasks,
@@ -41,6 +47,10 @@ import {
 import { httpBatchLink, TRPCClientError } from '@trpc/client';
 import { TRPCError } from '@trpc/server';
 import { createSandboxServerRpcClient } from '@roomote/sdk/sandbox-router';
+import {
+  dispatchPrReviewFollowUp,
+  updateTaskPrReviewOfferStatus,
+} from '@roomote/sdk/server';
 import superjson from 'superjson';
 import { z } from 'zod';
 
@@ -159,6 +169,87 @@ export const answerSandboxUserInputRequestInputSchema = z.object({
   answers: requestUserInputAnswersSchema,
 });
 
+export const handlePrReviewNotificationActionInputSchema = z.object({
+  deliveryId: z.string().uuid(),
+  choice: z.enum(['yes', 'auto', 'dismiss']),
+});
+
+export async function handlePrReviewNotificationActionCommand(
+  auth: UserAuthSuccess,
+  input: z.input<typeof handlePrReviewNotificationActionInputSchema>,
+): Promise<{ status: PrReviewActionOfferStatus }> {
+  const parsed = handlePrReviewNotificationActionInputSchema.parse(input);
+  const pendingAction = await getCanonicalPrReviewAction(parsed.deliveryId);
+  if (!pendingAction?.taskId || pendingAction.destinationKind !== 'task') {
+    throw new TRPCError({
+      code: 'NOT_FOUND',
+      message: 'Review action not found.',
+    });
+  }
+  const taskId = pendingAction.taskId;
+  const taskAccess = await resolveTaskByIdAccessCommand(auth, { taskId });
+  if (taskAccess.kind !== 'resolved') {
+    throw new TRPCError({ code: 'NOT_FOUND', message: 'Task not found.' });
+  }
+
+  const action = await claimCanonicalPrReviewAction({
+    deliveryId: parsed.deliveryId,
+    choice: parsed.choice,
+    actingUserId: auth.userId,
+    expectedDestinationKind: 'task',
+    expectedDestinationKey: taskId,
+  });
+  if (!action) {
+    await updateTaskPrReviewOfferStatus({
+      taskId,
+      deliveryIds: [parsed.deliveryId],
+      status: 'stale',
+    });
+    return { status: 'stale' };
+  }
+
+  if (parsed.choice === 'dismiss') {
+    await updateTaskPrReviewOfferStatus({
+      taskId,
+      deliveryIds: [parsed.deliveryId],
+      status: 'dismissed',
+    });
+    return { status: 'dismissed' };
+  }
+
+  const dispatched = await dispatchPrReviewFollowUp({
+    provider: 'web',
+    taskId,
+    followUpPrompt: action.followUpPrompt!,
+    actingUserId: auth.userId,
+    idempotencyKey: `pr-review-delivery:${parsed.deliveryId}`,
+  });
+  if (dispatched.outcome === 'unavailable') {
+    const released = await releaseCanonicalPrReviewActionDispatch(
+      parsed.deliveryId,
+    );
+    const status = released ? 'pending' : 'stale';
+    await updateTaskPrReviewOfferStatus({
+      taskId,
+      deliveryIds: [parsed.deliveryId],
+      status,
+    });
+    return { status };
+  }
+
+  const status = parsed.choice === 'auto' ? 'auto_resolved' : 'resolved';
+  await completeCanonicalPrReviewActionDispatch({
+    deliveryId: parsed.deliveryId,
+    runId: dispatched.runId,
+  });
+  await updateTaskPrReviewOfferStatus({
+    taskId,
+    deliveryIds: [parsed.deliveryId],
+    status,
+  });
+  return { status };
+}
+
 /**
  * Trusted actor switch, applied BEFORE the prompt reaches the sandbox.
  *
@@ -270,6 +361,19 @@ export async function sendSandboxPromptCommand(
   }
 
   await assertSandboxRpcEndpointReachable(taskRun.sandboxServerUrl);
+
+  if (typeof parsed.prompt === 'string' && parsed.prompt.trim().length > 0) {
+    const retiredDeliveryIds =
+      await retireCanonicalPrReviewActionsForDestinationKey({
+        destinationKind: 'task',
+        destinationKey: parsed.taskId,
+      });
+    await updateTaskPrReviewOfferStatus({
+      taskId: parsed.taskId,
+      deliveryIds: retiredDeliveryIds,
+      status: 'dismissed',
+    });
+  }
 
   const authToken = await createRunToken({
     runId: taskRun.id,

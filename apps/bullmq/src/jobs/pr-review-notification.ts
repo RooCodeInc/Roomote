@@ -938,6 +938,7 @@ ${delivery.text}`;
     // Chat delivery is optional (web-only tasks have no route). Task history is
     // always recorded so the web task view shows the self-review summary.
     let messageTs: string | null = null;
+    let taskReviewActionDeliveryId: string | null = null;
     if (delivery.route) {
       if (
         followUp &&
@@ -987,22 +988,66 @@ ${delivery.text}`;
         );
       }
     } else {
+      if (
+        followUp &&
+        !fastParent &&
+        data.ownershipVersion === 'canonical' &&
+        data.deliveryId
+      ) {
+        if (
+          !(await beginCanonicalPrReviewWebPrompt({
+            request: data,
+            followUpPrompt: followUp.prompt,
+          }))
+        ) {
+          console.log(
+            `[PrReviewNotification] Canonical web task delivery ${data.deliveryId} lost its prompt-posting fence, skipping`,
+          );
+          return;
+        }
+        taskReviewActionDeliveryId = data.deliveryId;
+      }
       console.log(
         `[PrReviewNotification] No conversation routing for task ${data.taskId}; recording review feedback to task history only`,
       );
     }
-    await recordPrReviewNotificationDeliveryBestEffort({
+    const recorded = await recordPrReviewNotificationDeliveryBestEffort({
       runId: latestJob.id,
       taskId: data.taskId,
       route: delivery.route,
       text: textWithQuestion,
       ...(messageTs ? { messageTs } : {}),
+      ...(taskReviewActionDeliveryId && followUp
+        ? {
+            reviewAction: {
+              deliveryId: taskReviewActionDeliveryId,
+              question: followUp.question,
+            },
+          }
+        : {}),
     });
+    if (taskReviewActionDeliveryId) {
+      if (!recorded) {
+        throw new Error('Canonical web task review offer was not persisted');
+      }
+      const { attached } =
+        await attachPendingPrReviewActionMessageWithRetirement(
+          taskReviewActionDeliveryId,
+          taskReviewActionDeliveryId,
+          { leaseToken: data.leaseToken },
+        );
+      if (!attached) {
+        throw new Error(
+          'Canonical web task review offer lost its publish fence',
+        );
+      }
+    }
     if (
       data.ownershipVersion !== 'canonical' ||
       !followUp ||
-      !delivery.route ||
-      !isButtonRouteProvider(delivery.route.provider)
+      (delivery.route
+        ? !isButtonRouteProvider(delivery.route.provider)
+        : !taskReviewActionDeliveryId)
     ) {
       await finalizePrReviewNotificationRequest(data);
     }

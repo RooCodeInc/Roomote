@@ -11,7 +11,15 @@ import {
   generateTrackedNonTaskObject,
   NON_TASK_INFERENCE_SURFACES,
 } from '@roomote/cloud-agents/server/non-task-provider-usage';
-import type { TaskRun } from '@roomote/db/server';
+import {
+  and,
+  db,
+  eq,
+  inArray,
+  sql,
+  taskMessages,
+  type TaskRun,
+} from '@roomote/db/server';
 import {
   Schemas as GitHubSchemas,
   createTaskRunGitHubToken,
@@ -29,6 +37,7 @@ import {
   PR_CONFLICT_NOTIFICATION_TASK_MESSAGE_SOURCE,
   PR_REVIEW_NOTIFICATION_TASK_MESSAGE_SOURCE,
   ROOMOTE_RUNTIME_TASK_MESSAGE_PROTOCOL,
+  type PrReviewActionOfferStatus,
   type SourceControlProvider,
 } from '@roomote/types';
 import { z } from 'zod';
@@ -1451,7 +1460,11 @@ export async function recordPrReviewNotificationDeliveryBestEffort(params: {
   source?:
     | typeof PR_REVIEW_NOTIFICATION_TASK_MESSAGE_SOURCE
     | typeof PR_CONFLICT_NOTIFICATION_TASK_MESSAGE_SOURCE;
-}): Promise<void> {
+  reviewAction?: {
+    deliveryId: string;
+    question: string;
+  };
+}): Promise<boolean> {
   const route = params.route ?? null;
   const source = params.source ?? PR_REVIEW_NOTIFICATION_TASK_MESSAGE_SOURCE;
   const operations: Array<{ label: string; promise: Promise<unknown> }> = [
@@ -1476,6 +1489,14 @@ export async function recordPrReviewNotificationDeliveryBestEffort(params: {
           payload: {
             text: params.text,
             source,
+            ...(params.reviewAction
+              ? {
+                  prReviewAction: {
+                    ...params.reviewAction,
+                    status: 'pending',
+                  },
+                }
+              : {}),
           },
           visibleInTranscript: true,
         },
@@ -1523,4 +1544,29 @@ export async function recordPrReviewNotificationDeliveryBestEffort(params: {
       }`,
     );
   }
+
+  return results[0]?.status === 'fulfilled';
+}
+
+export async function updateTaskPrReviewOfferStatus(input: {
+  taskId: string;
+  deliveryIds: string[];
+  status: PrReviewActionOfferStatus;
+}): Promise<void> {
+  if (input.deliveryIds.length === 0) return;
+
+  await db
+    .update(taskMessages)
+    .set({
+      payload: sql`jsonb_set(coalesce(${taskMessages.payload}, '{}'::jsonb), '{prReviewAction,status}', to_jsonb(${input.status}::text), true)`,
+    })
+    .where(
+      and(
+        eq(taskMessages.taskId, input.taskId),
+        inArray(
+          sql<string>`${taskMessages.payload} -> 'prReviewAction' ->> 'deliveryId'`,
+          input.deliveryIds,
+        ),
+      ),
+    );
 }
