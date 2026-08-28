@@ -12,13 +12,21 @@ import { SandboxLayoutContext } from '../../use-sandbox-layout';
 import { SessionWorkspace, type SessionInfo } from './SessionWorkspace';
 import { useOpenSessionTaskPanel } from './session-task-panel-context';
 
-const { useMediaQueryMock, sessionQueryState, fastTaskQueryState } = vi.hoisted(
-  () => ({
-    useMediaQueryMock: vi.fn(),
-    sessionQueryState: { data: null as unknown },
-    fastTaskQueryState: { data: null as unknown },
-  }),
-);
+const {
+  useMediaQueryMock,
+  sessionQueryState,
+  fastTaskQueryState,
+  searchParamsRef,
+  useTaskSummaryMock,
+  useTaskMock,
+} = vi.hoisted(() => ({
+  useMediaQueryMock: vi.fn(),
+  sessionQueryState: { data: null as unknown },
+  fastTaskQueryState: { data: null as unknown },
+  searchParamsRef: { current: new URLSearchParams() },
+  useTaskSummaryMock: vi.fn(),
+  useTaskMock: vi.fn(),
+}));
 
 vi.mock('usehooks-ts', () => ({
   useMediaQuery: useMediaQueryMock,
@@ -26,7 +34,23 @@ vi.mock('usehooks-ts', () => ({
 
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ replace: vi.fn() }),
-  useSearchParams: () => new URLSearchParams(),
+  useSearchParams: () => searchParamsRef.current,
+}));
+
+vi.mock('streamdown', () => ({
+  Streamdown: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+}));
+
+vi.mock('@streamdown/code', () => ({ code: () => null }));
+vi.mock('@streamdown/mermaid', () => ({ mermaid: () => null }));
+vi.mock('@streamdown/cjk', () => ({ cjk: () => null }));
+
+vi.mock('../../task/[taskId]/hooks/use-task-summary', () => ({
+  useTaskSummary: useTaskSummaryMock,
+}));
+
+vi.mock('@/hooks/tasks/useTask', () => ({
+  useTask: useTaskMock,
 }));
 
 vi.mock('@/hooks/task-models/useLaunchTaskModels', () => ({
@@ -126,6 +150,7 @@ function renderWorkspace({
   sessionOverride,
   queriedTasks,
   queriedFastTasks,
+  selectedTaskId,
 }: {
   isMobile: boolean;
   children?: ReactNode;
@@ -134,6 +159,7 @@ function renderWorkspace({
   queriedFastTasks?: Array<
     Pick<SessionInfo['tasks'][number], 'taskId' | 'title'>
   >;
+  selectedTaskId?: string;
 }) {
   useMediaQueryMock.mockReturnValue(!isMobile);
   let viewportChangeListener: ((event: MediaQueryListEvent) => void) | null =
@@ -153,6 +179,9 @@ function renderWorkspace({
     writable: true,
     value: vi.fn().mockReturnValue(mediaQuery),
   });
+  searchParamsRef.current = new URLSearchParams(
+    selectedTaskId ? { task: selectedTaskId } : undefined,
+  );
 
   const initialSession = { ...session, ...sessionOverride };
   sessionQueryState.data = {
@@ -194,6 +223,23 @@ function OpenNestedTask() {
 }
 
 describe('SessionWorkspace', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    useTaskSummaryMock.mockReturnValue({
+      enabled: true,
+      summary: null,
+      isLoadingSummary: false,
+      errorMessage: null,
+      isSummaryStale: false,
+      regenerateSummary: vi.fn(),
+    });
+    useTaskMock.mockReturnValue({
+      data: null,
+      isPending: false,
+      isError: false,
+    });
+  });
+
   it('matches the task sidebar replacement behavior and controls on mobile', () => {
     renderWorkspace({ isMobile: true });
 
@@ -336,4 +382,242 @@ describe('SessionWorkspace', () => {
     expect(screen.queryByRole('button', { name: 'Session info' })).toBeNull();
     expect(screen.getByRole('button', { name: 'Show sidebar' })).toBeVisible();
   });
+
+  it('shows a generated summary in execution details', () => {
+    useTaskSummaryMock.mockReturnValue({
+      enabled: true,
+      summary: 'The task updated the session sidebar and verified the result.',
+      isLoadingSummary: false,
+      errorMessage: null,
+      isSummaryStale: false,
+      regenerateSummary: vi.fn(),
+    });
+
+    renderWorkspace({
+      isMobile: false,
+      selectedTaskId: 'task-1',
+      sessionOverride: { tasks: [createSessionTask()] },
+    });
+
+    expect(
+      screen.getByRole('heading', { name: 'Summary' }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        'The task updated the session sidebar and verified the result.',
+      ),
+    ).toBeInTheDocument();
+    expect(useTaskSummaryMock).toHaveBeenCalledWith('task-1');
+  });
+
+  it('shows execution details for a selected Fast-only session task', () => {
+    useTaskSummaryMock.mockReturnValue({
+      enabled: true,
+      summary: 'The Fast task completed its delegated work.',
+      isLoadingSummary: false,
+      errorMessage: null,
+      isSummaryStale: false,
+      regenerateSummary: vi.fn(),
+    });
+    useTaskMock.mockReturnValue({
+      data: {
+        id: 'task-1',
+        title: 'Fast delegated task',
+        workflow: 'standard',
+        state: 'completed',
+        repositoryName: 'RooCodeInc/Roomote',
+        taskRun: {
+          id: 1,
+          status: 'completed',
+          taskPhase: null,
+          error: null,
+          result: null,
+          pullRequests: [],
+        },
+        artifacts: [],
+        inferenceUsage: { eventCount: 1, costMicroUsd: 100 },
+      },
+      isPending: false,
+      isError: false,
+    });
+
+    renderWorkspace({
+      isMobile: false,
+      selectedTaskId: 'task-1',
+      sessionOverride: {
+        taskSource: 'fast',
+        tasks: [],
+        taskCards: [{ taskId: 'task-1', title: 'Fast delegated task' }],
+      },
+    });
+
+    expect(
+      screen.getByText('The Fast task completed its delegated work.'),
+    ).toBeInTheDocument();
+    expect(useTaskSummaryMock).toHaveBeenCalledWith('task-1');
+    expect(useTaskMock).toHaveBeenCalledWith('task-1', true, {
+      refetchInterval: 2_000,
+    });
+  });
+
+  it('shows loading and retryable error states for task summaries', () => {
+    useTaskSummaryMock.mockReturnValue({
+      enabled: true,
+      summary: null,
+      isLoadingSummary: true,
+      errorMessage: null,
+      isSummaryStale: false,
+      regenerateSummary: vi.fn(),
+    });
+    const task = createSessionTask();
+    const { rerender } = renderWorkspace({
+      isMobile: false,
+      selectedTaskId: task.taskId,
+      sessionOverride: { tasks: [task] },
+    });
+
+    expect(
+      screen.getByLabelText('Generating task summary'),
+    ).toBeInTheDocument();
+
+    const regenerateSummary = vi.fn();
+    useTaskSummaryMock.mockReturnValue({
+      enabled: true,
+      summary: null,
+      isLoadingSummary: false,
+      errorMessage:
+        'Summary is temporarily unavailable. Try again in a moment.',
+      isSummaryStale: false,
+      regenerateSummary,
+    });
+    rerender(
+      <QueryClientProvider client={new QueryClient()}>
+        <SandboxLayoutProvider>
+          <SessionWorkspace session={{ ...session, tasks: [task] }}>
+            <div>Session transcript</div>
+          </SessionWorkspace>
+        </SandboxLayoutProvider>
+      </QueryClientProvider>,
+    );
+
+    expect(
+      screen.getByText(
+        'Summary is temporarily unavailable. Try again in a moment.',
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Try again' }),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
+    expect(regenerateSummary).toHaveBeenCalledOnce();
+  });
+
+  it('allows a stale generated summary to be refreshed', () => {
+    const regenerateSummary = vi.fn();
+    useTaskSummaryMock.mockReturnValue({
+      enabled: true,
+      summary: 'The execution completed its original scope.',
+      isLoadingSummary: false,
+      errorMessage: null,
+      isSummaryStale: true,
+      regenerateSummary,
+    });
+
+    renderWorkspace({
+      isMobile: false,
+      selectedTaskId: 'task-1',
+      sessionOverride: { tasks: [createSessionTask()] },
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh summary' }));
+    expect(regenerateSummary).toHaveBeenCalledOnce();
+  });
+
+  it('falls back gracefully while an execution has too little activity', () => {
+    renderWorkspace({
+      isMobile: false,
+      selectedTaskId: 'task-1',
+      sessionOverride: { tasks: [createSessionTask()] },
+    });
+
+    expect(
+      screen.getByText('A summary will appear as this execution progresses.'),
+    ).toBeInTheDocument();
+  });
+
+  it('uses the latest execution output when a generated summary is unavailable', () => {
+    renderWorkspace({
+      isMobile: false,
+      selectedTaskId: 'task-1',
+      sessionOverride: {
+        tasks: [
+          createSessionTask({
+            latestOutput: 'Implemented the sidebar summary and ran the tests.',
+          }),
+        ],
+      },
+    });
+
+    expect(
+      screen.getByText('Implemented the sidebar summary and ran the tests.'),
+    ).toBeInTheDocument();
+  });
+
+  it('shows a terminal empty state when a completed execution has no summary', () => {
+    useTaskSummaryMock.mockReturnValue({
+      enabled: false,
+      summary: null,
+      isLoadingSummary: false,
+      errorMessage: null,
+      isSummaryStale: false,
+      regenerateSummary: vi.fn(),
+    });
+
+    renderWorkspace({
+      isMobile: false,
+      selectedTaskId: 'task-1',
+      sessionOverride: {
+        tasks: [createSessionTask({ state: 'completed' })],
+      },
+    });
+
+    expect(
+      screen.getByText('No summary is available for this execution yet.'),
+    ).toBeInTheDocument();
+  });
+
+  it('does not request a summary for an inaccessible execution', () => {
+    renderWorkspace({
+      isMobile: false,
+      selectedTaskId: 'task-1',
+      sessionOverride: {
+        tasks: [createSessionTask({ canAccessDetails: false })],
+      },
+    });
+
+    expect(
+      screen.getByText('Execution details require task access.'),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Summary' })).toBeNull();
+    expect(useTaskSummaryMock).not.toHaveBeenCalled();
+  });
 });
+
+function createSessionTask(
+  overrides?: Partial<SessionInfo['tasks'][number]>,
+): SessionInfo['tasks'][number] {
+  return {
+    taskId: 'task-1',
+    title: 'Summarize session execution',
+    workflow: 'standard',
+    state: 'active',
+    repositoryName: 'RooCodeInc/Roomote',
+    latestOutput: null,
+    inferenceCostMicroUsd: 0,
+    canAccessDetails: true,
+    latestRun: null,
+    artifacts: [],
+    pullRequests: [],
+    ...overrides,
+  };
+}
