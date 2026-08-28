@@ -10,6 +10,7 @@ import {
   db,
   eq,
   getTaskGoalForRun,
+  isNull,
   repositories,
   sql,
   taskPullRequests,
@@ -101,6 +102,7 @@ async function launchFallbackWithCheckTransfer(
       where: and(
         eq(taskRuns.taskId, data.taskId),
         sql`${taskRuns.payload}->>'launchIdempotencyKey' = ${launchIdempotencyKey}`,
+        isNull(taskRuns.canceledAt),
       ),
       columns: { id: true, status: true },
     });

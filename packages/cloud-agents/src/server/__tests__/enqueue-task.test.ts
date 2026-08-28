@@ -955,7 +955,7 @@ describe('enqueueTask snapshot resume', () => {
     expect(resumeRuns).toHaveLength(1);
   });
 
-  it('allows a replacement resume after the previous resume was canceled', async () => {
+  it('allows retrying a resume that was canceled before queue publication', async () => {
     const userId = await createUser();
     const freshRun = await launchFresh({
       task: standardTaskInput({ computeProvider: 'modal' }),
@@ -964,28 +964,37 @@ describe('enqueueTask snapshot resume', () => {
       surface: 'web',
       trigger: 'manual',
     });
-    const resumeInput = {
-      task: {
-        type: TaskPayloadKind.SnapshotResume,
-        payload: {
-          repo: 'acme/widgets',
-          sourceSnapshotId: 'snap-canceled',
-          sourceRunId: freshRun.id,
+    const createResume = () =>
+      enqueueTask(
+        {
+          task: {
+            type: TaskPayloadKind.SnapshotResume,
+            payload: {
+              repo: 'acme/widgets',
+              sourceSnapshotId: 'snap-retry',
+              sourceRunId: freshRun.id,
+              launchIdempotencyKey: `snapshot-resume-retry:${freshRun.id}`,
+            },
+          } as SnapshotResumeTask,
+          actingUserId: userId,
         },
-      } as SnapshotResumeTask,
-      actingUserId: userId,
-    };
-    const canceledResume = await enqueueTask(resumeInput, { enqueue: false });
+        { enqueue: false },
+      );
+
+    const canceledResume = await createResume();
     await db
       .update(taskRuns)
-      .set({ status: RunStatus.Canceled })
+      .set({
+        status: RunStatus.Canceled,
+        canceledAt: new Date(),
+        error: 'Failed to enqueue task run',
+      })
       .where(eq(taskRuns.id, canceledResume.id));
 
-    const replacementResume = await enqueueTask(resumeInput, {
-      enqueue: false,
-    });
+    const retryResume = await createResume();
 
-    expect(replacementResume.id).not.toBe(canceledResume.id);
+    expect(retryResume.id).not.toBe(canceledResume.id);
+    expect(retryResume.status).toBe(RunStatus.Pending);
     const resumeRuns = await db.query.taskRuns.findMany({
       where: and(
         eq(taskRuns.sourceRunId, freshRun.id),
