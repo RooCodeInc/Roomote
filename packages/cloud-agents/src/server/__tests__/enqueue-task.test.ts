@@ -40,6 +40,7 @@ import {
   environments,
   environmentRepositoryMappings,
   repositories,
+  sessions,
   sessionTasks,
   userFactory,
   environmentFactory,
@@ -531,6 +532,11 @@ describe('enqueueTask initiator stamping', () => {
         where: eq(tasks.id, run.taskId),
         columns: { title: true, llmTitleCheckpoint: true },
       });
+      const [session] = await db
+        .select({ title: sessions.title })
+        .from(sessionTasks)
+        .innerJoin(sessions, eq(sessions.id, sessionTasks.sessionId))
+        .where(eq(sessionTasks.taskId, run.taskId));
 
       expect(mockGenerateLlmTaskTitle).toHaveBeenCalledWith({
         userId,
@@ -546,6 +552,7 @@ describe('enqueueTask initiator stamping', () => {
         title: 'Order more catnip from Amazon',
         llmTitleCheckpoint: 1,
       });
+      expect(session?.title).toBe('Order more catnip from Amazon');
     });
   });
 

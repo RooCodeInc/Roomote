@@ -396,6 +396,30 @@ export async function getSessionForTask(
   return session?.session ?? null;
 }
 
+export async function syncTaskSessionTitle(
+  tx: DatabaseOrTransaction,
+  input: { taskId: string; previousTitle: string; title: string },
+): Promise<boolean> {
+  const session = await getSessionForTask(tx, input.taskId);
+  if (!session || session.fastConversationId) {
+    return false;
+  }
+
+  const [updated] = await tx
+    .update(sessions)
+    .set({ title: input.title, updatedAt: new Date() })
+    .where(
+      and(
+        eq(sessions.id, session.id),
+        isNull(sessions.fastConversationId),
+        eq(sessions.title, input.previousTitle),
+      ),
+    )
+    .returning({ id: sessions.id });
+
+  return Boolean(updated);
+}
+
 export async function getSessionForFastConversation(
   tx: DatabaseOrTransaction,
   fastConversationId: string,

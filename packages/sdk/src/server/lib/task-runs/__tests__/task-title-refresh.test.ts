@@ -1,6 +1,8 @@
 import {
   db,
+  ensureSessionForTask,
   eq,
+  sessions,
   taskFactory,
   taskMessages,
   taskRuns,
@@ -95,26 +97,34 @@ describe('task title refresh', () => {
   });
 
   it('regenerates the title from the transcript when the job completes', async () => {
+    const taskId = 'task-title-final';
     const runId = await seedTaskWithPrompt({
-      taskId: 'task-title-final',
+      taskId,
       title: 'Early truncated title',
       llmTitleCheckpoint: 1,
     });
+    const session = await ensureSessionForTask(db, { taskId });
+    if (!session) throw new Error('Failed to create task session');
 
     await refreshTaskTitleOnCompletion({
-      taskId: 'task-title-final',
+      taskId,
       runId,
     });
 
     const task = await db.query.tasks.findFirst({
-      where: eq(tasks.id, 'task-title-final'),
+      where: eq(tasks.id, taskId),
       columns: { title: true, llmTitleCheckpoint: true },
+    });
+    const updatedSession = await db.query.sessions.findFirst({
+      where: eq(sessions.id, session.id),
+      columns: { title: true },
     });
 
     expect(task?.title).toBe('Generated summary title');
     expect(task?.llmTitleCheckpoint).toBe(LLM_TITLE_LOCKED_CHECKPOINT);
+    expect(updatedSession?.title).toBe('Generated summary title');
     expect(mockSyncTaskThreadTitle).toHaveBeenCalledWith({
-      taskId: 'task-title-final',
+      taskId,
     });
   });
 

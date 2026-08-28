@@ -12,6 +12,7 @@ import {
   getBackgroundAgentSettings,
   upsertBackgroundAutomationSlackThread,
   slackInstallations,
+  syncTaskSessionTitle,
   users,
   normalizeTaskActivityTimestamp,
   eq,
@@ -751,6 +752,7 @@ async function refreshTaskTitle(input: {
 }) {
   const [taskRow] = await db
     .select({
+      title: tasks.title,
       titleEditedByUserAt: tasks.titleEditedByUserAt,
       llmTitleCheckpoint: tasks.llmTitleCheckpoint,
     })
@@ -868,21 +870,33 @@ async function refreshTaskTitle(input: {
   });
   const shouldPersistGeneratedTitle = !isFallbackTaskTitle(generatedTitle);
 
-  const [updatedTask] = await db
-    .update(tasks)
-    .set({
-      llmTitleCheckpoint: desiredCheckpoint,
-      updatedAt: new Date(),
-      ...(shouldPersistGeneratedTitle ? { title: generatedTitle } : {}),
-    })
-    .where(
-      and(
-        eq(tasks.id, input.taskId),
-        isNull(tasks.titleEditedByUserAt),
-        lt(tasks.llmTitleCheckpoint, desiredCheckpoint),
-      ),
-    )
-    .returning({ id: tasks.id });
+  const updatedTask = await db.transaction(async (tx) => {
+    const [updated] = await tx
+      .update(tasks)
+      .set({
+        llmTitleCheckpoint: desiredCheckpoint,
+        updatedAt: new Date(),
+        ...(shouldPersistGeneratedTitle ? { title: generatedTitle } : {}),
+      })
+      .where(
+        and(
+          eq(tasks.id, input.taskId),
+          isNull(tasks.titleEditedByUserAt),
+          lt(tasks.llmTitleCheckpoint, desiredCheckpoint),
+        ),
+      )
+      .returning({ id: tasks.id });
+
+    if (updated && shouldPersistGeneratedTitle) {
+      await syncTaskSessionTitle(tx, {
+        taskId: updated.id,
+        previousTitle: taskRow.title,
+        title: generatedTitle,
+      });
+    }
+
+    return updated;
+  });
 
   if (!updatedTask) {
     return;

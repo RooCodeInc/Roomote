@@ -54,6 +54,7 @@ import {
   markTaskStartParallelCountEndedAt,
   projectPendingPrReviewEventsForAssociation,
   recordTaskStartParallelCount,
+  syncTaskSessionTitle,
   syncTaskStateFromRuns,
   taskPullRequests,
   taskRuns,
@@ -926,23 +927,42 @@ export async function persistEarlyGeneratedTaskTitle(input: {
     return false;
   }
   const lockFirstMessageCheckpoint = input.lockFirstMessageCheckpoint !== false;
-  const [updatedTask] = await db
-    .update(tasks)
-    .set({
-      ...(lockFirstMessageCheckpoint ? { llmTitleCheckpoint: 1 } : {}),
-      updatedAt: new Date(),
-      title: input.generatedTitle,
-    })
-    .where(
-      and(
-        eq(tasks.id, input.taskId),
-        isNull(tasks.titleEditedByUserAt),
-        lt(tasks.llmTitleCheckpoint, 1),
-      ),
-    )
-    .returning({ id: tasks.id });
+  return db.transaction(async (tx) => {
+    const [currentTask] = await tx
+      .select({ title: tasks.title })
+      .from(tasks)
+      .where(eq(tasks.id, input.taskId))
+      .for('update');
+    if (!currentTask) {
+      return false;
+    }
 
-  return Boolean(updatedTask);
+    const [updatedTask] = await tx
+      .update(tasks)
+      .set({
+        ...(lockFirstMessageCheckpoint ? { llmTitleCheckpoint: 1 } : {}),
+        updatedAt: new Date(),
+        title: input.generatedTitle,
+      })
+      .where(
+        and(
+          eq(tasks.id, input.taskId),
+          isNull(tasks.titleEditedByUserAt),
+          lt(tasks.llmTitleCheckpoint, 1),
+        ),
+      )
+      .returning({ id: tasks.id });
+
+    if (updatedTask) {
+      await syncTaskSessionTitle(tx, {
+        taskId: updatedTask.id,
+        previousTitle: currentTask.title,
+        title: input.generatedTitle,
+      });
+    }
+
+    return Boolean(updatedTask);
+  });
 }
 
 /**
@@ -1885,7 +1905,7 @@ async function enqueueFreshLaunch(
 
   // Fire-and-forget: generate an LLM title from the initial prompt during
   // startup so the user sees a meaningful title before the worker records
-  // the first envelope. Titles live on tasks only.
+  // the first envelope. Task-only Sessions mirror the generated title.
   if (
     !options.skipEarlyTitleGeneration &&
     !reusedTask &&
