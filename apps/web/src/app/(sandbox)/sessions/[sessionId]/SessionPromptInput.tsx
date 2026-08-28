@@ -84,6 +84,10 @@ export function SessionPromptInput({
   });
 
   const handleSubmit = async (message: PromptInputMessage) => {
+    if (isBusy || isUpdatingModelSelection) {
+      return;
+    }
+
     // Always send the current picker state: it round-trips the persisted
     // choice and clears it when the picker is reset to the default. The
     // draft and attachments are only cleared once the send succeeds, so a

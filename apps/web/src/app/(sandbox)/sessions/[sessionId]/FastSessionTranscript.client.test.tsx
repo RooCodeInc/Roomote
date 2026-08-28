@@ -552,6 +552,45 @@ describe('FastSessionTranscript', () => {
     });
   });
 
+  it('does not submit with Enter while a model selection is still saving', async () => {
+    let resolveModelUpdate: ((value: { success: true }) => void) | undefined;
+    updateModelSelectionMutate.mockReturnValue(
+      new Promise((resolve) => {
+        resolveModelUpdate = resolve;
+      }),
+    );
+    replyMutate.mockResolvedValue({ success: true });
+
+    render(
+      <FastSessionTranscript
+        sessionId="session-1"
+        initialMessages={[]}
+        canReply
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Use GLM 5.2' }));
+    const input = screen.getByPlaceholderText('Message agent');
+    fireEvent.change(input, { target: { value: 'Wait for the model save' } });
+    fireEvent.keyDown(input, { key: 'Enter', code: 'Enter', charCode: 13 });
+
+    expect(replyMutate).not.toHaveBeenCalled();
+
+    await act(async () => {
+      resolveModelUpdate?.({ success: true });
+    });
+    fireEvent.keyDown(input, { key: 'Enter', code: 'Enter', charCode: 13 });
+
+    await waitFor(() => {
+      expect(replyMutate).toHaveBeenCalledWith({
+        sessionId: 'session-1',
+        text: 'Wait for the model save',
+        model: 'openrouter/z-ai/glm-5.2',
+        reasoningEffort: null,
+      });
+    });
+  });
+
   it('sends an image-only reply', async () => {
     preparePromptAttachments.mockResolvedValueOnce({
       text: '',
