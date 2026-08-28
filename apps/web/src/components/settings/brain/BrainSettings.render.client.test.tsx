@@ -117,12 +117,6 @@ function buildSettings(
     inferenceProvider: 'openrouter',
     keySource: 'brain',
     recall: { mode: 'semantic', embeddedCount: 771, chunkCount: 771 },
-    models: {
-      synthesisModel: 'openai/gpt-5.6-luna',
-      synthesisSource: 'default',
-      embeddingModel: 'openai/text-embedding-3-small',
-      embeddingDimensions: 1536,
-    },
     corpus: {
       reachable: true,
       listedPages: 30,
@@ -185,7 +179,7 @@ beforeEach(() => {
 });
 
 describe('BrainSettings', () => {
-  it('shows Memory stats, the embedded browser, sources, and configuration', () => {
+  it('shows Memory stats, the embedded browser, and sources', () => {
     render(<BrainSettings />);
 
     expect(screen.getAllByText('Connected')).toHaveLength(1);
@@ -194,12 +188,10 @@ describe('BrainSettings', () => {
     expect(screen.getByText('OpenRouter')).toBeInTheDocument();
     expect(screen.getByText('Semantic + keyword')).toBeInTheDocument();
 
-    expect(screen.getByText('Configuration')).toBeInTheDocument();
-    expect(screen.getByText('openai/gpt-5.6-luna')).toBeInTheDocument();
-    expect(
-      screen.getByText('openai/text-embedding-3-small'),
-    ).toBeInTheDocument();
-    expect(screen.queryByText('Manage in Models')).not.toBeInTheDocument();
+    // The model Configuration section is gone: the synthesis model is the
+    // deployment helper model and the embedding pair is create-time — neither
+    // is a per-page setting worth displaying here.
+    expect(screen.queryByText('Configuration')).not.toBeInTheDocument();
 
     expect(screen.getByText('Memory Stats')).toBeInTheDocument();
     expect(screen.getByText('30 memories')).toBeInTheDocument();
@@ -227,11 +219,7 @@ describe('BrainSettings', () => {
 
     const memoryStats = screen.getByText('Memory Stats');
     const browser = screen.getByText('Explore memories');
-    const configuration = screen.getByText('Configuration');
     expect(memoryStats.compareDocumentPosition(browser)).toBe(
-      Node.DOCUMENT_POSITION_FOLLOWING,
-    );
-    expect(browser.compareDocumentPosition(configuration)).toBe(
       Node.DOCUMENT_POSITION_FOLLOWING,
     );
   });

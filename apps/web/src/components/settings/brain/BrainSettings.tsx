@@ -7,7 +7,6 @@ import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { ErrorState, Skeleton } from '@/components/system';
 import { useTRPC } from '@/trpc/client';
 
-import { BrainConfigurationSection } from './BrainConfigurationSection';
 import { BrainCorpusSection } from './BrainCorpusSection';
 import { BrainBrowseSection } from './BrainBrowseSection';
 import { BrainEnableSection } from './BrainEnableSection';
@@ -115,7 +114,6 @@ export function BrainSettings() {
       />
       <BrainStatusSection settings={data} />
       <BrainSourcesSection sources={data.sources} />
-      <BrainConfigurationSection settings={data} />
     </div>
   );
 }

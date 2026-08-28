@@ -14,14 +14,12 @@ import {
   setBrainEnabled,
 } from '@roomote/db/server';
 import {
-  describeBrainModels,
   readBrainCorpus,
   readBrainPage,
   readBrainStats,
   resolveBrainSourceRequirements,
   resolveBrainInferenceProvider,
   type BrainCorpusSnapshot,
-  type BrainModelSummary,
 } from '@roomote/sdk/server';
 import {
   BRAIN_MCP_ID,
@@ -134,8 +132,6 @@ export type BrainSettings = {
    * for the other provider, and the page must not claim otherwise.
    */
   keySource: 'brain' | 'deployment' | null;
-  /** The models the Brain runs, or null when no provider resolves. */
-  models: BrainModelSummary | null;
   /**
    * Recall health. `semantic`/`keyword-only` are measured from gbrain's own
    * embedding counts; `unknown` means the admin census did not answer and
@@ -510,7 +506,6 @@ export async function getBrainSettingsCommand(
     url,
     inferenceProvider: inference?.providerId ?? null,
     keySource,
-    models: inference ? describeBrainModels(inference.providerId) : null,
     recall,
     corpus,
     sources: summarizeSources({
