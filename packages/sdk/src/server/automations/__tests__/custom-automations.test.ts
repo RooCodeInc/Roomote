@@ -331,7 +331,7 @@ describe('customAutomationsJob', () => {
             elements: [
               expect.objectContaining({
                 action_id: 'late_bound_automation_view_session',
-                text: expect.objectContaining({ text: 'Inspect session' }),
+                text: expect.objectContaining({ text: 'Follow' }),
                 url: expect.stringContaining(
                   '/sessions/33333333-3333-4333-8333-333333333333',
                 ),

@@ -92,7 +92,7 @@ export function buildCustomAutomationSlackMessage(params: {
               action_id: 'late_bound_automation_view_session',
               text: {
                 type: 'plain_text',
-                text: 'Inspect session',
+                text: 'Follow',
                 emoji: false,
               },
               url: buildFastSessionUrl('slack', params.sessionId),

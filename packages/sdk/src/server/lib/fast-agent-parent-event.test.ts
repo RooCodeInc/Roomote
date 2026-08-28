@@ -534,7 +534,7 @@ describe('deliverFastAgentParentEvent', () => {
             elements: [
               expect.objectContaining({
                 action_id: 'late_bound_automation_view_session',
-                text: expect.objectContaining({ text: 'Inspect session' }),
+                text: expect.objectContaining({ text: 'Follow' }),
                 url: expect.stringContaining(`/sessions/${parent.sessionId}`),
               }),
               expect.objectContaining({

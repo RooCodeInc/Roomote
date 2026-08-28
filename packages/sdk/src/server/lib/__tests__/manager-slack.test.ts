@@ -112,7 +112,7 @@ describe('manager slack helpers', () => {
           elements: [
             expect.objectContaining({
               action_id: 'late_bound_automation_view_session',
-              text: expect.objectContaining({ text: 'Inspect session' }),
+              text: expect.objectContaining({ text: 'Follow' }),
               url: expect.stringMatching(
                 /\/sessions\/session-1\?utm_source=slack&utm_medium=link&utm_campaign=slack\.fast_reply$/,
               ),
