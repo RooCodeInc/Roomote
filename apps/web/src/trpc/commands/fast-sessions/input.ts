@@ -61,3 +61,9 @@ export const replyToFastSessionInputSchema = z
     ...fastSessionMessageInputShape,
   })
   .superRefine(requireFastSessionContent);
+
+export const updateFastSessionModelSelectionInputSchema = z.object({
+  sessionId: z.string().uuid(),
+  model: fastSessionMessageInputShape.model,
+  reasoningEffort: fastSessionMessageInputShape.reasoningEffort,
+});

@@ -218,6 +218,27 @@ export async function getFastSessionTasksCommand(
   return getFastSessionTasks(auth, sessionId);
 }
 
+export async function updateFastSessionModelSelectionCommand(
+  auth: UserAuthSuccess,
+  input: {
+    sessionId: string;
+    model?: string | null;
+    reasoningEffort?: ReasoningEffort | null;
+  },
+): Promise<{ success: true }> {
+  const session = await findAccessibleFastSession(auth, input.sessionId);
+  if (!session) {
+    throw new Error('Fast session not found');
+  }
+
+  await resolveSessionModelSettings(session.id, input, {
+    model: session.model,
+    reasoningEffort: session.reasoningEffort,
+  });
+
+  return { success: true };
+}
+
 export async function replyToFastSessionCommand(
   auth: UserAuthSuccess,
   input: {

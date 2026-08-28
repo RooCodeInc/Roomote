@@ -377,6 +377,22 @@ describe('Home', () => {
     expect(mockPush).toHaveBeenCalledWith('/sessions/fast-session-1');
   });
 
+  it('starts a new Fast session with the selected non-default model', async () => {
+    render(<Home initialPlaceholderIndex={0} />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Model' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Use auto workspace' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Submit prompt' }));
+
+    await waitFor(() => {
+      expect(mockStartFastSession).toHaveBeenCalledWith({
+        text: 'Test prompt',
+        images: undefined,
+        model: 'openrouter/z-ai/glm-5.2',
+      });
+    });
+  });
+
   it('reuses the launch form without Home-only content in dialogs', async () => {
     const onTaskStarted = vi.fn();
 
