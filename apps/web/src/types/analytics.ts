@@ -2,7 +2,7 @@ import { z } from 'zod';
 
 import { timePeriodFilterSchema, type TimePeriodFilter } from './time-period';
 
-export const analyticsObjects = [
+const analyticsObjects = [
   'costs',
   'tasks',
   'pullRequests',
