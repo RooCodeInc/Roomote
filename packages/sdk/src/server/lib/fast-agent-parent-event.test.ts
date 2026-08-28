@@ -3,6 +3,7 @@ const mocks = vi.hoisted(() => ({
   releaseTurnLock: vi.fn(),
   answerQuestion: vi.fn(),
   createLauncher: vi.fn(),
+  createTaskLauncher: vi.fn(),
   launchTask: vi.fn(),
   findSession: vi.fn(),
   findInstallation: vi.fn(),
@@ -56,18 +57,18 @@ vi.mock('@roomote/cloud-agents/server', () => ({
   answerFastAgentQuestion: mocks.answerQuestion,
   resolveApiBaseUrl: () => 'https://roomote.example.com',
   fastAgentConversationRepository: { findById: mocks.findSession },
-  createFastAgentTaskLauncher:
-    ({
-      buildTask,
-    }: {
-      buildTask: (input: {
-        prompt: string;
-        environmentId: string | null;
-        model?: string | null;
-        parentSessionId: string;
-      }) => unknown | Promise<unknown>;
-    }) =>
-    async (input: {
+  createFastAgentTaskLauncher: (params: {
+    initiator: unknown;
+    buildTask: (input: {
+      prompt: string;
+      environmentId: string | null;
+      model?: string | null;
+      parentSessionId: string;
+    }) => unknown | Promise<unknown>;
+  }) => {
+    mocks.createTaskLauncher(params);
+    const { buildTask } = params;
+    return async (input: {
       prompt: string;
       environmentId: string | null;
       model?: string | null;
@@ -82,7 +83,8 @@ vi.mock('@roomote/cloud-agents/server', () => ({
       await input.postKickoff({ taskId: 'child-task-1', taskUrl });
       await mocks.enqueueTask({ task });
       return { success: true, taskId: 'child-task-1', taskUrl };
-    },
+    };
+  },
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -651,7 +653,7 @@ describe('deliverFastAgentParentEvent', () => {
         await adapter.resolveMcpServerConfigs();
         return adapter.launchTask({
           prompt: 'Inspect the repository.',
-          environmentId: null,
+          environmentId: 'agent-selected-environment',
           parentSessionId: automationParent.sessionId,
           postKickoff: vi.fn(),
         });
@@ -668,6 +670,7 @@ describe('deliverFastAgentParentEvent', () => {
         prompt: 'Find actionable regressions.',
         trigger: 'schedule',
         defaultTaskModel: 'openai/gpt-5.6-luna',
+        taskEnvironmentId: 'configured-automation-environment',
       },
     });
 
@@ -676,11 +679,15 @@ describe('deliverFastAgentParentEvent', () => {
       apiBaseUrl: 'https://roomote.example.com',
       includeRoomoteMemberTools: true,
     });
+    expect(mocks.createTaskLauncher).toHaveBeenCalledWith(
+      expect.objectContaining({ initiator: { kind: 'user', userId: 'u1' } }),
+    );
     expect(mocks.enqueueTask).toHaveBeenCalledWith({
       task: expect.objectContaining({
         payload: expect.objectContaining({
           fastAgentSessionId: automationParent.sessionId,
           fastAgentParent: automationParent,
+          environmentId: 'configured-automation-environment',
           harnessModelOverrides: {
             'opencode-server': 'openai/gpt-5.6-luna',
           },

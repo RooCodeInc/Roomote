@@ -124,6 +124,8 @@ export type FastAgentParentEvent =
       prompt: string;
       trigger: 'schedule' | 'manual';
       defaultTaskModel?: string;
+      /** Enforced scope for sandbox tasks delegated by this automation. */
+      taskEnvironmentId?: string;
       rootMessageId?: string;
     }
   | {
@@ -344,11 +346,6 @@ function createFastAgentAutomationTaskLauncher(params: {
   conversation: Extract<FastAgentConversation, { surface: 'automation' }>;
   event: FastAgentParentEvent;
 }): LaunchFastAgentTask {
-  const automationName =
-    params.event.type === 'automation_triggered'
-      ? params.event.automationName
-      : 'Custom automation';
-
   return createFastAgentTaskLauncher({
     userId: params.userId,
     surface: 'system',
@@ -358,12 +355,8 @@ function createFastAgentAutomationTaskLauncher(params: {
         : 'schedule',
     taskUrlCampaign: 'fast-automation-delegation',
     initiator: {
-      kind: 'automation',
-      key: 'custom_automation',
-      actor: {
-        externalId: params.conversation.workspaceId,
-        displayName: automationName,
-      },
+      userId: params.userId,
+      kind: 'user',
     },
     afterKickoff: async (taskRun) => {
       await db
@@ -1316,13 +1309,23 @@ export async function deliverFastAgentParentEvent(params: {
       params.event.type === 'automation_triggered'
         ? params.event.defaultTaskModel
         : undefined;
-    const launchTask = defaultTaskModel
-      ? (input: Parameters<LaunchFastAgentTask>[0]) =>
-          parentTurn.adapter.launchTask({
-            ...input,
-            model: input.model ?? defaultTaskModel,
-          })
-      : parentTurn.adapter.launchTask;
+    const taskEnvironmentId =
+      params.event.type === 'automation_triggered'
+        ? params.event.taskEnvironmentId
+        : undefined;
+    const launchTask =
+      defaultTaskModel || taskEnvironmentId
+        ? (input: Parameters<LaunchFastAgentTask>[0]) =>
+            parentTurn.adapter.launchTask({
+              ...input,
+              ...(defaultTaskModel
+                ? { model: input.model ?? defaultTaskModel }
+                : {}),
+              ...(taskEnvironmentId
+                ? { environmentId: taskEnvironmentId }
+                : {}),
+            })
+        : parentTurn.adapter.launchTask;
     // The same base URL must reach both the config resolver and the broker:
     // the broker only injects its auth header on deployment-proxy URLs whose
     // origin matches its own apiBaseUrl, so a mismatched pair silently drops
