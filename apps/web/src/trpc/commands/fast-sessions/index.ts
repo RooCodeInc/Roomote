@@ -208,6 +208,11 @@ export async function replyToFastSessionCommand(
   if (!session) {
     throw new Error('Fast session not found');
   }
+  if (session.ownerAutomation) {
+    throw new Error(
+      'Automation-owned Fast sessions are read-only until the next release.',
+    );
+  }
 
   const senderDisplayName =
     getUserDisplayName({ name: auth.name, email: auth.primaryEmail }) ?? null;

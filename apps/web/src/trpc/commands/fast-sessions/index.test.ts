@@ -2,6 +2,7 @@ const mocks = vi.hoisted(() => ({
   after: vi.fn(),
   acquireTurnLock: vi.fn(),
   answerQuestion: vi.fn(),
+  dbUpdate: vi.fn(),
 }));
 
 vi.mock('next/server', () => ({ after: mocks.after }));
@@ -20,7 +21,7 @@ vi.mock('@roomote/sdk/server', () => ({
 }));
 
 vi.mock('@roomote/db/server', () => ({
-  db: {},
+  db: { update: mocks.dbUpdate },
   eq: vi.fn(),
   fastAgentConversations: {},
 }));
@@ -29,7 +30,10 @@ vi.mock('@/lib/server/fast-sessions', () => ({
   findAccessibleFastSession: vi.fn(),
 }));
 
-import { scheduleWebFastAgentTurn } from './index';
+import { buildFastAgentSurfaceReplyDelivery } from '@roomote/sdk/server';
+import { findAccessibleFastSession } from '@/lib/server/fast-sessions';
+
+import { replyToFastSessionCommand, scheduleWebFastAgentTurn } from './index';
 
 describe('scheduleWebFastAgentTurn', () => {
   beforeEach(() => {
@@ -67,5 +71,41 @@ describe('scheduleWebFastAgentTurn', () => {
 
     expect(mocks.answerQuestion).toHaveBeenCalledOnce();
     expect(release).toHaveBeenCalledOnce();
+  });
+});
+
+describe('replyToFastSessionCommand', () => {
+  it('rejects staged automation-owned sessions before persisting settings', async () => {
+    vi.mocked(findAccessibleFastSession).mockResolvedValue({
+      id: 'session-1',
+      userId: null,
+      ownerAutomation: 'announcer',
+      title: null,
+      surface: 'automation',
+      workspaceId: 'announcer',
+      conversationId: 'occurrence-1',
+      model: null,
+      reasoningEffort: null,
+    });
+
+    await expect(
+      replyToFastSessionCommand(
+        {
+          success: true,
+          userId: 'admin-1',
+          name: 'Admin',
+          primaryEmail: 'admin@example.com',
+          isAdmin: true,
+        } as never,
+        {
+          sessionId: 'session-1',
+          text: 'Continue',
+          model: 'openai/gpt-5.6',
+          reasoningEffort: 'high',
+        },
+      ),
+    ).rejects.toThrow('read-only until the next release');
+    expect(mocks.dbUpdate).not.toHaveBeenCalled();
+    expect(buildFastAgentSurfaceReplyDelivery).not.toHaveBeenCalled();
   });
 });

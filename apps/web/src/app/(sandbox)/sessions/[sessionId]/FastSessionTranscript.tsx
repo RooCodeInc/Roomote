@@ -55,6 +55,7 @@ export function FastSessionTranscript({
   initialMessages,
   hasOlderMessages,
   canReply,
+  readOnlyReason,
   initialTitle = null,
   fallbackTitle = 'Session',
   sessionModel = null,
@@ -66,6 +67,7 @@ export function FastSessionTranscript({
   initialMessages: FastSessionMessage[];
   hasOlderMessages?: boolean;
   canReply?: boolean;
+  readOnlyReason?: string;
   initialTitle?: string | null;
   fallbackTitle?: string;
   sessionModel?: string | null;
@@ -289,6 +291,10 @@ export function FastSessionTranscript({
             <p className="px-4 pb-2 text-xs text-destructive">{replyError}</p>
           ) : null}
         </div>
+      ) : readOnlyReason ? (
+        <p className="mx-auto w-full max-w-4xl shrink-0 px-4 pb-4 text-sm text-muted-foreground">
+          {readOnlyReason}
+        </p>
       ) : null}
     </MessageUiOptionsProvider>
   );
