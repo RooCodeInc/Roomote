@@ -169,6 +169,19 @@ describe('StepCommunicationConnect', () => {
     expect(
       screen.getByText(/This deployment is already configured for Slack/i),
     ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        /read and reply in direct messages and channels where the app has been added/i,
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/list public channels so you can choose destinations/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        /cannot read or post in a private channel unless someone invites it/i,
+      ),
+    ).toBeInTheDocument();
     expect(connectSlackMutateMock).toHaveBeenCalledTimes(1);
   });
 

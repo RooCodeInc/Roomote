@@ -186,6 +186,12 @@ export function StepCommunicationConnect({
         This deployment is already configured for Slack. Connect the Slack app
         so Roomote can talk with your workspace.
       </p>
+      <p className="text-sm text-muted-foreground">
+        Roomote can read and reply in direct messages and channels where the app
+        has been added. It can list public channels so you can choose
+        destinations, but it cannot read or post in a private channel unless
+        someone invites it.
+      </p>
       <SetupFooter onBack={onBack}>
         <Button
           onClick={() => connectSlack.mutate()}
