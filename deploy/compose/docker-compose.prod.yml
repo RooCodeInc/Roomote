@@ -24,12 +24,10 @@ x-roomote-base-env: &roomote-base-env
   R_BRAIN_MODEL: ${R_BRAIN_MODEL:-}
   R_BRAIN_EMBEDDING_MODEL: ${R_BRAIN_EMBEDDING_MODEL:-}
   R_BRAIN_EMBEDDING_DIMENSIONS: ${R_BRAIN_EMBEDDING_DIMENSIONS:-}
-  R_BRAIN_RERANKER_MODEL: ${R_BRAIN_RERANKER_MODEL:-}
-  # Optional self-run inference: point embeddings/rerank at the bundled
+  # Optional self-run inference: point embeddings at the bundled
   # `infinity` service (profile local-inference) or any OpenAI-compatible
   # server. Chat synthesis keeps flowing to the configured model provider.
   R_BRAIN_EMBEDDINGS_UPSTREAM_URL: ${R_BRAIN_EMBEDDINGS_UPSTREAM_URL:-}
-  R_BRAIN_RERANK_UPSTREAM_URL: ${R_BRAIN_RERANK_UPSTREAM_URL:-}
   R_BRAIN_INFERENCE_UPSTREAM_API_KEY: ${R_BRAIN_INFERENCE_UPSTREAM_API_KEY:-}
   R_GBRAIN_URL: ${R_GBRAIN_URL:-http://gbrain:8931}
   R_GBRAIN_ADMIN_TOKEN_FILE: /gbrain-data/admin-bootstrap-token
@@ -542,7 +540,6 @@ services:
       # provider key below instead makes the Brain call the provider directly.
       OPENAI_BASE_URL: ${GBRAIN_OPENAI_BASE_URL:-http://api:3001/api/brain/inference}
       OPENAI_API_KEY: ${R_BRAIN_GATEWAY_TOKEN:-}
-      GBRAIN_RERANKER_MODEL: ${R_BRAIN_RERANKER_MODEL:-}
       # Create-time, and it has to be the container that receives these: the
       # embedding model and its width are decided when the Brain is created,
       # and the gateway must never substitute a different one afterwards.
@@ -555,7 +552,7 @@ services:
     security_opt:
       - no-new-privileges:true
 
-  # Self-run embedding/reranking models for the Brain (opt-in, CPU).
+  # Self-run embedding model for the Brain (opt-in, CPU).
   # Enable with the `local-inference` compose profile. The upstream URLs are
   # NOT sufficient on their own: R_BRAIN_EMBEDDING_MODEL and
   # R_BRAIN_EMBEDDING_DIMENSIONS must name what this server serves (gbrain's
@@ -590,8 +587,6 @@ services:
       # Brain's first boot; the embedding choice is create-time.
       - --model-id
       - ${INFINITY_EMBEDDING_MODEL:-BAAI/bge-m3}
-      - --model-id
-      - ${INFINITY_RERANKER_MODEL:-BAAI/bge-reranker-v2-m3}
     volumes:
       - infinity_cache:/app/.cache
     security_opt:

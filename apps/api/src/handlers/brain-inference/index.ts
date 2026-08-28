@@ -20,14 +20,15 @@ import type { Variables } from '../../types';
 const LOG_PREFIX = '[Brain Inference]';
 
 /**
- * The Brain's whole inference surface: embeddings for recall, reranking for
- * precision, and chat for sourced synthesis and query expansion. Deliberately
- * narrower than the task-sandbox gateway's allowlist, because this credential
- * is a static deployment secret rather than a short-lived run token.
+ * The Brain's whole inference surface: embeddings for recall and chat for
+ * sourced synthesis and query expansion. Deliberately narrower than the
+ * task-sandbox gateway's allowlist, because this credential is a static
+ * deployment secret rather than a short-lived run token. Reranking is not
+ * part of the Brain: retrieval is hybrid RRF, and the reranker is disabled
+ * per-brain by the gbrain entrypoint.
  */
 const BRAIN_ALLOWED_PATHS = new Set([
   '/v1/embeddings',
-  '/v1/rerank',
   '/v1/chat/completions',
   '/v1/responses',
 ]);
@@ -119,13 +120,13 @@ async function rewriteBody(
 }
 
 /**
- * A self-run inference upstream for one gateway path. Embeddings and rerank
- * are the Brain's bulk data paths (memory text in, vectors/scores out), so
- * they are the ones a deployment may want on its own hardware; chat synthesis
- * stays with the configured model provider. Model names pass through
- * unrewritten — the upstream owns its own model registry, and every Brain is
- * locked to its embedding model at creation, so the name must mean exactly
- * one thing forever.
+ * A self-run inference upstream for one gateway path. Embeddings are the
+ * Brain's bulk data path (memory text in, vectors out), so they are the one
+ * a deployment may want on its own hardware; chat synthesis stays with the
+ * configured model provider. Model names pass through unrewritten — the
+ * upstream owns its own model registry, and every Brain is locked to its
+ * embedding model at creation, so the name must mean exactly one thing
+ * forever.
  */
 function resolveLocalUpstream(
   upstreamPath: string,
@@ -133,9 +134,7 @@ function resolveLocalUpstream(
   const baseUrl =
     upstreamPath === '/v1/embeddings'
       ? Env.R_BRAIN_EMBEDDINGS_UPSTREAM_URL
-      : upstreamPath === '/v1/rerank'
-        ? Env.R_BRAIN_RERANK_UPSTREAM_URL
-        : undefined;
+      : undefined;
 
   if (!baseUrl?.trim()) {
     return null;
@@ -261,20 +260,6 @@ brainInference.post('/*', async (c) => {
       {
         error:
           'No model provider is configured for this deployment. Add a provider key in Settings to enable the Brain.',
-      },
-      503,
-    );
-  }
-
-  // gbrain's OpenRouter reranker speaks the same authenticated gateway
-  // contract as embeddings and chat, but OpenAI itself has no compatible
-  // rerank endpoint. Fail explicitly instead of forwarding a doomed request
-  // to api.openai.com and obscuring the missing capability as a 404.
-  if (upstreamPath === '/v1/rerank' && resolved.providerId !== 'openrouter') {
-    return c.json(
-      {
-        error:
-          'Brain reranking requires an OpenRouter provider configured in Settings, or a local rerank upstream (R_BRAIN_RERANK_UPSTREAM_URL).',
       },
       503,
     );

@@ -146,57 +146,6 @@ describe('brain inference gateway', () => {
     });
   });
 
-  it('routes reranking through OpenRouter without exposing its key to gbrain', async () => {
-    const fetchMock = vi.fn(
-      async (_url: string, _init: RequestInit) =>
-        new Response(JSON.stringify({ results: [] }), { status: 200 }),
-    );
-    vi.stubGlobal('fetch', fetchMock);
-
-    const body = {
-      model: 'cohere/rerank-v3.5',
-      query: 'Which result is relevant?',
-      documents: ['relevant', 'unrelated'],
-      top_n: 2,
-    };
-    const response = await post('/v1/rerank', {
-      token: GATEWAY_TOKEN,
-      body,
-    });
-
-    expect(response.status).toBe(200);
-    const [url, init] = fetchMock.mock.calls[0]!;
-    expect(url).toBe('https://openrouter.ai/api/v1/rerank');
-    expect((init.headers as Headers).get('authorization')).toBe(
-      `Bearer ${OPENROUTER.apiKey}`,
-    );
-    expect(JSON.parse(init.body as string)).toEqual(body);
-  });
-
-  it('reports reranking as unavailable when only OpenAI is configured', async () => {
-    mockResolveBrainInferenceProvider.mockResolvedValue({
-      providerId: 'openai',
-      apiKey: 'sk-openai-provider-key',
-    });
-    const fetchMock = vi.fn();
-    vi.stubGlobal('fetch', fetchMock);
-
-    const response = await post('/v1/rerank', {
-      token: GATEWAY_TOKEN,
-      body: {
-        model: 'cohere/rerank-v3.5',
-        query: 'query',
-        documents: ['document'],
-      },
-    });
-
-    expect(response.status).toBe(503);
-    await expect(response.json()).resolves.toMatchObject({
-      error: expect.stringContaining('OpenRouter'),
-    });
-    expect(fetchMock).not.toHaveBeenCalled();
-  });
-
   it('surfaces an unreachable provider as 502 rather than a crash', async () => {
     vi.stubGlobal(
       'fetch',
@@ -265,17 +214,8 @@ describe('local inference upstreams', () => {
     expect(mockResolveBrainInferenceProvider).not.toHaveBeenCalled();
   });
 
-  it('allows rerank without OpenRouter when a rerank upstream is set', async () => {
-    mockEnv.R_BRAIN_RERANK_UPSTREAM_URL = 'http://infinity:7997/';
-    mockResolveBrainInferenceProvider.mockResolvedValue({
-      providerId: 'openai' as const,
-      apiKey: 'sk-openai',
-    });
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValue(
-        new Response(JSON.stringify({ results: [] }), { status: 200 }),
-      );
+  it('rejects the removed rerank path like any other unlisted path', async () => {
+    const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
 
     const response = await post('/v1/rerank', {
@@ -283,9 +223,26 @@ describe('local inference upstreams', () => {
       body: { model: 'bge-reranker-base', query: 'q', documents: ['a'] },
     });
 
+    expect(response.status).toBe(403);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('keeps the trailing slash on a configured upstream from doubling up', async () => {
+    mockEnv.R_BRAIN_EMBEDDINGS_UPSTREAM_URL = 'http://infinity:7997/';
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(new Response('{}', { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const response = await post('/v1/embeddings', {
+      token: GATEWAY_TOKEN,
+      body: { model: 'bge-small-en-v1.5', input: ['a'] },
+    });
+
     expect(response.status).toBe(200);
-    // Trailing slash on the configured URL must not double up.
-    expect(fetchMock.mock.calls[0]![0]).toBe('http://infinity:7997/v1/rerank');
+    expect(fetchMock.mock.calls[0]![0]).toBe(
+      'http://infinity:7997/v1/embeddings',
+    );
   });
 
   it('sends no authorization header when the upstream has no key', async () => {
@@ -306,7 +263,6 @@ describe('local inference upstreams', () => {
 
   it('keeps chat on the provider even when upstreams are configured', async () => {
     mockEnv.R_BRAIN_EMBEDDINGS_UPSTREAM_URL = 'http://infinity:7997';
-    mockEnv.R_BRAIN_RERANK_UPSTREAM_URL = 'http://infinity:7997';
     const fetchMock = vi
       .fn()
       .mockResolvedValue(new Response('{}', { status: 200 }));
