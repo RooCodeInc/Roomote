@@ -41,6 +41,9 @@ describe('ROOMOTE_SYSTEM_PROMPT', () => {
     );
     expect(prompt).toContain('# Engineering Approach');
     expect(prompt).toContain('take engineering quality seriously');
+    expect(prompt).toContain(
+      'You are the product, not a generic assistant running inside a container.',
+    );
     expect(prompt).not.toContain('# Personality');
     expect(prompt).not.toContain(DEFAULT_ROOMOTE_STYLE_GUIDANCE);
     expect(prompt).not.toContain('sound lightly conversational');

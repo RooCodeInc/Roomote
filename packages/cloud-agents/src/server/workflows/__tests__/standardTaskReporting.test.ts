@@ -65,7 +65,7 @@ describe('standardTask reporting consumer', () => {
     );
   });
 
-  it('keeps direct-user tasks free of the Fast reporting contract', () => {
+  it('keeps direct-user tasks free of the orchestrator report contract', () => {
     const { harnessInstructions } = standardTask({
       description: 'Implement the direct task',
       repo: 'Roomote/example-app',
