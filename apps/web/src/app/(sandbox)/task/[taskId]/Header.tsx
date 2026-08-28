@@ -26,6 +26,7 @@ import { PullRequestBadge, WorkspaceBadge } from '@/components/sandbox';
 import { WorkspaceHeader } from '@/components/layout';
 
 import { useTRPC } from '@/trpc/client';
+import { useAuthorizedUser } from '@/hooks/useUser';
 import { useSandboxLayout } from '../../use-sandbox-layout';
 
 import { type TaskSession } from './hooks';
@@ -38,29 +39,35 @@ interface HeaderProps {
 export const Header = ({ session: { taskRun, task, taskId } }: HeaderProps) => {
   const { isSidebarVisible, toggleSidebar } = useSandboxLayout();
   const trpc = useTRPC();
+  const { featureFlags } = useAuthorizedUser();
+  const sessionsUiEnabled = featureFlags?.sessions_ui === true;
   const searchParams = useSearchParams();
   const queryClient = useQueryClient();
   const [isRenameDialogOpen, setIsRenameDialogOpen] = useState(false);
   const [titleDraft, setTitleDraft] = useState(task?.title ?? '');
-  const parentSessionOptions = trpc.sessions?.forTask?.queryOptions({
-    taskId,
-  }) ?? {
+  const parentSessionOptions = trpc.sessions?.forTask?.queryOptions(
+    { taskId },
+    { enabled: sessionsUiEnabled },
+  ) ?? {
     queryKey: ['sessions', 'for-task', 'disabled', taskId],
     queryFn: async () => null,
     enabled: false,
   };
-  const { data: parentSession } = useQuery(parentSessionOptions);
+  const { data: queriedParentSession } = useQuery(parentSessionOptions);
+  const parentSession = sessionsUiEnabled ? queriedParentSession : null;
 
   const environmentId = taskRun?.payload?.environmentId;
   const repo = taskRun?.payload?.repo;
   const prRepo = taskRun?.prRepo;
   const prNumber = taskRun?.prNumber;
   const pullRequests = taskRun?.pullRequests ?? [];
-  const sessionHref = parentSession
-    ? `/sessions/${parentSession.sessionId}?task=${taskId}`
-    : taskRun?.payload?.fastAgentSessionId
-      ? `/sessions/${taskRun.payload.fastAgentSessionId}`
-      : null;
+  const sessionHref = sessionsUiEnabled
+    ? parentSession
+      ? `/sessions/${parentSession.sessionId}?task=${taskId}`
+      : taskRun?.payload?.fastAgentSessionId
+        ? `/sessions/${taskRun.payload.fastAgentSessionId}`
+        : null
+    : null;
 
   const badges = [
     (environmentId || repo) && (

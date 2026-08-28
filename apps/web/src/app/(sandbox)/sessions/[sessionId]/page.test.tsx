@@ -4,12 +4,14 @@ import { renderToStaticMarkup } from 'react-dom/server';
 const {
   authorizeMock,
   getFastSessionByIdMock,
+  getFastSessionTasksMock,
   getSessionByIdCommandMock,
   transcriptMock,
   sessionWorkspaceMock,
 } = vi.hoisted(() => ({
   authorizeMock: vi.fn(),
   getFastSessionByIdMock: vi.fn(),
+  getFastSessionTasksMock: vi.fn(),
   getSessionByIdCommandMock: vi.fn(),
   transcriptMock: vi.fn(
     ({ footer }: { messages: unknown[]; footer?: ReactNode }) => (
@@ -28,6 +30,7 @@ vi.mock('next/navigation', () => ({
 }));
 vi.mock('@/lib/server/fast-sessions', () => ({
   getFastSessionById: getFastSessionByIdMock,
+  getFastSessionTasks: getFastSessionTasksMock,
 }));
 vi.mock('@/trpc/commands/sessions', () => ({
   getSessionByIdCommand: getSessionByIdCommandMock,
@@ -64,6 +67,7 @@ describe('Fast session detail page', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     getSessionByIdCommandMock.mockResolvedValue(null);
+    getFastSessionTasksMock.mockResolvedValue([]);
   });
 
   it('uses the shared task workspace and renders supported session data', async () => {
@@ -189,7 +193,7 @@ describe('Fast session detail page', () => {
     );
   });
 
-  it('loads linked tasks for Fast session URLs when Sessions UI is disabled', async () => {
+  it('keeps the legacy Fast detail path when Sessions UI is disabled', async () => {
     authorizeMock.mockResolvedValue({
       success: true,
       userId: 'user-1',
@@ -226,6 +230,9 @@ describe('Fast session detail page', () => {
       messages: [],
       hasOlderMessages: false,
     });
+    getFastSessionTasksMock.mockResolvedValue([
+      { taskId: 'task-1', title: 'Delegated task' },
+    ]);
 
     renderToStaticMarkup(
       await SessionDetailPage({
@@ -233,15 +240,21 @@ describe('Fast session detail page', () => {
       }),
     );
 
-    expect(getSessionByIdCommandMock).toHaveBeenCalledWith(
+    expect(getSessionByIdCommandMock).not.toHaveBeenCalled();
+    expect(getFastSessionByIdMock).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: 'user-1' }),
+      'fast-session-3',
+    );
+    expect(getFastSessionTasksMock).toHaveBeenCalledWith(
       expect.objectContaining({ userId: 'user-1' }),
       'fast-session-3',
     );
     expect(sessionWorkspaceMock).toHaveBeenCalledWith(
       expect.objectContaining({
         session: expect.objectContaining({
-          id: 'unified-session-1',
-          tasks: [expect.objectContaining({ taskId: 'task-1' })],
+          id: 'fast-session-3',
+          taskSource: 'fast',
+          taskCards: [expect.objectContaining({ taskId: 'task-1' })],
         }),
       }),
       undefined,

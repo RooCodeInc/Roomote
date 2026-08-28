@@ -6,11 +6,13 @@ const {
   useTRPCMock,
   updateTitleMutationMock,
   parentSessionQueryMock,
+  featureFlagState,
 } = vi.hoisted(() => ({
   useSandboxLayoutMock: vi.fn(),
   useTRPCMock: vi.fn(),
   updateTitleMutationMock: vi.fn(async () => undefined),
   parentSessionQueryMock: vi.fn(),
+  featureFlagState: { sessionsUiEnabled: false },
 }));
 
 vi.mock('../../use-sandbox-layout', () => ({
@@ -19,6 +21,12 @@ vi.mock('../../use-sandbox-layout', () => ({
 
 vi.mock('@/trpc/client', () => ({
   useTRPC: useTRPCMock,
+}));
+
+vi.mock('@/hooks/useUser', () => ({
+  useAuthorizedUser: () => ({
+    featureFlags: { sessions_ui: featureFlagState.sessionsUiEnabled },
+  }),
 }));
 
 vi.mock('./TaskSessionReadTracker', () => ({
@@ -87,6 +95,7 @@ function renderHeader(
 describe('Header', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    featureFlagState.sessionsUiEnabled = false;
     parentSessionQueryMock.mockResolvedValue({
       sessionId: 'session-1',
       title: 'Parent Session',
@@ -167,7 +176,17 @@ describe('Header', () => {
     expect(screen.queryByText('OpenCode')).not.toBeInTheDocument();
   });
 
-  it('renders the parent session link regardless of the Sessions UI flag', async () => {
+  it('does not query or render Session links while Sessions UI is disabled', () => {
+    renderHeader();
+
+    expect(parentSessionQueryMock).not.toHaveBeenCalled();
+    expect(screen.queryByRole('link', { name: 'Parent Session' })).toBeNull();
+    expect(screen.queryByRole('link', { name: /Go to session/ })).toBeNull();
+  });
+
+  it('renders the parent session link while Sessions UI is enabled', async () => {
+    featureFlagState.sessionsUiEnabled = true;
+
     renderHeader();
 
     expect(
@@ -180,6 +199,7 @@ describe('Header', () => {
   });
 
   it('links to the Fast session when the task has no unified session', async () => {
+    featureFlagState.sessionsUiEnabled = true;
     parentSessionQueryMock.mockResolvedValue(null);
 
     renderHeader({
