@@ -34,7 +34,7 @@ export class GithubPrReviewLifecycleLockLostError extends Error {
   }
 }
 
-export type GithubPrReviewLifecycleLockHandle = (() => Promise<void>) & {
+type GithubPrReviewLifecycleLockHandle = (() => Promise<void>) & {
   signal: AbortSignal;
 };
 
