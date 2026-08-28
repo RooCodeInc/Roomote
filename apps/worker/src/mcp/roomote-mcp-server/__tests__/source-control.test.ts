@@ -388,4 +388,61 @@ describe('handleManageSourceControl issue actions', () => {
     });
     expect(tasksApiClient.writeSourceControl).not.toHaveBeenCalled();
   });
+
+  it('requires and forwards a review id and reason for review dismissal', async () => {
+    vi.mocked(tasksApiClient.writeSourceControl).mockResolvedValueOnce({
+      success: true,
+      action: 'dismiss_pull_request_review',
+      provider: 'github',
+      repositoryFullName: 'acme/web',
+      number: 12,
+      commentId: '900',
+      applied: true,
+      warnings: [],
+    } as never);
+
+    const result = await handleManageSourceControl(
+      {
+        action: 'dismiss_pull_request_review',
+        repositoryFullName: 'acme/web',
+        prNumber: 12,
+        reviewId: ' 900 ',
+        body: 'Requested changes have been addressed.',
+      },
+      config,
+      'task-1',
+    );
+
+    expect(JSON.parse(result.content[0]?.text ?? '')).toMatchObject({
+      success: true,
+      action: 'dismiss_pull_request_review',
+    });
+    expect(tasksApiClient.writeSourceControl).toHaveBeenCalledWith(
+      config,
+      'task-1',
+      expect.objectContaining({
+        action: 'dismiss_pull_request_review',
+        reviewId: '900',
+        body: 'Requested changes have been addressed.',
+      }),
+    );
+
+    vi.clearAllMocks();
+    const missingReviewId = await handleManageSourceControl(
+      {
+        action: 'dismiss_pull_request_review',
+        repositoryFullName: 'acme/web',
+        prNumber: 12,
+        body: 'Requested changes have been addressed.',
+      },
+      config,
+      'task-1',
+    );
+
+    expect(JSON.parse(missingReviewId.content[0]?.text ?? '')).toMatchObject({
+      success: false,
+      error: 'reviewId is required for dismiss_pull_request_review',
+    });
+    expect(tasksApiClient.writeSourceControl).not.toHaveBeenCalled();
+  });
 });
