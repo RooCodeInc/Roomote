@@ -151,7 +151,7 @@ export function captureFastAgentInferenceContext(
   });
 }
 
-export type CaptureFastAgentInferenceAttemptOutcomeInput = {
+type CaptureFastAgentInferenceAttemptOutcomeInput = {
   userId: string;
   sessionId: string;
   turnId: string;

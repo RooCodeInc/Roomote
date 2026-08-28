@@ -45,7 +45,7 @@ type FastAgentInferenceAttemptContext = Omit<
   'attemptNumber' | 'attemptScope' | 'providerRetryAttempt'
 >;
 
-export type FastAgentInferenceAttemptDiagnostics = {
+type FastAgentInferenceAttemptDiagnostics = {
   recordModelResolved: (model: string) => void;
   recordPromptStarted: () => void;
   recordProviderRetry: (attempt: number, error?: unknown) => void;
