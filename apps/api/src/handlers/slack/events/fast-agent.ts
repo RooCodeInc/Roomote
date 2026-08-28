@@ -66,7 +66,7 @@ export async function processFastAgentMessage(params: {
   launchTask: LaunchFastAgentTask;
   processingReactionName?: string;
   isExistingConversation?: boolean;
-  onAccepted?: () => void;
+  onAccepted?: (abort: () => Promise<void>) => void;
   onRejected?: () => void;
 }): Promise<void> {
   const {
@@ -128,7 +128,11 @@ export async function processFastAgentMessage(params: {
     // Resolved ahead of the turn so replies can carry the session footer;
     // the service's own getOrCreate finds this same row.
     const session = await getOrCreateFastAgentSession({ userId, conversation });
-    params.onAccepted?.();
+    params.onAccepted?.(() =>
+      releaseFastAgentLock.abort(
+        new Error('Fast suggestion launch settlement failed.'),
+      ),
+    );
 
     let threadContext: Awaited<ReturnType<typeof slack.fetchThreadMessages>> =
       [];

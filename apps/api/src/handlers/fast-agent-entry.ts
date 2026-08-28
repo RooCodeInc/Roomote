@@ -1,12 +1,12 @@
 type FastAgentEntryMode = 'explicit' | 'default';
 
 export type FastAgentStartResult =
-  | { accepted: true }
+  | { accepted: true; abort: () => Promise<void> }
   | { accepted: false; reason: string };
 
 export function startAcceptedFastAgentTurn(input: {
   run: (callbacks: {
-    onAccepted: () => void;
+    onAccepted: (abort: () => Promise<void>) => void;
     onRejected: () => void;
   }) => Promise<unknown>;
   busyMessage?: string;
@@ -20,10 +20,10 @@ export function startAcceptedFastAgentTurn(input: {
 
   void input
     .run({
-      onAccepted: () => {
+      onAccepted: (abort) => {
         if (settled) return;
         settled = true;
-        settleAcceptance?.({ accepted: true });
+        settleAcceptance?.({ accepted: true, abort });
       },
       onRejected: () => {
         if (settled) return;

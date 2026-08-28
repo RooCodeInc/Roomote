@@ -191,4 +191,32 @@ describe('launchClaimedSuggestedTask', () => {
       claimedAt,
     });
   });
+
+  it('aborts an accepted Fast turn before releasing a failed finalization', async () => {
+    const abort = vi.fn(async () => undefined);
+    mocks.finalize.mockRejectedValue(new Error('database unavailable'));
+
+    await expect(
+      launchClaimedSuggestedTask({
+        suggestion,
+        policy: {
+          usesRouterLaunch: true,
+          userDefaultEnabled: true,
+          fastAvailable: true,
+        },
+        launch: async () => ({
+          accepted: true,
+          runId: null,
+          taskId: null,
+          abort,
+        }),
+      }),
+    ).resolves.toMatchObject({
+      status: 'finalize_failed',
+      mode: 'fast',
+      cancelNote: 'Fast turn aborted',
+    });
+    expect(abort).toHaveBeenCalledOnce();
+    expect(mocks.release).toHaveBeenCalled();
+  });
 });

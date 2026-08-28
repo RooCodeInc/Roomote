@@ -41,16 +41,17 @@ describe('startAcceptedFastAgentTurn', () => {
 
   it('keeps an accepted result when completion later fails', async () => {
     const onError = vi.fn();
+    const abort = vi.fn(async () => undefined);
     const error = new Error('completion failed');
     await expect(
       startAcceptedFastAgentTurn({
         run: async ({ onAccepted }) => {
-          onAccepted();
+          onAccepted(abort);
           throw error;
         },
         onError,
       }),
-    ).resolves.toEqual({ accepted: true });
+    ).resolves.toEqual({ accepted: true, abort });
     await vi.waitFor(() => expect(onError).toHaveBeenCalledWith(error));
   });
 });

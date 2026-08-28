@@ -526,7 +526,12 @@ async function launchTaskSuggestionTaskFromReaction({
             errorLogPrefix: `Failed to start Fast suggestion response for work item ${workItemId}:`,
           });
           return fastStart.accepted
-            ? { accepted: true, runId: null, taskId: null }
+            ? {
+                accepted: true,
+                runId: null,
+                taskId: null,
+                abort: fastStart.abort,
+              }
             : fastStart;
         }
 

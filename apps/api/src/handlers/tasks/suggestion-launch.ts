@@ -15,6 +15,7 @@ type SuggestedTaskLaunchAttempt =
       accepted: true;
       runId: number | null;
       taskId: string | null;
+      abort?: () => Promise<void>;
     }
   | {
       accepted: false;
@@ -125,14 +126,26 @@ export async function launchClaimedSuggestedTask(input: {
     };
   }
 
+  const cancelAcceptedAttempt = async () => {
+    if (attempt.runId !== null) {
+      return cancelOrphanedWorkItemRunBestEffort(attempt.runId);
+    }
+    if (!attempt.abort) {
+      return 'no run id to cancel';
+    }
+    try {
+      await attempt.abort();
+      return 'Fast turn aborted';
+    } catch {
+      return 'Fast turn abort failed';
+    }
+  };
+
   let finalized: boolean;
   try {
     finalized = await finalize(attempt.taskId);
   } catch (error) {
-    const cancelNote =
-      attempt.runId === null
-        ? 'no run id to cancel'
-        : await cancelOrphanedWorkItemRunBestEffort(attempt.runId);
+    const cancelNote = await cancelAcceptedAttempt();
     await release().catch(() => undefined);
     return {
       status: 'finalize_failed',
@@ -152,10 +165,7 @@ export async function launchClaimedSuggestedTask(input: {
     };
   }
 
-  const cancelNote =
-    attempt.runId === null
-      ? 'no run id to cancel'
-      : await cancelOrphanedWorkItemRunBestEffort(attempt.runId);
+  const cancelNote = await cancelAcceptedAttempt();
   return {
     status: 'finalize_lost',
     mode,

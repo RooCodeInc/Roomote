@@ -358,7 +358,12 @@ async function launchClaimedDiscordSuggestion(input: {
             createAnchoredThread: false,
           });
           return fastStart.accepted
-            ? { accepted: true, runId: null, taskId: null }
+            ? {
+                accepted: true,
+                runId: null,
+                taskId: null,
+                abort: fastStart.abort,
+              }
             : fastStart;
         }
 

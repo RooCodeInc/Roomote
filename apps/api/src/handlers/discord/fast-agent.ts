@@ -97,7 +97,7 @@ export async function processDiscordFastAgentMessage(
     anchorMessageId?: string;
     interaction?: DiscordInteractionReplyContext;
     activeTasks?: { taskId: string }[];
-    onAccepted?: () => void;
+    onAccepted?: (abort: () => Promise<void>) => void;
     onRejected?: () => void;
   } & DiscordFastAgentSource,
 ): Promise<boolean> {
@@ -174,7 +174,11 @@ export async function processDiscordFastAgentMessage(
       userId: input.senderUserId,
       conversation,
     });
-    input.onAccepted?.();
+    input.onAccepted?.(() =>
+      releaseFastAgentLock.abort(
+        new Error('Fast suggestion launch settlement failed.'),
+      ),
+    );
     const postFastReplyWithFooter = async (text: string) => {
       const footerText = buildFastSessionReplyFooterText({
         provider: 'discord',
