@@ -14,6 +14,7 @@ import {
   db,
   eq,
   getDeploymentGitHubRoomoteMentionEnabled,
+  getSessionForTask,
   resolveTelegramRuntimeCredentials,
   tasks,
   taskRuns,
@@ -277,9 +278,12 @@ export async function createOrUpdateSourceControlPullRequestForTaskRun({
   const canonicalAttribution = displayName
     ? { ...attribution, displayName }
     : DEFAULT_ROOMOTE_COMMIT_AUTHOR;
+  const taskUrl =
+    (await buildPrAttributionFastSessionUrl(taskRun)) ??
+    buildPrAttributionTaskUrl(taskRun);
   const attributionLine = getPrBodyAttributionLine({
     attribution: canonicalAttribution,
-    taskUrl: buildPrAttributionTaskUrl(taskRun),
+    taskUrl,
     taskSurface:
       inheritedChatProvider ??
       (task?.surface === 'system' || task?.surface === 'api'
@@ -683,6 +687,31 @@ async function createOrUpdateGitHubPullRequest({
 
 function buildPrAttributionTaskUrl(taskRun: TaskRun): string {
   const url = new URL(`/task/${taskRun.taskId}`, Env.R_APP_URL);
+  url.searchParams.set('utm_source', 'github-comment');
+  url.searchParams.set('utm_medium', 'link');
+  url.searchParams.set('utm_campaign', taskRun.payloadKind);
+  return url.toString();
+}
+
+async function buildPrAttributionFastSessionUrl(
+  taskRun: TaskRun,
+): Promise<string | undefined> {
+  const fastAgentSessionId = getPayloadRecord(
+    taskRun.payload,
+  ).fastAgentSessionId;
+  if (typeof fastAgentSessionId !== 'string') {
+    return undefined;
+  }
+
+  const session = await getSessionForTask(db, taskRun.taskId);
+  if (
+    session?.visibility !== 'visible' ||
+    session.fastConversationId !== fastAgentSessionId
+  ) {
+    return undefined;
+  }
+
+  const url = new URL(`/sessions/${session.id}`, Env.R_APP_URL);
   url.searchParams.set('utm_source', 'github-comment');
   url.searchParams.set('utm_medium', 'link');
   url.searchParams.set('utm_campaign', taskRun.payloadKind);
