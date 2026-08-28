@@ -496,6 +496,8 @@ export function Home({
         return;
       }
 
+      // Auto is no longer offered in the picker, but stored workspace
+      // preferences may still restore it; treat it as Fast.
       if (isAutoWorkspace) {
         if (!submission.description && !submission.images?.length) return;
         await startFastSession({
@@ -566,7 +568,7 @@ export function Home({
             >
               <div ref={workspaceRef}>
                 <SelectWorkspace
-                  allowAuto
+                  allowFast
                   autoSelectDefaultWorkspace={false}
                   onInvalidWorkspaceReset={handleInvalidWorkspaceReset}
                   allowBranchSelection={canSelectBranch}

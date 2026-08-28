@@ -40,7 +40,6 @@ type SessionListInput = {
   status?: 'active' | 'needs_input' | 'blocked' | 'ready';
   user?: string | null;
   repository?: string | null;
-  environment?: string | null;
   pullRequest?: string | null;
   source?: string | null;
   model?: string | null;
@@ -151,20 +150,6 @@ function listConditions(auth: SessionAuth, input: SessionListInput) {
     input.repository
       ? taskExistsCondition(eq(tasks.repositoryName, input.repository))
       : undefined,
-    input.environment
-      ? exists(
-          db
-            .select({ one: sql`1` })
-            .from(sessionTasks)
-            .innerJoin(taskRuns, eq(taskRuns.taskId, sessionTasks.taskId))
-            .where(
-              and(
-                eq(sessionTasks.sessionId, sessions.id),
-                sql`${taskRuns.payload} ->> 'environmentId' = ${input.environment}`,
-              ),
-            ),
-        )
-      : undefined,
     input.model ? taskExistsCondition(eq(tasks.model, input.model)) : undefined,
     input.pullRequest && Number.isFinite(pullRequestNumber)
       ? exists(
@@ -230,6 +215,30 @@ const baseSelection = {
   updatedAt: sessions.updatedAt,
 };
 
+function externalVisibleFastMessageConditions(userId: string) {
+  return [
+    or(
+      sql`${fastAgentMessages.metadata} ->> 'userId' IS NULL`,
+      sql`${fastAgentMessages.metadata} ->> 'userId' <> ${userId}`,
+    ),
+    // Only events the transcript (and therefore the read cursor) can reach
+    // may count as unread, or invisible platform events would pin the badge
+    // forever.
+    sql`coalesce(${fastAgentMessages.metadata} ->> 'visibleInTranscript', 'true') <> 'false'`,
+  ];
+}
+
+type HydratedLinkedTask = {
+  sessionId: string;
+  taskId: string;
+  title: string;
+  workflow: string;
+  state: string;
+  repositoryName: string | null;
+  model: string | null;
+  activityAt: number;
+};
+
 async function hydrateSessionRows(
   auth: SessionAuth,
   rows: Array<
@@ -239,6 +248,10 @@ async function hydrateSessionRows(
       ownerImageUrl: string | null;
     }
   >,
+  options: {
+    /** Skip the linked-tasks query when the caller already fetched them. */
+    preloadedLinkedTasks?: HydratedLinkedTask[];
+  } = {},
 ) {
   if (rows.length === 0) return [];
   const ids = rows.map((row) => row.id);
@@ -251,22 +264,23 @@ async function hydrateSessionRows(
     externalFastActivity,
     pins,
   ] = await Promise.all([
-    db
-      .select({
-        sessionId: sessionTasks.sessionId,
-        taskId: tasks.id,
-        title: tasks.title,
-        workflow: tasks.workflow,
-        state: tasks.state,
-        repositoryName: tasks.repositoryName,
-        model: tasks.model,
-        activityAt: tasks.activityAt,
-      })
-      .from(sessionTasks)
-      .innerJoin(tasks, eq(tasks.id, sessionTasks.taskId))
-      .where(
-        and(inArray(sessionTasks.sessionId, ids), isNull(tasks.deletedAt)),
-      ),
+    options.preloadedLinkedTasks ??
+      db
+        .select({
+          sessionId: sessionTasks.sessionId,
+          taskId: tasks.id,
+          title: tasks.title,
+          workflow: tasks.workflow,
+          state: tasks.state,
+          repositoryName: tasks.repositoryName,
+          model: tasks.model,
+          activityAt: tasks.activityAt,
+        })
+        .from(sessionTasks)
+        .innerJoin(tasks, eq(tasks.id, sessionTasks.taskId))
+        .where(
+          and(inArray(sessionTasks.sessionId, ids), isNull(tasks.deletedAt)),
+        ),
     db
       .select({
         sessionId: sessionParticipants.sessionId,
@@ -331,14 +345,7 @@ async function hydrateSessionRows(
       .where(
         and(
           inArray(sessions.id, ids),
-          or(
-            sql`${fastAgentMessages.metadata} ->> 'userId' IS NULL`,
-            sql`${fastAgentMessages.metadata} ->> 'userId' <> ${auth.userId}`,
-          ),
-          // Only events the transcript (and therefore the read cursor) can
-          // reach may count as unread, or invisible platform events would pin
-          // the badge forever.
-          sql`coalesce(${fastAgentMessages.metadata} ->> 'visibleInTranscript', 'true') <> 'false'`,
+          ...externalVisibleFastMessageConditions(auth.userId),
         ),
       )
       .groupBy(sessions.id),
@@ -566,8 +573,21 @@ export async function getSessionById(auth: SessionAuth, sessionId: string) {
     (await findAccessibleSession(auth, sessionId)) ??
     (await findAccessibleSessionByFastConversationId(auth, sessionId));
   if (!session) return null;
-  const [hydrated] = await hydrateSessionRows(auth, [session]);
+  // Fetch the task rollups once and feed them into hydration; this endpoint
+  // is polled, so the duplicate linked-tasks join was pure waste.
   const sessionTaskDetails = await getSessionTasks(session.id);
+  const [hydrated] = await hydrateSessionRows(auth, [session], {
+    preloadedLinkedTasks: sessionTaskDetails.map((task) => ({
+      sessionId: session.id,
+      taskId: task.taskId,
+      title: task.title,
+      workflow: task.workflow,
+      state: task.state,
+      repositoryName: task.repositoryName,
+      model: task.model,
+      activityAt: task.activityAt,
+    })),
+  });
   const liveStatus = deriveSessionStatus({
     conversationResponding: isSessionConversationResponding(session),
     tasks: sessionTaskDetails.map((task) => ({
@@ -648,17 +668,13 @@ export async function getLatestExternalSessionEvent(
 
   const [[latestTask], fastRows] = await Promise.all([
     db
-      .select({
-        taskId: tasks.id,
-        activityAt: sql<number>`max(${tasks.activityAt})::bigint`,
-      })
+      .select({ taskId: tasks.id, activityAt: tasks.activityAt })
       .from(sessionTasks)
       .innerJoin(tasks, eq(tasks.id, sessionTasks.taskId))
       .where(
         and(eq(sessionTasks.sessionId, sessionId), isNull(tasks.deletedAt)),
       )
-      .groupBy(tasks.id)
-      .orderBy(desc(sql`max(${tasks.activityAt})`))
+      .orderBy(desc(tasks.activityAt))
       .limit(1),
     session.fastConversationId
       ? db
@@ -667,11 +683,7 @@ export async function getLatestExternalSessionEvent(
           .where(
             and(
               eq(fastAgentMessages.conversationId, session.fastConversationId),
-              or(
-                sql`${fastAgentMessages.metadata} ->> 'userId' IS NULL`,
-                sql`${fastAgentMessages.metadata} ->> 'userId' <> ${auth.userId}`,
-              ),
-              sql`coalesce(${fastAgentMessages.metadata} ->> 'visibleInTranscript', 'true') <> 'false'`,
+              ...externalVisibleFastMessageConditions(auth.userId),
             ),
           )
           .orderBy(desc(fastAgentMessages.ts))

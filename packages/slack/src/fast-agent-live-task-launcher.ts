@@ -23,7 +23,7 @@ type SlackLiveTaskCardNotifier = Pick<
   'postMessage' | 'postMessageDetailed' | 'updateMessage'
 >;
 
-export const PREPARING_WORKSPACE_TITLE = 'Preparing workspace…';
+const PREPARING_WORKSPACE_TITLE = 'Preparing workspace…';
 
 function describeError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);

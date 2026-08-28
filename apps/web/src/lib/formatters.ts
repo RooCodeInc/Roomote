@@ -185,5 +185,6 @@ export function formatTokens(tokens: number): string {
  * label instead of the raw `__all_repositories__` value.
  */
 export function formatRepositoryName(name: string): string {
-  return name === ALL_REPOSITORIES ? 'All Repositories' : name;
+  // replaceAll also covers combined values like `repo#123` PR labels.
+  return name.replaceAll(ALL_REPOSITORIES, 'All Repositories');
 }

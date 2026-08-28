@@ -5,9 +5,9 @@ import {
   eq,
   fastAgentConversations,
   fastAgentMessages,
+  inArray,
   isNull,
   lt,
-  or,
   sessions,
   sql,
 } from '@roomote/db/server';
@@ -121,6 +121,16 @@ export async function refreshFastAgentSessionTitle({
     }
 
     await db.transaction(async (tx) => {
+      // Re-read the conversation title under a row lock: the pre-generation
+      // snapshot may be stale by now, and the session guard below must match
+      // the title the session was actually seeded/synced from.
+      const [current] = await tx
+        .select({ title: fastAgentConversations.title })
+        .from(fastAgentConversations)
+        .where(eq(fastAgentConversations.id, sessionId))
+        .for('update');
+      if (!current) return;
+
       const [updatedConversation] = await tx
         .update(fastAgentConversations)
         .set({ title, llmTitleCheckpoint: checkpoint })
@@ -136,17 +146,23 @@ export async function refreshFastAgentSessionTitle({
 
       // Keep the unified Session's title in step with the generated
       // conversation title, but never clobber a manual Session rename: only
-      // overwrite the creation placeholder or a previous generated title.
+      // overwrite the creation placeholder or the previous conversation
+      // title (session titles are seeded trimmed, so match both forms).
+      const previousTitleCandidates = new Set(['New session']);
+      if (current.title) {
+        previousTitleCandidates.add(current.title);
+        const trimmed = current.title.trim();
+        if (trimmed) {
+          previousTitleCandidates.add(trimmed);
+        }
+      }
       await tx
         .update(sessions)
         .set({ title, updatedAt: new Date() })
         .where(
           and(
             eq(sessions.fastConversationId, sessionId),
-            or(
-              eq(sessions.title, 'New session'),
-              eq(sessions.title, conversation.title ?? ''),
-            ),
+            inArray(sessions.title, [...previousTitleCandidates]),
           ),
         );
     });

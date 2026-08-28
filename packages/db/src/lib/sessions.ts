@@ -269,8 +269,23 @@ export async function ensureSessionForTask(
     return existing;
   }
 
-  let session = input.fastConversationId
-    ? await getSessionForFastConversation(tx, input.fastConversationId)
+  // Callers may pass a raw payload conversation id that was never persisted
+  // (or was renamed away). Verify it exists before referencing it so the
+  // sessions insert cannot hit the FK and abort the caller's transaction.
+  let fastConversationId = input.fastConversationId ?? null;
+  if (fastConversationId) {
+    const [conversation] = await tx
+      .select({ id: fastAgentConversations.id })
+      .from(fastAgentConversations)
+      .where(eq(fastAgentConversations.id, fastConversationId))
+      .limit(1);
+    if (!conversation) {
+      fastConversationId = null;
+    }
+  }
+
+  let session = fastConversationId
+    ? await getSessionForFastConversation(tx, fastConversationId)
     : null;
   let createdCandidate = false;
 
@@ -301,7 +316,7 @@ export async function ensureSessionForTask(
         ...owner,
         sourceSurface: task.surface,
         sourceTrigger: task.trigger,
-        fastConversationId: input.fastConversationId ?? null,
+        fastConversationId,
         visibility: task.visibility,
         activityAt: task.activityAt,
         cachedStatus: deriveSessionStatus({
@@ -320,8 +335,8 @@ export async function ensureSessionForTask(
 
     session =
       inserted ??
-      (input.fastConversationId
-        ? await getSessionForFastConversation(tx, input.fastConversationId)
+      (fastConversationId
+        ? await getSessionForFastConversation(tx, fastConversationId)
         : null);
     createdCandidate = inserted !== undefined;
   }

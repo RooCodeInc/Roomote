@@ -7,7 +7,9 @@ import {
   eq,
   fastAgentConversations,
   gt,
+  inArray,
   isNull,
+  lt,
   or,
   sessionBackfillState,
   sessions,
@@ -20,6 +22,8 @@ import {
 const LOG_PREFIX = '[sessions]';
 const BACKFILL_KEY = 'unified-sessions-v1';
 const BATCH_SIZE = 100;
+/** Slack subtracted from the last-run watermark when bounding orphan scans. */
+const ORPHAN_SCAN_SLACK_MS = 60 * 60 * 1000;
 
 type Cursor = { createdAt: Date; id: string } | null;
 
@@ -92,7 +96,16 @@ async function backfillFastConversations(cursor: Cursor): Promise<boolean> {
     .limit(BATCH_SIZE);
 
   for (const row of rows) {
-    await db.transaction((tx) => ensureSessionForFastConversation(tx, row.id));
+    try {
+      await db.transaction((tx) =>
+        ensureSessionForFastConversation(tx, row.id),
+      );
+    } catch (error) {
+      console.error(
+        `${LOG_PREFIX} backfill failed for fast conversation ${row.id}`,
+        error,
+      );
+    }
   }
 
   const last = rows.at(-1);
@@ -126,21 +139,25 @@ async function backfillTasks(cursor: Cursor): Promise<boolean> {
     .limit(BATCH_SIZE);
 
   for (const row of rows) {
-    const latestFastRun = await db.query.taskRuns.findFirst({
-      where: and(
-        eq(taskRuns.taskId, row.id),
-        sql`${taskRuns.fastAgentSessionId} IS NOT NULL`,
-      ),
-      columns: { fastAgentSessionId: true },
-      orderBy: desc(taskRuns.id),
-    });
-    await db.transaction((tx) =>
-      ensureSessionForTask(tx, {
-        taskId: row.id,
-        fastConversationId: latestFastRun?.fastAgentSessionId ?? null,
-        origin: 'backfill',
-      }),
-    );
+    try {
+      const latestFastRun = await db.query.taskRuns.findFirst({
+        where: and(
+          eq(taskRuns.taskId, row.id),
+          sql`${taskRuns.fastAgentSessionId} IS NOT NULL`,
+        ),
+        columns: { fastAgentSessionId: true },
+        orderBy: desc(taskRuns.id),
+      });
+      await db.transaction((tx) =>
+        ensureSessionForTask(tx, {
+          taskId: row.id,
+          fastConversationId: latestFastRun?.fastAgentSessionId ?? null,
+          origin: 'backfill',
+        }),
+      );
+    } catch (error) {
+      console.error(`${LOG_PREFIX} backfill failed for task ${row.id}`, error);
+    }
   }
 
   const last = rows.at(-1);
@@ -169,7 +186,14 @@ async function backfillParticipants(): Promise<void> {
   console.info(`${LOG_PREFIX} backfill participants complete`);
 }
 
-async function reconcileRecentSessions(): Promise<void> {
+async function reconcileRecentSessions(lastRunAt: Date | null): Promise<void> {
+  // After backfill completion, bound the steady-state orphan scans to rows
+  // created since the previous reconcile (with slack) so they stop scanning
+  // entire tables every run. A null watermark means scan unbounded once.
+  const cutoff = lastRunAt
+    ? new Date(lastRunAt.getTime() - ORPHAN_SCAN_SLACK_MS)
+    : null;
+
   // Fast conversations without a session row (e.g. created before this
   // release finished its backfill) are adopted here so the unified list
   // converges without another full backfill.
@@ -180,14 +204,26 @@ async function reconcileRecentSessions(): Promise<void> {
       sessions,
       eq(sessions.fastConversationId, fastAgentConversations.id),
     )
-    .where(isNull(sessions.id))
+    .where(
+      and(
+        isNull(sessions.id),
+        cutoff ? gt(fastAgentConversations.createdAt, cutoff) : undefined,
+      ),
+    )
     .orderBy(desc(fastAgentConversations.updatedAt))
     .limit(BATCH_SIZE);
 
   for (const conversation of orphanConversations) {
-    await db.transaction((tx) =>
-      ensureSessionForFastConversation(tx, conversation.id),
-    );
+    try {
+      await db.transaction((tx) =>
+        ensureSessionForFastConversation(tx, conversation.id),
+      );
+    } catch (error) {
+      console.error(
+        `${LOG_PREFIX} reconcile failed for fast conversation ${conversation.id}`,
+        error,
+      );
+    }
   }
 
   const orphanTasks = await db
@@ -199,15 +235,23 @@ async function reconcileRecentSessions(): Promise<void> {
         eq(tasks.visibility, 'visible'),
         isNull(tasks.deletedAt),
         isNull(sessionTasks.taskId),
+        cutoff ? gt(tasks.createdAt, cutoff) : undefined,
       ),
     )
     .orderBy(desc(tasks.activityAt))
     .limit(BATCH_SIZE);
 
   for (const task of orphanTasks) {
-    await db.transaction((tx) =>
-      ensureSessionForTask(tx, { taskId: task.id, origin: 'backfill' }),
-    );
+    try {
+      await db.transaction((tx) =>
+        ensureSessionForTask(tx, { taskId: task.id, origin: 'backfill' }),
+      );
+    } catch (error) {
+      console.error(
+        `${LOG_PREFIX} reconcile failed for task ${task.id}`,
+        error,
+      );
+    }
   }
 
   const recent = await db
@@ -217,13 +261,55 @@ async function reconcileRecentSessions(): Promise<void> {
     .orderBy(desc(sessions.activityAt))
     .limit(BATCH_SIZE);
   for (const session of recent) {
-    await touchSessionActivity(db, session.id, session.activityAt);
+    try {
+      await touchSessionActivity(db, session.id, session.activityAt);
+    } catch (error) {
+      console.error(
+        `${LOG_PREFIX} refresh failed for session ${session.id}`,
+        error,
+      );
+    }
   }
+
+  // Sessions stuck 'active'/'needs_input' on an expired (or missing) lease
+  // may be older than the top-100-by-activity window; heal them explicitly
+  // so wedged sessions converge regardless of recency.
+  const expiredLeases = await db
+    .select({ id: sessions.id, activityAt: sessions.activityAt })
+    .from(sessions)
+    .where(
+      and(
+        eq(sessions.visibility, 'visible'),
+        inArray(sessions.cachedStatus, ['active', 'needs_input']),
+        or(
+          isNull(sessions.respondingUntil),
+          lt(sessions.respondingUntil, new Date()),
+        ),
+      ),
+    )
+    .limit(BATCH_SIZE);
+  for (const session of expiredLeases) {
+    try {
+      await touchSessionActivity(db, session.id, session.activityAt);
+    } catch (error) {
+      console.error(
+        `${LOG_PREFIX} lease heal failed for session ${session.id}`,
+        error,
+      );
+    }
+  }
+
+  // Advance only the watermark; updateState would clobber completedAt.
+  await db
+    .update(sessionBackfillState)
+    .set({ lastRunAt: new Date(), updatedAt: new Date() })
+    .where(eq(sessionBackfillState.key, BACKFILL_KEY));
 
   console.info(`${LOG_PREFIX} reconciliation`, {
     orphanFastConversations: orphanConversations.length,
     orphanVisibleTasks: orphanTasks.length,
     refreshedSessions: recent.length,
+    healedExpiredLeases: expiredLeases.length,
   });
 }
 
@@ -232,7 +318,7 @@ export async function sessionsReconcileJob(): Promise<void> {
     where: eq(sessionBackfillState.key, BACKFILL_KEY),
   });
   if (state?.completedAt) {
-    await reconcileRecentSessions();
+    await reconcileRecentSessions(state.lastRunAt);
     return;
   }
 
@@ -246,8 +332,16 @@ export async function sessionsReconcileJob(): Promise<void> {
     const complete = await backfillFastConversations(cursor);
     if (!complete) return;
   }
-  if (phase === 'fast_conversations' || phase === 'tasks') {
-    const complete = await backfillTasks(phase === 'tasks' ? cursor : null);
+  // 'fast_tasks' is the pre-rename name of the tasks phase; deployments that
+  // ran an earlier build of this branch may still be parked there.
+  if (
+    phase === 'fast_conversations' ||
+    phase === 'fast_tasks' ||
+    phase === 'tasks'
+  ) {
+    const complete = await backfillTasks(
+      phase === 'fast_tasks' || phase === 'tasks' ? cursor : null,
+    );
     if (!complete) return;
   }
   await backfillParticipants();

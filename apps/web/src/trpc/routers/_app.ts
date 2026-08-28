@@ -2843,10 +2843,17 @@ export const appRouter = createRouter({
       ),
     markRead: protectedProcedure
       .input(
-        sessionIdInputSchema.extend({
-          throughEventAt: z.number().nonnegative().optional(),
-          throughEventId: z.string().min(1).optional(),
-        }),
+        sessionIdInputSchema
+          .extend({
+            throughEventAt: z.number().nonnegative().optional(),
+            throughEventId: z.string().min(1).optional(),
+          })
+          .refine(
+            (value) =>
+              (value.throughEventAt === undefined) ===
+              (value.throughEventId === undefined),
+            'Pass both cursor fields or neither.',
+          ),
       )
       .mutation(({ ctx: { auth }, input }) =>
         markSessionReadCommand(auth, input),

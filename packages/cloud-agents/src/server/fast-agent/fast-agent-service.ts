@@ -42,7 +42,10 @@ import {
 } from '../../utils';
 import { resolveRoomoteReleaseVersion } from '../../release-version';
 import { getAvailableEnvironments, type RoutableEnvironment } from '../router';
-import { FAST_AGENT_MODEL_ROLE } from './fast-agent-constants';
+import {
+  FAST_AGENT_MODEL_ROLE,
+  FAST_RESPONDING_LEASE_MS,
+} from './fast-agent-constants';
 import { buildFastAgentSystemPrompt } from './fast-agent-prompt';
 import {
   appendFastAgentVisibleMessages,
@@ -139,10 +142,6 @@ const showWidgetArgsSchema = z.object({
 });
 const FAST_AGENT_DEFAULT_SLACK_HISTORY_LOOKBACK_MS = 24 * 60 * 60 * 1000;
 const FAST_AGENT_CANONICAL_TOOL_OUTPUT_MAX_CHARS = 50_000;
-
-// Generous ceiling on one fast-agent turn: long enough for delegation-heavy
-// responses, short enough that a crashed turn self-heals the session status.
-const FAST_RESPONDING_LEASE_MS = 15 * 60 * 1000;
 
 async function setFastSessionResponding(
   fastConversationId: string,

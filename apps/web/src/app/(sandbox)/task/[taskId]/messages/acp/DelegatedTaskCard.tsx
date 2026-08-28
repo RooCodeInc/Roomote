@@ -2,6 +2,8 @@
 
 import { useQuery } from '@tanstack/react-query';
 
+import { isExitedRunStatus } from '@roomote/types';
+
 import { ChevronRight, Skeleton } from '@/components/system';
 import { TaskStatusIndicator } from '@/components/sandbox';
 import { useTRPC } from '@/trpc/client';
@@ -20,9 +22,16 @@ export function DelegatedTaskCard({
     trpc.sandboxSession.byTaskId.queryOptions(
       { taskId },
       {
-        // The server omits refetchInterval once the run is settled — that is
-        // a stop signal, not missing data. Do not default it back to polling.
-        refetchInterval: (query) => query.state.data?.refetchInterval ?? false,
+        // The server only supplies refetchInterval during startup/snapshot
+        // fast-poll phases; its absence is NOT a settled signal. Keep polling
+        // until the run actually exits, then stop.
+        refetchInterval: (query) => {
+          const data = query.state.data;
+          if (data?.refetchInterval) return data.refetchInterval;
+          return data && isExitedRunStatus(data.taskRun?.status)
+            ? false
+            : 2_000;
+        },
       },
     ),
   );

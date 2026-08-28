@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 
 import { useTRPCClient } from '@/trpc/client';
 
@@ -11,10 +11,16 @@ import { useTRPCClient } from '@/trpc/client';
  */
 export function useMarkSessionRead(sessionId: string) {
   const trpc = useTRPCClient();
+  const lastRunAtRef = useRef(0);
 
   useEffect(() => {
     const markRead = () => {
       if (document.visibilityState !== 'visible') return;
+      // Returning to a tab fires focus AND visibilitychange back-to-back;
+      // one mutation is enough.
+      const now = Date.now();
+      if (now - lastRunAtRef.current < 1_000) return;
+      lastRunAtRef.current = now;
       void trpc.sessions.markRead.mutate({ sessionId });
     };
     markRead();

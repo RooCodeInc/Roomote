@@ -355,7 +355,8 @@ describe('Home', () => {
     render(<Home initialPlaceholderIndex={0} />);
 
     expect(screen.queryByText(/Select agent /)).not.toBeInTheDocument();
-    expect(screen.getByTestId('allow-auto')).toHaveTextContent('true');
+    // Auto was retired from the picker (identical to Fast); Fast is offered.
+    expect(screen.getByTestId('allow-auto')).toHaveTextContent('false');
     expect(mockUseCreateStandardTaskRun).toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole('button', { name: 'Use auto workspace' }));

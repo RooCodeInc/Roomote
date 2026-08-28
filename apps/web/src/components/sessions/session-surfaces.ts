@@ -1,8 +1,12 @@
+import type { TaskSurface } from '@roomote/types';
+
+import { getTaskSurfaceLabel } from '@/lib/task-surface-label';
+
 /**
  * One registry for every surface a Session can originate from (the
- * sessions_source_surface_check constraint's value set). The filter options,
- * labels, and brand icons all derive from here so a new surface shows up
- * everywhere at once.
+ * sessions_source_surface_check constraint's value set). Labels come from the
+ * canonical getTaskSurfaceLabel map so the filter, cards, and analytics can
+ * never disagree; this module adds the session-only entries and brand icons.
  */
 
 type SessionSurfaceBrandIcon =
@@ -21,19 +25,27 @@ type SurfaceDescriptor = {
   brandIcon?: SessionSurfaceBrandIcon;
 };
 
+const surface = (
+  value: TaskSurface,
+  brandIcon?: SessionSurfaceBrandIcon,
+): SurfaceDescriptor => ({
+  label: getTaskSurfaceLabel(value) ?? value,
+  brandIcon,
+});
+
 export const SESSION_SURFACES: Record<string, SurfaceDescriptor> = {
-  web: { label: 'Web' },
-  api: { label: 'API' },
-  slack: { label: 'Slack' },
-  teams: { label: 'Teams', brandIcon: 'teams' },
-  telegram: { label: 'Telegram', brandIcon: 'telegram' },
-  discord: { label: 'Discord', brandIcon: 'discord' },
-  linear: { label: 'Linear', brandIcon: 'linear' },
-  github: { label: 'GitHub', brandIcon: 'github' },
-  gitlab: { label: 'GitLab', brandIcon: 'gitlab' },
-  gitea: { label: 'Gitea', brandIcon: 'gitea' },
-  ado: { label: 'Azure DevOps', brandIcon: 'ado' },
-  bitbucket: { label: 'Bitbucket', brandIcon: 'bitbucket' },
+  web: surface('web'),
+  api: surface('api'),
+  slack: surface('slack'),
+  teams: surface('teams', 'teams'),
+  telegram: surface('telegram', 'telegram'),
+  discord: surface('discord', 'discord'),
+  linear: surface('linear', 'linear'),
+  github: surface('github', 'github'),
+  gitlab: surface('gitlab', 'gitlab'),
+  gitea: surface('gitea', 'gitea'),
+  ado: surface('ado', 'ado'),
+  bitbucket: surface('bitbucket', 'bitbucket'),
   system: { label: 'System' },
   automation: { label: 'Automation' },
 };

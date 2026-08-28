@@ -390,6 +390,31 @@ describe('session helpers', () => {
     ).toHaveLength(2);
   });
 
+  it('ignores an unknown Fast conversation id instead of aborting', async () => {
+    const user = await userFactory.create();
+    createdUserIds.push(user.id);
+    const task = await taskFactory.create({ initiatorUserId: user.id });
+    createdTaskIds.push(task.id);
+
+    const session = await db.transaction((tx) =>
+      ensureSessionForTask(tx, {
+        taskId: task.id,
+        fastConversationId: crypto.randomUUID(),
+        origin: 'fast_delegation',
+      }),
+    );
+
+    expect(session).not.toBeNull();
+    if (session) createdSessionIds.push(session.id);
+    expect(session?.fastConversationId).toBeNull();
+    expect(
+      await db
+        .select()
+        .from(sessionTasks)
+        .where(eq(sessionTasks.taskId, task.id)),
+    ).toHaveLength(1);
+  });
+
   it('creates one Session when a Fast conversation is created repeatedly', async () => {
     const user = await userFactory.create();
     createdUserIds.push(user.id);

@@ -16,6 +16,7 @@ import {
 } from '@roomote/db/server';
 import { fastAgentConversationSchema } from '@roomote/types';
 
+import { FAST_RESPONDING_LEASE_MS } from './fast-agent-constants';
 import type { FastAgentConversation } from './fast-agent-conversation';
 
 export type FastAgentConversationRecord = {
@@ -373,7 +374,19 @@ export const fastAgentConversationRepository: FastAgentConversationRepository =
             tx,
             session.id,
             Math.floor(message.ts / 1000),
-            { recomputeStatus: false },
+            {
+              recomputeStatus: false,
+              // An assistant message means the agent is still producing
+              // output; re-extend the responding lease so long turns do not
+              // expire it mid-stream.
+              ...(message.role === 'assistant'
+                ? {
+                    respondingUntil: new Date(
+                      Date.now() + FAST_RESPONDING_LEASE_MS,
+                    ),
+                  }
+                : {}),
+            },
           );
           const messageUserId = message.metadata?.userId;
           if (message.role === 'user' && typeof messageUserId === 'string') {

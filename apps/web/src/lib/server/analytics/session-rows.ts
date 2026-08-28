@@ -1,4 +1,4 @@
-import type { TaskSurface } from '@roomote/types';
+import { getSessionStatusLabel, type TaskSurface } from '@roomote/types';
 import {
   and,
   db,
@@ -70,7 +70,7 @@ export async function getSessionAnalyticsRows(
       value: 1,
       dimensions: {
         user: { key: owner, label: owner },
-        status: { key: status, label: status.replace('_', ' ') },
+        status: { key: status, label: getSessionStatusLabel(status) },
         source: createLabelBackedDimensionValue(sourceLabel),
         ownerKind: { key: row.ownerKind, label: row.ownerKind },
         hasExecution: { key: hasExecution, label: hasExecution },

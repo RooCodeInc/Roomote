@@ -27,6 +27,9 @@ vi.mock('@/lib/server/auth-context', () => ({ authorize: authorizeMock }));
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ replace: vi.fn() }),
   useSearchParams: () => new URLSearchParams(),
+  notFound: () => {
+    throw new Error('NEXT_NOT_FOUND');
+  },
 }));
 vi.mock('@/lib/server/fast-sessions', () => ({
   getFastSessionById: getFastSessionByIdMock,
@@ -80,7 +83,7 @@ describe('Session detail page', () => {
       isAdmin: false,
     });
     getFastSessionByIdMock.mockResolvedValue({
-      id: 'session-1',
+      id: '6a1f8f1e-0000-4000-8000-000000000001',
       userId: 'user-1',
       ownerName: 'User',
       ownerEmail: 'user@example.com',
@@ -132,7 +135,9 @@ describe('Session detail page', () => {
 
     const html = renderToStaticMarkup(
       await SessionDetailPage({
-        params: Promise.resolve({ sessionId: 'session-1' }),
+        params: Promise.resolve({
+          sessionId: '6a1f8f1e-0000-4000-8000-000000000001',
+        }),
       }),
     );
 
@@ -142,7 +147,7 @@ describe('Session detail page', () => {
     expect(html).not.toContain('OpenCode workspace details unavailable');
     expect(transcriptMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        sessionId: 'session-1',
+        sessionId: '6a1f8f1e-0000-4000-8000-000000000001',
         canReply: true,
         fallbackTitle: 'Question',
         initialMessages: expect.arrayContaining([
@@ -160,7 +165,7 @@ describe('Session detail page', () => {
       isAdmin: false,
     });
     getFastSessionByIdMock.mockResolvedValue({
-      id: 'session-2',
+      id: '6a1f8f1e-0000-4000-8000-000000000003',
       userId: 'user-1',
       ownerName: 'User',
       ownerEmail: 'user@example.com',
@@ -180,14 +185,16 @@ describe('Session detail page', () => {
 
     const html = renderToStaticMarkup(
       await SessionDetailPage({
-        params: Promise.resolve({ sessionId: 'session-2' }),
+        params: Promise.resolve({
+          sessionId: '6a1f8f1e-0000-4000-8000-000000000003',
+        }),
       }),
     );
 
     expect(html).not.toContain('b3b0a53e-6dab-4bb8-b3a5-111111111111');
     expect(transcriptMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        sessionId: 'session-2',
+        sessionId: '6a1f8f1e-0000-4000-8000-000000000003',
         canReply: true,
         initialTitle: 'Rotate the API keys',
         fallbackTitle: 'New session',
@@ -203,13 +210,13 @@ describe('Session detail page', () => {
       isAdmin: false,
     });
     getSessionByIdCommandMock.mockResolvedValue({
-      id: 'unified-session-1',
+      id: '6a1f8f1e-0000-4000-8000-000000000002',
       title: 'Session title',
       ownerName: 'User',
       ownerEmail: 'user@example.com',
       ownerImageUrl: null,
       sourceSurface: 'slack',
-      fastConversationId: 'fast-session-3',
+      fastConversationId: '6a1f8f1e-0000-4000-8000-000000000005',
       inferenceCostMicroUsd: 0,
       createdAt: new Date('2026-01-01T00:00:00.000Z'),
       status: 'active',
@@ -221,7 +228,7 @@ describe('Session detail page', () => {
       ],
     });
     getFastSessionByIdMock.mockResolvedValue({
-      id: 'fast-session-3',
+      id: '6a1f8f1e-0000-4000-8000-000000000005',
       ownerName: 'User',
       ownerEmail: 'user@example.com',
       surface: 'slack',
@@ -235,23 +242,25 @@ describe('Session detail page', () => {
 
     renderToStaticMarkup(
       await SessionDetailPage({
-        params: Promise.resolve({ sessionId: 'unified-session-1' }),
+        params: Promise.resolve({
+          sessionId: '6a1f8f1e-0000-4000-8000-000000000002',
+        }),
       }),
     );
 
     expect(getSessionByIdCommandMock).toHaveBeenCalledWith(
       expect.objectContaining({ userId: 'user-1' }),
-      'unified-session-1',
+      '6a1f8f1e-0000-4000-8000-000000000002',
     );
     expect(getFastSessionByIdMock).toHaveBeenCalledWith(
       expect.objectContaining({ userId: 'user-1' }),
-      'fast-session-3',
+      '6a1f8f1e-0000-4000-8000-000000000005',
     );
     expect(getFastSessionTasksMock).not.toHaveBeenCalled();
     expect(sessionWorkspaceMock).toHaveBeenCalledWith(
       expect.objectContaining({
         session: expect.objectContaining({
-          id: 'unified-session-1',
+          id: '6a1f8f1e-0000-4000-8000-000000000002',
           status: 'active',
           tasks: [expect.objectContaining({ taskId: 'task-1' })],
         }),
@@ -260,7 +269,7 @@ describe('Session detail page', () => {
     );
     expect(transcriptMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        sessionId: 'fast-session-3',
+        sessionId: '6a1f8f1e-0000-4000-8000-000000000005',
         canReply: true,
         initialTitle: 'Session title',
         fallbackTitle: 'Session title',
@@ -276,7 +285,7 @@ describe('Session detail page', () => {
       isAdmin: false,
     });
     getSessionByIdCommandMock.mockResolvedValue({
-      id: 'unified-session-2',
+      id: '6a1f8f1e-0000-4000-8000-000000000004',
       title: 'Task-only session',
       ownerName: 'User',
       ownerEmail: 'user@example.com',
@@ -296,7 +305,9 @@ describe('Session detail page', () => {
 
     const html = renderToStaticMarkup(
       await SessionDetailPage({
-        params: Promise.resolve({ sessionId: 'unified-session-2' }),
+        params: Promise.resolve({
+          sessionId: '6a1f8f1e-0000-4000-8000-000000000004',
+        }),
       }),
     );
 
@@ -312,7 +323,7 @@ describe('Session detail page', () => {
       isAdmin: false,
     });
     getFastSessionByIdMock.mockResolvedValue({
-      id: 'fast-session-3',
+      id: '6a1f8f1e-0000-4000-8000-000000000005',
       userId: 'user-1',
       ownerName: 'User',
       ownerEmail: 'user@example.com',
@@ -330,26 +341,28 @@ describe('Session detail page', () => {
 
     renderToStaticMarkup(
       await SessionDetailPage({
-        params: Promise.resolve({ sessionId: 'fast-session-3' }),
+        params: Promise.resolve({
+          sessionId: '6a1f8f1e-0000-4000-8000-000000000005',
+        }),
       }),
     );
 
     expect(getSessionByIdCommandMock).toHaveBeenCalledWith(
       expect.objectContaining({ userId: 'user-1' }),
-      'fast-session-3',
+      '6a1f8f1e-0000-4000-8000-000000000005',
     );
     expect(getFastSessionByIdMock).toHaveBeenCalledWith(
       expect.objectContaining({ userId: 'user-1' }),
-      'fast-session-3',
+      '6a1f8f1e-0000-4000-8000-000000000005',
     );
     expect(getFastSessionTasksMock).toHaveBeenCalledWith(
       expect.objectContaining({ userId: 'user-1' }),
-      'fast-session-3',
+      '6a1f8f1e-0000-4000-8000-000000000005',
     );
     expect(sessionWorkspaceMock).toHaveBeenCalledWith(
       expect.objectContaining({
         session: expect.objectContaining({
-          id: 'fast-session-3',
+          id: '6a1f8f1e-0000-4000-8000-000000000005',
           taskSource: 'fast',
           taskCards: [expect.objectContaining({ taskId: 'task-1' })],
         }),

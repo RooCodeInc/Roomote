@@ -415,26 +415,25 @@ export function SessionWorkspace({
     setPanel((previous) => (previous?.kind === kind ? null : { kind }));
     selectTask(null);
   };
-  const panelContent =
-    panel?.kind === 'nested' ? (
-      <NestedTaskSidePanel taskId={panel.taskId} onClose={closePanel} />
-    ) : selectedTask ? (
-      <SessionTaskPanel
-        sessionId={session.id}
-        task={selectedTask}
-        tasks={sessionTasks}
-        onSelect={selectTask}
-        onClose={closePanel}
-      />
-    ) : panel?.kind === 'tasks' ? (
-      <SessionTasksPanel
-        tasks={taskCards}
-        onOpenTask={openTaskPanel}
-        onClose={closePanel}
-      />
-    ) : (
-      <SessionInfoPanel session={session} onClose={closePanel} />
-    );
+  const panelContent = selectedTask ? (
+    <SessionTaskPanel
+      sessionId={session.id}
+      task={selectedTask}
+      tasks={sessionTasks}
+      onSelect={selectTask}
+      onClose={closePanel}
+    />
+  ) : panel?.kind === 'nested' ? (
+    <NestedTaskSidePanel taskId={panel.taskId} onClose={closePanel} />
+  ) : panel?.kind === 'tasks' ? (
+    <SessionTasksPanel
+      tasks={taskCards}
+      onOpenTask={openTaskPanel}
+      onClose={closePanel}
+    />
+  ) : (
+    <SessionInfoPanel session={session} onClose={closePanel} />
+  );
   const { isSidebarVisible, toggleSidebar } = useSandboxLayout();
   useResponsiveSandboxSidebar(session.id);
 

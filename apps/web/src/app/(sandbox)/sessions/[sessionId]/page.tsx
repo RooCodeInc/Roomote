@@ -1,4 +1,5 @@
 import { notFound } from 'next/navigation';
+import { z } from 'zod';
 
 import { resolveEffectiveModelRuntimeEnv } from '@roomote/db/server';
 import {
@@ -33,6 +34,11 @@ export default async function SessionDetailPage({
   if (!authorizedUser.success) {
     notFound();
   }
+  // Both lookup columns are uuid; a garbage route param would otherwise throw
+  // 22P02 in Postgres instead of 404ing.
+  if (!z.string().uuid().safeParse(sessionId).success) {
+    notFound();
+  }
 
   // Old links may carry a fast-conversation id whose session row hasn't been
   // backfilled yet; getSessionByIdCommand falls back by fastConversationId,
@@ -46,17 +52,20 @@ export default async function SessionDetailPage({
     : unifiedSession
       ? null
       : await getFastSessionById(authorizedUser, sessionId);
+  // The chip's "default" must reflect what Fast actually runs with: the
+  // deployment's orchestration model, not the task launch default.
+  const modelEnv: Record<string, string> =
+    await resolveEffectiveModelRuntimeEnv().catch(() => ({}));
+  const defaultModelId =
+    modelEnv.R_ORCHESTRATION_MODEL || modelEnv.R_MODEL || null;
+  const rawDefaultEffort = modelEnv.R_ORCHESTRATION_MODEL_REASONING_EFFORT;
+  const defaultReasoningEffort = REASONING_EFFORT_VALUES.includes(
+    rawDefaultEffort as ReasoningEffort,
+  )
+    ? (rawDefaultEffort as ReasoningEffort)
+    : null;
+
   if (unifiedSession) {
-    const modelEnv: Record<string, string> =
-      await resolveEffectiveModelRuntimeEnv().catch(() => ({}));
-    const defaultModelId =
-      modelEnv.R_ORCHESTRATION_MODEL || modelEnv.R_MODEL || null;
-    const rawDefaultEffort = modelEnv.R_ORCHESTRATION_MODEL_REASONING_EFFORT;
-    const defaultReasoningEffort = REASONING_EFFORT_VALUES.includes(
-      rawDefaultEffort as ReasoningEffort,
-    )
-      ? (rawDefaultEffort as ReasoningEffort)
-      : null;
     const sessionInfo: SessionInfo = {
       id: unifiedSession.id,
       ownerName: unifiedSession.ownerName,
@@ -121,19 +130,6 @@ export default async function SessionDetailPage({
   if (!session) {
     notFound();
   }
-
-  // The chip's "default" must reflect what Fast actually runs with: the
-  // deployment's orchestration model, not the task launch default.
-  const modelEnv: Record<string, string> =
-    await resolveEffectiveModelRuntimeEnv().catch(() => ({}));
-  const defaultModelId =
-    modelEnv.R_ORCHESTRATION_MODEL || modelEnv.R_MODEL || null;
-  const rawDefaultEffort = modelEnv.R_ORCHESTRATION_MODEL_REASONING_EFFORT;
-  const defaultReasoningEffort = REASONING_EFFORT_VALUES.includes(
-    rawDefaultEffort as ReasoningEffort,
-  )
-    ? (rawDefaultEffort as ReasoningEffort)
-    : null;
 
   const sessionInfo: SessionInfo = {
     id: session.id,

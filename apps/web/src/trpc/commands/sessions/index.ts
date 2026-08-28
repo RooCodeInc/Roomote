@@ -15,7 +15,6 @@ import {
   setSessionPinned,
   updateSessionMetadata,
 } from '@/lib/server/sessions';
-import { resolveTaskByIdAccessCommand } from '../tasks/by-id';
 
 export const sessionIdInputSchema = z.object({ sessionId: z.string().uuid() });
 export const sessionsListInputSchema = z.object({
@@ -23,7 +22,6 @@ export const sessionsListInputSchema = z.object({
   status: z.enum(SESSION_STATUSES).optional(),
   user: z.string().nullish(),
   repository: z.string().nullish(),
-  environment: z.string().nullish(),
   pullRequest: z.string().nullish(),
   source: z.string().nullish(),
   model: z.string().nullish(),
@@ -73,30 +71,16 @@ export async function getSessionByIdCommand(
   const session = await getSessionById(auth, sessionId);
   if (!session) return null;
 
-  const taskAccess = await Promise.all(
-    session.tasks.map((task) =>
-      resolveTaskByIdAccessCommand(auth, {
-        taskId: task.taskId,
-        includeArtifacts: true,
-      }),
-    ),
-  );
-
+  // Session access was already established by getSessionById's scope check,
+  // and getSessionTasks inner-joins live tasks only — the previous per-task
+  // access resolution had no additional predicate and cost ~5 queries per
+  // task on the workspace's polling path.
   return {
     ...session,
-    tasks: session.tasks.map((task, index) =>
-      taskAccess[index]?.kind === 'resolved'
-        ? { ...task, canAccessDetails: true as const }
-        : {
-            ...task,
-            canAccessDetails: false as const,
-            latestRun: null,
-            latestOutput: null,
-            inferenceCostMicroUsd: 0,
-            artifacts: [],
-            pullRequests: [],
-          },
-    ),
+    tasks: session.tasks.map((task) => ({
+      ...task,
+      canAccessDetails: true as const,
+    })),
   };
 }
 

@@ -1,7 +1,11 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 
-import { SESSION_STATUSES, type SessionStatus } from '@roomote/types';
+import {
+  getSessionStatusLabel,
+  SESSION_STATUSES,
+  type SessionStatus,
+} from '@roomote/types';
 
 import { parseTimePeriodParam } from '@/types';
 import { authorize } from '@/lib/server/auth-context';
@@ -23,7 +27,6 @@ export default async function SessionsPage({
     view?: string;
     q?: string;
     repository?: string;
-    environment?: string;
     pullRequest?: string;
     source?: string;
     model?: string;
@@ -58,7 +61,6 @@ export default async function SessionsPage({
     status,
     q,
     repository: params.repository,
-    environment: params.environment,
     pullRequest: params.pullRequest,
     source: params.source,
     model: params.model,
@@ -101,7 +103,7 @@ export default async function SessionsPage({
                   id={`session-${column}`}
                   className="mb-2 text-sm font-medium capitalize"
                 >
-                  {column.replace('_', ' ')}
+                  {getSessionStatusLabel(column)}
                 </h2>
                 <div className="divide-y rounded-lg border bg-card">
                   {result.sessions
