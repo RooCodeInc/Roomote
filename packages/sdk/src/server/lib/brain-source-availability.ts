@@ -2,10 +2,12 @@ import {
   and,
   db,
   deploymentMcpEnablements,
+  discordInstallations,
   eq,
   isNull,
   mcpConnections,
   slackInstallations,
+  resolveDiscordRuntimeCredentials,
 } from '@roomote/db/server';
 import {
   BRAIN_SOURCES,
@@ -99,6 +101,16 @@ const BRAIN_SOURCE_AVAILABILITY = {
       where: eq(slackInstallations.isActive, true),
     });
     return Boolean(installation);
+  },
+  discord: async () => {
+    const [credentials, installation] = await Promise.all([
+      resolveDiscordRuntimeCredentials(),
+      db.query.discordInstallations.findFirst({
+        columns: { id: true },
+        where: eq(discordInstallations.isActive, true),
+      }),
+    ]);
+    return Boolean(credentials.botToken && installation);
   },
   notion: async () => Boolean(await findBrainSourceConnectionConfig('notion')),
   granola: async () =>

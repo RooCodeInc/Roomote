@@ -59,12 +59,19 @@ automatically. If every tag is moderated, the bot needs Manage Threads to
 apply one.
 
 <Warning>
-  Unlike a Slack workspace, a Discord server can be public or shared with
+Unlike a Slack workspace, a Discord server can be public or shared with
   people outside your team. Task threads are visible to everyone who can see
   the channel, including repository names, task descriptions, and PR links.
   Only add Roomote to servers whose members you trust with that context, and
   use private channels for sensitive work.
 </Warning>
+
+When deployment Memory is enabled, Roomote also collects message history from
+server channels visible to `@everyone` where the bot has **View Channel** and
+**Read Message History**. Active public threads and forum posts are included;
+private channels, private threads, and DMs are not. Removing public visibility
+or the bot's read access removes that channel's collected pages after the next
+successful permission scan.
 
 If Roomote cannot see the server or channel, confirm that the bot was added to
 the server and that its role and channel overrides grant the permissions above.

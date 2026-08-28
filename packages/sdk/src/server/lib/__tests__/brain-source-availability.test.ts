@@ -1,9 +1,11 @@
 const mocks = vi.hoisted(() => ({
   findConnection: vi.fn(),
+  findDiscordInstallation: vi.fn(),
   findEnablement: vi.fn(),
   findSlackInstallation: vi.fn(),
   hasGithubSources: vi.fn(),
   findLinearConnection: vi.fn(),
+  resolveDiscordCredentials: vi.fn(),
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -11,11 +13,13 @@ vi.mock('@roomote/db/server', () => ({
   db: {
     query: {
       deploymentMcpEnablements: { findFirst: mocks.findEnablement },
+      discordInstallations: { findFirst: mocks.findDiscordInstallation },
       mcpConnections: { findFirst: mocks.findConnection },
       slackInstallations: { findFirst: mocks.findSlackInstallation },
     },
   },
   deploymentMcpEnablements: { enabled: {}, mcpId: {} },
+  discordInstallations: { isActive: {} },
   eq: vi.fn(),
   isNull: vi.fn(),
   mcpConnections: {
@@ -25,6 +29,7 @@ vi.mock('@roomote/db/server', () => ({
     userId: {},
   },
   slackInstallations: { isActive: {} },
+  resolveDiscordRuntimeCredentials: mocks.resolveDiscordCredentials,
 }));
 
 vi.mock('../brain-github', () => ({
@@ -53,6 +58,7 @@ describe('resolveBrainSourceRequirements', () => {
   it('resolves every reported source through the collector availability policy', async () => {
     const availability: Record<BrainSourceRequirement, boolean> = {
       github: true,
+      discord: true,
       granola: false,
       notion: true,
       linear: true,
@@ -69,6 +75,7 @@ describe('resolveBrainSourceRequirements', () => {
     expect(new Set(resolveRequirement.mock.calls.flat())).toEqual(
       new Set<BrainSourceRequirement>([
         'github',
+        'discord',
         'granola',
         'notion',
         'linear',
@@ -145,5 +152,15 @@ describe('isBrainSourceAvailable', () => {
 
     mocks.findLinearConnection.mockResolvedValue({ authConfig: {} });
     await expect(isBrainSourceAvailable('linear')).resolves.toBe(false);
+  });
+
+  it('requires Discord credentials and an active guild installation', async () => {
+    mocks.resolveDiscordCredentials.mockResolvedValue({ botToken: 'token' });
+    mocks.findDiscordInstallation.mockResolvedValue({ id: 'installation-id' });
+
+    await expect(isBrainSourceAvailable('discord')).resolves.toBe(true);
+
+    mocks.findDiscordInstallation.mockResolvedValue(null);
+    await expect(isBrainSourceAvailable('discord')).resolves.toBe(false);
   });
 });
