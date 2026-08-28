@@ -10,7 +10,6 @@ import {
   type AnalyticsFilters,
   type AnalyticsGranularity,
   type AnalyticsMetric,
-  type AnalyticsObject,
   type TimePeriodFilter,
   ANALYTICS_OBJECT_CONFIG,
   getAnalyticsAxisLabel,
@@ -21,7 +20,6 @@ import {
   isValidAnalyticsGranularity,
   isValidAnalyticsMetric,
   isValidAnalyticsViewBy,
-  analyticsObjects,
   parseTimePeriodParam,
 } from '@/types';
 import {
@@ -39,6 +37,7 @@ import {
   AnalyticsShell,
   AnalyticsShellDownloadAction,
   getAnalyticsHref,
+  type AnalyticsShellItemId,
 } from './AnalyticsShell';
 import { AnalyticsStackedBarChart } from './AnalyticsStackedBarChart';
 import { PullRequestSummaryCards } from './PullRequestSummaryCards';
@@ -67,29 +66,34 @@ type SelectedAnalyticsSegment = {
   seriesLabel: string;
 };
 
-const GENERIC_ANALYTICS_OBJECTS: AnalyticsObject[] = [
+const GENERIC_ANALYTICS_OBJECTS: AnalyticsShellItemId[] = [
+  'costs',
   'tasks',
-  'sessions',
   'pullRequests',
 ];
 
 function parseAnalyticsObject(
   value: string | null,
-  allowedObjects: readonly AnalyticsObject[] = analyticsObjects,
-): AnalyticsObject {
-  if (value && allowedObjects.includes(value as AnalyticsObject)) {
-    return value as AnalyticsObject;
+  allowedObjects: readonly AnalyticsShellItemId[] = GENERIC_ANALYTICS_OBJECTS,
+): AnalyticsShellItemId {
+  if (value && allowedObjects.includes(value as AnalyticsShellItemId)) {
+    return value as AnalyticsShellItemId;
   }
 
-  return allowedObjects[0] ?? analyticsObjects[0] ?? 'tasks';
+  return allowedObjects[0] ?? 'costs';
 }
 
 function getFiltersFromSearchParams(
   searchParams: URLSearchParams,
+  allowedKeys: readonly AnalyticsDimension[],
 ): AnalyticsFilters {
   const filters: AnalyticsFilters = {};
 
   for (const key of analyticsFilterKeys) {
+    if (!allowedKeys.includes(key)) {
+      continue;
+    }
+
     const values = searchParams.getAll(key).filter(Boolean);
     if (values.length > 0) {
       filters[key] = values;
@@ -101,7 +105,7 @@ function getFiltersFromSearchParams(
 
 export function Analytics({
   fixedObject,
-}: { fixedObject?: AnalyticsObject } = {}) {
+}: { fixedObject?: AnalyticsShellItemId } = {}) {
   const router = useRouter();
   const trpc = useTRPC();
   const queryClient = useQueryClient();
@@ -116,7 +120,11 @@ export function Analytics({
     fixedObject ??
     parseAnalyticsObject(searchParams.get('object'), GENERIC_ANALYTICS_OBJECTS);
   const basePath = fixedObject ? getAnalyticsHref(fixedObject) : '/analytics';
-  const filters = getFiltersFromSearchParams(searchParams);
+  const config = ANALYTICS_OBJECT_CONFIG[object];
+  const filters = getFiltersFromSearchParams(
+    searchParams,
+    config.filterDimensions,
+  );
   const timePeriod = parseTimePeriodParam(searchParams.get('timePeriod'), 7);
   const requestedViewBy = searchParams.get('viewBy');
   const granularityParam = searchParams.get('granularity');
@@ -168,7 +176,6 @@ export function Analytics({
       : null,
   );
 
-  const config = ANALYTICS_OBJECT_CONFIG[object];
   const axisLabel = getAnalyticsAxisLabel(object, metric);
   const chart =
     object === 'pullRequests'
@@ -210,12 +217,12 @@ export function Analytics({
 
   const resetSelection = () => setSelectedSegment(null);
 
-  const handleObjectChange = (nextObject: AnalyticsObject) => {
+  const handleObjectChange = (nextObject: AnalyticsShellItemId) => {
     if (nextObject === object) {
       return;
     }
 
-    if (fixedObject || nextObject === 'costs') {
+    if (fixedObject) {
       resetSelection();
       startParamsTransition(() => {
         router.push(getAnalyticsHref(nextObject));
@@ -225,12 +232,13 @@ export function Analytics({
 
     resetSelection();
     updateParams((params) => {
-      if (nextObject === 'tasks') {
+      if (nextObject === 'costs') {
         params.delete('object');
+        params.delete('viewBy');
       } else {
         params.set('object', nextObject);
+        params.set('viewBy', getDefaultAnalyticsViewBy(nextObject));
       }
-      params.set('viewBy', getDefaultAnalyticsViewBy(nextObject));
       params.delete('metric');
       for (const key of analyticsFilterKeys) {
         params.delete(key);
