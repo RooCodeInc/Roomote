@@ -369,7 +369,7 @@ export function getTaskTypeDimensionValue(task: {
   actorDisplayName?: string | null;
 }) {
   if (!task.initiatorKind) {
-    return createLabelBackedDimensionValue('Unknown Task');
+    return createDimensionValue('Unknown', 'Unknown Task');
   }
 
   if (task.initiatorKind === 'automation') {
@@ -385,5 +385,5 @@ export function getTaskTypeDimensionValue(task: {
     );
   }
 
-  return createLabelBackedDimensionValue('Manual Task');
+  return createDimensionValue('Manual', 'Manual Task');
 }

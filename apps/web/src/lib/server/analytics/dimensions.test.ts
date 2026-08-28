@@ -48,24 +48,27 @@ describe('getTaskTypeDimensionValue', () => {
   it.each([
     [
       { initiatorKind: 'user' as const, initiatorAutomation: null },
-      'Manual Task',
+      { key: 'Manual', label: 'Manual Task' },
     ],
-    [{ initiatorKind: null, initiatorAutomation: null }, 'Unknown Task'],
+    [
+      { initiatorKind: null, initiatorAutomation: null },
+      { key: 'Unknown', label: 'Unknown Task' },
+    ],
     [
       {
         initiatorKind: 'automation' as const,
         initiatorAutomation: 'automation',
       },
-      'Automation',
+      { key: 'automation:automation', label: 'Automation' },
     ],
     [
       {
         initiatorKind: 'automation' as const,
         initiatorAutomation: 'pr_review',
       },
-      'PR Review Task',
+      { key: 'automation:pr_review', label: 'PR Review Task' },
     ],
-  ])('formats %o as %s', (task, label) => {
-    expect(getTaskTypeDimensionValue(task)).toMatchObject({ label });
+  ])('formats %o as %o', (task, dimension) => {
+    expect(getTaskTypeDimensionValue(task)).toEqual(dimension);
   });
 });
