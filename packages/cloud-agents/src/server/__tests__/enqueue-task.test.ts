@@ -1098,6 +1098,36 @@ describe('enqueueTask snapshot resume', () => {
     expect(runsForTask).toHaveLength(2);
   });
 
+  it('starts a direct-user lifecycle when a user resumes an automation', async () => {
+    const userId = await createUser();
+    const freshRun = await launchFresh({
+      task: standardTaskInput({ computeProvider: 'modal' }),
+      initiator: { kind: 'automation', key: 'suggester' },
+      workflow: 'standard',
+      surface: 'system',
+      trigger: 'schedule',
+    });
+
+    expect(freshRun.payload.reportConsumer).toBe('automation');
+
+    const resumeRun = await enqueueTask(
+      {
+        task: {
+          type: TaskPayloadKind.SnapshotResume,
+          payload: {
+            repo: 'acme/widgets',
+            sourceSnapshotId: 'snap-automation-follow-up',
+            sourceRunId: freshRun.id,
+          },
+        } as SnapshotResumeTask,
+        actingUserId: userId,
+      },
+      { enqueue: false },
+    );
+
+    expect(resumeRun.payload.reportConsumer).toBe('direct-user');
+  });
+
   it('inherits source-control stamps from the source run payload', async () => {
     const userId = await createUser();
 

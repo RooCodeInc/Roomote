@@ -2406,12 +2406,18 @@ function inheritSnapshotResumeFastAgentParent(
 function inheritSnapshotResumeReportConsumer(
   payload: SnapshotResumeTask['payload'],
   sourcePayload: unknown,
+  actingUserId: string | null,
 ): void {
   if (payload.reportConsumer) {
     return;
   }
 
   const sourceConsumer = getTaskReportConsumerFromPayload(sourcePayload);
+  if (sourceConsumer === 'automation' && actingUserId) {
+    payload.reportConsumer = 'direct-user';
+    return;
+  }
+
   if (sourceConsumer !== 'direct-user') {
     payload.reportConsumer = sourceConsumer;
   }
@@ -2500,7 +2506,11 @@ async function enqueueSnapshotResume(
 
   inheritSnapshotResumeSourceControlStamps(task.payload, sourceRun.payload);
   inheritSnapshotResumeFastAgentParent(task.payload, sourceRun.payload);
-  inheritSnapshotResumeReportConsumer(task.payload, sourceRun.payload);
+  inheritSnapshotResumeReportConsumer(
+    task.payload,
+    sourceRun.payload,
+    actingUserId,
+  );
   inheritSnapshotResumeFastAgentSession(task.payload, sourceRun.payload);
   inheritSnapshotResumeCommunicationContext(task.payload, sourceRun.payload);
 
