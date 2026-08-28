@@ -571,6 +571,9 @@ services:
     networks: [default]
     environment:
       INFINITY_ANONYMOUS_USAGE_STATS: '0'
+      # Standard opt-out honored by Infinity (and many other tools); keeps
+      # the stack quiet even if the Infinity-specific variable is renamed.
+      DO_NOT_TRACK: '1'
     command:
       - v2
       - --device
