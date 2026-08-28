@@ -49,6 +49,36 @@ describe('unified Session queries', () => {
     expect(list.sessions.map((row) => row.id)).toContain(session.id);
   });
 
+  it('filters recent-session lookups by id without bypassing access scope', async () => {
+    const owner = await userFactory.create();
+    const stranger = await userFactory.create();
+    const included = await sessionFactory.create({
+      ownerKind: 'user',
+      ownerUserId: owner.id,
+      title: 'Included Session',
+      activityAt: 100,
+    });
+    await sessionFactory.create({
+      ownerKind: 'user',
+      ownerUserId: owner.id,
+      title: 'Newer but not included',
+      activityAt: 300,
+    });
+    const inaccessible = await sessionFactory.create({
+      ownerKind: 'user',
+      ownerUserId: stranger.id,
+      title: 'Inaccessible Session',
+      activityAt: 200,
+    });
+
+    const result = await getSessions(
+      { userId: owner.id, isAdmin: false },
+      { ids: [included.id, inaccessible.id] },
+    );
+
+    expect(result.sessions.map((session) => session.id)).toEqual([included.id]);
+  });
+
   it('returns task rollups, task resolution, and deterministic timeline events', async () => {
     const owner = await userFactory.create();
     const [conversation] = await db

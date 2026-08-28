@@ -27,6 +27,7 @@ export const sessionsListInputSchema = z.object({
   model: z.string().nullish(),
   period: z.union([z.literal('all'), z.number().int().positive()]).optional(),
   q: z.string().max(200).nullish(),
+  ids: z.array(z.string().uuid()).max(20).optional(),
   before: z.string().nullish(),
   limit: z.number().int().min(1).max(200).optional(),
 });
