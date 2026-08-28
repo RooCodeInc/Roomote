@@ -162,4 +162,33 @@ describe('launchClaimedSuggestedTask', () => {
     expect(mocks.cancel).toHaveBeenCalledWith(7);
     expect(mocks.release).not.toHaveBeenCalled();
   });
+
+  it('cancels the run and releases the claim when finalization throws', async () => {
+    mocks.finalize.mockRejectedValue(new Error('database unavailable'));
+    await expect(
+      launchClaimedSuggestedTask({
+        suggestion,
+        policy: {
+          usesRouterLaunch: true,
+          userDefaultEnabled: false,
+          fastAvailable: true,
+        },
+        launch: async () => ({
+          accepted: true,
+          runId: 7,
+          taskId: 'task-1',
+        }),
+      }),
+    ).resolves.toMatchObject({
+      status: 'finalize_failed',
+      mode: 'coding',
+      runId: 7,
+      taskId: 'task-1',
+    });
+    expect(mocks.cancel).toHaveBeenCalledWith(7);
+    expect(mocks.release).toHaveBeenCalledWith(expect.anything(), {
+      id: suggestion.id,
+      claimedAt,
+    });
+  });
 });

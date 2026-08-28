@@ -133,6 +133,7 @@ export async function launchClaimedSuggestedTask(input: {
       attempt.runId === null
         ? 'no run id to cancel'
         : await cancelOrphanedWorkItemRunBestEffort(attempt.runId);
+    await release().catch(() => undefined);
     return {
       status: 'finalize_failed',
       mode,
