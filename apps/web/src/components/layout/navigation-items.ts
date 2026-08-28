@@ -25,7 +25,7 @@ const PRIMARY_NAV_ITEMS: PrimaryNavItem[] = [
     icon: Rows4,
     href: '/sessions',
     label: 'Sessions',
-    description: 'View conversations and delegated work',
+    description: 'View current and past conversations',
     matchExact: false,
     matchPaths: ['/sessions', '/tasks', '/cloud-agents'],
   },

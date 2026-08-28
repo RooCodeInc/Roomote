@@ -62,12 +62,13 @@ export async function lookupSlackUserMapping(params: {
       userId: row.userId,
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
-      communicationsFastModeDefault:
+      communicationsFastModeDefault: !(
         typeof row.userMetadata === 'object' &&
         row.userMetadata !== null &&
         !Array.isArray(row.userMetadata) &&
         (row.userMetadata as Record<string, unknown>)
-          .communications_fast_mode_default === true,
+          .communications_fast_mode_default === false
+      ),
     },
     hasInactiveMapping: false,
   };

@@ -25,8 +25,18 @@ describe('hasCommunicationsFastModeDefault', () => {
     );
   });
 
-  it('returns false when the stored preference is not enabled', async () => {
+  it('defaults to enabled when no preference is stored', async () => {
     mocks.findUser.mockResolvedValue({ metadata: {} });
+
+    await expect(hasCommunicationsFastModeDefault('user-1')).resolves.toBe(
+      true,
+    );
+  });
+
+  it('honors an explicit opt-out', async () => {
+    mocks.findUser.mockResolvedValue({
+      metadata: { communications_fast_mode_default: false },
+    });
 
     await expect(hasCommunicationsFastModeDefault('user-1')).resolves.toBe(
       false,

@@ -22,11 +22,11 @@ export async function hasCommunicationsFastModeDefault(
   });
   const metadata = user?.metadata;
 
-  return (
+  return !(
     typeof metadata === 'object' &&
     metadata !== null &&
     !Array.isArray(metadata) &&
     (metadata as Record<string, unknown>).communications_fast_mode_default ===
-      true
+      false
   );
 }

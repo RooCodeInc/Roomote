@@ -17,7 +17,12 @@ describe('personal preferences', () => {
 
     await expect(
       getPersonalPreferencesCommand(buildAuth(user.id)),
-    ).resolves.toEqual(expect.objectContaining({ mindReaderMode: false }));
+    ).resolves.toEqual(
+      expect.objectContaining({
+        mindReaderMode: false,
+        communicationsFastModeDefault: true,
+      }),
+    );
   });
 
   it('persists mind reader mode without replacing other metadata', async () => {
@@ -91,6 +96,18 @@ describe('personal preferences', () => {
       getPersonalPreferencesCommand(buildAuth(user.id)),
     ).resolves.toEqual(
       expect.objectContaining({ communicationsFastModeDefault: true }),
+    );
+  });
+
+  it('honors an explicit communications fast mode opt-out', async () => {
+    const user = await userFactory.create({
+      metadata: { communications_fast_mode_default: false },
+    });
+
+    await expect(
+      getPersonalPreferencesCommand(buildAuth(user.id)),
+    ).resolves.toEqual(
+      expect.objectContaining({ communicationsFastModeDefault: false }),
     );
   });
 });
