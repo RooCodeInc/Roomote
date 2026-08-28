@@ -189,6 +189,7 @@ describe('TelegramCommunicationProvider', () => {
       provider: 'telegram',
       channelId: '-100456',
       messageId: '99',
+      lastTextMessageId: '99',
       threadId: '7',
     });
 
@@ -341,6 +342,7 @@ describe('TelegramCommunicationProvider', () => {
 
     expect(fetchMock.mock.calls.length).toBeGreaterThan(1);
     expect(result.messageId).toBe('200');
+    expect(result.lastTextMessageId).toBe('201');
 
     const firstBody = JSON.parse(
       (fetchMock.mock.calls[0]?.[1] as RequestInit).body as string,

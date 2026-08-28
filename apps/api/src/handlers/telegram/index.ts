@@ -36,10 +36,14 @@ import {
 } from './task-run-lookup.js';
 import { retireTelegramPrReviewOffersBestEffort } from './pr-review-action.js';
 import {
+  continueFastAgentSurfaceReply,
   consumeTelegramLinkCode,
+  findFastAgentSessionForProviderReply,
   isTelegramLinkCode,
+  isFastAgentProviderMessage,
   restoreTelegramLinkCode,
 } from '@roomote/sdk/server';
+import { getOrCreateFastAgentSession } from '@roomote/cloud-agents/server';
 
 import {
   handleTelegramCallbackQuery,
@@ -433,6 +437,101 @@ telegram.post('/', async (c) => {
         messageId: String(repliedToReportRootId),
       })
     : null;
+  const replyToMessageId = repliedToReportRootId
+    ? String(repliedToReportRootId)
+    : undefined;
+  const hasMedia = Boolean(
+    message.photo?.length || message.document || message.audio || message.voice,
+  );
+  const fastSession = !newTaskCommand
+    ? await findFastAgentSessionForProviderReply({
+        provider: 'telegram',
+        workspaceId: metadata.communicationChannelId,
+        channelId: metadata.communicationChannelId,
+        ...(metadata.communicationThreadId
+          ? { threadId: metadata.communicationThreadId }
+          : {}),
+        ...(replyToMessageId ? { replyToMessageId } : {}),
+        userId: senderUserId,
+      })
+    : null;
+  if (!fastSession && replyToMessageId) {
+    const isKnownFastMessage = await isFastAgentProviderMessage({
+      provider: 'telegram',
+      messageId: replyToMessageId,
+      workspaceId: metadata.communicationChannelId,
+      channelId: metadata.communicationChannelId,
+    });
+    if (isKnownFastMessage) {
+      return c.json({
+        ok: true,
+        queued: false,
+        reason: 'fast_session_route_mismatch',
+      });
+    }
+  }
+  if (fastSession) {
+    if (fastSession.userId !== senderUserId) {
+      return c.json({
+        ok: true,
+        queued: false,
+        reason: 'fast_session_user_mismatch',
+      });
+    }
+    if (fastSession.conversation.surface !== 'telegram') {
+      return c.json({
+        ok: true,
+        queued: false,
+        reason: 'fast_session_surface_mismatch',
+      });
+    }
+
+    const fastMessage = hasMedia
+      ? await attachTelegramMediaToQueuedMessage({
+          message,
+          queuedMessage: queuedMessage!,
+          ...(botToken ? { botToken } : {}),
+        })
+      : queuedMessage!;
+    const question = fastMessage.text.trim();
+    if (!question) {
+      return c.json({ ok: true, queued: false, reason: 'fast_message_empty' });
+    }
+    await ackTelegramMessageBestEffort({
+      chatId: metadata.communicationChannelId,
+      messageId: metadata.communicationMessageId,
+    });
+    const senderDisplayName =
+      [message.from?.first_name, message.from?.last_name]
+        .filter(Boolean)
+        .join(' ')
+        .trim() ||
+      message.from?.username?.trim() ||
+      null;
+    void continueFastAgentSurfaceReply({
+      sessionId: fastSession.id,
+      userId: senderUserId,
+      senderDisplayName,
+      question,
+      currentMessageId: metadata.communicationMessageId ?? fastMessage.ts,
+      ...(fastMessage.images ? { images: fastMessage.images } : {}),
+    })
+      .then((continued) => {
+        if (!continued) {
+          apiLogger.warn(
+            `[telegram] Fast session ${fastSession.id} could not resolve an active delivery route`,
+          );
+        }
+      })
+      .catch((error) => {
+        apiLogger.error(
+          `[telegram] Fast session ${fastSession.id} continuation failed: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      });
+    return c.json({ ok: true, fastAnswered: true, fastContinued: true });
+  }
   const activeRun = repliedToAutomationReport
     ? activeRunStatuses.some(
         (status) => status === repliedToAutomationReport.status,
@@ -441,9 +540,6 @@ telegram.post('/', async (c) => {
       : undefined
     : await findActiveTelegramTaskRun(conversation);
 
-  const hasMedia = Boolean(
-    message.photo?.length || message.document || message.audio || message.voice,
-  );
   const shouldProcessMedia = Boolean(
     activeRun ||
     newTaskCommand ||
@@ -645,6 +741,68 @@ telegram.post('/', async (c) => {
 
       apiLogger.warn(
         `[telegram] Failed to resume Telegram task from snapshot for chat ${metadata.communicationChannelId}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
+  }
+
+  if (!newTaskCommand) {
+    const providerConversationId =
+      metadata.communicationThreadId ??
+      (isTelegramPrivateChat(message)
+        ? metadata.communicationChannelId
+        : queuedMessage.ts);
+    const conversation = {
+      surface: 'telegram' as const,
+      workspaceId: metadata.communicationChannelId,
+      conversationId: `${providerConversationId}:user:${senderUserId}`,
+      replyTarget: {
+        channelId: metadata.communicationChannelId,
+        ...(metadata.communicationThreadId
+          ? { threadId: metadata.communicationThreadId }
+          : {}),
+      },
+    };
+
+    try {
+      const session = await getOrCreateFastAgentSession({
+        userId: senderUserId,
+        conversation,
+      });
+      void continueFastAgentSurfaceReply({
+        sessionId: session.id,
+        userId: senderUserId,
+        senderDisplayName:
+          [message.from?.first_name, message.from?.last_name]
+            .filter(Boolean)
+            .join(' ')
+            .trim() ||
+          message.from?.username?.trim() ||
+          null,
+        question: queuedMessage.text.trim(),
+        currentMessageId: metadata.communicationMessageId ?? queuedMessage.ts,
+        ...(queuedMessage.images ? { images: queuedMessage.images } : {}),
+      })
+        .then((continued) => {
+          if (!continued) {
+            apiLogger.warn(
+              `[telegram] Default Fast session ${session.id} could not resolve an active delivery route`,
+            );
+          }
+        })
+        .catch((error) => {
+          apiLogger.error(
+            `[telegram] Default Fast response failed: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          );
+        });
+
+      return c.json({ ok: true, fastAnswered: true, fastDefaulted: true });
+    } catch (error) {
+      apiLogger.warn(
+        `[telegram] Failed to initialize the default Fast session; falling back to task routing: ${
           error instanceof Error ? error.message : String(error)
         }`,
       );

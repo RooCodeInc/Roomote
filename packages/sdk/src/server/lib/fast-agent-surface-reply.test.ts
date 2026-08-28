@@ -23,8 +23,11 @@ vi.mock('../automations/destination', () => ({
 }));
 
 import {
+  and,
   db,
+  eq,
   fastAgentConversations,
+  fastAgentProviderMessages,
   fastAgentMessages,
   userFactory,
 } from '@roomote/db/server';
@@ -67,6 +70,7 @@ describe('buildFastAgentSurfaceReplyDelivery', () => {
       provider: 'telegram',
       channelId: 'telegram-chat-1',
       messageId: 'telegram-message-1',
+      lastTextMessageId: 'telegram-message-2',
     });
     mocks.createTelegramProvider.mockResolvedValue({
       postMessage: mocks.telegramPostMessage,
@@ -192,6 +196,7 @@ describe('buildFastAgentSurfaceReplyDelivery', () => {
       workspaceId: 'tenant-1',
       channelId: 'teams-channel-1',
       threadId: 'teams-root-1',
+      currentMessageId: undefined,
       post: mocks.teamsPostMessage,
       replace: mocks.teamsUpdateMessage,
     },
@@ -200,12 +205,21 @@ describe('buildFastAgentSurfaceReplyDelivery', () => {
       workspaceId: 'telegram-chat-1',
       channelId: 'telegram-chat-1',
       threadId: undefined,
+      currentMessageId: 'telegram-inbound-1',
       post: mocks.telegramPostMessage,
       replace: mocks.telegramEditMessage,
     },
   ])(
     'serves $surface sessions with provider-backed reply and replacement adapters',
-    async ({ surface, workspaceId, channelId, threadId, post, replace }) => {
+    async ({
+      surface,
+      workspaceId,
+      channelId,
+      threadId,
+      currentMessageId,
+      post,
+      replace,
+    }) => {
       const user = await userFactory.create();
       const [conversation] = await db
         .insert(fastAgentConversations)
@@ -224,10 +238,17 @@ describe('buildFastAgentSurfaceReplyDelivery', () => {
         userId: user.id,
         senderDisplayName: 'Matt',
         question: 'Follow up',
+        ...(currentMessageId ? { currentMessageId } : {}),
       });
       const handle = await delivery!.adapter.postReply({
         purpose: 'closeout',
         message: 'Done',
+      });
+      const binding = await db.query.fastAgentProviderMessages.findFirst({
+        where: and(
+          eq(fastAgentProviderMessages.provider, surface),
+          eq(fastAgentProviderMessages.conversationId, conversation!.id),
+        ),
       });
       await delivery!.adapter.replaceReply!(handle!, {
         purpose: 'closeout',
@@ -238,8 +259,12 @@ describe('buildFastAgentSurfaceReplyDelivery', () => {
         expect.objectContaining({
           channelId,
           ...(threadId ? { threadId } : {}),
+          ...(currentMessageId ? { replyToMessageId: currentMessageId } : {}),
           text: expect.stringContaining('Reply or use the [web app]'),
         }),
+      );
+      expect(binding?.messageId).toBe(
+        surface === 'teams' ? 'teams-message-1' : 'telegram-message-2',
       );
       expect(replace).toHaveBeenCalledWith(
         expect.objectContaining({
