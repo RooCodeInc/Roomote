@@ -29,7 +29,6 @@ export function SessionsFilters({
   pullRequest = null,
   model = null,
   source = 'all',
-  environment = '',
 }: {
   userId: string | null;
   timePeriod: TimePeriodFilter;
@@ -41,7 +40,6 @@ export function SessionsFilters({
   pullRequest?: string | null;
   model?: string | null;
   source?: string;
-  environment?: string;
 }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -128,11 +126,6 @@ export function SessionsFilters({
             const value = String(form.get('q') ?? '').trim();
             if (value) params.set('q', value);
             else params.delete('q');
-            const environmentValue = String(
-              form.get('environment') ?? '',
-            ).trim();
-            if (environmentValue) params.set('environment', environmentValue);
-            else params.delete('environment');
           });
         }}
       >
@@ -141,13 +134,6 @@ export function SessionsFilters({
           defaultValue={query}
           aria-label="Search sessions"
           placeholder="Search sessions"
-          className="h-8"
-        />
-        <Input
-          name="environment"
-          defaultValue={environment}
-          aria-label="Filter by environment ID"
-          placeholder="Environment ID"
           className="h-8"
         />
         <Button type="submit" size="sm" variant="outline">

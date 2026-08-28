@@ -12,7 +12,11 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import { getReasoningEffortLabel, type ReasoningEffort } from '@roomote/types';
 
-import { formatInferenceCost, getUserDisplayName } from '@/lib';
+import {
+  formatInferenceCost,
+  formatRepositoryName,
+  getUserDisplayName,
+} from '@/lib';
 import { SessionStatusBadge } from '@/components/sessions/SessionStatusBadge';
 import {
   getSessionSurfaceBrandIcon,
@@ -126,7 +130,9 @@ function SessionTaskPanel({
           <h3 className="font-medium">{task.title}</h3>
           <p className="text-muted-foreground capitalize">{task.state}</p>
           {task.repositoryName ? (
-            <p className="text-muted-foreground">{task.repositoryName}</p>
+            <p className="text-muted-foreground">
+              {formatRepositoryName(task.repositoryName)}
+            </p>
           ) : null}
         </div>
         {task.canAccessDetails === false ? (

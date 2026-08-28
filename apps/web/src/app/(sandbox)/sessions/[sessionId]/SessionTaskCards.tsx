@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { useMutation } from '@tanstack/react-query';
 import { toast } from 'sonner';
 
-import { formatInferenceCost } from '@/lib';
+import { formatInferenceCost, formatRepositoryName } from '@/lib';
 import {
   Badge,
   Button,
@@ -96,7 +96,11 @@ export function SessionTaskCards({
               </div>
             </CardHeader>
             <CardContent className="text-xs text-muted-foreground">
-              <p>{task.repositoryName ?? task.workflow}</p>
+              <p>
+                {task.repositoryName
+                  ? formatRepositoryName(task.repositoryName)
+                  : task.workflow}
+              </p>
               {task.latestRun?.error ? (
                 <p className="line-clamp-2 text-destructive">
                   {task.latestRun.error}
@@ -105,9 +109,11 @@ export function SessionTaskCards({
               {task.latestOutput ? (
                 <p className="line-clamp-2">{task.latestOutput}</p>
               ) : null}
-              <p>
-                ${formatInferenceCost(task.inferenceCostMicroUsd)} inference
-              </p>
+              {task.inferenceCostMicroUsd > 0 ? (
+                <p>
+                  ${formatInferenceCost(task.inferenceCostMicroUsd)} inference
+                </p>
+              ) : null}
               {task.canAccessDetails === false ? (
                 <p>Execution details require task access.</p>
               ) : null}

@@ -81,7 +81,6 @@ export default async function SessionsPage({
           view={view}
           query={q ?? ''}
           repository={params.repository ?? null}
-          environment={params.environment ?? ''}
           pullRequest={params.pullRequest ?? null}
           source={params.source ?? 'all'}
           model={params.model ?? null}

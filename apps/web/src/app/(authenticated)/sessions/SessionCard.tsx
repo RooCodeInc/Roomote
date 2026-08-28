@@ -1,7 +1,11 @@
 import Link from 'next/link';
 import { formatDistanceToNow } from 'date-fns';
 
-import { formatInferenceCost, getUserDisplayName } from '@/lib';
+import {
+  formatInferenceCost,
+  formatRepositoryName,
+  getUserDisplayName,
+} from '@/lib';
 import { Avatar } from '@/components/system';
 import { SessionStatusBadge } from '@/components/sessions/SessionStatusBadge';
 import { getSessionSurfaceLabel } from '@/components/sessions/session-surfaces';
@@ -67,12 +71,19 @@ export function SessionCard({ session }: { session: SessionCardData }) {
         </div>
         <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
           <SessionStatusBadge status={status} />
-          <span>{session.executionCount} executions</span>
           <span>{getSessionSurfaceLabel(session.sourceSurface)}</span>
           {primaryTask?.repositoryName ? (
-            <span>{primaryTask.repositoryName}</span>
+            <span>{formatRepositoryName(primaryTask.repositoryName)}</span>
           ) : null}
-          <span>${formatInferenceCost(session.inferenceCostMicroUsd)}</span>
+          {session.executionCount > 0 ? (
+            <span>
+              {session.executionCount} execution
+              {session.executionCount === 1 ? '' : 's'}
+            </span>
+          ) : null}
+          {session.inferenceCostMicroUsd > 0 ? (
+            <span>${formatInferenceCost(session.inferenceCostMicroUsd)}</span>
+          ) : null}
         </div>
       </div>
     </Link>
