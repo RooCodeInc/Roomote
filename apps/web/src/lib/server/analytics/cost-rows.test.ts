@@ -21,6 +21,8 @@ import {
   aggregateCostAnalyticsRowsByTask,
   getCostAnalyticsRows,
 } from './cost-rows';
+import { buildChartData } from './chart';
+import { applyDimensionFilters, buildFilterOptions } from './dimensions';
 import type { AnalyticsRow } from './types';
 
 describe('getCostAnalyticsRows', () => {
@@ -210,7 +212,7 @@ describe('getCostAnalyticsRows', () => {
     );
   });
 
-  it('classifies Session orchestration separately without double counting delegated task costs', async () => {
+  it('classifies Session and Memories costs without double counting task usage', async () => {
     const user = await userFactory.create();
     userIds.push(user.id);
     const currentNativeSessionId = `native-current-${crypto.randomUUID()}`;
@@ -284,6 +286,7 @@ describe('getCostAnalyticsRows', () => {
         },
         {
           eventKey: `delegated-run-${crypto.randomUUID()}`,
+          source: 'brain_synthesis',
           taskId: task.id,
           runId: run.id,
           costSource: 'opencode_message',
@@ -299,6 +302,14 @@ describe('getCostAnalyticsRows', () => {
           eventKey: `unattributed-${crypto.randomUUID()}`,
           costSource: 'missing',
           costMicroUsd: 5_000,
+        },
+        {
+          eventKey: `brain-synthesis-${crypto.randomUUID()}`,
+          source: 'brain_synthesis',
+          harnessSessionId: currentNativeSessionId,
+          messageId: `message-${crypto.randomUUID()}`,
+          costSource: 'opencode_message',
+          costMicroUsd: 6_000,
         },
       ])
       .returning({ id: llmUsageEvents.id });
@@ -320,9 +331,12 @@ describe('getCostAnalyticsRows', () => {
       .slice(2, 4)
       .map((event) => rowsById.get(event.id)!);
     const unattributedRow = rowsById.get(insertedEvents[4]!.id)!;
+    const memoryRow = rowsById.get(insertedEvents[5]!.id)!;
 
-    expect(insertedRows).toHaveLength(5);
-    expect(insertedRows.reduce((sum, row) => sum + row.value, 0)).toBe(0.015);
+    expect(insertedRows).toHaveLength(6);
+    expect(insertedRows.reduce((sum, row) => sum + row.value, 0)).toBeCloseTo(
+      0.021,
+    );
     expect(sessionRows.reduce((sum, row) => sum + row.value, 0)).toBe(0.003);
     expect(sessionRows.map((row) => row.dimensions.taskType?.label)).toEqual([
       'Session',
@@ -341,6 +355,46 @@ describe('getCostAnalyticsRows', () => {
     expect(unattributedRow.dimensions.taskType?.label).toBe(
       'Non-task inference',
     );
+    expect(memoryRow.dimensions.taskType).toEqual({
+      key: 'Memories',
+      label: 'Memories',
+    });
+    expect(memoryRow.details.values.taskTitle).toBe('Memories');
+
+    const filterOptions = buildFilterOptions(insertedRows, 'costs', {});
+    expect(filterOptions.filters.taskType).toContainEqual({
+      value: 'Memories',
+      label: 'Memories',
+    });
+    const filteredRows = applyDimensionFilters(insertedRows, {
+      taskType: ['Memories'],
+    });
+    expect(filteredRows.map((row) => row.id)).toEqual([memoryRow.id]);
+
+    const chart = buildChartData(
+      insertedRows,
+      'costs',
+      'taskType',
+      'cost',
+      'all',
+      'day',
+      new Date(),
+    );
+    expect(chart.total).toBeCloseTo(0.021);
+    expect(chart.costSummary?.totalInferenceCost).toBeCloseTo(0.021);
+    expect(chart.series).toContainEqual(
+      expect.objectContaining({
+        key: 'Memories',
+        label: 'Memories',
+        total: expect.closeTo(0.006),
+      }),
+    );
+    expect(
+      chart.buckets.reduce(
+        (sum, bucket) => sum + (bucket.segments.Memories ?? 0),
+        0,
+      ),
+    ).toBeCloseTo(0.006);
     for (const row of insertedRows) {
       expect(row.dimensions).not.toHaveProperty('session');
       expect(row.details.links?.session).toBeUndefined();

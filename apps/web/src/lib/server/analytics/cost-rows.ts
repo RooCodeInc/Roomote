@@ -240,8 +240,11 @@ export async function getCostAnalyticsRows(
 
   return usageRows.map((row) => {
     const isTask = Boolean(row.taskId);
+    const isMemory = !isTask && row.source === 'brain_synthesis';
     const isSession =
-      !isTask && fastNativeSessionIds.has(row.harnessSessionId ?? '');
+      !isTask &&
+      !isMemory &&
+      fastNativeSessionIds.has(row.harnessSessionId ?? '');
     const taskType = isTask
       ? getTaskTypeDimensionValue({
           initiatorKind: row.initiatorKind,
@@ -249,7 +252,7 @@ export async function getCostAnalyticsRows(
           actorDisplayName: row.actorDisplayName,
         })
       : createLabelBackedDimensionValue(
-          isSession ? 'Session' : 'Non-task inference',
+          isMemory ? 'Memories' : isSession ? 'Session' : 'Non-task inference',
         );
     const attributedUserId = row.userId ?? row.taskUserId;
     const userDimension =
