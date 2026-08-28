@@ -667,6 +667,13 @@ describe('canonical PR review notification ownership', () => {
         payload: { fastAgentParent: unrelatedParent },
       }),
     ]);
+    await db.insert(taskPullRequests).values({
+      taskId: source.id,
+      sourceControlProvider: 'gitlab',
+      repository,
+      prNumber: 6,
+      prUrl: `https://gitlab.com/${repository}/-/merge_requests/6`,
+    });
     await upsertPrReviewAutoPreference({
       sourceControlProvider: 'github',
       repository,
@@ -675,6 +682,17 @@ describe('canonical PR review notification ownership', () => {
       sourceTaskId: source.id,
       sourceDestinationKey: '["slack","T-pref","C-pref:1"]',
     });
+    await expect(
+      db.query.taskPullRequests.findFirst({
+        where: and(
+          eq(taskPullRequests.taskId, source.id),
+          eq(taskPullRequests.sourceControlProvider, 'gitlab'),
+          eq(taskPullRequests.repository, repository),
+          eq(taskPullRequests.prNumber, 6),
+        ),
+        columns: { autoHandleFeedbackByUserId: true },
+      }),
+    ).resolves.toEqual({ autoHandleFeedbackByUserId: null });
     await db.delete(tasks).where(eq(tasks.id, source.id));
 
     await expect(
@@ -762,6 +780,13 @@ describe('canonical PR review notification ownership', () => {
     const task = await taskFactory.create({ initiatorUserId: user.id });
     const repository = `owner/action-${task.id}`;
     await associate(task.id, repository, 7);
+    await db.insert(taskPullRequests).values({
+      taskId: task.id,
+      sourceControlProvider: 'gitlab',
+      repository,
+      prNumber: 7,
+      prUrl: `https://gitlab.com/${repository}/-/merge_requests/7`,
+    });
     await persistPrReviewEvent(
       eventInput({
         repository,
@@ -849,6 +874,17 @@ describe('canonical PR review notification ownership', () => {
       sourceTaskId: task.id,
       sourceDestinationKey: task.id,
     });
+    await expect(
+      db.query.taskPullRequests.findFirst({
+        where: and(
+          eq(taskPullRequests.taskId, task.id),
+          eq(taskPullRequests.sourceControlProvider, 'gitlab'),
+          eq(taskPullRequests.repository, repository),
+          eq(taskPullRequests.prNumber, 7),
+        ),
+        columns: { autoHandleFeedbackByUserId: true },
+      }),
+    ).resolves.toEqual({ autoHandleFeedbackByUserId: null });
   });
 
   it('authorizes and atomically claims a web Fast action by destination', async () => {

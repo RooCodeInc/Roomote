@@ -286,6 +286,8 @@ export {
   PrReviewNotificationRateLimitError,
   preparePrReviewNotificationDelivery,
   recordPrReviewNotificationDeliveryBestEffort,
+  getTaskPrReviewOfferStatus,
+  updateTaskPrReviewOfferStatus,
   triagePrReviewActivity,
   type PreparedPrReviewNotification,
   type PrReviewTriageContext,

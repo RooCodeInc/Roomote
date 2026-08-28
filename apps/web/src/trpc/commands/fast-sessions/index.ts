@@ -10,18 +10,14 @@ import {
 } from '@roomote/cloud-agents/server';
 import {
   buildFastAgentSurfaceReplyDelivery,
-  dispatchPrReviewFollowUp,
   resolveUserMcpServerConfigs,
   type FastAgentSurfaceReplyDelivery,
 } from '@roomote/sdk/server';
 import {
   db,
-  claimCanonicalPrReviewAction,
-  completeCanonicalPrReviewActionDispatch,
   eq,
   fastAgentConversations,
   getSessionForFastConversation,
-  releaseCanonicalPrReviewActionDispatch,
   retireCanonicalPrReviewActionsForDestinationKey,
 } from '@roomote/db/server';
 import {
@@ -34,9 +30,11 @@ import type { UserAuthSuccess } from '@/types';
 import {
   findAccessibleFastSession,
   buildFastSessionPrReviewDestinationKey,
+  getFastSessionPrReviewOfferStatus,
   getFastSessionTasks,
   updateFastSessionPrReviewOfferStatus,
 } from '@/lib/server/fast-sessions';
+import { handleWebPrReviewAction } from '@/lib/server/pr-review-actions';
 
 /**
  * Persist the session's model settings when the caller sent an explicit
@@ -320,60 +318,19 @@ export async function handleFastSessionPrReviewActionCommand(
   const session = await findAccessibleFastSession(auth, input.sessionId);
   if (!session) throw new Error('Fast session not found');
 
-  const action = await claimCanonicalPrReviewAction({
+  return handleWebPrReviewAction({
     deliveryId: input.deliveryId,
     choice: input.choice,
     actingUserId: auth.userId,
     expectedDestinationKind: 'fast_conversation',
     expectedDestinationKey: buildFastSessionPrReviewDestinationKey(session),
+    getOfferStatus: () =>
+      getFastSessionPrReviewOfferStatus(session.id, input.deliveryId),
+    updateOfferStatus: (status) =>
+      updateFastSessionPrReviewOfferStatus(
+        session.id,
+        [input.deliveryId],
+        status,
+      ),
   });
-  if (!action) {
-    await updateFastSessionPrReviewOfferStatus(
-      session.id,
-      [input.deliveryId],
-      'stale',
-    );
-    return { status: 'stale' };
-  }
-
-  if (input.choice === 'dismiss') {
-    await updateFastSessionPrReviewOfferStatus(
-      session.id,
-      [input.deliveryId],
-      'dismissed',
-    );
-    return { status: 'dismissed' };
-  }
-
-  const dispatched = await dispatchPrReviewFollowUp({
-    provider: 'web',
-    taskId: action.taskId!,
-    followUpPrompt: action.followUpPrompt!,
-    actingUserId: auth.userId,
-    idempotencyKey: `pr-review-delivery:${input.deliveryId}`,
-  });
-  const status = input.choice === 'auto' ? 'auto_resolved' : 'resolved';
-  if (dispatched.outcome === 'unavailable') {
-    const released = await releaseCanonicalPrReviewActionDispatch(
-      input.deliveryId,
-    );
-    const releasedStatus = released ? 'pending' : 'stale';
-    await updateFastSessionPrReviewOfferStatus(
-      session.id,
-      [input.deliveryId],
-      releasedStatus,
-    );
-    return { status: releasedStatus };
-  }
-
-  await completeCanonicalPrReviewActionDispatch({
-    deliveryId: input.deliveryId,
-    runId: dispatched.runId,
-  });
-  await updateFastSessionPrReviewOfferStatus(
-    session.id,
-    [input.deliveryId],
-    status,
-  );
-  return { status };
 }

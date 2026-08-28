@@ -2,11 +2,9 @@ const mocks = vi.hoisted(() => ({
   after: vi.fn(),
   acquireTurnLock: vi.fn(),
   answerQuestion: vi.fn(),
-  dispatchReviewAction: vi.fn(),
   findAccessibleSession: vi.fn(),
-  claimReviewAction: vi.fn(),
-  completeReviewAction: vi.fn(),
-  releaseReviewAction: vi.fn(),
+  getOfferStatus: vi.fn(),
+  handleReviewAction: vi.fn(),
   retireReviewActions: vi.fn(),
   updateOfferStatus: vi.fn(),
   buildReplyDelivery: vi.fn(),
@@ -27,15 +25,11 @@ vi.mock('@roomote/cloud-agents/server', () => ({
 
 vi.mock('@roomote/sdk/server', () => ({
   buildFastAgentSurfaceReplyDelivery: mocks.buildReplyDelivery,
-  dispatchPrReviewFollowUp: mocks.dispatchReviewAction,
   resolveUserMcpServerConfigs: vi.fn(),
 }));
 
 vi.mock('@roomote/db/server', () => ({
   db: { update: mocks.dbUpdate },
-  claimCanonicalPrReviewAction: mocks.claimReviewAction,
-  completeCanonicalPrReviewActionDispatch: mocks.completeReviewAction,
-  releaseCanonicalPrReviewActionDispatch: mocks.releaseReviewAction,
   retireCanonicalPrReviewActionsForDestinationKey: mocks.retireReviewActions,
   eq: vi.fn(),
   fastAgentConversations: {},
@@ -45,8 +39,13 @@ vi.mock('@roomote/db/server', () => ({
 vi.mock('@/lib/server/fast-sessions', () => ({
   findAccessibleFastSession: mocks.findAccessibleSession,
   buildFastSessionPrReviewDestinationKey: () => '["web","user-1","session-1"]',
+  getFastSessionPrReviewOfferStatus: mocks.getOfferStatus,
   getFastSessionTasks: vi.fn(),
   updateFastSessionPrReviewOfferStatus: mocks.updateOfferStatus,
+}));
+
+vi.mock('@/lib/server/pr-review-actions', () => ({
+  handleWebPrReviewAction: mocks.handleReviewAction,
 }));
 
 import {
@@ -143,15 +142,8 @@ describe('Fast session PR review actions', () => {
     mocks.updateOfferStatus.mockResolvedValue(undefined);
   });
 
-  it('claims and dispatches a canonical offer once', async () => {
-    mocks.claimReviewAction.mockResolvedValue({
-      taskId: 'task-1',
-      followUpPrompt: 'Resolve the feedback.',
-    });
-    mocks.dispatchReviewAction.mockResolvedValue({
-      outcome: 'queued',
-      runId: 42,
-    });
+  it('delegates an authorized offer to the shared web action lifecycle', async () => {
+    mocks.handleReviewAction.mockResolvedValue({ status: 'resolved' });
 
     await expect(
       handleFastSessionPrReviewActionCommand(auth, {
@@ -160,50 +152,33 @@ describe('Fast session PR review actions', () => {
         choice: 'yes',
       }),
     ).resolves.toEqual({ status: 'resolved' });
-    expect(mocks.claimReviewAction).toHaveBeenCalledWith(
-      expect.objectContaining({
-        actingUserId: 'user-1',
-        expectedDestinationKind: 'fast_conversation',
-        expectedDestinationKey: '["web","user-1","session-1"]',
-      }),
-    );
-    expect(mocks.dispatchReviewAction).toHaveBeenCalledWith({
-      provider: 'web',
-      taskId: 'task-1',
-      followUpPrompt: 'Resolve the feedback.',
-      actingUserId: 'user-1',
-      idempotencyKey: 'pr-review-delivery:11111111-1111-4111-8111-111111111111',
-    });
-    expect(mocks.completeReviewAction).toHaveBeenCalledWith({
+    expect(mocks.handleReviewAction).toHaveBeenCalledWith({
       deliveryId: '11111111-1111-4111-8111-111111111111',
-      runId: 42,
+      choice: 'yes',
+      actingUserId: 'user-1',
+      expectedDestinationKind: 'fast_conversation',
+      expectedDestinationKey: '["web","user-1","session-1"]',
+      getOfferStatus: expect.any(Function),
+      updateOfferStatus: expect.any(Function),
     });
-  });
-
-  it('retires a duplicate or late action without dispatching', async () => {
-    mocks.claimReviewAction.mockResolvedValue(null);
-    await expect(
-      handleFastSessionPrReviewActionCommand(auth, {
-        sessionId: session.id,
-        deliveryId: '11111111-1111-4111-8111-111111111111',
-        choice: 'dismiss',
-      }),
-    ).resolves.toEqual({ status: 'stale' });
-    expect(mocks.dispatchReviewAction).not.toHaveBeenCalled();
+    const [{ getOfferStatus, updateOfferStatus }] =
+      mocks.handleReviewAction.mock.calls[0]!;
+    mocks.getOfferStatus.mockResolvedValue('resolved');
+    await expect(getOfferStatus()).resolves.toBe('resolved');
+    expect(mocks.getOfferStatus).toHaveBeenCalledWith(
+      session.id,
+      '11111111-1111-4111-8111-111111111111',
+    );
+    await updateOfferStatus('resolved');
     expect(mocks.updateOfferStatus).toHaveBeenCalledWith(
       session.id,
       ['11111111-1111-4111-8111-111111111111'],
-      'stale',
+      'resolved',
     );
   });
 
-  it('releases the offer when the task cannot be steered', async () => {
-    mocks.claimReviewAction.mockResolvedValue({
-      taskId: 'task-1',
-      followUpPrompt: 'Resolve the feedback.',
-    });
-    mocks.dispatchReviewAction.mockResolvedValue({ outcome: 'unavailable' });
-    mocks.releaseReviewAction.mockResolvedValue(true);
+  it('rejects inaccessible sessions before entering the shared lifecycle', async () => {
+    mocks.findAccessibleSession.mockResolvedValue(null);
 
     await expect(
       handleFastSessionPrReviewActionCommand(auth, {
@@ -211,16 +186,9 @@ describe('Fast session PR review actions', () => {
         deliveryId: '11111111-1111-4111-8111-111111111111',
         choice: 'yes',
       }),
-    ).resolves.toEqual({ status: 'pending' });
-    expect(mocks.releaseReviewAction).toHaveBeenCalledWith(
-      '11111111-1111-4111-8111-111111111111',
-    );
-    expect(mocks.updateOfferStatus).toHaveBeenCalledWith(
-      session.id,
-      ['11111111-1111-4111-8111-111111111111'],
-      'pending',
-    );
-    expect(mocks.completeReviewAction).not.toHaveBeenCalled();
+    ).rejects.toThrow('Fast session not found');
+    expect(mocks.handleReviewAction).not.toHaveBeenCalled();
+    expect(mocks.updateOfferStatus).not.toHaveBeenCalled();
   });
 
   it('retires open offers when the user types a reply', async () => {

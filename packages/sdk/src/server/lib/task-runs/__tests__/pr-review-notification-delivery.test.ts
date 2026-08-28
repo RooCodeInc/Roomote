@@ -1644,12 +1644,18 @@ describe('recordPrReviewNotificationDeliveryBestEffort', () => {
   });
 
   it('persists web-only review feedback when there is no conversation route', async () => {
-    await recordPrReviewNotificationDeliveryBestEffort({
-      runId: 1,
-      taskId: 'task-1',
-      route: null,
-      text: 'formatted-message',
-    });
+    await expect(
+      recordPrReviewNotificationDeliveryBestEffort({
+        runId: 1,
+        taskId: 'task-1',
+        route: null,
+        text: 'formatted-message',
+        reviewAction: {
+          deliveryId: '11111111-1111-4111-8111-111111111111',
+          question: 'Resolve these issues?',
+        },
+      }),
+    ).resolves.toBe(true);
 
     expect(mockRecordTaskMessageEnvelope).toHaveBeenCalledWith({
       runId: 1,
@@ -1658,6 +1664,11 @@ describe('recordPrReviewNotificationDeliveryBestEffort', () => {
         payload: {
           text: 'formatted-message',
           source: 'pr_review_notification',
+          prReviewAction: {
+            deliveryId: '11111111-1111-4111-8111-111111111111',
+            question: 'Resolve these issues?',
+            status: 'pending',
+          },
         },
         visibleInTranscript: true,
       }),

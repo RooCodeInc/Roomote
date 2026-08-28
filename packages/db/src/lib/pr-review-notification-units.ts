@@ -1020,6 +1020,10 @@ export async function upsertPrReviewAutoPreference(input: {
       .where(
         and(
           eq(taskPullRequests.taskId, input.sourceTaskId),
+          eq(
+            taskPullRequests.sourceControlProvider,
+            input.sourceControlProvider,
+          ),
           eq(taskPullRequests.repository, input.repository),
           eq(taskPullRequests.prNumber, input.prNumber),
         ),
@@ -1298,6 +1302,10 @@ export async function claimCanonicalPrReviewAction(input: {
         .where(
           and(
             eq(taskPullRequests.taskId, action.taskId),
+            eq(
+              taskPullRequests.sourceControlProvider,
+              action.sourceControlProvider,
+            ),
             eq(taskPullRequests.repository, action.repository),
             eq(taskPullRequests.prNumber, action.prNumber),
           ),
