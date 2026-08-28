@@ -9,6 +9,8 @@ import {
 } from '@roomote/github';
 import {
   recordPrStatusChangeInTaskHistory,
+  PrStatusFastDeliveryError,
+  PrStatusHistoryRecordingError,
   updateTaskPrStatus,
   upsertGitHubPullRequestFactFromWebhook,
 } from '@roomote/sdk/server';
@@ -638,8 +640,10 @@ github.post('/', async (c) => {
 
         // Persist merged/closed status into linked task history so agents get
         // the same out-of-band context path as PR review-feedback notifications.
-        void Promise.resolve(
-          recordPrStatusChangeInTaskHistory({
+        let includeFastParentTargets = false;
+        let includeFastParentTaskIds: string[] = [];
+        try {
+          await recordPrStatusChangeInTaskHistory({
             sourceControlProvider: 'github',
             repository: payload.repository.full_name,
             prNumber: payload.pull_request.number,
@@ -650,18 +654,30 @@ github.post('/', async (c) => {
               (payload.pull_request.merged
                 ? payload.pull_request.merged_by?.login
                 : null) || payload.sender.login,
-          }),
-        ).catch((error) => {
+          });
+        } catch (error) {
+          if (error instanceof PrStatusFastDeliveryError) {
+            includeFastParentTaskIds = error.taskIds;
+          } else {
+            includeFastParentTargets = !(
+              error instanceof PrStatusHistoryRecordingError
+            );
+          }
           console.warn(
             `[pull_request.closed] Failed to record PR status in task history for ${payload.repository.full_name}#${payload.pull_request.number}: ${
               error instanceof Error ? error.message : String(error)
             }`,
           );
-        });
+        }
 
         // Skipped repositories suppress automated review work, not lifecycle
         // notifications for tasks that already track this pull request.
-        return handlePrMerge(payload);
+        return handlePrMerge(payload, {
+          includeFastParentTargets,
+          ...(includeFastParentTaskIds.length
+            ? { includeFastParentTaskIds }
+            : {}),
+        });
       }),
     );
 

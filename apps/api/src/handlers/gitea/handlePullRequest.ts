@@ -16,6 +16,8 @@ import {
 import { enqueueTask } from '@roomote/cloud-agents/server';
 import {
   recordPrStatusChangeInTaskHistory,
+  PrStatusFastDeliveryError,
+  PrStatusHistoryRecordingError,
   updateTaskPrStatus,
 } from '@roomote/sdk/server';
 
@@ -64,6 +66,8 @@ async function notifyTerminalPullRequestThreads(
   payload: GiteaPullRequestWebhook,
   repoFullName: string,
   status: 'merged' | 'closed',
+  includeFastParentTargets: boolean,
+  includeFastParentTaskIds: string[],
 ): Promise<void> {
   const prUrl = getPullRequestUrl(payload);
   const webhookHost = toHostFromUrl(prUrl);
@@ -92,6 +96,8 @@ async function notifyTerminalPullRequestThreads(
       prUrl,
       status,
       actorLogin: getGiteaUsername(payload.sender) ?? 'someone on Gitea',
+      ...(includeFastParentTargets ? { includeFastParentTargets: true } : {}),
+      ...(includeFastParentTaskIds.length ? { includeFastParentTaskIds } : {}),
     },
     `PR #${payload.number}`,
   );
@@ -127,8 +133,10 @@ export async function handleGiteaPullRequest(
       },
     });
 
-    await Promise.resolve(
-      recordPrStatusChangeInTaskHistory({
+    let includeFastParentTargets = false;
+    let includeFastParentTaskIds: string[] = [];
+    try {
+      await recordPrStatusChangeInTaskHistory({
         sourceControlProvider: 'gitea',
         repository: repoFullName,
         prNumber: payload.number,
@@ -136,16 +144,29 @@ export async function handleGiteaPullRequest(
         prUrl: getPullRequestUrl(payload),
         status,
         actorLogin: getGiteaUsername(payload.sender) ?? 'someone on Gitea',
-      }),
-    ).catch((error) => {
+      });
+    } catch (error) {
+      if (error instanceof PrStatusFastDeliveryError) {
+        includeFastParentTaskIds = error.taskIds;
+      } else {
+        includeFastParentTargets = !(
+          error instanceof PrStatusHistoryRecordingError
+        );
+      }
       console.warn(
         `[handleGiteaPullRequest] Failed to record PR status in task history for ${repoFullName}#${payload.number}: ${
           error instanceof Error ? error.message : String(error)
         }`,
       );
-    });
+    }
 
-    await notifyTerminalPullRequestThreads(payload, repoFullName, status);
+    await notifyTerminalPullRequestThreads(
+      payload,
+      repoFullName,
+      status,
+      includeFastParentTargets,
+      includeFastParentTaskIds,
+    );
 
     return { status: 'ok' };
   }

@@ -172,7 +172,10 @@ vi.mock('./fast-automation-suggestions', () => ({
   postFastAutomationSuggestionsToTelegram: mocks.postTelegramSuggestions,
 }));
 
-import { deliverFastAgentParentEvent } from './fast-agent-parent-event';
+import {
+  deliverFastAgentParentEvent,
+  resolveFastAgentPlatformEventPolicy,
+} from './fast-agent-parent-event';
 
 const parent = {
   sessionId: '11111111-1111-4111-8111-111111111111',
@@ -197,6 +200,28 @@ const event = {
       'https://roomote.example/task/task-1/artifacts/proof/result.png?v=1',
   },
 };
+
+describe('resolveFastAgentPlatformEventPolicy', () => {
+  it.each([
+    ['pull_request_opened', 'slack', 'default', 'optional'],
+    ['pull_request_feedback', 'slack', 'present_only', 'required'],
+    ['pull_request_conflict_detected', 'discord', 'present_only', 'required'],
+    ['pull_request_status_changed', 'slack', 'default', 'optional'],
+    ['pull_request_status_changed', 'teams', 'default', 'optional'],
+    ['pull_request_status_changed', 'telegram', 'default', 'optional'],
+    ['pull_request_status_changed', 'discord', 'default', 'optional'],
+    ['pull_request_status_changed', 'web', 'default', 'optional'],
+    ['pull_request_status_changed', 'automation', 'default', 'optional'],
+    ['automation_triggered', 'automation', 'default', 'required'],
+  ] as const)(
+    'routes %s on %s as %s/%s',
+    (eventType, surface, handling, visibility) => {
+      expect(
+        resolveFastAgentPlatformEventPolicy({ eventType, surface }),
+      ).toEqual({ handling, visibility });
+    },
+  );
+});
 
 describe('deliverFastAgentParentEvent', () => {
   beforeEach(() => {
@@ -1601,6 +1626,8 @@ describe('deliverFastAgentParentEvent', () => {
           '"type":"pull_request_status_changed"',
         ),
         turnSource: 'platform_event',
+        platformEventHandling: 'default',
+        platformEventVisibility: 'optional',
       }),
     );
     expect(firstClientMessageId).toEqual(expect.any(String));

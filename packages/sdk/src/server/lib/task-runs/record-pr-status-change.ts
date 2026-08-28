@@ -41,6 +41,22 @@ type RecordPrStatusChangeInTaskHistoryResult = {
   reason?: string;
 };
 
+/** Fast delivery completed, but the independent task-history persistence did
+ * not. Webhook callers should retry history without restoring direct Fast
+ * conversation delivery, which would duplicate the already-posted event. */
+export class PrStatusHistoryRecordingError extends Error {}
+
+/** Fast delivery failed for specific linked tasks. Webhook callers can restore
+ * direct delivery only for these targets without duplicating earlier tasks. */
+export class PrStatusFastDeliveryError extends Error {
+  readonly taskIds: string[];
+
+  constructor(message: string, taskIds: string[], options?: ErrorOptions) {
+    super(message, options);
+    this.taskIds = taskIds;
+  }
+}
+
 /**
  * Provider-native shorthand for a pull/merge request number.
  * GitHub/Gitea/Bitbucket use `#n`, GitLab uses `!n`, Azure DevOps has no
@@ -156,44 +172,25 @@ export async function recordPrStatusChangeInTaskHistory(
   let recordedTaskCount = 0;
   let claimedTaskCount = 0;
   let skippedAlreadyRecorded = 0;
+  let historyError: PrStatusHistoryRecordingError | null = null;
+  let fastDeliveryCause: unknown;
+  const fastFallbackTaskIds: string[] = [];
 
   for (const taskId of taskIds) {
-    // Claim once per task so webhook redeliveries and mid-loop failures do not
-    // rewrite history for tasks that already succeeded.
-    const claimKey = buildStatusRecordedKey({
-      sourceControlProvider,
-      repository: parsedInput.repository,
-      prNumber: parsedInput.prNumber,
-      status: parsedInput.status,
-      taskId,
+    const latestRun = await db.query.taskRuns.findFirst({
+      where: eq(taskRuns.taskId, taskId),
+      orderBy: [desc(taskRuns.createdAt), desc(taskRuns.id)],
+      columns: { id: true, taskId: true, payload: true },
     });
-    const claim = await redis.set(
-      claimKey,
-      '1',
-      'EX',
-      STATUS_RECORDED_TTL_SECONDS,
-      'NX',
-    );
 
-    if (claim !== 'OK') {
-      skippedAlreadyRecorded += 1;
+    if (!latestRun) {
       continue;
     }
 
-    claimedTaskCount += 1;
-
+    // Fast delivery owns the user-visible event for Fast conversations and has
+    // its own durable delivery claim. Complete it before history's Redis claim
+    // so a Redis outage cannot suppress both the Fast event and direct fallback.
     try {
-      const latestRun = await db.query.taskRuns.findFirst({
-        where: eq(taskRuns.taskId, taskId),
-        orderBy: [desc(taskRuns.createdAt)],
-        columns: { id: true, taskId: true, payload: true },
-      });
-
-      if (!latestRun) {
-        await redis.del(claimKey).catch(() => undefined);
-        continue;
-      }
-
       await notifyFastAgentParentOnPullRequestStatusChanged({
         run: latestRun,
         pullRequest: {
@@ -206,7 +203,45 @@ export async function recordPrStatusChangeInTaskHistory(
         },
         actorLogin: parsedInput.actorLogin,
       });
+    } catch (error) {
+      fastDeliveryCause ??= error;
+      fastFallbackTaskIds.push(taskId);
+    }
 
+    // Claim once per task so webhook redeliveries and mid-loop failures do not
+    // rewrite history for tasks that already succeeded.
+    const claimKey = buildStatusRecordedKey({
+      sourceControlProvider,
+      repository: parsedInput.repository,
+      prNumber: parsedInput.prNumber,
+      status: parsedInput.status,
+      taskId,
+    });
+    let claim: Awaited<ReturnType<typeof redis.set>>;
+    try {
+      claim = await redis.set(
+        claimKey,
+        '1',
+        'EX',
+        STATUS_RECORDED_TTL_SECONDS,
+        'NX',
+      );
+    } catch (error) {
+      historyError ??= new PrStatusHistoryRecordingError(
+        error instanceof Error ? error.message : String(error),
+        { cause: error },
+      );
+      continue;
+    }
+
+    if (claim !== 'OK') {
+      skippedAlreadyRecorded += 1;
+      continue;
+    }
+
+    claimedTaskCount += 1;
+
+    try {
       await recordTaskMessageEnvelope({
         runId: latestRun.id,
         taskId,
@@ -240,8 +275,26 @@ export async function recordPrStatusChangeInTaskHistory(
       // Release so a later webhook delivery can retry this task instead of
       // staying silent for the full TTL after a transient write failure.
       await redis.del(claimKey).catch(() => undefined);
-      throw error;
+      historyError ??= new PrStatusHistoryRecordingError(
+        error instanceof Error ? error.message : String(error),
+        { cause: error },
+      );
+      continue;
     }
+  }
+
+  if (fastFallbackTaskIds.length > 0) {
+    throw new PrStatusFastDeliveryError(
+      fastDeliveryCause instanceof Error
+        ? fastDeliveryCause.message
+        : String(fastDeliveryCause),
+      fastFallbackTaskIds,
+      { cause: fastDeliveryCause },
+    );
+  }
+
+  if (historyError) {
+    throw historyError;
   }
 
   if (recordedTaskCount === 0) {

@@ -5,6 +5,7 @@ import {
   taskPullRequests,
   taskRuns,
   tasks,
+  desc,
   eq,
   and,
   inArray,
@@ -114,6 +115,11 @@ interface NotifyPullRequestTerminalStatusParams {
    * not been updated yet.
    */
   mergedBy?: string;
+  /** Preserve the direct Fast-conversation fallback when status recording or
+   * Fast event delivery failed before the terminal notifier was scheduled. */
+  includeFastParentTargets?: boolean;
+  /** Restore direct fallback only for Fast tasks whose relay failed. */
+  includeFastParentTaskIds?: string[];
 }
 
 type SlackTarget = {
@@ -127,28 +133,91 @@ type SlackReplyTarget = {
   threadId: string;
 };
 
-function resolveSlackReplyTarget(payload: unknown): SlackReplyTarget | null {
-  const directReplyTarget =
-    getCommunicationProviderFromTaskPayload(payload) === 'slack'
-      ? {
-          channelId: getCommunicationChannelFromTaskPayload(payload),
-          threadId: getCommunicationThreadIdFromTaskPayload(payload),
-        }
-      : null;
-  const fastConversation = getFastAgentParentFromPayload(payload)?.conversation;
-  const fastReplyTarget =
-    fastConversation?.surface === 'slack' ? fastConversation.replyTarget : null;
+type DirectCommunicationProvider = 'slack' | 'teams' | 'telegram' | 'discord';
+
+function isFastParentConversationTarget(params: {
+  payload: unknown;
+  provider: DirectCommunicationProvider;
+  channelId: string;
+  threadId?: string;
+}): boolean {
+  const conversation = getFastAgentParentFromPayload(
+    params.payload,
+  )?.conversation;
+  if (!conversation || conversation.surface !== params.provider) {
+    return false;
+  }
 
   return (
-    [directReplyTarget, fastReplyTarget].find(
-      (target): target is SlackReplyTarget =>
-        Boolean(target?.channelId && target.threadId),
-    ) ?? null
+    conversation.replyTarget.channelId === params.channelId &&
+    conversation.replyTarget.threadId === params.threadId
   );
 }
 
-function getSlackTarget(taskId: string, payload: unknown): SlackTarget | null {
-  const replyTarget = resolveSlackReplyTarget(payload);
+function getFastParentConversationTargetKey(payload: unknown): string | null {
+  const conversation = getFastAgentParentFromPayload(payload)?.conversation;
+  if (
+    !conversation ||
+    conversation.surface === 'web' ||
+    conversation.surface === 'automation'
+  ) {
+    return null;
+  }
+
+  return [
+    conversation.surface,
+    conversation.replyTarget.channelId,
+    conversation.replyTarget.threadId ?? '',
+  ].join('\0');
+}
+
+function resolveSlackReplyTarget(
+  payload: unknown,
+  includeFastParentTargets: boolean,
+): SlackReplyTarget | null {
+  const isDirectSlackTarget =
+    getCommunicationProviderFromTaskPayload(payload) === 'slack';
+  const channelId = isDirectSlackTarget
+    ? getCommunicationChannelFromTaskPayload(payload)
+    : undefined;
+  const threadId = isDirectSlackTarget
+    ? getCommunicationThreadIdFromTaskPayload(payload)
+    : undefined;
+  if (channelId && threadId) {
+    if (
+      !includeFastParentTargets &&
+      isFastParentConversationTarget({
+        payload,
+        provider: 'slack',
+        channelId,
+        threadId,
+      })
+    ) {
+      return null;
+    }
+    return { channelId, threadId };
+  }
+
+  const conversation = getFastAgentParentFromPayload(payload)?.conversation;
+  return includeFastParentTargets &&
+    conversation?.surface === 'slack' &&
+    conversation.replyTarget.threadId
+    ? {
+        channelId: conversation.replyTarget.channelId,
+        threadId: conversation.replyTarget.threadId,
+      }
+    : null;
+}
+
+function getSlackTarget(
+  taskId: string,
+  payload: unknown,
+  includeFastParentTargets: boolean,
+): SlackTarget | null {
+  const replyTarget = resolveSlackReplyTarget(
+    payload,
+    includeFastParentTargets,
+  );
   if (!replyTarget) return null;
 
   return {
@@ -180,7 +249,10 @@ type DiscordTarget = {
   };
 };
 
-function getTeamsTarget(payload: unknown): TeamsTarget | null {
+function getTeamsTarget(
+  payload: unknown,
+  includeFastParentTargets: boolean,
+): TeamsTarget | null {
   if (
     !payload ||
     typeof payload !== 'object' ||
@@ -197,6 +269,17 @@ function getTeamsTarget(payload: unknown): TeamsTarget | null {
   }
 
   const threadId = getCommunicationThreadIdFromTaskPayload(payload);
+  if (
+    !includeFastParentTargets &&
+    isFastParentConversationTarget({
+      payload,
+      provider: 'teams',
+      channelId,
+      ...(threadId ? { threadId } : {}),
+    })
+  ) {
+    return null;
+  }
 
   return {
     channelId,
@@ -205,7 +288,10 @@ function getTeamsTarget(payload: unknown): TeamsTarget | null {
   };
 }
 
-function getTelegramTarget(payload: unknown): TelegramTarget | null {
+function getTelegramTarget(
+  payload: unknown,
+  includeFastParentTargets: boolean,
+): TelegramTarget | null {
   if (
     !payload ||
     typeof payload !== 'object' ||
@@ -222,6 +308,17 @@ function getTelegramTarget(payload: unknown): TelegramTarget | null {
 
   const threadId = getCommunicationThreadIdFromTaskPayload(payload);
   const replyToMessageId = getCommunicationMessageIdFromTaskPayload(payload);
+  if (
+    !includeFastParentTargets &&
+    isFastParentConversationTarget({
+      payload,
+      provider: 'telegram',
+      channelId: chatId,
+      ...(threadId ? { threadId } : {}),
+    })
+  ) {
+    return null;
+  }
 
   return {
     chatId,
@@ -230,7 +327,10 @@ function getTelegramTarget(payload: unknown): TelegramTarget | null {
   };
 }
 
-function getDiscordTarget(payload: unknown): DiscordTarget | null {
+function getDiscordTarget(
+  payload: unknown,
+  includeFastParentTargets: boolean,
+): DiscordTarget | null {
   if (
     !payload ||
     typeof payload !== 'object' ||
@@ -247,6 +347,17 @@ function getDiscordTarget(payload: unknown): DiscordTarget | null {
 
   const threadId = getCommunicationThreadIdFromTaskPayload(payload);
   const reactionTarget = getDiscordReactionTargetFromTaskPayload(payload);
+  if (
+    !includeFastParentTargets &&
+    isFastParentConversationTarget({
+      payload,
+      provider: 'discord',
+      channelId,
+      ...(threadId ? { threadId } : {}),
+    })
+  ) {
+    return null;
+  }
 
   return {
     channelId,
@@ -749,6 +860,8 @@ export async function notifyPullRequestTerminalStatus({
   status = 'merged',
   actorLogin,
   mergedBy,
+  includeFastParentTargets = false,
+  includeFastParentTaskIds = [],
 }: NotifyPullRequestTerminalStatusParams): Promise<void> {
   const resolvedActorLogin = actorLogin || mergedBy || 'someone';
 
@@ -826,17 +939,76 @@ export async function notifyPullRequestTerminalStatus({
       db.query.taskRuns.findMany({
         where: inArray(taskRuns.taskId, taskIds),
         columns: {
+          id: true,
           taskId: true,
           payload: true,
         },
+        orderBy: [desc(taskRuns.createdAt), desc(taskRuns.id)],
       }),
     ]);
 
     const slackTargets: SlackTarget[] = [];
     const linearSessionIds: string[] = [];
+    const fastFallbackTaskIds = new Set(includeFastParentTaskIds);
+    const latestRunByTaskId = new Map<string, (typeof linkedRuns)[number]>();
+    for (const run of linkedRuns) {
+      if (!latestRunByTaskId.has(run.taskId)) {
+        latestRunByTaskId.set(run.taskId, run);
+      }
+    }
+    const latestRuns = [...latestRunByTaskId.values()];
+    const latestRunIds = new Set(latestRuns.map((run) => run.id));
+    const successfulFastConversationTargets = new Set(
+      includeFastParentTargets
+        ? []
+        : latestRuns.flatMap((run) => {
+            if (fastFallbackTaskIds.has(run.taskId)) {
+              return [];
+            }
+            const targetKey = getFastParentConversationTargetKey(run.payload);
+            return targetKey ? [targetKey] : [];
+          }),
+    );
+    const includeFastFallbackForRun = (run: (typeof linkedRuns)[number]) => {
+      if (includeFastParentTargets) {
+        return true;
+      }
+      if (!fastFallbackTaskIds.has(run.taskId)) {
+        return false;
+      }
+      if (!latestRunIds.has(run.id)) {
+        return false;
+      }
+      const targetKey = getFastParentConversationTargetKey(run.payload);
+      return !targetKey || !successfulFastConversationTargets.has(targetKey);
+    };
+    const fastSlackConversationTargets = includeFastParentTargets
+      ? new Set<string>()
+      : new Set(
+          latestRuns.flatMap((run) => {
+            if (fastFallbackTaskIds.has(run.taskId)) {
+              return [];
+            }
+            const conversation = getFastAgentParentFromPayload(
+              run.payload,
+            )?.conversation;
+            return conversation?.surface === 'slack' &&
+              conversation.replyTarget.threadId
+              ? [
+                  `${conversation.replyTarget.channelId}\0${conversation.replyTarget.threadId}`,
+                ]
+              : [];
+          }),
+        );
 
     for (const task of linkedTasks) {
-      if (task.slackThreadTs && task.slackChannelId) {
+      if (
+        task.slackThreadTs &&
+        task.slackChannelId &&
+        !fastSlackConversationTargets.has(
+          `${task.slackChannelId}\0${task.slackThreadTs}`,
+        )
+      ) {
         slackTargets.push({
           taskId: task.id,
           slackThreadTs: task.slackThreadTs,
@@ -851,20 +1023,30 @@ export async function notifyPullRequestTerminalStatus({
 
     slackTargets.push(
       ...linkedRuns
-        .map((run) => getSlackTarget(run.taskId, run.payload))
+        .map((run) =>
+          getSlackTarget(
+            run.taskId,
+            run.payload,
+            includeFastFallbackForRun(run),
+          ),
+        )
         .filter((target): target is SlackTarget => target !== null),
     );
 
     const teamsTargets = linkedRuns
-      .map((run) => getTeamsTarget(run.payload))
+      .map((run) => getTeamsTarget(run.payload, includeFastFallbackForRun(run)))
       .filter((target): target is TeamsTarget => target !== null);
 
     const telegramTargets = linkedRuns
-      .map((run) => getTelegramTarget(run.payload))
+      .map((run) =>
+        getTelegramTarget(run.payload, includeFastFallbackForRun(run)),
+      )
       .filter((target): target is TelegramTarget => target !== null);
 
     const discordTargets = linkedRuns
-      .map((run) => getDiscordTarget(run.payload))
+      .map((run) =>
+        getDiscordTarget(run.payload, includeFastFallbackForRun(run)),
+      )
       .filter((target): target is DiscordTarget => target !== null);
 
     if (

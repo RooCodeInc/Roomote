@@ -25,6 +25,8 @@ const {
   mockUpdateTaskPrStatus,
   mockUpsertGitHubPullRequestFactFromWebhook,
   mockRecordPrStatusChangeInTaskHistory,
+  MockPrStatusFastDeliveryError,
+  MockPrStatusHistoryRecordingError,
   mockIsFromKnownInstallation,
   mockVerify,
   mockVerifyAndReceive,
@@ -61,6 +63,15 @@ const {
   mockUpdateTaskPrStatus: vi.fn(),
   mockUpsertGitHubPullRequestFactFromWebhook: vi.fn(),
   mockRecordPrStatusChangeInTaskHistory: vi.fn(),
+  MockPrStatusFastDeliveryError: class extends Error {
+    readonly taskIds: string[];
+
+    constructor(message: string, taskIds: string[]) {
+      super(message);
+      this.taskIds = taskIds;
+    }
+  },
+  MockPrStatusHistoryRecordingError: class extends Error {},
   mockIsFromKnownInstallation: vi.fn(),
   mockVerify: vi.fn(),
   mockVerifyAndReceive: vi.fn(),
@@ -120,6 +131,8 @@ vi.mock('@roomote/sdk/server', () => ({
   upsertGitHubPullRequestFactFromWebhook:
     mockUpsertGitHubPullRequestFactFromWebhook,
   recordPrStatusChangeInTaskHistory: mockRecordPrStatusChangeInTaskHistory,
+  PrStatusFastDeliveryError: MockPrStatusFastDeliveryError,
+  PrStatusHistoryRecordingError: MockPrStatusHistoryRecordingError,
 }));
 
 vi.mock('../../logging', () => ({
@@ -362,7 +375,85 @@ describe('github webhook router', () => {
     const response = await responsePromise;
 
     expect(response.status).toBe(200);
-    expect(mockHandlePrMerge).toHaveBeenCalledWith(payload);
+    expect(mockHandlePrMerge).toHaveBeenCalledWith(payload, {
+      includeFastParentTargets: false,
+    });
+  });
+
+  it('restores direct Fast targets when status handling fails before delivery', async () => {
+    mockUpdateTaskPrStatus.mockResolvedValue(undefined);
+    mockUpsertGitHubPullRequestFactFromWebhook.mockResolvedValue(undefined);
+    mockRecordPrStatusChangeInTaskHistory.mockRejectedValue(
+      new Error('redis unavailable'),
+    );
+    mockHandlePrMerge.mockResolvedValue({ status: 'ok' });
+    const payload = makePullRequestPayload('closed');
+
+    const response = await app.request('http://localhost/api/webhooks/github', {
+      method: 'POST',
+      headers: {
+        'x-github-delivery': 'delivery-status-history-failure',
+        'x-github-event': 'pull_request',
+        'x-hub-signature-256': 'sha256=test',
+      },
+      body: JSON.stringify(payload),
+    });
+
+    expect(response.status).toBe(200);
+    expect(mockHandlePrMerge).toHaveBeenCalledWith(payload, {
+      includeFastParentTargets: true,
+    });
+  });
+
+  it('keeps Fast targets suppressed when only task-history persistence fails', async () => {
+    mockUpdateTaskPrStatus.mockResolvedValue(undefined);
+    mockUpsertGitHubPullRequestFactFromWebhook.mockResolvedValue(undefined);
+    mockRecordPrStatusChangeInTaskHistory.mockRejectedValue(
+      new MockPrStatusHistoryRecordingError('redis unavailable'),
+    );
+    mockHandlePrMerge.mockResolvedValue({ status: 'ok' });
+    const payload = makePullRequestPayload('closed');
+
+    const response = await app.request('http://localhost/api/webhooks/github', {
+      method: 'POST',
+      headers: {
+        'x-github-delivery': 'delivery-task-history-failure',
+        'x-github-event': 'pull_request',
+        'x-hub-signature-256': 'sha256=test',
+      },
+      body: JSON.stringify(payload),
+    });
+
+    expect(response.status).toBe(200);
+    expect(mockHandlePrMerge).toHaveBeenCalledWith(payload, {
+      includeFastParentTargets: false,
+    });
+  });
+
+  it('restores direct fallback only for Fast tasks whose relay failed', async () => {
+    mockUpdateTaskPrStatus.mockResolvedValue(undefined);
+    mockUpsertGitHubPullRequestFactFromWebhook.mockResolvedValue(undefined);
+    mockRecordPrStatusChangeInTaskHistory.mockRejectedValue(
+      new MockPrStatusFastDeliveryError('relay unavailable', ['task-2']),
+    );
+    mockHandlePrMerge.mockResolvedValue({ status: 'ok' });
+    const payload = makePullRequestPayload('closed');
+
+    const response = await app.request('http://localhost/api/webhooks/github', {
+      method: 'POST',
+      headers: {
+        'x-github-delivery': 'delivery-fast-relay-failure',
+        'x-github-event': 'pull_request',
+        'x-hub-signature-256': 'sha256=test',
+      },
+      body: JSON.stringify(payload),
+    });
+
+    expect(response.status).toBe(200);
+    expect(mockHandlePrMerge).toHaveBeenCalledWith(payload, {
+      includeFastParentTargets: false,
+      includeFastParentTaskIds: ['task-2'],
+    });
   });
 
   it('does not notify linked tasks when terminal status persistence fails', async () => {
@@ -1033,7 +1124,9 @@ describe('github webhook router', () => {
           status,
         }),
       );
-      expect(mockHandlePrMerge).toHaveBeenCalledWith(payload);
+      expect(mockHandlePrMerge).toHaveBeenCalledWith(payload, {
+        includeFastParentTargets: false,
+      });
     },
   );
 

@@ -53,6 +53,8 @@ import {
 import {
   formatPrStatusChangeTaskHistoryText,
   formatPullRequestReference,
+  PrStatusFastDeliveryError,
+  PrStatusHistoryRecordingError,
   recordPrStatusChangeInTaskHistory,
 } from '../record-pr-status-change';
 
@@ -268,14 +270,29 @@ describe('recordPrStatusChangeInTaskHistory', () => {
     );
   });
 
-  it('releases the claim when no linked task has a run', async () => {
+  it('skips the history claim when no linked task has a run', async () => {
     mockFindFirstTaskRun.mockResolvedValue(null);
 
     await expect(recordPrStatusChangeInTaskHistory(baseInput)).resolves.toEqual(
       { recordedTaskCount: 0, reason: 'no_task_runs' },
     );
 
-    expect(mockRedisDel).toHaveBeenCalled();
+    expect(mockRedisSet).not.toHaveBeenCalled();
+    expect(mockRedisDel).not.toHaveBeenCalled();
+    expect(mockRecordTaskMessageEnvelope).not.toHaveBeenCalled();
+  });
+
+  it('delivers to Fast before claiming independent task history', async () => {
+    mockRedisSet.mockRejectedValue(new Error('redis down'));
+
+    await expect(recordPrStatusChangeInTaskHistory(baseInput)).rejects.toThrow(
+      PrStatusHistoryRecordingError,
+    );
+
+    expect(mockNotifyFastAgentParent).toHaveBeenCalledOnce();
+    expect(mockNotifyFastAgentParent.mock.invocationCallOrder[0]).toBeLessThan(
+      mockRedisSet.mock.invocationCallOrder[0]!,
+    );
     expect(mockRecordTaskMessageEnvelope).not.toHaveBeenCalled();
   });
 
@@ -283,9 +300,55 @@ describe('recordPrStatusChangeInTaskHistory', () => {
     mockRecordTaskMessageEnvelope.mockRejectedValue(new Error('db down'));
 
     await expect(recordPrStatusChangeInTaskHistory(baseInput)).rejects.toThrow(
-      'db down',
+      PrStatusHistoryRecordingError,
     );
 
     expect(mockRedisDel).toHaveBeenCalled();
+  });
+
+  it('continues Fast delivery for later tasks after a history failure', async () => {
+    mockFindManyTaskPullRequests.mockResolvedValue([
+      { taskId: 'task-1' },
+      { taskId: 'task-2' },
+    ]);
+    mockFindFirstTaskRun
+      .mockResolvedValueOnce({ id: 11, taskId: 'task-1', payload: {} })
+      .mockResolvedValueOnce({ id: 22, taskId: 'task-2', payload: {} });
+    mockRecordTaskMessageEnvelope.mockRejectedValueOnce(new Error('db down'));
+
+    await expect(recordPrStatusChangeInTaskHistory(baseInput)).rejects.toThrow(
+      PrStatusHistoryRecordingError,
+    );
+
+    expect(mockNotifyFastAgentParent).toHaveBeenCalledTimes(2);
+    expect(mockNotifyFastAgentParent).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        run: { id: 22, taskId: 'task-2', payload: {} },
+      }),
+    );
+    expect(mockRecordTaskMessageEnvelope).toHaveBeenCalledTimes(2);
+  });
+
+  it('reports only the later task whose Fast relay failed', async () => {
+    mockFindManyTaskPullRequests.mockResolvedValue([
+      { taskId: 'task-1' },
+      { taskId: 'task-2' },
+    ]);
+    mockFindFirstTaskRun
+      .mockResolvedValueOnce({ id: 11, taskId: 'task-1', payload: {} })
+      .mockResolvedValueOnce({ id: 22, taskId: 'task-2', payload: {} });
+    mockNotifyFastAgentParent
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error('relay unavailable'));
+    mockRecordTaskMessageEnvelope.mockRejectedValueOnce(new Error('db down'));
+
+    const error = await recordPrStatusChangeInTaskHistory(baseInput).catch(
+      (caught) => caught,
+    );
+
+    expect(error).toBeInstanceOf(PrStatusFastDeliveryError);
+    expect(error.taskIds).toEqual(['task-2']);
+    expect(mockNotifyFastAgentParent).toHaveBeenCalledTimes(2);
   });
 });
