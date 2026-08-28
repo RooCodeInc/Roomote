@@ -1,3 +1,4 @@
+import type { TaskSurface } from '@roomote/types';
 import {
   and,
   db,
@@ -13,12 +14,25 @@ import type { TimePeriodFilter, UserAuthSuccess } from '@/types';
 import { getUserDisplayName } from '@/lib';
 
 import type { AnalyticsRow } from './types';
+import { createLabelBackedDimensionValue, mapTaskSource } from './dimensions';
+import { formatAnalyticsDateTime, getTimeCutoff } from './time-buckets';
 
 export async function getSessionAnalyticsRows(
   _auth: UserAuthSuccess,
   timePeriod: TimePeriodFilter | undefined,
   now: Date,
 ): Promise<AnalyticsRow[]> {
+  const cutoff = getTimeCutoff(timePeriod, now);
+
+  const executionCounts = db
+    .select({
+      sessionId: sessionTasks.sessionId,
+      executionCount: sql<number>`count(*)::int`.as('execution_count'),
+    })
+    .from(sessionTasks)
+    .groupBy(sessionTasks.sessionId)
+    .as('execution_counts');
+
   const rows = await db
     .select({
       id: sessions.id,
@@ -27,24 +41,17 @@ export async function getSessionAnalyticsRows(
       ownerEmail: users.email,
       source: sessions.sourceSurface,
       ownerKind: sessions.ownerKind,
-      executionCount: sql<number>`(
-        select count(*)::int from ${sessionTasks}
-        where ${sessionTasks.sessionId} = ${sessions.id}
-      )`,
+      executionCount: sql<number>`coalesce(${executionCounts.executionCount}, 0)::int`,
       status: sessions.cachedStatus,
       createdAt: sessions.createdAt,
     })
     .from(sessions)
     .leftJoin(users, eq(users.id, sessions.ownerUserId))
+    .leftJoin(executionCounts, eq(executionCounts.sessionId, sessions.id))
     .where(
       and(
         eq(sessions.visibility, 'visible'),
-        timePeriod && timePeriod !== 'all'
-          ? gte(
-              sessions.createdAt,
-              new Date(now.getTime() - timePeriod * 24 * 60 * 60 * 1000),
-            )
-          : undefined,
+        cutoff ? gte(sessions.createdAt, cutoff) : undefined,
       ),
     );
 
@@ -54,6 +61,9 @@ export async function getSessionAnalyticsRows(
       'System';
     const status = row.status ?? 'ready';
     const hasExecution = row.executionCount > 0 ? 'yes' : 'no';
+    // Session source surfaces are the task surfaces (plus 'automation', which
+    // maps to the System source like other non-user-facing surfaces).
+    const sourceLabel = mapTaskSource(row.source as TaskSurface);
     return {
       id: row.id,
       timestamp: row.createdAt,
@@ -61,16 +71,16 @@ export async function getSessionAnalyticsRows(
       dimensions: {
         user: { key: owner, label: owner },
         status: { key: status, label: status.replace('_', ' ') },
-        source: { key: row.source, label: row.source },
+        source: createLabelBackedDimensionValue(sourceLabel),
         ownerKind: { key: row.ownerKind, label: row.ownerKind },
         hasExecution: { key: hasExecution, label: hasExecution },
       },
       details: {
         id: row.id,
         values: {
-          date: row.createdAt.toISOString(),
+          date: formatAnalyticsDateTime(row.createdAt),
           user: owner,
-          source: row.source,
+          source: sourceLabel,
           status,
           ownerKind: row.ownerKind,
           hasExecution,

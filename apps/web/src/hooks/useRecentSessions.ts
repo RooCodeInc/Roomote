@@ -1,41 +1,43 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useMemo } from 'react';
+import { useLocalStorage } from 'usehooks-ts';
 
 import { useAuthorizedUser } from './useUser';
 
-const MAX_RECENT_SESSIONS = 20;
+const STORAGE_KEY_PREFIX = 'roomote-recent-sessions';
+const MAX_RECENT = 20;
 
+type RecentEntry = { id: string; visitedAt: number };
+
+/**
+ * Tracks recently visited session IDs in localStorage, mirroring
+ * useRecentTasks. Storage is scoped per signed-in user so account switches do
+ * not leak history.
+ */
 export function useRecentSessions() {
   const { userId } = useAuthorizedUser();
-  const storageKey = `roomote-recent-sessions:${userId}`;
-  const [recentSessionIds, setRecentSessionIds] = useState<string[]>([]);
-
-  useEffect(() => {
-    try {
-      const stored = JSON.parse(localStorage.getItem(storageKey) ?? '[]');
-      setRecentSessionIds(Array.isArray(stored) ? stored.slice(0, 20) : []);
-    } catch {
-      setRecentSessionIds([]);
-    }
-  }, [storageKey]);
+  const [entries, setEntries] = useLocalStorage<RecentEntry[]>(
+    `${STORAGE_KEY_PREFIX}:${userId}`,
+    [],
+  );
 
   const recordVisit = useCallback(
     (sessionId: string) => {
-      setRecentSessionIds((current) => {
-        const next = [
-          sessionId,
-          ...current.filter((id) => id !== sessionId),
-        ].slice(0, MAX_RECENT_SESSIONS);
-        try {
-          localStorage.setItem(storageKey, JSON.stringify(next));
-        } catch {
-          // Local recents are best-effort.
-        }
-        return next;
+      setEntries((prev) => {
+        const filtered = prev.filter((entry) => entry.id !== sessionId);
+        return [{ id: sessionId, visitedAt: Date.now() }, ...filtered].slice(
+          0,
+          MAX_RECENT,
+        );
       });
     },
-    [storageKey],
+    [setEntries],
+  );
+
+  const recentSessionIds = useMemo(
+    () => entries.map((entry) => entry.id),
+    [entries],
   );
 
   return { recentSessionIds, recordVisit };

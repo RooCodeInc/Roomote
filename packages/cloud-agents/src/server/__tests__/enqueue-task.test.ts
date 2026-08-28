@@ -4,7 +4,6 @@
 // stamping, resume semantics, enqueue-time PR linkage, and pr_review queue
 // scope dedup.
 import Redis from 'ioredis-mock';
-import { invalidateDeploymentFeatureFlagCache } from '@roomote/feature-flags/server';
 
 const { mockGenerateLlmTaskTitle } = vi.hoisted(() => ({
   mockGenerateLlmTaskTitle: vi.fn().mockResolvedValue('Generated title'),
@@ -36,6 +35,7 @@ import {
   taskPullRequests,
   taskRunEvents,
   deploymentSettings,
+  fastAgentConversations,
   users,
   environments,
   environmentRepositoryMappings,
@@ -913,25 +913,6 @@ describe('enqueueTask initiator stamping', () => {
 });
 
 describe('enqueueTask Session linkage', () => {
-  beforeEach(async () => {
-    await db
-      .insert(deploymentSettings)
-      .values({ id: 'default', metadata: { sessions_data: true } })
-      .onConflictDoUpdate({
-        target: deploymentSettings.id,
-        set: { metadata: { sessions_data: true } },
-      });
-    invalidateDeploymentFeatureFlagCache();
-  });
-
-  afterEach(async () => {
-    await db
-      .update(deploymentSettings)
-      .set({ metadata: {} })
-      .where(eq(deploymentSettings.id, 'default'));
-    invalidateDeploymentFeatureFlagCache();
-  });
-
   it('creates exactly one Session link for a visible fresh task', async () => {
     const userId = await createUser();
     const run = await launchFresh({
@@ -1121,7 +1102,16 @@ describe('enqueueTask snapshot resume', () => {
 
   it('preserves Fast parent routing and communication isolation across resume', async () => {
     const userId = await createUser();
-    const fastAgentSessionId = '11111111-1111-4111-8111-111111111111';
+    const fastAgentSessionId = crypto.randomUUID();
+    // The Session linkage created at enqueue references the Fast conversation
+    // row, so the parent conversation must exist.
+    await db.insert(fastAgentConversations).values({
+      id: fastAgentSessionId,
+      userId,
+      surface: 'slack',
+      workspaceId: 'T123',
+      conversationId: fastAgentSessionId,
+    });
     const fastAgentParent = {
       sessionId: fastAgentSessionId,
       conversation: {
@@ -1209,8 +1199,16 @@ describe('enqueueTask snapshot resume', () => {
 
   it('recovers Fast parent isolation from an older ancestor in a resume chain', async () => {
     const userId = await createUser();
+    const ancestorFastSessionId = crypto.randomUUID();
+    await db.insert(fastAgentConversations).values({
+      id: ancestorFastSessionId,
+      userId,
+      surface: 'slack',
+      workspaceId: 'T123',
+      conversationId: ancestorFastSessionId,
+    });
     const fastAgentParent = {
-      sessionId: '22222222-2222-4222-8222-222222222222',
+      sessionId: ancestorFastSessionId,
       conversation: {
         surface: 'slack' as const,
         workspaceId: 'T123',

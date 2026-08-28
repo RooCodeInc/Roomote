@@ -24,7 +24,6 @@ vi.mock('@roomote/db/server', () => ({
   users: {
     id: 'users.id',
     deletedAt: 'users.deletedAt',
-    metadata: 'users.metadata',
   },
 }));
 
@@ -52,7 +51,6 @@ describe('lookupSlackUserMapping', () => {
         updatedAt,
         matchedUserId: 'user-1',
         userDeletedAt: null,
-        userMetadata: { communications_fast_mode_default: true },
       },
     ]);
 
@@ -68,35 +66,7 @@ describe('lookupSlackUserMapping', () => {
         userId: 'user-1',
         createdAt,
         updatedAt,
-        communicationsFastModeDefault: true,
       },
-      hasInactiveMapping: false,
-    });
-  });
-
-  it('enables Fast mode by default for active mappings without a preference', async () => {
-    const createdAt = new Date('2024-01-01T00:00:00.000Z');
-    const updatedAt = new Date('2024-01-02T00:00:00.000Z');
-    limitMock.mockResolvedValueOnce([
-      {
-        id: 'mapping-1',
-        slackUserId: 'U123',
-        slackTeamId: 'T123',
-        userId: 'user-1',
-        createdAt,
-        updatedAt,
-        matchedUserId: 'user-1',
-        userDeletedAt: null,
-        userMetadata: {},
-      },
-    ]);
-
-    const { lookupSlackUserMapping } = await import('./user-mapping.js');
-
-    await expect(
-      lookupSlackUserMapping({ slackUserId: 'U123', teamId: 'T123' }),
-    ).resolves.toMatchObject({
-      activeMapping: { communicationsFastModeDefault: true },
       hasInactiveMapping: false,
     });
   });
@@ -112,7 +82,6 @@ describe('lookupSlackUserMapping', () => {
         updatedAt: new Date('2024-01-02T00:00:00.000Z'),
         matchedUserId: 'user-1',
         userDeletedAt: new Date('2024-02-01T00:00:00.000Z'),
-        userMetadata: {},
       },
     ]);
 

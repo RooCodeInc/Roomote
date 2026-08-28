@@ -36,10 +36,6 @@ function normalizePersonalPreferences(
       typeof metadata.narration_mode === 'boolean'
         ? metadata.narration_mode
         : DEFAULT_PERSONAL_PREFERENCES.narrationMode,
-    communicationsFastModeDefault:
-      typeof metadata.communications_fast_mode_default === 'boolean'
-        ? metadata.communications_fast_mode_default
-        : DEFAULT_PERSONAL_PREFERENCES.communicationsFastModeDefault,
   };
 }
 
@@ -127,11 +123,6 @@ export async function updatePersonalPreferencesCommand(
 
   if (input.narrationMode !== undefined) {
     nextMetadataRecord.narration_mode = input.narrationMode;
-  }
-
-  if (input.communicationsFastModeDefault !== undefined) {
-    nextMetadataRecord.communications_fast_mode_default =
-      input.communicationsFastModeDefault;
   }
 
   if (Object.keys(nextMetadataRecord).length === 0) {

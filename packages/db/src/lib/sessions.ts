@@ -57,18 +57,33 @@ export function deriveSessionStatus(input: SessionStatusInput): SessionStatus {
   return 'ready';
 }
 
+export function isSessionConversationResponding(
+  session: Pick<Session, 'respondingUntil'>,
+  now: Date = new Date(),
+): boolean {
+  return (
+    session.respondingUntil !== null &&
+    session.respondingUntil.getTime() > now.getTime()
+  );
+}
+
 export async function touchSessionActivity(
   dbOrTx: DatabaseOrTransaction,
   sessionId: string,
   at: number,
   options: {
-    conversationResponding?: boolean;
+    /**
+     * Set (a future timestamp) or clear (null) the conversation-responding
+     * lease. When omitted, the stored lease decides whether the conversation
+     * counts as responding during status recomputation.
+     */
+    respondingUntil?: Date | null;
     recomputeStatus?: boolean;
   } = {},
 ): Promise<Session> {
   return runInTransactionIfAvailable(dbOrTx, async (tx) => {
     const [lockedSession] = await tx
-      .select({ id: sessions.id })
+      .select()
       .from(sessions)
       .where(eq(sessions.id, sessionId))
       .for('update');
@@ -77,46 +92,70 @@ export async function touchSessionActivity(
       throw new Error(`Session ${sessionId} does not exist.`);
     }
 
-    return refreshLockedSession(tx, sessionId, at, options);
+    return refreshLockedSession(tx, lockedSession, at, options);
   });
 }
 
 async function refreshLockedSession(
   tx: DatabaseOrTransaction,
-  sessionId: string,
+  lockedSession: Session,
   at: number,
-  options: { conversationResponding?: boolean; recomputeStatus?: boolean },
+  options: { respondingUntil?: Date | null; recomputeStatus?: boolean },
 ): Promise<Session> {
-  const linkedTasks = await tx
-    .selectDistinctOn([tasks.id], {
-      state: tasks.state,
-      taskPhase: taskRuns.taskPhase,
-      goalStatus: tasks.goalStatus,
-    })
-    .from(sessionTasks)
-    .innerJoin(tasks, eq(tasks.id, sessionTasks.taskId))
-    .leftJoin(taskRuns, eq(taskRuns.taskId, tasks.id))
-    .where(and(eq(sessionTasks.sessionId, sessionId), isNull(tasks.deletedAt)))
-    .orderBy(tasks.id, desc(taskRuns.id));
+  const respondingUntil =
+    options.respondingUntil !== undefined
+      ? options.respondingUntil
+      : lockedSession.respondingUntil;
+
+  let cachedStatus = lockedSession.cachedStatus;
+  if (options.recomputeStatus !== false) {
+    const linkedTasks = await tx
+      .selectDistinctOn([tasks.id], {
+        state: tasks.state,
+        taskPhase: taskRuns.taskPhase,
+        goalStatus: tasks.goalStatus,
+      })
+      .from(sessionTasks)
+      .innerJoin(tasks, eq(tasks.id, sessionTasks.taskId))
+      .leftJoin(taskRuns, eq(taskRuns.taskId, tasks.id))
+      .where(
+        and(
+          eq(sessionTasks.sessionId, lockedSession.id),
+          isNull(tasks.deletedAt),
+        ),
+      )
+      .orderBy(tasks.id, desc(taskRuns.id));
+
+    cachedStatus = deriveSessionStatus({
+      conversationResponding: isSessionConversationResponding({
+        respondingUntil,
+      }),
+      tasks: linkedTasks,
+    });
+  }
+
+  const nothingChanged =
+    at <= lockedSession.activityAt &&
+    cachedStatus === lockedSession.cachedStatus &&
+    options.respondingUntil === undefined;
+  if (nothingChanged) {
+    return lockedSession;
+  }
 
   const [updated] = await tx
     .update(sessions)
     .set({
       activityAt: sql`GREATEST(${sessions.activityAt}, ${at})`,
-      ...(options.recomputeStatus === false
-        ? {}
-        : {
-            cachedStatus: deriveSessionStatus({
-              conversationResponding: options.conversationResponding ?? false,
-              tasks: linkedTasks,
-            }),
-          }),
+      cachedStatus,
+      respondingUntil,
       updatedAt: new Date(),
     })
-    .where(eq(sessions.id, sessionId))
+    .where(eq(sessions.id, lockedSession.id))
     .returning();
 
-  if (!updated) throw new Error(`Session ${sessionId} does not exist.`);
+  if (!updated) {
+    throw new Error(`Session ${lockedSession.id} does not exist.`);
+  }
 
   return updated;
 }

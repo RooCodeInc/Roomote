@@ -11,6 +11,7 @@ export * from './automation-destination-fields';
 export * from './cloud-agents';
 export * from './pr-review-action';
 export * from './task-runs';
+export * from './sessions';
 export * from './fast-agent';
 export * from './chatgpt-subscription';
 export * from './github-copilot-subscription';

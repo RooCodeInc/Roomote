@@ -29,10 +29,6 @@ import {
   isBrainEnabled,
   touchSessionActivity,
 } from '@roomote/db/server';
-import {
-  evaluateDeploymentFeatureFlag,
-  FeatureFlag,
-} from '@roomote/feature-flags/server';
 import { Env } from '@roomote/env';
 import { z } from 'zod';
 
@@ -141,6 +137,10 @@ const showWidgetArgsSchema = z.object({
 const FAST_AGENT_DEFAULT_SLACK_HISTORY_LOOKBACK_MS = 24 * 60 * 60 * 1000;
 const FAST_AGENT_CANONICAL_TOOL_OUTPUT_MAX_CHARS = 50_000;
 
+// Generous ceiling on one fast-agent turn: long enough for delegation-heavy
+// responses, short enough that a crashed turn self-heals the session status.
+const FAST_RESPONDING_LEASE_MS = 15 * 60 * 1000;
+
 async function setFastSessionResponding(
   fastConversationId: string,
   responding: boolean,
@@ -148,7 +148,9 @@ async function setFastSessionResponding(
   const session = await getSessionForFastConversation(db, fastConversationId);
   if (!session) return;
   await touchSessionActivity(db, session.id, Math.floor(Date.now() / 1000), {
-    conversationResponding: responding,
+    respondingUntil: responding
+      ? new Date(Date.now() + FAST_RESPONDING_LEASE_MS)
+      : null,
   });
 }
 
@@ -1639,16 +1641,10 @@ export async function answerFastAgentQuestion({
               taskUrl?: string;
               taskLinkRendered?: boolean;
             }) => {
-              let sessionCommsEnabled = false;
               let linkedSession: Awaited<ReturnType<typeof getSessionForTask>> =
                 null;
               try {
-                sessionCommsEnabled = await evaluateDeploymentFeatureFlag(
-                  FeatureFlag.SessionsComms,
-                );
-                linkedSession = sessionCommsEnabled
-                  ? await getSessionForTask(db, task.taskId)
-                  : null;
+                linkedSession = await getSessionForTask(db, task.taskId);
               } catch (error) {
                 console.warn(
                   `[sessions] Failed to resolve Session kickoff link: ${formatErrorForLog(error)}`,
@@ -1658,13 +1654,11 @@ export async function answerFastAgentQuestion({
                 ? `${Env.R_APP_URL}/sessions/${linkedSession.id}?task=${task.taskId}`
                 : task.taskUrl;
               const message = [
-                sessionCommsEnabled
-                  ? `Preparing workspace…\n\n${args.kickoffMessage}`
-                  : args.kickoffMessage,
+                `Preparing workspace…\n\n${args.kickoffMessage}`,
                 destinationUrl &&
                 !task.taskLinkRendered &&
                 !args.kickoffMessage.includes(destinationUrl)
-                  ? `[${sessionCommsEnabled ? 'Open in Roomote' : 'Open the task'}](${destinationUrl})`
+                  ? `[Open in Roomote](${destinationUrl})`
                   : undefined,
               ]
                 .filter((part): part is string => Boolean(part))

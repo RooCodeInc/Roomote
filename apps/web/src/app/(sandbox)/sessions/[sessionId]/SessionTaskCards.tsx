@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { useMutation } from '@tanstack/react-query';
 import { toast } from 'sonner';
 
+import { formatInferenceCost } from '@/lib';
 import {
   Badge,
   Button,
@@ -105,7 +106,7 @@ export function SessionTaskCards({
                 <p className="line-clamp-2">{task.latestOutput}</p>
               ) : null}
               <p>
-                ${(task.inferenceCostMicroUsd / 1_000_000).toFixed(4)} inference
+                ${formatInferenceCost(task.inferenceCostMicroUsd)} inference
               </p>
               {task.canAccessDetails === false ? (
                 <p>Execution details require task access.</p>

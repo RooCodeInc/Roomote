@@ -283,9 +283,6 @@ importers:
       '@roomote/env':
         specifier: workspace:^
         version: link:../../packages/env
-      '@roomote/feature-flags':
-        specifier: workspace:^
-        version: link:../../packages/feature-flags
       '@roomote/github':
         specifier: workspace:^
         version: link:../../packages/github
@@ -1139,9 +1136,6 @@ importers:
       '@roomote/env':
         specifier: workspace:^
         version: link:../env
-      '@roomote/feature-flags':
-        specifier: workspace:^
-        version: link:../feature-flags
       '@roomote/gitea':
         specifier: workspace:^
         version: link:../gitea
@@ -1651,9 +1645,6 @@ importers:
       '@roomote/env':
         specifier: workspace:^
         version: link:../env
-      '@roomote/feature-flags':
-        specifier: workspace:^
-        version: link:../feature-flags
       '@roomote/redis':
         specifier: workspace:^
         version: link:../redis

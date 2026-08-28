@@ -51,9 +51,15 @@ describe('DelegatedTaskCard', () => {
     expect(onOpen).toHaveBeenCalledWith('child-1');
 
     const queryOptions = queryOptionsMock.mock.calls[0]![1];
+    // The server's refetchInterval drives polling; its absence means stop.
     expect(queryOptions.refetchInterval({ state: { data: undefined } })).toBe(
-      2_000,
+      false,
     );
+    expect(
+      queryOptions.refetchInterval({
+        state: { data: { refetchInterval: 2_000 } },
+      }),
+    ).toBe(2_000);
     expect(queryOptionsMock).toHaveBeenCalledWith(
       { taskId: 'child-1' },
       expect.any(Object),

@@ -1,7 +1,6 @@
 import type { Metadata, Viewport } from 'next';
 import localFont from 'next/font/local';
 import { DM_Sans } from 'next/font/google';
-import Script from 'next/script';
 
 import { PRODUCT_NAME } from '@roomote/types';
 
@@ -118,12 +117,15 @@ export default async function RootLayout({
 
   return (
     <html lang="en" suppressHydrationWarning>
+      <head>
+        {/* Must run synchronously before first paint: App Router queues
+            inline beforeInteractive Scripts until client bootstrap, which
+            flashes the wrong theme. */}
+        <script dangerouslySetInnerHTML={{ __html: getThemeBootScript() }} />
+      </head>
       <body
         className={`${fontSans.variable} ${fontMono.variable} font-sans antialiased`}
       >
-        <Script id="theme-boot" strategy="beforeInteractive">
-          {getThemeBootScript()}
-        </Script>
         <RouteTitle />
         <RootProviders
           authStatus={authStatus}

@@ -161,14 +161,10 @@ function AuthorizedCommandPalette() {
       { enabled: open },
     ),
   );
-  const sessionSearchOptions = trpc.sessions?.search?.queryOptions(
+  const sessionSearchOptions = trpc.sessions.search.queryOptions(
     { query: debouncedSearch, limit: SEARCH_TASKS_LIMIT },
-    { enabled: open && user?.featureFlags?.sessions_ui === true },
-  ) ?? {
-    queryKey: ['sessions', 'search', 'disabled'],
-    queryFn: async () => null,
-    enabled: false,
-  };
+    { enabled: open },
+  );
   const { data: sessionResults } = useQuery(sessionSearchOptions);
 
   // Promote recently-visited tasks to the top of the list

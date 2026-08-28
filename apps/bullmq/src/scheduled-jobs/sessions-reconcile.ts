@@ -17,11 +17,6 @@ import {
   tasks,
   touchSessionActivity,
 } from '@roomote/db/server';
-import {
-  evaluateDeploymentFeatureFlag,
-  FeatureFlag,
-} from '@roomote/feature-flags/server';
-
 const LOG_PREFIX = '[sessions]';
 const BACKFILL_KEY = 'unified-sessions-v1';
 const BATCH_SIZE = 100;
@@ -175,6 +170,26 @@ async function backfillParticipants(): Promise<void> {
 }
 
 async function reconcileRecentSessions(): Promise<void> {
+  // Fast conversations without a session row (e.g. created before this
+  // release finished its backfill) are adopted here so the unified list
+  // converges without another full backfill.
+  const orphanConversations = await db
+    .select({ id: fastAgentConversations.id })
+    .from(fastAgentConversations)
+    .leftJoin(
+      sessions,
+      eq(sessions.fastConversationId, fastAgentConversations.id),
+    )
+    .where(isNull(sessions.id))
+    .orderBy(desc(fastAgentConversations.updatedAt))
+    .limit(BATCH_SIZE);
+
+  for (const conversation of orphanConversations) {
+    await db.transaction((tx) =>
+      ensureSessionForFastConversation(tx, conversation.id),
+    );
+  }
+
   const orphanTasks = await db
     .select({ id: tasks.id })
     .from(tasks)
@@ -206,15 +221,13 @@ async function reconcileRecentSessions(): Promise<void> {
   }
 
   console.info(`${LOG_PREFIX} reconciliation`, {
+    orphanFastConversations: orphanConversations.length,
     orphanVisibleTasks: orphanTasks.length,
     refreshedSessions: recent.length,
   });
 }
 
 export async function sessionsReconcileJob(): Promise<void> {
-  const enabled = await evaluateDeploymentFeatureFlag(FeatureFlag.SessionsData);
-  if (!enabled) return;
-
   const state = await db.query.sessionBackfillState.findFirst({
     where: eq(sessionBackfillState.key, BACKFILL_KEY),
   });
@@ -233,11 +246,7 @@ export async function sessionsReconcileJob(): Promise<void> {
     const complete = await backfillFastConversations(cursor);
     if (!complete) return;
   }
-  if (
-    phase === 'fast_conversations' ||
-    phase === 'fast_tasks' ||
-    phase === 'tasks'
-  ) {
+  if (phase === 'fast_conversations' || phase === 'tasks') {
     const complete = await backfillTasks(phase === 'tasks' ? cursor : null);
     if (!complete) return;
   }

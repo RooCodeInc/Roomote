@@ -1,6 +1,6 @@
 import { RunStatus } from '@roomote/types';
 import {
-  SLACK_LIVE_TASK_CARD_MESSAGES,
+  SLACK_SESSION_LIVE_TASK_CARD_MESSAGES,
   type SlackTaskStreamStatus,
 } from '@roomote/slack/client';
 import { sdk, type TaskRun } from '@roomote/sdk/client';
@@ -395,7 +395,7 @@ export async function finishSlackLiveTaskStream(
     state.status = 'complete';
     if (!state.awaitingInput) {
       state.message =
-        state.finalMessage ?? SLACK_LIVE_TASK_CARD_MESSAGES.completed;
+        state.finalMessage ?? SLACK_SESSION_LIVE_TASK_CARD_MESSAGES.completed;
       state.provisionalCompletion = state.finalMessage === undefined;
     }
     await renderCard(taskRun, context, { settle: true });
@@ -413,7 +413,7 @@ export async function finishSlackLiveTaskStream(
     }
     state.status = 'complete';
     state.message =
-      state.finalMessage ?? SLACK_LIVE_TASK_CARD_MESSAGES.completed;
+      state.finalMessage ?? SLACK_SESSION_LIVE_TASK_CARD_MESSAGES.completed;
     state.provisionalCompletion = false;
     await renderCard(taskRun, context, { settle: true });
     return;
@@ -421,7 +421,7 @@ export async function finishSlackLiveTaskStream(
 
   if (status === RunStatus.Canceled) {
     state.status = 'error';
-    state.message = SLACK_LIVE_TASK_CARD_MESSAGES.canceled;
+    state.message = SLACK_SESSION_LIVE_TASK_CARD_MESSAGES.canceled;
     state.provisionalCompletion = false;
     await renderCard(taskRun, context, { settle: true });
     return;
@@ -430,7 +430,7 @@ export async function finishSlackLiveTaskStream(
   // A failed turn is not the end of the task: the workspace is retained and
   // the next run (a follow-up or a retry) keeps driving this same card.
   state.status = 'error';
-  state.message = SLACK_LIVE_TASK_CARD_MESSAGES.failed;
+  state.message = SLACK_SESSION_LIVE_TASK_CARD_MESSAGES.failed;
   state.provisionalCompletion = false;
   await renderCard(taskRun, context, { settle: true });
 }

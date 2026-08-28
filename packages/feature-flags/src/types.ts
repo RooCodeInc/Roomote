@@ -2,11 +2,7 @@
  * Feature flag types and configuration
  */
 
-export const FeatureFlag = {
-  SessionsData: 'sessions_data',
-  SessionsUi: 'sessions_ui',
-  SessionsComms: 'sessions_comms',
-} as const;
+export const FeatureFlag = {} as const;
 
 export type FeatureFlag = (typeof FeatureFlag)[keyof typeof FeatureFlag];
 

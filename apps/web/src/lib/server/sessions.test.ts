@@ -10,6 +10,7 @@ import {
 
 import {
   findAccessibleSession,
+  getLatestExternalSessionEvent,
   getSessionById,
   getSessionForTask,
   getSessions,
@@ -114,6 +115,67 @@ describe('unified Session queries', () => {
     expect(taskEvent).not.toHaveProperty('task.latestRun');
     expect(taskEvent).not.toHaveProperty('task.artifacts');
     expect(taskEvent).not.toHaveProperty('task.pullRequests');
+  });
+
+  it('resolves the latest external event from visible messages only', async () => {
+    const owner = await userFactory.create();
+    const other = await userFactory.create();
+    const [conversation] = await db
+      .insert(fastAgentConversations)
+      .values({
+        userId: owner.id,
+        surface: 'web',
+        workspaceId: owner.id,
+        conversationId: crypto.randomUUID(),
+      })
+      .returning();
+    const session = await sessionFactory.create({
+      ownerKind: 'user',
+      ownerUserId: owner.id,
+      title: 'Unread Session',
+      fastConversationId: conversation!.id,
+    });
+    await db.insert(fastAgentMessages).values([
+      {
+        conversationId: conversation!.id,
+        eventId: 'visible-1',
+        turnId: 'turn-1',
+        turnSeq: 0,
+        ts: 100,
+        eventType: 'roomote_runtime.user_prompt',
+        role: 'user',
+        contentBlocks: [{ type: 'text', text: 'hello' }],
+        metadata: { userId: other.id, visibleInTranscript: true },
+        payload: {},
+      },
+      {
+        conversationId: conversation!.id,
+        eventId: 'invisible-2',
+        turnId: 'turn-2',
+        turnSeq: 0,
+        ts: 200,
+        eventType: 'roomote_runtime.user_prompt',
+        role: 'user',
+        contentBlocks: [{ type: 'text', text: 'platform event' }],
+        metadata: { userId: other.id, visibleInTranscript: false },
+        payload: {},
+      },
+    ]);
+
+    // The invisible newer message must count for neither the unread max nor
+    // the read cursor, or the badge could never be cleared.
+    const latest = await getLatestExternalSessionEvent(
+      { userId: owner.id, isAdmin: false },
+      session.id,
+    );
+    expect(latest).toEqual({ at: 100, id: 'fast:visible-1' });
+
+    const list = await getSessions(
+      { userId: owner.id, isAdmin: false },
+      { scope: 'all' },
+    );
+    const row = list.sessions.find((entry) => entry.id === session.id);
+    expect(row?.unread).toBe(true);
   });
 
   it('excludes soft-deleted tasks from Session detail, timeline, and live status', async () => {

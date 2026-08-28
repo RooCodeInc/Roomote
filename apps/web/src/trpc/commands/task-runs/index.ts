@@ -12,12 +12,9 @@ import {
   resolveEvalHarnessSelection,
 } from '@roomote/types';
 import {
-  type RoutingDecision,
-  buildSlackRoutingContext,
   DeploymentReadOnlyError,
   enqueueTask,
   getTaskUrl,
-  routeTask,
 } from '@roomote/cloud-agents/server';
 import { captureTaskSettled } from '@roomote/telemetry/server';
 import {
@@ -36,7 +33,7 @@ import {
 import { SlackNotifier, settleSlackLiveTaskCardForRun } from '@roomote/slack';
 
 import type { UserAuthSuccess } from '@/types';
-import { Env, getArtifactById, getRepositories } from '@/lib/server';
+import { getArtifactById, getRepositories } from '@/lib/server';
 import {
   resolveEnvironmentSourceControlProvider,
   resolveSelectedRepositorySourceControlProvider,
@@ -363,42 +360,6 @@ async function notifySourceTaskArtifactBuild({
   });
 }
 
-export async function routeHomeTaskCommand(
-  auth: UserAuthSuccess,
-  input: {
-    description: string;
-    images?: string[];
-  },
-): Promise<RoutingDecision> {
-  try {
-    const trimmedDescription = input.description.trim();
-
-    if (trimmedDescription.length === 0) {
-      return {
-        status: 'fallback',
-        reason: 'Task description is required for auto routing.',
-      };
-    }
-
-    const routingContext = await buildSlackRoutingContext({
-      userId: auth.userId,
-      taskDescription: trimmedDescription,
-      ...(input.images?.length ? { images: input.images } : {}),
-      apiBaseUrl: Env.TRPC_URL ?? Env.R_APP_URL,
-    });
-
-    return await routeTask(routingContext);
-  } catch (error) {
-    console.error(error);
-
-    return {
-      status: 'fallback',
-      reason:
-        error instanceof Error ? error.message : 'An unknown error occurred.',
-    };
-  }
-}
-
 export async function createStandardTaskRunCommand(
   auth: UserAuthSuccess,
   input: CreateStandardTaskRunInput,
@@ -465,12 +426,10 @@ export async function createStandardTaskRunCommand(
       surface: 'web',
       trigger: 'manual',
     });
-    const linkedSession = auth.featureFlags.sessions_ui
-      ? await db.query.sessionTasks.findFirst({
-          where: eq(sessionTasks.taskId, launchResult.taskId),
-          columns: { sessionId: true },
-        })
-      : null;
+    const linkedSession = await db.query.sessionTasks.findFirst({
+      where: eq(sessionTasks.taskId, launchResult.taskId),
+      columns: { sessionId: true },
+    });
 
     try {
       await notifySourceTaskArtifactBuild({

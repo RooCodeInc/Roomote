@@ -3,7 +3,10 @@
 import { useCallback } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 
+import { getSessionStatusLabel, SESSION_STATUSES } from '@roomote/types';
+
 import type { TimePeriodFilter } from '@/types';
+import { SESSION_SURFACES } from '@/components/sessions/session-surfaces';
 import { TaskFilters } from '@/components/tasks';
 import {
   Button,
@@ -18,7 +21,6 @@ import {
 export function SessionsFilters({
   userId,
   timePeriod,
-  unified = false,
   scope = 'all',
   status = 'all',
   view = 'list',
@@ -31,7 +33,6 @@ export function SessionsFilters({
 }: {
   userId: string | null;
   timePeriod: TimePeriodFilter;
-  unified?: boolean;
   scope?: string;
   status?: string;
   view?: string;
@@ -60,118 +61,113 @@ export function SessionsFilters({
 
   return (
     <div className="flex w-full flex-wrap items-center gap-2">
-      {unified ? (
-        <>
-          <Select
-            value={scope}
-            onValueChange={(value) =>
-              updateParams((params) => params.set('scope', value))
-            }
-          >
-            <SelectTrigger size="sm" aria-label="Session scope">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All sessions</SelectItem>
-              <SelectItem value="tasks">Tasks</SelectItem>
-              <SelectItem value="reviews">Reviews</SelectItem>
-              <SelectItem value="automations">Automations</SelectItem>
-            </SelectContent>
-          </Select>
-          <Select
-            value={source}
-            onValueChange={(value) =>
-              updateParams((params) => {
-                if (value === 'all') params.delete('source');
-                else params.set('source', value);
-              })
-            }
-          >
-            <SelectTrigger size="sm" aria-label="Session source">
-              <SelectValue placeholder="All sources" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All sources</SelectItem>
-              <SelectItem value="web">Web</SelectItem>
-              <SelectItem value="slack">Slack</SelectItem>
-              <SelectItem value="teams">Teams</SelectItem>
-              <SelectItem value="telegram">Telegram</SelectItem>
-              <SelectItem value="discord">Discord</SelectItem>
-              <SelectItem value="automation">Automation</SelectItem>
-            </SelectContent>
-          </Select>
-          <Select
-            value={status}
-            onValueChange={(value) =>
-              updateParams((params) => {
-                if (value === 'all') params.delete('status');
-                else params.set('status', value);
-              })
-            }
-          >
-            <SelectTrigger size="sm" aria-label="Session status">
-              <SelectValue placeholder="All statuses" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All statuses</SelectItem>
-              <SelectItem value="active">Active</SelectItem>
-              <SelectItem value="needs_input">Needs input</SelectItem>
-              <SelectItem value="blocked">Blocked</SelectItem>
-              <SelectItem value="ready">Ready</SelectItem>
-            </SelectContent>
-          </Select>
-          <form
-            className="flex min-w-52 flex-1 gap-2"
-            onSubmit={(event) => {
-              event.preventDefault();
-              const form = new FormData(event.currentTarget);
-              updateParams((params) => {
-                const value = String(form.get('q') ?? '').trim();
-                if (value) params.set('q', value);
-                else params.delete('q');
-                const environmentValue = String(
-                  form.get('environment') ?? '',
-                ).trim();
-                if (environmentValue)
-                  params.set('environment', environmentValue);
-                else params.delete('environment');
-              });
-            }}
-          >
-            <Input
-              name="q"
-              defaultValue={query}
-              aria-label="Search sessions"
-              placeholder="Search sessions"
-              className="h-8"
-            />
-            <Input
-              name="environment"
-              defaultValue={environment}
-              aria-label="Filter by environment ID"
-              placeholder="Environment ID"
-              className="h-8"
-            />
-            <Button type="submit" size="sm" variant="outline">
-              Search
-            </Button>
-          </form>
-          <Select
-            value={view}
-            onValueChange={(value) =>
-              updateParams((params) => params.set('view', value))
-            }
-          >
-            <SelectTrigger size="sm" aria-label="Session view">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="list">List</SelectItem>
-              <SelectItem value="board">Board</SelectItem>
-            </SelectContent>
-          </Select>
-        </>
-      ) : null}
+      <Select
+        value={scope}
+        onValueChange={(value) =>
+          updateParams((params) => params.set('scope', value))
+        }
+      >
+        <SelectTrigger size="sm" aria-label="Session scope">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="all">All sessions</SelectItem>
+          <SelectItem value="tasks">Tasks</SelectItem>
+          <SelectItem value="reviews">Reviews</SelectItem>
+          <SelectItem value="automations">Automations</SelectItem>
+        </SelectContent>
+      </Select>
+      <Select
+        value={source}
+        onValueChange={(value) =>
+          updateParams((params) => {
+            if (value === 'all') params.delete('source');
+            else params.set('source', value);
+          })
+        }
+      >
+        <SelectTrigger size="sm" aria-label="Session source">
+          <SelectValue placeholder="All sources" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="all">All sources</SelectItem>
+          {Object.entries(SESSION_SURFACES).map(([value, descriptor]) => (
+            <SelectItem key={value} value={value}>
+              {descriptor.label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      <Select
+        value={status}
+        onValueChange={(value) =>
+          updateParams((params) => {
+            if (value === 'all') params.delete('status');
+            else params.set('status', value);
+          })
+        }
+      >
+        <SelectTrigger size="sm" aria-label="Session status">
+          <SelectValue placeholder="All statuses" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="all">All statuses</SelectItem>
+          {SESSION_STATUSES.map((value) => (
+            <SelectItem key={value} value={value} className="capitalize">
+              {getSessionStatusLabel(value)}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      <form
+        className="flex min-w-52 flex-1 gap-2"
+        onSubmit={(event) => {
+          event.preventDefault();
+          const form = new FormData(event.currentTarget);
+          updateParams((params) => {
+            const value = String(form.get('q') ?? '').trim();
+            if (value) params.set('q', value);
+            else params.delete('q');
+            const environmentValue = String(
+              form.get('environment') ?? '',
+            ).trim();
+            if (environmentValue) params.set('environment', environmentValue);
+            else params.delete('environment');
+          });
+        }}
+      >
+        <Input
+          name="q"
+          defaultValue={query}
+          aria-label="Search sessions"
+          placeholder="Search sessions"
+          className="h-8"
+        />
+        <Input
+          name="environment"
+          defaultValue={environment}
+          aria-label="Filter by environment ID"
+          placeholder="Environment ID"
+          className="h-8"
+        />
+        <Button type="submit" size="sm" variant="outline">
+          Search
+        </Button>
+      </form>
+      <Select
+        value={view}
+        onValueChange={(value) =>
+          updateParams((params) => params.set('view', value))
+        }
+      >
+        <SelectTrigger size="sm" aria-label="Session view">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="list">List</SelectItem>
+          <SelectItem value="board">Board</SelectItem>
+        </SelectContent>
+      </Select>
       <TaskFilters
         userId={userId ?? 'all'}
         repositoryName={repository}
@@ -214,9 +210,9 @@ export function SessionsFilters({
             }
           })
         }
-        showRepository={unified}
-        showPullRequest={unified}
-        showModel={unified}
+        showRepository
+        showPullRequest
+        showModel
         showTaskType={false}
       />
     </div>

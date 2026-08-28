@@ -199,9 +199,7 @@ export async function startFastSessionCommand(
     reasoningEffort: settings.reasoningEffort,
   });
 
-  const unifiedSession = auth.featureFlags.sessions_ui
-    ? await getSessionForFastConversation(db, session.id)
-    : null;
+  const unifiedSession = await getSessionForFastConversation(db, session.id);
   return {
     sessionId: unifiedSession?.id ?? session.id,
     fastConversationId: session.id,

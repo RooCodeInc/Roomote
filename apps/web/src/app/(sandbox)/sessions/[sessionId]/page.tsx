@@ -13,8 +13,8 @@ import {
   getFastSessionTasks,
 } from '@/lib/server/fast-sessions';
 import { getSessionByIdCommand } from '@/trpc/commands/sessions';
-import { Badge } from '@/components/system';
 import { WorkspaceHeader } from '@/components/layout';
+import { SessionStatusBadge } from '@/components/sessions/SessionStatusBadge';
 
 import { FastSessionTranscript } from './FastSessionTranscript';
 import { SessionWorkspace, type SessionInfo } from './SessionWorkspace';
@@ -34,10 +34,10 @@ export default async function SessionDetailPage({
     notFound();
   }
 
-  const sessionsUiEnabled = authorizedUser.featureFlags?.sessions_ui === true;
-  const unifiedSession = sessionsUiEnabled
-    ? await getSessionByIdCommand(authorizedUser, sessionId)
-    : null;
+  // Old links may carry a fast-conversation id whose session row hasn't been
+  // backfilled yet; getSessionByIdCommand falls back by fastConversationId,
+  // and the fast lookup below covers a conversation with no session row.
+  const unifiedSession = await getSessionByIdCommand(authorizedUser, sessionId);
   const session = unifiedSession?.fastConversationId
     ? await getFastSessionById(
         authorizedUser,
@@ -70,14 +70,6 @@ export default async function SessionDetailPage({
       status: unifiedSession.status,
       tasks: unifiedSession.tasks,
     };
-    const statusVariant =
-      unifiedSession.status === 'active'
-        ? 'success'
-        : unifiedSession.status === 'needs_input'
-          ? 'warning'
-          : unifiedSession.status === 'blocked'
-            ? 'destructive'
-            : 'secondary';
     const taskCards = (
       <SessionTaskCards
         sessionId={unifiedSession.id}
@@ -102,9 +94,7 @@ export default async function SessionDetailPage({
               defaultModelId={defaultModelId}
               defaultReasoningEffort={defaultReasoningEffort}
               headerExtras={
-                <Badge variant={statusVariant}>
-                  {unifiedSession.status.replace('_', ' ')}
-                </Badge>
+                <SessionStatusBadge status={unifiedSession.status} />
               }
               timelineExtras={taskCards}
             />
@@ -117,9 +107,7 @@ export default async function SessionDetailPage({
                 <h1 className="min-w-0 flex-1 truncate text-sm font-medium">
                   {unifiedSession.title}
                 </h1>
-                <Badge variant={statusVariant}>
-                  {unifiedSession.status.replace('_', ' ')}
-                </Badge>
+                <SessionStatusBadge status={unifiedSession.status} />
               </WorkspaceHeader>
               <div className="min-h-0 flex-1 overflow-y-auto p-4">
                 <div className="mx-auto max-w-4xl">{taskCards}</div>

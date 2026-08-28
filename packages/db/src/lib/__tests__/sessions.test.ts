@@ -114,14 +114,50 @@ describe('session helpers', () => {
     createdSessionIds.push(session.id);
 
     const active = await touchSessionActivity(db, session.id, 200, {
-      conversationResponding: true,
+      respondingUntil: new Date(Date.now() + 60_000),
     });
     const ready = await touchSessionActivity(db, session.id, 201, {
-      conversationResponding: false,
+      respondingUntil: null,
     });
 
     expect(active.cachedStatus).toBe('active');
     expect(ready.cachedStatus).toBe('ready');
+  });
+
+  it('honors the stored responding lease when recomputing without options', async () => {
+    const session = await sessionFactory.create({ cachedStatus: 'ready' });
+    createdSessionIds.push(session.id);
+
+    await touchSessionActivity(db, session.id, 200, {
+      respondingUntil: new Date(Date.now() + 60_000),
+    });
+    const recomputed = await touchSessionActivity(db, session.id, 201);
+
+    expect(recomputed.cachedStatus).toBe('active');
+  });
+
+  it('treats an expired responding lease as not responding', async () => {
+    const session = await sessionFactory.create({ cachedStatus: 'active' });
+    createdSessionIds.push(session.id);
+
+    await touchSessionActivity(db, session.id, 200, {
+      respondingUntil: new Date(Date.now() - 1_000),
+    });
+    const recomputed = await touchSessionActivity(db, session.id, 201);
+
+    expect(recomputed.cachedStatus).toBe('ready');
+  });
+
+  it('skips the write when nothing changed', async () => {
+    const session = await sessionFactory.create({
+      activityAt: 200,
+      cachedStatus: 'ready',
+    });
+    createdSessionIds.push(session.id);
+
+    const touched = await touchSessionActivity(db, session.id, 100);
+
+    expect(touched.updatedAt).toEqual(session.updatedAt);
   });
 
   it('recomputes cached status from linked tasks while touching activity', async () => {

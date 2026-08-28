@@ -3,37 +3,28 @@ import { fireEvent, render, screen, within } from '@testing-library/react';
 
 type PersonalColorTheme = 'light' | 'dark' | 'system';
 
-const {
-  colorThemeState,
-  mindReaderModeState,
-  narrationModeState,
-  personalPreferencesState,
-} = vi.hoisted(() => ({
-  colorThemeState: {
-    colorTheme: 'system' as PersonalColorTheme,
-    isLoading: false,
-    isUpdating: false,
-    setColorTheme: vi.fn(),
-  },
-  mindReaderModeState: {
-    enabled: false,
-    isLoading: false,
-    isUpdating: false,
-    setEnabled: vi.fn(),
-  },
-  narrationModeState: {
-    enabled: false,
-    isLoading: false,
-    isUpdating: false,
-    setEnabled: vi.fn(),
-  },
-  personalPreferencesState: {
-    preferences: { communicationsFastModeDefault: false },
-    isLoading: false,
-    isUpdating: false,
-    setPreferences: vi.fn(),
-  },
-}));
+const { colorThemeState, mindReaderModeState, narrationModeState } = vi.hoisted(
+  () => ({
+    colorThemeState: {
+      colorTheme: 'system' as PersonalColorTheme,
+      isLoading: false,
+      isUpdating: false,
+      setColorTheme: vi.fn(),
+    },
+    mindReaderModeState: {
+      enabled: false,
+      isLoading: false,
+      isUpdating: false,
+      setEnabled: vi.fn(),
+    },
+    narrationModeState: {
+      enabled: false,
+      isLoading: false,
+      isUpdating: false,
+      setEnabled: vi.fn(),
+    },
+  }),
+);
 
 vi.mock('@/hooks/useColorTheme', () => ({
   useColorTheme: () => colorThemeState,
@@ -45,10 +36,6 @@ vi.mock('@/hooks/useNarrationMode', () => ({
 
 vi.mock('@/hooks/useMindReaderMode', () => ({
   useMindReaderMode: () => mindReaderModeState,
-}));
-
-vi.mock('@/hooks/usePersonalPreferences', () => ({
-  usePersonalPreferences: () => personalPreferencesState,
 }));
 
 vi.mock('@/components/system', () => ({
@@ -136,9 +123,6 @@ describe('UserPreferencesSection', () => {
     narrationModeState.enabled = false;
     narrationModeState.isLoading = false;
     narrationModeState.isUpdating = false;
-    personalPreferencesState.preferences.communicationsFastModeDefault = false;
-    personalPreferencesState.isLoading = false;
-    personalPreferencesState.isUpdating = false;
   });
 
   it('renders user preference controls with the current state', () => {
@@ -165,12 +149,6 @@ describe('UserPreferencesSection', () => {
       ),
     ).toBeInTheDocument();
     expect(screen.getByLabelText('Toggle narration mode')).toBeChecked();
-    expect(screen.getByText('Fast response mode')).toHaveClass('font-semibold');
-    expect(
-      screen.getByText(
-        'Use fast responses by default for homepage prompts and linked Slack and Discord messages. GitHub, Teams, and Telegram are unaffected; `!fast` remains available in Slack.',
-      ),
-    ).toBeInTheDocument();
   });
 
   it('disables controls while the corresponding preference is loading or updating', () => {
@@ -225,20 +203,5 @@ describe('UserPreferencesSection', () => {
     expect(within(dropdown).getByRole('option', { name: 'Auto' })).toHaveValue(
       'system',
     );
-  });
-
-  it('updates the fast response mode default', () => {
-    personalPreferencesState.preferences.communicationsFastModeDefault = true;
-
-    render(<UserPreferencesSection />);
-
-    const toggle = screen.getByLabelText('Toggle fast response mode');
-    expect(toggle).toBeChecked();
-
-    fireEvent.click(toggle);
-
-    expect(personalPreferencesState.setPreferences).toHaveBeenCalledWith({
-      communicationsFastModeDefault: false,
-    });
   });
 });

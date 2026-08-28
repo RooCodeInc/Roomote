@@ -1,8 +1,10 @@
 import Link from 'next/link';
 import { formatDistanceToNow } from 'date-fns';
 
-import { getUserDisplayName } from '@/lib';
-import { Avatar, Badge } from '@/components/system';
+import { formatInferenceCost, getUserDisplayName } from '@/lib';
+import { Avatar } from '@/components/system';
+import { SessionStatusBadge } from '@/components/sessions/SessionStatusBadge';
+import { getSessionSurfaceLabel } from '@/components/sessions/session-surfaces';
 
 type SessionCardData = {
   id: string;
@@ -22,13 +24,6 @@ type SessionCardData = {
     repositoryName: string | null;
   }>;
 };
-
-const STATUS_VARIANTS = {
-  active: 'success',
-  needs_input: 'warning',
-  blocked: 'destructive',
-  ready: 'secondary',
-} as const;
 
 export function SessionCard({ session }: { session: SessionCardData }) {
   const owner =
@@ -71,15 +66,13 @@ export function SessionCard({ session }: { session: SessionCardData }) {
           </span>
         </div>
         <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-          <Badge variant={STATUS_VARIANTS[status]}>
-            {status.replace('_', ' ')}
-          </Badge>
+          <SessionStatusBadge status={status} />
           <span>{session.executionCount} executions</span>
-          <span>{session.sourceSurface}</span>
+          <span>{getSessionSurfaceLabel(session.sourceSurface)}</span>
           {primaryTask?.repositoryName ? (
             <span>{primaryTask.repositoryName}</span>
           ) : null}
-          <span>${(session.inferenceCostMicroUsd / 1_000_000).toFixed(4)}</span>
+          <span>${formatInferenceCost(session.inferenceCostMicroUsd)}</span>
         </div>
       </div>
     </Link>

@@ -46,7 +46,6 @@ import {
 } from '@roomote/sdk/server';
 
 import { apiLogger } from '../../logging.js';
-import { hasCommunicationsFastModeDefault } from '../fast-agent-entry.js';
 import { getCallRoomoteViaEmojiConfiguration } from '../call-roomote-via-emoji.js';
 import { syncActingUserForInboundMessage } from '../tasks/acting-user-sync.js';
 import {
@@ -745,10 +744,11 @@ async function processDiscordGatewayEvent(
     userId: senderUserId,
   });
 
+  // Fast mode is unconditional for ordinary linked-human messages. Reaction
+  // entries carry a configured task prompt, so they keep launching tasks
+  // (mirroring Slack's call-roomote-via-emoji flow).
   const defaultFastMessage =
-    message != null &&
-    command == null &&
-    (await hasCommunicationsFastModeDefault(senderUserId))
+    message != null && command == null && reactionTarget == null
       ? message
       : null;
 

@@ -1,25 +1,6 @@
 import type { FeatureFlagConfigMap, MetadataBooleanDescriptor } from './types';
 
-export const FEATURE_FLAG_CONFIG: FeatureFlagConfigMap = {
-  sessions_data: {
-    defaultValue: false,
-    metadataKey: 'sessions_data',
-    description: 'Create and reconcile unified Session records',
-    group: 'Sessions',
-  },
-  sessions_ui: {
-    defaultValue: false,
-    metadataKey: 'sessions_ui',
-    description: 'Use Sessions as the primary dashboard navigation unit',
-    group: 'Sessions',
-  },
-  sessions_comms: {
-    defaultValue: false,
-    metadataKey: 'sessions_comms',
-    description: 'Use Session-aware communication wording and links',
-    group: 'Sessions',
-  },
-};
+export const FEATURE_FLAG_CONFIG: FeatureFlagConfigMap = {};
 
 /**
  * Non-feature-flag boolean deployment metadata that is still actively read in

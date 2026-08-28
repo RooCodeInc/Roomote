@@ -7,7 +7,10 @@ const {
   mockTouchSessionActivity,
   tasksTable,
   taskArtifactsTable,
+  sessionsTable,
+  sessionTasksTable,
   deleteCalls,
+  updateCalls,
   transactionSpy,
 } = vi.hoisted(() => ({
   mockDeleteArtifactsBatch: vi.fn(),
@@ -21,7 +24,13 @@ const {
     path: 'taskArtifacts.path',
     version: 'taskArtifacts.version',
   },
+  sessionsTable: { id: 'sessions.id', archivedAt: 'sessions.archivedAt' },
+  sessionTasksTable: {
+    sessionId: 'sessionTasks.sessionId',
+    taskId: 'sessionTasks.taskId',
+  },
   deleteCalls: [] as unknown[],
+  updateCalls: [] as unknown[],
   transactionSpy: vi.fn(),
 }));
 
@@ -36,12 +45,29 @@ const artifactRows = [
   },
 ];
 
+// Rows the fake sessionTasks SELECT returns; tests override to simulate a
+// session left with no remaining live tasks.
+const remainingSessionTaskRows: Array<{ taskId: string }> = [];
+
 const fakeTx = {
   select: () => ({
-    from: (table: unknown) => ({
-      where: async () =>
-        table === taskArtifactsTable ? artifactRows : taskRows,
-    }),
+    from: (table: unknown) => {
+      const rowsFor = () =>
+        table === taskArtifactsTable
+          ? artifactRows
+          : table === sessionTasksTable
+            ? remainingSessionTaskRows
+            : taskRows;
+      return {
+        where: () =>
+          Object.assign(Promise.resolve(rowsFor()), {
+            limit: async () => rowsFor(),
+          }),
+        innerJoin: () => ({
+          where: () => ({ limit: async () => rowsFor() }),
+        }),
+      };
+    },
   }),
   delete: (table: unknown) => ({
     where: (condition: unknown) => {
@@ -49,11 +75,14 @@ const fakeTx = {
       return Promise.resolve();
     },
   }),
-  update: () => ({
-    set: () => ({
-      where: () => ({
-        returning: async () => taskRows,
-      }),
+  update: (table: unknown) => ({
+    set: (values: unknown) => ({
+      where: (condition: unknown) => {
+        updateCalls.push({ table, values, condition });
+        return Object.assign(Promise.resolve(), {
+          returning: async () => taskRows,
+        });
+      },
     }),
   }),
 };
@@ -67,10 +96,13 @@ vi.mock('@roomote/db/server', () => ({
   },
   tasks: tasksTable,
   taskArtifacts: taskArtifactsTable,
+  sessions: sessionsTable,
+  sessionTasks: sessionTasksTable,
   markTaskStartParallelCountsEndedAtForTaskIds: mockMarkParallelCounts,
   getSessionForTask: mockGetSessionForTask,
   touchSessionActivity: mockTouchSessionActivity,
   and: (...conditions: unknown[]) => ({ and: conditions }),
+  eq: (left: unknown, right: unknown) => ({ eq: [left, right] }),
   inArray: (column: unknown, values: unknown) => ({
     inArray: [column, values],
   }),
@@ -94,10 +126,14 @@ describe('deleteTasksCommand', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     deleteCalls.length = 0;
+    updateCalls.length = 0;
+    remainingSessionTaskRows.length = 0;
     mockDeleteArtifactsBatch.mockResolvedValue({ deleted: 1, errors: 0 });
     mockGetSessionForTask.mockResolvedValue({
       id: 'session-1',
       activityAt: 100,
+      fastConversationId: null,
+      archivedAt: null,
     });
   });
 
@@ -130,5 +166,44 @@ describe('deleteTasksCommand', () => {
       'session-1',
       100,
     );
+  });
+
+  it('archives a session left with no live tasks', async () => {
+    await deleteTasksCommand(auth, { taskIds: ['task-1'] });
+
+    const archiveUpdate = updateCalls.find(
+      (call) => (call as { table: unknown }).table === sessionsTable,
+    ) as { values: { archivedAt: unknown } } | undefined;
+    expect(archiveUpdate).toBeDefined();
+    expect(archiveUpdate!.values.archivedAt).toBeInstanceOf(Date);
+  });
+
+  it('keeps a session visible when live tasks remain', async () => {
+    remainingSessionTaskRows.push({ taskId: 'task-2' });
+
+    await deleteTasksCommand(auth, { taskIds: ['task-1'] });
+
+    expect(
+      updateCalls.some(
+        (call) => (call as { table: unknown }).table === sessionsTable,
+      ),
+    ).toBe(false);
+  });
+
+  it('never archives a session that has a fast conversation', async () => {
+    mockGetSessionForTask.mockResolvedValue({
+      id: 'session-1',
+      activityAt: 100,
+      fastConversationId: 'fast-1',
+      archivedAt: null,
+    });
+
+    await deleteTasksCommand(auth, { taskIds: ['task-1'] });
+
+    expect(
+      updateCalls.some(
+        (call) => (call as { table: unknown }).table === sessionsTable,
+      ),
+    ).toBe(false);
   });
 });

@@ -210,20 +210,16 @@ describe('authorize', () => {
     expect(mockUpdateSet).not.toHaveBeenCalled();
   });
 
-  it('ignores stale metadata and hydrates disabled Sessions flags', async () => {
+  it('evaluates feature flags to an empty object while ignoring stale metadata', async () => {
     mockDeploymentFindFirst.mockResolvedValue({
-      metadata: { suggestion_routing: true },
+      metadata: { suggestion_routing: true, sessions_ui: true },
     });
 
     const result = await authorize();
 
     expect(result.success).toBe(true);
     if (result.success) {
-      expect(result.featureFlags).toEqual({
-        sessions_data: false,
-        sessions_ui: false,
-        sessions_comms: false,
-      });
+      expect(result.featureFlags).toEqual({});
     }
   });
 

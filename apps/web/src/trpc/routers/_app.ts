@@ -127,7 +127,6 @@ import {
   syncRepositoriesCommand,
 } from '../commands/source-control';
 import {
-  routeHomeTaskCommand,
   createStandardTaskRunCommand,
   cancelTaskRunCommand,
   retryFailedTaskStartCommand,
@@ -1060,17 +1059,6 @@ export const appRouter = createRouter({
         startTaskGoalCommand(auth, input),
       ),
 
-    routeHomeTask: protectedProcedure
-      .input(
-        z.object({
-          description: z.string(),
-          images: z.array(z.string()).optional(),
-        }),
-      )
-      .mutation(({ ctx: { auth }, input }) =>
-        routeHomeTaskCommand(auth, input),
-      ),
-
     createStandardTask: protectedProcedure
       .input(
         z.object({
@@ -1477,14 +1465,12 @@ export const appRouter = createRouter({
             colorTheme: z.enum(PERSONAL_COLOR_THEMES).optional(),
             mindReaderMode: z.boolean().optional(),
             narrationMode: z.boolean().optional(),
-            communicationsFastModeDefault: z.boolean().optional(),
           })
           .refine(
             (input) =>
               input.colorTheme !== undefined ||
               input.mindReaderMode !== undefined ||
-              input.narrationMode !== undefined ||
-              input.communicationsFastModeDefault !== undefined,
+              input.narrationMode !== undefined,
             {
               message: 'Expected at least one personal preference to update.',
             },
@@ -2858,8 +2844,8 @@ export const appRouter = createRouter({
     markRead: protectedProcedure
       .input(
         sessionIdInputSchema.extend({
-          throughEventAt: z.number().nonnegative(),
-          throughEventId: z.string().min(1),
+          throughEventAt: z.number().nonnegative().optional(),
+          throughEventId: z.string().min(1).optional(),
         }),
       )
       .mutation(({ ctx: { auth }, input }) =>

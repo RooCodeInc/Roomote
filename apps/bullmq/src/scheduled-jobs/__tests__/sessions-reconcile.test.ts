@@ -1,6 +1,5 @@
 import {
   db,
-  deploymentSettings,
   eq,
   fastAgentConversations,
   sessionTasks,
@@ -11,23 +10,6 @@ import {
 import { sessionsReconcileJob } from '../sessions-reconcile';
 
 describe('sessionsReconcileJob', () => {
-  beforeEach(async () => {
-    await db
-      .insert(deploymentSettings)
-      .values({ id: 'default', metadata: { sessions_data: true } })
-      .onConflictDoUpdate({
-        target: deploymentSettings.id,
-        set: { metadata: { sessions_data: true } },
-      });
-  });
-
-  afterEach(async () => {
-    await db
-      .update(deploymentSettings)
-      .set({ metadata: {} })
-      .where(eq(deploymentSettings.id, 'default'));
-  });
-
   it('backfills Fast conversations and visible tasks idempotently', async () => {
     const user = await userFactory.create();
     const [conversation] = await db
@@ -52,6 +34,33 @@ describe('sessionsReconcileJob', () => {
     ).resolves.toHaveLength(1);
     await expect(
       db.select().from(sessionTasks).where(eq(sessionTasks.taskId, task.id)),
+    ).resolves.toHaveLength(1);
+  });
+
+  it('adopts orphan Fast conversations during steady-state reconciliation', async () => {
+    // Complete (or advance) the one-time backfill first so the next run takes
+    // the steady-state reconciliation path.
+    await sessionsReconcileJob();
+    await sessionsReconcileJob();
+
+    const user = await userFactory.create();
+    const [conversation] = await db
+      .insert(fastAgentConversations)
+      .values({
+        userId: user.id,
+        surface: 'web',
+        workspaceId: user.id,
+        conversationId: crypto.randomUUID(),
+      })
+      .returning();
+
+    await sessionsReconcileJob();
+
+    await expect(
+      db
+        .select()
+        .from(sessions)
+        .where(eq(sessions.fastConversationId, conversation!.id)),
     ).resolves.toHaveLength(1);
   });
 });

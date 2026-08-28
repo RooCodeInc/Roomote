@@ -20,7 +20,9 @@ export function DelegatedTaskCard({
     trpc.sandboxSession.byTaskId.queryOptions(
       { taskId },
       {
-        refetchInterval: (query) => query.state.data?.refetchInterval ?? 2_000,
+        // The server omits refetchInterval once the run is settled — that is
+        // a stop signal, not missing data. Do not default it back to polling.
+        refetchInterval: (query) => query.state.data?.refetchInterval ?? false,
       },
     ),
   );

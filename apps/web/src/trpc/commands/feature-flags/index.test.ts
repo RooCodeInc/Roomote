@@ -52,27 +52,17 @@ function buildAuth(isAdmin: boolean): UserAuthSuccess {
 describe('feature-flags commands', () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it('returns the default-off Sessions rollout flags', async () => {
+  it('returns no experimental flags without a metadata lookup when the config is empty', async () => {
     await expect(getExperimentalFlagsCommand(buildAuth(true))).resolves.toEqual(
-      [
-        expect.objectContaining({
-          id: 'sessions_data',
-          value: false,
-          explicitlySet: false,
-        }),
-        expect.objectContaining({
-          id: 'sessions_ui',
-          value: false,
-          explicitlySet: false,
-        }),
-        expect.objectContaining({
-          id: 'sessions_comms',
-          value: false,
-          explicitlySet: false,
-        }),
-      ],
+      [],
     );
-    expect(mockFindFirst).toHaveBeenCalledOnce();
+    expect(mockFindFirst).not.toHaveBeenCalled();
+  });
+
+  it('still rejects non-admin reads', async () => {
+    await expect(getExperimentalFlagsCommand(buildAuth(false))).rejects.toThrow(
+      'Unauthorized',
+    );
   });
 
   it('rejects stale flags before metadata lookup or a database write', async () => {

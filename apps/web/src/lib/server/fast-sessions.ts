@@ -9,13 +9,11 @@ import {
   desc,
   eq,
   exists,
-  gte,
   fastAgentConversations,
   fastAgentMessages,
   llmUsageEvents,
   inArray,
   isNull,
-  lt,
   or,
   sql,
   taskRuns,
@@ -24,7 +22,7 @@ import {
 } from '@roomote/db/server';
 import type { FastAgentMessage } from '@roomote/db';
 
-import type { TimePeriodFilter, UserAuthSuccess } from '@/types';
+import type { UserAuthSuccess } from '@/types';
 
 type FastSessionAuth = Pick<UserAuthSuccess, 'userId' | 'isAdmin'>;
 
@@ -51,7 +49,6 @@ export type FastSessionMessage = Pick<
   | 'createdAt'
 >;
 
-const FAST_SESSION_LIST_LIMIT = 200;
 const FAST_SESSION_TRANSCRIPT_MESSAGE_LIMIT = 1000;
 
 const fastSessionSelection = {
@@ -256,88 +253,6 @@ export async function getFastSessionMessagesSince(
   });
 
   return { messages, cursor };
-}
-
-export function encodeFastSessionCursor(row: {
-  updatedAt: Date;
-  id: string;
-}): string {
-  return `${row.updatedAt.getTime()}:${row.id}`;
-}
-
-function decodeFastSessionCursor(cursor: string | undefined) {
-  if (!cursor) {
-    return null;
-  }
-
-  const separator = cursor.indexOf(':');
-  if (separator <= 0) {
-    return null;
-  }
-
-  const updatedAtMs = Number(cursor.slice(0, separator));
-  const id = cursor.slice(separator + 1);
-  if (!Number.isFinite(updatedAtMs) || !id) {
-    return null;
-  }
-
-  return { updatedAt: new Date(updatedAtMs), id };
-}
-
-export async function getFastSessions(
-  auth: FastSessionAuth,
-  options?: {
-    before?: string;
-    filterUserId?: string | null;
-    timePeriod?: TimePeriodFilter;
-  },
-) {
-  const cursor = decodeFastSessionCursor(options?.before);
-
-  // Keyset pagination matching the (updatedAt desc, id desc) ordering.
-  const beforeCursor = cursor
-    ? or(
-        lt(fastAgentConversations.updatedAt, cursor.updatedAt),
-        and(
-          eq(fastAgentConversations.updatedAt, cursor.updatedAt),
-          lt(fastAgentConversations.id, cursor.id),
-        ),
-      )
-    : undefined;
-
-  const ownerFilter = options?.filterUserId
-    ? eq(fastAgentConversations.userId, options.filterUserId)
-    : undefined;
-  const timePeriod = options?.timePeriod ?? 'all';
-  const timeFilter =
-    timePeriod === 'all'
-      ? undefined
-      : gte(
-          fastAgentConversations.updatedAt,
-          new Date(Date.now() - timePeriod * 24 * 60 * 60 * 1000),
-        );
-
-  const rows = await db
-    .select(fastSessionSelection)
-    .from(fastAgentConversations)
-    .innerJoin(users, eq(fastAgentConversations.userId, users.id))
-    .where(and(fastSessionScope(auth), ownerFilter, timeFilter, beforeCursor))
-    .orderBy(
-      desc(fastAgentConversations.updatedAt),
-      desc(fastAgentConversations.id),
-    )
-    .limit(FAST_SESSION_LIST_LIMIT + 1);
-
-  const sessions = rows.slice(0, FAST_SESSION_LIST_LIMIT);
-  const lastSession = sessions.at(-1);
-
-  return {
-    sessions,
-    nextCursor:
-      rows.length > FAST_SESSION_LIST_LIMIT && lastSession
-        ? encodeFastSessionCursor(lastSession)
-        : null,
-  };
 }
 
 export async function getFastSessionById(

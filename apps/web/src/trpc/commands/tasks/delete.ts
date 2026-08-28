@@ -6,8 +6,11 @@ import {
   touchSessionActivity,
   taskArtifacts,
   and,
+  eq,
   inArray,
   isNull,
+  sessions,
+  sessionTasks,
 } from '@roomote/db/server';
 
 import { deleteArtifactsBatch } from '@/lib/server';
@@ -107,6 +110,29 @@ export async function deleteTasksCommand(
     }
     for (const session of affectedSessions.values()) {
       await touchSessionActivity(tx, session.id, session.activityAt);
+
+      // A session whose last task was just deleted (and that has no Fast
+      // conversation) would linger on the dashboard as an empty card carrying
+      // the deleted task's title. Archive it; users can unarchive.
+      if (!session.fastConversationId && !session.archivedAt) {
+        const [remaining] = await tx
+          .select({ taskId: sessionTasks.taskId })
+          .from(sessionTasks)
+          .innerJoin(tasks, eq(tasks.id, sessionTasks.taskId))
+          .where(
+            and(
+              eq(sessionTasks.sessionId, session.id),
+              isNull(tasks.deletedAt),
+            ),
+          )
+          .limit(1);
+        if (!remaining) {
+          await tx
+            .update(sessions)
+            .set({ archivedAt: endedAt, updatedAt: endedAt })
+            .where(eq(sessions.id, session.id));
+        }
+      }
     }
 
     return {

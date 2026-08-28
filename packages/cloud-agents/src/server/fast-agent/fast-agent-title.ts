@@ -7,6 +7,8 @@ import {
   fastAgentMessages,
   isNull,
   lt,
+  or,
+  sessions,
   sql,
 } from '@roomote/db/server';
 import {
@@ -57,6 +59,7 @@ export async function refreshFastAgentSessionTitle({
       where: eq(fastAgentConversations.id, sessionId),
       columns: {
         id: true,
+        title: true,
         titleEditedByUserAt: true,
         llmTitleCheckpoint: true,
       },
@@ -117,16 +120,36 @@ export async function refreshFastAgentSessionTitle({
       return;
     }
 
-    await db
-      .update(fastAgentConversations)
-      .set({ title, llmTitleCheckpoint: checkpoint })
-      .where(
-        and(
-          eq(fastAgentConversations.id, sessionId),
-          isNull(fastAgentConversations.titleEditedByUserAt),
-          lt(fastAgentConversations.llmTitleCheckpoint, checkpoint),
-        ),
-      );
+    await db.transaction(async (tx) => {
+      const [updatedConversation] = await tx
+        .update(fastAgentConversations)
+        .set({ title, llmTitleCheckpoint: checkpoint })
+        .where(
+          and(
+            eq(fastAgentConversations.id, sessionId),
+            isNull(fastAgentConversations.titleEditedByUserAt),
+            lt(fastAgentConversations.llmTitleCheckpoint, checkpoint),
+          ),
+        )
+        .returning({ id: fastAgentConversations.id });
+      if (!updatedConversation) return;
+
+      // Keep the unified Session's title in step with the generated
+      // conversation title, but never clobber a manual Session rename: only
+      // overwrite the creation placeholder or a previous generated title.
+      await tx
+        .update(sessions)
+        .set({ title, updatedAt: new Date() })
+        .where(
+          and(
+            eq(sessions.fastConversationId, sessionId),
+            or(
+              eq(sessions.title, 'New session'),
+              eq(sessions.title, conversation.title ?? ''),
+            ),
+          ),
+        );
+    });
   } catch (error) {
     console.error(
       `[Fast Agent] Failed to refresh session title session=${sessionId}: ${formatErrorForLog(error)}`,

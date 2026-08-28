@@ -122,6 +122,15 @@ vi.mock('@/trpc/client', () => ({
         queryOptions,
       },
     },
+    sessions: {
+      search: {
+        queryOptions: vi.fn((input, options) => ({
+          queryKey: ['sessions', 'search', input],
+          queryFn: async () => null,
+          ...options,
+        })),
+      },
+    },
   }),
 }));
 

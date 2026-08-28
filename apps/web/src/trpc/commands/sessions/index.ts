@@ -1,10 +1,12 @@
 import { z } from 'zod';
+import { SESSION_STATUSES } from '@roomote/types';
 import { advanceSessionReadCursor, db } from '@roomote/db/server';
 import { captureEvent } from '@roomote/telemetry/server';
 
 import type { UserAuthSuccess } from '@/types';
 import {
   findAccessibleSession,
+  getLatestExternalSessionEvent,
   getSessionById,
   getSessionForTask,
   getSessions,
@@ -18,7 +20,7 @@ import { resolveTaskByIdAccessCommand } from '../tasks/by-id';
 export const sessionIdInputSchema = z.object({ sessionId: z.string().uuid() });
 export const sessionsListInputSchema = z.object({
   scope: z.enum(['all', 'tasks', 'reviews', 'automations']).optional(),
-  status: z.enum(['active', 'needs_input', 'blocked', 'ready']).optional(),
+  status: z.enum(SESSION_STATUSES).optional(),
   user: z.string().nullish(),
   repository: z.string().nullish(),
   environment: z.string().nullish(),
@@ -33,14 +35,34 @@ export const sessionsListInputSchema = z.object({
 
 export async function markSessionReadCommand(
   auth: UserAuthSuccess,
-  input: { sessionId: string; throughEventAt: number; throughEventId: string },
+  input: {
+    sessionId: string;
+    throughEventAt?: number;
+    throughEventId?: string;
+  },
 ) {
-  if (!(await findAccessibleSession(auth, input.sessionId))) return null;
+  if (
+    input.throughEventAt !== undefined &&
+    input.throughEventId !== undefined
+  ) {
+    if (!(await findAccessibleSession(auth, input.sessionId))) return null;
+    return advanceSessionReadCursor(db, {
+      sessionId: input.sessionId,
+      userId: auth.userId,
+      eventAt: input.throughEventAt,
+      eventId: input.throughEventId,
+    });
+  }
+
+  // No explicit cursor: resolve the latest external event server-side so
+  // clients can mark a session read without fetching its timeline.
+  const latest = await getLatestExternalSessionEvent(auth, input.sessionId);
+  if (!latest) return null;
   return advanceSessionReadCursor(db, {
     sessionId: input.sessionId,
     userId: auth.userId,
-    eventAt: input.throughEventAt,
-    eventId: input.throughEventId,
+    eventAt: latest.at,
+    eventId: latest.id,
   });
 }
 

@@ -81,6 +81,7 @@ import type {
   McpToolAccessMode,
   FastAgentSurface,
   ReasoningEffort,
+  SessionStatus,
 } from '@roomote/types';
 import { DEFAULT_TASK_ARTIFACT_TYPE } from '@roomote/types';
 
@@ -3530,7 +3531,7 @@ export const automationsRelations = relations(automations, ({ many }) => ({
 
 export type SessionOwnerKind = 'user' | 'automation' | 'system';
 export type SessionSourceSurface = TaskSurface | FastAgentSurface;
-export type SessionStatus = 'active' | 'needs_input' | 'blocked' | 'ready';
+export type { SessionStatus };
 export type SessionTaskOrigin =
   | 'direct_launch'
   | 'fast_delegation'
@@ -3576,6 +3577,10 @@ export const sessions = pgTable(
       .$type<TaskVisibility>(),
     activityAt: bigint('activity_at', { mode: 'number' }).notNull(),
     cachedStatus: text('cached_status').$type<SessionStatus>(),
+    // Fast-conversation responding lease: while this is in the future, status
+    // recomputation treats the conversation as actively responding. TTL-based
+    // so a crashed turn self-heals instead of pinning the session 'active'.
+    respondingUntil: timestamp('responding_until'),
     archivedAt: timestamp('archived_at'),
     createdAt: timestamp('created_at').notNull().defaultNow(),
     updatedAt: timestamp('updated_at').notNull().defaultNow(),

@@ -4,12 +4,14 @@ import {
   db,
   desc,
   deriveSessionStatus,
+  isSessionConversationResponding,
   eq,
   exists,
   fastAgentMessages,
   gte,
   ilike,
   inArray,
+  isNotNull,
   isNull,
   llmUsageEvents,
   lt,
@@ -222,6 +224,7 @@ const baseSelection = {
   visibility: sessions.visibility,
   activityAt: sessions.activityAt,
   cachedStatus: sessions.cachedStatus,
+  respondingUntil: sessions.respondingUntil,
   archivedAt: sessions.archivedAt,
   createdAt: sessions.createdAt,
   updatedAt: sessions.updatedAt,
@@ -312,7 +315,9 @@ async function hydrateSessionRows(
         )`,
       })
       .from(sessions)
-      .where(inArray(sessions.id, ids)),
+      .where(
+        and(inArray(sessions.id, ids), isNotNull(sessions.fastConversationId)),
+      ),
     db
       .select({
         sessionId: sessions.id,
@@ -330,6 +335,10 @@ async function hydrateSessionRows(
             sql`${fastAgentMessages.metadata} ->> 'userId' IS NULL`,
             sql`${fastAgentMessages.metadata} ->> 'userId' <> ${auth.userId}`,
           ),
+          // Only events the transcript (and therefore the read cursor) can
+          // reach may count as unread, or invisible platform events would pin
+          // the badge forever.
+          sql`coalesce(${fastAgentMessages.metadata} ->> 'visibleInTranscript', 'true') <> 'false'`,
         ),
       )
       .groupBy(sessions.id),
@@ -457,70 +466,99 @@ async function getSessionTasks(sessionId: string) {
     .where(and(eq(sessionTasks.sessionId, sessionId), isNull(tasks.deletedAt)))
     .orderBy(sessionTasks.attachedAt);
 
-  return Promise.all(
-    linked.map(async (task) => {
-      const [latestRun, artifacts, pullRequests, usage] = await Promise.all([
-        db.query.taskRuns.findFirst({
-          where: eq(taskRuns.taskId, task.taskId),
-          orderBy: desc(taskRuns.id),
-          columns: {
-            id: true,
-            status: true,
-            taskPhase: true,
-            error: true,
-            result: true,
-          },
-        }),
-        db
-          .select({
-            id: taskArtifacts.id,
-            path: taskArtifacts.path,
-            artifactType: taskArtifacts.artifactType,
-            contentType: taskArtifacts.contentType,
-            size: taskArtifacts.size,
-          })
-          .from(taskArtifacts)
-          .where(eq(taskArtifacts.taskId, task.taskId))
-          .orderBy(desc(taskArtifacts.createdAt)),
-        db
-          .select({
-            id: taskPullRequests.id,
-            url: taskPullRequests.prUrl,
-            number: taskPullRequests.prNumber,
-            title: taskPullRequests.prTitle,
-            repository: taskPullRequests.repository,
-            status: taskPullRequests.status,
-          })
-          .from(taskPullRequests)
-          .where(eq(taskPullRequests.taskId, task.taskId)),
-        db
-          .select({
-            costMicroUsd: sql<number>`coalesce(sum(${llmUsageEvents.costMicroUsd}), 0)::bigint`,
-          })
-          .from(llmUsageEvents)
-          .where(eq(llmUsageEvents.taskId, task.taskId)),
-      ]);
-      const result = latestRun?.result;
-      const latestOutput =
-        result && typeof result === 'object'
-          ? String(
-              (result as Record<string, unknown>).summary ??
-                (result as Record<string, unknown>).message ??
-                '',
-            )
-              .trim()
-              .slice(0, 240) || null
-          : null;
-      return {
-        ...task,
-        latestRun: latestRun ?? null,
-        latestOutput,
-        inferenceCostMicroUsd: Number(usage[0]?.costMicroUsd ?? 0),
-        artifacts,
-        pullRequests,
-      };
-    }),
+  if (linked.length === 0) return [];
+
+  // Four batched lookups regardless of task count; the per-task N+1 version
+  // multiplied badly under the session workspace's polling.
+  const taskIds = linked.map((task) => task.taskId);
+  const [latestRuns, artifactRows, pullRequestRows, usageRows] =
+    await Promise.all([
+      db
+        .selectDistinctOn([taskRuns.taskId], {
+          taskId: taskRuns.taskId,
+          id: taskRuns.id,
+          status: taskRuns.status,
+          taskPhase: taskRuns.taskPhase,
+          error: taskRuns.error,
+          result: taskRuns.result,
+        })
+        .from(taskRuns)
+        .where(inArray(taskRuns.taskId, taskIds))
+        .orderBy(taskRuns.taskId, desc(taskRuns.id)),
+      db
+        .select({
+          taskId: taskArtifacts.taskId,
+          id: taskArtifacts.id,
+          path: taskArtifacts.path,
+          artifactType: taskArtifacts.artifactType,
+          contentType: taskArtifacts.contentType,
+          size: taskArtifacts.size,
+        })
+        .from(taskArtifacts)
+        .where(inArray(taskArtifacts.taskId, taskIds))
+        .orderBy(desc(taskArtifacts.createdAt)),
+      db
+        .select({
+          taskId: taskPullRequests.taskId,
+          id: taskPullRequests.id,
+          url: taskPullRequests.prUrl,
+          number: taskPullRequests.prNumber,
+          title: taskPullRequests.prTitle,
+          repository: taskPullRequests.repository,
+          status: taskPullRequests.status,
+        })
+        .from(taskPullRequests)
+        .where(inArray(taskPullRequests.taskId, taskIds)),
+      db
+        .select({
+          taskId: llmUsageEvents.taskId,
+          costMicroUsd: sql<number>`coalesce(sum(${llmUsageEvents.costMicroUsd}), 0)::bigint`,
+        })
+        .from(llmUsageEvents)
+        .where(inArray(llmUsageEvents.taskId, taskIds))
+        .groupBy(llmUsageEvents.taskId),
+    ]);
+
+  const latestRunByTask = new Map(latestRuns.map((run) => [run.taskId, run]));
+  const usageByTask = new Map(
+    usageRows.map((row) => [row.taskId, Number(row.costMicroUsd)]),
   );
+
+  return linked.map((task) => {
+    const latestRunRow = latestRunByTask.get(task.taskId);
+    const latestRun = latestRunRow
+      ? {
+          id: latestRunRow.id,
+          status: latestRunRow.status,
+          taskPhase: latestRunRow.taskPhase,
+          error: latestRunRow.error,
+          result: latestRunRow.result,
+        }
+      : null;
+    const result = latestRun?.result;
+    const latestOutput =
+      result && typeof result === 'object'
+        ? String(
+            (result as Record<string, unknown>).summary ??
+              (result as Record<string, unknown>).message ??
+              '',
+          )
+            .trim()
+            .slice(0, 240) || null
+        : null;
+    return {
+      ...task,
+      latestRun,
+      latestOutput,
+      inferenceCostMicroUsd: usageByTask.get(task.taskId) ?? 0,
+      artifacts: artifactRows
+        .filter((artifact) => artifact.taskId === task.taskId)
+        .map(({ taskId: _taskId, ...artifact }) => artifact),
+      pullRequests: pullRequestRows
+        .filter((pullRequest) => pullRequest.taskId === task.taskId)
+        .map(({ taskId: _taskId, ...pullRequest }) => pullRequest),
+    };
+  });
 }
 
 export async function getSessionById(auth: SessionAuth, sessionId: string) {
@@ -531,8 +569,7 @@ export async function getSessionById(auth: SessionAuth, sessionId: string) {
   const [hydrated] = await hydrateSessionRows(auth, [session]);
   const sessionTaskDetails = await getSessionTasks(session.id);
   const liveStatus = deriveSessionStatus({
-    conversationResponding:
-      Boolean(session.fastConversationId) && session.cachedStatus === 'active',
+    conversationResponding: isSessionConversationResponding(session),
     tasks: sessionTaskDetails.map((task) => ({
       state: task.state,
       taskPhase: task.latestRun?.taskPhase ?? null,
@@ -594,6 +631,61 @@ export async function getSessionTimeline(
       (left, right) => left.at - right.at || left.id.localeCompare(right.id),
     );
   return { events, cursor: events.at(-1)?.at ?? since };
+}
+
+/**
+ * Latest event another participant produced in this session, matching the
+ * unread computation in hydrateSessionRows exactly: max of live task activity
+ * and visible non-own fast messages. Used by markRead so clients don't have
+ * to fetch a whole timeline to advance their read cursor.
+ */
+export async function getLatestExternalSessionEvent(
+  auth: SessionAuth,
+  sessionId: string,
+): Promise<{ at: number; id: string } | null> {
+  const session = await findAccessibleSession(auth, sessionId);
+  if (!session) return null;
+
+  const [[latestTask], fastRows] = await Promise.all([
+    db
+      .select({
+        taskId: tasks.id,
+        activityAt: sql<number>`max(${tasks.activityAt})::bigint`,
+      })
+      .from(sessionTasks)
+      .innerJoin(tasks, eq(tasks.id, sessionTasks.taskId))
+      .where(
+        and(eq(sessionTasks.sessionId, sessionId), isNull(tasks.deletedAt)),
+      )
+      .groupBy(tasks.id)
+      .orderBy(desc(sql`max(${tasks.activityAt})`))
+      .limit(1),
+    session.fastConversationId
+      ? db
+          .select({ id: fastAgentMessages.eventId, ts: fastAgentMessages.ts })
+          .from(fastAgentMessages)
+          .where(
+            and(
+              eq(fastAgentMessages.conversationId, session.fastConversationId),
+              or(
+                sql`${fastAgentMessages.metadata} ->> 'userId' IS NULL`,
+                sql`${fastAgentMessages.metadata} ->> 'userId' <> ${auth.userId}`,
+              ),
+              sql`coalesce(${fastAgentMessages.metadata} ->> 'visibleInTranscript', 'true') <> 'false'`,
+            ),
+          )
+          .orderBy(desc(fastAgentMessages.ts))
+          .limit(1)
+      : Promise.resolve([]),
+  ]);
+
+  const latestFast = fastRows[0];
+  const taskAt = latestTask ? Number(latestTask.activityAt) * 1000 : 0;
+  const fastAt = latestFast ? Number(latestFast.ts) : 0;
+  if (taskAt === 0 && fastAt === 0) return null;
+  return fastAt >= taskAt
+    ? { at: fastAt, id: `fast:${latestFast!.id}` }
+    : { at: taskAt, id: `task:${latestTask!.taskId}:activity` };
 }
 
 export async function getSessionForTask(auth: SessionAuth, taskId: string) {

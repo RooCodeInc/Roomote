@@ -1,12 +1,23 @@
 'use client';
 
 import Link from 'next/link';
-import { useCallback, useEffect, useState, type ReactNode } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import { getReasoningEffortLabel, type ReasoningEffort } from '@roomote/types';
 
 import { formatInferenceCost, getUserDisplayName } from '@/lib';
+import { SessionStatusBadge } from '@/components/sessions/SessionStatusBadge';
+import {
+  getSessionSurfaceBrandIcon,
+  getSessionSurfaceLabel,
+} from '@/components/sessions/session-surfaces';
 import { useLaunchTaskModels } from '@/hooks/task-models/useLaunchTaskModels';
 import { useTRPC } from '@/trpc/client';
 import { FramedSurface, WorkspaceSurface } from '@/components/layout';
@@ -15,7 +26,6 @@ import {
   ArrowLeftFromLine,
   Avatar,
   BasicTooltip,
-  Badge,
   BrandIcon,
   Brain,
   Button,
@@ -68,51 +78,6 @@ export type SessionInfo = {
   taskSource?: 'unified' | 'fast';
   taskCards?: Array<Pick<SessionTaskSummary, 'taskId' | 'title'>>;
 };
-
-const SURFACE_LABELS: Record<string, string> = {
-  slack: 'Slack',
-  linear: 'Linear',
-  github: 'GitHub',
-  gitlab: 'GitLab',
-  gitea: 'Gitea',
-  bitbucket: 'Bitbucket',
-  ado: 'Azure DevOps',
-  discord: 'Discord',
-  teams: 'Teams',
-  telegram: 'Telegram',
-  automation: 'Automation',
-  web: 'Web',
-};
-
-type SessionSurfaceBrandIcon =
-  | 'linear'
-  | 'github'
-  | 'gitlab'
-  | 'gitea'
-  | 'bitbucket'
-  | 'ado'
-  | 'discord'
-  | 'teams'
-  | 'telegram';
-
-const SURFACE_BRAND_ICONS: Partial<Record<string, SessionSurfaceBrandIcon>> = {
-  linear: 'linear',
-  github: 'github',
-  gitlab: 'gitlab',
-  gitea: 'gitea',
-  bitbucket: 'bitbucket',
-  ado: 'ado',
-  discord: 'discord',
-  teams: 'teams',
-  telegram: 'telegram',
-};
-
-function getSessionStatusVariant(status: string) {
-  if (status === 'active') return 'success';
-  if (status === 'needs_input') return 'warning';
-  if (status === 'blocked') return 'destructive';
-  return 'secondary';
-}
 
 function SessionTaskPanel({
   sessionId,
@@ -277,8 +242,8 @@ function SessionInfoPanel({
     .filter(Boolean)
     .join(' • ');
   const inferenceCostLabel = formatInferenceCost(session.inferenceCostMicroUsd);
-  const surfaceLabel = SURFACE_LABELS[session.surface] ?? session.surface;
-  const surfaceBrandIcon = SURFACE_BRAND_ICONS[session.surface];
+  const surfaceLabel = getSessionSurfaceLabel(session.surface);
+  const surfaceBrandIcon = getSessionSurfaceBrandIcon(session.surface);
 
   return (
     <FramedSurface
@@ -344,9 +309,7 @@ function SessionInfoPanel({
           </SandboxInfoRow>
           {session.status ? (
             <SandboxInfoRow label="Status">
-              <Badge variant={getSessionStatusVariant(session.status)}>
-                {session.status.replace('_', ' ')}
-              </Badge>
+              <SessionStatusBadge status={session.status} />
             </SandboxInfoRow>
           ) : null}
         </SandboxInfoTable>
@@ -355,6 +318,11 @@ function SessionInfoPanel({
   );
 }
 
+type WorkspacePanel =
+  | { kind: 'info' }
+  | { kind: 'tasks' }
+  | { kind: 'nested'; taskId: string };
+
 export function SessionWorkspace({
   session,
   children,
@@ -362,9 +330,10 @@ export function SessionWorkspace({
   session: SessionInfo;
   children: ReactNode;
 }) {
-  const [isInfoOpen, setIsInfoOpen] = useState(false);
-  const [isTasksOpen, setIsTasksOpen] = useState(false);
-  const [nestedTaskId, setNestedTaskId] = useState<string | null>(null);
+  // Exactly one side panel can be active: the discriminated union makes an
+  // impossible combination unrepresentable. The URL's ?task= selection is the
+  // fourth panel and always wins over `panel` when both are set.
+  const [panel, setPanel] = useState<WorkspacePanel | null>(null);
   const trpc = useTRPC();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -374,7 +343,13 @@ export function SessionWorkspace({
       { sessionId: session.id },
       {
         enabled: !isFastTaskSource,
-        refetchInterval: 2_000,
+        // Settled sessions poll slowly; only visibly-running work needs the
+        // fast cadence. TanStack pauses both while the tab is unfocused.
+        refetchInterval: (query) =>
+          query.state.data?.status === 'active' ||
+          query.state.data?.status === 'needs_input'
+            ? 2_000
+            : 30_000,
       },
     ),
   );
@@ -395,8 +370,7 @@ export function SessionWorkspace({
   const selectedTask = sessionTasks.find(
     (task) => task.taskId === selectedTaskId,
   );
-  const panelOpen =
-    isInfoOpen || isTasksOpen || Boolean(selectedTask) || Boolean(nestedTaskId);
+  const panelOpen = panel !== null || Boolean(selectedTask);
 
   const selectTask = useCallback(
     (taskId: string | null) => {
@@ -409,46 +383,52 @@ export function SessionWorkspace({
     [router, searchParams, session.id],
   );
 
+  // Default a single-task session to its task panel once, on mount only — an
+  // explicit close or panel choice must never be fought by a re-select.
+  const didAutoSelect = useRef(false);
   useEffect(() => {
-    if (!isTasksOpen && !selectedTaskId && session.tasks.length === 1) {
+    if (didAutoSelect.current) return;
+    didAutoSelect.current = true;
+    if (!selectedTaskId && session.tasks.length === 1) {
       selectTask(session.tasks[0]!.taskId);
     }
-  }, [isTasksOpen, selectTask, selectedTaskId, session.tasks]);
+  }, [selectTask, selectedTaskId, session.tasks]);
 
   const openTaskPanel = useCallback(
     (taskId: string) => {
-      setIsInfoOpen(false);
-      setIsTasksOpen(false);
-      setNestedTaskId(taskId);
+      setPanel({ kind: 'nested', taskId });
       selectTask(null);
     },
     [selectTask],
   );
   const closePanel = () => {
-    setIsInfoOpen(false);
-    setIsTasksOpen(false);
-    setNestedTaskId(null);
+    setPanel(null);
     selectTask(null);
   };
-  const panelContent = nestedTaskId ? (
-    <NestedTaskSidePanel taskId={nestedTaskId} onClose={closePanel} />
-  ) : selectedTask ? (
-    <SessionTaskPanel
-      sessionId={session.id}
-      task={selectedTask}
-      tasks={sessionTasks}
-      onSelect={selectTask}
-      onClose={closePanel}
-    />
-  ) : isTasksOpen ? (
-    <SessionTasksPanel
-      tasks={taskCards}
-      onOpenTask={openTaskPanel}
-      onClose={closePanel}
-    />
-  ) : (
-    <SessionInfoPanel session={session} onClose={closePanel} />
-  );
+  const togglePanel = (kind: 'info' | 'tasks') => {
+    setPanel((previous) => (previous?.kind === kind ? null : { kind }));
+    selectTask(null);
+  };
+  const panelContent =
+    panel?.kind === 'nested' ? (
+      <NestedTaskSidePanel taskId={panel.taskId} onClose={closePanel} />
+    ) : selectedTask ? (
+      <SessionTaskPanel
+        sessionId={session.id}
+        task={selectedTask}
+        tasks={sessionTasks}
+        onSelect={selectTask}
+        onClose={closePanel}
+      />
+    ) : panel?.kind === 'tasks' ? (
+      <SessionTasksPanel
+        tasks={taskCards}
+        onOpenTask={openTaskPanel}
+        onClose={closePanel}
+      />
+    ) : (
+      <SessionInfoPanel session={session} onClose={closePanel} />
+    );
   const { isSidebarVisible, toggleSidebar } = useSandboxLayout();
   useResponsiveSandboxSidebar(session.id);
 
@@ -463,28 +443,18 @@ export function SessionWorkspace({
                 side="right"
                 label="Session info"
                 tooltip="Session info"
-                active={isInfoOpen && !selectedTask && !nestedTaskId}
+                active={panel?.kind === 'info' && !selectedTask}
                 icon={Info}
-                onClick={() => {
-                  setIsTasksOpen(false);
-                  setNestedTaskId(null);
-                  selectTask(null);
-                  setIsInfoOpen((previous) => !previous);
-                }}
+                onClick={() => togglePanel('info')}
               />
               <SideNavItem
                 side="right"
                 label="Tasks"
                 tooltip="Tasks"
-                active={isTasksOpen}
+                active={panel?.kind === 'tasks' && !selectedTask}
                 disabled={taskCards.length === 0}
                 icon={Rows4}
-                onClick={() => {
-                  setNestedTaskId(null);
-                  setIsInfoOpen(false);
-                  selectTask(null);
-                  setIsTasksOpen((previous) => !previous);
-                }}
+                onClick={() => togglePanel('tasks')}
               />
             </SandboxSideActions>
             {!isSidebarVisible && !panelOpen ? (

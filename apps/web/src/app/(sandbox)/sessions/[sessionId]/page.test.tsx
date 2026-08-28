@@ -60,10 +60,13 @@ vi.mock('./SessionWorkspace', () => ({
 vi.mock('./SessionReadTracker', () => ({
   SessionReadTracker: () => null,
 }));
+vi.mock('./SessionTaskCards', () => ({
+  SessionTaskCards: () => <div data-testid="session-task-cards" />,
+}));
 
 import SessionDetailPage from './page';
 
-describe('Fast session detail page', () => {
+describe('Session detail page', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     getSessionByIdCommandMock.mockResolvedValue(null);
@@ -193,12 +196,11 @@ describe('Fast session detail page', () => {
     );
   });
 
-  it('keeps the legacy Fast detail path when Sessions UI is disabled', async () => {
+  it('resolves the unified session first and renders its Fast transcript', async () => {
     authorizeMock.mockResolvedValue({
       success: true,
       userId: 'user-1',
       isAdmin: false,
-      featureFlags: { sessions_ui: false },
     });
     getSessionByIdCommandMock.mockResolvedValue({
       id: 'unified-session-1',
@@ -230,6 +232,98 @@ describe('Fast session detail page', () => {
       messages: [],
       hasOlderMessages: false,
     });
+
+    renderToStaticMarkup(
+      await SessionDetailPage({
+        params: Promise.resolve({ sessionId: 'unified-session-1' }),
+      }),
+    );
+
+    expect(getSessionByIdCommandMock).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: 'user-1' }),
+      'unified-session-1',
+    );
+    expect(getFastSessionByIdMock).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: 'user-1' }),
+      'fast-session-3',
+    );
+    expect(getFastSessionTasksMock).not.toHaveBeenCalled();
+    expect(sessionWorkspaceMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        session: expect.objectContaining({
+          id: 'unified-session-1',
+          status: 'active',
+          tasks: [expect.objectContaining({ taskId: 'task-1' })],
+        }),
+      }),
+      undefined,
+    );
+    expect(transcriptMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: 'fast-session-3',
+        canReply: true,
+        initialTitle: 'Session title',
+        fallbackTitle: 'Session title',
+      }),
+      undefined,
+    );
+  });
+
+  it('renders a task-only workspace for unified sessions without a Fast conversation', async () => {
+    authorizeMock.mockResolvedValue({
+      success: true,
+      userId: 'user-1',
+      isAdmin: false,
+    });
+    getSessionByIdCommandMock.mockResolvedValue({
+      id: 'unified-session-2',
+      title: 'Task-only session',
+      ownerName: 'User',
+      ownerEmail: 'user@example.com',
+      ownerImageUrl: null,
+      sourceSurface: 'web',
+      fastConversationId: null,
+      inferenceCostMicroUsd: 0,
+      createdAt: new Date('2026-01-01T00:00:00.000Z'),
+      status: 'completed',
+      tasks: [
+        {
+          taskId: 'task-2',
+          title: 'Delegated task',
+        },
+      ],
+    });
+
+    const html = renderToStaticMarkup(
+      await SessionDetailPage({
+        params: Promise.resolve({ sessionId: 'unified-session-2' }),
+      }),
+    );
+
+    expect(getFastSessionByIdMock).not.toHaveBeenCalled();
+    expect(transcriptMock).not.toHaveBeenCalled();
+    expect(html).toContain('Task-only session');
+  });
+
+  it('falls back to the Fast conversation lookup when no session row exists', async () => {
+    authorizeMock.mockResolvedValue({
+      success: true,
+      userId: 'user-1',
+      isAdmin: false,
+    });
+    getFastSessionByIdMock.mockResolvedValue({
+      id: 'fast-session-3',
+      userId: 'user-1',
+      ownerName: 'User',
+      ownerEmail: 'user@example.com',
+      surface: 'slack',
+      model: null,
+      reasoningEffort: null,
+      inferenceCostMicroUsd: 0,
+      createdAt: new Date('2026-01-01T00:00:00.000Z'),
+      messages: [],
+      hasOlderMessages: false,
+    });
     getFastSessionTasksMock.mockResolvedValue([
       { taskId: 'task-1', title: 'Delegated task' },
     ]);
@@ -240,7 +334,10 @@ describe('Fast session detail page', () => {
       }),
     );
 
-    expect(getSessionByIdCommandMock).not.toHaveBeenCalled();
+    expect(getSessionByIdCommandMock).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: 'user-1' }),
+      'fast-session-3',
+    );
     expect(getFastSessionByIdMock).toHaveBeenCalledWith(
       expect.objectContaining({ userId: 'user-1' }),
       'fast-session-3',

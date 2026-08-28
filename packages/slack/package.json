@@ -23,7 +23,6 @@
     "@roomote/communication": "workspace:^",
     "@roomote/db": "workspace:^",
     "@roomote/env": "workspace:^",
-    "@roomote/feature-flags": "workspace:^",
     "@roomote/redis": "workspace:^",
     "@roomote/types": "workspace:^",
     "@slack/web-api": "^7.19.0",
