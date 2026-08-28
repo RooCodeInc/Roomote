@@ -1,6 +1,6 @@
 'use client';
 
-import { useLayoutEffect, useState, type ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import { formatDistanceToNow } from 'date-fns';
 
 import { formatInferenceCost, getUserDisplayName } from '@/lib';
@@ -21,7 +21,10 @@ import {
   ResponsiveWorkspacePanels,
   SandboxSideActions,
 } from '../../SandboxWorkspacePanels';
-import { useSandboxLayout } from '../../use-sandbox-layout';
+import {
+  useResponsiveSandboxSidebar,
+  useSandboxLayout,
+} from '../../use-sandbox-layout';
 
 export type SessionInfo = {
   id: string;
@@ -126,28 +129,8 @@ export function SessionWorkspace({
   children: ReactNode;
 }) {
   const [isInfoOpen, setIsInfoOpen] = useState(false);
-  const { isSidebarVisible, setSidebarVisible, toggleSidebar } =
-    useSandboxLayout();
-
-  useLayoutEffect(() => {
-    const mobileQuery = window.matchMedia?.('(max-width: 767px)');
-
-    if (!mobileQuery?.matches) {
-      return;
-    }
-
-    setSidebarVisible(false);
-
-    const handleViewportChange = (event: MediaQueryListEvent) =>
-      setSidebarVisible(!event.matches);
-
-    mobileQuery.addEventListener('change', handleViewportChange);
-
-    return () => {
-      mobileQuery.removeEventListener('change', handleViewportChange);
-      setSidebarVisible(true);
-    };
-  }, [session.id, setSidebarVisible]);
+  const { isSidebarVisible, toggleSidebar } = useSandboxLayout();
+  useResponsiveSandboxSidebar(session.id);
 
   return (
     <WorkspaceSurface

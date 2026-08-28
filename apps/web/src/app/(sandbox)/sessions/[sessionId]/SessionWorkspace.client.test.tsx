@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from 'react';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 
 import { SandboxLayoutContext } from '../../use-sandbox-layout';
 import { SessionWorkspace, type SessionInfo } from './SessionWorkspace';
@@ -47,22 +47,41 @@ function SandboxLayoutProvider({ children }: { children: ReactNode }) {
 
 function renderWorkspace({ isMobile }: { isMobile: boolean }) {
   useMediaQueryMock.mockReturnValue(!isMobile);
+  let viewportChangeListener: ((event: MediaQueryListEvent) => void) | null =
+    null;
+  const mediaQuery = {
+    matches: isMobile,
+    addEventListener: vi.fn(
+      (event: string, listener: (event: MediaQueryListEvent) => void) => {
+        if (event === 'change') {
+          viewportChangeListener = listener;
+        }
+      },
+    ),
+    removeEventListener: vi.fn(),
+  };
   Object.defineProperty(window, 'matchMedia', {
     writable: true,
-    value: vi.fn().mockImplementation(() => ({
-      matches: isMobile,
-      addEventListener: vi.fn(),
-      removeEventListener: vi.fn(),
-    })),
+    value: vi.fn().mockReturnValue(mediaQuery),
   });
 
-  render(
+  const result = render(
     <SandboxLayoutProvider>
       <SessionWorkspace session={session}>
         <div>Session transcript</div>
       </SessionWorkspace>
     </SandboxLayoutProvider>,
   );
+
+  return {
+    ...result,
+    resizeToMobile() {
+      mediaQuery.matches = true;
+      act(() =>
+        viewportChangeListener?.({ matches: true } as MediaQueryListEvent),
+      );
+    },
+  };
 }
 
 describe('SessionWorkspace', () => {
@@ -132,5 +151,16 @@ describe('SessionWorkspace', () => {
     expect(
       screen.getByRole('button', { name: 'Close session info' }),
     ).toBeInTheDocument();
+  });
+
+  it('collapses the right rail when the viewport changes from desktop to mobile', () => {
+    const { resizeToMobile } = renderWorkspace({ isMobile: false });
+
+    expect(screen.getByRole('button', { name: 'Session info' })).toBeVisible();
+
+    resizeToMobile();
+
+    expect(screen.queryByRole('button', { name: 'Session info' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Show sidebar' })).toBeVisible();
   });
 });
