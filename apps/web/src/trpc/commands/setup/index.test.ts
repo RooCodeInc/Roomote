@@ -10,6 +10,7 @@ const {
   mockInsertValues,
   mockOnConflictDoUpdate,
   mockInvalidateBrainEnabledCache,
+  mockSql,
   mockTransaction,
   mockGetSetupBaseStatus,
   mockEnv,
@@ -23,6 +24,7 @@ const {
   mockInsertValues: vi.fn(),
   mockOnConflictDoUpdate: vi.fn(),
   mockInvalidateBrainEnabledCache: vi.fn(),
+  mockSql: vi.fn(() => 'sql-expression'),
   mockGetSetupBaseStatus: vi.fn().mockResolvedValue({ setupNewState: null }),
   mockEnv: { R_CLOUD_ENABLED: false },
   mockTransaction: vi.fn(async (callback: (tx: unknown) => Promise<unknown>) =>
@@ -48,11 +50,14 @@ vi.mock('@roomote/db/server', () => ({
     transaction: (callback: (tx: unknown) => Promise<void>) =>
       mockTransaction(callback),
   },
-  deploymentSettings: { id: 'deployment-settings.id' },
+  deploymentSettings: {
+    id: 'deployment-settings.id',
+    brainEnabled: 'deployment-settings.brain-enabled',
+  },
   invalidateBrainEnabledCache: () => mockInvalidateBrainEnabledCache(),
   users: { id: 'users.id' },
   eq: vi.fn(),
-  sql: vi.fn(),
+  sql: mockSql,
 }));
 
 vi.mock('@roomote/types', () => ({
@@ -142,7 +147,7 @@ describe('completeSetupCommand', () => {
     mockFindDeploymentSettings.mockResolvedValue(undefined);
   });
 
-  it('enables Memory by default for a new Cloud-hosted deployment', async () => {
+  it('defaults Memory without overwriting a concurrent explicit choice', async () => {
     mockEnv.R_CLOUD_ENABLED = true;
     mockFindDeploymentSettings.mockResolvedValue({
       brainEnabled: null,
@@ -158,8 +163,13 @@ describe('completeSetupCommand', () => {
     );
     expect(mockOnConflictDoUpdate).toHaveBeenCalledWith({
       target: 'deployment-settings.id',
-      set: expect.objectContaining({ brainEnabled: true }),
+      set: expect.objectContaining({ brainEnabled: 'sql-expression' }),
     });
+    expect(mockSql).toHaveBeenCalledWith(
+      ['coalesce(', ', ', ')'],
+      'deployment-settings.brain-enabled',
+      true,
+    );
     expect(mockInvalidateBrainEnabledCache).toHaveBeenCalledOnce();
   });
 

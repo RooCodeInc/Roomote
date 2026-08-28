@@ -487,9 +487,13 @@ export async function completeSetupCommand(
             setupCompletedAt: now,
             updatedAt: now,
             ...(metadataUpdate ? { metadata: metadataUpdate } : {}),
+            // Evaluate under the conflict row lock so a concurrent explicit
+            // Memory choice wins over this setup default.
             ...(brainEnabledDefault === undefined
               ? {}
-              : { brainEnabled: brainEnabledDefault }),
+              : {
+                  brainEnabled: sql`coalesce(${deploymentSettings.brainEnabled}, ${brainEnabledDefault})`,
+                }),
           },
         }),
       // The first admin going through /setup should not also need /onboarding,
