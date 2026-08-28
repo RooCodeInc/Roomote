@@ -217,9 +217,7 @@ describe('Discord component callbacks', () => {
         eventId: 'reaction-1',
         senderUserId: 'user-1',
         channel: expect.objectContaining({ channelId: 'thread-1' }),
-        question: expect.stringContaining(
-          'Start this suggested task: Fix tests',
-        ),
+        question: 'Fix tests\n\nRepair the flaky suite.',
       }),
     );
     expect(mocks.startNewTask).not.toHaveBeenCalled();

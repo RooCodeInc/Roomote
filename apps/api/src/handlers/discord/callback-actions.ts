@@ -316,7 +316,7 @@ async function launchClaimedDiscordSuggestion(input: {
         )
       : input.channel;
     const promptText = [
-      `Start this suggested task: ${suggestion.title}`,
+      suggestion.title,
       ...(suggestion.brief ? ['', suggestion.brief] : []),
       ...(suggestion.targetRepositoryFullName
         ? ['', `Target repository: ${suggestion.targetRepositoryFullName}`]

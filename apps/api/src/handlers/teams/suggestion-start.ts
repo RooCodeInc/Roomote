@@ -225,7 +225,7 @@ function buildTeamsSuggestionTaskPromptText(
   suggestion: ClaimedTeamsSuggestion,
 ): string {
   return [
-    `Start this suggested task: ${suggestion.title}`,
+    suggestion.title,
     '',
     suggestion.brief ?? '',
     ...(suggestion.targetRepositoryFullName
