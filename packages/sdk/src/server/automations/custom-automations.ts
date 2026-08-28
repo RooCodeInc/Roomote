@@ -1,4 +1,7 @@
-import { getOrCreateFastAgentSession } from '@roomote/cloud-agents/server';
+import {
+  enqueueTask,
+  getOrCreateFastAgentSession,
+} from '@roomote/cloud-agents/server';
 import {
   db,
   and,
@@ -24,12 +27,15 @@ import {
   isBackgroundAutomationUserTargetKind,
   isCommunicationAutomationTarget,
   resolveEvalHarnessSelection,
+  TaskPayloadKind,
   type AutomationTarget,
   type CommunicationProvider,
   type FastAgentConversation,
 } from '@roomote/types';
 
 import {
+  buildDestinationPromptContext,
+  buildDestinationTaskPayloadFields,
   findTeamsConversationRoute,
   listConnectedCommunicationProviders,
   type ResolvedAutomationDestination,
@@ -155,6 +161,49 @@ async function resolveDestination(
       ? { serviceUrl: target.metadata.serviceUrl }
       : {}),
   };
+}
+
+function buildLegacySandboxDescription(
+  prompt: string,
+  destination: ResolvedAutomationDestination | null,
+  allRepositories: boolean,
+): string {
+  const channelGuidance = destination
+    ? '\n- The first `send_chat_reply` is the report root and must stand alone. If important supporting detail would make it too long, keep the root concise and send the detail in follow-up replies in the same thread with clear headings. Keep essential conclusions and required actions in the root.'
+    : '';
+  const presentationGuidance = `<default_report_presentation>
+These are defaults, not requirements that override the automation request above. Before applying them, check the request for explicit guidance about format, structure, length, tone, audience, or where details should appear. On any conflict, follow the request. Apply these defaults only where the request is silent.
+
+- Lead with the result or most important takeaway in 1-2 sentences.
+- Keep the primary report concise, normally no more than about 250 words.
+- When the report has multiple topics, use 2-4 short bold Markdown headings with bullets underneath them.
+- Keep bullets short and put one finding, decision, or action in each bullet.
+- Prioritize decision-useful findings. Omit routine methodology, exhaustive test transcripts, and repeated conclusions unless the request asks for them or they materially support the result.
+- If the request explicitly requires a clean or no-action report, say so briefly and include only the most useful supporting evidence or caveats.
+- Use inline links with descriptive labels instead of raw URLs when possible.${channelGuidance}
+</default_report_presentation>`;
+
+  if (!destination) {
+    return `${prompt}
+
+${presentationGuidance}`;
+  }
+
+  const promptContext = buildDestinationPromptContext(destination);
+  const orgWideSuggestionInstruction = allRepositories
+    ? ' This run spans all active repositories. Every launchable suggestion must include the concrete `targetRepositoryFullName` that owns the work so Roomote can start it in the matching environment.'
+    : '';
+
+  return `${prompt}
+
+${presentationGuidance}
+
+<task_context>
+  <source>background-automation</source>
+  <${promptContext.channelTag}>${destination.channelId}</${promptContext.channelTag}>
+</task_context>
+
+The ${promptContext.surfaceLabel} conversation above is available for reports through \`send_chat_reply\`; do not use \`${promptContext.postToolName}\` and do not post anywhere else. Default to finishing silently. Interrupt the conversation only when there is something a human should see now: a concrete actionable or important finding, a meaningful completed result, a durable blocker, or required user input. Routine success, healthy status, no-change results, and findings that are neither actionable nor important should not produce a message unless the automation request explicitly asks for them. Stay silent while work is in flight: send no opening acknowledgement and do not post progress updates. If you do report, your first message creates this run's thread in that conversation, so make it one self-contained message that stands alone for readers who have not seen this task; later messages and user replies continue that same thread. Write the report as the result itself, like a teammate sharing what they found or did: do not mention this automation, the schedule, the task, or that anything requested the work; the message footer already attributes the automation. Lead with the outcome, not with framing like "Automation requested ..." or "Outcome: ...".${orgWideSuggestionInstruction}`;
 }
 
 function isFastDeliveryTarget(target: AutomationTarget): boolean {
@@ -467,6 +516,8 @@ async function launchCustomAutomationRow(
   const result = emptyJobResult();
   const frequency = getCustomAutomationFrequency(automation);
   const hasUnconfiguredTaskScope = automation.executionMode === 'fast';
+  const useLegacySandboxFallback =
+    !automation.createdByUserId && automation.executionMode === 'sandbox_task';
 
   if (automation.scheduleMode !== 'cron' && frequency === 'off') {
     result.skippedReason = 'Automation is disabled.';
@@ -520,6 +571,7 @@ async function launchCustomAutomationRow(
   }
 
   if (
+    !useLegacySandboxFallback &&
     automation.launchClaimedAt &&
     Date.now() - automation.launchClaimedAt.getTime() >=
       CUSTOM_AUTOMATION_LAUNCH_STALE_CLAIM_MS
@@ -575,11 +627,11 @@ async function launchCustomAutomationRow(
     return result;
   }
 
-  // A report destination is optional. Runs without one use the stored
-  // automation conversation so Fast still retains their result.
+  // A report destination is optional. Fast runs without one retain their
+  // result in the stored automation conversation.
   let destination: ResolvedAutomationDestination | null = null;
   if (isConfiguredAutomationTarget(automation.target)) {
-    if (!isFastDeliveryTarget(automation.target)) {
+    if (!useLegacySandboxFallback && !isFastDeliveryTarget(automation.target)) {
       const message = `${PROVIDER_LABELS[automation.target.provider as CommunicationProvider]} report destinations of this type are not supported in Fast mode.`;
       result.skippedReason = message;
       result.errors.push(message);
@@ -649,6 +701,70 @@ async function launchCustomAutomationRow(
   const modelOverride = modelSelection?.ok ? modelSelection : null;
 
   try {
+    if (useLegacySandboxFallback) {
+      const launchResult = await enqueueTask({
+        task: {
+          type: TaskPayloadKind.StandardTask,
+          ...(modelOverride?.harness ? { harness: modelOverride.harness } : {}),
+          payload: {
+            repo: automation.allRepositories ? ALL_REPOSITORIES : '',
+            ...(automation.environmentId
+              ? { environmentId: automation.environmentId }
+              : {}),
+            description: buildLegacySandboxDescription(
+              automation.prompt,
+              destination,
+              automation.allRepositories,
+            ),
+            ...(destination
+              ? buildDestinationTaskPayloadFields(destination)
+              : {}),
+            ...(destination ? { customAutomationId: automation.id } : {}),
+            ...(destination?.provider === 'slack'
+              ? {
+                  channel: destination.channelId,
+                  slackChannel: destination.channelId,
+                  ...(destination.teamId
+                    ? {
+                        teamId: destination.teamId,
+                        slackTeamId: destination.teamId,
+                      }
+                    : {}),
+                }
+              : {}),
+            ...(modelOverride?.harnessModelOverrides
+              ? { harnessModelOverrides: modelOverride.harnessModelOverrides }
+              : {}),
+          },
+        },
+        title: automation.name,
+        initiator: {
+          kind: 'automation',
+          key: 'custom_automation',
+          actor: {
+            externalId: automation.id,
+            displayName: automation.name,
+          },
+        },
+        workflow: 'standard',
+        surface: 'system',
+        trigger: opts.manualTrigger ? 'manual' : 'schedule',
+        ...(destination?.provider === 'slack'
+          ? { channels: { slackChannelId: destination.channelId } }
+          : {}),
+      });
+
+      await recordCustomAutomationRunOutcome(db, {
+        id: automation.id,
+        status: 'succeeded',
+        lastLaunchedTaskId: launchResult.taskId,
+        launchClaimedAt,
+      });
+      result.launchedTaskId = launchResult.taskId;
+      result.completed = true;
+      return result;
+    }
+
     await db
       .update(customAutomations)
       .set({ lastLaunchedTaskId: null })

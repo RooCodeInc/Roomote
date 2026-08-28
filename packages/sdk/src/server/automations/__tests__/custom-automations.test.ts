@@ -83,6 +83,12 @@ vi.mock('@roomote/db/server', () => ({
 }));
 
 vi.mock('../destination', () => ({
+  buildDestinationPromptContext: vi.fn(() => ({
+    channelTag: 'slack_channel_id',
+    postToolName: 'post_to_channel',
+    surfaceLabel: 'Slack',
+  })),
+  buildDestinationTaskPayloadFields: vi.fn(() => ({})),
   findTeamsConversationRoute: vi.fn(),
   listConnectedCommunicationProviders: vi.fn(async () => ['slack', 'teams']),
 }));
@@ -117,7 +123,7 @@ import {
   releaseCustomAutomationLaunchClaim,
   tryClaimCustomAutomationLaunch,
 } from '@roomote/db/server';
-import { ALL_REPOSITORIES } from '@roomote/types';
+import { ALL_REPOSITORIES, TaskPayloadKind } from '@roomote/types';
 import { findUserDirectMessageDestination } from '../../lib/user-direct-message';
 
 import {
@@ -782,6 +788,38 @@ describe('customAutomationsJob', () => {
     );
   });
 
+  it('keeps an ownerless legacy sandbox automation on the direct task path', async () => {
+    vi.mocked(listEnabledCustomAutomations).mockResolvedValue([
+      { ...automation, createdByUserId: null } as never,
+    ]);
+
+    const result = await customAutomationsJob();
+
+    expect(result.launchedTaskId).toBe('task_abc');
+    expect(fastMocks.getSession).not.toHaveBeenCalled();
+    expect(fastMocks.deliverParentEvent).not.toHaveBeenCalled();
+    expect(enqueueTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        trigger: 'schedule',
+        initiator: {
+          kind: 'automation',
+          key: 'custom_automation',
+          actor: {
+            externalId: automation.id,
+            displayName: automation.name,
+          },
+        },
+        task: expect.objectContaining({
+          type: TaskPayloadKind.StandardTask,
+          payload: expect.objectContaining({
+            environmentId: automation.environmentId,
+            description: expect.stringContaining(automation.prompt),
+          }),
+        }),
+      }),
+    );
+  });
+
   it('preserves all-repositories scope on the Fast automation event', async () => {
     vi.mocked(listEnabledCustomAutomations).mockResolvedValue([
       {
@@ -1078,6 +1116,26 @@ describe('runCustomAutomationNow', () => {
           taskEnvironmentId: automation.environmentId,
         }),
       }),
+    );
+  });
+
+  it('keeps an ownerless manual run on the legacy sandbox path', async () => {
+    vi.mocked(getCustomAutomationById).mockResolvedValue({
+      ...automation,
+      createdByUserId: null,
+      target: {},
+    } as never);
+    vi.mocked(enqueueTask).mockResolvedValue({
+      taskId: 'task_manual',
+    } as never);
+
+    const result = await runCustomAutomationNow(automation.id);
+
+    expect(result).toEqual({ outcome: 'launched', taskId: 'task_manual' });
+    expect(fastMocks.getSession).not.toHaveBeenCalled();
+    expect(fastMocks.deliverParentEvent).not.toHaveBeenCalled();
+    expect(enqueueTask).toHaveBeenCalledWith(
+      expect.objectContaining({ trigger: 'manual' }),
     );
   });
 
