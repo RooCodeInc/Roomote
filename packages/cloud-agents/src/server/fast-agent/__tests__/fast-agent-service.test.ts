@@ -3053,6 +3053,121 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     }
   });
 
+  it('bounds a stalled continuation after an integration tool returns', async () => {
+    vi.useFakeTimers();
+    try {
+      mocks.listIntegrations.mockResolvedValue([
+        {
+          id: 'github',
+          name: 'GitHub',
+          tools: [{ name: 'search_code', description: 'Search code' }],
+        },
+      ]);
+      mocks.generateText.mockImplementation(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          await invokeMcpTool('github', 'search_code', {
+            query: 'fast session',
+          });
+          return await new Promise<string>((_resolve, reject) => {
+            options.signal.addEventListener(
+              'abort',
+              () => reject(options.signal.reason),
+              { once: true },
+            );
+          });
+        },
+      );
+      const adapter = callbacks();
+
+      const resultPromise = answerFastAgentQuestion({ ...baseParams, adapter });
+      await vi.advanceTimersByTimeAsync(300_000);
+
+      await expect(resultPromise).resolves.toBe(
+        'The inference provider did not respond. Any delegated tasks can keep running; please try again in a moment.',
+      );
+      expect(mocks.generateText).toHaveBeenCalledTimes(1);
+      expect(mocks.captureInferenceAttemptOutcome).toHaveBeenCalledWith(
+        expect.objectContaining({
+          outcome: 'failure',
+          failureReason: 'timeout',
+          providerRetryEventCount: 0,
+        }),
+      );
+      expect(adapter.postReply).toHaveBeenLastCalledWith({
+        purpose: 'closeout',
+        message:
+          'The inference provider did not respond. Any delegated tasks can keep running; please try again in a moment.',
+      });
+      expect(mocks.invalidateSession).toHaveBeenCalledWith('conversation-1');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('pauses the continuation deadline for the full native tool invocation', async () => {
+    vi.useFakeTimers();
+    try {
+      mocks.listIntegrations.mockResolvedValue([
+        {
+          id: 'github',
+          name: 'GitHub',
+          tools: [{ name: 'search_code', description: 'Search code' }],
+        },
+      ]);
+      let resolveNativeWriteStarted: (() => void) | undefined;
+      const nativeWriteStarted = new Promise<void>((resolve) => {
+        resolveNativeWriteStarted = resolve;
+      });
+      let releaseNativeWrite: (() => void) | undefined;
+      const nativeWriteReleased = new Promise<void>((resolve) => {
+        releaseNativeWrite = resolve;
+      });
+      mocks.upsertMessage.mockImplementation(async ({ message }) => {
+        if (
+          message.eventType !== 'roomote_runtime.tool_call' ||
+          message.payload?.toolName !== nativeToolNames.sendChatReply
+        ) {
+          return;
+        }
+        resolveNativeWriteStarted?.();
+        await nativeWriteReleased;
+      });
+      let promptSignal: AbortSignal | undefined;
+      mocks.generateText.mockImplementation(
+        async (params, _session, options) => {
+          promptSignal = options.signal;
+          await options.onSessionReady('opencode-session-1');
+          await params.onProviderRetry?.({
+            attempt: 1,
+            message: 'Provider temporarily unavailable',
+          });
+          await invokeMcpTool('github', 'search_code', {
+            query: 'fast session',
+          });
+          await invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'closeout',
+            message: 'Finished.',
+          });
+          return '';
+        },
+      );
+
+      const resultPromise = answerFastAgentQuestion({
+        ...baseParams,
+        adapter: callbacks(),
+      });
+      await nativeWriteStarted;
+      await vi.advanceTimersByTimeAsync(300_000);
+
+      expect(promptSignal?.aborted).toBe(false);
+      releaseNativeWrite?.();
+      await expect(resultPromise).resolves.toBe('Finished.');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('backs off longer and reports a provider 429 before retrying', async () => {
     vi.useFakeTimers();
     try {

@@ -1240,6 +1240,8 @@ export async function answerFastAgentQuestion({
     let visibleUpdatePosted = false;
     let nativeToolInvoked = false;
     let retriedTaskStart = false;
+    let notifyToolExecutionStarted: () => void = () => undefined;
+    let notifyToolExecutionFinished: () => void = () => undefined;
 
     const mirrorPendingMessages = async (strict = false) => {
       const pending = turnVisibleMessages.slice(mirroredMessageCount);
@@ -1372,6 +1374,7 @@ export async function answerFastAgentQuestion({
     const executeMcpTool = async (
       call: FastAgentMcpToolCall,
     ): Promise<unknown> => {
+      notifyToolExecutionStarted();
       let canonicalToolEvent:
         | Awaited<ReturnType<typeof beginCanonicalToolEvent>>
         | undefined;
@@ -1483,6 +1486,8 @@ export async function answerFastAgentQuestion({
           await finishCanonicalToolEvent(canonicalToolEvent, failure);
         }
         return failure;
+      } finally {
+        notifyToolExecutionFinished();
       }
     };
 
@@ -1915,13 +1920,17 @@ export async function answerFastAgentQuestion({
     const executeNativeTool = async (
       call: FastAgentNativeToolCall,
     ): Promise<unknown> => {
-      const canonicalToolEvent = await beginCanonicalToolEvent({
-        title: call.name,
-        args: call.args,
-        nativeSessionId: call.sessionId,
-        kind: getFastAgentNativeAcpKind(call.name),
-      });
+      notifyToolExecutionStarted();
+      let canonicalToolEvent:
+        | Awaited<ReturnType<typeof beginCanonicalToolEvent>>
+        | undefined;
       try {
+        canonicalToolEvent = await beginCanonicalToolEvent({
+          title: call.name,
+          args: call.args,
+          nativeSessionId: call.sessionId,
+          kind: getFastAgentNativeAcpKind(call.name),
+        });
         const result = await executeNativeToolInner(call);
         await finishCanonicalToolEvent(
           canonicalToolEvent,
@@ -1930,12 +1939,16 @@ export async function answerFastAgentQuestion({
         );
         return result;
       } catch (error) {
-        await finishCanonicalToolEvent(
-          canonicalToolEvent,
-          toolFailure(error),
-          call.sessionId,
-        );
+        if (canonicalToolEvent) {
+          await finishCanonicalToolEvent(
+            canonicalToolEvent,
+            toolFailure(error),
+            call.sessionId,
+          );
+        }
         throw error;
+      } finally {
+        notifyToolExecutionFinished();
       }
     };
 
@@ -2062,6 +2075,67 @@ export async function answerFastAgentQuestion({
               let providerRetryTimeout:
                 | ReturnType<typeof setTimeout>
                 | undefined;
+              let providerRetryDeadlineAt: number | undefined;
+              let postToolContinuationTimeout:
+                | ReturnType<typeof setTimeout>
+                | undefined;
+              let activeToolExecutionCount = 0;
+              const clearProviderRetryTimeout = () => {
+                if (!providerRetryTimeout) return;
+                clearTimeout(providerRetryTimeout);
+                providerRetryTimeout = undefined;
+              };
+              const armProviderRetryTimeout = () => {
+                if (
+                  providerRetryDeadlineAt === undefined ||
+                  activeToolExecutionCount > 0
+                ) {
+                  return;
+                }
+                clearProviderRetryTimeout();
+                const remainingMs = Math.max(
+                  0,
+                  providerRetryDeadlineAt - Date.now(),
+                );
+                providerRetryTimeout = setTimeout(() => {
+                  providerRetryAbortController.abort(
+                    new NonTaskOpenCodePromptTimeoutError(
+                      FAST_AGENT_INFERENCE_RETRY_ATTEMPT_TIMEOUT_MS,
+                    ),
+                  );
+                }, remainingMs);
+                providerRetryTimeout.unref();
+              };
+              const clearPostToolContinuationTimeout = () => {
+                if (!postToolContinuationTimeout) return;
+                clearTimeout(postToolContinuationTimeout);
+                postToolContinuationTimeout = undefined;
+              };
+              notifyToolExecutionStarted = () => {
+                activeToolExecutionCount += 1;
+                clearProviderRetryTimeout();
+                clearPostToolContinuationTimeout();
+              };
+              notifyToolExecutionFinished = () => {
+                activeToolExecutionCount = Math.max(
+                  0,
+                  activeToolExecutionCount - 1,
+                );
+                if (activeToolExecutionCount > 0) return;
+                if (providerRetryDeadlineAt !== undefined) {
+                  armProviderRetryTimeout();
+                  return;
+                }
+                clearPostToolContinuationTimeout();
+                postToolContinuationTimeout = setTimeout(() => {
+                  providerRetryAbortController.abort(
+                    new NonTaskOpenCodePromptTimeoutError(
+                      FAST_AGENT_INFERENCE_RETRY_ATTEMPT_TIMEOUT_MS,
+                    ),
+                  );
+                }, FAST_AGENT_INFERENCE_RETRY_ATTEMPT_TIMEOUT_MS);
+                postToolContinuationTimeout.unref();
+              };
               const attemptStartedAt = Date.now();
               let promptStarted = false;
               let providerRetryEventCount = 0;
@@ -2086,6 +2160,7 @@ export async function answerFastAgentQuestion({
                       prompt: promptForAttempt,
                       onProviderRetry: async (event) => {
                         providerRetryEventCount += 1;
+                        clearPostToolContinuationTimeout();
                         captureInferenceContext(
                           'provider_retry',
                           event.attempt,
@@ -2095,16 +2170,12 @@ export async function answerFastAgentQuestion({
                         // retry events cannot extend the conversation lock.
                         if (
                           promptTimeoutMs === null &&
-                          providerRetryTimeout === undefined
+                          providerRetryDeadlineAt === undefined
                         ) {
-                          providerRetryTimeout = setTimeout(() => {
-                            providerRetryAbortController.abort(
-                              new NonTaskOpenCodePromptTimeoutError(
-                                FAST_AGENT_INFERENCE_RETRY_ATTEMPT_TIMEOUT_MS,
-                              ),
-                            );
-                          }, FAST_AGENT_INFERENCE_RETRY_ATTEMPT_TIMEOUT_MS);
-                          providerRetryTimeout.unref();
+                          providerRetryDeadlineAt =
+                            Date.now() +
+                            FAST_AGENT_INFERENCE_RETRY_ATTEMPT_TIMEOUT_MS;
+                          armProviderRetryTimeout();
                         }
                         await reportProviderRetryEvent(event);
                       },
@@ -2241,9 +2312,10 @@ export async function answerFastAgentQuestion({
                 });
                 throw error;
               } finally {
-                if (providerRetryTimeout) {
-                  clearTimeout(providerRetryTimeout);
-                }
+                notifyToolExecutionStarted = () => undefined;
+                notifyToolExecutionFinished = () => undefined;
+                clearPostToolContinuationTimeout();
+                clearProviderRetryTimeout();
               }
             },
             reportRoomoteInferenceRetry,
