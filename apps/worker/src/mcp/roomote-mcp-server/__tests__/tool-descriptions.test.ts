@@ -340,6 +340,20 @@ describe('roomote MCP tool descriptions', () => {
     );
   });
 
+  it('registers narrow Fast session communication separately from task management', async () => {
+    const { registeredTools } = await importRoomoteMcpServer();
+    const tool = getRegisteredTool(registeredTools, 'manage_sessions');
+
+    expect(tool.config.description).toContain('Fast sessions');
+    expect(getInputSchemaField(tool, 'action').options).toEqual([
+      'get_messages',
+      'send_message',
+    ]);
+    expect(getInputSchemaField(tool, 'sessionId').description).toContain(
+      'Fast session ID',
+    );
+  });
+
   it('registers show_widget for presentational HTML in the task transcript', async () => {
     const { registeredTools } = await importRoomoteMcpServer();
     const tool = getRegisteredTool(registeredTools, 'show_widget');

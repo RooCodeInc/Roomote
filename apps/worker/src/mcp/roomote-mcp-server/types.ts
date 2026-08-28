@@ -239,6 +239,15 @@ export interface TaskMessagesResponse {
   returned: number;
 }
 
+export interface FastSessionMessage extends Omit<TaskMessage, 'taskId'> {
+  sessionId: string;
+}
+
+export interface FastSessionMessagesResponse {
+  messages: FastSessionMessage[];
+  returned: number;
+}
+
 export interface SendMessageResponse {
   success: boolean;
   result?: unknown;

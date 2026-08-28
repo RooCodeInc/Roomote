@@ -4,12 +4,15 @@ import { z } from 'zod';
 import {
   ALL_REPOSITORIES,
   PRODUCT_NAME,
+  ROOMOTE_SESSION_COMMUNICATION_ACTIONS,
   ROOMOTE_TASK_INSPECTION_ACTIONS,
+  roomoteSessionCommunicationFieldSchemas,
   roomoteTaskInspectionFieldSchemas,
 } from '@roomote/types';
 
 import { environmentsRouter } from '../environments';
 import { tasksRouter } from '../tasks';
+import { fastSessionsRouter } from '../fast-sessions';
 import {
   invokeInProcessApi,
   toolError,
@@ -28,6 +31,7 @@ function invokeMemberApi(
     auth,
     mount: (app) => {
       app.route('/tasks', tasksRouter);
+      app.route('/fast-sessions', fastSessionsRouter);
       app.route('/environments', environmentsRouter);
     },
     path,
@@ -199,6 +203,58 @@ export function registerRoomoteMemberTools(
           });
         }
       }
+    },
+  );
+
+  server.registerTool(
+    'manage_sessions',
+    {
+      title: 'Manage Sessions',
+      description:
+        `Communicate with ${PRODUCT_NAME} Fast sessions as the signed-in member. ` +
+        'Use get_messages to read visible transcript messages and send_message to add a participant follow-up. Access is limited to sessions the member owns or has participated in.',
+      inputSchema: {
+        action: z.enum(ROOMOTE_SESSION_COMMUNICATION_ACTIONS),
+        ...roomoteSessionCommunicationFieldSchemas,
+      },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: false,
+      },
+    },
+    async (params) => {
+      if (!params.sessionId?.trim()) {
+        return toolError({
+          error: `sessionId is required for ${params.action}`,
+        });
+      }
+      if (params.action === 'get_messages') {
+        const query = new URLSearchParams();
+        if (params.limit) query.set('limit', String(params.limit));
+        const suffix = query.size > 0 ? `?${query.toString()}` : '';
+        return resultFromApi(
+          await invokeMemberApi(
+            auth,
+            `/fast-sessions/${encodeURIComponent(params.sessionId)}/messages${suffix}`,
+          ),
+        );
+      }
+      if (!params.message?.trim()) {
+        return toolError({ error: 'message is required for send_message' });
+      }
+      return resultFromApi(
+        await invokeMemberApi(
+          auth,
+          `/fast-sessions/${encodeURIComponent(params.sessionId)}/send_message`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ message: params.message }),
+          },
+        ),
+      );
     },
   );
 }

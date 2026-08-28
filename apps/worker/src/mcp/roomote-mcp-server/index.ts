@@ -14,7 +14,9 @@ import {
   TaskPayloadKind,
   createTaskEnvVarRequestBaseSchema,
   PRODUCT_NAME,
+  ROOMOTE_SESSION_COMMUNICATION_ACTIONS,
   ROOMOTE_TASK_INSPECTION_ACTIONS,
+  roomoteSessionCommunicationFieldSchemas,
   roomoteTaskInspectionFieldSchemas,
   sourceControlProviderSchema,
   taskArtifactTypeSchema,
@@ -79,6 +81,10 @@ import { taskSuggestionResultHasSubmittedSuggestions } from './automation-slack-
 import { registerAutomationWorkItemsTool } from './automation-work-items-tool.js';
 import { handleManageCustomAutomations } from './custom-automations.js';
 import { handleManageGoal } from './goal.js';
+import {
+  handleGetFastSessionMessages,
+  handleSendFastSessionMessage,
+} from './session-communication.js';
 
 export {
   taskSuggestionResultHasSubmittedSuggestions,
@@ -750,6 +756,48 @@ roomoteMcpServer.registerTool(
         return handleListEnvironments(config);
       }
     }
+  },
+);
+
+roomoteMcpServer.registerTool(
+  'manage_sessions',
+  {
+    title: 'Manage Sessions',
+    description:
+      `Communicate with ${PRODUCT_NAME} Fast sessions. ` +
+      'Use get_messages to read visible transcript messages and send_message to add a participant follow-up. Access is limited to sessions owned by or previously joined by the task acting user.',
+    inputSchema: {
+      action: z.enum(ROOMOTE_SESSION_COMMUNICATION_ACTIONS),
+      ...roomoteSessionCommunicationFieldSchemas,
+    },
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: false,
+      openWorldHint: false,
+    },
+  },
+  async (params): Promise<ToolResult> => {
+    const config = getRoomoteConfig();
+    if (!config) {
+      return errorResult('ROOMOTE_CLOUD_TOKEN environment variable not set');
+    }
+    if (!params.sessionId?.trim()) {
+      return errorResult(`sessionId is required for ${params.action}`);
+    }
+    if (params.action === 'get_messages') {
+      return handleGetFastSessionMessages(
+        { sessionId: params.sessionId, limit: params.limit },
+        config,
+      );
+    }
+    if (!params.message?.trim()) {
+      return errorResult('message is required for send_message');
+    }
+    return handleSendFastSessionMessage(
+      { sessionId: params.sessionId, message: params.message },
+      config,
+    );
   },
 );
 
