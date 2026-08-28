@@ -5,6 +5,7 @@ const {
   mockCompleteSetup,
   mockCreateStandardTaskRun,
   mockCaptureEvent,
+  mockIsNull,
   environmentState,
   launchState,
 } = vi.hoisted(() => ({
@@ -12,6 +13,7 @@ const {
   mockCompleteSetup: vi.fn(),
   mockCreateStandardTaskRun: vi.fn(),
   mockCaptureEvent: vi.fn(),
+  mockIsNull: vi.fn(),
   environmentState: { rows: [] as Array<{ id: string }> },
   launchState: {
     lookupResults: [] as Array<Array<{ taskId: string }>>,
@@ -62,11 +64,12 @@ vi.mock('@roomote/db/server', () => ({
   and: vi.fn(),
   eq: vi.fn(),
   desc: vi.fn(),
-  isNull: vi.fn(),
+  isNull: (...args: unknown[]) => mockIsNull(...args),
   sql: vi.fn(),
   taskRuns: {
     taskId: 'taskRuns.taskId',
     payload: 'taskRuns.payload',
+    canceledAt: 'taskRuns.canceledAt',
   },
 }));
 
@@ -294,6 +297,7 @@ describe('completeSetupWithStarterTasksCommand', () => {
       { starterTaskId: 'speed-up-ci', taskId: 'task-existing' },
     ]);
     expect(result.setupCompleted).toBe(true);
+    expect(mockIsNull).toHaveBeenCalledWith('taskRuns.canceledAt');
   });
 
   it('recovers the winning task after a concurrent uniqueness race', async () => {
