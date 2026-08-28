@@ -1,3 +1,5 @@
+import { setTimeout as delay } from 'node:timers/promises';
+
 interface WaitForOpenCodeServerOptions {
   baseUrl: string;
   timeoutMs: number;
@@ -21,37 +23,6 @@ async function probeOpenCodeHealth(
   }
 }
 
-function throwIfAborted(signal: AbortSignal | undefined): void {
-  if (signal?.aborted) {
-    throw signal.reason ?? new Error('OpenCode server readiness wait aborted.');
-  }
-}
-
-async function waitForRetry(
-  delayMs: number,
-  signal: AbortSignal | undefined,
-): Promise<void> {
-  await new Promise<void>((resolve, reject) => {
-    const onAbort = () => {
-      clearTimeout(timer);
-      reject(
-        signal?.reason ?? new Error('OpenCode server readiness wait aborted.'),
-      );
-    };
-    const timer = setTimeout(() => {
-      signal?.removeEventListener('abort', onAbort);
-      resolve();
-    }, delayMs);
-
-    if (signal?.aborted) {
-      onAbort();
-      return;
-    }
-
-    signal?.addEventListener('abort', onAbort, { once: true });
-  });
-}
-
 export async function waitForOpenCodeServer({
   baseUrl,
   timeoutMs,
@@ -62,9 +33,14 @@ export async function waitForOpenCodeServer({
   const deadline = Date.now() + timeoutMs;
   let lastError: unknown;
 
-  while (Date.now() < deadline) {
-    throwIfAborted(signal);
+  while (true) {
+    signal?.throwIfAborted();
     const remainingMs = deadline - Date.now();
+
+    if (remainingMs <= 0) {
+      break;
+    }
+
     const probeSignal = signal
       ? AbortSignal.any([
           signal,
@@ -76,15 +52,17 @@ export async function waitForOpenCodeServer({
       await probe(probeSignal);
       return;
     } catch (error) {
-      throwIfAborted(signal);
+      signal?.throwIfAborted();
       lastError = error;
     }
 
     const delayMs = Math.min(retryIntervalMs, deadline - Date.now());
 
-    if (delayMs > 0) {
-      await waitForRetry(delayMs, signal);
+    if (delayMs <= 0) {
+      break;
     }
+
+    await delay(delayMs, undefined, { signal });
   }
 
   const lastErrorMessage = lastError
