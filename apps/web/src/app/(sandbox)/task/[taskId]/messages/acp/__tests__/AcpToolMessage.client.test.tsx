@@ -10,6 +10,7 @@ import type { ReactNode } from 'react';
 import { Bot, FileIcon, Search, SquarePen, Wrench } from '@/components/system';
 
 import { AcpToolMessage } from '../AcpToolMessage';
+import { mcpIntegrationIconFor } from '../tool-icons';
 import type { AcpToolCallUiMessage, AcpToolResultUiMessage } from '../types';
 
 const toolHeaderSpy = vi.fn();
@@ -368,6 +369,28 @@ describe('AcpToolMessage', () => {
         action: 'Used',
         object: 'Query',
         suffix: 'Memory',
+      }),
+    );
+  });
+
+  it('uses the known MCP integration’s brand icon', () => {
+    render(
+      <AcpToolMessage
+        msg={buildResultMessage('mcp', {
+          title: 'search_issues',
+          isMcp: true,
+          mcpServerName: 'sentry',
+          mcpToolName: 'search_issues',
+          serverName: 'sentry',
+          toolName: 'search_issues',
+        })}
+      />,
+    );
+
+    expect(toolHeaderSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        icon: mcpIntegrationIconFor('sentry'),
+        suffix: 'Sentry',
       }),
     );
   });

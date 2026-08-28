@@ -13,7 +13,7 @@ import { messageAnchorId } from '../message-anchor';
 
 import { AcpToolDetails } from './AcpToolDetails';
 import type { GroupedToolCallRenderBlock } from './render-blocks';
-import { toolIconForKey } from './tool-icons';
+import { mcpIntegrationIconFor, toolIconForKey } from './tool-icons';
 import { resolveToolPresentation } from './tool-presentation';
 import { resolveToolPresentationPolicy } from './tool-presentation-policy';
 
@@ -55,11 +55,12 @@ export function AcpGroupedToolMessage({
       ? 'input-available'
       : 'output-available';
 
+  const firstPresentation = resolveToolPresentation(
+    group.items[0]!.msg.data,
+    group.items[0]!.msg.partial,
+  );
   const ToolIcon = groupedToolIcon({
-    iconKey: resolveToolPresentation(
-      group.items[0]!.msg.data,
-      group.items[0]!.msg.partial,
-    ).iconKey,
+    presentation: firstPresentation,
     hasFailed,
     hasRunning,
   });
@@ -93,16 +94,16 @@ export function AcpGroupedToolMessage({
                   resolveToolPresentationPolicy(item.msg, {
                     showInternalMessages: showSubagentPayload,
                   }).detailMode === 'expandable';
-                const iconKey = resolveToolPresentation(
+                const presentation = resolveToolPresentation(
                   item.msg.data,
                   item.msg.partial,
-                ).iconKey;
+                );
 
                 return (
                   <section key={item.msg.id} className="space-y-2">
                     <div className="flex min-w-0 items-center gap-1.5 text-xs font-medium tracking-wide text-muted-foreground">
                       <GroupedToolItemIcon
-                        iconKey={iconKey}
+                        presentation={presentation}
                         className="size-3 shrink-0"
                       />
                       <span className="truncate">{sectionTitle}</span>
@@ -126,22 +127,26 @@ export function AcpGroupedToolMessage({
 }
 
 function groupedToolIcon(params: {
-  iconKey: ReturnType<typeof resolveToolPresentation>['iconKey'];
+  presentation: ReturnType<typeof resolveToolPresentation>;
   hasRunning: boolean;
   hasFailed: boolean;
 }): LucideIcon {
   if (params.hasFailed) return AlertCircle;
   if (params.hasRunning) return Loader2;
-  return toolIconForKey(params.iconKey);
+  return params.presentation.integrationIcon
+    ? mcpIntegrationIconFor(params.presentation.integrationIcon)
+    : toolIconForKey(params.presentation.iconKey);
 }
 
 function GroupedToolItemIcon({
-  iconKey,
+  presentation,
   className,
 }: {
-  iconKey: ReturnType<typeof resolveToolPresentation>['iconKey'];
+  presentation: ReturnType<typeof resolveToolPresentation>;
   className?: string;
 }) {
-  const Icon = toolIconForKey(iconKey);
+  const Icon = presentation.integrationIcon
+    ? mcpIntegrationIconFor(presentation.integrationIcon)
+    : toolIconForKey(presentation.iconKey);
   return <Icon className={className} />;
 }

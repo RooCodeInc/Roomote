@@ -1,6 +1,10 @@
+import { createElement, forwardRef } from 'react';
+import type { LucideProps } from 'lucide-react';
+
 import {
   type LucideIcon,
   Brain,
+  BrandIcon,
   Bot,
   FileIcon,
   FolderIcon,
@@ -45,4 +49,19 @@ export function toolIconForKey(key: ToolIconKey): LucideIcon {
   if (key === 'alert') return TriangleAlert;
   if (key === 'messages') return MessagesSquare;
   return Wrench;
+}
+
+const mcpIntegrationIconCache = new Map<string, LucideIcon>();
+
+export function mcpIntegrationIconFor(icon: string): LucideIcon {
+  const existing = mcpIntegrationIconCache.get(icon);
+  if (existing) return existing;
+
+  const McpIntegrationIcon = forwardRef<SVGSVGElement, LucideProps>(
+    ({ className }, _ref) =>
+      createElement(BrandIcon, { icon, name: '', className }),
+  );
+  McpIntegrationIcon.displayName = `McpIntegrationIcon(${icon})`;
+  mcpIntegrationIconCache.set(icon, McpIntegrationIcon);
+  return McpIntegrationIcon;
 }

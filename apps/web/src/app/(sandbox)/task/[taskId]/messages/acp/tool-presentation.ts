@@ -1,4 +1,8 @@
-import type { AcpToolCallPayload, AcpToolResultPayload } from '@roomote/types';
+import {
+  getMcpIntegration,
+  type AcpToolCallPayload,
+  type AcpToolResultPayload,
+} from '@roomote/types';
 
 import { sanitizeSandboxPathString } from '@/lib';
 
@@ -51,6 +55,7 @@ interface ResolvedToolPresentation {
   category: ToolPresentationCategory;
   displayName: string;
   iconKey: ToolIconKey;
+  integrationIcon?: string;
   phase: ToolPresentationPhase;
   verb: string;
   object?: string;
@@ -147,12 +152,17 @@ export function resolveToolPresentation(
     isRead: 'isRead' in data && data.isRead === true,
     isSubagentSpawn: data.isSubagentSpawn === true,
   });
+  const explicitIconKey = toolName ? TOOL_ICON_OVERRIDES[toolName] : undefined;
+  const integration =
+    providerKind === 'mcp' && serverName
+      ? getMcpIntegration(serverName)
+      : undefined;
   const displayName = toolName
     ? formatToolIdentifier(toolName)
     : sanitizeSandboxPathString(data.title ?? 'Tool');
-  const providerLabel = serverName
-    ? formatToolIdentifier(serverName)
-    : undefined;
+  const providerLabel =
+    integration?.name ??
+    (serverName ? formatToolIdentifier(serverName) : undefined);
   const receipt = resolveReceiptLanguage(toolName, phase);
   const verb = receipt?.verb ?? (phase === 'running' ? 'Using' : 'Used');
   const object = receipt?.object ?? displayName;
@@ -161,9 +171,8 @@ export function resolveToolPresentation(
     identity: { providerKind, serverName, toolName },
     category,
     displayName,
-    iconKey: toolName
-      ? (TOOL_ICON_OVERRIDES[toolName] ?? categoryIconKey(category))
-      : categoryIconKey(category),
+    iconKey: explicitIconKey ?? categoryIconKey(category),
+    integrationIcon: explicitIconKey ? undefined : integration?.icon,
     phase,
     verb,
     object,

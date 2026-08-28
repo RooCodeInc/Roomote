@@ -95,6 +95,37 @@ describe('tool presentation resolver', () => {
     });
   });
 
+  it('uses a known MCP integration’s catalog label and icon', () => {
+    expect(
+      resolveToolPresentation(
+        toolData({
+          isMcp: true,
+          mcpServerName: 'sentry',
+          mcpToolName: 'search_issues',
+          serverName: 'sentry',
+          toolName: 'search_issues',
+        }),
+      ),
+    ).toMatchObject({
+      integrationIcon: 'sentry',
+      providerLabel: 'Sentry',
+    });
+  });
+
+  it('keeps explicit tool icons ahead of an MCP integration icon', () => {
+    expect(
+      resolveToolPresentation(
+        toolData({
+          isMcp: true,
+          mcpServerName: 'sentry',
+          mcpToolName: 'manage_goal',
+          serverName: 'sentry',
+          toolName: 'manage_goal',
+        }),
+      ),
+    ).toMatchObject({ iconKey: 'target', integrationIcon: undefined });
+  });
+
   it('uses meaningful receipt language for consequential task actions', () => {
     expect(
       resolveToolPresentation(toolData({ toolName: 'launch_task' })),

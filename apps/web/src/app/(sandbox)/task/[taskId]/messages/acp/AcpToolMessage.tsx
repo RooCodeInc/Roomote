@@ -27,7 +27,7 @@ import { resolveShowWidgetForToolMessage } from './show-widget-tool-result';
 import { VisualProofToolPreview } from './VisualProofToolPreview';
 import { resolveVisualProofMediaForToolMessage } from './visual-proof-tool-result';
 import { resolveToolPresentation } from './tool-presentation';
-import { toolIconForKey } from './tool-icons';
+import { mcpIntegrationIconFor, toolIconForKey } from './tool-icons';
 import { resolveToolPresentationPolicy } from './tool-presentation-policy';
 
 interface AcpToolMessageProps {
@@ -61,7 +61,9 @@ export function AcpToolMessage({
     ? AlertCircle
     : isRunning
       ? Loader2
-      : toolIconForKey(presentation.iconKey);
+      : presentation.integrationIcon
+        ? mcpIntegrationIconFor(presentation.integrationIcon)
+        : toolIconForKey(presentation.iconKey);
 
   const visualProofMedia = resolveVisualProofMediaForToolMessage(
     msg,
