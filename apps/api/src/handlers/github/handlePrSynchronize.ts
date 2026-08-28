@@ -24,8 +24,8 @@ import {
   sql,
 } from '@roomote/db/server';
 import { enqueueTask } from '@roomote/cloud-agents/server';
-import { acquireRedisLock } from '@roomote/redis';
 import {
+  acquireGithubPrReviewLifecycleLock,
   enqueueActivePrReviewFollowUp,
   publishGithubPrReviewCheck,
 } from '@roomote/sdk/server';
@@ -118,22 +118,6 @@ async function findExistingReviewTask(repository: string, prNumber: number) {
   return existingTask;
 }
 
-async function acquirePrReviewLaunchLock(repository: string, prNumber: number) {
-  const key = `pr-review-synchronize:${repository}:${prNumber}`;
-
-  for (let attempt = 0; attempt < 100; attempt++) {
-    const release = await acquireRedisLock(key, { ttlSeconds: 30 });
-
-    if (release) {
-      return release;
-    }
-
-    await new Promise((resolve) => setTimeout(resolve, 100));
-  }
-
-  return null;
-}
-
 export async function handlePrSynchronize({
   installation,
   repository,
@@ -181,7 +165,7 @@ export async function handlePrSynchronize({
   }
 
   const enqueued = await pMap(targets, async (currentTarget) => {
-    const releaseLaunchLock = await acquirePrReviewLaunchLock(
+    const releaseLaunchLock = await acquireGithubPrReviewLifecycleLock(
       repository.full_name,
       pr.number,
     );

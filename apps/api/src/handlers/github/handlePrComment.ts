@@ -12,6 +12,7 @@ import {
 } from '@roomote/db/server';
 import { getInstallationOctokit } from '@roomote/github';
 import {
+  acquireGithubPrReviewLifecycleLock,
   ensureSnapshotResumeGitHubFollowUpFallback,
   publishGithubPrReviewCheck,
 } from '@roomote/sdk/server';
@@ -1350,40 +1351,54 @@ export async function handlePrComment(
           );
         }
 
-        const reviewLaunch = await enqueueTask({
-          task: {
-            type: TaskPayloadKind.GithubPrReview,
-            githubLogin: reviewer.properties.githubLogin,
-            githubUserId: reviewer.properties.githubUserId,
-            payload: reviewPayload,
-          },
-          // A human @roomote mention started this review.
-          initiator: { kind: 'user', userId: reviewer.properties.userId },
-          workflow: 'pr_review',
-          surface: 'github',
-          trigger: 'message',
-          prLinkage: {
-            provider: 'github',
-            host: reviewer.repo.host ?? toHostFromUrl(prUrl) ?? 'github.com',
-            repositoryId: reviewer.repo.id,
-            repository: repository.full_name,
-            prNumber: pr.number,
-            prUrl,
-            prTitle: pr.title,
-            prSha: headSha,
-          },
-        });
-        if (reviewer.settings?.publishGithubCheck) {
-          await publishGithubPrReviewCheck({
-            installationId: githubInstallationId,
-            repository: repository.full_name,
-            prNumber: pr.number,
-            headSha,
-            taskId: reviewLaunch.taskId,
-            runId: reviewLaunch.id,
-          });
+        const releaseLifecycleLock = await acquireGithubPrReviewLifecycleLock(
+          repository.full_name,
+          pr.number,
+        );
+        if (!releaseLifecycleLock) {
+          throw new Error(
+            `Timed out serializing PR review launch for ${repository.full_name}#${pr.number}`,
+          );
         }
-        reviewLaunches.push(reviewLaunch);
+
+        try {
+          const reviewLaunch = await enqueueTask({
+            task: {
+              type: TaskPayloadKind.GithubPrReview,
+              githubLogin: reviewer.properties.githubLogin,
+              githubUserId: reviewer.properties.githubUserId,
+              payload: reviewPayload,
+            },
+            // A human @roomote mention started this review.
+            initiator: { kind: 'user', userId: reviewer.properties.userId },
+            workflow: 'pr_review',
+            surface: 'github',
+            trigger: 'message',
+            prLinkage: {
+              provider: 'github',
+              host: reviewer.repo.host ?? toHostFromUrl(prUrl) ?? 'github.com',
+              repositoryId: reviewer.repo.id,
+              repository: repository.full_name,
+              prNumber: pr.number,
+              prUrl,
+              prTitle: pr.title,
+              prSha: headSha,
+            },
+          });
+          if (reviewer.settings?.publishGithubCheck) {
+            await publishGithubPrReviewCheck({
+              installationId: githubInstallationId,
+              repository: repository.full_name,
+              prNumber: pr.number,
+              headSha,
+              taskId: reviewLaunch.taskId,
+              runId: reviewLaunch.id,
+            });
+          }
+          reviewLaunches.push(reviewLaunch);
+        } finally {
+          await releaseLifecycleLock();
+        }
       } catch (error) {
         failedReviewerIds.push(reviewer.id);
         console.warn(

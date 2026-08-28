@@ -3,7 +3,7 @@ import { TaskPayloadKind } from '@roomote/types';
 import type { WebhookPullRequestSynchronize } from '../types';
 
 const {
-  mockAcquireRedisLock,
+  mockAcquireGithubPrReviewLifecycleLock,
   mockEnqueueActivePrReviewFollowUp,
   mockPublishGithubPrReviewCheck,
   mockEnqueueTask,
@@ -16,7 +16,7 @@ const {
   mockUpdateSet,
   mockUpdateWhere,
 } = vi.hoisted(() => ({
-  mockAcquireRedisLock: vi.fn(),
+  mockAcquireGithubPrReviewLifecycleLock: vi.fn(),
   mockEnqueueActivePrReviewFollowUp: vi.fn(),
   mockPublishGithubPrReviewCheck: vi.fn(),
   mockEnqueueTask: vi.fn(),
@@ -30,10 +30,6 @@ const {
   mockUpdateWhere: vi.fn(),
 }));
 
-vi.mock('@roomote/redis', () => ({
-  acquireRedisLock: (...args: unknown[]) => mockAcquireRedisLock(...args),
-}));
-
 vi.mock('@roomote/cloud-agents/server', () => ({
   enqueueTask: (...args: unknown[]) => mockEnqueueTask(...args),
 }));
@@ -44,6 +40,8 @@ vi.mock('../currentPrHead', () => ({
 }));
 
 vi.mock('@roomote/sdk/server', () => ({
+  acquireGithubPrReviewLifecycleLock: (...args: unknown[]) =>
+    mockAcquireGithubPrReviewLifecycleLock(...args),
   enqueueActivePrReviewFollowUp: (...args: unknown[]) =>
     mockEnqueueActivePrReviewFollowUp(...args),
   publishGithubPrReviewCheck: (...args: unknown[]) =>
@@ -126,7 +124,7 @@ const payload = {
 describe('handlePrSynchronize', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockAcquireRedisLock.mockResolvedValue(mockReleaseLock);
+    mockAcquireGithubPrReviewLifecycleLock.mockResolvedValue(mockReleaseLock);
     mockEnqueueActivePrReviewFollowUp.mockResolvedValue(undefined);
     mockUpdate.mockReturnValue({ set: mockUpdateSet });
     mockUpdateSet.mockReturnValue({ where: mockUpdateWhere });
@@ -415,7 +413,7 @@ describe('handlePrSynchronize', () => {
       'Could not resolve the live head for owner/repo#42.',
     );
 
-    expect(mockAcquireRedisLock).toHaveBeenCalledOnce();
+    expect(mockAcquireGithubPrReviewLifecycleLock).toHaveBeenCalledOnce();
     expect(mockReleaseLock).toHaveBeenCalledOnce();
     expect(mockEnqueueTask).not.toHaveBeenCalled();
   });

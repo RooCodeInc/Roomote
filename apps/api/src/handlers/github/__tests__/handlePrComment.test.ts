@@ -5,6 +5,8 @@ const {
   mockFindLatestTaskRun,
   mockGetTaskChannelBindings,
   mockPublishGithubPrReviewCheck,
+  mockAcquireGithubPrReviewLifecycleLock,
+  mockReleaseGithubPrReviewLifecycleLock,
   MockSnapshotResumeAlreadyExistsError,
 } = vi.hoisted(() => ({
   mockGetGitHubAutomationTargets: vi.fn(),
@@ -13,6 +15,8 @@ const {
   mockFindLatestTaskRun: vi.fn(),
   mockGetTaskChannelBindings: vi.fn(),
   mockPublishGithubPrReviewCheck: vi.fn(),
+  mockAcquireGithubPrReviewLifecycleLock: vi.fn(),
+  mockReleaseGithubPrReviewLifecycleLock: vi.fn(),
   MockSnapshotResumeAlreadyExistsError: class extends Error {},
 }));
 
@@ -40,6 +44,7 @@ vi.mock('@roomote/github', () => ({
 }));
 
 vi.mock('@roomote/sdk/server', () => ({
+  acquireGithubPrReviewLifecycleLock: mockAcquireGithubPrReviewLifecycleLock,
   ensureSnapshotResumeGitHubFollowUpFallback: vi.fn(),
   publishGithubPrReviewCheck: mockPublishGithubPrReviewCheck,
 }));
@@ -132,6 +137,9 @@ describe('handlePrComment', () => {
       request: vi.fn(),
     });
     mockGetTaskChannelBindings.mockResolvedValue(null);
+    mockAcquireGithubPrReviewLifecycleLock.mockResolvedValue(
+      mockReleaseGithubPrReviewLifecycleLock,
+    );
   });
 
   it('returns a normal delivery failure when another GitHub resume wins', async () => {

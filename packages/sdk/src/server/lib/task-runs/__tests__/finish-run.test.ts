@@ -15,6 +15,8 @@ const mockFindLinearDeploymentMcpConnection = vi.fn();
 const mockGetValidAccessToken = vi.fn().mockResolvedValue('decrypted-token');
 const mockRedisSet = vi.fn().mockResolvedValue('OK');
 const mockRedisDel = vi.fn().mockResolvedValue(1);
+const mockAcquireRedisLock = vi.fn();
+const mockReleaseRedisLock = vi.fn().mockResolvedValue(undefined);
 const mockDbExecute = vi.fn().mockResolvedValue([]);
 const mockRecordTaskRunLifecycleEvent = vi.fn().mockResolvedValue(undefined);
 const mockCleanupSandboxOidcTargetsForTaskRun = vi
@@ -215,6 +217,7 @@ vi.mock('@roomote/cloud-agents/server', () => ({
 }));
 
 vi.mock('@roomote/redis', () => ({
+  acquireRedisLock: (...args: unknown[]) => mockAcquireRedisLock(...args),
   getRedis: () => ({
     set: (...args: unknown[]) => mockRedisSet(...args),
     del: (...args: unknown[]) => mockRedisDel(...args),
@@ -440,6 +443,7 @@ describe('finishRun', () => {
     }));
     mockRedisSet.mockResolvedValue('OK');
     mockRedisDel.mockResolvedValue(1);
+    mockAcquireRedisLock.mockResolvedValue(mockReleaseRedisLock);
     mockUpdateMessage.mockResolvedValue(true);
     mockDbExecute.mockResolvedValue([]);
     mockResolveDefaultComputeProvider.mockResolvedValue('modal');
@@ -2313,6 +2317,36 @@ describe('finishRun', () => {
           status: 'completed',
           conclusion: 'success',
         }),
+      );
+    });
+
+    it('serializes ownership verification and shared cleanup with review launch', async () => {
+      mockFindFirstRun.mockResolvedValue(
+        makeRun(
+          { payloadKind: TaskPayloadKind.GithubPrReview },
+          { workflow: 'pr_review', surface: 'github' },
+        ),
+      );
+      mockFindManyTaskPullRequests.mockResolvedValue([reviewPrRow]);
+      mockFinalizeGithubPrReviewComment.mockResolvedValueOnce({
+        finalized: false,
+        body: '<!-- roomote-review-summary sha=abc1234 -->\n<!-- roomote-review-status:start -->\nNo issues found.\n<!-- roomote-review-status:end -->\n<!-- roomote-review-checklist:start -->\n<!-- roomote-review-checklist:end -->',
+      });
+
+      await finishRun({ id: 1, status: RunStatus.Completed });
+
+      expect(mockAcquireRedisLock).toHaveBeenCalledWith(
+        'pr-review-synchronize:owner/repo:42',
+        { ttlSeconds: 120 },
+      );
+      expect(mockAcquireRedisLock.mock.invocationCallOrder[0]).toBeLessThan(
+        mockGetCheckRun.mock.invocationCallOrder[0]!,
+      );
+      expect(mockGetCheckRun.mock.invocationCallOrder[0]).toBeLessThan(
+        mockFinalizeGithubPrReviewComment.mock.invocationCallOrder[0]!,
+      );
+      expect(mockUpdateCheckRun.mock.invocationCallOrder[0]).toBeLessThan(
+        mockReleaseRedisLock.mock.invocationCallOrder[0]!,
       );
     });
 

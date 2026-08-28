@@ -20,8 +20,28 @@ import {
   REVIEW_SUMMARY_MARKER,
 } from '@roomote/cloud-agents/server';
 import { getInstallationOctokit, updateCheckRun } from '@roomote/github';
+import { acquireRedisLock } from '@roomote/redis';
 
 export const GITHUB_PR_REVIEW_CHECK_NAME = 'Roomote code review';
+
+export async function acquireGithubPrReviewLifecycleLock(
+  repository: string,
+  prNumber: number,
+) {
+  const key = `pr-review-synchronize:${repository}:${prNumber}`;
+
+  for (let attempt = 0; attempt < 100; attempt++) {
+    const release = await acquireRedisLock(key, { ttlSeconds: 120 });
+
+    if (release) {
+      return release;
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+
+  return null;
+}
 
 function splitRepository(repository: string) {
   const [owner, repo] = repository.split('/');
