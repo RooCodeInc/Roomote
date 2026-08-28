@@ -523,6 +523,40 @@ describe('Discord public-channel Brain collector', () => {
     });
   });
 
+  it('keeps cleanup enabled after the final installation is deactivated', async () => {
+    workspace.available = false;
+    workspace.installations = [];
+    workspace.tracked = [
+      {
+        collectorId: 'discord-public-channels:day-pages',
+        itemId: 'discord/100/300/2026-08-20/000',
+        slug: 'discord/100/300/2026-08-20/000',
+        lastSeenAt: new Date('2026-08-20T00:00:00Z'),
+      },
+    ];
+    const { discordPublicChannelsCollector } =
+      await import('../brain-collectors/discord-public-channels');
+
+    await expect(discordPublicChannelsCollector.isEnabled()).resolves.toBe(
+      true,
+    );
+    const result = await discordPublicChannelsCollector.collect({
+      since: null,
+      now: new Date('2026-08-28T12:00:00Z'),
+      limit: 100,
+    });
+    expect(result.pageRetirements).toContainEqual(
+      expect.objectContaining({
+        slug: 'discord/100/300/2026-08-20/000',
+      }),
+    );
+
+    workspace.tracked = [];
+    await expect(discordPublicChannelsCollector.isEnabled()).resolves.toBe(
+      false,
+    );
+  });
+
   it('prunes pending backfill for deactivated installations', async () => {
     workspace.installations = [{ guildId: '100' }];
     workspace.syncState.set('discord-public-channels:backfill-pending-v1', {

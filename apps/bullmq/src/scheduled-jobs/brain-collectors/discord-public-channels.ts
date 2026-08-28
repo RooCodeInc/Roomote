@@ -927,7 +927,14 @@ export const discordPublicChannelsCollector: BrainCollector = {
   id: BRAIN_COLLECTOR_IDS.discordPublicChannels,
   displayName: 'Discord public channels',
   async isEnabled() {
-    return isBrainSourceAvailable('discord');
+    const [available, provider, tracked] = await Promise.all([
+      isBrainSourceAvailable('discord'),
+      createDiscordCommunicationProviderFromRuntimeCredentials(),
+      listBrainCollectorItems(db, DISCORD_INVENTORY_ID, 1),
+    ]);
+    // Keep authoritative deactivation cleanup runnable after the final guild
+    // is disabled, but preserve historical pages when credentials are removed.
+    return available || (provider !== null && tracked.length > 0);
   },
   collect({ now, limit }) {
     return collectDiscordIncremental({ now, limit });
