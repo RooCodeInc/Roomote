@@ -22,7 +22,12 @@ vi.mock('../automations/destination', () => ({
   findTeamsConversationRoute: mocks.findTeamsConversationRoute,
 }));
 
-import { db, fastAgentConversations, userFactory } from '@roomote/db/server';
+import {
+  db,
+  fastAgentConversations,
+  fastAgentMessages,
+  userFactory,
+} from '@roomote/db/server';
 
 import { buildFastAgentSurfaceReplyDelivery } from './fast-agent-surface-reply';
 
@@ -109,6 +114,46 @@ describe('buildFastAgentSurfaceReplyDelivery', () => {
     });
 
     expect(delivery?.conversation.surface).toBe('automation');
+  });
+
+  it('allows recorded participants but rejects unrelated users', async () => {
+    const owner = await userFactory.create();
+    const participant = await userFactory.create();
+    const bystander = await userFactory.create();
+    const conversation = await createConversation({
+      userId: owner.id,
+      surface: 'web',
+    });
+    await db.insert(fastAgentMessages).values({
+      conversationId: conversation.id,
+      eventId: 'participant-message',
+      turnId: 'participant-turn',
+      turnSeq: 0,
+      ts: Date.now(),
+      eventType: 'roomote_runtime.user_prompt',
+      role: 'user',
+      contentBlocks: [{ type: 'text', text: 'Joined' }],
+      metadata: { userId: participant.id, visibleInTranscript: true },
+      payload: {},
+      source: 'web',
+    });
+
+    await expect(
+      buildFastAgentSurfaceReplyDelivery({
+        sessionId: conversation.id,
+        userId: participant.id,
+        senderDisplayName: null,
+        question: 'Participant follow-up',
+      }),
+    ).resolves.not.toBeNull();
+    await expect(
+      buildFastAgentSurfaceReplyDelivery({
+        sessionId: conversation.id,
+        userId: bystander.id,
+        senderDisplayName: null,
+        question: 'Bystander follow-up',
+      }),
+    ).resolves.toBeNull();
   });
 
   it('returns null for a Slack session without an installation', async () => {

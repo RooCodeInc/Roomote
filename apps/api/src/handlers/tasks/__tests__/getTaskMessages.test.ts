@@ -11,6 +11,7 @@ const {
   descMock,
   eqMock,
   mockGetImageUrisFromContentBlocks,
+  mockGetFastSessionMessagesForUser,
   mockGetTextFromContentBlocks,
   mockLogHandlerError,
   mockResolveAcpTranscriptVisibility,
@@ -30,6 +31,7 @@ const {
   mockGetImageUrisFromContentBlocks: vi.fn(() => [
     'https://example.com/image.png',
   ]),
+  mockGetFastSessionMessagesForUser: vi.fn(),
   mockGetTextFromContentBlocks: vi.fn(() => 'Hello from transcript'),
   mockLogHandlerError: vi.fn(),
   mockResolveAcpTranscriptVisibility: vi.fn(() => true),
@@ -45,6 +47,10 @@ const {
 
 vi.mock('../helpers', () => ({
   visibleTaskHistoryCondition,
+}));
+
+vi.mock('../fastSessionCommunication', () => ({
+  getFastSessionMessagesForUser: mockGetFastSessionMessagesForUser,
 }));
 
 vi.mock('../../utils', () => ({
@@ -112,6 +118,8 @@ describe('getTaskMessages', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mockSelect.mockReset();
+    mockGetFastSessionMessagesForUser.mockResolvedValue(null);
 
     taskSelectFromMock.mockReturnValue({
       where: taskSelectWhereMock,
@@ -170,6 +178,7 @@ describe('getTaskMessages', () => {
         },
       ],
     });
+    expect(mockGetFastSessionMessagesForUser).not.toHaveBeenCalled();
   });
 
   it('adds the hidden-task-history condition to the task lookup', async () => {
@@ -191,5 +200,32 @@ describe('getTaskMessages', () => {
 
     expect(response.status).toBe(404);
     await expect(response.json()).resolves.toEqual({ error: 'Task not found' });
+  });
+
+  it('falls back to a Fast session when no task matches', async () => {
+    taskSelectLimitMock.mockResolvedValueOnce([]);
+    mockGetFastSessionMessagesForUser.mockResolvedValueOnce([
+      {
+        id: 'fast-message-1',
+        taskId: 'fast-session-1',
+        text: 'Fast response',
+      },
+    ]);
+
+    const response = await createApp(authContext).request(
+      'http://localhost/tasks/fast-session-1/messages',
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      returned: 1,
+      messages: [{ taskId: 'fast-session-1', text: 'Fast response' }],
+    });
+    expect(mockGetFastSessionMessagesForUser).toHaveBeenCalledWith({
+      sessionId: 'fast-session-1',
+      userId: 'user-1',
+      limit: undefined,
+      order: 'desc',
+    });
   });
 });

@@ -321,10 +321,10 @@ describe('roomote MCP tool descriptions', () => {
       'list_environments',
     ]);
     expect(taskIdField.description).toBe(
-      'The task ID (required for get_summary, get_compute_logs, get_messages, cancel, and send_message)',
+      'The task ID; for get_messages and send_message this may instead be a canonical Fast session ID',
     );
     expect(limitField.description).toBe(
-      'Positive result limit: 1 to 100 for search (default 20), or 1 to 1000 for get_messages',
+      'Positive result limit: 1 to 100 for search (default 20), or 1 to 1000 for get_messages (task or Fast session)',
     );
   });
 
@@ -338,6 +338,18 @@ describe('roomote MCP tool descriptions', () => {
     expect(getInputSchemaField(manageTasksTool, 'model').description).toContain(
       'Call list_models first and pass an exact returned model ID',
     );
+  });
+
+  it('models Fast session communication inside manage_tasks', async () => {
+    const { registeredTools } = await importRoomoteMcpServer();
+    const tool = getRegisteredTool(registeredTools, 'manage_tasks');
+
+    expect(tool.config.description).toContain(
+      'For a Fast session, pass its canonical session ID as taskId.',
+    );
+    expect(
+      registeredTools.some((candidate) => candidate.name === 'manage_sessions'),
+    ).toBe(false);
   });
 
   it('registers show_widget for presentational HTML in the task transcript', async () => {

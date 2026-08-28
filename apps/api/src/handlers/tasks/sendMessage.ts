@@ -7,6 +7,7 @@ import {
   type SendMessageSenderMode,
   sendMessageToTask,
 } from './sendMessageToTask';
+import { sendMessageToFastSessionForUser } from './fastSessionCommunication';
 
 type PublicSendMessageSenderMode = Extract<
   SendMessageSenderMode,
@@ -123,7 +124,7 @@ export async function sendMessage(
     return c.json({ error: 'senderMode is invalid' }, 400);
   }
 
-  const result = await sendMessageToTask({
+  let result = await sendMessageToTask({
     taskId,
     userId: auth.userId,
     authContext: auth.authContext,
@@ -133,6 +134,15 @@ export async function sendMessage(
     clientMessageId,
     senderMode,
   });
+
+  if (!result.success && result.status === 404) {
+    result = await sendMessageToFastSessionForUser({
+      sessionId: taskId,
+      userId: auth.userId,
+      message: body.message,
+      images: body.images,
+    });
+  }
 
   if (result.success) {
     return c.json(result);

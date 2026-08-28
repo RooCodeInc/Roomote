@@ -7,7 +7,14 @@ import {
   type FastAgentConversation,
   type FastAgentTurnAdapter,
 } from '@roomote/cloud-agents/server';
-import { and, db, eq, slackInstallations } from '@roomote/db/server';
+import {
+  and,
+  db,
+  eq,
+  fastAgentMessages,
+  slackInstallations,
+  sql,
+} from '@roomote/db/server';
 import {
   buildFastSessionReplyFooterText,
   deliverManagedThreadReplyFooter,
@@ -105,6 +112,29 @@ export type FastAgentSurfaceReplyDelivery = {
   >;
 };
 
+export async function canUserAccessFastAgentSession(params: {
+  sessionId: string;
+  userId: string;
+}): Promise<boolean> {
+  const [session] = await db
+    .select({ id: fastAgentMessages.conversationId })
+    .from(fastAgentMessages)
+    .where(
+      and(
+        eq(fastAgentMessages.conversationId, params.sessionId),
+        sql`${fastAgentMessages.metadata} ->> 'userId' = ${params.userId}`,
+      ),
+    )
+    .limit(1);
+
+  if (session) return true;
+
+  const conversation = await fastAgentConversationRepository.findById({
+    id: params.sessionId,
+  });
+  return conversation?.userId === params.userId;
+}
+
 /**
  * Build the platform delivery for a web-initiated reply to an existing Fast
  * session: the adapter posts the agent's replies back into the conversation's
@@ -125,7 +155,12 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
   if (!session) {
     return null;
   }
-  if (session.userId !== params.userId) {
+  if (
+    !(await canUserAccessFastAgentSession({
+      sessionId: session.id,
+      userId: params.userId,
+    }))
+  ) {
     return null;
   }
   const conversation = session.conversation;
@@ -438,6 +473,20 @@ export async function continueFastAgentSurfaceReply(params: {
     return false;
   }
 
+  return runFastAgentSurfaceReply({ ...params, delivery });
+}
+
+async function runFastAgentSurfaceReply(params: {
+  sessionId: string;
+  userId: string;
+  senderDisplayName: string | null;
+  question: string;
+  currentMessageId: string;
+  images?: string[];
+  delivery: FastAgentSurfaceReplyDelivery;
+}): Promise<boolean> {
+  const { delivery } = params;
+
   const release = await acquireFastAgentTurnLock({
     conversation: delivery.conversation,
   });
@@ -470,4 +519,21 @@ export async function continueFastAgentSurfaceReply(params: {
   } finally {
     await release().catch(() => {});
   }
+}
+
+export async function queueFastAgentSurfaceReply(params: {
+  sessionId: string;
+  userId: string;
+  senderDisplayName: string | null;
+  question: string;
+  currentMessageId: string;
+  images?: string[];
+}): Promise<boolean> {
+  const delivery = await buildFastAgentSurfaceReplyDelivery(params);
+  if (!delivery) return false;
+
+  void runFastAgentSurfaceReply({ ...params, delivery }).catch((error) => {
+    console.error('[Fast Agent] Queued surface reply failed:', error);
+  });
+  return true;
 }

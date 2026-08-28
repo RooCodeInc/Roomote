@@ -61,7 +61,7 @@ export function registerRoomoteMemberTools(
       title: 'Manage Tasks',
       description:
         `Manage ${PRODUCT_NAME} tasks as the signed-in member. ` +
-        'Use list_environments immediately before launch, search for task history, inspect summaries/messages/compute logs, launch tasks, cancel active tasks, or send follow-up messages.',
+        'Use list_environments immediately before launch, search for task history, inspect summaries/messages/compute logs, launch tasks, cancel active tasks, or send follow-up messages. For get_messages and send_message, taskId may be either a task ID or a canonical Fast session ID.',
       inputSchema: manageTasksInputSchema,
       annotations: {
         readOnlyHint: false,
