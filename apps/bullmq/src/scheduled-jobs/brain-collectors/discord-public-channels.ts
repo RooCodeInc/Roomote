@@ -98,7 +98,7 @@ let discoveryCache: {
   value: DiscordDiscovery;
 } | null = null;
 
-export function discordSnowflakeToDate(id: string): Date | null {
+function discordSnowflakeToDate(id: string): Date | null {
   try {
     const milliseconds = (BigInt(id) >> 22n) + DISCORD_EPOCH_MS;
     const value = Number(milliseconds);
@@ -136,7 +136,7 @@ function discordDayPrefix(entry: DiscordCollectionEntry, day: string): string {
   return `${brainNamespacePrefix('discord')}${entry.guildId}/${channelPath}/${day}/`.toLowerCase();
 }
 
-export function groupDiscordMessagesIntoDayPages(input: {
+function groupDiscordMessagesIntoDayPages(input: {
   entry: DiscordCollectionEntry;
   day: string;
   messages: CommunicationMessage[];
