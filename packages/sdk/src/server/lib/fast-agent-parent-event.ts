@@ -36,6 +36,8 @@ import {
   buildFastSessionReplyFooterText,
   deliverManagedThreadReplyFooter,
   getDiscordFooterlessFinalChunk,
+  resolveFastSessionReplyFooterContext,
+  type FastSessionReplyFooterContext,
 } from '@roomote/communication';
 import {
   ALL_REPOSITORIES,
@@ -339,6 +341,13 @@ type FastAgentParentTurn = {
   adapter: FastAgentTurnAdapter;
 };
 
+type FastAgentParentTurnParams = {
+  parent: FastAgentParent;
+  event: FastAgentParentEvent;
+  onReplyPosted: () => void;
+  footerContext: FastSessionReplyFooterContext;
+};
+
 function createFastAgentAutomationTaskLauncher(params: {
   userId: string;
   conversation: Extract<FastAgentConversation, { surface: 'automation' }>;
@@ -477,11 +486,9 @@ async function createWebFastAgentParentTurn(params: {
   };
 }
 
-async function createSlackFastAgentParentTurn(params: {
-  parent: FastAgentParent;
-  event: FastAgentParentEvent;
-  onReplyPosted: () => void;
-}): Promise<FastAgentParentTurn> {
+async function createSlackFastAgentParentTurn(
+  params: FastAgentParentTurnParams,
+): Promise<FastAgentParentTurn> {
   const fallbackConversation = params.parent.conversation;
   if (fallbackConversation.surface !== 'slack') {
     throw new Error('Expected a Slack Fast parent conversation.');
@@ -646,6 +653,7 @@ async function createSlackFastAgentParentTurn(params: {
           footerText: buildFastSessionReplyFooterText({
             provider: 'slack',
             sessionId: params.parent.sessionId,
+            ...params.footerContext,
           }),
           clientMsgId: buildSlackClientMessageId(
             buildEventClientMessageSeed(params.event),
@@ -827,11 +835,9 @@ async function postDiscordFastParentMessageWithFooter(params: {
   });
 }
 
-async function createDiscordFastAgentParentTurn(params: {
-  parent: FastAgentParent;
-  event: FastAgentParentEvent;
-  onReplyPosted: () => void;
-}): Promise<FastAgentParentTurn> {
+async function createDiscordFastAgentParentTurn(
+  params: FastAgentParentTurnParams,
+): Promise<FastAgentParentTurn> {
   const fallbackConversation = params.parent.conversation;
   if (fallbackConversation.surface !== 'discord') {
     throw new Error('Expected a Discord Fast parent conversation.');
@@ -956,6 +962,7 @@ async function createDiscordFastAgentParentTurn(params: {
         const footerText = buildFastSessionReplyFooterText({
           provider: 'discord',
           sessionId: params.parent.sessionId,
+          ...params.footerContext,
         });
         const bodyText = action ? `${message}\n${action.question}` : message;
         const textWithFooter = `${bodyText}\n\n${footerText}`;
@@ -1024,11 +1031,9 @@ async function createDiscordFastAgentParentTurn(params: {
   };
 }
 
-async function createTeamsFastAgentParentTurn(params: {
-  parent: FastAgentParent;
-  event: FastAgentParentEvent;
-  onReplyPosted: () => void;
-}): Promise<FastAgentParentTurn> {
+async function createTeamsFastAgentParentTurn(
+  params: FastAgentParentTurnParams,
+): Promise<FastAgentParentTurn> {
   const fallbackConversation = params.parent.conversation;
   if (fallbackConversation.surface !== 'teams') {
     throw new Error('Expected a Teams Fast parent conversation.');
@@ -1088,7 +1093,7 @@ async function createTeamsFastAgentParentTurn(params: {
                 suggestions.length > 0,
               )
             : message;
-        const text = `${reportMessage}\n\n${buildFastSessionReplyFooterText({ provider: 'teams', sessionId: params.parent.sessionId })}`;
+        const text = `${reportMessage}\n\n${buildFastSessionReplyFooterText({ provider: 'teams', sessionId: params.parent.sessionId, ...params.footerContext })}`;
         if (
           params.event.type === 'automation_triggered' &&
           params.event.rootMessageId &&
@@ -1165,11 +1170,9 @@ async function createTeamsFastAgentParentTurn(params: {
   };
 }
 
-async function createTelegramFastAgentParentTurn(params: {
-  parent: FastAgentParent;
-  event: FastAgentParentEvent;
-  onReplyPosted: () => void;
-}): Promise<FastAgentParentTurn> {
+async function createTelegramFastAgentParentTurn(
+  params: FastAgentParentTurnParams,
+): Promise<FastAgentParentTurn> {
   const fallbackConversation = params.parent.conversation;
   if (fallbackConversation.surface !== 'telegram') {
     throw new Error('Expected a Telegram Fast parent conversation.');
@@ -1219,7 +1222,7 @@ async function createTelegramFastAgentParentTurn(params: {
           ...(conversation.replyTarget.threadId
             ? { threadId: conversation.replyTarget.threadId }
             : {}),
-          text: `${reportMessage}\n\n${buildFastSessionReplyFooterText({ provider: 'telegram', sessionId: params.parent.sessionId })}`,
+          text: `${reportMessage}\n\n${buildFastSessionReplyFooterText({ provider: 'telegram', sessionId: params.parent.sessionId, ...params.footerContext })}`,
           textFormat: 'markdown',
           images,
         });
@@ -1251,19 +1254,37 @@ async function createFastAgentParentTurn(params: {
   event: FastAgentParentEvent;
   onReplyPosted: () => void;
 }): Promise<FastAgentParentTurn> {
+  if (params.parent.conversation.surface === 'automation') {
+    return createAutomationFastAgentParentTurn(params);
+  }
+  if (params.parent.conversation.surface === 'web') {
+    return createWebFastAgentParentTurn(params);
+  }
+
+  const pullRequest =
+    params.event.type === 'pull_request_opened' ||
+    params.event.type === 'pull_request_feedback' ||
+    params.event.type === 'pull_request_conflict_detected'
+      ? params.event.pullRequest
+      : null;
+  const pullRequests =
+    params.event.type === 'task_settled' ? params.event.pullRequests : [];
+  const footerContext = await resolveFastSessionReplyFooterContext({
+    taskIds: 'taskId' in params.event ? [params.event.taskId] : [],
+    pullRequest,
+    pullRequests,
+  });
+  const turnParams = { ...params, footerContext };
+
   switch (params.parent.conversation.surface) {
     case 'slack':
-      return createSlackFastAgentParentTurn(params);
+      return createSlackFastAgentParentTurn(turnParams);
     case 'discord':
-      return createDiscordFastAgentParentTurn(params);
+      return createDiscordFastAgentParentTurn(turnParams);
     case 'teams':
-      return createTeamsFastAgentParentTurn(params);
+      return createTeamsFastAgentParentTurn(turnParams);
     case 'telegram':
-      return createTelegramFastAgentParentTurn(params);
-    case 'automation':
-      return createAutomationFastAgentParentTurn(params);
-    case 'web':
-      return createWebFastAgentParentTurn(params);
+      return createTelegramFastAgentParentTurn(turnParams);
   }
 }
 

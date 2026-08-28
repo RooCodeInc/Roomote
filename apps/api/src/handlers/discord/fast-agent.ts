@@ -21,6 +21,7 @@ import {
   deliverManagedThreadReplyFooter,
   getDiscordFooterlessFinalChunk,
   getThreadReplyFooterRecord,
+  resolveFastSessionReplyFooterContext,
   setThreadReplyFooterRecord,
   withThreadReplyFooterLock,
 } from '@roomote/communication';
@@ -174,6 +175,9 @@ export async function processDiscordFastAgentMessage(
       userId: input.senderUserId,
       conversation,
     });
+    const footerContext = await resolveFastSessionReplyFooterContext({
+      taskIds: (input.activeTasks ?? []).map((task) => task.taskId),
+    });
     input.onAccepted?.(() =>
       releaseFastAgentLock.abort(
         new Error('Fast suggestion launch settlement failed.'),
@@ -183,6 +187,7 @@ export async function processDiscordFastAgentMessage(
       const footerText = buildFastSessionReplyFooterText({
         provider: 'discord',
         sessionId: session.id,
+        ...footerContext,
       });
       const textWithFooter = `${text}\n\n${footerText}`;
       const channelId = conversation.replyTarget.channelId;
@@ -345,6 +350,7 @@ export async function processDiscordFastAgentMessage(
           const footerText = buildFastSessionReplyFooterText({
             provider: 'discord',
             sessionId: session.id,
+            ...footerContext,
           });
           const footerChannelId = conversation.replyTarget.channelId;
           const footerStateThreadId =

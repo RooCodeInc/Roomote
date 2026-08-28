@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   findInstallation: vi.fn(),
   findArtifacts: vi.fn(),
   findTaskRun: vi.fn(),
+  findTaskPullRequests: vi.fn(),
   postMessage: vi.fn(),
   updateMessage: vi.fn(),
   addReaction: vi.fn(),
@@ -90,6 +91,10 @@ vi.mock('@roomote/db/server', () => ({
     query: {
       slackInstallations: { findFirst: mocks.findInstallation },
       taskArtifacts: { findMany: mocks.findArtifacts },
+      taskPullRequests: {
+        findFirst: vi.fn().mockResolvedValue(null),
+        findMany: mocks.findTaskPullRequests,
+      },
       taskRuns: { findFirst: mocks.findTaskRun },
     },
   },
@@ -101,6 +106,7 @@ vi.mock('@roomote/db/server', () => ({
     teamId: 'slack_installations.team_id',
   },
   taskArtifacts: { id: 'task_artifacts.id' },
+  taskPullRequests: { taskId: 'task_pull_requests.task_id' },
   taskRuns: { id: 'task_runs.id' },
 }));
 
@@ -227,6 +233,7 @@ describe('deliverFastAgentParentEvent', () => {
       },
     ]);
     mocks.findTaskRun.mockResolvedValue({ status: 'running' });
+    mocks.findTaskPullRequests.mockResolvedValue([]);
     mocks.postMessage.mockResolvedValue('101.001');
     mocks.updateMessage.mockResolvedValue(true);
     mocks.addReaction.mockResolvedValue(true);
@@ -1450,7 +1457,7 @@ describe('deliverFastAgentParentEvent', () => {
       threadId: 'thread-1',
       idempotencyKey: 'fast-parent-pr-feedback:feedback-123',
       text: expect.stringMatching(
-        /^There is new PR feedback\.\nWant me to resolve these issues\?\n\n-# Reply or use the \[web app\]\(.*\/sessions\/.*\)\.$/,
+        /^There is new PR feedback\.\nWant me to resolve these issues\?\n\n-# Working on \[PR #42\]\(https:\/\/github\.com\/acme\/web\/pull\/42\), reply or use the \[web app\]\(.*\/sessions\/.*\)\.$/,
       ),
       textFormat: 'markdown',
       images: [],

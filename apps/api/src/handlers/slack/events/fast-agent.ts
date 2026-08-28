@@ -6,7 +6,10 @@ import {
   type FastAgentActiveTask,
   type LaunchFastAgentTask,
 } from '@roomote/cloud-agents/server';
-import { buildFastSessionReplyFooterText } from '@roomote/communication';
+import {
+  buildFastSessionReplyFooterText,
+  resolveFastSessionReplyFooterContext,
+} from '@roomote/communication';
 import {
   buildSlackThreadReplyFooterBlock,
   getSlackThreadReplyFooterMessageTs,
@@ -188,6 +191,9 @@ export async function processFastAgentMessage(params: {
     const resolvedActiveTasks = resolveActiveTasks
       ? await resolveActiveTasks()
       : activeTasks;
+    const footerContext = await resolveFastSessionReplyFooterContext({
+      taskIds: resolvedActiveTasks.map((task) => task.taskId),
+    });
     const responseText = await answerFastAgentQuestion({
       question,
       images: attachments.images,
@@ -225,7 +231,7 @@ export async function processFastAgentMessage(params: {
               slackTeamId: teamId,
               source: 'fast_agent',
             },
-            fastSessionFooter: { sessionId: session.id },
+            fastSessionFooter: { sessionId: session.id, ...footerContext },
           });
           if (posted === 'failed') {
             throw new Error('Slack did not accept the Fast parent reply.');
@@ -271,6 +277,7 @@ export async function processFastAgentMessage(params: {
                             footerText: buildFastSessionReplyFooterText({
                               provider: 'slack',
                               sessionId: session.id,
+                              ...footerContext,
                             }),
                           }),
                         ]
@@ -324,7 +331,7 @@ export async function processFastAgentMessage(params: {
           slackTeamId: teamId,
           source: 'fast_agent',
         },
-        fastSessionFooter: { sessionId: session.id },
+        fastSessionFooter: { sessionId: session.id, ...footerContext },
       });
     }
   } finally {
