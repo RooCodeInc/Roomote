@@ -242,6 +242,7 @@ vi.mock('@/components/system', () => ({
   Search: () => <svg aria-hidden="true" />,
   PanelLeftClose: () => <svg aria-hidden="true" />,
   PanelLeftOpen: () => <svg aria-hidden="true" />,
+  Plus: () => <svg aria-hidden="true" />,
   VectorSquare: () => <svg aria-hidden="true" />,
   Zap: () => <svg aria-hidden="true" />,
 }));
@@ -269,6 +270,12 @@ vi.mock('@/components/layout/release-notices', () => ({
 
 vi.mock('@/components/layout/CommandPaletteContext', () => ({
   useCommandPalette: () => ({ setOpen: openCommandPaletteMock }),
+}));
+
+vi.mock('@/components/tasks/NewTaskDialog', () => ({
+  NewTaskDialog: ({ open }: { open: boolean }) => (
+    <div data-testid="new-task-dialog" data-open={String(open)} />
+  ),
 }));
 
 vi.mock('@/hooks/useRecentTasks', () => ({
@@ -750,6 +757,28 @@ describe('SideNav quick access tasks', () => {
     fireEvent.click(screen.getByTestId('nav-action-Search (⌘K)'));
 
     expect(openCommandPaletteMock).toHaveBeenCalledWith(true);
+  });
+
+  it('opens a new session dialog from an action above Home', () => {
+    render(<SideNav />);
+
+    const newTaskItem = screen.getByTestId('nav-action-New Session');
+    const homeItem = screen.getByTestId('nav-/');
+
+    expect(newTaskItem.compareDocumentPosition(homeItem)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+    expect(screen.getByTestId('new-task-dialog')).toHaveAttribute(
+      'data-open',
+      'false',
+    );
+
+    fireEvent.click(newTaskItem);
+
+    expect(screen.getByTestId('new-task-dialog')).toHaveAttribute(
+      'data-open',
+      'true',
+    );
   });
 
   it('shows the collapsed-only task list affordance after search and expands the sidebar', () => {

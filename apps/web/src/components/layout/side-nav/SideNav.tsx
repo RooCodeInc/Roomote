@@ -1,6 +1,6 @@
 'use client';
 
-import { type ComponentProps, useMemo } from 'react';
+import { type ComponentProps, useMemo, useState } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
@@ -17,6 +17,7 @@ import {
   Search,
   PanelLeftClose,
   PanelLeftOpen,
+  Plus,
   VectorSquare,
   SquareDashed,
 } from '@/components/system';
@@ -39,6 +40,7 @@ import { useLiveTaskStatus, useTaskPins } from '@/hooks/tasks';
 import { useTRPC } from '@/trpc/client';
 import { sortTasksByLastActive } from '@/lib/task-order';
 import { cn } from '@/lib/utils';
+import { NewTaskDialog } from '@/components/tasks/NewTaskDialog';
 
 import { getVisiblePrimaryNavItems } from '../navigation-items';
 import { SideNavItem } from './SideNavItem';
@@ -82,6 +84,7 @@ export const SideNav = () => {
   const isSideNavExpanded = hasHydrated && persistedIsSideNavExpanded;
   const trpc = useTRPC();
   const { recentTaskIds } = useRecentTasks();
+  const [isNewTaskDialogOpen, setIsNewTaskDialogOpen] = useState(false);
   const { pinnedTaskIds, setTaskPinned, isTaskPinMutationPending } =
     useTaskPins();
 
@@ -273,6 +276,17 @@ export const SideNav = () => {
 
       {/* Nav items — pinned to top */}
       <div className="mt-4 flex w-full shrink-0 flex-col gap-1">
+        <SideNavItem
+          icon={Plus}
+          label="New Session"
+          tooltip="New Session"
+          description="Start a session from anywhere"
+          expanded={isSideNavExpanded}
+          active={false}
+          aria-label="New Session"
+          onClick={() => setIsNewTaskDialogOpen(true)}
+        />
+
         {visibleNavItems.map(
           ({ icon, href, label, description, matchExact, matchPaths }) => (
             <SideNavItem
@@ -412,6 +426,10 @@ export const SideNav = () => {
           <UserMenu expanded={isSideNavExpanded} />
         </div>
       </div>
+      <NewTaskDialog
+        open={isNewTaskDialogOpen}
+        onOpenChange={setIsNewTaskDialogOpen}
+      />
     </nav>
   );
 };
