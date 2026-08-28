@@ -992,6 +992,55 @@ describe('enqueueTask snapshot resume', () => {
     expect(resumeRuns).toHaveLength(1);
   });
 
+  it('allows retrying a resume that was canceled before queue publication', async () => {
+    const userId = await createUser();
+    const freshRun = await launchFresh({
+      task: standardTaskInput({ computeProvider: 'modal' }),
+      initiator: { kind: 'user', userId },
+      workflow: 'standard',
+      surface: 'web',
+      trigger: 'manual',
+    });
+    const createResume = () =>
+      enqueueTask(
+        {
+          task: {
+            type: TaskPayloadKind.SnapshotResume,
+            payload: {
+              repo: 'acme/widgets',
+              sourceSnapshotId: 'snap-retry',
+              sourceRunId: freshRun.id,
+              launchIdempotencyKey: `snapshot-resume-retry:${freshRun.id}`,
+            },
+          } as SnapshotResumeTask,
+          actingUserId: userId,
+        },
+        { enqueue: false },
+      );
+
+    const canceledResume = await createResume();
+    await db
+      .update(taskRuns)
+      .set({
+        status: RunStatus.Canceled,
+        canceledAt: new Date(),
+        error: 'Failed to enqueue task run',
+      })
+      .where(eq(taskRuns.id, canceledResume.id));
+
+    const retryResume = await createResume();
+
+    expect(retryResume.id).not.toBe(canceledResume.id);
+    expect(retryResume.status).toBe(RunStatus.Pending);
+    const resumeRuns = await db.query.taskRuns.findMany({
+      where: and(
+        eq(taskRuns.sourceRunId, freshRun.id),
+        eq(taskRuns.kind, 'resume'),
+      ),
+    });
+    expect(resumeRuns).toHaveLength(2);
+  });
+
   it('attaches a resume run to the source task without re-attribution', async () => {
     const initiatorUserId = await createUser();
     const resumerUserId = await createUser();

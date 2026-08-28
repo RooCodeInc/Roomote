@@ -3,6 +3,7 @@ import {
   and,
   db,
   eq,
+  isNull,
   taskPullRequests,
   taskRuns,
   type TaskPullRequest,
@@ -19,9 +20,97 @@ import {
   REVIEW_STATUS_START_MARKER,
   REVIEW_SUMMARY_MARKER,
 } from '@roomote/cloud-agents/server';
-import { getInstallationOctokit, updateCheckRun } from '@roomote/github';
+import {
+  getCheckRun,
+  getInstallationOctokit,
+  updateCheckRun,
+} from '@roomote/github';
+import { acquireRedisLock } from '@roomote/redis';
 
 export const GITHUB_PR_REVIEW_CHECK_NAME = 'Roomote code review';
+const GITHUB_PR_REVIEW_LIFECYCLE_LOCK_TTL_SECONDS = 120;
+const GITHUB_PR_REVIEW_LIFECYCLE_LOCK_RENEW_MS =
+  (GITHUB_PR_REVIEW_LIFECYCLE_LOCK_TTL_SECONDS * 1_000) / 3;
+
+export class GithubPrReviewLifecycleLockLostError extends Error {
+  constructor() {
+    super('GitHub PR review lifecycle lock ownership was lost.');
+    this.name = 'GithubPrReviewLifecycleLockLostError';
+  }
+}
+
+type GithubPrReviewLifecycleLockHandle = (() => Promise<void>) & {
+  signal: AbortSignal;
+};
+
+export async function acquireGithubPrReviewLifecycleLock(
+  repository: string,
+  prNumber: number,
+) {
+  const key = `pr-review-synchronize:${repository}:${prNumber}`;
+
+  for (let attempt = 0; attempt < 100; attempt++) {
+    const release = await acquireRedisLock(key, {
+      ttlSeconds: GITHUB_PR_REVIEW_LIFECYCLE_LOCK_TTL_SECONDS,
+    });
+
+    if (release) {
+      const ownership = new AbortController();
+      let released = false;
+      let renewalPending = false;
+      let ownershipDeadlineTimer: ReturnType<typeof setTimeout>;
+      const abortOwnership = () => {
+        if (released || ownership.signal.aborted) return;
+        ownership.abort(new GithubPrReviewLifecycleLockLostError());
+        clearInterval(renewalTimer);
+        clearTimeout(ownershipDeadlineTimer);
+        console.error(
+          `[githubPrReviewCheck] Lifecycle lock ownership was lost for ${key}`,
+        );
+      };
+      const extendOwnershipDeadline = () => {
+        clearTimeout(ownershipDeadlineTimer);
+        ownershipDeadlineTimer = setTimeout(
+          abortOwnership,
+          GITHUB_PR_REVIEW_LIFECYCLE_LOCK_TTL_SECONDS * 1_000,
+        );
+        ownershipDeadlineTimer.unref();
+      };
+      const renewalTimer = setInterval(() => {
+        if (renewalPending) return;
+        renewalPending = true;
+        void release
+          .renewDetailed(GITHUB_PR_REVIEW_LIFECYCLE_LOCK_TTL_SECONDS)
+          .then((result) => {
+            if (result === 'renewed') {
+              extendOwnershipDeadline();
+            } else {
+              abortOwnership();
+            }
+          })
+          .catch(abortOwnership)
+          .finally(() => {
+            renewalPending = false;
+          });
+      }, GITHUB_PR_REVIEW_LIFECYCLE_LOCK_RENEW_MS);
+      renewalTimer.unref();
+      extendOwnershipDeadline();
+
+      const releaseLifecycleLock = (async () => {
+        released = true;
+        clearInterval(renewalTimer);
+        clearTimeout(ownershipDeadlineTimer);
+        await release();
+      }) as GithubPrReviewLifecycleLockHandle;
+      releaseLifecycleLock.signal = ownership.signal;
+      return releaseLifecycleLock;
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+
+  return null;
+}
 
 function splitRepository(repository: string) {
   const [owner, repo] = repository.split('/');
@@ -130,6 +219,7 @@ async function completeCheckRunWithResult(input: {
     summary: string;
   };
   taskUrl: string;
+  signal?: AbortSignal;
 }): Promise<void> {
   await input.octokit.rest.checks.update({
     ...input.repository,
@@ -142,6 +232,7 @@ async function completeCheckRunWithResult(input: {
       title: input.result.title,
       summary: `${input.result.summary} [Open the task](${input.taskUrl}).`,
     },
+    ...(input.signal ? { request: { signal: input.signal } } : {}),
   });
 }
 
@@ -153,6 +244,7 @@ export async function publishGithubPrReviewCheck(input: {
   taskId: string;
   runId: number;
   status?: 'queued' | 'in_progress';
+  signal?: AbortSignal;
 }): Promise<void> {
   const repository = splitRepository(input.repository);
   if (!repository) {
@@ -160,12 +252,14 @@ export async function publishGithubPrReviewCheck(input: {
   }
 
   try {
+    input.signal?.throwIfAborted();
     const existingLinkage = await findGithubPrLinkage(input);
     const octokit = await getInstallationOctokit({
       installationId: input.installationId,
     });
     const taskUrl = getReviewTaskUrl(input.taskId);
     const status = input.status ?? 'queued';
+    input.signal?.throwIfAborted();
     const { data: checkRun } = await octokit.rest.checks.create({
       ...repository,
       name: GITHUB_PR_REVIEW_CHECK_NAME,
@@ -186,9 +280,11 @@ export async function publishGithubPrReviewCheck(input: {
             ? `Roomote is reviewing this commit. [Open the task](${taskUrl}).`
             : `Roomote is queued to review this commit. [Open the task](${taskUrl}).`,
       },
+      ...(input.signal ? { request: { signal: input.signal } } : {}),
     });
 
-    await db
+    input.signal?.throwIfAborted();
+    const claimedLinkage = await db
       .update(taskPullRequests)
       .set({ githubCheckRunId: checkRun.id, updatedAt: new Date() })
       .where(
@@ -197,9 +293,24 @@ export async function publishGithubPrReviewCheck(input: {
           eq(taskPullRequests.sourceControlProvider, 'github'),
           eq(taskPullRequests.repository, input.repository),
           eq(taskPullRequests.prNumber, input.prNumber),
+          existingLinkage?.githubCheckRunId
+            ? eq(
+                taskPullRequests.githubCheckRunId,
+                existingLinkage.githubCheckRunId,
+              )
+            : isNull(taskPullRequests.githubCheckRunId),
         ),
-      );
+      )
+      .returning({ id: taskPullRequests.id });
 
+    if (claimedLinkage.length === 0) {
+      console.log(
+        `[githubPrReviewCheck] Skipping stale check ${checkRun.id} for run ${input.runId}; linkage changed during publication`,
+      );
+      return;
+    }
+
+    input.signal?.throwIfAborted();
     try {
       const currentLinkage = await findGithubPrLinkage(input);
       const run = await db.query.taskRuns.findFirst({
@@ -220,9 +331,11 @@ export async function publishGithubPrReviewCheck(input: {
         (run?.status === RunStatus.Completed || canCompleteFromSummary)
       ) {
         try {
+          input.signal?.throwIfAborted();
           const { data: comment } = await octokit.rest.issues.getComment({
             ...repository,
             comment_id: currentLinkage.githubReviewCommentId,
+            ...(input.signal ? { request: { signal: input.signal } } : {}),
           });
           // Only trust a summary authored during this run's lifetime. The
           // shared comment can still hold a previous same-SHA cycle's
@@ -268,8 +381,10 @@ export async function publishGithubPrReviewCheck(input: {
           checkRunId: checkRun.id,
           result,
           taskUrl,
+          signal: input.signal,
         });
       } else if (status === 'queued' && run?.startedAt) {
+        input.signal?.throwIfAborted();
         await octokit.rest.checks.update({
           ...repository,
           check_run_id: checkRun.id,
@@ -280,6 +395,7 @@ export async function publishGithubPrReviewCheck(input: {
             title: 'Roomote review in progress',
             summary: `Roomote is reviewing this commit. [Open the task](${taskUrl}).`,
           },
+          ...(input.signal ? { request: { signal: input.signal } } : {}),
         });
       }
     } catch (error) {
@@ -294,6 +410,7 @@ export async function publishGithubPrReviewCheck(input: {
       existingLinkage?.githubCheckRunId &&
       existingLinkage.githubCheckRunId !== checkRun.id
     ) {
+      input.signal?.throwIfAborted();
       await octokit.rest.checks.update({
         ...repository,
         check_run_id: existingLinkage.githubCheckRunId,
@@ -305,6 +422,7 @@ export async function publishGithubPrReviewCheck(input: {
           summary:
             'Roomote started a new review for a newer pull request head.',
         },
+        ...(input.signal ? { request: { signal: input.signal } } : {}),
       });
     }
   } catch (error) {
@@ -314,6 +432,156 @@ export async function publishGithubPrReviewCheck(input: {
       }`,
     );
   }
+}
+
+export async function transferGithubPrReviewCheckToRun(input: {
+  installationId: number;
+  repository: string;
+  prNumber: number;
+  taskId: string;
+  previousRunId: number;
+  newRunId: number;
+  signal?: AbortSignal;
+}): Promise<void> {
+  const repository = splitRepository(input.repository);
+  if (!repository) return;
+
+  input.signal?.throwIfAborted();
+  const linkage = await findGithubPrLinkage(input);
+  if (!linkage?.githubCheckRunId) return;
+
+  const octokit = await getInstallationOctokit({
+    installationId: input.installationId,
+  });
+  const { data: currentCheck } = await octokit.rest.checks.get({
+    ...repository,
+    check_run_id: linkage.githubCheckRunId,
+    ...(input.signal ? { request: { signal: input.signal } } : {}),
+  });
+  input.signal?.throwIfAborted();
+
+  const owningRunId = Number(
+    /^roomote-review:(\d+)$/.exec(currentCheck.external_id ?? '')?.[1],
+  );
+  if (owningRunId === input.newRunId) return;
+  if (owningRunId !== input.previousRunId) {
+    console.log(
+      `[githubPrReviewCheck] Skipping transfer from run ${input.previousRunId} to ${input.newRunId}; check ${linkage.githubCheckRunId} belongs to ${Number.isFinite(owningRunId) ? `run ${owningRunId}` : 'an unknown run'}`,
+    );
+    return;
+  }
+
+  const taskUrl = getReviewTaskUrl(input.taskId);
+  if (currentCheck.status !== 'completed') {
+    await octokit.rest.checks.update({
+      ...repository,
+      check_run_id: linkage.githubCheckRunId,
+      external_id: `roomote-review:${input.newRunId}`,
+      details_url: taskUrl,
+      ...(input.signal ? { request: { signal: input.signal } } : {}),
+    });
+    return;
+  }
+
+  input.signal?.throwIfAborted();
+  const { data: replacementCheck } = await octokit.rest.checks.create({
+    ...repository,
+    name: GITHUB_PR_REVIEW_CHECK_NAME,
+    head_sha: currentCheck.head_sha,
+    status: 'in_progress',
+    started_at: new Date().toISOString(),
+    details_url: taskUrl,
+    external_id: `roomote-review:${input.newRunId}`,
+    output: {
+      title: 'Roomote review in progress',
+      summary: `Roomote is reviewing this commit. [Open the task](${taskUrl}).`,
+    },
+    ...(input.signal ? { request: { signal: input.signal } } : {}),
+  });
+
+  input.signal?.throwIfAborted();
+  const claimedLinkage = await db
+    .update(taskPullRequests)
+    .set({ githubCheckRunId: replacementCheck.id, updatedAt: new Date() })
+    .where(
+      and(
+        eq(taskPullRequests.id, linkage.id),
+        eq(taskPullRequests.githubCheckRunId, linkage.githubCheckRunId),
+      ),
+    )
+    .returning({ id: taskPullRequests.id });
+
+  if (claimedLinkage.length === 0) {
+    console.log(
+      `[githubPrReviewCheck] Skipping replacement check ${replacementCheck.id}; linkage changed during transfer to run ${input.newRunId}`,
+    );
+  }
+}
+
+export async function reconcileGithubPrReviewCheckForRun(input: {
+  installationId: number;
+  repository: string;
+  prNumber: number;
+  taskId: string;
+  runId: number;
+  signal?: AbortSignal;
+}): Promise<void> {
+  const run = await db.query.taskRuns.findFirst({
+    where: eq(taskRuns.id, input.runId),
+    columns: { status: true },
+  });
+  if (
+    !run ||
+    (run.status !== RunStatus.Completed &&
+      run.status !== RunStatus.Failed &&
+      run.status !== RunStatus.Canceled)
+  ) {
+    return;
+  }
+
+  const repository = splitRepository(input.repository);
+  if (!repository) return;
+  const linkage = await findGithubPrLinkage(input);
+  if (!linkage?.githubCheckRunId) return;
+
+  input.signal?.throwIfAborted();
+  const octokit = await getInstallationOctokit({
+    installationId: input.installationId,
+  });
+  const { data: checkRun } = await octokit.rest.checks.get({
+    ...repository,
+    check_run_id: linkage.githubCheckRunId,
+    ...(input.signal ? { request: { signal: input.signal } } : {}),
+  });
+  const owningRunId = Number(
+    /^roomote-review:(\d+)$/.exec(checkRun.external_id ?? '')?.[1],
+  );
+  if (checkRun.status === 'completed' || owningRunId !== input.runId) return;
+
+  let reviewSummaryBody: string | undefined;
+  if (run.status === RunStatus.Completed && linkage.githubReviewCommentId) {
+    const { data: comment } = await octokit.rest.issues.getComment({
+      ...repository,
+      comment_id: linkage.githubReviewCommentId,
+      ...(input.signal ? { request: { signal: input.signal } } : {}),
+    });
+    reviewSummaryBody = comment.body ?? undefined;
+  }
+
+  const result = getGithubPrReviewCheckResult({
+    runStatus: run.status,
+    reviewSummaryBody,
+    safetyNetFinalized: false,
+    expectedHeadSha: checkRun.head_sha,
+  });
+  await completeCheckRunWithResult({
+    octokit,
+    repository,
+    checkRunId: linkage.githubCheckRunId,
+    result,
+    taskUrl: getReviewTaskUrl(input.taskId),
+    signal: input.signal,
+  });
 }
 
 export async function completeGithubPrReviewCheckFromSummary(input: {
@@ -431,6 +699,7 @@ export async function completeGithubPrReviewCheckFromSummary(input: {
 
 export async function markGithubPrReviewCheckInProgress(input: {
   taskId: string;
+  runId: number;
   gitHubToken: string;
 }): Promise<void> {
   try {
@@ -445,6 +714,17 @@ export async function markGithubPrReviewCheckInProgress(input: {
     }
 
     const taskUrl = getReviewTaskUrl(input.taskId);
+    const { data: checkRun } = await getCheckRun(input.gitHubToken, {
+      ...repository,
+      check_run_id: linkage.githubCheckRunId,
+    });
+    const owningRunId = Number(
+      /^roomote-review:(\d+)$/.exec(checkRun.external_id ?? '')?.[1],
+    );
+    if (checkRun.status === 'completed' || owningRunId !== input.runId) {
+      return;
+    }
+
     await updateCheckRun(input.gitHubToken, {
       ...repository,
       check_run_id: linkage.githubCheckRunId,

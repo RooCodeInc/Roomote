@@ -48,4 +48,33 @@ describe('task run launch idempotency', () => {
       }),
     ).rejects.toMatchObject({ cause: { code: '23505' } });
   });
+
+  it('allows reusing a launch key after the previous run was canceled', async () => {
+    const firstTask = await createTask();
+    const secondTask = await createTask();
+    const payload = {
+      repo: 'test/repo',
+      description: 'retry canceled launch',
+      launchIdempotencyKey: 'retry-canceled:test-user:review-fallback',
+    } as CreateTaskRun['payload'];
+
+    await db.insert(taskRuns).values({
+      taskId: firstTask.id,
+      kind: 'fresh',
+      payloadKind: TaskPayloadKind.StandardTask,
+      payload,
+      status: RunStatus.Canceled,
+      canceledAt: new Date(),
+    });
+
+    await expect(
+      db.insert(taskRuns).values({
+        taskId: secondTask.id,
+        kind: 'fresh',
+        payloadKind: TaskPayloadKind.StandardTask,
+        payload,
+        status: RunStatus.Pending,
+      }),
+    ).resolves.toBeDefined();
+  });
 });

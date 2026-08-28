@@ -3,7 +3,7 @@ import { TaskPayloadKind } from '@roomote/types';
 import type { WebhookPullRequestSynchronize } from '../types';
 
 const {
-  mockAcquireRedisLock,
+  mockAcquireGithubPrReviewLifecycleLock,
   mockEnqueueActivePrReviewFollowUp,
   mockPublishGithubPrReviewCheck,
   mockEnqueueTask,
@@ -16,22 +16,20 @@ const {
   mockUpdateSet,
   mockUpdateWhere,
 } = vi.hoisted(() => ({
-  mockAcquireRedisLock: vi.fn(),
+  mockAcquireGithubPrReviewLifecycleLock: vi.fn(),
   mockEnqueueActivePrReviewFollowUp: vi.fn(),
   mockPublishGithubPrReviewCheck: vi.fn(),
   mockEnqueueTask: vi.fn(),
   mockGetGitHubAutomationTargets: vi.fn(),
   mockGetCurrentGitHubPrHeadSha: vi.fn(),
   mockFindFirstLockedRun: vi.fn(),
-  mockReleaseLock: vi.fn().mockResolvedValue(undefined),
+  mockReleaseLock: Object.assign(vi.fn().mockResolvedValue(undefined), {
+    signal: new AbortController().signal,
+  }),
   mockSelect: vi.fn(),
   mockUpdate: vi.fn(),
   mockUpdateSet: vi.fn(),
   mockUpdateWhere: vi.fn(),
-}));
-
-vi.mock('@roomote/redis', () => ({
-  acquireRedisLock: (...args: unknown[]) => mockAcquireRedisLock(...args),
 }));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
@@ -44,6 +42,8 @@ vi.mock('../currentPrHead', () => ({
 }));
 
 vi.mock('@roomote/sdk/server', () => ({
+  acquireGithubPrReviewLifecycleLock: (...args: unknown[]) =>
+    mockAcquireGithubPrReviewLifecycleLock(...args),
   enqueueActivePrReviewFollowUp: (...args: unknown[]) =>
     mockEnqueueActivePrReviewFollowUp(...args),
   publishGithubPrReviewCheck: (...args: unknown[]) =>
@@ -126,7 +126,7 @@ const payload = {
 describe('handlePrSynchronize', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockAcquireRedisLock.mockResolvedValue(mockReleaseLock);
+    mockAcquireGithubPrReviewLifecycleLock.mockResolvedValue(mockReleaseLock);
     mockEnqueueActivePrReviewFollowUp.mockResolvedValue(undefined);
     mockUpdate.mockReturnValue({ set: mockUpdateSet });
     mockUpdateSet.mockReturnValue({ where: mockUpdateWhere });
@@ -242,6 +242,7 @@ describe('handlePrSynchronize', () => {
 
     expect(mockEnqueueActivePrReviewFollowUp).toHaveBeenCalledWith(
       expect.objectContaining({
+        installationId: 1,
         runId: 100,
         taskId: 'task-100',
         sandboxServerUrl: 'http://sandbox.test',
@@ -277,6 +278,7 @@ describe('handlePrSynchronize', () => {
       taskId: 'task-100',
       runId: 100,
       status: 'in_progress',
+      signal: mockReleaseLock.signal,
     });
     expect(mockReleaseLock).toHaveBeenCalledOnce();
   });
@@ -311,6 +313,7 @@ describe('handlePrSynchronize', () => {
 
     expect(mockEnqueueActivePrReviewFollowUp).toHaveBeenCalledWith(
       expect.objectContaining({
+        installationId: 1,
         runId: 100,
         taskId: 'task-100',
         eventHeadSha: 'new-head',
@@ -404,6 +407,7 @@ describe('handlePrSynchronize', () => {
       headSha: 'new-head',
       taskId: 'task-100',
       runId: 200,
+      signal: mockReleaseLock.signal,
     });
     expect(mockReleaseLock).toHaveBeenCalledOnce();
   });
@@ -415,7 +419,7 @@ describe('handlePrSynchronize', () => {
       'Could not resolve the live head for owner/repo#42.',
     );
 
-    expect(mockAcquireRedisLock).toHaveBeenCalledOnce();
+    expect(mockAcquireGithubPrReviewLifecycleLock).toHaveBeenCalledOnce();
     expect(mockReleaseLock).toHaveBeenCalledOnce();
     expect(mockEnqueueTask).not.toHaveBeenCalled();
   });

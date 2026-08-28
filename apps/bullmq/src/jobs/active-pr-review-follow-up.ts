@@ -3,17 +3,25 @@ import { Job } from 'bullmq';
 import {
   buildGitHubPrSynchronizeFollowUpMessage,
   enqueueTask,
+  SnapshotResumeAlreadyExistsError,
 } from '@roomote/cloud-agents/server';
 import {
+  and,
   db,
   eq,
   getTaskGoalForRun,
+  isNull,
+  repositories,
+  sql,
   taskPullRequests,
   taskRuns,
 } from '@roomote/db/server';
 import {
+  acquireGithubPrReviewLifecycleLock,
   activePrReviewFollowUpRequestSchema,
+  reconcileGithubPrReviewCheckForRun,
   type ActivePrReviewFollowUpRequest,
+  transferGithubPrReviewCheckToRun,
   withSandboxServerRpcClient,
 } from '@roomote/sdk/server';
 import {
@@ -45,6 +53,84 @@ async function updateLinkedHead(
     .update(taskPullRequests)
     .set({ prSha: headSha })
     .where(eq(taskPullRequests.taskId, taskId));
+}
+
+async function launchFallbackWithCheckTransfer(
+  data: ActivePrReviewFollowUpRequest,
+  launch: (launchIdempotencyKey: string) => Promise<{ id: number }>,
+): Promise<void> {
+  const releaseLifecycleLock = await acquireGithubPrReviewLifecycleLock(
+    data.repository,
+    data.prNumber,
+  );
+  if (!releaseLifecycleLock) {
+    throw new Error(
+      `Timed out serializing PR review fallback for ${data.repository}#${data.prNumber}`,
+    );
+  }
+
+  try {
+    releaseLifecycleLock.signal.throwIfAborted();
+    const repositoryId = data.fallback.prLinkage.repositoryId;
+    const installationId =
+      data.installationId ??
+      (repositoryId
+        ? (
+            await db.query.repositories.findFirst({
+              where: eq(repositories.id, repositoryId),
+              columns: { id: true },
+              with: {
+                githubInstallation: { columns: { installationId: true } },
+              },
+            })
+          )?.githubInstallation?.installationId
+        : undefined);
+    if (!installationId) {
+      throw new Error(
+        `Could not resolve GitHub installation for PR review fallback ${data.repository}#${data.prNumber}`,
+      );
+    }
+
+    const launchIdempotencyKey = [
+      'github-pr-review-fallback',
+      data.taskId,
+      data.runId,
+      data.eventHeadSha,
+    ].join(':');
+    const existingFallback = await db.query.taskRuns.findFirst({
+      where: and(
+        eq(taskRuns.taskId, data.taskId),
+        sql`${taskRuns.payload}->>'launchIdempotencyKey' = ${launchIdempotencyKey}`,
+        isNull(taskRuns.canceledAt),
+      ),
+      columns: { id: true },
+    });
+    const fallbackRun =
+      existingFallback ?? (await launch(launchIdempotencyKey));
+    releaseLifecycleLock.signal.throwIfAborted();
+
+    await transferGithubPrReviewCheckToRun({
+      installationId,
+      repository: data.repository,
+      prNumber: data.prNumber,
+      taskId: data.taskId,
+      previousRunId: data.runId,
+      newRunId: fallbackRun.id,
+      signal: releaseLifecycleLock.signal,
+    });
+    await reconcileGithubPrReviewCheckForRun({
+      installationId,
+      repository: data.repository,
+      prNumber: data.prNumber,
+      taskId: data.taskId,
+      runId: fallbackRun.id,
+      signal: releaseLifecycleLock.signal,
+    });
+
+    await updateLinkedHead(data.taskId, data.eventHeadSha);
+  } finally {
+    await releaseLifecycleLock();
+  }
 }
 
 export const activePrReviewFollowUpJob = async (
@@ -120,30 +206,49 @@ export const activePrReviewFollowUpJob = async (
       resumePromptClientMessageId: buildClientMessageId(data),
     } satisfies TaskPayload<typeof TaskPayloadKind.SnapshotResume>;
 
-    await enqueueTask({
-      task: {
-        type: TaskPayloadKind.SnapshotResume,
-        sourceSnapshotId: run.snapshotId,
-        sourceRunId: run.id,
-        payload: resumePayload,
+    await launchFallbackWithCheckTransfer(
+      data,
+      async (launchIdempotencyKey) => {
+        try {
+          return await enqueueTask({
+            task: {
+              type: TaskPayloadKind.SnapshotResume,
+              sourceSnapshotId: run.snapshotId!,
+              sourceRunId: run.id,
+              payload: { ...resumePayload, launchIdempotencyKey },
+            },
+            actingUserId: run.actingUserId,
+          });
+        } catch (error) {
+          if (error instanceof SnapshotResumeAlreadyExistsError) {
+            return { id: error.existingRunId };
+          }
+          throw error;
+        }
       },
-      actingUserId: run.actingUserId,
-    });
-    await updateLinkedHead(run.taskId, data.eventHeadSha);
+    );
     return;
   }
 
-  await enqueueTask({
-    existingTaskId: run.taskId,
-    task: data.fallback.task,
-    initiator: {
-      kind: 'automation',
-      key: 'review_code',
-      actor: data.fallback.initiatorActor,
-    },
-    workflow: 'pr_review',
-    surface: 'github',
-    trigger: 'webhook',
-    prLinkage: data.fallback.prLinkage,
-  });
+  await launchFallbackWithCheckTransfer(data, (launchIdempotencyKey) =>
+    enqueueTask({
+      existingTaskId: run.taskId,
+      task: {
+        ...data.fallback.task,
+        payload: {
+          ...data.fallback.task.payload,
+          launchIdempotencyKey,
+        },
+      },
+      initiator: {
+        kind: 'automation',
+        key: 'review_code',
+        actor: data.fallback.initiatorActor,
+      },
+      workflow: 'pr_review',
+      surface: 'github',
+      trigger: 'webhook',
+      prLinkage: data.fallback.prLinkage,
+    }),
+  );
 };
