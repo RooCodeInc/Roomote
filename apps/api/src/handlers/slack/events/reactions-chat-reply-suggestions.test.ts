@@ -219,6 +219,37 @@ describe('chat reply suggestion reactions', () => {
     expect(mocks.postStartedMessage).not.toHaveBeenCalled();
   });
 
+  it('keeps a finalized launch when tracked thread bookkeeping fails', async () => {
+    updateBuilder.where.mockRejectedValueOnce(new Error('tracking failed'));
+    const slack = {
+      postMessage: vi.fn(async () => 'seeded-thread-ts'),
+      deleteMessage: vi.fn(async () => undefined),
+      getMessageMetadata: vi.fn(),
+    };
+
+    await handleReactionAddedEvent({
+      context: {
+        teamId: 'T1',
+        slackInstallation: { botUserId: 'UROOMOTE', teamId: 'T1' },
+        slack,
+      } as never,
+      event: {
+        type: 'reaction_added',
+        user: 'U1',
+        reaction: 'thumbsup',
+        item: { type: 'message', channel: 'C1', ts: 'card-ts' },
+        event_ts: 'event-ts',
+      },
+    });
+
+    expect(mocks.finalizeWorkItemLaunched).toHaveBeenCalledWith(
+      expect.anything(),
+      { id: 'work-item-1', taskId: 'task-new', claimedAt },
+    );
+    expect(mocks.releaseWorkItemClaim).not.toHaveBeenCalled();
+    expect(slack.deleteMessage).not.toHaveBeenCalled();
+  });
+
   it('starts a Fast session when Fast is the user default', async () => {
     mocks.lookupSlackUserMapping.mockResolvedValue({
       hasInactiveMapping: false,

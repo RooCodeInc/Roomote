@@ -142,36 +142,20 @@ function getLaunchableSuggestionType(
 
 /**
  * Finalize a successful launch via the shared work_items helper (`launching` →
- * `launched` with the task link, guarded so a race is idempotent) and, when it
- * wins, record the seeded thread on the tracked suggestion card. Returns false
- * when another launcher already finalized the work item.
+ * `launched` with the task link, guarded so a race is idempotent). Returns
+ * false when another launcher already finalized the work item.
  */
-async function markWorkItemLaunched(params: {
+async function finalizeSuggestionLaunch(params: {
   workItemId: string;
-  trackedMessageId: string;
   taskId: string | null;
   /** The claiming launcher's fencing token (claimed row's `launchClaimedAt`). */
   claimedAt: Date;
-  launchedThreadTs?: string;
 }): Promise<boolean> {
-  const finalized = await finalizeWorkItemLaunched(db, {
+  return finalizeWorkItemLaunched(db, {
     id: params.workItemId,
     taskId: params.taskId,
     claimedAt: params.claimedAt,
   });
-
-  if (!finalized) {
-    return false;
-  }
-
-  if (params.launchedThreadTs) {
-    await db
-      .update(trackedMessages)
-      .set({ threadTs: params.launchedThreadTs, updatedAt: new Date() })
-      .where(eq(trackedMessages.id, params.trackedMessageId));
-  }
-
-  return true;
 }
 
 const REMOVED_SLACK_ACCOUNT_LAUNCH_FAILURE =
@@ -612,12 +596,10 @@ async function launchTaskSuggestionTaskFromReaction({
         };
       },
       finalize: (taskId) =>
-        markWorkItemLaunched({
+        finalizeSuggestionLaunch({
           workItemId,
-          trackedMessageId: suggestionCard.id,
           taskId,
           claimedAt,
-          launchedThreadTs: seededThreadTs,
         }),
     });
 
@@ -655,6 +637,15 @@ async function launchTaskSuggestionTaskFromReaction({
     }
 
     taskRun = { id: launchResult.runId, taskId: launchResult.taskId };
+    await db
+      .update(trackedMessages)
+      .set({ threadTs: launchThreadTs, updatedAt: new Date() })
+      .where(eq(trackedMessages.id, suggestionCard.id))
+      .catch((error) => {
+        apiLogger.warn(
+          `${logPrefix} failed to record launched suggestion thread: ${formatErrorForLog(error)}`,
+        );
+      });
 
     if (!usesRouterLaunch && directWorkspaceName) {
       await postTaskSuggestionStartedMessage({
