@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { toast } from 'sonner';
 
 import type { ReasoningEffort } from '@roomote/types';
 
@@ -22,6 +23,7 @@ import {
   usePromptInputAttachments,
 } from '@/components/ai-elements';
 import { BasicTooltip } from '@/components/system';
+import { useTRPCClient } from '@/trpc/client';
 
 import { AttachmentsDisplay } from '../../task/[taskId]/prompt-input/AttachmentsDisplay';
 import { SessionModelSwitcher } from './SessionModelSwitcher';
@@ -51,6 +53,7 @@ function SessionSubmit({
 /** Session reply composer mirroring the task composer's structure: action
  * menu and model switcher on the left, voice and submit on the right. */
 export function SessionPromptInput({
+  sessionId,
   isBusy,
   onSend,
   initialModel = null,
@@ -58,6 +61,7 @@ export function SessionPromptInput({
   defaultModelId = null,
   defaultReasoningEffort = null,
 }: {
+  sessionId: string;
   isBusy: boolean;
   onSend: (submission: SessionPromptSubmission) => Promise<boolean>;
   initialModel?: string | null;
@@ -65,11 +69,14 @@ export function SessionPromptInput({
   defaultModelId?: string | null;
   defaultReasoningEffort?: ReasoningEffort | null;
 }) {
+  const trpcClient = useTRPCClient();
   const [prompt, setPrompt] = useState('');
   const [resetKey, setResetKey] = useState(0);
   const [model, setModel] = useState(initialModel ?? '');
   const [reasoningEffort, setReasoningEffort] =
     useState<ReasoningEffort | null>(initialReasoningEffort);
+  const [isUpdatingModelSelection, setIsUpdatingModelSelection] =
+    useState(false);
   const voiceDictation = useVoiceDictation({
     onTranscript: (text) => setPrompt(text),
     getPrefix: () => prompt,
@@ -92,6 +99,48 @@ export function SessionPromptInput({
       setResetKey((previous) => previous + 1);
     }
   };
+
+  const updateModelSelection = async (
+    next: { model?: string | null; reasoningEffort?: ReasoningEffort | null },
+    rollback: () => void,
+  ) => {
+    setIsUpdatingModelSelection(true);
+    try {
+      await trpcClient.fastSessions.updateModelSelection.mutate({
+        sessionId,
+        ...next,
+      });
+    } catch (error) {
+      rollback();
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : 'Failed to update the model settings',
+      );
+    } finally {
+      setIsUpdatingModelSelection(false);
+    }
+  };
+
+  const handleModelChange = (nextModel: string) => {
+    const previousModel = model;
+    setModel(nextModel);
+    void updateModelSelection({ model: nextModel || null }, () =>
+      setModel(previousModel),
+    );
+  };
+
+  const handleReasoningEffortChange = (
+    nextReasoningEffort: ReasoningEffort | null,
+  ) => {
+    const previousReasoningEffort = reasoningEffort;
+    setReasoningEffort(nextReasoningEffort);
+    void updateModelSelection({ reasoningEffort: nextReasoningEffort }, () =>
+      setReasoningEffort(previousReasoningEffort),
+    );
+  };
+
+  const controlsDisabled = isBusy || isUpdatingModelSelection;
 
   return (
     <div className="mx-auto w-full max-w-4xl">
@@ -126,12 +175,12 @@ export function SessionPromptInput({
             </PromptInputActionMenu>
             <SessionModelSwitcher
               model={model}
-              onModelChange={setModel}
+              onModelChange={handleModelChange}
               reasoningEffort={reasoningEffort}
-              onReasoningEffortChange={setReasoningEffort}
+              onReasoningEffortChange={handleReasoningEffortChange}
               defaultModelId={defaultModelId}
               defaultReasoningEffort={defaultReasoningEffort}
-              disabled={isBusy}
+              disabled={controlsDisabled}
             />
           </PromptInputTools>
           <div className="flex items-center gap-2">
@@ -141,7 +190,7 @@ export function SessionPromptInput({
               onClick={voiceDictation.toggle}
               disabled={isBusy}
             />
-            <SessionSubmit sending={isBusy} prompt={prompt} />
+            <SessionSubmit sending={controlsDisabled} prompt={prompt} />
           </div>
         </PromptInputFooter>
       </PromptInputRoot>

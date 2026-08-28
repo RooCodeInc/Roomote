@@ -307,6 +307,7 @@ export function FastSessionTranscript({
       {canReply ? (
         <div className="mx-auto w-full shrink-0 overflow-clip rounded-t-md rounded-b-3xl border-2 border-background bg-card transition-colors @[56rem]:rounded-t-lg">
           <SessionPromptInput
+            sessionId={sessionId}
             isBusy={isSending}
             onSend={sendReply}
             initialModel={sessionModel}

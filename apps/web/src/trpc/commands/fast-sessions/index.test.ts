@@ -2,6 +2,10 @@ const mocks = vi.hoisted(() => ({
   after: vi.fn(),
   acquireTurnLock: vi.fn(),
   answerQuestion: vi.fn(),
+  dbUpdate: vi.fn(),
+  dbSet: vi.fn(),
+  dbWhere: vi.fn(),
+  findAccessibleFastSession: vi.fn(),
 }));
 
 vi.mock('next/server', () => ({ after: mocks.after }));
@@ -20,20 +24,32 @@ vi.mock('@roomote/sdk/server', () => ({
 }));
 
 vi.mock('@roomote/db/server', () => ({
-  db: {},
+  db: { update: mocks.dbUpdate },
   eq: vi.fn(),
   fastAgentConversations: {},
 }));
 
 vi.mock('@/lib/server/fast-sessions', () => ({
-  findAccessibleFastSession: vi.fn(),
+  findAccessibleFastSession: mocks.findAccessibleFastSession,
 }));
 
-import { scheduleWebFastAgentTurn } from './index';
+import {
+  scheduleWebFastAgentTurn,
+  updateFastSessionModelSelectionCommand,
+} from './index';
+
+const auth = {
+  userId: 'user-1',
+  name: 'Test User',
+  primaryEmail: 'test@example.com',
+} as never;
 
 describe('scheduleWebFastAgentTurn', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.dbUpdate.mockReturnValue({ set: mocks.dbSet });
+    mocks.dbSet.mockReturnValue({ where: mocks.dbWhere });
+    mocks.dbWhere.mockResolvedValue(undefined);
   });
 
   it('keeps the complete Fast turn in the request post-response lifecycle', async () => {
@@ -67,5 +83,26 @@ describe('scheduleWebFastAgentTurn', () => {
 
     expect(mocks.answerQuestion).toHaveBeenCalledOnce();
     expect(release).toHaveBeenCalledOnce();
+  });
+
+  it('persists an explicit model selection before the next turn', async () => {
+    mocks.findAccessibleFastSession.mockResolvedValue({
+      id: 'fast-session-1',
+      model: null,
+      reasoningEffort: null,
+    });
+
+    await expect(
+      updateFastSessionModelSelectionCommand(auth, {
+        sessionId: '00000000-0000-4000-8000-000000000000',
+        model: 'openrouter/z-ai/glm-5.2',
+        reasoningEffort: 'high',
+      }),
+    ).resolves.toEqual({ success: true });
+
+    expect(mocks.dbSet).toHaveBeenCalledWith({
+      model: 'openrouter/z-ai/glm-5.2',
+      reasoningEffort: 'high',
+    });
   });
 });

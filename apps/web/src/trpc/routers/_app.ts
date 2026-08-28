@@ -35,10 +35,12 @@ import {
   getFastSessionTasksCommand,
   replyToFastSessionCommand,
   startFastSessionCommand,
+  updateFastSessionModelSelectionCommand,
 } from '../commands/fast-sessions';
 import {
   replyToFastSessionInputSchema,
   startFastSessionInputSchema,
+  updateFastSessionModelSelectionInputSchema,
 } from '../commands/fast-sessions/input';
 import {
   getSessionByIdCommand,
@@ -2814,6 +2816,11 @@ export const appRouter = createRouter({
       .input(replyToFastSessionInputSchema)
       .mutation(({ ctx: { auth }, input }) =>
         replyToFastSessionCommand(auth, input),
+      ),
+    updateModelSelection: protectedProcedure
+      .input(updateFastSessionModelSelectionInputSchema)
+      .mutation(({ ctx: { auth }, input }) =>
+        updateFastSessionModelSelectionCommand(auth, input),
       ),
     tasks: protectedProcedure
       .input(z.object({ sessionId: z.string().uuid() }))
