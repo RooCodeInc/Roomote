@@ -2551,6 +2551,7 @@ async function enqueueSnapshotResume(
         where: and(
           eq(taskRuns.sourceRunId, sourceRun.id),
           eq(taskRuns.kind, 'resume'),
+          isNull(taskRuns.canceledAt),
         ),
         columns: { id: true },
       });

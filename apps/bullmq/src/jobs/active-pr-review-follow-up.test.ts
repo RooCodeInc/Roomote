@@ -7,6 +7,7 @@ const {
   mockFindFallbackRun,
   mockFindFirstRepository,
   mockGetTaskGoalForRun,
+  mockIsNull,
   mockSendPrompt,
   mockUpdateWhere,
   mockWithSandboxServerRpcClient,
@@ -22,6 +23,7 @@ const {
   mockFindFallbackRun: vi.fn(),
   mockFindFirstRepository: vi.fn(),
   mockGetTaskGoalForRun: vi.fn(),
+  mockIsNull: vi.fn((...args: unknown[]) => args),
   mockSendPrompt: vi.fn(),
   mockUpdateWhere: vi.fn(),
   mockWithSandboxServerRpcClient: vi.fn(),
@@ -66,6 +68,7 @@ vi.mock('@roomote/db/server', () => ({
   },
   eq: vi.fn((...args: unknown[]) => args),
   and: vi.fn((...args: unknown[]) => args),
+  isNull: (...args: unknown[]) => mockIsNull(...args),
   sql: vi.fn((...args: unknown[]) => args),
   getTaskGoalForRun: (...args: unknown[]) => mockGetTaskGoalForRun(...args),
   repositories: { id: 'repositories.id' },
@@ -74,6 +77,7 @@ vi.mock('@roomote/db/server', () => ({
     id: 'taskRuns.id',
     taskId: 'taskRuns.taskId',
     payload: 'taskRuns.payload',
+    canceledAt: 'taskRuns.canceledAt',
   },
 }));
 
@@ -353,7 +357,7 @@ describe('activePrReviewFollowUpJob', () => {
     expect(mockSendPrompt).not.toHaveBeenCalled();
   });
 
-  it('starts a sync review when the completed run has no resumable snapshot', async () => {
+  it('starts a sync review without reusing a canceled fallback attempt', async () => {
     mockFindFirstRun.mockResolvedValue({
       id: 100,
       taskId: 'task-100',
@@ -398,6 +402,7 @@ describe('activePrReviewFollowUpJob', () => {
       newRunId: 200,
       signal: mockReleaseGithubPrReviewLifecycleLock.signal,
     });
+    expect(mockIsNull).toHaveBeenCalledWith('taskRuns.canceledAt');
   });
 
   it.each([
