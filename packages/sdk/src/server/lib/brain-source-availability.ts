@@ -20,6 +20,10 @@ import {
 } from '@roomote/types';
 
 import { hasBrainGithubSources } from './brain-github';
+import {
+  findLinearDeploymentMcpConnection,
+  getLinearDeploymentMetadata,
+} from './mcp/linear-connections';
 
 type BrainMcpSourceId = 'granola' | 'notion' | 'rippling';
 type BrainMcpSourceConfig =
@@ -100,6 +104,12 @@ const BRAIN_SOURCE_AVAILABILITY = {
   granola: async () =>
     Boolean(await findBrainSourceConnectionConfig('granola')),
   github: hasBrainGithubSources,
+  linear: async () => {
+    const connection = await findLinearDeploymentMcpConnection();
+    return Boolean(
+      connection && getLinearDeploymentMetadata(connection.authConfig),
+    );
+  },
   rippling: async () =>
     Boolean(await findBrainSourceConnectionConfig('rippling')),
 } satisfies Record<BrainSourceRequirement, () => Promise<boolean>>;

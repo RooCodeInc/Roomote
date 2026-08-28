@@ -32,6 +32,9 @@ describe('resolveBrainNamespaceId', () => {
     );
     expect(resolveBrainNamespaceId('people/roomote-member-abc')).toBe('people');
     expect(resolveBrainNamespaceId('daily/digests/2026-01-02')).toBe('daily');
+    expect(resolveBrainNamespaceId('linear/org/issues/issue-id')).toBe(
+      'linear',
+    );
   });
 
   it('does not invent a namespace for an unrecognised prefix', () => {
@@ -56,6 +59,9 @@ describe('resolveBrainSourceIdForCollector', () => {
     expect(
       resolveBrainSourceIdForCollector('github-issues:occurrence-date-v3'),
     ).toBe('github-issues');
+    expect(
+      resolveBrainSourceIdForCollector('linear-issues:entity-census-v1'),
+    ).toBe('linear-issues');
   });
 
   it('folds a fanned-out collector’s per-partition rows into one source', () => {

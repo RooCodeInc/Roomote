@@ -31,6 +31,7 @@ export const BRAIN_NAMESPACES = [
   { id: 'memories', prefix: 'memories/', label: 'Conversation memories' },
   { id: 'prs', prefix: 'prs/', label: 'Pull requests' },
   { id: 'github', prefix: 'github/', label: 'GitHub issues' },
+  { id: 'linear', prefix: 'linear/', label: 'Linear issues' },
   { id: 'slack', prefix: 'slack/', label: 'Slack' },
   { id: 'notion', prefix: 'notion/', label: 'Notion' },
   { id: 'meetings', prefix: 'meetings/', label: 'Meetings' },
@@ -119,6 +120,7 @@ export const BRAIN_COLLECTOR_IDS = {
   slackPersonDirectory: 'slack-person-directory:occurrence-date-v2',
   slackPublicChannels: 'slack-public-channels:entity-timeline-v3',
   githubIssues: 'github-issues:occurrence-date-v3',
+  linearIssues: 'linear-issues:entity-census-v1',
   notionPages: 'notion-pages',
   granolaMeetings: 'granola-meetings:entity-timeline-v3',
 } as const;
@@ -135,6 +137,7 @@ export const BRAIN_PAGE_TYPES = {
   conversationMemory: 'conversation-memory',
   pullRequest: 'pull-request',
   githubIssue: 'github-issue',
+  linearIssue: 'linear-issue',
   slackDay: 'slack',
   meeting: 'meeting',
   notionPage: 'notion-page',
@@ -259,6 +262,16 @@ export const BRAIN_SOURCES = [
     requires: 'github',
   },
   {
+    id: 'linear-issues',
+    label: 'Linear issues',
+    description:
+      'Issues and bounded discussion from the connected Linear workspace, refreshed as they change upstream.',
+    namespaceId: 'linear',
+    collectorIdPrefix: 'linear-issues',
+    collectorIds: [BRAIN_COLLECTOR_IDS.linearIssues] as readonly string[],
+    requires: 'linear',
+  },
+  {
     id: 'notion-pages',
     label: 'Notion',
     description:
@@ -365,7 +378,7 @@ export function parseBrainBackfillCompletedCount(
  * chosen from gbrain's own description, which is written for a different
  * product and routes to tools this deployment does not expose.
  */
-export const BRAIN_MCP_READ_INSTRUCTIONS = `The \`gbrain\` server is this deployment's shared memory (the Brain). It holds memories distilled from completed tasks plus activity from connected integrations (pull requests, Slack channels, meeting notes, GitHub issues), each stored as a page with citations.
+export const BRAIN_MCP_READ_INSTRUCTIONS = `The \`gbrain\` server is this deployment's shared memory (the Brain). It holds memories distilled from completed tasks plus activity from connected integrations (pull requests, Slack channels, meeting notes, GitHub issues, Linear issues), each stored as a page with citations.
 
 ## Using what it knows
 
@@ -379,7 +392,7 @@ Which tool:
 - \`query\` when you are describing a concept and do not know how the Brain words it. It expands your phrasing into related queries, so it finds pages that talk about the same thing in different language. This is the default, and the right choice for that first pass.
 - \`search\` when you already know the exact token: a slug, a repository name, an error string, a person's handle. Cheaper than \`query\` because it skips the expansion step.
 - \`entity\` for one known person. It resolves names and linked provider handles against canonical deployment-member cards without an LLM call.
-- \`list_pages\` to enumerate rather than guess, and to answer "what is in the Brain" or "what happened recently" (it sorts by recency). Use it before ever concluding the Brain is empty. Pages are namespaced: \`people/\`, \`tasks/\`, \`prs/\`, \`slack/\`, \`notion/\`, \`meetings/\`, \`github/\`.
+- \`list_pages\` to enumerate rather than guess, and to answer "what is in the Brain" or "what happened recently" (it sorts by recency). Use it before ever concluding the Brain is empty. Pages are namespaced: \`people/\`, \`tasks/\`, \`prs/\`, \`slack/\`, \`notion/\`, \`meetings/\`, \`github/\`, \`linear/\`.
 - \`get_page\` on a slug for a page's full text, once a search result looks relevant.
 
 A result set that comes back populated is not proof of coverage, and one query returning nothing is not proof of absence. If the answer matters, try the other phrasing or list the namespace before deciding the Brain has nothing.

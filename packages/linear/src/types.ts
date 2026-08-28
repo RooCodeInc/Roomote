@@ -262,6 +262,44 @@ export interface LinearIssue {
   };
 }
 
+/** Normalized issue shape used by bounded, read-only Brain collection. */
+export interface LinearBrainIssue {
+  id: string;
+  identifier: string;
+  title: string;
+  description: string | null;
+  url: string;
+  priority: number | null;
+  priorityLabel: string | null;
+  createdAt: string;
+  updatedAt: string;
+  completedAt: string | null;
+  canceledAt: string | null;
+  archivedAt: string | null;
+  dueDate: string | null;
+  state: { name: string; type: string } | null;
+  team: { key: string; name: string } | null;
+  project: { name: string } | null;
+  creator: { name: string } | null;
+  assignee: { name: string } | null;
+  labels: string[];
+  comments: Array<{
+    id: string;
+    body: string;
+    createdAt: string;
+    updatedAt: string;
+    author: string | null;
+  }>;
+}
+
+export interface LinearBrainIssuePage {
+  issues: LinearBrainIssue[];
+  pageInfo: {
+    hasNextPage: boolean;
+    endCursor: string | null;
+  };
+}
+
 /**
  * Linear Comment from webhook payload
  * Note: url and createdAt are optional as Linear doesn't always include them

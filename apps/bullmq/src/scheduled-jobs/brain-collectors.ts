@@ -27,6 +27,7 @@ import {
 } from './brain-collectors/write-pages';
 import { githubIssuesCollector } from './brain-collectors/github-issues';
 import { granolaMeetingsCollector } from './brain-collectors/granola-meetings';
+import { linearIssuesCollector } from './brain-collectors/linear-issues';
 import {
   notionPagesCollector,
   notionUsersCollector,
@@ -364,4 +365,5 @@ const BRAIN_COLLECTORS: BrainCollector[] = [
   notionPagesCollector,
   granolaMeetingsCollector,
   githubIssuesCollector,
+  linearIssuesCollector,
 ];
