@@ -146,3 +146,22 @@ export function getTaskReportConsumerFromPayload(
     ? 'orchestrator'
     : 'direct-user';
 }
+
+/**
+ * Orchestrator-owned tasks retain chat coordinates for attribution and
+ * structured controls, but must not receive direct chat reply capabilities.
+ */
+export function shouldSuppressDirectCommunicationContext(
+  payload: unknown,
+): boolean {
+  const explicitlyInherited =
+    Boolean(payload) &&
+    typeof payload === 'object' &&
+    !Array.isArray(payload) &&
+    (payload as Record<string, unknown>).communicationContextInherited === true;
+
+  return (
+    explicitlyInherited ||
+    getTaskReportConsumerFromPayload(payload) === 'orchestrator'
+  );
+}

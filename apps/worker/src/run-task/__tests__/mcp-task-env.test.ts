@@ -78,6 +78,51 @@ describe('getCommunicationReplyContext', () => {
     expect(isFastAgentChildTaskRun(taskRun)).toBe(true);
   });
 
+  it.each([
+    ['slack', 'C123', '111.222'],
+    ['discord', 'channel-1', 'thread-1'],
+    ['teams', '19:conversation@thread.v2', 'activity-root'],
+    ['telegram', '-100456', '7'],
+  ] as const)(
+    'does not activate direct %s replies for an orchestrator-owned Fast child missing the newer inheritance flag',
+    (provider, channelId, threadId) => {
+      const taskRun = {
+        payload: {
+          communicationProvider: provider,
+          communicationChannelId: channelId,
+          communicationThreadId: threadId,
+          fastAgentParent: {
+            sessionId: '11111111-1111-4111-8111-111111111111',
+            conversation: {
+              surface: provider,
+              workspaceId: 'workspace-1',
+              conversationId: 'conversation-1',
+              replyTarget: { channelId, threadId },
+            },
+          },
+        },
+      };
+
+      expect(getSlackReplyContext(taskRun)).toBeNull();
+      expect(getCommunicationReplyContext(taskRun)).toBeNull();
+      expect(isFastAgentChildTaskRun(taskRun)).toBe(true);
+    },
+  );
+
+  it('does not activate direct chat replies for an explicitly orchestrator-owned task', () => {
+    const taskRun = {
+      payload: {
+        communicationProvider: 'teams',
+        communicationChannelId: '19:conversation@thread.v2',
+        communicationThreadId: 'activity-root',
+        reportConsumer: 'orchestrator',
+      },
+    };
+
+    expect(getSlackReplyContext(taskRun)).toBeNull();
+    expect(getCommunicationReplyContext(taskRun)).toBeNull();
+  });
+
   it('returns Teams communication context from provider-neutral payload metadata', () => {
     expect(
       getCommunicationReplyContext({

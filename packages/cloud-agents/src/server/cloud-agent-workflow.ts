@@ -19,6 +19,7 @@ import {
   getSlackThreadTsFromTaskPayload,
   getTaskReportConsumerFromPayload,
   resolveSourceControlHostFromPayload,
+  shouldSuppressDirectCommunicationContext,
 } from '@roomote/types';
 import {
   type TaskRun,
@@ -348,9 +349,9 @@ export async function generatePrompt({
       const communicationProvider = getCommunicationProviderFromTaskPayload(
         taskSpec.payload,
       );
-      const inheritedCommunicationContext =
-        taskSpec.payload.communicationContextInherited === true;
       const reportConsumer = getTaskReportConsumerFromPayload(taskSpec.payload);
+      const inheritedCommunicationContext =
+        shouldSuppressDirectCommunicationContext(taskSpec.payload);
       const activeSlackChannel = inheritedCommunicationContext
         ? null
         : slackChannel;

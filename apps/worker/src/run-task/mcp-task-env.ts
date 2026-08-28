@@ -6,6 +6,7 @@ import {
   getFastAgentParentFromPayload,
   getSlackChannelFromTaskPayload,
   getSlackThreadTsFromTaskPayload,
+  shouldSuppressDirectCommunicationContext,
 } from '@roomote/types';
 
 interface SlackReplyContext {
@@ -37,19 +38,10 @@ export function isFastAgentChildTaskRun(taskRun: {
   return getFastAgentParentFromPayload(taskRun.payload) !== null;
 }
 
-function hasInheritedCommunicationContext(payload: unknown): boolean {
-  return (
-    Boolean(payload) &&
-    typeof payload === 'object' &&
-    !Array.isArray(payload) &&
-    (payload as Record<string, unknown>).communicationContextInherited === true
-  );
-}
-
 export function getSlackReplyContext(taskRun: {
   payload: unknown;
 }): SlackReplyContext | null {
-  if (hasInheritedCommunicationContext(taskRun.payload)) {
+  if (shouldSuppressDirectCommunicationContext(taskRun.payload)) {
     return null;
   }
 
@@ -67,7 +59,7 @@ export function getSlackReplyContext(taskRun: {
 export function getCommunicationReplyContext(taskRun: {
   payload: unknown;
 }): CommunicationReplyContext | null {
-  if (hasInheritedCommunicationContext(taskRun.payload)) {
+  if (shouldSuppressDirectCommunicationContext(taskRun.payload)) {
     return null;
   }
 
