@@ -2,6 +2,7 @@ import {
   db,
   eq,
   fastAgentConversations,
+  inArray,
   sessionBackfillState,
   sessionFactory,
   sessionTasks,
@@ -154,6 +155,36 @@ describe('sessionsReconcileJob', () => {
     expect(watermarkAfter?.cursorCreatedAt?.getTime() ?? 0).toBeGreaterThan(
       watermarkBefore?.cursorCreatedAt?.getTime() ?? 0,
     );
+  });
+
+  it('drains an over-batch orphan backlog across runs without stranding rows', async () => {
+    await sessionsReconcileJob();
+    await sessionsReconcileJob();
+
+    // 101 orphans: one full batch plus one. A full batch must NOT advance
+    // the watermark, so the next run still sees (and adopts) the remainder.
+    const user = await userFactory.create();
+    const rows = await db
+      .insert(fastAgentConversations)
+      .values(
+        Array.from({ length: 101 }, () => ({
+          userId: user.id,
+          surface: 'web' as const,
+          workspaceId: user.id,
+          conversationId: crypto.randomUUID(),
+        })),
+      )
+      .returning({ id: fastAgentConversations.id });
+
+    await sessionsReconcileJob();
+    await sessionsReconcileJob();
+
+    const ids = rows.map((row) => row.id);
+    const adopted = await db
+      .select({ id: sessions.fastConversationId })
+      .from(sessions)
+      .where(inArray(sessions.fastConversationId, ids));
+    expect(adopted).toHaveLength(101);
   });
 
   it('heals sessions wedged active on an expired responding lease', async () => {

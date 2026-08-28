@@ -313,10 +313,15 @@ async function reconcileRecentSessions(watermark: Date | null): Promise<void> {
     }
   }
 
-  // Advance the watermark only when every orphan adoption succeeded, so
-  // transiently-failed rows stay inside the next scan window and eventually
-  // converge. Failures in the touch/heal loops don't affect orphan scanning.
-  if (orphanFailures === 0) {
+  // Advance the watermark only when this pass definitely drained the
+  // backlog: zero adoption failures AND neither scan returned a full batch
+  // (a full batch means older rows may remain beyond the LIMIT). Otherwise
+  // the next run rescans the same window until it converges. Failures in
+  // the touch/heal loops don't affect orphan scanning.
+  const sawFullBatch =
+    orphanConversations.length === BATCH_SIZE ||
+    orphanTasks.length === BATCH_SIZE;
+  if (orphanFailures === 0 && !sawFullBatch) {
     await db
       .insert(sessionBackfillState)
       .values({
@@ -338,7 +343,7 @@ async function reconcileRecentSessions(watermark: Date | null): Promise<void> {
       });
   } else {
     console.warn(
-      `${LOG_PREFIX} keeping the reconcile watermark: ${orphanFailures} orphan adoption(s) failed`,
+      `${LOG_PREFIX} keeping the reconcile watermark: ${orphanFailures} orphan adoption(s) failed, fullBatch=${sawFullBatch}`,
     );
   }
 
