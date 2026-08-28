@@ -7,10 +7,10 @@ import {
   createFastAgentWebTaskLauncher,
   getOrCreateFastAgentSession,
   resolveApiBaseUrl,
-  sendFastAgentTaskMessage,
 } from '@roomote/cloud-agents/server';
 import {
   buildFastAgentSurfaceReplyDelivery,
+  dispatchPrReviewFollowUp,
   resolveUserMcpServerConfigs,
   type FastAgentSurfaceReplyDelivery,
 } from '@roomote/sdk/server';
@@ -18,12 +18,11 @@ import {
   db,
   claimCanonicalPrReviewAction,
   completeCanonicalPrReviewActionDispatch,
-  desc,
   eq,
   fastAgentConversations,
   getSessionForFastConversation,
+  releaseCanonicalPrReviewActionDispatch,
   retireCanonicalPrReviewActionsForDestinationKey,
-  taskRuns,
 } from '@roomote/db/server';
 import {
   formatErrorForLog,
@@ -295,7 +294,7 @@ export async function handleFastSessionPrReviewActionCommand(
     choice: 'yes' | 'auto' | 'dismiss';
   },
 ): Promise<{
-  status: 'resolved' | 'auto_resolved' | 'dismissed' | 'stale';
+  status: 'pending' | 'resolved' | 'auto_resolved' | 'dismissed' | 'stale';
 }> {
   const session = await findAccessibleFastSession(auth, input.sessionId);
   if (!session) throw new Error('Fast session not found');
@@ -325,31 +324,31 @@ export async function handleFastSessionPrReviewActionCommand(
     return { status: 'dismissed' };
   }
 
-  const dispatched = await sendFastAgentTaskMessage(
-    { userId: auth.userId, apiBaseUrl: resolveApiBaseUrl() ?? undefined },
-    { taskId: action.taskId!, message: action.followUpPrompt! },
-  );
+  const dispatched = await dispatchPrReviewFollowUp({
+    provider: 'web',
+    taskId: action.taskId!,
+    followUpPrompt: action.followUpPrompt!,
+    actingUserId: auth.userId,
+    idempotencyKey: `pr-review-delivery:${input.deliveryId}`,
+  });
   const status = input.choice === 'auto' ? 'auto_resolved' : 'resolved';
-  if (!dispatched.success) {
+  if (dispatched.outcome === 'unavailable') {
+    const released = await releaseCanonicalPrReviewActionDispatch(
+      input.deliveryId,
+    );
+    const releasedStatus = released ? 'pending' : 'stale';
     await updateFastSessionPrReviewOfferStatus(
       session.id,
       [input.deliveryId],
-      input.choice === 'auto' ? status : 'stale',
+      releasedStatus,
     );
-    return { status: input.choice === 'auto' ? status : 'stale' };
+    return { status: releasedStatus };
   }
 
-  const latestRun = await db.query.taskRuns.findFirst({
-    where: eq(taskRuns.taskId, action.taskId!),
-    orderBy: [desc(taskRuns.createdAt)],
-    columns: { id: true },
+  await completeCanonicalPrReviewActionDispatch({
+    deliveryId: input.deliveryId,
+    runId: dispatched.runId,
   });
-  if (latestRun) {
-    await completeCanonicalPrReviewActionDispatch({
-      deliveryId: input.deliveryId,
-      runId: latestRun.id,
-    });
-  }
   await updateFastSessionPrReviewOfferStatus(
     session.id,
     [input.deliveryId],

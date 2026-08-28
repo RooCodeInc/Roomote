@@ -253,6 +253,7 @@ export {
   beginCanonicalPrReviewAutoDispatch,
   beginCanonicalPrReviewPrompt,
   beginCanonicalPrReviewWebPrompt,
+  beginCanonicalPrReviewWebAutoDispatch,
   completeCanonicalPrReviewAutoDispatch,
   consumePendingPrReviewActivity,
   dispatchDuePrReviewNotifications,

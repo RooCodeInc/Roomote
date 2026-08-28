@@ -11,6 +11,7 @@ const {
   mockPrepareCanonical,
   mockBeginCanonicalPrompt,
   mockBeginCanonicalWebPrompt,
+  mockBeginCanonicalWebAutoDispatch,
   mockBeginCanonicalAutoDispatch,
   mockCompleteCanonicalAutoDispatch,
   mockRecordDelivery,
@@ -42,6 +43,7 @@ const {
   mockPrepareCanonical: vi.fn(),
   mockBeginCanonicalPrompt: vi.fn(),
   mockBeginCanonicalWebPrompt: vi.fn(),
+  mockBeginCanonicalWebAutoDispatch: vi.fn(),
   mockBeginCanonicalAutoDispatch: vi.fn(),
   mockCompleteCanonicalAutoDispatch: vi.fn(),
   mockRecordDelivery: vi.fn(),
@@ -188,6 +190,7 @@ vi.mock('@roomote/sdk/server', () => ({
   prepareCanonicalPrReviewNotificationRequest: mockPrepareCanonical,
   beginCanonicalPrReviewPrompt: mockBeginCanonicalPrompt,
   beginCanonicalPrReviewWebPrompt: mockBeginCanonicalWebPrompt,
+  beginCanonicalPrReviewWebAutoDispatch: mockBeginCanonicalWebAutoDispatch,
   beginCanonicalPrReviewAutoDispatch: mockBeginCanonicalAutoDispatch,
   completeCanonicalPrReviewAutoDispatch: mockCompleteCanonicalAutoDispatch,
   recordPrReviewNotificationDeliveryBestEffort: mockRecordDelivery,
@@ -235,6 +238,7 @@ describe('prReviewNotificationJob', () => {
     mockPrepareCanonical.mockResolvedValue(true);
     mockBeginCanonicalPrompt.mockResolvedValue(true);
     mockBeginCanonicalWebPrompt.mockResolvedValue(true);
+    mockBeginCanonicalWebAutoDispatch.mockResolvedValue(true);
     mockBeginCanonicalAutoDispatch.mockResolvedValue(true);
     mockCompleteCanonicalAutoDispatch.mockResolvedValue(true);
 
@@ -1644,6 +1648,77 @@ describe('prReviewNotificationJob', () => {
       { leaseToken },
     );
     expect(mockFinalize).not.toHaveBeenCalled();
+  });
+
+  it('auto-dispatches opted-in feedback for a web Fast parent', async () => {
+    const deliveryId = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+    const leaseToken = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
+    const destinationKey = '["web","user-1","session-1"]';
+    mockFindFirstTaskRun.mockResolvedValue({
+      id: 1,
+      taskId: 'task-1',
+      payload: {
+        fastAgentParent: {
+          sessionId: '99999999-9999-4999-8999-999999999999',
+          conversation: {
+            surface: 'web',
+            workspaceId: 'user-1',
+            conversationId: 'session-1',
+          },
+        },
+      },
+      status: RunStatus.Idle,
+      taskPhase: 'waiting_for_prompt',
+      workerHeartbeatAt: new Date(),
+    });
+    mockPrepareDelivery.mockResolvedValue({
+      post: true,
+      route: null,
+      text: 'Review feedback remains.',
+      followUpQuestion: 'Resolve it?',
+      followUpPrompt: 'Resolve the review feedback.',
+    });
+    mockFindAutoHandlePrReviewFeedbackPreference.mockResolvedValue({
+      taskId: 'task-1',
+      userId: 'user-1',
+      destinationKey,
+    });
+    mockNotifyFastAgentParent.mockResolvedValue(true);
+    mockDispatchFollowUp.mockResolvedValue({ outcome: 'resumed', runId: 99 });
+
+    await prReviewNotificationJob(
+      makeJob({
+        ownershipVersion: 'canonical',
+        deliveryId,
+        notificationUnitId: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
+        deliveryState: 'claimed',
+        destinationKey,
+        dispatchKey: `pr-review-delivery:${deliveryId}`,
+        deliveryIds: [deliveryId],
+        leaseToken,
+        events,
+      }) as never,
+    );
+
+    expect(mockBeginCanonicalWebAutoDispatch).toHaveBeenCalledWith({
+      request: expect.objectContaining({ deliveryId }),
+      followUpPrompt: 'Resolve the review feedback.',
+      targetTaskId: 'task-1',
+      actingUserId: 'user-1',
+    });
+    expect(mockDispatchFollowUp).toHaveBeenCalledWith({
+      provider: 'web',
+      taskId: 'task-1',
+      followUpPrompt: 'Resolve the review feedback.',
+      actingUserId: 'user-1',
+      idempotencyKey: `pr-review-delivery:${deliveryId}`,
+    });
+    expect(mockCompleteCanonicalAutoDispatch).toHaveBeenCalledWith({
+      request: expect.objectContaining({ deliveryId }),
+      runId: 99,
+    });
+    expect(mockBeginCanonicalWebPrompt).not.toHaveBeenCalled();
+    expect(mockAttachPendingPrReviewActionMessage).not.toHaveBeenCalled();
   });
 
   it('reuses the canonical dispatch key for automatic follow-up retries', async () => {

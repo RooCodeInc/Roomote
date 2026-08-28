@@ -1329,6 +1329,30 @@ export async function completeCanonicalPrReviewActionDispatch(input: {
   return rows.length === 1;
 }
 
+export async function releaseCanonicalPrReviewActionDispatch(
+  deliveryId: string,
+): Promise<boolean> {
+  const rows = await db
+    .update(prReviewNotificationDeliveries)
+    .set({
+      status: 'awaiting_user_action',
+      actionClaimedAt: null,
+      actingUserId: null,
+      targetTaskId: null,
+      completedAt: null,
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(prReviewNotificationDeliveries.id, deliveryId),
+        eq(prReviewNotificationDeliveries.status, 'auto_dispatch_pending'),
+        isNull(prReviewNotificationDeliveries.dispatchedRunId),
+      ),
+    )
+    .returning({ id: prReviewNotificationDeliveries.id });
+  return rows.length === 1;
+}
+
 export async function retireCanonicalPrReviewActionsForDestination(input: {
   provider: 'slack' | 'discord' | 'telegram';
   slackTeamId?: string;

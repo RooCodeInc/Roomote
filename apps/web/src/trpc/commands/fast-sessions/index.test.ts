@@ -2,14 +2,14 @@ const mocks = vi.hoisted(() => ({
   after: vi.fn(),
   acquireTurnLock: vi.fn(),
   answerQuestion: vi.fn(),
-  sendTaskMessage: vi.fn(),
+  dispatchReviewAction: vi.fn(),
   findAccessibleSession: vi.fn(),
   claimReviewAction: vi.fn(),
   completeReviewAction: vi.fn(),
+  releaseReviewAction: vi.fn(),
   retireReviewActions: vi.fn(),
   updateOfferStatus: vi.fn(),
   buildReplyDelivery: vi.fn(),
-  findLatestRun: vi.fn(),
 }));
 
 vi.mock('next/server', () => ({ after: mocks.after }));
@@ -20,24 +20,23 @@ vi.mock('@roomote/cloud-agents/server', () => ({
   createFastAgentWebTaskLauncher: vi.fn(),
   getOrCreateFastAgentSession: vi.fn(),
   resolveApiBaseUrl: vi.fn(),
-  sendFastAgentTaskMessage: mocks.sendTaskMessage,
 }));
 
 vi.mock('@roomote/sdk/server', () => ({
   buildFastAgentSurfaceReplyDelivery: mocks.buildReplyDelivery,
+  dispatchPrReviewFollowUp: mocks.dispatchReviewAction,
   resolveUserMcpServerConfigs: vi.fn(),
 }));
 
 vi.mock('@roomote/db/server', () => ({
-  db: { query: { taskRuns: { findFirst: mocks.findLatestRun } } },
+  db: {},
   claimCanonicalPrReviewAction: mocks.claimReviewAction,
   completeCanonicalPrReviewActionDispatch: mocks.completeReviewAction,
+  releaseCanonicalPrReviewActionDispatch: mocks.releaseReviewAction,
   retireCanonicalPrReviewActionsForDestinationKey: mocks.retireReviewActions,
-  desc: vi.fn(),
   eq: vi.fn(),
   fastAgentConversations: {},
   getSessionForFastConversation: vi.fn(),
-  taskRuns: { taskId: 'taskId', createdAt: 'createdAt' },
 }));
 
 vi.mock('@/lib/server/fast-sessions', () => ({
@@ -121,8 +120,10 @@ describe('Fast session PR review actions', () => {
       taskId: 'task-1',
       followUpPrompt: 'Resolve the feedback.',
     });
-    mocks.sendTaskMessage.mockResolvedValue({ success: true });
-    mocks.findLatestRun.mockResolvedValue({ id: 42 });
+    mocks.dispatchReviewAction.mockResolvedValue({
+      outcome: 'queued',
+      runId: 42,
+    });
 
     await expect(
       handleFastSessionPrReviewActionCommand(auth, {
@@ -138,10 +139,13 @@ describe('Fast session PR review actions', () => {
         expectedDestinationKey: '["web","user-1","session-1"]',
       }),
     );
-    expect(mocks.sendTaskMessage).toHaveBeenCalledWith(
-      expect.objectContaining({ userId: 'user-1' }),
-      { taskId: 'task-1', message: 'Resolve the feedback.' },
-    );
+    expect(mocks.dispatchReviewAction).toHaveBeenCalledWith({
+      provider: 'web',
+      taskId: 'task-1',
+      followUpPrompt: 'Resolve the feedback.',
+      actingUserId: 'user-1',
+      idempotencyKey: 'pr-review-delivery:11111111-1111-4111-8111-111111111111',
+    });
     expect(mocks.completeReviewAction).toHaveBeenCalledWith({
       deliveryId: '11111111-1111-4111-8111-111111111111',
       runId: 42,
@@ -157,12 +161,38 @@ describe('Fast session PR review actions', () => {
         choice: 'dismiss',
       }),
     ).resolves.toEqual({ status: 'stale' });
-    expect(mocks.sendTaskMessage).not.toHaveBeenCalled();
+    expect(mocks.dispatchReviewAction).not.toHaveBeenCalled();
     expect(mocks.updateOfferStatus).toHaveBeenCalledWith(
       session.id,
       ['11111111-1111-4111-8111-111111111111'],
       'stale',
     );
+  });
+
+  it('releases the offer when the task cannot be steered', async () => {
+    mocks.claimReviewAction.mockResolvedValue({
+      taskId: 'task-1',
+      followUpPrompt: 'Resolve the feedback.',
+    });
+    mocks.dispatchReviewAction.mockResolvedValue({ outcome: 'unavailable' });
+    mocks.releaseReviewAction.mockResolvedValue(true);
+
+    await expect(
+      handleFastSessionPrReviewActionCommand(auth, {
+        sessionId: session.id,
+        deliveryId: '11111111-1111-4111-8111-111111111111',
+        choice: 'yes',
+      }),
+    ).resolves.toEqual({ status: 'pending' });
+    expect(mocks.releaseReviewAction).toHaveBeenCalledWith(
+      '11111111-1111-4111-8111-111111111111',
+    );
+    expect(mocks.updateOfferStatus).toHaveBeenCalledWith(
+      session.id,
+      ['11111111-1111-4111-8111-111111111111'],
+      'pending',
+    );
+    expect(mocks.completeReviewAction).not.toHaveBeenCalled();
   });
 
   it('retires open offers when the user types a reply', async () => {

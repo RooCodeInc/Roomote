@@ -18,6 +18,7 @@ import {
   attachPendingPrReviewActionMessageWithRetirement,
   beginCanonicalPrReviewAutoDispatch,
   beginCanonicalPrReviewPrompt,
+  beginCanonicalPrReviewWebAutoDispatch,
   beginCanonicalPrReviewWebPrompt,
   buildPrReviewNotificationPostInput,
   createPrReviewNotificationTelemetry,
@@ -649,9 +650,11 @@ export const prReviewNotificationJob = async (
           directAutoHandleRoute ??
           fallbackAutoHandleRoute)
         : null;
-    const autoHandleUserId = autoHandleRoute
-      ? autoHandlePreference?.userId
-      : null;
+    const canAutoHandleWeb = Boolean(
+      followUp && autoHandlePreference && isWebFastParent,
+    );
+    const autoHandleUserId =
+      autoHandleRoute || canAutoHandleWeb ? autoHandlePreference?.userId : null;
 
     // Fast-parent delivery can fail and release this notification for retry.
     // Complete it before auto-dispatch so a retry cannot enqueue the same
@@ -660,6 +663,7 @@ export const prReviewNotificationJob = async (
     if (
       followUp &&
       isWebFastParent &&
+      !autoHandleUserId &&
       data.ownershipVersion === 'canonical' &&
       data.deliveryId
     ) {
@@ -748,36 +752,50 @@ export const prReviewNotificationJob = async (
       followUp &&
       autoHandlePreference &&
       autoHandleUserId &&
-      autoHandleRoute &&
+      (autoHandleRoute || canAutoHandleWeb) &&
       ownsAutoHandleDispatch
     ) {
       if (
         data.deliveryState !== 'auto_dispatch_pending' &&
-        !(await beginCanonicalPrReviewAutoDispatch({
-          request: data,
-          followUpPrompt: followUp.prompt,
-          targetTaskId: autoHandlePreference.taskId,
-          actingUserId: autoHandleUserId,
-          route: autoHandleRoute,
-        }))
+        !(await (canAutoHandleWeb
+          ? beginCanonicalPrReviewWebAutoDispatch({
+              request: data,
+              followUpPrompt: followUp.prompt,
+              targetTaskId: autoHandlePreference.taskId,
+              actingUserId: autoHandleUserId,
+            })
+          : beginCanonicalPrReviewAutoDispatch({
+              request: data,
+              followUpPrompt: followUp.prompt,
+              targetTaskId: autoHandlePreference.taskId,
+              actingUserId: autoHandleUserId,
+              route: autoHandleRoute!,
+            })))
       ) {
         console.log(
           `[PrReviewNotification] Canonical delivery ${data.deliveryId} lost its automatic-dispatch fence, skipping`,
         );
         return;
       }
-      const dispatched = await dispatchPrReviewFollowUp({
-        provider: autoHandleRoute.provider,
+      const dispatchInput = {
         taskId: autoHandlePreference.taskId,
-        ...(autoHandleRoute.provider === 'slack'
-          ? { slackTeamId: autoHandleRoute.slackTeamId }
-          : {}),
-        channelId: autoHandleRoute.channelId,
-        threadId: autoHandleRoute.threadId ?? null,
         followUpPrompt: followUp.prompt,
         actingUserId: autoHandleUserId,
         ...(data.dispatchKey ? { idempotencyKey: data.dispatchKey } : {}),
-      });
+      };
+      const dispatched = await dispatchPrReviewFollowUp(
+        canAutoHandleWeb
+          ? { ...dispatchInput, provider: 'web' }
+          : {
+              ...dispatchInput,
+              provider: autoHandleRoute!.provider,
+              ...(autoHandleRoute!.provider === 'slack'
+                ? { slackTeamId: autoHandleRoute!.slackTeamId }
+                : {}),
+              channelId: autoHandleRoute!.channelId,
+              threadId: autoHandleRoute!.threadId ?? null,
+            },
+      );
 
       if (dispatched.outcome !== 'unavailable') {
         if (

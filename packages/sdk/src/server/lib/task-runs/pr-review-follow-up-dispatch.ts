@@ -1,4 +1,8 @@
-import { enqueueTask } from '@roomote/cloud-agents/server';
+import {
+  enqueueTask,
+  resolveApiBaseUrl,
+  sendFastAgentTaskMessage,
+} from '@roomote/cloud-agents/server';
 import {
   and,
   db,
@@ -51,6 +55,22 @@ export type PrReviewFollowUpDispatchResult =
   | { outcome: 'queued'; runId: number }
   | { outcome: 'resumed'; runId: number }
   | { outcome: 'unavailable' };
+
+type PrReviewFollowUpDispatchInput = {
+  taskId: string;
+  followUpPrompt: string;
+  actingUserId: string;
+  providerUserId?: string;
+  slackTeamId?: string;
+  idempotencyKey?: string;
+} & (
+  | { provider: 'web'; channelId?: never; threadId?: never }
+  | {
+      provider: PrReviewActionProvider;
+      channelId: string;
+      threadId: string | null;
+    }
+);
 
 type FastAgentSlackLookup = {
   taskId: string;
@@ -152,29 +172,46 @@ async function findCompletedFastAgentSlackTaskRunWithSnapshot(
  * queue into that task's live run when one exists, otherwise wake that task
  * from its snapshot. Used by button handlers and the auto-handle path.
  */
-export async function dispatchPrReviewFollowUp(input: {
-  provider: PrReviewActionProvider;
-  taskId: string;
-  channelId: string;
-  threadId: string | null;
-  followUpPrompt: string;
-  /** Roomote user the dispatched work is attributed to. */
-  actingUserId: string;
-  /** Provider-native user id shown in the transcript; falls back to actingUserId. */
-  providerUserId?: string;
-  /**
-   * Workspace identity for modern Slack runs. Verified legacy offers can omit
-   * it because their immutable task binding is the routing authority.
-   */
-  slackTeamId?: string;
-  /** Stable canonical delivery key used to deduplicate retry dispatches. */
-  idempotencyKey?: string;
-}): Promise<PrReviewFollowUpDispatchResult> {
+export async function dispatchPrReviewFollowUp(
+  input: PrReviewFollowUpDispatchInput,
+): Promise<PrReviewFollowUpDispatchResult> {
+  if (input.provider === 'web') {
+    return dispatchWebFollowUp(input);
+  }
   if (input.provider === 'slack') {
-    return dispatchSlackFollowUp(input);
+    return dispatchSlackFollowUp({
+      ...input,
+    });
   }
 
-  return dispatchCommunicationFollowUp(input);
+  return dispatchCommunicationFollowUp({
+    ...input,
+    provider: input.provider,
+  });
+}
+
+async function dispatchWebFollowUp(input: {
+  taskId: string;
+  followUpPrompt: string;
+  actingUserId: string;
+}): Promise<PrReviewFollowUpDispatchResult> {
+  const dispatched = await sendFastAgentTaskMessage(
+    {
+      userId: input.actingUserId,
+      apiBaseUrl: resolveApiBaseUrl() ?? undefined,
+    },
+    { taskId: input.taskId, message: input.followUpPrompt },
+  );
+  if (!dispatched.success) return { outcome: 'unavailable' };
+
+  const latestRun = await db.query.taskRuns.findFirst({
+    where: eq(taskRuns.taskId, input.taskId),
+    orderBy: [desc(taskRuns.createdAt)],
+    columns: { id: true },
+  });
+  return latestRun
+    ? { outcome: 'queued', runId: latestRun.id }
+    : { outcome: 'unavailable' };
 }
 
 async function dispatchSlackFollowUp(input: {

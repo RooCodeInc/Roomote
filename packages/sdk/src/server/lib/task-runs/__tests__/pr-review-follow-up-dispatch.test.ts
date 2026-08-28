@@ -2,6 +2,7 @@ const mocks = vi.hoisted(() => ({
   clearLatestUserMessage: vi.fn(),
   dbSelectLimit: vi.fn(),
   enqueueTask: vi.fn(),
+  findLatestTaskRun: vi.fn(),
   findActiveCommunicationTaskRun: vi.fn(),
   findActiveSlackTaskRun: vi.fn(),
   findCompletedCommunicationTaskRunWithSnapshot: vi.fn(),
@@ -12,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   queueCommunicationMessage: vi.fn(),
   queueSlackMessage: vi.fn(),
   resumeCommunicationTaskFromSnapshot: vi.fn(),
+  sendFastAgentTaskMessage: vi.fn(),
   setTrustedRunActingUser: vi.fn(),
   withContention: vi.fn(),
   where: vi.fn(),
@@ -19,6 +21,8 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('@roomote/cloud-agents/server', () => ({
   enqueueTask: mocks.enqueueTask,
+  resolveApiBaseUrl: () => 'https://roomote.example',
+  sendFastAgentTaskMessage: mocks.sendFastAgentTaskMessage,
 }));
 
 vi.mock('@roomote/communication', () => ({
@@ -39,7 +43,12 @@ vi.mock('@roomote/db/server', () => {
   chain.orderBy.mockReturnValue(chain);
   return {
     and: vi.fn((...conditions: unknown[]) => ({ conditions })),
-    db: { select: vi.fn(() => chain) },
+    db: {
+      select: vi.fn(() => chain),
+      query: {
+        taskRuns: { findFirst: mocks.findLatestTaskRun },
+      },
+    },
     desc: vi.fn((value: unknown) => value),
     eq: vi.fn((left: unknown, right: unknown) => ({ left, right })),
     gt: vi.fn((left: unknown, right: unknown) => ({ left, right })),
@@ -102,6 +111,48 @@ const taskA = 'task-a';
 const taskB = 'task-b';
 const sharedThread = '111.222';
 const prompt = 'Address the pending review feedback.';
+
+describe('web Fast review follow-up dispatch', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('steers the owning task and returns its latest run', async () => {
+    mocks.sendFastAgentTaskMessage.mockResolvedValue({ success: true });
+    mocks.findLatestTaskRun.mockResolvedValue({ id: 71 });
+
+    await expect(
+      dispatchPrReviewFollowUp({
+        provider: 'web',
+        taskId: taskA,
+        followUpPrompt: prompt,
+        actingUserId: 'user-1',
+      }),
+    ).resolves.toEqual({ outcome: 'queued', runId: 71 });
+    expect(mocks.sendFastAgentTaskMessage).toHaveBeenCalledWith(
+      {
+        userId: 'user-1',
+        apiBaseUrl: 'https://roomote.example',
+      },
+      { taskId: taskA, message: prompt },
+    );
+  });
+
+  it('reports an unavailable task without inventing a run', async () => {
+    mocks.sendFastAgentTaskMessage.mockResolvedValue({
+      success: false,
+      error: 'Task unavailable',
+    });
+
+    await expect(
+      dispatchPrReviewFollowUp({
+        provider: 'web',
+        taskId: taskA,
+        followUpPrompt: prompt,
+        actingUserId: 'user-1',
+      }),
+    ).resolves.toEqual({ outcome: 'unavailable' });
+    expect(mocks.findLatestTaskRun).not.toHaveBeenCalled();
+  });
+});
 
 function slackRun(id: number, taskId: string) {
   return {

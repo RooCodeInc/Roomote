@@ -15,6 +15,7 @@ import {
   prReviewNotificationDeliveries,
   prReviewNotificationUnitEvents,
   prReviewNotificationUnits,
+  releaseCanonicalPrReviewActionDispatch,
   runFactory,
   taskFactory,
   taskPullRequests,
@@ -913,6 +914,28 @@ describe('canonical PR review notification ownership', () => {
         expectedDestinationKey: '["web","other","session"]',
       }),
     ).resolves.toBeNull();
+    await expect(
+      claimCanonicalPrReviewAction({
+        deliveryId: claim.deliveryId,
+        choice: 'yes',
+        actingUserId: user.id,
+        expectedDestinationKind: 'fast_conversation',
+        expectedDestinationKey: destinationKey,
+      }),
+    ).resolves.toMatchObject({ taskId: task.id });
+    await expect(
+      releaseCanonicalPrReviewActionDispatch(claim.deliveryId),
+    ).resolves.toBe(true);
+    await expect(
+      db.query.prReviewNotificationDeliveries.findFirst({
+        where: eq(prReviewNotificationDeliveries.id, claim.deliveryId),
+        columns: { status: true, actingUserId: true, targetTaskId: true },
+      }),
+    ).resolves.toEqual({
+      status: 'awaiting_user_action',
+      actingUserId: null,
+      targetTaskId: null,
+    });
     const concurrent = await Promise.all([
       claimCanonicalPrReviewAction({
         deliveryId: claim.deliveryId,
