@@ -21,7 +21,10 @@ import {
   ResponsiveWorkspacePanels,
   SandboxSideActions,
 } from '../../SandboxWorkspacePanels';
-import { useSandboxLayout } from '../../use-sandbox-layout';
+import {
+  useResponsiveSandboxSidebar,
+  useSandboxLayout,
+} from '../../use-sandbox-layout';
 
 export type SessionInfo = {
   id: string;
@@ -127,6 +130,7 @@ export function SessionWorkspace({
 }) {
   const [isInfoOpen, setIsInfoOpen] = useState(false);
   const { isSidebarVisible, toggleSidebar } = useSandboxLayout();
+  useResponsiveSandboxSidebar(session.id);
 
   return (
     <WorkspaceSurface

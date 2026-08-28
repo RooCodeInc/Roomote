@@ -18,6 +18,7 @@ vi.mock('@/lib/server/fast-sessions', () => ({
   getFastSessionById: getFastSessionByIdMock,
 }));
 vi.mock('../../use-sandbox-layout', () => ({
+  useResponsiveSandboxSidebar: vi.fn(),
   useSandboxLayout: () => ({
     isSidebarVisible: true,
     setSidebarVisible: vi.fn(),
