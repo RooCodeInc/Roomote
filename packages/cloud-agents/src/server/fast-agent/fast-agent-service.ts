@@ -244,14 +244,12 @@ const launchTaskArgsSchema = z.object({
   environmentId: z.string().trim().min(1).nullable().optional(),
   model: z.string().trim().min(1).nullable().optional(),
   includeAttachments: z.boolean().optional().default(false),
-  includeImages: z.boolean().optional().default(false),
   kickoffMessage: z.string().trim().min(1),
 });
 const taskMessageArgsSchema = z.object({
   taskId: z.string().trim().min(1).nullable().optional(),
   message: z.string().trim().min(1),
   includeAttachments: z.boolean().optional().default(false),
-  includeImages: z.boolean().optional().default(false),
 });
 const taskIdArgsSchema = z.object({
   taskId: z.string().trim().min(1).nullable().optional(),
@@ -1692,7 +1690,6 @@ export async function answerFastAgentQuestion({
               args.environmentId ?? null,
               args.model ?? null,
               args.includeAttachments,
-              args.includeImages,
             ])}`;
             if (completedTaskActions.has(signature)) {
               return {
@@ -1745,8 +1742,7 @@ export async function answerFastAgentQuestion({
               : args.prompt;
             const result = await adapter.launchTask({
               prompt,
-              ...((args.includeAttachments || args.includeImages) &&
-              images.length > 0
+              ...(args.includeAttachments && images.length > 0
                 ? { images }
                 : {}),
               environmentId: args.environmentId ?? null,
@@ -1790,8 +1786,7 @@ export async function answerFastAgentQuestion({
               {
                 taskId: target.taskId,
                 message,
-                ...((args.includeAttachments || args.includeImages) &&
-                images.length > 0
+                ...(args.includeAttachments && images.length > 0
                   ? { images }
                   : {}),
               },

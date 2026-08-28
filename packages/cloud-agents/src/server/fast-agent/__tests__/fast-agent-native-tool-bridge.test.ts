@@ -119,7 +119,6 @@ describe('Fast native OpenCode tool bridge', () => {
     expect(launchTaskSource).toContain(
       'includeAttachments: z.boolean().optional()',
     );
-    expect(launchTaskSource).toContain('includeImages: z.boolean().optional()');
     expect(launchTaskSource).toContain(
       'Supported current-turn attachments are forwarded only when includeAttachments is true',
     );
@@ -139,9 +138,6 @@ describe('Fast native OpenCode tool bridge', () => {
     );
     expect(sendTaskMessageSource).toContain(
       'includeAttachments: z.boolean().optional()',
-    );
-    expect(sendTaskMessageSource).toContain(
-      'includeImages: z.boolean().optional()',
     );
     expect(sendTaskMessageSource).toContain(
       'Supported current-turn attachments are forwarded only when includeAttachments is true',

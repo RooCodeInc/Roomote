@@ -128,7 +128,6 @@ describe('buildFastAgentSystemPrompt', () => {
     );
     expect(prompt).toContain('kickoffMessage');
     expect(prompt).toContain('"includeAttachments"');
-    expect(prompt).toContain('"includeImages"');
     expect(prompt).toContain('attachments are not forwarded by default');
     expect(prompt).toContain(
       'supported attachments from the active conversation turn are relevant to that instruction',

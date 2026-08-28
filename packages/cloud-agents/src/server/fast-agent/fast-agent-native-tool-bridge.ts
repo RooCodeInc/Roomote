@@ -287,7 +287,6 @@ export default {
     environmentId: z.string().nullable().optional().describe(${JSON.stringify(`Exact environment ID from the system prompt; omit, pass null, or pass "${ALL_REPOSITORIES}" to run against all active repositories`)}),
     model: z.string().min(1).nullable().optional().describe("Exact deployment-enabled model ID; omit or pass null to use the deployment default"),
     includeAttachments: z.boolean().optional().describe("Set true to forward supported images and extracted file, audio, or video context from the active conversation turn; defaults to false"),
-    includeImages: z.boolean().optional().describe("Deprecated compatibility option that forwards only supported images from the active conversation turn"),
     kickoffMessage: z.string().min(1).describe("Brief user-facing description of the work now underway; do not mention delegation, launching, or queue state"),
   },
   execute: (args, context) => invoke("launch_task", args, context),
@@ -304,7 +303,6 @@ export default {
     taskId: z.string().nullable().optional(),
     message: z.string().min(1),
     includeAttachments: z.boolean().optional().describe("Set true to forward supported images and extracted file, audio, or video context from the active conversation turn; defaults to false"),
-    includeImages: z.boolean().optional().describe("Deprecated compatibility option that forwards only supported images from the active conversation turn"),
   },
   execute: (args, context) => invoke("send_task_message", args, context),
 }
