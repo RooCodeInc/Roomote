@@ -67,6 +67,7 @@ import { useTaskLaunchConfig } from '@/components/tasks/TaskLaunchConfig';
 
 import { OnboardingCard } from './OnboardingCard';
 import { BottomSheetTabs } from './BottomSheetTabs';
+import { PromptLibraryMenu } from './PromptLibraryMenu';
 import Image from 'next/image';
 import { DiscordLogoIcon } from '@radix-ui/react-icons';
 import {
@@ -612,6 +613,11 @@ export function NewTaskForm({
               <ModelSelect
                 value={selectedModelId}
                 onValueChange={setSelectedModelOverrideId}
+              />
+
+              <PromptLibraryMenu
+                promptText={promptText}
+                onSelectPrompt={setPromptText}
               />
 
               {!cloudEnabled && computeProviderDescriptors.length > 1 && (
