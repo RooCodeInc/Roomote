@@ -2387,6 +2387,9 @@ function inheritSnapshotResumeFastAgentParent(
   if (parent && !payload.fastAgentParent) {
     payload.fastAgentParent = parent;
   }
+  if (parent && !payload.reportConsumer) {
+    payload.reportConsumer = 'orchestrator';
+  }
 }
 
 function inheritSnapshotResumeFastAgentSession(
