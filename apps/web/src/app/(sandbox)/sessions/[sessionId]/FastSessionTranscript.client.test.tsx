@@ -551,6 +551,7 @@ describe('FastSessionTranscript', () => {
   });
 
   it('updates the header title from the session stream event', () => {
+    document.title = 'Roomote';
     render(
       <FastSessionTranscript
         sessionId="session-1"
@@ -563,11 +564,19 @@ describe('FastSessionTranscript', () => {
 
     act(() => {
       FakeEventSource.instances[0]!.emit('session', {
-        title: 'Rotate the API keys',
+        title:
+          'Rotate the API keys across every production environment without downtime',
       });
     });
 
-    expect(screen.getByText('Rotate the API keys')).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        'Rotate the API keys across every production environment without downtime',
+      ),
+    ).toBeInTheDocument();
+    expect(document.title).toBe(
+      'Rotate the API keys across every production environment with... | Roomote',
+    );
   });
 
   it('hides the reply composer for non-web sessions', () => {
