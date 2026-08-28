@@ -18,6 +18,7 @@ import {
 import type { Variables } from '../../types';
 import type { McpAuth } from '../mcp/middleware';
 import { visibleTaskHistoryCondition } from './helpers';
+import { getFastSessionMessagesForUser } from './fastSessionCommunication';
 import { logHandlerError } from '../utils';
 
 /**
@@ -62,7 +63,7 @@ export async function getTaskMessages(
     return c.json({ error: 'order must be one of: asc, desc' }, 400);
   }
 
-  const order = orderParam ?? 'asc';
+  const order: 'asc' | 'desc' = orderParam === 'desc' ? 'desc' : 'asc';
 
   try {
     const [task] = await db
@@ -72,6 +73,18 @@ export async function getTaskMessages(
       .limit(1);
 
     if (!task) {
+      const userId = c.get('mcpAuth').userId;
+      if (userId) {
+        const messages = await getFastSessionMessagesForUser({
+          sessionId: taskId,
+          userId,
+          limit,
+          order: 'desc',
+        });
+        if (messages) {
+          return c.json({ messages, returned: messages.length });
+        }
+      }
       return c.json({ error: 'Task not found' }, 404);
     }
 

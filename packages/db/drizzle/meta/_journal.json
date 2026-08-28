@@ -442,6 +442,41 @@
       "when": 1787776112381,
       "tag": "0062_neat_lady_deathstrike",
       "breakpoints": true
+    },
+    {
+      "idx": 63,
+      "version": "7",
+      "when": 1787897902620,
+      "tag": "0063_organic_garia",
+      "breakpoints": true
+    },
+    {
+      "idx": 64,
+      "version": "7",
+      "when": 1787908038379,
+      "tag": "0064_deep_vengeance",
+      "breakpoints": true
+    },
+    {
+      "idx": 65,
+      "version": "7",
+      "when": 1787922913068,
+      "tag": "0065_sessions_responding_until",
+      "breakpoints": true
+    },
+    {
+      "idx": 66,
+      "version": "7",
+      "when": 1787934945156,
+      "tag": "0066_fresh_warlock",
+      "breakpoints": true
+    },
+    {
+      "idx": 67,
+      "version": "7",
+      "when": 1787942815726,
+      "tag": "0067_clean_storm",
+      "breakpoints": true
     }
   ]
 }

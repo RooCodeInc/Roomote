@@ -71,8 +71,11 @@ vi.mock('../schema', () => ({
 }));
 
 import {
+  invalidateBrainEnabledCache,
+  isBrainEnabled,
   isBrainProviderConfigured,
   resetBrainProviderConfiguredCache,
+  resolveBrainEnabledState,
   resolveEffectiveModelRuntimeEnv,
   resolveModelProviderEnvValue,
   resolveSandboxModelRuntimeEnv,
@@ -1369,5 +1372,79 @@ describe('isBrainProviderConfigured', () => {
     expect(
       mockEnvironmentVariablesFindMany.mock.calls.length,
     ).toBeLessThanOrEqual(1);
+  });
+});
+
+describe('isBrainEnabled', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.unstubAllEnvs();
+    invalidateBrainEnabledCache();
+    resetBrainProviderConfiguredCache();
+    mockDecryptSecrets.mockImplementation(async (value) => value);
+    mockEnvironmentVariablesFindMany.mockResolvedValue([]);
+    mockDeploymentSettingsFindFirst.mockResolvedValue(undefined);
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    invalidateBrainEnabledCache();
+    resetBrainProviderConfiguredCache();
+  });
+
+  it('is off with no stored choice and no legacy key', async () => {
+    await expect(resolveBrainEnabledState()).resolves.toEqual({
+      enabled: false,
+      fromLegacyKey: true,
+    });
+  });
+
+  it('falls back to the legacy explicit Brain key when no choice is stored', async () => {
+    vi.stubEnv('R_BRAIN_OPENROUTER_API_KEY', 'sk-or-brain');
+
+    await expect(resolveBrainEnabledState()).resolves.toEqual({
+      enabled: true,
+      fromLegacyKey: true,
+    });
+  });
+
+  it('treats a missing brainEnabled column value as no stored choice', async () => {
+    // Rows written before the column existed select as null.
+    mockDeploymentSettingsFindFirst.mockResolvedValue({ brainEnabled: null });
+    vi.stubEnv('R_BRAIN_OPENAI_API_KEY', 'sk-brain');
+
+    await expect(isBrainEnabled()).resolves.toBe(true);
+  });
+
+  it('lets an explicit stored choice win over the legacy key in both directions', async () => {
+    mockDeploymentSettingsFindFirst.mockResolvedValue({ brainEnabled: false });
+    vi.stubEnv('R_BRAIN_OPENAI_API_KEY', 'sk-brain');
+
+    await expect(resolveBrainEnabledState()).resolves.toEqual({
+      enabled: false,
+      fromLegacyKey: false,
+    });
+
+    invalidateBrainEnabledCache();
+    mockDeploymentSettingsFindFirst.mockResolvedValue({ brainEnabled: true });
+    vi.unstubAllEnvs();
+
+    await expect(resolveBrainEnabledState()).resolves.toEqual({
+      enabled: true,
+      fromLegacyKey: false,
+    });
+  });
+
+  it('caches the answer until invalidated', async () => {
+    mockDeploymentSettingsFindFirst.mockResolvedValue({ brainEnabled: true });
+
+    await expect(isBrainEnabled()).resolves.toBe(true);
+    await expect(isBrainEnabled()).resolves.toBe(true);
+    expect(mockDeploymentSettingsFindFirst).toHaveBeenCalledTimes(1);
+
+    mockDeploymentSettingsFindFirst.mockResolvedValue({ brainEnabled: false });
+    invalidateBrainEnabledCache();
+
+    await expect(isBrainEnabled()).resolves.toBe(false);
   });
 });

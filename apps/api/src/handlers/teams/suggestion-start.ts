@@ -4,21 +4,16 @@ import {
   claimWorkItem,
   db,
   eq,
-  finalizeWorkItemLaunched,
   inArray,
   isNotNull,
-  releaseWorkItemClaim,
   sql,
   trackedMessages,
   workItems,
 } from '@roomote/db/server';
-import {
-  MANAGED_DEPLOYMENT_READ_ONLY_MESSAGE,
-  isDeploymentReadOnlyError,
-} from '@roomote/types';
+import { MANAGED_DEPLOYMENT_READ_ONLY_MESSAGE } from '@roomote/types';
 
 import { apiLogger } from '../../logging.js';
-import { cancelOrphanedWorkItemRunBestEffort } from '../tasks/orphaned-work-item-run.js';
+import { launchClaimedSuggestedTask } from '../tasks/suggestion-launch.js';
 import { claimCurrentThreadSuggestionByMessage } from '../tasks/current-thread-suggestion-reaction.js';
 import { stripTeamsMessageIdSuffix } from './find-active-teams-run.js';
 
@@ -73,6 +68,7 @@ export type ClaimedTeamsSuggestion = {
   investigationContext: string | null;
   targetRepositoryFullName: string | null;
   targetEnvironmentId?: string | null;
+  usesRouterLaunch?: boolean;
   launchClaimedAt: Date;
 };
 
@@ -229,7 +225,7 @@ function buildTeamsSuggestionTaskPromptText(
   suggestion: ClaimedTeamsSuggestion,
 ): string {
   return [
-    `Start this suggested task: ${suggestion.title}`,
+    suggestion.title,
     '',
     suggestion.brief ?? '',
     ...(suggestion.targetRepositoryFullName
@@ -278,97 +274,53 @@ export async function launchClaimedTeamsSuggestion(params: {
   postMessage: (text: string) => Promise<void>;
 }): Promise<LaunchClaimedTeamsSuggestionResult> {
   const { suggestion } = params;
-  const claimedAt = suggestion.launchClaimedAt;
-
-  try {
-    const launch = await params.launchTask(
-      buildTeamsSuggestionTaskPromptText(suggestion),
-    );
-
-    if (launch.status === 'started') {
-      // Close the launch state machine: `launching` -> `launched` with the
-      // task link, so a later "start idea N" can never relaunch this
-      // suggestion and the task stays linked to its work item.
-      const finalized = await finalizeWorkItemLaunched(db, {
-        id: suggestion.id,
-        taskId: launch.launchResult.taskId,
-        claimedAt,
-      });
-
-      if (!finalized) {
-        // The task is already enqueued but the fencing guard rejected the
-        // finalize (our stale claim was reclaimed by another launcher), so
-        // the run is orphaned from the work item. Best-effort cancel it while
-        // it is still pre-sandbox; log loudly either way with the outcome.
-        const cancelNote = await cancelOrphanedWorkItemRunBestEffort(
-          launch.launchResult.id,
-        );
-
-        apiLogger.warn(
-          `[teams] finalize lost the fencing guard for work item ${suggestion.id}; task ${launch.launchResult.taskId} (run ${launch.launchResult.id}) was orphaned — ${cancelNote}`,
-        );
-
-        // startNewTeamsTask already posted its started acknowledgement before
-        // the finalize, so correct it: the user must not follow the canceled
-        // orphan. Surface the claim-lose outcome instead of a started one.
-        await params.postMessage(
-          `"${suggestion.title}" was already started elsewhere — this duplicate launch was canceled.`,
-        );
-
-        return { result: 'already_started' };
-      }
-
-      return { result: 'started', runId: launch.launchResult.id };
-    }
-
-    // Routing answered inline; no task was launched. Release the claim so the
-    // suggestion is retryable now instead of dead for the stale window.
-    await releaseWorkItemClaim(db, { id: suggestion.id, claimedAt });
-
-    return { result: 'replied_inline' };
-  } catch (error) {
-    if (isDeploymentReadOnlyError(error)) {
-      await releaseWorkItemClaim(db, { id: suggestion.id, claimedAt }).catch(
-        (releaseError) => {
-          apiLogger.warn(
-            `[teams] Failed to release claim for work item ${suggestion.id} after read-only launch block: ${
-              releaseError instanceof Error
-                ? releaseError.message
-                : String(releaseError)
-            }`,
-          );
-        },
+  const launchResult = await launchClaimedSuggestedTask({
+    suggestion,
+    policy: {
+      usesRouterLaunch: suggestion.usesRouterLaunch === true,
+      userDefaultEnabled: false,
+      fastAvailable: false,
+    },
+    launch: async () => {
+      const launch = await params.launchTask(
+        buildTeamsSuggestionTaskPromptText(suggestion),
       );
+      return launch.status === 'started'
+        ? {
+            accepted: true,
+            runId: launch.launchResult.id,
+            taskId: launch.launchResult.taskId,
+          }
+        : { accepted: false };
+    },
+  });
 
-      await params.postMessage(MANAGED_DEPLOYMENT_READ_ONLY_MESSAGE);
-
-      return { result: 'launch_failed' };
-    }
-
-    apiLogger.warn(
-      `[teams] Failed to launch suggestion ${suggestion.id} from "start idea" reply: ${
-        error instanceof Error ? error.message : String(error)
-      }`,
-    );
-
-    // Release the claim (fenced on our token) so the suggestion becomes
-    // retryable immediately rather than after the 10-minute stale window.
-    await releaseWorkItemClaim(db, { id: suggestion.id, claimedAt }).catch(
-      (releaseError) => {
-        apiLogger.warn(
-          `[teams] Failed to release claim for work item ${suggestion.id} after launch failure: ${
-            releaseError instanceof Error
-              ? releaseError.message
-              : String(releaseError)
-          }`,
-        );
-      },
-    );
-
-    await params.postMessage(
-      `Could not start "${suggestion.title}" — try describing the task in a message instead.`,
-    );
-
-    return { result: 'launch_failed' };
+  if (launchResult.status === 'started') {
+    return { result: 'started', runId: launchResult.runId! };
   }
+  if (launchResult.status === 'rejected') {
+    return { result: 'replied_inline' };
+  }
+  if (
+    launchResult.status === 'finalize_lost' ||
+    launchResult.status === 'finalize_failed'
+  ) {
+    apiLogger.warn(
+      `[teams] failed to finalize work item ${suggestion.id}; task ${launchResult.taskId ?? 'null'} (run ${launchResult.runId ?? 'null'}) — ${launchResult.cancelNote}`,
+    );
+    await params.postMessage(
+      `"${suggestion.title}" was already started elsewhere — this duplicate launch was canceled.`,
+    );
+    return { result: 'already_started' };
+  }
+
+  apiLogger.warn(
+    `[teams] Failed to launch suggestion ${suggestion.id}: ${launchResult.error instanceof Error ? launchResult.error.message : String(launchResult.error)}`,
+  );
+  await params.postMessage(
+    launchResult.readOnly
+      ? MANAGED_DEPLOYMENT_READ_ONLY_MESSAGE
+      : `Could not start "${suggestion.title}" — try describing the task in a message instead.`,
+  );
+  return { result: 'launch_failed' };
 }

@@ -1,6 +1,8 @@
 import { format, formatDistanceToNowStrict } from 'date-fns';
 import { enUS } from 'date-fns/locale';
 
+import { ALL_REPOSITORIES } from '@roomote/types';
+
 /**
  * Formats a number to be more readable (e.g., 2300 → 2.3K, 6700000 → 6.7M)
  * @param value The number to format
@@ -176,4 +178,13 @@ export function formatTokens(tokens: number): string {
   }
 
   return `${(tokens / 1000000000).toFixed(1)}B`;
+}
+
+/**
+ * Repository names may carry the ALL_REPOSITORIES sentinel; render its pretty
+ * label instead of the raw `__all_repositories__` value.
+ */
+export function formatRepositoryName(name: string): string {
+  // replaceAll also covers combined values like `repo#123` PR labels.
+  return name.replaceAll(ALL_REPOSITORIES, 'All Repositories');
 }

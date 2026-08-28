@@ -446,13 +446,17 @@ export async function fetchIssueComment({
   gitHubToken,
   repo,
   commentId,
-}: FetchParams & { commentId: number }): Promise<IssueComment> {
+  signal,
+}: FetchParams & {
+  commentId: number;
+  signal?: AbortSignal;
+}): Promise<IssueComment> {
   const env = { GH_TOKEN: gitHubToken };
 
   const result = await execa(
     'gh',
     ['api', `repos/${repo}/issues/comments/${commentId}`],
-    { env },
+    { env, signal },
   );
 
   try {

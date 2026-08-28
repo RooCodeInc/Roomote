@@ -511,10 +511,10 @@ const manageTasksToolDescription =
   'Use action "search" to find tasks by query or status. ' +
   `Use action "get_summary" to inspect a specific task's latest status and failure details (requires taskId). ` +
   'Use action "get_compute_logs" to fetch all compute logs for a task, including per-job command output for compute providers that support output lookup when the job has both a machine id and sandbox command id (requires taskId). ' +
-  'Use action "get_messages" to retrieve the latest message history for a task (requires taskId, returns newest first). ' +
+  'Use action "get_messages" to retrieve the latest message history for a task or Fast session (requires taskId, returns newest first). For a Fast session, pass its canonical session ID as taskId. ' +
   `Use action "launch" to create and start a new task against an environment using ${PRODUCT_NAME}'s default standard workflow (requires prompt and environmentId). ` +
   'Use action "cancel" to cancel an active task (requires taskId). ' +
-  'Use action "send_message" to send a follow-up message to a running task (requires taskId and message). ' +
+  'Use action "send_message" to send a follow-up message to a running task or Fast session (requires taskId and message). For a Fast session, pass its canonical session ID as taskId. ' +
   'Use action "list_models" to list the enabled model IDs available for task model selection. Call it before "update_models" when resolving a requested model name to an exact ID. ' +
   'Use action "update_models" ONLY when the user explicitly asks to change the model or reasoning level for a task (requires role; taskId defaults to the current task). Pass the desired model id and/or reasoningEffort; omit both to reset the role to the deployment default. Users usually phrase both together: in "switch to Luna Max" or "use GPT 5.4 medium", the trailing low/medium/high/extra high/max word is the reasoningEffort and the rest names the model — set BOTH fields in one call. Changes apply from the next turn, so a change to the current task does not affect the turn that is already running.';
 
@@ -537,7 +537,7 @@ const manageTasksInputSchema = {
     .string()
     .optional()
     .describe(
-      'The task ID (required for get_summary, get_compute_logs, get_messages, cancel, and send_message)',
+      'The task ID; for get_messages and send_message this may instead be a canonical Fast session ID',
     ),
   message: z
     .string()

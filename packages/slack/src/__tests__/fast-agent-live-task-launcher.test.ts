@@ -1,5 +1,6 @@
 const mocks = vi.hoisted(() => ({
   enqueueTask: vi.fn(),
+  getSessionForTask: vi.fn(),
   getSlackLiveTaskStreamData: vi.fn(),
   setSlackLiveTaskStreamData: vi.fn(),
   postMessage: vi.fn(),
@@ -60,6 +61,15 @@ vi.mock('@roomote/cloud-agents/server', () => ({
   },
 }));
 
+vi.mock('@roomote/db/server', () => ({
+  db: {},
+  getSessionForTask: mocks.getSessionForTask,
+}));
+
+vi.mock('@roomote/env', () => ({
+  Env: { R_APP_URL: 'https://roomote.example' },
+}));
+
 vi.mock('../live-task-stream', () => ({
   buildSlackLiveTaskTitle: (prompt: string) => prompt,
   getSlackLiveTaskStreamData: mocks.getSlackLiveTaskStreamData,
@@ -94,6 +104,7 @@ describe('createFastAgentSlackLiveTaskLauncher', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.enqueueTask.mockResolvedValue(undefined);
+    mocks.getSessionForTask.mockResolvedValue(null);
     mocks.getSlackLiveTaskStreamData.mockResolvedValue(null);
     mocks.postMessageDetailed.mockResolvedValue({ ts: 'card-ts' });
     mocks.postMessage.mockResolvedValue('fallback-ts');
@@ -105,11 +116,11 @@ describe('createFastAgentSlackLiveTaskLauncher', () => {
   const taskLinkFallback = {
     channel: 'C123',
     thread_ts: '100.001',
-    text: 'Open the task: https://roomote.example/task/task-1',
+    text: 'Open in Roomote: https://roomote.example/task/task-1',
     blocks: [
       {
         type: 'markdown',
-        text: '[Open the task](https://roomote.example/task/task-1)',
+        text: '[Open in Roomote](https://roomote.example/task/task-1)',
       },
     ],
     unfurl_links: false,
@@ -135,18 +146,18 @@ describe('createFastAgentSlackLiveTaskLauncher', () => {
     expect(mocks.postMessageDetailed).toHaveBeenCalledWith({
       channel: 'C123',
       thread_ts: '100.001',
-      text: 'Starting task…\n<https://roomote.example/task/task-1|Open the task>',
+      text: 'Preparing workspace…\n<https://roomote.example/task/task-1|Open in Roomote>',
       blocks: [
         expect.objectContaining({
           type: 'task_card',
           task_id: 'roomote-task-task-1',
-          title: 'Starting task…',
+          title: 'Preparing workspace…',
           status: 'in_progress',
           sources: [
             {
               type: 'url',
               url: 'https://roomote.example/task/task-1',
-              text: 'View task',
+              text: 'Open in Roomote',
             },
           ],
         }),
@@ -178,6 +189,34 @@ describe('createFastAgentSlackLiveTaskLauncher', () => {
       rendersTaskLink: true,
       environmentId: 'env-1',
     });
+  });
+
+  it('links the card to the session when the task already has one', async () => {
+    mocks.getSessionForTask.mockResolvedValue({ id: 'session-1' });
+
+    await createLauncher()({
+      prompt: 'Add a regression test',
+      environmentId: null,
+      parentSessionId: '11111111-1111-4111-8111-111111111111',
+      postKickoff: vi.fn(),
+    });
+
+    const sessionUrl = 'https://roomote.example/sessions/session-1?task=task-1';
+    expect(mocks.postMessageDetailed).toHaveBeenCalledWith(
+      expect.objectContaining({
+        blocks: [
+          expect.objectContaining({
+            sources: [
+              { type: 'url', url: sessionUrl, text: 'Open in Roomote' },
+            ],
+          }),
+        ],
+      }),
+    );
+    expect(mocks.setSlackLiveTaskStreamData).toHaveBeenCalledWith(
+      'task-1',
+      expect.objectContaining({ taskUrl: sessionUrl }),
+    );
   });
 
   it('reuses an existing card instead of posting a second one', async () => {
@@ -292,7 +331,7 @@ describe('createFastAgentSlackLiveTaskLauncher', () => {
               {
                 type: 'url',
                 url: 'https://roomote.example/task/task-1',
-                text: 'View task',
+                text: 'Open in Roomote',
               },
             ],
           }),

@@ -15,11 +15,15 @@ import {
   type SlackEvent,
   type SlackNotifier,
 } from '@roomote/slack';
-import { stripLeadingSlackProductMention } from '@roomote/cloud-agents';
+import {
+  appendAttachmentTextsToPromptText,
+  stripLeadingSlackProductMention,
+} from '@roomote/cloud-agents';
 import { resolveUserMcpServerConfigs } from '@roomote/sdk/server';
 
 import { LEADING_FAST_COMMAND_MENTION_PATTERN } from '../constants.js';
 import { postSlackThreadMarkdownMessage } from '../helpers/thread-posting.js';
+import { processSlackAttachments } from '../helpers/attachments.js';
 
 export function stripLeadingFastCommandMention(text: string): string {
   return text.replace(LEADING_FAST_COMMAND_MENTION_PATTERN, '').trimStart();
@@ -66,6 +70,8 @@ export async function processFastAgentMessage(params: {
   launchTask: LaunchFastAgentTask;
   processingReactionName?: string;
   isExistingConversation?: boolean;
+  onAccepted?: (abort: () => Promise<void>) => void;
+  onRejected?: () => void;
 }): Promise<void> {
   const {
     event,
@@ -95,6 +101,7 @@ export async function processFastAgentMessage(params: {
   });
 
   if (!releaseFastAgentLock) {
+    params.onRejected?.();
     console.error(
       `[SlackWebhook] Fast turn lock did not become available for ${teamId}:${event.channel}:${threadId}`,
     );
@@ -106,7 +113,7 @@ export async function processFastAgentMessage(params: {
       stripLeadingFastCommandMention(event.authoredText ?? event.text),
     ),
   );
-  const question = extractFastQuestion(normalizedText, continuation) ?? '';
+  const baseQuestion = extractFastQuestion(normalizedText, continuation) ?? '';
 
   let didAddProcessingReaction = false;
 
@@ -125,6 +132,11 @@ export async function processFastAgentMessage(params: {
     // Resolved ahead of the turn so replies can carry the session footer;
     // the service's own getOrCreate finds this same row.
     const session = await getOrCreateFastAgentSession({ userId, conversation });
+    params.onAccepted?.(() =>
+      releaseFastAgentLock.abort(
+        new Error('Fast suggestion launch settlement failed.'),
+      ),
+    );
 
     let threadContext: Awaited<ReturnType<typeof slack.fetchThreadMessages>> =
       [];
@@ -149,14 +161,20 @@ export async function processFastAgentMessage(params: {
       eventFiles: event.files,
       messages: threadContext,
     });
-    const images = currentMessageFiles?.length
-      ? await slack.processSlackFiles(currentMessageFiles).catch((error) => {
-          console.error(
-            `[SlackWebhook] Failed to process Fast message images: ${error instanceof Error ? error.message : String(error)}`,
-          );
-          return [];
-        })
-      : [];
+    const attachments = await processSlackAttachments({
+      slack,
+      files: currentMessageFiles,
+      userId,
+      userTextContext: baseQuestion,
+    });
+    const attachmentTexts = [
+      ...attachments.attachmentTexts,
+      ...attachments.videoDescriptions,
+    ];
+    const question = appendAttachmentTextsToPromptText({
+      text: baseQuestion,
+      attachmentTexts,
+    });
     const serializedThreadContext = threadContext
       .filter((message) => message.ts !== event.ts)
       .map((message) => ({
@@ -172,7 +190,8 @@ export async function processFastAgentMessage(params: {
       : activeTasks;
     const responseText = await answerFastAgentQuestion({
       question,
-      images,
+      images: attachments.images,
+      attachmentTexts,
       currentMessageAgentContext: event.agentContext,
       threadContext: serializedThreadContext,
       userId,

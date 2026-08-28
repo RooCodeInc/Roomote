@@ -1,0 +1,1 @@
+ALTER TABLE "deployment_settings" ADD COLUMN "brain_enabled" boolean;

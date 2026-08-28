@@ -15,6 +15,7 @@ import {
 import { useTRPC } from '@/trpc/client';
 import { usePageTitle } from '@/hooks/usePageTitle';
 import { useRecentTasks } from '@/hooks/useRecentTasks';
+import { truncatePageTitle } from '@/lib/page-title';
 
 import { FramedSurface } from '@/components/layout';
 import { EmptyState } from '@/components/system';
@@ -118,11 +119,7 @@ export default function SandboxPage() {
     }
   }, [taskId, unresolvedTaskId, recordVisit]);
 
-  usePageTitle(
-    task && task.title.length > 60
-      ? `${task.title.slice(0, 60)}...`
-      : task?.title,
-  );
+  usePageTitle(truncatePageTitle(task?.title));
 
   useEffect(() => {
     if (sessionState !== 'interactive') {

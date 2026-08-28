@@ -13,7 +13,10 @@ vi.mock('../../task-url', () => ({
 
 import { ALL_REPOSITORIES, TaskPayloadKind } from '@roomote/types';
 
-import { createFastAgentSlackTaskLauncher } from '../fast-agent-task-launcher';
+import {
+  createFastAgentSlackTaskLauncher,
+  createFastAgentWebTaskLauncher,
+} from '../fast-agent-task-launcher';
 
 describe('createFastAgentSlackTaskLauncher', () => {
   beforeEach(() => {
@@ -86,6 +89,7 @@ describe('createFastAgentSlackTaskLauncher', () => {
             slackConversationUrl:
               'https://acme.slack.com/archives/C123/p100002?thread_ts=100.001&cid=C123',
             communicationContextInherited: true,
+            reportConsumer: 'orchestrator',
             fastAgentSessionId: '11111111-1111-4111-8111-111111111111',
             fastAgentParent: {
               sessionId: '11111111-1111-4111-8111-111111111111',
@@ -116,6 +120,9 @@ describe('createFastAgentSlackTaskLauncher', () => {
       taskId: 'task-1',
       taskUrl: 'https://roomote.example/task/task-1',
     });
+    expect(
+      mocks.enqueueTask.mock.calls[0]?.[0]?.task.payload,
+    ).not.toHaveProperty('images');
     expect(order).toEqual(['kickoff', 'queued']);
   });
 
@@ -161,6 +168,31 @@ describe('createFastAgentSlackTaskLauncher', () => {
     const task = mocks.enqueueTask.mock.calls[0]?.[0]?.task;
     expect(task.payload).toMatchObject({ repo: ALL_REPOSITORIES });
     expect(task.payload).not.toHaveProperty('environmentId');
+  });
+
+  it('retains multiple Fast turn images in the child task payload', async () => {
+    const images = [
+      'data:image/png;base64,cG5nLWJ5dGVz',
+      'data:image/webp;base64,d2VicC1ieXRlcw==',
+    ];
+    const launchTask = createFastAgentSlackTaskLauncher({
+      userId: 'user-1',
+      teamId: 'T123',
+      channelId: 'C123',
+      threadTs: '100.001',
+    });
+
+    await launchTask({
+      prompt: 'Implement the UI shown in these screenshots',
+      images,
+      environmentId: null,
+      parentSessionId: '11111111-1111-4111-8111-111111111111',
+      postKickoff: vi.fn(),
+    });
+
+    expect(mocks.enqueueTask.mock.calls[0]?.[0]?.task.payload.images).toEqual(
+      images,
+    );
   });
 
   it('runs afterKickoff inside the launch gate', async () => {
@@ -346,5 +378,46 @@ describe('createFastAgentSlackTaskLauncher', () => {
       }),
     ).rejects.toThrow('Slack failed');
     expect(queued).toBe(false);
+  });
+});
+
+describe('createFastAgentWebTaskLauncher', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.enqueueTask.mockImplementation(
+      async (
+        _input: unknown,
+        options: {
+          beforeEnqueue: (taskRun: { taskId: string }) => Promise<void>;
+        },
+      ) => {
+        await options.beforeEnqueue({ taskId: 'task-1' });
+        return { taskId: 'task-1' };
+      },
+    );
+  });
+
+  it('keeps the kickoff free of a duplicate task link', async () => {
+    const postKickoff = vi.fn();
+
+    await createFastAgentWebTaskLauncher({
+      userId: 'user-1',
+      conversation: {
+        surface: 'web',
+        workspaceId: 'workspace-1',
+        conversationId: 'conversation-1',
+      },
+    })({
+      prompt: 'Fix checkout',
+      environmentId: null,
+      parentSessionId: '11111111-1111-4111-8111-111111111111',
+      postKickoff,
+    });
+
+    expect(postKickoff).toHaveBeenCalledWith({
+      taskId: 'task-1',
+      taskUrl: 'https://roomote.example/task/task-1',
+      taskLinkRendered: true,
+    });
   });
 });

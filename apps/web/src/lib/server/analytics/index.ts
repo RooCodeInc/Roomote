@@ -23,6 +23,7 @@ import {
   getCostAnalyticsRows,
 } from './cost-rows';
 import { getTaskAnalyticsRows } from './task-rows';
+import { getSessionAnalyticsRows } from './session-rows';
 import {
   buildPullRequestAnalyticsSummary,
   getPullRequestAnalyticsRows,
@@ -39,6 +40,8 @@ async function getAnalyticsRows(
   metric: AnalyticsMetric = getDefaultAnalyticsMetric(object),
 ) {
   switch (object) {
+    case 'sessions':
+      return getSessionAnalyticsRows(auth, timePeriod, now);
     case 'tasks':
       return getTaskAnalyticsRows(auth, timePeriod, now, metric);
     case 'pullRequests':
@@ -53,13 +56,24 @@ function getAnalyticsDetailsColumns(
   metric: AnalyticsMetric = getDefaultAnalyticsMetric(object),
 ): AnalyticsDetailsColumn[] {
   switch (object) {
+    case 'sessions':
+      return [
+        { key: 'date', label: 'Date' },
+        { key: 'user', label: 'User' },
+        { key: 'source', label: 'Source' },
+        { key: 'status', label: 'Status' },
+        { key: 'ownerKind', label: 'Owner kind' },
+        { key: 'hasExecution', label: 'Has execution' },
+        { key: 'sessionTitle', label: 'Session' },
+        { key: 'session', label: 'Session Link' },
+      ];
     case 'tasks': {
       const columns: AnalyticsDetailsColumn[] = [
         { key: 'date', label: 'Date' },
         { key: 'user', label: 'User' },
         { key: 'project', label: 'Environment' },
         { key: 'source', label: 'Source' },
-        { key: 'taskType', label: 'Task Type' },
+        { key: 'taskType', label: 'Type' },
         { key: 'taskTitle', label: 'Task Title' },
         { key: 'task', label: 'Task Link' },
       ];
@@ -87,7 +101,7 @@ function getAnalyticsDetailsColumns(
       return [
         { key: 'date', label: 'Date' },
         { key: 'user', label: 'User' },
-        { key: 'taskType', label: 'Task Type' },
+        { key: 'taskType', label: 'Type' },
         { key: 'project', label: 'Environment' },
         { key: 'source', label: 'Source' },
         { key: 'provider', label: 'Provider' },

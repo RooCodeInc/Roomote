@@ -531,7 +531,7 @@ describe('subscribeHarnessCallbacks', () => {
       'runtime-session-transient',
       {
         type: 'completion',
-        text: 'Task completed.',
+        text: 'Ready.',
         ts: expect.any(Number),
         provisional: true,
       },

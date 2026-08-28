@@ -4,11 +4,18 @@ import {
   eq,
   fastAgentConversations,
   fastAgentMessages,
+  inArray,
+  sessions,
   userFactory,
   users,
 } from '@roomote/db/server';
 
-import { fastAgentConversationRepository } from '../fast-agent-conversation-repository';
+import {
+  fastAgentConversationRepository,
+  INTERRUPTED_INFERENCE_RETRY_MESSAGE,
+  reconcileExpiredFastAgentInferenceRetryNotices,
+  reconcileFastAgentInferenceRetryNotices,
+} from '../fast-agent-conversation-repository';
 import { hasFastAgentSession } from '../fast-agent-session';
 
 const createdUserIds: string[] = [];
@@ -417,5 +424,119 @@ describe('Fast conversation repository', () => {
           (block) => block.type === 'text' && block.text === 'Retrying',
         ),
     ).toBe(true);
+  });
+
+  it('reconciles a persisted legacy retry notice after its turn stops', async () => {
+    const user = await createUser();
+    const session = await fastAgentConversationRepository.getOrCreate({
+      userId: user.id,
+      conversation: slackConversation,
+    });
+    await fastAgentConversationRepository.upsertMessage({
+      conversationId: session.id,
+      message: {
+        eventId: 'turn-stale:retry-notice',
+        turnId: 'turn-stale',
+        turnSeq: 1,
+        ts: 100,
+        eventType: 'roomote_runtime.assistant_message',
+        role: 'assistant',
+        contentBlocks: [{ type: 'text', text: 'Retrying in 1s' }],
+        metadata: { visibleInTranscript: true, purpose: 'progress' },
+        payload: { purpose: 'progress' },
+        source: 'web',
+      },
+    });
+
+    await expect(
+      reconcileFastAgentInferenceRetryNotices(session.id),
+    ).resolves.toBe(1);
+
+    const [notice] = await db
+      .select()
+      .from(fastAgentMessages)
+      .where(eq(fastAgentMessages.conversationId, session.id));
+    expect(notice?.contentBlocks).toEqual([
+      { type: 'text', text: INTERRUPTED_INFERENCE_RETRY_MESSAGE },
+    ]);
+    expect(notice?.metadata).toMatchObject({
+      visibleInTranscript: true,
+      purpose: 'closeout',
+      inferenceRetryNotice: true,
+      inferenceRetryActive: false,
+    });
+  });
+
+  it('reconciles only retry notices whose session lease is inactive', async () => {
+    const user = await createUser();
+    const expired = await fastAgentConversationRepository.getOrCreate({
+      userId: user.id,
+      conversation: {
+        surface: 'web',
+        workspaceId: user.id,
+        conversationId: crypto.randomUUID(),
+      },
+    });
+    const active = await fastAgentConversationRepository.getOrCreate({
+      userId: user.id,
+      conversation: {
+        surface: 'web',
+        workspaceId: user.id,
+        conversationId: crypto.randomUUID(),
+      },
+    });
+    const retryMessage = {
+      eventId: 'turn-1:retry-notice:0',
+      turnId: 'turn-1',
+      turnSeq: 1,
+      ts: 100,
+      eventType: 'roomote_runtime.assistant_message' as const,
+      role: 'assistant' as const,
+      contentBlocks: [{ type: 'text' as const, text: 'Retrying in 1s' }],
+      metadata: {
+        visibleInTranscript: true,
+        purpose: 'progress',
+        inferenceRetryNotice: true,
+        inferenceRetryActive: true,
+      },
+      payload: { purpose: 'progress' },
+      source: 'web',
+    };
+    await fastAgentConversationRepository.upsertMessage({
+      conversationId: expired.id,
+      message: retryMessage,
+    });
+    await fastAgentConversationRepository.upsertMessage({
+      conversationId: active.id,
+      message: retryMessage,
+    });
+    await db
+      .update(sessions)
+      .set({ respondingUntil: new Date(Date.now() - 1_000) })
+      .where(eq(sessions.fastConversationId, expired.id));
+    await db
+      .update(sessions)
+      .set({ respondingUntil: new Date(Date.now() + 60_000) })
+      .where(eq(sessions.fastConversationId, active.id));
+
+    await expect(
+      reconcileExpiredFastAgentInferenceRetryNotices(),
+    ).resolves.toBe(1);
+
+    const rows = await db
+      .select({
+        conversationId: fastAgentMessages.conversationId,
+        metadata: fastAgentMessages.metadata,
+      })
+      .from(fastAgentMessages)
+      .where(
+        inArray(fastAgentMessages.conversationId, [expired.id, active.id]),
+      );
+    expect(
+      rows.find((row) => row.conversationId === expired.id)?.metadata,
+    ).toMatchObject({ inferenceRetryActive: false });
+    expect(
+      rows.find((row) => row.conversationId === active.id)?.metadata,
+    ).toMatchObject({ inferenceRetryActive: true });
   });
 });

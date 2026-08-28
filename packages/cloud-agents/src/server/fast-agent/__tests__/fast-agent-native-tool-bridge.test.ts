@@ -80,6 +80,10 @@ describe('Fast native OpenCode tool bridge', () => {
       join(toolsDirectory, 'launch_task.js'),
       'utf8',
     );
+    const sendTaskMessageSource = await readFile(
+      join(toolsDirectory, 'send_task_message.js'),
+      'utf8',
+    );
     const showWidgetSource = await readFile(
       join(toolsDirectory, 'show_widget.js'),
       'utf8',
@@ -113,6 +117,13 @@ describe('Fast native OpenCode tool bridge', () => {
     expect(launchTaskSource).toContain('model: z.string().min(1)');
     expect(launchTaskSource).toContain('deployment-enabled model ID');
     expect(launchTaskSource).toContain(
+      'includeAttachments: z.boolean().optional()',
+    );
+    expect(launchTaskSource).toContain(
+      'Supported current-turn attachments are forwarded only when includeAttachments is true',
+    );
+    expect(launchTaskSource).toContain('defaults to false');
+    expect(launchTaskSource).toContain(
       'Brief user-facing description of the work now underway',
     );
     expect(launchTaskSource).toContain(
@@ -125,6 +136,13 @@ describe('Fast native OpenCode tool bridge', () => {
     expect(launchTaskSource).toContain(
       'to run against all active repositories',
     );
+    expect(sendTaskMessageSource).toContain(
+      'includeAttachments: z.boolean().optional()',
+    );
+    expect(sendTaskMessageSource).toContain(
+      'Supported current-turn attachments are forwarded only when includeAttachments is true',
+    );
+    expect(sendTaskMessageSource).toContain('defaults to false');
     expect(showWidgetSource).toContain('invoke("show_widget"');
     expect(showWidgetSource).toContain('textFallback: z.string().max(4000)');
     expect(showWidgetSource).toContain(

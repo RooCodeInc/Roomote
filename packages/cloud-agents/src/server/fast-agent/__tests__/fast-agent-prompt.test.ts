@@ -127,6 +127,11 @@ describe('buildFastAgentSystemPrompt', () => {
       'Call it immediately, before an acknowledgement or other user-visible response',
     );
     expect(prompt).toContain('kickoffMessage');
+    expect(prompt).toContain('"includeAttachments"');
+    expect(prompt).toContain('attachments are not forwarded by default');
+    expect(prompt).toContain(
+      'supported attachments from the active conversation turn are relevant to that instruction',
+    );
     expect(prompt).toContain("describing the user's work now underway");
     expect(prompt).toContain(
       'The kickoff acknowledges the request, but it is not the only communication expected while longer work continues',

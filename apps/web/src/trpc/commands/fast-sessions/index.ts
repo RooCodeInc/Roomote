@@ -13,7 +13,12 @@ import {
   resolveUserMcpServerConfigs,
   type FastAgentSurfaceReplyDelivery,
 } from '@roomote/sdk/server';
-import { db, eq, fastAgentConversations } from '@roomote/db/server';
+import {
+  db,
+  eq,
+  fastAgentConversations,
+  getSessionForFastConversation,
+} from '@roomote/db/server';
 import {
   formatErrorForLog,
   getUserDisplayName,
@@ -21,7 +26,10 @@ import {
 } from '@roomote/types';
 
 import type { UserAuthSuccess } from '@/types';
-import { findAccessibleFastSession } from '@/lib/server/fast-sessions';
+import {
+  findAccessibleFastSession,
+  getFastSessionTasks,
+} from '@/lib/server/fast-sessions';
 
 /**
  * Persist the session's model settings when the caller sent an explicit
@@ -80,6 +88,7 @@ type WebFastAgentTurnInput = {
   delivery: FastAgentSurfaceReplyDelivery;
   question: string;
   images?: string[];
+  attachmentTexts?: string[];
   model?: string;
   reasoningEffort?: ReasoningEffort;
   senderDisplayName?: string;
@@ -98,6 +107,7 @@ async function runWebFastAgentTurn({
   delivery,
   question,
   images,
+  attachmentTexts,
   model,
   reasoningEffort,
   senderDisplayName,
@@ -116,6 +126,7 @@ async function runWebFastAgentTurn({
     await answerFastAgentQuestion({
       question,
       images,
+      attachmentTexts,
       userId,
       apiBaseUrl,
       conversation,
@@ -154,10 +165,11 @@ export async function startFastSessionCommand(
   input: {
     text: string;
     images?: string[];
+    attachmentTexts?: string[];
     model?: string | null;
     reasoningEffort?: ReasoningEffort | null;
   },
-): Promise<{ sessionId: string }> {
+): Promise<{ sessionId: string; fastConversationId?: string }> {
   const conversation: WebFastAgentConversation = {
     surface: 'web',
     workspaceId: auth.userId,
@@ -187,11 +199,23 @@ export async function startFastSessionCommand(
     },
     question: input.text,
     images: input.images,
+    attachmentTexts: input.attachmentTexts,
     model: settings.model,
     reasoningEffort: settings.reasoningEffort,
   });
 
-  return { sessionId: session.id };
+  const unifiedSession = await getSessionForFastConversation(db, session.id);
+  return {
+    sessionId: unifiedSession?.id ?? session.id,
+    fastConversationId: session.id,
+  };
+}
+
+export async function getFastSessionTasksCommand(
+  auth: UserAuthSuccess,
+  sessionId: string,
+) {
+  return getFastSessionTasks(auth, sessionId);
 }
 
 export async function replyToFastSessionCommand(
@@ -200,6 +224,7 @@ export async function replyToFastSessionCommand(
     sessionId: string;
     text: string;
     images?: string[];
+    attachmentTexts?: string[];
     model?: string | null;
     reasoningEffort?: ReasoningEffort | null;
   },
@@ -234,6 +259,7 @@ export async function replyToFastSessionCommand(
     delivery,
     question: input.text,
     images: input.images,
+    attachmentTexts: input.attachmentTexts,
     model: settings.model,
     reasoningEffort: settings.reasoningEffort,
     ...(senderDisplayName ? { senderDisplayName } : {}),

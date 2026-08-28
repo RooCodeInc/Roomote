@@ -67,9 +67,12 @@ export {
   type ActivePrReviewFollowUpRequest,
 } from './lib/task-runs/active-pr-review-follow-up';
 export {
+  acquireGithubPrReviewLifecycleLock,
   completeGithubPrReviewCheckFromSummary,
   GITHUB_PR_REVIEW_CHECK_NAME,
   publishGithubPrReviewCheck,
+  reconcileGithubPrReviewCheckForRun,
+  transferGithubPrReviewCheckToRun,
 } from './lib/task-runs/github-pr-review-check';
 export {
   PULL_REQUEST_MERGEABILITY_CHECK_QUEUE_NAME,

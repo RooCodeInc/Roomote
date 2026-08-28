@@ -9,6 +9,7 @@ import {
   asc,
   eq,
   inArray,
+  invalidateBrainEnabledCache,
   sql,
 } from '@roomote/db/server';
 import {
@@ -423,7 +424,7 @@ export async function completeSetupCommand(
 
   const now = new Date();
 
-  await db.transaction(async (tx) => {
+  const defaultedBrainEnabled = await db.transaction(async (tx) => {
     await tx.execute(
       sql`SELECT pg_advisory_xact_lock(hashtext('setup-complete'))`,
     );
@@ -433,15 +434,29 @@ export async function completeSetupCommand(
     // enabled when the field is absent).
     const existingSettings = await tx.query.deploymentSettings.findFirst({
       where: eq(deploymentSettings.id, 'default'),
-      columns: { metadata: true, setupNewState: true },
+      columns: {
+        metadata: true,
+        setupNewState: true,
+        setupCompletedAt: true,
+        brainEnabled: true,
+      },
     });
     const recommendationsWereReviewed =
       normalizeSetupNewState(existingSettings?.setupNewState ?? {})
         .automationRecommendations?.status === 'ready';
     let metadataUpdate: Record<string, unknown> | undefined;
-    const anonymousAnalyticsEnabled = isRoomoteCloudEnabled(Env.R_CLOUD_ENABLED)
+    const cloudEnabled = isRoomoteCloudEnabled(Env.R_CLOUD_ENABLED);
+    const anonymousAnalyticsEnabled = cloudEnabled
       ? true
       : input?.anonymousAnalyticsEnabled;
+    // Setup completion is the shared creation boundary. Default only unfinished
+    // Cloud deployments so existing instances and explicit choices stay intact.
+    const brainEnabledDefault =
+      cloudEnabled &&
+      existingSettings?.setupCompletedAt == null &&
+      existingSettings?.brainEnabled == null
+        ? true
+        : undefined;
     if (anonymousAnalyticsEnabled !== undefined) {
       const existingMetadata =
         existingSettings?.metadata &&
@@ -462,6 +477,9 @@ export async function completeSetupCommand(
           id: 'default',
           setupCompletedAt: now,
           ...(metadataUpdate ? { metadata: metadataUpdate } : {}),
+          ...(brainEnabledDefault === undefined
+            ? {}
+            : { brainEnabled: brainEnabledDefault }),
         })
         .onConflictDoUpdate({
           target: deploymentSettings.id,
@@ -469,6 +487,13 @@ export async function completeSetupCommand(
             setupCompletedAt: now,
             updatedAt: now,
             ...(metadataUpdate ? { metadata: metadataUpdate } : {}),
+            // Evaluate under the conflict row lock so a concurrent explicit
+            // Memory choice wins over this setup default.
+            ...(brainEnabledDefault === undefined
+              ? {}
+              : {
+                  brainEnabled: sql`coalesce(${deploymentSettings.brainEnabled}, ${brainEnabledDefault})`,
+                }),
           },
         }),
       // The first admin going through /setup should not also need /onboarding,
@@ -482,7 +507,13 @@ export async function completeSetupCommand(
     if (!recommendationsWereReviewed) {
       await ensureManagedReviewerEnabledByDefaultInTx(tx, auth);
     }
+
+    return brainEnabledDefault === true;
   });
+
+  if (defaultedBrainEnabled) {
+    invalidateBrainEnabledCache();
+  }
 
   // Setup completion should not wait for the GitHub-backed recommendation scan.
   queueMicrotask(() => {

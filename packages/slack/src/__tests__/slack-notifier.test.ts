@@ -1168,6 +1168,14 @@ describe('SlackNotifier', () => {
         filetype: 'svg',
       };
 
+      const misleadingFilename: SlackFile = {
+        ...smallImage,
+        id: 'F5',
+        name: 'document.png',
+        mimetype: 'application/pdf',
+        filetype: 'pdf',
+      };
+
       getGlobalWithFetch().fetch = vi.fn().mockResolvedValue({
         ok: true,
         arrayBuffer: async () => new TextEncoder().encode('fake-image').buffer,
@@ -1178,6 +1186,7 @@ describe('SlackNotifier', () => {
         largeImage,
         textFile,
         svgFile,
+        misleadingFilename,
       ]);
 
       expect(getGlobalWithFetch().fetch).toHaveBeenCalledTimes(1);

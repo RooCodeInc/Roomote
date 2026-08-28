@@ -82,7 +82,7 @@ describe('settleSlackLiveTaskCardForRun', () => {
               elements: [
                 {
                   type: 'rich_text_section',
-                  elements: [{ type: 'text', text: 'Task canceled.' }],
+                  elements: [{ type: 'text', text: 'Stopped.' }],
                 },
               ],
             },
