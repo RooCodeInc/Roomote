@@ -10,6 +10,10 @@ import type {
   FastAgentConversation,
   FastAgentTurnSource,
 } from './fast-agent-conversation';
+import {
+  captureFastAgentTurnSettled,
+  type FastAgentSessionPath,
+} from './fast-agent-context-telemetry';
 
 const MAX_TERMINAL_ERROR_LENGTH = 4_000;
 
@@ -21,6 +25,7 @@ type FastAgentTurnDiagnosticsContext = {
   hasImages: boolean;
   modelRole: 'primary' | 'small' | 'orchestration';
   turnSource: FastAgentTurnSource;
+  userId: string;
 };
 
 type FastAgentTurnDiagnosticsOptions = {
@@ -60,8 +65,9 @@ export class FastAgentTurnDiagnostics {
   private failureReason: string | undefined;
   private terminalError: unknown;
   private visibleReplyCount = 0;
+  private firstAssistantResponseAt: number | undefined;
   private resolvedModel: string | undefined;
-  private sessionPath: string | undefined;
+  private sessionPath: FastAgentSessionPath | undefined;
   private openCodeSessionId: string | undefined;
   private inferenceQueuedAt: number | undefined;
   private inferenceSetupStartedAt: number | undefined;
@@ -99,15 +105,18 @@ export class FastAgentTurnDiagnostics {
     this.canonicalConversationId = conversationId;
   }
 
-  recordVisibleReply(): void {
+  recordVisibleReply(options: { assistantResponse?: boolean } = {}): void {
     this.visibleReplyCount += 1;
+    if (options.assistantResponse !== false) {
+      this.firstAssistantResponseAt ??= this.now();
+    }
   }
 
   recordModelResolved(model: string): void {
     this.resolvedModel = model;
   }
 
-  recordSessionPath(path: string): void {
+  recordSessionPath(path: FastAgentSessionPath): void {
     this.sessionPath = path;
   }
 
@@ -266,6 +275,47 @@ export class FastAgentTurnDiagnostics {
     ).reduce((total, stats) => total + stats.count, 0);
     const preInferenceFinishedAt =
       this.inferenceQueuedAt ?? this.inferenceStartedAt ?? turnFinishedAt;
+    const serviceDurationMs = turnFinishedAt - this.turnStartedAt;
+    const firstResponseDurationMs =
+      this.firstAssistantResponseAt === undefined
+        ? undefined
+        : this.firstAssistantResponseAt - this.turnStartedAt;
+    const sandboxlessStartupDurationMs =
+      this.inferenceStartedAt === undefined
+        ? undefined
+        : this.inferenceStartedAt - this.turnStartedAt;
+    const inferenceToFirstResponseDurationMs =
+      this.inferenceStartedAt === undefined ||
+      this.firstAssistantResponseAt === undefined
+        ? undefined
+        : this.firstAssistantResponseAt - this.inferenceStartedAt;
+    const inferenceDurationMs =
+      this.inferenceStartedAt !== undefined &&
+      this.inferenceFinishedAt !== undefined
+        ? this.inferenceFinishedAt - this.inferenceStartedAt
+        : undefined;
+    const postInferenceDurationMs =
+      this.inferenceFinishedAt === undefined
+        ? undefined
+        : turnFinishedAt - this.inferenceFinishedAt;
+
+    captureFastAgentTurnSettled({
+      userId: this.context.userId,
+      surface: this.context.conversation.surface,
+      turnSource: this.context.turnSource,
+      sessionPath: this.sessionPath,
+      outcome: this.failed ? 'failure' : 'success',
+      serviceDurationMs,
+      firstResponseDurationMs,
+      sandboxlessStartupDurationMs,
+      inferenceToFirstResponseDurationMs,
+      inferenceDurationMs,
+      postInferenceDurationMs,
+      visibleReplyCount: this.visibleReplyCount,
+      openCodeProviderRetryEventCount: this.openCodeProviderRetryEventCount,
+      roomoteInferenceRetryCount: this.roomoteInferenceRetryCount,
+    });
+
     const logMessage = formatSingleLineLog('[Fast Agent] Turn finished.', {
       surface: this.context.conversation.surface,
       workspaceId: this.context.conversation.workspaceId,
@@ -281,7 +331,10 @@ export class FastAgentTurnDiagnostics {
       releaseSource: this.deployMarker.roomote_release_source,
       outcome: this.failed ? 'failure' : 'success',
       reason: this.failureReason,
-      serviceDurationMs: turnFinishedAt - this.turnStartedAt,
+      serviceDurationMs,
+      firstResponseDurationMs,
+      sandboxlessStartupDurationMs,
+      inferenceToFirstResponseDurationMs,
       preInferenceDurationMs: preInferenceFinishedAt - this.turnStartedAt,
       conversationQueueDurationMs:
         this.inferenceQueuedAt !== undefined &&
@@ -293,15 +346,8 @@ export class FastAgentTurnDiagnostics {
         this.inferenceStartedAt !== undefined
           ? this.inferenceStartedAt - this.inferenceSetupStartedAt
           : undefined,
-      inferenceDurationMs:
-        this.inferenceStartedAt !== undefined &&
-        this.inferenceFinishedAt !== undefined
-          ? this.inferenceFinishedAt - this.inferenceStartedAt
-          : undefined,
-      postInferenceDurationMs:
-        this.inferenceFinishedAt !== undefined
-          ? turnFinishedAt - this.inferenceFinishedAt
-          : undefined,
+      inferenceDurationMs,
+      postInferenceDurationMs,
       processConcurrentTurnCountAtStart: this.processConcurrentTurnCountAtStart,
       openCodeProviderRetryEventCount: this.openCodeProviderRetryEventCount,
       firstOpenCodeProviderRetryElapsedMs:

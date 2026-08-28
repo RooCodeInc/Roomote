@@ -22,6 +22,7 @@ const mocks = vi.hoisted(() => ({
   bindMcpExecutor: vi.fn(),
   captureInferenceContext: vi.fn(),
   captureInferenceAttemptOutcome: vi.fn(),
+  captureTurnSettled: vi.fn(),
   revokeMcpCapabilities: vi.fn(),
   reconcileRetryNotices: vi.fn(),
   nativeExecutor: undefined as
@@ -145,6 +146,7 @@ vi.mock('../fast-agent-integration-broker', () => ({
 vi.mock('../fast-agent-context-telemetry', () => ({
   captureFastAgentInferenceContext: mocks.captureInferenceContext,
   captureFastAgentInferenceAttemptOutcome: mocks.captureInferenceAttemptOutcome,
+  captureFastAgentTurnSettled: mocks.captureTurnSettled,
 }));
 
 vi.mock('../fast-agent-tasks', () => ({
@@ -483,6 +485,29 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       sessionId: 'conversation-1',
       openCodeSessionId: 'opencode-session-1',
     });
+  });
+
+  it('excludes canonical persistence from first-response latency', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(1_000);
+    mocks.upsertMessage.mockImplementation(async ({ message }) => {
+      if (message.eventType === ACP_ENVELOPE_EVENT_TYPES.AssistantMessage) {
+        vi.setSystemTime(Date.now() + 250);
+      }
+    });
+
+    try {
+      await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+
+      expect(mocks.captureTurnSettled).toHaveBeenCalledWith(
+        expect.objectContaining({
+          firstResponseDurationMs: 0,
+          serviceDurationMs: 250,
+        }),
+      );
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('uses a surface-neutral sender envelope for web turns', async () => {
