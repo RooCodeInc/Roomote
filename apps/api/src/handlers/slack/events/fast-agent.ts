@@ -66,6 +66,8 @@ export async function processFastAgentMessage(params: {
   launchTask: LaunchFastAgentTask;
   processingReactionName?: string;
   isExistingConversation?: boolean;
+  onAccepted?: (abort: () => Promise<void>) => void;
+  onRejected?: () => void;
 }): Promise<void> {
   const {
     event,
@@ -95,6 +97,7 @@ export async function processFastAgentMessage(params: {
   });
 
   if (!releaseFastAgentLock) {
+    params.onRejected?.();
     console.error(
       `[SlackWebhook] Fast turn lock did not become available for ${teamId}:${event.channel}:${threadId}`,
     );
@@ -125,6 +128,11 @@ export async function processFastAgentMessage(params: {
     // Resolved ahead of the turn so replies can carry the session footer;
     // the service's own getOrCreate finds this same row.
     const session = await getOrCreateFastAgentSession({ userId, conversation });
+    params.onAccepted?.(() =>
+      releaseFastAgentLock.abort(
+        new Error('Fast suggestion launch settlement failed.'),
+      ),
+    );
 
     let threadContext: Awaited<ReturnType<typeof slack.fetchThreadMessages>> =
       [];

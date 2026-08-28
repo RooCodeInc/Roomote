@@ -31,6 +31,10 @@ import {
 import { ALL_REPOSITORIES } from '@roomote/types';
 
 import { buildCommunicationTaskThreadName } from '../tasks/communication-task-thread.js';
+import {
+  startAcceptedFastAgentTurn,
+  type FastAgentStartResult,
+} from '../fast-agent-entry.js';
 import { replyToDiscordEvent } from './replies.js';
 import {
   discordMetadataForChannel,
@@ -74,28 +78,34 @@ export function getDiscordFastLaunchSourceEventId(input: {
   return `${input.eventId}:fast-launch:${digest}`;
 }
 
-export async function processDiscordFastAgentMessage(input: {
-  event: DiscordGatewayEvent;
-  question: string;
-  sender: DiscordUser;
-  senderUserId: string;
-  provider: DiscordCommunicationProvider;
-  applicationId: string;
-  channel: DiscordChannelContext;
-  metadata: ReturnType<typeof discordMetadataForChannel>;
-  conversationId: string;
-  createAnchoredThread?: boolean;
-  /**
-   * The real Discord message replies and anchored threads attach to. Defaults
-   * to the inbound message's own id; reaction summons pass the reacted-on
-   * message because their synthesized message id is not a real Discord
-   * message.
-   */
-  anchorMessageId?: string;
-  interaction?: DiscordInteractionReplyContext;
-  activeTasks?: { taskId: string }[];
-}): Promise<void> {
-  const message = getDiscordMessageCreate(input.event);
+type DiscordFastAgentSource =
+  | { event: DiscordGatewayEvent; eventId?: never }
+  | { event?: never; eventId: string };
+
+export async function processDiscordFastAgentMessage(
+  input: {
+    question: string;
+    sender: DiscordUser;
+    senderUserId: string;
+    provider: DiscordCommunicationProvider;
+    applicationId: string;
+    channel: DiscordChannelContext;
+    metadata: ReturnType<typeof discordMetadataForChannel>;
+    conversationId: string;
+    createAnchoredThread?: boolean;
+    /** Real Discord message used for replies and anchored threads. */
+    anchorMessageId?: string;
+    interaction?: DiscordInteractionReplyContext;
+    activeTasks?: { taskId: string }[];
+    onAccepted?: (abort: () => Promise<void>) => void;
+    onRejected?: () => void;
+  } & DiscordFastAgentSource,
+): Promise<boolean> {
+  const message = input.event ? getDiscordMessageCreate(input.event) : null;
+  const eventId = 'eventId' in input ? input.eventId : input.event.eventId;
+  if (!eventId) {
+    throw new Error('Discord Fast entry requires a source event id.');
+  }
   const anchorMessageId = input.anchorMessageId ?? message?.id;
   let channel = input.channel;
   let metadata = input.metadata;
@@ -140,10 +150,11 @@ export async function processDiscordFastAgentMessage(input: {
   };
   const releaseFastAgentLock = await acquireFastAgentTurnLock({ conversation });
   if (!releaseFastAgentLock) {
+    input.onRejected?.();
     console.error(
       `[Discord] Fast turn lock did not become available for ${conversation.workspaceId}:${conversation.conversationId}`,
     );
-    return;
+    return false;
   }
 
   try {
@@ -163,6 +174,11 @@ export async function processDiscordFastAgentMessage(input: {
       userId: input.senderUserId,
       conversation,
     });
+    input.onAccepted?.(() =>
+      releaseFastAgentLock.abort(
+        new Error('Fast suggestion launch settlement failed.'),
+      ),
+    );
     const postFastReplyWithFooter = async (text: string) => {
       const footerText = buildFastSessionReplyFooterText({
         provider: 'discord',
@@ -277,7 +293,7 @@ export async function processDiscordFastAgentMessage(input: {
               user: input.sender.global_name?.trim() || input.sender.username,
               userId: input.senderUserId,
               ts: getDiscordFastLaunchSourceEventId({
-                eventId: input.event.eventId,
+                eventId,
                 prompt,
                 environmentId,
                 model,
@@ -408,4 +424,23 @@ export async function processDiscordFastAgentMessage(input: {
   } finally {
     await releaseFastAgentLock().catch(() => {});
   }
+  return true;
+}
+
+export function startDiscordFastAgentResponse(
+  input: Parameters<typeof processDiscordFastAgentMessage>[0],
+): Promise<FastAgentStartResult> {
+  return startAcceptedFastAgentTurn({
+    run: ({ onAccepted, onRejected }) =>
+      processDiscordFastAgentMessage({
+        ...input,
+        onAccepted,
+        onRejected,
+      }),
+    onError: (error) => {
+      console.error(
+        `[Discord] Fast suggestion response failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    },
+  });
 }

@@ -132,6 +132,7 @@ beforeEach(() => {
     brief: 'The retry loop never terminates.',
     investigationContext: null,
     targetRepositoryFullName: null,
+    usesRouterLaunch: true,
     launchClaimedAt: CLAIMED_AT,
   });
   findCurrentThreadSuggestionIdByMessageMock.mockResolvedValue(WORK_ITEM_ID);
@@ -143,6 +144,7 @@ beforeEach(() => {
       brief: 'The retry loop never terminates.',
       investigationContext: null,
       targetRepositoryFullName: null,
+      usesRouterLaunch: true,
       launchClaimedAt: CLAIMED_AT,
     },
   });
@@ -224,6 +226,23 @@ describe('handleTelegramCallbackQuery suggestion launch lifecycle', () => {
         queuedMessage: expect.objectContaining({ threadTs: '44' }),
         metadata: expect.objectContaining({ communicationThreadId: '44' }),
       }),
+    );
+  });
+
+  it('keeps router-backed suggestions on the coding path when Fast is unavailable', async () => {
+    startNewTelegramTaskMock.mockResolvedValue({
+      status: 'started',
+      launchResult: { id: 7, taskId: 'task-1' },
+    });
+
+    await handleTelegramCallbackQuery(buildSuggestionQuery());
+
+    expect(startNewTelegramTaskMock).toHaveBeenCalledWith(
+      expect.not.objectContaining({ workspaceOverride: expect.anything() }),
+    );
+    expect(finalizeWorkItemLaunchedMock).toHaveBeenCalledWith(
+      expect.anything(),
+      { id: WORK_ITEM_ID, taskId: 'task-1', claimedAt: CLAIMED_AT },
     );
   });
 

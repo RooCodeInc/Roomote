@@ -262,6 +262,7 @@ describe('Discord setup suggestions', () => {
       investigationContext: null,
       targetRepositoryFullName: null,
       targetEnvironmentId: null,
+      usesRouterLaunch: true,
     });
   });
 });
