@@ -115,4 +115,4 @@ export function ArchitectureSnapshotContent({ content }: { content: string }) {
   );
 }
 
-export { formatSourceLocation, toMermaidMarkdown };
+export { toMermaidMarkdown };
