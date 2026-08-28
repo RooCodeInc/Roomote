@@ -43,6 +43,7 @@ export async function handleUpload(
           `Invalid architecture snapshot: ${snapshot.error.issues[0]?.message ?? 'Invalid contract'}`,
         );
       }
+      preparedArtifact.contentType = 'application/json';
     }
     const result = await uploadPreparedArtifact(config, {
       taskId: input.taskId,

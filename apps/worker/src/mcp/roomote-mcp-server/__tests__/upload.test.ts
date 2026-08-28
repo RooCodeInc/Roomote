@@ -175,9 +175,9 @@ describe('handleUpload', () => {
     );
   });
 
-  it('validates architecture snapshot content before uploading', async () => {
+  it('uploads a valid extensionless architecture snapshot as JSON', async () => {
     await writeFile(
-      join(testDir, 'architecture.json'),
+      join(testDir, 'architecture-snapshot'),
       JSON.stringify({
         schemaVersion: 1,
         title: 'Artifact flow',
@@ -209,7 +209,7 @@ describe('handleUpload', () => {
 
     const result = await handleUpload(
       {
-        path: 'architecture.json',
+        path: 'architecture-snapshot',
         taskId: 'task-1',
         artifactType: 'architecture-snapshot',
       },
@@ -219,13 +219,16 @@ describe('handleUpload', () => {
     expect(fetchMock).toHaveBeenCalledTimes(3);
     expect(
       JSON.parse(fetchMock.mock.calls[0]![1]!.body as string),
-    ).toMatchObject({ artifactType: 'architecture-snapshot' });
+    ).toMatchObject({
+      artifactType: 'architecture-snapshot',
+      contentType: 'application/json',
+    });
     expect(JSON.parse(result.content[0]!.text)).toMatchObject({
       success: true,
       artifactId: 'art-snapshot',
       artifactType: 'architecture-snapshot',
       version: 1,
-      path: 'architecture.json',
+      path: 'architecture-snapshot',
     });
   });
 
