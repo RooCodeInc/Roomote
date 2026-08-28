@@ -1967,38 +1967,6 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     expect(launchTask.mock.calls[0]?.[0]).not.toHaveProperty('images');
   });
 
-  it('keeps includeImages image-only for task launches', async () => {
-    const launchTask = vi.fn<LaunchFastAgentTask>(async ({ postKickoff }) => {
-      await postKickoff({ taskId: 'task-1' });
-      return { success: true, taskId: 'task-1' };
-    });
-    mocks.generateText.mockImplementation(
-      async (_params, _session, options) => {
-        await options.onSessionReady('opencode-session-1');
-        await invokeTool(nativeToolNames.launchTask, {
-          prompt: 'Use the screenshot.',
-          includeImages: true,
-          kickoffMessage: 'I’m checking the screenshot.',
-        });
-        return '';
-      },
-    );
-
-    await answerFastAgentQuestion({
-      ...baseParams,
-      images: ['data:image/png;base64,c2NyZWVuc2hvdA=='],
-      attachmentTexts: ['Attachment: plan.md\nNot forwarded by includeImages.'],
-      adapter: callbacks({ launchTask }),
-    });
-
-    expect(launchTask).toHaveBeenCalledWith(
-      expect.objectContaining({
-        prompt: 'Use the screenshot.',
-        images: ['data:image/png;base64,c2NyZWVuc2hvdA=='],
-      }),
-    );
-  });
-
   it.each(['slack', 'discord', 'teams', 'telegram'] as const)(
     'passes structured suggestions through a %s automation closeout',
     async (surface) => {
@@ -2369,41 +2337,6 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       {
         taskId: 'task-1',
         message: 'Include the failing test.',
-      },
-    );
-  });
-
-  it('keeps includeImages as an image-only compatibility option', async () => {
-    mocks.getActiveTasks.mockResolvedValue([
-      { taskId: 'task-1', title: 'Checkout', status: 'running' },
-    ]);
-    mocks.generateText.mockImplementation(
-      async (_params, _session, options) => {
-        await options.onSessionReady('opencode-session-1');
-        await invokeTool(nativeToolNames.sendTaskMessage, {
-          taskId: 'task-1',
-          message: 'Use the screenshot.',
-          includeImages: true,
-        });
-        return '';
-      },
-    );
-
-    await answerFastAgentQuestion({
-      ...baseParams,
-      images: ['data:image/png;base64,c2NyZWVuc2hvdA=='],
-      attachmentTexts: [
-        'Attachment: private-plan.md\nDo not forward implicitly.',
-      ],
-      adapter: callbacks(),
-    });
-
-    expect(mocks.sendTaskMessage).toHaveBeenCalledWith(
-      expect.objectContaining({ userId: 'user-1' }),
-      {
-        taskId: 'task-1',
-        message: 'Use the screenshot.',
-        images: ['data:image/png;base64,c2NyZWVuc2hvdA=='],
       },
     );
   });
