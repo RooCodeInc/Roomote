@@ -367,6 +367,10 @@ export async function captureActivationTaskCreated(
   );
 }
 
+export async function captureActivationTrialInferenceUsed(): Promise<void> {
+  return captureInstanceEvent('activation_trial_inference_used');
+}
+
 export async function captureActivationPrMerged(properties: {
   provider: string;
   workflow: string;
