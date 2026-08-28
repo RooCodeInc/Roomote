@@ -1,6 +1,16 @@
+import { getTaskReportConsumerFromPayload } from '@roomote/types';
+
 import { standardTask } from '../standardTask';
 
 describe('standardTask reporting consumer', () => {
+  it('normalizes the legacy persisted consumer value', () => {
+    expect(
+      getTaskReportConsumerFromPayload({
+        reportConsumer: 'fast-orchestrator',
+      }),
+    ).toBe('orchestrator');
+  });
+
   it('gives orchestrator-owned coding tasks an internal factual report contract', () => {
     const { harnessInstructions } = standardTask({
       description: 'Implement the delegated change',
