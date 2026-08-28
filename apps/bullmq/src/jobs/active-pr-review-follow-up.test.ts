@@ -4,6 +4,8 @@ const {
   mockBuildPrompt,
   mockEnqueueTask,
   mockFindFirstRun,
+  mockFindFallbackRun,
+  mockFindFirstRepository,
   mockGetTaskGoalForRun,
   mockSendPrompt,
   mockUpdateWhere,
@@ -11,10 +13,13 @@ const {
   mockAcquireGithubPrReviewLifecycleLock,
   mockReleaseGithubPrReviewLifecycleLock,
   mockTransferGithubPrReviewCheckToRun,
+  MockSnapshotResumeAlreadyExistsError,
 } = vi.hoisted(() => ({
   mockBuildPrompt: vi.fn(),
   mockEnqueueTask: vi.fn(),
   mockFindFirstRun: vi.fn(),
+  mockFindFallbackRun: vi.fn(),
+  mockFindFirstRepository: vi.fn(),
   mockGetTaskGoalForRun: vi.fn(),
   mockSendPrompt: vi.fn(),
   mockUpdateWhere: vi.fn(),
@@ -24,19 +29,31 @@ const {
     signal: new AbortController().signal,
   }),
   mockTransferGithubPrReviewCheckToRun: vi.fn(),
+  MockSnapshotResumeAlreadyExistsError: class extends Error {
+    constructor(public readonly existingRunId: number) {
+      super(`Snapshot resume run ${existingRunId} already exists.`);
+    }
+  },
 }));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
   buildGitHubPrSynchronizeFollowUpMessage: (...args: unknown[]) =>
     mockBuildPrompt(...args),
   enqueueTask: (...args: unknown[]) => mockEnqueueTask(...args),
+  SnapshotResumeAlreadyExistsError: MockSnapshotResumeAlreadyExistsError,
 }));
 
 vi.mock('@roomote/db/server', () => ({
   db: {
     query: {
       taskRuns: {
-        findFirst: (...args: unknown[]) => mockFindFirstRun(...args),
+        findFirst: (input: { columns?: Record<string, boolean> }) =>
+          input.columns && Object.keys(input.columns).length === 1
+            ? mockFindFallbackRun(input)
+            : mockFindFirstRun(input),
+      },
+      repositories: {
+        findFirst: (...args: unknown[]) => mockFindFirstRepository(...args),
       },
     },
     update: vi.fn(() => ({
@@ -46,9 +63,16 @@ vi.mock('@roomote/db/server', () => ({
     })),
   },
   eq: vi.fn((...args: unknown[]) => args),
+  and: vi.fn((...args: unknown[]) => args),
+  sql: vi.fn((...args: unknown[]) => args),
   getTaskGoalForRun: (...args: unknown[]) => mockGetTaskGoalForRun(...args),
+  repositories: { id: 'repositories.id' },
   taskPullRequests: { taskId: 'taskPullRequests.taskId' },
-  taskRuns: { id: 'taskRuns.id' },
+  taskRuns: {
+    id: 'taskRuns.id',
+    taskId: 'taskRuns.taskId',
+    payload: 'taskRuns.payload',
+  },
 }));
 
 vi.mock('@roomote/sdk/server', () => ({
@@ -102,6 +126,7 @@ const data = {
       provider: 'github' as const,
       host: 'github.com',
       repository: 'owner/repo',
+      repositoryId: 'repo-id',
       prNumber: 42,
       prUrl: 'https://github.com/owner/repo/pull/42',
       prSha: 'new-head',
@@ -109,8 +134,10 @@ const data = {
   },
 };
 
-function makeJob() {
-  return { data } as unknown as Job<typeof data, void, string>;
+function makeJob(overrides: Partial<typeof data> = {}) {
+  return {
+    data: { ...data, ...overrides },
+  } as unknown as Job<typeof data, void, string>;
 }
 
 describe('activePrReviewFollowUpJob', () => {
@@ -129,6 +156,11 @@ describe('activePrReviewFollowUpJob', () => {
       mockReleaseGithubPrReviewLifecycleLock,
     );
     mockTransferGithubPrReviewCheckToRun.mockResolvedValue(undefined);
+    mockFindFallbackRun.mockResolvedValue(null);
+    mockFindFirstRepository.mockResolvedValue({
+      id: 'repo-id',
+      githubInstallation: { installationId: 1 },
+    });
   });
 
   it('sends a hidden follow-up that keeps the active task alive', async () => {
@@ -333,7 +365,14 @@ describe('activePrReviewFollowUpJob', () => {
 
     expect(mockEnqueueTask).toHaveBeenCalledWith({
       existingTaskId: 'task-100',
-      task: data.fallback.task,
+      task: {
+        ...data.fallback.task,
+        payload: {
+          ...data.fallback.task.payload,
+          launchIdempotencyKey:
+            'github-pr-review-fallback:task-100:100:new-head',
+        },
+      },
       initiator: {
         kind: 'automation',
         key: 'review_code',
@@ -354,6 +393,119 @@ describe('activePrReviewFollowUpJob', () => {
       newRunId: 200,
       signal: mockReleaseGithubPrReviewLifecycleLock.signal,
     });
+  });
+
+  it.each([
+    ['no snapshot', null],
+    ['snapshot resume', 'snapshot-100'],
+  ])(
+    'reuses fallback B after transfer fails once (%s)',
+    async (_label, snapshotId) => {
+      mockFindFirstRun.mockResolvedValue({
+        id: 100,
+        taskId: 'task-100',
+        status: RunStatus.Completed,
+        sandboxServerUrl: null,
+        snapshotId,
+        snapshotCreatedAt: snapshotId ? new Date() : null,
+        port: snapshotId ? 3000 : null,
+        payload: { repo: 'owner/repo' },
+        actingUserId: 'user-1',
+      });
+      mockFindFallbackRun
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce({ id: 200 });
+      mockTransferGithubPrReviewCheckToRun
+        .mockRejectedValueOnce(new Error('transfer failed'))
+        .mockResolvedValueOnce(undefined);
+
+      await expect(activePrReviewFollowUpJob(makeJob())).rejects.toThrow(
+        'transfer failed',
+      );
+      await activePrReviewFollowUpJob(makeJob());
+
+      expect(mockEnqueueTask).toHaveBeenCalledOnce();
+      expect(mockTransferGithubPrReviewCheckToRun).toHaveBeenCalledTimes(2);
+      expect(mockTransferGithubPrReviewCheckToRun).toHaveBeenLastCalledWith(
+        expect.objectContaining({ newRunId: 200 }),
+      );
+      expect(mockUpdateWhere).toHaveBeenCalledOnce();
+    },
+  );
+
+  it('reuses fallback B when linked-head persistence fails after transfer', async () => {
+    mockFindFirstRun.mockResolvedValue({
+      id: 100,
+      taskId: 'task-100',
+      status: RunStatus.Completed,
+      sandboxServerUrl: null,
+      snapshotId: null,
+      snapshotCreatedAt: null,
+      port: null,
+      payload: { repo: 'owner/repo' },
+      actingUserId: null,
+    });
+    mockFindFallbackRun
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({ id: 200 });
+    mockUpdateWhere
+      .mockRejectedValueOnce(new Error('head update failed'))
+      .mockResolvedValueOnce(undefined);
+
+    await expect(activePrReviewFollowUpJob(makeJob())).rejects.toThrow(
+      'head update failed',
+    );
+    await activePrReviewFollowUpJob(makeJob());
+
+    expect(mockEnqueueTask).toHaveBeenCalledOnce();
+    expect(mockTransferGithubPrReviewCheckToRun).toHaveBeenCalledTimes(2);
+    expect(mockUpdateWhere).toHaveBeenCalledTimes(2);
+  });
+
+  it('recovers the existing SnapshotResume run when enqueue reports a duplicate', async () => {
+    mockFindFirstRun.mockResolvedValue({
+      id: 100,
+      taskId: 'task-100',
+      status: RunStatus.Completed,
+      sandboxServerUrl: null,
+      snapshotId: 'snapshot-100',
+      snapshotCreatedAt: new Date(),
+      port: 3000,
+      payload: { repo: 'owner/repo' },
+      actingUserId: 'user-1',
+    });
+    mockEnqueueTask.mockRejectedValueOnce(
+      new MockSnapshotResumeAlreadyExistsError(200),
+    );
+
+    await activePrReviewFollowUpJob(makeJob());
+
+    expect(mockTransferGithubPrReviewCheckToRun).toHaveBeenCalledWith(
+      expect.objectContaining({ newRunId: 200 }),
+    );
+  });
+
+  it('resolves installation context for legacy jobs before launching fallback B', async () => {
+    mockFindFirstRun.mockResolvedValue({
+      id: 100,
+      taskId: 'task-100',
+      status: RunStatus.Completed,
+      sandboxServerUrl: null,
+      snapshotId: null,
+      snapshotCreatedAt: null,
+      port: null,
+      payload: { repo: 'owner/repo' },
+      actingUserId: null,
+    });
+
+    await activePrReviewFollowUpJob(
+      makeJob({ installationId: undefined as never }),
+    );
+
+    expect(mockFindFirstRepository).toHaveBeenCalledOnce();
+    expect(mockTransferGithubPrReviewCheckToRun).toHaveBeenCalledWith(
+      expect.objectContaining({ installationId: 1, newRunId: 200 }),
+    );
   });
 
   it('retries when fallback ownership cannot acquire the lifecycle lock', async () => {

@@ -3,11 +3,15 @@ import { Job } from 'bullmq';
 import {
   buildGitHubPrSynchronizeFollowUpMessage,
   enqueueTask,
+  SnapshotResumeAlreadyExistsError,
 } from '@roomote/cloud-agents/server';
 import {
+  and,
   db,
   eq,
   getTaskGoalForRun,
+  repositories,
+  sql,
   taskPullRequests,
   taskRuns,
 } from '@roomote/db/server';
@@ -51,7 +55,7 @@ async function updateLinkedHead(
 
 async function launchFallbackWithCheckTransfer(
   data: ActivePrReviewFollowUpRequest,
-  launch: () => Promise<{ id: number }>,
+  launch: (launchIdempotencyKey: string) => Promise<{ id: number }>,
 ): Promise<void> {
   const releaseLifecycleLock = await acquireGithubPrReviewLifecycleLock(
     data.repository,
@@ -65,20 +69,52 @@ async function launchFallbackWithCheckTransfer(
 
   try {
     releaseLifecycleLock.signal.throwIfAborted();
-    const fallbackRun = await launch();
+    const repositoryId = data.fallback.prLinkage.repositoryId;
+    const installationId =
+      data.installationId ??
+      (repositoryId
+        ? (
+            await db.query.repositories.findFirst({
+              where: eq(repositories.id, repositoryId),
+              columns: { id: true },
+              with: {
+                githubInstallation: { columns: { installationId: true } },
+              },
+            })
+          )?.githubInstallation?.installationId
+        : undefined);
+    if (!installationId) {
+      throw new Error(
+        `Could not resolve GitHub installation for PR review fallback ${data.repository}#${data.prNumber}`,
+      );
+    }
+
+    const launchIdempotencyKey = [
+      'github-pr-review-fallback',
+      data.taskId,
+      data.runId,
+      data.eventHeadSha,
+    ].join(':');
+    const existingFallback = await db.query.taskRuns.findFirst({
+      where: and(
+        eq(taskRuns.taskId, data.taskId),
+        sql`${taskRuns.payload}->>'launchIdempotencyKey' = ${launchIdempotencyKey}`,
+      ),
+      columns: { id: true },
+    });
+    const fallbackRun =
+      existingFallback ?? (await launch(launchIdempotencyKey));
     releaseLifecycleLock.signal.throwIfAborted();
 
-    if (data.installationId) {
-      await transferGithubPrReviewCheckToRun({
-        installationId: data.installationId,
-        repository: data.repository,
-        prNumber: data.prNumber,
-        taskId: data.taskId,
-        previousRunId: data.runId,
-        newRunId: fallbackRun.id,
-        signal: releaseLifecycleLock.signal,
-      });
-    }
+    await transferGithubPrReviewCheckToRun({
+      installationId,
+      repository: data.repository,
+      prNumber: data.prNumber,
+      taskId: data.taskId,
+      previousRunId: data.runId,
+      newRunId: fallbackRun.id,
+      signal: releaseLifecycleLock.signal,
+    });
 
     await updateLinkedHead(data.taskId, data.eventHeadSha);
   } finally {
@@ -159,24 +195,40 @@ export const activePrReviewFollowUpJob = async (
       resumePromptClientMessageId: buildClientMessageId(data),
     } satisfies TaskPayload<typeof TaskPayloadKind.SnapshotResume>;
 
-    await launchFallbackWithCheckTransfer(data, () =>
-      enqueueTask({
-        task: {
-          type: TaskPayloadKind.SnapshotResume,
-          sourceSnapshotId: run.snapshotId!,
-          sourceRunId: run.id,
-          payload: resumePayload,
-        },
-        actingUserId: run.actingUserId,
-      }),
+    await launchFallbackWithCheckTransfer(
+      data,
+      async (launchIdempotencyKey) => {
+        try {
+          return await enqueueTask({
+            task: {
+              type: TaskPayloadKind.SnapshotResume,
+              sourceSnapshotId: run.snapshotId!,
+              sourceRunId: run.id,
+              payload: { ...resumePayload, launchIdempotencyKey },
+            },
+            actingUserId: run.actingUserId,
+          });
+        } catch (error) {
+          if (error instanceof SnapshotResumeAlreadyExistsError) {
+            return { id: error.existingRunId };
+          }
+          throw error;
+        }
+      },
     );
     return;
   }
 
-  await launchFallbackWithCheckTransfer(data, () =>
+  await launchFallbackWithCheckTransfer(data, (launchIdempotencyKey) =>
     enqueueTask({
       existingTaskId: run.taskId,
-      task: data.fallback.task,
+      task: {
+        ...data.fallback.task,
+        payload: {
+          ...data.fallback.task.payload,
+          launchIdempotencyKey,
+        },
+      },
       initiator: {
         kind: 'automation',
         key: 'review_code',
