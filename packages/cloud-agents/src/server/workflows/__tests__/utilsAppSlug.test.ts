@@ -142,16 +142,26 @@ describe('getPrBodyAttributionLine', () => {
     expect(line).not.toContain('@roomote');
   });
 
-  it('uses a Fast session as the primary link and keeps task execution details secondary', () => {
-    const line = getPrBodyAttributionLine({
+  it('keeps task wording when the link destination is a Session', () => {
+    const taskLine = getPrBodyAttributionLine({
       attribution: DEFAULT_ROOMOTE_COMMIT_AUTHOR,
       taskUrl: 'https://app.roomote.dev/task/task-123',
-      sessionUrl: 'https://app.roomote.dev/sessions/session-123',
-      taskSurface: 'web',
+      taskSurface: 'slack',
+    });
+    const sessionLine = getPrBodyAttributionLine({
+      attribution: DEFAULT_ROOMOTE_COMMIT_AUTHOR,
+      taskUrl: 'https://app.roomote.dev/sessions/session-123',
+      taskSurface: 'slack',
     });
 
-    expect(line).toContain(
-      'Follow up by mentioning @roomote or in [the Fast session](https://app.roomote.dev/sessions/session-123). [View execution details](https://app.roomote.dev/task/task-123).',
+    expect(sessionLine).toBe(
+      taskLine?.replace(
+        'https://app.roomote.dev/task/task-123',
+        'https://app.roomote.dev/sessions/session-123',
+      ),
     );
+    expect(sessionLine).not.toContain('Fast session');
+    expect(sessionLine).not.toContain('execution details');
+    expect(sessionLine).toContain('in [the web UI](');
   });
 });

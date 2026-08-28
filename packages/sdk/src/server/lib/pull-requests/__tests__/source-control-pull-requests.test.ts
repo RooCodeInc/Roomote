@@ -1615,7 +1615,7 @@ Done.`,
         visibility: 'visible',
         fastConversationId: '11111111-1111-4111-8111-111111111111',
       },
-      expectedSessionUrl:
+      expectedTaskUrl:
         'https://example.com/sessions/22222222-2222-4222-8222-222222222222?utm_source=github-comment&utm_medium=link&utm_campaign=standard',
       queriesSession: true,
     },
@@ -1623,7 +1623,8 @@ Done.`,
       label: 'keeps the task link for a direct coding task',
       payload: { repo: 'acme/web' },
       linkedSession: null,
-      expectedSessionUrl: undefined,
+      expectedTaskUrl:
+        'https://example.com/task/task-123?utm_source=github-comment&utm_medium=link&utm_campaign=standard',
       queriesSession: false,
     },
     {
@@ -1633,7 +1634,8 @@ Done.`,
         fastAgentSessionId: '11111111-1111-4111-8111-111111111111',
       },
       linkedSession: null,
-      expectedSessionUrl: undefined,
+      expectedTaskUrl:
+        'https://example.com/task/task-123?utm_source=github-comment&utm_medium=link&utm_campaign=standard',
       queriesSession: true,
     },
     {
@@ -1648,7 +1650,8 @@ Done.`,
         visibility: 'visible',
         fastConversationId: '33333333-3333-4333-8333-333333333333',
       },
-      expectedSessionUrl: undefined,
+      expectedTaskUrl:
+        'https://example.com/task/task-123?utm_source=github-comment&utm_medium=link&utm_campaign=standard',
       queriesSession: true,
     },
     {
@@ -1662,7 +1665,8 @@ Done.`,
         visibility: 'hidden',
         fastConversationId: '11111111-1111-4111-8111-111111111111',
       },
-      expectedSessionUrl: undefined,
+      expectedTaskUrl:
+        'https://example.com/task/task-123?utm_source=github-comment&utm_medium=link&utm_campaign=standard',
       queriesSession: true,
     },
   ])('$label', async (testCase) => {
@@ -1697,9 +1701,7 @@ Done.`,
 
     expect(mockGetPrBodyAttributionLine).toHaveBeenCalledWith(
       expect.objectContaining({
-        taskUrl:
-          'https://example.com/task/task-123?utm_source=github-comment&utm_medium=link&utm_campaign=standard',
-        sessionUrl: testCase.expectedSessionUrl,
+        taskUrl: testCase.expectedTaskUrl,
       }),
     );
     if (testCase.queriesSession) {

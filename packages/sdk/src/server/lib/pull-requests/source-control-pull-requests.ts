@@ -278,12 +278,12 @@ export async function createOrUpdateSourceControlPullRequestForTaskRun({
   const canonicalAttribution = displayName
     ? { ...attribution, displayName }
     : DEFAULT_ROOMOTE_COMMIT_AUTHOR;
-  const taskUrl = buildPrAttributionTaskUrl(taskRun);
-  const sessionUrl = await buildPrAttributionFastSessionUrl(taskRun);
+  const taskUrl =
+    (await buildPrAttributionFastSessionUrl(taskRun)) ??
+    buildPrAttributionTaskUrl(taskRun);
   const attributionLine = getPrBodyAttributionLine({
     attribution: canonicalAttribution,
     taskUrl,
-    sessionUrl,
     taskSurface:
       inheritedChatProvider ??
       (task?.surface === 'system' || task?.surface === 'api'

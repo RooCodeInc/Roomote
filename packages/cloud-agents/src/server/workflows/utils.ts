@@ -44,7 +44,6 @@ export function resolveConflictResolverLabel(
 export function getPrBodyAttributionLine({
   attribution,
   taskUrl,
-  sessionUrl,
   taskSurface,
   slackTeamDomain,
   slackTeamId,
@@ -68,7 +67,6 @@ export function getPrBodyAttributionLine({
 }: {
   attribution: ResolvedTaskCommitAuthor;
   taskUrl?: string;
-  sessionUrl?: string;
   taskSurface?:
     | 'web'
     | 'slack'
@@ -104,7 +102,6 @@ export function getPrBodyAttributionLine({
   if (
     attribution.kind === 'roomote' &&
     !taskUrl &&
-    !sessionUrl &&
     !(slackChannel && slackThreadTs) &&
     !(telegramChatId && telegramMessageId) &&
     !telegramBotUsername &&
@@ -118,7 +115,6 @@ export function getPrBodyAttributionLine({
   return buildPrBodyAttributionLine({
     attribution,
     taskUrl,
-    sessionUrl,
     taskSurface,
     slackTeamDomain,
     slackTeamId,
@@ -145,7 +141,6 @@ export function getPrBodyAttributionLine({
 function buildPrBodyAttributionLine({
   attribution,
   taskUrl,
-  sessionUrl,
   taskSurface,
   slackTeamDomain,
   slackTeamId,
@@ -169,7 +164,6 @@ function buildPrBodyAttributionLine({
 }: {
   attribution: ResolvedTaskCommitAuthor;
   taskUrl?: string;
-  sessionUrl?: string;
   taskSurface?:
     | 'web'
     | 'slack'
@@ -207,7 +201,6 @@ function buildPrBodyAttributionLine({
       ? value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')
       : value;
   const safeTaskUrl = taskUrl ? escapeValue(taskUrl) : undefined;
-  const safeSessionUrl = sessionUrl ? escapeValue(sessionUrl) : undefined;
   const resolvedSlackConversationUrl =
     slackConversationUrl?.trim() ||
     buildSlackThreadPermalink({
@@ -232,13 +225,6 @@ function buildPrBodyAttributionLine({
   const taskLink = safeTaskUrl
     ? `[${taskLinkLabel}](${safeTaskUrl})`
     : undefined;
-  const sessionLink = safeSessionUrl
-    ? `[the Fast session](${safeSessionUrl})`
-    : undefined;
-  const executionDetailsLink =
-    sessionLink && safeTaskUrl
-      ? `[View execution details](${safeTaskUrl}).`
-      : undefined;
 
   // Resolve the originating conversation link for chat surfaces. Slack is
   // preferred via the exact permalink resolved at launch time; Telegram and
@@ -280,24 +266,18 @@ function buildPrBodyAttributionLine({
   }
 
   const defaultFollowUpInstruction = `mention ${appMention} for follow-up asks.`;
-  const primaryTaskLink = sessionLink ?? taskLink;
   const chatFollowUpInstruction = conversationLink
-    ? primaryTaskLink
-      ? `Follow up by mentioning ${appMention}, in ${primaryTaskLink}, or in ${conversationLink}.`
+    ? taskLink
+      ? `Follow up by mentioning ${appMention}, in ${taskLink}, or in ${conversationLink}.`
       : `Follow up by mentioning ${appMention} or in ${conversationLink}.`
-    : primaryTaskLink
-      ? `Follow up by mentioning ${appMention} or in ${primaryTaskLink}.`
+    : taskLink
+      ? `Follow up by mentioning ${appMention} or in ${taskLink}.`
       : `Follow up by mentioning ${appMention}.`;
-  const primaryInstruction = isChatSurface
+  const instruction = isChatSurface
     ? chatFollowUpInstruction
-    : sessionLink
-      ? `Follow up by mentioning ${appMention} or in ${sessionLink}.`
-      : taskLink
-        ? `${taskLink} or ${defaultFollowUpInstruction}`
-        : defaultFollowUpInstruction;
-  const instruction = executionDetailsLink
-    ? `${primaryInstruction} ${executionDetailsLink}`
-    : primaryInstruction;
+    : taskLink
+      ? `${taskLink} or ${defaultFollowUpInstruction}`
+      : defaultFollowUpInstruction;
 
   if (attribution.kind === 'roomote') {
     return formatPrBodyAttribution('Created by Roomote.', instruction);
