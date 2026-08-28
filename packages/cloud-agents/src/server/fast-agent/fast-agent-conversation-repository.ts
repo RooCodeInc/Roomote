@@ -10,6 +10,10 @@ import {
   advanceSessionNotifiedCursor,
   advanceSessionReadCursor,
   getSessionForFastConversation,
+  isNull,
+  lt,
+  or,
+  sessions,
   sql,
   touchSessionActivity,
   type DatabaseOrTransaction,
@@ -36,6 +40,116 @@ export type FastAgentMessageWrite = Omit<
   CreateFastAgentMessage,
   'conversationId'
 >;
+
+export const INTERRUPTED_INFERENCE_RETRY_MESSAGE =
+  'The inference retry was interrupted before it completed. Please send the request again.';
+
+const activeInferenceRetryNoticeWhere = and(
+  // The event slot also matches notices written before retry lifecycle
+  // metadata was introduced, so existing stale transcripts self-heal.
+  sql`${fastAgentMessages.eventId} LIKE ${'%:retry-notice%'}`,
+  sql`${fastAgentMessages.metadata}->>'purpose' = 'progress'`,
+  or(
+    sql`${fastAgentMessages.metadata}->>'inferenceRetryActive' = 'true'`,
+    sql`${fastAgentMessages.metadata}->>'inferenceRetryActive' IS NULL`,
+  ),
+);
+
+async function reconcileInferenceRetryNotices(
+  database: DatabaseOrTransaction,
+  conversationId: string,
+  requireExpiredLease: boolean,
+): Promise<number> {
+  await database.execute(
+    sql`select pg_advisory_xact_lock(hashtextextended(${`fast-agent-conversation:${conversationId}`}, 0))`,
+  );
+
+  if (requireExpiredLease) {
+    const session = await getSessionForFastConversation(
+      database,
+      conversationId,
+    );
+    if (session?.respondingUntil && session.respondingUntil > new Date()) {
+      return 0;
+    }
+  }
+
+  const notices = await database
+    .select({
+      id: fastAgentMessages.id,
+      metadata: fastAgentMessages.metadata,
+      payload: fastAgentMessages.payload,
+    })
+    .from(fastAgentMessages)
+    .where(
+      and(
+        eq(fastAgentMessages.conversationId, conversationId),
+        activeInferenceRetryNoticeWhere,
+      ),
+    );
+
+  for (const notice of notices) {
+    await database
+      .update(fastAgentMessages)
+      .set({
+        contentBlocks: [
+          { type: 'text', text: INTERRUPTED_INFERENCE_RETRY_MESSAGE },
+        ],
+        metadata: {
+          ...(notice.metadata ?? {}),
+          visibleInTranscript: true,
+          purpose: 'closeout',
+          inferenceRetryNotice: true,
+          inferenceRetryActive: false,
+        },
+        payload: { ...notice.payload, purpose: 'closeout' },
+        updatedAt: new Date(),
+      })
+      .where(eq(fastAgentMessages.id, notice.id));
+  }
+
+  return notices.length;
+}
+
+export async function reconcileFastAgentInferenceRetryNotices(
+  conversationId: string,
+): Promise<number> {
+  return db.transaction((tx) =>
+    reconcileInferenceRetryNotices(tx, conversationId, false),
+  );
+}
+
+export async function reconcileExpiredFastAgentInferenceRetryNotices(
+  limit = 100,
+): Promise<number> {
+  const candidates = await db
+    .selectDistinct({ conversationId: fastAgentMessages.conversationId })
+    .from(fastAgentMessages)
+    .innerJoin(
+      sessions,
+      eq(sessions.fastConversationId, fastAgentMessages.conversationId),
+    )
+    .where(
+      and(
+        activeInferenceRetryNoticeWhere,
+        or(
+          isNull(sessions.respondingUntil),
+          lt(sessions.respondingUntil, new Date()),
+        ),
+      ),
+    )
+    .limit(limit);
+
+  let reconciled = 0;
+  for (const candidate of candidates) {
+    // The per-conversation lock and lease recheck prevent a renewed active
+    // turn from being reconciled after the candidate scan races with it.
+    reconciled += await db.transaction((tx) =>
+      reconcileInferenceRetryNotices(tx, candidate.conversationId, true),
+    );
+  }
+  return reconciled;
+}
 
 export interface FastAgentConversationRepository {
   getOrCreate(input: {

@@ -1,3 +1,4 @@
+import { reconcileExpiredFastAgentInferenceRetryNotices } from '@roomote/cloud-agents/server';
 import {
   and,
   db,
@@ -205,6 +206,8 @@ async function reconcileRecentSessions(watermark: Date | null): Promise<void> {
     : null;
   const scanStartedAt = new Date();
   let orphanFailures = 0;
+  const reconciledRetryNotices =
+    await reconcileExpiredFastAgentInferenceRetryNotices(BATCH_SIZE);
 
   // Fast conversations without a session row (e.g. created before this
   // release finished its backfill) are adopted here so the unified list
@@ -352,6 +355,7 @@ async function reconcileRecentSessions(watermark: Date | null): Promise<void> {
     orphanVisibleTasks: orphanTasks.length,
     refreshedSessions: recent.length,
     healedExpiredLeases: expiredLeases.length,
+    reconciledRetryNotices,
   });
 }
 
