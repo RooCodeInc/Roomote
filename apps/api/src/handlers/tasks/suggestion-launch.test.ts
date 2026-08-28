@@ -40,7 +40,7 @@ beforeEach(() => {
 });
 
 describe('resolveSuggestedTaskLaunchMode', () => {
-  it('selects Fast only for router-backed suggestions when Fast is available and default', () => {
+  it('selects Fast for a router-backed suggestion when Fast is the default', () => {
     expect(
       resolveSuggestedTaskLaunchMode({
         usesRouterLaunch: true,
@@ -48,6 +48,9 @@ describe('resolveSuggestedTaskLaunchMode', () => {
         fastAvailable: true,
       }),
     ).toBe('fast');
+  });
+
+  it('falls back to coding when Fast is unavailable', () => {
     expect(
       resolveSuggestedTaskLaunchMode({
         usesRouterLaunch: true,
@@ -55,6 +58,9 @@ describe('resolveSuggestedTaskLaunchMode', () => {
         fastAvailable: false,
       }),
     ).toBe('coding');
+  });
+
+  it('keeps pinned suggestions on coding', () => {
     expect(
       resolveSuggestedTaskLaunchMode({
         usesRouterLaunch: false,
