@@ -20,6 +20,7 @@ function createTestDiagnostics(now: () => number) {
       hasImages: false,
       modelRole: 'primary',
       turnSource: 'human',
+      userId: 'user-1',
     },
     {
       deployMarker: {
@@ -50,6 +51,9 @@ describe('FastAgentTurnDiagnostics', () => {
     diagnostics.recordSessionPath('cold_rebuild');
     diagnostics.recordOpenCodeSessionReady('opencode-session-1');
     diagnostics.recordOpenCodeProviderRetry(2, 'temporary upstream failure');
+    diagnostics.recordVisibleReply({ assistantResponse: false });
+    currentTime = 1_085;
+    diagnostics.recordVisibleReply();
     currentTime = 1_100;
     diagnostics.markInferenceFinished();
     currentTime = 1_110;
@@ -61,6 +65,9 @@ describe('FastAgentTurnDiagnostics', () => {
     );
     const logMessage = String(logger.info.mock.calls[0]?.[0]);
     expect(logMessage).toContain('serviceDurationMs=110');
+    expect(logMessage).toContain('firstResponseDurationMs=85');
+    expect(logMessage).toContain('sandboxlessStartupDurationMs=60');
+    expect(logMessage).toContain('inferenceToFirstResponseDurationMs=25');
     expect(logMessage).toContain('preInferenceDurationMs=10');
     expect(logMessage).toContain('conversationQueueDurationMs=30');
     expect(logMessage).toContain('inferenceSetupDurationMs=20');
@@ -159,6 +166,7 @@ describe('FastAgentTurnDiagnostics', () => {
         hasImages: false,
         modelRole: 'primary',
         turnSource: 'human',
+        userId: 'user-1',
       },
       { deployMarker: {}, logger, now: () => currentTime },
     );

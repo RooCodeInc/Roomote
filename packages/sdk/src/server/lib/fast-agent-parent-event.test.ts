@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   findInstallation: vi.fn(),
   findArtifacts: vi.fn(),
   findTaskRun: vi.fn(),
+  findTaskPullRequests: vi.fn(),
   postMessage: vi.fn(),
   updateMessage: vi.fn(),
   addReaction: vi.fn(),
@@ -83,6 +84,7 @@ vi.mock('@roomote/cloud-agents/server', () => ({
       await mocks.enqueueTask({ task });
       return { success: true, taskId: 'child-task-1', taskUrl };
     },
+  createFastAgentWebTaskLauncher: vi.fn(() => mocks.launchTask),
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -90,6 +92,10 @@ vi.mock('@roomote/db/server', () => ({
     query: {
       slackInstallations: { findFirst: mocks.findInstallation },
       taskArtifacts: { findMany: mocks.findArtifacts },
+      taskPullRequests: {
+        findFirst: vi.fn().mockResolvedValue(null),
+        findMany: mocks.findTaskPullRequests,
+      },
       taskRuns: { findFirst: mocks.findTaskRun },
     },
   },
@@ -101,6 +107,7 @@ vi.mock('@roomote/db/server', () => ({
     teamId: 'slack_installations.team_id',
   },
   taskArtifacts: { id: 'task_artifacts.id' },
+  taskPullRequests: { taskId: 'task_pull_requests.task_id' },
   taskRuns: { id: 'task_runs.id' },
 }));
 
@@ -227,6 +234,7 @@ describe('deliverFastAgentParentEvent', () => {
       },
     ]);
     mocks.findTaskRun.mockResolvedValue({ status: 'running' });
+    mocks.findTaskPullRequests.mockResolvedValue([]);
     mocks.postMessage.mockResolvedValue('101.001');
     mocks.updateMessage.mockResolvedValue(true);
     mocks.addReaction.mockResolvedValue(true);
@@ -287,6 +295,7 @@ describe('deliverFastAgentParentEvent', () => {
       provider: 'telegram',
       channelId: 'telegram-chat-1',
       messageId: 'telegram-message-1',
+      lastTextMessageId: 'telegram-message-2',
     });
     mocks.createTelegramProvider.mockResolvedValue({
       postMessage: mocks.telegramPostMessage,
@@ -321,6 +330,54 @@ describe('deliverFastAgentParentEvent', () => {
           message: 'The proof is ready.',
           imageArtifactIds: ['artifact-1', 'artifact-1'],
         }),
+    );
+  });
+
+  it('passes a canonical review offer into the web transcript payload', async () => {
+    const webParent = {
+      sessionId: parent.sessionId,
+      conversation: {
+        surface: 'web' as const,
+        workspaceId: 'user-1',
+        conversationId: 'session-1',
+      },
+    };
+    mocks.answerQuestion.mockResolvedValue('Presented feedback');
+
+    await deliverFastAgentParentEvent({
+      parent: webParent,
+      event: {
+        type: 'pull_request_feedback',
+        feedbackId: 'feedback-1',
+        taskId: 'task-1',
+        runId: 42,
+        taskUrl: 'https://roomote.example/task/task-1',
+        pullRequest: {
+          provider: 'github',
+          host: 'github.com',
+          repository: 'acme/web',
+          number: 42,
+          title: 'Fix review feedback',
+          url: 'https://github.com/acme/web/pull/42',
+          status: 'open',
+        },
+        summary: 'Review feedback remains.',
+        suggestedActionQuestion: 'Resolve these issues?',
+        suggestedActionPrompt: 'Resolve the review feedback.',
+        reviewActionDeliveryId: '22222222-2222-4222-8222-222222222222',
+      },
+    });
+
+    expect(mocks.answerQuestion).toHaveBeenCalledWith(
+      expect.objectContaining({
+        platformEventTranscriptPayload: {
+          prReviewAction: {
+            deliveryId: '22222222-2222-4222-8222-222222222222',
+            question: 'Resolve these issues?',
+            status: 'pending',
+          },
+        },
+      }),
     );
   });
 
@@ -947,6 +1004,13 @@ describe('deliverFastAgentParentEvent', () => {
           suggestions,
         }),
       );
+      expect(mocks.recordProviderMessage).toHaveBeenCalledWith({
+        sessionId: parent.sessionId,
+        conversation: expect.objectContaining({ surface }),
+        messageId:
+          rootMessageId ??
+          (surface === 'teams' ? 'teams-message-1' : 'telegram-message-2'),
+      });
     },
   );
 
@@ -1450,7 +1514,7 @@ describe('deliverFastAgentParentEvent', () => {
       threadId: 'thread-1',
       idempotencyKey: 'fast-parent-pr-feedback:feedback-123',
       text: expect.stringMatching(
-        /^There is new PR feedback\.\nWant me to resolve these issues\?\n\n-# Reply or use the \[web app\]\(.*\/sessions\/.*\)\.$/,
+        /^There is new PR feedback\.\nWant me to resolve these issues\?\n\n-# Working on \[PR #42\]\(https:\/\/github\.com\/acme\/web\/pull\/42\), reply or use the \[web app\]\(.*\/sessions\/.*\)\.$/,
       ),
       textFormat: 'markdown',
       images: [],

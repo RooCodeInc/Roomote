@@ -1,6 +1,7 @@
 import {
   replyToFastSessionInputSchema,
   startFastSessionInputSchema,
+  updateFastSessionModelSelectionInputSchema,
 } from './input';
 
 describe('Fast session input schemas', () => {
@@ -72,5 +73,19 @@ describe('Fast session input schemas', () => {
         images: ['not-an-image'],
       }),
     ).toThrow('Image must be a base64 data URL');
+  });
+
+  it('accepts explicit model-selection updates without message content', () => {
+    expect(
+      updateFastSessionModelSelectionInputSchema.parse({
+        sessionId: '00000000-0000-4000-8000-000000000000',
+        model: ' openrouter/z-ai/glm-5.2 ',
+        reasoningEffort: 'high',
+      }),
+    ).toEqual({
+      sessionId: '00000000-0000-4000-8000-000000000000',
+      model: 'openrouter/z-ai/glm-5.2',
+      reasoningEffort: 'high',
+    });
   });
 });

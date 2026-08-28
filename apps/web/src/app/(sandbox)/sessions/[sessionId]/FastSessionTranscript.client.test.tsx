@@ -9,13 +9,21 @@ import { ACP_ENVELOPE_EVENT_TYPES } from '@roomote/types';
 
 import { FastSessionTranscript } from './FastSessionTranscript';
 
-const { replyMutate, preparePromptAttachments, openTaskPanel, narrationState } =
-  vi.hoisted(() => ({
-    replyMutate: vi.fn(),
-    preparePromptAttachments: vi.fn(),
-    openTaskPanel: vi.fn(),
-    narrationState: { enabled: false },
-  }));
+const {
+  replyMutate,
+  reviewActionMutate,
+  updateModelSelectionMutate,
+  preparePromptAttachments,
+  openTaskPanel,
+  narrationState,
+} = vi.hoisted(() => ({
+  replyMutate: vi.fn(),
+  reviewActionMutate: vi.fn(),
+  updateModelSelectionMutate: vi.fn(),
+  preparePromptAttachments: vi.fn(),
+  openTaskPanel: vi.fn(),
+  narrationState: { enabled: false },
+}));
 
 vi.mock('@/hooks/useNarrationMode', () => ({
   useNarrationMode: () => ({ enabled: narrationState.enabled }),
@@ -23,8 +31,47 @@ vi.mock('@/hooks/useNarrationMode', () => ({
 
 vi.mock('@/trpc/client', () => ({
   useTRPCClient: () => ({
-    fastSessions: { reply: { mutate: replyMutate } },
+    fastSessions: {
+      reply: { mutate: replyMutate },
+      reviewAction: { mutate: reviewActionMutate },
+      updateModelSelection: { mutate: updateModelSelectionMutate },
+    },
   }),
+}));
+
+vi.mock('./SessionModelSwitcher', () => ({
+  SessionModelSwitcher: ({
+    model,
+    onModelChange,
+    reasoningEffort,
+    onReasoningEffortChange,
+    disabled,
+  }: {
+    model: string;
+    onModelChange: (model: string) => void;
+    reasoningEffort: string | null;
+    onReasoningEffortChange: (effort: 'high') => void;
+    disabled?: boolean;
+  }) => (
+    <div>
+      <span data-testid="session-model">{model}</span>
+      <span data-testid="session-reasoning">{reasoningEffort}</span>
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => onModelChange('openrouter/z-ai/glm-5.2')}
+      >
+        Use GLM 5.2
+      </button>
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => onReasoningEffortChange('high')}
+      >
+        Use high reasoning
+      </button>
+    </div>
+  ),
 }));
 
 vi.mock('@/lib/prompt-attachments', async () => {
@@ -93,6 +140,8 @@ class FakeEventSource {
 beforeEach(() => {
   FakeEventSource.instances = [];
   replyMutate.mockReset();
+  reviewActionMutate.mockReset();
+  updateModelSelectionMutate.mockReset();
   preparePromptAttachments.mockImplementation(({ text }: { text: string }) =>
     Promise.resolve({ text }),
   );
@@ -106,6 +155,82 @@ afterEach(() => {
 });
 
 describe('FastSessionTranscript', () => {
+  const reviewOfferMessage = (status = 'pending') => ({
+    id: 'offer-1',
+    eventId: 'turn-offer:assistant:0',
+    turnId: 'turn-offer',
+    turnSeq: 1,
+    ts: 2,
+    eventType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+    role: 'assistant' as const,
+    contentBlocks: [
+      { type: 'text' as const, text: 'Review feedback remains.' },
+    ],
+    metadata: { visibleInTranscript: true },
+    payload: {
+      prReviewAction: {
+        deliveryId: '11111111-1111-4111-8111-111111111111',
+        question: 'Would you like me to resolve these issues?',
+        status,
+      },
+    },
+    source: 'web',
+    nativeSessionId: 'opencode-1',
+    nativeMessageId: null,
+    createdAt: new Date('2026-01-01T00:00:01.000Z'),
+  });
+
+  it('renders and dispatches a persisted review action offer', async () => {
+    reviewActionMutate.mockResolvedValue({ status: 'resolved' });
+    render(
+      <FastSessionTranscript
+        sessionId="22222222-2222-4222-8222-222222222222"
+        initialMessages={[reviewOfferMessage()]}
+      />,
+    );
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Resolve these issues' }),
+    );
+    await waitFor(() =>
+      expect(reviewActionMutate).toHaveBeenCalledWith({
+        sessionId: '22222222-2222-4222-8222-222222222222',
+        deliveryId: '11111111-1111-4111-8111-111111111111',
+        choice: 'yes',
+      }),
+    );
+    expect(
+      await screen.findByText('Resolving the current review issues.'),
+    ).toBeInTheDocument();
+  });
+
+  it('renders retired and late-click states without actionable controls', async () => {
+    const { rerender } = render(
+      <FastSessionTranscript
+        sessionId="22222222-2222-4222-8222-222222222222"
+        initialMessages={[reviewOfferMessage('dismissed')]}
+      />,
+    );
+    expect(screen.getByText('Review action dismissed.')).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Resolve these issues' }),
+    ).not.toBeInTheDocument();
+
+    rerender(
+      <FastSessionTranscript
+        sessionId="22222222-2222-4222-8222-222222222222"
+        initialMessages={[reviewOfferMessage()]}
+      />,
+    );
+    act(() => {
+      FakeEventSource.instances.at(-1)?.emit('messages', {
+        messages: [reviewOfferMessage('stale')],
+      });
+    });
+    expect(
+      await screen.findByText('This offer was already handled or has expired.'),
+    ).toBeInTheDocument();
+  });
   it('renders persisted user and assistant text with task transcript primitives', () => {
     render(
       <FastSessionTranscript
@@ -458,6 +583,91 @@ describe('FastSessionTranscript', () => {
       text: 'Follow up question',
       model: null,
       reasoningEffort: null,
+    });
+  });
+
+  it('persists model selections immediately and uses them for the next reply', async () => {
+    updateModelSelectionMutate.mockResolvedValue({ success: true });
+    replyMutate.mockResolvedValue({ success: true });
+
+    render(
+      <FastSessionTranscript
+        sessionId="session-1"
+        initialMessages={[]}
+        canReply
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Use GLM 5.2' }));
+    expect(screen.getByTestId('session-model')).toHaveTextContent(
+      'openrouter/z-ai/glm-5.2',
+    );
+    await waitFor(() => {
+      expect(updateModelSelectionMutate).toHaveBeenCalledWith({
+        sessionId: 'session-1',
+        model: 'openrouter/z-ai/glm-5.2',
+      });
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Use high reasoning' }));
+    expect(screen.getByTestId('session-reasoning')).toHaveTextContent('high');
+    await waitFor(() => {
+      expect(updateModelSelectionMutate).toHaveBeenLastCalledWith({
+        sessionId: 'session-1',
+        reasoningEffort: 'high',
+      });
+    });
+
+    const input = screen.getByPlaceholderText('Message agent');
+    fireEvent.change(input, { target: { value: 'Use these settings' } });
+    fireEvent.keyDown(input, { key: 'Enter', code: 'Enter', charCode: 13 });
+
+    await waitFor(() => {
+      expect(replyMutate).toHaveBeenCalledWith({
+        sessionId: 'session-1',
+        text: 'Use these settings',
+        model: 'openrouter/z-ai/glm-5.2',
+        reasoningEffort: 'high',
+      });
+    });
+  });
+
+  it('does not submit with Enter while a model selection is still saving', async () => {
+    let resolveModelUpdate: ((value: { success: true }) => void) | undefined;
+    updateModelSelectionMutate.mockReturnValue(
+      new Promise((resolve) => {
+        resolveModelUpdate = resolve;
+      }),
+    );
+    replyMutate.mockResolvedValue({ success: true });
+
+    render(
+      <FastSessionTranscript
+        sessionId="session-1"
+        initialMessages={[]}
+        canReply
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Use GLM 5.2' }));
+    const input = screen.getByPlaceholderText('Message agent');
+    fireEvent.change(input, { target: { value: 'Wait for the model save' } });
+    fireEvent.keyDown(input, { key: 'Enter', code: 'Enter', charCode: 13 });
+
+    expect(replyMutate).not.toHaveBeenCalled();
+
+    await act(async () => {
+      resolveModelUpdate?.({ success: true });
+    });
+    fireEvent.keyDown(input, { key: 'Enter', code: 'Enter', charCode: 13 });
+
+    await waitFor(() => {
+      expect(replyMutate).toHaveBeenCalledWith({
+        sessionId: 'session-1',
+        text: 'Wait for the model save',
+        model: 'openrouter/z-ai/glm-5.2',
+        reasoningEffort: null,
+      });
     });
   });
 

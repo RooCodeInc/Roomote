@@ -61,3 +61,15 @@ export const replyToFastSessionInputSchema = z
     ...fastSessionMessageInputShape,
   })
   .superRefine(requireFastSessionContent);
+
+export const fastSessionPrReviewActionInputSchema = z.object({
+  sessionId: z.string().uuid(),
+  deliveryId: z.string().uuid(),
+  choice: z.enum(['yes', 'auto', 'dismiss']),
+});
+
+export const updateFastSessionModelSelectionInputSchema = z.object({
+  sessionId: z.string().uuid(),
+  model: fastSessionMessageInputShape.model,
+  reasoningEffort: fastSessionMessageInputShape.reasoningEffort,
+});

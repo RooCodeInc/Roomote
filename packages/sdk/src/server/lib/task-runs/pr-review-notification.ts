@@ -892,6 +892,27 @@ export async function beginCanonicalPrReviewPrompt(input: {
   });
 }
 
+export async function beginCanonicalPrReviewWebPrompt(input: {
+  request: PrReviewNotificationRequest;
+  followUpPrompt: string;
+}): Promise<boolean> {
+  const { request } = input;
+  if (
+    request.ownershipVersion !== 'canonical' ||
+    !request.deliveryId ||
+    !request.leaseToken
+  ) {
+    return true;
+  }
+  return transitionCanonicalPrReviewDelivery({
+    deliveryId: request.deliveryId,
+    leaseToken: request.leaseToken,
+    expected: ['prepared', 'prompt_posting'],
+    status: 'prompt_posting',
+    values: { followUpPrompt: input.followUpPrompt },
+  });
+}
+
 export async function beginCanonicalPrReviewAutoDispatch(input: {
   request: PrReviewNotificationRequest;
   followUpPrompt: string;
@@ -920,6 +941,55 @@ export async function beginCanonicalPrReviewAutoDispatch(input: {
       routeWorkspaceId: route.provider === 'slack' ? route.slackTeamId : null,
       routeChannelId: route.channelId,
       routeThreadId: route.threadId,
+    },
+  });
+}
+
+export async function beginCanonicalPrReviewWebAutoDispatch(input: {
+  request: PrReviewNotificationRequest;
+  followUpPrompt: string;
+  targetTaskId: string;
+  actingUserId: string;
+}): Promise<boolean> {
+  const { request } = input;
+  if (
+    request.ownershipVersion !== 'canonical' ||
+    !request.deliveryId ||
+    !request.leaseToken
+  ) {
+    return true;
+  }
+  return transitionCanonicalPrReviewDelivery({
+    deliveryId: request.deliveryId,
+    leaseToken: request.leaseToken,
+    expected: 'prepared',
+    status: 'auto_dispatch_pending',
+    values: {
+      followUpPrompt: input.followUpPrompt,
+      targetTaskId: input.targetTaskId,
+      actingUserId: input.actingUserId,
+    },
+  });
+}
+
+export async function releaseCanonicalPrReviewWebAutoDispatch(
+  request: PrReviewNotificationRequest,
+): Promise<boolean> {
+  if (
+    request.ownershipVersion !== 'canonical' ||
+    !request.deliveryId ||
+    !request.leaseToken
+  ) {
+    return true;
+  }
+  return transitionCanonicalPrReviewDelivery({
+    deliveryId: request.deliveryId,
+    leaseToken: request.leaseToken,
+    expected: 'auto_dispatch_pending',
+    status: 'prepared',
+    values: {
+      targetTaskId: null,
+      actingUserId: null,
     },
   });
 }

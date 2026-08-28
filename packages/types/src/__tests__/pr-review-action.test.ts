@@ -1,6 +1,7 @@
 import {
   buildPrReviewActionCallbackData,
   parsePrReviewActionCallbackData,
+  parsePrReviewActionOffer,
 } from '../pr-review-action';
 
 describe('pr review action callback data', () => {
@@ -30,6 +31,25 @@ describe('pr review action callback data', () => {
     expect(parsePrReviewActionCallbackData('prr:y:')).toBeNull();
     expect(
       parsePrReviewActionCallbackData('prr:y:$(rm -rf /)involving-bad-chars'),
+    ).toBeNull();
+  });
+
+  it('parses persisted Fast transcript offers and rejects malformed payloads', () => {
+    expect(
+      parsePrReviewActionOffer({
+        prReviewAction: {
+          deliveryId: '11111111-1111-4111-8111-111111111111',
+          question: 'Resolve these issues?',
+          status: 'pending',
+        },
+      }),
+    ).toEqual({
+      deliveryId: '11111111-1111-4111-8111-111111111111',
+      question: 'Resolve these issues?',
+      status: 'pending',
+    });
+    expect(
+      parsePrReviewActionOffer({ prReviewAction: { status: 'pending' } }),
     ).toBeNull();
   });
 });

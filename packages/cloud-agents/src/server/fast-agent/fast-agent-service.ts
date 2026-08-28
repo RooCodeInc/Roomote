@@ -775,6 +775,7 @@ export async function answerFastAgentQuestion({
   platformEventVisibility = 'optional',
   platformEventKind = 'delegated_task',
   allowSilentAmbientReply = false,
+  platformEventTranscriptPayload,
 }: {
   question: string;
   images?: string[];
@@ -800,6 +801,7 @@ export async function answerFastAgentQuestion({
   platformEventKind?: FastAgentPlatformEventKind;
   /** True only for an unmentioned turn in a multi-human Fast conversation. */
   allowSilentAmbientReply?: boolean;
+  platformEventTranscriptPayload?: Record<string, unknown>;
 }): Promise<string> {
   const turnId = buildFastAgentTurnId({
     currentMessageId,
@@ -812,6 +814,7 @@ export async function answerFastAgentQuestion({
     hasImages: images.length > 0,
     modelRole: FAST_AGENT_MODEL_ROLE,
     turnSource,
+    userId,
   });
   const platformEvent = turnSource === 'platform_event';
   const turnVisibleMessages: ModelMessage[] = [];
@@ -900,6 +903,7 @@ export async function answerFastAgentQuestion({
         },
         payload: {
           purpose: reply.purpose,
+          ...(platformEventTranscriptPayload ?? {}),
           ...(reply.imageArtifactIds?.length
             ? { imageArtifactIds: reply.imageArtifactIds }
             : {}),
@@ -1020,6 +1024,7 @@ export async function answerFastAgentQuestion({
   const replaceInferenceRetryReply = async (
     reply: FastAgentReply,
     bestEffort = false,
+    onDelivered?: () => void,
   ): Promise<boolean> => {
     if (!inferenceRetryCanonicalEvent) {
       return false;
@@ -1046,6 +1051,7 @@ export async function answerFastAgentQuestion({
     let replacement: FastAgentReplyHandle | void;
     try {
       replacement = await adapter.replaceReply(inferenceRetryReply, reply);
+      onDelivered?.();
     } catch (error) {
       if (!bestEffort) {
         await persistAssistantReply({
@@ -1257,9 +1263,12 @@ export async function answerFastAgentQuestion({
       mirrorImmediately = false,
       nativeMessage?: NonTaskOpenCodeCompletedMessage | null,
     ) => {
-      const replacedRetry = await replaceInferenceRetryReply(reply, true);
+      const replacedRetry = await replaceInferenceRetryReply(reply, true, () =>
+        diagnostics.recordVisibleReply(),
+      );
       if (!replacedRetry) {
         const posted = await adapter.postReply(reply);
+        diagnostics.recordVisibleReply();
         turnVisibleMessages.push(buildAssistantTextMessage(reply.message));
         await persistAssistantReply({
           reply,
@@ -1271,7 +1280,6 @@ export async function answerFastAgentQuestion({
       inferenceRetryReply = undefined;
       inferenceRetryMessageIndex = undefined;
       inferenceRetryCanonicalEvent = undefined;
-      diagnostics.recordVisibleReply();
       lastVisibleMessage = reply.message;
       visibleUpdatePosted = true;
       if (reply.purpose === 'closeout' || reply.purpose === 'clarification') {
@@ -1316,7 +1324,7 @@ export async function answerFastAgentQuestion({
           inferenceRetryNotice: true,
         });
       }
-      diagnostics.recordVisibleReply();
+      diagnostics.recordVisibleReply({ assistantResponse: false });
     };
     const reportProviderRetryEvent = async (
       event: NonTaskProviderRetryEvent,
@@ -2359,8 +2367,13 @@ export async function answerFastAgentQuestion({
     if (!closed) {
       try {
         const reply = { purpose: 'closeout' as const, message };
-        if (!(await replaceInferenceRetryReply(reply, true))) {
+        if (
+          !(await replaceInferenceRetryReply(reply, true, () =>
+            diagnostics.recordVisibleReply(),
+          ))
+        ) {
           const posted = await adapter.postReply(reply);
+          diagnostics.recordVisibleReply();
           turnVisibleMessages.push(buildAssistantTextMessage(message));
           await persistAssistantReply({
             reply,
@@ -2373,7 +2386,6 @@ export async function answerFastAgentQuestion({
         inferenceRetryReply = undefined;
         inferenceRetryMessageIndex = undefined;
         inferenceRetryCanonicalEvent = undefined;
-        diagnostics.recordVisibleReply();
         lastVisibleMessage = message;
       } catch (postError) {
         console.error(

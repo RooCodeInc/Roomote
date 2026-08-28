@@ -10,14 +10,19 @@ import {
 } from '@roomote/cloud-agents/server';
 import {
   buildFastAgentSurfaceReplyDelivery,
+  dispatchPrReviewFollowUp,
   resolveUserMcpServerConfigs,
   type FastAgentSurfaceReplyDelivery,
 } from '@roomote/sdk/server';
 import {
   db,
+  claimCanonicalPrReviewAction,
+  completeCanonicalPrReviewActionDispatch,
   eq,
   fastAgentConversations,
   getSessionForFastConversation,
+  releaseCanonicalPrReviewActionDispatch,
+  retireCanonicalPrReviewActionsForDestinationKey,
 } from '@roomote/db/server';
 import {
   formatErrorForLog,
@@ -28,7 +33,9 @@ import {
 import type { UserAuthSuccess } from '@/types';
 import {
   findAccessibleFastSession,
+  buildFastSessionPrReviewDestinationKey,
   getFastSessionTasks,
+  updateFastSessionPrReviewOfferStatus,
 } from '@/lib/server/fast-sessions';
 
 /**
@@ -218,6 +225,27 @@ export async function getFastSessionTasksCommand(
   return getFastSessionTasks(auth, sessionId);
 }
 
+export async function updateFastSessionModelSelectionCommand(
+  auth: UserAuthSuccess,
+  input: {
+    sessionId: string;
+    model?: string | null;
+    reasoningEffort?: ReasoningEffort | null;
+  },
+): Promise<{ success: true }> {
+  const session = await findAccessibleFastSession(auth, input.sessionId);
+  if (!session) {
+    throw new Error('Fast session not found');
+  }
+
+  await resolveSessionModelSettings(session.id, input, {
+    model: session.model,
+    reasoningEffort: session.reasoningEffort,
+  });
+
+  return { success: true };
+}
+
 export async function replyToFastSessionCommand(
   auth: UserAuthSuccess,
   input: {
@@ -254,6 +282,17 @@ export async function replyToFastSessionCommand(
     );
   }
 
+  const retiredDeliveryIds =
+    await retireCanonicalPrReviewActionsForDestinationKey({
+      destinationKind: 'fast_conversation',
+      destinationKey: buildFastSessionPrReviewDestinationKey(session),
+    });
+  await updateFastSessionPrReviewOfferStatus(
+    session.id,
+    retiredDeliveryIds,
+    'dismissed',
+  );
+
   scheduleWebFastAgentTurn({
     userId: auth.userId,
     delivery,
@@ -266,4 +305,75 @@ export async function replyToFastSessionCommand(
   });
 
   return { success: true };
+}
+
+export async function handleFastSessionPrReviewActionCommand(
+  auth: UserAuthSuccess,
+  input: {
+    sessionId: string;
+    deliveryId: string;
+    choice: 'yes' | 'auto' | 'dismiss';
+  },
+): Promise<{
+  status: 'pending' | 'resolved' | 'auto_resolved' | 'dismissed' | 'stale';
+}> {
+  const session = await findAccessibleFastSession(auth, input.sessionId);
+  if (!session) throw new Error('Fast session not found');
+
+  const action = await claimCanonicalPrReviewAction({
+    deliveryId: input.deliveryId,
+    choice: input.choice,
+    actingUserId: auth.userId,
+    expectedDestinationKind: 'fast_conversation',
+    expectedDestinationKey: buildFastSessionPrReviewDestinationKey(session),
+  });
+  if (!action) {
+    await updateFastSessionPrReviewOfferStatus(
+      session.id,
+      [input.deliveryId],
+      'stale',
+    );
+    return { status: 'stale' };
+  }
+
+  if (input.choice === 'dismiss') {
+    await updateFastSessionPrReviewOfferStatus(
+      session.id,
+      [input.deliveryId],
+      'dismissed',
+    );
+    return { status: 'dismissed' };
+  }
+
+  const dispatched = await dispatchPrReviewFollowUp({
+    provider: 'web',
+    taskId: action.taskId!,
+    followUpPrompt: action.followUpPrompt!,
+    actingUserId: auth.userId,
+    idempotencyKey: `pr-review-delivery:${input.deliveryId}`,
+  });
+  const status = input.choice === 'auto' ? 'auto_resolved' : 'resolved';
+  if (dispatched.outcome === 'unavailable') {
+    const released = await releaseCanonicalPrReviewActionDispatch(
+      input.deliveryId,
+    );
+    const releasedStatus = released ? 'pending' : 'stale';
+    await updateFastSessionPrReviewOfferStatus(
+      session.id,
+      [input.deliveryId],
+      releasedStatus,
+    );
+    return { status: releasedStatus };
+  }
+
+  await completeCanonicalPrReviewActionDispatch({
+    deliveryId: input.deliveryId,
+    runId: dispatched.runId,
+  });
+  await updateFastSessionPrReviewOfferStatus(
+    session.id,
+    [input.deliveryId],
+    status,
+  );
+  return { status };
 }

@@ -16,6 +16,7 @@ import {
   getFastSessionTasks,
   getFastSessionMessagesSince,
   getFastSessionDisplayTitle,
+  updateFastSessionPrReviewOfferStatus,
 } from './fast-sessions';
 
 async function createFastSession({
@@ -407,6 +408,41 @@ describe('Fast session queries', () => {
     expect(third.messages.map((message) => message.eventId)).toEqual([
       'turn-1:assistant:0',
     ]);
+  });
+
+  it('streams an in-place review offer retirement', async () => {
+    const owner = await userFactory.create();
+    const session = await createFastSession({
+      userId: owner.id,
+      conversationId: 'review-offer-stream',
+      updatedAt: new Date('2026-01-01T00:00:00.000Z'),
+    });
+    const deliveryId = '11111111-1111-4111-8111-111111111111';
+    await createFastMessage({
+      conversationId: session.id,
+      eventId: 'turn-1:assistant:review',
+      turnSeq: 1,
+      payload: {
+        prReviewAction: {
+          deliveryId,
+          question: 'Resolve these issues?',
+          status: 'pending',
+        },
+      },
+    });
+    const first = await getFastSessionMessagesSince(session.id, 0);
+
+    await updateFastSessionPrReviewOfferStatus(
+      session.id,
+      [deliveryId],
+      'dismissed',
+    );
+    const second = await getFastSessionMessagesSince(session.id, first.cursor);
+
+    expect(second.messages).toHaveLength(1);
+    expect(second.messages[0]?.payload).toMatchObject({
+      prReviewAction: { deliveryId, status: 'dismissed' },
+    });
   });
 
   it('finds sessions for owners and participants but not bystanders', async () => {

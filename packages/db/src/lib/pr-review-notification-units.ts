@@ -1135,6 +1135,7 @@ export async function findPrReviewAutoPreference(input: {
 
 export async function getCanonicalPrReviewAction(deliveryId: string): Promise<{
   deliveryId: string;
+  destinationKind: 'fast_conversation' | 'task';
   status: CanonicalPrReviewDeliveryState;
   provider: 'slack' | 'teams' | 'discord' | 'telegram' | null;
   slackTeamId: string | null;
@@ -1154,6 +1155,7 @@ export async function getCanonicalPrReviewAction(deliveryId: string): Promise<{
   const [row] = await db
     .select({
       deliveryId: prReviewNotificationDeliveries.id,
+      destinationKind: prReviewNotificationDeliveries.destinationKind,
       status: prReviewNotificationDeliveries.status,
       provider: prReviewNotificationDeliveries.routeProvider,
       slackTeamId: prReviewNotificationDeliveries.routeWorkspaceId,
@@ -1213,6 +1215,8 @@ export async function claimCanonicalPrReviewAction(input: {
   choice: 'yes' | 'auto' | 'dismiss';
   actingUserId?: string;
   expectedSlackTeamId?: string;
+  expectedDestinationKind?: 'fast_conversation' | 'task';
+  expectedDestinationKey?: string;
 }): Promise<Awaited<ReturnType<typeof getCanonicalPrReviewAction>>> {
   return db.transaction(async (tx) => {
     const action = await getCanonicalPrReviewAction(input.deliveryId);
@@ -1220,10 +1224,15 @@ export async function claimCanonicalPrReviewAction(input: {
       !action ||
       action.status !== 'awaiting_user_action' ||
       !action.taskId ||
-      !action.provider ||
-      action.provider === 'teams' ||
-      !action.channelId ||
       !action.followUpPrompt ||
+      (input.expectedDestinationKind &&
+        action.destinationKind !== input.expectedDestinationKind) ||
+      (input.expectedDestinationKey &&
+        action.destinationKey !== input.expectedDestinationKey) ||
+      (!input.expectedDestinationKey &&
+        (!action.provider ||
+          action.provider === 'teams' ||
+          !action.channelId)) ||
       (input.expectedSlackTeamId &&
         action.provider === 'slack' &&
         action.slackTeamId !== input.expectedSlackTeamId)
@@ -1320,6 +1329,30 @@ export async function completeCanonicalPrReviewActionDispatch(input: {
   return rows.length === 1;
 }
 
+export async function releaseCanonicalPrReviewActionDispatch(
+  deliveryId: string,
+): Promise<boolean> {
+  const rows = await db
+    .update(prReviewNotificationDeliveries)
+    .set({
+      status: 'awaiting_user_action',
+      actionClaimedAt: null,
+      actingUserId: null,
+      targetTaskId: null,
+      completedAt: null,
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(prReviewNotificationDeliveries.id, deliveryId),
+        eq(prReviewNotificationDeliveries.status, 'auto_dispatch_pending'),
+        isNull(prReviewNotificationDeliveries.dispatchedRunId),
+      ),
+    )
+    .returning({ id: prReviewNotificationDeliveries.id });
+  return rows.length === 1;
+}
+
 export async function retireCanonicalPrReviewActionsForDestination(input: {
   provider: 'slack' | 'discord' | 'telegram';
   slackTeamId?: string;
@@ -1352,4 +1385,30 @@ export async function retireCanonicalPrReviewActionsForDestination(input: {
     )
     .returning({ id: prReviewNotificationDeliveries.id });
   return Promise.all(rows.map(({ id }) => getCanonicalPrReviewAction(id)));
+}
+
+export async function retireCanonicalPrReviewActionsForDestinationKey(input: {
+  destinationKind: 'fast_conversation' | 'task';
+  destinationKey: string;
+}) {
+  const rows = await db
+    .update(prReviewNotificationDeliveries)
+    .set({
+      status: 'dismissed',
+      actionClaimedAt: new Date(),
+      completedAt: new Date(),
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(prReviewNotificationDeliveries.status, 'awaiting_user_action'),
+        eq(
+          prReviewNotificationDeliveries.destinationKind,
+          input.destinationKind,
+        ),
+        eq(prReviewNotificationDeliveries.destinationKey, input.destinationKey),
+      ),
+    )
+    .returning({ id: prReviewNotificationDeliveries.id });
+  return rows.map(({ id }) => id);
 }

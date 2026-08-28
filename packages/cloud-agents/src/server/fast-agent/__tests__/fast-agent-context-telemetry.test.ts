@@ -5,6 +5,7 @@ vi.mock('@roomote/telemetry/server', () => ({ captureEvent }));
 import {
   captureFastAgentInferenceAttemptOutcome,
   captureFastAgentInferenceContext,
+  captureFastAgentTurnSettled,
 } from '../fast-agent-context-telemetry';
 
 describe('captureFastAgentInferenceContext', () => {
@@ -165,5 +166,50 @@ describe('captureFastAgentInferenceContext', () => {
       'session-1',
     );
     expect(JSON.stringify(captureEvent.mock.calls[0])).not.toContain('turn-1');
+  });
+
+  it('records identifier-free first-response and startup timings', () => {
+    captureFastAgentTurnSettled({
+      userId: 'private-user-id',
+      surface: 'web',
+      turnSource: 'human',
+      sessionPath: 'cold_rebuild',
+      outcome: 'success',
+      serviceDurationMs: 1_250,
+      firstResponseDurationMs: 900,
+      sandboxlessStartupDurationMs: 350,
+      inferenceToFirstResponseDurationMs: 550,
+      inferenceDurationMs: 700,
+      postInferenceDurationMs: 200,
+      visibleReplyCount: 1,
+      openCodeProviderRetryEventCount: 0,
+      roomoteInferenceRetryCount: 0,
+    });
+
+    expect(captureEvent).toHaveBeenCalledWith('fast_turn_settled', {
+      userId: 'private-user-id',
+      properties: {
+        surface: 'web',
+        turn_source: 'human',
+        session_path: 'cold_rebuild',
+        outcome: 'success',
+        service_duration_ms: 1_250,
+        first_response_duration_ms: 900,
+        sandboxless_startup_duration_ms: 350,
+        inference_to_first_response_duration_ms: 550,
+        inference_duration_ms: 700,
+        post_inference_duration_ms: 200,
+        had_assistant_response: true,
+        visible_reply_count: 1,
+        opencode_provider_retry_event_count: 0,
+        roomote_inference_retry_count: 0,
+      },
+    });
+    expect(captureEvent.mock.calls[0]?.[1]?.properties).not.toHaveProperty(
+      'session_id',
+    );
+    expect(captureEvent.mock.calls[0]?.[1]?.properties).not.toHaveProperty(
+      'turn_id',
+    );
   });
 });
