@@ -9,6 +9,7 @@ import {
 import {
   createDiscordCommunicationProviderFromRuntimeCredentials,
   isBrainSourceAvailable,
+  listDiscordInstallations,
 } from '@roomote/sdk/server';
 import {
   BRAIN_COLLECTOR_IDS,
@@ -69,6 +70,7 @@ type DiscordCollectionEntry = {
 type DiscordDiscovery = {
   provider: DiscordCommunicationProvider;
   entries: DiscordCollectionEntry[];
+  activeGuildIds: Set<string>;
   scannedGuildIds: Set<string>;
   readableChannelKeys: Set<string>;
   nextGuildCursor: DiscordGuildDiscoveryCursor;
@@ -303,14 +305,20 @@ async function discoverDiscordEntries(
     await createDiscordCommunicationProviderFromRuntimeCredentials();
   if (!provider) return null;
 
-  const [bot, guildPage] = await Promise.all([
+  const [bot, guildPage, installations] = await Promise.all([
     provider.getBotInfo(),
     provider.listGuildsPage({
       ...(cursor.after ? { after: cursor.after } : {}),
       limit: DISCORD_GUILDS_PER_DISCOVERY_PASS,
     }),
+    listDiscordInstallations(),
   ]);
-  const guilds = guildPage.guilds;
+  const activeGuildIds = new Set(
+    installations.map((installation) => installation.guildId),
+  );
+  const guilds = guildPage.guilds.filter((guild) =>
+    activeGuildIds.has(guild.id),
+  );
   const entries: DiscordCollectionEntry[] = [];
   const scannedGuildIds = new Set<string>();
   const readableChannelKeys = new Set<string>();
@@ -370,6 +378,7 @@ async function discoverDiscordEntries(
   const value = {
     provider,
     entries,
+    activeGuildIds,
     scannedGuildIds,
     readableChannelKeys,
     nextGuildCursor: guildPage.nextAfter
@@ -612,6 +621,7 @@ function pendingEntryRemainsEligible(
   discovery: DiscordDiscovery,
   activeKeys: ReadonlySet<string>,
 ): boolean {
+  if (!discovery.activeGuildIds.has(entry.guildId)) return false;
   if (!discovery.scannedGuildIds.has(entry.guildId)) return true;
   if (activeKeys.has(entry.key)) return true;
   return Boolean(
@@ -802,16 +812,34 @@ async function backfillDiscordHistory(rawCursor: string | null): Promise<{
   pageRetirements?: CollectorPageRetirement[];
 }> {
   const noProgress = { pages: [], nextCursor: rawCursor, done: false };
-  const [provider, pendingState] = await Promise.all([
+  const [provider, pendingState, installations] = await Promise.all([
     discoveryCache?.value.provider ??
       createDiscordCommunicationProviderFromRuntimeCredentials(),
     getBrainSyncState(db, DISCORD_BACKFILL_PENDING_STATE_ID),
+    listDiscordInstallations(),
   ]);
   if (!provider) return noProgress;
 
   const state = parseBackfillCursor(rawCursor);
   const completed = new Set(state.completed);
-  const pending = parseBackfillPending(pendingState?.backfillCursor ?? null);
+  const activeGuildIds = new Set(
+    installations.map((installation) => installation.guildId),
+  );
+  const savedPending = parseBackfillPending(
+    pendingState?.backfillCursor ?? null,
+  );
+  const pending = savedPending.filter((entry) =>
+    activeGuildIds.has(entry.guildId),
+  );
+  const prunedPendingUpdate =
+    pending.length === savedPending.length
+      ? []
+      : [
+          {
+            collectorId: DISCORD_BACKFILL_PENDING_STATE_ID,
+            cursor: serializeBackfillPending(pending),
+          },
+        ];
   const entry =
     (state.key
       ? pending.find((candidate) => candidate.key === state.key)
@@ -826,6 +854,7 @@ async function backfillDiscordHistory(rawCursor: string | null): Promise<{
         day: null,
       } satisfies DiscordBackfillCursor),
       done: true,
+      stateUpdates: prunedPendingUpdate,
     };
   }
 
@@ -863,6 +892,7 @@ async function backfillDiscordHistory(rawCursor: string | null): Promise<{
         day: nextDay,
       } satisfies DiscordBackfillCursor),
       done: false,
+      stateUpdates: prunedPendingUpdate,
       ...reconciled,
     };
   }

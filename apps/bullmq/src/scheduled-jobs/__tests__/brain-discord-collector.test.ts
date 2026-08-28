@@ -22,6 +22,8 @@ const workspace = vi.hoisted(() => ({
   available: true,
   providerEnabled: true,
   guildPageNextAfter: null as string | null,
+  guilds: [] as Array<{ id: string; name: string; icon: null }>,
+  installations: [] as Array<{ guildId: string }>,
   channels: [] as Array<{
     id: string;
     name: string;
@@ -46,7 +48,7 @@ function snowflake(iso: string, sequence = 0): string {
 const provider = {
   getBotInfo: vi.fn(async () => ({ id: '999' })),
   listGuildsPage: vi.fn(async () => ({
-    guilds: [{ id: '100', name: 'Community', icon: null }],
+    guilds: workspace.guilds,
     nextAfter: workspace.guildPageNextAfter,
   })),
   listPublicReadableGuildChannels: vi.fn(async () => workspace.channels),
@@ -82,6 +84,7 @@ vi.mock('@roomote/sdk/server', () => ({
     workspace.providerEnabled ? provider : null,
   ),
   isBrainSourceAvailable: vi.fn(async () => workspace.available),
+  listDiscordInstallations: vi.fn(async () => workspace.installations),
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -124,6 +127,8 @@ beforeEach(() => {
   workspace.available = true;
   workspace.providerEnabled = true;
   workspace.guildPageNextAfter = null;
+  workspace.guilds = [{ id: '100', name: 'Community', icon: null }];
+  workspace.installations = [{ guildId: '100' }];
   workspace.channels = [{ id: '300', name: 'general', type: 0 }];
   workspace.threads = [];
   vi.clearAllMocks();
@@ -455,6 +460,66 @@ describe('Discord public-channel Brain collector', () => {
       collectorId: 'discord-public-channels:guild-discovery',
       cursor: JSON.stringify({ after: '100' }),
     });
+  });
+
+  it('discovers channels only for active Discord installations', async () => {
+    workspace.guilds = [
+      { id: '100', name: 'Active', icon: null },
+      { id: '101', name: 'Inactive', icon: null },
+    ];
+    workspace.installations = [{ guildId: '100' }];
+    const { discordPublicChannelsCollector } =
+      await import('../brain-collectors/discord-public-channels');
+
+    await discordPublicChannelsCollector.collect({
+      since: null,
+      now: new Date('2026-08-28T12:00:00Z'),
+      limit: 100,
+    });
+
+    expect(provider.listPublicReadableGuildChannels).toHaveBeenCalledTimes(1);
+    expect(provider.listPublicReadableGuildChannels).toHaveBeenCalledWith({
+      guildId: '100',
+      userId: '999',
+    });
+    expect(provider.listGuildActiveThreads).toHaveBeenCalledWith('100');
+    expect(provider.listGuildActiveThreads).not.toHaveBeenCalledWith('101');
+  });
+
+  it('prunes pending backfill for deactivated installations', async () => {
+    workspace.installations = [{ guildId: '100' }];
+    workspace.syncState.set('discord-public-channels:backfill-pending-v1', {
+      backfillCursor: JSON.stringify({
+        entries: [
+          {
+            key: '101/301',
+            guildId: '101',
+            guildName: 'Inactive',
+            channelId: '301',
+            channelName: 'general',
+            parentChannelId: null,
+            parentChannelName: null,
+            isThread: false,
+          },
+        ],
+      }),
+    });
+    const { discordPublicChannelsCollector } =
+      await import('../brain-collectors/discord-public-channels');
+
+    const result = await discordPublicChannelsCollector.backfill!({
+      cursor: null,
+      limit: 100,
+    });
+
+    expect(result.done).toBe(true);
+    expect(result.stateUpdates).toEqual([
+      {
+        collectorId: 'discord-public-channels:backfill-pending-v1',
+        cursor: JSON.stringify({ entries: [] }),
+      },
+    ]);
+    expect(workspace.fetchCalls).toEqual([]);
   });
 
   it('disables collection without credentials and preserves inventory', async () => {
