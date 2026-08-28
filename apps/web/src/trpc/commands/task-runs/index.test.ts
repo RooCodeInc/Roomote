@@ -27,17 +27,20 @@ const {
 }));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
-  buildSlackRoutingContext: vi.fn(),
+  DeploymentReadOnlyError: class DeploymentReadOnlyError extends Error {},
   enqueueTask: (...args: unknown[]) => mockEnqueueTask(...args),
   getTaskUrl: vi.fn(() => 'https://roomote.test/tasks/task-123'),
-  routeTask: vi.fn(),
 }));
 
 vi.mock('@roomote/db/server', () => ({
   and: vi.fn((...conditions: unknown[]) => ({ type: 'and', conditions })),
+  sessionTasks: { taskId: 'sessionTasks.taskId' },
   db: {
     query: {
       tasks: {
+        findFirst: vi.fn(async () => null),
+      },
+      sessionTasks: {
         findFirst: vi.fn(async () => null),
       },
       taskRuns: {

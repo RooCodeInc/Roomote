@@ -505,13 +505,13 @@ describe('SideNav quick access tasks', () => {
     expect(screen.getByTestId('nav-/analytics')).toBeInTheDocument();
   });
 
-  it('shows task history before automations for admins', () => {
+  it('shows Sessions before automations for admins', () => {
     render(<SideNav />);
 
     const automations = screen.getByTestId('nav-/automations');
-    const tasks = screen.getByTestId('nav-/tasks');
+    const sessions = screen.getByTestId('nav-/sessions');
 
-    expect(automations.compareDocumentPosition(tasks)).toBe(
+    expect(automations.compareDocumentPosition(sessions)).toBe(
       Node.DOCUMENT_POSITION_PRECEDING,
     );
   });

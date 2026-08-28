@@ -281,7 +281,7 @@ describe('AcpToolDetails', () => {
   });
 
   it.each(['search', 'query'])(
-    'adds the sanitized Hippocampus %s query to the existing result YAML',
+    'renders the sanitized Memory %s input before the result YAML',
     (toolName) => {
       const result = {
         matches: [{ title: 'Existing result', score: 0.98 }],
@@ -308,20 +308,14 @@ describe('AcpToolDetails', () => {
         />,
       );
 
-      expect(codeBlockSpy).toHaveBeenCalledWith(
-        expect.objectContaining({
-          code: [
-            'matches:',
-            '  - title: Existing result',
-            '    score: 0.98',
-            'query: Find RooCodeInc/Roomote notes with api_key=[redacted]',
-          ].join('\n'),
-          language: 'yaml',
-          variant: 'compact',
-          highlight: false,
-          className: expect.stringContaining('bg-transparent'),
-        }),
-      );
+      expect(screen.getByText('Input')).toBeInTheDocument();
+      expect(screen.getByText('Result')).toBeInTheDocument();
+      expect(codeBlockSpy.mock.calls.map(([props]) => props.code)).toEqual([
+        'query: Find RooCodeInc/Roomote notes with api_key=[redacted]',
+        ['matches:', '  - title: Existing result', '    score: 0.98'].join(
+          '\n',
+        ),
+      ]);
       expect(toolInputSpy).not.toHaveBeenCalled();
     },
   );
@@ -349,19 +343,12 @@ describe('AcpToolDetails', () => {
       />,
     );
 
-    expect(codeBlockSpy).toHaveBeenCalledWith(
-      expect.objectContaining({
-        code: [
-          'delivered: true',
-          'taskId: task-1',
-          'message: Review RooCodeInc/Roomote and use password=[redacted]',
-        ].join('\n'),
-        language: 'yaml',
-        variant: 'compact',
-        highlight: false,
-        className: expect.stringContaining('bg-transparent'),
-      }),
-    );
+    expect(screen.getByText('Input')).toBeInTheDocument();
+    expect(screen.getByText('Result')).toBeInTheDocument();
+    expect(codeBlockSpy.mock.calls.map(([props]) => props.code)).toEqual([
+      'message: Review RooCodeInc/Roomote and use password=[redacted]',
+      ['delivered: true', 'taskId: task-1'].join('\n'),
+    ]);
     expect(toolInputSpy).not.toHaveBeenCalled();
   });
 
@@ -387,6 +374,61 @@ describe('AcpToolDetails', () => {
       expect.objectContaining({ code: 'Spawning subagent' }),
     );
     expect(toolInputSpy).not.toHaveBeenCalled();
+  });
+
+  it('keeps colliding input and result fields separate', () => {
+    render(
+      <AcpToolDetails
+        msg={{
+          ...buildMessage({
+            kind: 'mcp',
+            title: 'query',
+            isMcp: true,
+            mcpServerName: 'gbrain',
+            mcpToolName: 'query',
+            serverName: 'gbrain',
+            toolName: 'query',
+            rawInput: { arguments: { query: 'requested value' } },
+            output: JSON.stringify({ query: 'result value', matches: 2 }),
+          } as Partial<AcpToolResultUiMessage['data']>),
+          text: JSON.stringify({ query: 'result value', matches: 2 }),
+        }}
+      />,
+    );
+
+    expect(codeBlockSpy.mock.calls.map(([props]) => props.code)).toEqual([
+      'query: requested value',
+      ['query: result value', 'matches: 2'].join('\n'),
+    ]);
+  });
+
+  it('keeps input visible when a truncated result is no longer valid JSON', () => {
+    render(
+      <AcpToolDetails
+        msg={{
+          ...buildMessage({
+            kind: 'mcp',
+            title: 'query',
+            isMcp: true,
+            mcpServerName: 'gbrain',
+            mcpToolName: 'query',
+            serverName: 'gbrain',
+            toolName: 'query',
+            rawInput: { arguments: { query: 'large result' } },
+            output: '{"matches":[\n... output truncated ...\n]}',
+          } as Partial<AcpToolResultUiMessage['data']>),
+          text: '{"matches":[\n... output truncated ...\n]}',
+        }}
+      />,
+    );
+
+    expect(codeBlockSpy.mock.calls[0]?.[0].code).toBe('query: large result');
+    expect(codeBlockSpy.mock.calls[1]?.[0]).toEqual(
+      expect.objectContaining({
+        language: 'yaml',
+        code: expect.stringContaining('output truncated'),
+      }),
+    );
   });
 
   it('hides expanded details for Roomote Slack lifecycle tools', () => {

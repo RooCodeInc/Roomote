@@ -1,6 +1,5 @@
 import { type LucideIcon } from '@/components/system';
-import { ChartColumnIncreasing, House, Zap } from '@/components/system';
-import { Rows4 } from 'lucide-react';
+import { ChartColumnIncreasing, House, Rows4, Zap } from '@/components/system';
 
 interface PrimaryNavItem {
   icon: LucideIcon;
@@ -24,11 +23,11 @@ const PRIMARY_NAV_ITEMS: PrimaryNavItem[] = [
   },
   {
     icon: Rows4,
-    href: '/tasks',
-    label: 'Tasks',
-    description: 'View current and past tasks',
+    href: '/sessions',
+    label: 'Sessions',
+    description: 'View current and past conversations',
     matchExact: false,
-    matchPaths: ['/tasks', '/cloud-agents'],
+    matchPaths: ['/sessions', '/tasks', '/cloud-agents'],
   },
   {
     icon: Zap,

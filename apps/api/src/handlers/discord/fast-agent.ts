@@ -93,6 +93,8 @@ export async function processDiscordFastAgentMessage(
     metadata: ReturnType<typeof discordMetadataForChannel>;
     conversationId: string;
     createAnchoredThread?: boolean;
+    /** Real Discord message used for replies and anchored threads. */
+    anchorMessageId?: string;
     interaction?: DiscordInteractionReplyContext;
     activeTasks?: { taskId: string }[];
     onAccepted?: () => void;
@@ -104,10 +106,12 @@ export async function processDiscordFastAgentMessage(
   if (!eventId) {
     throw new Error('Discord Fast entry requires a source event id.');
   }
+  const anchorMessageId = input.anchorMessageId ?? message?.id;
   let channel = input.channel;
   let metadata = input.metadata;
   if (
     message &&
+    anchorMessageId &&
     input.createAnchoredThread !== false &&
     !channel.isDirectMessage &&
     !channel.isThread &&
@@ -115,7 +119,7 @@ export async function processDiscordFastAgentMessage(
   ) {
     const thread = await input.provider.createThreadFromMessage({
       channelId: channel.channelId,
-      messageId: message.id,
+      messageId: anchorMessageId,
       name: buildCommunicationTaskThreadName(input.question),
     });
     channel = {
@@ -196,7 +200,7 @@ export async function processDiscordFastAgentMessage(
             applicationId: input.applicationId,
             channel,
             ...(input.interaction ? { interaction: input.interaction } : {}),
-            ...(message ? { replyToMessageId: message.id } : {}),
+            ...(anchorMessageId ? { replyToMessageId: anchorMessageId } : {}),
             text: textWithFooter,
           });
           await recordFastAgentConversationMessageBestEffort({
@@ -235,7 +239,7 @@ export async function processDiscordFastAgentMessage(
       userId: input.senderUserId,
       apiBaseUrl,
       conversation,
-      currentMessageId: message?.id ?? input.interaction?.interaction.id,
+      currentMessageId: anchorMessageId ?? input.interaction?.interaction.id,
       signal: releaseFastAgentLock.signal,
       senderDisplayName:
         input.interaction?.interaction.member?.nick ??

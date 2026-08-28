@@ -24,7 +24,10 @@ import {
   appendFastAgentMemory,
   db,
   getDeploymentTaskModelOptions,
+  getSessionForFastConversation,
+  getSessionForTask,
   isBrainEnabled,
+  touchSessionActivity,
 } from '@roomote/db/server';
 import { Env } from '@roomote/env';
 import { z } from 'zod';
@@ -39,7 +42,10 @@ import {
 } from '../../utils';
 import { resolveRoomoteReleaseVersion } from '../../release-version';
 import { getAvailableEnvironments, type RoutableEnvironment } from '../router';
-import { FAST_AGENT_MODEL_ROLE } from './fast-agent-constants';
+import {
+  FAST_AGENT_MODEL_ROLE,
+  FAST_RESPONDING_LEASE_MS,
+} from './fast-agent-constants';
 import { buildFastAgentSystemPrompt } from './fast-agent-prompt';
 import {
   appendFastAgentVisibleMessages,
@@ -73,7 +79,10 @@ import {
   type FastAgentMcpToolCall,
   type FastAgentNativeToolCall,
 } from './fast-agent-native-tool-bridge';
-import { buildFastAgentToolFilter } from './fast-agent-tool-policy';
+import {
+  buildFastAgentToolFilter,
+  getFastAgentNativeAcpKind,
+} from './fast-agent-tool-policy';
 import {
   callFastAgentIntegration,
   listFastAgentIntegrations,
@@ -133,6 +142,19 @@ const showWidgetArgsSchema = z.object({
 });
 const FAST_AGENT_DEFAULT_SLACK_HISTORY_LOOKBACK_MS = 24 * 60 * 60 * 1000;
 const FAST_AGENT_CANONICAL_TOOL_OUTPUT_MAX_CHARS = 50_000;
+
+async function setFastSessionResponding(
+  fastConversationId: string,
+  responding: boolean,
+): Promise<void> {
+  const session = await getSessionForFastConversation(db, fastConversationId);
+  if (!session) return;
+  await touchSessionActivity(db, session.id, Math.floor(Date.now() / 1000), {
+    respondingUntil: responding
+      ? new Date(Date.now() + FAST_RESPONDING_LEASE_MS)
+      : null,
+  });
+}
 
 function buildFastAgentTurnId({
   currentMessageId,
@@ -875,12 +897,14 @@ export async function answerFastAgentQuestion({
     nativeSessionId,
     mcpServerName = null,
     mcpToolName = null,
+    kind = mcpServerName && mcpToolName ? 'mcp' : 'tool',
   }: {
     title: string;
     args: Record<string, unknown>;
     nativeSessionId?: string | null;
     mcpServerName?: string | null;
     mcpToolName?: string | null;
+    kind?: string;
   }) => {
     const ordinal = nextToolOrdinal++;
     const toolCallId = `${turnId}:tool:${ordinal}`;
@@ -898,10 +922,10 @@ export async function answerFastAgentQuestion({
         payload: {
           toolCallId,
           title,
-          kind: 'tool',
+          kind,
           status: 'in_progress',
           isExecute: false,
-          isRead: false,
+          isRead: kind === 'read',
           isMcp,
           isRoomoteNativeTool: !isMcp,
           mcpServerName,
@@ -924,6 +948,7 @@ export async function answerFastAgentQuestion({
       isMcp,
       mcpServerName,
       mcpToolName,
+      kind,
       canonicalEvent,
     };
   };
@@ -950,9 +975,10 @@ export async function answerFastAgentQuestion({
         payload: {
           toolCallId: event.toolCallId,
           title: event.title,
-          kind: 'tool',
+          kind: event.kind,
           status: failed ? 'failed' : 'completed',
           isExecute: false,
+          isRead: event.kind === 'read',
           isMcp: event.isMcp,
           isRoomoteNativeTool: !event.isMcp,
           mcpServerName: event.mcpServerName,
@@ -1050,6 +1076,11 @@ export async function answerFastAgentQuestion({
           }),
     ]);
     canonicalConversationId = session.id;
+    await setFastSessionResponding(session.id, true).catch((error) => {
+      console.warn(
+        `[sessions] Failed to mark Fast Session active: ${formatErrorForLog(error)}`,
+      );
+    });
     durableOpenCodeSessionId = session.openCodeSessionId;
     activeOpenCodeSessionId = session.openCodeSessionId;
     diagnostics.setCanonicalConversationId(session.id);
@@ -1071,6 +1102,7 @@ export async function answerFastAgentQuestion({
           visibleInTranscript: !platformEvent,
           turnSource,
           userId,
+          ...(senderDisplayName ? { userName: senderDisplayName } : {}),
           ...(senderDisplayName ? { senderDisplayName } : {}),
           ...(senderExternalId ? { senderExternalId } : {}),
         },
@@ -1616,12 +1648,24 @@ export async function answerFastAgentQuestion({
               taskUrl?: string;
               taskLinkRendered?: boolean;
             }) => {
+              let linkedSession: Awaited<ReturnType<typeof getSessionForTask>> =
+                null;
+              try {
+                linkedSession = await getSessionForTask(db, task.taskId);
+              } catch (error) {
+                console.warn(
+                  `[sessions] Failed to resolve Session kickoff link: ${formatErrorForLog(error)}`,
+                );
+              }
+              const destinationUrl = linkedSession
+                ? `${Env.R_APP_URL}/sessions/${linkedSession.id}?task=${task.taskId}`
+                : task.taskUrl;
               const message = [
-                args.kickoffMessage,
-                task.taskUrl &&
+                `Preparing workspace…\n\n${args.kickoffMessage}`,
+                destinationUrl &&
                 !task.taskLinkRendered &&
-                !args.kickoffMessage.includes(task.taskUrl)
-                  ? `[Open the task](${task.taskUrl})`
+                !args.kickoffMessage.includes(destinationUrl)
+                  ? `[Open in Roomote](${destinationUrl})`
                   : undefined,
               ]
                 .filter((part): part is string => Boolean(part))
@@ -1790,6 +1834,7 @@ export async function answerFastAgentQuestion({
         title: call.name,
         args: call.args,
         nativeSessionId: call.sessionId,
+        kind: getFastAgentNativeAcpKind(call.name),
       });
       try {
         const result = await executeNativeToolInner(call);
@@ -1943,6 +1988,7 @@ export async function answerFastAgentQuestion({
                   generateTrackedNonTaskTextInOpenCodeSession(
                     {
                       userId,
+                      fastConversationId: session.id,
                       surface:
                         NON_TASK_INFERENCE_SURFACES.fastAgentQuestionAnswering,
                       modelRole: FAST_AGENT_MODEL_ROLE,
@@ -2273,6 +2319,15 @@ export async function answerFastAgentQuestion({
     }
     return lastVisibleMessage || message;
   } finally {
+    if (canonicalConversationId) {
+      await setFastSessionResponding(canonicalConversationId, false).catch(
+        (error) => {
+          console.warn(
+            `[sessions] Failed to settle Fast Session status: ${formatErrorForLog(error)}`,
+          );
+        },
+      );
+    }
     diagnostics.finish();
   }
 }

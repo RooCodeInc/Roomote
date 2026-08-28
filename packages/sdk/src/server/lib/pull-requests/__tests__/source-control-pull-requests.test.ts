@@ -2136,6 +2136,7 @@ Done.`,
             draft: false,
             head: { ref: 'feature/x' },
             base: { ref: 'develop' },
+            assignees: [{ login: 'existing-reviewer' }],
           },
         ]),
       )
@@ -2157,11 +2158,15 @@ Done.`,
         ...baseInput,
         repositoryFullName: 'acme/tools',
         sourceControlProvider: 'gitea' as const,
+        assignees: ['monalisa'],
       },
       fetchImpl,
     });
 
     expect(fetchImpl.mock.calls[1]?.[1]).toMatchObject({ method: 'PATCH' });
+    expect(
+      JSON.parse((fetchImpl.mock.calls[1]?.[1] as { body: string }).body),
+    ).toMatchObject({ assignees: ['existing-reviewer', 'monalisa'] });
     expect(result).toMatchObject({
       action: 'updated',
       targetBranch: 'develop',

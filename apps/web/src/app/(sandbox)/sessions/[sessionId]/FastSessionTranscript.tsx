@@ -1,6 +1,13 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react';
 import {
   ACP_ENVELOPE_EVENT_TYPES,
   getImageUrisFromContentBlocks,
@@ -24,6 +31,8 @@ import {
   type SessionPromptSubmission,
 } from './SessionPromptInput';
 import { preparePromptAttachments } from '@/lib/prompt-attachments';
+import { useOpenSessionTaskPanel } from './session-task-panel-context';
+import { useNarrationMode } from '@/hooks/useNarrationMode';
 
 import {
   AcpTranscriptBlockList,
@@ -56,11 +65,13 @@ export function FastSessionTranscript({
   hasOlderMessages,
   canReply,
   initialTitle = null,
-  fallbackTitle = 'Session',
+  fallbackTitle = 'New session',
   sessionModel = null,
   sessionReasoningEffort = null,
   defaultModelId = null,
   defaultReasoningEffort = null,
+  headerExtras,
+  timelineExtras,
 }: {
   sessionId: string;
   initialMessages: FastSessionMessage[];
@@ -72,8 +83,13 @@ export function FastSessionTranscript({
   sessionReasoningEffort?: ReasoningEffort | null;
   defaultModelId?: string | null;
   defaultReasoningEffort?: ReasoningEffort | null;
+  headerExtras?: ReactNode;
+  timelineExtras?: ReactNode;
 }) {
   const trpcClient = useTRPCClient();
+  const openTaskPanel = useOpenSessionTaskPanel();
+  const { enabled: narrationModeEnabled } = useNarrationMode();
+  const displayMode = narrationModeEnabled ? 'narration' : 'default';
   const [serverMessages, setServerMessages] = useState<
     Map<string, TranscriptMessage>
   >(
@@ -169,11 +185,12 @@ export function FastSessionTranscript({
   const { renderBlocks, suppressMessage } = useAcpTranscriptBlocks({
     messages: uiMessages,
     artifacts: [],
-    displayMode: 'default',
+    displayMode,
     initialPrompt: null,
     shouldHideFirstMessage: false,
     showInternalMessages: false,
     hasLeadingTextBoundary: false,
+    keepDelegatedTasksVisible: true,
     resetKey: `${messages.length}:${messages[0]?.eventId ?? ''}:${messages.at(-1)?.eventId ?? ''}`,
   });
 
@@ -254,11 +271,15 @@ export function FastSessionTranscript({
   );
 
   return (
-    <MessageUiOptionsProvider>
-      <WorkspaceHeader contentClassName="flex-row items-center gap-3">
+    <MessageUiOptionsProvider value={{ displayMode }}>
+      <WorkspaceHeader
+        className="py-4.25"
+        contentClassName="flex-row items-center gap-3"
+      >
         <h1 className="ph-no-capture min-w-0 flex-1 truncate text-sm font-medium">
           {title ?? fallbackTitle}
         </h1>
+        {headerExtras}
       </WorkspaceHeader>
       <Conversation className="min-h-0 flex-1" initial="instant">
         <ConversationContent className="ph-no-capture mx-auto w-full max-w-4xl p-4">
@@ -267,10 +288,12 @@ export function FastSessionTranscript({
               Older messages in this session are not shown.
             </p>
           ) : null}
+          {timelineExtras}
           <AcpTranscriptBlockList
             blocks={renderBlocks}
             showInternalMessages={false}
             onSuppress={suppressMessage}
+            onOpenDelegatedTask={openTaskPanel ?? undefined}
           />
         </ConversationContent>
         <ConversationScrollButton />

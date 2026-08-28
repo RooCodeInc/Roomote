@@ -3,7 +3,7 @@ import { and, db, eq, slackInstallations } from '@roomote/db/server';
 
 import {
   buildSlackLiveTaskCardBlocks,
-  SLACK_LIVE_TASK_CARD_MESSAGES,
+  SLACK_SESSION_LIVE_TASK_CARD_MESSAGES,
 } from './live-task-card-blocks';
 import {
   buildSlackLiveTaskTitle,
@@ -105,8 +105,8 @@ export async function settleSlackLiveTaskCardForRun(input: {
       status: 'error',
       message:
         input.status === RunStatus.Canceled
-          ? SLACK_LIVE_TASK_CARD_MESSAGES.canceled
-          : SLACK_LIVE_TASK_CARD_MESSAGES.failed,
+          ? SLACK_SESSION_LIVE_TASK_CARD_MESSAGES.canceled
+          : SLACK_SESSION_LIVE_TASK_CARD_MESSAGES.failed,
       taskTitle: input.taskTitle,
     });
   } catch (error) {

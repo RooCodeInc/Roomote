@@ -46,10 +46,6 @@ import {
 } from '@roomote/sdk/server';
 
 import { apiLogger } from '../../logging.js';
-import {
-  hasCommunicationsFastModeDefault,
-  resolveFastAgentEntryMode,
-} from '../fast-agent-entry.js';
 import { getCallRoomoteViaEmojiConfiguration } from '../call-roomote-via-emoji.js';
 import { syncActingUserForInboundMessage } from '../tasks/acting-user-sync.js';
 import {
@@ -748,16 +744,11 @@ async function processDiscordGatewayEvent(
     userId: senderUserId,
   });
 
+  // Fast mode is unconditional for ordinary linked-human messages, including
+  // reaction summons: a configured emoji synthesizes a bot mention that enters
+  // the fast agent, matching Slack's call-roomote-via-emoji flow.
   const defaultFastMessage =
-    message != null &&
-    command == null &&
-    resolveFastAgentEntryMode({
-      explicitInvocation: false,
-      userDefaultEnabled: await hasCommunicationsFastModeDefault(senderUserId),
-      fastAvailable: true,
-    })
-      ? message
-      : null;
+    message != null && command == null ? message : null;
 
   if (command?.name === 'goal') {
     if (!command.objective) {
@@ -818,6 +809,11 @@ async function processDiscordGatewayEvent(
         conversationId:
           repliedFastSession?.conversation.conversationId ?? channel.channelId,
         ...(repliedFastSession ? { createAnchoredThread: false } : {}),
+        // A reaction summon's synthesized message id is not a real Discord
+        // message; anchor replies on the reacted-on message instead.
+        ...(reactionTarget
+          ? { anchorMessageId: reactionTarget.messageId }
+          : {}),
         activeTasks: activeRun ? [{ taskId: activeRun.taskId }] : [],
       });
       return { ok: true, fastAnswered: true, fastContinued: true };
@@ -830,19 +826,42 @@ async function processDiscordGatewayEvent(
       )
     : '';
   if (defaultFastMessage && defaultFastQuestion) {
+    let fastQuestion = defaultFastQuestion;
+    if (reactionTarget) {
+      // Match Slack's emoji summon: inline the reacted-on message so the fast
+      // agent sees what it was asked to act on even without thread history.
+      try {
+        const targetMessage = await resolved.provider.getMessage({
+          channelId: reactionTarget.channelId,
+          messageId: reactionTarget.messageId,
+        });
+        if (targetMessage?.text) {
+          fastQuestion = `${defaultFastQuestion}\n\nMessage to act on:\n${targetMessage.text}`;
+        }
+      } catch (error) {
+        apiLogger.warn(
+          `[discord] Could not resolve emoji summon target ${reactionTarget.channelId}:${reactionTarget.messageId}: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    }
     await processDiscordFastAgentMessage({
       event,
-      question: defaultFastQuestion,
+      question: fastQuestion,
       sender,
       senderUserId,
       provider: resolved.provider,
       applicationId: resolved.applicationId,
       channel,
       metadata,
+      // A reaction summon anchors its fast conversation (and any created
+      // thread) on the reacted-on message, mirroring Slack threading under
+      // the reacted-on message; the synthesized message id is not a real
+      // Discord message.
       conversationId: getDiscordFastConversationId(
         channel,
-        defaultFastMessage.id,
+        reactionTarget?.messageId ?? defaultFastMessage.id,
       ),
+      ...(reactionTarget ? { anchorMessageId: reactionTarget.messageId } : {}),
       activeTasks: activeRun ? [{ taskId: activeRun.taskId }] : [],
     });
     return { ok: true, fastAnswered: true, fastDefaulted: true };

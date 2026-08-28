@@ -24,7 +24,6 @@ import { findDiscordMappedUserId } from '@roomote/sdk/server';
 import { parsePrReviewActionCallbackData } from '@roomote/types';
 
 import { apiLogger } from '../../logging.js';
-import { hasCommunicationsFastModeDefault } from '../fast-agent-entry.js';
 import { launchClaimedSuggestedTask } from '../tasks/suggestion-launch.js';
 import {
   claimCurrentThreadSuggestionByMessage,
@@ -335,9 +334,7 @@ async function launchClaimedDiscordSuggestion(input: {
       suggestion: { id: suggestion.id, launchClaimedAt: claimedAt },
       policy: {
         usesRouterLaunch,
-        userDefaultEnabled: usesRouterLaunch
-          ? await hasCommunicationsFastModeDefault(input.senderUserId)
-          : false,
+        userDefaultEnabled: usesRouterLaunch,
         fastAvailable: true,
       },
       launch: async (launchMode) => {

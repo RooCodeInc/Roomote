@@ -146,10 +146,7 @@ describe('chat reply suggestion reactions', () => {
     });
     mocks.lookupSlackUserMapping.mockResolvedValue({
       hasInactiveMapping: false,
-      activeMapping: {
-        userId: 'user-1',
-        communicationsFastModeDefault: false,
-      },
+      activeMapping: null,
     });
     mocks.claimWorkItem.mockResolvedValue({ launchClaimedAt: claimedAt });
     mocks.finalizeWorkItemLaunched.mockResolvedValue(true);
@@ -176,7 +173,7 @@ describe('chat reply suggestion reactions', () => {
     mocks.startFastAgentResponse.mockResolvedValue({ accepted: true });
   });
 
-  it('starts and records a coding task when coding is the user default', async () => {
+  it('starts and records a coding task when Fast is unavailable', async () => {
     const slack = {
       postMessage: vi.fn(async () => 'seeded-thread-ts'),
       deleteMessage: vi.fn(async () => undefined),
@@ -255,7 +252,6 @@ describe('chat reply suggestion reactions', () => {
       hasInactiveMapping: false,
       activeMapping: {
         userId: 'user-1',
-        communicationsFastModeDefault: true,
       },
     });
     const slack = {
@@ -302,7 +298,6 @@ describe('chat reply suggestion reactions', () => {
       hasInactiveMapping: false,
       activeMapping: {
         userId: 'user-1',
-        communicationsFastModeDefault: true,
       },
     });
     mocks.startFastAgentResponse.mockResolvedValue({
@@ -352,7 +347,6 @@ describe('chat reply suggestion reactions', () => {
       hasInactiveMapping: false,
       activeMapping: {
         userId: 'user-1',
-        communicationsFastModeDefault: true,
       },
     });
     mocks.startFastAgentResponse.mockRejectedValue(

@@ -498,8 +498,7 @@ async function launchTaskSuggestionTaskFromReaction({
       suggestion: { id: workItemId, launchClaimedAt: claimedAt },
       policy: {
         usesRouterLaunch,
-        userDefaultEnabled:
-          activeUserMapping?.communicationsFastModeDefault === true,
+        userDefaultEnabled: Boolean(activeUserMapping),
         fastAvailable: Boolean(activeUserMapping),
       },
       launch: async (launchMode) => {
