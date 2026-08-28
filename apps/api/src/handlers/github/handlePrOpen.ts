@@ -114,6 +114,7 @@ export async function handlePrOpen(
     }
 
     try {
+      releaseLifecycleLock.signal.throwIfAborted();
       const launch = await enqueueTask({
         task: {
           type: TaskPayloadKind.GithubPrReview,
@@ -151,6 +152,7 @@ export async function handlePrOpen(
       });
 
       if (target.settings?.publishGithubCheck) {
+        releaseLifecycleLock.signal.throwIfAborted();
         await publishGithubPrReviewCheck({
           installationId: installation!.id,
           repository: repository.full_name,

@@ -23,7 +23,9 @@ const {
   mockGetGitHubAutomationTargets: vi.fn(),
   mockGetCurrentGitHubPrHeadSha: vi.fn(),
   mockFindFirstLockedRun: vi.fn(),
-  mockReleaseLock: vi.fn().mockResolvedValue(undefined),
+  mockReleaseLock: Object.assign(vi.fn().mockResolvedValue(undefined), {
+    signal: new AbortController().signal,
+  }),
   mockSelect: vi.fn(),
   mockUpdate: vi.fn(),
   mockUpdateSet: vi.fn(),

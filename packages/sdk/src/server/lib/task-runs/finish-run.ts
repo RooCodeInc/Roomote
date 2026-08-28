@@ -732,6 +732,7 @@ async function cleanupGithubPrReviewArtifacts(
     }
 
     try {
+      releaseLifecycleLock.signal.throwIfAborted();
       let token: string | undefined;
       let checkRunId = prRow.githubCheckRunId;
       try {
@@ -757,12 +758,15 @@ async function cleanupGithubPrReviewArtifacts(
       }
 
       try {
+        releaseLifecycleLock.signal.throwIfAborted();
         token = await createTaskRunGitHubToken(run);
+        releaseLifecycleLock.signal.throwIfAborted();
         const { data: checkRun } = await getCheckRun(token, {
           owner,
           repo,
           check_run_id: checkRunId,
         });
+        releaseLifecycleLock.signal.throwIfAborted();
         const owningRunId = Number(
           /^roomote-review:(\d+)$/.exec(checkRun.external_id ?? '')?.[1],
         );
@@ -784,6 +788,7 @@ async function cleanupGithubPrReviewArtifacts(
 
       if (prRow.githubReactionId) {
         try {
+          releaseLifecycleLock.signal.throwIfAborted();
           token ??= await createTaskRunGitHubToken(run);
 
           await deleteReaction(token, {
@@ -792,6 +797,7 @@ async function cleanupGithubPrReviewArtifacts(
             repo,
             issue_number: prRow.prNumber,
           });
+          releaseLifecycleLock.signal.throwIfAborted();
 
           await db
             .update(taskPullRequests)
@@ -820,7 +826,9 @@ async function cleanupGithubPrReviewArtifacts(
         };
 
         try {
+          releaseLifecycleLock.signal.throwIfAborted();
           token = await createTaskRunGitHubToken(run);
+          releaseLifecycleLock.signal.throwIfAborted();
           // A user-stopped run arrives here already normalized to Canceled (see
           // finishRun), so the review outcome maps naturally.
           const outcome =
@@ -849,6 +857,7 @@ async function cleanupGithubPrReviewArtifacts(
             commentId: prRow.githubReviewCommentId,
             terminalStatus,
           });
+          releaseLifecycleLock.signal.throwIfAborted();
 
           if (reviewSummary.finalized) {
             console.log(
@@ -865,6 +874,7 @@ async function cleanupGithubPrReviewArtifacts(
 
         if (checkRunId) {
           try {
+            releaseLifecycleLock.signal.throwIfAborted();
             token ??= await createTaskRunGitHubToken(run);
             const checkResult = getGithubPrReviewCheckResult({
               runStatus: status,
@@ -888,6 +898,7 @@ async function cleanupGithubPrReviewArtifacts(
               },
             });
 
+            releaseLifecycleLock.signal.throwIfAborted();
             await updateCheckRun(token, {
               owner,
               repo,
@@ -910,6 +921,12 @@ async function cleanupGithubPrReviewArtifacts(
           }
         }
       }
+    } catch (error) {
+      console.error(
+        `[finishRun] Aborted PR review cleanup for run ${run.id}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
     } finally {
       await releaseLifecycleLock();
     }

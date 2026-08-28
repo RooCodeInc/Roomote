@@ -11,18 +11,29 @@ const {
   mockGetIssueComment,
   mockUpdateInstallationCheck,
   mockUpdateCheckRun,
-} = vi.hoisted(() => ({
-  mockFindFirstLinkage: vi.fn(),
-  mockFindFirstRun: vi.fn(),
-  mockDbUpdate: vi.fn(),
-  mockDbUpdateSet: vi.fn(),
-  mockDbUpdateWhere: vi.fn(),
-  mockCreateCheck: vi.fn(),
-  mockGetCheck: vi.fn(),
-  mockGetIssueComment: vi.fn(),
-  mockUpdateInstallationCheck: vi.fn(),
-  mockUpdateCheckRun: vi.fn(),
-}));
+  mockAcquireRedisLock,
+  mockRenewRedisLock,
+  mockReleaseRedisLock,
+} = vi.hoisted(() => {
+  const mockRenewRedisLock = vi.fn();
+  return {
+    mockFindFirstLinkage: vi.fn(),
+    mockFindFirstRun: vi.fn(),
+    mockDbUpdate: vi.fn(),
+    mockDbUpdateSet: vi.fn(),
+    mockDbUpdateWhere: vi.fn(),
+    mockCreateCheck: vi.fn(),
+    mockGetCheck: vi.fn(),
+    mockGetIssueComment: vi.fn(),
+    mockUpdateInstallationCheck: vi.fn(),
+    mockUpdateCheckRun: vi.fn(),
+    mockAcquireRedisLock: vi.fn(),
+    mockRenewRedisLock,
+    mockReleaseRedisLock: Object.assign(vi.fn(), {
+      renewDetailed: mockRenewRedisLock,
+    }),
+  };
+});
 
 vi.mock('@roomote/db/server', async () => {
   const actual =
@@ -70,9 +81,15 @@ vi.mock('@roomote/cloud-agents/server', async () => {
   };
 });
 
+vi.mock('@roomote/redis', () => ({
+  acquireRedisLock: (...args: unknown[]) => mockAcquireRedisLock(...args),
+}));
+
 import {
+  acquireGithubPrReviewLifecycleLock,
   completeGithubPrReviewCheckFromSummary,
   getGithubPrReviewCheckResult,
+  GithubPrReviewLifecycleLockLostError,
   markGithubPrReviewCheckInProgress,
   publishGithubPrReviewCheck,
 } from '../github-pr-review-check';
@@ -87,6 +104,69 @@ describe('GitHub PR review check lifecycle', () => {
     mockGetCheck.mockResolvedValue({
       data: { head_sha: '789abcd', status: 'in_progress' },
     });
+    mockAcquireRedisLock.mockResolvedValue(mockReleaseRedisLock);
+    mockRenewRedisLock.mockResolvedValue('renewed');
+  });
+
+  it.each(['lost', 'error'] as const)(
+    'aborts the lifecycle lease when renewal returns %s',
+    async (renewalResult) => {
+      vi.useFakeTimers();
+      mockRenewRedisLock.mockResolvedValueOnce(renewalResult);
+
+      try {
+        const lock = await acquireGithubPrReviewLifecycleLock('owner/repo', 42);
+
+        expect(lock).not.toBeNull();
+        await vi.advanceTimersByTimeAsync(40_000);
+
+        expect(mockRenewRedisLock).toHaveBeenCalledWith(120);
+        expect(lock!.signal.aborted).toBe(true);
+        expect(lock!.signal.reason).toBeInstanceOf(
+          GithubPrReviewLifecycleLockLostError,
+        );
+        await lock!();
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
+
+  it('keeps the lifecycle lease active beyond its original TTL', async () => {
+    vi.useFakeTimers();
+
+    try {
+      const lock = await acquireGithubPrReviewLifecycleLock('owner/repo', 42);
+
+      expect(lock).not.toBeNull();
+      await vi.advanceTimersByTimeAsync(150_000);
+
+      expect(mockRenewRedisLock).toHaveBeenCalledTimes(3);
+      expect(lock!.signal.aborted).toBe(false);
+      await lock!();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('aborts when a pending renewal outlives the lease deadline', async () => {
+    vi.useFakeTimers();
+    mockRenewRedisLock.mockReturnValueOnce(new Promise(() => {}));
+
+    try {
+      const lock = await acquireGithubPrReviewLifecycleLock('owner/repo', 42);
+
+      expect(lock).not.toBeNull();
+      await vi.advanceTimersByTimeAsync(120_000);
+
+      expect(lock!.signal.aborted).toBe(true);
+      expect(lock!.signal.reason).toBeInstanceOf(
+        GithubPrReviewLifecycleLockLostError,
+      );
+      await lock!();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('publishes a queued check, persists its id, and supersedes the old head', async () => {

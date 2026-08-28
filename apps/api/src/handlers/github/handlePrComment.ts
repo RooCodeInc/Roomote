@@ -1362,6 +1362,7 @@ export async function handlePrComment(
         }
 
         try {
+          releaseLifecycleLock.signal.throwIfAborted();
           const reviewLaunch = await enqueueTask({
             task: {
               type: TaskPayloadKind.GithubPrReview,
@@ -1386,6 +1387,7 @@ export async function handlePrComment(
             },
           });
           if (reviewer.settings?.publishGithubCheck) {
+            releaseLifecycleLock.signal.throwIfAborted();
             await publishGithubPrReviewCheck({
               installationId: githubInstallationId,
               repository: repository.full_name,

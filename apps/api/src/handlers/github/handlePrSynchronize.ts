@@ -177,6 +177,7 @@ export async function handlePrSynchronize({
     }
 
     try {
+      releaseLaunchLock.signal.throwIfAborted();
       const headSha = await getCurrentGitHubPrHeadSha({
         installationId: installation!.id,
         repository: repository.full_name,
@@ -335,6 +336,7 @@ export async function handlePrSynchronize({
             },
           });
           if (currentTarget.settings?.publishGithubCheck) {
+            releaseLaunchLock.signal.throwIfAborted();
             await publishGithubPrReviewCheck({
               installationId: installation!.id,
               repository: repository.full_name,
@@ -442,6 +444,7 @@ export async function handlePrSynchronize({
       });
 
       if (currentTarget.settings?.publishGithubCheck) {
+        releaseLaunchLock.signal.throwIfAborted();
         await publishGithubPrReviewCheck({
           installationId: installation!.id,
           repository: repository.full_name,

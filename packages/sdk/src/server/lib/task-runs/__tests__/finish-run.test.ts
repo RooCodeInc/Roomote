@@ -16,7 +16,11 @@ const mockGetValidAccessToken = vi.fn().mockResolvedValue('decrypted-token');
 const mockRedisSet = vi.fn().mockResolvedValue('OK');
 const mockRedisDel = vi.fn().mockResolvedValue(1);
 const mockAcquireRedisLock = vi.fn();
-const mockReleaseRedisLock = vi.fn().mockResolvedValue(undefined);
+const mockRenewRedisLock = vi.fn().mockResolvedValue('renewed');
+const mockReleaseRedisLock = Object.assign(
+  vi.fn().mockResolvedValue(undefined),
+  { renewDetailed: mockRenewRedisLock },
+);
 const mockDbExecute = vi.fn().mockResolvedValue([]);
 const mockRecordTaskRunLifecycleEvent = vi.fn().mockResolvedValue(undefined);
 const mockCleanupSandboxOidcTargetsForTaskRun = vi

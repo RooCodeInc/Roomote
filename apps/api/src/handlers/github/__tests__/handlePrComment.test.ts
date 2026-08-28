@@ -16,7 +16,9 @@ const {
   mockGetTaskChannelBindings: vi.fn(),
   mockPublishGithubPrReviewCheck: vi.fn(),
   mockAcquireGithubPrReviewLifecycleLock: vi.fn(),
-  mockReleaseGithubPrReviewLifecycleLock: vi.fn(),
+  mockReleaseGithubPrReviewLifecycleLock: Object.assign(vi.fn(), {
+    signal: new AbortController().signal,
+  }),
   MockSnapshotResumeAlreadyExistsError: class extends Error {},
 }));
 

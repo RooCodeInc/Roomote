@@ -23,6 +23,20 @@ import { getInstallationOctokit, updateCheckRun } from '@roomote/github';
 import { acquireRedisLock } from '@roomote/redis';
 
 export const GITHUB_PR_REVIEW_CHECK_NAME = 'Roomote code review';
+const GITHUB_PR_REVIEW_LIFECYCLE_LOCK_TTL_SECONDS = 120;
+const GITHUB_PR_REVIEW_LIFECYCLE_LOCK_RENEW_MS =
+  (GITHUB_PR_REVIEW_LIFECYCLE_LOCK_TTL_SECONDS * 1_000) / 3;
+
+export class GithubPrReviewLifecycleLockLostError extends Error {
+  constructor() {
+    super('GitHub PR review lifecycle lock ownership was lost.');
+    this.name = 'GithubPrReviewLifecycleLockLostError';
+  }
+}
+
+export type GithubPrReviewLifecycleLockHandle = (() => Promise<void>) & {
+  signal: AbortSignal;
+};
 
 export async function acquireGithubPrReviewLifecycleLock(
   repository: string,
@@ -31,10 +45,60 @@ export async function acquireGithubPrReviewLifecycleLock(
   const key = `pr-review-synchronize:${repository}:${prNumber}`;
 
   for (let attempt = 0; attempt < 100; attempt++) {
-    const release = await acquireRedisLock(key, { ttlSeconds: 120 });
+    const release = await acquireRedisLock(key, {
+      ttlSeconds: GITHUB_PR_REVIEW_LIFECYCLE_LOCK_TTL_SECONDS,
+    });
 
     if (release) {
-      return release;
+      const ownership = new AbortController();
+      let released = false;
+      let renewalPending = false;
+      let ownershipDeadlineTimer: ReturnType<typeof setTimeout>;
+      const abortOwnership = () => {
+        if (released || ownership.signal.aborted) return;
+        ownership.abort(new GithubPrReviewLifecycleLockLostError());
+        clearInterval(renewalTimer);
+        clearTimeout(ownershipDeadlineTimer);
+        console.error(
+          `[githubPrReviewCheck] Lifecycle lock ownership was lost for ${key}`,
+        );
+      };
+      const extendOwnershipDeadline = () => {
+        clearTimeout(ownershipDeadlineTimer);
+        ownershipDeadlineTimer = setTimeout(
+          abortOwnership,
+          GITHUB_PR_REVIEW_LIFECYCLE_LOCK_TTL_SECONDS * 1_000,
+        );
+        ownershipDeadlineTimer.unref();
+      };
+      const renewalTimer = setInterval(() => {
+        if (renewalPending) return;
+        renewalPending = true;
+        void release
+          .renewDetailed(GITHUB_PR_REVIEW_LIFECYCLE_LOCK_TTL_SECONDS)
+          .then((result) => {
+            if (result === 'renewed') {
+              extendOwnershipDeadline();
+            } else {
+              abortOwnership();
+            }
+          })
+          .catch(abortOwnership)
+          .finally(() => {
+            renewalPending = false;
+          });
+      }, GITHUB_PR_REVIEW_LIFECYCLE_LOCK_RENEW_MS);
+      renewalTimer.unref();
+      extendOwnershipDeadline();
+
+      const releaseLifecycleLock = (async () => {
+        released = true;
+        clearInterval(renewalTimer);
+        clearTimeout(ownershipDeadlineTimer);
+        await release();
+      }) as GithubPrReviewLifecycleLockHandle;
+      releaseLifecycleLock.signal = ownership.signal;
+      return releaseLifecycleLock;
     }
 
     await new Promise((resolve) => setTimeout(resolve, 100));
