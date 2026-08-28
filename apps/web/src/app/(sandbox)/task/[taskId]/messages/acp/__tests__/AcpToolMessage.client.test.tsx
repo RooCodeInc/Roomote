@@ -7,7 +7,7 @@ import {
 } from '@testing-library/react';
 import type { ReactNode } from 'react';
 
-import { Bot, Eye, Search, SquarePen, Wrench } from '@/components/system';
+import { Bot, FileIcon, Search, SquarePen, Wrench } from '@/components/system';
 
 import { AcpToolMessage } from '../AcpToolMessage';
 import type { AcpToolCallUiMessage, AcpToolResultUiMessage } from '../types';
@@ -349,7 +349,7 @@ describe('AcpToolMessage', () => {
     expect(toolDetailsSpy).not.toHaveBeenCalled();
   });
 
-  it('renders the gbrain MCP server as Hippocampus', () => {
+  it('renders the gbrain MCP server as Memory', () => {
     render(
       <AcpToolMessage
         msg={buildResultMessage('mcp', {
@@ -367,7 +367,7 @@ describe('AcpToolMessage', () => {
       expect.objectContaining({
         action: 'Used',
         object: 'Query',
-        suffix: 'Hippocampus',
+        suffix: 'Memory',
       }),
     );
   });
@@ -387,7 +387,7 @@ describe('AcpToolMessage', () => {
 
     expect(toolHeaderSpy).toHaveBeenCalledWith(
       expect.objectContaining({
-        icon: Eye,
+        icon: FileIcon,
         collapsible: false,
       }),
     );

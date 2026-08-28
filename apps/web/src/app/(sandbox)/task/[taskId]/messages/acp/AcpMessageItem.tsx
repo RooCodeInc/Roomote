@@ -10,6 +10,7 @@ import { AcpToolMessage } from './AcpToolMessage';
 import { AcpUnknownMessage } from './AcpUnknownMessage';
 import { DelegatedTaskCard } from './DelegatedTaskCard';
 import { getDelegatedTaskDetails } from './delegated-task';
+import { resolveToolPresentationPolicy } from './tool-presentation-policy';
 
 interface AcpMessageItemProps {
   msg: AcpUiMessage;
@@ -36,8 +37,16 @@ function AcpMessageItemBase({
     case 'tool_call':
     case 'tool_result': {
       const delegatedTask = getDelegatedTaskDetails(msg);
+      const policy = resolveToolPresentationPolicy(msg, {
+        delegatedTaskCardsEnabled: Boolean(onOpenDelegatedTask),
+        showInternalMessages: showSubagentPayload,
+      });
 
-      if (delegatedTask && onOpenDelegatedTask) {
+      if (
+        policy.renderAs === 'delegated-task-card' &&
+        delegatedTask &&
+        onOpenDelegatedTask
+      ) {
         return (
           <DelegatedTaskCard {...delegatedTask} onOpen={onOpenDelegatedTask} />
         );

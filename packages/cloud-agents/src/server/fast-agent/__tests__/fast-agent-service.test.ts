@@ -503,6 +503,14 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         senderContextPresent: true,
       }),
     );
+    const userMessage = mocks.upsertMessage.mock.calls
+      .map(([input]) => input.message)
+      .find((message) => message.eventType === 'roomote_runtime.user_prompt');
+    expect(userMessage?.metadata).toMatchObject({
+      userId: 'user-1',
+      userName: 'Matt',
+      senderDisplayName: 'Matt',
+    });
   });
 
   it('escapes tag injection in non-Slack sender and message context', async () => {
@@ -1913,6 +1921,16 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     expect(canonicalWrites[toolResultIndex]?.turnSeq).toBe(
       canonicalWrites[toolCallIndex]?.turnSeq,
     );
+    expect(canonicalWrites[toolCallIndex]?.payload).toMatchObject({
+      kind: 'task',
+      toolName: 'launch_task',
+      status: 'in_progress',
+    });
+    expect(canonicalWrites[toolResultIndex]?.payload).toMatchObject({
+      kind: 'task',
+      toolName: 'launch_task',
+      status: 'completed',
+    });
   });
 
   it('launches across all repositories when the sentinel is explicit', async () => {

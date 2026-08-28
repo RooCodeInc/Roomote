@@ -7,17 +7,7 @@ import {
   sanitizeSandboxPathString,
 } from '@/lib';
 
-import {
-  type LucideIcon,
-  AlertCircle,
-  Bot,
-  Eye,
-  Loader2,
-  SquarePen,
-  Terminal,
-  Search,
-  Wrench,
-} from '@/components/system';
+import { AlertCircle, Loader2 } from '@/components/system';
 import {
   Message,
   MessageContent,
@@ -32,11 +22,13 @@ import { messageAnchorId } from '../message-anchor';
 import type { AcpToolCallUiMessage, AcpToolResultUiMessage } from './types';
 import { AcpToolDetails } from './AcpToolDetails';
 import { isSubagentToolPayload } from './subagent-tool';
-import { hidesExpandedToolResult } from './tool-detail-visibility';
 import { ShowWidgetPreview } from './ShowWidgetPreview';
 import { resolveShowWidgetForToolMessage } from './show-widget-tool-result';
 import { VisualProofToolPreview } from './VisualProofToolPreview';
 import { resolveVisualProofMediaForToolMessage } from './visual-proof-tool-result';
+import { resolveToolPresentation } from './tool-presentation';
+import { toolIconForKey } from './tool-icons';
+import { resolveToolPresentationPolicy } from './tool-presentation-policy';
 
 interface AcpToolMessageProps {
   msg: AcpToolCallUiMessage | AcpToolResultUiMessage;
@@ -51,7 +43,6 @@ export function AcpToolMessage({
 }: AcpToolMessageProps) {
   const artifactLink = useArtifactLink();
   const anchorId = messageAnchorId(msg.ts);
-  const kind = msg.data.kind;
   const title = sanitizeSandboxPathString(msg.data.title ?? 'Tool use');
   const sanitizedToolData = sanitizeSandboxPathsForDisplay(msg.data);
 
@@ -65,10 +56,13 @@ export function AcpToolMessage({
       ? 'input-available'
       : 'output-available';
 
-  const ToolIcon = toolKindIcon({ kind, isRunning, isFailed });
+  const presentation = resolveToolPresentation(msg.data, msg.partial);
+  const ToolIcon = isFailed
+    ? AlertCircle
+    : isRunning
+      ? Loader2
+      : toolIconForKey(presentation.iconKey);
 
-  const isMcp = msg.data.isMcp;
-  const isMcpLabelPresent = Boolean(msg.data.toolName || msg.data.serverName);
   const visualProofMedia = resolveVisualProofMediaForToolMessage(
     msg,
     artifactLink?.artifacts,
@@ -77,13 +71,15 @@ export function AcpToolMessage({
   const showWidget = resolveShowWidgetForToolMessage(msg);
   const showWidgetPreview = showWidget !== null;
   const isSubagentRow = isSubagentToolPayload(msg.data);
+  const policy = resolveToolPresentationPolicy(msg, {
+    artifacts: artifactLink?.artifacts,
+    showInternalMessages: showSubagentPayload,
+  });
   // Direct manage_artifacts / show_widget rows collapse to just the preview;
   // subagent rows keep their collapsible prompt/result details alongside it.
   const showExpandedDetails =
     (isSubagentRow || (!showVisualProofPreview && !showWidgetPreview)) &&
-    !hidesExpandedToolResult(msg, {
-      showSubagentPayload,
-    });
+    policy.detailMode === 'expandable';
   const showNestedActivity = Boolean(children);
   const showCollapsibleContent = showExpandedDetails || showNestedActivity;
 
@@ -92,28 +88,24 @@ export function AcpToolMessage({
   );
   // Running: agent name · current action · elapsed. Settled: agent name ·
   // spawn title · total elapsed + call count (the receipt).
-  const showSubagentRow = kind === 'subagent' && subagentActivity !== null;
+  const showSubagentRow = presentation.category === 'subagent';
 
   const action = showSubagentRow
-    ? (subagentActivity.agentType ?? title)
-    : isMcp && isMcpLabelPresent
-      ? isRunning
-        ? 'Using'
-        : 'Used'
-      : title;
+    ? (subagentActivity?.agentType ?? msg.data.agentType ?? title)
+    : presentation.verb;
 
   const object = showSubagentRow
     ? isRunning
-      ? sanitizeSandboxPathString(subagentActivity.lastAction ?? 'starting…')
+      ? sanitizeSandboxPathString(subagentActivity?.lastAction ?? 'starting…')
       : title
-    : isMcp && isMcpLabelPresent
-      ? formatToolPart(msg.data.toolName ?? msg.data.serverName ?? '')
-      : undefined;
+    : presentation.object;
 
   const suffix = showSubagentRow
-    ? formatSubagentElapsed(subagentActivity)
-    : msg.data.isMcp && msg.data.toolName && msg.data.serverName
-      ? formatToolPart(msg.data.serverName)
+    ? subagentActivity
+      ? formatSubagentElapsed(subagentActivity)
+      : undefined
+    : presentation.identity.providerKind === 'mcp'
+      ? presentation.providerLabel
       : undefined;
   const suffixPrefix = showSubagentRow ? '·' : 'from';
 
@@ -198,31 +190,4 @@ function formatSubagentElapsed(activity: SubagentActivity): string | undefined {
   return typeof count === 'number' && count > 0
     ? `${elapsed} · ${count} ${count === 1 ? 'call' : 'calls'}`
     : elapsed;
-}
-
-/** Format a raw tool/server identifier into a human-readable label. */
-function formatToolPart(str: string): string {
-  if (str.toLowerCase() === 'gbrain') return 'Hippocampus';
-
-  return str
-    .replace(/[.]/g, ' ')
-    .replace(/[-_]/g, ' ')
-    .replace(/([a-z])([A-Z])/g, '$1 $2')
-    .replace(/\b\w/g, (c) => c.toUpperCase())
-    .trim();
-}
-
-function toolKindIcon(params: {
-  kind: string | null;
-  isRunning: boolean;
-  isFailed: boolean;
-}): LucideIcon {
-  if (params.isRunning) return Loader2;
-  if (params.isFailed) return AlertCircle;
-  if (params.kind === 'subagent') return Bot;
-  if (params.kind === 'read') return Eye;
-  if (params.kind === 'execute') return Terminal;
-  if (params.kind === 'search') return Search;
-  if (params.kind === 'edit') return SquarePen;
-  return Wrench;
 }

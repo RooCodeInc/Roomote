@@ -63,7 +63,6 @@ export {
   ExternalLink,
   Eye,
   EyeOff,
-  File,
   FileBox,
   FileCode,
   FileDiffIcon,

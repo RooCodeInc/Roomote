@@ -9,13 +9,17 @@ import { ACP_ENVELOPE_EVENT_TYPES } from '@roomote/types';
 
 import { FastSessionTranscript } from './FastSessionTranscript';
 
-const { replyMutate, preparePromptAttachments, openTaskPanel } = vi.hoisted(
-  () => ({
+const { replyMutate, preparePromptAttachments, openTaskPanel, narrationState } =
+  vi.hoisted(() => ({
     replyMutate: vi.fn(),
     preparePromptAttachments: vi.fn(),
     openTaskPanel: vi.fn(),
-  }),
-);
+    narrationState: { enabled: false },
+  }));
+
+vi.mock('@/hooks/useNarrationMode', () => ({
+  useNarrationMode: () => ({ enabled: narrationState.enabled }),
+}));
 
 vi.mock('@/trpc/client', () => ({
   useTRPCClient: () => ({
@@ -92,6 +96,7 @@ beforeEach(() => {
   preparePromptAttachments.mockImplementation(({ text }: { text: string }) =>
     Promise.resolve({ text }),
   );
+  narrationState.enabled = false;
   openTaskPanel.mockReset();
   vi.stubGlobal('EventSource', FakeEventSource);
 });
@@ -229,7 +234,9 @@ describe('FastSessionTranscript', () => {
       />,
     );
 
-    expect(screen.getAllByText('launch_task')).toHaveLength(1);
+    expect(screen.getByText('Starting')).toBeInTheDocument();
+    expect(screen.getByText('Coding Task')).toBeInTheDocument();
+    expect(screen.getByText('Running')).toBeInTheDocument();
     expect(FakeEventSource.instances).toHaveLength(1);
     expect(FakeEventSource.instances[0]!.url).toBe(
       '/api/sessions/session-1/stream',
@@ -241,7 +248,8 @@ describe('FastSessionTranscript', () => {
       });
     });
 
-    expect(screen.getAllByText('launch_task')).toHaveLength(1);
+    expect(screen.getByText('Started')).toBeInTheDocument();
+    expect(screen.queryByText('Running')).not.toBeInTheDocument();
   });
 
   it('renders trusted Fast show_widget results with the shared sandboxed preview', () => {
@@ -301,7 +309,8 @@ describe('FastSessionTranscript', () => {
     );
   });
 
-  it('opens a launched child task in the session side panel', () => {
+  it('keeps a launched child task visible in narration mode and opens its panel', () => {
+    narrationState.enabled = true;
     render(
       <FastSessionTranscript
         sessionId="session-1"
@@ -319,7 +328,7 @@ describe('FastSessionTranscript', () => {
             payload: {
               toolCallId: 'turn-1:tool:0',
               title: 'launch_task',
-              kind: 'tool',
+              kind: 'task',
               status: 'completed',
               isExecute: false,
               isMcp: false,
@@ -420,14 +429,9 @@ describe('FastSessionTranscript', () => {
       />,
     );
 
-    const activityToggle = screen.getByRole('button', {
-      name: /Worked for/,
-    });
-    expect(screen.queryByText('launch_task')).not.toBeInTheDocument();
-
-    fireEvent.click(activityToggle);
-
-    expect(screen.getAllByText('launch_task')).toHaveLength(1);
+    expect(
+      screen.getByRole('button', { name: /Started Coding Task Completed/ }),
+    ).toBeInTheDocument();
     expect(screen.getByText('I started the checkout fix.')).toBeInTheDocument();
   });
 
