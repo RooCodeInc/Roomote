@@ -1,7 +1,9 @@
+import { eq } from 'drizzle-orm';
+
 import type { LlmUsageCostSource } from '@roomote/types';
 
 import { db } from '../db';
-import { llmUsageEvents } from '../schema';
+import { llmUsageEvents, sessions, sessionTasks } from '../schema';
 
 export interface RecordLlmUsageInput {
   source?: string;
@@ -11,6 +13,7 @@ export interface RecordLlmUsageInput {
   runId?: number | null;
   userId?: string | null;
   environmentId?: string | null;
+  fastConversationId?: string | null;
   harnessSessionId?: string | null;
   messageId?: string | null;
   providerId?: string | null;
@@ -100,6 +103,19 @@ export async function recordLlmUsage(
       : clampOptionalInteger(input.contextTokens);
   const costSource = input.costSource ?? 'missing';
   const agent = normalizeAgent(input.agent);
+  const sessionId = input.fastConversationId
+    ? await db.query.sessions.findFirst({
+        where: eq(sessions.fastConversationId, input.fastConversationId),
+        columns: { id: true },
+      })
+    : input.taskId
+      ? await db
+          .select({ id: sessionTasks.sessionId })
+          .from(sessionTasks)
+          .where(eq(sessionTasks.taskId, input.taskId))
+          .limit(1)
+          .then((rows) => rows[0])
+      : null;
 
   const values = {
     source: input.source ?? 'roomote',
@@ -108,6 +124,7 @@ export async function recordLlmUsage(
     runId: input.runId ?? null,
     userId: input.userId ?? null,
     environmentId: input.environmentId ?? null,
+    sessionId: sessionId?.id ?? null,
     eventKey: input.eventKey ?? null,
     harnessSessionId: input.harnessSessionId ?? null,
     messageId: input.messageId ?? null,

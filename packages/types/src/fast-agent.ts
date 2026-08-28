@@ -86,18 +86,29 @@ export const fastAgentParentSchema = z.object({
 
 export type FastAgentParent = z.infer<typeof fastAgentParentSchema>;
 
+export type TaskReportConsumer = 'direct-user' | 'orchestrator';
+
+export const taskReportConsumerSchema = z
+  .enum(['direct-user', 'orchestrator', 'fast-orchestrator'])
+  .transform(
+    (consumer): TaskReportConsumer =>
+      consumer === 'fast-orchestrator' ? 'orchestrator' : consumer,
+  );
+
 /**
  * A delegated Fast child keeps its parent's coordinates for lifecycle routing,
  * but the child runtime must not treat those coordinates as a direct reply
- * surface. Fast owns all chat delivery for the child.
+ * surface. The orchestrator owns all chat delivery for the child.
  */
 export function buildFastAgentChildTaskMetadata(parent: FastAgentParent): {
   communicationContextInherited: true;
+  reportConsumer: 'orchestrator';
   fastAgentSessionId: string;
   fastAgentParent: FastAgentParent;
 } {
   return {
     communicationContextInherited: true,
+    reportConsumer: 'orchestrator',
     fastAgentSessionId: parent.sessionId,
     fastAgentParent: parent,
   };
@@ -115,4 +126,23 @@ export function getFastAgentParentFromPayload(
     .safeParse(payload);
 
   return parsed.success ? parsed.data.fastAgentParent : null;
+}
+
+export function getTaskReportConsumerFromPayload(
+  payload: unknown,
+): TaskReportConsumer {
+  if (payload && typeof payload === 'object' && !Array.isArray(payload)) {
+    const parsed = taskReportConsumerSchema.safeParse(
+      (payload as Record<string, unknown>).reportConsumer,
+    );
+    if (parsed.success) {
+      return parsed.data;
+    }
+  }
+
+  // Existing orchestrator-owned tasks still need the report contract when
+  // they resume or settle after an upgrade.
+  return getFastAgentParentFromPayload(payload)
+    ? 'orchestrator'
+    : 'direct-user';
 }

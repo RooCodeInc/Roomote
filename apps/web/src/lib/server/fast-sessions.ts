@@ -9,20 +9,28 @@ import {
   desc,
   eq,
   exists,
-  gte,
   fastAgentConversations,
   fastAgentMessages,
   llmUsageEvents,
-  lt,
+  inArray,
+  isNull,
   or,
+  sessions,
   sql,
+  taskRuns,
+  tasks,
   users,
 } from '@roomote/db/server';
 import type { FastAgentMessage } from '@roomote/db';
 
-import type { TimePeriodFilter, UserAuthSuccess } from '@/types';
+import type { UserAuthSuccess } from '@/types';
 
 type FastSessionAuth = Pick<UserAuthSuccess, 'userId' | 'isAdmin'>;
+
+type FastSessionTaskSummary = {
+  taskId: string;
+  title: string;
+};
 
 export type FastSessionMessage = Pick<
   FastAgentMessage,
@@ -42,7 +50,6 @@ export type FastSessionMessage = Pick<
   | 'createdAt'
 >;
 
-const FAST_SESSION_LIST_LIMIT = 200;
 const FAST_SESSION_TRANSCRIPT_MESSAGE_LIMIT = 1000;
 
 const fastSessionSelection = {
@@ -118,6 +125,68 @@ export async function findAccessibleFastSession(
     .limit(1);
 
   return session ?? null;
+}
+
+export async function getFastSessionDisplayTitle(
+  fastConversationId: string,
+  fallbackTitle: string | null,
+): Promise<string | null> {
+  const [session] = await db
+    .select({ title: sessions.title })
+    .from(sessions)
+    .where(eq(sessions.fastConversationId, fastConversationId))
+    .limit(1);
+  return session?.title ?? fallbackTitle;
+}
+
+/**
+ * Fast conversations predate the unified Session tables. Their delegated tasks
+ * are linked directly from task runs, rather than through session_tasks.
+ */
+export async function getFastSessionTasks(
+  auth: FastSessionAuth,
+  sessionId: string,
+): Promise<FastSessionTaskSummary[] | null> {
+  const session = await findAccessibleFastSession(auth, sessionId);
+  if (!session) return null;
+
+  const [conversation] = await db
+    .select({
+      legacyConversationIds: fastAgentConversations.legacyConversationIds,
+    })
+    .from(fastAgentConversations)
+    .where(eq(fastAgentConversations.id, session.id))
+    .limit(1);
+  const lookupIds = [
+    session.id,
+    ...(conversation?.legacyConversationIds ?? []),
+  ];
+  const latestRunPerTask = db.$with('latest_fast_session_task_runs').as(
+    db
+      .selectDistinctOn([taskRuns.taskId], {
+        taskId: taskRuns.taskId,
+        title: tasks.title,
+        latestRunId: taskRuns.id,
+      })
+      .from(taskRuns)
+      .innerJoin(tasks, eq(tasks.id, taskRuns.taskId))
+      .where(
+        and(
+          inArray(taskRuns.fastAgentSessionId, lookupIds),
+          isNull(tasks.deletedAt),
+        ),
+      )
+      .orderBy(taskRuns.taskId, desc(taskRuns.id)),
+  );
+
+  return db
+    .with(latestRunPerTask)
+    .select({
+      taskId: latestRunPerTask.taskId,
+      title: latestRunPerTask.title,
+    })
+    .from(latestRunPerTask)
+    .orderBy(desc(latestRunPerTask.latestRunId));
 }
 
 function sanitizeFastSessionMessageRow<
@@ -197,88 +266,6 @@ export async function getFastSessionMessagesSince(
   });
 
   return { messages, cursor };
-}
-
-export function encodeFastSessionCursor(row: {
-  updatedAt: Date;
-  id: string;
-}): string {
-  return `${row.updatedAt.getTime()}:${row.id}`;
-}
-
-function decodeFastSessionCursor(cursor: string | undefined) {
-  if (!cursor) {
-    return null;
-  }
-
-  const separator = cursor.indexOf(':');
-  if (separator <= 0) {
-    return null;
-  }
-
-  const updatedAtMs = Number(cursor.slice(0, separator));
-  const id = cursor.slice(separator + 1);
-  if (!Number.isFinite(updatedAtMs) || !id) {
-    return null;
-  }
-
-  return { updatedAt: new Date(updatedAtMs), id };
-}
-
-export async function getFastSessions(
-  auth: FastSessionAuth,
-  options?: {
-    before?: string;
-    filterUserId?: string | null;
-    timePeriod?: TimePeriodFilter;
-  },
-) {
-  const cursor = decodeFastSessionCursor(options?.before);
-
-  // Keyset pagination matching the (updatedAt desc, id desc) ordering.
-  const beforeCursor = cursor
-    ? or(
-        lt(fastAgentConversations.updatedAt, cursor.updatedAt),
-        and(
-          eq(fastAgentConversations.updatedAt, cursor.updatedAt),
-          lt(fastAgentConversations.id, cursor.id),
-        ),
-      )
-    : undefined;
-
-  const ownerFilter = options?.filterUserId
-    ? eq(fastAgentConversations.userId, options.filterUserId)
-    : undefined;
-  const timePeriod = options?.timePeriod ?? 'all';
-  const timeFilter =
-    timePeriod === 'all'
-      ? undefined
-      : gte(
-          fastAgentConversations.updatedAt,
-          new Date(Date.now() - timePeriod * 24 * 60 * 60 * 1000),
-        );
-
-  const rows = await db
-    .select(fastSessionSelection)
-    .from(fastAgentConversations)
-    .innerJoin(users, eq(fastAgentConversations.userId, users.id))
-    .where(and(fastSessionScope(auth), ownerFilter, timeFilter, beforeCursor))
-    .orderBy(
-      desc(fastAgentConversations.updatedAt),
-      desc(fastAgentConversations.id),
-    )
-    .limit(FAST_SESSION_LIST_LIMIT + 1);
-
-  const sessions = rows.slice(0, FAST_SESSION_LIST_LIMIT);
-  const lastSession = sessions.at(-1);
-
-  return {
-    sessions,
-    nextCursor:
-      rows.length > FAST_SESSION_LIST_LIMIT && lastSession
-        ? encodeFastSessionCursor(lastSession)
-        : null,
-  };
 }
 
 export async function getFastSessionById(

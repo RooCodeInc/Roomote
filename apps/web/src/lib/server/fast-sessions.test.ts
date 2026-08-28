@@ -1,16 +1,21 @@
 import {
   db,
+  ensureSessionForFastConversation,
+  eq,
   fastAgentConversations,
   fastAgentMessages,
+  runFactory,
+  sessions,
+  taskFactory,
   userFactory,
 } from '@roomote/db/server';
 
 import {
-  encodeFastSessionCursor,
   findAccessibleFastSession,
   getFastSessionById,
+  getFastSessionTasks,
   getFastSessionMessagesSince,
-  getFastSessions,
+  getFastSessionDisplayTitle,
 } from './fast-sessions';
 
 async function createFastSession({
@@ -77,96 +82,35 @@ async function createFastMessage({
 }
 
 describe('Fast session queries', () => {
-  it('lists only the current user sessions for a non-admin', async () => {
+  it('prefers the unified Session title for live Fast updates', async () => {
     const owner = await userFactory.create();
-    const otherUser = await userFactory.create();
-    const older = await createFastSession({
+    const conversation = await createFastSession({
       userId: owner.id,
-      conversationId: 'older',
+      conversationId: 'unified-display-title',
       updatedAt: new Date('2026-01-01T00:00:00.000Z'),
     });
-    const newer = await createFastSession({
-      userId: owner.id,
-      conversationId: 'newer',
-      updatedAt: new Date('2026-01-02T00:00:00.000Z'),
-    });
-    await createFastMessage({
-      conversationId: newer.id,
-      eventId: 'newer:user',
-      turnSeq: 0,
-      role: 'user',
-      eventType: 'roomote_runtime.user_prompt',
-    });
-    await createFastSession({
-      userId: otherUser.id,
-      conversationId: 'other-user',
-      updatedAt: new Date('2026-01-03T00:00:00.000Z'),
-    });
+    const session = await ensureSessionForFastConversation(db, conversation.id);
+    await db
+      .update(sessions)
+      .set({
+        title: 'Manual unified title',
+        titleEditedByUserAt: new Date(),
+      })
+      .where(eq(sessions.id, session.id));
+    await db
+      .update(fastAgentConversations)
+      .set({ title: 'Generated conversation title' })
+      .where(eq(fastAgentConversations.id, conversation.id));
 
-    const { sessions, nextCursor } = await getFastSessions({
-      userId: owner.id,
-      isAdmin: false,
-    });
-
-    expect(sessions.map((session) => session.id)).toEqual([newer.id, older.id]);
-    expect(sessions[0]).toMatchObject({
-      messageCount: 1,
-      ownerName: owner.name,
-    });
-    expect(nextCursor).toBeNull();
+    await expect(
+      getFastSessionDisplayTitle(
+        conversation.id,
+        'Generated conversation title',
+      ),
+    ).resolves.toBe('Manual unified title');
   });
 
-  it('lists sessions across users for an admin', async () => {
-    const admin = await userFactory.create();
-    const otherUser = await userFactory.create();
-    const adminSession = await createFastSession({
-      userId: admin.id,
-      conversationId: 'admin-session',
-      updatedAt: new Date('2026-01-01T00:00:00.000Z'),
-    });
-    const otherSession = await createFastSession({
-      userId: otherUser.id,
-      conversationId: 'other-session',
-      updatedAt: new Date('2026-01-02T00:00:00.000Z'),
-    });
-
-    const { sessions } = await getFastSessions({
-      userId: admin.id,
-      isAdmin: true,
-    });
-
-    expect(sessions.map((session) => session.id)).toEqual(
-      expect.arrayContaining([adminSession.id, otherSession.id]),
-    );
-  });
-
-  it('pages older sessions with a keyset cursor', async () => {
-    const owner = await userFactory.create();
-    const oldest = await createFastSession({
-      userId: owner.id,
-      conversationId: 'cursor-oldest',
-      updatedAt: new Date('2026-01-01T00:00:00.000Z'),
-    });
-    const middle = await createFastSession({
-      userId: owner.id,
-      conversationId: 'cursor-middle',
-      updatedAt: new Date('2026-01-02T00:00:00.000Z'),
-    });
-    await createFastSession({
-      userId: owner.id,
-      conversationId: 'cursor-newest',
-      updatedAt: new Date('2026-01-03T00:00:00.000Z'),
-    });
-
-    const { sessions } = await getFastSessions(
-      { userId: owner.id, isAdmin: false },
-      { before: encodeFastSessionCursor(middle) },
-    );
-
-    expect(sessions.map((session) => session.id)).toEqual([oldest.id]);
-  });
-
-  it('applies the same scope to detail lookups', async () => {
+  it('applies the caller scope to detail lookups', async () => {
     const owner = await userFactory.create();
     const otherUser = await userFactory.create();
     const session = await createFastSession({
@@ -181,6 +125,31 @@ describe('Fast session queries', () => {
     await expect(
       getFastSessionById({ userId: otherUser.id, isAdmin: true }, session.id),
     ).resolves.toMatchObject({ id: session.id, userId: owner.id });
+  });
+
+  it('lists every task associated with a Fast session', async () => {
+    const owner = await userFactory.create();
+    const session = await createFastSession({
+      userId: owner.id,
+      conversationId: 'tasks-session',
+      updatedAt: new Date('2026-01-01T00:00:00.000Z'),
+    });
+    const delegatedTask = await taskFactory.create({
+      title: 'Delegated task',
+      state: 'active',
+    });
+    await runFactory.create({
+      taskId: delegatedTask.id,
+      payload: {
+        repo: 'acme/widgets',
+        description: 'Delegated Fast task',
+        fastAgentSessionId: session.id,
+      },
+    });
+
+    await expect(
+      getFastSessionTasks({ userId: owner.id, isAdmin: false }, session.id),
+    ).resolves.toEqual([{ taskId: delegatedTask.id, title: 'Delegated task' }]);
   });
 
   it('reads canonical messages in timestamp and turn sequence order', async () => {
@@ -289,9 +258,6 @@ describe('Fast session queries', () => {
     await expect(
       getFastSessionById(participantAuth, session.id),
     ).resolves.toMatchObject({ id: session.id });
-    const { sessions: participantList } =
-      await getFastSessions(participantAuth);
-    expect(participantList.map((row) => row.id)).toContain(session.id);
 
     await expect(
       getFastSessionById({ userId: bystander.id, isAdmin: false }, session.id),

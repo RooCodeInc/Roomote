@@ -5,8 +5,6 @@ import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { toast } from 'sonner';
 
-import { ALL_REPOSITORIES } from '@roomote/types';
-
 import {
   type Filter,
   type TimePeriodFilter,
@@ -14,7 +12,11 @@ import {
   parseTimePeriodParam,
 } from '@/types';
 
-import { DEFAULT_VISIBLE_TASK_WORKFLOWS, getTaskCategoryById } from '@/lib';
+import {
+  DEFAULT_VISIBLE_TASK_WORKFLOWS,
+  formatRepositoryName,
+  getTaskCategoryById,
+} from '@/lib';
 import { cn } from '@/lib/utils';
 
 import { useAuthorizedUser } from '@/hooks/useUser';
@@ -320,7 +322,7 @@ export const Tasks = () => {
       const pullRequestLabel =
         pullRequest === HAS_PULL_REQUEST_FILTER_VALUE
           ? 'Has PR'
-          : pullRequest.replace(ALL_REPOSITORIES, 'All Repositories');
+          : formatRepositoryName(pullRequest);
 
       result.push({
         type: 'pullRequest',

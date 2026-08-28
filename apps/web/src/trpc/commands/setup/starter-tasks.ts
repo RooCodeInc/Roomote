@@ -51,7 +51,10 @@ async function findStarterTaskLaunch(
     .select({ taskId: taskRuns.taskId })
     .from(taskRuns)
     .where(
-      sql`${taskRuns.payload}->>'launchIdempotencyKey' = ${launchIdempotencyKey}`,
+      and(
+        sql`${taskRuns.payload}->>'launchIdempotencyKey' = ${launchIdempotencyKey}`,
+        isNull(taskRuns.canceledAt),
+      ),
     )
     .limit(1);
 

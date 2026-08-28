@@ -24,7 +24,6 @@ vi.mock('@roomote/db/server', () => ({
   users: {
     id: 'users.id',
     deletedAt: 'users.deletedAt',
-    metadata: 'users.metadata',
   },
 }));
 
@@ -52,7 +51,6 @@ describe('lookupSlackUserMapping', () => {
         updatedAt,
         matchedUserId: 'user-1',
         userDeletedAt: null,
-        userMetadata: { communications_fast_mode_default: true },
       },
     ]);
 
@@ -68,7 +66,6 @@ describe('lookupSlackUserMapping', () => {
         userId: 'user-1',
         createdAt,
         updatedAt,
-        communicationsFastModeDefault: true,
       },
       hasInactiveMapping: false,
     });
@@ -85,7 +82,6 @@ describe('lookupSlackUserMapping', () => {
         updatedAt: new Date('2024-01-02T00:00:00.000Z'),
         matchedUserId: 'user-1',
         userDeletedAt: new Date('2024-02-01T00:00:00.000Z'),
-        userMetadata: {},
       },
     ]);
 

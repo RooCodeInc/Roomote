@@ -23,6 +23,7 @@ const mocks = vi.hoisted(() => ({
   captureInferenceContext: vi.fn(),
   captureInferenceAttemptOutcome: vi.fn(),
   revokeMcpCapabilities: vi.fn(),
+  reconcileRetryNotices: vi.fn(),
   nativeExecutor: undefined as
     | ((call: {
         agent?: string;
@@ -71,6 +72,12 @@ vi.mock('../fast-agent-session', () => ({
   upsertFastAgentMessage: mocks.upsertMessage,
 }));
 
+vi.mock('../fast-agent-conversation-repository', () => ({
+  INTERRUPTED_INFERENCE_RETRY_MESSAGE:
+    'The inference retry was interrupted before it completed. Please send the request again.',
+  reconcileFastAgentInferenceRetryNotices: mocks.reconcileRetryNotices,
+}));
+
 vi.mock('../../router', () => ({
   getAvailableEnvironments: mocks.getEnvironments,
 }));
@@ -80,6 +87,9 @@ vi.mock('@roomote/db/server', () => ({
   appendFastAgentMemory: mocks.appendMemory,
   isBrainEnabled: mocks.isBrainEnabled,
   db: {},
+  getSessionForFastConversation: vi.fn().mockResolvedValue(null),
+  getSessionForTask: vi.fn().mockResolvedValue(null),
+  touchSessionActivity: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock('../../non-task-provider-usage', () => ({
@@ -264,6 +274,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     });
     mocks.setOpenCodeSession.mockResolvedValue(undefined);
     mocks.upsertMessage.mockResolvedValue(undefined);
+    mocks.reconcileRetryNotices.mockResolvedValue(0);
     mocks.getActiveTasks.mockResolvedValue([]);
     mocks.getEnvironments.mockResolvedValue([
       {
@@ -500,6 +511,14 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         senderContextPresent: true,
       }),
     );
+    const userMessage = mocks.upsertMessage.mock.calls
+      .map(([input]) => input.message)
+      .find((message) => message.eventType === 'roomote_runtime.user_prompt');
+    expect(userMessage?.metadata).toMatchObject({
+      userId: 'user-1',
+      userName: 'Matt',
+      senderDisplayName: 'Matt',
+    });
   });
 
   it('escapes tag injection in non-Slack sender and message context', async () => {
@@ -1847,7 +1866,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
           prompt: 'Fix checkout.',
           environmentId: 'env-1',
           model: 'anthropic/claude-sonnet-5',
-          includeImages: true,
+          includeAttachments: true,
           kickoffMessage: 'I’m delegating the checkout fix.',
         });
         expect(result).toEqual(
@@ -1864,6 +1883,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         'data:image/png;base64,c2NyZWVuc2hvdC0x',
         'data:image/gif;base64,c2NyZWVuc2hvdC0y',
       ],
+      attachmentTexts: ['Attachment: checkout-plan.md\nAdd a retry test.'],
       adapter,
     });
 
@@ -1881,7 +1901,8 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
           'data:image/gif;base64,c2NyZWVuc2hvdC0y',
         ],
         model: 'anthropic/claude-sonnet-5',
-        prompt: 'Fix checkout.',
+        prompt:
+          'Fix checkout.\n\nAttachment: checkout-plan.md\nAdd a retry test.',
       }),
     );
     const canonicalWrites = mocks.upsertMessage.mock.calls.map(
@@ -1910,6 +1931,16 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     expect(canonicalWrites[toolResultIndex]?.turnSeq).toBe(
       canonicalWrites[toolCallIndex]?.turnSeq,
     );
+    expect(canonicalWrites[toolCallIndex]?.payload).toMatchObject({
+      kind: 'task',
+      toolName: 'launch_task',
+      status: 'in_progress',
+    });
+    expect(canonicalWrites[toolResultIndex]?.payload).toMatchObject({
+      kind: 'task',
+      toolName: 'launch_task',
+      status: 'completed',
+    });
   });
 
   it('launches across all repositories when the sentinel is explicit', async () => {
@@ -1942,6 +1973,38 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       expect.objectContaining({ environmentId: ALL_REPOSITORIES }),
     );
     expect(launchTask.mock.calls[0]?.[0]).not.toHaveProperty('images');
+  });
+
+  it('keeps includeImages image-only for task launches', async () => {
+    const launchTask = vi.fn<LaunchFastAgentTask>(async ({ postKickoff }) => {
+      await postKickoff({ taskId: 'task-1' });
+      return { success: true, taskId: 'task-1' };
+    });
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        await invokeTool(nativeToolNames.launchTask, {
+          prompt: 'Use the screenshot.',
+          includeImages: true,
+          kickoffMessage: 'I’m checking the screenshot.',
+        });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({
+      ...baseParams,
+      images: ['data:image/png;base64,c2NyZWVuc2hvdA=='],
+      attachmentTexts: ['Attachment: plan.md\nNot forwarded by includeImages.'],
+      adapter: callbacks({ launchTask }),
+    });
+
+    expect(launchTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        prompt: 'Use the screenshot.',
+        images: ['data:image/png;base64,c2NyZWVuc2hvdA=='],
+      }),
+    );
   });
 
   it.each(['slack', 'discord', 'teams', 'telegram'] as const)(
@@ -2223,62 +2286,67 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     expect(adapter.postReply).not.toHaveBeenCalled();
   });
 
-  it('steers an active task before posting a user-visible response', async () => {
-    mocks.getActiveTasks.mockResolvedValue([
-      { taskId: 'task-1', title: 'Checkout', status: 'running' },
-    ]);
-    const order: string[] = [];
-    mocks.sendTaskMessage.mockImplementation(async () => {
-      order.push('steer');
-      return { success: true };
-    });
-    mocks.generateText.mockImplementation(
-      async (_params, _session, options) => {
-        await options.onSessionReady('opencode-session-1');
-        await expect(
-          invokeTool(nativeToolNames.sendTaskMessage, {
-            taskId: 'task-1',
-            message: 'Include the failing test.',
-            includeImages: true,
-          }),
-        ).resolves.toEqual({ success: true });
-        await invokeTool(nativeToolNames.sendChatReply, {
-          purpose: 'closeout',
-          message: 'The task was updated.',
-        });
-        return '';
-      },
-    );
-    const adapter = callbacks({
-      postReply: vi.fn(async () => {
-        order.push('reply');
-      }),
-    });
+  it.each(['running', 'completed'] as const)(
+    'forwards attachments to a %s task before posting a response',
+    async (status) => {
+      mocks.getActiveTasks.mockResolvedValue([
+        { taskId: 'task-1', title: 'Checkout', status },
+      ]);
+      const order: string[] = [];
+      mocks.sendTaskMessage.mockImplementation(async () => {
+        order.push('steer');
+        return { success: true };
+      });
+      mocks.generateText.mockImplementation(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          await expect(
+            invokeTool(nativeToolNames.sendTaskMessage, {
+              taskId: 'task-1',
+              message: 'Include the failing test.',
+              includeAttachments: true,
+            }),
+          ).resolves.toEqual({ success: true });
+          await invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'closeout',
+            message: 'The task was updated.',
+          });
+          return '';
+        },
+      );
+      const adapter = callbacks({
+        postReply: vi.fn(async () => {
+          order.push('reply');
+        }),
+      });
 
-    await answerFastAgentQuestion({
-      ...baseParams,
-      images: [
-        'data:image/png;base64,c2NyZWVuc2hvdC0x',
-        'data:image/webp;base64,c2NyZWVuc2hvdC0y',
-      ],
-      adapter,
-    });
-
-    expect(mocks.sendTaskMessage).toHaveBeenCalledWith(
-      expect.objectContaining({ userId: 'user-1' }),
-      {
-        taskId: 'task-1',
-        message: 'Include the failing test.',
+      await answerFastAgentQuestion({
+        ...baseParams,
         images: [
           'data:image/png;base64,c2NyZWVuc2hvdC0x',
           'data:image/webp;base64,c2NyZWVuc2hvdC0y',
         ],
-      },
-    );
-    expect(order).toEqual(['steer', 'reply']);
-  });
+        attachmentTexts: ['Attachment: failure.log\nECONNRESET'],
+        adapter,
+      });
 
-  it('does not attach current-turn images to a task message without opt-in', async () => {
+      expect(mocks.sendTaskMessage).toHaveBeenCalledWith(
+        expect.objectContaining({ userId: 'user-1' }),
+        {
+          taskId: 'task-1',
+          message:
+            'Include the failing test.\n\nAttachment: failure.log\nECONNRESET',
+          images: [
+            'data:image/png;base64,c2NyZWVuc2hvdC0x',
+            'data:image/webp;base64,c2NyZWVuc2hvdC0y',
+          ],
+        },
+      );
+      expect(order).toEqual(['steer', 'reply']);
+    },
+  );
+
+  it('does not forward current-turn attachments without opt-in', async () => {
     mocks.getActiveTasks.mockResolvedValue([
       { taskId: 'task-1', title: 'Checkout', status: 'running' },
     ]);
@@ -2300,6 +2368,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     await answerFastAgentQuestion({
       ...baseParams,
       images: ['data:image/png;base64,bm90LWZvcndhcmRlZA=='],
+      attachmentTexts: ['Attachment: plan.md\nNot forwarded.'],
       adapter: callbacks(),
     });
 
@@ -2308,6 +2377,41 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       {
         taskId: 'task-1',
         message: 'Include the failing test.',
+      },
+    );
+  });
+
+  it('keeps includeImages as an image-only compatibility option', async () => {
+    mocks.getActiveTasks.mockResolvedValue([
+      { taskId: 'task-1', title: 'Checkout', status: 'running' },
+    ]);
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        await invokeTool(nativeToolNames.sendTaskMessage, {
+          taskId: 'task-1',
+          message: 'Use the screenshot.',
+          includeImages: true,
+        });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({
+      ...baseParams,
+      images: ['data:image/png;base64,c2NyZWVuc2hvdA=='],
+      attachmentTexts: [
+        'Attachment: private-plan.md\nDo not forward implicitly.',
+      ],
+      adapter: callbacks(),
+    });
+
+    expect(mocks.sendTaskMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: 'user-1' }),
+      {
+        taskId: 'task-1',
+        message: 'Use the screenshot.',
+        images: ['data:image/png;base64,c2NyZWVuc2hvdA=='],
       },
     );
   });
@@ -3253,6 +3357,15 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       expect(retryWrites.at(-1)?.contentBlocks).toEqual([
         { type: 'text', text: 'Connection restored.' },
       ]);
+      expect(retryWrites[0]?.metadata).toMatchObject({
+        inferenceRetryNotice: true,
+        inferenceRetryActive: true,
+      });
+      expect(retryWrites.at(-1)?.metadata).toMatchObject({
+        purpose: 'closeout',
+        inferenceRetryNotice: true,
+        inferenceRetryActive: false,
+      });
     } finally {
       vi.useRealTimers();
     }
@@ -3329,6 +3442,18 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       expect(consoleWarn).toHaveBeenCalledWith(
         expect.stringContaining('Failed to replace inference retry notice'),
       );
+      const retryWrites = mocks.upsertMessage.mock.calls
+        .map(([input]) => input.message)
+        .filter((message) => message.eventId === '100.2:retry-notice:0');
+      expect(retryWrites.at(-1)?.metadata).toMatchObject({
+        visibleInTranscript: false,
+        purpose: 'closeout',
+        inferenceRetryNotice: true,
+        inferenceRetryActive: false,
+      });
+      expect(
+        JSON.stringify(mocks.appendVisibleMessages.mock.lastCall),
+      ).not.toContain('Retrying in');
     } finally {
       consoleWarn.mockRestore();
       vi.useRealTimers();

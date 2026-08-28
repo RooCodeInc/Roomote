@@ -9,9 +9,16 @@ import { ACP_ENVELOPE_EVENT_TYPES } from '@roomote/types';
 
 import { FastSessionTranscript } from './FastSessionTranscript';
 
-const { replyMutate, preparePromptAttachments } = vi.hoisted(() => ({
-  replyMutate: vi.fn(),
-  preparePromptAttachments: vi.fn(),
+const { replyMutate, preparePromptAttachments, openTaskPanel, narrationState } =
+  vi.hoisted(() => ({
+    replyMutate: vi.fn(),
+    preparePromptAttachments: vi.fn(),
+    openTaskPanel: vi.fn(),
+    narrationState: { enabled: false },
+  }));
+
+vi.mock('@/hooks/useNarrationMode', () => ({
+  useNarrationMode: () => ({ enabled: narrationState.enabled }),
 }));
 
 vi.mock('@/trpc/client', () => ({
@@ -36,6 +43,24 @@ vi.mock('@/hooks/task-models/useLaunchTaskModels', () => ({
     data: { models: [], defaultModelId: undefined },
     isPending: false,
   }),
+}));
+
+vi.mock('./session-task-panel-context', () => ({
+  useOpenSessionTaskPanel: () => openTaskPanel,
+}));
+
+vi.mock('../../task/[taskId]/messages/acp/DelegatedTaskCard', () => ({
+  DelegatedTaskCard: ({
+    taskId,
+    onOpen,
+  }: {
+    taskId: string;
+    onOpen: (taskId: string) => void;
+  }) => (
+    <button type="button" onClick={() => onOpen(taskId)}>
+      Delegated task {taskId}
+    </button>
+  ),
 }));
 
 class FakeEventSource {
@@ -71,6 +96,8 @@ beforeEach(() => {
   preparePromptAttachments.mockImplementation(({ text }: { text: string }) =>
     Promise.resolve({ text }),
   );
+  narrationState.enabled = false;
+  openTaskPanel.mockReset();
   vi.stubGlobal('EventSource', FakeEventSource);
 });
 
@@ -207,7 +234,9 @@ describe('FastSessionTranscript', () => {
       />,
     );
 
-    expect(screen.getAllByText('launch_task')).toHaveLength(1);
+    expect(screen.getByText('Starting')).toBeInTheDocument();
+    expect(screen.getByText('Coding Task')).toBeInTheDocument();
+    expect(screen.getByText('Running')).toBeInTheDocument();
     expect(FakeEventSource.instances).toHaveLength(1);
     expect(FakeEventSource.instances[0]!.url).toBe(
       '/api/sessions/session-1/stream',
@@ -219,7 +248,8 @@ describe('FastSessionTranscript', () => {
       });
     });
 
-    expect(screen.getAllByText('launch_task')).toHaveLength(1);
+    expect(screen.getByText('Started')).toBeInTheDocument();
+    expect(screen.queryByText('Running')).not.toBeInTheDocument();
   });
 
   it('renders trusted Fast show_widget results with the shared sandboxed preview', () => {
@@ -279,6 +309,69 @@ describe('FastSessionTranscript', () => {
     );
   });
 
+  it('keeps a launched child task visible in narration mode and opens its panel', () => {
+    narrationState.enabled = true;
+    render(
+      <FastSessionTranscript
+        sessionId="session-1"
+        initialMessages={[
+          {
+            id: 'tool-1',
+            eventId: 'turn-1:tool:0',
+            turnId: 'turn-1',
+            turnSeq: 1,
+            ts: 2,
+            eventType: ACP_ENVELOPE_EVENT_TYPES.ToolResult,
+            role: 'tool',
+            contentBlocks: [],
+            metadata: { visibleInTranscript: true },
+            payload: {
+              toolCallId: 'turn-1:tool:0',
+              title: 'launch_task',
+              kind: 'task',
+              status: 'completed',
+              isExecute: false,
+              isMcp: false,
+              mcpServerName: null,
+              mcpToolName: null,
+              toolName: 'launch_task',
+              command: null,
+              exitCode: null,
+              output: JSON.stringify({ success: true, taskId: 'child-1' }),
+              rawInput: { arguments: { prompt: 'Fix checkout' } },
+            },
+            source: 'web',
+            nativeSessionId: 'opencode-1',
+            nativeMessageId: null,
+            createdAt: new Date('2026-01-01T00:00:01.000Z'),
+          },
+          {
+            id: 'kickoff-child-1',
+            eventId: 'turn-1:assistant:child-kickoff',
+            turnId: 'turn-1',
+            turnSeq: 2,
+            ts: 3,
+            eventType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+            role: 'assistant',
+            contentBlocks: [
+              { type: 'text', text: 'I started the delegated task.' },
+            ],
+            metadata: { visibleInTranscript: true },
+            payload: { purpose: 'progress', kickoff: true },
+            source: 'web',
+            nativeSessionId: 'opencode-1',
+            nativeMessageId: null,
+            createdAt: new Date('2026-01-01T00:00:02.000Z'),
+          },
+        ]}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /Delegated task/ }));
+
+    expect(openTaskPanel).toHaveBeenCalledWith('child-1');
+  });
+
   it('cold-loads one completed tool row before an intervening kickoff', () => {
     render(
       <FastSessionTranscript
@@ -336,14 +429,9 @@ describe('FastSessionTranscript', () => {
       />,
     );
 
-    const activityToggle = screen.getByRole('button', {
-      name: /Worked for/,
-    });
-    expect(screen.queryByText('launch_task')).not.toBeInTheDocument();
-
-    fireEvent.click(activityToggle);
-
-    expect(screen.getAllByText('launch_task')).toHaveLength(1);
+    expect(
+      screen.getByRole('button', { name: /Started Coding Task Completed/ }),
+    ).toBeInTheDocument();
     expect(screen.getByText('I started the checkout fix.')).toBeInTheDocument();
   });
 
@@ -467,11 +555,11 @@ describe('FastSessionTranscript', () => {
       <FastSessionTranscript
         sessionId="session-1"
         initialMessages={[]}
-        fallbackTitle="Session"
+        fallbackTitle="New session"
       />,
     );
 
-    expect(screen.getByText('Session')).toBeInTheDocument();
+    expect(screen.getByText('New session')).toBeInTheDocument();
 
     act(() => {
       FakeEventSource.instances[0]!.emit('session', {

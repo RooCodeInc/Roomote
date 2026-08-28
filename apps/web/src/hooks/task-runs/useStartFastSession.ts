@@ -9,8 +9,11 @@ export function useStartFastSession(options?: {
   const trpcClient = useTRPCClient();
 
   return useMutation({
-    mutationFn: (variables: { text: string; images?: string[] }) =>
-      trpcClient.fastSessions.start.mutate(variables),
+    mutationFn: (variables: {
+      text: string;
+      images?: string[];
+      attachmentTexts?: string[];
+    }) => trpcClient.fastSessions.start.mutate(variables),
     ...options,
   });
 }

@@ -1,12 +1,17 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
-const { useSandboxLayoutMock, useTRPCMock, updateTitleMutationMock } =
-  vi.hoisted(() => ({
-    useSandboxLayoutMock: vi.fn(),
-    useTRPCMock: vi.fn(),
-    updateTitleMutationMock: vi.fn(async () => undefined),
-  }));
+const {
+  useSandboxLayoutMock,
+  useTRPCMock,
+  updateTitleMutationMock,
+  parentSessionQueryMock,
+} = vi.hoisted(() => ({
+  useSandboxLayoutMock: vi.fn(),
+  useTRPCMock: vi.fn(),
+  updateTitleMutationMock: vi.fn(async () => undefined),
+  parentSessionQueryMock: vi.fn(),
+}));
 
 vi.mock('../../use-sandbox-layout', () => ({
   useSandboxLayout: useSandboxLayoutMock,
@@ -14,6 +19,10 @@ vi.mock('../../use-sandbox-layout', () => ({
 
 vi.mock('@/trpc/client', () => ({
   useTRPC: useTRPCMock,
+}));
+
+vi.mock('./TaskSessionReadTracker', () => ({
+  TaskSessionReadTracker: () => null,
 }));
 
 vi.mock('@/components/sandbox', () => ({
@@ -78,6 +87,10 @@ function renderHeader(
 describe('Header', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    parentSessionQueryMock.mockResolvedValue({
+      sessionId: 'session-1',
+      title: 'Parent Session',
+    });
 
     useSandboxLayoutMock.mockReturnValue({
       isSidebarVisible: true,
@@ -91,6 +104,18 @@ describe('Header', () => {
             'sandboxSession.byTaskId',
             taskId,
           ],
+        },
+      },
+      sessions: {
+        forTask: {
+          queryOptions: (
+            _input: { taskId: string },
+            options?: { enabled?: boolean },
+          ) => ({
+            queryKey: ['sessions.forTask'],
+            queryFn: parentSessionQueryMock,
+            enabled: options?.enabled,
+          }),
         },
       },
       tasks: {
@@ -140,6 +165,37 @@ describe('Header', () => {
     });
 
     expect(screen.queryByText('OpenCode')).not.toBeInTheDocument();
+  });
+
+  it('always queries the parent session and renders its links', async () => {
+    renderHeader();
+
+    expect(
+      await screen.findByRole('link', { name: 'Parent Session' }),
+    ).toHaveAttribute('href', '/sessions/session-1?task=task-123');
+    expect(screen.getByRole('link', { name: /Go to session/ })).toHaveAttribute(
+      'href',
+      '/sessions/session-1?task=task-123',
+    );
+    expect(parentSessionQueryMock).toHaveBeenCalled();
+  });
+
+  it('links to the Fast session when the task has no unified session', async () => {
+    parentSessionQueryMock.mockResolvedValue(null);
+
+    renderHeader({
+      taskRun: {
+        payload: {
+          environmentId: 'env-1',
+          fastAgentSessionId: '00000000-0000-4000-8000-000000000001',
+        },
+        harness: 'opencode-server',
+      } as never,
+    });
+
+    expect(
+      await screen.findByRole('link', { name: /Go to session/ }),
+    ).toHaveAttribute('href', '/sessions/00000000-0000-4000-8000-000000000001');
   });
 
   it('refreshes task lists after renaming a task', async () => {

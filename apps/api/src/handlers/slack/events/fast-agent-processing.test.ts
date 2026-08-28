@@ -24,6 +24,15 @@ vi.mock('@roomote/redis', async (importOriginal) => {
 vi.mock('@roomote/cloud-agents/server', () => ({
   acquireFastAgentTurnLock: mocks.acquireLock,
   answerFastAgentQuestion: mocks.answerQuestion,
+  extractPromptTextAttachments: vi.fn(
+    async (inputs: Array<{ filename: string; bytes: Uint8Array }>) => ({
+      attachmentTexts: inputs.map(
+        (input) =>
+          `Attachment: ${input.filename}\n${Buffer.from(input.bytes).toString('utf8')}`,
+      ),
+      warnings: [],
+    }),
+  ),
   hasFastAgentSession: mocks.hasSession,
   getOrCreateFastAgentSession: vi
     .fn()
@@ -31,6 +40,15 @@ vi.mock('@roomote/cloud-agents/server', () => ({
 }));
 
 vi.mock('@roomote/cloud-agents', () => ({
+  appendAttachmentTextsToPromptText: ({
+    text,
+    attachmentTexts = [],
+  }: {
+    text: string;
+    attachmentTexts?: string[];
+  }) => [text, ...attachmentTexts].filter(Boolean).join('\n\n'),
+  isRoomoteTextExtractableAttachment: ({ mimeType }: { mimeType?: string }) =>
+    mimeType?.startsWith('text/') ?? false,
   stripLeadingSlackProductMention: (text: string) => text,
 }));
 
@@ -377,6 +395,60 @@ describe('processFastAgentMessage', () => {
         images: [image],
       }),
     );
+  });
+
+  it('passes authenticated extracted file content to the Fast turn separately', async () => {
+    const files = [
+      {
+        id: 'F_PLAN',
+        name: 'plan.md',
+        mimetype: 'text/markdown',
+        filetype: 'markdown',
+        url_private: 'https://files.slack.com/F_PLAN',
+        url_private_download: 'https://files.slack.com/F_PLAN/download',
+        size: 128,
+      },
+    ];
+    const slack = {
+      addReaction: vi.fn().mockResolvedValue(true),
+      removeReaction: vi.fn().mockResolvedValue(true),
+      normalizeIncomingText: vi.fn(async (text: string) => text),
+      fetchThreadMessages: vi.fn(async () => []),
+      processSlackFiles: vi.fn().mockResolvedValue([]),
+      downloadSlackFile: vi
+        .fn()
+        .mockResolvedValue(
+          Buffer.from('# Plan\nImplement attachment forwarding.'),
+        ),
+    };
+
+    await processFastAgentMessage({
+      event: {
+        type: 'message',
+        channel: 'D123',
+        channel_type: 'im',
+        user: 'U123',
+        text: '!fast implement this plan',
+        ts: '100.001',
+        files,
+      } as never,
+      slack: slack as never,
+      userId: 'user-1',
+      teamId: 'T123',
+    });
+
+    expect(slack.downloadSlackFile).toHaveBeenCalledWith(files[0]);
+    expect(mocks.answerQuestion).toHaveBeenCalledWith(
+      expect.objectContaining({
+        question: expect.stringContaining('Implement attachment forwarding.'),
+        attachmentTexts: [
+          expect.stringContaining('Implement attachment forwarding.'),
+        ],
+      }),
+    );
+    expect(
+      JSON.stringify(mocks.answerQuestion.mock.calls[0]?.[0]),
+    ).not.toContain('url_private_download');
   });
 
   it('can answer with a reaction without posting a text fallback', async () => {

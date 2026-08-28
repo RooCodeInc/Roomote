@@ -13,7 +13,10 @@ vi.mock('../../task-url', () => ({
 
 import { ALL_REPOSITORIES, TaskPayloadKind } from '@roomote/types';
 
-import { createFastAgentSlackTaskLauncher } from '../fast-agent-task-launcher';
+import {
+  createFastAgentSlackTaskLauncher,
+  createFastAgentWebTaskLauncher,
+} from '../fast-agent-task-launcher';
 
 describe('createFastAgentSlackTaskLauncher', () => {
   beforeEach(() => {
@@ -86,6 +89,7 @@ describe('createFastAgentSlackTaskLauncher', () => {
             slackConversationUrl:
               'https://acme.slack.com/archives/C123/p100002?thread_ts=100.001&cid=C123',
             communicationContextInherited: true,
+            reportConsumer: 'orchestrator',
             fastAgentSessionId: '11111111-1111-4111-8111-111111111111',
             fastAgentParent: {
               sessionId: '11111111-1111-4111-8111-111111111111',
@@ -374,5 +378,46 @@ describe('createFastAgentSlackTaskLauncher', () => {
       }),
     ).rejects.toThrow('Slack failed');
     expect(queued).toBe(false);
+  });
+});
+
+describe('createFastAgentWebTaskLauncher', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.enqueueTask.mockImplementation(
+      async (
+        _input: unknown,
+        options: {
+          beforeEnqueue: (taskRun: { taskId: string }) => Promise<void>;
+        },
+      ) => {
+        await options.beforeEnqueue({ taskId: 'task-1' });
+        return { taskId: 'task-1' };
+      },
+    );
+  });
+
+  it('keeps the kickoff free of a duplicate task link', async () => {
+    const postKickoff = vi.fn();
+
+    await createFastAgentWebTaskLauncher({
+      userId: 'user-1',
+      conversation: {
+        surface: 'web',
+        workspaceId: 'workspace-1',
+        conversationId: 'conversation-1',
+      },
+    })({
+      prompt: 'Fix checkout',
+      environmentId: null,
+      parentSessionId: '11111111-1111-4111-8111-111111111111',
+      postKickoff,
+    });
+
+    expect(postKickoff).toHaveBeenCalledWith({
+      taskId: 'task-1',
+      taskUrl: 'https://roomote.example/task/task-1',
+      taskLinkRendered: true,
+    });
   });
 });

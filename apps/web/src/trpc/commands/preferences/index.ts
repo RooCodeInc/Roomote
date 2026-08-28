@@ -36,8 +36,6 @@ function normalizePersonalPreferences(
       typeof metadata.narration_mode === 'boolean'
         ? metadata.narration_mode
         : DEFAULT_PERSONAL_PREFERENCES.narrationMode,
-    communicationsFastModeDefault:
-      metadata.communications_fast_mode_default === true,
   };
 }
 
@@ -125,11 +123,6 @@ export async function updatePersonalPreferencesCommand(
 
   if (input.narrationMode !== undefined) {
     nextMetadataRecord.narration_mode = input.narrationMode;
-  }
-
-  if (input.communicationsFastModeDefault !== undefined) {
-    nextMetadataRecord.communications_fast_mode_default =
-      input.communicationsFastModeDefault;
   }
 
   if (Object.keys(nextMetadataRecord).length === 0) {

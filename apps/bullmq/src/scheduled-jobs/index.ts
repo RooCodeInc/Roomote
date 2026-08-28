@@ -9,3 +9,4 @@ export { standbyRetentionJob } from './standby-retention';
 export { prReviewNotificationDispatchJob } from './pr-review-notification-dispatch';
 export { brainOutboxDrainJob, brainCollectorsJob } from './brain-outbox-drain';
 export { brainMaintenanceJob } from './brain-maintenance';
+export { sessionsReconcileJob } from './sessions-reconcile';

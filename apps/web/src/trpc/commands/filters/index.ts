@@ -17,7 +17,6 @@ import {
 } from '@roomote/db/server';
 
 import {
-  ALL_REPOSITORIES,
   formatExternalActorLabel,
   type TaskSurface,
   getTaskModelDisplayName,
@@ -29,14 +28,11 @@ import {
   buildCreatorFilterValue,
   formatAutomationLabel,
 } from '@/lib/task-creator-filter';
+import { formatRepositoryName } from '@/lib';
 import { getTaskSurfaceLabel } from '@/lib/task-surface-label';
 import { getCreatorFilterCondition } from '@/lib/server/tasks';
 
 type FilterOption = { value: string; label: string; subLabel?: string };
-
-function formatPrRepoName(repo: string): string {
-  return repo === ALL_REPOSITORIES ? 'All Repositories' : repo;
-}
 
 const getTimePeriodCutoff = (timePeriod: number): number =>
   Math.floor(Date.now() / 1000) - timePeriod * 24 * 60 * 60;
@@ -278,7 +274,7 @@ export async function getPullRequestsForFilterCommand(
     .map((r) => {
       const value = `${r.repository}#${r.prNumber}`;
       const label = r.prTitle || `#${r.prNumber}`;
-      const subLabel = `${formatPrRepoName(r.repository)}#${r.prNumber}`;
+      const subLabel = `${formatRepositoryName(r.repository)}#${r.prNumber}`;
       return { value, label, subLabel };
     });
 }
