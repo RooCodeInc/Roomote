@@ -40,9 +40,11 @@ When Memory is enabled, Roomote also backfills the pages shared with this
 integration and keeps their Markdown snapshots current. Notion pages are
 stored under the `notion/` namespace. New and edited pages are picked up on
 regular Memory collector ticks, and a daily full sweep discovers older pages
-that were newly shared without being edited. The same sweep replaces pages
-that are no longer shared with unavailable tombstones, so their former
-content is no longer retained in Memory search results.
+that were newly shared without being edited. After each full sweep, Roomote also
+walks accessible child pages and data sources so content omitted from Notion's
+search index can still enter Memory. The same sweep replaces pages that are no
+longer shared with unavailable tombstones, so their former content is no longer
+retained in Memory search results.
 
 When the integration's capabilities allow listing users, Memory also
 refreshes the workspace user directory once a day to link page authors,
