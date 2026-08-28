@@ -1728,8 +1728,12 @@ export async function answerFastAgentQuestion({
               const destinationUrl = linkedSession
                 ? `${Env.R_APP_URL}/sessions/${linkedSession.id}?task=${task.taskId}`
                 : task.taskUrl;
+              // The delegated task's live Slack card owns the workspace
+              // startup status; the kickoff is a permanent thread message
+              // that nothing can update later, so it must not carry
+              // transient "preparing" copy.
               const message = [
-                `Preparing workspace…\n\n${args.kickoffMessage}`,
+                args.kickoffMessage,
                 destinationUrl &&
                 !task.taskLinkRendered &&
                 !args.kickoffMessage.includes(destinationUrl)
