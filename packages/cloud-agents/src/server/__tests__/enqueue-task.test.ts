@@ -35,10 +35,12 @@ import {
   taskPullRequests,
   taskRunEvents,
   deploymentSettings,
+  fastAgentConversations,
   users,
   environments,
   environmentRepositoryMappings,
   repositories,
+  sessionTasks,
   userFactory,
   environmentFactory,
   repositoryFactory,
@@ -59,8 +61,10 @@ import {
   shouldCaptureTaskCreatedEvent,
   type FreshTaskLaunch,
 } from '../task-run-queue';
+import { resolveAggregateSourceControl } from '../cloud-agent-workflow';
 import { LLM_TITLE_LOCKED_CHECKPOINT } from '../llm-task-title';
 import { applyTaskModelSelectionToRun } from '../task-model-selection';
+import { getPrSha } from '../workflows/utils';
 
 const createdTaskIds: string[] = [];
 const createdUserIds: string[] = [];
@@ -909,6 +913,40 @@ describe('enqueueTask initiator stamping', () => {
   });
 });
 
+describe('enqueueTask Session linkage', () => {
+  it('creates exactly one Session link for a visible fresh task', async () => {
+    const userId = await createUser();
+    const run = await launchFresh({
+      initiator: { kind: 'user', userId },
+      workflow: 'standard',
+      surface: 'web',
+      trigger: 'manual',
+    });
+
+    const links = await db
+      .select()
+      .from(sessionTasks)
+      .where(eq(sessionTasks.taskId, run.taskId));
+    expect(links).toHaveLength(1);
+    expect(links[0]?.origin).toBe('direct_launch');
+  });
+
+  it('does not create Session links for hidden tasks', async () => {
+    const userId = await createUser();
+    const run = await launchFresh({
+      initiator: { kind: 'user', userId },
+      workflow: 'scan',
+      surface: 'system',
+      trigger: 'schedule',
+      visibility: 'hidden',
+    });
+
+    await expect(
+      db.select().from(sessionTasks).where(eq(sessionTasks.taskId, run.taskId)),
+    ).resolves.toEqual([]);
+  });
+});
+
 describe('enqueueTask snapshot resume', () => {
   it('atomically rejects concurrent resumes from the same source run', async () => {
     const userId = await createUser();
@@ -1065,7 +1103,16 @@ describe('enqueueTask snapshot resume', () => {
 
   it('preserves Fast parent routing and communication isolation across resume', async () => {
     const userId = await createUser();
-    const fastAgentSessionId = '11111111-1111-4111-8111-111111111111';
+    const fastAgentSessionId = crypto.randomUUID();
+    // The Session linkage created at enqueue references the Fast conversation
+    // row, so the parent conversation must exist.
+    await db.insert(fastAgentConversations).values({
+      id: fastAgentSessionId,
+      userId,
+      surface: 'slack',
+      workspaceId: 'T123',
+      conversationId: fastAgentSessionId,
+    });
     const fastAgentParent = {
       sessionId: fastAgentSessionId,
       conversation: {
@@ -1084,6 +1131,7 @@ describe('enqueueTask snapshot resume', () => {
           communicationChannelId: 'C123',
           communicationThreadId: '111.222',
           communicationContextInherited: true,
+          reportConsumer: 'orchestrator',
           fastAgentSessionId,
           fastAgentParent,
         },
@@ -1109,6 +1157,7 @@ describe('enqueueTask snapshot resume', () => {
     const resumePayload = resumeRun.payload as Record<string, unknown>;
 
     expect(resumePayload.communicationContextInherited).toBe(true);
+    expect(resumePayload.reportConsumer).toBe('orchestrator');
     expect(resumePayload.fastAgentParent).toEqual(fastAgentParent);
     expect(resumePayload.fastAgentSessionId).toBe(fastAgentSessionId);
   });
@@ -1153,8 +1202,16 @@ describe('enqueueTask snapshot resume', () => {
 
   it('recovers Fast parent isolation from an older ancestor in a resume chain', async () => {
     const userId = await createUser();
+    const ancestorFastSessionId = crypto.randomUUID();
+    await db.insert(fastAgentConversations).values({
+      id: ancestorFastSessionId,
+      userId,
+      surface: 'slack',
+      workspaceId: 'T123',
+      conversationId: ancestorFastSessionId,
+    });
     const fastAgentParent = {
-      sessionId: '22222222-2222-4222-8222-222222222222',
+      sessionId: ancestorFastSessionId,
       conversation: {
         surface: 'slack' as const,
         workspaceId: 'T123',
@@ -1208,6 +1265,7 @@ describe('enqueueTask snapshot resume', () => {
     const resumePayload = resumeRun.payload as Record<string, unknown>;
 
     expect(resumePayload.communicationContextInherited).toBe(true);
+    expect(resumePayload.reportConsumer).toBe('orchestrator');
     expect(resumePayload.fastAgentParent).toEqual(fastAgentParent);
   });
 
@@ -1809,6 +1867,197 @@ describe('enqueueTask PR linkage', () => {
     expect(persistedLinkage?.githubReviewCommentId).toBe(303);
   });
 
+  it('anchors getPrSha on the previously reviewed head, not the bumped linkage', async () => {
+    const prNumber = 81;
+    const reviewedSha = '1'.repeat(40);
+    const pushedSha = '2'.repeat(40);
+    const prUrl = `https://github.com/acme/widgets/pull/${prNumber}`;
+    const makeTask = (headSha: string) =>
+      ({
+        type:
+          headSha === reviewedSha
+            ? TaskPayloadKind.GithubPrReview
+            : TaskPayloadKind.GithubPrReviewSync,
+        requestedWorkKindDecision: explicitWorkKind,
+        payload: {
+          repo: 'acme/widgets',
+          prNumber,
+          prTitle: 'Anchor on the reviewed head',
+          prUrl,
+          headSha,
+        },
+      }) as FreshTaskLaunch['task'];
+    const makeLinkage = (prSha: string) => ({
+      provider: 'github' as const,
+      repository: 'acme/widgets',
+      prNumber,
+      prUrl,
+      prTitle: 'Anchor on the reviewed head',
+      prSha,
+    });
+
+    const reviewRun = await enqueueTask(
+      {
+        task: makeTask(reviewedSha),
+        initiator: { kind: 'automation', key: 'review_code' },
+        workflow: 'pr_review',
+        surface: 'github',
+        trigger: 'webhook',
+        prLinkage: makeLinkage(reviewedSha),
+      },
+      { enqueue: false, skipEarlyTitleGeneration: true },
+    );
+    createdTaskIds.push(reviewRun.taskId);
+
+    await db
+      .update(taskRuns)
+      .set({
+        status: RunStatus.Completed,
+        startedAt: new Date(),
+        completedAt: new Date(),
+      })
+      .where(eq(taskRuns.id, reviewRun.id));
+    await db
+      .update(tasks)
+      .set({ state: 'completed' })
+      .where(eq(tasks.id, reviewRun.taskId));
+
+    // A push launches the sync onto the same task and bumps the shared
+    // linkage row to the new head before the sync run builds its prompt.
+    const syncRun = await enqueueTask(
+      {
+        existingTaskId: reviewRun.taskId,
+        task: makeTask(pushedSha),
+        initiator: { kind: 'automation', key: 'review_code' },
+        workflow: 'pr_review',
+        surface: 'github',
+        trigger: 'webhook',
+        prLinkage: makeLinkage(pushedSha),
+      },
+      { enqueue: false, skipEarlyTitleGeneration: true },
+    );
+
+    const linkage = await db.query.taskPullRequests.findFirst({
+      where: eq(taskPullRequests.taskId, reviewRun.taskId),
+    });
+    expect(linkage?.prSha).toBe(pushedSha);
+
+    // The sync's anchor must be the head the prior review actually covered.
+    // Reading the bumped linkage here made last_review_sha equal the fresh
+    // head, so syncs reported "no new commits" despite real pushes.
+    await expect(
+      getPrSha({
+        currentRunId: syncRun.id,
+        repo: 'acme/widgets',
+        prNumber,
+      }),
+    ).resolves.toBe(reviewedSha);
+  });
+
+  it('anchors past follow-up runs that carry no payload headSha', async () => {
+    const prNumber = 82;
+    const reviewedSha = '3'.repeat(40);
+    const pushedSha = '4'.repeat(40);
+    const prUrl = `https://github.com/acme/widgets/pull/${prNumber}`;
+    const makeLinkage = (prSha: string) => ({
+      provider: 'github' as const,
+      repository: 'acme/widgets',
+      prNumber,
+      prUrl,
+      prTitle: 'Anchor past follow-ups',
+      prSha,
+    });
+    const launch = (
+      task: FreshTaskLaunch['task'],
+      existingTaskId?: string,
+      prSha = reviewedSha,
+    ) =>
+      enqueueTask(
+        {
+          ...(existingTaskId ? { existingTaskId } : {}),
+          task,
+          initiator: { kind: 'automation', key: 'review_code' },
+          workflow: 'pr_review',
+          surface: 'github',
+          trigger: 'webhook',
+          prLinkage: makeLinkage(prSha),
+        },
+        { enqueue: false, skipEarlyTitleGeneration: true },
+      );
+    const finishRun = async (runId: number, taskId: string) => {
+      await db
+        .update(taskRuns)
+        .set({
+          status: RunStatus.Completed,
+          startedAt: new Date(),
+          completedAt: new Date(),
+        })
+        .where(eq(taskRuns.id, runId));
+      await db
+        .update(tasks)
+        .set({ state: 'completed' })
+        .where(eq(tasks.id, taskId));
+    };
+
+    const reviewRun = await launch({
+      type: TaskPayloadKind.GithubPrReview,
+      requestedWorkKindDecision: explicitWorkKind,
+      payload: {
+        repo: 'acme/widgets',
+        prNumber,
+        prTitle: 'Anchor past follow-ups',
+        prUrl,
+        headSha: reviewedSha,
+      },
+    } as FreshTaskLaunch['task']);
+    createdTaskIds.push(reviewRun.taskId);
+    await finishRun(reviewRun.id, reviewRun.taskId);
+
+    // A mention follow-up runs between the review and the next push. Its
+    // payload records no headSha, so it must not become the anchor.
+    const followUpRun = await launch(
+      {
+        type: TaskPayloadKind.GithubPrReviewFollowUp,
+        requestedWorkKindDecision: explicitWorkKind,
+        payload: {
+          repo: 'acme/widgets',
+          prNumber,
+          prTitle: 'Anchor past follow-ups',
+          commentBody: 'Please tweak the error message',
+        },
+      } as FreshTaskLaunch['task'],
+      reviewRun.taskId,
+    );
+    await finishRun(followUpRun.id, reviewRun.taskId);
+
+    const syncRun = await launch(
+      {
+        type: TaskPayloadKind.GithubPrReviewSync,
+        requestedWorkKindDecision: explicitWorkKind,
+        payload: {
+          repo: 'acme/widgets',
+          prNumber,
+          prTitle: 'Anchor past follow-ups',
+          prUrl,
+          headSha: pushedSha,
+        },
+      } as FreshTaskLaunch['task'],
+      reviewRun.taskId,
+      pushedSha,
+    );
+
+    // The newest sibling (the follow-up) has no payload headSha; falling
+    // back to the bumped linkage there would resurrect the "no new
+    // commits" bug. The anchor must skip to the run that recorded one.
+    await expect(
+      getPrSha({
+        currentRunId: syncRun.id,
+        repo: 'acme/widgets',
+        prNumber,
+      }),
+    ).resolves.toBe(reviewedSha);
+  });
+
   it('serializes concurrent first reviews into one durable PR task', async () => {
     const prNumber = 80;
     const prUrl = `https://github.com/acme/widgets/pull/${prNumber}`;
@@ -1920,10 +2169,11 @@ describe('enqueueTask source-control provider stamping', () => {
     }
   });
 
-  it('stamps gitlab on an environment-workspace launch for a gitlab-only deployment', async () => {
+  it('stamps the provider and host on a homogeneous environment-workspace launch', async () => {
     const userId = await createUser();
     const repository = await repositoryFactory.create({
-      sourceControlProvider: 'gitlab',
+      sourceControlProvider: 'gitea',
+      host: 'gitea.example.com',
       linkedByUserId: userId,
       fullName: 'group/project',
       isActive: true,
@@ -1933,7 +2183,7 @@ describe('enqueueTask source-control provider stamping', () => {
     const environment = await environmentFactory.create({
       createdByUserId: userId,
       config: {
-        name: 'GitLab environment',
+        name: 'Gitea environment',
         repositories: [{ repository: 'group/project' }],
       },
     });
@@ -1948,11 +2198,10 @@ describe('enqueueTask source-control provider stamping', () => {
       task: standardTaskInput({
         payload: {
           // environmentId makes this an environment workspace regardless of
-          // repo, so the provider must resolve via the environment-repository
-          // mapping (this repo is intentionally not in the repositories table).
-          repo: 'unmapped/repo',
+          // repo. The web UI uses the aggregate sentinel for these launches.
+          repo: ALL_REPOSITORIES,
           environmentId: environment.id,
-          description: 'Work in the gitlab environment',
+          description: 'Work in the Gitea environment',
         },
       }),
       initiator: { kind: 'user', userId },
@@ -1968,11 +2217,64 @@ describe('enqueueTask source-control provider stamping', () => {
     expect(
       (persistedRun!.payload as { sourceControlProvider?: string })
         .sourceControlProvider,
-    ).toBe('gitlab');
-    expect(
-      (persistedRun!.payload as { repositoryProviders?: unknown })
-        .repositoryProviders,
-    ).toBeUndefined();
+    ).toBe('gitea');
+    expect(persistedRun!.payload.sourceControlHost).toBe('gitea.example.com');
+    expect(resolveAggregateSourceControl(persistedRun!.payload)).toEqual({
+      provider: 'gitea',
+      host: 'gitea.example.com',
+    });
+    expect(persistedRun!.payload.repositoryProviders).toEqual({
+      'group/project': 'gitea',
+    });
+  });
+
+  it('clears attribution for incomplete environment repository coverage', async () => {
+    const userId = await createUser();
+    const repository = await repositoryFactory.create({
+      sourceControlProvider: 'gitea',
+      host: 'gitea.example.com',
+      linkedByUserId: userId,
+      fullName: 'group/environment-api',
+      isActive: true,
+    });
+    createdRepositoryIds.push(repository.id);
+
+    const environment = await environmentFactory.create({
+      createdByUserId: userId,
+      config: {
+        name: 'Incomplete Gitea environment',
+        repositories: [
+          { repository: 'group/environment-api' },
+          { repository: 'group/environment-web' },
+        ],
+      },
+    });
+    createdEnvironmentIds.push(environment.id);
+
+    await db.insert(environmentRepositoryMappings).values({
+      environmentId: environment.id,
+      repositoryId: repository.id,
+    });
+
+    const run = await launchFresh({
+      task: standardTaskInput({
+        payload: {
+          repo: ALL_REPOSITORIES,
+          environmentId: environment.id,
+          sourceControlProvider: 'gitea',
+          sourceControlHost: 'gitea.example.com',
+          description: 'Work in an incompletely mapped environment',
+        },
+      }),
+      initiator: { kind: 'user', userId },
+      workflow: 'standard',
+      surface: 'web',
+      trigger: 'manual',
+    });
+
+    expect(run.payload.sourceControlProvider).toBeUndefined();
+    expect(run.payload.sourceControlHost).toBeUndefined();
+    expect(resolveAggregateSourceControl(run.payload)).toBeUndefined();
   });
 
   it('stamps a provider map and the first repository provider for a mixed environment', async () => {
@@ -2080,6 +2382,85 @@ describe('enqueueTask source-control provider stamping', () => {
         'acme/Platform/selected-api': 'ado',
       },
     });
+  });
+
+  it('stamps complete provider coverage for homogeneous selected repositories', async () => {
+    const userId = await createUser();
+    const apiRepository = await repositoryFactory.create({
+      sourceControlProvider: 'gitea',
+      host: 'gitea.example.com',
+      linkedByUserId: userId,
+      fullName: 'group/homogeneous-api',
+      isActive: true,
+    });
+    const webRepository = await repositoryFactory.create({
+      sourceControlProvider: 'gitea',
+      host: 'gitea.example.com',
+      linkedByUserId: userId,
+      fullName: 'group/homogeneous-web',
+      isActive: true,
+    });
+    createdRepositoryIds.push(apiRepository.id, webRepository.id);
+
+    const run = await launchFresh({
+      task: standardTaskInput({
+        payload: {
+          repo: ALL_REPOSITORIES,
+          selectedRepositories: [
+            'group/homogeneous-api',
+            'group/homogeneous-web',
+          ],
+          description: 'Work across homogeneous repositories',
+        },
+      }),
+      initiator: { kind: 'user', userId },
+      workflow: 'standard',
+      surface: 'web',
+      trigger: 'manual',
+    });
+
+    expect(run.payload).toMatchObject({
+      sourceControlProvider: 'gitea',
+      sourceControlHost: 'gitea.example.com',
+      repositoryProviders: {
+        'group/homogeneous-api': 'gitea',
+        'group/homogeneous-web': 'gitea',
+      },
+    });
+    expect(resolveAggregateSourceControl(run.payload)).toEqual({
+      provider: 'gitea',
+      host: 'gitea.example.com',
+    });
+  });
+
+  it('does not stamp a provider for incomplete selected repository coverage', async () => {
+    const userId = await createUser();
+    const repository = await repositoryFactory.create({
+      sourceControlProvider: 'gitea',
+      linkedByUserId: userId,
+      fullName: 'group/resolved-api',
+      isActive: true,
+    });
+    createdRepositoryIds.push(repository.id);
+
+    const run = await launchFresh({
+      task: standardTaskInput({
+        payload: {
+          repo: ALL_REPOSITORIES,
+          selectedRepositories: ['group/resolved-api', 'group/missing-web'],
+          description: 'Work across an incomplete repository selection',
+        },
+      }),
+      initiator: { kind: 'user', userId },
+      workflow: 'standard',
+      surface: 'web',
+      trigger: 'manual',
+    });
+
+    expect(run.payload.repositoryProviders).toEqual({
+      'group/resolved-api': 'gitea',
+    });
+    expect(run.payload.sourceControlProvider).toBeUndefined();
   });
 
   it('re-stamps a PR launch after auto-resolving a mixed environment', async () => {

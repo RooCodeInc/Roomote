@@ -12,22 +12,22 @@ import {
 } from '@/components/system';
 import { PageNavigationShell } from '@/components/settings/PageNavigationShell';
 
-type AnalyticsShellItemId = AnalyticsObject;
+export type AnalyticsShellItemId = Exclude<AnalyticsObject, 'sessions'>;
 
 export function getAnalyticsHref(itemId: AnalyticsShellItemId) {
   switch (itemId) {
     case 'tasks':
-      return '/analytics';
+      return '/analytics?object=tasks';
     case 'pullRequests':
       return '/analytics?object=pullRequests';
     case 'costs':
-      return '/analytics/costs';
+      return '/analytics';
   }
 }
 
 const ANALYTICS_SHELL_ITEMS = [
-  { id: 'tasks', label: 'Tasks', icon: ChartColumnIncreasing },
   { id: 'costs', label: 'Costs', icon: CircleDollarSign },
+  { id: 'tasks', label: 'Tasks', icon: ChartColumnIncreasing },
 ] as const satisfies Array<{
   id: AnalyticsObject;
   label: string;
@@ -60,7 +60,7 @@ export function AnalyticsShell({
   const resolvedActiveItemId =
     (items.some((item) => item.id === activeItemId)
       ? activeItemId
-      : items[0]?.id) ?? 'tasks';
+      : items[0]?.id) ?? 'costs';
 
   return (
     <PageNavigationShell

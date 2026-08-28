@@ -2,9 +2,77 @@
 
 This file tracks product releases for Roomote (single monorepo version). Automated release entries are prepended by `pnpm run version`.
 
+## 0.45.0 (2026-08-27)
+
+This release adds secure hosted trial inference and self-run Brain model options, expands GLM 5.3 support, and improves reliability across Fast sessions, pull-request reviews, Memory, and chat.
+
+### Highlights
+
+- Start hosted deployments with secure, spend-capped Roomote trial inference and accurate cost reporting.
+- Run Brain embeddings and reranking on self-hosted infrastructure with multilingual bundled defaults.
+- Use GLM 5.3 and GLM 5.3 Flash across more existing inference providers.
+- Keep Fast sessions, pull-request re-reviews, Memory ingestion, and chat reporting reliable through retries and resumptions.
+
+### Minor changes
+
+- Expand GLM 5.3 and GLM 5.3 Flash availability and recommendations across OpenRouter, Vercel AI Gateway, Requesty, OpenCode Go, Z.AI, and Z.AI Coding Plan.
+- Offer secure, spend-capped Roomote trial inference during hosted setup, record its real model costs in task and cost analytics, and present the option with clearer onboarding copy.
+- Let self-hosted deployments run Brain embeddings and reranking through their own OpenAI-compatible upstream, including an opt-in bundled CPU service with multilingual model defaults.
+
+### Patch changes
+
+- Include the Brain's memory volume and database state in supported self-hosted backup and restore bundles so memories survive host recovery consistently.
+- Treat temporary Brain network outages as queue backpressure so infrastructure restarts do not exhaust individual memory write retries or require manual repair.
+- Render Fast replies as rich Markdown in Discord guild channels instead of falling back to plain unformatted messages.
+- Make suggested tasks in Fast automation reports launch reliably across Slack, Discord, Microsoft Teams, and Telegram while keeping each suggestion card's state in sync.
+- Preserve the full Fast conversation context across resumed turns so follow-up answers continue from the existing thread instead of losing earlier messages.
+- Keep Fast session sidebars and information panels usable on mobile by switching them to the same single-panel layout as task workspaces.
+- Discover Notion pages and database rows that inherit integration access through shared parents, even when Notion search does not return them.
+- Keep automatic pull-request re-reviews running after their previous sandbox shuts down and anchor each sync review on the head commit that was actually reviewed.
+- Keep Standard tasks and Fast web sessions running through retryable inference-provider failures instead of ending the work prematurely.
+- Briefly name the recalled insight that materially influenced an agent's approach without exposing internal memory provenance or identifiers.
+- Keep Fast and standard agents identified as Roomote by removing OpenCode's conflicting injected identity prefix from their system prompts.
+- Render automation report Markdown correctly in Slack while preserving the report's replyable thread footer.
+- Use task-specific wording in Slack inline status updates so progress messages describe the work instead of exposing generic agent terminology.
+- Make transcript tool activity easier to inspect by showing sanitized inputs and readable YAML details without hiding the corresponding tool results.
+
+## 0.44.0 (2026-08-26)
+
+This release adds shared memory, skill discovery, and presentational widgets to Fast sessions, expands automation delivery across chat providers, and improves session and pull request review reliability.
+
+### Highlights
+
+- Save durable context from Fast sessions and recall it in later work through connected memory providers.
+- Discover and load packaged or repository-defined skills from Fast before delegating work.
+- Render safe status cards, tables, plans, and other presentational widgets in Fast session transcripts.
+- Deliver Fast automation reports across Slack, Discord, Microsoft Teams, and Telegram, with direct chat continuation where supported.
+
+### Minor changes
+
+- Deliver Fast automation reports across Slack, Discord, Microsoft Teams, and Telegram channel or direct-message destinations, with web continuation everywhere and direct chat continuation where the provider supports Fast session identity.
+- Let Fast sessions discover and load packaged and repository-defined skill documents through bounded, session-safe tools without exposing filesystem access.
+- Let Fast save durable preferences, decisions, corrections, and facts to shared memory so they can be recalled in later sessions, while supporting pluggable memory providers and making concurrent memory ingestion more reliable.
+- Render safe presentational widgets such as status cards, tables, and plans directly in Fast session transcripts while keeping raw HTML confined to the sandboxed web view.
+
+### Patch changes
+
+- Deliver Fast custom automation reports to their owners through configured Slack direct messages, and fail runs clearly when their configured Fast destination cannot be resolved or supported.
+- Reconcile image-only Fast replies with their canonical transcript events so optimistic messages do not remain duplicated or stale.
+- Keep Fast sessions moving through retryable provider failures without repeating completed tool effects, and forward follow-up instructions to active tasks before posting the confirmation reply.
+- Make Fast coding-task kickoffs clearer by describing the repository work and naming the target repository when it is known without exposing internal orchestration details.
+- Restore web-initiated Fast turns in standalone production images by shipping native-tool runtime dependencies and removing stale generated tool files during setup.
+- Honor each user's Fast response mode preference on the homepage even when the browser has a saved workspace, while keeping explicit environment links and active workspace choices ahead of the personal default.
+- Deliver completed pull request review findings reliably by tracking the review lifecycle with structured metadata instead of variable status wording.
+- Keep pull request review threads clear by removing stale action buttons when newer feedback arrives or an action is handled, while preserving the latest actionable controls across Slack, Discord, and Telegram.
+- Settle Slack task cards when work becomes idle or waits for input, then return them to an active state when work resumes without losing delayed final output.
+- Keep the current page visible while authenticated navigation loads and correct the label shown when an input request is cancelled.
+- Show Slack pull request review resolutions as subdued context notes instead of prominent message sections after an action is handled.
+- Show the redacted task memory submitted by an agent in the save tool result so users can inspect what was recorded without exposing secret-shaped values.
+- Deliver Teams Fast automation reports and failure states to newly created owner direct messages by using the persisted session route when no active route row exists.
+
 ## 0.43.0 (2026-08-26)
 
-This release brings Fast conversations into the dashboard, introduces a streamlined Memory experience, launches useful starter tasks directly from setup, and adds optional GitHub review checks.
+This release brings Fast sessions into the dashboard, introduces a streamlined Memory experience, launches useful starter tasks directly from setup, and adds optional GitHub review checks.
 
 ### Highlights
 
@@ -23,7 +91,7 @@ This release brings Fast conversations into the dashboard, introduces a streamli
 ### Patch changes
 
 - Keep Slack pull request status and resumed task previews accurate across ordinary, Fast-delegated, retried, reopened, and completed task paths.
-- Keep Fast conversations useful across follow-ups and longer work by preserving native context through helper restarts, exposing deployment task inspection, responding naturally to corrections, and sharing concise progress when work takes time.
+- Keep Fast sessions useful across follow-ups and longer work by preserving native context through helper restarts, exposing deployment task inspection, responding naturally to corrections, and sharing concise progress when work takes time.
 - Make pull request feedback and review checks more reliable by coalescing duplicate actionable notifications, completing checks when reviews finish, and showing provisional findings sooner when a summary is delayed.
 - Render automation result tables in Slack with valid cell payloads, including tables with visually empty cells.
 - Show the first user message as a Fast session's temporary title instead of exposing a timestamp-like conversation identifier while title generation finishes.
@@ -71,7 +139,7 @@ This release adds a shared task board, expands Fast delegation and preferences, 
 ### Highlights
 
 - Coordinate team work from a shared board organized by task lifecycle, ownership, and context.
-- Launch multiple independent tasks from one Fast conversation, choose their coding models, and consult focused reasoning subagents.
+- Launch multiple independent tasks from one Fast session, choose their coding models, and consult focused reasoning subagents.
 - Send actionable GitHub check failures back to linked tasks and their originating conversations.
 - Warn operators about provider usage limits and deliver configuration issues to admins even without a configured channel.
 
@@ -88,11 +156,11 @@ This release adds a shared task board, expands Fast delegation and preferences, 
 
 - Give Brain pull-request pages the PR description and labels from GitHub, GitLab, Gitea, Bitbucket, and Azure DevOps so agents can recall why a change was made, not only its title.
 - Enrich Brain pull-request pages with files changed, code areas, line totals, and review outcomes across supported source-control providers so agents can find the changes that affected a part of the codebase.
-- Keep Fast conversations moving with clearer delegated replies, Slack task cards that resume after follow-ups, recovery from missing runtime dependencies and transient provider outages, and accurate guidance when a provider blocks a response.
+- Keep Fast sessions moving with clearer delegated replies, Slack task cards that resume after follow-ups, recovery from missing runtime dependencies and transient provider outages, and accurate guidance when a provider blocks a response.
 - Show Fast response mode to every user in Personal Settings and apply each saved preference to eligible linked Slack and Discord messages without requiring deployment configuration.
 - Trust only explicitly configured Roomote GitHub App slugs for managed pull-request activity, and keep Roomote attribution in pull-request descriptions to one canonical entry.
 - Make onboarding easier to follow with clearer account, inference-provider, source-control, and environment guidance throughout the setup flow.
-- Make pull-request feedback in Fast conversations reliable by delivering review activity consistently, keeping Slack review actions usable after delegated tasks settle, suppressing duplicate or stale results, and reducing notification pressure on provider quotas.
+- Make pull-request feedback in Fast sessions reliable by delivering review activity consistently, keeping Slack review actions usable after delegated tasks settle, suppressing duplicate or stale results, and reducing notification pressure on provider quotas.
 - Keep Brain task-memory history accurate by recording completed tasks reliably, distinguishing real ingestion gaps from completed backfills, and preventing the history-ingestion banner from returning after completion.
 - Finish Slack task cards with the delegated agent's real result after Fast work settles, preserve actionable input requests, and keep terminal error cards stable while delivery retries.
 - Give Fast and normal Roomote agents the semantic product release in their core prompt context while omitting channel tags and unavailable versions.
@@ -467,12 +535,12 @@ This release expands Amazon Bedrock and deployment controls, refreshes Automatio
 ### Patch changes
 
 - Keep Azure Container Apps sandboxes suspended until Roomote deliberately wakes them, recover cleanly from leftover workers, and stop retrying runs whose sandboxes were deleted. Thanks to @tebieshi for contributing this improvement.
-- Stop ChatGPT subscription connections from waiting forever on expired or blocked device codes, explain why authorization stopped, and offer a clean restart. Thanks to @daniel-lxs for contributing this improvement.
+- Stop ChatGPT subscription connections from waiting forever on expired or blocked device codes, explain why authorization stopped, and offer a clean restart.
 - Recommend Claude Sonnet 5 at medium reasoning for code review when operators apply supported provider presets, while retaining Opus for planning.
 - Keep Discord task requests through account linking, focus onboarding on the required personal account connection, and preserve automation reply threads when tasks resume.
 - Keep the Users settings invite list focused on links that still have uses remaining while retaining consumed invite records.
 - Add a direct Personal settings shortcut to the signed-in user menu.
-- Make ChatGPT, xAI, and GitHub Copilot device connections handle expiry, rate limits, restarts, and stale polling consistently, with clearer terminal errors across all three providers. Thanks to @daniel-lxs for contributing this improvement.
+- Make ChatGPT, xAI, and GitHub Copilot device connections handle expiry, rate limits, restarts, and stale polling consistently, with clearer terminal errors across all three providers.
 - Give sandbox providers more time to finish rate-limited starts before aborting, and offer a retry when a task start fails before producing output.
 - Show terminal command output again in the web task view, with collapsible details and a copy button for easier inspection.
 - Restore the previous deployment metadata and controller after a failed self-hosted image pull so operators can retry upgrades without breaking the next backup.
@@ -691,7 +759,7 @@ This release makes Roomote easier to reach across communication channels while r
 
 ### Patch changes
 
-- Let interrupted MCP OAuth connections resume safely after sign-in, route GitHub issue links to their matching environment, and keep source-control attribution and review follow-up behavior accurate. Thanks to @daniel-lxs for contributing the MCP OAuth improvement.
+- Let interrupted MCP OAuth connections resume safely after sign-in, route GitHub issue links to their matching environment, and keep source-control attribution and review follow-up behavior accurate.
 - Improve deployment and task reliability with faster encrypted configuration access, request timing diagnostics, safer custom MCP environment-variable handling, and quieter automation discovery scans. Thanks to @mrubens for contributing these improvements.
 - Show a workspace-shaped loading state while task history hydrates, preserve accepted or dismissed PR feedback in Discord, and add a Discord community link to the release-update dialog.
 

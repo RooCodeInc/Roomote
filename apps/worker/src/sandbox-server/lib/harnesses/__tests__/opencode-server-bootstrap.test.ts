@@ -158,6 +158,23 @@ describe('opencode-server bootstrap', () => {
     }
   });
 
+  it('keeps project config disabled in the parent worker harness', async () => {
+    const { prepareOpenCodeCommandEnv } =
+      await import('../opencode-server/bootstrap');
+
+    const homeDir = createTempHome();
+    const { commandEnv } = await prepareOpenCodeCommandEnv({
+      runtimeEnv: {
+        ...createDirectHarnessRuntimeEnv(homeDir),
+        OPENCODE_DISABLE_PROJECT_CONFIG: '0',
+      },
+      workspacePath: '/tmp/workspace',
+      logger: createLogger(),
+    });
+
+    expect(commandEnv.OPENCODE_DISABLE_PROJECT_CONFIG).toBe('1');
+  });
+
   it('moves literal remote MCP header values into env vars before preparing the runtime overlay', async () => {
     const { prepareOpenCodeCommandEnv } =
       await import('../opencode-server/bootstrap');

@@ -81,6 +81,7 @@ import type {
   McpToolAccessMode,
   FastAgentSurface,
   ReasoningEffort,
+  SessionStatus,
 } from '@roomote/types';
 import { DEFAULT_TASK_ARTIFACT_TYPE } from '@roomote/types';
 
@@ -150,6 +151,8 @@ export const users = pgTable(
 export const userRelations = relations(users, ({ many }) => ({
   tasks: many(tasks, { relationName: 'taskInitiatorUser' }),
   taskPins: many(taskPins),
+  ownedSessions: many(sessions, { relationName: 'sessionOwnerUser' }),
+  sessionParticipants: many(sessionParticipants),
   slackFastIntegrationCalls: many(slackFastIntegrationCalls),
   workItems: many(workItems),
   setupQualificationBlocks: many(setupQualificationBlocks),
@@ -184,6 +187,12 @@ export const deploymentSettings = pgTable('deployment_settings', {
     'runtime_compute_config',
   ).$type<DeploymentComputeConfig>(),
   accessPolicy: jsonb('access_policy').$type<DeploymentAccessPolicy>(),
+  // Whether the Brain (Memory) is on for this deployment. Deliberately
+  // nullable with no default: null means "no explicit choice", and readers
+  // fall back to the legacy activation signal (an explicit R_BRAIN_* provider
+  // key) so deployments enabled before this toggle existed stay enabled
+  // without a backfill.
+  brainEnabled: boolean('brain_enabled'),
   // Signed Roomote license key (RMLK1.<payload>.<signature>) raising the
   // deployment's seat limit above the free tier; null for unlicensed
   // deployments. Verified at read time, never trusted as stored.
@@ -840,6 +849,7 @@ export const tasksRelations = relations(tasks, ({ one, many }) => ({
     relationName: 'taskCommitAuthorUser',
   }),
   taskPins: many(taskPins),
+  sessionTasks: many(sessionTasks),
   runs: many(taskRuns),
   inferenceUsageEvents: many(llmUsageEvents),
   workItemsAsSource: many(workItems, {
@@ -1792,6 +1802,9 @@ export const llmUsageEvents = pgTable(
     environmentId: uuid('environment_id').references(() => environments.id, {
       onDelete: 'set null',
     }),
+    sessionId: uuid('session_id').references(() => sessions.id, {
+      onDelete: 'set null',
+    }),
     // Non-task producers use eventKey for idempotency. Task harness events use
     // the session/message pair below because a message may be retried with
     // progressively richer usage data.
@@ -1859,6 +1872,7 @@ export const llmUsageEvents = pgTable(
     index('task_inference_usage_events_environment_id_idx').on(
       table.environmentId,
     ),
+    index('task_inference_usage_events_session_id_idx').on(table.sessionId),
     index('task_inference_usage_events_provider_model_idx').on(
       table.providerId,
       table.modelId,
@@ -1883,6 +1897,10 @@ export const llmUsageEventsRelations = relations(llmUsageEvents, ({ one }) => ({
   environment: one(environments, {
     fields: [llmUsageEvents.environmentId],
     references: [environments.id],
+  }),
+  session: one(sessions, {
+    fields: [llmUsageEvents.sessionId],
+    references: [sessions.id],
   }),
 }));
 
@@ -3062,6 +3080,7 @@ export const fastAgentConversations = pgTable(
     conversationId: text('conversation_id').notNull(),
     currentReplyChannelId: text('current_reply_channel_id'),
     currentReplyThreadId: text('current_reply_thread_id'),
+    currentReplyServiceUrl: text('current_reply_service_url'),
     replyTargetVerified: boolean('reply_target_verified')
       .notNull()
       .default(true),
@@ -3142,6 +3161,52 @@ export const fastAgentMessages = pgTable(
 );
 
 /**
+ * fast_agent_provider_messages
+ *
+ * Durable provider message bindings for communication surfaces whose stable
+ * conversation address can host more than one Fast session. Inbound replies
+ * use these server-written rows to recover the canonical session without
+ * trusting identifiers embedded in message text or webhook routing metadata.
+ */
+export const fastAgentProviderMessages = pgTable(
+  'fast_agent_provider_messages',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    conversationId: uuid('conversation_id')
+      .notNull()
+      .references(() => fastAgentConversations.id, { onDelete: 'cascade' }),
+    provider: text('provider').notNull().$type<'discord' | 'teams'>(),
+    workspaceId: text('workspace_id').notNull(),
+    channelId: text('channel_id').notNull(),
+    threadId: text('thread_id'),
+    messageId: text('message_id').notNull(),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('fast_agent_provider_messages_route_unique').on(
+      table.provider,
+      table.workspaceId,
+      table.channelId,
+      table.messageId,
+    ),
+    index('fast_agent_provider_messages_conversation_idx').on(
+      table.conversationId,
+    ),
+    index('fast_agent_provider_messages_thread_idx').on(
+      table.provider,
+      table.workspaceId,
+      table.channelId,
+      table.threadId,
+    ),
+    check(
+      'fast_agent_provider_messages_provider_check',
+      sql`${table.provider} in ('discord', 'teams')`,
+    ),
+  ],
+);
+
+/**
  * fast_agent_pr_feedback_deliveries
  *
  * Durable conversation-scoped claims for PR feedback presented by Fast.
@@ -3183,7 +3248,9 @@ export const fastAgentConversationsRelations = relations(
       references: [users.id],
     }),
     messages: many(fastAgentMessages),
+    providerMessages: many(fastAgentProviderMessages),
     prFeedbackDeliveries: many(fastAgentPrFeedbackDeliveries),
+    session: one(sessions),
   }),
 );
 
@@ -3192,6 +3259,16 @@ export const fastAgentMessagesRelations = relations(
   ({ one }) => ({
     conversation: one(fastAgentConversations, {
       fields: [fastAgentMessages.conversationId],
+      references: [fastAgentConversations.id],
+    }),
+  }),
+);
+
+export const fastAgentProviderMessagesRelations = relations(
+  fastAgentProviderMessages,
+  ({ one }) => ({
+    conversation: one(fastAgentConversations, {
+      fields: [fastAgentProviderMessages.conversationId],
       references: [fastAgentConversations.id],
     }),
   }),
@@ -3447,8 +3524,282 @@ export const automations = pgTable('automations', {
 
 export const automationsRelations = relations(automations, ({ many }) => ({
   tasks: many(tasks),
+  sessions: many(sessions),
   workItems: many(workItems),
   trackedMessages: many(trackedMessages),
+}));
+
+export type SessionOwnerKind = 'user' | 'automation' | 'system';
+export type SessionSourceSurface = TaskSurface | FastAgentSurface;
+export type { SessionStatus };
+export type SessionTaskOrigin =
+  | 'direct_launch'
+  | 'fast_delegation'
+  | 'backfill'
+  | 'follow_up';
+export type SessionParticipantRole = 'owner' | 'member';
+export type SessionBackfillPhase =
+  | 'fast_conversations'
+  | 'fast_tasks'
+  | 'tasks'
+  | 'participants';
+
+/**
+ * sessions
+ *
+ * Additive Session storage is intentionally separate from tasks and Fast
+ * conversations so the previous release remains safe against this schema for
+ * N-1 rollback. Existing operational records remain canonical.
+ */
+export const sessions = pgTable(
+  'sessions',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    title: text('title').notNull(),
+    titleEditedByUserAt: timestamp('title_edited_by_user_at'),
+    llmTitleCheckpoint: integer('llm_title_checkpoint').notNull().default(0),
+    ownerKind: text('owner_kind').notNull().$type<SessionOwnerKind>(),
+    ownerUserId: text('owner_user_id').references(() => users.id, {
+      onDelete: 'set null',
+    }),
+    ownerAutomation: text('owner_automation')
+      .$type<BackgroundAutomationKey>()
+      .references(() => automations.key, { onDelete: 'set null' }),
+    sourceSurface: text('source_surface')
+      .notNull()
+      .$type<SessionSourceSurface>(),
+    sourceTrigger: text('source_trigger').notNull().$type<TaskTrigger>(),
+    fastConversationId: uuid('fast_conversation_id').references(
+      () => fastAgentConversations.id,
+      { onDelete: 'set null' },
+    ),
+    visibility: text('visibility')
+      .notNull()
+      .default('visible')
+      .$type<TaskVisibility>(),
+    activityAt: bigint('activity_at', { mode: 'number' }).notNull(),
+    cachedStatus: text('cached_status').$type<SessionStatus>(),
+    // Fast-conversation responding lease: while this is in the future, status
+    // recomputation treats the conversation as actively responding. TTL-based
+    // so a crashed turn self-heals instead of pinning the session 'active'.
+    respondingUntil: timestamp('responding_until'),
+    archivedAt: timestamp('archived_at'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => [
+    index('sessions_visibility_activity_at_idx').on(
+      table.visibility,
+      table.activityAt.desc(),
+      table.id.desc(),
+    ),
+    index('sessions_owner_user_id_idx').on(table.ownerUserId),
+    uniqueIndex('sessions_fast_conversation_id_unique')
+      .on(table.fastConversationId)
+      .where(sql`${table.fastConversationId} IS NOT NULL`),
+    check(
+      'sessions_owner_shape_check',
+      // Owner FKs use ON DELETE SET NULL so retained Sessions can outlive
+      // deleted users and automation definitions. The shape still prevents a
+      // value from being stored in the wrong owner column.
+      sql`(${table.ownerKind} = 'user' AND ${table.ownerAutomation} IS NULL) OR (${table.ownerKind} = 'automation' AND ${table.ownerUserId} IS NULL) OR (${table.ownerKind} = 'system' AND ${table.ownerUserId} IS NULL AND ${table.ownerAutomation} IS NULL)`,
+    ),
+    check(
+      'sessions_owner_kind_check',
+      sql`${table.ownerKind} in ('user', 'automation', 'system')`,
+    ),
+    check(
+      'sessions_source_surface_check',
+      sql`${table.sourceSurface} in ('web', 'api', 'slack', 'teams', 'telegram', 'discord', 'linear', 'github', 'gitlab', 'gitea', 'ado', 'bitbucket', 'system', 'automation')`,
+    ),
+    check(
+      'sessions_source_trigger_check',
+      sql`${table.sourceTrigger} in ('message', 'webhook', 'schedule', 'manual')`,
+    ),
+    check(
+      'sessions_visibility_check',
+      sql`${table.visibility} in ('visible', 'hidden')`,
+    ),
+    check(
+      'sessions_cached_status_check',
+      sql`${table.cachedStatus} IS NULL OR ${table.cachedStatus} in ('active', 'needs_input', 'blocked', 'ready')`,
+    ),
+  ],
+);
+
+/** Additive task linkage retained independently for N-1 rollback safety. */
+export const sessionTasks = pgTable(
+  'session_tasks',
+  {
+    sessionId: uuid('session_id')
+      .notNull()
+      .references(() => sessions.id, { onDelete: 'cascade' }),
+    taskId: text('task_id')
+      .notNull()
+      .references(() => tasks.id, { onDelete: 'cascade' }),
+    attachedAt: timestamp('attached_at').notNull().defaultNow(),
+    origin: text('origin').notNull().$type<SessionTaskOrigin>(),
+  },
+  (table) => [
+    primaryKey({
+      name: 'session_tasks_session_id_task_id_pk',
+      columns: [table.sessionId, table.taskId],
+    }),
+    uniqueIndex('session_tasks_task_id_unique').on(table.taskId),
+    index('session_tasks_session_attached_at_idx').on(
+      table.sessionId,
+      table.attachedAt.desc(),
+    ),
+    check(
+      'session_tasks_origin_check',
+      sql`${table.origin} in ('direct_launch', 'fast_delegation', 'backfill', 'follow_up')`,
+    ),
+  ],
+);
+
+/** Additive read-state storage retained independently for N-1 rollback safety. */
+export const sessionParticipants = pgTable(
+  'session_participants',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    sessionId: uuid('session_id')
+      .notNull()
+      .references(() => sessions.id, { onDelete: 'cascade' }),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, {
+        onDelete: 'cascade',
+      }),
+    role: text('role')
+      .notNull()
+      .default('member')
+      .$type<SessionParticipantRole>(),
+    lastReadEventAt: bigint('last_read_event_at', { mode: 'number' }),
+    lastReadEventId: text('last_read_event_id'),
+    lastNotifiedEventAt: bigint('last_notified_event_at', { mode: 'number' }),
+    lastNotifiedEventId: text('last_notified_event_id'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('session_participants_session_user_unique').on(
+      table.sessionId,
+      table.userId,
+    ),
+    index('session_participants_user_id_idx').on(table.userId),
+    check(
+      'session_participants_role_check',
+      sql`${table.role} in ('owner', 'member')`,
+    ),
+  ],
+);
+
+/** User-scoped Session pins mirror task pins without changing task storage. */
+export const sessionPins = pgTable(
+  'session_pins',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    sessionId: uuid('session_id')
+      .notNull()
+      .references(() => sessions.id, { onDelete: 'cascade' }),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('session_pins_user_session_unique').on(
+      table.userId,
+      table.sessionId,
+    ),
+    index('session_pins_user_updated_at_idx').on(table.userId, table.updatedAt),
+    index('session_pins_session_id_idx').on(table.sessionId),
+  ],
+);
+
+/** Durable bounded-backfill position retained independently for N-1 safety. */
+export const sessionBackfillState = pgTable(
+  'session_backfill_state',
+  {
+    key: text('key').primaryKey(),
+    phase: text('phase')
+      .notNull()
+      .default('fast_conversations')
+      .$type<SessionBackfillPhase>(),
+    cursorCreatedAt: timestamp('cursor_created_at'),
+    cursorId: text('cursor_id'),
+    completedAt: timestamp('completed_at'),
+    lastRunAt: timestamp('last_run_at'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => [
+    check(
+      'session_backfill_state_phase_check',
+      sql`${table.phase} in ('fast_conversations', 'fast_tasks', 'tasks', 'participants')`,
+    ),
+    check(
+      'session_backfill_state_cursor_shape_check',
+      sql`(${table.cursorCreatedAt} IS NULL) = (${table.cursorId} IS NULL)`,
+    ),
+  ],
+);
+
+export const sessionsRelations = relations(sessions, ({ one, many }) => ({
+  ownerUser: one(users, {
+    fields: [sessions.ownerUserId],
+    references: [users.id],
+    relationName: 'sessionOwnerUser',
+  }),
+  ownerAutomationRow: one(automations, {
+    fields: [sessions.ownerAutomation],
+    references: [automations.key],
+  }),
+  fastConversation: one(fastAgentConversations, {
+    fields: [sessions.fastConversationId],
+    references: [fastAgentConversations.id],
+  }),
+  tasks: many(sessionTasks),
+  participants: many(sessionParticipants),
+  pins: many(sessionPins),
+  usageEvents: many(llmUsageEvents),
+}));
+
+export const sessionTasksRelations = relations(sessionTasks, ({ one }) => ({
+  session: one(sessions, {
+    fields: [sessionTasks.sessionId],
+    references: [sessions.id],
+  }),
+  task: one(tasks, {
+    fields: [sessionTasks.taskId],
+    references: [tasks.id],
+  }),
+}));
+
+export const sessionParticipantsRelations = relations(
+  sessionParticipants,
+  ({ one }) => ({
+    session: one(sessions, {
+      fields: [sessionParticipants.sessionId],
+      references: [sessions.id],
+    }),
+    user: one(users, {
+      fields: [sessionParticipants.userId],
+      references: [users.id],
+    }),
+  }),
+);
+
+export const sessionPinsRelations = relations(sessionPins, ({ one }) => ({
+  session: one(sessions, {
+    fields: [sessionPins.sessionId],
+    references: [sessions.id],
+  }),
+  user: one(users, {
+    fields: [sessionPins.userId],
+    references: [users.id],
+  }),
 }));
 
 /**
@@ -4275,6 +4626,14 @@ export const brainMemoryEvents = pgTable(
      * other page.
      */
     agentSummary: text('agent_summary'),
+    /**
+     * Bumped whenever saveBrainAgentSummary updates the row's content. The
+     * drainer fences its completion on the revision it claimed, so a summary
+     * that lands while a page write is in flight forces a re-ingest of the
+     * newer content instead of being stranded behind an already-written older
+     * snapshot.
+     */
+    revision: integer('revision').notNull().default(0),
     attempts: integer('attempts').notNull().default(0),
     lastError: text('last_error'),
     processedAt: timestamp('processed_at'),

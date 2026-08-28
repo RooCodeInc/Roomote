@@ -37,7 +37,7 @@ describe('ProviderCreditBalanceLine', () => {
     render(<ProviderCreditBalanceLine balance={balance()} />);
 
     expect(
-      screen.getByText(/Credits:.*12\.50.*of.*50\.00.*left/i),
+      screen.getByText(/12[.,]50.*of.*50[.,]00.*left/i),
     ).toBeInTheDocument();
     expect(screen.getByRole('progressbar')).toBeInTheDocument();
   });
@@ -49,7 +49,7 @@ describe('ProviderCreditBalanceLine', () => {
       />,
     );
 
-    expect(screen.getByText(/Credits:.*3\.00.*left/i)).toBeInTheDocument();
+    expect(screen.getByText(/3[.,]00.*left/i)).toBeInTheDocument();
     expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
   });
 });

@@ -22,16 +22,47 @@ describe('Fast session input schemas', () => {
     });
   });
 
+  it('accepts bounded extracted attachment text', () => {
+    expect(
+      replyToFastSessionInputSchema.parse({
+        sessionId: '00000000-0000-4000-8000-000000000000',
+        text: 'Implement this plan',
+        attachmentTexts: ['Attachment: plan.md\nAdd the feature.'],
+      }).attachmentTexts,
+    ).toEqual(['Attachment: plan.md\nAdd the feature.']);
+  });
+
+  it('rejects too many extracted attachments', () => {
+    expect(() =>
+      startFastSessionInputSchema.parse({
+        text: 'Implement these plans',
+        attachmentTexts: Array.from(
+          { length: 21 },
+          (_, index) => `Attachment ${index}`,
+        ),
+      }),
+    ).toThrow('Array must contain at most 20 element(s)');
+  });
+
+  it('rejects extracted attachment text over the aggregate limit', () => {
+    expect(() =>
+      startFastSessionInputSchema.parse({
+        text: 'Implement this plan',
+        attachmentTexts: ['a'.repeat(200_001)],
+      }),
+    ).toThrow('Extracted attachment text exceeds the 200,000 character limit');
+  });
+
   it('rejects empty starts and replies without images', () => {
     expect(() => startFastSessionInputSchema.parse({ text: '  ' })).toThrow(
-      'Text or at least one image is required',
+      'Text or at least one attachment is required',
     );
     expect(() =>
       replyToFastSessionInputSchema.parse({
         sessionId: '00000000-0000-4000-8000-000000000000',
         text: '',
       }),
-    ).toThrow('Text or at least one image is required');
+    ).toThrow('Text or at least one attachment is required');
   });
 
   it('rejects image values the Fast service cannot use', () => {

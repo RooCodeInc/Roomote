@@ -6,11 +6,17 @@ import {
   eq,
   fastAgentConversations,
   fastAgentMessages,
+  ensureSessionForFastConversation,
+  advanceSessionNotifiedCursor,
+  advanceSessionReadCursor,
+  getSessionForFastConversation,
   sql,
+  touchSessionActivity,
   type DatabaseOrTransaction,
 } from '@roomote/db/server';
 import { fastAgentConversationSchema } from '@roomote/types';
 
+import { FAST_RESPONDING_LEASE_MS } from './fast-agent-constants';
 import type { FastAgentConversation } from './fast-agent-conversation';
 
 export type FastAgentConversationRecord = {
@@ -90,6 +96,7 @@ function toConversation(
     | 'conversationId'
     | 'currentReplyChannelId'
     | 'currentReplyThreadId'
+    | 'currentReplyServiceUrl'
   >,
 ): FastAgentConversation | null {
   const parsed = fastAgentConversationSchema.safeParse(
@@ -107,6 +114,9 @@ function toConversation(
             channelId: record.currentReplyChannelId,
             ...(record.currentReplyThreadId
               ? { threadId: record.currentReplyThreadId }
+              : {}),
+            ...(record.currentReplyServiceUrl
+              ? { serviceUrl: record.currentReplyServiceUrl }
               : {}),
           },
         },
@@ -176,6 +186,10 @@ export const fastAgentConversationRepository: FastAgentConversationRepository =
                 'replyTarget' in conversation
                   ? conversation.replyTarget.threadId
                   : null,
+              currentReplyServiceUrl:
+                'replyTarget' in conversation
+                  ? (conversation.replyTarget.serviceUrl ?? null)
+                  : null,
               replyTargetVerified: true,
             })
             .onConflictDoNothing();
@@ -201,11 +215,17 @@ export const fastAgentConversationRepository: FastAgentConversationRepository =
               'replyTarget' in conversation
                 ? (conversation.replyTarget.threadId ?? null)
                 : null,
+            currentReplyServiceUrl:
+              'replyTarget' in conversation
+                ? (conversation.replyTarget.serviceUrl ?? null)
+                : null,
             replyTargetVerified: true,
             updatedAt: sql`now()`,
           })
           .where(eq(fastAgentConversations.id, record.id))
           .returning();
+
+        await ensureSessionForFastConversation(tx, updated?.id ?? record.id);
 
         return loadConversationRecord(tx, updated?.id ?? record.id);
       });
@@ -235,6 +255,10 @@ export const fastAgentConversationRepository: FastAgentConversationRepository =
             currentReplyThreadId:
               'replyTarget' in fallbackConversation
                 ? (fallbackConversation.replyTarget.threadId ?? null)
+                : null,
+            currentReplyServiceUrl:
+              'replyTarget' in fallbackConversation
+                ? (fallbackConversation.replyTarget.serviceUrl ?? null)
                 : null,
             replyTargetVerified: true,
             updatedAt: sql`now()`,
@@ -290,6 +314,15 @@ export const fastAgentConversationRepository: FastAgentConversationRepository =
         if (!updated) {
           throw new Error('Fast conversation was not found.');
         }
+        const session = await getSessionForFastConversation(tx, conversationId);
+        if (session) {
+          await touchSessionActivity(
+            tx,
+            session.id,
+            Math.floor(Date.now() / 1000),
+            { recomputeStatus: false },
+          );
+        }
       });
     },
 
@@ -335,6 +368,42 @@ export const fastAgentConversationRepository: FastAgentConversationRepository =
           .update(fastAgentConversations)
           .set({ updatedAt: sql`now()` })
           .where(eq(fastAgentConversations.id, conversationId));
+        const session = await getSessionForFastConversation(tx, conversationId);
+        if (session) {
+          await touchSessionActivity(
+            tx,
+            session.id,
+            Math.floor(message.ts / 1000),
+            {
+              recomputeStatus: false,
+              // An assistant message means the agent is still producing
+              // output; re-extend the responding lease so long turns do not
+              // expire it mid-stream.
+              ...(message.role === 'assistant'
+                ? {
+                    respondingUntil: new Date(
+                      Date.now() + FAST_RESPONDING_LEASE_MS,
+                    ),
+                  }
+                : {}),
+            },
+          );
+          const messageUserId = message.metadata?.userId;
+          if (message.role === 'user' && typeof messageUserId === 'string') {
+            await advanceSessionReadCursor(tx, {
+              sessionId: session.id,
+              userId: messageUserId,
+              eventAt: message.ts,
+              eventId: message.eventId,
+            });
+          } else if (message.role === 'assistant') {
+            await advanceSessionNotifiedCursor(tx, {
+              sessionId: session.id,
+              eventAt: message.ts,
+              eventId: message.eventId,
+            });
+          }
+        }
       });
     },
 

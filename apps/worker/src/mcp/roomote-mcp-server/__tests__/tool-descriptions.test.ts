@@ -3,6 +3,11 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { z } from 'zod';
+import {
+  SHOW_WIDGET_FIXED_CANVAS_GUIDANCE,
+  SHOW_WIDGET_HEIGHT_DESCRIPTION,
+  SHOW_WIDGET_THEME_GUIDANCE,
+} from '@roomote/cloud-agents/show-widget';
 import { MANAGE_CUSTOM_AUTOMATIONS_TOOL } from '@roomote/types';
 
 const thisFilePath = fileURLToPath(import.meta.url);
@@ -355,10 +360,9 @@ describe('roomote MCP tool descriptions', () => {
     expect(tool.config.description).toContain(
       'Do not use it for ordinary prose',
     );
-    expect(tool.config.description).toContain('rw-card');
-    expect(tool.config.description).toContain('`--rw-*` theme variables');
+    expect(tool.config.description).toContain(SHOW_WIDGET_THEME_GUIDANCE);
     expect(tool.config.description).toContain(
-      'Keep widgets compact enough to fit without scrolling',
+      SHOW_WIDGET_FIXED_CANVAS_GUIDANCE,
     );
     expect(tool.config.description).toContain(
       'HTML, CSS, and inline SVG are displayed in a sandboxed iframe',
@@ -374,8 +378,8 @@ describe('roomote MCP tool descriptions', () => {
     expect(getInputSchemaField(tool, 'css').description).toContain(
       '--rw-surface',
     );
-    expect(getInputSchemaField(tool, 'height').description).toContain(
-      'without a vertical scrollbar',
+    expect(getInputSchemaField(tool, 'height').description).toBe(
+      SHOW_WIDGET_HEIGHT_DESCRIPTION,
     );
     expect(getInputSchemaField(tool, 'textFallback').description).toContain(
       'originating chat surface',
@@ -1177,5 +1181,56 @@ describe('roomote MCP tool descriptions', () => {
         },
       ],
     });
+  });
+
+  it('forwards reviewId from manage_source_control tool params', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          success: true,
+          action: 'dismiss_pull_request_review',
+          provider: 'github',
+          repositoryFullName: 'RooCodeInc/Roomote',
+          number: 12,
+          commentId: '900',
+          applied: true,
+          warnings: [],
+        }),
+      }),
+    );
+
+    const { registeredTools } = await importRoomoteMcpServer({
+      ROOMOTE_CLOUD_TOKEN: 'run-token',
+      ROOMOTE_PLATFORM_API_URL: 'https://platform.example.com',
+      ROOMOTE_TASK_ID: 'task_123',
+    });
+    const sourceControlTool = getRegisteredTool(
+      registeredTools,
+      'manage_source_control',
+    );
+
+    await sourceControlTool.handler?.({
+      action: 'dismiss_pull_request_review',
+      repositoryFullName: 'RooCodeInc/Roomote',
+      prNumber: 12,
+      reviewId: '900',
+      body: 'Requested changes have been addressed.',
+    });
+
+    expect(fetch).toHaveBeenCalledWith(
+      'https://platform.example.com/api/mcp/tasks/task_123/source_control',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({
+          action: 'dismiss_pull_request_review',
+          repositoryFullName: 'RooCodeInc/Roomote',
+          prNumber: 12,
+          reviewId: '900',
+          body: 'Requested changes have been addressed.',
+        }),
+      }),
+    );
   });
 });

@@ -54,6 +54,23 @@ describe('inference gateway URL builders', () => {
     );
   });
 
+  it('registers Roomote inference as a managed OpenRouter-backed route', () => {
+    const provider = getInferenceGatewayProvider('roomote');
+
+    expect(provider).toMatchObject({
+      envVarNames: ['R_TRIAL_OPENROUTER_API_KEY'],
+      upstreamBaseUrl: 'https://openrouter.ai/api',
+      authHeader: { name: 'authorization', scheme: 'bearer' },
+      openCodeBaseUrlSuffix: '/v1',
+    });
+    expect(
+      buildInferenceGatewayOpenCodeBaseUrl(
+        'https://api.example.com/api/inference',
+        provider!,
+      ),
+    ).toBe('https://api.example.com/api/inference/roomote/v1');
+  });
+
   it('registers OpenCode Go with its subscription endpoint and API key', () => {
     const provider = getInferenceGatewayProvider('opencode-go');
 

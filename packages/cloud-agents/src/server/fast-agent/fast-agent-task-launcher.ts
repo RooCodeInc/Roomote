@@ -46,17 +46,27 @@ export function createFastAgentTaskLauncher(
 ): LaunchFastAgentTask {
   return async ({
     prompt,
+    images,
     environmentId,
     model,
     parentSessionId,
     postKickoff,
   }) => {
-    const task = await params.buildTask({
+    const builtTask = await params.buildTask({
       prompt,
       environmentId,
       model,
       parentSessionId,
     });
+    const task = images?.length
+      ? {
+          ...builtTask,
+          payload: {
+            ...builtTask.payload,
+            images,
+          },
+        }
+      : builtTask;
     let taskUrl: string | undefined;
     let preparedTaskRun: { id: number; taskId: string } | undefined;
 
@@ -195,6 +205,7 @@ export function createFastAgentWebTaskLauncher(params: {
     userId: params.userId,
     surface: 'web',
     taskUrlCampaign: 'fast-delegation',
+    rendersTaskLink: true,
     buildTask: ({ prompt, environmentId, model, parentSessionId }) => ({
       type: TaskPayloadKind.StandardTask,
       payload: {

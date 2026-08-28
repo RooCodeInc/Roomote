@@ -12,7 +12,6 @@ import {
   and,
   db,
   eq,
-  finalizeWorkItemLaunched,
   inArray,
   isNull,
   releaseWorkItemClaim,
@@ -21,7 +20,7 @@ import {
 } from '@roomote/db/server';
 
 import { apiLogger } from '../../logging.js';
-import { cancelOrphanedWorkItemRunBestEffort } from '../tasks/orphaned-work-item-run.js';
+import { launchClaimedSuggestedTask } from '../tasks/suggestion-launch.js';
 import {
   claimCurrentThreadSuggestionByMessage,
   findCurrentThreadSuggestionIdByMessage,
@@ -276,63 +275,59 @@ async function handleSuggestionLaunchCallback(params: {
     if (suggestion.targetEnvironmentId && !workspaceOverride) {
       throw new Error('The suggestion target environment is unavailable.');
     }
-    const started = await startNewTelegramTask({
-      message,
-      launchOwnerUserId: senderUserId,
-      queuedMessage,
-      metadata: {
-        communicationProvider: 'telegram',
-        communicationChannelId: chatId,
-        ...(threadId ? { communicationThreadId: threadId } : {}),
-        communicationMessageId: messageId,
+    const launchResult = await launchClaimedSuggestedTask({
+      suggestion: { id: params.suggestionId, launchClaimedAt: claimedAt },
+      policy: {
+        usesRouterLaunch: suggestion.usesRouterLaunch === true,
+        userDefaultEnabled: false,
+        fastAvailable: false,
       },
-      // The button click already is the explicit start signal.
-      skipRoutingConfirmation: true,
-      forceNewTopic: true,
-      ...(workspaceOverride ? { workspaceOverride } : {}),
+      launch: async () => {
+        const started = await startNewTelegramTask({
+          message,
+          launchOwnerUserId: senderUserId,
+          queuedMessage,
+          metadata: {
+            communicationProvider: 'telegram',
+            communicationChannelId: chatId,
+            ...(threadId ? { communicationThreadId: threadId } : {}),
+            communicationMessageId: messageId,
+          },
+          // The button click already is the explicit start signal.
+          skipRoutingConfirmation: true,
+          forceNewTopic: true,
+          ...(workspaceOverride ? { workspaceOverride } : {}),
+        });
+        return started.status === 'started'
+          ? {
+              accepted: true,
+              runId: started.launchResult.id,
+              taskId: started.launchResult.taskId,
+            }
+          : { accepted: false };
+      },
     });
 
-    if (started.status === 'started') {
-      // Close the launch state machine: `launching` -> `launched` with the
-      // task link, so a later click can never relaunch this suggestion and the
-      // task stays linked to its work item.
-      const finalized = await finalizeWorkItemLaunched(db, {
-        id: params.suggestionId,
-        taskId: started.launchResult.taskId,
-        claimedAt,
+    if (
+      launchResult.status === 'finalize_lost' ||
+      launchResult.status === 'finalize_failed'
+    ) {
+      apiLogger.warn(
+        `[telegram] failed to finalize work item ${params.suggestionId}; task ${launchResult.taskId ?? 'null'} (run ${launchResult.runId ?? 'null'}) — ${launchResult.cancelNote}`,
+      );
+      await postTelegramMessageBestEffort({
+        chatId,
+        replyToMessageId: messageId,
+        text: `"${suggestion.title}" was already started elsewhere — this duplicate task was canceled.`,
       });
-
-      if (!finalized) {
-        // The task is already enqueued but the fencing guard rejected the
-        // finalize (our stale claim was reclaimed by another launcher), so
-        // the run is orphaned from the work item. Best-effort cancel it while
-        // it is still pre-sandbox; log loudly either way with the outcome.
-        const cancelNote = await cancelOrphanedWorkItemRunBestEffort(
-          started.launchResult.id,
-        );
-
-        apiLogger.warn(
-          `[telegram] finalize lost the fencing guard for work item ${params.suggestionId}; task ${started.launchResult.taskId} (run ${started.launchResult.id}) was orphaned — ${cancelNote}`,
-        );
-
-        // The callback was already answered "Starting: ..." and the launch
-        // path already posted a started message pointing at the orphan, so
-        // post a corrective reply: the user must follow the winning launch,
-        // not the canceled duplicate. (Deferring the started post until after
-        // finalize would change startNewTelegramTask's contract for its other
-        // callers, so correct instead.)
-        await postTelegramMessageBestEffort({
-          chatId,
-          replyToMessageId: messageId,
-          text: `"${suggestion.title}" was already started elsewhere — this duplicate task was canceled.`,
-        });
-      }
-    } else {
-      // No task was launched: routing answered inline (`replied_inline`), or —
-      // defensively, since skipRoutingConfirmation is set — a confirmation was
-      // requested. Release the claim so the suggestion is retryable now
-      // instead of dead for the 10-minute stale window.
-      await releaseWorkItemClaim(db, { id: params.suggestionId, claimedAt });
+    } else if (launchResult.status === 'failed') {
+      await postTelegramMessageBestEffort({
+        chatId,
+        replyToMessageId: messageId,
+        text: launchResult.readOnly
+          ? MANAGED_DEPLOYMENT_READ_ONLY_MESSAGE
+          : `Could not start "${suggestion.title}" — try describing the task in a message instead.`,
+      });
     }
   } catch (error) {
     const blockedByReadOnly = isDeploymentReadOnlyError(error);

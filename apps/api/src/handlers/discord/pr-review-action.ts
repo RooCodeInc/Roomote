@@ -64,6 +64,35 @@ export async function handleDiscordPrReviewActionCallback(input: {
   };
   const user = input.interaction.member?.user ?? input.interaction.user;
   const mappedUserId = await findDiscordMappedUserId(user?.id);
+  const clearOfferButtons = async (params: {
+    channelId: string;
+    messageId: string;
+    text?: string;
+  }) => {
+    try {
+      const text =
+        params.text ??
+        (
+          await input.provider.getMessage({
+            channelId: params.channelId,
+            messageId: params.messageId,
+          })
+        )?.text;
+      if (text === undefined) return;
+
+      await input.provider.editMessage({
+        channelId: params.channelId,
+        messageId: params.messageId,
+        text,
+      });
+    } catch (error) {
+      apiLogger.warn(
+        `[discord] Failed to clear PR review action buttons from ${params.messageId}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
+  };
 
   if (input.choice !== 'dismiss' && !mappedUserId) {
     // Not claimed: a teammate with a linked account can still accept.
@@ -79,8 +108,26 @@ export async function handleDiscordPrReviewActionCallback(input: {
   });
 
   if (!pending) {
+    if (input.interaction.message) {
+      await clearOfferButtons({
+        channelId: input.interaction.message.channel_id,
+        messageId: input.interaction.message.id,
+        text: input.interaction.message.content,
+      });
+    }
     await replyToOffer('This offer was already handled or has expired.');
     return;
+  }
+
+  const offerMessageId = pending.messageId ?? input.interaction.message?.id;
+  if (offerMessageId) {
+    await clearOfferButtons({
+      channelId: pending.threadId ?? pending.channelId,
+      messageId: offerMessageId,
+      ...(input.interaction.message
+        ? { text: input.interaction.message.content }
+        : {}),
+    });
   }
 
   if (input.choice === 'dismiss') {
@@ -145,22 +192,47 @@ export async function handleDiscordPrReviewActionCallback(input: {
 /**
  * Retires any pending PR review offers bound to a Discord conversation
  * because a typed reply superseded them. Claims atomically so later clicks
- * report "already handled"; the buttons stay visible but dead (Discord
- * message component editing is not wired up yet). Fire-and-forget.
+ * report "already handled" and strips the controls from posted messages.
+ * Fire-and-forget.
  */
 export function retireDiscordPrReviewOffersBestEffort({
+  provider,
   channelId,
   threadId,
 }: {
+  provider: DiscordCommunicationProvider;
   channelId: string;
   threadId: string | null;
 }): void {
   void (async () => {
-    await claimPendingPrReviewActionsForThread({
+    const claimed = await claimPendingPrReviewActionsForThread({
       provider: 'discord',
       channelId,
       threadId,
     });
+    for (const pending of claimed) {
+      if (!pending.messageId) continue;
+      try {
+        const destinationId = pending.threadId ?? pending.channelId;
+        const message = await provider.getMessage({
+          channelId: destinationId,
+          messageId: pending.messageId,
+        });
+        if (message) {
+          await provider.editMessage({
+            channelId: destinationId,
+            messageId: pending.messageId,
+            text: message.text,
+          });
+        }
+      } catch (error) {
+        apiLogger.warn(
+          `[discord] Failed to clear PR review action buttons from ${pending.messageId}: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      }
+    }
   })().catch((error: unknown) => {
     apiLogger.warn(
       `[discord] Failed to retire PR review offers for channel ${channelId}: ${

@@ -41,7 +41,7 @@ type SettingsNavigationItem = {
   icon: LucideIcon;
   adminOnly?: boolean;
   hiddenWhenCloud?: boolean;
-  /** Shown only on deployments that have enabled Memory. */
+  /** Shown only on deployments where Memory is wired or enabled. */
   requiresBrain?: boolean;
   newGroup?: boolean;
   matches: (pathname: string) => boolean;

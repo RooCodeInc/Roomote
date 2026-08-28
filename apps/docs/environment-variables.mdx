@@ -220,6 +220,13 @@ as per-task auth tokens or workspace paths.
 | `OPENAI_COMPATIBLE_<NAME>_LABEL`       | Optional     | Display label stored with a named OpenAI-compatible connection.                                                                          |
 | `VLLM_BASE_URL`                        | vLLM         | vLLM OpenAI-compatible endpoint URL, usually including its `/v1` path.                                                                  |
 | `VLLM_API_KEY`                         | Optional     | Bearer API key for a vLLM endpoint that requires authentication.                                                                        |
+| `R_BRAIN_OPENROUTER_API_KEY`           | Memory provider | OpenRouter key that enables Memory embeddings and synthesis.                                                             |
+| `R_BRAIN_OPENAI_API_KEY`               | Memory provider | OpenAI key that enables Memory embeddings and synthesis.                                                                              |
+| `R_BRAIN_MODEL`                        | Optional     | Memory synthesis model in the configured provider's naming. Changes apply immediately.                                                  |
+| `R_BRAIN_EMBEDDING_MODEL`              | Before first Memory boot | Embedding model id that sizes Memory's vector storage. Changing it later requires re-embedding.                              |
+| `R_BRAIN_EMBEDDING_DIMENSIONS`         | Before first Memory boot | Output width for `R_BRAIN_EMBEDDING_MODEL`; it must match the served model.                                                   |
+| `R_BRAIN_EMBEDDINGS_UPSTREAM_URL`      | Optional     | OpenAI-compatible embeddings endpoint used instead of the Memory provider.                                                               |
+| `R_BRAIN_INFERENCE_UPSTREAM_API_KEY`   | Optional     | Bearer key for the self-run embeddings upstream; omit it for a trusted private-network service.                         |
 
 ### Sandbox providers
 

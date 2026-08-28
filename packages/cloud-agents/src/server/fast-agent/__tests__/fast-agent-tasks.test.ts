@@ -5,7 +5,7 @@ describe('fast-agent task operations', () => {
     vi.unstubAllGlobals();
   });
 
-  it('steers messages to active tasks through a reverse-proxy pathname', async () => {
+  it('steers messages with images through a reverse-proxy pathname', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ success: true }), {
         status: 200,
@@ -23,6 +23,10 @@ describe('fast-agent task operations', () => {
       {
         taskId: 'task-42',
         message: 'Also add a test.',
+        images: [
+          'data:image/png;base64,c2NyZWVuc2hvdC0x',
+          'data:image/webp;base64,c2NyZWVuc2hvdC0y',
+        ],
       },
     );
 
@@ -36,6 +40,10 @@ describe('fast-agent task operations', () => {
         }),
         body: JSON.stringify({
           message: 'Also add a test.',
+          images: [
+            'data:image/png;base64,c2NyZWVuc2hvdC0x',
+            'data:image/webp;base64,c2NyZWVuc2hvdC0y',
+          ],
           senderMode: 'fast_agent',
         }),
       }),

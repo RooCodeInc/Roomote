@@ -10,6 +10,8 @@ import {
   asRecord,
   asString,
   buildAcpRequestUserInputRequestId,
+  INFERENCE_PROVIDER_ERROR_BASE_DELAY_MS,
+  INFERENCE_PROVIDER_ERROR_MAX_DELAY_MS,
   normalizeAcpReasoningText,
   parseAcpFlattenedMcpToolName,
   OPENCODE_ARCHITECT_AGENT,
@@ -4191,8 +4193,14 @@ export class OpenCodeServerHarness
     const attemptNumber = this.providerErrorRecoveryCounts[recovery.kind];
     const delayMs = resolveOpenCodeProviderErrorRetryDelayMs({
       attemptNumber,
-      baseDelayMs: this.providerErrorBaseDelayMs,
-      maxDelayMs: this.providerErrorMaxDelayMs,
+      baseDelayMs:
+        recovery.kind === 'provider_error'
+          ? this.providerErrorBaseDelayMs
+          : INFERENCE_PROVIDER_ERROR_BASE_DELAY_MS,
+      maxDelayMs:
+        recovery.kind === 'provider_error'
+          ? this.providerErrorMaxDelayMs
+          : INFERENCE_PROVIDER_ERROR_MAX_DELAY_MS,
     });
     const errorSummary = summarizeOpenCodeProviderError(error);
     const retryAtMs = Date.now() + delayMs;

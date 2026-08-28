@@ -1,5 +1,8 @@
 import type { SetupModelProviderId } from './model-provider-config';
-import { OPENCODE_GO_API_KEY_ENV_VAR_NAME } from './model-provider-config';
+import {
+  OPENCODE_GO_API_KEY_ENV_VAR_NAME,
+  ROOMOTE_INFERENCE_API_KEY_ENV_VAR_NAME,
+} from './model-provider-config';
 import {
   getOpenAiCompatibleProviderInstance,
   isOpenAiCompatibleProviderEnvVarName,
@@ -223,6 +226,15 @@ const ZAI_INFERENCE_PATHS: readonly string[] = [
  */
 export const INFERENCE_GATEWAY_PROVIDERS: readonly InferenceGatewayProvider[] =
   [
+    {
+      id: 'roomote',
+      name: 'Roomote inference',
+      envVarNames: [ROOMOTE_INFERENCE_API_KEY_ENV_VAR_NAME],
+      upstreamBaseUrl: 'https://openrouter.ai/api',
+      authHeader: { name: 'authorization', scheme: 'bearer' },
+      allowedPaths: OPENAI_COMPATIBLE_INFERENCE_PATHS,
+      openCodeBaseUrlSuffix: '/v1',
+    },
     {
       id: 'openrouter',
       name: 'OpenRouter',

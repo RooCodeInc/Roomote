@@ -2,7 +2,10 @@ import { COMMS_PROVIDER_ENV_VAR_NAMES } from './setup-auth-config';
 import { COMPUTE_PROVIDER_ENV_VAR_NAMES } from './setup-compute-config';
 import { SETUP_SOURCE_CONTROL_PROVIDER_CATALOG } from './setup-source-control-config';
 import { OPENCODE_AUTH_CONTENT_ENV_VAR_NAME } from './chatgpt-subscription';
-import { DISABLED_MODEL_PROVIDER_ENV_VAR_NAMES } from './model-provider-config';
+import {
+  DISABLED_MODEL_PROVIDER_ENV_VAR_NAMES,
+  ROOMOTE_INFERENCE_API_KEY_ENV_VAR_NAME,
+} from './model-provider-config';
 
 /**
  * Per-repo source-control access tokens. A task legitimately receives the
@@ -148,6 +151,9 @@ export const CONTROL_PLANE_ENV_VAR_NAMES: ReadonlySet<string> = new Set<string>(
     ...MEDIA_PROVIDER_ENV_VAR_NAMES,
     ...DECLARATIVE_ENVIRONMENT_ENV_VAR_NAMES,
     ...DISABLED_MODEL_PROVIDER_ENV_VAR_NAMES,
+    // Hosting-managed Roomote inference is served only through the inference
+    // gateway, never configured through the generic environment editor.
+    ROOMOTE_INFERENCE_API_KEY_ENV_VAR_NAME,
   ],
 );
 

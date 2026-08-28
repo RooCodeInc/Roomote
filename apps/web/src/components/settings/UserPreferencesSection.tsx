@@ -3,7 +3,6 @@
 import { useColorTheme } from '@/hooks/useColorTheme';
 import { useMindReaderMode } from '@/hooks/useMindReaderMode';
 import { useNarrationMode } from '@/hooks/useNarrationMode';
-import { usePersonalPreferences } from '@/hooks/usePersonalPreferences';
 import type { PersonalColorTheme } from '@/types/preferences';
 
 import {
@@ -47,14 +46,6 @@ export function UserPreferencesSection() {
     isUpdating: isNarrationModeUpdating,
     setEnabled: setNarrationModeEnabled,
   } = useNarrationMode();
-  const {
-    preferences,
-    isLoading: isCommunicationsFastModeDefaultLoading,
-    isUpdating: isCommunicationsFastModeDefaultUpdating,
-    setPreferences,
-  } = usePersonalPreferences({
-    errorMessage: 'Failed to update the communications fast mode default.',
-  });
   const isThemeDisabled = isThemeLoading || isThemeUpdating;
 
   return (
@@ -119,30 +110,6 @@ export function UserPreferencesSection() {
             <p className="text-sm text-foreground">
               Streamline conversations, keeping only text messages and LLM
               thoughts.
-            </p>
-          </div>
-        </div>
-
-        <div className="flex gap-3">
-          <Switch
-            aria-label="Toggle fast response mode"
-            checked={preferences.communicationsFastModeDefault}
-            disabled={
-              isCommunicationsFastModeDefaultLoading ||
-              isCommunicationsFastModeDefaultUpdating
-            }
-            onCheckedChange={(enabled) =>
-              setPreferences({ communicationsFastModeDefault: enabled })
-            }
-          />
-          <div className="space-y-1">
-            <p className="text-sm font-semibold text-foreground">
-              Fast response mode
-            </p>
-            <p className="text-sm text-foreground">
-              Use fast responses by default for linked Slack and Discord
-              messages. Dashboard, GitHub, Teams, and Telegram are unaffected;
-              `!fast` remains available in Slack.
             </p>
           </div>
         </div>

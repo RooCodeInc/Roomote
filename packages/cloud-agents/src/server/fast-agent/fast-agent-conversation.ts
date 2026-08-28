@@ -1,6 +1,10 @@
 import type { FastAgentConversation } from '@roomote/types';
 
-export type { FastAgentConversation, FastAgentSurface } from '@roomote/types';
+export {
+  isFastAgentCommunicationConversation,
+  type FastAgentConversation,
+  type FastAgentSurface,
+} from '@roomote/types';
 
 /** Build the N-1 Slack-shaped compatibility namespace. New persistence and
  * turn locks use surface/workspace/conversation identity fields directly. */
@@ -20,10 +24,17 @@ export type FastAgentPlatformEventHandling = 'default' | 'present_only';
 
 export type FastAgentPlatformEventKind = 'delegated_task' | 'automation';
 
+export type FastAgentSuggestedTask = {
+  title: string;
+  brief: string;
+};
+
 export type FastAgentReply = {
   purpose: 'ack' | 'progress' | 'closeout' | 'clarification';
   message: string;
   imageArtifactIds?: string[];
+  /** Launchable follow-ups attached to a Fast automation report. */
+  suggestions?: FastAgentSuggestedTask[];
   /** True for the parent-owned task kickoff. Deliverers must treat anything
    * short of a visible, durable post (including deliberate suppression) as a
    * failure so the launch gate never opens without its kickoff. */
@@ -42,6 +53,7 @@ export type FastAgentReaction = {
 
 export type LaunchFastAgentTask = (params: {
   prompt: string;
+  images?: string[];
   environmentId: string | null;
   model?: string | null;
   parentSessionId: string;

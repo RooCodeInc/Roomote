@@ -91,10 +91,12 @@ export type NonTaskInferenceTrackingInput = {
   surface: string;
   userId?: string | null;
   taskId?: string | null;
+  fastConversationId?: string | null;
   provider?: string;
 };
 
 export const NON_TASK_INFERENCE_SURFACES = {
+  brainSynthesis: 'brain_synthesis',
   chatAudioTranscription: 'chat_audio_transcription',
   chatVideoDescription: 'chat_video_description',
   customAutomationScheduleResolution: 'custom_automation_schedule_resolution',
@@ -359,6 +361,9 @@ async function recordNonTaskOpenCodeUsage(
       usageType: 'inference',
       eventKey: `non-task:${params.surface}:${harnessSessionId}:${messageId}`,
       taskId: params.taskId ?? null,
+      ...(params.fastConversationId
+        ? { fastConversationId: params.fastConversationId }
+        : {}),
       userId: params.userId ?? null,
       harnessSessionId,
       messageId,

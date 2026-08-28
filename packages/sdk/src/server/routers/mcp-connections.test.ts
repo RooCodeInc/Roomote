@@ -31,7 +31,7 @@ const {
   mockDesc,
   mockFindCustomServers,
   mockFindConnectionFirst,
-  mockIsBrainProviderConfigured,
+  mockIsBrainEnabled,
 } = vi.hoisted(() => {
   const mockOrderBy = vi.fn();
   const mockWhere = vi.fn(() => ({
@@ -76,9 +76,7 @@ const {
     mockFindConnectionFirst: vi.fn<(...args: unknown[]) => Promise<unknown>>(
       async () => undefined,
     ),
-    mockIsBrainProviderConfigured: vi.fn<() => Promise<boolean>>(
-      async () => false,
-    ),
+    mockIsBrainEnabled: vi.fn<() => Promise<boolean>>(async () => false),
   };
 });
 
@@ -128,7 +126,7 @@ vi.mock('@roomote/db/server', () => ({
   isNull: mockIsNull,
   isNotNull: vi.fn((column: unknown) => ({ type: 'isNotNull', column })),
   inArray: mockInArray,
-  isBrainProviderConfigured: mockIsBrainProviderConfigured,
+  isBrainEnabled: mockIsBrainEnabled,
 }));
 
 vi.mock('@roomote/db/encryption', () => ({
@@ -235,7 +233,7 @@ describe('mcpConnectionsRouter.getMcpServerConfigs', () => {
     vi.clearAllMocks();
     mockEnv.R_CURATED_INTEGRATIONS_DISABLED = false;
     mockEnv.R_GBRAIN_URL = undefined;
-    mockIsBrainProviderConfigured.mockResolvedValue(false);
+    mockIsBrainEnabled.mockResolvedValue(false);
     mockFindTaskRun.mockResolvedValue({
       actingUserId: null,
     });
@@ -286,7 +284,7 @@ describe('mcpConnectionsRouter.getMcpServerConfigs', () => {
 
   it('delivers the Brain when an explicit Brain provider key is configured', async () => {
     mockEnv.R_GBRAIN_URL = 'http://gbrain:8931';
-    mockIsBrainProviderConfigured.mockResolvedValue(true);
+    mockIsBrainEnabled.mockResolvedValue(true);
 
     const result = await createCaller(
       'https://api.preview.roomote.run/trpc/mcpConnections.getMcpServerConfigs',
@@ -303,7 +301,7 @@ describe('mcpConnectionsRouter.getMcpServerConfigs', () => {
     // neither can mean an operator turned the Brain on. Delivering here would
     // point every agent's required preflight at a Brain nobody enabled.
     mockEnv.R_GBRAIN_URL = 'http://gbrain:8931';
-    mockIsBrainProviderConfigured.mockResolvedValue(false);
+    mockIsBrainEnabled.mockResolvedValue(false);
 
     const result = await createCaller(
       'https://api.preview.roomote.run/trpc/mcpConnections.getMcpServerConfigs',
@@ -314,7 +312,7 @@ describe('mcpConnectionsRouter.getMcpServerConfigs', () => {
 
   it('never delivers the Brain without an address to proxy to', async () => {
     mockEnv.R_GBRAIN_URL = undefined;
-    mockIsBrainProviderConfigured.mockResolvedValue(true);
+    mockIsBrainEnabled.mockResolvedValue(true);
 
     const result = await createCaller(
       'https://api.preview.roomote.run/trpc/mcpConnections.getMcpServerConfigs',

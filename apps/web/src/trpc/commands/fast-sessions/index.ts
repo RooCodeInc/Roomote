@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { after } from 'next/server';
 
 import {
   acquireFastAgentTurnLock,
@@ -12,7 +13,12 @@ import {
   resolveUserMcpServerConfigs,
   type FastAgentSurfaceReplyDelivery,
 } from '@roomote/sdk/server';
-import { db, eq, fastAgentConversations } from '@roomote/db/server';
+import {
+  db,
+  eq,
+  fastAgentConversations,
+  getSessionForFastConversation,
+} from '@roomote/db/server';
 import {
   formatErrorForLog,
   getUserDisplayName,
@@ -20,7 +26,10 @@ import {
 } from '@roomote/types';
 
 import type { UserAuthSuccess } from '@/types';
-import { findAccessibleFastSession } from '@/lib/server/fast-sessions';
+import {
+  findAccessibleFastSession,
+  getFastSessionTasks,
+} from '@/lib/server/fast-sessions';
 
 /**
  * Persist the session's model settings when the caller sent an explicit
@@ -74,31 +83,35 @@ type WebFastAgentConversation = {
   conversationId: string;
 };
 
+type WebFastAgentTurnInput = {
+  userId: string;
+  delivery: FastAgentSurfaceReplyDelivery;
+  question: string;
+  images?: string[];
+  attachmentTexts?: string[];
+  model?: string;
+  reasoningEffort?: ReasoningEffort;
+  senderDisplayName?: string;
+};
+
 /**
- * Run one web-initiated Fast turn. Fire-and-forget: the caller returns
- * immediately and the transcript view picks up canonical rows as the turn
- * persists them. The Redis turn lock serializes turns per conversation, so
- * queued replies simply wait their turn. The delivery's adapter routes agent
- * replies to the conversation's home surface (Slack/Discord threads for
- * sessions that live there; the canonical transcript alone for web).
+ * Run one web-initiated Fast turn after the caller's response is ready. The
+ * transcript view picks up canonical rows as the turn persists them. The Redis
+ * turn lock serializes turns per conversation, so queued replies simply wait
+ * their turn. The delivery's adapter routes agent replies to the conversation's
+ * home surface (Slack/Discord threads for sessions that live there; the
+ * canonical transcript alone for web).
  */
 async function runWebFastAgentTurn({
   userId,
   delivery,
   question,
   images,
+  attachmentTexts,
   model,
   reasoningEffort,
   senderDisplayName,
-}: {
-  userId: string;
-  delivery: FastAgentSurfaceReplyDelivery;
-  question: string;
-  images?: string[];
-  model?: string;
-  reasoningEffort?: ReasoningEffort;
-  senderDisplayName?: string;
-}): Promise<void> {
+}: WebFastAgentTurnInput): Promise<void> {
   const conversation = delivery.conversation;
   const release = await acquireFastAgentTurnLock({ conversation });
   if (!release) {
@@ -113,6 +126,7 @@ async function runWebFastAgentTurn({
     await answerFastAgentQuestion({
       question,
       images,
+      attachmentTexts,
       userId,
       apiBaseUrl,
       conversation,
@@ -140,15 +154,22 @@ async function runWebFastAgentTurn({
   }
 }
 
+export function scheduleWebFastAgentTurn(input: WebFastAgentTurnInput): void {
+  // Keep the server invocation alive after tRPC returns the session to the UI.
+  // A detached promise can be suspended between a retry notice and its timer.
+  after(() => runWebFastAgentTurn(input));
+}
+
 export async function startFastSessionCommand(
   auth: UserAuthSuccess,
   input: {
     text: string;
     images?: string[];
+    attachmentTexts?: string[];
     model?: string | null;
     reasoningEffort?: ReasoningEffort | null;
   },
-): Promise<{ sessionId: string }> {
+): Promise<{ sessionId: string; fastConversationId?: string }> {
   const conversation: WebFastAgentConversation = {
     surface: 'web',
     workspaceId: auth.userId,
@@ -164,7 +185,7 @@ export async function startFastSessionCommand(
     reasoningEffort: null,
   });
 
-  void runWebFastAgentTurn({
+  scheduleWebFastAgentTurn({
     userId: auth.userId,
     delivery: {
       conversation,
@@ -178,11 +199,23 @@ export async function startFastSessionCommand(
     },
     question: input.text,
     images: input.images,
+    attachmentTexts: input.attachmentTexts,
     model: settings.model,
     reasoningEffort: settings.reasoningEffort,
   });
 
-  return { sessionId: session.id };
+  const unifiedSession = await getSessionForFastConversation(db, session.id);
+  return {
+    sessionId: unifiedSession?.id ?? session.id,
+    fastConversationId: session.id,
+  };
+}
+
+export async function getFastSessionTasksCommand(
+  auth: UserAuthSuccess,
+  sessionId: string,
+) {
+  return getFastSessionTasks(auth, sessionId);
 }
 
 export async function replyToFastSessionCommand(
@@ -191,6 +224,7 @@ export async function replyToFastSessionCommand(
     sessionId: string;
     text: string;
     images?: string[];
+    attachmentTexts?: string[];
     model?: string | null;
     reasoningEffort?: ReasoningEffort | null;
   },
@@ -220,11 +254,12 @@ export async function replyToFastSessionCommand(
     );
   }
 
-  void runWebFastAgentTurn({
+  scheduleWebFastAgentTurn({
     userId: auth.userId,
     delivery,
     question: input.text,
     images: input.images,
+    attachmentTexts: input.attachmentTexts,
     model: settings.model,
     reasoningEffort: settings.reasoningEffort,
     ...(senderDisplayName ? { senderDisplayName } : {}),

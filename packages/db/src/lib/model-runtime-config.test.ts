@@ -71,9 +71,13 @@ vi.mock('../schema', () => ({
 }));
 
 import {
+  invalidateBrainEnabledCache,
+  isBrainEnabled,
   isBrainProviderConfigured,
   resetBrainProviderConfiguredCache,
+  resolveBrainEnabledState,
   resolveEffectiveModelRuntimeEnv,
+  resolveModelProviderEnvValue,
   resolveSandboxModelRuntimeEnv,
 } from './model-runtime-config';
 import { TASK_MODEL_ROLE_DESCRIPTORS, TASK_MODEL_ROLES } from '@roomote/types';
@@ -1153,6 +1157,168 @@ describe('resolveEffectiveModelRuntimeEnv', () => {
   });
 });
 
+describe('managed Roomote inference key', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockDecryptSecrets.mockImplementation(async (value) => value);
+    mockEnvironmentVariablesFindMany.mockResolvedValue([]);
+    mockResolveGitHubCopilotOpenCodeAuthContent.mockResolvedValue(null);
+    mockResolveOpenCodeAuthContent.mockResolvedValue(null);
+    mockIsChatGptSubscriptionFastModeEnabled.mockResolvedValue(false);
+    mockGetFreshXaiAccessToken.mockResolvedValue(null);
+  });
+
+  it('advertises Roomote inference as gateway-served without leaking its key', async () => {
+    mockDeploymentSettingsFindFirst.mockResolvedValue({
+      runtimeModelConfig: { roomoteModel: 'roomote/openai/gpt-5.6-luna' },
+      taskModelSettings: null,
+    });
+
+    const env = await resolveSandboxModelRuntimeEnv({
+      runtimeEnv: {},
+      deploymentEnvVars: { R_TRIAL_OPENROUTER_API_KEY: 'sk-trial' },
+    });
+
+    expect(env.R_INFERENCE_GATEWAY_KEYS?.split(',')).toContain(
+      'R_TRIAL_OPENROUTER_API_KEY',
+    );
+    expect(env).not.toHaveProperty('OPENROUTER_API_KEY');
+    expect(env).not.toHaveProperty('R_TRIAL_OPENROUTER_API_KEY');
+    expect(Object.values(env)).not.toContain('sk-trial');
+  });
+
+  it('keeps an unavailable Roomote provider on the gateway for an actionable failure', async () => {
+    mockDeploymentSettingsFindFirst.mockResolvedValue({
+      runtimeModelConfig: { roomoteModel: 'roomote/openai/gpt-5.6-luna' },
+      taskModelSettings: null,
+    });
+
+    const env = await resolveSandboxModelRuntimeEnv({
+      runtimeEnv: {},
+      deploymentEnvVars: {},
+    });
+
+    expect(env.R_INFERENCE_GATEWAY_KEYS?.split(',')).toContain(
+      'R_TRIAL_OPENROUTER_API_KEY',
+    );
+    expect(env).not.toHaveProperty('R_TRIAL_OPENROUTER_API_KEY');
+  });
+
+  it('emits per-model costs for the sandbox from catalog metadata', async () => {
+    mockDeploymentSettingsFindFirst.mockResolvedValue({
+      runtimeModelConfig: { roomoteModel: 'roomote/openai/gpt-5.6-luna' },
+      taskModelSettings: {
+        models: [
+          {
+            id: 'roomote/openai/gpt-5.6-luna',
+            displayName: 'GPT 5.6 Luna',
+            family: 'GPT',
+            metadata: {
+              contextWindow: 400_000,
+              inputTypes: ['text'],
+              inputPricePerToken: 0.000002,
+              outputPricePerToken: 0.00001,
+              lastRefreshedAt: '2026-08-27T00:00:00.000Z',
+            },
+          },
+        ],
+        allowedModelIds: ['roomote/openai/gpt-5.6-luna'],
+        defaultModelId: 'roomote/openai/gpt-5.6-luna',
+      },
+    });
+
+    const env = await resolveSandboxModelRuntimeEnv({
+      runtimeEnv: {},
+      deploymentEnvVars: { R_TRIAL_OPENROUTER_API_KEY: 'sk-trial' },
+    });
+
+    expect(JSON.parse(env.R_TASK_MODEL_COSTS ?? '{}')).toEqual({
+      'roomote/openai/gpt-5.6-luna': { input: 2, output: 10 },
+    });
+    expect(JSON.parse(env.R_TASK_MODEL_CONTEXT_WINDOWS ?? '{}')).toEqual({
+      'roomote/openai/gpt-5.6-luna': 400_000,
+    });
+  });
+
+  it('materializes the stored key on the control plane for Roomote models', async () => {
+    mockDeploymentSettingsFindFirst.mockResolvedValue({
+      runtimeModelConfig: { roomoteModel: 'roomote/openai/gpt-5.6-luna' },
+      taskModelSettings: null,
+    });
+
+    const env = await resolveEffectiveModelRuntimeEnv({
+      runtimeEnv: {},
+      deploymentEnvVars: { R_TRIAL_OPENROUTER_API_KEY: 'sk-trial' },
+    });
+
+    expect(env.R_TRIAL_OPENROUTER_API_KEY).toBe('sk-trial');
+    expect(env).not.toHaveProperty('OPENROUTER_API_KEY');
+  });
+
+  it('never materializes the Roomote key from the process environment', async () => {
+    // The hosting-injected variable is a delivery mechanism only: setup
+    // imports it into Settings storage, and deleting that stored key must
+    // disable the provider even while hosting keeps injecting the variable.
+    mockDeploymentSettingsFindFirst.mockResolvedValue({
+      runtimeModelConfig: { roomoteModel: 'roomote/openai/gpt-5.6-luna' },
+      taskModelSettings: null,
+    });
+
+    const env = await resolveEffectiveModelRuntimeEnv({
+      runtimeEnv: { R_TRIAL_OPENROUTER_API_KEY: 'sk-trial' },
+      deploymentEnvVars: {},
+    });
+
+    expect(env).not.toHaveProperty('R_TRIAL_OPENROUTER_API_KEY');
+  });
+
+  it('does not materialize an unrelated user-provided OpenRouter key', async () => {
+    mockDeploymentSettingsFindFirst.mockResolvedValue({
+      runtimeModelConfig: { roomoteModel: 'roomote/openai/gpt-5.6-luna' },
+      taskModelSettings: null,
+    });
+
+    const env = await resolveEffectiveModelRuntimeEnv({
+      runtimeEnv: {},
+      deploymentEnvVars: {
+        R_TRIAL_OPENROUTER_API_KEY: 'sk-trial',
+        OPENROUTER_API_KEY: 'sk-saved',
+      },
+    });
+
+    expect(env.R_TRIAL_OPENROUTER_API_KEY).toBe('sk-trial');
+    expect(env).not.toHaveProperty('OPENROUTER_API_KEY');
+  });
+
+  it('resolveModelProviderEnvValue resolves the Roomote key from storage only', async () => {
+    // The runtime env value is hosting's delivery mechanism, not a live
+    // credential: only the imported Settings row counts.
+    await expect(
+      resolveModelProviderEnvValue(['R_TRIAL_OPENROUTER_API_KEY'], {
+        runtimeEnv: {
+          R_TRIAL_OPENROUTER_API_KEY: 'sk-runtime',
+        },
+      }),
+    ).resolves.toBeUndefined();
+
+    mockEnvironmentVariablesFindMany.mockResolvedValue([
+      { name: 'R_TRIAL_OPENROUTER_API_KEY', value: 'sk-saved' },
+    ]);
+    await expect(
+      resolveModelProviderEnvValue(['R_TRIAL_OPENROUTER_API_KEY'], {
+        runtimeEnv: {},
+      }),
+    ).resolves.toBe('sk-saved');
+
+    mockEnvironmentVariablesFindMany.mockResolvedValue([]);
+    await expect(
+      resolveModelProviderEnvValue(['OPENROUTER_API_KEY'], {
+        runtimeEnv: { R_TRIAL_OPENROUTER_API_KEY: 'sk-trial' },
+      }),
+    ).resolves.toBeUndefined();
+  });
+});
+
 describe('isBrainProviderConfigured', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -1206,5 +1372,79 @@ describe('isBrainProviderConfigured', () => {
     expect(
       mockEnvironmentVariablesFindMany.mock.calls.length,
     ).toBeLessThanOrEqual(1);
+  });
+});
+
+describe('isBrainEnabled', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.unstubAllEnvs();
+    invalidateBrainEnabledCache();
+    resetBrainProviderConfiguredCache();
+    mockDecryptSecrets.mockImplementation(async (value) => value);
+    mockEnvironmentVariablesFindMany.mockResolvedValue([]);
+    mockDeploymentSettingsFindFirst.mockResolvedValue(undefined);
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    invalidateBrainEnabledCache();
+    resetBrainProviderConfiguredCache();
+  });
+
+  it('is off with no stored choice and no legacy key', async () => {
+    await expect(resolveBrainEnabledState()).resolves.toEqual({
+      enabled: false,
+      fromLegacyKey: true,
+    });
+  });
+
+  it('falls back to the legacy explicit Brain key when no choice is stored', async () => {
+    vi.stubEnv('R_BRAIN_OPENROUTER_API_KEY', 'sk-or-brain');
+
+    await expect(resolveBrainEnabledState()).resolves.toEqual({
+      enabled: true,
+      fromLegacyKey: true,
+    });
+  });
+
+  it('treats a missing brainEnabled column value as no stored choice', async () => {
+    // Rows written before the column existed select as null.
+    mockDeploymentSettingsFindFirst.mockResolvedValue({ brainEnabled: null });
+    vi.stubEnv('R_BRAIN_OPENAI_API_KEY', 'sk-brain');
+
+    await expect(isBrainEnabled()).resolves.toBe(true);
+  });
+
+  it('lets an explicit stored choice win over the legacy key in both directions', async () => {
+    mockDeploymentSettingsFindFirst.mockResolvedValue({ brainEnabled: false });
+    vi.stubEnv('R_BRAIN_OPENAI_API_KEY', 'sk-brain');
+
+    await expect(resolveBrainEnabledState()).resolves.toEqual({
+      enabled: false,
+      fromLegacyKey: false,
+    });
+
+    invalidateBrainEnabledCache();
+    mockDeploymentSettingsFindFirst.mockResolvedValue({ brainEnabled: true });
+    vi.unstubAllEnvs();
+
+    await expect(resolveBrainEnabledState()).resolves.toEqual({
+      enabled: true,
+      fromLegacyKey: false,
+    });
+  });
+
+  it('caches the answer until invalidated', async () => {
+    mockDeploymentSettingsFindFirst.mockResolvedValue({ brainEnabled: true });
+
+    await expect(isBrainEnabled()).resolves.toBe(true);
+    await expect(isBrainEnabled()).resolves.toBe(true);
+    expect(mockDeploymentSettingsFindFirst).toHaveBeenCalledTimes(1);
+
+    mockDeploymentSettingsFindFirst.mockResolvedValue({ brainEnabled: false });
+    invalidateBrainEnabledCache();
+
+    await expect(isBrainEnabled()).resolves.toBe(false);
   });
 });

@@ -18,6 +18,9 @@ describe('Brain MCP instructions', () => {
     expect(BRAIN_MCP_READ_INSTRUCTIONS).toContain(
       "never expose Brain's `source` field or other internal provenance metadata",
     );
+    expect(BRAIN_MCP_READ_INSTRUCTIONS).toContain(
+      'When recalled context materially shapes the path or approach you choose, casually and concisely mention the specific insight that informed it; do not merely say that memory or history was helpful',
+    );
     expect(BRAIN_MCP_INSTRUCTIONS).toContain('save_task_memory');
   });
 });
@@ -29,6 +32,12 @@ describe('resolveBrainNamespaceId', () => {
     );
     expect(resolveBrainNamespaceId('people/roomote-member-abc')).toBe('people');
     expect(resolveBrainNamespaceId('daily/digests/2026-01-02')).toBe('daily');
+    expect(resolveBrainNamespaceId('linear/org/issues/issue-id')).toBe(
+      'linear',
+    );
+    expect(resolveBrainNamespaceId('discord/123/456/2026-01-02/000')).toBe(
+      'discord',
+    );
   });
 
   it('does not invent a namespace for an unrecognised prefix', () => {
@@ -53,6 +62,9 @@ describe('resolveBrainSourceIdForCollector', () => {
     expect(
       resolveBrainSourceIdForCollector('github-issues:occurrence-date-v3'),
     ).toBe('github-issues');
+    expect(
+      resolveBrainSourceIdForCollector('linear-issues:entity-census-v1'),
+    ).toBe('linear-issues');
   });
 
   it('folds a fanned-out collector’s per-partition rows into one source', () => {
@@ -64,6 +76,11 @@ describe('resolveBrainSourceIdForCollector', () => {
     expect(resolveBrainSourceIdForCollector('notion-pages:incremental')).toBe(
       'notion-pages',
     );
+    expect(
+      resolveBrainSourceIdForCollector(
+        'discord-public-channels:entity-timeline-v1:123/456',
+      ),
+    ).toBe('discord-public-channels');
   });
 
   it('claims nothing for state rows that are not a source', () => {

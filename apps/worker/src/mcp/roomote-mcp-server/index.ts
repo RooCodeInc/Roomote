@@ -48,7 +48,12 @@ import {
   handleUpdateEnvironment,
 } from './create-environment.js';
 import { handleRequestEnvironmentVariables } from './request-environment-variables.js';
-import { handleShowWidget } from './show-widget.js';
+import {
+  handleShowWidget,
+  SHOW_WIDGET_FIXED_CANVAS_GUIDANCE,
+  SHOW_WIDGET_HEIGHT_DESCRIPTION,
+  SHOW_WIDGET_THEME_GUIDANCE,
+} from './show-widget.js';
 import { handleSendChatReply } from './send-chat-reply.js';
 import { handleRelayFastAgentChatReply } from './relay-fast-agent-chat-reply.js';
 import {
@@ -165,9 +170,10 @@ roomoteMcpServer.registerTool(
       'Use it when a structured or visual presentation is clearer than plain text, or to demonstrate how something would look. ' +
       'Examples include mock UI, status cards, tables, annotated plans, and other visual examples. ' +
       'HTML, CSS, and inline SVG are displayed in a sandboxed iframe with scripts disabled and network requests blocked. ' +
-      'Prefer semantic HTML with the built-in widget classes (`rw-card`, `rw-stack`, `rw-row`, `rw-grid`, `rw-stat`, `rw-badge`, `rw-callout`, `rw-muted`) so the widget follows the host task theme. ' +
-      'For custom CSS, use the provided `--rw-*` theme variables instead of hard-coded colors; omit css when the built-in styles are sufficient. ' +
-      'Keep widgets compact enough to fit without scrolling: use concise labels and a small number of cards, rows, or table entries, and choose a height that fully fits the expected content. Use ordinary prose or an artifact for long content. ' +
+      SHOW_WIDGET_THEME_GUIDANCE +
+      ' ' +
+      SHOW_WIDGET_FIXED_CANVAS_GUIDANCE +
+      ' ' +
       'Do not use it for ordinary prose or collecting user input; use request_user_input when you need answers. ' +
       'Optional textFallback is delivered to the originating chat surface (Slack/Teams/Telegram/Discord) when the task was started from chat.',
     inputSchema: {
@@ -184,12 +190,7 @@ roomoteMcpServer.registerTool(
         .describe(
           'Optional extra CSS injected after the built-in widget defaults. Prefer --rw-background, --rw-surface, --rw-surface-muted, --rw-text, --rw-text-muted, --rw-border, --rw-primary, --rw-accent, --rw-success, --rw-warning, and --rw-danger instead of hard-coded colors.',
         ),
-      height: z
-        .number()
-        .optional()
-        .describe(
-          'Optional widget iframe height in pixels (clamped to 120-800; default 320). Choose the smallest height that fully fits the expected content without a vertical scrollbar.',
-        ),
+      height: z.number().optional().describe(SHOW_WIDGET_HEIGHT_DESCRIPTION),
       textFallback: z
         .string()
         .optional()
@@ -763,10 +764,10 @@ roomoteMcpServer.registerTool(
       'when an open PR/MR already exists for sourceBranch, targetBranch may be omitted and defaults to its current base. ' +
       'Use action "get_pull_request" to read PR/MR details (state, branches, head/base SHAs), ' +
       '"list_pull_requests" to list open PRs/MRs in a repository (summaries with branches, labels, and mergeability where the provider exposes it), and ' +
-      '"list_pull_request_comments" to read review threads (with resolution state) and issue comments. ' +
+      '"list_pull_request_comments" to read review threads, top-level reviews, and issue comments. ' +
       'Use "reply_to_pull_request_comment" to answer a review thread, "create_pull_request_comment" for a top-level comment, ' +
       '"create_pull_request_review_comment" for a new inline comment anchored to a file and line of the current diff, ' +
-      '"resolve_pull_request_thread" to resolve or reopen a thread, and "submit_pull_request_review" to approve, request changes, or leave a review comment. ' +
+      '"resolve_pull_request_thread" to resolve or reopen a thread, "submit_pull_request_review" to approve, request changes, or leave a review comment, and "dismiss_pull_request_review" to dismiss a GitHub review. ' +
       'Provider gaps are reported as warnings with applied:false instead of errors. ' +
       'For the PR diff, use local git against the returned SHAs instead of a provider CLI. ' +
       'The platform resolves the current task source-control provider and keeps provider tokens server-side.',
@@ -782,13 +783,14 @@ roomoteMcpServer.registerTool(
           'create_pull_request_review_comment',
           'resolve_pull_request_thread',
           'submit_pull_request_review',
+          'dismiss_pull_request_review',
           'update_pull_request_comment',
           'get_issue',
           'list_issue_comments',
           'create_issue_comment',
         ])
         .describe(
-          'get_issue reads a plain issue; list_issue_comments reads its comments; create_issue_comment posts a top-level issue comment. create_or_update_pull_request creates or refreshes the PR/MR for a branch; get_pull_request reads PR/MR details; list_pull_requests lists open PRs/MRs in the repository; list_pull_request_comments reads review threads and issue comments; reply_to_pull_request_comment answers a review thread; create_pull_request_comment posts a top-level PR comment; create_pull_request_review_comment posts one new inline review comment anchored to a file and line of the current diff (one finding per call); resolve_pull_request_thread resolves or reopens a thread; submit_pull_request_review approves, requests changes, or leaves a review comment; update_pull_request_comment edits an existing comment in place.',
+          'get_issue reads a plain issue; list_issue_comments reads its comments; create_issue_comment posts a top-level issue comment. create_or_update_pull_request creates or refreshes the PR/MR for a branch; get_pull_request reads PR/MR details; list_pull_requests lists open PRs/MRs in the repository; list_pull_request_comments reads review threads, top-level reviews, and issue comments; reply_to_pull_request_comment answers a review thread; create_pull_request_comment posts a top-level PR comment; create_pull_request_review_comment posts one new inline review comment anchored to a file and line of the current diff (one finding per call); resolve_pull_request_thread resolves or reopens a thread; submit_pull_request_review approves, requests changes, or leaves a review comment; dismiss_pull_request_review dismisses a GitHub review; update_pull_request_comment edits an existing comment in place.',
         ),
       repositoryFullName: z
         .string()
@@ -842,6 +844,12 @@ roomoteMcpServer.registerTool(
         .optional()
         .describe(
           'Required for update_pull_request_comment: the comment id from list_pull_request_comments or a prior write result.',
+        ),
+      reviewId: z
+        .string()
+        .optional()
+        .describe(
+          'Required for dismiss_pull_request_review: the review id from list_pull_request_comments.',
         ),
       resolved: z
         .boolean()
@@ -913,7 +921,7 @@ roomoteMcpServer.registerTool(
         .string()
         .optional()
         .describe(
-          'The text content: the PR/MR description for create_or_update_pull_request, the comment text for issue/PR reply or create actions, or the optional review body for submit_pull_request_review.',
+          'The text content: the PR/MR description for create_or_update_pull_request, the comment text for issue/PR reply or create actions, the optional review body for submit_pull_request_review, or the required dismissal reason for dismiss_pull_request_review.',
         ),
       labels: z
         .array(z.string())
@@ -959,6 +967,7 @@ roomoteMcpServer.registerTool(
         limit: params.limit,
         threadId: params.threadId,
         commentId: params.commentId,
+        reviewId: params.reviewId,
         resolved: params.resolved,
         reviewEvent: params.reviewEvent,
         path: params.path,

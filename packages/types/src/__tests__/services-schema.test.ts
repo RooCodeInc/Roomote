@@ -69,24 +69,12 @@ describe('Service Schema', () => {
       expect(serviceDefaultPorts.redis7).toBe(6379);
       expect(serviceDefaultPorts.postgres15).toBe(5432);
       expect(serviceDefaultPorts.postgres16).toBe(5432);
+      expect(serviceDefaultPorts.postgres17).toBe(5432);
       expect(serviceDefaultPorts.mysql8).toBe(3306);
       expect(serviceDefaultPorts.mariadb10).toBe(3306);
-    });
-
-    it('covers all tested service names', () => {
-      const serviceNames: ServiceName[] = [
-        'redis6',
-        'redis7',
-        'postgres15',
-        'postgres16',
-        'mysql8',
-        'mariadb10',
-      ];
-
-      for (const name of serviceNames) {
-        expect(serviceDefaultPorts[name]).toBeDefined();
-        expect(typeof serviceDefaultPorts[name]).toBe('number');
-      }
+      expect(serviceDefaultPorts.clickhouse).toBe(9000);
+      expect(serviceDefaultPorts.codeserver).toBe(0);
+      expect(serviceDefaultPorts.aws).toBe(0);
     });
   });
 });
