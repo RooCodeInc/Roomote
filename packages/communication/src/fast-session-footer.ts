@@ -3,14 +3,80 @@ import { Env } from '@roomote/env';
 import {
   buildThreadReplyFooterText,
   formatMarkdownLink,
+  type ThreadReplyLinkedPr,
 } from './chat-messages';
 import { chunkDiscordMessage } from './discord-provider';
+import { resolveThreadReplyFooterContext } from './thread-reply-footer-context';
 
 export type FastSessionFooterProvider =
   | 'slack'
   | 'discord'
   | 'teams'
   | 'telegram';
+
+export type FastSessionPullRequestReference = {
+  number: number | null;
+  url: string;
+  status?: string | null;
+};
+
+export type FastSessionReplyFooterContext = {
+  linkedPrs: ThreadReplyLinkedPr[];
+  livePreviewUrl: string | null;
+};
+
+const TERMINAL_PULL_REQUEST_STATUSES = new Set(['closed', 'merged']);
+
+function collectFastSessionLinkedPrs(params: {
+  pullRequest?: FastSessionPullRequestReference | null;
+  pullRequests?: readonly FastSessionPullRequestReference[];
+  linkedPrs?: readonly ThreadReplyLinkedPr[];
+}): ThreadReplyLinkedPr[] {
+  const directPrs = [
+    ...(params.pullRequest ? [params.pullRequest] : []),
+    ...(params.pullRequests ?? []),
+  ].flatMap((pullRequest) =>
+    typeof pullRequest.number === 'number' &&
+    !TERMINAL_PULL_REQUEST_STATUSES.has(pullRequest.status ?? '')
+      ? [{ prNumber: pullRequest.number, prUrl: pullRequest.url }]
+      : [],
+  );
+  const uniquePrs = new Map<string, ThreadReplyLinkedPr>();
+
+  for (const pullRequest of [...directPrs, ...(params.linkedPrs ?? [])]) {
+    uniquePrs.set(pullRequest.prUrl, pullRequest);
+  }
+
+  return [...uniquePrs.values()];
+}
+
+export async function resolveFastSessionReplyFooterContext(params: {
+  taskIds?: readonly string[];
+  pullRequest?: FastSessionPullRequestReference | null;
+  pullRequests?: readonly FastSessionPullRequestReference[];
+}): Promise<FastSessionReplyFooterContext> {
+  const taskIds = [...new Set(params.taskIds ?? [])];
+  const contexts = await Promise.all(
+    taskIds.map((taskId) =>
+      resolveThreadReplyFooterContext({
+        taskId,
+        prRepo: null,
+        prNumber: null,
+      }),
+    ),
+  );
+
+  return {
+    linkedPrs: collectFastSessionLinkedPrs({
+      pullRequest: params.pullRequest,
+      pullRequests: params.pullRequests,
+      linkedPrs: contexts.flatMap((context) => context.linkedPrs),
+    }),
+    livePreviewUrl:
+      contexts.find((context) => context.livePreviewUrl)?.livePreviewUrl ??
+      null,
+  };
+}
 
 export function buildFastSessionUrl(
   provider: FastSessionFooterProvider,
@@ -30,13 +96,17 @@ export function buildFastSessionUrl(
 export function buildFastSessionReplyFooterText(params: {
   provider: FastSessionFooterProvider;
   sessionId: string;
+  pullRequest?: FastSessionPullRequestReference | null;
+  pullRequests?: readonly FastSessionPullRequestReference[];
+  linkedPrs?: readonly ThreadReplyLinkedPr[];
+  livePreviewUrl?: string | null;
 }): string {
   const sessionUrl = buildFastSessionUrl(params.provider, params.sessionId);
 
   return buildThreadReplyFooterText({
     taskUrl: sessionUrl,
-    linkedPrs: [],
-    livePreviewUrl: null,
+    linkedPrs: collectFastSessionLinkedPrs(params),
+    livePreviewUrl: params.livePreviewUrl,
     explicitMentionRequired: false,
     ...(params.provider === 'slack'
       ? { formatLink: (label: string, url: string) => `<${url}|${label}>` }
