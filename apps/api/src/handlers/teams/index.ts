@@ -1969,6 +1969,7 @@ teams.post('/', async (c) => {
             ? { threadId: metadata.communicationThreadId }
             : {}),
           ...(replyToMessageId ? { replyToMessageId } : {}),
+          userId: mappedUserId,
         })
       : null;
   if (!fastSession && replyToMessageId) {
@@ -2274,14 +2275,15 @@ teams.post('/', async (c) => {
     }
 
     if (tenantId) {
+      const providerConversationId =
+        metadata.communicationThreadId ??
+        (activity.conversation.conversationType === 'personal'
+          ? fastChannelId
+          : queuedMessage.ts);
       const conversation = {
         surface: 'teams' as const,
         workspaceId: tenantId,
-        conversationId:
-          metadata.communicationThreadId ??
-          (activity.conversation.conversationType === 'personal'
-            ? fastChannelId
-            : queuedMessage.ts),
+        conversationId: `${providerConversationId}:user:${mappedUserId}`,
         replyTarget: {
           channelId: fastChannelId,
           ...(metadata.communicationThreadId

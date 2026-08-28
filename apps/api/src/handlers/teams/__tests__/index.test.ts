@@ -723,6 +723,7 @@ describe('Teams webhook handler', () => {
       channelId: '19:conversation@thread.v2',
       threadId: 'activity-root',
       replyToMessageId: 'fast-report-1',
+      userId: 'mapped-user-1',
     });
     expect(findTeamsConversationRouteMock).toHaveBeenCalledWith(
       '19:conversation@thread.v2',
@@ -1263,7 +1264,7 @@ describe('Teams webhook handler', () => {
       conversation: {
         surface: 'teams',
         workspaceId: 'tenant-1',
-        conversationId: 'activity-root',
+        conversationId: 'activity-root:user:mapped-user-1',
         replyTarget: {
           channelId: '19:conversation@thread.v2',
           threadId: 'activity-root',
@@ -1636,11 +1637,71 @@ describe('Teams webhook handler', () => {
       conversation: {
         surface: 'teams',
         workspaceId: 'tenant-1',
-        conversationId: 'a:personal-conversation',
+        conversationId: 'a:personal-conversation:user:mapped-user-1',
         replyTarget: { channelId: 'a:personal-conversation' },
       },
     });
     expect(enqueueTaskMock).not.toHaveBeenCalled();
+  });
+
+  it('creates separate Fast sessions for linked users in the same Teams thread', async () => {
+    findFirstMock.mockResolvedValue(null);
+    teamsUserMappingFindFirstMock
+      .mockResolvedValueOnce({ userId: 'mapped-user-1' })
+      .mockResolvedValueOnce({ userId: 'mapped-user-2' });
+    getFastSessionMock.mockImplementation(async ({ userId }) => ({
+      id: `session:${userId}`,
+    }));
+    const app = createApp();
+
+    const firstResponse = await app.request('/teams', {
+      method: 'POST',
+      headers: {
+        authorization: 'Bearer bot-framework-token',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify(createTeamsActivity()),
+    });
+    const secondResponse = await app.request('/teams', {
+      method: 'POST',
+      headers: {
+        authorization: 'Bearer bot-framework-token',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify(createTeamsActivity({ id: 'activity-3' })),
+    });
+
+    await expect(firstResponse.json()).resolves.toMatchObject({
+      fastDefaulted: true,
+    });
+    await expect(secondResponse.json()).resolves.toMatchObject({
+      fastDefaulted: true,
+    });
+    expect(getFastSessionMock).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        userId: 'mapped-user-1',
+        conversation: expect.objectContaining({
+          conversationId: 'activity-root:user:mapped-user-1',
+        }),
+      }),
+    );
+    expect(getFastSessionMock).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        userId: 'mapped-user-2',
+        conversation: expect.objectContaining({
+          conversationId: 'activity-root:user:mapped-user-2',
+        }),
+      }),
+    );
+    expect(continueFastReplyMock).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        sessionId: 'session:mapped-user-2',
+        userId: 'mapped-user-2',
+      }),
+    );
   });
 
   it('ignores channel messages without a bot mention when no active task run exists', async () => {

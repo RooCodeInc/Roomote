@@ -111,6 +111,80 @@ describe('Fast provider message bindings', () => {
     expect(session?.id).toBe(conversation.id);
   });
 
+  it('resolves a shared Teams thread to the requesting user session', async () => {
+    const suffix = crypto.randomUUID();
+    const route = {
+      surface: 'teams' as const,
+      workspaceId: `tenant:${suffix}`,
+      channelId: `conversation:${suffix}`,
+      threadId: `root:${suffix}`,
+    };
+    const first = await createFastConversation({
+      ...route,
+      conversationId: `first:${suffix}`,
+    });
+    const second = await createFastConversation({
+      ...route,
+      conversationId: `second:${suffix}`,
+    });
+
+    await expect(
+      findFastAgentSessionForProviderReply({
+        provider: 'teams',
+        workspaceId: route.workspaceId,
+        channelId: route.channelId,
+        threadId: route.threadId,
+        userId: second.user.id,
+      }),
+    ).resolves.toMatchObject({
+      id: second.conversation.id,
+      userId: second.user.id,
+    });
+    await expect(
+      findFastAgentSessionForProviderReply({
+        provider: 'teams',
+        workspaceId: route.workspaceId,
+        channelId: route.channelId,
+        threadId: route.threadId,
+        userId: first.user.id,
+      }),
+    ).resolves.toMatchObject({
+      id: first.conversation.id,
+      userId: first.user.id,
+    });
+  });
+
+  it('rejects a provider-message binding owned by another user', async () => {
+    const suffix = crypto.randomUUID();
+    const first = await createFastConversation({
+      surface: 'teams',
+      workspaceId: `tenant:${suffix}`,
+      conversationId: `first:${suffix}`,
+      channelId: `conversation:${suffix}`,
+      threadId: `root:${suffix}`,
+    });
+    const secondUser = await userFactory.create();
+    await recordFastAgentProviderMessage({
+      sessionId: first.conversation.id,
+      provider: 'teams',
+      workspaceId: `tenant:${suffix}`,
+      channelId: `conversation:${suffix}`,
+      threadId: `root:${suffix}`,
+      messageId: `message:${suffix}`,
+    });
+
+    await expect(
+      findFastAgentSessionForProviderReply({
+        provider: 'teams',
+        workspaceId: `tenant:${suffix}`,
+        channelId: `conversation:${suffix}`,
+        threadId: `root:${suffix}`,
+        replyToMessageId: `message:${suffix}`,
+        userId: secondUser.id,
+      }),
+    ).resolves.toBeNull();
+  });
+
   it('resolves a Teams personal-chat reply without treating replyToId as a session thread', async () => {
     const suffix = crypto.randomUUID();
     const { conversation } = await createFastConversation({

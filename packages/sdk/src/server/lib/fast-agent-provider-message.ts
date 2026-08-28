@@ -99,7 +99,7 @@ export async function recordFastAgentConversationMessageBestEffort(
 }
 
 export async function findFastAgentSessionForProviderReply(
-  input: ProviderRoute & { replyToMessageId?: string },
+  input: ProviderRoute & { replyToMessageId?: string; userId?: string },
 ): Promise<FastAgentConversationRecord | null> {
   let conversationId: string | null = null;
   let matchedProviderMessage = false;
@@ -125,6 +125,9 @@ export async function findFastAgentSessionForProviderReply(
         eq(fastAgentConversations.workspaceId, input.workspaceId),
         eq(fastAgentConversations.currentReplyChannelId, input.channelId),
         eq(fastAgentConversations.currentReplyThreadId, input.threadId),
+        ...(input.userId
+          ? [eq(fastAgentConversations.userId, input.userId)]
+          : []),
       ),
       columns: { id: true },
     });
@@ -139,6 +142,7 @@ export async function findFastAgentSessionForProviderReply(
     id: conversationId,
   });
   return session &&
+    (!input.userId || session.userId === input.userId) &&
     matchesProviderRoute(session, input, !matchedProviderMessage)
     ? session
     : null;
