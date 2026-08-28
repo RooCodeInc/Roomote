@@ -497,6 +497,7 @@ export async function finalizeGithubPrReviewComment({
   prNumber,
   commentId,
   terminalStatus,
+  signal,
 }: {
   gitHubToken: string;
   owner: string;
@@ -504,6 +505,7 @@ export async function finalizeGithubPrReviewComment({
   prNumber: number;
   commentId?: number | null;
   terminalStatus: string;
+  signal?: AbortSignal;
 }): Promise<{
   finalized: boolean;
   body?: string;
@@ -522,6 +524,7 @@ export async function finalizeGithubPrReviewComment({
       gitHubToken,
       repo: fullName,
       commentId: resolvedCommentId,
+      signal,
     });
   } catch {
     return { finalized: false };
@@ -542,6 +545,7 @@ export async function finalizeGithubPrReviewComment({
     repo,
     comment_id: resolvedCommentId,
     body: updatedBody,
+    ...(signal ? { request: { signal } } : {}),
   });
 
   return { finalized: true, body: updatedBody };

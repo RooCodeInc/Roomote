@@ -2354,6 +2354,50 @@ describe('finishRun', () => {
       );
     });
 
+    it('cancels an in-flight summary write when lifecycle ownership is lost', async () => {
+      vi.useFakeTimers();
+      mockRenewRedisLock.mockResolvedValueOnce('lost');
+      mockFindFirstRun.mockResolvedValue(
+        makeRun(
+          { payloadKind: TaskPayloadKind.GithubPrReview },
+          { workflow: 'pr_review', surface: 'github' },
+        ),
+      );
+      mockFindManyTaskPullRequests.mockResolvedValue([reviewPrRow]);
+      let markWriteStarted!: () => void;
+      const writeStarted = new Promise<void>((resolve) => {
+        markWriteStarted = resolve;
+      });
+      mockFinalizeGithubPrReviewComment.mockImplementationOnce(
+        ({ signal }: { signal: AbortSignal }) => {
+          markWriteStarted();
+          return new Promise((_, reject) => {
+            signal.addEventListener('abort', () => reject(signal.reason), {
+              once: true,
+            });
+          });
+        },
+      );
+
+      try {
+        const finishPromise = finishRun({
+          id: 1,
+          status: RunStatus.Completed,
+        });
+        await writeStarted;
+        await vi.advanceTimersByTimeAsync(40_000);
+        await finishPromise;
+
+        expect(mockFinalizeGithubPrReviewComment).toHaveBeenCalledWith(
+          expect.objectContaining({ signal: expect.any(AbortSignal) }),
+        );
+        expect(mockUpdateCheckRun).not.toHaveBeenCalled();
+        expect(mockReleaseRedisLock).toHaveBeenCalledOnce();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
     it('fails the check when the canonical review summary has findings', async () => {
       mockFindFirstRun.mockResolvedValue(
         makeRun(

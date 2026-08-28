@@ -765,6 +765,7 @@ async function cleanupGithubPrReviewArtifacts(
           owner,
           repo,
           check_run_id: checkRunId,
+          request: { signal: releaseLifecycleLock.signal },
         });
         releaseLifecycleLock.signal.throwIfAborted();
         const owningRunId = Number(
@@ -796,6 +797,7 @@ async function cleanupGithubPrReviewArtifacts(
             owner,
             repo,
             issue_number: prRow.prNumber,
+            request: { signal: releaseLifecycleLock.signal },
           });
           releaseLifecycleLock.signal.throwIfAborted();
 
@@ -856,6 +858,7 @@ async function cleanupGithubPrReviewArtifacts(
             prNumber: prRow.prNumber,
             commentId: prRow.githubReviewCommentId,
             terminalStatus,
+            signal: releaseLifecycleLock.signal,
           });
           releaseLifecycleLock.signal.throwIfAborted();
 
@@ -911,6 +914,7 @@ async function cleanupGithubPrReviewArtifacts(
                 title: checkResult.title,
                 summary: `${checkResult.summary} [Open the task](${taskUrl}).`,
               },
+              request: { signal: releaseLifecycleLock.signal },
             });
           } catch (error) {
             console.error(
