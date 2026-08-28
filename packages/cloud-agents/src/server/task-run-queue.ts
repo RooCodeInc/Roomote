@@ -48,6 +48,7 @@ import {
   db,
   deploymentSettings,
   ensureAutomationRowsOnce,
+  ensureSessionForTask,
   isChatGptSubscriptionConnected,
   createTaskWithRetry,
   markTaskStartParallelCountEndedAt,
@@ -69,6 +70,7 @@ import {
   recordSnapshotResumeEvent,
   resolveDefaultComputeProvider,
   resolveWorkspaceRepositoryProviders,
+  resolveWorkspaceSourceControlHost,
   sql,
 } from '@roomote/db/server';
 import { type Redis, getRedis } from '@roomote/redis';
@@ -1385,7 +1387,6 @@ async function enqueueFreshLaunch(
   const { task, initiator, workflow, surface, trigger } = input;
   const visibility: TaskVisibility = input.visibility ?? 'visible';
   const linkedUserId = getTaskInitiatorLinkedUserId(initiator);
-
   await assertUserIsNotDeleted(linkedUserId);
 
   const requestedExistingTask = input.existingTaskId
@@ -1637,6 +1638,14 @@ async function enqueueFreshLaunch(
         });
 
         if (activeRun) {
+          await ensureSessionForTask(tx, {
+            taskId: existingTask.id,
+            fastConversationId:
+              getFastAgentParentFromPayload(taskWithHarnessOverrides.payload)
+                ?.sessionId ?? null,
+            origin: 'follow_up',
+            existingTaskReused: true,
+          });
           return { taskRun: activeRun, createdRun: false, reusedTask: true };
         }
 
@@ -1685,6 +1694,20 @@ async function enqueueFreshLaunch(
         );
         taskId = createdTask.id;
       }
+
+      const fastParent = getFastAgentParentFromPayload(
+        taskWithHarnessOverrides.payload,
+      );
+      await ensureSessionForTask(tx, {
+        taskId,
+        fastConversationId: fastParent?.sessionId ?? null,
+        origin: fastParent
+          ? 'fast_delegation'
+          : existingTask
+            ? 'follow_up'
+            : 'direct_launch',
+        existingTaskReused: Boolean(existingTask),
+      });
 
       if (input.prLinkage) {
         const prLinkage = {
@@ -1801,6 +1824,15 @@ async function enqueueFreshLaunch(
   if (!createdRun) {
     return taskRun;
   }
+
+  const delegated = Boolean(
+    reusedTask ||
+    getFastAgentParentFromPayload(taskWithHarnessOverrides.payload),
+  );
+  void captureEvent(delegated ? 'session_task_delegated' : 'session_created', {
+    ...(linkedUserId ? { userId: linkedUserId } : {}),
+    properties: { surface, outcome: 'created' },
+  });
 
   if (shouldCaptureTaskCreatedEvent(taskRun.payloadKind)) {
     // Anonymous analytics (no-op unless enabled): task creation with
@@ -2042,14 +2074,43 @@ async function stampWorkspaceSourceControlProviders(
   payload: FreshTask['payload'],
   workspace: ReturnType<typeof resolveTaskWorkspace>,
 ): Promise<void> {
-  const repositoryProviders = await resolveWorkspaceRepositoryProviders(
-    db,
-    workspace,
-  );
+  const [repositoryProviders, workspaceHost] = await Promise.all([
+    resolveWorkspaceRepositoryProviders(db, workspace),
+    resolveWorkspaceSourceControlHost(db, workspace),
+  ]);
+  const isAggregateWorkspace =
+    workspace.type === 'repository_set' ||
+    workspace.type === 'all_repositories';
+  const requiresCompleteCoverage =
+    isAggregateWorkspace || workspace.type === 'environment';
+  const expectedRepositoryCount =
+    workspace.type === 'repository_set'
+      ? new Set(workspace.repositories).size
+      : undefined;
+
+  if (requiresCompleteCoverage) {
+    payload.repositoryProviders = repositoryProviders;
+  }
+
+  if (
+    requiresCompleteCoverage &&
+    (Object.keys(repositoryProviders).length === 0 ||
+      (expectedRepositoryCount !== undefined &&
+        Object.keys(repositoryProviders).length !== expectedRepositoryCount))
+  ) {
+    payload.sourceControlProvider = undefined;
+    payload.sourceControlHost = undefined;
+    return;
+  }
+
   const providers = Object.values(repositoryProviders);
   const spansProviders = new Set(providers).size > 1;
 
-  if (spansProviders) {
+  if (requiresCompleteCoverage && !spansProviders) {
+    payload.sourceControlHost = workspaceHost;
+  }
+
+  if (spansProviders && !requiresCompleteCoverage) {
     payload.repositoryProviders = repositoryProviders;
   }
 
@@ -2325,6 +2386,9 @@ function inheritSnapshotResumeFastAgentParent(
   const parent = getFastAgentParentFromPayload(sourcePayload);
   if (parent && !payload.fastAgentParent) {
     payload.fastAgentParent = parent;
+  }
+  if (parent && !payload.reportConsumer) {
+    payload.reportConsumer = 'orchestrator';
   }
 }
 

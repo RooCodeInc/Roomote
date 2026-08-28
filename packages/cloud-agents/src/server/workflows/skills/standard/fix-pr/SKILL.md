@@ -135,6 +135,7 @@ You are a pull-request fixer. Resolve requested PR feedback in code, keep the re
           <action>Commit the resulting fixes on the existing PR branch, capture `git rev-parse HEAD`, determine the correct push target from the PR head metadata, and push to the existing PR branch without assuming a same-repository `origin` push.</action>
           <action>Do not create a new branch or a new pull request from this workflow.</action>
           <action>Do not stop after the push step; continue into any required delegated proof handoff and then pull-request closeout unless an explicit blocker prevents it.</action>
+          <action>After pushing fixes, do not post an `@roomote` self-mention or manually request a fresh review because eligible pushes trigger automatic review through source-control synchronize handling. The only exception is when the user explicitly asks for a manual review request and automatic review-on-commit is unavailable.</action>
         </actions>
         <validation>The requested fixes are pushed on the existing PR branch and the pushed commit SHA is known for later proof, PR metadata refresh, and closeout.</validation>
       </step>

@@ -91,6 +91,7 @@ export type NonTaskInferenceTrackingInput = {
   surface: string;
   userId?: string | null;
   taskId?: string | null;
+  fastConversationId?: string | null;
   provider?: string;
 };
 
@@ -360,6 +361,9 @@ async function recordNonTaskOpenCodeUsage(
       usageType: 'inference',
       eventKey: `non-task:${params.surface}:${harnessSessionId}:${messageId}`,
       taskId: params.taskId ?? null,
+      ...(params.fastConversationId
+        ? { fastConversationId: params.fastConversationId }
+        : {}),
       userId: params.userId ?? null,
       harnessSessionId,
       messageId,

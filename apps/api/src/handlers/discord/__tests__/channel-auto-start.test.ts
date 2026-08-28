@@ -20,7 +20,6 @@ const mocks = vi.hoisted(() => ({
   createDirectMessage: vi.fn(),
   postMessage: vi.fn(),
   addReaction: vi.fn(),
-  hasFastDefault: vi.fn(),
   processFast: vi.fn(),
 }));
 
@@ -39,10 +38,6 @@ vi.mock('@roomote/db/server', () => ({
 
 vi.mock('@roomote/sdk/server', () => ({
   findDiscordMappedUserId: mocks.findMappedUserId,
-}));
-
-vi.mock('../../fast-agent-entry.js', () => ({
-  hasCommunicationsFastModeDefault: mocks.hasFastDefault,
 }));
 
 vi.mock('../../shared/channel-launch-gate.js', async (importOriginal) => ({
@@ -118,6 +113,24 @@ function messagePayload(overrides: Record<string, unknown> = {}) {
     attachments: [],
     ...overrides,
   };
+}
+
+const IMAGE_ATTACHMENT = {
+  id: 'attachment-1',
+  filename: 'context.png',
+  content_type: 'image/png',
+  size: 1234,
+  url: 'https://cdn.discordapp.com/attachments/context.png',
+};
+
+// Fast mode always answers linked-human text messages, so launch-path tests
+// use an attachment-only human message (no text for Fast mode to answer).
+function attachmentOnlyPayload(overrides: Record<string, unknown> = {}) {
+  return messagePayload({
+    content: '',
+    attachments: [IMAGE_ATTACHMENT],
+    ...overrides,
+  });
 }
 
 function gatewayEvent(payload: Record<string, unknown>): DiscordGatewayEvent {
@@ -204,13 +217,10 @@ describe('maybeHandleDiscordChannelAutoStart', () => {
     mocks.createDirectMessage.mockResolvedValue({ id: 'dm-1' });
     mocks.postMessage.mockResolvedValue({ messageId: 'dm-message-1' });
     mocks.addReaction.mockResolvedValue(undefined);
-    mocks.hasFastDefault.mockResolvedValue(false);
     mocks.processFast.mockResolvedValue(undefined);
   });
 
-  it('routes a linked user default to Fast mode before channel auto-start launch', async () => {
-    mocks.hasFastDefault.mockResolvedValue(true);
-
+  it('routes a linked-human text message to Fast mode before channel auto-start launch', async () => {
     await expect(runHandler({})).resolves.toBe(true);
     await flushBackgroundWork();
 
@@ -266,6 +276,7 @@ describe('maybeHandleDiscordChannelAutoStart', () => {
         runHandler({
           payload: messagePayload({
             content: '',
+            author: { id: 'alert-bot', username: 'alerts', bot: true },
             message_snapshots: [
               {
                 message: {
@@ -315,8 +326,10 @@ describe('maybeHandleDiscordChannelAutoStart', () => {
     expect(mocks.startNewTask).not.toHaveBeenCalled();
   });
 
-  it('launches a linked-human message with instructions as the prompt prefix', async () => {
-    await expect(runHandler({})).resolves.toBe(true);
+  it('launches a linked-human attachment message with instructions as the prompt prefix', async () => {
+    await expect(
+      runHandler({ payload: attachmentOnlyPayload() }),
+    ).resolves.toBe(true);
     await flushBackgroundWork();
 
     expect(mocks.addReaction).toHaveBeenCalledWith({
@@ -347,7 +360,7 @@ describe('maybeHandleDiscordChannelAutoStart', () => {
   it('forwards message_reference into startNewDiscordTask for reply launches', async () => {
     await expect(
       runHandler({
-        payload: messagePayload({
+        payload: attachmentOnlyPayload({
           type: 19,
           message_reference: {
             message_id: 'parent-message-1',
@@ -472,7 +485,9 @@ describe('maybeHandleDiscordChannelAutoStart', () => {
       debug: { llmDecision: 'skip', reason: 'not an incident' },
     });
 
-    await expect(runHandler({})).resolves.toBe(true);
+    await expect(
+      runHandler({ payload: attachmentOnlyPayload() }),
+    ).resolves.toBe(true);
     await flushBackgroundWork();
 
     expect(mocks.evaluateGate).toHaveBeenCalledWith(
@@ -507,7 +522,9 @@ describe('maybeHandleDiscordChannelAutoStart', () => {
       debug: { llmDecision: 'error', reason: 'provider unavailable' },
     });
 
-    await expect(runHandler({})).resolves.toBe(true);
+    await expect(
+      runHandler({ payload: attachmentOnlyPayload() }),
+    ).resolves.toBe(true);
     await flushBackgroundWork();
 
     expect(mocks.startNewTask).not.toHaveBeenCalled();
@@ -521,7 +538,9 @@ describe('maybeHandleDiscordChannelAutoStart', () => {
   it('replies when task startup throws', async () => {
     mocks.startNewTask.mockRejectedValue(new Error('task queue unavailable'));
 
-    await expect(runHandler({})).resolves.toBe(true);
+    await expect(
+      runHandler({ payload: attachmentOnlyPayload() }),
+    ).resolves.toBe(true);
     await flushBackgroundWork();
 
     expect(mocks.postMessage).toHaveBeenCalledWith({
@@ -590,7 +609,9 @@ describe('maybeHandleDiscordChannelAutoStart', () => {
   it('never lets a reaction failure abort the launch', async () => {
     mocks.addReaction.mockRejectedValue(new Error('rate limited'));
 
-    await expect(runHandler({})).resolves.toBe(true);
+    await expect(
+      runHandler({ payload: attachmentOnlyPayload() }),
+    ).resolves.toBe(true);
     await flushBackgroundWork();
 
     expect(mocks.startNewTask).toHaveBeenCalledTimes(1);
@@ -603,7 +624,9 @@ describe('maybeHandleDiscordChannelAutoStart', () => {
   it('releases the routing lock when the launch fails', async () => {
     mocks.startNewTask.mockRejectedValue(new Error('boom'));
 
-    await expect(runHandler({})).resolves.toBe(true);
+    await expect(
+      runHandler({ payload: attachmentOnlyPayload() }),
+    ).resolves.toBe(true);
     await flushBackgroundWork();
 
     expect(mocks.redis.del).toHaveBeenCalledWith(

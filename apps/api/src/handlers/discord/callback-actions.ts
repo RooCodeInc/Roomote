@@ -8,7 +8,6 @@ import {
   and,
   db,
   eq,
-  finalizeWorkItemLaunched,
   inArray,
   isNull,
   or,
@@ -25,7 +24,7 @@ import { findDiscordMappedUserId } from '@roomote/sdk/server';
 import { parsePrReviewActionCallbackData } from '@roomote/types';
 
 import { apiLogger } from '../../logging.js';
-import { cancelOrphanedWorkItemRunBestEffort } from '../tasks/orphaned-work-item-run.js';
+import { launchClaimedSuggestedTask } from '../tasks/suggestion-launch.js';
 import {
   claimCurrentThreadSuggestionByMessage,
   findCurrentThreadSuggestionIdByMessage,
@@ -49,6 +48,10 @@ import {
 } from './task-launch.js';
 import { claimDiscordSuggestionLaunch } from './setup-suggestions.js';
 import { startNewDiscordTask } from './task-orchestration.js';
+import {
+  getDiscordFastConversationId,
+  startDiscordFastAgentResponse,
+} from './fast-agent.js';
 
 /** Match Slack cancel reaction (`DEFAULT_SLACK_CANCEL_EMOJI`). */
 const DISCORD_CANCEL_REACTION_EMOJI = 'x';
@@ -325,65 +328,128 @@ async function launchClaimedDiscordSuggestion(input: {
         ? ['', `Context: ${suggestion.investigationContext}`]
         : []),
     ].join('\n');
-    const queuedMessage: QueuedCommunicationMessage = {
-      provider: 'discord',
-      text: promptText,
-      user:
-        input.senderDisplayName?.trim() ||
-        input.sender.global_name?.trim() ||
-        input.sender.username,
-      userId: input.senderUserId,
-      ts: input.triggerId,
-      channel: launchChannel.channelId,
-      turnPolicy: { reactionsAllowed: true },
-    };
-    const workspaceOverride = suggestion.targetEnvironmentId
-      ? await resolveDiscordWorkspace({
-          type: 'environment',
-          id: suggestion.targetEnvironmentId,
-          name: suggestion.targetEnvironmentId,
-        })
-      : undefined;
-    if (suggestion.targetEnvironmentId && !workspaceOverride) {
-      throw new Error('The suggestion target environment is unavailable.');
-    }
-    const started = await startNewDiscordTask({
-      provider: input.provider,
-      applicationId: input.applicationId,
-      requesterDiscordUserId: input.sender.id,
-      launchOwnerUserId: input.senderUserId,
-      queuedMessage,
-      metadata: discordMetadataForChannel({
-        channel: launchChannel,
-        messageId: input.triggerId,
-      }),
-      channel: launchChannel,
-      skipRoutingConfirmation: true,
-      ...(workspaceOverride ? { workspaceOverride } : {}),
+    const usesRouterLaunch = suggestion.usesRouterLaunch === true;
+    let taskUrl: string | undefined;
+    const launchResult = await launchClaimedSuggestedTask({
+      suggestion: { id: suggestion.id, launchClaimedAt: claimedAt },
+      policy: {
+        usesRouterLaunch,
+        userDefaultEnabled: usesRouterLaunch,
+        fastAvailable: true,
+      },
+      launch: async (launchMode) => {
+        if (launchMode === 'fast') {
+          const fastStart = await startDiscordFastAgentResponse({
+            eventId: input.triggerId,
+            question: promptText,
+            sender: input.sender,
+            senderUserId: input.senderUserId,
+            provider: input.provider,
+            applicationId: input.applicationId,
+            channel: input.channel,
+            metadata: discordMetadataForChannel({
+              channel: input.channel,
+              messageId: input.triggerId,
+            }),
+            conversationId: getDiscordFastConversationId(
+              input.channel,
+              input.triggerId,
+            ),
+            createAnchoredThread: false,
+          });
+          return fastStart.accepted
+            ? {
+                accepted: true,
+                runId: null,
+                taskId: null,
+                abort: fastStart.abort,
+              }
+            : fastStart;
+        }
+
+        const queuedMessage: QueuedCommunicationMessage = {
+          provider: 'discord',
+          text: promptText,
+          user:
+            input.senderDisplayName?.trim() ||
+            input.sender.global_name?.trim() ||
+            input.sender.username,
+          userId: input.senderUserId,
+          ts: input.triggerId,
+          channel: launchChannel.channelId,
+          turnPolicy: { reactionsAllowed: true },
+        };
+        const workspaceOverride = suggestion.targetEnvironmentId
+          ? await resolveDiscordWorkspace({
+              type: 'environment',
+              id: suggestion.targetEnvironmentId,
+              name: suggestion.targetEnvironmentId,
+            })
+          : undefined;
+        if (suggestion.targetEnvironmentId && !workspaceOverride) {
+          throw new Error('The suggestion target environment is unavailable.');
+        }
+        const started = await startNewDiscordTask({
+          provider: input.provider,
+          applicationId: input.applicationId,
+          requesterDiscordUserId: input.sender.id,
+          launchOwnerUserId: input.senderUserId,
+          queuedMessage,
+          metadata: discordMetadataForChannel({
+            channel: launchChannel,
+            messageId: input.triggerId,
+          }),
+          channel: launchChannel,
+          skipRoutingConfirmation: true,
+          ...(workspaceOverride ? { workspaceOverride } : {}),
+        });
+        if (started.status !== 'started') {
+          return { accepted: false };
+        }
+        taskUrl = started.taskUrl;
+        return {
+          accepted: true,
+          runId: started.launchResult.id,
+          taskId: started.launchResult.taskId,
+        };
+      },
     });
-    if (started.status !== 'started') {
-      await releaseWorkItemClaim(db, { id: suggestion.id, claimedAt });
+
+    if (launchResult.status === 'rejected') {
+      if (launchResult.reason) {
+        await input.provider.postMessage({
+          channelId: input.channel.parentChannelId ?? input.channel.channelId,
+          ...(input.channel.parentChannelId
+            ? { threadId: input.channel.channelId }
+            : {}),
+          text: `Could not start “${suggestion.title}” — ${launchResult.reason}`,
+        });
+      }
       return;
     }
-    const finalized = await finalizeWorkItemLaunched(db, {
-      id: suggestion.id,
-      taskId: started.launchResult.taskId,
-      claimedAt,
-    });
-    if (!finalized) {
-      const cancelNote = await cancelOrphanedWorkItemRunBestEffort(
-        started.launchResult.id,
-      );
+    if (launchResult.status === 'failed') {
+      throw launchResult.error;
+    }
+    if (
+      launchResult.status === 'finalize_lost' ||
+      launchResult.status === 'finalize_failed'
+    ) {
       apiLogger.warn(
-        `[discord] Lost suggestion launch fence for ${suggestion.id}; duplicate run ${started.launchResult.id} was orphaned — ${cancelNote}`,
+        `[discord] Failed to finalize suggestion ${suggestion.id}; task ${launchResult.taskId ?? 'null'} (run ${launchResult.runId ?? 'null'}) — ${launchResult.cancelNote}`,
       );
       await input.provider.postMessage({
         channelId: input.channel.parentChannelId ?? input.channel.channelId,
         ...(input.channel.parentChannelId
           ? { threadId: input.channel.channelId }
           : {}),
-        text: `“${suggestion.title}” was already started elsewhere — this duplicate task was canceled.`,
+        text:
+          launchResult.mode === 'coding'
+            ? `“${suggestion.title}” was already started elsewhere — this duplicate task was canceled.`
+            : `“${suggestion.title}” was already started elsewhere.`,
       });
+      return;
+    }
+    if (launchResult.mode === 'fast') {
       return;
     }
     await input.provider.postMessage({
@@ -394,9 +460,7 @@ async function launchClaimedDiscordSuggestion(input: {
       text: input.channel.parentChannelId
         ? `Started “${suggestion.title}” in a new task thread.`
         : `Started “${suggestion.title}”.`,
-      ...(started.taskUrl
-        ? { buttons: [[{ text: 'Follow', url: started.taskUrl }]] }
-        : {}),
+      ...(taskUrl ? { buttons: [[{ text: 'Follow', url: taskUrl }]] } : {}),
     });
   } catch (error) {
     const blockedByReadOnly = isDeploymentReadOnlyError(error);

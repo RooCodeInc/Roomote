@@ -32,6 +32,7 @@ import {
 } from '@roomote/types';
 
 import {
+  getFastSessionTasksCommand,
   replyToFastSessionCommand,
   startFastSessionCommand,
 } from '../commands/fast-sessions';
@@ -39,6 +40,19 @@ import {
   replyToFastSessionInputSchema,
   startFastSessionInputSchema,
 } from '../commands/fast-sessions/input';
+import {
+  getSessionByIdCommand,
+  getSessionForTask,
+  getSessions,
+  getSessionTimeline,
+  archiveSessionCommand,
+  listSessionPins,
+  markSessionReadCommand,
+  sessionIdInputSchema,
+  sessionsListInputSchema,
+  setSessionPinned,
+  updateSessionMetadata,
+} from '../commands/sessions';
 import {
   analyticsChartInputSchema,
   analyticsDetailsInputSchema,
@@ -113,7 +127,6 @@ import {
   syncRepositoriesCommand,
 } from '../commands/source-control';
 import {
-  routeHomeTaskCommand,
   createStandardTaskRunCommand,
   cancelTaskRunCommand,
   retryFailedTaskStartCommand,
@@ -1046,17 +1059,6 @@ export const appRouter = createRouter({
         startTaskGoalCommand(auth, input),
       ),
 
-    routeHomeTask: protectedProcedure
-      .input(
-        z.object({
-          description: z.string(),
-          images: z.array(z.string()).optional(),
-        }),
-      )
-      .mutation(({ ctx: { auth }, input }) =>
-        routeHomeTaskCommand(auth, input),
-      ),
-
     createStandardTask: protectedProcedure
       .input(
         z.object({
@@ -1463,14 +1465,12 @@ export const appRouter = createRouter({
             colorTheme: z.enum(PERSONAL_COLOR_THEMES).optional(),
             mindReaderMode: z.boolean().optional(),
             narrationMode: z.boolean().optional(),
-            communicationsFastModeDefault: z.boolean().optional(),
           })
           .refine(
             (input) =>
               input.colorTheme !== undefined ||
               input.mindReaderMode !== undefined ||
-              input.narrationMode !== undefined ||
-              input.communicationsFastModeDefault !== undefined,
+              input.narrationMode !== undefined,
             {
               message: 'Expected at least one personal preference to update.',
             },
@@ -2814,6 +2814,84 @@ export const appRouter = createRouter({
       .input(replyToFastSessionInputSchema)
       .mutation(({ ctx: { auth }, input }) =>
         replyToFastSessionCommand(auth, input),
+      ),
+    tasks: protectedProcedure
+      .input(z.object({ sessionId: z.string().uuid() }))
+      .query(({ ctx: { auth }, input }) =>
+        getFastSessionTasksCommand(auth, input.sessionId),
+      ),
+  }),
+
+  sessions: createRouter({
+    list: protectedProcedure
+      .input(sessionsListInputSchema)
+      .query(({ ctx: { auth }, input }) => getSessions(auth, input)),
+    byId: protectedProcedure
+      .input(sessionIdInputSchema)
+      .query(({ ctx: { auth }, input }) =>
+        getSessionByIdCommand(auth, input.sessionId),
+      ),
+    timeline: protectedProcedure
+      .input(sessionIdInputSchema.extend({ since: z.number().optional() }))
+      .query(({ ctx: { auth }, input }) =>
+        getSessionTimeline(auth, input.sessionId, input.since),
+      ),
+    forTask: protectedProcedure
+      .input(z.object({ taskId: z.string().min(1) }))
+      .query(({ ctx: { auth }, input }) =>
+        getSessionForTask(auth, input.taskId),
+      ),
+    markRead: protectedProcedure
+      .input(
+        sessionIdInputSchema
+          .extend({
+            throughEventAt: z.number().nonnegative().optional(),
+            throughEventId: z.string().min(1).optional(),
+          })
+          .refine(
+            (value) =>
+              (value.throughEventAt === undefined) ===
+              (value.throughEventId === undefined),
+            'Pass both cursor fields or neither.',
+          ),
+      )
+      .mutation(({ ctx: { auth }, input }) =>
+        markSessionReadCommand(auth, input),
+      ),
+    rename: protectedProcedure
+      .input(
+        sessionIdInputSchema.extend({
+          title: z.string().trim().min(1).max(500),
+        }),
+      )
+      .mutation(({ ctx: { auth }, input }) =>
+        updateSessionMetadata(auth, input.sessionId, { title: input.title }),
+      ),
+    archive: protectedProcedure
+      .input(sessionIdInputSchema)
+      .mutation(({ ctx: { auth }, input }) =>
+        archiveSessionCommand(auth, input.sessionId),
+      ),
+    unarchive: protectedProcedure
+      .input(sessionIdInputSchema)
+      .mutation(({ ctx: { auth }, input }) =>
+        updateSessionMetadata(auth, input.sessionId, { archivedAt: null }),
+      ),
+    pins: protectedProcedure.query(({ ctx: { auth } }) =>
+      listSessionPins(auth),
+    ),
+    setPinned: protectedProcedure
+      .input(sessionIdInputSchema.extend({ pinned: z.boolean() }))
+      .mutation(({ ctx: { auth }, input }) => setSessionPinned(auth, input)),
+    search: protectedProcedure
+      .input(
+        z.object({
+          query: z.string().max(200),
+          limit: z.number().int().min(1).max(50).optional(),
+        }),
+      )
+      .query(({ ctx: { auth }, input }) =>
+        getSessions(auth, { q: input.query, limit: input.limit ?? 20 }),
       ),
   }),
 

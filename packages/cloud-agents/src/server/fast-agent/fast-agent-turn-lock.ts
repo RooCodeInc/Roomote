@@ -16,6 +16,7 @@ export class FastAgentTurnLockLostError extends Error {
 
 export type FastAgentTurnLockHandle = (() => Promise<void>) & {
   signal: AbortSignal;
+  abort: (reason?: unknown) => Promise<void>;
 };
 
 /** Serialize every human and platform-generated Fast turn for one chat. */
@@ -69,11 +70,16 @@ export async function acquireFastAgentTurnLock(params: {
       renewalTimer.unref();
 
       const releaseTurnLock = (async () => {
+        if (released) return;
         released = true;
         clearInterval(renewalTimer);
         await release();
       }) as FastAgentTurnLockHandle;
       releaseTurnLock.signal = ownership.signal;
+      releaseTurnLock.abort = async (reason) => {
+        ownership.abort(reason);
+        await releaseTurnLock();
+      };
       return releaseTurnLock;
     }
 

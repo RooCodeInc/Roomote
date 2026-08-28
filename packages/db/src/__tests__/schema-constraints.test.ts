@@ -28,10 +28,15 @@ import {
 
 import {
   db,
+  fastAgentConversations,
   inArray,
   repositories,
   repositoryFactory,
   runFactory,
+  sessionFactory,
+  sessionParticipants,
+  sessions,
+  sessionTasks,
   taskFactory,
   tasks,
   userFactory,
@@ -43,6 +48,7 @@ const createdTaskIds: string[] = [];
 const createdUserIds: string[] = [];
 const createdRepositoryIds: string[] = [];
 const createdWebhookIds: string[] = [];
+const createdSessionIds: string[] = [];
 
 afterAll(async () => {
   if (createdWebhookIds.length > 0) {
@@ -53,6 +59,10 @@ afterAll(async () => {
     await db
       .delete(repositories)
       .where(inArray(repositories.id, createdRepositoryIds));
+  }
+
+  if (createdSessionIds.length > 0) {
+    await db.delete(sessions).where(inArray(sessions.id, createdSessionIds));
   }
 
   if (createdTaskIds.length > 0) {
@@ -69,6 +79,14 @@ async function createTask(overrides: Parameters<typeof taskFactory.create>[0]) {
   const task = await taskFactory.create(overrides);
   createdTaskIds.push(task.id);
   return task;
+}
+
+async function createSession(
+  overrides: Parameters<typeof sessionFactory.create>[0],
+) {
+  const session = await sessionFactory.create(overrides);
+  createdSessionIds.push(session.id);
+  return session;
 }
 
 /**
@@ -165,6 +183,124 @@ describe('tasks classification CHECK constraints', () => {
       await expectConstraintViolation(createTask(overrides), constraintName);
     },
   );
+});
+
+describe('sessions CHECK and uniqueness constraints', () => {
+  it.each([
+    ['ownerKind', 'sessions_owner_kind_check'],
+    ['sourceSurface', 'sessions_source_surface_check'],
+    ['sourceTrigger', 'sessions_source_trigger_check'],
+    ['visibility', 'sessions_visibility_check'],
+    ['cachedStatus', 'sessions_cached_status_check'],
+  ] as const)(
+    'rejects an unknown %s value via %s',
+    async (field, constraintName) => {
+      const overrides = {
+        [field]: 'not-a-real-vocabulary-value',
+      } as unknown as Parameters<typeof sessionFactory.create>[0];
+
+      await expectConstraintViolation(createSession(overrides), constraintName);
+    },
+  );
+
+  it('enforces the owner shape', async () => {
+    const user = await userFactory.create();
+    createdUserIds.push(user.id);
+
+    await expectConstraintViolation(
+      createSession({ ownerKind: 'system', ownerUserId: user.id }),
+      'sessions_owner_shape_check',
+    );
+  });
+
+  it('allows only one canonical session per task', async () => {
+    const task = await createTask({});
+    const first = await createSession({});
+    const second = await createSession({});
+
+    await db.insert(sessionTasks).values({
+      sessionId: first.id,
+      taskId: task.id,
+      origin: 'direct_launch',
+    });
+    await expectConstraintViolation(
+      db.insert(sessionTasks).values({
+        sessionId: second.id,
+        taskId: task.id,
+        origin: 'follow_up',
+      }),
+      'session_tasks_task_id_unique',
+    );
+  });
+
+  it('rejects unknown task-link origins', async () => {
+    const task = await createTask({});
+    const session = await createSession({});
+
+    await expectConstraintViolation(
+      db.insert(sessionTasks).values({
+        sessionId: session.id,
+        taskId: task.id,
+        origin: 'not-a-real-origin' as 'direct_launch',
+      }),
+      'session_tasks_origin_check',
+    );
+  });
+
+  it('allows only one participant row per session and user', async () => {
+    const user = await userFactory.create();
+    createdUserIds.push(user.id);
+    const session = await createSession({});
+
+    await db.insert(sessionParticipants).values({
+      sessionId: session.id,
+      userId: user.id,
+      role: 'member',
+    });
+    await expectConstraintViolation(
+      db.insert(sessionParticipants).values({
+        sessionId: session.id,
+        userId: user.id,
+        role: 'owner',
+      }),
+      'session_participants_session_user_unique',
+    );
+  });
+
+  it('rejects unknown participant roles', async () => {
+    const user = await userFactory.create();
+    createdUserIds.push(user.id);
+    const session = await createSession({});
+
+    await expectConstraintViolation(
+      db.insert(sessionParticipants).values({
+        sessionId: session.id,
+        userId: user.id,
+        role: 'not-a-real-role' as 'member',
+      }),
+      'session_participants_role_check',
+    );
+  });
+
+  it('allows only one session per Fast conversation', async () => {
+    const user = await userFactory.create();
+    createdUserIds.push(user.id);
+    const [conversation] = await db
+      .insert(fastAgentConversations)
+      .values({
+        userId: user.id,
+        surface: 'web',
+        workspaceId: `workspace-${randomUUID()}`,
+        conversationId: `conversation-${randomUUID()}`,
+      })
+      .returning();
+
+    await createSession({ fastConversationId: conversation!.id });
+    await expectConstraintViolation(
+      createSession({ fastConversationId: conversation!.id }),
+      'sessions_fast_conversation_id_unique',
+    );
+  });
 });
 
 describe('task_runs classification CHECK constraints', () => {

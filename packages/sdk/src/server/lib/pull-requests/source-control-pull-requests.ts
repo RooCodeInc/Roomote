@@ -14,6 +14,7 @@ import {
   db,
   eq,
   getDeploymentGitHubRoomoteMentionEnabled,
+  getSessionForTask,
   resolveTelegramRuntimeCredentials,
   tasks,
   taskRuns,
@@ -277,9 +278,12 @@ export async function createOrUpdateSourceControlPullRequestForTaskRun({
   const canonicalAttribution = displayName
     ? { ...attribution, displayName }
     : DEFAULT_ROOMOTE_COMMIT_AUTHOR;
+  const taskUrl =
+    (await buildPrAttributionFastSessionUrl(taskRun)) ??
+    buildPrAttributionTaskUrl(taskRun);
   const attributionLine = getPrBodyAttributionLine({
     attribution: canonicalAttribution,
-    taskUrl: buildPrAttributionTaskUrl(taskRun),
+    taskUrl,
     taskSurface:
       inheritedChatProvider ??
       (task?.surface === 'system' || task?.surface === 'api'
@@ -689,6 +693,31 @@ function buildPrAttributionTaskUrl(taskRun: TaskRun): string {
   return url.toString();
 }
 
+async function buildPrAttributionFastSessionUrl(
+  taskRun: TaskRun,
+): Promise<string | undefined> {
+  const fastAgentSessionId = getPayloadRecord(
+    taskRun.payload,
+  ).fastAgentSessionId;
+  if (typeof fastAgentSessionId !== 'string') {
+    return undefined;
+  }
+
+  const session = await getSessionForTask(db, taskRun.taskId);
+  if (
+    session?.visibility !== 'visible' ||
+    session.fastConversationId !== fastAgentSessionId
+  ) {
+    return undefined;
+  }
+
+  const url = new URL(`/sessions/${session.id}`, Env.R_APP_URL);
+  url.searchParams.set('utm_source', 'github-comment');
+  url.searchParams.set('utm_medium', 'link');
+  url.searchParams.set('utm_campaign', taskRun.payloadKind);
+  return url.toString();
+}
+
 function prependCanonicalPrAttribution(body: string, line: string): string {
   let remainingBody = body.trimStart();
 
@@ -866,6 +895,17 @@ async function createOrUpdateGiteaPullRequest({
       : createDraft,
     'gitea',
   );
+  const assignees =
+    input.assignees.length > 0
+      ? [
+          ...new Set([
+            ...(existing?.assignees
+              ?.map((assignee) => assignee.login)
+              .filter((login): login is string => Boolean(login)) ?? []),
+            ...input.assignees,
+          ]),
+        ]
+      : [];
   const pullRequest = existing
     ? await requestJson({
         fetchImpl,
@@ -878,7 +918,11 @@ async function createOrUpdateGiteaPullRequest({
           {},
         ),
         tokenHeader: { name: 'Authorization', value: `token ${token}` },
-        body: { title, body: input.body },
+        body: {
+          title,
+          body: input.body,
+          ...(assignees.length > 0 ? { assignees } : {}),
+        },
         schema: giteaPullRequestSchema,
       })
     : await requestJson({
@@ -897,7 +941,7 @@ async function createOrUpdateGiteaPullRequest({
           head: input.sourceBranch,
           title,
           body: input.body,
-          ...(input.assignees.length > 0 ? { assignees: input.assignees } : {}),
+          ...(assignees.length > 0 ? { assignees } : {}),
         },
         schema: giteaPullRequestSchema,
       });

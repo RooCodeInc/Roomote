@@ -150,7 +150,6 @@ describe('channel auto-start unlinked author', () => {
         updatedAt: new Date('2026-01-01T00:00:00.000Z'),
         matchedUserId: 'user-1',
         userDeletedAt: null,
-        userMetadata: { communications_fast_mode_default: true },
       },
     ]);
     const { handleMessageOrAppMentionEvent } =
