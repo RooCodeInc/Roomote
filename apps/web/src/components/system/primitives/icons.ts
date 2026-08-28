@@ -189,6 +189,7 @@ export {
   SquareSlashIcon,
   Stethoscope,
   Sun,
+  Target,
   Terminal,
   TerminalIcon,
   ThumbsDown,

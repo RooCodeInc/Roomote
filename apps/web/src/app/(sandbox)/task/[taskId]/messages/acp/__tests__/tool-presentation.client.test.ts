@@ -56,6 +56,27 @@ describe('tool presentation resolver', () => {
     });
   });
 
+  it.each([
+    ['manage_custom_automations', 'task'],
+    ['get_about_me', 'roomote'],
+    ['describe_video', 'video'],
+    ['manage_goal', 'target'],
+    ['manage_tasks', 'list-checks'],
+    ['manage_source_control', 'pull-request'],
+    ['manage_environments', 'environment'],
+    ['save_task_memory', 'memory'],
+    ['request_environment_variables', 'terminal'],
+    ['report_platform_issue', 'alert'],
+    ['submit_automation_work_items', 'task'],
+    ['list_chat_channels', 'messages'],
+    ['get_chat_channel_messages', 'messages'],
+    ['get_chat_message_context', 'messages'],
+  ] as const)('uses the %s icon for %s', (toolName, iconKey) => {
+    expect(resolveToolPresentation(toolData({ toolName }))).toMatchObject({
+      iconKey,
+    });
+  });
+
   it('uses Memory as the provider label without changing canonical identity', () => {
     expect(
       resolveToolPresentation(

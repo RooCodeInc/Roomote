@@ -12,12 +12,9 @@ import {
 import { messageAnchorId } from '../message-anchor';
 
 import { AcpToolDetails } from './AcpToolDetails';
-import type {
-  GroupedToolCallRenderBlock,
-  GroupedToolDisplayKind,
-} from './render-blocks';
+import type { GroupedToolCallRenderBlock } from './render-blocks';
 import { toolIconForKey } from './tool-icons';
-import type { ToolIconKey } from './tool-presentation';
+import { resolveToolPresentation } from './tool-presentation';
 import { resolveToolPresentationPolicy } from './tool-presentation-policy';
 
 interface AcpGroupedToolMessageProps {
@@ -59,7 +56,10 @@ export function AcpGroupedToolMessage({
       : 'output-available';
 
   const ToolIcon = groupedToolIcon({
-    displayKind: group.displayKind,
+    iconKey: resolveToolPresentation(
+      group.items[0]!.msg.data,
+      group.items[0]!.msg.partial,
+    ).iconKey,
     hasFailed,
     hasRunning,
   });
@@ -93,12 +93,16 @@ export function AcpGroupedToolMessage({
                   resolveToolPresentationPolicy(item.msg, {
                     showInternalMessages: showSubagentPayload,
                   }).detailMode === 'expandable';
+                const iconKey = resolveToolPresentation(
+                  item.msg.data,
+                  item.msg.partial,
+                ).iconKey;
 
                 return (
                   <section key={item.msg.id} className="space-y-2">
                     <div className="flex min-w-0 items-center gap-1.5 text-xs font-medium tracking-wide text-muted-foreground">
                       <GroupedToolItemIcon
-                        displayKind={item.displayKind}
+                        iconKey={iconKey}
                         className="size-3 shrink-0"
                       />
                       <span className="truncate">{sectionTitle}</span>
@@ -122,43 +126,22 @@ export function AcpGroupedToolMessage({
 }
 
 function groupedToolIcon(params: {
-  displayKind: GroupedToolDisplayKind;
+  iconKey: ReturnType<typeof resolveToolPresentation>['iconKey'];
   hasRunning: boolean;
   hasFailed: boolean;
 }): LucideIcon {
   if (params.hasFailed) return AlertCircle;
   if (params.hasRunning) return Loader2;
-  return groupedDisplayKindIcon(params.displayKind);
+  return toolIconForKey(params.iconKey);
 }
 
 function GroupedToolItemIcon({
-  displayKind,
+  iconKey,
   className,
 }: {
-  displayKind: GroupedToolDisplayKind;
+  iconKey: ReturnType<typeof resolveToolPresentation>['iconKey'];
   className?: string;
 }) {
-  const Icon = groupedDisplayKindIcon(displayKind);
+  const Icon = toolIconForKey(iconKey);
   return <Icon className={className} />;
-}
-
-function groupedDisplayKindIcon(
-  displayKind: GroupedToolDisplayKind,
-): LucideIcon {
-  return toolIconForKey(displayKindIconKey(displayKind));
-}
-
-function displayKindIconKey(displayKind: GroupedToolDisplayKind): ToolIconKey {
-  if (displayKind === 'execute') return 'terminal';
-  if (displayKind === 'read') return 'file';
-  if (displayKind === 'list') return 'folder';
-  if (displayKind === 'search') return 'search';
-  if (displayKind === 'edit') return 'edit';
-  if (displayKind === 'subagent') return 'bot';
-  if (displayKind === 'task') return 'task';
-  if (displayKind === 'communication') return 'message';
-  if (displayKind === 'memory') return 'memory';
-  if (displayKind === 'artifact') return 'artifact';
-  if (displayKind === 'widget') return 'widget';
-  return 'tool';
 }

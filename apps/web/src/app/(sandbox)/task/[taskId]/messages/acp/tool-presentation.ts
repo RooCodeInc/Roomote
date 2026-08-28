@@ -28,6 +28,14 @@ export type ToolIconKey =
   | 'memory'
   | 'artifact'
   | 'widget'
+  | 'roomote'
+  | 'video'
+  | 'target'
+  | 'list-checks'
+  | 'pull-request'
+  | 'environment'
+  | 'alert'
+  | 'messages'
   | 'tool';
 
 type ToolPresentationPhase = 'running' | 'completed' | 'failed';
@@ -84,6 +92,22 @@ const COMMUNICATION_TOOL_NAMES = new Set([
   'post_to_channel',
   'ignore_event',
 ]);
+const TOOL_ICON_OVERRIDES: Readonly<Partial<Record<string, ToolIconKey>>> = {
+  manage_custom_automations: 'task',
+  get_about_me: 'roomote',
+  describe_video: 'video',
+  manage_goal: 'target',
+  manage_tasks: 'list-checks',
+  manage_source_control: 'pull-request',
+  manage_environments: 'environment',
+  save_task_memory: 'memory',
+  request_environment_variables: 'terminal',
+  report_platform_issue: 'alert',
+  submit_automation_work_items: 'task',
+  list_chat_channels: 'messages',
+  get_chat_channel_messages: 'messages',
+  get_chat_message_context: 'messages',
+};
 
 function normalized(value: string | null | undefined): string | null {
   const result = value?.trim().toLowerCase();
@@ -137,7 +161,9 @@ export function resolveToolPresentation(
     identity: { providerKind, serverName, toolName },
     category,
     displayName,
-    iconKey: categoryIconKey(category),
+    iconKey: toolName
+      ? (TOOL_ICON_OVERRIDES[toolName] ?? categoryIconKey(category))
+      : categoryIconKey(category),
     phase,
     verb,
     object,

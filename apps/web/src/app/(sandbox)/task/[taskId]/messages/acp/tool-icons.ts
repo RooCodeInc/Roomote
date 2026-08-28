@@ -5,11 +5,19 @@ import {
   FileIcon,
   FolderIcon,
   GalleryVerticalEnd,
+  GitPullRequest,
   HardDriveUpload,
+  ListChecks,
   MessageSquareText,
+  MessagesSquare,
+  RoomoteR,
   Search,
   SquarePen,
+  Target,
   Terminal,
+  TriangleAlert,
+  VectorSquare,
+  Video,
   Wrench,
   Zap,
 } from '@/components/system';
@@ -28,5 +36,13 @@ export function toolIconForKey(key: ToolIconKey): LucideIcon {
   if (key === 'memory') return Brain;
   if (key === 'artifact') return HardDriveUpload;
   if (key === 'widget') return GalleryVerticalEnd;
+  if (key === 'roomote') return RoomoteR;
+  if (key === 'video') return Video;
+  if (key === 'target') return Target;
+  if (key === 'list-checks') return ListChecks;
+  if (key === 'pull-request') return GitPullRequest;
+  if (key === 'environment') return VectorSquare;
+  if (key === 'alert') return TriangleAlert;
+  if (key === 'messages') return MessagesSquare;
   return Wrench;
 }
