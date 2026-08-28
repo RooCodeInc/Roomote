@@ -98,6 +98,7 @@ export async function processDiscordFastAgentMessage(
     anchorMessageId?: string;
     interaction?: DiscordInteractionReplyContext;
     activeTasks?: { taskId: string }[];
+    directedAtRoomote?: boolean;
     onAccepted?: (abort: () => Promise<void>) => void;
     onRejected?: () => void;
   } & DiscordFastAgentSource,
@@ -255,6 +256,14 @@ export async function processDiscordFastAgentMessage(
         input.sender.global_name ??
         input.sender.username,
       activeTasks: input.activeTasks,
+      allowSilentAmbientReply:
+        !input.directedAtRoomote &&
+        history.some(
+          (entry) =>
+            !entry.botId &&
+            Boolean(entry.user) &&
+            entry.user !== input.sender.id,
+        ),
       adapter: {
         resolveMcpServerConfigs: () =>
           resolveUserMcpServerConfigs({

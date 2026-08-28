@@ -774,6 +774,7 @@ export async function answerFastAgentQuestion({
   platformEventHandling = 'default',
   platformEventVisibility = 'optional',
   platformEventKind = 'delegated_task',
+  allowSilentAmbientReply = false,
   platformEventTranscriptPayload,
 }: {
   question: string;
@@ -798,6 +799,8 @@ export async function answerFastAgentQuestion({
   platformEventHandling?: FastAgentPlatformEventHandling;
   platformEventVisibility?: FastAgentPlatformEventVisibility;
   platformEventKind?: FastAgentPlatformEventKind;
+  /** True only for an unmentioned turn in a multi-human Fast conversation. */
+  allowSilentAmbientReply?: boolean;
   platformEventTranscriptPayload?: Record<string, unknown>;
 }): Promise<string> {
   const turnId = buildFastAgentTurnId({
@@ -1227,6 +1230,7 @@ export async function answerFastAgentQuestion({
       platformEventVisibility,
       platformEventKind,
       retryTaskStartAvailable: Boolean(adapter.retryTaskStart),
+      allowSilentAmbientReply,
       releaseVersion,
     });
     const integrationCallSignatures = new Set<string>();
@@ -1884,13 +1888,14 @@ export async function answerFastAgentQuestion({
 
           case FAST_AGENT_NATIVE_TOOL_NAMES.ignoreEvent: {
             ignoreEventArgsSchema.parse(call.args);
-            if (!platformEvent) {
+            if (!platformEvent && !allowSilentAmbientReply) {
               return {
                 success: false,
-                error: 'Only a platform event can be ignored.',
+                error:
+                  'Only an optional platform event or eligible ambient human message may be ignored.',
               };
             }
-            if (platformEventVisibility === 'required') {
+            if (platformEvent && platformEventVisibility === 'required') {
               return {
                 success: false,
                 error: 'This platform event requires a user-visible closeout.',

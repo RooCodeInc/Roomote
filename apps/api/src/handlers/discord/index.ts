@@ -698,6 +698,7 @@ async function processDiscordGatewayEvent(
     !channel.isDirectMessage &&
     !command &&
     !isDiscordBotMentioned(message, resolved.botUserId) &&
+    !repliedFastSession &&
     isRoomoteThread
   ) {
     const shouldRouteUnmentioned =
@@ -815,6 +816,10 @@ async function processDiscordGatewayEvent(
           ? { anchorMessageId: reactionTarget.messageId }
           : {}),
         activeTasks: activeRun ? [{ taskId: activeRun.taskId }] : [],
+        directedAtRoomote:
+          channel.isDirectMessage ||
+          Boolean(repliedFastSession) ||
+          isDiscordBotMentioned(message, resolved.botUserId),
       });
       return { ok: true, fastAnswered: true, fastContinued: true };
     }
@@ -863,6 +868,7 @@ async function processDiscordGatewayEvent(
       ),
       ...(reactionTarget ? { anchorMessageId: reactionTarget.messageId } : {}),
       activeTasks: activeRun ? [{ taskId: activeRun.taskId }] : [],
+      directedAtRoomote: true,
     });
     return { ok: true, fastAnswered: true, fastDefaulted: true };
   }
