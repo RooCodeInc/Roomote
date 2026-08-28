@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { Streamdown } from 'streamdown';
 import {
   useCallback,
   useEffect,
@@ -45,7 +46,9 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
+  Skeleton,
 } from '@/components/system';
+import { streamdownCodeMermaidCjkPlugins } from '@/components/ai-elements/streamdown-plugins';
 import type { SessionTaskSummary } from './SessionTaskCards';
 
 import { SandboxSidePanelHeader } from '../../SandboxSidePanelHeader';
@@ -65,6 +68,7 @@ import {
 import { NestedTaskSidePanel } from './NestedTaskSidePanel';
 import { OpenSessionTaskPanelContext } from './session-task-panel-context';
 import { DelegatedTaskCard } from '../../task/[taskId]/messages/acp/DelegatedTaskCard';
+import { useTaskSummary } from '../../task/[taskId]/hooks/use-task-summary';
 
 export type SessionInfo = {
   id: string;
@@ -82,6 +86,74 @@ export type SessionInfo = {
   taskSource?: 'unified' | 'fast';
   taskCards?: Array<Pick<SessionTaskSummary, 'taskId' | 'title'>>;
 };
+
+function SessionTaskSummarySection({ task }: { task: SessionTaskSummary }) {
+  const {
+    enabled,
+    summary,
+    isLoadingSummary,
+    errorMessage,
+    isSummaryStale,
+    regenerateSummary,
+  } = useTaskSummary(task.taskId);
+  const fallbackSummary = task.latestOutput?.trim();
+
+  return (
+    <section className="space-y-2">
+      <h3 className="font-medium">Summary</h3>
+      {isLoadingSummary ? (
+        <div className="space-y-2" aria-label="Generating task summary">
+          <Skeleton className="h-4 w-full" />
+          <Skeleton className="h-4 w-5/6" />
+          <Skeleton className="h-4 w-2/3" />
+        </div>
+      ) : summary ? (
+        <div className="space-y-2">
+          {isSummaryStale ? (
+            <p className="text-xs text-muted-foreground">
+              New activity is not included yet.{' '}
+              <Button
+                variant="link"
+                size="xs"
+                className="h-auto p-0"
+                onClick={() => regenerateSummary()}
+              >
+                Refresh summary
+              </Button>
+            </p>
+          ) : null}
+          <div className="text-sm leading-relaxed text-muted-foreground [&_p]:mb-2">
+            <Streamdown plugins={streamdownCodeMermaidCjkPlugins}>
+              {summary}
+            </Streamdown>
+          </div>
+        </div>
+      ) : errorMessage ? (
+        <div className="space-y-2 text-sm text-muted-foreground">
+          <p>{errorMessage}</p>
+          <Button
+            variant="link"
+            size="sm"
+            className="h-auto p-0"
+            onClick={() => regenerateSummary()}
+          >
+            Try again
+          </Button>
+        </div>
+      ) : fallbackSummary ? (
+        <p className="whitespace-pre-wrap text-sm leading-relaxed text-muted-foreground">
+          {fallbackSummary}
+        </p>
+      ) : (
+        <p className="text-sm text-muted-foreground">
+          {enabled || task.state === 'active'
+            ? 'A summary will appear as this execution progresses.'
+            : 'No summary is available for this execution yet.'}
+        </p>
+      )}
+    </section>
+  );
+}
 
 function SessionTaskPanel({
   sessionId,
@@ -135,6 +207,9 @@ function SessionTaskPanel({
             </p>
           ) : null}
         </div>
+        {task.canAccessDetails === false ? null : (
+          <SessionTaskSummarySection task={task} />
+        )}
         {task.canAccessDetails === false ? (
           <p className="rounded-md border bg-muted p-3 text-muted-foreground">
             Execution details require task access.
