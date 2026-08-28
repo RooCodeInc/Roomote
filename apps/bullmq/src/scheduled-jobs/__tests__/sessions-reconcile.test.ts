@@ -138,9 +138,22 @@ describe('sessionsReconcileJob', () => {
         .where(eq(sessions.fastConversationId, poisoned!.id)),
     ).resolves.toHaveLength(0);
 
+    // A failed adoption must NOT advance the reconcile watermark, so the
+    // failed row stays inside the next run's scan window instead of being
+    // stranded past the cutoff once the failure clears.
+    const watermarkBefore = await db.query.sessionBackfillState.findFirst({
+      where: eq(sessionBackfillState.key, 'unified-sessions-reconcile-v1'),
+    });
     await db
       .delete(fastAgentConversations)
       .where(eq(fastAgentConversations.id, poisoned!.id));
+    await sessionsReconcileJob();
+    const watermarkAfter = await db.query.sessionBackfillState.findFirst({
+      where: eq(sessionBackfillState.key, 'unified-sessions-reconcile-v1'),
+    });
+    expect(watermarkAfter?.cursorCreatedAt?.getTime() ?? 0).toBeGreaterThan(
+      watermarkBefore?.cursorCreatedAt?.getTime() ?? 0,
+    );
   });
 
   it('heals sessions wedged active on an expired responding lease', async () => {

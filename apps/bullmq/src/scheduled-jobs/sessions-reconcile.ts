@@ -21,6 +21,15 @@ import {
 } from '@roomote/db/server';
 const LOG_PREFIX = '[sessions]';
 const BACKFILL_KEY = 'unified-sessions-v1';
+/**
+ * Steady-state reconcile watermark, stored as a second state row: its
+ * cursorCreatedAt marks the scan-start time of the last orphan pass that
+ * completed with ZERO failures. Advancing only on clean passes means a
+ * transient outage keeps failed rows inside the scan window until they
+ * actually converge, instead of stranding them past the cutoff forever.
+ */
+const RECONCILE_KEY = 'unified-sessions-reconcile-v1';
+const RECONCILE_CURSOR_ID = 'watermark';
 const BATCH_SIZE = 100;
 /** Slack subtracted from the last-run watermark when bounding orphan scans. */
 const ORPHAN_SCAN_SLACK_MS = 60 * 60 * 1000;
@@ -186,13 +195,16 @@ async function backfillParticipants(): Promise<void> {
   console.info(`${LOG_PREFIX} backfill participants complete`);
 }
 
-async function reconcileRecentSessions(lastRunAt: Date | null): Promise<void> {
-  // After backfill completion, bound the steady-state orphan scans to rows
-  // created since the previous reconcile (with slack) so they stop scanning
-  // entire tables every run. A null watermark means scan unbounded once.
-  const cutoff = lastRunAt
-    ? new Date(lastRunAt.getTime() - ORPHAN_SCAN_SLACK_MS)
+async function reconcileRecentSessions(watermark: Date | null): Promise<void> {
+  // Bound the steady-state orphan scans to rows created since the last
+  // fully-successful pass (with slack) so they stop scanning entire tables
+  // every run. A null watermark (first run, or no clean pass yet) scans
+  // unbounded.
+  const cutoff = watermark
+    ? new Date(watermark.getTime() - ORPHAN_SCAN_SLACK_MS)
     : null;
+  const scanStartedAt = new Date();
+  let orphanFailures = 0;
 
   // Fast conversations without a session row (e.g. created before this
   // release finished its backfill) are adopted here so the unified list
@@ -219,6 +231,7 @@ async function reconcileRecentSessions(lastRunAt: Date | null): Promise<void> {
         ensureSessionForFastConversation(tx, conversation.id),
       );
     } catch (error) {
+      orphanFailures += 1;
       console.error(
         `${LOG_PREFIX} reconcile failed for fast conversation ${conversation.id}`,
         error,
@@ -247,6 +260,7 @@ async function reconcileRecentSessions(lastRunAt: Date | null): Promise<void> {
         ensureSessionForTask(tx, { taskId: task.id, origin: 'backfill' }),
       );
     } catch (error) {
+      orphanFailures += 1;
       console.error(
         `${LOG_PREFIX} reconcile failed for task ${task.id}`,
         error,
@@ -299,11 +313,34 @@ async function reconcileRecentSessions(lastRunAt: Date | null): Promise<void> {
     }
   }
 
-  // Advance only the watermark; updateState would clobber completedAt.
-  await db
-    .update(sessionBackfillState)
-    .set({ lastRunAt: new Date(), updatedAt: new Date() })
-    .where(eq(sessionBackfillState.key, BACKFILL_KEY));
+  // Advance the watermark only when every orphan adoption succeeded, so
+  // transiently-failed rows stay inside the next scan window and eventually
+  // converge. Failures in the touch/heal loops don't affect orphan scanning.
+  if (orphanFailures === 0) {
+    await db
+      .insert(sessionBackfillState)
+      .values({
+        key: RECONCILE_KEY,
+        phase: 'participants',
+        cursorCreatedAt: scanStartedAt,
+        cursorId: RECONCILE_CURSOR_ID,
+        completedAt: null,
+        lastRunAt: scanStartedAt,
+      })
+      .onConflictDoUpdate({
+        target: sessionBackfillState.key,
+        set: {
+          cursorCreatedAt: scanStartedAt,
+          cursorId: RECONCILE_CURSOR_ID,
+          lastRunAt: scanStartedAt,
+          updatedAt: new Date(),
+        },
+      });
+  } else {
+    console.warn(
+      `${LOG_PREFIX} keeping the reconcile watermark: ${orphanFailures} orphan adoption(s) failed`,
+    );
+  }
 
   console.info(`${LOG_PREFIX} reconciliation`, {
     orphanFastConversations: orphanConversations.length,
@@ -318,7 +355,10 @@ export async function sessionsReconcileJob(): Promise<void> {
     where: eq(sessionBackfillState.key, BACKFILL_KEY),
   });
   if (state?.completedAt) {
-    await reconcileRecentSessions(state.lastRunAt);
+    const reconcileState = await db.query.sessionBackfillState.findFirst({
+      where: eq(sessionBackfillState.key, RECONCILE_KEY),
+    });
+    await reconcileRecentSessions(reconcileState?.cursorCreatedAt ?? null);
     return;
   }
 
