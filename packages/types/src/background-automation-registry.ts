@@ -17,6 +17,7 @@ import type { CommunicationProvider } from './communication';
 import { sourceControlProviders } from './source-control';
 import type { SourceControlProvider } from './source-control';
 import type { TaskSuggestionSource } from './task-runs';
+import type { AutomationTaskLaunchPolicyId } from './automation-task-launch-policy';
 
 export const AUTO_RESPOND_CHANNELS_SETTINGS_HASH = 'auto-respond-channels';
 export const MANAGER_CHANNEL_SETTINGS_HASH = 'roomote-managers';
@@ -87,6 +88,8 @@ export type TriggerableBackgroundAutomationDescriptor<
    */
   supportedSourceControlProviders: readonly SourceControlProvider[];
   scheduledSuggestionSource?: TaskSuggestionSource;
+  /** Policy for fresh sandbox tasks launched by this automation, if any. */
+  taskLaunchPolicyId: AutomationTaskLaunchPolicyId | null;
 };
 
 const CONFLICT_RESOLVER_SCHEDULE_MODES = [
@@ -152,6 +155,7 @@ export const TRIGGERABLE_BACKGROUND_AUTOMATION_DESCRIPTORS = [
     usesManagerChannel: false,
     supportedCommunicationProviders: [],
     supportedSourceControlProviders: ['github', 'gitlab', 'ado', 'gitea'],
+    taskLaunchPolicyId: 'conflict_resolution',
   },
   {
     automationKey: 'suggester',
@@ -166,6 +170,7 @@ export const TRIGGERABLE_BACKGROUND_AUTOMATION_DESCRIPTORS = [
     supportedCommunicationProviders: ['slack', 'teams', 'telegram', 'discord'],
     supportedSourceControlProviders: sourceControlProviders,
     scheduledSuggestionSource: 'suggest_ideas',
+    taskLaunchPolicyId: 'suggester_scan',
   },
   {
     automationKey: 'announcer',
@@ -177,6 +182,7 @@ export const TRIGGERABLE_BACKGROUND_AUTOMATION_DESCRIPTORS = [
     usesManagerChannel: true,
     supportedCommunicationProviders: ['slack', 'teams', 'telegram', 'discord'],
     supportedSourceControlProviders: sourceControlProviders,
+    taskLaunchPolicyId: 'announcer',
   },
   {
     automationKey: 'manager_stats',
@@ -189,6 +195,7 @@ export const TRIGGERABLE_BACKGROUND_AUTOMATION_DESCRIPTORS = [
     usesManagerChannel: true,
     supportedCommunicationProviders: ['slack', 'teams', 'telegram', 'discord'],
     supportedSourceControlProviders: sourceControlProviders,
+    taskLaunchPolicyId: null,
   },
   {
     automationKey: 'provider_usage_limit',
@@ -199,6 +206,7 @@ export const TRIGGERABLE_BACKGROUND_AUTOMATION_DESCRIPTORS = [
     usesManagerChannel: true,
     supportedCommunicationProviders: ['slack', 'teams', 'telegram', 'discord'],
     supportedSourceControlProviders: [],
+    taskLaunchPolicyId: null,
   },
   {
     automationKey: 'sentry_triage',
@@ -210,6 +218,7 @@ export const TRIGGERABLE_BACKGROUND_AUTOMATION_DESCRIPTORS = [
     supportedCommunicationProviders: ['slack', 'teams', 'telegram', 'discord'],
     supportedSourceControlProviders: sourceControlProviders,
     scheduledSuggestionSource: 'sentry_triage',
+    taskLaunchPolicyId: 'scheduled_triage_scan',
   },
   {
     automationKey: 'dependabot_triage',
@@ -221,6 +230,7 @@ export const TRIGGERABLE_BACKGROUND_AUTOMATION_DESCRIPTORS = [
     supportedCommunicationProviders: ['slack', 'teams', 'telegram', 'discord'],
     supportedSourceControlProviders: ['github'],
     scheduledSuggestionSource: 'dependabot_triage',
+    taskLaunchPolicyId: 'scheduled_triage_scan',
   },
   {
     automationKey: 'codeql_triage',
@@ -232,6 +242,7 @@ export const TRIGGERABLE_BACKGROUND_AUTOMATION_DESCRIPTORS = [
     supportedCommunicationProviders: ['slack', 'teams', 'telegram', 'discord'],
     supportedSourceControlProviders: ['github'],
     scheduledSuggestionSource: 'codeql_triage',
+    taskLaunchPolicyId: 'scheduled_triage_scan',
   },
   {
     automationKey: 'issue_fixer',
@@ -247,6 +258,7 @@ export const TRIGGERABLE_BACKGROUND_AUTOMATION_DESCRIPTORS = [
     usesManagerChannel: false,
     supportedCommunicationProviders: [],
     supportedSourceControlProviders: ['github', 'gitlab', 'gitea'],
+    taskLaunchPolicyId: 'issue_fixer',
   },
   {
     automationKey: 'security_auditor',
@@ -259,6 +271,7 @@ export const TRIGGERABLE_BACKGROUND_AUTOMATION_DESCRIPTORS = [
     supportedCommunicationProviders: ['slack', 'teams', 'telegram', 'discord'],
     supportedSourceControlProviders: sourceControlProviders,
     scheduledSuggestionSource: 'security_auditor',
+    taskLaunchPolicyId: 'merged_pr_audit_scan',
   },
   {
     automationKey: 'code_quality_auditor',
@@ -271,6 +284,7 @@ export const TRIGGERABLE_BACKGROUND_AUTOMATION_DESCRIPTORS = [
     supportedCommunicationProviders: ['slack', 'teams', 'telegram', 'discord'],
     supportedSourceControlProviders: sourceControlProviders,
     scheduledSuggestionSource: 'code_quality_auditor',
+    taskLaunchPolicyId: 'merged_pr_audit_scan',
   },
   {
     automationKey: 'ci_failure_triage',
@@ -292,6 +306,7 @@ export const TRIGGERABLE_BACKGROUND_AUTOMATION_DESCRIPTORS = [
       'gitea',
     ],
     scheduledSuggestionSource: 'ci_failure_triage',
+    taskLaunchPolicyId: 'ci_failure_triage',
   },
 ] as const satisfies readonly TriggerableBackgroundAutomationDescriptor[];
 

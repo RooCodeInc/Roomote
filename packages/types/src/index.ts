@@ -6,6 +6,7 @@ export * from './auth';
 export * from './automation-label';
 export * from './background-agents';
 export * from './background-automation-registry';
+export * from './automation-task-launch-policy';
 export * from './automation-recommendations';
 export * from './automation-destination-fields';
 export * from './cloud-agents';

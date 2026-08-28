@@ -26,6 +26,7 @@ import {
   isConfiguredAutomationTarget,
   isBackgroundAutomationUserTargetKind,
   isCommunicationAutomationTarget,
+  resolveAutomationTaskLaunchMode,
   resolveEvalHarnessSelection,
   TaskPayloadKind,
   type AutomationTarget,
@@ -517,7 +518,11 @@ async function launchCustomAutomationRow(
   const frequency = getCustomAutomationFrequency(automation);
   const hasUnconfiguredTaskScope = automation.executionMode === 'fast';
   const useLegacySandboxFallback =
-    !automation.createdByUserId && automation.executionMode === 'sandbox_task';
+    automation.executionMode === 'sandbox_task' &&
+    resolveAutomationTaskLaunchMode({
+      policyId: 'custom_automation',
+      runAsUserId: automation.createdByUserId,
+    }) === 'sandbox_task';
 
   if (automation.scheduleMode !== 'cron' && frequency === 'off') {
     result.skippedReason = 'Automation is disabled.';

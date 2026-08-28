@@ -25,6 +25,7 @@ import {
   FAST_EXECUTION,
   getCommunicationAutomationTargetKind,
   isScheduleOnlyBackgroundAutomationFrequency,
+  resolveAutomationTaskLaunchMode,
   type AutomationTarget,
   type BackgroundAutomationProvider,
   type CustomAutomationScheduleMode,
@@ -46,6 +47,7 @@ export type CustomAutomationListItem = {
   cronExpression: string | null;
   model: string | null;
   executionMode: 'sandbox_task' | 'fast';
+  launchMode: 'fast_session' | 'legacy_sandbox_task' | 'unavailable';
   environmentId: string | null;
   target: OptionalAutomationTarget;
   lastRunAt: Date | null;
@@ -111,6 +113,10 @@ function toListItem(
       : isScheduleOnlyBackgroundAutomationFrequency(row.scheduleMode)
         ? row.scheduleMode
         : 'off';
+  const launchMode = resolveAutomationTaskLaunchMode({
+    policyId: 'custom_automation',
+    runAsUserId: row.createdByUserId,
+  });
 
   return {
     id: row.id,
@@ -121,6 +127,12 @@ function toListItem(
     cronExpression: row.cronExpression,
     model: row.model,
     executionMode: row.executionMode,
+    launchMode:
+      launchMode === 'fast_session'
+        ? 'fast_session'
+        : row.executionMode === 'sandbox_task'
+          ? 'legacy_sandbox_task'
+          : 'unavailable',
     environmentId:
       row.executionMode === 'fast'
         ? FAST_EXECUTION

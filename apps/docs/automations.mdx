@@ -85,6 +85,13 @@ conflict resolution, and remove it when a human should handle the conflict
 instead. Roomote only tries this on labeled PRs that are still active, and it
 skips PRs older than the age cap you set.
 
+Built-in repository scans, audits, issue and CI investigations, PR reviews,
+conflict resolution, setup scans, and snapshot maintenance continue to start
+tasks directly. Those automations either have no human run-as identity, produce
+structured results consumed by another Roomote workflow, or require a sandbox
+by definition. Deterministic alert and stats automations that do not need an
+agent post their result directly without launching a task.
+
 ## Custom automations
 
 Create arbitrary scheduled agent runs with:
@@ -92,7 +99,8 @@ Create arbitrary scheduled agent runs with:
 - a clear **name**
 - the **prompt** Roomote should run
 - a **cadence** (`every hour`, `every 6 hours`, `daily`, or `weekly`)
-- one required **execution target**: **Fast**, a named environment, or **All repositories**
+- one required **delegated task scope**: no default environment, a named
+  environment, or **All repositories**
 - an optional **model** override for the runs; the default follows the
   deployment task model
 - an optional **report destination**: a direct message to the automation owner,
@@ -101,9 +109,9 @@ Create arbitrary scheduled agent runs with:
 Each automation card summarizes its cadence, workspace target, report destination,
 creator, and most recent run.
 
-Use **View previous runs** on an automation card to open the task list
-filtered to that automation's runs. For a custom automation, the history is
-scoped to that specific automation rather than all custom automations.
+Legacy ownerless automations that still run directly in a sandbox show **View
+previous runs** on their automation card. Owned automation results stay with
+their Fast sessions and any tasks delegated from those sessions.
 
 When creating an automation through Roomote chat, ask for **suggested tasks** or
 **launchable follow-ups** if qualifying findings should become tasks that
@@ -121,10 +129,13 @@ five-field cron expression or a natural-language schedule such as “weekdays at
 clarification rather than guessing when the recurrence itself is ambiguous.
 Custom schedules do not support seconds or cron macros.
 
-On each due tick, Roomote either launches a normal task in the selected
-environment (or across all active repositories), or runs the prompt directly in
-**Fast** without starting a sandbox. A Fast run can still delegate a normal task
-when repository or workspace execution is required.
+On each due tick, an owned custom automation starts in **Fast** without a
+sandbox. Fast uses integrations directly when that is enough and delegates a
+normal task only when repository or workspace execution is required. The
+selected task scope controls that delegated task; it does not force every run to
+start a sandbox. Legacy automation records whose owner was deleted retain their
+previous direct sandbox behavior because there is no user identity that can
+authorize a Fast session safely.
 
 Fast runs deliver to every custom-automation report destination: Slack,
 Discord, Microsoft Teams, or Telegram, as either a channel/chat or a direct
@@ -144,9 +155,9 @@ or important findings, meaningful completed results, blockers, and questions
 that need input. Routine success, healthy status, and no-change results stay
 silent unless the automation prompt explicitly asks for a report in those
 cases. The first message starts a thread, later updates continue that same
-thread, and you can reply there to talk to the task. There is no progress
-chatter in between. Without a destination, the run happens silently and its
-results appear only in the task view.
+thread, and you can reply there to continue the Fast session. There is no
+progress chatter in between. Without a destination, the run happens silently
+and its result remains in the stored Fast session.
 
 Unless the prompt asks for a different presentation, custom automation reports
 lead with the result, stay concise, and use short Markdown headings and bullets

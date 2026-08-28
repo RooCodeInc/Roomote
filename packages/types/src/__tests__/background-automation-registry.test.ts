@@ -155,4 +155,42 @@ describe('background automation registry', () => {
       'gitea',
     ]);
   });
+
+  it('classifies every triggerable automation that launches sandbox tasks', () => {
+    expect(
+      (
+        [
+          'conflict_resolver',
+          'suggester',
+          'announcer',
+          'manager_stats',
+          'provider_usage_limit',
+          'sentry_triage',
+          'dependabot_triage',
+          'codeql_triage',
+          'issue_fixer',
+          'security_auditor',
+          'code_quality_auditor',
+          'ci_failure_triage',
+        ] as const
+      ).map((key) => [
+        key,
+        getTriggerableBackgroundAutomationDescriptorByKey(key)
+          ?.taskLaunchPolicyId,
+      ]),
+    ).toEqual([
+      ['conflict_resolver', 'conflict_resolution'],
+      ['suggester', 'suggester_scan'],
+      ['announcer', 'announcer'],
+      ['manager_stats', null],
+      ['provider_usage_limit', null],
+      ['sentry_triage', 'scheduled_triage_scan'],
+      ['dependabot_triage', 'scheduled_triage_scan'],
+      ['codeql_triage', 'scheduled_triage_scan'],
+      ['issue_fixer', 'issue_fixer'],
+      ['security_auditor', 'merged_pr_audit_scan'],
+      ['code_quality_auditor', 'merged_pr_audit_scan'],
+      ['ci_failure_triage', 'ci_failure_triage'],
+    ]);
+  });
 });
