@@ -8,7 +8,7 @@ import {
   useRef,
   useState,
 } from 'react';
-import { useMutation } from '@tanstack/react-query';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 
 import {
@@ -103,6 +103,7 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
   ) {
     const trpc = useTRPC();
     const trpcClient = useTRPCClient();
+    const queryClient = useQueryClient();
     const client = useSandboxClient();
     const {
       rollbackOptimisticPromptSubmission,
@@ -491,6 +492,12 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
             if (!started.success) {
               throw new Error(started.error);
             }
+
+            await queryClient.invalidateQueries({
+              queryKey: trpc.sandboxSession.byTaskId.queryKey({
+                taskId: taskRun.taskId,
+              }),
+            });
           } else {
             await trpcClient.sandboxSession.sendPrompt.mutate({
               taskId: taskRun.taskId,
@@ -533,9 +540,11 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
         pendingUserInputState,
         sending,
         handlePromptChange,
+        queryClient,
         scrollToBottom,
         handleMessageSent,
         taskRun,
+        trpc,
         trpcClient,
         shouldOptimisticallyQueuePrompt,
         rollbackOptimisticPromptSubmission,

@@ -1,7 +1,11 @@
 import { getTaskSummary } from './tasks-api-client.js';
 import { getHarnessLabel, getTaskStatusLabel } from './task-display.js';
 import { textResult, catchError } from './tool-result.js';
-import type { RoomoteConfig, ToolResult } from './types.js';
+import type {
+  RoomoteConfig,
+  TaskSummaryResponse,
+  ToolResult,
+} from './types.js';
 
 /**
  * Lifecycle of the task's environment setup (repository setup commands and
@@ -26,6 +30,36 @@ function getEnvironmentSetupLine(state: string | null): string | null {
   }
 }
 
+function getGoalLines(
+  goal: TaskSummaryResponse['goal'],
+  hasUsedGoalMode: boolean | undefined,
+): string[] {
+  if (!goal) {
+    return hasUsedGoalMode ? ['Goal Mode: used previously'] : [];
+  }
+
+  const status = (() => {
+    switch (goal.status) {
+      case 'active':
+        return 'Active';
+      case 'complete':
+        return 'Completed';
+      case 'blocked':
+        return 'Blocked';
+      case 'budget_limited':
+        return 'Continuation limit reached';
+      default:
+        return 'Used';
+    }
+  })();
+
+  return [
+    `Goal Mode: ${status}`,
+    goal.objective ? `Goal Objective: ${goal.objective}` : null,
+    goal.blockedReason ? `Goal Blocker: ${goal.blockedReason}` : null,
+  ].filter((line): line is string => line !== null);
+}
+
 export async function handleGetTaskSummary(
   params: { taskId: string },
   config: RoomoteConfig,
@@ -39,6 +73,7 @@ export async function handleGetTaskSummary(
       `ID: ${result.id}`,
       `Status: ${getTaskStatusLabel(result)}`,
       result.mode ? `Mode: ${result.mode}` : null,
+      ...getGoalLines(result.goal, result.hasUsedGoalMode),
       harnessLabel ? `Harness: ${harnessLabel}` : null,
       result.repositoryName ? `Repository: ${result.repositoryName}` : null,
       result.linkedEnvironmentName

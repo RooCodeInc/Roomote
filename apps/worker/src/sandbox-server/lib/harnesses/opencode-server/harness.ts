@@ -5369,6 +5369,7 @@ export class OpenCodeServerHarness
       userName: next.userName,
       userImageUrl: next.userImageUrl,
       clientMessageId: next.clientMessageId,
+      goalContext: next.goalContext,
     });
     await this.submitPrompt({
       text: next.text,

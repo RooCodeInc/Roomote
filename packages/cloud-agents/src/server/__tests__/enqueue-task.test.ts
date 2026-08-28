@@ -237,6 +237,8 @@ describe('enqueueTask initiator stamping', () => {
       goalLastContinuationId: expect.stringMatching(/^goal-generation:/),
       goalGenerationIds: [expect.stringMatching(/^goal-generation:/)],
       goalStatus: 'active',
+      goalStartedAt: expect.any(Date),
+      goalEndedAt: null,
       goalMaxContinuations: 4,
       goalContinuationsUsed: 0,
     });

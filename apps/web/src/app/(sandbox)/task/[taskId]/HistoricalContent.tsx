@@ -20,6 +20,7 @@ import { useRetryFailedTaskStart } from '@/hooks/task-runs';
 import { SidebarActions } from './sidebar-actions';
 import { isTaskRunAsleep } from './sidebar-actions/utils';
 import { DraftPromptBanner } from './DraftPromptBanner';
+import { GoalPanel } from './GoalPanel';
 import { Header } from './Header';
 import { Messages } from './Messages';
 import { PreviewCommand } from './PreviewCommand';
@@ -118,6 +119,7 @@ export function HistoricalContent({ session, footer }: HistoricalContentProps) {
                 />
                 {shouldShowWakeTaskInput && taskRun ? (
                   <HistoricalInputTray>
+                    <GoalPanel task={session.task} />
                     <WakeTaskInput
                       taskRun={taskRun}
                       initialPrompt={draftPrompt ?? ''}

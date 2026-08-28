@@ -37,6 +37,16 @@ vi.mock('../helpers', () => ({
     timestamp: 'tasks.timestamp',
     activityAt: 'tasks.activityAt',
     repositoryName: 'tasks.repository_name',
+    goalObjective: 'tasks.goalObjective',
+    goalStatus: 'tasks.goalStatus',
+    goalMaxContinuations: 'tasks.goalMaxContinuations',
+    goalContinuationsUsed: 'tasks.goalContinuationsUsed',
+    goalBlockedReason: 'tasks.goalBlockedReason',
+    goalStartedAt: 'tasks.goalStartedAt',
+    goalEndedAt: 'tasks.goalEndedAt',
+    goalCompletedAt: 'tasks.goalCompletedAt',
+    goalLastContinuationId: 'tasks.goalLastContinuationId',
+    goalGenerationIds: 'tasks.goalGenerationIds',
   },
   getLatestTaskRunsByTaskIds: mockGetLatestTaskRunsByTaskIds,
   visibleTaskHistoryCondition,
@@ -97,11 +107,21 @@ describe('getTaskSummary', () => {
         id: 'task-1',
         title: 'Broken startup',
         mode: 'standard',
-        completed: false,
+        state: 'active',
         repositoryName: 'owner/repo',
         harness: 'opencode-server',
         timestamp: 1,
         activityAt: 2,
+        goalObjective: null,
+        goalStatus: null,
+        goalMaxContinuations: null,
+        goalContinuationsUsed: 0,
+        goalBlockedReason: null,
+        goalStartedAt: null,
+        goalEndedAt: null,
+        goalCompletedAt: null,
+        goalLastContinuationId: null,
+        goalGenerationIds: [],
       },
     ]);
     mockSelect.mockReturnValue({
@@ -137,6 +157,71 @@ describe('getTaskSummary', () => {
       taskRunStatus: 'failed',
       taskRunError: 'Sandbox startup timed out',
       environmentSetupState: 'failed',
+    });
+  });
+
+  it.each([
+    ['active', null, null],
+    ['complete', null, new Date('2026-08-14T12:05:00Z')],
+    ['blocked', 'Waiting for approval', new Date('2026-08-14T12:05:00Z')],
+    ['budget_limited', null, new Date('2026-08-14T12:05:00Z')],
+  ] as const)(
+    'returns durable %s goal metadata without changing the legacy mode',
+    async (goalStatus, goalBlockedReason, goalEndedAt) => {
+      const goalStartedAt = new Date('2026-08-14T12:00:00Z');
+      const goalCompletedAt = goalStatus === 'complete' ? goalEndedAt : null;
+      selectLimitMock.mockResolvedValueOnce([
+        {
+          id: 'task-1',
+          title: 'Count to ten',
+          mode: null,
+          state: 'active',
+          repositoryName: 'owner/repo',
+          harness: 'opencode-server',
+          timestamp: 1,
+          activityAt: 2,
+          goalObjective: 'Count to ten',
+          goalStatus,
+          goalMaxContinuations: 5,
+          goalContinuationsUsed: 2,
+          goalBlockedReason,
+          goalStartedAt,
+          goalEndedAt,
+          goalCompletedAt,
+          goalLastContinuationId: 'goal-generation:1',
+          goalGenerationIds: ['goal-generation:1'],
+        },
+      ]);
+
+      const response = await createApp(authContext).request(
+        'http://localhost/tasks/task-1/summary',
+      );
+
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toMatchObject({
+        mode: null,
+        hasUsedGoalMode: true,
+        goal: {
+          objective: 'Count to ten',
+          status: goalStatus,
+          blockedReason: goalBlockedReason,
+          startedAt: goalStartedAt.toISOString(),
+          endedAt: goalEndedAt?.toISOString() ?? null,
+          generation: 'goal-generation:1',
+        },
+      });
+    },
+  );
+
+  it('explicitly reports that an ordinary task never used goal mode', async () => {
+    const response = await createApp(authContext).request(
+      'http://localhost/tasks/task-1/summary',
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      hasUsedGoalMode: false,
+      goal: null,
     });
   });
 

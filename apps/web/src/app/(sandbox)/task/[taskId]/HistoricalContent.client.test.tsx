@@ -81,6 +81,11 @@ vi.mock('./Header', () => ({
   Header: () => <div>Header</div>,
 }));
 
+vi.mock('./GoalPanel', () => ({
+  GoalPanel: ({ task }: { task?: { goalObjective?: string | null } }) =>
+    task?.goalObjective ? <div>Durable goal status</div> : null,
+}));
+
 vi.mock('./Messages', () => ({
   Messages: ({ footer }: { footer?: ReactNode }) => (
     <div>
@@ -154,6 +159,37 @@ describe('HistoricalContent', () => {
     );
 
     expect(screen.queryByText('Waking up')).not.toBeInTheDocument();
+  });
+
+  it('shows durable goal status above the historical wake input', () => {
+    isTaskRunAsleepMock.mockReturnValue(true);
+
+    render(
+      <HistoricalContent
+        session={
+          {
+            sessionState: 'historical',
+            draftPrompt: null,
+            task: { goalObjective: 'Ship the release' },
+            taskRun: {
+              id: 123,
+              snapshotId: 'snap-123',
+              createdAt: new Date('2026-05-22T20:57:00.000Z'),
+              startedAt: new Date('2026-05-22T20:58:30.000Z'),
+            },
+            taskId: 'task-123',
+            artifacts: [],
+          } as never
+        }
+      />,
+    );
+
+    const goalStatus = screen.getByText('Durable goal status');
+    const wakeInput = screen.getByText('Wake task input');
+    expect(
+      goalStatus.compareDocumentPosition(wakeInput) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
   });
 
   it('shows a transcript error footer when a historical task exits with result.error', () => {

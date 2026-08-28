@@ -335,6 +335,33 @@ describe('AcpTextMessage', () => {
     ).toBeVisible();
   });
 
+  it('does not decorate a user prompt with persisted goal provenance', () => {
+    render(
+      <AcpTextMessage
+        msg={{
+          id: 'message-goal',
+          ts: 123,
+          role: 'user',
+          kind: 'text',
+          partial: false,
+          sessionId: 'session-1',
+          updateType: 'roomote_runtime.user_prompt',
+          text: 'Count to ten',
+          data: {
+            goal: {
+              objective: 'Count to ten',
+              generation: 'goal-generation:1',
+            },
+          },
+        }}
+      />,
+    );
+
+    expect(screen.getByText('Count to ten')).toBeVisible();
+    expect(screen.queryByTestId('goal-origin')).not.toBeInTheDocument();
+    expect(screen.queryByText('Sent as goal')).not.toBeInTheDocument();
+  });
+
   it('renders user text as plain text instead of markdown', () => {
     render(
       <AcpTextMessage

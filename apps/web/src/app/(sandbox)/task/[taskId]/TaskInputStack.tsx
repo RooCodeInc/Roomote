@@ -12,6 +12,7 @@ import { PromptInput, type PromptInputHandle } from './prompt-input';
 import { QueuedMessages } from './QueuedMessages';
 import { ActiveSubtasksList } from './ActiveSubtasksList';
 import { TodoList } from './TodoList';
+import { GoalPanel } from './GoalPanel';
 
 export function TaskInputStack({
   session,
@@ -49,6 +50,7 @@ export function TaskInputStack({
         onVisibleRequestKeyChange={setVisibleEnvVarRequestKey}
       />
       <QueuedMessages />
+      <GoalPanel task={session.task} />
       {!isBooting && (
         <div className={shouldHidePromptInput ? 'hidden' : undefined}>
           <PromptInput

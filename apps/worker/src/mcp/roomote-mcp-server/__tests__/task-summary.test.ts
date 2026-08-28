@@ -93,6 +93,81 @@ describe('handleGetTaskSummary', () => {
     expect(result.content[0]?.text).toContain('Status: Completed');
   });
 
+  it.each([
+    ['active', 'Goal Mode: Active', null],
+    ['complete', 'Goal Mode: Completed', null],
+    ['blocked', 'Goal Mode: Blocked', 'Waiting for approval'],
+  ] as const)(
+    'surfaces %s goal history even when legacy mode is null',
+    async (status, expectedStatus, blockedReason) => {
+      vi.mocked(tasksApiClient.getTaskSummary).mockResolvedValueOnce({
+        id: 'task-goal',
+        title: 'Count to ten',
+        mode: null,
+        completed: status === 'complete',
+        repositoryName: null,
+        harness: 'opencode-server',
+        createdAt: 1700000000,
+        taskRunStatus: 'running',
+        taskPhase: 'executing',
+        taskRunError: null,
+        environmentSetupState: null,
+        linkedEnvironmentId: null,
+        linkedEnvironmentName: null,
+        hasUsedGoalMode: true,
+        goal: {
+          objective: 'Count to ten',
+          status,
+          maxContinuations: 5,
+          continuationsUsed: 1,
+          blockedReason,
+          completedAt: status === 'complete' ? '2026-08-14T12:00:00Z' : null,
+          generation: 'goal-generation:1',
+        },
+      });
+
+      const result = await handleGetTaskSummary(
+        { taskId: 'task-goal' },
+        config,
+      );
+      const text = result.content[0]?.text ?? '';
+
+      expect(text).toContain(expectedStatus);
+      expect(text).toContain('Goal Objective: Count to ten');
+      expect(text).not.toMatch(/(^|\n)Mode:/);
+      if (blockedReason) {
+        expect(text).toContain(`Goal Blocker: ${blockedReason}`);
+      }
+    },
+  );
+
+  it('does not add goal output for a non-goal task', async () => {
+    vi.mocked(tasksApiClient.getTaskSummary).mockResolvedValueOnce({
+      id: 'task-ordinary',
+      title: 'Ordinary task',
+      mode: null,
+      completed: false,
+      repositoryName: null,
+      harness: 'opencode-server',
+      createdAt: 1700000000,
+      taskRunStatus: 'running',
+      taskPhase: 'executing',
+      taskRunError: null,
+      environmentSetupState: null,
+      linkedEnvironmentId: null,
+      linkedEnvironmentName: null,
+      hasUsedGoalMode: false,
+      goal: null,
+    });
+
+    const result = await handleGetTaskSummary(
+      { taskId: 'task-ordinary' },
+      config,
+    );
+
+    expect(result.content[0]?.text).not.toContain('Goal');
+  });
+
   it('includes the latest task run error when present', async () => {
     vi.mocked(tasksApiClient.getTaskSummary).mockResolvedValueOnce({
       id: 'task-3',

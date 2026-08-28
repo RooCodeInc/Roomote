@@ -49,6 +49,11 @@ export async function getTaskSummary(
           columns: { id: true, name: true },
         })
       : null;
+    const hasUsedGoalMode =
+      typeof task.goalObjective === 'string' ||
+      task.goalStatus != null ||
+      (Array.isArray(task.goalGenerationIds) &&
+        task.goalGenerationIds.length > 0);
 
     return c.json({
       id: task.id,
@@ -65,6 +70,20 @@ export async function getTaskSummary(
       environmentSetupState: latestRun?.environmentSetupState ?? null,
       linkedEnvironmentId: linkedEnvironmentId ?? null,
       linkedEnvironmentName: linkedEnvironment?.name ?? null,
+      hasUsedGoalMode,
+      goal: hasUsedGoalMode
+        ? {
+            objective: task.goalObjective ?? null,
+            status: task.goalStatus ?? null,
+            maxContinuations: task.goalMaxContinuations ?? null,
+            continuationsUsed: task.goalContinuationsUsed ?? 0,
+            blockedReason: task.goalBlockedReason ?? null,
+            startedAt: task.goalStartedAt ?? null,
+            endedAt: task.goalEndedAt ?? null,
+            completedAt: task.goalCompletedAt ?? null,
+            generation: task.goalLastContinuationId ?? null,
+          }
+        : null,
     });
   } catch (error) {
     logHandlerError('getTaskSummary', error);

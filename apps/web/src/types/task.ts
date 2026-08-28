@@ -50,6 +50,10 @@ export const taskSchema = z.object({
   // the by-id command; absent from trimmed list rows).
   prompt: z.string().nullable().optional(),
   draftPrompt: z.string().nullable().optional(),
+  goalObjective: z.string().nullable().optional(),
+  goalStartedAt: z.coerce.date().nullable().optional(),
+  goalEndedAt: z.coerce.date().nullable().optional(),
+  goalGenerationIds: z.array(z.string()).optional(),
   slackChannelId: z.string().nullable().optional(),
   slackThreadTs: z.string().nullable().optional(),
   linearSessionId: z.string().nullable().optional(),

@@ -134,6 +134,7 @@ export async function prepareTaskGoalActivation(input: {
   const activationUuid = randomUUID();
   const activationId = `${GOAL_ACTIVATION_PREFIX}${activationUuid}`;
   const generationId = `${GOAL_GENERATION_PREFIX}${activationUuid}`;
+  const startedAt = new Date();
   const previous = await db.transaction(async (tx) => {
     const [task] = await tx
       .select()
@@ -153,6 +154,8 @@ export async function prepareTaskGoalActivation(input: {
         goalMaxContinuations: input.goal.maxContinuations,
         goalContinuationsUsed: 0,
         goalBlockedReason: null,
+        goalStartedAt: startedAt,
+        goalEndedAt: null,
         goalCompletedAt: null,
         goalLastContinuationId: activationId,
         goalContinuationIds: [],
@@ -202,6 +205,8 @@ export async function prepareTaskGoalActivation(input: {
           goalMaxContinuations: previous.goalMaxContinuations,
           goalContinuationsUsed: previous.goalContinuationsUsed,
           goalBlockedReason: previous.goalBlockedReason,
+          goalStartedAt: previous.goalStartedAt,
+          goalEndedAt: previous.goalEndedAt,
           goalCompletedAt: previous.goalCompletedAt,
           goalLastContinuationId: previous.goalLastContinuationId,
           goalContinuationIds: previous.goalContinuationIds,
@@ -285,6 +290,7 @@ export async function markTaskGoalForRun(
             ? {
                 goalStatus: 'blocked',
                 goalBlockedReason: reason,
+                goalEndedAt: new Date(),
                 goalBlockerCandidateReason: null,
                 goalBlockerCandidateCount: 0,
                 goalBlockerLastContinuationUsed: null,
@@ -344,12 +350,14 @@ export async function markTaskGoalForRun(
     };
   }
 
+  const completedAt = new Date();
   const [updated] = await db
     .update(tasks)
     .set({
       goalStatus: input.status,
       goalBlockedReason: null,
-      goalCompletedAt: new Date(),
+      goalEndedAt: completedAt,
+      goalCompletedAt: completedAt,
       goalBlockerCandidateReason: null,
       goalBlockerCandidateCount: 0,
       goalBlockerLastContinuationUsed: null,
@@ -457,7 +465,11 @@ export async function claimTaskGoalContinuationForRun(input: {
 
   const [limited] = await db
     .update(tasks)
-    .set({ goalStatus: 'budget_limited', updatedAt: new Date() })
+    .set({
+      goalStatus: 'budget_limited',
+      goalEndedAt: new Date(),
+      updatedAt: new Date(),
+    })
     .where(
       and(
         eq(tasks.id, current.id),
@@ -499,6 +511,7 @@ export async function releaseTaskGoalContinuationForRun(input: {
     .update(tasks)
     .set({
       goalStatus: 'active',
+      goalEndedAt: null,
       goalContinuationsUsed: sql`GREATEST(${tasks.goalContinuationsUsed} - 1, 0)`,
       goalLastContinuationId: releasedGeneration,
       goalContinuationIds: sql`array_remove(${tasks.goalContinuationIds}, ${input.continuationId})`,
