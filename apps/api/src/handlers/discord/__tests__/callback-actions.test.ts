@@ -12,7 +12,6 @@ const mocks = vi.hoisted(() => ({
   finalizeWorkItem: vi.fn(),
   releaseWorkItem: vi.fn(),
   handlePrReviewAction: vi.fn(),
-  hasFastDefault: vi.fn(),
   processFastAgentMessage: vi.fn(),
 }));
 
@@ -45,7 +44,6 @@ vi.mock('@roomote/sdk/server', () => ({
   findDiscordMappedUserId: mocks.findMappedUser,
 }));
 vi.mock('../../fast-agent-entry.js', () => ({
-  hasCommunicationsFastModeDefault: mocks.hasFastDefault,
   resolveFastAgentEntryMode: ({
     userDefaultEnabled,
     fastAvailable,
@@ -94,7 +92,6 @@ describe('Discord component callbacks', () => {
     mocks.reply.mockResolvedValue({ messageId: 'response-1' });
     mocks.findMappedUser.mockResolvedValue('user-1');
     mocks.findSuggestionByMessage.mockResolvedValue('suggestion-1');
-    mocks.hasFastDefault.mockResolvedValue(false);
     mocks.processFastAgentMessage.mockResolvedValue({ accepted: true });
     mocks.releaseWorkItem.mockResolvedValue(true);
     mocks.resolveWorkspace.mockResolvedValue({
@@ -173,7 +170,6 @@ describe('Discord component callbacks', () => {
   });
 
   it('starts a Fast session for a router-backed suggestion when Fast is the default', async () => {
-    mocks.hasFastDefault.mockResolvedValue(true);
     mocks.claimSuggestionByMessage.mockResolvedValue({
       outcome: 'claimed',
       suggestion: {
@@ -234,7 +230,7 @@ describe('Discord component callbacks', () => {
     });
   });
 
-  it('starts a coding task for a router-backed suggestion when coding is the default', async () => {
+  it('starts a coding task for a pinned suggestion', async () => {
     const claimedAt = new Date('2026-08-28T00:00:00.000Z');
     mocks.claimSuggestionByMessage.mockResolvedValue({
       outcome: 'claimed',
@@ -245,7 +241,7 @@ describe('Discord component callbacks', () => {
         investigationContext: null,
         targetRepositoryFullName: null,
         targetEnvironmentId: null,
-        usesRouterLaunch: true,
+        usesRouterLaunch: false,
         launchClaimedAt: claimedAt,
       },
     });
@@ -294,7 +290,6 @@ describe('Discord component callbacks', () => {
 
   it('releases the suggestion when the Fast session is busy', async () => {
     const claimedAt = new Date('2026-08-28T00:00:00.000Z');
-    mocks.hasFastDefault.mockResolvedValue(true);
     mocks.processFastAgentMessage.mockResolvedValue({
       accepted: false,
       reason: 'Fast session is busy.',
