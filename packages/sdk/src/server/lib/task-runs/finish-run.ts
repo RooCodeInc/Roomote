@@ -734,32 +734,37 @@ async function cleanupGithubPrReviewArtifacts(
       continue;
     }
 
-    if (checkRunId) {
-      try {
-        token = await createTaskRunGitHubToken(run);
-        const { data: checkRun } = await getCheckRun(token, {
-          owner,
-          repo,
-          check_run_id: checkRunId,
-        });
-        const owningRunId = Number(
-          /^roomote-review:(\d+)$/.exec(checkRun.external_id ?? '')?.[1],
-        );
+    if (!checkRunId) {
+      console.log(
+        `[finishRun] Skipping PR review cleanup for run ${run.id}; no current check owner is available`,
+      );
+      continue;
+    }
 
-        if (!Number.isFinite(owningRunId) || owningRunId !== run.id) {
-          console.log(
-            `[finishRun] Skipping PR review cleanup for run ${run.id}; check ${checkRunId} belongs to ${Number.isFinite(owningRunId) ? `run ${owningRunId}` : 'an unknown run'}`,
-          );
-          continue;
-        }
-      } catch (error) {
-        console.error(
-          `[finishRun] Failed to verify PR review check ownership for run ${run.id}: ${
-            error instanceof Error ? error.message : String(error)
-          }`,
+    try {
+      token = await createTaskRunGitHubToken(run);
+      const { data: checkRun } = await getCheckRun(token, {
+        owner,
+        repo,
+        check_run_id: checkRunId,
+      });
+      const owningRunId = Number(
+        /^roomote-review:(\d+)$/.exec(checkRun.external_id ?? '')?.[1],
+      );
+
+      if (!Number.isFinite(owningRunId) || owningRunId !== run.id) {
+        console.log(
+          `[finishRun] Skipping PR review cleanup for run ${run.id}; check ${checkRunId} belongs to ${Number.isFinite(owningRunId) ? `run ${owningRunId}` : 'an unknown run'}`,
         );
         continue;
       }
+    } catch (error) {
+      console.error(
+        `[finishRun] Failed to verify PR review check ownership for run ${run.id}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      continue;
     }
 
     if (prRow.githubReactionId) {

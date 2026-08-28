@@ -2382,6 +2382,28 @@ describe('finishRun', () => {
       expect(mockUpdateCheckRun).not.toHaveBeenCalled();
     });
 
+    it('does not finalize shared review artifacts without a current check linkage', async () => {
+      mockFindFirstRun.mockResolvedValue(
+        makeRun(
+          { payloadKind: TaskPayloadKind.GithubPrReview },
+          { workflow: 'pr_review', surface: 'github' },
+        ),
+      );
+      mockFindManyTaskPullRequests.mockResolvedValue([
+        { ...reviewPrRow, githubReactionId: 789 },
+      ]);
+      mockFindFirstTaskPullRequest.mockResolvedValueOnce({
+        githubCheckRunId: null,
+      });
+
+      await finishRun({ id: 1, status: RunStatus.Failed });
+
+      expect(mockGetCheckRun).not.toHaveBeenCalled();
+      expect(mockDeleteReaction).not.toHaveBeenCalled();
+      expect(mockFinalizeGithubPrReviewComment).not.toHaveBeenCalled();
+      expect(mockUpdateCheckRun).not.toHaveBeenCalled();
+    });
+
     it('refreshes a missing check id when publication races with finalization', async () => {
       mockFindFirstRun.mockResolvedValue(
         makeRun(
