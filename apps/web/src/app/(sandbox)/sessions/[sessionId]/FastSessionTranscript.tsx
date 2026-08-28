@@ -248,6 +248,9 @@ export function FastSessionTranscript({
           sessionId,
           text: prepared.text,
           ...(images.length > 0 ? { images } : {}),
+          ...(prepared.attachmentTexts?.length
+            ? { attachmentTexts: prepared.attachmentTexts }
+            : {}),
           model: message.model ?? null,
           reasoningEffort: message.reasoningEffort ?? null,
         });

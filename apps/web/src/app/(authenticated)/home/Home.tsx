@@ -102,6 +102,7 @@ type SubmissionSnapshot = {
   branch?: string;
   description?: string;
   images?: string[];
+  attachmentTexts?: string[];
   blank: boolean;
 };
 
@@ -411,6 +412,7 @@ export function NewTaskForm({
     async (payload: {
       text: string;
       images?: string[];
+      attachmentTexts?: string[];
       model?: string;
     }): Promise<void> => {
       // A second submit while the first is in flight would mint a second
@@ -509,6 +511,7 @@ export function NewTaskForm({
         description:
           preparedPrompt.text.length > 0 ? preparedPrompt.text : undefined,
         images: preparedPrompt.images,
+        attachmentTexts: preparedPrompt.attachmentTexts,
         blank: preparedPrompt.text.length === 0,
       };
 
@@ -519,6 +522,7 @@ export function NewTaskForm({
         await startFastSession({
           text: submission.description ?? '',
           images: submission.images,
+          attachmentTexts: submission.attachmentTexts,
           model: selectedModelId,
         });
         return;
@@ -531,6 +535,7 @@ export function NewTaskForm({
         await startFastSession({
           text: submission.description ?? '',
           images: submission.images,
+          attachmentTexts: submission.attachmentTexts,
           model: selectedModelId,
         });
         return;

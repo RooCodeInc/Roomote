@@ -127,10 +127,11 @@ describe('buildFastAgentSystemPrompt', () => {
       'Call it immediately, before an acknowledgement or other user-visible response',
     );
     expect(prompt).toContain('kickoffMessage');
+    expect(prompt).toContain('"includeAttachments"');
     expect(prompt).toContain('"includeImages"');
-    expect(prompt).toContain('images are not attached by default');
+    expect(prompt).toContain('attachments are not forwarded by default');
     expect(prompt).toContain(
-      'supported images from the active conversation turn are relevant to that instruction',
+      'supported attachments from the active conversation turn are relevant to that instruction',
     );
     expect(prompt).toContain("describing the user's work now underway");
     expect(prompt).toContain(

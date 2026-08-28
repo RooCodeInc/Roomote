@@ -34,6 +34,7 @@ import { z } from 'zod';
 
 import packageJson from '../../../../../package.json';
 
+import { appendAttachmentTextsToPromptText } from '../../file-attachments';
 import {
   buildSlackThreadPromptBlocks,
   wrapSlackMessage,
@@ -238,12 +239,14 @@ const launchTaskArgsSchema = z.object({
   prompt: z.string().trim().min(1),
   environmentId: z.string().trim().min(1).nullable().optional(),
   model: z.string().trim().min(1).nullable().optional(),
+  includeAttachments: z.boolean().optional().default(false),
   includeImages: z.boolean().optional().default(false),
   kickoffMessage: z.string().trim().min(1),
 });
 const taskMessageArgsSchema = z.object({
   taskId: z.string().trim().min(1).nullable().optional(),
   message: z.string().trim().min(1),
+  includeAttachments: z.boolean().optional().default(false),
   includeImages: z.boolean().optional().default(false),
 });
 const taskIdArgsSchema = z.object({
@@ -751,6 +754,7 @@ function toolFailure(error: unknown): { success: false; error: string } {
 export async function answerFastAgentQuestion({
   question,
   images = [],
+  attachmentTexts = [],
   currentMessageAgentContext,
   threadContext = [],
   userId,
@@ -771,6 +775,7 @@ export async function answerFastAgentQuestion({
 }: {
   question: string;
   images?: string[];
+  attachmentTexts?: string[];
   currentMessageAgentContext?: string;
   threadContext?: FastAgentThreadMessage[];
   userId: string;
@@ -1633,6 +1638,7 @@ export async function answerFastAgentQuestion({
               args.prompt,
               args.environmentId ?? null,
               args.model ?? null,
+              args.includeAttachments,
               args.includeImages,
             ])}`;
             if (completedTaskActions.has(signature)) {
@@ -1678,9 +1684,18 @@ export async function answerFastAgentQuestion({
               kickoffDelivered = true;
             };
             throwIfTurnCancelled();
+            const prompt = args.includeAttachments
+              ? appendAttachmentTextsToPromptText({
+                  text: args.prompt,
+                  attachmentTexts,
+                })
+              : args.prompt;
             const result = await adapter.launchTask({
-              prompt: args.prompt,
-              ...(args.includeImages && images.length > 0 ? { images } : {}),
+              prompt,
+              ...((args.includeAttachments || args.includeImages) &&
+              images.length > 0
+                ? { images }
+                : {}),
               environmentId: args.environmentId ?? null,
               model: args.model ?? null,
               parentSessionId: session.id,
@@ -1711,12 +1726,21 @@ export async function answerFastAgentQuestion({
             }
             completedTaskActions.add(signature);
             throwIfTurnCancelled();
+            const message = args.includeAttachments
+              ? appendAttachmentTextsToPromptText({
+                  text: args.message,
+                  attachmentTexts,
+                })
+              : args.message;
             const result = await sendFastAgentTaskMessage(
               { userId, apiBaseUrl },
               {
                 taskId: target.taskId,
-                message: args.message,
-                ...(args.includeImages && images.length > 0 ? { images } : {}),
+                message,
+                ...((args.includeAttachments || args.includeImages) &&
+                images.length > 0
+                  ? { images }
+                  : {}),
               },
             );
             return result;

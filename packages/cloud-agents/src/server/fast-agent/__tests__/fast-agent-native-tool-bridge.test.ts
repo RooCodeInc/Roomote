@@ -116,9 +116,12 @@ describe('Fast native OpenCode tool bridge', () => {
     expect(replySource).toContain('Launchable follow-ups');
     expect(launchTaskSource).toContain('model: z.string().min(1)');
     expect(launchTaskSource).toContain('deployment-enabled model ID');
+    expect(launchTaskSource).toContain(
+      'includeAttachments: z.boolean().optional()',
+    );
     expect(launchTaskSource).toContain('includeImages: z.boolean().optional()');
     expect(launchTaskSource).toContain(
-      'Current-turn images are attached only when includeImages is true',
+      'Supported current-turn attachments are forwarded only when includeAttachments is true',
     );
     expect(launchTaskSource).toContain('defaults to false');
     expect(launchTaskSource).toContain(
@@ -135,10 +138,13 @@ describe('Fast native OpenCode tool bridge', () => {
       'to run against all active repositories',
     );
     expect(sendTaskMessageSource).toContain(
+      'includeAttachments: z.boolean().optional()',
+    );
+    expect(sendTaskMessageSource).toContain(
       'includeImages: z.boolean().optional()',
     );
     expect(sendTaskMessageSource).toContain(
-      'Current-turn images are attached only when includeImages is true',
+      'Supported current-turn attachments are forwarded only when includeAttachments is true',
     );
     expect(sendTaskMessageSource).toContain('defaults to false');
     expect(showWidgetSource).toContain('invoke("show_widget"');
