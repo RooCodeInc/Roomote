@@ -3,7 +3,11 @@
 import { useCallback, useEffect, useState } from 'react';
 import { toast } from 'sonner';
 
-import { DEFAULT_MANAGED_DEPLOYMENT_ACCESS } from '@roomote/types';
+import {
+  DEFAULT_MANAGED_DEPLOYMENT_ACCESS,
+  getTaskToolInvocation,
+  type TaskToolActionId,
+} from '@roomote/types';
 
 import type { PromptInputMessage } from '@/components/ai-elements';
 import { TaskPromptInput } from '@/components/tasks';
@@ -17,10 +21,12 @@ import { cn } from '@/lib/utils';
 
 import { useOptimisticPromptSubmission } from './prompt-input/useOptimisticPromptSubmission';
 import { TaskModelSwitcher } from './prompt-input/TaskModelSwitcher';
+import { TaskToolsMenu } from './sidebar-actions/TaskToolsButton';
+import { shouldShowTaskToolsActions } from './sidebar-actions/utils';
 
 interface WakeTaskInputProps {
   taskRun: Pick<TaskRunDetail, 'id' | 'snapshotId' | 'taskId'> &
-    Partial<Pick<TaskRunDetail, 'harness' | 'payload'>>;
+    Partial<Pick<TaskRunDetail, 'harness' | 'payload' | 'payloadKind'>>;
   initialPrompt?: string;
   embedded?: boolean;
 }
@@ -133,6 +139,13 @@ export function WakeTaskInput({
     }
   };
 
+  const handleTaskToolSelect = (actionId: TaskToolActionId) => {
+    void handleSubmit({
+      text: getTaskToolInvocation(actionId, taskRun.harness),
+      files: [],
+    });
+  };
+
   const input = (
     <div
       className={cn(
@@ -150,13 +163,21 @@ export function WakeTaskInput({
         submitWithMetaKey={false}
         submitIcon={promptText.trim().length === 0 ? <Sun /> : undefined}
         tools={
-          taskRun.harness === 'opencode-server' ? (
-            <TaskModelSwitcher
-              taskRun={taskRun}
-              disabled={isBusy}
-              onPendingChange={handleModelSettingsPendingChange}
-            />
-          ) : undefined
+          <>
+            {shouldShowTaskToolsActions(taskRun.payloadKind) && (
+              <TaskToolsMenu
+                onSelect={handleTaskToolSelect}
+                disabled={isBusy}
+              />
+            )}
+            {taskRun.harness === 'opencode-server' && (
+              <TaskModelSwitcher
+                taskRun={taskRun}
+                disabled={isBusy}
+                onPendingChange={handleModelSettingsPendingChange}
+              />
+            )}
+          </>
         }
         surface={embedded ? 'embedded' : 'default'}
         submitDisabledReason={taskLaunchDisabledReason}

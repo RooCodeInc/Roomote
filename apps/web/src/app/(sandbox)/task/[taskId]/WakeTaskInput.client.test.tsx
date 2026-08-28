@@ -172,6 +172,27 @@ vi.mock('./prompt-input/TaskModelSwitcher', () => ({
   },
 }));
 
+vi.mock('./sidebar-actions/TaskToolsButton', () => ({
+  TaskToolsMenu: ({
+    disabled,
+    onSelect,
+  }: {
+    disabled?: boolean;
+    onSelect: (actionId: 'simplify') => void;
+  }) => (
+    <div>
+      <button type="button" disabled={disabled} aria-label="Task Tools" />
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => onSelect('simplify')}
+      >
+        Simplify changed code
+      </button>
+    </div>
+  ),
+}));
+
 import { WakeTaskInput } from './WakeTaskInput';
 
 function renderWithQueryClient(ui: React.ReactNode, queryClient: QueryClient) {
@@ -275,6 +296,49 @@ describe('WakeTaskInput', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));
     expect(restoreMutateAsyncMock).not.toHaveBeenCalled();
+  });
+
+  it('runs a task tool as the wake-up prompt', async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        queries: { retry: false },
+      },
+    });
+    preparePromptAttachmentsMock.mockImplementation(
+      ({ text }: { text: string }) => Promise.resolve({ text }),
+    );
+
+    renderWithQueryClient(
+      <WakeTaskInput
+        taskRun={{
+          id: 42,
+          snapshotId: 'snap-42',
+          taskId: 'task-42',
+          harness: 'opencode-server',
+          payloadKind: 'standard',
+        }}
+      />,
+      queryClient,
+    );
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Simplify changed code' }),
+    );
+
+    await waitFor(() => {
+      expect(restoreMutateAsyncMock).toHaveBeenCalledWith({
+        sourceSnapshotId: 'snap-42',
+        sourceRunId: 42,
+        clientMessageId: expect.any(String),
+        resumePrompt: '$simplify',
+      });
+    });
+
+    expect(appendOptimisticAcpEventMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: '$simplify',
+      }),
+    );
   });
 
   it('prefills the sleeping draft, appends an optimistic transcript row, and resumes the task with a deferred prompt', async () => {
