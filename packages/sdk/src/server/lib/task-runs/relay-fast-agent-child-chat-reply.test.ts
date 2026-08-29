@@ -37,6 +37,38 @@ describe('relayFastAgentChildChatReply', () => {
     mocks.deliverParentEvent.mockResolvedValue('delivered');
   });
 
+  it.each([
+    ['ack', 'The child started investigating.'],
+    ['progress', 'The child is running targeted tests.'],
+    ['closeout', 'The child completed the requested fix.'],
+    ['clarification', 'The child needs a decision.'],
+  ] as const)(
+    'routes child %s messages through the Fast parent',
+    async (purpose, message) => {
+      await expect(
+        relayFastAgentChildChatReply({
+          runId: 42,
+          taskId: 'task-1',
+          deliverySignature: purpose.repeat(16),
+          purpose,
+          message,
+        }),
+      ).resolves.toEqual({ relayed: true });
+
+      expect(mocks.deliverParentEvent).toHaveBeenCalledWith({
+        parent,
+        event: {
+          type: 'child_message',
+          taskId: 'task-1',
+          runId: 42,
+          messageId: expect.stringMatching(/^[a-f0-9]{64}$/),
+          purpose,
+          message,
+        },
+      });
+    },
+  );
+
   it('sends the child update only to the Fast parent event path', async () => {
     await expect(
       relayFastAgentChildChatReply({
