@@ -41,13 +41,12 @@ function mentionsDiscordUserOtherThanBotWithoutMentioningBot(
   return mentionedUserIds.size > 0 && !mentionedUserIds.has(botUserId ?? '');
 }
 
-function mentionsDiscordUserOtherThanBotOrUser(
+function mentionsDiscordUserOtherThanBot(
   text: string,
   botUserId: string | undefined,
-  discordUserId: string,
 ): boolean {
   return getMentionedDiscordUserIds(text).some(
-    (userId) => userId !== botUserId && userId !== discordUserId,
+    (userId) => userId !== botUserId,
   );
 }
 
@@ -66,7 +65,6 @@ function isHumanAuthoredHistoryMessage(
 function toSharedHistoryMessages(
   threadMessages: DiscordThreadHistoryMessage[],
   botUserId: string,
-  senderDiscordUserId: string,
 ): UnmentionedThreadHistoryMessage[] {
   return threadMessages.map((message) => {
     const isBot = message.botId === botUserId;
@@ -76,10 +74,9 @@ function toSharedHistoryMessages(
       authorUserId: isHuman ? message.user : isBot ? botUserId : null,
       isBot,
       mentionsBot: mentionsDiscordBotInText(message.text, botUserId),
-      mentionsSomebodyElse: mentionsDiscordUserOtherThanBotOrUser(
+      mentionsSomebodyElse: mentionsDiscordUserOtherThanBot(
         message.text,
         botUserId,
-        senderDiscordUserId,
       ),
     };
   });
@@ -174,11 +171,7 @@ export async function shouldRouteUnmentionedDiscordThreadReplyToAgent(params: {
     isThreadRootAuthor,
     isAutomationReportThread: params.isAutomationReportThread,
     isOpenConversationThread: params.isOpenConversationThread,
-    threadMessages: toSharedHistoryMessages(
-      threadMessages,
-      botUserId,
-      senderDiscordUserId,
-    ),
+    threadMessages: toSharedHistoryMessages(threadMessages, botUserId),
     compareMessageIds: compareBigIntMessageIds,
   });
 

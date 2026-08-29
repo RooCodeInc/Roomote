@@ -14,10 +14,7 @@ export type UnmentionedThreadHistoryMessage = {
   isBot: boolean;
   /** True when this history message @-mentions the Roomote bot. */
   mentionsBot: boolean;
-  /**
-   * True when this history message mentions a principal other than the bot
-   * and other than the current sender (another human or another app).
-   */
+  /** True when this history message mentions a principal other than the bot. */
   mentionsSomebodyElse: boolean;
 };
 

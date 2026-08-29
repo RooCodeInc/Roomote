@@ -191,6 +191,30 @@ describe('shouldRouteUnmentionedSlackThreadReplyToAgent', () => {
     ).resolves.toMatchObject({ shouldRoute: true });
   });
 
+  it('keeps a reply silent when the previous participant addressed the sender', async () => {
+    hasFastAgentSessionMock.mockResolvedValue(true);
+    findRoomoteOwnedSlackThreadMock.mockResolvedValue(null);
+    fetchThreadMessagesMock.mockResolvedValue([
+      humanMessage('U111', THREAD_TS, '<@UBOT> !fast hi'),
+      botMessage('101.000', 'Hi there.'),
+      humanMessage('U111', '102.000', '<@U222> what do you think?'),
+    ]);
+
+    await expect(
+      routeDecision(
+        threadReplyEvent({
+          user: 'U222',
+          ts: '103.000',
+          text: 'I agree',
+        }),
+      ),
+    ).resolves.toEqual({ shouldRoute: false });
+    expect(markSlackThreadExplicitMentionRequiredMock).toHaveBeenCalledWith(
+      'C123',
+      THREAD_TS,
+    );
+  });
+
   it('keeps a peer-directed reply silent in an existing fast-agent thread', async () => {
     hasFastAgentSessionMock.mockResolvedValue(true);
     findRoomoteOwnedSlackThreadMock.mockResolvedValue(null);

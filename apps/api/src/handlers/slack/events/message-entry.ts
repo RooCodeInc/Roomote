@@ -92,7 +92,6 @@ import {
 import {
   mentionsSlackBot,
   mentionsSlackUserOtherThanBot,
-  mentionsSlackUserOtherThanBotOrUser,
   mentionsSlackUserOtherThanBotWithoutMentioningBot,
 } from '../helpers/mention-routing.js';
 import { postSlackThreadMarkdownMessage } from '../helpers/thread-posting.js';
@@ -580,10 +579,9 @@ export async function shouldRouteUnmentionedSlackThreadReplyToAgent(params: {
         authorUserId: isHumanAuthored ? message.user : isBot ? botUserId : null,
         isBot,
         mentionsBot: mentionsSlackBot(message, slackInstallation.botUserId),
-        mentionsSomebodyElse: mentionsSlackUserOtherThanBotOrUser(
+        mentionsSomebodyElse: mentionsSlackUserOtherThanBot(
           message,
           slackInstallation.botUserId,
-          event.user,
         ),
       };
     },
