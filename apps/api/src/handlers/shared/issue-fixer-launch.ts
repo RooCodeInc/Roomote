@@ -104,6 +104,7 @@ export async function launchIssueFixerTriage({
             description,
             visibleInTranscript: false,
             sourceControlProvider,
+            sourceEventUrl: issue.url,
             ...(sourceControlHost ? { sourceControlHost } : {}),
           },
         },

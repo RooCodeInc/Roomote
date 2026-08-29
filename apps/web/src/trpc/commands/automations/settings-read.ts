@@ -1,9 +1,16 @@
 import {
+  buildSlackThreadPermalink,
+  getCommunicationChannelFromTaskPayload,
+  getCommunicationMessageIdFromTaskPayload,
+  getCommunicationTeamDomainFromTaskPayload,
+  getCommunicationTeamIdFromTaskPayload,
+  getCommunicationThreadIdFromTaskPayload,
   USER_FACING_AUTOMATION_KEYS,
   type BackgroundAutomationKey,
   type PrReviewSettings,
   type TaskTrigger,
   type TaskState,
+  type TaskSurface,
 } from '@roomote/types';
 import {
   db,
@@ -15,6 +22,7 @@ import {
   getBackgroundAgentSettingsWithAutomationsForDeployment,
   inArray,
   resolveTelegramRuntimeCredentials,
+  taskRuns,
   tasks,
   type Automation,
 } from '@roomote/db/server';
@@ -66,6 +74,8 @@ type AutomationTaskRunSummary = {
   trigger: TaskTrigger;
   state: TaskState;
   createdAt: Date;
+  sourceUrl: string | null;
+  sourceLabel: string | null;
 };
 
 type AutomationStatusSummary = {
@@ -93,6 +103,64 @@ const RUN_HISTORY_KEYS: BackgroundAutomationKey[] = [
 
 const RUN_HISTORY_LIMIT_PER_AUTOMATION = 5;
 
+function getSafeSourceUrl(payload: unknown): string | null {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    return null;
+  }
+
+  const record = payload as Record<string, unknown>;
+  const candidate =
+    typeof record.sourceEventUrl === 'string'
+      ? record.sourceEventUrl
+      : typeof record.issueUrl === 'string'
+        ? record.issueUrl
+        : getSafeSourceUrl(record.payload);
+
+  if (!candidate) return null;
+
+  try {
+    const url = new URL(candidate);
+    return url.protocol === 'https:' || url.protocol === 'http:'
+      ? url.toString()
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function resolveAutomationRunSource(params: {
+  payload: unknown;
+  surface: TaskSurface;
+  trigger: TaskTrigger;
+  slackChannelId: string | null;
+  slackThreadTs: string | null;
+}): Pick<AutomationTaskRunSummary, 'sourceUrl' | 'sourceLabel'> {
+  if (params.surface === 'slack' && params.trigger === 'message') {
+    const sourceUrl = buildSlackThreadPermalink({
+      slackWorkspaceDomain: getCommunicationTeamDomainFromTaskPayload(
+        params.payload,
+      ),
+      slackTeamId: getCommunicationTeamIdFromTaskPayload(params.payload),
+      slackChannelId:
+        getCommunicationChannelFromTaskPayload(params.payload) ??
+        params.slackChannelId,
+      threadTs:
+        getCommunicationThreadIdFromTaskPayload(params.payload) ??
+        params.slackThreadTs,
+      messageTs: getCommunicationMessageIdFromTaskPayload(params.payload),
+    });
+
+    if (sourceUrl) {
+      return { sourceUrl, sourceLabel: 'Open source message' };
+    }
+  }
+
+  const sourceEventUrl = getSafeSourceUrl(params.payload);
+  return sourceEventUrl
+    ? { sourceUrl: sourceEventUrl, sourceLabel: 'Open source issue' }
+    : { sourceUrl: null, sourceLabel: null };
+}
+
 async function listRecentAutomationTasks(): Promise<
   Partial<Record<BackgroundAutomationKey, AutomationTaskRunSummary[]>>
 > {
@@ -104,11 +172,38 @@ async function listRecentAutomationTasks(): Promise<
       state: tasks.state,
       createdAt: tasks.createdAt,
       initiatorAutomation: tasks.initiatorAutomation,
+      surface: tasks.surface,
+      slackChannelId: tasks.slackChannelId,
+      slackThreadTs: tasks.slackThreadTs,
     })
     .from(tasks)
     .where(inArray(tasks.initiatorAutomation, RUN_HISTORY_KEYS))
     .orderBy(desc(tasks.createdAt))
     .limit(RUN_HISTORY_KEYS.length * RUN_HISTORY_LIMIT_PER_AUTOMATION * 2);
+
+  const latestPayloadByTaskId = new Map<string, unknown>();
+  if (rows.length > 0) {
+    const runRows = await db
+      .select({
+        taskId: taskRuns.taskId,
+        kind: taskRuns.kind,
+        payload: taskRuns.payload,
+      })
+      .from(taskRuns)
+      .where(
+        inArray(
+          taskRuns.taskId,
+          rows.map((row) => row.taskId),
+        ),
+      )
+      .orderBy(taskRuns.id);
+
+    for (const run of runRows) {
+      if (run.kind === 'fresh' && !latestPayloadByTaskId.has(run.taskId)) {
+        latestPayloadByTaskId.set(run.taskId, run.payload);
+      }
+    }
+  }
 
   const grouped: Partial<
     Record<BackgroundAutomationKey, AutomationTaskRunSummary[]>
@@ -127,12 +222,21 @@ async function listRecentAutomationTasks(): Promise<
       continue;
     }
 
+    const source = resolveAutomationRunSource({
+      payload: latestPayloadByTaskId.get(row.taskId),
+      surface: row.surface,
+      trigger: row.trigger,
+      slackChannelId: row.slackChannelId,
+      slackThreadTs: row.slackThreadTs,
+    });
+
     existing.push({
       taskId: row.taskId,
       title: row.title,
       trigger: row.trigger,
       state: row.state,
       createdAt: row.createdAt,
+      ...source,
     });
     grouped[key] = existing;
   }

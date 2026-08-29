@@ -81,6 +81,7 @@ describe('launchIssueFixerTriage', () => {
             environmentId: 'env-host-scoped',
             sourceControlProvider: 'gitlab',
             sourceControlHost: 'git.example.com',
+            sourceEventUrl: 'https://git.example.com/acme/backend/-/issues/9',
           }),
         }),
         surface: 'gitlab',
