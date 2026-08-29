@@ -281,7 +281,7 @@ describe('handleMergeAnnouncerPush', () => {
       createPayload({
         pullRequest: {
           number: 7,
-          title: 'Ship widget export!',
+          title: '<!channel> Ship widget & <export>!',
           body: 'Detailed rationale',
           changedFileCount: 2,
           additions: 20,
@@ -294,8 +294,21 @@ describe('handleMergeAnnouncerPush', () => {
     expect(postMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         text: expect.stringContaining(
-          'Merged pull request: Ship widget export.',
+          'Merged pull request: &lt;!channel&gt; Ship widget &amp; &lt;export&gt;.',
         ),
+        blocks: [
+          expect.objectContaining({
+            child_blocks: expect.arrayContaining([
+              expect.objectContaining({
+                type: 'section',
+                text: {
+                  type: 'mrkdwn',
+                  text: 'Merged pull request: &lt;!channel&gt; Ship widget &amp; &lt;export&gt;.',
+                },
+              }),
+            ]),
+          }),
+        ],
       }),
     );
   });

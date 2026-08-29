@@ -31,6 +31,7 @@ import {
   resolveAutomationRuntimeDestination,
   type ResolvedAutomationDestination,
 } from './destination';
+import { escapeSlackMrkdwnText } from '../lib/task-runs/channel-provider-error-text';
 import { emptyJobResult, type AutomationJobResult } from './types';
 
 const LOG_PREFIX = '[mergeAnnouncer]';
@@ -290,6 +291,7 @@ function buildMergeAnnouncerNotification(params: {
   const commitCount = params.event.commitCount ?? params.event.commits.length;
   const commitLabel = `${commitCount} ${commitCount === 1 ? 'commit' : 'commits'}`;
   const summary = normalizeSummary(params.summary);
+  const slackSummary = escapeSlackMrkdwnText(summary);
   const configureUrl = buildManagerSlackSettingsUrl(
     MERGE_ANNOUNCER_SETTINGS_HASH,
   );
@@ -306,7 +308,9 @@ function buildMergeAnnouncerNotification(params: {
     : [];
 
   return {
-    fallbackText: `${params.pusher} pushed ${commitLabel} to ${params.branch} in ${params.repository.fullName}. ${summary}`,
+    fallbackText: escapeSlackMrkdwnText(
+      `${params.pusher} pushed ${commitLabel} to ${params.branch} in ${params.repository.fullName}. ${summary}`,
+    ),
     slackBlocks: buildAutomationResultBlocks({
       title: 'Merge Announcer',
       iconUrl: buildAutomationIconUrl('git-commit-vertical'),
@@ -320,7 +324,7 @@ function buildMergeAnnouncerNotification(params: {
           type: 'section',
           text: {
             type: 'mrkdwn',
-            text: summary,
+            text: slackSummary,
           },
         },
       ],
