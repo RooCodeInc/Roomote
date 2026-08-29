@@ -358,6 +358,9 @@ describe('Home', () => {
     expect(
       screen.getByRole('heading', { name: 'New Session' }),
     ).toBeInTheDocument();
+    expect(
+      screen.queryByText(/^Choose where Roomote should work/),
+    ).not.toBeInTheDocument();
     expect(screen.queryByText(/Select agent /)).not.toBeInTheDocument();
     // Auto was retired from the picker (identical to Fast); Fast is offered.
     expect(screen.getByTestId('allow-auto')).toHaveTextContent('false');
