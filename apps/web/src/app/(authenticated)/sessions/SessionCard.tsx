@@ -40,7 +40,7 @@ export function SessionCard({ session }: { session: SessionCardData }) {
 
   return (
     <Link
-      href={`/sessions/${session.id}${primaryTask ? `?task=${primaryTask.taskId}` : ''}`}
+      href={`/sessions/${session.id}`}
       className="ph-no-capture group flex w-full items-start gap-3 p-4 transition-colors hover:bg-accent-foreground/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
     >
       <div className="relative mt-1 shrink-0">

@@ -278,7 +278,7 @@ async function handleSuggestionLaunchCallback(params: {
     const launchResult = await launchClaimedSuggestedTask({
       suggestion: { id: params.suggestionId, launchClaimedAt: claimedAt },
       policy: {
-        usesRouterLaunch: suggestion.usesRouterLaunch === true,
+        fastEligible: false,
         userDefaultEnabled: false,
         fastAvailable: false,
       },

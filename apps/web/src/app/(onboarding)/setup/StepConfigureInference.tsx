@@ -48,8 +48,9 @@ export function StepConfigureInference({
         <p>
           Roomote needs a model provider for, you know, AI stuff.
           <br />
-          If you want, we can give you a few credits to try Roomote out or you
-          can configure your provider directly.
+          Your Roomote Cloud trial includes $5 of inference, enough to complete
+          several tasks and get a practical sense of what Roomote can do. You
+          can also configure your own provider directly.
         </p>
 
         <div className="space-y-0.5 max-w-sm">

@@ -333,7 +333,7 @@ async function launchClaimedDiscordSuggestion(input: {
     const launchResult = await launchClaimedSuggestedTask({
       suggestion: { id: suggestion.id, launchClaimedAt: claimedAt },
       policy: {
-        usesRouterLaunch,
+        fastEligible: usesRouterLaunch,
         userDefaultEnabled: usesRouterLaunch,
         fastAvailable: true,
       },
