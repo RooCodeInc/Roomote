@@ -4,6 +4,7 @@ const mocks = vi.hoisted(() => ({
   releaseLock: vi.fn(),
   answerQuestion: vi.fn(),
   postThreadMessage: vi.fn(),
+  recordProviderMessage: vi.fn(),
 }));
 
 vi.mock('@roomote/redis', async (importOriginal) => {
@@ -52,6 +53,11 @@ vi.mock('@roomote/cloud-agents', () => ({
   stripLeadingSlackProductMention: (text: string) => text,
 }));
 
+vi.mock('@roomote/sdk/server', () => ({
+  recordFastAgentConversationMessageBestEffort: mocks.recordProviderMessage,
+  resolveUserMcpServerConfigs: vi.fn(async () => ({})),
+}));
+
 vi.mock('../helpers/thread-posting.js', () => ({
   postSlackThreadMarkdownMessage: mocks.postThreadMessage,
 }));
@@ -76,6 +82,7 @@ describe('processFastAgentMessage', () => {
       status: 'posted',
       messageId: '101.001',
     });
+    mocks.recordProviderMessage.mockResolvedValue(undefined);
     mocks.answerQuestion.mockImplementation(
       async ({
         adapter,
@@ -137,6 +144,16 @@ describe('processFastAgentMessage', () => {
     });
 
     expect(mocks.postThreadMessage).toHaveBeenCalledOnce();
+    expect(mocks.recordProviderMessage).toHaveBeenCalledWith({
+      sessionId: 'fast-session-1',
+      conversation: {
+        surface: 'slack',
+        workspaceId: 'T123',
+        conversationId: '100.001',
+        replyTarget: { channelId: 'D123', threadId: '100.001' },
+      },
+      messageId: '101.001',
+    });
     expect(slack.updateMessage).toHaveBeenCalledWith({
       channel: 'D123',
       ts: '101.001',

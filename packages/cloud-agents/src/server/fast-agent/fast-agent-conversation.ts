@@ -22,7 +22,10 @@ export type FastAgentPlatformEventVisibility = 'optional' | 'required';
 
 export type FastAgentPlatformEventHandling = 'default' | 'present_only';
 
-export type FastAgentPlatformEventKind = 'delegated_task' | 'automation';
+export type FastAgentPlatformEventKind =
+  | 'delegated_task'
+  | 'automation'
+  | 'external_input';
 
 export type FastAgentSuggestedTask = {
   title: string;

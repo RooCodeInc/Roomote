@@ -53,6 +53,7 @@ import {
   handleMessageOrAppMentionEvent,
   startFastAgentResponse,
 } from './message-entry.js';
+import { maybeRouteFastAgentReaction } from './fast-agent-reaction.js';
 
 export async function maybeCallRoomoteViaEmoji(params: {
   context: SlackWebhookContext;
@@ -819,6 +820,10 @@ export async function handleReactionAddedEvent(params: {
       );
       return;
     }
+  }
+
+  if (await maybeRouteFastAgentReaction({ context, event })) {
+    return;
   }
 
   apiLogger.debug(

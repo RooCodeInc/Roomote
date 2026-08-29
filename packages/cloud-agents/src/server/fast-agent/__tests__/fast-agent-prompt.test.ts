@@ -485,6 +485,25 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).not.toContain('<slack_modern_markdown>');
   });
 
+  it('allows optional external input to use the existing ignore-event path', () => {
+    const prompt = buildFastAgentSystemPrompt({
+      availableEnvironments: [],
+      surface: 'slack',
+      turnSource: 'platform_event',
+      platformEventKind: 'external_input',
+      platformEventVisibility: 'optional',
+    });
+
+    expect(prompt).toContain('External Platform Input');
+    expect(prompt).toContain(
+      'external interaction associated with this conversation',
+    );
+    expect(prompt).toContain(
+      'Call "ignore_event" only when the event is duplicate, lifecycle-only, machinery-only, or a routine log that adds nothing useful',
+    );
+    expect(prompt).not.toContain('Do not call "ignore_event"');
+  });
+
   it('requires a visible closeout for visibility-required platform events', () => {
     const prompt = buildFastAgentSystemPrompt({
       availableEnvironments: [],

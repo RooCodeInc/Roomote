@@ -11,7 +11,7 @@ import {
   type FastAgentConversationRecord,
 } from '@roomote/cloud-agents/server';
 
-export type FastAgentReplyProvider = 'discord' | 'teams' | 'telegram';
+export type FastAgentReplyProvider = 'discord' | 'slack' | 'teams' | 'telegram';
 
 type ProviderRoute = {
   provider: FastAgentReplyProvider;
@@ -72,6 +72,7 @@ export async function recordFastAgentConversationMessage(input: {
   const { conversation } = input;
   if (
     conversation.surface !== 'discord' &&
+    conversation.surface !== 'slack' &&
     conversation.surface !== 'teams' &&
     conversation.surface !== 'telegram'
   ) {

@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   startFastAgentResponse: vi.fn(),
   postStartedMessage: vi.fn(),
   getConfiguration: vi.fn(),
+  routeFastReaction: vi.fn(),
 }));
 
 const claimedAt = new Date('2026-08-06T00:00:00.000Z');
@@ -126,6 +127,10 @@ vi.mock('./message-entry.js', () => ({
   startFastAgentResponse: mocks.startFastAgentResponse,
 }));
 
+vi.mock('./fast-agent-reaction.js', () => ({
+  maybeRouteFastAgentReaction: mocks.routeFastReaction,
+}));
+
 vi.mock('./task-suggestion-reaction-contention.js', () => ({
   runTaskSuggestionReactionContention: vi.fn(
     async ({ launch }: { launch: () => Promise<boolean> }) =>
@@ -139,6 +144,7 @@ describe('chat reply suggestion reactions', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.getConfiguration.mockResolvedValue(null);
+    mocks.routeFastReaction.mockResolvedValue(false);
     mocks.trackedMessageFindFirst.mockResolvedValue({
       id: 'tracked-message-1',
       workItemId: 'work-item-1',
@@ -213,6 +219,7 @@ describe('chat reply suggestion reactions', () => {
       },
     );
     expect(mocks.postStartedMessage).not.toHaveBeenCalled();
+    expect(mocks.routeFastReaction).not.toHaveBeenCalled();
   });
 
   it('keeps a finalized launch when tracked thread bookkeeping fails', async () => {
