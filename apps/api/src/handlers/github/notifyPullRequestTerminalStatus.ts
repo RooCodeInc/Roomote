@@ -834,9 +834,21 @@ export async function notifyPullRequestTerminalStatus({
 
     const slackTargets: SlackTarget[] = [];
     const linearSessionIds: string[] = [];
+    // Fast/session-backed tasks receive terminal PR events through their parent
+    // session. Keep this webhook fan-out only for legacy/direct Slack tasks so
+    // it cannot add a second canned status post to the same conversation.
+    const fastTaskIds = new Set(
+      linkedRuns
+        .filter((run) => getFastAgentParentFromPayload(run.payload) !== null)
+        .map((run) => run.taskId),
+    );
 
     for (const task of linkedTasks) {
-      if (task.slackThreadTs && task.slackChannelId) {
+      if (
+        !fastTaskIds.has(task.id) &&
+        task.slackThreadTs &&
+        task.slackChannelId
+      ) {
         slackTargets.push({
           taskId: task.id,
           slackThreadTs: task.slackThreadTs,
@@ -851,6 +863,7 @@ export async function notifyPullRequestTerminalStatus({
 
     slackTargets.push(
       ...linkedRuns
+        .filter((run) => !fastTaskIds.has(run.taskId))
         .map((run) => getSlackTarget(run.taskId, run.payload))
         .filter((target): target is SlackTarget => target !== null),
     );
