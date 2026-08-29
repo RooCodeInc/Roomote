@@ -36,6 +36,7 @@ vi.mock('@roomote/sdk/server', () => ({
 vi.mock('@roomote/db/server', () => ({
   db: { update: mocks.dbUpdate, select: mocks.dbSelect },
   retireCanonicalPrReviewActionsForDestinationKey: mocks.retireReviewActions,
+  and: vi.fn(),
   eq: vi.fn(),
   fastAgentConversations: {},
   fastAgentMessages: {},
@@ -246,8 +247,8 @@ describe('startSetupFastSessionCommand', () => {
     await startSetupFastSessionCommand(auth, input);
     expect(scheduled).toBeDefined();
 
-    // A concurrent submit's kickoff persisted its event row first: the
-    // re-check under the turn lock sees the message and skips this turn.
+    // A concurrent submit's kickoff persisted its prompt row first: the
+    // re-check under the turn lock sees the kickoff event and skips.
     mocks.dbSelectLimit.mockResolvedValue([{ id: 'message-1' }]);
     await scheduled?.();
 
@@ -278,6 +279,7 @@ describe('startSetupFastSessionCommand', () => {
         turnSource: 'platform_event',
         platformEventKind: 'setup',
         platformEventVisibility: 'required',
+        currentMessageId: 'setup-kickoff:setup-conversation-1',
       }),
     );
     expect(release).toHaveBeenCalledOnce();
@@ -298,7 +300,7 @@ describe('startSetupFastSessionCommand', () => {
     expect(mocks.after).toHaveBeenCalledOnce();
   });
 
-  it('does not schedule a second kickoff once the transcript has messages', async () => {
+  it('does not schedule a second kickoff once the kickoff event row exists', async () => {
     mocks.getOrCreateSession.mockResolvedValue({
       id: 'setup-conversation-1',
       created: false,

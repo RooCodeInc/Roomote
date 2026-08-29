@@ -14,6 +14,7 @@ import {
   type FastAgentSurfaceReplyDelivery,
 } from '@roomote/sdk/server';
 import {
+  and,
   db,
   eq,
   fastAgentConversations,
@@ -102,12 +103,16 @@ type WebFastAgentTurnInput = {
   /** Present for trusted platform-generated turns (e.g. the setup kickoff);
    * absent for human-authored web messages. */
   platformEventKind?: 'setup';
-  /** Fast conversation ID whose transcript must still be empty when the turn
-   * acquires its lock, or the turn is skipped. This is the atomic claim for
-   * the setup kickoff: concurrent submits can both pass the pre-schedule
-   * empty-transcript check, but the first kickoff persists its event row
-   * under the turn lock, so the re-check under the same lock is race-free. */
-  skipUnlessConversationEmpty?: string;
+  /** Deterministic turn ID override. Canonical event IDs derive from it, so a
+   * fixed value lets a turn be claimed idempotently across retries. */
+  currentMessageId?: string;
+  /** Skip the turn if this exact canonical event row already exists when the
+   * turn acquires its lock. This is the atomic claim for the setup kickoff:
+   * concurrent submits can both pass the pre-schedule check, but the first
+   * kickoff persists its prompt row under the turn lock, so the re-check
+   * under the same lock is race-free — and unlike a transcript-emptiness
+   * probe it is not fooled by an early human reply in the new session. */
+  skipIfEventExists?: { conversationId: string; eventId: string };
 };
 
 /**
@@ -128,7 +133,8 @@ async function runWebFastAgentTurn({
   reasoningEffort,
   senderDisplayName,
   platformEventKind,
-  skipUnlessConversationEmpty,
+  currentMessageId,
+  skipIfEventExists,
 }: WebFastAgentTurnInput): Promise<void> {
   const conversation = delivery.conversation;
   const release = await acquireFastAgentTurnLock({ conversation });
@@ -141,17 +147,23 @@ async function runWebFastAgentTurn({
 
   const apiBaseUrl = resolveApiBaseUrl() ?? undefined;
   try {
-    if (skipUnlessConversationEmpty) {
-      const [existingMessage] = await db
+    if (skipIfEventExists) {
+      const [existingEvent] = await db
         .select({ id: fastAgentMessages.id })
         .from(fastAgentMessages)
         .where(
-          eq(fastAgentMessages.conversationId, skipUnlessConversationEmpty),
+          and(
+            eq(
+              fastAgentMessages.conversationId,
+              skipIfEventExists.conversationId,
+            ),
+            eq(fastAgentMessages.eventId, skipIfEventExists.eventId),
+          ),
         )
         .limit(1);
-      if (existingMessage) {
+      if (existingEvent) {
         console.log(
-          `[Fast Web] Skipping duplicate kickoff turn for ${conversation.conversationId}: the transcript is no longer empty.`,
+          `[Fast Web] Skipping duplicate turn for ${conversation.conversationId}: event ${skipIfEventExists.eventId} already ran.`,
         );
         return;
       }
@@ -164,7 +176,7 @@ async function runWebFastAgentTurn({
       userId,
       apiBaseUrl,
       conversation,
-      currentMessageId: `web-${randomUUID()}`,
+      currentMessageId: currentMessageId ?? `web-${randomUUID()}`,
       signal: release.signal,
       model,
       reasoningEffort,
@@ -282,14 +294,26 @@ export async function startSetupFastSessionCommand(
     conversation,
   });
 
+  // The kickoff turn runs under a deterministic turn ID, so its persisted
+  // prompt row has a knowable event ID. Claiming on that exact row (rather
+  // than transcript emptiness) means an early human reply in the new session
+  // can never masquerade as an already-run kickoff.
+  const kickoffTurnId = `setup-kickoff:${session.id}`;
+  const kickoffPromptEventId = `${kickoffTurnId}:user`;
+
   let scheduleKickoff = session.created;
   if (!scheduleKickoff) {
-    const [existingMessage] = await db
+    const [existingKickoff] = await db
       .select({ id: fastAgentMessages.id })
       .from(fastAgentMessages)
-      .where(eq(fastAgentMessages.conversationId, session.id))
+      .where(
+        and(
+          eq(fastAgentMessages.conversationId, session.id),
+          eq(fastAgentMessages.eventId, kickoffPromptEventId),
+        ),
+      )
       .limit(1);
-    scheduleKickoff = !existingMessage;
+    scheduleKickoff = !existingKickoff;
   }
 
   if (scheduleKickoff) {
@@ -328,7 +352,11 @@ export async function startSetupFastSessionCommand(
       },
       question: `<platform_event>${JSON.stringify(input.event)}</platform_event>`,
       platformEventKind: 'setup',
-      skipUnlessConversationEmpty: session.id,
+      currentMessageId: kickoffTurnId,
+      skipIfEventExists: {
+        conversationId: session.id,
+        eventId: kickoffPromptEventId,
+      },
     });
   }
 
