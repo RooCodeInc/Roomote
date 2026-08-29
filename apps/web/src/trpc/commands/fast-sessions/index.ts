@@ -251,6 +251,7 @@ function scheduleWebFastAgentInitialTurn(input: {
         signal: release.signal,
         model: initialTurn.model,
         reasoningEffort: initialTurn.reasoningEffort,
+        rethrowHandledErrors: true,
         adapter: {
           resolveMcpServerConfigs: () =>
             resolveUserMcpServerConfigs({

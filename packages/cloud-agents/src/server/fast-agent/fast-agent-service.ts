@@ -836,6 +836,7 @@ export async function answerFastAgentQuestion({
   allowSilentAmbientReply = false,
   platformEventTranscriptPayload,
   slackRoomoteUserId,
+  rethrowHandledErrors = false,
 }: {
   question: string;
   images?: string[];
@@ -864,6 +865,9 @@ export async function answerFastAgentQuestion({
   allowSilentAmbientReply?: boolean;
   platformEventTranscriptPayload?: Record<string, unknown>;
   slackRoomoteUserId?: string;
+  /** Rethrow after persisting the user-visible error closeout so durable
+   * callers can leave their work item pending for retry. */
+  rethrowHandledErrors?: boolean;
 }): Promise<string> {
   const turnId = buildFastAgentTurnId({
     currentMessageId,
@@ -2612,6 +2616,7 @@ export async function answerFastAgentQuestion({
         );
       }
     }
+    if (rethrowHandledErrors) throw terminalError;
     return lastVisibleMessage || message;
   } finally {
     if (canonicalConversationId) {

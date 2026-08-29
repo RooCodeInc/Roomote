@@ -3898,6 +3898,30 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     });
   });
 
+  it('can rethrow a handled failure after posting its error closeout', async () => {
+    const error = new Error(
+      "ContentFilterError: The response was blocked by the provider's content filter",
+    );
+    mocks.generateText.mockRejectedValue(error);
+    const adapter = callbacks();
+
+    await expect(
+      answerFastAgentQuestion({
+        ...baseParams,
+        adapter,
+        rethrowHandledErrors: true,
+      }),
+    ).rejects.toMatchObject({
+      name: 'FastAgentInferenceError',
+      failure: { reason: 'content_filter', retryable: false },
+    });
+    expect(adapter.postReply).toHaveBeenCalledWith({
+      purpose: 'closeout',
+      message:
+        'The inference provider blocked this response with its content filter, so retrying will not help. Try rephrasing the request or asking in a new thread.',
+    });
+  });
+
   it('does not surface a duplicate retry notice for repeated failures', async () => {
     vi.useFakeTimers();
     try {

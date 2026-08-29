@@ -276,6 +276,7 @@ describe('startFastSessionCommand', () => {
       expect.objectContaining({
         question: 'Review the starter prompt',
         currentMessageId: 'web-initial-fast-session-1',
+        rethrowHandledErrors: true,
       }),
     );
     expect(mocks.completeInitialTurn).toHaveBeenCalledWith('fast-session-1');
