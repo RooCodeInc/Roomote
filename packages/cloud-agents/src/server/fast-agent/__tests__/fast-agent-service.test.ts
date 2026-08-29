@@ -3053,7 +3053,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     }
   });
 
-  it('bounds a stalled continuation after an integration tool returns', async () => {
+  it('bounds an explicitly idle continuation after an integration tool returns', async () => {
     vi.useFakeTimers();
     try {
       mocks.listIntegrations.mockResolvedValue([
@@ -3063,30 +3063,70 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
           tools: [{ name: 'search_code', description: 'Search code' }],
         },
       ]);
+      let resolveToolReturned: (() => void) | undefined;
+      const toolReturned = new Promise<void>((resolve) => {
+        resolveToolReturned = resolve;
+      });
+      let promptSignal: AbortSignal | undefined;
+      let markSessionIdle: (() => void) | undefined;
+      let lateMcpResult: unknown;
+      let lateNativeResult: unknown;
+      const launchTask = vi.fn();
       mocks.generateText.mockImplementation(
         async (_params, _session, options) => {
+          promptSignal = options.signal;
+          markSessionIdle = () => options.onSessionStatus?.('idle');
           await options.onSessionReady('opencode-session-1');
+          await invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'ack',
+            message: 'Checking.',
+          });
           await invokeMcpTool('github', 'search_code', {
             query: 'fast session',
           });
+          resolveToolReturned?.();
           return await new Promise<string>((_resolve, reject) => {
             options.signal.addEventListener(
               'abort',
-              () => reject(options.signal.reason),
+              async () => {
+                lateMcpResult = await invokeMcpTool('github', 'search_code', {
+                  query: 'late search',
+                });
+                lateNativeResult = await invokeTool(
+                  nativeToolNames.launchTask,
+                  {
+                    prompt: 'Late work.',
+                    environmentId: 'env-1',
+                    model: 'anthropic/claude-sonnet-5',
+                    includeAttachments: false,
+                    kickoffMessage: 'Starting late work.',
+                  },
+                );
+                reject(options.signal.reason);
+              },
               { once: true },
             );
           });
         },
       );
-      const adapter = callbacks();
+      const adapter = callbacks({ launchTask });
 
       const resultPromise = answerFastAgentQuestion({ ...baseParams, adapter });
+      await toolReturned;
+      await vi.advanceTimersByTimeAsync(30 * 60_000);
+
+      expect(promptSignal?.aborted).toBe(false);
+      markSessionIdle?.();
       await vi.advanceTimersByTimeAsync(300_000);
 
       await expect(resultPromise).resolves.toBe(
         'The inference provider did not respond. Any delegated tasks can keep running; please try again in a moment.',
       );
       expect(mocks.generateText).toHaveBeenCalledTimes(1);
+      expect(mocks.callIntegration).toHaveBeenCalledTimes(1);
+      expect(launchTask).not.toHaveBeenCalled();
+      expect(lateMcpResult).toMatchObject({ success: false });
+      expect(lateNativeResult).toMatchObject({ success: false });
       expect(mocks.captureInferenceAttemptOutcome).toHaveBeenCalledWith(
         expect.objectContaining({
           outcome: 'failure',
@@ -3145,6 +3185,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
           await invokeMcpTool('github', 'search_code', {
             query: 'fast session',
           });
+          await options.onSessionStatus?.('idle');
           await invokeTool(nativeToolNames.sendChatReply, {
             purpose: 'closeout',
             message: 'Finished.',

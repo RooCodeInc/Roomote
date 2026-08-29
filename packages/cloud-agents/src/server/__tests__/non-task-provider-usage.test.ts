@@ -286,6 +286,24 @@ describe('resolveOpenCodeSmallModel', () => {
     eventSubscribeMock.mockResolvedValue({
       stream: (async function* () {
         yield {
+          type: 'session.status' as const,
+          properties: {
+            sessionID: 'session-1',
+            status: { type: 'busy' as const },
+          },
+        };
+        yield {
+          type: 'session.status' as const,
+          properties: {
+            sessionID: 'session-1',
+            status: { type: 'idle' as const },
+          },
+        };
+        yield {
+          type: 'session.idle' as const,
+          properties: { sessionID: 'session-1' },
+        };
+        yield {
           type: 'session.created',
           properties: {
             sessionID: 'subagent-session-1',
@@ -320,6 +338,7 @@ describe('resolveOpenCodeSmallModel', () => {
     const onModelResolved = vi.fn();
     const onPromptStarted = vi.fn();
     const onMessageCompleted = vi.fn();
+    const onSessionStatus = vi.fn();
     const onSubagentSessionReady = vi.fn(() => markSubagentReady());
     const session: { id?: string } = {};
 
@@ -345,6 +364,7 @@ describe('resolveOpenCodeSmallModel', () => {
           onMessageCompleted,
           onPromptStarted,
           onSessionReady,
+          onSessionStatus,
           onSubagentSessionReady,
           permission: FAST_AGENT_SESSION_PERMISSIONS,
           promptOnlySubagents: true,
@@ -362,6 +382,7 @@ describe('resolveOpenCodeSmallModel', () => {
     });
     expect(onPromptStarted).toHaveBeenCalledOnce();
     expect(onSessionReady).toHaveBeenCalledWith('session-1');
+    expect(onSessionStatus.mock.calls).toEqual([['busy'], ['idle'], ['idle']]);
     expect(onSubagentSessionReady).toHaveBeenCalledWith('subagent-session-1');
     expect(onModelResolved.mock.invocationCallOrder[0]!).toBeLessThan(
       onPromptStarted.mock.invocationCallOrder[0]!,

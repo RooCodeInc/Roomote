@@ -222,6 +222,7 @@ export type NonTaskOpenCodeNativeSessionOptions = {
   ) => Promise<void> | void;
   onPromptStarted?: () => void;
   onSessionReady?: (sessionID: string) => Promise<void> | void;
+  onSessionStatus?: (status: 'busy' | 'idle') => Promise<void> | void;
   onSubagentSessionReady?: (sessionID: string) => Promise<void> | void;
   permission?: PermissionRuleset;
   promptOnlySubagents?: boolean;
@@ -788,6 +789,7 @@ async function runNonTaskSdkPrompt(
       message: NonTaskOpenCodeCompletedMessage,
     ) => Promise<void> | void;
     onSessionReady?: (sessionID: string) => Promise<void> | void;
+    onSessionStatus?: (status: 'busy' | 'idle') => Promise<void> | void;
     onSubagentSessionReady?: (sessionID: string) => Promise<void> | void;
     permission?: PermissionRuleset;
     preserveReasoning?: boolean;
@@ -958,6 +960,7 @@ async function runNonTaskSdkPrompt(
     let eventMonitor: Promise<void> | undefined;
     const needsEventMonitor = Boolean(
       params.onProviderRetry ||
+      options.onSessionStatus ||
       options.onSubagentSessionReady ||
       options.trackSessionTreeUsage,
     );
@@ -997,6 +1000,18 @@ async function runNonTaskSdkPrompt(
               ) {
                 void recordUsageOnce(event.properties.info);
                 markUsageEventObserved(event.properties.info);
+              } else if (
+                event.type === 'session.status' &&
+                event.properties.sessionID === sessionId &&
+                (event.properties.status.type === 'busy' ||
+                  event.properties.status.type === 'idle')
+              ) {
+                await options.onSessionStatus?.(event.properties.status.type);
+              } else if (
+                event.type === 'session.idle' &&
+                event.properties.sessionID === sessionId
+              ) {
+                await options.onSessionStatus?.('idle');
               } else if (
                 event.type === 'session.status' &&
                 event.properties.sessionID === sessionId &&
@@ -1387,6 +1402,7 @@ export async function generateTrackedNonTaskTextInOpenCodeSession(
       onPromptStarted: options.onPromptStarted,
       onMessageCompleted: options.onMessageCompleted,
       onSessionReady: options.onSessionReady,
+      onSessionStatus: options.onSessionStatus,
       onSubagentSessionReady: options.onSubagentSessionReady,
       permission: options.permission,
       preserveReasoning: true,

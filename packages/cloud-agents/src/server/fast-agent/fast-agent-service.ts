@@ -1240,6 +1240,7 @@ export async function answerFastAgentQuestion({
     let visibleUpdatePosted = false;
     let nativeToolInvoked = false;
     let retriedTaskStart = false;
+    let activeInferenceSignal: AbortSignal | undefined;
     let notifyToolExecutionStarted: () => void = () => undefined;
     let notifyToolExecutionFinished: () => void = () => undefined;
 
@@ -1349,9 +1350,14 @@ export async function answerFastAgentQuestion({
         ? { success: false as const, error: 'This Fast turn is closed.' }
         : null;
     const throwIfTurnCancelled = () => {
-      if (!signal?.aborted) return;
-      throw signal.reason instanceof Error
+      const reason = signal?.aborted
         ? signal.reason
+        : activeInferenceSignal?.aborted
+          ? activeInferenceSignal.reason
+          : undefined;
+      if (reason === undefined) return;
+      throw reason instanceof Error
+        ? reason
         : new Error('This Fast turn was canceled.');
     };
     const requireLockOwnership = () => {
@@ -1925,6 +1931,8 @@ export async function answerFastAgentQuestion({
         | Awaited<ReturnType<typeof beginCanonicalToolEvent>>
         | undefined;
       try {
+        const ownershipError = requireLockOwnership();
+        if (ownershipError) return ownershipError;
         canonicalToolEvent = await beginCanonicalToolEvent({
           title: call.name,
           args: call.args,
@@ -2072,14 +2080,16 @@ export async function answerFastAgentQuestion({
               const promptSignal = signal
                 ? AbortSignal.any([signal, providerRetryAbortController.signal])
                 : providerRetryAbortController.signal;
+              activeInferenceSignal = promptSignal;
               let providerRetryTimeout:
                 | ReturnType<typeof setTimeout>
                 | undefined;
               let providerRetryDeadlineAt: number | undefined;
-              let postToolContinuationTimeout:
+              let idlePostToolContinuationTimeout:
                 | ReturnType<typeof setTimeout>
                 | undefined;
               let activeToolExecutionCount = 0;
+              let postToolContinuationPending = false;
               const clearProviderRetryTimeout = () => {
                 if (!providerRetryTimeout) return;
                 clearTimeout(providerRetryTimeout);
@@ -2106,15 +2116,36 @@ export async function answerFastAgentQuestion({
                 }, remainingMs);
                 providerRetryTimeout.unref();
               };
-              const clearPostToolContinuationTimeout = () => {
-                if (!postToolContinuationTimeout) return;
-                clearTimeout(postToolContinuationTimeout);
-                postToolContinuationTimeout = undefined;
+              const clearIdlePostToolContinuationTimeout = () => {
+                if (!idlePostToolContinuationTimeout) return;
+                clearTimeout(idlePostToolContinuationTimeout);
+                idlePostToolContinuationTimeout = undefined;
+              };
+              const armIdlePostToolContinuationTimeout = () => {
+                // No transcript output can still mean the model is working.
+                // Only OpenCode's explicit idle state starts this grace period.
+                if (
+                  !postToolContinuationPending ||
+                  activeToolExecutionCount > 0 ||
+                  providerRetryDeadlineAt !== undefined ||
+                  idlePostToolContinuationTimeout !== undefined
+                ) {
+                  return;
+                }
+                idlePostToolContinuationTimeout = setTimeout(() => {
+                  providerRetryAbortController.abort(
+                    new NonTaskOpenCodePromptTimeoutError(
+                      FAST_AGENT_INFERENCE_RETRY_ATTEMPT_TIMEOUT_MS,
+                    ),
+                  );
+                }, FAST_AGENT_INFERENCE_RETRY_ATTEMPT_TIMEOUT_MS);
+                idlePostToolContinuationTimeout.unref();
               };
               notifyToolExecutionStarted = () => {
                 activeToolExecutionCount += 1;
+                postToolContinuationPending = false;
                 clearProviderRetryTimeout();
-                clearPostToolContinuationTimeout();
+                clearIdlePostToolContinuationTimeout();
               };
               notifyToolExecutionFinished = () => {
                 activeToolExecutionCount = Math.max(
@@ -2122,19 +2153,10 @@ export async function answerFastAgentQuestion({
                   activeToolExecutionCount - 1,
                 );
                 if (activeToolExecutionCount > 0) return;
+                postToolContinuationPending = true;
                 if (providerRetryDeadlineAt !== undefined) {
                   armProviderRetryTimeout();
-                  return;
                 }
-                clearPostToolContinuationTimeout();
-                postToolContinuationTimeout = setTimeout(() => {
-                  providerRetryAbortController.abort(
-                    new NonTaskOpenCodePromptTimeoutError(
-                      FAST_AGENT_INFERENCE_RETRY_ATTEMPT_TIMEOUT_MS,
-                    ),
-                  );
-                }, FAST_AGENT_INFERENCE_RETRY_ATTEMPT_TIMEOUT_MS);
-                postToolContinuationTimeout.unref();
               };
               const attemptStartedAt = Date.now();
               let promptStarted = false;
@@ -2160,7 +2182,7 @@ export async function answerFastAgentQuestion({
                       prompt: promptForAttempt,
                       onProviderRetry: async (event) => {
                         providerRetryEventCount += 1;
-                        clearPostToolContinuationTimeout();
+                        clearIdlePostToolContinuationTimeout();
                         captureInferenceContext(
                           'provider_retry',
                           event.attempt,
@@ -2230,6 +2252,13 @@ export async function answerFastAgentQuestion({
                             },
                           ),
                         );
+                      },
+                      onSessionStatus: (status) => {
+                        if (status === 'busy') {
+                          clearIdlePostToolContinuationTimeout();
+                          return;
+                        }
+                        armIdlePostToolContinuationTimeout();
                       },
                       onSubagentSessionReady: (subagentSessionID) => {
                         if (boundSubagentSessionIDs.has(subagentSessionID))
@@ -2314,7 +2343,10 @@ export async function answerFastAgentQuestion({
               } finally {
                 notifyToolExecutionStarted = () => undefined;
                 notifyToolExecutionFinished = () => undefined;
-                clearPostToolContinuationTimeout();
+                if (activeInferenceSignal === promptSignal) {
+                  activeInferenceSignal = undefined;
+                }
+                clearIdlePostToolContinuationTimeout();
                 clearProviderRetryTimeout();
               }
             },
