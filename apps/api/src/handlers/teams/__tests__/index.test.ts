@@ -40,6 +40,8 @@ const {
   releaseClaimedOutOfBandMock,
   callViaEmojiConfigMock,
   continueFastReplyMock,
+  queueFastReplyMock,
+  findFastMessageSessionMock,
   findFastReplySessionMock,
   findTeamsConversationRouteMock,
   getFastSessionMock,
@@ -103,6 +105,8 @@ const {
   releaseClaimedOutOfBandMock: vi.fn(),
   callViaEmojiConfigMock: vi.fn(),
   continueFastReplyMock: vi.fn(),
+  queueFastReplyMock: vi.fn(),
+  findFastMessageSessionMock: vi.fn(),
   findFastReplySessionMock: vi.fn(),
   findTeamsConversationRouteMock: vi.fn(),
   getFastSessionMock: vi.fn(),
@@ -286,12 +290,18 @@ vi.mock('@roomote/sdk/server', () => ({
         }
       : null,
   ),
+  findFastAgentSessionForProviderMessage: findFastMessageSessionMock,
   findFastAgentSessionForProviderReply: findFastReplySessionMock,
   findTeamsConversationRoute: findTeamsConversationRouteMock,
   isFastAgentProviderMessage: isFastProviderMessageMock,
+  queueFastAgentSurfaceReply: queueFastReplyMock,
 }));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
+  buildFastAgentReactionExternalInputQuestion: vi.fn(
+    (input: unknown) =>
+      `<external_input>${JSON.stringify(input)}</external_input>`,
+  ),
   buildTeamsRoutingContext: buildTeamsRoutingContextMock,
   enqueueTask: enqueueTaskMock,
   getOrCreateFastAgentSession: getFastSessionMock,
@@ -370,6 +380,8 @@ describe('Teams webhook handler', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     continueFastReplyMock.mockResolvedValue(true);
+    queueFastReplyMock.mockResolvedValue(true);
+    findFastMessageSessionMock.mockResolvedValue(null);
     findFastReplySessionMock.mockResolvedValue(null);
     getFastSessionMock.mockResolvedValue({
       id: '11111111-1111-4111-8111-111111111111',
@@ -501,6 +513,7 @@ describe('Teams webhook handler', () => {
         threadTs: 'activity-root',
       }),
     );
+    expect(queueFastReplyMock).not.toHaveBeenCalled();
   });
 
   it('launches the exact suggested task when a linked user likes its card', async () => {
@@ -556,6 +569,139 @@ describe('Teams webhook handler', () => {
       }),
     );
     expect(callViaEmojiConfigMock).not.toHaveBeenCalled();
+    expect(queueFastReplyMock).not.toHaveBeenCalled();
+  });
+
+  it('queues a native reaction on the owner’s bound Fast message', async () => {
+    teamsUserMappingFindFirstMock.mockResolvedValue({
+      userId: 'mapped-user-1',
+    });
+    findFastMessageSessionMock.mockResolvedValue({
+      id: 'fast-session-1',
+      userId: 'mapped-user-1',
+      conversation: {
+        surface: 'teams',
+        workspaceId: 'tenant-1',
+        conversationId: '19:conversation@thread.v2:user:mapped-user-1',
+        replyTarget: {
+          channelId: '19:conversation@thread.v2',
+          threadId: 'activity-root',
+        },
+      },
+    });
+
+    const response = await createApp().request('/teams', {
+      method: 'POST',
+      headers: {
+        authorization: 'Bearer valid-token',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify(
+        createTeamsActivity({
+          type: 'messageReaction',
+          id: 'fast-reaction-1',
+          text: undefined,
+          entities: undefined,
+          replyToId: 'fast-message-1',
+          reactionsAdded: [{ type: 'heart' }],
+        }),
+      ),
+    });
+
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      fastReactionQueued: true,
+    });
+    expect(findFastMessageSessionMock).toHaveBeenCalledWith({
+      provider: 'teams',
+      workspaceId: 'tenant-1',
+      channelId: '19:conversation@thread.v2',
+      messageId: 'fast-message-1',
+    });
+    expect(queueFastReplyMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: 'fast-session-1',
+        userId: 'mapped-user-1',
+        currentMessageId: 'teams-reaction:fast-reaction-1',
+        replyToMessageId: 'fast-message-1',
+        externalInput: expect.objectContaining({
+          provider: 'teams',
+          reactions: [{ name: 'heart' }],
+        }),
+      }),
+    );
+  });
+
+  it('rejects a reaction from a different Fast session owner', async () => {
+    teamsUserMappingFindFirstMock.mockResolvedValue({
+      userId: 'mapped-user-1',
+    });
+    findFastMessageSessionMock.mockResolvedValue({
+      id: 'fast-session-1',
+      userId: 'another-user',
+      conversation: {
+        surface: 'teams',
+        workspaceId: 'tenant-1',
+        conversationId: '19:conversation@thread.v2:user:another-user',
+        replyTarget: {
+          channelId: '19:conversation@thread.v2',
+          threadId: 'activity-root',
+        },
+      },
+    });
+
+    const response = await createApp().request('/teams', {
+      method: 'POST',
+      headers: {
+        authorization: 'Bearer valid-token',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify(
+        createTeamsActivity({
+          type: 'messageReaction',
+          id: 'fast-reaction-owner-mismatch',
+          text: undefined,
+          entities: undefined,
+          replyToId: 'fast-message-1',
+          reactionsAdded: [{ type: 'laugh' }],
+        }),
+      ),
+    });
+
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      queued: false,
+      reason: 'fast_session_user_mismatch',
+    });
+    expect(queueFastReplyMock).not.toHaveBeenCalled();
+  });
+
+  it('ignores reaction removals', async () => {
+    const response = await createApp().request('/teams', {
+      method: 'POST',
+      headers: {
+        authorization: 'Bearer valid-token',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify(
+        createTeamsActivity({
+          type: 'messageReaction',
+          id: 'reaction-removed',
+          text: undefined,
+          entities: undefined,
+          replyToId: 'fast-message-1',
+          reactionsAdded: [],
+          reactionsRemoved: [{ type: 'heart' }],
+        }),
+      ),
+    });
+
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      ignored: 'reaction_removed',
+    });
+    expect(findFastMessageSessionMock).not.toHaveBeenCalled();
+    expect(queueFastReplyMock).not.toHaveBeenCalled();
   });
 
   it('does not claim a reaction suggestion when account mapping fails', async () => {

@@ -14,6 +14,10 @@ const mocks = vi.hoisted(() => ({
 vi.mock('@roomote/cloud-agents/server', () => ({
   acquireFastAgentTurnLock: mocks.acquireLock,
   answerFastAgentQuestion: mocks.answerQuestion,
+  buildFastAgentReactionExternalInputQuestion: vi.fn(
+    (input: unknown) =>
+      `<external_input>${JSON.stringify(input)}</external_input>`,
+  ),
   getActiveFastAgentTasks: mocks.getActiveTasks,
 }));
 
@@ -23,7 +27,7 @@ vi.mock('@roomote/communication', () => ({
 }));
 
 vi.mock('@roomote/sdk/server', () => ({
-  findFastAgentSessionForProviderReply: mocks.findSession,
+  findFastAgentSessionForProviderMessage: mocks.findSession,
   recordFastAgentConversationMessageBestEffort: mocks.recordProviderMessage,
   resolveUserMcpServerConfigs: vi.fn(async () => ({})),
 }));
@@ -102,7 +106,7 @@ describe('Fast Slack reaction input', () => {
       provider: 'slack',
       workspaceId: 'T1',
       channelId: 'C1',
-      replyToMessageId: '101.000',
+      messageId: '101.000',
       userId: 'user-1',
     });
     expect(mocks.answerQuestion).toHaveBeenCalledWith(
@@ -117,14 +121,20 @@ describe('Fast Slack reaction input', () => {
         platformEventTranscriptPayload: {
           externalInput: expect.objectContaining({
             type: 'reaction_added',
-            emoji: 'eyes',
-            reactor: { slackUserId: 'UALICE', displayName: '@alice' },
+            provider: 'slack',
+            reactions: [{ name: 'eyes' }],
+            reactor: {
+              externalUserId: 'UALICE',
+              displayName: '@alice',
+            },
             message: expect.objectContaining({
+              workspaceId: 'T1',
               channelId: 'C1',
-              messageTs: '101.000',
-              threadTs: '100.000',
+              messageId: '101.000',
+              threadId: '100.000',
               text: 'I found the issue.',
             }),
+            eventId: '102.000',
           }),
         },
       }),

@@ -2485,6 +2485,40 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     expect(adapter.postReply).not.toHaveBeenCalled();
   });
 
+  it('rejects reaction side effects during platform events', async () => {
+    let reactionResult: unknown;
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        reactionResult = await invokeTool(nativeToolNames.sendChatReaction, {
+          name: 'thumbsup',
+          purpose: 'closeout',
+        });
+        await invokeTool(nativeToolNames.ignoreEvent, {
+          reason: 'no response needed',
+        });
+        return '';
+      },
+    );
+    const adapter = callbacks();
+
+    await answerFastAgentQuestion({
+      ...baseParams,
+      currentMessageId: 'slack-reaction:1710000000.000100',
+      turnSource: 'platform_event',
+      platformEventKind: 'external_input',
+      platformEventVisibility: 'optional',
+      adapter,
+    });
+
+    expect(reactionResult).toEqual({
+      success: false,
+      error:
+        'Emoji reactions are unavailable during platform events. Use send_chat_reply or ignore_event instead.',
+    });
+    expect(adapter.postReaction).not.toHaveBeenCalled();
+  });
+
   it('posts a closeout when a visibility-required event tries to ignore itself', async () => {
     mocks.generateText.mockImplementation(
       async (_params, _session, options) => {

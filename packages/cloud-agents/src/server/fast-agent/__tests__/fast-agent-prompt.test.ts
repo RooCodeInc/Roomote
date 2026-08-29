@@ -504,7 +504,7 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).not.toContain('Do not call "ignore_event"');
     expect(prompt).toContain('Do not use the reaction tool');
     expect(prompt).toContain(
-      'an inbound Slack reaction event is not itself a reactable message surface',
+      'an inbound emoji-reaction event is not itself a reactable message surface',
     );
     expect(prompt).toContain(
       'If the reaction warrants a response, post a text reply; otherwise stay silent according to the ignore rules above',

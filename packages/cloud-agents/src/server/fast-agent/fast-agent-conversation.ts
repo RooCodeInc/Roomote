@@ -27,6 +27,27 @@ export type FastAgentPlatformEventKind =
   | 'automation'
   | 'external_input';
 
+export type FastAgentReactionExternalInput = {
+  type: 'reaction_added';
+  provider: 'slack' | 'discord' | 'teams' | 'telegram';
+  reactions: Array<{ name: string; id?: string }>;
+  reactor: { externalUserId: string; displayName?: string };
+  message: {
+    workspaceId: string;
+    channelId: string;
+    messageId: string;
+    threadId?: string;
+    text?: string;
+  };
+  eventId: string;
+};
+
+export function buildFastAgentReactionExternalInputQuestion(
+  input: FastAgentReactionExternalInput,
+): string {
+  return `<external_input>${JSON.stringify(input)}</external_input>`;
+}
+
 export type FastAgentSuggestedTask = {
   title: string;
   brief: string;

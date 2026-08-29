@@ -153,6 +153,38 @@ export async function findFastAgentSessionForProviderReply(
     : null;
 }
 
+export async function findFastAgentSessionForProviderMessage(
+  input: ProviderRoute & { messageId: string; userId?: string },
+): Promise<FastAgentConversationRecord | null> {
+  const binding = await db.query.fastAgentProviderMessages.findFirst({
+    where: and(
+      eq(fastAgentProviderMessages.provider, input.provider),
+      eq(fastAgentProviderMessages.workspaceId, input.workspaceId),
+      eq(fastAgentProviderMessages.channelId, input.channelId),
+      eq(fastAgentProviderMessages.messageId, input.messageId),
+    ),
+    columns: { conversationId: true, threadId: true },
+  });
+  if (
+    !binding ||
+    (input.threadId !== undefined && binding.threadId !== input.threadId)
+  ) {
+    return null;
+  }
+
+  const session = await fastAgentConversationRepository.findById({
+    id: binding.conversationId,
+  });
+  return session &&
+    (!input.userId || session.userId === input.userId) &&
+    matchesProviderRoute(session, {
+      ...input,
+      ...(binding.threadId ? { threadId: binding.threadId } : {}),
+    })
+    ? session
+    : null;
+}
+
 export async function isFastAgentProviderMessage(input: {
   provider: FastAgentReplyProvider;
   messageId: string;

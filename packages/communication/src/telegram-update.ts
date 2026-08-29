@@ -222,6 +222,27 @@ export function isNewTelegramThumbsUpReaction(
   );
 }
 
+export function getNewTelegramMessageReactions(
+  reaction: TelegramMessageReaction,
+): Array<{ name: string; id?: string }> {
+  const reactionKey = (item: TelegramMessageReaction['new_reaction'][number]) =>
+    `${item.type}:${item.emoji ?? ''}:${item.custom_emoji_id ?? ''}`;
+  const oldReactionKeys = new Set(reaction.old_reaction.map(reactionKey));
+
+  return reaction.new_reaction
+    .filter((item) => !oldReactionKeys.has(reactionKey(item)))
+    .map((item) =>
+      item.type === 'emoji' && item.emoji
+        ? { name: item.emoji }
+        : item.type === 'custom_emoji' && item.custom_emoji_id
+          ? {
+              name: `custom_emoji:${item.custom_emoji_id}`,
+              id: item.custom_emoji_id,
+            }
+          : { name: item.type },
+    );
+}
+
 export function getTelegramChatId(message: TelegramMessage): string {
   return String(message.chat.id);
 }

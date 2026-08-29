@@ -1577,6 +1577,13 @@ export async function answerFastAgentQuestion({
 
           case FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReaction: {
             const args = chatReactionArgsSchema.parse(call.args);
+            if (platformEvent) {
+              return {
+                success: false,
+                error:
+                  'Emoji reactions are unavailable during platform events. Use send_chat_reply or ignore_event instead.',
+              };
+            }
             if (!adapter.postReaction) {
               return {
                 success: false,

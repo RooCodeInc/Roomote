@@ -2,14 +2,16 @@ import { Env } from '@roomote/env';
 import {
   acquireFastAgentTurnLock,
   answerFastAgentQuestion,
+  buildFastAgentReactionExternalInputQuestion,
   getActiveFastAgentTasks,
+  type FastAgentReactionExternalInput,
 } from '@roomote/cloud-agents/server';
 import {
   buildFastSessionReplyFooterText,
   resolveFastSessionReplyFooterContext,
 } from '@roomote/communication';
 import {
-  findFastAgentSessionForProviderReply,
+  findFastAgentSessionForProviderMessage,
   recordFastAgentConversationMessageBestEffort,
   resolveUserMcpServerConfigs,
 } from '@roomote/sdk/server';
@@ -26,24 +28,11 @@ import type { SlackWebhookContext } from '../context.js';
 import { postSlackThreadMarkdownMessage } from '../helpers/thread-posting.js';
 import { lookupSlackUserMapping } from '../helpers/user-mapping.js';
 
-type SlackReactionInput = {
-  type: 'reaction_added';
-  emoji: string;
-  reactor: { slackUserId: string; displayName?: string };
-  message: {
-    channelId: string;
-    messageTs: string;
-    threadTs: string;
-    text: string;
-  };
-  eventTs: string;
-};
-
 async function processFastAgentReaction(params: {
   context: SlackWebhookContext;
   event: SlackReactionAddedEvent;
   session: NonNullable<
-    Awaited<ReturnType<typeof findFastAgentSessionForProviderReply>>
+    Awaited<ReturnType<typeof findFastAgentSessionForProviderMessage>>
   >;
   targetMessage: { text: string; thread_ts?: string };
   reactorDisplayName?: string;
@@ -67,22 +56,24 @@ async function processFastAgentReaction(params: {
   );
 
   const threadTs = conversation.replyTarget.threadId;
-  const reactionInput: SlackReactionInput = {
+  const reactionInput: FastAgentReactionExternalInput = {
     type: 'reaction_added',
-    emoji: event.reaction,
+    provider: 'slack',
+    reactions: [{ name: event.reaction }],
     reactor: {
-      slackUserId: event.user,
+      externalUserId: event.user,
       ...(params.reactorDisplayName
         ? { displayName: params.reactorDisplayName }
         : {}),
     },
     message: {
+      workspaceId: context.teamId,
       channelId: event.item.channel,
-      messageTs: event.item.ts,
-      threadTs,
+      messageId: event.item.ts,
+      threadId: threadTs,
       text: params.targetMessage.text,
     },
-    eventTs: event.event_ts,
+    eventId: event.event_ts,
   };
 
   try {
@@ -93,7 +84,7 @@ async function processFastAgentReaction(params: {
     let didSendVisibleResponse = false;
 
     const responseText = await answerFastAgentQuestion({
-      question: `<external_input>${JSON.stringify(reactionInput)}</external_input>`,
+      question: buildFastAgentReactionExternalInputQuestion(reactionInput),
       userId: session.userId,
       conversation,
       currentMessageId: `slack-reaction:${event.event_ts}`,
@@ -239,11 +230,11 @@ export async function maybeRouteFastAgentReaction(params: {
   });
   if (!activeMapping) return false;
 
-  const session = await findFastAgentSessionForProviderReply({
+  const session = await findFastAgentSessionForProviderMessage({
     provider: 'slack',
     workspaceId: context.teamId,
     channelId: event.item.channel,
-    replyToMessageId: event.item.ts,
+    messageId: event.item.ts,
     userId: activeMapping.userId,
   });
   if (!session) return false;

@@ -29,9 +29,11 @@ import type { TeamsCommunicationProvider } from '@roomote/communication/teams-pr
 import {
   continueFastAgentSurfaceReply,
   createTeamsCommunicationProviderFromRuntimeCredentials,
+  findFastAgentSessionForProviderMessage,
   findFastAgentSessionForProviderReply,
   findTeamsConversationRoute,
   isFastAgentProviderMessage,
+  queueFastAgentSurfaceReply,
 } from '@roomote/sdk/server';
 import {
   exchangeMicrosoftDelegatedGraphToken,
@@ -70,6 +72,7 @@ import { appendAttachmentTextsToPromptText } from '@roomote/cloud-agents';
 import {
   AUDIO_TRANSCRIPTION_MAX_SIZE_BYTES,
   buildTeamsRoutingContext,
+  buildFastAgentReactionExternalInputQuestion,
   enqueueTask,
   formatAudioAttachmentWarning,
   formatAudioTranscriptionResult,
@@ -78,6 +81,7 @@ import {
   resolveAudioTranscriptionMimeType,
   routeTask,
   transcribeAudioAttachment,
+  type FastAgentReactionExternalInput,
   type RoutingWorkspace,
 } from '@roomote/cloud-agents/server';
 
@@ -1782,6 +1786,12 @@ teams.post('/', async (c) => {
     }
 
     const reactionTargetMessageId = activity.replyToId?.trim();
+    if (
+      (activity.reactionsAdded?.length ?? 0) === 0 &&
+      (activity.reactionsRemoved?.length ?? 0) > 0
+    ) {
+      return c.json({ ok: true, ignored: 'reaction_removed' });
+    }
     const hasLikeReaction = (activity.reactionsAdded ?? []).some(
       (reaction) => reaction.type === 'like',
     );
@@ -1845,13 +1855,99 @@ teams.post('/', async (c) => {
       }
     }
 
-    if (!configuration && !claimedSuggestionReaction) {
-      return c.json({ ok: true, ignored: 'reaction_not_configured' });
-    }
-
     const targetMessageId = activity.replyToId?.trim();
     if (!targetMessageId) {
       return c.json({ ok: true, ignored: 'reaction_target_missing' });
+    }
+
+    if (!configuration && !claimedSuggestionReaction) {
+      const addedReactions = (activity.reactionsAdded ?? [])
+        .map((reaction) => reaction.type.trim().toLowerCase())
+        .filter(isTeamsNativeReactionType)
+        .map((name) => ({ name }));
+      if (addedReactions.length === 0) {
+        return c.json({ ok: true, ignored: 'reaction_not_configured' });
+      }
+
+      const metadata = getTeamsActivityCommunicationMetadata(activity);
+      const tenantId = metadata.teamsTenantId;
+      const fastChannelId = getTeamsBaseConversationId(
+        metadata.communicationChannelId,
+      );
+      const fastSession = tenantId
+        ? await findFastAgentSessionForProviderMessage({
+            provider: 'teams',
+            workspaceId: tenantId,
+            channelId: fastChannelId,
+            messageId: targetMessageId,
+          })
+        : null;
+      if (!fastSession) {
+        return c.json({ ok: true, ignored: 'reaction_not_configured' });
+      }
+
+      const mappedUserId = await findMappedTeamsUserId(activity);
+      if (!mappedUserId) {
+        await postTeamsAccountLinkPrompt({ activity, metadata });
+        return c.json({
+          ok: true,
+          queued: false,
+          reason: 'account_link_required',
+        });
+      }
+      if (fastSession.userId !== mappedUserId) {
+        return c.json({
+          ok: true,
+          queued: false,
+          reason: 'fast_session_user_mismatch',
+        });
+      }
+      if (fastSession.conversation.surface !== 'teams') {
+        return c.json({
+          ok: true,
+          queued: false,
+          reason: 'fast_session_surface_mismatch',
+        });
+      }
+
+      const eventId = activity.id ?? randomUUID();
+      const reactionInput: FastAgentReactionExternalInput = {
+        type: 'reaction_added',
+        provider: 'teams',
+        reactions: addedReactions,
+        reactor: {
+          externalUserId: activity.from?.id ?? mappedUserId,
+          ...(activity.from?.name?.trim()
+            ? { displayName: activity.from.name.trim() }
+            : {}),
+        },
+        message: {
+          workspaceId: tenantId!,
+          channelId: fastChannelId,
+          messageId: targetMessageId,
+          ...(fastSession.conversation.replyTarget.threadId
+            ? { threadId: fastSession.conversation.replyTarget.threadId }
+            : {}),
+        },
+        eventId,
+      };
+      const queued = await queueFastAgentSurfaceReply({
+        sessionId: fastSession.id,
+        userId: mappedUserId,
+        senderDisplayName: activity.from?.name?.trim() || null,
+        question: buildFastAgentReactionExternalInputQuestion(reactionInput),
+        currentMessageId: `teams-reaction:${eventId}`,
+        replyToMessageId: targetMessageId,
+        externalInput: reactionInput,
+      });
+      return c.json(
+        queued
+          ? { ok: true, fastReactionQueued: true }
+          : {
+              ok: true,
+              ignored: 'teams_fast_reaction_route_unavailable',
+            },
+      );
     }
 
     const mentionName = activity.recipient?.name?.trim() || PRODUCT_NAME;

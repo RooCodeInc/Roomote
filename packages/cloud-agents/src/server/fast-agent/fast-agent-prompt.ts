@@ -257,7 +257,7 @@ ${
     : '- No failed-start retry tool is available for this event. Report or ignore it without retrying.'
 }
 - Launching creates a separate delegated task; it does not retry the task associated with this event.
-- Do not use the reaction tool because a platform event has no incoming chat message to react to. In particular, an inbound Slack reaction event is not itself a reactable message surface. If the reaction warrants a response, post a text reply; otherwise stay silent according to the ignore rules above.
+- Do not use the reaction tool because a platform event has no incoming chat message to react to. In particular, an inbound emoji-reaction event is not itself a reactable message surface. If the reaction warrants a response, post a text reply; otherwise stay silent according to the ignore rules above.
 ${
   platformEventKind === 'automation'
     ? `- Execute the automation prompt now. Use integrations directly when sufficient, and launch a task only when repository or workspace execution is actually required. The configured model is a delegated-task default, not the Fast inference model.
