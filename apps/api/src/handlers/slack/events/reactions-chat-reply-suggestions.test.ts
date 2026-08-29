@@ -292,6 +292,56 @@ describe('chat reply suggestion reactions', () => {
     );
   });
 
+  it('starts a pinned automation suggestion in Fast when Fast is the user default', async () => {
+    mocks.trackedMessageFindFirst.mockResolvedValue({
+      id: 'tracked-message-1',
+      workItemId: 'work-item-1',
+      metadata: { suggestionType: 'suggested_tasks' },
+    });
+    mocks.lookupSlackUserMapping.mockResolvedValue({
+      hasInactiveMapping: false,
+      activeMapping: { userId: 'user-1' },
+    });
+    const slack = {
+      postMessage: vi.fn(async () => 'seeded-thread-ts'),
+      deleteMessage: vi.fn(async () => undefined),
+      getMessageMetadata: vi.fn(),
+    };
+
+    await handleReactionAddedEvent({
+      context: {
+        teamId: 'T1',
+        slackInstallation: { botUserId: 'UROOMOTE', teamId: 'T1' },
+        slack,
+      } as never,
+      event: {
+        type: 'reaction_added',
+        user: 'U1',
+        reaction: 'thumbsup',
+        item: { type: 'message', channel: 'C1', ts: 'card-ts' },
+        event_ts: 'event-ts',
+      },
+    });
+
+    expect(mocks.resolveWorkspace).toHaveBeenCalled();
+    expect(mocks.startFastAgentResponse).toHaveBeenCalledWith(
+      expect.objectContaining({
+        continuation: true,
+        userId: 'user-1',
+        event: expect.objectContaining({
+          thread_ts: 'seeded-thread-ts',
+          agentContext: 'implementation prompt',
+        }),
+      }),
+    );
+    expect(mocks.startAutoRoutedSlackTask).not.toHaveBeenCalled();
+    expect(mocks.startSlackAppMentionTask).not.toHaveBeenCalled();
+    expect(mocks.finalizeWorkItemLaunched).toHaveBeenCalledWith(
+      expect.anything(),
+      { id: 'work-item-1', taskId: null, claimedAt },
+    );
+  });
+
   it('releases the claim when the Fast turn lock is busy', async () => {
     mocks.lookupSlackUserMapping.mockResolvedValue({
       hasInactiveMapping: false,
