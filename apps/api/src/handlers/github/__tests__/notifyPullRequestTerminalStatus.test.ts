@@ -85,6 +85,7 @@ vi.mock('@roomote/db/server', () => ({
   slackInstallations: {},
   githubInstallations: {},
   taskPullRequests: {},
+  desc: vi.fn((column: unknown) => ({ desc: column })),
   eq: vi.fn((...args: unknown[]) => ({ eq: args })),
   and: vi.fn((...args: unknown[]) => ({ and: args })),
   inArray: vi.fn((...args: unknown[]) => ({ inArray: args })),
@@ -340,7 +341,7 @@ describe('notifyPullRequestTerminalStatus', () => {
     expect(mockRemoveReaction).not.toHaveBeenCalled();
   });
 
-  it('still posts to a legacy Slack task linked to the same PR as a session-backed task', async () => {
+  it('uses each task latest run when Fast and legacy histories are mixed', async () => {
     mockedGithubFind.mockResolvedValue({ id: 1 } as any);
     mockedTaskPullRequestsFind.mockResolvedValue([
       { taskId: 'session-task' },
@@ -364,6 +365,26 @@ describe('notifyPullRequestTerminalStatus', () => {
       {
         taskId: 'session-task',
         payload: fastParentSlackPayload('CSESSION', 'session-thread'),
+      },
+      {
+        taskId: 'legacy-task',
+        payload: {
+          communicationProvider: 'slack',
+          communicationChannelId: 'CLEGACY',
+          communicationThreadId: 'legacy-thread',
+        },
+      },
+      {
+        taskId: 'session-task',
+        payload: {
+          communicationProvider: 'slack',
+          communicationChannelId: 'CSESSION-OLD',
+          communicationThreadId: 'session-thread-old',
+        },
+      },
+      {
+        taskId: 'legacy-task',
+        payload: fastParentSlackPayload('CLEGACY-OLD', 'legacy-thread-old'),
       },
     ] as any);
     mockedSlackFind.mockResolvedValue({ botAccessToken: 'xoxb-token' } as any);
