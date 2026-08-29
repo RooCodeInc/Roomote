@@ -32,10 +32,12 @@ import {
 } from '@roomote/types';
 
 import {
+  getFastSessionMessagesCommand,
   getFastSessionTasksCommand,
   handleFastSessionPrReviewActionCommand,
   replyToFastSessionCommand,
   startFastSessionCommand,
+  submitFastSessionUserInputCommand,
   updateFastSessionModelSelectionCommand,
 } from '../commands/fast-sessions';
 import {
@@ -299,6 +301,13 @@ import {
   getSetupStatusCommand,
 } from '../commands/setup';
 import { completeSetupWithStarterTasksCommand } from '../commands/setup/starter-tasks';
+import {
+  getOrCreateSetupSessionCommand,
+  getSetupSessionStatusCommand,
+  launchSetupStarterTasksForSetupSession,
+  scheduleSetupSessionMilestoneTurn,
+  submitSetupSessionUserInputCommand,
+} from '../commands/setup/setup-session';
 import { SETUP_STARTER_TASK_IDS } from '@/lib/setup-starter-tasks';
 import {
   getSetupNewStatusCommand,
@@ -2545,6 +2554,58 @@ export const appRouter = createRouter({
       .mutation(({ ctx: { auth }, input }) =>
         completeSetupWithStarterTasksCommand(auth, input),
       ),
+
+    getOrCreateSession: protectedProcedure.mutation(({ ctx: { auth } }) =>
+      getOrCreateSetupSessionCommand(auth),
+    ),
+
+    sessionStatus: protectedProcedure.query(({ ctx: { auth } }) =>
+      getSetupSessionStatusCommand(auth),
+    ),
+
+    sessionMilestone: protectedProcedure
+      .input(
+        z.object({
+          milestone: z.enum([
+            'session_created',
+            'source_control_connected',
+            'starter_picker_submitted',
+            'first_task_launched',
+            'recommendations_notified',
+            'setup_completed',
+          ]),
+          eventType: z.enum([
+            'source_control_connected',
+            'recommendations_ready',
+            'recommendations_decided',
+          ]),
+        }),
+      )
+      .mutation(({ ctx: { auth }, input }) =>
+        scheduleSetupSessionMilestoneTurn(auth, input),
+      ),
+
+    retrySessionStarterTasks: protectedProcedure
+      .input(
+        z.object({
+          starterTaskIds: z.array(z.enum(SETUP_STARTER_TASK_IDS)).min(1),
+        }),
+      )
+      .mutation(({ ctx: { auth }, input }) =>
+        launchSetupStarterTasksForSetupSession(auth, input.starterTaskIds),
+      ),
+
+    submitSessionUserInput: protectedProcedure
+      .input(
+        z.object({
+          sessionId: z.string().uuid(),
+          requestId: z.string().min(1),
+          answers: z.record(z.object({ answers: z.array(z.string()).max(50) })),
+        }),
+      )
+      .mutation(({ ctx: { auth }, input }) =>
+        submitSetupSessionUserInputCommand(auth, input),
+      ),
   }),
 
   setupNew: createRouter({
@@ -2841,6 +2902,22 @@ export const appRouter = createRouter({
       .input(z.object({ sessionId: z.string().uuid() }))
       .query(({ ctx: { auth }, input }) =>
         getFastSessionTasksCommand(auth, input.sessionId),
+      ),
+    messages: protectedProcedure
+      .input(z.object({ sessionId: z.string().uuid() }))
+      .query(({ ctx: { auth }, input }) =>
+        getFastSessionMessagesCommand(auth, input.sessionId),
+      ),
+    submitUserInput: protectedProcedure
+      .input(
+        z.object({
+          sessionId: z.string().uuid(),
+          requestId: z.string().min(1),
+          answers: z.record(z.object({ answers: z.array(z.string()).max(50) })),
+        }),
+      )
+      .mutation(({ ctx: { auth }, input }) =>
+        submitFastSessionUserInputCommand(auth, input),
       ),
   }),
 

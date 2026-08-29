@@ -180,16 +180,23 @@ After you upgrade, Roomote can surface the new release in the web app:
   wizard creates the GitHub App; other providers use their documented OAuth or
   credential flow.
 - For Slack, Microsoft Teams, Telegram, and Discord: a workspace or server where
-  you can install an app or bot; the setup wizard prefills the Slack app
+  you can install an app or bot; the setup assistant prefills the Slack app
   manifest and creates Discord's installation link for you.
 
 ## Verify the deployment
 
-The final setup step offers a small set of preselected starter tasks. Keep the
-ones you want, clear any you do not want to run yet, then select **Go**. If you
-start one task, Roomote opens it directly; if you start several, Roomote opens
-the task list. You can also clear every selection and finish setup without
-starting a task.
+Setup ends in a conversational session with Roomote. Once sign-in, inference,
+and a usable sandbox provider are confirmed, the setup wizard is replaced by a
+persistent chat session: Roomote maintains an onboarding agenda in the
+session, and you connect source control through the trusted side panel (the
+same panel opens as a sheet on smaller screens). Credential entry and OAuth
+always happen in that panel, never in chat.
+
+When repositories are connected, Roomote offers the preselected starter tasks
+in one structured multi-select question; choose at least one and it launches
+them as visible tasks attached to the same session. The first successful
+launch completes setup, and the session continues as a normal session.
+Automation recommendations appear inline afterwards and are optional.
 
 After setup, run a small task that uses the first environment if you did not
 start one from the starter list. A healthy deployment should let you:

@@ -50,6 +50,7 @@ export function createFastAgentTaskLauncher(
     environmentId,
     model,
     parentSessionId,
+    launchIdempotencyKey,
     postKickoff,
   }) => {
     const builtTask = await params.buildTask({
@@ -58,15 +59,14 @@ export function createFastAgentTaskLauncher(
       model,
       parentSessionId,
     });
-    const task = images?.length
-      ? {
-          ...builtTask,
-          payload: {
-            ...builtTask.payload,
-            images,
-          },
-        }
-      : builtTask;
+    const task = {
+      ...builtTask,
+      payload: {
+        ...builtTask.payload,
+        ...(launchIdempotencyKey ? { launchIdempotencyKey } : {}),
+        ...(images?.length ? { images } : {}),
+      },
+    };
     let taskUrl: string | undefined;
     let preparedTaskRun: { id: number; taskId: string } | undefined;
 

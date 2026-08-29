@@ -129,6 +129,131 @@ export type AutomationRecommendationBatch = {
 export type SetupProvisionableComputeProvider =
   keyof typeof SETUP_COMPUTE_PROVISIONING_STATE_FIELDS;
 
+/**
+ * Idempotent setup-session milestones persisted in deployment setup state so
+ * platform events (initial greeting, OAuth return, recommendation readiness)
+ * and completion markers run exactly once even across process restarts.
+ */
+export const SETUP_SESSION_MILESTONES = [
+  'session_created',
+  'source_control_connected',
+  'starter_picker_submitted',
+  'first_task_launched',
+  'recommendations_notified',
+  'setup_completed',
+] as const;
+
+export type SetupSessionMilestone = (typeof SETUP_SESSION_MILESTONES)[number];
+
+export function isSetupSessionMilestone(
+  value: unknown,
+): value is SetupSessionMilestone {
+  return (
+    typeof value === 'string' &&
+    (SETUP_SESSION_MILESTONES as readonly string[]).includes(value)
+  );
+}
+
+/**
+ * Linkage between deployment setup and the persisted conversational setup
+ * Fast session. Referenced by unified session ID only — no database column,
+ * no separate agent identity. Milestone values are ISO timestamps.
+ */
+export type SetupNewSetupSession = {
+  /** Unified (canonical) session ID shown in routes and transcript. */
+  sessionId: string;
+  /** Canonical Fast conversation backing the unified session. */
+  conversationId: string;
+  /** Stable batch ID for starter-task launch idempotency keys. */
+  starterLaunchBatchId: string;
+  /** Persisted milestone notifications keyed by milestone name. */
+  milestones: Partial<Record<SetupSessionMilestone, string>>;
+  /** Set once the first starter task launched successfully. */
+  completedAt: string | null;
+};
+
+export const SETUP_SESSION_STARTER_LAUNCH_BATCH_PREFIX = 'setup-batch';
+
+export function createSetupNewSetupSession(input: {
+  sessionId: string;
+  conversationId: string;
+}): SetupNewSetupSession {
+  return {
+    sessionId: input.sessionId,
+    conversationId: input.conversationId,
+    starterLaunchBatchId: `${SETUP_SESSION_STARTER_LAUNCH_BATCH_PREFIX}-${input.sessionId}`,
+    milestones: {},
+    completedAt: null,
+  };
+}
+
+function normalizeSetupSessionMilestones(value: unknown): {
+  milestones: SetupNewSetupSession['milestones'];
+  valid: boolean;
+} {
+  const milestones: SetupNewSetupSession['milestones'] = {};
+  let valid = true;
+  if (value === undefined || value === null) return { milestones, valid };
+  if (typeof value !== 'object' || Array.isArray(value)) {
+    return { milestones, valid: false };
+  }
+  for (const [key, timestamp] of Object.entries(
+    value as Record<string, unknown>,
+  )) {
+    if (!isSetupSessionMilestone(key)) {
+      valid = false;
+      continue;
+    }
+    if (typeof timestamp === 'string' && !Number.isNaN(Date.parse(timestamp))) {
+      milestones[key] = timestamp;
+    } else {
+      valid = false;
+    }
+  }
+  return { milestones, valid };
+}
+
+/**
+ * Parse and normalize a persisted setup-session linkage. Returns null for
+ * absent or malformed values so older JSON without setup metadata, partially
+ * written rows, or corrupt payloads degrade to a fresh session instead of
+ * breaking setup.
+ */
+export function normalizeSetupNewSetupSession(
+  value: unknown,
+): SetupNewSetupSession | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return null;
+  }
+  const record = value as Record<string, unknown>;
+  const sessionId = asNonEmptyString(record.sessionId);
+  const conversationId = asNonEmptyString(record.conversationId);
+  if (!sessionId || !conversationId) {
+    return null;
+  }
+  const starterLaunchBatchId =
+    asNonEmptyString(record.starterLaunchBatchId) ??
+    `${SETUP_SESSION_STARTER_LAUNCH_BATCH_PREFIX}-${sessionId}`;
+  const { milestones } = normalizeSetupSessionMilestones(record.milestones);
+  const completedAt =
+    typeof record.completedAt === 'string' &&
+    !Number.isNaN(Date.parse(record.completedAt))
+      ? record.completedAt
+      : null;
+
+  return {
+    sessionId,
+    conversationId,
+    starterLaunchBatchId,
+    milestones,
+    completedAt,
+  };
+}
+
+function asNonEmptyString(value: unknown): string | null {
+  return typeof value === 'string' && value.trim().length > 0 ? value : null;
+}
+
 export const isSetupProvisionableComputeProvider = (
   provider: ComputeProvider,
 ): provider is SetupProvisionableComputeProvider =>
@@ -175,6 +300,12 @@ export type SetupNewState = {
   lastInteractedByUserId: string | null;
   automationRecommendations: AutomationRecommendationBatch | null;
   /**
+   * Conversational setup session linkage. Optional for backward
+   * compatibility with deployments whose persisted state predates the
+   * conversational setup flow; normalization supplies null.
+   */
+  setupSession: SetupNewSetupSession | null;
+  /**
    * When the hosting-injected Roomote inference key was imported from the
    * process environment into encrypted Settings storage. One-shot: once
    * stamped, the env value is never imported again, so deleting the Roomote
@@ -212,6 +343,7 @@ export function createEmptySetupNewState(): SetupNewState {
     azureDiskImageBuild: null,
     lastInteractedByUserId: null,
     automationRecommendations: null,
+    setupSession: null,
     trialInferenceKeyImportedAt: null,
   };
 }
@@ -244,5 +376,6 @@ export function normalizeSetupNewState(
     authProvider: isSetupAuthProviderId(normalizedState.authProvider)
       ? normalizedState.authProvider
       : null,
+    setupSession: normalizeSetupNewSetupSession(state?.setupSession),
   };
 }

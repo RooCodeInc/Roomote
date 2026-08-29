@@ -41,6 +41,7 @@ import { StepCommunicationConnect } from './StepCommunicationConnect';
 import { StepInvoke } from './StepInvoke';
 import { useSetupFlow } from './hooks';
 import { StepAutomationRecommendations } from './StepAutomationRecommendations';
+import { SetupConversationalSetup } from './SetupConversationalSetup';
 import { getSetupStepPath } from './types';
 import { LoadingSetupFlow, stepTransitionVariants } from './SetupBootstrapFlow';
 
@@ -245,6 +246,18 @@ export function SetupSignedInFlow() {
       </div>
     );
   if (isLoading || !status) return <LoadingSetupFlow />;
+
+  // Deterministic bootstrap owns the flow until authentication, inference,
+  // and a usable compute path are confirmed. From there, the conversational
+  // setup session replaces the remaining wizard steps directly.
+  const conversationalSetupReady =
+    status.modelSetup.setupSatisfied &&
+    status.computeSetup.setupSatisfied &&
+    status.computeSetup.selectedProvider != null &&
+    status.setupCompletedAt == null;
+  if (conversationalSetupReady) {
+    return <SetupConversationalSetup />;
+  }
 
   const removeSourceControlSyncMarker = () => {
     const params = readSetupSearchParams();

@@ -258,6 +258,46 @@ const ignoreEventArgsSchema = z.object({ reason: z.string().trim().min(1) });
 const saveMemoryArgsSchema = z.object({
   memory: z.string().trim().min(1).max(FAST_AGENT_MEMORY_FACT_MAX_CHARS),
 });
+const updatePlanArgsSchema = z.object({
+  entries: z
+    .array(
+      z.object({
+        content: z.string().trim().min(1).max(500),
+        status: z.enum(['pending', 'in_progress', 'completed']),
+      }),
+    )
+    .min(1)
+    .max(20),
+});
+const requestUserInputArgsSchema = z.object({
+  questions: z
+    .array(
+      z.object({
+        id: z.string().trim().min(1).max(80),
+        header: z.string().trim().min(1).max(60),
+        question: z.string().trim().min(1).max(500),
+        isOther: z.boolean().optional().default(false),
+        isSecret: z.boolean().optional().default(false),
+        options: z
+          .array(
+            z.object({
+              label: z.string().trim().min(1).max(140),
+              description: z.string().trim().min(1).max(500),
+            }),
+          )
+          .min(1)
+          .max(12)
+          .optional(),
+        selectionMode: z.enum(['single', 'multiple']).optional(),
+        minSelections: z.number().int().positive().optional(),
+      }),
+    )
+    .min(1)
+    .max(4),
+});
+const launchSetupStarterTasksArgsSchema = z.object({
+  taskIds: z.array(z.string().trim().min(1)).min(1).max(20),
+});
 
 function normalizeThreadText(text: string): string {
   return text.replace(/\s+/g, ' ').trim();
@@ -776,6 +816,8 @@ export async function answerFastAgentQuestion({
   platformEventKind = 'delegated_task',
   allowSilentAmbientReply = false,
   platformEventTranscriptPayload,
+  setupSnapshot,
+  setupSession = false,
 }: {
   question: string;
   images?: string[];
@@ -802,6 +844,11 @@ export async function answerFastAgentQuestion({
   /** True only for an unmentioned turn in a multi-human Fast conversation. */
   allowSilentAmbientReply?: boolean;
   platformEventTranscriptPayload?: Record<string, unknown>;
+  /** Trusted setup snapshot injected into setup-session turns. */
+  setupSnapshot?: string;
+  /** True only for the active conversational setup session; enables
+   * setup-only native tools. */
+  setupSession?: boolean;
 }): Promise<string> {
   const turnId = buildFastAgentTurnId({
     currentMessageId,
@@ -1232,6 +1279,8 @@ export async function answerFastAgentQuestion({
       retryTaskStartAvailable: Boolean(adapter.retryTaskStart),
       allowSilentAmbientReply,
       releaseVersion,
+      ...(setupSnapshot ? { setupSnapshot } : {}),
+      setupSession,
     });
     const integrationCallSignatures = new Set<string>();
     const completedChatReactionSignatures = new Set<string>();
@@ -1890,6 +1939,166 @@ export async function answerFastAgentQuestion({
             };
           }
 
+          case FAST_AGENT_NATIVE_TOOL_NAMES.updatePlan: {
+            const args = updatePlanArgsSchema.parse(call.args);
+            throwIfTurnCancelled();
+            await persistCanonicalMessage(
+              {
+                ...allocateCanonicalEvent(`plan:${nextTurnSeq++}`),
+                turnId,
+                ts: Date.now(),
+                eventType: ACP_ENVELOPE_EVENT_TYPES.Plan,
+                role: 'assistant',
+                contentBlocks: [
+                  {
+                    type: 'text',
+                    text: args.entries
+                      .map((entry) => `- [${entry.status}] ${entry.content}`)
+                      .join('\n'),
+                  },
+                ],
+                metadata: { visibleInTranscript: true },
+                payload: {
+                  entries: args.entries.map((entry, index) => ({
+                    id: `${turnId}:plan:${index}`,
+                    ...entry,
+                  })),
+                },
+                source: conversation.surface,
+                nativeSessionId: activeOpenCodeSessionId,
+              },
+              true,
+            );
+            visibleUpdatePosted = true;
+            return {
+              success: true,
+              updated: true,
+              entries: args.entries.length,
+            };
+          }
+
+          case FAST_AGENT_NATIVE_TOOL_NAMES.requestUserInput: {
+            const args = requestUserInputArgsSchema.parse(call.args);
+            for (const question of args.questions) {
+              if (question.options && question.isSecret) {
+                return {
+                  success: false,
+                  error:
+                    'Secret questions must use free-text answers, not options.',
+                };
+              }
+              if (question.selectionMode === 'multiple' && !question.options) {
+                return {
+                  success: false,
+                  error:
+                    'Multi-select questions require options to choose from.',
+                };
+              }
+              if (
+                question.minSelections !== undefined &&
+                question.selectionMode !== 'multiple'
+              ) {
+                return {
+                  success: false,
+                  error:
+                    'Minimum selections apply only to multi-select questions.',
+                };
+              }
+              if (
+                question.minSelections !== undefined &&
+                question.options &&
+                question.minSelections > question.options.length
+              ) {
+                return {
+                  success: false,
+                  error:
+                    'Minimum selections cannot exceed the number of options.',
+                };
+              }
+            }
+            const inputEvent = allocateCanonicalEvent(
+              `input_request:${nextTurnSeq++}`,
+            );
+            const requestId = `rui:${inputEvent.eventId}`;
+            throwIfTurnCancelled();
+            await persistCanonicalMessage(
+              {
+                ...inputEvent,
+                turnId,
+                ts: Date.now(),
+                eventType: ACP_ENVELOPE_EVENT_TYPES.RequestUserInput,
+                role: 'assistant',
+                contentBlocks: [
+                  {
+                    type: 'text',
+                    text: args.questions
+                      .map((question) => question.question)
+                      .join('\n'),
+                  },
+                ],
+                metadata: { visibleInTranscript: true },
+                payload: {
+                  requestId,
+                  status: 'pending',
+                  sessionId: session.id,
+                  turnId,
+                  callId: requestId,
+                  questions: args.questions,
+                },
+                source: conversation.surface,
+                nativeSessionId: activeOpenCodeSessionId,
+              },
+              true,
+            );
+            await adapter.requestUserInput?.({
+              requestId,
+              questions: args.questions.map((question) => ({
+                ...question,
+                ...(question.selectionMode === 'multiple'
+                  ? { selectionMode: 'multiple' as const }
+                  : {}),
+              })),
+            });
+            visibleUpdatePosted = true;
+            closed = true;
+            return { success: true, requestId, closed: true };
+          }
+
+          case FAST_AGENT_NATIVE_TOOL_NAMES.launchSetupStarterTasks: {
+            if (!setupSession) {
+              return {
+                success: false,
+                error:
+                  'Starter-task launching is available only in the active setup session.',
+              };
+            }
+            if (!adapter.launchSetupStarterTasks) {
+              return {
+                success: false,
+                error: 'Starter-task launching is unavailable for this turn.',
+              };
+            }
+            const args = launchSetupStarterTasksArgsSchema.parse(call.args);
+            const signature = `launch_setup_starter_tasks:${args.taskIds.join(',')}`;
+            if (completedTaskActions.has(signature)) {
+              return {
+                success: false,
+                error:
+                  'Those starter tasks were already launched in this turn.',
+              };
+            }
+            completedTaskActions.add(signature);
+            throwIfTurnCancelled();
+            const result = await adapter.launchSetupStarterTasks({
+              taskIds: args.taskIds,
+            });
+            for (const launch of result.launched) {
+              currentTasks.set(launch.taskId, { taskId: launch.taskId });
+            }
+            visibleUpdatePosted = true;
+            return result;
+          }
+
           case FAST_AGENT_NATIVE_TOOL_NAMES.ignoreEvent: {
             ignoreEventArgsSchema.parse(call.args);
             if (!platformEvent && !allowSilentAmbientReply) {
@@ -2132,6 +2341,7 @@ export async function answerFastAgentQuestion({
                         availableIntegrations.map(
                           (integration) => integration.id,
                         ),
+                        { setupSession },
                       ),
                       onModelResolved: (model) => {
                         resolvedInferenceModel = model;
@@ -2158,6 +2368,7 @@ export async function answerFastAgentQuestion({
                             {
                               allowSkillAccess: true,
                               allowSpillRecovery: true,
+                              allowSetupTools: setupSession,
                               skillStore,
                               spillBudget,
                             },

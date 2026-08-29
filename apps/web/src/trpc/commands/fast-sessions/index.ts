@@ -7,6 +7,10 @@ import {
   createFastAgentWebTaskLauncher,
   getOrCreateFastAgentSession,
   resolveApiBaseUrl,
+  type FastAgentPlatformEventKind,
+  type FastAgentPlatformEventVisibility,
+  type FastAgentTurnSource,
+  upsertFastAgentMessage,
 } from '@roomote/cloud-agents/server';
 import {
   buildFastAgentSurfaceReplyDelivery,
@@ -17,19 +21,28 @@ import {
   db,
   eq,
   fastAgentConversations,
+  fastAgentMessages,
+  and,
+  sql,
   getSessionForFastConversation,
   retireCanonicalPrReviewActionsForDestinationKey,
 } from '@roomote/db/server';
 import {
+  ACP_ENVELOPE_EVENT_TYPES,
   formatErrorForLog,
   getUserDisplayName,
+  parseAcpRequestUserInputAnswers,
+  parseAcpRequestUserInputPayload,
+  parseAcpRequestUserInputQuestion,
   type ReasoningEffort,
 } from '@roomote/types';
+import type { FastAgentTurnAdapter } from '@roomote/cloud-agents/server';
 
 import type { UserAuthSuccess } from '@/types';
 import {
   findAccessibleFastSession,
   buildFastSessionPrReviewDestinationKey,
+  getFastSessionById,
   getFastSessionPrReviewOfferStatus,
   getFastSessionTasks,
   updateFastSessionPrReviewOfferStatus,
@@ -97,6 +110,12 @@ type WebFastAgentTurnInput = {
   model?: string;
   reasoningEffort?: ReasoningEffort;
   senderDisplayName?: string;
+  turnSource?: FastAgentTurnSource;
+  platformEventKind?: FastAgentPlatformEventKind;
+  platformEventVisibility?: FastAgentPlatformEventVisibility;
+  setupSnapshot?: string;
+  setupSession?: boolean;
+  adapterExtensions?: Partial<FastAgentTurnAdapter>;
 };
 
 /**
@@ -116,6 +135,12 @@ async function runWebFastAgentTurn({
   model,
   reasoningEffort,
   senderDisplayName,
+  turnSource,
+  platformEventKind,
+  platformEventVisibility,
+  setupSnapshot,
+  setupSession,
+  adapterExtensions,
 }: WebFastAgentTurnInput): Promise<void> {
   const conversation = delivery.conversation;
   const release = await acquireFastAgentTurnLock({ conversation });
@@ -140,6 +165,15 @@ async function runWebFastAgentTurn({
       model,
       reasoningEffort,
       senderDisplayName,
+      ...(turnSource
+        ? {
+            turnSource,
+            ...(platformEventKind ? { platformEventKind } : {}),
+            ...(platformEventVisibility ? { platformEventVisibility } : {}),
+          }
+        : {}),
+      ...(setupSnapshot ? { setupSnapshot } : {}),
+      setupSession,
       adapter: {
         resolveMcpServerConfigs: () =>
           resolveUserMcpServerConfigs({
@@ -148,6 +182,7 @@ async function runWebFastAgentTurn({
             includeRoomoteMemberTools: true,
           }),
         ...delivery.adapter,
+        ...adapterExtensions,
       },
     });
   } catch (error) {
@@ -164,7 +199,6 @@ export function scheduleWebFastAgentTurn(input: WebFastAgentTurnInput): void {
   // A detached promise can be suspended between a retry notice and its timer.
   after(() => runWebFastAgentTurn(input));
 }
-
 export async function startFastSessionCommand(
   auth: UserAuthSuccess,
   input: {
@@ -224,6 +258,29 @@ export async function getFastSessionTasksCommand(
   sessionId: string,
 ) {
   return getFastSessionTasks(auth, sessionId);
+}
+
+/** Client-facing Fast transcript load: canonical rows plus paging state. */
+export async function getFastSessionMessagesCommand(
+  auth: UserAuthSuccess,
+  sessionId: string,
+) {
+  const session = await findAccessibleFastSession(auth, sessionId);
+  if (!session) {
+    throw new Error('Fast session not found');
+  }
+  const detail = await getFastSessionById(auth, sessionId);
+  if (!detail) {
+    throw new Error('Fast session not found');
+  }
+  return {
+    sessionId: detail.id,
+    title: detail.title,
+    model: detail.model,
+    reasoningEffort: detail.reasoningEffort,
+    messages: detail.messages,
+    hasOlderMessages: detail.hasOlderMessages,
+  };
 }
 
 export async function updateFastSessionModelSelectionCommand(
@@ -336,4 +393,165 @@ export async function handleFastSessionPrReviewActionCommand(
         status,
       ),
   });
+}
+
+/**
+ * Submit an authenticated structured response to a Fast session's pending
+ * `request_user_input` request. The response is persisted as a canonical
+ * transcript event, duplicate or already-resolved submissions are rejected,
+ * and the same Fast conversation resumes automatically with a hidden
+ * normalized answer payload while the visible transcript keeps only the
+ * structured response event.
+ */
+export async function submitFastSessionUserInputCommand(
+  auth: UserAuthSuccess,
+  input: {
+    sessionId: string;
+    requestId: string;
+    answers: Record<string, { answers: string[] }>;
+  },
+  options: {
+    adapterExtensions?: Partial<FastAgentTurnAdapter>;
+    setupSnapshot?: string;
+    setupSession?: boolean;
+  } = {},
+): Promise<{ success: true }> {
+  const session = await findAccessibleFastSession(auth, input.sessionId);
+  if (!session) {
+    throw new Error('Fast session not found');
+  }
+
+  const [request] = await db
+    .select({
+      eventId: fastAgentMessages.eventId,
+      turnId: fastAgentMessages.turnId,
+      payload: fastAgentMessages.payload,
+    })
+    .from(fastAgentMessages)
+    .where(
+      and(
+        eq(fastAgentMessages.conversationId, session.id),
+        sql`${fastAgentMessages.eventType} = ${ACP_ENVELOPE_EVENT_TYPES.RequestUserInput}`,
+        sql`(${fastAgentMessages.payload}->>'requestId') = ${input.requestId}`,
+      ),
+    )
+    .orderBy(sql`${fastAgentMessages.ts} desc`)
+    .limit(1);
+
+  if (!request) {
+    throw new Error('This input request does not exist in the session.');
+  }
+
+  const [existingResponse] = await db
+    .select({ eventId: fastAgentMessages.eventId })
+    .from(fastAgentMessages)
+    .where(
+      and(
+        eq(fastAgentMessages.conversationId, session.id),
+        sql`${fastAgentMessages.eventType} = ${ACP_ENVELOPE_EVENT_TYPES.RequestUserInputResponse}`,
+        sql`(${fastAgentMessages.payload}->>'requestId') = ${input.requestId}`,
+      ),
+    )
+    .limit(1);
+  if (existingResponse) {
+    throw new Error('This input request was already resolved.');
+  }
+
+  const requestPayload = parseAcpRequestUserInputPayload(request.payload);
+  if (!requestPayload) {
+    throw new Error('This input request is no longer valid.');
+  }
+  const submitted = parseAcpRequestUserInputAnswers(input.answers) ?? {};
+  for (const question of requestPayload.questions.map((question) =>
+    parseAcpRequestUserInputQuestion(question),
+  )) {
+    if (!question) continue;
+    const answers = submitted[question.id]?.answers ?? [];
+    const selectionMode = question.selectionMode ?? 'single';
+    if (selectionMode === 'multiple') {
+      const minSelections =
+        question.minSelections ?? (question.options?.length ? 1 : 0);
+      if (answers.length < minSelections) {
+        throw new Error(
+          `Select at least ${minSelections} option${minSelections === 1 ? '' : 's'}.`,
+        );
+      }
+      if (
+        question.options?.length &&
+        answers.some(
+          (answer) =>
+            !question.options?.some((option) => option.label === answer),
+        )
+      ) {
+        throw new Error('One or more selections are not valid options.');
+      }
+    } else if (answers.length > 1) {
+      throw new Error('This question accepts a single answer.');
+    }
+  }
+
+  const responseEventId = `${request.eventId}:response`;
+  await upsertFastAgentMessage({
+    sessionId: session.id,
+    message: {
+      eventId: responseEventId,
+      turnId: request.turnId,
+      turnSeq: 2_000_000_000,
+      ts: Date.now(),
+      eventType: ACP_ENVELOPE_EVENT_TYPES.RequestUserInputResponse,
+      role: 'user',
+      contentBlocks: [
+        {
+          type: 'text' as const,
+          text: JSON.stringify({ requestId: input.requestId, submitted }),
+        },
+      ],
+      metadata: { visibleInTranscript: true },
+      payload: {
+        requestId: input.requestId,
+        sessionId: session.id,
+        turnId: request.turnId,
+        callId: input.requestId,
+        answers: submitted,
+        resolution: 'submitted',
+      },
+      source: 'web',
+    },
+  });
+
+  scheduleWebFastAgentTurn({
+    userId: auth.userId,
+    delivery: {
+      conversation: {
+        surface: 'web',
+        workspaceId: session.userId,
+        conversationId: session.conversationId,
+      },
+      adapter: {
+        launchTask: createFastAgentWebTaskLauncher({
+          userId: session.userId,
+          conversation: {
+            surface: 'web',
+            workspaceId: session.userId,
+            conversationId: session.conversationId,
+          },
+        }),
+        postReply: async () => {},
+      },
+    },
+    question: `<structured_input_response>${JSON.stringify({
+      requestId: input.requestId,
+      answers: submitted,
+    })}</structured_input_response>`,
+    turnSource: 'platform_event',
+    platformEventKind: 'input_response',
+    platformEventVisibility: 'required',
+    ...(options.adapterExtensions
+      ? { adapterExtensions: options.adapterExtensions }
+      : {}),
+    ...(options.setupSnapshot ? { setupSnapshot: options.setupSnapshot } : {}),
+    setupSession: options.setupSession ?? false,
+  });
+
+  return { success: true };
 }

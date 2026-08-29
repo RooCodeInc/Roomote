@@ -22,7 +22,11 @@ export type FastAgentPlatformEventVisibility = 'optional' | 'required';
 
 export type FastAgentPlatformEventHandling = 'default' | 'present_only';
 
-export type FastAgentPlatformEventKind = 'delegated_task' | 'automation';
+export type FastAgentPlatformEventKind =
+  | 'delegated_task'
+  | 'automation'
+  | 'setup'
+  | 'input_response';
 
 export type FastAgentSuggestedTask = {
   title: string;
@@ -57,6 +61,9 @@ export type LaunchFastAgentTask = (params: {
   environmentId: string | null;
   model?: string | null;
   parentSessionId: string;
+  /** Optional launch idempotency key persisted in the standard task-run
+   * payload; a partial unique index makes concurrent retries converge. */
+  launchIdempotencyKey?: string;
   postKickoff: (task: {
     taskId: string;
     taskUrl?: string;
@@ -86,6 +93,28 @@ export type FastAgentMcpServerConfig = {
   disabledTools?: string[];
 };
 
+/** Structured input request issued with the Fast-native request_user_input tool. */
+export type FastAgentInputRequest = {
+  requestId: string;
+  questions: Array<{
+    id: string;
+    header: string;
+    question: string;
+    isOther: boolean;
+    isSecret: boolean;
+    options?: Array<{ label: string; description: string }>;
+    selectionMode?: 'single' | 'multiple';
+    minSelections?: number;
+  }>;
+};
+
+export type FastAgentSetupStarterLaunchResult = {
+  launched: Array<{ starterTaskId: string; taskId: string }>;
+  failed: Array<{ starterTaskId: string; error: string }>;
+  /** True when setup completed because at least one task launched. */
+  setupCompleted: boolean;
+};
+
 /** Surface adapter for side effects available during one Fast turn. */
 export type FastAgentTurnAdapter = {
   launchTask: LaunchFastAgentTask;
@@ -99,4 +128,11 @@ export type FastAgentTurnAdapter = {
   resolveMcpServerConfigs?: () => Promise<
     Record<string, FastAgentMcpServerConfig>
   >;
+  /** Called when the turn ends waiting on structured user input. The caller
+   * persists the pending request and marks the session needs_input. */
+  requestUserInput?: (request: FastAgentInputRequest) => Promise<void>;
+  /** Setup-only: launch validated starter-task catalog entries. */
+  launchSetupStarterTasks?: (params: {
+    taskIds: string[];
+  }) => Promise<FastAgentSetupStarterLaunchResult>;
 };

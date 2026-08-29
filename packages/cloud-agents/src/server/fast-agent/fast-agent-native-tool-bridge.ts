@@ -29,6 +29,7 @@ import { z } from 'zod';
 
 import {
   FAST_AGENT_NATIVE_TOOL_NAMES,
+  isFastAgentSetupOnlyNativeTool,
   isFastAgentSpillTool,
   type FastAgentNativeToolName,
 } from './fast-agent-tool-policy';
@@ -118,6 +119,8 @@ type FastAgentNativeToolBridge = {
 type ActiveExecutor = {
   allowSkillAccess: boolean;
   allowSpillRecovery: boolean;
+  /** Setup-only native tools are callable from this session. */
+  allowSetupTools: boolean;
   conversationId: string;
   executor: FastAgentNativeToolExecutor;
   skillStore: FastAgentSkillStore;
@@ -127,6 +130,7 @@ type ActiveExecutor = {
 type FastAgentNativeToolBindingOptions = {
   allowSkillAccess?: boolean;
   allowSpillRecovery: boolean;
+  allowSetupTools?: boolean;
   skillStore?: FastAgentSkillStore;
   spillBudget?: FastAgentSpillTurnBudget;
 };
@@ -429,6 +433,58 @@ export default {
     offset: z.number().int().nonnegative().optional(),
   },
   execute: (args, context) => invoke("spill_grep", args, context),
+}
+`,
+
+    [FAST_AGENT_NATIVE_TOOL_NAMES.updatePlan]: String.raw`
+import { z } from "zod"
+import { invoke } from "../roomote-fast-tool-bridge.js"
+
+export default {
+  description: "Create or replace this conversation's onboarding plan. Each entry is one concise step with a status; persist a fresh copy on every change so the plan stays the readable source of truth.",
+  args: {
+    entries: z.array(z.object({
+      content: z.string().min(1).max(500).describe("One concise step of the current plan"),
+      status: z.enum(["pending", "in_progress", "completed"]).describe("Step status"),
+    })).max(20).describe("The complete replacement plan, in order"),
+  },
+  execute: (args, context) => invoke("update_plan", args, context),
+}
+`,
+
+    [FAST_AGENT_NATIVE_TOOL_NAMES.requestUserInput]: String.raw`
+import { z } from "zod"
+import { invoke } from "../roomote-fast-tool-bridge.js"
+
+export default {
+  description: "Ask the user one or more structured questions rendered as an interactive card. The turn ends in needs_input and automatically resumes with the answers. Use only when free conversation cannot capture the needed structure, and never request secrets this way.",
+  args: {
+    questions: z.array(z.object({
+      id: z.string().min(1).max(80),
+      header: z.string().min(1).max(60),
+      question: z.string().min(1).max(500),
+      options: z.array(z.object({
+        label: z.string().min(1).max(140),
+        description: z.string().min(1).max(500),
+      })).min(1).max(12).optional().describe("Present options as choices; omit for free-text"),
+      selectionMode: z.enum(["single", "multiple"]).optional().describe("Multiple allows checkbox selections with an explicit submit; defaults to single"),
+      minSelections: z.number().int().positive().optional().describe("Minimum selections required in multiple mode"),
+    })).min(1).max(4),
+  },
+  execute: (args, context) => invoke("request_user_input", args, context),
+}
+`,
+
+    [FAST_AGENT_NATIVE_TOOL_NAMES.launchSetupStarterTasks]: String.raw`
+import { z } from "zod"
+import { invoke } from "../roomote-fast-tool-bridge.js"
+
+export default {
+  description: "Launch one or more hardcoded setup starter tasks as visible Roomote tasks attached to this session. Accept only exact starter-task IDs from the setup snapshot; prompts are resolved server-side. Requires at least one ID.",
+  args: {
+    taskIds: z.array(z.string().min(1)).min(1).max(20).describe("Exact starter-task IDs from the setup snapshot's starter catalog"),
+  },
+  execute: (args, context) => invoke("launch_setup_starter_tasks", args, context),
 }
 `,
   };
@@ -898,6 +954,24 @@ async function startBridge(): Promise<FastAgentNativeToolBridge> {
         });
         return;
       }
+      if (
+        isFastAgentSetupOnlyNativeTool(parsed.tool) &&
+        !activeExecutor.allowSetupTools
+      ) {
+        writeJson(response, 200, {
+          ok: true,
+          ...(await formatFastAgentNativeToolResult(
+            parsed.sessionID,
+            {
+              success: false,
+              error:
+                'Setup starter-task launching is available only in the active setup session.',
+            },
+            { allowSpill: false },
+          )),
+        });
+        return;
+      }
 
       const call = {
         sessionId: parsed.sessionID,
@@ -1282,6 +1356,7 @@ export function bindFastAgentNativeToolExecutor(
   activeExecutors.set(sessionID, {
     allowSkillAccess: options.allowSkillAccess ?? false,
     allowSpillRecovery: options.allowSpillRecovery,
+    allowSetupTools: options.allowSetupTools ?? false,
     conversationId,
     executor,
     skillStore: options.skillStore ?? fastAgentSkillStore,

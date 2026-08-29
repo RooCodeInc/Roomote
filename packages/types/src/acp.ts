@@ -168,6 +168,13 @@ export interface AcpRequestUserInputQuestion {
   isOther: boolean;
   isSecret: boolean;
   options?: AcpRequestUserInputQuestionOption[];
+  /**
+   * Backward-compatible selection mode. Defaults to `single` when absent;
+   * `multiple` renders checkbox options with an explicit submit action.
+   */
+  selectionMode?: 'single' | 'multiple';
+  /** Minimum selections enforced by UI and server in `multiple` mode. */
+  minSelections?: number;
 }
 
 export type AcpRequestUserInputAnswers = Record<
@@ -263,7 +270,7 @@ function parseAcpRequestUserInputQuestionOption(
   return { label, description };
 }
 
-function parseAcpRequestUserInputQuestion(
+export function parseAcpRequestUserInputQuestion(
   value: unknown,
 ): AcpRequestUserInputQuestion | null {
   const record = asRecordOrNull(value);
@@ -284,6 +291,20 @@ function parseAcpRequestUserInputQuestion(
         )
     : undefined;
 
+  const selectionMode =
+    record?.selectionMode === 'multiple' ? 'multiple' : 'single';
+  const rawMinSelections =
+    typeof record?.minSelections === 'number' &&
+    Number.isFinite(record.minSelections)
+      ? Math.floor(record.minSelections)
+      : null;
+  const minSelections =
+    selectionMode === 'multiple' &&
+    rawMinSelections !== null &&
+    rawMinSelections >= 1
+      ? Math.min(rawMinSelections, options?.length ?? rawMinSelections)
+      : undefined;
+
   return {
     id,
     header,
@@ -291,6 +312,8 @@ function parseAcpRequestUserInputQuestion(
     isOther: record?.isOther === true,
     isSecret: record?.isSecret === true,
     ...(options ? { options } : {}),
+    ...(selectionMode === 'multiple' ? { selectionMode } : {}),
+    ...(minSelections !== undefined ? { minSelections } : {}),
   };
 }
 

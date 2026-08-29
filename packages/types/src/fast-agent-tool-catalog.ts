@@ -18,6 +18,9 @@ export const FAST_AGENT_NATIVE_TOOL_NAMES = {
   showWidget: 'show_widget',
   spillGrep: 'spill_grep',
   spillRead: 'spill_read',
+  updatePlan: 'update_plan',
+  requestUserInput: 'request_user_input',
+  launchSetupStarterTasks: 'launch_setup_starter_tasks',
 } as const;
 
 export type FastAgentNativeToolName =
@@ -58,10 +61,35 @@ export const FAST_AGENT_NATIVE_TOOL_CATALOG = [
   },
   { name: FAST_AGENT_NATIVE_TOOL_NAMES.spillGrep, kind: ACP_TOOL_KINDS.search },
   { name: FAST_AGENT_NATIVE_TOOL_NAMES.spillRead, kind: ACP_TOOL_KINDS.read },
+  { name: FAST_AGENT_NATIVE_TOOL_NAMES.updatePlan, kind: ACP_TOOL_KINDS.edit },
+  {
+    name: FAST_AGENT_NATIVE_TOOL_NAMES.requestUserInput,
+    kind: ACP_TOOL_KINDS.communication,
+  },
+  {
+    name: FAST_AGENT_NATIVE_TOOL_NAMES.launchSetupStarterTasks,
+    kind: ACP_TOOL_KINDS.task,
+  },
 ] as const satisfies readonly {
   name: FastAgentNativeToolName;
   kind: KnownAcpToolKind;
 }[];
+
+/**
+ * Native tools exposed only to the active conversational setup session. The
+ * generic Fast tool filter excludes them; the setup-session filter includes
+ * them, and the native tool bridge rejects calls from any other session.
+ */
+export const FAST_AGENT_SETUP_ONLY_NATIVE_TOOL_NAMES: readonly FastAgentNativeToolName[] =
+  [FAST_AGENT_NATIVE_TOOL_NAMES.launchSetupStarterTasks];
+
+export function isFastAgentSetupOnlyNativeTool(
+  name: FastAgentNativeToolName,
+): boolean {
+  return (
+    FAST_AGENT_SETUP_ONLY_NATIVE_TOOL_NAMES as readonly string[]
+  ).includes(name);
+}
 
 export function getFastAgentNativeAcpKind(
   name: FastAgentNativeToolName,
