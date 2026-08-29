@@ -467,6 +467,11 @@ describe('deliverFastAgentParentEvent', () => {
     expect(mocks.postMessage).not.toHaveBeenCalledWith(
       expect.objectContaining({ text: childEvent.message }),
     );
+    expect(mocks.recordProviderMessage).toHaveBeenCalledWith({
+      sessionId: parent.sessionId,
+      conversation: parent.conversation,
+      messageId: '101.001',
+    });
   });
 
   it('captures an automation platform turn without a chat provider', async () => {
@@ -552,6 +557,11 @@ describe('deliverFastAgentParentEvent', () => {
       },
     });
     expect(mocks.postMessage).not.toHaveBeenCalled();
+    expect(mocks.recordProviderMessage).toHaveBeenCalledWith({
+      sessionId: parent.sessionId,
+      conversation: parent.conversation,
+      messageId: '100.001',
+    });
   });
 
   it('posts structured suggestions beneath a Fast Slack automation report', async () => {
