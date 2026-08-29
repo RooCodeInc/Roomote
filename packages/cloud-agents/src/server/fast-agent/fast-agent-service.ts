@@ -1539,7 +1539,10 @@ export async function answerFastAgentQuestion({
             if (
               platformEvent &&
               args.purpose !== 'closeout' &&
-              args.purpose !== 'clarification'
+              args.purpose !== 'clarification' &&
+              // The setup kickoff introduces itself with one ack before
+              // launching the starter tasks, then still ends on a closeout.
+              !(platformEventKind === 'setup' && args.purpose === 'ack')
             ) {
               return {
                 success: false,
