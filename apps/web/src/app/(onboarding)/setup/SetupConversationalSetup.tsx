@@ -8,10 +8,9 @@ import { useTRPC } from '@/trpc/client';
 import type { FastSessionMessage } from '@/lib/server/fast-sessions';
 
 import { FastSessionTranscript } from '../../(sandbox)/sessions/[sessionId]/FastSessionTranscript';
-import { StepAutomationRecommendations } from './StepAutomationRecommendations';
+import { SetupRecommendationsInlineCard } from './SetupRecommendationsInlineCard';
 import {
   SetupSourceControlPanelSurface,
-  useSetupRecommendationNotifications,
   useSetupRouteTransition,
   useSetupSourceControlMilestoneEffect,
   useSetupSourceControlStatus,
@@ -53,8 +52,6 @@ export function SetupConversationalSetup() {
     enabled: enabled && Boolean(sessionId),
     connectedProviderCount,
   });
-  const notifyRecommendationChoice = useSetupRecommendationNotifications();
-
   const messagesQuery = useQuery(
     trpc.fastSessions.messages.queryOptions(
       { sessionId: sessionId! },
@@ -103,19 +100,7 @@ export function SetupConversationalSetup() {
           </ul>
         </div>
       ) : null}
-      {sourceControlConnected ? (
-        <div className="rounded-2xl border border-border bg-card p-4">
-          <p className="mb-3 text-sm font-medium">Recommended automations</p>
-          <StepAutomationRecommendations
-            onContinue={() => {
-              notifyRecommendationChoice.mutate({
-                milestone: 'recommendations_notified',
-                eventType: 'recommendations_decided',
-              });
-            }}
-          />
-        </div>
-      ) : null}
+      {sourceControlConnected ? <SetupRecommendationsInlineCard /> : null}
     </div>
   );
 

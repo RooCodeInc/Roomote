@@ -139,6 +139,7 @@ export const SETUP_SESSION_MILESTONES = [
   'source_control_connected',
   'starter_picker_submitted',
   'first_task_launched',
+  'first_task_completed',
   'recommendations_notified',
   'setup_completed',
 ] as const;

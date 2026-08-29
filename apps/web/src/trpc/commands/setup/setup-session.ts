@@ -181,6 +181,16 @@ function buildSetupSessionAdapterExtensions(
   };
 }
 
+/**
+ * The unified session ID of the deployment's conversational setup session,
+ * or null when no session was created yet. Used to mount setup-only UI (the
+ * inline recommendations card) on the session's normal route.
+ */
+export async function findDeploymentSetupSessionId(): Promise<string | null> {
+  const state = await readSetupNewState();
+  return normalizeSetupNewSetupSession(state.setupSession)?.sessionId ?? null;
+}
+
 /** Read-only setup-session info for the setup workspace client. */
 export async function getSetupSessionStatusCommand(auth: UserAuthSuccess) {
   assertAdmin(auth);

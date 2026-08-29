@@ -20,9 +20,6 @@ import {
 import { useTRPC } from '@/trpc/client';
 import { SetupFooter } from './SetupFooter';
 import { StepTitle } from './StepTitle';
-import { getSetupStepDefinition } from './types';
-
-const STEP = getSetupStepDefinition('automation-recommendations');
 
 function candidateTitle(candidateId: string) {
   return (
@@ -152,7 +149,11 @@ export function StepAutomationRecommendations({
   return (
     <div className="mx-auto flex w-full max-w-3xl flex-col gap-8">
       <StepTitle
-        text={pending ? 'Looking for stuff to automate...' : STEP.title}
+        text={
+          pending
+            ? 'Looking for stuff to automate...'
+            : 'Recommended automations'
+        }
       />
       {pending ? (
         <div

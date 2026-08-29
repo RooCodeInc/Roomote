@@ -29,6 +29,7 @@ import {
   buildFastAgentDeliveringMarker,
   buildFastAgentDeliveryClaimPredicate,
 } from './fast-agent-delivery-claim';
+import { recordSetupSessionTaskCompleted } from './setup-session-task-completed';
 
 const NOTIFIED_RESULT_KEY = 'fastAgentParentSettleNotifiedAt';
 const FAST_AGENT_STARTUP_MAX_RETRIES = 2;
@@ -176,6 +177,20 @@ export async function notifyFastAgentParentOnSettle(
 
   if (claimRows.length === 0) {
     return;
+  }
+
+  // Setup-funnel telemetry: the first completed task launched by the
+  // conversational setup session records its milestone exactly once.
+  // Best-effort and non-blocking; delivery continues regardless.
+  if (status === RunStatus.Completed) {
+    void recordSetupSessionTaskCompleted({
+      conversationId: parent.sessionId,
+      status,
+    }).catch((error) => {
+      console.warn(
+        `[notifyFastAgentParentOnSettle] Failed to record setup-session task completion for run ${run.id}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    });
   }
 
   let delivered = false;

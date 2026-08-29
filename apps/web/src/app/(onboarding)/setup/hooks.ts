@@ -7,7 +7,6 @@ import {
   getSetupNewComputeProvisioningState,
   isSetupProvisionableComputeProvider,
   ROOMOTE_INFERENCE_PROVIDER_ID,
-  type SetupAuthProviderId,
 } from '@roomote/types';
 
 import { useTRPC } from '@/trpc/client';
@@ -45,9 +44,6 @@ function readOpenRouterOauthStatus(
  * provider and connection choices can be fixed mid-setup.
  */
 const PINNABLE_SETUP_STEPS: readonly SetupStep[] = [
-  'auth-provider',
-  'auth-env-vars',
-  'slack',
   'inference',
   'env-vars',
   'source-control-provider',
@@ -65,8 +61,6 @@ const PINNABLE_SETUP_STEPS: readonly SetupStep[] = [
  * steps; PINNABLE_SETUP_STEPS still covers in-range revisits.
  */
 const DEEP_LINK_REVISITABLE_SETUP_STEPS: readonly SetupStep[] = [
-  'auth-provider',
-  'auth-env-vars',
   'env-vars',
   'source-control-config',
   'compute-provider',
@@ -171,20 +165,6 @@ function hasRealProgress(status: {
   );
 }
 
-function hasLegacyOnboardingTask(status: {
-  setupNewState: {
-    onboardingTaskId: string | null;
-    slackChannel: string | null;
-    slackThreadTs: string | null;
-  };
-}): boolean {
-  return (
-    status.setupNewState.onboardingTaskId !== null &&
-    status.setupNewState.slackChannel === null &&
-    status.setupNewState.slackThreadTs === null
-  );
-}
-
 function toTimestamp(value: Date | string | null): number {
   if (!value) {
     return Number.NaN;
@@ -226,14 +206,12 @@ function isInitialReplayVisit(status: {
 export function useSetupFlow(
   options: {
     enabled?: boolean;
-    pendingAuthProvider?: SetupAuthProviderId | null;
   } = {},
 ) {
   const trpc = useTRPC();
   const router = useRouter();
   const { user } = useUser();
   const queryEnabled = options.enabled ?? true;
-  const pendingAuthProvider = options.pendingAuthProvider ?? null;
 
   const {
     data: status,
@@ -286,9 +264,7 @@ export function useSetupFlow(
   const setupSession = useSetupAsyncSession({
     currentTaskId: status?.setupNewState.onboardingTaskId ?? null,
   });
-  const setupSteps = getSetupSteps(
-    Boolean(pendingAuthProvider ?? status?.setupNewState.authProvider),
-  );
+  const setupSteps = getSetupSteps(true);
   stepRef.current = step;
 
   const setStepWithTransition = useCallback(
@@ -307,47 +283,6 @@ export function useSetupFlow(
     },
     [setupSteps],
   );
-  const communicationStepResolved =
-    setupSession.session.communicationStep.state === 'skipped' ||
-    setupSession.session.communicationStep.state === 'completed';
-  const hasUnlockedPostOnboardingFlow = useCallback(() => {
-    if (!setupSession.session.onboardingTask.postOnboardingUnlocked) {
-      return false;
-    }
-
-    // When an onboarding task exists, scope the unlock to that task so a new
-    // task (or any onboardingTaskId change) resets it via the setup session's
-    // currentTaskId effect. When no task exists yet — e.g. skipping
-    // environment setup from repo selection before any onboarding task has
-    // started — honor the unlock until a task starts, otherwise the
-    // auto-skip watchdog treats invoke as unreachable and yanks the user
-    // back to repo selection.
-    if (status?.setupNewState.onboardingTaskId) {
-      return (
-        setupSession.session.onboardingTask.taskId ===
-        status.setupNewState.onboardingTaskId
-      );
-    }
-
-    return true;
-  }, [
-    setupSession.session.onboardingTask.postOnboardingUnlocked,
-    setupSession.session.onboardingTask.taskId,
-    status?.setupNewState.onboardingTaskId,
-  ]);
-  const hasPostOnboardingAccess = useCallback(
-    (forceUnlocked = false) => {
-      return (
-        !!status &&
-        (status.onboardingSucceeded ||
-          (status.setupNewState.onboardingTaskId !== null &&
-            !status.onboardingFailed) ||
-          forceUnlocked ||
-          hasUnlockedPostOnboardingFlow())
-      );
-    },
-    [hasUnlockedPostOnboardingFlow, status],
-  );
 
   const shouldSkip = useCallback(
     (candidate: SetupStep): boolean => {
@@ -356,21 +291,9 @@ export function useSetupFlow(
       }
 
       const replayEntryVisit = isInitialReplayVisit(status);
-      // A communication provider that the user actually chose (either pending
-      // in the current session or already saved). Runtime env vars alone must
-      // not count as a choice so the chooser still renders and lets the user
-      // pick — even when a provider is fully configured by env vars.
-      const chosenAuthProvider =
-        pendingAuthProvider ?? status.setupNewState.authProvider;
-      const effectiveAuthProvider =
-        chosenAuthProvider ?? status.authSetup.runtimeConfiguredProvider;
       const effectiveSourceControlProvider =
         status.setupNewState.sourceControlProvider ??
         status.sourceControlSetup.runtimeConfiguredProvider;
-      const effectiveCommunicationProvider =
-        status.setupNewState.authProvider ??
-        status.authSetup.runtimeConfiguredProvider ??
-        status.authSetup.selectedProvider;
       const selectedComputeProvider = status.computeSetup.selectedProvider;
       const hasStaleComputeProvider =
         status.setupNewState.computeProvider !== null &&
@@ -384,16 +307,6 @@ export function useSetupFlow(
           return (
             !replayEntryVisit &&
             (hasSeenSetupWelcome() || hasRealProgress(status))
-          );
-        case 'auth-provider':
-          return communicationStepResolved || chosenAuthProvider !== null;
-        case 'auth-env-vars':
-          return (
-            effectiveAuthProvider === null ||
-            (status.authSetup.providers.find(
-              (provider) => provider.id === effectiveAuthProvider,
-            )?.setupSatisfied ??
-              false)
           );
         case 'inference': {
           const trialInferenceAvailable = status.modelSetup.providers?.some(
@@ -477,36 +390,11 @@ export function useSetupFlow(
 
           return computeProviderStatus?.configSatisfied ?? false;
         }
-        case 'slack':
-          if (communicationStepResolved) {
-            return true;
-          }
-
-          if (hasLegacyOnboardingTask(status)) {
-            return true;
-          }
-
-          if (effectiveCommunicationProvider === 'slack') {
-            return status.hasSlack;
-          }
-
-          if (effectiveCommunicationProvider === 'microsoft') {
-            return false;
-          }
-
-          return true;
-        case 'automation-recommendations':
-          return ['applied', 'skipped'].includes(
-            status.setupNewState.automationRecommendations?.applicationState ??
-              'pending',
-          );
-        case 'invoke':
-          return false;
         default:
           return false;
       }
     },
-    [communicationStepResolved, pendingAuthProvider, status],
+    [status],
   );
 
   const shouldSkipPostOnboarding = useCallback(
@@ -518,14 +406,10 @@ export function useSetupFlow(
     ): boolean => {
       const { forceUnlocked = false } = options;
 
-      switch (candidate) {
-        case 'invoke':
-          return !hasPostOnboardingAccess(forceUnlocked);
-        default:
-          return shouldSkip(candidate);
-      }
+      void forceUnlocked;
+      return shouldSkip(candidate);
     },
-    [hasPostOnboardingAccess, shouldSkip],
+    [shouldSkip],
   );
 
   const findNextStep = useCallback(
@@ -538,7 +422,9 @@ export function useSetupFlow(
         }
       }
 
-      return 'invoke';
+      // The wizard has no terminal step: once every bootstrap step is
+      // satisfied, /setup renders the conversational setup session.
+      return setupSteps.at(-1) ?? 'welcome';
     },
     [setupSteps, shouldSkip],
   );
@@ -574,7 +460,7 @@ export function useSetupFlow(
 
   const findNextPostOnboardingStep = useCallback(
     ({
-      fromIndex = setupSteps.indexOf('invoke'),
+      fromIndex = 0,
       forceUnlocked,
     }: {
       fromIndex?: number;
@@ -591,7 +477,7 @@ export function useSetupFlow(
         }
       }
 
-      return 'invoke';
+      return setupSteps.at(-1) ?? 'welcome';
     },
     [setupSteps, shouldSkipPostOnboarding],
   );

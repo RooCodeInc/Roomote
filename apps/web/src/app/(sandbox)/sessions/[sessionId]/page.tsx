@@ -21,6 +21,8 @@ import { getSessionByIdCommand } from '@/trpc/commands/sessions';
 import { WorkspaceHeader } from '@/components/layout';
 import { SessionStatusBadge } from '@/components/sessions/SessionStatusBadge';
 
+import { findDeploymentSetupSessionId } from '@/trpc/commands/setup/setup-session';
+import { SetupRecommendationsInlineCard } from '../../../(onboarding)/setup/SetupRecommendationsInlineCard';
 import { FastSessionTranscript } from './FastSessionTranscript';
 import { SessionWorkspace, type SessionInfo } from './SessionWorkspace';
 import { SessionTaskCards } from './SessionTaskCards';
@@ -118,6 +120,15 @@ export default async function SessionDetailPage({
         tasks={unifiedSession.tasks}
       />
     );
+    // The setup session keeps its inline automation-recommendations card on
+    // its normal route after activation: recommendations are optional and
+    // must not interrupt activation, so they surface here once ready.
+    const isSetupSession =
+      authorizedUser.isAdmin &&
+      unifiedSession.id === (await findDeploymentSetupSessionId());
+    const setupRecommendations = isSetupSession ? (
+      <SetupRecommendationsInlineCard />
+    ) : null;
 
     return (
       <SessionWorkspace session={sessionInfo}>
@@ -138,7 +149,12 @@ export default async function SessionDetailPage({
               headerExtras={
                 <SessionStatusBadge status={unifiedSession.status} />
               }
-              timelineExtras={taskCards}
+              timelineExtras={
+                <>
+                  {taskCards}
+                  {setupRecommendations}
+                </>
+              }
             />
           ) : (
             <>
