@@ -938,6 +938,7 @@ export function normalizeBackgroundAgentSettings(
   const securityAuditor = automationMap.get('security_auditor');
   const codeQualityAuditor = automationMap.get('code_quality_auditor');
   const ciFailureTriage = automationMap.get('ci_failure_triage');
+  const mergeAnnouncer = automationMap.get('merge_announcer');
   const platformIssueAlerts = automationMap.get('platform_issue_alerts');
 
   const managerSlackChannelId = row?.managerSlackChannelId ?? null;
@@ -1092,6 +1093,13 @@ export function normalizeBackgroundAgentSettings(
     ),
     ciFailureTriageLastRunAt: ciFailureTriage?.lastRunAt ?? null,
     ciFailureTriageScanCursor: ciFailureTriage?.scanCursor ?? null,
+
+    mergeAnnouncerFrequency: getAutomationFrequency(
+      mergeAnnouncer,
+      isFrequencyOf(['off', 'daily'] as const),
+    ),
+    mergeAnnouncerLastRunAt: mergeAnnouncer?.lastRunAt ?? null,
+    mergeAnnouncerScanCursor: mergeAnnouncer?.scanCursor ?? null,
 
     ...Object.fromEntries(
       AUTOMATION_DESTINATION_DESCRIPTORS.flatMap((descriptor) => {

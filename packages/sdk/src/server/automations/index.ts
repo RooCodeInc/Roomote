@@ -17,6 +17,12 @@ export { dependabotTriageJob } from './dependabot-triage';
 export { issueFixerJob } from './issue-fixer';
 export { managerStatsJob, formatManagerStatsMessage } from './manager-stats';
 export {
+  handleMergeAnnouncerPush,
+  mergeAnnouncerJob,
+  type MergeAnnouncerPushEvent,
+  type MergeAnnouncerPushResult,
+} from './merge-announcer';
+export {
   providerUsageLimitJob,
   buildProviderUsageLimitWarningMessage,
   getProviderUsageLimitPeriodId,

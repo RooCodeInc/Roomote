@@ -145,6 +145,10 @@ function getAutomationActivations(
       enabled: settings.ciFailureTriageFrequency !== 'off',
     },
     {
+      automation: 'merge_announcer',
+      enabled: settings.mergeAnnouncerFrequency !== 'off',
+    },
+    {
       automation: 'suggester',
       enabled: settings.suggesterFrequency !== 'off',
     },
@@ -311,6 +315,7 @@ export async function updateBackgroundAgentSettingsCommand(
         securityAuditorSlackChannel: string | null;
         codeQualityAuditorSlackChannel: string | null;
         ciFailureTriageSlackChannel: string | null;
+        mergeAnnouncerSlackChannel: string | null;
       };
       slackChannelDisplayNames: SlackChannelDisplayNames;
     }
@@ -626,6 +631,7 @@ export async function updateBackgroundAgentSettingsCommand(
   const codeQualityAuditorChannelResult =
     destinationResults.codeQualityAuditor.slack;
   const ciFailureTriageChannelResult = destinationResults.ciFailureTriage.slack;
+  const mergeAnnouncerChannelResult = destinationResults.mergeAnnouncer.slack;
   const managerStatsDiscordResult = destinationResults.managerStats.discord;
   const providerUsageLimitDiscordResult =
     destinationResults.providerUsageLimit.discord;
@@ -639,6 +645,7 @@ export async function updateBackgroundAgentSettingsCommand(
     destinationResults.codeQualityAuditor.discord;
   const ciFailureTriageDiscordResult =
     destinationResults.ciFailureTriage.discord;
+  const mergeAnnouncerDiscordResult = destinationResults.mergeAnnouncer.discord;
   const suggesterDiscordResult = destinationResults.suggester.discord;
   const announcerDiscordResult = destinationResults.announcer.discord;
 
@@ -918,6 +925,7 @@ export async function updateBackgroundAgentSettingsCommand(
   const codeQualityAuditorFrequency =
     input.codeQualityAuditorFrequency ?? 'off';
   const ciFailureTriageFrequency = input.ciFailureTriageFrequency ?? 'off';
+  const mergeAnnouncerFrequency = input.mergeAnnouncerFrequency ?? 'off';
 
   // Manager-channel automations resolve their destination as
   // automation target -> shared manager channel. Enabling one requires a
@@ -938,6 +946,7 @@ export async function updateBackgroundAgentSettingsCommand(
       | 'securityAuditorSlackChannel'
       | 'codeQualityAuditorSlackChannel'
       | 'ciFailureTriageSlackChannel'
+      | 'mergeAnnouncerSlackChannel'
       | 'suggesterSlackChannel'
       | 'announcerSlackChannel';
   }> = [
@@ -1035,6 +1044,15 @@ export async function updateBackgroundAgentSettingsCommand(
         ciFailureTriageDiscordResult.channelId,
       field: 'ciFailureTriageSlackChannel',
     },
+    {
+      automationId: 'mergeAnnouncer',
+      key: 'merge_announcer',
+      frequency: mergeAnnouncerFrequency,
+      channelId:
+        mergeAnnouncerChannelResult.channelId ??
+        mergeAnnouncerDiscordResult.channelId,
+      field: 'mergeAnnouncerSlackChannel',
+    },
   ];
 
   for (const validation of managerChannelAutomationValidations) {
@@ -1125,6 +1143,16 @@ export async function updateBackgroundAgentSettingsCommand(
     fieldErrors.general =
       fieldErrors.general ||
       'Connect GitHub before enabling Triage CodeQL Alerts.';
+  }
+
+  if (
+    input.savingAutomation === 'mergeAnnouncer' &&
+    mergeAnnouncerFrequency !== 'off' &&
+    !(await hasActiveRepository())
+  ) {
+    fieldErrors.general =
+      fieldErrors.general ||
+      'Add at least one active repository before enabling Merge announcer.';
   }
 
   if (
@@ -1413,6 +1441,14 @@ export async function updateBackgroundAgentSettingsCommand(
     });
 
     await upsertAutomation(tx, {
+      key: 'merge_announcer',
+      enabled: mergeAnnouncerFrequency !== 'off',
+      schedule: { mode: mergeAnnouncerFrequency },
+      ...destinationUpsertFields('mergeAnnouncer'),
+      updatedAt: now,
+    });
+
+    await upsertAutomation(tx, {
       key: 'suggester',
       enabled: effectiveSuggesterFrequency !== 'off',
       schedule: {
@@ -1516,6 +1552,7 @@ export async function updateBackgroundAgentSettingsCommand(
       updatedSettings.codeQualityAuditorSlackChannelId,
     ciFailureTriageSlackChannelId:
       updatedSettings.ciFailureTriageSlackChannelId,
+    mergeAnnouncerSlackChannelId: updatedSettings.mergeAnnouncerSlackChannelId,
   });
   const slackChannelDisplayNames = await getSlackChannelDisplayNames({
     notifier: postSaveNotifier,
@@ -1537,6 +1574,7 @@ export async function updateBackgroundAgentSettingsCommand(
       updatedSettings.codeQualityAuditorSlackChannelId,
     ciFailureTriageSlackChannelId:
       updatedSettings.ciFailureTriageSlackChannelId,
+    mergeAnnouncerSlackChannelId: updatedSettings.mergeAnnouncerSlackChannelId,
   });
   for (const row of finalResolvedChannelAutoStartRows) {
     if (

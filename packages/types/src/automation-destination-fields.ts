@@ -23,6 +23,7 @@ export type AutomationDestinationAutomationId =
   | 'ciFailureTriage'
   | 'suggester'
   | 'announcer'
+  | 'mergeAnnouncer'
   | 'platformIssueAlerts';
 
 export type AutomationDestinationDescriptor = {
@@ -166,6 +167,17 @@ export const AUTOMATION_DESTINATION_DESCRIPTORS = [
     discordSettingsKey: 'announcerDiscordChannelId',
     slackSettingsIncludesManagerFallback: false,
     optionalDiscordInput: true,
+    managedTargetKinds: ['slack_channel', 'discord_channel'],
+  },
+  {
+    automationId: 'mergeAnnouncer',
+    automationKey: 'merge_announcer',
+    slackField: 'mergeAnnouncerSlackChannel',
+    discordField: 'mergeAnnouncerDiscordChannel',
+    slackSettingsKey: 'mergeAnnouncerSlackChannelId',
+    discordSettingsKey: 'mergeAnnouncerDiscordChannelId',
+    slackSettingsIncludesManagerFallback: true,
+    optionalDiscordInput: false,
     managedTargetKinds: ['slack_channel', 'discord_channel'],
   },
   {

@@ -497,7 +497,7 @@ const GITLAB_WEBHOOK_EVENT_FLAGS = {
   note_events: true,
   issues_events: true,
   pipeline_events: true,
-  push_events: false,
+  push_events: true,
 } as const;
 
 const GITLAB_WEBHOOK_ENSURE_CONCURRENCY = 5;

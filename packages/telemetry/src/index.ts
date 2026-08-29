@@ -134,6 +134,7 @@ export type ActivationAutomation =
   | 'security_auditor'
   | 'code_quality_auditor'
   | 'ci_failure_triage'
+  | 'merge_announcer'
   | 'suggester'
   | 'announcer'
   | 'platform_issue_alerts';

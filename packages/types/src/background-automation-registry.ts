@@ -8,6 +8,7 @@ import type {
   DependabotTriageFrequency,
   IssueFixerFrequency,
   ManagerStatsFrequency,
+  MergeAnnouncerFrequency,
   ProviderUsageLimitFrequency,
   SecurityAuditorFrequency,
   SentryTriageFrequency,
@@ -32,6 +33,7 @@ export const CI_FAILURE_TRIAGE_SETTINGS_HASH = 'ci-failure-triage';
 export const SUMMARIZE_MERGED_PRS_SETTINGS_HASH = 'summarize-merged-prs';
 export const PLATFORM_ISSUE_ALERTS_SETTINGS_HASH = 'platform-issue-alerts';
 export const PROVIDER_USAGE_LIMIT_SETTINGS_HASH = 'provider-usage-limit';
+export const MERGE_ANNOUNCER_SETTINGS_HASH = 'merge-announcer';
 
 export type BackgroundAutomationSettingsHash =
   | typeof AUTO_RESPOND_CHANNELS_SETTINGS_HASH
@@ -47,7 +49,8 @@ export type BackgroundAutomationSettingsHash =
   | typeof CI_FAILURE_TRIAGE_SETTINGS_HASH
   | typeof SUMMARIZE_MERGED_PRS_SETTINGS_HASH
   | typeof PLATFORM_ISSUE_ALERTS_SETTINGS_HASH
-  | typeof PROVIDER_USAGE_LIMIT_SETTINGS_HASH;
+  | typeof PROVIDER_USAGE_LIMIT_SETTINGS_HASH
+  | typeof MERGE_ANNOUNCER_SETTINGS_HASH;
 
 export type BackgroundAutomationManualTriggerRequirement =
   | 'slack'
@@ -118,6 +121,11 @@ const ISSUE_FIXER_SCHEDULE_MODES = [
   'off',
   'daily',
 ] as const satisfies readonly IssueFixerFrequency[];
+
+const MERGE_ANNOUNCER_SCHEDULE_MODES = [
+  'off',
+  'daily',
+] as const satisfies readonly MergeAnnouncerFrequency[];
 
 const HOURLY_AUDIT_SCHEDULE_MODES = [
   'off',
@@ -293,6 +301,17 @@ export const TRIGGERABLE_BACKGROUND_AUTOMATION_DESCRIPTORS = [
     ],
     scheduledSuggestionSource: 'ci_failure_triage',
   },
+  {
+    automationKey: 'merge_announcer',
+    label: 'Merge announcer',
+    slackIcon: 'megaphone',
+    scheduleModes: MERGE_ANNOUNCER_SCHEDULE_MODES,
+    // Source-control push webhooks trigger this automation; 'daily' only means enabled.
+    manualTriggerRequirements: [],
+    usesManagerChannel: true,
+    supportedCommunicationProviders: ['slack', 'teams', 'telegram', 'discord'],
+    supportedSourceControlProviders: sourceControlProviders,
+  },
 ] as const satisfies readonly TriggerableBackgroundAutomationDescriptor[];
 
 export type TriggerableBackgroundAutomationDescriptorItem =
@@ -392,6 +411,10 @@ const BACKGROUND_AUTOMATION_SETTINGS_CATALOG = [
   {
     hash: SUMMARIZE_MERGED_PRS_SETTINGS_HASH,
     automationKey: 'announcer',
+  },
+  {
+    hash: MERGE_ANNOUNCER_SETTINGS_HASH,
+    automationKey: 'merge_announcer',
   },
 ] as const satisfies readonly BackgroundAutomationSettingsCatalogEntry[];
 

@@ -89,6 +89,7 @@ const RUN_HISTORY_KEYS: BackgroundAutomationKey[] = [
   'security_auditor',
   'code_quality_auditor',
   'ci_failure_triage',
+  'merge_announcer',
 ];
 
 const RUN_HISTORY_LIMIT_PER_AUTOMATION = 5;
@@ -297,6 +298,7 @@ export async function getBackgroundAgentSettingsCommand(
     securityAuditorSlackChannel: string | null;
     codeQualityAuditorSlackChannel: string | null;
     ciFailureTriageSlackChannel: string | null;
+    mergeAnnouncerSlackChannel: string | null;
   };
   slackChannelDisplayNames: SlackChannelDisplayNames;
   resolvedDestinations: ResolvedAutomationDestinations;
@@ -381,6 +383,8 @@ export async function getBackgroundAgentSettingsCommand(
         visibleSettings.codeQualityAuditorSlackChannelId,
       ciFailureTriageSlackChannelId:
         visibleSettings.ciFailureTriageSlackChannelId,
+      mergeAnnouncerSlackChannelId:
+        visibleSettings.mergeAnnouncerSlackChannelId,
     }),
     getSlackChannelDisplayNames({
       notifier,
@@ -405,6 +409,8 @@ export async function getBackgroundAgentSettingsCommand(
         visibleSettings.codeQualityAuditorSlackChannelId,
       ciFailureTriageSlackChannelId:
         visibleSettings.ciFailureTriageSlackChannelId,
+      mergeAnnouncerSlackChannelId:
+        visibleSettings.mergeAnnouncerSlackChannelId,
     }),
     resolveAutomationDestinations({
       slackConnected: Boolean(slackInstallation?.isActive),

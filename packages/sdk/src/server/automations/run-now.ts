@@ -8,6 +8,7 @@ import { conflictScanJob } from './conflict-scan';
 import { dependabotTriageJob } from './dependabot-triage';
 import { issueFixerJob } from './issue-fixer';
 import { managerStatsJob } from './manager-stats';
+import { mergeAnnouncerJob } from './merge-announcer';
 import { providerUsageLimitJob } from './provider-usage-limit';
 import { securityAuditorJob } from './security-auditor';
 import { sentryTriageJob } from './sentry-triage';
@@ -34,6 +35,7 @@ const AUTOMATION_RUNNERS: Record<
   security_auditor: securityAuditorJob,
   code_quality_auditor: codeQualityAuditorJob,
   ci_failure_triage: ciFailureTriageJob,
+  merge_announcer: mergeAnnouncerJob,
 };
 
 export function getAutomationRunner(

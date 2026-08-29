@@ -973,6 +973,18 @@ describe('AutomationsSettings', () => {
     expect(getAutomationHistoryHref('providerUsageLimit')).toBeNull();
   });
 
+  it('shows Merge announcer as a webhook-driven automation without task history', async () => {
+    render(<AutomationsSettings />);
+
+    expect(await screen.findByText('Merge announcer')).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        'Summarize commits pushed to each active repository’s default branch and announce who pushed them.',
+      ),
+    ).toBeInTheDocument();
+    expect(getAutomationHistoryHref('mergeAnnouncer')).toBeNull();
+  });
+
   it('filters available automations by category and provider-aware search', async () => {
     render(<AutomationsSettings />);
 

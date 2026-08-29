@@ -10,6 +10,7 @@ import type {
   DependabotTriageFrequency,
   IssueFixerFrequency,
   ManagerStatsFrequency,
+  MergeAnnouncerFrequency,
   ProviderUsageLimitFrequency,
   ProviderUsageLimitThreshold,
   PrReviewSettings,
@@ -588,6 +589,11 @@ export type BackgroundAgentSettings = StoredBackgroundAgentSettings & {
   ciFailureTriageDiscordChannelId: string | null;
   ciFailureTriageLastRunAt: Date | null;
   ciFailureTriageScanCursor?: CiFailureTriageScanCursor | null;
+  mergeAnnouncerFrequency: MergeAnnouncerFrequency;
+  mergeAnnouncerSlackChannelId: string | null;
+  mergeAnnouncerDiscordChannelId: string | null;
+  mergeAnnouncerLastRunAt: Date | null;
+  mergeAnnouncerScanCursor?: CiFailureTriageScanCursor | null;
 };
 
 export type SecurityAuditorScanCursor = AutomationScanCursor;
