@@ -36,6 +36,11 @@ export type FastAgentConversationRecord = {
   openCodeSessionId: string | null;
 };
 
+export type FastAgentConversationGetOrCreateResult =
+  FastAgentConversationRecord & {
+    created: boolean;
+  };
+
 export type FastAgentMessageWrite = Omit<
   CreateFastAgentMessage,
   'conversationId'
@@ -157,7 +162,7 @@ export interface FastAgentConversationRepository {
   getOrCreate(input: {
     userId: string;
     conversation: FastAgentConversation;
-  }): Promise<FastAgentConversationRecord>;
+  }): Promise<FastAgentConversationGetOrCreateResult>;
   findById(input: {
     id: string;
     fallbackConversation?: FastAgentConversation;
@@ -286,8 +291,9 @@ export const fastAgentConversationRepository: FastAgentConversationRepository =
           where: buildIdentityWhere(conversation),
         });
 
+        let created = false;
         if (!record) {
-          await tx
+          const [inserted] = await tx
             .insert(fastAgentConversations)
             .values({
               userId,
@@ -308,7 +314,9 @@ export const fastAgentConversationRepository: FastAgentConversationRepository =
                   : null,
               replyTargetVerified: true,
             })
-            .onConflictDoNothing();
+            .onConflictDoNothing()
+            .returning({ id: fastAgentConversations.id });
+          created = Boolean(inserted);
           record = await tx.query.fastAgentConversations.findFirst({
             where: buildIdentityWhere(conversation),
           });
@@ -343,7 +351,10 @@ export const fastAgentConversationRepository: FastAgentConversationRepository =
 
         await ensureSessionForFastConversation(tx, updated?.id ?? record.id);
 
-        return loadConversationRecord(tx, updated?.id ?? record.id);
+        return {
+          ...(await loadConversationRecord(tx, updated?.id ?? record.id)),
+          created,
+        };
       });
     },
 

@@ -287,7 +287,7 @@ function CompletionPreferences({
 
 type StarterTaskLaunch = {
   starterTaskId: SetupStarterTaskId;
-  taskId: string;
+  sessionId: string;
 };
 
 function buildLaunchErrorMessage(result: {
@@ -367,8 +367,8 @@ function StarterTasksStepContent({
           allLaunched.length === 0
             ? '/'
             : allLaunched.length === 1 && firstLaunched
-              ? `/task/${firstLaunched.taskId}`
-              : '/tasks',
+              ? `/sessions/${firstLaunched.sessionId}`
+              : '/sessions',
         );
 
         await Promise.all([

@@ -26,7 +26,7 @@ const userState = vi.hoisted(() => ({
 }));
 const starterResultState = vi.hoisted(() => ({
   queue: [] as Array<{
-    launched: Array<{ starterTaskId: string; taskId: string }>;
+    launched: Array<{ starterTaskId: string; sessionId: string }>;
     failed: Array<{ starterTaskId: string; error: string }>;
     setupCompleted: boolean;
     completionError: string | null;
@@ -61,7 +61,7 @@ vi.mock('@tanstack/react-query', async () => {
             const result = starterResultState.queue.shift() ?? {
               launched: input.selectedStarterTaskIds.map((starterTaskId) => ({
                 starterTaskId,
-                taskId: `task-${starterTaskId}`,
+                sessionId: `session-${starterTaskId}`,
               })),
               failed: [],
               setupCompleted: true,
@@ -307,7 +307,7 @@ describe('Setup StepInvoke', () => {
     }
   });
 
-  it('launches a single selected task and routes to it', async () => {
+  it('launches a single selected Session and routes to it', async () => {
     render(<StepInvoke />);
 
     for (const title of STARTER_TASK_TITLES.slice(1)) {
@@ -325,7 +325,7 @@ describe('Setup StepInvoke', () => {
     });
 
     await waitFor(() => {
-      expect(replaceMock).toHaveBeenCalledWith('/task/task-speed-up-ci');
+      expect(replaceMock).toHaveBeenCalledWith('/sessions/session-speed-up-ci');
     });
 
     expect(setQueryDataMock).toHaveBeenCalledWith(
@@ -347,7 +347,7 @@ describe('Setup StepInvoke', () => {
     expect(mutateMock).not.toHaveBeenCalled();
   });
 
-  it('launches every selected task and routes to the tasks list', async () => {
+  it('launches every selected Session and routes to the Sessions list', async () => {
     render(<StepInvoke />);
 
     clickGo();
@@ -367,15 +367,15 @@ describe('Setup StepInvoke', () => {
     });
 
     await waitFor(() => {
-      expect(replaceMock).toHaveBeenCalledWith('/tasks');
+      expect(replaceMock).toHaveBeenCalledWith('/sessions');
     });
   });
 
   it('keeps failures visible and retries only tasks that have not launched', async () => {
     starterResultState.queue.push({
       launched: [
-        { starterTaskId: 'speed-up-ci', taskId: 'task-ci' },
-        { starterTaskId: 'security-scan', taskId: 'task-security' },
+        { starterTaskId: 'speed-up-ci', sessionId: 'session-ci' },
+        { starterTaskId: 'security-scan', sessionId: 'session-security' },
       ],
       failed: [
         { starterTaskId: 'fix-test-flakes', error: 'No repositories.' },
@@ -414,7 +414,7 @@ describe('Setup StepInvoke', () => {
     });
 
     await waitFor(() => {
-      expect(replaceMock).toHaveBeenCalledWith('/tasks');
+      expect(replaceMock).toHaveBeenCalledWith('/sessions');
     });
   });
 
@@ -457,7 +457,7 @@ describe('Setup StepInvoke', () => {
 
   it('keeps setup incomplete and offers retry when completion fails after launches', async () => {
     starterResultState.queue.push({
-      launched: [{ starterTaskId: 'speed-up-ci', taskId: 'task-ci' }],
+      launched: [{ starterTaskId: 'speed-up-ci', sessionId: 'session-ci' }],
       failed: [],
       setupCompleted: false,
       completionError: 'settings write failed',
@@ -476,7 +476,7 @@ describe('Setup StepInvoke', () => {
     expect(replaceMock).not.toHaveBeenCalled();
 
     // The remaining selection is empty, so the retry completes setup through
-    // the starter mutation and routes to the already-launched task.
+    // the starter mutation and routes to the already-launched Session.
     fireEvent.click(screen.getByRole('button', { name: /retry/i }));
 
     await waitFor(() => {
@@ -489,7 +489,7 @@ describe('Setup StepInvoke', () => {
     });
 
     await waitFor(() => {
-      expect(replaceMock).toHaveBeenCalledWith('/task/task-ci');
+      expect(replaceMock).toHaveBeenCalledWith('/sessions/session-ci');
     });
   });
 

@@ -19,6 +19,7 @@ type FastAgentSessionRecord = {
   id: string;
   compatibilityMessages: ModelMessage[];
   openCodeSessionId: string | null;
+  created: boolean;
 };
 
 export type FastAgentActiveTask = {
