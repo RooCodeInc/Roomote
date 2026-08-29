@@ -145,7 +145,7 @@ describe('unified Session queries', () => {
     const taskSession = await sessionFactory.create({
       ownerKind: 'user',
       ownerUserId: owner.id,
-      title: 'Linked task transcript search',
+      title: 'Linked execution details',
     });
     await db.insert(sessionTasks).values({
       sessionId: taskSession.id,
@@ -244,6 +244,90 @@ describe('unified Session queries', () => {
       { q: 'search-target' },
     );
     expect(deletedRepositoryResult.sessions).toEqual([]);
+  });
+
+  it('ranks search matches by relevance and recency across pages', async () => {
+    const owner = await userFactory.create();
+    const directOlder = await sessionFactory.create({
+      ownerKind: 'user',
+      ownerUserId: owner.id,
+      title: 'Ranking nebula older title',
+      activityAt: 100,
+    });
+    const directNewer = await sessionFactory.create({
+      ownerKind: 'user',
+      ownerUserId: owner.id,
+      title: 'Ranking nebula newer title',
+      activityAt: 200,
+    });
+
+    const task = await taskFactory.create({
+      initiatorUserId: owner.id,
+      title: 'Ranking nebula linked task',
+    });
+    const taskSession = await sessionFactory.create({
+      ownerKind: 'user',
+      ownerUserId: owner.id,
+      title: 'Unrelated linked session',
+      activityAt: 400,
+    });
+    await db.insert(sessionTasks).values({
+      sessionId: taskSession.id,
+      taskId: task.id,
+      origin: 'direct_launch',
+    });
+
+    const [conversation] = await db
+      .insert(fastAgentConversations)
+      .values({
+        userId: owner.id,
+        surface: 'web',
+        workspaceId: owner.id,
+        conversationId: crypto.randomUUID(),
+      })
+      .returning();
+    const transcriptSession = await sessionFactory.create({
+      ownerKind: 'user',
+      ownerUserId: owner.id,
+      title: 'Unrelated transcript session',
+      fastConversationId: conversation!.id,
+      activityAt: 500,
+    });
+    await db.insert(fastAgentMessages).values({
+      conversationId: conversation!.id,
+      eventId: 'ranking-transcript',
+      turnId: 'ranking-turn',
+      turnSeq: 0,
+      ts: 500,
+      eventType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+      role: 'assistant',
+      contentBlocks: [
+        { type: 'text', text: 'Ranking nebula appears only in this message.' },
+      ],
+      metadata: { visibleInTranscript: true },
+      payload: {},
+    });
+
+    const expectedOrder = [
+      directNewer.id,
+      directOlder.id,
+      taskSession.id,
+      transcriptSession.id,
+    ];
+    const receivedOrder: string[] = [];
+    let before: string | null = null;
+
+    for (let index = 0; index < expectedOrder.length; index += 1) {
+      const result = await getSessions(
+        { userId: owner.id, isAdmin: false },
+        { q: 'ranking nebula', limit: 1, before },
+      );
+      receivedOrder.push(...result.sessions.map((session) => session.id));
+      before = result.nextCursor;
+    }
+
+    expect(receivedOrder).toEqual(expectedOrder);
+    expect(before).toBeNull();
   });
 
   it('returns task rollups, task resolution, and deterministic timeline events', async () => {

@@ -1,5 +1,6 @@
 import {
   and,
+  asc,
   count,
   db,
   desc,
@@ -9,6 +10,7 @@ import {
   exists,
   fastAgentMessages,
   gte,
+  gt,
   ilike,
   inArray,
   isNotNull,
@@ -84,17 +86,24 @@ function sessionScope(auth: SessionAuth) {
   );
 }
 
-function encodeCursor(row: { activityAt: number; id: string }): string {
-  return `${row.activityAt}:${row.id}`;
+function encodeCursor(
+  row: { activityAt: number; id: string },
+  searchRank?: number,
+): string {
+  return searchRank === undefined
+    ? `${row.activityAt}:${row.id}`
+    : `${searchRank}:${row.activityAt}:${row.id}`;
 }
 
 function decodeCursor(cursor?: string | null) {
   if (!cursor) return null;
-  const separator = cursor.indexOf(':');
-  const activityAt = Number(cursor.slice(0, separator));
-  const id = cursor.slice(separator + 1);
-  return separator > 0 && Number.isFinite(activityAt) && id
-    ? { activityAt, id }
+  const parts = cursor.split(':');
+  const hasSearchRank = parts.length === 3;
+  const searchRank = hasSearchRank ? Number(parts[0]) : undefined;
+  const activityAt = Number(parts[hasSearchRank ? 1 : 0]);
+  const id = parts[hasSearchRank ? 2 : 1];
+  return Number.isFinite(activityAt) && id && Number.isFinite(searchRank ?? 0)
+    ? { activityAt, id, searchRank }
     : null;
 }
 
@@ -114,13 +123,103 @@ function taskExistsCondition(condition?: ReturnType<typeof eq>) {
   );
 }
 
-function listConditions(auth: SessionAuth, input: SessionListInput) {
+function buildSessionSearch(query: string | null | undefined) {
+  const normalizedQuery = query?.trim();
+  if (!normalizedQuery) return null;
+
+  const queryPattern = `%${normalizedQuery.replace(
+    /[\\%_]/g,
+    (character) => `\\${character}`,
+  )}%`;
+  const sessionTitleMatch = ilike(sessions.title, queryPattern);
+  const linkedTaskMatch = exists(
+    db
+      .select({ one: sql`1` })
+      .from(sessionTasks)
+      .innerJoin(tasks, eq(tasks.id, sessionTasks.taskId))
+      .where(
+        and(
+          eq(sessionTasks.sessionId, sessions.id),
+          isNull(tasks.deletedAt),
+          or(
+            ilike(tasks.title, queryPattern),
+            ilike(tasks.repositoryName, queryPattern),
+          ),
+        ),
+      ),
+  );
+  const fastTranscriptMatch = exists(
+    db
+      .select({ one: sql`1` })
+      .from(fastAgentMessages)
+      .where(
+        and(
+          eq(fastAgentMessages.conversationId, sessions.fastConversationId),
+          inArray(fastAgentMessages.role, ['user', 'assistant']),
+          sql`case
+            when ${fastAgentMessages.metadata} ->> 'visibleInTranscript' is not null
+              then ${fastAgentMessages.metadata} ->> 'visibleInTranscript' = 'true'
+            else ${fastAgentMessages.eventType} <> ${ACP_ENVELOPE_EVENT_TYPES.UserPrompt}
+          end`,
+          sql`exists (
+            select 1
+            from jsonb_array_elements(${fastAgentMessages.contentBlocks}) as block
+            where block ->> 'type' = 'text'
+              and block ->> 'text' ilike ${queryPattern} escape '\\'
+          )`,
+        ),
+      ),
+  );
+  const taskTranscriptMatch = exists(
+    db
+      .select({ one: sql`1` })
+      .from(sessionTasks)
+      .innerJoin(taskMessages, eq(taskMessages.taskId, sessionTasks.taskId))
+      .innerJoin(tasks, eq(tasks.id, sessionTasks.taskId))
+      .where(
+        and(
+          eq(sessionTasks.sessionId, sessions.id),
+          isNull(tasks.deletedAt),
+          inArray(taskMessages.role, ['user', 'assistant']),
+          sql`case
+            when ${taskMessages.metadata} ->> 'visibleInTranscript' is not null
+              then ${taskMessages.metadata} ->> 'visibleInTranscript' = 'true'
+            else ${taskMessages.eventType} <> ${ACP_ENVELOPE_EVENT_TYPES.UserPrompt}
+          end`,
+          sql`exists (
+            select 1
+            from jsonb_array_elements(${taskMessages.contentBlocks}) as block
+            where block ->> 'type' = 'text'
+              and block ->> 'text' ilike ${queryPattern} escape '\\'
+          )`,
+        ),
+      ),
+  );
+
+  return {
+    condition: or(
+      sessionTitleMatch,
+      linkedTaskMatch,
+      fastTranscriptMatch,
+      taskTranscriptMatch,
+    ),
+    rank: sql<number>`case
+      when ${sessionTitleMatch} then 0
+      when ${linkedTaskMatch} then 1
+      else 2
+    end`,
+  };
+}
+
+type SessionSearch = NonNullable<ReturnType<typeof buildSessionSearch>>;
+
+function listConditions(
+  auth: SessionAuth,
+  input: SessionListInput,
+  search: SessionSearch | null,
+) {
   const cursor = decodeCursor(input.before);
   const scope = input.scope ?? 'all';
-  const query = input.q?.trim();
-  const queryPattern = query
-    ? `%${query.replace(/[\\%_]/g, (character) => `\\${character}`)}%`
-    : null;
   const period = input.period ?? 'all';
   const pullRequestNumber = Number(input.pullRequest);
 
@@ -140,15 +239,29 @@ function listConditions(auth: SessionAuth, input: SessionListInput) {
           sessions.activityAt,
           Math.floor(Date.now() / 1000) - period * 24 * 60 * 60,
         ),
-    cursor
+    cursor && search && cursor.searchRank !== undefined
       ? or(
-          lt(sessions.activityAt, cursor.activityAt),
+          gt(search.rank, cursor.searchRank),
           and(
-            eq(sessions.activityAt, cursor.activityAt),
-            lt(sessions.id, cursor.id),
+            eq(search.rank, cursor.searchRank),
+            or(
+              lt(sessions.activityAt, cursor.activityAt),
+              and(
+                eq(sessions.activityAt, cursor.activityAt),
+                lt(sessions.id, cursor.id),
+              ),
+            ),
           ),
         )
-      : undefined,
+      : cursor
+        ? or(
+            lt(sessions.activityAt, cursor.activityAt),
+            and(
+              eq(sessions.activityAt, cursor.activityAt),
+              lt(sessions.id, cursor.id),
+            ),
+          )
+        : undefined,
     scope === 'tasks' ? taskExistsCondition() : undefined,
     scope === 'reviews'
       ? taskExistsCondition(eq(tasks.workflow, 'pr_review'))
@@ -175,80 +288,7 @@ function listConditions(auth: SessionAuth, input: SessionListInput) {
             ),
         )
       : undefined,
-    queryPattern
-      ? or(
-          ilike(sessions.title, queryPattern),
-          exists(
-            db
-              .select({ one: sql`1` })
-              .from(sessionTasks)
-              .innerJoin(tasks, eq(tasks.id, sessionTasks.taskId))
-              .where(
-                and(
-                  eq(sessionTasks.sessionId, sessions.id),
-                  isNull(tasks.deletedAt),
-                  or(
-                    ilike(tasks.title, queryPattern),
-                    ilike(tasks.repositoryName, queryPattern),
-                  ),
-                ),
-              ),
-          ),
-          exists(
-            db
-              .select({ one: sql`1` })
-              .from(fastAgentMessages)
-              .where(
-                and(
-                  eq(
-                    fastAgentMessages.conversationId,
-                    sessions.fastConversationId,
-                  ),
-                  inArray(fastAgentMessages.role, ['user', 'assistant']),
-                  sql`case
-                    when ${fastAgentMessages.metadata} ->> 'visibleInTranscript' is not null
-                      then ${fastAgentMessages.metadata} ->> 'visibleInTranscript' = 'true'
-                    else ${fastAgentMessages.eventType} <> ${ACP_ENVELOPE_EVENT_TYPES.UserPrompt}
-                  end`,
-                  sql`exists (
-                    select 1
-                    from jsonb_array_elements(${fastAgentMessages.contentBlocks}) as block
-                    where block ->> 'type' = 'text'
-                      and block ->> 'text' ilike ${queryPattern} escape '\\'
-                  )`,
-                ),
-              ),
-          ),
-          exists(
-            db
-              .select({ one: sql`1` })
-              .from(sessionTasks)
-              .innerJoin(
-                taskMessages,
-                eq(taskMessages.taskId, sessionTasks.taskId),
-              )
-              .innerJoin(tasks, eq(tasks.id, sessionTasks.taskId))
-              .where(
-                and(
-                  eq(sessionTasks.sessionId, sessions.id),
-                  isNull(tasks.deletedAt),
-                  inArray(taskMessages.role, ['user', 'assistant']),
-                  sql`case
-                    when ${taskMessages.metadata} ->> 'visibleInTranscript' is not null
-                      then ${taskMessages.metadata} ->> 'visibleInTranscript' = 'true'
-                    else ${taskMessages.eventType} <> ${ACP_ENVELOPE_EVENT_TYPES.UserPrompt}
-                  end`,
-                  sql`exists (
-                    select 1
-                    from jsonb_array_elements(${taskMessages.contentBlocks}) as block
-                    where block ->> 'type' = 'text'
-                      and block ->> 'text' ilike ${queryPattern} escape '\\'
-                  )`,
-                ),
-              ),
-          ),
-        )
-      : undefined,
+    search?.condition,
   );
 }
 
@@ -467,18 +507,27 @@ async function hydrateSessionRows(
 
 export async function getSessions(auth: SessionAuth, input: SessionListInput) {
   const limit = Math.min(Math.max(input.limit ?? DEFAULT_LIMIT, 1), MAX_LIMIT);
+  const search = buildSessionSearch(input.q);
+  const searchRank = search?.rank ?? sql<number>`0`;
+  const orderBy = search
+    ? [asc(searchRank), desc(sessions.activityAt), desc(sessions.id)]
+    : [desc(sessions.activityAt), desc(sessions.id)];
   const rows = await db
-    .select(baseSelection)
+    .select({ ...baseSelection, searchRank })
     .from(sessions)
     .leftJoin(users, eq(users.id, sessions.ownerUserId))
-    .where(listConditions(auth, input))
-    .orderBy(desc(sessions.activityAt), desc(sessions.id))
+    .where(listConditions(auth, input, search))
+    .orderBy(...orderBy)
     .limit(limit + 1);
-  const page = rows.slice(0, limit);
-  const last = page.at(-1);
+  const pageRows = rows.slice(0, limit);
+  const page = pageRows.map(({ searchRank: _searchRank, ...row }) => row);
+  const last = pageRows.at(-1);
   return {
     sessions: await hydrateSessionRows(auth, page),
-    nextCursor: rows.length > limit && last ? encodeCursor(last) : null,
+    nextCursor:
+      rows.length > limit && last
+        ? encodeCursor(last, search ? last.searchRank : undefined)
+        : null,
   };
 }
 
