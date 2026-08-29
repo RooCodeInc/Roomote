@@ -44,6 +44,7 @@ type ManageSourceControlParams = {
   targetBranch?: string;
   title?: string;
   body?: string;
+  prAttribution?: string;
   labels?: string[];
   assignees?: string[];
   sourceControlProvider?: SourceControlProvider;
@@ -93,6 +94,7 @@ export async function handleManageSourceControl(
         targetBranch,
         title,
         body: params.body,
+        prAttribution: params.prAttribution,
         labels: params.labels,
         assignees: params.assignees,
         sourceControlProvider: params.sourceControlProvider,

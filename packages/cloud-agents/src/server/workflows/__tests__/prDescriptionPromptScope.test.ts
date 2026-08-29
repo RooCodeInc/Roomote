@@ -34,6 +34,12 @@ describe('PR description prompt scope', () => {
     expect(fixPrSkill).toContain(
       'recover existing PR-body metadata that still applies, including current `## Related PRs` links, from the `body` field of the latest `get_pull_request` result.',
     );
+    expect(fixPrSkill).toContain(
+      'When one participant is clear, pass their conversation display name or source-control login as `prAttribution`.',
+    );
+    expect(fixPrSkill).toContain(
+      'and `prAttribution` when the conversation establishes a clear participant.',
+    );
     expect(createPrSkill).toContain(
       'HEAD` to capture the full shipped diff for the branch. Use this local git diff for every provider.',
     );
@@ -231,7 +237,13 @@ describe('PR description prompt scope', () => {
         'and `body` set to the exact `/tmp/pr-body.md` contents.',
       );
       expect(skillContent).toContain(
-        'Include `labels` only when a current conflict-resolver label is provided, and include `assignees` only when provider-compatible assignee usernames are available for this run.',
+        'Prefer the person who requested or explicitly authorized the implementation or PR creation; do not infer ownership from thread ownership, task initiation, or the latest comment alone.',
+      );
+      expect(skillContent).toContain(
+        'When one participant is clear, pass their conversation display name or source-control login as `prAttribution`.',
+      );
+      expect(skillContent).toContain(
+        'Include `prAttribution` when the conversation establishes a clear participant, include `labels` only when a current conflict-resolver label is provided, and include `assignees` only when provider-compatible assignee usernames are available for this run.',
       );
       expect(skillContent).toContain(
         skillContent === createDraftPrSkill
