@@ -115,6 +115,40 @@ describe('fast-agent integration broker', () => {
     });
   });
 
+  it('exposes connected Linear tools through its read-only router MCP', async () => {
+    mocks.configuredServers = {
+      linear: {
+        url: 'https://api.example.com/api/mcp-routing/linear',
+        headers: { 'X-MCP-Client': 'Roomote' },
+        disabledTools: ['get_document'],
+      },
+    };
+    mocks.listMcpTools.mockResolvedValue([
+      { name: 'get_issue', inputSchema: { type: 'object' } },
+      { name: 'get_document', inputSchema: { type: 'object' } },
+    ]);
+
+    const integrations = await listFastAgentIntegrations({
+      userId: 'user-1',
+      apiBaseUrl: 'https://api.example.com',
+    });
+
+    expect(integrations).toEqual([
+      expect.objectContaining({
+        id: 'linear',
+        tools: [{ name: 'get_issue', inputSchema: { type: 'object' } }],
+      }),
+    ]);
+    expect(mocks.listMcpTools).toHaveBeenCalledWith({
+      url: 'https://api.example.com/api/mcp-routing/linear',
+      headers: {
+        'X-MCP-Client': 'Roomote',
+        Authorization: 'Bearer control-plane-token',
+      },
+      signal: expect.any(AbortSignal),
+    });
+  });
+
   it('exposes the read-only Brain proxy when the Brain is configured', async () => {
     mocks.configuredServers = {
       gbrain: {

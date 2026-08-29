@@ -267,6 +267,42 @@ describe('mcpConnectionsRouter.getMcpServerConfigs', () => {
     });
   });
 
+  it('routes Linear through its read-only catalog for Fast user sessions', async () => {
+    mockOrderBy.mockResolvedValue([
+      buildJoinedConnectionRow({
+        id: 'conn-linear',
+        mcpId: 'linear',
+        disabledTools: ['get_document'],
+      }),
+    ]);
+
+    const result = await resolveUserMcpServerConfigs({
+      userId: 'user-1',
+      apiBaseUrl: 'https://api.preview.roomote.run/_roomote-api',
+    });
+
+    expect(result.linear).toEqual({
+      url: 'https://api.preview.roomote.run/api/mcp-routing/linear',
+      headers: { 'X-MCP-Client': 'Roomote' },
+      disabledTools: ['get_document'],
+    });
+    expect(mockGetValidAccessToken).not.toHaveBeenCalled();
+  });
+
+  it('keeps the full Linear proxy for task runs', async () => {
+    mockOrderBy.mockResolvedValue([
+      buildJoinedConnectionRow({ id: 'conn-linear', mcpId: 'linear' }),
+    ]);
+
+    const result = await createJobCaller(
+      'https://api.preview.roomote.run/trpc/mcpConnections.getMcpServerConfigs',
+    ).getMcpServerConfigs();
+
+    expect(result.servers.linear?.url).toBe(
+      'https://api.preview.roomote.run/api/mcp/linear',
+    );
+  });
+
   it('carries deployment-disabled tools with the resolved server config', async () => {
     mockOrderBy.mockResolvedValue([
       buildJoinedConnectionRow({

@@ -41,6 +41,7 @@ import {
   BRAIN_PROXY_PATH,
   CUSTOM_MCP_PROXY_PATH_PREFIX,
   MCP_INTEGRATION_PROXY_PATH_PREFIX,
+  MCP_ROUTING_PROXY_PATH_PREFIX,
   ROOMOTE_MCP_ID,
   customMcpConnectionId,
   PRODUCT_NAME,
@@ -148,14 +149,27 @@ export async function resolveUserMcpServerConfigs(options: {
   apiBaseUrl?: string;
   includeRoomoteMemberTools?: boolean;
 }): Promise<ResolvedMcpServerConfigs> {
-  return resolveMcpServerConfigs({
+  const requestOrigin = getRequestOrigin({ url: options.apiBaseUrl });
+  const servers = await resolveMcpServerConfigs({
     auth: { userId: options.userId },
-    requestOrigin: getRequestOrigin({ url: options.apiBaseUrl }),
+    requestOrigin,
     includeRoomoteMemberTools: options.includeRoomoteMemberTools,
     // This runs on every Fast turn; the per-connection info stream is worker
     // config-fetch debugging noise at that frequency.
     quiet: true,
   });
+
+  // Fast is conversational and must only receive Linear's existing read-only
+  // router catalog. Task runs keep the full deployment proxy used for coding
+  // workflows that can update Linear under their normal task policy.
+  if (servers.linear) {
+    const proxyPath = `${MCP_ROUTING_PROXY_PATH_PREFIX}linear`;
+    servers.linear.url = requestOrigin
+      ? `${requestOrigin}${proxyPath}`
+      : proxyPath;
+  }
+
+  return servers;
 }
 
 export const mcpConnectionsRouter = router({

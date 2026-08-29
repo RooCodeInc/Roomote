@@ -446,6 +446,14 @@ describe('router helpers', () => {
     expect(isRouterMcpToolAllowed('github', 'actions_run_trigger')).toBe(false);
   });
 
+  it('keeps Linear router access read-only', () => {
+    expect(getAllowedRouterMcpToolNames('linear')).toEqual(
+      expect.arrayContaining(['get_issue', 'list_issues', 'list_comments']),
+    );
+    expect(isRouterMcpToolAllowed('linear', 'save_issue')).toBe(false);
+    expect(isRouterMcpToolAllowed('linear', 'save_comment')).toBe(false);
+  });
+
   it('includes Roomote lookup support for Slack and Discord permalink references', () => {
     expect(
       shouldIncludeRoomoteRouterLookup(
