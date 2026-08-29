@@ -87,8 +87,7 @@ describe('completeSetupWithStarterTasksCommand', () => {
     expect(mockStartSetupFastSession).toHaveBeenCalledWith(
       expect.objectContaining({ userId: 'admin-1' }),
       {
-        conversationId:
-          'setup-session:11111111-1111-4111-8111-111111111111',
+        conversationId: 'setup-session:11111111-1111-4111-8111-111111111111',
         title: 'Set up Roomote',
         event: expect.objectContaining({
           type: 'setup_session_started',

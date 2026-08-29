@@ -53,7 +53,9 @@ export async function completeSetupWithStarterTasksCommand(
       sessionId: null,
       setupCompleted: false,
       completionError:
-        error instanceof Error ? error.message : 'Setup could not be completed.',
+        error instanceof Error
+          ? error.message
+          : 'Setup could not be completed.',
     };
   }
 

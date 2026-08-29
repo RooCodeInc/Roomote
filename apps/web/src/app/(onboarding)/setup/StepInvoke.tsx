@@ -333,7 +333,9 @@ function StarterTasksStepContent({
 
         // Leave before awaiting invalidation so /setup's completed-setup
         // guard cannot race and flash Home before the destination page.
-        router.replace(result.sessionId ? `/sessions/${result.sessionId}` : '/');
+        router.replace(
+          result.sessionId ? `/sessions/${result.sessionId}` : '/',
+        );
 
         await Promise.all([
           queryClient.invalidateQueries({
