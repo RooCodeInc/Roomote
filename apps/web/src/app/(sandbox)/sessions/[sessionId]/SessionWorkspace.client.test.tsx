@@ -407,6 +407,13 @@ describe('SessionWorkspace', () => {
                 thumbnailUrl:
                   '/api/artifacts/artifact-image-older/raw?sig=test',
               },
+              {
+                id: 'artifact-video',
+                path: 'recordings/session-walkthrough.webm',
+                artifactType: 'visual-proof',
+                contentType: 'video/webm',
+                previewUrl: '/api/artifacts/artifact-video/raw?sig=test',
+              },
             ],
             pullRequests: [],
           },
@@ -418,6 +425,7 @@ describe('SessionWorkspace', () => {
       screen.getByRole('heading', { name: 'Screenshots' }),
     ).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Files' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Videos' })).toBeInTheDocument();
 
     const imageLink = screen.getByRole('link', {
       name: /Sidebar Alignment/,
@@ -441,6 +449,17 @@ describe('SessionWorkspace', () => {
     );
     expect(
       screen.queryByText('tmp/capture-visual-proof/sidebar-alignment.png'),
+    ).not.toBeInTheDocument();
+    const videoPreview = screen.getByLabelText(
+      'Video preview: Session Walkthrough',
+    );
+    expect(videoPreview).toHaveAttribute(
+      'src',
+      '/api/artifacts/artifact-video/raw?sig=test',
+    );
+    fireEvent.error(videoPreview);
+    expect(
+      screen.queryByLabelText('Video preview: Session Walkthrough'),
     ).not.toBeInTheDocument();
   });
 

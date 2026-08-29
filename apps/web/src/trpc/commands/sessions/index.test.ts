@@ -90,6 +90,11 @@ describe('getSessionByIdCommand', () => {
               path: 'notes.txt',
               contentType: 'text/plain',
             },
+            {
+              id: 'artifact-video',
+              path: 'recordings/demo.webm',
+              contentType: 'video/webm',
+            },
           ],
         },
       ],
@@ -114,6 +119,13 @@ describe('getSessionByIdCommand', () => {
       expect.objectContaining({
         id: 'artifact-text',
         thumbnailUrl: undefined,
+        previewUrl: undefined,
+      }),
+      expect.objectContaining({
+        id: 'artifact-video',
+        thumbnailUrl: undefined,
+        previewUrl:
+          '/api/artifacts/artifact-video/raw?sig=signature-artifact-video-7200&ts=7200',
       }),
     ]);
     expect(secondResult?.tasks[0]?.artifacts).toEqual(

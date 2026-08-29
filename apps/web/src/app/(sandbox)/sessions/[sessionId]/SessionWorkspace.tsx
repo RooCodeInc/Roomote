@@ -91,6 +91,7 @@ type SessionTaskSummary = {
     artifactType: string;
     contentType: string;
     thumbnailUrl?: string;
+    previewUrl?: string;
   }>;
   pullRequests: Array<{
     id: string;
@@ -126,13 +127,12 @@ function SessionArtifactCard({
   artifact: SessionTaskSummary['artifacts'][number];
   href: string;
 }) {
-  const [failedThumbnailUrl, setFailedThumbnailUrl] = useState<string | null>(
-    null,
-  );
+  const [failedPreviewUrl, setFailedPreviewUrl] = useState<string | null>(null);
   const label = humanizeFilename(artifact.path);
   const isImage = artifact.contentType.startsWith('image/');
   const isVideo = artifact.contentType.startsWith('video/');
   const thumbnailUrl = artifact.thumbnailUrl;
+  const videoPreviewUrl = artifact.previewUrl;
 
   return (
     <Link
@@ -141,17 +141,36 @@ function SessionArtifactCard({
       className="group block min-w-0 overflow-hidden rounded-lg border bg-card transition-opacity hover:opacity-70"
     >
       <span className="flex aspect-video w-full items-center justify-center overflow-hidden bg-muted">
-        {isImage && thumbnailUrl && failedThumbnailUrl !== thumbnailUrl ? (
+        {isImage && thumbnailUrl && failedPreviewUrl !== thumbnailUrl ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img
             src={thumbnailUrl}
             alt={label}
             className="size-full object-contain"
             loading="lazy"
-            onError={() => setFailedThumbnailUrl(thumbnailUrl)}
+            onError={() => setFailedPreviewUrl(thumbnailUrl)}
           />
         ) : isImage ? (
           <Image className="size-6 text-muted-foreground" />
+        ) : isVideo &&
+          videoPreviewUrl &&
+          failedPreviewUrl !== videoPreviewUrl ? (
+          <span className="relative block size-full bg-black">
+            <video
+              src={videoPreviewUrl}
+              aria-label={`Video preview: ${label}`}
+              muted
+              playsInline
+              preload="metadata"
+              className="pointer-events-none size-full object-contain"
+              onError={() => setFailedPreviewUrl(videoPreviewUrl)}
+            />
+            <span className="pointer-events-none absolute inset-0 flex items-center justify-center">
+              <span className="flex size-8 items-center justify-center rounded-full bg-black/60 ring-1 ring-white/25">
+                <span className="ml-0.5 h-0 w-0 border-y-[5px] border-y-transparent border-l-[8px] border-l-white" />
+              </span>
+            </span>
+          </span>
         ) : isVideo ? (
           <VideoIcon className="size-6 text-muted-foreground" />
         ) : (

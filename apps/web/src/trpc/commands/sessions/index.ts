@@ -92,12 +92,20 @@ export async function getSessionByIdCommand(
     ...session,
     tasks: session.tasks.map((task) => ({
       ...task,
-      artifacts: task.artifacts.map((artifact) => ({
-        ...artifact,
-        thumbnailUrl: artifact.contentType.startsWith('image/')
-          ? `/api/artifacts/${artifact.id}/raw?sig=${signArtifactId(artifact.id, artifactSignatureTimestamp)}&ts=${artifactSignatureTimestamp}`
-          : undefined,
-      })),
+      artifacts: task.artifacts.map((artifact) => {
+        const isImage = artifact.contentType.startsWith('image/');
+        const isVideo = artifact.contentType.startsWith('video/');
+        const previewUrl =
+          isImage || isVideo
+            ? `/api/artifacts/${artifact.id}/raw?sig=${signArtifactId(artifact.id, artifactSignatureTimestamp)}&ts=${artifactSignatureTimestamp}`
+            : undefined;
+
+        return {
+          ...artifact,
+          thumbnailUrl: isImage ? previewUrl : undefined,
+          previewUrl: isVideo ? previewUrl : undefined,
+        };
+      }),
       canAccessDetails: true as const,
     })),
   };
