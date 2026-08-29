@@ -293,6 +293,28 @@ describe('SessionWorkspace', () => {
   );
 
   it.each([false, true])(
+    'keeps the first manually opened panel visible from a normal attributed URL when isMobile=%s',
+    (isMobile) => {
+      renderWorkspace({
+        isMobile,
+        sessionOverride: { tasks: [singleTask] },
+        searchParams:
+          'utm_source=slack&utm_medium=link&utm_campaign=slack.fast_reply',
+      });
+
+      if (isMobile) {
+        fireEvent.click(screen.getByRole('button', { name: 'Show sidebar' }));
+      }
+      fireEvent.click(screen.getByRole('button', { name: 'Session info' }));
+
+      expect(
+        screen.getByRole('heading', { name: 'Session Info' }),
+      ).toBeInTheDocument();
+      expect(routerReplaceMock).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([false, true])(
     'keeps execution details closed when a sole task arrives after navigation and isMobile=%s',
     async (isMobile) => {
       renderWorkspace({
@@ -330,6 +352,13 @@ describe('SessionWorkspace', () => {
         screen.getByRole('button', { name: 'Close execution details' }),
       ).toBeInTheDocument();
       expect(routerReplaceMock).not.toHaveBeenCalled();
+
+      fireEvent.click(
+        screen.getByRole('button', { name: 'Close execution details' }),
+      );
+      expect(routerReplaceMock).toHaveBeenCalledWith(
+        '/sessions/session-1?utm_source=slack&utm_medium=link&utm_campaign=slack.fast_reply',
+      );
     },
   );
 
