@@ -12,13 +12,17 @@ import { SandboxLayoutContext } from '../../use-sandbox-layout';
 import { SessionWorkspace, type SessionInfo } from './SessionWorkspace';
 import { useOpenSessionTaskPanel } from './session-task-panel-context';
 
-const { useMediaQueryMock, sessionQueryState, fastTaskQueryState } = vi.hoisted(
-  () => ({
-    useMediaQueryMock: vi.fn(),
-    sessionQueryState: { data: null as unknown },
-    fastTaskQueryState: { data: null as unknown },
-  }),
-);
+const {
+  useMediaQueryMock,
+  sessionQueryState,
+  fastTaskQueryState,
+  searchParamsState,
+} = vi.hoisted(() => ({
+  useMediaQueryMock: vi.fn(),
+  sessionQueryState: { data: null as unknown },
+  fastTaskQueryState: { data: null as unknown },
+  searchParamsState: { value: '' },
+}));
 
 vi.mock('usehooks-ts', () => ({
   useMediaQuery: useMediaQueryMock,
@@ -26,7 +30,7 @@ vi.mock('usehooks-ts', () => ({
 
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ replace: vi.fn() }),
-  useSearchParams: () => new URLSearchParams(),
+  useSearchParams: () => new URLSearchParams(searchParamsState.value),
 }));
 
 vi.mock('@/hooks/task-models/useLaunchTaskModels', () => ({
@@ -126,6 +130,7 @@ function renderWorkspace({
   sessionOverride,
   queriedTasks,
   queriedFastTasks,
+  selectedTaskId,
 }: {
   isMobile: boolean;
   children?: ReactNode;
@@ -134,8 +139,10 @@ function renderWorkspace({
   queriedFastTasks?: Array<
     Pick<SessionInfo['tasks'][number], 'taskId' | 'title'>
   >;
+  selectedTaskId?: string;
 }) {
   useMediaQueryMock.mockReturnValue(!isMobile);
+  searchParamsState.value = selectedTaskId ? `task=${selectedTaskId}` : '';
   let viewportChangeListener: ((event: MediaQueryListEvent) => void) | null =
     null;
   const mediaQuery = {
@@ -284,6 +291,61 @@ describe('SessionWorkspace', () => {
     );
 
     expect(screen.getByText('Nested panel task-1')).toBeInTheDocument();
+  });
+
+  it('renders image thumbnails and file links in execution details', () => {
+    renderWorkspace({
+      isMobile: false,
+      selectedTaskId: 'task-1',
+      sessionOverride: {
+        tasks: [
+          {
+            taskId: 'task-1',
+            title: 'Capture sidebar proof',
+            workflow: 'standard',
+            state: 'completed',
+            repositoryName: 'RooCodeInc/Roomote',
+            latestOutput: null,
+            inferenceCostMicroUsd: 0,
+            canAccessDetails: true,
+            latestRun: null,
+            artifacts: [
+              {
+                id: 'artifact-image',
+                path: 'tmp/capture-visual-proof/sidebar-alignment.png',
+                artifactType: 'visual-proof',
+                contentType: 'image/png',
+                thumbnailUrl: '/api/artifacts/artifact-image/raw?sig=test',
+              },
+              {
+                id: 'artifact-file',
+                path: 'plans/sidebar.md',
+                artifactType: 'plan',
+                contentType: 'text/markdown',
+              },
+            ],
+            pullRequests: [],
+          },
+        ],
+      },
+    });
+
+    const imageLink = screen.getByRole('link', {
+      name: /Sidebar Alignment.*tmp\/capture-visual-proof\/sidebar-alignment\.png/,
+    });
+    expect(imageLink).toHaveAttribute(
+      'href',
+      '/task/task-1/artifacts/tmp%2Fcapture-visual-proof%2Fsidebar-alignment.png?returnTo=%2Fsessions%2Fsession-1%3Ftask%3Dtask-1',
+    );
+    expect(
+      screen.getByRole('img', { name: 'Sidebar Alignment' }),
+    ).toHaveAttribute('src', '/api/artifacts/artifact-image/raw?sig=test');
+    expect(
+      screen.getByRole('link', { name: /Sidebar.*plans\/sidebar\.md/ }),
+    ).toHaveAttribute(
+      'href',
+      '/task/task-1/artifacts/plans%2Fsidebar.md?returnTo=%2Fsessions%2Fsession-1%3Ftask%3Dtask-1',
+    );
   });
 
   it('enables and populates the Tasks panel from refreshed session tasks', async () => {

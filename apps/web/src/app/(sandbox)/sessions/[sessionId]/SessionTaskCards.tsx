@@ -37,6 +37,8 @@ export type SessionTaskSummary = {
     id: string;
     path: string;
     artifactType: string;
+    contentType: string;
+    thumbnailUrl?: string;
   }>;
   pullRequests: Array<{
     id: string;

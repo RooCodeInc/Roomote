@@ -16,6 +16,7 @@ import {
   formatInferenceCost,
   formatRepositoryName,
   getUserDisplayName,
+  humanizeFilename,
 } from '@/lib';
 import { SessionStatusBadge } from '@/components/sessions/SessionStatusBadge';
 import {
@@ -35,7 +36,9 @@ import {
   Button,
   Calendar,
   DollarSign,
+  FileText,
   Globe,
+  Image,
   Info,
   Slack,
   X,
@@ -168,9 +171,36 @@ function SessionTaskPanel({
               <Link
                 key={artifact.id}
                 href={`/task/${task.taskId}/artifacts/${encodeURIComponent(artifact.path)}?returnTo=${encodeURIComponent(`/sessions/${sessionId}?task=${task.taskId}`)}`}
-                className="block truncate text-primary hover:underline"
+                title={artifact.path}
+                className="group flex min-w-0 items-center gap-3 rounded-lg border bg-card p-2 transition-opacity hover:opacity-70"
               >
-                {artifact.path}
+                {artifact.contentType.startsWith('image/') ? (
+                  <span className="flex aspect-video w-20 shrink-0 items-center justify-center overflow-hidden rounded-md bg-muted">
+                    {artifact.thumbnailUrl ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={artifact.thumbnailUrl}
+                        alt={humanizeFilename(artifact.path)}
+                        className="size-full object-contain"
+                        loading="lazy"
+                      />
+                    ) : (
+                      <Image className="size-5 text-muted-foreground" />
+                    )}
+                  </span>
+                ) : (
+                  <span className="flex aspect-video w-20 shrink-0 items-center justify-center rounded-md bg-muted">
+                    <FileText className="size-5 text-muted-foreground" />
+                  </span>
+                )}
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate font-medium text-primary group-hover:underline">
+                    {humanizeFilename(artifact.path)}
+                  </span>
+                  <span className="block truncate font-mono text-xs text-muted-foreground">
+                    {artifact.path}
+                  </span>
+                </span>
               </Link>
             ))}
           </section>
