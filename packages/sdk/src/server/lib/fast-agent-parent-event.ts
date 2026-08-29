@@ -617,6 +617,12 @@ async function createSlackFastAgentParentTurn(
               suggestions,
             });
           }
+          await recordFastAgentConversationMessageBestEffort({
+            sessionId: session.id,
+            conversation,
+            messageId:
+              params.event.rootMessageId ?? conversation.replyTarget.threadId,
+          });
           params.onReplyPosted();
           return;
         }
@@ -668,6 +674,11 @@ async function createSlackFastAgentParentTurn(
             'Slack did not return a Fast parent event timestamp.',
           );
         }
+        await recordFastAgentConversationMessageBestEffort({
+          sessionId: session.id,
+          conversation,
+          messageId: messageTs,
+        });
         if (action) {
           const { superseded } =
             await attachPendingPrReviewActionMessageWithRetirement(
