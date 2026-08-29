@@ -151,10 +151,153 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
 
 describe('FastSessionTranscript', () => {
+  const textMessage = ({
+    id,
+    role,
+    text,
+    ts,
+    visible = true,
+    turnSeq = role === 'user' ? 0 : 1,
+  }: {
+    id: string;
+    role: 'user' | 'assistant';
+    text: string;
+    ts: number;
+    visible?: boolean;
+    turnSeq?: number;
+  }) => ({
+    id,
+    eventId: `${id}:event`,
+    turnId: `${id}:turn`,
+    turnSeq,
+    ts,
+    eventType:
+      role === 'user'
+        ? ACP_ENVELOPE_EVENT_TYPES.UserPrompt
+        : ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+    role,
+    contentBlocks: [{ type: 'text' as const, text }],
+    metadata: { visibleInTranscript: visible },
+    payload: {},
+    source: 'web',
+    nativeSessionId: role === 'assistant' ? 'opencode-1' : null,
+    nativeMessageId: null,
+    createdAt: new Date(ts),
+  });
+
+  it('shows Thinking while the initial Fast turn is awaiting output', () => {
+    render(
+      <FastSessionTranscript sessionId="session-1" initialMessages={[]} />,
+    );
+
+    expect(screen.getByText('Thinking...')).toBeInTheDocument();
+  });
+
+  it('shows Thinking after a follow-up until streamed output arrives', async () => {
+    vi.spyOn(Date, 'now').mockReturnValue(2);
+    replyMutate.mockResolvedValue({ success: true });
+    render(
+      <FastSessionTranscript
+        sessionId="session-1"
+        initialMessages={[
+          textMessage({
+            id: 'user-1',
+            role: 'user',
+            text: 'First question',
+            ts: 1,
+          }),
+          textMessage({
+            id: 'assistant-1',
+            role: 'assistant',
+            text: 'First answer',
+            ts: 2,
+          }),
+        ]}
+        canReply
+      />,
+    );
+
+    expect(screen.queryByText('Thinking...')).not.toBeInTheDocument();
+    const input = screen.getByPlaceholderText('Message agent');
+    fireEvent.change(input, { target: { value: 'Follow up' } });
+    fireEvent.keyDown(input, { key: 'Enter', code: 'Enter', charCode: 13 });
+
+    expect(await screen.findByText('Thinking...')).toBeInTheDocument();
+    act(() => {
+      FakeEventSource.instances[0]!.emit('messages', {
+        messages: [
+          textMessage({
+            id: 'stale-assistant',
+            role: 'assistant',
+            text: 'Replayed earlier output',
+            ts: 2,
+            turnSeq: -1,
+          }),
+          textMessage({
+            id: 'lifecycle-2',
+            role: 'assistant',
+            text: 'Internal lifecycle update',
+            ts: Date.now(),
+            visible: false,
+          }),
+        ],
+      });
+    });
+    expect(screen.getByText('Thinking...')).toBeInTheDocument();
+
+    act(() => {
+      FakeEventSource.instances[0]!.emit('messages', {
+        messages: [
+          textMessage({
+            id: 'assistant-2',
+            role: 'assistant',
+            text: 'Follow-up answer',
+            ts: Date.now() + 1,
+          }),
+        ],
+      });
+    });
+
+    expect(screen.queryByText('Thinking...')).not.toBeInTheDocument();
+    expect(screen.getByText('Follow-up answer')).toBeInTheDocument();
+  });
+
+  it('clears Thinking when a follow-up send fails', async () => {
+    replyMutate.mockRejectedValue(new Error('turn is busy'));
+    render(
+      <FastSessionTranscript
+        sessionId="session-1"
+        initialMessages={[
+          textMessage({
+            id: 'user-1',
+            role: 'user',
+            text: 'First question',
+            ts: 1,
+          }),
+          textMessage({
+            id: 'assistant-1',
+            role: 'assistant',
+            text: 'First answer',
+            ts: 2,
+          }),
+        ]}
+        canReply
+      />,
+    );
+
+    const input = screen.getByPlaceholderText('Message agent');
+    fireEvent.change(input, { target: { value: 'Retry this' } });
+    fireEvent.keyDown(input, { key: 'Enter', code: 'Enter', charCode: 13 });
+
+    expect(await screen.findByText('turn is busy')).toBeInTheDocument();
+    expect(screen.queryByText('Thinking...')).not.toBeInTheDocument();
+  });
+
   const reviewOfferMessage = (status = 'pending') => ({
     id: 'offer-1',
     eventId: 'turn-offer:assistant:0',
