@@ -219,7 +219,6 @@ function buildMergeAnnouncerNotification(params: {
   const configureUrl = buildManagerSlackSettingsUrl(
     MERGE_ANNOUNCER_SETTINGS_HASH,
   );
-  const slackNarrative = `*${params.pusher}* pushed ${commitLabel} to *${params.branch}* in *${params.repository.fullName}*.`;
   const markdownNarrative = `**${params.pusher}** pushed ${commitLabel} to **${params.branch}** in **${params.repository.fullName}**.`;
   const additionalActions = params.event.compareUrl
     ? [
@@ -238,12 +237,16 @@ function buildMergeAnnouncerNotification(params: {
       title: 'Merge Announcer',
       iconUrl: buildAutomationIconUrl('git-commit-vertical'),
       configureUrl,
+      subtitle: {
+        type: 'plain_text',
+        text: `${params.repository.fullName} · ${params.branch} · ${params.pusher}`,
+      },
       contentBlocks: [
         {
           type: 'section',
           text: {
             type: 'mrkdwn',
-            text: `${slackNarrative}\n\n> ${summary}`,
+            text: summary,
           },
         },
       ],
