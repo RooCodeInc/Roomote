@@ -67,16 +67,6 @@ export function getSetupStepDefinition(step: SetupStep) {
 }
 
 /**
- * Canonical URL for a signed-in setup step. The setup flow keeps the active
- * step in the query string (`/setup?step=<step-id>`) so the URL is the source
- * of truth for navigation, deep links, and browser back/forward. OAuth
- * callbacks and setup deep links depend on this exact shape.
- */
-export function getSetupStepPath(step: SetupStep): string {
-  return `/setup?step=${step}`;
-}
-
-/**
  * Canonical setup URL for a full query string. The setup URL carries both the
  * active `step` and the provider params the docs panel renders from, so every
  * writer builds the complete query and formats it here.

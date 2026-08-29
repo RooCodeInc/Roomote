@@ -217,11 +217,6 @@ export function useSetupSourceControlMilestoneEffect({
   }, [enabled, connectedProviderCount]);
 }
 
-export function useSetupRecommendationNotifications() {
-  const trpc = useTRPC();
-  return useMutation(trpc.setup.sessionMilestone.mutationOptions());
-}
-
 export function useSetupRouteTransition({
   sessionId,
   completed,
