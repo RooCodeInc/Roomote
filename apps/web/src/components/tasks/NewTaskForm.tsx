@@ -87,7 +87,7 @@ function resolveInitialComputeProvider(
   );
 }
 
-export type NewTaskFormProps = {
+type NewTaskFormProps = {
   defaultComputeProvider?: ComputeProvider;
   availableComputeProviders?: readonly ComputeProvider[];
   onTaskStarted?: () => void;
