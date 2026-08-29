@@ -368,10 +368,18 @@ export async function readBrainCorpus(): Promise<BrainCorpusSnapshot | null> {
 
       const snapshot = await fetchBrainCorpus(resolved);
 
-      if (snapshot) {
+      if (snapshot && snapshot.pages.length > 0) {
         corpusCache.snapshot = snapshot;
         corpusCache.expiresAtMs = Date.now() + CORPUS_CACHE_TTL_MS;
         await storeCorpus(resolved, snapshot);
+      } else if (snapshot) {
+        // An empty census is served but never trusted for the full TTL: a
+        // brain's first ingestion typically lands minutes after the first
+        // (empty) settings-page read, and a ten-minute cached "nothing here"
+        // makes fresh Memory look broken. An empty walk is also the cheapest
+        // walk (one call), so re-reading soon costs nothing.
+        corpusCache.snapshot = snapshot;
+        corpusCache.expiresAtMs = Date.now() + CORPUS_FAILURE_CACHE_TTL_MS;
       } else {
         corpusCache.expiresAtMs = Date.now() + CORPUS_FAILURE_CACHE_TTL_MS;
       }
@@ -410,7 +418,9 @@ export async function readBrainCorpus(): Promise<BrainCorpusSnapshot | null> {
 
       const stored = await readStoredCorpus(connection);
 
-      if (!stored) {
+      // A stored empty census (including ones persisted before empties
+      // stopped being stored) is as cheap to redo as to trust — walk fresh.
+      if (!stored || stored.snapshot.pages.length === 0) {
         return refresh(connection);
       }
 

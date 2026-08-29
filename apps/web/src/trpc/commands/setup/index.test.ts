@@ -82,6 +82,7 @@ vi.mock('@roomote/cloud-agents/server', () => ({
 
 vi.mock('@roomote/sdk/server/request-instance-ping', () => ({
   requestInstancePing: (...args: unknown[]) => mockRequestInstancePing(...args),
+  requestBrainBackfill: vi.fn(async () => undefined),
 }));
 
 vi.mock('@roomote/telemetry/server', () => ({

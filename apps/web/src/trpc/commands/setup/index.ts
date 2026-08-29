@@ -17,7 +17,10 @@ import {
   type EnvironmentConfig,
   normalizeSetupNewState,
 } from '@roomote/types';
-import { requestInstancePing } from '@roomote/sdk/server/request-instance-ping';
+import {
+  requestBrainBackfill,
+  requestInstancePing,
+} from '@roomote/sdk/server/request-instance-ping';
 import {
   captureActivationEnvironmentSaved,
   captureActivationSetupCompleted,
@@ -527,6 +530,12 @@ export async function completeSetupCommand(
   // Ping service sees the founding admin within minutes instead of at the
   // next daily tick.
   void requestInstancePing('setup-completed');
+
+  // Sources typically get connected during setup, and no toggle fires
+  // afterwards — kick the initial Memory backfill now so a fresh deployment's
+  // brain starts filling the moment setup finishes. No-ops harmlessly when
+  // Memory is off; the jobs hold their checkpoints.
+  void requestBrainBackfill('setup-completed');
 
   if (
     (input?.productUpdatesEnabled ?? true) &&

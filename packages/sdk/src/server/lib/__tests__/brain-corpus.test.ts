@@ -213,6 +213,48 @@ describe('readBrainCorpus', () => {
     expect(redisSet).toHaveBeenCalledTimes(1);
   });
 
+  it('serves an empty census but neither stores it nor trusts it for the full TTL', async () => {
+    vi.useFakeTimers();
+    try {
+      const fetchMock = vi.fn(async () => toolResponse([]));
+      global.fetch = fetchMock as unknown as typeof fetch;
+
+      const first = await readBrainCorpus();
+      expect(first?.pages).toEqual([]);
+      expect(redisSet).not.toHaveBeenCalled();
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+
+      // Within the short window the empty snapshot is served from memory.
+      await readBrainCorpus();
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+
+      // First ingestion lands moments later; the next read past the short
+      // window re-walks instead of serving "nothing here" for ten minutes.
+      vi.advanceTimersByTime(31_000);
+      const windows = [windowOf(0, 42)];
+      fetchMock.mockImplementation(async () =>
+        toolResponse(windows.shift() ?? []),
+      );
+      await readBrainCorpus();
+      await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('re-walks instead of hydrating a stored empty census', async () => {
+    redisGet.mockResolvedValue(
+      JSON.stringify({ generatedAt: new Date().toISOString(), pages: [] }),
+    );
+    const fetchMock = vi.fn(async () => toolResponse(windowOf(0, 3)));
+    global.fetch = fetchMock as unknown as typeof fetch;
+
+    const snapshot = await readBrainCorpus();
+
+    expect(snapshot?.pages).toHaveLength(3);
+    expect(fetchMock).toHaveBeenCalled();
+  });
+
   it('hydrates a completed census from shared storage without listing again', async () => {
     redisGet.mockResolvedValue(
       JSON.stringify({

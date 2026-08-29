@@ -1,5 +1,6 @@
 import { randomBytes } from 'node:crypto';
 
+import { requestBrainBackfill } from '@roomote/sdk/server/request-instance-ping';
 import * as Ado from '@roomote/ado';
 import * as Bitbucket from '@roomote/bitbucket';
 import * as Gitea from '@roomote/gitea';
@@ -1010,7 +1011,7 @@ export async function saveSourceControlConfigCommand(
     allowIncompleteDelegated: true,
   });
 
-  return db.transaction(async (tx) => {
+  const result = await db.transaction(async (tx) => {
     const providerStatus = await saveSourceControlConfigValues({
       executor: tx,
       actorUserId: auth.userId,
@@ -1024,6 +1025,15 @@ export async function saveSourceControlConfigCommand(
       configSatisfied: providerStatus.configSatisfied,
     };
   });
+
+  if (result.configSatisfied) {
+    // A newly satisfied provider config means repositories (and their PRs
+    // and issues) just became reachable — start Memory ingestion now rather
+    // than waiting out the 15-minute schedules.
+    void requestBrainBackfill('source-control-connected');
+  }
+
+  return result;
 }
 
 type ClearSourceControlConfigWarning = {
