@@ -392,7 +392,7 @@ export function NewTaskForm({
       setIsExiting(true);
       router.push(
         result.sessionId
-          ? `/sessions/${result.sessionId}?task=${result.taskId}`
+          ? `/sessions/${result.sessionId}`
           : `/task/${result.taskId}`,
       );
     } else if ('error' in result) {

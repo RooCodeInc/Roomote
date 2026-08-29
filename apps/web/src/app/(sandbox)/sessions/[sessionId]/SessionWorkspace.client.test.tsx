@@ -17,11 +17,13 @@ const {
   sessionQueryState,
   fastTaskQueryState,
   searchParamsState,
+  routerReplaceMock,
 } = vi.hoisted(() => ({
   useMediaQueryMock: vi.fn(),
   sessionQueryState: { data: null as unknown },
   fastTaskQueryState: { data: null as unknown },
   searchParamsState: { value: '' },
+  routerReplaceMock: vi.fn(),
 }));
 
 vi.mock('usehooks-ts', () => ({
@@ -29,7 +31,7 @@ vi.mock('usehooks-ts', () => ({
 }));
 
 vi.mock('next/navigation', () => ({
-  useRouter: () => ({ replace: vi.fn() }),
+  useRouter: () => ({ replace: routerReplaceMock }),
   useSearchParams: () => new URLSearchParams(searchParamsState.value),
 }));
 
@@ -106,6 +108,20 @@ const session: SessionInfo = {
   createdAt: new Date('2026-01-01T00:00:00.000Z'),
   status: 'needs_input',
   tasks: [],
+};
+
+const singleTask: SessionInfo['tasks'][number] = {
+  taskId: 'task-1',
+  title: 'Update homepage background',
+  workflow: 'standard',
+  state: 'active',
+  repositoryName: null,
+  latestOutput: null,
+  inferenceCostMicroUsd: 0,
+  canAccessDetails: true,
+  latestRun: null,
+  artifacts: [],
+  pullRequests: [],
 };
 
 function SandboxLayoutProvider({ children }: { children: ReactNode }) {
@@ -201,6 +217,10 @@ function OpenNestedTask() {
 }
 
 describe('SessionWorkspace', () => {
+  beforeEach(() => {
+    routerReplaceMock.mockClear();
+  });
+
   it('matches the task sidebar replacement behavior and controls on mobile', () => {
     renderWorkspace({ isMobile: true });
 
@@ -253,6 +273,68 @@ describe('SessionWorkspace', () => {
     ).toBeInTheDocument();
   });
 
+  it('lands on the transcript for a single-task session on mobile', () => {
+    renderWorkspace({
+      isMobile: true,
+      sessionOverride: { tasks: [singleTask] },
+    });
+
+    expect(screen.getByText('Session transcript')).toBeInTheDocument();
+    expect(screen.queryByText('Execution details')).not.toBeInTheDocument();
+    expect(routerReplaceMock).not.toHaveBeenCalled();
+  });
+
+  it('keeps the single-task execution details default on desktop', () => {
+    renderWorkspace({
+      isMobile: false,
+      sessionOverride: { tasks: [singleTask] },
+    });
+
+    expect(routerReplaceMock).toHaveBeenCalledWith(
+      '/sessions/session-1?task=task-1',
+    );
+  });
+
+  it('selects a single task that arrives after the desktop workspace renders', async () => {
+    renderWorkspace({
+      isMobile: false,
+      sessionOverride: { tasks: [] },
+      queriedTasks: [singleTask],
+    });
+
+    await waitFor(() => {
+      expect(routerReplaceMock).toHaveBeenCalledWith(
+        '/sessions/session-1?task=task-1',
+      );
+    });
+  });
+
+  it('replaces a stale desktop task selection with the sole current task', () => {
+    renderWorkspace({
+      isMobile: false,
+      selectedTaskId: 'missing-task',
+      sessionOverride: { tasks: [singleTask] },
+    });
+
+    expect(routerReplaceMock).toHaveBeenCalledWith(
+      '/sessions/session-1?task=task-1',
+    );
+  });
+
+  it('opens explicitly selected execution details on mobile', () => {
+    renderWorkspace({
+      isMobile: true,
+      selectedTaskId: singleTask.taskId,
+      sessionOverride: { tasks: [singleTask] },
+    });
+
+    expect(screen.queryByText('Session transcript')).not.toBeInTheDocument();
+    expect(screen.getByText('Execution details')).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Close execution details' }),
+    ).toBeInTheDocument();
+  });
+
   it('disables the Tasks panel button until the session has a task', () => {
     renderWorkspace({ isMobile: false });
 
@@ -262,23 +344,7 @@ describe('SessionWorkspace', () => {
   it('lists session tasks with delegated task cards', () => {
     renderWorkspace({
       isMobile: false,
-      sessionOverride: {
-        tasks: [
-          {
-            taskId: 'task-1',
-            title: 'Update homepage background',
-            workflow: 'standard',
-            state: 'active',
-            repositoryName: null,
-            latestOutput: null,
-            inferenceCostMicroUsd: 0,
-            canAccessDetails: true,
-            latestRun: null,
-            artifacts: [],
-            pullRequests: [],
-          },
-        ],
-      },
+      sessionOverride: { tasks: [singleTask] },
     });
 
     fireEvent.click(screen.getByRole('button', { name: 'Tasks' }));
