@@ -114,6 +114,10 @@ describe('handleMergeAnnouncerPush', () => {
         expect.objectContaining({
           type: 'container',
           title: expect.objectContaining({ text: 'Merge Announcer' }),
+          subtitle: {
+            type: 'plain_text',
+            text: 'acme/widgets · develop · alice',
+          },
           icon: expect.objectContaining({
             image_url: expect.stringContaining(
               '/automation-icons/git-commit-vertical.png',
@@ -122,11 +126,10 @@ describe('handleMergeAnnouncerPush', () => {
           child_blocks: expect.arrayContaining([
             expect.objectContaining({
               type: 'section',
-              text: expect.objectContaining({
-                text: expect.stringContaining(
-                  '> Adds exports and strengthens widget validation.',
-                ),
-              }),
+              text: {
+                type: 'mrkdwn',
+                text: 'Adds exports and strengthens widget validation.',
+              },
             }),
             expect.objectContaining({
               type: 'actions',
