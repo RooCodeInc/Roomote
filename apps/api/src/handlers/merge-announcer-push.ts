@@ -1,4 +1,8 @@
-import type { MergeAnnouncerPushEvent } from '@roomote/sdk/server';
+import { getInstallationOctokit } from '@roomote/github';
+import type {
+  MergeAnnouncerPullRequestContext,
+  MergeAnnouncerPushEvent,
+} from '@roomote/sdk/server';
 
 import { toHostFromUrl } from './utils';
 import type { AdoPushWebhook } from './ado/types';
@@ -6,8 +10,13 @@ import type { BitbucketPushWebhook } from './bitbucket/types';
 import type { GiteaPushWebhook } from './gitea/types';
 import type { GitLabPushWebhook } from './gitlab/types';
 
+const MAX_GITHUB_ASSOCIATED_PULL_REQUESTS = 10;
+const MAX_GITHUB_PULL_REQUEST_CANDIDATES = 3;
+const MAX_GITHUB_CHANGED_FILES = 20;
+
 type GitHubPushWebhook = {
   ref: string;
+  after?: string;
   deleted?: boolean;
   compare?: string | null;
   size?: number;
@@ -23,11 +32,21 @@ type GitHubPushWebhook = {
   }>;
   pusher?: { name?: string | null } | null;
   sender?: { login?: string | null } | null;
+  installation?: { id?: number | null } | null;
   repository?: {
     id: number;
     full_name: string;
+    default_branch?: string | null;
     html_url?: string | null;
   };
+};
+
+type GitHubMergeAnnouncerDependencies = {
+  getInstallationOctokit: typeof getInstallationOctokit;
+};
+
+const githubMergeAnnouncerDependencies: GitHubMergeAnnouncerDependencies = {
+  getInstallationOctokit,
 };
 
 export function normalizeGitHubPush(
@@ -52,6 +71,114 @@ export function normalizeGitHubPush(
       htmlUrl: payload.repository.html_url,
     },
   };
+}
+
+export async function enrichGitHubMergeAnnouncerEvent(
+  payload: GitHubPushWebhook,
+  event: MergeAnnouncerPushEvent,
+  dependencies: GitHubMergeAnnouncerDependencies = githubMergeAnnouncerDependencies,
+): Promise<MergeAnnouncerPushEvent> {
+  const installationId = payload.installation?.id;
+  const after = payload.after?.trim();
+  const [owner, repo] = payload.repository?.full_name.split('/') ?? [];
+  const branch = event.ref.startsWith('refs/heads/')
+    ? event.ref.slice('refs/heads/'.length)
+    : null;
+
+  if (
+    !installationId ||
+    !after ||
+    !owner ||
+    !repo ||
+    !branch ||
+    event.deleted ||
+    event.commits.length === 0 ||
+    (payload.repository?.default_branch &&
+      payload.repository.default_branch !== branch)
+  ) {
+    return event;
+  }
+
+  try {
+    const octokit = await dependencies.getInstallationOctokit({
+      installationId,
+    });
+    const { data: associatedPullRequests } =
+      await octokit.rest.repos.listPullRequestsAssociatedWithCommit({
+        owner,
+        repo,
+        commit_sha: after,
+        per_page: MAX_GITHUB_ASSOCIATED_PULL_REQUESTS,
+      });
+    const candidates = associatedPullRequests
+      .filter(
+        (pullRequest) =>
+          pullRequest.state === 'closed' && pullRequest.base.ref === branch,
+      )
+      .slice(0, MAX_GITHUB_PULL_REQUEST_CANDIDATES);
+    const detailResults = await Promise.allSettled(
+      candidates.map((pullRequest) =>
+        octokit.rest.pulls.get({
+          owner,
+          repo,
+          pull_number: pullRequest.number,
+        }),
+      ),
+    );
+    const pullRequest = detailResults
+      .flatMap((result) =>
+        result.status === 'fulfilled' ? [result.value.data] : [],
+      )
+      .find(
+        (candidate) =>
+          candidate.merged_at !== null &&
+          candidate.base.ref === branch &&
+          candidate.merge_commit_sha === after,
+      );
+
+    if (!pullRequest) {
+      return event;
+    }
+
+    let changedFiles: MergeAnnouncerPullRequestContext['changedFiles'];
+    try {
+      const { data: files } = await octokit.rest.pulls.listFiles({
+        owner,
+        repo,
+        pull_number: pullRequest.number,
+        per_page: MAX_GITHUB_CHANGED_FILES,
+        page: 1,
+      });
+      changedFiles = files.map((file) => ({
+        path: file.filename,
+        status: file.status,
+        additions: file.additions,
+        deletions: file.deletions,
+      }));
+    } catch (error) {
+      console.warn(
+        `[mergeAnnouncer] Failed to fetch changed files for ${payload.repository?.full_name}#${pullRequest.number}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+
+    return {
+      ...event,
+      pullRequest: {
+        number: pullRequest.number,
+        title: pullRequest.title,
+        body: pullRequest.body,
+        changedFileCount: pullRequest.changed_files,
+        additions: pullRequest.additions,
+        deletions: pullRequest.deletions,
+        ...(changedFiles ? { changedFiles } : {}),
+      },
+    };
+  } catch (error) {
+    console.warn(
+      `[mergeAnnouncer] Failed to resolve merged pull request for ${payload.repository?.full_name}@${after}: ${error instanceof Error ? error.message : String(error)}`,
+    );
+    return event;
+  }
 }
 
 const ZERO_SHA = /^0+$/u;

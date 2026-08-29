@@ -53,7 +53,10 @@ import { handleInstallationRepositoriesChange } from './handleInstallationReposi
 // Utilities:
 import { isFromKnownInstallation } from './isFromKnownInstallation';
 import { recordWebhook } from './recordWebhook';
-import { normalizeGitHubPush } from '../merge-announcer-push';
+import {
+  enrichGitHubMergeAnnouncerEvent,
+  normalizeGitHubPush,
+} from '../merge-announcer-push';
 
 /**
  * Fire-and-forget PR status update. Logs errors but never throws.
@@ -555,7 +558,10 @@ github.post('/', async (c) => {
           handlePushConflictCheck(payload),
           queueBaseBranchMergeabilityCheck(payload),
           mergeAnnouncerEvent
-            ? handleMergeAnnouncerPush(mergeAnnouncerEvent)
+            ? enrichGitHubMergeAnnouncerEvent(
+                payload,
+                mergeAnnouncerEvent,
+              ).then(handleMergeAnnouncerPush)
             : Promise.resolve({ status: 'ok' as const }),
         ]);
         return mergeAnnouncerResult.status === 'error'

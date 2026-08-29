@@ -13,6 +13,7 @@ const {
   mockHandlePrSynchronize,
   mockHandlePushConflictCheck,
   mockHandleMergeAnnouncerPush,
+  mockGetInstallationOctokit,
   mockQueueBaseBranchMergeabilityCheck,
   mockQueueTrackedPullRequestMergeabilityCheck,
   mockIsRepoSkipped,
@@ -50,6 +51,7 @@ const {
   mockHandlePrSynchronize: vi.fn(),
   mockHandlePushConflictCheck: vi.fn(),
   mockHandleMergeAnnouncerPush: vi.fn(),
+  mockGetInstallationOctokit: vi.fn(),
   mockQueueBaseBranchMergeabilityCheck: vi.fn(),
   mockQueueTrackedPullRequestMergeabilityCheck: vi.fn(),
   mockIsRepoSkipped: vi.fn(),
@@ -112,6 +114,7 @@ vi.mock('@roomote/db/server', () => ({
 }));
 
 vi.mock('@roomote/github', () => ({
+  getInstallationOctokit: mockGetInstallationOctokit,
   isRepoSkipped: mockIsRepoSkipped,
   resolveConfiguredGitHubAppSlug: mockResolveConfiguredGitHubAppSlug,
   resolveGitHubRoomoteMentionEnabled: mockResolveGitHubRoomoteMentionEnabled,
