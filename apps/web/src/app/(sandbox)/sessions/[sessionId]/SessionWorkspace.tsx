@@ -514,13 +514,15 @@ export function SessionWorkspace({
 
   const selectTask = useCallback(
     (taskId: string | null) => {
+      if (taskId === selectedTaskId) return;
+
       const params = new URLSearchParams(searchParams);
       if (taskId) params.set('task', taskId);
       else params.delete('task');
       const query = params.toString();
       router.replace(`/sessions/${session.id}${query ? `?${query}` : ''}`);
     },
-    [router, searchParams, session.id],
+    [router, searchParams, selectedTaskId, session.id],
   );
 
   const openTaskPanel = useCallback(
