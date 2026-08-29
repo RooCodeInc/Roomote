@@ -502,6 +502,13 @@ describe('buildFastAgentSystemPrompt', () => {
       'Call "ignore_event" only when the event is duplicate, lifecycle-only, machinery-only, or a routine log that adds nothing useful',
     );
     expect(prompt).not.toContain('Do not call "ignore_event"');
+    expect(prompt).toContain('Do not use the reaction tool');
+    expect(prompt).toContain(
+      'an inbound emoji-reaction event is not itself a reactable message surface',
+    );
+    expect(prompt).toContain(
+      'If the reaction warrants a response, post a text reply; otherwise stay silent according to the ignore rules above',
+    );
   });
 
   it('requires a visible closeout for visibility-required platform events', () => {

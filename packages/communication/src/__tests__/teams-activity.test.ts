@@ -16,6 +16,23 @@ import {
 } from '../teams-activity';
 
 describe('Teams activity helpers', () => {
+  it('parses added and removed message reactions', () => {
+    const parsed = parseTeamsActivity({
+      type: 'messageReaction',
+      id: 'reaction-1',
+      conversation: { id: '19:conversation@thread.v2' },
+      replyToId: 'activity-root',
+      reactionsAdded: [{ type: 'heart' }],
+      reactionsRemoved: [{ type: 'like' }],
+    });
+
+    expect(parsed.success).toBe(true);
+    expect(parsed.data).toMatchObject({
+      reactionsAdded: [{ type: 'heart' }],
+      reactionsRemoved: [{ type: 'like' }],
+    });
+  });
+
   it('parses Teams message activities into queued communication messages', () => {
     const parsed = parseTeamsActivity({
       type: 'message',

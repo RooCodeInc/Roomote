@@ -80,6 +80,15 @@ export const teamsActivitySchema = z
           .passthrough(),
       )
       .optional(),
+    reactionsRemoved: z
+      .array(
+        z
+          .object({
+            type: z.string(),
+          })
+          .passthrough(),
+      )
+      .optional(),
     attachments: z.array(z.unknown()).optional(),
   })
   .passthrough();
