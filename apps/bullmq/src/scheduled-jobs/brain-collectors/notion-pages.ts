@@ -762,7 +762,7 @@ export function buildNotionSearchBody(
   };
 }
 
-export function buildNotionDataSourceSearchBody(
+function buildNotionDataSourceSearchBody(
   cursor: string | null,
 ): Record<string, unknown> {
   return {
