@@ -20,6 +20,13 @@ const {
 }));
 
 vi.mock('@roomote/db/server', () => ({
+  DevLoginInferencePlaceholderError: class DevLoginInferencePlaceholderError extends Error {
+    constructor() {
+      super(
+        'Local development login uses an intentionally invalid inference key.',
+      );
+    }
+  },
   db: {
     query: {
       taskRuns: { findFirst: mockFindTaskRun },
@@ -39,6 +46,7 @@ vi.mock('@roomote/sdk/server', () => ({
 
 import { inference } from '../index';
 import { resetRoomoteInferenceKeyCache } from '../registry';
+import { DevLoginInferencePlaceholderError } from '@roomote/db/server';
 
 function createApp(authContext: Variables['authContext']) {
   const app = new Hono<{ Variables: Variables }>();
@@ -146,6 +154,22 @@ describe('inference gateway', () => {
     const response = await postMessages(createApp(createUserToken()));
 
     expect(response.status).toBe(403);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('reports the local dev-login placeholder without contacting an upstream', async () => {
+    const fetchMock = stubUpstreamFetch();
+    mockResolveModelProviderEnvValue.mockRejectedValueOnce(
+      new DevLoginInferencePlaceholderError(),
+    );
+
+    const response = await postMessages(createApp(createRunToken()));
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toEqual({
+      error:
+        'Local development login uses an intentionally invalid inference key.',
+    });
     expect(fetchMock).not.toHaveBeenCalled();
   });
 

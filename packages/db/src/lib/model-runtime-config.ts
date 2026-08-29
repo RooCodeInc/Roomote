@@ -3,6 +3,7 @@ import {
   applyImplicitLiteLlmModelPrefix,
   CHATGPT_FAST_MODE_ENV_VAR_NAME,
   CHATGPT_OPENCODE_PROVIDER_ID,
+  DEV_LOGIN_INFERENCE_API_KEY_PLACEHOLDER,
   DISABLED_MODEL_PROVIDER_ENV_VAR_NAMES,
   getDefaultTaskModelId,
   getEnabledTaskModels,
@@ -49,6 +50,23 @@ const DEFAULT_DEPLOYMENT_ID = 'default';
 const DISABLED_MODEL_PROVIDER_ENV_VAR_NAME_SET = new Set<string>(
   DISABLED_MODEL_PROVIDER_ENV_VAR_NAMES,
 );
+
+export class DevLoginInferencePlaceholderError extends Error {
+  constructor() {
+    super(
+      'Local development login uses an intentionally invalid inference key. Configure a real inference provider in Settings > Models before running tasks.',
+    );
+    this.name = 'DevLoginInferencePlaceholderError';
+  }
+}
+
+function rejectDevLoginInferencePlaceholder(value: string): string {
+  if (value === DEV_LOGIN_INFERENCE_API_KEY_PLACEHOLDER) {
+    throw new DevLoginInferencePlaceholderError();
+  }
+
+  return value;
+}
 
 async function loadPersistedDeploymentEnvVars(
   executor: DatabaseOrTransaction = db,
@@ -189,7 +207,7 @@ export async function resolveModelProviderEnvValue(
     const runtimeValue = normalizeConfiguredValue(runtimeEnv[envVarName]);
 
     if (runtimeValue) {
-      return runtimeValue;
+      return rejectDevLoginInferencePlaceholder(runtimeValue);
     }
   }
 
@@ -203,7 +221,7 @@ export async function resolveModelProviderEnvValue(
     const normalizedValue = normalizeConfiguredValue(persistedValue);
 
     if (normalizedValue) {
-      return normalizedValue;
+      return rejectDevLoginInferencePlaceholder(normalizedValue);
     }
   }
 
@@ -576,7 +594,9 @@ async function resolveModelRuntimeEnv(
           : normalizeConfiguredValue(runtimeEnv[envVarName])) ??
         normalizeConfiguredValue(persistedEnvVars[envVarName]);
 
-      return value ? [[envVarName, value]] : [];
+      return value
+        ? [[envVarName, rejectDevLoginInferencePlaceholder(value)]]
+        : [];
     }),
   );
 
