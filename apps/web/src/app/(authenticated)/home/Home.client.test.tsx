@@ -128,7 +128,8 @@ vi.mock('./BottomSheetTabs', () => ({
   BottomSheetTabs: () => <div>Tabs</div>,
 }));
 
-import { Home, NewTaskForm } from './Home';
+import { NewTaskForm } from '@/components/tasks/NewTaskForm';
+import { Home } from './Home';
 
 vi.mock('@/components/tasks', async () => {
   const actual =
@@ -393,16 +394,10 @@ describe('Home', () => {
     });
   });
 
-  it('reuses the launch form without Home-only content in dialogs', async () => {
+  it('keeps Home-only content out of the shared launch form', async () => {
     const onTaskStarted = vi.fn();
 
-    render(
-      <NewTaskForm
-        initialPlaceholderIndex={0}
-        presentation="dialog"
-        onTaskStarted={onTaskStarted}
-      />,
-    );
+    render(<NewTaskForm onTaskStarted={onTaskStarted} />);
 
     expect(
       screen.queryByRole('heading', { name: 'New Session' }),
