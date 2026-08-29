@@ -9,14 +9,16 @@ import {
 
 import type { Variables } from '../../../types';
 
-const { mockResolveConnection, mockResolveBrainProvider } = vi.hoisted(() => ({
-  mockResolveConnection: vi.fn(),
-  mockResolveBrainProvider: vi.fn(),
-}));
+const { mockResolveConnection, mockIsBrainEmbeddingAvailable } = vi.hoisted(
+  () => ({
+    mockResolveConnection: vi.fn(),
+    mockIsBrainEmbeddingAvailable: vi.fn(),
+  }),
+);
 
 vi.mock('@roomote/sdk/server', () => ({
   resolveBrainConnection: mockResolveConnection,
-  resolveBrainInferenceProvider: mockResolveBrainProvider,
+  isBrainEmbeddingAvailable: mockIsBrainEmbeddingAvailable,
 }));
 
 import { createGbrainMcpProxy, GBRAIN_READ_TOOL_NAMES } from '../gbrain';
@@ -71,16 +73,9 @@ describe('createGbrainMcpProxy', () => {
     upstreamRequests = [];
     mockResolveConnection.mockReset();
     // A Brain is only offered to agents when it can actually embed, so the
-    // default for these cases is "a provider is configured".
-    mockResolveBrainProvider.mockReset();
-    mockResolveBrainProvider.mockResolvedValue({
-      providerId: 'openrouter',
-      apiKey: 'sk-or-test',
-      models: {
-        embedding: 'openai/text-embedding-3-small',
-        chat: 'openai/gpt-5.6-luna',
-      },
-    });
+    // default for these cases is "an embedder is available".
+    mockIsBrainEmbeddingAvailable.mockReset();
+    mockIsBrainEmbeddingAvailable.mockResolvedValue(true);
   });
 
   afterEach(async () => {
@@ -120,18 +115,35 @@ describe('createGbrainMcpProxy', () => {
     expect(mockResolveConnection).toHaveBeenCalledWith('agent');
   });
 
-  it('hides the Brain from agents when no model provider is configured', async () => {
+  it('hides the Brain from agents when it cannot embed', async () => {
     mockResolveConnection.mockResolvedValue({
       baseUrl: 'http://brain.test',
       token: 'agent-token',
     });
-    mockResolveBrainProvider.mockResolvedValue(null);
+    mockIsBrainEmbeddingAvailable.mockResolvedValue(false);
 
     const response = await postMcp(createApp(), toolCall('query'));
 
     // Worse than absent: a Brain that cannot embed still answers keyword
     // queries, so retrieval would look real while missing everything semantic.
     expect(response.status).toBe(404);
+  });
+
+  it('serves agents on an embedder-only deployment with no provider key', async () => {
+    // The trial / Anthropic-only case: a self-run embedder is configured and
+    // no OpenAI/OpenRouter key exists. The drain ingests such a Brain, so the
+    // read path must let agents query it too.
+    mockResolveConnection.mockResolvedValue({
+      baseUrl: await startUpstream(),
+      token: 'agent-token',
+    });
+    mockIsBrainEmbeddingAvailable.mockResolvedValue(true);
+
+    const response = await postMcp(createApp(), toolCall('query'));
+
+    expect(response.status).toBe(200);
+    expect(upstreamRequests).toHaveLength(1);
+    expect(upstreamRequests[0]?.authorization).toBe('Bearer agent-token');
   });
 
   it.each(['remember', 'forget'])(
