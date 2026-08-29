@@ -31,7 +31,6 @@ import {
   Shimmer,
 } from '@/components/ai-elements';
 import { WorkspaceHeader } from '@/components/layout';
-import { Lightbulb } from '@/components/system';
 import {
   SessionPromptInput,
   type SessionPromptSubmission,
@@ -103,12 +102,9 @@ function ThinkingMessage() {
   return (
     <Message from="assistant" className="chat-reasoning-message">
       <MessageContent>
-        <div className="flex items-center gap-2 text-sm font-light text-muted-foreground">
-          <Lightbulb className="size-4" />
-          <Shimmer direction="rl" duration={1}>
-            Thinking...
-          </Shimmer>
-        </div>
+        <Shimmer className="text-sm font-light" direction="rl" duration={1}>
+          Thinking
+        </Shimmer>
       </MessageContent>
     </Message>
   );
@@ -290,6 +286,7 @@ export function FastSessionTranscript({
       setIsSending(true);
       setReplyError(null);
       let optimisticId: string | null = null;
+      let previousPendingResponse: TranscriptOrder | null = null;
       try {
         const prepared = await preparePromptAttachments({
           text: message.text.trim(),
@@ -331,6 +328,7 @@ export function FastSessionTranscript({
           createdAt: new Date(),
         };
         setOptimisticMessages((previous) => [...previous, optimistic]);
+        previousPendingResponse = pendingResponseAfter;
         setPendingResponseAfter(optimistic);
         await trpcClient.fastSessions.reply.mutate({
           sessionId,
@@ -353,13 +351,15 @@ export function FastSessionTranscript({
         setReplyError(
           error instanceof Error ? error.message : 'Failed to send message',
         );
-        setPendingResponseAfter(null);
+        setPendingResponseAfter((current) =>
+          current?.id === optimisticId ? previousPendingResponse : current,
+        );
         return false;
       } finally {
         setIsSending(false);
       }
     },
-    [isSending, sessionId, trpcClient],
+    [isSending, pendingResponseAfter, sessionId, trpcClient],
   );
 
   const handleReviewAction = useCallback(

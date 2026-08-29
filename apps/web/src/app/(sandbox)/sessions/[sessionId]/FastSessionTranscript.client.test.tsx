@@ -195,7 +195,7 @@ describe('FastSessionTranscript', () => {
       <FastSessionTranscript sessionId="session-1" initialMessages={[]} />,
     );
 
-    expect(screen.getByText('Thinking...')).toBeInTheDocument();
+    expect(screen.getByText('Thinking')).toBeInTheDocument();
   });
 
   it('shows Thinking after a follow-up until streamed output arrives', async () => {
@@ -222,12 +222,12 @@ describe('FastSessionTranscript', () => {
       />,
     );
 
-    expect(screen.queryByText('Thinking...')).not.toBeInTheDocument();
+    expect(screen.queryByText('Thinking')).not.toBeInTheDocument();
     const input = screen.getByPlaceholderText('Message agent');
     fireEvent.change(input, { target: { value: 'Follow up' } });
     fireEvent.keyDown(input, { key: 'Enter', code: 'Enter', charCode: 13 });
 
-    expect(await screen.findByText('Thinking...')).toBeInTheDocument();
+    expect(await screen.findByText('Thinking')).toBeInTheDocument();
     act(() => {
       FakeEventSource.instances[0]!.emit('messages', {
         messages: [
@@ -248,7 +248,7 @@ describe('FastSessionTranscript', () => {
         ],
       });
     });
-    expect(screen.getByText('Thinking...')).toBeInTheDocument();
+    expect(screen.getByText('Thinking')).toBeInTheDocument();
 
     act(() => {
       FakeEventSource.instances[0]!.emit('messages', {
@@ -263,7 +263,7 @@ describe('FastSessionTranscript', () => {
       });
     });
 
-    expect(screen.queryByText('Thinking...')).not.toBeInTheDocument();
+    expect(screen.queryByText('Thinking')).not.toBeInTheDocument();
     expect(screen.getByText('Follow-up answer')).toBeInTheDocument();
   });
 
@@ -295,7 +295,34 @@ describe('FastSessionTranscript', () => {
     fireEvent.keyDown(input, { key: 'Enter', code: 'Enter', charCode: 13 });
 
     expect(await screen.findByText('turn is busy')).toBeInTheDocument();
-    expect(screen.queryByText('Thinking...')).not.toBeInTheDocument();
+    expect(screen.queryByText('Thinking')).not.toBeInTheDocument();
+  });
+
+  it('keeps Thinking for an earlier pending response when a later send fails', async () => {
+    replyMutate.mockRejectedValue(new Error('turn is busy'));
+    render(
+      <FastSessionTranscript
+        sessionId="session-1"
+        initialMessages={[
+          textMessage({
+            id: 'user-1',
+            role: 'user',
+            text: 'Earlier pending follow-up',
+            ts: 1,
+          }),
+        ]}
+        canReply
+      />,
+    );
+
+    const input = screen.getByPlaceholderText('Message agent');
+    fireEvent.change(input, { target: { value: 'Rejected follow-up' } });
+    fireEvent.keyDown(input, { key: 'Enter', code: 'Enter', charCode: 13 });
+
+    expect(await screen.findByText('turn is busy')).toBeInTheDocument();
+    expect(screen.getByText('Thinking')).toBeInTheDocument();
+    expect(screen.getByText('Earlier pending follow-up')).toBeInTheDocument();
+    expect(screen.getByRole('log')).not.toHaveTextContent('Rejected follow-up');
   });
 
   const reviewOfferMessage = (status = 'pending') => ({
