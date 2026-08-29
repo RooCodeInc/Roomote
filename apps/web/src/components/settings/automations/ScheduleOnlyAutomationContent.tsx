@@ -8,7 +8,7 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
-  Megaphone,
+  GitCommitVertical,
   SquarePen,
   Switch,
   TriangleAlert,
@@ -97,7 +97,7 @@ export const SCHEDULE_ONLY_AUTOMATION_UI_DEFINITIONS = {
       'Runs immediately from provider-deduplicated push webhooks, not on a daily or weekly batch schedule.',
       'Uses the helper model for a brief commit summary and posts through the configured automation destination or normal manager-channel fallback.',
     ],
-    icon: Megaphone,
+    icon: GitCommitVertical,
     control: {
       kind: 'toggle',
       enabledFrequency: 'daily',

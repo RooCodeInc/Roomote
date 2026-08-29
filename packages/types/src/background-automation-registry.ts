@@ -304,7 +304,7 @@ export const TRIGGERABLE_BACKGROUND_AUTOMATION_DESCRIPTORS = [
   {
     automationKey: 'merge_announcer',
     label: 'Merge announcer',
-    slackIcon: 'megaphone',
+    slackIcon: 'git-commit-vertical',
     scheduleModes: MERGE_ANNOUNCER_SCHEDULE_MODES,
     // Source-control push webhooks trigger this automation; 'daily' only means enabled.
     manualTriggerRequirements: [],

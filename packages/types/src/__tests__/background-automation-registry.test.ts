@@ -150,7 +150,7 @@ describe('background automation registry', () => {
 
     expect(descriptor).toMatchObject({
       label: 'Merge announcer',
-      slackIcon: 'megaphone',
+      slackIcon: 'git-commit-vertical',
       scheduleModes: ['off', 'daily'],
       usesManagerChannel: true,
       supportedCommunicationProviders: [
