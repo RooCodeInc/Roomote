@@ -81,7 +81,7 @@ export function AutomationDestinationPicker({
   return (
     <div className="space-y-2">
       <Label htmlFor={id}>{label}</Label>
-      <div className="flex flex-col gap-2 sm:flex-row">
+      <div className="grid gap-2">
         <Select
           value={value.provider}
           disabled={disabled}
@@ -98,7 +98,7 @@ export function AutomationDestinationPicker({
           <SelectTrigger
             id={id}
             aria-label="Destination provider"
-            className="w-full sm:w-52"
+            className="w-full sm:max-w-52"
           >
             <SelectValue />
           </SelectTrigger>
@@ -117,7 +117,7 @@ export function AutomationDestinationPicker({
             {noneDescription}
           </p>
         ) : (
-          <div className="flex min-w-0 flex-1 flex-col gap-2 sm:flex-row sm:items-center">
+          <div className="grid min-w-0 gap-2 sm:grid-cols-[9rem_minmax(0,1fr)] sm:items-center">
             <Select
               value={value.mode}
               disabled={disabled}
@@ -132,7 +132,7 @@ export function AutomationDestinationPicker({
             >
               <SelectTrigger
                 aria-label={`${providerLabel} destination type`}
-                className="w-full sm:w-36"
+                className="w-full"
               >
                 <SelectValue />
               </SelectTrigger>
@@ -150,7 +150,7 @@ export function AutomationDestinationPicker({
             ) : value.provider === 'slack' ? (
               <SlackChannelSelect
                 id={`${id}-channel`}
-                className="flex-1"
+                className="min-w-0 w-full"
                 value={value.channelId || null}
                 options={slackOptions}
                 disabled={disabled}
@@ -166,7 +166,7 @@ export function AutomationDestinationPicker({
               >
                 <SelectTrigger
                   aria-label="Destination channel"
-                  className="flex-1"
+                  className="min-w-0 w-full"
                 >
                   <SelectValue placeholder="Select Discord channel" />
                 </SelectTrigger>
@@ -181,7 +181,7 @@ export function AutomationDestinationPicker({
             ) : (
               <Input
                 aria-label="Destination channel"
-                className="flex-1"
+                className="min-w-0 w-full"
                 value={value.channelId}
                 disabled={disabled}
                 onChange={(event) =>
