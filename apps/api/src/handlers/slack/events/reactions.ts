@@ -653,7 +653,11 @@ async function launchTaskSuggestionTaskFromReaction({
         );
       });
 
-    if (!usesRouterLaunch && directWorkspaceName) {
+    if (
+      launchResult.mode === 'coding' &&
+      !usesRouterLaunch &&
+      directWorkspaceName
+    ) {
       await postTaskSuggestionStartedMessage({
         slack,
         channelId,

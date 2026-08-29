@@ -336,6 +336,7 @@ describe('chat reply suggestion reactions', () => {
     );
     expect(mocks.startAutoRoutedSlackTask).not.toHaveBeenCalled();
     expect(mocks.startSlackAppMentionTask).not.toHaveBeenCalled();
+    expect(mocks.postStartedMessage).not.toHaveBeenCalled();
     expect(mocks.finalizeWorkItemLaunched).toHaveBeenCalledWith(
       expect.anything(),
       { id: 'work-item-1', taskId: null, claimedAt },
