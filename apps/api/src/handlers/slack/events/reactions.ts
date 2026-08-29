@@ -497,7 +497,9 @@ async function launchTaskSuggestionTaskFromReaction({
     const launchResult = await launchClaimedSuggestedTask({
       suggestion: { id: workItemId, launchClaimedAt: claimedAt },
       policy: {
-        usesRouterLaunch,
+        // Pinned scan suggestions still enter Fast; the pin only selects the
+        // verified workspace if this launch falls back to coding.
+        fastEligible: suggestionType === 'suggested_tasks',
         userDefaultEnabled: Boolean(activeUserMapping),
         fastAvailable: Boolean(activeUserMapping),
       },
@@ -651,7 +653,11 @@ async function launchTaskSuggestionTaskFromReaction({
         );
       });
 
-    if (!usesRouterLaunch && directWorkspaceName) {
+    if (
+      launchResult.mode === 'coding' &&
+      !usesRouterLaunch &&
+      directWorkspaceName
+    ) {
       await postTaskSuggestionStartedMessage({
         slack,
         channelId,
