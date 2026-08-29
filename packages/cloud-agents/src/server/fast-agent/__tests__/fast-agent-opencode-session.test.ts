@@ -74,6 +74,30 @@ describe('FastAgentOpenCodeSessionManager', () => {
     ]);
   });
 
+  it('rebuilds an unbaselined persisted session when tracking its tool catalog', async () => {
+    const manager = new FastAgentOpenCodeSessionManager();
+    const execute = vi.fn(async (session, prompt, context) => ({
+      sessionId: session.id,
+      prompt,
+      context,
+    }));
+
+    await expect(
+      manager.run({
+        conversationId: 'persisted-catalog',
+        persistedSessionId: 'persisted-session',
+        prompt: 'delta',
+        bootstrapPrompt: 'compatibility history',
+        toolCatalogKey: 'linear:get_issue,save_issue',
+        execute,
+      }),
+    ).resolves.toEqual({
+      sessionId: undefined,
+      prompt: 'compatibility history',
+      context: { path: 'cold_rebuild', validateSession: false },
+    });
+  });
+
   it('serializes concurrent prompts for one conversation', async () => {
     const manager = new FastAgentOpenCodeSessionManager();
     let releaseFirst!: () => void;

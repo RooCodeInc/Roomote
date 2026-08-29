@@ -1166,7 +1166,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     expect(mocks.setOpenCodeSession).not.toHaveBeenCalled();
   });
 
-  it('rebuilds missing durable sessions and stores the replacement id', async () => {
+  it('rebuilds unbaselined durable sessions and stores the replacement id', async () => {
     const { FastAgentOpenCodeSessionManager } = await vi.importActual<
       typeof import('../fast-agent-opencode-session')
     >('../fast-agent-opencode-session');
@@ -1199,14 +1199,13 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
 
     await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
 
-    expect(prompts).toHaveLength(2);
-    expect(prompts[0]).not.toContain('Earlier answer');
-    expect(prompts[1]).toContain('Earlier answer');
+    expect(prompts).toHaveLength(1);
+    expect(prompts[0]).toContain('Earlier answer');
     expect(mocks.setOpenCodeSession).toHaveBeenCalledWith({
       sessionId: 'conversation-1',
       openCodeSessionId: 'replacement-session',
     });
-    expect(mocks.getNativeRuntime).toHaveBeenCalledTimes(2);
+    expect(mocks.getNativeRuntime).toHaveBeenCalledOnce();
   });
 
   it('keeps Fast-native tools parent-only while MCP tools use the shared broker', async () => {

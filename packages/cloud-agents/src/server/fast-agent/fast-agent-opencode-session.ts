@@ -101,11 +101,15 @@ export class FastAgentOpenCodeSessionManager {
         }
       }
 
-      if (
+      const hasUnbaselinedPersistedCatalog =
+        toolCatalogKey !== undefined &&
+        entry.toolCatalogKey === undefined &&
+        entry.session.id !== undefined;
+      const hasChangedToolCatalog =
         toolCatalogKey !== undefined &&
         entry.toolCatalogKey !== undefined &&
-        entry.toolCatalogKey !== toolCatalogKey
-      ) {
+        entry.toolCatalogKey !== toolCatalogKey;
+      if (hasUnbaselinedPersistedCatalog || hasChangedToolCatalog) {
         entry.session.id = undefined;
         entry.resumeValidationPending = false;
         this.endConversation(conversationId);
