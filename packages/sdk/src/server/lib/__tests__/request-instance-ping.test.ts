@@ -83,7 +83,11 @@ describe('requestBrainBackfill', () => {
       'PullRequestAnalyticsSync',
     ]);
     for (const [jobName, data, opts] of mockQueueAdd.mock.calls) {
-      expect(data).toEqual({ reason: 'memory-enabled' });
+      expect(data).toEqual(
+        jobName === 'PullRequestAnalyticsSync'
+          ? { reason: 'memory-enabled', chainBrainCollectors: true }
+          : { reason: 'memory-enabled' },
+      );
       expect(opts).toEqual({
         jobId: `brain-backfill-request-${jobName}-${minuteBucket}`,
       });

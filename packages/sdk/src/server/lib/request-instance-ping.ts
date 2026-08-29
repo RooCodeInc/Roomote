@@ -92,6 +92,11 @@ export async function requestLicenseUsageSync(reason: string): Promise<void> {
  * backfill — task history, PR facts, integration sources — starts right away
  * and the settings page shows content landing within moments of enabling.
  *
+ * The kicked analytics sync is asked to chain a follow-up BrainCollectors
+ * run: the PR-fact → Brain sync lives in the collectors job and reads the
+ * table the analytics sync populates, so the concurrent one-off collectors
+ * run can race it and see nothing there yet.
+ *
  * Fire-and-forget with per-minute job ids, like the requests above: the
  * regular schedules are the safety net, every job is idempotent against its
  * durable checkpoints, and a failed enqueue must never break the Settings
@@ -104,7 +109,9 @@ export async function requestBrainBackfill(reason: string): Promise<void> {
       BRAIN_BACKFILL_JOBS.map((jobName) =>
         getQueue().add(
           jobName,
-          { reason },
+          jobName === 'PullRequestAnalyticsSync'
+            ? { reason, chainBrainCollectors: true }
+            : { reason },
           { jobId: `brain-backfill-request-${jobName}-${minuteBucket}` },
         ),
       ),
