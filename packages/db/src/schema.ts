@@ -98,6 +98,14 @@ export type LicenseCloudEntitlements = Record<
   string | number | boolean
 >;
 
+export type FastAgentInitialTurn = {
+  question: string;
+  images?: string[];
+  attachmentTexts?: string[];
+  model?: string;
+  reasoningEffort?: ReasoningEffort;
+};
+
 /** Cached self-hosted licensing lease issued by Roomote Cloud. */
 export type LicenseCloudState = {
   licenseId: string;
@@ -3092,6 +3100,8 @@ export const fastAgentConversations = pgTable(
       .default(sql`'[]'::jsonb`)
       .$type<Record<string, unknown>[]>(),
     openCodeSessionId: text('opencode_session_id'),
+    initialTurn: jsonb('initial_turn').$type<FastAgentInitialTurn>(),
+    initialTurnCompletedAt: timestamp('initial_turn_completed_at'),
     model: text('model'),
     reasoningEffort: text('reasoning_effort').$type<ReasoningEffort>(),
     title: text('title'),

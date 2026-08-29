@@ -4,6 +4,8 @@ import {
   desc,
   db,
   eq,
+  fastAgentConversations,
+  type FastAgentInitialTurn,
   inArray,
   isTaskRunFollowUpCandidate,
   isNull,
@@ -25,6 +27,7 @@ type FastAgentSessionRecord = {
   compatibilityMessages: ModelMessage[];
   openCodeSessionId: string | null;
   created: boolean;
+  initialTurnPending: boolean;
 };
 
 export type FastAgentActiveTask = {
@@ -36,11 +39,38 @@ export type FastAgentActiveTask = {
 export async function getOrCreateFastAgentSession({
   userId,
   conversation,
+  initialTurn,
 }: {
   userId: string;
   conversation: FastAgentConversation;
+  initialTurn?: FastAgentInitialTurn;
 }): Promise<FastAgentSessionRecord> {
-  return fastAgentConversationRepository.getOrCreate({ userId, conversation });
+  return fastAgentConversationRepository.getOrCreate({
+    userId,
+    conversation,
+    initialTurn,
+  });
+}
+
+export async function getPendingFastAgentInitialTurn(
+  sessionId: string,
+): Promise<FastAgentInitialTurn | null> {
+  const row = await db.query.fastAgentConversations.findFirst({
+    where: eq(fastAgentConversations.id, sessionId),
+    columns: { initialTurn: true, initialTurnCompletedAt: true },
+  });
+  return row?.initialTurn && !row.initialTurnCompletedAt
+    ? row.initialTurn
+    : null;
+}
+
+export async function completeFastAgentInitialTurn(
+  sessionId: string,
+): Promise<void> {
+  await db
+    .update(fastAgentConversations)
+    .set({ initialTurnCompletedAt: new Date() })
+    .where(eq(fastAgentConversations.id, sessionId));
 }
 
 export async function hasFastAgentSession(

@@ -252,6 +252,7 @@ export {
 export * from './fixtures/factories/index';
 
 export type {
+  FastAgentInitialTurn,
   SuggestionType,
   ManagerMcpSetupNotificationReason,
   EnvironmentConfigVersionSource,

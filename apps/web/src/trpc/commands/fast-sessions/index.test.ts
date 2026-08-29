@@ -9,6 +9,8 @@ const mocks = vi.hoisted(() => ({
   updateOfferStatus: vi.fn(),
   buildReplyDelivery: vi.fn(),
   createWebTaskLauncher: vi.fn(),
+  completeInitialTurn: vi.fn(),
+  getPendingInitialTurn: vi.fn(),
   getOrCreateSession: vi.fn(),
   getUnifiedSession: vi.fn(),
   getFastSessionTasks: vi.fn(),
@@ -25,7 +27,9 @@ vi.mock('next/server', () => ({ after: mocks.after }));
 vi.mock('@roomote/cloud-agents/server', () => ({
   acquireFastAgentTurnLock: mocks.acquireTurnLock,
   answerFastAgentQuestion: mocks.answerQuestion,
+  completeFastAgentInitialTurn: mocks.completeInitialTurn,
   createFastAgentWebTaskLauncher: mocks.createWebTaskLauncher,
+  getPendingFastAgentInitialTurn: mocks.getPendingInitialTurn,
   getOrCreateFastAgentSession: mocks.getOrCreateSession,
   resolveApiBaseUrl: vi.fn(),
 }));
@@ -210,10 +214,11 @@ describe('startFastSessionCommand', () => {
     mocks.getOrCreateSession.mockResolvedValue({
       id: 'fast-session-1',
       created: true,
+      initialTurnPending: true,
     });
   });
 
-  it('recovers an idempotent Session without scheduling its first turn twice', async () => {
+  it('reschedules a durable first turn when the creating callback never ran', async () => {
     const input = {
       text: 'Review the starter prompt',
       conversationId: 'setup-starter:batch-1:speed-up-ci',
@@ -226,6 +231,7 @@ describe('startFastSessionCommand', () => {
     mocks.getOrCreateSession.mockResolvedValueOnce({
       id: 'fast-session-1',
       created: false,
+      initialTurnPending: true,
     });
     await expect(startFastSessionCommand(auth, input)).resolves.toEqual({
       sessionId: 'unified-session-1',
@@ -240,8 +246,96 @@ describe('startFastSessionCommand', () => {
         workspaceId: 'user-1',
         conversationId: input.conversationId,
       },
+      initialTurn: { question: input.text },
     });
-    expect(mocks.after).toHaveBeenCalledOnce();
+    expect(mocks.after).toHaveBeenCalledTimes(2);
+  });
+
+  it('completes the durable first turn after the scheduled callback succeeds', async () => {
+    let scheduled: (() => Promise<void>) | undefined;
+    const release = Object.assign(vi.fn().mockResolvedValue(undefined), {
+      signal: new AbortController().signal,
+    });
+    mocks.after.mockImplementation((callback) => {
+      scheduled = callback;
+    });
+    mocks.acquireTurnLock.mockResolvedValue(release);
+    mocks.getPendingInitialTurn.mockResolvedValue({
+      question: 'Review the starter prompt',
+    });
+    mocks.answerQuestion.mockResolvedValue('Started');
+
+    await startFastSessionCommand(auth, {
+      text: 'Review the starter prompt',
+      conversationId: 'setup-starter:batch-1:speed-up-ci',
+    });
+    await scheduled?.();
+
+    expect(mocks.getPendingInitialTurn).toHaveBeenCalledWith('fast-session-1');
+    expect(mocks.answerQuestion).toHaveBeenCalledWith(
+      expect.objectContaining({
+        question: 'Review the starter prompt',
+        currentMessageId: 'web-initial-fast-session-1',
+      }),
+    );
+    expect(mocks.completeInitialTurn).toHaveBeenCalledWith('fast-session-1');
+    expect(release).toHaveBeenCalledOnce();
+  });
+
+  it('leaves a failed first turn pending for a successful retry', async () => {
+    const scheduled: Array<() => Promise<void>> = [];
+    const releases = Array.from({ length: 2 }, () =>
+      Object.assign(vi.fn().mockResolvedValue(undefined), {
+        signal: new AbortController().signal,
+      }),
+    );
+    mocks.after.mockImplementation((callback) => {
+      scheduled.push(callback);
+    });
+    mocks.acquireTurnLock
+      .mockResolvedValueOnce(releases[0])
+      .mockResolvedValueOnce(releases[1]);
+    mocks.getPendingInitialTurn.mockResolvedValue({
+      question: 'Review the starter prompt',
+    });
+    mocks.answerQuestion
+      .mockRejectedValueOnce(new Error('Process interrupted'))
+      .mockResolvedValueOnce('Started');
+
+    const input = {
+      text: 'Review the starter prompt',
+      conversationId: 'setup-starter:batch-1:speed-up-ci',
+    };
+    await startFastSessionCommand(auth, input);
+    await scheduled[0]?.();
+
+    expect(mocks.completeInitialTurn).not.toHaveBeenCalled();
+
+    mocks.getOrCreateSession.mockResolvedValueOnce({
+      id: 'fast-session-1',
+      created: false,
+      initialTurnPending: true,
+    });
+    await startFastSessionCommand(auth, input);
+    await scheduled[1]?.();
+
+    expect(mocks.answerQuestion).toHaveBeenCalledTimes(2);
+    expect(mocks.completeInitialTurn).toHaveBeenCalledOnce();
+  });
+
+  it('does not reschedule an already completed first turn', async () => {
+    mocks.getOrCreateSession.mockResolvedValue({
+      id: 'fast-session-1',
+      created: false,
+      initialTurnPending: false,
+    });
+
+    await startFastSessionCommand(auth, {
+      text: 'Review the starter prompt',
+      conversationId: 'setup-starter:batch-1:speed-up-ci',
+    });
+
+    expect(mocks.after).not.toHaveBeenCalled();
   });
 });
 

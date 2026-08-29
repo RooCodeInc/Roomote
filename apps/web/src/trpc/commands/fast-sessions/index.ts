@@ -4,7 +4,9 @@ import { after } from 'next/server';
 import {
   acquireFastAgentTurnLock,
   answerFastAgentQuestion,
+  completeFastAgentInitialTurn,
   createFastAgentWebTaskLauncher,
+  getPendingFastAgentInitialTurn,
   getOrCreateFastAgentSession,
   resolveApiBaseUrl,
 } from '@roomote/cloud-agents/server';
@@ -219,6 +221,57 @@ export function scheduleWebFastAgentTurn(input: WebFastAgentTurnInput): void {
   after(() => runWebFastAgentTurn(input));
 }
 
+function scheduleWebFastAgentInitialTurn(input: {
+  sessionId: string;
+  userId: string;
+  delivery: FastAgentSurfaceReplyDelivery;
+}): void {
+  after(async () => {
+    const conversation = input.delivery.conversation;
+    const release = await acquireFastAgentTurnLock({ conversation });
+    if (!release) {
+      console.error(
+        `[Fast Web] Turn lock did not become available for ${conversation.conversationId}`,
+      );
+      return;
+    }
+
+    try {
+      const initialTurn = await getPendingFastAgentInitialTurn(input.sessionId);
+      if (!initialTurn) return;
+
+      await answerFastAgentQuestion({
+        question: initialTurn.question,
+        images: initialTurn.images,
+        attachmentTexts: initialTurn.attachmentTexts,
+        userId: input.userId,
+        apiBaseUrl: resolveApiBaseUrl() ?? undefined,
+        conversation,
+        currentMessageId: `web-initial-${input.sessionId}`,
+        signal: release.signal,
+        model: initialTurn.model,
+        reasoningEffort: initialTurn.reasoningEffort,
+        adapter: {
+          resolveMcpServerConfigs: () =>
+            resolveUserMcpServerConfigs({
+              userId: input.userId,
+              apiBaseUrl: resolveApiBaseUrl() ?? undefined,
+              includeRoomoteMemberTools: true,
+            }),
+          ...input.delivery.adapter,
+        },
+      });
+      await completeFastAgentInitialTurn(input.sessionId);
+    } catch (error) {
+      console.error(
+        `[Fast Web] Initial turn failed for ${conversation.conversationId}: ${formatErrorForLog(error)}`,
+      );
+    } finally {
+      await release().catch(() => {});
+    }
+  });
+}
+
 export async function startFastSessionCommand(
   auth: UserAuthSuccess,
   input: {
@@ -239,14 +292,26 @@ export async function startFastSessionCommand(
   const session = await getOrCreateFastAgentSession({
     userId: auth.userId,
     conversation,
+    initialTurn: {
+      question: input.text,
+      ...(input.images ? { images: input.images } : {}),
+      ...(input.attachmentTexts
+        ? { attachmentTexts: input.attachmentTexts }
+        : {}),
+      ...(input.model ? { model: input.model } : {}),
+      ...(input.reasoningEffort
+        ? { reasoningEffort: input.reasoningEffort }
+        : {}),
+    },
   });
-  const settings = await resolveSessionModelSettings(session.id, input, {
+  await resolveSessionModelSettings(session.id, input, {
     model: null,
     reasoningEffort: null,
   });
 
-  if (session.created) {
-    scheduleWebFastAgentTurn({
+  if (session.initialTurnPending) {
+    scheduleWebFastAgentInitialTurn({
+      sessionId: session.id,
       userId: auth.userId,
       delivery: {
         conversation,
@@ -258,11 +323,6 @@ export async function startFastSessionCommand(
           postReply: async () => {},
         },
       },
-      question: input.text,
-      images: input.images,
-      attachmentTexts: input.attachmentTexts,
-      model: settings.model,
-      reasoningEffort: settings.reasoningEffort,
     });
   }
 

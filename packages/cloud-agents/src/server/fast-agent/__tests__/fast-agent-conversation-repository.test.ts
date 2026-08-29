@@ -153,6 +153,35 @@ describe('Fast conversation repository', () => {
     ).resolves.toMatchObject({ title: 'Investigate Slack agent status' });
   });
 
+  it('persists an initial turn atomically and preserves it across retries', async () => {
+    const user = await createUser();
+    const conversation = {
+      surface: 'web' as const,
+      workspaceId: user.id,
+      conversationId: 'durable-initial-turn',
+    };
+    const initialTurn = { question: 'Review the starter prompt' };
+
+    const created = await fastAgentConversationRepository.getOrCreate({
+      userId: user.id,
+      conversation,
+      initialTurn,
+    });
+    const retried = await fastAgentConversationRepository.getOrCreate({
+      userId: user.id,
+      conversation,
+      initialTurn: { question: 'Do not replace the original prompt' },
+    });
+    const [row] = await db
+      .select({ initialTurn: fastAgentConversations.initialTurn })
+      .from(fastAgentConversations)
+      .where(eq(fastAgentConversations.id, created.id));
+
+    expect(created).toMatchObject({ created: true, initialTurnPending: true });
+    expect(retried).toMatchObject({ created: false, initialTurnPending: true });
+    expect(row?.initialTurn).toEqual(initialTurn);
+  });
+
   it('keeps identity stable while updating the current reply destination', async () => {
     const user = await createUser();
     const discordConversation = {

@@ -2,6 +2,7 @@ import type { ModelMessage } from 'ai';
 import {
   and,
   type CreateFastAgentMessage,
+  type FastAgentInitialTurn,
   db,
   eq,
   fastAgentConversations,
@@ -46,6 +47,7 @@ export type FastAgentConversationRecord = {
 export type FastAgentConversationGetOrCreateResult =
   FastAgentConversationRecord & {
     created: boolean;
+    initialTurnPending: boolean;
   };
 
 export type FastAgentMessageWrite = Omit<
@@ -189,6 +191,7 @@ export interface FastAgentConversationRepository {
   getOrCreate(input: {
     userId: string;
     conversation: FastAgentConversation;
+    initialTurn?: FastAgentInitialTurn;
   }): Promise<FastAgentConversationGetOrCreateResult>;
   findById(input: {
     id: string;
@@ -328,7 +331,7 @@ async function loadConversationRecord(
 
 export const fastAgentConversationRepository: FastAgentConversationRepository =
   {
-    async getOrCreate({ userId, conversation }) {
+    async getOrCreate({ userId, conversation, initialTurn }) {
       return db.transaction(async (tx) => {
         await tx.execute(
           sql`select pg_advisory_xact_lock(hashtextextended(${buildIdentityKey(conversation)}, 0))`,
@@ -367,6 +370,7 @@ export const fastAgentConversationRepository: FastAgentConversationRepository =
                   ? (conversation.replyTarget.serviceUrl ?? null)
                   : null,
               replyTargetVerified: true,
+              initialTurn,
             })
             .onConflictDoNothing()
             .returning({ id: fastAgentConversations.id });
@@ -398,6 +402,11 @@ export const fastAgentConversationRepository: FastAgentConversationRepository =
                 ? (conversation.replyTarget.serviceUrl ?? null)
                 : null,
             replyTargetVerified: true,
+            ...(initialTurn
+              ? {
+                  initialTurn: sql`coalesce(${fastAgentConversations.initialTurn}, ${JSON.stringify(initialTurn)}::jsonb)`,
+                }
+              : {}),
             updatedAt: sql`now()`,
           })
           .where(eq(fastAgentConversations.id, record.id))
@@ -408,6 +417,10 @@ export const fastAgentConversationRepository: FastAgentConversationRepository =
         return {
           ...(await loadConversationRecord(tx, updated?.id ?? record.id)),
           created,
+          initialTurnPending: Boolean(
+            (updated ?? record).initialTurn &&
+            !(updated ?? record).initialTurnCompletedAt,
+          ),
         };
       });
     },
