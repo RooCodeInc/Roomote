@@ -206,7 +206,7 @@ function normalizeSummary(summary: string): string {
     .replace(/\s*\n+\s*/gu, ' ');
 }
 
-export function buildMergeAnnouncerNotification(params: {
+function buildMergeAnnouncerNotification(params: {
   event: MergeAnnouncerPushEvent;
   branch: string;
   repository: TrackedRepository;
