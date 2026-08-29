@@ -8,7 +8,7 @@ import {
 
 describe('automation destination field registry', () => {
   it('keeps a stable one-of Slack/Discord descriptor for each destination automation', () => {
-    expect(AUTOMATION_DESTINATION_DESCRIPTORS).toHaveLength(11);
+    expect(AUTOMATION_DESTINATION_DESCRIPTORS).toHaveLength(12);
     expect(
       new Set(
         AUTOMATION_DESTINATION_DESCRIPTORS.map(
