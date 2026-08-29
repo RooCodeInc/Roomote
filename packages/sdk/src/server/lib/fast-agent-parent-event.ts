@@ -115,6 +115,7 @@ export type FastAgentPullRequestContext = {
   number: number | null;
   title: string | null;
   url: string;
+  targetBranch?: string | null;
   status: PullRequestStatus | null;
 };
 

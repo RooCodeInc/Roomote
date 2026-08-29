@@ -645,6 +645,7 @@ github.post('/', async (c) => {
             prNumber: payload.pull_request.number,
             prTitle: payload.pull_request.title,
             prUrl: payload.pull_request.html_url,
+            targetBranch: payload.pull_request.base.ref,
             status,
             actorLogin:
               (payload.pull_request.merged

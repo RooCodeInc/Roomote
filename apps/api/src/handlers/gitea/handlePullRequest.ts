@@ -134,6 +134,7 @@ export async function handleGiteaPullRequest(
         prNumber: payload.number,
         prTitle: pullRequest.title,
         prUrl: getPullRequestUrl(payload),
+        targetBranch: pullRequest.base?.ref,
         status,
         actorLogin: getGiteaUsername(payload.sender) ?? 'someone on Gitea',
       }),

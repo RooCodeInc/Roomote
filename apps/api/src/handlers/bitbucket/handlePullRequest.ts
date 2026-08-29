@@ -138,6 +138,7 @@ export async function handleBitbucketPullRequest(
         prNumber,
         prTitle: pullRequest.title,
         prUrl: getBitbucketPullRequestUrl(payload),
+        targetBranch: getBitbucketPullRequestBaseRef(pullRequest),
         status,
         actorLogin:
           getBitbucketUsername(payload.actor) ?? 'someone on Bitbucket',
