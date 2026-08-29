@@ -692,9 +692,13 @@ function parseBackfillCursor(cursor: string | null): BackfillCursor {
 
 /**
  * One bounded deep-backfill step: a single page of one repository's full
- * issue history, oldest first. Completed repository identities are retained
- * while the collector stays open, so a repository connected later is found
- * and backfilled without invalidating a positional cursor.
+ * issue history, newest first, so a long backlog surfaces its most useful
+ * (recent) issues before its stale tail. An issue updated mid-walk shifts
+ * toward page 1 and can be missed by the positional cursor, but the
+ * incremental pass owns updates and re-reads it from the watermark.
+ * Completed repository identities are retained while the collector stays
+ * open, so a repository connected later is found and backfilled without
+ * invalidating a positional cursor.
  */
 export async function backfillBrainGithubIssuesStep(input: {
   cursor: string | null;
@@ -764,7 +768,7 @@ export async function backfillBrainGithubIssuesStep(input: {
       repo,
       state: 'all',
       sort: 'updated',
-      direction: 'asc',
+      direction: 'desc',
       per_page: BACKFILL_PER_PAGE,
       page,
     });
