@@ -43,8 +43,8 @@ async function createConversation(userId: string, conversationId: string) {
   return conversation!;
 }
 
-async function createTaskSession(taskId: string) {
-  const task = await taskFactory.create({ id: taskId, title: 'New session' });
+async function createTaskSession() {
+  const task = await taskFactory.create({ title: 'New session' });
   const session = await ensureSessionForTask(db, { taskId: task.id });
   if (!session) throw new Error('Failed to create task Session');
   const [run] = await db
@@ -238,7 +238,7 @@ describe('refreshFastAgentSessionTitle', () => {
   });
 
   it('generates a task-only Session title independently from its task', async () => {
-    const { task, session } = await createTaskSession('session-title-task');
+    const { task, session } = await createTaskSession();
     generateLlmTaskTitle.mockResolvedValue('Independent Session title');
 
     await refreshTaskSessionTitle({
@@ -258,9 +258,7 @@ describe('refreshFastAgentSessionTitle', () => {
   });
 
   it('does not overwrite a manually renamed task-only Session', async () => {
-    const { task, session } = await createTaskSession(
-      'session-title-manual-rename',
-    );
+    const { task, session } = await createTaskSession();
     await db
       .update(sessions)
       .set({
@@ -278,9 +276,7 @@ describe('refreshFastAgentSessionTitle', () => {
   });
 
   it('preserves a Session rename that lands while title generation is running', async () => {
-    const { task, session } = await createTaskSession(
-      'session-title-concurrent-rename',
-    );
+    const { task, session } = await createTaskSession();
     generateLlmTaskTitle.mockImplementationOnce(async () => {
       await db
         .update(sessions)
@@ -305,7 +301,7 @@ describe('refreshFastAgentSessionTitle', () => {
   });
 
   it('locks a task-only Session title after completion refresh', async () => {
-    const { task, session } = await createTaskSession('session-title-final');
+    const { task, session } = await createTaskSession();
     generateLlmTaskTitle.mockResolvedValueOnce('Completed Session title');
 
     await refreshTaskSessionTitle({ taskId: task.id, mode: 'final' });
@@ -324,7 +320,7 @@ describe('refreshFastAgentSessionTitle', () => {
   it('leaves Fast-backed Session titles to the Fast transcript generator', async () => {
     const user = await userFactory.create();
     const conversation = await createConversation(user.id, 'fast-owned-title');
-    const task = await taskFactory.create({ id: 'fast-owned-title-task' });
+    const task = await taskFactory.create();
     await ensureSessionForTask(db, {
       taskId: task.id,
       fastConversationId: conversation.id,
