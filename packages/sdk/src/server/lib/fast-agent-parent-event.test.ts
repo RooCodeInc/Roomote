@@ -1639,6 +1639,7 @@ describe('deliverFastAgentParentEvent', () => {
         number: 42,
         title: 'Fix review feedback',
         url: 'https://github.com/acme/web/pull/42',
+        targetBranch: 'develop',
         status: 'merged' as const,
       },
       status: 'merged' as const,
@@ -1666,11 +1667,14 @@ describe('deliverFastAgentParentEvent', () => {
 
     expect(mocks.answerQuestion).toHaveBeenCalledWith(
       expect.objectContaining({
-        question: expect.stringContaining(
-          '"type":"pull_request_status_changed"',
+        question: expect.stringMatching(
+          /"type":"pull_request_status_changed".*"targetBranch":"develop"/,
         ),
         turnSource: 'platform_event',
       }),
+    );
+    expect(mocks.answerQuestion.mock.calls[0]?.[0]?.question).not.toContain(
+      '"targetBranch":"main"',
     );
     expect(firstClientMessageId).toEqual(expect.any(String));
     expect(mocks.postMessage.mock.calls[1]?.[0]?.client_msg_id).toBe(

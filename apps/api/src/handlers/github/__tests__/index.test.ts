@@ -223,6 +223,7 @@ function makePullRequestPayload(
       updated_at: '2026-08-06T12:00:00Z',
       user: { login: 'author' },
       merged_by: null,
+      base: { ref: 'develop' },
       ...overrides,
     },
     sender: { login: 'actor' },
@@ -1008,6 +1009,7 @@ describe('github webhook router', () => {
           updated_at: '2026-08-06T12:00:00Z',
           user: { login: 'author' },
           merged_by: merged ? { login: 'merger' } : null,
+          base: { ref: 'develop' },
         },
         sender: { login: merged ? 'merger' : 'closer' },
       };
@@ -1036,6 +1038,7 @@ describe('github webhook router', () => {
         expect.objectContaining({
           repository: 'test-org/test-repo',
           prNumber: 42,
+          targetBranch: 'develop',
           status,
         }),
       );

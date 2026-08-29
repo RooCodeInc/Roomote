@@ -491,6 +491,9 @@ describe('handleAdoPullRequest', () => {
       42,
       'merged',
     );
+    expect(mockRecordPrStatusChangeInTaskHistory).toHaveBeenLastCalledWith(
+      expect.objectContaining({ targetBranch: 'main' }),
+    );
     expect(mockScheduleSourceControlPullRequestFactSync).toHaveBeenCalledWith({
       provider: 'ado',
       repositoryFullName: 'acme/Platform/backend',
