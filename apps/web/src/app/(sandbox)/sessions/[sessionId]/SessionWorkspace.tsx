@@ -42,6 +42,7 @@ import {
   Image,
   Info,
   Slack,
+  VideoIcon,
   X,
   Rows4,
   Select,
@@ -118,6 +119,52 @@ export type SessionInfo = {
   taskCards?: Array<Pick<SessionTaskSummary, 'taskId' | 'title'>>;
 };
 
+function SessionArtifactCard({
+  artifact,
+  href,
+}: {
+  artifact: SessionTaskSummary['artifacts'][number];
+  href: string;
+}) {
+  const [failedThumbnailUrl, setFailedThumbnailUrl] = useState<string | null>(
+    null,
+  );
+  const label = humanizeFilename(artifact.path);
+  const isImage = artifact.contentType.startsWith('image/');
+  const isVideo = artifact.contentType.startsWith('video/');
+  const thumbnailUrl = artifact.thumbnailUrl;
+
+  return (
+    <Link
+      href={href}
+      title={artifact.path}
+      className="group block min-w-0 overflow-hidden rounded-lg border bg-card transition-opacity hover:opacity-70"
+    >
+      <span className="flex aspect-video w-full items-center justify-center overflow-hidden bg-muted">
+        {isImage && thumbnailUrl && failedThumbnailUrl !== thumbnailUrl ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={thumbnailUrl}
+            alt={label}
+            className="size-full object-contain"
+            loading="lazy"
+            onError={() => setFailedThumbnailUrl(thumbnailUrl)}
+          />
+        ) : isImage ? (
+          <Image className="size-6 text-muted-foreground" />
+        ) : isVideo ? (
+          <VideoIcon className="size-6 text-muted-foreground" />
+        ) : (
+          <FileText className="size-6 text-muted-foreground" />
+        )}
+      </span>
+      <span className="block border-t px-2 py-1.5 text-center">
+        <span className="block truncate text-xs font-medium">{label}</span>
+      </span>
+    </Link>
+  );
+}
+
 function SessionTaskPanel({
   sessionId,
   task,
@@ -131,6 +178,31 @@ function SessionTaskPanel({
   onSelect: (taskId: string) => void;
   onClose: () => void;
 }) {
+  const artifactPaths = new Set<string>();
+  const latestArtifacts = task.artifacts.filter((artifact) => {
+    if (artifactPaths.has(artifact.path)) return false;
+    artifactPaths.add(artifact.path);
+    return true;
+  });
+  const screenshotArtifacts = latestArtifacts.filter((artifact) =>
+    artifact.contentType.startsWith('image/'),
+  );
+  const videoArtifacts = latestArtifacts.filter((artifact) =>
+    artifact.contentType.startsWith('video/'),
+  );
+  const fileArtifacts = latestArtifacts.filter(
+    (artifact) =>
+      !artifact.contentType.startsWith('image/') &&
+      !artifact.contentType.startsWith('video/'),
+  );
+  const artifactSections = [
+    { label: 'Screenshots', artifacts: screenshotArtifacts },
+    { label: 'Videos', artifacts: videoArtifacts },
+    { label: 'Files', artifacts: fileArtifacts },
+  ];
+  const artifactHref = (path: string) =>
+    `/task/${task.taskId}/artifacts/${encodeURIComponent(path)}?returnTo=${encodeURIComponent(`/sessions/${sessionId}?task=${task.taskId}`)}`;
+
   return (
     <>
       <div className="flex shrink-0 items-center justify-between gap-2 border-b-2 border-card px-4 py-2">
@@ -196,47 +268,35 @@ function SessionTaskPanel({
             ))}
           </section>
         ) : null}
-        {task.artifacts.length ? (
-          <section className="space-y-2">
-            <h3 className="font-medium">Artifacts</h3>
-            {task.artifacts.map((artifact) => (
-              <Link
-                key={artifact.id}
-                href={`/task/${task.taskId}/artifacts/${encodeURIComponent(artifact.path)}?returnTo=${encodeURIComponent(`/sessions/${sessionId}?task=${task.taskId}`)}`}
-                title={artifact.path}
-                className="group flex min-w-0 items-center gap-3 rounded-lg border bg-card p-2 transition-opacity hover:opacity-70"
-              >
-                {artifact.contentType.startsWith('image/') ? (
-                  <span className="flex aspect-video w-20 shrink-0 items-center justify-center overflow-hidden rounded-md bg-muted">
-                    {artifact.thumbnailUrl ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img
-                        src={artifact.thumbnailUrl}
-                        alt={humanizeFilename(artifact.path)}
-                        className="size-full object-contain"
-                        loading="lazy"
-                      />
-                    ) : (
-                      <Image className="size-5 text-muted-foreground" />
-                    )}
-                  </span>
-                ) : (
-                  <span className="flex aspect-video w-20 shrink-0 items-center justify-center rounded-md bg-muted">
-                    <FileText className="size-5 text-muted-foreground" />
-                  </span>
-                )}
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate font-medium text-primary group-hover:underline">
-                    {humanizeFilename(artifact.path)}
-                  </span>
-                  <span className="block truncate font-mono text-xs text-muted-foreground">
-                    {artifact.path}
-                  </span>
-                </span>
-              </Link>
-            ))}
-          </section>
-        ) : null}
+        <section className="space-y-3 @container">
+          <h3 className="font-medium">Artifacts</h3>
+          {latestArtifacts.length ? (
+            <>
+              {artifactSections.map(({ label, artifacts }) =>
+                artifacts.length ? (
+                  <div key={label} className="space-y-2">
+                    <h4 className="text-xs font-medium text-muted-foreground">
+                      {label}
+                    </h4>
+                    <div className="grid grid-cols-2 gap-4 @[500px]:grid-cols-3">
+                      {artifacts.map((artifact) => (
+                        <SessionArtifactCard
+                          key={artifact.id}
+                          artifact={artifact}
+                          href={artifactHref(artifact.path)}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                ) : null,
+              )}
+            </>
+          ) : (
+            <p className="py-6 text-center text-sm text-muted-foreground">
+              No artifacts in this task yet.
+            </p>
+          )}
+        </section>
         {task.canAccessDetails === false ? null : (
           <Button asChild className="w-full">
             <Link

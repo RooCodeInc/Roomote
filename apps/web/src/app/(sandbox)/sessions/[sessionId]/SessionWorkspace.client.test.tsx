@@ -335,6 +335,16 @@ describe('SessionWorkspace', () => {
     ).toBeInTheDocument();
   });
 
+  it('shows the Task artifact empty state in execution details', () => {
+    renderWorkspace({
+      isMobile: false,
+      selectedTaskId: singleTask.taskId,
+      sessionOverride: { tasks: [singleTask] },
+    });
+
+    expect(screen.getByText('No artifacts in this task yet.')).toBeVisible();
+  });
+
   it('disables the Tasks panel button until the session has a task', () => {
     renderWorkspace({ isMobile: false });
 
@@ -359,7 +369,7 @@ describe('SessionWorkspace', () => {
     expect(screen.getByText('Nested panel task-1')).toBeInTheDocument();
   });
 
-  it('renders image thumbnails and file links in execution details', () => {
+  it('groups latest artifact previews and file links in execution details', () => {
     renderWorkspace({
       isMobile: false,
       selectedTaskId: 'task-1',
@@ -389,6 +399,14 @@ describe('SessionWorkspace', () => {
                 artifactType: 'plan',
                 contentType: 'text/markdown',
               },
+              {
+                id: 'artifact-image-older',
+                path: 'tmp/capture-visual-proof/sidebar-alignment.png',
+                artifactType: 'visual-proof',
+                contentType: 'image/png',
+                thumbnailUrl:
+                  '/api/artifacts/artifact-image-older/raw?sig=test',
+              },
             ],
             pullRequests: [],
           },
@@ -396,22 +414,34 @@ describe('SessionWorkspace', () => {
       },
     });
 
+    expect(
+      screen.getByRole('heading', { name: 'Screenshots' }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Files' })).toBeInTheDocument();
+
     const imageLink = screen.getByRole('link', {
-      name: /Sidebar Alignment.*tmp\/capture-visual-proof\/sidebar-alignment\.png/,
+      name: /Sidebar Alignment/,
     });
     expect(imageLink).toHaveAttribute(
       'href',
       '/task/task-1/artifacts/tmp%2Fcapture-visual-proof%2Fsidebar-alignment.png?returnTo=%2Fsessions%2Fsession-1%3Ftask%3Dtask-1',
     );
+    const thumbnail = screen.getByRole('img', { name: 'Sidebar Alignment' });
+    expect(thumbnail).toHaveAttribute(
+      'src',
+      '/api/artifacts/artifact-image/raw?sig=test',
+    );
+    fireEvent.error(thumbnail);
     expect(
-      screen.getByRole('img', { name: 'Sidebar Alignment' }),
-    ).toHaveAttribute('src', '/api/artifacts/artifact-image/raw?sig=test');
-    expect(
-      screen.getByRole('link', { name: /Sidebar.*plans\/sidebar\.md/ }),
-    ).toHaveAttribute(
+      screen.queryByRole('img', { name: 'Sidebar Alignment' }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Sidebar' })).toHaveAttribute(
       'href',
       '/task/task-1/artifacts/plans%2Fsidebar.md?returnTo=%2Fsessions%2Fsession-1%3Ftask%3Dtask-1',
     );
+    expect(
+      screen.queryByText('tmp/capture-visual-proof/sidebar-alignment.png'),
+    ).not.toBeInTheDocument();
   });
 
   it('enables and populates the Tasks panel from refreshed session tasks', async () => {
