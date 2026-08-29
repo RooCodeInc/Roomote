@@ -48,7 +48,7 @@ export function StepConfigureInference({
         <p>
           Roomote needs a model provider for, you know, AI stuff.
           <br />
-          Roomote trial inference includes $5 of inference, enough to complete
+          Your Roomote Cloud trial includes $5 of inference, enough to complete
           several tasks and get a practical sense of what Roomote can do. You
           can also configure your own provider directly.
         </p>
