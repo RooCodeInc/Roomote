@@ -22,9 +22,13 @@ describe('NewTaskDialog', () => {
   it('labels the dialog and renders the shared task form', () => {
     render(<NewTaskDialog open onOpenChange={onOpenChangeMock} />);
 
+    const dialog = screen.getByRole('dialog', { name: 'New Session' });
+
+    expect(dialog).toBeInTheDocument();
+    expect(dialog).not.toHaveAttribute('aria-describedby');
     expect(
-      screen.getByRole('dialog', { name: 'New Session' }),
-    ).toBeInTheDocument();
+      screen.queryByText(/^Choose where Roomote should work/),
+    ).not.toBeInTheDocument();
     expect(screen.getByTestId('new-task-form')).toBeInTheDocument();
   });
 

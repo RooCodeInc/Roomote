@@ -3,7 +3,6 @@
 import {
   Dialog,
   DialogContent,
-  DialogDescription,
   DialogHeader,
   DialogTitle,
 } from '@/components/system';
@@ -18,12 +17,9 @@ export function NewTaskDialog({
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent size="2xl">
+      <DialogContent size="2xl" aria-describedby={undefined}>
         <DialogHeader>
           <DialogTitle>New Session</DialogTitle>
-          <DialogDescription>
-            Choose where Roomote should work, then describe what you need.
-          </DialogDescription>
         </DialogHeader>
         <NewTaskForm onTaskStarted={() => onOpenChange(false)} />
       </DialogContent>
