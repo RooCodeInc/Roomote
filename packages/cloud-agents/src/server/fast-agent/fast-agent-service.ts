@@ -1538,11 +1538,14 @@ export async function answerFastAgentQuestion({
             }
             if (
               platformEvent &&
+              // On chat surfaces every reply is a separate message and push
+              // notification, so automated events are held to one closeout.
+              // Web platform events render in a session transcript where
+              // extra replies are ordinary conversation; the prompt alone
+              // governs reply style there (e.g. the setup kickoff's intro).
+              conversation.surface !== 'web' &&
               args.purpose !== 'closeout' &&
-              args.purpose !== 'clarification' &&
-              // The setup kickoff introduces itself with one ack before
-              // launching the starter tasks, then still ends on a closeout.
-              !(platformEventKind === 'setup' && args.purpose === 'ack')
+              args.purpose !== 'clarification'
             ) {
               return {
                 success: false,
