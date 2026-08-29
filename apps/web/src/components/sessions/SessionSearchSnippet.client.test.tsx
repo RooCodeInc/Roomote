@@ -7,7 +7,7 @@ describe('SessionSearchSnippet', () => {
     render(
       <SessionSearchSnippet
         snippet="...Preserve the Heliotrope detail before release."
-        query="heliotrope"
+        query="  heliotrope  "
       />,
     );
 

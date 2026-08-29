@@ -11,10 +11,11 @@ export function SessionSearchSnippet({
 }) {
   if (!snippet) return null;
 
+  const normalizedQuery = query.trim();
   const matchAt = snippet
     .toLocaleLowerCase()
-    .indexOf(query.toLocaleLowerCase());
-  if (!query || matchAt < 0) {
+    .indexOf(normalizedQuery.toLocaleLowerCase());
+  if (!normalizedQuery || matchAt < 0) {
     return (
       <p className={cn('text-sm text-muted-foreground', className)}>
         {snippet}
@@ -26,9 +27,9 @@ export function SessionSearchSnippet({
     <p className={cn('text-sm text-muted-foreground', className)}>
       {snippet.slice(0, matchAt)}
       <mark className="bg-transparent font-medium text-foreground">
-        {snippet.slice(matchAt, matchAt + query.length)}
+        {snippet.slice(matchAt, matchAt + normalizedQuery.length)}
       </mark>
-      {snippet.slice(matchAt + query.length)}
+      {snippet.slice(matchAt + normalizedQuery.length)}
     </p>
   );
 }
