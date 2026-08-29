@@ -7,7 +7,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/system';
-import { NewTaskForm } from '@/app/(authenticated)/home/Home';
+import { NewTaskForm } from './NewTaskForm';
 
 export function NewTaskDialog({
   open,
@@ -25,11 +25,7 @@ export function NewTaskDialog({
             Choose where Roomote should work, then describe what you need.
           </DialogDescription>
         </DialogHeader>
-        <NewTaskForm
-          initialPlaceholderIndex={0}
-          presentation="dialog"
-          onTaskStarted={() => onOpenChange(false)}
-        />
+        <NewTaskForm onTaskStarted={() => onOpenChange(false)} />
       </DialogContent>
     </Dialog>
   );

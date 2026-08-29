@@ -4,20 +4,9 @@ const { onOpenChangeMock } = vi.hoisted(() => ({
   onOpenChangeMock: vi.fn(),
 }));
 
-vi.mock('@/app/(authenticated)/home/Home', () => ({
-  NewTaskForm: ({
-    presentation,
-    onTaskStarted,
-  }: {
-    presentation: string;
-    onTaskStarted: () => void;
-  }) => (
-    <button
-      type="button"
-      data-testid="new-task-form"
-      data-presentation={presentation}
-      onClick={onTaskStarted}
-    >
+vi.mock('./NewTaskForm', () => ({
+  NewTaskForm: ({ onTaskStarted }: { onTaskStarted: () => void }) => (
+    <button type="button" data-testid="new-task-form" onClick={onTaskStarted}>
       Launch task
     </button>
   ),
@@ -30,16 +19,13 @@ describe('NewTaskDialog', () => {
     vi.clearAllMocks();
   });
 
-  it('labels the dialog and renders the shared compact task form', () => {
+  it('labels the dialog and renders the shared task form', () => {
     render(<NewTaskDialog open onOpenChange={onOpenChangeMock} />);
 
     expect(
       screen.getByRole('dialog', { name: 'New Session' }),
     ).toBeInTheDocument();
-    expect(screen.getByTestId('new-task-form')).toHaveAttribute(
-      'data-presentation',
-      'dialog',
-    );
+    expect(screen.getByTestId('new-task-form')).toBeInTheDocument();
   });
 
   it('closes after the shared form starts a task', () => {
