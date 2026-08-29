@@ -1307,6 +1307,9 @@ export async function deliverFastAgentParentEvent(params: {
   /** Cap the turn-lock wait so callers holding an HTTP request can fail fast
    * and lean on their own retry instead of blocking. */
   lockWaitMs?: number;
+  /** Bound synchronous callers independently from Fast provider recovery so
+   * an abandoned HTTP request cannot keep renewing the conversation lock. */
+  turnTimeoutMs?: number;
 }): Promise<'delivered' | 'skipped'> {
   const conversation = params.parent.conversation;
   const releaseTurnLock = await acquireFastAgentTurnLock({
@@ -1323,6 +1326,21 @@ export async function deliverFastAgentParentEvent(params: {
   }
 
   let replyPosted = false;
+  const turnAbortController = new AbortController();
+  const turnTimeout =
+    params.turnTimeoutMs === undefined
+      ? undefined
+      : setTimeout(() => {
+          turnAbortController.abort(
+            new Error(
+              `Fast parent event delivery timed out after ${params.turnTimeoutMs}ms.`,
+            ),
+          );
+        }, params.turnTimeoutMs);
+  turnTimeout?.unref();
+  const turnSignal = turnTimeout
+    ? AbortSignal.any([releaseTurnLock.signal, turnAbortController.signal])
+    : releaseTurnLock.signal;
 
   try {
     if (params.event.type === 'pull_request_opened') {
@@ -1364,7 +1382,7 @@ export async function deliverFastAgentParentEvent(params: {
       conversation: parentTurn.conversation,
       currentMessageId: buildEventClientMessageSeed(params.event),
       apiBaseUrl,
-      signal: releaseTurnLock.signal,
+      signal: turnSignal,
       turnSource: 'platform_event',
       platformEventHandling:
         params.event.type === 'pull_request_feedback' ||
@@ -1418,6 +1436,7 @@ export async function deliverFastAgentParentEvent(params: {
       { cause: error, replyPosted },
     );
   } finally {
+    if (turnTimeout) clearTimeout(turnTimeout);
     await releaseTurnLock();
   }
 }

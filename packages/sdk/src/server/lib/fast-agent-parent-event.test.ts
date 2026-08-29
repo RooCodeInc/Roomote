@@ -1,6 +1,8 @@
 const mocks = vi.hoisted(() => ({
   acquireTurnLock: vi.fn(),
-  releaseTurnLock: vi.fn(),
+  releaseTurnLock: Object.assign(vi.fn(), {
+    signal: new AbortController().signal,
+  }),
   answerQuestion: vi.fn(),
   createLauncher: vi.fn(),
   launchTask: vi.fn(),
@@ -208,6 +210,7 @@ const event = {
 describe('deliverFastAgentParentEvent', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.releaseTurnLock.signal = new AbortController().signal;
     mocks.acquireTurnLock.mockResolvedValue(mocks.releaseTurnLock);
     mocks.releaseTurnLock.mockResolvedValue(undefined);
     mocks.findSession.mockImplementation(
@@ -776,6 +779,35 @@ describe('deliverFastAgentParentEvent', () => {
       deliverFastAgentParentEvent({ parent, event }),
     ).rejects.toThrow('turn lock did not become available');
     expect(mocks.answerQuestion).not.toHaveBeenCalled();
+  });
+
+  it('releases an acquired lock when a synchronous parent event times out', async () => {
+    vi.useFakeTimers();
+    try {
+      mocks.answerQuestion.mockImplementationOnce(
+        ({ signal }: { signal: AbortSignal }) =>
+          new Promise((_resolve, reject) => {
+            signal.addEventListener('abort', () => reject(signal.reason), {
+              once: true,
+            });
+          }),
+      );
+
+      const delivery = deliverFastAgentParentEvent({
+        parent,
+        event,
+        turnTimeoutMs: 1_000,
+      });
+      const rejection = expect(delivery).rejects.toThrow(
+        'Fast parent event delivery timed out after 1000ms.',
+      );
+      await vi.advanceTimersByTimeAsync(1_000);
+
+      await rejection;
+      expect(mocks.releaseTurnLock).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('delivers a guild parent event to its routable channel, not its session identity', async () => {
