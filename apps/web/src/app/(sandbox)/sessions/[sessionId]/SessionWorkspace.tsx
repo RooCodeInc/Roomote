@@ -1,17 +1,10 @@
 'use client';
 
 import Link from 'next/link';
-import {
-  useCallback,
-  useEffect,
-  useRef,
-  useState,
-  type ReactNode,
-} from 'react';
+import { useCallback, useState, type ReactNode } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import { getReasoningEffortLabel, type ReasoningEffort } from '@roomote/types';
-import { useMediaQuery } from 'usehooks-ts';
 
 import {
   formatInferenceCost,
@@ -405,7 +398,6 @@ export function SessionWorkspace({
   const trpc = useTRPC();
   const router = useRouter();
   const searchParams = useSearchParams();
-  const isMdOrLarger = useMediaQuery('(min-width: 768px)');
   const isFastTaskSource = session.taskSource === 'fast';
   const { data: currentSession } = useQuery(
     trpc.sessions.byId.queryOptions(
@@ -451,22 +443,6 @@ export function SessionWorkspace({
     },
     [router, searchParams, session.id],
   );
-
-  // Desktop keeps the single-task split-panel default. Mobile starts on the
-  // transcript unless a task was selected explicitly through the URL.
-  const didAutoSelect = useRef(false);
-  useEffect(() => {
-    if (
-      !isMdOrLarger ||
-      didAutoSelect.current ||
-      selectedTask ||
-      sessionTasks.length !== 1
-    ) {
-      return;
-    }
-    didAutoSelect.current = true;
-    selectTask(sessionTasks[0]!.taskId);
-  }, [isMdOrLarger, selectTask, selectedTask, sessionTasks]);
 
   const openTaskPanel = useCallback(
     (taskId: string) => {

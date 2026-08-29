@@ -147,6 +147,7 @@ function renderWorkspace({
   queriedTasks,
   queriedFastTasks,
   selectedTaskId,
+  searchParams,
 }: {
   isMobile: boolean;
   children?: ReactNode;
@@ -156,9 +157,11 @@ function renderWorkspace({
     Pick<SessionInfo['tasks'][number], 'taskId' | 'title'>
   >;
   selectedTaskId?: string;
+  searchParams?: string;
 }) {
   useMediaQueryMock.mockReturnValue(!isMobile);
-  searchParamsState.value = selectedTaskId ? `task=${selectedTaskId}` : '';
+  searchParamsState.value =
+    searchParams ?? (selectedTaskId ? `task=${selectedTaskId}` : '');
   let viewportChangeListener: ((event: MediaQueryListEvent) => void) | null =
     null;
   const mediaQuery = {
@@ -273,67 +276,77 @@ describe('SessionWorkspace', () => {
     ).toBeInTheDocument();
   });
 
-  it('lands on the transcript for a single-task session on mobile', () => {
-    renderWorkspace({
-      isMobile: true,
-      sessionOverride: { tasks: [singleTask] },
-    });
+  it.each([false, true])(
+    'lands on the transcript for a normal single-task session URL when isMobile=%s',
+    (isMobile) => {
+      renderWorkspace({
+        isMobile,
+        sessionOverride: { tasks: [singleTask] },
+        searchParams:
+          'utm_source=slack&utm_medium=link&utm_campaign=slack.fast_reply',
+      });
 
-    expect(screen.getByText('Session transcript')).toBeInTheDocument();
-    expect(screen.queryByText('Execution details')).not.toBeInTheDocument();
-    expect(routerReplaceMock).not.toHaveBeenCalled();
-  });
+      expect(screen.getByText('Session transcript')).toBeInTheDocument();
+      expect(screen.queryByText('Execution details')).not.toBeInTheDocument();
+      expect(routerReplaceMock).not.toHaveBeenCalled();
+    },
+  );
 
-  it('keeps the single-task execution details default on desktop', () => {
-    renderWorkspace({
-      isMobile: false,
-      sessionOverride: { tasks: [singleTask] },
-    });
+  it.each([false, true])(
+    'keeps execution details closed when a sole task arrives after navigation and isMobile=%s',
+    async (isMobile) => {
+      renderWorkspace({
+        isMobile,
+        sessionOverride: { tasks: [] },
+        queriedTasks: [singleTask],
+        searchParams:
+          'utm_source=slack&utm_medium=link&utm_campaign=slack.fast_reply',
+      });
 
-    expect(routerReplaceMock).toHaveBeenCalledWith(
-      '/sessions/session-1?task=task-1',
-    );
-  });
+      if (isMobile) {
+        fireEvent.click(screen.getByRole('button', { name: 'Show sidebar' }));
+      }
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: 'Tasks' })).toBeEnabled();
+      });
+      expect(screen.getByText('Session transcript')).toBeInTheDocument();
+      expect(screen.queryByText('Execution details')).not.toBeInTheDocument();
+      expect(routerReplaceMock).not.toHaveBeenCalled();
+    },
+  );
 
-  it('selects a single task that arrives after the desktop workspace renders', async () => {
-    renderWorkspace({
-      isMobile: false,
-      sessionOverride: { tasks: [] },
-      queriedTasks: [singleTask],
-    });
+  it.each([false, true])(
+    'opens explicitly selected execution details when isMobile=%s',
+    (isMobile) => {
+      renderWorkspace({
+        isMobile,
+        sessionOverride: { tasks: [singleTask] },
+        searchParams:
+          'utm_source=slack&utm_medium=link&utm_campaign=slack.fast_reply&task=task-1',
+      });
 
-    await waitFor(() => {
-      expect(routerReplaceMock).toHaveBeenCalledWith(
-        '/sessions/session-1?task=task-1',
-      );
-    });
-  });
+      expect(screen.getByText('Execution details')).toBeInTheDocument();
+      expect(
+        screen.getByRole('button', { name: 'Close execution details' }),
+      ).toBeInTheDocument();
+      expect(routerReplaceMock).not.toHaveBeenCalled();
+    },
+  );
 
-  it('replaces a stale desktop task selection with the sole current task', () => {
-    renderWorkspace({
-      isMobile: false,
-      selectedTaskId: 'missing-task',
-      sessionOverride: { tasks: [singleTask] },
-    });
+  it.each([false, true])(
+    'opens an explicitly selected task when its details arrive after navigation and isMobile=%s',
+    async (isMobile) => {
+      renderWorkspace({
+        isMobile,
+        sessionOverride: { tasks: [] },
+        queriedTasks: [singleTask],
+        selectedTaskId: singleTask.taskId,
+      });
 
-    expect(routerReplaceMock).toHaveBeenCalledWith(
-      '/sessions/session-1?task=task-1',
-    );
-  });
-
-  it('opens explicitly selected execution details on mobile', () => {
-    renderWorkspace({
-      isMobile: true,
-      selectedTaskId: singleTask.taskId,
-      sessionOverride: { tasks: [singleTask] },
-    });
-
-    expect(screen.queryByText('Session transcript')).not.toBeInTheDocument();
-    expect(screen.getByText('Execution details')).toBeInTheDocument();
-    expect(
-      screen.getByRole('button', { name: 'Close execution details' }),
-    ).toBeInTheDocument();
-  });
+      expect(await screen.findByText('Execution details')).toBeInTheDocument();
+      expect(routerReplaceMock).not.toHaveBeenCalled();
+    },
+  );
 
   it('disables the Tasks panel button until the session has a task', () => {
     renderWorkspace({ isMobile: false });
