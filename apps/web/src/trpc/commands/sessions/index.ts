@@ -20,6 +20,9 @@ import {
   signArtifactId,
 } from '@/lib/server/artifact-signature';
 
+// Keep polled session payloads stable for the raw route's one-hour cache lifetime.
+const ARTIFACT_SIGNATURE_CACHE_WINDOW_SECONDS = 60 * 60;
+
 export const sessionIdInputSchema = z.object({ sessionId: z.string().uuid() });
 export const sessionsListInputSchema = z.object({
   scope: z.enum(['all', 'tasks', 'reviews', 'automations']).optional(),
@@ -76,7 +79,10 @@ export async function getSessionByIdCommand(
   const session = await getSessionById(auth, sessionId);
   if (!session) return null;
 
-  const artifactSignatureTimestamp = currentEpochSeconds();
+  const artifactSignatureTimestamp =
+    Math.floor(
+      currentEpochSeconds() / ARTIFACT_SIGNATURE_CACHE_WINDOW_SECONDS,
+    ) * ARTIFACT_SIGNATURE_CACHE_WINDOW_SECONDS;
 
   // Session access was already established by getSessionById's scope check,
   // and getSessionTasks inner-joins live tasks only — the previous per-task
