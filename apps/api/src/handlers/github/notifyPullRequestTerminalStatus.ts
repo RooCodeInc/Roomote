@@ -5,6 +5,7 @@ import {
   taskPullRequests,
   taskRuns,
   tasks,
+  desc,
   eq,
   and,
   inArray,
@@ -825,6 +826,7 @@ export async function notifyPullRequestTerminalStatus({
       }),
       db.query.taskRuns.findMany({
         where: inArray(taskRuns.taskId, taskIds),
+        orderBy: [desc(taskRuns.createdAt)],
         columns: {
           taskId: true,
           payload: true,
@@ -834,9 +836,27 @@ export async function notifyPullRequestTerminalStatus({
 
     const slackTargets: SlackTarget[] = [];
     const linearSessionIds: string[] = [];
+    const latestRunsByTaskId = new Map<string, (typeof linkedRuns)[number]>();
+    for (const run of linkedRuns) {
+      if (!latestRunsByTaskId.has(run.taskId)) {
+        latestRunsByTaskId.set(run.taskId, run);
+      }
+    }
+    // Fast/session-backed tasks receive terminal PR events through their parent
+    // session. Keep this webhook fan-out only for legacy/direct Slack tasks so
+    // it cannot add a second canned status post to the same conversation.
+    const fastTaskIds = new Set(
+      [...latestRunsByTaskId.values()]
+        .filter((run) => getFastAgentParentFromPayload(run.payload) !== null)
+        .map((run) => run.taskId),
+    );
 
     for (const task of linkedTasks) {
-      if (task.slackThreadTs && task.slackChannelId) {
+      if (
+        !fastTaskIds.has(task.id) &&
+        task.slackThreadTs &&
+        task.slackChannelId
+      ) {
         slackTargets.push({
           taskId: task.id,
           slackThreadTs: task.slackThreadTs,
@@ -850,7 +870,8 @@ export async function notifyPullRequestTerminalStatus({
     }
 
     slackTargets.push(
-      ...linkedRuns
+      ...[...latestRunsByTaskId.values()]
+        .filter((run) => !fastTaskIds.has(run.taskId))
         .map((run) => getSlackTarget(run.taskId, run.payload))
         .filter((target): target is SlackTarget => target !== null),
     );
