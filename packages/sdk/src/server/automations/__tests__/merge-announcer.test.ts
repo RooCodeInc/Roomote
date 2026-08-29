@@ -108,16 +108,43 @@ describe('handleMergeAnnouncerPush', () => {
     expect(postMessage).toHaveBeenCalledWith({
       channelId: 'C123',
       text: expect.stringContaining(
-        '**2 commits pushed to [acme/widgets](https://github.com/acme/widgets)@develop by alice**',
+        'alice pushed 2 commits to develop in acme/widgets.',
       ),
-      textFormat: 'markdown',
+      blocks: [
+        expect.objectContaining({
+          type: 'container',
+          title: expect.objectContaining({ text: 'Merge Announcer' }),
+          icon: expect.objectContaining({
+            image_url: expect.stringContaining(
+              '/automation-icons/git-commit-vertical.png',
+            ),
+          }),
+          child_blocks: expect.arrayContaining([
+            expect.objectContaining({
+              type: 'section',
+              text: expect.objectContaining({
+                text: expect.stringContaining(
+                  '> Adds exports and strengthens widget validation.',
+                ),
+              }),
+            }),
+            expect.objectContaining({
+              type: 'actions',
+              elements: expect.arrayContaining([
+                expect.objectContaining({
+                  action_id: 'merge_announcer_view_changes',
+                  text: expect.objectContaining({ text: 'View changes' }),
+                }),
+                expect.objectContaining({
+                  action_id: 'late_bound_automation_configure',
+                  text: expect.objectContaining({ text: 'Configure' }),
+                }),
+              ]),
+            }),
+          ]),
+        }),
+      ],
     });
-    const postedText = postMessage.mock.calls[0]?.[0]?.text as string;
-    expect(postedText).toContain(
-      'Adds exports and strengthens widget validation.',
-    );
-    expect(postedText).toContain('Authors: bob, Carol Coder');
-    expect(postedText).toContain('[View changes]');
     expect(dependencies.recordOutcome).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({ key: 'merge_announcer', status: 'succeeded' }),
@@ -150,7 +177,15 @@ describe('handleMergeAnnouncerPush', () => {
     expect(postMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         channelId: 'dm-123',
-        text: expect.stringContaining('by fallback-pusher'),
+        text: expect.stringContaining(
+          '**fallback-pusher** pushed 2 commits to **main**',
+        ),
+        buttons: [
+          [
+            expect.objectContaining({ text: 'View changes' }),
+            expect.objectContaining({ text: 'Configure' }),
+          ],
+        ],
       }),
     );
   });
@@ -186,7 +221,9 @@ describe('handleMergeAnnouncerPush', () => {
     expect(result.status).toBe('ok');
     expect(postMessage).toHaveBeenCalledWith(
       expect.objectContaining({
-        text: expect.stringContaining('- Add widget export'),
+        text: expect.stringContaining(
+          'Changes include Add widget export; Fix widget validation.',
+        ),
       }),
     );
   });
