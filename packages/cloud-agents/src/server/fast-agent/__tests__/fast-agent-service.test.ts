@@ -1971,6 +1971,13 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     expect(adapter.postReply).toHaveBeenCalledWith(
       expect.objectContaining({ kickoff: true, purpose: 'progress' }),
     );
+    // The kickoff is a permanent thread message the runtime never edits, so
+    // it must not carry transient workspace-startup copy; the delegated
+    // task's live Slack card owns that status instead.
+    const kickoffReply = (adapter.postReply as ReturnType<typeof vi.fn>).mock
+      .calls[0]![0] as { message: string };
+    expect(kickoffReply.message).not.toContain('Preparing workspace');
+    expect(kickoffReply.message).toContain('I’m delegating the checkout fix.');
     expect(launchTask).toHaveBeenCalledWith(
       expect.objectContaining({
         images: [
