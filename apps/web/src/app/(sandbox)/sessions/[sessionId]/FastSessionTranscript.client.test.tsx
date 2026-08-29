@@ -325,6 +325,57 @@ describe('FastSessionTranscript', () => {
     expect(screen.getByRole('log')).not.toHaveTextContent('Rejected follow-up');
   });
 
+  it('does not restore an earlier pending response that resolves during attachment preparation', async () => {
+    let finishPreparing: ((value: { text: string }) => void) | undefined;
+    preparePromptAttachments.mockReturnValueOnce(
+      new Promise((resolve) => {
+        finishPreparing = resolve;
+      }),
+    );
+    replyMutate.mockRejectedValue(new Error('turn is busy'));
+    render(
+      <FastSessionTranscript
+        sessionId="session-1"
+        initialMessages={[
+          textMessage({
+            id: 'user-1',
+            role: 'user',
+            text: 'Earlier pending follow-up',
+            ts: 1,
+          }),
+        ]}
+        canReply
+      />,
+    );
+
+    const input = screen.getByPlaceholderText('Message agent');
+    fireEvent.change(input, { target: { value: 'Later follow-up' } });
+    fireEvent.keyDown(input, { key: 'Enter', code: 'Enter', charCode: 13 });
+    await waitFor(() => expect(preparePromptAttachments).toHaveBeenCalled());
+
+    act(() => {
+      FakeEventSource.instances[0]!.emit('messages', {
+        messages: [
+          textMessage({
+            id: 'assistant-1',
+            role: 'assistant',
+            text: 'Earlier response',
+            ts: 2,
+          }),
+        ],
+      });
+    });
+    expect(screen.queryByText('Thinking')).not.toBeInTheDocument();
+
+    await act(async () => {
+      finishPreparing?.({ text: 'Later follow-up' });
+    });
+
+    expect(await screen.findByText('turn is busy')).toBeInTheDocument();
+    expect(screen.queryByText('Thinking')).not.toBeInTheDocument();
+    expect(screen.getByText('Earlier response')).toBeInTheDocument();
+  });
+
   const reviewOfferMessage = (status = 'pending') => ({
     id: 'offer-1',
     eventId: 'turn-offer:assistant:0',

@@ -328,8 +328,10 @@ export function FastSessionTranscript({
           createdAt: new Date(),
         };
         setOptimisticMessages((previous) => [...previous, optimistic]);
-        previousPendingResponse = pendingResponseAfter;
-        setPendingResponseAfter(optimistic);
+        setPendingResponseAfter((current) => {
+          previousPendingResponse = current;
+          return optimistic;
+        });
         await trpcClient.fastSessions.reply.mutate({
           sessionId,
           text: prepared.text,
@@ -359,7 +361,7 @@ export function FastSessionTranscript({
         setIsSending(false);
       }
     },
-    [isSending, pendingResponseAfter, sessionId, trpcClient],
+    [isSending, sessionId, trpcClient],
   );
 
   const handleReviewAction = useCallback(
