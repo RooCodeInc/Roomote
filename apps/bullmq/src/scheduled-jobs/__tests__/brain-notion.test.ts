@@ -360,7 +360,9 @@ describe('Notion traversal discovery', () => {
     mode: 'traverse' as const,
     lastSweepAt: '2026-08-27T00:00:00.000Z',
     scanStartedAt: '2026-08-27T00:00:00.000Z',
-    traverse: { afterItemId: '', pending: [] },
+    // Most tests focus on the block/inventory walk; the shared data-source
+    // enumeration that runs first has its own tests below.
+    traverse: { afterItemId: '', pending: [], dataSourcesDone: true },
   };
   const pageObject = (id: string, title: string) => ({
     object: 'page',
@@ -519,6 +521,98 @@ describe('Notion traversal discovery', () => {
     });
 
     expect(result.pages.map((page) => page.title)).toEqual(['Row page']);
+  });
+
+  it('discovers rows of directly-shared databases search never surfaced', async () => {
+    const dataSource = '99991111-0000-0000-0000-0000000000d5';
+    const row = '99991111-0000-0000-0000-000000000101';
+    const searchBodies: unknown[] = [];
+    mockNotionApiRequestJson.mockImplementation(async ({ path, body }) => {
+      if (path === 'search') {
+        searchBodies.push(body);
+        return {
+          results: [{ object: 'data_source', id: dataSource }],
+          has_more: false,
+        };
+      }
+      if (path === `data_sources/${encodeURIComponent(dataSource)}/query`) {
+        return {
+          results: [pageObject(row, 'Shared database row')],
+          has_more: false,
+        };
+      }
+      if (path === `pages/${encodeURIComponent(row)}`) {
+        return pageObject(row, 'Shared database row');
+      }
+      if (path === `pages/${encodeURIComponent(row)}/markdown`) {
+        return { markdown: 'Row body' };
+      }
+      if (path.startsWith('blocks/')) {
+        return { results: [], has_more: false };
+      }
+      throw new Error(`unexpected path ${path}`);
+    });
+
+    const result = await collectNotionTraversal({
+      config,
+      saved: {
+        ...savedTraverse,
+        traverse: { afterItemId: '', pending: [] },
+      },
+      limit: 10,
+    });
+
+    expect(searchBodies).toEqual([
+      expect.objectContaining({
+        filter: { property: 'object', value: 'data_source' },
+      }),
+    ]);
+    expect(result.pages.map((page) => page.title)).toEqual([
+      'Shared database row',
+    ]);
+    expect(JSON.parse(result.stateUpdates![0]!.cursor as string)).toMatchObject(
+      { mode: 'idle' },
+    );
+  });
+
+  it('restarts data-source enumeration when its search cursor expires', async () => {
+    const searchCursors: unknown[] = [];
+    mockNotionApiRequestJson.mockImplementation(async ({ path, body }) => {
+      if (path === 'search') {
+        const cursor = (body as { start_cursor?: string }).start_cursor;
+        searchCursors.push(cursor ?? null);
+        if (cursor) {
+          throw new NotionApiError(
+            'cursor expired',
+            400,
+            'validation_error',
+            null,
+          );
+        }
+        return { results: [], has_more: false };
+      }
+      throw new Error(`unexpected path ${path}`);
+    });
+
+    const result = await collectNotionTraversal({
+      config,
+      saved: {
+        ...savedTraverse,
+        traverse: {
+          afterItemId: '',
+          pending: [],
+          dataSourceCursor: 'stale-cursor',
+        },
+      },
+      limit: 10,
+    });
+
+    // The stale cursor restarts the enumeration from the top instead of
+    // wedging the pass, and the cycle still completes.
+    expect(searchCursors).toEqual(['stale-cursor', null]);
+    expect(JSON.parse(result.stateUpdates![0]!.cursor as string)).toMatchObject(
+      { mode: 'idle' },
+    );
   });
 
   it('descends into any block with children, not just a container allowlist', async () => {

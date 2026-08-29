@@ -79,9 +79,10 @@ const NOTION_MAX_SEARCH_REQUESTS_PER_PASS = 10;
  * directly-shared content is guaranteed; children reachable through a shared
  * parent may never appear (see
  * https://developers.notion.com/reference/search-optimizations-and-limitations).
- * After each sweep+reconcile cycle the collector therefore walks the block
- * tree and data sources of every inventoried page, discovering
- * inheritance-shared pages the search index missed.
+ * After each sweep+reconcile cycle the collector therefore enumerates every
+ * data source the integration can see and walks the block tree of every
+ * inventoried page, discovering inheritance-shared pages — database rows
+ * above all — that the search index missed.
  */
 const NOTION_MAX_TRAVERSAL_REQUESTS_PER_PASS = 24;
 const NOTION_TRAVERSAL_SEED_BATCH = 25;
@@ -761,6 +762,23 @@ export function buildNotionSearchBody(
   };
 }
 
+export function buildNotionDataSourceSearchBody(
+  cursor: string | null,
+): Record<string, unknown> {
+  return {
+    filter: { property: 'object', value: 'data_source' },
+    page_size: NOTION_SEARCH_PAGE_SIZE,
+    ...(cursor ? { start_cursor: cursor } : {}),
+  };
+}
+
+function isNotionSearchDataSource(
+  value: unknown,
+): value is { object: 'data_source'; id: string } {
+  const record = asObject(value);
+  return !!record && record.object === 'data_source' && !!asString(record.id);
+}
+
 async function fetchNotionPage(
   config: McpConnectionNotionConfig,
   page: NotionSearchPage,
@@ -803,6 +821,10 @@ type NotionTraverseState = {
   afterItemId: string;
   /** Discovered containers awaiting expansion, bounded. */
   pending: NotionTraverseNode[];
+  /** Search cursor for the shared data-source enumeration, when paused. */
+  dataSourceCursor?: string;
+  /** True once every directly-shared data source is enqueued this cycle. */
+  dataSourcesDone?: boolean;
 };
 
 type NotionScanCursor = {
@@ -918,11 +940,13 @@ function isNotionBlock(value: unknown): value is NotionBlock {
 
 /**
  * Walk the inventory's block trees and data sources, emitting pages the
- * search-based sweep never surfaced. The seed side iterates
- * brain_collector_items by durable id cursor (no queue growth); only
- * discovered containers carry over between passes, bounded by
- * NOTION_TRAVERSAL_MAX_PENDING. A pass ends when its request budget or page
- * limit is spent; completion flips the scan back to idle.
+ * search-based sweep never surfaced. Directly-shared data sources are
+ * enumerated first via search (their rows inherit access but are the classic
+ * search-index gap), then the seed side iterates brain_collector_items by
+ * durable id cursor (no queue growth); only discovered containers carry over
+ * between passes, bounded by NOTION_TRAVERSAL_MAX_PENDING. A pass ends when
+ * its request budget or page limit is spent; completion flips the scan back
+ * to idle.
  */
 export async function collectNotionTraversal(input: {
   config: McpConnectionNotionConfig;
@@ -936,6 +960,8 @@ export async function collectNotionTraversal(input: {
     pending: [],
   };
   let afterItemId = state.afterItemId;
+  let dataSourceCursor = state.dataSourceCursor ?? null;
+  let dataSourcesDone = state.dataSourcesDone === true;
   const pending: NotionTraverseNode[] = [...state.pending];
   const pages: CollectorPage[] = [];
   const itemUpdates: CollectorItemUpdate[] = [];
@@ -1083,6 +1109,46 @@ export async function collectNotionTraversal(input: {
     const node = pending.shift();
 
     if (!node) {
+      if (!dataSourcesDone) {
+        // Rows of a database shared directly with the integration inherit
+        // access but rarely reach the search index, and no inventoried page
+        // holds them as child_database blocks — search is the only way to
+        // find those data sources at all.
+        requests++;
+        let found: NotionSearchResponse;
+        try {
+          found = await notionCollectorRequest<NotionSearchResponse>({
+            config: input.config,
+            path: 'search',
+            method: 'POST',
+            body: buildNotionDataSourceSearchBody(dataSourceCursor),
+          });
+        } catch (error) {
+          if (
+            dataSourceCursor &&
+            error instanceof NotionApiError &&
+            error.status === 400
+          ) {
+            // Notion pagination cursors expire; restart the enumeration.
+            dataSourceCursor = null;
+            continue;
+          }
+          throw error;
+        }
+        for (const raw of found.results ?? []) {
+          if (isNotionSearchDataSource(raw)) {
+            pushPending({ kind: 'data_source', id: raw.id });
+          }
+        }
+        const nextCursor =
+          found.has_more && asString(found.next_cursor)
+            ? found.next_cursor!.trim()
+            : null;
+        dataSourceCursor = nextCursor;
+        dataSourcesDone = nextCursor === null;
+        continue;
+      }
+
       const batch = await listBrainCollectorItemsAfter(
         db,
         NOTION_PAGES_COLLECTOR_ID,
@@ -1259,6 +1325,8 @@ export async function collectNotionTraversal(input: {
                 traverse: {
                   afterItemId,
                   pending: pending.slice(0, NOTION_TRAVERSAL_MAX_PENDING),
+                  ...(dataSourceCursor ? { dataSourceCursor } : {}),
+                  ...(dataSourcesDone ? { dataSourcesDone: true } : {}),
                 },
               },
         ),
