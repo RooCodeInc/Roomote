@@ -30,6 +30,50 @@ describe('FastAgentOpenCodeSessionManager', () => {
     ]);
   });
 
+  it('rebuilds a warm session when its MCP tool catalog changes', async () => {
+    const manager = new FastAgentOpenCodeSessionManager();
+    const calls: Array<{
+      prompt: string;
+      sessionId?: string;
+      path: string;
+    }> = [];
+    const execute = vi.fn(async (session, prompt: string, context) => {
+      calls.push({ prompt, sessionId: session.id, path: context.path });
+      session.id ??= `opencode-session-${calls.length}`;
+      return session.id;
+    });
+    const run = (toolCatalogKey: string, prompt: string) =>
+      manager.run({
+        conversationId: 'conversation-1',
+        prompt,
+        bootstrapPrompt: `bootstrap ${prompt}`,
+        toolCatalogKey,
+        execute,
+      });
+
+    await run('notion:search', 'turn one');
+    await run('notion:search', 'turn two');
+    await run('linear:get_issue,save_issue|notion:search', 'turn three');
+
+    expect(calls).toEqual([
+      {
+        prompt: 'bootstrap turn one',
+        sessionId: undefined,
+        path: 'cold_rebuild',
+      },
+      {
+        prompt: 'turn two',
+        sessionId: 'opencode-session-1',
+        path: 'warm',
+      },
+      {
+        prompt: 'bootstrap turn three',
+        sessionId: undefined,
+        path: 'cold_rebuild',
+      },
+    ]);
+  });
+
   it('serializes concurrent prompts for one conversation', async () => {
     const manager = new FastAgentOpenCodeSessionManager();
     let releaseFirst!: () => void;

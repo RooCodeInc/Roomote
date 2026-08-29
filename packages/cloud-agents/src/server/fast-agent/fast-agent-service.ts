@@ -91,6 +91,7 @@ import {
 import {
   callFastAgentIntegration,
   listFastAgentIntegrations,
+  type FastAgentIntegration,
 } from './fast-agent-integration-broker';
 import {
   cancelFastAgentTask,
@@ -184,6 +185,19 @@ function buildFastAgentTurnId({
     .digest('hex')
     .slice(0, 24);
   return `fallback:${digest}`;
+}
+
+function buildFastAgentToolCatalogKey(
+  integrations: FastAgentIntegration[],
+): string {
+  const catalog = integrations
+    .map((integration) => ({
+      id: integration.id,
+      tools: integration.tools.map((tool) => tool.name).sort(),
+    }))
+    .sort((left, right) => left.id.localeCompare(right.id));
+
+  return createHash('sha256').update(JSON.stringify(catalog)).digest('hex');
 }
 
 function buildFastAgentUserContentBlocks(
@@ -1983,6 +1997,7 @@ export async function answerFastAgentQuestion({
       persistedSessionId: session.openCodeSessionId,
       prompt: serializedTurnPrompt,
       bootstrapPrompt: serializedBootstrapPrompt,
+      toolCatalogKey: buildFastAgentToolCatalogKey(availableIntegrations),
       onPathSelected: (path) => {
         diagnostics.recordSessionPath(path);
         console.info(`[Fast Agent] OpenCode session path=${path}.`);

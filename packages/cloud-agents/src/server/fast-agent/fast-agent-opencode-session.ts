@@ -9,6 +9,7 @@ const DEFAULT_FAST_AGENT_OPENCODE_SESSION_LIMIT = 250;
 
 type SessionEntry = {
   session: NonTaskOpenCodeSession;
+  toolCatalogKey?: string;
   resumeValidationPending: boolean;
   generation: number;
   lastUsedAt: number;
@@ -21,6 +22,7 @@ type FastAgentOpenCodeSessionRunInput<T> = {
   persistedSessionId?: string | null;
   prompt: string;
   bootstrapPrompt: string;
+  toolCatalogKey?: string;
   execute: (
     session: NonTaskOpenCodeSession,
     selectedPrompt: string,
@@ -76,6 +78,7 @@ export class FastAgentOpenCodeSessionManager {
     persistedSessionId,
     prompt,
     bootstrapPrompt,
+    toolCatalogKey,
     execute,
     onPathSelected,
   }: FastAgentOpenCodeSessionRunInput<T>): Promise<T> {
@@ -97,6 +100,17 @@ export class FastAgentOpenCodeSessionManager {
           entry.resumeValidationPending = true;
         }
       }
+
+      if (
+        toolCatalogKey !== undefined &&
+        entry.toolCatalogKey !== undefined &&
+        entry.toolCatalogKey !== toolCatalogKey
+      ) {
+        entry.session.id = undefined;
+        entry.resumeValidationPending = false;
+        this.endConversation(conversationId);
+      }
+      entry.toolCatalogKey = toolCatalogKey;
 
       const validateSession = entry.resumeValidationPending;
       const path: FastAgentOpenCodeSessionPath = entry.session.id

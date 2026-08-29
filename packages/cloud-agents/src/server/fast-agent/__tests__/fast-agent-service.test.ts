@@ -672,6 +672,41 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     },
   );
 
+  it('keys warm OpenCode sessions by the resolved MCP tool catalog', async () => {
+    mocks.listIntegrations
+      .mockResolvedValueOnce([
+        {
+          id: 'notion',
+          name: 'Notion',
+          description: 'Knowledge',
+          tools: [{ name: 'search' }],
+        },
+      ])
+      .mockResolvedValueOnce([
+        {
+          id: 'linear',
+          name: 'Linear',
+          description: 'Issues',
+          tools: [{ name: 'get_issue' }, { name: 'save_issue' }],
+        },
+        {
+          id: 'notion',
+          name: 'Notion',
+          description: 'Knowledge',
+          tools: [{ name: 'search' }],
+        },
+      ]);
+
+    await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+    await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+
+    const firstKey = mocks.runSession.mock.calls[0]?.[0].toolCatalogKey;
+    const secondKey = mocks.runSession.mock.calls[1]?.[0].toolCatalogKey;
+    expect(firstKey).toMatch(/^[a-f0-9]{64}$/u);
+    expect(secondKey).toMatch(/^[a-f0-9]{64}$/u);
+    expect(secondKey).not.toBe(firstKey);
+  });
+
   it('does not attribute automation platform events to a human sender', async () => {
     await answerFastAgentQuestion({
       question:
