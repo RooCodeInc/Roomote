@@ -17,6 +17,7 @@ import {
   db,
   eq,
   fastAgentConversations,
+  fastAgentMessages,
   getSessionForFastConversation,
   retireCanonicalPrReviewActionsForDestinationKey,
   sessions,
@@ -232,10 +233,12 @@ export async function startFastSessionCommand(
 }
 
 /**
- * Creates (or reuses) the first-run setup session and, on creation, schedules
- * its kickoff as a trusted setup platform event instead of a human message.
- * The deterministic conversationId makes creation idempotent per launch batch,
- * and the `created` guard means a re-submit never schedules a second kickoff.
+ * Creates (or reuses) the first-run setup session and schedules its kickoff
+ * as a trusted setup platform event instead of a human message. The
+ * deterministic conversationId makes creation idempotent per launch batch. A
+ * kickoff is scheduled on creation, and again on reuse while the transcript
+ * is still empty: creation can commit while a later failure (or a process
+ * crash) loses the kickoff, and an empty transcript means it never ran.
  */
 export async function startSetupFastSessionCommand(
   auth: UserAuthSuccess,
@@ -256,20 +259,37 @@ export async function startSetupFastSessionCommand(
     conversation,
   });
 
-  if (session.created) {
+  let scheduleKickoff = session.created;
+  if (!scheduleKickoff) {
+    const [existingMessage] = await db
+      .select({ id: fastAgentMessages.id })
+      .from(fastAgentMessages)
+      .where(eq(fastAgentMessages.conversationId, session.id))
+      .limit(1);
+    scheduleKickoff = !existingMessage;
+  }
+
+  if (scheduleKickoff) {
     // Fixed, human-authored-style title: marking it user-edited keeps the
-    // LLM title refresh from renaming the setup session later.
+    // LLM title refresh from renaming the setup session later. Best-effort:
+    // a failed rename must never cost the kickoff and the starter launches.
     const titleEditedByUserAt = new Date();
-    await Promise.all([
-      db
-        .update(fastAgentConversations)
-        .set({ title: input.title, titleEditedByUserAt })
-        .where(eq(fastAgentConversations.id, session.id)),
-      db
-        .update(sessions)
-        .set({ title: input.title, titleEditedByUserAt })
-        .where(eq(sessions.fastConversationId, session.id)),
-    ]);
+    try {
+      await Promise.all([
+        db
+          .update(fastAgentConversations)
+          .set({ title: input.title, titleEditedByUserAt })
+          .where(eq(fastAgentConversations.id, session.id)),
+        db
+          .update(sessions)
+          .set({ title: input.title, titleEditedByUserAt })
+          .where(eq(sessions.fastConversationId, session.id)),
+      ]);
+    } catch (error) {
+      console.error(
+        `[Fast Web] Failed to title setup session ${session.id}: ${formatErrorForLog(error)}`,
+      );
+    }
 
     scheduleWebFastAgentTurn({
       userId: auth.userId,

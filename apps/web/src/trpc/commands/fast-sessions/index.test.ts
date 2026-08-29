@@ -14,6 +14,8 @@ const mocks = vi.hoisted(() => ({
   dbUpdate: vi.fn(),
   dbSet: vi.fn(),
   dbWhere: vi.fn(),
+  dbSelect: vi.fn(),
+  dbSelectLimit: vi.fn(),
 }));
 
 vi.mock('next/server', () => ({ after: mocks.after }));
@@ -32,10 +34,12 @@ vi.mock('@roomote/sdk/server', () => ({
 }));
 
 vi.mock('@roomote/db/server', () => ({
-  db: { update: mocks.dbUpdate },
+  db: { update: mocks.dbUpdate, select: mocks.dbSelect },
   retireCanonicalPrReviewActionsForDestinationKey: mocks.retireReviewActions,
   eq: vi.fn(),
   fastAgentConversations: {},
+  fastAgentMessages: {},
+  sessions: {},
   getSessionForFastConversation: mocks.getUnifiedSession,
 }));
 
@@ -56,6 +60,7 @@ import {
   replyToFastSessionCommand,
   scheduleWebFastAgentTurn,
   startFastSessionCommand,
+  startSetupFastSessionCommand,
   updateFastSessionModelSelectionCommand,
 } from './index';
 
@@ -178,6 +183,95 @@ describe('startFastSessionCommand', () => {
         conversationId: input.conversationId,
       },
     });
+    expect(mocks.after).toHaveBeenCalledOnce();
+  });
+});
+
+describe('startSetupFastSessionCommand', () => {
+  const input = {
+    conversationId: 'setup-session:batch-1',
+    title: 'Set up Roomote',
+    event: { type: 'setup_session_started' },
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.createWebTaskLauncher.mockReturnValue(vi.fn());
+    mocks.getUnifiedSession.mockResolvedValue({ id: 'unified-session-1' });
+    mocks.dbUpdate.mockReturnValue({ set: mocks.dbSet });
+    mocks.dbSet.mockReturnValue({ where: mocks.dbWhere });
+    mocks.dbWhere.mockResolvedValue(undefined);
+    mocks.dbSelect.mockReturnValue({
+      from: () => ({ where: () => ({ limit: mocks.dbSelectLimit }) }),
+    });
+    mocks.dbSelectLimit.mockResolvedValue([]);
+  });
+
+  it('schedules the kickoff and titles the session on creation', async () => {
+    mocks.getOrCreateSession.mockResolvedValue({
+      id: 'setup-conversation-1',
+      created: true,
+    });
+
+    await expect(startSetupFastSessionCommand(auth, input)).resolves.toEqual({
+      sessionId: 'unified-session-1',
+      created: true,
+    });
+
+    expect(mocks.after).toHaveBeenCalledOnce();
+    expect(mocks.dbSet).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: 'Set up Roomote',
+        titleEditedByUserAt: expect.any(Date),
+      }),
+    );
+    // No transcript probe is needed when the conversation was just created.
+    expect(mocks.dbSelect).not.toHaveBeenCalled();
+  });
+
+  it('recovers a lost kickoff when reusing a conversation with an empty transcript', async () => {
+    mocks.getOrCreateSession.mockResolvedValue({
+      id: 'setup-conversation-1',
+      created: false,
+    });
+    mocks.dbSelectLimit.mockResolvedValue([]);
+
+    await expect(startSetupFastSessionCommand(auth, input)).resolves.toEqual({
+      sessionId: 'unified-session-1',
+      created: false,
+    });
+
+    expect(mocks.after).toHaveBeenCalledOnce();
+  });
+
+  it('does not schedule a second kickoff once the transcript has messages', async () => {
+    mocks.getOrCreateSession.mockResolvedValue({
+      id: 'setup-conversation-1',
+      created: false,
+    });
+    mocks.dbSelectLimit.mockResolvedValue([{ id: 'message-1' }]);
+
+    await expect(startSetupFastSessionCommand(auth, input)).resolves.toEqual({
+      sessionId: 'unified-session-1',
+      created: false,
+    });
+
+    expect(mocks.after).not.toHaveBeenCalled();
+    expect(mocks.dbUpdate).not.toHaveBeenCalled();
+  });
+
+  it('still schedules the kickoff when the title updates fail', async () => {
+    mocks.getOrCreateSession.mockResolvedValue({
+      id: 'setup-conversation-1',
+      created: true,
+    });
+    mocks.dbWhere.mockRejectedValue(new Error('title write failed'));
+
+    await expect(startSetupFastSessionCommand(auth, input)).resolves.toEqual({
+      sessionId: 'unified-session-1',
+      created: true,
+    });
+
     expect(mocks.after).toHaveBeenCalledOnce();
   });
 });
