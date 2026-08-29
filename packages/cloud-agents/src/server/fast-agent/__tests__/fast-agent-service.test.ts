@@ -3197,6 +3197,63 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     }
   });
 
+  it('fences an MCP side effect when cancellation races tool persistence', async () => {
+    mocks.listIntegrations.mockResolvedValue([
+      {
+        id: 'github',
+        name: 'GitHub',
+        tools: [{ name: 'search_code', description: 'Search code' }],
+      },
+    ]);
+    let resolvePersistenceStarted: (() => void) | undefined;
+    const persistenceStarted = new Promise<void>((resolve) => {
+      resolvePersistenceStarted = resolve;
+    });
+    let releasePersistence: (() => void) | undefined;
+    const persistenceReleased = new Promise<void>((resolve) => {
+      releasePersistence = resolve;
+    });
+    mocks.upsertMessage.mockImplementation(async ({ message }) => {
+      if (
+        message.eventType !== 'roomote_runtime.tool_call' ||
+        message.payload?.isMcp !== true ||
+        message.payload?.rawInput?.arguments?.query !== 'cancel race'
+      ) {
+        return;
+      }
+      resolvePersistenceStarted?.();
+      await persistenceReleased;
+    });
+    let mcpResult: unknown;
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'ack',
+          message: 'Checking.',
+        });
+        mcpResult = await invokeMcpTool('github', 'search_code', {
+          query: 'cancel race',
+        });
+        return '';
+      },
+    );
+    const turnAbort = new AbortController();
+
+    const resultPromise = answerFastAgentQuestion({
+      ...baseParams,
+      adapter: callbacks(),
+      signal: turnAbort.signal,
+    });
+    await persistenceStarted;
+    turnAbort.abort(new Error('User canceled the turn.'));
+    releasePersistence?.();
+
+    await expect(resultPromise).rejects.toThrow('User canceled the turn.');
+    expect(mcpResult).toMatchObject({ success: false });
+    expect(mocks.callIntegration).not.toHaveBeenCalled();
+  });
+
   it('does not interrupt an active native tool during provider recovery', async () => {
     vi.useFakeTimers();
     try {

@@ -1636,6 +1636,7 @@ export async function answerFastAgentQuestion({
           mcpServerName: call.integrationId,
           mcpToolName: call.toolName,
         });
+        throwIfTurnCancelled();
         const result = await callFastAgentIntegration(
           {
             userId,
