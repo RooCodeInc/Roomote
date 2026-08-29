@@ -63,9 +63,6 @@ vi.mock('./SessionWorkspace', () => ({
 vi.mock('./SessionReadTracker', () => ({
   SessionReadTracker: () => null,
 }));
-vi.mock('./SessionTaskCards', () => ({
-  SessionTaskCards: () => <div data-testid="session-task-cards" />,
-}));
 
 import SessionDetailPage, { generateMetadata } from './page';
 
@@ -300,6 +297,9 @@ describe('Session detail page', () => {
         fallbackTitle: 'Session title',
       }),
       undefined,
+    );
+    expect(transcriptMock.mock.calls[0]?.[0]).not.toHaveProperty(
+      'timelineExtras',
     );
   });
 

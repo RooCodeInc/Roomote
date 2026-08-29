@@ -50,8 +50,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/system';
-import type { SessionTaskSummary } from './SessionTaskCards';
-
 import { SandboxSidePanelHeader } from '../../SandboxSidePanelHeader';
 import {
   SandboxInfoPanel,
@@ -69,6 +67,39 @@ import {
 import { NestedTaskSidePanel } from './NestedTaskSidePanel';
 import { OpenSessionTaskPanelContext } from './session-task-panel-context';
 import { DelegatedTaskCard } from '../../task/[taskId]/messages/acp/DelegatedTaskCard';
+
+type SessionTaskSummary = {
+  taskId: string;
+  title: string;
+  workflow: string;
+  state: string;
+  repositoryName: string | null;
+  latestOutput: string | null;
+  inferenceCostMicroUsd: number;
+  canAccessDetails?: boolean;
+  latestRun: {
+    id: number;
+    status: string;
+    taskPhase: string | null;
+    error: string | null;
+    result: unknown;
+  } | null;
+  artifacts: Array<{
+    id: string;
+    path: string;
+    artifactType: string;
+    contentType: string;
+    thumbnailUrl?: string;
+  }>;
+  pullRequests: Array<{
+    id: string;
+    url: string;
+    number: number | null;
+    title: string | null;
+    repository: string | null;
+    status: string | null;
+  }>;
+};
 
 export type SessionInfo = {
   id: string;
