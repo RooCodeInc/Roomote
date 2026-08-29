@@ -4,6 +4,7 @@ import {
   fastAgentMessages,
   sessionFactory,
   sessionTasks,
+  taskArtifacts,
   taskFactory,
   userFactory,
 } from '@roomote/db/server';
@@ -105,6 +106,21 @@ describe('unified Session queries', () => {
       taskId: task.id,
       origin: 'fast_delegation',
     });
+    await db.insert(taskArtifacts).values([
+      {
+        taskId: task.id,
+        path: 'screenshots/result.png',
+        contentType: 'image/png',
+        size: 123,
+        uploaded: true,
+      },
+      {
+        taskId: task.id,
+        path: 'screenshots/pending.png',
+        contentType: 'image/png',
+        size: 0,
+      },
+    ]);
     await db.insert(fastAgentMessages).values({
       conversationId: conversation!.id,
       eventId: 'message-1',
@@ -123,7 +139,13 @@ describe('unified Session queries', () => {
       session.id,
     );
     expect(detail?.tasks).toEqual([
-      expect.objectContaining({ taskId: task.id, title: 'Delegated work' }),
+      expect.objectContaining({
+        taskId: task.id,
+        title: 'Delegated work',
+        artifacts: [
+          expect.objectContaining({ path: 'screenshots/result.png' }),
+        ],
+      }),
     ]);
     await expect(
       getSessionForTask({ userId: owner.id, isAdmin: false }, task.id),

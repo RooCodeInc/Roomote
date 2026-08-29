@@ -506,7 +506,12 @@ async function getSessionTasks(sessionId: string) {
           size: taskArtifacts.size,
         })
         .from(taskArtifacts)
-        .where(inArray(taskArtifacts.taskId, taskIds))
+        .where(
+          and(
+            inArray(taskArtifacts.taskId, taskIds),
+            eq(taskArtifacts.uploaded, true),
+          ),
+        )
         .orderBy(desc(taskArtifacts.createdAt)),
       db
         .select({

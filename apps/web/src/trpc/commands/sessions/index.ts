@@ -15,6 +15,10 @@ import {
   setSessionPinned,
   updateSessionMetadata,
 } from '@/lib/server/sessions';
+import {
+  currentEpochSeconds,
+  signArtifactId,
+} from '@/lib/server/artifact-signature';
 
 export const sessionIdInputSchema = z.object({ sessionId: z.string().uuid() });
 export const sessionsListInputSchema = z.object({
@@ -72,6 +76,8 @@ export async function getSessionByIdCommand(
   const session = await getSessionById(auth, sessionId);
   if (!session) return null;
 
+  const artifactSignatureTimestamp = currentEpochSeconds();
+
   // Session access was already established by getSessionById's scope check,
   // and getSessionTasks inner-joins live tasks only — the previous per-task
   // access resolution had no additional predicate and cost ~5 queries per
@@ -80,6 +86,12 @@ export async function getSessionByIdCommand(
     ...session,
     tasks: session.tasks.map((task) => ({
       ...task,
+      artifacts: task.artifacts.map((artifact) => ({
+        ...artifact,
+        thumbnailUrl: artifact.contentType.startsWith('image/')
+          ? `/api/artifacts/${artifact.id}/raw?sig=${signArtifactId(artifact.id, artifactSignatureTimestamp)}&ts=${artifactSignatureTimestamp}`
+          : undefined,
+      })),
       canAccessDetails: true as const,
     })),
   };
