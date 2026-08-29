@@ -19,6 +19,7 @@ export { managerStatsJob, formatManagerStatsMessage } from './manager-stats';
 export {
   handleMergeAnnouncerPush,
   mergeAnnouncerJob,
+  type MergeAnnouncerPullRequestContext,
   type MergeAnnouncerPushEvent,
   type MergeAnnouncerPushResult,
 } from './merge-announcer';

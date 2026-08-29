@@ -1,4 +1,5 @@
 import {
+  enrichGitHubMergeAnnouncerEvent,
   normalizeAdoPush,
   normalizeBitbucketPush,
   normalizeGiteaPush,
@@ -39,6 +40,244 @@ describe('Merge announcer push normalization', () => {
       repository: { externalId: '1', host: 'github.com' },
       commits: [{ id: 'abc', author: { username: 'bob' } }],
     });
+  });
+
+  it('enriches GitHub merge pushes with bounded PR metadata and file stats', async () => {
+    const payload = {
+      ref: 'refs/heads/main',
+      after: 'abcdef1234567890',
+      installation: { id: 99 },
+      repository: {
+        id: 1,
+        full_name: 'acme/widgets',
+        html_url: 'https://github.com/acme/widgets',
+      },
+      commits: [{ id: 'abcdef1234567890', message: 'Merge pull request #7' }],
+    };
+    const event = normalizeGitHubPush(payload)!;
+    const listPullRequestsAssociatedWithCommit = vi.fn().mockResolvedValue({
+      data: [
+        { number: 7, state: 'closed', base: { ref: 'main' } },
+        { number: 8, state: 'open', base: { ref: 'main' } },
+      ],
+    });
+    const get = vi.fn().mockResolvedValue({
+      data: {
+        number: 7,
+        title: 'Ship widget export',
+        body: 'Adds the export and updates validation.',
+        merged_at: '2026-08-29T12:00:00Z',
+        merge_commit_sha: payload.after,
+        base: { ref: 'main' },
+        changed_files: 24,
+        additions: 120,
+        deletions: 15,
+      },
+    });
+    const listFiles = vi.fn().mockResolvedValue({
+      data: [
+        {
+          filename: 'src/widget.ts',
+          status: 'modified',
+          additions: 20,
+          deletions: 4,
+          patch: 'unbounded patch content must not be retained',
+        },
+      ],
+    });
+    const getInstallationOctokit = vi.fn().mockResolvedValue({
+      rest: {
+        repos: { listPullRequestsAssociatedWithCommit },
+        pulls: { get, listFiles },
+      },
+    });
+
+    const enriched = await enrichGitHubMergeAnnouncerEvent(payload, event, {
+      getInstallationOctokit: getInstallationOctokit as never,
+    });
+
+    expect(getInstallationOctokit).toHaveBeenCalledWith({ installationId: 99 });
+    expect(listPullRequestsAssociatedWithCommit).toHaveBeenCalledWith({
+      owner: 'acme',
+      repo: 'widgets',
+      commit_sha: payload.after,
+      per_page: 10,
+    });
+    expect(get).toHaveBeenCalledWith({
+      owner: 'acme',
+      repo: 'widgets',
+      pull_number: 7,
+    });
+    expect(listFiles).toHaveBeenCalledWith({
+      owner: 'acme',
+      repo: 'widgets',
+      pull_number: 7,
+      per_page: 20,
+      page: 1,
+    });
+    expect(enriched.pullRequest).toEqual({
+      number: 7,
+      title: 'Ship widget export',
+      body: 'Adds the export and updates validation.',
+      changedFileCount: 24,
+      additions: 120,
+      deletions: 15,
+      changedFiles: [
+        {
+          path: 'src/widget.ts',
+          status: 'modified',
+          additions: 20,
+          deletions: 4,
+        },
+      ],
+    });
+    expect(JSON.stringify(enriched)).not.toContain('unbounded patch content');
+  });
+
+  it('keeps commit-only context when GitHub PR enrichment fails', async () => {
+    const payload = {
+      ref: 'refs/heads/main',
+      after: 'abcdef1234567890',
+      installation: { id: 99 },
+      repository: {
+        id: 1,
+        full_name: 'acme/widgets',
+        html_url: 'https://github.com/acme/widgets',
+      },
+      commits: [{ id: 'abcdef1234567890', message: 'Ship widget' }],
+    };
+    const event = normalizeGitHubPush(payload)!;
+    const getInstallationOctokit = vi
+      .fn()
+      .mockRejectedValue(new Error('GitHub unavailable'));
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    await expect(
+      enrichGitHubMergeAnnouncerEvent(payload, event, {
+        getInstallationOctokit: getInstallationOctokit as never,
+      }),
+    ).resolves.toBe(event);
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining('Failed to resolve merged pull request'),
+    );
+
+    warn.mockRestore();
+  });
+
+  it('keeps verified PR metadata and stats when changed files are unavailable', async () => {
+    const payload = {
+      ref: 'refs/heads/main',
+      after: 'abcdef1234567890',
+      installation: { id: 99 },
+      repository: { id: 1, full_name: 'acme/widgets' },
+      commits: [{ id: 'abcdef1234567890', message: 'Merge pull request #7' }],
+    };
+    const event = normalizeGitHubPush(payload)!;
+    const listFiles = vi.fn().mockRejectedValue(new Error('files unavailable'));
+    const getInstallationOctokit = vi.fn().mockResolvedValue({
+      rest: {
+        repos: {
+          listPullRequestsAssociatedWithCommit: vi.fn().mockResolvedValue({
+            data: [{ number: 7, state: 'closed', base: { ref: 'main' } }],
+          }),
+        },
+        pulls: {
+          get: vi.fn().mockResolvedValue({
+            data: {
+              number: 7,
+              title: 'Ship widget export',
+              body: 'Detailed rationale',
+              merged_at: '2026-08-29T12:00:00Z',
+              merge_commit_sha: payload.after,
+              base: { ref: 'main' },
+              changed_files: 24,
+              additions: 120,
+              deletions: 15,
+            },
+          }),
+          listFiles,
+        },
+      },
+    });
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    const enriched = await enrichGitHubMergeAnnouncerEvent(payload, event, {
+      getInstallationOctokit: getInstallationOctokit as never,
+    });
+
+    expect(enriched.pullRequest).toEqual({
+      number: 7,
+      title: 'Ship widget export',
+      body: 'Detailed rationale',
+      changedFileCount: 24,
+      additions: 120,
+      deletions: 15,
+    });
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining('Failed to fetch changed files'),
+    );
+    warn.mockRestore();
+  });
+
+  it('rejects associated PRs whose merge SHA is not the pushed tip', async () => {
+    const payload = {
+      ref: 'refs/heads/main',
+      after: 'abcdef1234567890',
+      installation: { id: 99 },
+      repository: { id: 1, full_name: 'acme/widgets' },
+      commits: [{ id: 'abcdef1234567890', message: 'Ship widget' }],
+    };
+    const event = normalizeGitHubPush(payload)!;
+    const listFiles = vi.fn();
+    const getInstallationOctokit = vi.fn().mockResolvedValue({
+      rest: {
+        repos: {
+          listPullRequestsAssociatedWithCommit: vi.fn().mockResolvedValue({
+            data: [{ number: 7, state: 'closed', base: { ref: 'main' } }],
+          }),
+        },
+        pulls: {
+          get: vi.fn().mockResolvedValue({
+            data: {
+              merged_at: '2026-08-29T12:00:00Z',
+              merge_commit_sha: 'different-sha',
+              base: { ref: 'main' },
+            },
+          }),
+          listFiles,
+        },
+      },
+    });
+
+    await expect(
+      enrichGitHubMergeAnnouncerEvent(payload, event, {
+        getInstallationOctokit: getInstallationOctokit as never,
+      }),
+    ).resolves.toBe(event);
+    expect(listFiles).not.toHaveBeenCalled();
+  });
+
+  it('does not query PR associations for non-default GitHub branches', async () => {
+    const payload = {
+      ref: 'refs/heads/feature/widget',
+      after: 'abcdef1234567890',
+      installation: { id: 99 },
+      repository: {
+        id: 1,
+        full_name: 'acme/widgets',
+        default_branch: 'main',
+      },
+      commits: [{ id: 'abcdef1234567890', message: 'Ship widget' }],
+    };
+    const event = normalizeGitHubPush(payload)!;
+    const getInstallationOctokit = vi.fn();
+
+    await expect(
+      enrichGitHubMergeAnnouncerEvent(payload, event, {
+        getInstallationOctokit: getInstallationOctokit as never,
+      }),
+    ).resolves.toBe(event);
+    expect(getInstallationOctokit).not.toHaveBeenCalled();
   });
 
   it('normalizes GitLab pushes and branch deletion', () => {

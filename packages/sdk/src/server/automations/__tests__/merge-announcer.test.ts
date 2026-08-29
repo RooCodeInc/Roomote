@@ -193,6 +193,46 @@ describe('handleMergeAnnouncerPush', () => {
     );
   });
 
+  it('prioritizes bounded, redacted merged PR context in the summary prompt', async () => {
+    const { dependencies } = createDependencies();
+    const changedFiles = Array.from({ length: 21 }, (_, index) => ({
+      path: `src/file-${index + 1}.ts`,
+      status: 'modified',
+      additions: index + 1,
+      deletions: index,
+    }));
+
+    await handleMergeAnnouncerPush(
+      createPayload({
+        pullRequest: {
+          number: 7,
+          title: 'Ship widget export',
+          body: `API_TOKEN=supersecretvalue\n${'supporting context '.repeat(300)}`,
+          changedFileCount: 21,
+          additions: 231,
+          deletions: 210,
+          changedFiles,
+        },
+      }),
+      dependencies,
+    );
+
+    const prompt = dependencies.generateSummary.mock.calls[0]?.[0] as string;
+    expect(prompt).toContain(
+      'treat its title and body as the primary source of intent',
+    );
+    expect(prompt).toContain('<merged_pull_request>');
+    expect(prompt).toContain('Number: #7');
+    expect(prompt).toContain('Title: Ship widget export');
+    expect(prompt).toContain('API_TOKEN=[redacted]');
+    expect(prompt).toContain('… [truncated]');
+    expect(prompt).toContain('Change stats: 21 files (+231/-210)');
+    expect(prompt).toContain('Changed files shown (20 of 21)');
+    expect(prompt).toContain('modified src/file-20.ts (+20/-19)');
+    expect(prompt).not.toContain('src/file-21.ts');
+    expect(prompt).not.toContain('supersecretvalue');
+  });
+
   it('excludes pushes to non-default branches before generating a summary', async () => {
     const { dependencies, postMessage } = createDependencies();
 
@@ -226,6 +266,35 @@ describe('handleMergeAnnouncerPush', () => {
       expect.objectContaining({
         text: expect.stringContaining(
           'Changes include Add widget export; Fix widget validation.',
+        ),
+      }),
+    );
+  });
+
+  it('falls back to the redacted PR title when merged PR summarization fails', async () => {
+    const { dependencies, postMessage } = createDependencies();
+    dependencies.generateSummary.mockRejectedValue(
+      new Error('model unavailable'),
+    );
+
+    await handleMergeAnnouncerPush(
+      createPayload({
+        pullRequest: {
+          number: 7,
+          title: 'Ship widget export!',
+          body: 'Detailed rationale',
+          changedFileCount: 2,
+          additions: 20,
+          deletions: 4,
+        },
+      }),
+      dependencies,
+    );
+
+    expect(postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: expect.stringContaining(
+          'Merged pull request: Ship widget export.',
         ),
       }),
     );
