@@ -15,8 +15,8 @@ import {
 import { SlackChannelSelect } from './SlackChannelSelect';
 
 export type AutomationDestinationProvider = 'none' | CommunicationProvider;
-export type AutomationDestinationMode = 'channel' | 'direct_message';
-export type AutomationDestinationValue = {
+type AutomationDestinationMode = 'channel' | 'direct_message';
+type AutomationDestinationValue = {
   provider: AutomationDestinationProvider;
   mode: AutomationDestinationMode;
   channelId: string;
