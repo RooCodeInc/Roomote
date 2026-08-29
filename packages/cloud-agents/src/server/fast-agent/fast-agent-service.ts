@@ -1538,6 +1538,12 @@ export async function answerFastAgentQuestion({
             }
             if (
               platformEvent &&
+              // On chat surfaces every reply is a separate message and push
+              // notification, so automated events are held to one closeout.
+              // Web platform events render in a session transcript where
+              // extra replies are ordinary conversation; the prompt alone
+              // governs reply style there (e.g. the setup kickoff's intro).
+              conversation.surface !== 'web' &&
               args.purpose !== 'closeout' &&
               args.purpose !== 'clarification'
             ) {
@@ -2329,6 +2335,14 @@ export async function answerFastAgentQuestion({
           purpose: 'closeout',
           message:
             'I could not complete that request within the available turn.',
+        });
+      } else if (platformEvent && platformEventVisibility === 'required') {
+        // A visibility-required platform event promises a closeout even when
+        // an intro ack or launch kickoff already posted a visible update
+        // (e.g. the setup kickoff ending on an empty terminal response).
+        await postReply({
+          purpose: 'closeout',
+          message: 'I will post updates here as this progresses.',
         });
       }
     }

@@ -14,11 +14,14 @@ import {
   type FastAgentSurfaceReplyDelivery,
 } from '@roomote/sdk/server';
 import {
+  and,
   db,
   eq,
   fastAgentConversations,
+  fastAgentMessages,
   getSessionForFastConversation,
   retireCanonicalPrReviewActionsForDestinationKey,
+  sessions,
 } from '@roomote/db/server';
 import {
   formatErrorForLog,
@@ -97,6 +100,19 @@ type WebFastAgentTurnInput = {
   model?: string;
   reasoningEffort?: ReasoningEffort;
   senderDisplayName?: string;
+  /** Present for trusted platform-generated turns (e.g. the setup kickoff);
+   * absent for human-authored web messages. */
+  platformEventKind?: 'setup';
+  /** Deterministic turn ID override. Canonical event IDs derive from it, so a
+   * fixed value lets a turn be claimed idempotently across retries. */
+  currentMessageId?: string;
+  /** Skip the turn if this exact canonical event row already exists when the
+   * turn acquires its lock. This is the atomic claim for the setup kickoff:
+   * concurrent submits can both pass the pre-schedule check, but the first
+   * kickoff persists its prompt row under the turn lock, so the re-check
+   * under the same lock is race-free — and unlike a transcript-emptiness
+   * probe it is not fooled by an early human reply in the new session. */
+  skipIfEventExists?: { conversationId: string; eventId: string };
 };
 
 /**
@@ -116,6 +132,9 @@ async function runWebFastAgentTurn({
   model,
   reasoningEffort,
   senderDisplayName,
+  platformEventKind,
+  currentMessageId,
+  skipIfEventExists,
 }: WebFastAgentTurnInput): Promise<void> {
   const conversation = delivery.conversation;
   const release = await acquireFastAgentTurnLock({ conversation });
@@ -128,6 +147,28 @@ async function runWebFastAgentTurn({
 
   const apiBaseUrl = resolveApiBaseUrl() ?? undefined;
   try {
+    if (skipIfEventExists) {
+      const [existingEvent] = await db
+        .select({ id: fastAgentMessages.id })
+        .from(fastAgentMessages)
+        .where(
+          and(
+            eq(
+              fastAgentMessages.conversationId,
+              skipIfEventExists.conversationId,
+            ),
+            eq(fastAgentMessages.eventId, skipIfEventExists.eventId),
+          ),
+        )
+        .limit(1);
+      if (existingEvent) {
+        console.log(
+          `[Fast Web] Skipping duplicate turn for ${conversation.conversationId}: event ${skipIfEventExists.eventId} already ran.`,
+        );
+        return;
+      }
+    }
+
     await answerFastAgentQuestion({
       question,
       images,
@@ -135,11 +176,18 @@ async function runWebFastAgentTurn({
       userId,
       apiBaseUrl,
       conversation,
-      currentMessageId: `web-${randomUUID()}`,
+      currentMessageId: currentMessageId ?? `web-${randomUUID()}`,
       signal: release.signal,
       model,
       reasoningEffort,
       senderDisplayName,
+      ...(platformEventKind
+        ? {
+            turnSource: 'platform_event' as const,
+            platformEventKind,
+            platformEventVisibility: 'required' as const,
+          }
+        : {}),
       adapter: {
         resolveMcpServerConfigs: () =>
           resolveUserMcpServerConfigs({
@@ -216,6 +264,106 @@ export async function startFastSessionCommand(
   return {
     sessionId: unifiedSession?.id ?? session.id,
     fastConversationId: session.id,
+  };
+}
+
+/**
+ * Creates (or reuses) the first-run setup session and schedules its kickoff
+ * as a trusted setup platform event instead of a human message. The
+ * deterministic conversationId makes creation idempotent per launch batch. A
+ * kickoff is scheduled on creation, and again on reuse while the transcript
+ * is still empty: creation can commit while a later failure (or a process
+ * crash) loses the kickoff, and an empty transcript means it never ran.
+ */
+export async function startSetupFastSessionCommand(
+  auth: UserAuthSuccess,
+  input: {
+    conversationId: string;
+    title: string;
+    event: Record<string, unknown>;
+  },
+): Promise<{ sessionId: string; created: boolean }> {
+  const conversation: WebFastAgentConversation = {
+    surface: 'web',
+    workspaceId: auth.userId,
+    conversationId: input.conversationId,
+  };
+
+  const session = await getOrCreateFastAgentSession({
+    userId: auth.userId,
+    conversation,
+  });
+
+  // The kickoff turn runs under a deterministic turn ID, so its persisted
+  // prompt row has a knowable event ID. Claiming on that exact row (rather
+  // than transcript emptiness) means an early human reply in the new session
+  // can never masquerade as an already-run kickoff.
+  const kickoffTurnId = `setup-kickoff:${session.id}`;
+  const kickoffPromptEventId = `${kickoffTurnId}:user`;
+
+  let scheduleKickoff = session.created;
+  if (!scheduleKickoff) {
+    const [existingKickoff] = await db
+      .select({ id: fastAgentMessages.id })
+      .from(fastAgentMessages)
+      .where(
+        and(
+          eq(fastAgentMessages.conversationId, session.id),
+          eq(fastAgentMessages.eventId, kickoffPromptEventId),
+        ),
+      )
+      .limit(1);
+    scheduleKickoff = !existingKickoff;
+  }
+
+  if (scheduleKickoff) {
+    // Fixed, human-authored-style title: marking it user-edited keeps the
+    // LLM title refresh from renaming the setup session later. Best-effort:
+    // a failed rename must never cost the kickoff and the starter launches.
+    const titleEditedByUserAt = new Date();
+    try {
+      await Promise.all([
+        db
+          .update(fastAgentConversations)
+          .set({ title: input.title, titleEditedByUserAt })
+          .where(eq(fastAgentConversations.id, session.id)),
+        db
+          .update(sessions)
+          .set({ title: input.title, titleEditedByUserAt })
+          .where(eq(sessions.fastConversationId, session.id)),
+      ]);
+    } catch (error) {
+      console.error(
+        `[Fast Web] Failed to title setup session ${session.id}: ${formatErrorForLog(error)}`,
+      );
+    }
+
+    scheduleWebFastAgentTurn({
+      userId: auth.userId,
+      delivery: {
+        conversation,
+        adapter: {
+          launchTask: createFastAgentWebTaskLauncher({
+            userId: auth.userId,
+            conversation,
+          }),
+          postReply: async () => {},
+        },
+      },
+      question: `<platform_event>${JSON.stringify(input.event)}</platform_event>`,
+      platformEventKind: 'setup',
+      currentMessageId: kickoffTurnId,
+      skipIfEventExists: {
+        conversationId: session.id,
+        eventId: kickoffPromptEventId,
+      },
+    });
+  }
+
+  const unifiedSession = await getSessionForFastConversation(db, session.id);
+  return {
+    sessionId: unifiedSession?.id ?? session.id,
+    created: session.created,
   };
 }
 
