@@ -583,7 +583,7 @@ export async function shouldRouteUnmentionedSlackThreadReplyToAgent(params: {
         mentionsSomebodyElse: mentionsSlackUserOtherThanBotOrUser(
           message,
           slackInstallation.botUserId,
-          event.user,
+          message.user,
         ),
       };
     },
