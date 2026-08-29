@@ -83,6 +83,68 @@ describe('Notion page mapping', () => {
     expect(mapped?.content).toContain('## Decision\n\nShip the collector.');
   });
 
+  it('renders database property values into the page body', () => {
+    const users = buildNotionUserReferences(
+      [{ id: 'notion-ada', name: 'Ada', email: null }],
+      new Map(),
+    );
+    const mapped = buildNotionPage(
+      {
+        ...page,
+        properties: {
+          ...page.properties,
+          Status: { type: 'status', status: { name: 'In review' } },
+          Priority: { type: 'select', select: { name: 'P1' } },
+          Tags: {
+            type: 'multi_select',
+            multi_select: [{ name: 'infra' }, { name: 'memory' }],
+          },
+          Due: { type: 'date', date: { start: '2026-09-01', end: null } },
+          Effort: { type: 'number', number: 3 },
+          Done: { type: 'checkbox', checkbox: false },
+          Owner: {
+            type: 'people',
+            people: [{ object: 'user', id: 'notion-ada' }],
+          },
+          Blocked: {
+            type: 'relation',
+            relation: [{ id: '12345678-90AB-CDEF-1234-567890ABCD00' }],
+          },
+          Ticket: {
+            type: 'unique_id',
+            unique_id: { prefix: 'ROO', number: 42 },
+          },
+          Score: { type: 'formula', formula: { type: 'number', number: 8.5 } },
+          Empty: { type: 'rich_text', rich_text: [] },
+        },
+      },
+      { markdown: 'Body' },
+      { identityContext: { users, identityLookup: new Map() } },
+    );
+
+    expect(mapped?.content).toContain('## Properties');
+    expect(mapped?.content).toContain('- **Status**: In review');
+    expect(mapped?.content).toContain('- **Priority**: P1');
+    expect(mapped?.content).toContain('- **Tags**: infra, memory');
+    expect(mapped?.content).toContain('- **Due**: 2026-09-01');
+    expect(mapped?.content).toContain('- **Effort**: 3');
+    expect(mapped?.content).toContain('- **Done**: No');
+    expect(mapped?.content).toContain('- **Owner**: Ada');
+    expect(mapped?.content).toContain(
+      '- **Blocked**: [notion/1234567890abcdef1234567890abcd00](notion/1234567890abcdef1234567890abcd00)',
+    );
+    expect(mapped?.content).toContain('- **Ticket**: ROO-42');
+    expect(mapped?.content).toContain('- **Score**: 8.5');
+    // Empty values and the title property never render as property lines.
+    expect(mapped?.content).not.toContain('**Empty**');
+    expect(mapped?.content).not.toContain('**Name**');
+  });
+
+  it('omits the properties section for pages with only a title', () => {
+    const mapped = buildNotionPage(page, { markdown: 'Body' });
+    expect(mapped?.content).not.toContain('## Properties');
+  });
+
   it('emits deterministic person and relation references from page metadata', () => {
     const identities: PersonIdentityRecord[] = [
       {
