@@ -987,6 +987,7 @@ roomoteMcpServer.registerTool(
         targetBranch: params.targetBranch,
         title: params.title,
         body: params.body,
+        prAttribution: params.prAttribution,
         labels: params.labels,
         assignees: params.assignees,
         sourceControlProvider: params.sourceControlProvider,
