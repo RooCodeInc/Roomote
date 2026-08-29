@@ -641,6 +641,17 @@ describe('GitHub issue collector progress', () => {
     expect(second.pages[0]?.slug).toBe('github/acme/b/issues/7');
     expect(second.done).toBe(false);
   });
+
+  it('walks history newest first so recent issues land before the stale tail', async () => {
+    githubMocks.repositories = [{ fullName: 'acme/a', installationId: 1 }];
+    githubMocks.listForRepo.mockResolvedValueOnce({ data: [] });
+
+    await backfillBrainGithubIssuesStep({ cursor: null });
+
+    expect(githubMocks.listForRepo).toHaveBeenCalledWith(
+      expect.objectContaining({ sort: 'updated', direction: 'desc' }),
+    );
+  });
 });
 
 describe('deep backfill completion and re-arming', () => {
