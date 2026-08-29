@@ -12,6 +12,7 @@ const {
   mockHandlePrReopen,
   mockHandlePrSynchronize,
   mockHandlePushConflictCheck,
+  mockHandleMergeAnnouncerPush,
   mockQueueBaseBranchMergeabilityCheck,
   mockQueueTrackedPullRequestMergeabilityCheck,
   mockIsRepoSkipped,
@@ -48,6 +49,7 @@ const {
   mockHandlePrReopen: vi.fn(),
   mockHandlePrSynchronize: vi.fn(),
   mockHandlePushConflictCheck: vi.fn(),
+  mockHandleMergeAnnouncerPush: vi.fn(),
   mockQueueBaseBranchMergeabilityCheck: vi.fn(),
   mockQueueTrackedPullRequestMergeabilityCheck: vi.fn(),
   mockIsRepoSkipped: vi.fn(),
@@ -116,6 +118,7 @@ vi.mock('@roomote/github', () => ({
 }));
 
 vi.mock('@roomote/sdk/server', () => ({
+  handleMergeAnnouncerPush: mockHandleMergeAnnouncerPush,
   updateTaskPrStatus: mockUpdateTaskPrStatus,
   upsertGitHubPullRequestFactFromWebhook:
     mockUpsertGitHubPullRequestFactFromWebhook,
@@ -244,6 +247,7 @@ describe('github webhook router', () => {
     mockHandlePrReopen.mockReset();
     mockHandlePrSynchronize.mockReset();
     mockHandlePushConflictCheck.mockReset();
+    mockHandleMergeAnnouncerPush.mockReset();
     mockIsRepoSkipped.mockReset();
     mockQueuePrReviewActivityNotification.mockReset();
     mockQueuePrReviewSummaryNotification.mockReset();
@@ -268,6 +272,8 @@ describe('github webhook router', () => {
     mockHandlePrComment.mockResolvedValue({ status: 'ok' });
     mockHandleGitHubIssueComment.mockResolvedValue({ status: 'ok' });
     mockHandleGitHubIssueFixer.mockResolvedValue({ status: 'ok' });
+    mockHandlePushConflictCheck.mockResolvedValue({ status: 'ok' });
+    mockHandleMergeAnnouncerPush.mockResolvedValue({ status: 'ok' });
     mockRecordWebhook.mockImplementation(
       async (
         _deliveryId: string,
@@ -1047,7 +1053,16 @@ describe('github webhook router', () => {
         'x-github-event': 'push',
         'x-hub-signature-256': 'sha256=test',
       },
-      body: JSON.stringify({ ref: 'refs/heads/main' }),
+      body: JSON.stringify({
+        ref: 'refs/heads/main',
+        repository: {
+          id: 10,
+          full_name: 'test-org/test-repo',
+          html_url: 'https://github.com/test-org/test-repo',
+        },
+        pusher: { name: 'actor' },
+        commits: [{ id: 'abc', message: 'Ship change' }],
+      }),
     });
 
     expect(response.status).toBe(200);
@@ -1056,6 +1071,13 @@ describe('github webhook router', () => {
     );
     expect(webhooksConstructorParams).toEqual([{ secret: 'db-only-secret' }]);
     expect(mockHandlePushConflictCheck).toHaveBeenCalled();
+    expect(mockHandleMergeAnnouncerPush).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: 'github',
+        ref: 'refs/heads/main',
+        pusher: 'actor',
+      }),
+    );
   });
 
   it('refreshes GitHub mention settings before dispatching handlers', async () => {
@@ -1078,6 +1100,48 @@ describe('github webhook router', () => {
     expect(
       mockResolveGitHubRoomoteMentionEnabled.mock.invocationCallOrder[0],
     ).toBeLessThan(mockVerifyAndReceive.mock.invocationCallOrder[0]!);
+  });
+
+  it('returns Merge announcer failures to webhook audit recording', async () => {
+    let handlerResult: unknown;
+    mockHandleMergeAnnouncerPush.mockResolvedValue({
+      status: 'error',
+      message: 'delivery failed',
+    });
+    mockRecordWebhook.mockImplementation(
+      async (
+        _deliveryId: string,
+        _event: string,
+        _payload: unknown,
+        handler: () => Promise<unknown>,
+      ) => {
+        handlerResult = await handler();
+      },
+    );
+
+    const response = await app.request('http://localhost/api/webhooks/github', {
+      method: 'POST',
+      headers: {
+        'x-github-delivery': 'delivery-announcer-failure',
+        'x-github-event': 'push',
+        'x-hub-signature-256': 'sha256=test',
+      },
+      body: JSON.stringify({
+        ref: 'refs/heads/main',
+        repository: {
+          id: 10,
+          full_name: 'test-org/test-repo',
+          html_url: 'https://github.com/test-org/test-repo',
+        },
+        commits: [{ id: 'abc', message: 'Ship change' }],
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(handlerResult).toEqual({
+      status: 'error',
+      message: 'delivery failed',
+    });
   });
 
   it('returns 401 without an installation lookup when the signature is invalid', async () => {

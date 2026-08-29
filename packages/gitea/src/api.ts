@@ -30,6 +30,7 @@ const GITEA_WEBHOOK_EVENTS = [
   'pull_request_comment',
   'issue_comment',
   'issues',
+  'push',
   // Gitea Actions completion payloads (GitHub-compatible workflow_run event).
   'workflow_run',
 ] as const;

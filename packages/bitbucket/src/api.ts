@@ -36,6 +36,7 @@ const BITBUCKET_WEBHOOK_EVENTS = [
   'pullrequest:rejected',
   'pullrequest:comment_created',
   'pullrequest:comment_updated',
+  'repo:push',
   // CI Failure Triage: Bitbucket Pipelines posts commit statuses; failures are
   // filtered in the webhook handler.
   'repo:commit_status_created',

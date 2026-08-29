@@ -487,6 +487,7 @@ describe('Gitea API helpers', () => {
     );
     expect(fetchMock.mock.calls[1]?.[1]?.body).toContain('"issues"');
     expect(fetchMock.mock.calls[1]?.[1]?.body).toContain('"workflow_run"');
+    expect(fetchMock.mock.calls[1]?.[1]?.body).toContain('"push"');
   });
 
   it('posts a Gitea pull request comment through the issue comments API', async () => {

@@ -58,6 +58,7 @@ These automations react to pull requests, issues, and repository state.
 | **Review Code**            | Reviews pull requests automatically or on demand                  | Add an extra reviewer for regressions, risky changes, and missed tests |
 | **Triage Issues**          | Posts clarifying questions or an implementation plan when an issue is opened/reopened on GitHub, GitLab, or Gitea | Get a grounded plan on the issue without auto-opening a PR           |
 | **Resolve PR Conflicts**   | Looks for merge conflicts and helps fix them on open PRs          | Keep long-running branches from getting stuck                          |
+| **Merge announcer**        | Summarizes commits pushed to active repositories' default branches and names the pusher | Keep the team aware of changes that land outside pull requests |
 
 For **Review Code**, decide whether Roomote should review new commits
 automatically and whether draft pull requests should be included. If your team
@@ -84,6 +85,15 @@ exists in your repositories, add it to PRs where you want Roomote to attempt
 conflict resolution, and remove it when a human should handle the conflict
 instead. Roomote only tries this on labeled PRs that are still active, and it
 skips PRs older than the age cap you set.
+
+For **Merge announcer**, connect a source-control provider and turn the toggle
+on. Choose Slack, Microsoft Teams, Telegram, or Discord, then select a channel
+or **DM me**. Choose **Default** to use the shared Manager Channel or normal
+primary-conversation fallback. Roomote reacts to provider-deduplicated push
+webhooks for each active repository's current default branch, uses the
+deployment helper model to write a brief commit summary, and includes the pusher
+and commit authors. Feature-branch pushes and branch deletions are ignored.
+GitHub, GitLab, Azure DevOps, Bitbucket, and Gitea are supported.
 
 ## Custom automations
 

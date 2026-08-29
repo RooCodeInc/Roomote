@@ -106,6 +106,40 @@ describe('listConnectedCommunicationProviders', () => {
 });
 
 describe('resolveAutomationRuntimeDestination', () => {
+  it('resolves an explicit cross-provider user target before manager fallback', async () => {
+    mockFindUserDirectMessageDestination.mockResolvedValue({
+      channelId: 'discord-dm-1',
+    });
+
+    await expect(
+      resolveAutomationRuntimeDestination({
+        runtime: {
+          destination: {
+            provider: 'slack',
+            channelId: 'C_MANAGER',
+            source: 'manager_channel',
+          },
+          targets: [
+            {
+              provider: 'discord',
+              targetKind: 'discord_user',
+              externalRef: 'user-1',
+            },
+          ],
+        },
+        slackConnected: true,
+      }),
+    ).resolves.toEqual({
+      provider: 'discord',
+      channelId: 'discord-dm-1',
+      source: 'automation_target',
+    });
+    expect(mockFindUserDirectMessageDestination).toHaveBeenCalledWith(
+      'discord',
+      'user-1',
+    );
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
   });
