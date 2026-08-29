@@ -596,6 +596,144 @@ function notionPageEntityReferences(
   };
 }
 
+function notionDateValue(value: unknown): string | null {
+  const record = asObject(value);
+  const start = record ? asString(record.start) : null;
+  if (!start) return null;
+  const end = asString(record?.end);
+  return end ? `${start} → ${end}` : start;
+}
+
+function notionNamedOptions(value: unknown): string | null {
+  const names = Array.isArray(value)
+    ? value.flatMap((option) => {
+        const name = asString(asObject(option)?.name);
+        return name ? [name] : [];
+      })
+    : [];
+  return names.length > 0 ? names.join(', ') : null;
+}
+
+/**
+ * Human-readable value for one database property, or null when the property
+ * is empty or adds nothing beyond the frontmatter (timestamps and authorship
+ * already have fields there). People resolve through the stored directory and
+ * relations render as Brain slug links so property lines stay meaningful
+ * inside Memory search results.
+ */
+function renderNotionPropertyValue(
+  record: Record<string, unknown>,
+  context: NotionPageIdentityContext,
+): string | null {
+  switch (record.type) {
+    case 'rich_text':
+      return notionRichTextPlainText(record.rich_text) || null;
+    case 'number':
+      return typeof record.number === 'number' ? String(record.number) : null;
+    case 'select':
+    case 'status':
+      return asString(asObject(record[record.type])?.name) ?? null;
+    case 'multi_select':
+      return notionNamedOptions(record.multi_select);
+    case 'date':
+      return notionDateValue(record.date);
+    case 'checkbox':
+      return record.checkbox === true
+        ? 'Yes'
+        : record.checkbox === false
+          ? 'No'
+          : null;
+    case 'url':
+    case 'email':
+    case 'phone_number':
+      return asString(record[record.type]) ?? null;
+    case 'files':
+      return notionNamedOptions(record.files);
+    case 'people': {
+      const names = Array.isArray(record.people)
+        ? record.people.flatMap((user) => {
+            const id = notionUserId(user);
+            const name =
+              (id ? context.users.get(id)?.title : null) ??
+              parseNotionUser(user)?.name ??
+              asString(asObject(user)?.name);
+            return name ? [name] : [];
+          })
+        : [];
+      return names.length > 0 ? names.join(', ') : null;
+    }
+    case 'relation': {
+      const links = Array.isArray(record.relation)
+        ? record.relation.flatMap((relation) => {
+            const id = notionUserId(relation);
+            const slug = id ? notionPageSlug(id) : null;
+            return slug ? [`[${slug}](${slug})`] : [];
+          })
+        : [];
+      return links.length > 0 ? links.join(', ') : null;
+    }
+    case 'unique_id': {
+      const uniqueId = asObject(record.unique_id);
+      if (typeof uniqueId?.number !== 'number') return null;
+      const prefix = asString(uniqueId.prefix);
+      return prefix ? `${prefix}-${uniqueId.number}` : String(uniqueId.number);
+    }
+    case 'formula': {
+      const formula = asObject(record.formula);
+      return formula ? renderNotionPropertyValue(formula, context) : null;
+    }
+    case 'rollup': {
+      const rollup = asObject(record.rollup);
+      if (!rollup) return null;
+      if (rollup.type === 'array' && Array.isArray(rollup.array)) {
+        const values = rollup.array.flatMap((entry) => {
+          const item = asObject(entry);
+          const value = item ? renderNotionPropertyValue(item, context) : null;
+          return value ? [value] : [];
+        });
+        return values.length > 0 ? values.join('; ') : null;
+      }
+      return renderNotionPropertyValue(rollup, context);
+    }
+    // Formula results arrive as {type: 'string' | 'boolean', ...}; plain
+    // strings and dates above cover the other two result shapes.
+    case 'string':
+      return asString(record.string) ?? null;
+    case 'boolean':
+      return record.boolean === true
+        ? 'Yes'
+        : record.boolean === false
+          ? 'No'
+          : null;
+    default:
+      // Timestamps and authorship live in the frontmatter; buttons,
+      // verification, and future property types have no stable text value.
+      return null;
+  }
+}
+
+function renderNotionPropertyLines(
+  page: NotionSearchPage,
+  context: NotionPageIdentityContext,
+): string[] {
+  return Object.entries(page.properties ?? {})
+    .flatMap(([name, property]) => {
+      const record = asObject(property);
+      if (!record || record.type === 'title') return [];
+      const value = renderNotionPropertyValue(record, context);
+      if (!value) return [];
+      // Notion caps inline multi-value properties (relations above all) at
+      // 25 entries and signals the rest with has_more; an unmarked subset
+      // would read as the complete list.
+      const truncated =
+        record.has_more === true
+          ? ' _(Notion truncated this list; open the source page for the rest)_'
+          : '';
+      return [`- **${name}**: ${value}${truncated}`];
+    })
+    .sort((a, b) => a.localeCompare(b));
+}
+
 export function buildNotionPage(
   page: NotionSearchPage,
   markdown: NotionMarkdownResponse,
@@ -619,10 +757,11 @@ export function buildNotionPage(
   const updatedAt = parseDate(page.last_edited_time) ?? createdAt;
   const sourceUrl = asString(page.url);
   const body = asString(markdown.markdown);
-  const references = notionPageEntityReferences(
-    page,
-    options.identityContext ?? EMPTY_NOTION_PAGE_IDENTITY_CONTEXT,
-  );
+  const identityContext =
+    options.identityContext ?? EMPTY_NOTION_PAGE_IDENTITY_CONTEXT;
+  const references = notionPageEntityReferences(page, identityContext);
+  const propertyLines =
+    status === 'active' ? renderNotionPropertyLines(page, identityContext) : [];
 
   return {
     slug,
@@ -655,6 +794,12 @@ export function buildNotionPage(
       '',
       `# ${title}`,
       ...(sourceUrl ? ['', `[Open in Notion](${sourceUrl})`] : []),
+      // Database property values: the page-as-Markdown body carries only the
+      // page content, so rows would otherwise lose their Status/Owner/date
+      // columns in Memory.
+      ...(propertyLines.length > 0
+        ? ['', '## Properties', '', ...propertyLines]
+        : []),
       ...(status === 'deleted'
         ? ['', 'This page is in the Notion trash.']
         : status === 'unavailable'
