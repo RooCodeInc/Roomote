@@ -19,7 +19,7 @@ export function SideNavSessionItem({
       href={`/sessions/${session.id}`}
       aria-label={session.title}
       className={cn(
-        'ph-no-capture flex min-h-10 w-full items-center rounded-lg pl-10.5 transition-all',
+        'ph-no-capture flex min-h-10 w-full items-center rounded-lg pl-2 transition-all',
         isActive
           ? 'pr-2 bg-foreground text-accent-bright-foreground dark:bg-accent-foreground dark:text-card'
           : 'text-muted-foreground hover:text-accent-foreground',

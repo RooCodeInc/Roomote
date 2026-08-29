@@ -298,7 +298,7 @@ export const SideNav = () => {
 
                 {recentSessions.length > 0 && (
                   <div className="flex flex-col">
-                    <h3 className="text-sm font-semibold pl-10.5 py-1">
+                    <h3 className="text-sm font-semibold pl-2 py-1">
                       Recent sessions
                     </h3>
                     {recentSessions.map((session) => (
