@@ -2463,7 +2463,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     expect(mocks.cancelTask).toHaveBeenCalledOnce();
   });
 
-  it('ignores a platform event through a native terminal tool', async () => {
+  it('silently ignores optional external input through the existing native tool', async () => {
     mocks.generateText.mockImplementation(
       async (_params, _session, options) => {
         await options.onSessionReady('opencode-session-1');
@@ -2477,6 +2477,8 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       answerFastAgentQuestion({
         ...baseParams,
         turnSource: 'platform_event',
+        platformEventKind: 'external_input',
+        platformEventVisibility: 'optional',
         adapter,
       }),
     ).resolves.toBe('');

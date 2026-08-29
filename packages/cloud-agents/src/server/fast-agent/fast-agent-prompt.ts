@@ -237,8 +237,8 @@ ${reactionGuidance}
 - Select an environment ID only when the target is clear. Otherwise use null to use the deployment default.
 ${
   platformEvent
-    ? `## ${platformEventKind === 'automation' ? 'Automation Platform Event' : 'Delegated Task Platform Event'}
-- The current input is a trusted platform-generated ${platformEventKind === 'automation' ? 'custom automation request' : 'event about a delegated task'}, not a human-authored request.
+    ? `## ${platformEventKind === 'automation' ? 'Automation Platform Event' : platformEventKind === 'external_input' ? 'External Platform Input' : 'Delegated Task Platform Event'}
+- The current input is a trusted platform-generated ${platformEventKind === 'automation' ? 'custom automation request' : platformEventKind === 'external_input' ? 'external interaction associated with this conversation' : 'event about a delegated task'}, not a human-authored request.
 ${
   platformEventVisibility === 'required'
     ? '- This event requires a user-visible closeout because it carries user-useful substance. Present its result, changed expectation, required decision, or recovery action; never narrate lifecycle state alone. Do not call "ignore_event".'
