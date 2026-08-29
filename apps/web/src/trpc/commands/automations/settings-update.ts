@@ -925,8 +925,12 @@ export async function updateBackgroundAgentSettingsCommand(
     input.codeQualityAuditorFrequency ?? 'off';
   const ciFailureTriageFrequency = input.ciFailureTriageFrequency ?? 'off';
   const mergeAnnouncerFrequency =
-    input.mergeAnnouncerFrequency ?? existingSettings.mergeAnnouncerFrequency;
+    input.savingAutomation === 'mergeAnnouncer'
+      ? (input.mergeAnnouncerFrequency ??
+        existingSettings.mergeAnnouncerFrequency)
+      : existingSettings.mergeAnnouncerFrequency;
   const mergeAnnouncerDestinationSubmitted =
+    input.savingAutomation === 'mergeAnnouncer' &&
     input.mergeAnnouncerTargetProvider !== undefined;
   const mergeAnnouncerTargetProvider =
     input.mergeAnnouncerTargetProvider ?? null;
