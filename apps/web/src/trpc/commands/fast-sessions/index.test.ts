@@ -8,6 +8,9 @@ const mocks = vi.hoisted(() => ({
   retireReviewActions: vi.fn(),
   updateOfferStatus: vi.fn(),
   buildReplyDelivery: vi.fn(),
+  createWebTaskLauncher: vi.fn(),
+  getOrCreateSession: vi.fn(),
+  getUnifiedSession: vi.fn(),
   dbUpdate: vi.fn(),
   dbSet: vi.fn(),
   dbWhere: vi.fn(),
@@ -18,8 +21,8 @@ vi.mock('next/server', () => ({ after: mocks.after }));
 vi.mock('@roomote/cloud-agents/server', () => ({
   acquireFastAgentTurnLock: mocks.acquireTurnLock,
   answerFastAgentQuestion: mocks.answerQuestion,
-  createFastAgentWebTaskLauncher: vi.fn(),
-  getOrCreateFastAgentSession: vi.fn(),
+  createFastAgentWebTaskLauncher: mocks.createWebTaskLauncher,
+  getOrCreateFastAgentSession: mocks.getOrCreateSession,
   resolveApiBaseUrl: vi.fn(),
 }));
 
@@ -33,7 +36,7 @@ vi.mock('@roomote/db/server', () => ({
   retireCanonicalPrReviewActionsForDestinationKey: mocks.retireReviewActions,
   eq: vi.fn(),
   fastAgentConversations: {},
-  getSessionForFastConversation: vi.fn(),
+  getSessionForFastConversation: mocks.getUnifiedSession,
 }));
 
 vi.mock('@/lib/server/fast-sessions', () => ({
@@ -52,6 +55,7 @@ import {
   handleFastSessionPrReviewActionCommand,
   replyToFastSessionCommand,
   scheduleWebFastAgentTurn,
+  startFastSessionCommand,
   updateFastSessionModelSelectionCommand,
 } from './index';
 
@@ -132,6 +136,49 @@ describe('scheduleWebFastAgentTurn', () => {
       model: 'openrouter/z-ai/glm-5.2',
       reasoningEffort: 'high',
     });
+  });
+});
+
+describe('startFastSessionCommand', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.createWebTaskLauncher.mockReturnValue(vi.fn());
+    mocks.getUnifiedSession.mockResolvedValue({ id: 'unified-session-1' });
+    mocks.getOrCreateSession.mockResolvedValue({
+      id: 'fast-session-1',
+      created: true,
+    });
+  });
+
+  it('recovers an idempotent Session without scheduling its first turn twice', async () => {
+    const input = {
+      text: 'Review the starter prompt',
+      conversationId: 'setup-starter:batch-1:speed-up-ci',
+    };
+
+    await expect(startFastSessionCommand(auth, input)).resolves.toEqual({
+      sessionId: 'unified-session-1',
+      fastConversationId: 'fast-session-1',
+    });
+    mocks.getOrCreateSession.mockResolvedValueOnce({
+      id: 'fast-session-1',
+      created: false,
+    });
+    await expect(startFastSessionCommand(auth, input)).resolves.toEqual({
+      sessionId: 'unified-session-1',
+      fastConversationId: 'fast-session-1',
+    });
+
+    expect(mocks.getOrCreateSession).toHaveBeenCalledTimes(2);
+    expect(mocks.getOrCreateSession).toHaveBeenCalledWith({
+      userId: 'user-1',
+      conversation: {
+        surface: 'web',
+        workspaceId: 'user-1',
+        conversationId: input.conversationId,
+      },
+    });
+    expect(mocks.after).toHaveBeenCalledOnce();
   });
 });
 

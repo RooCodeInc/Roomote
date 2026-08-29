@@ -32,6 +32,30 @@ import { getSetupStepDefinition } from './types';
 const INVOKE_STEP = getSetupStepDefinition('invoke');
 
 const STARTER_TASKS_TITLE = "You're set up. Let's get Roomote working.";
+const STARTER_TASK_LAUNCH_BATCH_STORAGE_KEY =
+  'roomote.setup.starterTaskLaunchBatchId';
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function getOrCreateStarterTaskLaunchBatchId() {
+  const existing = window.sessionStorage.getItem(
+    STARTER_TASK_LAUNCH_BATCH_STORAGE_KEY,
+  );
+  if (existing && UUID_PATTERN.test(existing)) {
+    return existing;
+  }
+
+  const launchBatchId = crypto.randomUUID();
+  window.sessionStorage.setItem(
+    STARTER_TASK_LAUNCH_BATCH_STORAGE_KEY,
+    launchBatchId,
+  );
+  return launchBatchId;
+}
+
+function clearStarterTaskLaunchBatchId() {
+  window.sessionStorage.removeItem(STARTER_TASK_LAUNCH_BATCH_STORAGE_KEY);
+}
 
 type CommunicationProviderId = 'slack' | 'microsoft' | 'telegram' | 'discord';
 
@@ -293,6 +317,7 @@ function StarterTasksStepContent({
   const trpc = useTRPC();
   const { user } = useUser();
   const queryClient = useQueryClient();
+  const [launchBatchId] = useState(getOrCreateStarterTaskLaunchBatchId);
   const [selectedIds, setSelectedIds] = useState<SetupStarterTaskId[]>(() =>
     SETUP_STARTER_TASKS.map((starterTask) => starterTask.id),
   );
@@ -324,6 +349,7 @@ function StarterTasksStepContent({
         }
 
         setLaunchError(null);
+        clearStarterTaskLaunchBatchId();
 
         // Optimistically mark setup as completed in the cache so the
         // authenticated layout doesn't redirect back to /setup.
@@ -396,6 +422,7 @@ function StarterTasksStepContent({
 
     setLaunchError(null);
     launchStarterTasks.mutate({
+      launchBatchId,
       selectedStarterTaskIds: remainingIds,
       ...preferences,
     });

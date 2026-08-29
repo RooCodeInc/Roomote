@@ -112,6 +112,7 @@ describe('Fast conversation repository', () => {
     );
 
     expect(new Set(sessions.map(({ id }) => id)).size).toBe(1);
+    expect(sessions.filter(({ created }) => created)).toHaveLength(1);
     const rows = await db
       .select({ id: fastAgentConversations.id })
       .from(fastAgentConversations)

@@ -74,6 +74,7 @@ describe('completeSetupWithStarterTasksCommand', () => {
       .mockResolvedValueOnce({ sessionId: 'session-security' });
 
     const result = await completeSetupWithStarterTasksCommand(buildAuth(), {
+      launchBatchId: '11111111-1111-4111-8111-111111111111',
       selectedStarterTaskIds: ['speed-up-ci', 'security-scan'],
       anonymousAnalyticsEnabled: true,
       productUpdatesEnabled: false,
@@ -84,12 +85,20 @@ describe('completeSetupWithStarterTasksCommand', () => {
     expect(mockStartFastSession).toHaveBeenNthCalledWith(
       1,
       expect.objectContaining({ userId: 'admin-1' }),
-      { text: getSetupStarterTask('speed-up-ci').prompt },
+      {
+        text: getSetupStarterTask('speed-up-ci').prompt,
+        conversationId:
+          'setup-starter:11111111-1111-4111-8111-111111111111:speed-up-ci',
+      },
     );
     expect(mockStartFastSession).toHaveBeenNthCalledWith(
       2,
       expect.objectContaining({ userId: 'admin-1' }),
-      { text: getSetupStarterTask('security-scan').prompt },
+      {
+        text: getSetupStarterTask('security-scan').prompt,
+        conversationId:
+          'setup-starter:11111111-1111-4111-8111-111111111111:security-scan',
+      },
     );
     expect(mockCompleteSetup).toHaveBeenCalledWith(expect.anything(), {
       anonymousAnalyticsEnabled: true,
@@ -120,6 +129,7 @@ describe('completeSetupWithStarterTasksCommand', () => {
 
   it('deduplicates repeated starter task ids', async () => {
     const result = await completeSetupWithStarterTasksCommand(buildAuth(), {
+      launchBatchId: '11111111-1111-4111-8111-111111111111',
       selectedStarterTaskIds: ['speed-up-ci', 'speed-up-ci'],
     });
 
@@ -133,6 +143,7 @@ describe('completeSetupWithStarterTasksCommand', () => {
       .mockRejectedValueOnce(new Error('session startup failed'));
 
     const result = await completeSetupWithStarterTasksCommand(buildAuth(), {
+      launchBatchId: '11111111-1111-4111-8111-111111111111',
       selectedStarterTaskIds: ['speed-up-ci', 'security-scan'],
     });
 
@@ -149,6 +160,7 @@ describe('completeSetupWithStarterTasksCommand', () => {
 
   it('completes setup without launching anything for an empty selection', async () => {
     const result = await completeSetupWithStarterTasksCommand(buildAuth(), {
+      launchBatchId: '11111111-1111-4111-8111-111111111111',
       selectedStarterTaskIds: [],
       productUpdatesEnabled: true,
     });
@@ -169,6 +181,7 @@ describe('completeSetupWithStarterTasksCommand', () => {
     mockCompleteSetup.mockRejectedValueOnce(new Error('settings write failed'));
 
     const result = await completeSetupWithStarterTasksCommand(buildAuth(), {
+      launchBatchId: '11111111-1111-4111-8111-111111111111',
       selectedStarterTaskIds: ['fix-test-flakes'],
     });
 

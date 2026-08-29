@@ -173,12 +173,13 @@ export async function startFastSessionCommand(
     attachmentTexts?: string[];
     model?: string | null;
     reasoningEffort?: ReasoningEffort | null;
+    conversationId?: string;
   },
 ): Promise<{ sessionId: string; fastConversationId?: string }> {
   const conversation: WebFastAgentConversation = {
     surface: 'web',
     workspaceId: auth.userId,
-    conversationId: randomUUID(),
+    conversationId: input.conversationId ?? randomUUID(),
   };
 
   const session = await getOrCreateFastAgentSession({
@@ -190,24 +191,26 @@ export async function startFastSessionCommand(
     reasoningEffort: null,
   });
 
-  scheduleWebFastAgentTurn({
-    userId: auth.userId,
-    delivery: {
-      conversation,
-      adapter: {
-        launchTask: createFastAgentWebTaskLauncher({
-          userId: auth.userId,
-          conversation,
-        }),
-        postReply: async () => {},
+  if (session.created) {
+    scheduleWebFastAgentTurn({
+      userId: auth.userId,
+      delivery: {
+        conversation,
+        adapter: {
+          launchTask: createFastAgentWebTaskLauncher({
+            userId: auth.userId,
+            conversation,
+          }),
+          postReply: async () => {},
+        },
       },
-    },
-    question: input.text,
-    images: input.images,
-    attachmentTexts: input.attachmentTexts,
-    model: settings.model,
-    reasoningEffort: settings.reasoningEffort,
-  });
+      question: input.text,
+      images: input.images,
+      attachmentTexts: input.attachmentTexts,
+      model: settings.model,
+      reasoningEffort: settings.reasoningEffort,
+    });
+  }
 
   const unifiedSession = await getSessionForFastConversation(db, session.id);
   return {

@@ -26,6 +26,7 @@ type CompleteSetupWithStarterTasksResult = {
 export async function completeSetupWithStarterTasksCommand(
   auth: UserAuthSuccess,
   input: {
+    launchBatchId: string;
     selectedStarterTaskIds: SetupStarterTaskId[];
     anonymousAnalyticsEnabled?: boolean;
     productUpdatesEnabled?: boolean;
@@ -47,6 +48,11 @@ export async function completeSetupWithStarterTasksCommand(
         try {
           const result = await startFastSessionCommand(auth, {
             text: starterTask.prompt,
+            conversationId: [
+              'setup-starter',
+              input.launchBatchId,
+              starterTaskId,
+            ].join(':'),
           });
           return { starterTaskId, sessionId: result.sessionId };
         } catch (error) {
