@@ -229,6 +229,60 @@ describe('startSetupFastSessionCommand', () => {
     expect(mocks.dbSelect).not.toHaveBeenCalled();
   });
 
+  it('skips a scheduled kickoff whose transcript gained messages before the turn lock', async () => {
+    mocks.getOrCreateSession.mockResolvedValue({
+      id: 'setup-conversation-1',
+      created: true,
+    });
+    let scheduled: (() => Promise<void>) | undefined;
+    mocks.after.mockImplementation((callback) => {
+      scheduled = callback;
+    });
+    const release = Object.assign(vi.fn().mockResolvedValue(undefined), {
+      signal: new AbortController().signal,
+    });
+    mocks.acquireTurnLock.mockResolvedValue(release);
+
+    await startSetupFastSessionCommand(auth, input);
+    expect(scheduled).toBeDefined();
+
+    // A concurrent submit's kickoff persisted its event row first: the
+    // re-check under the turn lock sees the message and skips this turn.
+    mocks.dbSelectLimit.mockResolvedValue([{ id: 'message-1' }]);
+    await scheduled?.();
+
+    expect(mocks.answerQuestion).not.toHaveBeenCalled();
+    expect(release).toHaveBeenCalledOnce();
+  });
+
+  it('runs a scheduled kickoff whose transcript is still empty at the turn lock', async () => {
+    mocks.getOrCreateSession.mockResolvedValue({
+      id: 'setup-conversation-1',
+      created: true,
+    });
+    let scheduled: (() => Promise<void>) | undefined;
+    mocks.after.mockImplementation((callback) => {
+      scheduled = callback;
+    });
+    const release = Object.assign(vi.fn().mockResolvedValue(undefined), {
+      signal: new AbortController().signal,
+    });
+    mocks.acquireTurnLock.mockResolvedValue(release);
+    mocks.answerQuestion.mockResolvedValue('Welcome');
+
+    await startSetupFastSessionCommand(auth, input);
+    await scheduled?.();
+
+    expect(mocks.answerQuestion).toHaveBeenCalledWith(
+      expect.objectContaining({
+        turnSource: 'platform_event',
+        platformEventKind: 'setup',
+        platformEventVisibility: 'required',
+      }),
+    );
+    expect(release).toHaveBeenCalledOnce();
+  });
+
   it('recovers a lost kickoff when reusing a conversation with an empty transcript', async () => {
     mocks.getOrCreateSession.mockResolvedValue({
       id: 'setup-conversation-1',

@@ -2329,6 +2329,14 @@ export async function answerFastAgentQuestion({
           message:
             'I could not complete that request within the available turn.',
         });
+      } else if (platformEvent && platformEventVisibility === 'required') {
+        // A visibility-required platform event promises a closeout even when
+        // an intro ack or launch kickoff already posted a visible update
+        // (e.g. the setup kickoff ending on an empty terminal response).
+        await postReply({
+          purpose: 'closeout',
+          message: 'I will post updates here as this progresses.',
+        });
       }
     }
     await mirrorPendingMessages();

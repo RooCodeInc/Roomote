@@ -102,6 +102,12 @@ type WebFastAgentTurnInput = {
   /** Present for trusted platform-generated turns (e.g. the setup kickoff);
    * absent for human-authored web messages. */
   platformEventKind?: 'setup';
+  /** Fast conversation ID whose transcript must still be empty when the turn
+   * acquires its lock, or the turn is skipped. This is the atomic claim for
+   * the setup kickoff: concurrent submits can both pass the pre-schedule
+   * empty-transcript check, but the first kickoff persists its event row
+   * under the turn lock, so the re-check under the same lock is race-free. */
+  skipUnlessConversationEmpty?: string;
 };
 
 /**
@@ -122,6 +128,7 @@ async function runWebFastAgentTurn({
   reasoningEffort,
   senderDisplayName,
   platformEventKind,
+  skipUnlessConversationEmpty,
 }: WebFastAgentTurnInput): Promise<void> {
   const conversation = delivery.conversation;
   const release = await acquireFastAgentTurnLock({ conversation });
@@ -134,6 +141,22 @@ async function runWebFastAgentTurn({
 
   const apiBaseUrl = resolveApiBaseUrl() ?? undefined;
   try {
+    if (skipUnlessConversationEmpty) {
+      const [existingMessage] = await db
+        .select({ id: fastAgentMessages.id })
+        .from(fastAgentMessages)
+        .where(
+          eq(fastAgentMessages.conversationId, skipUnlessConversationEmpty),
+        )
+        .limit(1);
+      if (existingMessage) {
+        console.log(
+          `[Fast Web] Skipping duplicate kickoff turn for ${conversation.conversationId}: the transcript is no longer empty.`,
+        );
+        return;
+      }
+    }
+
     await answerFastAgentQuestion({
       question,
       images,
@@ -305,6 +328,7 @@ export async function startSetupFastSessionCommand(
       },
       question: `<platform_event>${JSON.stringify(input.event)}</platform_event>`,
       platformEventKind: 'setup',
+      skipUnlessConversationEmpty: session.id,
     });
   }
 
