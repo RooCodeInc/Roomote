@@ -22,11 +22,13 @@ import {
   sessionTasks,
   sql,
   taskArtifacts,
+  taskMessages,
   taskPullRequests,
   taskRuns,
   tasks,
   users,
 } from '@roomote/db/server';
+import { ACP_ENVELOPE_EVENT_TYPES } from '@roomote/types';
 
 import type { UserAuthSuccess } from '@/types';
 
@@ -116,6 +118,9 @@ function listConditions(auth: SessionAuth, input: SessionListInput) {
   const cursor = decodeCursor(input.before);
   const scope = input.scope ?? 'all';
   const query = input.q?.trim();
+  const queryPattern = query
+    ? `%${query.replace(/[\\%_]/g, (character) => `\\${character}`)}%`
+    : null;
   const period = input.period ?? 'all';
   const pullRequestNumber = Number(input.pullRequest);
 
@@ -170,9 +175,9 @@ function listConditions(auth: SessionAuth, input: SessionListInput) {
             ),
         )
       : undefined,
-    query
+    queryPattern
       ? or(
-          ilike(sessions.title, `%${query.replaceAll('%', '\\%')}%`),
+          ilike(sessions.title, queryPattern),
           exists(
             db
               .select({ one: sql`1` })
@@ -181,13 +186,64 @@ function listConditions(auth: SessionAuth, input: SessionListInput) {
               .where(
                 and(
                   eq(sessionTasks.sessionId, sessions.id),
+                  isNull(tasks.deletedAt),
                   or(
-                    ilike(tasks.title, `%${query.replaceAll('%', '\\%')}%`),
-                    ilike(
-                      tasks.repositoryName,
-                      `%${query.replaceAll('%', '\\%')}%`,
-                    ),
+                    ilike(tasks.title, queryPattern),
+                    ilike(tasks.repositoryName, queryPattern),
                   ),
+                ),
+              ),
+          ),
+          exists(
+            db
+              .select({ one: sql`1` })
+              .from(fastAgentMessages)
+              .where(
+                and(
+                  eq(
+                    fastAgentMessages.conversationId,
+                    sessions.fastConversationId,
+                  ),
+                  inArray(fastAgentMessages.role, ['user', 'assistant']),
+                  sql`case
+                    when ${fastAgentMessages.metadata} ->> 'visibleInTranscript' is not null
+                      then ${fastAgentMessages.metadata} ->> 'visibleInTranscript' = 'true'
+                    else ${fastAgentMessages.eventType} <> ${ACP_ENVELOPE_EVENT_TYPES.UserPrompt}
+                  end`,
+                  sql`exists (
+                    select 1
+                    from jsonb_array_elements(${fastAgentMessages.contentBlocks}) as block
+                    where block ->> 'type' = 'text'
+                      and block ->> 'text' ilike ${queryPattern} escape '\\'
+                  )`,
+                ),
+              ),
+          ),
+          exists(
+            db
+              .select({ one: sql`1` })
+              .from(sessionTasks)
+              .innerJoin(
+                taskMessages,
+                eq(taskMessages.taskId, sessionTasks.taskId),
+              )
+              .innerJoin(tasks, eq(tasks.id, sessionTasks.taskId))
+              .where(
+                and(
+                  eq(sessionTasks.sessionId, sessions.id),
+                  isNull(tasks.deletedAt),
+                  inArray(taskMessages.role, ['user', 'assistant']),
+                  sql`case
+                    when ${taskMessages.metadata} ->> 'visibleInTranscript' is not null
+                      then ${taskMessages.metadata} ->> 'visibleInTranscript' = 'true'
+                    else ${taskMessages.eventType} <> ${ACP_ENVELOPE_EVENT_TYPES.UserPrompt}
+                  end`,
+                  sql`exists (
+                    select 1
+                    from jsonb_array_elements(${taskMessages.contentBlocks}) as block
+                    where block ->> 'type' = 'text'
+                      and block ->> 'text' ilike ${queryPattern} escape '\\'
+                  )`,
                 ),
               ),
           ),

@@ -1,13 +1,21 @@
 import {
   db,
+  eq,
   fastAgentConversations,
   fastAgentMessages,
+  runFactory,
   sessionFactory,
   sessionTasks,
   taskArtifacts,
   taskFactory,
+  taskMessages,
+  tasks,
   userFactory,
 } from '@roomote/db/server';
+import {
+  ACP_ENVELOPE_EVENT_TYPES,
+  ROOMOTE_RUNTIME_TASK_MESSAGE_PROTOCOL,
+} from '@roomote/types';
 
 import {
   findAccessibleSession,
@@ -78,6 +86,164 @@ describe('unified Session queries', () => {
     );
 
     expect(result.sessions.map((session) => session.id)).toEqual([included.id]);
+  });
+
+  it('searches visible Fast and task transcript text', async () => {
+    const owner = await userFactory.create();
+    const [conversation] = await db
+      .insert(fastAgentConversations)
+      .values({
+        userId: owner.id,
+        surface: 'web',
+        workspaceId: owner.id,
+        conversationId: crypto.randomUUID(),
+      })
+      .returning();
+    const fastSession = await sessionFactory.create({
+      ownerKind: 'user',
+      ownerUserId: owner.id,
+      title: 'Fast transcript search',
+      fastConversationId: conversation!.id,
+    });
+    await db.insert(fastAgentMessages).values([
+      {
+        conversationId: conversation!.id,
+        eventId: 'search-visible',
+        turnId: 'turn-visible',
+        turnSeq: 0,
+        ts: 100,
+        eventType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+        role: 'assistant',
+        contentBlocks: [
+          { type: 'text', text: 'The uncommon heliotrope snippet is ready.' },
+        ],
+        metadata: { visibleInTranscript: true },
+        payload: {},
+      },
+      {
+        conversationId: conversation!.id,
+        eventId: 'search-hidden',
+        turnId: 'turn-hidden',
+        turnSeq: 0,
+        ts: 200,
+        eventType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+        role: 'assistant',
+        contentBlocks: [
+          { type: 'text', text: 'The private zephyr phrase is hidden.' },
+        ],
+        metadata: { visibleInTranscript: false },
+        payload: {},
+      },
+    ]);
+
+    const task = await taskFactory.create({
+      initiatorUserId: owner.id,
+      title: 'Task transcript search',
+      repositoryName: 'RooCodeInc/search-target',
+    });
+    const run = await runFactory.create({ taskId: task.id });
+    const taskSession = await sessionFactory.create({
+      ownerKind: 'user',
+      ownerUserId: owner.id,
+      title: 'Linked task transcript search',
+    });
+    await db.insert(sessionTasks).values({
+      sessionId: taskSession.id,
+      taskId: task.id,
+      origin: 'direct_launch',
+    });
+    await db.insert(taskMessages).values({
+      runId: run.id,
+      taskId: task.id,
+      ts: 300,
+      eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
+      role: 'user',
+      protocol: ROOMOTE_RUNTIME_TASK_MESSAGE_PROTOCOL,
+      contentBlocks: [
+        {
+          type: 'text',
+          text: 'Please preserve the uncommon vermilion detail.',
+        },
+      ],
+      metadata: { visibleInTranscript: true },
+      payload: {},
+    });
+
+    const fastResult = await getSessions(
+      { userId: owner.id, isAdmin: false },
+      { q: 'heliotrope' },
+    );
+    expect(fastResult.sessions.map((session) => session.id)).toEqual([
+      fastSession.id,
+    ]);
+
+    const taskResult = await getSessions(
+      { userId: owner.id, isAdmin: false },
+      { q: 'vermilion' },
+    );
+    expect(taskResult.sessions.map((session) => session.id)).toEqual([
+      taskSession.id,
+    ]);
+
+    const titleResult = await getSessions(
+      { userId: owner.id, isAdmin: false },
+      { q: 'Fast transcript search' },
+    );
+    expect(titleResult.sessions.map((session) => session.id)).toEqual([
+      fastSession.id,
+    ]);
+
+    const repositoryResult = await getSessions(
+      { userId: owner.id, isAdmin: false },
+      { q: 'search-target' },
+    );
+    expect(repositoryResult.sessions.map((session) => session.id)).toEqual([
+      taskSession.id,
+    ]);
+
+    const hiddenResult = await getSessions(
+      { userId: owner.id, isAdmin: false },
+      { q: 'zephyr' },
+    );
+    expect(hiddenResult.sessions).toEqual([]);
+
+    await db.insert(taskMessages).values({
+      runId: run.id,
+      taskId: task.id,
+      ts: 400,
+      eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
+      role: 'user',
+      protocol: ROOMOTE_RUNTIME_TASK_MESSAGE_PROTOCOL,
+      contentBlocks: [
+        { type: 'text', text: 'The legacy indigo wrapper is not visible.' },
+      ],
+      payload: {},
+    });
+    const legacyHiddenResult = await getSessions(
+      { userId: owner.id, isAdmin: false },
+      { q: 'indigo' },
+    );
+    expect(legacyHiddenResult.sessions).toEqual([]);
+
+    await db
+      .update(tasks)
+      .set({ deletedAt: new Date() })
+      .where(eq(tasks.id, task.id));
+    const deletedTaskResult = await getSessions(
+      { userId: owner.id, isAdmin: false },
+      { q: 'vermilion' },
+    );
+    expect(deletedTaskResult.sessions).toEqual([]);
+    const deletedTaskTitleResult = await getSessions(
+      { userId: owner.id, isAdmin: false },
+      { q: 'Task transcript search' },
+    );
+    expect(deletedTaskTitleResult.sessions).toEqual([]);
+    const deletedRepositoryResult = await getSessions(
+      { userId: owner.id, isAdmin: false },
+      { q: 'search-target' },
+    );
+    expect(deletedRepositoryResult.sessions).toEqual([]);
   });
 
   it('returns task rollups, task resolution, and deterministic timeline events', async () => {
