@@ -2534,7 +2534,6 @@ export const appRouter = createRouter({
     completeWithStarterTasks: protectedProcedure
       .input(
         z.object({
-          launchBatchId: z.string().uuid(),
           selectedStarterTaskIds: z
             .array(z.enum(SETUP_STARTER_TASK_IDS))
             .max(SETUP_STARTER_TASK_IDS.length),
