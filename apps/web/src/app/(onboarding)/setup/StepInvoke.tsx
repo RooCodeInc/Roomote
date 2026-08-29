@@ -22,7 +22,6 @@ import { useEnvironments } from '@/hooks/environments/useEnvironments';
 import { useUser } from '@/hooks/useUser';
 import {
   SETUP_STARTER_TASKS,
-  getSetupStarterTask,
   type SetupStarterTaskId,
 } from '@/lib/setup-starter-tasks';
 import { buildInvokeMethods } from '../invokeMethods';
@@ -285,28 +284,6 @@ function CompletionPreferences({
   );
 }
 
-type StarterTaskLaunch = {
-  starterTaskId: SetupStarterTaskId;
-  sessionId: string;
-};
-
-function buildLaunchErrorMessage(result: {
-  failed: Array<{ starterTaskId: SetupStarterTaskId; error: string }>;
-  completionError: string | null;
-}) {
-  const [firstFailure] = result.failed;
-
-  if (firstFailure) {
-    const failedTitles = result.failed
-      .map((failure) => getSetupStarterTask(failure.starterTaskId).title)
-      .join(', ');
-
-    return `Couldn't start: ${failedTitles} (${firstFailure.error}). Press Retry to try again.`;
-  }
-
-  return `${result.completionError ?? 'Setup could not be completed.'} Press Retry to try again.`;
-}
-
 function StarterTasksStepContent({
   onTryItOut,
   linkSuggestedTasks = false,
@@ -321,7 +298,6 @@ function StarterTasksStepContent({
   const [selectedIds, setSelectedIds] = useState<SetupStarterTaskId[]>(() =>
     SETUP_STARTER_TASKS.map((starterTask) => starterTask.id),
   );
-  const [launchedTasks, setLaunchedTasks] = useState<StarterTaskLaunch[]>([]);
   const [launchError, setLaunchError] = useState<string | null>(null);
   const [anonymousAnalyticsEnabled, setAnonymousAnalyticsEnabled] =
     useState(true);
@@ -336,14 +312,9 @@ function StarterTasksStepContent({
   const launchStarterTasks = useMutation(
     trpc.setup.completeWithStarterTasks.mutationOptions({
       onSuccess: async (result) => {
-        const allLaunched = [...launchedTasks, ...(result?.launched ?? [])];
-        setLaunchedTasks(allLaunched);
-
-        if (!result || result.failed.length > 0 || !result.setupCompleted) {
+        if (!result?.setupCompleted) {
           setLaunchError(
-            result
-              ? buildLaunchErrorMessage(result)
-              : 'The tasks could not be started. Press Retry to try again.',
+            `${result?.completionError ?? 'Setup could not be completed.'} Press Retry to try again.`,
           );
           return;
         }
@@ -362,14 +333,7 @@ function StarterTasksStepContent({
 
         // Leave before awaiting invalidation so /setup's completed-setup
         // guard cannot race and flash Home before the destination page.
-        const [firstLaunched] = allLaunched;
-        router.replace(
-          allLaunched.length === 0
-            ? '/'
-            : allLaunched.length === 1 && firstLaunched
-              ? `/sessions/${firstLaunched.sessionId}`
-              : '/sessions',
-        );
+        router.replace(result.sessionId ? `/sessions/${result.sessionId}` : '/');
 
         await Promise.all([
           queryClient.invalidateQueries({
@@ -389,10 +353,6 @@ function StarterTasksStepContent({
     }),
   );
 
-  const launchedIds = new Set(
-    launchedTasks.map((launch) => launch.starterTaskId),
-  );
-  const remainingIds = selectedIds.filter((id) => !launchedIds.has(id));
   const isPending = completeSetup.isPending || launchStarterTasks.isPending;
 
   const toggleStarterTask = (id: SetupStarterTaskId, checked: boolean) => {
@@ -413,9 +373,9 @@ function StarterTasksStepContent({
       ...(!isCloudAdmin ? { productUpdatesEnabled } : {}),
     };
 
-    if (remainingIds.length === 0 && launchedTasks.length === 0) {
-      // Nothing selected and nothing launched: plain setup completion with
-      // the existing Home routing.
+    if (selectedIds.length === 0) {
+      // Nothing selected: plain setup completion with the existing Home
+      // routing.
       completeSetup.mutate(preferences);
       return;
     }
@@ -423,7 +383,7 @@ function StarterTasksStepContent({
     setLaunchError(null);
     launchStarterTasks.mutate({
       launchBatchId,
-      selectedStarterTaskIds: remainingIds,
+      selectedStarterTaskIds: selectedIds,
       ...preferences,
     });
   };
@@ -440,8 +400,7 @@ function StarterTasksStepContent({
       />
       <div className="space-y-2 rounded-xl bg-card py-2 divide-y">
         {SETUP_STARTER_TASKS.map((starterTask) => {
-          const isLaunched = launchedIds.has(starterTask.id);
-          const checked = isLaunched || selectedIds.includes(starterTask.id);
+          const checked = selectedIds.includes(starterTask.id);
           const inputId = `setup-starter-task-${starterTask.id}`;
 
           return (
@@ -455,7 +414,7 @@ function StarterTasksStepContent({
                 aria-label={starterTask.title}
                 className="relative top-0.5 shrink-0"
                 checked={checked}
-                disabled={isLaunched || isPending}
+                disabled={isPending}
                 onCheckedChange={(nextChecked) =>
                   toggleStarterTask(starterTask.id, nextChecked === true)
                 }
@@ -463,7 +422,7 @@ function StarterTasksStepContent({
               <span className="flex-1">
                 <span className="font-semibold">{starterTask.title}</span>
                 <span className="block text-muted-foreground">
-                  {isLaunched ? 'Started.' : starterTask.description}
+                  {starterTask.description}
                 </span>
               </span>
             </label>

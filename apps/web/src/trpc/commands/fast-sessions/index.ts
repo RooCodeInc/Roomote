@@ -19,6 +19,7 @@ import {
   fastAgentConversations,
   getSessionForFastConversation,
   retireCanonicalPrReviewActionsForDestinationKey,
+  sessions,
 } from '@roomote/db/server';
 import {
   formatErrorForLog,
@@ -97,6 +98,9 @@ type WebFastAgentTurnInput = {
   model?: string;
   reasoningEffort?: ReasoningEffort;
   senderDisplayName?: string;
+  /** Present for trusted platform-generated turns (e.g. the setup kickoff);
+   * absent for human-authored web messages. */
+  platformEventKind?: 'setup';
 };
 
 /**
@@ -116,6 +120,7 @@ async function runWebFastAgentTurn({
   model,
   reasoningEffort,
   senderDisplayName,
+  platformEventKind,
 }: WebFastAgentTurnInput): Promise<void> {
   const conversation = delivery.conversation;
   const release = await acquireFastAgentTurnLock({ conversation });
@@ -140,6 +145,13 @@ async function runWebFastAgentTurn({
       model,
       reasoningEffort,
       senderDisplayName,
+      ...(platformEventKind
+        ? {
+            turnSource: 'platform_event' as const,
+            platformEventKind,
+            platformEventVisibility: 'required' as const,
+          }
+        : {}),
       adapter: {
         resolveMcpServerConfigs: () =>
           resolveUserMcpServerConfigs({
@@ -216,6 +228,70 @@ export async function startFastSessionCommand(
   return {
     sessionId: unifiedSession?.id ?? session.id,
     fastConversationId: session.id,
+  };
+}
+
+/**
+ * Creates (or reuses) the first-run setup session and, on creation, schedules
+ * its kickoff as a trusted setup platform event instead of a human message.
+ * The deterministic conversationId makes creation idempotent per launch batch,
+ * and the `created` guard means a re-submit never schedules a second kickoff.
+ */
+export async function startSetupFastSessionCommand(
+  auth: UserAuthSuccess,
+  input: {
+    conversationId: string;
+    title: string;
+    event: Record<string, unknown>;
+  },
+): Promise<{ sessionId: string; created: boolean }> {
+  const conversation: WebFastAgentConversation = {
+    surface: 'web',
+    workspaceId: auth.userId,
+    conversationId: input.conversationId,
+  };
+
+  const session = await getOrCreateFastAgentSession({
+    userId: auth.userId,
+    conversation,
+  });
+
+  if (session.created) {
+    // Fixed, human-authored-style title: marking it user-edited keeps the
+    // LLM title refresh from renaming the setup session later.
+    const titleEditedByUserAt = new Date();
+    await Promise.all([
+      db
+        .update(fastAgentConversations)
+        .set({ title: input.title, titleEditedByUserAt })
+        .where(eq(fastAgentConversations.id, session.id)),
+      db
+        .update(sessions)
+        .set({ title: input.title, titleEditedByUserAt })
+        .where(eq(sessions.fastConversationId, session.id)),
+    ]);
+
+    scheduleWebFastAgentTurn({
+      userId: auth.userId,
+      delivery: {
+        conversation,
+        adapter: {
+          launchTask: createFastAgentWebTaskLauncher({
+            userId: auth.userId,
+            conversation,
+          }),
+          postReply: async () => {},
+        },
+      },
+      question: `<platform_event>${JSON.stringify(input.event)}</platform_event>`,
+      platformEventKind: 'setup',
+    });
+  }
+
+  const unifiedSession = await getSessionForFastConversation(db, session.id);
+  return {
+    sessionId: unifiedSession?.id ?? session.id,
+    created: session.created,
   };
 }
 

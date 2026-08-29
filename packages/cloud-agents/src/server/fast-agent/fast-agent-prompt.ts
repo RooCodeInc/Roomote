@@ -237,8 +237,8 @@ ${reactionGuidance}
 - Select an environment ID only when the target is clear. Otherwise use null to use the deployment default.
 ${
   platformEvent
-    ? `## ${platformEventKind === 'automation' ? 'Automation Platform Event' : platformEventKind === 'external_input' ? 'External Platform Input' : 'Delegated Task Platform Event'}
-- The current input is a trusted platform-generated ${platformEventKind === 'automation' ? 'custom automation request' : platformEventKind === 'external_input' ? 'external interaction associated with this conversation' : 'event about a delegated task'}, not a human-authored request.
+    ? `## ${platformEventKind === 'automation' ? 'Automation Platform Event' : platformEventKind === 'external_input' ? 'External Platform Input' : platformEventKind === 'setup' ? 'Setup Session Kickoff' : 'Delegated Task Platform Event'}
+- The current input is a trusted platform-generated ${platformEventKind === 'automation' ? 'custom automation request' : platformEventKind === 'external_input' ? 'external interaction associated with this conversation' : platformEventKind === 'setup' ? 'first-run setup kickoff for this deployment' : 'event about a delegated task'}, not a human-authored request.
 ${
   platformEventVisibility === 'required'
     ? '- This event requires a user-visible closeout because it carries user-useful substance. Present its result, changed expectation, required decision, or recovery action; never narrate lifecycle state alone. Do not call "ignore_event".'
@@ -263,6 +263,15 @@ ${
     ? `- Execute the automation prompt now. Use integrations directly when sufficient, and launch a task only when repository or workspace execution is actually required. The configured model is a delegated-task default, not the Fast inference model.
 - When the automation asks for launchable suggested tasks and this is a Slack, Discord, Teams, or Telegram report, put each concrete follow-up in the closeout's \`suggestions\` array. Keep the report summary in \`message\`; do not render suggestion cards or launch instructions as inline prose because the delivery layer adds them.
 - If launchable suggestions are unavailable on the current surface, keep follow-ups as ordinary report text and do not promise reaction-triggered launching.
+`
+    : ''
+}
+${
+  platformEventKind === 'setup'
+    ? `- The deployment's administrator just finished initial setup and is arriving in this session right now. The event lists the starter tasks they selected on the final setup screen.
+- First launch every listed starter task with "launch_task", one call per listed task, using that task's \`prompt\` field verbatim as the task prompt and null for the environment. Launch each listed task exactly once and do not invent tasks beyond the list on this turn.
+- Then post exactly one closeout that welcomes the administrator by name when the event provides one, explains in a sentence or two what you are and the kinds of work they can ask for here (coding tasks across their connected repositories, questions about their code, follow-ups on running work), and notes that the tasks just started will report progress and results back into this conversation. Keep it warm and brief; do not repeat per-task links or details already visible in the kickoff cards.
+- If a launch fails, name the task that could not start in the closeout and tell the administrator they can ask you to retry it.
 `
     : ''
 }

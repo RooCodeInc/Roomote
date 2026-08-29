@@ -25,7 +25,8 @@ export type FastAgentPlatformEventHandling = 'default' | 'present_only';
 export type FastAgentPlatformEventKind =
   | 'delegated_task'
   | 'automation'
-  | 'external_input';
+  | 'external_input'
+  | 'setup';
 
 export type FastAgentSuggestedTask = {
   title: string;

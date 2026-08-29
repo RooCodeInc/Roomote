@@ -26,8 +26,7 @@ const userState = vi.hoisted(() => ({
 }));
 const starterResultState = vi.hoisted(() => ({
   queue: [] as Array<{
-    launched: Array<{ starterTaskId: string; sessionId: string }>;
-    failed: Array<{ starterTaskId: string; error: string }>;
+    sessionId: string | null;
     setupCompleted: boolean;
     completionError: string | null;
   }>,
@@ -59,11 +58,7 @@ vi.mock('@tanstack/react-query', async () => {
           mutate: async (input: { selectedStarterTaskIds: string[] }) => {
             starterMutateMock(input);
             const result = starterResultState.queue.shift() ?? {
-              launched: input.selectedStarterTaskIds.map((starterTaskId) => ({
-                starterTaskId,
-                sessionId: `session-${starterTaskId}`,
-              })),
-              failed: [],
+              sessionId: 'setup-session-1',
               setupCompleted: true,
               completionError: null,
             };
@@ -307,7 +302,7 @@ describe('Setup StepInvoke', () => {
     }
   });
 
-  it('launches a single selected Session and routes to it', async () => {
+  it('submits a single selected starter task and routes to the setup session', async () => {
     render(<StepInvoke />);
 
     for (const title of STARTER_TASK_TITLES.slice(1)) {
@@ -325,7 +320,7 @@ describe('Setup StepInvoke', () => {
     });
 
     await waitFor(() => {
-      expect(replaceMock).toHaveBeenCalledWith('/sessions/session-speed-up-ci');
+      expect(replaceMock).toHaveBeenCalledWith('/sessions/setup-session-1');
     });
 
     expect(setQueryDataMock).toHaveBeenCalledWith(
@@ -347,7 +342,7 @@ describe('Setup StepInvoke', () => {
     expect(mutateMock).not.toHaveBeenCalled();
   });
 
-  it('launches every selected Session and routes to the Sessions list', async () => {
+  it('submits the full selection and routes to the one setup session', async () => {
     render(<StepInvoke />);
 
     clickGo();
@@ -367,22 +362,15 @@ describe('Setup StepInvoke', () => {
     });
 
     await waitFor(() => {
-      expect(replaceMock).toHaveBeenCalledWith('/sessions');
+      expect(replaceMock).toHaveBeenCalledWith('/sessions/setup-session-1');
     });
   });
 
-  it('keeps failures visible and retries only tasks that have not launched', async () => {
+  it('surfaces a completion error and retries with the same selection', async () => {
     starterResultState.queue.push({
-      launched: [
-        { starterTaskId: 'speed-up-ci', sessionId: 'session-ci' },
-        { starterTaskId: 'security-scan', sessionId: 'session-security' },
-      ],
-      failed: [
-        { starterTaskId: 'fix-test-flakes', error: 'No repositories.' },
-        { starterTaskId: 'update-dependencies', error: 'No repositories.' },
-      ],
+      sessionId: null,
       setupCompleted: false,
-      completionError: null,
+      completionError: 'settings write failed',
     });
 
     render(<StepInvoke />);
@@ -390,45 +378,36 @@ describe('Setup StepInvoke', () => {
     clickGo();
 
     await waitFor(() => {
-      expect(
-        screen.getByText(
-          /Couldn't start: Fix test flakes, Update dependencies/,
-        ),
-      ).toBeInTheDocument();
+      expect(screen.getByText(/settings write failed/)).toBeInTheDocument();
     });
     expect(replaceMock).not.toHaveBeenCalled();
-    expect(
-      screen.getByRole('checkbox', { name: 'Speed up CI' }),
-    ).toBeDisabled();
-    expect(screen.getAllByText('Started.')).toHaveLength(2);
 
     fireEvent.click(screen.getByRole('button', { name: /retry/i }));
 
     await waitFor(() => {
       expect(starterMutateMock).toHaveBeenLastCalledWith({
         launchBatchId: '11111111-1111-4111-8111-111111111111',
-        selectedStarterTaskIds: ['fix-test-flakes', 'update-dependencies'],
+        selectedStarterTaskIds: [
+          'speed-up-ci',
+          'security-scan',
+          'fix-test-flakes',
+          'update-dependencies',
+        ],
         anonymousAnalyticsEnabled: true,
         productUpdatesEnabled: true,
       });
     });
 
     await waitFor(() => {
-      expect(replaceMock).toHaveBeenCalledWith('/sessions');
+      expect(replaceMock).toHaveBeenCalledWith('/sessions/setup-session-1');
     });
   });
 
   it('reuses the launch batch id after an ambiguous result and remount', async () => {
     starterResultState.queue.push({
-      launched: [],
-      failed: [
-        { starterTaskId: 'speed-up-ci', error: 'Request timed out.' },
-        { starterTaskId: 'security-scan', error: 'Request timed out.' },
-        { starterTaskId: 'fix-test-flakes', error: 'Request timed out.' },
-        { starterTaskId: 'update-dependencies', error: 'Request timed out.' },
-      ],
+      sessionId: null,
       setupCompleted: false,
-      completionError: null,
+      completionError: 'Request timed out.',
     });
 
     const firstRender = render(<StepInvoke />);
@@ -453,44 +432,6 @@ describe('Setup StepInvoke', () => {
     expect(starterMutateMock.mock.calls[1]?.[0].launchBatchId).toBe(
       starterMutateMock.mock.calls[0]?.[0].launchBatchId,
     );
-  });
-
-  it('keeps setup incomplete and offers retry when completion fails after launches', async () => {
-    starterResultState.queue.push({
-      launched: [{ starterTaskId: 'speed-up-ci', sessionId: 'session-ci' }],
-      failed: [],
-      setupCompleted: false,
-      completionError: 'settings write failed',
-    });
-
-    render(<StepInvoke />);
-
-    for (const title of STARTER_TASK_TITLES.slice(1)) {
-      fireEvent.click(screen.getByRole('checkbox', { name: title }));
-    }
-    clickGo();
-
-    await waitFor(() => {
-      expect(screen.getByText(/settings write failed/)).toBeInTheDocument();
-    });
-    expect(replaceMock).not.toHaveBeenCalled();
-
-    // The remaining selection is empty, so the retry completes setup through
-    // the starter mutation and routes to the already-launched Session.
-    fireEvent.click(screen.getByRole('button', { name: /retry/i }));
-
-    await waitFor(() => {
-      expect(starterMutateMock).toHaveBeenLastCalledWith({
-        launchBatchId: '11111111-1111-4111-8111-111111111111',
-        selectedStarterTaskIds: [],
-        anonymousAnalyticsEnabled: true,
-        productUpdatesEnabled: true,
-      });
-    });
-
-    await waitFor(() => {
-      expect(replaceMock).toHaveBeenCalledWith('/sessions/session-ci');
-    });
   });
 
   it('optimistically completes setup and onboarding before routing away when nothing is selected', async () => {
