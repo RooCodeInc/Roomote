@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 
-import { and, desc, eq, gt, inArray, isNull, lte, sql } from 'drizzle-orm';
+import { and, desc, eq, gt, inArray, isNull, lte, ne, sql } from 'drizzle-orm';
 
 import {
   activeRunStatuses,
@@ -1189,6 +1189,13 @@ export async function getCanonicalPrReviewAction(deliveryId: string): Promise<{
   return row ?? null;
 }
 
+/**
+ * Marks the posted canonical action as awaiting the user and retires every
+ * older awaiting offer in the same destination conversation, mirroring the
+ * legacy Redis path's claim-older-offers-on-attach semantics. Only the newest
+ * offer in a conversation stays actionable; earlier ones would otherwise
+ * accumulate as a stack of pending cards.
+ */
 export async function attachCanonicalPrReviewActionMessage(
   deliveryId: string,
   messageId: string,
@@ -1210,8 +1217,42 @@ export async function attachCanonicalPrReviewActionMessage(
         eq(prReviewNotificationDeliveries.status, 'prompt_posting'),
       ),
     )
-    .returning({ id: prReviewNotificationDeliveries.id });
-  return rows.length === 1;
+    .returning({
+      id: prReviewNotificationDeliveries.id,
+      destinationKind: prReviewNotificationDeliveries.destinationKind,
+      destinationKey: prReviewNotificationDeliveries.destinationKey,
+    });
+  const attached = rows[0];
+  if (!attached) {
+    return false;
+  }
+
+  if (attached.destinationKind && attached.destinationKey) {
+    await db
+      .update(prReviewNotificationDeliveries)
+      .set({
+        status: 'dismissed',
+        actionClaimedAt: new Date(),
+        completedAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(prReviewNotificationDeliveries.status, 'awaiting_user_action'),
+          eq(
+            prReviewNotificationDeliveries.destinationKind,
+            attached.destinationKind,
+          ),
+          eq(
+            prReviewNotificationDeliveries.destinationKey,
+            attached.destinationKey,
+          ),
+          ne(prReviewNotificationDeliveries.id, attached.id),
+        ),
+      );
+  }
+
+  return true;
 }
 
 export async function claimCanonicalPrReviewAction(input: {

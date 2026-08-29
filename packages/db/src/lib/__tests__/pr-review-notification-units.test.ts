@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+
 import {
   and,
   attachCanonicalPrReviewActionMessage,
@@ -994,5 +996,97 @@ describe('canonical PR review notification ownership', () => {
       destinationKey,
       taskId: task.id,
     });
+  });
+
+  it('retires older awaiting actions in the same destination when a new one attaches', async () => {
+    const sessionConversation = `supersede-session-${randomUUID()}`;
+    const otherConversation = `supersede-other-${randomUUID()}`;
+    const fastParentPayload = (conversationId: string) => ({
+      fastAgentParent: {
+        sessionId: '11111111-1111-4111-8111-111111111111',
+        conversation: {
+          surface: 'web' as const,
+          workspaceId: 'user-1',
+          conversationId,
+        },
+      },
+    });
+
+    const postAction = async (repository: string) => {
+      const claim = (await claimForRepository(repository)).find(
+        ({ repository: claimedRepository }) => claimedRepository === repository,
+      );
+      if (!claim || claim.ownershipVersion !== 'canonical') {
+        throw new Error('expected canonical claim');
+      }
+      await transitionCanonicalPrReviewDelivery({
+        deliveryId: claim.deliveryId,
+        leaseToken: claim.leaseToken,
+        expected: 'claimed',
+        status: 'prepared',
+      });
+      await transitionCanonicalPrReviewDelivery({
+        deliveryId: claim.deliveryId,
+        leaseToken: claim.leaseToken,
+        expected: 'prepared',
+        status: 'prompt_posting',
+        values: { followUpPrompt: 'Resolve the feedback.' },
+      });
+      await expect(
+        attachCanonicalPrReviewActionMessage(
+          claim.deliveryId,
+          claim.deliveryId,
+          claim.leaseToken,
+        ),
+      ).resolves.toBe(true);
+      return claim.deliveryId;
+    };
+    const statusOf = async (deliveryId: string) =>
+      (
+        await db.query.prReviewNotificationDeliveries.findFirst({
+          where: eq(prReviewNotificationDeliveries.id, deliveryId),
+          columns: { status: true },
+        })
+      )?.status;
+
+    const setups = await Promise.all(
+      [
+        { conversationId: sessionConversation, prNumber: 21 },
+        { conversationId: sessionConversation, prNumber: 22 },
+        { conversationId: otherConversation, prNumber: 23 },
+      ].map(async ({ conversationId, prNumber }) => {
+        const task = await taskFactory.create();
+        const repository = `owner/supersede-${task.id}`;
+        await Promise.all([
+          runFactory.create({
+            taskId: task.id,
+            payload: fastParentPayload(conversationId),
+          }),
+          associate(task.id, repository, prNumber),
+        ]);
+        await persistPrReviewEvent(
+          eventInput({
+            repository,
+            prNumber,
+            eventKey: `supersede-${task.id}`,
+          }),
+        );
+        return repository;
+      }),
+    );
+
+    const otherDeliveryId = await postAction(setups[2]!);
+    const firstDeliveryId = await postAction(setups[0]!);
+    const secondDeliveryId = await postAction(setups[1]!);
+
+    // The newest offer in the session stays actionable; the older one is
+    // retired, and a different conversation's offer is untouched.
+    await expect(statusOf(firstDeliveryId)).resolves.toBe('dismissed');
+    await expect(statusOf(secondDeliveryId)).resolves.toBe(
+      'awaiting_user_action',
+    );
+    await expect(statusOf(otherDeliveryId)).resolves.toBe(
+      'awaiting_user_action',
+    );
   });
 });
