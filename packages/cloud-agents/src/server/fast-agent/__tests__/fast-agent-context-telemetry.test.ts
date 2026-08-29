@@ -173,6 +173,7 @@ describe('captureFastAgentInferenceContext', () => {
       userId: 'private-user-id',
       surface: 'web',
       turnSource: 'human',
+      initialHumanTurn: true,
       sessionPath: 'cold_rebuild',
       outcome: 'success',
       serviceDurationMs: 1_250,
@@ -191,6 +192,7 @@ describe('captureFastAgentInferenceContext', () => {
       properties: {
         surface: 'web',
         turn_source: 'human',
+        initial_human_turn: true,
         session_path: 'cold_rebuild',
         outcome: 'success',
         service_duration_ms: 1_250,
@@ -210,6 +212,26 @@ describe('captureFastAgentInferenceContext', () => {
     );
     expect(captureEvent.mock.calls[0]?.[1]?.properties).not.toHaveProperty(
       'turn_id',
+    );
+  });
+
+  it('keeps an unavailable initial-turn classification explicit', () => {
+    captureFastAgentTurnSettled({
+      userId: 'private-user-id',
+      surface: 'web',
+      turnSource: 'human',
+      outcome: 'failure',
+      serviceDurationMs: 100,
+      visibleReplyCount: 0,
+      openCodeProviderRetryEventCount: 0,
+      roomoteInferenceRetryCount: 0,
+    });
+
+    expect(captureEvent).toHaveBeenCalledWith(
+      'fast_turn_settled',
+      expect.objectContaining({
+        properties: expect.objectContaining({ initial_human_turn: null }),
+      }),
     );
   });
 });

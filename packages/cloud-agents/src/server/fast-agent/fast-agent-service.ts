@@ -844,7 +844,9 @@ export async function answerFastAgentQuestion({
   const persistCanonicalMessage = async (
     message: Parameters<typeof upsertFastAgentMessage>[0]['message'],
     bestEffort = false,
-  ): Promise<void> => {
+  ): Promise<
+    Awaited<ReturnType<typeof upsertFastAgentMessage>> | undefined
+  > => {
     if (!canonicalConversationId) {
       if (bestEffort) return;
       throw new Error(
@@ -853,7 +855,7 @@ export async function answerFastAgentQuestion({
     }
 
     try {
-      await upsertFastAgentMessage({
+      return await upsertFastAgentMessage({
         sessionId: canonicalConversationId,
         message,
       });
@@ -1095,9 +1097,11 @@ export async function answerFastAgentQuestion({
   };
 
   try {
-    turnVisibleMessages.push(
-      buildUserTextMessage(normalizeThreadText(question)),
-    );
+    if (!platformEvent) {
+      turnVisibleMessages.push(
+        buildUserTextMessage(normalizeThreadText(question)),
+      );
+    }
     const [
       availableEnvironments,
       taskModelOptions,
@@ -1149,7 +1153,7 @@ export async function answerFastAgentQuestion({
     activeOpenCodeSessionId = session.openCodeSessionId;
     diagnostics.setCanonicalConversationId(session.id);
     const userEvent = allocateCanonicalEvent('user');
-    await persistCanonicalMessage(
+    const userMessageResult = await persistCanonicalMessage(
       {
         ...userEvent,
         turnId,
@@ -1174,6 +1178,9 @@ export async function answerFastAgentQuestion({
         source: conversation.surface,
       },
       true,
+    );
+    diagnostics.recordInitialHumanTurn(
+      platformEvent ? false : userMessageResult?.initialHumanTurn,
     );
     if (!platformEvent) {
       void refreshFastAgentSessionTitle({ sessionId: session.id, userId });
