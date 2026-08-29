@@ -290,7 +290,9 @@ images, and GitHub Release have all shipped successfully.
 Fetch both branches and tags, then branch from the exact latest `main` tip:
 
 ```bash
-git fetch origin main develop --tags
+git fetch --tags origin \
+  refs/heads/main:refs/remotes/origin/main \
+  refs/heads/develop:refs/remotes/origin/develop
 git switch --create hotfix/<concise-name> origin/main
 git tag --sort=-version:refname | head -5
 node -p "require('./package.json').version"
