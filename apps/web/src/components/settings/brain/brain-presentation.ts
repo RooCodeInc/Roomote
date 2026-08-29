@@ -129,9 +129,11 @@ export function describeSourceStatus(
 }
 
 export const BRAIN_INFERENCE_PROVIDER_LABELS: Record<
-  'openrouter' | 'openai',
+  'openrouter' | 'openai' | 'helper',
   string
 > = {
   openrouter: 'OpenRouter',
   openai: 'OpenAI',
+  // No Brain-specific key: the gateway rides the deployment's helper model.
+  helper: 'Helper model',
 };

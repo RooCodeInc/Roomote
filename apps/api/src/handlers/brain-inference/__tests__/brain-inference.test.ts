@@ -440,6 +440,27 @@ describe('helper-model synthesis', () => {
     expect(JSON.parse(init.body as string).model).toBe('openai/gpt-5.6-mini');
   });
 
+  it('answers non-sentinel chat with the helper model when no provider key exists', async () => {
+    mockResolveBrainInferenceProvider.mockResolvedValue(null);
+    mockGenerateTrackedNonTaskText.mockResolvedValue('expanded query');
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    const response = await post('/v1/chat/completions', {
+      token: GATEWAY_TOKEN,
+      body: {
+        model: 'gpt-5.2',
+        messages: [{ role: 'user', content: 'expand this' }],
+      },
+    });
+
+    expect(response.status).toBe(200);
+    const payload = (await response.json()) as { id: string; model: string };
+    expect(payload.id).toMatch(/^brain-helper-/);
+    expect(mockGenerateTrackedNonTaskText).toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it('leaves non-sentinel chat models on the provider path', async () => {
     const fetchMock = vi.fn(
       async () =>

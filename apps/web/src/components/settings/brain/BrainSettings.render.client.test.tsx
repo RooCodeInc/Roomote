@@ -115,6 +115,7 @@ function buildSettings(
     enabledFromLegacyKey: false,
     url: 'http://gbrain:8080',
     inferenceProvider: 'openrouter',
+    embeddingsAvailable: true,
     keySource: 'brain',
     recall: { mode: 'semantic', embeddedCount: 771, chunkCount: 771 },
     corpus: {
