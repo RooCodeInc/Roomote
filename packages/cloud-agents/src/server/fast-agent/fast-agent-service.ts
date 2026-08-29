@@ -2307,7 +2307,7 @@ export async function answerFastAgentQuestion({
     });
 
     throwIfTurnCancelled();
-    if (!closed) {
+    if (!closed && !platformEvent) {
       const message = promptText.trim();
       if (message) {
         await postReply(

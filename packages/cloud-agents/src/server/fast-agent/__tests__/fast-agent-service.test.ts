@@ -2483,6 +2483,99 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     expect(adapter.postReply).not.toHaveBeenCalled();
   });
 
+  it.each([
+    'automation_triggered',
+    'child_message',
+    'artifact_published',
+    'task_settled',
+    'pull_request_opened',
+    'pull_request_feedback',
+    'pull_request_status_changed',
+    'pull_request_conflict_detected',
+  ])(
+    'does not post an escaped %s platform event echoed as final text',
+    async (type) => {
+      const event = { type };
+      const escapedEvent = `&lt;platform_event&gt;${JSON.stringify(event)}&lt;/platform_event&gt;`;
+      mocks.generateText.mockImplementation(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          return escapedEvent;
+        },
+      );
+      const adapter = callbacks();
+
+      await expect(
+        answerFastAgentQuestion({
+          ...baseParams,
+          question: `<platform_event>${JSON.stringify(event)}</platform_event>`,
+          currentMessageId: `fast-parent-${type}:event-1`,
+          turnSource: 'platform_event',
+          adapter,
+        }),
+      ).resolves.toBe('');
+
+      expect(adapter.postReply).not.toHaveBeenCalled();
+    },
+  );
+
+  it('does not post a literal platform event envelope echoed as final text', async () => {
+    const event = {
+      type: 'task_settled',
+      taskId: 'task-1',
+      status: 'completed',
+    };
+    const serializedEvent = `<platform_event>${JSON.stringify(event)}</platform_event>`;
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        return serializedEvent;
+      },
+    );
+    const adapter = callbacks();
+
+    await expect(
+      answerFastAgentQuestion({
+        ...baseParams,
+        question: serializedEvent,
+        currentMessageId: 'fast-parent-settle:42',
+        turnSource: 'platform_event',
+        adapter,
+      }),
+    ).resolves.toBe('');
+
+    expect(adapter.postReply).not.toHaveBeenCalled();
+  });
+
+  it('keeps a deliberate parent-authored session reply for a platform event', async () => {
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'closeout',
+          message: 'The delegated task finished its targeted checks.',
+        });
+        return '&lt;platform_event&gt;internal payload&lt;/platform_event&gt;';
+      },
+    );
+    const adapter = callbacks();
+
+    await answerFastAgentQuestion({
+      ...baseParams,
+      question:
+        '<platform_event>{"type":"task_settled","status":"completed"}</platform_event>',
+      currentMessageId: 'fast-parent-settle:42',
+      turnSource: 'platform_event',
+      adapter,
+    });
+
+    expect(adapter.postReply).toHaveBeenCalledWith({
+      purpose: 'closeout',
+      message: 'The delegated task finished its targeted checks.',
+    });
+    expect(adapter.postReply).toHaveBeenCalledOnce();
+  });
+
   it('posts a closeout when a visibility-required event tries to ignore itself', async () => {
     mocks.generateText.mockImplementation(
       async (_params, _session, options) => {
@@ -2494,6 +2587,10 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         ).toEqual({
           success: false,
           error: 'This platform event requires a user-visible closeout.',
+        });
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'closeout',
+          message: 'There is new pull request feedback to review.',
         });
         return 'There is new pull request feedback to review.';
       },
