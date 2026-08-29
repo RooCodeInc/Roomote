@@ -590,10 +590,16 @@ export type BackgroundAgentSettings = StoredBackgroundAgentSettings & {
   ciFailureTriageLastRunAt: Date | null;
   ciFailureTriageScanCursor?: CiFailureTriageScanCursor | null;
   mergeAnnouncerFrequency: MergeAnnouncerFrequency;
-  mergeAnnouncerSlackChannelId: string | null;
-  mergeAnnouncerDiscordChannelId: string | null;
   mergeAnnouncerLastRunAt: Date | null;
   mergeAnnouncerScanCursor?: CiFailureTriageScanCursor | null;
+  mergeAnnouncerTargetProvider:
+    | 'slack'
+    | 'teams'
+    | 'telegram'
+    | 'discord'
+    | null;
+  mergeAnnouncerTargetMode: 'channel' | 'direct_message' | null;
+  mergeAnnouncerTargetChannelId: string | null;
 };
 
 export type SecurityAuditorScanCursor = AutomationScanCursor;

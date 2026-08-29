@@ -298,7 +298,6 @@ export async function getBackgroundAgentSettingsCommand(
     securityAuditorSlackChannel: string | null;
     codeQualityAuditorSlackChannel: string | null;
     ciFailureTriageSlackChannel: string | null;
-    mergeAnnouncerSlackChannel: string | null;
   };
   slackChannelDisplayNames: SlackChannelDisplayNames;
   resolvedDestinations: ResolvedAutomationDestinations;
@@ -383,8 +382,6 @@ export async function getBackgroundAgentSettingsCommand(
         visibleSettings.codeQualityAuditorSlackChannelId,
       ciFailureTriageSlackChannelId:
         visibleSettings.ciFailureTriageSlackChannelId,
-      mergeAnnouncerSlackChannelId:
-        visibleSettings.mergeAnnouncerSlackChannelId,
     }),
     getSlackChannelDisplayNames({
       notifier,
@@ -409,8 +406,6 @@ export async function getBackgroundAgentSettingsCommand(
         visibleSettings.codeQualityAuditorSlackChannelId,
       ciFailureTriageSlackChannelId:
         visibleSettings.ciFailureTriageSlackChannelId,
-      mergeAnnouncerSlackChannelId:
-        visibleSettings.mergeAnnouncerSlackChannelId,
     }),
     resolveAutomationDestinations({
       slackConnected: Boolean(slackInstallation?.isActive),

@@ -86,14 +86,14 @@ conflict resolution, and remove it when a human should handle the conflict
 instead. Roomote only tries this on labeled PRs that are still active, and it
 skips PRs older than the age cap you set.
 
-For **Merge announcer**, connect a source-control provider, choose a report destination or
-configure the shared Manager Channel, and turn the toggle on. Roomote reacts to
-provider-deduplicated push webhooks for each active repository's current default branch,
-uses the deployment helper model to write a brief commit summary, and includes
-the pusher and commit authors. Feature-branch pushes and branch deletions are
-ignored. GitHub, GitLab, Azure DevOps, Bitbucket, and Gitea are supported.
-Reports can use Slack, Microsoft Teams, Telegram, or Discord through
-the normal automation destination fallback.
+For **Merge announcer**, connect a source-control provider and turn the toggle
+on. Choose Slack, Microsoft Teams, Telegram, or Discord, then select a channel
+or **DM me**. Choose **Default** to use the shared Manager Channel or normal
+primary-conversation fallback. Roomote reacts to provider-deduplicated push
+webhooks for each active repository's current default branch, uses the
+deployment helper model to write a brief commit summary, and includes the pusher
+and commit authors. Feature-branch pushes and branch deletions are ignored.
+GitHub, GitLab, Azure DevOps, Bitbucket, and Gitea are supported.
 
 ## Custom automations
 

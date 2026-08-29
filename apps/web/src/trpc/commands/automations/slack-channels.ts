@@ -143,7 +143,6 @@ export async function getSlackChannelAccessWarnings({
   securityAuditorSlackChannelId,
   codeQualityAuditorSlackChannelId,
   ciFailureTriageSlackChannelId,
-  mergeAnnouncerSlackChannelId,
 }: {
   notifier: SlackNotifier | null;
   channelAutoStartSlackChannelIds: string[];
@@ -158,7 +157,6 @@ export async function getSlackChannelAccessWarnings({
   securityAuditorSlackChannelId: string | null;
   codeQualityAuditorSlackChannelId: string | null;
   ciFailureTriageSlackChannelId: string | null;
-  mergeAnnouncerSlackChannelId: string | null;
 }): Promise<SlackChannelAccessWarnings> {
   if (!notifier) {
     return {
@@ -175,7 +173,6 @@ export async function getSlackChannelAccessWarnings({
       securityAuditorSlackChannel: null,
       codeQualityAuditorSlackChannel: null,
       ciFailureTriageSlackChannel: null,
-      mergeAnnouncerSlackChannel: null,
     };
   }
 
@@ -192,7 +189,6 @@ export async function getSlackChannelAccessWarnings({
     securityAuditorSlackChannelId,
     codeQualityAuditorSlackChannelId,
     ciFailureTriageSlackChannelId,
-    mergeAnnouncerSlackChannelId,
   ].filter((channelId): channelId is string => Boolean(channelId));
 
   const membershipByChannelId = new Map<string, boolean | null>();
@@ -266,11 +262,6 @@ export async function getSlackChannelAccessWarnings({
       membershipByChannelId.get(ciFailureTriageSlackChannelId) !== true
         ? ciFailureTriageSlackChannelId
         : null,
-    mergeAnnouncerSlackChannel:
-      mergeAnnouncerSlackChannelId &&
-      membershipByChannelId.get(mergeAnnouncerSlackChannelId) !== true
-        ? mergeAnnouncerSlackChannelId
-        : null,
   };
 }
 
@@ -289,7 +280,6 @@ export async function getSlackChannelDisplayNames({
   securityAuditorSlackChannelId,
   codeQualityAuditorSlackChannelId,
   ciFailureTriageSlackChannelId,
-  mergeAnnouncerSlackChannelId,
 }: {
   notifier: SlackNotifier | null;
   channelAutoStartSlackChannelIds: string[];
@@ -305,7 +295,6 @@ export async function getSlackChannelDisplayNames({
   securityAuditorSlackChannelId: string | null;
   codeQualityAuditorSlackChannelId: string | null;
   ciFailureTriageSlackChannelId: string | null;
-  mergeAnnouncerSlackChannelId: string | null;
 }): Promise<SlackChannelDisplayNames> {
   if (!notifier) {
     return {
@@ -322,7 +311,6 @@ export async function getSlackChannelDisplayNames({
       securityAuditorSlackChannel: null,
       codeQualityAuditorSlackChannel: null,
       ciFailureTriageSlackChannel: null,
-      mergeAnnouncerSlackChannel: null,
     };
   }
 
@@ -341,7 +329,6 @@ export async function getSlackChannelDisplayNames({
     securityAuditorSlackChannel,
     codeQualityAuditorSlackChannel,
     ciFailureTriageSlackChannel,
-    mergeAnnouncerSlackChannel,
   ] = await Promise.all([
     Promise.all(
       uniqueChannelIds.map(async (channelId) => [
@@ -385,9 +372,6 @@ export async function getSlackChannelDisplayNames({
     ciFailureTriageSlackChannelId
       ? notifier.getChannelName(ciFailureTriageSlackChannelId)
       : Promise.resolve(null),
-    mergeAnnouncerSlackChannelId
-      ? notifier.getChannelName(mergeAnnouncerSlackChannelId)
-      : Promise.resolve(null),
   ]);
 
   return {
@@ -430,9 +414,6 @@ export async function getSlackChannelDisplayNames({
       : null,
     ciFailureTriageSlackChannel: ciFailureTriageSlackChannel
       ? `#${ciFailureTriageSlackChannel}`
-      : null,
-    mergeAnnouncerSlackChannel: mergeAnnouncerSlackChannel
-      ? `#${mergeAnnouncerSlackChannel}`
       : null,
   };
 }

@@ -44,7 +44,6 @@ export type BackgroundAgentFieldErrorKey =
   | 'securityAuditorSlackChannel'
   | 'codeQualityAuditorSlackChannel'
   | 'ciFailureTriageSlackChannel'
-  | 'mergeAnnouncerSlackChannel'
   | 'managerStatsDiscordChannel'
   | 'providerUsageLimitDiscordChannel'
   | 'sentryTriageDiscordChannel'
@@ -53,7 +52,6 @@ export type BackgroundAgentFieldErrorKey =
   | 'securityAuditorDiscordChannel'
   | 'codeQualityAuditorDiscordChannel'
   | 'ciFailureTriageDiscordChannel'
-  | 'mergeAnnouncerDiscordChannel'
   | 'suggesterDiscordChannel'
   | 'announcerDiscordChannel'
   | 'platformIssueDiscordChannel'
@@ -84,7 +82,6 @@ export type SlackChannelFieldErrorKey = Extract<
   | 'securityAuditorSlackChannel'
   | 'codeQualityAuditorSlackChannel'
   | 'ciFailureTriageSlackChannel'
-  | 'mergeAnnouncerSlackChannel'
 >;
 
 export type DiscordChannelFieldErrorKey = Extract<
@@ -98,7 +95,6 @@ export type DiscordChannelFieldErrorKey = Extract<
   | 'securityAuditorDiscordChannel'
   | 'codeQualityAuditorDiscordChannel'
   | 'ciFailureTriageDiscordChannel'
-  | 'mergeAnnouncerDiscordChannel'
   | 'suggesterDiscordChannel'
   | 'announcerDiscordChannel'
   | 'platformIssueDiscordChannel'
@@ -127,7 +123,6 @@ export interface SlackChannelAccessWarnings {
   securityAuditorSlackChannel: string | null;
   codeQualityAuditorSlackChannel: string | null;
   ciFailureTriageSlackChannel: string | null;
-  mergeAnnouncerSlackChannel: string | null;
 }
 
 export interface SlackChannelDisplayNames {
@@ -144,7 +139,6 @@ export interface SlackChannelDisplayNames {
   securityAuditorSlackChannel: string | null;
   codeQualityAuditorSlackChannel: string | null;
   ciFailureTriageSlackChannel: string | null;
-  mergeAnnouncerSlackChannel: string | null;
 }
 
 /**
@@ -320,6 +314,7 @@ export interface UpdateBackgroundAgentSettingsInput extends ScheduleOnlyAutomati
   codeQualityAuditorDiscordChannel?: string | null;
   ciFailureTriageSlackChannel?: string | null;
   ciFailureTriageDiscordChannel?: string | null;
-  mergeAnnouncerSlackChannel?: string | null;
-  mergeAnnouncerDiscordChannel?: string | null;
+  mergeAnnouncerTargetProvider?: CommunicationProvider | null;
+  mergeAnnouncerTargetMode?: 'channel' | 'direct_message';
+  mergeAnnouncerTargetChannelId?: string | null;
 }

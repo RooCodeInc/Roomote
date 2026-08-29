@@ -5,6 +5,7 @@ import {
   DEFAULT_PROVIDER_USAGE_LIMIT_FREQUENCY,
   DEFAULT_PROVIDER_USAGE_LIMIT_THRESHOLD,
   getTriggerableBackgroundAutomationDescriptorByKey,
+  getCommunicationAutomationTargetKind,
   isConflictResolverMaxPrAgeDays,
   isProviderUsageLimitThreshold,
   type AutomationTarget,
@@ -26,6 +27,7 @@ import {
   findDiscordDestinationByChannelId,
   findTeamsPrimaryConversation,
   findTelegramPrimaryChatId,
+  listConnectedCommunicationProviders,
   resolveAutomationRuntimeDestination,
 } from '@roomote/sdk/server';
 import { resolveConfiguredGitHubAppSlug } from '@roomote/github';
@@ -315,7 +317,6 @@ export async function updateBackgroundAgentSettingsCommand(
         securityAuditorSlackChannel: string | null;
         codeQualityAuditorSlackChannel: string | null;
         ciFailureTriageSlackChannel: string | null;
-        mergeAnnouncerSlackChannel: string | null;
       };
       slackChannelDisplayNames: SlackChannelDisplayNames;
     }
@@ -631,7 +632,6 @@ export async function updateBackgroundAgentSettingsCommand(
   const codeQualityAuditorChannelResult =
     destinationResults.codeQualityAuditor.slack;
   const ciFailureTriageChannelResult = destinationResults.ciFailureTriage.slack;
-  const mergeAnnouncerChannelResult = destinationResults.mergeAnnouncer.slack;
   const managerStatsDiscordResult = destinationResults.managerStats.discord;
   const providerUsageLimitDiscordResult =
     destinationResults.providerUsageLimit.discord;
@@ -645,7 +645,6 @@ export async function updateBackgroundAgentSettingsCommand(
     destinationResults.codeQualityAuditor.discord;
   const ciFailureTriageDiscordResult =
     destinationResults.ciFailureTriage.discord;
-  const mergeAnnouncerDiscordResult = destinationResults.mergeAnnouncer.discord;
   const suggesterDiscordResult = destinationResults.suggester.discord;
   const announcerDiscordResult = destinationResults.announcer.discord;
 
@@ -925,7 +924,40 @@ export async function updateBackgroundAgentSettingsCommand(
   const codeQualityAuditorFrequency =
     input.codeQualityAuditorFrequency ?? 'off';
   const ciFailureTriageFrequency = input.ciFailureTriageFrequency ?? 'off';
-  const mergeAnnouncerFrequency = input.mergeAnnouncerFrequency ?? 'off';
+  const mergeAnnouncerFrequency =
+    input.mergeAnnouncerFrequency ?? existingSettings.mergeAnnouncerFrequency;
+  const mergeAnnouncerDestinationSubmitted =
+    input.mergeAnnouncerTargetProvider !== undefined;
+  const mergeAnnouncerTargetProvider =
+    input.mergeAnnouncerTargetProvider ?? null;
+  const mergeAnnouncerTargetMode = input.mergeAnnouncerTargetMode ?? 'channel';
+  const mergeAnnouncerTargetChannelId =
+    input.mergeAnnouncerTargetChannelId?.trim() ?? '';
+  let mergeAnnouncerTarget: AutomationTarget | null = null;
+
+  if (mergeAnnouncerDestinationSubmitted && mergeAnnouncerTargetProvider) {
+    const connectedProviders = await listConnectedCommunicationProviders();
+    if (!connectedProviders.includes(mergeAnnouncerTargetProvider)) {
+      fieldErrors.general = `Connect ${mergeAnnouncerTargetProvider} before saving a ${mergeAnnouncerTargetProvider} report destination.`;
+    } else if (
+      mergeAnnouncerTargetMode === 'channel' &&
+      !mergeAnnouncerTargetChannelId
+    ) {
+      fieldErrors.general = 'Choose a destination channel.';
+    } else {
+      mergeAnnouncerTarget = {
+        provider: mergeAnnouncerTargetProvider,
+        targetKind: getCommunicationAutomationTargetKind(
+          mergeAnnouncerTargetProvider,
+          mergeAnnouncerTargetMode,
+        ),
+        externalRef:
+          mergeAnnouncerTargetMode === 'direct_message'
+            ? auth.userId
+            : mergeAnnouncerTargetChannelId,
+      };
+    }
+  }
 
   // Manager-channel automations resolve their destination as
   // automation target -> shared manager channel. Enabling one requires a
@@ -946,7 +978,7 @@ export async function updateBackgroundAgentSettingsCommand(
       | 'securityAuditorSlackChannel'
       | 'codeQualityAuditorSlackChannel'
       | 'ciFailureTriageSlackChannel'
-      | 'mergeAnnouncerSlackChannel'
+      | 'general'
       | 'suggesterSlackChannel'
       | 'announcerSlackChannel';
   }> = [
@@ -1049,9 +1081,10 @@ export async function updateBackgroundAgentSettingsCommand(
       key: 'merge_announcer',
       frequency: mergeAnnouncerFrequency,
       channelId:
-        mergeAnnouncerChannelResult.channelId ??
-        mergeAnnouncerDiscordResult.channelId,
-      field: 'mergeAnnouncerSlackChannel',
+        (mergeAnnouncerDestinationSubmitted
+          ? mergeAnnouncerTarget?.externalRef
+          : null) ?? null,
+      field: 'general',
     },
   ];
 
@@ -1089,7 +1122,11 @@ export async function updateBackgroundAgentSettingsCommand(
       if (nonSlackProviders.length > 0) {
         const runtime = await getAutomationRuntime(validation.key);
         const destination = await resolveAutomationRuntimeDestination({
-          runtime,
+          runtime:
+            validation.key === 'merge_announcer' &&
+            mergeAnnouncerDestinationSubmitted
+              ? { ...runtime, destination: null, targets: [] }
+              : runtime,
           slackConnected: await hasActiveSlackInstallation(),
         });
 
@@ -1444,7 +1481,21 @@ export async function updateBackgroundAgentSettingsCommand(
       key: 'merge_announcer',
       enabled: mergeAnnouncerFrequency !== 'off',
       schedule: { mode: mergeAnnouncerFrequency },
-      ...destinationUpsertFields('mergeAnnouncer'),
+      ...(mergeAnnouncerDestinationSubmitted
+        ? {
+            targets: mergeAnnouncerTarget ? [mergeAnnouncerTarget] : [],
+            managedTargetKinds: [
+              'slack_channel',
+              'slack_user',
+              'discord_channel',
+              'discord_user',
+              'teams_channel',
+              'teams_user',
+              'telegram_chat',
+              'telegram_user',
+            ] as const,
+          }
+        : {}),
       updatedAt: now,
     });
 
@@ -1552,7 +1603,6 @@ export async function updateBackgroundAgentSettingsCommand(
       updatedSettings.codeQualityAuditorSlackChannelId,
     ciFailureTriageSlackChannelId:
       updatedSettings.ciFailureTriageSlackChannelId,
-    mergeAnnouncerSlackChannelId: updatedSettings.mergeAnnouncerSlackChannelId,
   });
   const slackChannelDisplayNames = await getSlackChannelDisplayNames({
     notifier: postSaveNotifier,
@@ -1574,7 +1624,6 @@ export async function updateBackgroundAgentSettingsCommand(
       updatedSettings.codeQualityAuditorSlackChannelId,
     ciFailureTriageSlackChannelId:
       updatedSettings.ciFailureTriageSlackChannelId,
-    mergeAnnouncerSlackChannelId: updatedSettings.mergeAnnouncerSlackChannelId,
   });
   for (const row of finalResolvedChannelAutoStartRows) {
     if (

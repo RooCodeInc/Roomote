@@ -352,6 +352,25 @@ const DESTINATION_TARGET_KINDS = [
   ['discord', 'discord_channel'],
 ] as const;
 
+function getAutomationCommunicationTarget(
+  automation: Pick<Automation, 'targets'> | undefined,
+): AutomationTarget | null {
+  for (const [provider, targetKind] of DESTINATION_TARGET_KINDS) {
+    const target = automation?.targets.find(
+      (candidate) =>
+        candidate.provider === provider && candidate.targetKind === targetKind,
+    );
+    if (target) return target;
+  }
+
+  return (
+    automation?.targets.find(
+      (target) =>
+        target.provider !== 'sentry' && target.targetKind.endsWith('_user'),
+    ) ?? null
+  );
+}
+
 /**
  * Provider-neutral destination waterfall: the automation's own channel
  * target wins (Slack first when several providers are targeted), otherwise
@@ -940,6 +959,7 @@ export function normalizeBackgroundAgentSettings(
   const ciFailureTriage = automationMap.get('ci_failure_triage');
   const mergeAnnouncer = automationMap.get('merge_announcer');
   const platformIssueAlerts = automationMap.get('platform_issue_alerts');
+  const mergeAnnouncerTarget = getAutomationCommunicationTarget(mergeAnnouncer);
 
   const managerSlackChannelId = row?.managerSlackChannelId ?? null;
   const managerDiscordChannelId = row?.managerDiscordChannelId ?? null;
@@ -1100,6 +1120,19 @@ export function normalizeBackgroundAgentSettings(
     ),
     mergeAnnouncerLastRunAt: mergeAnnouncer?.lastRunAt ?? null,
     mergeAnnouncerScanCursor: mergeAnnouncer?.scanCursor ?? null,
+    mergeAnnouncerTargetProvider:
+      mergeAnnouncerTarget?.provider === 'sentry'
+        ? null
+        : (mergeAnnouncerTarget?.provider ?? null),
+    mergeAnnouncerTargetMode: mergeAnnouncerTarget
+      ? mergeAnnouncerTarget.targetKind.endsWith('_user')
+        ? 'direct_message'
+        : 'channel'
+      : null,
+    mergeAnnouncerTargetChannelId:
+      mergeAnnouncerTarget && !mergeAnnouncerTarget.targetKind.endsWith('_user')
+        ? mergeAnnouncerTarget.externalRef
+        : null,
 
     ...Object.fromEntries(
       AUTOMATION_DESTINATION_DESCRIPTORS.flatMap((descriptor) => {
