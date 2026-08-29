@@ -21,6 +21,7 @@ import {
 } from '@/components/system';
 
 import { WorkspaceBadge } from '@/components/sandbox/WorkspaceBadge';
+import { SessionSearchSnippet } from '@/components/sessions/SessionSearchSnippet';
 import { formatDistanceToNowCompact } from '@/lib/formatters';
 import { SETTINGS_PATHS } from '@/lib/settings';
 import { SUPPORT_MAILTO } from '@/lib/support';
@@ -298,7 +299,14 @@ function AuthorizedCommandPalette() {
                 value={`${session.title}-${session.id}`}
                 onSelect={() => navigate(`/sessions/${session.id}`)}
               >
-                <span className="truncate">{session.title}</span>
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate">{session.title}</span>
+                  <SessionSearchSnippet
+                    snippet={session.searchSnippet}
+                    query={debouncedSearch}
+                    className="line-clamp-1 text-xs"
+                  />
+                </span>
                 <span className="ml-auto text-xs text-muted-foreground">
                   {session.executionCount} executions
                 </span>
