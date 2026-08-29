@@ -467,7 +467,10 @@ describe('buildFastAgentSystemPrompt', () => {
       'Do not describe a closed pull request as merged or a merged pull request as merely closed',
     );
     expect(prompt).toContain(
-      'explicitly name it as the destination branch; otherwise do not infer or name a destination branch',
+      'When `targetBranch` is absent from the pull request metadata, do not infer or name a destination branch',
+    );
+    expect(prompt).not.toContain(
+      'explicitly name it as the destination branch',
     );
   });
 
