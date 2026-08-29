@@ -537,6 +537,46 @@ describe('Fast conversation repository', () => {
     ).resolves.toEqual({ initialHumanTurn: false });
   });
 
+  it('does not treat legacy platform-event history as a human turn', async () => {
+    const user = await createUser();
+    const session = await fastAgentConversationRepository.getOrCreate({
+      userId: user.id,
+      conversation: slackConversation,
+    });
+    await fastAgentConversationRepository.appendVisibleMessages({
+      conversationId: session.id,
+      messages: [
+        {
+          role: 'user',
+          content: [
+            {
+              type: 'text',
+              text: '<platform_event>{"type":"task_settled"}</platform_event>',
+            },
+          ],
+        },
+      ],
+    });
+
+    await expect(
+      fastAgentConversationRepository.upsertMessage({
+        conversationId: session.id,
+        message: {
+          eventId: 'first-human',
+          turnId: 'first-human',
+          turnSeq: 0,
+          ts: 100,
+          eventType: 'roomote_runtime.user_prompt',
+          role: 'user',
+          contentBlocks: [{ type: 'text', text: 'Prompt' }],
+          metadata: { visibleInTranscript: true, turnSource: 'human' },
+          payload: {},
+          source: 'slack',
+        },
+      }),
+    ).resolves.toEqual({ initialHumanTurn: true });
+  });
+
   it('reconciles a persisted legacy retry notice after its turn stops', async () => {
     const user = await createUser();
     const session = await fastAgentConversationRepository.getOrCreate({

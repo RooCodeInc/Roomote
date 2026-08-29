@@ -56,6 +56,22 @@ export type FastAgentMessageUpsertResult = {
 export const INTERRUPTED_INFERENCE_RETRY_MESSAGE =
   'The inference retry was interrupted before it completed. Please send the request again.';
 
+function isLegacyPlatformEventMessage(message: ModelMessage): boolean {
+  if (message.role !== 'user') return false;
+
+  const text =
+    typeof message.content === 'string'
+      ? message.content
+      : message.content
+          .flatMap((part) => (part.type === 'text' ? [part.text] : []))
+          .join('');
+  const normalized = text.trim();
+  return (
+    normalized.startsWith('<platform_event>') &&
+    normalized.endsWith('</platform_event>')
+  );
+}
+
 function activeInferenceRetryNoticeWhere() {
   return and(
     // The event slot also matches notices written before retry lifecycle
@@ -518,7 +534,11 @@ export const fastAgentConversationRepository: FastAgentConversationRepository =
             .limit(1);
           const hasCompatibilityHumanPrompt = (
             conversation.compatibilityMessages as ModelMessage[]
-          ).some(({ role }) => role === 'user');
+          ).some(
+            (compatibilityMessage) =>
+              compatibilityMessage.role === 'user' &&
+              !isLegacyPlatformEventMessage(compatibilityMessage),
+          );
           initialHumanTurn =
             !priorHumanPrompt &&
             (Boolean(currentHumanPrompt) || !hasCompatibilityHumanPrompt);
