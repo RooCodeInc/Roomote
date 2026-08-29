@@ -3,7 +3,7 @@ import {
   parseBrainToolPayloads as parseToolPayloads,
   postBrainToolCall,
   resolveBrainConnection,
-  resolveBrainInferenceProvider,
+  isBrainEmbeddingAvailable,
 } from '@roomote/sdk/server';
 import {
   db,
@@ -842,9 +842,13 @@ export async function runBrainDailyDigest(
  * gbrain owns the maintenance algorithm and its cycle locking.
  */
 export async function brainMaintenanceJob(): Promise<void> {
-  const provider = await resolveBrainInferenceProvider();
-
-  if (!provider) {
+  // Provider-agnostic, like the collector/outbox gate: a Brain with a
+  // configured embedder is a real Brain, and the digest's synthesis rides the
+  // deployment's helper model through the inference gateway, so no
+  // OpenAI/OpenRouter key is required. If a deployment somehow cannot
+  // synthesize at all, the nightly digest errors for that night (already
+  // caught below) rather than the whole Brain being dark.
+  if (!(await isBrainEmbeddingAvailable())) {
     return;
   }
 
