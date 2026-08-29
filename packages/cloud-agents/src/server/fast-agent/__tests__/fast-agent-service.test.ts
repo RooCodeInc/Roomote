@@ -3197,7 +3197,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     }
   });
 
-  it('pauses the continuation deadline for the full native tool invocation', async () => {
+  it('does not interrupt an active native tool during provider recovery', async () => {
     vi.useFakeTimers();
     try {
       mocks.listIntegrations.mockResolvedValue([
