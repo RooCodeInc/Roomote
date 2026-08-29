@@ -140,6 +140,27 @@ describe('Notion page mapping', () => {
     expect(mapped?.content).not.toContain('**Name**');
   });
 
+  it('marks property lists Notion truncated at the inline cap', () => {
+    const mapped = buildNotionPage(
+      {
+        ...page,
+        properties: {
+          ...page.properties,
+          Blocked: {
+            type: 'relation',
+            relation: [{ id: '12345678-90AB-CDEF-1234-567890ABCD00' }],
+            has_more: true,
+          },
+        },
+      },
+      { markdown: 'Body' },
+    );
+
+    expect(mapped?.content).toContain(
+      '- **Blocked**: [notion/1234567890abcdef1234567890abcd00](notion/1234567890abcdef1234567890abcd00) _(Notion truncated this list; open the source page for the rest)_',
+    );
+  });
+
   it('omits the properties section for pages with only a title', () => {
     const mapped = buildNotionPage(page, { markdown: 'Body' });
     expect(mapped?.content).not.toContain('## Properties');

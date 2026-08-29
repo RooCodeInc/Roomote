@@ -721,7 +721,15 @@ function renderNotionPropertyLines(
       const record = asObject(property);
       if (!record || record.type === 'title') return [];
       const value = renderNotionPropertyValue(record, context);
-      return value ? [`- **${name}**: ${value}`] : [];
+      if (!value) return [];
+      // Notion caps inline multi-value properties (relations above all) at
+      // 25 entries and signals the rest with has_more; an unmarked subset
+      // would read as the complete list.
+      const truncated =
+        record.has_more === true
+          ? ' _(Notion truncated this list; open the source page for the rest)_'
+          : '';
+      return [`- **${name}**: ${value}${truncated}`];
     })
     .sort((a, b) => a.localeCompare(b));
 }
