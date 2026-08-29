@@ -176,6 +176,7 @@ describe('unified Session queries', () => {
     expect(fastResult.sessions.map((session) => session.id)).toEqual([
       fastSession.id,
     ]);
+    expect(fastResult.sessions[0]?.searchSnippet).toContain('heliotrope');
 
     const taskResult = await getSessions(
       { userId: owner.id, isAdmin: false },
@@ -184,6 +185,7 @@ describe('unified Session queries', () => {
     expect(taskResult.sessions.map((session) => session.id)).toEqual([
       taskSession.id,
     ]);
+    expect(taskResult.sessions[0]?.searchSnippet).toContain('vermilion');
 
     const titleResult = await getSessions(
       { userId: owner.id, isAdmin: false },
@@ -192,6 +194,7 @@ describe('unified Session queries', () => {
     expect(titleResult.sessions.map((session) => session.id)).toEqual([
       fastSession.id,
     ]);
+    expect(titleResult.sessions[0]?.searchSnippet).toBeNull();
 
     const repositoryResult = await getSessions(
       { userId: owner.id, isAdmin: false },
@@ -315,6 +318,7 @@ describe('unified Session queries', () => {
       transcriptSession.id,
     ];
     const receivedOrder: string[] = [];
+    const receivedSnippets: Array<string | null> = [];
     let before: string | null = null;
 
     for (let index = 0; index < expectedOrder.length; index += 1) {
@@ -323,11 +327,163 @@ describe('unified Session queries', () => {
         { q: 'ranking nebula', limit: 1, before },
       );
       receivedOrder.push(...result.sessions.map((session) => session.id));
+      receivedSnippets.push(
+        ...result.sessions.map((session) => session.searchSnippet),
+      );
       before = result.nextCursor;
     }
 
     expect(receivedOrder).toEqual(expectedOrder);
+    expect(receivedSnippets).toEqual([
+      null,
+      null,
+      null,
+      expect.stringContaining('Ranking nebula'),
+    ]);
     expect(before).toBeNull();
+  });
+
+  it('does not preview invisible or deleted transcript content', async () => {
+    const owner = await userFactory.create();
+    const [conversation] = await db
+      .insert(fastAgentConversations)
+      .values({
+        userId: owner.id,
+        surface: 'web',
+        workspaceId: owner.id,
+        conversationId: crypto.randomUUID(),
+      })
+      .returning();
+    const fastSession = await sessionFactory.create({
+      ownerKind: 'user',
+      ownerUserId: owner.id,
+      title: 'Private legacy audit',
+      fastConversationId: conversation!.id,
+    });
+    await db.insert(fastAgentMessages).values([
+      {
+        conversationId: conversation!.id,
+        eventId: 'hidden-preview',
+        turnId: 'hidden-turn',
+        turnSeq: 0,
+        ts: 100,
+        eventType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+        role: 'assistant',
+        contentBlocks: [{ type: 'text', text: 'Private transcript detail' }],
+        metadata: { visibleInTranscript: false },
+        payload: {},
+      },
+      {
+        conversationId: conversation!.id,
+        eventId: 'legacy-preview',
+        turnId: 'legacy-turn',
+        turnSeq: 0,
+        ts: 200,
+        eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
+        role: 'user',
+        contentBlocks: [{ type: 'text', text: 'Legacy transcript detail' }],
+        payload: {},
+      },
+    ]);
+
+    for (const query of ['private', 'legacy']) {
+      const result = await getSessions(
+        { userId: owner.id, isAdmin: false },
+        { q: query },
+      );
+      expect(result.sessions).toEqual([
+        expect.objectContaining({ id: fastSession.id, searchSnippet: null }),
+      ]);
+    }
+
+    const task = await taskFactory.create({
+      initiatorUserId: owner.id,
+      title: 'Unrelated deleted task',
+    });
+    const run = await runFactory.create({ taskId: task.id });
+    const taskSession = await sessionFactory.create({
+      ownerKind: 'user',
+      ownerUserId: owner.id,
+      title: 'Crimson deletion audit',
+    });
+    await db.insert(sessionTasks).values({
+      sessionId: taskSession.id,
+      taskId: task.id,
+      origin: 'direct_launch',
+    });
+    await db.insert(taskMessages).values({
+      runId: run.id,
+      taskId: task.id,
+      ts: 300,
+      eventType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+      role: 'assistant',
+      protocol: ROOMOTE_RUNTIME_TASK_MESSAGE_PROTOCOL,
+      contentBlocks: [{ type: 'text', text: 'Crimson deleted detail' }],
+      metadata: { visibleInTranscript: true },
+      payload: {},
+    });
+    await db
+      .update(tasks)
+      .set({ deletedAt: new Date() })
+      .where(eq(tasks.id, task.id));
+
+    const deletedResult = await getSessions(
+      { userId: owner.id, isAdmin: false },
+      { q: 'crimson' },
+    );
+    expect(deletedResult.sessions).toEqual([
+      expect.objectContaining({ id: taskSession.id, searchSnippet: null }),
+    ]);
+  });
+
+  it('requires three characters only for transcript-content matches', async () => {
+    const owner = await userFactory.create();
+    const directSession = await sessionFactory.create({
+      ownerKind: 'user',
+      ownerUserId: owner.id,
+      title: 'QZ direct title',
+    });
+    const [conversation] = await db
+      .insert(fastAgentConversations)
+      .values({
+        userId: owner.id,
+        surface: 'web',
+        workspaceId: owner.id,
+        conversationId: crypto.randomUUID(),
+      })
+      .returning();
+    await sessionFactory.create({
+      ownerKind: 'user',
+      ownerUserId: owner.id,
+      title: 'Unrelated short transcript',
+      fastConversationId: conversation!.id,
+    });
+    await db.insert(fastAgentMessages).values({
+      conversationId: conversation!.id,
+      eventId: 'short-transcript',
+      turnId: 'short-turn',
+      turnSeq: 0,
+      ts: 100,
+      eventType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+      role: 'assistant',
+      contentBlocks: [{ type: 'text', text: 'ZX' }],
+      metadata: { visibleInTranscript: true },
+      payload: {},
+    });
+
+    const shortTranscriptResult = await getSessions(
+      { userId: owner.id, isAdmin: false },
+      { q: 'zx' },
+    );
+    expect(shortTranscriptResult.sessions).toEqual([]);
+
+    const shortTitleResult = await getSessions(
+      { userId: owner.id, isAdmin: false },
+      { q: 'qz' },
+    );
+    expect(shortTitleResult.sessions.map((session) => session.id)).toEqual([
+      directSession.id,
+    ]);
   });
 
   it('returns task rollups, task resolution, and deterministic timeline events', async () => {

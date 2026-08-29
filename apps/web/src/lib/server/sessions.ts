@@ -56,6 +56,9 @@ type SessionListInput = {
 
 const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 200;
+const MIN_TRANSCRIPT_SEARCH_LENGTH = 3;
+const SEARCH_SNIPPET_CONTEXT_CHARS = 60;
+const SEARCH_SNIPPET_LENGTH = 180;
 
 function sessionScope(auth: SessionAuth) {
   if (auth.isAdmin) return undefined;
@@ -148,53 +151,59 @@ function buildSessionSearch(query: string | null | undefined) {
         ),
       ),
   );
-  const fastTranscriptMatch = exists(
-    db
-      .select({ one: sql`1` })
-      .from(fastAgentMessages)
-      .where(
-        and(
-          eq(fastAgentMessages.conversationId, sessions.fastConversationId),
-          inArray(fastAgentMessages.role, ['user', 'assistant']),
-          sql`case
-            when ${fastAgentMessages.metadata} ->> 'visibleInTranscript' is not null
-              then ${fastAgentMessages.metadata} ->> 'visibleInTranscript' = 'true'
-            else ${fastAgentMessages.eventType} <> ${ACP_ENVELOPE_EVENT_TYPES.UserPrompt}
-          end`,
-          sql`exists (
-            select 1
-            from jsonb_array_elements(${fastAgentMessages.contentBlocks}) as block
-            where block ->> 'type' = 'text'
-              and block ->> 'text' ilike ${queryPattern} escape '\\'
-          )`,
-        ),
-      ),
-  );
-  const taskTranscriptMatch = exists(
-    db
-      .select({ one: sql`1` })
-      .from(sessionTasks)
-      .innerJoin(taskMessages, eq(taskMessages.taskId, sessionTasks.taskId))
-      .innerJoin(tasks, eq(tasks.id, sessionTasks.taskId))
-      .where(
-        and(
-          eq(sessionTasks.sessionId, sessions.id),
-          isNull(tasks.deletedAt),
-          inArray(taskMessages.role, ['user', 'assistant']),
-          sql`case
-            when ${taskMessages.metadata} ->> 'visibleInTranscript' is not null
-              then ${taskMessages.metadata} ->> 'visibleInTranscript' = 'true'
-            else ${taskMessages.eventType} <> ${ACP_ENVELOPE_EVENT_TYPES.UserPrompt}
-          end`,
-          sql`exists (
-            select 1
-            from jsonb_array_elements(${taskMessages.contentBlocks}) as block
-            where block ->> 'type' = 'text'
-              and block ->> 'text' ilike ${queryPattern} escape '\\'
-          )`,
-        ),
-      ),
-  );
+  const searchTranscripts =
+    normalizedQuery.length >= MIN_TRANSCRIPT_SEARCH_LENGTH;
+  const fastTranscriptMatch = searchTranscripts
+    ? exists(
+        db
+          .select({ one: sql`1` })
+          .from(fastAgentMessages)
+          .where(
+            and(
+              eq(fastAgentMessages.conversationId, sessions.fastConversationId),
+              inArray(fastAgentMessages.role, ['user', 'assistant']),
+              sql`case
+                when ${fastAgentMessages.metadata} ->> 'visibleInTranscript' is not null
+                  then ${fastAgentMessages.metadata} ->> 'visibleInTranscript' = 'true'
+                else ${fastAgentMessages.eventType} <> ${ACP_ENVELOPE_EVENT_TYPES.UserPrompt}
+              end`,
+              sql`exists (
+                select 1
+                from jsonb_array_elements(${fastAgentMessages.contentBlocks}) as block
+                where block ->> 'type' = 'text'
+                  and block ->> 'text' ilike ${queryPattern} escape '\\'
+              )`,
+            ),
+          ),
+      )
+    : sql<boolean>`false`;
+  const taskTranscriptMatch = searchTranscripts
+    ? exists(
+        db
+          .select({ one: sql`1` })
+          .from(sessionTasks)
+          .innerJoin(taskMessages, eq(taskMessages.taskId, sessionTasks.taskId))
+          .innerJoin(tasks, eq(tasks.id, sessionTasks.taskId))
+          .where(
+            and(
+              eq(sessionTasks.sessionId, sessions.id),
+              isNull(tasks.deletedAt),
+              inArray(taskMessages.role, ['user', 'assistant']),
+              sql`case
+                when ${taskMessages.metadata} ->> 'visibleInTranscript' is not null
+                  then ${taskMessages.metadata} ->> 'visibleInTranscript' = 'true'
+                else ${taskMessages.eventType} <> ${ACP_ENVELOPE_EVENT_TYPES.UserPrompt}
+              end`,
+              sql`exists (
+                select 1
+                from jsonb_array_elements(${taskMessages.contentBlocks}) as block
+                where block ->> 'type' = 'text'
+                  and block ->> 'text' ilike ${queryPattern} escape '\\'
+              )`,
+            ),
+          ),
+      )
+    : sql<boolean>`false`;
 
   return {
     condition: or(
@@ -208,10 +217,109 @@ function buildSessionSearch(query: string | null | undefined) {
       when ${linkedTaskMatch} then 1
       else 2
     end`,
+    normalizedQuery,
+    queryPattern,
+    searchTranscripts,
   };
 }
 
 type SessionSearch = NonNullable<ReturnType<typeof buildSessionSearch>>;
+
+async function getSessionSearchSnippets(
+  auth: SessionAuth,
+  sessionIds: string[],
+  search: SessionSearch | null,
+) {
+  if (sessionIds.length === 0 || !search?.searchTranscripts) {
+    return new Map<string, string>();
+  }
+  const accessCondition = sessionScope(auth) ?? sql`true`;
+
+  // Keep context retrieval page-bounded so it reuses relationship indexes
+  // instead of repeating the global transcript scan used to find matches.
+  const rows = await db.execute<{ session_id: string; snippet: string }>(sql`
+    with matching_text as (
+      select
+        ${sessions.id} as session_id,
+        ${fastAgentMessages.ts} as ts,
+        block ->> 'text' as text
+      from ${sessions}
+      inner join ${fastAgentMessages}
+        on ${fastAgentMessages.conversationId} = ${sessions.fastConversationId}
+      cross join lateral jsonb_array_elements(${fastAgentMessages.contentBlocks}) as block
+      where ${inArray(sessions.id, sessionIds)}
+        and ${accessCondition}
+        and ${eq(sessions.visibility, 'visible')}
+        and ${isNull(sessions.archivedAt)}
+        and ${inArray(fastAgentMessages.role, ['user', 'assistant'])}
+        and case
+          when ${fastAgentMessages.metadata} ->> 'visibleInTranscript' is not null
+            then ${fastAgentMessages.metadata} ->> 'visibleInTranscript' = 'true'
+          else ${fastAgentMessages.eventType} <> ${ACP_ENVELOPE_EVENT_TYPES.UserPrompt}
+        end
+        and block ->> 'type' = 'text'
+        and block ->> 'text' ilike ${search.queryPattern} escape '\\'
+
+      union all
+
+      select
+        ${sessions.id} as session_id,
+        ${taskMessages.ts} as ts,
+        block ->> 'text' as text
+      from ${sessionTasks}
+      inner join ${sessions} on ${sessions.id} = ${sessionTasks.sessionId}
+      inner join ${tasks} on ${tasks.id} = ${sessionTasks.taskId}
+      inner join ${taskMessages} on ${taskMessages.taskId} = ${sessionTasks.taskId}
+      cross join lateral jsonb_array_elements(${taskMessages.contentBlocks}) as block
+      where ${inArray(sessions.id, sessionIds)}
+        and ${accessCondition}
+        and ${eq(sessions.visibility, 'visible')}
+        and ${isNull(sessions.archivedAt)}
+        and ${isNull(tasks.deletedAt)}
+        and ${inArray(taskMessages.role, ['user', 'assistant'])}
+        and case
+          when ${taskMessages.metadata} ->> 'visibleInTranscript' is not null
+            then ${taskMessages.metadata} ->> 'visibleInTranscript' = 'true'
+          else ${taskMessages.eventType} <> ${ACP_ENVELOPE_EVENT_TYPES.UserPrompt}
+        end
+        and block ->> 'type' = 'text'
+        and block ->> 'text' ilike ${search.queryPattern} escape '\\'
+    ), positioned as (
+      select
+        session_id,
+        ts,
+        text,
+        strpos(lower(text), lower(${search.normalizedQuery})) as match_at
+      from matching_text
+    ), ranked as (
+      select
+        session_id,
+        text,
+        match_at,
+        row_number() over (partition by session_id order by ts desc) as match_rank
+      from positioned
+    )
+    select
+      session_id,
+      concat(
+        case when match_at > ${SEARCH_SNIPPET_CONTEXT_CHARS + 1} then '...' else '' end,
+        substring(
+          text
+          from greatest(match_at - ${SEARCH_SNIPPET_CONTEXT_CHARS}, 1)
+          for ${SEARCH_SNIPPET_LENGTH}
+        ),
+        case
+          when length(text) > greatest(match_at - ${SEARCH_SNIPPET_CONTEXT_CHARS}, 1) + ${SEARCH_SNIPPET_LENGTH} - 1
+            then '...'
+          else ''
+        end
+      ) as snippet
+    from ranked
+    where match_rank = 1
+  `);
+
+  return new Map(rows.map((row) => [row.session_id, row.snippet]));
+}
 
 function listConditions(
   auth: SessionAuth,
@@ -522,8 +630,19 @@ export async function getSessions(auth: SessionAuth, input: SessionListInput) {
   const pageRows = rows.slice(0, limit);
   const page = pageRows.map(({ searchRank: _searchRank, ...row }) => row);
   const last = pageRows.at(-1);
+  const [hydratedSessions, searchSnippets] = await Promise.all([
+    hydrateSessionRows(auth, page),
+    getSessionSearchSnippets(
+      auth,
+      page.map((session) => session.id),
+      search,
+    ),
+  ]);
   return {
-    sessions: await hydrateSessionRows(auth, page),
+    sessions: hydratedSessions.map((session) => ({
+      ...session,
+      searchSnippet: searchSnippets.get(session.id) ?? null,
+    })),
     nextCursor:
       rows.length > limit && last
         ? encodeCursor(last, search ? last.searchRank : undefined)

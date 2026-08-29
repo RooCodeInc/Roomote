@@ -114,7 +114,11 @@ export default async function SessionsPage({
                         : session.cachedStatus === column,
                     )
                     .map((session) => (
-                      <SessionCard key={session.id} session={session} />
+                      <SessionCard
+                        key={session.id}
+                        session={session}
+                        query={q}
+                      />
                     ))}
                 </div>
               </section>
@@ -123,7 +127,7 @@ export default async function SessionsPage({
         ) : (
           <div className="divide-y divide-card">
             {result.sessions.map((session) => (
-              <SessionCard key={session.id} session={session} />
+              <SessionCard key={session.id} session={session} query={q} />
             ))}
           </div>
         )}

@@ -6,6 +6,14 @@ const setOpen = vi.fn();
 const action = vi.fn();
 const queryOptions = vi.fn(() => ({}));
 const useUserMock = vi.fn();
+let sessionQueryData: {
+  sessions: Array<{
+    id: string;
+    title: string;
+    executionCount: number;
+    searchSnippet: string | null;
+  }>;
+} | null = null;
 
 function Icon() {
   return <svg aria-hidden="true" />;
@@ -16,22 +24,25 @@ vi.mock('next/navigation', () => ({
 }));
 
 vi.mock('@tanstack/react-query', () => ({
-  useQuery: () => ({
-    data: [
-      {
-        id: 'task-1',
-        title: 'Most recent task',
-        timestamp: 1,
-        lastMessageAt: 1,
-        taskRun: {
-          payload: {
-            environmentId: undefined,
-            repo: undefined,
-          },
+  useQuery: (options: { queryKey?: unknown[] }) =>
+    options.queryKey?.[0] === 'sessions'
+      ? { data: sessionQueryData }
+      : {
+          data: [
+            {
+              id: 'task-1',
+              title: 'Most recent task',
+              timestamp: 1,
+              lastMessageAt: 1,
+              taskRun: {
+                payload: {
+                  environmentId: undefined,
+                  repo: undefined,
+                },
+              },
+            },
+          ],
         },
-      },
-    ],
-  }),
 }));
 
 vi.mock('@/components/system', () => ({
@@ -159,6 +170,7 @@ describe('CommandPalette', () => {
       isSignedIn: true,
       user: {},
     });
+    sessionQueryData = null;
   });
 
   it('does not render or query when the user is signed out', () => {
@@ -196,6 +208,25 @@ describe('CommandPalette', () => {
 
     expect(setOpen).toHaveBeenCalledWith(false);
     expect(push).toHaveBeenCalledWith('/task/task-1');
+  });
+
+  it('shows matching transcript context for Session results', () => {
+    sessionQueryData = {
+      sessions: [
+        {
+          id: 'session-1',
+          title: 'Prepare release notes',
+          executionCount: 1,
+          searchSnippet: '...preserve the heliotrope detail before release.',
+        },
+      ],
+    };
+
+    render(<CommandPalette />);
+
+    expect(
+      screen.getByText(/preserve the heliotrope detail before release/),
+    ).toBeVisible();
   });
 
   it('runs custom command actions and closes the palette', () => {

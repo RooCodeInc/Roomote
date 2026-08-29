@@ -33,4 +33,33 @@ describe('SessionCard', () => {
       screen.getByRole('link', { name: /Update homepage background/ }),
     ).toHaveAttribute('href', '/sessions/session-1');
   });
+
+  it('shows a contextual matching transcript snippet', () => {
+    render(
+      <SessionCard
+        query="heliotrope"
+        session={{
+          id: 'session-2',
+          title: 'Prepare release notes',
+          ownerName: 'Test User',
+          ownerEmail: 'test@example.com',
+          ownerImageUrl: null,
+          sourceSurface: 'web',
+          activityAt: Date.now() / 1000,
+          cachedStatus: 'ready',
+          executionCount: 0,
+          inferenceCostMicroUsd: 0,
+          unread: false,
+          searchSnippet: '...preserve the Heliotrope detail before release.',
+          tasks: [],
+        }}
+      />,
+    );
+
+    const match = screen.getByText('Heliotrope');
+    expect(match).toHaveProperty('tagName', 'MARK');
+    expect(match.parentElement).toHaveTextContent(
+      '...preserve the Heliotrope detail before release.',
+    );
+  });
 });

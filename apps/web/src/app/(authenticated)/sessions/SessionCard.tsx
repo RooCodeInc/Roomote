@@ -8,6 +8,7 @@ import {
 } from '@/lib';
 import { Avatar } from '@/components/system';
 import { SessionStatusBadge } from '@/components/sessions/SessionStatusBadge';
+import { SessionSearchSnippet } from '@/components/sessions/SessionSearchSnippet';
 import { getSessionSurfaceLabel } from '@/components/sessions/session-surfaces';
 
 type SessionCardData = {
@@ -22,6 +23,7 @@ type SessionCardData = {
   executionCount: number;
   inferenceCostMicroUsd: number;
   unread: boolean;
+  searchSnippet?: string | null;
   tasks: Array<{
     taskId: string;
     workflow: string;
@@ -29,7 +31,13 @@ type SessionCardData = {
   }>;
 };
 
-export function SessionCard({ session }: { session: SessionCardData }) {
+export function SessionCard({
+  session,
+  query = '',
+}: {
+  session: SessionCardData;
+  query?: string;
+}) {
   const owner =
     getUserDisplayName({
       name: session.ownerName,
@@ -69,6 +77,11 @@ export function SessionCard({ session }: { session: SessionCardData }) {
             })}
           </span>
         </div>
+        <SessionSearchSnippet
+          snippet={session.searchSnippet}
+          query={query}
+          className="line-clamp-2"
+        />
         <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
           <SessionStatusBadge status={status} />
           <span>{getSessionSurfaceLabel(session.sourceSurface)}</span>
