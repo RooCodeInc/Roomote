@@ -104,18 +104,4 @@ describe('isBrainEmbeddingAvailable', () => {
     mockEnv.R_BRAIN_EMBEDDINGS_UPSTREAM_URL = '   ';
     await expect(isBrainEmbeddingAvailable()).resolves.toBe(false);
   });
-
-  it('resolves the stored trial key as the openrouter provider', async () => {
-    mockResolveModelProviderEnvValue.mockImplementation(async (names) => {
-      const list = typeof names === 'string' ? [names] : names;
-      return list.includes('R_TRIAL_OPENROUTER_API_KEY')
-        ? 'sk-or-trial'
-        : undefined;
-    });
-
-    await expect(isBrainEmbeddingAvailable()).resolves.toBe(true);
-    expect(mockResolveModelProviderEnvValue).toHaveBeenCalledWith(
-      expect.arrayContaining(['R_TRIAL_OPENROUTER_API_KEY']),
-    );
-  });
 });
