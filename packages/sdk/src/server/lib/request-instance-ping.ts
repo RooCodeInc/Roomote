@@ -3,14 +3,18 @@ import { Queue } from 'bullmq';
 import { getRedis } from '@roomote/redis';
 
 /**
- * The bullmq scheduled-jobs queue and the InstancePing job name it
- * dispatches on (apps/bullmq ScheduledJobName.InstancePing). Duplicated as
- * literals because the enum lives in the bullmq app, which the SDK cannot
- * depend on.
+ * The bullmq scheduled-jobs queue and the job names it dispatches on
+ * (apps/bullmq ScheduledJobName). Duplicated as literals because the enum
+ * lives in the bullmq app, which the SDK cannot depend on.
  */
 const SCHEDULED_JOBS_QUEUE = 'scheduled-jobs';
 const INSTANCE_PING_JOB = 'InstancePing';
 const LICENSE_USAGE_SYNC_JOB = 'LicenseUsageSync';
+const BRAIN_BACKFILL_JOBS = [
+  'BrainOutboxDrain',
+  'BrainCollectors',
+  'PullRequestAnalyticsSync',
+] as const;
 
 let queue: Queue | null = null;
 
@@ -76,6 +80,38 @@ export async function requestLicenseUsageSync(reason: string): Promise<void> {
   } catch (error) {
     console.warn(
       `[requestLicenseUsageSync] failed to enqueue (reason=${reason}):`,
+      error instanceof Error ? error.message : error,
+    );
+  }
+}
+
+/**
+ * Kicks the Brain ingestion jobs immediately instead of waiting out their
+ * schedules (the outbox drain runs every minute, but collectors and the PR
+ * facts sync only every 15). Used when memory is switched on, so the initial
+ * backfill — task history, PR facts, integration sources — starts right away
+ * and the settings page shows content landing within moments of enabling.
+ *
+ * Fire-and-forget with per-minute job ids, like the requests above: the
+ * regular schedules are the safety net, every job is idempotent against its
+ * durable checkpoints, and a failed enqueue must never break the Settings
+ * mutation that asked for it.
+ */
+export async function requestBrainBackfill(reason: string): Promise<void> {
+  try {
+    const minuteBucket = Math.floor(Date.now() / 60_000);
+    await Promise.all(
+      BRAIN_BACKFILL_JOBS.map((jobName) =>
+        getQueue().add(
+          jobName,
+          { reason },
+          { jobId: `brain-backfill-request-${jobName}-${minuteBucket}` },
+        ),
+      ),
+    );
+  } catch (error) {
+    console.warn(
+      `[requestBrainBackfill] failed to enqueue (reason=${reason}):`,
       error instanceof Error ? error.message : error,
     );
   }

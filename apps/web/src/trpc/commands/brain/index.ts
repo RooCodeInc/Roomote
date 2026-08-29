@@ -17,6 +17,7 @@ import {
   readBrainCorpus,
   readBrainPage,
   readBrainStats,
+  requestBrainBackfill,
   resolveBrainSourceRequirements,
   resolveBrainInferenceProvider,
   type BrainCorpusSnapshot,
@@ -539,6 +540,13 @@ export async function setMemoryEnabledCommand(
   assertAdmin(auth);
 
   await setBrainEnabled(input.enabled);
+
+  if (input.enabled) {
+    // Start the initial backfill now rather than waiting out the 15-minute
+    // collector and PR-sync schedules: a freshly enabled Memory should show
+    // content landing within moments, not ticks from now.
+    void requestBrainBackfill('memory-enabled');
+  }
 
   return { enabled: input.enabled };
 }

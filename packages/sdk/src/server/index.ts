@@ -429,6 +429,7 @@ export {
 } from './lib/mcp/linear-connections';
 
 export {
+  requestBrainBackfill,
   requestInstancePing,
   requestLicenseUsageSync,
   resetInstancePingQueueForTests,
