@@ -98,7 +98,7 @@ describe('StepConfigureInference', () => {
       screen.getByRole('heading', { name: 'Configure inference' }),
     ).toBeInTheDocument();
     expect(screen.getByText(/Roomote needs a model provider/).textContent).toBe(
-      'Roomote needs a model provider for, you know, AI stuff.If you want, we can give you a few credits to try Roomote out or you can configure your provider directly.',
+      'Roomote needs a model provider for, you know, AI stuff.Roomote trial inference includes $5 of inference, enough to complete several tasks and get a practical sense of what Roomote can do. You can also configure your own provider directly.',
     );
     expect(
       screen.getByRole('button', {
