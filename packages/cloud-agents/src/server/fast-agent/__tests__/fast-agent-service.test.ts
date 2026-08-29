@@ -3053,7 +3053,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     }
   });
 
-  it('bounds an explicitly idle continuation after an integration tool returns', async () => {
+  it('reports quiet lifecycle state without aborting work and fences real cancellation', async () => {
     vi.useFakeTimers();
     try {
       mocks.listIntegrations.mockResolvedValue([
@@ -3068,15 +3068,30 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         resolveToolReturned = resolve;
       });
       let promptSignal: AbortSignal | undefined;
-      let markSessionIdle: (() => void) | undefined;
+      let reportSessionIdle: (() => void) | undefined;
       let lateMcpResult: unknown;
       let lateNativeResult: unknown;
       const launchTask = vi.fn();
+      const turnAbort = new AbortController();
       mocks.generateText.mockImplementation(
         async (_params, _session, options) => {
           promptSignal = options.signal;
-          markSessionIdle = () => options.onSessionStatus?.('idle');
+          reportSessionIdle = () =>
+            options.onLifecycleEvent?.({
+              type: 'session_status',
+              status: 'idle',
+              atMs: Date.now(),
+            });
           await options.onSessionReady('opencode-session-1');
+          options.onLifecycleEvent?.({
+            type: 'provider_request_started',
+            atMs: Date.now(),
+          });
+          options.onLifecycleEvent?.({
+            type: 'session_status',
+            status: 'busy',
+            atMs: Date.now(),
+          });
           await invokeTool(nativeToolNames.sendChatReply, {
             purpose: 'ack',
             message: 'Checking.',
@@ -3111,35 +3126,72 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       );
       const adapter = callbacks({ launchTask });
 
-      const resultPromise = answerFastAgentQuestion({ ...baseParams, adapter });
+      const resultPromise = answerFastAgentQuestion({
+        ...baseParams,
+        adapter,
+        signal: turnAbort.signal,
+      });
       await toolReturned;
-      await vi.advanceTimersByTimeAsync(30 * 60_000);
+      await vi.advanceTimersByTimeAsync(10 * 60_000);
 
       expect(promptSignal?.aborted).toBe(false);
-      markSessionIdle?.();
-      await vi.advanceTimersByTimeAsync(300_000);
-
-      await expect(resultPromise).resolves.toBe(
-        'The inference provider did not respond. Any delegated tasks can keep running; please try again in a moment.',
+      expect(adapter.postReply).toHaveBeenCalledWith(
+        expect.objectContaining({
+          purpose: 'progress',
+          message: expect.stringContaining(
+            'OpenCode still reports the model request as active.',
+          ),
+        }),
       );
+
+      reportSessionIdle?.();
+      await vi.advanceTimersByTimeAsync(10 * 60_000);
+
+      expect(promptSignal?.aborted).toBe(false);
+      expect(adapter.postReply).toHaveBeenCalledWith(
+        expect.objectContaining({
+          purpose: 'progress',
+          message: expect.stringContaining(
+            'OpenCode currently reports the session as idle',
+          ),
+        }),
+      );
+
+      turnAbort.abort(new Error('User canceled the turn.'));
+
+      await expect(resultPromise).rejects.toThrow('User canceled the turn.');
       expect(mocks.generateText).toHaveBeenCalledTimes(1);
       expect(mocks.callIntegration).toHaveBeenCalledTimes(1);
       expect(launchTask).not.toHaveBeenCalled();
       expect(lateMcpResult).toMatchObject({ success: false });
       expect(lateNativeResult).toMatchObject({ success: false });
-      expect(mocks.captureInferenceAttemptOutcome).toHaveBeenCalledWith(
-        expect.objectContaining({
-          outcome: 'failure',
-          failureReason: 'timeout',
-          providerRetryEventCount: 0,
-        }),
-      );
-      expect(adapter.postReply).toHaveBeenLastCalledWith({
-        purpose: 'closeout',
-        message:
-          'The inference provider did not respond. Any delegated tasks can keep running; please try again in a moment.',
-      });
       expect(mocks.invalidateSession).toHaveBeenCalledWith('conversation-1');
+      const lifecyclePayloads = mocks.upsertMessage.mock.calls
+        .map(([input]) => input.message)
+        .filter(
+          (message) =>
+            message.eventType === 'roomote_runtime.fast_agent_lifecycle',
+        )
+        .map((message) => message.payload);
+      expect(lifecyclePayloads).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            kind: 'turn_started',
+            steeringAvailable: true,
+            steeringAccepted: true,
+          }),
+          expect.objectContaining({
+            kind: 'provider_request_started',
+            requestId: expect.any(String),
+          }),
+          expect.objectContaining({ kind: 'tool_started', toolKind: 'mcp' }),
+          expect.objectContaining({ kind: 'tool_finished', toolKind: 'mcp' }),
+          expect.objectContaining({
+            kind: 'turn_aborted',
+            abortReason: 'Error',
+          }),
+        ]),
+      );
     } finally {
       vi.useRealTimers();
     }
@@ -3185,7 +3237,11 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
           await invokeMcpTool('github', 'search_code', {
             query: 'fast session',
           });
-          await options.onSessionStatus?.('idle');
+          options.onLifecycleEvent?.({
+            type: 'session_status',
+            status: 'idle',
+            atMs: Date.now(),
+          });
           await invokeTool(nativeToolNames.sendChatReply, {
             purpose: 'closeout',
             message: 'Finished.',

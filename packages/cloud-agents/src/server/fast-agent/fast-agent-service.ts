@@ -299,6 +299,8 @@ function buildIntegrationCallSignature({
 export const FAST_AGENT_INFERENCE_MAX_RETRIES = INFERENCE_PROVIDER_MAX_RETRIES;
 export const FAST_AGENT_TRANSIENT_INFERENCE_MAX_RETRIES = 6;
 const FAST_AGENT_INFERENCE_RETRY_ATTEMPT_TIMEOUT_MS = 5 * 60_000;
+const FAST_AGENT_QUIET_STATUS_INTERVAL_MS = 10 * 60_000;
+const FAST_AGENT_ACTIVITY_PERSIST_INTERVAL_MS = 30_000;
 const FAST_AGENT_TRANSIENT_RETRY_JITTER_RATIO = 0.2;
 const FAST_AGENT_PROVIDER_RECOVERY_PROMPT =
   buildInferenceProviderRecoveryPrompt({ protectCompletedSideEffects: true });
@@ -823,6 +825,7 @@ export async function answerFastAgentQuestion({
   let durableOpenCodeSessionId: string | null = null;
   let lastVisibleMessage = '';
   let closed = false;
+  let visibleUpdatePosted = false;
   let inferenceRetryReply: FastAgentReplyHandle | undefined;
   let inferenceRetryMessageIndex: number | undefined;
   let inferenceRetryCanonicalEvent:
@@ -834,14 +837,25 @@ export async function answerFastAgentQuestion({
   let nextAssistantOrdinal = 0;
   let nextToolOrdinal = 0;
   let nextRetryNoticeOrdinal = 0;
+  let nextLifecycleOrdinal = 0;
   let nextTurnSeq = 0;
+  let lifecycleState = 'initializing';
+  let lifecycleStateStartedAt = Date.now();
+  let lastMeaningfulActivityAt = lifecycleStateStartedAt;
+  let lastPersistedProviderActivityAt = 0;
+  let activeLifecycleToolCount = 0;
+  let activePersistenceCount = 0;
+  let quietStatusTimer: ReturnType<typeof setTimeout> | undefined;
+  let quietStatusEnabled = false;
+  let reportQuietStatus: () => Promise<void> = async () => undefined;
+  const lifecycleWrites = new Set<Promise<void>>();
   const degradedContextComponents = new Set<string>();
 
   const allocateCanonicalEvent = (slot: string) => ({
     eventId: `${turnId}:${slot}`,
     turnSeq: nextTurnSeq++,
   });
-  const persistCanonicalMessage = async (
+  const writeCanonicalMessage = async (
     message: Parameters<typeof upsertFastAgentMessage>[0]['message'],
     bestEffort = false,
   ): Promise<void> => {
@@ -861,6 +875,97 @@ export async function answerFastAgentQuestion({
       if (!bestEffort) throw error;
       console.error(
         `[Fast Agent] Failed to persist canonical message conversation=${canonicalConversationId} event=${message.eventId}: ${formatErrorForLog(error)}`,
+      );
+    }
+  };
+  const clearQuietStatusTimer = () => {
+    if (!quietStatusTimer) return;
+    clearTimeout(quietStatusTimer);
+    quietStatusTimer = undefined;
+  };
+  const scheduleQuietStatus = () => {
+    clearQuietStatusTimer();
+    if (!quietStatusEnabled || closed) return;
+    quietStatusTimer = setTimeout(() => {
+      quietStatusTimer = undefined;
+      void reportQuietStatus();
+    }, FAST_AGENT_QUIET_STATUS_INTERVAL_MS);
+    quietStatusTimer.unref();
+  };
+  const persistLifecycleEvent = async (
+    kind: string,
+    details: Record<string, unknown> = {},
+    options: { meaningful?: boolean; state?: string; atMs?: number } = {},
+  ) => {
+    const atMs = options.atMs ?? Date.now();
+    const previousState = lifecycleState;
+    if (options.state && options.state !== lifecycleState) {
+      lifecycleState = options.state;
+      lifecycleStateStartedAt = atMs;
+    }
+    if (options.meaningful !== false) {
+      lastMeaningfulActivityAt = atMs;
+      scheduleQuietStatus();
+    }
+    const event = allocateCanonicalEvent(`lifecycle:${nextLifecycleOrdinal++}`);
+    await writeCanonicalMessage(
+      {
+        ...event,
+        turnId,
+        ts: atMs,
+        eventType: 'roomote_runtime.fast_agent_lifecycle',
+        contentBlocks: [],
+        metadata: { visibleInTranscript: false, lifecycleKind: kind },
+        payload: {
+          kind,
+          state: lifecycleState,
+          previousState,
+          stateStartedAtMs: lifecycleStateStartedAt,
+          stateAgeMs: Math.max(0, atMs - lifecycleStateStartedAt),
+          lastMeaningfulActivityAtMs: lastMeaningfulActivityAt,
+          lastMeaningfulActivityAgeMs: Math.max(
+            0,
+            atMs - lastMeaningfulActivityAt,
+          ),
+          activeToolCount: activeLifecycleToolCount,
+          persistenceActive: activePersistenceCount > 0,
+          steeringAvailable: isFastAgentCommunicationConversation(conversation),
+          steeringAccepted: turnSource === 'human',
+          ...details,
+        },
+        source: conversation.surface,
+        nativeSessionId: activeOpenCodeSessionId,
+      },
+      true,
+    );
+  };
+  const queueLifecycleEvent = (
+    kind: string,
+    details: Record<string, unknown> = {},
+    options: { meaningful?: boolean; state?: string; atMs?: number } = {},
+  ) => {
+    const write = persistLifecycleEvent(kind, details, options);
+    lifecycleWrites.add(write);
+    void write.finally(() => lifecycleWrites.delete(write));
+  };
+  const persistCanonicalMessage = async (
+    message: Parameters<typeof upsertFastAgentMessage>[0]['message'],
+    bestEffort = false,
+  ) => {
+    activePersistenceCount += 1;
+    queueLifecycleEvent(
+      'persistence_started',
+      { persistedEventType: message.eventType },
+      { meaningful: true },
+    );
+    try {
+      await writeCanonicalMessage(message, bestEffort);
+    } finally {
+      activePersistenceCount = Math.max(0, activePersistenceCount - 1);
+      queueLifecycleEvent(
+        'persistence_finished',
+        { persistedEventType: message.eventType },
+        { meaningful: true },
       );
     }
   };
@@ -915,6 +1020,49 @@ export async function answerFastAgentQuestion({
       },
       true,
     );
+  reportQuietStatus = async () => {
+    if (!quietStatusEnabled || closed) return;
+    const atMs = Date.now();
+    const quietMinutes = Math.max(
+      1,
+      Math.floor((atMs - lastMeaningfulActivityAt) / 60_000),
+    );
+    const detail =
+      activeLifecycleToolCount > 0
+        ? 'A tool is still running.'
+        : activePersistenceCount > 0
+          ? 'Roomote is saving the latest activity.'
+          : lifecycleState === 'provider_retry'
+            ? 'The inference provider is retrying the request.'
+            : lifecycleState === 'provider_disconnected'
+              ? 'The provider connection was interrupted; Roomote is still waiting for the turn to settle.'
+              : lifecycleState === 'idle'
+                ? 'OpenCode currently reports the session as idle while Roomote waits for the turn to settle.'
+                : 'OpenCode still reports the model request as active.';
+    const message = `This run is still open after ${quietMinutes} minutes without new lifecycle activity. ${detail} Use Follow in Roomote or reply with guidance.`;
+    const reply = { purpose: 'progress' as const, message };
+    try {
+      const posted = await adapter.postReply(reply);
+      diagnostics.recordVisibleReply({ assistantResponse: false });
+      visibleUpdatePosted = true;
+      await persistAssistantReply({
+        reply,
+        event: allocateCanonicalEvent(`assistant:${nextAssistantOrdinal++}`),
+        platformMessageId: posted?.messageId,
+      });
+      await persistLifecycleEvent(
+        'quiet_status_reported',
+        { quietMinutes },
+        { meaningful: false, atMs },
+      );
+    } catch (error) {
+      console.warn(
+        `[Fast Agent] Failed to post quiet status: ${formatErrorForLog(error)}`,
+      );
+    } finally {
+      scheduleQuietStatus();
+    }
+  };
   const beginCanonicalToolEvent = async ({
     title,
     args,
@@ -1175,6 +1323,16 @@ export async function answerFastAgentQuestion({
       },
       true,
     );
+    await persistLifecycleEvent(
+      'turn_started',
+      {
+        turnSource,
+        platformEventKind,
+        steeringAvailable: isFastAgentCommunicationConversation(conversation),
+        steeringAccepted: turnSource === 'human',
+      },
+      { state: 'working' },
+    );
     if (!platformEvent) {
       void refreshFastAgentSessionTitle({ sessionId: session.id, userId });
     }
@@ -1237,7 +1395,6 @@ export async function answerFastAgentQuestion({
     const completedChatReactionSignatures = new Set<string>();
     const completedChatReplySignatures = new Set<string>();
     const completedTaskActions = new Set<string>();
-    let visibleUpdatePosted = false;
     let nativeToolInvoked = false;
     let retriedTaskStart = false;
     let activeInferenceSignal: AbortSignal | undefined;
@@ -1381,6 +1538,17 @@ export async function answerFastAgentQuestion({
       call: FastAgentMcpToolCall,
     ): Promise<unknown> => {
       notifyToolExecutionStarted();
+      const toolStartedAt = Date.now();
+      activeLifecycleToolCount += 1;
+      queueLifecycleEvent(
+        'tool_started',
+        {
+          toolKind: 'mcp',
+          toolName: call.toolName,
+          toolStartedAtMs: toolStartedAt,
+        },
+        { state: 'tool_running', atMs: toolStartedAt },
+      );
       let canonicalToolEvent:
         | Awaited<ReturnType<typeof beginCanonicalToolEvent>>
         | undefined;
@@ -1493,6 +1661,17 @@ export async function answerFastAgentQuestion({
         }
         return failure;
       } finally {
+        activeLifecycleToolCount = Math.max(0, activeLifecycleToolCount - 1);
+        queueLifecycleEvent(
+          'tool_finished',
+          {
+            toolKind: 'mcp',
+            toolName: call.toolName,
+            toolStartedAtMs: toolStartedAt,
+            toolDurationMs: Math.max(0, Date.now() - toolStartedAt),
+          },
+          { state: 'working' },
+        );
         notifyToolExecutionFinished();
       }
     };
@@ -1927,6 +2106,17 @@ export async function answerFastAgentQuestion({
       call: FastAgentNativeToolCall,
     ): Promise<unknown> => {
       notifyToolExecutionStarted();
+      const toolStartedAt = Date.now();
+      activeLifecycleToolCount += 1;
+      queueLifecycleEvent(
+        'tool_started',
+        {
+          toolKind: 'native',
+          toolName: call.name,
+          toolStartedAtMs: toolStartedAt,
+        },
+        { state: 'tool_running', atMs: toolStartedAt },
+      );
       let canonicalToolEvent:
         | Awaited<ReturnType<typeof beginCanonicalToolEvent>>
         | undefined;
@@ -1956,6 +2146,17 @@ export async function answerFastAgentQuestion({
         }
         throw error;
       } finally {
+        activeLifecycleToolCount = Math.max(0, activeLifecycleToolCount - 1);
+        queueLifecycleEvent(
+          'tool_finished',
+          {
+            toolKind: 'native',
+            toolName: call.name,
+            toolStartedAtMs: toolStartedAt,
+            toolDurationMs: Math.max(0, Date.now() - toolStartedAt),
+          },
+          { state: 'working' },
+        );
         notifyToolExecutionFinished();
       }
     };
@@ -2085,11 +2286,7 @@ export async function answerFastAgentQuestion({
                 | ReturnType<typeof setTimeout>
                 | undefined;
               let providerRetryDeadlineAt: number | undefined;
-              let idlePostToolContinuationTimeout:
-                | ReturnType<typeof setTimeout>
-                | undefined;
               let activeToolExecutionCount = 0;
-              let postToolContinuationPending = false;
               const clearProviderRetryTimeout = () => {
                 if (!providerRetryTimeout) return;
                 clearTimeout(providerRetryTimeout);
@@ -2116,36 +2313,9 @@ export async function answerFastAgentQuestion({
                 }, remainingMs);
                 providerRetryTimeout.unref();
               };
-              const clearIdlePostToolContinuationTimeout = () => {
-                if (!idlePostToolContinuationTimeout) return;
-                clearTimeout(idlePostToolContinuationTimeout);
-                idlePostToolContinuationTimeout = undefined;
-              };
-              const armIdlePostToolContinuationTimeout = () => {
-                // No transcript output can still mean the model is working.
-                // Only OpenCode's explicit idle state starts this grace period.
-                if (
-                  !postToolContinuationPending ||
-                  activeToolExecutionCount > 0 ||
-                  providerRetryDeadlineAt !== undefined ||
-                  idlePostToolContinuationTimeout !== undefined
-                ) {
-                  return;
-                }
-                idlePostToolContinuationTimeout = setTimeout(() => {
-                  providerRetryAbortController.abort(
-                    new NonTaskOpenCodePromptTimeoutError(
-                      FAST_AGENT_INFERENCE_RETRY_ATTEMPT_TIMEOUT_MS,
-                    ),
-                  );
-                }, FAST_AGENT_INFERENCE_RETRY_ATTEMPT_TIMEOUT_MS);
-                idlePostToolContinuationTimeout.unref();
-              };
               notifyToolExecutionStarted = () => {
                 activeToolExecutionCount += 1;
-                postToolContinuationPending = false;
                 clearProviderRetryTimeout();
-                clearIdlePostToolContinuationTimeout();
               };
               notifyToolExecutionFinished = () => {
                 activeToolExecutionCount = Math.max(
@@ -2153,7 +2323,6 @@ export async function answerFastAgentQuestion({
                   activeToolExecutionCount - 1,
                 );
                 if (activeToolExecutionCount > 0) return;
-                postToolContinuationPending = true;
                 if (providerRetryDeadlineAt !== undefined) {
                   armProviderRetryTimeout();
                 }
@@ -2182,7 +2351,6 @@ export async function answerFastAgentQuestion({
                       prompt: promptForAttempt,
                       onProviderRetry: async (event) => {
                         providerRetryEventCount += 1;
-                        clearIdlePostToolContinuationTimeout();
                         captureInferenceContext(
                           'provider_retry',
                           event.attempt,
@@ -2253,12 +2421,40 @@ export async function answerFastAgentQuestion({
                           ),
                         );
                       },
-                      onSessionStatus: (status) => {
-                        if (status === 'busy') {
-                          clearIdlePostToolContinuationTimeout();
-                          return;
+                      onLifecycleEvent: (event) => {
+                        const requestId = `${turnId}:attempt:${inferenceAttemptNumber}`;
+                        if (event.type === 'provider_activity') {
+                          lastMeaningfulActivityAt = event.atMs;
+                          scheduleQuietStatus();
+                          if (
+                            event.atMs - lastPersistedProviderActivityAt <
+                            FAST_AGENT_ACTIVITY_PERSIST_INTERVAL_MS
+                          ) {
+                            return;
+                          }
+                          lastPersistedProviderActivityAt = event.atMs;
                         }
-                        armIdlePostToolContinuationTimeout();
+                        const state =
+                          event.type === 'session_status'
+                            ? event.status
+                            : event.type === 'provider_retry'
+                              ? 'provider_retry'
+                              : event.type;
+                        if (event.type === 'provider_request_started') {
+                          quietStatusEnabled = true;
+                        } else if (event.type === 'provider_request_ended') {
+                          quietStatusEnabled = false;
+                          clearQuietStatusTimer();
+                        }
+                        queueLifecycleEvent(
+                          event.type,
+                          {
+                            requestId,
+                            attemptNumber: inferenceAttemptNumber,
+                            ...event,
+                          },
+                          { state, atMs: event.atMs },
+                        );
                       },
                       onSubagentSessionReady: (subagentSessionID) => {
                         if (boundSubagentSessionIDs.has(subagentSessionID))
@@ -2346,7 +2542,6 @@ export async function answerFastAgentQuestion({
                 if (activeInferenceSignal === promptSignal) {
                   activeInferenceSignal = undefined;
                 }
-                clearIdlePostToolContinuationTimeout();
                 clearProviderRetryTimeout();
               }
             },
@@ -2426,6 +2621,11 @@ export async function answerFastAgentQuestion({
       }
     }
     await mirrorPendingMessages();
+    await persistLifecycleEvent(
+      'turn_completed',
+      {},
+      { meaningful: false, state: 'completed' },
+    );
     return lastVisibleMessage;
   } catch (error) {
     const terminalError =
@@ -2437,6 +2637,22 @@ export async function answerFastAgentQuestion({
           ? error.failure.reason
           : 'unclassified',
       terminalError,
+    );
+    await persistLifecycleEvent(
+      signal?.aborted ? 'turn_aborted' : 'turn_failed',
+      {
+        abortReason: signal?.aborted
+          ? signal.reason instanceof Error
+            ? signal.reason.name
+            : 'external_abort'
+          : error instanceof FastAgentInferenceError
+            ? error.failure.reason
+            : 'unclassified',
+      },
+      {
+        meaningful: false,
+        state: signal?.aborted ? 'aborted' : 'failed',
+      },
     );
     if (signal?.aborted) {
       if (canonicalConversationId) {
@@ -2511,6 +2727,8 @@ export async function answerFastAgentQuestion({
     }
     return lastVisibleMessage || message;
   } finally {
+    quietStatusEnabled = false;
+    clearQuietStatusTimer();
     if (canonicalConversationId) {
       await setFastSessionResponding(canonicalConversationId, false).catch(
         (error) => {
@@ -2528,6 +2746,9 @@ export async function answerFastAgentQuestion({
           );
         });
       }
+    }
+    while (lifecycleWrites.size > 0) {
+      await Promise.allSettled([...lifecycleWrites]);
     }
     diagnostics.finish();
   }

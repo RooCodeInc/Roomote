@@ -171,6 +171,20 @@ export type NonTaskProviderRetryEvent = {
   nextRetryAtMs?: number;
 };
 
+export type NonTaskOpenCodeLifecycleEvent =
+  | { type: 'provider_request_started'; atMs: number }
+  | { type: 'provider_first_token'; atMs: number }
+  | { type: 'provider_activity'; atMs: number }
+  | {
+      type: 'provider_request_ended';
+      atMs: number;
+      outcome: 'success' | 'error' | 'aborted';
+    }
+  | { type: 'provider_retry'; atMs: number; attempt: number }
+  | { type: 'provider_disconnected'; atMs: number }
+  | { type: 'provider_error'; atMs: number }
+  | { type: 'session_status'; atMs: number; status: 'busy' | 'idle' };
+
 export interface GenerateTrackedNonTaskTextParams extends GenerateTrackedNonTaskBaseParams {
   files?: NonTaskPromptFile[];
   requiredInputModality?: NonTaskInputModality;
@@ -222,7 +236,7 @@ export type NonTaskOpenCodeNativeSessionOptions = {
   ) => Promise<void> | void;
   onPromptStarted?: () => void;
   onSessionReady?: (sessionID: string) => Promise<void> | void;
-  onSessionStatus?: (status: 'busy' | 'idle') => Promise<void> | void;
+  onLifecycleEvent?: (event: NonTaskOpenCodeLifecycleEvent) => void;
   onSubagentSessionReady?: (sessionID: string) => Promise<void> | void;
   permission?: PermissionRuleset;
   promptOnlySubagents?: boolean;
@@ -290,6 +304,12 @@ export function isNonTaskOpenCodeSessionValidationError(
 
 function asString(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+}
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return value !== null && typeof value === 'object'
+    ? (value as Record<string, unknown>)
+    : undefined;
 }
 
 function asFiniteNumber(value: unknown): number | undefined {
@@ -789,7 +809,7 @@ async function runNonTaskSdkPrompt(
       message: NonTaskOpenCodeCompletedMessage,
     ) => Promise<void> | void;
     onSessionReady?: (sessionID: string) => Promise<void> | void;
-    onSessionStatus?: (status: 'busy' | 'idle') => Promise<void> | void;
+    onLifecycleEvent?: (event: NonTaskOpenCodeLifecycleEvent) => void;
     onSubagentSessionReady?: (sessionID: string) => Promise<void> | void;
     permission?: PermissionRuleset;
     preserveReasoning?: boolean;
@@ -960,10 +980,22 @@ async function runNonTaskSdkPrompt(
     let eventMonitor: Promise<void> | undefined;
     const needsEventMonitor = Boolean(
       params.onProviderRetry ||
-      options.onSessionStatus ||
+      options.onLifecycleEvent ||
       options.onSubagentSessionReady ||
       options.trackSessionTreeUsage,
     );
+
+    const emitLifecycleEvent = (event: NonTaskOpenCodeLifecycleEvent) => {
+      try {
+        options.onLifecycleEvent?.(event);
+      } catch (error) {
+        console.warn(
+          `[NonTaskProviderUsage] OpenCode lifecycle observer failed: ${formatOpenCodeSdkError(error)}`,
+        );
+      }
+    };
+    const assistantMessageIds = new Set<string>();
+    let firstTokenObserved = false;
 
     if (needsEventMonitor) {
       try {
@@ -992,31 +1024,74 @@ async function runNonTaskSdkPrompt(
                   return;
                 }
               } else if (
-                options.trackSessionTreeUsage &&
                 event.type === 'message.updated' &&
                 event.properties.info.role === 'assistant' &&
-                event.properties.info.time.completed !== undefined &&
                 trackedSessionIds.has(event.properties.info.sessionID)
               ) {
-                void recordUsageOnce(event.properties.info);
-                markUsageEventObserved(event.properties.info);
+                const messageId = asString(event.properties.info.id);
+                if (messageId) assistantMessageIds.add(messageId);
+                if (
+                  options.trackSessionTreeUsage &&
+                  event.properties.info.time.completed !== undefined
+                ) {
+                  void recordUsageOnce(event.properties.info);
+                  markUsageEventObserved(event.properties.info);
+                }
+              } else if (event.type === 'message.part.updated') {
+                const properties = asRecord(event.properties);
+                const part = asRecord(properties?.part);
+                const messageId = asString(part?.messageID);
+                const partType = asString(part?.type);
+                const text =
+                  asString(properties?.delta) ??
+                  asString(part?.text) ??
+                  asString(part?.content);
+                if (
+                  messageId &&
+                  assistantMessageIds.has(messageId) &&
+                  (partType === 'text' || partType === 'reasoning') &&
+                  text?.length
+                ) {
+                  const atMs = Date.now();
+                  if (!firstTokenObserved) {
+                    firstTokenObserved = true;
+                    emitLifecycleEvent({
+                      type: 'provider_first_token',
+                      atMs,
+                    });
+                  }
+                  emitLifecycleEvent({ type: 'provider_activity', atMs });
+                }
               } else if (
                 event.type === 'session.status' &&
                 event.properties.sessionID === sessionId &&
                 (event.properties.status.type === 'busy' ||
                   event.properties.status.type === 'idle')
               ) {
-                await options.onSessionStatus?.(event.properties.status.type);
+                emitLifecycleEvent({
+                  type: 'session_status',
+                  status: event.properties.status.type,
+                  atMs: Date.now(),
+                });
               } else if (
                 event.type === 'session.idle' &&
                 event.properties.sessionID === sessionId
               ) {
-                await options.onSessionStatus?.('idle');
+                emitLifecycleEvent({
+                  type: 'session_status',
+                  status: 'idle',
+                  atMs: Date.now(),
+                });
               } else if (
                 event.type === 'session.status' &&
                 event.properties.sessionID === sessionId &&
                 event.properties.status.type === 'retry'
               ) {
+                emitLifecycleEvent({
+                  type: 'provider_retry',
+                  attempt: event.properties.status.attempt,
+                  atMs: Date.now(),
+                });
                 try {
                   await params.onProviderRetry?.({
                     attempt: event.properties.status.attempt,
@@ -1056,6 +1131,10 @@ async function runNonTaskSdkPrompt(
                 event.type === 'session.error' &&
                 event.properties.sessionID === sessionId
               ) {
+                emitLifecycleEvent({
+                  type: 'provider_error',
+                  atMs: Date.now(),
+                });
                 rejectSessionError(
                   new NonTaskOpenCodePromptError(
                     event.properties.error ??
@@ -1070,6 +1149,10 @@ async function runNonTaskSdkPrompt(
             }
           } catch (error) {
             if (!eventAbortController.signal.aborted) {
+              emitLifecycleEvent({
+                type: 'provider_disconnected',
+                atMs: Date.now(),
+              });
               console.warn(
                 `[NonTaskProviderUsage] OpenCode event monitor failed: ${formatOpenCodeSdkError(error)}`,
               );
@@ -1095,6 +1178,10 @@ async function runNonTaskSdkPrompt(
     try {
       const turnStartedAtMs = Date.now();
       options.onPromptStarted?.();
+      emitLifecycleEvent({
+        type: 'provider_request_started',
+        atMs: turnStartedAtMs,
+      });
       const promptRequest = client.session.prompt(
         {
           sessionID: sessionId,
@@ -1269,8 +1356,19 @@ async function runNonTaskSdkPrompt(
         );
       }
 
+      emitLifecycleEvent({
+        type: 'provider_request_ended',
+        atMs: Date.now(),
+        outcome: 'success',
+      });
+
       return promptResult.data;
     } catch (error) {
+      emitLifecycleEvent({
+        type: 'provider_request_ended',
+        atMs: Date.now(),
+        outcome: abortController.signal.aborted ? 'aborted' : 'error',
+      });
       // Aborting the HTTP request does not guarantee that an OpenCode server
       // stopped its model turn. Explicitly cancel it before the session or a
       // leased server is reused for a bounded retry.
@@ -1402,7 +1500,7 @@ export async function generateTrackedNonTaskTextInOpenCodeSession(
       onPromptStarted: options.onPromptStarted,
       onMessageCompleted: options.onMessageCompleted,
       onSessionReady: options.onSessionReady,
-      onSessionStatus: options.onSessionStatus,
+      onLifecycleEvent: options.onLifecycleEvent,
       onSubagentSessionReady: options.onSubagentSessionReady,
       permission: options.permission,
       preserveReasoning: true,

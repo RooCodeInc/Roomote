@@ -304,6 +304,30 @@ describe('resolveOpenCodeSmallModel', () => {
           properties: { sessionID: 'session-1' },
         };
         yield {
+          type: 'message.updated' as const,
+          properties: {
+            info: {
+              id: 'assistant-message-1',
+              sessionID: 'session-1',
+              role: 'assistant' as const,
+              time: { created: 100 },
+            },
+          },
+        };
+        yield {
+          type: 'message.part.updated' as const,
+          properties: {
+            part: {
+              id: 'assistant-part-1',
+              sessionID: 'session-1',
+              messageID: 'assistant-message-1',
+              type: 'text' as const,
+              text: 'Working',
+            },
+            delta: 'Working',
+          },
+        };
+        yield {
           type: 'session.created',
           properties: {
             sessionID: 'subagent-session-1',
@@ -338,7 +362,7 @@ describe('resolveOpenCodeSmallModel', () => {
     const onModelResolved = vi.fn();
     const onPromptStarted = vi.fn();
     const onMessageCompleted = vi.fn();
-    const onSessionStatus = vi.fn();
+    const onLifecycleEvent = vi.fn();
     const onSubagentSessionReady = vi.fn(() => markSubagentReady());
     const session: { id?: string } = {};
 
@@ -364,7 +388,7 @@ describe('resolveOpenCodeSmallModel', () => {
           onMessageCompleted,
           onPromptStarted,
           onSessionReady,
-          onSessionStatus,
+          onLifecycleEvent,
           onSubagentSessionReady,
           permission: FAST_AGENT_SESSION_PERMISSIONS,
           promptOnlySubagents: true,
@@ -382,7 +406,27 @@ describe('resolveOpenCodeSmallModel', () => {
     });
     expect(onPromptStarted).toHaveBeenCalledOnce();
     expect(onSessionReady).toHaveBeenCalledWith('session-1');
-    expect(onSessionStatus.mock.calls).toEqual([['busy'], ['idle'], ['idle']]);
+    expect(onLifecycleEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'provider_request_started' }),
+    );
+    expect(onLifecycleEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'session_status', status: 'busy' }),
+    );
+    expect(onLifecycleEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'session_status', status: 'idle' }),
+    );
+    expect(onLifecycleEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'provider_first_token' }),
+    );
+    expect(onLifecycleEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'provider_activity' }),
+    );
+    expect(onLifecycleEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'provider_request_ended',
+        outcome: 'success',
+      }),
+    );
     expect(onSubagentSessionReady).toHaveBeenCalledWith('subagent-session-1');
     expect(onModelResolved.mock.invocationCallOrder[0]!).toBeLessThan(
       onPromptStarted.mock.invocationCallOrder[0]!,
