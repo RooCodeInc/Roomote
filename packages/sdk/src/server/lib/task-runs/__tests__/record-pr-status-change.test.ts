@@ -13,6 +13,7 @@ vi.mock('@roomote/db/server', async () => {
 
   return {
     ...actual,
+    desc: vi.fn((column: unknown) => ({ desc: column })),
     db: {
       query: {
         taskPullRequests: {
@@ -49,6 +50,7 @@ import {
   PR_STATUS_NOTIFICATION_TASK_MESSAGE_SOURCE,
   ROOMOTE_RUNTIME_TASK_MESSAGE_PROTOCOL,
 } from '@roomote/types';
+import { desc, taskRuns } from '@roomote/db/server';
 
 import {
   formatPrStatusChangeTaskHistoryText,
@@ -222,6 +224,8 @@ describe('recordPrStatusChangeInTaskHistory', () => {
 
     expect(mockRecordTaskMessageEnvelope).toHaveBeenCalledTimes(2);
     expect(mockNotifyFastAgentParent).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(desc)).toHaveBeenNthCalledWith(1, taskRuns.createdAt);
+    expect(vi.mocked(desc)).toHaveBeenNthCalledWith(2, taskRuns.id);
     expect(mockNotifyFastAgentParent).toHaveBeenNthCalledWith(1, {
       run: { id: 11, taskId: 'task-1', payload: {} },
       pullRequest: {
