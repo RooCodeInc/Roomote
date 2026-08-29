@@ -15,6 +15,7 @@ import { readFileSync } from 'node:fs';
 
 import { resolveModelProviderEnvValue } from '@roomote/db/server';
 import { Env } from '@roomote/env';
+import { ROOMOTE_INFERENCE_API_KEY_ENV_VAR_NAME } from '@roomote/types';
 
 /**
  * Same model under each provider's naming, so a request can be translated
@@ -56,13 +57,22 @@ const BRAIN_PROVIDER_PREFERENCE: readonly BrainInferenceProviderId[] = [
 /**
  * Brain-specific keys win over the deployment's general model-provider keys,
  * so an operator can bill the Brain separately from task inference without
- * the two settings fighting.
+ * the two settings fighting. The Roomote-minted trial key comes last: it is
+ * an OpenRouter key delivered by hosting and imported into Settings storage
+ * (`resolveModelProviderEnvValue` never reads its raw env value, so deleting
+ * the stored key disables it), and without it a trial-only deployment had no
+ * Brain inference at all — the gateway 503'd expansion and synthesis, and
+ * the Memory page showed "Not configured" despite working trial inference.
  */
 const BRAIN_PROVIDER_ENV_VAR_NAMES: Record<
   BrainInferenceProviderId,
   readonly string[]
 > = {
-  openrouter: ['R_BRAIN_OPENROUTER_API_KEY', 'OPENROUTER_API_KEY'],
+  openrouter: [
+    'R_BRAIN_OPENROUTER_API_KEY',
+    'OPENROUTER_API_KEY',
+    ROOMOTE_INFERENCE_API_KEY_ENV_VAR_NAME,
+  ],
   openai: ['R_BRAIN_OPENAI_API_KEY', 'OPENAI_API_KEY'],
 };
 
