@@ -138,7 +138,8 @@ const defaultDependencies: MergeAnnouncerDependencies = {
     }),
   getRuntime: () => getAutomationRuntime('merge_announcer'),
   listConnectedProviders: listConnectedCommunicationProviders,
-  recordOutcome: recordAutomationRunOutcome,
+  recordOutcome: (executor, params) =>
+    recordAutomationRunOutcome(executor, params),
   resolveDestination: resolveAutomationRuntimeDestination,
 };
 
