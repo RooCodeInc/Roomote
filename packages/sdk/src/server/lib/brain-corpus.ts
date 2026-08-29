@@ -403,6 +403,15 @@ export async function readBrainCorpus(): Promise<BrainCorpusSnapshot | null> {
   };
 
   if (corpusCache.snapshot) {
+    // An expired empty snapshot must not ride stale-while-revalidate: the
+    // whole point of its short TTL is that first ingestion is probably
+    // landing right now, and serving "nothing here" once more while the
+    // refresh runs re-creates the empty settings page this path exists to
+    // avoid. The awaited walk is cheap — the corpus was empty moments ago.
+    if (corpusCache.snapshot.pages.length === 0) {
+      return (await refresh()) ?? corpusCache.snapshot;
+    }
+
     void refresh();
     return corpusCache.snapshot;
   }

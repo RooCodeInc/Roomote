@@ -228,15 +228,17 @@ describe('readBrainCorpus', () => {
       await readBrainCorpus();
       expect(fetchMock).toHaveBeenCalledTimes(1);
 
-      // First ingestion lands moments later; the next read past the short
-      // window re-walks instead of serving "nothing here" for ten minutes.
+      // First ingestion lands moments later; the very next read past the
+      // short window awaits a fresh walk and returns the new pages, rather
+      // than serving "nothing here" once more via stale-while-revalidate.
       vi.advanceTimersByTime(31_000);
       const windows = [windowOf(0, 42)];
       fetchMock.mockImplementation(async () =>
         toolResponse(windows.shift() ?? []),
       );
-      await readBrainCorpus();
-      await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+      const third = await readBrainCorpus();
+      expect(third?.pages).toHaveLength(42);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
     } finally {
       vi.useRealTimers();
     }

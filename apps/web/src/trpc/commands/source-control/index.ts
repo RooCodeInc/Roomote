@@ -1026,12 +1026,13 @@ export async function saveSourceControlConfigCommand(
     };
   });
 
-  if (result.configSatisfied) {
-    // A newly satisfied provider config means repositories (and their PRs
-    // and issues) just became reachable — start Memory ingestion now rather
-    // than waiting out the 15-minute schedules.
-    void requestBrainBackfill('source-control-connected');
-  }
+  // A successful save means every required value is satisfied (the save
+  // throws otherwise), and `result.configSatisfied` reflects the state
+  // BEFORE this save — so kick unconditionally: repositories (and their PRs
+  // and issues) may have just become reachable, and Memory ingestion should
+  // start now rather than waiting out the 15-minute schedules. Harmless when
+  // nothing changed; the jobs are idempotent and no-op without Memory.
+  void requestBrainBackfill('source-control-connected');
 
   return result;
 }
