@@ -115,16 +115,17 @@ describe('fast-agent integration broker', () => {
     });
   });
 
-  it('exposes connected Linear tools through its read-only router MCP', async () => {
+  it('exposes the full task Linear catalog with actor authorization', async () => {
     mocks.configuredServers = {
       linear: {
-        url: 'https://api.example.com/api/mcp-routing/linear',
+        url: 'https://api.example.com/api/mcp/linear',
         headers: { 'X-MCP-Client': 'Roomote' },
         disabledTools: ['get_document'],
       },
     };
     mocks.listMcpTools.mockResolvedValue([
       { name: 'get_issue', inputSchema: { type: 'object' } },
+      { name: 'save_issue', inputSchema: { type: 'object' } },
       { name: 'get_document', inputSchema: { type: 'object' } },
     ]);
 
@@ -136,11 +137,14 @@ describe('fast-agent integration broker', () => {
     expect(integrations).toEqual([
       expect.objectContaining({
         id: 'linear',
-        tools: [{ name: 'get_issue', inputSchema: { type: 'object' } }],
+        tools: [
+          { name: 'get_issue', inputSchema: { type: 'object' } },
+          { name: 'save_issue', inputSchema: { type: 'object' } },
+        ],
       }),
     ]);
     expect(mocks.listMcpTools).toHaveBeenCalledWith({
-      url: 'https://api.example.com/api/mcp-routing/linear',
+      url: 'https://api.example.com/api/mcp/linear',
       headers: {
         'X-MCP-Client': 'Roomote',
         Authorization: 'Bearer control-plane-token',
