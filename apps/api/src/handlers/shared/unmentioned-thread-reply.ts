@@ -65,9 +65,9 @@ export function compareBigIntMessageIds(left: string, right: string): number {
  * Eligibility is limited to senders already in the conversation: task owner,
  * thread starter, or someone who mentioned the bot earlier. Automation reports
  * and other open Roomote conversations have no single owning participant, so
- * any human reply there is eligible. Routing still fails when somebody else
- * posted or was mentioned after the bot's last message; a later bot reply
- * reopens that window.
+ * any human reply there is eligible. Speaker changes are expected in open
+ * conversations, but routing still fails when somebody else was mentioned
+ * after the bot's last message; a later bot reply reopens that window.
  */
 export function evaluateUnmentionedThreadReplyRouting(input: {
   eventMessageId: string;
@@ -143,7 +143,8 @@ export function evaluateUnmentionedThreadReplyRouting(input: {
       continue;
     }
 
-    const isMessageFromSomebodyElse = message.authorUserId !== senderUserId;
+    const isMessageFromSomebodyElse =
+      !isOpenConversationThread && message.authorUserId !== senderUserId;
     if (isMessageFromSomebodyElse || message.mentionsSomebodyElse) {
       return { shouldRoute: false, interjectionDetected: true };
     }

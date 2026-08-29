@@ -171,6 +171,26 @@ describe('shouldRouteUnmentionedSlackThreadReplyToAgent', () => {
     ).resolves.toMatchObject({ shouldRoute: true });
   });
 
+  it('routes a new participant after the original participant speaks again in a fast-agent thread', async () => {
+    hasFastAgentSessionMock.mockResolvedValue(true);
+    findRoomoteOwnedSlackThreadMock.mockResolvedValue(null);
+    fetchThreadMessagesMock.mockResolvedValue([
+      humanMessage('U111', THREAD_TS, '<@UBOT> !fast hi'),
+      botMessage('101.000', 'Hi there.'),
+      humanMessage('U111', '102.000', 'One more detail'),
+    ]);
+
+    await expect(
+      routeDecision(
+        threadReplyEvent({
+          user: 'U222',
+          ts: '103.000',
+          text: 'Can you check that too?',
+        }),
+      ),
+    ).resolves.toMatchObject({ shouldRoute: true });
+  });
+
   it('keeps a peer-directed reply silent in an existing fast-agent thread', async () => {
     hasFastAgentSessionMock.mockResolvedValue(true);
     findRoomoteOwnedSlackThreadMock.mockResolvedValue(null);
@@ -187,7 +207,7 @@ describe('shouldRouteUnmentionedSlackThreadReplyToAgent', () => {
     expect(fetchThreadMessagesMock).not.toHaveBeenCalled();
   });
 
-  it('requires an explicit mention after another user interjects in a fast-agent thread', async () => {
+  it('keeps routing between participants in a fast-agent thread', async () => {
     hasFastAgentSessionMock.mockResolvedValue(true);
     findRoomoteOwnedSlackThreadMock.mockResolvedValue(null);
     fetchThreadMessagesMock.mockResolvedValue([
@@ -204,11 +224,8 @@ describe('shouldRouteUnmentionedSlackThreadReplyToAgent', () => {
           text: 'Can you continue?',
         }),
       ),
-    ).resolves.toEqual({ shouldRoute: false });
-    expect(markSlackThreadExplicitMentionRequiredMock).toHaveBeenCalledWith(
-      'C123',
-      THREAD_TS,
-    );
+    ).resolves.toMatchObject({ shouldRoute: true });
+    expect(markSlackThreadExplicitMentionRequiredMock).not.toHaveBeenCalled();
   });
 
   it('routes an unmentioned reply directly after the bot last spoke', async () => {
