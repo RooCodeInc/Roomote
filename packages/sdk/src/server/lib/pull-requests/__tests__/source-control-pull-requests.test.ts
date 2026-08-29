@@ -25,6 +25,7 @@ const {
   mockResolveTelegramRuntimeCredentials,
   mockGetPrBodyAttributionLine,
   mockGetSessionForTask,
+  mockTaskParticipantRows,
   mockTasksFindFirst,
   mockResolveLaunchTaskCommitAuthor,
   mockResolveRunCommitAuthor,
@@ -48,6 +49,7 @@ const {
   mockResolveTelegramRuntimeCredentials: vi.fn(),
   mockGetPrBodyAttributionLine: vi.fn(),
   mockGetSessionForTask: vi.fn(),
+  mockTaskParticipantRows: vi.fn(),
   mockTasksFindFirst: vi.fn(),
   mockResolveLaunchTaskCommitAuthor: vi.fn(),
   mockResolveRunCommitAuthor: vi.fn(),
@@ -133,6 +135,13 @@ vi.mock('@roomote/db/server', () => ({
   resolveTelegramRuntimeCredentials: (...args: unknown[]) =>
     mockResolveTelegramRuntimeCredentials(...args),
   db: {
+    selectDistinct: () => ({
+      from: () => ({
+        innerJoin: () => ({
+          where: () => mockTaskParticipantRows(),
+        }),
+      }),
+    }),
     transaction: (callback: (tx: unknown) => unknown) =>
       callback({
         insert: () => ({
@@ -184,8 +193,17 @@ vi.mock('@roomote/db/server', () => ({
     id: 'taskRuns.id',
     taskId: 'taskRuns.taskId',
   },
+  taskMessages: {
+    taskId: 'taskMessages.taskId',
+    userId: 'taskMessages.userId',
+    role: 'taskMessages.role',
+  },
   tasks: {
     id: 'tasks.id',
+  },
+  users: {
+    id: 'users.id',
+    name: 'users.name',
   },
   taskPullRequests: {
     taskId: 'taskPullRequests.taskId',
@@ -201,6 +219,7 @@ vi.mock('@roomote/db/server', () => ({
   ),
   and: vi.fn((...conditions: unknown[]) => ({ type: 'and', conditions })),
   eq: vi.fn((left: unknown, right: unknown) => ({ type: 'eq', left, right })),
+  isNotNull: vi.fn((value: unknown) => ({ type: 'isNotNull', value })),
 }));
 
 import { createOrUpdateSourceControlPullRequestForTaskRun } from '../source-control-pull-requests';
@@ -274,6 +293,7 @@ describe('createOrUpdateSourceControlPullRequestForTaskRun', () => {
     mockGetDeploymentPrAction.mockResolvedValue('draft');
     mockEnvironmentsFindFirst.mockResolvedValue(null);
     mockGetSessionForTask.mockResolvedValue(null);
+    mockTaskParticipantRows.mockResolvedValue([]);
     mockResolveGitLabToken.mockResolvedValue('gitlab-token');
     mockResolveGiteaToken.mockResolvedValue('gitea-token');
     mockResolveGiteaBaseUrl.mockResolvedValue('https://git.example.com');
@@ -1168,7 +1188,7 @@ describe('optional targetBranch', () => {
     );
   });
 
-  it('uses the live actor in the body only when creating a pull request', async () => {
+  it('keeps current acting-user provenance when no participant is explicitly selected', async () => {
     const octokit = makeOctokit({
       list: [],
       created: {
@@ -1181,8 +1201,10 @@ describe('optional targetBranch', () => {
       },
     });
     mockResolveRunCommitAuthor.mockResolvedValue({
-      displayName: 'Participant',
-      prAssigneeLogin: null,
+      kind: 'user',
+      displayName: '@daniel-lxs',
+      publicDisplayName: '@daniel-lxs',
+      prAssigneeLogin: 'daniel-lxs',
     });
 
     await createOrUpdateSourceControlPullRequestForTaskRun({
@@ -1190,14 +1212,104 @@ describe('optional targetBranch', () => {
       input: {
         ...baseInput,
         targetBranch: 'develop',
-        body: attributionBody('Opened on behalf of Launch Owner.'),
+        body: attributionBody('Opened on behalf of @mrubens.'),
       },
     });
 
     expect(octokit.rest.pulls.create).toHaveBeenCalledWith(
       expect.objectContaining({
-        body: attributionBody('Opened on behalf of Participant.'),
+        body: attributionBody('Opened on behalf of @daniel-lxs.'),
       }),
+    );
+    expect(octokit.rest.issues.addAssignees).toHaveBeenCalledWith(
+      expect.objectContaining({ assignees: ['daniel-lxs'] }),
+    );
+  });
+
+  it('uses an explicitly selected participant when Matt initiates and Dan later comments', async () => {
+    const octokit = makeOctokit({
+      list: [],
+      created: {
+        number: 13,
+        node_id: 'node-13',
+        html_url: 'https://github.com/acme/web/pull/13',
+        title: '[Feature] X',
+        draft: true,
+        base: { ref: 'develop' },
+      },
+    });
+    mockTaskParticipantRows.mockResolvedValue([
+      { userId: 'user-matt', name: 'Matt Rubens' },
+      { userId: 'user-123', name: 'Dan Riccio' },
+    ]);
+    mockResolveRunCommitAuthor
+      .mockResolvedValueOnce({
+        kind: 'user',
+        displayName: '@daniel-lxs',
+        publicDisplayName: '@daniel-lxs',
+        prAssigneeLogin: 'daniel-lxs',
+      })
+      .mockResolvedValueOnce({
+        kind: 'user',
+        displayName: '@mrubens',
+        publicDisplayName: '@mrubens',
+        prAssigneeLogin: 'mrubens',
+      });
+    mockResolveLaunchTaskCommitAuthor.mockResolvedValue({
+      displayName: '@mrubens',
+      prAssigneeLogin: 'mrubens',
+    });
+
+    await createOrUpdateSourceControlPullRequestForTaskRun({
+      taskRun: makeTaskRun({ repo: 'acme/web' }),
+      input: {
+        ...baseInput,
+        targetBranch: 'develop',
+        body: attributionBody('Opened on behalf of @mrubens.'),
+        prAttribution: 'Matt Rubens',
+      },
+    });
+
+    expect(octokit.rest.pulls.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        body: attributionBody('Opened on behalf of @mrubens.'),
+      }),
+    );
+    expect(octokit.rest.issues.addAssignees).toHaveBeenCalledWith(
+      expect.objectContaining({ assignees: ['daniel-lxs'] }),
+    );
+  });
+
+  it('rejects explicit PR attribution to someone outside the task conversation', async () => {
+    mockTaskParticipantRows.mockResolvedValue([
+      { userId: 'user-matt', name: 'Matt Rubens' },
+      { userId: 'user-123', name: 'Dan Riccio' },
+    ]);
+    mockResolveRunCommitAuthor
+      .mockResolvedValueOnce({
+        kind: 'user',
+        displayName: 'Dan Riccio',
+        publicDisplayName: '@daniel-lxs',
+        prAssigneeLogin: 'daniel-lxs',
+      })
+      .mockResolvedValueOnce({
+        kind: 'user',
+        displayName: 'Matt Rubens',
+        publicDisplayName: '@mrubens',
+        prAssigneeLogin: 'mrubens',
+      });
+
+    await expect(
+      createOrUpdateSourceControlPullRequestForTaskRun({
+        taskRun: makeTaskRun({ repo: 'acme/web' }),
+        input: {
+          ...baseInput,
+          targetBranch: 'develop',
+          prAttribution: '@outsider',
+        },
+      }),
+    ).rejects.toThrow(
+      'PR attribution participant "@outsider" is not eligible for this task. Choose one of: @mrubens, @daniel-lxs.',
     );
   });
 
@@ -1987,6 +2099,64 @@ Done.`,
       expect.objectContaining({
         body: attributionBody('Opened on behalf of @launch-owner.'),
       }),
+    );
+  });
+
+  it('updates existing PR provenance for an explicitly selected participant without changing assignment', async () => {
+    const existing = {
+      number: 11,
+      node_id: 'node-11',
+      html_url: 'https://github.com/acme/web/pull/11',
+      title: 'Old title',
+      draft: false,
+      base: { ref: 'develop' },
+      body: attributionBody('Opened on behalf of @launch-owner.'),
+    };
+    const octokit = makeOctokit({
+      list: [existing],
+      updated: { ...existing, title: '[Feature] X' },
+    });
+    mockRepositoriesFindFirst.mockResolvedValue({
+      installationId: 555,
+      externalRepoId: null,
+      fullName: 'acme/web',
+      htmlUrl: 'https://github.com/acme/web',
+      private: false,
+    });
+    mockTaskParticipantRows.mockResolvedValue([
+      { userId: 'user-matt', name: 'Matt Rubens' },
+      { userId: 'user-123', name: 'Dan Riccio' },
+    ]);
+    mockResolveRunCommitAuthor
+      .mockResolvedValueOnce({
+        kind: 'user',
+        displayName: 'Dan Riccio',
+        publicDisplayName: '@daniel-lxs',
+        prAssigneeLogin: 'daniel-lxs',
+      })
+      .mockResolvedValueOnce({
+        kind: 'user',
+        displayName: 'Matt Rubens',
+        publicDisplayName: '@mrubens',
+        prAssigneeLogin: 'mrubens',
+      });
+
+    await createOrUpdateSourceControlPullRequestForTaskRun({
+      taskRun: makeTaskRun({ repo: 'acme/web' }),
+      input: {
+        ...baseInput,
+        body: attributionBody('Opened on behalf of @launch-owner.'),
+        prAttribution: 'Matt Rubens',
+      },
+    });
+
+    expect(octokit.rest.pulls.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        body: attributionBody('Opened on behalf of @mrubens.'),
+      }),
+    );
+    expect(octokit.rest.issues.addAssignees).toHaveBeenCalledWith(
+      expect.objectContaining({ assignees: ['daniel-lxs'] }),
     );
   });
 
