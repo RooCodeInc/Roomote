@@ -81,7 +81,9 @@ function toSharedHistoryMessages(
       mentionsSomebodyElse: message.mentions.some(
         (mention) =>
           !isBotGraphMention(mention, normalizedBotAppId) &&
-          (Boolean(mention.applicationId) || Boolean(mention.userId)),
+          (Boolean(mention.applicationId) ||
+            (Boolean(mention.userId) &&
+              mention.userId !== message.authorUserId)),
       ),
     };
   });

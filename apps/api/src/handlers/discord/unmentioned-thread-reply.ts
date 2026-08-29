@@ -41,12 +41,13 @@ function mentionsDiscordUserOtherThanBotWithoutMentioningBot(
   return mentionedUserIds.size > 0 && !mentionedUserIds.has(botUserId ?? '');
 }
 
-function mentionsDiscordUserOtherThanBot(
+function mentionsDiscordUserOtherThanBotOrUser(
   text: string,
   botUserId: string | undefined,
+  discordUserId: string | null | undefined,
 ): boolean {
   return getMentionedDiscordUserIds(text).some(
-    (userId) => userId !== botUserId,
+    (userId) => userId !== botUserId && userId !== discordUserId,
   );
 }
 
@@ -74,9 +75,10 @@ function toSharedHistoryMessages(
       authorUserId: isHuman ? message.user : isBot ? botUserId : null,
       isBot,
       mentionsBot: mentionsDiscordBotInText(message.text, botUserId),
-      mentionsSomebodyElse: mentionsDiscordUserOtherThanBot(
+      mentionsSomebodyElse: mentionsDiscordUserOtherThanBotOrUser(
         message.text,
         botUserId,
+        message.user,
       ),
     };
   });

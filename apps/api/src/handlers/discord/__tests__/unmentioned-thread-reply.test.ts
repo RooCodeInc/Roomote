@@ -142,6 +142,20 @@ describe('shouldRouteUnmentionedDiscordThreadReplyToAgent', () => {
     ).resolves.toBe(false);
   });
 
+  it('keeps routing after the sender mentions themself in an open fast-agent thread', async () => {
+    fetchThreadMessagesMock.mockResolvedValue([
+      humanHistory(THREAD_ROOT_ID, USER_1, 'Can you summarize this?'),
+      botHistory('200', 'Hi there.'),
+      humanHistory('300', USER_1, `<@${USER_1}> note to self`),
+    ]);
+
+    await expect(
+      routeDecision(threadReplyMessage({ user: USER_1 }), {
+        isOpenConversationThread: true,
+      }),
+    ).resolves.toBe(true);
+  });
+
   it('keeps routing consecutive replies from the same sender before the bot answers', async () => {
     fetchThreadMessagesMock.mockResolvedValue([
       humanHistory(
