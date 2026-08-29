@@ -14,7 +14,7 @@ const MAX_GITHUB_ASSOCIATED_PULL_REQUESTS = 10;
 const MAX_GITHUB_PULL_REQUEST_CANDIDATES = 3;
 const MAX_GITHUB_CHANGED_FILES = 20;
 
-export type GitHubPushWebhook = {
+type GitHubPushWebhook = {
   ref: string;
   after?: string;
   deleted?: boolean;
