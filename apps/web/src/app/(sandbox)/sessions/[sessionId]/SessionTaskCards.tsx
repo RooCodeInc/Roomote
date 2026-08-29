@@ -72,7 +72,10 @@ export function SessionTaskCards({
   };
 
   return (
-    <section aria-labelledby="session-executions" className="space-y-2 py-3">
+    <section
+      aria-labelledby="session-executions"
+      className="hidden space-y-2 py-3"
+    >
       <h2 id="session-executions" className="text-sm font-medium">
         Executions
       </h2>
