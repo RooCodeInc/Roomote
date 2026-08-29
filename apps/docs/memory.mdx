@@ -87,13 +87,15 @@ Memory runs as its own service alongside Roomote, reachable only on your
 deployment's internal network. On the hosted templates (Railway, Render,
 Coolify) that service is already there after a deploy, sitting idle.
 
-The **Enable Memory** toggle at the top of **Settings → Memory** is what
-turns it on; no provider key is required for that. Synthesis runs through
-your deployment's helper model — the same small model that already writes
-task titles and summaries. Deployments that enabled Memory before the toggle
-existed, by setting `R_BRAIN_OPENROUTER_API_KEY` or `R_BRAIN_OPENAI_API_KEY`,
-stay enabled without doing anything; using the toggle stores an explicit
-choice that wins over the key from then on.
+New Roomote Cloud deployments enable Memory when initial setup completes.
+Existing deployments keep their current setting. Administrators can change it
+with the **Enable Memory** toggle at the top of **Settings → Memory**; no
+provider key is required. Synthesis runs through your deployment's helper model
+— the same small model that already writes task titles and summaries.
+Deployments that enabled Memory before the toggle existed, by setting
+`R_BRAIN_OPENROUTER_API_KEY` or `R_BRAIN_OPENAI_API_KEY`, stay enabled without
+doing anything; using the toggle stores an explicit choice that wins over the
+key from then on.
 
 Semantic recall still needs embeddings. Those come from an OpenRouter or
 OpenAI key — a Memory-specific `R_BRAIN_*` key to bill Memory separately, or
