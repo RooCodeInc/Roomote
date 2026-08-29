@@ -643,6 +643,34 @@ describe('Home', () => {
     });
   });
 
+  it('opens a new task session on the transcript', async () => {
+    mockUseCreateStandardTaskRun.mockImplementation(
+      (options: { onSuccess: (result: unknown) => void }) => ({
+        isPending: false,
+        mutateAsync: async () => {
+          const result = {
+            success: true,
+            id: 4,
+            taskId: 'task-4',
+            sessionId: 'session-1',
+          };
+          options.onSuccess(result);
+          return result;
+        },
+      }),
+    );
+    render(<Home initialPlaceholderIndex={0} />);
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Use single-repo environment' }),
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Submit prompt' }));
+
+    await waitFor(() => {
+      expect(mockPush).toHaveBeenCalledWith('/sessions/session-1');
+    });
+  });
+
   it('uses opencode as the default harness', async () => {
     render(<Home initialPlaceholderIndex={0} />);
 
