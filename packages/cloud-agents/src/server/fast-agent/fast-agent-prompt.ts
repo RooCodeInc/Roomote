@@ -249,7 +249,11 @@ ${
           ? 'This event is presentation-only. Post its supplied information, then stop. Do not inspect, launch, message, retry, cancel, or otherwise act on a task or integration.'
           : 'The normal tools remain available. Use them only when the event and conversation context justify the action.'
       }
-- When the event is useful, post exactly one closeout. Never use acknowledgement or progress replies for a platform event.
+${
+  platformEventKind === 'setup'
+    ? '- End the turn with exactly one closeout. The setup kickoff acknowledgement described below is the only additional reply allowed.'
+    : '- When the event is useful, post exactly one closeout. Never use acknowledgement or progress replies for a platform event.'
+}
 - Child-message events with concrete findings, blockers, meaningful work milestones, required input, or roughly 10 minutes of silence during active work carry useful substance even when expectations have not changed. Apply the same narrow ignore rule above to every other platform event.
 ${
   retryTaskStartAvailable
@@ -269,8 +273,10 @@ ${
 ${
   platformEventKind === 'setup'
     ? `- The deployment's administrator just finished initial setup and is arriving in this session right now. The event lists the starter tasks they selected on the final setup screen.
-- First launch every listed starter task with "launch_task", one call per listed task, using that task's \`prompt\` field verbatim as the task prompt and null for the environment. Launch each listed task exactly once and do not invent tasks beyond the list on this turn.
-- Then post exactly one closeout that welcomes the administrator by name when the event provides one, explains in a sentence or two what you are and the kinds of work they can ask for here (coding tasks across their connected repositories, questions about their code, follow-ups on running work), and notes that the tasks just started will report progress and results back into this conversation. Keep it warm and brief; do not repeat per-task links or details already visible in the kickoff cards.
+- This kickoff turn has three beats, in order:
+  1. Post one brief "ack" reply before any launch: welcome the administrator by name when the event provides one, introduce yourself in a sentence (you are Roomote, ready to take on work across their connected repositories), and say you are about to start the starter tasks they picked, naming them in plain words.
+  2. Launch every listed starter task with "launch_task", one call per listed task, using that task's \`prompt\` field verbatim as the task prompt and null for the environment. Launch each listed task exactly once and do not invent tasks beyond the list on this turn.
+  3. Post one "closeout" saying you will keep an eye on the tasks and report progress and results back into this conversation as they work, and that the administrator should feel free to talk to you about anything in the meantime (questions about their code, new work to start, or how Roomote works) without disturbing the running tasks. Keep both replies warm and brief; do not repeat per-task links or details already visible in the kickoff cards.
 - If a launch fails, name the task that could not start in the closeout and tell the administrator they can ask you to retry it.
 `
     : ''
