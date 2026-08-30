@@ -5,13 +5,19 @@ const {
   mockRedisGet,
   mockRedisSet,
   mockFetch,
+  mockReadFile,
   mockIsRoomoteCloudEnabled,
 } = vi.hoisted(() => ({
   mockFindFirst: vi.fn(),
   mockRedisGet: vi.fn(),
   mockRedisSet: vi.fn(),
   mockFetch: vi.fn(),
+  mockReadFile: vi.fn(),
   mockIsRoomoteCloudEnabled: vi.fn((): boolean => false),
+}));
+
+vi.mock('node:fs/promises', () => ({
+  readFile: (...args: unknown[]) => mockReadFile(...args),
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -94,6 +100,24 @@ describe('releases commands', () => {
     });
     mockRedisGet.mockResolvedValue(null);
     mockRedisSet.mockResolvedValue('OK');
+    mockReadFile.mockResolvedValue(`# Changelog
+
+## 0.17.0 (2026-07-22)
+
+Not installed yet.
+
+## 0.14.0 (2026-07-19)
+
+Oldest release.
+
+## 0.16.0 (2026-07-21)
+
+Current release.
+
+## 0.15.0 (2026-07-20)
+
+Previous release.
+`);
     vi.stubGlobal('fetch', mockFetch);
   });
 
@@ -175,45 +199,8 @@ describe('releases commands', () => {
     expect(mockRedisSet).toHaveBeenCalled();
   });
 
-  it('returns product release history newest first through the running version', async () => {
+  it('returns changelog release history newest first through the running version', async () => {
     mockEnv.RELEASE_VERSION = 'v0.16.0';
-    mockFetch.mockResolvedValue({
-      ok: true,
-      status: 200,
-      json: async () => [
-        {
-          tag_name: 'v0.17.0',
-          name: 'Roomote v0.17.0',
-          body: 'Not installed yet.',
-        },
-        {
-          tag_name: 'v0.14.0',
-          name: 'Roomote v0.14.0',
-          body: 'Oldest release.',
-        },
-        {
-          tag_name: 'worker-v9.0.0',
-          name: 'Worker release',
-          body: 'Not a product release.',
-        },
-        {
-          tag_name: 'v0.16.0',
-          name: 'Roomote v0.16.0',
-          body: 'Current release.',
-        },
-        {
-          tag_name: 'v0.15.0',
-          name: 'Roomote v0.15.0',
-          body: 'Previous release.',
-        },
-        {
-          tag_name: 'v0.13.0',
-          name: 'Draft release',
-          body: 'Not published.',
-          draft: true,
-        },
-      ],
-    });
 
     const releases = await getReleaseHistoryCommand(memberAuth, {
       version: '0.16.0',
@@ -224,12 +211,12 @@ describe('releases commands', () => {
       '0.15.0',
       '0.14.0',
     ]);
-    expect(mockRedisSet).toHaveBeenCalledWith(
-      'release:notes:0.16.0:history',
-      expect.any(String),
-      'EX',
-      100,
+    expect(mockReadFile).toHaveBeenCalledWith(
+      expect.stringContaining('CHANGELOG.md'),
+      'utf8',
     );
+    expect(mockFetch).not.toHaveBeenCalled();
+    expect(mockRedisSet).not.toHaveBeenCalled();
   });
 
   it('refuses notes for versions the caller cannot see', async () => {
