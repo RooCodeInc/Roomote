@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import dynamic from 'next/dynamic';
 import { useCallback, useState, type ReactNode } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
@@ -23,6 +24,7 @@ import { FramedSurface, WorkspaceSurface } from '@/components/layout';
 import { SideNavItem } from '@/components/layout/side-nav/SideNavItem';
 import {
   ArrowLeftFromLine,
+  ArrowLeft,
   Avatar,
   BasicTooltip,
   BrandIcon,
@@ -34,6 +36,7 @@ import {
   Globe,
   Image,
   Info,
+  Loader2Icon,
   Slack,
   VideoIcon,
   X,
@@ -61,6 +64,25 @@ import {
 import { NestedTaskSidePanel } from './NestedTaskSidePanel';
 import { OpenSessionTaskPanelContext } from './session-task-panel-context';
 import { DelegatedTaskCard } from '../../task/[taskId]/messages/acp/DelegatedTaskCard';
+import { useArtifactByPath } from '../../task/[taskId]/hooks/use-artifact-by-path';
+
+const ArtifactViewerContent = dynamic(
+  () =>
+    import('@/components/tasks/ArtifactViewerContent').then(
+      (module) => module.ArtifactViewerContent,
+    ),
+  {
+    ssr: false,
+    loading: () => (
+      <div
+        className="flex h-full items-center justify-center"
+        aria-label="Loading artifact viewer"
+      >
+        <Loader2Icon className="size-5 animate-spin text-muted-foreground" />
+      </div>
+    ),
+  },
+);
 
 type SessionTaskSummary = {
   taskId: string;
@@ -115,10 +137,10 @@ export type SessionInfo = {
 
 function SessionArtifactCard({
   artifact,
-  href,
+  onOpen,
 }: {
   artifact: SessionTaskSummary['artifacts'][number];
-  href: string;
+  onOpen: () => void;
 }) {
   const [failedPreviewUrl, setFailedPreviewUrl] = useState<string | null>(null);
   const label = humanizeFilename(artifact.path);
@@ -128,10 +150,11 @@ function SessionArtifactCard({
   const videoPreviewUrl = artifact.previewUrl;
 
   return (
-    <Link
-      href={href}
+    <button
+      type="button"
+      onClick={onOpen}
       title={artifact.path}
-      className="group block min-w-0 overflow-hidden rounded-lg border bg-card transition-opacity hover:opacity-70"
+      className="group block w-full min-w-0 cursor-pointer overflow-hidden rounded-lg border bg-card text-left transition-opacity hover:opacity-70"
     >
       <span className="flex aspect-video w-full items-center justify-center overflow-hidden bg-muted">
         {isImage && thumbnailUrl && failedPreviewUrl !== thumbnailUrl ? (
@@ -173,7 +196,7 @@ function SessionArtifactCard({
       <span className="block border-t px-2 py-1.5 text-center">
         <span className="block truncate text-xs font-medium">{label}</span>
       </span>
-    </Link>
+    </button>
   );
 }
 
@@ -190,6 +213,14 @@ function SessionTaskPanel({
   onSelect: (taskId: string) => void;
   onClose: () => void;
 }) {
+  const [selectedArtifactPath, setSelectedArtifactPath] = useState<
+    string | null
+  >(null);
+  const {
+    data: selectedArtifact,
+    isPending: isArtifactPending,
+    isError: isArtifactError,
+  } = useArtifactByPath(task.taskId, selectedArtifactPath);
   const artifactPaths = new Set<string>();
   const latestArtifacts = task.artifacts.filter((artifact) => {
     if (artifactPaths.has(artifact.path)) return false;
@@ -212,8 +243,59 @@ function SessionTaskPanel({
     { label: 'Videos', artifacts: videoArtifacts },
     { label: 'Files', artifacts: fileArtifacts },
   ];
-  const artifactHref = (path: string) =>
-    `/task/${task.taskId}/artifacts/${encodeURIComponent(path)}?returnTo=${encodeURIComponent(`/sessions/${sessionId}?task=${task.taskId}`)}`;
+
+  if (selectedArtifactPath) {
+    return (
+      <>
+        <div className="flex min-w-0 shrink-0 items-center gap-2 border-b-2 border-card px-4 py-2">
+          <BasicTooltip content="Back to artifacts">
+            <Button
+              variant="ghost"
+              size="icon"
+              className="size-7 shrink-0"
+              aria-label="Back to artifacts"
+              onClick={() => setSelectedArtifactPath(null)}
+            >
+              <ArrowLeft />
+            </Button>
+          </BasicTooltip>
+          <h2 className="min-w-0 flex-1 truncate text-sm font-medium">
+            {humanizeFilename(selectedArtifactPath)}
+          </h2>
+          <BasicTooltip content="Close">
+            <Button
+              variant="ghost"
+              size="icon"
+              aria-label="Close execution details"
+              onClick={onClose}
+            >
+              <X />
+            </Button>
+          </BasicTooltip>
+        </div>
+        <div className="min-h-0 flex-1 bg-zinc-800">
+          {isArtifactPending ? (
+            <div
+              className="flex h-full items-center justify-center"
+              aria-label="Loading artifact"
+            >
+              <Loader2Icon className="size-5 animate-spin text-muted-foreground" />
+            </div>
+          ) : isArtifactError || !selectedArtifact ? (
+            <div className="flex h-full items-center justify-center px-6 text-center text-sm text-muted-foreground">
+              This artifact is unavailable.
+            </div>
+          ) : (
+            <ArtifactViewerContent
+              artifact={selectedArtifact}
+              taskId={task.taskId}
+              className="h-full border-0"
+            />
+          )}
+        </div>
+      </>
+    );
+  }
 
   return (
     <>
@@ -295,7 +377,7 @@ function SessionTaskPanel({
                         <SessionArtifactCard
                           key={artifact.id}
                           artifact={artifact}
-                          href={artifactHref(artifact.path)}
+                          onOpen={() => setSelectedArtifactPath(artifact.path)}
                         />
                       ))}
                     </div>
@@ -542,6 +624,7 @@ export function SessionWorkspace({
   };
   const panelContent = selectedTask ? (
     <SessionTaskPanel
+      key={selectedTask.taskId}
       sessionId={session.id}
       task={selectedTask}
       tasks={sessionTasks}
