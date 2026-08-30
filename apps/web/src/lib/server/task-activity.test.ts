@@ -103,6 +103,31 @@ describe('getLatestTaskActivityLine', () => {
     );
   });
 
+  it('keeps the last eligible line behind a long transient retry storm', async () => {
+    const { run } = await createRunWithTask('task-activity-retry-storm');
+
+    await db.insert(taskMessages).values([
+      messageRow(run, {
+        ts: 1_000,
+        eventType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+        text: 'Fixing the login bug.',
+      }),
+      // More transient rows than one scan batch, so the eligible message is
+      // only reachable by continuing past the first page.
+      ...Array.from({ length: 25 }, (_, index) =>
+        messageRow(run, {
+          ts: 2_000 + index,
+          eventType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+          text: `Retrying after a rate limit (attempt ${index + 1})`,
+        }),
+      ),
+    ]);
+
+    await expect(getLatestTaskActivityLine(run.id)).resolves.toBe(
+      'Fixing the login bug.',
+    );
+  });
+
   it('returns null when the run has produced no assistant messages', async () => {
     const { run } = await createRunWithTask('task-activity-empty');
 

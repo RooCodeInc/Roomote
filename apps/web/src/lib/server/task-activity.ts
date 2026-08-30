@@ -55,30 +55,39 @@ export function formatTaskActivityLine(text: string): string | null {
 export async function getLatestTaskActivityLine(
   runId: number,
 ): Promise<string | null> {
-  const messages = await db
-    .select({ contentBlocks: taskMessages.contentBlocks })
-    .from(taskMessages)
-    .where(
-      and(
-        eq(taskMessages.runId, runId),
-        eq(taskMessages.eventType, ACP_ENVELOPE_EVENT_TYPES.AssistantMessage),
-      ),
-    )
-    .orderBy(desc(taskMessages.ts), desc(taskMessages.createdAt))
-    .limit(10);
+  // Long retry storms can stack many transient messages on top of the last
+  // eligible one; scan newest-first in batches until an eligible message is
+  // found so the card keeps its prior activity line, matching Slack.
+  const batchSize = 20;
+  for (let offset = 0; ; offset += batchSize) {
+    const messages = await db
+      .select({ contentBlocks: taskMessages.contentBlocks })
+      .from(taskMessages)
+      .where(
+        and(
+          eq(taskMessages.runId, runId),
+          eq(taskMessages.eventType, ACP_ENVELOPE_EVENT_TYPES.AssistantMessage),
+        ),
+      )
+      .orderBy(desc(taskMessages.ts), desc(taskMessages.createdAt))
+      .limit(batchSize)
+      .offset(offset);
 
-  for (const message of messages) {
-    const text = getTextFromContentBlocks(
-      message.contentBlocks as TaskMessageContentBlock[] | null,
-    )?.trim();
-    if (!text || TRANSIENT_ASSISTANT_MESSAGE_PATTERN.test(text)) {
-      continue;
+    for (const message of messages) {
+      const text = getTextFromContentBlocks(
+        message.contentBlocks as TaskMessageContentBlock[] | null,
+      )?.trim();
+      if (!text || TRANSIENT_ASSISTANT_MESSAGE_PATTERN.test(text)) {
+        continue;
+      }
+      const line = formatTaskActivityLine(text);
+      if (line) {
+        return line;
+      }
     }
-    const line = formatTaskActivityLine(text);
-    if (line) {
-      return line;
+
+    if (messages.length < batchSize) {
+      return null;
     }
   }
-
-  return null;
 }
