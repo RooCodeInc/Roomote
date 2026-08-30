@@ -20,9 +20,10 @@ The full contributor walkthrough lives in the repository
 - **mise** — manages the repository toolchain (Node.js, pnpm, and friends).
 - **OpenCode CLI** — provides the `opencode` binary used to run tasks
   (`npm install -g opencode-ai`).
-- **A public HTTPS URL** — set `R_PUBLIC_URL` to a URL that reaches local port
-  13000. An ngrok domain, Cloudflare Tunnel, Tailscale Funnel, or your own
-  domain works. Install ngrok only when you use an ngrok domain.
+- **A public HTTPS URL** — set `R_PUBLIC_URL` to a URL that reaches the local
+  Caddy edge on port 18080. An ngrok domain, Cloudflare Tunnel, Tailscale
+  Funnel, or your own domain works. Install ngrok only when you use an ngrok
+  domain.
 
 ## Install and run
 
@@ -33,9 +34,9 @@ pnpm dev
 ```
 
 `pnpm dev` starts all services locally under PM2 supervision: it prepares
-service code, resolves your public callback URL, starts Postgres, Redis, and
-MinIO if needed, builds the local worker release archive, and starts the
-Roomote services.
+service code, resolves your public callback URL, starts Postgres, Redis, MinIO,
+and the required Brain (`gbrain`) service if needed, builds the local worker
+release archive, and starts the Roomote services.
 
 The public development edge also proxies signed artifact-storage paths to
 local MinIO. Hosted compute providers such as E2B, Modal, Daytona, and Box can

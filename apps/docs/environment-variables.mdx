@@ -130,6 +130,8 @@ as per-task auth tokens or workspace paths.
 | `ROOMOTE_FORCE_TELEMETRY` | Development only   | Force-enables telemetry in development or preview environments when a Ping endpoint is explicitly configured.                                                                                                                                                                                                                                                                                                                           |
 | `R_CLOUD_ENABLED`       | Roomote Cloud only   | Deployment-managed switch for Roomote Cloud behavior, including required anonymous analytics and Cloud support integrations. Do not set this for self-hosted deployments.                                                                                                                                                                                                                                                                |
 | `R_CURATED_INTEGRATIONS_DISABLED` | Optional | Operator policy for the curated **Settings > Integrations** catalog, which is enabled by default. Set to `true` and restart Roomote to prevent those integrations from being configured or used. Existing connections remain stored while disabled and become available again once the value is unset. Communications, source-control, inference, sandbox providers, and environment-defined MCP servers are unaffected. |
+| `R_CUSTOM_MCP_DISABLED` | Optional | Set to `true` or `1` to disable admin-configured custom MCP servers, including their Settings UI, proxy routes, and delivery to tasks. Defaults to `false`. |
+| `R_CUSTOM_MCP_ALLOWED_PRIVATE_CIDRS` | Optional | Comma-separated private CIDR ranges that custom MCP servers may reach in addition to public addresses. Leave unset to keep private and special-use ranges blocked. |
 | `R_GITHUB_APP_SLUG`     | GitHub setup         | Primary GitHub App slug used by server-rendered setup, mentions, and GitHub integration flows.                                                                                                                                                                                                                                                                                                                                           |
 | `R_GITHUB_ADDITIONAL_APP_SLUGS` | Optional GitHub setup | Comma-separated additional GitHub App slugs that Roomote should trust as managed bot identities for review attribution and notifications.                                                                                                                                                                                                                                                                                               |
 | `SETUP_TOKEN`           | Required (non-local) | One-time bootstrap token that admits the first admin at `/setup`. Required on every non-local deployment — tokenless bootstrap is allowed only when `NODE_ENV` is not `production` and `R_APP_ENV` is `development`, so anything running with `NODE_ENV=production` needs it. Without it, first-admin bootstrap stays closed so nobody can claim the founding-admin slot by reaching the URL first. Optional only in local development. |
@@ -151,6 +153,7 @@ as per-task auth tokens or workspace paths.
 | `S3_SECRET_ACCESS_KEY`  | Production  | Artifact-storage secret key.                                                                                                                   |
 | `S3_BUCKET_ARTIFACTS`   | Production  | Bucket used for Roomote artifacts.                                                                                                             |
 | `S3_AUTO_CREATE_BUCKET` | Optional    | Set to `true` or `1` to create the artifacts bucket at API boot when it is missing.                                                            |
+| `WEBHOOK_RETENTION_DAYS` | Optional   | Days to retain recorded webhook payloads before BullMQ cleanup deletes them. Defaults to `3`.                                                  |
 
 ### Security and signing
 
@@ -225,7 +228,7 @@ as per-task auth tokens or workspace paths.
 | `VLLM_API_KEY`                         | Optional     | Bearer API key for a vLLM endpoint that requires authentication.                                                                        |
 | `R_BRAIN_OPENROUTER_API_KEY`           | Memory provider | OpenRouter key that enables Memory embeddings and synthesis.                                                             |
 | `R_BRAIN_OPENAI_API_KEY`               | Memory provider | OpenAI key that enables Memory embeddings and synthesis.                                                                              |
-| `R_BRAIN_MODEL`                        | Optional     | Memory synthesis model in the configured provider's naming. Changes apply immediately.                                                  |
+| `R_BRAIN_MODEL`                        | Optional     | Memory synthesis model in the configured provider's naming. Changes apply after restarting the API service.                             |
 | `R_BRAIN_EMBEDDING_MODEL`              | Before first Memory boot | Embedding model id that sizes Memory's vector storage. Changing it later requires re-embedding.                              |
 | `R_BRAIN_EMBEDDING_DIMENSIONS`         | Before first Memory boot | Output width for `R_BRAIN_EMBEDDING_MODEL`; it must match the served model.                                                   |
 | `R_BRAIN_EMBEDDINGS_UPSTREAM_URL`      | Optional     | OpenAI-compatible embeddings endpoint used instead of the Memory provider.                                                               |
@@ -235,7 +238,7 @@ as per-task auth tokens or workspace paths.
 
 | Env var                              | Required          | Used for                                                                                                                                 |
 | ------------------------------------ | ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| `DEFAULT_COMPUTE_PROVIDER`           | Optional          | Runtime default sandbox provider when no admin default is saved. Supported values are `docker`, `modal`, `e2b`, `daytona`, `blaxel`, `box`, `azure`, and the Roomote Cloud-only `roomote`. |
+| `DEFAULT_COMPUTE_PROVIDER`           | Optional          | Runtime default sandbox provider when no admin default is saved. Accepted values are `docker`, `modal`, `e2b`, `daytona`, `box`, `azure`, and the Roomote Cloud-only `roomote`. |
 | `EXCLUDED_COMPUTE_PROVIDERS`         | Optional          | Comma-separated provider IDs to hide or exclude from default selection.                                                                  |
 | `DOCKER_WORKER_IMAGE`                | Optional          | Worker image used by Docker. In production, prefer an immutable registry-qualified tag.                                                  |
 | `ROOMOTE_WORKER_IMAGE_REPO`          | Optional          | Registry repository used to derive the worker image from `RELEASE_VERSION` when `DOCKER_WORKER_IMAGE` is unset.                          |
@@ -245,7 +248,7 @@ as per-task auth tokens or workspace paths.
 | `DOCKER_WORKER_CPU_LIMIT`            | Optional          | CPU limit per Docker task. Defaults to `2`.                                                                                              |
 | `DOCKER_WORKER_MEMORY_LIMIT`         | Optional          | Memory and memory+swap limit for each Docker worker. Defaults to `4g`.                                                                   |
 | `DOCKER_TASK_DAEMON_MEMORY_LIMIT`    | Optional          | Memory and memory+swap limit for the nested Docker daemon used by Docker-project tasks. Defaults to `8g`.                                |
-| `DOCKER_WORKER_PIDS_LIMIT`           | Optional          | Process limit per Docker task. Defaults to `512`.                                                                                        |
+| `DOCKER_WORKER_PIDS_LIMIT`           | Optional          | Process limit per Docker task. The runtime default is `2048`; installer-managed production Compose sets `512`.                          |
 | `DOCKER_WORKER_DISK_LIMIT`           | Optional          | Writable-layer limit. Defaults to `20g`; tasks fail closed when the Docker storage driver cannot enforce it.                             |
 | `DOCKER_WORKER_ALLOW_UNBOUNDED_DISK` | Optional          | Explicitly permits startup without `--storage-opt size`. Defaults to `false`; use only with an equivalent host-level quota.              |
 | `DOCKER_WORKER_LOG_MAX_SIZE`         | Optional          | Maximum size of each Docker JSON log file. Defaults to `10m`.                                                                            |
@@ -258,16 +261,24 @@ as per-task auth tokens or workspace paths.
 | `MODAL_ENDPOINT`                     | Optional          | Modal endpoint override.                                                                                                                 |
 | `MODAL_ENVIRONMENT`                  | Optional          | Modal environment name.                                                                                                                  |
 | `MODAL_APP_NAME`                     | Optional          | Modal app name override.                                                                                                                 |
+| `MODAL_BASE_IMAGE_REF`               | Modal infrastructure | Worker-compatible base image reference. Process env, release-image derivation, or installer/deployer synchronization owns this value; Settings does not collect it. |
+| `MODAL_REGISTRY_USERNAME`            | Optional          | Process-only registry username used when Modal pulls a private base image.                                                               |
+| `MODAL_REGISTRY_PASSWORD`            | Optional          | Process-only registry password or token used when Modal pulls a private base image.                                                      |
+| `MODAL_ECR_OIDC_ROLE_ARN`            | Optional          | Process-only AWS IAM role ARN used for Modal ECR OIDC access. Set together with `MODAL_ECR_REGION`.                                      |
+| `MODAL_ECR_REGION`                   | Optional          | Process-only AWS region for Modal ECR OIDC access. Set together with `MODAL_ECR_OIDC_ROLE_ARN`.                                          |
 | `MODAL_REGIONS`                      | Optional          | Comma-separated Modal sandbox placement regions (for example `us` or `us-west`). Unset keeps Modal default placement.                    |
 | `MODAL_VM_MEMORY_MIB`                | Optional          | Memory allocated to Modal VM sandboxes used for nested Docker workloads. Defaults to `8192` MiB.                                         |
 | `E2B_API_KEY`                        | E2B               | E2B API key. Can also be saved from **Settings > Sandboxes**.                                                                            |
+| `E2B_TEMPLATE_ID`                    | E2B infrastructure | Worker template ID. Process env or Roomote's artifact provisioning owns this value; Settings does not collect it.                       |
 | `E2B_DOMAIN`                         | Optional          | E2B domain for self-hosted or custom E2B clusters.                                                                                       |
 | `E2B_MAX_SANDBOX_TIMEOUT_MS`         | Optional          | Maximum E2B sandbox timeout Roomote will request. Defaults to one hour.                                                                  |
 | `DAYTONA_API_KEY`                    | Daytona           | Daytona API key. Can also be saved from **Settings > Sandboxes**.                                                                        |
+| `DAYTONA_SNAPSHOT_NAME`              | Daytona infrastructure | Worker snapshot name. Process env or Roomote's artifact provisioning owns this value; Settings does not collect it.                  |
 | `DAYTONA_API_URL`                    | Optional          | Daytona API URL override.                                                                                                                |
 | `DAYTONA_TARGET`                     | Optional          | Daytona target or region.                                                                                                                |
 | `BL_API_KEY`                         | Blaxel            | Blaxel API key. Can also be saved from **Settings > Sandboxes**.                                                                         |
 | `BL_WORKSPACE`                       | Blaxel            | Blaxel workspace name.                                                                                                                   |
+| `BLAXEL_IMAGE`                       | Blaxel infrastructure | Worker-compatible sandbox image. Process env or Roomote's artifact provisioning owns this value; Settings does not collect it.       |
 | `BLAXEL_REGION`                      | Optional          | Blaxel sandbox placement region. Unset lets Blaxel choose the closest region.                                                            |
 | `BLAXEL_STANDBY_MAX_COUNT`           | Optional          | Maximum Blaxel standby sandboxes retained for resume. Defaults to `25`; `0` disables retention.                                          |
 | `BLAXEL_STANDBY_MAX_AGE_HOURS`       | Optional          | Maximum age of a Blaxel standby sandbox. Defaults to `168`, capped at `168`.                                                             |
@@ -354,6 +365,7 @@ as per-task auth tokens or workspace paths.
 | `R_TEAMS_BOT_OAUTH_SCOPE`      | Optional          | Teams bot OAuth scope override.                                                  |
 | `R_TELEGRAM_BOT_TOKEN`         | Telegram          | Telegram bot token.                                                              |
 | `R_TELEGRAM_WEBHOOK_SECRET`    | Telegram          | Optional. Telegram webhook secret; generated automatically when unset in the UI. |
+| `TELEGRAM_API_BASE_URL`         | Optional          | Telegram Bot API base URL. Defaults to `https://api.telegram.org`.                |
 | `R_DISCORD_BOT_TOKEN`          | Discord           | Discord bot token. The bot and application identity are read from this token.    |
 | `R_DISCORD_GATEWAY_SECRET`     | Discord           | Shared internal secret for Discord event delivery between BullMQ and API. Auto-generated when Discord is saved in the UI if unset, and auto-healed when Discord is already configured without one. |
 | `DISCORD_API_BASE_URL`         | Optional          | Discord REST API base URL override, primarily for testing.                       |
