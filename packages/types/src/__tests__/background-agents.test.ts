@@ -77,6 +77,7 @@ describe('background agent helpers', () => {
       'codeQualityAuditorFrequency',
       'ciFailureTriageFrequency',
       'issueFixerFrequency',
+      'mergeAnnouncerFrequency',
     ]);
   });
 

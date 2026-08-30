@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 
-import { and, desc, eq, gt, inArray, isNull, lte, sql } from 'drizzle-orm';
+import { and, desc, eq, gt, inArray, isNull, lte, ne, sql } from 'drizzle-orm';
 
 import {
   activeRunStatuses,
@@ -11,6 +11,7 @@ import {
 
 import { db, type DatabaseOrTransaction } from '../db';
 import {
+  fastAgentMessages,
   prReviewAutoPreferences,
   prReviewEvents,
   prReviewNotificationDeliveries,
@@ -1020,6 +1021,10 @@ export async function upsertPrReviewAutoPreference(input: {
       .where(
         and(
           eq(taskPullRequests.taskId, input.sourceTaskId),
+          eq(
+            taskPullRequests.sourceControlProvider,
+            input.sourceControlProvider,
+          ),
           eq(taskPullRequests.repository, input.repository),
           eq(taskPullRequests.prNumber, input.prNumber),
         ),
@@ -1185,29 +1190,106 @@ export async function getCanonicalPrReviewAction(deliveryId: string): Promise<{
   return row ?? null;
 }
 
+/**
+ * Marks the posted canonical action as awaiting the user and retires every
+ * older awaiting offer in the same destination conversation, mirroring the
+ * legacy Redis path's claim-older-offers-on-attach semantics. Only the newest
+ * offer in a conversation stays actionable; earlier ones would otherwise
+ * accumulate as a stack of pending cards. Attach and retirement run in one
+ * transaction serialized per destination (claims are only serialized per
+ * repository/PR, so concurrent attaches into the same conversation would
+ * otherwise dismiss each other), and retired offers' cached transcript
+ * payloads are dismissed so already-rendered session cards deactivate.
+ */
 export async function attachCanonicalPrReviewActionMessage(
   deliveryId: string,
   messageId: string,
   leaseToken: string,
 ): Promise<boolean> {
-  const rows = await db
-    .update(prReviewNotificationDeliveries)
-    .set({
-      providerMessageId: messageId,
-      status: 'awaiting_user_action',
-      leaseToken: null,
-      leaseExpiresAt: null,
-      updatedAt: new Date(),
-    })
-    .where(
-      and(
-        eq(prReviewNotificationDeliveries.id, deliveryId),
-        eq(prReviewNotificationDeliveries.leaseToken, leaseToken),
-        eq(prReviewNotificationDeliveries.status, 'prompt_posting'),
-      ),
-    )
-    .returning({ id: prReviewNotificationDeliveries.id });
-  return rows.length === 1;
+  return db.transaction(async (tx) => {
+    const delivery = await tx.query.prReviewNotificationDeliveries.findFirst({
+      where: eq(prReviewNotificationDeliveries.id, deliveryId),
+      columns: { destinationKind: true, destinationKey: true },
+    });
+    if (!delivery) {
+      return false;
+    }
+
+    const destination =
+      delivery.destinationKind && delivery.destinationKey
+        ? {
+            kind: delivery.destinationKind,
+            key: delivery.destinationKey,
+          }
+        : null;
+    if (destination) {
+      await tx.execute(
+        sql`select pg_advisory_xact_lock(hashtextextended(${`pr-review-destination:${destination.kind}:${destination.key}`}, 0))`,
+      );
+    }
+
+    const rows = await tx
+      .update(prReviewNotificationDeliveries)
+      .set({
+        providerMessageId: messageId,
+        status: 'awaiting_user_action',
+        leaseToken: null,
+        leaseExpiresAt: null,
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(prReviewNotificationDeliveries.id, deliveryId),
+          eq(prReviewNotificationDeliveries.leaseToken, leaseToken),
+          eq(prReviewNotificationDeliveries.status, 'prompt_posting'),
+        ),
+      )
+      .returning({ id: prReviewNotificationDeliveries.id });
+    if (rows.length !== 1) {
+      return false;
+    }
+
+    if (!destination) {
+      return true;
+    }
+
+    const retired = await tx
+      .update(prReviewNotificationDeliveries)
+      .set({
+        status: 'dismissed',
+        actionClaimedAt: new Date(),
+        completedAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(prReviewNotificationDeliveries.status, 'awaiting_user_action'),
+          eq(prReviewNotificationDeliveries.destinationKind, destination.kind),
+          eq(prReviewNotificationDeliveries.destinationKey, destination.key),
+          ne(prReviewNotificationDeliveries.id, deliveryId),
+        ),
+      )
+      .returning({ id: prReviewNotificationDeliveries.id });
+
+    if (retired.length > 0) {
+      // Session cards render from the cached message payload, so retiring
+      // the delivery rows alone would leave the old cards actionable.
+      await tx
+        .update(fastAgentMessages)
+        .set({
+          payload: sql`jsonb_set(coalesce(${fastAgentMessages.payload}, '{}'::jsonb), '{prReviewAction,status}', to_jsonb('dismissed'::text), true)`,
+          updatedAt: sql`now()`,
+        })
+        .where(
+          inArray(
+            sql<string>`${fastAgentMessages.payload} -> 'prReviewAction' ->> 'deliveryId'`,
+            retired.map(({ id }) => id),
+          ),
+        );
+    }
+
+    return true;
+  });
 }
 
 export async function claimCanonicalPrReviewAction(input: {
@@ -1298,6 +1380,10 @@ export async function claimCanonicalPrReviewAction(input: {
         .where(
           and(
             eq(taskPullRequests.taskId, action.taskId),
+            eq(
+              taskPullRequests.sourceControlProvider,
+              action.sourceControlProvider,
+            ),
             eq(taskPullRequests.repository, action.repository),
             eq(taskPullRequests.prNumber, action.prNumber),
           ),

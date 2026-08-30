@@ -18,6 +18,7 @@ const handleBitbucketComment = vi.fn(async () => ({ status: 'ok' as const }));
 const handleBitbucketCommitStatus = vi.fn(async () => ({
   status: 'ok' as const,
 }));
+const handleMergeAnnouncerPush = vi.fn(async () => ({ status: 'ok' as const }));
 const resolveDeploymentEnvVar = vi.fn();
 
 vi.mock('../../github/recordWebhook', () => ({
@@ -49,6 +50,12 @@ vi.mock('@roomote/db/server', () => ({
   ): ReturnType<typeof resolveDeploymentEnvVar> =>
     resolveDeploymentEnvVar(...args),
 }));
+vi.mock('@roomote/sdk/server', () => ({
+  handleMergeAnnouncerPush: (
+    ...args: Parameters<typeof handleMergeAnnouncerPush>
+  ): ReturnType<typeof handleMergeAnnouncerPush> =>
+    handleMergeAnnouncerPush(...args),
+}));
 
 function sign(body: string): string {
   return createHmac('sha256', 'bitbucket-secret').update(body).digest('hex');
@@ -61,6 +68,7 @@ describe('bitbucket webhook router', () => {
     handleBitbucketPullRequest.mockClear();
     handleBitbucketComment.mockClear();
     handleBitbucketCommitStatus.mockClear();
+    handleMergeAnnouncerPush.mockClear();
     resolveDeploymentEnvVar.mockImplementation(async (name: string) =>
       name === 'BITBUCKET_WEBHOOK_SECRET' ? 'bitbucket-secret' : null,
     );
@@ -109,6 +117,51 @@ describe('bitbucket webhook router', () => {
       expect.any(Object),
       expect.any(Function),
       { provider: 'bitbucket' },
+    );
+  });
+
+  it('routes normalized repo:push events', async () => {
+    const body = JSON.stringify({
+      actor: { nickname: 'alice' },
+      repository: {
+        full_name: 'ws/repo',
+        uuid: '{uuid}',
+        links: { html: { href: 'https://bitbucket.org/ws/repo' } },
+      },
+      push: {
+        changes: [
+          {
+            new: { name: 'main', type: 'branch' },
+            commits: [{ hash: 'abc', message: 'Ship backend' }],
+          },
+        ],
+      },
+    });
+    const app = await mountApp();
+    const response = await app.request(
+      'http://localhost/api/webhooks/bitbucket',
+      {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-hub-signature-256': `sha256=${sign(body)}`,
+          'x-event-key': 'repo:push',
+          'x-request-uuid': 'push-delivery',
+        },
+        body,
+      },
+    );
+
+    expect(response.status).toBe(200);
+    expect(recordWebhook).toHaveBeenCalledWith(
+      'push-delivery',
+      'repo:push',
+      expect.anything(),
+      expect.any(Function),
+      { provider: 'bitbucket' },
+    );
+    expect(handleMergeAnnouncerPush).toHaveBeenCalledWith(
+      expect.objectContaining({ provider: 'bitbucket', pusher: 'alice' }),
     );
   });
 

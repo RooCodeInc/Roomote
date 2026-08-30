@@ -5,6 +5,7 @@ import {
   DEFAULT_PROVIDER_USAGE_LIMIT_FREQUENCY,
   DEFAULT_PROVIDER_USAGE_LIMIT_THRESHOLD,
   getTriggerableBackgroundAutomationDescriptorByKey,
+  getCommunicationAutomationTargetKind,
   isConflictResolverMaxPrAgeDays,
   isProviderUsageLimitThreshold,
   type AutomationTarget,
@@ -26,6 +27,7 @@ import {
   findDiscordDestinationByChannelId,
   findTeamsPrimaryConversation,
   findTelegramPrimaryChatId,
+  listConnectedCommunicationProviders,
   resolveAutomationRuntimeDestination,
 } from '@roomote/sdk/server';
 import { resolveConfiguredGitHubAppSlug } from '@roomote/github';
@@ -143,6 +145,10 @@ function getAutomationActivations(
     {
       automation: 'ci_failure_triage',
       enabled: settings.ciFailureTriageFrequency !== 'off',
+    },
+    {
+      automation: 'merge_announcer',
+      enabled: settings.mergeAnnouncerFrequency !== 'off',
     },
     {
       automation: 'suggester',
@@ -918,6 +924,44 @@ export async function updateBackgroundAgentSettingsCommand(
   const codeQualityAuditorFrequency =
     input.codeQualityAuditorFrequency ?? 'off';
   const ciFailureTriageFrequency = input.ciFailureTriageFrequency ?? 'off';
+  const mergeAnnouncerFrequency =
+    input.savingAutomation === 'mergeAnnouncer'
+      ? (input.mergeAnnouncerFrequency ??
+        existingSettings.mergeAnnouncerFrequency)
+      : existingSettings.mergeAnnouncerFrequency;
+  const mergeAnnouncerDestinationSubmitted =
+    input.savingAutomation === 'mergeAnnouncer' &&
+    input.mergeAnnouncerTargetProvider !== undefined;
+  const mergeAnnouncerTargetProvider =
+    input.mergeAnnouncerTargetProvider ?? null;
+  const mergeAnnouncerTargetMode = input.mergeAnnouncerTargetMode ?? 'channel';
+  const mergeAnnouncerTargetChannelId =
+    input.mergeAnnouncerTargetChannelId?.trim() ?? '';
+  let mergeAnnouncerTarget: AutomationTarget | null = null;
+
+  if (mergeAnnouncerDestinationSubmitted && mergeAnnouncerTargetProvider) {
+    const connectedProviders = await listConnectedCommunicationProviders();
+    if (!connectedProviders.includes(mergeAnnouncerTargetProvider)) {
+      fieldErrors.general = `Connect ${mergeAnnouncerTargetProvider} before saving a ${mergeAnnouncerTargetProvider} report destination.`;
+    } else if (
+      mergeAnnouncerTargetMode === 'channel' &&
+      !mergeAnnouncerTargetChannelId
+    ) {
+      fieldErrors.general = 'Choose a destination channel.';
+    } else {
+      mergeAnnouncerTarget = {
+        provider: mergeAnnouncerTargetProvider,
+        targetKind: getCommunicationAutomationTargetKind(
+          mergeAnnouncerTargetProvider,
+          mergeAnnouncerTargetMode,
+        ),
+        externalRef:
+          mergeAnnouncerTargetMode === 'direct_message'
+            ? auth.userId
+            : mergeAnnouncerTargetChannelId,
+      };
+    }
+  }
 
   // Manager-channel automations resolve their destination as
   // automation target -> shared manager channel. Enabling one requires a
@@ -938,6 +982,7 @@ export async function updateBackgroundAgentSettingsCommand(
       | 'securityAuditorSlackChannel'
       | 'codeQualityAuditorSlackChannel'
       | 'ciFailureTriageSlackChannel'
+      | 'general'
       | 'suggesterSlackChannel'
       | 'announcerSlackChannel';
   }> = [
@@ -1035,6 +1080,16 @@ export async function updateBackgroundAgentSettingsCommand(
         ciFailureTriageDiscordResult.channelId,
       field: 'ciFailureTriageSlackChannel',
     },
+    {
+      automationId: 'mergeAnnouncer',
+      key: 'merge_announcer',
+      frequency: mergeAnnouncerFrequency,
+      channelId:
+        (mergeAnnouncerDestinationSubmitted
+          ? mergeAnnouncerTarget?.externalRef
+          : null) ?? null,
+      field: 'general',
+    },
   ];
 
   for (const validation of managerChannelAutomationValidations) {
@@ -1071,7 +1126,11 @@ export async function updateBackgroundAgentSettingsCommand(
       if (nonSlackProviders.length > 0) {
         const runtime = await getAutomationRuntime(validation.key);
         const destination = await resolveAutomationRuntimeDestination({
-          runtime,
+          runtime:
+            validation.key === 'merge_announcer' &&
+            mergeAnnouncerDestinationSubmitted
+              ? { ...runtime, destination: null, targets: [] }
+              : runtime,
           slackConnected: await hasActiveSlackInstallation(),
         });
 
@@ -1125,6 +1184,16 @@ export async function updateBackgroundAgentSettingsCommand(
     fieldErrors.general =
       fieldErrors.general ||
       'Connect GitHub before enabling Triage CodeQL Alerts.';
+  }
+
+  if (
+    input.savingAutomation === 'mergeAnnouncer' &&
+    mergeAnnouncerFrequency !== 'off' &&
+    !(await hasActiveRepository())
+  ) {
+    fieldErrors.general =
+      fieldErrors.general ||
+      'Add at least one active repository before enabling Merge announcer.';
   }
 
   if (
@@ -1409,6 +1478,28 @@ export async function updateBackgroundAgentSettingsCommand(
       enabled: ciFailureTriageFrequency !== 'off',
       schedule: { mode: ciFailureTriageFrequency },
       ...destinationUpsertFields('ciFailureTriage'),
+      updatedAt: now,
+    });
+
+    await upsertAutomation(tx, {
+      key: 'merge_announcer',
+      enabled: mergeAnnouncerFrequency !== 'off',
+      schedule: { mode: mergeAnnouncerFrequency },
+      ...(mergeAnnouncerDestinationSubmitted
+        ? {
+            targets: mergeAnnouncerTarget ? [mergeAnnouncerTarget] : [],
+            managedTargetKinds: [
+              'slack_channel',
+              'slack_user',
+              'discord_channel',
+              'discord_user',
+              'teams_channel',
+              'teams_user',
+              'telegram_chat',
+              'telegram_user',
+            ] as const,
+          }
+        : {}),
       updatedAt: now,
     });
 

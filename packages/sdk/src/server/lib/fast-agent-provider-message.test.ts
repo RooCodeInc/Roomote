@@ -3,13 +3,14 @@ import { describe, expect, it } from 'vitest';
 import { db, fastAgentConversations, userFactory } from '@roomote/db/server';
 
 import {
+  findFastAgentSessionForProviderMessage,
   findFastAgentSessionForProviderReply,
   isFastAgentProviderMessage,
   recordFastAgentProviderMessage,
 } from './fast-agent-provider-message';
 
 async function createFastConversation(input: {
-  surface: 'discord' | 'teams' | 'telegram';
+  surface: 'discord' | 'slack' | 'teams' | 'telegram';
   workspaceId: string;
   conversationId: string;
   channelId: string;
@@ -31,6 +32,87 @@ async function createFastConversation(input: {
 }
 
 describe('Fast provider message bindings', () => {
+  it('resolves a Slack reaction target to its bound Fast session owner', async () => {
+    const suffix = crypto.randomUUID();
+    const { user, conversation } = await createFastConversation({
+      surface: 'slack',
+      workspaceId: `team:${suffix}`,
+      conversationId: `thread:${suffix}`,
+      channelId: `channel:${suffix}`,
+      threadId: `thread:${suffix}`,
+    });
+    await recordFastAgentProviderMessage({
+      sessionId: conversation.id,
+      provider: 'slack',
+      workspaceId: `team:${suffix}`,
+      channelId: `channel:${suffix}`,
+      threadId: `thread:${suffix}`,
+      messageId: `message:${suffix}`,
+    });
+
+    await expect(
+      findFastAgentSessionForProviderMessage({
+        provider: 'slack',
+        workspaceId: `team:${suffix}`,
+        channelId: `channel:${suffix}`,
+        threadId: `thread:${suffix}`,
+        messageId: `message:${suffix}`,
+        userId: user.id,
+      }),
+    ).resolves.toMatchObject({ id: conversation.id, userId: user.id });
+  });
+
+  it('requires exact provider-message route and ownership for reactions', async () => {
+    const suffix = crypto.randomUUID();
+    const { user, conversation } = await createFastConversation({
+      surface: 'telegram',
+      workspaceId: `chat:${suffix}`,
+      conversationId: `topic:${suffix}`,
+      channelId: `chat:${suffix}`,
+      threadId: `topic:${suffix}`,
+    });
+    const otherUser = await userFactory.create();
+    await recordFastAgentProviderMessage({
+      sessionId: conversation.id,
+      provider: 'telegram',
+      workspaceId: `chat:${suffix}`,
+      channelId: `chat:${suffix}`,
+      threadId: `topic:${suffix}`,
+      messageId: `message:${suffix}`,
+    });
+
+    await expect(
+      findFastAgentSessionForProviderMessage({
+        provider: 'telegram',
+        workspaceId: `chat:${suffix}`,
+        channelId: `chat:${suffix}`,
+        threadId: `topic:${suffix}`,
+        messageId: `message:${suffix}`,
+        userId: user.id,
+      }),
+    ).resolves.toMatchObject({ id: conversation.id, userId: user.id });
+    await expect(
+      findFastAgentSessionForProviderMessage({
+        provider: 'telegram',
+        workspaceId: `chat:${suffix}`,
+        channelId: `chat:${suffix}`,
+        threadId: `other-topic:${suffix}`,
+        messageId: `message:${suffix}`,
+        userId: user.id,
+      }),
+    ).resolves.toBeNull();
+    await expect(
+      findFastAgentSessionForProviderMessage({
+        provider: 'telegram',
+        workspaceId: `chat:${suffix}`,
+        channelId: `chat:${suffix}`,
+        threadId: `topic:${suffix}`,
+        messageId: `message:${suffix}`,
+        userId: otherUser.id,
+      }),
+    ).resolves.toBeNull();
+  });
+
   it('resolves a Discord DM reply to the bound Fast session', async () => {
     const suffix = crypto.randomUUID();
     const { user, conversation } = await createFastConversation({

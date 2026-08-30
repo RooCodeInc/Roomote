@@ -1,5 +1,6 @@
 import {
   ACP_UI_TOOL_OUTPUT_MAX_CHARS,
+  parsePrReviewActionOffer,
   type PrReviewActionOfferStatus,
   sanitizeEnvelopeFields,
 } from '@roomote/types';
@@ -85,6 +86,23 @@ export async function updateFastSessionPrReviewOfferStatus(
         ),
       ),
     );
+}
+
+export async function getFastSessionPrReviewOfferStatus(
+  sessionId: string,
+  deliveryId: string,
+): Promise<PrReviewActionOfferStatus | null> {
+  const [message] = await db
+    .select({ payload: fastAgentMessages.payload })
+    .from(fastAgentMessages)
+    .where(
+      and(
+        eq(fastAgentMessages.conversationId, sessionId),
+        sql`${fastAgentMessages.payload} -> 'prReviewAction' ->> 'deliveryId' = ${deliveryId}`,
+      ),
+    )
+    .limit(1);
+  return parsePrReviewActionOffer(message?.payload)?.status ?? null;
 }
 
 const FAST_SESSION_TRANSCRIPT_MESSAGE_LIMIT = 1000;

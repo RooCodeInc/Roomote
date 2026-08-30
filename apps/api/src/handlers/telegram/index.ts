@@ -17,6 +17,7 @@ import {
   getTelegramUpdateCommunicationMetadata,
   getTelegramUpdateMessage,
   getTelegramUpdateMessageReaction,
+  getNewTelegramMessageReactions,
   getTelegramNewTaskCommand,
   isTelegramImplicitTopicCreatedMessage,
   isTelegramPrivateChat,
@@ -38,12 +39,18 @@ import { retireTelegramPrReviewOffersBestEffort } from './pr-review-action.js';
 import {
   continueFastAgentSurfaceReply,
   consumeTelegramLinkCode,
+  findFastAgentSessionForProviderMessage,
   findFastAgentSessionForProviderReply,
   isTelegramLinkCode,
   isFastAgentProviderMessage,
+  queueFastAgentSurfaceReply,
   restoreTelegramLinkCode,
 } from '@roomote/sdk/server';
-import { getOrCreateFastAgentSession } from '@roomote/cloud-agents/server';
+import {
+  buildFastAgentReactionExternalInputQuestion,
+  getOrCreateFastAgentSession,
+  type FastAgentReactionExternalInput,
+} from '@roomote/cloud-agents/server';
 
 import {
   handleTelegramCallbackQuery,
@@ -139,15 +146,98 @@ telegram.post('/', async (c) => {
     if (!claimedReaction) {
       return c.json({ ok: true, duplicate: true });
     }
-    if (!isNewTelegramThumbsUpReaction(messageReaction)) {
-      return c.json({ ok: true, ignored: 'unsupported_reaction' });
+    const addedReactions = getNewTelegramMessageReactions(messageReaction);
+    if (addedReactions.length === 0) {
+      return c.json({ ok: true, ignored: 'reaction_removed_or_unchanged' });
     }
 
-    const handled = await handleTelegramSuggestionReaction(messageReaction);
+    if (isNewTelegramThumbsUpReaction(messageReaction)) {
+      const handled = await handleTelegramSuggestionReaction(messageReaction);
+      if (handled) {
+        return c.json({ ok: true, suggestionStarted: true });
+      }
+    }
+
+    const chatId = String(messageReaction.chat.id);
+    const messageId = String(messageReaction.message_id);
+    const threadId = messageReaction.message_thread_id
+      ? String(messageReaction.message_thread_id)
+      : undefined;
+    const fastSession = await findFastAgentSessionForProviderMessage({
+      provider: 'telegram',
+      workspaceId: chatId,
+      channelId: chatId,
+      ...(threadId ? { threadId } : {}),
+      messageId,
+    });
+    if (!fastSession) {
+      return c.json({ ok: true, ignored: 'reaction_target_not_fast' });
+    }
+    if (!messageReaction.user) {
+      return c.json({ ok: true, ignored: 'reaction_user_missing' });
+    }
+
+    const senderUserId = await resolveTelegramSenderUserId(
+      String(messageReaction.user.id),
+    );
+    if (!senderUserId) {
+      await postTelegramMessageBestEffort({
+        chatId,
+        ...(threadId ? { threadId } : {}),
+        replyToMessageId: messageId,
+        text: 'Link your Roomote account to respond to Roomote from Telegram.',
+      });
+      return c.json({
+        ok: true,
+        queued: false,
+        reason: 'telegram_reactor_not_linked',
+      });
+    }
+    if (fastSession.userId !== senderUserId) {
+      return c.json({
+        ok: true,
+        queued: false,
+        reason: 'fast_session_user_mismatch',
+      });
+    }
+
+    const senderDisplayName =
+      [messageReaction.user.first_name, messageReaction.user.last_name]
+        .filter(Boolean)
+        .join(' ')
+        .trim() ||
+      messageReaction.user.username?.trim() ||
+      null;
+    const eventId = String(update.update_id);
+    const reactionInput: FastAgentReactionExternalInput = {
+      type: 'reaction_added',
+      provider: 'telegram',
+      reactions: addedReactions,
+      reactor: {
+        externalUserId: String(messageReaction.user.id),
+        ...(senderDisplayName ? { displayName: senderDisplayName } : {}),
+      },
+      message: {
+        workspaceId: chatId,
+        channelId: chatId,
+        messageId,
+        ...(threadId ? { threadId } : {}),
+      },
+      eventId,
+    };
+    const queued = await queueFastAgentSurfaceReply({
+      sessionId: fastSession.id,
+      userId: senderUserId,
+      senderDisplayName,
+      question: buildFastAgentReactionExternalInputQuestion(reactionInput),
+      currentMessageId: `telegram-reaction:${eventId}`,
+      replyToMessageId: messageId,
+      externalInput: reactionInput,
+    });
     return c.json(
-      handled
-        ? { ok: true, suggestionStarted: true }
-        : { ok: true, ignored: 'reaction_target_not_suggestion' },
+      queued
+        ? { ok: true, fastReactionQueued: true }
+        : { ok: true, ignored: 'telegram_fast_reaction_route_unavailable' },
     );
   }
 

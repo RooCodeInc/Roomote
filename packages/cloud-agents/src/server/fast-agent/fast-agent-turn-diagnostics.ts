@@ -62,6 +62,7 @@ export class FastAgentTurnDiagnostics {
   private readonly processConcurrentTurnCountAtStart: number;
   private readonly turnStartedAt: number;
   private canonicalConversationId: string | null = null;
+  private initialHumanTurn: boolean | undefined;
   private failureReason: string | undefined;
   private terminalError: unknown;
   private visibleReplyCount = 0;
@@ -103,6 +104,10 @@ export class FastAgentTurnDiagnostics {
 
   setCanonicalConversationId(conversationId: string): void {
     this.canonicalConversationId = conversationId;
+  }
+
+  recordInitialHumanTurn(initialHumanTurn: boolean | undefined): void {
+    this.initialHumanTurn = initialHumanTurn;
   }
 
   recordVisibleReply(options: { assistantResponse?: boolean } = {}): void {
@@ -303,6 +308,7 @@ export class FastAgentTurnDiagnostics {
       userId: this.context.userId,
       surface: this.context.conversation.surface,
       turnSource: this.context.turnSource,
+      initialHumanTurn: this.initialHumanTurn,
       sessionPath: this.sessionPath,
       outcome: this.failed ? 'failure' : 'success',
       serviceDurationMs,

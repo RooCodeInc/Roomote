@@ -275,7 +275,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       openCodeSessionId: null,
     });
     mocks.setOpenCodeSession.mockResolvedValue(undefined);
-    mocks.upsertMessage.mockResolvedValue(undefined);
+    mocks.upsertMessage.mockResolvedValue({ initialHumanTurn: true });
     mocks.reconcileRetryNotices.mockResolvedValue(0);
     mocks.getActiveTasks.mockResolvedValue([]);
     mocks.getEnvironments.mockResolvedValue([
@@ -405,6 +405,12 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         providerRetryEventCount: 0,
       }),
     );
+    expect(mocks.captureTurnSettled).toHaveBeenCalledWith(
+      expect.objectContaining({
+        turnSource: 'human',
+        initialHumanTurn: true,
+      }),
+    );
     expect(mocks.upsertMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         sessionId: 'conversation-1',
@@ -487,13 +493,18 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     });
   });
 
-  it('excludes canonical persistence from first-response latency', async () => {
+  it('measures receipt to delivery and excludes assistant persistence', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(1_000);
     mocks.upsertMessage.mockImplementation(async ({ message }) => {
+      if (message.eventType === ACP_ENVELOPE_EVENT_TYPES.UserPrompt) {
+        vi.setSystemTime(Date.now() + 100);
+        return { initialHumanTurn: true };
+      }
       if (message.eventType === ACP_ENVELOPE_EVENT_TYPES.AssistantMessage) {
         vi.setSystemTime(Date.now() + 250);
       }
+      return { initialHumanTurn: false };
     });
 
     try {
@@ -501,8 +512,9 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
 
       expect(mocks.captureTurnSettled).toHaveBeenCalledWith(
         expect.objectContaining({
-          firstResponseDurationMs: 0,
-          serviceDurationMs: 250,
+          initialHumanTurn: true,
+          firstResponseDurationMs: 100,
+          serviceDurationMs: 350,
         }),
       );
     } finally {
@@ -693,7 +705,60 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         senderContextPresent: false,
       }),
     );
+    expect(mocks.captureTurnSettled).toHaveBeenCalledWith(
+      expect.objectContaining({
+        turnSource: 'platform_event',
+        initialHumanTurn: false,
+      }),
+    );
+    expect(
+      mocks.appendVisibleMessages.mock.calls
+        .flatMap(([input]) => input.messages)
+        .some((message) => message.role === 'user'),
+    ).toBe(false);
     expect(mocks.getUserIdentity).not.toHaveBeenCalled();
+  });
+
+  it('keeps the first human turn initial after a platform event', async () => {
+    let humanPromptSeen = false;
+    mocks.upsertMessage.mockImplementation(async ({ message }) => {
+      const humanPrompt =
+        message.eventType === ACP_ENVELOPE_EVENT_TYPES.UserPrompt &&
+        message.metadata?.turnSource === 'human';
+      const initialHumanTurn = humanPrompt && !humanPromptSeen;
+      humanPromptSeen ||= humanPrompt;
+      return { initialHumanTurn };
+    });
+
+    await answerFastAgentQuestion({
+      ...baseParams,
+      question: '<platform_event>{"type":"task_settled"}</platform_event>',
+      turnSource: 'platform_event',
+      adapter: callbacks(),
+    });
+    expect(mocks.captureTurnSettled).toHaveBeenLastCalledWith(
+      expect.objectContaining({ initialHumanTurn: false }),
+    );
+    expect(
+      mocks.appendVisibleMessages.mock.calls
+        .flatMap(([input]) => input.messages)
+        .some((message) => message.role === 'user'),
+    ).toBe(false);
+
+    await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+    expect(mocks.captureTurnSettled).toHaveBeenLastCalledWith(
+      expect.objectContaining({ initialHumanTurn: true }),
+    );
+  });
+
+  it('leaves initial-turn classification unknown when prompt persistence fails', async () => {
+    mocks.upsertMessage.mockRejectedValue(new Error('database unavailable'));
+
+    await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+
+    expect(mocks.captureTurnSettled).toHaveBeenCalledWith(
+      expect.objectContaining({ initialHumanTurn: undefined }),
+    );
   });
 
   it('includes supplemental thread context in a warm follow-up delta', async () => {
@@ -1971,6 +2036,13 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     expect(adapter.postReply).toHaveBeenCalledWith(
       expect.objectContaining({ kickoff: true, purpose: 'progress' }),
     );
+    // The kickoff is a permanent thread message the runtime never edits, so
+    // it must not carry transient workspace-startup copy; the delegated
+    // task's live Slack card owns that status instead.
+    const kickoffReply = (adapter.postReply as ReturnType<typeof vi.fn>).mock
+      .calls[0]![0] as { message: string };
+    expect(kickoffReply.message).not.toContain('Preparing workspace');
+    expect(kickoffReply.message).toContain('I’m delegating the checkout fix.');
     expect(launchTask).toHaveBeenCalledWith(
       expect.objectContaining({
         images: [
@@ -2456,7 +2528,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     expect(mocks.cancelTask).toHaveBeenCalledOnce();
   });
 
-  it('ignores a platform event through a native terminal tool', async () => {
+  it('silently ignores optional external input through the existing native tool', async () => {
     mocks.generateText.mockImplementation(
       async (_params, _session, options) => {
         await options.onSessionReady('opencode-session-1');
@@ -2470,10 +2542,46 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       answerFastAgentQuestion({
         ...baseParams,
         turnSource: 'platform_event',
+        platformEventKind: 'external_input',
+        platformEventVisibility: 'optional',
         adapter,
       }),
     ).resolves.toBe('');
     expect(adapter.postReply).not.toHaveBeenCalled();
+  });
+
+  it('rejects reaction side effects during platform events', async () => {
+    let reactionResult: unknown;
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        reactionResult = await invokeTool(nativeToolNames.sendChatReaction, {
+          name: 'thumbsup',
+          purpose: 'closeout',
+        });
+        await invokeTool(nativeToolNames.ignoreEvent, {
+          reason: 'no response needed',
+        });
+        return '';
+      },
+    );
+    const adapter = callbacks();
+
+    await answerFastAgentQuestion({
+      ...baseParams,
+      currentMessageId: 'slack-reaction:1710000000.000100',
+      turnSource: 'platform_event',
+      platformEventKind: 'external_input',
+      platformEventVisibility: 'optional',
+      adapter,
+    });
+
+    expect(reactionResult).toEqual({
+      success: false,
+      error:
+        'Emoji reactions are unavailable during platform events. Use send_chat_reply or ignore_event instead.',
+    });
+    expect(adapter.postReaction).not.toHaveBeenCalled();
   });
 
   it('posts a closeout when a visibility-required event tries to ignore itself', async () => {

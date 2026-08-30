@@ -221,6 +221,8 @@ import {
   answerSandboxUserInputRequestCommand,
   answerSandboxUserInputRequestInputSchema,
   getSandboxSessionByTaskIdCommand,
+  handlePrReviewNotificationActionCommand,
+  handlePrReviewNotificationActionInputSchema,
   saveDraftPromptCommand,
   sendSandboxPromptCommand,
   sendSandboxPromptInputSchema,
@@ -373,6 +375,7 @@ import {
   triggerAutomationCommand,
   updateCustomAutomationCommand,
 } from '../commands/automations';
+import { mergeAnnouncerDestinationInputShape } from '../commands/automations/settings-schema';
 import {
   getAgentBehaviorSettingsCommand,
   updateAgentBehaviorSettingsCommand,
@@ -700,6 +703,7 @@ const automationsRouter = createRouter({
           .nullable()
           .optional(),
         ...SCHEDULE_ONLY_FREQUENCY_FIELD_SHAPE,
+        ...mergeAnnouncerDestinationInputShape,
         issueFixerInstructions: z.string().max(8_000).nullable().optional(),
         suggesterFrequency: z.enum(['off', 'daily', 'weekly']),
         suggesterSlackChannel: z.string().trim().min(1).max(160).nullable(),
@@ -2116,6 +2120,12 @@ export const appRouter = createRouter({
       .input(answerSandboxUserInputRequestInputSchema)
       .mutation(({ ctx: { auth }, input }) =>
         answerSandboxUserInputRequestCommand(auth, input),
+      ),
+
+    handlePrReviewNotificationAction: protectedProcedure
+      .input(handlePrReviewNotificationActionInputSchema)
+      .mutation(({ ctx: { auth }, input }) =>
+        handlePrReviewNotificationActionCommand(auth, input),
       ),
 
     takeOverBrowserControl: protectedProcedure

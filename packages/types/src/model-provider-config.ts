@@ -369,6 +369,14 @@ export type SetupModelProviderDescriptor = {
 export const DEFAULT_SETUP_MODEL_PROVIDER_ID: SetupModelProviderId =
   'openrouter';
 
+/**
+ * Non-secret placeholder persisted by the local dev-login flow when no model
+ * provider is configured. Runtime resolution rejects it before any upstream
+ * request; its only purpose is to let local development pass setup.
+ */
+export const DEV_LOGIN_INFERENCE_API_KEY_PLACEHOLDER =
+  'roomote-dev-login-intentionally-invalid';
+
 const OPENAI_RECOMMENDED_MODEL_PRESETS = [
   {
     id: 'default',

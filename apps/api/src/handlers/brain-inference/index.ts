@@ -325,6 +325,74 @@ brainInference.post('/*', async (c) => {
       // Not JSON we understand; the provider path forwards it untouched.
     }
 
+    const answerWithHelperModel = async (body: Record<string, unknown>) => {
+      if (body.stream === true) {
+        // gbrain's gateway chat is non-streaming by design; refuse rather
+        // than pretend an SSE stream that would never come.
+        return c.json(
+          {
+            error:
+              'The Brain helper model does not support streaming. Retry without stream.',
+          },
+          400,
+        );
+      }
+
+      const { system, prompt } = toHelperPromptParts(body.messages);
+      const jsonInstruction = jsonResponseInstruction(body.response_format);
+      const systemWithFormat = [system, jsonInstruction]
+        .filter((part): part is string => Boolean(part))
+        .join('\n\n');
+
+      try {
+        const text = await generateTrackedNonTaskText({
+          surface: NON_TASK_INFERENCE_SURFACES.brainSynthesis,
+          modelRole: 'small',
+          system: systemWithFormat || undefined,
+          prompt,
+          maxOutputTokens:
+            typeof body.max_tokens === 'number' &&
+            Number.isFinite(body.max_tokens) &&
+            body.max_tokens > 0
+              ? body.max_tokens
+              : HELPER_SYNTHESIS_DEFAULT_MAX_OUTPUT_TOKENS,
+          timeoutMs: HELPER_SYNTHESIS_TIMEOUT_MS,
+        });
+
+        return c.json({
+          id: `brain-helper-${randomUUID()}`,
+          object: 'chat.completion',
+          created: Math.floor(Date.now() / 1000),
+          model: BRAIN_HELPER_MODEL_ID,
+          choices: [
+            {
+              index: 0,
+              message: { role: 'assistant', content: text },
+              finish_reason: 'stop',
+            },
+          ],
+          // Advisory only: gbrain logs usage but never bills from it, and
+          // the real usage is already recorded by the tracked call above.
+          usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+        });
+      } catch (error) {
+        const detail = (
+          error instanceof Error ? error.message : String(error)
+        ).replace(/\s+/g, ' ');
+
+        console.warn(
+          formatSingleLineLog(`${LOG_PREFIX} Helper synthesis failed`, {
+            error: detail,
+          }),
+        );
+
+        return c.json(
+          { error: `Brain helper-model synthesis failed: ${detail}` },
+          502,
+        );
+      }
+    };
+
     if (parsedBody?.model === BRAIN_HELPER_MODEL_ID) {
       const overrideModel = Env.R_BRAIN_MODEL?.trim();
 
@@ -334,74 +402,16 @@ brainInference.post('/*', async (c) => {
           model: overrideModel,
         });
       } else {
-        if (parsedBody.stream === true) {
-          // gbrain's gateway chat is non-streaming by design; refuse rather
-          // than pretend an SSE stream that would never come.
-          return c.json(
-            {
-              error:
-                'The Brain helper model does not support streaming. Retry without stream.',
-            },
-            400,
-          );
-        }
-
-        const { system, prompt } = toHelperPromptParts(parsedBody.messages);
-        const jsonInstruction = jsonResponseInstruction(
-          parsedBody.response_format,
-        );
-        const systemWithFormat = [system, jsonInstruction]
-          .filter((part): part is string => Boolean(part))
-          .join('\n\n');
-
-        try {
-          const text = await generateTrackedNonTaskText({
-            surface: NON_TASK_INFERENCE_SURFACES.brainSynthesis,
-            modelRole: 'small',
-            system: systemWithFormat || undefined,
-            prompt,
-            maxOutputTokens:
-              typeof parsedBody.max_tokens === 'number' &&
-              Number.isFinite(parsedBody.max_tokens) &&
-              parsedBody.max_tokens > 0
-                ? parsedBody.max_tokens
-                : HELPER_SYNTHESIS_DEFAULT_MAX_OUTPUT_TOKENS,
-            timeoutMs: HELPER_SYNTHESIS_TIMEOUT_MS,
-          });
-
-          return c.json({
-            id: `brain-helper-${randomUUID()}`,
-            object: 'chat.completion',
-            created: Math.floor(Date.now() / 1000),
-            model: BRAIN_HELPER_MODEL_ID,
-            choices: [
-              {
-                index: 0,
-                message: { role: 'assistant', content: text },
-                finish_reason: 'stop',
-              },
-            ],
-            // Advisory only: gbrain logs usage but never bills from it, and
-            // the real usage is already recorded by the tracked call above.
-            usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
-          });
-        } catch (error) {
-          const detail = (
-            error instanceof Error ? error.message : String(error)
-          ).replace(/\s+/g, ' ');
-
-          console.warn(
-            formatSingleLineLog(`${LOG_PREFIX} Helper synthesis failed`, {
-              error: detail,
-            }),
-          );
-
-          return c.json(
-            { error: `Brain helper-model synthesis failed: ${detail}` },
-            502,
-          );
-        }
+        return answerWithHelperModel(parsedBody);
       }
+    } else if (parsedBody && !(await resolveBrainInferenceProvider())) {
+      // No Brain provider key configured. gbrain's expansion and chat send
+      // concrete model ids, not the sentinel, so without this they would
+      // 503 on the provider path below — instead every chat request rides
+      // the deployment's helper model, exactly like the sentinel. A
+      // Brain-specific key, when configured, still takes this path's place
+      // so an operator can bill Memory inference separately.
+      return answerWithHelperModel(parsedBody);
     }
   }
 

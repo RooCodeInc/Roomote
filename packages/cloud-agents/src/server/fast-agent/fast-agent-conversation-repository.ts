@@ -18,7 +18,10 @@ import {
   touchSessionActivity,
   type DatabaseOrTransaction,
 } from '@roomote/db/server';
-import { fastAgentConversationSchema } from '@roomote/types';
+import {
+  ACP_ENVELOPE_EVENT_TYPES,
+  fastAgentConversationSchema,
+} from '@roomote/types';
 
 import { FAST_RESPONDING_LEASE_MS } from './fast-agent-constants';
 import type { FastAgentConversation } from './fast-agent-conversation';
@@ -36,13 +39,38 @@ export type FastAgentConversationRecord = {
   openCodeSessionId: string | null;
 };
 
+export type FastAgentConversationGetOrCreateResult =
+  FastAgentConversationRecord & {
+    created: boolean;
+  };
+
 export type FastAgentMessageWrite = Omit<
   CreateFastAgentMessage,
   'conversationId'
 >;
 
+export type FastAgentMessageUpsertResult = {
+  initialHumanTurn: boolean;
+};
+
 export const INTERRUPTED_INFERENCE_RETRY_MESSAGE =
   'The inference retry was interrupted before it completed. Please send the request again.';
+
+function isLegacyPlatformEventMessage(message: ModelMessage): boolean {
+  if (message.role !== 'user') return false;
+
+  const text =
+    typeof message.content === 'string'
+      ? message.content
+      : message.content
+          .flatMap((part) => (part.type === 'text' ? [part.text] : []))
+          .join('');
+  const normalized = text.trim();
+  return (
+    normalized.startsWith('<platform_event>') &&
+    normalized.endsWith('</platform_event>')
+  );
+}
 
 function activeInferenceRetryNoticeWhere() {
   return and(
@@ -157,7 +185,7 @@ export interface FastAgentConversationRepository {
   getOrCreate(input: {
     userId: string;
     conversation: FastAgentConversation;
-  }): Promise<FastAgentConversationRecord>;
+  }): Promise<FastAgentConversationGetOrCreateResult>;
   findById(input: {
     id: string;
     fallbackConversation?: FastAgentConversation;
@@ -171,7 +199,7 @@ export interface FastAgentConversationRepository {
   upsertMessage(input: {
     conversationId: string;
     message: FastAgentMessageWrite;
-  }): Promise<void>;
+  }): Promise<FastAgentMessageUpsertResult>;
   setOpenCodeSession(input: {
     conversationId: string;
     openCodeSessionId: string;
@@ -286,8 +314,9 @@ export const fastAgentConversationRepository: FastAgentConversationRepository =
           where: buildIdentityWhere(conversation),
         });
 
+        let created = false;
         if (!record) {
-          await tx
+          const [inserted] = await tx
             .insert(fastAgentConversations)
             .values({
               userId,
@@ -308,7 +337,9 @@ export const fastAgentConversationRepository: FastAgentConversationRepository =
                   : null,
               replyTargetVerified: true,
             })
-            .onConflictDoNothing();
+            .onConflictDoNothing()
+            .returning({ id: fastAgentConversations.id });
+          created = Boolean(inserted);
           record = await tx.query.fastAgentConversations.findFirst({
             where: buildIdentityWhere(conversation),
           });
@@ -343,7 +374,10 @@ export const fastAgentConversationRepository: FastAgentConversationRepository =
 
         await ensureSessionForFastConversation(tx, updated?.id ?? record.id);
 
-        return loadConversationRecord(tx, updated?.id ?? record.id);
+        return {
+          ...(await loadConversationRecord(tx, updated?.id ?? record.id)),
+          created,
+        };
       });
     },
 
@@ -443,18 +477,71 @@ export const fastAgentConversationRepository: FastAgentConversationRepository =
     },
 
     async upsertMessage({ conversationId: requestedId, message }) {
-      await db.transaction(async (tx) => {
+      return db.transaction(async (tx) => {
         const conversationId = await resolveCanonicalId(tx, requestedId);
         await tx.execute(
           sql`select pg_advisory_xact_lock(hashtextextended(${`fast-agent-conversation:${conversationId}`}, 0))`,
         );
         const [conversation] = await tx
-          .select({ id: fastAgentConversations.id })
+          .select({
+            id: fastAgentConversations.id,
+            compatibilityMessages: fastAgentConversations.compatibilityMessages,
+          })
           .from(fastAgentConversations)
           .where(eq(fastAgentConversations.id, conversationId))
           .limit(1);
         if (!conversation) {
           throw new Error('Fast conversation was not found.');
+        }
+
+        const isHumanPrompt =
+          message.eventType === ACP_ENVELOPE_EVENT_TYPES.UserPrompt &&
+          message.role === 'user' &&
+          message.metadata?.turnSource === 'human';
+        let initialHumanTurn = false;
+        if (isHumanPrompt) {
+          const [currentHumanPrompt] = await tx
+            .select({ id: fastAgentMessages.id })
+            .from(fastAgentMessages)
+            .where(
+              and(
+                eq(fastAgentMessages.conversationId, conversationId),
+                eq(fastAgentMessages.eventId, message.eventId),
+                eq(
+                  fastAgentMessages.eventType,
+                  ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
+                ),
+                eq(fastAgentMessages.role, 'user'),
+                sql`${fastAgentMessages.metadata}->>'turnSource' = 'human'`,
+              ),
+            )
+            .limit(1);
+          const [priorHumanPrompt] = await tx
+            .select({ id: fastAgentMessages.id })
+            .from(fastAgentMessages)
+            .where(
+              and(
+                eq(fastAgentMessages.conversationId, conversationId),
+                eq(
+                  fastAgentMessages.eventType,
+                  ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
+                ),
+                eq(fastAgentMessages.role, 'user'),
+                sql`${fastAgentMessages.metadata}->>'turnSource' = 'human'`,
+                sql`${fastAgentMessages.eventId} <> ${message.eventId}`,
+              ),
+            )
+            .limit(1);
+          const hasCompatibilityHumanPrompt = (
+            conversation.compatibilityMessages as ModelMessage[]
+          ).some(
+            (compatibilityMessage) =>
+              compatibilityMessage.role === 'user' &&
+              !isLegacyPlatformEventMessage(compatibilityMessage),
+          );
+          initialHumanTurn =
+            !priorHumanPrompt &&
+            (Boolean(currentHumanPrompt) || !hasCompatibilityHumanPrompt);
         }
 
         await tx
@@ -520,6 +607,8 @@ export const fastAgentConversationRepository: FastAgentConversationRepository =
             });
           }
         }
+
+        return { initialHumanTurn };
       });
     },
 

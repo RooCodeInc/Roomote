@@ -22,7 +22,8 @@ When anonymous telemetry is enabled, your deployment sends:
   whether it was configured before the wizard. Other events include
   non-identifying facts like the harness, model, source surface, and sandbox
   provider used. Fast session events include bounded outcome, retry count, and
-  phase-duration measurements, but not conversation or message identifiers.
+  phase-duration measurements, plus whether a turn is the session's first human
+  message, but not conversation or message identifiers.
 - **A daily instance report** — aggregate deployment metadata and usage:
   setup timestamps; counts of users, environments, and connected repositories;
   task, model, token, and cost totals for the past day; pull-request statistics

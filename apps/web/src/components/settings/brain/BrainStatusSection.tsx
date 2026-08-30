@@ -51,8 +51,10 @@ export function BrainStatusSection({ settings }: { settings: BrainSettings }) {
                 ? 'Semantic + keyword'
                 : settings.recall.mode === 'keyword-only'
                   ? 'Keyword only'
-                  : // The admin census did not answer; fall back to inference.
-                    settings.inferenceProvider
+                  : // The admin census did not answer; fall back to whether an
+                    // embedding path exists at all. Inference presence is the
+                    // wrong proxy now that the helper model always answers it.
+                    settings.embeddingsAvailable
                     ? 'Semantic + keyword'
                     : 'Keyword only'
             }

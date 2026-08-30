@@ -5,10 +5,12 @@ import {
   getProviderRetryNoticeFromMessageData,
   getTerminalProviderErrorFromMessageData,
   parseLinkedReviewResults,
+  parsePrReviewActionOffer,
   stripLlmCitationArtifacts,
 } from '@roomote/types';
 
 import { cn } from '@/lib/utils';
+import { useTRPCClient } from '@/trpc/client';
 
 import {
   Avatar,
@@ -40,6 +42,8 @@ import { messageAnchorId } from '../message-anchor';
 import type { AcpUiMessage } from './types';
 import { ProviderRetryNoticeMessage } from './ProviderRetryNoticeMessage';
 import { TerminalProviderErrorMessage } from './TerminalProviderErrorMessage';
+import { PrReviewActionOffer } from '@/components/ai-elements/pr-review-action-offer';
+import { useMessageUiOptions } from '@/components/ai-elements/message-ui-options';
 
 const UserMessageToggle = ({
   isExpanded,
@@ -86,6 +90,27 @@ function getImageMediaType(url: string): string {
 
 interface AcpTextMessageProps {
   msg: AcpUiMessage;
+}
+
+function PrReviewNotificationActions({ msg }: { msg: AcpUiMessage }) {
+  const offer = parsePrReviewActionOffer(msg.data as Record<string, unknown>);
+  const trpcClient = useTRPCClient();
+  if (!offer) return null;
+
+  return (
+    <div className="mt-3" data-testid="pr-review-notification-actions">
+      <PrReviewActionOffer
+        offer={offer}
+        onAction={async (choice) => {
+          const result =
+            await trpcClient.sandboxSession.handlePrReviewNotificationAction.mutate(
+              { deliveryId: offer.deliveryId, choice },
+            );
+          return result.status;
+        }}
+      />
+    </div>
+  );
 }
 
 function getUserTooltipContent(msg: AcpUiMessage): string {
@@ -157,6 +182,7 @@ export function AcpTextMessage({ msg }: AcpTextMessageProps) {
     null,
   );
   const showPersistentTimestamp = useInternalTranscriptRowsVisible();
+  const { hidePrReviewActions } = useMessageUiOptions();
   const isUser = msg.role === 'user';
   const baseContent = isUser
     ? (msg.text ?? '')
@@ -333,6 +359,9 @@ export function AcpTextMessage({ msg }: AcpTextMessageProps) {
           ) : (
             <MessageResponse>{content}</MessageResponse>
           )}
+          {!hidePrReviewActions && !isUser && msg.kind === 'text' ? (
+            <PrReviewNotificationActions msg={msg} />
+          ) : null}
         </MessageContent>
       </div>
       {showPersistentTimestamp && !msg.partial && (

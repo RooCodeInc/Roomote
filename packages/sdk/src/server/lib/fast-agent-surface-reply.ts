@@ -6,6 +6,7 @@ import {
   getActiveFastAgentTasks,
   resolveApiBaseUrl,
   type FastAgentConversation,
+  type FastAgentReactionExternalInput,
   type FastAgentTurnAdapter,
 } from '@roomote/cloud-agents/server';
 import {
@@ -114,6 +115,17 @@ export type FastAgentSurfaceReplyDelivery = {
   >;
 };
 
+type FastAgentSurfaceReplyParams = {
+  sessionId: string;
+  userId: string;
+  senderDisplayName: string | null;
+  question: string;
+  currentMessageId: string;
+  replyToMessageId?: string;
+  images?: string[];
+  externalInput?: FastAgentReactionExternalInput;
+};
+
 export async function canUserAccessFastAgentSession(params: {
   sessionId: string;
   userId: string;
@@ -151,6 +163,8 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
   senderDisplayName: string | null;
   question: string;
   currentMessageId?: string;
+  replyToMessageId?: string;
+  externalInput?: FastAgentReactionExternalInput;
 }): Promise<FastAgentSurfaceReplyDelivery | null> {
   const session = await fastAgentConversationRepository.findById({
     id: params.sessionId,
@@ -202,10 +216,12 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
     }
 
     const slack = new SlackNotifier(installation.botAccessToken);
-    let pendingQuote = buildSlackReplyQuote({
-      senderDisplayName: params.senderDisplayName,
-      text: params.question,
-    });
+    let pendingQuote = params.externalInput
+      ? null
+      : buildSlackReplyQuote({
+          senderDisplayName: params.senderDisplayName,
+          text: params.question,
+        });
 
     return {
       conversation,
@@ -249,6 +265,11 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
           if (!messageTs) {
             throw new Error('Slack did not return a Fast reply timestamp.');
           }
+          await recordFastAgentConversationMessageBestEffort({
+            sessionId: session.id,
+            conversation,
+            messageId: messageTs,
+          });
           return { messageId: messageTs };
         },
         replaceReply: async (handle, { message }) => {
@@ -289,6 +310,11 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
           if (!updated) {
             throw new Error('Slack did not update the Fast reply.');
           }
+          await recordFastAgentConversationMessageBestEffort({
+            sessionId: session.id,
+            conversation,
+            messageId: handle.messageId,
+          });
           return handle;
         },
       },
@@ -302,10 +328,12 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
       return null;
     }
 
-    let pendingQuote = buildDiscordReplyQuote({
-      senderDisplayName: params.senderDisplayName,
-      text: params.question,
-    });
+    let pendingQuote = params.externalInput
+      ? null
+      : buildDiscordReplyQuote({
+          senderDisplayName: params.senderDisplayName,
+          text: params.question,
+        });
 
     return {
       conversation,
@@ -437,6 +465,7 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
     if (!provider) {
       return null;
     }
+    const replyToMessageId = params.replyToMessageId ?? params.currentMessageId;
     return {
       conversation,
       adapter: {
@@ -450,9 +479,7 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
             ...(conversation.replyTarget.threadId
               ? { threadId: conversation.replyTarget.threadId }
               : {}),
-            ...(params.currentMessageId
-              ? { replyToMessageId: params.currentMessageId }
-              : {}),
+            ...(replyToMessageId ? { replyToMessageId } : {}),
             text: `${message}\n\n${buildFastSessionReplyFooterText({ provider: 'telegram', sessionId: session.id, ...footerContext })}`,
             textFormat: 'markdown',
           });
@@ -484,14 +511,9 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
   return null;
 }
 
-export async function continueFastAgentSurfaceReply(params: {
-  sessionId: string;
-  userId: string;
-  senderDisplayName: string | null;
-  question: string;
-  currentMessageId: string;
-  images?: string[];
-}): Promise<boolean> {
+export async function continueFastAgentSurfaceReply(
+  params: FastAgentSurfaceReplyParams,
+): Promise<boolean> {
   const delivery = await buildFastAgentSurfaceReplyDelivery(params);
   if (!delivery) {
     return false;
@@ -500,15 +522,11 @@ export async function continueFastAgentSurfaceReply(params: {
   return runFastAgentSurfaceReply({ ...params, delivery });
 }
 
-async function runFastAgentSurfaceReply(params: {
-  sessionId: string;
-  userId: string;
-  senderDisplayName: string | null;
-  question: string;
-  currentMessageId: string;
-  images?: string[];
-  delivery: FastAgentSurfaceReplyDelivery;
-}): Promise<boolean> {
+async function runFastAgentSurfaceReply(
+  params: FastAgentSurfaceReplyParams & {
+    delivery: FastAgentSurfaceReplyDelivery;
+  },
+): Promise<boolean> {
   const { delivery } = params;
 
   const release = await acquireFastAgentTurnLock({
@@ -520,6 +538,9 @@ async function runFastAgentSurfaceReply(params: {
 
   const apiBaseUrl = resolveApiBaseUrl() ?? undefined;
   try {
+    const activeTasks = params.externalInput
+      ? await getActiveFastAgentTasks(params.sessionId)
+      : undefined;
     await answerFastAgentQuestion({
       question: params.question,
       images: params.images,
@@ -529,6 +550,18 @@ async function runFastAgentSurfaceReply(params: {
       currentMessageId: params.currentMessageId,
       signal: release.signal,
       senderDisplayName: params.senderDisplayName ?? undefined,
+      ...(activeTasks ? { activeTasks } : {}),
+      ...(params.externalInput
+        ? {
+            senderExternalId: params.externalInput.reactor.externalUserId,
+            turnSource: 'platform_event' as const,
+            platformEventKind: 'external_input' as const,
+            platformEventVisibility: 'optional' as const,
+            platformEventTranscriptPayload: {
+              externalInput: params.externalInput,
+            },
+          }
+        : {}),
       adapter: {
         resolveMcpServerConfigs: () =>
           resolveUserMcpServerConfigs({
@@ -545,14 +578,9 @@ async function runFastAgentSurfaceReply(params: {
   }
 }
 
-export async function queueFastAgentSurfaceReply(params: {
-  sessionId: string;
-  userId: string;
-  senderDisplayName: string | null;
-  question: string;
-  currentMessageId: string;
-  images?: string[];
-}): Promise<boolean> {
+export async function queueFastAgentSurfaceReply(
+  params: FastAgentSurfaceReplyParams,
+): Promise<boolean> {
   const delivery = await buildFastAgentSurfaceReplyDelivery(params);
   if (!delivery) return false;
 

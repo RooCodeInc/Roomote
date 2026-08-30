@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const {
   mockResolveConnection,
-  mockResolveBrainProvider,
+  mockIsBrainEmbeddingAvailable,
   mockBackfillEvents,
   mockClaimEvents,
   mockClaimFastEvents,
@@ -15,7 +15,7 @@ const {
   mockRunBrainCollectors,
 } = vi.hoisted(() => ({
   mockResolveConnection: vi.fn(),
-  mockResolveBrainProvider: vi.fn(),
+  mockIsBrainEmbeddingAvailable: vi.fn(),
   mockBackfillEvents: vi.fn(),
   mockClaimEvents: vi.fn(),
   mockClaimFastEvents: vi.fn(),
@@ -33,7 +33,7 @@ vi.mock('@roomote/sdk/server', async (importOriginal) => ({
   // through the mocked global fetch.
   ...(await importOriginal<typeof import('@roomote/sdk/server')>()),
   resolveBrainConnection: mockResolveConnection,
-  resolveBrainInferenceProvider: mockResolveBrainProvider,
+  isBrainEmbeddingAvailable: mockIsBrainEmbeddingAvailable,
 }));
 
 vi.mock('@roomote/db/server', async (importOriginal) => {
@@ -308,10 +308,7 @@ describe('collector continuation orchestration', () => {
       baseUrl: 'http://brain.test',
       token: 'ingest-token',
     });
-    mockResolveBrainProvider.mockResolvedValue({
-      providerId: 'openrouter',
-      apiKey: 'sk-or',
-    });
+    mockIsBrainEmbeddingAvailable.mockResolvedValue(true);
   });
 
   it('runs incremental integrations only on the scheduled pass', async () => {
@@ -670,7 +667,7 @@ describe('Brain readiness gate', () => {
     // cannot embed, burn every memory through its retry budget into a
     // terminal state, and mark the one-shot history backfill complete before
     // a single page landed.
-    mockResolveBrainProvider.mockResolvedValue(null);
+    mockIsBrainEmbeddingAvailable.mockResolvedValue(false);
 
     await brainOutboxDrainJob();
 
@@ -683,10 +680,7 @@ describe('Brain readiness gate', () => {
       baseUrl: 'http://brain.test',
       token: 'ingest-token',
     });
-    mockResolveBrainProvider.mockResolvedValue({
-      providerId: 'openrouter',
-      apiKey: 'sk-or',
-    });
+    mockIsBrainEmbeddingAvailable.mockResolvedValue(true);
     mockGetSyncState.mockResolvedValue({ backfillCompletedAt: new Date() });
     mockClaimEvents.mockResolvedValue([]);
 
@@ -750,10 +744,7 @@ describe('fast conversation memory drain', () => {
       baseUrl: 'http://brain.test',
       token: 'ingest-token',
     });
-    mockResolveBrainProvider.mockResolvedValue({
-      providerId: 'openrouter',
-      apiKey: 'sk-or',
-    });
+    mockIsBrainEmbeddingAvailable.mockResolvedValue(true);
     mockGetSyncState.mockResolvedValue({ backfillCompletedAt: new Date() });
   });
 

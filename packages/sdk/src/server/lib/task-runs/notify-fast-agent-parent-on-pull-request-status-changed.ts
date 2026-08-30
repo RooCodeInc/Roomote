@@ -40,6 +40,7 @@ export async function notifyFastAgentParentOnPullRequestStatusChanged(params: {
     number: number;
     title: string;
     url: string;
+    targetBranch?: string;
     status: 'merged' | 'closed';
   };
   actorLogin: string;
@@ -60,6 +61,7 @@ export async function notifyFastAgentParentOnPullRequestStatusChanged(params: {
     number: params.pullRequest.number,
     title: params.pullRequest.title,
     url: params.pullRequest.url,
+    targetBranch: params.pullRequest.targetBranch ?? null,
     status: params.pullRequest.status,
   };
 
@@ -100,6 +102,7 @@ export async function notifyFastAgentParentOnPullRequestStatusChanged(params: {
           repository: pullRequest.repository,
           prNumber: pullRequest.number,
           prUrl: pullRequest.url,
+          targetBranch: pullRequest.targetBranch,
           status: params.pullRequest.status,
           actorLogin: params.actorLogin,
         },

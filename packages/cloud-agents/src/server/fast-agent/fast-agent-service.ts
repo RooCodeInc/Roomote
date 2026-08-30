@@ -858,7 +858,9 @@ export async function answerFastAgentQuestion({
   const writeCanonicalMessage = async (
     message: Parameters<typeof upsertFastAgentMessage>[0]['message'],
     bestEffort = false,
-  ): Promise<void> => {
+  ): Promise<
+    Awaited<ReturnType<typeof upsertFastAgentMessage>> | undefined
+  > => {
     if (!canonicalConversationId) {
       if (bestEffort) return;
       throw new Error(
@@ -867,7 +869,7 @@ export async function answerFastAgentQuestion({
     }
 
     try {
-      await upsertFastAgentMessage({
+      return await upsertFastAgentMessage({
         sessionId: canonicalConversationId,
         message,
       });
@@ -959,7 +961,7 @@ export async function answerFastAgentQuestion({
       { meaningful: true },
     );
     try {
-      await writeCanonicalMessage(message, bestEffort);
+      return await writeCanonicalMessage(message, bestEffort);
     } finally {
       activePersistenceCount = Math.max(0, activePersistenceCount - 1);
       queueLifecycleEvent(
@@ -1243,9 +1245,11 @@ export async function answerFastAgentQuestion({
   };
 
   try {
-    turnVisibleMessages.push(
-      buildUserTextMessage(normalizeThreadText(question)),
-    );
+    if (!platformEvent) {
+      turnVisibleMessages.push(
+        buildUserTextMessage(normalizeThreadText(question)),
+      );
+    }
     const [
       availableEnvironments,
       taskModelOptions,
@@ -1297,7 +1301,7 @@ export async function answerFastAgentQuestion({
     activeOpenCodeSessionId = session.openCodeSessionId;
     diagnostics.setCanonicalConversationId(session.id);
     const userEvent = allocateCanonicalEvent('user');
-    await persistCanonicalMessage(
+    const userMessageResult = await persistCanonicalMessage(
       {
         ...userEvent,
         turnId,
@@ -1332,6 +1336,9 @@ export async function answerFastAgentQuestion({
         steeringAccepted: turnSource === 'human',
       },
       { state: 'working' },
+    );
+    diagnostics.recordInitialHumanTurn(
+      platformEvent ? false : userMessageResult?.initialHumanTurn,
     );
     if (!platformEvent) {
       void refreshFastAgentSessionTitle({ sessionId: session.id, userId });
@@ -1729,6 +1736,12 @@ export async function answerFastAgentQuestion({
             }
             if (
               platformEvent &&
+              // On chat surfaces every reply is a separate message and push
+              // notification, so automated events are held to one closeout.
+              // Web platform events render in a session transcript where
+              // extra replies are ordinary conversation; the prompt alone
+              // governs reply style there (e.g. the setup kickoff's intro).
+              conversation.surface !== 'web' &&
               args.purpose !== 'closeout' &&
               args.purpose !== 'clarification'
             ) {
@@ -1768,6 +1781,13 @@ export async function answerFastAgentQuestion({
 
           case FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReaction: {
             const args = chatReactionArgsSchema.parse(call.args);
+            if (platformEvent) {
+              return {
+                success: false,
+                error:
+                  'Emoji reactions are unavailable during platform events. Use send_chat_reply or ignore_event instead.',
+              };
+            }
             if (!adapter.postReaction) {
               return {
                 success: false,
@@ -1919,8 +1939,12 @@ export async function answerFastAgentQuestion({
               const destinationUrl = linkedSession
                 ? `${Env.R_APP_URL}/sessions/${linkedSession.id}?task=${task.taskId}`
                 : task.taskUrl;
+              // The delegated task's live Slack card owns the workspace
+              // startup status; the kickoff is a permanent thread message
+              // that nothing can update later, so it must not carry
+              // transient "preparing" copy.
               const message = [
-                `Preparing workspace…\n\n${args.kickoffMessage}`,
+                args.kickoffMessage,
                 destinationUrl &&
                 !task.taskLinkRendered &&
                 !args.kickoffMessage.includes(destinationUrl)
@@ -2618,6 +2642,14 @@ export async function answerFastAgentQuestion({
           purpose: 'closeout',
           message:
             'I could not complete that request within the available turn.',
+        });
+      } else if (platformEvent && platformEventVisibility === 'required') {
+        // A visibility-required platform event promises a closeout even when
+        // an intro ack or launch kickoff already posted a visible update
+        // (e.g. the setup kickoff ending on an empty terminal response).
+        await postReply({
+          purpose: 'closeout',
+          message: 'I will post updates here as this progresses.',
         });
       }
     }

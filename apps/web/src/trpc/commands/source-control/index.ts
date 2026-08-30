@@ -1,5 +1,6 @@
 import { randomBytes } from 'node:crypto';
 
+import { requestBrainBackfill } from '@roomote/sdk/server/request-instance-ping';
 import * as Ado from '@roomote/ado';
 import * as Bitbucket from '@roomote/bitbucket';
 import * as Gitea from '@roomote/gitea';
@@ -1010,7 +1011,7 @@ export async function saveSourceControlConfigCommand(
     allowIncompleteDelegated: true,
   });
 
-  return db.transaction(async (tx) => {
+  const result = await db.transaction(async (tx) => {
     const providerStatus = await saveSourceControlConfigValues({
       executor: tx,
       actorUserId: auth.userId,
@@ -1024,6 +1025,16 @@ export async function saveSourceControlConfigCommand(
       configSatisfied: providerStatus.configSatisfied,
     };
   });
+
+  // A successful save means every required value is satisfied (the save
+  // throws otherwise), and `result.configSatisfied` reflects the state
+  // BEFORE this save — so kick unconditionally: repositories (and their PRs
+  // and issues) may have just become reachable, and Memory ingestion should
+  // start now rather than waiting out the 15-minute schedules. Harmless when
+  // nothing changed; the jobs are idempotent and no-op without Memory.
+  void requestBrainBackfill('source-control-connected');
+
+  return result;
 }
 
 type ClearSourceControlConfigWarning = {

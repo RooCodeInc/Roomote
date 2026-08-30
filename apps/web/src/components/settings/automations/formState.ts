@@ -2,6 +2,7 @@ import {
   AUTOMATION_DESTINATION_DESCRIPTORS,
   SCHEDULE_ONLY_BACKGROUND_AUTOMATION_LIST,
   type ChannelAutoStartLaunchMode,
+  type CommunicationProvider,
   type ConflictResolverMaxPrAgeDays,
   type ScheduleOnlyBackgroundAutomationFrequency,
   type ScheduleOnlyBackgroundAutomationFrequencyField,
@@ -112,6 +113,9 @@ export type FormState = {
   announcerFrequency: AnnouncerFrequency;
   announcerInstructions: string;
   platformIssueAlertsEnabled: boolean;
+  mergeAnnouncerTargetProvider: 'none' | CommunicationProvider;
+  mergeAnnouncerTargetMode: 'channel' | 'direct_message';
+  mergeAnnouncerTargetChannelId: string;
 } & DestinationChannelFormFields &
   ScheduleOnlyAutomationFormFields;
 
@@ -225,6 +229,13 @@ const SCHEDULE_ONLY_AUTOMATION_FIELDS = Object.fromEntries(
       ] ?? []),
       ...(automation.id === 'issueFixer'
         ? (['issueFixerInstructions'] as const)
+        : []),
+      ...(automation.id === 'mergeAnnouncer'
+        ? ([
+            'mergeAnnouncerTargetProvider',
+            'mergeAnnouncerTargetMode',
+            'mergeAnnouncerTargetChannelId',
+          ] as const)
         : []),
     ],
   ]),
@@ -386,6 +397,13 @@ export function buildAutomationSettingsSaveInput(
     codeqlTriageFrequency: stateToSave.codeqlTriageFrequency,
     ...buildScheduleOnlyAutomationSaveInput(stateToSave),
     issueFixerInstructions: stateToSave.issueFixerInstructions.trim() || null,
+    mergeAnnouncerTargetProvider:
+      stateToSave.mergeAnnouncerTargetProvider === 'none'
+        ? null
+        : stateToSave.mergeAnnouncerTargetProvider,
+    mergeAnnouncerTargetMode: stateToSave.mergeAnnouncerTargetMode,
+    mergeAnnouncerTargetChannelId:
+      stateToSave.mergeAnnouncerTargetChannelId.trim() || null,
     suggesterFrequency: stateToSave.suggesterFrequency,
     suggesterInstructions: stateToSave.suggesterInstructions.trim() || null,
     suggesterUseTelegram: stateToSave.suggesterUseTelegram,

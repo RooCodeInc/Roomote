@@ -344,6 +344,9 @@ describe('handleGiteaPullRequest', () => {
       42,
       'merged',
     );
+    expect(mockRecordPrStatusChangeInTaskHistory).toHaveBeenLastCalledWith(
+      expect.objectContaining({ targetBranch: 'main' }),
+    );
     expect(mockScheduleSourceControlPullRequestFactSync).toHaveBeenCalledWith({
       provider: 'gitea',
       repositoryFullName: 'acme/backend',

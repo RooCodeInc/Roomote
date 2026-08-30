@@ -71,6 +71,7 @@ vi.mock('../schema', () => ({
 }));
 
 import {
+  DevLoginInferencePlaceholderError,
   invalidateBrainEnabledCache,
   isBrainEnabled,
   isBrainProviderConfigured,
@@ -80,7 +81,11 @@ import {
   resolveModelProviderEnvValue,
   resolveSandboxModelRuntimeEnv,
 } from './model-runtime-config';
-import { TASK_MODEL_ROLE_DESCRIPTORS, TASK_MODEL_ROLES } from '@roomote/types';
+import {
+  DEV_LOGIN_INFERENCE_API_KEY_PLACEHOLDER,
+  TASK_MODEL_ROLE_DESCRIPTORS,
+  TASK_MODEL_ROLES,
+} from '@roomote/types';
 
 describe('resolveEffectiveModelRuntimeEnv', () => {
   beforeEach(() => {
@@ -125,6 +130,23 @@ describe('resolveEffectiveModelRuntimeEnv', () => {
       R_MODEL_ENV_KEYS: 'OPENAI_API_KEY',
       OPENAI_API_KEY: 'sk-runtime',
     });
+  });
+
+  it('rejects the dev-login placeholder before control-plane inference can use it', async () => {
+    mockDeploymentSettingsFindFirst.mockResolvedValue({
+      runtimeModelConfig: {
+        roomoteModel: 'openrouter/openai/gpt-5.6-sol',
+      },
+    });
+
+    await expect(
+      resolveEffectiveModelRuntimeEnv({
+        runtimeEnv: {},
+        deploymentEnvVars: {
+          OPENROUTER_API_KEY: DEV_LOGIN_INFERENCE_API_KEY_PLACEHOLDER,
+        },
+      }),
+    ).rejects.toBeInstanceOf(DevLoginInferencePlaceholderError);
   });
 
   it('resolves model and reasoning env overrides for every role descriptor', async () => {

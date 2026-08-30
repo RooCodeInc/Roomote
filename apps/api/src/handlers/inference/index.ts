@@ -5,7 +5,12 @@ import {
   rebaseRoomoteModelIdToUpstream,
   ROOMOTE_INFERENCE_PROVIDER_ID,
 } from '@roomote/types';
-import { db, eq, taskRuns } from '@roomote/db/server';
+import {
+  db,
+  DevLoginInferencePlaceholderError,
+  eq,
+  taskRuns,
+} from '@roomote/db/server';
 import { recordLlmUsage } from '@roomote/sdk/server';
 
 import type { Variables } from '../../types';
@@ -385,10 +390,12 @@ inference.on(['POST', 'GET'], '/:provider/*', async (c) => {
       }),
     );
 
-    return c.json(
-      { error: `Failed to resolve the ${provider.name} configuration` },
-      500,
-    );
+    return error instanceof DevLoginInferencePlaceholderError
+      ? c.json({ error: error.message }, 503)
+      : c.json(
+          { error: `Failed to resolve the ${provider.name} configuration` },
+          500,
+        );
   }
 
   if (!resolution.ok) {

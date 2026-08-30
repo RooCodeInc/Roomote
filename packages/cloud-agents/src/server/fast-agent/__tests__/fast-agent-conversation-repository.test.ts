@@ -112,6 +112,7 @@ describe('Fast conversation repository', () => {
     );
 
     expect(new Set(sessions.map(({ id }) => id)).size).toBe(1);
+    expect(sessions.filter(({ created }) => created)).toHaveLength(1);
     const rows = await db
       .select({ id: fastAgentConversations.id })
       .from(fastAgentConversations)
@@ -424,6 +425,156 @@ describe('Fast conversation repository', () => {
           (block) => block.type === 'text' && block.text === 'Retrying',
         ),
     ).toBe(true);
+  });
+
+  it('classifies the first human prompt after platform events and retries idempotently', async () => {
+    const user = await createUser();
+    const session = await fastAgentConversationRepository.getOrCreate({
+      userId: user.id,
+      conversation: slackConversation,
+    });
+    const prompt = (
+      eventId: string,
+      turnSource: 'human' | 'platform_event',
+    ) => ({
+      eventId,
+      turnId: eventId,
+      turnSeq: 0,
+      ts: 100,
+      eventType: 'roomote_runtime.user_prompt' as const,
+      role: 'user' as const,
+      contentBlocks: [{ type: 'text' as const, text: 'Prompt' }],
+      metadata: { visibleInTranscript: true, turnSource },
+      payload: {},
+      source: 'slack',
+    });
+
+    await expect(
+      fastAgentConversationRepository.upsertMessage({
+        conversationId: session.id,
+        message: prompt('platform-event', 'platform_event'),
+      }),
+    ).resolves.toEqual({ initialHumanTurn: false });
+    await expect(
+      fastAgentConversationRepository.upsertMessage({
+        conversationId: session.id,
+        message: prompt('first-human', 'human'),
+      }),
+    ).resolves.toEqual({ initialHumanTurn: true });
+    await expect(
+      fastAgentConversationRepository.upsertMessage({
+        conversationId: session.id,
+        message: prompt('first-human', 'human'),
+      }),
+    ).resolves.toEqual({ initialHumanTurn: true });
+    await expect(
+      fastAgentConversationRepository.upsertMessage({
+        conversationId: session.id,
+        message: prompt('later-human', 'human'),
+      }),
+    ).resolves.toEqual({ initialHumanTurn: false });
+  });
+
+  it('lets only one concurrent human prompt claim the initial turn', async () => {
+    const user = await createUser();
+    const session = await fastAgentConversationRepository.getOrCreate({
+      userId: user.id,
+      conversation: slackConversation,
+    });
+
+    const results = await Promise.all(
+      ['human-a', 'human-b'].map((eventId) =>
+        fastAgentConversationRepository.upsertMessage({
+          conversationId: session.id,
+          message: {
+            eventId,
+            turnId: eventId,
+            turnSeq: 0,
+            ts: 100,
+            eventType: 'roomote_runtime.user_prompt',
+            role: 'user',
+            contentBlocks: [{ type: 'text', text: 'Prompt' }],
+            metadata: { visibleInTranscript: true, turnSource: 'human' },
+            payload: {},
+            source: 'slack',
+          },
+        }),
+      ),
+    );
+
+    expect(
+      results.filter(({ initialHumanTurn }) => initialHumanTurn),
+    ).toHaveLength(1);
+  });
+
+  it('treats rollback-compatible human history as an earlier turn', async () => {
+    const user = await createUser();
+    const session = await fastAgentConversationRepository.getOrCreate({
+      userId: user.id,
+      conversation: slackConversation,
+    });
+    await fastAgentConversationRepository.appendVisibleMessages({
+      conversationId: session.id,
+      messages: [{ role: 'user', content: 'Earlier question' }],
+    });
+
+    await expect(
+      fastAgentConversationRepository.upsertMessage({
+        conversationId: session.id,
+        message: {
+          eventId: 'later-human',
+          turnId: 'later-human',
+          turnSeq: 0,
+          ts: 100,
+          eventType: 'roomote_runtime.user_prompt',
+          role: 'user',
+          contentBlocks: [{ type: 'text', text: 'Prompt' }],
+          metadata: { visibleInTranscript: true, turnSource: 'human' },
+          payload: {},
+          source: 'slack',
+        },
+      }),
+    ).resolves.toEqual({ initialHumanTurn: false });
+  });
+
+  it('does not treat legacy platform-event history as a human turn', async () => {
+    const user = await createUser();
+    const session = await fastAgentConversationRepository.getOrCreate({
+      userId: user.id,
+      conversation: slackConversation,
+    });
+    await fastAgentConversationRepository.appendVisibleMessages({
+      conversationId: session.id,
+      messages: [
+        {
+          role: 'user',
+          content: [
+            {
+              type: 'text',
+              text: '<platform_event>{"type":"task_settled"}</platform_event>',
+            },
+          ],
+        },
+      ],
+    });
+
+    await expect(
+      fastAgentConversationRepository.upsertMessage({
+        conversationId: session.id,
+        message: {
+          eventId: 'first-human',
+          turnId: 'first-human',
+          turnSeq: 0,
+          ts: 100,
+          eventType: 'roomote_runtime.user_prompt',
+          role: 'user',
+          contentBlocks: [{ type: 'text', text: 'Prompt' }],
+          metadata: { visibleInTranscript: true, turnSource: 'human' },
+          payload: {},
+          source: 'slack',
+        },
+      }),
+    ).resolves.toEqual({ initialHumanTurn: true });
   });
 
   it('reconciles a persisted legacy retry notice after its turn stops', async () => {

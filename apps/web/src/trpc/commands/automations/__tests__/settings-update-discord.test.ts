@@ -5,6 +5,7 @@ import {
   discordInstallationChannels,
   discordInstallations,
   eq,
+  getBackgroundAgentSettingsForDeployment,
   slackInstallations,
   upsertAutomation,
   users,
@@ -14,6 +15,7 @@ import type { BackgroundAutomationKey } from '@roomote/types';
 import type { UserAuthSuccess } from '@/types';
 
 import { updateBackgroundAgentSettingsCommand } from '../settings-update';
+import { mergeAnnouncerDestinationInputSchema } from '../settings-schema';
 import type { UpdateBackgroundAgentSettingsInput } from '../types';
 
 const mockCaptureActivationAutomationChanged = vi.hoisted(() => vi.fn());
@@ -889,6 +891,105 @@ describe('updateBackgroundAgentSettingsCommand Discord destinations', () => {
     if (result.success) {
       expect(result.settings.platformIssueAlertsEnabled).toBe(true);
     }
+  });
+
+  it('writes a Merge announcer channel through the standard destination fields', async () => {
+    await insertSlackInstallation();
+    const destination = mergeAnnouncerDestinationInputSchema.parse({
+      mergeAnnouncerTargetProvider: 'slack',
+      mergeAnnouncerTargetMode: 'channel',
+      mergeAnnouncerTargetChannelId: 'C123UPDATES',
+    });
+
+    const result = await updateBackgroundAgentSettingsCommand(
+      adminAuth,
+      buildInput({
+        savingAutomation: 'mergeAnnouncer',
+        mergeAnnouncerFrequency: 'off',
+        ...destination,
+      }),
+    );
+
+    expect(result.success).toBe(true);
+    expect(await getAutomationTargets('merge_announcer')).toEqual([
+      {
+        provider: 'slack',
+        targetKind: 'slack_channel',
+        externalRef: 'C123UPDATES',
+      },
+    ]);
+    const reloadedSettings = await getBackgroundAgentSettingsForDeployment();
+    expect(reloadedSettings).toMatchObject({
+      mergeAnnouncerTargetProvider: 'slack',
+      mergeAnnouncerTargetMode: 'channel',
+      mergeAnnouncerTargetChannelId: 'C123UPDATES',
+    });
+  });
+
+  it('writes a Merge announcer DM without exposing provider-specific user ids', async () => {
+    await insertSlackInstallation();
+
+    const result = await updateBackgroundAgentSettingsCommand(
+      adminAuth,
+      buildInput({
+        savingAutomation: 'mergeAnnouncer',
+        mergeAnnouncerFrequency: 'off',
+        mergeAnnouncerTargetProvider: 'slack',
+        mergeAnnouncerTargetMode: 'direct_message',
+        mergeAnnouncerTargetChannelId: null,
+      }),
+    );
+
+    expect(result.success).toBe(true);
+    expect(await getAutomationTargets('merge_announcer')).toEqual([
+      {
+        provider: 'slack',
+        targetKind: 'slack_user',
+        externalRef: adminAuth.userId,
+      },
+    ]);
+  });
+
+  it('preserves a Merge announcer destination during an unrelated stale form save', async () => {
+    await upsertAutomation(db, {
+      key: 'merge_announcer',
+      enabled: true,
+      schedule: { mode: 'daily' },
+      targets: [
+        {
+          provider: 'discord',
+          targetKind: 'discord_channel',
+          externalRef: 'D-CURRENT',
+        },
+      ],
+    });
+
+    const result = await updateBackgroundAgentSettingsCommand(
+      adminAuth,
+      buildInput({
+        savingAutomation: 'managerStats',
+        mergeAnnouncerFrequency: 'off',
+        mergeAnnouncerTargetProvider: 'slack',
+        mergeAnnouncerTargetMode: 'channel',
+        mergeAnnouncerTargetChannelId: 'C-STALE',
+      }),
+    );
+
+    expect(result.success).toBe(true);
+    expect(await getAutomationTargets('merge_announcer')).toEqual([
+      {
+        provider: 'discord',
+        targetKind: 'discord_channel',
+        externalRef: 'D-CURRENT',
+      },
+    ]);
+    const automation = await db.query.automations.findFirst({
+      where: eq(automations.key, 'merge_announcer'),
+    });
+    expect(automation).toMatchObject({
+      enabled: true,
+      schedule: { mode: 'daily' },
+    });
   });
 
   it('keeps provider usage alerts on the Manager Channel fallback when it changes', async () => {

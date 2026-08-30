@@ -195,4 +195,23 @@ describe('tool presentation policy', () => {
       ).rowVisibility,
     ).toBe('hidden');
   });
+
+  it('hides ignore_event as internal lifecycle handling', () => {
+    const message = toolMessage({
+      title: 'ignore_event',
+      toolName: 'ignore_event',
+      kind: 'communication',
+    });
+
+    expect(
+      resolveToolPresentationPolicy(message, {
+        showInternalMessages: false,
+      }).rowVisibility,
+    ).toBe('debug-only');
+    expect(
+      resolveToolPresentationPolicy(message, {
+        showInternalMessages: true,
+      }).rowVisibility,
+    ).toBe('visible');
+  });
 });
