@@ -234,6 +234,7 @@ export async function processFastAgentMessage(params: {
           slack,
           channel: event.channel,
           threadTs: threadId,
+          title: session.title,
         }),
         resolveMcpServerConfigs: () =>
           resolveUserMcpServerConfigs({

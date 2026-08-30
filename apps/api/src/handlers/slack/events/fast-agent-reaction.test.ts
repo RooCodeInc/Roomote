@@ -66,6 +66,7 @@ describe('Fast Slack reaction input', () => {
     mocks.findSession.mockResolvedValue({
       id: 'session-1',
       userId: 'user-1',
+      title: 'Investigate Slack agent status',
       conversation: {
         surface: 'slack',
         workspaceId: 'T1',
@@ -104,6 +105,12 @@ describe('Fast Slack reaction input', () => {
     ).resolves.toBe(true);
 
     await vi.waitFor(() => expect(mocks.answerQuestion).toHaveBeenCalledOnce());
+    expect(mocks.createActivity).toHaveBeenCalledWith({
+      slack: expect.anything(),
+      channel: 'C1',
+      threadTs: '100.000',
+      title: 'Investigate Slack agent status',
+    });
     expect(mocks.findSession).toHaveBeenCalledWith({
       provider: 'slack',
       workspaceId: 'T1',

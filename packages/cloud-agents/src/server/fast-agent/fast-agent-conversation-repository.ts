@@ -29,6 +29,7 @@ import type { FastAgentConversation } from './fast-agent-conversation';
 export type FastAgentConversationRecord = {
   id: string;
   userId: string;
+  title: string | null;
   conversation: FastAgentConversation;
   /**
    * Durable visible history for cold starts and provider retries. OpenCode,
@@ -296,6 +297,7 @@ async function loadConversationRecord(
   return {
     id: record.id,
     userId: record.userId,
+    title: record.title,
     conversation,
     compatibilityMessages: record.compatibilityMessages as ModelMessage[],
     openCodeSessionId: record.openCodeSessionId,

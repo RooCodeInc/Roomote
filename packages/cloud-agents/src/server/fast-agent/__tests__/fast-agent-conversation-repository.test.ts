@@ -130,6 +130,28 @@ describe('Fast conversation repository', () => {
     expect(rows).toEqual([{ id: sessions[0]!.id }]);
   });
 
+  it('returns the persisted Fast conversation title', async () => {
+    const user = await createUser();
+    const session = await fastAgentConversationRepository.getOrCreate({
+      userId: user.id,
+      conversation: slackConversation,
+    });
+    await db
+      .update(fastAgentConversations)
+      .set({ title: 'Investigate Slack agent status' })
+      .where(eq(fastAgentConversations.id, session.id));
+
+    await expect(
+      fastAgentConversationRepository.findById({ id: session.id }),
+    ).resolves.toMatchObject({ title: 'Investigate Slack agent status' });
+    await expect(
+      fastAgentConversationRepository.getOrCreate({
+        userId: user.id,
+        conversation: slackConversation,
+      }),
+    ).resolves.toMatchObject({ title: 'Investigate Slack agent status' });
+  });
+
   it('keeps identity stable while updating the current reply destination', async () => {
     const user = await createUser();
     const discordConversation = {

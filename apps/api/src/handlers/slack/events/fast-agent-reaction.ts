@@ -103,6 +103,7 @@ async function processFastAgentReaction(params: {
           slack: context.slack,
           channel: event.item.channel,
           threadTs,
+          title: session.title,
         }),
         resolveMcpServerConfigs: () =>
           resolveUserMcpServerConfigs({

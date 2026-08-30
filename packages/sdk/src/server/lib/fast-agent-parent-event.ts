@@ -549,6 +549,7 @@ async function createSlackFastAgentParentTurn(
         slack,
         channel: conversation.replyTarget.channelId,
         threadTs: conversation.replyTarget.threadId,
+        title: session.title,
       }),
       launchTask: createFastAgentSlackLiveTaskLauncher({
         slack,

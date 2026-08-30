@@ -1,24 +1,24 @@
 import type { FastAgentTurnActivity } from '@roomote/cloud-agents/server';
-import { PRODUCT_NAME } from '@roomote/types';
-
 import type { SlackNotifier } from './slack-notifier';
 
-export const FAST_AGENT_SLACK_SESSION_TITLE = `${PRODUCT_NAME} Fast session`;
 export const FAST_AGENT_SLACK_PROCESSING_DELAY_MS = 300;
 
 export function createFastAgentSlackSessionActivity({
   slack,
   channel,
   threadTs,
+  title,
   delayMs = FAST_AGENT_SLACK_PROCESSING_DELAY_MS,
 }: {
-  slack: Pick<SlackNotifier, 'setAgentSessionStatus'>;
+  slack: Pick<SlackNotifier, 'renameAgentSession' | 'setAgentSessionStatus'>;
   channel: string;
   threadTs: string;
+  title?: string | null;
   delayMs?: number;
 }): FastAgentTurnActivity {
+  const sessionTitle = title?.trim().slice(0, 200) || undefined;
   let processingTimer: ReturnType<typeof setTimeout> | undefined;
-  let processingUpdate: Promise<boolean> | undefined;
+  let processingUpdate: Promise<void> | undefined;
   let settled = false;
 
   return {
@@ -27,12 +27,27 @@ export function createFastAgentSlackSessionActivity({
 
       processingTimer = setTimeout(() => {
         processingTimer = undefined;
-        processingUpdate = slack.setAgentSessionStatus({
-          channel,
-          threadTs,
-          status: 'processing',
-          title: FAST_AGENT_SLACK_SESSION_TITLE,
-        });
+        processingUpdate = (async () => {
+          const response = await slack.setAgentSessionStatus({
+            channel,
+            threadTs,
+            status: 'processing',
+            ...(sessionTitle ? { title: sessionTitle } : {}),
+          });
+          // Slack ignores setStatus.title after creation, so rename only when
+          // its response proves an existing session still has another title.
+          if (
+            response.ok &&
+            sessionTitle &&
+            response.title?.trim() !== sessionTitle
+          ) {
+            await slack.renameAgentSession({
+              channel,
+              threadTs,
+              title: sessionTitle,
+            });
+          }
+        })();
       }, delayMs);
       processingTimer.unref?.();
     },
@@ -53,7 +68,7 @@ export function createFastAgentSlackSessionActivity({
           channel,
           threadTs,
           status: 'active',
-          title: FAST_AGENT_SLACK_SESSION_TITLE,
+          ...(sessionTitle ? { title: sessionTitle } : {}),
         });
       }
     },
