@@ -120,7 +120,6 @@ describe('createFastAgentSlackSessionActivity', () => {
       channel: 'C123',
       threadTs: '100.001',
       status: 'active',
-      title: 'Generated Fast title',
     });
   });
 
@@ -138,6 +137,46 @@ describe('createFastAgentSlackSessionActivity', () => {
     expect(syncTitle).toHaveBeenCalledOnce();
     expect(syncTitle).toHaveBeenCalledWith(
       expect.objectContaining({ title: 'Generated after settlement' }),
+    );
+  });
+
+  it('creates a titled active session when a short turn generates its title', async () => {
+    vi.useFakeTimers();
+    const { activity, setAgentSessionStatus, syncTitle } = createActivity({});
+
+    activity.start();
+    activity.updateTitle?.('Fast title before settlement');
+    await activity.settle();
+    await vi.runAllTimersAsync();
+
+    expect(setAgentSessionStatus).toHaveBeenCalledOnce();
+    expect(setAgentSessionStatus).toHaveBeenCalledWith({
+      channel: 'C123',
+      threadTs: '100.001',
+      status: 'active',
+    });
+    expect(syncTitle).toHaveBeenCalledWith(
+      expect.objectContaining({ title: 'Fast title before settlement' }),
+    );
+  });
+
+  it('creates a titled active session when a short turn title arrives after settlement', async () => {
+    vi.useFakeTimers();
+    const { activity, setAgentSessionStatus, syncTitle } = createActivity({});
+
+    activity.start();
+    await activity.settle();
+    activity.updateTitle?.('Fast title after settlement');
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(setAgentSessionStatus).toHaveBeenCalledWith({
+      channel: 'C123',
+      threadTs: '100.001',
+      status: 'active',
+    });
+    expect(syncTitle).toHaveBeenCalledWith(
+      expect.objectContaining({ title: 'Fast title after settlement' }),
     );
   });
 

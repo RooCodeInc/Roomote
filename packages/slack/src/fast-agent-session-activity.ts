@@ -51,6 +51,19 @@ export function createFastAgentSlackSessionActivity({
     return titleUpdate;
   };
 
+  const syncSettledTitle = async () => {
+    if (!settled || processingUpdate || !sessionTitle) return;
+    const response = await slack.setAgentSessionStatus({
+      channel,
+      threadTs,
+      status: 'active',
+    });
+    processingSucceeded = response.ok;
+    if (response.ok) {
+      await queueTitleSync(response.title);
+    }
+  };
+
   return {
     start() {
       if (processingTimer || processingUpdate || settled) return;
@@ -62,7 +75,6 @@ export function createFastAgentSlackSessionActivity({
             channel,
             threadTs,
             status: 'processing',
-            ...(sessionTitle ? { title: sessionTitle } : {}),
           });
           processingSucceeded = response.ok;
           if (response.ok) {
@@ -80,7 +92,10 @@ export function createFastAgentSlackSessionActivity({
         clearTimeout(processingTimer);
         processingTimer = undefined;
       }
-      if (!processingUpdate) return;
+      if (!processingUpdate) {
+        await syncSettledTitle();
+        return;
+      }
 
       try {
         await processingUpdate;
@@ -90,7 +105,6 @@ export function createFastAgentSlackSessionActivity({
           channel,
           threadTs,
           status: 'active',
-          ...(sessionTitle ? { title: sessionTitle } : {}),
         });
       }
     },
@@ -98,6 +112,8 @@ export function createFastAgentSlackSessionActivity({
       sessionTitle = normalizeSlackAgentSessionTitle(title);
       if (processingUpdate) {
         void processingUpdate.then(() => queueTitleSync());
+      } else {
+        void syncSettledTitle();
       }
     },
   };
