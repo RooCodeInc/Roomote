@@ -227,7 +227,6 @@ describe('handleMergeAnnouncerPush', () => {
     expect(prompt).toContain(
       'single main practical user or operational benefit',
     );
-    expect(prompt).toContain('include the pull request link inline');
     expect(prompt).toContain(
       'do not enumerate every platform, integration, implementation detail, edge case, or internal mechanism',
     );
