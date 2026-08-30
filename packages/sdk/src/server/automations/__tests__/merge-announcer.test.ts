@@ -218,6 +218,18 @@ describe('handleMergeAnnouncerPush', () => {
     );
 
     const prompt = dependencies.generateSummary.mock.calls[0]?.[0] as string;
+    expect(prompt).toContain('one or two conversational sentences');
+    expect(prompt).toContain('Do not use bullets or headings');
+    expect(prompt).toContain(
+      'engineer quickly messaging a coworker about what shipped',
+    );
+    expect(prompt).toContain('casual, everyday language');
+    expect(prompt).toContain(
+      'single main practical user or operational benefit',
+    );
+    expect(prompt).toContain(
+      'do not enumerate every platform, integration, implementation detail, edge case, or internal mechanism',
+    );
     expect(prompt).toContain(
       'treat its title and body as the primary source of intent',
     );
