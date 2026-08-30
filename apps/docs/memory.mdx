@@ -25,6 +25,8 @@ Roomote fills Memory from what it can already see:
   can read
 - **GitHub issues** in connected repositories
 - **Notion pages** explicitly shared with the deployment's Notion integration
+  including readable database property values such as status, dates, people,
+  labels, relations, and formula or rollup results
 - **meeting notes** from Granola, when that integration is connected
 - **employee directory and reporting structure** from Rippling, when that
   integration is connected; HRIS reporting and membership fields remain
@@ -79,7 +81,9 @@ references in page snapshots in those cases, but it does not guess a match from
 the display name. The workspace user directory is refreshed once a day; people
 removed from the workspace (or hidden when the integration loses its
 user-listing capability) have their Notion identity cards marked deleted on
-the next refresh.
+the next refresh. Notion may truncate long multi-value database properties;
+Memory marks those partial values and links back to the source page for the
+complete list.
 
 ## Turning it on
 
