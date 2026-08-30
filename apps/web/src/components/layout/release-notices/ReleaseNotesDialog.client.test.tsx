@@ -119,4 +119,39 @@ describe('ReleaseNotesDialog', () => {
     expect(screen.getByText('Latest')).toBeTruthy();
     expect(screen.getByLabelText('Release history')).toBeTruthy();
   });
+
+  it('shows and links an update target when its notes are unavailable', () => {
+    mockUseQuery.mockReturnValue({
+      data: [
+        {
+          version: '0.17.0',
+          summary: null,
+          highlights: [],
+          detailsMarkdown: '',
+          htmlUrl: 'https://github.com/RooCodeInc/Roomote/releases/tag/v0.17.0',
+        },
+      ],
+      isLoading: false,
+    });
+
+    render(
+      <ReleaseNotesDialog
+        open
+        onOpenChange={vi.fn()}
+        mode="update-available"
+        version="0.17.0"
+        runningVersion="0.16.0"
+      />,
+    );
+
+    expect(
+      screen.getByText(/Release notes for v0\.17\.0 are unavailable/),
+    ).toBeTruthy();
+    expect(
+      screen
+        .getByRole('link', { name: /Go to the release/ })
+        .getAttribute('href'),
+    ).toBe('https://github.com/RooCodeInc/Roomote/releases/tag/v0.17.0');
+    expect(screen.getByText('Latest')).toBeTruthy();
+  });
 });

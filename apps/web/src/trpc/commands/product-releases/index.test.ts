@@ -1,20 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const {
-  mockFindFirst,
-  mockRedisGet,
-  mockRedisSet,
-  mockFetch,
-  mockReadFile,
-  mockIsRoomoteCloudEnabled,
-} = vi.hoisted(() => ({
-  mockFindFirst: vi.fn(),
-  mockRedisGet: vi.fn(),
-  mockRedisSet: vi.fn(),
-  mockFetch: vi.fn(),
-  mockReadFile: vi.fn(),
-  mockIsRoomoteCloudEnabled: vi.fn((): boolean => false),
-}));
+const { mockFindFirst, mockFetch, mockReadFile, mockIsRoomoteCloudEnabled } =
+  vi.hoisted(() => ({
+    mockFindFirst: vi.fn(),
+    mockFetch: vi.fn(),
+    mockReadFile: vi.fn(),
+    mockIsRoomoteCloudEnabled: vi.fn((): boolean => false),
+  }));
 
 vi.mock('node:fs/promises', () => ({
   readFile: (...args: unknown[]) => mockReadFile(...args),
@@ -30,16 +22,6 @@ vi.mock('@roomote/db/server', () => ({
   },
   deploymentSettings: { id: 'id' },
   eq: (left: unknown, right: unknown) => ({ left, right }),
-}));
-
-vi.mock('@roomote/redis', () => ({
-  getRedis: () => ({
-    get: mockRedisGet,
-    set: mockRedisSet,
-  }),
-  REDIS_KEYS: { RELEASE_NOTES: 'release:notes' },
-  RELEASE_NOTES_CACHE_TTL_SECONDS: 100,
-  RELEASE_NOTES_NEGATIVE_CACHE_TTL_SECONDS: 10,
 }));
 
 vi.mock('@/lib/server/env', () => ({
@@ -98,8 +80,6 @@ describe('releases commands', () => {
       latestKnownVersion: '0.15.0',
       latestVersionCheckedAt: new Date('2026-07-20T00:00:00.000Z'),
     });
-    mockRedisGet.mockResolvedValue(null);
-    mockRedisSet.mockResolvedValue('OK');
     mockReadFile.mockResolvedValue(`# Changelog
 
 ## 0.17.0 (2026-07-22)
@@ -175,28 +155,17 @@ Previous release.
     });
   });
 
-  it('fetches and caches release notes for the running version', async () => {
-    mockFetch.mockResolvedValue({
-      ok: true,
-      status: 200,
-      json: async () => ({
-        tag_name: 'v0.14.0',
-        name: 'Roomote v0.14.0',
-        body: '## 0.14.0\n\nSummary here.\n\n### Highlights\n\n- One\n\n### Minor changes\n\n- Two\n',
-        html_url: 'https://github.com/RooCodeInc/Roomote/releases/tag/v0.14.0',
-      }),
-    });
-
+  it('reads release notes for the running version from the changelog', async () => {
     const notes = await getReleaseNotesCommand(memberAuth, {
       version: '0.14.0',
     });
 
     expect(notes).toMatchObject({
       version: '0.14.0',
-      summary: 'Summary here.',
-      highlights: ['One'],
+      summary: 'Oldest release.',
+      htmlUrl: 'https://github.com/RooCodeInc/Roomote/releases/tag/v0.14.0',
     });
-    expect(mockRedisSet).toHaveBeenCalled();
+    expect(mockFetch).not.toHaveBeenCalled();
   });
 
   it('returns changelog release history newest first through the running version', async () => {
@@ -216,7 +185,36 @@ Previous release.
       'utf8',
     );
     expect(mockFetch).not.toHaveBeenCalled();
-    expect(mockRedisSet).not.toHaveBeenCalled();
+  });
+
+  it('keeps a newer update target visible when its notes are absent locally', async () => {
+    mockReadFile.mockResolvedValue(`# Changelog
+
+## 0.14.0 (2026-07-19)
+
+Installed release.
+`);
+
+    const releases = await getReleaseHistoryCommand(adminAuth, {
+      version: '0.15.0',
+    });
+
+    expect(releases).toEqual([
+      {
+        version: '0.15.0',
+        tagName: 'v0.15.0',
+        title: 'Roomote v0.15.0',
+        summary: null,
+        highlights: [],
+        detailsMarkdown: '',
+        htmlUrl: 'https://github.com/RooCodeInc/Roomote/releases/tag/v0.15.0',
+      },
+      expect.objectContaining({
+        version: '0.14.0',
+        summary: 'Installed release.',
+      }),
+    ]);
+    expect(mockFetch).not.toHaveBeenCalled();
   });
 
   it('refuses notes for versions the caller cannot see', async () => {
@@ -226,12 +224,17 @@ Previous release.
     expect(mockFetch).not.toHaveBeenCalled();
   });
 
-  it('allows admins to fetch latest notes and returns null on cache miss + 404', async () => {
-    mockFetch.mockResolvedValue({ ok: false, status: 404 });
+  it('returns no notes when an allowed update is absent from the changelog', async () => {
+    mockReadFile.mockResolvedValue(`# Changelog
+
+## 0.14.0 (2026-07-19)
+
+Installed release.
+`);
 
     await expect(
       getReleaseNotesCommand(adminAuth, { version: '0.15.0' }),
     ).resolves.toBeNull();
-    expect(mockRedisSet).toHaveBeenCalled();
+    expect(mockFetch).not.toHaveBeenCalled();
   });
 });
