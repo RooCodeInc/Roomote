@@ -1,55 +1,67 @@
 import type { FastAgentTurnActivity } from '@roomote/cloud-agents/server';
+import {
+  normalizeSlackAgentSessionTitle,
+  syncSlackAgentSessionTitleBestEffort,
+} from './agent-session-title-sync';
 import type { SlackNotifier } from './slack-notifier';
 
 export const FAST_AGENT_SLACK_PROCESSING_DELAY_MS = 300;
-const SLACK_AGENT_SESSION_TITLE_MAX_CHARS = 200;
-
-function normalizeSessionTitle(title: string | null | undefined) {
-  return title?.trim()
-    ? title.slice(0, SLACK_AGENT_SESSION_TITLE_MAX_CHARS)
-    : undefined;
-}
 
 export function createFastAgentSlackSessionActivity({
   slack,
   channel,
   threadTs,
+  workspaceId,
   title,
+  resolveTitle,
+  syncTitle = syncSlackAgentSessionTitleBestEffort,
   delayMs = FAST_AGENT_SLACK_PROCESSING_DELAY_MS,
 }: {
   slack: Pick<SlackNotifier, 'renameAgentSession' | 'setAgentSessionStatus'>;
   channel: string;
   threadTs: string;
+  workspaceId: string;
   title?: string | null;
+  resolveTitle?: () => Promise<string | null | undefined>;
+  syncTitle?: typeof syncSlackAgentSessionTitleBestEffort;
   delayMs?: number;
 }): FastAgentTurnActivity {
-  let sessionTitle = normalizeSessionTitle(title);
-  let slackTitle: string | undefined;
+  let sessionTitle = normalizeSlackAgentSessionTitle(title);
   let processingTimer: ReturnType<typeof setTimeout> | undefined;
   let processingUpdate: Promise<void> | undefined;
+  let processingSucceeded = false;
   let titleUpdate = Promise.resolve();
   let settled = false;
 
-  const syncTitle = () => {
+  const queueTitleSync = (reportedTitle?: string) => {
+    const title = sessionTitle;
+    if (!processingSucceeded || !title) return titleUpdate;
+
     titleUpdate = titleUpdate.then(async () => {
-      if (
-        !sessionTitle ||
-        slackTitle === undefined ||
-        slackTitle === sessionTitle
-      ) {
-        return;
-      }
-      if (
-        await slack.renameAgentSession({
-          channel,
-          threadTs,
-          title: sessionTitle,
-        })
-      ) {
-        slackTitle = sessionTitle;
-      }
+      await syncTitle({
+        slack,
+        workspaceId,
+        channel,
+        threadTs,
+        title,
+        reportedTitle,
+        resolveTitle: resolveTitle ?? (async () => sessionTitle),
+      });
     });
     return titleUpdate;
+  };
+
+  const syncSettledTitle = async () => {
+    if (!settled || processingUpdate || !sessionTitle) return;
+    const response = await slack.setAgentSessionStatus({
+      channel,
+      threadTs,
+      status: 'active',
+    });
+    processingSucceeded = response.ok;
+    if (response.ok) {
+      await queueTitleSync(response.title);
+    }
   };
 
   return {
@@ -63,13 +75,10 @@ export function createFastAgentSlackSessionActivity({
             channel,
             threadTs,
             status: 'processing',
-            ...(sessionTitle ? { title: sessionTitle } : {}),
           });
+          processingSucceeded = response.ok;
           if (response.ok) {
-            slackTitle = response.title;
-            // Slack ignores setStatus.title after creation, so rename only
-            // when its response proves an existing session has another title.
-            await syncTitle();
+            await queueTitleSync(response.title);
           }
         })();
       }, delayMs);
@@ -83,24 +92,28 @@ export function createFastAgentSlackSessionActivity({
         clearTimeout(processingTimer);
         processingTimer = undefined;
       }
-      if (!processingUpdate) return;
+      if (!processingUpdate) {
+        await syncSettledTitle();
+        return;
+      }
 
       try {
         await processingUpdate;
-        await syncTitle();
+        await queueTitleSync();
       } finally {
         await slack.setAgentSessionStatus({
           channel,
           threadTs,
           status: 'active',
-          ...(sessionTitle ? { title: sessionTitle } : {}),
         });
       }
     },
     updateTitle(title) {
-      sessionTitle = normalizeSessionTitle(title);
+      sessionTitle = normalizeSlackAgentSessionTitle(title);
       if (processingUpdate) {
-        void processingUpdate.then(syncTitle);
+        void processingUpdate.then(() => queueTitleSync());
+      } else {
+        void syncSettledTitle();
       }
     },
   };
