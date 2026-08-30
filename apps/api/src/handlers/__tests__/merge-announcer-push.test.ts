@@ -64,6 +64,7 @@ describe('Merge announcer push normalization', () => {
     const get = vi.fn().mockResolvedValue({
       data: {
         number: 7,
+        html_url: 'https://github.com/acme/widgets/pull/7',
         title: 'Ship widget export',
         body: 'Adds the export and updates validation.',
         merged_at: '2026-08-29T12:00:00Z',
@@ -117,6 +118,7 @@ describe('Merge announcer push normalization', () => {
     });
     expect(enriched.pullRequest).toEqual({
       number: 7,
+      url: 'https://github.com/acme/widgets/pull/7',
       title: 'Ship widget export',
       body: 'Adds the export and updates validation.',
       changedFileCount: 24,
@@ -185,6 +187,7 @@ describe('Merge announcer push normalization', () => {
           get: vi.fn().mockResolvedValue({
             data: {
               number: 7,
+              html_url: 'https://github.com/acme/widgets/pull/7',
               title: 'Ship widget export',
               body: 'Detailed rationale',
               merged_at: '2026-08-29T12:00:00Z',
@@ -207,6 +210,7 @@ describe('Merge announcer push normalization', () => {
 
     expect(enriched.pullRequest).toEqual({
       number: 7,
+      url: 'https://github.com/acme/widgets/pull/7',
       title: 'Ship widget export',
       body: 'Detailed rationale',
       changedFileCount: 24,

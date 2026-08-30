@@ -56,6 +56,7 @@ type MergeAnnouncerCommit = {
 
 export type MergeAnnouncerPullRequestContext = {
   number: number;
+  url: string;
   title: string;
   body?: string | null;
   changedFileCount: number;
@@ -296,13 +297,14 @@ function buildMergeAnnouncerNotification(params: {
     MERGE_ANNOUNCER_SETTINGS_HASH,
   );
   const markdownNarrative = `**${params.pusher}** pushed ${commitLabel} to **${params.branch}** in **${params.repository.fullName}**.`;
-  const additionalActions = params.event.compareUrl
+  const changesUrl = params.event.pullRequest?.url ?? params.event.compareUrl;
+  const additionalActions = changesUrl
     ? [
         {
           type: 'button',
           action_id: 'merge_announcer_view_changes',
           text: { type: 'plain_text', text: 'View changes', emoji: false },
-          url: params.event.compareUrl,
+          url: changesUrl,
         },
       ]
     : [];
@@ -333,9 +335,7 @@ function buildMergeAnnouncerNotification(params: {
     markdownText: `${markdownNarrative}\n\n> ${summary}`,
     buttons: [
       [
-        ...(params.event.compareUrl
-          ? [{ text: 'View changes', url: params.event.compareUrl }]
-          : []),
+        ...(changesUrl ? [{ text: 'View changes', url: changesUrl }] : []),
         { text: 'Configure', url: configureUrl },
       ],
     ],
