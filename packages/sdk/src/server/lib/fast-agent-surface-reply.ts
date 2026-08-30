@@ -25,6 +25,7 @@ import {
 } from '@roomote/communication';
 import {
   createFastAgentSlackLiveTaskLauncher,
+  createFastAgentSlackSessionActivity,
   getSlackThreadReplyFooterMessageTs,
   postSlackThreadMessageWithFooterText,
   withSlackThreadReplyFooterLock,
@@ -111,7 +112,7 @@ export type FastAgentSurfaceReplyDelivery = {
   conversation: FastAgentConversation;
   adapter: Pick<
     FastAgentTurnAdapter,
-    'launchTask' | 'postReply' | 'replaceReply'
+    'activity' | 'launchTask' | 'postReply' | 'replaceReply'
   >;
 };
 
@@ -226,6 +227,12 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
     return {
       conversation,
       adapter: {
+        activity: createFastAgentSlackSessionActivity({
+          slack,
+          channel: conversation.replyTarget.channelId,
+          threadTs: conversation.replyTarget.threadId,
+          title: session.title,
+        }),
         launchTask: createFastAgentSlackLiveTaskLauncher({
           slack,
           userId: params.userId,

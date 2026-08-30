@@ -236,6 +236,81 @@ export class SlackNotifier {
     return this.client;
   }
 
+  public async setAgentSessionStatus({
+    channel,
+    threadTs,
+    status,
+    title,
+  }: {
+    channel: string;
+    threadTs: string;
+    status: 'active' | 'processing' | 'suspended' | 'closed';
+    title?: string;
+  }): Promise<{ ok: boolean; title?: string }> {
+    try {
+      const response = await this.getClient().apiCall(
+        'agents.sessions.setStatus',
+        {
+          channel_id: channel,
+          thread_ts: threadTs,
+          status,
+          ...(title ? { title } : {}),
+        },
+      );
+      if (response.ok) {
+        const responseTitle = (response as { title?: unknown }).title;
+        return {
+          ok: true,
+          ...(typeof responseTitle === 'string'
+            ? { title: responseTitle }
+            : {}),
+        };
+      }
+
+      console.warn(
+        `[setAgentSessionStatus] Slack rejected status=${status} channel=${channel} thread=${threadTs} error=${response.error ?? 'unknown_error'}`,
+      );
+      return { ok: false };
+    } catch (error) {
+      console.warn(
+        `[setAgentSessionStatus] Slack status=${status} failed for channel=${channel} thread=${threadTs}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      return { ok: false };
+    }
+  }
+
+  public async renameAgentSession({
+    channel,
+    threadTs,
+    title,
+  }: {
+    channel: string;
+    threadTs: string;
+    title: string;
+  }): Promise<boolean> {
+    try {
+      const response = await this.getClient().apiCall(
+        'agents.sessions.rename',
+        {
+          channel_id: channel,
+          thread_ts: threadTs,
+          title,
+        },
+      );
+      if (response.ok) return true;
+
+      console.warn(
+        `[renameAgentSession] Slack rejected channel=${channel} thread=${threadTs} error=${response.error ?? 'unknown_error'}`,
+      );
+      return false;
+    } catch (error) {
+      console.warn(
+        `[renameAgentSession] Slack rename failed for channel=${channel} thread=${threadTs}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      return false;
+    }
+  }
+
   private getChannelDiscovery(): SlackChannelDiscovery {
     if (!this.channelDiscovery) {
       this.channelDiscovery = new SlackChannelDiscovery(this.token);

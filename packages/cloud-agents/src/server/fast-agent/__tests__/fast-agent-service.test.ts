@@ -496,6 +496,24 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     });
   });
 
+  it('starts and settles surface activity around a successful turn', async () => {
+    const activity = {
+      start: vi.fn(),
+      settle: vi.fn().mockResolvedValue(undefined),
+    };
+
+    await answerFastAgentQuestion({
+      ...baseParams,
+      adapter: callbacks({ activity }),
+    });
+
+    expect(activity.start).toHaveBeenCalledOnce();
+    expect(activity.settle).toHaveBeenCalledOnce();
+    expect(activity.start.mock.invocationCallOrder[0]).toBeLessThan(
+      activity.settle.mock.invocationCallOrder[0]!,
+    );
+  });
+
   it('measures receipt to delivery and excludes assistant persistence', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(1_000);
@@ -3883,13 +3901,19 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
 
   it('rethrows native prompt failures for platform event retry', async () => {
     mocks.generateText.mockRejectedValue(new Error('OpenCode unavailable'));
+    const activity = {
+      start: vi.fn(),
+      settle: vi.fn().mockResolvedValue(undefined),
+    };
 
     await expect(
       answerFastAgentQuestion({
         ...baseParams,
         turnSource: 'platform_event',
-        adapter: callbacks(),
+        adapter: callbacks({ activity }),
       }),
     ).rejects.toThrow('OpenCode unavailable');
+    expect(activity.start).toHaveBeenCalledOnce();
+    expect(activity.settle).toHaveBeenCalledOnce();
   });
 });

@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   telegramPostMessage: vi.fn(),
   telegramEditMessage: vi.fn(),
   findTeamsConversationRoute: vi.fn(),
+  createActivity: vi.fn(() => ({ start: vi.fn(), settle: vi.fn() })),
   slackPostThreadMessage: vi.fn(),
   slackUpdateMessage: vi.fn(),
 }));
@@ -13,6 +14,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock('@roomote/slack', () => ({
   buildSlackThreadReplyFooterBlock: vi.fn(() => ({ type: 'context' })),
   createFastAgentSlackLiveTaskLauncher: vi.fn(() => vi.fn()),
+  createFastAgentSlackSessionActivity: mocks.createActivity,
   getSlackThreadReplyFooterMessageTs: vi.fn(async () => null),
   postSlackThreadMessageWithFooterText: mocks.slackPostThreadMessage,
   withSlackThreadReplyFooterLock: vi.fn(
@@ -54,6 +56,7 @@ import { buildFastAgentSurfaceReplyDelivery } from './fast-agent-surface-reply';
 async function createConversation(input: {
   userId: string;
   surface: 'web' | 'automation' | 'slack' | 'teams' | 'telegram';
+  title?: string;
   replyTarget?: { channelId: string; threadId?: string };
 }) {
   const [conversation] = await db
@@ -63,6 +66,7 @@ async function createConversation(input: {
       surface: input.surface,
       workspaceId: `workspace-${input.surface}-${Date.now()}`,
       conversationId: `conversation-${input.surface}-${Date.now()}`,
+      title: input.title ?? null,
       currentReplyChannelId: input.replyTarget?.channelId ?? null,
       currentReplyThreadId: input.replyTarget?.threadId ?? null,
     })
@@ -202,6 +206,7 @@ describe('buildFastAgentSurfaceReplyDelivery', () => {
     const conversation = await createConversation({
       userId: user.id,
       surface: 'slack',
+      title: 'Investigate Slack agent status',
       replyTarget: { channelId: 'C456', threadId: '1700000000.000200' },
     });
     await db.insert(slackInstallations).values({
@@ -228,6 +233,13 @@ describe('buildFastAgentSurfaceReplyDelivery', () => {
     await delivery!.adapter.replaceReply!(handle!, {
       purpose: 'closeout',
       message: 'Updated reply',
+    });
+
+    expect(mocks.createActivity).toHaveBeenCalledWith({
+      slack: expect.anything(),
+      channel: 'C456',
+      threadTs: '1700000000.000200',
+      title: 'Investigate Slack agent status',
     });
 
     await expect(

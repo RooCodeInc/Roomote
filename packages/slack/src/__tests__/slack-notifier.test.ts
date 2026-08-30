@@ -51,6 +51,64 @@ describe('SlackNotifier', () => {
     process.env.SLACK_API_BASE_URL = originalBaseUrl;
   });
 
+  describe('setAgentSessionStatus', () => {
+    it('sets a titled agent session status through the Web API', async () => {
+      apiCallMock.mockResolvedValue({
+        ok: true,
+        title: 'Investigate Slack agent status',
+      });
+
+      await expect(
+        notifier.setAgentSessionStatus({
+          channel: 'C123',
+          threadTs: '100.001',
+          status: 'processing',
+          title: 'Investigate Slack agent status',
+        }),
+      ).resolves.toEqual({
+        ok: true,
+        title: 'Investigate Slack agent status',
+      });
+
+      expect(apiCallMock).toHaveBeenCalledWith('agents.sessions.setStatus', {
+        channel_id: 'C123',
+        thread_ts: '100.001',
+        status: 'processing',
+        title: 'Investigate Slack agent status',
+      });
+    });
+
+    it('treats Slack status rejections as best-effort failures', async () => {
+      apiCallMock.mockResolvedValue({ ok: false, error: 'feature_disabled' });
+
+      await expect(
+        notifier.setAgentSessionStatus({
+          channel: 'C123',
+          threadTs: '100.001',
+          status: 'active',
+        }),
+      ).resolves.toEqual({ ok: false });
+    });
+
+    it('renames an existing agent session through the Web API', async () => {
+      apiCallMock.mockResolvedValue({ ok: true });
+
+      await expect(
+        notifier.renameAgentSession({
+          channel: 'C123',
+          threadTs: '100.001',
+          title: 'Investigate Slack agent status',
+        }),
+      ).resolves.toBe(true);
+
+      expect(apiCallMock).toHaveBeenCalledWith('agents.sessions.rename', {
+        channel_id: 'C123',
+        thread_ts: '100.001',
+        title: 'Investigate Slack agent status',
+      });
+    });
+  });
+
   describe('getDirectMessageUserId', () => {
     it('returns the user for a one-to-one direct message', async () => {
       getGlobalWithFetch().fetch = vi.fn().mockResolvedValue({

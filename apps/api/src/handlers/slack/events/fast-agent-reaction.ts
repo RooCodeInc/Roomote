@@ -18,6 +18,7 @@ import {
 import {
   buildSlackThreadReplyFooterBlock,
   createFastAgentSlackLiveTaskLauncher,
+  createFastAgentSlackSessionActivity,
   getSlackThreadReplyFooterMessageTs,
   type SlackReactionAddedEvent,
   withSlackThreadReplyFooterLock,
@@ -98,6 +99,12 @@ async function processFastAgentReaction(params: {
       platformEventVisibility: 'optional',
       platformEventTranscriptPayload: { externalInput: reactionInput },
       adapter: {
+        activity: createFastAgentSlackSessionActivity({
+          slack: context.slack,
+          channel: event.item.channel,
+          threadTs,
+          title: session.title,
+        }),
         resolveMcpServerConfigs: () =>
           resolveUserMcpServerConfigs({
             userId: session.userId,

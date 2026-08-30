@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({
   acquireLock: vi.fn(),
   answerQuestion: vi.fn(),
+  createActivity: vi.fn(() => ({ start: vi.fn(), settle: vi.fn() })),
   findSession: vi.fn(),
   getActiveTasks: vi.fn(),
   lookupUser: vi.fn(),
@@ -35,6 +36,7 @@ vi.mock('@roomote/sdk/server', () => ({
 vi.mock('@roomote/slack', () => ({
   buildSlackThreadReplyFooterBlock: vi.fn(() => ({ type: 'context' })),
   createFastAgentSlackLiveTaskLauncher: vi.fn(() => vi.fn()),
+  createFastAgentSlackSessionActivity: mocks.createActivity,
   getSlackThreadReplyFooterMessageTs: vi.fn(async () => null),
   withSlackThreadReplyFooterLock: vi.fn(
     async ({ fn }: { fn: () => Promise<unknown> }) => fn(),
@@ -64,6 +66,7 @@ describe('Fast Slack reaction input', () => {
     mocks.findSession.mockResolvedValue({
       id: 'session-1',
       userId: 'user-1',
+      title: 'Investigate Slack agent status',
       conversation: {
         surface: 'slack',
         workspaceId: 'T1',
@@ -102,6 +105,12 @@ describe('Fast Slack reaction input', () => {
     ).resolves.toBe(true);
 
     await vi.waitFor(() => expect(mocks.answerQuestion).toHaveBeenCalledOnce());
+    expect(mocks.createActivity).toHaveBeenCalledWith({
+      slack: expect.anything(),
+      channel: 'C1',
+      threadTs: '100.000',
+      title: 'Investigate Slack agent status',
+    });
     expect(mocks.findSession).toHaveBeenCalledWith({
       provider: 'slack',
       workspaceId: 'T1',

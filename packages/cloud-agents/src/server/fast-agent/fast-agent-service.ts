@@ -1148,6 +1148,14 @@ export async function answerFastAgentQuestion({
   };
 
   try {
+    adapter.activity?.start();
+  } catch (error) {
+    console.warn(
+      `[Fast Agent] Failed to start surface activity: ${formatErrorForLog(error)}`,
+    );
+  }
+
+  try {
     if (!platformEvent) {
       turnVisibleMessages.push(
         buildUserTextMessage(normalizeThreadText(question)),
@@ -1234,7 +1242,9 @@ export async function answerFastAgentQuestion({
       platformEvent ? false : userMessageResult?.initialHumanTurn,
     );
     if (!platformEvent) {
-      void refreshFastAgentSessionTitle({ sessionId: session.id, userId });
+      void refreshFastAgentSessionTitle({ sessionId: session.id, userId }).then(
+        (title) => adapter.activity?.updateTitle?.(title),
+      );
     }
     const sessionActiveTasks = await getActiveFastAgentTasks(session.id);
     const resolvedActiveTasks = [
@@ -2562,6 +2572,11 @@ export async function answerFastAgentQuestion({
         });
       }
     }
+    await adapter.activity?.settle().catch((error) => {
+      console.warn(
+        `[Fast Agent] Failed to settle surface activity: ${formatErrorForLog(error)}`,
+      );
+    });
     diagnostics.finish();
   }
 }

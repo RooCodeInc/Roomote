@@ -119,7 +119,7 @@ describe('refreshFastAgentSessionTitle', () => {
     });
     generateLlmTaskTitle.mockResolvedValue('Rotate the API keys');
 
-    await refreshFastAgentSessionTitle({
+    const refreshedTitle = await refreshFastAgentSessionTitle({
       sessionId: conversation.id,
       userId: user.id,
     });
@@ -133,6 +133,7 @@ describe('refreshFastAgentSessionTitle', () => {
     expect(updated?.title).toBe('Rotate the API keys');
     expect(updated?.llmTitleCheckpoint).toBe(1);
     expect(session?.title).toBe('Rotate the API keys');
+    expect(refreshedTitle).toBe('Rotate the API keys');
     expect(session?.llmTitleCheckpoint).toBe(1);
     expect(generateLlmTaskTitle).toHaveBeenCalledWith({
       userId: user.id,
