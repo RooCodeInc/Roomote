@@ -71,7 +71,7 @@ type PendingResponseAction =
   | {
       type: 'messages';
       messages: TranscriptMessage[];
-      newUserEventIds: ReadonlySet<string>;
+      newEventIds: ReadonlySet<string>;
     }
   | { type: 'optimistic'; message: TranscriptOrder }
   | { type: 'commitOptimistic'; optimisticId: string }
@@ -118,14 +118,17 @@ export function pendingResponseReducer(
       compareTranscriptMessages,
     )) {
       const pendingThreshold = pendingAfter ?? latestVisibleResponse;
+      const isNewMessage =
+        action.type === 'hydrate' || action.newEventIds.has(message.eventId);
       if (
         message.role === 'user' &&
+        isNewMessage &&
         (action.type === 'hydrate' ||
-          (action.newUserEventIds.has(message.eventId) &&
-            (pendingThreshold === null || message.ts >= pendingThreshold.ts)))
+          pendingThreshold === null ||
+          message.ts >= pendingThreshold.ts)
       ) {
         pendingAfter = message;
-      } else if (isVisibleResponseActivity(message)) {
+      } else if (isNewMessage && isVisibleResponseActivity(message)) {
         if (
           latestVisibleResponse === null ||
           compareTranscriptOrder(message, latestVisibleResponse) >= 0
@@ -251,9 +254,11 @@ export function FastSessionTranscript({
           messages: TranscriptMessage[];
         };
         const previous = serverMessagesRef.current;
-        const canonicalUserMessages = messages.filter(
-          (message) =>
-            message.role === 'user' && !previous.has(message.eventId),
+        const canonicalMessages = messages.filter(
+          (message) => !previous.has(message.eventId),
+        );
+        const canonicalUserMessages = canonicalMessages.filter(
+          (message) => message.role === 'user',
         );
         const next = new Map(previous);
         for (const message of messages) {
@@ -264,8 +269,8 @@ export function FastSessionTranscript({
         dispatchPendingResponse({
           type: 'messages',
           messages,
-          newUserEventIds: new Set(
-            canonicalUserMessages.map((message) => message.eventId),
+          newEventIds: new Set(
+            canonicalMessages.map((message) => message.eventId),
           ),
         });
 

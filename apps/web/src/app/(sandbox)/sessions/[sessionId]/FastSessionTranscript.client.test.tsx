@@ -222,7 +222,7 @@ describe('FastSessionTranscript', () => {
 
       const afterStaleOutput = pendingResponseReducer(hydrated, {
         type: 'messages',
-        newUserEventIds: new Set(),
+        newEventIds: new Set(),
         messages: [
           textMessage({
             id: 'stale-assistant',
@@ -237,7 +237,7 @@ describe('FastSessionTranscript', () => {
 
       const afterVisibleOutput = pendingResponseReducer(afterStaleOutput, {
         type: 'messages',
-        newUserEventIds: new Set(),
+        newEventIds: new Set(['assistant-1:event']),
         messages: [
           textMessage({
             id: 'assistant-1',
@@ -251,7 +251,7 @@ describe('FastSessionTranscript', () => {
 
       const afterStaleUserReplay = pendingResponseReducer(afterVisibleOutput, {
         type: 'messages',
-        newUserEventIds: new Set(),
+        newEventIds: new Set(),
         messages: [
           textMessage({
             id: 'stale-user',
@@ -264,7 +264,7 @@ describe('FastSessionTranscript', () => {
       expect(afterStaleUserReplay.pendingAfter).toBeNull();
     });
 
-    it('accepts a newly streamed user prompt that ties the latest response timestamp', () => {
+    it('keeps a tied new user pending when the same batch replays the latest response', () => {
       const latestResponse = textMessage({
         id: 'assistant-1',
         role: 'assistant',
@@ -284,8 +284,8 @@ describe('FastSessionTranscript', () => {
 
       const next = pendingResponseReducer(hydrated, {
         type: 'messages',
-        messages: [nextUser],
-        newUserEventIds: new Set([nextUser.eventId]),
+        messages: [nextUser, latestResponse],
+        newEventIds: new Set([nextUser.eventId]),
       });
 
       expect(next.pendingAfter?.id).toBe(nextUser.id);
@@ -323,7 +323,7 @@ describe('FastSessionTranscript', () => {
 
       const resolved = pendingResponseReducer(optimisticPending, {
         type: 'messages',
-        newUserEventIds: new Set(),
+        newEventIds: new Set(['assistant-1:event']),
         messages: [
           textMessage({
             id: 'assistant-1',
