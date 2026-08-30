@@ -274,6 +274,29 @@ describe('readBrainCorpus', () => {
     }
   });
 
+  it('sees a new page that shares the cached newest timestamp', async () => {
+    vi.useFakeTimers();
+    try {
+      // Two pages stamped with one timestamp, as a bulk import writes them.
+      let windows = [windowOf(0, 2, true)];
+      const fetchMock = vi.fn(async () => toolResponse(windows.shift() ?? []));
+      global.fetch = fetchMock as unknown as typeof fetch;
+
+      const first = await readBrainCorpus();
+      expect(first?.pages).toHaveLength(2);
+
+      // A third page lands with that same updated_at. A strict > query from
+      // the boundary would never return it.
+      vi.advanceTimersByTime(4_000);
+      windows = [windowOf(0, 3, true)];
+      const second = await readBrainCorpus();
+
+      expect(second?.pages).toHaveLength(3);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('serves the cached snapshot when a top-up fails', async () => {
     vi.useFakeTimers();
     try {
@@ -366,7 +389,9 @@ describe('readBrainCorpus', () => {
     expect(listedArguments(fetchMock)[0]).toMatchObject({
       limit: 100,
       sort: 'updated_asc',
-      updated_after: '2026-01-01T00:00:00.000Z',
+      // One millisecond before the stored newest row: the boundary's tie
+      // cluster is deliberately re-read.
+      updated_after: '2025-12-31T23:59:59.999Z',
     });
   });
 

@@ -222,7 +222,12 @@ async function topUpCachedCorpus(): Promise<void> {
       {
         limit: CORPUS_LISTING_WINDOW,
         sort: 'updated_asc',
-        updated_after: boundary.toISOString(),
+        // `updated_after` is a strict > filter, and bulk writes stamp one
+        // updated_at across a whole transaction — a new page sharing the
+        // boundary timestamp would be invisible to an exact query. Start one
+        // millisecond earlier so the boundary's tie cluster is re-read; the
+        // slug merge below makes the overlap free.
+        updated_after: new Date(boundary.getTime() - 1).toISOString(),
       },
       { timeoutMs: CORPUS_REQUEST_TIMEOUT_MS },
     );
@@ -230,6 +235,14 @@ async function topUpCachedCorpus(): Promise<void> {
 
     if (fresh.length === 0) {
       return;
+    }
+
+    // A saturated window means more changed than one call can see — new
+    // pages beyond the window, or a tie cluster wider than it. Mark the
+    // census due so the next read walks instead of trusting this partial
+    // merge for the rest of the TTL.
+    if (fresh.length >= CORPUS_LISTING_WINDOW) {
+      corpusCache.expiresAtMs = 0;
     }
 
     const merged = new Map(
