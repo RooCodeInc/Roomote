@@ -1229,6 +1229,7 @@ export async function answerFastAgentQuestion({
           // something a person typed — keep them out of the transcript view.
           visibleInTranscript: !platformEvent,
           turnSource,
+          ...(platformEvent ? { platformEventKind } : {}),
           userId,
           ...(senderDisplayName ? { userName: senderDisplayName } : {}),
           ...(senderDisplayName ? { senderDisplayName } : {}),
@@ -1242,7 +1243,7 @@ export async function answerFastAgentQuestion({
     diagnostics.recordInitialHumanTurn(
       platformEvent ? false : userMessageResult?.initialHumanTurn,
     );
-    if (!platformEvent) {
+    if (!platformEvent || platformEventKind === 'automation') {
       void refreshFastAgentSessionTitle({ sessionId: session.id, userId }).then(
         (title) => adapter.activity?.updateTitle?.(title),
       );
