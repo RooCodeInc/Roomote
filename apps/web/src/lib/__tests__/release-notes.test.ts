@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { parseReleaseBody } from '../release-notes';
+import { parseProductReleaseHistory, parseReleaseBody } from '../release-notes';
 
 describe('parseReleaseBody', () => {
   it('parses summary, highlights, and remaining details', () => {
@@ -72,5 +72,45 @@ Ship in-app release notices for self-host admins and all users.
       highlights: [],
       detailsMarkdown: '',
     });
+  });
+});
+
+describe('parseProductReleaseHistory', () => {
+  it('parses the prepended product release sections in changelog order', () => {
+    const releases = parseProductReleaseHistory(`# Changelog
+
+Release entries are prepended.
+
+## 0.16.0 (2026-07-21)
+
+Current release.
+
+### Highlights
+
+- Current highlight
+
+## v0.15.0 (2026-07-20)
+
+Previous release.
+
+### Patch changes
+
+- Previous fix
+`);
+
+    expect(releases).toEqual([
+      {
+        version: '0.16.0',
+        summary: 'Current release.',
+        highlights: ['Current highlight'],
+        detailsMarkdown: '',
+      },
+      {
+        version: '0.15.0',
+        summary: 'Previous release.',
+        highlights: [],
+        detailsMarkdown: '### Patch changes\n\n- Previous fix',
+      },
+    ]);
   });
 });
