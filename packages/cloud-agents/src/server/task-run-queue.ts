@@ -105,6 +105,26 @@ enum TaskRunQueueKeys {
 
 const SNAPSHOT_RESUME_ADVISORY_LOCK_NAMESPACE = 0x52534d45;
 
+/** True when the error (or any of its causes) is a Postgres deadlock (40P01). */
+function isPostgresDeadlockError(error: unknown): boolean {
+  let current: unknown = error;
+  for (let depth = 0; depth < 5 && current; depth += 1) {
+    if (
+      typeof current === 'object' &&
+      current !== null &&
+      'code' in current &&
+      (current as { code?: unknown }).code === '40P01'
+    ) {
+      return true;
+    }
+    current =
+      typeof current === 'object' && current !== null && 'cause' in current
+        ? (current as { cause?: unknown }).cause
+        : undefined;
+  }
+  return false;
+}
+
 export class SnapshotResumeAlreadyExistsError extends Error {
   constructor(public readonly existingRunId: number) {
     super(`Snapshot resume run ${existingRunId} already exists.`);
@@ -1538,10 +1558,22 @@ async function enqueueFreshLaunch(
     githubUserId: 'githubUserId' in task ? task.githubUserId : null,
   };
 
+  const fastParent = getFastAgentParentFromPayload(
+    taskWithHarnessOverrides.payload,
+  );
+
   // Fresh runs are persisted atomically with either a new task or the existing
   // durable task they continue.
-  const { taskRun, createdRun, reusedTask } = await db.transaction(
-    async (tx) => {
+  const runPersistTransaction = () =>
+    db.transaction(async (tx) => {
+      if (fastParent) {
+        // Parallel launch_task calls from one Fast turn write the same
+        // session and conversation rows; serializing per parent conversation
+        // prevents lock-order deadlocks (40P01) between them.
+        await tx.execute(
+          sql`select pg_advisory_xact_lock(hashtextextended(${`fast-parent-launch:${fastParent.sessionId}`}, 0))`,
+        );
+      }
       const chatgptConnected = effectiveTaskModel.startsWith('openai/')
         ? await isChatGptSubscriptionConnected(tx)
         : false;
@@ -1695,9 +1727,6 @@ async function enqueueFreshLaunch(
         taskId = createdTask.id;
       }
 
-      const fastParent = getFastAgentParentFromPayload(
-        taskWithHarnessOverrides.payload,
-      );
       await ensureSessionForTask(tx, {
         taskId,
         fastConversationId: fastParent?.sessionId ?? null,
@@ -1818,8 +1847,25 @@ async function enqueueFreshLaunch(
         createdRun: true,
         reusedTask: Boolean(existingTask),
       };
-    },
-  );
+    });
+
+  let persisted: Awaited<ReturnType<typeof runPersistTransaction>>;
+  try {
+    persisted = await runPersistTransaction();
+  } catch (error) {
+    if (!isPostgresDeadlockError(error)) {
+      throw error;
+    }
+    // The aborted transaction persisted nothing, so one retry is safe and
+    // absorbs any remaining lock-order conflict with an unrelated writer.
+    console.warn(
+      `[task-run-queue] Retrying task persistence after a deadlock: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+    persisted = await runPersistTransaction();
+  }
+  const { taskRun, createdRun, reusedTask } = persisted;
 
   if (!createdRun) {
     return taskRun;
