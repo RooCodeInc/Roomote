@@ -298,6 +298,16 @@ function buildIntegrationCallSignature({
 
 export const FAST_AGENT_INFERENCE_MAX_RETRIES = INFERENCE_PROVIDER_MAX_RETRIES;
 export const FAST_AGENT_TRANSIENT_INFERENCE_MAX_RETRIES = 6;
+// Matches the standard-task recovery delay ceiling so a single Fast failure
+// burst gets a comparable bounded backoff window (~63-76s with jitter).
+const FAST_AGENT_RETRYABLE_INFERENCE_MAX_DELAY_MS = 60_000;
+// Recoveries shorter than this stay silent, like standard-task recovery that
+// never posts retry chatter to the user's chat surface. A notice appears only
+// when the user is about to wait longer than this without any progress.
+const FAST_AGENT_SILENT_RECOVERY_WINDOW_MS = 30_000;
+// Progress-based budget resets are bounded so one turn cannot retry forever:
+// this caps total automatic retries across every reset within a single turn.
+export const FAST_AGENT_MAX_INFERENCE_RETRIES_PER_TURN = 12;
 const FAST_AGENT_INFERENCE_RETRY_ATTEMPT_TIMEOUT_MS = 5 * 60_000;
 const FAST_AGENT_TRANSIENT_RETRY_JITTER_RATIO = 0.2;
 const FAST_AGENT_PROVIDER_RECOVERY_PROMPT =
@@ -317,6 +327,14 @@ type FastAgentInferenceRetryNotice = {
 type FastAgentInferenceRetryOptions = {
   canRetry?: (error: unknown, failure: FastAgentInferenceFailure) => boolean;
   prepareRetry?: () => Promise<void> | void;
+  /**
+   * Consume forward progress made since the previous failure. Returning true
+   * grants a fresh bounded retry budget, mirroring how standard-task provider
+   * recovery resets after every completed turn. Callers must only return true
+   * when the next retry continues the same session, so completed side effects
+   * are never replayed with the refreshed budget.
+   */
+  consumeRetryBudgetReset?: () => boolean;
   signal?: AbortSignal;
 };
 
@@ -336,14 +354,12 @@ class FastAgentInferenceError extends Error {
 function resolveFastAgentInferenceMaxRetries(
   failure: FastAgentInferenceFailure,
 ): number {
-  switch (failure.reason) {
-    case 'endpoint_unreachable':
-    case 'gateway_blocked':
-    case 'timeout':
-      return FAST_AGENT_TRANSIENT_INFERENCE_MAX_RETRIES;
-    default:
-      return FAST_AGENT_INFERENCE_MAX_RETRIES;
-  }
+  // Rate limits keep the shared Retry-After governed budget. Every other
+  // retryable failure gets the standard-task-sized budget so Fast stops
+  // giving up on transient provider errors that coding tasks recover from.
+  return failure.reason === 'rate_limited'
+    ? FAST_AGENT_INFERENCE_MAX_RETRIES
+    : FAST_AGENT_TRANSIENT_INFERENCE_MAX_RETRIES;
 }
 
 function resolveFastAgentInferenceRetryDelayMs(
@@ -351,21 +367,22 @@ function resolveFastAgentInferenceRetryDelayMs(
   failure: FastAgentInferenceFailure,
   retryNumber: number,
 ): number {
+  const rateLimited = failure.reason === 'rate_limited';
   const delayMs = resolveInferenceProviderRetryDelayMs({
     error,
     attemptNumber: retryNumber,
-    rateLimited: failure.reason === 'rate_limited',
+    rateLimited,
+    ...(rateLimited
+      ? {}
+      : { maxDelayMs: FAST_AGENT_RETRYABLE_INFERENCE_MAX_DELAY_MS }),
   });
 
-  if (
-    resolveFastAgentInferenceMaxRetries(failure) ===
-    FAST_AGENT_INFERENCE_MAX_RETRIES
-  ) {
+  if (rateLimited) {
     return delayMs;
   }
 
   // Positive jitter spreads concurrent recovery attempts without shortening
-  // the 61-second base backoff window. Six retries remain bounded below 75s.
+  // the base backoff window. Six retries remain bounded below 76 seconds.
   return Math.round(
     delayMs * (1 + Math.random() * FAST_AGENT_TRANSIENT_RETRY_JITTER_RATIO),
   );
@@ -452,6 +469,7 @@ async function runFastAgentInferenceWithRetries<T>(
   onRetry?: (notice: FastAgentInferenceRetryNotice) => Promise<void>,
   options: FastAgentInferenceRetryOptions = {},
 ): Promise<T> {
+  let totalRetryCount = 0;
   for (let retryNumber = 0; ; retryNumber += 1) {
     try {
       options.signal?.throwIfAborted();
@@ -464,15 +482,27 @@ async function runFastAgentInferenceWithRetries<T>(
       }
 
       const failure = classifyNonTaskInferenceError(error);
+      if (
+        failure.retryable &&
+        totalRetryCount < FAST_AGENT_MAX_INFERENCE_RETRIES_PER_TURN &&
+        options.consumeRetryBudgetReset?.() === true
+      ) {
+        // The failed attempt made real forward progress that the next warm
+        // continuation preserves, so grant a fresh bounded budget the same
+        // way standard-task recovery resets after each completed turn.
+        retryNumber = 0;
+      }
       const maxRetries = resolveFastAgentInferenceMaxRetries(failure);
       if (
         !failure.retryable ||
         options.canRetry?.(error, failure) === false ||
-        retryNumber >= maxRetries
+        retryNumber >= maxRetries ||
+        totalRetryCount >= FAST_AGENT_MAX_INFERENCE_RETRIES_PER_TURN
       ) {
         throw new FastAgentInferenceError(failure, error);
       }
 
+      totalRetryCount += 1;
       const attemptNumber = retryNumber + 1;
       const delayMs = resolveFastAgentInferenceRetryDelayMs(
         error,
@@ -829,6 +859,27 @@ export async function answerFastAgentQuestion({
     | { eventId: string; turnSeq: number }
     | undefined;
   let inferenceRetryAttempted = false;
+  // Anchors the silent-recovery window: set on the first retry signal of a
+  // continuous no-progress stretch, cleared whenever the provider makes
+  // visible progress again (completed message or successful attempt).
+  let inferenceRecoveryEpisodeStartedAt: number | undefined;
+  // Notice texts already shown during the current recovery episode. Cleared
+  // with the episode anchor so a later distinct episode in the same turn can
+  // surface an identical notice again.
+  const reportedInferenceNotices = new Set<string>();
+  const noteInferenceRecoveryProgress = () => {
+    inferenceRecoveryEpisodeStartedAt = undefined;
+    reportedInferenceNotices.clear();
+    // Deliberately leave inferenceRetryReply and inferenceRetryCanonicalEvent
+    // alone: the notice slot is owned by the replacement paths (real reply,
+    // terminal closeout, abort), and releasing it here would orphan a posted
+    // notice and let next-turn reconciliation rewrite it as interrupted.
+  };
+  // Incremented on every completed OpenCode message and native tool call so
+  // the retry loop can distinguish attempts that advanced the turn from
+  // attempts that failed without any recoverable progress.
+  let turnProgressMarker = 0;
+  let consumedProgressMarker = 0;
   let activeOpenCodeSessionId: string | null = null;
   let completedOpenCodeMessage: NonTaskOpenCodeCompletedMessage | null = null;
   let nextAssistantOrdinal = 0;
@@ -1297,12 +1348,23 @@ export async function answerFastAgentQuestion({
       }
     };
 
-    const reportedInferenceNotices = new Set<string>();
     const reportInferenceRetry = async (
       notice: FastAgentInferenceRetryNotice,
     ) => {
       inferenceRetryAttempted = true;
       if (platformEvent) {
+        return;
+      }
+
+      // Stay silent while recovery is short enough that a standard task
+      // would absorb it invisibly. A notice is only worth interrupting the
+      // user for when the pending wait pushes the continuous no-progress
+      // stretch past the silent window.
+      const now = Date.now();
+      inferenceRecoveryEpisodeStartedAt ??= now;
+      const projectedRecoveryMs =
+        now - inferenceRecoveryEpisodeStartedAt + (notice.delayMs ?? 0);
+      if (projectedRecoveryMs < FAST_AGENT_SILENT_RECOVERY_WINDOW_MS) {
         return;
       }
 
@@ -1388,6 +1450,7 @@ export async function answerFastAgentQuestion({
         const ownershipError = requireLockOwnership();
         if (ownershipError) return ownershipError;
         nativeToolInvoked = true;
+        turnProgressMarker += 1;
 
         if (platformEventHandling === 'present_only') {
           return {
@@ -1504,6 +1567,7 @@ export async function answerFastAgentQuestion({
         const ownershipError = requireLockOwnership();
         if (ownershipError) return ownershipError;
         nativeToolInvoked = true;
+        turnProgressMarker += 1;
 
         if (
           platformEventHandling === 'present_only' &&
@@ -2159,6 +2223,11 @@ export async function answerFastAgentQuestion({
                       },
                       onMessageCompleted: (message) => {
                         completedOpenCodeMessage = message;
+                        // A completed assistant message is provider progress:
+                        // it restarts the silent-recovery window and lets a
+                        // later failure earn a refreshed retry budget.
+                        turnProgressMarker += 1;
+                        noteInferenceRecoveryProgress();
                       },
                       onPromptStarted: () => {
                         promptStarted = true;
@@ -2210,6 +2279,7 @@ export async function answerFastAgentQuestion({
                     },
                   );
                 const result = await resultPromise;
+                noteInferenceRecoveryProgress();
                 captureFastAgentInferenceAttemptOutcome({
                   userId,
                   sessionId: session.id,
@@ -2282,6 +2352,21 @@ export async function answerFastAgentQuestion({
                 (!nativeToolInvoked || openCodeSession.id !== undefined) &&
                 !isNonTaskOpenCodePromptTimeoutError(error) &&
                 !isNonTaskOpenCodeSessionValidationError(error),
+              // Grant a fresh bounded budget only when the failed attempt
+              // advanced the turn and the next retry continues the same
+              // OpenCode session. Cold rebuilds replay from scratch, so
+              // resetting there could loop on the same later failure.
+              consumeRetryBudgetReset: () => {
+                if (turnProgressMarker === consumedProgressMarker) {
+                  return false;
+                }
+                consumedProgressMarker = turnProgressMarker;
+                if (!nativeToolInvoked || openCodeSession.id === undefined) {
+                  return false;
+                }
+                noteInferenceRecoveryProgress();
+                return true;
+              },
               prepareRetry: () => {
                 if (nativeToolInvoked && openCodeSession.id) {
                   promptForAttempt = FAST_AGENT_PROVIDER_RECOVERY_PROMPT;
