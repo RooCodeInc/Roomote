@@ -1,7 +1,10 @@
 import { render } from '@testing-library/react';
 
 let accountCapabilities:
-  | { canChangePassword: boolean; canSetPassword: boolean }
+  | {
+      canChangePassword: boolean;
+      canSetPassword: boolean;
+    }
   | undefined = {
   canChangePassword: true,
   canSetPassword: false,
@@ -41,7 +44,10 @@ import { PersonalSettingsRoute } from './PersonalSettingsRoute';
 
 describe('PersonalSettingsRoute', () => {
   beforeEach(() => {
-    accountCapabilities = { canChangePassword: true, canSetPassword: false };
+    accountCapabilities = {
+      canChangePassword: true,
+      canSetPassword: false,
+    };
     personalSettingsPageMock.mockClear();
   });
 

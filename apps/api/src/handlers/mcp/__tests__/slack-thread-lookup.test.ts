@@ -95,6 +95,7 @@ vi.mock('@roomote/redis', () => ({
 import { db } from '@roomote/db/server';
 import { mcpAuthMiddleware } from '../middleware';
 import { slackMcp } from '../slack';
+import { getSlackReplyTarget } from '../slack-thread-lookup';
 
 type JsonBody = {
   error?: string;
@@ -159,6 +160,21 @@ function mockSlackTaskRun(
     ...overrides,
   };
 }
+
+describe('getSlackReplyTarget', () => {
+  it('prefers the per-run payload target for snapshot resumes', () => {
+    expect(
+      getSlackReplyTarget(
+        {
+          slackChannelId: 'C_SOURCE',
+          slackThreadTs: '111.222',
+          payload: { channel: 'C_ALERT', thread_ts: '333.444' },
+        },
+        { preferPayload: true },
+      ),
+    ).toEqual({ channel: 'C_ALERT', threadTs: '333.444' });
+  });
+});
 
 describe('slack thread lookup MCP endpoint', () => {
   const runToken: RunTokenContext = {

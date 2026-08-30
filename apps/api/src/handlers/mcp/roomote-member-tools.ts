@@ -1,75 +1,50 @@
-import { Hono } from 'hono';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 
-import { ALL_REPOSITORIES, PRODUCT_NAME } from '@roomote/types';
+import {
+  ALL_REPOSITORIES,
+  PRODUCT_NAME,
+  ROOMOTE_TASK_INSPECTION_ACTIONS,
+  roomoteTaskInspectionFieldSchemas,
+} from '@roomote/types';
 
-import type { Variables } from '../../types';
 import { environmentsRouter } from '../environments';
 import { tasksRouter } from '../tasks';
+import {
+  invokeInProcessApi,
+  toolError,
+  toolResultFromApi as resultFromApi,
+  type InProcessApiResult,
+} from './in-process-api';
 import type { McpAuth } from './middleware';
 import { toMcpToolResult } from './proxy-utils';
 
-type MemberApiResult = {
-  ok: boolean;
-  status: number;
-  payload: Record<string, unknown>;
-};
-
-function toolError(payload: Record<string, unknown>) {
-  return { ...toMcpToolResult(payload), isError: true as const };
-}
-
-async function invokeMemberApi(
+function invokeMemberApi(
   auth: McpAuth,
   path: string,
   init?: RequestInit,
-): Promise<MemberApiResult> {
-  const app = new Hono<{
-    Variables: Variables & { mcpAuth: McpAuth };
-  }>();
-  app.use('*', async (c, next) => {
-    c.set('authContext', auth.authContext);
-    c.set('mcpAuth', auth);
-    await next();
+): Promise<InProcessApiResult> {
+  return invokeInProcessApi({
+    auth,
+    mount: (app) => {
+      app.route('/tasks', tasksRouter);
+      app.route('/environments', environmentsRouter);
+    },
+    path,
+    init,
   });
-  app.route('/tasks', tasksRouter);
-  app.route('/environments', environmentsRouter);
-
-  const response = await app.request(`http://roomote.internal${path}`, init);
-  const rawPayload: unknown = await response.json();
-  const payload =
-    rawPayload && typeof rawPayload === 'object' && !Array.isArray(rawPayload)
-      ? (rawPayload as Record<string, unknown>)
-      : { result: rawPayload };
-
-  return { ok: response.ok, status: response.status, payload };
-}
-
-function resultFromApi(result: MemberApiResult) {
-  return result.ok
-    ? toMcpToolResult(result.payload)
-    : toolError({ status: result.status, ...result.payload });
 }
 
 const manageTasksInputSchema = {
   action: z.enum([
-    'search',
-    'get_summary',
-    'get_compute_logs',
-    'get_messages',
+    ...ROOMOTE_TASK_INSPECTION_ACTIONS,
     'launch',
     'cancel',
     'send_message',
     'list_environments',
   ]),
-  taskId: z.string().optional(),
+  ...roomoteTaskInspectionFieldSchemas,
   message: z.string().optional(),
-  query: z.string().optional(),
-  status: z.enum(['active', 'completed', 'all']).optional(),
-  pullRequest: z.string().optional(),
-  limit: z.number().int().min(1).max(1000).optional(),
-  cursor: z.string().optional(),
   prompt: z.string().optional(),
   environmentId: z.string().optional(),
   branch: z.string().optional(),
@@ -86,7 +61,7 @@ export function registerRoomoteMemberTools(
       title: 'Manage Tasks',
       description:
         `Manage ${PRODUCT_NAME} tasks as the signed-in member. ` +
-        'Use list_environments immediately before launch, search for task history, inspect summaries/messages/compute logs, launch tasks, cancel active tasks, or send follow-up messages.',
+        'Use list_environments immediately before launch, search for task history, inspect summaries/messages/compute logs, launch tasks, cancel active tasks, or send follow-up messages. For get_messages and send_message, taskId may be either a task ID or a canonical Fast session ID.',
       inputSchema: manageTasksInputSchema,
       annotations: {
         readOnlyHint: false,

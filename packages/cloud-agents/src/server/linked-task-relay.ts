@@ -1,15 +1,21 @@
 import {
   db,
+  desc,
   eq,
   findReusableGitHubPrFollowUpOwner,
   getReviewCodeAutomationSettings,
+  taskRuns,
   tasks,
 } from '@roomote/db/server';
-import { type PrReviewSettings } from '@roomote/types';
+import {
+  getFastAgentParentFromPayload,
+  type PrReviewSettings,
+} from '@roomote/types';
 
 export type LinkedTaskRelayState = {
   linkedTaskId: string | null;
   relayEnabled: boolean;
+  handoffTarget?: 'fast_parent' | 'implementation_task';
   ownerLookupPending?: true;
 };
 
@@ -43,13 +49,6 @@ export async function getLinkedTaskRelayState({
   const settings =
     reviewerSettings ?? (await getReviewCodeAutomationSettings());
 
-  if (!settings.relayReviewResultsToTask) {
-    return {
-      linkedTaskId: null,
-      relayEnabled: false,
-    };
-  }
-
   const linkedTaskOwner = await findReusableGitHubPrFollowUpOwner({
     repoFullName: repository,
     prNumber,
@@ -79,18 +78,35 @@ export async function getLinkedTaskRelayState({
     };
   }
 
+  const latestRun = await db.query.taskRuns.findFirst({
+    where: eq(taskRuns.taskId, linkedTask.id),
+    orderBy: [desc(taskRuns.createdAt)],
+    columns: { payload: true },
+  });
+  const hasFastParent = Boolean(
+    getFastAgentParentFromPayload(latestRun?.payload),
+  );
+
   if (!linkedTask.initiatorUserId) {
     return {
       linkedTaskId: linkedTask.id,
-      relayEnabled: false,
+      relayEnabled: hasFastParent,
+      ...(hasFastParent ? { handoffTarget: 'fast_parent' as const } : {}),
     };
   }
 
+  const creatorRelayEnabled =
+    settings.relayReviewResultsToTask === true &&
+    getRelayEligibleCreatorIds(settings).has(linkedTask.initiatorUserId);
+
   return {
     linkedTaskId: linkedTask.id,
-    relayEnabled: getRelayEligibleCreatorIds(settings).has(
-      linkedTask.initiatorUserId,
-    ),
+    relayEnabled: hasFastParent || creatorRelayEnabled,
+    ...(hasFastParent
+      ? { handoffTarget: 'fast_parent' as const }
+      : creatorRelayEnabled
+        ? { handoffTarget: 'implementation_task' as const }
+        : {}),
   };
 }
 

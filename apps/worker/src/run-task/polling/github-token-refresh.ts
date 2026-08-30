@@ -14,6 +14,32 @@ const DEFAULT_GITHUB_TOKEN_REFRESH_INTERVAL_MS = 45 * 60 * 1000;
 interface GitHubTokenRefreshOptions {
   runId: number;
   logger: Pick<HarnessLogger, 'info' | 'error'>;
+  initialExpiresAt?: Date | string | null;
+}
+
+function getRefreshAtMs(expiresAt: Date | string | null | undefined): number {
+  if (!expiresAt) {
+    return Date.now();
+  }
+
+  const expiresAtMs =
+    expiresAt instanceof Date ? expiresAt.getTime() : Date.parse(expiresAt);
+  if (Number.isNaN(expiresAtMs)) {
+    return Date.now();
+  }
+
+  const now = Date.now();
+  const remainingMs = expiresAtMs - now;
+  const refreshBufferMs =
+    remainingMs > 0 ? Math.min(5 * 60 * 1000, remainingMs / 4) : 5 * 60 * 1000;
+
+  return Math.max(
+    now,
+    Math.min(
+      now + DEFAULT_GITHUB_TOKEN_REFRESH_INTERVAL_MS,
+      expiresAtMs - refreshBufferMs,
+    ),
+  );
 }
 
 export async function refreshGitHubToken({
@@ -70,7 +96,7 @@ export async function refreshGitHubToken({
 export function createGitHubTokenRefreshInterval(
   options: GitHubTokenRefreshOptions,
 ): NodeJS.Timeout {
-  let nextRefreshAtMs = Date.now();
+  let nextRefreshAtMs = getRefreshAtMs(options.initialExpiresAt);
   let refreshInFlight = false;
 
   const tick = async () => {
@@ -95,8 +121,9 @@ export function createGitHubTokenRefreshInterval(
     }
   };
 
-  // Refresh once immediately so long workspace preparation time does not
-  // consume most of the token window before runtime polling starts.
+  // Legacy dequeue responses without expiry metadata still refresh
+  // immediately. Current responses reuse the bootstrap credential until the
+  // normal pre-expiry refresh window.
   void tick();
 
   return setInterval(() => {

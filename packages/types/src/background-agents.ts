@@ -10,6 +10,23 @@ export type AnnouncerFrequency = 'off' | 'daily' | 'weekly';
 
 export type ManagerStatsFrequency = 'off' | 'weekly';
 
+export type ProviderUsageLimitFrequency = 'off' | 'every_hour';
+
+export const DEFAULT_PROVIDER_USAGE_LIMIT_FREQUENCY: ProviderUsageLimitFrequency =
+  'every_hour';
+export const DEFAULT_PROVIDER_USAGE_LIMIT_THRESHOLD = 85;
+export const PROVIDER_USAGE_LIMIT_THRESHOLDS = [
+  5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90, 95,
+] as const;
+export type ProviderUsageLimitThreshold =
+  (typeof PROVIDER_USAGE_LIMIT_THRESHOLDS)[number];
+
+export function isProviderUsageLimitThreshold(
+  value: number,
+): value is ProviderUsageLimitThreshold {
+  return (PROVIDER_USAGE_LIMIT_THRESHOLDS as readonly number[]).includes(value);
+}
+
 export type SentryTriageFrequency = 'off' | 'daily' | 'weekly';
 
 export type DependabotTriageFrequency = 'off' | 'daily' | 'weekly';
@@ -51,6 +68,13 @@ export type CustomAutomationScheduleMode =
   | ScheduleOnlyBackgroundAutomationFrequency
   | 'cron';
 
+export const CUSTOM_AUTOMATION_EXECUTION_MODES = [
+  'sandbox_task',
+  'fast',
+] as const;
+export type CustomAutomationExecutionMode =
+  (typeof CUSTOM_AUTOMATION_EXECUTION_MODES)[number];
+
 export const MAX_CUSTOM_AUTOMATIONS = 25;
 
 export const CUSTOM_AUTOMATION_NAME_MAX_LENGTH = 100;
@@ -71,6 +95,8 @@ export type CiFailureTriageFrequency = 'off' | 'daily';
 
 export type IssueFixerFrequency = 'off' | 'daily';
 
+export type MergeAnnouncerFrequency = 'off' | 'daily';
+
 /**
  * User-facing automations shown on the Automations settings page. Each key is
  * the canonical snake_case identifier used everywhere: the automations table
@@ -84,10 +110,11 @@ export const USER_FACING_AUTOMATION_KEYS = [
   'call_roomote_via_emoji',
   // Channel auto-start for ALL chat providers (Slack + Discord targets live in
   // this one row, distinguished by target provider/targetKind). The key keeps
-  // its historical Slack-only name because renaming an automations primary key
+  // its historical Slack-only name because renaming an automation's primary key
   // would break the N-1 rollback release.
   'slack_channel_auto_start',
   'manager_stats',
+  'provider_usage_limit',
   'platform_issue_alerts',
   'sentry_triage',
   'dependabot_triage',
@@ -96,6 +123,7 @@ export const USER_FACING_AUTOMATION_KEYS = [
   'security_auditor',
   'code_quality_auditor',
   'ci_failure_triage',
+  'merge_announcer',
 ] as const;
 
 /**
@@ -161,6 +189,41 @@ export function isBackgroundAutomationUserTargetKind(
     value === 'teams_user' ||
     value === 'telegram_user' ||
     value === 'discord_user'
+  );
+}
+
+export const communicationAutomationTargetKinds = {
+  slack: { channel: 'slack_channel', direct_message: 'slack_user' },
+  discord: { channel: 'discord_channel', direct_message: 'discord_user' },
+  teams: { channel: 'teams_channel', direct_message: 'teams_user' },
+  telegram: { channel: 'telegram_chat', direct_message: 'telegram_user' },
+} as const satisfies Record<
+  CommunicationProvider,
+  Record<'channel' | 'direct_message', BackgroundAutomationTargetKind>
+>;
+
+export function getCommunicationAutomationTargetKind(
+  provider: CommunicationProvider,
+  mode: 'channel' | 'direct_message',
+): BackgroundAutomationTargetKind {
+  return communicationAutomationTargetKinds[provider][mode];
+}
+
+export function isCommunicationAutomationTarget(
+  target: Pick<AutomationTarget, 'provider' | 'targetKind'>,
+): target is Pick<AutomationTarget, 'provider' | 'targetKind'> & {
+  provider: CommunicationProvider;
+} {
+  if (!(target.provider in communicationAutomationTargetKinds)) {
+    return false;
+  }
+  const kinds =
+    communicationAutomationTargetKinds[
+      target.provider as CommunicationProvider
+    ];
+  return (
+    target.targetKind === kinds.channel ||
+    target.targetKind === kinds.direct_message
   );
 }
 
@@ -279,6 +342,18 @@ export const SCHEDULE_ONLY_BACKGROUND_AUTOMATIONS = {
     requiresManagerChannel: true,
     suggestionSource: 'issue_fixer',
   },
+  mergeAnnouncer: {
+    id: 'mergeAnnouncer',
+    label: 'Merge announcer',
+    hashAliases: ['merge-announcer', 'mergeannouncer'],
+    automationKey: 'merge_announcer',
+    frequencyField: 'mergeAnnouncerFrequency',
+    lastRunAtField: 'mergeAnnouncerLastRunAt',
+    scanCursorField: 'mergeAnnouncerScanCursor',
+    defaultFrequency: 'off',
+    requiresManagerChannel: true,
+    suggestionSource: 'merge_announcer',
+  },
 } as const satisfies Record<string, ScheduleOnlyBackgroundAutomationDefinition>;
 
 export type ScheduleOnlyBackgroundAutomationId =
@@ -345,3 +420,4 @@ export function hasEnabledBackgroundAgents(
     getBackgroundAgentFrequencyValues(settings).some((value) => value !== 'off')
   );
 }
+import type { CommunicationProvider } from './communication';

@@ -5,7 +5,9 @@ const {
   mockGetTaskChannelBindings,
   mockGetTaskGoalForRun,
   mockFindLatestTaskRun,
+  mockFindReusableGitHubPrFollowUpOwner,
   mockHttpBatchLink,
+  mockNotifyFastAgentParentOnPrFeedback,
   mockSendPromptMutate,
   mockSteerTaskMutate,
   mockTrackLatestUserMessageForReplyQuote,
@@ -13,6 +15,11 @@ const {
   mockRestoreActingUserIdAfterFailedDelivery,
   mockUpdateActingUserIdIfNeeded,
   mockUserFindFirst,
+  mockTaskPullRequestFindFirst,
+  mockTaskRunFindFirst,
+  MockSnapshotResumeAlreadyExistsError,
+  mockAnd,
+  mockEq,
 } = vi.hoisted(() => ({
   mockCreateRunToken: vi.fn(),
   mockCreateTRPCProxyClient: vi.fn(),
@@ -20,7 +27,9 @@ const {
   mockGetTaskChannelBindings: vi.fn(),
   mockGetTaskGoalForRun: vi.fn(),
   mockFindLatestTaskRun: vi.fn(),
+  mockFindReusableGitHubPrFollowUpOwner: vi.fn(),
   mockHttpBatchLink: vi.fn((options) => options),
+  mockNotifyFastAgentParentOnPrFeedback: vi.fn(),
   mockSendPromptMutate: vi.fn(),
   mockSteerTaskMutate: vi.fn(),
   mockTrackLatestUserMessageForReplyQuote: vi.fn(),
@@ -28,6 +37,11 @@ const {
   mockRestoreActingUserIdAfterFailedDelivery: vi.fn(),
   mockUpdateActingUserIdIfNeeded: vi.fn(),
   mockUserFindFirst: vi.fn(),
+  mockTaskPullRequestFindFirst: vi.fn(),
+  mockTaskRunFindFirst: vi.fn(),
+  MockSnapshotResumeAlreadyExistsError: class extends Error {},
+  mockAnd: vi.fn((...conditions: unknown[]) => conditions),
+  mockEq: vi.fn((left: unknown, right: unknown) => ({ left, right })),
 }));
 
 vi.mock('../acting-user-sync', () => ({
@@ -53,8 +67,18 @@ vi.mock('@trpc/client', () => ({
   },
 }));
 
+vi.mock('@roomote/sdk/server', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@roomote/sdk/server')>();
+
+  return {
+    ...actual,
+    notifyFastAgentParentOnPrFeedback: mockNotifyFastAgentParentOnPrFeedback,
+  };
+});
+
 vi.mock('@roomote/cloud-agents/server', () => ({
   enqueueTask: mockEnqueueTask,
+  SnapshotResumeAlreadyExistsError: MockSnapshotResumeAlreadyExistsError,
 }));
 
 vi.mock('@roomote/communication/messages', () => ({
@@ -98,14 +122,20 @@ vi.mock('@roomote/db/server', async (importOriginal) => {
 
   return {
     ...actual,
+    findReusableGitHubPrFollowUpOwner: mockFindReusableGitHubPrFollowUpOwner,
     getTaskGoalForRun: mockGetTaskGoalForRun,
+    and: mockAnd,
+    eq: mockEq,
     db: {
       query: {
         users: {
           findFirst: mockUserFindFirst,
         },
         taskPullRequests: {
-          findFirst: vi.fn(),
+          findFirst: mockTaskPullRequestFindFirst,
+        },
+        taskRuns: {
+          findFirst: mockTaskRunFindFirst,
         },
       },
       update: vi.fn(() => ({
@@ -117,7 +147,10 @@ vi.mock('@roomote/db/server', async (importOriginal) => {
   };
 });
 
-import { EXPIRED_SNAPSHOT_RESUME_ERROR } from '@roomote/types';
+import {
+  EXPIRED_SNAPSHOT_RESUME_ERROR,
+  type RunTokenContext,
+} from '@roomote/types';
 
 import { sendMessageToTask, steerMessageToTask } from '../sendMessageToTask';
 
@@ -187,6 +220,10 @@ describe('sendMessageToTask', () => {
       linearOrganizationId: null,
     });
     mockGetTaskGoalForRun.mockResolvedValue(null);
+    mockFindReusableGitHubPrFollowUpOwner.mockResolvedValue(null);
+    mockNotifyFastAgentParentOnPrFeedback.mockResolvedValue(undefined);
+    mockTaskPullRequestFindFirst.mockResolvedValue(null);
+    mockTaskRunFindFirst.mockResolvedValue(null);
     mockTrackLatestUserMessageForSlackQuote.mockResolvedValue(undefined);
     mockTrackLatestUserMessageForReplyQuote.mockResolvedValue(undefined);
     mockRestoreActingUserIdAfterFailedDelivery.mockResolvedValue(undefined);
@@ -198,6 +235,536 @@ describe('sendMessageToTask', () => {
       name: 'Alice',
       email: 'alice@example.com',
     });
+  });
+
+  it('delegates Fast child answer-or-steer dispatch to the worker', async () => {
+    mockFindLatestTaskRun.mockResolvedValue(
+      createActiveRun({
+        payload: {
+          fastAgentParent: {
+            sessionId: '11111111-1111-4111-8111-111111111111',
+            conversation: {
+              surface: 'discord',
+              workspaceId: 'guild-1',
+              conversationId: 'channel-1:message-1',
+              replyTarget: { channelId: 'channel-1', threadId: 'message-1' },
+            },
+          },
+        },
+      }),
+    );
+    const result = await steerMessageToTask({
+      taskId: 'task-1',
+      userId: 'user-1',
+      message: 'Use a separate helper instead.',
+      senderMode: 'fast_agent',
+    });
+
+    expect(result).toEqual({ success: true, result: { ok: true } });
+    expect(mockSteerTaskMutate).toHaveBeenCalledWith({
+      prompt: 'Use a separate helper instead.',
+      quoteText: 'Use a separate helper instead.',
+      answerPendingInput: true,
+      suppressSlackReplyQuote: true,
+    });
+  });
+
+  it('marks Fast child messages for worker-owned pending-input dispatch', async () => {
+    mockFindLatestTaskRun.mockResolvedValue(
+      createActiveRun({
+        payload: {
+          fastAgentParent: {
+            sessionId: '11111111-1111-4111-8111-111111111111',
+            conversation: {
+              surface: 'discord',
+              workspaceId: 'guild-1',
+              conversationId: 'channel-1:message-1',
+              replyTarget: { channelId: 'channel-1', threadId: 'message-1' },
+            },
+          },
+        },
+      }),
+    );
+
+    const result = await steerMessageToTask({
+      taskId: 'task-1',
+      userId: 'user-1',
+      message: 'Also add another test.',
+    });
+
+    expect(result).toEqual({ success: true, result: { ok: true } });
+    expect(mockSteerTaskMutate).toHaveBeenCalledWith({
+      prompt: 'Also add another test.',
+      quoteText: 'Also add another test.',
+      answerPendingInput: true,
+    });
+  });
+
+  it('delivers linked review results to the Fast parent without waking the implementation task', async () => {
+    mockFindLatestTaskRun.mockResolvedValue(
+      createActiveRun({
+        payload: {
+          fastAgentParent: {
+            sessionId: '11111111-1111-4111-8111-111111111111',
+            conversation: {
+              surface: 'slack',
+              workspaceId: 'T123',
+              conversationId: '100.001',
+              replyTarget: { channelId: 'C123', threadId: '100.001' },
+            },
+          },
+        },
+      }),
+    );
+    mockTaskRunFindFirst.mockResolvedValue({
+      id: 200,
+      taskId: 'review-task',
+      payloadKind: 'github_pr_review',
+      payload: {
+        repo: 'acme/app',
+        prNumber: 42,
+        prUrl: 'https://github.com/acme/app/pull/42',
+        headSha: 'abc123',
+      },
+    });
+    mockFindReusableGitHubPrFollowUpOwner.mockResolvedValue({
+      taskId: 'task-1',
+    });
+    mockTaskPullRequestFindFirst.mockResolvedValue({
+      host: 'github.com',
+      prTitle: 'Fix the thing',
+      prUrl: 'https://github.com/acme/app/pull/42',
+      status: 'open',
+      prSha: 'abc123',
+    });
+
+    const result = await sendMessageToTask({
+      taskId: 'task-1',
+      userId: 'reviewer-user',
+      authContext: {
+        tokenType: 'run',
+        runId: 200,
+        userId: 'reviewer-user',
+        principal: 'user',
+        version: 1,
+      } as RunTokenContext,
+      senderMode: 'linked_review_handoff',
+      message: `<review_result>
+<review_kind>initial</review_kind>
+<outcome>findings_remain</outcome>
+<finding_count>1</finding_count>
+<title>Review found an issue</title>
+<summary>One issue needs attention.</summary>
+<repository>acme/app</repository>
+<pull_request_number>42</pull_request_number>
+<current_head_sha>abc123</current_head_sha>
+</review_result>`,
+    });
+
+    expect(result).toEqual({
+      success: true,
+      result: { sent: true, deliveredToFastParent: true },
+    });
+    expect(mockNotifyFastAgentParentOnPrFeedback).toHaveBeenCalledWith({
+      run: expect.objectContaining({ id: 42, taskId: 'task-1' }),
+      feedbackSourceIds: ['linked-review:review-task:abc123'],
+      reviewTaskId: 'review-task',
+      reviewHeadSha: 'abc123',
+      pullRequest: {
+        provider: 'github',
+        host: 'github.com',
+        repository: 'acme/app',
+        number: 42,
+        title: 'Fix the thing',
+        url: 'https://github.com/acme/app/pull/42',
+        status: 'open',
+      },
+      summary: 'Review found an issue: One issue needs attention.',
+      reviewResult: {
+        reviewKind: 'initial',
+        outcome: 'findings_remain',
+        findingCount: 1,
+        approvalStatus: null,
+        headSha: 'abc123',
+      },
+      suggestedActionQuestion: 'Would you like me to resolve this feedback?',
+      suggestedActionPrompt: 'Address the review feedback on acme/app#42.',
+    });
+    expect(mockSendPromptMutate).not.toHaveBeenCalled();
+    expect(mockEnqueueTask).not.toHaveBeenCalled();
+  });
+
+  it('uses the review run as stable feedback identity when no head SHA is available', async () => {
+    mockFindLatestTaskRun.mockResolvedValue(
+      createActiveRun({
+        payload: {
+          fastAgentParent: {
+            sessionId: '11111111-1111-4111-8111-111111111111',
+            conversation: {
+              surface: 'slack',
+              workspaceId: 'T123',
+              conversationId: '100.001',
+              replyTarget: { channelId: 'C123', threadId: '100.001' },
+            },
+          },
+        },
+      }),
+    );
+    mockTaskRunFindFirst.mockResolvedValue({
+      id: 200,
+      taskId: 'review-task',
+      payloadKind: 'github_pr_review',
+      payload: {
+        repo: 'acme/app',
+        prNumber: 42,
+        prUrl: 'https://github.com/acme/app/pull/42',
+      },
+    });
+    mockFindReusableGitHubPrFollowUpOwner.mockResolvedValue({
+      taskId: 'task-1',
+    });
+    mockTaskPullRequestFindFirst.mockResolvedValue({
+      host: 'github.com',
+      prTitle: 'Fix the thing',
+      prUrl: 'https://github.com/acme/app/pull/42',
+      status: 'open',
+      prSha: 'current-head',
+    });
+
+    await sendMessageToTask({
+      taskId: 'task-1',
+      userId: 'reviewer-user',
+      authContext: {
+        tokenType: 'run',
+        runId: 200,
+        userId: 'reviewer-user',
+        principal: 'user',
+        version: 1,
+      } as RunTokenContext,
+      senderMode: 'linked_review_handoff',
+      message:
+        '<review_result><outcome>clean</outcome><finding_count>0</finding_count></review_result>',
+    });
+
+    expect(mockNotifyFastAgentParentOnPrFeedback).toHaveBeenCalledWith(
+      expect.objectContaining({
+        feedbackSourceIds: ['linked-review:review-task:200'],
+        reviewTaskId: 'review-task',
+      }),
+    );
+  });
+
+  it('suppresses linked review results for an older pull request head', async () => {
+    mockFindLatestTaskRun.mockResolvedValue(
+      createActiveRun({
+        payload: {
+          fastAgentParent: {
+            sessionId: '11111111-1111-4111-8111-111111111111',
+            conversation: {
+              surface: 'slack',
+              workspaceId: 'T123',
+              conversationId: '100.001',
+              replyTarget: { channelId: 'C123', threadId: '100.001' },
+            },
+          },
+        },
+      }),
+    );
+    mockTaskRunFindFirst.mockResolvedValue({
+      id: 200,
+      taskId: 'review-task',
+      payloadKind: 'github_pr_review',
+      payload: {
+        repo: 'acme/app',
+        prNumber: 42,
+        prUrl: 'https://github.com/acme/app/pull/42',
+        headSha: 'old-head',
+      },
+    });
+    mockFindReusableGitHubPrFollowUpOwner.mockResolvedValue({
+      taskId: 'task-1',
+    });
+    mockTaskPullRequestFindFirst.mockResolvedValue({
+      host: 'github.com',
+      prTitle: 'Fix the thing',
+      prUrl: 'https://github.com/acme/app/pull/42',
+      status: 'open',
+      prSha: 'current-head',
+    });
+
+    const result = await sendMessageToTask({
+      taskId: 'task-1',
+      userId: 'reviewer-user',
+      authContext: {
+        tokenType: 'run',
+        runId: 200,
+        userId: 'reviewer-user',
+        principal: 'user',
+        version: 1,
+      } as RunTokenContext,
+      senderMode: 'linked_review_handoff',
+      message:
+        '<review_result><outcome>findings_remain</outcome><finding_count>1</finding_count><current_head_sha>old-head</current_head_sha></review_result>',
+    });
+
+    expect(result).toEqual({
+      success: true,
+      result: {
+        skipped: true,
+        reason:
+          'Linked review handoff skipped because the review targets an older pull request head.',
+      },
+    });
+    expect(mockNotifyFastAgentParentOnPrFeedback).not.toHaveBeenCalled();
+    expect(mockSendPromptMutate).not.toHaveBeenCalled();
+  });
+
+  it('suppresses a review that finishes before the synchronize follow-up is relayed', async () => {
+    mockFindLatestTaskRun.mockResolvedValue(
+      createActiveRun({
+        payload: {
+          fastAgentParent: {
+            sessionId: '11111111-1111-4111-8111-111111111111',
+            conversation: {
+              surface: 'slack',
+              workspaceId: 'T123',
+              conversationId: '100.001',
+              replyTarget: { channelId: 'C123', threadId: '100.001' },
+            },
+          },
+        },
+      }),
+    );
+    mockTaskRunFindFirst.mockResolvedValue({
+      id: 200,
+      taskId: 'review-task',
+      payloadKind: 'github_pr_review_sync',
+      payload: {
+        repo: 'acme/app',
+        prNumber: 42,
+        prUrl: 'https://github.com/acme/app/pull/42',
+        headSha: 'old-head',
+        // Stamped by the synchronize handler before the debounced follow-up
+        // runs, so the linkage below still holds the pre-push head.
+        latestObservedHeadSha: 'pushed-head',
+      },
+    });
+    mockFindReusableGitHubPrFollowUpOwner.mockResolvedValue({
+      taskId: 'task-1',
+    });
+    mockTaskPullRequestFindFirst.mockResolvedValue({
+      host: 'github.com',
+      prTitle: 'Fix the thing',
+      prUrl: 'https://github.com/acme/app/pull/42',
+      status: 'open',
+      prSha: 'old-head',
+    });
+
+    const result = await sendMessageToTask({
+      taskId: 'task-1',
+      userId: 'reviewer-user',
+      authContext: {
+        tokenType: 'run',
+        runId: 200,
+        userId: 'reviewer-user',
+        principal: 'user',
+        version: 1,
+      } as RunTokenContext,
+      senderMode: 'linked_review_handoff',
+      message:
+        '<review_result><outcome>findings_remain</outcome><finding_count>1</finding_count><current_head_sha>old-head</current_head_sha></review_result>',
+    });
+
+    expect(result).toEqual({
+      success: true,
+      result: {
+        skipped: true,
+        reason:
+          'Linked review handoff skipped because the review targets an older pull request head.',
+      },
+    });
+    expect(mockNotifyFastAgentParentOnPrFeedback).not.toHaveBeenCalled();
+  });
+
+  it('delivers a review that reports the newly observed head after a push', async () => {
+    mockFindLatestTaskRun.mockResolvedValue(
+      createActiveRun({
+        payload: {
+          fastAgentParent: {
+            sessionId: '11111111-1111-4111-8111-111111111111',
+            conversation: {
+              surface: 'slack',
+              workspaceId: 'T123',
+              conversationId: '100.001',
+              replyTarget: { channelId: 'C123', threadId: '100.001' },
+            },
+          },
+        },
+      }),
+    );
+    mockTaskRunFindFirst.mockResolvedValue({
+      id: 200,
+      taskId: 'review-task',
+      payloadKind: 'github_pr_review_sync',
+      payload: {
+        repo: 'acme/app',
+        prNumber: 42,
+        prUrl: 'https://github.com/acme/app/pull/42',
+        headSha: 'old-head',
+        latestObservedHeadSha: 'pushed-head',
+      },
+    });
+    mockFindReusableGitHubPrFollowUpOwner.mockResolvedValue({
+      taskId: 'task-1',
+    });
+    mockTaskPullRequestFindFirst.mockResolvedValue({
+      host: 'github.com',
+      prTitle: 'Fix the thing',
+      prUrl: 'https://github.com/acme/app/pull/42',
+      status: 'open',
+      prSha: 'old-head',
+    });
+
+    await sendMessageToTask({
+      taskId: 'task-1',
+      userId: 'reviewer-user',
+      authContext: {
+        tokenType: 'run',
+        runId: 200,
+        userId: 'reviewer-user',
+        principal: 'user',
+        version: 1,
+      } as RunTokenContext,
+      senderMode: 'linked_review_handoff',
+      message:
+        '<review_result><outcome>clean</outcome><finding_count>0</finding_count><current_head_sha>pushed-head</current_head_sha></review_result>',
+    });
+
+    expect(mockNotifyFastAgentParentOnPrFeedback).toHaveBeenCalledWith(
+      expect.objectContaining({ reviewHeadSha: 'pushed-head' }),
+    );
+  });
+
+  it('delivers a current sync review after the implementation task PR link becomes stale', async () => {
+    mockFindLatestTaskRun.mockResolvedValue(
+      createActiveRun({
+        payload: {
+          fastAgentParent: {
+            sessionId: '11111111-1111-4111-8111-111111111111',
+            conversation: {
+              surface: 'slack',
+              workspaceId: 'T123',
+              conversationId: '100.001',
+              replyTarget: { channelId: 'C123', threadId: '100.001' },
+            },
+          },
+        },
+      }),
+    );
+    mockTaskRunFindFirst.mockResolvedValue({
+      id: 201,
+      taskId: 'review-task',
+      payloadKind: 'github_pr_review_sync',
+      payload: {
+        repo: 'acme/app',
+        prNumber: 42,
+        prUrl: 'https://github.com/acme/app/pull/42',
+        headSha: 'new-head',
+      },
+    });
+    mockFindReusableGitHubPrFollowUpOwner.mockResolvedValue({
+      taskId: 'task-1',
+    });
+    // This row is resolved through the review task, whose linkage is refreshed
+    // on pull_request.synchronize; the implementation task may still hold old-head.
+    mockTaskPullRequestFindFirst.mockResolvedValue({
+      host: 'github.com',
+      prTitle: 'Fix the thing',
+      prUrl: 'https://github.com/acme/app/pull/42',
+      status: 'open',
+      prSha: 'new-head',
+    });
+
+    const result = await sendMessageToTask({
+      taskId: 'task-1',
+      userId: 'reviewer-user',
+      authContext: {
+        tokenType: 'run',
+        runId: 201,
+        userId: 'reviewer-user',
+        principal: 'user',
+        version: 1,
+      } as RunTokenContext,
+      senderMode: 'linked_review_handoff',
+      message:
+        '<review_result><review_kind>sync</review_kind><outcome>clean</outcome><finding_count>0</finding_count><current_head_sha>new-head</current_head_sha></review_result>',
+    });
+
+    expect(result).toEqual({
+      success: true,
+      result: { sent: true, deliveredToFastParent: true },
+    });
+    expect(mockNotifyFastAgentParentOnPrFeedback).toHaveBeenCalledWith(
+      expect.objectContaining({
+        reviewTaskId: 'review-task',
+        reviewHeadSha: 'new-head',
+      }),
+    );
+    expect(mockEq.mock.calls.some(([, value]) => value === 'review-task')).toBe(
+      true,
+    );
+  });
+
+  it('does not wake the implementation task when its Fast parent is gone', async () => {
+    mockFindLatestTaskRun.mockResolvedValue(createActiveRun({ payload: {} }));
+    mockTaskRunFindFirst.mockResolvedValue({
+      id: 200,
+      taskId: 'review-task',
+      payloadKind: 'github_pr_review',
+      payload: {
+        repo: 'acme/app',
+        prNumber: 42,
+        prUrl: 'https://github.com/acme/app/pull/42',
+        headSha: 'abc123',
+        linkedReviewHandoffTarget: 'fast_parent',
+      },
+    });
+    mockFindReusableGitHubPrFollowUpOwner.mockResolvedValue({
+      taskId: 'task-1',
+    });
+    mockTaskPullRequestFindFirst.mockResolvedValue({
+      host: 'github.com',
+      prTitle: 'Fix the thing',
+      prUrl: 'https://github.com/acme/app/pull/42',
+      status: 'open',
+    });
+
+    const result = await sendMessageToTask({
+      taskId: 'task-1',
+      userId: 'reviewer-user',
+      authContext: {
+        tokenType: 'run',
+        runId: 200,
+        userId: 'reviewer-user',
+        principal: 'user',
+        version: 1,
+      } as RunTokenContext,
+      senderMode: 'linked_review_handoff',
+      message:
+        '<review_result><outcome>findings_remain</outcome><finding_count>1</finding_count></review_result>',
+    });
+
+    expect(result).toEqual({
+      success: true,
+      result: {
+        skipped: true,
+        reason:
+          'Linked review handoff skipped because the Fast parent is no longer available.',
+      },
+    });
+    expect(mockNotifyFastAgentParentOnPrFeedback).not.toHaveBeenCalled();
+    expect(mockSendPromptMutate).not.toHaveBeenCalled();
+    expect(mockEnqueueTask).not.toHaveBeenCalled();
   });
 
   it('writes the acting user BEFORE delivering the prompt to the sandbox', async () => {
@@ -554,6 +1121,113 @@ describe('sendMessageToTask', () => {
     );
   });
 
+  it('preserves Fast parent routing when a typed reply resumes a completed child', async () => {
+    const fastAgentParent = {
+      sessionId: '11111111-1111-4111-8111-111111111111',
+      conversation: {
+        surface: 'slack',
+        workspaceId: 'T123',
+        conversationId: '111.222',
+        replyTarget: { channelId: 'C123', threadId: '111.222' },
+      },
+    };
+    mockFindLatestTaskRun.mockResolvedValue(
+      createActiveRun({
+        status: 'completed',
+        sandboxServerUrl: null,
+        snapshotId: 'snap-fast',
+        payload: {
+          repo: 'acme/app',
+          fastAgentParent,
+        },
+      }),
+    );
+
+    const result = await steerMessageToTask({
+      taskId: 'task-1',
+      userId: 'user-1',
+      message: 'Address the review feedback.',
+      senderMode: 'fast_agent',
+    });
+
+    expect(result).toEqual({
+      success: true,
+      result: { resumed: true, runId: 77, taskId: 'task-1' },
+    });
+    expect(mockEnqueueTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        task: expect.objectContaining({
+          payload: expect.objectContaining({
+            communicationContextInherited: true,
+            fastAgentSessionId: fastAgentParent.sessionId,
+            fastAgentParent,
+          }),
+        }),
+      }),
+      expect.any(Object),
+    );
+  });
+
+  it('resumes the same task when an active steer races with run settlement', async () => {
+    const activeRun = createActiveRun({ snapshotId: 'snap-race' });
+    const completedRun = createActiveRun({
+      status: 'completed',
+      sandboxServerUrl: null,
+      snapshotId: 'snap-race',
+      payload: { repo: 'acme/app' },
+    });
+    mockFindLatestTaskRun
+      .mockResolvedValueOnce(activeRun)
+      .mockResolvedValueOnce(completedRun);
+    mockSteerTaskMutate.mockRejectedValueOnce(new Error('worker exited'));
+
+    const result = await steerMessageToTask({
+      taskId: 'task-1',
+      userId: 'user-1',
+      message: 'Continue after settlement.',
+    });
+
+    expect(result).toEqual({
+      success: true,
+      result: { resumed: true, runId: 77, taskId: 'task-1' },
+    });
+    expect(mockEnqueueTask).toHaveBeenCalledTimes(1);
+    expect(mockEnqueueTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        task: expect.objectContaining({
+          sourceRunId: 42,
+        }),
+      }),
+      expect.any(Object),
+    );
+  });
+
+  it('returns a retryable conflict when another resume wins the race', async () => {
+    mockFindLatestTaskRun.mockResolvedValue(
+      createActiveRun({
+        status: 'completed',
+        sandboxServerUrl: null,
+        snapshotId: 'snap-race',
+        payload: { repo: 'acme/app' },
+      }),
+    );
+    mockEnqueueTask.mockRejectedValueOnce(
+      new MockSnapshotResumeAlreadyExistsError(),
+    );
+
+    const result = await steerMessageToTask({
+      taskId: 'task-1',
+      userId: 'user-1',
+      message: 'Continue after the other resume.',
+    });
+
+    expect(result).toEqual({
+      success: false,
+      error: 'Task continuation is already in progress. Try again shortly.',
+      status: 409,
+    });
+  });
+
   it('returns a clear error when a sleeping task snapshot has expired', async () => {
     mockFindLatestTaskRun.mockResolvedValue(
       createActiveRun({
@@ -660,6 +1334,29 @@ describe('sendMessageToTask', () => {
     expect(mockSteerTaskMutate).toHaveBeenCalledWith({
       prompt: 'Pause the implementation and inspect the failing test.',
       quoteText: 'Pause the implementation and inspect the failing test.',
+    });
+  });
+
+  it('does not track or request Slack reply quotes for Fast-agent steers', async () => {
+    mockFindLatestTaskRun.mockResolvedValue(createActiveRun());
+
+    const result = await steerMessageToTask({
+      taskId: 'task-1',
+      userId: 'user-1',
+      message: 'Continue the delegated task.',
+      senderMode: 'fast_agent',
+    });
+
+    expect(result).toEqual({
+      success: true,
+      result: { ok: true },
+    });
+    expect(mockTrackLatestUserMessageForSlackQuote).not.toHaveBeenCalled();
+    expect(mockTrackLatestUserMessageForReplyQuote).not.toHaveBeenCalled();
+    expect(mockSteerTaskMutate).toHaveBeenCalledWith({
+      prompt: 'Continue the delegated task.',
+      quoteText: 'Continue the delegated task.',
+      suppressSlackReplyQuote: true,
     });
   });
 

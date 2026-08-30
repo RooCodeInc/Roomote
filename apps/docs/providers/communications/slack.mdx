@@ -37,6 +37,20 @@ If Slack is already configured, Settings → Communications shows the saved
 credentials and still offers **Create a new Slack app with a configuration
 token** when you need to replace them.
 
+### Update an existing Slack app
+
+After connecting a workspace, use **Settings → Communications → Slack → Update
+app** to bring the existing app manifest up to date with the current Roomote
+configuration. Generate and paste a fresh app configuration token when
+prompted. Roomote exports the app's current manifest, preserves custom fields,
+adds or updates Roomote's required capabilities, scopes, events, redirect URLs,
+and callback URLs, validates the result, and then applies it. The token is not
+stored.
+
+If the update changes permissions, Roomote shows **Reinstall in Slack**. Finish
+that approval step before testing the new capabilities because Slack does not
+add scopes to existing installations automatically.
+
 ### Alternative: env vars or an existing app
 
 If you already have a Slack app, or production secret management should own the
@@ -88,6 +102,7 @@ Scopes**:
 
 ```text
 app_mentions:read
+assistant:write
 channels:read
 channels:history
 chat:write
@@ -122,6 +137,8 @@ Turn on **Event Subscriptions** and set **Request URL** to:
 Subscribe to these bot events:
 
 ```text
+app_context_changed
+app_home_opened
 app_mention
 message.im
 message.channels
@@ -143,11 +160,40 @@ Turn on **Interactivity & Shortcuts** and use the same request URL:
 Roomote uses this endpoint for button clicks and other interactive Slack
 payloads.
 
-## App home and messages
+## Agent messaging experience
 
-If you want to start tasks by direct message, make sure the app can receive DMs.
-Enable the app surfaces needed for messages to the bot, then keep the
-`message.im` event subscription enabled.
+Roomote-created apps enable Slack's current **Agent messaging experience**
+(`features.agent_view`). This keeps conversations in the app's Messages tab,
+opens Fast-mode responses in threads, and allows Slack to render native loading
+states and streamed task cards. Tasks delegated by Fast appear as native cards
+that stream coding progress and settle to their final result in the same thread.
+
+For an existing app, use **Update app** in Settings → Communications to apply
+these settings. You can also configure them manually by enabling the **Agents**
+feature, selecting the Agent messaging experience, adding the `assistant:write`
+scope and the `app_home_opened` and `app_context_changed` events, and then
+reinstalling the app. Hard-refresh Slack afterward. Keep `message.im` enabled
+so direct messages continue reaching Roomote.
+
+## Fast answers
+
+Mention the app and use `!fast <request>` to ask the fast orchestrator a
+question or delegate work into a task. For example: `@Roomote !fast summarize
+this thread` or `@Roomote !fast fix the failing CI job`.
+
+**Fast response mode** is always on across Slack, Discord, Microsoft Teams, and
+Telegram: ordinary messages from your linked account go through the Fast
+orchestrator, which can delegate work into tasks. `!fast` remains available for
+an explicit Slack Fast request. Replies in a Fast-owned Slack thread continue
+that Fast session; replies in an existing task-only thread continue the task.
+
+Fast can read a bounded history from the current Slack channel, use MCP servers
+and user-scoped integrations that you are allowed to access, and delegate
+repository work to Roomote tasks. Deployment admins can also manage custom
+automations through Fast. Fast does not read other channels implicitly or
+inspect repository contents without delegating the work to a task. When the
+request spans every repository, Fast can delegate it to the deployment's
+all-repositories environment.
 
 ## Local URL changes
 
@@ -160,5 +206,6 @@ restart Roomote with the matching URL.
 1. sign in with Slack, if Slack sign-in is enabled
 2. install the Slack app to the workspace
 3. mention the app in a channel or send it a direct message
-4. confirm Roomote starts a task and replies with a task link
-5. reply in the same thread and confirm the message continues the same task
+4. confirm Roomote answers in Fast and includes a web continuation link
+5. reply in the same thread and confirm the message continues the same Fast
+   session; when Fast delegates work, confirm the task card stays in that thread

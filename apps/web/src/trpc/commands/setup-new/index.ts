@@ -1,12 +1,6 @@
-import * as GitHub from '@roomote/github';
 import { TRPCError } from '@trpc/server';
 import { enqueueTask } from '@roomote/cloud-agents/server';
 import { resolveEnvironmentSourceControlProvider } from '@/lib/server/source-control-provider';
-import { buildSetupKickoffText } from '@roomote/communication/chat-messages';
-import { DiscordCommunicationProvider } from '@roomote/communication/discord-provider';
-import type { TeamsCommunicationProvider } from '@roomote/communication/teams-provider';
-import { TelegramCommunicationProvider } from '@roomote/communication/telegram-provider';
-import { SlackNotifier } from '@roomote/slack';
 import {
   captureActivationAutomationChanged,
   captureTaskSettled,
@@ -16,7 +10,6 @@ import {
   deploymentSettings,
   environments,
   environmentVariables,
-  taskRuns,
   workItems,
   pullRequestFacts,
   slackInstallations,
@@ -33,12 +26,9 @@ import {
   finalizeWorkItemLaunched,
   releaseWorkItemClaim,
   WORK_ITEM_LAUNCH_STALE_CLAIM_MS,
-  markTaskStartParallelCountEndedAt,
   resolveDeploymentEnvVar,
   purgeSavedDeploymentWorkerImage,
-  resolveTelegramRuntimeCredentials,
   invalidateTelegramRuntimeCredentialsCache,
-  resolveDiscordRuntimeCredentials,
   invalidateTeamsBotRuntimeCredentialsCache,
   isChatGptSubscriptionConnected,
   isGitHubCopilotSubscriptionConnected,
@@ -50,17 +40,10 @@ import {
   getCustomAutomationById,
 } from '@roomote/db/server';
 import {
-  createTeamsCommunicationProviderFromRuntimeCredentials,
-  findTelegramPrimaryChatId,
-  findDiscordDefaultDestination,
-  findDiscordUserMappingByRoomoteUserId,
-  findTeamsPrimaryConversation,
-  recordSlackConversationMessageBestEffort,
   AUTOMATION_RECOMMENDATION_REPOSITORY_CAP,
   buildAutomationRecommendationFingerprint,
   enqueueAutomationRecommendationInitialRun,
   enqueueAutomationRecommendations,
-  enqueueAutomationSignalPrefetch,
 } from '@roomote/sdk/server';
 import {
   buildRecommendedDeploymentModelConfig,
@@ -71,13 +54,14 @@ import {
   buildSetupSourceControlStatus,
   CHATGPT_SUBSCRIPTION_PROVIDER_ID,
   XAI_SUBSCRIPTION_PROVIDER_ID,
+  ROOMOTE_INFERENCE_API_KEY_ENV_VAR_NAME,
+  ROOMOTE_INFERENCE_PROVIDER_ID,
+  ROOMOTE_TRIAL_MODEL_PRESET_ID,
   OPENAI_COMPATIBLE_PROVIDER_ID,
   collectSetupModelProviderCredentialValues,
   createEmptyDeploymentModelConfig,
   createEmptySetupNewState,
-  RunStatus,
   TaskPayloadKind,
-  resolveEvalHarnessSelection,
   type ComputeProvider,
   assertUniqueRepositoryFullNames,
   type DeploymentModelConfig,
@@ -96,7 +80,6 @@ import {
   isComputeCredentialField,
   isComputeInfrastructureField,
   isConfiguredEnvValue,
-  isExitedRunStatus,
   isRequiredComputeField,
   normalizeTaskModelSettings,
   NON_SECRET_AUTH_ENV_VAR_NAMES,
@@ -120,7 +103,6 @@ import {
   type SetupProvisionableComputeProvider,
   type SourceControlProvider,
   type TaskModelSettings,
-  WAITING_FOR_SANDBOX_PROVIDER_TASK_PHASE,
   AUTOMATION_RECOMMENDATIONS_CATALOG_VERSION,
   AUTOMATION_RECOMMENDATION_CATALOG,
   ALL_REPOSITORIES,
@@ -141,10 +123,6 @@ import {
   isSetupTokenValid,
 } from '@/lib/server';
 import {
-  appendEnvironmentDefinitionGuidance,
-  buildSetupEnvironmentTaskTitle,
-  buildSetupNewKickoffPrompt,
-  buildSetupNewWorkspacePayload,
   findMatchingSetupNewEnvironment,
   isSetupNewOnboardingFailureStatus,
   isSetupNewOnboardingSuccessStatus,
@@ -190,6 +168,11 @@ import {
 } from '../source-control';
 import { getPersistedRawTaskModelSettings } from '../task-models';
 import {
+  fetchModelsDevCatalog,
+  lookupModelMetadataFromCatalog,
+  mergeMetadata,
+} from '../task-models/models-dev';
+import {
   buildAutoAddedTaskModelSettings,
   collectConnectedTaskModelProviderIds,
 } from '../task-models/auto-add-models';
@@ -232,58 +215,6 @@ async function getPersistedSetupNewState(
     .limit(1);
 
   return normalizeSetupNewState(settings?.setupNewState ?? {});
-}
-
-async function markAutomationRecommendationBatchFailed(
-  inputFingerprint: string,
-  errorCode: string,
-) {
-  await db.transaction(async (tx) => {
-    await tx.execute(
-      sql`SELECT pg_advisory_xact_lock(hashtext('automation-recommendations'))`,
-    );
-    const currentState = await getPersistedSetupNewState(tx);
-    if (
-      currentState.automationRecommendations?.inputFingerprint !==
-      inputFingerprint
-    ) {
-      return;
-    }
-    await savePersistedSetupNewState(
-      normalizeSetupNewState({
-        ...currentState,
-        automationRecommendations: {
-          ...currentState.automationRecommendations,
-          status: 'failed',
-          completedAt: new Date().toISOString(),
-          errorCode,
-        },
-      }),
-      tx,
-    );
-  });
-}
-
-function createPendingAutomationRecommendationBatch(
-  inputFingerprint: string,
-  previousBatch: AutomationRecommendationBatch | null | undefined,
-): AutomationRecommendationBatch {
-  const sameInput = previousBatch?.inputFingerprint === inputFingerprint;
-  return {
-    version: 1,
-    inputFingerprint,
-    catalogVersion: AUTOMATION_RECOMMENDATIONS_CATALOG_VERSION,
-    status: 'pending',
-    startedAt: new Date().toISOString(),
-    completedAt: null,
-    partial: false,
-    errorCode: null,
-    dismissed: sameInput ? previousBatch.dismissed : false,
-    applicationState: sameInput
-      ? (previousBatch.applicationState ?? 'pending')
-      : 'pending',
-    recommendations: sameInput ? previousBatch.recommendations : [],
-  };
 }
 
 async function getPersistedRuntimeModelConfig(
@@ -363,6 +294,250 @@ async function savePersistedTaskModelSettings(
 
 // Persisted runtime compute config helpers are shared with the compute
 // settings commands and imported from '../compute'.
+
+/**
+ * Imports the hosting-injected Roomote inference key from the process
+ * environment into encrypted Settings storage. The env variable is only the
+ * delivery mechanism: every runtime read (the inference gateway, credit
+ * balance, provider status) resolves the stored key, so deleting the Roomote
+ * inference provider disables the trial even though hosting keeps injecting
+ * the variable — once the `trialInferenceKeyImportedAt` marker is stamped, a
+ * missing stored key is an operator's explicit disable and is never
+ * re-created. A *rotated* injected value on a deployment whose stored key
+ * still exists is re-imported, so hosting can replace a revoked trial key.
+ */
+export async function importTrialInferenceKeyIfNeeded(
+  userId: string | null,
+): Promise<void> {
+  const injectedValue =
+    process.env[ROOMOTE_INFERENCE_API_KEY_ENV_VAR_NAME]?.trim();
+
+  if (
+    !isConfiguredEnvValue(process.env[ROOMOTE_INFERENCE_API_KEY_ENV_VAR_NAME])
+  ) {
+    return;
+  }
+
+  // Lock-free pre-check: this runs on every setup-status read, so the common
+  // "already imported" case must not open a write transaction or take the
+  // deploymentSettings row lock.
+  if (await trialInferenceImportUpToDate(db, injectedValue!)) {
+    return;
+  }
+
+  await db.transaction(async (tx) => {
+    await tx
+      .insert(deploymentSettings)
+      .values({ id: 'default' })
+      .onConflictDoNothing();
+    await tx
+      .select({ id: deploymentSettings.id })
+      .from(deploymentSettings)
+      .where(eq(deploymentSettings.id, 'default'))
+      .for('update');
+
+    // Re-check under the lock: a concurrent status read may have imported.
+    if (await trialInferenceImportUpToDate(tx, injectedValue!)) {
+      return;
+    }
+
+    const currentState = await getPersistedSetupNewState(tx);
+
+    await upsertDeploymentEnvironmentVariables(tx, {
+      userId,
+      values: [
+        {
+          name: ROOMOTE_INFERENCE_API_KEY_ENV_VAR_NAME,
+          value: injectedValue!,
+        },
+      ],
+    });
+
+    if (currentState.trialInferenceKeyImportedAt === null) {
+      await savePersistedSetupNewState(
+        normalizeSetupNewState({
+          ...currentState,
+          trialInferenceKeyImportedAt: new Date().toISOString(),
+        }),
+        tx,
+      );
+    }
+  });
+}
+
+/**
+ * Whether the injected trial key needs no import work: it was already
+ * imported and either the operator has since deleted the stored key
+ * (disabling the trial — never re-create it) or the stored value already
+ * matches the injected one.
+ */
+async function trialInferenceImportUpToDate(
+  executor: DatabaseOrTransaction,
+  injectedValue: string,
+): Promise<boolean> {
+  const currentState = await getPersistedSetupNewState(executor);
+
+  if (currentState.trialInferenceKeyImportedAt === null) {
+    return false;
+  }
+
+  const storedValue = await resolveDeploymentEnvVar(
+    ROOMOTE_INFERENCE_API_KEY_ENV_VAR_NAME,
+    executor,
+    {},
+  );
+
+  return !storedValue || storedValue === injectedValue;
+}
+
+/**
+ * Free-trial inference. A hosting provisioner can inject a capped,
+ * Roomote-minted OpenRouter key as `R_TRIAL_OPENROUTER_API_KEY`. The setup
+ * wizard's inference step then offers managed Roomote inference alongside
+ * connecting a provider. It uses Roomote model ids so an operator's future
+ * OpenRouter connection remains entirely separate.
+ *
+ * This is an explicit operator choice, never an automatic seed: the command
+ * no-ops once any inference choice exists (a selected provider or saved
+ * model config) and refuses when a real provider is already connected, so it
+ * can never overwrite configuration.
+ */
+export async function chooseSetupTrialInferenceCommand(auth: UserAuthSuccess) {
+  assertAdmin(auth);
+
+  const { userId } = auth;
+  await importTrialInferenceKeyIfNeeded(userId);
+
+  return db.transaction(async (tx) => {
+    // Serialize against concurrent configuration writes: every check below
+    // must observe the row state the upserts will replace, or an operator's
+    // save landing between read and write would be overwritten.
+    await tx
+      .insert(deploymentSettings)
+      .values({ id: 'default' })
+      .onConflictDoNothing();
+    await tx
+      .select({ id: deploymentSettings.id })
+      .from(deploymentSettings)
+      .where(eq(deploymentSettings.id, 'default'))
+      .for('update');
+
+    const [
+      currentState,
+      persistedModelConfig,
+      persistedEnvVarNames,
+      chatgptConnected,
+      githubCopilotConnected,
+      xaiSubscriptionConnected,
+    ] = await Promise.all([
+      getPersistedSetupNewState(tx),
+      getPersistedRuntimeModelConfig(tx),
+      getPersistedEnvironmentVariableNames(tx),
+      isChatGptSubscriptionConnected(),
+      isGitHubCopilotSubscriptionConnected(),
+      isXaiSubscriptionConnected(),
+    ]);
+
+    // Any prior inference choice wins: a repeat click (or a stale wizard tab)
+    // must not reset models an operator has since adjusted. A bare
+    // task-model-settings row is deliberately NOT counted as a choice:
+    // deleting the last provider leaves one behind (normalization re-inflates
+    // it to the default catalog), and treating that leftover as a choice
+    // would make this command silently no-op — the wizard would advance with
+    // no usable models seeded at all. Settings an operator actually uses are
+    // always accompanied by a selected provider, a connected provider (which
+    // the check below refuses on), or a saved role model.
+    const hasModelChoices =
+      currentState.modelProvider !== null ||
+      Object.values(persistedModelConfig).some((value) => value !== null);
+
+    if (hasModelChoices) {
+      return {
+        setupNewState: currentState,
+        runtimeModelConfig: persistedModelConfig,
+      };
+    }
+
+    const status = buildSetupModelStatus({
+      runtimeEnv: process.env,
+      persistedEnvVarNames,
+      chatgptConnected,
+      githubCopilotConnected,
+      xaiSubscriptionConnected,
+    });
+    const trialKeyStored = status.providers.some(
+      (provider) =>
+        provider.id === ROOMOTE_INFERENCE_PROVIDER_ID &&
+        provider.savedApiKeySatisfied,
+    );
+
+    if (!trialKeyStored) {
+      throw new Error(
+        'Free trial inference is not available on this deployment.',
+      );
+    }
+
+    const hasOperatorProvider = status.providers.some(
+      (provider) =>
+        provider.id !== ROOMOTE_INFERENCE_PROVIDER_ID &&
+        (provider.savedApiKeySatisfied || provider.runtimeApiKeySatisfied),
+    );
+
+    if (hasOperatorProvider) {
+      throw new Error(
+        'A model provider is already connected, so the free trial is not needed.',
+      );
+    }
+
+    const provider = getSetupModelProvider(ROOMOTE_INFERENCE_PROVIDER_ID);
+    const runtimeModelConfig = buildRecommendedDeploymentModelConfig(
+      provider,
+      ROOMOTE_TRIAL_MODEL_PRESET_ID,
+    );
+    const defaultModelId = runtimeModelConfig.roomoteModel;
+    // Best-effort metadata for the seeded catalog: without pricing and
+    // context windows every trial message records zero cost and models run
+    // on default limits. The roomote-aware catalog lookup resolves each
+    // model through its OpenRouter upstream; a failed fetch seeds without
+    // metadata, exactly as before, and the Settings refresh backfills.
+    const metadataCatalog = await fetchModelsDevCatalog(
+      AbortSignal.timeout(10_000),
+    ).catch(() => null);
+    const trialModels = provider.suggestedTaskModels.map((suggestion) => {
+      const lookup = metadataCatalog
+        ? lookupModelMetadataFromCatalog(metadataCatalog, suggestion.id)
+        : null;
+      return buildTaskModelOption({
+        id: suggestion.id,
+        displayName: suggestion.displayName,
+        family: suggestion.family,
+        ...(lookup?.metadata && Object.keys(lookup.metadata).length > 0
+          ? { metadata: mergeMetadata(null, lookup.metadata) }
+          : {}),
+      });
+    });
+    const setupNewState = normalizeSetupNewState({
+      ...currentState,
+      modelProvider: provider.id,
+      lastInteractedByUserId: userId,
+    });
+
+    await Promise.all([
+      savePersistedSetupNewState(setupNewState, tx),
+      savePersistedRuntimeModelConfig(runtimeModelConfig, tx),
+      savePersistedTaskModelSettings(
+        normalizeTaskModelSettings({
+          models: trialModels,
+          allowedModelIds: trialModels.map((model) => model.id),
+          defaultModelId: defaultModelId ?? provider.defaultRoomoteModel,
+        }),
+        tx,
+      ),
+    ]);
+
+    return { setupNewState, runtimeModelConfig };
+  });
+}
 
 async function resolveSelectedRepositories(repositoryIds: string[]): Promise<{
   normalizedRepositoryIds: string[];
@@ -461,41 +636,6 @@ async function resolveConnectedRecommendationRepositories(): Promise<{
   };
 }
 
-/**
- * Look up which selected repositories have no commits yet. Empty repos are a
- * supported onboarding target (the environment-setup agent bootstraps them
- * with an initial commit), so this only informs the kickoff prompt — it never
- * blocks the selection. Non-GitHub repos are absent from the returned map and
- * treated as non-empty.
- */
-async function resolveRepositorySelectionEmptyStates(
-  repositoryIds: string[],
-): Promise<Map<string, boolean>> {
-  return GitHub.getRepositoryEmptyStates({ repositoryIds });
-}
-
-async function clearTaskSuggestions(
-  sourceTaskId: string | null,
-  executor: DatabaseOrTransaction = db,
-) {
-  if (!sourceTaskId) {
-    return;
-  }
-
-  await executor
-    .delete(workItems)
-    .where(
-      and(
-        eq(workItems.sourceTaskId, sourceTaskId),
-        eq(workItems.kind, 'suggestion'),
-      ),
-    );
-}
-
-async function clearQueuedSetupTasks(executor: DatabaseOrTransaction = db) {
-  await executor.delete(workItems).where(eq(workItems.kind, 'onboarding'));
-}
-
 async function getActiveSlackInstallation(
   executor: DatabaseOrTransaction = db,
 ) {
@@ -563,169 +703,6 @@ async function getSetupSlackAccessStatus(
   };
 }
 
-/**
- * Resolves the Slack DM target for the setup onboarding handoff. Returns null
- * when the deployment has no active Slack installation or the admin has no
- * linked Slack account, so setup can fall back to a web-only onboarding task.
- */
-async function resolveSetupSlackHandoffTarget(
-  input: {
-    userId: string;
-  },
-  executor: DatabaseOrTransaction = db,
-) {
-  const installation = await getActiveSlackInstallation(executor);
-
-  if (!installation) {
-    return null;
-  }
-
-  const mapping = await getSlackUserMappingForTeam(
-    {
-      userId: input.userId,
-      teamId: installation.teamId,
-    },
-    executor,
-  );
-
-  if (!mapping) {
-    return null;
-  }
-
-  return {
-    botAccessToken: installation.botAccessToken,
-    slackTeamId: installation.teamId,
-    slackUserId: mapping.slackUserId,
-  };
-}
-
-type SetupChatFallbackHandoffTarget =
-  | {
-      provider: 'discord';
-      channelId: string;
-      guildId?: string;
-      botToken: string;
-      applicationId: string;
-    }
-  | { provider: 'telegram'; chatId: string; botToken: string }
-  | {
-      provider: 'teams';
-      conversationId: string;
-      serviceUrl: string;
-      teams: TeamsCommunicationProvider;
-    };
-
-/**
- * Resolves the non-Slack chat destination for the setup onboarding kickoff,
- * matching the proactive-messaging fallback ordering (Slack > Discord >
- * Telegram > Teams). Returns null when no chat surface is available, so setup falls
- * back to a web-only onboarding task. Teams is only selected when both a
- * captured primary conversation and resolvable bot credentials exist, so a
- * half-configured Teams deployment never blocks onboarding.
- */
-async function resolveSetupChatFallbackHandoffTarget(
-  userId: string,
-): Promise<SetupChatFallbackHandoffTarget | null> {
-  const [discordCredentials, discordDestination, discordUserMapping] =
-    await Promise.all([
-      resolveDiscordRuntimeCredentials(),
-      findDiscordDefaultDestination(),
-      findDiscordUserMappingByRoomoteUserId(userId),
-    ]);
-  if (
-    discordCredentials.botToken &&
-    discordCredentials.applicationId &&
-    discordUserMapping
-  ) {
-    try {
-      const discord = new DiscordCommunicationProvider({
-        botToken: discordCredentials.botToken,
-        applicationId: discordCredentials.applicationId,
-      });
-      const directMessage = await discord.createDirectMessage(
-        discordUserMapping.discordUserId,
-      );
-      return {
-        provider: 'discord',
-        channelId: directMessage.id,
-        botToken: discordCredentials.botToken,
-        applicationId: discordCredentials.applicationId,
-      };
-    } catch (error) {
-      console.warn(
-        '[setup-new] Failed to open a Discord DM with the linked setup user; trying another chat destination.',
-        error,
-      );
-    }
-  }
-  if (
-    discordCredentials.botToken &&
-    discordCredentials.applicationId &&
-    discordDestination
-  ) {
-    return {
-      provider: 'discord',
-      channelId: discordDestination.channelId,
-      guildId: discordDestination.guildId,
-      botToken: discordCredentials.botToken,
-      applicationId: discordCredentials.applicationId,
-    };
-  }
-
-  const { botToken } = await resolveTelegramRuntimeCredentials();
-
-  if (botToken) {
-    const chatId = await findTelegramPrimaryChatId();
-
-    if (chatId) {
-      return { provider: 'telegram', chatId, botToken };
-    }
-  }
-
-  const conversation = await findTeamsPrimaryConversation();
-
-  if (conversation) {
-    const teams =
-      await createTeamsCommunicationProviderFromRuntimeCredentials();
-
-    if (teams) {
-      return {
-        provider: 'teams',
-        conversationId: conversation.conversationId,
-        serviceUrl: conversation.serviceUrl,
-        teams,
-      };
-    }
-
-    console.warn(
-      '[setup-new] Skipping the Teams setup kickoff because Teams bot credentials could not be resolved; onboarding continues as a web-only task.',
-    );
-  }
-
-  return null;
-}
-
-export function didSuggestionSourceChange({
-  currentState,
-  nextRepositoryIds,
-  nextSetupGuidance,
-}: {
-  currentState: PersistedSetupNewState;
-  nextRepositoryIds: string[];
-  nextSetupGuidance: string | null;
-}): boolean {
-  const currentRepositoryIdSet = new Set(currentState.selectedRepositoryIds);
-  const nextRepositoryIdSet = new Set(nextRepositoryIds);
-
-  return (
-    currentState.setupGuidance !== nextSetupGuidance ||
-    currentRepositoryIdSet.size !== nextRepositoryIdSet.size ||
-    [...currentRepositoryIdSet].some(
-      (repositoryId) => !nextRepositoryIdSet.has(repositoryId),
-    )
-  );
-}
-
 async function getOnboardingTaskState(taskId: string | null) {
   if (!taskId) {
     return {
@@ -745,11 +722,6 @@ async function getOnboardingTaskState(taskId: string | null) {
   };
 }
 
-type SetupOnboardingComputeGate = {
-  waiting: boolean;
-  error: string | null;
-};
-
 function findAvailableSetupComputeProvider(
   computeSetup: SetupComputeStatus,
   provider: ComputeProvider,
@@ -761,58 +733,6 @@ function findAvailableSetupComputeProvider(
   return computeSetup.providers.find(
     (candidate) => candidate.provider === provider,
   );
-}
-
-async function getSetupOnboardingComputeGate(
-  setupNewState: PersistedSetupNewState,
-  executor: DatabaseOrTransaction,
-): Promise<SetupOnboardingComputeGate> {
-  const provider = setupNewState.computeProvider;
-
-  if (!provider || !isSetupProvisionableComputeProvider(provider)) {
-    return { waiting: false, error: null };
-  }
-
-  const persistedEnvVarNames =
-    await getPersistedEnvironmentVariableNames(executor);
-  const providerStatus = buildSetupComputeStatus({
-    runtimeEnv: process.env,
-    persistedEnvVarNames,
-    selectedProvider: provider,
-  }).providers.find((candidate) => candidate.provider === provider);
-
-  // A configured artifact means this is a non-blocking replacement. The old
-  // artifact remains active while provisioning publishes its successor.
-  if (providerStatus?.configSatisfied) {
-    return { waiting: false, error: null };
-  }
-
-  const provisioning = presentSetupNewComputeProvisioning(
-    getSetupNewComputeProvisioningState(setupNewState, provider),
-  );
-  const error =
-    provisioning?.status === 'failed'
-      ? `Sandbox provider provisioning failed: ${
-          provisioning.error ?? 'The worker artifact could not be prepared.'
-        } Retry provisioning in Settings → Sandboxes.`
-      : null;
-
-  return { waiting: true, error };
-}
-
-function enqueueSetupOnboardingTask(
-  input: Parameters<typeof enqueueTask>[0],
-  computeGate: SetupOnboardingComputeGate,
-) {
-  if (!computeGate.waiting) {
-    return enqueueTask(input);
-  }
-
-  return enqueueTask(input, {
-    enqueue: false,
-    initialTaskPhase: WAITING_FOR_SANDBOX_PROVIDER_TASK_PHASE,
-    initialError: computeGate.error,
-  });
 }
 
 async function getPersistedTaskSuggestionRows(suggestionIds?: string[]) {
@@ -1432,6 +1352,7 @@ export async function getSetupNewStatusCommand(auth: UserAuthSuccess) {
 
   const { userId } = auth;
   await purgeSavedDeploymentWorkerImage();
+  await importTrialInferenceKeyIfNeeded(userId);
 
   const [
     baseStatus,
@@ -1674,6 +1595,9 @@ export async function saveSetupNewModelConfigCommand(
   }
 
   const provider = getSetupModelProvider(providerId);
+  if (provider.id === ROOMOTE_INFERENCE_PROVIDER_ID) {
+    throw new Error('Roomote inference is managed by your hosting provider.');
+  }
   const isOauthProvider = provider.authKind === 'oauth';
 
   const [chatgptConnected, githubCopilotConnected, xaiSubscriptionConnected] =
@@ -2604,643 +2528,6 @@ export async function createSetupBootstrapSlackAppFromManifestCommand(input: {
   });
 }
 
-export async function saveSetupNewSelectionCommand(
-  auth: UserAuthSuccess,
-  input: {
-    repositoryIds: string[];
-    setupGuidance?: string;
-    selectedModelId?: string;
-  },
-) {
-  assertAdmin(auth);
-  const { userId } = auth;
-
-  if (input.repositoryIds.length === 0) {
-    throw new Error('Select at least one repository to continue.');
-  }
-
-  const { normalizedRepositoryIds } = await resolveSelectedRepositories(
-    input.repositoryIds,
-  );
-  const nextSetupGuidance = input.setupGuidance?.trim() || null;
-  const nextSelectedModelId = input.selectedModelId?.trim() || null;
-
-  const result = await db.transaction(async (tx) => {
-    await tx.execute(
-      sql`SELECT pg_advisory_xact_lock(hashtext('automation-recommendations'))`,
-    );
-    const currentState = await getPersistedSetupNewState(tx);
-    const setupNewState = normalizeSetupNewState({
-      ...currentState,
-      selectedRepositoryIds: normalizedRepositoryIds,
-      setupGuidance: nextSetupGuidance,
-      selectedModelId: nextSelectedModelId,
-      onboardingTaskId: null,
-      onboardingTaskStartedAt: null,
-      slackTeamId: null,
-      slackChannel: null,
-      slackThreadTs: null,
-      chatHandoffProvider: null,
-      chatHandoffChannelId: null,
-      chatHandoffThreadId: null,
-      chatHandoffServiceUrl: null,
-      suggestionTaskId: null,
-      suggestionTaskStartedAt: null,
-      suggestionGenerationTriggeredAt: null,
-      lastInteractedByUserId: userId,
-    });
-
-    await savePersistedSetupNewState(setupNewState, tx);
-    await clearQueuedSetupTasks(tx);
-
-    if (
-      didSuggestionSourceChange({
-        currentState,
-        nextRepositoryIds: normalizedRepositoryIds,
-        nextSetupGuidance,
-      })
-    ) {
-      await clearTaskSuggestions(currentState.suggestionTaskId, tx);
-    }
-
-    return {
-      setupNewState,
-    };
-  });
-
-  return result;
-}
-
-export async function prefetchSetupRecommendationSignalsCommand(
-  auth: UserAuthSuccess,
-  _input: { repositoryIds: string[] },
-) {
-  assertAdmin(auth);
-  const { normalizedRepositoryIds } =
-    await resolveConnectedRecommendationRepositories();
-  await enqueueAutomationSignalPrefetch(normalizedRepositoryIds);
-  return { repositoryIds: normalizedRepositoryIds };
-}
-
-export async function startSetupNewOnboardingTaskCommand(
-  auth: UserAuthSuccess,
-) {
-  assertAdmin(auth);
-  const { userId } = auth;
-  const {
-    normalizedRepositoryIds: recommendationRepositoryIds,
-    connectedRepositories,
-  } = await resolveConnectedRecommendationRepositories();
-  const recommendationFingerprint = buildAutomationRecommendationFingerprint(
-    recommendationRepositoryIds,
-    connectedRepositories[0]?.sourceControlProvider ?? null,
-  );
-  const startResult = await db.transaction(async (tx) => {
-    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext('setup-new'))`);
-
-    const currentState = await getPersistedSetupNewState(tx);
-
-    if (currentState.onboardingTaskId) {
-      const existingRecommendationBatch =
-        currentState.automationRecommendations;
-      const recommendationBatch =
-        existingRecommendationBatch?.inputFingerprint ===
-          recommendationFingerprint &&
-        existingRecommendationBatch.status !== 'failed'
-          ? existingRecommendationBatch
-          : createPendingAutomationRecommendationBatch(
-              recommendationFingerprint,
-              existingRecommendationBatch,
-            );
-      let setupNewState = currentState;
-      if (recommendationBatch !== existingRecommendationBatch) {
-        setupNewState = normalizeSetupNewState({
-          ...currentState,
-          automationRecommendations: recommendationBatch,
-        });
-        await savePersistedSetupNewState(setupNewState, tx);
-      }
-      return {
-        taskId: currentState.onboardingTaskId,
-        startedAt: currentState.onboardingTaskStartedAt,
-        launchedNewOnboardingTask: false as const,
-        recommendationBatch,
-        repositoryIds: recommendationRepositoryIds,
-        setupNewState,
-        nextStep: 'invoke' as const,
-      };
-    }
-
-    if (currentState.computeProvider) {
-      const persistedRuntimeComputeConfig =
-        await getPersistedRuntimeComputeConfig(tx);
-      const computeSetup = buildSetupComputeStatus({
-        runtimeEnv: process.env,
-        persistedComputeConfig: persistedRuntimeComputeConfig,
-        selectedProvider: currentState.computeProvider,
-      });
-
-      if (computeSetup.selectedProvider !== currentState.computeProvider) {
-        throw new Error(
-          'Selected sandbox provider is no longer available. Choose another provider before starting setup.',
-        );
-      }
-    }
-
-    const { normalizedRepositoryIds, selectedRepositories } =
-      await resolveSelectedRepositories(currentState.selectedRepositoryIds);
-    const repositoryEmptyStates = await resolveRepositorySelectionEmptyStates(
-      selectedRepositories.map((repository) => repository.id),
-    );
-
-    if (selectedRepositories.length === 0) {
-      throw new Error('Select at least one repository before starting setup.');
-    }
-
-    const existingRecommendationBatch = currentState.automationRecommendations;
-    const recommendationBatch =
-      existingRecommendationBatch?.inputFingerprint ===
-        recommendationFingerprint &&
-      existingRecommendationBatch.status !== 'failed'
-        ? existingRecommendationBatch
-        : createPendingAutomationRecommendationBatch(
-            recommendationFingerprint,
-            existingRecommendationBatch,
-          );
-
-    const selectedRepositoryFullNames = selectedRepositories.map(
-      (repository) => repository.fullName,
-    );
-    const onboardingTaskTitle = buildSetupEnvironmentTaskTitle(
-      selectedRepositoryFullNames,
-    );
-    let workspacePayload: ReturnType<typeof buildSetupNewWorkspacePayload>;
-    try {
-      workspacePayload = buildSetupNewWorkspacePayload(
-        selectedRepositoryFullNames,
-      );
-    } catch (error) {
-      throw new TRPCError({
-        code: 'BAD_REQUEST',
-        message:
-          error instanceof Error
-            ? error.message
-            : 'The selected repositories are invalid.',
-        cause: error,
-      });
-    }
-    // Stamp the provider explicitly: dequeue defaults to GitHub when the
-    // payload omits it, which breaks non-GitHub deployments.
-    const setupSourceControlProvider =
-      selectedRepositories[0]?.sourceControlProvider;
-    const emptyRepositoryFullNames = selectedRepositories
-      .filter((repository) => repositoryEmptyStates.get(repository.id) === true)
-      .map((repository) => repository.fullName);
-    const prompt = appendEnvironmentDefinitionGuidance(
-      buildSetupNewKickoffPrompt(
-        selectedRepositoryFullNames,
-        emptyRepositoryFullNames.length > 0
-          ? { emptyRepositoryFullNames }
-          : undefined,
-      ),
-      currentState.setupGuidance,
-    );
-    const modelSelection = resolveEvalHarnessSelection({
-      model: currentState.selectedModelId ?? undefined,
-    });
-
-    if (!modelSelection.ok) {
-      throw new Error(modelSelection.error);
-    }
-
-    const computeGate = await getSetupOnboardingComputeGate(currentState, tx);
-
-    const handoffTarget = await resolveSetupSlackHandoffTarget(
-      {
-        userId,
-      },
-      tx,
-    );
-
-    if (!handoffTarget) {
-      // No connected Slack workspace (or the admin never linked their Slack
-      // account). Fall back to the next chat surface (Discord, Telegram, then Teams)
-      // so the kickoff still gets a real conversation thread; only when no
-      // chat surface exists does onboarding run as a web-only task whose
-      // progress stays visible in the setup wizard's task panel.
-      const fallbackTarget =
-        await resolveSetupChatFallbackHandoffTarget(userId);
-
-      if (fallbackTarget) {
-        const kickoffMessage = buildSetupKickoffText();
-        let kickoffMessageId: string | null = null;
-        let kickoffChannelId: string | null = null;
-        let kickoffThreadId: string | null = null;
-
-        if (fallbackTarget.provider === 'discord') {
-          const discord = new DiscordCommunicationProvider({
-            botToken: fallbackTarget.botToken,
-            applicationId: fallbackTarget.applicationId,
-          });
-          try {
-            if (fallbackTarget.guildId) {
-              const thread = await discord.createTaskThread({
-                channelId: fallbackTarget.channelId,
-                name: 'Set up Roomote',
-                initialText: kickoffMessage,
-              });
-              if (thread.messageId) {
-                kickoffMessageId = thread.messageId;
-                kickoffChannelId = thread.parentChannelId;
-                kickoffThreadId = thread.channelId;
-              }
-            } else {
-              const posted = await discord.postMessage({
-                channelId: fallbackTarget.channelId,
-                text: kickoffMessage,
-                textFormat: 'markdown',
-              });
-              kickoffMessageId = posted.messageId ?? null;
-              kickoffChannelId = posted.messageId
-                ? fallbackTarget.channelId
-                : null;
-            }
-            if (!kickoffMessageId) {
-              console.warn(
-                '[setup-new] The Discord setup kickoff returned no message id; onboarding continues as a web-only task.',
-              );
-            }
-          } catch (error) {
-            console.warn(
-              '[setup-new] Failed to create a Discord setup thread; onboarding continues as a web-only task.',
-              error,
-            );
-          }
-        } else if (fallbackTarget.provider === 'telegram') {
-          const telegram = new TelegramCommunicationProvider({
-            botToken: fallbackTarget.botToken,
-          });
-          try {
-            const { hasTopicsEnabled } = await telegram.getBotInfo();
-            if (hasTopicsEnabled) {
-              const topic = await telegram.createForumTopic({
-                channelId: fallbackTarget.chatId,
-                name: 'Set up Roomote',
-              });
-              kickoffThreadId = topic.messageThreadId;
-            }
-          } catch (error) {
-            console.warn(
-              '[setup-new] Could not create a Telegram topic for the setup task; falling back to the primary chat.',
-              error,
-            );
-          }
-          const posted = await telegram.postMessage({
-            channelId: fallbackTarget.chatId,
-            ...(kickoffThreadId ? { threadId: kickoffThreadId } : {}),
-            text: kickoffMessage,
-            textFormat: 'markdown',
-          });
-
-          if (!posted.messageId) {
-            throw new Error(
-              'Roomote could not post the Telegram setup kickoff.',
-            );
-          }
-
-          kickoffMessageId = posted.messageId;
-          kickoffChannelId = fallbackTarget.chatId;
-        } else {
-          // Teams is best-effort: when the kickoff post fails, onboarding
-          // continues as a web-only task instead of failing setup, and the
-          // persisted handoff fields stay null so Teams never looks
-          // connected without a delivered kickoff.
-          try {
-            const posted = await fallbackTarget.teams.postMessage({
-              channelId: fallbackTarget.conversationId,
-              serviceUrl: fallbackTarget.serviceUrl,
-              text: kickoffMessage,
-              textFormat: 'markdown',
-            });
-
-            if (posted.messageId) {
-              kickoffMessageId = posted.messageId;
-              kickoffChannelId = fallbackTarget.conversationId;
-            } else {
-              console.warn(
-                '[setup-new] The Teams setup kickoff post returned no message id; onboarding continues as a web-only task.',
-              );
-            }
-          } catch (error) {
-            console.warn(
-              '[setup-new] Failed to post the Teams setup kickoff; onboarding continues as a web-only task.',
-              error,
-            );
-          }
-        }
-
-        if (kickoffMessageId && kickoffChannelId) {
-          const startedAt = new Date().toISOString();
-          const launchResult = await enqueueSetupOnboardingTask(
-            {
-              title: onboardingTaskTitle,
-              task: {
-                ...(modelSelection.harness
-                  ? { harness: modelSelection.harness }
-                  : {}),
-                type: TaskPayloadKind.StandardTask,
-                payload: {
-                  ...workspacePayload,
-                  ...(setupSourceControlProvider
-                    ? { sourceControlProvider: setupSourceControlProvider }
-                    : {}),
-                  description: prompt,
-                  visibleInTranscript: false,
-                  communicationProvider: fallbackTarget.provider,
-                  communicationChannelId: kickoffChannelId,
-                  communicationMessageId: kickoffMessageId,
-                  ...(kickoffThreadId
-                    ? {
-                        communicationThreadId: kickoffThreadId,
-                        ...(fallbackTarget.provider === 'telegram'
-                          ? { telegramTaskTopic: true }
-                          : {}),
-                        ...(fallbackTarget.provider === 'discord'
-                          ? { discordTaskThread: true }
-                          : {}),
-                      }
-                    : {}),
-                  ...(fallbackTarget.provider === 'discord' &&
-                  fallbackTarget.guildId
-                    ? { communicationGuildId: fallbackTarget.guildId }
-                    : {}),
-                  ...(fallbackTarget.provider === 'teams'
-                    ? {
-                        communicationThreadId: kickoffMessageId,
-                        communicationServiceUrl: fallbackTarget.serviceUrl,
-                      }
-                    : {}),
-                  ...(modelSelection.harnessModelOverrides
-                    ? {
-                        harnessModelOverrides:
-                          modelSelection.harnessModelOverrides,
-                      }
-                    : {}),
-                },
-              },
-              initiator: { kind: 'user', userId },
-              workflow: 'setup_onboarding',
-              surface: 'web',
-              trigger: 'manual',
-            },
-            computeGate,
-          );
-
-          const setupNewState = normalizeSetupNewState({
-            ...currentState,
-            selectedRepositoryIds: normalizedRepositoryIds,
-            setupGuidance: currentState.setupGuidance ?? null,
-            onboardingTaskId: launchResult.taskId,
-            onboardingTaskStartedAt: startedAt,
-            slackTeamId: null,
-            slackChannel: null,
-            slackThreadTs: null,
-            chatHandoffProvider: fallbackTarget.provider,
-            chatHandoffChannelId: kickoffChannelId,
-            chatHandoffThreadId:
-              kickoffThreadId ??
-              (fallbackTarget.provider === 'teams' ? kickoffMessageId : null),
-            chatHandoffServiceUrl:
-              fallbackTarget.provider === 'teams'
-                ? fallbackTarget.serviceUrl
-                : null,
-            automationRecommendations: recommendationBatch,
-            lastInteractedByUserId: userId,
-          });
-          await savePersistedSetupNewState(setupNewState, tx);
-
-          return {
-            taskId: launchResult.taskId,
-            startedAt,
-            launchedNewOnboardingTask: true as const,
-            recommendationBatch,
-            repositoryIds: recommendationRepositoryIds,
-            setupNewState,
-            nextStep: 'invoke' as const,
-          };
-        }
-      }
-
-      const startedAt = new Date().toISOString();
-      const launchResult = await enqueueSetupOnboardingTask(
-        {
-          title: onboardingTaskTitle,
-          task: {
-            ...(modelSelection.harness
-              ? { harness: modelSelection.harness }
-              : {}),
-            type: TaskPayloadKind.StandardTask,
-            payload: {
-              ...workspacePayload,
-              ...(setupSourceControlProvider
-                ? { sourceControlProvider: setupSourceControlProvider }
-                : {}),
-              description: prompt,
-              visibleInTranscript: false,
-              ...(modelSelection.harnessModelOverrides
-                ? {
-                    harnessModelOverrides: modelSelection.harnessModelOverrides,
-                  }
-                : {}),
-            },
-          },
-          initiator: { kind: 'user', userId },
-          workflow: 'setup_onboarding',
-          surface: 'web',
-          trigger: 'manual',
-        },
-        computeGate,
-      );
-
-      const setupNewState = normalizeSetupNewState({
-        ...currentState,
-        selectedRepositoryIds: normalizedRepositoryIds,
-        setupGuidance: currentState.setupGuidance ?? null,
-        onboardingTaskId: launchResult.taskId,
-        onboardingTaskStartedAt: startedAt,
-        slackTeamId: null,
-        slackChannel: null,
-        slackThreadTs: null,
-        chatHandoffProvider: null,
-        chatHandoffChannelId: null,
-        chatHandoffThreadId: null,
-        chatHandoffServiceUrl: null,
-        automationRecommendations: recommendationBatch,
-        lastInteractedByUserId: userId,
-      });
-      await savePersistedSetupNewState(setupNewState, tx);
-
-      return {
-        taskId: launchResult.taskId,
-        startedAt,
-        launchedNewOnboardingTask: true as const,
-        recommendationBatch,
-        repositoryIds: recommendationRepositoryIds,
-        setupNewState,
-        nextStep: 'invoke' as const,
-      };
-    }
-
-    const slack = new SlackNotifier(handoffTarget.botAccessToken);
-    const slackChannel = await slack.openConversation(
-      handoffTarget.slackUserId,
-    );
-
-    if (!slackChannel) {
-      throw new Error('Roomote could not open a Slack DM for setup.');
-    }
-
-    const kickoffMessage = buildSetupKickoffText({
-      userMention: `<@${handoffTarget.slackUserId}>`,
-    });
-    const slackThreadTs = await slack.postMessage({
-      channel: slackChannel,
-      text: kickoffMessage,
-    });
-
-    if (!slackThreadTs) {
-      throw new Error('Roomote could not post the Slack setup kickoff.');
-    }
-
-    const startedAt = new Date().toISOString();
-    let launchResult: Awaited<ReturnType<typeof enqueueTask>>;
-
-    try {
-      launchResult = await enqueueSetupOnboardingTask(
-        {
-          title: onboardingTaskTitle,
-          task: {
-            ...(modelSelection.harness
-              ? { harness: modelSelection.harness }
-              : {}),
-            type: TaskPayloadKind.SlackAppMention,
-            payload: {
-              ...workspacePayload,
-              ...(setupSourceControlProvider
-                ? { sourceControlProvider: setupSourceControlProvider }
-                : {}),
-              channel: slackChannel,
-              user: handoffTarget.slackUserId,
-              text: prompt,
-              ts: slackThreadTs,
-              thread_ts: slackThreadTs,
-              webPath: '/setup',
-              visibleInTranscript: false,
-              ...(modelSelection.harnessModelOverrides
-                ? {
-                    harnessModelOverrides: modelSelection.harnessModelOverrides,
-                  }
-                : {}),
-            },
-          },
-          initiator: { kind: 'user', userId },
-          workflow: 'setup_onboarding',
-          surface: 'slack',
-          trigger: 'manual',
-          channels: {
-            slackChannelId: slackChannel,
-            slackThreadTs,
-          },
-        },
-        computeGate,
-      );
-    } catch (error) {
-      await slack.deleteMessage({ channel: slackChannel, ts: slackThreadTs });
-      throw error;
-    }
-
-    const setupNewState = normalizeSetupNewState({
-      ...currentState,
-      selectedRepositoryIds: normalizedRepositoryIds,
-      setupGuidance: currentState.setupGuidance ?? null,
-      onboardingTaskId: launchResult.taskId,
-      onboardingTaskStartedAt: startedAt,
-      slackTeamId: handoffTarget.slackTeamId,
-      slackChannel,
-      slackThreadTs,
-      chatHandoffProvider: 'slack',
-      chatHandoffChannelId: slackChannel,
-      chatHandoffThreadId: slackThreadTs,
-      chatHandoffServiceUrl: null,
-      automationRecommendations: recommendationBatch,
-      lastInteractedByUserId: userId,
-    });
-    await savePersistedSetupNewState(setupNewState, tx);
-
-    await recordSlackConversationMessageBestEffort({
-      logContext: 'setupNew.startOnboardingTask',
-      subjectUserId: userId,
-      slackTeamId: handoffTarget.slackTeamId,
-      subjectSlackUserId: handoffTarget.slackUserId,
-      slackChannelId: slackChannel,
-      conversationKind: 'dm',
-      messageTs: slackThreadTs,
-      direction: 'outbound',
-      authorKind: 'roomote',
-      source: 'setup_dm',
-      text: kickoffMessage,
-      taskId: launchResult.taskId,
-      runId: launchResult.id,
-    });
-
-    return {
-      taskId: launchResult.taskId,
-      startedAt,
-      launchedNewOnboardingTask: true as const,
-      recommendationBatch,
-      repositoryIds: recommendationRepositoryIds,
-      setupNewState,
-      nextStep: 'invoke' as const,
-    };
-  });
-
-  if (startResult.recommendationBatch?.status === 'pending') {
-    try {
-      await enqueueAutomationRecommendations({
-        fingerprint: startResult.recommendationBatch.inputFingerprint,
-        repositoryIds: startResult.repositoryIds,
-      });
-    } catch (error) {
-      console.error(
-        '[startSetupNewOnboardingTaskCommand] Failed to enqueue recommendation scoring:',
-        error,
-      );
-      await markAutomationRecommendationBatchFailed(
-        startResult.recommendationBatch.inputFingerprint,
-        'recommendation_queue_unavailable',
-      );
-    }
-  }
-
-  try {
-    await triggerTaskSuggestionsCommand(auth);
-  } catch (error) {
-    console.error(
-      `[startSetupNewOnboardingTaskCommand] Failed to trigger task suggestions: ${
-        error instanceof Error ? error.message : String(error)
-      }`,
-    );
-  }
-
-  return {
-    taskId: startResult.taskId,
-    startedAt: startResult.startedAt,
-    recommendationBatch: startResult.recommendationBatch,
-    setupNewState: startResult.setupNewState,
-    nextStep: startResult.nextStep,
-  };
-}
-
 export async function setSetupRecommendationEnabledCommand(
   auth: UserAuthSuccess,
   input: { id: string; enabled: boolean },
@@ -3677,99 +2964,6 @@ export async function dismissSetupRecommendationsCardCommand(
       tx,
     );
     return batch;
-  });
-}
-
-export async function cancelSetupNewOnboardingTaskCommand(
-  auth: UserAuthSuccess,
-) {
-  assertAdmin(auth);
-
-  const currentState = await getPersistedSetupNewState();
-
-  if (!currentState.onboardingTaskId) {
-    return { success: true as const };
-  }
-
-  const jobs = await db
-    .select({
-      id: taskRuns.id,
-      status: taskRuns.status,
-    })
-    .from(taskRuns)
-    .where(eq(taskRuns.taskId, currentState.onboardingTaskId));
-
-  const activeRunIds = jobs
-    .filter((job) => !isExitedRunStatus(job.status))
-    .map((job) => job.id);
-
-  if (activeRunIds.length > 0) {
-    const endedAt = new Date();
-
-    const canceledRuns = await db.transaction(async (tx) => {
-      const canceled = await tx
-        .update(taskRuns)
-        .set({
-          status: RunStatus.Canceled,
-          canceledAt: endedAt,
-        })
-        .where(inArray(taskRuns.id, activeRunIds))
-        .returning({ id: taskRuns.id });
-
-      await Promise.all(
-        canceled.map((run) =>
-          markTaskStartParallelCountEndedAt(tx, {
-            runId: run.id,
-            endedAt,
-          }),
-        ),
-      );
-
-      return canceled;
-    });
-
-    for (const run of canceledRuns) {
-      void captureTaskSettled(run.id, 'canceled');
-    }
-  }
-
-  return { success: true as const };
-}
-
-export async function resetSetupNewSelectionCommand(auth: UserAuthSuccess) {
-  assertAdmin(auth);
-
-  const { userId } = auth;
-
-  return db.transaction(async (tx) => {
-    const currentState = await getPersistedSetupNewState(tx);
-    const setupNewState = normalizeSetupNewState({
-      ...currentState,
-      selectedRepositoryIds: [],
-      setupGuidance: null,
-      onboardingTaskId: null,
-      onboardingTaskStartedAt: null,
-      slackTeamId: null,
-      slackChannel: null,
-      slackThreadTs: null,
-      chatHandoffProvider: null,
-      chatHandoffChannelId: null,
-      chatHandoffThreadId: null,
-      chatHandoffServiceUrl: null,
-      suggestionTaskId: null,
-      suggestionTaskStartedAt: null,
-      suggestionGenerationTriggeredAt: null,
-      automationRecommendations: null,
-      lastInteractedByUserId: userId,
-    });
-
-    await savePersistedSetupNewState(setupNewState, tx);
-    await clearTaskSuggestions(currentState.suggestionTaskId, tx);
-    await clearQueuedSetupTasks(tx);
-
-    return {
-      setupNewState,
-    };
   });
 }
 

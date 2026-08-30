@@ -13,7 +13,7 @@ type FastAgentTaskToolResult = Record<string, unknown>;
 
 type ResolveFastAgentAuthToken = () => Promise<string>;
 
-interface FastAgentTaskApiContext {
+export interface FastAgentTaskApiContext {
   apiBaseUrl?: string;
   getAuthToken?: ResolveFastAgentAuthToken;
   userId: string;
@@ -80,7 +80,8 @@ function buildFastAgentTaskApiUrl({
   path: string;
   query?: Record<string, string | number | undefined>;
 }): string {
-  const url = new URL(path, `${resolvedApiBaseUrl}/`);
+  const relativePath = path.replace(/^\/+/, '');
+  const url = new URL(relativePath, `${resolvedApiBaseUrl}/`);
 
   for (const [key, value] of Object.entries(query ?? {})) {
     if (value === undefined || value === '') {
@@ -185,6 +186,52 @@ async function callFastAgentTaskApi({
   }
 }
 
+export async function sendFastAgentTaskMessage(
+  context: FastAgentTaskApiContext,
+  params: { taskId: string; message: string; images?: string[] },
+): Promise<FastAgentTaskToolResult> {
+  return callFastAgentTaskApi({
+    ...context,
+    method: 'POST',
+    path: `${FAST_AGENT_TASKS_API_PATH}/${params.taskId}/steer_message`,
+    body: {
+      message: params.message,
+      ...(params.images?.length ? { images: params.images } : {}),
+      senderMode: 'fast_agent',
+    },
+  });
+}
+
+export async function sendFastAgentTaskMessageOnce(
+  context: FastAgentTaskApiContext,
+  params: {
+    taskId: string;
+    message: string;
+    clientMessageId: string;
+  },
+): Promise<FastAgentTaskToolResult> {
+  return callFastAgentTaskApi({
+    ...context,
+    method: 'POST',
+    path: `${FAST_AGENT_TASKS_API_PATH}/${params.taskId}/send_message`,
+    body: {
+      message: params.message,
+      clientMessageId: params.clientMessageId,
+    },
+  });
+}
+
+export async function cancelFastAgentTask(
+  context: FastAgentTaskApiContext,
+  taskId: string,
+): Promise<FastAgentTaskToolResult> {
+  return callFastAgentTaskApi({
+    ...context,
+    method: 'POST',
+    path: `${FAST_AGENT_TASKS_API_PATH}/${taskId}/cancel`,
+  });
+}
+
 const fastAgentTaskStatusSchema = z.enum(['active', 'completed', 'all']);
 const fastAgentTaskOrderSchema = z.enum(['asc', 'desc']);
 const fastAgentTaskTypeSchema = z.enum(['standard']);
@@ -227,9 +274,14 @@ export function createFastAgentTaskTools(
           type: fastAgentTaskTypeSchema
             .optional()
             .describe('Optional task type override'),
+          model: nonEmptyTrimmedStringSchema
+            .optional()
+            .describe(
+              'Optional exact deployment-enabled model ID. Omit it to use the deployment default',
+            ),
         })
         .strict(),
-      execute: async ({ prompt, environmentId, type }) =>
+      execute: async ({ prompt, environmentId, type, model }) =>
         callFastAgentTaskApi({
           ...context,
           method: 'POST',
@@ -241,6 +293,7 @@ export function createFastAgentTaskTools(
               ? { environmentId }
               : {}),
             ...(type ? { type } : {}),
+            ...(model ? { model } : {}),
           },
         }),
     }),
@@ -310,7 +363,8 @@ export function createFastAgentTaskTools(
         }),
     }),
     send_task_message: tool({
-      description: 'Send a follow-up message to a running Roomote task.',
+      description:
+        'Send a follow-up message to an active or resumable Roomote task.',
       inputSchema: z
         .object({
           taskId: nonEmptyTrimmedStringSchema.describe(
@@ -322,12 +376,7 @@ export function createFastAgentTaskTools(
         })
         .strict(),
       execute: async ({ taskId, message }) =>
-        callFastAgentTaskApi({
-          ...context,
-          method: 'POST',
-          path: `${FAST_AGENT_TASKS_API_PATH}/${taskId}/send_message`,
-          body: { message },
-        }),
+        sendFastAgentTaskMessage(context, { taskId, message }),
     }),
     cancel_task: tool({
       description: 'Cancel a running Roomote task.',
@@ -338,12 +387,7 @@ export function createFastAgentTaskTools(
           ),
         })
         .strict(),
-      execute: async ({ taskId }) =>
-        callFastAgentTaskApi({
-          ...context,
-          method: 'POST',
-          path: `${FAST_AGENT_TASKS_API_PATH}/${taskId}/cancel`,
-        }),
+      execute: async ({ taskId }) => cancelFastAgentTask(context, taskId),
     }),
   };
 }

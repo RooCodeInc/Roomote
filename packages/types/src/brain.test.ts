@@ -1,21 +1,98 @@
-import { BRAIN_MCP_INSTRUCTIONS } from './brain';
+import {
+  BRAIN_MCP_INSTRUCTIONS,
+  BRAIN_MCP_READ_INSTRUCTIONS,
+  BRAIN_NAMESPACES,
+  brainNamespaceLabel,
+  resolveBrainNamespaceId,
+  resolveBrainSourceIdForCollector,
+} from './brain';
 
-describe('BRAIN_MCP_INSTRUCTIONS', () => {
-  it('makes Brain recall a sequential gate before overlapping sources', () => {
+describe('Brain MCP instructions', () => {
+  it('retains Brain-specific recall, tool, provenance, and write guidance', () => {
+    expect(BRAIN_MCP_INSTRUCTIONS).toContain(
+      'Treat Brain recall as a sequential preflight',
+    );
     expect(BRAIN_MCP_INSTRUCTIONS).toContain(
       'run one `query` about the area you are about to touch and wait for its result',
     );
-    expect(BRAIN_MCP_INSTRUCTIONS).toContain(
-      'Never issue the Brain query and an overlapping Slack, GitHub, meeting, task-history, or pull-request lookup in the same parallel batch',
+    expect(BRAIN_MCP_READ_INSTRUCTIONS).toContain(
+      "never expose Brain's `source` field or other internal provenance metadata",
+    );
+    expect(BRAIN_MCP_READ_INSTRUCTIONS).toContain(
+      'When recalled context materially shapes the path or approach you choose, casually and concisely mention the specific insight that informed it; do not merely say that memory or history was helpful',
+    );
+    expect(BRAIN_MCP_INSTRUCTIONS).toContain('save_task_memory');
+  });
+});
+
+describe('resolveBrainNamespaceId', () => {
+  it('buckets a page by the namespace its slug was written under', () => {
+    expect(resolveBrainNamespaceId('slack/T123/C456/2026-01-02/1-2')).toBe(
+      'slack',
+    );
+    expect(resolveBrainNamespaceId('people/roomote-member-abc')).toBe('people');
+    expect(resolveBrainNamespaceId('daily/digests/2026-01-02')).toBe('daily');
+    expect(resolveBrainNamespaceId('linear/org/issues/issue-id')).toBe(
+      'linear',
+    );
+    expect(resolveBrainNamespaceId('discord/123/456/2026-01-02/000')).toBe(
+      'discord',
     );
   });
 
-  it('allows narrow live-source fallback only for an explicit coverage or freshness gap', () => {
-    expect(BRAIN_MCP_INSTRUCTIONS).toContain(
-      'the Brain lacks enough coverage, freshness beyond its collection window could materially change the answer, or the user explicitly asks for live verification',
+  it('does not invent a namespace for an unrecognised prefix', () => {
+    expect(resolveBrainNamespaceId('scratch/whatever')).toBe('other');
+    expect(brainNamespaceLabel('other')).toBe('Other');
+  });
+
+  it('provides a label for every registered namespace', () => {
+    for (const namespace of BRAIN_NAMESPACES) {
+      expect(namespace.label).toBeTruthy();
+    }
+  });
+});
+
+describe('resolveBrainSourceIdForCollector', () => {
+  it('survives the version suffix collectors bump when page semantics change', () => {
+    expect(
+      resolveBrainSourceIdForCollector(
+        'slack-public-channels:entity-timeline-v2',
+      ),
+    ).toBe('slack-public-channels');
+    expect(
+      resolveBrainSourceIdForCollector('github-issues:occurrence-date-v3'),
+    ).toBe('github-issues');
+    expect(
+      resolveBrainSourceIdForCollector('linear-issues:entity-census-v1'),
+    ).toBe('linear-issues');
+  });
+
+  it('folds a fanned-out collector’s per-partition rows into one source', () => {
+    expect(
+      resolveBrainSourceIdForCollector(
+        'slack-public-channels:entity-timeline-v2:T123/C456',
+      ),
+    ).toBe('slack-public-channels');
+    expect(resolveBrainSourceIdForCollector('notion-pages:incremental')).toBe(
+      'notion-pages',
     );
-    expect(BRAIN_MCP_INSTRUCTIONS).toContain(
-      'do not sweep an entire integration when the Brain already answers the question',
-    );
+    expect(
+      resolveBrainSourceIdForCollector(
+        'discord-public-channels:entity-timeline-v1:123/456',
+      ),
+    ).toBe('discord-public-channels');
+  });
+
+  it('claims nothing for state rows that are not a source', () => {
+    expect(resolveBrainSourceIdForCollector('roomote-daily-digest')).toBeNull();
+  });
+
+  it('maps the outbox-fed checkpoints back to their sources', () => {
+    expect(
+      resolveBrainSourceIdForCollector('task-memory:effective-date-v2'),
+    ).toBe('task-memories');
+    expect(
+      resolveBrainSourceIdForCollector('pull-request-facts:occurrence-date-v3'),
+    ).toBe('pull-request-facts');
   });
 });

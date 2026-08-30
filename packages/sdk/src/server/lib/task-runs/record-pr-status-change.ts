@@ -18,6 +18,7 @@ import {
 } from '@roomote/types';
 
 import { recordTaskMessageEnvelope } from './record-task-message-envelope';
+import { notifyFastAgentParentOnPullRequestStatusChanged } from './notify-fast-agent-parent-on-pull-request-status-changed';
 
 const STATUS_RECORDED_TTL_SECONDS = 30 * 24 * 60 * 60;
 
@@ -26,6 +27,7 @@ export const recordPrStatusChangeInTaskHistoryInputSchema = z.object({
   prNumber: z.number().int().positive(),
   prTitle: z.string().default('untitled'),
   prUrl: z.string().min(1),
+  targetBranch: z.string().trim().min(1).optional(),
   status: z.enum(['merged', 'closed']),
   actorLogin: z.string().default('someone'),
   sourceControlProvider: sourceControlProviderSchema.optional(),
@@ -184,14 +186,28 @@ export async function recordPrStatusChangeInTaskHistory(
     try {
       const latestRun = await db.query.taskRuns.findFirst({
         where: eq(taskRuns.taskId, taskId),
-        orderBy: [desc(taskRuns.createdAt)],
-        columns: { id: true },
+        orderBy: [desc(taskRuns.createdAt), desc(taskRuns.id)],
+        columns: { id: true, taskId: true, payload: true },
       });
 
       if (!latestRun) {
         await redis.del(claimKey).catch(() => undefined);
         continue;
       }
+
+      await notifyFastAgentParentOnPullRequestStatusChanged({
+        run: latestRun,
+        pullRequest: {
+          provider: sourceControlProvider,
+          repository: parsedInput.repository,
+          number: parsedInput.prNumber,
+          title: parsedInput.prTitle,
+          url: parsedInput.prUrl,
+          targetBranch: parsedInput.targetBranch,
+          status: parsedInput.status,
+        },
+        actorLogin: parsedInput.actorLogin,
+      });
 
       await recordTaskMessageEnvelope({
         runId: latestRun.id,
@@ -215,6 +231,7 @@ export async function recordPrStatusChangeInTaskHistory(
             repository: parsedInput.repository,
             prNumber: parsedInput.prNumber,
             prUrl: parsedInput.prUrl,
+            targetBranch: parsedInput.targetBranch,
             actorLogin: parsedInput.actorLogin,
           },
           visibleInTranscript: true,

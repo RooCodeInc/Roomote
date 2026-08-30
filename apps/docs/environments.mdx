@@ -32,10 +32,11 @@ A good first environment usually makes at least one of these possible:
 
 ## How the first environment is created
 
-During setup, you pick the repository or repositories for the first
-environment and add any setup guidance you already know. Roomote then starts
-an environment setup task that figures out how to run the app locally and
-prepare the workspace for future tasks.
+Open **Settings > Environments > New** and choose the repository or repositories
+for the environment. Add any setup guidance you already know, then select
+**Start Agent** so Roomote can define a reusable workspace configuration. If
+you already know the configuration you need, select **Enter YAML directly**
+instead.
 
 An environment can combine repositories from different source-control
 providers, such as GitHub and GitLab. Each provider must have working
@@ -44,19 +45,18 @@ workspace. Repositories connected through GitHub must also belong to the same
 GitHub App installation. Repository full names must be unique within the
 environment, including across source-control connections.
 
-The setup task is meant to produce a working environment Roomote can reuse. If
-it cannot finish, adjust the input and try again from
-**Settings > Environments**.
+If the resulting environment needs changes, edit it from
+**Settings > Environments** and update the repositories, guidance, services, or
+YAML definition there.
 
 ## Start from a brand-new repository
 
 You do not need an existing codebase to set up an environment. From
-**Settings > Environments > New** (or the onboarding repo-selection step),
-choose **Create a new repository** to open github.com with the right owner
-pre-filled — either a brand-new repository or a fork of an existing one by
-URL. Once you create it on GitHub, it appears in the repository list
-automatically; if the GitHub App only has access to selected repositories,
-grant it access to the new repository first.
+**Settings > Environments > New**, choose **Create a new repository** to open
+github.com with the right owner pre-filled — either a brand-new repository or a
+fork of an existing one by URL. Once you create it on GitHub, it appears in the
+repository list automatically; if the GitHub App only has access to selected
+repositories, grant it access to the new repository first.
 
 An empty repository is fine. When you start setup against a repository with
 no commits, Roomote pushes a minimal initial commit (a README and a
@@ -79,11 +79,12 @@ already started with.
 
 ## Edit an environment
 
-When you edit an existing environment, Roomote gives you three views of the
+When you edit an existing environment, Roomote gives you four views of the
 same configuration:
 
 - **Editor** is the visual form for common environment settings.
 - **YAML** is the raw configuration for precise edits and advanced options.
+- **Diff** compares the saved configuration with your editable YAML draft.
 - **Preview** shows the saved structure in a more readable form before you use
   it for new tasks.
 

@@ -8,6 +8,7 @@ import {
   getTaskGoalForRun,
   isNotNull,
   releaseTaskGoalContinuationForRun,
+  sessionTasks,
   slackInstallations,
   taskPullRequests,
 } from '@roomote/db/server';
@@ -55,7 +56,10 @@ import {
   type EnqueueTaskInput,
 } from '@roomote/cloud-agents/server';
 import {
+  activateSlackRunReplyTarget,
+  clearActiveSlackRunReplyTarget,
   clearPendingSlackRequestUserInput,
+  getActiveSlackRunReplyTarget,
   getSlackThreadFooterText as buildSlackThreadFooterText,
   getSlackStartedMessageData,
   getSlackMessages,
@@ -74,6 +78,9 @@ import {
   setPendingLinearRequestUserInput,
 } from '@roomote/linear';
 import { publishCommunicationRequestUserInput } from '../lib/communication-request-user-input';
+import { publishFastAgentRequestUserInput } from '../lib/task-runs/publish-fast-agent-request-user-input';
+import { relayFastAgentChildChatReply } from '../lib/task-runs/relay-fast-agent-child-chat-reply';
+import { renderSlackLiveTaskCardForRun } from '../lib/task-runs/slack-live-task-stream';
 import {
   authenticatedProcedure,
   isRunToken,
@@ -395,10 +402,15 @@ export const taskRunsRouter = router({
     .input(enqueueTaskInputSchema)
     .mutation(async ({ input }) => {
       const launchResult = await enqueueTask(input as EnqueueTaskInput);
+      const linkedSession = await db.query.sessionTasks.findFirst({
+        where: eq(sessionTasks.taskId, launchResult.taskId),
+        columns: { sessionId: true },
+      });
 
       return {
         id: launchResult.id,
         taskId: launchResult.taskId,
+        sessionId: linkedSession?.sessionId,
       };
     }),
   dequeue: runScoped(
@@ -537,6 +549,32 @@ export const taskRunsRouter = router({
   getMessageSources: runScoped(z.object({ runId: z.number() }), 'runId').query(
     ({ input }) => getMessageSources(input.runId),
   ),
+  // Run-token only: the card is a worker-driven surface, and letting any
+  // authenticated caller rewrite a card by run id would let them put
+  // arbitrary text on another task's card.
+  renderSlackLiveTaskCard: runScoped(
+    z.object({
+      runId: z.number(),
+      status: z.enum(['in_progress', 'complete', 'error']),
+      message: z.string().optional(),
+    }),
+    'runId',
+  )
+    .use(({ ctx, next }) => {
+      if (!isRunToken(ctx.auth)) {
+        throw new TRPCError({
+          code: 'FORBIDDEN',
+          message: 'This endpoint is only available to run tokens',
+        });
+      }
+      return next();
+    })
+    .mutation(({ input }) =>
+      renderSlackLiveTaskCardForRun(input.runId, {
+        status: input.status,
+        ...(input.message ? { message: input.message } : {}),
+      }),
+    ),
   getResolvedGitAuthor: runScoped(
     z.object({ runId: z.number() }),
     'runId',
@@ -586,6 +624,18 @@ export const taskRunsRouter = router({
   getSlackMessages: runScoped(z.object({ runId: z.number() }), 'runId').query(
     async ({ input }) => getSlackMessages(input.runId),
   ),
+  getActiveSlackReplyTarget: runScoped(
+    z.object({ runId: z.number() }),
+    'runId',
+  ).query(({ input }) => getActiveSlackRunReplyTarget(input.runId)),
+  activateSlackReplyTarget: runScoped(
+    z.object({ runId: z.number(), messageTs: z.string().min(1) }),
+    'runId',
+  ).mutation(({ input }) => activateSlackRunReplyTarget(input)),
+  clearActiveSlackReplyTarget: runScoped(
+    z.object({ runId: z.number() }),
+    'runId',
+  ).mutation(({ input }) => clearActiveSlackRunReplyTarget(input.runId)),
   getCommunicationMessages: runScoped(
     z.object({
       runId: z.number(),
@@ -603,6 +653,8 @@ export const taskRunsRouter = router({
         user: z.string(),
         userId: z.string().optional(),
         ts: z.string(),
+        channel: z.string().optional(),
+        threadTs: z.string().optional(),
         images: z.array(z.string()).optional(),
         formattedPrompt: z.string().optional(),
       }),
@@ -753,6 +805,26 @@ export const taskRunsRouter = router({
       promptMessageTs: input.promptMessageTs,
     }),
   ),
+  publishFastAgentRequestUserInput: runScoped(
+    z.object({
+      runId: z.number(),
+      requestId: z.string(),
+      taskId: z.string(),
+      questions: z.array(acpRequestUserInputQuestionSchema),
+    }),
+    'runId',
+  ).mutation(async ({ input }) => publishFastAgentRequestUserInput(input)),
+  relayFastAgentChildChatReply: runScoped(
+    z.object({
+      runId: z.number(),
+      taskId: z.string().min(1),
+      deliverySignature: z.string().regex(/^[a-f0-9]{64}$/),
+      purpose: z.enum(['ack', 'progress', 'closeout', 'clarification']),
+      message: z.string().trim().min(1),
+      imageArtifactIds: z.array(z.string().min(1)).optional(),
+    }),
+    'runId',
+  ).mutation(async ({ input }) => relayFastAgentChildChatReply(input)),
   clearPendingSlackRequestUserInput: runScoped(
     z.object({
       runId: z.number(),

@@ -185,6 +185,17 @@ describe('handleGiteaPullRequest', () => {
     expect('sourceControlHost' in task.payload).toBe(false);
   });
 
+  it('restores tracked draft status when a pull request is reopened', async () => {
+    await handleGiteaPullRequest(makePayload('reopened', { draft: true }));
+
+    expect(mockUpdateTaskPrStatus).toHaveBeenCalledWith(
+      'gitea',
+      'acme/backend',
+      42,
+      'draft',
+    );
+  });
+
   it('selects and stamps the webhook host among same-name repositories on multiple hosts', async () => {
     // Two active rows share the repository identity; only the host differs.
     const rows = [
@@ -333,6 +344,9 @@ describe('handleGiteaPullRequest', () => {
       42,
       'merged',
     );
+    expect(mockRecordPrStatusChangeInTaskHistory).toHaveBeenLastCalledWith(
+      expect.objectContaining({ targetBranch: 'main' }),
+    );
     expect(mockScheduleSourceControlPullRequestFactSync).toHaveBeenCalledWith({
       provider: 'gitea',
       repositoryFullName: 'acme/backend',
@@ -340,6 +354,7 @@ describe('handleGiteaPullRequest', () => {
         number: 42,
         externalId: 900,
         title: 'Update backend',
+        body: null,
         url: 'https://git.example.com/acme/backend/pulls/42',
         authorLogin: 'gitea-user',
         state: 'merged',

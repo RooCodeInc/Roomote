@@ -39,7 +39,12 @@ export type MockSlackUser = {
   name: string;
   displayName?: string;
   realName?: string;
+  title?: string;
   email?: string;
+  deleted?: boolean;
+  isBot?: boolean;
+  isAppUser?: boolean;
+  updated?: number;
 };
 
 export type MockSlackChannel = {
@@ -94,6 +99,10 @@ export type MockSlackState = {
   manifestCredentials?: MockSlackManifestCredentials;
   /** Apps created through `apps.manifest.create`, oldest first. */
   createdManifests?: MockSlackCreatedManifest[];
+  /** Manifest replacements applied through `apps.manifest.update`. */
+  updatedManifests?: MockSlackCreatedManifest[];
+  /** Controls whether manifest updates report that OAuth approval is needed. */
+  manifestPermissionsUpdated?: boolean;
 };
 
 export type MockSlackRoomoteTarget = {
@@ -210,6 +219,23 @@ function maybeParseSlackFormValue(value: string): unknown {
   }
 
   return value;
+}
+
+function parseManifestRecord(value: unknown): JsonRecord | null {
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value) as unknown;
+      return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+        ? (parsed as JsonRecord)
+        : null;
+    } catch {
+      return null;
+    }
+  }
+
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as JsonRecord)
+    : null;
 }
 
 function parseRequestBody(
@@ -450,7 +476,7 @@ export class MockSlackServer {
     // App-config endpoints authenticate with configuration tokens instead of
     // bot tokens, so they skip the bot check and validate in their handler.
     if (
-      url.pathname !== '/api/apps.manifest.create' &&
+      !url.pathname.startsWith('/api/apps.manifest.') &&
       !this.isAuthorized(request)
     ) {
       json(response, 401, { ok: false, error: 'invalid_auth' });
@@ -706,6 +732,100 @@ export class MockSlackServer {
         return;
       }
 
+      case 'POST apps.manifest.export': {
+        if (!this.isConfigTokenAuthorized(request)) {
+          json(response, 200, { ok: false, error: 'invalid_auth' });
+          return;
+        }
+
+        const appId =
+          typeof jsonBody.app_id === 'string' ? jsonBody.app_id : '';
+        const app = (this.state.createdManifests ?? []).find(
+          (entry) => entry.appId === appId,
+        );
+
+        if (!app) {
+          json(response, 200, { ok: false, error: 'app_not_found' });
+          return;
+        }
+
+        json(response, 200, { ok: true, manifest: app.manifest });
+        return;
+      }
+
+      case 'POST apps.manifest.validate': {
+        if (!this.isConfigTokenAuthorized(request)) {
+          json(response, 200, { ok: false, error: 'invalid_auth' });
+          return;
+        }
+
+        const manifest = parseManifestRecord(jsonBody.manifest);
+        if (!manifest) {
+          json(response, 200, {
+            ok: false,
+            error: 'invalid_manifest',
+            errors: [
+              {
+                message: 'manifest must be a JSON object',
+                pointer: '/manifest',
+              },
+            ],
+          });
+          return;
+        }
+
+        json(response, 200, { ok: true, errors: [] });
+        return;
+      }
+
+      case 'POST apps.manifest.update': {
+        if (!this.isConfigTokenAuthorized(request)) {
+          json(response, 200, { ok: false, error: 'invalid_auth' });
+          return;
+        }
+
+        const appId =
+          typeof jsonBody.app_id === 'string' ? jsonBody.app_id : '';
+        const manifest = parseManifestRecord(jsonBody.manifest);
+        const manifests = this.state.createdManifests ?? [];
+        const appIndex = manifests.findIndex((entry) => entry.appId === appId);
+
+        if (appIndex < 0) {
+          json(response, 200, { ok: false, error: 'app_not_found' });
+          return;
+        }
+
+        if (!manifest) {
+          json(response, 200, {
+            ok: false,
+            error: 'invalid_manifest',
+            errors: [
+              {
+                message: 'manifest must be a JSON object',
+                pointer: '/manifest',
+              },
+            ],
+          });
+          return;
+        }
+
+        const updatedManifest = { appId, manifest };
+        this.state.createdManifests = manifests.map((entry, index) =>
+          index === appIndex ? updatedManifest : entry,
+        );
+        this.state.updatedManifests = [
+          ...(this.state.updatedManifests ?? []),
+          updatedManifest,
+        ];
+
+        json(response, 200, {
+          ok: true,
+          app_id: appId,
+          permissions_updated: this.state.manifestPermissionsUpdated ?? false,
+        });
+        return;
+      }
+
       case 'POST apps.manifest.delete': {
         // Real Slack reports Web API failures as HTTP 200 with `ok: false`.
         if (!this.isConfigTokenAuthorized(request)) {
@@ -932,11 +1052,53 @@ export class MockSlackServer {
             id: user.id,
             name: user.name,
             real_name: user.realName ?? user.displayName ?? user.name,
+            deleted: user.deleted ?? false,
+            is_bot: user.isBot ?? false,
+            is_app_user: user.isAppUser ?? false,
+            updated: user.updated ?? 0,
             profile: {
               display_name: user.displayName ?? user.name,
               real_name: user.realName ?? user.displayName ?? user.name,
+              title: user.title ?? '',
               ...(user.email ? { email: user.email } : {}),
             },
+          },
+        });
+        return;
+      }
+
+      case 'GET users.list': {
+        const limit = Math.max(
+          1,
+          Number.parseInt(url.searchParams.get('limit') ?? '100', 10) || 100,
+        );
+        const offset = Math.max(
+          0,
+          Number.parseInt(url.searchParams.get('cursor') ?? '0', 10) || 0,
+        );
+        const page = this.state.users.slice(offset, offset + limit);
+        const nextOffset = offset + page.length;
+
+        json(response, 200, {
+          ok: true,
+          members: page.map((user) => ({
+            id: user.id,
+            name: user.name,
+            real_name: user.realName ?? user.displayName ?? user.name,
+            deleted: user.deleted ?? false,
+            is_bot: user.isBot ?? false,
+            is_app_user: user.isAppUser ?? false,
+            updated: user.updated ?? 0,
+            profile: {
+              display_name: user.displayName ?? user.name,
+              real_name: user.realName ?? user.displayName ?? user.name,
+              title: user.title ?? '',
+              ...(user.email ? { email: user.email } : {}),
+            },
+          })),
+          response_metadata: {
+            next_cursor:
+              nextOffset < this.state.users.length ? String(nextOffset) : '',
           },
         });
         return;

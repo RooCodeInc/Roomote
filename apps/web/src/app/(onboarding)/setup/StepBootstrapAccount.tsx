@@ -29,16 +29,31 @@ export function StepBootstrapAccount({
   ];
 
   return (
-    <div className="relative w-full max-w-xl space-y-6 py-2 md:py-0">
+    <div className="relative w-full max-w-2xl space-y-6 py-2 md:py-0">
       <StepTitle text="Authentication setup" />
-      <p>
-        Do you use any of these communication tools? They make auth easier (no
-        invites or passwords to deal with) and talking to Roomote more
-        convenient.
-        <br />
-        If not, you can also just do email/password.
-      </p>
+      <div className="space-y-2">
+        <p className="font-semibold">
+          First up is your admin account. There are two options:
+        </p>
+        <ul className="pl-5 list-disc">
+          <li>Simple email + password</li>
+          <li>
+            Auth with Slack or Teams (best if you plan on talking to Roomote
+            using either of those)
+          </li>
+        </ul>
+      </div>
       <div className="space-y-2 max-w-md">
+        <Button
+          type="button"
+          variant="default"
+          className="w-full"
+          onClick={onUseEmailPassword}
+        >
+          <KeyRound />
+          <span className="font-medium grow text-left">Use email/password</span>
+          <ArrowRight />
+        </Button>
         {providerButtons.map((provider) => (
           <Button
             key={provider.id}
@@ -58,17 +73,6 @@ export function StepBootstrapAccount({
             <ArrowRight />
           </Button>
         ))}
-
-        <Button
-          type="button"
-          variant="outline"
-          className="w-full"
-          onClick={onUseEmailPassword}
-        >
-          <KeyRound />
-          <span className="font-medium grow text-left">Use email/password</span>
-          <ArrowRight />
-        </Button>
       </div>
     </div>
   );

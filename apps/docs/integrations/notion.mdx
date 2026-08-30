@@ -1,25 +1,93 @@
 ---
 title: Notion
-description: Bring Notion pages and databases into Roomote tasks.
+description: Bring approved Notion pages and data sources into Roomote tasks.
 icon: 'https://api.iconify.design/simple-icons:notion.svg?color=currentColor'
 ---
 
 Connect Notion when product specs, runbooks, notes, or operating context already
-live there and Roomote should be able to inspect that material during a task.
+live there and Roomote should use that material during tasks and automations.
 
-## When to use it
+## Access boundary
 
-- Pull a spec or runbook into a planning or debugging task
-- Inspect database-backed project context without copying it into the prompt
-- Keep task context close to the docs your team already maintains
+Roomote uses a Notion **internal integration**, not Notion's hosted MCP OAuth
+connection. Notion itself restricts the token to pages and data sources that
+have been explicitly shared with the internal integration. Unshared content,
+including private pages, is unavailable to Roomote.
 
-## How setup works
+Sharing a parent page may also grant access to its children. Review the content
+access list in Notion whenever the page hierarchy changes.
 
-Admins enable Notion from **Settings > Integrations**. Each teammate then links
-their own Notion account from [Personal Settings](/personal-settings) when they
-need it.
+## Set up Notion
 
-## What to expect
+1. In [Notion integrations](https://www.notion.so/profile/integrations/internal),
+   create an internal integration for Roomote.
+2. In the integration's **Configuration** tab, enable only the capabilities
+   Roomote should have: read, update, insert, and comment access are controlled
+   independently by Notion. If Memory should link Notion identities to
+   Roomote members, also grant the user-information capability that includes
+   email addresses; without it, Memory keeps stable but unlinked Notion
+   user references.
+3. In Notion, share only the approved pages and data sources with the new
+   integration. You can manage this from the integration's **Content access**
+   settings or a page's **Connections** menu.
+4. Copy the internal integration secret.
+5. In Roomote, open **Settings > Integrations**, choose **Configure Notion**,
+   and paste the secret.
 
-Notion gives Roomote shared document context. The resulting engineering work
-still gets reviewed in the Roomote task view and normal repository workflow.
+The secret is encrypted server-side and is never sent to task sandboxes.
+
+When Memory is enabled, Roomote also backfills the pages shared with this
+integration and keeps their Markdown snapshots current. Notion pages are
+stored under the `notion/` namespace. New and edited pages are picked up on
+regular Memory collector ticks, and a daily full sweep discovers older pages
+that were newly shared without being edited. Because Notion's search index
+does not reliably surface pages that live inside databases, the sweep also
+enumerates every shared data source and walks page trees to capture database
+rows and other inheritance-shared pages. The same sweep replaces pages
+that are no longer shared with unavailable tombstones, so their former
+content is no longer retained in Memory search results.
+
+When the integration's capabilities allow listing users, Memory also
+refreshes the workspace user directory once a day to link page authors,
+people properties, and mentions to people cards. Verified email addresses
+are used only to match Notion users to Roomote members and are never copied
+into Memory pages. Users removed from the workspace have their Notion
+identity cards marked deleted on the next daily refresh, and revoking the
+user-information capability retracts the whole directory the same way.
+
+Roomote agents can read and update page content as enhanced Markdown, move
+regular pages beneath another page or into a data source, and create blocks at
+the start or end of existing content or after a specific child block. These
+operations use Notion's public API rather than Notion's hosted MCP tools, so
+their schemas and limitations follow the public API.
+
+Notion's public API cannot move or reorder an existing block. Positional block
+insertion applies only to newly created blocks. Moving a database or preserving
+a block's ID while recreating it in another position is also unsupported.
+
+Roomote's deployment-wide integration is not a proxy for Notion's hosted MCP.
+Hosted-only features such as connected-source search, attachment helpers,
+database and view creation, page duplication, folders, meeting-note queries,
+and workspace team or user lookup are not currently exposed as agent tools.
+(Memory's identity linking reads the workspace user directory directly
+through the public API, as described above.) Roomote instead provides the
+direct public-API operations that work with a restricted internal
+integration token.
+
+<Note>
+  A previous hosted-MCP OAuth connection is not reused because it inherits the
+  authorizing person's full Notion permissions. Configure an internal
+  integration before enabling this deployment-wide connection.
+</Note>
+
+## Control capabilities
+
+Notion's **Configuration** tab is the source of truth for what Roomote can do.
+Disable update, insert, or comment capabilities there when the connection
+should be read-only. Roomote exposes its Notion tools, but Notion rejects any
+operation the integration's capabilities do not permit.
+
+Inserting blocks requires **Insert content**. Moving pages and updating page
+Markdown require **Update content**, including edit access to the destination
+parent for page moves. Changing these capabilities on an existing internal
+integration takes effect without reconnecting Roomote.

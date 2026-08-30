@@ -16,6 +16,18 @@ export { conflictScanJob } from './conflict-scan';
 export { dependabotTriageJob } from './dependabot-triage';
 export { issueFixerJob } from './issue-fixer';
 export { managerStatsJob, formatManagerStatsMessage } from './manager-stats';
+export {
+  handleMergeAnnouncerPush,
+  mergeAnnouncerJob,
+  type MergeAnnouncerPullRequestContext,
+  type MergeAnnouncerPushEvent,
+  type MergeAnnouncerPushResult,
+} from './merge-announcer';
+export {
+  providerUsageLimitJob,
+  buildProviderUsageLimitWarningMessage,
+  getProviderUsageLimitPeriodId,
+} from './provider-usage-limit';
 export { securityAuditorJob } from './security-auditor';
 export { sentryTriageJob } from './sentry-triage';
 export { suggesterJob } from './suggester';
@@ -23,6 +35,7 @@ export { getAutomationRunner, runAutomationNow } from './run-now';
 export {
   buildDestinationTaskPayloadFields,
   findTeamsConversationDisplayName,
+  findTeamsConversationRoute,
   findTeamsConversationServiceUrl,
   listConnectedCommunicationProviders,
   resolveAutomationRuntimeDestination,

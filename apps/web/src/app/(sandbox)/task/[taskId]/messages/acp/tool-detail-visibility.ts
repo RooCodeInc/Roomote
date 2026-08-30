@@ -1,5 +1,5 @@
-import { isInternalDebugToolCallMessage } from '../../message-visibility';
 import { isSubagentToolPayload } from './subagent-tool';
+import { resolveToolPresentationPolicy } from './tool-presentation-policy';
 
 import type { AcpToolCallUiMessage, AcpToolResultUiMessage } from './types';
 
@@ -69,21 +69,9 @@ export function hidesExpandedToolResult(
   msg: AcpToolUiMessage,
   options?: ToolDetailVisibilityOptions,
 ): boolean {
-  const data = msg.data as unknown as Record<string, unknown>;
-
-  if (isSubagentToolPayload(msg.data)) {
-    if (options?.showSubagentPayload === true) {
-      return false;
-    }
-
-    return (
-      getSubagentPrompt(msg) === null && getSubagentLastMessage(msg) === null
-    );
-  }
-
   return (
-    isInternalDebugToolCallMessage(msg) ||
-    msg.data.kind === 'read' ||
-    data.isRead === true
+    resolveToolPresentationPolicy(msg, {
+      showInternalMessages: options?.showSubagentPayload === true,
+    }).detailMode !== 'expandable'
   );
 }

@@ -14,5 +14,7 @@ export * from './teams-graph-client';
 export * from './teams-provider';
 export * from './telegram-provider';
 export * from './telegram-update';
+export * from './fast-session-footer';
 export * from './thread-reply-footer-context';
+export * from './thread-reply-footer-delivery';
 export * from './thread-reply-footer-state';

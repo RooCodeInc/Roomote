@@ -12,6 +12,7 @@ const {
   mockGetCombinedStatusForRef,
   mockIsRoomoteGitHubLogin,
   mockResolveConfiguredGitHubAppSlug,
+  mockGetGitHubRateLimitRetryAfterMs,
 } = vi.hoisted(() => ({
   mockGenerateObject: vi.fn(),
   mockReadSourceControlPullRequest: vi.fn(),
@@ -26,6 +27,7 @@ const {
   mockGetCombinedStatusForRef: vi.fn(),
   mockIsRoomoteGitHubLogin: vi.fn((login: string) => login === 'roomote[bot]'),
   mockResolveConfiguredGitHubAppSlug: vi.fn(),
+  mockGetGitHubRateLimitRetryAfterMs: vi.fn(),
 }));
 
 vi.mock('@roomote/cloud-agents/server/non-task-provider-usage', () => ({
@@ -57,8 +59,11 @@ vi.mock('@roomote/cloud-agents/server', () => ({
 
     return content.slice(start + startMarker.length, end);
   },
-  isReviewInProgressStatusLine: (line: string) =>
-    /^(Self-reviewing|Reviewing|Re-reviewing)/i.test(line.trim()),
+  isReviewSummaryInProgress: (body: string) =>
+    body.includes('version=2 phase=reviewing') ||
+    /<!-- roomote-review-status:start -->\s*(?:Self-reviewing|Reviewing|Re-reviewing)/i.test(
+      body,
+    ),
 }));
 
 vi.mock('../../pull-requests/source-control-pull-request-reads', () => ({
@@ -107,14 +112,29 @@ vi.mock('@roomote/github', () => ({
       },
     },
   }),
+  getGitHubRateLimitRetryAfterMs: (...args: unknown[]) =>
+    mockGetGitHubRateLimitRetryAfterMs(...args),
+  isGitHubUnauthorizedError: (error: unknown) =>
+    typeof error === 'object' &&
+    error !== null &&
+    'status' in error &&
+    Number(error.status) === 401,
+  withTaskRunGitHubTokenRetry: async (
+    taskRun: unknown,
+    operation: (token: string) => Promise<unknown>,
+    runtimeOptions?: unknown,
+  ) => operation(await mockCreateTaskRunGitHubToken(taskRun, runtimeOptions)),
 }));
 
 import type { TaskRun } from '@roomote/db/server';
 import type { PrReviewActivityEvent } from '../pr-review-notification';
 
 import {
+  clearPrReviewTriageDecisionCache,
   collectCiChecks,
+  createPrReviewNotificationTelemetry,
   gatherPrReviewTriageContext,
+  PrReviewNotificationRateLimitError,
   preparePrReviewNotificationDelivery,
   recordPrReviewNotificationDeliveryBestEffort,
   triagePrReviewActivity,
@@ -142,6 +162,10 @@ const events: PrReviewActivityEvent[] = [
   },
 ];
 
+beforeEach(() => {
+  clearPrReviewTriageDecisionCache();
+});
+
 const eventsWithoutSelfReview: PrReviewActivityEvent[] = events.slice(0, 2);
 
 beforeEach(() => {
@@ -152,7 +176,15 @@ beforeEach(() => {
 });
 
 function mockGreenCiChecks() {
-  mockCreateTaskRunGitHubToken.mockResolvedValue('github-token');
+  mockCreateTaskRunGitHubToken.mockImplementation(
+    async (
+      _taskRun: unknown,
+      runtimeOptions?: { onTokenMintRequest?: () => void },
+    ) => {
+      runtimeOptions?.onTokenMintRequest?.();
+      return 'github-token';
+    },
+  );
   mockPullsGet.mockResolvedValue({
     data: { head: { sha: 'abc123' }, mergeable: true },
   });
@@ -192,7 +224,7 @@ describe('preparePrReviewNotificationDelivery', () => {
         {
           id: 'c1',
           author: 'roomote[bot]',
-          body: '<!-- roomote-review-summary sha=abc mode=initial -->\n<!-- roomote-review-status:start -->\n**All 1 issue addressed.** [See task](https://example.com)\n<!-- roomote-review-status:end -->',
+          body: '<!-- roomote-review-summary sha=abc1234 mode=initial -->\n<!-- roomote-review-status:start -->\n**All 1 issue addressed.** [See task](https://example.com)\n<!-- roomote-review-status:end -->',
           createdAt: null,
           url: null,
         },
@@ -209,7 +241,69 @@ describe('preparePrReviewNotificationDelivery', () => {
       },
     });
     mockFormatMessage.mockReturnValue('formatted-message');
+    mockGetGitHubRateLimitRetryAfterMs.mockReturnValue(null);
     mockGreenCiChecks();
+  });
+
+  it('suppresses CI failures from an outdated PR head', async () => {
+    await expect(
+      preparePrReviewNotificationDelivery({
+        taskRun,
+        request,
+        events: [
+          {
+            kind: 'ci_failure',
+            authorLogin: 'github-actions',
+            checkName: 'CI / Tests',
+            reviewHeadSha: 'old-head',
+          },
+        ],
+      }),
+    ).resolves.toEqual({ post: false, reason: 'not_worth_notifying' });
+
+    expect(mockGenerateObject).not.toHaveBeenCalled();
+  });
+
+  it('propagates GitHub rate limits so durable delivery can defer', async () => {
+    const rateLimitError = Object.assign(new Error('API rate limit exceeded'), {
+      status: 403,
+    });
+    mockReadSourceControlPullRequest.mockRejectedValue(rateLimitError);
+    mockGetGitHubRateLimitRetryAfterMs.mockImplementation((error: unknown) =>
+      error === rateLimitError ? 900_000 : null,
+    );
+
+    await expect(
+      gatherPrReviewTriageContext({
+        taskRun,
+        repository: request.repository,
+        prNumber: request.prNumber,
+        sourceControlProvider: 'github',
+      }),
+    ).rejects.toMatchObject({
+      name: 'PrReviewNotificationRateLimitError',
+      retryAfterMs: 900_000,
+    });
+    expect(mockPullsGet).not.toHaveBeenCalled();
+  });
+
+  it('propagates rate limits from nested live-head status reads', async () => {
+    const rateLimitError = Object.assign(new Error('API rate limit exceeded'), {
+      status: 403,
+    });
+    mockListCheckRunsForRef.mockRejectedValue(rateLimitError);
+    mockGetGitHubRateLimitRetryAfterMs.mockImplementation((error: unknown) =>
+      error === rateLimitError ? 900_000 : null,
+    );
+
+    await expect(
+      gatherPrReviewTriageContext({
+        taskRun,
+        repository: request.repository,
+        prNumber: request.prNumber,
+        sourceControlProvider: 'github',
+      }),
+    ).rejects.toBeInstanceOf(PrReviewNotificationRateLimitError);
   });
 
   it('prepares a routed, formatted delivery from the shared SDK flow', async () => {
@@ -358,7 +452,7 @@ describe('preparePrReviewNotificationDelivery', () => {
             kind: 'review_comment',
             authorLogin: 'roomote[bot]',
             roomoteAuthored: true,
-            reviewHeadSha: 'abc',
+            reviewHeadSha: 'abc1234',
           },
         ],
       }),
@@ -377,12 +471,12 @@ describe('preparePrReviewNotificationDelivery', () => {
           kind: 'review_comment',
           authorLogin: 'roomote[bot]',
           roomoteAuthored: true,
-          reviewHeadSha: 'abc',
+          reviewHeadSha: 'abc1234',
         },
         {
           kind: 'review_comment',
           authorLogin: 'alice',
-          reviewHeadSha: 'abc',
+          reviewHeadSha: 'abc1234',
         },
       ],
     });
@@ -421,7 +515,7 @@ describe('preparePrReviewNotificationDelivery', () => {
         {
           id: 'c1',
           author: 'roomote[bot]',
-          body: '<!-- roomote-review-summary sha=abc mode=initial -->\n<!-- roomote-review-status:start -->\nReviewing the PR now.\n<!-- roomote-review-status:end -->',
+          body: '<!-- roomote-review-summary sha=abc1234 mode=initial version=2 phase=reviewing -->\n<!-- roomote-review-status:start -->\nI am inspecting the updated head.\n<!-- roomote-review-status:end -->',
           createdAt: null,
           url: null,
         },
@@ -437,7 +531,7 @@ describe('preparePrReviewNotificationDelivery', () => {
           kind: 'review_comment',
           authorLogin: 'roomote[bot]',
           roomoteAuthored: true,
-          reviewHeadSha: 'abc',
+          reviewHeadSha: 'abc1234',
         },
       ],
     });
@@ -456,7 +550,7 @@ describe('preparePrReviewNotificationDelivery', () => {
         {
           id: 'c1',
           author: 'alice',
-          body: '<!-- roomote-review-summary sha=abc mode=initial -->\n<!-- roomote-review-status:start -->\n1 issue outstanding.\n<!-- roomote-review-status:end -->',
+          body: '<!-- roomote-review-summary sha=abc1234 mode=initial -->\n<!-- roomote-review-status:start -->\n1 issue outstanding.\n<!-- roomote-review-status:end -->',
           createdAt: null,
           url: null,
         },
@@ -472,7 +566,7 @@ describe('preparePrReviewNotificationDelivery', () => {
           kind: 'review_comment',
           authorLogin: 'roomote[bot]',
           roomoteAuthored: true,
-          reviewHeadSha: 'abc',
+          reviewHeadSha: 'abc1234',
         },
       ],
     });
@@ -708,6 +802,25 @@ describe('preparePrReviewNotificationDelivery', () => {
     expect(mockGenerateObject).not.toHaveBeenCalled();
   });
 
+  it('drops a review summary for an older PR head before triage', async () => {
+    await expect(
+      preparePrReviewNotificationDelivery({
+        taskRun,
+        request,
+        events: [
+          {
+            kind: 'review_summary',
+            authorLogin: 'roomote[bot]',
+            roomoteAuthored: true,
+            reviewHeadSha: 'older-head',
+            summary: 'One issue needs attention.',
+          },
+        ],
+      }),
+    ).resolves.toEqual({ post: false, reason: 'not_worth_notifying' });
+    expect(mockGenerateObject).not.toHaveBeenCalled();
+  });
+
   it.each([
     { resolved: true, outdated: false },
     { resolved: false, outdated: true },
@@ -837,7 +950,7 @@ describe('preparePrReviewNotificationDelivery', () => {
         {
           id: 'c1',
           author: 'acme[bot]',
-          body: '<!-- roomote-review-summary sha=abc mode=initial -->\n<!-- roomote-review-status:start -->\n1 issue outstanding.\n<!-- roomote-review-status:end -->',
+          body: '<!-- roomote-review-summary sha=abc1234 mode=initial -->\n<!-- roomote-review-status:start -->\n1 issue outstanding.\n<!-- roomote-review-status:end -->',
           createdAt: null,
           url: null,
         },
@@ -854,7 +967,7 @@ describe('preparePrReviewNotificationDelivery', () => {
             kind: 'review_comment',
             authorLogin: 'acme[bot]',
             roomoteAuthored: true,
-            reviewHeadSha: 'abc',
+            reviewHeadSha: 'abc1234',
           },
         ],
       }),
@@ -913,6 +1026,48 @@ describe('triagePrReviewActivity', () => {
       '(URL: https://github.com/owner/repo/pull/42#issuecomment-7)',
     );
     expect(prompt).not.toContain('Current pull request state:');
+  });
+
+  it('reuses one in-flight triage across concurrent linked task deliveries', async () => {
+    mockGenerateObject.mockResolvedValue({
+      object: {
+        worthNotifying: true,
+        actionableFeedback: false,
+        summary: 'alice approved the pull request.',
+        followUpQuestion: '',
+        followUpPrompt: '',
+      },
+    });
+    const firstTelemetry = createPrReviewNotificationTelemetry(events.length);
+    const secondTelemetry = createPrReviewNotificationTelemetry(events.length);
+
+    const [first, second] = await Promise.all([
+      triagePrReviewActivity({
+        ...request,
+        events,
+        telemetry: firstTelemetry,
+      }),
+      triagePrReviewActivity({
+        ...request,
+        taskId: 'task-2',
+        events,
+        telemetry: secondTelemetry,
+      }),
+    ]);
+
+    expect(second).toEqual(first);
+    expect(mockGenerateObject).toHaveBeenCalledTimes(1);
+    expect(firstTelemetry).toMatchObject({
+      eventsTriaged: events.length,
+      triageInvoked: true,
+      triageCacheHit: false,
+    });
+    expect(secondTelemetry).toMatchObject({
+      eventsTriaged: events.length,
+      triageInvoked: false,
+      triageCacheHit: true,
+    });
+    expect(secondTelemetry.triageInputTokenEstimate).toBeGreaterThan(0);
   });
 
   it('passes the source-control provider label into the triage prompt', async () => {
@@ -986,8 +1141,8 @@ describe('triagePrReviewActivity', () => {
         unresolvedThreadCount: 2,
         latestReviewStatus: '2 issues outstanding.',
         latestReviewSummaryComment:
-          '<!-- roomote-review-summary sha=abc mode=initial -->\n<!-- roomote-review-checklist:start -->\n- [ ] `apps/api/src/foo.ts:10` - Handle null actor ids\n- [ ] `apps/api/src/bar.ts:20` - Rename the helper to match its return shape\n<!-- roomote-review-checklist:end -->',
-        latestTerminalReviewSummaryHeadSha: 'abc',
+          '<!-- roomote-review-summary sha=abc1234 mode=initial -->\n<!-- roomote-review-checklist:start -->\n- [ ] `apps/api/src/foo.ts:10` - Handle null actor ids\n- [ ] `apps/api/src/bar.ts:20` - Rename the helper to match its return shape\n<!-- roomote-review-checklist:end -->',
+        latestTerminalReviewSummaryHeadSha: 'abc1234',
         ciStatus: {
           checks: [
             { name: 'CI / Lint', status: 'success' },
@@ -1060,6 +1215,43 @@ describe('triagePrReviewActivity', () => {
     ).resolves.toEqual({ post: false, reason: 'not_worth_notifying' });
   });
 
+  it('always treats a CI failure event as actionable', async () => {
+    mockGenerateObject.mockResolvedValue({
+      object: {
+        worthNotifying: false,
+        actionableFeedback: false,
+        summary: '',
+        followUpQuestion: '',
+        followUpPrompt: '',
+      },
+    });
+
+    await expect(
+      triagePrReviewActivity({
+        ...request,
+        events: [
+          {
+            kind: 'ci_failure',
+            authorLogin: 'github-actions',
+            checkName: 'CI / Tests',
+            url: 'https://github.com/owner/repo/actions/runs/7/job/8',
+          },
+        ],
+      }),
+    ).resolves.toEqual({
+      post: true,
+      summary:
+        'CI failed on [owner/repo#42](https://github.com/owner/repo/pull/42).',
+      followUpQuestion: 'Would you like me to resolve this CI failure?',
+      followUpPrompt:
+        'Investigate and resolve the failed CI checks on [owner/repo#42](https://github.com/owner/repo/pull/42). Review [the failed check](https://github.com/owner/repo/actions/runs/7/job/8).',
+    });
+
+    expect(mockGenerateObject.mock.calls[0]?.[0]?.prompt).toContain(
+      '- CI check CI / Tests failed (URL: https://github.com/owner/repo/actions/runs/7/job/8)',
+    );
+  });
+
   it('always passes along self-review results even when the model says they are not worth notifying', async () => {
     mockGenerateObject.mockResolvedValue({
       object: {
@@ -1114,7 +1306,7 @@ describe('gatherPrReviewTriageContext', () => {
         {
           id: 'c1',
           author: 'roomote[bot]',
-          body: '<!-- roomote-review-summary sha=abc mode=initial -->\n<!-- roomote-review-status:start -->\n**All 1 issue addressed.** [See task](https://example.com)\n<!-- roomote-review-status:end -->',
+          body: '<!-- roomote-review-summary sha=abc1234 mode=initial -->\n<!-- roomote-review-status:start -->\n**All 1 issue addressed.** [See task](https://example.com)\n<!-- roomote-review-status:end -->',
           createdAt: null,
           url: null,
         },
@@ -1125,10 +1317,12 @@ describe('gatherPrReviewTriageContext', () => {
   });
 
   it('collects thread counts and the latest review status', async () => {
+    const telemetry = createPrReviewNotificationTelemetry(1);
     const context = await gatherPrReviewTriageContext({
       taskRun,
       repository: request.repository,
       prNumber: request.prNumber,
+      telemetry,
     });
 
     expect(context).toEqual({
@@ -1136,8 +1330,8 @@ describe('gatherPrReviewTriageContext', () => {
       unresolvedThreadCount: 1,
       latestReviewStatus: 'All 1 issue addressed. See task',
       latestReviewSummaryComment:
-        '<!-- roomote-review-summary sha=abc mode=initial -->\n<!-- roomote-review-status:start -->\n**All 1 issue addressed.** [See task](https://example.com)\n<!-- roomote-review-status:end -->',
-      latestTerminalReviewSummaryHeadSha: 'abc',
+        '<!-- roomote-review-summary sha=abc1234 mode=initial -->\n<!-- roomote-review-status:start -->\n**All 1 issue addressed.** [See task](https://example.com)\n<!-- roomote-review-status:end -->',
+      latestTerminalReviewSummaryHeadSha: 'abc1234',
       currentHeadSha: 'abc123',
       reviewThreads: [
         { resolved: true, outdated: undefined, commentIds: [] },
@@ -1152,6 +1346,73 @@ describe('gatherPrReviewTriageContext', () => {
       },
       mergeable: true,
     });
+    expect(mockReadSourceControlPullRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        useGitHubConditionalRequests: true,
+        githubToken: 'github-token',
+      }),
+    );
+    expect(mockCreateTaskRunGitHubToken).toHaveBeenCalledTimes(1);
+    expect(telemetry.githubTokenMintRequests).toBe(1);
+  });
+
+  it('uses ETags for every GitHub live-head polling read', async () => {
+    const notModified = () =>
+      Object.assign(new Error('Not modified'), {
+        status: 304,
+        response: { headers: {} },
+      });
+    mockPullsGet
+      .mockResolvedValueOnce({
+        data: { head: { sha: 'etag-head' }, mergeable: true },
+        headers: { etag: '"pull-v1"' },
+        status: 200,
+      })
+      .mockRejectedValueOnce(notModified());
+    mockListCheckRunsForRef
+      .mockResolvedValueOnce({
+        data: { check_runs: [] },
+        headers: { etag: '"checks-v1"' },
+        status: 200,
+      })
+      .mockRejectedValueOnce(notModified());
+    mockGetCombinedStatusForRef
+      .mockResolvedValueOnce({
+        data: { statuses: [], total_count: 0 },
+        headers: { etag: '"status-v1"' },
+        status: 200,
+      })
+      .mockRejectedValueOnce(notModified());
+
+    await gatherPrReviewTriageContext({
+      taskRun,
+      repository: request.repository,
+      prNumber: request.prNumber,
+    });
+    await gatherPrReviewTriageContext({
+      taskRun,
+      repository: request.repository,
+      prNumber: request.prNumber,
+    });
+
+    expect(mockPullsGet).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        request: { headers: { 'if-none-match': '"pull-v1"' } },
+      }),
+    );
+    expect(mockListCheckRunsForRef).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        request: { headers: { 'if-none-match': '"checks-v1"' } },
+      }),
+    );
+    expect(mockGetCombinedStatusForRef).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        request: { headers: { 'if-none-match': '"status-v1"' } },
+      }),
+    );
   });
 
   it('includes mergeable false when the PR has conflicts', async () => {
@@ -1383,12 +1644,18 @@ describe('recordPrReviewNotificationDeliveryBestEffort', () => {
   });
 
   it('persists web-only review feedback when there is no conversation route', async () => {
-    await recordPrReviewNotificationDeliveryBestEffort({
-      runId: 1,
-      taskId: 'task-1',
-      route: null,
-      text: 'formatted-message',
-    });
+    await expect(
+      recordPrReviewNotificationDeliveryBestEffort({
+        runId: 1,
+        taskId: 'task-1',
+        route: null,
+        text: 'formatted-message',
+        reviewAction: {
+          deliveryId: '11111111-1111-4111-8111-111111111111',
+          question: 'Resolve these issues?',
+        },
+      }),
+    ).resolves.toBe(true);
 
     expect(mockRecordTaskMessageEnvelope).toHaveBeenCalledWith({
       runId: 1,
@@ -1397,6 +1664,11 @@ describe('recordPrReviewNotificationDeliveryBestEffort', () => {
         payload: {
           text: 'formatted-message',
           source: 'pr_review_notification',
+          prReviewAction: {
+            deliveryId: '11111111-1111-4111-8111-111111111111',
+            question: 'Resolve these issues?',
+            status: 'pending',
+          },
         },
         visibleInTranscript: true,
       }),

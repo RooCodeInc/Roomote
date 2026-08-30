@@ -441,8 +441,8 @@ function SlackConfigTokenCreateExperience({
       <div className="space-y-4 max-w-xl">
         <p>
           Because Roomote is self-hosted, we can&apos;t offer you an
-          out-of-the-box Slack app – you need your own. But with just an app
-          configuration token, we&apos;ll create it for you.
+          out-of-the-box Slack app – you need your own. Creating it is dead
+          simple, though.
         </p>
         <NumberedStep number={1}>
           <p className="font-semibold">Get an app token.</p>

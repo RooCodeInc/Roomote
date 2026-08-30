@@ -7,6 +7,7 @@ const mockFindFirstRun = vi.fn();
 const mockFindManyRuns = vi.fn();
 const mockFindFirstTask = vi.fn();
 const mockFindManyTaskPullRequests = vi.fn();
+const mockFindFirstTaskPullRequest = vi.fn();
 const mockFindFirstDeploymentSettings = vi.fn();
 const mockFindFirstSlackInstallation = vi.fn();
 const mockFindFirstSlackUserMapping = vi.fn();
@@ -14,6 +15,12 @@ const mockFindLinearDeploymentMcpConnection = vi.fn();
 const mockGetValidAccessToken = vi.fn().mockResolvedValue('decrypted-token');
 const mockRedisSet = vi.fn().mockResolvedValue('OK');
 const mockRedisDel = vi.fn().mockResolvedValue(1);
+const mockAcquireRedisLock = vi.fn();
+const mockRenewRedisLock = vi.fn().mockResolvedValue('renewed');
+const mockReleaseRedisLock = Object.assign(
+  vi.fn().mockResolvedValue(undefined),
+  { renewDetailed: mockRenewRedisLock },
+);
 const mockDbExecute = vi.fn().mockResolvedValue([]);
 const mockRecordTaskRunLifecycleEvent = vi.fn().mockResolvedValue(undefined);
 const mockCleanupSandboxOidcTargetsForTaskRun = vi
@@ -22,6 +29,7 @@ const mockCleanupSandboxOidcTargetsForTaskRun = vi
 const mockResolveDiscordRuntimeCredentials = vi.fn();
 const mockDiscordPostMessage = vi.fn();
 const mockNotifySourceRunOnSettle = vi.fn().mockResolvedValue(undefined);
+const mockNotifyFastAgentParentOnSettle = vi.fn().mockResolvedValue(undefined);
 const mockDbTransaction = vi.fn();
 const mockCaptureTaskSettled = vi.fn();
 const mockResolveDefaultComputeProvider = vi.fn().mockResolvedValue('modal');
@@ -127,6 +135,8 @@ vi.mock('@roomote/db/server', async () => {
         taskPullRequests: {
           findMany: (...args: unknown[]) =>
             mockFindManyTaskPullRequests(...args),
+          findFirst: (...args: unknown[]) =>
+            mockFindFirstTaskPullRequest(...args),
         },
         deploymentSettings: {
           findFirst: (...args: unknown[]) =>
@@ -166,7 +176,10 @@ const mockSuggestSlackQuestionChannels = vi.fn();
 const mockBuildTerminalReviewStatus = vi
   .fn()
   .mockReturnValue('terminal-status');
-const mockFinalizeGithubPrReviewComment = vi.fn().mockResolvedValue(false);
+const mockFinalizeGithubPrReviewComment = vi.fn().mockResolvedValue({
+  finalized: false,
+  body: '<!-- roomote-review-summary sha=abc1234 -->',
+});
 
 vi.mock('@roomote/cloud-agents/server', () => ({
   enqueueTask: vi.fn(),
@@ -178,9 +191,37 @@ vi.mock('@roomote/cloud-agents/server', () => ({
     mockBuildTerminalReviewStatus(...args),
   finalizeGithubPrReviewComment: (...args: unknown[]) =>
     mockFinalizeGithubPrReviewComment(...args),
+  REVIEW_SUMMARY_MARKER: '<!-- roomote-review-summary',
+  REVIEW_STATUS_START_MARKER: '<!-- roomote-review-status:start -->',
+  REVIEW_STATUS_END_MARKER: '<!-- roomote-review-status:end -->',
+  REVIEW_CHECKLIST_START_MARKER: '<!-- roomote-review-checklist:start -->',
+  REVIEW_CHECKLIST_END_MARKER: '<!-- roomote-review-checklist:end -->',
+  isReviewSummaryInProgress: (body: string) =>
+    body.includes('version=2 phase=reviewing') ||
+    /<!-- roomote-review-status:start -->\s*(?:Self-reviewing the PR(?: with fresh eyes)? now\.|Reviewing the PR now\.|Re-reviewing new commits now\.)/i.test(
+      body,
+    ),
+  parseReviewSummaryMarkerSha: (body: string) =>
+    body.match(/roomote-review-summary\s+sha=([0-9a-f]+)/i)?.[1],
+  getMarkedSection: ({
+    content,
+    startMarker,
+    endMarker,
+  }: {
+    content: string;
+    startMarker: string;
+    endMarker: string;
+  }) => {
+    const start = content.indexOf(startMarker);
+    const end = content.indexOf(endMarker, start + startMarker.length);
+    return start === -1 || end === -1
+      ? undefined
+      : content.slice(start + startMarker.length, end).trim();
+  },
 }));
 
 vi.mock('@roomote/redis', () => ({
+  acquireRedisLock: (...args: unknown[]) => mockAcquireRedisLock(...args),
   getRedis: () => ({
     set: (...args: unknown[]) => mockRedisSet(...args),
     del: (...args: unknown[]) => mockRedisDel(...args),
@@ -192,12 +233,18 @@ vi.mock('@roomote/telemetry/server', () => ({
 }));
 
 const mockCreateIssueComment = vi.fn().mockResolvedValue(undefined);
+const mockDeleteReaction = vi.fn().mockResolvedValue(undefined);
+const mockGetCheckRun = vi.fn().mockResolvedValue({
+  data: { external_id: 'roomote-review:1' },
+});
+const mockUpdateCheckRun = vi.fn().mockResolvedValue(undefined);
 
 vi.mock('@roomote/github', () => ({
   createTaskRunGitHubToken: vi.fn().mockResolvedValue('github-token'),
   createIssueComment: (...args: unknown[]) => mockCreateIssueComment(...args),
-  deleteReaction: vi.fn(),
-  updateCheckRun: vi.fn(),
+  deleteReaction: (...args: unknown[]) => mockDeleteReaction(...args),
+  getCheckRun: (...args: unknown[]) => mockGetCheckRun(...args),
+  updateCheckRun: (...args: unknown[]) => mockUpdateCheckRun(...args),
 }));
 
 const mockPostMessage = vi.fn().mockResolvedValue('ts-123');
@@ -281,6 +328,11 @@ vi.mock('../notify-source-run-on-settle', () => ({
     mockNotifySourceRunOnSettle(...args),
 }));
 
+vi.mock('../notify-fast-agent-parent-on-settle', () => ({
+  notifyFastAgentParentOnSettle: (...args: unknown[]) =>
+    mockNotifyFastAgentParentOnSettle(...args),
+}));
+
 vi.mock('../../automation-result-metadata', () => ({
   resolveAutomationResultSubtitle: (...args: unknown[]) =>
     mockResolveAutomationResultSubtitle(...args),
@@ -353,6 +405,7 @@ describe('finishRun', () => {
     joinedSelectRows = [];
     mockFindManyRuns.mockResolvedValue([]);
     mockFindManyTaskPullRequests.mockResolvedValue([]);
+    mockFindFirstTaskPullRequest.mockResolvedValue(undefined);
     mockFindFirstDeploymentSettings.mockResolvedValue({
       slackOnboardingStage: 'awaiting_task_milestone',
     });
@@ -394,6 +447,10 @@ describe('finishRun', () => {
     }));
     mockRedisSet.mockResolvedValue('OK');
     mockRedisDel.mockResolvedValue(1);
+    mockGetCheckRun.mockResolvedValue({
+      data: { external_id: 'roomote-review:1' },
+    });
+    mockAcquireRedisLock.mockResolvedValue(mockReleaseRedisLock);
     mockUpdateMessage.mockResolvedValue(true);
     mockDbExecute.mockResolvedValue([]);
     mockResolveDefaultComputeProvider.mockResolvedValue('modal');
@@ -1476,6 +1533,42 @@ describe('finishRun', () => {
   });
 
   describe('Slack failure notification', () => {
+    it('routes Fast child failures through the parent without generic Slack delivery', async () => {
+      const job = makeRun({
+        payloadKind: TaskPayloadKind.StandardTask,
+        payload: {
+          repo: 'owner/repo',
+          description: 'Implement the fix',
+          communicationProvider: 'slack',
+          communicationContextInherited: true,
+          fastAgentParent: {
+            sessionId: '11111111-1111-4111-8111-111111111111',
+            conversation: {
+              surface: 'slack',
+              workspaceId: 'T123',
+              conversationId: '111.222',
+              replyTarget: { channelId: 'C123', threadId: '111.222' },
+            },
+          },
+        },
+      });
+      mockFindFirstRun.mockResolvedValue(job);
+      mockFindFirstTask.mockResolvedValue(job.task);
+
+      await finishRun({
+        id: 1,
+        status: RunStatus.Failed,
+        error: 'spawn timeout',
+      });
+
+      expect(mockPostMessage).not.toHaveBeenCalled();
+      expect(mockNotifyFastAgentParentOnSettle).toHaveBeenCalledWith(
+        expect.objectContaining({ taskId: job.taskId }),
+        RunStatus.Failed,
+        job.task.title,
+      );
+    });
+
     it('posts a retryable generic thread reply when a non-setup Slack job fails', async () => {
       const job = makeRun(
         {
@@ -2187,6 +2280,287 @@ describe('finishRun', () => {
         text: "I ran into a hiccup and couldn't get started. This is usually temporary -- try again and I'll give it another shot.\n\n**Error details:** The provider returned an error: API key is invalid.\n\n[Open the task](https://example.com/task)",
         textFormat: 'markdown',
       });
+    });
+  });
+
+  describe('GitHub PR review checks', () => {
+    const reviewPrRow = {
+      id: 'tpr-review',
+      taskId: 'task-1',
+      sourceControlProvider: 'github',
+      repository: 'owner/repo',
+      prNumber: 42,
+      prUrl: 'https://github.com/owner/repo/pull/42',
+      githubReactionId: null,
+      githubCheckRunId: 123,
+      githubReviewCommentId: 456,
+    };
+
+    beforeEach(() => {
+      mockFindFirstTaskPullRequest.mockResolvedValue({
+        githubCheckRunId: 123,
+      });
+    });
+
+    it('passes the check when the canonical review summary is clean', async () => {
+      mockFindFirstRun.mockResolvedValue(
+        makeRun(
+          { payloadKind: TaskPayloadKind.GithubPrReview },
+          { workflow: 'pr_review', surface: 'github' },
+        ),
+      );
+      mockFindManyTaskPullRequests.mockResolvedValue([reviewPrRow]);
+      mockFinalizeGithubPrReviewComment.mockResolvedValueOnce({
+        finalized: false,
+        body: '<!-- roomote-review-summary sha=abc1234 -->\n<!-- roomote-review-status:start -->\nNo issues found.\n<!-- roomote-review-status:end -->\n<!-- roomote-review-checklist:start -->\n<!-- roomote-review-checklist:end -->',
+      });
+
+      await finishRun({ id: 1, status: RunStatus.Completed });
+
+      expect(mockUpdateCheckRun).toHaveBeenCalledWith(
+        'github-token',
+        expect.objectContaining({
+          check_run_id: 123,
+          status: 'completed',
+          conclusion: 'success',
+        }),
+      );
+    });
+
+    it('serializes ownership verification and shared cleanup with review launch', async () => {
+      mockFindFirstRun.mockResolvedValue(
+        makeRun(
+          { payloadKind: TaskPayloadKind.GithubPrReview },
+          { workflow: 'pr_review', surface: 'github' },
+        ),
+      );
+      mockFindManyTaskPullRequests.mockResolvedValue([reviewPrRow]);
+      mockFinalizeGithubPrReviewComment.mockResolvedValueOnce({
+        finalized: false,
+        body: '<!-- roomote-review-summary sha=abc1234 -->\n<!-- roomote-review-status:start -->\nNo issues found.\n<!-- roomote-review-status:end -->\n<!-- roomote-review-checklist:start -->\n<!-- roomote-review-checklist:end -->',
+      });
+
+      await finishRun({ id: 1, status: RunStatus.Completed });
+
+      expect(mockAcquireRedisLock).toHaveBeenCalledWith(
+        'pr-review-synchronize:owner/repo:42',
+        { ttlSeconds: 120 },
+      );
+      expect(mockAcquireRedisLock.mock.invocationCallOrder[0]).toBeLessThan(
+        mockGetCheckRun.mock.invocationCallOrder[0]!,
+      );
+      expect(mockGetCheckRun.mock.invocationCallOrder[0]).toBeLessThan(
+        mockFinalizeGithubPrReviewComment.mock.invocationCallOrder[0]!,
+      );
+      expect(mockUpdateCheckRun.mock.invocationCallOrder[0]).toBeLessThan(
+        mockReleaseRedisLock.mock.invocationCallOrder[0]!,
+      );
+    });
+
+    it('cancels an in-flight summary write when lifecycle ownership is lost', async () => {
+      vi.useFakeTimers();
+      mockRenewRedisLock.mockResolvedValueOnce('lost');
+      mockFindFirstRun.mockResolvedValue(
+        makeRun(
+          { payloadKind: TaskPayloadKind.GithubPrReview },
+          { workflow: 'pr_review', surface: 'github' },
+        ),
+      );
+      mockFindManyTaskPullRequests.mockResolvedValue([reviewPrRow]);
+      let markWriteStarted!: () => void;
+      const writeStarted = new Promise<void>((resolve) => {
+        markWriteStarted = resolve;
+      });
+      mockFinalizeGithubPrReviewComment.mockImplementationOnce(
+        ({ signal }: { signal: AbortSignal }) => {
+          markWriteStarted();
+          return new Promise((_, reject) => {
+            signal.addEventListener('abort', () => reject(signal.reason), {
+              once: true,
+            });
+          });
+        },
+      );
+
+      try {
+        const finishPromise = finishRun({
+          id: 1,
+          status: RunStatus.Completed,
+        });
+        await writeStarted;
+        await vi.advanceTimersByTimeAsync(40_000);
+        await finishPromise;
+
+        expect(mockFinalizeGithubPrReviewComment).toHaveBeenCalledWith(
+          expect.objectContaining({ signal: expect.any(AbortSignal) }),
+        );
+        expect(mockUpdateCheckRun).not.toHaveBeenCalled();
+        expect(mockReleaseRedisLock).toHaveBeenCalledOnce();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('fails the check when the canonical review summary has findings', async () => {
+      mockFindFirstRun.mockResolvedValue(
+        makeRun(
+          { payloadKind: TaskPayloadKind.GithubPrReview },
+          { workflow: 'pr_review', surface: 'github' },
+        ),
+      );
+      mockFindManyTaskPullRequests.mockResolvedValue([reviewPrRow]);
+      mockFinalizeGithubPrReviewComment.mockResolvedValueOnce({
+        finalized: false,
+        body: '<!-- roomote-review-summary sha=abc1234 -->\n<!-- roomote-review-status:start -->\n1 issue outstanding.\n<!-- roomote-review-status:end -->\n<!-- roomote-review-checklist:start -->\n- [ ] Fix authorization\n<!-- roomote-review-checklist:end -->',
+      });
+
+      await finishRun({ id: 1, status: RunStatus.Completed });
+
+      expect(mockUpdateCheckRun).toHaveBeenCalledWith(
+        'github-token',
+        expect.objectContaining({
+          check_run_id: 123,
+          status: 'completed',
+          conclusion: 'failure',
+        }),
+      );
+    });
+
+    it('does not let a stale run finalize a newer review cycle', async () => {
+      mockFindFirstRun.mockResolvedValue(
+        makeRun(
+          { payloadKind: TaskPayloadKind.GithubPrReview },
+          { workflow: 'pr_review', surface: 'github' },
+        ),
+      );
+      mockFindManyTaskPullRequests.mockResolvedValue([
+        { ...reviewPrRow, githubReactionId: 789 },
+      ]);
+      mockGetCheckRun.mockResolvedValueOnce({
+        data: { external_id: 'roomote-review:2' },
+      });
+
+      await finishRun({ id: 1, status: RunStatus.Failed });
+
+      expect(mockGetCheckRun).toHaveBeenCalledWith(
+        'github-token',
+        expect.objectContaining({ check_run_id: 123 }),
+      );
+      expect(mockDeleteReaction).not.toHaveBeenCalled();
+      expect(mockFinalizeGithubPrReviewComment).not.toHaveBeenCalled();
+      expect(mockUpdateCheckRun).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      TaskPayloadKind.GithubPrReviewSync,
+      TaskPayloadKind.SnapshotResume,
+    ])(
+      'lets fallback run B finish clean after ownership transfers from failed run A (%s)',
+      async (fallbackPayloadKind) => {
+        mockFindManyTaskPullRequests.mockResolvedValue([reviewPrRow]);
+        mockGetCheckRun.mockResolvedValue({
+          data: { external_id: 'roomote-review:200' },
+        });
+        mockFindFirstRun
+          .mockResolvedValueOnce(
+            makeRun(
+              { id: 100, payloadKind: TaskPayloadKind.GithubPrReviewSync },
+              { workflow: 'pr_review', surface: 'github' },
+            ),
+          )
+          .mockResolvedValueOnce(
+            makeRun(
+              { id: 200, payloadKind: fallbackPayloadKind },
+              { workflow: 'pr_review', surface: 'github' },
+            ),
+          );
+
+        await finishRun({ id: 100, status: RunStatus.Failed });
+        expect(mockFinalizeGithubPrReviewComment).not.toHaveBeenCalled();
+        expect(mockUpdateCheckRun).not.toHaveBeenCalled();
+
+        mockFinalizeGithubPrReviewComment.mockResolvedValueOnce({
+          finalized: false,
+          body: '<!-- roomote-review-summary sha=abc1234 -->\n<!-- roomote-review-status:start -->\nNo issues found.\n<!-- roomote-review-status:end -->\n<!-- roomote-review-checklist:start -->\n<!-- roomote-review-checklist:end -->',
+        });
+        await finishRun({ id: 200, status: RunStatus.Completed });
+
+        expect(mockUpdateCheckRun).toHaveBeenCalledWith(
+          'github-token',
+          expect.objectContaining({
+            check_run_id: 123,
+            conclusion: 'success',
+          }),
+        );
+      },
+    );
+
+    it('does not finalize a review cycle with unknown check ownership', async () => {
+      mockFindFirstRun.mockResolvedValue(
+        makeRun(
+          { payloadKind: TaskPayloadKind.GithubPrReview },
+          { workflow: 'pr_review', surface: 'github' },
+        ),
+      );
+      mockFindManyTaskPullRequests.mockResolvedValue([reviewPrRow]);
+      mockGetCheckRun.mockResolvedValueOnce({ data: { external_id: null } });
+
+      await finishRun({ id: 1, status: RunStatus.Failed });
+
+      expect(mockFinalizeGithubPrReviewComment).not.toHaveBeenCalled();
+      expect(mockUpdateCheckRun).not.toHaveBeenCalled();
+    });
+
+    it('does not finalize shared review artifacts without a current check linkage', async () => {
+      mockFindFirstRun.mockResolvedValue(
+        makeRun(
+          { payloadKind: TaskPayloadKind.GithubPrReview },
+          { workflow: 'pr_review', surface: 'github' },
+        ),
+      );
+      mockFindManyTaskPullRequests.mockResolvedValue([
+        { ...reviewPrRow, githubReactionId: 789 },
+      ]);
+      mockFindFirstTaskPullRequest.mockResolvedValueOnce({
+        githubCheckRunId: null,
+      });
+
+      await finishRun({ id: 1, status: RunStatus.Failed });
+
+      expect(mockGetCheckRun).not.toHaveBeenCalled();
+      expect(mockDeleteReaction).not.toHaveBeenCalled();
+      expect(mockFinalizeGithubPrReviewComment).not.toHaveBeenCalled();
+      expect(mockUpdateCheckRun).not.toHaveBeenCalled();
+    });
+
+    it('refreshes a missing check id when publication races with finalization', async () => {
+      mockFindFirstRun.mockResolvedValue(
+        makeRun(
+          { payloadKind: TaskPayloadKind.GithubPrReview },
+          { workflow: 'pr_review', surface: 'github' },
+        ),
+      );
+      mockFindManyTaskPullRequests.mockResolvedValue([
+        { ...reviewPrRow, githubCheckRunId: null },
+      ]);
+      mockFindFirstTaskPullRequest.mockResolvedValue({
+        githubCheckRunId: 123,
+      });
+      mockFinalizeGithubPrReviewComment.mockResolvedValueOnce({
+        finalized: false,
+        body: '<!-- roomote-review-summary sha=abc1234 -->\n<!-- roomote-review-status:start -->\nNo issues found.\n<!-- roomote-review-status:end -->\n<!-- roomote-review-checklist:start -->\n<!-- roomote-review-checklist:end -->',
+      });
+
+      await finishRun({ id: 1, status: RunStatus.Completed });
+
+      expect(mockUpdateCheckRun).toHaveBeenCalledWith(
+        'github-token',
+        expect.objectContaining({
+          check_run_id: 123,
+          status: 'completed',
+          conclusion: 'success',
+        }),
+      );
     });
   });
 

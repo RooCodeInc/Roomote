@@ -1,4 +1,7 @@
-import { getTaskInitiatorDimensionValue } from './dimensions';
+import {
+  getTaskInitiatorDimensionValue,
+  getTaskTypeDimensionValue,
+} from './dimensions';
 
 describe('getTaskInitiatorDimensionValue', () => {
   it('groups fallback Linear session identities under a stable label', () => {
@@ -38,5 +41,34 @@ describe('getTaskInitiatorDimensionValue', () => {
       key: 'external:linear-user-id',
       label: 'Ada Lovelace',
     });
+  });
+});
+
+describe('getTaskTypeDimensionValue', () => {
+  it.each([
+    [
+      { initiatorKind: 'user' as const, initiatorAutomation: null },
+      { key: 'Manual', label: 'Manual Task' },
+    ],
+    [
+      { initiatorKind: null, initiatorAutomation: null },
+      { key: 'Unknown', label: 'Unknown Task' },
+    ],
+    [
+      {
+        initiatorKind: 'automation' as const,
+        initiatorAutomation: 'automation',
+      },
+      { key: 'automation:automation', label: 'Automation' },
+    ],
+    [
+      {
+        initiatorKind: 'automation' as const,
+        initiatorAutomation: 'pr_review',
+      },
+      { key: 'automation:pr_review', label: 'PR Review Task' },
+    ],
+  ])('formats %o as %o', (task, dimension) => {
+    expect(getTaskTypeDimensionValue(task)).toEqual(dimension);
   });
 });

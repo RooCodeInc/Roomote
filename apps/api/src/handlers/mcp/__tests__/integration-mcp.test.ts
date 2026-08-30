@@ -92,6 +92,7 @@ function createToolCallRequest(id: number, name: string) {
 function createApp(
   integrationId: string,
   authContext: Variables['authContext'],
+  options?: Parameters<typeof createIntegrationMcpProxy>[1],
 ) {
   const integration = getMcpIntegration(integrationId);
 
@@ -106,7 +107,7 @@ function createApp(
     await next();
   });
 
-  app.route('/mcp', createIntegrationMcpProxy(integration));
+  app.route('/mcp', createIntegrationMcpProxy(integration, options));
   return app;
 }
 
@@ -147,7 +148,9 @@ describe('createIntegrationMcpProxy acting-user scoping', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.unstubAllGlobals();
-    mockFindEnablement.mockResolvedValue({ disabledTools: null });
+    mockFindEnablement.mockResolvedValue({
+      disabledTools: null,
+    });
     mockGetValidAccessToken.mockResolvedValue('valid-access-token');
   });
 
@@ -186,7 +189,7 @@ describe('createIntegrationMcpProxy acting-user scoping', () => {
     mockFindTaskRun.mockResolvedValue({ id: 42, actingUserId: null });
 
     const response = await postMcp(
-      createApp('notion', createRunToken()),
+      createApp('monday', createRunToken()),
       createInitializeRequest(1),
     );
     const body = (await response.json()) as JsonRpcErrorBody;
@@ -211,6 +214,38 @@ describe('createIntegrationMcpProxy acting-user scoping', () => {
 
     expect(response.status).toBe(200);
     expect(mockFindConnection).toHaveBeenCalledTimes(1);
+  });
+
+  it('resolves a user-scoped connection for a Fast user auth token', async () => {
+    // Fast turns reach user-scoped proxies with the acting user's auth token;
+    // credential resolution must stay pinned to the token holder.
+    mockFindConnection.mockResolvedValue({ id: 'conn-3', userId: 'user-3' });
+    stubUpstreamFetch();
+
+    const response = await postMcp(
+      createApp(
+        'monday',
+        { userId: 'user-3', tokenType: 'auth', version: 1 },
+        { allowAuthTokens: true },
+      ),
+      createInitializeRequest(1),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mockFindTaskRun).not.toHaveBeenCalled();
+    expect(mockFindConnection).toHaveBeenCalledTimes(1);
+  });
+
+  it('still rejects a user auth token when auth tokens are not allowed', async () => {
+    const response = await postMcp(
+      createApp('monday', { userId: 'user-3', tokenType: 'auth', version: 1 }),
+      createInitializeRequest(1),
+    );
+    const body = (await response.json()) as JsonRpcErrorBody;
+
+    expect(response.status).toBe(403);
+    expect(body.error.message).toContain('only available for task run tokens');
+    expect(mockFindConnection).not.toHaveBeenCalled();
   });
 
   it('forwards the decrypted admin-configured X bearer token upstream', async () => {

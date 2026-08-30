@@ -1,38 +1,66 @@
+import { redactBrainText } from '@roomote/communication/redact-brain-text';
 import {
   db,
   backfillBrainMemoryEvents,
   claimPendingBrainMemoryEvents,
+  claimPendingFastAgentMemoryEvents,
   getBrainSyncState,
   upsertBrainSyncState,
   environments,
+  fastAgentConversations,
   markBrainMemoryEvent,
+  markFastAgentMemoryEvent,
+  settleBrainMemoryEvent,
   releaseBrainMemoryEvents,
+  releaseFastAgentMemoryEvents,
+  settleFastAgentMemoryEvent,
   pullRequestFacts,
   taskPullRequests,
   taskRuns,
+  users,
   and,
   eq,
   gt,
   gte,
   or,
+  renameBrainSyncStateFamilyPrefix,
+  type BrainMemoryEventRow,
+  type FastAgentMemoryEventRow,
 } from '@roomote/db/server';
 import {
-  resolveBrainInferenceProvider,
+  parseBrainToolPayloads,
+  postBrainToolCall,
+  isBrainEmbeddingAvailable,
   resolveBrainConnection,
 } from '@roomote/sdk/server';
-import { getLinkedEnvironmentIdFromPayload, RunStatus } from '@roomote/types';
+import {
+  BRAIN_COLLECTOR_IDS,
+  BRAIN_PAGE_TYPES,
+  RunStatus,
+  brainNamespacePrefix,
+  getLinkedEnvironmentIdFromPayload,
+  renderBrainFrontmatter,
+} from '@roomote/types';
 
 import { runBrainCollectors } from './brain-collectors';
+import { drainMemoryOutboxBatch } from './memory-outbox-drain';
+import {
+  runSlackDayPageCensus,
+  runSlackDayPageInventoryMaintenance,
+} from './brain-collectors/slack-day-page-inventory';
+import { slackPublicChannelsCollector } from './brain-collectors/slack-public-channels';
 
 const LOG_PREFIX = '[brainOutboxDrain]';
 /** Sync-state key for the one-time task-history backfill. */
-const TASK_MEMORY_COLLECTOR_ID = 'task-memory';
+const TASK_MEMORY_COLLECTOR_ID = BRAIN_COLLECTOR_IDS.taskMemories;
 const CLAIM_BATCH_SIZE = 10;
 // Backfill can enqueue a deployment's whole task history at once; drain up
 // to this many batches per tick so the backlog clears in minutes, not hours.
 const MAX_BATCHES_PER_TICK = 20;
 const MAX_ATTEMPTS = 5;
-const PR_FACTS_COLLECTOR_ID = 'pull-request-facts';
+// Versioned when date semantics change so existing pages are replayed and
+// corrected instead of retaining stale effective dates forever.
+const PR_FACTS_COLLECTOR_ID = BRAIN_COLLECTOR_IDS.pullRequestFacts;
 // PR analytics gives every repository in one sync the same timestamp but
 // writes repositories sequentially. Re-read a bounded window on each normal
 // collector tick so a row committed late with that shared timestamp cannot
@@ -40,31 +68,7 @@ const PR_FACTS_COLLECTOR_ID = 'pull-request-facts';
 const PR_FACTS_OVERLAP_MS = 24 * 60 * 60 * 1000;
 const BACKFILL_CONTINUATION_DELAY_MS = 1_000;
 
-/**
- * Deterministic pre-ingestion redaction. This is a structural boundary, not a
- * prompt: nothing leaves for the brain without passing through it. Patterns
- * mirror the sandbox worker-env scrub list; keep the two in sync when adding
- * a credential shape.
- */
-const SECRET_PATTERNS: RegExp[] = [
-  /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g,
-  /\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{20,}\b/g,
-  /\bgithub_pat_[A-Za-z0-9_]{20,}\b/g,
-  /\bsk-[A-Za-z0-9_-]{20,}\b/g,
-  /\bxox[baprs]-[A-Za-z0-9-]{10,}\b/g,
-  /\bAKIA[0-9A-Z]{16}\b/g,
-  /\bBearer\s+[A-Za-z0-9._~+/=-]{16,}/g,
-];
-
-export function redactBrainText(text: string): string {
-  let redacted = text;
-
-  for (const pattern of SECRET_PATTERNS) {
-    redacted = redacted.replace(pattern, '[REDACTED]');
-  }
-
-  return redacted;
-}
+export { redactBrainText };
 
 type IngestPage = {
   slug: string;
@@ -107,6 +111,113 @@ export function isBrainNotReady(error: unknown): boolean {
   return error instanceof BrainNotReadyError;
 }
 
+const NETWORK_ERROR_CODES = new Set([
+  'ECONNREFUSED',
+  'ECONNRESET',
+  'ETIMEDOUT',
+  'EAI_AGAIN',
+  'ENOTFOUND',
+  'EPIPE',
+  'UND_ERR_CONNECT_TIMEOUT',
+  'UND_ERR_SOCKET',
+]);
+
+/**
+ * A throw from the transport itself — fetch rejects only when no HTTP
+ * response exists (connection refused during a gbrain deploy swap, DNS,
+ * reset), and undici wraps the real cause under `error.cause` with the
+ * top-level message being just "fetch failed". This is a property of the
+ * moment, not of the page being written, so it must never consume a
+ * memory's retry budget: with staging rolling images on every develop
+ * build, a two-minute restart window would otherwise walk perfectly good
+ * memories into a terminal state (observed 2026-08-27: 29 memories
+ * "exhausted their attempts. fetch failed").
+ */
+export function isBrainUnreachable(error: unknown): boolean {
+  let current: unknown = error;
+
+  for (let depth = 0; current && depth < 5; depth++) {
+    if (current instanceof Error) {
+      const code = (current as NodeJS.ErrnoException).code;
+      if (code && NETWORK_ERROR_CODES.has(code)) {
+        return true;
+      }
+      if (
+        current.message === 'fetch failed' ||
+        /socket hang up|other side closed|terminated|premature close/i.test(
+          current.message,
+        )
+      ) {
+        return true;
+      }
+      current = current.cause;
+    } else {
+      break;
+    }
+  }
+
+  return false;
+}
+
+export async function callBrainWriteTool(
+  connection: { baseUrl: string; token: string },
+  name: string,
+  args: Record<string, unknown>,
+): Promise<string> {
+  // Shared transport; the backpressure classification below is this write
+  // path's own and deliberately stays here. No timeout: put_page embeds
+  // synchronously and a slow embed is backpressure, not a failure.
+  let response: Awaited<ReturnType<typeof postBrainToolCall>>;
+
+  try {
+    response = await postBrainToolCall(connection, name, args);
+  } catch (error) {
+    if (isBrainUnreachable(error)) {
+      throw new BrainNotReadyError(
+        `gbrain ${name} unreachable: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
+    throw error;
+  }
+
+  const { status, ok, body } = response;
+
+  if (status === 429) {
+    throw new BrainRateLimitedError(
+      `gbrain ${name} rate limited: ${body.slice(0, 300)}`,
+    );
+  }
+
+  // Detect tool-level failure through the shared JSON-RPC parser rather than
+  // a substring match: the parser owns the envelope shape (including
+  // whitespace-tolerant isError detection) and error prose from the page body
+  // must never masquerade as failure classification.
+  let toolError: string | null = null;
+
+  try {
+    parseBrainToolPayloads(body, name);
+  } catch (error) {
+    toolError = error instanceof Error ? error.message : String(error);
+  }
+
+  const failed = !ok || toolError !== null;
+  const failureText = `${toolError ?? ''} ${body.slice(0, 300)}`;
+
+  if (failed && /embed\(|embedding/i.test(failureText)) {
+    throw new BrainNotReadyError(
+      `gbrain ${name} could not embed: ${failureText.slice(0, 300)}`,
+    );
+  }
+
+  if (failed) {
+    throw new Error(`gbrain ${name} failed: ${failureText.slice(0, 300)}`);
+  }
+
+  return body;
+}
+
 /**
  * Write one memory page via gbrain's MCP `put_page` op with a write-scoped
  * access token. Synchronous and immediately retrievable, so task completion
@@ -116,47 +227,10 @@ export async function postToBrain(
   page: IngestPage,
   connection: { baseUrl: string; token: string },
 ): Promise<void> {
-  const { baseUrl, token } = connection;
-
-  const response = await fetch(`${baseUrl.replace(/\/$/, '')}/mcp`, {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      accept: 'application/json, text/event-stream',
-      authorization: `Bearer ${token}`,
-    },
-    body: JSON.stringify({
-      jsonrpc: '2.0',
-      id: 1,
-      method: 'tools/call',
-      params: {
-        name: 'put_page',
-        arguments: { slug: page.slug, content: page.content },
-      },
-    }),
+  await callBrainWriteTool(connection, 'put_page', {
+    slug: page.slug,
+    content: page.content,
   });
-
-  const body = await response.text().catch(() => '');
-
-  if (response.status === 429) {
-    throw new BrainRateLimitedError(
-      `gbrain put_page rate limited: ${body.slice(0, 300)}`,
-    );
-  }
-
-  const failed = !response.ok || body.includes('"isError":true');
-
-  if (failed && /embed\(|embedding/i.test(body)) {
-    throw new BrainNotReadyError(
-      `gbrain put_page could not embed: ${body.slice(0, 300)}`,
-    );
-  }
-
-  if (failed) {
-    throw new Error(
-      `gbrain put_page failed: ${response.status} ${body.slice(0, 300)}`,
-    );
-  }
 }
 
 /**
@@ -192,19 +266,28 @@ export function buildMemoryPage(input: {
   });
 
   const content = [
-    '---',
-    `roomote_task_id: ${input.taskId}`,
-    `roomote_run_id: ${input.runId}`,
-    // GBrain derives effective_date from this conventional field. Keep the
-    // full timestamp below as provenance, but make backfilled pages sort and
-    // filter by when the task completed rather than when it was ingested.
-    ...(completedDate ? [`date: ${completedDate}`] : []),
-    `completed_at: ${completed}`,
-    // Environment stamp: costs nothing now, enables environment-scoped
-    // retrieval (gbrain sources) or admin triage later without re-ingesting.
-    ...(input.environmentName ? [`environment: ${input.environmentName}`] : []),
-    'provenance: roomote-task-memory',
-    '---',
+    ...renderBrainFrontmatter({
+      type: BRAIN_PAGE_TYPES.taskMemory,
+      title: input.taskTitle,
+      // Legacy completed runs can lack a completion time; `completed` is the
+      // literal "unknown" then, which is no date at all.
+      created: completedAtIso ?? null,
+      fields: [
+        `roomote_task_id: ${input.taskId}`,
+        `roomote_run_id: ${input.runId}`,
+        // GBrain derives effective_date from this conventional field. Keep
+        // the full timestamp below as provenance, but make backfilled pages
+        // sort and filter by when the task completed rather than when it
+        // was ingested.
+        completedDate && `date: ${completedDate}`,
+        `completed_at: ${completed}`,
+        // Environment stamp: costs nothing now, enables environment-scoped
+        // retrieval (gbrain sources) or admin triage later without
+        // re-ingesting.
+        input.environmentName && `environment: ${input.environmentName}`,
+        'provenance: roomote-task-memory',
+      ],
+    }),
     '',
     `# ${input.taskTitle}`,
     '',
@@ -217,19 +300,20 @@ export function buildMemoryPage(input: {
   ].join('\n');
 
   return {
-    slug: `tasks/${input.taskId}/runs/${input.runId}`,
+    slug: `${brainNamespacePrefix('tasks')}${input.taskId}/runs/${input.runId}`,
     title: input.taskTitle,
     content: redactBrainText(content),
   };
 }
 
 /**
- * Drain the brain_memory_events transactional outbox. Runs on the
- * shared scheduler queue; claims use FOR UPDATE SKIP LOCKED so overlapping
- * ticks never double-process. When the brain is enabled, completed tasks
- * feed it deployment-wide (the corpus is company-wide by definition;
- * enabling the integration is the ingestion consent). Skip rules decide
- * whether a claimed event becomes a memory ('done'), is skipped, or retries.
+ * Drain the brain_memory_events and fast_agent_memory_events transactional
+ * outboxes. Runs on the shared scheduler queue; claims use FOR UPDATE SKIP
+ * LOCKED so overlapping ticks never double-process. When the brain is
+ * enabled, completed tasks and Fast conversation memories feed it
+ * deployment-wide (the corpus is company-wide by definition; enabling the
+ * integration is the ingestion consent). Skip rules decide whether a claimed
+ * event becomes a memory ('done'), is skipped, or retries.
  */
 export async function brainOutboxDrainJob(): Promise<void> {
   const connection = await resolveReadyBrain();
@@ -247,31 +331,43 @@ export async function brainOutboxDrainJob(): Promise<void> {
       break;
     }
   }
+
+  for (let batch = 0; batch < MAX_BATCHES_PER_TICK; batch++) {
+    const drained = await drainOneFastMemoryBatch(connection);
+
+    if (!drained) {
+      break;
+    }
+  }
 }
 
 /**
  * A Brain worth writing to needs both halves: somewhere to put pages, and a
- * model provider to embed them with.
+ * way to embed them.
  *
- * The provider half is not optional caution. Every page written to a Brain
+ * The embedding half is not optional caution. Every page written to a Brain
  * that cannot embed fails outright — gbrain retries the embed three times and
- * returns an error — so draining ahead of a configured provider would burn
- * each memory through its retry budget into a terminal 'failed' state that no
- * later claim picks up, and would mark the one-shot history backfill complete
- * before a single page landed. Holding here instead is what makes turning the
- * Brain on later actually pick up everything that happened before.
+ * returns an error — so draining ahead of an embedding path would burn each
+ * memory through its retry budget into a terminal 'failed' state that no later
+ * claim picks up, and would mark the one-shot history backfill complete before
+ * a single page landed. Holding here instead is what makes turning the Brain
+ * on later actually pick up everything that happened before.
+ *
+ * The check is provider-agnostic: a configured embedder (the shared Modal
+ * endpoint for managed tenants, or a local model self-hosted) is enough, and
+ * synthesis rides the deployment's helper model through the inference gateway,
+ * so no OpenAI/OpenRouter key is required — an Anthropic-only or trial-key
+ * tenant is just as ready. See isBrainEmbeddingAvailable.
  */
 async function resolveReadyBrain(): Promise<{
   baseUrl: string;
   token: string;
 } | null> {
-  // Provider first, and not in parallel: resolving a connection registers
-  // scoped OAuth clients against the Brain as a side effect, which is not
-  // worth doing for a Brain that cannot embed yet. This check is cached, so
-  // the common unconfigured tick costs nothing.
-  const provider = await resolveBrainInferenceProvider();
-
-  if (!provider) {
+  // Embedding path first, and not in parallel: resolving a connection
+  // registers scoped OAuth clients against the Brain as a side effect, which
+  // is not worth doing for a Brain that cannot embed yet. This check is
+  // cached, so the common unconfigured tick costs nothing.
+  if (!(await isBrainEmbeddingAvailable())) {
     return null;
   }
 
@@ -291,7 +387,9 @@ async function backfillTaskHistoryOnce(): Promise<void> {
     return;
   }
 
-  const enqueued = await backfillBrainMemoryEvents(db);
+  const enqueued = await backfillBrainMemoryEvents(db, {
+    requeueCompleted: true,
+  });
 
   await upsertBrainSyncState(db, TASK_MEMORY_COLLECTOR_ID, {
     backfillCompletedAt: new Date(),
@@ -313,6 +411,40 @@ export async function brainCollectorsJob(): Promise<void> {
 
   if (!connection) {
     return;
+  }
+
+  try {
+    // Before any Slack collection: repair pre-canonicalization inventories
+    // (re-arming the healing replay where the case mismatch neutered it),
+    // then the one-time inventory census the Slack collector holds on.
+    // Running these here, ahead of the pass, normally completes them within
+    // the first tick after a deploy.
+    await runSlackDayPageInventoryMaintenance(slackPublicChannelsCollector.id);
+    await runSlackDayPageCensus();
+  } catch (error) {
+    console.warn(
+      `${LOG_PREFIX} slack day-page census failed; slack collection stays held: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
+
+  try {
+    // The GitHub per-repository stream rows were once keyed under a
+    // hardcoded superseded version while the collector moved on; move them
+    // under the current id so their watermarks and cursors keep counting as
+    // the source's live streams. No-op fast once clean.
+    await renameBrainSyncStateFamilyPrefix(
+      db,
+      'github-issues:occurrence-date-v2',
+      BRAIN_COLLECTOR_IDS.githubIssues,
+    );
+  } catch (error) {
+    console.warn(
+      `${LOG_PREFIX} github stream-row migration failed; retrying next tick: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
   }
 
   let includeIncremental = true;
@@ -378,137 +510,252 @@ async function drainOneBatch(connection: {
   baseUrl: string;
   token: string;
 }): Promise<boolean> {
-  const events = await claimPendingBrainMemoryEvents(db, CLAIM_BATCH_SIZE);
+  return drainMemoryOutboxBatch<BrainMemoryEventRow, IngestPage>(
+    {
+      claim: () => claimPendingBrainMemoryEvents(db, CLAIM_BATCH_SIZE),
+      async prepare(event) {
+        const run = await db.query.taskRuns.findFirst({
+          where: eq(taskRuns.id, event.runId),
+          with: { task: true },
+        });
 
-  if (events.length === 0) {
-    return false;
-  }
-
-  for (const [index, event] of events.entries()) {
-    try {
-      const run = await db.query.taskRuns.findFirst({
-        where: eq(taskRuns.id, event.runId),
-        with: { task: true },
-      });
-
-      if (!run) {
-        await markBrainMemoryEvent(
-          db,
-          event.id,
-          'skipped',
-          'run no longer exists',
-        );
-        continue;
-      }
-
-      // An agent can save its memory before its run finishes (the tool call
-      // is part of wrapping up), which creates this row while the run is
-      // still in flight. Only a run that settled somewhere other than
-      // Completed is a real skip; anything still moving must stay pending, or
-      // a drain tick landing in that window would discard the memory for good.
-      if (run.status !== RunStatus.Completed) {
-        const settled =
-          run.status === RunStatus.Failed || run.status === RunStatus.Canceled;
-
-        await markBrainMemoryEvent(
-          db,
-          event.id,
-          settled ? 'skipped' : 'pending',
-          `run status is ${run.status}`,
-        );
-
-        if (!settled) {
-          // Claiming charged an attempt, but nothing was delivered: the run is
-          // simply not finished. Left charged, an agent that saves its memory
-          // early on a long task burns the whole retry budget before the first
-          // real send, and the next transient failure is terminal.
-          await releaseBrainMemoryEvents(db, [event.id]);
+        if (!run) {
+          await markBrainMemoryEvent(
+            db,
+            event.id,
+            'skipped',
+            'run no longer exists',
+          );
+          return null;
         }
 
-        continue;
-      }
+        // An agent can save its memory before its run finishes (the tool call
+        // is part of wrapping up), which creates this row while the run is
+        // still in flight. Only a run that settled somewhere other than
+        // Completed is a real skip; anything still moving must stay pending, or
+        // a drain tick landing in that window would discard the memory for good.
+        if (run.status !== RunStatus.Completed) {
+          const settled =
+            run.status === RunStatus.Failed ||
+            run.status === RunStatus.Canceled;
 
-      const prRows = await db
-        .select()
-        .from(taskPullRequests)
-        .where(eq(taskPullRequests.taskId, run.taskId));
+          await markBrainMemoryEvent(
+            db,
+            event.id,
+            settled ? 'skipped' : 'pending',
+            `run status is ${run.status}`,
+          );
 
-      const environmentId = getLinkedEnvironmentIdFromPayload(run.payload);
-      let environmentName: string | null = null;
+          if (!settled) {
+            // Claiming charged an attempt, but nothing was delivered: the run is
+            // simply not finished. Left charged, an agent that saves its memory
+            // early on a long task burns the whole retry budget before the first
+            // real send, and the next transient failure is terminal.
+            await releaseBrainMemoryEvents(db, [event.id]);
+          }
 
-      if (environmentId) {
-        const [environment] = await db
-          .select({ name: environments.name })
-          .from(environments)
-          .where(eq(environments.id, environmentId))
-          .limit(1);
-        environmentName = environment?.name ?? null;
-      }
+          return null;
+        }
 
-      const page = buildMemoryPage({
-        environmentName,
-        agentSummary: event.agentSummary,
-        runId: run.id,
-        taskId: run.taskId,
-        taskTitle: run.task.title,
-        completedAt: run.completedAt,
-        pullRequests: prRows.map((pr) => ({
-          repository: pr.repository,
-          prNumber: pr.prNumber,
-          prTitle: pr.prTitle,
-          prUrl: pr.prUrl,
-        })),
-      });
+        const prRows = await db
+          .select()
+          .from(taskPullRequests)
+          .where(eq(taskPullRequests.taskId, run.taskId));
 
-      await postToBrain(page, connection);
-      await markBrainMemoryEvent(db, event.id, 'done');
+        const environmentId = getLinkedEnvironmentIdFromPayload(run.payload);
+        let environmentName: string | null = null;
 
-      console.log(
-        `${LOG_PREFIX} ingested memory for run ${event.runId} (${page.slug})`,
-      );
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+        if (environmentId) {
+          const [environment] = await db
+            .select({ name: environments.name })
+            .from(environments)
+            .where(eq(environments.id, environmentId))
+            .limit(1);
+          environmentName = environment?.name ?? null;
+        }
 
-      // A 429 means "slow down", not "this event is bad". Requeue without
-      // terminal-failure accounting and end the tick so the next one (60s
-      // later) resumes gently. The rest of this batch was already flipped to
-      // 'processing' by the claim, so hand it back explicitly rather than
-      // leaving it to the stale-claim reclaim fifteen minutes later.
-      // Both mean "not this event's fault, and not now": hand the whole
-      // remaining batch back and let a later tick retry the same idempotent
-      // slugs once the Brain can actually accept them.
-      if (isBrainRateLimited(error) || isBrainNotReady(error)) {
-        await markBrainMemoryEvent(db, event.id, 'pending', message);
-        await releaseBrainMemoryEvents(db, [
-          event.id,
-          ...events.slice(index + 1).map((pending) => pending.id),
-        ]);
+        const page = buildMemoryPage({
+          environmentName,
+          agentSummary: event.agentSummary,
+          runId: run.id,
+          taskId: run.taskId,
+          taskTitle: run.task.title,
+          completedAt: run.completedAt,
+          pullRequests: prRows.map((pr) => ({
+            repository: pr.repository,
+            prNumber: pr.prNumber,
+            prTitle: pr.prTitle,
+            prUrl: pr.prUrl,
+          })),
+        });
+
+        return {
+          page,
+          settledMessage: `ingested memory for run ${event.runId}`,
+          supersededMessage: `run ${event.runId} gained a newer summary mid-write; re-ingesting next tick`,
+        };
+      },
+      write: (page) => postToBrain(page, connection),
+      mark: (id, status, lastError) =>
+        markBrainMemoryEvent(db, id, status, lastError),
+      release: (ids) => releaseBrainMemoryEvents(db, ids),
+      settle: (id, revision, outcome, lastError) =>
+        lastError === undefined
+          ? settleBrainMemoryEvent(db, id, revision, outcome)
+          : settleBrainMemoryEvent(db, id, revision, outcome, lastError),
+      classifyBackpressure: (error) =>
+        isBrainRateLimited(error)
+          ? 'rate-limited'
+          : isBrainNotReady(error)
+            ? 'not-ready'
+            : null,
+      onSettled: (prepared, result) =>
         console.log(
-          `${LOG_PREFIX} ${
-            isBrainRateLimited(error) ? 'rate limited by' : 'cannot embed into'
-          } the brain; pausing until next tick`,
-        );
-        return false;
-      }
+          `${LOG_PREFIX} ${result === 'settled' ? prepared.settledMessage : prepared.supersededMessage} (${prepared.page.slug})`,
+        ),
+      onBackpressure: (kind) =>
+        console.log(
+          `${LOG_PREFIX} ${kind === 'rate-limited' ? 'rate limited by' : 'cannot reach or embed into'} the brain; pausing until next tick`,
+        ),
+      onFailure: (event, terminal, message) =>
+        console.warn(
+          `${LOG_PREFIX} ${terminal ? 'permanently failed' : 'will retry'} run ${event.runId} (attempt ${event.attempts}): ${message}`,
+        ),
+    },
+    MAX_ATTEMPTS,
+  );
+}
 
-      const terminal = event.attempts >= MAX_ATTEMPTS;
+/**
+ * Build the memory page for a Fast conversation's remembered facts. Same
+ * conservative posture as task memories: structured provenance fields only,
+ * the accumulated facts as body, deterministic redaction over the whole page.
+ * `created` is the outbox row's creation time so idempotent re-puts of an
+ * unchanged memory do not read as content changes.
+ */
+export function buildFastMemoryPage(input: {
+  conversationId: string;
+  conversationTitle: string | null;
+  userName: string | null;
+  userId: string;
+  surface: string;
+  memory: string;
+  createdAt: Date;
+  updatedAt: Date;
+}): IngestPage {
+  const title =
+    input.conversationTitle ??
+    `Fast conversation ${input.conversationId.slice(0, 8)}`;
 
-      await markBrainMemoryEvent(
-        db,
-        event.id,
-        terminal ? 'failed' : 'pending',
-        message,
-      );
+  const content = [
+    ...renderBrainFrontmatter({
+      type: BRAIN_PAGE_TYPES.conversationMemory,
+      title,
+      created: input.createdAt,
+      fields: [
+        `roomote_conversation_id: ${input.conversationId}`,
+        `roomote_user_id: ${input.userId}`,
+        input.userName && `saved_by: ${JSON.stringify(input.userName)}`,
+        `surface: ${input.surface}`,
+        // GBrain derives effective_date from this conventional field. The
+        // last save is the honest date for a page whose content grows.
+        `date: ${input.updatedAt.toISOString().slice(0, 10)}`,
+        'provenance: roomote-fast-memory',
+      ],
+    }),
+    '',
+    `# ${title}`,
+    '',
+    '## Remembered facts',
+    '',
+    input.memory,
+    '',
+  ].join('\n');
 
-      console.warn(
-        `${LOG_PREFIX} ${terminal ? 'permanently failed' : 'will retry'} run ${
-          event.runId
-        } (attempt ${event.attempts}): ${message}`,
-      );
-    }
-  }
+  return {
+    slug: `${brainNamespacePrefix('memories')}fast/${input.conversationId}`,
+    title,
+    content: redactBrainText(content),
+  };
+}
 
-  return true;
+/** Returns false when no pending conversation-memory events remained. */
+async function drainOneFastMemoryBatch(connection: {
+  baseUrl: string;
+  token: string;
+}): Promise<boolean> {
+  return drainMemoryOutboxBatch<FastAgentMemoryEventRow, IngestPage>(
+    {
+      claim: () => claimPendingFastAgentMemoryEvents(db, CLAIM_BATCH_SIZE),
+      async prepare(event) {
+        const [conversation] = await db
+          .select({
+            title: fastAgentConversations.title,
+            surface: fastAgentConversations.surface,
+            userId: fastAgentConversations.userId,
+            userName: users.name,
+          })
+          .from(fastAgentConversations)
+          .leftJoin(users, eq(users.id, fastAgentConversations.userId))
+          .where(eq(fastAgentConversations.id, event.conversationId))
+          .limit(1);
+
+        if (!conversation) {
+          await markFastAgentMemoryEvent(
+            db,
+            event.id,
+            'skipped',
+            'conversation no longer exists',
+          );
+          return null;
+        }
+
+        const page = buildFastMemoryPage({
+          conversationId: event.conversationId,
+          conversationTitle: conversation.title,
+          userName: conversation.userName,
+          userId: conversation.userId,
+          surface: conversation.surface,
+          memory: event.memory,
+          createdAt: event.createdAt,
+          updatedAt: event.updatedAt,
+        });
+
+        return {
+          page,
+          settledMessage: `ingested memory for conversation ${event.conversationId}`,
+          supersededMessage: `conversation ${event.conversationId} gained facts mid-write; re-ingesting next tick`,
+        };
+      },
+      write: (page) => postToBrain(page, connection),
+      mark: (id, status, lastError) =>
+        markFastAgentMemoryEvent(db, id, status, lastError),
+      release: (ids) => releaseFastAgentMemoryEvents(db, ids),
+      settle: (id, revision, outcome, lastError) =>
+        lastError === undefined
+          ? settleFastAgentMemoryEvent(db, id, revision, outcome)
+          : settleFastAgentMemoryEvent(db, id, revision, outcome, lastError),
+      classifyBackpressure: (error) =>
+        isBrainRateLimited(error)
+          ? 'rate-limited'
+          : isBrainNotReady(error)
+            ? 'not-ready'
+            : null,
+      onSettled: (prepared, result) =>
+        console.log(
+          `${LOG_PREFIX} ${result === 'settled' ? prepared.settledMessage : prepared.supersededMessage} (${prepared.page.slug})`,
+        ),
+      onBackpressure: (kind) =>
+        console.log(
+          `${LOG_PREFIX} ${kind === 'rate-limited' ? 'rate limited by' : 'cannot reach or embed into'} the brain; pausing conversation-memory drain until next tick`,
+        ),
+      onFailure: (event, terminal, message) =>
+        console.warn(
+          `${LOG_PREFIX} ${terminal ? 'permanently failed' : 'will retry'} conversation ${event.conversationId} (attempt ${event.attempts}): ${message}`,
+        ),
+    },
+    MAX_ATTEMPTS,
+  );
 }
 
 /** Per-pass ceiling on PR fact pages. A durable keyset resumes immediately. */
@@ -566,6 +813,157 @@ export function getPullRequestFactsResumeCursor(
 }
 
 /**
+ * Bound on the description excerpt a pull-request page carries. Long enough
+ * for the "why" and the summary of changes most descriptions lead with,
+ * short enough that a template-heavy description cannot dominate the page's
+ * embedding or the nightly digest's evidence budget.
+ */
+const PR_BODY_CHAR_CAP = 4_000;
+
+export function buildPullRequestFactPage(fact: {
+  repositoryFullName: string;
+  prNumber: number;
+  title: string;
+  htmlUrl: string;
+  authorLogin: string | null;
+  body?: string | null;
+  labels?: string[] | null;
+  changedFiles?: string[] | null;
+  changedFileCount?: number | null;
+  filesCapped?: boolean | null;
+  reviewsCapped?: boolean | null;
+  additions?: number | null;
+  deletions?: number | null;
+  reviews?: Array<{ login: string | null; state: string }> | null;
+  state: string;
+  createdAtRemote: Date;
+  closedAtRemote: Date | null;
+  mergedAtRemote: Date | null;
+}): IngestPage {
+  const merged = fact.mergedAtRemote?.toISOString();
+  const occurredAt =
+    fact.mergedAtRemote ?? fact.closedAtRemote ?? fact.createdAtRemote;
+  const labels = fact.labels ?? [];
+  const body = fact.body?.trim() ?? '';
+  const changedFiles = fact.changedFiles ?? [];
+  // The distinct leading directories are what a question about "the
+  // collectors" or "the web app" matches on; the path list is the detail.
+  const areas = [
+    ...new Set(
+      changedFiles.map((path) => {
+        const segments = path.split('/');
+        return segments.length > 1 ? segments.slice(0, 2).join('/') : '.';
+      }),
+    ),
+  ].sort();
+  const fileCount = fact.changedFileCount ?? changedFiles.length;
+  // When the provider listing was capped, every number here describes the
+  // files that were read, not the pull request. Say so rather than
+  // publishing a lower bound as a total.
+  const filesCapped = fact.filesCapped === true;
+  const fileCountLabel = filesCapped
+    ? `At least ${fileCount} files changed`
+    : `${fileCount} file${fileCount === 1 ? '' : 's'} changed`;
+  const lineTotals =
+    fact.additions !== null && fact.additions !== undefined
+      ? ` (+${fact.additions} / -${fact.deletions ?? 0}${filesCapped ? ' so far' : ''})`
+      : '';
+  const reviewsByState = new Map<string, string[]>();
+  for (const review of fact.reviews ?? []) {
+    const logins = reviewsByState.get(review.state) ?? [];
+    const login = review.login ?? 'unknown';
+    if (!logins.includes(login)) {
+      logins.push(login);
+    }
+    reviewsByState.set(review.state, logins);
+  }
+  const approvedBy = reviewsByState.get('approved') ?? [];
+  const changesRequestedBy = reviewsByState.get('changes_requested') ?? [];
+  const description =
+    body.length > PR_BODY_CHAR_CAP
+      ? `${body.slice(0, PR_BODY_CHAR_CAP)}\n\n_Description truncated; open the pull request for the rest._`
+      : body;
+  const content = [
+    ...renderBrainFrontmatter({
+      type: BRAIN_PAGE_TYPES.pullRequest,
+      title: `${fact.repositoryFullName}#${fact.prNumber}: ${fact.title}`,
+      created: fact.createdAtRemote,
+      fields: [
+        `event_date: ${occurredAt.toISOString().slice(0, 10)}`,
+        `repository: ${fact.repositoryFullName}`,
+        `pr_number: ${fact.prNumber}`,
+        `state: ${fact.state}`,
+        fact.authorLogin && `author: ${fact.authorLogin}`,
+        merged && `merged_at: ${merged}`,
+        labels.length > 0 && `labels: ${JSON.stringify(labels)}`,
+        changedFiles.length > 0 &&
+          `changed_files: ${fileCount}${filesCapped ? '+' : ''}`,
+        areas.length > 0 && `areas: ${JSON.stringify(areas)}`,
+        approvedBy.length > 0 && `approved_by: ${JSON.stringify(approvedBy)}`,
+        'provenance: roomote-pull-requests',
+      ],
+    }),
+    '',
+    `# ${fact.repositoryFullName}#${fact.prNumber}: ${fact.title}`,
+    '',
+    `${fact.state === 'merged' || merged ? 'Merged' : 'State: ' + fact.state}${merged ? ` at ${merged}` : ''}${fact.authorLogin ? ` by ${fact.authorLogin}` : ''}.`,
+    ...(labels.length > 0 ? ['', `Labels: ${labels.join(', ')}`] : []),
+    // The description is the author's own account of what changed and why:
+    // the part of a pull request the diff cannot say. Treated as evidence
+    // like every other ingested text, never as instructions.
+    ...(description ? ['', '## Description', '', description] : []),
+    ...(changedFiles.length > 0
+      ? [
+          '',
+          `## Changes`,
+          '',
+          `${fileCountLabel}${lineTotals}${areas.length > 0 ? ` across ${areas.join(', ')}` : ''}.`,
+          '',
+          ...changedFiles.map((path) => `- ${path}`),
+          ...(fileCount > changedFiles.length
+            ? [
+                `- … and ${fileCount - changedFiles.length}${filesCapped ? ' or more' : ''} more`,
+              ]
+            : []),
+          ...(filesCapped
+            ? [
+                '',
+                '_The provider file listing was capped; this covers the files read._',
+              ]
+            : []),
+        ]
+      : []),
+    ...(approvedBy.length > 0 || changesRequestedBy.length > 0
+      ? [
+          '',
+          '## Reviews',
+          '',
+          ...(approvedBy.length > 0
+            ? [`- Approved by ${approvedBy.join(', ')}`]
+            : []),
+          ...(changesRequestedBy.length > 0
+            ? [`- Changes requested by ${changesRequestedBy.join(', ')}`]
+            : []),
+          ...(fact.reviewsCapped === true
+            ? [
+                '',
+                '_The provider review listing was capped; later reviewers may be missing._',
+              ]
+            : []),
+        ]
+      : []),
+    '',
+    fact.htmlUrl,
+  ].join('\n');
+
+  return {
+    slug: `${brainNamespacePrefix('prs')}${fact.repositoryFullName}/${fact.prNumber}`,
+    title: `${fact.repositoryFullName}#${fact.prNumber}: ${fact.title}`,
+    content: redactBrainText(content),
+  };
+}
+
+/**
  * First integration-derived memory source: merged pull requests, from the
  * locally mirrored pull_request_facts table (populated by the analytics
  * sync from the deployment's connected source control). The durable
@@ -596,7 +994,18 @@ async function syncPullRequestFacts(
       title: pullRequestFacts.title,
       htmlUrl: pullRequestFacts.htmlUrl,
       authorLogin: pullRequestFacts.authorLogin,
+      body: pullRequestFacts.body,
+      labels: pullRequestFacts.labels,
+      changedFiles: pullRequestFacts.changedFiles,
+      changedFileCount: pullRequestFacts.changedFileCount,
+      filesCapped: pullRequestFacts.filesCapped,
+      reviewsCapped: pullRequestFacts.reviewsCapped,
+      additions: pullRequestFacts.additions,
+      deletions: pullRequestFacts.deletions,
+      reviews: pullRequestFacts.reviews,
       state: pullRequestFacts.state,
+      createdAtRemote: pullRequestFacts.createdAtRemote,
+      closedAtRemote: pullRequestFacts.closedAtRemote,
       mergedAtRemote: pullRequestFacts.mergedAtRemote,
       updatedAt: pullRequestFacts.updatedAt,
     })
@@ -625,32 +1034,7 @@ async function syncPullRequestFacts(
 
   for (const fact of facts) {
     try {
-      const merged = fact.mergedAtRemote?.toISOString();
-      const content = [
-        '---',
-        `repository: ${fact.repositoryFullName}`,
-        `pr_number: ${fact.prNumber}`,
-        `state: ${fact.state}`,
-        ...(fact.authorLogin ? [`author: ${fact.authorLogin}`] : []),
-        ...(merged ? [`merged_at: ${merged}`] : []),
-        'provenance: roomote-pull-requests',
-        '---',
-        '',
-        `# ${fact.repositoryFullName}#${fact.prNumber}: ${fact.title}`,
-        '',
-        `${fact.state === 'merged' || merged ? 'Merged' : 'State: ' + fact.state}${merged ? ` at ${merged}` : ''}${fact.authorLogin ? ` by ${fact.authorLogin}` : ''}.`,
-        '',
-        fact.htmlUrl,
-      ].join('\n');
-
-      await postToBrain(
-        {
-          slug: `prs/${fact.repositoryFullName}/${fact.prNumber}`,
-          title: `${fact.repositoryFullName}#${fact.prNumber}: ${fact.title}`,
-          content: redactBrainText(content),
-        },
-        connection,
-      );
+      await postToBrain(buildPullRequestFactPage(fact), connection);
       ingested++;
     } catch (error) {
       // Leave the watermark unadvanced past this fact; retry next tick.

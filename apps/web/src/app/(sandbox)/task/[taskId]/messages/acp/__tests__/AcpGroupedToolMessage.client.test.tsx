@@ -120,15 +120,12 @@ describe('AcpGroupedToolMessage', () => {
     codeBlockSpy.mockClear();
   });
 
-  it('renders grouped header and per-file sections', () => {
+  it('keeps grouped read rows compact when no item has expandable details', () => {
     render(<AcpGroupedToolMessage group={buildGroup()} />);
 
     expect(screen.getByText('Exploring 2 files')).toBeInTheDocument();
-    expect(screen.getByText('file_a.txt')).toBeInTheDocument();
-    expect(screen.getByText('file_b.txt')).toBeInTheDocument();
-    expect(screen.getByText('file_a.txt').className).toContain('truncate');
-    expect(screen.getByText('file_b.txt').className).toContain('truncate');
-
+    expect(screen.queryByText('file_a.txt')).not.toBeInTheDocument();
+    expect(screen.queryByText('file_b.txt')).not.toBeInTheDocument();
     expect(codeBlockSpy).not.toHaveBeenCalled();
   });
 });

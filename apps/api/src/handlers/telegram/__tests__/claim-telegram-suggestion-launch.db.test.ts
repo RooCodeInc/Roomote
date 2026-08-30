@@ -133,6 +133,7 @@ describe('claimTelegramSuggestionLaunch (work_items launch CAS)', () => {
       investigationContext: null,
       targetRepositoryFullName: null,
       targetEnvironmentId: null,
+      usesRouterLaunch: true,
     });
   });
 

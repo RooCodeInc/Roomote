@@ -274,12 +274,14 @@ it('opens the highlighted integration settings for admin setup', () => {
   );
 });
 
-it('does not show workspace setup to non-admins and prompts enabled personal MCP links', () => {
+it('does not offer deployment-scoped Notion setup to non-admins', () => {
   isAdmin = false;
   enabledMcpIds = ['notion'];
 
   render(<OnboardingCard />);
-  expect(screen.getByText('Link your Notion account')).toBeInTheDocument();
+  expect(
+    screen.queryByText('Link your Notion account'),
+  ).not.toBeInTheDocument();
   expect(
     screen.queryByText('Enable Notion for your workspace'),
   ).not.toBeInTheDocument();

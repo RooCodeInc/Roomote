@@ -80,6 +80,9 @@ describe('live previews helpers', () => {
     expect(buildExamplePreviewHostname('preview.roomote.example.com')).toBe(
       'abc123def4567-web.preview.roomote.example.com',
     );
+    expect(buildExamplePreviewHostname('roomote.example.com', 'preview')).toBe(
+      'abc123def4567-web-preview.roomote.example.com',
+    );
     expect(isLocalPreviewDomain('roomotepreview.localhost')).toBe(true);
   });
 });

@@ -80,7 +80,9 @@ vi.mock('@roomote/db/server', () => ({
 }));
 
 import {
+  clearGitHubTokenCacheForTesting,
   createGitHubToken,
+  createGitHubTokenWithMetadata,
   resolveGitHubAppCredentials,
   resolveRuntimeGitHubAppCredentials,
 } from '../github-token';
@@ -171,6 +173,7 @@ describe('resolveRuntimeGitHubAppCredentials', () => {
 describe('createGitHubToken', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    clearGitHubTokenCacheForTesting();
     mockEnv.R_GITHUB_APP_ID = '';
     mockEnv.R_GITHUB_APP_PRIVATE_KEY = '';
     mockFindActiveInstallations.mockResolvedValue([
@@ -179,7 +182,10 @@ describe('createGitHubToken', () => {
       },
     ]);
     mockCreateInstallationAccessToken.mockResolvedValue({
-      data: { token: 'ghs_installation_token' },
+      data: {
+        token: 'ghs_installation_token',
+        expires_at: '2030-01-01T01:00:00.000Z',
+      },
     });
     mockJwtSign.mockReturnValue('app-jwt');
     mockResolveDeploymentEnvVar.mockImplementation(async (name: string) =>
@@ -237,6 +243,187 @@ describe('createGitHubToken', () => {
 
     expect(mockCreateInstallationAccessToken).toHaveBeenCalledWith({
       installation_id: 999,
+    });
+  });
+
+  it('caches a valid installation token and reports only the actual mint request', async () => {
+    const onTokenMintRequest = vi.fn();
+
+    await expect(
+      createGitHubToken({ type: 'activeInstallation' }, undefined, {
+        cache: true,
+        onTokenMintRequest,
+      }),
+    ).resolves.toBe('ghs_installation_token');
+    await expect(
+      createGitHubToken({ type: 'activeInstallation' }, undefined, {
+        cache: true,
+        onTokenMintRequest,
+      }),
+    ).resolves.toBe('ghs_installation_token');
+
+    expect(mockCreateInstallationAccessToken).toHaveBeenCalledTimes(1);
+    expect(onTokenMintRequest).toHaveBeenCalledTimes(1);
+  });
+
+  it('normalizes equivalent repository scopes without crossing scope boundaries', async () => {
+    mockFindInstallation.mockResolvedValue({ installationId: 999 });
+
+    await createGitHubToken(
+      {
+        type: 'installationId',
+        installationId: 'inst-row-id',
+        repositoryIds: [8, 7, 8],
+      },
+      undefined,
+      { cache: true },
+    );
+    await createGitHubToken(
+      {
+        type: 'installationId',
+        installationId: 'inst-row-id',
+        repositoryIds: [7, 8],
+      },
+      undefined,
+      { cache: true },
+    );
+    await createGitHubToken(
+      {
+        type: 'installationId',
+        installationId: 'inst-row-id',
+        repositoryIds: [7],
+      },
+      undefined,
+      { cache: true },
+    );
+
+    expect(mockCreateInstallationAccessToken).toHaveBeenCalledTimes(2);
+    expect(mockCreateInstallationAccessToken).toHaveBeenNthCalledWith(1, {
+      installation_id: 999,
+      repository_ids: [7, 8],
+    });
+    expect(mockCreateInstallationAccessToken).toHaveBeenNthCalledWith(2, {
+      installation_id: 999,
+      repository_ids: [7],
+    });
+  });
+
+  it('single-flights concurrent token requests for the same scope', async () => {
+    let resolveMint:
+      | ((value: { data: { token: string; expires_at: string } }) => void)
+      | undefined;
+    mockCreateInstallationAccessToken.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveMint = resolve;
+      }),
+    );
+
+    const first = createGitHubToken({ type: 'activeInstallation' });
+    const second = createGitHubToken({ type: 'activeInstallation' });
+
+    await vi.waitFor(() => {
+      expect(mockCreateInstallationAccessToken).toHaveBeenCalledTimes(1);
+    });
+    resolveMint?.({
+      data: {
+        token: 'ghs_shared_token',
+        expires_at: '2030-01-01T01:00:00.000Z',
+      },
+    });
+
+    await expect(Promise.all([first, second])).resolves.toEqual([
+      'ghs_shared_token',
+      'ghs_shared_token',
+    ]);
+    expect(mockCreateInstallationAccessToken).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not reuse a token inside the refresh buffer', async () => {
+    mockCreateInstallationAccessToken.mockResolvedValue({
+      data: {
+        token: 'ghs_expiring_token',
+        expires_at: new Date(Date.now() + 4 * 60 * 1000).toISOString(),
+      },
+    });
+
+    await createGitHubToken({ type: 'activeInstallation' }, undefined, {
+      cache: true,
+    });
+    await createGitHubToken({ type: 'activeInstallation' }, undefined, {
+      cache: true,
+    });
+
+    expect(mockCreateInstallationAccessToken).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not reuse a token beyond the configured cache age', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-08-24T12:00:00.000Z'));
+    mockCreateInstallationAccessToken.mockResolvedValue({
+      data: {
+        token: 'ghs_cached_token',
+        expires_at: '2026-08-24T13:00:00.000Z',
+      },
+    });
+
+    try {
+      await createGitHubToken({ type: 'activeInstallation' }, undefined, {
+        cache: true,
+        maxCacheAgeMs: 15 * 60 * 1000,
+      });
+      await vi.advanceTimersByTimeAsync(15 * 60 * 1000);
+      await createGitHubToken({ type: 'activeInstallation' }, undefined, {
+        cache: true,
+        maxCacheAgeMs: 15 * 60 * 1000,
+      });
+
+      expect(mockCreateInstallationAccessToken).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('force-refreshes and replaces a cached token', async () => {
+    mockCreateInstallationAccessToken
+      .mockResolvedValueOnce({
+        data: {
+          token: 'ghs_first_token',
+          expires_at: '2030-01-01T01:00:00.000Z',
+        },
+      })
+      .mockResolvedValueOnce({
+        data: {
+          token: 'ghs_fresh_token',
+          expires_at: '2030-01-01T01:00:00.000Z',
+        },
+      });
+
+    await expect(
+      createGitHubToken({ type: 'activeInstallation' }, undefined, {
+        cache: true,
+      }),
+    ).resolves.toBe('ghs_first_token');
+    await expect(
+      createGitHubToken({ type: 'activeInstallation' }, undefined, {
+        cache: true,
+        forceRefresh: true,
+      }),
+    ).resolves.toBe('ghs_fresh_token');
+    await expect(
+      createGitHubToken({ type: 'activeInstallation' }, undefined, {
+        cache: true,
+      }),
+    ).resolves.toBe('ghs_fresh_token');
+
+    expect(mockCreateInstallationAccessToken).toHaveBeenCalledTimes(2);
+  });
+
+  it('returns the installation token expiry metadata', async () => {
+    await expect(
+      createGitHubTokenWithMetadata({ type: 'activeInstallation' }),
+    ).resolves.toEqual({
+      token: 'ghs_installation_token',
+      expiresAt: new Date('2030-01-01T01:00:00.000Z'),
     });
   });
 });

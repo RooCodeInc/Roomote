@@ -26,6 +26,10 @@ Search active or completed tasks by keyword, status, or pull request. Once you
 find a task, you can read its summary, conversation, and compute logs to
 understand what happened and where the work stands.
 
+Roomote MCP can also read and continue a Fast Session when you provide its
+Session ID. Summaries, compute logs, and cancellation remain task-only
+operations and require a task ID.
+
 This is useful when you want to:
 
 - catch up on a task that is already running
@@ -58,6 +62,7 @@ only returns conversations your signed-in user is allowed to read.
 - “Show me the messages and compute logs from the task that failed this
   morning.”
 - “Tell the running task to add a regression test before it opens the PR.”
+- “Read the latest messages from this Fast Session and send a follow-up.”
 - “Use this Slack message as context and explain what the team decided.”
 - “Cancel the task working on the old approach.”
 

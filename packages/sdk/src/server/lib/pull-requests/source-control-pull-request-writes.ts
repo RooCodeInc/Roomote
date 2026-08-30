@@ -1,5 +1,5 @@
 import { createGitHubToken } from '@roomote/auth';
-import { getOctokit } from '@roomote/github';
+import { getOctokit, Schemas as GitHubSchemas } from '@roomote/github';
 import { type TaskRun } from '@roomote/db/server';
 import {
   getSourceControlProviderLabel,
@@ -63,6 +63,7 @@ export const sourceControlPullRequestWriteInputSchema = z.object({
     'update_pull_request_comment',
     'resolve_pull_request_thread',
     'submit_pull_request_review',
+    'dismiss_pull_request_review',
   ]),
   repositoryFullName: z.string().trim().min(1),
   prNumber: z.number().int().positive(),
@@ -82,6 +83,8 @@ export const sourceControlPullRequestWriteInputSchema = z.object({
    * list_pull_request_comments or a prior write result.
    */
   commentId: optionalTrimmedNonEmptyStringSchema,
+  /** Required for dismiss_pull_request_review. */
+  reviewId: optionalTrimmedNonEmptyStringSchema,
   /** Required for reply, create_comment, and update_comment; optional for review. */
   body: z.string().optional(),
   /**
@@ -341,6 +344,7 @@ function normalizeOptionalWriteIds(
     ...input,
     threadId: blankToUndefined(input.threadId),
     commentId: blankToUndefined(input.commentId),
+    reviewId: blankToUndefined(input.reviewId),
     path: blankToUndefined(input.path),
   };
 }
@@ -381,6 +385,10 @@ function assertWriteInputFields(
     case 'submit_pull_request_review':
       requireReviewEvent(input);
       break;
+    case 'dismiss_pull_request_review':
+      requireReviewId(input);
+      requireBody(input);
+      break;
   }
 }
 
@@ -404,6 +412,17 @@ function requireCommentId(input: SourceControlPullRequestWriteInput): string {
   }
 
   return input.commentId;
+}
+
+function requireReviewId(input: SourceControlPullRequestWriteInput): string {
+  if (!input.reviewId) {
+    throw new SourceControlWriteError(
+      400,
+      `reviewId is required for ${input.action}.`,
+    );
+  }
+
+  return input.reviewId;
 }
 
 function requireBody(input: SourceControlPullRequestWriteInput): string {
@@ -738,6 +757,44 @@ async function writeGitHubPullRequest({
         url: data.html_url ?? null,
       });
     }
+    case 'dismiss_pull_request_review': {
+      const reviewId = requireReviewId(input);
+      const body = requireBody(input);
+      const numericReviewId = Number(reviewId);
+      const { data: review } = await octokit.rest.pulls.getReview({
+        owner,
+        repo,
+        pull_number: input.prNumber,
+        review_id: numericReviewId,
+      });
+      const reviewAuthor = review.user?.login;
+
+      if (
+        review.state !== 'CHANGES_REQUESTED' ||
+        !reviewAuthor ||
+        !GitHubSchemas.isManagedRoomoteGitHubLogin(reviewAuthor)
+      ) {
+        throw new Error(
+          `GitHub review ${reviewId} is not a Roomote-authored CHANGES_REQUESTED review.`,
+        );
+      }
+
+      const { data } = await octokit.rest.pulls.dismissReview({
+        owner,
+        repo,
+        pull_number: input.prNumber,
+        review_id: numericReviewId,
+        message: body,
+      });
+
+      return buildWriteResult({
+        input,
+        provider,
+        repository,
+        commentId: String(data.id),
+        url: data.html_url ?? null,
+      });
+    }
   }
 }
 
@@ -762,7 +819,11 @@ async function createGitHubWriteClient(
     installationId: repository.installationId,
   });
 
-  return { octokit: getOctokit(token), owner, repo };
+  return {
+    octokit: getOctokit(token, { retryRateLimits: true }),
+    owner,
+    repo,
+  };
 }
 
 async function writeGitLabMergeRequest({
@@ -980,6 +1041,14 @@ async function writeGitLabMergeRequest({
         tokenHeader,
         mergeRequestPath,
         apiBaseUrl,
+      });
+    case 'dismiss_pull_request_review':
+      return buildWriteResult({
+        input,
+        provider,
+        repository,
+        applied: false,
+        warnings: ['GitLab does not expose review dismissal.'],
       });
   }
 }
@@ -1386,6 +1455,14 @@ async function writeGiteaPullRequest({
         url: review.html_url ?? null,
       });
     }
+    case 'dismiss_pull_request_review':
+      return buildWriteResult({
+        input,
+        provider,
+        repository,
+        applied: false,
+        warnings: ['Gitea does not expose review dismissal.'],
+      });
   }
 }
 
@@ -1643,6 +1720,14 @@ async function writeBitbucketPullRequest({
         repository,
       });
     }
+    case 'dismiss_pull_request_review':
+      return buildWriteResult({
+        input,
+        provider,
+        repository,
+        applied: false,
+        warnings: ['Bitbucket does not expose review dismissal.'],
+      });
   }
 }
 
@@ -1874,6 +1959,14 @@ async function writeAdoPullRequest({
         commentId,
       });
     }
+    case 'dismiss_pull_request_review':
+      return buildWriteResult({
+        input,
+        provider,
+        repository,
+        applied: false,
+        warnings: ['Azure DevOps does not expose review dismissal.'],
+      });
   }
 }
 

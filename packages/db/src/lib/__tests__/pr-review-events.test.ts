@@ -43,6 +43,7 @@ function eventInput(repository: string, prNumber: number, eventKey: string) {
     batchId: null,
     dueAt: new Date(),
     observedAt: new Date(),
+    legacyOwnership: true,
   };
 }
 
@@ -383,6 +384,198 @@ describe('durable PR review events', () => {
     expect(reclaimed.flatMap(({ deliveryIds }) => deliveryIds)).toContain(
       target!.id,
     );
+  });
+
+  it('coalesces a Roomote review finding with a same-head CI failure', async () => {
+    const task = await taskFactory.create();
+    const repository = `owner/cross-trigger-${task.id}`;
+    await associate(task.id, repository, 1659);
+    await persistPrReviewEvent({
+      ...eventInput(repository, 1659, `summary-${task.id}`),
+      legacyOwnership: false,
+      event: {
+        kind: 'review_summary',
+        authorLogin: 'roomote[bot]',
+        roomoteAuthored: true,
+        reviewHeadSha: 'reviewed-head',
+      },
+      batchKind: 'roomote',
+      batchId: 'review-cycle',
+      reviewHeadSha: 'reviewed-head',
+      roomoteAuthored: true,
+      isSummary: true,
+      observedAt: new Date('2026-08-25T18:26:03Z'),
+    });
+    await persistPrReviewEvent({
+      ...eventInput(repository, 1659, `check-run-${task.id}`),
+      legacyOwnership: false,
+      event: {
+        kind: 'ci_failure',
+        authorLogin: 'github-actions',
+        checkName: 'Test',
+        reviewHeadSha: 'reviewed-head',
+      },
+      batchKind: 'human',
+      batchId: null,
+      reviewHeadSha: 'reviewed-head',
+      observedAt: new Date('2026-08-25T18:29:28Z'),
+    });
+
+    const claims = (
+      await Promise.all([
+        claimDuePrReviewDeliveries(),
+        claimDuePrReviewDeliveries(),
+      ])
+    )
+      .flat()
+      .filter(({ taskId }) => taskId === task.id);
+
+    expect(claims).toHaveLength(1);
+    expect(claims[0]).toMatchObject({
+      batchKind: 'roomote',
+      batchId: 'review-cycle',
+      deliveryIds: [expect.any(String)],
+      events: expect.arrayContaining([
+        expect.objectContaining({ kind: 'review_summary' }),
+        expect.objectContaining({ kind: 'ci_failure', checkName: 'Test' }),
+      ]),
+    });
+  });
+
+  it('keeps human feedback separate when coalescing a CI failure', async () => {
+    const task = await taskFactory.create();
+    const repository = `owner/cross-trigger-human-${task.id}`;
+    await associate(task.id, repository, 1660);
+    await persistPrReviewEvent({
+      ...eventInput(repository, 1660, `summary-${task.id}`),
+      legacyOwnership: false,
+      event: {
+        kind: 'review_summary',
+        roomoteAuthored: true,
+        reviewHeadSha: 'reviewed-head',
+      },
+      batchKind: 'roomote',
+      batchId: 'review-cycle',
+      reviewHeadSha: 'reviewed-head',
+      roomoteAuthored: true,
+      isSummary: true,
+    });
+    await persistPrReviewEvent({
+      ...eventInput(repository, 1660, `check-run-${task.id}`),
+      legacyOwnership: false,
+      event: {
+        kind: 'ci_failure',
+        checkName: 'Test',
+        reviewHeadSha: 'reviewed-head',
+      },
+      reviewHeadSha: 'reviewed-head',
+    });
+    await persistPrReviewEvent({
+      ...eventInput(repository, 1660, `human-comment-${task.id}`),
+      legacyOwnership: false,
+      event: {
+        kind: 'review_comment',
+        authorLogin: 'alice',
+        reviewHeadSha: 'reviewed-head',
+      },
+      reviewHeadSha: 'reviewed-head',
+    });
+
+    const claims = (await claimDuePrReviewDeliveries()).filter(
+      ({ taskId }) => taskId === task.id,
+    );
+
+    expect(claims).toHaveLength(2);
+    expect(
+      claims.find(({ batchKind }) => batchKind === 'roomote')?.events,
+    ).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ kind: 'review_summary' }),
+        expect.objectContaining({ kind: 'ci_failure' }),
+      ]),
+    );
+    expect(
+      claims.find(({ batchKind }) => batchKind === 'human')?.events,
+    ).toEqual([expect.objectContaining({ kind: 'review_comment' })]);
+  });
+
+  it('does not attach CI to ambiguous same-head review cycles', async () => {
+    const task = await taskFactory.create();
+    const repository = `owner/cross-trigger-cycles-${task.id}`;
+    await associate(task.id, repository, 1661);
+
+    for (const batchId of ['review-cycle-a', 'review-cycle-b']) {
+      await persistPrReviewEvent({
+        ...eventInput(repository, 1661, `${batchId}-${task.id}`),
+        legacyOwnership: false,
+        event: {
+          kind: 'review_summary',
+          roomoteAuthored: true,
+          reviewHeadSha: 'reviewed-head',
+        },
+        batchKind: 'roomote',
+        batchId,
+        reviewHeadSha: 'reviewed-head',
+        roomoteAuthored: true,
+        isSummary: true,
+      });
+    }
+    await persistPrReviewEvent({
+      ...eventInput(repository, 1661, `check-run-${task.id}`),
+      legacyOwnership: false,
+      event: {
+        kind: 'ci_failure',
+        checkName: 'Test',
+        reviewHeadSha: 'reviewed-head',
+      },
+      reviewHeadSha: 'reviewed-head',
+    });
+
+    const claims = (await claimDuePrReviewDeliveries()).filter(
+      ({ taskId }) => taskId === task.id,
+    );
+
+    expect(claims).toHaveLength(3);
+    expect(
+      claims
+        .map(({ batchId }) => batchId)
+        .sort((a, b) => String(a).localeCompare(String(b))),
+    ).toEqual([
+      expect.stringMatching(/^ci:/),
+      'review-cycle-a',
+      'review-cycle-b',
+    ]);
+    expect(
+      claims.find(({ batchId }) => batchId?.startsWith('ci:'))?.events,
+    ).toEqual([expect.objectContaining({ kind: 'ci_failure' })]);
+  });
+
+  it('defers provider rate limits without consuming task deferral budget', async () => {
+    const task = await taskFactory.create();
+    const repository = `owner/rate-limit-${task.id}`;
+    const dueAt = new Date(Date.now() + 15 * 60 * 1_000);
+    await associate(task.id, repository, 71);
+    await persistPrReviewEvent(
+      eventInput(repository, 71, `rate-limit-${task.id}`),
+    );
+    const claim = (await claimDuePrReviewDeliveries()).find(
+      ({ taskId }) => taskId === task.id,
+    )!;
+
+    await deferPrReviewDeliveries(claim, dueAt, {
+      incrementDeferrals: false,
+    });
+
+    const delivery = await db.query.prReviewEventDeliveries.findFirst({
+      where: eq(prReviewEventDeliveries.id, claim.deliveryIds[0]!),
+    });
+    expect(delivery).toMatchObject({
+      status: 'pending',
+      dueAt,
+      deferrals: 0,
+      leaseToken: null,
+      leaseExpiresAt: null,
+    });
   });
 
   it('does not renew an expired or reclaimed delivery claim', async () => {

@@ -8,15 +8,18 @@ import {
   getTriggerableBackgroundAutomationDescriptorByKey,
   MANAGER_CHANNEL_SETTINGS_HASH,
   MANAGER_STATS_SETTINGS_HASH,
+  PLATFORM_ISSUE_ALERTS_SETTINGS_HASH,
   SECURITY_AUDITOR_SETTINGS_HASH,
   SENTRY_TRIAGE_SETTINGS_HASH,
   SUGGEST_IDEAS_SETTINGS_HASH,
   SUMMARIZE_MERGED_PRS_SETTINGS_HASH,
+  type SlackBlock,
 } from '@roomote/types';
 import {
   buildAutomationResultBlocks,
   convertSlackLinksToMarkdown,
 } from '@roomote/slack';
+import { buildFastSessionUrl } from '@roomote/communication';
 
 const DEFAULT_LOCAL_R_APP_URL = 'http://localhost:13000';
 
@@ -28,6 +31,7 @@ export {
   DEPENDABOT_TRIAGE_SETTINGS_HASH,
   MANAGER_CHANNEL_SETTINGS_HASH,
   MANAGER_STATS_SETTINGS_HASH,
+  PLATFORM_ISSUE_ALERTS_SETTINGS_HASH,
   SECURITY_AUDITOR_SETTINGS_HASH,
   SENTRY_TRIAGE_SETTINGS_HASH,
   SUGGEST_IDEAS_SETTINGS_HASH,
@@ -65,10 +69,51 @@ export function buildCustomAutomationSettingsUrl(automationId: string) {
   ).toString();
 }
 
+export function buildCustomAutomationSlackMessage(params: {
+  automationId: string;
+  automationName: string;
+  text: string;
+  contentBlocks?: SlackBlock[];
+  sessionId?: string;
+}): SlackAutomationSettingsMessage {
+  return {
+    text: params.text,
+    blocks: buildAutomationResultBlocks({
+      title: params.automationName,
+      iconUrl: buildAutomationIconUrl('zap'),
+      configureUrl: buildCustomAutomationSettingsUrl(params.automationId),
+      contentBlocks: params.contentBlocks ?? [
+        { type: 'markdown', text: params.text },
+      ],
+      additionalActions: params.sessionId
+        ? [
+            {
+              type: 'button',
+              action_id: 'late_bound_automation_view_session',
+              text: {
+                type: 'plain_text',
+                text: 'Follow',
+                emoji: false,
+              },
+              url: buildFastSessionUrl('slack', params.sessionId),
+            },
+          ]
+        : undefined,
+    }),
+  };
+}
+
 export function buildManagerSlackSettingsUrl(
   hash = MANAGER_CHANNEL_SETTINGS_HASH,
 ) {
   return buildAutomationsSettingsUrl(hash).toString();
+}
+
+export function buildModelsSettingsUrl() {
+  return new URL(
+    '/settings/models',
+    process.env.R_APP_URL || DEFAULT_LOCAL_R_APP_URL,
+  ).toString();
 }
 
 export function buildManagerSlackFooterText(
@@ -111,6 +156,7 @@ export function buildAutomationSettingsContextBlock(hash: string) {
 export function buildAutomationSettingsMessage(
   text: string,
   hash: string,
+  options?: { taskUrl?: string | null; slackIcon?: string },
 ): SlackAutomationSettingsMessage {
   const trimmedText = text.trim();
   const settingsDescriptor = getBackgroundAutomationSettingsDescriptor(hash);
@@ -125,8 +171,11 @@ export function buildAutomationSettingsMessage(
     text: trimmedText,
     blocks: buildAutomationResultBlocks({
       title,
-      iconUrl: buildAutomationIconUrl(automationDescriptor?.slackIcon ?? 'zap'),
+      iconUrl: buildAutomationIconUrl(
+        options?.slackIcon ?? automationDescriptor?.slackIcon ?? 'zap',
+      ),
       configureUrl: buildManagerSlackSettingsUrl(hash),
+      taskUrl: options?.taskUrl,
       contentBlocks: [
         {
           type: 'section',

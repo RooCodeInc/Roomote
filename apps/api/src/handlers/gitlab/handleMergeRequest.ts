@@ -117,6 +117,7 @@ export async function handleGitLabMergeRequest(
         number: mergeRequest.iid,
         externalId: mergeRequest.id ?? null,
         title: mergeRequest.title,
+        body: mergeRequest.description ?? null,
         url: mergeRequest.url,
         // The merge-request webhook carries the acting user, not the MR
         // author; the scheduled sync backfills authorLogin.
@@ -134,6 +135,7 @@ export async function handleGitLabMergeRequest(
         prNumber: mergeRequest.iid,
         prTitle: mergeRequest.title,
         prUrl: mergeRequest.url,
+        targetBranch: mergeRequest.target_branch,
         status,
         actorLogin:
           payload.user?.username ?? payload.user?.name ?? 'someone on GitLab',
@@ -151,6 +153,15 @@ export async function handleGitLabMergeRequest(
     }
 
     return { status: 'ok' };
+  }
+
+  if (mergeRequest.action === 'open' || mergeRequest.action === 'reopen') {
+    await updateTaskPrStatus(
+      'gitlab',
+      repoFullName,
+      mergeRequest.iid,
+      mergeRequest.draft ? 'draft' : 'open',
+    );
   }
 
   const taskType = getReviewTaskType(payload);

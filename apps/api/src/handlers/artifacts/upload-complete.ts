@@ -1,6 +1,7 @@
 import type { Context } from 'hono';
 
 import { db, eq, taskArtifacts } from '@roomote/db/server';
+import { notifyFastAgentParentOnArtifact } from '@roomote/sdk/server';
 
 import type { Variables } from '../../types';
 import {
@@ -51,6 +52,31 @@ export async function markArtifactUploadComplete(
       updatedAt: new Date(),
     })
     .where(eq(taskArtifacts.id, artifactId));
+
+  const notification = await notifyFastAgentParentOnArtifact({
+    id: artifact.id,
+    taskId: artifact.taskId,
+    runId: artifact.runId,
+    path: artifact.path,
+    version: artifact.version,
+    contentType: artifact.contentType,
+    uploaded: true,
+  });
+  if (notification === 'failed') {
+    return c.json(
+      { error: 'Artifact published, but parent notification failed' },
+      503,
+    );
+  }
+  if (notification === 'in_progress') {
+    // Another request is mid-delivery; 503 keeps the worker retrying until
+    // that delivery settles instead of reporting success while it can still
+    // fail and release its claim.
+    return c.json(
+      { error: 'Artifact published; parent notification is in progress' },
+      503,
+    );
+  }
 
   return new Response(null, { status: 200 });
 }

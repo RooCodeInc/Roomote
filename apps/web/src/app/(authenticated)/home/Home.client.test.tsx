@@ -6,8 +6,7 @@ import {
   waitFor,
 } from '@testing-library/react';
 
-import { ALL_REPOSITORIES } from '@roomote/types';
-import type { RoutingDecision } from '@roomote/cloud-agents/server';
+import { ALL_REPOSITORIES, FAST_EXECUTION } from '@roomote/types';
 import type { PromptInputMessage } from '@/components/ai-elements';
 import { AUTO_WORKSPACE_VALUE } from '@/components/tasks/constants';
 
@@ -29,8 +28,8 @@ const {
   mockUseCreateStandardTaskRun,
   mockCreateStandardTaskRun,
   mockUseLaunchTaskModels,
-  mockUseRouteHomeTask,
-  mockRouteHomeTask,
+  mockPreparePromptAttachments,
+  mockStartFastSession,
 } = vi.hoisted(() => ({
   mockPush: vi.fn(),
   mockToast: vi.fn(),
@@ -40,8 +39,8 @@ const {
   mockUseCreateStandardTaskRun: vi.fn(),
   mockCreateStandardTaskRun: vi.fn(),
   mockUseLaunchTaskModels: vi.fn(),
-  mockUseRouteHomeTask: vi.fn(),
-  mockRouteHomeTask: vi.fn(),
+  mockPreparePromptAttachments: vi.fn(),
+  mockStartFastSession: vi.fn(),
 }));
 
 vi.mock('next/navigation', () => ({
@@ -91,23 +90,26 @@ vi.mock('@/hooks/environments', () => ({
 
 vi.mock('@/hooks/task-runs', () => ({
   useCreateStandardTaskRun: mockUseCreateStandardTaskRun,
-  useRouteHomeTask: mockUseRouteHomeTask,
+  useStartFastSession: () => ({
+    isPending: false,
+    mutateAsync: mockStartFastSession,
+  }),
 }));
+
+vi.mock('@/lib/prompt-attachments', async () => {
+  const actual = await vi.importActual<
+    typeof import('@/lib/prompt-attachments')
+  >('@/lib/prompt-attachments');
+
+  return {
+    ...actual,
+    preparePromptAttachments: mockPreparePromptAttachments,
+  };
+});
 
 vi.mock('@/hooks/task-models/useLaunchTaskModels', () => ({
   useLaunchTaskModels: mockUseLaunchTaskModels,
 }));
-
-vi.mock('@/components/system', async () => {
-  const actual = await vi.importActual<typeof import('@/components/system')>(
-    '@/components/system',
-  );
-
-  return {
-    ...actual,
-    Loader2: (props: React.ComponentProps<'svg'>) => <svg {...props} />,
-  };
-});
 
 vi.mock('@/lib', () => ({
   processImageFiles: mockProcessImageFiles,
@@ -126,6 +128,7 @@ vi.mock('./BottomSheetTabs', () => ({
   BottomSheetTabs: () => <div>Tabs</div>,
 }));
 
+import { NewTaskForm } from '@/components/tasks/NewTaskForm';
 import { Home } from './Home';
 
 vi.mock('@/components/tasks', async () => {
@@ -136,17 +139,25 @@ vi.mock('@/components/tasks', async () => {
   const { useEffect } = await vi.importActual<typeof import('react')>('react');
   const { useFormContext } =
     await vi.importActual<typeof import('react-hook-form')>('react-hook-form');
+  const { useWorkspaceStorage } = await vi.importActual<
+    typeof import('@/hooks/useWorkspaceStorage')
+  >('@/hooks/useWorkspaceStorage');
 
   return {
     ...actual,
     SelectWorkspace: ({
       allowAuto,
+      autoSelectDefaultWorkspace,
+      onInvalidWorkspaceReset,
       allowBranchSelection,
     }: {
       allowAuto?: boolean;
+      autoSelectDefaultWorkspace?: boolean;
+      onInvalidWorkspaceReset?: () => void;
       allowBranchSelection?: boolean;
     }) => {
       const { watch, setValue } = useFormContext();
+      const { setWorkspace } = useWorkspaceStorage();
       const repository = watch('repository');
       const environmentId = watch('environmentId');
 
@@ -158,13 +169,24 @@ vi.mock('@/components/tasks', async () => {
         setValue('repository', AUTO_WORKSPACE_VALUE);
         setValue('environmentId', undefined);
         setValue('branch', '');
-      }, [allowAuto, environmentId, setValue]);
+        setWorkspace({ workspace: { type: 'auto' } });
+        onInvalidWorkspaceReset?.();
+      }, [
+        allowAuto,
+        environmentId,
+        onInvalidWorkspaceReset,
+        setValue,
+        setWorkspace,
+      ]);
 
       return (
         <div>
           <span data-testid="repository">{repository ?? ''}</span>
           <span data-testid="environment">{environmentId ?? ''}</span>
           <span data-testid="allow-auto">{String(Boolean(allowAuto))}</span>
+          <span data-testid="auto-select-default-workspace">
+            {String(Boolean(autoSelectDefaultWorkspace))}
+          </span>
           <span data-testid="allow-branch-selection">
             {String(Boolean(allowBranchSelection))}
           </span>
@@ -177,6 +199,16 @@ vi.mock('@/components/tasks', async () => {
             }}
           >
             Use auto workspace
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setValue('repository', FAST_EXECUTION);
+              setValue('environmentId', undefined);
+              setValue('branch', '');
+            }}
+          >
+            Use Fast workspace
           </button>
           <button
             type="button"
@@ -214,11 +246,13 @@ vi.mock('@/components/tasks', async () => {
     TaskPromptInput: ({
       onSubmit,
       onPromptTextChange,
+      promptText,
       placeholder,
       submitDisabledReason,
     }: {
       onSubmit: (message: PromptInputMessage) => Promise<void> | void;
       onPromptTextChange?: (value: string) => void;
+      promptText?: string;
       placeholder?: string;
       submitDisabledReason?: string;
     }) => (
@@ -237,6 +271,11 @@ vi.mock('@/components/tasks', async () => {
         }}
       >
         <div data-testid="prompt-placeholder">{placeholder}</div>
+        <textarea
+          aria-label="Task prompt"
+          value={promptText ?? ''}
+          onChange={(event) => onPromptTextChange?.(event.target.value)}
+        />
         <button type="submit" disabled={Boolean(submitDisabledReason)}>
           Submit prompt
         </button>
@@ -265,52 +304,6 @@ vi.mock('@/components/tasks', async () => {
   };
 });
 
-const routedEnvironmentSuggestion: RoutingDecision = {
-  status: 'routed',
-  result: {
-    workspace: {
-      type: 'environment',
-      id: 'env-routed',
-      name: 'Routed Workspace',
-    },
-    reasoning: 'Best match',
-  },
-};
-
-const routedEnvironmentSuggestionWithModel: RoutingDecision = {
-  status: 'routed',
-  result: {
-    workspace: {
-      type: 'environment',
-      id: 'env-routed',
-      name: 'Routed Workspace',
-    },
-    model: {
-      id: 'openrouter/z-ai/glm-5.2',
-      displayName: 'GLM 5.2',
-      source: 'preference',
-    },
-    reasoning: 'Best match',
-  },
-};
-
-const routedEnvironmentSuggestionWithDefaultModel: RoutingDecision = {
-  status: 'routed',
-  result: {
-    workspace: {
-      type: 'environment',
-      id: 'env-routed',
-      name: 'Routed Workspace',
-    },
-    model: {
-      id: 'openrouter/openai/gpt-5.4',
-      displayName: 'GPT 5.4',
-      source: 'default',
-    },
-    reasoning: 'Best match',
-  },
-};
-
 describe('Home', () => {
   beforeEach(() => {
     currentSearchParams = '';
@@ -325,6 +318,10 @@ describe('Home', () => {
     vi.clearAllMocks();
 
     mockProcessImageFiles.mockResolvedValue([]);
+    mockPreparePromptAttachments.mockImplementation(
+      ({ text }: { text: string }) => Promise.resolve({ text }),
+    );
+    mockStartFastSession.mockResolvedValue({ sessionId: 'fast-session-1' });
     mockCreateStandardTaskRun.mockResolvedValue({
       success: true,
       id: 4,
@@ -333,10 +330,6 @@ describe('Home', () => {
     mockUseCreateStandardTaskRun.mockReturnValue({
       isPending: false,
       mutateAsync: mockCreateStandardTaskRun,
-    });
-    mockUseRouteHomeTask.mockReturnValue({
-      isPending: false,
-      mutateAsync: mockRouteHomeTask,
     });
     mockUseLaunchTaskModels.mockReturnValue({
       data: {
@@ -357,31 +350,126 @@ describe('Home', () => {
         ],
       },
     });
-    mockRouteHomeTask.mockResolvedValue({
-      status: 'fallback',
-      reason: 'No routing result',
-    });
   });
 
-  it('renders without an agent selector and does not launch on fallback', async () => {
+  it('renders without an agent selector and starts a Fast session for Auto submissions', async () => {
     render(<Home initialPlaceholderIndex={0} />);
 
+    expect(
+      screen.getByRole('heading', { name: 'New Session' }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText(/^Choose where Roomote should work/),
+    ).not.toBeInTheDocument();
     expect(screen.queryByText(/Select agent /)).not.toBeInTheDocument();
-    expect(screen.getByTestId('allow-auto')).toHaveTextContent('true');
-    expect(screen.getByTestId('repository')).toHaveTextContent(
-      AUTO_WORKSPACE_VALUE,
-    );
+    // Auto was retired from the picker (identical to Fast); Fast is offered.
+    expect(screen.getByTestId('allow-auto')).toHaveTextContent('false');
     expect(mockUseCreateStandardTaskRun).toHaveBeenCalled();
 
+    fireEvent.click(screen.getByRole('button', { name: 'Use auto workspace' }));
     fireEvent.click(screen.getByRole('button', { name: 'Submit prompt' }));
 
     await waitFor(() => {
-      expect(mockRouteHomeTask).toHaveBeenCalledWith({
-        description: 'Test prompt',
+      expect(mockStartFastSession).toHaveBeenCalledWith({
+        text: 'Test prompt',
+        images: undefined,
+        model: 'openrouter/openai/gpt-5.4',
       });
     });
 
     expect(mockCreateStandardTaskRun).not.toHaveBeenCalled();
+    expect(mockPush).toHaveBeenCalledWith('/sessions/fast-session-1');
+  });
+
+  it('starts a new Fast session with the selected non-default model', async () => {
+    render(<Home initialPlaceholderIndex={0} />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Model' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Use auto workspace' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Submit prompt' }));
+
+    await waitFor(() => {
+      expect(mockStartFastSession).toHaveBeenCalledWith({
+        text: 'Test prompt',
+        images: undefined,
+        model: 'openrouter/z-ai/glm-5.2',
+      });
+    });
+  });
+
+  it('keeps Home-only content out of the shared launch form', async () => {
+    const onTaskStarted = vi.fn();
+
+    render(<NewTaskForm onTaskStarted={onTaskStarted} />);
+
+    expect(
+      screen.queryByRole('heading', { name: 'New Session' }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText('Onboarding')).not.toBeInTheDocument();
+    expect(screen.queryByText('Tabs')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Use Fast workspace' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Submit prompt' }));
+
+    await waitFor(() => expect(onTaskStarted).toHaveBeenCalledOnce());
+  });
+
+  it('always defaults to Fast execution', async () => {
+    render(<Home initialPlaceholderIndex={0} />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('repository')).toHaveTextContent(
+        FAST_EXECUTION,
+      );
+    });
+    expect(
+      screen.getByTestId('auto-select-default-workspace'),
+    ).toHaveTextContent('false');
+  });
+
+  it.each([
+    {
+      name: 'environment',
+      workspace: { type: 'environment', id: 'env-1' },
+    },
+    {
+      name: 'repository',
+      workspace: { type: 'repository', value: 'RooCodeInc/Roomote' },
+    },
+  ])('prefers Fast over a persisted $name workspace', async ({ workspace }) => {
+    localStorage.setItem(
+      'roomote-workspace:deployment',
+      JSON.stringify({ workspace }),
+    );
+
+    render(<Home initialPlaceholderIndex={0} />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('repository')).toHaveTextContent(
+        FAST_EXECUTION,
+      );
+      expect(screen.getByTestId('environment')).toHaveTextContent('');
+    });
+  });
+
+  it('starts a Fast session with an image-only prompt', async () => {
+    mockPreparePromptAttachments.mockResolvedValueOnce({
+      text: '',
+      images: ['data:image/png;base64,image-1'],
+    });
+    render(<Home initialPlaceholderIndex={0} />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Use Fast workspace' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Submit prompt' }));
+
+    await waitFor(() => {
+      expect(mockStartFastSession).toHaveBeenCalledWith({
+        text: '',
+        images: ['data:image/png;base64,image-1'],
+        model: 'openrouter/openai/gpt-5.4',
+      });
+    });
+    expect(mockPush).toHaveBeenCalledWith('/sessions/fast-session-1');
   });
 
   it('renders the feedback prompt below the input and opens its dialog', async () => {
@@ -475,28 +563,6 @@ describe('Home', () => {
     }
   });
 
-  it('shows a toast and does not launch a task for platform answers', async () => {
-    mockRouteHomeTask.mockResolvedValue({
-      status: 'platform_answer',
-      result: {
-        answer: 'Roomote can help from Slack, Linear, GitHub, and the web app.',
-        reasoning: 'Generic product question',
-      },
-    } satisfies RoutingDecision);
-
-    render(<Home initialPlaceholderIndex={0} />);
-
-    fireEvent.click(screen.getByRole('button', { name: 'Submit prompt' }));
-
-    await waitFor(() => {
-      expect(mockToast).toHaveBeenCalledWith(
-        'Roomote can help from Slack, Linear, GitHub, and the web app.',
-      );
-    });
-
-    expect(mockCreateStandardTaskRun).not.toHaveBeenCalled();
-  });
-
   it('cycles prompt placeholders every 5 seconds from a random starting point', async () => {
     vi.useFakeTimers();
 
@@ -527,94 +593,17 @@ describe('Home', () => {
     }
   });
 
-  it('launches a standard task run without an agent identity for routed workspaces', async () => {
-    mockRouteHomeTask.mockResolvedValue(routedEnvironmentSuggestion);
-
-    render(<Home initialPlaceholderIndex={0} />);
-
-    fireEvent.click(screen.getByRole('button', { name: 'Submit prompt' }));
-
-    await waitFor(() => {
-      expect(mockCreateStandardTaskRun).toHaveBeenCalledWith(
-        expect.objectContaining({
-          computeProvider: 'docker',
-          harness: 'opencode-server',
-          payload: expect.objectContaining({
-            repo: ALL_REPOSITORIES,
-            environmentId: 'env-routed',
-            description: 'Test prompt',
-            blank: false,
-          }),
-        }),
-      );
-    });
-
-    const persisted = JSON.parse(
-      localStorage.getItem('roomote-workspace:deployment') ?? '{}',
-    );
-
-    expect(persisted).toEqual(
-      expect.objectContaining({
-        workspace: { type: 'auto' },
-      }),
-    );
-  });
-
-  it('uses the routed model for auto-routed launches', async () => {
-    mockRouteHomeTask.mockResolvedValue(routedEnvironmentSuggestionWithModel);
-
-    render(<Home initialPlaceholderIndex={0} />);
-
-    fireEvent.click(screen.getByRole('button', { name: 'Submit prompt' }));
-
-    await waitFor(() => {
-      expect(mockCreateStandardTaskRun).toHaveBeenCalledWith(
-        expect.objectContaining({
-          model: 'openrouter/z-ai/glm-5.2',
-          payload: expect.objectContaining({
-            repo: ALL_REPOSITORIES,
-            environmentId: 'env-routed',
-            description: 'Test prompt',
-            blank: false,
-          }),
-        }),
-      );
-    });
-  });
-
-  it('preserves the picker model for auto-routed launches when routing only returns the default model', async () => {
-    mockRouteHomeTask.mockResolvedValue(
-      routedEnvironmentSuggestionWithDefaultModel,
-    );
-
+  it('uses the picker model for explicit environment launches', async () => {
     render(<Home initialPlaceholderIndex={0} />);
 
     fireEvent.click(screen.getByRole('button', { name: 'Model' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Submit prompt' }));
-
-    await waitFor(() => {
-      expect(mockCreateStandardTaskRun).toHaveBeenNthCalledWith(
-        1,
-        expect.objectContaining({
-          model: 'openrouter/z-ai/glm-5.2',
-          payload: expect.objectContaining({
-            repo: ALL_REPOSITORIES,
-            environmentId: 'env-routed',
-            description: 'Test prompt',
-            blank: false,
-          }),
-        }),
-      );
-    });
-
     fireEvent.click(
       screen.getByRole('button', { name: 'Use single-repo environment' }),
     );
     fireEvent.click(screen.getByRole('button', { name: 'Submit prompt' }));
 
     await waitFor(() => {
-      expect(mockCreateStandardTaskRun).toHaveBeenNthCalledWith(
-        2,
+      expect(mockCreateStandardTaskRun).toHaveBeenCalledWith(
         expect.objectContaining({
           model: 'openrouter/z-ai/glm-5.2',
           payload: expect.objectContaining({
@@ -650,8 +639,34 @@ describe('Home', () => {
         }),
       );
     });
+  });
 
-    expect(mockRouteHomeTask).not.toHaveBeenCalled();
+  it('opens a new task session on the transcript', async () => {
+    mockUseCreateStandardTaskRun.mockImplementation(
+      (options: { onSuccess: (result: unknown) => void }) => ({
+        isPending: false,
+        mutateAsync: async () => {
+          const result = {
+            success: true,
+            id: 4,
+            taskId: 'task-4',
+            sessionId: 'session-1',
+          };
+          options.onSuccess(result);
+          return result;
+        },
+      }),
+    );
+    render(<Home initialPlaceholderIndex={0} />);
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Use single-repo environment' }),
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Submit prompt' }));
+
+    await waitFor(() => {
+      expect(mockPush).toHaveBeenCalledWith('/sessions/session-1');
+    });
   });
 
   it('uses opencode as the default harness', async () => {
@@ -799,8 +814,6 @@ describe('Home', () => {
         }),
       );
     });
-
-    expect(mockRouteHomeTask).not.toHaveBeenCalled();
   });
 
   it('does not source-pin environment launches when debug UI is off', async () => {
@@ -923,41 +936,23 @@ describe('Home', () => {
     });
   });
 
-  it('announces routing progress while auto-routing is pending', async () => {
-    let resolveRoute:
-      | ((value: typeof routedEnvironmentSuggestion) => void)
-      | undefined;
-
-    mockRouteHomeTask.mockImplementation(
-      () =>
-        new Promise((resolve) => {
-          resolveRoute = resolve;
-        }),
-    );
-
-    render(<Home initialPlaceholderIndex={0} />);
-
-    fireEvent.click(screen.getByRole('button', { name: 'Submit prompt' }));
-
-    await waitFor(() => {
-      expect(screen.getByText('Routing...')).toBeInTheDocument();
-    });
-
-    resolveRoute?.(routedEnvironmentSuggestion);
-
-    await waitFor(() => {
-      expect(mockCreateStandardTaskRun).toHaveBeenCalled();
-    });
-  });
-
-  it('disables Auto submissions when no environments exist yet', () => {
+  it('starts a Fast session for Auto submissions without an environment', async () => {
     currentEnvironments = [];
 
     render(<Home initialPlaceholderIndex={0} />);
 
-    expect(
-      screen.getByRole('button', { name: 'Submit prompt' }),
-    ).toBeDisabled();
+    const submitButton = screen.getByRole('button', { name: 'Submit prompt' });
+    expect(submitButton).toBeEnabled();
+    fireEvent.click(submitButton);
+
+    await waitFor(() => {
+      expect(mockStartFastSession).toHaveBeenCalledWith({
+        text: 'Test prompt',
+        images: undefined,
+        model: 'openrouter/openai/gpt-5.4',
+      });
+    });
+    expect(mockCreateStandardTaskRun).not.toHaveBeenCalled();
   });
 
   it('does not show the empty-environments warning while environments are loading', () => {
@@ -1051,44 +1046,25 @@ describe('Home', () => {
     });
   });
 
-  it('normalizes stale persisted workspace to Auto before submit', async () => {
+  it('restores the Fast default after normalizing a stale persisted workspace', async () => {
     localStorage.setItem(
       'roomote-workspace:deployment',
       JSON.stringify({
-        harness: 'opencode-server',
         workspace: { type: 'environment', id: 'env-stale' },
       }),
     );
-
-    mockRouteHomeTask.mockResolvedValue({
-      status: 'fallback',
-      reason: 'Routing unavailable',
-    });
 
     render(<Home initialPlaceholderIndex={0} />);
 
     await waitFor(() => {
       expect(screen.getByTestId('repository')).toHaveTextContent(
-        AUTO_WORKSPACE_VALUE,
+        FAST_EXECUTION,
       );
       expect(screen.getByTestId('environment')).toHaveTextContent('');
     });
-
-    fireEvent.click(screen.getByRole('button', { name: 'Submit prompt' }));
-
-    await waitFor(() => {
-      expect(mockRouteHomeTask).toHaveBeenCalledWith({
-        description: 'Test prompt',
-      });
-      expect(mockToastError).toHaveBeenCalledWith(
-        "Couldn't auto-route this task.",
-      );
-    });
-
-    expect(mockCreateStandardTaskRun).not.toHaveBeenCalled();
   });
 
-  it('prefers environmentId from the URL when present', async () => {
+  it('prefers environmentId from the URL over the Fast default', async () => {
     currentSearchParams = 'environmentId=env-created';
 
     render(<Home initialPlaceholderIndex={0} />);
@@ -1113,48 +1089,42 @@ describe('Home', () => {
     expect(persisted).not.toHaveProperty('harnessPreference');
   });
 
-  it('defaults to the sole environment on load when workspace storage is Auto', async () => {
-    localStorage.setItem(
-      'roomote-workspace:deployment',
-      JSON.stringify({ workspace: { type: 'auto' } }),
-    );
-    currentEnvironments = [{ id: 'env-sole', name: 'Only Env' }];
-    currentEnvironmentsPending = false;
+  it('prefills editable task details from the URL', async () => {
+    currentSearchParams = new URLSearchParams({
+      prompt: 'Fix the build',
+      model: 'openrouter/openai/gpt-5.4',
+      environmentId: 'env-created',
+    }).toString();
 
     render(<Home initialPlaceholderIndex={0} />);
 
-    await waitFor(() => {
-      expect(screen.getByTestId('repository')).toHaveTextContent('env-sole');
-      expect(screen.getByTestId('environment')).toHaveTextContent('env-sole');
-    });
-
-    expect(
-      JSON.parse(localStorage.getItem('roomote-workspace:deployment') ?? '{}'),
-    ).toEqual(
-      expect.objectContaining({
-        workspace: { type: 'environment', id: 'env-sole' },
-      }),
+    expect(screen.getByRole('textbox', { name: 'Task prompt' })).toHaveValue(
+      'Fix the build',
     );
-  });
-
-  it('keeps Auto on load when multiple environments exist and storage is Auto', async () => {
-    localStorage.setItem(
-      'roomote-workspace:deployment',
-      JSON.stringify({ workspace: { type: 'auto' } }),
+    expect(screen.getByTestId('selected-model-id')).toHaveTextContent(
+      'openrouter/openai/gpt-5.4',
     );
-    currentEnvironments = [
-      { id: 'env-a', name: 'Alpha' },
-      { id: 'env-b', name: 'Beta' },
-    ];
-    currentEnvironmentsPending = false;
-
-    render(<Home initialPlaceholderIndex={0} />);
 
     await waitFor(() => {
-      expect(screen.getByTestId('repository')).toHaveTextContent(
-        AUTO_WORKSPACE_VALUE,
+      expect(screen.getByTestId('environment')).toHaveTextContent(
+        'env-created',
       );
-      expect(screen.getByTestId('environment')).toHaveTextContent('');
     });
+
+    fireEvent.change(screen.getByRole('textbox', { name: 'Task prompt' }), {
+      target: { value: 'Fix the tests instead' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Model' }));
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Use single-repo environment' }),
+    );
+
+    expect(screen.getByRole('textbox', { name: 'Task prompt' })).toHaveValue(
+      'Fix the tests instead',
+    );
+    expect(screen.getByTestId('selected-model-id')).toHaveTextContent(
+      'openrouter/z-ai/glm-5.2',
+    );
+    expect(screen.getByTestId('environment')).toHaveTextContent('env-single');
   });
 });

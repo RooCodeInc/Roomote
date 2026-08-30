@@ -1,15 +1,35 @@
-import { acquireRedisLock } from '@roomote/redis';
-import { PRODUCT_NAME } from '@roomote/types';
-import { answerFastAgentQuestion } from '@roomote/cloud-agents/server';
-import { type SlackEvent, type SlackNotifier } from '@roomote/slack';
-import { stripLeadingSlackProductMention } from '@roomote/cloud-agents';
-
 import {
-  FAST_AGENT_LOCK_TTL_SECONDS,
-  LEADING_FAST_COMMAND_MENTION_PATTERN,
-  SLACK_FAST_AGENT_LOCK_PREFIX,
-} from '../constants.js';
+  getOrCreateFastAgentSession,
+  acquireFastAgentTurnLock,
+  answerFastAgentQuestion,
+  hasFastAgentSession,
+  type FastAgentActiveTask,
+  type LaunchFastAgentTask,
+} from '@roomote/cloud-agents/server';
+import {
+  buildFastSessionReplyFooterText,
+  resolveFastSessionReplyFooterContext,
+} from '@roomote/communication';
+import {
+  buildSlackThreadReplyFooterBlock,
+  getSlackThreadReplyFooterMessageTs,
+  withSlackThreadReplyFooterLock,
+  resolveCurrentSlackMessageFiles,
+  type SlackEvent,
+  type SlackNotifier,
+} from '@roomote/slack';
+import {
+  appendAttachmentTextsToPromptText,
+  stripLeadingSlackProductMention,
+} from '@roomote/cloud-agents';
+import {
+  recordFastAgentConversationMessageBestEffort,
+  resolveUserMcpServerConfigs,
+} from '@roomote/sdk/server';
+
+import { LEADING_FAST_COMMAND_MENTION_PATTERN } from '../constants.js';
 import { postSlackThreadMarkdownMessage } from '../helpers/thread-posting.js';
+import { processSlackAttachments } from '../helpers/attachments.js';
 
 export function stripLeadingFastCommandMention(text: string): string {
   return text.replace(LEADING_FAST_COMMAND_MENTION_PATTERN, '').trimStart();
@@ -24,7 +44,15 @@ export function isBareFastCommandInvocation(text: string): boolean {
   return /^!fast(?:\s|$)/i.test(text.trimStart());
 }
 
-function extractFastQuestion(mentionStrippedText: string): string | null {
+export function extractFastQuestion(
+  mentionStrippedText: string,
+  continuation = false,
+): string | null {
+  if (continuation) {
+    const trimmedQuestion = mentionStrippedText.trim();
+    return trimmedQuestion.length > 0 ? trimmedQuestion : null;
+  }
+
   const match = mentionStrippedText.match(/^!fast\s*(.*)$/is);
   if (!match) {
     return null;
@@ -42,8 +70,15 @@ export async function processFastAgentMessage(params: {
   userId: string;
   teamId: string;
   apiBaseUrl?: string;
-  ackEmoji: string;
-  usageText?: string;
+  continuation?: boolean;
+  activeTasks?: FastAgentActiveTask[];
+  resolveActiveTasks?: () => Promise<FastAgentActiveTask[]>;
+  launchTask: LaunchFastAgentTask;
+  processingReactionName?: string;
+  isExistingConversation?: boolean;
+  directedAtRoomote?: boolean;
+  onAccepted?: (abort: () => Promise<void>) => void;
+  onRejected?: () => void;
 }): Promise<void> {
   const {
     event,
@@ -51,60 +86,65 @@ export async function processFastAgentMessage(params: {
     userId,
     teamId,
     apiBaseUrl,
-    ackEmoji,
-    usageText = `Use \`!fast <question>\` after mentioning ${PRODUCT_NAME}.`,
+    continuation = false,
+    activeTasks = [],
+    resolveActiveTasks,
+    launchTask,
+    processingReactionName = 'eyes',
+    isExistingConversation = false,
+    directedAtRoomote = false,
   } = params;
   const threadId = event.thread_ts || event.ts;
-  const releaseFastAgentLock = await acquireRedisLock(
-    `${SLACK_FAST_AGENT_LOCK_PREFIX}${threadId}`,
-    { ttlSeconds: FAST_AGENT_LOCK_TTL_SECONDS },
-  );
+  const conversation = {
+    surface: 'slack' as const,
+    workspaceId: teamId,
+    conversationId: threadId,
+    replyTarget: {
+      channelId: event.channel,
+      threadId,
+    },
+  };
+  const releaseFastAgentLock = await acquireFastAgentTurnLock({
+    conversation,
+  });
 
   if (!releaseFastAgentLock) {
-    await postSlackThreadMarkdownMessage({
-      slack,
-      channel: event.channel,
-      threadTs: threadId,
-      text: "I'm already working on a question in this thread - please wait.",
-      sourceMessageTs: event.ts,
-      conversationLog: {
-        userId,
-        slackTeamId: teamId,
-        source: 'fast_agent',
-      },
-    });
+    params.onRejected?.();
+    console.error(
+      `[SlackWebhook] Fast turn lock did not become available for ${teamId}:${event.channel}:${threadId}`,
+    );
     return;
   }
 
-  await slack.addReaction({
-    channel: event.channel,
-    timestamp: event.ts,
-    name: ackEmoji,
-  });
-
   const normalizedText = stripLeadingSlackProductMention(
     await slack.normalizeIncomingText(
-      stripLeadingFastCommandMention(event.text),
+      stripLeadingFastCommandMention(event.authoredText ?? event.text),
     ),
   );
-  const question = extractFastQuestion(normalizedText);
+  const baseQuestion = extractFastQuestion(normalizedText, continuation) ?? '';
+
+  let didAddProcessingReaction = false;
 
   try {
-    if (!question) {
-      await postSlackThreadMarkdownMessage({
-        slack,
+    // A false routing result can become stale while waiting for the turn lock.
+    const hasExistingConversation =
+      isExistingConversation || (await hasFastAgentSession(conversation));
+    if (!hasExistingConversation) {
+      didAddProcessingReaction = await slack.addReaction({
         channel: event.channel,
-        threadTs: threadId,
-        text: usageText,
-        sourceMessageTs: event.ts,
-        conversationLog: {
-          userId,
-          slackTeamId: teamId,
-          source: 'fast_agent',
-        },
+        timestamp: event.ts,
+        name: processingReactionName,
       });
-      return;
     }
+
+    // Resolved ahead of the turn so replies can carry the session footer;
+    // the service's own getOrCreate finds this same row.
+    const session = await getOrCreateFastAgentSession({ userId, conversation });
+    params.onAccepted?.(() =>
+      releaseFastAgentLock.abort(
+        new Error('Fast suggestion launch settlement failed.'),
+      ),
+    );
 
     let threadContext: Awaited<ReturnType<typeof slack.fetchThreadMessages>> =
       [];
@@ -120,8 +160,29 @@ export async function processFastAgentMessage(params: {
       );
     }
 
-    let didFailToReplyToSlack = false;
-    let didPostFinalAnswer = false;
+    let didSendVisibleResponse = false;
+    const currentMessage = threadContext.find(
+      (message) => message.ts === event.ts,
+    );
+    const currentMessageFiles = resolveCurrentSlackMessageFiles({
+      currentMessageTs: event.ts,
+      eventFiles: event.files,
+      messages: threadContext,
+    });
+    const attachments = await processSlackAttachments({
+      slack,
+      files: currentMessageFiles,
+      userId,
+      userTextContext: baseQuestion,
+    });
+    const attachmentTexts = [
+      ...attachments.attachmentTexts,
+      ...attachments.videoDescriptions,
+    ];
+    const question = appendAttachmentTextsToPromptText({
+      text: baseQuestion,
+      attachmentTexts,
+    });
     const serializedThreadContext = threadContext
       .filter((message) => message.ts !== event.ts)
       .map((message) => ({
@@ -131,44 +192,163 @@ export async function processFastAgentMessage(params: {
         ts: message.ts,
         bot_id: message.bot_id,
       }));
+    const hasOtherHumanParticipant = threadContext.some(
+      (message) =>
+        message.ts !== event.ts &&
+        !message.bot_id &&
+        Boolean(message.user) &&
+        message.user !== event.user,
+    );
 
+    const resolvedActiveTasks = resolveActiveTasks
+      ? await resolveActiveTasks()
+      : activeTasks;
+    const footerContext = await resolveFastSessionReplyFooterContext({
+      taskIds: resolvedActiveTasks.map((task) => task.taskId),
+    });
     const responseText = await answerFastAgentQuestion({
       question,
+      images: attachments.images,
+      attachmentTexts,
+      currentMessageAgentContext: event.agentContext,
       threadContext: serializedThreadContext,
       userId,
       apiBaseUrl,
-      slackChannel: event.channel,
-      slackThreadTs: threadId,
-      currentMessageTs: event.ts,
-      postSlackReply: async ({ type, text }) => {
-        try {
+      conversation,
+      currentMessageId: event.ts,
+      signal: releaseFastAgentLock.signal,
+      senderExternalId: event.user,
+      senderDisplayName:
+        currentMessage?.user === event.user
+          ? currentMessage.username
+          : undefined,
+      activeTasks: resolvedActiveTasks,
+      allowSilentAmbientReply:
+        event.channel_type !== 'im' &&
+        event.channel_type !== 'mpim' &&
+        hasOtherHumanParticipant &&
+        !directedAtRoomote,
+      adapter: {
+        resolveMcpServerConfigs: () =>
+          resolveUserMcpServerConfigs({
+            userId,
+            apiBaseUrl,
+            includeRoomoteMemberTools: true,
+          }),
+        launchTask,
+        postReply: async ({ message, kickoff }) => {
           const posted = await postSlackThreadMarkdownMessage({
             slack,
             channel: event.channel,
             threadTs: threadId,
-            text,
+            text: message,
             sourceMessageTs: event.ts,
             conversationLog: {
               userId,
               slackTeamId: teamId,
               source: 'fast_agent',
             },
+            fastSessionFooter: { sessionId: session.id, ...footerContext },
           });
-          if (posted && type === 'final_answer') {
-            didPostFinalAnswer = true;
+          if (posted === 'failed') {
+            throw new Error('Slack did not accept the Fast parent reply.');
           }
-        } catch (error) {
-          didFailToReplyToSlack = true;
-          throw error;
-        }
+          if (posted === 'suppressed' && kickoff) {
+            // The launch gate requires a visible, durable parent kickoff
+            // before the child becomes runnable; a suppressed kickoff must
+            // abort the launch instead of opening the gate silently.
+            throw new Error(
+              'The Fast kickoff was suppressed because the triggering message was deleted.',
+            );
+          }
+          // Suppression of an ordinary reply is deliberate (the triggering
+          // message was deleted); treat it as delivered so the turn is not
+          // aborted mid-flight.
+          didSendVisibleResponse = true;
+          if (typeof posted !== 'object') {
+            return undefined;
+          }
+          await recordFastAgentConversationMessageBestEffort({
+            sessionId: session.id,
+            conversation,
+            messageId: posted.messageId,
+          });
+          return { messageId: posted.messageId };
+        },
+        replaceReply: async ({ messageId }, { message }) => {
+          // Keep the sticky footer when the edited message is its current
+          // carrier; the lookup and edit share the footer lock so a
+          // concurrent relocation cannot slip in between them.
+          const updated = await withSlackThreadReplyFooterLock({
+            channel: event.channel,
+            threadTs: threadId,
+            fn: async () => {
+              const footerMessageTs = await getSlackThreadReplyFooterMessageTs(
+                event.channel,
+                threadId,
+              ).catch(() => null);
+              return slack.updateMessage({
+                channel: event.channel,
+                ts: messageId,
+                message: {
+                  text: message,
+                  blocks: [
+                    { type: 'markdown', text: message },
+                    ...(footerMessageTs === messageId
+                      ? [
+                          buildSlackThreadReplyFooterBlock({
+                            footerText: buildFastSessionReplyFooterText({
+                              provider: 'slack',
+                              sessionId: session.id,
+                              ...footerContext,
+                            }),
+                          }),
+                        ]
+                      : []),
+                  ],
+                },
+              });
+            },
+          });
+          if (!updated) {
+            throw new Error('Slack did not update the Fast parent reply.');
+          }
+          await recordFastAgentConversationMessageBestEffort({
+            sessionId: session.id,
+            conversation,
+            messageId,
+          });
+          didSendVisibleResponse = true;
+          return { messageId };
+        },
+        postReaction: async ({ name, purpose, messageId }) => {
+          if (
+            didAddProcessingReaction &&
+            name === processingReactionName &&
+            messageId === event.ts
+          ) {
+            if (purpose === 'closeout') {
+              didAddProcessingReaction = false;
+            }
+            didSendVisibleResponse = true;
+            return;
+          }
+
+          const added = await slack.addReaction({
+            channel: event.channel,
+            timestamp: messageId,
+            name,
+          });
+          if (!added) {
+            throw new Error(`Slack rejected the ${name} reaction.`);
+          }
+          didSendVisibleResponse = true;
+        },
       },
     });
 
-    if (
-      responseText.length > 0 &&
-      (didFailToReplyToSlack || !didPostFinalAnswer)
-    ) {
-      await postSlackThreadMarkdownMessage({
+    if (responseText.length > 0 && !didSendVisibleResponse) {
+      const posted = await postSlackThreadMarkdownMessage({
         slack,
         channel: event.channel,
         threadTs: threadId,
@@ -179,16 +359,26 @@ export async function processFastAgentMessage(params: {
           slackTeamId: teamId,
           source: 'fast_agent',
         },
+        fastSessionFooter: { sessionId: session.id, ...footerContext },
       });
+      if (typeof posted === 'object') {
+        await recordFastAgentConversationMessageBestEffort({
+          sessionId: session.id,
+          conversation,
+          messageId: posted.messageId,
+        });
+      }
     }
   } finally {
-    await slack
-      .removeReaction({
-        channel: event.channel,
-        timestamp: event.ts,
-        name: ackEmoji,
-      })
-      .catch(() => {});
+    if (didAddProcessingReaction) {
+      await slack
+        .removeReaction({
+          channel: event.channel,
+          timestamp: event.ts,
+          name: processingReactionName,
+        })
+        .catch(() => {});
+    }
     await releaseFastAgentLock().catch(() => {});
   }
 }

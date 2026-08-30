@@ -1,4 +1,9 @@
-import { normalizeTaskModelId } from '@roomote/types';
+import {
+  DEFAULT_MODEL_PROVIDER_CREDENTIAL_ENV_VAR_NAMES,
+  normalizeTaskModelId,
+  TASK_MODEL_ROLE_DESCRIPTORS,
+  TASK_MODEL_ROLES,
+} from '@roomote/types';
 
 import type { UserAuthSuccess } from '@/types';
 
@@ -69,6 +74,39 @@ vi.mock('@roomote/db/server', () => ({
     mockIsGitHubCopilotSubscriptionConnected,
   isXaiSubscriptionConnected: mockIsXaiSubscriptionConnected,
   isNull: vi.fn((column) => ({ isNull: column })),
+  // Mirrors the real runtime-first-then-persisted precedence through the
+  // persisted-values mock this file already controls, including the
+  // settings-only exception: the Roomote trial key never resolves from the
+  // runtime env (see SETTINGS_ONLY_MODEL_PROVIDER_ENV_VAR_NAMES).
+  resolveModelProviderEnvValue: vi.fn(
+    async (envVarNames: string | readonly string[]) => {
+      const names =
+        typeof envVarNames === 'string' ? [envVarNames] : envVarNames;
+
+      for (const name of names) {
+        if (name === 'R_TRIAL_OPENROUTER_API_KEY') {
+          continue;
+        }
+        const value = process.env[name]?.trim();
+        if (value) {
+          return value;
+        }
+      }
+
+      const persisted = (await mockGetPersistedEnvironmentVariableValues(
+        names,
+      )) as Partial<Record<string, string>> | undefined;
+
+      for (const name of names) {
+        const value = persisted?.[name]?.trim();
+        if (value) {
+          return value;
+        }
+      }
+
+      return undefined;
+    },
+  ),
 }));
 
 vi.mock('../environment-variables', () => ({
@@ -92,6 +130,7 @@ import {
 } from './index';
 
 const PROVIDER_ENV_VAR_NAMES = [
+  'R_TRIAL_OPENROUTER_API_KEY',
   'OPENROUTER_API_KEY',
   'OPENAI_API_KEY',
   'AZURE_API_KEY',
@@ -147,6 +186,7 @@ describe('lookupTaskModelCommand', () => {
   const originalProviderEnvValues = new Map<string, string | undefined>();
   const originalOpenRouterKey = process.env.OPENROUTER_API_KEY;
   const originalRoomoteModel = process.env.R_MODEL;
+  const originalRoomoteOrchestrationModel = process.env.R_ORCHESTRATION_MODEL;
   const originalRoomoteSmallModel = process.env.R_SMALL_MODEL;
   const originalRoomoteVisionModel = process.env.R_VISION_MODEL;
   const originalRoomoteCodeReviewModel = process.env.R_CODE_REVIEW_MODEL;
@@ -170,12 +210,14 @@ describe('lookupTaskModelCommand', () => {
       delete process.env[name];
     }
     delete process.env.R_MODEL;
+    delete process.env.R_ORCHESTRATION_MODEL;
     delete process.env.R_SMALL_MODEL;
     delete process.env.R_VISION_MODEL;
     delete process.env.R_CODE_REVIEW_MODEL;
     delete process.env.R_EXPLORE_MODEL;
     delete process.env.R_PLANNING_MODEL;
     delete process.env.R_MODEL_REASONING_EFFORT;
+    delete process.env.R_ORCHESTRATION_MODEL_REASONING_EFFORT;
     delete process.env.R_SMALL_MODEL_REASONING_EFFORT;
     delete process.env.R_VISION_MODEL_REASONING_EFFORT;
     delete process.env.R_CODE_REVIEW_MODEL_REASONING_EFFORT;
@@ -261,6 +303,12 @@ describe('lookupTaskModelCommand', () => {
       process.env.R_MODEL = originalRoomoteModel;
     }
 
+    if (originalRoomoteOrchestrationModel === undefined) {
+      delete process.env.R_ORCHESTRATION_MODEL;
+    } else {
+      process.env.R_ORCHESTRATION_MODEL = originalRoomoteOrchestrationModel;
+    }
+
     if (originalRoomoteSmallModel === undefined) {
       delete process.env.R_SMALL_MODEL;
     } else {
@@ -292,6 +340,7 @@ describe('lookupTaskModelCommand', () => {
     }
 
     delete process.env.R_MODEL_REASONING_EFFORT;
+    delete process.env.R_ORCHESTRATION_MODEL_REASONING_EFFORT;
     delete process.env.R_SMALL_MODEL_REASONING_EFFORT;
     delete process.env.R_VISION_MODEL_REASONING_EFFORT;
     delete process.env.R_CODE_REVIEW_MODEL_REASONING_EFFORT;
@@ -427,6 +476,44 @@ describe('lookupTaskModelCommand', () => {
       expect.objectContaining({
         headers: expect.objectContaining({
           Authorization: 'Bearer saved-openrouter-key',
+        }),
+        signal: expect.any(AbortSignal),
+      }),
+    );
+  });
+
+  it('uses the managed Roomote key to look up Roomote model metadata through OpenRouter', async () => {
+    // The trial key is settings-only: production resolves it from the
+    // persisted store, never the runtime env, so the test stores it there.
+    mockGetPersistedEnvironmentVariableValues.mockResolvedValue({
+      R_TRIAL_OPENROUTER_API_KEY: 'managed-roomote-key',
+    });
+    fetchMock.mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          data: {
+            id: 'openai/gpt-5.6-luna',
+            name: 'GPT 5.6 Luna',
+          },
+        }),
+        { headers: { 'content-type': 'application/json' } },
+      ),
+    );
+
+    await expect(
+      lookupTaskModelCommand(buildMockAuth(), {
+        modelId: 'roomote/openai/gpt-5.6-luna',
+      }),
+    ).resolves.toMatchObject({
+      modelId: 'roomote/openai/gpt-5.6-luna',
+      displayName: 'GPT 5.6 Luna',
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://openrouter.ai/api/v1/model/openai/gpt-5.6-luna',
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          Authorization: 'Bearer managed-roomote-key',
         }),
         signal: expect.any(AbortSignal),
       }),
@@ -833,12 +920,14 @@ describe('lookupTaskModelCommand', () => {
         set: expect.objectContaining({
           runtimeModelConfig: {
             roomoteModel: 'openrouter/openai/gpt-5.6',
+            roomoteOrchestrationModel: null,
             roomoteSmallModel: 'openrouter/z-ai/glm-5.2',
             roomoteVisionModel: null,
             roomoteCodeReviewModel: null,
             roomoteExploreModel: null,
             roomotePlanningModel: null,
             roomoteModelReasoningEffort: null,
+            roomoteOrchestrationModelReasoningEffort: null,
             roomoteSmallModelReasoningEffort: null,
             roomoteVisionModelReasoningEffort: null,
             roomoteCodeReviewModelReasoningEffort: null,
@@ -848,6 +937,81 @@ describe('lookupTaskModelCommand', () => {
         }),
       }),
     );
+  });
+
+  it('persists a selected orchestration model independently', async () => {
+    const result = await updateTaskModelSettingsCommand(buildMockAuth(), {
+      models: [
+        {
+          id: 'openrouter/openai/gpt-5.6',
+          displayName: 'GPT 5.6',
+          family: 'GPT',
+        },
+        {
+          id: 'z-ai/glm-5.2',
+          displayName: 'GLM 5.2',
+          family: 'GLM',
+        },
+      ],
+      allowedModelIds: ['openrouter/openai/gpt-5.6', 'z-ai/glm-5.2'],
+      defaultModelId: 'openrouter/openai/gpt-5.6',
+      orchestrationModelId: 'z-ai/glm-5.2',
+      helperModelId: null,
+      visionModelId: null,
+      codeReviewModelId: null,
+      planningModelId: null,
+      codingModelReasoningEffort: null,
+      orchestrationModelReasoningEffort: 'high',
+      helperModelReasoningEffort: null,
+      visionModelReasoningEffort: null,
+      codeReviewModelReasoningEffort: null,
+      planningModelReasoningEffort: null,
+    });
+
+    expect(result).toMatchObject({ success: true });
+    expect(mockUpdateDeploymentSettings).toHaveBeenCalledWith(
+      expect.objectContaining({
+        set: expect.objectContaining({
+          runtimeModelConfig: expect.objectContaining({
+            roomoteModel: 'openrouter/openai/gpt-5.6',
+            roomoteOrchestrationModel: 'openrouter/z-ai/glm-5.2',
+            roomoteOrchestrationModelReasoningEffort: 'high',
+          }),
+        }),
+      }),
+    );
+  });
+
+  it('rejects an orchestration model outside the saved catalog', async () => {
+    const result = await updateTaskModelSettingsCommand(buildMockAuth(), {
+      models: [
+        {
+          id: 'openrouter/openai/gpt-5.6',
+          displayName: 'GPT 5.6',
+          family: 'GPT',
+        },
+      ],
+      allowedModelIds: ['openrouter/openai/gpt-5.6'],
+      defaultModelId: 'openrouter/openai/gpt-5.6',
+      orchestrationModelId: 'openrouter/anthropic/claude-opus-5',
+      helperModelId: null,
+      visionModelId: null,
+      codeReviewModelId: null,
+      planningModelId: null,
+      codingModelReasoningEffort: null,
+      orchestrationModelReasoningEffort: null,
+      helperModelReasoningEffort: null,
+      visionModelReasoningEffort: null,
+      codeReviewModelReasoningEffort: null,
+      planningModelReasoningEffort: null,
+    });
+
+    expect(result).toEqual({
+      success: false,
+      fieldErrors: {
+        orchestrationModelId: 'Choose a valid orchestration model.',
+      },
+    });
   });
 
   it('persists a selected vision model to runtimeModelConfig.roomoteVisionModel', async () => {
@@ -885,12 +1049,14 @@ describe('lookupTaskModelCommand', () => {
         set: expect.objectContaining({
           runtimeModelConfig: {
             roomoteModel: 'openrouter/openai/gpt-5.6',
+            roomoteOrchestrationModel: null,
             roomoteSmallModel: null,
             roomoteVisionModel: 'openrouter/z-ai/glm-5.2',
             roomoteCodeReviewModel: null,
             roomoteExploreModel: null,
             roomotePlanningModel: null,
             roomoteModelReasoningEffort: null,
+            roomoteOrchestrationModelReasoningEffort: null,
             roomoteSmallModelReasoningEffort: null,
             roomoteVisionModelReasoningEffort: null,
             roomoteCodeReviewModelReasoningEffort: null,
@@ -949,12 +1115,14 @@ describe('lookupTaskModelCommand', () => {
         set: expect.objectContaining({
           runtimeModelConfig: {
             roomoteModel: 'openrouter/anthropic/claude-sonnet-4',
+            roomoteOrchestrationModel: null,
             roomoteSmallModel: null,
             roomoteVisionModel: null,
             roomoteCodeReviewModel: null,
             roomoteExploreModel: null,
             roomotePlanningModel: null,
             roomoteModelReasoningEffort: null,
+            roomoteOrchestrationModelReasoningEffort: null,
             roomoteSmallModelReasoningEffort: null,
             roomoteVisionModelReasoningEffort: null,
             roomoteCodeReviewModelReasoningEffort: null,
@@ -1013,12 +1181,14 @@ describe('lookupTaskModelCommand', () => {
         set: expect.objectContaining({
           runtimeModelConfig: {
             roomoteModel: 'openrouter/openai/gpt-5.6',
+            roomoteOrchestrationModel: null,
             roomoteSmallModel: 'openrouter/anthropic/claude-haiku-4',
             roomoteVisionModel: null,
             roomoteCodeReviewModel: null,
             roomoteExploreModel: null,
             roomotePlanningModel: null,
             roomoteModelReasoningEffort: null,
+            roomoteOrchestrationModelReasoningEffort: null,
             roomoteSmallModelReasoningEffort: null,
             roomoteVisionModelReasoningEffort: null,
             roomoteCodeReviewModelReasoningEffort: null,
@@ -1077,12 +1247,14 @@ describe('lookupTaskModelCommand', () => {
         set: expect.objectContaining({
           runtimeModelConfig: {
             roomoteModel: 'openrouter/openai/gpt-5.6',
+            roomoteOrchestrationModel: null,
             roomoteSmallModel: null,
             roomoteVisionModel: 'openrouter/anthropic/claude-sonnet-4',
             roomoteCodeReviewModel: null,
             roomoteExploreModel: null,
             roomotePlanningModel: null,
             roomoteModelReasoningEffort: null,
+            roomoteOrchestrationModelReasoningEffort: null,
             roomoteSmallModelReasoningEffort: null,
             roomoteVisionModelReasoningEffort: null,
             roomoteCodeReviewModelReasoningEffort: null,
@@ -1159,6 +1331,55 @@ describe('lookupTaskModelCommand', () => {
         }),
       }),
     );
+  });
+
+  it('reads and writes every role through the canonical descriptor', async () => {
+    const selectedModelId = 'openrouter/openai/gpt-5.6';
+    const result = await updateTaskModelSettingsCommand(buildMockAuth(), {
+      models: [
+        {
+          id: selectedModelId,
+          displayName: 'GPT 5.6',
+          family: 'GPT',
+        },
+      ],
+      allowedModelIds: [selectedModelId],
+      defaultModelId: selectedModelId,
+      orchestrationModelId: selectedModelId,
+      helperModelId: selectedModelId,
+      visionModelId: selectedModelId,
+      codeReviewModelId: selectedModelId,
+      exploreModelId: selectedModelId,
+      planningModelId: selectedModelId,
+      codingModelReasoningEffort: 'high',
+      orchestrationModelReasoningEffort: 'high',
+      helperModelReasoningEffort: 'high',
+      visionModelReasoningEffort: 'high',
+      codeReviewModelReasoningEffort: 'high',
+      exploreModelReasoningEffort: 'high',
+      planningModelReasoningEffort: 'high',
+    });
+
+    expect(result).toMatchObject({ success: true });
+    const runtimeModelConfig =
+      mockUpdateDeploymentSettings.mock.calls.at(-1)?.[0]?.set
+        ?.runtimeModelConfig;
+
+    for (const role of TASK_MODEL_ROLES) {
+      const descriptor = TASK_MODEL_ROLE_DESCRIPTORS[role];
+      expect(runtimeModelConfig[descriptor.modelConfigKey]).toBe(
+        selectedModelId,
+      );
+      expect(runtimeModelConfig[descriptor.reasoningConfigKey]).toBe('high');
+    }
+
+    if (result.success) {
+      expect(Object.keys(result.settings.runtimeModels).sort()).toEqual(
+        TASK_MODEL_ROLES.map(
+          (role) => TASK_MODEL_ROLE_DESCRIPTORS[role].runtimeStatusKey,
+        ).sort(),
+      );
+    }
   });
 
   it('persists the selected reasoning effort when the env override is invalid', async () => {
@@ -1582,6 +1803,14 @@ describe('task model provider commands', () => {
     expect(txInsert).not.toHaveBeenCalled();
   });
 
+  it('rejects saving the hosting-managed Roomote provider', async () => {
+    await expect(
+      saveTaskModelProviderCommand(buildMockAuth(), { provider: 'roomote' }),
+    ).rejects.toThrow('Roomote inference is managed by your hosting provider.');
+
+    expect(mockUpsertDeploymentEnvironmentVariables).not.toHaveBeenCalled();
+  });
+
   it('saves the API key and seeds the recommended models for a newly connected provider', async () => {
     mockGetPersistedEnvironmentVariableNames
       .mockResolvedValueOnce([])
@@ -1869,6 +2098,59 @@ describe('task model provider commands', () => {
     expect(mockTxDelete).toHaveBeenCalled();
   });
 
+  it('deletes Roomote inference to disable the trial when another provider remains', async () => {
+    // Hermetic: host provider keys must not change the last-provider count.
+    for (const name of DEFAULT_MODEL_PROVIDER_CREDENTIAL_ENV_VAR_NAMES) {
+      vi.stubEnv(name, '');
+    }
+    vi.stubEnv('R_TRIAL_OPENROUTER_API_KEY', '');
+    try {
+      mockIsChatGptSubscriptionConnected.mockResolvedValue(false);
+      mockIsGitHubCopilotSubscriptionConnected.mockResolvedValue(false);
+      mockIsXaiSubscriptionConnected.mockResolvedValue(false);
+      mockGetPersistedEnvironmentVariableNames.mockResolvedValue([
+        'R_TRIAL_OPENROUTER_API_KEY',
+        'ANTHROPIC_API_KEY',
+      ]);
+
+      await deleteTaskModelProviderCommand(buildMockAuth(), {
+        provider: 'roomote',
+      });
+
+      expect(txDeleteWhere).toHaveBeenCalledWith({
+        and: [
+          { isNull: 'env.user_id' },
+          { column: 'env.name', values: ['R_TRIAL_OPENROUTER_API_KEY'] },
+        ],
+      });
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it('keeps Roomote inference while it is the only connected provider', async () => {
+    for (const name of DEFAULT_MODEL_PROVIDER_CREDENTIAL_ENV_VAR_NAMES) {
+      vi.stubEnv(name, '');
+    }
+    vi.stubEnv('R_TRIAL_OPENROUTER_API_KEY', '');
+    try {
+      mockIsChatGptSubscriptionConnected.mockResolvedValue(false);
+      mockIsGitHubCopilotSubscriptionConnected.mockResolvedValue(false);
+      mockIsXaiSubscriptionConnected.mockResolvedValue(false);
+      mockGetPersistedEnvironmentVariableNames.mockResolvedValue([
+        'R_TRIAL_OPENROUTER_API_KEY',
+      ]);
+
+      await expect(
+        deleteTaskModelProviderCommand(buildMockAuth(), {
+          provider: 'roomote',
+        }),
+      ).rejects.toThrow('Keep at least one inference provider connected.');
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
   it('removes only the xAI API key when a Grok subscription remains connected', async () => {
     // Dual-path xAI shares catalog id `xai`. Deleting the key must not strip
     // xai/* models while SuperGrok is still connected.
@@ -1944,6 +2226,16 @@ describe('task model provider commands', () => {
     expect(txOnConflictDoUpdate).not.toHaveBeenCalled();
   });
 
+  it('rejects deleting Roomote inference when no key was ever imported', async () => {
+    // Deletion is the supported way to disable the trial, but it operates on
+    // the imported Settings row; without one there is nothing to remove.
+    await expect(
+      deleteTaskModelProviderCommand(buildMockAuth(), { provider: 'roomote' }),
+    ).rejects.toThrow('does not have saved credentials');
+
+    expect(mockTxDelete).not.toHaveBeenCalled();
+  });
+
   it('deletes provider credentials and cascades removing provider models without deleting usage data', async () => {
     const persistedRow = {
       taskModelSettings: {
@@ -1965,20 +2257,20 @@ describe('task model provider commands', () => {
         ],
         defaultModelId: 'anthropic/claude-sonnet-4',
       },
-      runtimeModelConfig: {
-        roomoteModel: 'anthropic/claude-sonnet-4',
-        roomoteSmallModel: 'anthropic/claude-sonnet-4',
-        roomoteVisionModel: 'openrouter/openai/gpt-5.6-terra',
-        roomoteCodeReviewModel: null,
-        roomoteExploreModel: null,
-        roomotePlanningModel: null,
-        roomoteModelReasoningEffort: null,
-        roomoteSmallModelReasoningEffort: null,
-        roomoteVisionModelReasoningEffort: null,
-        roomoteCodeReviewModelReasoningEffort: null,
-        roomoteExploreModelReasoningEffort: null,
-        roomotePlanningModelReasoningEffort: null,
-      },
+      runtimeModelConfig: Object.fromEntries(
+        TASK_MODEL_ROLES.flatMap((role) => {
+          const descriptor = TASK_MODEL_ROLE_DESCRIPTORS[role];
+          return [
+            [
+              descriptor.modelConfigKey,
+              role === 'vision'
+                ? 'openrouter/openai/gpt-5.6-terra'
+                : 'anthropic/claude-sonnet-4',
+            ],
+            [descriptor.reasoningConfigKey, 'high'],
+          ];
+        }),
+      ),
     };
     mockFindDeploymentSettings.mockImplementation(async (options) => {
       const columns = (options as { columns?: Record<string, boolean> })
@@ -2017,11 +2309,12 @@ describe('task model provider commands', () => {
     expect(updateSet.taskModelSettings.defaultModelId).toBe(
       'openrouter/openai/gpt-5.6-terra',
     );
-    expect(updateSet.runtimeModelConfig.roomoteModel).toBeNull();
-    expect(updateSet.runtimeModelConfig.roomoteSmallModel).toBeNull();
-    expect(updateSet.runtimeModelConfig.roomoteVisionModel).toBe(
-      'openrouter/openai/gpt-5.6-terra',
-    );
+    for (const role of TASK_MODEL_ROLES) {
+      const descriptor = TASK_MODEL_ROLE_DESCRIPTORS[role];
+      expect(updateSet.runtimeModelConfig[descriptor.modelConfigKey]).toBe(
+        role === 'vision' ? 'openrouter/openai/gpt-5.6-terra' : null,
+      );
+    }
     expect(updateSet.setupNewState.modelProvider).toBeNull();
   });
 });

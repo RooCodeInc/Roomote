@@ -53,6 +53,25 @@ export type AcpLiveEventType =
 /** All known Roomote runtime event types — envelope (persisted) + live-only (streamed). */
 export type AcpEventType = AcpEnvelopeEventType | AcpLiveEventType;
 
+/** Restore separation between bold reasoning headings concatenated by a provider. */
+export function normalizeAcpReasoningText(text: string): string {
+  return text.replace(/[^\r\n]+/g, (line) => {
+    if (!line.startsWith('**') || !line.endsWith('**')) {
+      return line;
+    }
+
+    const headings = line.slice(2, -2).split('****');
+    if (
+      headings.length < 2 ||
+      headings.some((heading) => heading.length === 0 || heading.includes('**'))
+    ) {
+      return line;
+    }
+
+    return `**${headings.join('**\n\n**')}**`;
+  });
+}
+
 export const ACP_LOGICAL_EVENT_ID_KEY = 'logicalEventId' as const;
 
 export interface AcpLogicalEventIdParts {
@@ -864,6 +883,26 @@ export type AcpToolCallPayloadKind =
   | string
   | null;
 
+/** Stable machine-level tool facts. User-facing labels and icons belong to UI clients. */
+export const ACP_TOOL_KINDS = {
+  execute: 'execute',
+  read: 'read',
+  search: 'search',
+  list: 'list',
+  edit: 'edit',
+  subagent: 'subagent',
+  task: 'task',
+  communication: 'communication',
+  memory: 'memory',
+  artifact: 'artifact',
+  widget: 'widget',
+  mcp: 'mcp',
+  tool: 'tool',
+} as const;
+
+export type KnownAcpToolKind =
+  (typeof ACP_TOOL_KINDS)[keyof typeof ACP_TOOL_KINDS];
+
 export interface AcpSessionUpdate extends Record<string, unknown> {
   sessionUpdate: string;
 }
@@ -962,6 +1001,8 @@ export interface AcpToolCallPayload {
   isExecute: boolean;
   isRead: boolean;
   isMcp: boolean;
+  /** Trusted Roomote-native tool output persisted by the Fast runtime. */
+  isRoomoteNativeTool?: boolean;
   mcpServerName: string | null;
   mcpToolName: string | null;
   command: string | null;
@@ -985,7 +1026,10 @@ export interface AcpToolResultPayload {
   kind: AcpToolCallPayloadKind;
   title: string | null;
   isExecute: boolean;
+  isRead?: boolean;
   isMcp: boolean;
+  /** Trusted Roomote-native tool output persisted by the Fast runtime. */
+  isRoomoteNativeTool?: boolean;
   mcpServerName: string | null;
   mcpToolName: string | null;
   command: string | null;
@@ -1401,7 +1445,7 @@ function isSlackThreadActivityOnlyBlock(text: string): boolean {
 /**
  * Extract slack_message content from:
  *   thread_activity* thread_context? thread_activity*
- *   replying_to? slack_turn_policy? slack_message
+ *   replying_to? slack_turn_policy? slack_message_context? slack_message
  *
  * Implemented as the original recursive descent with per-(pos, phase) memoization,
  * executed on an explicit heap stack so thousands of sequential activity blocks
@@ -1467,15 +1511,41 @@ function parseSlackRestFrom(text: string, index: number): string | null {
         afterPolicyOpen + 1,
         closeMarker,
         (_close, afterClose) =>
-          extractSlackMessageAt(text, afterClose) !== null,
+          extractSlackMessageAfterOptionalContext(text, afterClose) !== null,
       );
       if (found !== null) {
-        return extractSlackMessageAt(text, found.afterClose);
+        return extractSlackMessageAfterOptionalContext(text, found.afterClose);
       }
     }
 
-    return extractSlackMessageAt(text, at);
+    return extractSlackMessageAfterOptionalContext(text, at);
   }
+}
+
+function extractSlackMessageAfterOptionalContext(
+  text: string,
+  index: number,
+): string | null {
+  const afterContextOpen = matchOpenTag(
+    text,
+    index,
+    'slack_message_context',
+    false,
+  );
+  if (afterContextOpen !== null && text[afterContextOpen] === '\n') {
+    const closeMarker = '\n</slack_message_context>';
+    const found = findStructuralClose(
+      text,
+      afterContextOpen + 1,
+      closeMarker,
+      (_close, afterClose) => extractSlackMessageAt(text, afterClose) !== null,
+    );
+    if (found !== null) {
+      return extractSlackMessageAt(text, found.afterClose);
+    }
+  }
+
+  return extractSlackMessageAt(text, index);
 }
 
 function parseSlackTranscriptFrom(text: string, start: number): string | null {

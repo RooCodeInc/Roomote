@@ -1,15 +1,14 @@
-import type { AcpMessage } from '@roomote/types';
-
 import { RuntimePromptQueue } from '../runtime-prompt-queue';
+import type { PersistableEnvelope } from '../../runtime-envelope-builder';
 
 function createQueue() {
-  const emittedEvents: AcpMessage[] = [];
+  const emittedEvents: PersistableEnvelope[] = [];
   let sequence = 0;
 
   const queue = new RuntimePromptQueue({
     getSessionId: () => 'test-session',
     getNextSequence: () => ++sequence,
-    emitRuntimeOutput: (event) => emittedEvents.push(event),
+    emitRuntimeUpdate: (event) => emittedEvents.push(event),
   });
 
   return { queue, emittedEvents };
@@ -45,6 +44,18 @@ describe('RuntimePromptQueue', () => {
       const b = queue.dequeue();
 
       expect(a?.id).not.toBe(b?.id);
+    });
+
+    it('uses the monotonic sequence as the durable envelope timestamp', () => {
+      const { queue, emittedEvents } = createQueue();
+
+      queue.enqueue({ text: 'first' });
+      queue.enqueue({ text: 'second' });
+
+      expect(emittedEvents.map((event) => event.ts)).toEqual([1, 2]);
+      expect(emittedEvents.map((event) => event.metadata?.sequence)).toEqual([
+        1, 2,
+      ]);
     });
 
     it('preserves images in queued messages', () => {

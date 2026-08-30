@@ -21,6 +21,7 @@ import {
   getImageUrisFromContentBlocks,
   getProviderRetryNoticeFromMessageData,
   inferAcpMessageKind,
+  normalizeAcpReasoningText,
   normalizeTranscriptUserText,
   normalizePlanPayload,
   parseAcpRequestUserInputPayload,
@@ -317,6 +318,8 @@ export function toAcpUiMessage(
     case 'reasoning':
       return {
         ...base,
+        text: normalizeAcpReasoningText(normalized.text ?? ''),
+        rawText: normalized.text ?? '',
         role: 'assistant',
         kind: 'reasoning',
         data: payloadRecord,
@@ -1281,10 +1284,23 @@ export class AcpProtocolService {
         const existing = messages[idx]! as AcpOtherUiMessage;
         const next = messages.slice();
 
+        const existingText = existing.rawText ?? existing.text ?? '';
+        const candidateText = candidate.rawText ?? candidate.text ?? '';
+        const hasOverlappingBoldBoundary =
+          idPrefix === 'reasoning' &&
+          existingText.endsWith('**') &&
+          candidateText.startsWith('****');
+        const combinedText =
+          existingText +
+          (hasOverlappingBoldBoundary ? candidateText.slice(2) : candidateText);
         next[idx] = {
           ...existing,
           ts: event.ts,
-          text: (existing.text ?? '') + (candidate.text ?? ''),
+          text:
+            idPrefix === 'reasoning'
+              ? normalizeAcpReasoningText(combinedText)
+              : combinedText,
+          ...(idPrefix === 'reasoning' ? { rawText: combinedText } : {}),
           partial: true,
           data: event.payload,
         };

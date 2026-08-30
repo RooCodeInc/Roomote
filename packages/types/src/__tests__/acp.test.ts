@@ -6,6 +6,7 @@ import {
   parseAcpTaskCancelledPayload,
   type AcpRequestUserInputQuestion,
   isLinkedReviewResultsMessage,
+  normalizeAcpReasoningText,
   normalizeTranscriptUserText,
   parseLinkedReviewResults,
   parseAcpRequestUserInputAnswerReply,
@@ -20,6 +21,27 @@ import {
   wrapOutOfBandContext,
   ACP_API_TOOL_OUTPUT_MAX_CHARS,
 } from '../acp';
+
+describe('normalizeAcpReasoningText', () => {
+  it('separates adjacent bold reasoning headings', () => {
+    expect(
+      normalizeAcpReasoningText(
+        '**Clarifying boundaries****Assessing precision****Checking gaps**',
+      ),
+    ).toBe(
+      '**Clarifying boundaries**\n\n**Assessing precision**\n\n**Checking gaps**',
+    );
+  });
+
+  it.each([
+    'First\n\n****\n\n**Second**',
+    'The requested **read****write** permissions are required.',
+    '**read****write** permissions are required.',
+    'Permissions: **read****write**',
+  ])('preserves non-heading Markdown: %s', (markdown) => {
+    expect(normalizeAcpReasoningText(markdown)).toBe(markdown);
+  });
+});
 
 describe('wrapOutOfBandContext', () => {
   it('wraps messages with escaped content and a sent_at attribute', () => {
@@ -154,7 +176,7 @@ describe('normalizeTranscriptUserText', () => {
           '<thread_activity>\nBob Example: Added another clue\n</thread_activity>',
           '<thread_context>\n<slack_thread_message ts="109.000">Carol Example: Earlier thread detail</slack_thread_message>\n</thread_context>',
           '<replying_to ts="110.000">\nRoomote Bot: Previous reply\n</replying_to>',
-          '<slack_message ts="111.000">\nlatest question\n</slack_message>',
+          '<slack_message ts="111.000" sender_slack_id="U123" sender_name="Alice Example" sender_github="alice-example">\nlatest question\n</slack_message>',
         ].join('\n\n'),
       ),
     ).toBe('latest question');
@@ -384,6 +406,39 @@ describe('normalizeTranscriptUserText', () => {
     ).toBe('latest question');
   });
 
+  it('hides agent-only Slack message context from transcript text', () => {
+    expect(
+      normalizeTranscriptUserText(
+        [
+          '<slack_turn_policy reactions_allowed="false" prefer_emoji_ack="false">',
+          'Emoji reactions are not allowed.',
+          '</slack_turn_policy>',
+          '',
+          '<slack_message_context>',
+          'Slack block text:',
+          'State: New',
+          '</slack_message_context>',
+          '',
+          '<slack_message ts="111.000">',
+          'latest question',
+          '</slack_message>',
+        ].join('\n'),
+      ),
+    ).toBe('latest question');
+  });
+
+  it('leaves malformed Slack message context visible instead of stripping arbitrary text', () => {
+    const text = [
+      '<slack_message_context>',
+      'Slack block text without a closing context tag',
+      '<slack_message>',
+      'latest question',
+      '</slack_message>',
+    ].join('\n');
+
+    expect(normalizeTranscriptUserText(text)).toBe(text);
+  });
+
   it('extracts the current Slack turn when the prompt wrappers are HTML-escaped', () => {
     expect(
       normalizeTranscriptUserText(
@@ -395,6 +450,10 @@ describe('normalizeTranscriptUserText', () => {
           '&lt;replying_to ts="110.000"&gt;',
           'Roomote Bot: Previous reply',
           '&lt;/replying_to&gt;',
+          '',
+          '&lt;slack_message_context&gt;',
+          'Slack block text: State: New',
+          '&lt;/slack_message_context&gt;',
           '',
           '&lt;slack_message ts="111.000"&gt;',
           'latest question',

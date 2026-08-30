@@ -7,143 +7,52 @@ import {
 } from '../automation-result-blocks';
 
 describe('automation result blocks', () => {
-  it('translates prose markdown and preserves GFM tables as native tables', () => {
-    expect(
-      buildAutomationResultContentBlocks(
-        '**Summary** with [details](https://example.com).\n\n| Name | Result |\n| --- | ---: |\n| Build | **Passed** |',
-      ),
-    ).toEqual([
-      {
-        type: 'section',
-        text: {
-          type: 'mrkdwn',
-          text: '*Summary* with <https://example.com|details>.',
-        },
-      },
-      {
-        type: 'table',
-        column_settings: [
-          { align: 'left', is_wrapped: true },
-          { align: 'right', is_wrapped: true },
-        ],
-        rows: [
-          [
-            {
-              type: 'rich_text',
-              elements: [
-                {
-                  type: 'rich_text_section',
-                  elements: [
-                    { type: 'text', text: 'Name', style: { bold: true } },
-                  ],
-                },
-              ],
-            },
-            {
-              type: 'rich_text',
-              elements: [
-                {
-                  type: 'rich_text_section',
-                  elements: [
-                    { type: 'text', text: 'Result', style: { bold: true } },
-                  ],
-                },
-              ],
-            },
-          ],
-          [
-            {
-              type: 'rich_text',
-              elements: [
-                {
-                  type: 'rich_text_section',
-                  elements: [{ type: 'text', text: 'Build' }],
-                },
-              ],
-            },
-            {
-              type: 'rich_text',
-              elements: [
-                {
-                  type: 'rich_text_section',
-                  elements: [
-                    { type: 'text', text: 'Passed', style: { bold: true } },
-                  ],
-                },
-              ],
-            },
-          ],
-        ],
-      },
-    ]);
-  });
-
-  it('keeps tables inside tilde code fences as verbatim prose', () => {
-    const text = '~~~md\n| Name |\n| --- |\n| Demo |\n~~~';
+  it('preserves report Markdown for Slack to render', () => {
+    const text = `  ${[
+      '## Devin by Cognition',
+      '### [Team stopped using Claude Tag](<https://x.com/example/status/1>)',
+      '- Time: 2 hours ago',
+      '',
+      '| Name | Result |',
+      '| --- | ---: |',
+      '| Build | **Passed** |',
+    ].join('\n')}  `;
 
     expect(buildAutomationResultContentBlocks(text)).toEqual([
-      {
-        type: 'section',
-        text: { type: 'mrkdwn', text },
-      },
+      { type: 'markdown', text },
     ]);
   });
 
-  it('converts markdown lists into supported container child sections', () => {
-    expect(buildAutomationResultContentBlocks('- First\n- Second')).toEqual([
-      {
-        type: 'section',
-        text: { type: 'mrkdwn', text: '- First\n- Second' },
-      },
-    ]);
-  });
+  it('does not escape angle-bracket Markdown link destinations', () => {
+    const text = '[Report](<https://x.com/example/status/1>)';
 
-  it('escapes literal Slack control characters while preserving converted links', () => {
-    expect(
-      buildAutomationResultContentBlocks(
-        'Notify <@U123> and <!here> when a < b & review [details](https://example.com?a=1&b=2).',
-      ),
-    ).toEqual([
-      {
-        type: 'section',
-        text: {
-          type: 'mrkdwn',
-          text: 'Notify &lt;@U123&gt; and &lt;!here&gt; when a &lt; b &amp; review <https://example.com?a=1&amp;b=2|details>.',
-        },
-      },
+    expect(buildAutomationResultContentBlocks(text)).toEqual([
+      { type: 'markdown', text },
     ]);
-  });
-
-  it('preserves pipes inside variable-length inline code table cells', () => {
-    const blocks = buildAutomationResultContentBlocks(
-      '| Value |\n| --- |\n| ``a|b`` |',
+    expect(buildAutomationResultContentBlocks(text)).not.toContainEqual(
+      expect.objectContaining({
+        text: expect.stringContaining('&lt;'),
+      }),
     );
-
-    expect(blocks).toHaveLength(1);
-    expect(blocks[0]?.type).toBe('table');
-    if (blocks[0]?.type !== 'table') return;
-    expect(blocks[0].rows).toHaveLength(2);
-    expect(JSON.stringify(blocks[0].rows[1])).toContain('a|b');
   });
 
-  it('uses sections for oversized table fallbacks', () => {
-    const rows = Array.from({ length: 100 }, (_, index) => `| ${index} |`);
-    const blocks = buildAutomationResultContentBlocks(
-      ['| Value |', '| --- |', ...rows].join('\n'),
-    );
-
-    expect(blocks.length).toBeGreaterThan(0);
-    expect(blocks.every((block) => block.type === 'section')).toBe(true);
+  it('omits empty report content', () => {
+    expect(buildAutomationResultContentBlocks('  \n')).toEqual([]);
   });
 
-  it('builds the requested container chrome and keeps task and configure actions', () => {
+  it('builds top-level header, Markdown, images, and actions', () => {
     expect(
       buildAutomationResultBlocks({
         title: 'Daily report',
         iconUrl: 'https://app.example.com/automation-icons/zap.png',
         configureUrl: 'https://app.example.com/automations#custom-automation-1',
         contentBlocks: [
-          { type: 'markdown', text: 'Everything is **healthy**.' },
+          { type: 'markdown', text: '  ## Summary\n- Healthy  ' },
+          {
+            type: 'image',
+            image_url: 'https://app.example.com/proof.png',
+            alt_text: 'Proof',
+          },
         ],
         subtitle: {
           type: 'plain_text',
@@ -158,57 +67,71 @@ describe('automation result blocks', () => {
       }),
     ).toEqual([
       {
-        type: 'container',
-        width: 'full',
-        block_id: 'roomote_automation_result_container',
-        title: { type: 'plain_text', text: 'Daily report', emoji: false },
-        subtitle: {
-          type: 'plain_text',
-          text: 'Weekly · GPT 5.6 High · $0.56 · 02:37s',
-        },
-        icon: {
-          type: 'image',
-          image_url: 'https://app.example.com/automation-icons/zap.png',
-          alt_text: 'Daily report automation icon',
-        },
-        has_header_divider: true,
-        child_blocks: [
+        type: 'context',
+        block_id: 'roomote_automation_result_header',
+        elements: [
           {
-            type: 'section',
-            text: { type: 'mrkdwn', text: 'Everything is *healthy*.' },
+            type: 'image',
+            image_url: 'https://app.example.com/automation-icons/zap.png',
+            alt_text: 'Daily report automation icon',
           },
           {
-            type: 'actions',
-            block_id: 'roomote_automation_result_actions',
-            elements: [
-              {
-                type: 'button',
-                action_id: 'late_bound_automation_view_task',
-                text: {
-                  type: 'plain_text',
-                  text: 'Go to task',
-                  emoji: false,
-                },
-                url: 'https://app.example.com/task/1',
-              },
-              {
-                type: 'button',
-                action_id: 'late_bound_automation_configure',
-                text: {
-                  type: 'plain_text',
-                  text: 'Configure',
-                  emoji: false,
-                },
-                url: 'https://app.example.com/automations#custom-automation-1',
-              },
-            ],
+            type: 'plain_text',
+            text: 'Daily report',
+            emoji: false,
+          },
+          {
+            type: 'plain_text',
+            text: 'Weekly · GPT 5.6 High · $0.56 · 2m 37s',
+          },
+        ],
+      },
+      { type: 'markdown', text: '  ## Summary\n- Healthy  ' },
+      {
+        type: 'image',
+        image_url: 'https://app.example.com/proof.png',
+        alt_text: 'Proof',
+      },
+      {
+        type: 'actions',
+        block_id: 'roomote_automation_result_actions',
+        elements: [
+          {
+            type: 'button',
+            action_id: 'late_bound_automation_view_task',
+            text: { type: 'plain_text', text: 'Go to task', emoji: false },
+            url: 'https://app.example.com/task/1',
+          },
+          {
+            type: 'button',
+            action_id: 'late_bound_automation_configure',
+            text: { type: 'plain_text', text: 'Configure', emoji: false },
+            url: 'https://app.example.com/automations#custom-automation-1',
           },
         ],
       },
     ]);
   });
 
-  it('formats automation result metadata with zero-value padding', () => {
+  it('leaves explicitly provided native tables unchanged', () => {
+    const table = {
+      type: 'table' as const,
+      rows: [[{ type: 'raw_text' as const, text: 'Result' }]],
+    };
+
+    const [container] = buildAutomationResultBlocks({
+      title: 'Build report',
+      iconUrl: 'https://app.example.com/automation-icons/wrench.png',
+      configureUrl: 'https://app.example.com/automations#build-report',
+      contentBlocks: [table],
+    });
+
+    expect(container?.type).toBe('container');
+    if (container?.type !== 'container') return;
+    expect(container.child_blocks).toContainEqual(table);
+  });
+
+  it('formats automation result metadata with compact duration units', () => {
     expect(
       formatAutomationResultSubtitle({
         trigger: 'Manual',
@@ -216,20 +139,52 @@ describe('automation result blocks', () => {
         costMicroUsd: 200_000,
         durationMs: 37_900,
       }),
-    ).toBe('Manual · Kimi K3 Medium · $0.20 · 00:37s');
+    ).toBe('Manual · Kimi K3 Medium · $0.20 · 37s');
 
     expect(
       formatAutomationResultSubtitle({
-        trigger: 'Daily',
+        trigger: 'Weekly',
         model: 'GPT 5.6 Max',
         costMicroUsd: 0,
-        durationMs: 608_000,
+        durationMs: 93_784_000,
       }),
-    ).toBe('Daily · GPT 5.6 Max · $0.00 · 10:08s');
+    ).toBe('Weekly · GPT 5.6 Max · $0.00 · 1d 2h 3m 4s');
+  });
+
+  it('places additional actions before a custom Configure label', () => {
+    const blocks = buildAutomationResultBlocks({
+      title: 'Usage alert',
+      iconUrl: 'https://app.example.com/automation-icons/battery-warning.png',
+      configureUrl: 'https://app.example.com/automations#provider-usage-limit',
+      configureLabel: 'Configure alert',
+      additionalActions: [
+        {
+          type: 'button',
+          action_id: 'manage_models',
+          text: { type: 'plain_text', text: 'Manage models', emoji: false },
+          url: 'https://app.example.com/settings/models',
+        },
+      ],
+    });
+
+    const [container] = blocks;
+    expect(container?.type).toBe('container');
+    if (container?.type !== 'container') return;
+    expect(container.child_blocks.at(-1)).toEqual({
+      type: 'actions',
+      block_id: 'roomote_automation_result_actions',
+      elements: [
+        expect.objectContaining({ action_id: 'manage_models' }),
+        expect.objectContaining({
+          action_id: 'late_bound_automation_configure',
+          text: expect.objectContaining({ text: 'Configure alert' }),
+        }),
+      ],
+    });
   });
 
   it('reserves action capacity for task and configure buttons', () => {
-    const [container] = buildAutomationResultBlocks({
+    const blocks = buildAutomationResultBlocks({
       title: 'Audit',
       iconUrl: 'https://app.example.com/automation-icons/wrench.png',
       configureUrl: 'https://app.example.com/automations#audit',
@@ -241,11 +196,7 @@ describe('automation result blocks', () => {
       ),
     });
 
-    expect(container?.type).toBe('container');
-    if (container?.type !== 'container') return;
-    const actions = container.child_blocks.filter(
-      (block) => block.type === 'actions',
-    );
+    const actions = blocks.filter((block) => block.type === 'actions');
     expect(actions).toHaveLength(2);
     expect(actions[0]?.type).toBe('actions');
     expect(actions[1]?.type).toBe('actions');
@@ -260,25 +211,29 @@ describe('automation result blocks', () => {
     ]);
   });
 
-  it('puts full width on the container when rebuilding a result', () => {
-    const [container] = buildAutomationResultBlocks({
+  it('reserves top-level block capacity for automation chrome', () => {
+    const blocks = buildAutomationResultBlocks({
       title: 'Audit',
       iconUrl: 'https://app.example.com/automation-icons/wrench.png',
       configureUrl: 'https://app.example.com/automations#audit',
       contentBlocks: [
-        {
-          type: 'section',
-          text: { type: 'mrkdwn', text: 'Finished.' },
-        },
+        { type: 'markdown', text: '## Summary' },
+        ...Array.from({ length: 48 }, (_, index) => ({
+          type: 'image' as const,
+          image_url: `https://app.example.com/proof-${index + 1}.png`,
+          alt_text: `Proof ${index + 1}`,
+        })),
       ],
     });
 
-    expect(container?.type).toBe('container');
-    if (container?.type !== 'container') return;
-    expect(container.width).toBe('full');
-    expect(container.child_blocks[0]).toEqual({
-      type: 'section',
-      text: { type: 'mrkdwn', text: 'Finished.' },
-    });
+    expect(blocks).toHaveLength(50);
+    expect(blocks[0]?.type).toBe('context');
+    expect(blocks[1]).toEqual({ type: 'markdown', text: '## Summary' });
+    expect(blocks.at(-1)?.type).toBe('actions');
+    expect(blocks).not.toContainEqual(
+      expect.objectContaining({
+        image_url: 'https://app.example.com/proof-48.png',
+      }),
+    );
   });
 });

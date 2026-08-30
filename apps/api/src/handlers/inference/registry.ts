@@ -3,6 +3,7 @@ import {
   getInferenceGatewayProvider,
   INFERENCE_GATEWAY_RESOURCE_PATTERN,
   INFERENCE_GATEWAY_REGION_PATTERN,
+  ROOMOTE_INFERENCE_PROVIDER_ID,
   type InferenceGatewayProvider,
 } from '@roomote/types';
 import {
@@ -16,6 +17,49 @@ export function getInferenceProvider(
   providerId: string,
 ): InferenceGatewayProvider | undefined {
   return getInferenceGatewayProvider(providerId);
+}
+
+/**
+ * The Roomote trial key resolves from the encrypted Settings store only
+ * (never the process env), so without a cache every request on a trial
+ * deployment — all of its LLM traffic — would pay a DB read plus decryption
+ * on this hot path. Cached with a short TTL like
+ * `isBrainProviderConfigured` in @roomote/db; the TTL bounds how long a
+ * deleted or rotated stored key keeps serving.
+ */
+const ROOMOTE_KEY_CACHE_TTL_MS = 30_000;
+
+let roomoteKeyCache: {
+  value: string | undefined;
+  expiresAtMs: number;
+} | null = null;
+
+/** Drop the cached trial key, so the next request re-reads Settings. */
+export function resetRoomoteInferenceKeyCache(): void {
+  roomoteKeyCache = null;
+}
+
+async function resolveProviderApiKey(
+  provider: InferenceGatewayProvider,
+): Promise<string | undefined> {
+  if (provider.id !== ROOMOTE_INFERENCE_PROVIDER_ID) {
+    return resolveModelProviderEnvValue(provider.envVarNames);
+  }
+
+  const cached = roomoteKeyCache;
+
+  if (cached && cached.expiresAtMs > Date.now()) {
+    return cached.value;
+  }
+
+  const value = await resolveModelProviderEnvValue(provider.envVarNames);
+
+  roomoteKeyCache = {
+    value,
+    expiresAtMs: Date.now() + ROOMOTE_KEY_CACHE_TTL_MS,
+  };
+
+  return value;
 }
 
 /** The upstream URL and auth headers the gateway forwards for one request. */
@@ -61,7 +105,7 @@ export async function resolveGatewayUpstream(
     requiresSourceCoupledRegion &&
     provider.envVarNames.some((envVarName) => process.env[envVarName]?.trim());
   const [apiKey, upstreamBaseUrl] = await Promise.all([
-    resolveModelProviderEnvValue(provider.envVarNames),
+    resolveProviderApiKey(provider),
     resolveProviderUpstreamBaseUrl(provider, {
       regionSource: requiresSourceCoupledRegion
         ? hasRuntimeApiKey
@@ -75,7 +119,10 @@ export async function resolveGatewayUpstream(
     return {
       ok: false,
       status: 404,
-      error: `No ${provider.name} API key is configured for this deployment`,
+      error:
+        provider.id === ROOMOTE_INFERENCE_PROVIDER_ID
+          ? 'Roomote inference is unavailable. Connect an inference provider to continue.'
+          : `No ${provider.name} API key is configured for this deployment`,
     };
   }
 

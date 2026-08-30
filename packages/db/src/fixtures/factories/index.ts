@@ -1,5 +1,6 @@
 export { userFactory } from './user.factory';
 export { taskFactory } from './task.factory';
+export { sessionFactory } from './session.factory';
 export { githubInstallationFactory } from './githubInstallation.factory';
 export { slackInstallationFactory } from './slackInstallation.factory';
 export { slackUserMappingFactory } from './slackUserMapping.factory';

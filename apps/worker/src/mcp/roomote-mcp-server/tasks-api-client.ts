@@ -325,6 +325,7 @@ export async function manageSourceControl(
     targetBranch?: string;
     title: string;
     body: string;
+    prAttribution?: string;
     labels?: string[];
     assignees?: string[];
     sourceControlProvider?: SourceControlProvider;
@@ -387,11 +388,13 @@ export async function writeSourceControl(
       | 'create_pull_request_review_comment'
       | 'resolve_pull_request_thread'
       | 'submit_pull_request_review'
+      | 'dismiss_pull_request_review'
       | 'update_pull_request_comment';
     repositoryFullName: string;
     prNumber: number;
     threadId?: string;
     commentId?: string;
+    reviewId?: string;
     body?: string;
     resolved?: boolean;
     reviewEvent?: 'approve' | 'request_changes' | 'comment';

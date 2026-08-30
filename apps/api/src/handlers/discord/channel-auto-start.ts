@@ -4,6 +4,7 @@ import {
   getDiscordMessageContent,
   isDiscordAudioAttachment,
   isDiscordBotMentioned,
+  stripDiscordBotMention,
   type DiscordGatewayEvent,
   type DiscordMessage,
 } from '@roomote/communication/discord-event';
@@ -36,6 +37,10 @@ import {
   releaseAccountLinkDmSlot,
 } from './account-link.js';
 import { processDiscordAttachments } from './attachments.js';
+import {
+  getDiscordFastConversationId,
+  processDiscordFastAgentMessage,
+} from './fast-agent.js';
 import { rememberPendingDiscordAccountLinkTask } from './pending-account-link-task.js';
 import { startNewDiscordTask } from './task-orchestration.js';
 import {
@@ -268,6 +273,34 @@ export async function maybeHandleDiscordChannelAutoStart(input: {
     };
     launchOwnerUserId = mappedUserId;
     queuedMessageUserId = mappedUserId;
+
+    const defaultFastQuestion = stripDiscordBotMention(
+      getDiscordMessageContent(message),
+      botUserId,
+    );
+    if (defaultFastQuestion) {
+      void processDiscordFastAgentMessage({
+        event,
+        question: defaultFastQuestion,
+        sender: message.author,
+        senderUserId: mappedUserId,
+        provider,
+        applicationId: input.applicationId,
+        channel,
+        metadata: discordMetadataForChannel({
+          channel,
+          messageId: message.id,
+          anchorMessageId: message.id,
+        }),
+        conversationId: getDiscordFastConversationId(channel, message.id),
+        directedAtRoomote: true,
+      }).catch((error) => {
+        apiLogger.error(
+          `[DiscordChannelAutoStart] Failed to answer in Fast mode for ${logContext}: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      });
+      return true;
+    }
   }
 
   const messageAttachments = getDiscordMessageAttachments(message);

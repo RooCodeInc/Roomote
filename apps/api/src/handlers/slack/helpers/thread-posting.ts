@@ -5,12 +5,22 @@ import {
   recordSlackConversationMessageBestEffort,
 } from '@roomote/sdk/server';
 import {
+  buildFastSessionReplyFooterText,
+  type FastSessionReplyFooterContext,
+} from '@roomote/communication';
+import {
   buildStartedBlocks,
   persistPostedSlackKickoff,
+  postSlackThreadMessageWithFooterText,
   type SlackNotifier,
 } from '@roomote/slack';
 
 import { apiLogger } from '../../../logging.js';
+
+type SlackThreadMarkdownPostResult =
+  | { status: 'posted'; messageId: string }
+  | 'suppressed'
+  | 'failed';
 
 export async function postSlackThreadMarkdownMessage({
   slack,
@@ -19,6 +29,7 @@ export async function postSlackThreadMarkdownMessage({
   text,
   sourceMessageTs,
   conversationLog,
+  fastSessionFooter,
 }: {
   slack: SlackNotifier;
   channel: string;
@@ -30,7 +41,9 @@ export async function postSlackThreadMarkdownMessage({
     slackTeamId: string;
     source: string;
   };
-}): Promise<boolean> {
+  /** Attach the sticky Fast session reply footer to this message. */
+  fastSessionFooter?: { sessionId: string } & FastSessionReplyFooterContext;
+}): Promise<SlackThreadMarkdownPostResult> {
   if (sourceMessageTs) {
     const sourceMessageExists = await slack.hasMessageInThread({
       channel,
@@ -42,24 +55,38 @@ export async function postSlackThreadMarkdownMessage({
       apiLogger.debug(
         `[SlackWebhook] Skipping fast-agent reply because source message ${sourceMessageTs} is no longer in thread ${threadTs}`,
       );
-      return false;
+      // Deliberate suppression (the triggering message was deleted), not a
+      // Slack delivery failure; callers must not treat this as an error.
+      return 'suppressed';
     }
   }
 
-  const messageTs = await slack.postMessage({
-    channel,
-    thread_ts: threadTs,
-    text,
-    blocks: [
-      {
-        type: 'markdown',
+  const messageTs = fastSessionFooter
+    ? await postSlackThreadMessageWithFooterText({
+        slack,
+        channel,
+        threadTs,
         text,
-      },
-    ],
-  });
+        bodyBlocks: [{ type: 'markdown', text }],
+        footerText: buildFastSessionReplyFooterText({
+          provider: 'slack',
+          ...fastSessionFooter,
+        }),
+      })
+    : await slack.postMessage({
+        channel,
+        thread_ts: threadTs,
+        text,
+        blocks: [
+          {
+            type: 'markdown',
+            text,
+          },
+        ],
+      });
 
   if (!messageTs) {
-    return false;
+    return 'failed';
   }
 
   if (conversationLog) {
@@ -85,7 +112,7 @@ export async function postSlackThreadMarkdownMessage({
     }
   }
 
-  return true;
+  return { status: 'posted', messageId: messageTs };
 }
 
 export async function postTaskSuggestionStartedMessage(params: {

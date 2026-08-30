@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { MockDiscordServer } from '../mock-discord-server';
 import {
+  buildDiscordMessageNonce,
   chunkDiscordMessage,
   DiscordApiTransportError,
   DiscordCommunicationProvider,
@@ -23,6 +24,31 @@ function createHarness(options: { nonceFactory?: () => string } = {}) {
 }
 
 describe('DiscordCommunicationProvider', () => {
+  it('deduplicates the same logical send across provider instances', async () => {
+    const server = new MockDiscordServer();
+    const createProvider = () =>
+      new DiscordCommunicationProvider({
+        botToken: server.botToken,
+        applicationId: server.application.id,
+        apiBaseUrl: 'https://discord.example.test/api/v10',
+        fetch: server.fetch as typeof fetch,
+      });
+    const input = {
+      channelId: '400000000000000001',
+      text: 'Task finished.',
+      idempotencyKey: 'fast-parent-settle:42',
+    };
+
+    const first = await createProvider().postMessage(input);
+    const retried = await createProvider().postMessage(input);
+
+    expect(retried.messageId).toBe(first.messageId);
+    expect(server.state.messages[input.channelId]).toHaveLength(1);
+    expect(server.state.messages[input.channelId]?.[0]?.nonce).toBe(
+      buildDiscordMessageNonce(input.idempotencyKey),
+    );
+  });
+
   it('chunks messages at 2000 characters and disables every allowed mention', async () => {
     const nonces = ['123456789012345678', '123456789012345679'];
     const { server, provider } = createHarness({
@@ -288,6 +314,28 @@ describe('DiscordCommunicationProvider', () => {
     });
   });
 
+  it('lists active guild threads for bounded collector discovery', async () => {
+    const { server, provider } = createHarness();
+    server.addChannel({
+      id: '400000000000000002',
+      guild_id: server.guildId,
+      parent_id: '400000000000000001',
+      name: 'public-thread',
+      type: 11,
+    });
+
+    await expect(
+      provider.listGuildActiveThreads(server.guildId),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        id: '400000000000000002',
+        parentId: '400000000000000001',
+        name: 'public-thread',
+        type: 11,
+      }),
+    ]);
+  });
+
   it('treats a denied add_reactions overwrite as missing required channel permission', async () => {
     const { server, provider } = createHarness();
     const channelId = '400000000000000001';
@@ -467,6 +515,14 @@ describe('DiscordCommunicationProvider', () => {
         channelIds: [publicChannelId, privateChannelId],
       }),
     ).resolves.toEqual([publicChannelId]);
+    await expect(
+      provider.listPublicReadableGuildChannels({
+        guildId: server.guildId,
+        userId: server.bot.id,
+      }),
+    ).resolves.toEqual([
+      expect.objectContaining({ id: publicChannelId, name: 'public' }),
+    ]);
   });
 
   it('applies the everyone overwrite separately from member role overwrites', async () => {

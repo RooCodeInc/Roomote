@@ -50,7 +50,7 @@ name: roomote-backup-ci
 
 services:
   postgres:
-    image: pgvector/pgvector:0.8.1-pg17
+    image: pgvector/pgvector:0.8.1-pg17-trixie@sha256:137f044b0efe3d57f39b972b9b53641b1f2045b99d879e298bbf514a25787dcf
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: password
@@ -125,6 +125,10 @@ openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -md sha256 \
   tar -xzf - --no-same-owner -C "$inspection_dir"
 grep -q '"formatVersion": 1' "$inspection_dir/manifest.json"
 grep -q '"mode": "local-minio"' "$inspection_dir/manifest.json"
+# The Brain profile is not enabled in this fixture: the manifest must say so
+# explicitly, and the bundle must not carry a Brain snapshot.
+grep -A2 '"brain"' "$inspection_dir/manifest.json" | grep -q '"included": false'
+test ! -f "$inspection_dir/gbrain-data.tar"
 grep -q '"included": true' "$inspection_dir/manifest.json"
 test -s "$inspection_dir/postgres.sql"
 test -s "$inspection_dir/minio-data.tar"

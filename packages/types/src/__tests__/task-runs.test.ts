@@ -268,6 +268,36 @@ describe('Task Tool invocation helpers', () => {
 });
 
 describe('taskSpecSchema', () => {
+  it('parses a channel-less automation Fast parent', () => {
+    const parsed = taskSpecSchema.parse({
+      userId: 'user-1',
+      type: TaskPayloadKind.StandardTask,
+      payload: {
+        repo: ALL_REPOSITORIES,
+        description: 'Delegated from a Fast automation',
+        communicationContextInherited: true,
+        fastAgentSessionId: '11111111-1111-4111-8111-111111111111',
+        fastAgentParent: {
+          sessionId: '11111111-1111-4111-8111-111111111111',
+          conversation: {
+            surface: 'automation',
+            workspaceId: 'automation-1',
+            conversationId: 'occurrence-1',
+          },
+        },
+      },
+    });
+
+    if (parsed.type !== TaskPayloadKind.StandardTask) {
+      throw new Error('Expected StandardTask payload');
+    }
+    expect(parsed.payload.fastAgentParent?.conversation).toEqual({
+      surface: 'automation',
+      workspaceId: 'automation-1',
+      conversationId: 'occurrence-1',
+    });
+  });
+
   it('preserves sourceControlProvider on StandardTask payloads', () => {
     const parsed = taskSpecSchema.parse({
       userId: 'user-1',
@@ -495,6 +525,16 @@ describe('taskSpecSchema', () => {
         channel: 'C123',
         slackChannel: 'C123',
         thread_ts: '111.222',
+        communicationContextInherited: true,
+        fastAgentParent: {
+          sessionId: '11111111-1111-4111-8111-111111111111',
+          conversation: {
+            surface: 'slack',
+            workspaceId: 'T123',
+            conversationId: '111.222',
+            replyTarget: { channelId: 'C123', threadId: '111.222' },
+          },
+        },
       },
     });
 
@@ -505,6 +545,16 @@ describe('taskSpecSchema', () => {
     expect(parsed.payload.channel).toBe('C123');
     expect(parsed.payload.slackChannel).toBe('C123');
     expect(parsed.payload.thread_ts).toBe('111.222');
+    expect(parsed.payload.communicationContextInherited).toBe(true);
+    expect(parsed.payload.fastAgentParent?.sessionId).toBe(
+      '11111111-1111-4111-8111-111111111111',
+    );
+    expect(parsed.payload.fastAgentParent?.conversation).toEqual({
+      surface: 'slack',
+      workspaceId: 'T123',
+      conversationId: '111.222',
+      replyTarget: { channelId: 'C123', threadId: '111.222' },
+    });
   });
 
   it('parses Dependabot suggestion sources on SuggestedTasks payloads', () => {

@@ -1,0 +1,82 @@
+---
+title: Rippling
+description: Give Memory an authoritative employee directory and reporting structure from Rippling HRIS.
+icon: users
+---
+
+Connect Rippling when Memory should use your HR system as the source of truth for
+who works at the company, where they sit in the organization, and who they
+report to.
+
+## Prerequisites
+
+Rippling's V2 REST API requires the API product for your company. The admin who
+creates the token needs access to the **API Tokens** app and a company-wide
+permission profile. A token limited to the creator's direct or indirect reports
+cannot produce an authoritative company roster.
+
+Create a token with the scopes needed to read the roster and its expanded
+references:
+
+- `workers.read`
+- `users.read`
+- `departments.read`
+- `teams.read`
+- `work-locations.read`
+
+Rippling applies both the token scopes and the token owner's permission profile.
+Review both if employees or fields are missing. Rippling also revokes a token
+when its owner is terminated or the token is unused for more than 30 days.
+
+See Rippling's [API token and permission
+guide](https://developer.rippling.com/documentation/rest-api/essentials/api-tokens)
+and [HRIS getting-started
+guide](https://developer.rippling.com/documentation/rest-api/guides/hris-getting-started)
+for the current account requirements.
+
+## Connect Rippling
+
+1. Create a company-wide API token in Rippling with the required read scopes.
+2. In Roomote, open **Settings > Integrations** and choose **Configure
+   Rippling**.
+3. Paste the API token and save.
+
+Roomote verifies the token against Rippling's V2 workers endpoint before it is
+stored. The token is encrypted on the control plane and is never sent to task
+sandboxes or exposed as an agent tool.
+
+## What Memory collects
+
+Roomote collects the Rippling worker resource ID, permanent employee number when
+Rippling returns one, manager ID, work email, name, title, department and team
+memberships, employment type, available location and time-zone data, start and
+end dates, and Rippling's worker status. A work email that exactly matches a
+Roomote account links the Rippling identity to that existing person card.
+
+Person pages preserve:
+
+- `rippling-hris` provenance and the snapshot observation time
+- exact Rippling status alongside Memory's active or inactive status
+- explicit `reports_to` and membership fields marked as authoritative HRIS data
+- a clear distinction between those source-of-truth relationships and
+  collaboration relationships inferred from messages, meetings, or code review
+
+Memory is deployment-wide. Work emails and HR attributes collected through
+this integration are available to teammates who can use the deployment's
+Memory.
+
+## Sync and lifecycle behavior
+
+Roomote follows Rippling's cursor pagination and builds resumable full roster
+snapshots. It retries temporary failures and `429` rate limits with bounded
+backoff. Inventory reconciliation happens only after the final page succeeds,
+so a failed or interrupted snapshot cannot deactivate employees accidentally.
+
+Terminated workers remain represented with Rippling's exact status and end date.
+Workers absent from a later complete snapshot, or left behind after the
+integration is disconnected, become unavailable tombstones so stale active
+profiles and relationships do not remain searchable.
+
+Rippling's Worker Changes API is a separately entitled product. Roomote does not
+assume it is available; the baseline integration uses safe snapshots for every
+customer instead.

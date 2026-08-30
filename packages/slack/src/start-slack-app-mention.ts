@@ -65,6 +65,7 @@ function getLinkedInitiatorUserId(
 
 function buildActiveSlackFollowUpPrompt(input: {
   text: string;
+  agentContext?: string;
   ts: string;
   threadMessages?: SlackThreadMessage[];
   latestOwnBotReplyText?: string;
@@ -105,7 +106,10 @@ function buildActiveSlackFollowUpPrompt(input: {
         reactionsAllowed: hasPriorBotReply,
         preferEmojiAck: hasPriorBotReply,
       }),
-      wrapSlackMessage(input.text, { ts: input.ts }),
+      wrapSlackMessage(input.text, {
+        ts: input.ts,
+        agentContext: input.agentContext,
+      }),
     ]
       .filter(Boolean)
       .join('\n\n'),
@@ -130,6 +134,7 @@ export async function startSlackAppMentionTask(input: {
   slackUserId: string;
   persistedSlackUserId?: string | null;
   text: string;
+  slackMessageContext?: string;
   agentPromptText?: string;
   /**
    * Deprecated: acknowledgement/completion reactions are fixed defaults and
@@ -148,6 +153,7 @@ export async function startSlackAppMentionTask(input: {
   environmentId?: string;
   reasoningEffort?: ReasoningEffort;
   readinessMessage?: string;
+  liveTaskStream?: boolean;
   images?: string[];
   threadMessages?: SlackThreadMessage[];
   latestOwnBotReplyText?: string;
@@ -155,6 +161,15 @@ export async function startSlackAppMentionTask(input: {
   webPath?: string;
   slackConversationUrl?: string;
   skipInitialActingUser?: boolean;
+  /**
+   * Runs after the task run exists but before its work is dispatched. Throwing
+   * aborts the dispatch; callers that use this for best-effort UI should catch
+   * their own errors.
+   */
+  beforeTaskRunDispatch?: (taskRun: {
+    id: number;
+    taskId: string;
+  }) => Promise<void>;
   /**
    * Started-message metadata callers persist themselves via
    * setSlackStartedMessageTs after the launch. Accepted here so call sites
@@ -195,6 +210,7 @@ export async function startSlackAppMentionTask(input: {
     const builtPrompt = !agentPromptText
       ? buildActiveSlackFollowUpPrompt({
           text: input.text,
+          agentContext: input.slackMessageContext,
           ts: input.ts,
           threadMessages: promptRelevantThreadMessages,
           latestOwnBotReplyText: promptRelevantLatestOwnBotReply?.text,
@@ -229,6 +245,11 @@ export async function startSlackAppMentionTask(input: {
         );
       }
     }
+
+    await input.beforeTaskRunDispatch?.({
+      id: activeRun.id,
+      taskId: activeRun.taskId,
+    });
 
     await queueSlackMessage(activeRun.id, {
       text: input.text,
@@ -278,6 +299,9 @@ export async function startSlackAppMentionTask(input: {
         ? {}
         : { user: input.persistedSlackUserId ?? input.slackUserId }),
       text: input.text,
+      ...(input.slackMessageContext?.trim()
+        ? { slackMessageContext: input.slackMessageContext.trim() }
+        : {}),
       ...(input.agentPromptText?.trim()
         ? { agentPromptText: input.agentPromptText.trim() }
         : {}),
@@ -299,6 +323,7 @@ export async function startSlackAppMentionTask(input: {
       ...(input.readinessMessage
         ? { readinessMessage: input.readinessMessage }
         : {}),
+      ...(input.liveTaskStream ? { liveTaskStream: true } : {}),
       ...(input.images?.length ? { images: input.images } : {}),
       ...(promptRelevantThreadMessages?.length
         ? { threadMessages: promptRelevantThreadMessages }
@@ -329,7 +354,12 @@ export async function startSlackAppMentionTask(input: {
         slackThreadTs: input.threadTs,
       },
     },
-    input.skipInitialActingUser ? { skipInitialActingUser: true } : {},
+    {
+      ...(input.skipInitialActingUser ? { skipInitialActingUser: true } : {}),
+      ...(input.beforeTaskRunDispatch
+        ? { beforeEnqueue: input.beforeTaskRunDispatch }
+        : {}),
+    },
   );
 
   return {

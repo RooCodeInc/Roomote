@@ -90,6 +90,9 @@ const ROUTER_LINEAR_ALLOWED_TOOLS = [
 ] as const;
 
 const ROUTER_GITHUB_ALLOWED_TOOLS = [
+  'actions_get',
+  'actions_list',
+  'get_job_logs',
   'get_pull_request',
   'pull_request_read',
   'list_pull_requests',
@@ -130,7 +133,7 @@ const ROUTER_MCP_SERVER_POLICIES: Record<
     requiredToolGroups: ['github-pr-context', 'github-issue-context'],
     upstreamConstraints: {
       readonly: true,
-      toolsets: ['repos', 'pull_requests', 'issues'],
+      toolsets: ['repos', 'pull_requests', 'issues', 'actions'],
     },
   },
 };

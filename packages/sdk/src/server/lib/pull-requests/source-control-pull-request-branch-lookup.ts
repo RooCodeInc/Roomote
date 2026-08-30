@@ -39,6 +39,11 @@ export const giteaPullRequestSchema = z
     draft: z.boolean().optional(),
     head: z.object({ ref: z.string().optional() }).optional(),
     base: z.object({ ref: z.string().optional() }).optional(),
+    assignees: z
+      .array(
+        z.object({ login: z.string().nullable().optional() }).passthrough(),
+      )
+      .optional(),
   })
   .passthrough();
 const giteaPullRequestListSchema = z.array(giteaPullRequestSchema);

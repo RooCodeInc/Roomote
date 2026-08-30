@@ -95,6 +95,7 @@ describe('SlackNotifier', () => {
       const ts = await notifier.postMessage({
         channel: 'C123',
         text: 'hello world',
+        client_msg_id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
       });
 
       expect(getGlobalWithFetch().fetch).toHaveBeenCalledTimes(1);
@@ -106,7 +107,11 @@ describe('SlackNotifier', () => {
             Authorization: `Bearer ${token}`,
             'Content-Type': 'application/json',
           }),
-          body: JSON.stringify({ channel: 'C123', text: 'hello world' }),
+          body: JSON.stringify({
+            channel: 'C123',
+            text: 'hello world',
+            client_msg_id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+          }),
         }),
       );
 
@@ -1163,6 +1168,14 @@ describe('SlackNotifier', () => {
         filetype: 'svg',
       };
 
+      const misleadingFilename: SlackFile = {
+        ...smallImage,
+        id: 'F5',
+        name: 'document.png',
+        mimetype: 'application/pdf',
+        filetype: 'pdf',
+      };
+
       getGlobalWithFetch().fetch = vi.fn().mockResolvedValue({
         ok: true,
         arrayBuffer: async () => new TextEncoder().encode('fake-image').buffer,
@@ -1173,6 +1186,7 @@ describe('SlackNotifier', () => {
         largeImage,
         textFile,
         svgFile,
+        misleadingFilename,
       ]);
 
       expect(getGlobalWithFetch().fetch).toHaveBeenCalledTimes(1);
@@ -1548,6 +1562,17 @@ describe('SlackNotifier', () => {
         [
           'can you see this?',
           '',
+          'Forwarded Slack message:',
+          'Context:',
+          '- Author: Annie Easley',
+          '- Channel: C0EXAMPLE01',
+          'Text:',
+          'Forwarded body',
+        ].join('\n'),
+      );
+      expect(message?.authoredText).toBe('can you see this?');
+      expect(message?.agentContext).toBe(
+        [
           'Forwarded Slack message:',
           'Context:',
           '- Author: Annie Easley',

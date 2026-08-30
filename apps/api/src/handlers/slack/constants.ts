@@ -1,4 +1,5 @@
 import { Env } from '@roomote/env';
+import { TASK_SUGGESTION_MESSAGE_METADATA_EVENT_TYPE } from '@roomote/types';
 
 const UNFURL_ALLOWED_DOMAIN_SUFFIXES = new Set(
   (Env.SLACK_UNFURL_ALLOWED_DOMAINS ?? new URL(Env.R_APP_URL).hostname)
@@ -20,10 +21,8 @@ export const SLACK_EVENT_DEDUP_PREFIX = 'slack:event:';
 export const SLACK_WORKFLOW_COMPLETION_PREFIX = 'slack:workflow-completion:';
 export const SLACK_WORKFLOW_COMPLETION_TTL_SECONDS = 24 * 60 * 60;
 export const ROUTING_LOCK_TTL_SECONDS = 60;
-export const FAST_AGENT_LOCK_TTL_SECONDS = 600;
 export const SLACK_WELCOME_MESSAGE_CHANNEL_LIMIT = 3;
 export const SLACK_ROUTING_LOCK_PREFIX = 'slack:routing-lock:';
-export const SLACK_FAST_AGENT_LOCK_PREFIX = 'slack:fast-agent-lock:';
 export const SLACK_SETUP_SUGGESTION_LOCK_PREFIX =
   'slack:setup-suggestion-reaction:';
 export const LEADING_FAST_COMMAND_MENTION_PATTERN = /^\s*<@[^>]+>[\s,:;.-]*/;
@@ -34,7 +33,7 @@ export const TASK_SUGGESTION_TYPES = [
   SUGGESTED_TASKS_SUGGESTION_TYPE,
 ] as const;
 export const SETUP_ONBOARDING_SUGGESTION_METADATA_EVENT_TYPE =
-  'roomote.setup_onboarding_suggestion';
+  TASK_SUGGESTION_MESSAGE_METADATA_EVENT_TYPE;
 export const THUMBS_UP_REACTIONS = new Set(['+1', 'thumbsup']);
 
 export const isAllowedUnfurlDomain = (domain: string): boolean => {

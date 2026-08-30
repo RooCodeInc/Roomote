@@ -14,10 +14,7 @@ export type UnmentionedThreadHistoryMessage = {
   isBot: boolean;
   /** True when this history message @-mentions the Roomote bot. */
   mentionsBot: boolean;
-  /**
-   * True when this history message mentions a principal other than the bot
-   * and other than the current sender (another human or another app).
-   */
+  /** True when this history message mentions someone other than its author or the bot. */
   mentionsSomebodyElse: boolean;
 };
 
@@ -63,11 +60,11 @@ export function compareBigIntMessageIds(left: string, right: string): number {
  * skip, ownership lookup, history fetch) have already passed.
  *
  * Eligibility is limited to senders already in the conversation: task owner,
- * thread starter, or someone who mentioned the bot earlier. Automation report
- * threads (`isAutomationReportThread`) have a bot-authored root and no owning
- * user, so any human reply there is eligible. Routing still fails when
- * somebody else posted or was mentioned after the bot's last message; a later
- * bot reply reopens that window.
+ * thread starter, or someone who mentioned the bot earlier. Automation reports
+ * and other open Roomote conversations have no single owning participant, so
+ * any human reply there is eligible. Speaker changes are expected in open
+ * conversations, but routing still fails when somebody else was mentioned
+ * after the bot's last message; a later bot reply reopens that window.
  */
 export function evaluateUnmentionedThreadReplyRouting(input: {
   eventMessageId: string;
@@ -75,6 +72,8 @@ export function evaluateUnmentionedThreadReplyRouting(input: {
   isThreadTaskOwner: boolean;
   isThreadRootAuthor: boolean;
   isAutomationReportThread?: boolean;
+  /** True when any human participant may address Roomote in this conversation. */
+  isOpenConversationThread?: boolean;
   threadMessages: UnmentionedThreadHistoryMessage[];
   compareMessageIds: CompareMessageIds;
 }): UnmentionedThreadReplyEvaluation {
@@ -84,6 +83,7 @@ export function evaluateUnmentionedThreadReplyRouting(input: {
     isThreadTaskOwner,
     isThreadRootAuthor,
     isAutomationReportThread = false,
+    isOpenConversationThread = false,
     threadMessages,
     compareMessageIds,
   } = input;
@@ -105,7 +105,8 @@ export function evaluateUnmentionedThreadReplyRouting(input: {
     !isThreadTaskOwner &&
     !isThreadRootAuthor &&
     !hasMentionedBotEarlierInThread &&
-    !isAutomationReportThread
+    !isAutomationReportThread &&
+    !isOpenConversationThread
   ) {
     return { shouldRoute: false, interjectionDetected: false };
   }
@@ -139,7 +140,8 @@ export function evaluateUnmentionedThreadReplyRouting(input: {
       continue;
     }
 
-    const isMessageFromSomebodyElse = message.authorUserId !== senderUserId;
+    const isMessageFromSomebodyElse =
+      !isOpenConversationThread && message.authorUserId !== senderUserId;
     if (isMessageFromSomebodyElse || message.mentionsSomebodyElse) {
       return { shouldRoute: false, interjectionDetected: true };
     }

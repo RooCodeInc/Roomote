@@ -16,8 +16,8 @@ const {
 vi.mock('@roomote/cloud-agents', () => ({
   getSlackThreadDisplayName: getSlackThreadDisplayNameMock,
   wrapSlackMessage: vi.fn(
-    (text: string, options?: { ts?: string }) =>
-      `<slack_message${options?.ts ? ` ts="${options.ts}"` : ''}>\n${text}\n</slack_message>`,
+    (text: string, options?: { ts?: string; agentContext?: string }) =>
+      `${options?.agentContext ? `<slack_message_context>\n${options.agentContext}\n</slack_message_context>\n\n` : ''}<slack_message${options?.ts ? ` ts="${options.ts}"` : ''}>\n${text}\n</slack_message>`,
   ),
   wrapSlackReplyingTo: vi.fn(
     ({
@@ -912,6 +912,7 @@ describe('SlackThreadDeliveryTracker', () => {
       await tracker.buildContinuationPrompt({
         currentMessageTs: '111.000',
         currentMessageText: 'latest question',
+        currentMessageAgentContext: 'Slack block text:\nState: New',
         fetchThreadMessages: async () => [
           {
             user: 'U111',
@@ -927,7 +928,12 @@ describe('SlackThreadDeliveryTracker', () => {
 
     await tracker.commit();
 
-    expect(formattedPrompt).toBeUndefined();
+    expect(formattedPrompt).toContain(
+      '<slack_message_context>\nSlack block text:\nState: New\n</slack_message_context>',
+    );
+    expect(formattedPrompt).toContain(
+      '<slack_message ts="111.000">\nlatest question\n</slack_message>',
+    );
     expect(turnPolicy).toEqual({ reactionsAllowed: false });
     expect(releaseClaimedSlackThreadMessagesMock).toHaveBeenCalledWith(
       'C123',

@@ -1,6 +1,8 @@
 const mocks = vi.hoisted(() => ({
   clearLatestUserMessage: vi.fn(),
+  dbSelectLimit: vi.fn(),
   enqueueTask: vi.fn(),
+  findLatestTaskRun: vi.fn(),
   findActiveCommunicationTaskRun: vi.fn(),
   findActiveSlackTaskRun: vi.fn(),
   findCompletedCommunicationTaskRunWithSnapshot: vi.fn(),
@@ -11,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   queueCommunicationMessage: vi.fn(),
   queueSlackMessage: vi.fn(),
   resumeCommunicationTaskFromSnapshot: vi.fn(),
+  sendFastAgentTaskMessageOnce: vi.fn(),
   setTrustedRunActingUser: vi.fn(),
   withContention: vi.fn(),
   where: vi.fn(),
@@ -18,6 +21,8 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('@roomote/cloud-agents/server', () => ({
   enqueueTask: mocks.enqueueTask,
+  resolveApiBaseUrl: () => 'https://roomote.example',
+  sendFastAgentTaskMessageOnce: mocks.sendFastAgentTaskMessageOnce,
 }));
 
 vi.mock('@roomote/communication', () => ({
@@ -30,29 +35,45 @@ vi.mock('@roomote/db/server', () => {
     innerJoin: vi.fn(),
     where: mocks.where,
     orderBy: vi.fn(),
-    limit: vi.fn(),
+    limit: mocks.dbSelectLimit,
   };
   chain.from.mockReturnValue(chain);
   chain.innerJoin.mockReturnValue(chain);
   chain.where.mockReturnValue(chain);
   chain.orderBy.mockReturnValue(chain);
-  chain.limit.mockResolvedValue([{ id: 103 }]);
-
   return {
     and: vi.fn((...conditions: unknown[]) => ({ conditions })),
-    db: { select: vi.fn(() => chain) },
+    db: {
+      select: vi.fn(() => chain),
+      query: {
+        taskRuns: { findFirst: mocks.findLatestTaskRun },
+      },
+    },
     desc: vi.fn((value: unknown) => value),
     eq: vi.fn((left: unknown, right: unknown) => ({ left, right })),
     gt: vi.fn((left: unknown, right: unknown) => ({ left, right })),
     setTrustedRunActingUser: mocks.setTrustedRunActingUser,
     taskRuns: {
+      canceledAt: 'taskRuns.canceledAt',
       createdAt: 'taskRuns.createdAt',
       id: 'taskRuns.id',
       kind: 'taskRuns.kind',
       payload: 'taskRuns.payload',
+      port: 'taskRuns.port',
+      snapshotCreatedAt: 'taskRuns.snapshotCreatedAt',
+      snapshotFailedAt: 'taskRuns.snapshotFailedAt',
+      snapshotId: 'taskRuns.snapshotId',
+      status: 'taskRuns.status',
       taskId: 'taskRuns.taskId',
     },
-    tasks: { id: 'tasks.id', slackThreadTs: 'tasks.slackThreadTs' },
+    tasks: {
+      deletedAt: 'tasks.deletedAt',
+      id: 'tasks.id',
+      slackThreadTs: 'tasks.slackThreadTs',
+    },
+    inArray: vi.fn((left: unknown, right: unknown) => ({ left, right })),
+    isNotNull: vi.fn((value: unknown) => ({ isNotNull: value })),
+    isNull: vi.fn((value: unknown) => ({ isNull: value })),
   };
 });
 
@@ -91,6 +112,54 @@ const taskB = 'task-b';
 const sharedThread = '111.222';
 const prompt = 'Address the pending review feedback.';
 
+describe('web Fast review follow-up dispatch', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('steers the owning task and returns its latest run', async () => {
+    mocks.sendFastAgentTaskMessageOnce.mockResolvedValue({ success: true });
+    mocks.findLatestTaskRun.mockResolvedValue({ id: 71 });
+
+    await expect(
+      dispatchPrReviewFollowUp({
+        provider: 'web',
+        taskId: taskA,
+        followUpPrompt: prompt,
+        actingUserId: 'user-1',
+        idempotencyKey: 'pr-review-delivery:1',
+      }),
+    ).resolves.toEqual({ outcome: 'queued', runId: 71 });
+    expect(mocks.sendFastAgentTaskMessageOnce).toHaveBeenCalledWith(
+      {
+        userId: 'user-1',
+        apiBaseUrl: 'https://roomote.example',
+      },
+      {
+        taskId: taskA,
+        message: prompt,
+        clientMessageId: 'pr-review-delivery:1',
+      },
+    );
+  });
+
+  it('reports an unavailable task without inventing a run', async () => {
+    mocks.sendFastAgentTaskMessageOnce.mockResolvedValue({
+      success: false,
+      error: 'Task unavailable',
+    });
+
+    await expect(
+      dispatchPrReviewFollowUp({
+        provider: 'web',
+        taskId: taskA,
+        followUpPrompt: prompt,
+        actingUserId: 'user-1',
+        idempotencyKey: 'pr-review-delivery:1',
+      }),
+    ).resolves.toEqual({ outcome: 'unavailable' });
+    expect(mocks.findLatestTaskRun).not.toHaveBeenCalled();
+  });
+});
+
 function slackRun(id: number, taskId: string) {
   return {
     id,
@@ -98,6 +167,36 @@ function slackRun(id: number, taskId: string) {
     payload: { repo: 'owner/repo' },
     port: null,
     snapshotId: `snapshot-${taskId}`,
+  };
+}
+
+function fastSlackRun({
+  workspaceId = 'T123',
+  channelId = 'C123',
+  threadId = sharedThread,
+}: {
+  workspaceId?: string;
+  channelId?: string;
+  threadId?: string;
+} = {}) {
+  return {
+    id: 101,
+    taskId: taskA,
+    snapshotId: 'snapshot-task-a',
+    payload: {
+      repo: 'owner/repo',
+      environmentId: 'environment-1',
+      fastAgentParent: {
+        sessionId: '11111111-1111-4111-8111-111111111111',
+        conversation: {
+          surface: 'slack',
+          workspaceId,
+          conversationId: threadId,
+          replyTarget: { channelId, threadId },
+        },
+      },
+    },
+    port: null,
   };
 }
 
@@ -131,6 +230,7 @@ describe('dispatchPrReviewFollowUp', () => {
       }),
     );
     mocks.enqueueTask.mockResolvedValue({ id: 102 });
+    mocks.dbSelectLimit.mockResolvedValue([]);
     mocks.resumeCommunicationTaskFromSnapshot.mockResolvedValue({ id: 302 });
   });
 
@@ -209,11 +309,189 @@ describe('dispatchPrReviewFollowUp', () => {
     );
   });
 
+  it('resumes a completed Fast child from its parent Slack review action', async () => {
+    mocks.findActiveSlackTaskRun.mockResolvedValue(null);
+    mocks.dbSelectLimit
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([fastSlackRun()]);
+
+    const result = await dispatchPrReviewFollowUp({
+      provider: 'slack',
+      taskId: taskA,
+      slackTeamId,
+      channelId: 'C123',
+      threadId: sharedThread,
+      followUpPrompt: prompt,
+      actingUserId: 'user-1',
+      providerUserId: 'U123',
+    });
+
+    expect(result).toEqual({ outcome: 'resumed', runId: 102 });
+    expect(mocks.enqueueTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        task: expect.objectContaining({
+          sourceRunId: 101,
+          payload: expect.objectContaining({
+            communicationContextInherited: true,
+            fastAgentSessionId: '11111111-1111-4111-8111-111111111111',
+            fastAgentParent: expect.objectContaining({
+              sessionId: '11111111-1111-4111-8111-111111111111',
+            }),
+          }),
+        }),
+        actingUserId: 'user-1',
+      }),
+      {},
+    );
+    expect(mocks.queueSlackMessage).toHaveBeenCalledWith(
+      102,
+      expect.objectContaining({ text: prompt, userId: 'user-1', user: 'U123' }),
+    );
+  });
+
+  it('queues a Fast review action while the child is idle without a snapshot', async () => {
+    mocks.findActiveSlackTaskRun.mockResolvedValue(null);
+    mocks.dbSelectLimit.mockResolvedValueOnce([
+      { ...fastSlackRun(), snapshotId: null },
+    ]);
+
+    const result = await dispatchPrReviewFollowUp({
+      provider: 'slack',
+      taskId: taskA,
+      slackTeamId,
+      channelId: 'C123',
+      threadId: sharedThread,
+      followUpPrompt: prompt,
+      actingUserId: 'user-1',
+      providerUserId: 'U123',
+    });
+
+    expect(result).toEqual({ outcome: 'queued', runId: 101 });
+    expect(mocks.setTrustedRunActingUser).toHaveBeenCalledWith({
+      runId: 101,
+      userId: 'user-1',
+    });
+    expect(mocks.queueSlackMessage).toHaveBeenCalledWith(
+      101,
+      expect.objectContaining({ text: prompt, userId: 'user-1', user: 'U123' }),
+    );
+    expect(mocks.enqueueTask).not.toHaveBeenCalled();
+    expect(mocks.getSlackTaskRunWorkspacePredicate).not.toHaveBeenCalled();
+  });
+
+  it('queues onto a contended Fast child resume without requiring a task-owned thread binding', async () => {
+    mocks.findActiveSlackTaskRun.mockResolvedValue(null);
+    mocks.dbSelectLimit
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([fastSlackRun()])
+      .mockResolvedValueOnce([{ ...fastSlackRun(), id: 103 }]);
+    mocks.withContention.mockImplementation(
+      async (
+        _key: string,
+        options: { onContended: () => Promise<number> },
+      ) => ({ value: await options.onContended() }),
+    );
+
+    const result = await dispatchPrReviewFollowUp({
+      provider: 'slack',
+      taskId: taskA,
+      slackTeamId,
+      channelId: 'C123',
+      threadId: sharedThread,
+      followUpPrompt: prompt,
+      actingUserId: 'user-1',
+    });
+
+    expect(result).toEqual({ outcome: 'resumed', runId: 103 });
+    const where = mocks.where.mock.calls.at(-1)?.[0] as {
+      conditions: unknown[];
+    };
+    expect(where.conditions).toEqual(
+      expect.arrayContaining([{ left: 'taskRuns.taskId', right: taskA }]),
+    );
+    expect(where.conditions).not.toContainEqual({
+      left: 'tasks.slackThreadTs',
+      right: sharedThread,
+    });
+    expect(where.conditions).not.toContainEqual({
+      legacyWorkspacePredicate: slackTeamId,
+    });
+    expect(mocks.getSlackTaskRunWorkspacePredicate).not.toHaveBeenCalled();
+    expect(mocks.enqueueTask).not.toHaveBeenCalled();
+    expect(mocks.queueSlackMessage).toHaveBeenCalledWith(
+      103,
+      expect.anything(),
+    );
+  });
+
+  it('rejects a contended Fast resume from a different parent conversation', async () => {
+    mocks.findActiveSlackTaskRun.mockResolvedValue(null);
+    mocks.dbSelectLimit
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([fastSlackRun()])
+      .mockResolvedValueOnce([
+        {
+          ...fastSlackRun({ channelId: 'C-other' }),
+          id: 103,
+        },
+      ]);
+    mocks.withContention.mockImplementation(
+      async (
+        _key: string,
+        options: { onContended: () => Promise<number | undefined> },
+      ) => ({ value: await options.onContended() }),
+    );
+
+    const result = await dispatchPrReviewFollowUp({
+      provider: 'slack',
+      taskId: taskA,
+      slackTeamId,
+      channelId: 'C123',
+      threadId: sharedThread,
+      followUpPrompt: prompt,
+      actingUserId: 'user-1',
+    });
+
+    expect(result).toEqual({ outcome: 'unavailable' });
+    expect(mocks.queueSlackMessage).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['workspace', { workspaceId: 'T-other' }],
+    ['channel', { channelId: 'C-other' }],
+    ['thread', { threadId: 'different-thread' }],
+  ])(
+    'does not resume a Fast child through a different Slack parent %s',
+    async (_field, parentOverrides) => {
+      mocks.findActiveSlackTaskRun.mockResolvedValue(null);
+      mocks.dbSelectLimit.mockResolvedValue([
+        fastSlackRun(parentOverrides as Parameters<typeof fastSlackRun>[0]),
+      ]);
+
+      const result = await dispatchPrReviewFollowUp({
+        provider: 'slack',
+        taskId: taskA,
+        slackTeamId,
+        channelId: 'C123',
+        threadId: sharedThread,
+        followUpPrompt: prompt,
+        actingUserId: 'user-1',
+      });
+
+      expect(result).toEqual({ outcome: 'unavailable' });
+      expect(mocks.enqueueTask).not.toHaveBeenCalled();
+      expect(mocks.queueSlackMessage).not.toHaveBeenCalled();
+    },
+  );
+
   it('queues a modern review action onto a drain-created legacy resume after losing contention', async () => {
     mocks.findActiveSlackTaskRun.mockResolvedValue(null);
     mocks.findCompletedSlackTaskRunWithSnapshot.mockResolvedValue(
       slackRun(101, taskA),
     );
+    mocks.dbSelectLimit
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ id: 103 }]);
     mocks.withContention.mockImplementation(
       async (key: string, options: { onContended: () => Promise<number> }) => ({
         key,
@@ -255,6 +533,7 @@ describe('dispatchPrReviewFollowUp', () => {
     mocks.findCompletedSlackTaskRunWithSnapshot.mockResolvedValue(
       slackRun(101, taskA),
     );
+    mocks.dbSelectLimit.mockResolvedValueOnce([{ id: 103 }]);
     mocks.withContention.mockImplementation(
       async (
         _key: string,

@@ -130,6 +130,7 @@ services:
     image: gbrain
     public_domain: no # private network only; the api service proxies agent access
     volume: /data
+    backup_schedules: [DAILY, WEEKLY] # configure both on the /data volume in Template Composer
     env:
       GBRAIN_DATABASE_URL: ${{Postgres.DATABASE_URL}}
       # Railway's private network is IPv6-only, so the Brain must bind :: to
@@ -154,10 +155,10 @@ services:
       through the api service — the Brain itself has no public domain and is
       never reachable from the internet. It stays idle until
       a Brain provider key is set on api, so deploying with both keys
-      empty costs only the container. The volume holds the corpus, so back it
-      up like Postgres; deleting it is recoverable (task history and
-      integration sources re-ingest) but not free. Delete this service
-      entirely if the deployment should have no memory.
+      empty costs only the container. The volume holds the corpus and has
+      daily plus weekly Railway backups; deleting it is recoverable (task
+      history and integration sources re-ingest) but not free. Delete this
+      service entirely if the deployment should have no memory.
 
   api:
     image: app

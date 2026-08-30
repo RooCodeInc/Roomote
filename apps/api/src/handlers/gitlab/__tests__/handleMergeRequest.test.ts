@@ -86,6 +86,7 @@ function makePayload(
       id: 999,
       iid: 42,
       title: 'Update backend',
+      body: null,
       url: 'https://gitlab.com/acme/backend/-/merge_requests/42',
       source_branch: 'feature/test',
       target_branch: 'main',
@@ -177,6 +178,17 @@ describe('handleGitLabMergeRequest', () => {
       { task: { payload: Record<string, unknown> } },
     ];
     expect('sourceControlHost' in task.payload).toBe(false);
+  });
+
+  it('restores tracked draft status when a merge request is reopened', async () => {
+    await handleGitLabMergeRequest(makePayload('reopen', { draft: true }));
+
+    expect(mockUpdateTaskPrStatus).toHaveBeenCalledWith(
+      'gitlab',
+      'acme/backend',
+      42,
+      'draft',
+    );
   });
 
   it('selects and stamps the webhook host among same-name repositories on multiple hosts', async () => {
@@ -333,6 +345,9 @@ describe('handleGitLabMergeRequest', () => {
       42,
       'merged',
     );
+    expect(mockRecordPrStatusChangeInTaskHistory).toHaveBeenLastCalledWith(
+      expect.objectContaining({ targetBranch: 'main' }),
+    );
     expect(mockScheduleSourceControlPullRequestFactSync).toHaveBeenCalledWith({
       provider: 'gitlab',
       repositoryFullName: 'acme/backend',
@@ -340,6 +355,7 @@ describe('handleGitLabMergeRequest', () => {
         number: 42,
         externalId: 999,
         title: 'Update backend',
+        body: null,
         url: 'https://gitlab.com/acme/backend/-/merge_requests/42',
         authorLogin: null,
         state: 'merged',

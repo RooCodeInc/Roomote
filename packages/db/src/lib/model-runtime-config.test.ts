@@ -35,9 +35,18 @@ vi.mock('../db', () => ({
   },
 }));
 
-vi.mock('./environment-variables', () => ({
-  stringifyDecryptedEnvVarValue: (value: unknown) => String(value),
-}));
+vi.mock('./environment-variables', async (importOriginal) => {
+  // Keep the real resolveDeploymentEnvVar: it reads through the mocked db
+  // and encryption modules above, and isBrainProviderConfigured exercises
+  // that persisted-settings path for real.
+  const actual =
+    await importOriginal<typeof import('./environment-variables')>();
+
+  return {
+    ...actual,
+    stringifyDecryptedEnvVarValue: (value: unknown) => String(value),
+  };
+});
 
 vi.mock('./chatgpt-subscription', () => ({
   resolveOpenCodeAuthContent: (...args: unknown[]) =>
@@ -62,9 +71,21 @@ vi.mock('../schema', () => ({
 }));
 
 import {
+  DevLoginInferencePlaceholderError,
+  invalidateBrainEnabledCache,
+  isBrainEnabled,
+  isBrainProviderConfigured,
+  resetBrainProviderConfiguredCache,
+  resolveBrainEnabledState,
   resolveEffectiveModelRuntimeEnv,
+  resolveModelProviderEnvValue,
   resolveSandboxModelRuntimeEnv,
 } from './model-runtime-config';
+import {
+  DEV_LOGIN_INFERENCE_API_KEY_PLACEHOLDER,
+  TASK_MODEL_ROLE_DESCRIPTORS,
+  TASK_MODEL_ROLES,
+} from '@roomote/types';
 
 describe('resolveEffectiveModelRuntimeEnv', () => {
   beforeEach(() => {
@@ -109,6 +130,64 @@ describe('resolveEffectiveModelRuntimeEnv', () => {
       R_MODEL_ENV_KEYS: 'OPENAI_API_KEY',
       OPENAI_API_KEY: 'sk-runtime',
     });
+  });
+
+  it('rejects the dev-login placeholder before control-plane inference can use it', async () => {
+    mockDeploymentSettingsFindFirst.mockResolvedValue({
+      runtimeModelConfig: {
+        roomoteModel: 'openrouter/openai/gpt-5.6-sol',
+      },
+    });
+
+    await expect(
+      resolveEffectiveModelRuntimeEnv({
+        runtimeEnv: {},
+        deploymentEnvVars: {
+          OPENROUTER_API_KEY: DEV_LOGIN_INFERENCE_API_KEY_PLACEHOLDER,
+        },
+      }),
+    ).rejects.toBeInstanceOf(DevLoginInferencePlaceholderError);
+  });
+
+  it('resolves model and reasoning env overrides for every role descriptor', async () => {
+    mockDeploymentSettingsFindFirst.mockResolvedValue({
+      runtimeModelConfig: {},
+    });
+    const runtimeEnv = Object.fromEntries(
+      TASK_MODEL_ROLES.flatMap((role) => {
+        const descriptor = TASK_MODEL_ROLE_DESCRIPTORS[role];
+        return [
+          [descriptor.modelEnvVar, `openrouter/test/${role}`],
+          [descriptor.reasoningEnvVar, 'xhigh'],
+        ];
+      }),
+    );
+
+    const env = await resolveEffectiveModelRuntimeEnv({
+      runtimeEnv,
+      deploymentEnvVars: { OPENROUTER_API_KEY: 'sk-openrouter' },
+    });
+
+    for (const role of TASK_MODEL_ROLES) {
+      const descriptor = TASK_MODEL_ROLE_DESCRIPTORS[role];
+      expect(env[descriptor.modelEnvVar]).toBe(`openrouter/test/${role}`);
+      expect(env[descriptor.reasoningEnvVar]).toBe('xhigh');
+    }
+
+    const sandboxEnv = await resolveSandboxModelRuntimeEnv({
+      runtimeEnv,
+      deploymentEnvVars: { OPENROUTER_API_KEY: 'sk-openrouter' },
+    });
+
+    for (const role of TASK_MODEL_ROLES) {
+      const descriptor = TASK_MODEL_ROLE_DESCRIPTORS[role];
+      expect(sandboxEnv[descriptor.modelEnvVar]).toBe(
+        descriptor.includeInSandbox ? `openrouter/test/${role}` : undefined,
+      );
+      expect(sandboxEnv[descriptor.reasoningEnvVar]).toBe(
+        descriptor.includeInSandbox ? 'xhigh' : undefined,
+      );
+    }
   });
 
   it('falls back to persisted model config and saved encrypted env vars', async () => {
@@ -192,6 +271,53 @@ describe('resolveEffectiveModelRuntimeEnv', () => {
       R_PLANNING_MODEL_REASONING_EFFORT: 'high',
       R_MODEL_ENV_KEYS: 'OPENROUTER_API_KEY',
       OPENROUTER_API_KEY: 'sk-openrouter',
+    });
+  });
+
+  it('resolves an orchestration model independently from the coding model', async () => {
+    mockDeploymentSettingsFindFirst.mockResolvedValue({
+      runtimeModelConfig: {
+        roomoteModel: 'openrouter/openai/gpt-5.4',
+        roomoteOrchestrationModel: 'anthropic/claude-sonnet-4',
+        roomoteOrchestrationModelReasoningEffort: 'high',
+      },
+    });
+
+    const env = await resolveEffectiveModelRuntimeEnv({
+      runtimeEnv: {},
+      deploymentEnvVars: {
+        OPENROUTER_API_KEY: 'sk-openrouter',
+        ANTHROPIC_API_KEY: 'sk-anthropic',
+      },
+    });
+
+    expect(env).toMatchObject({
+      R_MODEL: 'openrouter/openai/gpt-5.4',
+      R_ORCHESTRATION_MODEL: 'anthropic/claude-sonnet-4',
+      R_ORCHESTRATION_MODEL_REASONING_EFFORT: 'high',
+      R_MODEL_ENV_KEYS: 'OPENROUTER_API_KEY,ANTHROPIC_API_KEY',
+    });
+  });
+
+  it('defaults orchestration reasoning to low when no choice is persisted', async () => {
+    mockDeploymentSettingsFindFirst.mockResolvedValue({
+      runtimeModelConfig: {
+        roomoteModel: 'openrouter/openai/gpt-5.4',
+        roomoteOrchestrationModel: 'anthropic/claude-sonnet-4',
+      },
+    });
+
+    const env = await resolveEffectiveModelRuntimeEnv({
+      runtimeEnv: {},
+      deploymentEnvVars: {
+        OPENROUTER_API_KEY: 'sk-openrouter',
+        ANTHROPIC_API_KEY: 'sk-anthropic',
+      },
+    });
+
+    expect(env).toMatchObject({
+      R_ORCHESTRATION_MODEL: 'anthropic/claude-sonnet-4',
+      R_ORCHESTRATION_MODEL_REASONING_EFFORT: 'low',
     });
   });
 
@@ -661,7 +787,7 @@ describe('resolveEffectiveModelRuntimeEnv', () => {
     expect(env.R_CHATGPT_FAST_MODE).toBe('1');
   });
 
-  it('emits the ChatGPT gateway marker instead of OPENCODE_AUTH_CONTENT in gateway mode', async () => {
+  it('emits the ChatGPT gateway marker instead of OPENCODE_AUTH_CONTENT for task sandboxes', async () => {
     mockDeploymentSettingsFindFirst.mockResolvedValue({
       runtimeModelConfig: { roomoteModel: 'openai/gpt-5.4' },
     });
@@ -1050,5 +1176,297 @@ describe('resolveEffectiveModelRuntimeEnv', () => {
       expect(env).not.toHaveProperty('LITELLM_API_KEY');
       expect(env).not.toHaveProperty('LITELLM_BASE_URL');
     });
+  });
+});
+
+describe('managed Roomote inference key', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockDecryptSecrets.mockImplementation(async (value) => value);
+    mockEnvironmentVariablesFindMany.mockResolvedValue([]);
+    mockResolveGitHubCopilotOpenCodeAuthContent.mockResolvedValue(null);
+    mockResolveOpenCodeAuthContent.mockResolvedValue(null);
+    mockIsChatGptSubscriptionFastModeEnabled.mockResolvedValue(false);
+    mockGetFreshXaiAccessToken.mockResolvedValue(null);
+  });
+
+  it('advertises Roomote inference as gateway-served without leaking its key', async () => {
+    mockDeploymentSettingsFindFirst.mockResolvedValue({
+      runtimeModelConfig: { roomoteModel: 'roomote/openai/gpt-5.6-luna' },
+      taskModelSettings: null,
+    });
+
+    const env = await resolveSandboxModelRuntimeEnv({
+      runtimeEnv: {},
+      deploymentEnvVars: { R_TRIAL_OPENROUTER_API_KEY: 'sk-trial' },
+    });
+
+    expect(env.R_INFERENCE_GATEWAY_KEYS?.split(',')).toContain(
+      'R_TRIAL_OPENROUTER_API_KEY',
+    );
+    expect(env).not.toHaveProperty('OPENROUTER_API_KEY');
+    expect(env).not.toHaveProperty('R_TRIAL_OPENROUTER_API_KEY');
+    expect(Object.values(env)).not.toContain('sk-trial');
+  });
+
+  it('keeps an unavailable Roomote provider on the gateway for an actionable failure', async () => {
+    mockDeploymentSettingsFindFirst.mockResolvedValue({
+      runtimeModelConfig: { roomoteModel: 'roomote/openai/gpt-5.6-luna' },
+      taskModelSettings: null,
+    });
+
+    const env = await resolveSandboxModelRuntimeEnv({
+      runtimeEnv: {},
+      deploymentEnvVars: {},
+    });
+
+    expect(env.R_INFERENCE_GATEWAY_KEYS?.split(',')).toContain(
+      'R_TRIAL_OPENROUTER_API_KEY',
+    );
+    expect(env).not.toHaveProperty('R_TRIAL_OPENROUTER_API_KEY');
+  });
+
+  it('emits per-model costs for the sandbox from catalog metadata', async () => {
+    mockDeploymentSettingsFindFirst.mockResolvedValue({
+      runtimeModelConfig: { roomoteModel: 'roomote/openai/gpt-5.6-luna' },
+      taskModelSettings: {
+        models: [
+          {
+            id: 'roomote/openai/gpt-5.6-luna',
+            displayName: 'GPT 5.6 Luna',
+            family: 'GPT',
+            metadata: {
+              contextWindow: 400_000,
+              inputTypes: ['text'],
+              inputPricePerToken: 0.000002,
+              outputPricePerToken: 0.00001,
+              lastRefreshedAt: '2026-08-27T00:00:00.000Z',
+            },
+          },
+        ],
+        allowedModelIds: ['roomote/openai/gpt-5.6-luna'],
+        defaultModelId: 'roomote/openai/gpt-5.6-luna',
+      },
+    });
+
+    const env = await resolveSandboxModelRuntimeEnv({
+      runtimeEnv: {},
+      deploymentEnvVars: { R_TRIAL_OPENROUTER_API_KEY: 'sk-trial' },
+    });
+
+    expect(JSON.parse(env.R_TASK_MODEL_COSTS ?? '{}')).toEqual({
+      'roomote/openai/gpt-5.6-luna': { input: 2, output: 10 },
+    });
+    expect(JSON.parse(env.R_TASK_MODEL_CONTEXT_WINDOWS ?? '{}')).toEqual({
+      'roomote/openai/gpt-5.6-luna': 400_000,
+    });
+  });
+
+  it('materializes the stored key on the control plane for Roomote models', async () => {
+    mockDeploymentSettingsFindFirst.mockResolvedValue({
+      runtimeModelConfig: { roomoteModel: 'roomote/openai/gpt-5.6-luna' },
+      taskModelSettings: null,
+    });
+
+    const env = await resolveEffectiveModelRuntimeEnv({
+      runtimeEnv: {},
+      deploymentEnvVars: { R_TRIAL_OPENROUTER_API_KEY: 'sk-trial' },
+    });
+
+    expect(env.R_TRIAL_OPENROUTER_API_KEY).toBe('sk-trial');
+    expect(env).not.toHaveProperty('OPENROUTER_API_KEY');
+  });
+
+  it('never materializes the Roomote key from the process environment', async () => {
+    // The hosting-injected variable is a delivery mechanism only: setup
+    // imports it into Settings storage, and deleting that stored key must
+    // disable the provider even while hosting keeps injecting the variable.
+    mockDeploymentSettingsFindFirst.mockResolvedValue({
+      runtimeModelConfig: { roomoteModel: 'roomote/openai/gpt-5.6-luna' },
+      taskModelSettings: null,
+    });
+
+    const env = await resolveEffectiveModelRuntimeEnv({
+      runtimeEnv: { R_TRIAL_OPENROUTER_API_KEY: 'sk-trial' },
+      deploymentEnvVars: {},
+    });
+
+    expect(env).not.toHaveProperty('R_TRIAL_OPENROUTER_API_KEY');
+  });
+
+  it('does not materialize an unrelated user-provided OpenRouter key', async () => {
+    mockDeploymentSettingsFindFirst.mockResolvedValue({
+      runtimeModelConfig: { roomoteModel: 'roomote/openai/gpt-5.6-luna' },
+      taskModelSettings: null,
+    });
+
+    const env = await resolveEffectiveModelRuntimeEnv({
+      runtimeEnv: {},
+      deploymentEnvVars: {
+        R_TRIAL_OPENROUTER_API_KEY: 'sk-trial',
+        OPENROUTER_API_KEY: 'sk-saved',
+      },
+    });
+
+    expect(env.R_TRIAL_OPENROUTER_API_KEY).toBe('sk-trial');
+    expect(env).not.toHaveProperty('OPENROUTER_API_KEY');
+  });
+
+  it('resolveModelProviderEnvValue resolves the Roomote key from storage only', async () => {
+    // The runtime env value is hosting's delivery mechanism, not a live
+    // credential: only the imported Settings row counts.
+    await expect(
+      resolveModelProviderEnvValue(['R_TRIAL_OPENROUTER_API_KEY'], {
+        runtimeEnv: {
+          R_TRIAL_OPENROUTER_API_KEY: 'sk-runtime',
+        },
+      }),
+    ).resolves.toBeUndefined();
+
+    mockEnvironmentVariablesFindMany.mockResolvedValue([
+      { name: 'R_TRIAL_OPENROUTER_API_KEY', value: 'sk-saved' },
+    ]);
+    await expect(
+      resolveModelProviderEnvValue(['R_TRIAL_OPENROUTER_API_KEY'], {
+        runtimeEnv: {},
+      }),
+    ).resolves.toBe('sk-saved');
+
+    mockEnvironmentVariablesFindMany.mockResolvedValue([]);
+    await expect(
+      resolveModelProviderEnvValue(['OPENROUTER_API_KEY'], {
+        runtimeEnv: { R_TRIAL_OPENROUTER_API_KEY: 'sk-trial' },
+      }),
+    ).resolves.toBeUndefined();
+  });
+});
+
+describe('isBrainProviderConfigured', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.unstubAllEnvs();
+    resetBrainProviderConfiguredCache();
+    mockDecryptSecrets.mockImplementation(async (value) => value);
+    mockEnvironmentVariablesFindMany.mockResolvedValue([]);
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    resetBrainProviderConfiguredCache();
+  });
+
+  it('is off with nothing configured', async () => {
+    await expect(isBrainProviderConfigured()).resolves.toBe(false);
+  });
+
+  it('is never satisfied by the general task provider keys', async () => {
+    // Nearly every deployment has one of these to run tasks. Counting them
+    // would activate the Brain everywhere the templates generate the gateway
+    // token, which is the auto-activation bug this predicate exists to close.
+    vi.stubEnv('OPENROUTER_API_KEY', 'sk-or-general');
+    vi.stubEnv('OPENAI_API_KEY', 'sk-general');
+
+    await expect(isBrainProviderConfigured()).resolves.toBe(false);
+  });
+
+  it('activates on an explicit Brain key in the runtime env', async () => {
+    vi.stubEnv('R_BRAIN_OPENROUTER_API_KEY', 'sk-or-brain');
+
+    await expect(isBrainProviderConfigured()).resolves.toBe(true);
+  });
+
+  it('activates on an explicit Brain key persisted in Settings', async () => {
+    mockEnvironmentVariablesFindMany.mockResolvedValue([
+      { name: 'R_BRAIN_OPENAI_API_KEY', value: 'sk-brain-persisted' },
+    ]);
+
+    await expect(isBrainProviderConfigured()).resolves.toBe(true);
+  });
+
+  it('caches the answer between calls', async () => {
+    vi.stubEnv('R_BRAIN_OPENAI_API_KEY', 'sk-brain');
+
+    await expect(isBrainProviderConfigured()).resolves.toBe(true);
+    await expect(isBrainProviderConfigured()).resolves.toBe(true);
+
+    // The second call answers from cache; only the first resolution may have
+    // touched persisted settings at all.
+    expect(
+      mockEnvironmentVariablesFindMany.mock.calls.length,
+    ).toBeLessThanOrEqual(1);
+  });
+});
+
+describe('isBrainEnabled', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.unstubAllEnvs();
+    invalidateBrainEnabledCache();
+    resetBrainProviderConfiguredCache();
+    mockDecryptSecrets.mockImplementation(async (value) => value);
+    mockEnvironmentVariablesFindMany.mockResolvedValue([]);
+    mockDeploymentSettingsFindFirst.mockResolvedValue(undefined);
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    invalidateBrainEnabledCache();
+    resetBrainProviderConfiguredCache();
+  });
+
+  it('is off with no stored choice and no legacy key', async () => {
+    await expect(resolveBrainEnabledState()).resolves.toEqual({
+      enabled: false,
+      fromLegacyKey: true,
+    });
+  });
+
+  it('falls back to the legacy explicit Brain key when no choice is stored', async () => {
+    vi.stubEnv('R_BRAIN_OPENROUTER_API_KEY', 'sk-or-brain');
+
+    await expect(resolveBrainEnabledState()).resolves.toEqual({
+      enabled: true,
+      fromLegacyKey: true,
+    });
+  });
+
+  it('treats a missing brainEnabled column value as no stored choice', async () => {
+    // Rows written before the column existed select as null.
+    mockDeploymentSettingsFindFirst.mockResolvedValue({ brainEnabled: null });
+    vi.stubEnv('R_BRAIN_OPENAI_API_KEY', 'sk-brain');
+
+    await expect(isBrainEnabled()).resolves.toBe(true);
+  });
+
+  it('lets an explicit stored choice win over the legacy key in both directions', async () => {
+    mockDeploymentSettingsFindFirst.mockResolvedValue({ brainEnabled: false });
+    vi.stubEnv('R_BRAIN_OPENAI_API_KEY', 'sk-brain');
+
+    await expect(resolveBrainEnabledState()).resolves.toEqual({
+      enabled: false,
+      fromLegacyKey: false,
+    });
+
+    invalidateBrainEnabledCache();
+    mockDeploymentSettingsFindFirst.mockResolvedValue({ brainEnabled: true });
+    vi.unstubAllEnvs();
+
+    await expect(resolveBrainEnabledState()).resolves.toEqual({
+      enabled: true,
+      fromLegacyKey: false,
+    });
+  });
+
+  it('caches the answer until invalidated', async () => {
+    mockDeploymentSettingsFindFirst.mockResolvedValue({ brainEnabled: true });
+
+    await expect(isBrainEnabled()).resolves.toBe(true);
+    await expect(isBrainEnabled()).resolves.toBe(true);
+    expect(mockDeploymentSettingsFindFirst).toHaveBeenCalledTimes(1);
+
+    mockDeploymentSettingsFindFirst.mockResolvedValue({ brainEnabled: false });
+    invalidateBrainEnabledCache();
+
+    await expect(isBrainEnabled()).resolves.toBe(false);
   });
 });

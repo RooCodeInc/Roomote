@@ -3,6 +3,7 @@ import {
   getCommunicationChannelFromTaskPayload,
   getCommunicationProviderFromTaskPayload,
   getCommunicationThreadIdFromTaskPayload,
+  getFastAgentParentFromPayload,
   getSlackChannelFromTaskPayload,
   getSlackThreadTsFromTaskPayload,
 } from '@roomote/types';
@@ -29,6 +30,12 @@ const RESERVED_COMMUNICATION_MCP_ENV_KEYS = [
   'ROOMOTE_COMMUNICATION_CHANNEL_ID',
   'ROOMOTE_COMMUNICATION_THREAD_ID',
 ] as const;
+
+export function isFastAgentChildTaskRun(taskRun: {
+  payload: unknown;
+}): boolean {
+  return getFastAgentParentFromPayload(taskRun.payload) !== null;
+}
 
 function hasInheritedCommunicationContext(payload: unknown): boolean {
   return (
@@ -141,6 +148,17 @@ export function buildMcpTaskEnv(input: {
         'roomote-slack-reply-satisfaction.json',
       ].join('/');
     }
+  }
+
+  if (input.runtimeEnv.ROOMOTE_FAST_AGENT_CHILD === 'true') {
+    // Fast children cannot post to the inherited chat surface directly, but
+    // their private parent relay still uses the normal lifecycle hooks.
+    mcpTaskEnv.ROOMOTE_SLACK_REPLY_SATISFACTION_STATE_FILE ??= [
+      input.runtimeEnv.HOME ?? '/tmp',
+      '.config',
+      'opencode',
+      'roomote-slack-reply-satisfaction.json',
+    ].join('/');
   }
 
   return mcpTaskEnv;

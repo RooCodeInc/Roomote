@@ -37,6 +37,7 @@ function decide(input: {
   isThreadTaskOwner?: boolean;
   isThreadRootAuthor?: boolean;
   isAutomationReportThread?: boolean;
+  isOpenConversationThread?: boolean;
   threadMessages: UnmentionedThreadHistoryMessage[];
 }) {
   return evaluateUnmentionedThreadReplyRouting({
@@ -45,6 +46,7 @@ function decide(input: {
     isThreadTaskOwner: input.isThreadTaskOwner ?? true,
     isThreadRootAuthor: input.isThreadRootAuthor ?? false,
     isAutomationReportThread: input.isAutomationReportThread ?? false,
+    isOpenConversationThread: input.isOpenConversationThread ?? false,
     threadMessages: input.threadMessages,
     compareMessageIds: compareNumericMessageIds,
   });
@@ -118,6 +120,47 @@ describe('evaluateUnmentionedThreadReplyRouting', () => {
         threadMessages: [bot('100'), bot('200')],
       }),
     ).toEqual({ shouldRoute: true, interjectionDetected: false });
+  });
+
+  it('routes a first-time sender in an open Roomote conversation', () => {
+    expect(
+      decide({
+        isThreadTaskOwner: false,
+        isThreadRootAuthor: false,
+        isOpenConversationThread: true,
+        senderUserId: 'U2',
+        threadMessages: [human('100', 'U1', { mentionsBot: true }), bot('200')],
+      }),
+    ).toEqual({ shouldRoute: true, interjectionDetected: false });
+  });
+
+  it('routes a new sender after another participant speaks in an open Roomote conversation', () => {
+    expect(
+      decide({
+        isThreadTaskOwner: false,
+        isThreadRootAuthor: false,
+        isOpenConversationThread: true,
+        senderUserId: 'U2',
+        threadMessages: [
+          human('100', 'U1', { mentionsBot: true }),
+          bot('200'),
+          human('300', 'U1'),
+        ],
+      }),
+    ).toEqual({ shouldRoute: true, interjectionDetected: false });
+  });
+
+  it('still requires a mention when somebody else was mentioned in an open Roomote conversation', () => {
+    expect(
+      decide({
+        isOpenConversationThread: true,
+        threadMessages: [
+          human('100', 'U1', { mentionsBot: true }),
+          bot('200'),
+          human('300', 'U1', { mentionsSomebodyElse: true }),
+        ],
+      }),
+    ).toEqual({ shouldRoute: false, interjectionDetected: true });
   });
 
   it('still requires a mention after an interjection in an automation report thread', () => {

@@ -15,6 +15,9 @@ import YAML from 'yaml';
 const root = resolve(import.meta.dirname, '../..');
 const read = (path) => readFileSync(join(root, path), 'utf8');
 const catalog = JSON.parse(read('deploy/deployment-catalog.json'));
+const installer = read('deploy/install.sh');
+const deployer = read('deploy/scripts/deploy.sh');
+const productionEnvExample = read('.env.production.example');
 
 function fail(message) {
   throw new Error(message);
@@ -23,6 +26,68 @@ function fail(message) {
 function assert(condition, message) {
   if (!condition) fail(message);
 }
+
+assert(
+  installer.includes('preview_domain="$domain"') &&
+    installer.includes(
+      'preview_subdomain_suffix="${saved_preview_subdomain_suffix:-preview}"',
+    ),
+  'installer: new installs must default to flat preview hostnames with a suffix',
+);
+assert(
+  installer.includes(
+    'read_saved_env_value "$install_root/.env" ROOMOTE_PREVIEW_DOMAIN',
+  ) &&
+    installer.includes(
+      'read_saved_env_value "$install_root/.env" PREVIEW_PROXY_SUBDOMAIN_SUFFIX',
+    ),
+  'installer: reruns must preserve existing preview hostname settings',
+);
+assert(
+  installer.includes(
+    'set_env_value PREVIEW_PROXY_SUBDOMAIN_SUFFIX "$preview_subdomain_suffix"',
+  ),
+  'installer: preview suffix must be persisted for Compose services',
+);
+assert(
+  productionEnvExample.includes(
+    'ROOMOTE_APP_DOMAIN=roomote.example.com\nROOMOTE_PREVIEW_DOMAIN=roomote.example.com\nPREVIEW_PROXY_SUBDOMAIN_SUFFIX=preview',
+  ),
+  'production env example: new installs must default to flat preview hostnames',
+);
+assert(
+  deployer.includes('preview_domain="$domain"') &&
+    deployer.includes(
+      'configured_preview_subdomain_suffix="$(read_env_value "$env_file" PREVIEW_PROXY_SUBDOMAIN_SUFFIX)"',
+    ) &&
+    deployer.includes(
+      'preview_subdomain_suffix="$configured_preview_subdomain_suffix"',
+    ) &&
+    deployer.includes(
+      'set_env_value "$tmp_env" PREVIEW_PROXY_SUBDOMAIN_SUFFIX "$preview_subdomain_suffix"',
+    ),
+  'DigitalOcean deployer: flat previews must preserve custom suffixes and default to preview',
+);
+assert(
+  deployer.includes('read_tfvars_value "$tfvars_file" domain') &&
+    deployer.includes('read_tfvars_value "$tfvars_file" preview_domain'),
+  'DigitalOcean deployer: reruns must preserve the preview layout, not a stale preview domain',
+);
+const digitalOceanTerraform = read('deploy/providers/digitalocean/main.tf');
+assert(
+  digitalOceanTerraform.includes(
+    'preview_domain = var.preview_domain != "" ? var.preview_domain : var.domain',
+  ) &&
+    digitalOceanTerraform.includes(
+      'count  = var.manage_dns && local.preview_domain != var.domain ? 1 : 0',
+    ),
+  'DigitalOcean Terraform: flat previews must not duplicate the app DNS record',
+);
+assert(
+  digitalOceanTerraform.includes('local.preview_domain == var.dns_zone') &&
+    digitalOceanTerraform.includes('var.domain == var.dns_zone'),
+  'DigitalOcean Terraform: zone-apex domains must map to "@"/"*" record names',
+);
 
 function commandText(command) {
   if (Array.isArray(command)) return command.join(' ');
@@ -60,12 +125,13 @@ const composeEnv = {
   R_DISCORD_GATEWAY_SECRET: 'deployment-ci-discord-gateway-secret',
   PREVIEW_AUTH_PRIVATE_KEY: 'deployment-ci-preview-private-key',
   PREVIEW_AUTH_PUBLIC_KEY: 'deployment-ci-preview-public-key',
+  PREVIEW_PROXY_SUBDOMAIN_SUFFIX: 'preview',
   REDIS_URL: 'redis://redis:6379',
   ROOMOTE_APP_DOMAIN: 'roomote.localhost',
   ROOMOTE_CADDY_LOCAL_CERTS: 'local_certs',
   ROOMOTE_CADDY_WILDCARD_TLS_SNIPPET: '',
   R_APP_URL: 'http://roomote.localhost',
-  ROOMOTE_PREVIEW_DOMAIN: 'preview.roomote.localhost',
+  ROOMOTE_PREVIEW_DOMAIN: 'roomote.localhost',
   ROOMOTE_VERSION: 'deployment-ci',
   S3_ACCESS_KEY_ID: 'roomote',
   S3_SECRET_ACCESS_KEY: 'deployment-ci-minio-password',
@@ -152,6 +218,18 @@ function validateComposeShape(shape) {
       }
     }
 
+    if (['self-host-production', 'installer-production'].includes(shape.name)) {
+      for (const serviceName of ['web', 'api', 'controller', 'preview-proxy']) {
+        const service = config.services[serviceName];
+        if (!service) continue;
+        assert(
+          service.environment?.PREVIEW_PROXY_SUBDOMAIN_SUFFIX ===
+            composeEnv.PREVIEW_PROXY_SUBDOMAIN_SUFFIX,
+          `${shape.name}: ${serviceName} must receive PREVIEW_PROXY_SUBDOMAIN_SUFFIX`,
+        );
+      }
+    }
+
     if (
       'ROOMOTE_CADDY_LOCAL_CERTS' in (config.services.caddy?.environment ?? {})
     ) {
@@ -208,6 +286,33 @@ assert(
 assert(
   'R_DISCORD_GATEWAY_SECRET' in railway.services.bullmq.env,
   'railway: bullmq must receive R_DISCORD_GATEWAY_SECRET',
+);
+assert(
+  railway.services.gbrain?.volume === '/data' &&
+    JSON.stringify(railway.services.gbrain?.backup_schedules) ===
+      JSON.stringify(['DAILY', 'WEEKLY']),
+  'railway: gbrain must retain daily and weekly volume backups',
+);
+
+const gbrainEntrypoint = read('.docker/gbrain/entrypoint.sh');
+assert(
+  gbrainEntrypoint.includes(
+    'gbrain config set agent.use_gateway_loop true >/dev/null',
+  ),
+  'gbrain: Roomote gateway models require the gateway-native agent loop',
+);
+const gbrainResetIndex = gbrainEntrypoint.indexOf(
+  'write_storage_layout "$STORAGE_LAYOUT_RESETTING"',
+);
+const gbrainCutoverCompleteIndex = gbrainEntrypoint.indexOf(
+  'write_storage_layout "$STORAGE_LAYOUT_VERSION"',
+);
+const gbrainInitIndex = gbrainEntrypoint.indexOf('\n    gbrain init');
+assert(
+  gbrainResetIndex >= 0 &&
+    gbrainCutoverCompleteIndex > gbrainResetIndex &&
+    gbrainCutoverCompleteIndex < gbrainInitIndex,
+  'gbrain: filesystem cutover must be recorded before fallible initialization',
 );
 
 const render = YAML.parse(read('render.yaml'));
@@ -281,6 +386,16 @@ assert(
 );
 const caddyfile = read('deploy/caddy/Caddyfile');
 assert(
+  caddyfile.includes('path /api/webhooks /api/webhooks/*'),
+  'caddy: app domain must route public webhooks directly to the API',
+);
+assert(
+  caddyfile.includes(
+    'handle @api_webhooks {\n\t\timport roomote_proxy api:3001',
+  ),
+  'caddy: public webhooks must bypass the web application',
+);
+assert(
   caddyfile.includes(
     'path_regexp local_sandbox ^/_roomote-sandbox/([a-z0-9]+)(/.*)$',
   ),
@@ -344,7 +459,7 @@ function validateCaddyfile(mode, contents, environment) {
 
 const caddyEnvironment = {
   ROOMOTE_APP_DOMAIN: 'roomote.example.test',
-  ROOMOTE_PREVIEW_DOMAIN: 'preview.roomote.example.test',
+  ROOMOTE_PREVIEW_DOMAIN: 'roomote.example.test',
   S3_BUCKET_ARTIFACTS: 'roomote-artifacts',
 };
 validateCaddyfile('acme', acmeCaddyfile, {
@@ -496,6 +611,7 @@ for (const script of [
   'deploy/ci/upgrade-compatibility.sh',
   'deploy/host/tests/backup-restore.integration.sh',
   'deploy/host/tests/upgrade-failed-pull.sh',
+  '.docker/gbrain/entrypoint.sh',
 ]) {
   execFileSync('bash', ['-n', join(root, script)], { stdio: 'pipe' });
 }

@@ -283,8 +283,8 @@ export const ROUTE_POLICY_RULES: readonly RoutePolicyRule[] = [
     ],
   },
 
-  // Router-facing MCP endpoints: accept user auth tokens (LLM router
-  // gathering context before a run exists) and task run tokens.
+  // Router-facing MCP endpoints share token parsing. The public member route
+  // rejects run tokens in its handler; the legacy route remains run-capable.
   {
     name: 'roomote-public-mcp',
     match: { type: 'exact', path: '/mcp' },

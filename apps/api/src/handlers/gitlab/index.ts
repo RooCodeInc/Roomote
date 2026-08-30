@@ -3,9 +3,11 @@ import { createHash } from 'node:crypto';
 import { Hono } from 'hono';
 
 import { resolveDeploymentEnvVar } from '@roomote/db/server';
+import { handleMergeAnnouncerPush } from '@roomote/sdk/server';
 
 import { apiLogger, logApiError } from '../../logging';
 import { recordWebhook } from '../github/recordWebhook';
+import { normalizeGitLabPush } from '../merge-announcer-push';
 import { handleGitLabIssue } from './handleIssue';
 import { handleGitLabMergeRequest } from './handleMergeRequest';
 import { handleGitLabNote } from './handleNote';
@@ -15,6 +17,7 @@ import {
   gitLabMergeRequestWebhookSchema,
   gitLabNoteWebhookSchema,
   gitLabPipelineWebhookSchema,
+  gitLabPushWebhookSchema,
 } from './types';
 import { verifyGitLabWebhook } from './verifyWebhook';
 
@@ -29,7 +32,9 @@ function getGitLabDeliveryId({
 }): string {
   return (
     headers['webhook-id'] ??
+    headers['idempotency-key'] ??
     headers['x-gitlab-webhook-uuid'] ??
+    headers['x-gitlab-event-uuid'] ??
     createHash('sha256').update(body).digest('hex')
   );
 }
@@ -101,6 +106,20 @@ gitlab.post('/', async (c) => {
         `pipeline.${status}`,
         payload,
         () => handleGitLabPipeline(payload),
+        { provider: 'gitlab' },
+      );
+
+      return c.json({ message: 'webhook_processed' });
+    }
+
+    if (eventName === 'Push Hook') {
+      const payload = gitLabPushWebhookSchema.parse(parsedJson);
+
+      await recordWebhook(
+        deliveryId,
+        'push',
+        payload,
+        () => handleMergeAnnouncerPush(normalizeGitLabPush(payload)),
         { provider: 'gitlab' },
       );
 

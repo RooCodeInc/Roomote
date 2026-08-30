@@ -2,6 +2,7 @@ import {
   generateLlmTaskTitle,
   isFallbackTaskTitle,
   LLM_TITLE_LOCKED_CHECKPOINT,
+  refreshTaskSessionTitle,
 } from '@roomote/cloud-agents/server';
 import {
   db,
@@ -10,7 +11,9 @@ import {
   tasks,
   taskRuns,
   getBackgroundAgentSettings,
+  upsertBackgroundAutomationSlackThread,
   slackInstallations,
+  users,
   normalizeTaskActivityTimestamp,
   eq,
   and,
@@ -27,9 +30,16 @@ import {
   trackSlackBotReply,
 } from '@roomote/slack';
 import { createDiscordCommunicationProviderFromRuntimeCredentials } from '../discord-communication';
+import { listConnectedCommunicationProviders } from '../../automations/destination';
+import {
+  hasUserDirectMessageIdentity,
+  sendUserDirectMessage,
+} from '../user-direct-message';
 import {
   appendManagerSlackFooter,
+  buildAutomationSettingsMessage,
   degradeSlackMrkdwnToMarkdown,
+  PLATFORM_ISSUE_ALERTS_SETTINGS_HASH,
 } from '../manager-slack';
 import {
   type AcpPersistedEnvelope,
@@ -46,6 +56,7 @@ import {
   isVisibleInTranscript,
   normalizeTranscriptUserText,
   platformIssueReportSchema,
+  type CommunicationProvider,
   withTranscriptVisibility,
 } from '@roomote/types';
 
@@ -163,7 +174,7 @@ function getPlatformIssueReportFromToolPayload(
 
 function buildPlatformIssueTaskUrl(
   taskId: string,
-  utmSource: 'slack' | 'discord',
+  utmSource: CommunicationProvider,
 ): string {
   const url = new URL(`/task/${taskId}`, process.env.R_APP_URL);
 
@@ -177,13 +188,27 @@ function buildPlatformIssueTaskUrl(
 function buildPlatformIssueAlertText(params: {
   taskId: string;
   report: { title: string; summary: string };
-  utmSource: 'slack' | 'discord';
+  utmSource: CommunicationProvider;
 }): string {
   const taskUrl = buildPlatformIssueTaskUrl(params.taskId, params.utmSource);
 
   return appendManagerSlackFooter(
     `Platform issue reported: *${params.report.title}*\n` +
       `> ${params.report.summary}\n<${taskUrl}|View task>`,
+  );
+}
+
+function buildPlatformIssueSlackAlertMessage(params: {
+  taskId: string;
+  report: { title: string; summary: string };
+}) {
+  const taskUrl = buildPlatformIssueTaskUrl(params.taskId, 'slack');
+
+  return buildAutomationSettingsMessage(
+    `Platform issue reported: *${params.report.title}*\n` +
+      `> ${params.report.summary}`,
+    PLATFORM_ISSUE_ALERTS_SETTINGS_HASH,
+    { taskUrl, slackIcon: 'triangle-alert' },
   );
 }
 
@@ -199,6 +224,64 @@ async function markPlatformIssueReportPosted(reportRowId: string) {
         isNull(taskPlatformIssueReports.slackPostedAt),
       ),
     );
+}
+
+async function notifyDeploymentAdminsOfPlatformIssue(params: {
+  taskId: string;
+  report: { title: string; summary: string };
+}): Promise<{ complete: boolean; delivered: boolean }> {
+  const [admins, providers] = await Promise.all([
+    db.query.users.findMany({
+      where: and(eq(users.role, 'admin'), isNull(users.deletedAt)),
+      columns: { id: true },
+      orderBy: asc(users.createdAt),
+    }),
+    listConnectedCommunicationProviders(),
+  ]);
+  let delivered = false;
+  let eligibleAdmins = 0;
+  let deliveredAdmins = 0;
+
+  for (const admin of admins) {
+    const linkedProviders: CommunicationProvider[] = [];
+    for (const provider of providers) {
+      if (await hasUserDirectMessageIdentity(provider, admin.id)) {
+        linkedProviders.push(provider);
+      }
+    }
+    if (linkedProviders.length === 0) {
+      continue;
+    }
+
+    eligibleAdmins += 1;
+    for (const provider of linkedProviders) {
+      const slackText = buildPlatformIssueAlertText({
+        taskId: params.taskId,
+        report: params.report,
+        utmSource: provider,
+      });
+      const sent = await sendUserDirectMessage({
+        provider,
+        userId: admin.id,
+        text:
+          provider === 'slack'
+            ? slackText
+            : degradeSlackMrkdwnToMarkdown(slackText),
+        logContext: 'recordTaskMessageEnvelope',
+      });
+
+      if (sent) {
+        delivered = true;
+        deliveredAdmins += 1;
+        break;
+      }
+    }
+  }
+
+  return {
+    complete: eligibleAdmins > 0 && deliveredAdmins === eligibleAdmins,
+    delivered,
+  };
 }
 
 async function maybeNotifyPlatformIssue(params: {
@@ -218,9 +301,14 @@ async function maybeNotifyPlatformIssue(params: {
       columns: {
         botAccessToken: true,
         isActive: true,
+        teamId: true,
       },
     }),
   ]);
+
+  if (!settings.platformIssueAlertsEnabled) {
+    return;
+  }
 
   // The automation's own destination wins, then the shared manager channel.
   // Preserve the existing Slack preference when both manager providers exist.
@@ -263,6 +351,19 @@ async function maybeNotifyPlatformIssue(params: {
     settings.platformIssueSlackChannelId ?? settings.managerSlackChannelId;
 
   if (!channelId) {
+    const delivery = await notifyDeploymentAdminsOfPlatformIssue({
+      taskId: params.taskId,
+      report: params.report,
+    });
+    if (delivery.complete) {
+      await markPlatformIssueReportPosted(params.reportRowId);
+    } else {
+      console.warn(
+        delivery.delivered
+          ? `[recordTaskMessageEnvelope] Some linked admins did not receive the platform issue alert for task ${params.taskId}; leaving it pending for retry`
+          : `[recordTaskMessageEnvelope] No configured channel or linked admin DM destination for platform issue alert on task ${params.taskId}`,
+      );
+    }
     return;
   }
 
@@ -274,14 +375,14 @@ async function maybeNotifyPlatformIssue(params: {
   }
 
   const slack = new SlackNotifier(slackInstallation.botAccessToken);
+  const message = buildPlatformIssueSlackAlertMessage({
+    taskId: params.taskId,
+    report: params.report,
+  });
 
   const messageTs = await slack.postMessage({
     channel: channelId,
-    text: buildPlatformIssueAlertText({
-      taskId: params.taskId,
-      report: params.report,
-      utmSource: 'slack',
-    }),
+    ...message,
     unfurl_links: false,
     unfurl_media: false,
   });
@@ -291,6 +392,28 @@ async function maybeNotifyPlatformIssue(params: {
       `[recordTaskMessageEnvelope] Failed to post platform issue Slack alert for task ${params.taskId}`,
     );
     return;
+  }
+
+  try {
+    await upsertBackgroundAutomationSlackThread(db, {
+      surface: 'slack',
+      automationKey: 'platform_issue_alerts',
+      slackTeamId: slackInstallation.teamId,
+      slackChannelId: channelId,
+      threadTs: messageTs,
+      summaryText: message.text,
+      postedAt: new Date(),
+      metadata: {
+        sourceTaskId: params.taskId,
+        slackTeamId: slackInstallation.teamId,
+      },
+    });
+  } catch (error) {
+    console.warn(
+      `[recordTaskMessageEnvelope] Failed to track platform issue Slack alert thread for task ${params.taskId}: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
   }
 
   await markPlatformIssueReportPosted(params.reportRowId);
@@ -613,12 +736,19 @@ async function maybeRefreshTaskTitle(input: RecordTaskMessageEnvelopeInput) {
     return;
   }
 
-  await refreshTaskTitle({
-    taskId: input.taskId,
-    runId: input.runId,
-    userId: input.userId,
-    mode: 'checkpoint',
-  });
+  await Promise.all([
+    refreshTaskTitle({
+      taskId: input.taskId,
+      runId: input.runId,
+      userId: input.userId,
+      mode: 'checkpoint',
+    }),
+    refreshTaskSessionTitle({
+      taskId: input.taskId,
+      userId: input.userId,
+      mode: 'checkpoint',
+    }),
+  ]);
 }
 
 async function refreshTaskTitle(input: {
@@ -794,12 +924,19 @@ export async function refreshTaskTitleOnCompletion(input: {
     await pendingRefresh.catch(() => {});
   }
 
-  await refreshTaskTitle({
-    taskId: input.taskId,
-    runId: input.runId,
-    userId: input.userId,
-    mode: 'final',
-  });
+  await Promise.all([
+    refreshTaskTitle({
+      taskId: input.taskId,
+      runId: input.runId,
+      userId: input.userId,
+      mode: 'final',
+    }),
+    refreshTaskSessionTitle({
+      taskId: input.taskId,
+      userId: input.userId,
+      mode: 'final',
+    }),
+  ]);
 }
 
 function scheduleTaskTitleRefresh(input: RecordTaskMessageEnvelopeInput) {

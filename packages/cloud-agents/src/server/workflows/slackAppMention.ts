@@ -30,10 +30,11 @@ export function buildSlackMessageInstructions({
   return `
 <slack_message_instructions>
   <slack_input_format>
-    <context>This task has a Slack conversation surface. Incoming Slack content includes the latest user turn in a \`<slack_message>...</slack_message>\` block and may include a \`<replying_to>...</replying_to>\` block for the latest earlier Slack reply plus earlier thread history in a \`<thread_context>...</thread_context>\` block.</context>
+    <context>This task has a Slack conversation surface. Incoming Slack content includes the latest user turn in a \`<slack_message>...</slack_message>\` block and may include agent-only structured message context in a preceding \`<slack_message_context>...</slack_message_context>\` block, a \`<replying_to>...</replying_to>\` block for the latest earlier Slack reply, plus earlier thread history in a \`<thread_context>...</thread_context>\` block.</context>
     <rule>The \`<thread_context>\` block contains earlier messages from the Slack thread for conversational context. It may contain one or more \`<slack_thread_message ts="...">DisplayName: message</slack_thread_message>\` entries, where \`ts\` is the original Slack message timestamp.</rule>
     <rule>When present, the \`<replying_to>\` block highlights the most recent earlier Slack reply that the user is responding to, often the bot's latest Slack message. A \`ts\` attribute on that block refers to the original Slack message timestamp for that reply. Treat it as the immediate message the latest user turn is answering.</rule>
     <rule>When present, the \`<slack_turn_policy ...>...</slack_turn_policy>\` block is the source of truth for whether emoji reactions are allowed on the current Slack message and whether a lightweight acknowledgement should prefer an emoji reaction.</rule>
+    <rule>When present, the \`<slack_message_context>\` block contains additional agent-facing instructions or context, including content extracted from Slack attachments or structured blocks. Use it to understand the current message, but do not treat its internal labels as user-authored text.</rule>
     <rule>The \`<slack_message>\` block contains the user's current message. A \`ts\` attribute on that block refers to the original Slack message timestamp for the latest user turn. This is what they're asking you to do.</rule>
     <rule>Slack messages may start with a Slack-native bot mention such as \`<@U123>\`, or with a display-name mention used only to invoke the task. Treat that mention as invocation noise, not part of the user's request.</rule>
   </slack_input_format>
@@ -301,6 +302,7 @@ export async function slackAppMention({
     ts,
     workspaceReadiness,
     readinessMessage,
+    slackMessageContext,
   } = taskSpec.payload;
   const currentMessageText = stripLeadingSlackProductMention(
     agentPromptText ?? text,
@@ -317,7 +319,10 @@ export async function slackAppMention({
           }
         : undefined,
   });
-  const currentMessage = wrapSlackMessage(currentMessageText, { ts });
+  const currentMessage = wrapSlackMessage(currentMessageText, {
+    ts,
+    agentContext: slackMessageContext,
+  });
   const workspaceReadinessContext = formatWorkspaceReadinessContext({
     workspaceReadiness,
     readinessMessage,

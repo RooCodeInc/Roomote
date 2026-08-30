@@ -161,6 +161,7 @@ function buildProviderSetup(
   overrides: {
     openrouterRuntimeKey?: boolean;
     openrouterSavedKey?: boolean;
+    managedRoomote?: boolean;
     openaiSavedKey?: boolean;
     anthropicSavedKey?: boolean;
     chatgptConnected?: boolean;
@@ -184,6 +185,24 @@ function buildProviderSetup(
       persistedProviderId: null,
       preselectedProvider: 'openrouter' as const,
       providers: [
+        ...(overrides.managedRoomote
+          ? [
+              {
+                id: 'roomote' as SetupModelProviderId,
+                label: 'Roomote inference',
+                envVarName: 'R_TRIAL_OPENROUTER_API_KEY',
+                defaultRoomoteModel: 'roomote/openai/gpt-5.6-luna',
+                authKind: 'api-key' as const,
+                suggestedTaskModels: [],
+                hidden: true,
+                // The imported Settings row, not the hosting-injected env
+                // variable, is what connects the provider.
+                runtimeApiKeySatisfied: false,
+                savedApiKeySatisfied: true,
+                additionalEnvValues: {} satisfies Record<string, string>,
+              },
+            ]
+          : []),
         {
           id: 'openrouter' as SetupModelProviderId,
           label: 'OpenRouter',
@@ -534,7 +553,9 @@ describe('InferenceProviderSection', () => {
     renderInferenceProviderSection();
 
     // Locale-independent: currency separators and symbols vary by environment.
-    expect(screen.getByText(/Credits:.*left/i)).toBeInTheDocument();
+    expect(
+      screen.getByText(/12[.,]50.*of.*50[.,]00.*left/i),
+    ).toBeInTheDocument();
     expect(
       screen.getByRole('progressbar', { name: 'Credit balance' }),
     ).toBeInTheDocument();
@@ -663,7 +684,9 @@ describe('InferenceProviderSection', () => {
 
     expect(screen.getByText('xAI (Grok subscription)')).toBeInTheDocument();
     expect(screen.getByText('xAI')).toBeInTheDocument();
-    expect(screen.getByLabelText('API key for xAI')).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Edit xAI API key' }),
+    ).toBeInTheDocument();
     expect(
       screen.getByText(/subscription is preferred at runtime/i),
     ).toBeInTheDocument();
@@ -762,17 +785,13 @@ describe('InferenceProviderSection', () => {
     ).not.toBeInTheDocument();
   });
 
-  it('masks a saved key on a connected row and allows rotating it', async () => {
+  it('opens an edit dialog for a saved key and allows rotating it', async () => {
     providerSetupData.current = buildProviderSetup({
       anthropicSavedKey: true,
     });
     mutateAsyncMock.mockResolvedValue({});
 
     renderInferenceProviderSection();
-
-    expect(screen.getByLabelText('API key for Anthropic')).toHaveValue(
-      '••••••••••••••••••••••••••••',
-    );
 
     fireEvent.click(
       screen.getByRole('button', { name: 'Edit Anthropic API key' }),
@@ -895,17 +914,78 @@ describe('InferenceProviderSection', () => {
     expect(mutateAsyncMock).toHaveBeenCalledWith({ provider: 'anthropic' });
   });
 
-  it('locks a runtime env-managed key behind a masked field and lock tooltip', () => {
+  it('shows managed Roomote inference separately while OpenRouter remains addable', () => {
+    providerSetupData.current = buildProviderSetup({
+      managedRoomote: true,
+    });
+    providerCreditsData.current = [
+      {
+        providerId: 'roomote',
+        remaining: 3,
+        limit: 5,
+        currency: 'USD',
+        fetchedAt: new Date().toISOString(),
+      },
+    ];
+
+    renderInferenceProviderSection();
+
+    expect(screen.getByText('Roomote inference')).toBeInTheDocument();
+    expect(screen.getByText(/3[.,]00.*of.*5[.,]00.*left/i)).toBeInTheDocument();
+    expect(
+      screen.getByRole('progressbar', { name: 'Credit balance' }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: /edit roomote inference/i }),
+    ).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /Add provider/ }));
+    fireEvent.click(screen.getByRole('combobox', { name: 'Provider to add' }));
+    expect(
+      screen.getByRole('option', { name: 'OpenRouter' }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole('option', { name: 'Roomote inference' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('offers deleting Roomote inference once another provider is connected', () => {
+    providerSetupData.current = buildProviderSetup({
+      managedRoomote: true,
+      anthropicSavedKey: true,
+    });
+
+    renderInferenceProviderSection();
+
+    const deleteButton = screen.getByRole('button', {
+      name: 'Delete Roomote inference provider',
+    });
+    expect(deleteButton).toBeEnabled();
+
+    fireEvent.click(deleteButton);
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+  });
+
+  it('blocks deleting Roomote inference while it is the only provider', () => {
+    providerSetupData.current = buildProviderSetup({
+      managedRoomote: true,
+    });
+
+    renderInferenceProviderSection();
+
+    expect(
+      screen.getByRole('button', {
+        name: 'Delete Roomote inference provider',
+      }),
+    ).toBeDisabled();
+  });
+
+  it('locks a runtime env-managed key behind a lock tooltip', () => {
     providerSetupData.current = buildProviderSetup({
       openrouterRuntimeKey: true,
     });
 
     renderInferenceProviderSection();
 
-    expect(screen.getByLabelText('API key for OpenRouter')).toHaveValue(
-      '••••••••••••••••••••••••••••',
-    );
-    expect(screen.getByLabelText('API key for OpenRouter')).toBeDisabled();
     expect(
       screen.getByLabelText(
         'OpenRouter API key is managed by OPENROUTER_API_KEY',

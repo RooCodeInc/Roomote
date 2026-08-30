@@ -1,15 +1,25 @@
-import { enqueueTask } from '@roomote/cloud-agents/server';
+import {
+  enqueueTask,
+  resolveApiBaseUrl,
+  sendFastAgentTaskMessageOnce,
+} from '@roomote/cloud-agents/server';
 import {
   and,
   db,
   desc,
   eq,
   gt,
+  inArray,
+  isNotNull,
+  isNull,
   setTrustedRunActingUser,
   taskRuns,
   tasks,
 } from '@roomote/db/server';
-import { queueCommunicationMessage } from '@roomote/communication';
+import {
+  queueCommunicationMessage,
+  queueCommunicationMessageOnce,
+} from '@roomote/communication';
 import { withContention } from '@roomote/redis';
 import {
   clearLatestUserMessage,
@@ -22,6 +32,12 @@ import {
 } from '@roomote/slack';
 import {
   ALL_REPOSITORIES,
+  activeRunStatuses,
+  buildFastAgentChildTaskMetadata,
+  type FastAgentParent,
+  getFastAgentParentFromPayload,
+  RunStatus,
+  SANDBOX_SNAPSHOT_EXPIRY_MS,
   TaskPayloadKind,
   populateSnapshotResumeSlackMetadata,
   restoreSnapshotResumeVisiblePromptFields,
@@ -40,6 +56,120 @@ export type PrReviewFollowUpDispatchResult =
   | { outcome: 'resumed'; runId: number }
   | { outcome: 'unavailable' };
 
+type PrReviewFollowUpDispatchInput = {
+  taskId: string;
+  followUpPrompt: string;
+  actingUserId: string;
+  providerUserId?: string;
+  slackTeamId?: string;
+  idempotencyKey?: string;
+} & (
+  | {
+      provider: 'web';
+      channelId?: never;
+      threadId?: never;
+      idempotencyKey: string;
+    }
+  | {
+      provider: PrReviewActionProvider;
+      channelId: string;
+      threadId: string | null;
+    }
+);
+
+type FastAgentSlackLookup = {
+  taskId: string;
+  slackTeamId: string;
+  channelId: string;
+  threadId: string;
+};
+
+function getMatchingFastAgentSlackParent(
+  payload: unknown,
+  input: FastAgentSlackLookup,
+): FastAgentParent | null {
+  const parent = getFastAgentParentFromPayload(payload);
+  if (
+    parent?.conversation.surface !== 'slack' ||
+    parent.conversation.workspaceId !== input.slackTeamId ||
+    parent.conversation.replyTarget.channelId !== input.channelId ||
+    parent.conversation.replyTarget.threadId !== input.threadId
+  ) {
+    return null;
+  }
+
+  return parent;
+}
+
+async function findActiveFastAgentSlackTaskRun(input: FastAgentSlackLookup) {
+  const [activeRun] = await db
+    .select({
+      id: taskRuns.id,
+      taskId: taskRuns.taskId,
+      payload: taskRuns.payload,
+    })
+    .from(taskRuns)
+    .innerJoin(tasks, eq(tasks.id, taskRuns.taskId))
+    .where(
+      and(
+        eq(taskRuns.taskId, input.taskId),
+        inArray(taskRuns.status, [...activeRunStatuses]),
+        isNull(taskRuns.canceledAt),
+        isNull(tasks.deletedAt),
+      ),
+    )
+    .orderBy(desc(taskRuns.createdAt))
+    .limit(1);
+
+  if (!activeRun) {
+    return null;
+  }
+
+  return getMatchingFastAgentSlackParent(activeRun.payload, input)
+    ? activeRun
+    : null;
+}
+
+async function findCompletedFastAgentSlackTaskRunWithSnapshot(
+  input: FastAgentSlackLookup,
+) {
+  const snapshotCutoff = new Date(Date.now() - SANDBOX_SNAPSHOT_EXPIRY_MS);
+  const [completedRun] = await db
+    .select({
+      id: taskRuns.id,
+      taskId: taskRuns.taskId,
+      snapshotId: taskRuns.snapshotId,
+      payload: taskRuns.payload,
+      port: taskRuns.port,
+    })
+    .from(taskRuns)
+    .innerJoin(tasks, eq(tasks.id, taskRuns.taskId))
+    .where(
+      and(
+        eq(taskRuns.taskId, input.taskId),
+        inArray(taskRuns.status, [RunStatus.Completed, RunStatus.Idle]),
+        isNotNull(taskRuns.snapshotId),
+        isNull(taskRuns.snapshotFailedAt),
+        isNull(taskRuns.canceledAt),
+        isNull(tasks.deletedAt),
+        gt(taskRuns.snapshotCreatedAt, snapshotCutoff),
+      ),
+    )
+    .orderBy(desc(taskRuns.createdAt))
+    .limit(1);
+
+  if (!completedRun) {
+    return null;
+  }
+
+  const parent = getMatchingFastAgentSlackParent(completedRun.payload, input);
+  if (!parent) {
+    return null;
+  }
+
+  return { ...completedRun, parent };
+}
+
 /**
  * Delivers a prepared PR review follow-up instruction into its owning task,
  * using the originating conversation only as a secondary routing constraint.
@@ -47,27 +177,51 @@ export type PrReviewFollowUpDispatchResult =
  * queue into that task's live run when one exists, otherwise wake that task
  * from its snapshot. Used by button handlers and the auto-handle path.
  */
-export async function dispatchPrReviewFollowUp(input: {
-  provider: PrReviewActionProvider;
-  taskId: string;
-  channelId: string;
-  threadId: string | null;
-  followUpPrompt: string;
-  /** Roomote user the dispatched work is attributed to. */
-  actingUserId: string;
-  /** Provider-native user id shown in the transcript; falls back to actingUserId. */
-  providerUserId?: string;
-  /**
-   * Workspace identity for modern Slack runs. Verified legacy offers can omit
-   * it because their immutable task binding is the routing authority.
-   */
-  slackTeamId?: string;
-}): Promise<PrReviewFollowUpDispatchResult> {
+export async function dispatchPrReviewFollowUp(
+  input: PrReviewFollowUpDispatchInput,
+): Promise<PrReviewFollowUpDispatchResult> {
+  if (input.provider === 'web') {
+    return dispatchWebFollowUp(input);
+  }
   if (input.provider === 'slack') {
-    return dispatchSlackFollowUp(input);
+    return dispatchSlackFollowUp({
+      ...input,
+    });
   }
 
-  return dispatchCommunicationFollowUp(input);
+  return dispatchCommunicationFollowUp({
+    ...input,
+    provider: input.provider,
+  });
+}
+
+async function dispatchWebFollowUp(input: {
+  taskId: string;
+  followUpPrompt: string;
+  actingUserId: string;
+  idempotencyKey: string;
+}): Promise<PrReviewFollowUpDispatchResult> {
+  const dispatched = await sendFastAgentTaskMessageOnce(
+    {
+      userId: input.actingUserId,
+      apiBaseUrl: resolveApiBaseUrl() ?? undefined,
+    },
+    {
+      taskId: input.taskId,
+      message: input.followUpPrompt,
+      clientMessageId: input.idempotencyKey,
+    },
+  );
+  if (!dispatched.success) return { outcome: 'unavailable' };
+
+  const latestRun = await db.query.taskRuns.findFirst({
+    where: eq(taskRuns.taskId, input.taskId),
+    orderBy: [desc(taskRuns.createdAt)],
+    columns: { id: true },
+  });
+  return latestRun
+    ? { outcome: 'queued', runId: latestRun.id }
+    : { outcome: 'unavailable' };
 }
 
 async function dispatchSlackFollowUp(input: {
@@ -78,6 +232,7 @@ async function dispatchSlackFollowUp(input: {
   actingUserId: string;
   providerUserId?: string;
   slackTeamId?: string;
+  idempotencyKey?: string;
 }): Promise<PrReviewFollowUpDispatchResult> {
   const threadTs = input.threadId;
 
@@ -89,27 +244,56 @@ async function dispatchSlackFollowUp(input: {
     text: input.followUpPrompt,
     user: input.providerUserId ?? input.actingUserId,
     userId: input.actingUserId,
-    ts: new Date().toISOString(),
+    ts: input.idempotencyKey ?? new Date().toISOString(),
   };
   const lookupScope = input.slackTeamId
     ? { taskId: input.taskId, slackTeamId: input.slackTeamId }
     : { taskId: input.taskId };
-  const activeRun = await findActiveSlackTaskRun(threadTs, lookupScope);
+  const threadBoundActiveRun = await findActiveSlackTaskRun(
+    threadTs,
+    lookupScope,
+  );
+  const fastAgentActiveRun =
+    !threadBoundActiveRun && input.slackTeamId
+      ? await findActiveFastAgentSlackTaskRun({
+          taskId: input.taskId,
+          slackTeamId: input.slackTeamId,
+          channelId: input.channelId,
+          threadId: threadTs,
+        })
+      : null;
+  const activeRun = threadBoundActiveRun ?? fastAgentActiveRun;
 
   if (activeRun) {
     await setTrustedRunActingUser({
       runId: activeRun.id,
       userId: input.actingUserId,
     });
-    await queueSlackMessage(activeRun.id, queuedMessage);
+    if (input.idempotencyKey) {
+      await queueCommunicationMessageOnce('slack', activeRun.id, queuedMessage);
+    } else {
+      await queueSlackMessage(activeRun.id, queuedMessage);
+    }
 
     return { outcome: 'queued', runId: activeRun.id };
   }
 
-  const completedRun = await findCompletedSlackTaskRunWithSnapshot(
+  const threadBoundCompletedRun = await findCompletedSlackTaskRunWithSnapshot(
     threadTs,
     lookupScope,
   );
+  // Fast children inherit the parent conversation but do not own its Slack
+  // thread binding, so validate the persisted parent coordinates explicitly.
+  const fastAgentCompletedRun =
+    !threadBoundCompletedRun && input.slackTeamId
+      ? await findCompletedFastAgentSlackTaskRunWithSnapshot({
+          taskId: input.taskId,
+          slackTeamId: input.slackTeamId,
+          channelId: input.channelId,
+          threadId: threadTs,
+        })
+      : null;
+  const completedRun = threadBoundCompletedRun ?? fastAgentCompletedRun;
 
   if (!completedRun?.snapshotId) {
     return { outcome: 'unavailable' };
@@ -137,6 +321,9 @@ async function dispatchSlackFollowUp(input: {
     slackOriginMessageTs: originMessageTs,
     ackEmoji,
     completionEmoji,
+    ...(fastAgentCompletedRun
+      ? buildFastAgentChildTaskMetadata(fastAgentCompletedRun.parent)
+      : {}),
   };
 
   populateSnapshotResumeSlackMetadata(resumePayload, {
@@ -173,14 +360,16 @@ async function dispatchSlackFollowUp(input: {
         // instead of dropping the follow-up. The task predicate prevents a
         // sibling task in the same thread from receiving the action.
         const [recent] = await db
-          .select({ id: taskRuns.id })
+          .select({ id: taskRuns.id, payload: taskRuns.payload })
           .from(taskRuns)
           .innerJoin(tasks, eq(tasks.id, taskRuns.taskId))
           .where(
             and(
-              eq(tasks.slackThreadTs, threadTs),
+              ...(fastAgentCompletedRun
+                ? []
+                : [eq(tasks.slackThreadTs, threadTs)]),
               eq(taskRuns.taskId, input.taskId),
-              ...(input.slackTeamId
+              ...(input.slackTeamId && !fastAgentCompletedRun
                 ? [getSlackTaskRunWorkspacePredicate(input.slackTeamId)]
                 : []),
               eq(taskRuns.kind, 'resume'),
@@ -189,6 +378,19 @@ async function dispatchSlackFollowUp(input: {
           )
           .orderBy(desc(taskRuns.createdAt))
           .limit(1);
+
+        if (
+          fastAgentCompletedRun &&
+          recent &&
+          !getMatchingFastAgentSlackParent(recent.payload, {
+            taskId: input.taskId,
+            slackTeamId: input.slackTeamId!,
+            channelId: input.channelId,
+            threadId: threadTs,
+          })
+        ) {
+          return undefined;
+        }
 
         return recent?.id;
       },
@@ -199,7 +401,11 @@ async function dispatchSlackFollowUp(input: {
     return { outcome: 'unavailable' };
   }
 
-  await queueSlackMessage(resumeRunId, queuedMessage);
+  if (input.idempotencyKey) {
+    await queueCommunicationMessageOnce('slack', resumeRunId, queuedMessage);
+  } else {
+    await queueSlackMessage(resumeRunId, queuedMessage);
+  }
   await clearLatestUserMessage(resumeRunId);
 
   return { outcome: 'resumed', runId: resumeRunId };
@@ -213,6 +419,7 @@ async function dispatchCommunicationFollowUp(input: {
   followUpPrompt: string;
   actingUserId: string;
   providerUserId?: string;
+  idempotencyKey?: string;
 }): Promise<PrReviewFollowUpDispatchResult> {
   const provider = input.provider as 'discord' | 'telegram';
   const conversation = {
@@ -225,7 +432,7 @@ async function dispatchCommunicationFollowUp(input: {
     text: input.followUpPrompt,
     user: input.providerUserId ?? input.actingUserId,
     userId: input.actingUserId,
-    ts: new Date().toISOString(),
+    ts: input.idempotencyKey ?? new Date().toISOString(),
   };
   const activeRun = await findActiveCommunicationTaskRun(conversation);
 
@@ -234,7 +441,15 @@ async function dispatchCommunicationFollowUp(input: {
       runId: activeRun.id,
       userId: input.actingUserId,
     });
-    await queueCommunicationMessage(provider, activeRun.id, queuedMessage);
+    if (input.idempotencyKey) {
+      await queueCommunicationMessageOnce(
+        provider,
+        activeRun.id,
+        queuedMessage,
+      );
+    } else {
+      await queueCommunicationMessage(provider, activeRun.id, queuedMessage);
+    }
 
     return { outcome: 'queued', runId: activeRun.id };
   }

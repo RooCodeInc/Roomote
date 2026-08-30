@@ -12,6 +12,7 @@ import {
   stripLlmCitationArtifacts,
 } from '@roomote/types';
 import { type DequeuedTaskRun, sdk } from '@roomote/sdk/client';
+import { SLACK_SESSION_LIVE_TASK_CARD_MESSAGES } from '@roomote/slack/client';
 
 import type { Harness } from '../sandbox-server';
 import type { HarnessInferenceUsageEvent } from '../sandbox-server/lib/harness';
@@ -20,6 +21,7 @@ import { captureWorkerException } from '../monitoring/sentry';
 
 import type { CallbackEvent, RunTaskCallbacks, RunTaskContext } from './types';
 import { fromRuntimeEnvelope } from './runtime-events/envelope';
+import { isEligibleProvisionalCompletionText } from './provisional-completion';
 import {
   cancelPendingMissingChatCloseoutFallback,
   recordMissingChatCloseoutFallback,
@@ -39,6 +41,11 @@ const TOOL_RUNTIME_EVENT_TYPES = new Set<string>([
 interface PendingCompletionEvents {
   callbackTaskId: string;
   events: CallbackEvent[];
+}
+
+interface HarnessCallbackSubscription {
+  (): Promise<void>;
+  flushPendingCompletionEvents(): Promise<void>;
 }
 
 /**
@@ -61,7 +68,7 @@ export function subscribeHarnessCallbacks({
   context: RunTaskContext;
   logger: HarnessLogger;
   mcpTaskEnv?: Record<string, string>;
-}): () => Promise<void> {
+}): HarnessCallbackSubscription {
   const persistedTaskId = taskRun.taskId;
   const pendingCompletionEventsByCallbackId = new Map<
     string,
@@ -69,6 +76,11 @@ export function subscribeHarnessCallbacks({
   >();
   const pendingPersistenceWrites = new Set<Promise<void>>();
   const pendingTaskCompletionWork = new Set<Promise<void>>();
+  const latestAssistantMessagesByCallbackId = new Map<
+    string,
+    { text: string; ts: number }
+  >();
+  const filteredCompletionCallbackIds = new Set<string>();
   let consecutivePersistenceFailures = 0;
   let assistantOutputStamped = false;
   let assistantOutputStampInFlight: Promise<void> | null = null;
@@ -232,28 +244,48 @@ export function subscribeHarnessCallbacks({
     );
   };
 
-  const forwardCallbackEvent = (
+  const forwardCallbackEvent = async (
     callbackTaskId: string,
     event: CallbackEvent,
-  ) => {
+  ): Promise<void> => {
     if (event.type === 'completion') {
       logger.info(
         `[subscribeHarnessCallbacks] Forwarding completion callback for task run ${taskRun.id}: taskId=${callbackTaskId} ts=${event.ts} textChars=${event.text.length}`,
       );
     }
 
-    void callbacks
-      .onMessage?.(taskRun, callbackTaskId, event, context)
-      .catch((error) => {
-        logger.warn(
-          `[subscribeHarnessCallbacks] Failed callback onMessage for task run ${taskRun.id}: ${
-            error instanceof Error ? error.message : String(error)
-          }`,
-        );
-      });
+    const slackReplyTarget = context.slackReplyTarget as
+      | {
+          slackTeamId: string;
+          channel: string;
+          threadTs: string;
+          reactionsAllowed?: boolean;
+        }
+      | undefined;
+    const callbackPromise = slackReplyTarget
+      ? callbacks.onMessage?.(taskRun, callbackTaskId, event, context, {
+          slackReplyTarget: { ...slackReplyTarget },
+        })
+      : callbacks.onMessage?.(taskRun, callbackTaskId, event, context);
+
+    try {
+      await callbackPromise;
+      if (event.type === 'completion') {
+        latestAssistantMessagesByCallbackId.delete(callbackTaskId);
+        filteredCompletionCallbackIds.delete(callbackTaskId);
+      }
+    } catch (error) {
+      logger.warn(
+        `[subscribeHarnessCallbacks] Failed callback onMessage for task run ${taskRun.id}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
   };
 
-  const flushPendingCompletionEvents = (callbackTaskId: string) => {
+  const flushPendingCompletionEventsForTask = async (
+    callbackTaskId: string,
+  ): Promise<void> => {
     const pending = pendingCompletionEventsByCallbackId.get(callbackTaskId);
 
     if (!pending) {
@@ -263,7 +295,41 @@ export function subscribeHarnessCallbacks({
     pendingCompletionEventsByCallbackId.delete(callbackTaskId);
 
     for (const event of pending.events) {
-      forwardCallbackEvent(pending.callbackTaskId, event);
+      await forwardCallbackEvent(pending.callbackTaskId, event);
+    }
+  };
+
+  const flushPendingCompletionEvents = async (): Promise<void> => {
+    await waitForPendingPersistenceWrites();
+    await waitForPendingTaskCompletionWork();
+
+    while (pendingCompletionEventsByCallbackId.size > 0) {
+      await Promise.all(
+        [...pendingCompletionEventsByCallbackId.keys()].map((callbackTaskId) =>
+          flushPendingCompletionEventsForTask(callbackTaskId),
+        ),
+      );
+    }
+
+    for (const [
+      callbackTaskId,
+      message,
+    ] of latestAssistantMessagesByCallbackId) {
+      await forwardCallbackEvent(callbackTaskId, {
+        type: 'completion',
+        text: message.text,
+        ts: message.ts,
+        provisional: true,
+      });
+    }
+
+    for (const callbackTaskId of filteredCompletionCallbackIds) {
+      await forwardCallbackEvent(callbackTaskId, {
+        type: 'completion',
+        text: SLACK_SESSION_LIVE_TASK_CARD_MESSAGES.completed,
+        ts: Date.now(),
+        provisional: true,
+      });
     }
   };
 
@@ -386,9 +452,25 @@ export function subscribeHarnessCallbacks({
       for (const event of events) {
         if (event.type === 'followup' || event.type === 'request_user_input') {
           clearPendingCompletionEvents(callbackTaskId);
+          latestAssistantMessagesByCallbackId.delete(callbackTaskId);
+          filteredCompletionCallbackIds.delete(callbackTaskId);
+        } else if (event.type === 'request_user_input_response') {
+          latestAssistantMessagesByCallbackId.delete(callbackTaskId);
+          filteredCompletionCallbackIds.delete(callbackTaskId);
+        } else if (event.type === 'text') {
+          if (isEligibleProvisionalCompletionText(event.text)) {
+            latestAssistantMessagesByCallbackId.set(callbackTaskId, {
+              text: event.text,
+              ts: event.ts,
+            });
+            filteredCompletionCallbackIds.delete(callbackTaskId);
+          } else {
+            latestAssistantMessagesByCallbackId.delete(callbackTaskId);
+            filteredCompletionCallbackIds.add(callbackTaskId);
+          }
         }
 
-        forwardCallbackEvent(callbackTaskId, event);
+        void forwardCallbackEvent(callbackTaskId, event);
       }
     });
 
@@ -422,21 +504,31 @@ export function subscribeHarnessCallbacks({
       trackPendingTaskCompletionWork(
         (async () => {
           await waitForPendingPersistenceWrites();
-          flushPendingCompletionEvents(taskId);
+          await flushPendingCompletionEventsForTask(taskId);
         })(),
       );
       return;
     }
 
-    if (
-      event.eventName === TaskEventName.TaskAborted ||
-      event.eventName === TaskEventName.TaskStarted
-    ) {
+    if (event.eventName === TaskEventName.TaskStarted) {
       clearPendingCompletionEvents(taskId);
+      latestAssistantMessagesByCallbackId.delete(taskId);
+      filteredCompletionCallbackIds.delete(taskId);
+      void forwardCallbackEvent(taskId, {
+        type: 'turn_started',
+        ts: Date.now(),
+      });
+      return;
+    }
+
+    if (event.eventName === TaskEventName.TaskAborted) {
+      clearPendingCompletionEvents(taskId);
+      latestAssistantMessagesByCallbackId.delete(taskId);
+      filteredCompletionCallbackIds.delete(taskId);
     }
   });
 
-  return async () => {
+  const unsubscribe = async () => {
     unsubscribeRuntimeOutput();
     unsubscribeRuntimeInferenceUsage();
     unsubscribeTurnCompleted();
@@ -448,7 +540,10 @@ export function subscribeHarnessCallbacks({
     await waitForMissingChatCloseoutFallbackDelivery(context);
 
     for (const callbackTaskId of pendingCompletionEventsByCallbackId.keys()) {
-      flushPendingCompletionEvents(callbackTaskId);
+      await flushPendingCompletionEventsForTask(callbackTaskId);
     }
   };
+
+  unsubscribe.flushPendingCompletionEvents = flushPendingCompletionEvents;
+  return unsubscribe;
 }

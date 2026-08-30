@@ -1,4 +1,4 @@
-import type { SlackBlock } from '@roomote/types';
+import { PR_REVIEW_ACTION_LABELS, type SlackBlock } from '@roomote/types';
 
 export const PR_REVIEW_ACTION_YES_ACTION_ID = 'pr_review_action_yes';
 export const PR_REVIEW_ACTION_AUTO_ACTION_ID = 'pr_review_action_auto';
@@ -30,7 +30,7 @@ export function parseSlackPrReviewActionButtonValue(
  * Dismiss buttons. The caller appends the sticky thread footer.
  */
 export function buildSlackPrReviewActionBlocks(params: {
-  /** Summary text already converted to Slack mrkdwn link syntax. */
+  /** Summary text in standard Markdown for Slack's modern markdown block. */
   text: string;
   question: string;
   nonce: string;
@@ -39,11 +39,8 @@ export function buildSlackPrReviewActionBlocks(params: {
 
   return [
     {
-      type: 'section',
-      text: {
-        type: 'mrkdwn',
-        text: params.text,
-      },
+      type: 'markdown',
+      text: params.text,
     },
     {
       type: 'section',
@@ -62,7 +59,7 @@ export function buildSlackPrReviewActionBlocks(params: {
           action_id: PR_REVIEW_ACTION_YES_ACTION_ID,
           text: {
             type: 'plain_text',
-            text: 'Resolve these issues',
+            text: PR_REVIEW_ACTION_LABELS.yes,
             emoji: true,
           },
           value,
@@ -72,7 +69,7 @@ export function buildSlackPrReviewActionBlocks(params: {
           action_id: PR_REVIEW_ACTION_AUTO_ACTION_ID,
           text: {
             type: 'plain_text',
-            text: 'Auto-resolve on this PR',
+            text: PR_REVIEW_ACTION_LABELS.auto,
             emoji: true,
           },
           value,
@@ -80,7 +77,11 @@ export function buildSlackPrReviewActionBlocks(params: {
         {
           type: 'button',
           action_id: PR_REVIEW_ACTION_DISMISS_ACTION_ID,
-          text: { type: 'plain_text', text: 'Dismiss', emoji: true },
+          text: {
+            type: 'plain_text',
+            text: PR_REVIEW_ACTION_LABELS.dismiss,
+            emoji: true,
+          },
           value,
         },
       ],
@@ -99,18 +100,11 @@ const ACTIONS_BLOCK_ID = 'pr_review_action';
 export function buildResolvedSlackPrReviewMessageBlocks(
   originalBlocks: unknown[] | undefined | null,
   resolution: string,
-  resolutionType: 'context' | 'section' = 'context',
 ): unknown[] {
-  const resolutionBlock =
-    resolutionType === 'section'
-      ? {
-          type: 'section',
-          text: { type: 'mrkdwn', text: resolution },
-        }
-      : {
-          type: 'context',
-          elements: [{ type: 'mrkdwn', text: resolution }],
-        };
+  const resolutionBlock = {
+    type: 'context',
+    elements: [{ type: 'mrkdwn', text: `_${resolution}_` }],
+  };
 
   if (!originalBlocks || originalBlocks.length === 0) {
     return [resolutionBlock];

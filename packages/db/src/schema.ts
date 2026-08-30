@@ -58,6 +58,7 @@ import type {
   AutomationScanCursor,
   AutomationTarget,
   OptionalAutomationTarget,
+  CustomAutomationExecutionMode,
   BackgroundAutomationKey,
   PlatformIssueReport,
   WorkspaceReadiness,
@@ -77,6 +78,10 @@ import type {
   TaskRunErrorCode,
   UserRole,
   RepositoryAutomationSignals,
+  McpToolAccessMode,
+  FastAgentSurface,
+  ReasoningEffort,
+  SessionStatus,
 } from '@roomote/types';
 import { DEFAULT_TASK_ARTIFACT_TYPE } from '@roomote/types';
 
@@ -146,7 +151,9 @@ export const users = pgTable(
 export const userRelations = relations(users, ({ many }) => ({
   tasks: many(tasks, { relationName: 'taskInitiatorUser' }),
   taskPins: many(taskPins),
-  slackQuickAnswers: many(slackQuickAnswers),
+  ownedSessions: many(sessions, { relationName: 'sessionOwnerUser' }),
+  sessionParticipants: many(sessionParticipants),
+  slackFastIntegrationCalls: many(slackFastIntegrationCalls),
   workItems: many(workItems),
   setupQualificationBlocks: many(setupQualificationBlocks),
 }));
@@ -180,6 +187,12 @@ export const deploymentSettings = pgTable('deployment_settings', {
     'runtime_compute_config',
   ).$type<DeploymentComputeConfig>(),
   accessPolicy: jsonb('access_policy').$type<DeploymentAccessPolicy>(),
+  // Whether the Brain (Memory) is on for this deployment. Deliberately
+  // nullable with no default: null means "no explicit choice", and readers
+  // fall back to the legacy activation signal (an explicit R_BRAIN_* provider
+  // key) so deployments enabled before this toggle existed stay enabled
+  // without a backfill.
+  brainEnabled: boolean('brain_enabled'),
   // Signed Roomote license key (RMLK1.<payload>.<signature>) raising the
   // deployment's seat limit above the free tier; null for unlicensed
   // deployments. Verified at read time, never trusted as stored.
@@ -836,6 +849,7 @@ export const tasksRelations = relations(tasks, ({ one, many }) => ({
     relationName: 'taskCommitAuthorUser',
   }),
   taskPins: many(taskPins),
+  sessionTasks: many(sessionTasks),
   runs: many(taskRuns),
   inferenceUsageEvents: many(llmUsageEvents),
   workItemsAsSource: many(workItems, {
@@ -977,7 +991,6 @@ export const taskPullRequests = pgTable(
     repositoryId: uuid('repository_id').references(() => repositories.id, {
       onDelete: 'set null',
     }),
-
     // PR details
     prUrl: text('pr_url').notNull(),
     prNumber: integer('pr_number'),
@@ -1002,6 +1015,15 @@ export const taskPullRequests = pgTable(
 
     // Status
     status: text('status').$type<import('@roomote/types').PullRequestStatus>(),
+    mergeabilityStatus: text('mergeability_status')
+      .notNull()
+      .default('unknown')
+      .$type<'unknown' | 'clean' | 'conflicting'>(),
+    conflictDetectedAt: timestamp('conflict_detected_at'),
+    conflictNotificationClaimedAt: timestamp(
+      'conflict_notification_claimed_at',
+    ),
+    conflictNotifiedAt: timestamp('conflict_notified_at'),
 
     // When set, new review feedback on this PR is dispatched into the owning
     // task automatically instead of asking first; the referenced user (who
@@ -1026,6 +1048,13 @@ export const taskPullRequests = pgTable(
       table.sourceControlProvider,
       table.repository,
       table.prNumber,
+    ),
+    index('task_pull_requests_mergeability_lookup_idx').on(
+      table.sourceControlProvider,
+      table.repository,
+      table.status,
+      table.createdByRoomote,
+      table.prBaseRef,
     ),
 
     // Prevent duplicate PR URLs for the same task
@@ -1150,6 +1179,207 @@ export const prReviewEventDeliveries = pgTable(
   ],
 );
 
+/**
+ * One semantic PR feedback episode. New notification work is assigned here;
+ * the legacy event-delivery rows above remain for N-1 rollback and draining.
+ */
+export const prReviewNotificationUnits = pgTable(
+  'pr_review_notification_units',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    sourceControlProvider: text('source_control_provider')
+      .notNull()
+      .$type<SourceControlProvider>(),
+    host: text('host'),
+    repositoryId: uuid('repository_id').references(() => repositories.id, {
+      onDelete: 'set null',
+    }),
+    repositoryIdentityKey: text('repository_identity_key').notNull(),
+    repository: text('repository').notNull(),
+    prNumber: integer('pr_number').notNull(),
+    prUrl: text('pr_url').notNull(),
+    headSha: text('head_sha'),
+    headIdentityKey: text('head_identity_key').notNull(),
+    episodeKind: text('episode_kind')
+      .notNull()
+      .$type<'roomote_cycle' | 'human' | 'automated' | 'ci'>(),
+    episodeId: text('episode_id').notNull(),
+    dueAt: timestamp('due_at').notNull(),
+    firstObservedAt: timestamp('first_observed_at').notNull(),
+    lastObservedAt: timestamp('last_observed_at').notNull(),
+    sealedAt: timestamp('sealed_at'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('pr_review_notification_units_identity_unique').on(
+      table.sourceControlProvider,
+      table.repositoryIdentityKey,
+      table.prNumber,
+      table.headIdentityKey,
+      table.episodeKind,
+      table.episodeId,
+    ),
+    index('pr_review_notification_units_open_head_idx').on(
+      table.sourceControlProvider,
+      table.repository,
+      table.prNumber,
+      table.headSha,
+      table.sealedAt,
+    ),
+    check(
+      'pr_review_notification_units_episode_kind_check',
+      sql`${table.episodeKind} in ('roomote_cycle', 'human', 'automated', 'ci')`,
+    ),
+  ],
+);
+
+export const prReviewNotificationUnitEvents = pgTable(
+  'pr_review_notification_unit_events',
+  {
+    unitId: uuid('unit_id')
+      .notNull()
+      .references(() => prReviewNotificationUnits.id, { onDelete: 'cascade' }),
+    eventId: uuid('event_id')
+      .notNull()
+      .references(() => prReviewEvents.id, { onDelete: 'cascade' }),
+    attachedAt: timestamp('attached_at').notNull().defaultNow(),
+  },
+  (table) => [
+    primaryKey({
+      name: 'pr_review_notification_unit_events_pk',
+      columns: [table.unitId, table.eventId],
+    }),
+    uniqueIndex('pr_review_notification_unit_events_event_unique').on(
+      table.eventId,
+    ),
+  ],
+);
+
+export const prReviewNotificationDeliveries = pgTable(
+  'pr_review_notification_deliveries',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    notificationUnitId: uuid('notification_unit_id')
+      .notNull()
+      .references(() => prReviewNotificationUnits.id, {
+        onDelete: 'cascade',
+      }),
+    destinationKind: text('destination_kind')
+      .notNull()
+      .$type<'fast_conversation' | 'task'>(),
+    destinationKey: text('destination_key').notNull(),
+    taskId: text('task_id').references(() => tasks.id, {
+      onDelete: 'set null',
+    }),
+    status: text('status')
+      .notNull()
+      .default('pending')
+      .$type<
+        | 'pending'
+        | 'claimed'
+        | 'prepared'
+        | 'prompt_posting'
+        | 'awaiting_user_action'
+        | 'auto_dispatch_pending'
+        | 'completed'
+        | 'suppressed'
+        | 'dismissed'
+      >(),
+    dueAt: timestamp('due_at').notNull(),
+    deferrals: integer('deferrals').notNull().default(0),
+    attempt: integer('attempt').notNull().default(0),
+    leaseToken: uuid('lease_token'),
+    leaseExpiresAt: timestamp('lease_expires_at'),
+    routeProvider: text('route_provider').$type<
+      'slack' | 'teams' | 'telegram' | 'discord'
+    >(),
+    routeWorkspaceId: text('route_workspace_id'),
+    routeChannelId: text('route_channel_id'),
+    routeThreadId: text('route_thread_id'),
+    followUpPrompt: text('follow_up_prompt'),
+    targetTaskId: text('target_task_id').references(() => tasks.id, {
+      onDelete: 'set null',
+    }),
+    actingUserId: text('acting_user_id').references(() => users.id, {
+      onDelete: 'set null',
+    }),
+    providerMessageId: text('provider_message_id'),
+    actionClaimedAt: timestamp('action_claimed_at'),
+    dispatchKey: text('dispatch_key').notNull(),
+    dispatchedRunId: integer('dispatched_run_id'),
+    completedAt: timestamp('completed_at'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('pr_review_notification_deliveries_destination_unique').on(
+      table.notificationUnitId,
+      table.destinationKind,
+      table.destinationKey,
+    ),
+    uniqueIndex('pr_review_notification_deliveries_dispatch_key_unique').on(
+      table.dispatchKey,
+    ),
+    index('pr_review_notification_deliveries_due_idx').on(
+      table.status,
+      table.dueAt,
+      table.leaseExpiresAt,
+    ),
+    index('pr_review_notification_deliveries_destination_idx').on(
+      table.destinationKind,
+      table.destinationKey,
+    ),
+    check(
+      'pr_review_notification_deliveries_destination_kind_check',
+      sql`${table.destinationKind} in ('fast_conversation', 'task')`,
+    ),
+    check(
+      'pr_review_notification_deliveries_status_check',
+      sql`${table.status} in ('pending', 'claimed', 'prepared', 'prompt_posting', 'awaiting_user_action', 'auto_dispatch_pending', 'completed', 'suppressed', 'dismissed')`,
+    ),
+  ],
+);
+
+export const prReviewAutoPreferences = pgTable(
+  'pr_review_auto_preferences',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    sourceControlProvider: text('source_control_provider')
+      .notNull()
+      .$type<SourceControlProvider>(),
+    host: text('host'),
+    repositoryId: uuid('repository_id').references(() => repositories.id, {
+      onDelete: 'set null',
+    }),
+    repositoryIdentityKey: text('repository_identity_key').notNull(),
+    repository: text('repository').notNull(),
+    prNumber: integer('pr_number').notNull(),
+    enabledByUserId: text('enabled_by_user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    enabledAt: timestamp('enabled_at').notNull().defaultNow(),
+    sourceTaskId: text('source_task_id').references(() => tasks.id, {
+      onDelete: 'set null',
+    }),
+    sourceDestinationKey: text('source_destination_key'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('pr_review_auto_preferences_identity_unique').on(
+      table.sourceControlProvider,
+      table.repositoryIdentityKey,
+      table.prNumber,
+    ),
+    index('pr_review_auto_preferences_repository_idx').on(
+      table.sourceControlProvider,
+      table.repository,
+      table.prNumber,
+    ),
+  ],
+);
+
 export const taskPullRequestsRelations = relations(
   taskPullRequests,
   ({ one }) => ({
@@ -1209,6 +1439,10 @@ export const taskRuns = pgTable(
     queueScope: text('queue_scope'),
     taskPhase: text('task_phase'),
     payload: jsonb('payload').notNull().$type<TaskPayload>(),
+    /** Indexed projection of payload.fastAgentSessionId for Fast task lookup. */
+    fastAgentSessionId: uuid('fast_agent_session_id').generatedAlwaysAs(
+      sql`((payload ->> 'fastAgentSessionId')::uuid)`,
+    ),
     // Per-attempt prompt, including the deferred resume prompt.
     prompt: text('prompt'),
     log: text('log'),
@@ -1328,6 +1562,7 @@ export const taskRuns = pgTable(
   },
   (table) => [
     index('task_runs_task_id_idx').on(table.taskId),
+    index('task_runs_fast_agent_session_id_idx').on(table.fastAgentSessionId),
     index('task_runs_queue_scope_idx').on(table.queueScope),
     index('task_runs_acting_user_id_idx').on(table.actingUserId),
     index('task_runs_snapshot_id_idx').on(table.snapshotId),
@@ -1354,6 +1589,11 @@ export const taskRuns = pgTable(
       .on(sql`(${table.payload}->>'communicationSourceEventId')`)
       .where(
         sql`${table.payload}->>'communicationProvider' = 'discord' AND ${table.payload}->>'communicationSourceEventId' IS NOT NULL AND ${table.canceledAt} IS NULL`,
+      ),
+    uniqueIndex('task_runs_launch_idempotency_key_unique')
+      .on(sql`(${table.payload}->>'launchIdempotencyKey')`)
+      .where(
+        sql`${table.payload}->>'launchIdempotencyKey' IS NOT NULL AND ${table.canceledAt} IS NULL`,
       ),
     index('task_runs_first_assistant_output_at_idx').on(
       table.firstAssistantOutputAt,
@@ -1564,6 +1804,9 @@ export const llmUsageEvents = pgTable(
     environmentId: uuid('environment_id').references(() => environments.id, {
       onDelete: 'set null',
     }),
+    sessionId: uuid('session_id').references(() => sessions.id, {
+      onDelete: 'set null',
+    }),
     // Non-task producers use eventKey for idempotency. Task harness events use
     // the session/message pair below because a message may be retried with
     // progressively richer usage data.
@@ -1631,6 +1874,7 @@ export const llmUsageEvents = pgTable(
     index('task_inference_usage_events_environment_id_idx').on(
       table.environmentId,
     ),
+    index('task_inference_usage_events_session_id_idx').on(table.sessionId),
     index('task_inference_usage_events_provider_model_idx').on(
       table.providerId,
       table.modelId,
@@ -1655,6 +1899,10 @@ export const llmUsageEventsRelations = relations(llmUsageEvents, ({ one }) => ({
   environment: one(environments, {
     fields: [llmUsageEvents.environmentId],
     references: [environments.id],
+  }),
+  session: one(sessions, {
+    fields: [llmUsageEvents.sessionId],
+    references: [sessions.id],
   }),
 }));
 
@@ -2225,6 +2473,45 @@ export const pullRequestFacts = pgTable(
     state: text('state')
       .notNull()
       .$type<'open' | 'draft' | 'closed' | 'merged'>(),
+    // The PR description and labels as the provider's list payload carries
+    // them; both come free with the sync's existing list requests, and the
+    // Brain's pull-request pages are the consumer (the "why" behind a
+    // change). Both are nullable with null meaning "not known to this
+    // writer": webhook-driven upserts carry only what their event payload
+    // has, and must not erase what the list sync stored.
+    body: text('body'),
+    labels: jsonb('labels').$type<string[]>(),
+    // Per-PR enrichment that list payloads cannot carry (one to three extra
+    // provider requests each): the files touched and who reviewed it. Filled
+    // by a budgeted pass; null means not enriched yet. `enrichedForUpdatedAt`
+    // is the remote update time the enrichment reflects, so a PR that
+    // changed since is picked up again; `enrichmentAttemptedAt` spaces out
+    // retries after a failed read.
+    changedFiles: jsonb('changed_files').$type<string[]>(),
+    // How many files the enrichment READ. A lower bound rather than the
+    // total when `filesCapped` is set (the provider listing hit the fetch
+    // cap), which the page discloses instead of implying completeness.
+    changedFileCount: integer('changed_file_count'),
+    filesCapped: boolean('files_capped'),
+    reviewsCapped: boolean('reviews_capped'),
+    additions: integer('additions'),
+    deletions: integer('deletions'),
+    reviews: jsonb('reviews').$type<
+      Array<{
+        login: string | null;
+        state:
+          | 'approved'
+          | 'changes_requested'
+          | 'commented'
+          | 'dismissed'
+          | 'pending';
+      }>
+    >(),
+    enrichedAt: timestamp('enriched_at'),
+    enrichedForUpdatedAt: timestamp('enriched_for_updated_at'),
+    // Set only when a read FAILED, so the retry hold cannot park a row whose
+    // remote update time moved during a successful pass.
+    enrichmentFailedAt: timestamp('enrichment_failed_at'),
     createdAtRemote: timestamp('created_at_remote').notNull(),
     updatedAtRemote: timestamp('updated_at_remote').notNull(),
     closedAtRemote: timestamp('closed_at_remote'),
@@ -2426,6 +2713,65 @@ export const slackUserMappingsRelations = relations(
       references: [users.id],
     }),
   }),
+);
+
+/**
+ * slack_directory_users
+ *
+ * Privacy-safe Slack profile projection used to build Brain person cards for
+ * the whole workspace, including people who do not have Roomote accounts.
+ * Email, status, timezone, and avatar fields are deliberately not retained.
+ */
+export const slackDirectoryUsers = pgTable(
+  'slack_directory_users',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    slackUserId: text('slack_user_id').notNull(),
+    slackTeamId: text('slack_team_id').notNull(),
+    username: text('username'),
+    displayName: text('display_name'),
+    realName: text('real_name'),
+    title: text('title'),
+    isDeleted: boolean('is_deleted').notNull().default(false),
+    isBot: boolean('is_bot').notNull().default(false),
+    isAppUser: boolean('is_app_user').notNull().default(false),
+    profileUpdatedAt: timestamp('profile_updated_at'),
+    lastSeenAt: timestamp('last_seen_at').notNull().defaultNow(),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => [
+    index('slack_directory_users_team_id_idx').on(table.slackTeamId),
+    unique('slack_directory_users_unique').on(
+      table.slackUserId,
+      table.slackTeamId,
+    ),
+  ],
+);
+
+/**
+ * notion_directory_users
+ *
+ * Durable snapshot of the Notion workspace user directory used to link Brain
+ * person cards to Notion identities. `email` holds only addresses Notion has
+ * verified; it is an internal linking hint and is never copied into Brain
+ * page content. Rows are marked deleted rather than removed when a user
+ * disappears from the workspace (or the integration loses its user-list
+ * capability) so the Brain can tombstone the projected person card.
+ */
+export const notionDirectoryUsers = pgTable(
+  'notion_directory_users',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    notionUserId: text('notion_user_id').notNull(),
+    name: text('name').notNull(),
+    email: text('email'),
+    isDeleted: boolean('is_deleted').notNull().default(false),
+    lastSeenAt: timestamp('last_seen_at').notNull().defaultNow(),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => [unique('notion_directory_users_unique').on(table.notionUserId)],
 );
 
 /**
@@ -2716,6 +3062,237 @@ export const slackAuthTokens = pgTable(
 export const slackAuthTokensRelations = relations(slackAuthTokens, () => ({}));
 
 /**
+ * fast_agent_conversations
+ *
+ * Provider-neutral persistence for runless Fast conversations. The unique
+ * identity intentionally excludes the mutable reply destination so moving a
+ * conversation's delivery address never forks its memory. Visible messages
+ * provide the reliable cold-start fallback; the last native OpenCode session
+ * id enables best-effort resume while that local session remains available.
+ */
+export const fastAgentConversations = pgTable(
+  'fast_agent_conversations',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    surface: text('surface').notNull().$type<FastAgentSurface>(),
+    workspaceId: text('workspace_id').notNull(),
+    conversationId: text('conversation_id').notNull(),
+    currentReplyChannelId: text('current_reply_channel_id'),
+    currentReplyThreadId: text('current_reply_thread_id'),
+    currentReplyServiceUrl: text('current_reply_service_url'),
+    replyTargetVerified: boolean('reply_target_verified')
+      .notNull()
+      .default(true),
+    compatibilityMessages: jsonb('compatibility_messages')
+      .notNull()
+      .default(sql`'[]'::jsonb`)
+      .$type<Record<string, unknown>[]>(),
+    openCodeSessionId: text('opencode_session_id'),
+    model: text('model'),
+    reasoningEffort: text('reasoning_effort').$type<ReasoningEffort>(),
+    title: text('title'),
+    titleEditedByUserAt: timestamp('title_edited_by_user_at'),
+    llmTitleCheckpoint: integer('llm_title_checkpoint').notNull().default(0),
+    legacyConversationIds: uuid('legacy_conversation_ids')
+      .array()
+      .notNull()
+      .default(sql`'{}'::uuid[]`),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('fast_agent_conversations_identity_unique').on(
+      table.surface,
+      table.workspaceId,
+      table.conversationId,
+    ),
+    index('fast_agent_conversations_user_idx').on(table.userId),
+    index('fast_agent_conversations_legacy_ids_idx').using(
+      'gin',
+      table.legacyConversationIds,
+    ),
+  ],
+);
+
+/**
+ * fast_agent_messages
+ *
+ * Forward-only canonical Fast/OpenCode transcript events. During the N-1
+ * compatibility window, visible text is also written to
+ * fast_agent_conversations.compatibility_messages for rollback safety.
+ */
+export const fastAgentMessages = pgTable(
+  'fast_agent_messages',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    conversationId: uuid('conversation_id')
+      .notNull()
+      .references(() => fastAgentConversations.id, { onDelete: 'cascade' }),
+    eventId: text('event_id').notNull(),
+    turnId: text('turn_id').notNull(),
+    turnSeq: integer('turn_seq').notNull(),
+    ts: bigint('ts', { mode: 'number' }).notNull(),
+    eventType: text('event_type').notNull().$type<TaskMessageEventType>(),
+    role: text('role').$type<TaskMessageRole>(),
+    contentBlocks: jsonb('content_blocks')
+      .$type<TaskMessageContentBlock[]>()
+      .notNull()
+      .default([]),
+    metadata: jsonb('metadata').$type<TaskMessageMetadata>(),
+    payload: jsonb('payload').notNull().$type<TaskMessagePayload>().default({}),
+    source: text('source'),
+    nativeSessionId: text('native_session_id'),
+    nativeMessageId: text('native_message_id'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('fast_agent_messages_conversation_event_unique').on(
+      table.conversationId,
+      table.eventId,
+    ),
+    index('fast_agent_messages_conversation_order_idx').on(
+      table.conversationId,
+      table.ts,
+      table.turnSeq,
+    ),
+  ],
+);
+
+/**
+ * fast_agent_provider_messages
+ *
+ * Durable provider message bindings for communication surfaces whose stable
+ * conversation address can host more than one Fast session. Inbound replies
+ * use these server-written rows to recover the canonical session without
+ * trusting identifiers embedded in message text or webhook routing metadata.
+ */
+export const fastAgentProviderMessages = pgTable(
+  'fast_agent_provider_messages',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    conversationId: uuid('conversation_id')
+      .notNull()
+      .references(() => fastAgentConversations.id, { onDelete: 'cascade' }),
+    provider: text('provider')
+      .notNull()
+      .$type<'discord' | 'slack' | 'teams' | 'telegram'>(),
+    workspaceId: text('workspace_id').notNull(),
+    channelId: text('channel_id').notNull(),
+    threadId: text('thread_id'),
+    messageId: text('message_id').notNull(),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('fast_agent_provider_messages_route_unique').on(
+      table.provider,
+      table.workspaceId,
+      table.channelId,
+      table.messageId,
+    ),
+    index('fast_agent_provider_messages_conversation_idx').on(
+      table.conversationId,
+    ),
+    index('fast_agent_provider_messages_thread_idx').on(
+      table.provider,
+      table.workspaceId,
+      table.channelId,
+      table.threadId,
+    ),
+    check(
+      'fast_agent_provider_messages_provider_v3_check',
+      sql`${table.provider} in ('discord', 'slack', 'teams', 'telegram')`,
+    ),
+  ],
+);
+
+/**
+ * fast_agent_pr_feedback_deliveries
+ *
+ * Durable conversation-scoped claims for PR feedback presented by Fast.
+ * Task-level PR event deliveries intentionally fan out to every linked task;
+ * this table prevents those projections from posting the same review result
+ * more than once to a shared Fast conversation.
+ */
+export const fastAgentPrFeedbackDeliveries = pgTable(
+  'fast_agent_pr_feedback_deliveries',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    conversationId: uuid('conversation_id')
+      .notNull()
+      .references(() => fastAgentConversations.id, { onDelete: 'cascade' }),
+    feedbackId: text('feedback_id').notNull(),
+    taskId: text('task_id').references(() => tasks.id, {
+      onDelete: 'set null',
+    }),
+    leaseToken: uuid('lease_token'),
+    leaseExpiresAt: timestamp('lease_expires_at'),
+    deliveredAt: timestamp('delivered_at'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('fast_agent_pr_feedback_deliveries_identity_unique').on(
+      table.conversationId,
+      table.feedbackId,
+    ),
+    index('fast_agent_pr_feedback_deliveries_task_idx').on(table.taskId),
+  ],
+);
+
+export const fastAgentConversationsRelations = relations(
+  fastAgentConversations,
+  ({ one, many }) => ({
+    user: one(users, {
+      fields: [fastAgentConversations.userId],
+      references: [users.id],
+    }),
+    messages: many(fastAgentMessages),
+    providerMessages: many(fastAgentProviderMessages),
+    prFeedbackDeliveries: many(fastAgentPrFeedbackDeliveries),
+    session: one(sessions),
+  }),
+);
+
+export const fastAgentMessagesRelations = relations(
+  fastAgentMessages,
+  ({ one }) => ({
+    conversation: one(fastAgentConversations, {
+      fields: [fastAgentMessages.conversationId],
+      references: [fastAgentConversations.id],
+    }),
+  }),
+);
+
+export const fastAgentProviderMessagesRelations = relations(
+  fastAgentProviderMessages,
+  ({ one }) => ({
+    conversation: one(fastAgentConversations, {
+      fields: [fastAgentProviderMessages.conversationId],
+      references: [fastAgentConversations.id],
+    }),
+  }),
+);
+
+export const fastAgentPrFeedbackDeliveriesRelations = relations(
+  fastAgentPrFeedbackDeliveries,
+  ({ one }) => ({
+    conversation: one(fastAgentConversations, {
+      fields: [fastAgentPrFeedbackDeliveries.conversationId],
+      references: [fastAgentConversations.id],
+    }),
+    task: one(tasks, {
+      fields: [fastAgentPrFeedbackDeliveries.taskId],
+      references: [tasks.id],
+    }),
+  }),
+);
+
+/**
  * slack_conversation_messages
  */
 
@@ -2755,12 +3332,6 @@ export const slackConversationMessages = pgTable(
     runId: integer('run_id').references(() => taskRuns.id, {
       onDelete: 'set null',
     }),
-    slackQuickAnswerId: uuid('slack_quick_answer_id').references(
-      () => slackQuickAnswers.id,
-      {
-        onDelete: 'set null',
-      },
-    ),
     createdAt: timestamp('created_at').notNull().defaultNow(),
   },
   (table) => [
@@ -2803,52 +3374,72 @@ export const slackConversationMessagesRelations = relations(
       fields: [slackConversationMessages.runId],
       references: [taskRuns.id],
     }),
-    slackQuickAnswer: one(slackQuickAnswers, {
-      fields: [slackConversationMessages.slackQuickAnswerId],
-      references: [slackQuickAnswers.id],
-    }),
   }),
 );
 
+export type SlackFastIntegrationCallStatus =
+  | 'executing'
+  | 'succeeded'
+  | 'failed';
+
 /**
- * slack_quick_answers (renamed from fast_agent_sessions in Stage 4)
+ * slack_fast_integration_calls
  *
- * Deliberately kept OUT of the task spine: these rows store the runless
- * Slack-thread quick-answer conversation for the fast agent. They intentionally
- * do NOT overlap with tasks/task_runs (no launched task, no run) — a quick
- * answer never becomes a task, so folding it into the task tables would break
- * the runless-chat storage the suggester feedback loop reads.
+ * Durable audit trail for deployment MCP tools executed directly by runless
+ * Fast conversations. An `executing` row is inserted before the external call
+ * so a missing terminal update remains visibly ambiguous.
  */
-export const slackQuickAnswers = pgTable(
-  'slack_quick_answers',
+export const slackFastIntegrationCalls = pgTable(
+  'slack_fast_integration_calls',
   {
     id: uuid('id').primaryKey().defaultRandom(),
+    fastAgentConversationId: uuid('fast_agent_conversation_id')
+      .notNull()
+      .references(() => fastAgentConversations.id, { onDelete: 'cascade' }),
     userId: text('user_id')
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
+    slackTeamId: text('slack_team_id').notNull(),
     slackChannel: text('slack_channel').notNull(),
     slackThreadTs: text('slack_thread_ts').notNull(),
-    messages: jsonb('messages')
-      .notNull()
-      .default(sql`'[]'::jsonb`)
-      .$type<Record<string, unknown>[]>(),
+    slackMessageTs: text('slack_message_ts').notNull(),
+    integrationId: text('integration_id').notNull(),
+    toolName: text('tool_name').notNull(),
+    arguments: jsonb('arguments').notNull().$type<Record<string, unknown>>(),
+    status: text('status').notNull().$type<SlackFastIntegrationCallStatus>(),
+    resultPreview: text('result_preview'),
+    error: text('error'),
+    startedAt: timestamp('started_at').notNull().defaultNow(),
+    completedAt: timestamp('completed_at'),
+    durationMs: integer('duration_ms'),
     createdAt: timestamp('created_at').notNull().defaultNow(),
     updatedAt: timestamp('updated_at').notNull().defaultNow(),
   },
   (table) => [
-    uniqueIndex('slack_quick_answers_deployment_channel_thread_unique').on(
-      table.slackChannel,
-      table.slackThreadTs,
+    index('slack_fast_integration_calls_conversation_idx').on(
+      table.fastAgentConversationId,
+      table.createdAt,
     ),
-    index('slack_quick_answers_deployment_user_idx').on(table.userId),
+    index('slack_fast_integration_calls_user_idx').on(
+      table.userId,
+      table.createdAt,
+    ),
+    index('slack_fast_integration_calls_status_idx').on(
+      table.status,
+      table.createdAt,
+    ),
   ],
 );
 
-export const slackQuickAnswersRelations = relations(
-  slackQuickAnswers,
+export const slackFastIntegrationCallsRelations = relations(
+  slackFastIntegrationCalls,
   ({ one }) => ({
+    fastAgentConversation: one(fastAgentConversations, {
+      fields: [slackFastIntegrationCalls.fastAgentConversationId],
+      references: [fastAgentConversations.id],
+    }),
     user: one(users, {
-      fields: [slackQuickAnswers.userId],
+      fields: [slackFastIntegrationCalls.userId],
       references: [users.id],
     }),
   }),
@@ -2937,8 +3528,282 @@ export const automations = pgTable('automations', {
 
 export const automationsRelations = relations(automations, ({ many }) => ({
   tasks: many(tasks),
+  sessions: many(sessions),
   workItems: many(workItems),
   trackedMessages: many(trackedMessages),
+}));
+
+export type SessionOwnerKind = 'user' | 'automation' | 'system';
+export type SessionSourceSurface = TaskSurface | FastAgentSurface;
+export type { SessionStatus };
+export type SessionTaskOrigin =
+  | 'direct_launch'
+  | 'fast_delegation'
+  | 'backfill'
+  | 'follow_up';
+export type SessionParticipantRole = 'owner' | 'member';
+export type SessionBackfillPhase =
+  | 'fast_conversations'
+  | 'fast_tasks'
+  | 'tasks'
+  | 'participants';
+
+/**
+ * sessions
+ *
+ * Additive Session storage is intentionally separate from tasks and Fast
+ * conversations so the previous release remains safe against this schema for
+ * N-1 rollback. Existing operational records remain canonical.
+ */
+export const sessions = pgTable(
+  'sessions',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    title: text('title').notNull(),
+    titleEditedByUserAt: timestamp('title_edited_by_user_at'),
+    llmTitleCheckpoint: integer('llm_title_checkpoint').notNull().default(0),
+    ownerKind: text('owner_kind').notNull().$type<SessionOwnerKind>(),
+    ownerUserId: text('owner_user_id').references(() => users.id, {
+      onDelete: 'set null',
+    }),
+    ownerAutomation: text('owner_automation')
+      .$type<BackgroundAutomationKey>()
+      .references(() => automations.key, { onDelete: 'set null' }),
+    sourceSurface: text('source_surface')
+      .notNull()
+      .$type<SessionSourceSurface>(),
+    sourceTrigger: text('source_trigger').notNull().$type<TaskTrigger>(),
+    fastConversationId: uuid('fast_conversation_id').references(
+      () => fastAgentConversations.id,
+      { onDelete: 'set null' },
+    ),
+    visibility: text('visibility')
+      .notNull()
+      .default('visible')
+      .$type<TaskVisibility>(),
+    activityAt: bigint('activity_at', { mode: 'number' }).notNull(),
+    cachedStatus: text('cached_status').$type<SessionStatus>(),
+    // Fast-conversation responding lease: while this is in the future, status
+    // recomputation treats the conversation as actively responding. TTL-based
+    // so a crashed turn self-heals instead of pinning the session 'active'.
+    respondingUntil: timestamp('responding_until'),
+    archivedAt: timestamp('archived_at'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => [
+    index('sessions_visibility_activity_at_idx').on(
+      table.visibility,
+      table.activityAt.desc(),
+      table.id.desc(),
+    ),
+    index('sessions_owner_user_id_idx').on(table.ownerUserId),
+    uniqueIndex('sessions_fast_conversation_id_unique')
+      .on(table.fastConversationId)
+      .where(sql`${table.fastConversationId} IS NOT NULL`),
+    check(
+      'sessions_owner_shape_check',
+      // Owner FKs use ON DELETE SET NULL so retained Sessions can outlive
+      // deleted users and automation definitions. The shape still prevents a
+      // value from being stored in the wrong owner column.
+      sql`(${table.ownerKind} = 'user' AND ${table.ownerAutomation} IS NULL) OR (${table.ownerKind} = 'automation' AND ${table.ownerUserId} IS NULL) OR (${table.ownerKind} = 'system' AND ${table.ownerUserId} IS NULL AND ${table.ownerAutomation} IS NULL)`,
+    ),
+    check(
+      'sessions_owner_kind_check',
+      sql`${table.ownerKind} in ('user', 'automation', 'system')`,
+    ),
+    check(
+      'sessions_source_surface_check',
+      sql`${table.sourceSurface} in ('web', 'api', 'slack', 'teams', 'telegram', 'discord', 'linear', 'github', 'gitlab', 'gitea', 'ado', 'bitbucket', 'system', 'automation')`,
+    ),
+    check(
+      'sessions_source_trigger_check',
+      sql`${table.sourceTrigger} in ('message', 'webhook', 'schedule', 'manual')`,
+    ),
+    check(
+      'sessions_visibility_check',
+      sql`${table.visibility} in ('visible', 'hidden')`,
+    ),
+    check(
+      'sessions_cached_status_check',
+      sql`${table.cachedStatus} IS NULL OR ${table.cachedStatus} in ('active', 'needs_input', 'blocked', 'ready')`,
+    ),
+  ],
+);
+
+/** Additive task linkage retained independently for N-1 rollback safety. */
+export const sessionTasks = pgTable(
+  'session_tasks',
+  {
+    sessionId: uuid('session_id')
+      .notNull()
+      .references(() => sessions.id, { onDelete: 'cascade' }),
+    taskId: text('task_id')
+      .notNull()
+      .references(() => tasks.id, { onDelete: 'cascade' }),
+    attachedAt: timestamp('attached_at').notNull().defaultNow(),
+    origin: text('origin').notNull().$type<SessionTaskOrigin>(),
+  },
+  (table) => [
+    primaryKey({
+      name: 'session_tasks_session_id_task_id_pk',
+      columns: [table.sessionId, table.taskId],
+    }),
+    uniqueIndex('session_tasks_task_id_unique').on(table.taskId),
+    index('session_tasks_session_attached_at_idx').on(
+      table.sessionId,
+      table.attachedAt.desc(),
+    ),
+    check(
+      'session_tasks_origin_check',
+      sql`${table.origin} in ('direct_launch', 'fast_delegation', 'backfill', 'follow_up')`,
+    ),
+  ],
+);
+
+/** Additive read-state storage retained independently for N-1 rollback safety. */
+export const sessionParticipants = pgTable(
+  'session_participants',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    sessionId: uuid('session_id')
+      .notNull()
+      .references(() => sessions.id, { onDelete: 'cascade' }),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, {
+        onDelete: 'cascade',
+      }),
+    role: text('role')
+      .notNull()
+      .default('member')
+      .$type<SessionParticipantRole>(),
+    lastReadEventAt: bigint('last_read_event_at', { mode: 'number' }),
+    lastReadEventId: text('last_read_event_id'),
+    lastNotifiedEventAt: bigint('last_notified_event_at', { mode: 'number' }),
+    lastNotifiedEventId: text('last_notified_event_id'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('session_participants_session_user_unique').on(
+      table.sessionId,
+      table.userId,
+    ),
+    index('session_participants_user_id_idx').on(table.userId),
+    check(
+      'session_participants_role_check',
+      sql`${table.role} in ('owner', 'member')`,
+    ),
+  ],
+);
+
+/** User-scoped Session pins mirror task pins without changing task storage. */
+export const sessionPins = pgTable(
+  'session_pins',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    sessionId: uuid('session_id')
+      .notNull()
+      .references(() => sessions.id, { onDelete: 'cascade' }),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('session_pins_user_session_unique').on(
+      table.userId,
+      table.sessionId,
+    ),
+    index('session_pins_user_updated_at_idx').on(table.userId, table.updatedAt),
+    index('session_pins_session_id_idx').on(table.sessionId),
+  ],
+);
+
+/** Durable bounded-backfill position retained independently for N-1 safety. */
+export const sessionBackfillState = pgTable(
+  'session_backfill_state',
+  {
+    key: text('key').primaryKey(),
+    phase: text('phase')
+      .notNull()
+      .default('fast_conversations')
+      .$type<SessionBackfillPhase>(),
+    cursorCreatedAt: timestamp('cursor_created_at'),
+    cursorId: text('cursor_id'),
+    completedAt: timestamp('completed_at'),
+    lastRunAt: timestamp('last_run_at'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => [
+    check(
+      'session_backfill_state_phase_check',
+      sql`${table.phase} in ('fast_conversations', 'fast_tasks', 'tasks', 'participants')`,
+    ),
+    check(
+      'session_backfill_state_cursor_shape_check',
+      sql`(${table.cursorCreatedAt} IS NULL) = (${table.cursorId} IS NULL)`,
+    ),
+  ],
+);
+
+export const sessionsRelations = relations(sessions, ({ one, many }) => ({
+  ownerUser: one(users, {
+    fields: [sessions.ownerUserId],
+    references: [users.id],
+    relationName: 'sessionOwnerUser',
+  }),
+  ownerAutomationRow: one(automations, {
+    fields: [sessions.ownerAutomation],
+    references: [automations.key],
+  }),
+  fastConversation: one(fastAgentConversations, {
+    fields: [sessions.fastConversationId],
+    references: [fastAgentConversations.id],
+  }),
+  tasks: many(sessionTasks),
+  participants: many(sessionParticipants),
+  pins: many(sessionPins),
+  usageEvents: many(llmUsageEvents),
+}));
+
+export const sessionTasksRelations = relations(sessionTasks, ({ one }) => ({
+  session: one(sessions, {
+    fields: [sessionTasks.sessionId],
+    references: [sessions.id],
+  }),
+  task: one(tasks, {
+    fields: [sessionTasks.taskId],
+    references: [tasks.id],
+  }),
+}));
+
+export const sessionParticipantsRelations = relations(
+  sessionParticipants,
+  ({ one }) => ({
+    session: one(sessions, {
+      fields: [sessionParticipants.sessionId],
+      references: [sessions.id],
+    }),
+    user: one(users, {
+      fields: [sessionParticipants.userId],
+      references: [users.id],
+    }),
+  }),
+);
+
+export const sessionPinsRelations = relations(sessionPins, ({ one }) => ({
+  session: one(sessions, {
+    fields: [sessionPins.sessionId],
+    references: [sessions.id],
+  }),
+  user: one(users, {
+    fields: [sessionPins.userId],
+    references: [users.id],
+  }),
 }));
 
 /**
@@ -2967,6 +3832,10 @@ export const customAutomations = pgTable(
       onDelete: 'set null',
     }),
     allRepositories: boolean('all_repositories').notNull().default(false),
+    executionMode: text('execution_mode')
+      .notNull()
+      .default('sandbox_task')
+      .$type<CustomAutomationExecutionMode>(),
     target: jsonb('target')
       .notNull()
       .default(sql`'{}'::jsonb`)
@@ -3529,6 +4398,8 @@ export const deploymentMcpEnablements = pgTable(
       onDelete: 'set null',
     }),
     disabledTools: text('disabled_tools').array(),
+    // N-1 rollback: retained for the previous release's Notion access-mode code.
+    toolAccessMode: text('tool_access_mode').$type<McpToolAccessMode>(),
     createdAt: timestamp('created_at').notNull().defaultNow(),
     updatedAt: timestamp('updated_at').notNull().defaultNow(),
   },
@@ -3759,6 +4630,14 @@ export const brainMemoryEvents = pgTable(
      * other page.
      */
     agentSummary: text('agent_summary'),
+    /**
+     * Bumped whenever saveBrainAgentSummary updates the row's content. The
+     * drainer fences its completion on the revision it claimed, so a summary
+     * that lands while a page write is in flight forces a re-ingest of the
+     * newer content instead of being stranded behind an already-written older
+     * snapshot.
+     */
+    revision: integer('revision').notNull().default(0),
     attempts: integer('attempts').notNull().default(0),
     lastError: text('last_error'),
     processedAt: timestamp('processed_at'),
@@ -3768,6 +4647,54 @@ export const brainMemoryEvents = pgTable(
   (table) => [
     unique('brain_memory_events_run_unique').on(table.runId),
     index('brain_memory_events_status_created_idx').on(
+      table.status,
+      table.createdAt,
+    ),
+  ],
+);
+
+/**
+ * fast_agent_memory_events
+ *
+ * Transactional outbox for Fast conversation memories, the conversational
+ * sibling of brain_memory_events. One row per conversation accumulates the
+ * facts Fast was asked to remember; the ingestion drainer is the only writer
+ * to the Brain, so the slug, redaction, and provenance stay server-controlled
+ * and Fast never holds a Brain write credential. A separate table (rather
+ * than a nullable run_id on brain_memory_events) keeps the N-1 release's
+ * drainer, which claims rows without filtering, from ever seeing runless rows.
+ */
+export const fastAgentMemoryEvents = pgTable(
+  'fast_agent_memory_events',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    conversationId: uuid('conversation_id')
+      .notNull()
+      .references(() => fastAgentConversations.id, { onDelete: 'cascade' }),
+    /** Accumulated `- fact` markdown lines, newest appended last. */
+    memory: text('memory').notNull(),
+    /**
+     * Bumped on every appended fact. The drainer fences its completion on the
+     * revision it claimed, so a save that lands while a page write is in
+     * flight forces a re-ingest of the newer content instead of being
+     * stranded behind an already-written older snapshot.
+     */
+    revision: integer('revision').notNull().default(0),
+    status: text('status')
+      .notNull()
+      .default('pending')
+      .$type<'pending' | 'processing' | 'done' | 'skipped' | 'failed'>(),
+    attempts: integer('attempts').notNull().default(0),
+    lastError: text('last_error'),
+    processedAt: timestamp('processed_at'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => [
+    unique('fast_agent_memory_events_conversation_unique').on(
+      table.conversationId,
+    ),
+    index('fast_agent_memory_events_status_created_idx').on(
       table.status,
       table.createdAt,
     ),
@@ -3792,6 +4719,34 @@ export const brainSyncState = pgTable('brain_sync_state', {
   createdAt: timestamp('created_at').notNull().defaultNow(),
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
 });
+
+/**
+ * Durable inventory of upstream objects written by Brain collectors. A
+ * completed source sweep can compare its observation timestamp with this
+ * inventory and tombstone objects that disappeared because access was
+ * revoked upstream.
+ */
+export const brainCollectorItems = pgTable(
+  'brain_collector_items',
+  {
+    collectorId: text('collector_id').notNull(),
+    itemId: text('item_id').notNull(),
+    slug: text('slug').notNull(),
+    lastSeenAt: timestamp('last_seen_at').notNull(),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.collectorId, table.itemId],
+      name: 'brain_collector_items_collector_item_pk',
+    }),
+    index('brain_collector_items_collector_seen_idx').on(
+      table.collectorId,
+      table.lastSeenAt,
+    ),
+  ],
+);
 
 export const brainMemoryEventsRelations = relations(
   brainMemoryEvents,

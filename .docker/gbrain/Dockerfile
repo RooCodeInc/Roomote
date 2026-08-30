@@ -8,10 +8,10 @@
 # worker. The worker is required for Roomote-scheduled maintenance cycles.
 FROM oven/bun:1.3.14
 
-ARG GBRAIN_REF=ac402f5
+ARG GBRAIN_REF=f49ca569232dbc0d8e0783d84606115e3bfe5ab1
 
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends postgresql-client \
+  && apt-get install -y --no-install-recommends ca-certificates git postgresql-client \
   && rm -rf /var/lib/apt/lists/*
 
 RUN bun install -g "github:garrytan/gbrain#${GBRAIN_REF}"
@@ -30,8 +30,8 @@ RUN set -e; \
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
-# Generated tokens and local service config live on the volume; corpus data
-# lives in Postgres.
+# Generated tokens, local service config, and the Markdown corpus live on the
+# volume. Postgres remains gbrain's query index and durable job backend.
 VOLUME /data
 ENV GBRAIN_DATA_DIR=/data
 

@@ -23,8 +23,12 @@ const SETUP_STEP_DEFINITIONS = [
     title: 'Connect Slack',
   },
   {
-    id: 'env-vars',
+    id: 'inference',
     title: 'Configure inference',
+  },
+  {
+    id: 'env-vars',
+    title: 'Configure inference provider',
   },
   {
     id: 'source-control-provider',
@@ -51,10 +55,6 @@ const SETUP_STEP_DEFINITIONS = [
     title: 'Configure sandboxes',
   },
   {
-    id: 'repo-selection',
-    title: 'Set up environment',
-  },
-  {
     id: 'invoke',
     title: "That's it!",
   },
@@ -64,9 +64,39 @@ type SetupStepDefinition = (typeof SETUP_STEP_DEFINITIONS)[number];
 
 export type SetupStep = SetupStepDefinition['id'];
 
-export const SETUP_STEPS: SetupStep[] = SETUP_STEP_DEFINITIONS.map(
+export const SETUP_STEPS: readonly SetupStep[] = SETUP_STEP_DEFINITIONS.map(
   (definition) => definition.id,
 );
+
+const EMAIL_PASSWORD_SETUP_ORDER_POLICY = {
+  move: ['auth-provider', 'auth-env-vars', 'slack'],
+  after: 'source-control-connect',
+} as const satisfies {
+  move: readonly SetupStep[];
+  after: SetupStep;
+};
+
+const EMAIL_PASSWORD_MOVED_SETUP_STEPS = new Set<SetupStep>(
+  EMAIL_PASSWORD_SETUP_ORDER_POLICY.move,
+);
+
+const EMAIL_PASSWORD_SETUP_STEPS: readonly SetupStep[] = SETUP_STEPS.flatMap(
+  (step) => {
+    if (step === EMAIL_PASSWORD_SETUP_ORDER_POLICY.after) {
+      return [step, ...EMAIL_PASSWORD_SETUP_ORDER_POLICY.move];
+    }
+
+    return EMAIL_PASSWORD_MOVED_SETUP_STEPS.has(step) ? [] : [step];
+  },
+);
+
+export function getSetupSteps(
+  hasCommunicationAuthProvider: boolean,
+): readonly SetupStep[] {
+  return hasCommunicationAuthProvider
+    ? SETUP_STEPS
+    : EMAIL_PASSWORD_SETUP_STEPS;
+}
 
 const SETUP_STEP_DEFINITION_MAP = Object.fromEntries(
   SETUP_STEP_DEFINITIONS.map((definition) => [definition.id, definition]),

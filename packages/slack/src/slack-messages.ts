@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { getRedis } from '@roomote/redis';
 import {
   clearLatestUserMessageForReplyQuote,
@@ -16,6 +17,14 @@ import { slackDebug } from './logging';
 
 const SLACK_THREAD_REPLY_FOOTER_TTL_SECONDS = 30 * 24 * 60 * 60;
 const SLACK_THREAD_DELIVERED_MESSAGE_TTL_SECONDS = 30 * 24 * 60 * 60;
+
+const CLEAR_NEXT_SLACK_REPLY_QUOTE_SUPPRESSION_IF_ID_SCRIPT = `
+local current = redis.call('GET', KEYS[1])
+if current ~= ARGV[1] then
+  return 0
+end
+return redis.call('DEL', KEYS[1])
+`;
 
 export interface LatestSlackBotReply {
   ts: string;
@@ -58,10 +67,7 @@ export function hasSlackThreadReplyContext(job: {
   );
 }
 
-export type QueuedSlackMessage = Omit<
-  QueuedCommunicationMessage,
-  'provider' | 'channel' | 'threadTs'
->;
+export type QueuedSlackMessage = Omit<QueuedCommunicationMessage, 'provider'>;
 
 /**
  * Queue a Slack message for delivery to an active task run.
@@ -295,6 +301,42 @@ function getLatestSlackBotReplyKey(channel: string, threadTs: string): string {
 
 function getLatestUserMessageKey(runId: number): string {
   return `slack:latest_user_message:${runId}`;
+}
+
+function getNextSlackReplyQuoteSuppressionKey(runId: number): string {
+  return `slack:next_reply_quote_suppression:${runId}`;
+}
+
+export async function suppressNextSlackReplyQuote(
+  runId: number,
+): Promise<string> {
+  const suppressionId = randomUUID();
+  await getRedis().set(
+    getNextSlackReplyQuoteSuppressionKey(runId),
+    suppressionId,
+    'EX',
+    SLACK_THREAD_DELIVERED_MESSAGE_TTL_SECONDS,
+  );
+  return suppressionId;
+}
+
+export async function getNextSlackReplyQuoteSuppression(
+  runId: number,
+): Promise<string | null> {
+  return getRedis().get(getNextSlackReplyQuoteSuppressionKey(runId));
+}
+
+export async function clearNextSlackReplyQuoteSuppressionIfId(
+  runId: number,
+  suppressionId: string,
+): Promise<boolean> {
+  const result = await getRedis().eval(
+    CLEAR_NEXT_SLACK_REPLY_QUOTE_SUPPRESSION_IF_ID_SCRIPT,
+    1,
+    getNextSlackReplyQuoteSuppressionKey(runId),
+    suppressionId,
+  );
+  return typeof result === 'number' ? result > 0 : Number(result) > 0;
 }
 
 export async function setLatestSlackBotReply(

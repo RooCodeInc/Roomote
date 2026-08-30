@@ -202,6 +202,7 @@ describe('startAutoRoutedSlackTask', () => {
       initiatingSlackUserId: 'UINSTALLER',
       channel: 'C123',
       prompt: 'Investigate this',
+      slackMessageContext: 'Slack block text:\nState: New',
       threadTs: '120.000',
       originMessageTs: '123.456',
     });
@@ -234,6 +235,7 @@ describe('startAutoRoutedSlackTask', () => {
         trigger: 'message',
         slackUserId: 'UINSTALLER',
         channel: 'C123',
+        slackMessageContext: 'Slack block text:\nState: New',
         ts: '123.456',
         threadTs: '120.000',
         skipInitialActingUser: false,
@@ -1426,7 +1428,8 @@ describe('startAutoRoutedSlackTask', () => {
       status: 'not_started',
       code: 'deployment_read_only',
       threadId: '120.000',
-      message: 'This deployment is read-only. New task launches are paused.',
+      message:
+        'New tasks are paused due to a billing issue. Please check billing.',
       routingResult: expect.any(Object),
     });
     expect(finishRoutedStartMock).not.toHaveBeenCalled();

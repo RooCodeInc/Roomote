@@ -8,6 +8,8 @@ import type {
   DependabotTriageFrequency,
   IssueFixerFrequency,
   ManagerStatsFrequency,
+  MergeAnnouncerFrequency,
+  ProviderUsageLimitFrequency,
   SecurityAuditorFrequency,
   SentryTriageFrequency,
   SuggesterFrequency,
@@ -29,6 +31,9 @@ export const SECURITY_AUDITOR_SETTINGS_HASH = 'security-auditor';
 export const CODE_QUALITY_AUDITOR_SETTINGS_HASH = 'code-quality-auditor';
 export const CI_FAILURE_TRIAGE_SETTINGS_HASH = 'ci-failure-triage';
 export const SUMMARIZE_MERGED_PRS_SETTINGS_HASH = 'summarize-merged-prs';
+export const PLATFORM_ISSUE_ALERTS_SETTINGS_HASH = 'platform-issue-alerts';
+export const PROVIDER_USAGE_LIMIT_SETTINGS_HASH = 'provider-usage-limit';
+export const MERGE_ANNOUNCER_SETTINGS_HASH = 'merge-announcer';
 
 export type BackgroundAutomationSettingsHash =
   | typeof AUTO_RESPOND_CHANNELS_SETTINGS_HASH
@@ -42,7 +47,10 @@ export type BackgroundAutomationSettingsHash =
   | typeof SECURITY_AUDITOR_SETTINGS_HASH
   | typeof CODE_QUALITY_AUDITOR_SETTINGS_HASH
   | typeof CI_FAILURE_TRIAGE_SETTINGS_HASH
-  | typeof SUMMARIZE_MERGED_PRS_SETTINGS_HASH;
+  | typeof SUMMARIZE_MERGED_PRS_SETTINGS_HASH
+  | typeof PLATFORM_ISSUE_ALERTS_SETTINGS_HASH
+  | typeof PROVIDER_USAGE_LIMIT_SETTINGS_HASH
+  | typeof MERGE_ANNOUNCER_SETTINGS_HASH;
 
 export type BackgroundAutomationManualTriggerRequirement =
   | 'slack'
@@ -114,6 +122,11 @@ const ISSUE_FIXER_SCHEDULE_MODES = [
   'daily',
 ] as const satisfies readonly IssueFixerFrequency[];
 
+const MERGE_ANNOUNCER_SCHEDULE_MODES = [
+  'off',
+  'daily',
+] as const satisfies readonly MergeAnnouncerFrequency[];
+
 const HOURLY_AUDIT_SCHEDULE_MODES = [
   'off',
   'every_hour',
@@ -129,6 +142,11 @@ const MANAGER_STATS_SCHEDULE_MODES = [
   'off',
   'weekly',
 ] as const satisfies readonly ManagerStatsFrequency[];
+
+const PROVIDER_USAGE_LIMIT_SCHEDULE_MODES = [
+  'off',
+  'every_hour',
+] as const satisfies readonly ProviderUsageLimitFrequency[];
 
 export const TRIGGERABLE_BACKGROUND_AUTOMATION_DESCRIPTORS = [
   {
@@ -179,6 +197,16 @@ export const TRIGGERABLE_BACKGROUND_AUTOMATION_DESCRIPTORS = [
     usesManagerChannel: true,
     supportedCommunicationProviders: ['slack', 'teams', 'telegram', 'discord'],
     supportedSourceControlProviders: sourceControlProviders,
+  },
+  {
+    automationKey: 'provider_usage_limit',
+    label: 'Inference Provider Usage Alerts',
+    slackIcon: 'battery-warning',
+    scheduleModes: PROVIDER_USAGE_LIMIT_SCHEDULE_MODES,
+    manualTriggerRequirements: [],
+    usesManagerChannel: true,
+    supportedCommunicationProviders: ['slack', 'teams', 'telegram', 'discord'],
+    supportedSourceControlProviders: [],
   },
   {
     automationKey: 'sentry_triage',
@@ -273,6 +301,17 @@ export const TRIGGERABLE_BACKGROUND_AUTOMATION_DESCRIPTORS = [
     ],
     scheduledSuggestionSource: 'ci_failure_triage',
   },
+  {
+    automationKey: 'merge_announcer',
+    label: 'Merge announcer',
+    slackIcon: 'git-commit-vertical',
+    scheduleModes: MERGE_ANNOUNCER_SCHEDULE_MODES,
+    // Source-control push webhooks trigger this automation; 'daily' only means enabled.
+    manualTriggerRequirements: [],
+    usesManagerChannel: true,
+    supportedCommunicationProviders: ['slack', 'teams', 'telegram', 'discord'],
+    supportedSourceControlProviders: sourceControlProviders,
+  },
 ] as const satisfies readonly TriggerableBackgroundAutomationDescriptor[];
 
 export type TriggerableBackgroundAutomationDescriptorItem =
@@ -326,8 +365,16 @@ const BACKGROUND_AUTOMATION_SETTINGS_CATALOG = [
     label: 'Manager Channel',
   },
   {
+    hash: PLATFORM_ISSUE_ALERTS_SETTINGS_HASH,
+    label: 'Alert on Config Errors',
+  },
+  {
     hash: MANAGER_STATS_SETTINGS_HASH,
     automationKey: 'manager_stats',
+  },
+  {
+    hash: PROVIDER_USAGE_LIMIT_SETTINGS_HASH,
+    automationKey: 'provider_usage_limit',
   },
   {
     hash: SUGGEST_IDEAS_SETTINGS_HASH,
@@ -364,6 +411,10 @@ const BACKGROUND_AUTOMATION_SETTINGS_CATALOG = [
   {
     hash: SUMMARIZE_MERGED_PRS_SETTINGS_HASH,
     automationKey: 'announcer',
+  },
+  {
+    hash: MERGE_ANNOUNCER_SETTINGS_HASH,
+    automationKey: 'merge_announcer',
   },
 ] as const satisfies readonly BackgroundAutomationSettingsCatalogEntry[];
 

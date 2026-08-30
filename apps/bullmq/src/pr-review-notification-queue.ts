@@ -45,10 +45,6 @@ export function startPrReviewNotificationQueue() {
     connection,
   });
 
-  queueEvents.on('completed', ({ jobId }) =>
-    console.log(`[PrReviewNotificationQueue] job ${jobId} completed`),
-  );
-
   queueEvents.on('failed', ({ jobId, failedReason }) =>
     console.error(
       `[PrReviewNotificationQueue] job ${jobId} failed: ${failedReason}`,

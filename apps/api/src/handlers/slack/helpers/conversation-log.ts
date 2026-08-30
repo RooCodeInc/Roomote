@@ -55,6 +55,8 @@ export function getInboundSlackConversationSource(
 }
 
 type RoomoteOwnedSlackThreadMatch = {
+  taskId: string | null;
+  trackedAliasTaskId: string | null;
   userId: string | null;
   slackUserId: string | null;
   /**
@@ -117,6 +119,8 @@ export async function findRoomoteOwnedSlackThread(params: {
 
     if (payload.teamId === params.teamId) {
       const match = {
+        taskId: job.taskId,
+        trackedAliasTaskId: null,
         userId: job.userId,
         slackUserId: typeof payload.user === 'string' ? payload.user : null,
         isAutomationReportThread: isCustomAutomationThread,
@@ -133,14 +137,14 @@ export async function findRoomoteOwnedSlackThread(params: {
 
   const trackedAutomationThread = await findBackgroundAutomationSlackThread({
     surface: 'slack',
+    slackTeamId: params.teamId,
     slackChannelId: params.channelId,
     threadTs: params.threadTs,
   });
 
   // Any automation thread carrying a sourceTaskId is task-backed by
-  // construction: the binding is written only when a task owns the root. The
-  // automation key itself is irrelevant, so every automation's report thread
-  // accepts unmentioned replies, not just the ones that predate this.
+  // construction. Only platform issue alerts are alternate aliases that may
+  // route outside the task's canonical Slack thread.
   const sourceTaskId =
     typeof trackedAutomationThread?.metadata?.sourceTaskId === 'string' &&
     trackedAutomationThread.metadata.sourceTaskId.trim().length > 0
@@ -148,16 +152,12 @@ export async function findRoomoteOwnedSlackThread(params: {
       : null;
 
   if (sourceTaskId) {
-    const sourceTaskRun = existingSlackTaskRuns.find(
-      (job) => job.taskId === sourceTaskId,
-    );
-
-    if (sourceTaskRun) {
-      return {
-        userId: sourceTaskRun.userId,
-        slackUserId: null,
-        isAutomationReportThread: true,
-      };
+    const trackedSlackTeamId =
+      typeof trackedAutomationThread?.metadata.slackTeamId === 'string'
+        ? trackedAutomationThread.metadata.slackTeamId
+        : null;
+    if (trackedSlackTeamId && trackedSlackTeamId !== params.teamId) {
+      return fallbackMatch;
     }
 
     const [sourceTaskRunById] = await db
@@ -170,7 +170,9 @@ export async function findRoomoteOwnedSlackThread(params: {
       .where(
         and(
           eq(tasks.id, sourceTaskId),
-          eq(tasks.slackThreadTs, params.threadTs),
+          ...(trackedSlackTeamId
+            ? []
+            : [eq(tasks.slackThreadTs, params.threadTs)]),
           isNull(tasks.deletedAt),
         ),
       )
@@ -179,6 +181,11 @@ export async function findRoomoteOwnedSlackThread(params: {
 
     if (sourceTaskRunById) {
       return {
+        taskId: sourceTaskId,
+        trackedAliasTaskId:
+          trackedAutomationThread?.automationKey === 'platform_issue_alerts'
+            ? sourceTaskId
+            : null,
         userId:
           sourceTaskRunById.initiatorUserId ?? sourceTaskRunById.actingUserId,
         slackUserId: null,
@@ -195,6 +202,8 @@ export async function findRoomoteOwnedSlackThread(params: {
   if (trackedBotReply) {
     return (
       fallbackMatch ?? {
+        taskId: null,
+        trackedAliasTaskId: null,
         userId: null,
         slackUserId: null,
         isAutomationReportThread: isCustomAutomationThread,
@@ -214,11 +223,13 @@ export async function isRoomoteOwnedSlackThread(params: {
 }
 
 export async function findTrackedBackgroundAutomationSlackThread(params: {
+  teamId?: string;
   channelId: string;
   threadTs: string;
 }) {
   return findBackgroundAutomationSlackThread({
     surface: 'slack',
+    ...(params.teamId ? { slackTeamId: params.teamId } : {}),
     slackChannelId: params.channelId,
     threadTs: params.threadTs,
   });

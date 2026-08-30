@@ -17,7 +17,11 @@ describe('personal preferences', () => {
 
     await expect(
       getPersonalPreferencesCommand(buildAuth(user.id)),
-    ).resolves.toEqual(expect.objectContaining({ mindReaderMode: false }));
+    ).resolves.toEqual(
+      expect.objectContaining({
+        mindReaderMode: false,
+      }),
+    );
   });
 
   it('persists mind reader mode without replacing other metadata', async () => {

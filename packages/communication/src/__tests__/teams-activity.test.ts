@@ -4,6 +4,7 @@ import {
   getTeamsActivityCommunicationMetadata,
   getTeamsActivityAudioAttachments,
   getTeamsActivityImageAttachments,
+  getTeamsBaseConversationId,
   getTeamsConversationMessageIdSuffix,
   isTeamsBotAuthoredActivity,
   isTeamsBotMentioned,
@@ -15,6 +16,23 @@ import {
 } from '../teams-activity';
 
 describe('Teams activity helpers', () => {
+  it('parses added and removed message reactions', () => {
+    const parsed = parseTeamsActivity({
+      type: 'messageReaction',
+      id: 'reaction-1',
+      conversation: { id: '19:conversation@thread.v2' },
+      replyToId: 'activity-root',
+      reactionsAdded: [{ type: 'heart' }],
+      reactionsRemoved: [{ type: 'like' }],
+    });
+
+    expect(parsed.success).toBe(true);
+    expect(parsed.data).toMatchObject({
+      reactionsAdded: [{ type: 'heart' }],
+      reactionsRemoved: [{ type: 'like' }],
+    });
+  });
+
   it('parses Teams message activities into queued communication messages', () => {
     const parsed = parseTeamsActivity({
       type: 'message',
@@ -111,6 +129,9 @@ describe('Teams activity helpers', () => {
     expect(
       getTeamsConversationMessageIdSuffix(parsed.data.conversation.id),
     ).toBe('activity-root');
+    expect(getTeamsBaseConversationId(parsed.data.conversation.id)).toBe(
+      '19:conversation@thread.v2',
+    );
     expect(teamsActivityToQueuedCommunicationMessage(parsed.data)).toEqual({
       provider: 'teams',
       text: 'keep going',

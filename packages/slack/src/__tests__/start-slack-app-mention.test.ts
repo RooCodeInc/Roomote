@@ -6,6 +6,7 @@ const {
   findActiveSlackTaskRunMock,
   queueSlackMessageMock,
   resolveSlackReactionNamesMock,
+  wrapSlackMessageMock,
 } = vi.hoisted(() => ({
   dbUpdateSetMock: vi.fn(),
   enqueueTaskMock: vi.fn(),
@@ -14,6 +15,7 @@ const {
   findActiveSlackTaskRunMock: vi.fn(),
   queueSlackMessageMock: vi.fn(),
   resolveSlackReactionNamesMock: vi.fn(),
+  wrapSlackMessageMock: vi.fn((text: string) => text),
 }));
 
 vi.mock('@roomote/cloud-agents', () => ({
@@ -21,7 +23,7 @@ vi.mock('@roomote/cloud-agents', () => ({
     (message: { user?: string; username?: string }) =>
       message.username?.trim() || message.user || 'user',
   ),
-  wrapSlackMessage: vi.fn((text: string) => text),
+  wrapSlackMessage: wrapSlackMessageMock,
   wrapSlackReplyingTo: vi.fn((message: { text: string }) => message.text),
   wrapSlackThreadContext: vi.fn((messages: { text: string }[]) =>
     messages.map((message) => message.text).join('\n'),
@@ -91,6 +93,7 @@ describe('startSlackAppMentionTask', () => {
       teamId: 'T123',
       slackUserId: 'U123',
       text: 'hello',
+      slackMessageContext: 'Slack block text:\nState: New',
       ts: '111.000',
       threadTs: '111.000',
       repo: 'owner/repo',
@@ -110,6 +113,7 @@ describe('startSlackAppMentionTask', () => {
         },
         task: expect.objectContaining({
           payload: expect.objectContaining({
+            slackMessageContext: 'Slack block text:\nState: New',
             slackConversationUrl:
               'https://acme-team.slack.com/archives/C123/p111000?thread_ts=111.000&cid=C123',
           }),
@@ -117,6 +121,34 @@ describe('startSlackAppMentionTask', () => {
       }),
       {},
     );
+  });
+
+  it('runs a surface hook before dispatching a fresh task run', async () => {
+    const beforeTaskRunDispatch = vi.fn();
+    enqueueTaskMock.mockImplementationOnce(async (_input, options) => {
+      await options.beforeEnqueue({ id: 42, taskId: 'task_123' });
+      return { id: 42, taskId: 'task_123' };
+    });
+    const { startSlackAppMentionTask } =
+      await import('../start-slack-app-mention');
+
+    await startSlackAppMentionTask({
+      initiator: { kind: 'user', userId: 'user_123' },
+      trigger: 'message',
+      channel: 'C123',
+      teamId: 'T123',
+      slackUserId: 'U123',
+      text: 'hello',
+      ts: '111.000',
+      threadTs: '111.000',
+      repo: 'owner/repo',
+      beforeTaskRunDispatch,
+    });
+
+    expect(beforeTaskRunDispatch).toHaveBeenCalledWith({
+      id: 42,
+      taskId: 'task_123',
+    });
   });
 
   it('persists an exact Slack conversation permalink onto a reused active task run', async () => {
@@ -139,6 +171,7 @@ describe('startSlackAppMentionTask', () => {
       teamId: 'T123',
       slackUserId: 'U123',
       text: 'hello again',
+      slackMessageContext: 'Slack block text:\nPriority: High',
       ts: '111.000',
       threadTs: '111.000',
       repo: 'owner/repo',
@@ -166,6 +199,10 @@ describe('startSlackAppMentionTask', () => {
         text: 'hello again',
       }),
     );
+    expect(wrapSlackMessageMock).toHaveBeenCalledWith('hello again', {
+      ts: '111.000',
+      agentContext: 'Slack block text:\nPriority: High',
+    });
   });
 
   it('does not rewrite the reused job payload when the permalink is unchanged', async () => {
@@ -203,6 +240,42 @@ describe('startSlackAppMentionTask', () => {
       expect.objectContaining({
         text: 'hello again',
       }),
+    );
+  });
+
+  it('runs a surface hook before dispatching an active-task follow-up', async () => {
+    findActiveSlackTaskRunMock.mockResolvedValueOnce({
+      id: 99,
+      taskId: 'task_existing',
+      payload: {
+        channel: 'C123',
+        text: 'earlier text',
+        thread_ts: '111.000',
+      },
+    });
+    const beforeTaskRunDispatch = vi.fn();
+    const { startSlackAppMentionTask } =
+      await import('../start-slack-app-mention');
+
+    await startSlackAppMentionTask({
+      initiator: { kind: 'user', userId: 'user_123' },
+      trigger: 'message',
+      channel: 'C123',
+      teamId: 'T123',
+      slackUserId: 'U123',
+      text: 'hello again',
+      ts: '111.001',
+      threadTs: '111.000',
+      repo: 'owner/repo',
+      beforeTaskRunDispatch,
+    });
+
+    expect(beforeTaskRunDispatch).toHaveBeenCalledWith({
+      id: 99,
+      taskId: 'task_existing',
+    });
+    expect(beforeTaskRunDispatch.mock.invocationCallOrder[0]).toBeLessThan(
+      queueSlackMessageMock.mock.invocationCallOrder[0]!,
     );
   });
 });

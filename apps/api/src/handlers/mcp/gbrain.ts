@@ -1,5 +1,5 @@
 import {
-  resolveBrainInferenceProvider,
+  isBrainEmbeddingAvailable,
   resolveBrainConnection,
 } from '@roomote/sdk/server';
 
@@ -19,7 +19,6 @@ import { createMcpProxy, McpProxyError } from './proxy-utils';
  * - `recall` leads with hot-memory facts saved via `remember`, which this
  *   deployment never writes. Its page arm duplicates `search`, so exposing it
  *   only offers a worse `search` with a permanently empty half.
- * - `entity` reads person/company/project cards, which nothing creates.
  * - `context_pack` and `delta` serve long-lived agents with standing entities
  *   and heartbeats. Roomote's agents are per-task and start cold.
  *
@@ -33,6 +32,9 @@ export const GBRAIN_READ_TOOL_NAMES = [
   // -token path with no expansion call.
   'query',
   'search',
+  // Exact, zero-LLM lookup for canonical person cards populated from Roomote
+  // member identities. Prefer this over broad search for a known person.
+  'entity',
   // Reason across pages. Expensive and slow, but bounded in tokens, which is
   // the only reason to prefer it over reading pages directly.
   'synthesize',
@@ -50,9 +52,10 @@ export const GBRAIN_READ_TOOL_NAMES = [
  * upstream. Requests are refused unless the integration is enabled and a
  * connection (admin-entered or env-pinned) exists.
  */
-export function createGbrainMcpProxy() {
+export function createGbrainMcpProxy(options?: { allowAuthTokens?: boolean }) {
   return createMcpProxy({
     name: 'Brain',
+    allowAuthTokens: options?.allowAuthTokens,
     allowedToolNames: GBRAIN_READ_TOOL_NAMES,
     validateTaskRunToken: async () => null,
     resolveCredentials: async () => {
@@ -60,16 +63,20 @@ export function createGbrainMcpProxy() {
       // service has a Brain, and the read-only agent client is provisioned
       // headlessly on first use.
       //
-      // Both halves are required before an agent is told the Brain exists. A
-      // Brain container with no provider key configured yet can still answer
-      // keyword queries, which is worse than absent: recall would look real
-      // while silently missing everything semantic.
-      const [connection, provider] = await Promise.all([
+      // Both halves are required before an agent is told the Brain exists: a
+      // place to read from (connection) and a way to embed the query. Without
+      // an embedding path a Brain can still answer keyword queries, which is
+      // worse than absent — recall would look real while silently missing
+      // everything semantic. The embedding check is provider-agnostic, matching
+      // the ingest side (isBrainEmbeddingAvailable): a self-run embedder is
+      // enough, so a trial or Anthropic-only tenant whose pages the drain
+      // ingested can also query them, instead of accumulating unreadable memory.
+      const [connection, embeddingAvailable] = await Promise.all([
         resolveBrainConnection('agent'),
-        resolveBrainInferenceProvider(),
+        isBrainEmbeddingAvailable(),
       ]);
 
-      if (!connection || !provider) {
+      if (!connection || !embeddingAvailable) {
         throw new McpProxyError(
           404,
           'The Brain is not configured on this deployment',

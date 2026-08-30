@@ -1,33 +1,50 @@
+import { createHash } from 'node:crypto';
+
 import {
   REVIEW_STATUS_END_MARKER,
   REVIEW_STATUS_START_MARKER,
   REVIEW_SUMMARY_MARKER,
   getMarkedSection,
-  isReviewInProgressStatusLine,
+  isReviewSummaryInProgress,
 } from '@roomote/cloud-agents/server';
 import {
   generateTrackedNonTaskObject,
   NON_TASK_INFERENCE_SURFACES,
 } from '@roomote/cloud-agents/server/non-task-provider-usage';
-import type { TaskRun } from '@roomote/db/server';
+import {
+  and,
+  db,
+  eq,
+  inArray,
+  sql,
+  taskMessages,
+  type TaskRun,
+} from '@roomote/db/server';
 import {
   Schemas as GitHubSchemas,
   createTaskRunGitHubToken,
+  getGitHubRateLimitRetryAfterMs,
   getOctokit,
+  isGitHubUnauthorizedError,
   resolveConfiguredGitHubAppSlug,
+  withTaskRunGitHubTokenRetry,
 } from '@roomote/github';
 import { setLatestSlackBotReply, trackSlackBotReply } from '@roomote/slack';
 import {
   ACP_ENVELOPE_EVENT_TYPES,
   getSourceControlProviderLabel,
   normalizeSourceControlProvider,
+  PR_CONFLICT_NOTIFICATION_TASK_MESSAGE_SOURCE,
   PR_REVIEW_NOTIFICATION_TASK_MESSAGE_SOURCE,
   ROOMOTE_RUNTIME_TASK_MESSAGE_PROTOCOL,
+  parsePrReviewActionOffer,
+  type PrReviewActionOfferStatus,
   type SourceControlProvider,
 } from '@roomote/types';
 import { z } from 'zod';
 
 import { readSourceControlPullRequestForTaskRun } from '../pull-requests/source-control-pull-request-reads';
+import { prReviewGitHubConditionalRequestCache } from '../pull-requests/github-conditional-request-cache';
 import { recordTaskMessageEnvelope } from './record-task-message-envelope';
 import {
   formatPrReviewActivityMessage,
@@ -42,6 +59,128 @@ const PR_REVIEW_TRIAGE_MAX_OUTPUT_TOKENS = 512;
 const MAX_REVIEW_STATUS_LENGTH = 300;
 const MAX_REVIEW_ACTIVITY_SECTION_LENGTH = 32_000;
 const REVIEW_ACTIVITY_TRUNCATION_NOTICE_LENGTH = 256;
+const PR_REVIEW_TRIAGE_CACHE_TTL_MS = 15 * 60 * 1000;
+const PR_REVIEW_TRIAGE_CACHE_MAX_ENTRIES = 500;
+
+type PrReviewNotificationTelemetry = {
+  githubApiCalls: number;
+  githubTokenMintRequests: number;
+  eventsReceived: number;
+  eventsTriaged: number;
+  triageInvoked: boolean;
+  triageCacheHit: boolean;
+  triageInputChars: number;
+  triageInputTokenEstimate: number;
+};
+
+type PrReviewRateLimitMetadata = {
+  status: number | null;
+  remaining: string | null;
+  resetAt: string | null;
+  retryAfter: string | null;
+};
+
+const prReviewTriageDecisionCache = new Map<
+  string,
+  { decision: PrReviewTriageDecision; storedAt: number }
+>();
+
+export function clearPrReviewTriageDecisionCache(): void {
+  prReviewTriageDecisionCache.clear();
+  prReviewTriageInFlight.clear();
+}
+
+export function createPrReviewNotificationTelemetry(
+  eventsReceived: number,
+): PrReviewNotificationTelemetry {
+  return {
+    githubApiCalls: 0,
+    githubTokenMintRequests: 0,
+    eventsReceived,
+    eventsTriaged: 0,
+    triageInvoked: false,
+    triageCacheHit: false,
+    triageInputChars: 0,
+    triageInputTokenEstimate: 0,
+  };
+}
+
+export class PrReviewNotificationRateLimitError extends Error {
+  constructor(
+    readonly retryAfterMs: number,
+    cause: unknown,
+    readonly rateLimit: PrReviewRateLimitMetadata,
+    readonly telemetry: PrReviewNotificationTelemetry,
+  ) {
+    super('GitHub installation API rate limited during PR review triage.', {
+      cause,
+    });
+    this.name = 'PrReviewNotificationRateLimitError';
+  }
+}
+
+function getErrorHeader(error: unknown, name: string): string | null {
+  if (
+    typeof error !== 'object' ||
+    error === null ||
+    !('response' in error) ||
+    typeof error.response !== 'object' ||
+    error.response === null ||
+    !('headers' in error.response) ||
+    typeof error.response.headers !== 'object' ||
+    error.response.headers === null
+  ) {
+    return null;
+  }
+
+  const headers = error.response.headers as Record<string, unknown>;
+  const value = headers[name] ?? headers[name.toLowerCase()];
+  return typeof value === 'string' || typeof value === 'number'
+    ? String(value)
+    : null;
+}
+
+function getRateLimitMetadata(error: unknown): PrReviewRateLimitMetadata {
+  const status =
+    typeof error === 'object' && error !== null && 'status' in error
+      ? Number(error.status)
+      : null;
+  const reset = getErrorHeader(error, 'x-ratelimit-reset');
+  const resetSeconds = reset ? Number(reset) : Number.NaN;
+
+  return {
+    status: status !== null && Number.isFinite(status) ? status : null,
+    remaining: getErrorHeader(error, 'x-ratelimit-remaining'),
+    resetAt:
+      Number.isFinite(resetSeconds) && resetSeconds > 0
+        ? new Date(resetSeconds * 1000).toISOString()
+        : null,
+    retryAfter: getErrorHeader(error, 'retry-after'),
+  };
+}
+
+function rethrowGitHubRateLimit(
+  error: unknown,
+  telemetry: PrReviewNotificationTelemetry,
+): void {
+  if (isGitHubUnauthorizedError(error)) {
+    throw error;
+  }
+
+  if (error instanceof PrReviewNotificationRateLimitError) {
+    throw error;
+  }
+
+  const retryAfterMs = getGitHubRateLimitRetryAfterMs(error);
+  if (retryAfterMs !== null) {
+    throw new PrReviewNotificationRateLimitError(
+      retryAfterMs,
+      error,
+      getRateLimitMetadata(error),
+      { ...telemetry },
+    );
+  }
+}
 
 const prReviewTriageResponseSchema = z.object({
   worthNotifying: z.boolean(),
@@ -108,6 +247,41 @@ type PrReviewTriageDecision =
       followUpPrompt: string | null;
     }
   | { post: false; reason: 'not_worth_notifying' };
+
+const prReviewTriageInFlight = new Map<
+  string,
+  Promise<{ object: z.infer<typeof prReviewTriageResponseSchema> }>
+>();
+
+function getCachedPrReviewTriageDecision(
+  key: string,
+): PrReviewTriageDecision | null {
+  const cached = prReviewTriageDecisionCache.get(key);
+  if (!cached) return null;
+  if (Date.now() - cached.storedAt > PR_REVIEW_TRIAGE_CACHE_TTL_MS) {
+    prReviewTriageDecisionCache.delete(key);
+    return null;
+  }
+
+  prReviewTriageDecisionCache.delete(key);
+  prReviewTriageDecisionCache.set(key, cached);
+  return cached.decision;
+}
+
+function cachePrReviewTriageDecision(
+  key: string,
+  decision: PrReviewTriageDecision,
+): void {
+  prReviewTriageDecisionCache.delete(key);
+  prReviewTriageDecisionCache.set(key, { decision, storedAt: Date.now() });
+  while (
+    prReviewTriageDecisionCache.size > PR_REVIEW_TRIAGE_CACHE_MAX_ENTRIES
+  ) {
+    const oldestKey = prReviewTriageDecisionCache.keys().next().value;
+    if (typeof oldestKey !== 'string') break;
+    prReviewTriageDecisionCache.delete(oldestKey);
+  }
+}
 
 export type PreparedPrReviewNotification =
   | {
@@ -274,11 +448,15 @@ async function fetchPrReviewLiveHeadState({
   repository,
   prNumber,
   sourceControlProvider,
+  telemetry,
+  githubToken,
 }: {
   taskRun: TaskRun;
   repository: string;
   prNumber: number;
   sourceControlProvider?: SourceControlProvider;
+  telemetry: PrReviewNotificationTelemetry;
+  githubToken?: string;
 }): Promise<PrReviewLiveHeadState> {
   const provider = normalizeSourceControlProvider(sourceControlProvider);
 
@@ -293,14 +471,22 @@ async function fetchPrReviewLiveHeadState({
   }
 
   try {
-    const token = await createTaskRunGitHubToken(taskRun);
+    const token = githubToken ?? (await createTaskRunGitHubToken(taskRun));
     const octokit = getOctokit(token);
 
-    const { data: pullRequest } = await octokit.rest.pulls.get({
-      owner,
-      repo,
-      pull_number: prNumber,
-    });
+    const { data: pullRequest } =
+      await prReviewGitHubConditionalRequestCache.request(
+        `pull:${taskRun.id}:${repository}#${prNumber}`,
+        (headers) => {
+          telemetry.githubApiCalls += 1;
+          return octokit.rest.pulls.get({
+            owner,
+            repo,
+            pull_number: prNumber,
+            request: { headers },
+          });
+        },
+      );
     const headSha =
       typeof pullRequest.head?.sha === 'string' ? pullRequest.head.sha : null;
     const mergeable =
@@ -318,12 +504,19 @@ async function fetchPrReviewLiveHeadState({
     let statusContexts: Array<{ context: string; state: string }> = [];
 
     try {
-      const { data } = await octokit.rest.checks.listForRef({
-        owner,
-        repo,
-        ref: headSha,
-        per_page: 100,
-      });
+      const { data } = await prReviewGitHubConditionalRequestCache.request(
+        `checks:${taskRun.id}:${repository}@${headSha}`,
+        (headers) => {
+          telemetry.githubApiCalls += 1;
+          return octokit.rest.checks.listForRef({
+            owner,
+            repo,
+            ref: headSha,
+            per_page: 100,
+            request: { headers },
+          });
+        },
+      );
 
       checkRuns = data.check_runs.map((run) => ({
         name: run.name,
@@ -331,6 +524,7 @@ async function fetchPrReviewLiveHeadState({
         conclusion: run.conclusion,
       }));
     } catch (error) {
+      rethrowGitHubRateLimit(error, telemetry);
       console.warn(
         `[PrReviewNotification] Failed to list check runs for ${repository}#${prNumber}: ${
           error instanceof Error ? error.message : String(error)
@@ -340,11 +534,18 @@ async function fetchPrReviewLiveHeadState({
 
     try {
       const { data: combined } =
-        await octokit.rest.repos.getCombinedStatusForRef({
-          owner,
-          repo,
-          ref: headSha,
-        });
+        await prReviewGitHubConditionalRequestCache.request(
+          `status:${taskRun.id}:${repository}@${headSha}`,
+          (headers) => {
+            telemetry.githubApiCalls += 1;
+            return octokit.rest.repos.getCombinedStatusForRef({
+              owner,
+              repo,
+              ref: headSha,
+              request: { headers },
+            });
+          },
+        );
 
       // GitHub returns an empty statuses list for Actions-only repos. Only
       // include classic commit statuses when total_count is positive.
@@ -358,6 +559,7 @@ async function fetchPrReviewLiveHeadState({
         });
       }
     } catch (error) {
+      rethrowGitHubRateLimit(error, telemetry);
       console.warn(
         `[PrReviewNotification] Failed to fetch combined status for ${repository}#${prNumber}: ${
           error instanceof Error ? error.message : String(error)
@@ -373,6 +575,7 @@ async function fetchPrReviewLiveHeadState({
       currentHeadSha: headSha,
     };
   } catch (error) {
+    rethrowGitHubRateLimit(error, telemetry);
     console.warn(
       `[PrReviewNotification] Could not resolve live PR head state for ${repository}#${prNumber}: ${
         error instanceof Error ? error.message : String(error)
@@ -394,6 +597,7 @@ so, write the complete chat message.
 
 Set "worthNotifying" to true when the activity contains something the PR owner
 would plausibly want to know or act on, for example:
+- a CI failure event reports a failed check on the current PR head
 - a human reviewer approved the PR, requested changes, or dismissed a review
 - a human reviewer left review comments
 - an automated review found concrete issues worth considering
@@ -536,6 +740,10 @@ function describePrReviewEvent(
       ? `\n  Untrusted review content (JSON string): ${JSON.stringify(event.body)}`
       : '';
 
+  if (event.kind === 'ci_failure') {
+    return `- CI check ${event.checkName ?? 'unknown'} failed${link}`;
+  }
+
   if (event.kind === 'review_comment') {
     return reply
       ? `- ${author}${automation}${reply}${link}${body}`
@@ -614,6 +822,10 @@ function hasPotentialActionableReviewContent(
   events: PrReviewActivityEvent[],
 ): boolean {
   return events.some((event) => {
+    if (event.kind === 'ci_failure') {
+      return true;
+    }
+
     // Automated reviewers only receive an action offer from live provider
     // state (an open thread, failed CI, or conflicts), never from stale text.
     if (event.automatedAuthorId) {
@@ -661,7 +873,8 @@ function sanitizeReviewStatus(status: string): string {
 
 function getReviewSummaryHeadSha(body: string): string | null {
   return (
-    body.match(/<!--\s*roomote-review-summary\s+sha=([0-9a-f]+)/i)?.[1] ?? null
+    body.match(/<!--\s*roomote-review-summary\s+sha=([0-9a-f]{7,})/i)?.[1] ??
+    null
   );
 }
 
@@ -669,10 +882,14 @@ async function fetchPrDiscussionSignals({
   taskRun,
   repository,
   prNumber,
+  telemetry,
+  githubToken,
 }: {
   taskRun: TaskRun;
   repository: string;
   prNumber: number;
+  telemetry: PrReviewNotificationTelemetry;
+  githubToken?: string;
 }): Promise<Omit<PrReviewTriageContext, 'ciStatus' | 'mergeable'>> {
   const result = await readSourceControlPullRequestForTaskRun({
     taskRun,
@@ -681,6 +898,11 @@ async function fetchPrDiscussionSignals({
       repositoryFullName: repository,
       prNumber,
     },
+    useGitHubConditionalRequests: true,
+    onGitHubApiRequest: () => {
+      telemetry.githubApiCalls += 1;
+    },
+    githubToken,
   });
 
   if (!('threads' in result)) {
@@ -722,8 +944,8 @@ async function fetchPrDiscussionSignals({
 
     if (status?.trim()) {
       latestReviewStatus = sanitizeReviewStatus(status);
-      latestTerminalReviewSummaryHeadSha = isReviewInProgressStatusLine(
-        status.trim().split('\n')[0] ?? '',
+      latestTerminalReviewSummaryHeadSha = isReviewSummaryInProgress(
+        comment.body,
       )
         ? null
         : getReviewSummaryHeadSha(comment.body);
@@ -767,52 +989,96 @@ export async function gatherPrReviewTriageContext({
   repository,
   prNumber,
   sourceControlProvider,
+  telemetry = createPrReviewNotificationTelemetry(0),
 }: {
   taskRun: TaskRun;
   repository: string;
   prNumber: number;
   sourceControlProvider?: SourceControlProvider;
+  telemetry?: PrReviewNotificationTelemetry;
 }): Promise<PrReviewTriageContext> {
-  const [discussionResult, liveHeadState] = await Promise.all([
-    (async () => {
-      try {
-        return await fetchPrDiscussionSignals({
-          taskRun,
-          repository,
-          prNumber,
-        });
-      } catch (error) {
-        console.warn(
-          `[PrReviewNotification] Could not fetch PR discussion signals for ${repository}#${prNumber}: ${
-            error instanceof Error ? error.message : String(error)
-          }`,
-        );
-
-        return {
-          resolvedThreadCount: null,
-          unresolvedThreadCount: null,
-          latestReviewStatus: null,
-          latestReviewSummaryComment: null,
-          latestTerminalReviewSummaryHeadSha: null,
-          currentHeadSha: null,
-          reviewThreads: [],
-        };
+  const provider = normalizeSourceControlProvider(sourceControlProvider);
+  const gatherWithToken = async (
+    githubToken?: string,
+  ): Promise<PrReviewTriageContext> => {
+    let discussionResult: Omit<PrReviewTriageContext, 'ciStatus' | 'mergeable'>;
+    try {
+      discussionResult = await fetchPrDiscussionSignals({
+        taskRun,
+        repository,
+        prNumber,
+        telemetry,
+        githubToken,
+      });
+    } catch (error) {
+      if (provider === 'github') {
+        rethrowGitHubRateLimit(error, telemetry);
       }
-    })(),
-    fetchPrReviewLiveHeadState({
+      console.warn(
+        `[PrReviewNotification] Could not fetch PR discussion signals for ${repository}#${prNumber}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+
+      discussionResult = {
+        resolvedThreadCount: null,
+        unresolvedThreadCount: null,
+        latestReviewStatus: null,
+        latestReviewSummaryComment: null,
+        latestTerminalReviewSummaryHeadSha: null,
+        currentHeadSha: null,
+        reviewThreads: [],
+      };
+    }
+
+    // Avoid starting the live-head request burst when discussion reads have
+    // already established that the installation is rate limited.
+    const liveHeadState = await fetchPrReviewLiveHeadState({
       taskRun,
       repository,
       prNumber,
       sourceControlProvider,
-    }),
-  ]);
+      telemetry,
+      githubToken,
+    });
 
-  return {
-    ...discussionResult,
-    currentHeadSha: liveHeadState.currentHeadSha,
-    ciStatus: liveHeadState.ciStatus,
-    mergeable: liveHeadState.mergeable,
+    return {
+      ...discussionResult,
+      currentHeadSha: liveHeadState.currentHeadSha,
+      ciStatus: liveHeadState.ciStatus,
+      mergeable: liveHeadState.mergeable,
+    };
   };
+
+  if (provider !== 'github') {
+    return gatherWithToken();
+  }
+
+  try {
+    return await withTaskRunGitHubTokenRetry(taskRun, gatherWithToken, {
+      onTokenMintRequest: () => {
+        telemetry.githubTokenMintRequests += 1;
+      },
+    });
+  } catch (error) {
+    rethrowGitHubRateLimit(error, telemetry);
+    console.warn(
+      `[PrReviewNotification] Could not create task-scoped GitHub client for ${repository}#${prNumber}: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+    return {
+      resolvedThreadCount: null,
+      unresolvedThreadCount: null,
+      latestReviewStatus: null,
+      latestReviewSummaryComment: null,
+      latestTerminalReviewSummaryHeadSha: null,
+      currentHeadSha: null,
+      reviewThreads: [],
+      ciStatus: null,
+      mergeable: null,
+    };
+  }
 }
 
 function buildCiContextLines(context: PrReviewTriageContext): string[] {
@@ -892,6 +1158,7 @@ export async function triagePrReviewActivity({
   events,
   context,
   sourceControlProvider,
+  telemetry = createPrReviewNotificationTelemetry(events.length),
 }: {
   taskId: string;
   repository: string;
@@ -900,6 +1167,7 @@ export async function triagePrReviewActivity({
   events: PrReviewActivityEvent[];
   context?: PrReviewTriageContext;
   sourceControlProvider?: SourceControlProvider;
+  telemetry?: PrReviewNotificationTelemetry;
 }): Promise<PrReviewTriageDecision> {
   const containsSelfReviewResult = events.some(
     (event) => event.kind === 'review_summary',
@@ -916,6 +1184,10 @@ export async function triagePrReviewActivity({
   );
   const hasDeterministicActionSignal =
     events.some((event) => {
+      if (event.kind === 'ci_failure') {
+        return true;
+      }
+
       if (
         event.reviewState === 'changes_requested' &&
         !event.automatedAuthorId
@@ -941,29 +1213,76 @@ export async function triagePrReviewActivity({
       ? buildContextLines(context, { containsSelfReviewResult })
       : []),
   ].join('\n');
+  const cacheKey = createHash('sha256').update(prompt).digest('hex');
+  const cachedDecision = getCachedPrReviewTriageDecision(cacheKey);
+  telemetry.eventsTriaged = events.length;
+  telemetry.triageInputChars =
+    PR_REVIEW_TRIAGE_SYSTEM_PROMPT.length + prompt.length;
+  telemetry.triageInputTokenEstimate = Math.ceil(
+    telemetry.triageInputChars / 4,
+  );
 
-  const { object } = await generateTrackedNonTaskObject({
-    taskId,
-    surface: NON_TASK_INFERENCE_SURFACES.prReviewNotificationTriage,
-    timeoutMs: PR_REVIEW_TRIAGE_TIMEOUT_MS,
-    maxOutputTokens: PR_REVIEW_TRIAGE_MAX_OUTPUT_TOKENS,
-    schema: prReviewTriageResponseSchema,
-    system: PR_REVIEW_TRIAGE_SYSTEM_PROMPT,
-    prompt,
-  });
+  if (cachedDecision) {
+    telemetry.triageCacheHit = true;
+    return cachedDecision;
+  }
+
+  let generation = prReviewTriageInFlight.get(cacheKey);
+  if (generation) {
+    telemetry.triageCacheHit = true;
+  } else {
+    telemetry.triageInvoked = true;
+    generation = generateTrackedNonTaskObject({
+      taskId,
+      surface: NON_TASK_INFERENCE_SURFACES.prReviewNotificationTriage,
+      timeoutMs: PR_REVIEW_TRIAGE_TIMEOUT_MS,
+      maxOutputTokens: PR_REVIEW_TRIAGE_MAX_OUTPUT_TOKENS,
+      schema: prReviewTriageResponseSchema,
+      system: PR_REVIEW_TRIAGE_SYSTEM_PROMPT,
+      prompt,
+      maxProviderRetryAttempts: 1,
+      onProviderRetry: ({ attempt, nextRetryAtMs }) => {
+        console.warn(
+          JSON.stringify({
+            event: 'pr_review_notification_triage_provider_retry',
+            instanceId: process.env.R_INSTANCE_ID ?? null,
+            taskId,
+            repository,
+            prNumber,
+            attempt,
+            nextRetryAtMs: nextRetryAtMs ?? null,
+          }),
+        );
+      },
+    });
+    prReviewTriageInFlight.set(cacheKey, generation);
+  }
+
+  let object: z.infer<typeof prReviewTriageResponseSchema>;
+  try {
+    ({ object } = await generation);
+  } finally {
+    if (telemetry.triageInvoked) {
+      prReviewTriageInFlight.delete(cacheKey);
+    }
+  }
 
   if (
     !object.worthNotifying &&
     !containsSelfReviewResult &&
     !hasDeterministicActionSignal
   ) {
-    return { post: false, reason: 'not_worth_notifying' };
+    const decision = { post: false, reason: 'not_worth_notifying' } as const;
+    cachePrReviewTriageDecision(cacheKey, decision);
+    return decision;
   }
 
   const summary =
     object.summary.trim() ||
     (hasDeterministicActionSignal
-      ? `There is actionable review feedback on [${repository}#${prNumber}](${prUrl}).`
+      ? events.some((event) => event.kind === 'ci_failure')
+        ? `CI failed on [${repository}#${prNumber}](${prUrl}).`
+        : `There is actionable review feedback on [${repository}#${prNumber}](${prUrl}).`
       : '');
 
   if (!summary) {
@@ -977,21 +1296,28 @@ export async function triagePrReviewActivity({
   const actionableFeedback =
     hasDeterministicActionSignal ||
     (object.actionableFeedback && hasPotentialActionableReviewContent(events));
+  const containsCiFailure = events.some((event) => event.kind === 'ci_failure');
   const hasModelFollowUp =
     followUpQuestion.length > 0 && followUpPrompt.length > 0;
-  const fallbackPrompt = `Resolve the actionable review feedback on [${repository}#${prNumber}](${prUrl}).${events
+  const fallbackPrompt = `${containsCiFailure ? 'Investigate and resolve the failed CI checks' : 'Resolve the actionable review feedback'} on [${repository}#${prNumber}](${prUrl}).${events
     .flatMap((event) =>
-      event.url ? [` Review [the feedback](${event.url}).`] : [],
+      event.url
+        ? [
+            ` Review [${event.kind === 'ci_failure' ? 'the failed check' : 'the feedback'}](${event.url}).`,
+          ]
+        : [],
     )
     .join('')}`;
 
-  return {
+  const decision: PrReviewTriageDecision = {
     post: true,
     summary,
     followUpQuestion: actionableFeedback
       ? hasModelFollowUp
         ? followUpQuestion
-        : 'Would you like me to resolve this feedback?'
+        : containsCiFailure
+          ? 'Would you like me to resolve this CI failure?'
+          : 'Would you like me to resolve this feedback?'
       : null,
     followUpPrompt: actionableFeedback
       ? hasModelFollowUp
@@ -999,6 +1325,8 @@ export async function triagePrReviewActivity({
         : fallbackPrompt
       : null,
   };
+  cachePrReviewTriageDecision(cacheKey, decision);
+  return decision;
 }
 
 function filterHandledReviewEvents(
@@ -1038,7 +1366,9 @@ function filterHandledReviewEvents(
     return (
       !context.currentHeadSha ||
       !event.reviewHeadSha ||
-      event.kind !== 'review' ||
+      (event.kind !== 'review' &&
+        event.kind !== 'ci_failure' &&
+        event.kind !== 'review_summary') ||
       event.reviewHeadSha === context.currentHeadSha
     );
   });
@@ -1048,10 +1378,12 @@ export async function preparePrReviewNotificationDelivery({
   taskRun,
   request,
   events,
+  telemetry = createPrReviewNotificationTelemetry(events.length),
 }: {
   taskRun: TaskRun;
   request: PrReviewNotificationRequest;
   events: PrReviewActivityEvent[];
+  telemetry?: PrReviewNotificationTelemetry;
 }): Promise<PreparedPrReviewNotification> {
   const route = await resolvePrReviewNotificationRoute(taskRun);
   const context = await gatherPrReviewTriageContext({
@@ -1059,6 +1391,7 @@ export async function preparePrReviewNotificationDelivery({
     repository: request.repository,
     prNumber: request.prNumber,
     sourceControlProvider: request.sourceControlProvider,
+    telemetry,
   });
   const liveEvents = filterHandledReviewEvents(events, context);
   const eventsToTriage = context.latestTerminalReviewSummaryHeadSha
@@ -1082,6 +1415,7 @@ export async function preparePrReviewNotificationDelivery({
     events: eventsToTriage,
     context,
     sourceControlProvider: request.sourceControlProvider,
+    telemetry,
   });
 
   if (!triage.post) {
@@ -1124,8 +1458,16 @@ export async function recordPrReviewNotificationDeliveryBestEffort(params: {
   text: string;
   route?: PrReviewNotificationRoute | null;
   messageTs?: string | null;
-}): Promise<void> {
+  source?:
+    | typeof PR_REVIEW_NOTIFICATION_TASK_MESSAGE_SOURCE
+    | typeof PR_CONFLICT_NOTIFICATION_TASK_MESSAGE_SOURCE;
+  reviewAction?: {
+    deliveryId: string;
+    question: string;
+  };
+}): Promise<boolean> {
   const route = params.route ?? null;
+  const source = params.source ?? PR_REVIEW_NOTIFICATION_TASK_MESSAGE_SOURCE;
   const operations: Array<{ label: string; promise: Promise<unknown> }> = [
     {
       label: 'persist task history',
@@ -1142,12 +1484,20 @@ export async function recordPrReviewNotificationDeliveryBestEffort(params: {
           protocol: ROOMOTE_RUNTIME_TASK_MESSAGE_PROTOCOL,
           contentBlocks: [{ type: 'text', text: params.text }],
           metadata: {
-            source: PR_REVIEW_NOTIFICATION_TASK_MESSAGE_SOURCE,
+            source,
             visibleInTranscript: true,
           },
           payload: {
             text: params.text,
-            source: PR_REVIEW_NOTIFICATION_TASK_MESSAGE_SOURCE,
+            source,
+            ...(params.reviewAction
+              ? {
+                  prReviewAction: {
+                    ...params.reviewAction,
+                    status: 'pending',
+                  },
+                }
+              : {}),
           },
           visibleInTranscript: true,
         },
@@ -1195,4 +1545,46 @@ export async function recordPrReviewNotificationDeliveryBestEffort(params: {
       }`,
     );
   }
+
+  return results[0]?.status === 'fulfilled';
+}
+
+export async function updateTaskPrReviewOfferStatus(input: {
+  taskId: string;
+  deliveryIds: string[];
+  status: PrReviewActionOfferStatus;
+}): Promise<void> {
+  if (input.deliveryIds.length === 0) return;
+
+  await db
+    .update(taskMessages)
+    .set({
+      payload: sql`jsonb_set(coalesce(${taskMessages.payload}, '{}'::jsonb), '{prReviewAction,status}', to_jsonb(${input.status}::text), true)`,
+    })
+    .where(
+      and(
+        eq(taskMessages.taskId, input.taskId),
+        inArray(
+          sql<string>`${taskMessages.payload} -> 'prReviewAction' ->> 'deliveryId'`,
+          input.deliveryIds,
+        ),
+      ),
+    );
+}
+
+export async function getTaskPrReviewOfferStatus(input: {
+  taskId: string;
+  deliveryId: string;
+}): Promise<PrReviewActionOfferStatus | null> {
+  const [message] = await db
+    .select({ payload: taskMessages.payload })
+    .from(taskMessages)
+    .where(
+      and(
+        eq(taskMessages.taskId, input.taskId),
+        sql`${taskMessages.payload} -> 'prReviewAction' ->> 'deliveryId' = ${input.deliveryId}`,
+      ),
+    )
+    .limit(1);
+  return parsePrReviewActionOffer(message?.payload)?.status ?? null;
 }

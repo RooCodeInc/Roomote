@@ -12,12 +12,9 @@ import {
   resolveEvalHarnessSelection,
 } from '@roomote/types';
 import {
-  type RoutingDecision,
-  buildSlackRoutingContext,
   DeploymentReadOnlyError,
   enqueueTask,
   getTaskUrl,
-  routeTask,
 } from '@roomote/cloud-agents/server';
 import { captureTaskSettled } from '@roomote/telemetry/server';
 import {
@@ -28,14 +25,15 @@ import {
   inArray,
   markTaskStartParallelCountEndedAt,
   prepareTaskGoalActivation,
+  sessionTasks,
   slackInstallations,
   taskRuns,
   tasks,
 } from '@roomote/db/server';
-import { SlackNotifier } from '@roomote/slack';
+import { SlackNotifier, settleSlackLiveTaskCardForRun } from '@roomote/slack';
 
 import type { UserAuthSuccess } from '@/types';
-import { Env, getArtifactById, getRepositories } from '@/lib/server';
+import { getArtifactById, getRepositories } from '@/lib/server';
 import {
   resolveEnvironmentSourceControlProvider,
   resolveSelectedRepositorySourceControlProvider,
@@ -45,7 +43,7 @@ import { sendSandboxPromptCommand } from '../sandbox-session';
 import { resolveTaskByIdAccessCommand } from '../tasks/by-id';
 
 export type CreateTaskRunResult =
-  | { success: true; id: number; taskId: string }
+  | { success: true; id: number; taskId: string; sessionId?: string }
   | { success: false; error: string };
 
 export async function startTaskGoalCommand(
@@ -362,42 +360,6 @@ async function notifySourceTaskArtifactBuild({
   });
 }
 
-export async function routeHomeTaskCommand(
-  auth: UserAuthSuccess,
-  input: {
-    description: string;
-    images?: string[];
-  },
-): Promise<RoutingDecision> {
-  try {
-    const trimmedDescription = input.description.trim();
-
-    if (trimmedDescription.length === 0) {
-      return {
-        status: 'fallback',
-        reason: 'Task description is required for auto routing.',
-      };
-    }
-
-    const routingContext = await buildSlackRoutingContext({
-      userId: auth.userId,
-      taskDescription: trimmedDescription,
-      ...(input.images?.length ? { images: input.images } : {}),
-      apiBaseUrl: Env.TRPC_URL ?? Env.R_APP_URL,
-    });
-
-    return await routeTask(routingContext);
-  } catch (error) {
-    console.error(error);
-
-    return {
-      status: 'fallback',
-      reason:
-        error instanceof Error ? error.message : 'An unknown error occurred.',
-    };
-  }
-}
-
 export async function createStandardTaskRunCommand(
   auth: UserAuthSuccess,
   input: CreateStandardTaskRunInput,
@@ -464,6 +426,10 @@ export async function createStandardTaskRunCommand(
       surface: 'web',
       trigger: 'manual',
     });
+    const linkedSession = await db.query.sessionTasks.findFirst({
+      where: eq(sessionTasks.taskId, launchResult.taskId),
+      columns: { sessionId: true },
+    });
 
     try {
       await notifySourceTaskArtifactBuild({
@@ -486,6 +452,7 @@ export async function createStandardTaskRunCommand(
       success: true,
       id: launchResult.id,
       taskId: launchResult.taskId,
+      sessionId: linkedSession?.sessionId,
     };
   } catch (error) {
     console.error(error);
@@ -562,6 +529,13 @@ export async function cancelTaskRunCommand(
 
       if (canceledRun) {
         void captureTaskSettled(canceledRun.id, 'canceled');
+        // A run canceled before any worker claimed it has nobody else to
+        // settle its Slack task card.
+        void settleSlackLiveTaskCardForRun({
+          taskId: job.taskId,
+          payload: job.payload,
+          status: RunStatus.Canceled,
+        });
       }
     }
 

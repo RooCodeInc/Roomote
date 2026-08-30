@@ -84,6 +84,15 @@ function isRoomoteMcpServer(
   return getMcpServerName(data) === ROOMOTE_MCP_SERVER_NAME;
 }
 
+function isTrustedRoomoteWidgetTool(
+  data: AcpToolCallUiMessage['data'] | AcpToolResultUiMessage['data'],
+): boolean {
+  return (
+    (data.isMcp === true && isRoomoteMcpServer(data)) ||
+    (data.isMcp === false && data.isRoomoteNativeTool === true)
+  );
+}
+
 function clampWidgetHeight(height: unknown): number {
   if (typeof height !== 'number' || !Number.isFinite(height)) {
     return SHOW_WIDGET_DEFAULT_HEIGHT;
@@ -139,7 +148,7 @@ function isSettledToolResult(
 export function resolveShowWidgetForToolMessage(
   msg: AcpToolCallUiMessage | AcpToolResultUiMessage,
 ): ShowWidgetPayload | null {
-  if (msg.data.isMcp !== true || !isRoomoteMcpServer(msg.data)) {
+  if (!isTrustedRoomoteWidgetTool(msg.data)) {
     return null;
   }
 

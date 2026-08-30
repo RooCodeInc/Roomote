@@ -160,6 +160,8 @@ Roomote handles the work that pulls you off your main project:
   migration files, boilerplate.
 - **Build small features.** "Add a dark mode toggle to settings." It writes the
   code, runs the app, takes a screenshot, and opens a PR with a preview link.
+- **Start from scratch.** Create an empty GitHub repository from Roomote, then
+  use the first task to build the project in an isolated environment.
 - **Triage issues.** Connect Linear, Jira, or GitHub Issues. It reads new
   tickets, asks clarifying questions, and starts working.
 
@@ -220,8 +222,16 @@ converts to Apache 2.0.
 
 **How is this different from Cursor / Copilot / Claude Code?**
 Those are IDE tools that help you write code faster in your editor. Roomote is a
-standalone agent: you assign it a task, walk away, and come back to a PR. It
-does not require an IDE or a terminal session.
+cloud agent: you assign it a task, walk away, and come back to a PR. It does not
+require an IDE or terminal session, but you can also connect Roomote to Claude
+Code, Codex, or Cursor through its OAuth MCP server and delegate work from the
+tools you already use.
+
+**Can I use Roomote from my existing coding agent?**
+Yes. Connect any OAuth-capable MCP client to your Roomote deployment to start,
+inspect, and steer Roomote tasks without switching tools. See the
+[Roomote MCP setup guide](https://docs.roomote.dev/integrations/roomote-mcp) for
+Claude Code, Codex, and Cursor instructions.
 
 **How is this different from Devin?**
 Devin is a closed, hosted product. Roomote is source-available and
@@ -264,6 +274,8 @@ code. "Fix the typo on the pricing page" works.
 ## Documentation
 
 - [Public docs](https://docs.roomote.dev): setup, configuration, integrations
+- [Roomote MCP](https://docs.roomote.dev/integrations/roomote-mcp): use Roomote
+  from Claude Code, Codex, Cursor, and other OAuth-capable MCP clients
 - [Self-hosting guide](SELF_HOSTING.md): DNS, production config, scaling
 - [Local development](LOCAL_DEVELOPMENT.md): contributing to Roomote itself
 

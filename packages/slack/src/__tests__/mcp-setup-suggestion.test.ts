@@ -167,11 +167,11 @@ import {
 const SETUP_REQUIREMENT = {
   serviceId: 'notion',
   serviceName: 'Notion',
-  reason: 'user_auth_required',
+  reason: 'deployment_auth_required',
   canConfigure: true,
   settingsUrl:
-    'https://app.example.com/settings/personal?service=notion&source=slack-mcp-interrupt',
-  copyVariant: 'user_auth_required',
+    'https://app.example.com/settings/integrations?service=notion&source=slack-mcp-interrupt',
+  copyVariant: 'deployment_auth_required_admin',
 } as const;
 
 describe('Slack MCP setup suggestion flow', () => {
@@ -254,7 +254,7 @@ describe('Slack MCP setup suggestion flow', () => {
             elements: [
               expect.objectContaining({
                 type: 'mrkdwn',
-                text: expect.stringContaining('link your Notion account'),
+                text: expect.stringContaining('finish connecting Notion'),
               }),
             ],
           }),

@@ -5,6 +5,7 @@ const {
   mockHandleAdoPullRequest,
   mockHandleAdoWorkItemComment,
   mockHandleAdoBuild,
+  mockHandleMergeAnnouncerPush,
   mockRecordWebhook,
   mockResolveDeploymentEnvVar,
 } = vi.hoisted(() => ({
@@ -12,12 +13,17 @@ const {
   mockHandleAdoPullRequest: vi.fn(),
   mockHandleAdoWorkItemComment: vi.fn(),
   mockHandleAdoBuild: vi.fn(),
+  mockHandleMergeAnnouncerPush: vi.fn(),
   mockRecordWebhook: vi.fn(),
   mockResolveDeploymentEnvVar: vi.fn(),
 }));
 
 vi.mock('@roomote/db/server', () => ({
   resolveDeploymentEnvVar: mockResolveDeploymentEnvVar,
+}));
+
+vi.mock('@roomote/sdk/server', () => ({
+  handleMergeAnnouncerPush: mockHandleMergeAnnouncerPush,
 }));
 
 vi.mock('../../logging', () => ({
@@ -56,6 +62,7 @@ describe('ado webhook router', () => {
     mockHandleAdoPullRequest.mockReset();
     mockHandleAdoWorkItemComment.mockReset();
     mockHandleAdoBuild.mockReset();
+    mockHandleMergeAnnouncerPush.mockReset();
     mockRecordWebhook.mockReset();
     mockResolveDeploymentEnvVar.mockReset();
     mockResolveDeploymentEnvVar.mockImplementation(async (name: string) =>
@@ -65,6 +72,7 @@ describe('ado webhook router', () => {
     mockHandleAdoPullRequest.mockResolvedValue({ status: 'ok' });
     mockHandleAdoWorkItemComment.mockResolvedValue({ status: 'ok' });
     mockHandleAdoBuild.mockResolvedValue({ status: 'ok' });
+    mockHandleMergeAnnouncerPush.mockResolvedValue({ status: 'ok' });
     mockRecordWebhook.mockImplementation(
       async (
         _deliveryId: string,
@@ -131,6 +139,45 @@ describe('ado webhook router', () => {
           pullRequestId: 42,
         }),
       }),
+    );
+  });
+
+  it('records and routes normalized git.push webhooks', async () => {
+    const payload = {
+      id: 'push-delivery',
+      eventType: 'git.push',
+      resource: {
+        repository: {
+          id: 'repo-1',
+          name: 'backend',
+          project: { id: 'project-1', name: 'Platform' },
+          webUrl: 'https://dev.azure.com/acme/Platform/_git/backend',
+        },
+        refUpdates: [{ name: 'refs/heads/main' }],
+        pushedBy: { displayName: 'Alice' },
+        commits: [{ id: 'abc', message: 'Ship backend' }],
+      },
+    };
+
+    const response = await app.request('http://localhost/api/webhooks/ado', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        authorization: 'Basic YW55OmFkby1zZWNyZXQ=',
+      },
+      body: JSON.stringify(payload),
+    });
+
+    expect(response.status).toBe(200);
+    expect(mockRecordWebhook).toHaveBeenCalledWith(
+      'push-delivery',
+      'git.push',
+      expect.anything(),
+      expect.any(Function),
+      { provider: 'ado' },
+    );
+    expect(mockHandleMergeAnnouncerPush).toHaveBeenCalledWith(
+      expect.objectContaining({ provider: 'ado', pusher: 'Alice' }),
     );
   });
 

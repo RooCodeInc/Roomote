@@ -1,0 +1,483 @@
+import { createAuthToken, ROOMOTE_MCP_PATH } from '@roomote/auth';
+import {
+  beginSlackFastIntegrationCall,
+  completeSlackFastIntegrationCall,
+  db,
+  githubInstallations,
+  isNull,
+} from '@roomote/db/server';
+import {
+  createMemoryMcpInstructions,
+  MCP_INTEGRATION_PROXY_PATH_PREFIX,
+  MCP_ROUTING_PROXY_PATH_PREFIX,
+  ROOMOTE_MCP_ID,
+  getMcpIntegration,
+  getMemoryMcpDisplayName,
+  formatErrorForLog,
+  isMemoryMcpServer,
+} from '@roomote/types';
+
+import {
+  callMcpTool,
+  listMcpTools,
+  type McpToolDefinition,
+} from '../mcp-tool-client';
+import { isRouterMcpServerEnabled } from '../router/mcp-policy';
+import { resolveApiBaseUrl } from '../shared-utils';
+import {
+  getFastAgentConversationStorageWorkspaceId,
+  type FastAgentMcpServerConfig,
+  type FastAgentConversation,
+} from './fast-agent-conversation';
+
+export type FastAgentIntegration = {
+  id: string;
+  name: string;
+  description: string;
+  instructions?: string;
+  tools: McpToolDefinition[];
+  endpoint?: {
+    url: string;
+    headers: Record<string, string>;
+    // Deployment-proxy endpoints authenticate with a short-lived broker token
+    // that must be re-minted at call time rather than reused from list time.
+    deploymentProxy?: boolean;
+  };
+};
+
+type FastAgentIntegrationCandidate = Omit<FastAgentIntegration, 'tools'> & {
+  disabledTools: Set<string>;
+};
+
+type BrokerContext = {
+  userId: string;
+  apiBaseUrl?: string;
+};
+
+type IntegrationAuditContext = BrokerContext & {
+  sessionId: string;
+  conversation: FastAgentConversation;
+  messageId: string;
+};
+
+const FAST_AGENT_INTEGRATION_TOOL_CACHE_TTL_MS = 5 * 60_000;
+const FAST_AGENT_INTEGRATION_TOOL_CACHE_RETRY_MS = 30_000;
+const FAST_AGENT_INTEGRATION_DISCOVERY_TIMEOUT_MS = 10_000;
+const FAST_AGENT_INTEGRATION_CALL_TIMEOUT_MS = 60_000;
+
+type IntegrationToolCacheEntry = {
+  expiresAt: number;
+  tools: Promise<McpToolDefinition[]>;
+};
+
+const integrationToolCache = new Map<string, IntegrationToolCacheEntry>();
+
+async function withFastIntegrationTimeout<T>(
+  operation: (signal: AbortSignal) => Promise<T>,
+  timeoutMs: number,
+  operationName: string,
+): Promise<T> {
+  const abortController = new AbortController();
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  const timeoutPromise = new Promise<never>((_resolve, reject) => {
+    timeout = setTimeout(() => {
+      const error = new Error(
+        `${operationName} timed out after ${timeoutMs}ms.`,
+      );
+      abortController.abort(error);
+      reject(error);
+    }, timeoutMs);
+    timeout.unref?.();
+  });
+
+  try {
+    return await Promise.race([
+      operation(abortController.signal),
+      timeoutPromise,
+    ]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
+}
+
+async function listCachedIntegrationTools(options: {
+  cacheKey: string;
+  url: string;
+  headers: Record<string, string>;
+}): Promise<McpToolDefinition[]> {
+  const { cacheKey, ...clientOptions } = options;
+  const cached = integrationToolCache.get(cacheKey);
+  if (cached) {
+    if (cached.expiresAt <= Date.now()) {
+      // Keep serving the last known-good catalog while refreshing. Fast turns
+      // must never wait behind a deployment MCP server that stopped answering
+      // after it was previously discovered successfully.
+      cached.expiresAt =
+        Date.now() + FAST_AGENT_INTEGRATION_TOOL_CACHE_RETRY_MS;
+      const refresh = withFastIntegrationTimeout(
+        (signal) => listMcpTools({ ...clientOptions, signal }),
+        FAST_AGENT_INTEGRATION_DISCOVERY_TIMEOUT_MS,
+        'Fast integration tool discovery',
+      );
+      void refresh
+        .then((tools) => {
+          if (integrationToolCache.get(cacheKey) === cached) {
+            integrationToolCache.set(cacheKey, {
+              expiresAt: Date.now() + FAST_AGENT_INTEGRATION_TOOL_CACHE_TTL_MS,
+              tools: Promise.resolve(tools),
+            });
+          }
+        })
+        .catch(() => {
+          if (integrationToolCache.get(cacheKey) === cached) {
+            cached.expiresAt =
+              Date.now() + FAST_AGENT_INTEGRATION_TOOL_CACHE_RETRY_MS;
+          }
+        });
+    }
+
+    return cached.tools;
+  }
+
+  const tools = withFastIntegrationTimeout(
+    (signal) => listMcpTools({ ...clientOptions, signal }),
+    FAST_AGENT_INTEGRATION_DISCOVERY_TIMEOUT_MS,
+    'Fast integration tool discovery',
+  );
+  pruneExpiredIntegrationToolCacheEntries();
+  integrationToolCache.set(cacheKey, {
+    expiresAt: Date.now() + FAST_AGENT_INTEGRATION_TOOL_CACHE_TTL_MS,
+    tools,
+  });
+
+  try {
+    return await tools;
+  } catch (error) {
+    if (integrationToolCache.get(cacheKey)?.tools === tools) {
+      integrationToolCache.delete(cacheKey);
+    }
+    throw error;
+  }
+}
+
+// The cache is keyed per user, so on deployments with many Fast users
+// abandoned entries would otherwise accumulate for the process lifetime.
+// Entries still inside the stale-while-refresh window are kept.
+function pruneExpiredIntegrationToolCacheEntries(): void {
+  const cutoff = Date.now() - FAST_AGENT_INTEGRATION_TOOL_CACHE_TTL_MS;
+  for (const [key, entry] of integrationToolCache) {
+    if (entry.expiresAt <= cutoff) {
+      integrationToolCache.delete(key);
+    }
+  }
+}
+
+export function clearFastAgentIntegrationToolCache(): void {
+  integrationToolCache.clear();
+}
+
+function integrationProxyUrl(baseUrl: string, integrationId: string): string {
+  const relativePath =
+    integrationId === 'github'
+      ? 'api/mcp-routing/github'
+      : `api/mcp/${encodeURIComponent(integrationId)}`;
+  return new URL(relativePath, `${baseUrl}/`).toString();
+}
+
+function describeMcpServer(
+  id: string,
+): Pick<FastAgentIntegration, 'name' | 'description' | 'instructions'> {
+  if (id === ROOMOTE_MCP_ID) {
+    return {
+      name: 'Roomote',
+      description:
+        'Manage this Roomote deployment, including custom automations and other deployment capabilities.',
+    };
+  }
+  if (isMemoryMcpServer(id)) {
+    return {
+      name: getMemoryMcpDisplayName(id),
+      description: 'Read and write persistent context shared across tasks.',
+      instructions: createMemoryMcpInstructions(id, {
+        surface: 'conversation',
+      }),
+    };
+  }
+  const integration = getMcpIntegration(id);
+  return {
+    name: integration?.name ?? id,
+    description:
+      integration?.description ??
+      'Use tools from this deployment-configured MCP server.',
+    instructions: integration?.instructions,
+  };
+}
+
+function resolveFastMcpEndpoint(options: {
+  apiBaseUrl: string;
+  authToken: string;
+  integrationId: string;
+  config: FastAgentMcpServerConfig;
+}) {
+  const apiUrl = new URL(options.apiBaseUrl);
+  const configuredUrl = new URL(options.config.url, options.apiBaseUrl);
+  const isDeploymentProxy =
+    configuredUrl.origin === apiUrl.origin &&
+    (configuredUrl.pathname.startsWith(MCP_INTEGRATION_PROXY_PATH_PREFIX) ||
+      configuredUrl.pathname.startsWith(MCP_ROUTING_PROXY_PATH_PREFIX) ||
+      (options.integrationId === ROOMOTE_MCP_ID &&
+        configuredUrl.pathname === ROOMOTE_MCP_PATH));
+
+  if (!isDeploymentProxy) {
+    return {
+      url: configuredUrl.toString(),
+      headers: options.config.headers,
+    };
+  }
+
+  const relativePath = `${configuredUrl.pathname.replace(/^\/+/, '')}${configuredUrl.search}`;
+  return {
+    url: new URL(relativePath, `${options.apiBaseUrl}/`).toString(),
+    headers: {
+      ...options.config.headers,
+      Authorization: `Bearer ${options.authToken}`,
+    },
+    deploymentProxy: true,
+  };
+}
+
+async function resolveBrokerAuth(context: BrokerContext) {
+  const apiBaseUrl = resolveApiBaseUrl(context.apiBaseUrl);
+  if (!apiBaseUrl) {
+    throw new Error('Integration API base URL is unavailable.');
+  }
+
+  return {
+    apiBaseUrl,
+    authToken: await createAuthToken({
+      userId: context.userId,
+      timeoutMs: 2 * 60_000,
+    }),
+  };
+}
+
+/**
+ * Actor-resolved remote MCP servers only. Local transports and filesystem
+ * tools remain sandbox-only. Tools disabled by the deployment remain
+ * unavailable, and calls to exposed tools are audited.
+ */
+export async function listFastAgentIntegrations(
+  context: BrokerContext,
+  resolveMcpServerConfigs?: () => Promise<
+    Record<string, FastAgentMcpServerConfig>
+  >,
+): Promise<FastAgentIntegration[]> {
+  if (!resolveMcpServerConfigs) {
+    console.warn(
+      '[Fast Agent] No MCP server config resolver was provided for this surface; deployment MCP servers will be unavailable.',
+    );
+  }
+  const configuredServersPromise: Promise<
+    Record<string, FastAgentMcpServerConfig>
+  > = resolveMcpServerConfigs?.() ?? Promise.resolve({});
+  const [configuredServers, githubInstallation] = await Promise.all([
+    configuredServersPromise,
+    isRouterMcpServerEnabled('github')
+      ? db.query.githubInstallations.findFirst({
+          where: isNull(githubInstallations.suspendedAt),
+          columns: { id: true },
+        })
+      : Promise.resolve(undefined),
+  ]);
+
+  if (Object.keys(configuredServers).length === 0 && !githubInstallation) {
+    return [];
+  }
+
+  const { apiBaseUrl, authToken } = await resolveBrokerAuth(context);
+  const candidates: FastAgentIntegrationCandidate[] = Object.entries(
+    configuredServers,
+  ).map(([id, config]) => ({
+    id,
+    ...describeMcpServer(id),
+    endpoint: resolveFastMcpEndpoint({
+      apiBaseUrl,
+      authToken,
+      integrationId: id,
+      config,
+    }),
+    disabledTools: new Set(config.disabledTools ?? []),
+  }));
+
+  if (githubInstallation && !configuredServers.github) {
+    candidates.push({
+      id: 'github',
+      name: 'GitHub',
+      description:
+        'Read repositories, code, issues, pull requests, commits, and recent activity available to the deployment GitHub App.',
+      endpoint: {
+        url: integrationProxyUrl(apiBaseUrl, 'github'),
+        headers: { Authorization: `Bearer ${authToken}` },
+        deploymentProxy: true,
+      },
+      disabledTools: new Set<string>(),
+    });
+  }
+
+  if (candidates.length === 0) {
+    return [];
+  }
+
+  const results = await Promise.allSettled(
+    candidates.map(async (integration) => ({
+      ...integration,
+      tools: (
+        await listCachedIntegrationTools({
+          cacheKey: `${context.userId}:${integration.endpoint!.url}`,
+          url: integration.endpoint!.url,
+          headers: integration.endpoint!.headers,
+        })
+      ).filter((tool) => !integration.disabledTools.has(tool.name)),
+    })),
+  );
+
+  let hasPrimaryMemory = false;
+  return results.flatMap((result) => {
+    if (result.status !== 'fulfilled' || result.value.tools.length === 0) {
+      return [];
+    }
+
+    const isMemory = isMemoryMcpServer(result.value.id);
+    const primaryMemory = isMemory && !hasPrimaryMemory;
+    if (isMemory) {
+      hasPrimaryMemory = true;
+    }
+
+    return [
+      {
+        id: result.value.id,
+        name: result.value.name,
+        description: result.value.description,
+        instructions: isMemory
+          ? createMemoryMcpInstructions(result.value.id, {
+              primary: primaryMemory,
+              surface: 'conversation',
+            })
+          : result.value.instructions,
+        tools: result.value.tools,
+        endpoint: result.value.endpoint,
+      },
+    ];
+  });
+}
+
+function serializeAuditPreview(value: unknown, maxLength: number): string {
+  try {
+    return (JSON.stringify(value) ?? String(value)).slice(0, maxLength);
+  } catch {
+    return '[Unserializable integration result]';
+  }
+}
+
+export async function callFastAgentIntegration(
+  context: IntegrationAuditContext,
+  available: FastAgentIntegration[],
+  request: {
+    integrationId: string;
+    toolName: string;
+    args: Record<string, unknown>;
+  },
+): Promise<unknown> {
+  const integration = available.find(
+    (candidate) => candidate.id === request.integrationId,
+  );
+  if (!integration) {
+    throw new Error('That integration is not available to fast mode.');
+  }
+  if (!integration.tools.some((tool) => tool.name === request.toolName)) {
+    throw new Error('That integration tool is not available to fast mode.');
+  }
+
+  // Fail closed: an integration tool never executes unless its durable audit
+  // record exists first.
+  const audit = await beginSlackFastIntegrationCall({
+    fastAgentConversationId: context.sessionId,
+    userId: context.userId,
+    slackTeamId: getFastAgentConversationStorageWorkspaceId(
+      context.conversation,
+    ),
+    slackChannel:
+      'replyTarget' in context.conversation
+        ? context.conversation.replyTarget.channelId
+        : context.conversation.conversationId,
+    slackThreadTs: context.conversation.conversationId,
+    slackMessageTs: context.messageId,
+    integrationId: integration.id,
+    toolName: request.toolName,
+    arguments: request.args,
+  });
+
+  try {
+    // The token minted at list time is short-lived, so deployment-proxy calls
+    // re-mint it here: a call late in a long turn must not send an expired
+    // bearer. Direct upstream endpoints keep their own resolved headers.
+    let endpoint = integration.endpoint;
+    if (!endpoint || endpoint.deploymentProxy) {
+      const { apiBaseUrl, authToken } = await resolveBrokerAuth(context);
+      endpoint = endpoint
+        ? {
+            ...endpoint,
+            headers: {
+              ...endpoint.headers,
+              Authorization: `Bearer ${authToken}`,
+            },
+          }
+        : {
+            url: integrationProxyUrl(apiBaseUrl, integration.id),
+            headers: { Authorization: `Bearer ${authToken}` },
+          };
+    }
+    const result = await withFastIntegrationTimeout(
+      (signal) =>
+        callMcpTool({
+          url: endpoint.url,
+          headers: endpoint.headers,
+          toolName: request.toolName,
+          args: request.args,
+          toolCallId: `fast:${audit.id}:${integration.id}:${request.toolName}`,
+          signal,
+        }),
+      FAST_AGENT_INTEGRATION_CALL_TIMEOUT_MS,
+      `Fast ${integration.id}/${request.toolName} integration call`,
+    );
+
+    try {
+      await completeSlackFastIntegrationCall({
+        id: audit.id,
+        status: 'succeeded',
+        resultPreview: serializeAuditPreview(result, 30_000),
+        startedAt: audit.startedAt,
+      });
+    } catch (error) {
+      console.warn(
+        `[Fast Agent] Could not complete integration audit ${audit.id}: ${formatErrorForLog(error)}`,
+      );
+    }
+
+    return result;
+  } catch (error) {
+    try {
+      await completeSlackFastIntegrationCall({
+        id: audit.id,
+        status: 'failed',
+        error: formatErrorForLog(error).slice(0, 10_000),
+        startedAt: audit.startedAt,
+      });
+    } catch (auditError) {
+      console.warn(
+        `[Fast Agent] Could not complete failed integration audit ${audit.id}: ${formatErrorForLog(auditError)}`,
+      );
+    }
+    throw error;
+  }
+}
