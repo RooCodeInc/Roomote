@@ -20,8 +20,9 @@ type CompleteSetupWithStarterTasksResult = {
 
 /**
  * Completes setup, then drops the administrator into one "Set up Roomote"
- * Fast session whose kickoff turn launches the selected starter tasks and
- * opens the conversation around them.
+ * Fast session whose kickoff turn investigates the connected repositories,
+ * launches concrete work in the administrator's selected focus areas, and
+ * opens the conversation around it.
  *
  * Setup completion is deterministic and happens before the session's first
  * turn runs, so a failed or slow model turn can never leave setup incomplete.
@@ -78,16 +79,17 @@ export async function completeSetupWithStarterTasksCommand(
     event: {
       type: 'setup_session_started',
       description:
-        'The administrator finished initial setup and selected these starter tasks to launch.',
+        'The administrator finished initial setup and picked focus areas for Roomote to investigate and start work on.',
       ...(adminName ? { adminName } : {}),
       ...(repoDigest.length > 0 ? { repositories: repoDigest } : {}),
-      starterTasks: selectedStarterTaskIds.map((starterTaskId) => {
+      // Direction, not scripts: the kickoff investigates the repositories and
+      // authors its own task prompts grounded in what it finds.
+      focusAreas: selectedStarterTaskIds.map((starterTaskId) => {
         const starterTask = getSetupStarterTask(starterTaskId);
         return {
           id: starterTask.id,
           title: starterTask.title,
           description: starterTask.description,
-          prompt: starterTask.prompt,
         };
       }),
     },

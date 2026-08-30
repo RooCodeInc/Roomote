@@ -132,15 +132,17 @@ describe('completeSetupWithStarterTasksCommand', () => {
         event: expect.objectContaining({
           type: 'setup_session_started',
           adminName: 'Admin',
-          starterTasks: [
-            expect.objectContaining({
+          focusAreas: [
+            {
               id: 'speed-up-ci',
-              prompt: getSetupStarterTask('speed-up-ci').prompt,
-            }),
-            expect.objectContaining({
+              title: getSetupStarterTask('speed-up-ci').title,
+              description: getSetupStarterTask('speed-up-ci').description,
+            },
+            {
               id: 'security-scan',
-              prompt: getSetupStarterTask('security-scan').prompt,
-            }),
+              title: getSetupStarterTask('security-scan').title,
+              description: getSetupStarterTask('security-scan').description,
+            },
           ],
         }),
       },
@@ -172,9 +174,9 @@ describe('completeSetupWithStarterTasksCommand', () => {
     expect(mockStartSetupFastSession).toHaveBeenCalledTimes(1);
     const [, input] = mockStartSetupFastSession.mock.calls[0] as [
       unknown,
-      { event: { starterTasks: unknown[] } },
+      { event: { focusAreas: unknown[] } },
     ];
-    expect(input.event.starterTasks).toHaveLength(1);
+    expect(input.event.focusAreas).toHaveLength(1);
   });
 
   it('completes setup without a session for an empty selection', async () => {

@@ -293,7 +293,7 @@ describe('Setup StepInvoke', () => {
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        'These are a few good starter tasks to get you going, zero effort:',
+        'Pick a few areas for Roomote to dig into. It will explore your repositories and start the most valuable work it finds:',
       ),
     ).toBeInTheDocument();
 
