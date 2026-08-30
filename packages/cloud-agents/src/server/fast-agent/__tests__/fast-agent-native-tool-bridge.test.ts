@@ -146,8 +146,12 @@ describe('Fast native OpenCode tool bridge', () => {
     expect(showWidgetSource).toContain('invoke("show_widget"');
     expect(showWidgetSource).toContain('textFallback: z.string().max(4000)');
     expect(showWidgetSource).toContain(
-      'On Slack or Discord, textFallback is posted instead',
+      'On Slack or Discord, textFallback is posted as a chat preview with a link to open the rendered widget',
     );
+    expect(showWidgetSource).toContain(
+      'Optional chat preview shown on Slack or Discord with a link to open the rendered widget',
+    );
+    expect(showWidgetSource).not.toContain('textFallback is posted instead');
     expect(showWidgetSource).toContain(SHOW_WIDGET_THEME_GUIDANCE);
     expect(showWidgetSource).toContain(SHOW_WIDGET_FIXED_CANVAS_GUIDANCE);
     expect(showWidgetSource).toContain(SHOW_WIDGET_HEIGHT_DESCRIPTION);
