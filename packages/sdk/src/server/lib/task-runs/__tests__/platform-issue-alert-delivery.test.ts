@@ -258,15 +258,19 @@ describe('platform issue alert delivery', () => {
         }),
         child_blocks: expect.arrayContaining([
           expect.objectContaining({
+            type: 'section',
+            block_id: 'roomote_automation_result_settings',
+            accessory: expect.objectContaining({
+              action_id: 'late_bound_automation_configure',
+              url: 'https://app.example.com/automations#platform-issue-alerts',
+            }),
+          }),
+          expect.objectContaining({
             type: 'actions',
             elements: expect.arrayContaining([
               expect.objectContaining({
                 action_id: 'late_bound_automation_view_task',
                 url: expect.stringContaining('utm_source=slack'),
-              }),
-              expect.objectContaining({
-                action_id: 'late_bound_automation_configure',
-                url: 'https://app.example.com/automations#platform-issue-alerts',
               }),
             ]),
           }),

@@ -129,11 +129,14 @@ describe('refreshAutomationRootFooter', () => {
           block.elements ?? [],
       )
       .map((element: { action_id?: string }) => element.action_id);
-    expect(
-      actionIds.filter((id: string | undefined) =>
-        id?.includes('automation_configure'),
-      ),
-    ).toEqual(['late_bound_automation_configure']);
+    expect(blocks[0]?.child_blocks).toContainEqual(
+      expect.objectContaining({
+        block_id: 'roomote_automation_result_settings',
+        accessory: expect.objectContaining({
+          action_id: 'late_bound_automation_configure',
+        }),
+      }),
+    );
     expect(
       actionIds.filter((id: string | undefined) => id?.includes('view_pr')),
     ).toHaveLength(24);
@@ -188,6 +191,14 @@ describe('refreshAutomationRootFooter', () => {
         (block: { block_id?: string }) =>
           block.block_id === 'roomote_automation_result_actions',
       ),
-    ).toHaveLength(1);
+    ).toHaveLength(0);
+    expect(blocks).toContainEqual(
+      expect.objectContaining({
+        block_id: 'roomote_automation_result_settings',
+        accessory: expect.objectContaining({
+          action_id: 'late_bound_automation_configure',
+        }),
+      }),
+    );
   });
 });

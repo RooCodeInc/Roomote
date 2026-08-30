@@ -44,6 +44,7 @@ function createPayload(
       {
         id: '2222222222222222222222222222222222222222',
         message: 'Fix widget validation',
+        url: 'https://github.com/acme/widgets/commit/2222222',
         author: { name: 'Carol Coder' },
       },
     ],
@@ -126,6 +127,14 @@ describe('handleMergeAnnouncerPush', () => {
           child_blocks: expect.arrayContaining([
             expect.objectContaining({
               type: 'section',
+              block_id: 'roomote_automation_result_settings',
+              accessory: expect.objectContaining({
+                action_id: 'late_bound_automation_configure',
+                accessibility_label: 'Configure Merge Announcer automation',
+              }),
+            }),
+            expect.objectContaining({
+              type: 'section',
               text: {
                 type: 'mrkdwn',
                 text: 'Adds exports and strengthens widget validation.',
@@ -138,10 +147,6 @@ describe('handleMergeAnnouncerPush', () => {
                   action_id: 'merge_announcer_view_changes',
                   text: expect.objectContaining({ text: 'View changes' }),
                   url: 'https://github.com/acme/widgets/compare/before...after',
-                }),
-                expect.objectContaining({
-                  action_id: 'late_bound_automation_configure',
-                  text: expect.objectContaining({ text: 'Configure' }),
                 }),
               ]),
             }),
@@ -185,6 +190,35 @@ describe('handleMergeAnnouncerPush', () => {
                     url: 'https://github.com/acme/widgets/pull/7',
                   }),
                 ]),
+              }),
+            ]),
+          }),
+        ],
+      }),
+    );
+  });
+
+  it('falls back to the pushed commit when no compare URL is available', async () => {
+    const { dependencies, postMessage } = createDependencies();
+
+    await handleMergeAnnouncerPush(
+      createPayload({ compareUrl: null }),
+      dependencies,
+    );
+
+    expect(postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        blocks: [
+          expect.objectContaining({
+            child_blocks: expect.arrayContaining([
+              expect.objectContaining({
+                type: 'actions',
+                elements: [
+                  expect.objectContaining({
+                    action_id: 'merge_announcer_view_changes',
+                    url: 'https://github.com/acme/widgets/commit/2222222',
+                  }),
+                ],
               }),
             ]),
           }),
