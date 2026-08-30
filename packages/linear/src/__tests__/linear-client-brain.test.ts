@@ -21,9 +21,43 @@ describe('LinearClient.listIssuesForBrain', () => {
               title: 'Collect Linear issues',
               description: null,
               url: 'https://linear.app/acme/issue/ENG-1',
+              estimate: 3,
               createdAt: '2026-08-01T00:00:00.000Z',
               updatedAt: '2026-08-02T00:00:00.000Z',
-              labels: { nodes: [{ name: 'brain' }] },
+              startedAt: '2026-08-01T12:00:00.000Z',
+              cycle: { name: 'August', number: 12 },
+              parent: {
+                id: 'parent-1',
+                identifier: 'ENG-0',
+                title: 'Brain ingestion',
+              },
+              labels: { nodes: [{ name: 'memory' }, { name: 'brain' }] },
+              relations: {
+                nodes: [
+                  {
+                    type: 'blocks',
+                    relatedIssue: {
+                      id: 'issue-2',
+                      identifier: 'ENG-2',
+                      title: 'Search Linear issues',
+                    },
+                  },
+                ],
+                pageInfo: { hasNextPage: true },
+              },
+              inverseRelations: {
+                nodes: [
+                  {
+                    type: 'duplicate',
+                    issue: {
+                      id: 'issue-3',
+                      identifier: 'ENG-3',
+                      title: 'Index Linear issues',
+                    },
+                  },
+                ],
+                pageInfo: { hasNextPage: false },
+              },
               comments: {
                 nodes: [
                   {
@@ -66,7 +100,22 @@ describe('LinearClient.listIssuesForBrain', () => {
       issues: [
         expect.objectContaining({
           id: 'issue-1',
-          labels: ['brain'],
+          estimate: 3,
+          startedAt: '2026-08-01T12:00:00.000Z',
+          cycle: { name: 'August', number: 12 },
+          parent: expect.objectContaining({ identifier: 'ENG-0' }),
+          labels: ['brain', 'memory'],
+          relationships: [
+            expect.objectContaining({
+              type: 'blocks',
+              direction: 'outbound',
+            }),
+            expect.objectContaining({
+              type: 'duplicate',
+              direction: 'inbound',
+            }),
+          ],
+          relationshipsTruncated: true,
           comments: [expect.objectContaining({ author: 'External author' })],
         }),
       ],

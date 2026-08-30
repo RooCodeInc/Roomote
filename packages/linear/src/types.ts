@@ -271,8 +271,10 @@ export interface LinearBrainIssue {
   url: string;
   priority: number | null;
   priorityLabel: string | null;
+  estimate: number | null;
   createdAt: string;
   updatedAt: string;
+  startedAt: string | null;
   completedAt: string | null;
   canceledAt: string | null;
   archivedAt: string | null;
@@ -280,9 +282,17 @@ export interface LinearBrainIssue {
   state: { name: string; type: string } | null;
   team: { key: string; name: string } | null;
   project: { name: string } | null;
+  cycle: { name: string | null; number: number } | null;
+  parent: { id: string; identifier: string; title: string } | null;
   creator: { name: string } | null;
   assignee: { name: string } | null;
   labels: string[];
+  relationships: Array<{
+    type: string;
+    direction: 'outbound' | 'inbound';
+    issue: { id: string; identifier: string; title: string };
+  }>;
+  relationshipsTruncated: boolean;
   comments: Array<{
     id: string;
     body: string;

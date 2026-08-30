@@ -166,6 +166,85 @@ function issueEventDate(issue: LinearBrainIssue): string {
   );
 }
 
+function linearIssueSlug(organizationId: string, issueId: string): string {
+  return `${brainNamespacePrefix('linear')}${organizationId.toLowerCase()}/issues/${issueId.toLowerCase()}`;
+}
+
+function linearIssueLink(
+  organizationId: string,
+  issue: { id: string; identifier: string; title: string },
+): string {
+  return `[${issue.identifier}: ${issue.title}](${linearIssueSlug(organizationId, issue.id)})`;
+}
+
+function relationshipLabel(
+  type: string,
+  direction: 'outbound' | 'inbound',
+): string {
+  if (type === 'blocks') {
+    return direction === 'outbound' ? 'Blocks' : 'Blocked by';
+  }
+  if (type === 'duplicate') {
+    return direction === 'outbound' ? 'Duplicate of' : 'Duplicated by';
+  }
+  if (type === 'related') {
+    return 'Related issues';
+  }
+  return direction === 'outbound'
+    ? `Related (${type})`
+    : `Related by (${type})`;
+}
+
+function renderLinearMetadataLines(
+  organizationId: string,
+  issue: LinearBrainIssue,
+): string[] {
+  const lines: string[] = [];
+  if (issue.startedAt) lines.push(`- **Started**: ${issue.startedAt}`);
+  if (issue.estimate !== null) {
+    lines.push(`- **Estimate**: ${issue.estimate}`);
+  }
+  if (issue.cycle) {
+    lines.push(
+      `- **Cycle**: ${issue.cycle.name ? `${issue.cycle.name} (#${issue.cycle.number})` : `#${issue.cycle.number}`}`,
+    );
+  }
+  if (issue.parent) {
+    lines.push(
+      `- **Parent**: ${linearIssueLink(organizationId, issue.parent)}`,
+    );
+  }
+
+  const relationshipGroups = new Map<
+    string,
+    Map<string, LinearBrainIssue['relationships'][number]['issue']>
+  >();
+  for (const relationship of issue.relationships) {
+    const label = relationshipLabel(relationship.type, relationship.direction);
+    const issues = relationshipGroups.get(label) ?? new Map();
+    issues.set(relationship.issue.id, relationship.issue);
+    relationshipGroups.set(label, issues);
+  }
+  for (const [label, relatedIssues] of [...relationshipGroups].sort(
+    ([a], [b]) => a.localeCompare(b),
+  )) {
+    const links = [...relatedIssues.values()]
+      .sort(
+        (a, b) =>
+          a.identifier.localeCompare(b.identifier) ||
+          a.title.localeCompare(b.title),
+      )
+      .map((relatedIssue) => linearIssueLink(organizationId, relatedIssue));
+    lines.push(`- **${label}**: ${links.join(', ')}`);
+  }
+  if (issue.relationshipsTruncated) {
+    lines.push(
+      '_Linear truncated the relationship list; open the source issue for the rest._',
+    );
+  }
+  return lines;
+}
+
 export function buildLinearIssuePage(input: {
   organizationId: string;
   organizationName: string | null;
@@ -189,6 +268,7 @@ export function buildLinearIssuePage(input: {
       : [];
   });
   const description = issue.description?.trim() ?? '';
+  const metadataLines = renderLinearMetadataLines(input.organizationId, issue);
   const content = [
     ...renderBrainFrontmatter({
       type: BRAIN_PAGE_TYPES.linearIssue,
@@ -220,13 +300,16 @@ export function buildLinearIssuePage(input: {
     '',
     `# ${title}`,
     '',
+    ...(metadataLines.length > 0
+      ? ['## Metadata', '', ...metadataLines, '']
+      : []),
     ...(description ? [description.slice(0, ISSUE_BODY_CHAR_CAP), ''] : []),
     ...(discussion.length > 0 ? ['## Discussion', '', ...discussion] : []),
     issue.url,
   ].join('\n');
 
   return {
-    slug: `${brainNamespacePrefix('linear')}${input.organizationId.toLowerCase()}/issues/${issue.id.toLowerCase()}`,
+    slug: linearIssueSlug(input.organizationId, issue.id),
     title,
     content,
   };
