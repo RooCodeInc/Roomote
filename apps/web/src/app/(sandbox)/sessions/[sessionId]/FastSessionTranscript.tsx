@@ -4,6 +4,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useReducer,
   useRef,
   useState,
   type ReactNode,
@@ -56,6 +57,22 @@ type TranscriptMessage = Omit<FastSessionMessage, 'createdAt'> & {
 
 type TranscriptOrder = Pick<TranscriptMessage, 'id' | 'ts' | 'turnSeq'>;
 
+type PendingResponseState = {
+  pendingAfter: TranscriptOrder | null;
+  latestVisibleResponse: TranscriptOrder | null;
+  optimisticRollback: {
+    optimisticId: string;
+    pendingAfter: TranscriptOrder | null;
+  } | null;
+};
+
+type PendingResponseAction =
+  | { type: 'hydrate'; messages: TranscriptMessage[] }
+  | { type: 'messages'; messages: TranscriptMessage[] }
+  | { type: 'optimistic'; message: TranscriptOrder }
+  | { type: 'commitOptimistic'; optimisticId: string }
+  | { type: 'rollbackOptimistic'; optimisticId: string };
+
 function compareTranscriptOrder(a: TranscriptOrder, b: TranscriptOrder) {
   if (a.ts !== b.ts) return a.ts - b.ts;
   if (a.turnSeq !== b.turnSeq) return a.turnSeq - b.turnSeq;
@@ -79,23 +96,76 @@ function isVisibleResponseActivity(message: TranscriptMessage) {
   );
 }
 
-function getPendingResponseOrder(messages: TranscriptMessage[]) {
-  let pendingAfter: TranscriptOrder | null =
-    messages.length === 0 ? { id: '', ts: 0, turnSeq: -1 } : null;
+export function pendingResponseReducer(
+  state: PendingResponseState,
+  action: PendingResponseAction,
+): PendingResponseState {
+  if (action.type === 'hydrate' || action.type === 'messages') {
+    let pendingAfter =
+      action.type === 'hydrate'
+        ? action.messages.length === 0
+          ? { id: '', ts: 0, turnSeq: -1 }
+          : null
+        : state.pendingAfter;
+    let latestVisibleResponse =
+      action.type === 'hydrate' ? null : state.latestVisibleResponse;
 
-  for (const message of [...messages].sort(compareTranscriptMessages)) {
-    if (message.role === 'user') {
-      pendingAfter = message;
-    } else if (
-      pendingAfter !== null &&
-      compareTranscriptOrder(message, pendingAfter) >= 0 &&
-      isVisibleResponseActivity(message)
-    ) {
-      pendingAfter = null;
+    for (const message of [...action.messages].sort(
+      compareTranscriptMessages,
+    )) {
+      const pendingThreshold = pendingAfter ?? latestVisibleResponse;
+      if (
+        message.role === 'user' &&
+        (pendingThreshold === null ||
+          compareTranscriptOrder(message, pendingThreshold) >= 0)
+      ) {
+        pendingAfter = message;
+      } else if (isVisibleResponseActivity(message)) {
+        if (
+          latestVisibleResponse === null ||
+          compareTranscriptOrder(message, latestVisibleResponse) >= 0
+        ) {
+          latestVisibleResponse = message;
+        }
+        if (
+          pendingAfter !== null &&
+          compareTranscriptOrder(message, pendingAfter) >= 0
+        ) {
+          pendingAfter = null;
+        }
+      }
     }
+
+    return { ...state, pendingAfter, latestVisibleResponse };
   }
 
-  return pendingAfter;
+  if (action.type === 'optimistic') {
+    return {
+      pendingAfter: action.message,
+      latestVisibleResponse: state.latestVisibleResponse,
+      optimisticRollback: {
+        optimisticId: action.message.id,
+        pendingAfter: state.pendingAfter,
+      },
+    };
+  }
+
+  if (state.optimisticRollback?.optimisticId !== action.optimisticId) {
+    return state;
+  }
+
+  if (action.type === 'commitOptimistic') {
+    return { ...state, optimisticRollback: null };
+  }
+
+  return {
+    pendingAfter:
+      state.pendingAfter?.id === action.optimisticId
+        ? state.optimisticRollback.pendingAfter
+        : state.pendingAfter,
+    latestVisibleResponse: state.latestVisibleResponse,
+    optimisticRollback: null,
+  };
 }
 
 function ThinkingMessage() {
@@ -151,10 +221,19 @@ export function FastSessionTranscript({
     TranscriptMessage[]
   >([]);
   const [isSending, setIsSending] = useState(false);
-  const [pendingResponseAfter, setPendingResponseAfter] =
-    useState<TranscriptOrder | null>(() =>
-      getPendingResponseOrder(initialMessages),
-    );
+  const [pendingResponseState, dispatchPendingResponse] = useReducer(
+    pendingResponseReducer,
+    initialMessages,
+    (messages) =>
+      pendingResponseReducer(
+        {
+          pendingAfter: null,
+          latestVisibleResponse: null,
+          optimisticRollback: null,
+        },
+        { type: 'hydrate', messages },
+      ),
+  );
   const [replyError, setReplyError] = useState<string | null>(null);
   const [title, setTitle] = useState<string | null>(initialTitle);
   usePageTitle(truncatePageTitle(title ?? fallbackTitle));
@@ -177,25 +256,7 @@ export function FastSessionTranscript({
         }
         serverMessagesRef.current = next;
         setServerMessages(next);
-        setPendingResponseAfter((current) => {
-          let pendingAfter = current;
-          for (const message of [...messages].sort(compareTranscriptMessages)) {
-            if (
-              message.role === 'user' &&
-              (pendingAfter === null ||
-                compareTranscriptOrder(message, pendingAfter) >= 0)
-            ) {
-              pendingAfter = message;
-            } else if (
-              isVisibleResponseActivity(message) &&
-              pendingAfter !== null &&
-              compareTranscriptOrder(message, pendingAfter) >= 0
-            ) {
-              pendingAfter = null;
-            }
-          }
-          return pendingAfter;
-        });
+        dispatchPendingResponse({ type: 'messages', messages });
 
         if (canonicalUserMessages.length > 0) {
           setOptimisticMessages((current) => {
@@ -286,7 +347,6 @@ export function FastSessionTranscript({
       setIsSending(true);
       setReplyError(null);
       let optimisticId: string | null = null;
-      let previousPendingResponse: TranscriptOrder | null = null;
       try {
         const prepared = await preparePromptAttachments({
           text: message.text.trim(),
@@ -328,10 +388,7 @@ export function FastSessionTranscript({
           createdAt: new Date(),
         };
         setOptimisticMessages((previous) => [...previous, optimistic]);
-        setPendingResponseAfter((current) => {
-          previousPendingResponse = current;
-          return optimistic;
-        });
+        dispatchPendingResponse({ type: 'optimistic', message: optimistic });
         await trpcClient.fastSessions.reply.mutate({
           sessionId,
           text: prepared.text,
@@ -341,6 +398,10 @@ export function FastSessionTranscript({
             : {}),
           model: message.model ?? null,
           reasoningEffort: message.reasoningEffort ?? null,
+        });
+        dispatchPendingResponse({
+          type: 'commitOptimistic',
+          optimisticId,
         });
         return true;
       } catch (error) {
@@ -353,9 +414,12 @@ export function FastSessionTranscript({
         setReplyError(
           error instanceof Error ? error.message : 'Failed to send message',
         );
-        setPendingResponseAfter((current) =>
-          current?.id === optimisticId ? previousPendingResponse : current,
-        );
+        if (optimisticId) {
+          dispatchPendingResponse({
+            type: 'rollbackOptimistic',
+            optimisticId,
+          });
+        }
         return false;
       } finally {
         setIsSending(false);
@@ -403,7 +467,9 @@ export function FastSessionTranscript({
             onSuppress={suppressMessage}
             onOpenDelegatedTask={openTaskPanel ?? undefined}
           />
-          {pendingResponseAfter !== null ? <ThinkingMessage /> : null}
+          {pendingResponseState.pendingAfter !== null ? (
+            <ThinkingMessage />
+          ) : null}
           {reviewOffers.map((offer) => (
             <PrReviewActionOffer
               key={offer.deliveryId}

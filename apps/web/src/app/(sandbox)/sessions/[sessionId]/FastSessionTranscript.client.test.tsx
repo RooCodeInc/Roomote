@@ -7,7 +7,10 @@ import {
 } from '@testing-library/react';
 import { ACP_ENVELOPE_EVENT_TYPES } from '@roomote/types';
 
-import { FastSessionTranscript } from './FastSessionTranscript';
+import {
+  FastSessionTranscript,
+  pendingResponseReducer,
+} from './FastSessionTranscript';
 
 const {
   replyMutate,
@@ -188,6 +191,124 @@ describe('FastSessionTranscript', () => {
     nativeSessionId: role === 'assistant' ? 'opencode-1' : null,
     nativeMessageId: null,
     createdAt: new Date(ts),
+  });
+
+  describe('pendingResponseReducer', () => {
+    const emptyState = {
+      pendingAfter: null,
+      latestVisibleResponse: null,
+      optimisticRollback: null,
+    };
+
+    it('uses the same ordering and visibility rules for hydration and streamed messages', () => {
+      const hydrated = pendingResponseReducer(emptyState, {
+        type: 'hydrate',
+        messages: [
+          textMessage({
+            id: 'user-1',
+            role: 'user',
+            text: 'Question',
+            ts: 2,
+          }),
+          textMessage({
+            id: 'hidden-1',
+            role: 'assistant',
+            text: 'Internal activity',
+            ts: 3,
+            visible: false,
+          }),
+        ],
+      });
+
+      const afterStaleOutput = pendingResponseReducer(hydrated, {
+        type: 'messages',
+        messages: [
+          textMessage({
+            id: 'stale-assistant',
+            role: 'assistant',
+            text: 'Earlier output',
+            ts: 2,
+            turnSeq: -1,
+          }),
+        ],
+      });
+      expect(afterStaleOutput.pendingAfter?.id).toBe('user-1');
+
+      const afterVisibleOutput = pendingResponseReducer(afterStaleOutput, {
+        type: 'messages',
+        messages: [
+          textMessage({
+            id: 'assistant-1',
+            role: 'assistant',
+            text: 'Answer',
+            ts: 3,
+          }),
+        ],
+      });
+      expect(afterVisibleOutput.pendingAfter).toBeNull();
+
+      const afterStaleUserReplay = pendingResponseReducer(afterVisibleOutput, {
+        type: 'messages',
+        messages: [
+          textMessage({
+            id: 'stale-user',
+            role: 'user',
+            text: 'Replayed question',
+            ts: 2,
+          }),
+        ],
+      });
+      expect(afterStaleUserReplay.pendingAfter).toBeNull();
+    });
+
+    it('restores an optimistic fallback only while that message owns pending state', () => {
+      const earlierPending = pendingResponseReducer(emptyState, {
+        type: 'hydrate',
+        messages: [
+          textMessage({
+            id: 'user-1',
+            role: 'user',
+            text: 'Earlier question',
+            ts: 1,
+          }),
+        ],
+      });
+      const optimistic = textMessage({
+        id: 'optimistic-1',
+        role: 'user',
+        text: 'Later question',
+        ts: 2,
+      });
+      const optimisticPending = pendingResponseReducer(earlierPending, {
+        type: 'optimistic',
+        message: optimistic,
+      });
+
+      expect(
+        pendingResponseReducer(optimisticPending, {
+          type: 'rollbackOptimistic',
+          optimisticId: optimistic.id,
+        }).pendingAfter?.id,
+      ).toBe('user-1');
+
+      const resolved = pendingResponseReducer(optimisticPending, {
+        type: 'messages',
+        messages: [
+          textMessage({
+            id: 'assistant-1',
+            role: 'assistant',
+            text: 'Answer',
+            ts: 3,
+          }),
+        ],
+      });
+      expect(
+        pendingResponseReducer(resolved, {
+          type: 'rollbackOptimistic',
+          optimisticId: optimistic.id,
+        }).pendingAfter,
+      ).toBeNull();
+    });
   });
 
   it('shows Thinking while the initial Fast turn is awaiting output', () => {
