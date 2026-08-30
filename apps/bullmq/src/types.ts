@@ -23,11 +23,11 @@ export enum ScheduledJobName {
 
 /**
  * Automation scheduler jobs are named by the canonical snake_case automation
- * key (ci_failure_triage is webhook/Run-now driven and never scheduled).
+ * key (webhook-driven automations are never scheduled).
  */
 export type ScheduledAutomationJobName = Exclude<
   TriggerableBackgroundAutomationKey,
-  'ci_failure_triage' | 'issue_fixer'
+  'ci_failure_triage' | 'issue_fixer' | 'merge_announcer'
 >;
 
 export type SchedulerJobName = ScheduledJobName | ScheduledAutomationJobName;

@@ -30,7 +30,7 @@ import {
 import {
   parseBrainToolPayloads,
   postBrainToolCall,
-  resolveBrainInferenceProvider,
+  isBrainEmbeddingAvailable,
   resolveBrainConnection,
 } from '@roomote/sdk/server';
 import {
@@ -343,27 +343,31 @@ export async function brainOutboxDrainJob(): Promise<void> {
 
 /**
  * A Brain worth writing to needs both halves: somewhere to put pages, and a
- * model provider to embed them with.
+ * way to embed them.
  *
- * The provider half is not optional caution. Every page written to a Brain
+ * The embedding half is not optional caution. Every page written to a Brain
  * that cannot embed fails outright — gbrain retries the embed three times and
- * returns an error — so draining ahead of a configured provider would burn
- * each memory through its retry budget into a terminal 'failed' state that no
- * later claim picks up, and would mark the one-shot history backfill complete
- * before a single page landed. Holding here instead is what makes turning the
- * Brain on later actually pick up everything that happened before.
+ * returns an error — so draining ahead of an embedding path would burn each
+ * memory through its retry budget into a terminal 'failed' state that no later
+ * claim picks up, and would mark the one-shot history backfill complete before
+ * a single page landed. Holding here instead is what makes turning the Brain
+ * on later actually pick up everything that happened before.
+ *
+ * The check is provider-agnostic: a configured embedder (the shared Modal
+ * endpoint for managed tenants, or a local model self-hosted) is enough, and
+ * synthesis rides the deployment's helper model through the inference gateway,
+ * so no OpenAI/OpenRouter key is required — an Anthropic-only or trial-key
+ * tenant is just as ready. See isBrainEmbeddingAvailable.
  */
 async function resolveReadyBrain(): Promise<{
   baseUrl: string;
   token: string;
 } | null> {
-  // Provider first, and not in parallel: resolving a connection registers
-  // scoped OAuth clients against the Brain as a side effect, which is not
-  // worth doing for a Brain that cannot embed yet. This check is cached, so
-  // the common unconfigured tick costs nothing.
-  const provider = await resolveBrainInferenceProvider();
-
-  if (!provider) {
+  // Embedding path first, and not in parallel: resolving a connection
+  // registers scoped OAuth clients against the Brain as a side effect, which
+  // is not worth doing for a Brain that cannot embed yet. This check is
+  // cached, so the common unconfigured tick costs nothing.
+  if (!(await isBrainEmbeddingAvailable())) {
     return null;
   }
 

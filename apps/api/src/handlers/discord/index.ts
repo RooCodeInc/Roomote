@@ -25,7 +25,12 @@ import {
   setLatestInboundMessageId,
 } from '@roomote/communication/messages';
 import { reactionEmojiMatches } from '@roomote/communication/reaction-emoji';
-import { getTaskUrl, hasFastAgentSession } from '@roomote/cloud-agents/server';
+import {
+  buildFastAgentReactionExternalInputQuestion,
+  getTaskUrl,
+  hasFastAgentSession,
+  type FastAgentReactionExternalInput,
+} from '@roomote/cloud-agents/server';
 import {
   MANAGED_DEPLOYMENT_READ_ONLY_MESSAGE,
   RunStatus,
@@ -37,8 +42,10 @@ import {
   consumeDiscordLinkCode,
   findDiscordInstallationByGuildId,
   findDiscordMappedUserId,
+  findFastAgentSessionForProviderMessage,
   findFastAgentSessionForProviderReply,
   isFastAgentProviderMessage,
+  queueFastAgentSurfaceReply,
   restoreDiscordLinkCode,
   upsertDiscordInstallation,
   upsertDiscordUserMapping,
@@ -308,7 +315,89 @@ async function processDiscordGatewayEvent(
       reaction.emoji.name,
     );
     if (!configuration) {
-      return { ok: true, ignored: 'reaction_not_configured' };
+      const channel = await resolveDiscordChannelContext(
+        resolved.provider,
+        reaction.channel_id,
+      );
+      const metadata = discordMetadataForChannel({
+        channel,
+        messageId: reaction.message_id,
+      });
+      const session = await findFastAgentSessionForProviderMessage({
+        provider: 'discord',
+        workspaceId: channel.guildId ?? 'dm',
+        channelId: metadata.communicationChannelId,
+        ...(metadata.communicationThreadId
+          ? { threadId: metadata.communicationThreadId }
+          : {}),
+        messageId: reaction.message_id,
+      });
+      if (!session) {
+        return { ok: true, ignored: 'reaction_not_configured' };
+      }
+
+      const senderUserId = await findDiscordMappedUserId(reaction.user_id);
+      if (!senderUserId) {
+        await promptDiscordAccountLink({
+          provider: resolved.provider,
+          applicationId: resolved.applicationId,
+          channel,
+          discordUserId: reaction.user_id,
+          replyToMessageId: reaction.message_id,
+        });
+        return { ok: true, ignored: 'discord_reactor_not_linked' };
+      }
+      if (session.userId !== senderUserId) {
+        return { ok: true, ignored: 'discord_fast_session_user_mismatch' };
+      }
+
+      const author = reaction.member?.user ?? {
+        id: reaction.user_id,
+        username: `Discord user ${reaction.user_id}`,
+      };
+      const senderDisplayName =
+        (typeof reaction.member?.nick === 'string'
+          ? reaction.member.nick
+          : undefined) ??
+        (typeof author.global_name === 'string'
+          ? author.global_name
+          : undefined) ??
+        author.username;
+      const reactionInput: FastAgentReactionExternalInput = {
+        type: 'reaction_added',
+        provider: 'discord',
+        reactions: [
+          {
+            name: reaction.emoji.name,
+            ...(reaction.emoji.id ? { id: reaction.emoji.id } : {}),
+          },
+        ],
+        reactor: {
+          externalUserId: reaction.user_id,
+          ...(senderDisplayName ? { displayName: senderDisplayName } : {}),
+        },
+        message: {
+          workspaceId: channel.guildId ?? 'dm',
+          channelId: metadata.communicationChannelId,
+          messageId: reaction.message_id,
+          ...(metadata.communicationThreadId
+            ? { threadId: metadata.communicationThreadId }
+            : {}),
+        },
+        eventId: event.eventId,
+      };
+      const queued = await queueFastAgentSurfaceReply({
+        sessionId: session.id,
+        userId: senderUserId,
+        senderDisplayName,
+        question: buildFastAgentReactionExternalInputQuestion(reactionInput),
+        currentMessageId: `discord-reaction:${event.eventId}`,
+        replyToMessageId: reaction.message_id,
+        externalInput: reactionInput,
+      });
+      return queued
+        ? { ok: true, fastReactionQueued: true }
+        : { ok: true, ignored: 'discord_fast_reaction_route_unavailable' };
     }
 
     const author = reaction.member?.user ?? {

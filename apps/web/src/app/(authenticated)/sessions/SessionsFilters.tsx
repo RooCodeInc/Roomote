@@ -133,7 +133,7 @@ export function SessionsFilters({
           name="q"
           defaultValue={query}
           aria-label="Search sessions"
-          placeholder="Search sessions"
+          placeholder="Search titles or messages (3+ chars)"
           className="h-8"
         />
         <Button type="submit" size="sm" variant="outline">

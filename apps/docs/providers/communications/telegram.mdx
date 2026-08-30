@@ -67,7 +67,11 @@ When you save Telegram credentials in Roomote, the webhook is registered
 automatically at `<public-url>/api/webhooks/telegram` with the managed secret
 token and `allowed_updates` including `message`, `callback_query`, and
 `message_reaction`. Roomote uses newly added 👍 reactions on suggested-task
-messages to launch the selected task.
+messages to launch the selected task and user-attributed reactions on Roomote
+Fast replies as conversation input. Roomote does not request
+`message_reaction_count`: those aggregate updates do not identify the reacting
+user, so they cannot satisfy Roomote's account and conversation ownership
+checks.
 If the connection check reports a mismatch, delivery error, or stale update
 configuration, use **Repair** in Telegram settings to re-register it.
 

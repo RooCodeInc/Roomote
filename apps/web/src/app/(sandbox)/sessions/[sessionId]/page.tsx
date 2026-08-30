@@ -23,7 +23,6 @@ import { SessionStatusBadge } from '@/components/sessions/SessionStatusBadge';
 
 import { FastSessionTranscript } from './FastSessionTranscript';
 import { SessionWorkspace, type SessionInfo } from './SessionWorkspace';
-import { SessionTaskCards } from './SessionTaskCards';
 import { SessionReadTracker } from './SessionReadTracker';
 
 const getSessionPageData = cache(async (sessionId: string) => {
@@ -112,13 +111,6 @@ export default async function SessionDetailPage({
       status: unifiedSession.status,
       tasks: unifiedSession.tasks,
     };
-    const taskCards = (
-      <SessionTaskCards
-        sessionId={unifiedSession.id}
-        tasks={unifiedSession.tasks}
-      />
-    );
-
     return (
       <SessionWorkspace session={sessionInfo}>
         <SessionReadTracker sessionId={unifiedSession.id} />
@@ -138,23 +130,17 @@ export default async function SessionDetailPage({
               headerExtras={
                 <SessionStatusBadge status={unifiedSession.status} />
               }
-              timelineExtras={taskCards}
             />
           ) : (
-            <>
-              <WorkspaceHeader
-                className="py-4"
-                contentClassName="flex-row items-center gap-3"
-              >
-                <h1 className="min-w-0 flex-1 truncate text-sm font-medium">
-                  {unifiedSession.title}
-                </h1>
-                <SessionStatusBadge status={unifiedSession.status} />
-              </WorkspaceHeader>
-              <div className="min-h-0 flex-1 overflow-y-auto p-4">
-                <div className="mx-auto max-w-4xl">{taskCards}</div>
-              </div>
-            </>
+            <WorkspaceHeader
+              className="py-4"
+              contentClassName="flex-row items-center gap-3"
+            >
+              <h1 className="min-w-0 flex-1 truncate text-sm font-medium">
+                {unifiedSession.title}
+              </h1>
+              <SessionStatusBadge status={unifiedSession.status} />
+            </WorkspaceHeader>
           )}
         </div>
       </SessionWorkspace>

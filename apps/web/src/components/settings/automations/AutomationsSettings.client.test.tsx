@@ -77,6 +77,10 @@ const baseFormState: FormState = {
   ciFailureTriageFrequency: 'off' as const,
   ciFailureTriageSlackChannel: '',
   ciFailureTriageDiscordChannel: '',
+  mergeAnnouncerFrequency: 'off' as const,
+  mergeAnnouncerTargetProvider: 'none',
+  mergeAnnouncerTargetMode: 'channel',
+  mergeAnnouncerTargetChannelId: '',
   suggesterFrequency: 'off',
   suggesterSlackChannel: '',
   suggesterDiscordChannel: '',
@@ -93,6 +97,28 @@ const baseFormState: FormState = {
 };
 
 describe('Automations selection helpers', () => {
+  it('saves Merge announcer through the standard provider/mode destination fields', () => {
+    const input = buildAutomationSettingsSaveInput(
+      {
+        ...baseFormState,
+        mergeAnnouncerTargetProvider: 'teams',
+        mergeAnnouncerTargetMode: 'direct_message',
+        mergeAnnouncerTargetChannelId: '',
+      },
+      baseFormState,
+      'mergeAnnouncer',
+    );
+
+    expect(input).toMatchObject({
+      savingAutomation: 'mergeAnnouncer',
+      mergeAnnouncerTargetProvider: 'teams',
+      mergeAnnouncerTargetMode: 'direct_message',
+      mergeAnnouncerTargetChannelId: null,
+    });
+    expect(input).not.toHaveProperty('mergeAnnouncerSlackChannel');
+    expect(input).not.toHaveProperty('mergeAnnouncerDiscordChannel');
+  });
+
   it('includes emoji trigger settings in its save input', () => {
     const saveInput = buildAutomationSettingsSaveInput(
       {

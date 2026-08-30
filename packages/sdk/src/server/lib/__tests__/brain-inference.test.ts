@@ -4,12 +4,23 @@ vi.mock('@roomote/db/server', () => ({
   resolveModelProviderEnvValue: vi.fn(),
 }));
 
-const mockEnv: { R_BRAIN_MODEL?: string; R_BRAIN_EMBEDDING_MODEL?: string } =
-  {};
+const mockEnv: {
+  R_BRAIN_MODEL?: string;
+  R_BRAIN_EMBEDDING_MODEL?: string;
+  R_BRAIN_EMBEDDINGS_UPSTREAM_URL?: string;
+} = {};
 
 vi.mock('@roomote/env', () => ({ Env: mockEnv }));
 
-const { mapBrainModelName } = await import('../brain-inference');
+const {
+  mapBrainModelName,
+  isBrainEmbeddingAvailable,
+  resetBrainInferenceProviderCache,
+} = await import('../brain-inference');
+const { resolveModelProviderEnvValue } = await import('@roomote/db/server');
+const mockResolveModelProviderEnvValue = vi.mocked(
+  resolveModelProviderEnvValue,
+);
 
 const OPENROUTER = { providerId: 'openrouter', apiKey: 'sk-or' } as const;
 const OPENAI = { providerId: 'openai', apiKey: 'sk' } as const;
@@ -17,6 +28,10 @@ const OPENAI = { providerId: 'openai', apiKey: 'sk' } as const;
 beforeEach(() => {
   delete mockEnv.R_BRAIN_MODEL;
   delete mockEnv.R_BRAIN_EMBEDDING_MODEL;
+  delete mockEnv.R_BRAIN_EMBEDDINGS_UPSTREAM_URL;
+  mockResolveModelProviderEnvValue.mockReset();
+  mockResolveModelProviderEnvValue.mockResolvedValue(undefined);
+  resetBrainInferenceProviderCache();
 });
 
 describe('mapBrainModelName', () => {
@@ -65,5 +80,28 @@ describe('mapBrainModelName', () => {
     expect(mapBrainModelName('some-custom-model', OPENROUTER)).toBe(
       'some-custom-model',
     );
+  });
+});
+
+describe('isBrainEmbeddingAvailable', () => {
+  it('is ready when a self-run embedder is configured, with no provider key', async () => {
+    mockEnv.R_BRAIN_EMBEDDINGS_UPSTREAM_URL = 'https://embedder.example/v1';
+    // No provider key of any kind — the trial/Anthropic-only case.
+    await expect(isBrainEmbeddingAvailable()).resolves.toBe(true);
+    expect(mockResolveModelProviderEnvValue).not.toHaveBeenCalled();
+  });
+
+  it('falls back to an embeddings-capable provider key when no embedder is set', async () => {
+    mockResolveModelProviderEnvValue.mockResolvedValue('sk-or');
+    await expect(isBrainEmbeddingAvailable()).resolves.toBe(true);
+  });
+
+  it('is not ready with neither an embedder nor a provider key', async () => {
+    await expect(isBrainEmbeddingAvailable()).resolves.toBe(false);
+  });
+
+  it('treats a whitespace-only upstream as unset', async () => {
+    mockEnv.R_BRAIN_EMBEDDINGS_UPSTREAM_URL = '   ';
+    await expect(isBrainEmbeddingAvailable()).resolves.toBe(false);
   });
 });

@@ -286,6 +286,8 @@ export {
   PrReviewNotificationRateLimitError,
   preparePrReviewNotificationDelivery,
   recordPrReviewNotificationDeliveryBestEffort,
+  getTaskPrReviewOfferStatus,
+  updateTaskPrReviewOfferStatus,
   triagePrReviewActivity,
   type PreparedPrReviewNotification,
   type PrReviewTriageContext,
@@ -427,6 +429,7 @@ export {
 } from './lib/mcp/linear-connections';
 
 export {
+  requestBrainBackfill,
   requestInstancePing,
   requestLicenseUsageSync,
   resetInstancePingQueueForTests,

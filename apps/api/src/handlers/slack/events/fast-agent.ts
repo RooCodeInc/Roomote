@@ -22,7 +22,10 @@ import {
   appendAttachmentTextsToPromptText,
   stripLeadingSlackProductMention,
 } from '@roomote/cloud-agents';
-import { resolveUserMcpServerConfigs } from '@roomote/sdk/server';
+import {
+  recordFastAgentConversationMessageBestEffort,
+  resolveUserMcpServerConfigs,
+} from '@roomote/sdk/server';
 
 import { LEADING_FAST_COMMAND_MENTION_PATTERN } from '../constants.js';
 import { postSlackThreadMarkdownMessage } from '../helpers/thread-posting.js';
@@ -262,9 +265,15 @@ export async function processFastAgentMessage(params: {
           // message was deleted); treat it as delivered so the turn is not
           // aborted mid-flight.
           didSendVisibleResponse = true;
-          return typeof posted === 'object'
-            ? { messageId: posted.messageId }
-            : undefined;
+          if (typeof posted !== 'object') {
+            return undefined;
+          }
+          await recordFastAgentConversationMessageBestEffort({
+            sessionId: session.id,
+            conversation,
+            messageId: posted.messageId,
+          });
+          return { messageId: posted.messageId };
         },
         replaceReply: async ({ messageId }, { message }) => {
           // Keep the sticky footer when the edited message is its current
@@ -304,6 +313,11 @@ export async function processFastAgentMessage(params: {
           if (!updated) {
             throw new Error('Slack did not update the Fast parent reply.');
           }
+          await recordFastAgentConversationMessageBestEffort({
+            sessionId: session.id,
+            conversation,
+            messageId,
+          });
           didSendVisibleResponse = true;
           return { messageId };
         },
@@ -334,7 +348,7 @@ export async function processFastAgentMessage(params: {
     });
 
     if (responseText.length > 0 && !didSendVisibleResponse) {
-      await postSlackThreadMarkdownMessage({
+      const posted = await postSlackThreadMarkdownMessage({
         slack,
         channel: event.channel,
         threadTs: threadId,
@@ -347,6 +361,13 @@ export async function processFastAgentMessage(params: {
         },
         fastSessionFooter: { sessionId: session.id, ...footerContext },
       });
+      if (typeof posted === 'object') {
+        await recordFastAgentConversationMessageBestEffort({
+          sessionId: session.id,
+          conversation,
+          messageId: posted.messageId,
+        });
+      }
     }
   } finally {
     if (didAddProcessingReaction) {

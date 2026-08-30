@@ -41,6 +41,8 @@ const {
   telegramMappingsFindFirstMock,
   appendAccountLinkHelpTextMock,
   continueFastReplyMock,
+  queueFastReplyMock,
+  findFastMessageSessionMock,
   findFastReplySessionMock,
   getFastSessionMock,
   isFastProviderMessageMock,
@@ -89,6 +91,8 @@ const {
   telegramMappingsFindFirstMock: vi.fn(),
   appendAccountLinkHelpTextMock: vi.fn(async (message: string) => message),
   continueFastReplyMock: vi.fn(),
+  queueFastReplyMock: vi.fn(),
+  findFastMessageSessionMock: vi.fn(),
   findFastReplySessionMock: vi.fn(),
   getFastSessionMock: vi.fn(),
   isFastProviderMessageMock: vi.fn(),
@@ -276,8 +280,10 @@ vi.mock('@roomote/sdk/server', () => ({
   isTelegramLinkCode: (value: string) =>
     /^link-[A-Za-z0-9_-]{16,}$/.test(value.trim()),
   findTelegramPrimaryChatId: vi.fn(async () => null),
+  findFastAgentSessionForProviderMessage: findFastMessageSessionMock,
   findFastAgentSessionForProviderReply: findFastReplySessionMock,
   isFastAgentProviderMessage: isFastProviderMessageMock,
+  queueFastAgentSurfaceReply: queueFastReplyMock,
   TELEGRAM_PRIMARY_CHAT_ENV_VAR_NAME: 'TELEGRAM_PRIMARY_CHAT_ID',
   claimPendingPrReviewAction: vi.fn(async () => null),
   claimPendingPrReviewActionsForThread: vi.fn(async () => []),
@@ -305,6 +311,10 @@ vi.mock('../../tasks/task-stop.js', () => ({
 }));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
+  buildFastAgentReactionExternalInputQuestion: vi.fn(
+    (input: unknown) =>
+      `<external_input>${JSON.stringify(input)}</external_input>`,
+  ),
   buildTelegramRoutingContext: buildTelegramRoutingContextMock,
   classifyFollowUp: classifyFollowUpMock,
   enqueueTask: enqueueTaskMock,
@@ -394,6 +404,8 @@ describe('Telegram webhook handler', () => {
     telegramMappingsFindFirstMock.mockReset();
     consumeLinkCodeMock.mockReset();
     continueFastReplyMock.mockResolvedValue(true);
+    queueFastReplyMock.mockResolvedValue(true);
+    findFastMessageSessionMock.mockResolvedValue(null);
     findFastReplySessionMock.mockResolvedValue(null);
     getFastSessionMock.mockRejectedValue(new Error('Fast unavailable'));
     isFastProviderMessageMock.mockResolvedValue(false);
@@ -479,6 +491,114 @@ describe('Telegram webhook handler', () => {
       taskId: 'task-new',
     });
     postMessageMock.mockResolvedValue({ messageId: 'telegram-response' });
+  });
+
+  it('queues a new reaction on the owner’s bound Fast message', async () => {
+    findFastMessageSessionMock.mockResolvedValue({
+      id: 'fast-session-1',
+      userId: 'mapped-user-1',
+      conversation: {
+        surface: 'telegram',
+        workspaceId: '222',
+        conversationId: '222:user:mapped-user-1',
+        replyTarget: { channelId: '222' },
+      },
+    });
+    mockTelegramLinkedSender('mapped-user-1');
+
+    const response = await postTelegramUpdate({
+      update_id: 124,
+      message_reaction: {
+        chat: { id: 222, type: 'private' },
+        message_id: 777,
+        date: 1_700_000_000,
+        user: {
+          id: 111,
+          first_name: 'Ada',
+          last_name: 'Lovelace',
+          username: 'ada',
+        },
+        old_reaction: [],
+        new_reaction: [{ type: 'emoji', emoji: '❤️' }],
+      },
+    });
+
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      fastReactionQueued: true,
+    });
+    expect(findFastMessageSessionMock).toHaveBeenCalledWith({
+      provider: 'telegram',
+      workspaceId: '222',
+      channelId: '222',
+      messageId: '777',
+    });
+    expect(queueFastReplyMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: 'fast-session-1',
+        userId: 'mapped-user-1',
+        currentMessageId: 'telegram-reaction:124',
+        replyToMessageId: '777',
+        externalInput: expect.objectContaining({
+          provider: 'telegram',
+          reactions: [{ name: '❤️' }],
+        }),
+      }),
+    );
+  });
+
+  it('rejects a reaction from a different Fast session owner', async () => {
+    findFastMessageSessionMock.mockResolvedValue({
+      id: 'fast-session-1',
+      userId: 'another-user',
+      conversation: {
+        surface: 'telegram',
+        workspaceId: '222',
+        conversationId: '222:user:another-user',
+        replyTarget: { channelId: '222' },
+      },
+    });
+    mockTelegramLinkedSender('mapped-user-1');
+
+    const response = await postTelegramUpdate({
+      update_id: 125,
+      message_reaction: {
+        chat: { id: 222, type: 'private' },
+        message_id: 777,
+        date: 1_700_000_000,
+        user: { id: 111, first_name: 'Ada' },
+        old_reaction: [],
+        new_reaction: [{ type: 'emoji', emoji: '🔥' }],
+      },
+    });
+
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      queued: false,
+      reason: 'fast_session_user_mismatch',
+    });
+    expect(queueFastReplyMock).not.toHaveBeenCalled();
+  });
+
+  it('ignores reaction removals without starting Fast or a suggestion', async () => {
+    const response = await postTelegramUpdate({
+      update_id: 126,
+      message_reaction: {
+        chat: { id: 222, type: 'private' },
+        message_id: 777,
+        date: 1_700_000_000,
+        user: { id: 111, first_name: 'Ada' },
+        old_reaction: [{ type: 'emoji', emoji: '👍' }],
+        new_reaction: [],
+      },
+    });
+
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      ignored: 'reaction_removed_or_unchanged',
+    });
+    expect(findFastMessageSessionMock).not.toHaveBeenCalled();
+    expect(queueFastReplyMock).not.toHaveBeenCalled();
   });
 
   it('remembers implicit Telegram topics so the task title can replace New Chat', async () => {

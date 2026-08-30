@@ -79,7 +79,7 @@ function registerSearchTool(
     {
       title: 'Search Notion',
       description:
-        'Search pages and data sources explicitly shared with the deployment Notion integration.',
+        'Search pages and data sources explicitly shared with the deployment Notion integration. Pages that live inside databases are often missing from search results: to find them, locate the data source (object_type "data_source") and list its rows with notion-query-data-sources.',
       inputSchema: {
         query: z.string().optional(),
         object_type: z.enum(['page', 'data_source']).optional(),
@@ -118,10 +118,12 @@ function registerFetchTool(
     {
       title: 'Fetch Notion Content',
       description:
-        'Fetch a page, data source, or block explicitly shared with the deployment Notion integration. Pages include enhanced Markdown content; blocks include one page of child blocks.',
+        'Fetch a page, database, data source, or block explicitly shared with the deployment Notion integration. Pages include enhanced Markdown content; databases list their data sources (query rows with notion-query-data-sources); blocks include one page of child blocks.',
       inputSchema: {
         id: nonEmptyStringSchema,
-        object_type: z.enum(['page', 'data_source', 'block']).default('page'),
+        object_type: z
+          .enum(['page', 'database', 'data_source', 'block'])
+          .default('page'),
         include_transcript: z.boolean().optional(),
         ...paginationSchema,
       },
@@ -136,6 +138,13 @@ function registerFetchTool(
       page_size,
     }) => {
       const encodedId = encodeURIComponent(id);
+      if (objectType === 'database') {
+        const database = await notionApiRequestJson<Record<string, unknown>>({
+          config,
+          path: `databases/${encodedId}`,
+        });
+        return toMcpToolResult({ database });
+      }
       if (objectType === 'data_source') {
         const dataSource = await notionApiRequestJson<Record<string, unknown>>({
           config,

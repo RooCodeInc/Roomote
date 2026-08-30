@@ -279,7 +279,7 @@ describe('prReviewNotificationJob', () => {
       },
       text: 'formatted-message',
     });
-    mockRecordDelivery.mockResolvedValue(undefined);
+    mockRecordDelivery.mockResolvedValue(true);
     mockNotifyFastAgentParent.mockResolvedValue(false);
     mockAttachPendingPrReviewActionMessage.mockResolvedValue({
       attached: true,
@@ -1493,6 +1493,48 @@ describe('prReviewNotificationJob', () => {
       route: null,
       text: 'I reviewed owner/repo#42 on GitHub and found no issues.',
     });
+  });
+
+  it('publishes an actionable canonical offer for a web-only standard task', async () => {
+    const deliveryId = '11111111-1111-4111-8111-111111111111';
+    const leaseToken = '22222222-2222-4222-8222-222222222222';
+    mockPrepareDelivery.mockResolvedValue({
+      post: true,
+      route: null,
+      text: 'Review feedback remains.',
+      followUpQuestion: 'Would you like me to resolve these issues?',
+      followUpPrompt: 'Resolve the review feedback.',
+    });
+
+    await prReviewNotificationJob(
+      makeJob({
+        ownershipVersion: 'canonical',
+        deliveryId,
+        deliveryState: 'claimed',
+        deliveryIds: [deliveryId],
+        leaseToken,
+      }) as never,
+    );
+
+    expect(mockBeginCanonicalWebPrompt).toHaveBeenCalledWith({
+      request: expect.objectContaining({ deliveryId }),
+      followUpPrompt: 'Resolve the review feedback.',
+    });
+    expect(mockRecordDelivery).toHaveBeenCalledWith(
+      expect.objectContaining({
+        taskId: 'task-1',
+        reviewAction: {
+          deliveryId,
+          question: 'Would you like me to resolve these issues?',
+        },
+      }),
+    );
+    expect(mockAttachPendingPrReviewActionMessage).toHaveBeenCalledWith(
+      deliveryId,
+      deliveryId,
+      { leaseToken },
+    );
+    expect(mockFinalize).not.toHaveBeenCalled();
   });
 
   it('skips without posting when the notification is not worth sending', async () => {

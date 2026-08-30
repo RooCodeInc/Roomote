@@ -29,11 +29,11 @@ describe('upsertFastAgentMessage', () => {
   it('retries one transient canonical database failure', async () => {
     upsertMessageMock
       .mockRejectedValueOnce(new Error('temporary failure'))
-      .mockResolvedValueOnce(undefined);
+      .mockResolvedValueOnce({ initialHumanTurn: true });
 
     await expect(
       upsertFastAgentMessage({ sessionId: 'session-1', message }),
-    ).resolves.toBeUndefined();
+    ).resolves.toEqual({ initialHumanTurn: true });
     expect(upsertMessageMock).toHaveBeenCalledTimes(2);
   });
 

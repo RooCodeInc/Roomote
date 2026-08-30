@@ -95,6 +95,8 @@ export type CiFailureTriageFrequency = 'off' | 'daily';
 
 export type IssueFixerFrequency = 'off' | 'daily';
 
+export type MergeAnnouncerFrequency = 'off' | 'daily';
+
 /**
  * User-facing automations shown on the Automations settings page. Each key is
  * the canonical snake_case identifier used everywhere: the automations table
@@ -121,6 +123,7 @@ export const USER_FACING_AUTOMATION_KEYS = [
   'security_auditor',
   'code_quality_auditor',
   'ci_failure_triage',
+  'merge_announcer',
 ] as const;
 
 /**
@@ -338,6 +341,18 @@ export const SCHEDULE_ONLY_BACKGROUND_AUTOMATIONS = {
     defaultFrequency: 'off',
     requiresManagerChannel: true,
     suggestionSource: 'issue_fixer',
+  },
+  mergeAnnouncer: {
+    id: 'mergeAnnouncer',
+    label: 'Merge announcer',
+    hashAliases: ['merge-announcer', 'mergeannouncer'],
+    automationKey: 'merge_announcer',
+    frequencyField: 'mergeAnnouncerFrequency',
+    lastRunAtField: 'mergeAnnouncerLastRunAt',
+    scanCursorField: 'mergeAnnouncerScanCursor',
+    defaultFrequency: 'off',
+    requiresManagerChannel: true,
+    suggestionSource: 'merge_announcer',
   },
 } as const satisfies Record<string, ScheduleOnlyBackgroundAutomationDefinition>;
 

@@ -8,6 +8,7 @@ import {
   resolveGitHubRoomoteMentionEnabled,
 } from '@roomote/github';
 import {
+  handleMergeAnnouncerPush,
   recordPrStatusChangeInTaskHistory,
   updateTaskPrStatus,
   upsertGitHubPullRequestFactFromWebhook,
@@ -52,6 +53,10 @@ import { handleInstallationRepositoriesChange } from './handleInstallationReposi
 // Utilities:
 import { isFromKnownInstallation } from './isFromKnownInstallation';
 import { recordWebhook } from './recordWebhook';
+import {
+  enrichGitHubMergeAnnouncerEvent,
+  normalizeGitHubPush,
+} from '../merge-announcer-push';
 
 /**
  * Fire-and-forget PR status update. Logs errors but never throws.
@@ -548,11 +553,20 @@ github.post('/', async (c) => {
 
     webhooks.on('push', ({ id, name, payload }) =>
       recordWebhook(id, name, payload, async () => {
-        const [result] = await Promise.all([
+        const mergeAnnouncerEvent = normalizeGitHubPush(payload);
+        const [result, , mergeAnnouncerResult] = await Promise.all([
           handlePushConflictCheck(payload),
           queueBaseBranchMergeabilityCheck(payload),
+          mergeAnnouncerEvent
+            ? enrichGitHubMergeAnnouncerEvent(
+                payload,
+                mergeAnnouncerEvent,
+              ).then(handleMergeAnnouncerPush)
+            : Promise.resolve({ status: 'ok' as const }),
         ]);
-        return result;
+        return mergeAnnouncerResult.status === 'error'
+          ? mergeAnnouncerResult
+          : result;
       }),
     );
 
@@ -645,6 +659,7 @@ github.post('/', async (c) => {
             prNumber: payload.pull_request.number,
             prTitle: payload.pull_request.title,
             prUrl: payload.pull_request.html_url,
+            targetBranch: payload.pull_request.base.ref,
             status,
             actorLogin:
               (payload.pull_request.merged

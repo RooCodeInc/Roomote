@@ -1,6 +1,8 @@
 const mocks = vi.hoisted(() => ({
   acquireTurnLock: vi.fn(),
-  releaseTurnLock: vi.fn(),
+  releaseTurnLock: Object.assign(vi.fn(), {
+    signal: new AbortController().signal,
+  }),
   answerQuestion: vi.fn(),
   createLauncher: vi.fn(),
   launchTask: vi.fn(),
@@ -208,6 +210,7 @@ const event = {
 describe('deliverFastAgentParentEvent', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.releaseTurnLock.signal = new AbortController().signal;
     mocks.acquireTurnLock.mockResolvedValue(mocks.releaseTurnLock);
     mocks.releaseTurnLock.mockResolvedValue(undefined);
     mocks.findSession.mockImplementation(
@@ -464,6 +467,11 @@ describe('deliverFastAgentParentEvent', () => {
     expect(mocks.postMessage).not.toHaveBeenCalledWith(
       expect.objectContaining({ text: childEvent.message }),
     );
+    expect(mocks.recordProviderMessage).toHaveBeenCalledWith({
+      sessionId: parent.sessionId,
+      conversation: parent.conversation,
+      messageId: '101.001',
+    });
   });
 
   it('captures an automation platform turn without a chat provider', async () => {
@@ -549,6 +557,11 @@ describe('deliverFastAgentParentEvent', () => {
       },
     });
     expect(mocks.postMessage).not.toHaveBeenCalled();
+    expect(mocks.recordProviderMessage).toHaveBeenCalledWith({
+      sessionId: parent.sessionId,
+      conversation: parent.conversation,
+      messageId: '100.001',
+    });
   });
 
   it('posts structured suggestions beneath a Fast Slack automation report', async () => {
@@ -776,6 +789,35 @@ describe('deliverFastAgentParentEvent', () => {
       deliverFastAgentParentEvent({ parent, event }),
     ).rejects.toThrow('turn lock did not become available');
     expect(mocks.answerQuestion).not.toHaveBeenCalled();
+  });
+
+  it('releases an acquired lock when a synchronous parent event times out', async () => {
+    vi.useFakeTimers();
+    try {
+      mocks.answerQuestion.mockImplementationOnce(
+        ({ signal }: { signal: AbortSignal }) =>
+          new Promise((_resolve, reject) => {
+            signal.addEventListener('abort', () => reject(signal.reason), {
+              once: true,
+            });
+          }),
+      );
+
+      const delivery = deliverFastAgentParentEvent({
+        parent,
+        event,
+        turnTimeoutMs: 1_000,
+      });
+      const rejection = expect(delivery).rejects.toThrow(
+        'Fast parent event delivery timed out after 1000ms.',
+      );
+      await vi.advanceTimersByTimeAsync(1_000);
+
+      await rejection;
+      expect(mocks.releaseTurnLock).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('delivers a guild parent event to its routable channel, not its session identity', async () => {
@@ -1639,6 +1681,7 @@ describe('deliverFastAgentParentEvent', () => {
         number: 42,
         title: 'Fix review feedback',
         url: 'https://github.com/acme/web/pull/42',
+        targetBranch: 'develop',
         status: 'merged' as const,
       },
       status: 'merged' as const,
@@ -1666,11 +1709,14 @@ describe('deliverFastAgentParentEvent', () => {
 
     expect(mocks.answerQuestion).toHaveBeenCalledWith(
       expect.objectContaining({
-        question: expect.stringContaining(
-          '"type":"pull_request_status_changed"',
+        question: expect.stringMatching(
+          /"type":"pull_request_status_changed".*"targetBranch":"develop"/,
         ),
         turnSource: 'platform_event',
       }),
+    );
+    expect(mocks.answerQuestion.mock.calls[0]?.[0]?.question).not.toContain(
+      '"targetBranch":"main"',
     );
     expect(firstClientMessageId).toEqual(expect.any(String));
     expect(mocks.postMessage.mock.calls[1]?.[0]?.client_msg_id).toBe(

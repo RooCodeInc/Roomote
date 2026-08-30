@@ -196,6 +196,7 @@ export function captureFastAgentTurnSettled(input: {
   userId: string;
   surface: FastAgentSurface;
   turnSource: FastAgentTurnSource;
+  initialHumanTurn?: boolean;
   sessionPath?: FastAgentSessionPath;
   outcome: 'success' | 'failure';
   serviceDurationMs: number;
@@ -213,6 +214,7 @@ export function captureFastAgentTurnSettled(input: {
     properties: {
       surface: input.surface,
       turn_source: input.turnSource,
+      initial_human_turn: input.initialHumanTurn ?? null,
       session_path: input.sessionPath ?? null,
       outcome: input.outcome,
       service_duration_ms: input.serviceDurationMs,

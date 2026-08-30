@@ -5,6 +5,7 @@ import {
 } from '@roomote/cloud-agents/server';
 import {
   REASONING_EFFORT_VALUES,
+  type PrReviewActionOfferStatus,
   RunStatus,
   TaskPayloadKind,
   activeRunStatuses,
@@ -32,8 +33,10 @@ import {
   inArray,
   isNotNull,
   getTaskGoalForRun,
+  getCanonicalPrReviewAction,
   not,
   resolveEffectivePreviewRuntimeConfig,
+  retireCanonicalPrReviewActionsForDestinationKey,
   taskMessages,
   taskRuns,
   tasks,
@@ -41,6 +44,10 @@ import {
 import { httpBatchLink, TRPCClientError } from '@trpc/client';
 import { TRPCError } from '@trpc/server';
 import { createSandboxServerRpcClient } from '@roomote/sdk/sandbox-router';
+import {
+  getTaskPrReviewOfferStatus,
+  updateTaskPrReviewOfferStatus,
+} from '@roomote/sdk/server';
 import superjson from 'superjson';
 import { z } from 'zod';
 
@@ -55,6 +62,7 @@ import {
   withOutOfBandContext,
 } from '@/lib/server/out-of-band-context';
 import { getUserDisplayName } from '@/lib/user-display-name';
+import { handleWebPrReviewAction } from '@/lib/server/pr-review-actions';
 
 import { restoreSnapshotResumeVisiblePromptFields } from '../snapshot-visible-prompt';
 import {
@@ -118,6 +126,27 @@ async function assertSandboxRpcEndpointReachable(sandboxServerUrl: string) {
   }
 }
 
+async function retireTaskPrReviewOffersAfterReply(taskId: string) {
+  try {
+    const retiredDeliveryIds =
+      await retireCanonicalPrReviewActionsForDestinationKey({
+        destinationKind: 'task',
+        destinationKey: taskId,
+      });
+    await updateTaskPrReviewOfferStatus({
+      taskId,
+      deliveryIds: retiredDeliveryIds,
+      status: 'dismissed',
+    });
+  } catch (error) {
+    // The prompt is already in the sandbox at this point. Cleanup must not
+    // make a successful user reply look failed and invite duplicate delivery.
+    console.warn(
+      `[sendSandboxPromptCommand] Failed to retire PR review offers for task ${taskId}: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+}
+
 export const sendSandboxPromptInputSchema = z
   .object({
     taskId: z.string(),
@@ -158,6 +187,49 @@ export const answerSandboxUserInputRequestInputSchema = z.object({
   requestId: z.string().min(1),
   answers: requestUserInputAnswersSchema,
 });
+
+export const handlePrReviewNotificationActionInputSchema = z.object({
+  deliveryId: z.string().uuid(),
+  choice: z.enum(['yes', 'auto', 'dismiss']),
+});
+
+export async function handlePrReviewNotificationActionCommand(
+  auth: UserAuthSuccess,
+  input: z.input<typeof handlePrReviewNotificationActionInputSchema>,
+): Promise<{ status: PrReviewActionOfferStatus }> {
+  const parsed = handlePrReviewNotificationActionInputSchema.parse(input);
+  const pendingAction = await getCanonicalPrReviewAction(parsed.deliveryId);
+  if (!pendingAction?.taskId || pendingAction.destinationKind !== 'task') {
+    throw new TRPCError({
+      code: 'NOT_FOUND',
+      message: 'Review action not found.',
+    });
+  }
+  const taskId = pendingAction.taskId;
+  const taskAccess = await resolveTaskByIdAccessCommand(auth, { taskId });
+  if (taskAccess.kind !== 'resolved') {
+    throw new TRPCError({ code: 'NOT_FOUND', message: 'Task not found.' });
+  }
+
+  return handleWebPrReviewAction({
+    deliveryId: parsed.deliveryId,
+    choice: parsed.choice,
+    actingUserId: auth.userId,
+    expectedDestinationKind: 'task',
+    expectedDestinationKey: taskId,
+    getOfferStatus: () =>
+      getTaskPrReviewOfferStatus({
+        taskId,
+        deliveryId: parsed.deliveryId,
+      }),
+    updateOfferStatus: (status) =>
+      updateTaskPrReviewOfferStatus({
+        taskId,
+        deliveryIds: [parsed.deliveryId],
+        status,
+      }),
+  });
+}
 
 /**
  * Trusted actor switch, applied BEFORE the prompt reaches the sandbox.
@@ -364,6 +436,10 @@ export async function sendSandboxPromptCommand(
         : parsed.autoSteerWhenQueued,
       goalContext,
     });
+
+    if (typeof parsed.prompt === 'string' && parsed.prompt.trim().length > 0) {
+      await retireTaskPrReviewOffersAfterReply(parsed.taskId);
+    }
 
     if (
       parsed.source === 'web' &&

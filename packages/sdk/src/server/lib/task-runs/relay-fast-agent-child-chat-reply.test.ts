@@ -60,6 +60,8 @@ describe('relayFastAgentChildChatReply', () => {
         message: 'The targeted tests are running.',
         imageArtifactIds: ['artifact-1'],
       },
+      lockWaitMs: 30_000,
+      turnTimeoutMs: 30_000,
     });
   });
 

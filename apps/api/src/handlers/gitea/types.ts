@@ -176,3 +176,33 @@ export const giteaWorkflowRunWebhookSchema = z
 export type GiteaWorkflowRunWebhook = z.infer<
   typeof giteaWorkflowRunWebhookSchema
 >;
+
+const giteaPushCommitSchema = z
+  .object({
+    id: z.string(),
+    message: z.string(),
+    url: z.string().optional(),
+    author: giteaUserSchema
+      .extend({
+        name: z.string().optional(),
+        email: z.string().optional(),
+      })
+      .optional(),
+  })
+  .passthrough();
+
+export const giteaPushWebhookSchema = z
+  .object({
+    ref: z.string(),
+    deleted: z.boolean().optional(),
+    compare_url: z.string().nullable().optional(),
+    commits: z.array(giteaPushCommitSchema),
+    pusher: giteaUserSchema.extend({ name: z.string().optional() }).optional(),
+    sender: giteaUserSchema.optional(),
+    repository: giteaRepositorySchema.extend({
+      default_branch: z.string().optional(),
+    }),
+  })
+  .passthrough();
+
+export type GiteaPushWebhook = z.infer<typeof giteaPushWebhookSchema>;
