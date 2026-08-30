@@ -16,7 +16,7 @@ export function createFastAgentSlackSessionActivity({
   title?: string | null;
   delayMs?: number;
 }): FastAgentTurnActivity {
-  const sessionTitle = title?.trim().slice(0, 200) || undefined;
+  const sessionTitle = title?.trim() ? title : undefined;
   let processingTimer: ReturnType<typeof setTimeout> | undefined;
   let processingUpdate: Promise<void> | undefined;
   let settled = false;
