@@ -1242,7 +1242,9 @@ export async function answerFastAgentQuestion({
       platformEvent ? false : userMessageResult?.initialHumanTurn,
     );
     if (!platformEvent) {
-      void refreshFastAgentSessionTitle({ sessionId: session.id, userId });
+      void refreshFastAgentSessionTitle({ sessionId: session.id, userId }).then(
+        (title) => adapter.activity?.updateTitle?.(title),
+      );
     }
     const sessionActiveTasks = await getActiveFastAgentTasks(session.id);
     const resolvedActiveTasks = [

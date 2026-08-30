@@ -2,6 +2,13 @@ import type { FastAgentTurnActivity } from '@roomote/cloud-agents/server';
 import type { SlackNotifier } from './slack-notifier';
 
 export const FAST_AGENT_SLACK_PROCESSING_DELAY_MS = 300;
+const SLACK_AGENT_SESSION_TITLE_MAX_CHARS = 200;
+
+function normalizeSessionTitle(title: string | null | undefined) {
+  return title?.trim()
+    ? title.slice(0, SLACK_AGENT_SESSION_TITLE_MAX_CHARS)
+    : undefined;
+}
 
 export function createFastAgentSlackSessionActivity({
   slack,
@@ -16,10 +23,34 @@ export function createFastAgentSlackSessionActivity({
   title?: string | null;
   delayMs?: number;
 }): FastAgentTurnActivity {
-  const sessionTitle = title?.trim() ? title : undefined;
+  let sessionTitle = normalizeSessionTitle(title);
+  let slackTitle: string | undefined;
   let processingTimer: ReturnType<typeof setTimeout> | undefined;
   let processingUpdate: Promise<void> | undefined;
+  let titleUpdate = Promise.resolve();
   let settled = false;
+
+  const syncTitle = () => {
+    titleUpdate = titleUpdate.then(async () => {
+      if (
+        !sessionTitle ||
+        slackTitle === undefined ||
+        slackTitle === sessionTitle
+      ) {
+        return;
+      }
+      if (
+        await slack.renameAgentSession({
+          channel,
+          threadTs,
+          title: sessionTitle,
+        })
+      ) {
+        slackTitle = sessionTitle;
+      }
+    });
+    return titleUpdate;
+  };
 
   return {
     start() {
@@ -34,19 +65,11 @@ export function createFastAgentSlackSessionActivity({
             status: 'processing',
             ...(sessionTitle ? { title: sessionTitle } : {}),
           });
-          // Slack ignores setStatus.title after creation, so rename only when
-          // its response proves an existing session still has another title.
-          if (
-            response.ok &&
-            sessionTitle &&
-            response.title !== undefined &&
-            response.title !== sessionTitle
-          ) {
-            await slack.renameAgentSession({
-              channel,
-              threadTs,
-              title: sessionTitle,
-            });
+          if (response.ok) {
+            slackTitle = response.title;
+            // Slack ignores setStatus.title after creation, so rename only
+            // when its response proves an existing session has another title.
+            await syncTitle();
           }
         })();
       }, delayMs);
@@ -64,6 +87,7 @@ export function createFastAgentSlackSessionActivity({
 
       try {
         await processingUpdate;
+        await syncTitle();
       } finally {
         await slack.setAgentSessionStatus({
           channel,
@@ -71,6 +95,12 @@ export function createFastAgentSlackSessionActivity({
           status: 'active',
           ...(sessionTitle ? { title: sessionTitle } : {}),
         });
+      }
+    },
+    updateTitle(title) {
+      sessionTitle = normalizeSessionTitle(title);
+      if (processingUpdate) {
+        void processingUpdate.then(syncTitle);
       }
     },
   };

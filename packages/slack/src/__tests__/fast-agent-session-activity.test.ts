@@ -108,9 +108,10 @@ describe('createFastAgentSlackSessionActivity', () => {
     expect(renameAgentSession).not.toHaveBeenCalled();
   });
 
-  it('passes a nonblank persisted title to Slack without rewriting it', async () => {
+  it('bounds a persisted title to Slack’s 200-character limit', async () => {
     vi.useFakeTimers();
-    const title = `Status ${'detail'.repeat(40)}`;
+    const persistedTitle = `Status ${'detail'.repeat(40)}`;
+    const title = persistedTitle.slice(0, 200);
     const setAgentSessionStatus = vi
       .fn()
       .mockResolvedValueOnce({ ok: true, title })
@@ -120,7 +121,7 @@ describe('createFastAgentSlackSessionActivity', () => {
       slack: { renameAgentSession, setAgentSessionStatus },
       channel: 'C123',
       threadTs: '100.001',
-      title,
+      title: persistedTitle,
     });
 
     activity.start();
@@ -136,6 +137,37 @@ describe('createFastAgentSlackSessionActivity', () => {
       expect.objectContaining({ title }),
     );
     expect(renameAgentSession).not.toHaveBeenCalled();
+  });
+
+  it('renames an untitled session when its Fast title is generated', async () => {
+    vi.useFakeTimers();
+    const setAgentSessionStatus = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: true, title: 'Slack default title' })
+      .mockResolvedValueOnce({ ok: true });
+    const renameAgentSession = vi.fn().mockResolvedValue(true);
+    const activity = createFastAgentSlackSessionActivity({
+      slack: { renameAgentSession, setAgentSessionStatus },
+      channel: 'C123',
+      threadTs: '100.001',
+    });
+
+    activity.start();
+    await vi.advanceTimersByTimeAsync(FAST_AGENT_SLACK_PROCESSING_DELAY_MS);
+    activity.updateTitle?.('Generated Fast title');
+    await activity.settle();
+
+    expect(renameAgentSession).toHaveBeenCalledWith({
+      channel: 'C123',
+      threadTs: '100.001',
+      title: 'Generated Fast title',
+    });
+    expect(setAgentSessionStatus).toHaveBeenNthCalledWith(2, {
+      channel: 'C123',
+      threadTs: '100.001',
+      status: 'active',
+      title: 'Generated Fast title',
+    });
   });
 
   it('renames an existing session before active cleanup when the title changed', async () => {

@@ -108,6 +108,7 @@ export type RetryFastAgentTaskStart = () => Promise<
 export type FastAgentTurnActivity = {
   start: () => void;
   settle: () => Promise<void>;
+  updateTitle?: (title: string | null) => void;
 };
 
 export type FastAgentMcpServerConfig = {
