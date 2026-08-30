@@ -68,7 +68,11 @@ type PendingResponseState = {
 
 type PendingResponseAction =
   | { type: 'hydrate'; messages: TranscriptMessage[] }
-  | { type: 'messages'; messages: TranscriptMessage[] }
+  | {
+      type: 'messages';
+      messages: TranscriptMessage[];
+      newUserEventIds: ReadonlySet<string>;
+    }
   | { type: 'optimistic'; message: TranscriptOrder }
   | { type: 'commitOptimistic'; optimisticId: string }
   | { type: 'rollbackOptimistic'; optimisticId: string };
@@ -116,8 +120,9 @@ export function pendingResponseReducer(
       const pendingThreshold = pendingAfter ?? latestVisibleResponse;
       if (
         message.role === 'user' &&
-        (pendingThreshold === null ||
-          compareTranscriptOrder(message, pendingThreshold) >= 0)
+        (action.type === 'hydrate' ||
+          (action.newUserEventIds.has(message.eventId) &&
+            (pendingThreshold === null || message.ts >= pendingThreshold.ts)))
       ) {
         pendingAfter = message;
       } else if (isVisibleResponseActivity(message)) {
@@ -256,7 +261,13 @@ export function FastSessionTranscript({
         }
         serverMessagesRef.current = next;
         setServerMessages(next);
-        dispatchPendingResponse({ type: 'messages', messages });
+        dispatchPendingResponse({
+          type: 'messages',
+          messages,
+          newUserEventIds: new Set(
+            canonicalUserMessages.map((message) => message.eventId),
+          ),
+        });
 
         if (canonicalUserMessages.length > 0) {
           setOptimisticMessages((current) => {

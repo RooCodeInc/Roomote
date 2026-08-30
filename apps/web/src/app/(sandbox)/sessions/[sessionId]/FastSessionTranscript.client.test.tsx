@@ -222,6 +222,7 @@ describe('FastSessionTranscript', () => {
 
       const afterStaleOutput = pendingResponseReducer(hydrated, {
         type: 'messages',
+        newUserEventIds: new Set(),
         messages: [
           textMessage({
             id: 'stale-assistant',
@@ -236,6 +237,7 @@ describe('FastSessionTranscript', () => {
 
       const afterVisibleOutput = pendingResponseReducer(afterStaleOutput, {
         type: 'messages',
+        newUserEventIds: new Set(),
         messages: [
           textMessage({
             id: 'assistant-1',
@@ -249,6 +251,7 @@ describe('FastSessionTranscript', () => {
 
       const afterStaleUserReplay = pendingResponseReducer(afterVisibleOutput, {
         type: 'messages',
+        newUserEventIds: new Set(),
         messages: [
           textMessage({
             id: 'stale-user',
@@ -259,6 +262,33 @@ describe('FastSessionTranscript', () => {
         ],
       });
       expect(afterStaleUserReplay.pendingAfter).toBeNull();
+    });
+
+    it('accepts a newly streamed user prompt that ties the latest response timestamp', () => {
+      const latestResponse = textMessage({
+        id: 'assistant-1',
+        role: 'assistant',
+        text: 'Answer',
+        ts: 2,
+      });
+      const hydrated = pendingResponseReducer(emptyState, {
+        type: 'hydrate',
+        messages: [latestResponse],
+      });
+      const nextUser = textMessage({
+        id: 'user-2',
+        role: 'user',
+        text: 'Follow up',
+        ts: latestResponse.ts,
+      });
+
+      const next = pendingResponseReducer(hydrated, {
+        type: 'messages',
+        messages: [nextUser],
+        newUserEventIds: new Set([nextUser.eventId]),
+      });
+
+      expect(next.pendingAfter?.id).toBe(nextUser.id);
     });
 
     it('restores an optimistic fallback only while that message owns pending state', () => {
@@ -293,6 +323,7 @@ describe('FastSessionTranscript', () => {
 
       const resolved = pendingResponseReducer(optimisticPending, {
         type: 'messages',
+        newUserEventIds: new Set(),
         messages: [
           textMessage({
             id: 'assistant-1',
