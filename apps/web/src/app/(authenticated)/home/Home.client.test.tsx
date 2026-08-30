@@ -128,7 +128,8 @@ vi.mock('./BottomSheetTabs', () => ({
   BottomSheetTabs: () => <div>Tabs</div>,
 }));
 
-import { Home, NewTaskForm } from './Home';
+import { NewTaskForm } from '@/components/tasks/NewTaskForm';
+import { Home } from './Home';
 
 vi.mock('@/components/tasks', async () => {
   const actual =
@@ -357,6 +358,9 @@ describe('Home', () => {
     expect(
       screen.getByRole('heading', { name: 'New Session' }),
     ).toBeInTheDocument();
+    expect(
+      screen.queryByText(/^Choose where Roomote should work/),
+    ).not.toBeInTheDocument();
     expect(screen.queryByText(/Select agent /)).not.toBeInTheDocument();
     // Auto was retired from the picker (identical to Fast); Fast is offered.
     expect(screen.getByTestId('allow-auto')).toHaveTextContent('false');
@@ -377,16 +381,26 @@ describe('Home', () => {
     expect(mockPush).toHaveBeenCalledWith('/sessions/fast-session-1');
   });
 
-  it('reuses the launch form without Home-only content in dialogs', async () => {
+  it('starts a new Fast session with the selected non-default model', async () => {
+    render(<Home initialPlaceholderIndex={0} />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Model' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Use auto workspace' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Submit prompt' }));
+
+    await waitFor(() => {
+      expect(mockStartFastSession).toHaveBeenCalledWith({
+        text: 'Test prompt',
+        images: undefined,
+        model: 'openrouter/z-ai/glm-5.2',
+      });
+    });
+  });
+
+  it('keeps Home-only content out of the shared launch form', async () => {
     const onTaskStarted = vi.fn();
 
-    render(
-      <NewTaskForm
-        initialPlaceholderIndex={0}
-        presentation="dialog"
-        onTaskStarted={onTaskStarted}
-      />,
-    );
+    render(<NewTaskForm onTaskStarted={onTaskStarted} />);
 
     expect(
       screen.queryByRole('heading', { name: 'New Session' }),
@@ -624,6 +638,34 @@ describe('Home', () => {
           }),
         }),
       );
+    });
+  });
+
+  it('opens a new task session on the transcript', async () => {
+    mockUseCreateStandardTaskRun.mockImplementation(
+      (options: { onSuccess: (result: unknown) => void }) => ({
+        isPending: false,
+        mutateAsync: async () => {
+          const result = {
+            success: true,
+            id: 4,
+            taskId: 'task-4',
+            sessionId: 'session-1',
+          };
+          options.onSuccess(result);
+          return result;
+        },
+      }),
+    );
+    render(<Home initialPlaceholderIndex={0} />);
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Use single-repo environment' }),
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Submit prompt' }));
+
+    await waitFor(() => {
+      expect(mockPush).toHaveBeenCalledWith('/sessions/session-1');
     });
   });
 

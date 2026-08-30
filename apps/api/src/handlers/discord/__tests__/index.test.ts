@@ -62,9 +62,11 @@ const mocks = vi.hoisted(() => ({
   acquireFastTurnLock: vi.fn(),
   answerFast: vi.fn(),
   hasFastSession: vi.fn(),
+  findFastMessageSession: vi.fn(),
   findFastReplySession: vi.fn(),
   isFastProviderMessage: vi.fn(),
   recordProviderMessage: vi.fn(),
+  queueFastSurfaceReply: vi.fn(),
 }));
 
 vi.mock('../../account-link-help.js', () => ({
@@ -110,9 +112,11 @@ vi.mock('@roomote/sdk/server', () => ({
   upsertDiscordInstallation: mocks.upsertInstallation,
   enqueueDiscordGatewayEvent: mocks.enqueueGatewayEvent,
   claimPendingPrReviewActionsForThread: vi.fn(async () => []),
+  findFastAgentSessionForProviderMessage: mocks.findFastMessageSession,
   findFastAgentSessionForProviderReply: mocks.findFastReplySession,
   isFastAgentProviderMessage: mocks.isFastProviderMessage,
   recordFastAgentConversationMessageBestEffort: mocks.recordProviderMessage,
+  queueFastAgentSurfaceReply: mocks.queueFastSurfaceReply,
   resolveUserMcpServerConfigs: vi.fn(async () => ({})),
 }));
 
@@ -182,6 +186,10 @@ vi.mock('../callback-actions.js', () => ({
 vi.mock('@roomote/cloud-agents/server', () => ({
   acquireFastAgentTurnLock: mocks.acquireFastTurnLock,
   answerFastAgentQuestion: mocks.answerFast,
+  buildFastAgentReactionExternalInputQuestion: vi.fn(
+    (input: unknown) =>
+      `<external_input>${JSON.stringify(input)}</external_input>`,
+  ),
   resolveApiBaseUrl: () => 'https://roomote.example.com',
   getTaskUrl: mocks.getTaskUrl,
   hasFastAgentSession: mocks.hasFastSession,
@@ -323,9 +331,11 @@ describe('Discord Gateway event handler', () => {
     );
     mocks.answerFast.mockResolvedValue('A quick answer');
     mocks.hasFastSession.mockResolvedValue(false);
+    mocks.findFastMessageSession.mockResolvedValue(null);
     mocks.findFastReplySession.mockResolvedValue(null);
     mocks.isFastProviderMessage.mockResolvedValue(false);
     mocks.recordProviderMessage.mockResolvedValue(true);
+    mocks.queueFastSurfaceReply.mockResolvedValue(true);
     mocks.reply.mockResolvedValue({ messageId: 'reply-1' });
     mocks.createDirectMessage.mockResolvedValue({ id: 'dm-private-1' });
     mocks.createThreadFromMessage.mockResolvedValue({
@@ -509,6 +519,7 @@ describe('Discord Gateway event handler', () => {
     );
     expect(mocks.startNewTask).not.toHaveBeenCalled();
     expect(mocks.queueMessage).not.toHaveBeenCalled();
+    expect(mocks.queueFastSurfaceReply).not.toHaveBeenCalled();
   });
 
   it('answers a configured reaction through the fast agent when the reacted-on message cannot be fetched', async () => {
@@ -591,6 +602,99 @@ describe('Discord Gateway event handler', () => {
       }),
     );
     expect(mocks.callViaEmojiConfig).not.toHaveBeenCalled();
+    expect(mocks.queueFastSurfaceReply).not.toHaveBeenCalled();
+  });
+
+  it('queues an unconfigured reaction on the owner’s bound Fast message', async () => {
+    mocks.getChannel.mockResolvedValue({
+      id: 'thread-1',
+      name: 'Task thread',
+      type: 11,
+      guildId: 'guild-1',
+      parentId: 'channel-1',
+    });
+    mocks.findFastMessageSession.mockResolvedValue({
+      id: 'fast-session-1',
+      userId: 'roomote-user-1',
+      conversation: {
+        surface: 'discord',
+        workspaceId: 'guild-1',
+        conversationId: 'thread-1',
+        replyTarget: { channelId: 'channel-1', threadId: 'thread-1' },
+      },
+    });
+
+    const response = await postEvent({
+      eventId: 'thread-1:message-1:discord-user-1:heart',
+      eventType: 'MESSAGE_REACTION_ADD',
+      receivedAt: '2026-07-12T15:00:00.000Z',
+      payload: {
+        user_id: 'discord-user-1',
+        channel_id: 'thread-1',
+        message_id: 'message-1',
+        guild_id: 'guild-1',
+        emoji: { id: null, name: 'heart' },
+        member: {
+          nick: 'Matt',
+          user: { id: 'discord-user-1', username: 'matt' },
+        },
+      },
+    });
+
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      fastReactionQueued: true,
+    });
+    expect(mocks.findFastMessageSession).toHaveBeenCalledWith({
+      provider: 'discord',
+      workspaceId: 'guild-1',
+      channelId: 'channel-1',
+      threadId: 'thread-1',
+      messageId: 'message-1',
+    });
+    expect(mocks.queueFastSurfaceReply).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: 'fast-session-1',
+        userId: 'roomote-user-1',
+        currentMessageId: expect.stringContaining('discord-reaction:'),
+        replyToMessageId: 'message-1',
+        externalInput: expect.objectContaining({
+          provider: 'discord',
+          reactions: [{ name: 'heart' }],
+        }),
+      }),
+    );
+  });
+
+  it('rejects a reaction from a different Fast session owner', async () => {
+    mocks.findFastMessageSession.mockResolvedValue({
+      id: 'fast-session-1',
+      userId: 'another-roomote-user',
+      conversation: {
+        surface: 'discord',
+        workspaceId: 'dm',
+        conversationId: 'dm-1',
+        replyTarget: { channelId: 'dm-1' },
+      },
+    });
+
+    const response = await postEvent({
+      eventId: 'dm-1:message-1:discord-user-1:heart',
+      eventType: 'MESSAGE_REACTION_ADD',
+      receivedAt: '2026-07-12T15:00:00.000Z',
+      payload: {
+        user_id: 'discord-user-1',
+        channel_id: 'dm-1',
+        message_id: 'message-1',
+        emoji: { id: null, name: 'heart' },
+      },
+    });
+
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      ignored: 'discord_fast_session_user_mismatch',
+    });
+    expect(mocks.queueFastSurfaceReply).not.toHaveBeenCalled();
   });
 
   it('rejects an invalid Gateway secret before claiming the event', async () => {
@@ -1064,6 +1168,7 @@ describe('Discord Gateway event handler', () => {
     const response = await postEvent(envelope(message()));
 
     expect(response.status).toBe(200);
+    expect(mocks.shouldRouteUnmentioned).not.toHaveBeenCalled();
     expect(mocks.answerFast).toHaveBeenCalledWith(
       expect.objectContaining({ activeTasks: [{ taskId: 'task-23' }] }),
     );
@@ -1616,6 +1721,7 @@ describe('Discord Gateway event handler', () => {
     expect(mocks.answerFast).toHaveBeenCalledWith(
       expect.objectContaining({
         question: 'Investigate the second finding',
+        allowSilentAmbientReply: false,
         conversation: expect.objectContaining({
           conversationId: 'automation-run-1',
         }),
@@ -1623,6 +1729,51 @@ describe('Discord Gateway event handler', () => {
     );
     expect(mocks.findAutomationReportRun).not.toHaveBeenCalled();
     expect(mocks.startNewTask).not.toHaveBeenCalled();
+  });
+
+  it('requires a response for a native reply to Roomote in a shared Fast thread', async () => {
+    mocks.getChannel.mockResolvedValue({
+      id: 'thread-1',
+      guildId: 'guild-1',
+      parentId: 'channel-1',
+      name: 'fast-thread',
+      type: 11,
+    });
+    mocks.findFastReplySession.mockResolvedValue({
+      id: '11111111-1111-4111-8111-111111111111',
+      userId: 'roomote-user-1',
+      conversation: {
+        surface: 'discord',
+        workspaceId: 'guild-1',
+        conversationId: 'thread-1',
+        replyTarget: { channelId: 'channel-1', threadId: 'thread-1' },
+      },
+    });
+    mocks.shouldRouteUnmentioned.mockResolvedValue(false);
+    mocks.fetchThreadHistory.mockResolvedValue([
+      {
+        id: 'earlier-message',
+        user: 'discord-user-2',
+        text: 'Earlier participant message',
+        attachments: [],
+      },
+    ]);
+
+    const response = await postEvent(
+      envelope(
+        message({
+          channel_id: 'thread-1',
+          guild_id: 'guild-1',
+          content: 'Can you expand on that?',
+          message_reference: { message_id: 'fast-reply-1' },
+        }),
+      ),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.answerFast).toHaveBeenCalledWith(
+      expect.objectContaining({ allowSilentAmbientReply: false }),
+    );
   });
 
   it('preserves the root channel for a provider-bound guild Fast continuation', async () => {

@@ -1,5 +1,5 @@
 {
-  "id": "454387f2-421b-40e6-89de-22294026d3bd",
+  "id": "da289938-b40d-4e70-a034-7a5b6adbc822",
   "prevId": "5ec65fda-1612-4060-893e-4f4333bb2b5c",
   "version": "7",
   "dialect": "postgresql",
@@ -3832,9 +3832,9 @@
       "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {
-        "fast_agent_provider_messages_provider_check": {
-          "name": "fast_agent_provider_messages_provider_check",
-          "value": "\"fast_agent_provider_messages\".\"provider\" in ('discord', 'teams')"
+        "fast_agent_provider_messages_provider_v2_check": {
+          "name": "fast_agent_provider_messages_provider_v2_check",
+          "value": "\"fast_agent_provider_messages\".\"provider\" in ('discord', 'teams', 'telegram')"
         }
       },
       "isRLSEnabled": false
@@ -12178,18 +12178,6 @@
         "goal_blocked_reason": {
           "name": "goal_blocked_reason",
           "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "goal_started_at": {
-          "name": "goal_started_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "goal_ended_at": {
-          "name": "goal_ended_at",
-          "type": "timestamp",
           "primaryKey": false,
           "notNull": false
         },

@@ -5,6 +5,7 @@ import { createAuthToken } from '@roomote/auth';
 import * as GitHub from '@roomote/github';
 import { createClient } from '@roomote/sdk/client';
 import { enqueueAutomationSignalPrefetch } from '@roomote/sdk/server/automation-recommendations';
+import { requestBrainBackfill } from '@roomote/sdk/server/request-instance-ping';
 import { isLoopbackHostname } from '@roomote/types';
 import {
   db,
@@ -674,6 +675,8 @@ export async function enableGitHubAppCommand(
       );
 
       if (results.some((result) => result.success)) {
+        // Repositories just came back online for Memory ingestion.
+        void requestBrainBackfill('github-connected');
         return { success: true, mode: 'synced' };
       }
     }
@@ -822,6 +825,12 @@ export async function resolvePendingGitHubInstallationsCommand(
     const result = await GitHub.resolvePendingGitHubInstallations({
       userId: auth.userId,
     });
+
+    if (result.completed > 0) {
+      // A pending installation just resolved into live repositories — start
+      // Memory ingestion now rather than waiting out the 15-minute schedules.
+      void requestBrainBackfill('github-connected');
+    }
 
     return { success: true, ...result };
   } catch (error) {

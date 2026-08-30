@@ -83,6 +83,89 @@ describe('Notion page mapping', () => {
     expect(mapped?.content).toContain('## Decision\n\nShip the collector.');
   });
 
+  it('renders database property values into the page body', () => {
+    const users = buildNotionUserReferences(
+      [{ id: 'notion-ada', name: 'Ada', email: null }],
+      new Map(),
+    );
+    const mapped = buildNotionPage(
+      {
+        ...page,
+        properties: {
+          ...page.properties,
+          Status: { type: 'status', status: { name: 'In review' } },
+          Priority: { type: 'select', select: { name: 'P1' } },
+          Tags: {
+            type: 'multi_select',
+            multi_select: [{ name: 'infra' }, { name: 'memory' }],
+          },
+          Due: { type: 'date', date: { start: '2026-09-01', end: null } },
+          Effort: { type: 'number', number: 3 },
+          Done: { type: 'checkbox', checkbox: false },
+          Owner: {
+            type: 'people',
+            people: [{ object: 'user', id: 'notion-ada' }],
+          },
+          Blocked: {
+            type: 'relation',
+            relation: [{ id: '12345678-90AB-CDEF-1234-567890ABCD00' }],
+          },
+          Ticket: {
+            type: 'unique_id',
+            unique_id: { prefix: 'ROO', number: 42 },
+          },
+          Score: { type: 'formula', formula: { type: 'number', number: 8.5 } },
+          Empty: { type: 'rich_text', rich_text: [] },
+        },
+      },
+      { markdown: 'Body' },
+      { identityContext: { users, identityLookup: new Map() } },
+    );
+
+    expect(mapped?.content).toContain('## Properties');
+    expect(mapped?.content).toContain('- **Status**: In review');
+    expect(mapped?.content).toContain('- **Priority**: P1');
+    expect(mapped?.content).toContain('- **Tags**: infra, memory');
+    expect(mapped?.content).toContain('- **Due**: 2026-09-01');
+    expect(mapped?.content).toContain('- **Effort**: 3');
+    expect(mapped?.content).toContain('- **Done**: No');
+    expect(mapped?.content).toContain('- **Owner**: Ada');
+    expect(mapped?.content).toContain(
+      '- **Blocked**: [notion/1234567890abcdef1234567890abcd00](notion/1234567890abcdef1234567890abcd00)',
+    );
+    expect(mapped?.content).toContain('- **Ticket**: ROO-42');
+    expect(mapped?.content).toContain('- **Score**: 8.5');
+    // Empty values and the title property never render as property lines.
+    expect(mapped?.content).not.toContain('**Empty**');
+    expect(mapped?.content).not.toContain('**Name**');
+  });
+
+  it('marks property lists Notion truncated at the inline cap', () => {
+    const mapped = buildNotionPage(
+      {
+        ...page,
+        properties: {
+          ...page.properties,
+          Blocked: {
+            type: 'relation',
+            relation: [{ id: '12345678-90AB-CDEF-1234-567890ABCD00' }],
+            has_more: true,
+          },
+        },
+      },
+      { markdown: 'Body' },
+    );
+
+    expect(mapped?.content).toContain(
+      '- **Blocked**: [notion/1234567890abcdef1234567890abcd00](notion/1234567890abcdef1234567890abcd00) _(Notion truncated this list; open the source page for the rest)_',
+    );
+  });
+
+  it('omits the properties section for pages with only a title', () => {
+    const mapped = buildNotionPage(page, { markdown: 'Body' });
+    expect(mapped?.content).not.toContain('## Properties');
+  });
+
   it('emits deterministic person and relation references from page metadata', () => {
     const identities: PersonIdentityRecord[] = [
       {
@@ -360,7 +443,9 @@ describe('Notion traversal discovery', () => {
     mode: 'traverse' as const,
     lastSweepAt: '2026-08-27T00:00:00.000Z',
     scanStartedAt: '2026-08-27T00:00:00.000Z',
-    traverse: { afterItemId: '', pending: [] },
+    // Most tests focus on the block/inventory walk; the shared data-source
+    // enumeration that runs first has its own tests below.
+    traverse: { afterItemId: '', pending: [], dataSourcesDone: true },
   };
   const pageObject = (id: string, title: string) => ({
     object: 'page',
@@ -519,6 +604,98 @@ describe('Notion traversal discovery', () => {
     });
 
     expect(result.pages.map((page) => page.title)).toEqual(['Row page']);
+  });
+
+  it('discovers rows of directly-shared databases search never surfaced', async () => {
+    const dataSource = '99991111-0000-0000-0000-0000000000d5';
+    const row = '99991111-0000-0000-0000-000000000101';
+    const searchBodies: unknown[] = [];
+    mockNotionApiRequestJson.mockImplementation(async ({ path, body }) => {
+      if (path === 'search') {
+        searchBodies.push(body);
+        return {
+          results: [{ object: 'data_source', id: dataSource }],
+          has_more: false,
+        };
+      }
+      if (path === `data_sources/${encodeURIComponent(dataSource)}/query`) {
+        return {
+          results: [pageObject(row, 'Shared database row')],
+          has_more: false,
+        };
+      }
+      if (path === `pages/${encodeURIComponent(row)}`) {
+        return pageObject(row, 'Shared database row');
+      }
+      if (path === `pages/${encodeURIComponent(row)}/markdown`) {
+        return { markdown: 'Row body' };
+      }
+      if (path.startsWith('blocks/')) {
+        return { results: [], has_more: false };
+      }
+      throw new Error(`unexpected path ${path}`);
+    });
+
+    const result = await collectNotionTraversal({
+      config,
+      saved: {
+        ...savedTraverse,
+        traverse: { afterItemId: '', pending: [] },
+      },
+      limit: 10,
+    });
+
+    expect(searchBodies).toEqual([
+      expect.objectContaining({
+        filter: { property: 'object', value: 'data_source' },
+      }),
+    ]);
+    expect(result.pages.map((page) => page.title)).toEqual([
+      'Shared database row',
+    ]);
+    expect(JSON.parse(result.stateUpdates![0]!.cursor as string)).toMatchObject(
+      { mode: 'idle' },
+    );
+  });
+
+  it('restarts data-source enumeration when its search cursor expires', async () => {
+    const searchCursors: unknown[] = [];
+    mockNotionApiRequestJson.mockImplementation(async ({ path, body }) => {
+      if (path === 'search') {
+        const cursor = (body as { start_cursor?: string }).start_cursor;
+        searchCursors.push(cursor ?? null);
+        if (cursor) {
+          throw new NotionApiError(
+            'cursor expired',
+            400,
+            'validation_error',
+            null,
+          );
+        }
+        return { results: [], has_more: false };
+      }
+      throw new Error(`unexpected path ${path}`);
+    });
+
+    const result = await collectNotionTraversal({
+      config,
+      saved: {
+        ...savedTraverse,
+        traverse: {
+          afterItemId: '',
+          pending: [],
+          dataSourceCursor: 'stale-cursor',
+        },
+      },
+      limit: 10,
+    });
+
+    // The stale cursor restarts the enumeration from the top instead of
+    // wedging the pass, and the cycle still completes.
+    expect(searchCursors).toEqual(['stale-cursor', null]);
+    expect(JSON.parse(result.stateUpdates![0]!.cursor as string)).toMatchObject(
+      { mode: 'idle' },
+    );
   });
 
   it('descends into any block with children, not just a container allowlist', async () => {

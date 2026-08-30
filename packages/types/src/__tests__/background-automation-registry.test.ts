@@ -144,6 +144,34 @@ describe('background automation registry', () => {
     ]);
   });
 
+  it('registers Merge announcer as a provider-neutral push automation with cross-provider delivery', () => {
+    const descriptor =
+      getTriggerableBackgroundAutomationDescriptorByKey('merge_announcer');
+
+    expect(descriptor).toMatchObject({
+      label: 'Merge announcer',
+      slackIcon: 'git-commit-vertical',
+      scheduleModes: ['off', 'daily'],
+      usesManagerChannel: true,
+      supportedCommunicationProviders: [
+        'slack',
+        'teams',
+        'telegram',
+        'discord',
+      ],
+      supportedSourceControlProviders: [
+        'github',
+        'gitlab',
+        'gitea',
+        'ado',
+        'bitbucket',
+      ],
+    });
+    expect(
+      getTriggerableBackgroundAutomationSettingsHash('merge_announcer'),
+    ).toBe('merge-announcer');
+  });
+
   it('supports Gitea conflict scans alongside GitHub, GitLab, and Azure DevOps', () => {
     const descriptor =
       getTriggerableBackgroundAutomationDescriptorByKey('conflict_resolver');

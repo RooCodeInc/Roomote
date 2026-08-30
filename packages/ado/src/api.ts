@@ -84,6 +84,7 @@ const ADO_PULL_REQUEST_SERVICE_HOOK_EVENTS: readonly {
     webhookQueryParams: { notificationType: 'StatusUpdateNotification' },
   },
   { eventType: 'ms.vss-code.git-pullrequest-comment-event' },
+  { eventType: 'git.push' },
 ] as const;
 
 /** Project-scoped events (no repository publisher input). */

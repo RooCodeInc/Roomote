@@ -277,7 +277,7 @@ export async function launchClaimedTeamsSuggestion(params: {
   const launchResult = await launchClaimedSuggestedTask({
     suggestion,
     policy: {
-      usesRouterLaunch: suggestion.usesRouterLaunch === true,
+      fastEligible: false,
       userDefaultEnabled: false,
       fastAvailable: false,
     },

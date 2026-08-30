@@ -1,6 +1,8 @@
 const mocks = vi.hoisted(() => ({
   acquireTurnLock: vi.fn(),
-  releaseTurnLock: vi.fn(),
+  releaseTurnLock: Object.assign(vi.fn(), {
+    signal: new AbortController().signal,
+  }),
   answerQuestion: vi.fn(),
   createLauncher: vi.fn(),
   launchTask: vi.fn(),
@@ -8,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   findInstallation: vi.fn(),
   findArtifacts: vi.fn(),
   findTaskRun: vi.fn(),
+  findTaskPullRequests: vi.fn(),
   postMessage: vi.fn(),
   updateMessage: vi.fn(),
   addReaction: vi.fn(),
@@ -83,6 +86,7 @@ vi.mock('@roomote/cloud-agents/server', () => ({
       await mocks.enqueueTask({ task });
       return { success: true, taskId: 'child-task-1', taskUrl };
     },
+  createFastAgentWebTaskLauncher: vi.fn(() => mocks.launchTask),
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -90,6 +94,10 @@ vi.mock('@roomote/db/server', () => ({
     query: {
       slackInstallations: { findFirst: mocks.findInstallation },
       taskArtifacts: { findMany: mocks.findArtifacts },
+      taskPullRequests: {
+        findFirst: vi.fn().mockResolvedValue(null),
+        findMany: mocks.findTaskPullRequests,
+      },
       taskRuns: { findFirst: mocks.findTaskRun },
     },
   },
@@ -101,6 +109,7 @@ vi.mock('@roomote/db/server', () => ({
     teamId: 'slack_installations.team_id',
   },
   taskArtifacts: { id: 'task_artifacts.id' },
+  taskPullRequests: { taskId: 'task_pull_requests.task_id' },
   taskRuns: { id: 'task_runs.id' },
 }));
 
@@ -201,6 +210,7 @@ const event = {
 describe('deliverFastAgentParentEvent', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.releaseTurnLock.signal = new AbortController().signal;
     mocks.acquireTurnLock.mockResolvedValue(mocks.releaseTurnLock);
     mocks.releaseTurnLock.mockResolvedValue(undefined);
     mocks.findSession.mockImplementation(
@@ -227,6 +237,7 @@ describe('deliverFastAgentParentEvent', () => {
       },
     ]);
     mocks.findTaskRun.mockResolvedValue({ status: 'running' });
+    mocks.findTaskPullRequests.mockResolvedValue([]);
     mocks.postMessage.mockResolvedValue('101.001');
     mocks.updateMessage.mockResolvedValue(true);
     mocks.addReaction.mockResolvedValue(true);
@@ -287,6 +298,7 @@ describe('deliverFastAgentParentEvent', () => {
       provider: 'telegram',
       channelId: 'telegram-chat-1',
       messageId: 'telegram-message-1',
+      lastTextMessageId: 'telegram-message-2',
     });
     mocks.createTelegramProvider.mockResolvedValue({
       postMessage: mocks.telegramPostMessage,
@@ -321,6 +333,54 @@ describe('deliverFastAgentParentEvent', () => {
           message: 'The proof is ready.',
           imageArtifactIds: ['artifact-1', 'artifact-1'],
         }),
+    );
+  });
+
+  it('passes a canonical review offer into the web transcript payload', async () => {
+    const webParent = {
+      sessionId: parent.sessionId,
+      conversation: {
+        surface: 'web' as const,
+        workspaceId: 'user-1',
+        conversationId: 'session-1',
+      },
+    };
+    mocks.answerQuestion.mockResolvedValue('Presented feedback');
+
+    await deliverFastAgentParentEvent({
+      parent: webParent,
+      event: {
+        type: 'pull_request_feedback',
+        feedbackId: 'feedback-1',
+        taskId: 'task-1',
+        runId: 42,
+        taskUrl: 'https://roomote.example/task/task-1',
+        pullRequest: {
+          provider: 'github',
+          host: 'github.com',
+          repository: 'acme/web',
+          number: 42,
+          title: 'Fix review feedback',
+          url: 'https://github.com/acme/web/pull/42',
+          status: 'open',
+        },
+        summary: 'Review feedback remains.',
+        suggestedActionQuestion: 'Resolve these issues?',
+        suggestedActionPrompt: 'Resolve the review feedback.',
+        reviewActionDeliveryId: '22222222-2222-4222-8222-222222222222',
+      },
+    });
+
+    expect(mocks.answerQuestion).toHaveBeenCalledWith(
+      expect.objectContaining({
+        platformEventTranscriptPayload: {
+          prReviewAction: {
+            deliveryId: '22222222-2222-4222-8222-222222222222',
+            question: 'Resolve these issues?',
+            status: 'pending',
+          },
+        },
+      }),
     );
   });
 
@@ -407,6 +467,11 @@ describe('deliverFastAgentParentEvent', () => {
     expect(mocks.postMessage).not.toHaveBeenCalledWith(
       expect.objectContaining({ text: childEvent.message }),
     );
+    expect(mocks.recordProviderMessage).toHaveBeenCalledWith({
+      sessionId: parent.sessionId,
+      conversation: parent.conversation,
+      messageId: '101.001',
+    });
   });
 
   it('captures an automation platform turn without a chat provider', async () => {
@@ -476,6 +541,11 @@ describe('deliverFastAgentParentEvent', () => {
             type: 'actions',
             elements: [
               expect.objectContaining({
+                action_id: 'late_bound_automation_view_session',
+                text: expect.objectContaining({ text: 'Follow' }),
+                url: expect.stringContaining(`/sessions/${parent.sessionId}`),
+              }),
+              expect.objectContaining({
                 action_id: 'late_bound_automation_configure',
                 url: expect.stringContaining(
                   '/automations#custom-automation-automation-1',
@@ -487,6 +557,11 @@ describe('deliverFastAgentParentEvent', () => {
       },
     });
     expect(mocks.postMessage).not.toHaveBeenCalled();
+    expect(mocks.recordProviderMessage).toHaveBeenCalledWith({
+      sessionId: parent.sessionId,
+      conversation: parent.conversation,
+      messageId: '100.001',
+    });
   });
 
   it('posts structured suggestions beneath a Fast Slack automation report', async () => {
@@ -714,6 +789,35 @@ describe('deliverFastAgentParentEvent', () => {
       deliverFastAgentParentEvent({ parent, event }),
     ).rejects.toThrow('turn lock did not become available');
     expect(mocks.answerQuestion).not.toHaveBeenCalled();
+  });
+
+  it('releases an acquired lock when a synchronous parent event times out', async () => {
+    vi.useFakeTimers();
+    try {
+      mocks.answerQuestion.mockImplementationOnce(
+        ({ signal }: { signal: AbortSignal }) =>
+          new Promise((_resolve, reject) => {
+            signal.addEventListener('abort', () => reject(signal.reason), {
+              once: true,
+            });
+          }),
+      );
+
+      const delivery = deliverFastAgentParentEvent({
+        parent,
+        event,
+        turnTimeoutMs: 1_000,
+      });
+      const rejection = expect(delivery).rejects.toThrow(
+        'Fast parent event delivery timed out after 1000ms.',
+      );
+      await vi.advanceTimersByTimeAsync(1_000);
+
+      await rejection;
+      expect(mocks.releaseTurnLock).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('delivers a guild parent event to its routable channel, not its session identity', async () => {
@@ -947,6 +1051,13 @@ describe('deliverFastAgentParentEvent', () => {
           suggestions,
         }),
       );
+      expect(mocks.recordProviderMessage).toHaveBeenCalledWith({
+        sessionId: parent.sessionId,
+        conversation: expect.objectContaining({ surface }),
+        messageId:
+          rootMessageId ??
+          (surface === 'teams' ? 'teams-message-1' : 'telegram-message-2'),
+      });
     },
   );
 
@@ -1450,7 +1561,7 @@ describe('deliverFastAgentParentEvent', () => {
       threadId: 'thread-1',
       idempotencyKey: 'fast-parent-pr-feedback:feedback-123',
       text: expect.stringMatching(
-        /^There is new PR feedback\.\nWant me to resolve these issues\?\n\n-# Reply or use the \[web app\]\(.*\/sessions\/.*\)\.$/,
+        /^There is new PR feedback\.\nWant me to resolve these issues\?\n\n-# Working on \[PR #42\]\(https:\/\/github\.com\/acme\/web\/pull\/42\), reply or use the \[web app\]\(.*\/sessions\/.*\)\.$/,
       ),
       textFormat: 'markdown',
       images: [],
@@ -1570,6 +1681,7 @@ describe('deliverFastAgentParentEvent', () => {
         number: 42,
         title: 'Fix review feedback',
         url: 'https://github.com/acme/web/pull/42',
+        targetBranch: 'develop',
         status: 'merged' as const,
       },
       status: 'merged' as const,
@@ -1597,11 +1709,14 @@ describe('deliverFastAgentParentEvent', () => {
 
     expect(mocks.answerQuestion).toHaveBeenCalledWith(
       expect.objectContaining({
-        question: expect.stringContaining(
-          '"type":"pull_request_status_changed"',
+        question: expect.stringMatching(
+          /"type":"pull_request_status_changed".*"targetBranch":"develop"/,
         ),
         turnSource: 'platform_event',
       }),
+    );
+    expect(mocks.answerQuestion.mock.calls[0]?.[0]?.question).not.toContain(
+      '"targetBranch":"main"',
     );
     expect(firstClientMessageId).toEqual(expect.any(String));
     expect(mocks.postMessage.mock.calls[1]?.[0]?.client_msg_id).toBe(

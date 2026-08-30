@@ -47,7 +47,15 @@ import {
 
 import { ModelSelect } from '@/components/tasks/ModelSelect';
 
-import { SlackChannelSelect } from './SlackChannelSelect';
+import {
+  AutomationDestinationPicker,
+  type AutomationDestinationProvider,
+} from './AutomationDestinationPicker';
+
+type ConnectedDestinationProvider = Exclude<
+  AutomationDestinationProvider,
+  'none'
+>;
 
 type CustomAutomationFormState = {
   name: string;
@@ -62,11 +70,6 @@ type CustomAutomationFormState = {
   targetMode: 'channel' | 'direct_message';
   targetChannelId: string;
 };
-
-type AutomationDestinationProvider = Exclude<
-  CustomAutomationFormState['targetProvider'],
-  'none'
->;
 
 const EMPTY_FORM: CustomAutomationFormState = {
   name: '',
@@ -94,7 +97,7 @@ const SCHEDULE_OPTIONS: Array<{
 ];
 
 const DESTINATION_OPTIONS: Array<{
-  value: AutomationDestinationProvider;
+  value: ConnectedDestinationProvider;
   label: string;
   capability:
     | 'slackConnected'
@@ -213,7 +216,7 @@ function targetFromRow(row: CustomAutomationListItem): {
 
 function formFromRow(
   row: CustomAutomationListItem,
-  connectedProviders: readonly AutomationDestinationProvider[] | null,
+  connectedProviders: readonly ConnectedDestinationProvider[] | null,
 ): CustomAutomationFormState {
   const target = targetFromRow(row);
   const targetIsConnected =
@@ -315,14 +318,6 @@ export function CustomAutomationsSection() {
   );
   capabilitiesLoadedRef.current = capabilitiesLoaded;
   connectedDestinationProvidersRef.current = connectedDestinationProviders;
-  const visibleDestinationOptions = capabilitiesLoaded
-    ? connectedDestinationOptions
-    : DESTINATION_OPTIONS.filter(
-        (option) => option.value === form.targetProvider,
-      );
-  const selectedDestinationLabel =
-    DESTINATION_OPTIONS.find((option) => option.value === form.targetProvider)
-      ?.label ?? 'Provider';
 
   const environmentOptions = useMemo(
     () => [
@@ -778,145 +773,28 @@ export function CustomAutomationsSection() {
         </div>
 
         <div className="space-y-2">
-          <Label htmlFor="custom-automation-destination">Destination</Label>
-          <div className="flex flex-col gap-2 sm:flex-row">
-            <Select
-              value={form.targetProvider}
-              disabled={busy}
-              onValueChange={(value) =>
-                setForm((current) => ({
-                  ...current,
-                  targetProvider:
-                    value as CustomAutomationFormState['targetProvider'],
-                  targetMode: 'channel',
-                  targetChannelId:
-                    value === 'slack'
-                      ? managerSlackChannelId
-                      : value === 'discord'
-                        ? managerDiscordChannelId
-                        : '',
-                }))
-              }
-            >
-              <SelectTrigger
-                id="custom-automation-destination"
-                aria-label="Destination provider"
-                className="w-full sm:w-52"
-              >
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="none">None</SelectItem>
-                {visibleDestinationOptions.map((option) => (
-                  <SelectItem key={option.value} value={option.value}>
-                    {option.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-
-            {form.targetProvider === 'none' ? (
-              <p className="self-center text-sm text-muted-foreground">
-                Results appear only in the task view.
-              </p>
-            ) : (
-              <div className="flex min-w-0 flex-1 flex-col gap-2 sm:flex-row sm:items-center">
-                <Select
-                  value={form.targetMode}
-                  disabled={busy}
-                  onValueChange={(value) =>
-                    setForm((current) => ({
-                      ...current,
-                      targetMode:
-                        value as CustomAutomationFormState['targetMode'],
-                      targetChannelId:
-                        value === 'channel'
-                          ? current.targetProvider === 'slack'
-                            ? managerSlackChannelId
-                            : current.targetProvider === 'discord'
-                              ? managerDiscordChannelId
-                              : ''
-                          : '',
-                    }))
-                  }
-                >
-                  <SelectTrigger
-                    aria-label={`${selectedDestinationLabel} destination type`}
-                    className="w-full sm:w-36"
-                  >
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="channel">Channel</SelectItem>
-                    <SelectItem value="direct_message">DM me</SelectItem>
-                  </SelectContent>
-                </Select>
-                {form.targetMode === 'direct_message' ? (
-                  <p className="self-center text-sm text-muted-foreground">
-                    Results are sent privately to your linked{' '}
-                    {selectedDestinationLabel} account.
-                  </p>
-                ) : form.targetProvider === 'slack' ? (
-                  <SlackChannelSelect
-                    id="custom-automation-destination-channel"
-                    className="flex-1"
-                    value={form.targetChannelId || null}
-                    options={slackOptions}
-                    disabled={busy}
-                    onChange={(value) =>
-                      setForm((current) => ({
-                        ...current,
-                        targetChannelId: value ?? '',
-                      }))
-                    }
-                  />
-                ) : form.targetProvider === 'discord' ? (
-                  <Select
-                    value={form.targetChannelId || undefined}
-                    disabled={busy}
-                    onValueChange={(value) =>
-                      setForm((current) => ({
-                        ...current,
-                        targetChannelId: value,
-                      }))
-                    }
-                  >
-                    <SelectTrigger
-                      aria-label="Destination channel"
-                      className="flex-1"
-                    >
-                      <SelectValue placeholder="Select Discord channel" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {discordOptions.map((channel) => (
-                        <SelectItem key={channel.id} value={channel.id}>
-                          {channel.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                ) : (
-                  <Input
-                    aria-label="Destination channel"
-                    className="flex-1"
-                    value={form.targetChannelId}
-                    disabled={busy}
-                    onChange={(event) =>
-                      setForm((current) => ({
-                        ...current,
-                        targetChannelId: event.target.value,
-                      }))
-                    }
-                    placeholder={
-                      form.targetProvider === 'teams'
-                        ? 'Teams conversation ID'
-                        : 'Telegram chat ID'
-                    }
-                  />
-                )}
-              </div>
-            )}
-          </div>
+          <AutomationDestinationPicker
+            id="custom-automation-destination"
+            value={{
+              provider: form.targetProvider,
+              mode: form.targetMode,
+              channelId: form.targetChannelId,
+            }}
+            availableProviders={connectedDestinationProviders}
+            slackOptions={slackOptions}
+            discordOptions={discordOptions}
+            defaultSlackChannelId={managerSlackChannelId}
+            defaultDiscordChannelId={managerDiscordChannelId}
+            disabled={busy}
+            onChange={(destination) =>
+              setForm((current) => ({
+                ...current,
+                targetProvider: destination.provider,
+                targetMode: destination.mode,
+                targetChannelId: destination.channelId,
+              }))
+            }
+          />
           {form.environmentId === FAST_EXECUTION ? (
             <p className="text-sm text-muted-foreground">
               {form.targetProvider === 'none'

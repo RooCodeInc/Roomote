@@ -83,6 +83,7 @@ describe('manager slack helpers', () => {
       automationId: 'automation-1',
       automationName: 'Weekly scan',
       text: 'Found two regressions.',
+      sessionId: 'session-1',
     });
 
     expect(message).toEqual({
@@ -109,6 +110,13 @@ describe('manager slack helpers', () => {
           type: 'actions',
           block_id: 'roomote_automation_result_actions',
           elements: [
+            expect.objectContaining({
+              action_id: 'late_bound_automation_view_session',
+              text: expect.objectContaining({ text: 'Follow' }),
+              url: expect.stringMatching(
+                /\/sessions\/session-1\?utm_source=slack&utm_medium=link&utm_campaign=slack\.fast_reply$/,
+              ),
+            }),
             expect.objectContaining({
               action_id: 'late_bound_automation_configure',
               url: 'https://app.example.com/automations#custom-automation-automation-1',

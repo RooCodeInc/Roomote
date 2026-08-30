@@ -367,7 +367,7 @@ import { z } from "zod"
 import { invoke } from "../roomote-fast-tool-bridge.js"
 
 export default {
-  description: "Close a platform-generated event turn without posting a user-visible reply.",
+  description: "Close an eligible platform-event or ambient human-message turn without posting a user-visible reply.",
   args: { reason: z.string().min(1) },
   execute: (args, context) => invoke("ignore_event", args, context),
 }

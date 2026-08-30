@@ -14,9 +14,11 @@ import {
   setBrainEnabled,
 } from '@roomote/db/server';
 import {
+  isBrainEmbeddingAvailable,
   readBrainCorpus,
   readBrainPage,
   readBrainStats,
+  requestBrainBackfill,
   resolveBrainSourceRequirements,
   resolveBrainInferenceProvider,
   type BrainCorpusSnapshot,
@@ -124,7 +126,7 @@ export type BrainSettings = {
    */
   enabledFromLegacyKey: boolean;
   url: string | null;
-  inferenceProvider: 'openrouter' | 'openai' | null;
+  inferenceProvider: 'openrouter' | 'openai' | 'helper' | null;
   /**
    * Whether the serving key is the Brain's own (`R_BRAIN_*`) or the
    * deployment's general provider key. The provider preference order can
@@ -142,6 +144,13 @@ export type BrainSettings = {
     embeddedCount: number | null;
     chunkCount: number | null;
   };
+  /**
+   * Whether an embedding path exists at all (a dedicated embedder upstream
+   * or an embeddings-capable provider key). What the `unknown` recall mode
+   * falls back to: the helper model answers synthesis but cannot embed, so
+   * inference presence alone must not imply semantic recall.
+   */
+  embeddingsAvailable: boolean;
   corpus: BrainCorpusSummary;
   sources: BrainSourceSummary[];
   taskMemories: {
@@ -400,6 +409,7 @@ export async function getBrainSettingsCommand(
     itemCounts,
     memories,
     requirements,
+    embeddingsAvailable,
   ] = await Promise.all([
     resolveBrainInferenceProvider(),
     configured ? readBrainCorpus() : null,
@@ -408,6 +418,7 @@ export async function getBrainSettingsCommand(
     configured ? countBrainCollectorItemsByCollector(db) : [],
     configured ? getBrainMemoryEventSummary(db) : EMPTY_MEMORY_SUMMARY,
     resolveBrainSourceRequirements(),
+    isBrainEmbeddingAvailable(),
   ]);
 
   const corpus = summarizeCorpus(corpusSnapshot);
@@ -504,7 +515,11 @@ export async function getBrainSettingsCommand(
     enabled: enabledState.enabled,
     enabledFromLegacyKey: enabledState.enabled && enabledState.fromLegacyKey,
     url,
-    inferenceProvider: inference?.providerId ?? null,
+    // Chat and expansion always have somewhere to go: without a
+    // Brain-specific provider key, the gateway answers them with the
+    // deployment's helper model.
+    inferenceProvider: inference?.providerId ?? 'helper',
+    embeddingsAvailable,
     keySource,
     recall,
     corpus,
@@ -539,6 +554,13 @@ export async function setMemoryEnabledCommand(
   assertAdmin(auth);
 
   await setBrainEnabled(input.enabled);
+
+  if (input.enabled) {
+    // Start the initial backfill now rather than waiting out the 15-minute
+    // collector and PR-sync schedules: a freshly enabled Memory should show
+    // content landing within moments, not ticks from now.
+    void requestBrainBackfill('memory-enabled');
+  }
 
   return { enabled: input.enabled };
 }

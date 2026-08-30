@@ -7,7 +7,11 @@ vi.mock('../environment-variables', async (importOriginal) => ({
   resolveDeploymentEnvVar: mockResolveDeploymentEnvVar,
 }));
 
-import { resolveModelProviderEnvValue } from '../model-runtime-config';
+import {
+  DevLoginInferencePlaceholderError,
+  resolveModelProviderEnvValue,
+} from '../model-runtime-config';
+import { DEV_LOGIN_INFERENCE_API_KEY_PLACEHOLDER } from '@roomote/types';
 import type { DatabaseOrTransaction } from '../../db';
 
 describe('resolveModelProviderEnvValue', () => {
@@ -43,6 +47,29 @@ describe('resolveModelProviderEnvValue', () => {
       'OPENAI_API_KEY',
       executor,
       {},
+    );
+  });
+
+  it('rejects the dev-login placeholder before returning a runtime key', async () => {
+    await expect(
+      resolveModelProviderEnvValue('OPENROUTER_API_KEY', {
+        runtimeEnv: {
+          OPENROUTER_API_KEY: DEV_LOGIN_INFERENCE_API_KEY_PLACEHOLDER,
+        },
+      }),
+    ).rejects.toBeInstanceOf(DevLoginInferencePlaceholderError);
+    expect(mockResolveDeploymentEnvVar).not.toHaveBeenCalled();
+  });
+
+  it('rejects the dev-login placeholder before returning a saved key', async () => {
+    mockResolveDeploymentEnvVar.mockResolvedValue(
+      DEV_LOGIN_INFERENCE_API_KEY_PLACEHOLDER,
+    );
+
+    await expect(
+      resolveModelProviderEnvValue('OPENROUTER_API_KEY', { runtimeEnv: {} }),
+    ).rejects.toThrow(
+      'Configure a real inference provider in Settings > Models',
     );
   });
 });

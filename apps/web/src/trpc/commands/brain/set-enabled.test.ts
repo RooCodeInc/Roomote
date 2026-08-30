@@ -1,10 +1,16 @@
-const { mockSetBrainEnabled } = vi.hoisted(() => ({
+const { mockSetBrainEnabled, mockRequestBrainBackfill } = vi.hoisted(() => ({
   mockSetBrainEnabled: vi.fn(async () => undefined),
+  mockRequestBrainBackfill: vi.fn(async () => undefined),
 }));
 
 vi.mock('@roomote/db/server', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@roomote/db/server')>()),
   setBrainEnabled: mockSetBrainEnabled,
+}));
+
+vi.mock('@roomote/sdk/server', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@roomote/sdk/server')>()),
+  requestBrainBackfill: mockRequestBrainBackfill,
 }));
 
 import type { UserAuthSuccess } from '@/types';
@@ -17,6 +23,7 @@ function auth(isAdmin: boolean): UserAuthSuccess {
 
 beforeEach(() => {
   mockSetBrainEnabled.mockClear();
+  mockRequestBrainBackfill.mockClear();
 });
 
 describe('setMemoryEnabledCommand', () => {
@@ -37,5 +44,14 @@ describe('setMemoryEnabledCommand', () => {
       setMemoryEnabledCommand(auth(true), { enabled: false }),
     ).resolves.toEqual({ enabled: false });
     expect(mockSetBrainEnabled).toHaveBeenLastCalledWith(false);
+  });
+
+  it('kicks the initial backfill on enable, not on disable', async () => {
+    await setMemoryEnabledCommand(auth(true), { enabled: true });
+    expect(mockRequestBrainBackfill).toHaveBeenCalledWith('memory-enabled');
+
+    mockRequestBrainBackfill.mockClear();
+    await setMemoryEnabledCommand(auth(true), { enabled: false });
+    expect(mockRequestBrainBackfill).not.toHaveBeenCalled();
   });
 });

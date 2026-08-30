@@ -127,6 +127,15 @@ const state = vi.hoisted(() => ({
         ciFailureTriageFrequency: 'off' as const,
         ciFailureTriageSlackChannelId: null,
         ciFailureTriageDiscordChannelId: null,
+        mergeAnnouncerFrequency: 'off' as 'off' | 'daily',
+        mergeAnnouncerTargetProvider: null as
+          | 'slack'
+          | 'discord'
+          | 'teams'
+          | 'telegram'
+          | null,
+        mergeAnnouncerTargetMode: null as 'channel' | 'direct_message' | null,
+        mergeAnnouncerTargetChannelId: null,
         suggesterFrequency: 'off' as const,
         suggesterSlackChannelId: null,
         suggesterDiscordChannelId: null,
@@ -971,6 +980,34 @@ describe('AutomationsSettings', () => {
 
   it('does not add task history to provider usage alerts', () => {
     expect(getAutomationHistoryHref('providerUsageLimit')).toBeNull();
+  });
+
+  it('shows Merge announcer as a webhook-driven automation without task history', async () => {
+    state.settingsQuery.data.settings.mergeAnnouncerFrequency = 'daily';
+    state.settingsQuery.data.settings.mergeAnnouncerTargetProvider = 'discord';
+    state.settingsQuery.data.settings.mergeAnnouncerTargetMode =
+      'direct_message';
+    state.settingsQuery.data.settings.mergeAnnouncerTargetChannelId = null;
+    state.settingsQuery.data.capabilities.discordConnected = true;
+    render(<AutomationsSettings />);
+
+    expect(await screen.findByText('Merge announcer')).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        'Summarize commits pushed to each active repository’s default branch and announce who pushed them.',
+      ),
+    ).toBeInTheDocument();
+    expect(getAutomationHistoryHref('mergeAnnouncer')).toBeNull();
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Configure Merge announcer' }),
+    );
+    expect(
+      screen.getByRole('combobox', { name: 'Destination provider' }),
+    ).toHaveTextContent('Discord');
+    expect(
+      screen.getByRole('combobox', { name: 'Discord destination type' }),
+    ).toHaveTextContent('DM me');
   });
 
   it('filters available automations by category and provider-aware search', async () => {

@@ -1,9 +1,18 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { ACP_ENVELOPE_EVENT_TYPES } from '@roomote/types';
 
 const transcriptVisibilityState = vi.hoisted(() => ({
   enabled: false,
+}));
+const reviewActionMutate = vi.hoisted(() => vi.fn());
+
+vi.mock('@/trpc/client', () => ({
+  useTRPCClient: () => ({
+    sandboxSession: {
+      handlePrReviewNotificationAction: { mutate: reviewActionMutate },
+    },
+  }),
 }));
 
 vi.mock('@/components/ai-elements', () => ({
@@ -118,6 +127,52 @@ import { AcpTextMessage } from '../AcpTextMessage';
 describe('AcpTextMessage', () => {
   beforeEach(() => {
     transcriptVisibilityState.enabled = false;
+    reviewActionMutate.mockReset();
+  });
+
+  const reviewOfferMessage = (status = 'pending') => ({
+    id: 'review-offer-1',
+    ts: 123,
+    role: 'assistant' as const,
+    kind: 'text' as const,
+    partial: false,
+    sessionId: 'session-1',
+    updateType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+    text: 'Review feedback remains.',
+    data: {
+      prReviewAction: {
+        deliveryId: '11111111-1111-4111-8111-111111111111',
+        question: 'Would you like me to resolve these issues?',
+        status,
+      },
+    },
+  });
+
+  it('renders and dispatches a canonical review action offer', async () => {
+    reviewActionMutate.mockResolvedValue({ status: 'resolved' });
+    render(<AcpTextMessage msg={reviewOfferMessage()} />);
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Resolve these issues' }),
+    );
+    await waitFor(() =>
+      expect(reviewActionMutate).toHaveBeenCalledWith({
+        deliveryId: '11111111-1111-4111-8111-111111111111',
+        choice: 'yes',
+      }),
+    );
+    expect(
+      await screen.findByText('Resolving the current review issues.'),
+    ).toBeVisible();
+  });
+
+  it('renders a persisted retired offer without controls', () => {
+    render(<AcpTextMessage msg={reviewOfferMessage('dismissed')} />);
+
+    expect(screen.getByText('Review action dismissed.')).toBeVisible();
+    expect(
+      screen.queryByRole('button', { name: 'Resolve these issues' }),
+    ).not.toBeInTheDocument();
   });
 
   it('shows copy and new task actions for assistant completion text', () => {

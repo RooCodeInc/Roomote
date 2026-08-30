@@ -33,12 +33,16 @@ import {
 
 import {
   getFastSessionTasksCommand,
+  handleFastSessionPrReviewActionCommand,
   replyToFastSessionCommand,
   startFastSessionCommand,
+  updateFastSessionModelSelectionCommand,
 } from '../commands/fast-sessions';
 import {
   replyToFastSessionInputSchema,
+  fastSessionPrReviewActionInputSchema,
   startFastSessionInputSchema,
+  updateFastSessionModelSelectionInputSchema,
 } from '../commands/fast-sessions/input';
 import {
   getSessionByIdCommand,
@@ -217,6 +221,8 @@ import {
   answerSandboxUserInputRequestCommand,
   answerSandboxUserInputRequestInputSchema,
   getSandboxSessionByTaskIdCommand,
+  handlePrReviewNotificationActionCommand,
+  handlePrReviewNotificationActionInputSchema,
   saveDraftPromptCommand,
   sendSandboxPromptCommand,
   sendSandboxPromptInputSchema,
@@ -369,6 +375,7 @@ import {
   triggerAutomationCommand,
   updateCustomAutomationCommand,
 } from '../commands/automations';
+import { mergeAnnouncerDestinationInputShape } from '../commands/automations/settings-schema';
 import {
   getAgentBehaviorSettingsCommand,
   updateAgentBehaviorSettingsCommand,
@@ -696,6 +703,7 @@ const automationsRouter = createRouter({
           .nullable()
           .optional(),
         ...SCHEDULE_ONLY_FREQUENCY_FIELD_SHAPE,
+        ...mergeAnnouncerDestinationInputShape,
         issueFixerInstructions: z.string().max(8_000).nullable().optional(),
         suggesterFrequency: z.enum(['off', 'daily', 'weekly']),
         suggesterSlackChannel: z.string().trim().min(1).max(160).nullable(),
@@ -2114,6 +2122,12 @@ export const appRouter = createRouter({
         answerSandboxUserInputRequestCommand(auth, input),
       ),
 
+    handlePrReviewNotificationAction: protectedProcedure
+      .input(handlePrReviewNotificationActionInputSchema)
+      .mutation(({ ctx: { auth }, input }) =>
+        handlePrReviewNotificationActionCommand(auth, input),
+      ),
+
     takeOverBrowserControl: protectedProcedure
       .input(
         z.object({
@@ -2814,6 +2828,16 @@ export const appRouter = createRouter({
       .input(replyToFastSessionInputSchema)
       .mutation(({ ctx: { auth }, input }) =>
         replyToFastSessionCommand(auth, input),
+      ),
+    reviewAction: protectedProcedure
+      .input(fastSessionPrReviewActionInputSchema)
+      .mutation(({ ctx: { auth }, input }) =>
+        handleFastSessionPrReviewActionCommand(auth, input),
+      ),
+    updateModelSelection: protectedProcedure
+      .input(updateFastSessionModelSelectionInputSchema)
+      .mutation(({ ctx: { auth }, input }) =>
+        updateFastSessionModelSelectionCommand(auth, input),
       ),
     tasks: protectedProcedure
       .input(z.object({ sessionId: z.string().uuid() }))

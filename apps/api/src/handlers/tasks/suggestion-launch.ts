@@ -57,11 +57,11 @@ type SuggestedTaskLaunchResult =
     };
 
 export function resolveSuggestedTaskLaunchMode(input: {
-  usesRouterLaunch: boolean;
+  fastEligible: boolean;
   userDefaultEnabled: boolean;
   fastAvailable: boolean;
 }): SuggestedTaskLaunchMode {
-  if (!input.usesRouterLaunch) {
+  if (!input.fastEligible) {
     return 'coding';
   }
 
@@ -77,7 +77,7 @@ export function resolveSuggestedTaskLaunchMode(input: {
 export async function launchClaimedSuggestedTask(input: {
   suggestion: { id: string; launchClaimedAt: Date };
   policy: {
-    usesRouterLaunch: boolean;
+    fastEligible: boolean;
     userDefaultEnabled: boolean;
     fastAvailable: boolean;
   };

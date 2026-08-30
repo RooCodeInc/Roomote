@@ -126,6 +126,36 @@ describe('shouldRouteUnmentionedDiscordThreadReplyToAgent', () => {
     ).resolves.toBe(true);
   });
 
+  it('keeps a reply silent when the previous participant addressed the sender in an open fast-agent thread', async () => {
+    fetchThreadMessagesMock.mockResolvedValue([
+      humanHistory(THREAD_ROOT_ID, USER_1, 'Can you summarize this?'),
+      botHistory('200', 'Hi there.'),
+      humanHistory('300', USER_1, `<@${USER_2}> what do you think?`),
+    ]);
+
+    await expect(
+      routeDecision(threadReplyMessage({ user: USER_2, content: 'I agree' }), {
+        mappedUserId: 'roomote-user-2',
+        ownedThreadUserId: 'roomote-user-1',
+        isOpenConversationThread: true,
+      }),
+    ).resolves.toBe(false);
+  });
+
+  it('keeps routing after the sender mentions themself in an open fast-agent thread', async () => {
+    fetchThreadMessagesMock.mockResolvedValue([
+      humanHistory(THREAD_ROOT_ID, USER_1, 'Can you summarize this?'),
+      botHistory('200', 'Hi there.'),
+      humanHistory('300', USER_1, `<@${USER_1}> note to self`),
+    ]);
+
+    await expect(
+      routeDecision(threadReplyMessage({ user: USER_1 }), {
+        isOpenConversationThread: true,
+      }),
+    ).resolves.toBe(true);
+  });
+
   it('keeps routing consecutive replies from the same sender before the bot answers', async () => {
     fetchThreadMessagesMock.mockResolvedValue([
       humanHistory(

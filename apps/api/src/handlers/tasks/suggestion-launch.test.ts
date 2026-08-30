@@ -40,10 +40,10 @@ beforeEach(() => {
 });
 
 describe('resolveSuggestedTaskLaunchMode', () => {
-  it('selects Fast for a router-backed suggestion when Fast is the default', () => {
+  it('selects Fast for an eligible suggestion when Fast is the default', () => {
     expect(
       resolveSuggestedTaskLaunchMode({
-        usesRouterLaunch: true,
+        fastEligible: true,
         userDefaultEnabled: true,
         fastAvailable: true,
       }),
@@ -53,17 +53,17 @@ describe('resolveSuggestedTaskLaunchMode', () => {
   it('falls back to coding when Fast is unavailable', () => {
     expect(
       resolveSuggestedTaskLaunchMode({
-        usesRouterLaunch: true,
+        fastEligible: true,
         userDefaultEnabled: true,
         fastAvailable: false,
       }),
     ).toBe('coding');
   });
 
-  it('keeps pinned suggestions on coding', () => {
+  it('keeps Fast-ineligible suggestions on coding', () => {
     expect(
       resolveSuggestedTaskLaunchMode({
-        usesRouterLaunch: false,
+        fastEligible: false,
         userDefaultEnabled: true,
         fastAvailable: true,
       }),
@@ -77,7 +77,7 @@ describe('launchClaimedSuggestedTask', () => {
       launchClaimedSuggestedTask({
         suggestion,
         policy: {
-          usesRouterLaunch: true,
+          fastEligible: true,
           userDefaultEnabled: false,
           fastAvailable: true,
         },
@@ -105,7 +105,7 @@ describe('launchClaimedSuggestedTask', () => {
       launchClaimedSuggestedTask({
         suggestion,
         policy: {
-          usesRouterLaunch: true,
+          fastEligible: true,
           userDefaultEnabled: true,
           fastAvailable: true,
         },
@@ -129,7 +129,7 @@ describe('launchClaimedSuggestedTask', () => {
       launchClaimedSuggestedTask({
         suggestion,
         policy: {
-          usesRouterLaunch: true,
+          fastEligible: true,
           userDefaultEnabled: true,
           fastAvailable: true,
         },
@@ -148,7 +148,7 @@ describe('launchClaimedSuggestedTask', () => {
       launchClaimedSuggestedTask({
         suggestion,
         policy: {
-          usesRouterLaunch: true,
+          fastEligible: true,
           userDefaultEnabled: false,
           fastAvailable: true,
         },
@@ -175,7 +175,7 @@ describe('launchClaimedSuggestedTask', () => {
       launchClaimedSuggestedTask({
         suggestion,
         policy: {
-          usesRouterLaunch: true,
+          fastEligible: true,
           userDefaultEnabled: false,
           fastAvailable: true,
         },
@@ -206,7 +206,7 @@ describe('launchClaimedSuggestedTask', () => {
       launchClaimedSuggestedTask({
         suggestion,
         policy: {
-          usesRouterLaunch: true,
+          fastEligible: true,
           userDefaultEnabled: true,
           fastAvailable: true,
         },

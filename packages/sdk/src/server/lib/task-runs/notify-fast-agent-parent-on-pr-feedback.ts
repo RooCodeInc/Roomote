@@ -99,6 +99,7 @@ export async function notifyFastAgentParentOnPrFeedback(params: {
   suggestedActionQuestion?: string;
   suggestedActionPrompt?: string;
   canonicalDeliveryOwned?: boolean;
+  reviewActionDeliveryId?: string;
   reviewResult?: {
     reviewKind: 'initial' | 'sync' | null;
     outcome: string | null;
@@ -183,6 +184,9 @@ export async function notifyFastAgentParentOnPrFeedback(params: {
             : {}),
           ...(params.suggestedActionPrompt
             ? { suggestedActionPrompt: params.suggestedActionPrompt }
+            : {}),
+          ...(params.reviewActionDeliveryId
+            ? { reviewActionDeliveryId: params.reviewActionDeliveryId }
             : {}),
         },
         lockWaitMs: PR_FEEDBACK_DELIVERY_LOCK_WAIT_MS,

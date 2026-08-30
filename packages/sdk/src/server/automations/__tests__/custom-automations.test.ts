@@ -4,6 +4,7 @@ const fastMocks = vi.hoisted(() => ({
   getSession: vi.fn(),
   deliverParentEvent: vi.fn(),
   slackPostMessage: vi.fn(),
+  slackUpdateMessage: vi.fn(),
   createDiscordProvider: vi.fn(),
   discordPostMessage: vi.fn(),
   createDiscordThread: vi.fn(),
@@ -33,6 +34,7 @@ vi.mock('@roomote/slack', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@roomote/slack')>()),
   SlackNotifier: class SlackNotifier {
     postMessage = fastMocks.slackPostMessage;
+    updateMessage = fastMocks.slackUpdateMessage;
   },
 }));
 
@@ -204,6 +206,7 @@ describe('customAutomationsJob', () => {
     });
     fastMocks.deliverParentEvent.mockResolvedValue('delivered');
     fastMocks.slackPostMessage.mockResolvedValue('100.001');
+    fastMocks.slackUpdateMessage.mockResolvedValue(true);
     fastMocks.discordPostMessage.mockResolvedValue({
       provider: 'discord',
       channelId: 'discord-dm-1',
@@ -318,6 +321,29 @@ describe('customAutomationsJob', () => {
         ],
       }),
     );
+    expect(fastMocks.slackUpdateMessage).toHaveBeenCalledWith({
+      channel: 'C123',
+      ts: '100.001',
+      message: expect.objectContaining({
+        blocks: expect.arrayContaining([
+          expect.objectContaining({
+            type: 'actions',
+            elements: [
+              expect.objectContaining({
+                action_id: 'late_bound_automation_view_session',
+                text: expect.objectContaining({ text: 'Follow' }),
+                url: expect.stringContaining(
+                  '/sessions/33333333-3333-4333-8333-333333333333',
+                ),
+              }),
+              expect.objectContaining({
+                action_id: 'late_bound_automation_configure',
+              }),
+            ],
+          }),
+        ]),
+      }),
+    });
     expect(fastMocks.getSession).toHaveBeenCalledWith({
       userId: 'user-1',
       conversation: {

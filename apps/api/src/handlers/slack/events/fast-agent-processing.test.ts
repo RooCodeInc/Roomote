@@ -4,6 +4,7 @@ const mocks = vi.hoisted(() => ({
   releaseLock: vi.fn(),
   answerQuestion: vi.fn(),
   postThreadMessage: vi.fn(),
+  recordProviderMessage: vi.fn(),
 }));
 
 vi.mock('@roomote/redis', async (importOriginal) => {
@@ -52,6 +53,11 @@ vi.mock('@roomote/cloud-agents', () => ({
   stripLeadingSlackProductMention: (text: string) => text,
 }));
 
+vi.mock('@roomote/sdk/server', () => ({
+  recordFastAgentConversationMessageBestEffort: mocks.recordProviderMessage,
+  resolveUserMcpServerConfigs: vi.fn(async () => ({})),
+}));
+
 vi.mock('../helpers/thread-posting.js', () => ({
   postSlackThreadMarkdownMessage: mocks.postThreadMessage,
 }));
@@ -76,6 +82,7 @@ describe('processFastAgentMessage', () => {
       status: 'posted',
       messageId: '101.001',
     });
+    mocks.recordProviderMessage.mockResolvedValue(undefined);
     mocks.answerQuestion.mockImplementation(
       async ({
         adapter,
@@ -137,6 +144,16 @@ describe('processFastAgentMessage', () => {
     });
 
     expect(mocks.postThreadMessage).toHaveBeenCalledOnce();
+    expect(mocks.recordProviderMessage).toHaveBeenCalledWith({
+      sessionId: 'fast-session-1',
+      conversation: {
+        surface: 'slack',
+        workspaceId: 'T123',
+        conversationId: '100.001',
+        replyTarget: { channelId: 'D123', threadId: '100.001' },
+      },
+      messageId: '101.001',
+    });
     expect(slack.updateMessage).toHaveBeenCalledWith({
       channel: 'D123',
       ts: '101.001',
@@ -904,6 +921,114 @@ describe('processFastAgentMessage', () => {
     expect(mocks.hasSession).not.toHaveBeenCalled();
     expect(mocks.answerQuestion).toHaveBeenCalledWith(
       expect.objectContaining({ question: 'Good, tired' }),
+    );
+  });
+
+  it('allows silence for an unmentioned turn with another human participant', async () => {
+    const slack = {
+      addReaction: vi.fn().mockResolvedValue(true),
+      removeReaction: vi.fn().mockResolvedValue(true),
+      normalizeIncomingText: vi.fn(async (text: string) => text),
+      fetchThreadMessages: vi.fn(async () => [
+        { user: 'U111', username: 'Dan', text: '!fast hi', ts: '100.000' },
+        {
+          user: 'UBOT',
+          username: 'Roomote',
+          bot_id: 'B999',
+          text: 'Hi Dan.',
+          ts: '100.001',
+        },
+        { user: 'U222', username: 'Matt', text: 'Makes sense', ts: '100.002' },
+      ]),
+    };
+
+    await processFastAgentMessage({
+      event: {
+        type: 'message',
+        channel: 'C123',
+        user: 'U222',
+        text: 'Makes sense',
+        ts: '100.002',
+        thread_ts: '100.000',
+      } as never,
+      slack: slack as never,
+      userId: 'user-2',
+      teamId: 'T123',
+      continuation: true,
+      isExistingConversation: true,
+    });
+
+    expect(mocks.answerQuestion).toHaveBeenCalledWith(
+      expect.objectContaining({ allowSilentAmbientReply: true }),
+    );
+  });
+
+  it.each(['im', 'mpim'] as const)(
+    'requires a response in a Slack %s conversation',
+    async (channelType) => {
+      const slack = {
+        addReaction: vi.fn().mockResolvedValue(true),
+        removeReaction: vi.fn().mockResolvedValue(true),
+        normalizeIncomingText: vi.fn(async (text: string) => text),
+        fetchThreadMessages: vi.fn(async () => [
+          { user: 'U111', username: 'Dan', text: 'Earlier', ts: '100.000' },
+          { user: 'U222', username: 'Matt', text: 'Help', ts: '100.002' },
+        ]),
+      };
+
+      await processFastAgentMessage({
+        event: {
+          type: 'message',
+          channel: 'D123',
+          channel_type: channelType,
+          user: 'U222',
+          text: 'Help',
+          ts: '100.002',
+          thread_ts: '100.000',
+        } as never,
+        slack: slack as never,
+        userId: 'user-2',
+        teamId: 'T123',
+        continuation: true,
+        isExistingConversation: true,
+      });
+
+      expect(mocks.answerQuestion).toHaveBeenCalledWith(
+        expect.objectContaining({ allowSilentAmbientReply: false }),
+      );
+    },
+  );
+
+  it('requires a response for a directed turn with another human participant', async () => {
+    const slack = {
+      addReaction: vi.fn().mockResolvedValue(true),
+      removeReaction: vi.fn().mockResolvedValue(true),
+      normalizeIncomingText: vi.fn(async (text: string) => text),
+      fetchThreadMessages: vi.fn(async () => [
+        { user: 'U111', username: 'Dan', text: 'Earlier', ts: '100.000' },
+        { user: 'U222', username: 'Matt', text: '!fast help', ts: '100.002' },
+      ]),
+    };
+
+    await processFastAgentMessage({
+      event: {
+        type: 'message',
+        channel: 'C123',
+        user: 'U222',
+        text: '!fast help',
+        ts: '100.002',
+        thread_ts: '100.000',
+      } as never,
+      slack: slack as never,
+      userId: 'user-2',
+      teamId: 'T123',
+      continuation: true,
+      isExistingConversation: true,
+      directedAtRoomote: true,
+    });
+
+    expect(mocks.answerQuestion).toHaveBeenCalledWith(
+      expect.objectContaining({ allowSilentAmbientReply: false }),
     );
   });
 });

@@ -774,6 +774,8 @@ export async function answerFastAgentQuestion({
   platformEventHandling = 'default',
   platformEventVisibility = 'optional',
   platformEventKind = 'delegated_task',
+  allowSilentAmbientReply = false,
+  platformEventTranscriptPayload,
 }: {
   question: string;
   images?: string[];
@@ -797,6 +799,9 @@ export async function answerFastAgentQuestion({
   platformEventHandling?: FastAgentPlatformEventHandling;
   platformEventVisibility?: FastAgentPlatformEventVisibility;
   platformEventKind?: FastAgentPlatformEventKind;
+  /** True only for an unmentioned turn in a multi-human Fast conversation. */
+  allowSilentAmbientReply?: boolean;
+  platformEventTranscriptPayload?: Record<string, unknown>;
 }): Promise<string> {
   const turnId = buildFastAgentTurnId({
     currentMessageId,
@@ -809,6 +814,7 @@ export async function answerFastAgentQuestion({
     hasImages: images.length > 0,
     modelRole: FAST_AGENT_MODEL_ROLE,
     turnSource,
+    userId,
   });
   const platformEvent = turnSource === 'platform_event';
   const turnVisibleMessages: ModelMessage[] = [];
@@ -838,7 +844,9 @@ export async function answerFastAgentQuestion({
   const persistCanonicalMessage = async (
     message: Parameters<typeof upsertFastAgentMessage>[0]['message'],
     bestEffort = false,
-  ): Promise<void> => {
+  ): Promise<
+    Awaited<ReturnType<typeof upsertFastAgentMessage>> | undefined
+  > => {
     if (!canonicalConversationId) {
       if (bestEffort) return;
       throw new Error(
@@ -847,7 +855,7 @@ export async function answerFastAgentQuestion({
     }
 
     try {
-      await upsertFastAgentMessage({
+      return await upsertFastAgentMessage({
         sessionId: canonicalConversationId,
         message,
       });
@@ -897,6 +905,7 @@ export async function answerFastAgentQuestion({
         },
         payload: {
           purpose: reply.purpose,
+          ...(platformEventTranscriptPayload ?? {}),
           ...(reply.imageArtifactIds?.length
             ? { imageArtifactIds: reply.imageArtifactIds }
             : {}),
@@ -1017,6 +1026,7 @@ export async function answerFastAgentQuestion({
   const replaceInferenceRetryReply = async (
     reply: FastAgentReply,
     bestEffort = false,
+    onDelivered?: () => void,
   ): Promise<boolean> => {
     if (!inferenceRetryCanonicalEvent) {
       return false;
@@ -1043,6 +1053,7 @@ export async function answerFastAgentQuestion({
     let replacement: FastAgentReplyHandle | void;
     try {
       replacement = await adapter.replaceReply(inferenceRetryReply, reply);
+      onDelivered?.();
     } catch (error) {
       if (!bestEffort) {
         await persistAssistantReply({
@@ -1086,9 +1097,11 @@ export async function answerFastAgentQuestion({
   };
 
   try {
-    turnVisibleMessages.push(
-      buildUserTextMessage(normalizeThreadText(question)),
-    );
+    if (!platformEvent) {
+      turnVisibleMessages.push(
+        buildUserTextMessage(normalizeThreadText(question)),
+      );
+    }
     const [
       availableEnvironments,
       taskModelOptions,
@@ -1140,7 +1153,7 @@ export async function answerFastAgentQuestion({
     activeOpenCodeSessionId = session.openCodeSessionId;
     diagnostics.setCanonicalConversationId(session.id);
     const userEvent = allocateCanonicalEvent('user');
-    await persistCanonicalMessage(
+    const userMessageResult = await persistCanonicalMessage(
       {
         ...userEvent,
         turnId,
@@ -1165,6 +1178,9 @@ export async function answerFastAgentQuestion({
         source: conversation.surface,
       },
       true,
+    );
+    diagnostics.recordInitialHumanTurn(
+      platformEvent ? false : userMessageResult?.initialHumanTurn,
     );
     if (!platformEvent) {
       void refreshFastAgentSessionTitle({ sessionId: session.id, userId });
@@ -1221,6 +1237,7 @@ export async function answerFastAgentQuestion({
       platformEventVisibility,
       platformEventKind,
       retryTaskStartAvailable: Boolean(adapter.retryTaskStart),
+      allowSilentAmbientReply,
       releaseVersion,
     });
     const integrationCallSignatures = new Set<string>();
@@ -1253,9 +1270,12 @@ export async function answerFastAgentQuestion({
       mirrorImmediately = false,
       nativeMessage?: NonTaskOpenCodeCompletedMessage | null,
     ) => {
-      const replacedRetry = await replaceInferenceRetryReply(reply, true);
+      const replacedRetry = await replaceInferenceRetryReply(reply, true, () =>
+        diagnostics.recordVisibleReply(),
+      );
       if (!replacedRetry) {
         const posted = await adapter.postReply(reply);
+        diagnostics.recordVisibleReply();
         turnVisibleMessages.push(buildAssistantTextMessage(reply.message));
         await persistAssistantReply({
           reply,
@@ -1267,7 +1287,6 @@ export async function answerFastAgentQuestion({
       inferenceRetryReply = undefined;
       inferenceRetryMessageIndex = undefined;
       inferenceRetryCanonicalEvent = undefined;
-      diagnostics.recordVisibleReply();
       lastVisibleMessage = reply.message;
       visibleUpdatePosted = true;
       if (reply.purpose === 'closeout' || reply.purpose === 'clarification') {
@@ -1312,7 +1331,7 @@ export async function answerFastAgentQuestion({
           inferenceRetryNotice: true,
         });
       }
-      diagnostics.recordVisibleReply();
+      diagnostics.recordVisibleReply({ assistantResponse: false });
     };
     const reportProviderRetryEvent = async (
       event: NonTaskProviderRetryEvent,
@@ -1526,6 +1545,12 @@ export async function answerFastAgentQuestion({
             }
             if (
               platformEvent &&
+              // On chat surfaces every reply is a separate message and push
+              // notification, so automated events are held to one closeout.
+              // Web platform events render in a session transcript where
+              // extra replies are ordinary conversation; the prompt alone
+              // governs reply style there (e.g. the setup kickoff's intro).
+              conversation.surface !== 'web' &&
               args.purpose !== 'closeout' &&
               args.purpose !== 'clarification'
             ) {
@@ -1565,6 +1590,13 @@ export async function answerFastAgentQuestion({
 
           case FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReaction: {
             const args = chatReactionArgsSchema.parse(call.args);
+            if (platformEvent) {
+              return {
+                success: false,
+                error:
+                  'Emoji reactions are unavailable during platform events. Use send_chat_reply or ignore_event instead.',
+              };
+            }
             if (!adapter.postReaction) {
               return {
                 success: false,
@@ -1716,8 +1748,12 @@ export async function answerFastAgentQuestion({
               const destinationUrl = linkedSession
                 ? `${Env.R_APP_URL}/sessions/${linkedSession.id}?task=${task.taskId}`
                 : task.taskUrl;
+              // The delegated task's live Slack card owns the workspace
+              // startup status; the kickoff is a permanent thread message
+              // that nothing can update later, so it must not carry
+              // transient "preparing" copy.
               const message = [
-                `Preparing workspace…\n\n${args.kickoffMessage}`,
+                args.kickoffMessage,
                 destinationUrl &&
                 !task.taskLinkRendered &&
                 !args.kickoffMessage.includes(destinationUrl)
@@ -1876,13 +1912,14 @@ export async function answerFastAgentQuestion({
 
           case FAST_AGENT_NATIVE_TOOL_NAMES.ignoreEvent: {
             ignoreEventArgsSchema.parse(call.args);
-            if (!platformEvent) {
+            if (!platformEvent && !allowSilentAmbientReply) {
               return {
                 success: false,
-                error: 'Only a platform event can be ignored.',
+                error:
+                  'Only an optional platform event or eligible ambient human message may be ignored.',
               };
             }
-            if (platformEventVisibility === 'required') {
+            if (platformEvent && platformEventVisibility === 'required') {
               return {
                 success: false,
                 error: 'This platform event requires a user-visible closeout.',
@@ -2306,6 +2343,14 @@ export async function answerFastAgentQuestion({
           message:
             'I could not complete that request within the available turn.',
         });
+      } else if (platformEvent && platformEventVisibility === 'required') {
+        // A visibility-required platform event promises a closeout even when
+        // an intro ack or launch kickoff already posted a visible update
+        // (e.g. the setup kickoff ending on an empty terminal response).
+        await postReply({
+          purpose: 'closeout',
+          message: 'I will post updates here as this progresses.',
+        });
       }
     }
     await mirrorPendingMessages();
@@ -2354,8 +2399,13 @@ export async function answerFastAgentQuestion({
     if (!closed) {
       try {
         const reply = { purpose: 'closeout' as const, message };
-        if (!(await replaceInferenceRetryReply(reply, true))) {
+        if (
+          !(await replaceInferenceRetryReply(reply, true, () =>
+            diagnostics.recordVisibleReply(),
+          ))
+        ) {
           const posted = await adapter.postReply(reply);
+          diagnostics.recordVisibleReply();
           turnVisibleMessages.push(buildAssistantTextMessage(message));
           await persistAssistantReply({
             reply,
@@ -2368,7 +2418,6 @@ export async function answerFastAgentQuestion({
         inferenceRetryReply = undefined;
         inferenceRetryMessageIndex = undefined;
         inferenceRetryCanonicalEvent = undefined;
-        diagnostics.recordVisibleReply();
         lastVisibleMessage = message;
       } catch (postError) {
         console.error(

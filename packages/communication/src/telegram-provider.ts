@@ -130,6 +130,10 @@ export class TelegramCommunicationProvider implements CommunicationProviderAdapt
       message_id: number;
       message_thread_id?: number;
     } | null = null;
+    let lastTextResult: {
+      message_id: number;
+      message_thread_id?: number;
+    } | null = null;
 
     const replyMarkup = buildTelegramReplyMarkup(input.buttons);
     const lastSendIndex = chunks.length + images.length - 1;
@@ -147,6 +151,7 @@ export class TelegramCommunicationProvider implements CommunicationProviderAdapt
       });
 
       firstResult ??= result;
+      lastTextResult = result;
     }
 
     for (const [index, image] of images.entries()) {
@@ -172,6 +177,9 @@ export class TelegramCommunicationProvider implements CommunicationProviderAdapt
       provider: 'telegram',
       channelId: input.channelId,
       messageId: String(firstResult.message_id),
+      ...(lastTextResult
+        ? { lastTextMessageId: String(lastTextResult.message_id) }
+        : {}),
       ...(firstResult.message_thread_id !== undefined
         ? { threadId: String(firstResult.message_thread_id) }
         : input.threadId

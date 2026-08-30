@@ -38,7 +38,10 @@ The exact order depends on the setting. A few important cases:
   admin selection saved in Roomote wins over `DEFAULT_COMPUTE_PROVIDER` because
   local and Compose stacks often set a default automatically.
 - Local development has safe defaults for Postgres, Redis, MinIO, signing keys,
-  and local URLs. Production does not.
+  and local URLs. Dev login also stores an intentionally invalid inference
+  placeholder when no provider is configured, so setup can complete without a
+  secret; inference fails until you connect a real provider. Production does
+  not use this behavior.
 
 ## UI locking
 

@@ -923,6 +923,14 @@ roomoteMcpServer.registerTool(
         .describe(
           'The text content: the PR/MR description for create_or_update_pull_request, the comment text for issue/PR reply or create actions, the optional review body for submit_pull_request_review, or the required dismissal reason for dismiss_pull_request_review.',
         ),
+      prAttribution: z
+        .string()
+        .trim()
+        .min(1)
+        .optional()
+        .describe(
+          'Optional PR-body provenance choice for create_or_update_pull_request. Pass the name or source-control login of a participant recorded in the task conversation or the current acting user. Omit to retain current acting-user attribution. This does not change commit authorship or assignees.',
+        ),
       labels: z
         .array(z.string())
         .optional()
@@ -979,6 +987,7 @@ roomoteMcpServer.registerTool(
         targetBranch: params.targetBranch,
         title: params.title,
         body: params.body,
+        prAttribution: params.prAttribution,
         labels: params.labels,
         assignees: params.assignees,
         sourceControlProvider: params.sourceControlProvider,

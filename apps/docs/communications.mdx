@@ -58,6 +58,26 @@ also needs an environment that can run the suggestion's target repository.
 Configured **Call Roomote via emoji** automations are separate from these
 suggestion reactions.
 
+## React to Roomote replies
+
+When you react to a Roomote reply in an active Fast conversation, Roomote can
+use that reaction as context. The linked user who owns the Fast conversation
+must add the reaction. Roomote posts a text reply when the reaction warrants a
+response and otherwise stays silent; it does not react to the reaction event
+itself.
+
+| Provider | Fast reply reactions | Provider limits |
+| --- | --- | --- |
+| Slack | Supported | Slack sends standard and workspace custom `reaction_added` events. |
+| Discord | Supported | Discord Gateway sends standard and server custom reaction-add events, but the event does not include the reacted-to message text. |
+| Microsoft Teams | Supported | Bot Framework sends native `messageReaction` activities only for messages posted by Roomote. Reaction removals are ignored. |
+| Telegram | Supported | Roomote uses user-attributed `message_reaction` updates. Anonymous aggregate `message_reaction_count` updates are not supported because they do not identify the reacting user. |
+
+These reaction paths apply only to Roomote replies that were recorded for the
+current Fast conversation. Reactions on older or unrelated messages do not gain
+access to that conversation. Suggested-task reactions keep their dedicated
+launch behavior described above.
+
 Use the same stable public URL for every provider app setting that requires a
 callback or webhook. If you change that URL, update those provider settings and
 restart Roomote with the matching deployment URL. Discord receives messages

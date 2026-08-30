@@ -2,6 +2,18 @@
 
 This file tracks product releases for Roomote (single monorepo version). Automated release entries are prepended by `pnpm run version`.
 
+## 0.45.1 (2026-08-29)
+
+This patch restores complete Notion database discovery across Memory and the built-in Notion MCP.
+
+### Highlights
+
+- Find and ingest pages inside directly shared Notion databases even when Notion search omits them.
+
+### Patch changes
+
+- Discover pages inside directly shared Notion databases in Memory and let agents resolve the database through the Notion MCP even when Notion search omits its rows.
+
 ## 0.45.0 (2026-08-27)
 
 This release adds secure hosted trial inference and self-run Brain model options, expands GLM 5.3 support, and improves reliability across Fast sessions, pull-request reviews, Memory, and chat.

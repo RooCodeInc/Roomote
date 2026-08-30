@@ -387,6 +387,23 @@ describe('buildFastAgentSystemPrompt', () => {
     );
   });
 
+  it('permits silence only for eligible ambient human turns', () => {
+    const ambientPrompt = buildFastAgentSystemPrompt({
+      availableEnvironments: [],
+      allowSilentAmbientReply: true,
+    });
+    const directedPrompt = buildFastAgentSystemPrompt({
+      availableEnvironments: [],
+    });
+
+    expect(ambientPrompt).toContain(
+      'If it is ambient conversation between people rather than a request, reply, or answer directed at Roomote, call `ignore_event` and stop',
+    );
+    expect(directedPrompt).toContain(
+      '`ignore_event` and `retry_task_start` are invalid for this human-authored turn',
+    );
+  });
+
   it('uses native terminal tools for delegated-task platform events', () => {
     const prompt = buildFastAgentSystemPrompt({
       availableEnvironments: [],
@@ -449,6 +466,12 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain(
       'Do not describe a closed pull request as merged or a merged pull request as merely closed',
     );
+    expect(prompt).toContain(
+      'When `targetBranch` is absent from the pull request metadata, do not infer or name a destination branch',
+    );
+    expect(prompt).not.toContain(
+      'explicitly name it as the destination branch',
+    );
   });
 
   it('uses neutral guidance for a stored automation conversation', () => {
@@ -466,6 +489,32 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain("closeout's `suggestions` array");
     expect(prompt).toContain('do not promise reaction-triggered launching');
     expect(prompt).not.toContain('<slack_modern_markdown>');
+  });
+
+  it('allows optional external input to use the existing ignore-event path', () => {
+    const prompt = buildFastAgentSystemPrompt({
+      availableEnvironments: [],
+      surface: 'slack',
+      turnSource: 'platform_event',
+      platformEventKind: 'external_input',
+      platformEventVisibility: 'optional',
+    });
+
+    expect(prompt).toContain('External Platform Input');
+    expect(prompt).toContain(
+      'external interaction associated with this conversation',
+    );
+    expect(prompt).toContain(
+      'Call "ignore_event" only when the event is duplicate, lifecycle-only, machinery-only, or a routine log that adds nothing useful',
+    );
+    expect(prompt).not.toContain('Do not call "ignore_event"');
+    expect(prompt).toContain('Do not use the reaction tool');
+    expect(prompt).toContain(
+      'an inbound emoji-reaction event is not itself a reactable message surface',
+    );
+    expect(prompt).toContain(
+      'If the reaction warrants a response, post a text reply; otherwise stay silent according to the ignore rules above',
+    );
   });
 
   it('requires a visible closeout for visibility-required platform events', () => {

@@ -325,6 +325,7 @@ export async function manageSourceControl(
     targetBranch?: string;
     title: string;
     body: string;
+    prAttribution?: string;
     labels?: string[];
     assignees?: string[];
     sourceControlProvider?: SourceControlProvider;

@@ -583,7 +583,7 @@ export async function shouldRouteUnmentionedSlackThreadReplyToAgent(params: {
         mentionsSomebodyElse: mentionsSlackUserOtherThanBotOrUser(
           message,
           slackInstallation.botUserId,
-          event.user,
+          message.user,
         ),
       };
     },
@@ -1267,6 +1267,12 @@ async function maybeHandleChannelAutoStart(params: {
       userId: userMapping.userId,
       teamId: context.teamId,
       continuation: fastAgentEntryMode === 'default',
+      directedAtRoomote:
+        fastAgentEntryMode === 'explicit' ||
+        mentionsSlackBot(
+          channelAutoStartEvent,
+          context.slackInstallation.botUserId,
+        ),
       processingReactionName: ackEmoji,
       errorLogPrefix: `❌ Background fast-agent response failed for auto-start thread ${channelAutoStartEvent.ts}:`,
     });
@@ -1603,6 +1609,7 @@ export function startFastAgentResponse(params: {
   resolveActiveTasks?: () => Promise<{ taskId: string }[]>;
   processingReactionName: string;
   isExistingConversation?: boolean;
+  directedAtRoomote?: boolean;
   errorLogPrefix: string;
 }): Promise<FastAgentStartResult> {
   const { errorLogPrefix, ...fastAgentParams } = params;
@@ -1760,6 +1767,9 @@ async function handleSlackEntryEvent(params: {
           activeTaskId: activeRun?.taskId,
         }),
       continuation: fastAgentEntryMode === 'default',
+      directedAtRoomote:
+        fastAgentEntryMode === 'explicit' ||
+        mentionsSlackBot(event, slackInstallation.botUserId),
       processingReactionName: ackEmoji,
       errorLogPrefix: `❌ Background fast-agent response failed for thread ${threadId}:`,
     });

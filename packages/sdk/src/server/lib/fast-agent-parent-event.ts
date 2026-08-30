@@ -36,11 +36,14 @@ import {
   buildFastSessionReplyFooterText,
   deliverManagedThreadReplyFooter,
   getDiscordFooterlessFinalChunk,
+  resolveFastSessionReplyFooterContext,
+  type FastSessionReplyFooterContext,
 } from '@roomote/communication';
 import {
   ALL_REPOSITORIES,
   buildFastAgentChildTaskMetadata,
   buildPrReviewActionCallbackData,
+  PR_REVIEW_ACTION_LABELS,
   TaskPayloadKind,
   exitedRunStatuses,
   type FastAgentConversation,
@@ -112,6 +115,7 @@ export type FastAgentPullRequestContext = {
   number: number | null;
   title: string | null;
   url: string;
+  targetBranch?: string | null;
   status: PullRequestStatus | null;
 };
 
@@ -176,6 +180,7 @@ export type FastAgentParentEvent =
       summary: string;
       suggestedActionQuestion?: string;
       suggestedActionPrompt?: string;
+      reviewActionDeliveryId?: string;
       reviewResult?: {
         reviewKind: 'initial' | 'sync' | null;
         outcome: string | null;
@@ -339,6 +344,13 @@ type FastAgentParentTurn = {
   adapter: FastAgentTurnAdapter;
 };
 
+type FastAgentParentTurnParams = {
+  parent: FastAgentParent;
+  event: FastAgentParentEvent;
+  onReplyPosted: () => void;
+  footerContext: FastSessionReplyFooterContext;
+};
+
 function createFastAgentAutomationTaskLauncher(params: {
   userId: string;
   conversation: Extract<FastAgentConversation, { surface: 'automation' }>;
@@ -477,11 +489,9 @@ async function createWebFastAgentParentTurn(params: {
   };
 }
 
-async function createSlackFastAgentParentTurn(params: {
-  parent: FastAgentParent;
-  event: FastAgentParentEvent;
-  onReplyPosted: () => void;
-}): Promise<FastAgentParentTurn> {
+async function createSlackFastAgentParentTurn(
+  params: FastAgentParentTurnParams,
+): Promise<FastAgentParentTurn> {
   const fallbackConversation = params.parent.conversation;
   if (fallbackConversation.surface !== 'slack') {
     throw new Error('Expected a Slack Fast parent conversation.');
@@ -590,6 +600,7 @@ async function createSlackFastAgentParentTurn(params: {
               automationName: params.event.automationName,
               text: reportMessage,
               contentBlocks,
+              sessionId: params.parent.sessionId,
             }),
           });
           if (!updated) {
@@ -606,6 +617,12 @@ async function createSlackFastAgentParentTurn(params: {
               suggestions,
             });
           }
+          await recordFastAgentConversationMessageBestEffort({
+            sessionId: session.id,
+            conversation,
+            messageId:
+              params.event.rootMessageId ?? conversation.replyTarget.threadId,
+          });
           params.onReplyPosted();
           return;
         }
@@ -646,6 +663,7 @@ async function createSlackFastAgentParentTurn(params: {
           footerText: buildFastSessionReplyFooterText({
             provider: 'slack',
             sessionId: params.parent.sessionId,
+            ...params.footerContext,
           }),
           clientMsgId: buildSlackClientMessageId(
             buildEventClientMessageSeed(params.event),
@@ -656,6 +674,11 @@ async function createSlackFastAgentParentTurn(params: {
             'Slack did not return a Fast parent event timestamp.',
           );
         }
+        await recordFastAgentConversationMessageBestEffort({
+          sessionId: session.id,
+          conversation,
+          messageId: messageTs,
+        });
         if (action) {
           const { superseded } =
             await attachPendingPrReviewActionMessageWithRetirement(
@@ -827,11 +850,9 @@ async function postDiscordFastParentMessageWithFooter(params: {
   });
 }
 
-async function createDiscordFastAgentParentTurn(params: {
-  parent: FastAgentParent;
-  event: FastAgentParentEvent;
-  onReplyPosted: () => void;
-}): Promise<FastAgentParentTurn> {
+async function createDiscordFastAgentParentTurn(
+  params: FastAgentParentTurnParams,
+): Promise<FastAgentParentTurn> {
   const fallbackConversation = params.parent.conversation;
   if (fallbackConversation.surface !== 'discord') {
     throw new Error('Expected a Discord Fast parent conversation.');
@@ -956,6 +977,7 @@ async function createDiscordFastAgentParentTurn(params: {
         const footerText = buildFastSessionReplyFooterText({
           provider: 'discord',
           sessionId: params.parent.sessionId,
+          ...params.footerContext,
         });
         const bodyText = action ? `${message}\n${action.question}` : message;
         const textWithFooter = `${bodyText}\n\n${footerText}`;
@@ -977,21 +999,21 @@ async function createDiscordFastAgentParentTurn(params: {
                     buttons: [
                       [
                         {
-                          text: 'Resolve these issues',
+                          text: PR_REVIEW_ACTION_LABELS.yes,
                           callbackData: buildPrReviewActionCallbackData(
                             'yes',
                             action.nonce,
                           ),
                         },
                         {
-                          text: 'Auto-resolve on this PR',
+                          text: PR_REVIEW_ACTION_LABELS.auto,
                           callbackData: buildPrReviewActionCallbackData(
                             'auto',
                             action.nonce,
                           ),
                         },
                         {
-                          text: 'Dismiss',
+                          text: PR_REVIEW_ACTION_LABELS.dismiss,
                           callbackData: buildPrReviewActionCallbackData(
                             'dismiss',
                             action.nonce,
@@ -1024,11 +1046,9 @@ async function createDiscordFastAgentParentTurn(params: {
   };
 }
 
-async function createTeamsFastAgentParentTurn(params: {
-  parent: FastAgentParent;
-  event: FastAgentParentEvent;
-  onReplyPosted: () => void;
-}): Promise<FastAgentParentTurn> {
+async function createTeamsFastAgentParentTurn(
+  params: FastAgentParentTurnParams,
+): Promise<FastAgentParentTurn> {
   const fallbackConversation = params.parent.conversation;
   if (fallbackConversation.surface !== 'teams') {
     throw new Error('Expected a Teams Fast parent conversation.');
@@ -1088,7 +1108,7 @@ async function createTeamsFastAgentParentTurn(params: {
                 suggestions.length > 0,
               )
             : message;
-        const text = `${reportMessage}\n\n${buildFastSessionReplyFooterText({ provider: 'teams', sessionId: params.parent.sessionId })}`;
+        const text = `${reportMessage}\n\n${buildFastSessionReplyFooterText({ provider: 'teams', sessionId: params.parent.sessionId, ...params.footerContext })}`;
         if (
           params.event.type === 'automation_triggered' &&
           params.event.rootMessageId &&
@@ -1165,11 +1185,9 @@ async function createTeamsFastAgentParentTurn(params: {
   };
 }
 
-async function createTelegramFastAgentParentTurn(params: {
-  parent: FastAgentParent;
-  event: FastAgentParentEvent;
-  onReplyPosted: () => void;
-}): Promise<FastAgentParentTurn> {
+async function createTelegramFastAgentParentTurn(
+  params: FastAgentParentTurnParams,
+): Promise<FastAgentParentTurn> {
   const fallbackConversation = params.parent.conversation;
   if (fallbackConversation.surface !== 'telegram') {
     throw new Error('Expected a Telegram Fast parent conversation.');
@@ -1219,9 +1237,14 @@ async function createTelegramFastAgentParentTurn(params: {
           ...(conversation.replyTarget.threadId
             ? { threadId: conversation.replyTarget.threadId }
             : {}),
-          text: `${reportMessage}\n\n${buildFastSessionReplyFooterText({ provider: 'telegram', sessionId: params.parent.sessionId })}`,
+          text: `${reportMessage}\n\n${buildFastSessionReplyFooterText({ provider: 'telegram', sessionId: params.parent.sessionId, ...params.footerContext })}`,
           textFormat: 'markdown',
           images,
+        });
+        await recordFastAgentConversationMessageBestEffort({
+          sessionId: session.id,
+          conversation,
+          messageId: posted.lastTextMessageId ?? posted.messageId,
         });
         if (
           params.event.type === 'automation_triggered' &&
@@ -1251,19 +1274,37 @@ async function createFastAgentParentTurn(params: {
   event: FastAgentParentEvent;
   onReplyPosted: () => void;
 }): Promise<FastAgentParentTurn> {
+  if (params.parent.conversation.surface === 'automation') {
+    return createAutomationFastAgentParentTurn(params);
+  }
+  if (params.parent.conversation.surface === 'web') {
+    return createWebFastAgentParentTurn(params);
+  }
+
+  const pullRequest =
+    params.event.type === 'pull_request_opened' ||
+    params.event.type === 'pull_request_feedback' ||
+    params.event.type === 'pull_request_conflict_detected'
+      ? params.event.pullRequest
+      : null;
+  const pullRequests =
+    params.event.type === 'task_settled' ? params.event.pullRequests : [];
+  const footerContext = await resolveFastSessionReplyFooterContext({
+    taskIds: 'taskId' in params.event ? [params.event.taskId] : [],
+    pullRequest,
+    pullRequests,
+  });
+  const turnParams = { ...params, footerContext };
+
   switch (params.parent.conversation.surface) {
     case 'slack':
-      return createSlackFastAgentParentTurn(params);
+      return createSlackFastAgentParentTurn(turnParams);
     case 'discord':
-      return createDiscordFastAgentParentTurn(params);
+      return createDiscordFastAgentParentTurn(turnParams);
     case 'teams':
-      return createTeamsFastAgentParentTurn(params);
+      return createTeamsFastAgentParentTurn(turnParams);
     case 'telegram':
-      return createTelegramFastAgentParentTurn(params);
-    case 'automation':
-      return createAutomationFastAgentParentTurn(params);
-    case 'web':
-      return createWebFastAgentParentTurn(params);
+      return createTelegramFastAgentParentTurn(turnParams);
   }
 }
 
@@ -1277,6 +1318,9 @@ export async function deliverFastAgentParentEvent(params: {
   /** Cap the turn-lock wait so callers holding an HTTP request can fail fast
    * and lean on their own retry instead of blocking. */
   lockWaitMs?: number;
+  /** Bound synchronous callers independently from Fast provider recovery so
+   * an abandoned HTTP request cannot keep renewing the conversation lock. */
+  turnTimeoutMs?: number;
 }): Promise<'delivered' | 'skipped'> {
   const conversation = params.parent.conversation;
   const releaseTurnLock = await acquireFastAgentTurnLock({
@@ -1293,6 +1337,21 @@ export async function deliverFastAgentParentEvent(params: {
   }
 
   let replyPosted = false;
+  const turnAbortController = new AbortController();
+  const turnTimeout =
+    params.turnTimeoutMs === undefined
+      ? undefined
+      : setTimeout(() => {
+          turnAbortController.abort(
+            new Error(
+              `Fast parent event delivery timed out after ${params.turnTimeoutMs}ms.`,
+            ),
+          );
+        }, params.turnTimeoutMs);
+  turnTimeout?.unref();
+  const turnSignal = turnTimeout
+    ? AbortSignal.any([releaseTurnLock.signal, turnAbortController.signal])
+    : releaseTurnLock.signal;
 
   try {
     if (params.event.type === 'pull_request_opened') {
@@ -1334,7 +1393,7 @@ export async function deliverFastAgentParentEvent(params: {
       conversation: parentTurn.conversation,
       currentMessageId: buildEventClientMessageSeed(params.event),
       apiBaseUrl,
-      signal: releaseTurnLock.signal,
+      signal: turnSignal,
       turnSource: 'platform_event',
       platformEventHandling:
         params.event.type === 'pull_request_feedback' ||
@@ -1351,6 +1410,19 @@ export async function deliverFastAgentParentEvent(params: {
         params.event.type === 'automation_triggered'
           ? 'automation'
           : 'delegated_task',
+      ...(params.event.type === 'pull_request_feedback' &&
+      params.event.reviewActionDeliveryId &&
+      params.event.suggestedActionQuestion
+        ? {
+            platformEventTranscriptPayload: {
+              prReviewAction: {
+                deliveryId: params.event.reviewActionDeliveryId,
+                question: params.event.suggestedActionQuestion,
+                status: 'pending',
+              },
+            },
+          }
+        : {}),
       adapter: {
         ...parentTurn.adapter,
         launchTask,
@@ -1375,6 +1447,7 @@ export async function deliverFastAgentParentEvent(params: {
       { cause: error, replyPosted },
     );
   } finally {
+    if (turnTimeout) clearTimeout(turnTimeout);
     await releaseTurnLock();
   }
 }

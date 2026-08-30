@@ -21,6 +21,7 @@ import {
   deliverManagedThreadReplyFooter,
   getDiscordFooterlessFinalChunk,
   getThreadReplyFooterRecord,
+  resolveFastSessionReplyFooterContext,
   setThreadReplyFooterRecord,
   withThreadReplyFooterLock,
 } from '@roomote/communication';
@@ -97,6 +98,7 @@ export async function processDiscordFastAgentMessage(
     anchorMessageId?: string;
     interaction?: DiscordInteractionReplyContext;
     activeTasks?: { taskId: string }[];
+    directedAtRoomote?: boolean;
     onAccepted?: (abort: () => Promise<void>) => void;
     onRejected?: () => void;
   } & DiscordFastAgentSource,
@@ -174,6 +176,9 @@ export async function processDiscordFastAgentMessage(
       userId: input.senderUserId,
       conversation,
     });
+    const footerContext = await resolveFastSessionReplyFooterContext({
+      taskIds: (input.activeTasks ?? []).map((task) => task.taskId),
+    });
     input.onAccepted?.(() =>
       releaseFastAgentLock.abort(
         new Error('Fast suggestion launch settlement failed.'),
@@ -183,6 +188,7 @@ export async function processDiscordFastAgentMessage(
       const footerText = buildFastSessionReplyFooterText({
         provider: 'discord',
         sessionId: session.id,
+        ...footerContext,
       });
       const textWithFooter = `${text}\n\n${footerText}`;
       const channelId = conversation.replyTarget.channelId;
@@ -250,6 +256,14 @@ export async function processDiscordFastAgentMessage(
         input.sender.global_name ??
         input.sender.username,
       activeTasks: input.activeTasks,
+      allowSilentAmbientReply:
+        !input.directedAtRoomote &&
+        history.some(
+          (entry) =>
+            !entry.botId &&
+            Boolean(entry.user) &&
+            entry.user !== input.sender.id,
+        ),
       adapter: {
         resolveMcpServerConfigs: () =>
           resolveUserMcpServerConfigs({
@@ -345,6 +359,7 @@ export async function processDiscordFastAgentMessage(
           const footerText = buildFastSessionReplyFooterText({
             provider: 'discord',
             sessionId: session.id,
+            ...footerContext,
           });
           const footerChannelId = conversation.replyTarget.channelId;
           const footerStateThreadId =

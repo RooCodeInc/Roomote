@@ -262,6 +262,7 @@ export async function handleAdoPullRequest(
           pullRequest,
           repositoryFullName: repoFullName,
         }),
+        targetBranch: stripAdoGitRefPrefix(pullRequest.targetRefName),
         status: 'closed',
         actorLogin:
           getAdoIdentityName(payload.resource.closedBy) ??
@@ -308,6 +309,7 @@ export async function handleAdoPullRequest(
           pullRequest,
           repositoryFullName: repoFullName,
         }),
+        targetBranch: stripAdoGitRefPrefix(pullRequest.targetRefName),
         status: 'merged',
         actorLogin:
           getAdoIdentityName(payload.resource.closedBy) ??

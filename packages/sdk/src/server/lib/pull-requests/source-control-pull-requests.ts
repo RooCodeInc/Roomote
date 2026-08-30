@@ -11,16 +11,20 @@ import {
   resolveConfiguredGitHubAppSlugIfConfigured,
 } from '@roomote/github';
 import {
+  and,
   db,
   eq,
   getDeploymentGitHubRoomoteMentionEnabled,
   getSessionForTask,
+  isNotNull,
   resolveTelegramRuntimeCredentials,
+  taskMessages,
   tasks,
   taskRuns,
   getDeploymentPrAction,
   projectPendingPrReviewEventsForAssociation,
   taskPullRequests,
+  users,
   type TaskRun,
 } from '@roomote/db/server';
 import {
@@ -95,6 +99,7 @@ export const sourceControlPullRequestMutationInputSchema = z.object({
   targetBranch: z.string().trim().min(1).optional(),
   title: z.string().trim().min(1),
   body: z.string(),
+  prAttribution: z.string().trim().min(1).optional(),
   labels: z.array(z.string().trim().min(1)).default([]),
   assignees: z.array(z.string().trim().min(1)).default([]),
   sourceControlProvider: sourceControlProviderSchema.optional(),
@@ -194,6 +199,101 @@ type GitHubPullRequestResult = {
   assignees?: Array<{ login?: string | null }> | null;
 };
 
+function normalizeAttributionSelector(value: string): string {
+  return value.trim().replace(/^@/, '').toLowerCase();
+}
+
+async function resolveExplicitPrAttribution({
+  selector,
+  taskRun,
+  provider,
+  host,
+  liveAttribution,
+}: {
+  selector: string;
+  taskRun: TaskRun;
+  provider: SourceControlProvider;
+  host?: string;
+  liveAttribution: ResolvedTaskCommitAuthor;
+}): Promise<ResolvedTaskCommitAuthor> {
+  const messageParticipants = await db
+    .selectDistinct({ userId: users.id, name: users.name })
+    .from(taskMessages)
+    .innerJoin(users, eq(users.id, taskMessages.userId))
+    .where(
+      and(
+        eq(taskMessages.taskId, taskRun.taskId),
+        eq(taskMessages.role, 'user'),
+        isNotNull(taskMessages.userId),
+      ),
+    );
+  const participants = new Map(
+    messageParticipants.map((participant) => [
+      participant.userId,
+      participant.name,
+    ]),
+  );
+  if (taskRun.actingUserId && !participants.has(taskRun.actingUserId)) {
+    participants.set(taskRun.actingUserId, liveAttribution.displayName);
+  }
+
+  const candidates = await Promise.all(
+    [...participants].map(async ([userId, name]) => ({
+      userId,
+      name,
+      attribution:
+        userId === taskRun.actingUserId
+          ? liveAttribution
+          : await resolveRunCommitAuthor(
+              db,
+              { taskId: taskRun.taskId, actingUserId: userId },
+              { provider, host },
+            ),
+    })),
+  );
+  const normalizedSelector = normalizeAttributionSelector(selector);
+  const loginMatches = candidates.filter(({ attribution }) =>
+    [attribution.publicDisplayName, attribution.githubLogin]
+      .filter((value): value is string => Boolean(value))
+      .some(
+        (value) => normalizeAttributionSelector(value) === normalizedSelector,
+      ),
+  );
+  if (loginMatches.length === 1) {
+    return loginMatches[0]!.attribution;
+  }
+
+  const nameMatches = candidates.filter(({ name, attribution }) =>
+    [name, attribution.displayName]
+      .filter((value): value is string => Boolean(value))
+      .some(
+        (value) => normalizeAttributionSelector(value) === normalizedSelector,
+      ),
+  );
+  if (nameMatches.length === 1) {
+    return nameMatches[0]!.attribution;
+  }
+
+  const choices = [
+    ...new Set(
+      candidates
+        .map(
+          ({ name, attribution }) =>
+            attribution.publicDisplayName ?? attribution.githubLogin ?? name,
+        )
+        .filter((value): value is string => Boolean(value)),
+    ),
+  ];
+  const reason =
+    nameMatches.length > 1 || loginMatches.length > 1
+      ? `PR attribution participant "${selector}" is ambiguous.`
+      : `PR attribution participant "${selector}" is not eligible for this task.`;
+  throw new SourceControlMutationError(
+    400,
+    `${reason}${choices.length > 0 ? ` Choose one of: ${choices.join(', ')}.` : ''}`,
+  );
+}
+
 export async function createOrUpdateSourceControlPullRequestForTaskRun({
   taskRun,
   input,
@@ -240,16 +340,10 @@ export async function createOrUpdateSourceControlPullRequestForTaskRun({
     resolveConfiguredGitHubAppSlugIfConfigured(),
     getDeploymentGitHubRoomoteMentionEnabled(),
   ]);
-  const attribution = await resolveRunCommitAuthor(db, taskRun, {
+  const liveAttribution = await resolveRunCommitAuthor(db, taskRun, {
     provider,
     host: repository.host ?? payloadHost,
   });
-  const displayName =
-    attribution.kind === 'roomote'
-      ? null
-      : repository.private === true
-        ? attribution.displayName
-        : attribution.publicDisplayName;
   const task = await db.query.tasks.findFirst({
     where: eq(tasks.id, taskRun.taskId),
     columns: {
@@ -258,6 +352,22 @@ export async function createOrUpdateSourceControlPullRequestForTaskRun({
       slackThreadTs: true,
     },
   });
+  const bodyAttribution =
+    input.prAttribution === undefined
+      ? liveAttribution
+      : await resolveExplicitPrAttribution({
+          selector: input.prAttribution,
+          taskRun,
+          provider,
+          host: repository.host ?? payloadHost,
+          liveAttribution,
+        });
+  const displayName =
+    bodyAttribution.kind === 'roomote'
+      ? null
+      : repository.private === true
+        ? bodyAttribution.displayName
+        : bodyAttribution.publicDisplayName;
   const communicationProvider = getCommunicationProviderFromTaskPayload(
     taskRun.payload,
   );
@@ -276,7 +386,7 @@ export async function createOrUpdateSourceControlPullRequestForTaskRun({
       ? (await resolveTelegramRuntimeCredentials()).botUsername
       : null;
   const canonicalAttribution = displayName
-    ? { ...attribution, displayName }
+    ? { ...bodyAttribution, displayName }
     : DEFAULT_ROOMOTE_COMMIT_AUTHOR;
   const taskUrl =
     (await buildPrAttributionFastSessionUrl(taskRun)) ??
@@ -362,7 +472,10 @@ export async function createOrUpdateSourceControlPullRequestForTaskRun({
         : input.body,
     };
 
-  const liveGitHubAttribution = provider === 'github' ? attribution : undefined;
+  // PR attribution is provenance. Assignment continues to follow the live
+  // actor independently, and commit authorship is prepared before this call.
+  const liveGitHubAttribution =
+    provider === 'github' ? liveAttribution : undefined;
   const liveGitHubAssigneePlan = liveGitHubAttribution
     ? await resolveLiveGitHubAssigneePlan({
         taskRun,
@@ -618,7 +731,9 @@ async function createOrUpdateGitHubPullRequest({
       repo,
       pull_number: pullRequest.number,
       title: input.title,
-      body: preservePrBodyAttribution(input.body, pullRequest.body ?? ''),
+      body: input.prAttribution
+        ? input.body
+        : preservePrBodyAttribution(input.body, pullRequest.body ?? ''),
     });
     pullRequest = data;
   } else {

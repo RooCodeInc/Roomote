@@ -6,6 +6,22 @@ const mocks = vi.hoisted(() => ({
   telegramPostMessage: vi.fn(),
   telegramEditMessage: vi.fn(),
   findTeamsConversationRoute: vi.fn(),
+  slackPostThreadMessage: vi.fn(),
+  slackUpdateMessage: vi.fn(),
+}));
+
+vi.mock('@roomote/slack', () => ({
+  buildSlackThreadReplyFooterBlock: vi.fn(() => ({ type: 'context' })),
+  createFastAgentSlackLiveTaskLauncher: vi.fn(() => vi.fn()),
+  getSlackThreadReplyFooterMessageTs: vi.fn(async () => null),
+  postSlackThreadMessageWithFooterText: mocks.slackPostThreadMessage,
+  withSlackThreadReplyFooterLock: vi.fn(
+    async ({ fn }: { fn: () => Promise<unknown> }) => fn(),
+  ),
+  ROOMOTE_THREAD_REPLY_QUOTE_BLOCK_ID: 'quote',
+  SlackNotifier: vi.fn(function () {
+    return { updateMessage: mocks.slackUpdateMessage };
+  }),
 }));
 
 vi.mock('./teams-communication', () => ({
@@ -23,9 +39,13 @@ vi.mock('../automations/destination', () => ({
 }));
 
 import {
+  and,
   db,
+  eq,
   fastAgentConversations,
+  fastAgentProviderMessages,
   fastAgentMessages,
+  slackInstallations,
   userFactory,
 } from '@roomote/db/server';
 
@@ -67,6 +87,7 @@ describe('buildFastAgentSurfaceReplyDelivery', () => {
       provider: 'telegram',
       channelId: 'telegram-chat-1',
       messageId: 'telegram-message-1',
+      lastTextMessageId: 'telegram-message-2',
     });
     mocks.createTelegramProvider.mockResolvedValue({
       postMessage: mocks.telegramPostMessage,
@@ -76,6 +97,8 @@ describe('buildFastAgentSurfaceReplyDelivery', () => {
       serviceUrl: 'https://smba.example.com/amer/',
       workspaceId: 'tenant-1',
     });
+    mocks.slackPostThreadMessage.mockResolvedValue('slack-message-1');
+    mocks.slackUpdateMessage.mockResolvedValue(true);
   });
 
   it('serves web sessions with a transcript-only adapter', async () => {
@@ -174,6 +197,57 @@ describe('buildFastAgentSurfaceReplyDelivery', () => {
     ).resolves.toBeNull();
   });
 
+  it('binds Slack surface replies and replacements to the Fast session', async () => {
+    const user = await userFactory.create();
+    const conversation = await createConversation({
+      userId: user.id,
+      surface: 'slack',
+      replyTarget: { channelId: 'C456', threadId: '1700000000.000200' },
+    });
+    await db.insert(slackInstallations).values({
+      teamId: conversation.workspaceId,
+      teamName: 'Test workspace',
+      appId: 'A123',
+      botUserId: 'B123',
+      botAccessToken: 'xoxb-test',
+      scopes: { bot: ['chat:write'] },
+      installedByUserId: user.id,
+      isActive: true,
+    });
+
+    const delivery = await buildFastAgentSurfaceReplyDelivery({
+      sessionId: conversation.id,
+      userId: user.id,
+      senderDisplayName: 'Matt',
+      question: 'Follow up',
+    });
+    const handle = await delivery!.adapter.postReply({
+      purpose: 'closeout',
+      message: 'First reply',
+    });
+    await delivery!.adapter.replaceReply!(handle!, {
+      purpose: 'closeout',
+      message: 'Updated reply',
+    });
+
+    await expect(
+      db.query.fastAgentProviderMessages.findFirst({
+        where: and(
+          eq(fastAgentProviderMessages.provider, 'slack'),
+          eq(fastAgentProviderMessages.conversationId, conversation.id),
+          eq(fastAgentProviderMessages.messageId, 'slack-message-1'),
+        ),
+      }),
+    ).resolves.toMatchObject({
+      workspaceId: conversation.workspaceId,
+      channelId: 'C456',
+      threadId: '1700000000.000200',
+    });
+    expect(mocks.slackUpdateMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ ts: 'slack-message-1' }),
+    );
+  });
+
   it('returns null for an unknown session', async () => {
     const user = await userFactory.create();
     await expect(
@@ -192,6 +266,7 @@ describe('buildFastAgentSurfaceReplyDelivery', () => {
       workspaceId: 'tenant-1',
       channelId: 'teams-channel-1',
       threadId: 'teams-root-1',
+      currentMessageId: undefined,
       post: mocks.teamsPostMessage,
       replace: mocks.teamsUpdateMessage,
     },
@@ -200,12 +275,21 @@ describe('buildFastAgentSurfaceReplyDelivery', () => {
       workspaceId: 'telegram-chat-1',
       channelId: 'telegram-chat-1',
       threadId: undefined,
+      currentMessageId: 'telegram-inbound-1',
       post: mocks.telegramPostMessage,
       replace: mocks.telegramEditMessage,
     },
   ])(
     'serves $surface sessions with provider-backed reply and replacement adapters',
-    async ({ surface, workspaceId, channelId, threadId, post, replace }) => {
+    async ({
+      surface,
+      workspaceId,
+      channelId,
+      threadId,
+      currentMessageId,
+      post,
+      replace,
+    }) => {
       const user = await userFactory.create();
       const [conversation] = await db
         .insert(fastAgentConversations)
@@ -224,10 +308,17 @@ describe('buildFastAgentSurfaceReplyDelivery', () => {
         userId: user.id,
         senderDisplayName: 'Matt',
         question: 'Follow up',
+        ...(currentMessageId ? { currentMessageId } : {}),
       });
       const handle = await delivery!.adapter.postReply({
         purpose: 'closeout',
         message: 'Done',
+      });
+      const binding = await db.query.fastAgentProviderMessages.findFirst({
+        where: and(
+          eq(fastAgentProviderMessages.provider, surface),
+          eq(fastAgentProviderMessages.conversationId, conversation!.id),
+        ),
       });
       await delivery!.adapter.replaceReply!(handle!, {
         purpose: 'closeout',
@@ -238,8 +329,12 @@ describe('buildFastAgentSurfaceReplyDelivery', () => {
         expect.objectContaining({
           channelId,
           ...(threadId ? { threadId } : {}),
+          ...(currentMessageId ? { replyToMessageId: currentMessageId } : {}),
           text: expect.stringContaining('Reply or use the [web app]'),
         }),
+      );
+      expect(binding?.messageId).toBe(
+        surface === 'teams' ? 'teams-message-1' : 'telegram-message-2',
       );
       expect(replace).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -251,4 +346,51 @@ describe('buildFastAgentSurfaceReplyDelivery', () => {
       );
     },
   );
+
+  it('keeps a Telegram reaction event id separate from its reply target', async () => {
+    const user = await userFactory.create();
+    const [conversation] = await db
+      .insert(fastAgentConversations)
+      .values({
+        userId: user.id,
+        surface: 'telegram',
+        workspaceId: 'telegram-chat-reaction',
+        conversationId: `telegram-reaction-${Date.now()}`,
+        currentReplyChannelId: 'telegram-chat-reaction',
+      })
+      .returning();
+
+    const delivery = await buildFastAgentSurfaceReplyDelivery({
+      sessionId: conversation!.id,
+      userId: user.id,
+      senderDisplayName: 'Matt',
+      question: '<external_input>{}</external_input>',
+      currentMessageId: 'telegram-reaction:123',
+      replyToMessageId: '777',
+      externalInput: {
+        type: 'reaction_added',
+        provider: 'telegram',
+        reactions: [{ name: '👍' }],
+        reactor: { externalUserId: '111', displayName: 'Matt' },
+        message: {
+          workspaceId: 'telegram-chat-reaction',
+          channelId: 'telegram-chat-reaction',
+          messageId: '777',
+        },
+        eventId: '123',
+      },
+    });
+
+    await delivery!.adapter.postReply({
+      purpose: 'closeout',
+      message: 'Thanks for confirming.',
+    });
+
+    expect(mocks.telegramPostMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        replyToMessageId: '777',
+        text: expect.not.stringContaining('external_input'),
+      }),
+    );
+  });
 });

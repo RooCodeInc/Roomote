@@ -89,6 +89,7 @@ const RUN_HISTORY_KEYS: BackgroundAutomationKey[] = [
   'security_auditor',
   'code_quality_auditor',
   'ci_failure_triage',
+  'merge_announcer',
 ];
 
 const RUN_HISTORY_LIMIT_PER_AUTOMATION = 5;

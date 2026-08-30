@@ -6,7 +6,10 @@ import {
   type FastAgentActiveTask,
   type LaunchFastAgentTask,
 } from '@roomote/cloud-agents/server';
-import { buildFastSessionReplyFooterText } from '@roomote/communication';
+import {
+  buildFastSessionReplyFooterText,
+  resolveFastSessionReplyFooterContext,
+} from '@roomote/communication';
 import {
   buildSlackThreadReplyFooterBlock,
   getSlackThreadReplyFooterMessageTs,
@@ -19,7 +22,10 @@ import {
   appendAttachmentTextsToPromptText,
   stripLeadingSlackProductMention,
 } from '@roomote/cloud-agents';
-import { resolveUserMcpServerConfigs } from '@roomote/sdk/server';
+import {
+  recordFastAgentConversationMessageBestEffort,
+  resolveUserMcpServerConfigs,
+} from '@roomote/sdk/server';
 
 import { LEADING_FAST_COMMAND_MENTION_PATTERN } from '../constants.js';
 import { postSlackThreadMarkdownMessage } from '../helpers/thread-posting.js';
@@ -70,6 +76,7 @@ export async function processFastAgentMessage(params: {
   launchTask: LaunchFastAgentTask;
   processingReactionName?: string;
   isExistingConversation?: boolean;
+  directedAtRoomote?: boolean;
   onAccepted?: (abort: () => Promise<void>) => void;
   onRejected?: () => void;
 }): Promise<void> {
@@ -85,6 +92,7 @@ export async function processFastAgentMessage(params: {
     launchTask,
     processingReactionName = 'eyes',
     isExistingConversation = false,
+    directedAtRoomote = false,
   } = params;
   const threadId = event.thread_ts || event.ts;
   const conversation = {
@@ -184,10 +192,20 @@ export async function processFastAgentMessage(params: {
         ts: message.ts,
         bot_id: message.bot_id,
       }));
+    const hasOtherHumanParticipant = threadContext.some(
+      (message) =>
+        message.ts !== event.ts &&
+        !message.bot_id &&
+        Boolean(message.user) &&
+        message.user !== event.user,
+    );
 
     const resolvedActiveTasks = resolveActiveTasks
       ? await resolveActiveTasks()
       : activeTasks;
+    const footerContext = await resolveFastSessionReplyFooterContext({
+      taskIds: resolvedActiveTasks.map((task) => task.taskId),
+    });
     const responseText = await answerFastAgentQuestion({
       question,
       images: attachments.images,
@@ -205,6 +223,11 @@ export async function processFastAgentMessage(params: {
           ? currentMessage.username
           : undefined,
       activeTasks: resolvedActiveTasks,
+      allowSilentAmbientReply:
+        event.channel_type !== 'im' &&
+        event.channel_type !== 'mpim' &&
+        hasOtherHumanParticipant &&
+        !directedAtRoomote,
       adapter: {
         resolveMcpServerConfigs: () =>
           resolveUserMcpServerConfigs({
@@ -225,7 +248,7 @@ export async function processFastAgentMessage(params: {
               slackTeamId: teamId,
               source: 'fast_agent',
             },
-            fastSessionFooter: { sessionId: session.id },
+            fastSessionFooter: { sessionId: session.id, ...footerContext },
           });
           if (posted === 'failed') {
             throw new Error('Slack did not accept the Fast parent reply.');
@@ -242,9 +265,15 @@ export async function processFastAgentMessage(params: {
           // message was deleted); treat it as delivered so the turn is not
           // aborted mid-flight.
           didSendVisibleResponse = true;
-          return typeof posted === 'object'
-            ? { messageId: posted.messageId }
-            : undefined;
+          if (typeof posted !== 'object') {
+            return undefined;
+          }
+          await recordFastAgentConversationMessageBestEffort({
+            sessionId: session.id,
+            conversation,
+            messageId: posted.messageId,
+          });
+          return { messageId: posted.messageId };
         },
         replaceReply: async ({ messageId }, { message }) => {
           // Keep the sticky footer when the edited message is its current
@@ -271,6 +300,7 @@ export async function processFastAgentMessage(params: {
                             footerText: buildFastSessionReplyFooterText({
                               provider: 'slack',
                               sessionId: session.id,
+                              ...footerContext,
                             }),
                           }),
                         ]
@@ -283,6 +313,11 @@ export async function processFastAgentMessage(params: {
           if (!updated) {
             throw new Error('Slack did not update the Fast parent reply.');
           }
+          await recordFastAgentConversationMessageBestEffort({
+            sessionId: session.id,
+            conversation,
+            messageId,
+          });
           didSendVisibleResponse = true;
           return { messageId };
         },
@@ -313,7 +348,7 @@ export async function processFastAgentMessage(params: {
     });
 
     if (responseText.length > 0 && !didSendVisibleResponse) {
-      await postSlackThreadMarkdownMessage({
+      const posted = await postSlackThreadMarkdownMessage({
         slack,
         channel: event.channel,
         threadTs: threadId,
@@ -324,8 +359,15 @@ export async function processFastAgentMessage(params: {
           slackTeamId: teamId,
           source: 'fast_agent',
         },
-        fastSessionFooter: { sessionId: session.id },
+        fastSessionFooter: { sessionId: session.id, ...footerContext },
       });
+      if (typeof posted === 'object') {
+        await recordFastAgentConversationMessageBestEffort({
+          sessionId: session.id,
+          conversation,
+          messageId: posted.messageId,
+        });
+      }
     }
   } finally {
     if (didAddProcessingReaction) {

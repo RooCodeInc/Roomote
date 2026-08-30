@@ -10,7 +10,10 @@ import {
   teamsInstallations,
   type AutomationRuntime,
 } from '@roomote/db/server';
-import type { CommunicationProvider } from '@roomote/types';
+import {
+  isBackgroundAutomationUserTargetKind,
+  type CommunicationProvider,
+} from '@roomote/types';
 
 import { findDiscordDefaultDestination } from '../lib/discord-persistence';
 import { findTeamsPrimaryConversation } from '../lib/teams-primary-conversation';
@@ -131,7 +134,8 @@ export async function findTeamsConversationRoute(
 
 /**
  * Resolves where an automation run should report, extending the db-level
- * waterfall (own target -> manager channel) with a primary-conversation tail
+ * waterfall (own channel or DM target -> manager channel) with a
+ * primary-conversation tail
  * for deployments that have no Slack at all: the most recently active Teams
  * conversation, then the configured Telegram primary chat. The tail is
  * deliberately skipped when Slack is connected, so a Slack deployment that
@@ -139,17 +143,17 @@ export async function findTeamsConversationRoute(
  * "configure a manager channel" nudge instead of surprising another surface.
  */
 export async function resolveAutomationRuntimeDestination(params: {
-  runtime: Pick<AutomationRuntime, 'destination'>;
+  runtime: Pick<AutomationRuntime, 'destination'> &
+    Partial<Pick<AutomationRuntime, 'targets'>>;
   slackConnected: boolean;
   /** Optional user whose DM should receive a one-off fallback report. */
   fallbackUserId?: string | null;
 }): Promise<ResolvedAutomationDestination | null> {
   const destination = params.runtime.destination;
+  const staleSlackDestination =
+    destination?.provider === 'slack' && !params.slackConnected;
 
-  if (destination) {
-    const staleSlackDestination =
-      destination.provider === 'slack' && !params.slackConnected;
-
+  if (destination?.source === 'automation_target') {
     if (!staleSlackDestination) {
       if (destination.provider === 'teams') {
         const serviceUrl = await findTeamsConversationServiceUrl(
@@ -161,6 +165,32 @@ export async function resolveAutomationRuntimeDestination(params: {
 
       return destination;
     }
+  }
+
+  const userTarget = params.runtime.targets?.find(
+    (target) =>
+      isBackgroundAutomationUserTargetKind(target.targetKind) &&
+      (target.provider === 'slack' ||
+        target.provider === 'teams' ||
+        target.provider === 'telegram' ||
+        target.provider === 'discord'),
+  );
+  if (userTarget) {
+    const directMessage = await findUserDirectMessageDestination(
+      userTarget.provider as CommunicationProvider,
+      userTarget.externalRef,
+    );
+    return directMessage
+      ? {
+          provider: userTarget.provider as CommunicationProvider,
+          ...directMessage,
+          source: 'automation_target',
+        }
+      : null;
+  }
+
+  if (destination && !staleSlackDestination) {
+    return destination;
   }
 
   if (params.fallbackUserId) {

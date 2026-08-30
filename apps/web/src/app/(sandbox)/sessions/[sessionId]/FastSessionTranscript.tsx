@@ -13,6 +13,8 @@ import {
   getImageUrisFromContentBlocks,
   getTextFromContentBlocks,
   inferAcpMessageKind,
+  parsePrReviewActionOffer,
+  type PrReviewActionChoice,
   type AcpEventType,
   type ReasoningEffort,
 } from '@roomote/types';
@@ -23,7 +25,10 @@ import {
   Conversation,
   ConversationContent,
   ConversationScrollButton,
+  Message,
+  MessageContent,
   MessageUiOptionsProvider,
+  Shimmer,
 } from '@/components/ai-elements';
 import { WorkspaceHeader } from '@/components/layout';
 import {
@@ -35,6 +40,7 @@ import { useOpenSessionTaskPanel } from './session-task-panel-context';
 import { useNarrationMode } from '@/hooks/useNarrationMode';
 import { usePageTitle } from '@/hooks/usePageTitle';
 import { truncatePageTitle } from '@/lib/page-title';
+import { PrReviewActionOffer } from '@/components/ai-elements/pr-review-action-offer';
 
 import {
   AcpTranscriptBlockList,
@@ -48,10 +54,16 @@ type TranscriptMessage = Omit<FastSessionMessage, 'createdAt'> & {
   createdAt: Date | string;
 };
 
-function compareTranscriptMessages(a: TranscriptMessage, b: TranscriptMessage) {
+type TranscriptOrder = Pick<TranscriptMessage, 'id' | 'ts' | 'turnSeq'>;
+
+function compareTranscriptOrder(a: TranscriptOrder, b: TranscriptOrder) {
   if (a.ts !== b.ts) return a.ts - b.ts;
   if (a.turnSeq !== b.turnSeq) return a.turnSeq - b.turnSeq;
   return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+}
+
+function compareTranscriptMessages(a: TranscriptMessage, b: TranscriptMessage) {
+  return compareTranscriptOrder(a, b);
 }
 
 function getUserMessageIdentity(message: TranscriptMessage) {
@@ -59,6 +71,43 @@ function getUserMessageIdentity(message: TranscriptMessage) {
     getTextFromContentBlocks(message.contentBlocks)?.trim() ?? '',
     getImageUrisFromContentBlocks(message.contentBlocks),
   ]);
+}
+
+function isVisibleResponseActivity(message: TranscriptMessage) {
+  return (
+    message.role !== 'user' && message.metadata?.visibleInTranscript !== false
+  );
+}
+
+function getPendingResponseOrder(messages: TranscriptMessage[]) {
+  let pendingAfter: TranscriptOrder | null =
+    messages.length === 0 ? { id: '', ts: 0, turnSeq: -1 } : null;
+
+  for (const message of [...messages].sort(compareTranscriptMessages)) {
+    if (message.role === 'user') {
+      pendingAfter = message;
+    } else if (
+      pendingAfter !== null &&
+      compareTranscriptOrder(message, pendingAfter) >= 0 &&
+      isVisibleResponseActivity(message)
+    ) {
+      pendingAfter = null;
+    }
+  }
+
+  return pendingAfter;
+}
+
+function ThinkingMessage() {
+  return (
+    <Message from="assistant" className="chat-reasoning-message">
+      <MessageContent>
+        <Shimmer className="text-sm font-light" direction="rl" duration={1}>
+          Thinking
+        </Shimmer>
+      </MessageContent>
+    </Message>
+  );
 }
 
 export function FastSessionTranscript({
@@ -102,6 +151,10 @@ export function FastSessionTranscript({
     TranscriptMessage[]
   >([]);
   const [isSending, setIsSending] = useState(false);
+  const [pendingResponseAfter, setPendingResponseAfter] =
+    useState<TranscriptOrder | null>(() =>
+      getPendingResponseOrder(initialMessages),
+    );
   const [replyError, setReplyError] = useState<string | null>(null);
   const [title, setTitle] = useState<string | null>(initialTitle);
   usePageTitle(truncatePageTitle(title ?? fallbackTitle));
@@ -124,6 +177,25 @@ export function FastSessionTranscript({
         }
         serverMessagesRef.current = next;
         setServerMessages(next);
+        setPendingResponseAfter((current) => {
+          let pendingAfter = current;
+          for (const message of [...messages].sort(compareTranscriptMessages)) {
+            if (
+              message.role === 'user' &&
+              (pendingAfter === null ||
+                compareTranscriptOrder(message, pendingAfter) >= 0)
+            ) {
+              pendingAfter = message;
+            } else if (
+              isVisibleResponseActivity(message) &&
+              pendingAfter !== null &&
+              compareTranscriptOrder(message, pendingAfter) >= 0
+            ) {
+              pendingAfter = null;
+            }
+          }
+          return pendingAfter;
+        });
 
         if (canonicalUserMessages.length > 0) {
           setOptimisticMessages((current) => {
@@ -185,6 +257,14 @@ export function FastSessionTranscript({
       ),
     [messages],
   );
+  const reviewOffers = useMemo(
+    () =>
+      messages.flatMap((message) => {
+        const offer = parsePrReviewActionOffer(message.payload);
+        return offer ? [offer] : [];
+      }),
+    [messages],
+  );
   const { renderBlocks, suppressMessage } = useAcpTranscriptBlocks({
     messages: uiMessages,
     artifacts: [],
@@ -206,6 +286,7 @@ export function FastSessionTranscript({
       setIsSending(true);
       setReplyError(null);
       let optimisticId: string | null = null;
+      let previousPendingResponse: TranscriptOrder | null = null;
       try {
         const prepared = await preparePromptAttachments({
           text: message.text.trim(),
@@ -247,6 +328,10 @@ export function FastSessionTranscript({
           createdAt: new Date(),
         };
         setOptimisticMessages((previous) => [...previous, optimistic]);
+        setPendingResponseAfter((current) => {
+          previousPendingResponse = current;
+          return optimistic;
+        });
         await trpcClient.fastSessions.reply.mutate({
           sessionId,
           text: prepared.text,
@@ -268,6 +353,9 @@ export function FastSessionTranscript({
         setReplyError(
           error instanceof Error ? error.message : 'Failed to send message',
         );
+        setPendingResponseAfter((current) =>
+          current?.id === optimisticId ? previousPendingResponse : current,
+        );
         return false;
       } finally {
         setIsSending(false);
@@ -276,8 +364,22 @@ export function FastSessionTranscript({
     [isSending, sessionId, trpcClient],
   );
 
+  const handleReviewAction = useCallback(
+    async (deliveryId: string, choice: PrReviewActionChoice) => {
+      const result = await trpcClient.fastSessions.reviewAction.mutate({
+        sessionId,
+        deliveryId,
+        choice,
+      });
+      return result.status;
+    },
+    [sessionId, trpcClient],
+  );
+
   return (
-    <MessageUiOptionsProvider value={{ displayMode }}>
+    <MessageUiOptionsProvider
+      value={{ displayMode, hidePrReviewActions: true }}
+    >
       <WorkspaceHeader
         className="py-4.25"
         contentClassName="flex-row items-center gap-3"
@@ -301,12 +403,28 @@ export function FastSessionTranscript({
             onSuppress={suppressMessage}
             onOpenDelegatedTask={openTaskPanel ?? undefined}
           />
+          {pendingResponseAfter !== null ? <ThinkingMessage /> : null}
+          {reviewOffers.map((offer) => (
+            <div
+              key={offer.deliveryId}
+              className="mt-3 rounded-lg border border-border/70 bg-muted/40 px-3 py-3"
+            >
+              <p className="mb-2 text-sm">{offer.question}</p>
+              <PrReviewActionOffer
+                offer={offer}
+                onAction={(choice) =>
+                  handleReviewAction(offer.deliveryId, choice)
+                }
+              />
+            </div>
+          ))}
         </ConversationContent>
         <ConversationScrollButton />
       </Conversation>
       {canReply ? (
         <div className="mx-auto w-full shrink-0 overflow-clip rounded-t-md rounded-b-3xl border-2 border-background bg-card transition-colors @[56rem]:rounded-t-lg">
           <SessionPromptInput
+            sessionId={sessionId}
             isBusy={isSending}
             onSend={sendReply}
             initialModel={sessionModel}
