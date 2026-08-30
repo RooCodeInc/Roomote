@@ -141,6 +141,15 @@ describe('provider usage limit automation', () => {
     expect(JSON.stringify(message.blocks)).not.toContain('abc123def456');
     expect(message.blocks[0]).toMatchObject({
       child_blocks: [
+        expect.objectContaining({
+          type: 'section',
+          block_id: 'roomote_automation_result_settings',
+          accessory: expect.objectContaining({
+            action_id: 'late_bound_automation_configure',
+            accessibility_label: 'Configure alert',
+            url: expect.stringContaining('#provider-usage-limit'),
+          }),
+        }),
         {
           type: 'actions',
           elements: [
@@ -149,16 +158,6 @@ describe('provider usage limit automation', () => {
               action_id: 'provider_usage_limit_manage_models',
               text: { type: 'plain_text', text: 'Manage models', emoji: false },
               url: expect.stringContaining('/settings/models'),
-            }),
-            expect.objectContaining({
-              type: 'button',
-              action_id: 'late_bound_automation_configure',
-              text: {
-                type: 'plain_text',
-                text: 'Configure alert',
-                emoji: false,
-              },
-              url: expect.stringContaining('#provider-usage-limit'),
             }),
           ],
         },

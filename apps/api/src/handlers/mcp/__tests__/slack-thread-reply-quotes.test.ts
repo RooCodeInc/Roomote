@@ -386,6 +386,14 @@ describe('Slack thread reply quotes', () => {
               }),
             ]),
           }),
+          expect.objectContaining({
+            type: 'section',
+            block_id: 'roomote_automation_result_settings',
+            accessory: expect.objectContaining({
+              action_id: 'late_bound_automation_configure',
+              url: 'https://app.example.com/automations#custom-automation-automation-1',
+            }),
+          }),
           {
             type: 'markdown',
             text: '**Summary**\n\n| Idea | Priority |\n| --- | --- |\n| Demo | High |',
@@ -395,10 +403,6 @@ describe('Slack thread reply quotes', () => {
             elements: expect.arrayContaining([
               expect.objectContaining({
                 action_id: 'late_bound_automation_view_task',
-              }),
-              expect.objectContaining({
-                action_id: 'late_bound_automation_configure',
-                url: 'https://app.example.com/automations#custom-automation-automation-1',
               }),
             ]),
           }),

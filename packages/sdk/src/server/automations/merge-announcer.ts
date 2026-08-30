@@ -297,7 +297,10 @@ function buildMergeAnnouncerNotification(params: {
     MERGE_ANNOUNCER_SETTINGS_HASH,
   );
   const markdownNarrative = `**${params.pusher}** pushed ${commitLabel} to **${params.branch}** in **${params.repository.fullName}**.`;
-  const changesUrl = params.event.pullRequest?.url ?? params.event.compareUrl;
+  const changesUrl =
+    params.event.pullRequest?.url ??
+    params.event.compareUrl ??
+    params.event.commits.at(-1)?.url;
   const additionalActions = changesUrl
     ? [
         {
