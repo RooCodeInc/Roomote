@@ -29,6 +29,7 @@ import {
   isBrainEnabled,
   touchSessionActivity,
 } from '@roomote/db/server';
+import { buildFastSessionUrl } from '@roomote/communication';
 import { Env } from '@roomote/env';
 import { z } from 'zod';
 
@@ -1764,7 +1765,7 @@ export async function answerFastAgentQuestion({
                 throwIfTurnCancelled();
                 await postReply({
                   purpose: 'progress',
-                  message: result.textFallback,
+                  message: `${result.textFallback}\n\n[View widget](${buildFastSessionUrl(conversation.surface, session.id)})`,
                 });
                 completedChatReplySignatures.add(signature);
               }
