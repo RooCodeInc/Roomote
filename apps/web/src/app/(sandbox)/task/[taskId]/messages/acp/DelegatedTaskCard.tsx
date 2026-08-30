@@ -36,6 +36,9 @@ export function DelegatedTaskCard({
     ),
   );
   const title = data?.task?.title?.trim() || prompt || 'Delegated task';
+  // Latest assistant activity for the in-flight run (server clears it once
+  // the run exits); the plain status indicator remains the fallback.
+  const activityLine = data?.activityLine ?? null;
 
   return (
     <button
@@ -55,6 +58,11 @@ export function DelegatedTaskCard({
             {title}
           </span>
         )}
+        {!isPending && activityLine ? (
+          <span className="ph-no-capture mt-0.5 block truncate text-xs text-muted-foreground">
+            {activityLine}
+          </span>
+        ) : null}
       </span>
       <TaskStatusIndicator
         status={data?.taskRun?.status ?? null}

@@ -27,6 +27,7 @@ export * from './slack-oauth-state';
 export * from './github-oauth-state';
 export * from './source-control';
 export * from './sync-internal';
+export * from './task-activity';
 export * from './task-messages';
 export * from './task-models';
 export * from './tasks';

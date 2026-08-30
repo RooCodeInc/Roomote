@@ -54,7 +54,11 @@ import { z } from 'zod';
 import type { UserAuthSuccess } from '@/types';
 import { Env } from '@/lib/server';
 
-import { type TaskRunDetail, findActiveSuccessorTaskRun } from '@/lib/server';
+import {
+  type TaskRunDetail,
+  findActiveSuccessorTaskRun,
+  getLatestTaskActivityLine,
+} from '@/lib/server';
 import { getTaskRunVisiblePrompt } from '@/lib';
 import {
   claimOutOfBandContextForPrompt,
@@ -832,6 +836,7 @@ export async function getSandboxSessionByTaskIdCommand(
       task: null,
       taskRun: null,
       prompt: null,
+      activityLine: null,
       sessionState: 'not-found' as const,
       refetchInterval: undefined,
     };
@@ -914,24 +919,30 @@ export async function getSandboxSessionByTaskIdCommand(
 
   // Check whether the task ever produced messages. Used to distinguish boot
   // failures (no messages) from runtime failures (has conversation history).
-  const [bootFailureMessage, firstHarnessMessage] = await Promise.all([
-    shouldCheckBootFailureMessages
-      ? db.query.taskMessages.findFirst({
-          where: eq(taskMessages.runId, taskRun.id),
-          columns: { id: true },
-        })
-      : Promise.resolve(null),
-    shouldCheckHarnessMessages
-      ? db.query.taskMessages.findFirst({
-          where: and(
-            eq(taskMessages.runId, taskRun.id),
-            isNotNull(taskMessages.role),
-            not(eq(taskMessages.role, 'user')),
-          ),
-          columns: { id: true },
-        })
-      : Promise.resolve(null),
-  ]);
+  const [bootFailureMessage, firstHarnessMessage, activityLine] =
+    await Promise.all([
+      shouldCheckBootFailureMessages
+        ? db.query.taskMessages.findFirst({
+            where: eq(taskMessages.runId, taskRun.id),
+            columns: { id: true },
+          })
+        : Promise.resolve(null),
+      shouldCheckHarnessMessages
+        ? db.query.taskMessages.findFirst({
+            where: and(
+              eq(taskMessages.runId, taskRun.id),
+              isNotNull(taskMessages.role),
+              not(eq(taskMessages.role, 'user')),
+            ),
+            columns: { id: true },
+          })
+        : Promise.resolve(null),
+      // The card shows live activity only while the run is in flight; once the
+      // run exits the status label takes over and polling stops.
+      isExitedRunStatus(taskRun.status)
+        ? Promise.resolve(null)
+        : getLatestTaskActivityLine(taskRun.id),
+    ]);
 
   const hasMessages = !!bootFailureMessage;
   const hasHarnessMessages = !!firstHarnessMessage;
@@ -1003,6 +1014,7 @@ export async function getSandboxSessionByTaskIdCommand(
         resolvedPreviewRuntimeConfig.effective.previewProxySubdomainSuffix,
     },
     prompt,
+    activityLine,
     onboardingEnvironment: onboardingEnvironmentWithVerification,
     sessionState,
     refetchInterval,
