@@ -1179,7 +1179,7 @@ export async function answerFastAgentQuestion({
   };
 
   try {
-    if (!platformEvent) {
+    if (titleEligibleHumanInput) {
       turnVisibleMessages.push(
         buildUserTextMessage(normalizeThreadText(question)),
       );

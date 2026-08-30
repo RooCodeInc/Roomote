@@ -840,6 +840,44 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     );
     expect(mocks.getUserIdentity).toHaveBeenCalledWith('user-1');
     expect(mocks.refreshSessionTitle).not.toHaveBeenCalled();
+
+    const mirroredReactionTurn =
+      mocks.appendVisibleMessages.mock.calls.at(-1)?.[0].messages;
+    expect(mirroredReactionTurn).toEqual([
+      expect.objectContaining({ role: 'assistant' }),
+    ]);
+    expect(JSON.stringify(mirroredReactionTurn)).not.toContain(
+      '<external_input>',
+    );
+
+    mocks.getSession.mockResolvedValueOnce({
+      id: 'conversation-1',
+      compatibilityMessages: mirroredReactionTurn,
+      openCodeSessionId: null,
+    });
+    mocks.runSession.mockImplementationOnce(({ bootstrapPrompt, execute }) =>
+      execute({}, bootstrapPrompt, {
+        path: 'cold_rebuild',
+        validateSession: false,
+      }),
+    );
+
+    await answerFastAgentQuestion({
+      ...baseParams,
+      question: 'This is the first real message.',
+      currentMessageId: '100.4',
+      adapter: callbacks(),
+    });
+
+    const nextColdPrompt = mocks.generateText.mock.calls.at(-1)?.[0].prompt;
+    expect(nextColdPrompt).toContain('This is the first real message.');
+    expect(nextColdPrompt).not.toContain('<external_input>');
+    expect(mocks.captureTurnSettled).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        initialHumanTurn: true,
+        turnSource: 'human',
+      }),
+    );
   });
 
   it('leaves initial-turn classification unknown when prompt persistence fails', async () => {
