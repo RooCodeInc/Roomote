@@ -136,6 +136,63 @@ describe('Merge announcer push normalization', () => {
     expect(JSON.stringify(enriched)).not.toContain('unbounded patch content');
   });
 
+  it('enriches the associated PR while GitHub merge state is settling', async () => {
+    const payload = {
+      ref: 'refs/heads/develop',
+      after: '9d606d9be06853438da729770fa04bb4e81d45e7',
+      installation: { id: 99 },
+      repository: {
+        id: 1,
+        full_name: 'RooCodeInc/Roomote',
+        default_branch: 'develop',
+      },
+      commits: [
+        {
+          id: '9d606d9be06853438da729770fa04bb4e81d45e7',
+          message:
+            '[Fix] Memory titles overflow the Explore memories card (#1766)',
+        },
+      ],
+    };
+    const event = normalizeGitHubPush(payload)!;
+    const listPullRequestsAssociatedWithCommit = vi.fn().mockResolvedValue({
+      data: [{ number: 1766, state: 'open', base: { ref: 'develop' } }],
+    });
+    const get = vi.fn().mockResolvedValue({
+      data: {
+        number: 1766,
+        html_url: 'https://github.com/RooCodeInc/Roomote/pull/1766',
+        title: '[Fix] Memory titles overflow the Explore memories card',
+        body: 'Keep memory titles inside the card.',
+        merged_at: null,
+        merge_commit_sha: payload.after,
+        base: { ref: 'develop' },
+        changed_files: 1,
+        additions: 20,
+        deletions: 20,
+      },
+    });
+    const getInstallationOctokit = vi.fn().mockResolvedValue({
+      rest: {
+        repos: { listPullRequestsAssociatedWithCommit },
+        pulls: {
+          get,
+          listFiles: vi.fn().mockResolvedValue({ data: [] }),
+        },
+      },
+    });
+
+    const enriched = await enrichGitHubMergeAnnouncerEvent(payload, event, {
+      getInstallationOctokit: getInstallationOctokit as never,
+    });
+
+    expect(listPullRequestsAssociatedWithCommit).toHaveBeenCalledOnce();
+    expect(enriched.pullRequest).toMatchObject({
+      number: 1766,
+      url: 'https://github.com/RooCodeInc/Roomote/pull/1766',
+    });
+  });
+
   it('keeps commit-only context when GitHub PR enrichment fails', async () => {
     const payload = {
       ref: 'refs/heads/main',
@@ -237,17 +294,27 @@ describe('Merge announcer push normalization', () => {
       rest: {
         repos: {
           listPullRequestsAssociatedWithCommit: vi.fn().mockResolvedValue({
-            data: [{ number: 7, state: 'closed', base: { ref: 'main' } }],
+            data: [
+              { number: 7, state: 'closed', base: { ref: 'main' } },
+              { number: 8, state: 'closed', base: { ref: 'main' } },
+            ],
           }),
         },
         pulls: {
-          get: vi.fn().mockResolvedValue({
-            data: {
-              merged_at: '2026-08-29T12:00:00Z',
-              merge_commit_sha: 'different-sha',
-              base: { ref: 'main' },
-            },
-          }),
+          get: vi
+            .fn()
+            .mockResolvedValueOnce({
+              data: {
+                merge_commit_sha: 'different-sha',
+                base: { ref: 'main' },
+              },
+            })
+            .mockResolvedValueOnce({
+              data: {
+                merge_commit_sha: payload.after,
+                base: { ref: 'release' },
+              },
+            }),
           listFiles,
         },
       },
