@@ -55,6 +55,21 @@ function normalizeTaskMessageText(value: string | undefined): string {
   return normalizeTranscriptUserText(value)?.replace(/\s+/g, ' ').trim() ?? '';
 }
 
+function extractAutomationPromptText(text: string): string {
+  const match = /^<platform_event>(.*)<\/platform_event>$/su.exec(text.trim());
+  if (!match?.[1]) return text;
+
+  try {
+    const event = asRecord(JSON.parse(match[1]));
+    return event?.type === 'automation_triggered' &&
+      typeof event.prompt === 'string'
+      ? event.prompt
+      : text;
+  } catch {
+    return text;
+  }
+}
+
 export async function refreshTaskSessionTitle({
   taskId,
   userId,
@@ -197,6 +212,7 @@ export async function refreshFastAgentSessionTitle({
       .select({
         role: fastAgentMessages.role,
         contentBlocks: fastAgentMessages.contentBlocks,
+        metadata: fastAgentMessages.metadata,
       })
       .from(fastAgentMessages)
       .where(
@@ -206,7 +222,10 @@ export async function refreshFastAgentSessionTitle({
             TITLE_EVENT_TYPES.map((eventType) => sql`${eventType}`),
             sql`, `,
           )})`,
-          sql`coalesce(${fastAgentMessages.metadata} ->> 'visibleInTranscript', 'true') <> 'false'`,
+          sql`(
+            coalesce(${fastAgentMessages.metadata} ->> 'visibleInTranscript', 'true') <> 'false'
+            or ${fastAgentMessages.metadata} ->> 'platformEventKind' = 'automation'
+          )`,
         ),
       )
       .orderBy(asc(fastAgentMessages.ts), asc(fastAgentMessages.turnSeq))
@@ -218,7 +237,12 @@ export async function refreshFastAgentSessionTitle({
       if (row.role !== 'user' && row.role !== 'assistant') {
         continue;
       }
-      const text = getTextFromContentBlocks(row.contentBlocks)?.trim();
+      const rawText = getTextFromContentBlocks(row.contentBlocks)?.trim();
+      const metadata = asRecord(row.metadata);
+      const text =
+        rawText && metadata?.platformEventKind === 'automation'
+          ? extractAutomationPromptText(rawText).trim()
+          : rawText;
       if (!text) {
         continue;
       }

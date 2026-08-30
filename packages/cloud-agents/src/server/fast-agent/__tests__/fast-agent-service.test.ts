@@ -18,6 +18,7 @@ const mocks = vi.hoisted(() => ({
   sendTaskMessage: vi.fn(),
   cancelTask: vi.fn(),
   getUserIdentity: vi.fn(),
+  refreshTitle: vi.fn(),
   bindExecutor: vi.fn(),
   bindMcpExecutor: vi.fn(),
   captureInferenceContext: vi.fn(),
@@ -158,6 +159,10 @@ vi.mock('../fast-agent-user-identity', () => ({
   getFastAgentUserIdentity: mocks.getUserIdentity,
 }));
 
+vi.mock('../fast-agent-title', () => ({
+  refreshFastAgentSessionTitle: mocks.refreshTitle,
+}));
+
 import { buildFastSessionUrl } from '@roomote/communication';
 import {
   ACP_ENVELOPE_EVENT_TYPES,
@@ -221,6 +226,7 @@ async function invokeMcpTool(
 describe('answerFastAgentQuestion native OpenCode tools', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.refreshTitle.mockResolvedValue(null);
     mocks.nativeExecutor = undefined;
     mocks.mcpExecutor = undefined;
     mocks.mcpCapabilityAvailable = false;
@@ -733,6 +739,22 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         initialHumanTurn: false,
       }),
     );
+    expect(mocks.upsertMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: expect.objectContaining({
+          role: 'user',
+          metadata: expect.objectContaining({
+            visibleInTranscript: false,
+            turnSource: 'platform_event',
+            platformEventKind: 'automation',
+          }),
+        }),
+      }),
+    );
+    expect(mocks.refreshTitle).toHaveBeenCalledWith({
+      sessionId: 'conversation-1',
+      userId: 'user-1',
+    });
     expect(
       mocks.appendVisibleMessages.mock.calls
         .flatMap(([input]) => input.messages)
@@ -766,6 +788,17 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         .flatMap(([input]) => input.messages)
         .some((message) => message.role === 'user'),
     ).toBe(false);
+    expect(mocks.upsertMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: expect.objectContaining({
+          metadata: expect.objectContaining({
+            visibleInTranscript: false,
+            platformEventKind: 'delegated_task',
+          }),
+        }),
+      }),
+    );
+    expect(mocks.refreshTitle).not.toHaveBeenCalled();
 
     await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
     expect(mocks.captureTurnSettled).toHaveBeenLastCalledWith(
