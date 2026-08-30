@@ -58,8 +58,10 @@ const issue = {
   url: 'https://linear.app/acme/issue/ENG-42',
   priority: 2,
   priorityLabel: 'High',
+  estimate: 3,
   createdAt: '2026-08-01T10:00:00.000Z',
   updatedAt: '2026-08-03T12:00:00.000Z',
+  startedAt: '2026-08-02T08:00:00.000Z',
   completedAt: '2026-08-03T12:00:00.000Z',
   canceledAt: null,
   archivedAt: null,
@@ -67,9 +69,45 @@ const issue = {
   state: { name: 'Done', type: 'completed' },
   team: { key: 'ENG', name: 'Engineering' },
   project: { name: 'Previews' },
+  cycle: { name: 'August', number: 12 },
+  parent: {
+    id: 'parent-uuid',
+    identifier: 'ENG-40',
+    title: 'Preview reliability',
+  },
   creator: { name: 'Ada' },
   assignee: { name: 'Grace' },
   labels: ['bug', 'customer'],
+  relationships: [
+    {
+      type: 'related',
+      direction: 'outbound' as const,
+      issue: {
+        id: 'related-z',
+        identifier: 'ENG-44',
+        title: 'Track preview health',
+      },
+    },
+    {
+      type: 'blocks',
+      direction: 'inbound' as const,
+      issue: {
+        id: 'related-a',
+        identifier: 'ENG-41',
+        title: 'Renew preview leases',
+      },
+    },
+    {
+      type: 'related',
+      direction: 'inbound' as const,
+      issue: {
+        id: 'related-b',
+        identifier: 'ENG-43',
+        title: 'Report preview status',
+      },
+    },
+  ],
+  relationshipsTruncated: true,
   comments: [
     {
       id: 'comment-1',
@@ -110,10 +148,34 @@ describe('buildLinearIssuePage', () => {
     expect(page?.content).toContain('team: "Engineering"');
     expect(page?.content).toContain('project: "Previews"');
     expect(page?.content).toContain('state: "Done"');
+    expect(page?.content).not.toContain('**Status**');
+    expect(page?.content).not.toContain('**Priority**');
+    expect(page?.content).not.toContain('**Assignee**');
+    expect(page?.content).toContain(
+      '## Metadata\n\n- **Started**: 2026-08-02T08:00:00.000Z\n- **Estimate**: 3\n- **Cycle**: August (#12)\n- **Parent**: [ENG-40: Preview reliability](linear/org-uuid/issues/parent-uuid)\n- **Blocked by**: [ENG-41: Renew preview leases](linear/org-uuid/issues/related-a)\n- **Related issues**: [ENG-43: Report preview status](linear/org-uuid/issues/related-b), [ENG-44: Track preview health](linear/org-uuid/issues/related-z)\n_Linear truncated the relationship list; open the source issue for the rest._',
+    );
     expect(page?.content).toContain('## Discussion');
     expect(page?.content).toContain('The controller must renew the lease.');
     expect(page?.content).toContain('provenance: roomote-linear-issues');
     expect(page?.content).not.toContain('@');
+  });
+
+  it('omits metadata when the issue has no additional values', () => {
+    const page = buildLinearIssuePage({
+      organizationId: 'org',
+      organizationName: null,
+      issue: {
+        ...issue,
+        estimate: null,
+        startedAt: null,
+        cycle: null,
+        parent: null,
+        relationships: [],
+        relationshipsTruncated: false,
+      },
+    });
+
+    expect(page?.content).not.toContain('## Metadata');
   });
 
   it('bounds issue and comment text', () => {
