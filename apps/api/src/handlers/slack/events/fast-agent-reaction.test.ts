@@ -114,13 +114,14 @@ describe('Fast Slack reaction input', () => {
         currentMessageId: 'slack-reaction:102.000',
         senderExternalId: 'UALICE',
         senderDisplayName: '@alice',
-        turnSource: 'platform_event',
-        platformEventKind: 'external_input',
-        platformEventVisibility: 'optional',
+        turnSource: 'human',
+        inputKind: 'reaction',
+        responseVisibility: 'optional',
+        currentMessageReactable: false,
         question: expect.stringContaining(
           'React to this message with your favorite emoji.',
         ),
-        platformEventTranscriptPayload: {
+        turnTranscriptPayload: {
           externalInput: expect.objectContaining({
             type: 'reaction_added',
             provider: 'slack',

@@ -107,12 +107,14 @@ import { RemoteFastAgentRepositorySkillSource } from './fast-agent-repository-sk
 import { FastAgentSkillStore } from './fast-agent-skill-store';
 import {
   type FastAgentConversation,
+  type FastAgentInputKind,
   isFastAgentCommunicationConversation,
   type FastAgentPlatformEventHandling,
   type FastAgentPlatformEventKind,
   type FastAgentPlatformEventVisibility,
   type FastAgentReply,
   type FastAgentReplyHandle,
+  type FastAgentResponseVisibility,
   type FastAgentTurnAdapter,
   type FastAgentTurnSource,
 } from './fast-agent-conversation';
@@ -625,6 +627,7 @@ function buildFastAgentMessages({
   currentMessageTs,
   currentMessageSender,
   surface,
+  inputKind,
   turnSource,
 }: {
   question: string;
@@ -638,6 +641,7 @@ function buildFastAgentMessages({
     githubLogin?: string;
   };
   surface: FastAgentConversation['surface'];
+  inputKind: FastAgentInputKind;
   turnSource: FastAgentTurnSource;
 }): {
   bootstrapMessages: ModelMessage[];
@@ -646,27 +650,31 @@ function buildFastAgentMessages({
   turnThreadContextPresent: boolean;
 } {
   const normalizedQuestion = normalizeThreadText(question);
+  const contextualMessageTs =
+    inputKind === 'reaction' ? undefined : currentMessageTs;
   const currentUserMessageText =
-    surface === 'slack'
-      ? currentMessageTs
-        ? wrapSlackMessage(normalizedQuestion, {
-            ts: currentMessageTs,
-            senderSlackId: currentMessageSender?.slackUserId,
-            senderName: currentMessageSender?.displayName,
-            senderGithub: currentMessageSender?.githubLogin,
-            agentContext: currentMessageAgentContext,
-          })
-        : normalizedQuestion
-      : turnSource === 'human'
-        ? wrapFastAgentMessage(normalizedQuestion, currentMessageSender)
-        : normalizedQuestion;
+    inputKind === 'reaction'
+      ? normalizedQuestion
+      : surface === 'slack'
+        ? currentMessageTs
+          ? wrapSlackMessage(normalizedQuestion, {
+              ts: currentMessageTs,
+              senderSlackId: currentMessageSender?.slackUserId,
+              senderName: currentMessageSender?.displayName,
+              senderGithub: currentMessageSender?.githubLogin,
+              agentContext: currentMessageAgentContext,
+            })
+          : normalizedQuestion
+        : turnSource === 'human'
+          ? wrapFastAgentMessage(normalizedQuestion, currentMessageSender)
+          : normalizedQuestion;
   const turnMessage = buildUserTextMessage(currentUserMessageText);
 
   if (compatibilityMessages.length > 0) {
     const supplementalThreadContext = buildSupplementalThreadContext({
       threadContext,
       compatibilityMessages,
-      currentMessageTs,
+      currentMessageTs: contextualMessageTs,
       surface,
     });
     const turnMessages = [
@@ -684,10 +692,10 @@ function buildFastAgentMessages({
   }
 
   const { threadContext: serializedThreadContext, replyingTo } =
-    currentMessageTs && surface === 'slack'
+    contextualMessageTs && surface === 'slack'
       ? buildSlackThreadPromptBlocks({
           threadMessages: threadContext,
-          currentMessageTs,
+          currentMessageTs: contextualMessageTs,
         })
       : {
           threadContext: wrapFastAgentThreadContext(threadContext),
@@ -771,10 +779,14 @@ export async function answerFastAgentQuestion({
   model,
   reasoningEffort,
   turnSource = 'human',
+  inputKind,
+  responseVisibility,
+  currentMessageReactable,
   platformEventHandling = 'default',
-  platformEventVisibility = 'optional',
+  platformEventVisibility,
   platformEventKind = 'delegated_task',
   allowSilentAmbientReply = false,
+  turnTranscriptPayload,
   platformEventTranscriptPayload,
 }: {
   question: string;
@@ -796,11 +808,17 @@ export async function answerFastAgentQuestion({
   model?: string | null;
   reasoningEffort?: ReasoningEffort | null;
   turnSource?: FastAgentTurnSource;
+  inputKind?: FastAgentInputKind;
+  responseVisibility?: FastAgentResponseVisibility;
+  currentMessageReactable?: boolean;
   platformEventHandling?: FastAgentPlatformEventHandling;
+  /** @deprecated Use responseVisibility. */
   platformEventVisibility?: FastAgentPlatformEventVisibility;
   platformEventKind?: FastAgentPlatformEventKind;
   /** True only for an unmentioned turn in a multi-human Fast conversation. */
   allowSilentAmbientReply?: boolean;
+  turnTranscriptPayload?: Record<string, unknown>;
+  /** @deprecated Use turnTranscriptPayload. */
   platformEventTranscriptPayload?: Record<string, unknown>;
 }): Promise<string> {
   const turnId = buildFastAgentTurnId({
@@ -817,6 +835,19 @@ export async function answerFastAgentQuestion({
     userId,
   });
   const platformEvent = turnSource === 'platform_event';
+  const resolvedInputKind =
+    inputKind ?? (platformEvent ? 'platform_event' : 'message');
+  const resolvedResponseVisibility =
+    responseVisibility ??
+    platformEventVisibility ??
+    (platformEvent ? 'optional' : 'required');
+  const resolvedCurrentMessageReactable =
+    currentMessageReactable ??
+    (!platformEvent && resolvedInputKind === 'message');
+  const resolvedTurnTranscriptPayload =
+    turnTranscriptPayload ?? platformEventTranscriptPayload;
+  const titleEligibleHumanInput =
+    !platformEvent && resolvedInputKind === 'message';
   const turnVisibleMessages: ModelMessage[] = [];
   let mirroredMessageCount = 0;
   let canonicalConversationId: string | null = null;
@@ -905,7 +936,7 @@ export async function answerFastAgentQuestion({
         },
         payload: {
           purpose: reply.purpose,
-          ...(platformEventTranscriptPayload ?? {}),
+          ...(resolvedTurnTranscriptPayload ?? {}),
           ...(reply.imageArtifactIds?.length
             ? { imageArtifactIds: reply.imageArtifactIds }
             : {}),
@@ -1165,10 +1196,11 @@ export async function answerFastAgentQuestion({
           images,
         ),
         metadata: {
-          // Platform-event prompts are internal <platform_event> JSON, not
-          // something a person typed — keep them out of the transcript view.
-          visibleInTranscript: !platformEvent,
+          // Synthetic envelopes are useful model input but not readable
+          // transcript or title seeds.
+          visibleInTranscript: titleEligibleHumanInput,
           turnSource,
+          inputKind: resolvedInputKind,
           userId,
           ...(senderDisplayName ? { userName: senderDisplayName } : {}),
           ...(senderDisplayName ? { senderDisplayName } : {}),
@@ -1180,9 +1212,9 @@ export async function answerFastAgentQuestion({
       true,
     );
     diagnostics.recordInitialHumanTurn(
-      platformEvent ? false : userMessageResult?.initialHumanTurn,
+      titleEligibleHumanInput ? userMessageResult?.initialHumanTurn : false,
     );
-    if (!platformEvent) {
+    if (titleEligibleHumanInput) {
       void refreshFastAgentSessionTitle({ sessionId: session.id, userId });
     }
     const sessionActiveTasks = await getActiveFastAgentTasks(session.id);
@@ -1218,6 +1250,7 @@ export async function answerFastAgentQuestion({
       currentMessageTs: currentMessageId,
       currentMessageSender,
       surface: conversation.surface,
+      inputKind: resolvedInputKind,
       turnSource,
     });
     const releaseVersion = resolveRoomoteReleaseVersion(
@@ -1233,8 +1266,10 @@ export async function answerFastAgentQuestion({
       activeTasks: resolvedActiveTasks,
       surface: conversation.surface,
       turnSource,
+      inputKind: resolvedInputKind,
+      responseVisibility: resolvedResponseVisibility,
+      currentMessageReactable: resolvedCurrentMessageReactable,
       platformEventHandling,
-      platformEventVisibility,
       platformEventKind,
       retryTaskStartAvailable: Boolean(adapter.retryTaskStart),
       allowSilentAmbientReply,
@@ -1590,11 +1625,11 @@ export async function answerFastAgentQuestion({
 
           case FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReaction: {
             const args = chatReactionArgsSchema.parse(call.args);
-            if (platformEvent) {
+            if (!resolvedCurrentMessageReactable) {
               return {
                 success: false,
                 error:
-                  'Emoji reactions are unavailable during platform events. Use send_chat_reply or ignore_event instead.',
+                  'Emoji reactions are unavailable for this input. Use send_chat_reply or ignore_event instead.',
               };
             }
             if (!adapter.postReaction) {
@@ -1912,17 +1947,20 @@ export async function answerFastAgentQuestion({
 
           case FAST_AGENT_NATIVE_TOOL_NAMES.ignoreEvent: {
             ignoreEventArgsSchema.parse(call.args);
-            if (!platformEvent && !allowSilentAmbientReply) {
-              return {
-                success: false,
-                error:
-                  'Only an optional platform event or eligible ambient human message may be ignored.',
-              };
-            }
-            if (platformEvent && platformEventVisibility === 'required') {
+            if (platformEvent && resolvedResponseVisibility === 'required') {
               return {
                 success: false,
                 error: 'This platform event requires a user-visible closeout.',
+              };
+            }
+            if (
+              resolvedResponseVisibility !== 'optional' &&
+              !allowSilentAmbientReply
+            ) {
+              return {
+                success: false,
+                error:
+                  'Only optional input or an eligible ambient human message may be ignored.',
               };
             }
             closed = true;
@@ -2343,7 +2381,7 @@ export async function answerFastAgentQuestion({
           message:
             'I could not complete that request within the available turn.',
         });
-      } else if (platformEvent && platformEventVisibility === 'required') {
+      } else if (platformEvent && resolvedResponseVisibility === 'required') {
         // A visibility-required platform event promises a closeout even when
         // an intro ack or launch kickoff already posted a visible update
         // (e.g. the setup kickoff ending on an empty terminal response).

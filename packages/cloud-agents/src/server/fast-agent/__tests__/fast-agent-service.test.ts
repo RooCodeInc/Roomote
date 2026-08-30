@@ -25,6 +25,7 @@ const mocks = vi.hoisted(() => ({
   captureTurnSettled: vi.fn(),
   revokeMcpCapabilities: vi.fn(),
   reconcileRetryNotices: vi.fn(),
+  refreshSessionTitle: vi.fn(),
   nativeExecutor: undefined as
     | ((call: {
         agent?: string;
@@ -77,6 +78,10 @@ vi.mock('../fast-agent-conversation-repository', () => ({
   INTERRUPTED_INFERENCE_RETRY_MESSAGE:
     'The inference retry was interrupted before it completed. Please send the request again.',
   reconcileFastAgentInferenceRetryNotices: mocks.reconcileRetryNotices,
+}));
+
+vi.mock('../fast-agent-title', () => ({
+  refreshFastAgentSessionTitle: mocks.refreshSessionTitle,
 }));
 
 vi.mock('../../router', () => ({
@@ -279,6 +284,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     mocks.setOpenCodeSession.mockResolvedValue(undefined);
     mocks.upsertMessage.mockResolvedValue({ initialHumanTurn: true });
     mocks.reconcileRetryNotices.mockResolvedValue(0);
+    mocks.refreshSessionTitle.mockResolvedValue(undefined);
     mocks.getActiveTasks.mockResolvedValue([]);
     mocks.getEnvironments.mockResolvedValue([
       {
@@ -746,11 +752,16 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         .flatMap(([input]) => input.messages)
         .some((message) => message.role === 'user'),
     ).toBe(false);
+    expect(mocks.refreshSessionTitle).not.toHaveBeenCalled();
 
     await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
     expect(mocks.captureTurnSettled).toHaveBeenLastCalledWith(
       expect.objectContaining({ initialHumanTurn: true }),
     );
+    expect(mocks.refreshSessionTitle).toHaveBeenCalledWith({
+      sessionId: 'conversation-1',
+      userId: 'user-1',
+    });
   });
 
   it('rebuilds accumulated conversation context for a reaction that directly answers Fast', async () => {
@@ -790,10 +801,11 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       ...baseParams,
       question: buildFastAgentReactionExternalInputQuestion(reactionInput),
       currentMessageId: 'slack-reaction:100.3',
-      turnSource: 'platform_event',
-      platformEventKind: 'external_input',
-      platformEventVisibility: 'optional',
-      platformEventTranscriptPayload: { externalInput: reactionInput },
+      turnSource: 'human',
+      inputKind: 'reaction',
+      responseVisibility: 'optional',
+      currentMessageReactable: false,
+      turnTranscriptPayload: { externalInput: reactionInput },
       adapter: callbacks(),
     });
 
@@ -802,9 +814,29 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     expect(prompt).toContain(
       '[ASSISTANT]\nReact to this message with your favorite emoji.',
     );
-    expect(prompt).toContain('&lt;external_input&gt;');
+    expect(prompt).toContain('<external_input>');
     expect(prompt).toContain('sparkling_heart');
     expect(prompt).toContain('React to this message with your favorite emoji.');
+    expect(prompt).not.toContain('<slack_message ts="slack-reaction:100.3">');
+    expect(mocks.upsertMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: expect.objectContaining({
+          metadata: expect.objectContaining({
+            inputKind: 'reaction',
+            turnSource: 'human',
+            visibleInTranscript: false,
+          }),
+        }),
+      }),
+    );
+    expect(mocks.captureTurnSettled).toHaveBeenCalledWith(
+      expect.objectContaining({
+        initialHumanTurn: false,
+        turnSource: 'human',
+      }),
+    );
+    expect(mocks.getUserIdentity).toHaveBeenCalledWith('user-1');
+    expect(mocks.refreshSessionTitle).not.toHaveBeenCalled();
   });
 
   it('leaves initial-turn classification unknown when prompt persistence fails', async () => {
@@ -906,7 +938,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         ).resolves.toEqual({
           success: false,
           error:
-            'Only an optional platform event or eligible ambient human message may be ignored.',
+            'Only optional input or an eligible ambient human message may be ignored.',
         });
         await invokeTool(nativeToolNames.sendChatReply, {
           purpose: 'closeout',
@@ -2554,37 +2586,54 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     );
   });
 
-  it('still requires an acknowledgement before canceling a task', async () => {
-    mocks.getActiveTasks.mockResolvedValue([
-      { taskId: 'task-1', title: 'Checkout', status: 'running' },
-    ]);
-    mocks.generateText.mockImplementation(
-      async (_params, _session, options) => {
-        await options.onSessionReady('opencode-session-1');
-        await expect(
-          invokeTool(nativeToolNames.cancelTask, { taskId: 'task-1' }),
-        ).resolves.toEqual({
-          success: false,
-          error:
-            'Post an acknowledgement with send_chat_reply before this action.',
-        });
-        await invokeTool(nativeToolNames.sendChatReply, {
-          purpose: 'ack',
-          message: 'I’ll stop it.',
-        });
-        await expect(
-          invokeTool(nativeToolNames.cancelTask, { taskId: 'task-1' }),
-        ).resolves.toEqual({ success: true });
-        return '';
+  it.each([
+    ['message', {}],
+    [
+      'reaction',
+      {
+        inputKind: 'reaction' as const,
+        responseVisibility: 'optional' as const,
+        currentMessageReactable: false,
       },
-    );
+    ],
+  ])(
+    'still requires an acknowledgement before canceling a task for human %s input',
+    async (_inputKind, turnOptions) => {
+      mocks.getActiveTasks.mockResolvedValue([
+        { taskId: 'task-1', title: 'Checkout', status: 'running' },
+      ]);
+      mocks.generateText.mockImplementation(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          await expect(
+            invokeTool(nativeToolNames.cancelTask, { taskId: 'task-1' }),
+          ).resolves.toEqual({
+            success: false,
+            error:
+              'Post an acknowledgement with send_chat_reply before this action.',
+          });
+          await invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'ack',
+            message: 'I’ll stop it.',
+          });
+          await expect(
+            invokeTool(nativeToolNames.cancelTask, { taskId: 'task-1' }),
+          ).resolves.toEqual({ success: true });
+          return '';
+        },
+      );
 
-    await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+      await answerFastAgentQuestion({
+        ...baseParams,
+        ...turnOptions,
+        adapter: callbacks(),
+      });
 
-    expect(mocks.cancelTask).toHaveBeenCalledOnce();
-  });
+      expect(mocks.cancelTask).toHaveBeenCalledOnce();
+    },
+  );
 
-  it('silently ignores optional external input through the existing native tool', async () => {
+  it('silently ignores optional human reaction input through the existing native tool', async () => {
     mocks.generateText.mockImplementation(
       async (_params, _session, options) => {
         await options.onSessionReady('opencode-session-1');
@@ -2597,16 +2646,17 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     await expect(
       answerFastAgentQuestion({
         ...baseParams,
-        turnSource: 'platform_event',
-        platformEventKind: 'external_input',
-        platformEventVisibility: 'optional',
+        turnSource: 'human',
+        inputKind: 'reaction',
+        responseVisibility: 'optional',
+        currentMessageReactable: false,
         adapter,
       }),
     ).resolves.toBe('');
     expect(adapter.postReply).not.toHaveBeenCalled();
   });
 
-  it('rejects reaction side effects during platform events', async () => {
+  it('rejects reaction side effects on non-reactable human reaction input', async () => {
     let reactionResult: unknown;
     mocks.generateText.mockImplementation(
       async (_params, _session, options) => {
@@ -2626,16 +2676,17 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     await answerFastAgentQuestion({
       ...baseParams,
       currentMessageId: 'slack-reaction:1710000000.000100',
-      turnSource: 'platform_event',
-      platformEventKind: 'external_input',
-      platformEventVisibility: 'optional',
+      turnSource: 'human',
+      inputKind: 'reaction',
+      responseVisibility: 'optional',
+      currentMessageReactable: false,
       adapter,
     });
 
     expect(reactionResult).toEqual({
       success: false,
       error:
-        'Emoji reactions are unavailable during platform events. Use send_chat_reply or ignore_event instead.',
+        'Emoji reactions are unavailable for this input. Use send_chat_reply or ignore_event instead.',
     });
     expect(adapter.postReaction).not.toHaveBeenCalled();
   });

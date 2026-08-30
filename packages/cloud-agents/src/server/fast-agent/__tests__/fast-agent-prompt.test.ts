@@ -480,7 +480,7 @@ describe('buildFastAgentSystemPrompt', () => {
       surface: 'automation',
       turnSource: 'platform_event',
       platformEventKind: 'automation',
-      platformEventVisibility: 'required',
+      responseVisibility: 'required',
     });
 
     expect(prompt).toContain('fast mode on a stored automation conversation');
@@ -491,37 +491,34 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).not.toContain('<slack_modern_markdown>');
   });
 
-  it('treats optional reaction input as intentional conversation before allowing silence', () => {
+  it('treats optional reactions as non-reactable human conversation', () => {
     const prompt = buildFastAgentSystemPrompt({
       availableEnvironments: [],
       surface: 'slack',
-      turnSource: 'platform_event',
-      platformEventKind: 'external_input',
-      platformEventVisibility: 'optional',
+      turnSource: 'human',
+      inputKind: 'reaction',
+      responseVisibility: 'optional',
+      currentMessageReactable: false,
     });
 
-    expect(prompt).toContain('External Platform Input');
+    expect(prompt).toContain('Human Reaction Input');
     expect(prompt).toContain(
-      'envelope carrying an intentional human interaction associated with this conversation',
+      'intentional human-authored conversation from the reactor',
     );
     expect(prompt).toContain(
-      'The envelope is platform-generated, but the interaction inside it is deliberate user input',
+      'not ambient participant chatter and not platform lifecycle machinery',
     );
     expect(prompt).toContain(
-      'call "ignore_event" only after interpreting the reaction against the reacted-to message and recent conversation',
-    );
-    expect(prompt).not.toContain(
-      'This event requires a user-visible closeout because it carries user-useful substance',
-    );
-    expect(prompt).toContain('Do not use the reaction tool');
-    expect(prompt).toContain(
-      'an inbound emoji-reaction event is not itself a reactable message surface',
+      'Interpret the reaction against the reacted-to Fast message in `external_input.message` and the recent conversation',
     );
     expect(prompt).toContain(
-      'If the reaction warrants a response, post a text reply; otherwise stay silent according to the ignore rules above',
+      'A visible response is optional. Call "ignore_event" only when the reaction is duplicate or, after contextual interpretation, conveys no useful conversational intent or action',
     );
     expect(prompt).toContain(
-      'intentional conversational input from the reactor, not ambient participant chatter or lifecycle machinery',
+      'The reacted-to message is context, not a current message surface: do not call `send_chat_reaction`',
+    );
+    expect(prompt).toContain(
+      '`reactor` fields in the current `<external_input>` identify the human sender',
     );
     expect(prompt).toContain(
       'If Fast asked a question or invited a reaction and the emoji reasonably answers it, treat the reaction as a direct answer and continue from that answer',
@@ -529,13 +526,20 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain(
       'Do not call "ignore_event" merely because the input arrived as a reaction',
     );
+    expect(prompt).not.toContain('External Platform Input');
+    expect(prompt).not.toContain(
+      'a platform event has no incoming chat message',
+    );
+    expect(prompt).not.toContain(
+      'Use `send_chat_reaction` when an emoji itself is the appropriate response',
+    );
   });
 
   it('requires a visible closeout for visibility-required platform events', () => {
     const prompt = buildFastAgentSystemPrompt({
       availableEnvironments: [],
       turnSource: 'platform_event',
-      platformEventVisibility: 'required',
+      responseVisibility: 'required',
     });
 
     expect(prompt).toContain(

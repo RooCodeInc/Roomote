@@ -427,7 +427,7 @@ describe('Fast conversation repository', () => {
     ).toBe(true);
   });
 
-  it('classifies the first human prompt after platform events and retries idempotently', async () => {
+  it('classifies the first message after platform events and human reactions', async () => {
     const user = await createUser();
     const session = await fastAgentConversationRepository.getOrCreate({
       userId: user.id,
@@ -436,6 +436,7 @@ describe('Fast conversation repository', () => {
     const prompt = (
       eventId: string,
       turnSource: 'human' | 'platform_event',
+      inputKind?: 'message' | 'reaction' | 'platform_event',
     ) => ({
       eventId,
       turnId: eventId,
@@ -444,7 +445,12 @@ describe('Fast conversation repository', () => {
       eventType: 'roomote_runtime.user_prompt' as const,
       role: 'user' as const,
       contentBlocks: [{ type: 'text' as const, text: 'Prompt' }],
-      metadata: { visibleInTranscript: true, turnSource },
+      metadata: {
+        visibleInTranscript: true,
+        turnSource,
+        inputKind:
+          inputKind ?? (turnSource === 'human' ? 'message' : 'platform_event'),
+      },
       payload: {},
       source: 'slack',
     });
@@ -453,6 +459,12 @@ describe('Fast conversation repository', () => {
       fastAgentConversationRepository.upsertMessage({
         conversationId: session.id,
         message: prompt('platform-event', 'platform_event'),
+      }),
+    ).resolves.toEqual({ initialHumanTurn: false });
+    await expect(
+      fastAgentConversationRepository.upsertMessage({
+        conversationId: session.id,
+        message: prompt('human-reaction', 'human', 'reaction'),
       }),
     ).resolves.toEqual({ initialHumanTurn: false });
     await expect(

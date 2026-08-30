@@ -497,7 +497,8 @@ export const fastAgentConversationRepository: FastAgentConversationRepository =
         const isHumanPrompt =
           message.eventType === ACP_ENVELOPE_EVENT_TYPES.UserPrompt &&
           message.role === 'user' &&
-          message.metadata?.turnSource === 'human';
+          message.metadata?.turnSource === 'human' &&
+          message.metadata?.inputKind !== 'reaction';
         let initialHumanTurn = false;
         if (isHumanPrompt) {
           const [currentHumanPrompt] = await tx
@@ -513,6 +514,7 @@ export const fastAgentConversationRepository: FastAgentConversationRepository =
                 ),
                 eq(fastAgentMessages.role, 'user'),
                 sql`${fastAgentMessages.metadata}->>'turnSource' = 'human'`,
+                sql`coalesce(${fastAgentMessages.metadata}->>'inputKind', 'message') <> 'reaction'`,
               ),
             )
             .limit(1);
@@ -528,6 +530,7 @@ export const fastAgentConversationRepository: FastAgentConversationRepository =
                 ),
                 eq(fastAgentMessages.role, 'user'),
                 sql`${fastAgentMessages.metadata}->>'turnSource' = 'human'`,
+                sql`coalesce(${fastAgentMessages.metadata}->>'inputKind', 'message') <> 'reaction'`,
                 sql`${fastAgentMessages.eventId} <> ${message.eventId}`,
               ),
             )

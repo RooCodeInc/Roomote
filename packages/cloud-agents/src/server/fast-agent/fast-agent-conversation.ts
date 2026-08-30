@@ -18,14 +18,18 @@ export function getFastAgentConversationStorageWorkspaceId(
 
 export type FastAgentTurnSource = 'human' | 'platform_event';
 
-export type FastAgentPlatformEventVisibility = 'optional' | 'required';
+export type FastAgentInputKind = 'message' | 'reaction' | 'platform_event';
+
+export type FastAgentResponseVisibility = 'optional' | 'required';
+
+/** @deprecated Use FastAgentResponseVisibility for new turn contracts. */
+export type FastAgentPlatformEventVisibility = FastAgentResponseVisibility;
 
 export type FastAgentPlatformEventHandling = 'default' | 'present_only';
 
 export type FastAgentPlatformEventKind =
   | 'delegated_task'
   | 'automation'
-  | 'external_input'
   | 'setup';
 
 export type FastAgentReactionExternalInput = {
