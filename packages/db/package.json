@@ -33,7 +33,8 @@
     "db:migrate": "pnpm drizzle-kit:development migrate",
     "db:migrate:standalone": "DRIZZLE_MIGRATIONS_FOLDER=drizzle tsx src/run-migrations.ts",
     "db:push": "pnpm drizzle-kit:development push",
-    "db:push:test": "pnpm drizzle-kit:test push --force",
+    "db:push:test": "pnpm drizzle-kit:test push --force && pnpm db:reconcile-test-indexes",
+    "db:reconcile-test-indexes": "NODE_ENV=test dotenvx run --quiet --ignore=MISSING_ENV_FILE -f ../../.env.test -- sh -c 'DATABASE_URL=${DATABASE_URL:-postgres://postgres:password@localhost:15432/roomote_test} tsx scripts/reconcile-test-indexes.ts' --",
     "db:seed": "dotenvx run --quiet -f ../../.env.local -- tsx src/fixtures/seed.ts",
     "db:seed:demo": "dotenvx run --quiet --ignore=MISSING_ENV_FILE -f ../../.env.local -- tsx src/fixtures/seed-demo.ts",
     "development:create-env-var": "dotenvx run --quiet -f ../../.env.local -- tsx scripts/create-env-var.ts"
