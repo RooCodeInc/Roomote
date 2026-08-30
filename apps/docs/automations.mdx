@@ -94,6 +94,9 @@ webhooks for each active repository's current default branch, uses the
 deployment helper model to write a brief commit summary, and includes the pusher
 and commit authors. Feature-branch pushes and branch deletions are ignored.
 GitHub, GitLab, Azure DevOps, Bitbucket, and Gitea are supported.
+For GitHub merge commits that Roomote can match to a pull request, the summary
+uses that pull request's context and **View changes** opens the pull request.
+Other announcements link to the provider's compare view.
 
 ## Custom automations
 
