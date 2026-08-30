@@ -820,6 +820,55 @@ describe('deliverFastAgentParentEvent', () => {
     }
   });
 
+  it('releases an acquired lock when the timed-out parent turn does not settle', async () => {
+    vi.useFakeTimers();
+    try {
+      mocks.answerQuestion.mockImplementationOnce(
+        () => new Promise(() => undefined),
+      );
+
+      const delivery = deliverFastAgentParentEvent({
+        parent,
+        event,
+        turnTimeoutMs: 1_000,
+      });
+      const rejection = expect(delivery).rejects.toThrow(
+        'Fast parent event delivery timed out after 1000ms.',
+      );
+      await vi.advanceTimersByTimeAsync(1_000);
+
+      await rejection;
+      expect(mocks.releaseTurnLock).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('releases an acquired lock when parent-turn setup does not settle', async () => {
+    vi.useFakeTimers();
+    try {
+      mocks.findSession.mockImplementationOnce(
+        () => new Promise(() => undefined),
+      );
+
+      const delivery = deliverFastAgentParentEvent({
+        parent,
+        event,
+        turnTimeoutMs: 1_000,
+      });
+      const rejection = expect(delivery).rejects.toThrow(
+        'Fast parent event delivery timed out after 1000ms.',
+      );
+      await vi.advanceTimersByTimeAsync(1_000);
+
+      await rejection;
+      expect(mocks.answerQuestion).not.toHaveBeenCalled();
+      expect(mocks.releaseTurnLock).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('delivers a guild parent event to its routable channel, not its session identity', async () => {
     const discordParent = {
       ...parent,

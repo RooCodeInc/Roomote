@@ -1352,25 +1352,48 @@ export async function deliverFastAgentParentEvent(params: {
   const turnSignal = turnTimeout
     ? AbortSignal.any([releaseTurnLock.signal, turnAbortController.signal])
     : releaseTurnLock.signal;
+  let removeTurnAbortListener: (() => void) | undefined;
+  const turnAborted = new Promise<never>((_resolve, reject) => {
+    const rejectWithAbortReason = () => {
+      reject(
+        turnSignal.reason instanceof Error
+          ? turnSignal.reason
+          : new Error('Fast parent event delivery was aborted.'),
+      );
+    };
+    if (turnSignal.aborted) {
+      rejectWithAbortReason();
+      return;
+    }
+    turnSignal.addEventListener('abort', rejectWithAbortReason, { once: true });
+    removeTurnAbortListener = () =>
+      turnSignal.removeEventListener('abort', rejectWithAbortReason);
+  });
+  const withinTurnBudget = <T>(operation: Promise<T>) =>
+    Promise.race([operation, turnAborted]);
 
   try {
     if (params.event.type === 'pull_request_opened') {
-      const currentRun = await db.query.taskRuns.findFirst({
-        where: eq(taskRuns.id, params.event.runId),
-        columns: { status: true },
-      });
+      const currentRun = await withinTurnBudget(
+        db.query.taskRuns.findFirst({
+          where: eq(taskRuns.id, params.event.runId),
+          columns: { status: true },
+        }),
+      );
       if (!currentRun || EXITED_RUN_STATUSES.has(currentRun.status)) {
         return 'skipped';
       }
     }
 
-    const parentTurn = await createFastAgentParentTurn({
-      parent: params.parent,
-      event: params.event,
-      onReplyPosted: () => {
-        replyPosted = true;
-      },
-    });
+    const parentTurn = await withinTurnBudget(
+      createFastAgentParentTurn({
+        parent: params.parent,
+        event: params.event,
+        onReplyPosted: () => {
+          replyPosted = true;
+        },
+      }),
+    );
     const defaultTaskModel =
       params.event.type === 'automation_triggered'
         ? params.event.defaultTaskModel
@@ -1387,56 +1410,58 @@ export async function deliverFastAgentParentEvent(params: {
     // origin matches its own apiBaseUrl, so a mismatched pair silently drops
     // every deployment MCP server from parent-event turns.
     const apiBaseUrl = resolveApiBaseUrl() ?? undefined;
-    await answerFastAgentQuestion({
-      question: `<platform_event>${JSON.stringify(params.event)}</platform_event>`,
-      userId: parentTurn.userId,
-      conversation: parentTurn.conversation,
-      currentMessageId: buildEventClientMessageSeed(params.event),
-      apiBaseUrl,
-      signal: turnSignal,
-      turnSource: 'platform_event',
-      platformEventHandling:
-        params.event.type === 'pull_request_feedback' ||
-        params.event.type === 'pull_request_conflict_detected'
-          ? 'present_only'
-          : 'default',
-      platformEventVisibility:
-        params.event.type === 'pull_request_feedback' ||
-        params.event.type === 'pull_request_conflict_detected' ||
-        params.event.type === 'automation_triggered'
-          ? 'required'
-          : 'optional',
-      platformEventKind:
-        params.event.type === 'automation_triggered'
-          ? 'automation'
-          : 'delegated_task',
-      ...(params.event.type === 'pull_request_feedback' &&
-      params.event.reviewActionDeliveryId &&
-      params.event.suggestedActionQuestion
-        ? {
-            platformEventTranscriptPayload: {
-              prReviewAction: {
-                deliveryId: params.event.reviewActionDeliveryId,
-                question: params.event.suggestedActionQuestion,
-                status: 'pending',
+    await withinTurnBudget(
+      answerFastAgentQuestion({
+        question: `<platform_event>${JSON.stringify(params.event)}</platform_event>`,
+        userId: parentTurn.userId,
+        conversation: parentTurn.conversation,
+        currentMessageId: buildEventClientMessageSeed(params.event),
+        apiBaseUrl,
+        signal: turnSignal,
+        turnSource: 'platform_event',
+        platformEventHandling:
+          params.event.type === 'pull_request_feedback' ||
+          params.event.type === 'pull_request_conflict_detected'
+            ? 'present_only'
+            : 'default',
+        platformEventVisibility:
+          params.event.type === 'pull_request_feedback' ||
+          params.event.type === 'pull_request_conflict_detected' ||
+          params.event.type === 'automation_triggered'
+            ? 'required'
+            : 'optional',
+        platformEventKind:
+          params.event.type === 'automation_triggered'
+            ? 'automation'
+            : 'delegated_task',
+        ...(params.event.type === 'pull_request_feedback' &&
+        params.event.reviewActionDeliveryId &&
+        params.event.suggestedActionQuestion
+          ? {
+              platformEventTranscriptPayload: {
+                prReviewAction: {
+                  deliveryId: params.event.reviewActionDeliveryId,
+                  question: params.event.suggestedActionQuestion,
+                  status: 'pending',
+                },
               },
-            },
-          }
-        : {}),
-      adapter: {
-        ...parentTurn.adapter,
-        launchTask,
-        resolveMcpServerConfigs: () =>
-          resolveUserMcpServerConfigs({
-            userId: parentTurn.userId,
-            apiBaseUrl,
-            includeRoomoteMemberTools: true,
-          }),
-        ...(params.retryTaskStart
-          ? { retryTaskStart: params.retryTaskStart }
+            }
           : {}),
-      },
-    });
+        adapter: {
+          ...parentTurn.adapter,
+          launchTask,
+          resolveMcpServerConfigs: () =>
+            resolveUserMcpServerConfigs({
+              userId: parentTurn.userId,
+              apiBaseUrl,
+              includeRoomoteMemberTools: true,
+            }),
+          ...(params.retryTaskStart
+            ? { retryTaskStart: params.retryTaskStart }
+            : {}),
+        },
+      }),
+    );
     return 'delivered';
   } catch (error) {
     if (error instanceof FastAgentParentEventDeliveryError) {
@@ -1448,6 +1473,7 @@ export async function deliverFastAgentParentEvent(params: {
     );
   } finally {
     if (turnTimeout) clearTimeout(turnTimeout);
+    removeTurnAbortListener?.();
     await releaseTurnLock();
   }
 }
