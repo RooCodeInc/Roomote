@@ -1,7 +1,8 @@
-import { Queue, QueueEvents, Worker, type Job } from 'bullmq';
+import { DelayedError, Queue, QueueEvents, Worker, type Job } from 'bullmq';
 
 import {
   drainFastAgentParentEvents,
+  FastAgentParentBusyError,
   FAST_AGENT_PARENT_EVENT_QUEUE_NAME,
   recoverPendingFastAgentParentEvents,
   type FastAgentParentEventQueueRequest,
@@ -12,6 +13,7 @@ import { getRedis } from './redis';
 const RECOVERY_JOB_NAME = 'recover-pending';
 const RECOVERY_SCHEDULER_ID = 'fast-agent-parent-event-recovery';
 const RECOVERY_INTERVAL_MS = 60_000;
+const BUSY_PARENT_RETRY_DELAY_MS = 1_000;
 
 type FastAgentParentEventJob =
   | FastAgentParentEventQueueRequest
@@ -23,7 +25,15 @@ async function processJob(job: Job<FastAgentParentEventJob>) {
     return;
   }
   if ('recovery' in job.data) return;
-  await drainFastAgentParentEvents(job.data);
+  try {
+    await drainFastAgentParentEvents(job.data);
+  } catch (error) {
+    if (!(error instanceof FastAgentParentBusyError) || !job.token) {
+      throw error;
+    }
+    await job.moveToDelayed(Date.now() + BUSY_PARENT_RETRY_DELAY_MS, job.token);
+    throw new DelayedError();
+  }
 }
 
 export async function startFastAgentParentEventQueue() {
@@ -51,8 +61,8 @@ export async function startFastAgentParentEventQueue() {
   const worker = new Worker<FastAgentParentEventJob>(
     FAST_AGENT_PARENT_EVENT_QUEUE_NAME,
     processJob,
-    // A busy parent consumes only its own slot while other conversations keep
-    // draining. Ordering within each parent comes from the durable DB inbox.
+    // Busy parents immediately move back to delayed; no conversation can park
+    // the worker pool while it owns an active Fast turn.
     { connection, concurrency: 20, autorun: true },
   );
 

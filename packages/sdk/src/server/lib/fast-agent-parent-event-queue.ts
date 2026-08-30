@@ -31,6 +31,13 @@ export type FastAgentParentEventQueueRequest = {
   eventKey: string;
 };
 
+export class FastAgentParentBusyError extends Error {
+  constructor() {
+    super('Fast parent conversation is busy; retry the durable queue later.');
+    this.name = 'FastAgentParentBusyError';
+  }
+}
+
 let fastAgentParentEventQueue: Queue<FastAgentParentEventQueueRequest> | null =
   null;
 
@@ -174,13 +181,15 @@ export async function drainFastAgentParentEvents(
     return drainFastAgentParentEvents(request);
   }
 
-  // Intentionally no wall-clock wait or execution cutoff. The durable inbox
-  // owns admission; this worker simply waits until the active Fast turn exits.
+  // Admission is already durable, so a busy parent should not occupy a worker
+  // slot. BullMQ moves this wakeup to delayed and retries without consuming an
+  // attempt. Once acquired, event execution itself has no wall-clock cutoff.
   const turnLock = await acquireFastAgentTurnLock({
     conversation: parent.conversation,
+    maxWaitMs: 0,
   });
   if (!turnLock) {
-    throw new Error('Fast parent turn lock did not become available.');
+    throw new FastAgentParentBusyError();
   }
 
   try {

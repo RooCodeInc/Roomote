@@ -207,6 +207,7 @@ export {
   buildFastAgentParentEventKey,
   drainFastAgentParentEvents,
   enqueueFastAgentParentEvent,
+  FastAgentParentBusyError,
   FAST_AGENT_PARENT_EVENT_QUEUE_NAME,
   recoverPendingFastAgentParentEvents,
   type FastAgentParentEventQueueRequest,

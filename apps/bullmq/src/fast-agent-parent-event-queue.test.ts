@@ -5,9 +5,12 @@ const mocks = vi.hoisted(() => ({
   processor: undefined as ((job: unknown) => Promise<void>) | undefined,
   recover: vi.fn(),
   drain: vi.fn(),
+  BusyError: class FastAgentParentBusyError extends Error {},
+  DelayedError: class DelayedError extends Error {},
 }));
 
 vi.mock('bullmq', () => ({
+  DelayedError: mocks.DelayedError,
   Queue: class Queue {
     upsertJobScheduler = mocks.upsertJobScheduler;
   },
@@ -26,6 +29,7 @@ vi.mock('@roomote/sdk/server', () => ({
   FAST_AGENT_PARENT_EVENT_QUEUE_NAME: 'fast-agent-parent-events',
   recoverPendingFastAgentParentEvents: mocks.recover,
   drainFastAgentParentEvents: mocks.drain,
+  FastAgentParentBusyError: mocks.BusyError,
 }));
 
 vi.mock('./redis', () => ({ getRedis: vi.fn(() => ({})) }));
@@ -66,5 +70,24 @@ describe('startFastAgentParentEventQueue', () => {
     });
     expect(mocks.recover).toHaveBeenCalledOnce();
     expect(mocks.drain).not.toHaveBeenCalled();
+  });
+
+  it('delays a busy parent without consuming a worker attempt', async () => {
+    await startFastAgentParentEventQueue();
+    mocks.drain.mockRejectedValueOnce(new mocks.BusyError());
+    const moveToDelayed = vi.fn().mockResolvedValue(undefined);
+
+    await expect(
+      mocks.processor?.({
+        name: 'deliver',
+        data: { conversationId: 'conversation-1', eventKey: 'event-1' },
+        token: 'worker-token',
+        moveToDelayed,
+      }),
+    ).rejects.toBeInstanceOf(mocks.DelayedError);
+    expect(moveToDelayed).toHaveBeenCalledWith(
+      expect.any(Number),
+      'worker-token',
+    );
   });
 });

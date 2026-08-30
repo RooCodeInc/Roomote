@@ -89,6 +89,7 @@ import {
   buildFastAgentParentEventKey,
   drainFastAgentParentEvents,
   enqueueFastAgentParentEvent,
+  FastAgentParentBusyError,
 } from './fast-agent-parent-event-queue';
 
 const parent = {
@@ -177,6 +178,24 @@ describe('Fast parent event durable queue', () => {
     expect(mocks.deliver.mock.calls[0]?.[0]?.event.messageId).toBe('message-1');
     expect(mocks.deliver.mock.calls[1]?.[0]?.event.messageId).toBe('message-2');
     expect(mocks.releaseLock).toHaveBeenCalledOnce();
+  });
+
+  it('returns a retryable busy signal without occupying a worker slot', async () => {
+    const first = pendingRow('event-1');
+    mocks.findPending.mockResolvedValueOnce(first);
+    mocks.acquireLock.mockResolvedValueOnce(null);
+
+    await expect(
+      drainFastAgentParentEvents({
+        conversationId: parent.sessionId,
+        eventKey: first.eventKey,
+      }),
+    ).rejects.toBeInstanceOf(FastAgentParentBusyError);
+    expect(mocks.acquireLock).toHaveBeenCalledWith({
+      conversation: parent.conversation,
+      maxWaitMs: 0,
+    });
+    expect(mocks.deliver).not.toHaveBeenCalled();
   });
 
   it('keeps later events pending when the head has a transient failure', async () => {
