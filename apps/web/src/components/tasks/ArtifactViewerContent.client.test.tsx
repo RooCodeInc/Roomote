@@ -321,6 +321,51 @@ describe('ArtifactViewerContent', () => {
     ).toBeInTheDocument();
   });
 
+  it('resets HTML artifacts to preview when the path or version changes', () => {
+    const createHtmlArtifact = (path: string, version: number) => ({
+      id: 'artifact-html',
+      taskId: 'task-1',
+      path,
+      version,
+      artifactType: 'general' as const,
+      contentType: 'text/html',
+      size: 128,
+      createdAt: new Date('2026-05-22T00:00:00.000Z'),
+      downloadUrl: 'https://example.test/preview.html',
+      content: `<main>${path} v${version}</main>`,
+    });
+    const { rerender } = render(
+      <ArtifactViewerContent
+        taskId="task-1"
+        artifact={createHtmlArtifact('reports/first.html', 1)}
+      />,
+    );
+
+    fireEvent.click(screen.getByLabelText('Code'));
+    rerender(
+      <ArtifactViewerContent
+        taskId="task-1"
+        artifact={createHtmlArtifact('reports/second.html', 1)}
+      />,
+    );
+
+    expect(
+      screen.getByTitle('Preview of reports/second.html'),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByLabelText('Code'));
+    rerender(
+      <ArtifactViewerContent
+        taskId="task-1"
+        artifact={createHtmlArtifact('reports/second.html', 2)}
+      />,
+    );
+
+    expect(
+      screen.getByTitle('Preview of reports/second.html'),
+    ).toBeInTheDocument();
+  });
+
   it('keeps non-HTML text artifacts in the existing code view', () => {
     render(
       <ArtifactViewerContent

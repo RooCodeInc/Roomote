@@ -220,6 +220,10 @@ export function ArtifactViewerContent({
     prevLatestVersionRef.current = undefined;
   }, [artifact?.path]);
 
+  useEffect(() => {
+    setIsRaw(false);
+  }, [artifact?.path, artifact?.version]);
+
   const latestVersion = versions[0]?.version;
   useEffect(() => {
     if (!artifact || !onVersionChange || !latestVersion) return;
