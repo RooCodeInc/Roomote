@@ -167,7 +167,9 @@ export async function refreshTaskSessionTitle({
 
 /**
  * Regenerate a Fast session title from its canonical transcript, gated by the
- * same monotonic checkpoints tasks use. Best-effort: callers fire and forget.
+ * same monotonic checkpoints tasks use. Returns only a title changed by this
+ * invocation so callers can notify external surfaces without duplicate writes.
+ * Best-effort: callers fire and forget.
  */
 export async function refreshFastAgentSessionTitle({
   sessionId,
@@ -190,7 +192,7 @@ export async function refreshFastAgentSessionTitle({
       return null;
     }
     if (conversation.titleEditedByUserAt) {
-      return conversation.title;
+      return null;
     }
 
     const rows = await db
@@ -233,7 +235,7 @@ export async function refreshFastAgentSessionTitle({
       checkpoint <= conversation.llmTitleCheckpoint ||
       messages.length === 0
     ) {
-      return conversation.title;
+      return null;
     }
 
     const title = await generateLlmTaskTitle({
@@ -242,7 +244,7 @@ export async function refreshFastAgentSessionTitle({
       messages,
     });
     if (isFallbackTaskTitle(title)) {
-      return conversation.title;
+      return null;
     }
 
     return await db.transaction(async (tx) => {
@@ -254,7 +256,7 @@ export async function refreshFastAgentSessionTitle({
         .from(fastAgentConversations)
         .where(eq(fastAgentConversations.id, sessionId))
         .for('update');
-      if (!current) return conversation.title;
+      if (!current) return null;
 
       const [updatedConversation] = await tx
         .update(fastAgentConversations)
@@ -267,7 +269,7 @@ export async function refreshFastAgentSessionTitle({
           ),
         )
         .returning({ id: fastAgentConversations.id });
-      if (!updatedConversation) return current.title;
+      if (!updatedConversation) return null;
 
       // Keep the unified Session's title in step with the generated
       // conversation title, but never clobber a manual Session rename: only
@@ -296,7 +298,7 @@ export async function refreshFastAgentSessionTitle({
             inArray(sessions.title, [...previousTitleCandidates]),
           ),
         );
-      return title;
+      return title === current.title ? null : title;
     });
   } catch (error) {
     console.error(

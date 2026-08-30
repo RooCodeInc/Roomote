@@ -28,25 +28,33 @@ export function createFastAgentSlackSessionActivity({
   let processingTimer: ReturnType<typeof setTimeout> | undefined;
   let processingUpdate: Promise<void> | undefined;
   let titleUpdate = Promise.resolve();
+  let lastRenameAttemptTitle: string | undefined;
   let settled = false;
 
-  const syncTitle = () => {
+  const syncTitle = (requireSlackTitle = true) => {
     titleUpdate = titleUpdate.then(async () => {
+      const title = sessionTitle;
       if (
-        !sessionTitle ||
-        slackTitle === undefined ||
-        slackTitle === sessionTitle
+        !title ||
+        title === slackTitle ||
+        title === lastRenameAttemptTitle ||
+        (requireSlackTitle && slackTitle === undefined)
       ) {
         return;
       }
-      if (
-        await slack.renameAgentSession({
-          channel,
-          threadTs,
-          title: sessionTitle,
-        })
-      ) {
-        slackTitle = sessionTitle;
+      lastRenameAttemptTitle = title;
+      try {
+        if (
+          await slack.renameAgentSession({
+            channel,
+            threadTs,
+            title,
+          })
+        ) {
+          slackTitle = title;
+        }
+      } catch {
+        // Slack activity is best-effort and must never fail a Fast turn.
       }
     });
     return titleUpdate;
@@ -98,10 +106,14 @@ export function createFastAgentSlackSessionActivity({
       }
     },
     updateTitle(title) {
-      sessionTitle = normalizeSessionTitle(title);
-      if (processingUpdate) {
-        void processingUpdate.then(syncTitle);
-      }
+      const updatedTitle = normalizeSessionTitle(title);
+      if (!updatedTitle || updatedTitle === sessionTitle) return;
+
+      sessionTitle = updatedTitle;
+      // A generated title is reported only after it has been persisted. Rename
+      // directly so short turns and status responses without a title cannot
+      // suppress the corresponding Slack notification.
+      void syncTitle(false);
     },
   };
 }

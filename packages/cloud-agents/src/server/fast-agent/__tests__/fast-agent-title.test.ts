@@ -167,12 +167,13 @@ describe('refreshFastAgentSessionTitle', () => {
       .set({ title: 'Existing title', llmTitleCheckpoint: 1 })
       .where(eq(fastAgentConversations.id, conversation.id));
 
-    await refreshFastAgentSessionTitle({
+    const refreshedTitle = await refreshFastAgentSessionTitle({
       sessionId: conversation.id,
       userId: user.id,
     });
 
     expect(generateLlmTaskTitle).not.toHaveBeenCalled();
+    expect(refreshedTitle).toBeNull();
   });
 
   it('never overwrites a user-edited title', async () => {
@@ -191,12 +192,13 @@ describe('refreshFastAgentSessionTitle', () => {
       .set({ title: 'My name', titleEditedByUserAt: new Date() })
       .where(eq(fastAgentConversations.id, conversation.id));
 
-    await refreshFastAgentSessionTitle({
+    const refreshedTitle = await refreshFastAgentSessionTitle({
       sessionId: conversation.id,
       userId: user.id,
     });
 
     expect(generateLlmTaskTitle).not.toHaveBeenCalled();
+    expect(refreshedTitle).toBeNull();
     const updated = await db.query.fastAgentConversations.findFirst({
       where: eq(fastAgentConversations.id, conversation.id),
     });

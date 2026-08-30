@@ -170,6 +170,70 @@ describe('createFastAgentSlackSessionActivity', () => {
     });
   });
 
+  it('renames a generated title after a short turn has already settled', async () => {
+    vi.useFakeTimers();
+    const setAgentSessionStatus = vi.fn();
+    const renameAgentSession = vi.fn().mockResolvedValue(true);
+    const activity = createFastAgentSlackSessionActivity({
+      slack: { renameAgentSession, setAgentSessionStatus },
+      channel: 'C123',
+      threadTs: '100.001',
+    });
+
+    activity.start();
+    await activity.settle();
+    activity.updateTitle?.('Generated Fast title');
+    await vi.runAllTimersAsync();
+
+    expect(setAgentSessionStatus).not.toHaveBeenCalled();
+    expect(renameAgentSession).toHaveBeenCalledOnce();
+    expect(renameAgentSession).toHaveBeenCalledWith({
+      channel: 'C123',
+      threadTs: '100.001',
+      title: 'Generated Fast title',
+    });
+  });
+
+  it('does not rename blank or unchanged generated titles', async () => {
+    vi.useFakeTimers();
+    const setAgentSessionStatus = vi.fn();
+    const renameAgentSession = vi.fn();
+    const activity = createFastAgentSlackSessionActivity({
+      slack: { renameAgentSession, setAgentSessionStatus },
+      channel: 'C123',
+      threadTs: '100.001',
+      title: 'Existing Fast title',
+    });
+
+    activity.start();
+    await activity.settle();
+    activity.updateTitle?.('Existing Fast title');
+    activity.updateTitle?.('   ');
+    await vi.runAllTimersAsync();
+
+    expect(renameAgentSession).not.toHaveBeenCalled();
+  });
+
+  it('keeps generated title rename failures non-fatal', async () => {
+    vi.useFakeTimers();
+    const setAgentSessionStatus = vi.fn();
+    const renameAgentSession = vi
+      .fn()
+      .mockRejectedValue(new Error('Slack unavailable'));
+    const activity = createFastAgentSlackSessionActivity({
+      slack: { renameAgentSession, setAgentSessionStatus },
+      channel: 'C123',
+      threadTs: '100.001',
+    });
+
+    activity.start();
+    await activity.settle();
+    activity.updateTitle?.('Generated Fast title');
+    await vi.runAllTimersAsync();
+
+    expect(renameAgentSession).toHaveBeenCalledOnce();
+  });
+
   it('renames an existing session before active cleanup when the title changed', async () => {
     vi.useFakeTimers();
     let resolveRename!: (value: boolean) => void;
