@@ -111,10 +111,7 @@ export async function enrichGitHubMergeAnnouncerEvent(
         per_page: MAX_GITHUB_ASSOCIATED_PULL_REQUESTS,
       });
     const candidates = associatedPullRequests
-      .filter(
-        (pullRequest) =>
-          pullRequest.state === 'closed' && pullRequest.base.ref === branch,
-      )
+      .filter((pullRequest) => pullRequest.base.ref === branch)
       .slice(0, MAX_GITHUB_PULL_REQUEST_CANDIDATES);
     const detailResults = await Promise.allSettled(
       candidates.map((pullRequest) =>
@@ -131,9 +128,7 @@ export async function enrichGitHubMergeAnnouncerEvent(
       )
       .find(
         (candidate) =>
-          candidate.merged_at !== null &&
-          candidate.base.ref === branch &&
-          candidate.merge_commit_sha === after,
+          candidate.base.ref === branch && candidate.merge_commit_sha === after,
       );
 
     if (!pullRequest) {
