@@ -155,10 +155,26 @@ describe('refreshFastAgentSessionTitle', () => {
     });
     await insertMessage({
       conversationId: conversation.id,
+      eventId: 'turn-1:assistant',
+      role: 'assistant',
+      text: 'First answer',
+      ts: 2,
+      eventType: 'roomote_runtime.assistant_message',
+    });
+    await insertMessage({
+      conversationId: conversation.id,
       eventId: 'turn-2:user',
       role: 'user',
+      text: 'What does it look like?',
+      ts: 3,
+      eventType: 'roomote_runtime.user_prompt',
+    });
+    await insertMessage({
+      conversationId: conversation.id,
+      eventId: 'turn-3:user',
+      role: 'user',
       text: '<platform_event>{}</platform_event>',
-      ts: 2,
+      ts: 4,
       eventType: 'roomote_runtime.user_prompt',
       metadata: { visibleInTranscript: false },
     });

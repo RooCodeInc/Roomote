@@ -103,6 +103,7 @@ describe('createFastAgentSlackSessionActivity', () => {
 
     activity.start();
     await vi.advanceTimersByTimeAsync(FAST_AGENT_SLACK_PROCESSING_DELAY_MS);
+    activity.updateTitle?.('Investigate Slack agent status');
     await activity.settle();
 
     expect(renameAgentSession).not.toHaveBeenCalled();
@@ -188,6 +189,42 @@ describe('createFastAgentSlackSessionActivity', () => {
     expect(setAgentSessionStatus).not.toHaveBeenCalled();
     expect(renameAgentSession).toHaveBeenCalledOnce();
     expect(renameAgentSession).toHaveBeenCalledWith({
+      channel: 'C123',
+      threadTs: '100.001',
+      title: 'Generated Fast title',
+    });
+  });
+
+  it('retries a generated title after status creates the Slack session', async () => {
+    vi.useFakeTimers();
+    let resolveProcessing!: (value: { ok: true }) => void;
+    const processing = new Promise<{ ok: true }>((resolve) => {
+      resolveProcessing = resolve;
+    });
+    const setAgentSessionStatus = vi
+      .fn()
+      .mockReturnValueOnce(processing)
+      .mockResolvedValueOnce({ ok: true });
+    const renameAgentSession = vi
+      .fn()
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(true);
+    const activity = createFastAgentSlackSessionActivity({
+      slack: { renameAgentSession, setAgentSessionStatus },
+      channel: 'C123',
+      threadTs: '100.001',
+    });
+
+    activity.start();
+    await vi.advanceTimersByTimeAsync(FAST_AGENT_SLACK_PROCESSING_DELAY_MS);
+    activity.updateTitle?.('Generated Fast title');
+    await vi.waitFor(() => expect(renameAgentSession).toHaveBeenCalledOnce());
+
+    resolveProcessing({ ok: true });
+    await activity.settle();
+
+    expect(renameAgentSession).toHaveBeenCalledTimes(2);
+    expect(renameAgentSession).toHaveBeenLastCalledWith({
       channel: 'C123',
       threadTs: '100.001',
       title: 'Generated Fast title',

@@ -29,16 +29,20 @@ export function createFastAgentSlackSessionActivity({
   let processingUpdate: Promise<void> | undefined;
   let titleUpdate = Promise.resolve();
   let lastRenameAttemptTitle: string | undefined;
+  let pendingTitleChange = false;
   let settled = false;
 
-  const syncTitle = (requireSlackTitle = true) => {
+  const syncTitle = (requireSlackTitle = true, retryPendingChange = false) => {
     titleUpdate = titleUpdate.then(async () => {
       const title = sessionTitle;
+      const shouldRetryPendingChange = retryPendingChange && pendingTitleChange;
       if (
         !title ||
         title === slackTitle ||
-        title === lastRenameAttemptTitle ||
-        (requireSlackTitle && slackTitle === undefined)
+        (title === lastRenameAttemptTitle && !shouldRetryPendingChange) ||
+        (requireSlackTitle &&
+          slackTitle === undefined &&
+          !shouldRetryPendingChange)
       ) {
         return;
       }
@@ -52,9 +56,14 @@ export function createFastAgentSlackSessionActivity({
           })
         ) {
           slackTitle = title;
+          pendingTitleChange = false;
         }
       } catch {
         // Slack activity is best-effort and must never fail a Fast turn.
+      } finally {
+        if (shouldRetryPendingChange) {
+          pendingTitleChange = false;
+        }
       }
     });
     return titleUpdate;
@@ -75,9 +84,10 @@ export function createFastAgentSlackSessionActivity({
           });
           if (response.ok) {
             slackTitle = response.title;
-            // Slack ignores setStatus.title after creation, so rename only
-            // when its response proves an existing session has another title.
-            await syncTitle();
+            // Slack ignores setStatus.title after creation. A known mismatch
+            // still syncs, and a failed persisted-title rename gets one retry
+            // after setStatus has had a chance to create the session.
+            await syncTitle(true, true);
           }
         })();
       }, delayMs);
@@ -95,7 +105,7 @@ export function createFastAgentSlackSessionActivity({
 
       try {
         await processingUpdate;
-        await syncTitle();
+        await syncTitle(true, true);
       } finally {
         await slack.setAgentSessionStatus({
           channel,
@@ -110,6 +120,7 @@ export function createFastAgentSlackSessionActivity({
       if (!updatedTitle || updatedTitle === sessionTitle) return;
 
       sessionTitle = updatedTitle;
+      pendingTitleChange = true;
       // A generated title is reported only after it has been persisted. Rename
       // directly so short turns and status responses without a title cannot
       // suppress the corresponding Slack notification.
