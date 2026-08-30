@@ -44,8 +44,8 @@ generated title that updates as the Session evolves.
 
 Fast sessions can also render presentational widgets such as status cards,
 tables, and plans directly in the transcript. Widget HTML is sanitized and
-sandboxed in the web view; chat surfaces receive only the widget's text
-fallback.
+sandboxed in the web view. Chat surfaces receive a concise text preview and a
+link to open the rendered widget when both are available.
 
 ## Reply to a session
 
@@ -56,11 +56,13 @@ thread with a quoted copy of your web message, so the conversation stays in one
 place for everyone following it there.
 
 Fast replies across Slack, Discord, Microsoft Teams, and Telegram link back to
-the Session view. Slack and Discord can also resume Fast directly from chat.
-Microsoft Teams replies continue the same Session after Roomote verifies the
-tenant, installation, conversation, and linked user. Telegram currently uses
-the Session view for Fast follow-ups because its inbound webhook route does not
-yet carry Fast Session identity.
+the Session view and can resume the same Session directly from chat. Roomote
+verifies the provider installation, conversation, and linked user before it
+accepts the follow-up.
+
+In shared Slack and Discord conversations, Fast can stay silent when linked
+participants are talking to each other. A direct reply to Roomote, a mention,
+an explicit Fast command, or a direct message still requires a response.
 
 ## Execution access
 

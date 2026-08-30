@@ -2,6 +2,40 @@
 
 This file tracks product releases for Roomote (single monorepo version). Automated release entries are prepended by `pnpm run version`.
 
+## 0.46.0 (2026-08-30)
+
+This release makes Sessions the center of Roomote work, broadens Fast across chat and connected tooling, expands Memory context and control, and adds richer automation, analytics, and artifact workflows.
+
+### Highlights
+
+- Follow conversations, delegated executions, artifacts, reviews, and costs in a searchable Session workspace across desktop and mobile.
+- Continue Fast directly from Microsoft Teams and Telegram, react to replies across every chat provider, and delegate parallel coding work with attachment context.
+- Enable Memory more easily and recall public Discord discussions, visible Linear issues, and richer Notion database properties.
+- Preview generated HTML safely and announce default-branch changes with concise, pull-request-aware summaries across supported source-control providers.
+
+### Minor changes
+
+- Start and continue linked Fast conversations directly from Microsoft Teams and Telegram, matching the existing Slack and Discord experience.
+- React to Roomote Fast replies across Slack, Discord, Microsoft Teams, and Telegram to provide context for a follow-up or let the conversation stay quiet.
+- Announce default-branch pushes across supported source-control providers with concise, pull-request-aware summaries, direct change links, and durable Slack, Discord, Microsoft Teams, or Telegram destinations.
+- Open Analytics on Costs by default and break out Session orchestration and Memory synthesis so teams can understand where inference spend comes from.
+- Let Fast launch multiple independent coding tasks from one turn, forward image and supported file context into delegated work, and show nested startup progress without losing retries or results.
+- Let Fast inspect GitHub Actions runs, jobs, and logs to explain CI failures while keeping the diagnostic path read-only.
+- Let connected MCP clients read Fast Session history and send follow-ups through the same Roomote task communication interface used for standard tasks.
+- Open generated HTML artifacts as safely sandboxed previews with a source-code toggle, while keeping presentational widgets available in web transcripts and linked chat previews.
+- Add public Discord discussions and visible Linear issues to Memory, preserve richer Linear planning metadata, and render readable Notion database properties for more complete recall.
+- Let administrators enable Memory without a dedicated synthesis-provider key, enable it by default for new hosted deployments, and surface newly ingested pages within minutes instead of waiting for a later maintenance pass.
+- Finish setup in one Roomote Session that launches and tracks selected starter tasks, with clearer guidance about the value and limits of hosted trial inference.
+- Make Sessions the primary workspace for Roomote work, with dashboard launch and search, recent-session navigation, delegated execution details, artifacts, reviews, costs, stable titles, and responsive mobile layouts in one continuous conversation.
+
+### Patch changes
+
+- Keep Fast sessions quiet through short transient provider recoveries: retries stay silent unless the wait grows past 30 seconds, all retryable provider errors share a six-retry budget with bounded jittered backoff, and warm-session progress refreshes the recovery budget the way completed coding-task turns do.
+- Queue delegated-task updates durably for their Fast parent so busy conversations process child progress and completion in order instead of rejecting or killing the parent event after 30 seconds.
+- Keep pull-request review follow-through reliable by showing actionable feedback in Fast and standard web tasks, clearing resolved Roomote findings, preserving the correct destination branch and attribution, and avoiding duplicate review requests.
+- Disable anonymous usage reporting in the bundled Infinity service so self-hosted local Memory embeddings stay quiet by default.
+- Keep Fast Sessions stable through cold starts and refreshes by preserving conversation context, model and reasoning choices, generated titles, pull-request status, and recovery state without duplicate or stale transcript notices.
+
 ## 0.45.1 (2026-08-29)
 
 This patch restores complete Notion database discovery across Memory and the built-in Notion MCP.

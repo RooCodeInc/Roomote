@@ -160,6 +160,11 @@ R_GITHUB_ADDITIONAL_APP_SLUGS=roomote-community,roomote-reviewer
 Roomote treats only the primary slug and this comma-separated allowlist as
 managed bot identities. Do not add unrelated GitHub Apps.
 
+Fast can use the GitHub App's Actions access to inspect workflow runs, jobs, and
+logs when it explains a CI failure. That diagnostic path is read-only even
+though the app keeps broader Actions and Workflows permissions for normal task
+and automation workflows.
+
 Generate a private key from the app's **Private keys** section. GitHub
 downloads a `.pem` file. Convert it to an escaped single-line value before
 saving it in an env var:
@@ -219,11 +224,11 @@ Once the app is installed and an environment maps the repository:
 Issue mentions use the environment mapped to the repository. Map the repository
 to an environment before mentioning Roomote on issues.
 
-When a task delegated from a Fast session in Slack or Discord opens a pull
-request, actionable review feedback returns to that same session. Use
-**Resolve these issues** to address the current feedback, **Auto-resolve on this
-PR** to handle later actionable feedback automatically, or **Dismiss** to take
-no action.
+When a Roomote task opens a pull request, actionable review feedback returns to
+the owning Session and appears in both Fast and standard web task transcripts.
+Use **Resolve these issues** to address the current feedback, **Auto-resolve on
+this PR** to handle later actionable feedback automatically, or **Dismiss** to
+take no action.
 
 Failed GitHub checks also return to every Roomote task linked to the pull
 request and to the conversation that started the work. Roomote consolidates a
