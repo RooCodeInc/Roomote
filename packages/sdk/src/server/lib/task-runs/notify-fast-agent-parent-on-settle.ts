@@ -1,16 +1,6 @@
-import { setTimeout as delay } from 'node:timers/promises';
-
 import { redactSecrets } from '@roomote/communication/redact-secrets';
-import {
-  canRetryFailedStart,
-  enqueueTaskRelaunch,
-  getTaskUrl,
-} from '@roomote/cloud-agents/server';
-import {
-  RunStatus,
-  getFastAgentParentFromPayload,
-  type FastAgentParent,
-} from '@roomote/types';
+import { canRetryFailedStart, getTaskUrl } from '@roomote/cloud-agents/server';
+import { RunStatus, getFastAgentParentFromPayload } from '@roomote/types';
 import {
   type TaskRun,
   and,
@@ -20,118 +10,19 @@ import {
   sql,
   taskRuns,
 } from '@roomote/db/server';
-import {
-  FastAgentParentEventDeliveryError,
-  deliverFastAgentParentEvent,
-  listFastAgentPullRequestContexts,
-} from '../fast-agent-parent-event';
+import { listFastAgentPullRequestContexts } from '../fast-agent-parent-event';
+import { enqueueFastAgentParentEvent } from '../fast-agent-parent-event-queue';
 import {
   buildFastAgentDeliveringMarker,
   buildFastAgentDeliveryClaimPredicate,
 } from './fast-agent-delivery-claim';
 
 const NOTIFIED_RESULT_KEY = 'fastAgentParentSettleNotifiedAt';
-const FAST_AGENT_STARTUP_MAX_RETRIES = 2;
-const FAST_AGENT_STARTUP_RETRY_BASE_DELAY_MS = 1_000;
-
 type SettledStatus =
   | RunStatus.Completed
   | RunStatus.Failed
   | RunStatus.Canceled
   | RunStatus.Idle;
-
-async function countFastAgentStartupRetries(
-  run: TaskRun,
-  parent: FastAgentParent,
-): Promise<number> {
-  let retries = 0;
-  let sourceRunId = run.sourceRunId;
-
-  while (sourceRunId && retries < FAST_AGENT_STARTUP_MAX_RETRIES) {
-    const sourceRun = await db.query.taskRuns.findFirst({
-      where: eq(taskRuns.id, sourceRunId),
-      columns: { payload: true, sourceRunId: true },
-    });
-    const sourceParent = sourceRun
-      ? getFastAgentParentFromPayload(sourceRun.payload)
-      : null;
-
-    if (!sourceRun || sourceParent?.sessionId !== parent.sessionId) {
-      break;
-    }
-
-    retries += 1;
-    sourceRunId = sourceRun.sourceRunId;
-  }
-
-  return retries;
-}
-
-async function retryFastAgentStartup(
-  run: TaskRun,
-  parent: FastAgentParent,
-): Promise<
-  { success: true; runId: number } | { success: false; error: string }
-> {
-  const existingRetry = await db.query.taskRuns.findFirst({
-    where: and(
-      eq(taskRuns.taskId, run.taskId),
-      eq(taskRuns.sourceRunId, run.id),
-    ),
-    columns: { id: true },
-  });
-
-  // A parent event may be redelivered when the retry was queued but its Slack
-  // closeout failed. Return the original relaunch instead of attempting a
-  // second side effect or reporting the already-queued retry as a failure.
-  if (existingRetry) {
-    return { success: true, runId: existingRetry.id };
-  }
-
-  if (!(await canRetryFailedStart({ ...run, status: RunStatus.Failed }))) {
-    return {
-      success: false,
-      error: 'This task is not eligible for a failed-start retry.',
-    };
-  }
-
-  const retries = await countFastAgentStartupRetries(run, parent);
-  if (retries >= FAST_AGENT_STARTUP_MAX_RETRIES) {
-    return {
-      success: false,
-      error: 'The failed-start retry limit has been reached.',
-    };
-  }
-
-  const retryNumber = retries + 1;
-  const delayMs =
-    FAST_AGENT_STARTUP_RETRY_BASE_DELAY_MS * 2 ** (retryNumber - 1);
-
-  await delay(delayMs);
-  const relaunchedRun = await enqueueTaskRelaunch({
-    sourceRunId: run.id,
-    actingUserId: run.actingUserId,
-  });
-  await recordTaskRunLifecycleEvent(db, {
-    runId: run.id,
-    taskId: run.taskId,
-    eventType: 'decision',
-    message: `Fast parent retried child sandbox startup (${retryNumber}/${FAST_AGENT_STARTUP_MAX_RETRIES}).`,
-    details: {
-      reason: 'fast_agent_parent_startup_retry',
-      fastAgentSessionId: parent.sessionId,
-      retryNumber,
-      maxRetries: FAST_AGENT_STARTUP_MAX_RETRIES,
-      delayMs,
-    },
-  }).catch((error) => {
-    console.warn(
-      `[notifyFastAgentParentOnSettle] Failed to record parent-requested startup retry for run ${run.id}: ${error instanceof Error ? error.message : String(error)}`,
-    );
-  });
-
-  return { success: true, runId: relaunchedRun.id };
-}
 
 function formatFastAgentTerminalError(run: TaskRun): string {
   const error = run.error?.trim();
@@ -178,18 +69,14 @@ export async function notifyFastAgentParentOnSettle(
     return;
   }
 
-  let delivered = false;
-
   try {
     const pullRequests = await listFastAgentPullRequestContexts(run.taskId);
-    let retryTaskStart:
-      | (() => ReturnType<typeof retryFastAgentStartup>)
-      | undefined;
+    let retryTaskStartRunId: number | undefined;
 
     if (status === RunStatus.Failed) {
       try {
         if (await canRetryFailedStart({ ...run, status: RunStatus.Failed })) {
-          retryTaskStart = () => retryFastAgentStartup(run, parent);
+          retryTaskStartRunId = run.id;
         }
       } catch (error) {
         console.warn(
@@ -198,9 +85,9 @@ export async function notifyFastAgentParentOnSettle(
       }
     }
 
-    await deliverFastAgentParentEvent({
+    await enqueueFastAgentParentEvent({
       parent,
-      ...(retryTaskStart ? { retryTaskStart } : {}),
+      ...(retryTaskStartRunId ? { retryTaskStartRunId } : {}),
       event: {
         type: 'task_settled',
         taskId: run.taskId,
@@ -223,15 +110,13 @@ export async function notifyFastAgentParentOnSettle(
         pullRequests,
       },
     });
-    delivered = true;
-
     await markSettled();
 
     await recordTaskRunLifecycleEvent(db, {
       runId: run.id,
       taskId: run.taskId,
       eventType: 'decision',
-      message: `Passed ${status} lifecycle state to the Fast parent orchestrator.`,
+      message: `Queued ${status} lifecycle state for the Fast parent orchestrator.`,
       details: {
         reason: 'fast_agent_parent_settle_event',
         fastAgentSessionId: parent.sessionId,
@@ -244,22 +129,6 @@ export async function notifyFastAgentParentOnSettle(
         error instanceof Error ? error.message : String(error)
       }`,
     );
-    const deliveryError =
-      error instanceof FastAgentParentEventDeliveryError ? error : null;
-
-    if (delivered || deliveryError?.replyPosted) {
-      // The parent thread already saw the settle message; releasing the claim
-      // would let the other settle caller double-post. Settle the marker.
-      await markSettled().catch(() => {});
-      return;
-    }
-
-    if (deliveryError?.permanent) {
-      // No retry can succeed (parent session or installation gone).
-      await markSettled().catch(() => {});
-      return;
-    }
-
     try {
       await db
         .update(taskRuns)

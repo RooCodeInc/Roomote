@@ -8,6 +8,7 @@ import {
   createFastAgentWebTaskLauncher,
   fastAgentConversationRepository,
   resolveApiBaseUrl,
+  type FastAgentTurnLockHandle,
   type FastAgentTurnAdapter,
   type LaunchFastAgentTask,
 } from '@roomote/cloud-agents/server';
@@ -311,7 +312,9 @@ async function buildSelectedImages(params: {
   });
 }
 
-function buildEventClientMessageSeed(event: FastAgentParentEvent): string {
+export function buildEventClientMessageSeed(
+  event: FastAgentParentEvent,
+): string {
   switch (event.type) {
     case 'automation_triggered':
       return `fast-parent-automation:${event.eventId}`;
@@ -1308,8 +1311,7 @@ async function createFastAgentParentTurn(params: {
   }
 }
 
-/** Give a structured child event to the Fast orchestrator for presentation. */
-export async function deliverFastAgentParentEvent(params: {
+type FastAgentParentEventDeliveryParams = {
   parent: FastAgentParent;
   event: FastAgentParentEvent;
   retryTaskStart?: () => Promise<
@@ -1318,10 +1320,12 @@ export async function deliverFastAgentParentEvent(params: {
   /** Cap the turn-lock wait so callers holding an HTTP request can fail fast
    * and lean on their own retry instead of blocking. */
   lockWaitMs?: number;
-  /** Bound synchronous callers independently from Fast provider recovery so
-   * an abandoned HTTP request cannot keep renewing the conversation lock. */
-  turnTimeoutMs?: number;
-}): Promise<'delivered' | 'skipped'> {
+};
+
+/** Give a structured child event to the Fast orchestrator for presentation. */
+export async function deliverFastAgentParentEvent(
+  params: FastAgentParentEventDeliveryParams,
+): Promise<'delivered' | 'skipped'> {
   const conversation = params.parent.conversation;
   const releaseTurnLock = await acquireFastAgentTurnLock({
     conversation,
@@ -1336,64 +1340,43 @@ export async function deliverFastAgentParentEvent(params: {
     );
   }
 
+  try {
+    return await deliverFastAgentParentEventWithLock(params, releaseTurnLock);
+  } finally {
+    await releaseTurnLock();
+  }
+}
+
+/**
+ * Process one already-admitted event while a queue drainer owns the parent
+ * conversation. The caller owns lock release and may invoke this repeatedly
+ * to preserve durable queue order without letting another turn interleave.
+ */
+export async function deliverFastAgentParentEventWithLock(
+  params: FastAgentParentEventDeliveryParams,
+  turnLock: FastAgentTurnLockHandle,
+): Promise<'delivered' | 'skipped'> {
   let replyPosted = false;
-  const turnAbortController = new AbortController();
-  const turnTimeout =
-    params.turnTimeoutMs === undefined
-      ? undefined
-      : setTimeout(() => {
-          turnAbortController.abort(
-            new Error(
-              `Fast parent event delivery timed out after ${params.turnTimeoutMs}ms.`,
-            ),
-          );
-        }, params.turnTimeoutMs);
-  turnTimeout?.unref();
-  const turnSignal = turnTimeout
-    ? AbortSignal.any([releaseTurnLock.signal, turnAbortController.signal])
-    : releaseTurnLock.signal;
-  let removeTurnAbortListener: (() => void) | undefined;
-  const turnAborted = new Promise<never>((_resolve, reject) => {
-    const rejectWithAbortReason = () => {
-      reject(
-        turnSignal.reason instanceof Error
-          ? turnSignal.reason
-          : new Error('Fast parent event delivery was aborted.'),
-      );
-    };
-    if (turnSignal.aborted) {
-      rejectWithAbortReason();
-      return;
-    }
-    turnSignal.addEventListener('abort', rejectWithAbortReason, { once: true });
-    removeTurnAbortListener = () =>
-      turnSignal.removeEventListener('abort', rejectWithAbortReason);
-  });
-  const withinTurnBudget = <T>(operation: Promise<T>) =>
-    Promise.race([operation, turnAborted]);
+  const turnSignal = turnLock.signal;
 
   try {
     if (params.event.type === 'pull_request_opened') {
-      const currentRun = await withinTurnBudget(
-        db.query.taskRuns.findFirst({
-          where: eq(taskRuns.id, params.event.runId),
-          columns: { status: true },
-        }),
-      );
+      const currentRun = await db.query.taskRuns.findFirst({
+        where: eq(taskRuns.id, params.event.runId),
+        columns: { status: true },
+      });
       if (!currentRun || EXITED_RUN_STATUSES.has(currentRun.status)) {
         return 'skipped';
       }
     }
 
-    const parentTurn = await withinTurnBudget(
-      createFastAgentParentTurn({
-        parent: params.parent,
-        event: params.event,
-        onReplyPosted: () => {
-          replyPosted = true;
-        },
-      }),
-    );
+    const parentTurn = await createFastAgentParentTurn({
+      parent: params.parent,
+      event: params.event,
+      onReplyPosted: () => {
+        replyPosted = true;
+      },
+    });
     const defaultTaskModel =
       params.event.type === 'automation_triggered'
         ? params.event.defaultTaskModel
@@ -1410,7 +1393,7 @@ export async function deliverFastAgentParentEvent(params: {
     // origin matches its own apiBaseUrl, so a mismatched pair silently drops
     // every deployment MCP server from parent-event turns.
     const apiBaseUrl = resolveApiBaseUrl() ?? undefined;
-    const answer = answerFastAgentQuestion({
+    await answerFastAgentQuestion({
       question: `<platform_event>${JSON.stringify(params.event)}</platform_event>`,
       userId: parentTurn.userId,
       conversation: parentTurn.conversation,
@@ -1460,7 +1443,6 @@ export async function deliverFastAgentParentEvent(params: {
           : {}),
       },
     });
-    await withinTurnBudget(answer);
     return 'delivered';
   } catch (error) {
     if (error instanceof FastAgentParentEventDeliveryError) {
@@ -1470,9 +1452,5 @@ export async function deliverFastAgentParentEvent(params: {
       error instanceof Error ? error.message : String(error),
       { cause: error, replyPosted },
     );
-  } finally {
-    if (turnTimeout) clearTimeout(turnTimeout);
-    removeTurnAbortListener?.();
-    await releaseTurnLock();
   }
 }

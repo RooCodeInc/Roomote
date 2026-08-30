@@ -1,6 +1,6 @@
 const mocks = vi.hoisted(() => ({
   findRun: vi.fn(),
-  deliverParentEvent: vi.fn(),
+  enqueueParentEvent: vi.fn(),
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -10,8 +10,8 @@ vi.mock('@roomote/db/server', () => ({
   taskRuns: { id: 'task_runs.id', taskId: 'task_runs.task_id' },
 }));
 
-vi.mock('../fast-agent-parent-event', () => ({
-  deliverFastAgentParentEvent: mocks.deliverParentEvent,
+vi.mock('../fast-agent-parent-event-queue', () => ({
+  enqueueFastAgentParentEvent: mocks.enqueueParentEvent,
 }));
 
 import { relayFastAgentChildChatReply } from './relay-fast-agent-child-chat-reply';
@@ -34,10 +34,10 @@ describe('relayFastAgentChildChatReply', () => {
       taskId: 'task-1',
       payload: { fastAgentParent: parent },
     });
-    mocks.deliverParentEvent.mockResolvedValue('delivered');
+    mocks.enqueueParentEvent.mockResolvedValue({ queued: true });
   });
 
-  it('sends the child update only to the Fast parent event path', async () => {
+  it('durably queues the child update without waiting on the Fast parent', async () => {
     await expect(
       relayFastAgentChildChatReply({
         runId: 42,
@@ -49,7 +49,7 @@ describe('relayFastAgentChildChatReply', () => {
       }),
     ).resolves.toEqual({ relayed: true });
 
-    expect(mocks.deliverParentEvent).toHaveBeenCalledWith({
+    expect(mocks.enqueueParentEvent).toHaveBeenCalledWith({
       parent,
       event: {
         type: 'child_message',
@@ -60,8 +60,6 @@ describe('relayFastAgentChildChatReply', () => {
         message: 'The targeted tests are running.',
         imageArtifactIds: ['artifact-1'],
       },
-      lockWaitMs: 30_000,
-      turnTimeoutMs: 30_000,
     });
   });
 
@@ -81,7 +79,7 @@ describe('relayFastAgentChildChatReply', () => {
         message: 'Still working.',
       }),
     ).resolves.toEqual({ relayed: false });
-    expect(mocks.deliverParentEvent).not.toHaveBeenCalled();
+    expect(mocks.enqueueParentEvent).not.toHaveBeenCalled();
   });
 
   it('scopes the deterministic message id to the Fast parent session', async () => {
@@ -93,7 +91,7 @@ describe('relayFastAgentChildChatReply', () => {
       message: 'Still working.',
     };
     await relayFastAgentChildChatReply(input);
-    const firstMessageId = mocks.deliverParentEvent.mock.calls[0]?.[0]?.event
+    const firstMessageId = mocks.enqueueParentEvent.mock.calls[0]?.[0]?.event
       ?.messageId as string;
 
     mocks.findRun.mockResolvedValueOnce({
@@ -110,7 +108,7 @@ describe('relayFastAgentChildChatReply', () => {
 
     expect(firstMessageId).toMatch(/^[a-f0-9]{64}$/);
     expect(
-      mocks.deliverParentEvent.mock.calls[1]?.[0]?.event?.messageId,
+      mocks.enqueueParentEvent.mock.calls[1]?.[0]?.event?.messageId,
     ).not.toBe(firstMessageId);
   });
 });
