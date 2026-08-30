@@ -22,6 +22,7 @@ import {
 } from '../../task/[taskId]/hooks/use-task-session';
 import { Messages } from '../../task/[taskId]/Messages';
 import { SidePanelHeader } from '../../task/[taskId]/sidebar-panels/SidePanelHeader';
+import { Startup } from '../../task/[taskId]/startup';
 
 function NestedTaskTranscript({ session }: { session: TaskSession }) {
   const history = useTaskMessageEnvelopes(session.taskId);
@@ -47,6 +48,22 @@ function NestedTaskTranscript({ session }: { session: TaskSession }) {
     return <ErrorState title="Task is still preparing" />;
   }
 
+  const hasTranscriptHistory = (history.data?.length ?? 0) > 0;
+  const hasVisibleSessionPrompt =
+    session.prompt?.visibleInTranscript !== false && session.prompt != null;
+  const bootingTaskRun =
+    session.sessionState === 'booting' ? session.taskRun : null;
+
+  if (bootingTaskRun && !hasTranscriptHistory && !hasVisibleSessionPrompt) {
+    return (
+      <div className="min-h-0 flex-1 overflow-y-auto p-4">
+        <div className="mx-auto flex w-full max-w-4xl flex-col gap-2">
+          <Startup runId={bootingTaskRun.id} initialTaskRun={bootingTaskRun} />
+        </div>
+      </div>
+    );
+  }
+
   const transcript = (
     <ArtifactLinkProvider session={session}>
       <Messages
@@ -54,6 +71,14 @@ function NestedTaskTranscript({ session }: { session: TaskSession }) {
         initialScrollBehavior="instant"
         conversationClassName="mx-auto w-full max-w-4xl p-4"
         messageUiOptions={{ displayMode: 'default' }}
+        footer={
+          bootingTaskRun ? (
+            <Startup
+              runId={bootingTaskRun.id}
+              initialTaskRun={bootingTaskRun}
+            />
+          ) : null
+        }
       />
     </ArtifactLinkProvider>
   );

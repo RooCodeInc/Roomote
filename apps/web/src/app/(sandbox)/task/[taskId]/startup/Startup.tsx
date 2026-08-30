@@ -14,7 +14,7 @@ import { useStartupProgress } from './useStartupProgress';
 interface StartupProps {
   runId: number;
   initialTaskRun?: TaskRun;
-  newTaskHref: string;
+  newTaskHref?: string;
   onStatusChange?: (status: RunStatusValue) => void;
 }
 
@@ -49,7 +49,7 @@ export const Startup = ({
 interface StartupInnerProps {
   runId: number;
   initialTaskRun?: TaskRun;
-  newTaskHref: string;
+  newTaskHref?: string;
   onStatusChange?: (status: RunStatusValue) => void;
 }
 
