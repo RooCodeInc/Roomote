@@ -31,6 +31,7 @@ Roomote 1.0 makes Fast the default entry point for conversations, enables Memory
 - Let administrators enable Memory without a dedicated synthesis-provider key, enable it by default for new hosted deployments, and surface newly ingested pages within minutes instead of waiting for a later maintenance pass.
 - Finish setup in one Roomote Session that launches and tracks selected starter tasks, with clearer guidance about the value and limits of hosted trial inference.
 - Make Sessions the primary workspace for Roomote work, with dashboard launch and search, recent-session navigation, delegated execution details, artifacts, reviews, costs, stable titles, and responsive mobile layouts in one continuous conversation.
+- Browse current and previous Roomote releases directly in the update dialog, with the latest release expanded and newer remotely detected updates kept visible even when their notes are not yet available in the running image.
 
 ### Patch changes
 
@@ -40,6 +41,8 @@ Roomote 1.0 makes Fast the default entry point for conversations, enables Memory
 - Disable anonymous usage reporting in the bundled Infinity service so self-hosted local Memory embeddings stay quiet by default.
 - Keep Fast Sessions stable through cold starts and refreshes by preserving conversation context, model and reasoning choices, generated titles, pull-request status, and recovery state without duplicate or stale transcript notices.
 - Keep Slack Fast thread titles synchronized with generated and manually edited Session titles instead of leaving conversations labeled `Thread`.
+- Show platform issue alerts sent directly to Slack deployment admins with the same actionable automation card used for configured alert destinations.
+- Keep expanded tool-call details readable in Task and Fast transcripts by wrapping long YAML values within the transcript instead of clipping or overflowing them.
 
 ## 0.45.1 (2026-08-29)
 
