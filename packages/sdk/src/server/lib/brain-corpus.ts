@@ -139,7 +139,16 @@ let corpusCache: {
   expiresAtMs: number;
   load: Promise<BrainCorpusSnapshot | null> | null;
   refresh: Promise<BrainCorpusSnapshot | null> | null;
-} = { snapshot: null, expiresAtMs: 0, load: null, refresh: null };
+  topUp: Promise<void> | null;
+  topUpAtMs: number;
+} = {
+  snapshot: null,
+  expiresAtMs: 0,
+  load: null,
+  refresh: null,
+  topUp: null,
+  topUpAtMs: 0,
+};
 
 /** Drop the cached census, so the next call re-reads the corpus. */
 export function resetBrainCorpusCache(): void {
@@ -148,7 +157,124 @@ export function resetBrainCorpusCache(): void {
     expiresAtMs: 0,
     load: null,
     refresh: null,
+    topUp: null,
+    topUpAtMs: 0,
   };
+}
+
+/**
+ * Reads within this window share one top-up: a settings page load issues a
+ * handful of corpus reads back to back, and one incremental call answers for
+ * all of them.
+ */
+const CORPUS_TOP_UP_MIN_INTERVAL_MS = 3_000;
+
+/**
+ * Pull pages written since the cached snapshot's newest row into the cache,
+ * awaited by the read that triggered it. One bounded `list_pages` call
+ * (measured in single-digit milliseconds against a live Brain), so fresh
+ * ingestion is visible on the very next read instead of at the next
+ * ten-minute census. The full walk remains the source of truth for
+ * deletions and for anything wider than one window; a full window here just
+ * means more landed than one call returns, and the scheduled refresh
+ * reconciles.
+ */
+async function topUpCachedCorpus(): Promise<void> {
+  const snapshot = corpusCache.snapshot;
+
+  // Nothing to top up, a full walk already running owns the snapshot, or a
+  // recent top-up already answered for this page load.
+  if (
+    !snapshot ||
+    snapshot.pages.length === 0 ||
+    corpusCache.refresh ||
+    Date.now() - corpusCache.topUpAtMs < CORPUS_TOP_UP_MIN_INTERVAL_MS
+  ) {
+    return;
+  }
+
+  if (corpusCache.topUp) {
+    return corpusCache.topUp;
+  }
+
+  corpusCache.topUp = (async () => {
+    const boundary = snapshot.pages.reduce<Date | null>(
+      (latest, page) =>
+        page.updatedAt && (!latest || page.updatedAt > latest)
+          ? page.updatedAt
+          : latest,
+      null,
+    );
+
+    if (!boundary) {
+      return;
+    }
+
+    const connection = await resolveBrainConnection('agent');
+
+    if (!connection) {
+      return;
+    }
+
+    const payloads = await callBrainTool(
+      connection,
+      'list_pages',
+      {
+        limit: CORPUS_LISTING_WINDOW,
+        sort: 'updated_asc',
+        // `updated_after` is a strict > filter, and bulk writes stamp one
+        // updated_at across a whole transaction — a new page sharing the
+        // boundary timestamp would be invisible to an exact query. Start one
+        // millisecond earlier so the boundary's tie cluster is re-read; the
+        // slug merge below makes the overlap free.
+        updated_after: new Date(boundary.getTime() - 1).toISOString(),
+      },
+      { timeoutMs: CORPUS_REQUEST_TIMEOUT_MS },
+    );
+    const fresh = extractBrainCorpusPages(payloads);
+
+    if (fresh.length === 0) {
+      return;
+    }
+
+    // A saturated window means more changed than one call can see — new
+    // pages beyond the window, or a tie cluster wider than it. Mark the
+    // census due so the next read walks instead of trusting this partial
+    // merge for the rest of the TTL.
+    if (fresh.length >= CORPUS_LISTING_WINDOW) {
+      corpusCache.expiresAtMs = 0;
+    }
+
+    const merged = new Map(
+      (corpusCache.snapshot ?? snapshot).pages.map((page) => [page.slug, page]),
+    );
+
+    for (const page of fresh) {
+      merged.set(page.slug, page);
+    }
+
+    corpusCache.snapshot = {
+      pages: [...merged.values()].sort(
+        (left, right) =>
+          (right.updatedAt?.getTime() ?? 0) -
+            (left.updatedAt?.getTime() ?? 0) ||
+          left.slug.localeCompare(right.slug),
+      ),
+    };
+  })()
+    .catch((error) => {
+      console.warn(
+        `[brain] corpus top-up failed: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    })
+    .finally(() => {
+      corpusCache.topUpAtMs = Date.now();
+      corpusCache.topUp = null;
+    });
+
+  return corpusCache.topUp;
 }
 
 /**
@@ -350,6 +476,7 @@ async function fetchBrainCorpus(
  */
 export async function readBrainCorpus(): Promise<BrainCorpusSnapshot | null> {
   if (corpusCache.expiresAtMs > Date.now()) {
+    await topUpCachedCorpus();
     return corpusCache.snapshot;
   }
 
@@ -371,6 +498,9 @@ export async function readBrainCorpus(): Promise<BrainCorpusSnapshot | null> {
       if (snapshot && snapshot.pages.length > 0) {
         corpusCache.snapshot = snapshot;
         corpusCache.expiresAtMs = Date.now() + CORPUS_CACHE_TTL_MS;
+        // A walk that just finished IS the freshest read; the next top-up
+        // window starts now.
+        corpusCache.topUpAtMs = Date.now();
         await storeCorpus(resolved, snapshot);
       } else if (snapshot) {
         // An empty census is served but never trusted for the full TTL: a
@@ -412,6 +542,7 @@ export async function readBrainCorpus(): Promise<BrainCorpusSnapshot | null> {
       return (await refresh()) ?? corpusCache.snapshot;
     }
 
+    await topUpCachedCorpus();
     void refresh();
     return corpusCache.snapshot;
   }
@@ -439,11 +570,16 @@ export async function readBrainCorpus(): Promise<BrainCorpusSnapshot | null> {
         Date.now() + CORPUS_FAILURE_CACHE_TTL_MS,
       );
 
+      // The shared census may be minutes old by the time a new process
+      // hydrates it; the same bounded top-up the warm paths make keeps a
+      // restart from reintroducing the stale listing.
+      await topUpCachedCorpus();
+
       if (stored.generatedAtMs + CORPUS_CACHE_TTL_MS <= Date.now()) {
         void refresh(connection);
       }
 
-      return stored.snapshot;
+      return corpusCache.snapshot;
     })()
       .catch((error) => {
         console.warn(

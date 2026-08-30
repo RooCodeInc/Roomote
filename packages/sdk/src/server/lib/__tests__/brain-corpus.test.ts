@@ -213,6 +213,109 @@ describe('readBrainCorpus', () => {
     expect(redisSet).toHaveBeenCalledTimes(1);
   });
 
+  it('tops up a fresh cached snapshot with pages written since its newest row', async () => {
+    vi.useFakeTimers();
+    try {
+      const calls: unknown[] = [];
+      let windows = [windowOf(0, 42)];
+      const fetchMock = vi.fn(async (_url: unknown, init: RequestInit) => {
+        calls.push(
+          (
+            JSON.parse(init.body as string) as {
+              params: { arguments: unknown };
+            }
+          ).params.arguments,
+        );
+        return toolResponse(windows.shift() ?? []);
+      });
+      global.fetch = fetchMock as unknown as typeof fetch;
+
+      const first = await readBrainCorpus();
+      expect(first?.pages).toHaveLength(42);
+
+      // Ingestion lands one more page; a read past the top-up window sees it
+      // immediately without waiting for the ten-minute census.
+      vi.advanceTimersByTime(4_000);
+      windows = [windowOf(42, 1)];
+      const second = await readBrainCorpus();
+
+      expect(second?.pages).toHaveLength(43);
+      expect(second?.pages.some((page) => page.slug === 'tasks/run-42')).toBe(
+        true,
+      );
+      expect(calls.at(-1)).toMatchObject({
+        limit: 100,
+        sort: 'updated_asc',
+        updated_after: expect.stringContaining('2026-01-01'),
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('shares one top-up across a burst of reads', async () => {
+    vi.useFakeTimers();
+    try {
+      let windows = [windowOf(0, 42)];
+      const fetchMock = vi.fn(async () => toolResponse(windows.shift() ?? []));
+      global.fetch = fetchMock as unknown as typeof fetch;
+
+      await readBrainCorpus();
+      vi.advanceTimersByTime(4_000);
+      windows = [[]] as never;
+      await readBrainCorpus();
+      const callsAfterTopUp = fetchMock.mock.calls.length;
+      await readBrainCorpus();
+      await readBrainCorpus();
+
+      expect(fetchMock.mock.calls.length).toBe(callsAfterTopUp);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('sees a new page that shares the cached newest timestamp', async () => {
+    vi.useFakeTimers();
+    try {
+      // Two pages stamped with one timestamp, as a bulk import writes them.
+      let windows = [windowOf(0, 2, true)];
+      const fetchMock = vi.fn(async () => toolResponse(windows.shift() ?? []));
+      global.fetch = fetchMock as unknown as typeof fetch;
+
+      const first = await readBrainCorpus();
+      expect(first?.pages).toHaveLength(2);
+
+      // A third page lands with that same updated_at. A strict > query from
+      // the boundary would never return it.
+      vi.advanceTimersByTime(4_000);
+      windows = [windowOf(0, 3, true)];
+      const second = await readBrainCorpus();
+
+      expect(second?.pages).toHaveLength(3);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('serves the cached snapshot when a top-up fails', async () => {
+    vi.useFakeTimers();
+    try {
+      const windows = [windowOf(0, 42)];
+      const fetchMock = vi.fn(async () => toolResponse(windows.shift() ?? []));
+      global.fetch = fetchMock as unknown as typeof fetch;
+
+      const first = await readBrainCorpus();
+      vi.advanceTimersByTime(4_000);
+      fetchMock.mockRejectedValueOnce(new Error('brain restarting'));
+
+      const second = await readBrainCorpus();
+
+      expect(second).toBe(first);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('serves an empty census but neither stores it nor trusts it for the full TTL', async () => {
     vi.useFakeTimers();
     try {
@@ -257,7 +360,7 @@ describe('readBrainCorpus', () => {
     expect(fetchMock).toHaveBeenCalled();
   });
 
-  it('hydrates a completed census from shared storage without listing again', async () => {
+  it('hydrates a completed census from shared storage with one top-up, not a walk', async () => {
     redisGet.mockResolvedValue(
       JSON.stringify({
         generatedAt: new Date().toISOString(),
@@ -270,19 +373,26 @@ describe('readBrainCorpus', () => {
         ],
       }),
     );
-    const fetchMock = vi.fn();
+    // The stored census may predate pages written while this process was
+    // down; hydration makes the same bounded updated_after call as a warm
+    // read instead of trusting it blind (or re-walking).
+    const fetchMock = vi.fn(async () => toolResponse(windowOf(90, 1)));
     global.fetch = fetchMock as unknown as typeof fetch;
 
     const snapshot = await readBrainCorpus();
 
-    expect(snapshot?.pages).toEqual([
-      {
-        slug: 'tasks/shared-run',
-        title: 'Shared run',
-        updatedAt: new Date('2026-01-01T00:00:00.000Z'),
-      },
+    expect(snapshot?.pages.map((page) => page.slug).sort()).toEqual([
+      'tasks/run-90',
+      'tasks/shared-run',
     ]);
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(listedArguments(fetchMock)[0]).toMatchObject({
+      limit: 100,
+      sort: 'updated_asc',
+      // One millisecond before the stored newest row: the boundary's tie
+      // cluster is deliberately re-read.
+      updated_after: '2025-12-31T23:59:59.999Z',
+    });
   });
 
   it('throttles refresh attempts when a stale cache loses its connection', async () => {
@@ -309,7 +419,10 @@ describe('readBrainCorpus', () => {
       await Promise.resolve();
       await Promise.resolve();
       expect((await readBrainCorpus())?.pages).toHaveLength(1);
-      expect(resolveBrainConnection).toHaveBeenCalledTimes(2);
+      // Load + its hydration top-up, then on expiry one top-up attempt plus
+      // one refresh; the second read inside the failure window resolves
+      // nothing further.
+      expect(resolveBrainConnection).toHaveBeenCalledTimes(4);
     } finally {
       vi.useRealTimers();
     }
