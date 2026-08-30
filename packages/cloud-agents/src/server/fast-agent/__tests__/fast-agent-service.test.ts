@@ -2324,6 +2324,42 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     expect(adapter.postReply).toHaveBeenCalledOnce();
   });
 
+  it('allows retrying an identical launch after the first attempt fails', async () => {
+    const launchTask = vi.fn<LaunchFastAgentTask>();
+    launchTask
+      .mockResolvedValueOnce({
+        success: false,
+        error: 'deadlock detected',
+      })
+      .mockImplementationOnce(async ({ postKickoff }) => {
+        await postKickoff({ taskId: 'task-retried' });
+        return { success: true, taskId: 'task-retried' };
+      });
+    const adapter = callbacks({ launchTask });
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        const launch = {
+          prompt: 'Fix checkout.',
+          environmentId: 'env-1',
+          kickoffMessage: 'I’m delegating the checkout fix.',
+        };
+        await expect(
+          invokeTool(nativeToolNames.launchTask, launch),
+        ).resolves.toMatchObject({ success: false });
+        // The failed attempt must not poison the duplicate-launch signature.
+        await expect(
+          invokeTool(nativeToolNames.launchTask, launch),
+        ).resolves.toMatchObject({ success: true, taskId: 'task-retried' });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({ ...baseParams, adapter });
+
+    expect(launchTask).toHaveBeenCalledTimes(2);
+  });
+
   it('allows a corrected launch after rejecting an unavailable model', async () => {
     const launchTask = vi.fn<LaunchFastAgentTask>(async () => ({
       success: true,

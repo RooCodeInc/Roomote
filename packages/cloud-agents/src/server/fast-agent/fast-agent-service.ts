@@ -1848,16 +1848,28 @@ export async function answerFastAgentQuestion({
                   attachmentTexts,
                 })
               : args.prompt;
-            const result = await adapter.launchTask({
-              prompt,
-              ...(args.includeAttachments && images.length > 0
-                ? { images }
-                : {}),
-              environmentId: args.environmentId ?? null,
-              model: args.model ?? null,
-              parentSessionId: session.id,
-              postKickoff: deliverKickoff,
-            });
+            let result: Awaited<ReturnType<typeof adapter.launchTask>>;
+            try {
+              result = await adapter.launchTask({
+                prompt,
+                ...(args.includeAttachments && images.length > 0
+                  ? { images }
+                  : {}),
+                environmentId: args.environmentId ?? null,
+                model: args.model ?? null,
+                parentSessionId: session.id,
+                postKickoff: deliverKickoff,
+              });
+            } catch (error) {
+              completedTaskActions.delete(signature);
+              throw error;
+            }
+            if (!result.success) {
+              // A failed launch created nothing, so the model may retry the
+              // same task in this turn; keeping the signature would reject
+              // the retry as a duplicate.
+              completedTaskActions.delete(signature);
+            }
             if (result.success) {
               currentTasks.set(result.taskId, { taskId: result.taskId });
               if (result.kickoffDelivered) {
