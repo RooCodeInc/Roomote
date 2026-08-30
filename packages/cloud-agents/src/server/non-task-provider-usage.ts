@@ -52,7 +52,7 @@ export const FAST_AGENT_SESSION_PERMISSIONS: PermissionRuleset = Object.keys(
 ).map((permission) => ({
   permission,
   pattern: '*',
-  action: permission === 'task' ? 'ask' : 'deny',
+  action: permission === 'task' ? 'allow' : 'deny',
 }));
 
 /**
@@ -220,12 +220,6 @@ export type NonTaskOpenCodeNativeSessionOptions = {
   onMessageCompleted?: (
     message: NonTaskOpenCodeCompletedMessage,
   ) => Promise<void> | void;
-  onPermissionAsked?: (request: {
-    permission: string;
-    sessionId: string;
-  }) =>
-    | Promise<{ reply: 'once' | 'reject'; message?: string }>
-    | { reply: 'once' | 'reject'; message?: string };
   onPromptStarted?: () => void;
   onSessionReady?: (sessionID: string) => Promise<void> | void;
   onSubagentSessionReady?: (sessionID: string) => Promise<void> | void;
@@ -793,7 +787,6 @@ async function runNonTaskSdkPrompt(
     onMessageCompleted?: (
       message: NonTaskOpenCodeCompletedMessage,
     ) => Promise<void> | void;
-    onPermissionAsked?: NonTaskOpenCodeNativeSessionOptions['onPermissionAsked'];
     onSessionReady?: (sessionID: string) => Promise<void> | void;
     onSubagentSessionReady?: (sessionID: string) => Promise<void> | void;
     permission?: PermissionRuleset;
@@ -858,7 +851,6 @@ async function runNonTaskSdkPrompt(
       fetch: openCodeSdkFetch,
     });
     let sessionId = options.session?.id;
-    const reusedSession = Boolean(sessionId);
     if (sessionId && options.validateSession) {
       const validationResult = await client.session.messages(
         {
@@ -900,22 +892,6 @@ async function runNonTaskSdkPrompt(
       sessionId = sessionResult.data.id;
       if (options.session) {
         options.session.id = sessionId;
-      }
-    }
-    if (reusedSession && options.permission) {
-      const updateResult = await client.session.update(
-        {
-          sessionID: sessionId,
-          directory: sessionDirectory,
-          permission: options.permission,
-        },
-        { signal: abortController.signal },
-      );
-      if (updateResult.error || !updateResult.data) {
-        if (isOpenCodeSessionMissing(updateResult.error)) {
-          throw new NonTaskOpenCodeSessionNotFoundError();
-        }
-        throw new NonTaskOpenCodeSessionValidationError(updateResult.error);
       }
     }
     await options.onSessionReady?.(sessionId);
@@ -980,12 +956,8 @@ async function runNonTaskSdkPrompt(
       rejectSessionError = reject;
     });
     let eventMonitor: Promise<void> | undefined;
-    const requiresReliableEventMonitor = Boolean(
-      options.onPermissionAsked || options.onSubagentSessionReady,
-    );
     const needsEventMonitor = Boolean(
       params.onProviderRetry ||
-      options.onPermissionAsked ||
       options.onSubagentSessionReady ||
       options.trackSessionTreeUsage,
     );
@@ -1025,36 +997,6 @@ async function runNonTaskSdkPrompt(
               ) {
                 void recordUsageOnce(event.properties.info);
                 markUsageEventObserved(event.properties.info);
-              } else if (
-                event.type === 'permission.asked' &&
-                trackedSessionIds.has(event.properties.sessionID) &&
-                options.onPermissionAsked
-              ) {
-                try {
-                  const decision = await options.onPermissionAsked({
-                    permission: event.properties.permission,
-                    sessionId: event.properties.sessionID,
-                  });
-                  const permissionResult = await client.permission.reply(
-                    {
-                      requestID: event.properties.id,
-                      directory: sessionDirectory,
-                      reply: decision.reply,
-                      ...(decision.message
-                        ? { message: decision.message }
-                        : {}),
-                    },
-                    { signal: abortController.signal },
-                  );
-                  if (permissionResult.error || !permissionResult.data) {
-                    throw new Error(
-                      `OpenCode permission reply failed: ${formatOpenCodeSdkError(permissionResult.error)}`,
-                    );
-                  }
-                } catch (error) {
-                  rejectSessionError(error);
-                  return;
-                }
               } else if (
                 event.type === 'session.status' &&
                 event.properties.sessionID === sessionId &&
@@ -1113,33 +1055,16 @@ async function runNonTaskSdkPrompt(
             }
           } catch (error) {
             if (!eventAbortController.signal.aborted) {
-              if (requiresReliableEventMonitor) {
-                rejectSessionError(
-                  new Error(
-                    `OpenCode session event monitor failed: ${formatOpenCodeSdkError(error)}`,
-                  ),
-                );
-                return;
-              }
               console.warn(
                 `[NonTaskProviderUsage] OpenCode event monitor failed: ${formatOpenCodeSdkError(error)}`,
               );
             }
-            return;
-          }
-          if (
-            requiresReliableEventMonitor &&
-            !eventAbortController.signal.aborted
-          ) {
-            rejectSessionError(
-              new Error('OpenCode session event monitor ended unexpectedly.'),
-            );
           }
         })();
       } catch (error) {
-        if (requiresReliableEventMonitor) {
+        if (options.onSubagentSessionReady) {
           throw new Error(
-            `OpenCode session event handling is unavailable: ${formatOpenCodeSdkError(error)}`,
+            `OpenCode subagent session discovery is unavailable: ${formatOpenCodeSdkError(error)}`,
           );
         }
         // Retry reporting is additive. Keep the prompt path available if an
@@ -1461,7 +1386,6 @@ export async function generateTrackedNonTaskTextInOpenCodeSession(
       env: options.env,
       onPromptStarted: options.onPromptStarted,
       onMessageCompleted: options.onMessageCompleted,
-      onPermissionAsked: options.onPermissionAsked,
       onSessionReady: options.onSessionReady,
       onSubagentSessionReady: options.onSubagentSessionReady,
       permission: options.permission,

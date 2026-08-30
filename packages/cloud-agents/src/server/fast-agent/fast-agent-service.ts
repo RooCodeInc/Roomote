@@ -8,6 +8,7 @@ import {
   CHAT_MESSAGE_CONTEXT_TOOL,
   FAST_AGENT_MEMORY_FACT_MAX_CHARS,
   INFERENCE_PROVIDER_MAX_RETRIES,
+  MANAGE_CUSTOM_AUTOMATIONS_TOOL,
   ROOMOTE_MCP_ID,
   activeRunStatuses,
   buildInferenceProviderRecoveryPrompt,
@@ -1305,7 +1306,6 @@ export async function answerFastAgentQuestion({
     const completedChatReactionSignatures = new Set<string>();
     const completedChatReplySignatures = new Set<string>();
     const completedTaskActions = new Set<string>();
-    let humanTurnAcknowledged = false;
     let visibleUpdatePosted = false;
     let nativeToolInvoked = false;
     let retriedTaskStart = false;
@@ -1449,20 +1449,13 @@ export async function answerFastAgentQuestion({
       }
     };
     const requireAcknowledgement = () =>
-      !platformEvent && !humanTurnAcknowledged
+      !platformEvent && !visibleUpdatePosted
         ? {
             success: false as const,
             error:
-              'Post a user-visible acknowledgement with send_chat_reply before any other action.',
+              'Post an acknowledgement with send_chat_reply before this action.',
           }
         : null;
-    const mayRunBeforeAcknowledgement = (call: FastAgentNativeToolCall) =>
-      call.name === FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReply ||
-      call.name === FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReaction ||
-      (call.name === FAST_AGENT_NATIVE_TOOL_NAMES.ignoreEvent &&
-        allowSilentAmbientReply);
-    const requireNativeToolAcknowledgement = (call: FastAgentNativeToolCall) =>
-      mayRunBeforeAcknowledgement(call) ? null : requireAcknowledgement();
 
     const executeMcpTool = async (
       call: FastAgentMcpToolCall,
@@ -1475,6 +1468,8 @@ export async function answerFastAgentQuestion({
         if (closedError) return closedError;
         const ownershipError = requireLockOwnership();
         if (ownershipError) return ownershipError;
+        nativeToolInvoked = true;
+        turnProgressMarker += 1;
 
         if (platformEventHandling === 'present_only') {
           return {
@@ -1527,10 +1522,13 @@ export async function answerFastAgentQuestion({
         const actorScopedIntegrationArguments = chatLookupProvider
           ? { ...chatLookupArguments, provider: chatLookupProvider }
           : chatLookupArguments;
-        const ackError = requireAcknowledgement();
-        if (ackError) return ackError;
-        nativeToolInvoked = true;
-        turnProgressMarker += 1;
+        const managesCustomAutomations =
+          call.integrationId === ROOMOTE_MCP_ID &&
+          call.toolName === MANAGE_CUSTOM_AUTOMATIONS_TOOL.name;
+        if (!managesCustomAutomations) {
+          const ackError = requireAcknowledgement();
+          if (ackError) return ackError;
+        }
         const signature = buildIntegrationCallSignature({
           integrationId: call.integrationId,
           toolName: call.toolName,
@@ -1587,6 +1585,8 @@ export async function answerFastAgentQuestion({
         if (closedError) return closedError;
         const ownershipError = requireLockOwnership();
         if (ownershipError) return ownershipError;
+        nativeToolInvoked = true;
+        turnProgressMarker += 1;
 
         if (
           platformEventHandling === 'present_only' &&
@@ -1599,18 +1599,9 @@ export async function answerFastAgentQuestion({
           };
         }
 
-        const ackError = requireNativeToolAcknowledgement(call);
-        if (ackError) return ackError;
-        nativeToolInvoked = true;
-        turnProgressMarker += 1;
-
         switch (call.name) {
           case FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReply: {
             const args = chatReplyArgsSchema.parse(call.args);
-            if (args.purpose === 'progress') {
-              const ackError = requireAcknowledgement();
-              if (ackError) return ackError;
-            }
             if (
               args.suggestions?.length &&
               (args.purpose !== 'closeout' ||
@@ -1676,9 +1667,6 @@ export async function answerFastAgentQuestion({
                 ? { suggestions: args.suggestions }
                 : {}),
             });
-            if (args.purpose === 'ack') {
-              humanTurnAcknowledged = true;
-            }
             completedChatReplySignatures.add(signature);
             return { success: true, delivered: true, closed };
           }
@@ -1718,9 +1706,6 @@ export async function answerFastAgentQuestion({
               purpose: args.purpose,
               messageId,
             });
-            if (args.purpose === 'ack') {
-              humanTurnAcknowledged = true;
-            }
             completedChatReactionSignatures.add(signature);
             turnVisibleMessages.push(
               buildAssistantTextMessage(`[Reacted with :${name}:]`),
@@ -1942,6 +1927,8 @@ export async function answerFastAgentQuestion({
 
           case FAST_AGENT_NATIVE_TOOL_NAMES.cancelTask: {
             const args = taskIdArgsSchema.parse(call.args);
+            const ackError = requireAcknowledgement();
+            if (ackError) return ackError;
             const target = selectActiveTaskId(args.taskId, currentTasks);
             if (!target.taskId) return { success: false, error: target.error };
             const targetTask = currentTasks.get(target.taskId);
@@ -2273,38 +2260,6 @@ export async function answerFastAgentQuestion({
                         turnProgressMarker += 1;
                         noteInferenceRecoveryProgress();
                       },
-                      onPermissionAsked: ({ permission, sessionId }) => {
-                        if (
-                          permission !== 'task' ||
-                          sessionId !== activeOpenCodeSessionId
-                        ) {
-                          return {
-                            reply: 'reject' as const,
-                            message: 'This permission is unavailable here.',
-                          };
-                        }
-                        const closedError = requireOpen();
-                        if (closedError) {
-                          return {
-                            reply: 'reject' as const,
-                            message: closedError.error,
-                          };
-                        }
-                        if (platformEventHandling === 'present_only') {
-                          return {
-                            reply: 'reject' as const,
-                            message:
-                              'This platform event may only be presented to the user with a closeout.',
-                          };
-                        }
-                        const ackError = requireAcknowledgement();
-                        return ackError
-                          ? {
-                              reply: 'reject' as const,
-                              message: ackError.error,
-                            }
-                          : { reply: 'once' as const };
-                      },
                       onPromptStarted: () => {
                         promptStarted = true;
                         diagnostics.markInferenceStarted();
@@ -2323,7 +2278,6 @@ export async function answerFastAgentQuestion({
                             {
                               allowSkillAccess: true,
                               allowSpillRecovery: true,
-                              beforeExecute: requireNativeToolAcknowledgement,
                               skillStore,
                               spillBudget,
                             },
