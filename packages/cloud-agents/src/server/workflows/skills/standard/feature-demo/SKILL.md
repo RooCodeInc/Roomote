@@ -142,6 +142,7 @@ Run this with a GENEROUS command timeout (10 minutes) on the first attempt: a na
 
 <rules>
 <rule>Never load or invoke `agent-browser` (or any other browser automation) from this skill — capture is always delegated to the `proof-runner` subagent.</rule>
+<rule>Launch `proof-runner` directly from the current parent session, passing `proof-runner` as the Task tool's agent type. Never wrap capture in a `general` or any other intermediate subagent: subagents cannot spawn further subagents, so an intermediate hop makes `proof-runner` unreachable.</rule>
 <rule>Never ask for, read, or handle TTS provider keys. Narration goes through the control-plane endpoint with the run token; a 404 there means captions-only.</rule>
 <rule>All intermediate files live under `/tmp/feature-demo`. Never commit recordings, renders, node_modules, or props into the repository.</rule>
 <rule>Author demo scripts using only the beat actions listed in step 2.</rule>
