@@ -98,18 +98,18 @@ function PrReviewNotificationActions({ msg }: { msg: AcpUiMessage }) {
   if (!offer) return null;
 
   return (
-    <div className="mt-3" data-testid="pr-review-notification-actions">
-      <PrReviewActionOffer
-        offer={offer}
-        onAction={async (choice) => {
-          const result =
-            await trpcClient.sandboxSession.handlePrReviewNotificationAction.mutate(
-              { deliveryId: offer.deliveryId, choice },
-            );
-          return result.status;
-        }}
-      />
-    </div>
+    <PrReviewActionOffer
+      className="mt-3"
+      testId="pr-review-notification-actions"
+      offer={offer}
+      onAction={async (choice) => {
+        const result =
+          await trpcClient.sandboxSession.handlePrReviewNotificationAction.mutate(
+            { deliveryId: offer.deliveryId, choice },
+          );
+        return result.status;
+      }}
+    />
   );
 }
 

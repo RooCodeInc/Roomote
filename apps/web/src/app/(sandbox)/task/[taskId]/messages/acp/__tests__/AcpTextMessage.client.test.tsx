@@ -166,10 +166,15 @@ describe('AcpTextMessage', () => {
     ).toBeVisible();
   });
 
-  it('renders a persisted retired offer without controls', () => {
+  it('does not render a persisted dismissed offer', () => {
     render(<AcpTextMessage msg={reviewOfferMessage('dismissed')} />);
 
-    expect(screen.getByText('Review action dismissed.')).toBeVisible();
+    expect(
+      screen.queryByTestId('pr-review-notification-actions'),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByText('Review action dismissed.'),
+    ).not.toBeInTheDocument();
     expect(
       screen.queryByRole('button', { name: 'Resolve these issues' }),
     ).not.toBeInTheDocument();
