@@ -8,6 +8,7 @@ import {
 } from '@/lib/setup-starter-tasks';
 import { startSetupFastSessionCommand } from '../fast-sessions';
 import { completeSetupCommand } from './index';
+import { buildSetupRepoDigest } from './repo-digest';
 import { assertAdmin } from './shared';
 
 type CompleteSetupWithStarterTasksResult = {
@@ -67,6 +68,9 @@ export async function completeSetupWithStarterTasksCommand(
     name: auth.name,
     email: auth.primaryEmail,
   });
+  // Best-effort and internally time-boxed; an empty digest just means the
+  // kickoff greets without repository observations.
+  const repoDigest = await buildSetupRepoDigest();
 
   const { sessionId, created } = await startSetupFastSessionCommand(auth, {
     conversationId: `setup-session:${input.launchBatchId}`,
@@ -76,6 +80,7 @@ export async function completeSetupWithStarterTasksCommand(
       description:
         'The administrator finished initial setup and selected these starter tasks to launch.',
       ...(adminName ? { adminName } : {}),
+      ...(repoDigest.length > 0 ? { repositories: repoDigest } : {}),
       starterTasks: selectedStarterTaskIds.map((starterTaskId) => {
         const starterTask = getSetupStarterTask(starterTaskId);
         return {

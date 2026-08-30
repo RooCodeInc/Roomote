@@ -5,11 +5,13 @@ const {
   mockCompleteSetup,
   mockStartSetupFastSession,
   mockCaptureEvent,
+  mockBuildSetupRepoDigest,
 } = vi.hoisted(() => ({
   mockAssertAdmin: vi.fn(),
   mockCompleteSetup: vi.fn(),
   mockStartSetupFastSession: vi.fn(),
   mockCaptureEvent: vi.fn(),
+  mockBuildSetupRepoDigest: vi.fn(),
 }));
 
 vi.mock('./shared', () => ({
@@ -27,6 +29,11 @@ vi.mock('../fast-sessions', () => ({
 
 vi.mock('@roomote/telemetry/server', () => ({
   captureEvent: (...args: unknown[]) => mockCaptureEvent(...args),
+}));
+
+vi.mock('./repo-digest', () => ({
+  buildSetupRepoDigest: (...args: unknown[]) =>
+    mockBuildSetupRepoDigest(...args),
 }));
 
 import type { UserAuthSuccess } from '@/types';
@@ -65,6 +72,39 @@ describe('completeSetupWithStarterTasksCommand', () => {
       sessionId: 'setup-session-1',
       created: true,
     });
+    mockBuildSetupRepoDigest.mockResolvedValue([]);
+  });
+
+  it('includes the repository digest in the kickoff event when one is available', async () => {
+    const digest = [
+      { name: 'owner/app', provider: 'github', ciFailures30d: 9 },
+    ];
+    mockBuildSetupRepoDigest.mockResolvedValue(digest);
+
+    await completeSetupWithStarterTasksCommand(buildAuth(), {
+      launchBatchId: '11111111-1111-4111-8111-111111111111',
+      selectedStarterTaskIds: ['speed-up-ci'],
+    });
+
+    expect(mockStartSetupFastSession).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        event: expect.objectContaining({ repositories: digest }),
+      }),
+    );
+  });
+
+  it('omits the repositories field when the digest is empty', async () => {
+    await completeSetupWithStarterTasksCommand(buildAuth(), {
+      launchBatchId: '11111111-1111-4111-8111-111111111111',
+      selectedStarterTaskIds: ['speed-up-ci'],
+    });
+
+    const [, input] = mockStartSetupFastSession.mock.calls[0] as [
+      unknown,
+      { event: Record<string, unknown> },
+    ];
+    expect(input.event).not.toHaveProperty('repositories');
   });
 
   it('completes setup first, then starts one setup session carrying the selected starter tasks', async () => {
