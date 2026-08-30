@@ -200,6 +200,7 @@ async function sendSlackUserDirectMessage(
   userId: string,
   text: string,
   logContext: string,
+  blocks?: unknown[],
 ): Promise<boolean> {
   try {
     const destination = await resolveSlackUserDirectMessage(userId);
@@ -207,6 +208,7 @@ async function sendSlackUserDirectMessage(
       const messageTs = await destination.slack.postMessage({
         channel: destination.channelId,
         text,
+        ...(blocks ? { blocks } : {}),
       });
 
       if (messageTs) {
@@ -343,16 +345,18 @@ export async function sendUserDirectMessage({
   provider,
   userId,
   text,
+  slackBlocks,
   logContext,
 }: {
   provider: CommunicationProvider;
   userId: string;
   text: string;
+  slackBlocks?: unknown[];
   logContext: string;
 }): Promise<boolean> {
   switch (provider) {
     case 'slack':
-      return sendSlackUserDirectMessage(userId, text, logContext);
+      return sendSlackUserDirectMessage(userId, text, logContext, slackBlocks);
     case 'teams':
       return sendTeamsUserDirectMessage(userId, text, logContext);
     case 'telegram':

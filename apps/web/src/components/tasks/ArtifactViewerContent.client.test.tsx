@@ -224,6 +224,173 @@ import {
 import { toast } from 'sonner';
 
 describe('ArtifactViewerContent', () => {
+  it.each([
+    {
+      label: 'normalized content type',
+      path: 'reports/preview.bin',
+      contentType: 'TEXT/HTML; charset=UTF-8',
+    },
+    {
+      label: 'path extension',
+      path: 'reports/preview.XHTML',
+      contentType: 'application/octet-stream',
+    },
+  ])('detects HTML from $label', ({ path, contentType }) => {
+    render(
+      <ArtifactViewerContent
+        taskId="task-1"
+        artifact={{
+          id: 'artifact-html',
+          taskId: 'task-1',
+          path,
+          version: 1,
+          artifactType: 'general',
+          contentType,
+          size: 128,
+          createdAt: new Date('2026-05-22T00:00:00.000Z'),
+          downloadUrl: 'https://example.test/artifact',
+          content: '<h1>HTML preview</h1>',
+        }}
+      />,
+    );
+
+    expect(screen.getByTitle(`Preview of ${path}`)).toBeInTheDocument();
+  });
+
+  it('renders HTML in a fully locked-down iframe by default', () => {
+    const content = '<h1>Safe preview</h1><script>window.top.alert()</script>';
+
+    render(
+      <ArtifactViewerContent
+        taskId="task-1"
+        artifact={{
+          id: 'artifact-html',
+          taskId: 'task-1',
+          path: 'reports/preview.html',
+          version: 1,
+          artifactType: 'general',
+          contentType: 'text/html',
+          size: 128,
+          createdAt: new Date('2026-05-22T00:00:00.000Z'),
+          downloadUrl: 'https://example.test/preview.html',
+          content,
+        }}
+      />,
+    );
+
+    const preview = screen.getByTitle('Preview of reports/preview.html');
+    expect(preview).toHaveAttribute('srcdoc', content);
+    expect(preview).toHaveAttribute('sandbox', '');
+    expect(preview).toHaveAttribute('referrerpolicy', 'no-referrer');
+    expect(screen.getByText('Preview')).toBeInTheDocument();
+    expect(screen.getByText('Code')).toBeInTheDocument();
+  });
+
+  it('switches an HTML artifact between preview and code', () => {
+    const content = '<main>HTML source</main>';
+
+    render(
+      <ArtifactViewerContent
+        taskId="task-1"
+        artifact={{
+          id: 'artifact-html',
+          taskId: 'task-1',
+          path: 'reports/preview.htm',
+          version: 1,
+          artifactType: 'general',
+          contentType: 'application/octet-stream',
+          size: 128,
+          createdAt: new Date('2026-05-22T00:00:00.000Z'),
+          downloadUrl: 'https://example.test/preview.htm',
+          content,
+        }}
+      />,
+    );
+
+    fireEvent.click(screen.getByLabelText('Code'));
+
+    expect(
+      screen.queryByTitle('Preview of reports/preview.htm'),
+    ).not.toBeInTheDocument();
+    expect(screen.getByText(content)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByLabelText('Preview'));
+
+    expect(
+      screen.getByTitle('Preview of reports/preview.htm'),
+    ).toBeInTheDocument();
+  });
+
+  it('resets HTML artifacts to preview when the path or version changes', () => {
+    const createHtmlArtifact = (path: string, version: number) => ({
+      id: 'artifact-html',
+      taskId: 'task-1',
+      path,
+      version,
+      artifactType: 'general' as const,
+      contentType: 'text/html',
+      size: 128,
+      createdAt: new Date('2026-05-22T00:00:00.000Z'),
+      downloadUrl: 'https://example.test/preview.html',
+      content: `<main>${path} v${version}</main>`,
+    });
+    const { rerender } = render(
+      <ArtifactViewerContent
+        taskId="task-1"
+        artifact={createHtmlArtifact('reports/first.html', 1)}
+      />,
+    );
+
+    fireEvent.click(screen.getByLabelText('Code'));
+    rerender(
+      <ArtifactViewerContent
+        taskId="task-1"
+        artifact={createHtmlArtifact('reports/second.html', 1)}
+      />,
+    );
+
+    expect(
+      screen.getByTitle('Preview of reports/second.html'),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByLabelText('Code'));
+    rerender(
+      <ArtifactViewerContent
+        taskId="task-1"
+        artifact={createHtmlArtifact('reports/second.html', 2)}
+      />,
+    );
+
+    expect(
+      screen.getByTitle('Preview of reports/second.html'),
+    ).toBeInTheDocument();
+  });
+
+  it('keeps non-HTML text artifacts in the existing code view', () => {
+    render(
+      <ArtifactViewerContent
+        taskId="task-1"
+        artifact={{
+          id: 'artifact-text',
+          taskId: 'task-1',
+          path: 'reports/preview.html.txt',
+          version: 1,
+          artifactType: 'general',
+          contentType: 'text/plain',
+          size: 128,
+          createdAt: new Date('2026-05-22T00:00:00.000Z'),
+          downloadUrl: 'https://example.test/preview.txt',
+          content: 'Plain text content',
+        }}
+      />,
+    );
+
+    expect(screen.getByText('Plain text content')).toBeInTheDocument();
+    expect(screen.queryByText('Preview')).not.toBeInTheDocument();
+    expect(screen.queryByText('Code')).not.toBeInTheDocument();
+    expect(screen.queryByTitle(/Preview of/)).not.toBeInTheDocument();
+  });
+
   it('does not render the internal artifact type in the toolbar', () => {
     render(
       <ArtifactViewerContent

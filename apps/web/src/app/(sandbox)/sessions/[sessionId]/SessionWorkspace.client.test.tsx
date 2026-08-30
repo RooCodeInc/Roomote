@@ -18,12 +18,14 @@ const {
   fastTaskQueryState,
   searchParamsState,
   routerReplaceMock,
+  artifactQueryState,
 } = vi.hoisted(() => ({
   useMediaQueryMock: vi.fn(),
   sessionQueryState: { data: null as unknown },
   fastTaskQueryState: { data: null as unknown },
   searchParamsState: { value: '' },
   routerReplaceMock: vi.fn(),
+  artifactQueryState: { dataByPath: {} as Record<string, unknown> },
 }));
 
 vi.mock('usehooks-ts', () => ({
@@ -67,7 +69,27 @@ vi.mock('@/trpc/client', () => ({
         }),
       },
     },
+    artifacts: {
+      byPath: {
+        queryOptions: (
+          input: { taskId: string; path: string; version?: number },
+          options?: Record<string, unknown>,
+        ) => ({
+          queryKey: ['artifacts', 'byPath', input],
+          queryFn: async () => artifactQueryState.dataByPath[input.path],
+          ...options,
+        }),
+      },
+    },
   }),
+}));
+
+vi.mock('@/components/tasks/ArtifactViewerContent', () => ({
+  ArtifactViewerContent: ({
+    artifact,
+  }: {
+    artifact: { path: string } | null;
+  }) => <div>Artifact preview: {artifact?.path}</div>,
 }));
 
 vi.mock('./NestedTaskSidePanel', () => ({
@@ -222,6 +244,42 @@ function OpenNestedTask() {
 describe('SessionWorkspace', () => {
   beforeEach(() => {
     routerReplaceMock.mockClear();
+    artifactQueryState.dataByPath = {
+      'tmp/capture-visual-proof/sidebar-alignment.png': {
+        id: 'artifact-image',
+        taskId: 'task-1',
+        path: 'tmp/capture-visual-proof/sidebar-alignment.png',
+        version: 1,
+        artifactType: 'visual-proof',
+        contentType: 'image/png',
+        size: 1024,
+        createdAt: new Date('2026-01-01T00:00:00.000Z'),
+        downloadUrl: '/api/artifacts/artifact-image/download',
+      },
+      'plans/sidebar.md': {
+        id: 'artifact-file',
+        taskId: 'task-1',
+        path: 'plans/sidebar.md',
+        version: 1,
+        artifactType: 'plan',
+        contentType: 'text/markdown',
+        size: 512,
+        createdAt: new Date('2026-01-01T00:00:00.000Z'),
+        downloadUrl: '/api/artifacts/artifact-file/download',
+        content: '# Sidebar',
+      },
+      'recordings/session-walkthrough.webm': {
+        id: 'artifact-video',
+        taskId: 'task-1',
+        path: 'recordings/session-walkthrough.webm',
+        version: 1,
+        artifactType: 'visual-proof',
+        contentType: 'video/webm',
+        size: 2048,
+        createdAt: new Date('2026-01-01T00:00:00.000Z'),
+        downloadUrl: '/api/artifacts/artifact-video/download',
+      },
+    };
   });
 
   it('matches the task sidebar replacement behavior and controls on mobile', () => {
@@ -411,99 +469,129 @@ describe('SessionWorkspace', () => {
     expect(screen.getByText('Nested panel task-1')).toBeInTheDocument();
   });
 
-  it('groups latest artifact previews and file links in execution details', () => {
-    renderWorkspace({
-      isMobile: false,
-      selectedTaskId: 'task-1',
-      sessionOverride: {
-        tasks: [
-          {
-            taskId: 'task-1',
-            title: 'Capture sidebar proof',
-            workflow: 'standard',
-            state: 'completed',
-            repositoryName: 'RooCodeInc/Roomote',
-            latestOutput: null,
-            inferenceCostMicroUsd: 0,
-            canAccessDetails: true,
-            latestRun: null,
-            artifacts: [
-              {
-                id: 'artifact-image',
-                path: 'tmp/capture-visual-proof/sidebar-alignment.png',
-                artifactType: 'visual-proof',
-                contentType: 'image/png',
-                thumbnailUrl: '/api/artifacts/artifact-image/raw?sig=test',
-              },
-              {
-                id: 'artifact-file',
-                path: 'plans/sidebar.md',
-                artifactType: 'plan',
-                contentType: 'text/markdown',
-              },
-              {
-                id: 'artifact-image-older',
-                path: 'tmp/capture-visual-proof/sidebar-alignment.png',
-                artifactType: 'visual-proof',
-                contentType: 'image/png',
-                thumbnailUrl:
-                  '/api/artifacts/artifact-image-older/raw?sig=test',
-              },
-              {
-                id: 'artifact-video',
-                path: 'recordings/session-walkthrough.webm',
-                artifactType: 'visual-proof',
-                contentType: 'video/webm',
-                previewUrl: '/api/artifacts/artifact-video/raw?sig=test',
-              },
-            ],
-            pullRequests: [],
-          },
-        ],
-      },
-    });
+  it.each([false, true])(
+    'groups artifacts and opens image and file previews inside execution details when isMobile=%s',
+    async (isMobile) => {
+      renderWorkspace({
+        isMobile,
+        selectedTaskId: 'task-1',
+        sessionOverride: {
+          tasks: [
+            {
+              taskId: 'task-1',
+              title: 'Capture sidebar proof',
+              workflow: 'standard',
+              state: 'completed',
+              repositoryName: 'RooCodeInc/Roomote',
+              latestOutput: null,
+              inferenceCostMicroUsd: 0,
+              canAccessDetails: true,
+              latestRun: null,
+              artifacts: [
+                {
+                  id: 'artifact-image',
+                  path: 'tmp/capture-visual-proof/sidebar-alignment.png',
+                  artifactType: 'visual-proof',
+                  contentType: 'image/png',
+                  thumbnailUrl: '/api/artifacts/artifact-image/raw?sig=test',
+                },
+                {
+                  id: 'artifact-file',
+                  path: 'plans/sidebar.md',
+                  artifactType: 'plan',
+                  contentType: 'text/markdown',
+                },
+                {
+                  id: 'artifact-image-older',
+                  path: 'tmp/capture-visual-proof/sidebar-alignment.png',
+                  artifactType: 'visual-proof',
+                  contentType: 'image/png',
+                  thumbnailUrl:
+                    '/api/artifacts/artifact-image-older/raw?sig=test',
+                },
+                {
+                  id: 'artifact-video',
+                  path: 'recordings/session-walkthrough.webm',
+                  artifactType: 'visual-proof',
+                  contentType: 'video/webm',
+                  previewUrl: '/api/artifacts/artifact-video/raw?sig=test',
+                },
+              ],
+              pullRequests: [],
+            },
+          ],
+        },
+      });
 
-    expect(
-      screen.getByRole('heading', { name: 'Screenshots' }),
-    ).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Files' })).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Videos' })).toBeInTheDocument();
+      expect(
+        screen.getByRole('heading', { name: 'Screenshots' }),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole('heading', { name: 'Files' }),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole('heading', { name: 'Videos' }),
+      ).toBeInTheDocument();
 
-    const imageLink = screen.getByRole('link', {
-      name: /Sidebar Alignment/,
-    });
-    expect(imageLink).toHaveAttribute(
-      'href',
-      '/task/task-1/artifacts/tmp%2Fcapture-visual-proof%2Fsidebar-alignment.png?returnTo=%2Fsessions%2Fsession-1%3Ftask%3Dtask-1',
-    );
-    const thumbnail = screen.getByRole('img', { name: 'Sidebar Alignment' });
-    expect(thumbnail).toHaveAttribute(
-      'src',
-      '/api/artifacts/artifact-image/raw?sig=test',
-    );
-    fireEvent.error(thumbnail);
-    expect(
-      screen.queryByRole('img', { name: 'Sidebar Alignment' }),
-    ).not.toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Sidebar' })).toHaveAttribute(
-      'href',
-      '/task/task-1/artifacts/plans%2Fsidebar.md?returnTo=%2Fsessions%2Fsession-1%3Ftask%3Dtask-1',
-    );
-    expect(
-      screen.queryByText('tmp/capture-visual-proof/sidebar-alignment.png'),
-    ).not.toBeInTheDocument();
-    const videoPreview = screen.getByLabelText(
-      'Video preview: Session Walkthrough',
-    );
-    expect(videoPreview).toHaveAttribute(
-      'src',
-      '/api/artifacts/artifact-video/raw?sig=test',
-    );
-    fireEvent.error(videoPreview);
-    expect(
-      screen.queryByLabelText('Video preview: Session Walkthrough'),
-    ).not.toBeInTheDocument();
-  });
+      const imageButton = screen.getByRole('button', {
+        name: /Sidebar Alignment/,
+      });
+      const thumbnail = screen.getByRole('img', { name: 'Sidebar Alignment' });
+      expect(thumbnail).toHaveAttribute(
+        'src',
+        '/api/artifacts/artifact-image/raw?sig=test',
+      );
+      fireEvent.error(thumbnail);
+      expect(
+        screen.queryByRole('img', { name: 'Sidebar Alignment' }),
+      ).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Sidebar' })).toBeVisible();
+      expect(
+        screen.queryByText('tmp/capture-visual-proof/sidebar-alignment.png'),
+      ).not.toBeInTheDocument();
+      const videoPreview = screen.getByLabelText(
+        'Video preview: Session Walkthrough',
+      );
+      expect(videoPreview).toHaveAttribute(
+        'src',
+        '/api/artifacts/artifact-video/raw?sig=test',
+      );
+      fireEvent.error(videoPreview);
+      expect(
+        screen.queryByLabelText('Video preview: Session Walkthrough'),
+      ).not.toBeInTheDocument();
+
+      fireEvent.click(imageButton);
+      expect(
+        await screen.findByText(
+          'Artifact preview: tmp/capture-visual-proof/sidebar-alignment.png',
+        ),
+      ).toBeVisible();
+      expect(routerReplaceMock).not.toHaveBeenCalled();
+
+      fireEvent.click(
+        screen.getByRole('button', { name: 'Back to artifacts' }),
+      );
+      fireEvent.click(screen.getByRole('button', { name: 'Sidebar' }));
+      expect(
+        await screen.findByText('Artifact preview: plans/sidebar.md'),
+      ).toBeVisible();
+      expect(routerReplaceMock).not.toHaveBeenCalled();
+
+      fireEvent.click(
+        screen.getByRole('button', { name: 'Back to artifacts' }),
+      );
+      fireEvent.click(
+        screen.getByRole('button', { name: /Session Walkthrough/ }),
+      );
+      expect(
+        await screen.findByText(
+          'Artifact preview: recordings/session-walkthrough.webm',
+        ),
+      ).toBeVisible();
+      expect(routerReplaceMock).not.toHaveBeenCalled();
+    },
+  );
 
   it('enables and populates the Tasks panel from refreshed session tasks', async () => {
     const delegatedTask = {

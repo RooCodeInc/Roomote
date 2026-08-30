@@ -3,6 +3,7 @@ import {
   acquireFastAgentTurnLock,
   answerFastAgentQuestion,
   buildFastAgentReactionExternalInputQuestion,
+  fastAgentConversationRepository,
   getActiveFastAgentTasks,
   type FastAgentReactionExternalInput,
 } from '@roomote/cloud-agents/server';
@@ -101,9 +102,13 @@ async function processFastAgentReaction(params: {
       adapter: {
         activity: createFastAgentSlackSessionActivity({
           slack: context.slack,
+          workspaceId: context.teamId,
           channel: event.item.channel,
           threadTs,
           title: session.title,
+          resolveTitle: async () =>
+            (await fastAgentConversationRepository.findById({ id: session.id }))
+              ?.title,
         }),
         resolveMcpServerConfigs: () =>
           resolveUserMcpServerConfigs({

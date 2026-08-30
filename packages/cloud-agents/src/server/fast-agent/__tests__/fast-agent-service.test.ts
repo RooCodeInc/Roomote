@@ -18,6 +18,7 @@ const mocks = vi.hoisted(() => ({
   sendTaskMessage: vi.fn(),
   cancelTask: vi.fn(),
   getUserIdentity: vi.fn(),
+  refreshTitle: vi.fn(),
   bindExecutor: vi.fn(),
   bindMcpExecutor: vi.fn(),
   captureInferenceContext: vi.fn(),
@@ -158,6 +159,11 @@ vi.mock('../fast-agent-user-identity', () => ({
   getFastAgentUserIdentity: mocks.getUserIdentity,
 }));
 
+vi.mock('../fast-agent-title', () => ({
+  refreshFastAgentSessionTitle: mocks.refreshTitle,
+}));
+
+import { buildFastSessionUrl } from '@roomote/communication';
 import {
   ACP_ENVELOPE_EVENT_TYPES,
   ACP_UI_TOOL_OUTPUT_MAX_CHARS,
@@ -220,6 +226,7 @@ async function invokeMcpTool(
 describe('answerFastAgentQuestion native OpenCode tools', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.refreshTitle.mockResolvedValue(null);
     mocks.nativeExecutor = undefined;
     mocks.mcpExecutor = undefined;
     mocks.mcpCapabilityAvailable = false;
@@ -732,6 +739,22 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         initialHumanTurn: false,
       }),
     );
+    expect(mocks.upsertMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: expect.objectContaining({
+          role: 'user',
+          metadata: expect.objectContaining({
+            visibleInTranscript: false,
+            turnSource: 'platform_event',
+            platformEventKind: 'automation',
+          }),
+        }),
+      }),
+    );
+    expect(mocks.refreshTitle).toHaveBeenCalledWith({
+      sessionId: 'conversation-1',
+      userId: 'user-1',
+    });
     expect(
       mocks.appendVisibleMessages.mock.calls
         .flatMap(([input]) => input.messages)
@@ -765,6 +788,17 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         .flatMap(([input]) => input.messages)
         .some((message) => message.role === 'user'),
     ).toBe(false);
+    expect(mocks.upsertMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: expect.objectContaining({
+          metadata: expect.objectContaining({
+            visibleInTranscript: false,
+            platformEventKind: 'delegated_task',
+          }),
+        }),
+      }),
+    );
+    expect(mocks.refreshTitle).not.toHaveBeenCalled();
 
     await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
     expect(mocks.captureTurnSettled).toHaveBeenLastCalledWith(
@@ -908,7 +942,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     );
   });
 
-  it('sanitizes and persists Fast widgets while posting the Slack chat preview', async () => {
+  it('posts the sanitized Fast widget preview with its Slack session link', async () => {
     const adapter = callbacks();
     mocks.generateText.mockImplementation(
       async (_params, _session, options) => {
@@ -929,13 +963,20 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
 
     await expect(
       answerFastAgentQuestion({ ...baseParams, adapter }),
-    ).resolves.toBe('Status: all systems operational.');
+    ).resolves.toBe(
+      `Status: all systems operational.\n\n[View widget](${buildFastSessionUrl('slack', 'conversation-1')})`,
+    );
 
     expect(adapter.postReply).toHaveBeenCalledTimes(1);
     expect(adapter.postReply).toHaveBeenCalledWith({
       purpose: 'progress',
-      message: 'Status: all systems operational.',
+      message: `Status: all systems operational.\n\n[View widget](${buildFastSessionUrl('slack', 'conversation-1')})`,
     });
+    expect(adapter.postReply).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: expect.stringContaining('<p>Safe</p>'),
+      }),
+    );
     const toolResult = mocks.upsertMessage.mock.calls
       .map(([input]) => input.message)
       .find(
@@ -957,6 +998,31 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       shown: true,
       html: '<p>Safe</p>',
       textFallback: 'Status: all systems operational.',
+    });
+  });
+
+  it('posts the Fast widget preview with its Discord session link', async () => {
+    const adapter = callbacks();
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        await invokeTool(nativeToolNames.showWidget, {
+          html: '<p>Safe</p>',
+          textFallback: 'Status: all systems operational.',
+        });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({
+      ...baseParams,
+      conversation: { ...baseParams.conversation, surface: 'discord' },
+      adapter,
+    });
+
+    expect(adapter.postReply).toHaveBeenCalledWith({
+      purpose: 'progress',
+      message: `Status: all systems operational.\n\n[View widget](${buildFastSessionUrl('discord', 'conversation-1')})`,
     });
   });
 

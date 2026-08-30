@@ -100,4 +100,33 @@ describe('getArtifactByPathCommand', () => {
     expect(mockFetch).toHaveBeenCalledTimes(1);
     expect(result?.content).toBe('small text');
   });
+
+  it.each([
+    {
+      label: 'normalized content type',
+      path: 'reports/preview.bin',
+      contentType: 'TEXT/HTML; charset=UTF-8',
+    },
+    {
+      label: 'path extension',
+      path: 'reports/preview.HTML',
+      contentType: 'application/octet-stream',
+    },
+  ])(
+    'returns HTML content detected from $label',
+    async ({ path, contentType }) => {
+      mockGetArtifactByPath.mockResolvedValue(
+        createArtifact({ path, contentType }),
+      );
+      mockFetch.mockResolvedValue(new Response('<h1>HTML preview</h1>'));
+
+      const result = await getArtifactByPathCommand(auth, {
+        taskId: 'task-1',
+        path,
+      });
+
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+      expect(result?.content).toBe('<h1>HTML preview</h1>');
+    },
+  );
 });

@@ -29,6 +29,7 @@ import {
   isBrainEnabled,
   touchSessionActivity,
 } from '@roomote/db/server';
+import { buildFastSessionUrl } from '@roomote/communication';
 import { Env } from '@roomote/env';
 import { z } from 'zod';
 
@@ -1228,6 +1229,7 @@ export async function answerFastAgentQuestion({
           // something a person typed — keep them out of the transcript view.
           visibleInTranscript: !platformEvent,
           turnSource,
+          ...(platformEvent ? { platformEventKind } : {}),
           userId,
           ...(senderDisplayName ? { userName: senderDisplayName } : {}),
           ...(senderDisplayName ? { senderDisplayName } : {}),
@@ -1241,7 +1243,7 @@ export async function answerFastAgentQuestion({
     diagnostics.recordInitialHumanTurn(
       platformEvent ? false : userMessageResult?.initialHumanTurn,
     );
-    if (!platformEvent) {
+    if (!platformEvent || platformEventKind === 'automation') {
       void refreshFastAgentSessionTitle({ sessionId: session.id, userId }).then(
         (title) => adapter.activity?.updateTitle?.(title),
       );
@@ -1764,7 +1766,7 @@ export async function answerFastAgentQuestion({
                 throwIfTurnCancelled();
                 await postReply({
                   purpose: 'progress',
-                  message: result.textFallback,
+                  message: `${result.textFallback}\n\n[View widget](${buildFastSessionUrl(conversation.surface, session.id)})`,
                 });
                 completedChatReplySignatures.add(signature);
               }

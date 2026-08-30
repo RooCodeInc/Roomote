@@ -14,6 +14,21 @@ const MAX_GITHUB_ASSOCIATED_PULL_REQUESTS = 10;
 const MAX_GITHUB_PULL_REQUEST_CANDIDATES = 3;
 const MAX_GITHUB_CHANGED_FILES = 20;
 
+function getPullRequestNumberFromCommitMessage(
+  message: string | undefined,
+): number | null {
+  const subject = message?.trim().split('\n')[0] ?? '';
+  const match =
+    subject.match(/\(#(\d+)\)\s*$/u) ??
+    subject.match(/^Merge pull request #(\d+)\b/iu);
+  if (!match?.[1]) return null;
+
+  const pullRequestNumber = Number(match[1]);
+  return Number.isSafeInteger(pullRequestNumber) && pullRequestNumber > 0
+    ? pullRequestNumber
+    : null;
+}
+
 type GitHubPushWebhook = {
   ref: string;
   after?: string;
@@ -110,15 +125,28 @@ export async function enrichGitHubMergeAnnouncerEvent(
         commit_sha: after,
         per_page: MAX_GITHUB_ASSOCIATED_PULL_REQUESTS,
       });
-    const candidates = associatedPullRequests
+    const tipCommit = event.commits.find((commit) => commit.id === after);
+    const hintedPullRequestNumber =
+      associatedPullRequests.length === 0
+        ? getPullRequestNumberFromCommitMessage(tipCommit?.message)
+        : null;
+    const associatedCandidates = associatedPullRequests
       .filter((pullRequest) => pullRequest.base.ref === branch)
+      .map((pullRequest) => pullRequest.number)
       .slice(0, MAX_GITHUB_PULL_REQUEST_CANDIDATES);
+    const candidates = [
+      ...associatedCandidates,
+      ...(hintedPullRequestNumber &&
+      !associatedCandidates.includes(hintedPullRequestNumber)
+        ? [hintedPullRequestNumber]
+        : []),
+    ];
     const detailResults = await Promise.allSettled(
-      candidates.map((pullRequest) =>
+      candidates.map((pullRequestNumber) =>
         octokit.rest.pulls.get({
           owner,
           repo,
-          pull_number: pullRequest.number,
+          pull_number: pullRequestNumber,
         }),
       ),
     );

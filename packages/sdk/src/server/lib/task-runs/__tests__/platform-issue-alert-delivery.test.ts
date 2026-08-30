@@ -469,11 +469,38 @@ describe('platform issue alert delivery', () => {
     });
 
     expect(mockSlackOpenConversation).toHaveBeenCalledWith('UADMIN');
-    expect(mockSlackPostMessage).toHaveBeenCalledWith(
-      expect.objectContaining({
-        channel: 'DADMIN',
-        text: expect.stringContaining(REPORT.title),
-      }),
+    expect(mockSlackPostMessage).toHaveBeenCalledTimes(1);
+    const [post] = mockSlackPostMessage.mock.calls[0] ?? [];
+    expect(post).toMatchObject({
+      channel: 'DADMIN',
+      text: `Platform issue reported: *${REPORT.title}*\n> ${REPORT.summary}`,
+      blocks: [
+        expect.objectContaining({
+          type: 'container',
+          title: expect.objectContaining({ text: 'Alert on Config Errors' }),
+          icon: expect.objectContaining({
+            image_url:
+              'https://app.example.com/automation-icons/triangle-alert.png',
+          }),
+          child_blocks: expect.arrayContaining([
+            {
+              type: 'section',
+              text: {
+                type: 'mrkdwn',
+                text: `Platform issue reported: *${REPORT.title}*\n> ${REPORT.summary}`,
+              },
+            },
+          ]),
+        }),
+      ],
+    });
+    expect(post.text).not.toContain('View task');
+    expect(post.text).not.toContain('Manage manager posts');
+    expect(JSON.stringify(post.blocks)).toContain(
+      'late_bound_automation_view_task',
+    );
+    expect(JSON.stringify(post.blocks)).toContain(
+      'late_bound_automation_configure',
     );
     expect((await findReportRow(taskId))?.slackPostedAt).not.toBeNull();
   });

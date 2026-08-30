@@ -349,6 +349,12 @@ describe('AcpToolDetails', () => {
       'message: Review RooCodeInc/Roomote and use password=[redacted]',
       ['delivered: true', 'taskId: task-1'].join('\n'),
     ]);
+    expect(codeBlockSpy.mock.calls[0]?.[0].className).toContain(
+      '[&_pre]:whitespace-pre-wrap',
+    );
+    expect(codeBlockSpy.mock.calls[0]?.[0].className).toContain(
+      '[&_pre]:min-w-0',
+    );
     expect(toolInputSpy).not.toHaveBeenCalled();
   });
 

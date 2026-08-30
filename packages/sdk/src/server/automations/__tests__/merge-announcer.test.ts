@@ -160,23 +160,55 @@ describe('handleMergeAnnouncerPush', () => {
     );
   });
 
-  it('links View changes to the associated pull request', async () => {
+  it('grounds the artifact announcement in verified PR context and links the PR', async () => {
     const { dependencies, postMessage } = createDependencies();
+    dependencies.findRepository.mockResolvedValue({
+      defaultBranch: 'develop',
+      fullName: 'RooCodeInc/Roomote',
+    });
 
     await handleMergeAnnouncerPush(
       createPayload({
+        ref: 'refs/heads/develop',
+        commitCount: 1,
+        commits: [
+          {
+            id: 'd17604dc8bbca8a20ebe1d68f722f72889c95c5e',
+            message: 'fix: keep Session artifacts in execution details (#1896)',
+            url: 'https://github.com/RooCodeInc/Roomote/commit/d17604dc',
+          },
+        ],
         pullRequest: {
-          number: 7,
-          url: 'https://github.com/acme/widgets/pull/7',
-          title: 'Ship widget export',
+          number: 1896,
+          url: 'https://github.com/RooCodeInc/Roomote/pull/1896',
+          title: '[Improve] Keep Session artifacts in execution details',
+          body: 'Open artifacts inside the execution-details panel without leaving the Session.',
           changedFileCount: 2,
-          additions: 20,
-          deletions: 4,
+          additions: 271,
+          deletions: 100,
+          changedFiles: [
+            {
+              path: 'apps/web/src/app/(sandbox)/sessions/[sessionId]/SessionWorkspace.tsx',
+              status: 'modified',
+              additions: 92,
+              deletions: 9,
+            },
+          ],
         },
       }),
       dependencies,
     );
 
+    expect(dependencies.generateSummary).toHaveBeenCalledWith(
+      expect.stringContaining(
+        'Open artifacts inside the execution-details panel without leaving the Session.',
+      ),
+    );
+    expect(dependencies.generateSummary).toHaveBeenCalledWith(
+      expect.stringContaining(
+        'modified apps/web/src/app/(sandbox)/sessions/[sessionId]/SessionWorkspace.tsx (+92/-9)',
+      ),
+    );
     expect(postMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         blocks: [
@@ -187,7 +219,7 @@ describe('handleMergeAnnouncerPush', () => {
                 elements: expect.arrayContaining([
                   expect.objectContaining({
                     action_id: 'merge_announcer_view_changes',
-                    url: 'https://github.com/acme/widgets/pull/7',
+                    url: 'https://github.com/RooCodeInc/Roomote/pull/1896',
                   }),
                 ]),
               }),

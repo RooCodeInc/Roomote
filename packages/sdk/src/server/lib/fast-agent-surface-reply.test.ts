@@ -237,9 +237,11 @@ describe('buildFastAgentSurfaceReplyDelivery', () => {
 
     expect(mocks.createActivity).toHaveBeenCalledWith({
       slack: expect.anything(),
+      workspaceId: conversation.workspaceId,
       channel: 'C456',
       threadTs: '1700000000.000200',
       title: 'Investigate Slack agent status',
+      resolveTitle: expect.any(Function),
     });
 
     await expect(
