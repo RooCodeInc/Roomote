@@ -255,18 +255,23 @@ async function notifyDeploymentAdminsOfPlatformIssue(params: {
 
     eligibleAdmins += 1;
     for (const provider of linkedProviders) {
-      const slackText = buildPlatformIssueAlertText({
+      const alertText = buildPlatformIssueAlertText({
         taskId: params.taskId,
         report: params.report,
         utmSource: provider,
       });
+      const slackMessage =
+        provider === 'slack'
+          ? buildPlatformIssueSlackAlertMessage({
+              taskId: params.taskId,
+              report: params.report,
+            })
+          : null;
       const sent = await sendUserDirectMessage({
         provider,
         userId: admin.id,
-        text:
-          provider === 'slack'
-            ? slackText
-            : degradeSlackMrkdwnToMarkdown(slackText),
+        text: slackMessage?.text ?? degradeSlackMrkdwnToMarkdown(alertText),
+        slackBlocks: slackMessage?.blocks,
         logContext: 'recordTaskMessageEnvelope',
       });
 
