@@ -5,6 +5,7 @@ import { Streamdown } from 'streamdown';
 
 import {
   Astroid,
+  Badge,
   Button,
   ChevronDown,
   Collapsible,
@@ -49,7 +50,7 @@ function ReleaseNotesBody({
   highlights: string[];
   detailsMarkdown: string;
   isLoading: boolean;
-  mode: string;
+  mode: ReleaseNotesDialogMode;
 }) {
   if (isLoading) {
     return (
@@ -81,10 +82,10 @@ function ReleaseNotesBody({
 
       {highlights.length > 0 ? (
         <div className="space-y-2">
-          <h2 className="text-base font-semibold tracking-tight flex items-center gap-2">
+          <h3 className="text-base font-semibold tracking-tight flex items-center gap-2">
             <Astroid className="size-4" />
             <span>Highlights for {version}</span>
-          </h2>
+          </h3>
           <div className="border-l-2 pl-4 ml-1.5">
             <ul className="space-y-1 text-sm">
               {highlights.map((item) => (
@@ -136,8 +137,8 @@ export function ReleaseNotesDialog({
   runningVersion,
 }: ReleaseNotesDialogProps) {
   const trpc = useTRPC();
-  const notesQuery = useQuery(
-    trpc.releases.notes.queryOptions(
+  const historyQuery = useQuery(
+    trpc.releases.history.queryOptions(
       { version },
       {
         enabled: open && Boolean(version),
@@ -147,8 +148,9 @@ export function ReleaseNotesDialog({
   );
 
   const tag = toReleaseTag(version);
+  const releases = historyQuery.data ?? [];
   const htmlUrl =
-    notesQuery.data?.htmlUrl ?? `${GITHUB_RELEASES_BASE_URL}/tag/${tag}`;
+    releases[0]?.htmlUrl ?? `${GITHUB_RELEASES_BASE_URL}/tag/${tag}`;
   const title =
     mode === 'whats-new'
       ? `See what's new on Roomote`
@@ -162,20 +164,71 @@ export function ReleaseNotesDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[85vh] overflow-y-auto" size="3xl">
+      <DialogContent
+        className="grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden"
+        size="3xl"
+      >
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
           <DialogDescription>{description}</DialogDescription>
         </DialogHeader>
 
-        <ReleaseNotesBody
-          version={version}
-          summary={notesQuery.data?.summary ?? null}
-          highlights={notesQuery.data?.highlights ?? []}
-          detailsMarkdown={notesQuery.data?.detailsMarkdown ?? ''}
-          isLoading={notesQuery.isLoading}
-          mode={mode}
-        />
+        <div
+          aria-label="Release history"
+          className="min-h-0 overflow-y-auto scroll-thin pr-1"
+        >
+          {historyQuery.isLoading ? (
+            <ReleaseNotesBody
+              version={version}
+              summary={null}
+              highlights={[]}
+              detailsMarkdown=""
+              isLoading
+              mode={mode}
+            />
+          ) : releases.length > 0 ? (
+            <div className="space-y-4">
+              {releases.map((release, index) => (
+                <Collapsible
+                  key={release.version}
+                  defaultOpen={index === 0}
+                  className={index > 0 ? 'border-t pt-4' : undefined}
+                >
+                  <div className="flex items-center gap-2">
+                    <CollapsibleTrigger className="group flex min-w-0 cursor-pointer items-center gap-1.5 text-left hover:underline">
+                      <h2 className="truncate text-base font-semibold tracking-tight">
+                        Roomote {toReleaseTag(release.version)}
+                      </h2>
+                      <ChevronDown className="size-4 shrink-0 transition-transform group-data-[state=open]:rotate-180" />
+                    </CollapsibleTrigger>
+                    {index === 0 ? (
+                      <Badge variant="secondary">Latest</Badge>
+                    ) : null}
+                  </div>
+                  <CollapsibleContent className="mt-4">
+                    <ReleaseNotesBody
+                      version={release.version}
+                      summary={release.summary}
+                      highlights={release.highlights}
+                      detailsMarkdown={release.detailsMarkdown}
+                      isLoading={false}
+                      mode={index === 0 ? mode : 'whats-new'}
+                    />
+                  </CollapsibleContent>
+                </Collapsible>
+              ))}
+            </div>
+          ) : (
+            <ReleaseNotesBody
+              version={version}
+              summary={null}
+              highlights={[]}
+              detailsMarkdown=""
+              isLoading={false}
+              mode={mode}
+            />
+          )}
+        </div>
 
         <DialogFooter className="flex-col gap-2 md:flex-row md:justify-end">
           <a

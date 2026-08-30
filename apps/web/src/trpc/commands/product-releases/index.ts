@@ -1,21 +1,15 @@
 import { execFileSync } from 'node:child_process';
+import { readFile } from 'node:fs/promises';
+import { resolve } from 'node:path';
 
 import { db, deploymentSettings, eq } from '@roomote/db/server';
-import {
-  getRedis,
-  REDIS_KEYS,
-  RELEASE_NOTES_CACHE_TTL_SECONDS,
-  RELEASE_NOTES_NEGATIVE_CACHE_TTL_SECONDS,
-} from '@roomote/redis';
 
 import type { UserAuthSuccess } from '@/types';
 import { Env, isRoomoteCloudEnabled } from '@/lib/server/env';
-import { parseReleaseBody } from '@/lib/release-notes';
+import { parseProductReleaseHistory } from '@/lib/release-notes';
+import { GITHUB_RELEASES_BASE_URL } from '@/lib/release-links';
 import {
-  GITHUB_RELEASES_BASE_URL,
-  ROOMOTE_GITHUB_REPO,
-} from '@/lib/release-links';
-import {
+  compareProductVersions,
   isParsableProductVersion,
   isProductVersionNewer,
   normalizeProductVersion,
@@ -23,6 +17,12 @@ import {
 } from '@/lib/product-version';
 
 const DEFAULT_DEPLOYMENT_ID = 'default';
+const PRODUCT_CHANGELOG_PATH = resolve(
+  process.cwd(),
+  '..',
+  '..',
+  'CHANGELOG.md',
+);
 
 const PRODUCT_VERSION_PATTERN = /^v?\d+\.\d+\.\d+(?:-[\w.]+)?$/i;
 
@@ -105,10 +105,6 @@ function canSeeUpdateStatus(auth: UserAuthSuccess): boolean {
   return auth.isAdmin && !isRoomoteCloudEnabled(Env.R_CLOUD_ENABLED);
 }
 
-function releaseNotesCacheKey(version: string): string {
-  return `${REDIS_KEYS.RELEASE_NOTES}:${normalizeProductVersion(version) ?? version}`;
-}
-
 export async function getReleaseStatusCommand(
   auth: UserAuthSuccess,
 ): Promise<ReleaseStatus> {
@@ -174,108 +170,37 @@ function isAllowedNotesVersion(
   return false;
 }
 
-type CachedNotesPayload =
-  | { kind: 'notes'; notes: ReleaseNotes }
-  | { kind: 'missing' };
-
-async function readCachedNotes(
-  version: string,
-): Promise<CachedNotesPayload | null> {
-  try {
-    const raw = await getRedis().get(releaseNotesCacheKey(version));
-    if (!raw) {
-      return null;
-    }
-    return JSON.parse(raw) as CachedNotesPayload;
-  } catch {
-    return null;
-  }
+function toReleaseNotes(
+  release: ReturnType<typeof parseProductReleaseHistory>[number],
+): ReleaseNotes {
+  const tagName = toReleaseTag(release.version);
+  return {
+    ...release,
+    tagName,
+    title: `Roomote ${tagName}`,
+    htmlUrl: `${GITHUB_RELEASES_BASE_URL}/tag/${tagName}`,
+  };
 }
 
-async function writeCachedNotes(
-  version: string,
-  payload: CachedNotesPayload,
-  ttlSeconds: number,
-): Promise<void> {
-  try {
-    await getRedis().set(
-      releaseNotesCacheKey(version),
-      JSON.stringify(payload),
-      'EX',
-      ttlSeconds,
-    );
-  } catch {
-    // Best-effort cache; callers still return the fetched payload.
-  }
+function unavailableReleaseNotes(version: string): ReleaseNotes {
+  const tagName = toReleaseTag(version);
+  return {
+    version,
+    tagName,
+    title: `Roomote ${tagName}`,
+    summary: null,
+    highlights: [],
+    detailsMarkdown: '',
+    htmlUrl: `${GITHUB_RELEASES_BASE_URL}/tag/${tagName}`,
+  };
 }
 
-async function fetchGithubReleaseNotes(
-  version: string,
-): Promise<ReleaseNotes | null> {
-  const bare = normalizeProductVersion(version);
-  if (!bare) {
-    return null;
-  }
-
-  const tagName = toReleaseTag(bare);
-  const fallbackUrl = `${GITHUB_RELEASES_BASE_URL}/tag/${tagName}`;
-
+async function readChangelogReleaseNotes(): Promise<ReleaseNotes[]> {
   try {
-    const response = await fetch(
-      `https://api.github.com/repos/${ROOMOTE_GITHUB_REPO}/releases/tags/${tagName}`,
-      {
-        headers: {
-          Accept: 'application/vnd.github+json',
-          'User-Agent': 'Roomote',
-        },
-        signal: AbortSignal.timeout(5_000),
-      },
-    );
-
-    if (response.status === 404) {
-      return null;
-    }
-
-    if (!response.ok) {
-      console.warn(
-        `[releases] GitHub release fetch failed for ${tagName}: ${response.status}`,
-      );
-      return null;
-    }
-
-    const payload = (await response.json()) as {
-      tag_name?: string;
-      name?: string | null;
-      body?: string | null;
-      html_url?: string;
-    };
-
-    const body = typeof payload.body === 'string' ? payload.body : '';
-    const parsed = parseReleaseBody(body);
-    const resolvedTag =
-      typeof payload.tag_name === 'string' && payload.tag_name
-        ? payload.tag_name
-        : tagName;
-
-    return {
-      version: bare,
-      tagName: resolvedTag,
-      title:
-        (typeof payload.name === 'string' && payload.name.trim()) ||
-        `Roomote ${resolvedTag}`,
-      summary: parsed.summary,
-      highlights: parsed.highlights,
-      detailsMarkdown: parsed.detailsMarkdown,
-      htmlUrl:
-        (typeof payload.html_url === 'string' && payload.html_url) ||
-        fallbackUrl,
-    };
-  } catch (error) {
-    console.warn(
-      `[releases] GitHub release fetch failed for ${tagName}:`,
-      error instanceof Error ? error.message : error,
-    );
-    return null;
+    const changelog = await readFile(PRODUCT_CHANGELOG_PATH, 'utf8');
+    return parseProductReleaseHistory(changelog).map(toReleaseNotes);
+  } catch {
+    return [];
   }
 }
 
@@ -293,28 +218,38 @@ export async function getReleaseNotesCommand(
     return null;
   }
 
-  const cached = await readCachedNotes(version);
-  if (cached?.kind === 'notes') {
-    return cached.notes;
-  }
-  if (cached?.kind === 'missing') {
-    return null;
-  }
-
-  const notes = await fetchGithubReleaseNotes(version);
-  if (notes) {
-    await writeCachedNotes(
-      version,
-      { kind: 'notes', notes },
-      RELEASE_NOTES_CACHE_TTL_SECONDS,
-    );
-    return notes;
-  }
-
-  await writeCachedNotes(
-    version,
-    { kind: 'missing' },
-    RELEASE_NOTES_NEGATIVE_CACHE_TTL_SECONDS,
+  const normalizedVersion = normalizeProductVersion(version);
+  const releases = await readChangelogReleaseNotes();
+  return (
+    releases.find((release) => release.version === normalizedVersion) ?? null
   );
-  return null;
+}
+
+export async function getReleaseHistoryCommand(
+  auth: UserAuthSuccess,
+  input: { version: string },
+): Promise<ReleaseNotes[]> {
+  const version = input.version.trim();
+  if (!PRODUCT_VERSION_PATTERN.test(version)) {
+    return [];
+  }
+
+  const status = await getReleaseStatusCommand(auth);
+  if (!isAllowedNotesVersion(auth, version, status)) {
+    return [];
+  }
+
+  const normalizedVersion = normalizeProductVersion(version);
+  const releases = (await readChangelogReleaseNotes())
+    .filter((release) => compareProductVersions(release.version, version) <= 0)
+    .sort((left, right) => compareProductVersions(right.version, left.version));
+
+  if (
+    normalizedVersion &&
+    !releases.some((release) => release.version === normalizedVersion)
+  ) {
+    releases.unshift(unavailableReleaseNotes(normalizedVersion));
+  }
+
+  return releases;
 }
