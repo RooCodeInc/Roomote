@@ -248,9 +248,7 @@ export async function maybeRouteFastAgentReaction(params: {
   const reactorDisplayName = await context.slack
     .normalizeIncomingText(`<@${event.user}>`)
     .catch(() => undefined);
-  // The conversation lock is the Fast turn queue. Do not keep Slack's webhook
-  // request open while this reaction waits behind an active turn.
-  void startAcceptedFastAgentTurn({
+  await startAcceptedFastAgentTurn({
     run: ({ onAccepted, onRejected }) =>
       processFastAgentReaction({
         context,

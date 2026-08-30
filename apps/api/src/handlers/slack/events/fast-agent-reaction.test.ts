@@ -142,46 +142,6 @@ describe('Fast Slack reaction input', () => {
     expect(mocks.postThreadMessage).not.toHaveBeenCalled();
   });
 
-  it('accepts a bound reaction while its Fast turn waits for the conversation lock', async () => {
-    let releaseQueuedTurn: (() => void) | undefined;
-    mocks.acquireLock.mockImplementationOnce(
-      () =>
-        new Promise((resolve) => {
-          releaseQueuedTurn = () => resolve(mocks.releaseLock);
-        }),
-    );
-    const slack = {
-      getMessage: vi.fn(async () => ({
-        text: 'I found the issue.',
-        thread_ts: '100.000',
-      })),
-      normalizeIncomingText: vi.fn(async () => '@alice'),
-      updateMessage: vi.fn(),
-    };
-
-    await expect(
-      maybeRouteFastAgentReaction({
-        context: {
-          teamId: 'T1',
-          slackInstallation: { botUserId: 'UROOMOTE' },
-          slack,
-        } as never,
-        event: {
-          type: 'reaction_added',
-          user: 'UALICE',
-          reaction: 'eyes',
-          item: { type: 'message', channel: 'C1', ts: '101.000' },
-          event_ts: '102.000',
-        },
-      }),
-    ).resolves.toBe(true);
-
-    expect(mocks.answerQuestion).not.toHaveBeenCalled();
-    releaseQueuedTurn?.();
-    await vi.waitFor(() => expect(mocks.answerQuestion).toHaveBeenCalledOnce());
-    await vi.waitFor(() => expect(mocks.releaseLock).toHaveBeenCalledOnce());
-  });
-
   it('does not route reactions from users who do not own the bound session', async () => {
     mocks.findSession.mockResolvedValue(null);
 
