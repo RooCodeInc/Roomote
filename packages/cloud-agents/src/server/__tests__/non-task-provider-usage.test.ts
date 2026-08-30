@@ -11,6 +11,7 @@ const {
   execFileMock,
   execFileSyncMock,
   mockResolveEffectiveModelRuntimeEnv,
+  permissionReplyMock,
   recordLlmUsageMock,
   sessionAbortMock,
   spawnMock,
@@ -18,6 +19,7 @@ const {
   sessionCreateMock,
   sessionMessagesMock,
   sessionPromptMock,
+  sessionUpdateMock,
 } = vi.hoisted(() => ({
   createOpencodeClientMock: vi.fn(),
   configProvidersMock: vi.fn(),
@@ -26,6 +28,7 @@ const {
   execFileMock: vi.fn(),
   execFileSyncMock: vi.fn(),
   mockResolveEffectiveModelRuntimeEnv: vi.fn(),
+  permissionReplyMock: vi.fn(),
   recordLlmUsageMock: vi.fn(),
   sessionAbortMock: vi.fn(),
   spawnMock: vi.fn(),
@@ -33,6 +36,7 @@ const {
   sessionCreateMock: vi.fn(),
   sessionMessagesMock: vi.fn(),
   sessionPromptMock: vi.fn(),
+  sessionUpdateMock: vi.fn(),
 }));
 
 vi.mock('@opencode-ai/sdk/v2/client', () => ({
@@ -140,14 +144,19 @@ describe('resolveOpenCodeSmallModel', () => {
       event: {
         subscribe: eventSubscribeMock,
       },
+      permission: {
+        reply: permissionReplyMock,
+      },
       session: {
         abort: sessionAbortMock,
         children: sessionChildrenMock,
         create: sessionCreateMock,
         messages: sessionMessagesMock,
         prompt: sessionPromptMock,
+        update: sessionUpdateMock,
       },
     });
+    permissionReplyMock.mockResolvedValue({ data: true, error: undefined });
     sessionAbortMock.mockResolvedValue({ data: true, error: undefined });
     sessionCreateMock.mockResolvedValue({
       data: { id: 'session-1' },
@@ -155,6 +164,10 @@ describe('resolveOpenCodeSmallModel', () => {
     });
     sessionChildrenMock.mockResolvedValue({ data: [], error: undefined });
     sessionMessagesMock.mockResolvedValue({ data: [], error: undefined });
+    sessionUpdateMock.mockResolvedValue({
+      data: { id: 'session-1' },
+      error: undefined,
+    });
     configProvidersMock.mockResolvedValue({
       data: { providers: [], default: {} },
       error: undefined,
@@ -283,22 +296,44 @@ describe('resolveOpenCodeSmallModel', () => {
     const subagentReady = new Promise<void>((resolve) => {
       markSubagentReady = resolve;
     });
-    eventSubscribeMock.mockResolvedValue({
-      stream: (async function* () {
-        yield {
-          type: 'session.created',
-          properties: {
-            sessionID: 'subagent-session-1',
-            info: {
-              id: 'subagent-session-1',
-              parentID: 'session-1',
-            },
-          },
-        };
-      })(),
+    let markPermissionHandled!: () => void;
+    const permissionHandled = new Promise<void>((resolve) => {
+      markPermissionHandled = resolve;
     });
+    eventSubscribeMock.mockImplementation(
+      async (_params, options: { signal: AbortSignal }) => ({
+        stream: (async function* () {
+          yield {
+            type: 'permission.asked',
+            properties: {
+              id: 'permission-1',
+              sessionID: 'session-1',
+              permission: 'task',
+              patterns: ['advisor'],
+              metadata: {},
+              always: [],
+            },
+          };
+          yield {
+            type: 'session.created',
+            properties: {
+              sessionID: 'subagent-session-1',
+              info: {
+                id: 'subagent-session-1',
+                parentID: 'session-1',
+              },
+            },
+          };
+          await new Promise<void>((resolve) => {
+            options.signal.addEventListener('abort', () => resolve(), {
+              once: true,
+            });
+          });
+        })(),
+      }),
+    );
     sessionPromptMock.mockImplementation(async () => {
-      await subagentReady;
+      await Promise.all([subagentReady, permissionHandled]);
       return {
         data: {
           info: {
@@ -320,6 +355,10 @@ describe('resolveOpenCodeSmallModel', () => {
     const onModelResolved = vi.fn();
     const onPromptStarted = vi.fn();
     const onMessageCompleted = vi.fn();
+    const onPermissionAsked = vi.fn(() => {
+      markPermissionHandled();
+      return { reply: 'reject' as const, message: 'Acknowledge first.' };
+    });
     const onSubagentSessionReady = vi.fn(() => markSubagentReady());
     const session: { id?: string } = {};
 
@@ -343,6 +382,7 @@ describe('resolveOpenCodeSmallModel', () => {
           },
           onModelResolved,
           onMessageCompleted,
+          onPermissionAsked,
           onPromptStarted,
           onSessionReady,
           onSubagentSessionReady,
@@ -360,6 +400,19 @@ describe('resolveOpenCodeSmallModel', () => {
       createdAtMs: 100,
       completedAtMs: 200,
     });
+    expect(onPermissionAsked).toHaveBeenCalledWith({
+      permission: 'task',
+      sessionId: 'session-1',
+    });
+    expect(permissionReplyMock).toHaveBeenCalledWith(
+      {
+        requestID: 'permission-1',
+        directory: '/tmp/roomote-fast-native-test',
+        reply: 'reject',
+        message: 'Acknowledge first.',
+      },
+      expect.any(Object),
+    );
     expect(onPromptStarted).toHaveBeenCalledOnce();
     expect(onSessionReady).toHaveBeenCalledWith('session-1');
     expect(onSubagentSessionReady).toHaveBeenCalledWith('subagent-session-1');
@@ -395,6 +448,56 @@ describe('resolveOpenCodeSmallModel', () => {
       expect.any(Object),
     );
   });
+
+  it.each([
+    {
+      name: 'fails',
+      stream: () =>
+        (async function* () {
+          yield* [];
+          throw new Error('stream disconnected');
+        })(),
+      expected: 'OpenCode session event monitor failed',
+    },
+    {
+      name: 'ends',
+      stream: () =>
+        (async function* () {
+          yield* [];
+        })(),
+      expected: 'OpenCode session event monitor ended unexpectedly',
+    },
+  ])(
+    '$name closed when required permission monitoring is lost',
+    async ({ stream, expected }) => {
+      mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
+        R_MODEL: 'openrouter/openai/gpt-5.4',
+      });
+      eventSubscribeMock.mockResolvedValue({ stream: stream() });
+      sessionPromptMock.mockImplementation(() => new Promise(() => undefined));
+      const { generateTrackedNonTaskTextInOpenCodeSession } =
+        await import('../non-task-provider-usage.js');
+
+      await expect(
+        generateTrackedNonTaskTextInOpenCodeSession(
+          {
+            surface: 'fast_agent',
+            prompt: 'Use the task tool.',
+          },
+          {},
+          {
+            directory: '/tmp/roomote-fast-native-test',
+            onPermissionAsked: () => ({ reply: 'reject' }),
+            tools: { '*': false, task: true },
+          },
+        ),
+      ).rejects.toThrow(expected);
+      expect(sessionAbortMock).toHaveBeenCalledWith(
+        expect.objectContaining({ sessionID: 'session-1' }),
+        expect.any(Object),
+      );
+    },
+  );
 
   it('records completed Fast OpenCode usage with a stable event key', async () => {
     mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
@@ -963,8 +1066,10 @@ describe('resolveOpenCodeSmallModel', () => {
       data: [{ info: { id: 'message-1' }, parts: [] }],
       error: undefined,
     });
-    const { generateTrackedNonTaskTextInOpenCodeSession } =
-      await import('../non-task-provider-usage.js');
+    const {
+      FAST_AGENT_SESSION_PERMISSIONS,
+      generateTrackedNonTaskTextInOpenCodeSession,
+    } = await import('../non-task-provider-usage.js');
 
     await expect(
       generateTrackedNonTaskTextInOpenCodeSession(
@@ -972,6 +1077,7 @@ describe('resolveOpenCodeSmallModel', () => {
         { id: 'persisted-session' },
         {
           directory: '/var/lib/roomote/opencode/runtime/conversation',
+          permission: FAST_AGENT_SESSION_PERMISSIONS,
           tools: { '*': false, send_chat_reply: true },
           validateSession: true,
         },
@@ -988,6 +1094,14 @@ describe('resolveOpenCodeSmallModel', () => {
     );
     expect(sessionMessagesMock.mock.invocationCallOrder[0]!).toBeLessThan(
       sessionPromptMock.mock.invocationCallOrder[0]!,
+    );
+    expect(sessionUpdateMock).toHaveBeenCalledWith(
+      {
+        sessionID: 'persisted-session',
+        directory: '/var/lib/roomote/opencode/runtime/conversation',
+        permission: FAST_AGENT_SESSION_PERMISSIONS,
+      },
+      expect.any(Object),
     );
     expect(sessionCreateMock).not.toHaveBeenCalled();
   });

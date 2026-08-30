@@ -339,6 +339,72 @@ describe('Fast native OpenCode tool bridge', () => {
     }
   });
 
+  it('applies the parent turn guard before direct skill and spill handling', async () => {
+    const runtime = await getFastAgentNativeToolRuntime('guarded-tools', []);
+    const sessionId = 'guarded-tools-parent';
+    let acknowledged = false;
+    const acknowledgementError = {
+      success: false as const,
+      error:
+        'Post a user-visible acknowledgement with send_chat_reply before any other action.',
+    };
+    const unbind = bindFastAgentNativeToolExecutor(
+      sessionId,
+      'guarded-tools-conversation',
+      async (call) => {
+        if (
+          call.name === FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReply &&
+          call.args.purpose === 'ack'
+        ) {
+          acknowledged = true;
+        }
+        return { success: true };
+      },
+      {
+        allowSkillAccess: true,
+        allowSpillRecovery: true,
+        beforeExecute: (call) =>
+          acknowledged ||
+          call.name === FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReply
+            ? null
+            : acknowledgementError,
+      },
+    );
+    const callBridge = (tool: string, args: Record<string, unknown>) =>
+      fetch(runtime.env.ROOMOTE_FAST_TOOL_BRIDGE_URL!, {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${runtime.env.ROOMOTE_FAST_TOOL_BRIDGE_TOKEN}`,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({ sessionID: sessionId, tool, args }),
+      })
+        .then((response) => response.json())
+        .then((payload) => JSON.parse(payload.output));
+
+    try {
+      await expect(
+        callBridge(FAST_AGENT_NATIVE_TOOL_NAMES.listSkills, {}),
+      ).resolves.toEqual(acknowledgementError);
+      await expect(
+        callBridge(FAST_AGENT_NATIVE_TOOL_NAMES.spillRead, {
+          handle: 'unavailable',
+        }),
+      ).resolves.toEqual(acknowledgementError);
+      await expect(
+        callBridge(FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReply, {
+          purpose: 'ack',
+          message: 'I’ll check.',
+        }),
+      ).resolves.toEqual({ success: true });
+      await expect(
+        callBridge(FAST_AGENT_NATIVE_TOOL_NAMES.listSkills, {}),
+      ).resolves.toMatchObject({ success: true });
+    } finally {
+      unbind();
+    }
+  });
+
   it('lists and loads packaged and repository skills without filesystem access', async () => {
     const runtime = await getFastAgentNativeToolRuntime('native-skills', []);
     const parentSession = 'opencode-parent-skills';

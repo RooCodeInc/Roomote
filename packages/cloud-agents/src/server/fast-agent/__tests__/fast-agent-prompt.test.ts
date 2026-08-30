@@ -105,7 +105,7 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain('use "run_now" rather than "launch_task"');
     expect(prompt).toContain('same actor-authorized remote');
     expect(prompt).toContain('local stdio servers remain sandbox-only');
-    expect(prompt).toContain('It does not require a prior acknowledgement');
+    expect(prompt).toContain('acknowledge before calling it');
     expect(prompt).toContain(
       'Keep using "launch_task", "send_task_message", or "cancel_task" for task changes',
     );
@@ -118,13 +118,13 @@ describe('buildFastAgentSystemPrompt', () => {
     );
     expect(prompt).toContain('native JSON schema');
     expect(prompt).toContain(
-      'The runtime rejects those calls until an acknowledgement',
+      'the first action must be a user-visible acknowledgement',
     );
     expect(prompt).toContain(
-      'Sending a task message is also exempt so steering is not delayed',
+      'before Brain, integrations, subagents, task actions, skills, result recovery, widgets, or memory',
     );
     expect(prompt).toContain(
-      'Call it immediately, before an acknowledgement or other user-visible response',
+      'On a human-authored turn, acknowledge first, then send the instruction immediately',
     );
     expect(prompt).toContain('kickoffMessage');
     expect(prompt).toContain('"includeAttachments"');
@@ -134,7 +134,7 @@ describe('buildFastAgentSystemPrompt', () => {
     );
     expect(prompt).toContain("describing the user's work now underway");
     expect(prompt).toContain(
-      'The kickoff acknowledges the request, but it is not the only communication expected while longer work continues',
+      'The kickoff is a progress artifact after the acknowledgement, and it is not the only communication expected while longer work continues',
     );
     expect(prompt).not.toContain('explaining what is being delegated');
     expect(prompt).toContain('launch multiple independent tasks in one turn');

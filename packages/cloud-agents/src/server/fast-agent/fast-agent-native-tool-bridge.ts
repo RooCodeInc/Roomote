@@ -118,6 +118,7 @@ type FastAgentNativeToolBridge = {
 type ActiveExecutor = {
   allowSkillAccess: boolean;
   allowSpillRecovery: boolean;
+  beforeExecute?: FastAgentNativeToolGuard;
   conversationId: string;
   executor: FastAgentNativeToolExecutor;
   skillStore: FastAgentSkillStore;
@@ -127,9 +128,14 @@ type ActiveExecutor = {
 type FastAgentNativeToolBindingOptions = {
   allowSkillAccess?: boolean;
   allowSpillRecovery: boolean;
+  beforeExecute?: FastAgentNativeToolGuard;
   skillStore?: FastAgentSkillStore;
   spillBudget?: FastAgentSpillTurnBudget;
 };
+
+type FastAgentNativeToolGuard = (
+  call: FastAgentNativeToolCall,
+) => { success: false; error: string } | null;
 
 type FastAgentSpillTurnBudget = {
   calls: number;
@@ -905,6 +911,18 @@ async function startBridge(): Promise<FastAgentNativeToolBridge> {
         args: parsed.args,
         ...(parsed.agent ? { agent: parsed.agent } : {}),
       };
+      const guardError = activeExecutor.beforeExecute?.(call);
+      if (guardError) {
+        writeJson(response, 200, {
+          ok: true,
+          ...(await formatFastAgentNativeToolResult(
+            parsed.sessionID,
+            guardError,
+            { allowSpill: false },
+          )),
+        });
+        return;
+      }
       if (
         parsed.tool === FAST_AGENT_NATIVE_TOOL_NAMES.listSkills ||
         parsed.tool === FAST_AGENT_NATIVE_TOOL_NAMES.loadSkill
@@ -1282,6 +1300,7 @@ export function bindFastAgentNativeToolExecutor(
   activeExecutors.set(sessionID, {
     allowSkillAccess: options.allowSkillAccess ?? false,
     allowSpillRecovery: options.allowSpillRecovery,
+    beforeExecute: options.beforeExecute,
     conversationId,
     executor,
     skillStore: options.skillStore ?? fastAgentSkillStore,
