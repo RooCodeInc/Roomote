@@ -218,19 +218,18 @@ describe('handleMergeAnnouncerPush', () => {
     );
 
     const prompt = dependencies.generateSummary.mock.calls[0]?.[0] as string;
+    expect(prompt).toContain('one or two conversational sentences');
+    expect(prompt).toContain('Do not use bullets or headings');
     expect(prompt).toContain(
-      'one compact bullet per meaningful merged pull request',
+      'engineer quickly messaging a coworker about what shipped',
     );
-    expect(prompt).toContain('using • as the bullet marker');
+    expect(prompt).toContain('casual, everyday language');
     expect(prompt).toContain(
-      'plain-language past-tense verb such as Fixed, Added, or Improved',
+      'single main practical user or operational benefit',
     );
-    expect(prompt).toContain('practical user or operational benefit');
+    expect(prompt).toContain('include the pull request link inline');
     expect(prompt).toContain(
-      "pull request link inline using the announcement provider's native clickable format",
-    );
-    expect(prompt).toContain(
-      'Do not include a heading, preamble, conclusion, author list, implementation-detail enumeration, or generic praise',
+      'do not enumerate every platform, integration, implementation detail, edge case, or internal mechanism',
     );
     expect(prompt).toContain(
       'treat its title and body as the primary source of intent',
