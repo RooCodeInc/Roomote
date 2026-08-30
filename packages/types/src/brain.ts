@@ -122,7 +122,7 @@ export const BRAIN_COLLECTOR_IDS = {
   slackPublicChannels: 'slack-public-channels:entity-timeline-v3',
   discordPublicChannels: 'discord-public-channels:entity-timeline-v1',
   githubIssues: 'github-issues:occurrence-date-v3',
-  linearIssues: 'linear-issues:entity-census-v1',
+  linearIssues: 'linear-issues:entity-census-v2',
   notionPages: 'notion-pages',
   granolaMeetings: 'granola-meetings:entity-timeline-v3',
 } as const;

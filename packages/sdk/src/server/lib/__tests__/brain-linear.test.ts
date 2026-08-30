@@ -209,7 +209,7 @@ describe('Linear issue collection', () => {
     expect(result.pages).toHaveLength(1);
     expect(result.itemUpdates).toEqual([
       expect.objectContaining({
-        collectorId: 'linear-issues:entity-census-v1',
+        collectorId: 'linear-issues:entity-census-v2',
         itemId: 'Issue-UUID',
       }),
     ]);
@@ -237,14 +237,14 @@ describe('Linear issue collection', () => {
     const result = await collectBrainLinearIssues({ now, limit: 100 });
 
     expect(result.stateUpdates[0]).toEqual({
-      collectorId: 'linear-issues:entity-census-v1:incremental',
+      collectorId: 'linear-issues:entity-census-v2:incremental',
       watermark: new Date('2026-08-20T11:59:59.000Z'),
       cursor: null,
     });
   });
 
   it('re-arms a completed census after one day', async () => {
-    mocks.syncState.set('linear-issues:entity-census-v1', {
+    mocks.syncState.set('linear-issues:entity-census-v2', {
       backfillCompletedAt: new Date('2026-08-19T11:00:00.000Z'),
     });
     mocks.listIssues.mockResolvedValue({
@@ -258,7 +258,7 @@ describe('Linear issue collection', () => {
     });
 
     expect(result.stateUpdates).toContainEqual({
-      collectorId: 'linear-issues:entity-census-v1',
+      collectorId: 'linear-issues:entity-census-v2',
       cursor: null,
       backfillCompletedAt: null,
     });
@@ -327,7 +327,7 @@ describe('Linear issue census', () => {
       done: false,
       pageRetirements: [
         {
-          collectorId: 'linear-issues:entity-census-v1',
+          collectorId: 'linear-issues:entity-census-v2',
           itemId: 'deleted-issue',
           slug: 'linear/org/issues/deleted-issue',
         },
