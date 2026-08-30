@@ -3053,7 +3053,65 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     }
   });
 
-  it('reports quiet lifecycle state without aborting work and fences real cancellation', async () => {
+  it('keeps idle quiet work open until the turn completes', async () => {
+    vi.useFakeTimers();
+    try {
+      let promptSignal: AbortSignal | undefined;
+      let resolvePromptStarted: (() => void) | undefined;
+      const promptStarted = new Promise<void>((resolve) => {
+        resolvePromptStarted = resolve;
+      });
+      let resolvePrompt: ((value: string) => void) | undefined;
+      mocks.generateText.mockImplementation(
+        async (_params, _session, options) => {
+          promptSignal = options.signal;
+          await options.onSessionReady('opencode-session-1');
+          options.onLifecycleEvent?.({
+            type: 'provider_request_started',
+            atMs: Date.now(),
+          });
+          options.onLifecycleEvent?.({
+            type: 'session_status',
+            status: 'idle',
+            atMs: Date.now(),
+          });
+          resolvePromptStarted?.();
+          return await new Promise<string>((resolve) => {
+            resolvePrompt = resolve;
+          });
+        },
+      );
+      const adapter = callbacks();
+
+      const resultPromise = answerFastAgentQuestion({ ...baseParams, adapter });
+      await promptStarted;
+      await vi.advanceTimersByTimeAsync(30 * 60_000);
+
+      expect(promptSignal?.aborted).toBe(false);
+      expect(adapter.postReply).toHaveBeenCalledTimes(3);
+      expect(adapter.postReply).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          purpose: 'progress',
+          message: expect.stringContaining(
+            'OpenCode currently reports the session as idle',
+          ),
+        }),
+      );
+
+      resolvePrompt?.('Finished after quiet work.');
+
+      await expect(resultPromise).resolves.toBe('Finished after quiet work.');
+      expect(promptSignal?.aborted).toBe(false);
+      expect(adapter.postReply).toHaveBeenLastCalledWith({
+        purpose: 'closeout',
+        message: 'Finished after quiet work.',
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('reports quiet lifecycle state and fences real cancellation', async () => {
     vi.useFakeTimers();
     try {
       mocks.listIntegrations.mockResolvedValue([
