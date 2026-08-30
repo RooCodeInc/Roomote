@@ -1,24 +1,35 @@
 'use client';
 
 import { useEffect, useState, type KeyboardEvent } from 'react';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import { toast } from 'sonner';
 import {
   ArrowLeftFromLine,
   Button,
+  ExternalLink,
   Dialog,
   DialogContent,
   DialogFooter,
   DialogHeader,
   DialogTitle,
   Input,
+  Breadcrumb,
+  BreadcrumbItem,
+  BreadcrumbLink,
+  BreadcrumbList,
+  BreadcrumbPage,
+  BreadcrumbSeparator,
 } from '@/components/system';
 import { PullRequestBadge, WorkspaceBadge } from '@/components/sandbox';
+import { WorkspaceHeader } from '@/components/layout';
 
 import { useTRPC } from '@/trpc/client';
 import { useSandboxLayout } from '../../use-sandbox-layout';
 
 import { type TaskSession } from './hooks';
+import { TaskSessionReadTracker } from './TaskSessionReadTracker';
 
 interface HeaderProps {
   session: TaskSession;
@@ -27,15 +38,24 @@ interface HeaderProps {
 export const Header = ({ session: { taskRun, task, taskId } }: HeaderProps) => {
   const { isSidebarVisible, toggleSidebar } = useSandboxLayout();
   const trpc = useTRPC();
+  const searchParams = useSearchParams();
   const queryClient = useQueryClient();
   const [isRenameDialogOpen, setIsRenameDialogOpen] = useState(false);
   const [titleDraft, setTitleDraft] = useState(task?.title ?? '');
+  const { data: parentSession } = useQuery(
+    trpc.sessions.forTask.queryOptions({ taskId }),
+  );
 
   const environmentId = taskRun?.payload?.environmentId;
   const repo = taskRun?.payload?.repo;
   const prRepo = taskRun?.prRepo;
   const prNumber = taskRun?.prNumber;
   const pullRequests = taskRun?.pullRequests ?? [];
+  const sessionHref = parentSession
+    ? `/sessions/${parentSession.sessionId}?task=${taskId}`
+    : taskRun?.payload?.fastAgentSessionId
+      ? `/sessions/${taskRun.payload.fastAgentSessionId}`
+      : null;
 
   const badges = [
     (environmentId || repo) && (
@@ -149,21 +169,65 @@ export const Header = ({ session: { taskRun, task, taskId } }: HeaderProps) => {
   };
 
   const title = task?.title || 'Untitled task';
+  const returnTo = searchParams?.get('returnTo');
+  const safeReturnTo =
+    returnTo?.startsWith('/sessions') && !returnTo.startsWith('//')
+      ? returnTo
+      : '/sessions';
 
   return (
-    <div className="flex shrink-0 items-center overflow-hidden py-3 border-b-2 border-card @container">
-      <div className="relative flex flex-col @[600px]:flex-row min-w-0 max-w-4xl mx-auto flex-1 px-4 @[600px]:items-center gap-2 @[600px]:gap-4">
-        <h1
-          role="button"
-          tabIndex={0}
-          onClick={handleOpenRenameDialog}
-          onKeyDown={handleTitleKeyDown}
-          aria-label="Edit task title"
-          title="Edit task title"
-          className={`-ml-3 min-w-0 max-w-full cursor-pointer overflow-hidden rounded-md border border-transparent px-2 py-1 text-sm font-medium text-ellipsis whitespace-nowrap hover:border-border hover:bg-muted/40 focus-visible:border-border focus-visible:bg-muted/40 focus-visible:outline-none @[600px]:flex-[0_1_auto] ${!isSidebarVisible ? 'pr-8' : ''}`}
-        >
-          {title}
-        </h1>
+    <>
+      {parentSession ? (
+        <TaskSessionReadTracker sessionId={parentSession.sessionId} />
+      ) : null}
+      <WorkspaceHeader contentClassName="flex-row items-center justify-between gap-4">
+        {parentSession ? (
+          <Breadcrumb className="min-w-0">
+            <BreadcrumbList className="flex-nowrap text-xs">
+              <BreadcrumbItem>
+                <BreadcrumbLink asChild>
+                  <Link href={safeReturnTo}>Sessions</Link>
+                </BreadcrumbLink>
+              </BreadcrumbItem>
+              <BreadcrumbSeparator />
+              <BreadcrumbItem className="min-w-0">
+                <BreadcrumbLink asChild>
+                  <Link
+                    href={`/sessions/${parentSession.sessionId}?task=${taskId}`}
+                    className="max-w-40 truncate"
+                  >
+                    {parentSession.title}
+                  </Link>
+                </BreadcrumbLink>
+              </BreadcrumbItem>
+              <BreadcrumbSeparator />
+              <BreadcrumbItem className="min-w-0">
+                <BreadcrumbPage
+                  role="button"
+                  tabIndex={0}
+                  onClick={handleOpenRenameDialog}
+                  onKeyDown={handleTitleKeyDown}
+                  aria-label="Edit task title"
+                  className="max-w-48 cursor-pointer truncate"
+                >
+                  {title}
+                </BreadcrumbPage>
+              </BreadcrumbItem>
+            </BreadcrumbList>
+          </Breadcrumb>
+        ) : (
+          <h1
+            role="button"
+            tabIndex={0}
+            onClick={handleOpenRenameDialog}
+            onKeyDown={handleTitleKeyDown}
+            aria-label="Edit task title"
+            title="Edit task title"
+            className={`-ml-3 min-w-0 max-w-full cursor-pointer overflow-hidden rounded-md border border-transparent px-2 py-1 text-sm font-medium text-ellipsis whitespace-nowrap hover:border-border hover:bg-muted/40 focus-visible:border-border focus-visible:bg-muted/40 focus-visible:outline-none @[600px]:flex-[0_1_auto] ${!isSidebarVisible ? 'pr-8' : ''}`}
+          >
+            {title}
+          </h1>
+        )}
         {badges.length > 0 && (
           <div className="flex min-w-0 shrink-0 items-center gap-4 overflow-hidden text-xs text-muted-foreground">
             {badges.map((badge, index) => (
@@ -173,6 +237,14 @@ export const Header = ({ session: { taskRun, task, taskId } }: HeaderProps) => {
             ))}
           </div>
         )}
+        {sessionHref ? (
+          <Button asChild variant="ghost" size="sm" className="shrink-0">
+            <Link href={sessionHref}>
+              Go to session
+              <ExternalLink />
+            </Link>
+          </Button>
+        ) : null}
         {!isSidebarVisible && (
           <Button
             variant="ghost"
@@ -182,7 +254,7 @@ export const Header = ({ session: { taskRun, task, taskId } }: HeaderProps) => {
             <ArrowLeftFromLine className="size-4" />
           </Button>
         )}
-      </div>
+      </WorkspaceHeader>
       <Dialog open={isRenameDialogOpen} onOpenChange={setIsRenameDialogOpen}>
         <DialogContent size="sm">
           <DialogHeader>
@@ -218,6 +290,6 @@ export const Header = ({ session: { taskRun, task, taskId } }: HeaderProps) => {
           </form>
         </DialogContent>
       </Dialog>
-    </div>
+    </>
   );
 };

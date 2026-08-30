@@ -1,3 +1,7 @@
+export type SlackTableCell =
+  | { type: 'raw_text'; text: string }
+  | { type: 'rich_text'; elements: Array<Record<string, unknown>> };
+
 export type SlackBlock =
   | {
       type: 'section' | 'context' | 'actions';
@@ -28,8 +32,11 @@ export type SlackBlock =
   | {
       type: 'table';
       block_id?: string;
-      rows: Array<Array<Record<string, unknown>>>;
-      column_settings?: Array<Record<string, unknown>>;
+      rows: SlackTableCell[][];
+      column_settings?: Array<{
+        align?: 'left' | 'center' | 'right';
+        is_wrapped?: boolean;
+      }>;
     }
   | {
       type: 'container';
@@ -52,9 +59,11 @@ export function buildSlackThreadPermalink(params: {
   slackTeamId?: string | null;
   slackChannelId?: string | null;
   threadTs?: string | null;
+  messageTs?: string | null;
 }): string | null {
   const slackChannelId = params.slackChannelId?.trim();
   const threadTs = params.threadTs?.trim();
+  const messageTs = params.messageTs?.trim();
 
   if (!slackChannelId || !threadTs) {
     return null;
@@ -63,14 +72,14 @@ export function buildSlackThreadPermalink(params: {
   const slackWorkspaceDomain = params.slackWorkspaceDomain?.trim();
   const slackTeamId = params.slackTeamId?.trim();
 
-  if (!slackWorkspaceDomain && slackTeamId) {
+  if (!slackWorkspaceDomain && slackTeamId && !messageTs) {
     return `https://slack.com/app_redirect?channel=${encodeURIComponent(slackChannelId)}&team=${encodeURIComponent(slackTeamId)}`;
   }
 
   const origin = slackWorkspaceDomain
     ? `https://${encodeURIComponent(slackWorkspaceDomain)}.slack.com`
     : 'https://app.slack.com';
-  const permalinkTs = threadTs.replaceAll('.', '');
+  const permalinkTs = (messageTs || threadTs).replaceAll('.', '');
 
   return `${origin}/archives/${encodeURIComponent(slackChannelId)}/p${permalinkTs}?thread_ts=${encodeURIComponent(threadTs)}&cid=${encodeURIComponent(slackChannelId)}`;
 }

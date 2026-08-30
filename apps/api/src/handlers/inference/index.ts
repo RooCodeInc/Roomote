@@ -1,7 +1,16 @@
 import { Hono } from 'hono';
 
-import { formatSingleLineLog } from '@roomote/types';
-import { db, eq, taskRuns } from '@roomote/db/server';
+import {
+  formatSingleLineLog,
+  rebaseRoomoteModelIdToUpstream,
+  ROOMOTE_INFERENCE_PROVIDER_ID,
+} from '@roomote/types';
+import {
+  db,
+  DevLoginInferencePlaceholderError,
+  eq,
+  taskRuns,
+} from '@roomote/db/server';
 import { recordLlmUsage } from '@roomote/sdk/server';
 
 import type { Variables } from '../../types';
@@ -151,6 +160,39 @@ function buildInferenceResponseHeaders(upstreamHeaders: Headers): Headers {
   }
 
   return headers;
+}
+
+function rewriteRoomoteRequestModel(bodyText: string): string {
+  // The sandbox OpenCode config already sends upstream (prefix-stripped)
+  // model ids, so the dominant path never needs the rewrite; the substring
+  // check skips the full-body JSON parse and re-serialization for it. The
+  // rewrite exists for clients that address models by their catalog id.
+  if (!bodyText.includes(`"${ROOMOTE_INFERENCE_PROVIDER_ID}/`)) {
+    return bodyText;
+  }
+
+  try {
+    const body: unknown = JSON.parse(bodyText);
+
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      return bodyText;
+    }
+
+    const request = body as Record<string, unknown>;
+    const model = request.model;
+    const upstreamModel =
+      typeof model === 'string' ? rebaseRoomoteModelIdToUpstream(model) : null;
+    if (upstreamModel === null) {
+      return bodyText;
+    }
+
+    return JSON.stringify({
+      ...request,
+      model: upstreamModel,
+    });
+  } catch {
+    return bodyText;
+  }
 }
 
 /**
@@ -348,10 +390,12 @@ inference.on(['POST', 'GET'], '/:provider/*', async (c) => {
       }),
     );
 
-    return c.json(
-      { error: `Failed to resolve the ${provider.name} configuration` },
-      500,
-    );
+    return error instanceof DevLoginInferencePlaceholderError
+      ? c.json({ error: error.message }, 503)
+      : c.json(
+          { error: `Failed to resolve the ${provider.name} configuration` },
+          500,
+        );
   }
 
   if (!resolution.ok) {
@@ -365,12 +409,12 @@ inference.on(['POST', 'GET'], '/:provider/*', async (c) => {
       c.req.header('x-initiator') === 'agent' ? 'agent' : 'user';
   }
 
-  // GitHub Copilot's OAuth path normally labels vision traffic. Gateway mode
-  // holds that token server-side, so inspect the request body here and restore
-  // the same header OpenCode would have set.
   let requestBody: BodyInit | null = c.req.raw.body;
   let useDuplexHalf = Boolean(c.req.raw.body);
 
+  // GitHub Copilot's OAuth path normally labels vision traffic. Gateway mode
+  // holds that token server-side, so inspect the request body here and restore
+  // the same header OpenCode would have set.
   if (providerId === 'github-copilot' && method === 'POST') {
     const bodyText = await c.req.text();
     requestBody = bodyText;
@@ -379,6 +423,13 @@ inference.on(['POST', 'GET'], '/:provider/*', async (c) => {
     if (copilotRequestBodyHasVisionContent(bodyText)) {
       injectedHeaders['Copilot-Vision-Request'] = 'true';
     }
+  }
+
+  // Roomote model ids are an aliased namespace over OpenRouter; rewrite a
+  // catalog-id model reference onto the upstream slug OpenRouter expects.
+  if (providerId === ROOMOTE_INFERENCE_PROVIDER_ID && method === 'POST') {
+    requestBody = rewriteRoomoteRequestModel(await c.req.text());
+    useDuplexHalf = false;
   }
 
   try {
@@ -417,6 +468,19 @@ inference.on(['POST', 'GET'], '/:provider/*', async (c) => {
           elapsedMs: Date.now() - startedAt,
         }),
       );
+
+      if (
+        providerId === ROOMOTE_INFERENCE_PROVIDER_ID &&
+        upstreamResponse.status === 402
+      ) {
+        return c.json(
+          {
+            error:
+              'Roomote inference credits are exhausted. Connect an inference provider to continue.',
+          },
+          402,
+        );
+      }
     }
 
     return new Response(

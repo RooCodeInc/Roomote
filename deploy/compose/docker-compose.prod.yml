@@ -24,7 +24,11 @@ x-roomote-base-env: &roomote-base-env
   R_BRAIN_MODEL: ${R_BRAIN_MODEL:-}
   R_BRAIN_EMBEDDING_MODEL: ${R_BRAIN_EMBEDDING_MODEL:-}
   R_BRAIN_EMBEDDING_DIMENSIONS: ${R_BRAIN_EMBEDDING_DIMENSIONS:-}
-  R_BRAIN_RERANKER_MODEL: ${R_BRAIN_RERANKER_MODEL:-}
+  # Optional self-run inference: point embeddings at the bundled
+  # `infinity` service (profile local-inference) or any OpenAI-compatible
+  # server. Chat synthesis keeps flowing to the configured model provider.
+  R_BRAIN_EMBEDDINGS_UPSTREAM_URL: ${R_BRAIN_EMBEDDINGS_UPSTREAM_URL:-}
+  R_BRAIN_INFERENCE_UPSTREAM_API_KEY: ${R_BRAIN_INFERENCE_UPSTREAM_API_KEY:-}
   R_GBRAIN_URL: ${R_GBRAIN_URL:-http://gbrain:8931}
   R_GBRAIN_ADMIN_TOKEN_FILE: /gbrain-data/admin-bootstrap-token
   # Written by the Brain on first boot when no token was supplied, so a stack
@@ -536,7 +540,6 @@ services:
       # provider key below instead makes the Brain call the provider directly.
       OPENAI_BASE_URL: ${GBRAIN_OPENAI_BASE_URL:-http://api:3001/api/brain/inference}
       OPENAI_API_KEY: ${R_BRAIN_GATEWAY_TOKEN:-}
-      GBRAIN_RERANKER_MODEL: ${R_BRAIN_RERANKER_MODEL:-}
       # Create-time, and it has to be the container that receives these: the
       # embedding model and its width are decided when the Brain is created,
       # and the gateway must never substitute a different one afterwards.
@@ -546,6 +549,46 @@ services:
       GBRAIN_EMBEDDING_DIMENSIONS: ${R_BRAIN_EMBEDDING_DIMENSIONS:-}
     volumes:
       - gbrain_data:/data
+    security_opt:
+      - no-new-privileges:true
+
+  # Self-run embedding model for the Brain (opt-in, CPU).
+  # Enable with the `local-inference` compose profile. The upstream URLs are
+  # NOT sufficient on their own: R_BRAIN_EMBEDDING_MODEL and
+  # R_BRAIN_EMBEDDING_DIMENSIONS must name what this server serves (gbrain's
+  # defaults name a provider model it does not serve), and the embedding pair
+  # is create-time — the full set is documented together in
+  # .env.production.example. Serve models by pinned name and keep serving old
+  # names: every Brain is locked to its embedding model at creation.
+  infinity:
+    profiles:
+      - local-inference
+    image: michaelf34/infinity:0.0.76-cpu@sha256:2a464dcc06e659a277bc841b4be196100489076446482925481b2c5c120fce57
+    restart: unless-stopped
+    networks: [default]
+    environment:
+      INFINITY_ANONYMOUS_USAGE_STATS: '0'
+      # Standard opt-out honored by Infinity (and many other tools); keeps
+      # the stack quiet even if the Infinity-specific variable is renamed.
+      DO_NOT_TRACK: '1'
+    command:
+      - v2
+      - --device
+      - cpu
+      - --url-prefix
+      - /v1
+      - --port
+      - '7997'
+      # Multilingual defaults: memories arrive in whatever language the
+      # workspace speaks, and cross-lingual recall (an English query hitting
+      # a German Slack thread) needs a multilingual embedding space. On a
+      # smaller CPU host, Alibaba-NLP/gte-multilingual-base (768 dims) is a
+      # lighter alternative with close retrieval quality — pick before the
+      # Brain's first boot; the embedding choice is create-time.
+      - --model-id
+      - ${INFINITY_EMBEDDING_MODEL:-BAAI/bge-m3}
+    volumes:
+      - infinity_cache:/app/.cache
     security_opt:
       - no-new-privileges:true
 
@@ -604,6 +647,7 @@ volumes:
   caddy_data:
   caddy_config:
   gbrain_data:
+  infinity_cache:
 
 networks:
   default:

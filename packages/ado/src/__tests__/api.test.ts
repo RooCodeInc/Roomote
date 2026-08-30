@@ -1207,9 +1207,9 @@ describe('Azure DevOps API helpers', () => {
           'https://dev.azure.com/acme/_apis/hooks/subscriptions?api-version=7.1' &&
         init?.method === 'POST',
     );
-    // 1 existing PR created hook is refreshed via PUT; remaining 3 PR hooks
-    // plus workitem.commented and build.complete are created via POST.
-    expect(createCalls).toHaveLength(5);
+    // 1 existing PR created hook is refreshed via PUT; remaining repository
+    // hooks plus workitem.commented and build.complete are created via POST.
+    expect(createCalls).toHaveLength(6);
     const createBodies = createCalls.map(([, init]) =>
       JSON.parse(String(init?.body)),
     ) as Array<{
@@ -1240,6 +1240,14 @@ describe('Azure DevOps API helpers', () => {
         (body) =>
           body.eventType === 'git.pullrequest.updated' &&
           body.publisherInputs.notificationType === 'PushNotification',
+      ),
+    ).toBe(true);
+    expect(
+      createBodies.some(
+        (body) =>
+          body.eventType === 'git.push' &&
+          body.publisherInputs.repository === 'repo-1' &&
+          !body.consumerInputs.url?.includes('notificationType'),
       ),
     ).toBe(true);
     expect(

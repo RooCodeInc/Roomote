@@ -138,7 +138,7 @@ describe('subscribeHarnessCallbacks', () => {
     mockDeliverShowWidgetFallback.mockClear();
   });
 
-  it('persists Roomote runtime user prompt envelopes to task_messages', async () => {
+  it('persists user prompts and forwards them as turn starts', async () => {
     const { harness, emitEnvelope } = createRuntimeHarness();
 
     const callbacks = { onMessage: vi.fn().mockResolvedValue(undefined) };
@@ -175,8 +175,15 @@ describe('subscribeHarnessCallbacks', () => {
       taskId: '17294o7tqi124',
       envelope: userPromptEnvelope,
     });
-    // User prompts are persisted but not forwarded to callbacks.
-    expect(callbacks.onMessage).not.toHaveBeenCalled();
+    expect(callbacks.onMessage).toHaveBeenCalledWith(
+      { id: 45, taskId: '17294o7tqi124' },
+      'runtime-session-1',
+      {
+        type: 'turn_started',
+        ts: 1772823376000,
+      },
+      {},
+    );
 
     await unsubscribe();
   });
@@ -392,19 +399,26 @@ describe('subscribeHarnessCallbacks', () => {
       text: 'done',
     });
 
-    expect(callbacks.onMessage).not.toHaveBeenCalled();
+    expect(callbacks.onMessage).toHaveBeenCalledOnce();
+    expect(callbacks.onMessage).toHaveBeenCalledWith(
+      { id: 46, taskId: 'task-fallback' },
+      'runtime-session-2',
+      { type: 'turn_started', ts: 1772823376999 },
+      {},
+    );
 
     emitTaskEvent({
       eventName: TaskEventName.TaskCompleted,
       payload: ['runtime-session-2', {}, {}, {}],
     } as TaskEvent);
 
-    expect(callbacks.onMessage).not.toHaveBeenCalled();
+    expect(callbacks.onMessage).toHaveBeenCalledOnce();
 
     resolvePersist?.();
 
     await vi.waitFor(() => {
-      expect(callbacks.onMessage).toHaveBeenCalledWith(
+      expect(callbacks.onMessage).toHaveBeenNthCalledWith(
+        2,
         { id: 46, taskId: 'task-fallback' },
         'runtime-session-2',
         {
@@ -517,7 +531,7 @@ describe('subscribeHarnessCallbacks', () => {
       'runtime-session-transient',
       {
         type: 'completion',
-        text: 'Task completed.',
+        text: 'Ready.',
         ts: expect.any(Number),
         provisional: true,
       },

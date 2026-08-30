@@ -8,6 +8,7 @@ import {
   customAutomationsJob,
   dependabotTriageJob,
   managerStatsJob,
+  providerUsageLimitJob,
   securityAuditorJob,
   sentryTriageJob,
   suggesterJob,
@@ -34,7 +35,7 @@ import {
   brainOutboxDrainJob,
   brainCollectorsJob,
   brainMaintenanceJob,
-  providerUsageLimitCheckJob,
+  sessionsReconcileJob,
 } from './scheduled-jobs';
 
 const QUEUE_NAME = 'scheduled-jobs';
@@ -55,6 +56,7 @@ const RETIRED_JOB_SCHEDULER_NAMES = [
   'SecurityAuditor',
   'CodeQualityAuditor',
   'CiFailureTriage',
+  'ProviderUsageLimitCheck',
 ] as const;
 
 type ScheduledJob = Job<unknown, void, string>;
@@ -67,6 +69,7 @@ const AUTOMATION_JOBS: Record<
   suggester: suggesterJob,
   announcer: announcerJob,
   manager_stats: managerStatsJob,
+  provider_usage_limit: providerUsageLimitJob,
   sentry_triage: sentryTriageJob,
   dependabot_triage: dependabotTriageJob,
   codeql_triage: codeqlTriageJob,
@@ -103,8 +106,8 @@ async function createJobs(queue: Queue): Promise<void> {
     { every: 24 * 60 * 60 * 1000 }, // Every 24 hours.
   );
 
-  // Automation jobs tick hourly (manager_stats hourly on its posting days)
-  // and due-gate themselves against automations.enabled/schedule/lastRunAt.
+  // Automation jobs tick at their minimum supported cadence and due-gate
+  // themselves against automations.enabled/schedule/lastRunAt.
   await queue.upsertJobScheduler(
     'conflict_resolver' satisfies ScheduledAutomationJobName,
     { every: 60 * 60 * 1000 }, // Every 60 minutes.
@@ -124,6 +127,11 @@ async function createJobs(queue: Queue): Promise<void> {
     'manager_stats' satisfies ScheduledAutomationJobName,
     // The runner applies the configured deployment timezone and local-Friday
     // gate. Tick continuously so UTC date boundaries cannot exclude eastern zones.
+    { every: 60 * 60 * 1000 },
+  );
+
+  await queue.upsertJobScheduler(
+    'provider_usage_limit' satisfies ScheduledAutomationJobName,
     { every: 60 * 60 * 1000 },
   );
 
@@ -218,8 +226,8 @@ async function createJobs(queue: Queue): Promise<void> {
     { pattern: '0 7 * * *' },
   );
 
-  await queue.upsertJobScheduler(ScheduledJobName.ProviderUsageLimitCheck, {
-    every: 15 * 60 * 1000,
+  await queue.upsertJobScheduler(ScheduledJobName.SessionsReconcile, {
+    every: 60 * 1000,
   });
 
   const schedulers = await queue.getJobSchedulers();
@@ -263,8 +271,8 @@ const runJobs = async (job: ScheduledJob): Promise<void> => {
       return brainCollectorsJob();
     case ScheduledJobName.BrainMaintenance:
       return brainMaintenanceJob();
-    case ScheduledJobName.ProviderUsageLimitCheck:
-      return providerUsageLimitCheckJob();
+    case ScheduledJobName.SessionsReconcile:
+      return sessionsReconcileJob();
     case ScheduledJobName.CustomAutomations:
       await customAutomationsJob();
       return;

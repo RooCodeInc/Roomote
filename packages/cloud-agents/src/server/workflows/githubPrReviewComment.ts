@@ -16,9 +16,11 @@ export const REVIEW_CHECKLIST_END_MARKER =
   '<!-- roomote-review-checklist:end -->';
 
 export type ReviewMetaPhase = 'Reviewing' | 'Reviewed';
+export const REVIEW_SUMMARY_MARKER_VERSION = '2';
+const MAX_REVIEW_SUMMARY_MARKER_LENGTH = 1_024;
 
 export function isReviewInProgressStatusLine(line: string): boolean {
-  return /^(Self-reviewing the PR(?: with fresh eyes)? now\.|Reviewing the PR now\.|Re-reviewing new commits now\.)/i.test(
+  return /^(Self-reviewing the PR(?: with fresh eyes)? now\.|Reviewing the PR now\.|Re-reviewing new commits now\.|I am reviewing the updated PR head now\.)/i.test(
     line.trim(),
   );
 }
@@ -48,14 +50,174 @@ export function getMarkedSection({
   return content.slice(afterStart, endIndex).trim();
 }
 
+export function getReviewFooterPhase(
+  body: string,
+): ReviewMetaPhase | undefined {
+  const footer = body.trimEnd().split('\n').at(-1)?.trim();
+  if (!footer?.startsWith('<sub>')) {
+    return undefined;
+  }
+
+  const content = footer.slice('<sub>'.length).trimStart().toLowerCase();
+  if (
+    content === 'reviewing' ||
+    content.startsWith('reviewing ') ||
+    content.startsWith('reviewing<')
+  ) {
+    return 'Reviewing';
+  }
+  if (
+    content === 'reviewed' ||
+    content.startsWith('reviewed ') ||
+    content.startsWith('reviewed<')
+  ) {
+    return 'Reviewed';
+  }
+  return undefined;
+}
+
+function getReviewSummaryMarkerTokens(body: string): string[] | undefined {
+  const trimmedBody = body.trimStart();
+  const boundedLine = trimmedBody.slice(
+    0,
+    MAX_REVIEW_SUMMARY_MARKER_LENGTH + 1,
+  );
+  const newline = boundedLine.indexOf('\n');
+  const firstLine =
+    newline === -1 ? boundedLine : boundedLine.slice(0, newline);
+  if (
+    !firstLine.startsWith(REVIEW_SUMMARY_MARKER) ||
+    firstLine.length > MAX_REVIEW_SUMMARY_MARKER_LENGTH ||
+    (newline === -1 && trimmedBody.length > MAX_REVIEW_SUMMARY_MARKER_LENGTH)
+  ) {
+    return undefined;
+  }
+
+  const standardEnd = firstLine.indexOf('-->');
+  const alternateEnd = firstLine.indexOf('--!>');
+  const markerEnd =
+    standardEnd === -1
+      ? alternateEnd
+      : alternateEnd === -1
+        ? standardEnd
+        : Math.min(standardEnd, alternateEnd);
+  if (markerEnd === -1) {
+    return undefined;
+  }
+
+  const attributes = firstLine.slice(REVIEW_SUMMARY_MARKER.length, markerEnd);
+  const tokens: string[] = [];
+  let tokenStart = -1;
+
+  for (let index = 0; index <= attributes.length; index += 1) {
+    const character = attributes[index];
+    const separator =
+      index === attributes.length ||
+      character === ' ' ||
+      character === '\t' ||
+      character === '\r';
+    if (!separator && tokenStart === -1) {
+      tokenStart = index;
+    } else if (separator && tokenStart !== -1) {
+      tokens.push(attributes.slice(tokenStart, index));
+      tokenStart = -1;
+    }
+  }
+
+  return tokens;
+}
+
+function getReviewSummaryMarkerAttribute(
+  body: string,
+  name: string,
+): string | undefined {
+  const prefix = `${name}=`;
+  return getReviewSummaryMarkerTokens(body)
+    ?.find((token) => token.startsWith(prefix))
+    ?.slice(prefix.length);
+}
+
+export function getReviewSummaryMarkerPhase(
+  body: string,
+): ReviewMetaPhase | undefined {
+  const version = getReviewSummaryMarkerAttribute(body, 'version');
+  const phase = getReviewSummaryMarkerAttribute(body, 'phase')?.toLowerCase();
+
+  if (
+    version !== REVIEW_SUMMARY_MARKER_VERSION ||
+    (phase !== 'reviewing' && phase !== 'reviewed')
+  ) {
+    return undefined;
+  }
+
+  return phase === 'reviewing' ? 'Reviewing' : 'Reviewed';
+}
+
+/**
+ * Uses the versioned hidden marker when present so presentation text cannot
+ * accidentally complete a review cycle. Footer and status parsing are retained
+ * only for comments created before marker phases were required.
+ */
+export function isReviewSummaryInProgress(body: string): boolean {
+  const markerPhase = getReviewSummaryMarkerPhase(body);
+
+  if (markerPhase) {
+    return markerPhase === 'Reviewing';
+  }
+
+  const metaPhase = getReviewFooterPhase(body);
+
+  if (metaPhase) {
+    return metaPhase === 'Reviewing';
+  }
+
+  const statusContent = getMarkedSection({
+    content: body,
+    startMarker: REVIEW_STATUS_START_MARKER,
+    endMarker: REVIEW_STATUS_END_MARKER,
+  });
+  const firstStatusLine = statusContent?.split('\n')[0] ?? '';
+
+  return isReviewInProgressStatusLine(firstStatusLine);
+}
+
+function withReviewSummaryMarkerPhase(
+  summaryMarker: string,
+  phase: ReviewMetaPhase,
+): string {
+  const markerPhase = phase.toLowerCase();
+  const tokens = getReviewSummaryMarkerTokens(summaryMarker);
+  if (!tokens) {
+    return summaryMarker;
+  }
+
+  const attributes = new Map(
+    tokens.map((token) => {
+      const separator = token.indexOf('=');
+      return separator === -1
+        ? [token, token]
+        : [token.slice(0, separator), token];
+    }),
+  );
+  attributes.set('version', `version=${REVIEW_SUMMARY_MARKER_VERSION}`);
+  attributes.set('phase', `phase=${markerPhase}`);
+  return `${REVIEW_SUMMARY_MARKER} ${[...attributes.values()].join(' ')} -->`;
+}
+
 export function parseReviewSummaryMarkerSha(
   markerOrBody: string,
 ): string | undefined {
-  const match = markerOrBody.match(
-    /<!--\s*roomote-review-summary\s+sha=([0-9a-f]+)/i,
-  );
+  const sha = getReviewSummaryMarkerAttribute(markerOrBody, 'sha');
+  if (!sha || sha.length < 7) {
+    return undefined;
+  }
 
-  return match?.[1];
+  for (const character of sha.toLowerCase()) {
+    if (!'0123456789abcdef'.includes(character)) {
+      return undefined;
+    }
+  }
+  return sha;
 }
 
 export function buildGithubCommitHref({
@@ -132,6 +294,14 @@ export function buildReviewSummaryBody({
   repositoryFullName?: string | null;
   reviewedSha?: string;
 }): string {
+  const resolvedMetaPhase = resolveReviewMetaPhase({
+    statusContent,
+    metaPhase,
+  });
+  const versionedSummaryMarker = withReviewSummaryMarkerPhase(
+    summaryMarker,
+    resolvedMetaPhase,
+  );
   const sha = reviewedSha ?? parseReviewSummaryMarkerSha(summaryMarker);
   const resolvedCommitHref =
     (sha
@@ -142,14 +312,14 @@ export function buildReviewSummaryBody({
       : undefined) ?? commitHref;
   const metaFooter = sha
     ? buildReviewMetaFooter({
-        phase: resolveReviewMetaPhase({ statusContent, metaPhase }),
+        phase: resolvedMetaPhase,
         sha,
         commitHref: resolvedCommitHref,
       })
     : undefined;
 
   return [
-    summaryMarker,
+    versionedSummaryMarker,
     REVIEW_STATUS_START_MARKER,
     statusContent.trim(),
     REVIEW_STATUS_END_MARKER,
@@ -262,7 +432,7 @@ export function buildTerminalReviewSummaryBody({
     endMarker: REVIEW_STATUS_END_MARKER,
   });
 
-  if (!currentStatus || !isReviewInProgressStatusLine(currentStatus)) {
+  if (!currentStatus || !isReviewSummaryInProgress(trimmedBody)) {
     return null;
   }
 
@@ -284,6 +454,20 @@ export function buildTerminalReviewSummaryBody({
 
 export type ReviewTerminalOutcome = 'completed' | 'failed' | 'canceled';
 
+const TERMINAL_REVIEW_STATUS_MESSAGES: Record<ReviewTerminalOutcome, string> = {
+  completed: 'Review complete.',
+  failed: 'Review could not be completed.',
+  canceled: 'Review was canceled.',
+};
+
+export function isSafetyNetReviewStatusLine(line: string): boolean {
+  const trimmed = line.trim();
+
+  return Object.values(TERMINAL_REVIEW_STATUS_MESSAGES).some((message) =>
+    trimmed.startsWith(message),
+  );
+}
+
 export function buildTerminalReviewStatus({
   outcome,
   taskUrl,
@@ -295,14 +479,8 @@ export function buildTerminalReviewStatus({
     href: taskUrl,
     label: 'See task',
   });
-  const message =
-    outcome === 'completed'
-      ? 'Review complete.'
-      : outcome === 'failed'
-        ? 'Review could not be completed.'
-        : 'Review was canceled.';
 
-  return `${message} ${link}`;
+  return `${TERMINAL_REVIEW_STATUS_MESSAGES[outcome]} ${link}`;
 }
 
 /**
@@ -319,6 +497,7 @@ export async function finalizeGithubPrReviewComment({
   prNumber,
   commentId,
   terminalStatus,
+  signal,
 }: {
   gitHubToken: string;
   owner: string;
@@ -326,13 +505,17 @@ export async function finalizeGithubPrReviewComment({
   prNumber: number;
   commentId?: number | null;
   terminalStatus: string;
-}): Promise<boolean> {
+  signal?: AbortSignal;
+}): Promise<{
+  finalized: boolean;
+  body?: string;
+}> {
   const fullName = `${owner}/${repo}`;
   const resolvedCommentId =
     commentId ?? (await getPrReviewCommentId({ repo: fullName, prNumber }));
 
   if (!resolvedCommentId) {
-    return false;
+    return { finalized: false };
   }
 
   let comment: { body: string };
@@ -341,9 +524,10 @@ export async function finalizeGithubPrReviewComment({
       gitHubToken,
       repo: fullName,
       commentId: resolvedCommentId,
+      signal,
     });
   } catch {
-    return false;
+    return { finalized: false };
   }
 
   const updatedBody = buildTerminalReviewSummaryBody({
@@ -353,7 +537,7 @@ export async function finalizeGithubPrReviewComment({
   });
 
   if (!updatedBody) {
-    return false;
+    return { finalized: false, body: comment.body };
   }
 
   await updateIssueComment(gitHubToken, {
@@ -361,7 +545,8 @@ export async function finalizeGithubPrReviewComment({
     repo,
     comment_id: resolvedCommentId,
     body: updatedBody,
+    ...(signal ? { request: { signal } } : {}),
   });
 
-  return true;
+  return { finalized: true, body: updatedBody };
 }

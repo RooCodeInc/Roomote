@@ -1,6 +1,7 @@
 import { Queue, QueueEvents, Worker } from 'bullmq';
 
 import {
+  ACTIVE_PR_REVIEW_FOLLOW_UP_JOB_OPTIONS,
   ACTIVE_PR_REVIEW_FOLLOW_UP_QUEUE_NAME,
   type ActivePrReviewFollowUpRequest,
 } from '@roomote/sdk/server';
@@ -14,12 +15,7 @@ export function startActivePrReviewFollowUpQueue() {
     ACTIVE_PR_REVIEW_FOLLOW_UP_QUEUE_NAME,
     {
       connection,
-      defaultJobOptions: {
-        attempts: 3,
-        backoff: { type: 'exponential', delay: 2000 },
-        removeOnComplete: { age: 3600, count: 100 },
-        removeOnFail: { age: 24 * 3600 },
-      },
+      defaultJobOptions: ACTIVE_PR_REVIEW_FOLLOW_UP_JOB_OPTIONS,
     },
   );
   const worker = new Worker<ActivePrReviewFollowUpRequest, void, string>(

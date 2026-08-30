@@ -1,0 +1,144 @@
+import { randomUUID } from 'node:crypto';
+
+import {
+  and,
+  asc,
+  db,
+  desc,
+  eq,
+  fastAgentMessages,
+  sql,
+} from '@roomote/db/server';
+import {
+  canUserAccessFastAgentSession,
+  queueFastAgentSurfaceReply,
+} from '@roomote/sdk/server';
+import {
+  ACP_UI_TOOL_OUTPUT_MAX_CHARS,
+  getImageUrisFromContentBlocks,
+  getTextFromContentBlocks,
+  sanitizeEnvelopeFields,
+} from '@roomote/types';
+import { z } from 'zod';
+
+const canonicalFastSessionIdSchema = z.string().uuid();
+
+export async function getFastSessionMessagesForUser(params: {
+  sessionId: string;
+  userId: string;
+  limit?: number;
+  order: 'asc' | 'desc';
+}) {
+  if (!canonicalFastSessionIdSchema.safeParse(params.sessionId).success) {
+    return null;
+  }
+  if (
+    !(await canUserAccessFastAgentSession({
+      sessionId: params.sessionId,
+      userId: params.userId,
+    }))
+  ) {
+    return null;
+  }
+
+  const orderBy =
+    params.order === 'desc'
+      ? [
+          desc(fastAgentMessages.ts),
+          desc(fastAgentMessages.turnSeq),
+          desc(fastAgentMessages.createdAt),
+          desc(fastAgentMessages.id),
+        ]
+      : [
+          asc(fastAgentMessages.ts),
+          asc(fastAgentMessages.turnSeq),
+          asc(fastAgentMessages.createdAt),
+          asc(fastAgentMessages.id),
+        ];
+  let query = db
+    .select({
+      id: fastAgentMessages.id,
+      ts: fastAgentMessages.ts,
+      eventType: fastAgentMessages.eventType,
+      role: fastAgentMessages.role,
+      contentBlocks: fastAgentMessages.contentBlocks,
+      metadata: fastAgentMessages.metadata,
+      payload: fastAgentMessages.payload,
+    })
+    .from(fastAgentMessages)
+    .where(
+      and(
+        eq(fastAgentMessages.conversationId, params.sessionId),
+        sql`coalesce(${fastAgentMessages.metadata} ->> 'visibleInTranscript', 'true') <> 'false'`,
+      ),
+    )
+    .orderBy(...orderBy);
+  if (params.limit) {
+    query = query.limit(params.limit) as typeof query;
+  }
+
+  const rows = await query;
+  return rows.map((row) => {
+    const sanitized = sanitizeEnvelopeFields(
+      row.eventType,
+      row.contentBlocks,
+      row.metadata,
+      row.payload,
+      { maxOutputChars: ACP_UI_TOOL_OUTPUT_MAX_CHARS },
+    );
+    return {
+      id: row.id,
+      taskId: params.sessionId,
+      ts: Number(row.ts),
+      eventType: row.eventType,
+      role: row.role,
+      text: getTextFromContentBlocks(sanitized.contentBlocks),
+      images: getImageUrisFromContentBlocks(sanitized.contentBlocks),
+      metadata: sanitized.metadata,
+      visibleInTranscript: true,
+    };
+  });
+}
+
+export async function sendMessageToFastSessionForUser(params: {
+  sessionId: string;
+  userId: string;
+  message: string;
+  images?: string[];
+}): Promise<
+  | { success: true; result: { sessionId: string; queued: true } }
+  | { success: false; status: 404 | 409; error: string }
+> {
+  if (!canonicalFastSessionIdSchema.safeParse(params.sessionId).success) {
+    return { success: false, status: 404, error: 'Task not found' };
+  }
+  if (
+    !(await canUserAccessFastAgentSession({
+      sessionId: params.sessionId,
+      userId: params.userId,
+    }))
+  ) {
+    return { success: false, status: 404, error: 'Task not found' };
+  }
+
+  const queued = await queueFastAgentSurfaceReply({
+    sessionId: params.sessionId,
+    userId: params.userId,
+    senderDisplayName: null,
+    question: params.message,
+    images: params.images,
+    currentMessageId: `mcp-${randomUUID()}`,
+  });
+  if (!queued) {
+    return {
+      success: false,
+      status: 409,
+      error: "This Fast session's chat surface is not connected",
+    };
+  }
+
+  return {
+    success: true,
+    result: { sessionId: params.sessionId, queued: true },
+  };
+}

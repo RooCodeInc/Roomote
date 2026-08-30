@@ -1,9 +1,12 @@
 import {
   ALL_REPOSITORIES,
   buildFastAgentChildTaskMetadata,
+  buildSlackThreadPermalink,
   TaskPayloadKind,
-  type FastAgentSurface,
   type StandardTask,
+  type TaskInitiator,
+  type TaskSurface,
+  type TaskTrigger,
 } from '@roomote/types';
 
 import { enqueueTask } from '../task-run-queue';
@@ -29,7 +32,9 @@ export type FastAgentTaskLaunchHooks = {
 export function createFastAgentTaskLauncher(
   params: {
     userId: string;
-    surface: FastAgentSurface;
+    surface: TaskSurface;
+    initiator?: TaskInitiator;
+    trigger?: TaskTrigger;
     taskUrlCampaign: string;
     buildTask: (input: {
       prompt: string;
@@ -41,6 +46,7 @@ export function createFastAgentTaskLauncher(
 ): LaunchFastAgentTask {
   return async ({
     prompt,
+    images,
     environmentId,
     model,
     parentSessionId,
@@ -48,23 +54,32 @@ export function createFastAgentTaskLauncher(
     postKickoff,
   }) => {
     signal?.throwIfAborted();
-    const task = await params.buildTask({
+    const builtTask = await params.buildTask({
       prompt,
       environmentId,
       model,
       parentSessionId,
     });
     signal?.throwIfAborted();
+    const task = images?.length
+      ? {
+          ...builtTask,
+          payload: {
+            ...builtTask.payload,
+            images,
+          },
+        }
+      : builtTask;
     let taskUrl: string | undefined;
     let preparedTaskRun: { id: number; taskId: string } | undefined;
 
     const launch = await enqueueTask(
       {
         task,
-        initiator: { kind: 'user', userId: params.userId },
+        initiator: params.initiator ?? { kind: 'user', userId: params.userId },
         workflow: 'standard',
         surface: params.surface,
-        trigger: 'message',
+        trigger: params.trigger ?? 'message',
       },
       {
         signal,
@@ -130,6 +145,14 @@ export type FastAgentSlackTaskLauncherParams = {
 export function createFastAgentSlackTaskLauncher(
   params: FastAgentSlackTaskLauncherParams,
 ): LaunchFastAgentTask {
+  const slackConversationUrl = buildSlackThreadPermalink({
+    slackWorkspaceDomain: params.teamDomain,
+    slackTeamId: params.teamId,
+    slackChannelId: params.channelId,
+    threadTs: params.threadTs,
+    messageTs: params.messageId,
+  });
+
   return createFastAgentTaskLauncher({
     userId: params.userId,
     surface: 'slack',
@@ -152,6 +175,7 @@ export function createFastAgentSlackTaskLauncher(
         ...(params.messageId
           ? { communicationMessageId: params.messageId }
           : {}),
+        ...(slackConversationUrl ? { slackConversationUrl } : {}),
         ...buildFastAgentChildTaskMetadata({
           sessionId: parentSessionId,
           conversation: {
@@ -165,6 +189,39 @@ export function createFastAgentSlackTaskLauncher(
           },
         }),
         ...(params.liveTaskStream ? { liveTaskStream: true } : {}),
+        ...(environmentId && environmentId !== ALL_REPOSITORIES
+          ? { environmentId }
+          : {}),
+        ...(model
+          ? { harnessModelOverrides: { 'opencode-server': model } }
+          : {}),
+      },
+    }),
+  });
+}
+
+export function createFastAgentWebTaskLauncher(params: {
+  userId: string;
+  conversation: {
+    surface: 'web' | 'automation';
+    workspaceId: string;
+    conversationId: string;
+  };
+}): LaunchFastAgentTask {
+  return createFastAgentTaskLauncher({
+    userId: params.userId,
+    surface: 'web',
+    taskUrlCampaign: 'fast-delegation',
+    rendersTaskLink: true,
+    buildTask: ({ prompt, environmentId, model, parentSessionId }) => ({
+      type: TaskPayloadKind.StandardTask,
+      payload: {
+        repo: ALL_REPOSITORIES,
+        description: prompt,
+        ...buildFastAgentChildTaskMetadata({
+          sessionId: parentSessionId,
+          conversation: params.conversation,
+        }),
         ...(environmentId && environmentId !== ALL_REPOSITORIES
           ? { environmentId }
           : {}),

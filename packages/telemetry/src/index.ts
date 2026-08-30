@@ -126,6 +126,7 @@ export type ActivationAutomation =
   | 'review_code'
   | 'conflict_resolver'
   | 'manager_stats'
+  | 'provider_usage_limit'
   | 'sentry_triage'
   | 'dependabot_triage'
   | 'codeql_triage'
@@ -133,6 +134,7 @@ export type ActivationAutomation =
   | 'security_auditor'
   | 'code_quality_auditor'
   | 'ci_failure_triage'
+  | 'merge_announcer'
   | 'suggester'
   | 'announcer'
   | 'platform_issue_alerts';

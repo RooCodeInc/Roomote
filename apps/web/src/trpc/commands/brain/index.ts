@@ -5,22 +5,23 @@ import {
   db,
   eq,
   getBrainMemoryEventSummary,
-  isBrainProviderConfigured,
   isNull,
+  resolveBrainEnabledState,
   resolveModelProviderEnvValue,
   listBrainSyncStates,
   mcpConnections,
   requeueFailedBrainMemoryEvents,
+  setBrainEnabled,
 } from '@roomote/db/server';
 import {
-  describeBrainModels,
+  isBrainEmbeddingAvailable,
   readBrainCorpus,
   readBrainPage,
   readBrainStats,
+  requestBrainBackfill,
   resolveBrainSourceRequirements,
   resolveBrainInferenceProvider,
   type BrainCorpusSnapshot,
-  type BrainModelSummary,
 } from '@roomote/sdk/server';
 import {
   BRAIN_MCP_ID,
@@ -41,13 +42,6 @@ import type { UserAuthSuccess } from '@/types';
 import { Env } from '@/lib/server/env';
 
 import { assertAdmin } from '../setup/shared';
-
-/**
- * How many recently written pages the Settings page lists under the
- * composition chart. Enough to recognise what the Brain has been learning
- * lately, short enough to stay a glance rather than a log.
- */
-const RECENT_PAGE_LIMIT = 8;
 
 const EMPTY_MEMORY_SUMMARY: Awaited<
   ReturnType<typeof getBrainMemoryEventSummary>
@@ -118,20 +112,21 @@ export type BrainCorpusSummary = {
    * zero-filled. Computed from the exhaustive corpus listing.
    */
   activityByDay: Array<{ date: string; pages: number }>;
-  recentPages: Array<{
-    slug: string;
-    title: string;
-    namespaceLabel: string;
-    updatedAt: Date | null;
-  }>;
 };
 
 export type BrainSettings = {
   status: BrainStatus;
   /** Why the status is not `connected`, in one sentence, or null. */
   statusDetail: string | null;
+  /** Effective Brain on/off state, as the Settings toggle should render it. */
+  enabled: boolean;
+  /**
+   * True when `enabled` comes from the legacy activation signal (an explicit
+   * R_BRAIN_* provider key) rather than an explicit Settings choice.
+   */
+  enabledFromLegacyKey: boolean;
   url: string | null;
-  inferenceProvider: 'openrouter' | 'openai' | null;
+  inferenceProvider: 'openrouter' | 'openai' | 'helper' | null;
   /**
    * Whether the serving key is the Brain's own (`R_BRAIN_*`) or the
    * deployment's general provider key. The provider preference order can
@@ -139,8 +134,6 @@ export type BrainSettings = {
    * for the other provider, and the page must not claim otherwise.
    */
   keySource: 'brain' | 'deployment' | null;
-  /** The models the Brain runs, or null when no provider resolves. */
-  models: BrainModelSummary | null;
   /**
    * Recall health. `semantic`/`keyword-only` are measured from gbrain's own
    * embedding counts; `unknown` means the admin census did not answer and
@@ -151,6 +144,13 @@ export type BrainSettings = {
     embeddedCount: number | null;
     chunkCount: number | null;
   };
+  /**
+   * Whether an embedding path exists at all (a dedicated embedder upstream
+   * or an embeddings-capable provider key). What the `unknown` recall mode
+   * falls back to: the helper model answers synthesis but cannot embed, so
+   * inference presence alone must not imply semantic recall.
+   */
+  embeddingsAvailable: boolean;
   corpus: BrainCorpusSummary;
   sources: BrainSourceSummary[];
   taskMemories: {
@@ -209,7 +209,6 @@ function summarizeCorpus(
       totalPages: null,
       namespaces: [],
       activityByDay: [],
-      recentPages: [],
     };
   }
 
@@ -230,27 +229,12 @@ function summarizeCorpus(
       return right.pages - left.pages || left.label.localeCompare(right.label);
     });
 
-  const recentPages = snapshot.pages
-    .filter((page) => page.updatedAt)
-    .sort(
-      (left, right) =>
-        (right.updatedAt?.getTime() ?? 0) - (left.updatedAt?.getTime() ?? 0),
-    )
-    .slice(0, RECENT_PAGE_LIMIT)
-    .map((page) => ({
-      slug: page.slug,
-      title: page.title ?? page.slug,
-      namespaceLabel: brainNamespaceLabel(resolveBrainNamespaceId(page.slug)),
-      updatedAt: page.updatedAt,
-    }));
-
   return {
     reachable: true,
     listedPages: snapshot.pages.length,
     totalPages: null,
     namespaces,
     activityByDay: buildActivityByDay(snapshot.pages),
-    recentPages,
   };
 }
 
@@ -406,10 +390,12 @@ export async function getBrainSettingsCommand(
 ): Promise<BrainSettings> {
   assertAdmin(auth);
 
-  // Activation is the explicit brain-specific provider key, in Settings or
-  // the environment. The gateway token and R_GBRAIN_URL exist as plumbing on
-  // deployments that never opted in, so neither can mean "the Brain is on".
-  const configured = await isBrainProviderConfigured();
+  // Activation is the Settings toggle, falling back to the legacy explicit
+  // brain-specific provider key. The gateway token and R_GBRAIN_URL exist as
+  // plumbing on deployments that never opted in, so neither can mean "the
+  // Brain is on".
+  const enabledState = await resolveBrainEnabledState();
+  const configured = enabledState.enabled;
   const url = Env.R_GBRAIN_URL ?? null;
 
   // The rollups only describe a Brain that exists; on an unconfigured
@@ -423,6 +409,7 @@ export async function getBrainSettingsCommand(
     itemCounts,
     memories,
     requirements,
+    embeddingsAvailable,
   ] = await Promise.all([
     resolveBrainInferenceProvider(),
     configured ? readBrainCorpus() : null,
@@ -431,6 +418,7 @@ export async function getBrainSettingsCommand(
     configured ? countBrainCollectorItemsByCollector(db) : [],
     configured ? getBrainMemoryEventSummary(db) : EMPTY_MEMORY_SUMMARY,
     resolveBrainSourceRequirements(),
+    isBrainEmbeddingAvailable(),
   ]);
 
   const corpus = summarizeCorpus(corpusSnapshot);
@@ -479,7 +467,7 @@ export async function getBrainSettingsCommand(
       return {
         status: 'not_configured',
         statusDetail:
-          'This deployment has no Brain. Set a Brain provider key to give agents shared memory.',
+          'Memory is turned off for this deployment. Enable it to give agents shared memory.',
       };
     }
 
@@ -487,15 +475,18 @@ export async function getBrainSettingsCommand(
       return {
         status: 'incomplete',
         statusDetail:
-          'A Brain provider key is set, but no Brain service URL is configured, so there is nowhere to store memories.',
+          'A Memory provider key is set, but no Memory service URL is configured, so there is nowhere to store memories.',
       };
     }
 
-    if (!inference) {
+    // Synthesis rides the deployment's helper model in gateway mode, but
+    // semantic recall still needs embeddings: a provider key or a configured
+    // embeddings upstream.
+    if (!inference && !Env.R_BRAIN_EMBEDDINGS_UPSTREAM_URL) {
       return {
         status: 'incomplete',
         statusDetail:
-          'The Brain has no inference provider, so it can only match keywords. Configure a Brain provider key to enable semantic recall.',
+          'Memory has no embeddings provider, so it can only match keywords. Configure a provider key or an embeddings upstream to enable semantic recall.',
       };
     }
 
@@ -507,24 +498,29 @@ export async function getBrainSettingsCommand(
       return {
         status: 'incomplete',
         statusDetail:
-          'Roomote has not been able to provision its Brain credentials yet. This resolves on its own once the Brain has started.',
+          'Roomote has not been able to provision its Memory credentials yet. This resolves on its own once Memory has started.',
       };
     }
 
     return {
       status: 'unreachable',
       statusDetail:
-        'The Brain did not answer. Ingestion holds its position while it is down, so nothing is lost.',
+        'Memory did not answer. Ingestion holds its position while it is down, so nothing is lost.',
     };
   })();
 
   return {
     status,
     statusDetail,
+    enabled: enabledState.enabled,
+    enabledFromLegacyKey: enabledState.enabled && enabledState.fromLegacyKey,
     url,
-    inferenceProvider: inference?.providerId ?? null,
+    // Chat and expansion always have somewhere to go: without a
+    // Brain-specific provider key, the gateway answers them with the
+    // deployment's helper model.
+    inferenceProvider: inference?.providerId ?? 'helper',
+    embeddingsAvailable,
     keySource,
-    models: inference ? describeBrainModels(inference.providerId) : null,
     recall,
     corpus,
     sources: summarizeSources({
@@ -544,6 +540,29 @@ export async function getBrainSettingsCommand(
       recentCompletedRunsWithoutEvent: memories.recentCompletedRunsWithoutEvent,
     },
   };
+}
+
+/**
+ * Turn the Brain on or off for the deployment. Writes the explicit Settings
+ * choice, which from then on wins over the legacy R_BRAIN_* key fallback in
+ * both directions.
+ */
+export async function setMemoryEnabledCommand(
+  auth: UserAuthSuccess,
+  input: { enabled: boolean },
+): Promise<{ enabled: boolean }> {
+  assertAdmin(auth);
+
+  await setBrainEnabled(input.enabled);
+
+  if (input.enabled) {
+    // Start the initial backfill now rather than waiting out the 15-minute
+    // collector and PR-sync schedules: a freshly enabled Memory should show
+    // content landing within moments, not ticks from now.
+    void requestBrainBackfill('memory-enabled');
+  }
+
+  return { enabled: input.enabled };
 }
 
 /**

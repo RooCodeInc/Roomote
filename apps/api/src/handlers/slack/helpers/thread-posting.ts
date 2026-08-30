@@ -5,8 +5,13 @@ import {
   recordSlackConversationMessageBestEffort,
 } from '@roomote/sdk/server';
 import {
+  buildFastSessionReplyFooterText,
+  type FastSessionReplyFooterContext,
+} from '@roomote/communication';
+import {
   buildStartedBlocks,
   persistPostedSlackKickoff,
+  postSlackThreadMessageWithFooterText,
   type SlackNotifier,
 } from '@roomote/slack';
 
@@ -24,6 +29,7 @@ export async function postSlackThreadMarkdownMessage({
   text,
   sourceMessageTs,
   conversationLog,
+  fastSessionFooter,
 }: {
   slack: SlackNotifier;
   channel: string;
@@ -35,6 +41,8 @@ export async function postSlackThreadMarkdownMessage({
     slackTeamId: string;
     source: string;
   };
+  /** Attach the sticky Fast session reply footer to this message. */
+  fastSessionFooter?: { sessionId: string } & FastSessionReplyFooterContext;
 }): Promise<SlackThreadMarkdownPostResult> {
   if (sourceMessageTs) {
     const sourceMessageExists = await slack.hasMessageInThread({
@@ -53,17 +61,29 @@ export async function postSlackThreadMarkdownMessage({
     }
   }
 
-  const messageTs = await slack.postMessage({
-    channel,
-    thread_ts: threadTs,
-    text,
-    blocks: [
-      {
-        type: 'markdown',
+  const messageTs = fastSessionFooter
+    ? await postSlackThreadMessageWithFooterText({
+        slack,
+        channel,
+        threadTs,
         text,
-      },
-    ],
-  });
+        bodyBlocks: [{ type: 'markdown', text }],
+        footerText: buildFastSessionReplyFooterText({
+          provider: 'slack',
+          ...fastSessionFooter,
+        }),
+      })
+    : await slack.postMessage({
+        channel,
+        thread_ts: threadTs,
+        text,
+        blocks: [
+          {
+            type: 'markdown',
+            text,
+          },
+        ],
+      });
 
   if (!messageTs) {
     return 'failed';

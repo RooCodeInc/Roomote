@@ -262,6 +262,7 @@ export async function handleAdoPullRequest(
           pullRequest,
           repositoryFullName: repoFullName,
         }),
+        targetBranch: stripAdoGitRefPrefix(pullRequest.targetRefName),
         status: 'closed',
         actorLogin:
           getAdoIdentityName(payload.resource.closedBy) ??
@@ -308,6 +309,7 @@ export async function handleAdoPullRequest(
           pullRequest,
           repositoryFullName: repoFullName,
         }),
+        targetBranch: stripAdoGitRefPrefix(pullRequest.targetRefName),
         status: 'merged',
         actorLogin:
           getAdoIdentityName(payload.resource.closedBy) ??
@@ -324,6 +326,19 @@ export async function handleAdoPullRequest(
     await notifyTerminalPullRequestThreads(payload, repoFullName, 'merged');
 
     return { status: 'ok' };
+  }
+
+  if (
+    pullRequest.status === 'active' &&
+    (payload.eventType === 'git.pullrequest.created' ||
+      payload.eventType === 'git.pullrequest.updated')
+  ) {
+    await updateTaskPrStatus(
+      'ado',
+      repoFullName,
+      pullRequest.pullRequestId,
+      pullRequest.isDraft ? 'draft' : 'open',
+    );
   }
 
   const taskType = getReviewTaskType(payload, context);

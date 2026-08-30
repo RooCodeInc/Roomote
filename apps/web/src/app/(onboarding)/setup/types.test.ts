@@ -8,6 +8,7 @@ describe('getSetupSteps', () => {
     expect(new Set(emailPasswordSteps)).toEqual(new Set(SETUP_STEPS));
     expect(emailPasswordSteps).toEqual([
       'welcome',
+      'inference',
       'env-vars',
       'source-control-provider',
       'source-control-config',
@@ -18,13 +19,14 @@ describe('getSetupSteps', () => {
       'automation-recommendations',
       'compute-provider',
       'compute-config',
-      'environment-explainer',
-      'repo-selection',
       'invoke',
     ]);
   });
 
   it('uses the canonical order when communication handled authentication', () => {
     expect(getSetupSteps(true)).toBe(SETUP_STEPS);
+    expect(SETUP_STEPS.indexOf('inference')).toBe(
+      SETUP_STEPS.indexOf('env-vars') - 1,
+    );
   });
 });

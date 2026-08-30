@@ -42,7 +42,12 @@
     "groups": [
       {
         "group": "Getting Started",
-        "pages": ["index", "self-hosting", "homelab"]
+        "pages": [
+          "index",
+          "self-hosting",
+          "homelab",
+          "use-chatgpt-subscription"
+        ]
       },
       {
         "group": "Using Roomote",
@@ -51,7 +56,8 @@
           "use-cases",
           "tasks",
           "goal-mode",
-          "brain",
+          "fast-sessions",
+          "memory",
           "file-attachments"
         ]
       },

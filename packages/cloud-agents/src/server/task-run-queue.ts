@@ -48,6 +48,7 @@ import {
   db,
   deploymentSettings,
   ensureAutomationRowsOnce,
+  ensureSessionForTask,
   isChatGptSubscriptionConnected,
   createTaskWithRetry,
   markTaskStartParallelCountEndedAt,
@@ -69,6 +70,7 @@ import {
   recordSnapshotResumeEvent,
   resolveDefaultComputeProvider,
   resolveWorkspaceRepositoryProviders,
+  resolveWorkspaceSourceControlHost,
   sql,
 } from '@roomote/db/server';
 import { type Redis, getRedis } from '@roomote/redis';
@@ -99,6 +101,15 @@ enum TaskRunQueueKeys {
   Entries = 'queue:cloud-jobs:v2:entries',
   EntryScopes = 'queue:cloud-jobs:v2:entry-scopes',
   Scopes = 'queue:cloud-jobs:v2:scopes',
+}
+
+const SNAPSHOT_RESUME_ADVISORY_LOCK_NAMESPACE = 0x52534d45;
+
+export class SnapshotResumeAlreadyExistsError extends Error {
+  constructor(public readonly existingRunId: number) {
+    super(`Snapshot resume run ${existingRunId} already exists.`);
+    this.name = 'SnapshotResumeAlreadyExistsError';
+  }
 }
 
 export function resolveFreshTaskComputeProvider(
@@ -1552,7 +1563,6 @@ async function enqueueFreshLaunch(
   const { task, initiator, workflow, surface, trigger } = input;
   const visibility: TaskVisibility = input.visibility ?? 'visible';
   const linkedUserId = getTaskInitiatorLinkedUserId(initiator);
-
   await assertUserIsNotDeleted(linkedUserId);
 
   const requestedExistingTask = input.existingTaskId
@@ -1804,6 +1814,14 @@ async function enqueueFreshLaunch(
         });
 
         if (activeRun) {
+          await ensureSessionForTask(tx, {
+            taskId: existingTask.id,
+            fastConversationId:
+              getFastAgentParentFromPayload(taskWithHarnessOverrides.payload)
+                ?.sessionId ?? null,
+            origin: 'follow_up',
+            existingTaskReused: true,
+          });
           return { taskRun: activeRun, createdRun: false, reusedTask: true };
         }
 
@@ -1852,6 +1870,20 @@ async function enqueueFreshLaunch(
         );
         taskId = createdTask.id;
       }
+
+      const fastParent = getFastAgentParentFromPayload(
+        taskWithHarnessOverrides.payload,
+      );
+      await ensureSessionForTask(tx, {
+        taskId,
+        fastConversationId: fastParent?.sessionId ?? null,
+        origin: fastParent
+          ? 'fast_delegation'
+          : existingTask
+            ? 'follow_up'
+            : 'direct_launch',
+        existingTaskReused: Boolean(existingTask),
+      });
 
       if (input.prLinkage) {
         const prLinkage = {
@@ -1969,6 +2001,15 @@ async function enqueueFreshLaunch(
     return taskRun;
   }
 
+  const delegated = Boolean(
+    reusedTask ||
+    getFastAgentParentFromPayload(taskWithHarnessOverrides.payload),
+  );
+  void captureEvent(delegated ? 'session_task_delegated' : 'session_created', {
+    ...(linkedUserId ? { userId: linkedUserId } : {}),
+    properties: { surface, outcome: 'created' },
+  });
+
   if (shouldCaptureTaskCreatedEvent(taskRun.payloadKind)) {
     // Anonymous analytics (no-op unless enabled): task creation with
     // non-identifying routing facts only.
@@ -2021,23 +2062,19 @@ async function enqueueFreshLaunch(
   // Fire-and-forget: generate an LLM title from the initial prompt during
   // startup so the user sees a meaningful title before the worker records
   // the first envelope. Titles live on tasks only.
-  const description =
-    'description' in task.payload ? task.payload.description : undefined;
-
   if (
     !options.skipEarlyTitleGeneration &&
     !reusedTask &&
     !explicitTitle &&
     !hasDeterministicTaskRunTitle(task.type) &&
-    typeof description === 'string' &&
-    description.trim()
+    initialPrompt?.trim()
   ) {
     void (async () => {
       try {
         const generatedTitle = await generateLlmTaskTitle({
           userId: linkedUserId,
           taskId: taskRun.taskId,
-          messages: [{ role: 'user', text: description }],
+          messages: [{ role: 'user', text: initialPrompt }],
         });
         if (isFallbackTaskTitle(generatedTitle)) {
           return;
@@ -2213,14 +2250,43 @@ async function stampWorkspaceSourceControlProviders(
   payload: FreshTask['payload'],
   workspace: ReturnType<typeof resolveTaskWorkspace>,
 ): Promise<void> {
-  const repositoryProviders = await resolveWorkspaceRepositoryProviders(
-    db,
-    workspace,
-  );
+  const [repositoryProviders, workspaceHost] = await Promise.all([
+    resolveWorkspaceRepositoryProviders(db, workspace),
+    resolveWorkspaceSourceControlHost(db, workspace),
+  ]);
+  const isAggregateWorkspace =
+    workspace.type === 'repository_set' ||
+    workspace.type === 'all_repositories';
+  const requiresCompleteCoverage =
+    isAggregateWorkspace || workspace.type === 'environment';
+  const expectedRepositoryCount =
+    workspace.type === 'repository_set'
+      ? new Set(workspace.repositories).size
+      : undefined;
+
+  if (requiresCompleteCoverage) {
+    payload.repositoryProviders = repositoryProviders;
+  }
+
+  if (
+    requiresCompleteCoverage &&
+    (Object.keys(repositoryProviders).length === 0 ||
+      (expectedRepositoryCount !== undefined &&
+        Object.keys(repositoryProviders).length !== expectedRepositoryCount))
+  ) {
+    payload.sourceControlProvider = undefined;
+    payload.sourceControlHost = undefined;
+    return;
+  }
+
   const providers = Object.values(repositoryProviders);
   const spansProviders = new Set(providers).size > 1;
 
-  if (spansProviders) {
+  if (requiresCompleteCoverage && !spansProviders) {
+    payload.sourceControlHost = workspaceHost;
+  }
+
+  if (spansProviders && !requiresCompleteCoverage) {
     payload.repositoryProviders = repositoryProviders;
   }
 
@@ -2497,6 +2563,9 @@ function inheritSnapshotResumeFastAgentParent(
   if (parent && !payload.fastAgentParent) {
     payload.fastAgentParent = parent;
   }
+  if (parent && !payload.reportConsumer) {
+    payload.reportConsumer = 'orchestrator';
+  }
 }
 
 function inheritSnapshotResumeFastAgentSession(
@@ -2714,6 +2783,22 @@ async function enqueueSnapshotResume(
 
   try {
     taskRun = await db.transaction(async (tx) => {
+      await tx.execute(
+        sql`SELECT pg_advisory_xact_lock(${SNAPSHOT_RESUME_ADVISORY_LOCK_NAMESPACE}, ${sourceRun.id})`,
+      );
+
+      const existingResume = await tx.query.taskRuns.findFirst({
+        where: and(
+          eq(taskRuns.sourceRunId, sourceRun.id),
+          eq(taskRuns.kind, 'resume'),
+          isNull(taskRuns.canceledAt),
+        ),
+        columns: { id: true },
+      });
+      if (existingResume) {
+        throw new SnapshotResumeAlreadyExistsError(existingResume.id);
+      }
+
       const [insertedRun] = await tx
         .insert(taskRuns)
         .values({

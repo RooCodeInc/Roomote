@@ -134,6 +134,35 @@ describe('evaluateUnmentionedThreadReplyRouting', () => {
     ).toEqual({ shouldRoute: true, interjectionDetected: false });
   });
 
+  it('routes a new sender after another participant speaks in an open Roomote conversation', () => {
+    expect(
+      decide({
+        isThreadTaskOwner: false,
+        isThreadRootAuthor: false,
+        isOpenConversationThread: true,
+        senderUserId: 'U2',
+        threadMessages: [
+          human('100', 'U1', { mentionsBot: true }),
+          bot('200'),
+          human('300', 'U1'),
+        ],
+      }),
+    ).toEqual({ shouldRoute: true, interjectionDetected: false });
+  });
+
+  it('still requires a mention when somebody else was mentioned in an open Roomote conversation', () => {
+    expect(
+      decide({
+        isOpenConversationThread: true,
+        threadMessages: [
+          human('100', 'U1', { mentionsBot: true }),
+          bot('200'),
+          human('300', 'U1', { mentionsSomebodyElse: true }),
+        ],
+      }),
+    ).toEqual({ shouldRoute: false, interjectionDetected: true });
+  });
+
   it('still requires a mention after an interjection in an automation report thread', () => {
     expect(
       decide({

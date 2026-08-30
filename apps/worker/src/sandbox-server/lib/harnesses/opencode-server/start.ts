@@ -18,6 +18,7 @@ import {
 import { isExpectedSubprocessExit } from './expected-exit';
 import { OpenCodeServerHarness } from './harness';
 import { resolveOpenCodeCommand } from './opencode-command';
+import { waitForOpenCodeServer } from './readiness';
 
 interface StartOpenCodeServerHarnessOptions {
   workspacePath: string;
@@ -77,14 +78,6 @@ function parseTimeoutMs(value: string | undefined): number | undefined {
   return parsed;
 }
 
-function parseOpenCodeServerUrl(line: string): string | null {
-  const match = /opencode server listening on\s+(http:\/\/\S+)/iu.exec(
-    line.trim(),
-  );
-
-  return match?.[1] ?? null;
-}
-
 async function getAvailableLocalPort(): Promise<number> {
   return await new Promise<number>((resolve, reject) => {
     const server = net.createServer();
@@ -112,13 +105,11 @@ async function getAvailableLocalPort(): Promise<number> {
   });
 }
 
-function waitForOpenCodeServerUrl(options: {
+function attachOpenCodeServerLogs(options: {
   stdout: NodeJS.ReadableStream;
   stderr: NodeJS.ReadableStream;
   logger: HarnessLogger;
-  timeoutMs: number;
-}): Promise<string> {
-  const log = createPrefixedLogger(options.logger, '[opencode-server]');
+}): void {
   const stdoutLog = createPrefixedLogger(
     options.logger,
     '[opencode-server:stdout]',
@@ -128,68 +119,20 @@ function waitForOpenCodeServerUrl(options: {
     '[opencode-server:stderr]',
   );
 
-  return new Promise<string>((resolve, reject) => {
-    let resolved = false;
-    const stdoutReader = readline.createInterface({
-      input: options.stdout,
-      crlfDelay: Infinity,
-    });
-    const stderrReader = readline.createInterface({
-      input: options.stderr,
-      crlfDelay: Infinity,
-    });
-
-    const timer = setTimeout(() => {
-      if (resolved) {
-        return;
-      }
-
-      cleanup();
-      reject(new Error('Timed out waiting for OpenCode server URL.'));
-    }, options.timeoutMs);
-
-    const cleanup = () => {
-      clearTimeout(timer);
-      stdoutReader.off('line', handleStdoutLine);
-      stderrReader.off('line', handleStderrLine);
-    };
-
-    const maybeResolve = (source: 'stdout' | 'stderr', line: string) => {
-      if (resolved) {
-        return;
-      }
-
-      const url = parseOpenCodeServerUrl(line);
-
-      if (!url) {
-        return;
-      }
-
-      resolved = true;
-      clearTimeout(timer);
-      log.info(`Detected OpenCode server URL on ${source}: ${url}`);
-      resolve(url);
-    };
-
-    const handleStdoutLine = (line: string) => {
+  readline
+    .createInterface({ input: options.stdout, crlfDelay: Infinity })
+    .on('line', (line) => {
       if (line.trim().length > 0) {
         stdoutLog.info(line);
       }
-
-      maybeResolve('stdout', line);
-    };
-
-    const handleStderrLine = (line: string) => {
+    });
+  readline
+    .createInterface({ input: options.stderr, crlfDelay: Infinity })
+    .on('line', (line) => {
       if (line.trim().length > 0) {
         stderrLog.info(line);
       }
-
-      maybeResolve('stderr', line);
-    };
-
-    stdoutReader.on('line', handleStdoutLine);
-    stderrReader.on('line', handleStderrLine);
-  });
+    });
 }
 
 export async function startOpenCodeServerHarness({
@@ -254,6 +197,12 @@ export async function startOpenCodeServerHarness({
         'OpenCode server subprocess is missing stdout or stderr.',
       );
     }
+
+    attachOpenCodeServerLogs({
+      stdout: subprocess.stdout,
+      stderr: subprocess.stderr,
+      logger,
+    });
 
     if (onUnexpectedExit) {
       // The certificate needs the process's last words, not its first: these
@@ -329,24 +278,28 @@ export async function startOpenCodeServerHarness({
       { once: true },
     );
 
-    const baseUrl = await Promise.race([
-      waitForOpenCodeServerUrl({
-        stdout: subprocess.stdout,
-        stderr: subprocess.stderr,
-        logger,
-        timeoutMs: 30_000,
-      }),
-      subprocess.then(
-        () => {
-          throw new Error(
-            'OpenCode server exited before printing a listening URL.',
-          );
-        },
-        (error: unknown) => {
-          throw error;
-        },
-      ),
-    ]);
+    const baseUrl = `http://127.0.0.1:${port}`;
+    const readinessAbortController = new AbortController();
+
+    try {
+      await Promise.race([
+        waitForOpenCodeServer({
+          baseUrl,
+          timeoutMs: 30_000,
+          signal: readinessAbortController.signal,
+        }),
+        subprocess.then(
+          () => {
+            throw new Error('OpenCode server exited before becoming ready.');
+          },
+          (error: unknown) => {
+            throw error;
+          },
+        ),
+      ]);
+    } finally {
+      readinessAbortController.abort();
+    }
     const client = new OpenCodeServerClient({
       baseUrl,
       workspacePath,

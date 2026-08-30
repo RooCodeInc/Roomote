@@ -2,6 +2,7 @@ import {
   GATEWAY_TASK_MODEL_PROVIDER_IDS,
   type TaskModelInputType,
   type TaskModelMetadata,
+  rebaseRoomoteModelIdToUpstream,
 } from '@roomote/types';
 
 const MODELS_DEV_CATALOG_URL = 'https://models.dev/catalog.json';
@@ -275,6 +276,16 @@ export function lookupModelMetadataFromCatalog(
   catalog: ModelsDevCatalog,
   modelId: string,
 ): ExtractedMetadata {
+  // Roomote inference models are OpenRouter models under a separate id
+  // namespace; resolve their metadata (context window, pricing) through the
+  // upstream OpenRouter identity or every trial model stays metadata-less
+  // and OpenCode reports zero cost for trial usage.
+  const upstreamSlug = rebaseRoomoteModelIdToUpstream(modelId);
+  if (upstreamSlug !== null)
+    return lookupModelMetadataFromCatalog(
+      catalog,
+      `openrouter/${upstreamSlug}`,
+    );
   const slug = resolveModelsDevSlug(modelId);
   const gatewayProviderId = GATEWAY_TASK_MODEL_PROVIDER_IDS.find((providerId) =>
     modelId.startsWith(`${providerId}/`),

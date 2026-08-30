@@ -1,16 +1,17 @@
 ---
 title: Supermemory
-description: Save and recall shared memories across Roomote tasks.
+description: Save and recall shared memories across Roomote tasks and Fast sessions.
 icon: '/logo/integrations/supermemory.svg'
 ---
 
 Connect Supermemory when your deployment needs durable context that can carry
-across tasks, such as team preferences, recurring decisions, or important
-project conventions.
+across tasks and Fast sessions, such as team preferences, recurring
+decisions, or important project conventions.
 
 ## When to use it
 
 - Recall relevant context from earlier Roomote tasks before starting new work
+- Carry durable context into Fast sessions
 - Preserve explicit team preferences that should affect future tasks
 - Keep durable decisions available without adding them to every prompt
 
@@ -20,13 +21,20 @@ Admins connect Supermemory once from **Settings > Integrations**.
 
 ## What to expect
 
-Supermemory is a shared deployment memory store for Roomote tasks. When it is
-connected, Roomote proactively saves durable shared context so future tasks can
-reuse it — team preferences, lasting decisions, workflow conventions, and
-recurring gotchas — without waiting for someone to say "remember this."
+Supermemory is a shared deployment memory store for Roomote tasks and Fast
+sessions. When it is connected, Roomote proactively saves durable shared
+context from completed tasks so future work can reuse it — team preferences,
+lasting decisions, workflow conventions, and recurring gotchas — without
+waiting for someone to say "remember this."
+
+In Fast, ask Roomote to remember a durable preference, decision, correction, or
+fact. Fast uses Supermemory's available writing tools, and later tasks or
+conversations can recall that context. When more than one memory integration is
+connected, Roomote uses one as the primary store and avoids writing the same
+learning to every store.
 
 Task status, secrets, code snippets, one-off progress notes, and anything
 already encoded in the repository still do not belong in memory.
 
-Roomote can also recall relevant memories near the start of substantive work and
-use them as additional context.
+Roomote can also recall relevant memories near the start of substantive tasks
+and requests and use them as additional context.

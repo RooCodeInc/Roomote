@@ -18,9 +18,14 @@ export default defineConfig({
     js: `import { createRequire as __createRequire } from 'module';const require = __createRequire(import.meta.url);`,
   },
   esbuildOptions(options) {
-    // Exclude native modules and their runtime tree from bundling.
+    // Keep runtime-only dependency trees out of the API bundle.
     // tsup-level `external` is ignored when `noExternal: [/.*/]` is enabled,
     // so this must be applied at the esbuild layer.
-    options.external = [...(options.external ?? []), 'snowflake-sdk'];
+    options.external = [
+      ...(options.external ?? []),
+      'dompurify',
+      'jsdom',
+      'snowflake-sdk',
+    ];
   },
 });

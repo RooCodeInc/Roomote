@@ -135,6 +135,7 @@ export async function handleGitLabMergeRequest(
         prNumber: mergeRequest.iid,
         prTitle: mergeRequest.title,
         prUrl: mergeRequest.url,
+        targetBranch: mergeRequest.target_branch,
         status,
         actorLogin:
           payload.user?.username ?? payload.user?.name ?? 'someone on GitLab',
@@ -152,6 +153,15 @@ export async function handleGitLabMergeRequest(
     }
 
     return { status: 'ok' };
+  }
+
+  if (mergeRequest.action === 'open' || mergeRequest.action === 'reopen') {
+    await updateTaskPrStatus(
+      'gitlab',
+      repoFullName,
+      mergeRequest.iid,
+      mergeRequest.draft ? 'draft' : 'open',
+    );
   }
 
   const taskType = getReviewTaskType(payload);

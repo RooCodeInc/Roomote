@@ -1,17 +1,19 @@
 import { useState, type ComponentType } from 'react';
-import Image from 'next/image';
 import {
   ACP_ENVELOPE_EVENT_TYPES,
   type AcpRequestUserInputPayload,
   getProviderRetryNoticeFromMessageData,
   getTerminalProviderErrorFromMessageData,
   parseLinkedReviewResults,
+  parsePrReviewActionOffer,
   stripLlmCitationArtifacts,
 } from '@roomote/types';
 
 import { cn } from '@/lib/utils';
+import { useTRPCClient } from '@/trpc/client';
 
 import {
+  Avatar,
   BasicTooltip,
   Button,
   ChevronDownIcon,
@@ -40,6 +42,8 @@ import { messageAnchorId } from '../message-anchor';
 import type { AcpUiMessage } from './types';
 import { ProviderRetryNoticeMessage } from './ProviderRetryNoticeMessage';
 import { TerminalProviderErrorMessage } from './TerminalProviderErrorMessage';
+import { PrReviewActionOffer } from '@/components/ai-elements/pr-review-action-offer';
+import { useMessageUiOptions } from '@/components/ai-elements/message-ui-options';
 
 const UserMessageToggle = ({
   isExpanded,
@@ -86,6 +90,27 @@ function getImageMediaType(url: string): string {
 
 interface AcpTextMessageProps {
   msg: AcpUiMessage;
+}
+
+function PrReviewNotificationActions({ msg }: { msg: AcpUiMessage }) {
+  const offer = parsePrReviewActionOffer(msg.data as Record<string, unknown>);
+  const trpcClient = useTRPCClient();
+  if (!offer) return null;
+
+  return (
+    <div className="mt-3" data-testid="pr-review-notification-actions">
+      <PrReviewActionOffer
+        offer={offer}
+        onAction={async (choice) => {
+          const result =
+            await trpcClient.sandboxSession.handlePrReviewNotificationAction.mutate(
+              { deliveryId: offer.deliveryId, choice },
+            );
+          return result.status;
+        }}
+      />
+    </div>
+  );
 }
 
 function getUserTooltipContent(msg: AcpUiMessage): string {
@@ -147,7 +172,7 @@ function getRequestUserInputResponseDisplay(
     .filter((text) => text.length > 0);
 
   return {
-    title: data.resolution === 'cancelled' ? 'Cancelled requested input' : null,
+    title: data.resolution === 'cancelled' ? 'Cancelled input request' : null,
     questionTexts,
   };
 }
@@ -157,6 +182,7 @@ export function AcpTextMessage({ msg }: AcpTextMessageProps) {
     null,
   );
   const showPersistentTimestamp = useInternalTranscriptRowsVisible();
+  const { hidePrReviewActions } = useMessageUiOptions();
   const isUser = msg.role === 'user';
   const baseContent = isUser
     ? (msg.text ?? '')
@@ -223,15 +249,15 @@ export function AcpTextMessage({ msg }: AcpTextMessageProps) {
       <div
         className={cn('flex items-start gap-2', isUser && 'flex-row-reverse')}
       >
-        {isUser && msg.userImageUrl ? (
+        {isUser ? (
           <BasicTooltip content={userTooltipContent}>
             <div className="shrink-0 pt-1 mt-8">
-              <Image
-                src={msg.userImageUrl}
-                alt={msg.userName ?? 'User'}
-                width={24}
-                height={24}
-                className="size-6 rounded-full"
+              <Avatar
+                imageUrl={msg.userImageUrl}
+                name={msg.userName}
+                email={msg.userEmail}
+                size="sm"
+                alt={msg.userName ?? msg.userEmail ?? 'User'}
               />
             </div>
           </BasicTooltip>
@@ -333,6 +359,9 @@ export function AcpTextMessage({ msg }: AcpTextMessageProps) {
           ) : (
             <MessageResponse>{content}</MessageResponse>
           )}
+          {!hidePrReviewActions && !isUser && msg.kind === 'text' ? (
+            <PrReviewNotificationActions msg={msg} />
+          ) : null}
         </MessageContent>
       </div>
       {showPersistentTimestamp && !msg.partial && (

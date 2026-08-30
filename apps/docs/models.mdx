@@ -22,6 +22,18 @@ You can connect more than one inference provider in the same deployment. That
 lets you mix and match models by provider instead of betting the whole
 deployment on one account, one vendor, or one model family.
 
+### Managed Roomote inference
+
+Some hosting deployments provision **Roomote inference** with a limited,
+spend-capped credit grant during setup. It is separate from your own provider
+connections: in particular, you can add an OpenRouter key in **Settings >
+Models** even when Roomote inference is active. If the hosting deployment does
+not offer it, the option is not shown. Trial token usage and estimated model
+cost appear in task details and [Cost Analytics](/cost-analytics), while the
+remaining credit line reflects the hosted grant's authoritative limit. Its key
+is stored with your other provider credentials, so deleting the Roomote
+inference provider in **Settings > Models** disables it permanently.
+
 For example, a deployment might use:
 
 - an OpenRouter-routed model for the default coding model
@@ -204,11 +216,13 @@ limits, or Grok included-usage windows.
 These numbers come from unofficial provider endpoints, so the usage line is
 hidden whenever the provider does not return usable data.
 
-When a Slack Manager Channel is configured under **Settings > Automations**,
-Roomote also checks queryable limits every 15 minutes for OpenRouter, Kimi for
-Coding, OpenCode Go, Z.AI, and Z.AI Coding Plan. It posts one warning when a
-credential crosses 80%, 90%, or 100% usage in a limit window. The warning names
-the provider, credential fingerprint or label, limit window, and reported
+Under **Settings > Automations > Inference Provider Usage Alerts**, admins can
+configure hourly checks for queryable limits from OpenRouter, Kimi for Coding,
+OpenCode Go, Z.AI, and Z.AI Coding Plan. Roomote posts one warning when a
+credential crosses its configured threshold in a limit window, plus a critical
+warning at 100%. Alerts can report through Slack or Discord destinations and
+supported primary conversations in Teams, Telegram, or Discord. The warning
+names the provider, credential fingerprint or label, limit window, and reported
 usage. A provider that does not return usable quota data is skipped.
 
 xAI can be connected with an API key, a SuperGrok or eligible X Premium+

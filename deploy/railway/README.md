@@ -390,7 +390,7 @@ domain, which requires a domain you control:
    hostname. Previews are always enabled and publish for every environment
    that defines preview ports.
 
-## Enabling the Brain (optional)
+## Enabling Memory (optional)
 
 The `gbrain` service is part of the template and boots idle. It gives this
 deployment shared memory: completed tasks and activity from connected
@@ -400,26 +400,26 @@ what they decided and why when they finish substantial work.
 
 One variable turns it on: set `R_BRAIN_OPENROUTER_API_KEY` or
 `R_BRAIN_OPENAI_API_KEY` on **api** (or as a Settings environment value).
-The explicit `R_BRAIN_*` name is the Brain's on switch: a deployment that
-only configured task models under **Settings → Models** keeps no Brain, no
+The explicit `R_BRAIN_*` name is the on switch for Memory: a deployment that
+only configured task models under **Settings → Models** keeps no Memory, no
 ingestion, and agents are never told one exists. The value can be the same
-key you use for tasks, or a separate one to bill the Brain independently.
-The Brain has no provider key of its own; it asks the api service for
+key you use for tasks, or a separate one to bill Memory independently.
+Memory has no provider key of its own; it asks the api service for
 embeddings and synthesis using this key, and changing it later takes effect
-on the Brain's next request, with no redeploy.
+on Memory's next request, with no redeploy.
 
-Within a minute of the Brain key being configured, the deployment registers
-its own scoped clients against the Brain (a read-only one for agents, a
+Within a minute of the Memory key being configured, the deployment registers
+its own scoped clients against Memory (a read-only one for agents, a
 write-only one for ingestion), backfills the task history it already has, and
-starts delivering the Brain to new tasks. Watch the bullmq service logs for
+starts delivering Memory to new tasks. Watch the bullmq service logs for
 `[brain] provisioned scoped clients`.
 
-Nothing else is required, and nothing is exposed: the Brain has no public
+Nothing else is required, and nothing is exposed: Memory has no public
 domain, so it is reachable only over Railway's private network, and task
 sandboxes never touch it directly — they go through the api service with
 their run token, which grants read access only.
 
-Leaving every provider unconfigured is a supported state: the Brain sits
+Leaving every provider unconfigured is a supported state: Memory sits
 idle, agents are told nothing about it, and no ingestion runs. Deployments that will never
 want memory can delete the `gbrain` service entirely.
 
@@ -428,17 +428,16 @@ Two operational notes:
 - **The template backs up the volume.** The `/data` volume holds the corpus,
   and new template deployments schedule Railway's daily and weekly backups
   for it. Losing it is recoverable — task history and integration sources
-  re-ingest, and Roomote re-registers its clients automatically when the Brain
+  re-ingest, and Roomote re-registers its clients automatically when Memory
   no longer recognizes them — but the deployment starts cold until that
   finishes.
 - **Model choice is a variable, not a rebuild.** `R_BRAIN_MODEL` selects the
-  synthesis model, `R_BRAIN_EMBEDDING_MODEL` the embedding model, and
-  `R_BRAIN_RERANKER_MODEL` the reranker, all set on **api**. Leave them empty
-  for the defaults. The synthesis model can change at any time; the reranker
-  changes after a gbrain restart; the embedding model
-  sizes the Brain's vector storage when it is first created, so set it (with
+  synthesis model and `R_BRAIN_EMBEDDING_MODEL` the embedding model, both set
+  on **api**. Leave them empty for the defaults. The synthesis model can
+  change at any time; the embedding model
+  sizes Memory's vector storage when it is first created, so set it (with
   `R_BRAIN_EMBEDDING_DIMENSIONS`) before first boot or not at all. A later
-  change is ignored and reported in the Brain's logs rather than silently
+  change is ignored and reported in Memory's logs rather than silently
   applied.
 
 ## Upgrades, backups, and costs
@@ -464,7 +463,7 @@ Two operational notes:
   before enabling or continuing Discord. Template edits do not rewrite
   variables on existing projects.
 - **Back up** the Railway Postgres database, the MinIO volume or external
-  bucket, and the Brain volume. The template schedules volume backups for all
+  bucket, and the Memory volume. The template schedules volume backups for all
   three Railway-managed copies; keep equivalent coverage if you replace any
   of them with external infrastructure.
 - **Costs** split three ways: Railway hosts the control plane (web, api, preview-proxy,
@@ -517,7 +516,7 @@ references, like `R_APP_URL` — also open each app service's Variables
 tab on the scratch project and confirm the resolved values are real URLs,
 not literal `${{...}}` strings.
 
-For Brain storage changes, also open the `gbrain` service's **Backups** tab
+For Memory storage changes, also open the `gbrain` service's **Backups** tab
 and confirm its `/data` volume has both Daily and Weekly schedules before
 publishing the template update.
 

@@ -26,6 +26,7 @@ export {
   Bug,
   Calendar,
   Camera,
+  ChartColumn,
   ChartColumnIncreasing,
   Check,
   CheckCircle2,
@@ -62,7 +63,6 @@ export {
   ExternalLink,
   Eye,
   EyeOff,
-  File,
   FileBox,
   FileCode,
   FileDiffIcon,
@@ -160,7 +160,6 @@ export {
   RotateCcw,
   History as RotateCcwClock,
   RotateCcwKey,
-  RotateCw,
   ScrollText,
   Rows4,
   ScanFace,
@@ -190,6 +189,7 @@ export {
   SquareSlashIcon,
   Stethoscope,
   Sun,
+  Target,
   Terminal,
   TerminalIcon,
   ThumbsDown,
@@ -216,6 +216,7 @@ export {
   XIcon,
   Zap,
   BellElectric,
+  BatteryWarning,
 } from 'lucide-react';
 
 export type { LucideIcon } from 'lucide-react';

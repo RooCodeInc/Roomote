@@ -24,8 +24,11 @@ import {
   sql,
 } from '@roomote/db/server';
 import { enqueueTask } from '@roomote/cloud-agents/server';
-import { acquireRedisLock } from '@roomote/redis';
-import { enqueueActivePrReviewFollowUp } from '@roomote/sdk/server';
+import {
+  acquireGithubPrReviewLifecycleLock,
+  enqueueActivePrReviewFollowUp,
+  publishGithubPrReviewCheck,
+} from '@roomote/sdk/server';
 
 import type { WebhookResponse } from '../../types';
 import { toHostFromUrl } from '../utils';
@@ -115,22 +118,6 @@ async function findExistingReviewTask(repository: string, prNumber: number) {
   return existingTask;
 }
 
-async function acquirePrReviewLaunchLock(repository: string, prNumber: number) {
-  const key = `pr-review-synchronize:${repository}:${prNumber}`;
-
-  for (let attempt = 0; attempt < 100; attempt++) {
-    const release = await acquireRedisLock(key, { ttlSeconds: 30 });
-
-    if (release) {
-      return release;
-    }
-
-    await new Promise((resolve) => setTimeout(resolve, 100));
-  }
-
-  return null;
-}
-
 export async function handlePrSynchronize({
   installation,
   repository,
@@ -178,7 +165,7 @@ export async function handlePrSynchronize({
   }
 
   const enqueued = await pMap(targets, async (currentTarget) => {
-    const releaseLaunchLock = await acquirePrReviewLaunchLock(
+    const releaseLaunchLock = await acquireGithubPrReviewLifecycleLock(
       repository.full_name,
       pr.number,
     );
@@ -190,6 +177,7 @@ export async function handlePrSynchronize({
     }
 
     try {
+      releaseLaunchLock.signal.throwIfAborted();
       const headSha = await getCurrentGitHubPrHeadSha({
         installationId: installation!.id,
         repository: repository.full_name,
@@ -305,6 +293,7 @@ export async function handlePrSynchronize({
           });
 
           await enqueueActivePrReviewFollowUp({
+            installationId: installation!.id,
             runId: followUpRun.id,
             taskId: followUpRun.taskId,
             sandboxServerUrl: followUpRun.sandboxServerUrl!,
@@ -347,6 +336,19 @@ export async function handlePrSynchronize({
               },
             },
           });
+          if (currentTarget.settings?.publishGithubCheck) {
+            releaseLaunchLock.signal.throwIfAborted();
+            await publishGithubPrReviewCheck({
+              installationId: installation!.id,
+              repository: repository.full_name,
+              prNumber: pr.number,
+              headSha,
+              taskId: followUpRun.taskId,
+              runId: followUpRun.id,
+              status: 'in_progress',
+              signal: releaseLaunchLock.signal,
+            });
+          }
           queuedActiveReviewFollowUp = true;
         }
 
@@ -398,7 +400,7 @@ export async function handlePrSynchronize({
         reviewerSettings: currentTarget.settings,
       });
 
-      return enqueueTask({
+      const launch = await enqueueTask({
         existingTaskId: existingReviewTask?.taskId,
         task: {
           type: shouldRunSyncReview
@@ -442,6 +444,21 @@ export async function handlePrSynchronize({
           prBaseSha: pr.base?.sha ?? null,
         },
       });
+
+      if (currentTarget.settings?.publishGithubCheck) {
+        releaseLaunchLock.signal.throwIfAborted();
+        await publishGithubPrReviewCheck({
+          installationId: installation!.id,
+          repository: repository.full_name,
+          prNumber: pr.number,
+          headSha,
+          taskId: launch.taskId,
+          runId: launch.id,
+          signal: releaseLaunchLock.signal,
+        });
+      }
+
+      return launch;
     } finally {
       await releaseLaunchLock();
     }

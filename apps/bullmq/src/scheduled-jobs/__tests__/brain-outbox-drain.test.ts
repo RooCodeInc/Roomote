@@ -2,19 +2,29 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const {
   mockResolveConnection,
-  mockResolveBrainProvider,
+  mockIsBrainEmbeddingAvailable,
   mockBackfillEvents,
   mockClaimEvents,
+  mockClaimFastEvents,
+  mockConversationRows,
   mockGetSyncState,
+  mockMarkFastEvent,
+  mockSettleFastEvent,
   mockPullRequestFacts,
+  mockReleaseFastEvents,
   mockRunBrainCollectors,
 } = vi.hoisted(() => ({
   mockResolveConnection: vi.fn(),
-  mockResolveBrainProvider: vi.fn(),
+  mockIsBrainEmbeddingAvailable: vi.fn(),
   mockBackfillEvents: vi.fn(),
   mockClaimEvents: vi.fn(),
+  mockClaimFastEvents: vi.fn(),
+  mockConversationRows: vi.fn(),
   mockGetSyncState: vi.fn(),
+  mockMarkFastEvent: vi.fn(),
+  mockSettleFastEvent: vi.fn(),
   mockPullRequestFacts: vi.fn(),
+  mockReleaseFastEvents: vi.fn(),
   mockRunBrainCollectors: vi.fn(),
 }));
 
@@ -23,7 +33,7 @@ vi.mock('@roomote/sdk/server', async (importOriginal) => ({
   // through the mocked global fetch.
   ...(await importOriginal<typeof import('@roomote/sdk/server')>()),
   resolveBrainConnection: mockResolveConnection,
-  resolveBrainInferenceProvider: mockResolveBrainProvider,
+  isBrainEmbeddingAvailable: mockIsBrainEmbeddingAvailable,
 }));
 
 vi.mock('@roomote/db/server', async (importOriginal) => {
@@ -37,11 +47,18 @@ vi.mock('@roomote/db/server', async (importOriginal) => {
           where: vi.fn(() => ({
             orderBy: vi.fn(() => ({ limit: mockPullRequestFacts })),
           })),
+          leftJoin: vi.fn(() => ({
+            where: vi.fn(() => ({ limit: mockConversationRows })),
+          })),
         })),
       })),
     },
     backfillBrainMemoryEvents: mockBackfillEvents,
     claimPendingBrainMemoryEvents: mockClaimEvents,
+    claimPendingFastAgentMemoryEvents: mockClaimFastEvents,
+    markFastAgentMemoryEvent: mockMarkFastEvent,
+    settleFastAgentMemoryEvent: mockSettleFastEvent,
+    releaseFastAgentMemoryEvents: mockReleaseFastEvents,
     getBrainSyncState: mockGetSyncState,
     upsertBrainSyncState: vi.fn(),
   };
@@ -55,6 +72,9 @@ beforeEach(() => {
   vi.clearAllMocks();
   mockGetSyncState.mockResolvedValue(null);
   mockClaimEvents.mockResolvedValue([]);
+  mockClaimFastEvents.mockResolvedValue([]);
+  mockConversationRows.mockResolvedValue([]);
+  mockSettleFastEvent.mockResolvedValue('settled');
   mockPullRequestFacts.mockResolvedValue([]);
   mockRunBrainCollectors.mockResolvedValue({
     backfillProgressed: false,
@@ -65,9 +85,11 @@ beforeEach(() => {
 import {
   brainCollectorsJob,
   brainOutboxDrainJob,
+  buildFastMemoryPage,
   buildPullRequestFactPage,
   buildMemoryPage,
   callBrainWriteTool,
+  isBrainUnreachable,
   drainBrainHistoricalIngestion,
   getPullRequestFactsResumeCursor,
   isBrainNotReady,
@@ -286,10 +308,7 @@ describe('collector continuation orchestration', () => {
       baseUrl: 'http://brain.test',
       token: 'ingest-token',
     });
-    mockResolveBrainProvider.mockResolvedValue({
-      providerId: 'openrouter',
-      apiKey: 'sk-or',
-    });
+    mockIsBrainEmbeddingAvailable.mockResolvedValue(true);
   });
 
   it('runs incremental integrations only on the scheduled pass', async () => {
@@ -461,6 +480,14 @@ describe('redactBrainText', () => {
     expect(output).toContain('after');
   });
 
+  it('redacts private key blocks with repeated begin markers', () => {
+    const input = `${'-----BEGIN PRIVATE KEY-----\n'.repeat(1_000)}secret\n-----END PRIVATE KEY-----`;
+
+    const output = redactBrainText(input);
+
+    expect(output).toBe('[REDACTED]');
+  });
+
   it('leaves ordinary prose and identifiers alone', () => {
     const input =
       'Completed task tasks/abc123: merged owner/repo#42 at 2026-08-13.';
@@ -532,6 +559,79 @@ describe('postToBrain failure classification', () => {
     );
   });
 
+  it('classifies a transport-level failure as backpressure, not a page failure', async () => {
+    // undici's contract: fetch rejects with TypeError('fetch failed') and the
+    // real network error under `cause` — the shape produced when gbrain is
+    // mid-restart during a fleet image roll.
+    const cause = Object.assign(new Error('connect ECONNREFUSED'), {
+      code: 'ECONNREFUSED',
+    });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        throw new TypeError('fetch failed', { cause });
+      }),
+    );
+
+    await expect(postToBrain(page, connection)).rejects.toSatisfy(
+      isBrainNotReady,
+    );
+  });
+
+  it('classifies a mid-stream disconnect while reading the body as backpressure', async () => {
+    // The connection dropped while gbrain streamed its MCP response: headers
+    // arrived, the body read rejects with undici's terminated shape.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({
+        status: 200,
+        ok: true,
+        text: async () => {
+          throw new TypeError('terminated', {
+            cause: Object.assign(new Error('other side closed'), {
+              code: 'UND_ERR_SOCKET',
+            }),
+          });
+        },
+      })),
+    );
+
+    await expect(postToBrain(page, connection)).rejects.toSatisfy(
+      isBrainNotReady,
+    );
+  });
+
+  it('keeps an HTTP error from a reachable brain as a per-page failure', async () => {
+    stubUpstream('internal error', 500);
+
+    const error = await postToBrain(page, connection).catch(
+      (thrown: unknown) => thrown,
+    );
+
+    // A reachable server rejecting one payload must keep consuming that
+    // page's attempts, or a poison memory would block the queue forever.
+    expect(isBrainNotReady(error)).toBe(false);
+    expect(isBrainRateLimited(error)).toBe(false);
+    expect(error).toBeInstanceOf(Error);
+  });
+
+  it('recognizes network-level causes at any nesting depth', () => {
+    expect(
+      isBrainUnreachable(
+        new TypeError('fetch failed', {
+          cause: Object.assign(new Error('read ECONNRESET'), {
+            code: 'ECONNRESET',
+          }),
+        }),
+      ),
+    ).toBe(true);
+    expect(isBrainUnreachable(new Error('socket hang up'))).toBe(true);
+    expect(isBrainUnreachable(new Error('gbrain put_page failed: 500'))).toBe(
+      false,
+    );
+    expect(isBrainUnreachable('fetch failed')).toBe(false);
+  });
+
   it('calls supported gbrain write operations with the ingest credential', async () => {
     const fetchMock = vi.fn(async () => Response.json({ result: {} }));
     vi.stubGlobal('fetch', fetchMock);
@@ -567,7 +667,7 @@ describe('Brain readiness gate', () => {
     // cannot embed, burn every memory through its retry budget into a
     // terminal state, and mark the one-shot history backfill complete before
     // a single page landed.
-    mockResolveBrainProvider.mockResolvedValue(null);
+    mockIsBrainEmbeddingAvailable.mockResolvedValue(false);
 
     await brainOutboxDrainJob();
 
@@ -580,15 +680,159 @@ describe('Brain readiness gate', () => {
       baseUrl: 'http://brain.test',
       token: 'ingest-token',
     });
-    mockResolveBrainProvider.mockResolvedValue({
-      providerId: 'openrouter',
-      apiKey: 'sk-or',
-    });
+    mockIsBrainEmbeddingAvailable.mockResolvedValue(true);
     mockGetSyncState.mockResolvedValue({ backfillCompletedAt: new Date() });
     mockClaimEvents.mockResolvedValue([]);
 
     await brainOutboxDrainJob();
 
     expect(mockClaimEvents).toHaveBeenCalled();
+    expect(mockClaimFastEvents).toHaveBeenCalled();
+  });
+});
+
+describe('fast conversation memory pages', () => {
+  const baseInput = {
+    conversationId: '11111111-2222-3333-4444-555555555555',
+    conversationTitle: 'Deploy preferences',
+    userName: 'Sam Lee',
+    userId: 'user-1',
+    surface: 'slack',
+    memory: '- prefers deploys on Fridays\n- calls staging "the sandbox"',
+    createdAt: new Date('2026-08-01T09:00:00Z'),
+    updatedAt: new Date('2026-08-20T10:00:00Z'),
+  };
+
+  it('files the page under the conversation-specific memories slug', () => {
+    const page = buildFastMemoryPage(baseInput);
+
+    expect(page.slug).toBe(
+      'memories/fast/11111111-2222-3333-4444-555555555555',
+    );
+    expect(page.content).toContain('type: conversation-memory');
+    expect(page.content).toContain('provenance: roomote-fast-memory');
+    expect(page.content).toContain('roomote_user_id: user-1');
+    expect(page.content).toContain('date: 2026-08-20');
+    expect(page.content).toContain('- prefers deploys on Fridays');
+  });
+
+  it('falls back to a stable title for an untitled conversation', () => {
+    const page = buildFastMemoryPage({
+      ...baseInput,
+      conversationTitle: null,
+      userName: null,
+    });
+
+    expect(page.title).toBe('Fast conversation 11111111');
+    expect(page.content).not.toContain('saved_by');
+  });
+
+  it('redacts credential-shaped strings before ingestion', () => {
+    const page = buildFastMemoryPage({
+      ...baseInput,
+      memory: '- the token is ghp_abcdefghijklmnopqrstuvwxyz012345',
+    });
+
+    expect(page.content).not.toContain('ghp_abcdefghijklmnopqrstuvwxyz');
+    expect(page.content).toContain('[REDACTED]');
+  });
+});
+
+describe('fast conversation memory drain', () => {
+  beforeEach(() => {
+    mockResolveConnection.mockResolvedValue({
+      baseUrl: 'http://brain.test',
+      token: 'ingest-token',
+    });
+    mockIsBrainEmbeddingAvailable.mockResolvedValue(true);
+    mockGetSyncState.mockResolvedValue({ backfillCompletedAt: new Date() });
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  const event = {
+    id: 'event-1',
+    conversationId: 'conversation-1',
+    memory: '- prefers deploys on Fridays',
+    revision: 3,
+    attempts: 1,
+    createdAt: new Date('2026-08-01T09:00:00Z'),
+    updatedAt: new Date('2026-08-20T10:00:00Z'),
+  };
+
+  it('writes the page with the ingest credential and marks the event done', async () => {
+    const fetchMock = vi.fn(async () => Response.json({ result: {} }));
+    vi.stubGlobal('fetch', fetchMock);
+    mockClaimFastEvents.mockResolvedValueOnce([event]).mockResolvedValue([]);
+    mockConversationRows.mockResolvedValue([
+      {
+        title: 'Deploy preferences',
+        surface: 'slack',
+        userId: 'user-1',
+        userName: 'Sam Lee',
+      },
+    ]);
+
+    await brainOutboxDrainJob();
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://brain.test/mcp',
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({
+          authorization: 'Bearer ingest-token',
+        }),
+        body: expect.stringContaining('memories/fast/conversation-1'),
+      }),
+    );
+    expect(mockSettleFastEvent).toHaveBeenCalledWith(
+      expect.anything(),
+      'event-1',
+      3,
+      'done',
+    );
+  });
+
+  it('skips an event whose conversation no longer exists', async () => {
+    mockClaimFastEvents.mockResolvedValueOnce([event]).mockResolvedValue([]);
+    mockConversationRows.mockResolvedValue([]);
+
+    await brainOutboxDrainJob();
+
+    expect(mockMarkFastEvent).toHaveBeenCalledWith(
+      expect.anything(),
+      'event-1',
+      'skipped',
+      'conversation no longer exists',
+    );
+  });
+
+  it('hands the batch back on backpressure instead of burning retries', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response('rate limited', { status: 429 })),
+    );
+    const second = { ...event, id: 'event-2', conversationId: 'c-2' };
+    mockClaimFastEvents
+      .mockResolvedValueOnce([event, second])
+      .mockResolvedValue([]);
+    mockConversationRows.mockResolvedValue([
+      { title: null, surface: 'web', userId: 'user-1', userName: null },
+    ]);
+
+    await brainOutboxDrainJob();
+
+    expect(mockMarkFastEvent).toHaveBeenCalledWith(
+      expect.anything(),
+      'event-1',
+      'pending',
+      expect.stringContaining('rate limited'),
+    );
+    expect(mockReleaseFastEvents).toHaveBeenCalledWith(expect.anything(), [
+      'event-1',
+      'event-2',
+    ]);
   });
 });

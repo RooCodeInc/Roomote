@@ -1,7 +1,6 @@
 import {
   DEFAULT_MODEL_PROVIDER_ENV_KEYS,
   CHATGPT_FAST_MODE_ENV_VAR_NAME,
-  OPENCODE_AUTH_CONTENT_ENV_VAR_NAME,
   parseModelProviderEnvKeys,
 } from '@roomote/types';
 
@@ -44,7 +43,6 @@ const MODEL_RUNTIME_ENV_KEYS = [
   'R_MODEL_ENV_KEYS',
   'OPENCODE_CONFIG_CONTENT',
   'OPENCODE_COMMAND',
-  OPENCODE_AUTH_CONTENT_ENV_VAR_NAME,
 ] as const;
 export function sanitizeEnv(
   env: Record<string, string | undefined>,

@@ -141,6 +141,7 @@ describe('findUserDirectMessageDestination', () => {
       findUserDirectMessageDestination('teams', 'user-1'),
     ).resolves.toEqual({
       channelId: 'teams-dm-1',
+      teamId: 'tenant-1',
       serviceUrl: 'https://smba.example.com/amer/',
     });
     expect(mockCreateTeamsDirectMessage).toHaveBeenCalledWith({
@@ -231,6 +232,14 @@ describe('sendUserDirectMessageBestEffort', () => {
       telegramChatId: '424242',
     });
     mockTelegramPostMessage.mockResolvedValue({ messageId: '77' });
+
+    mockDiscordUserMappingsFindFirst.mockResolvedValue({
+      discordDmChannelId: 'discord-dm-1',
+      discordUserId: 'discord-user-1',
+    });
+    mockDiscordPostMessage.mockResolvedValue({
+      messageId: 'discord-message-1',
+    });
   });
 
   it('sends the message on every provider with a linked identity', async () => {
@@ -240,7 +249,7 @@ describe('sendUserDirectMessageBestEffort', () => {
       logContext: 'test',
     });
 
-    expect(delivered).toEqual(['slack', 'teams', 'telegram']);
+    expect(delivered).toEqual(['slack', 'teams', 'telegram', 'discord']);
 
     expect(mockOpenConversation).toHaveBeenCalledWith('U123');
     expect(mockSlackPostMessage).toHaveBeenCalledWith({
@@ -261,11 +270,37 @@ describe('sendUserDirectMessageBestEffort', () => {
       text: 'Your GitHub installation request was approved.',
       textFormat: 'markdown',
     });
+
+    expect(mockDiscordPostMessage).toHaveBeenCalledWith({
+      channelId: 'discord-dm-1',
+      text: 'Your GitHub installation request was approved.',
+      textFormat: 'markdown',
+    });
+  });
+
+  it('sends the message when Discord is the only linked provider', async () => {
+    mockSlackUserMappingsFindFirst.mockResolvedValue(undefined);
+    mockTeamsUserMappingsFindFirst.mockResolvedValue(undefined);
+    mockTelegramUserMappingsFindFirst.mockResolvedValue(undefined);
+
+    const delivered = await sendUserDirectMessageBestEffort({
+      userId: 'user-1',
+      text: 'hello',
+      logContext: 'test',
+    });
+
+    expect(delivered).toEqual(['discord']);
+    expect(mockDiscordPostMessage).toHaveBeenCalledWith({
+      channelId: 'discord-dm-1',
+      text: 'hello',
+      textFormat: 'markdown',
+    });
   });
 
   it('skips providers the user has not linked without failing the rest', async () => {
     mockSlackUserMappingsFindFirst.mockResolvedValue(undefined);
     mockTeamsUserMappingsFindFirst.mockResolvedValue(undefined);
+    mockDiscordUserMappingsFindFirst.mockResolvedValue(undefined);
 
     const delivered = await sendUserDirectMessageBestEffort({
       userId: 'user-1',
@@ -289,7 +324,7 @@ describe('sendUserDirectMessageBestEffort', () => {
       logContext: 'test',
     });
 
-    expect(delivered).toEqual(['slack', 'teams']);
+    expect(delivered).toEqual(['slack', 'teams', 'discord']);
     expect(mockTelegramPostMessage).not.toHaveBeenCalled();
   });
 
@@ -303,7 +338,7 @@ describe('sendUserDirectMessageBestEffort', () => {
       logContext: 'test',
     });
 
-    expect(delivered).toEqual(['teams', 'telegram']);
+    expect(delivered).toEqual(['teams', 'telegram', 'discord']);
     expect(warnSpy).toHaveBeenCalledWith(
       '[test] Failed to send Slack DM: slack is down',
     );

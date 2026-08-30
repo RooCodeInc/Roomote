@@ -3,14 +3,14 @@ const {
   mockGetBrainSyncState,
   mockPostToBrain,
   mockResolveConnection,
-  mockResolveProvider,
+  mockIsBrainEmbeddingAvailable,
   mockUpsertBrainSyncState,
 } = vi.hoisted(() => ({
   mockEnv: { TRPC_URL: 'http://api.test:3001' },
   mockGetBrainSyncState: vi.fn(),
   mockPostToBrain: vi.fn(),
   mockResolveConnection: vi.fn(),
-  mockResolveProvider: vi.fn(),
+  mockIsBrainEmbeddingAvailable: vi.fn(),
   mockUpsertBrainSyncState: vi.fn(),
 }));
 
@@ -20,7 +20,7 @@ vi.mock('@roomote/sdk/server', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@roomote/sdk/server')>()),
   getBrainGatewayToken: () => 'brain-gateway-token',
   resolveBrainConnection: mockResolveConnection,
-  resolveBrainInferenceProvider: mockResolveProvider,
+  isBrainEmbeddingAvailable: mockIsBrainEmbeddingAvailable,
 }));
 
 vi.mock('@roomote/env', () => ({
@@ -47,11 +47,6 @@ import {
   runBrainDailyDigest,
   runBrainWeeklySynthesis,
 } from '../brain-maintenance';
-
-const TEST_PROVIDER = {
-  providerId: 'openrouter' as const,
-  apiKey: 'brain-provider-key',
-};
 
 function synthesisResponse(input?: {
   answer?: string;
@@ -180,7 +175,7 @@ describe('brainMaintenanceJob', () => {
     mockGetBrainSyncState.mockResolvedValue(null);
     mockPostToBrain.mockReset();
     mockResolveConnection.mockReset();
-    mockResolveProvider.mockReset();
+    mockIsBrainEmbeddingAvailable.mockReset();
     mockUpsertBrainSyncState.mockReset();
   });
 
@@ -189,7 +184,7 @@ describe('brainMaintenanceJob', () => {
   });
 
   it('does nothing when the Brain provider is disabled', async () => {
-    mockResolveProvider.mockResolvedValue(null);
+    mockIsBrainEmbeddingAvailable.mockResolvedValue(false);
     const fetchSpy = vi.spyOn(globalThis, 'fetch');
 
     await brainMaintenanceJob();
@@ -199,7 +194,7 @@ describe('brainMaintenanceJob', () => {
   });
 
   it('submits the built-in autopilot cycle with the maintenance credential', async () => {
-    mockResolveProvider.mockResolvedValue(TEST_PROVIDER);
+    mockIsBrainEmbeddingAvailable.mockResolvedValue(true);
     mockResolveConnection.mockImplementation(async (credential: string) => ({
       baseUrl: 'http://gbrain.test/',
       token: `${credential}-token`,
@@ -264,7 +259,7 @@ describe('brainMaintenanceJob', () => {
     // Synthesis failures are rethrown after the submission so they stay
     // visible, and the scheduler retries the job; without the day marker
     // each retry queued another full cycle over the whole corpus.
-    mockResolveProvider.mockResolvedValue(TEST_PROVIDER);
+    mockIsBrainEmbeddingAvailable.mockResolvedValue(true);
     mockResolveConnection.mockImplementation(async (credential: string) => ({
       baseUrl: 'http://gbrain.test',
       token: `${credential}-token`,
@@ -297,7 +292,7 @@ describe('brainMaintenanceJob', () => {
   });
 
   it('fails the scheduler job when gbrain rejects the submission', async () => {
-    mockResolveProvider.mockResolvedValue(TEST_PROVIDER);
+    mockIsBrainEmbeddingAvailable.mockResolvedValue(true);
     mockResolveConnection.mockResolvedValue({
       baseUrl: 'http://gbrain.test',
       token: 'maintenance-token',
@@ -325,7 +320,7 @@ describe('brainMaintenanceJob', () => {
   it('keeps the claim on a 5xx, which can follow an accepted submission', async () => {
     // A gateway can answer 5xx after gbrain already queued the job, so the
     // claim must stand and the retry must not resubmit.
-    mockResolveProvider.mockResolvedValue(TEST_PROVIDER);
+    mockIsBrainEmbeddingAvailable.mockResolvedValue(true);
     mockResolveConnection.mockResolvedValue({
       baseUrl: 'http://gbrain.test',
       token: 'maintenance-token',
@@ -347,7 +342,7 @@ describe('brainMaintenanceJob', () => {
   });
 
   it('releases the claim when gbrain answers with a tool error', async () => {
-    mockResolveProvider.mockResolvedValue(TEST_PROVIDER);
+    mockIsBrainEmbeddingAvailable.mockResolvedValue(true);
     mockResolveConnection.mockResolvedValue({
       baseUrl: 'http://gbrain.test',
       token: 'maintenance-token',
@@ -378,7 +373,7 @@ describe('brainMaintenanceJob', () => {
   it('keeps the claim when the submission fails in transport', async () => {
     // No HTTP answer means gbrain may already have queued the job; releasing
     // the claim would let the retry queue a second corpus-wide cycle.
-    mockResolveProvider.mockResolvedValue(TEST_PROVIDER);
+    mockIsBrainEmbeddingAvailable.mockResolvedValue(true);
     mockResolveConnection.mockResolvedValue({
       baseUrl: 'http://gbrain.test',
       token: 'maintenance-token',
@@ -400,7 +395,7 @@ describe('brainMaintenanceJob', () => {
     // A crash between the submission and a marker written afterwards would
     // let the retry queue a second corpus-wide cycle; the claim has to land
     // first.
-    mockResolveProvider.mockResolvedValue(TEST_PROVIDER);
+    mockIsBrainEmbeddingAvailable.mockResolvedValue(true);
     mockResolveConnection.mockResolvedValue({
       baseUrl: 'http://gbrain.test',
       token: 'maintenance-token',
@@ -426,7 +421,7 @@ describe('brainMaintenanceJob', () => {
   });
 
   it('still submits maintenance when daily synthesis fails', async () => {
-    mockResolveProvider.mockResolvedValue(TEST_PROVIDER);
+    mockIsBrainEmbeddingAvailable.mockResolvedValue(true);
     mockResolveConnection.mockImplementation(async (credential: string) => ({
       baseUrl: 'http://gbrain.test',
       token: `${credential}-token`,
@@ -452,8 +447,8 @@ describe('runBrainDailyDigest', () => {
     mockEnv.TRPC_URL = 'http://api.test:3001';
     mockGetBrainSyncState.mockReset();
     mockPostToBrain.mockReset();
-    mockResolveProvider.mockReset();
-    mockResolveProvider.mockResolvedValue(TEST_PROVIDER);
+    mockIsBrainEmbeddingAvailable.mockReset();
+    mockIsBrainEmbeddingAvailable.mockResolvedValue(true);
     mockUpsertBrainSyncState.mockReset();
   });
 

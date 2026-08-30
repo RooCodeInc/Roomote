@@ -180,6 +180,17 @@ describe('handleGitLabMergeRequest', () => {
     expect('sourceControlHost' in task.payload).toBe(false);
   });
 
+  it('restores tracked draft status when a merge request is reopened', async () => {
+    await handleGitLabMergeRequest(makePayload('reopen', { draft: true }));
+
+    expect(mockUpdateTaskPrStatus).toHaveBeenCalledWith(
+      'gitlab',
+      'acme/backend',
+      42,
+      'draft',
+    );
+  });
+
   it('selects and stamps the webhook host among same-name repositories on multiple hosts', async () => {
     // Two active rows share the repository identity; only the host differs.
     const rows = [
@@ -333,6 +344,9 @@ describe('handleGitLabMergeRequest', () => {
       'acme/backend',
       42,
       'merged',
+    );
+    expect(mockRecordPrStatusChangeInTaskHistory).toHaveBeenLastCalledWith(
+      expect.objectContaining({ targetBranch: 'main' }),
     );
     expect(mockScheduleSourceControlPullRequestFactSync).toHaveBeenCalledWith({
       provider: 'gitlab',

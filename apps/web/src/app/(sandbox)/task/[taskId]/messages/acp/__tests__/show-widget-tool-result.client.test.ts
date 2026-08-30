@@ -95,6 +95,50 @@ describe('resolveShowWidgetForToolMessage', () => {
     });
   });
 
+  it('parses trusted Fast-native show_widget results', () => {
+    const widget = resolveShowWidgetForToolMessage(
+      buildResult({
+        isMcp: false,
+        isRoomoteNativeTool: true,
+        mcpServerName: null,
+        serverName: null,
+        output: JSON.stringify({
+          success: true,
+          shown: true,
+          title: 'Fast status',
+          html: '<p>ready</p>',
+          css: null,
+          height: 280,
+          textFallback: null,
+        }),
+      }),
+    );
+
+    expect(widget).toMatchObject({
+      title: 'Fast status',
+      html: '<p>ready</p>',
+      height: 280,
+    });
+  });
+
+  it('ignores unmarked native tools named show_widget', () => {
+    const widget = resolveShowWidgetForToolMessage(
+      buildResult({
+        isMcp: false,
+        isRoomoteNativeTool: false,
+        mcpServerName: null,
+        serverName: null,
+        output: JSON.stringify({
+          success: true,
+          shown: true,
+          html: '<p>untrusted</p>',
+        }),
+      }),
+    );
+
+    expect(widget).toBeNull();
+  });
+
   it('ignores in-progress rawInput and only renders successful tool results', () => {
     const widget = resolveShowWidgetForToolMessage(
       buildCall({

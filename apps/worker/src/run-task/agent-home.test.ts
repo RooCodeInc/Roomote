@@ -4,17 +4,100 @@ import {
   mkdtempSync,
   readFileSync,
   rmSync,
-  statSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import {
+  createIntegrationMcpInstructions,
   generateOpenCodeConfig,
-  rematerializeOpenCodeCredentialFiles,
   seedRuntimeHomeMiseGlobalConfig,
 } from './agent-home';
+import { OPENCODE_IDENTITY_PLUGIN_SCRIPT } from '@roomote/cloud-agents';
+
+describe('createIntegrationMcpInstructions', () => {
+  it.each(['gbrain', 'supermemory'])(
+    'injects shared memory lifecycle guidance for %s',
+    (name) => {
+      const instructions = createIntegrationMcpInstructions([
+        { type: 'remote', name, url: 'https://example.com/mcp' },
+      ]);
+
+      expect(instructions).toContain(
+        'before any other context or work tool call',
+      );
+      expect(instructions).toContain(
+        'At task completion, proactively save concise durable learnings',
+      );
+    },
+  );
+
+  it('does not infer memory guidance from a custom server name', () => {
+    expect(
+      createIntegrationMcpInstructions([
+        {
+          type: 'remote',
+          name: 'team-memory',
+          url: 'https://example.com/mcp',
+        },
+      ]),
+    ).toBeUndefined();
+  });
+
+  it('keeps ordinary integration guidance provider-specific', () => {
+    const instructions = createIntegrationMcpInstructions([
+      {
+        type: 'remote',
+        name: 'notion',
+        url: 'https://example.com/mcp',
+      },
+    ]);
+
+    expect(instructions).toContain('# Connected integration: Notion');
+    expect(instructions).not.toContain(
+      'before any other context or work tool call',
+    );
+  });
+
+  it('assigns the initial recall to only the first installed memory server', () => {
+    const instructions = createIntegrationMcpInstructions([
+      { type: 'remote', name: 'gbrain', url: 'https://example.com/brain' },
+      {
+        type: 'remote',
+        name: 'supermemory',
+        url: 'https://example.com/supermemory',
+      },
+    ]);
+
+    expect(
+      instructions?.match(/first normal context or work tool call/g),
+    ).toHaveLength(1);
+    expect(instructions).toContain(
+      'Another installed memory server owns the required initial recall',
+    );
+    expect(instructions).toContain(
+      'Treat Brain recall as a sequential preflight',
+    );
+    expect(instructions).toContain('save_task_memory');
+  });
+
+  it('does not inject Brain guidance when gbrain is a secondary memory server', () => {
+    const instructions = createIntegrationMcpInstructions([
+      {
+        type: 'remote',
+        name: 'supermemory',
+        url: 'https://example.com/supermemory',
+      },
+      { type: 'remote', name: 'gbrain', url: 'https://example.com/brain' },
+    ]);
+
+    expect(instructions).not.toContain(
+      'Treat Brain recall as a sequential preflight',
+    );
+    expect(instructions).not.toContain('save_task_memory');
+  });
+});
 
 describe('generateOpenCodeConfig provider support', () => {
   const tempDirs: string[] = [];
@@ -30,6 +113,23 @@ describe('generateOpenCodeConfig provider support', () => {
     tempDirs.push(homeDir);
     return homeDir;
   }
+
+  it('installs the Roomote identity plugin for standard task sessions', () => {
+    const result = generateOpenCodeConfig({
+      homeDir: createHomeDir(),
+      runtimeEnv: {
+        R_MODEL: 'openrouter/openai/gpt-5.6-terra',
+        OPENROUTER_API_KEY: 'openrouter-key',
+      },
+    });
+
+    expect(
+      readFileSync(
+        join(result.openCodeConfigDir, 'plugins', 'roomote-identity.js'),
+        'utf8',
+      ),
+    ).toBe(OPENCODE_IDENTITY_PLUGIN_SCRIPT);
+  });
 
   it('applies the per-task reasoning effort to a launch-time model override', () => {
     const result = generateOpenCodeConfig({
@@ -313,6 +413,25 @@ describe('generateOpenCodeConfig provider support', () => {
       baseURL: 'https://api.example.com/api/inference/openrouter/v1',
       apiKey: '{env:ROOMOTE_CLOUD_TOKEN}',
       headers: expect.objectContaining({}) as Record<string, string>,
+    });
+  });
+
+  it('rebases managed Roomote inference onto its separate gateway route', () => {
+    const result = generateOpenCodeConfig({
+      homeDir: createHomeDir(),
+      runtimeEnv: {
+        R_MODEL: 'roomote/openai/gpt-5.6-luna',
+        R_INFERENCE_GATEWAY_URL: 'https://api.example.com/api/inference',
+        R_INFERENCE_GATEWAY_KEYS: 'R_TRIAL_OPENROUTER_API_KEY',
+      },
+    });
+    const config = JSON.parse(result.configContent) as {
+      provider: { roomote: { options: Record<string, unknown> } };
+    };
+
+    expect(config.provider.roomote.options).toMatchObject({
+      baseURL: 'https://api.example.com/api/inference/roomote/v1',
+      apiKey: '{env:ROOMOTE_CLOUD_TOKEN}',
     });
   });
 
@@ -608,7 +727,7 @@ describe('generateOpenCodeConfig provider support', () => {
     });
   });
 
-  it('leaves the openai provider alone when a ChatGPT subscription is present', () => {
+  it('does not let legacy direct OAuth content bypass gateway rebasing', () => {
     const result = generateOpenCodeConfig({
       homeDir: createHomeDir(),
       runtimeEnv: {
@@ -622,7 +741,12 @@ describe('generateOpenCodeConfig provider support', () => {
       provider: Record<string, unknown>;
     };
 
-    expect(config.provider.openai).toBeUndefined();
+    expect(config.provider.openai).toMatchObject({
+      options: {
+        baseURL: 'https://api.example.com/api/inference/openai/v1',
+        apiKey: '{env:ROOMOTE_CLOUD_TOKEN}',
+      },
+    });
   });
 
   it('does not touch provider base URLs when no gateway URL is present', () => {
@@ -832,6 +956,59 @@ describe('generateOpenCodeConfig provider support', () => {
       coding: { name: 'coding' },
     });
     expect(result.configContent).toContain('litellm');
+  });
+
+  it('writes catalog pricing into custom-provider model config', () => {
+    const runtimeEnv = {
+      R_MODEL: 'roomote/openai/gpt-5.6-luna',
+      R_TRIAL_OPENROUTER_API_KEY: 'sk-or-trial',
+      R_TASK_MODEL_COSTS: JSON.stringify({
+        'roomote/openai/gpt-5.6-luna': { input: 2, output: 10 },
+      }),
+      R_INFERENCE_GATEWAY_URL: 'https://api.example.com/api/inference/',
+    };
+    const result = generateOpenCodeConfig({
+      homeDir: createHomeDir(),
+      runtimeEnv,
+    });
+    const config = JSON.parse(result.configContent) as {
+      provider: Record<
+        string,
+        { models: Record<string, { cost?: Record<string, number> }> }
+      >;
+    };
+
+    expect(
+      config.provider.roomote?.models['openai/gpt-5.6-luna']?.cost,
+    ).toEqual({ input: 2, output: 10 });
+    expect(runtimeEnv).not.toHaveProperty('R_TASK_MODEL_COSTS');
+  });
+
+  it('creates a model entry for a price-only switchable model', () => {
+    // Known by pricing alone (no context-window metadata): the entry must
+    // still be generated so the cost block lands.
+    const runtimeEnv = {
+      R_MODEL: 'roomote/openai/gpt-5.6-luna',
+      R_TRIAL_OPENROUTER_API_KEY: 'sk-or-trial',
+      R_TASK_MODEL_COSTS: JSON.stringify({
+        'roomote/openai/gpt-5.6-terra': { input: 4, output: 16 },
+      }),
+      R_INFERENCE_GATEWAY_URL: 'https://api.example.com/api/inference/',
+    };
+    const result = generateOpenCodeConfig({
+      homeDir: createHomeDir(),
+      runtimeEnv,
+    });
+    const config = JSON.parse(result.configContent) as {
+      provider: Record<
+        string,
+        { models: Record<string, { cost?: Record<string, number> }> }
+      >;
+    };
+
+    expect(
+      config.provider.roomote?.models['openai/gpt-5.6-terra']?.cost,
+    ).toEqual({ input: 4, output: 16 });
   });
 
   it('configures trusted LiteLLM context limits for proactive compaction', () => {
@@ -1091,102 +1268,6 @@ describe('generateOpenCodeConfig provider support', () => {
     expect(() => generateOpenCodeConfig({ homeDir, runtimeEnv })).toThrow(
       'Failed to remove disabled Google Vertex credentials before starting OpenCode',
     );
-  });
-});
-
-describe('rematerializeOpenCodeCredentialFiles', () => {
-  const tempDirs: string[] = [];
-
-  afterEach(() => {
-    for (const tempDir of tempDirs.splice(0)) {
-      rmSync(tempDir, { recursive: true, force: true });
-    }
-  });
-
-  function createHomeDir(): string {
-    const homeDir = mkdtempSync(join(tmpdir(), 'roomote-opencode-restore-'));
-    tempDirs.push(homeDir);
-    return homeDir;
-  }
-
-  function createLogger() {
-    return { info: vi.fn(), warn: vi.fn() };
-  }
-
-  it('rewrites the auth file from its env value', () => {
-    const homeDir = createHomeDir();
-    const authJson = JSON.stringify({ openai: { type: 'oauth' } });
-
-    const { failedSteps } = rematerializeOpenCodeCredentialFiles({
-      homeDir,
-      runtimeEnv: {
-        OPENCODE_AUTH_CONTENT: authJson,
-      },
-      logger: createLogger(),
-    });
-
-    expect(failedSteps).toEqual([]);
-
-    const dataDir = join(homeDir, '.local', 'share', 'opencode');
-    expect(readFileSync(join(dataDir, 'auth.json'), 'utf8')).toBe(authJson);
-    expect(statSync(join(dataDir, 'auth.json')).mode & 0o777).toBe(0o600);
-  });
-
-  it('does not rewrite the caller env or write files for absent values', () => {
-    const homeDir = createHomeDir();
-    const runtimeEnv = {};
-
-    const { failedSteps } = rematerializeOpenCodeCredentialFiles({
-      homeDir,
-      runtimeEnv,
-      logger: createLogger(),
-    });
-
-    expect(failedSteps).toEqual([]);
-    expect(
-      existsSync(join(homeDir, '.local', 'share', 'opencode', 'auth.json')),
-    ).toBe(false);
-    expect(runtimeEnv).toEqual({});
-  });
-
-  it('respects the task XDG data dir when rewriting files', () => {
-    const homeDir = createHomeDir();
-    const dataHome = join(homeDir, 'xdg-data');
-    const authJson = JSON.stringify({ openai: { type: 'oauth' } });
-
-    const { failedSteps } = rematerializeOpenCodeCredentialFiles({
-      homeDir,
-      runtimeEnv: {
-        XDG_DATA_HOME: dataHome,
-        OPENCODE_AUTH_CONTENT: authJson,
-      },
-      logger: createLogger(),
-    });
-
-    expect(failedSteps).toEqual([]);
-    expect(readFileSync(join(dataHome, 'opencode', 'auth.json'), 'utf8')).toBe(
-      authJson,
-    );
-  });
-
-  it('reports failed steps instead of throwing on write failures', () => {
-    const homeDir = createHomeDir();
-    // Occupy the data-dir path with a file so mkdir fails.
-    const dataParent = join(homeDir, '.local', 'share');
-    mkdirSync(dataParent, { recursive: true });
-    writeFileSync(join(dataParent, 'opencode'), 'not a directory');
-
-    const logger = createLogger();
-    const { failedSteps } = rematerializeOpenCodeCredentialFiles({
-      homeDir,
-      runtimeEnv: {
-        OPENCODE_AUTH_CONTENT: '{}',
-      },
-      logger,
-    });
-
-    expect(failedSteps).toEqual(['rewrite OpenCode auth file']);
-    expect(logger.warn).toHaveBeenCalledTimes(1);
   });
 });
 

@@ -1,71 +1,26 @@
 'use client';
 
+import { useCallback, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 
-import {
-  AnalyticsSummaryCard,
-  AnalyticsSummaryCardsGrid,
-  AnalyticsSummaryCardSkeleton,
-  ErrorState,
-  Skeleton,
-} from '@/components/system';
-import { formatDistanceToNowCompact, formatNumber } from '@/lib/formatters';
+import { ErrorState, Skeleton } from '@/components/system';
 import { useTRPC } from '@/trpc/client';
 
-import type { BrainSettings as BrainSettingsData } from '@/trpc/commands/brain';
-import { BrainConfigurationSection } from './BrainConfigurationSection';
 import { BrainCorpusSection } from './BrainCorpusSection';
+import { BrainBrowseSection } from './BrainBrowseSection';
+import { BrainEnableSection } from './BrainEnableSection';
+import { BrainMemoryIssuesSection } from './BrainMemoryIssuesSection';
 import { BrainSourcesSection } from './BrainSourcesSection';
 import { BrainStatusSection } from './BrainStatusSection';
-import { BrainTaskMemorySection } from './BrainTaskMemorySection';
-
-function SummaryTiles({ settings }: { settings: BrainSettingsData }) {
-  const recorded = settings.taskMemories.byStatus.done;
-
-  return (
-    <AnalyticsSummaryCardsGrid className="md:grid-cols-2">
-      <AnalyticsSummaryCard
-        label="Pages stored"
-        value={
-          settings.corpus.totalPages !== null
-            ? formatNumber(settings.corpus.totalPages)
-            : settings.corpus.reachable
-              ? formatNumber(settings.corpus.listedPages)
-              : 'Unknown'
-        }
-        secondary={
-          settings.corpus.totalPages !== null
-            ? 'in the corpus'
-            : 'in the corpus'
-        }
-      />
-      <AnalyticsSummaryCard
-        label="Task memories"
-        value={formatNumber(recorded)}
-        secondary={
-          settings.taskMemories.lastProcessedAt
-            ? `last processed ${formatDistanceToNowCompact(
-                settings.taskMemories.lastProcessedAt,
-                { addSuffix: true },
-              )}`
-            : 'none recorded yet'
-        }
-      />
-    </AnalyticsSummaryCardsGrid>
-  );
-}
 
 function BrainSettingsSkeleton() {
   return (
     <div className="space-y-6">
-      <AnalyticsSummaryCardsGrid className="md:grid-cols-2">
-        {Array.from({ length: 2 }).map((_, index) => (
-          <AnalyticsSummaryCardSkeleton key={index} />
-        ))}
-      </AnalyticsSummaryCardsGrid>
-      <Skeleton className="h-40 w-full" />
       <Skeleton className="h-56 w-full" />
       <Skeleton className="h-80 w-full" />
+      <Skeleton className="h-56 w-full" />
+      <Skeleton className="h-40 w-full" />
       <Skeleton className="h-56 w-full" />
     </div>
   );
@@ -73,14 +28,56 @@ function BrainSettingsSkeleton() {
 
 export function BrainSettings() {
   const trpc = useTRPC();
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
   const { data, isPending, isError } = useQuery(trpc.brain.get.queryOptions());
+  const selectedSlug = searchParams.get('memory');
+  const [namespaceId, setNamespaceId] = useState<string | null>(null);
+  const selectMemory = useCallback(
+    (slug: string | null) => {
+      const params = new URLSearchParams(searchParams);
+      if (slug) {
+        params.set('memory', slug);
+      } else {
+        params.delete('memory');
+      }
+      const query = params.toString();
+      router.replace(query ? `${pathname}?${query}` : pathname, {
+        scroll: false,
+      });
+    },
+    [pathname, router, searchParams],
+  );
+  const selectNamespace = useCallback(
+    (nextNamespaceId: string | null) => {
+      setNamespaceId(nextNamespaceId);
+      if (selectedSlug) {
+        selectMemory(null);
+      }
+    },
+    [selectMemory, selectedSlug],
+  );
 
   if (isPending) {
     return <BrainSettingsSkeleton />;
   }
 
   if (isError) {
-    return <ErrorState title="Failed to load the Brain" />;
+    return <ErrorState title="Failed to load Memory" />;
+  }
+
+  /*
+   * A disabled Brain has nothing worth reading: the toggle plus its short
+   * explanation is the whole page, because rendering empty stats and status
+   * sections would read as breakage rather than as an off switch.
+   */
+  if (!data.enabled) {
+    return (
+      <div className="space-y-6">
+        <BrainEnableSection settings={data} />
+      </div>
+    );
   }
 
   /*
@@ -94,6 +91,7 @@ export function BrainSettings() {
   if (data.status === 'not_configured' || !data.url) {
     return (
       <div className="space-y-6">
+        <BrainEnableSection settings={data} />
         <BrainStatusSection settings={data} />
       </div>
     );
@@ -101,12 +99,21 @@ export function BrainSettings() {
 
   return (
     <div className="space-y-6">
-      <SummaryTiles settings={data} />
+      <BrainEnableSection settings={data} />
+      <BrainMemoryIssuesSection taskMemories={data.taskMemories} />
+      <BrainCorpusSection
+        corpus={data.corpus}
+        onSelectNamespace={selectNamespace}
+      />
+      <BrainBrowseSection
+        corpus={data.corpus}
+        namespaceId={namespaceId}
+        selectedSlug={selectedSlug}
+        onSelectNamespace={selectNamespace}
+        onSelectMemory={selectMemory}
+      />
       <BrainStatusSection settings={data} />
-      <BrainConfigurationSection settings={data} />
       <BrainSourcesSection sources={data.sources} />
-      <BrainCorpusSection corpus={data.corpus} />
-      <BrainTaskMemorySection taskMemories={data.taskMemories} />
     </div>
   );
 }

@@ -5,6 +5,7 @@ import * as path from 'node:path';
 import {
   createRoomoteAdvisorAgentPrompt,
   createRoomoteJudgeAgentPrompt,
+  OPENCODE_IDENTITY_PLUGIN_SCRIPT,
   ROOMOTE_OPENCODE_ADVISOR_AGENT_DESCRIPTION,
   ROOMOTE_OPENCODE_ADVISOR_AGENT_NAME,
   ROOMOTE_OPENCODE_JUDGE_AGENT_DESCRIPTION,
@@ -24,9 +25,9 @@ import {
   DISABLED_MODEL_PROVIDER_ENV_VAR_NAMES,
   getInferenceGatewayProvider,
   getInferenceGatewayProviderByEnvVarName,
-  BRAIN_MCP_ID,
-  BRAIN_MCP_INSTRUCTIONS,
+  createMemoryMcpInstructions,
   getMcpIntegration,
+  getMemoryMcpDisplayName,
   getOpenAiCompatibleRuntimeConfigs,
   INFERENCE_GATEWAY_CHATGPT_ENV_VAR_NAME,
   INFERENCE_GATEWAY_GITHUB_COPILOT_ENV_VAR_NAME,
@@ -36,6 +37,7 @@ import {
   XAI_OPENCODE_PROVIDER_ID,
   type InferenceGatewayProvider,
   isConfiguredEnvValue,
+  isMemoryMcpServer,
   isTaskModelIdDisabled,
   mergeAmazonBedrockProviderConfig,
   mergeBedrockMantleOpenAiProviderConfig,
@@ -47,13 +49,14 @@ import {
   normalizeOptionalReasoningEffort,
   parseInferenceGatewayKeys,
   parseTaskModelContextWindows,
+  parseTaskModelCosts,
   renderManualSkillMarkdown,
   resolveOpenRouterVariantModelAlias,
   toBedrockMantleRuntimeModelId,
   OPENCODE_ARCHITECT_AGENT,
-  OPENCODE_AUTH_CONTENT_ENV_VAR_NAME,
   OPENCODE_GO_API_KEY_ENV_VAR_NAME,
   TASK_MODEL_CONTEXT_WINDOWS_ENV_VAR_NAME,
+  TASK_MODEL_COSTS_ENV_VAR_NAME,
   TaskPayloadKind,
   type EnvironmentManualSkill,
   type OpenRouterVariantModelAlias,
@@ -179,6 +182,8 @@ const ROOMOTE_OPENCODE_CHATGPT_GATEWAY_PLUGIN_FILE_NAME =
   'roomote-chatgpt-gateway.js';
 
 const ROOMOTE_OPENCODE_TOOL_SAFETY_PLUGIN_FILE_NAME = 'roomote-tool-safety.js';
+
+const ROOMOTE_OPENCODE_IDENTITY_PLUGIN_FILE_NAME = 'roomote-identity.js';
 
 const OPENCODE_ALLOW_ALL_PERMISSION = {
   read: 'allow',
@@ -532,14 +537,17 @@ export type OpenCodeConfigMcpServer =
  * attached to the task, that guidance is injected as an instruction file so
  * usage does not depend on tool descriptions alone.
  */
-function createIntegrationMcpInstructions(
+export function createIntegrationMcpInstructions(
   mcpServers: OpenCodeConfigMcpServer[] | undefined,
 ): string | undefined {
+  let hasPrimaryMemory = false;
   const sections = (mcpServers ?? []).flatMap((mcpServer) => {
-    // The Brain is infrastructure rather than a catalog integration, so its
-    // recall-first guidance ships from the shared types contract.
-    if (mcpServer.name === BRAIN_MCP_ID) {
-      return [`# Connected: Brain\n\n${BRAIN_MCP_INSTRUCTIONS}`];
+    if (isMemoryMcpServer(mcpServer.name)) {
+      const primary = !hasPrimaryMemory;
+      hasPrimaryMemory = true;
+      return [
+        `# Connected memory: ${getMemoryMcpDisplayName(mcpServer.name)}\n\n${createMemoryMcpInstructions(mcpServer.name, { primary })}`,
+      ];
     }
 
     const integration = getMcpIntegration(mcpServer.name);
@@ -650,6 +658,10 @@ function writeOpenCodeManagedFiles(openCodeConfigDir: string): void {
     pluginsDir,
     ROOMOTE_OPENCODE_TOOL_SAFETY_PLUGIN_FILE_NAME,
   );
+  const identityPluginPath = path.join(
+    pluginsDir,
+    ROOMOTE_OPENCODE_IDENTITY_PLUGIN_FILE_NAME,
+  );
   const silenceHookPath = path.join(
     openCodeConfigDir,
     ROOMOTE_OPENCODE_SLACK_SILENCE_HOOK_FILE_NAME,
@@ -671,6 +683,7 @@ function writeOpenCodeManagedFiles(openCodeConfigDir: string): void {
     OPENCODE_TOOL_SAFETY_PLUGIN_SCRIPT,
     'utf8',
   );
+  fs.writeFileSync(identityPluginPath, OPENCODE_IDENTITY_PLUGIN_SCRIPT, 'utf8');
   fs.writeFileSync(silenceHookPath, SLACK_SILENCE_HOOK_SCRIPT, 'utf8');
   fs.writeFileSync(stopHookPath, SLACK_STOP_HOOK_SCRIPT, 'utf8');
   fs.chmodSync(silenceHookPath, 0o755);
@@ -729,16 +742,6 @@ function mergeInferenceGatewayProviderConfig(
       !modelIds.some((modelId) =>
         modelId?.trim().startsWith(`${BEDROCK_MANTLE_OPENCODE_PROVIDER_ID}/`),
       )
-    ) {
-      continue;
-    }
-
-    // ChatGPT-subscription OAuth authenticates through opencode's Codex
-    // plugin directly; leave the openai provider on its default base URL
-    // when a subscription record is present in the sandbox (non-gateway mode).
-    if (
-      providerId === CHATGPT_OPENCODE_PROVIDER_ID &&
-      runtimeEnv[OPENCODE_AUTH_CONTENT_ENV_VAR_NAME]
     ) {
       continue;
     }
@@ -1304,6 +1307,10 @@ function resolveModelBackedOpenCodeConfig(
     runtimeEnv[TASK_MODEL_CONTEXT_WINDOWS_ENV_VAR_NAME],
   );
   delete runtimeEnv[TASK_MODEL_CONTEXT_WINDOWS_ENV_VAR_NAME];
+  const modelCosts = parseTaskModelCosts(
+    runtimeEnv[TASK_MODEL_COSTS_ENV_VAR_NAME],
+  );
+  delete runtimeEnv[TASK_MODEL_COSTS_ENV_VAR_NAME];
   const rawModel = applyImplicitLiteLlmModelPrefix(
     runtimeEnv.R_MODEL?.trim() ?? '',
     isLiteLlmConfigured,
@@ -1603,6 +1610,9 @@ function resolveModelBackedOpenCodeConfig(
   const openAiCompatibleModelIds = [
     ...configuredModelIds,
     ...Object.keys(modelContextWindows),
+    // A switchable model may be known only by its pricing; it still needs a
+    // config entry or its cost block is silently dropped.
+    ...Object.keys(modelCosts),
   ];
   const providerModelConfig = chatGptFastMode
     ? mergeOpenCodeChatGptFastModeOptions(
@@ -1625,6 +1635,7 @@ function resolveModelBackedOpenCodeConfig(
                 openAiCompatibleModelIds,
                 visionModel ?? effectiveCodingModel,
                 modelContextWindows,
+                modelCosts,
               ),
               runtimeEnv,
               configuredModelIds,
@@ -1943,10 +1954,9 @@ export function resolveOpenCodeDataDir(
 }
 
 /**
- * Credential files under the OpenCode data dir. The ChatGPT subscription
- * `auth.json` is active only outside gateway mode; the Google service-account
- * path is retained here solely to scrub files left by snapshots created while
- * Vertex was enabled.
+ * Credential files under the OpenCode data dir. These paths are retained
+ * solely to scrub files left by snapshots created before sandbox credentials
+ * moved behind the gateway or while Vertex was enabled.
  */
 export function resolveOpenCodeCredentialFilePaths(
   homeDir: string,
@@ -1958,45 +1968,6 @@ export function resolveOpenCodeCredentialFilePaths(
     path.join(dataDir, OPENCODE_AUTH_FILE_NAME),
     path.join(dataDir, GOOGLE_APPLICATION_CREDENTIALS_FILE_NAME),
   ];
-}
-
-/**
- * Rewrite the OpenCode auth file the pre-snapshot scrub removed, for
- * a sandbox that survived an abandoned snapshot attempt. Normally these files
- * are materialized once during harness bootstrap and OpenCode persists OAuth
- * refreshes back to auth.json, so restoring the same path from the
- * deployment's current env value heals the live harness without a restart.
- */
-export function rematerializeOpenCodeCredentialFiles(options: {
-  homeDir: string;
-  runtimeEnv: Record<string, string>;
-  logger: { info(message: string): void; warn(message: string): void };
-}): { failedSteps: string[] } {
-  const failedSteps: string[] = [];
-  const env = { ...options.runtimeEnv };
-
-  const authContent = env[OPENCODE_AUTH_CONTENT_ENV_VAR_NAME];
-
-  if (authContent) {
-    try {
-      const dataDir = resolveOpenCodeDataDir(options.homeDir, env);
-      fs.mkdirSync(dataDir, { recursive: true, mode: 0o700 });
-      fs.writeFileSync(
-        path.join(dataDir, OPENCODE_AUTH_FILE_NAME),
-        authContent,
-        { encoding: 'utf8', mode: 0o600 },
-      );
-    } catch (error) {
-      options.logger.warn(
-        `[rematerializeOpenCodeCredentialFiles] Failed to rewrite OpenCode auth file: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
-      );
-      failedSteps.push('rewrite OpenCode auth file');
-    }
-  }
-
-  return { failedSteps };
 }
 
 /**

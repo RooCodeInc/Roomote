@@ -67,7 +67,11 @@ When you save Telegram credentials in Roomote, the webhook is registered
 automatically at `<public-url>/api/webhooks/telegram` with the managed secret
 token and `allowed_updates` including `message`, `callback_query`, and
 `message_reaction`. Roomote uses newly added 👍 reactions on suggested-task
-messages to launch the selected task.
+messages to launch the selected task and user-attributed reactions on Roomote
+Fast replies as conversation input. Roomote does not request
+`message_reaction_count`: those aggregate updates do not identify the reacting
+user, so they cannot satisfy Roomote's account and conversation ownership
+checks.
 If the connection check reports a mismatch, delivery error, or stale update
 configuration, use **Repair** in Telegram settings to re-register it.
 
@@ -99,15 +103,33 @@ up on tasks on their behalf.
 ## Verify setup
 
 1. send a direct message to the bot, or mention the bot in a group
-2. confirm Roomote starts a task and posts a Telegram reply with the task link
-3. confirm a new task opens in its own topic when Threaded Mode is enabled
-4. when an environment confirmation appears, answer it with a button or a
+2. confirm Roomote answers in Fast and includes a web continuation link
+3. reply to the Fast answer, or reply in the same Fast-owned topic, and confirm
+   the same Fast session continues
+4. use `/new <request>` and confirm a fresh task opens in its own topic when
+   Threaded Mode is enabled
+5. when an environment confirmation appears, answer it with a button or a
    natural reply
-5. reply in the task topic to send a follow-up
+6. reply in the task topic to send a follow-up
 
-Photos are passed to the task as image input. Supported text documents are
-downloaded server-side and their extracted content is added to the request;
-the bot token is never included in the task prompt or attachment URL.
+Ordinary messages from linked users start in Fast in private chats and from bot
+mentions in groups. A Fast-owned topic can continue without another mention,
+and a direct reply to a Fast message resumes the bound session even when the
+chat has no topics. Sessions are isolated by linked Roomote user. `/new` remains
+an explicit fresh-task command: it bypasses Fast and snapshot resume so the
+request starts a normal task, creating a topic when Telegram supports it.
+
+Existing task-only chats and topics keep their active-task,
+`request_user_input`, routing-confirmation, and resumable-snapshot behavior. If
+Fast cannot initialize a new session, Roomote safely falls back to that existing
+task router. Fast automation reports can target a Telegram chat, topic, or owner
+direct message; replies continue the report's Fast session, and its footer opens
+the same session in the web app.
+
+Photos are passed to Fast or the task as image input. Supported text documents
+are downloaded server-side and their extracted content is added to the request;
+voice and audio messages are transcribed when supported. The bot token is never
+included in the prompt or attachment URL.
 
 ## Local URL changes
 

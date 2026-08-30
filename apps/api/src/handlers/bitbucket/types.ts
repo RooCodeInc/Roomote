@@ -156,6 +156,58 @@ export type BitbucketCommitStatusWebhook = z.infer<
   typeof bitbucketCommitStatusWebhookSchema
 >;
 
+const bitbucketPushCommitSchema = z
+  .object({
+    hash: z.string(),
+    message: z.string(),
+    links: z
+      .object({ html: bitbucketHtmlLinkSchema.optional() })
+      .passthrough()
+      .optional(),
+    author: z
+      .object({
+        raw: z.string().optional(),
+        user: bitbucketUserSchema.optional(),
+      })
+      .passthrough()
+      .optional(),
+  })
+  .passthrough();
+
+const bitbucketPushRefSchema = z
+  .object({
+    name: z.string(),
+    type: z.string().optional(),
+  })
+  .passthrough();
+
+export const bitbucketPushWebhookSchema = z
+  .object({
+    repository: bitbucketRepositorySchema,
+    actor: bitbucketUserSchema.optional(),
+    push: z
+      .object({
+        changes: z.array(
+          z
+            .object({
+              old: bitbucketPushRefSchema.nullable().optional(),
+              new: bitbucketPushRefSchema.nullable().optional(),
+              closed: z.boolean().optional(),
+              commits: z.array(bitbucketPushCommitSchema).optional(),
+              links: z
+                .object({ html: bitbucketHtmlLinkSchema.optional() })
+                .passthrough()
+                .optional(),
+            })
+            .passthrough(),
+        ),
+      })
+      .passthrough(),
+  })
+  .passthrough();
+
+export type BitbucketPushWebhook = z.infer<typeof bitbucketPushWebhookSchema>;
+
 export function getBitbucketPullRequestNumber(
   pullRequest: BitbucketPullRequestWebhook['pullrequest'],
 ): number {

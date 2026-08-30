@@ -5,7 +5,6 @@ import {
   isCustomMcpDisabled,
 } from '@roomote/env';
 import {
-  getMcpIntegrationConnectionScope,
   isCredentialOnlyMcpIntegration,
   isNativeMcpIntegration,
   MCP_INTEGRATIONS,
@@ -88,8 +87,11 @@ for (const integration of MCP_INTEGRATIONS.filter(
     `/${integration.id}`,
     createIntegrationMcpProxy(integration, {
       ...getIntegrationMcpProxyOptions(integration),
-      allowAuthTokens:
-        getMcpIntegrationConnectionScope(integration) === 'deployment',
+      // Fast turns authenticate with the acting user's auth token. Credential
+      // resolution is actor-scoped either way: deployment-scoped integrations
+      // use the org-wide connection, and user-scoped integrations only ever
+      // resolve the token holder's own connection.
+      allowAuthTokens: true,
     }),
   );
 }

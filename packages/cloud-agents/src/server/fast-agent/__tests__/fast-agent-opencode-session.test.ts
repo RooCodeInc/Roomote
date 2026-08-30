@@ -210,4 +210,112 @@ describe('FastAgentOpenCodeSessionManager', () => {
     await run('a', 'a3');
     expect(prompts.at(-1)).toBe('bootstrap a3');
   });
+
+  it('keeps sessions across the OpenCode server idle timeout by default', async () => {
+    let now = 0;
+    const manager = new FastAgentOpenCodeSessionManager({ now: () => now });
+    const prompts: string[] = [];
+    const execute = vi.fn(async (session, prompt: string) => {
+      prompts.push(prompt);
+      session.id ??= 'session-1';
+    });
+    const run = () =>
+      manager.run({
+        conversationId: 'conversation-1',
+        prompt: 'delta',
+        bootstrapPrompt: 'bootstrap',
+        execute,
+      });
+
+    await run();
+    now = 10 * 60_000;
+    await run();
+
+    expect(prompts).toEqual(['bootstrap', 'delta']);
+  });
+
+  it('cleans conversation spills on invalidation, eviction, and clear', async () => {
+    let now = 0;
+    const onConversationEnd = vi.fn();
+    const manager = new FastAgentOpenCodeSessionManager({
+      idleTtlMs: 10,
+      maxEntries: 1,
+      now: () => now,
+      onConversationEnd,
+    });
+    const execute = vi.fn(async (session) => {
+      session.id ??= 'session';
+    });
+    const run = (conversationId: string) =>
+      manager.run({
+        conversationId,
+        prompt: 'delta',
+        bootstrapPrompt: 'bootstrap',
+        execute,
+      });
+
+    await run('invalidated');
+    manager.invalidate('invalidated');
+    expect(onConversationEnd).toHaveBeenCalledWith('invalidated');
+
+    await run('evicted-a');
+    await run('evicted-b');
+    expect(onConversationEnd).toHaveBeenCalledWith('evicted-a');
+
+    now = 20;
+    await run('after-idle');
+    expect(onConversationEnd).toHaveBeenCalledWith('evicted-b');
+
+    manager.clear();
+    expect(onConversationEnd).toHaveBeenCalledWith('after-idle');
+  });
+
+  it('validates and resumes a durable session on matching storage', async () => {
+    const manager = new FastAgentOpenCodeSessionManager();
+    const execute = vi.fn(async (session, prompt, context) => ({
+      sessionId: session.id,
+      prompt,
+      context,
+    }));
+
+    await expect(
+      manager.run({
+        conversationId: 'durable',
+        persistedSessionId: 'persisted-session',
+        prompt: 'delta',
+        bootstrapPrompt: 'compatibility history',
+        execute,
+      }),
+    ).resolves.toEqual({
+      sessionId: 'persisted-session',
+      prompt: 'delta',
+      context: { path: 'cold_resume', validateSession: true },
+    });
+  });
+
+  it('falls back before prompting when durable validation fails', async () => {
+    const manager = new FastAgentOpenCodeSessionManager();
+    const execute = vi
+      .fn()
+      .mockRejectedValueOnce(new NonTaskOpenCodeSessionNotFoundError())
+      .mockImplementationOnce(async (session, prompt, context) => ({
+        sessionId: session.id,
+        prompt,
+        context,
+      }));
+
+    await expect(
+      manager.run({
+        conversationId: 'missing',
+        persistedSessionId: 'missing-session',
+        prompt: 'delta',
+        bootstrapPrompt: 'compatibility history',
+        execute,
+      }),
+    ).resolves.toEqual({
+      sessionId: undefined,
+      prompt: 'compatibility history',
+      context: { path: 'fallback_rebuild', validateSession: false },
+    });
+  });
 });

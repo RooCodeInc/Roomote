@@ -35,6 +35,10 @@ vi.mock('@roomote/auth', () => ({
 
 vi.mock('@roomote/github', () => ({
   getOctokit: (...args: unknown[]) => mockGetOctokit(...args),
+  Schemas: {
+    isManagedRoomoteGitHubLogin: (login: string) =>
+      login.toLowerCase() === 'roomote[bot]',
+  },
 }));
 
 vi.mock('@roomote/gitlab', () => ({
@@ -433,6 +437,199 @@ describe('writeSourceControlPullRequestForTaskRun', () => {
       applied: true,
       warnings: [],
     });
+  });
+
+  it('maps an explicit GitHub change-request review to REQUEST_CHANGES', async () => {
+    mockRepositoriesFindFirst.mockResolvedValue({
+      installationId: 'installation-1',
+      externalRepoId: null,
+      fullName: 'acme/backend',
+      htmlUrl: 'https://github.com/acme/backend',
+    });
+    mockCreateGitHubToken.mockResolvedValue('github-token');
+    const createReview = vi.fn().mockResolvedValue({
+      data: {
+        id: 900,
+        html_url:
+          'https://github.com/acme/backend/pull/55#pullrequestreview-900',
+      },
+    });
+    mockGetOctokit.mockReturnValue({
+      rest: { pulls: { createReview } },
+    });
+
+    await writeSourceControlPullRequestForTaskRun({
+      taskRun: makeTaskRun({
+        repo: 'acme/backend',
+        sourceControlProvider: 'github',
+      }),
+      input: {
+        action: 'submit_pull_request_review',
+        repositoryFullName: 'acme/backend',
+        prNumber: 55,
+        reviewEvent: 'request_changes',
+        body: 'Please address the findings.',
+        sourceControlProvider: 'github',
+      },
+    });
+
+    expect(createReview).toHaveBeenCalledWith({
+      owner: 'acme',
+      repo: 'backend',
+      pull_number: 55,
+      event: 'REQUEST_CHANGES',
+      body: 'Please address the findings.',
+    });
+  });
+
+  it('dismisses a GitHub change-request review through the installation token', async () => {
+    mockRepositoriesFindFirst.mockResolvedValue({
+      installationId: 'installation-1',
+      externalRepoId: null,
+      fullName: 'acme/backend',
+      htmlUrl: 'https://github.com/acme/backend',
+    });
+    mockCreateGitHubToken.mockResolvedValue('github-token');
+    const getReview = vi.fn().mockResolvedValue({
+      data: {
+        id: 901,
+        state: 'CHANGES_REQUESTED',
+        user: { login: 'ROOMOTE[BOT]' },
+      },
+    });
+    const dismissReview = vi.fn().mockResolvedValue({
+      data: {
+        id: 901,
+        html_url:
+          'https://github.com/acme/backend/pull/55#pullrequestreview-901',
+      },
+    });
+    mockGetOctokit.mockReturnValue({
+      rest: { pulls: { dismissReview, getReview } },
+    });
+
+    const result = await writeSourceControlPullRequestForTaskRun({
+      taskRun: makeTaskRun({
+        repo: 'acme/backend',
+        sourceControlProvider: 'github',
+      }),
+      input: {
+        action: 'dismiss_pull_request_review',
+        repositoryFullName: 'acme/backend',
+        prNumber: 55,
+        reviewId: '901',
+        body: 'Requested changes have been addressed.',
+        sourceControlProvider: 'github',
+      },
+    });
+
+    expect(getReview).toHaveBeenCalledWith({
+      owner: 'acme',
+      repo: 'backend',
+      pull_number: 55,
+      review_id: 901,
+    });
+    expect(dismissReview).toHaveBeenCalledWith({
+      owner: 'acme',
+      repo: 'backend',
+      pull_number: 55,
+      review_id: 901,
+      message: 'Requested changes have been addressed.',
+    });
+    expect(result).toMatchObject({
+      success: true,
+      action: 'dismiss_pull_request_review',
+      provider: 'github',
+      number: 55,
+      commentId: '901',
+      applied: true,
+      warnings: [],
+    });
+  });
+
+  it.each(['alice', 'dependabot[bot]'])(
+    'rejects dismissal of another author review from %s',
+    async (authorLogin) => {
+      mockRepositoriesFindFirst.mockResolvedValue({
+        installationId: 'installation-1',
+        externalRepoId: null,
+        fullName: 'acme/backend',
+        htmlUrl: 'https://github.com/acme/backend',
+      });
+      mockCreateGitHubToken.mockResolvedValue('github-token');
+      const getReview = vi.fn().mockResolvedValue({
+        data: {
+          id: 901,
+          state: 'CHANGES_REQUESTED',
+          user: { login: authorLogin },
+        },
+      });
+      const dismissReview = vi.fn();
+      mockGetOctokit.mockReturnValue({
+        rest: { pulls: { dismissReview, getReview } },
+      });
+
+      await expect(
+        writeSourceControlPullRequestForTaskRun({
+          taskRun: makeTaskRun({
+            repo: 'acme/backend',
+            sourceControlProvider: 'github',
+          }),
+          input: {
+            action: 'dismiss_pull_request_review',
+            repositoryFullName: 'acme/backend',
+            prNumber: 55,
+            reviewId: '901',
+            body: 'Requested changes have been addressed.',
+            sourceControlProvider: 'github',
+          },
+        }),
+      ).rejects.toThrow(
+        'GitHub review 901 is not a Roomote-authored CHANGES_REQUESTED review.',
+      );
+      expect(dismissReview).not.toHaveBeenCalled();
+    },
+  );
+
+  it('rejects dismissal of a non-change-request review', async () => {
+    mockRepositoriesFindFirst.mockResolvedValue({
+      installationId: 'installation-1',
+      externalRepoId: null,
+      fullName: 'acme/backend',
+      htmlUrl: 'https://github.com/acme/backend',
+    });
+    mockCreateGitHubToken.mockResolvedValue('github-token');
+    const getReview = vi.fn().mockResolvedValue({
+      data: {
+        id: 901,
+        state: 'APPROVED',
+        user: { login: 'roomote[bot]' },
+      },
+    });
+    const dismissReview = vi.fn();
+    mockGetOctokit.mockReturnValue({
+      rest: { pulls: { dismissReview, getReview } },
+    });
+
+    await expect(
+      writeSourceControlPullRequestForTaskRun({
+        taskRun: makeTaskRun({
+          repo: 'acme/backend',
+          sourceControlProvider: 'github',
+        }),
+        input: {
+          action: 'dismiss_pull_request_review',
+          repositoryFullName: 'acme/backend',
+          prNumber: 55,
+          reviewId: '901',
+          body: 'Requested changes have been addressed.',
+          sourceControlProvider: 'github',
+        },
+      }),
+    ).rejects.toThrow(
+      'GitHub review 901 is not a Roomote-authored CHANGES_REQUESTED review.',
+    );
+    expect(dismissReview).not.toHaveBeenCalled();
   });
 
   it('updates a GitLab note in place through the notes endpoint', async () => {

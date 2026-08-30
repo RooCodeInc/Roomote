@@ -90,6 +90,29 @@ describe('background automation registry', () => {
     ]);
   });
 
+  it('registers provider usage alerts as a cross-provider deterministic automation', () => {
+    const descriptor = getTriggerableBackgroundAutomationDescriptorByKey(
+      'provider_usage_limit',
+    );
+
+    expect(descriptor).toMatchObject({
+      label: 'Inference Provider Usage Alerts',
+      slackIcon: 'battery-warning',
+      scheduleModes: ['off', 'every_hour'],
+      usesManagerChannel: true,
+      supportedCommunicationProviders: [
+        'slack',
+        'teams',
+        'telegram',
+        'discord',
+      ],
+      supportedSourceControlProviders: [],
+    });
+    expect(
+      getTriggerableBackgroundAutomationSettingsHash('provider_usage_limit'),
+    ).toBe('provider-usage-limit');
+  });
+
   it('allows Teams, Telegram, and Discord destinations for CI failure triage Run now', () => {
     const descriptor =
       getTriggerableBackgroundAutomationDescriptorByKey('ci_failure_triage');
@@ -119,6 +142,34 @@ describe('background automation registry', () => {
       'gitlab',
       'gitea',
     ]);
+  });
+
+  it('registers Merge announcer as a provider-neutral push automation with cross-provider delivery', () => {
+    const descriptor =
+      getTriggerableBackgroundAutomationDescriptorByKey('merge_announcer');
+
+    expect(descriptor).toMatchObject({
+      label: 'Merge announcer',
+      slackIcon: 'git-commit-vertical',
+      scheduleModes: ['off', 'daily'],
+      usesManagerChannel: true,
+      supportedCommunicationProviders: [
+        'slack',
+        'teams',
+        'telegram',
+        'discord',
+      ],
+      supportedSourceControlProviders: [
+        'github',
+        'gitlab',
+        'gitea',
+        'ado',
+        'bitbucket',
+      ],
+    });
+    expect(
+      getTriggerableBackgroundAutomationSettingsHash('merge_announcer'),
+    ).toBe('merge-announcer');
   });
 
   it('supports Gitea conflict scans alongside GitHub, GitLab, and Azure DevOps', () => {

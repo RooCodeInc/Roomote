@@ -26,5 +26,7 @@ export * from './set-task-harness-session-id';
 export * from './slack-pr-inactivity-check';
 export * from './pr-review-notification';
 export * from './pr-review-notification-delivery';
+export * from './pull-request-mergeability-check';
+export * from './notify-fast-agent-parent-on-pull-request-conflict';
 export * from './conflict-resolution-comments';
 export * from './get-resolved-git-author';

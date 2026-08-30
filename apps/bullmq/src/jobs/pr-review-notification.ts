@@ -2,7 +2,6 @@ import { randomUUID } from 'node:crypto';
 
 import { Job } from 'bullmq';
 
-import type { CommunicationPostMessageInput } from '@roomote/communication';
 import {
   and,
   db,
@@ -16,19 +15,29 @@ import {
   PR_REVIEW_NOTIFICATION_DEFER_MS,
   PR_REVIEW_NOTIFICATION_MAX_DEFERRALS,
   PrReviewNotificationRateLimitError,
-  attachPendingPrReviewActionMessage,
+  attachPendingPrReviewActionMessageWithRetirement,
+  beginCanonicalPrReviewAutoDispatch,
+  beginCanonicalPrReviewPrompt,
+  beginCanonicalPrReviewWebAutoDispatch,
+  beginCanonicalPrReviewWebPrompt,
+  buildPrReviewNotificationPostInput,
   createPrReviewNotificationTelemetry,
   getCommunicationProviderAdapter,
   type PrReviewNotificationRequest,
   type PrReviewNotificationRoute,
   consumePendingPrReviewActivity,
+  completeCanonicalPrReviewAutoDispatch,
   dispatchPrReviewFollowUp,
+  findAutoHandlePrReviewFeedbackPreference,
   finalizePrReviewNotificationRequest,
   isDurablePrReviewNotificationRequest,
   renewPrReviewNotificationRequestLease,
+  releaseCanonicalPrReviewWebAutoDispatch,
+  retirePrReviewActionMessagesBestEffort,
   migrateLegacyPrReviewNotificationRequest,
   notifyFastAgentParentOnPrFeedback,
   preparePrReviewNotificationDelivery,
+  prepareCanonicalPrReviewNotificationRequest,
   prReviewNotificationRequestSchema,
   recordPrReviewNotificationDeliveryBestEffort,
   requeuePendingPrReviewActivity,
@@ -42,11 +51,49 @@ import {
 } from '@roomote/slack';
 import {
   buildPrReviewActionCallbackData,
+  PR_REVIEW_ACTION_LABELS,
   isTaskExecutingTurn,
+  getFastAgentParentFromPayload,
   WORKER_HEARTBEAT_STALE_MS,
 } from '@roomote/types';
 
 type PrReviewNotificationJob = Job<PrReviewNotificationRequest, void, string>;
+
+function isLiveTaskTurn(run: typeof taskRuns.$inferSelect): boolean {
+  if (!isTaskExecutingTurn(run.status, run.taskPhase)) {
+    return false;
+  }
+
+  return !(
+    run.workerHeartbeatAt != null &&
+    Date.now() - run.workerHeartbeatAt.getTime() >= WORKER_HEARTBEAT_STALE_MS
+  );
+}
+
+function findTaskPullRequestForNotification(data: PrReviewNotificationRequest) {
+  return db.query.taskPullRequests.findFirst({
+    where: and(
+      eq(taskPullRequests.taskId, data.taskId),
+      eq(
+        taskPullRequests.sourceControlProvider,
+        data.sourceControlProvider ?? 'github',
+      ),
+      eq(taskPullRequests.repository, data.repository),
+      eq(taskPullRequests.prNumber, data.prNumber),
+    ),
+    columns: {
+      sourceControlProvider: true,
+      host: true,
+      repository: true,
+      prNumber: true,
+      prTitle: true,
+      prUrl: true,
+      status: true,
+      repositoryId: true,
+      autoHandleFeedbackByUserId: true,
+    },
+  });
+}
 
 function logPrReviewNotificationTriage(input: {
   data: PrReviewNotificationRequest;
@@ -80,43 +127,6 @@ function logPrReviewNotificationTriage(input: {
   );
 }
 
-function buildPrReviewNotificationPostInput(
-  route: PrReviewNotificationRoute,
-  text: string,
-): CommunicationPostMessageInput {
-  switch (route.provider) {
-    case 'slack':
-      return {
-        channelId: route.channelId,
-        threadId: route.threadId,
-        text,
-      };
-    case 'teams':
-      return {
-        channelId: route.channelId,
-        serviceUrl: route.serviceUrl,
-        ...(route.threadId
-          ? { threadId: route.threadId, replyToMessageId: route.threadId }
-          : {}),
-        text,
-        textFormat: 'markdown',
-      };
-    case 'telegram':
-      return {
-        channelId: route.channelId,
-        ...(route.threadId ? { threadId: route.threadId } : {}),
-        text,
-      };
-    case 'discord':
-      return {
-        channelId: route.channelId,
-        ...(route.threadId ? { threadId: route.threadId } : {}),
-        text,
-        textFormat: 'markdown',
-      };
-  }
-}
-
 type PrReviewNotificationAction = {
   /** Summary text in the route provider's link syntax, without the question. */
   summaryText: string;
@@ -129,6 +139,10 @@ type PrReviewNotificationAction = {
 
 const BUTTON_ROUTE_PROVIDERS = ['slack', 'discord', 'telegram'] as const;
 type ButtonRouteProvider = (typeof BUTTON_ROUTE_PROVIDERS)[number];
+type ButtonPrReviewNotificationRoute = Extract<
+  PrReviewNotificationRoute,
+  { provider: ButtonRouteProvider }
+>;
 
 function isButtonRouteProvider(
   provider: PrReviewNotificationRoute['provider'],
@@ -138,8 +152,67 @@ function isButtonRouteProvider(
 
 function isButtonRoute(
   route: PrReviewNotificationRoute,
-): route is PrReviewNotificationRoute & { provider: ButtonRouteProvider } {
+): route is ButtonPrReviewNotificationRoute {
   return isButtonRouteProvider(route.provider);
+}
+
+function getFastParentButtonRoute(
+  payload: unknown,
+): ButtonPrReviewNotificationRoute | null {
+  const parent = getFastAgentParentFromPayload(payload);
+  if (
+    !parent ||
+    parent.conversation.surface === 'automation' ||
+    parent.conversation.surface === 'web'
+  ) {
+    return null;
+  }
+
+  const conversation = parent.conversation;
+  if (conversation.surface === 'slack') {
+    return {
+      provider: 'slack',
+      slackTeamId: conversation.workspaceId,
+      channelId: conversation.replyTarget.channelId,
+      threadId: conversation.replyTarget.threadId,
+    };
+  }
+
+  // Teams and Telegram can receive the Fast parent event itself, but the PR
+  // action-button renderer does not yet have provider-native callbacks there.
+  if (conversation.surface !== 'discord') {
+    return null;
+  }
+
+  return {
+    provider: 'discord',
+    channelId: conversation.replyTarget.channelId,
+    threadId: conversation.replyTarget.threadId ?? null,
+  };
+}
+
+function getPersistedButtonRoute(
+  data: PrReviewNotificationRequest,
+): ButtonPrReviewNotificationRoute | null {
+  if (!data.routeProvider || !isButtonRouteProvider(data.routeProvider)) {
+    return null;
+  }
+  if (!data.routeChannelId) return null;
+  if (data.routeProvider === 'slack') {
+    return data.routeWorkspaceId && data.routeThreadId
+      ? {
+          provider: 'slack',
+          slackTeamId: data.routeWorkspaceId,
+          channelId: data.routeChannelId,
+          threadId: data.routeThreadId,
+        }
+      : null;
+  }
+  return {
+    provider: data.routeProvider,
+    channelId: data.routeChannelId,
+    threadId: data.routeThreadId ?? null,
+  };
 }
 
 async function postPrReviewNotification({
@@ -147,30 +220,41 @@ async function postPrReviewNotification({
   route,
   text,
   action,
+  canonicalDeliveryId,
+  canonicalLeaseToken,
 }: {
   taskId: string;
   route: PrReviewNotificationRoute;
   text: string;
   /** When set (button-capable routes only), post the action buttons. */
   action?: PrReviewNotificationAction;
+  canonicalDeliveryId?: string;
+  canonicalLeaseToken?: string;
 }): Promise<string | null> {
   // Stored before posting: an orphaned record just expires, while a posted
   // message without a record would leave dead buttons.
-  const nonce = action ? randomUUID() : null;
+  const nonce = action ? (canonicalDeliveryId ?? randomUUID()) : null;
+  const pendingAction =
+    action && nonce && isButtonRouteProvider(route.provider)
+      ? {
+          nonce,
+          provider: route.provider,
+          ...(route.provider === 'slack'
+            ? { slackTeamId: route.slackTeamId }
+            : {}),
+          taskId,
+          repository: action.repository,
+          prNumber: action.prNumber,
+          prUrl: action.prUrl,
+          channelId: route.channelId,
+          threadId: route.threadId ?? null,
+          followUpPrompt: action.followUpPrompt,
+          ...(canonicalDeliveryId ? { canonicalDeliveryId } : {}),
+        }
+      : null;
 
-  if (action && nonce && isButtonRouteProvider(route.provider)) {
-    await setPendingPrReviewAction({
-      nonce,
-      provider: route.provider,
-      ...(route.provider === 'slack' ? { slackTeamId: route.slackTeamId } : {}),
-      taskId,
-      repository: action.repository,
-      prNumber: action.prNumber,
-      prUrl: action.prUrl,
-      channelId: route.channelId,
-      threadId: route.threadId ?? null,
-      followUpPrompt: action.followUpPrompt,
-    });
+  if (pendingAction) {
+    await setPendingPrReviewAction(pendingAction);
   }
 
   if (route.provider === 'slack') {
@@ -208,7 +292,21 @@ async function postPrReviewNotification({
     });
 
     if (nonce && messageTs) {
-      await attachPendingPrReviewActionMessage(nonce, messageTs);
+      const { attached, superseded } =
+        await attachPendingPrReviewActionMessageWithRetirement(
+          nonce,
+          messageTs,
+          {
+            ...(canonicalLeaseToken ? { leaseToken: canonicalLeaseToken } : {}),
+            ...(pendingAction ? { context: pendingAction } : {}),
+          },
+        );
+      if (canonicalDeliveryId && !attached) {
+        throw new Error('Canonical PR review prompt lost its posting fence');
+      }
+      if (superseded.length > 0) {
+        await retirePrReviewActionMessagesBestEffort(superseded);
+      }
     }
 
     return messageTs;
@@ -229,15 +327,15 @@ async function postPrReviewNotification({
     postInput.buttons = [
       [
         {
-          text: 'Resolve these issues',
+          text: PR_REVIEW_ACTION_LABELS.yes,
           callbackData: buildPrReviewActionCallbackData('yes', nonce),
         },
         {
-          text: 'Auto-resolve on this PR',
+          text: PR_REVIEW_ACTION_LABELS.auto,
           callbackData: buildPrReviewActionCallbackData('auto', nonce),
         },
         {
-          text: 'Dismiss',
+          text: PR_REVIEW_ACTION_LABELS.dismiss,
           callbackData: buildPrReviewActionCallbackData('dismiss', nonce),
         },
       ],
@@ -247,10 +345,24 @@ async function postPrReviewNotification({
   const posted = await adapter.postMessage(postInput);
 
   if (nonce && posted?.messageId) {
-    await attachPendingPrReviewActionMessage(nonce, posted.messageId);
+    const { attached, superseded } =
+      await attachPendingPrReviewActionMessageWithRetirement(
+        nonce,
+        posted.lastTextMessageId ?? posted.messageId,
+        {
+          ...(canonicalLeaseToken ? { leaseToken: canonicalLeaseToken } : {}),
+          ...(pendingAction ? { context: pendingAction } : {}),
+        },
+      );
+    if (canonicalDeliveryId && !attached) {
+      throw new Error('Canonical PR review prompt lost its posting fence');
+    }
+    if (superseded.length > 0) {
+      await retirePrReviewActionMessagesBestEffort(superseded);
+    }
   }
 
-  return null;
+  return posted?.messageId ?? null;
 }
 
 /**
@@ -294,6 +406,8 @@ export const prReviewNotificationJob = async (
     deliveryIds: data.deliveryIds,
     leaseToken: data.leaseToken,
     events: data.events,
+    ownershipVersion: data.ownershipVersion,
+    deliveryId: data.deliveryId,
   };
 
   const latestJob = await db.query.taskRuns.findFirst({
@@ -314,10 +428,7 @@ export const prReviewNotificationJob = async (
     latestJob.status,
     latestJob.taskPhase,
   );
-  const isWorkerHeartbeatStale =
-    latestJob.workerHeartbeatAt != null &&
-    Date.now() - latestJob.workerHeartbeatAt.getTime() >=
-      WORKER_HEARTBEAT_STALE_MS;
+  const isWorkerHeartbeatStale = isExecutingTurn && !isLiveTaskTurn(latestJob);
 
   if (isExecutingTurn && !isWorkerHeartbeatStale) {
     if (data.deferrals < PR_REVIEW_NOTIFICATION_MAX_DEFERRALS) {
@@ -346,27 +457,7 @@ export const prReviewNotificationJob = async (
     );
   }
 
-  const prLink = await db.query.taskPullRequests.findFirst({
-    where: and(
-      eq(taskPullRequests.taskId, data.taskId),
-      eq(
-        taskPullRequests.sourceControlProvider,
-        data.sourceControlProvider ?? 'github',
-      ),
-      eq(taskPullRequests.repository, data.repository),
-      eq(taskPullRequests.prNumber, data.prNumber),
-    ),
-    columns: {
-      sourceControlProvider: true,
-      host: true,
-      repository: true,
-      prNumber: true,
-      prTitle: true,
-      prUrl: true,
-      status: true,
-      autoHandleFeedbackByUserId: true,
-    },
-  });
+  const prLink = await findTaskPullRequestForNotification(data);
 
   if (prLink?.status === 'merged' || prLink?.status === 'closed') {
     console.log(
@@ -415,6 +506,66 @@ export const prReviewNotificationJob = async (
       return;
     }
 
+    if (
+      !(await prepareCanonicalPrReviewNotificationRequest(
+        data,
+        delivery.followUpPrompt ?? null,
+      ))
+    ) {
+      console.log(
+        `[PrReviewNotification] Canonical delivery ${data.deliveryId} lost its preparation fence, skipping`,
+      );
+      return;
+    }
+
+    // The task can be resumed by a review action while remote reads and model
+    // triage are in flight. Recheck before posting so a bulk-fix run gets the
+    // chance to resolve its included threads; the next delivery attempt then
+    // filters those handled comments against live provider state.
+    const [latestBeforeDelivery, latestPrLinkBeforeDelivery] =
+      await Promise.all([
+        db.query.taskRuns.findFirst({
+          where: eq(taskRuns.taskId, data.taskId),
+          orderBy: [desc(taskRuns.createdAt)],
+        }),
+        findTaskPullRequestForNotification(data),
+      ]);
+    const taskChangedDuringPreparation =
+      latestBeforeDelivery?.id !== latestJob.id;
+    if (
+      latestBeforeDelivery &&
+      (taskChangedDuringPreparation || isLiveTaskTurn(latestBeforeDelivery))
+    ) {
+      if (data.deferrals < PR_REVIEW_NOTIFICATION_MAX_DEFERRALS) {
+        await schedulePrReviewNotificationJob({
+          request: { ...data, deferrals: data.deferrals + 1 },
+          delayMs: PR_REVIEW_NOTIFICATION_DEFER_MS,
+        });
+        console.log(
+          `[PrReviewNotification] Task ${data.taskId} changed or resumed while preparing review feedback for ${data.repository}#${data.prNumber}; deferred delivery (deferral ${data.deferrals + 1})`,
+        );
+        return;
+      }
+
+      console.warn(
+        `[PrReviewNotification] Task ${data.taskId} changed or resumed while preparing review feedback for ${data.repository}#${data.prNumber}; dropping pending activity after ${data.deferrals} deferrals`,
+      );
+      await finalizePrReviewNotificationRequest(data, 'suppressed');
+      return;
+    }
+
+    const deliveryPrLink = latestPrLinkBeforeDelivery ?? prLink;
+    if (
+      deliveryPrLink?.status === 'merged' ||
+      deliveryPrLink?.status === 'closed'
+    ) {
+      console.log(
+        `[PrReviewNotification] PR ${data.repository}#${data.prNumber} became ${deliveryPrLink.status} while preparing, skipping notification`,
+      );
+      await finalizePrReviewNotificationRequest(data, 'suppressed');
+      return;
+    }
+
     // Preparing the notification may perform remote reads or model work. A
     // Roomote summary can supersede an inline fallback during that interval,
     // or the lease can expire. Atomically renew the still-current claim at the
@@ -445,91 +596,308 @@ export const prReviewNotificationJob = async (
     const roomoteReviewResult = events.find(
       (event) => event.reviewResult,
     )?.reviewResult;
-    const persistedAutoHandleUserId =
-      prLink?.autoHandleFeedbackByUserId ?? null;
-    const autoHandleRoute =
-      followUp &&
-      persistedAutoHandleUserId &&
-      delivery.route &&
-      isButtonRoute(delivery.route)
-        ? delivery.route
+    const fallbackAutoHandleRoute = getFastParentButtonRoute(latestJob.payload);
+    const fastParent = getFastAgentParentFromPayload(latestJob.payload);
+    const isWebFastParent = fastParent?.conversation.surface === 'web';
+    const persistedAutoHandleRoute = getPersistedButtonRoute(data);
+    const canonicalPreference =
+      data.ownershipVersion === 'canonical'
+        ? await findAutoHandlePrReviewFeedbackPreference({
+            sourceControlProvider: data.sourceControlProvider ?? 'github',
+            host: data.host,
+            repositoryId: data.repositoryId,
+            repository: data.repository,
+            prNumber: data.prNumber,
+          })
         : null;
-    const autoHandleUserId = autoHandleRoute ? persistedAutoHandleUserId : null;
+    const autoHandlePreference =
+      data.deliveryState === 'prompt_posting'
+        ? null
+        : data.deliveryState === 'auto_dispatch_pending' &&
+            data.targetTaskId &&
+            data.actingUserId
+          ? {
+              taskId: data.targetTaskId,
+              userId: data.actingUserId,
+              destinationKey: data.destinationKey ?? null,
+            }
+          : data.ownershipVersion === 'canonical'
+            ? canonicalPreference &&
+              (!canonicalPreference.destinationKey ||
+                canonicalPreference.destinationKey === data.destinationKey)
+              ? canonicalPreference
+              : null
+            : deliveryPrLink?.autoHandleFeedbackByUserId
+              ? {
+                  taskId: data.taskId,
+                  userId: deliveryPrLink.autoHandleFeedbackByUserId,
+                  destinationKey: null,
+                }
+              : fallbackAutoHandleRoute
+                ? await findAutoHandlePrReviewFeedbackPreference({
+                    sourceControlProvider:
+                      data.sourceControlProvider ?? 'github',
+                    host: deliveryPrLink?.host,
+                    repositoryId: deliveryPrLink?.repositoryId,
+                    repository: data.repository,
+                    prNumber: data.prNumber,
+                  })
+                : null;
+    const directAutoHandleRoute =
+      delivery.route && isButtonRoute(delivery.route) ? delivery.route : null;
+    const autoHandleRoute =
+      followUp && autoHandlePreference
+        ? (persistedAutoHandleRoute ??
+          directAutoHandleRoute ??
+          fallbackAutoHandleRoute)
+        : null;
+    const webAutoDispatchKey =
+      followUp &&
+      autoHandlePreference &&
+      isWebFastParent &&
+      data.ownershipVersion === 'canonical'
+        ? (data.dispatchKey ?? null)
+        : null;
+    const canAutoHandleWeb = webAutoDispatchKey !== null;
+    const autoHandleUserId =
+      autoHandleRoute || canAutoHandleWeb ? autoHandlePreference?.userId : null;
 
     // Fast-parent delivery can fail and release this notification for retry.
     // Complete it before auto-dispatch so a retry cannot enqueue the same
     // resolve prompt twice.
-    const deliveredToFastParent = await notifyFastAgentParentOnPrFeedback({
-      run: latestJob,
-      feedbackSourceIds: events.map(
-        (event) =>
-          event.providerEventId ??
-          [
-            event.kind,
-            event.authorLogin,
-            event.batchId ?? '',
-            event.reviewHeadSha ?? '',
-            event.reviewState ?? '',
-            event.checkName ?? '',
-            event.inReplyToId ?? '',
-            event.url ?? '',
-            String(event.observedAt ?? ''),
-            event.summary ?? event.body ?? '',
-          ].join('\0'),
-      ),
-      pullRequest: {
-        provider:
-          prLink?.sourceControlProvider ??
-          data.sourceControlProvider ??
-          'github',
-        host: prLink?.host,
-        repository: prLink?.repository ?? data.repository,
-        number: prLink?.prNumber ?? data.prNumber,
-        title: prLink?.prTitle,
-        url: prLink?.prUrl ?? data.prUrl,
-        status: prLink?.status,
-      },
-      summary: delivery.text,
-      ...(roomoteReviewIdentity?.reviewTaskId &&
-      roomoteReviewIdentity.reviewHeadSha
-        ? {
-            reviewTaskId: roomoteReviewIdentity.reviewTaskId,
-            reviewHeadSha: roomoteReviewIdentity.reviewHeadSha,
-          }
-        : {}),
-      ...(roomoteReviewResult ? { reviewResult: roomoteReviewResult } : {}),
-      ...(followUp && !autoHandleUserId
-        ? {
-            suggestedActionQuestion: followUp.question,
-            suggestedActionPrompt: followUp.prompt,
-          }
+    let webReviewActionDeliveryId: string | null = null;
+    if (
+      followUp &&
+      isWebFastParent &&
+      !autoHandleUserId &&
+      data.ownershipVersion === 'canonical' &&
+      data.deliveryId
+    ) {
+      if (
+        !(await beginCanonicalPrReviewWebPrompt({
+          request: data,
+          followUpPrompt: followUp.prompt,
+        }))
+      ) {
+        console.log(
+          `[PrReviewNotification] Canonical Fast web delivery ${data.deliveryId} lost its prompt-posting fence, skipping`,
+        );
+        return;
+      }
+      webReviewActionDeliveryId = data.deliveryId;
+    }
+    const feedbackSourceIds = events.map(
+      (event) =>
+        event.providerEventId ??
+        [
+          event.kind,
+          event.authorLogin,
+          event.batchId ?? '',
+          event.reviewHeadSha ?? '',
+          event.reviewState ?? '',
+          event.checkName ?? '',
+          event.inReplyToId ?? '',
+          event.url ?? '',
+          String(event.observedAt ?? ''),
+          event.summary ?? event.body ?? '',
+        ].join('\0'),
+    );
+    const notifyFastParent = (options: {
+      includeSuggestedAction: boolean;
+      reviewActionDeliveryId?: string;
+    }) =>
+      notifyFastAgentParentOnPrFeedback({
+        run: latestJob,
+        feedbackSourceIds,
+        pullRequest: {
+          provider:
+            deliveryPrLink?.sourceControlProvider ??
+            data.sourceControlProvider ??
+            'github',
+          host: deliveryPrLink?.host,
+          repository: deliveryPrLink?.repository ?? data.repository,
+          number: deliveryPrLink?.prNumber ?? data.prNumber,
+          title: deliveryPrLink?.prTitle,
+          url: deliveryPrLink?.prUrl ?? data.prUrl,
+          status: deliveryPrLink?.status,
+        },
+        summary: delivery.text,
+        ...(roomoteReviewIdentity?.reviewTaskId &&
+        roomoteReviewIdentity.reviewHeadSha
+          ? {
+              reviewTaskId: roomoteReviewIdentity.reviewTaskId,
+              reviewHeadSha: roomoteReviewIdentity.reviewHeadSha,
+            }
+          : {}),
+        ...(roomoteReviewResult ? { reviewResult: roomoteReviewResult } : {}),
+        ...(followUp && options.includeSuggestedAction
+          ? {
+              suggestedActionQuestion: followUp.question,
+              suggestedActionPrompt: followUp.prompt,
+            }
+          : {}),
+        canonicalDeliveryOwned: data.ownershipVersion === 'canonical',
+        ...(options.reviewActionDeliveryId
+          ? { reviewActionDeliveryId: options.reviewActionDeliveryId }
+          : {}),
+      });
+    const deliveredToFastParent = await notifyFastParent({
+      includeSuggestedAction: Boolean(followUp && !autoHandleUserId),
+      ...(webReviewActionDeliveryId
+        ? { reviewActionDeliveryId: webReviewActionDeliveryId }
         : {}),
     });
 
+    if (deliveredToFastParent && webReviewActionDeliveryId) {
+      const { attached } =
+        await attachPendingPrReviewActionMessageWithRetirement(
+          webReviewActionDeliveryId,
+          webReviewActionDeliveryId,
+          { leaseToken: data.leaseToken },
+        );
+      if (!attached) {
+        throw new Error(
+          'Canonical Fast web review offer lost its publish fence',
+        );
+      }
+    }
+
     let autoHandledText: string | null = null;
-    if (followUp && autoHandleUserId && autoHandleRoute) {
-      const dispatched = await dispatchPrReviewFollowUp({
-        provider: autoHandleRoute.provider,
-        taskId: data.taskId,
-        ...(autoHandleRoute.provider === 'slack'
-          ? { slackTeamId: autoHandleRoute.slackTeamId }
-          : {}),
-        channelId: autoHandleRoute.channelId,
-        threadId: autoHandleRoute.threadId ?? null,
+    const ownsAutoHandleDispatch =
+      directAutoHandleRoute !== null || deliveredToFastParent;
+    if (
+      followUp &&
+      autoHandlePreference &&
+      autoHandleUserId &&
+      (autoHandleRoute || canAutoHandleWeb) &&
+      ownsAutoHandleDispatch
+    ) {
+      if (
+        data.deliveryState !== 'auto_dispatch_pending' &&
+        !(await (canAutoHandleWeb
+          ? beginCanonicalPrReviewWebAutoDispatch({
+              request: data,
+              followUpPrompt: followUp.prompt,
+              targetTaskId: autoHandlePreference.taskId,
+              actingUserId: autoHandleUserId,
+            })
+          : beginCanonicalPrReviewAutoDispatch({
+              request: data,
+              followUpPrompt: followUp.prompt,
+              targetTaskId: autoHandlePreference.taskId,
+              actingUserId: autoHandleUserId,
+              route: autoHandleRoute!,
+            })))
+      ) {
+        console.log(
+          `[PrReviewNotification] Canonical delivery ${data.deliveryId} lost its automatic-dispatch fence, skipping`,
+        );
+        return;
+      }
+      const dispatchInput = {
+        taskId: autoHandlePreference.taskId,
         followUpPrompt: followUp.prompt,
         actingUserId: autoHandleUserId,
-      });
+        ...(data.dispatchKey ? { idempotencyKey: data.dispatchKey } : {}),
+      };
+      const dispatched = await dispatchPrReviewFollowUp(
+        canAutoHandleWeb
+          ? {
+              ...dispatchInput,
+              provider: 'web',
+              idempotencyKey: webAutoDispatchKey,
+            }
+          : {
+              ...dispatchInput,
+              provider: autoHandleRoute!.provider,
+              ...(autoHandleRoute!.provider === 'slack'
+                ? { slackTeamId: autoHandleRoute!.slackTeamId }
+                : {}),
+              channelId: autoHandleRoute!.channelId,
+              threadId: autoHandleRoute!.threadId ?? null,
+            },
+      );
 
       if (dispatched.outcome !== 'unavailable') {
+        if (
+          !(await completeCanonicalPrReviewAutoDispatch({
+            request: data,
+            runId: dispatched.runId,
+          }))
+        ) {
+          console.log(
+            `[PrReviewNotification] Canonical delivery ${data.deliveryId} lost its completion fence after dispatch`,
+          );
+          return;
+        }
         autoHandledText = `New review feedback — I'm on it:
 ${delivery.text}`;
         console.log(
-          `[PrReviewNotification] Auto-dispatched review feedback for ${data.repository}#${data.prNumber} into task ${data.taskId} (${dispatched.outcome}, run ${dispatched.runId})`,
+          `[PrReviewNotification] Auto-dispatched review feedback for ${data.repository}#${data.prNumber} into task ${autoHandlePreference.taskId} (${dispatched.outcome}, run ${dispatched.runId})`,
         );
       } else {
+        if (data.deferrals < PR_REVIEW_NOTIFICATION_MAX_DEFERRALS) {
+          await schedulePrReviewNotificationJob({
+            request: {
+              ...data,
+              deferrals: data.deferrals + 1,
+            },
+            delayMs: PR_REVIEW_NOTIFICATION_DEFER_MS,
+          });
+          console.log(
+            `[PrReviewNotification] Auto-handle dispatch unavailable for ${data.repository}#${data.prNumber}; deferred delivery while task ${data.taskId} becomes resumable (deferral ${data.deferrals + 1})`,
+          );
+          return;
+        }
+
         console.warn(
-          `[PrReviewNotification] Auto-handle dispatch unavailable for ${data.repository}#${data.prNumber}; falling back to the interactive offer`,
+          `[PrReviewNotification] Auto-handle dispatch remained unavailable for ${data.repository}#${data.prNumber} after ${data.deferrals} deferrals; falling back to the interactive offer`,
         );
+        if (
+          canAutoHandleWeb &&
+          data.ownershipVersion === 'canonical' &&
+          data.deliveryId
+        ) {
+          if (
+            !(await releaseCanonicalPrReviewWebAutoDispatch(data)) ||
+            !(await beginCanonicalPrReviewWebPrompt({
+              request: data,
+              followUpPrompt: followUp.prompt,
+            }))
+          ) {
+            console.log(
+              `[PrReviewNotification] Canonical Fast web delivery ${data.deliveryId} lost its interactive-fallback fence, skipping`,
+            );
+            return;
+          }
+          const fallbackDelivered = await notifyFastParent({
+            includeSuggestedAction: true,
+            reviewActionDeliveryId: data.deliveryId,
+          });
+          if (!fallbackDelivered) {
+            throw new Error(
+              'Canonical Fast web review fallback was not delivered',
+            );
+          }
+          const { attached } =
+            await attachPendingPrReviewActionMessageWithRetirement(
+              data.deliveryId,
+              data.deliveryId,
+              { leaseToken: data.leaseToken },
+            );
+          if (!attached) {
+            throw new Error(
+              'Canonical Fast web review fallback lost its publish fence',
+            );
+          }
+          await recordPrReviewNotificationDeliveryBestEffort({
+            runId: latestJob.id,
+            taskId: data.taskId,
+            route: null,
+            text: textWithQuestion,
+          });
+          return;
+        }
       }
     }
 
@@ -540,12 +908,14 @@ ${delivery.text}`;
         route: null,
         text: autoHandledText ?? textWithQuestion,
       });
-      await finalizePrReviewNotificationRequest(data);
+      if (!webReviewActionDeliveryId) {
+        await finalizePrReviewNotificationRequest(data);
+      }
       return;
     }
 
-    // If the automatic dispatch was unavailable, continue into the normal
-    // offer path even though the Fast parent already received the summary.
+    // Once retries are exhausted, continue into the normal offer path even
+    // though the Fast parent already received the deduplicated summary.
 
     if (autoHandledText && delivery.route) {
       const messageTs = await postPrReviewNotification({
@@ -568,7 +938,22 @@ ${delivery.text}`;
     // Chat delivery is optional (web-only tasks have no route). Task history is
     // always recorded so the web task view shows the self-review summary.
     let messageTs: string | null = null;
+    let taskReviewActionDeliveryId: string | null = null;
     if (delivery.route) {
+      if (
+        followUp &&
+        isButtonRouteProvider(delivery.route.provider) &&
+        !(await beginCanonicalPrReviewPrompt({
+          request: data,
+          route: delivery.route,
+          followUpPrompt: followUp.prompt,
+        }))
+      ) {
+        console.log(
+          `[PrReviewNotification] Canonical delivery ${data.deliveryId} lost its prompt-posting fence, skipping`,
+        );
+        return;
+      }
       messageTs = await postPrReviewNotification({
         taskId: data.taskId,
         route: delivery.route,
@@ -585,20 +970,87 @@ ${delivery.text}`;
               },
             }
           : {}),
+        ...(data.ownershipVersion === 'canonical' && data.deliveryId
+          ? {
+              canonicalDeliveryId: data.deliveryId,
+              canonicalLeaseToken: data.leaseToken,
+            }
+          : {}),
       });
+      if (
+        followUp &&
+        isButtonRouteProvider(delivery.route.provider) &&
+        data.ownershipVersion === 'canonical' &&
+        !messageTs
+      ) {
+        throw new Error(
+          'Canonical PR review prompt did not return a message id',
+        );
+      }
     } else {
+      if (
+        followUp &&
+        !fastParent &&
+        data.ownershipVersion === 'canonical' &&
+        data.deliveryId
+      ) {
+        if (
+          !(await beginCanonicalPrReviewWebPrompt({
+            request: data,
+            followUpPrompt: followUp.prompt,
+          }))
+        ) {
+          console.log(
+            `[PrReviewNotification] Canonical web task delivery ${data.deliveryId} lost its prompt-posting fence, skipping`,
+          );
+          return;
+        }
+        taskReviewActionDeliveryId = data.deliveryId;
+      }
       console.log(
         `[PrReviewNotification] No conversation routing for task ${data.taskId}; recording review feedback to task history only`,
       );
     }
-    await recordPrReviewNotificationDeliveryBestEffort({
+    const recorded = await recordPrReviewNotificationDeliveryBestEffort({
       runId: latestJob.id,
       taskId: data.taskId,
       route: delivery.route,
       text: textWithQuestion,
       ...(messageTs ? { messageTs } : {}),
+      ...(taskReviewActionDeliveryId && followUp
+        ? {
+            reviewAction: {
+              deliveryId: taskReviewActionDeliveryId,
+              question: followUp.question,
+            },
+          }
+        : {}),
     });
-    await finalizePrReviewNotificationRequest(data);
+    if (taskReviewActionDeliveryId) {
+      if (!recorded) {
+        throw new Error('Canonical web task review offer was not persisted');
+      }
+      const { attached } =
+        await attachPendingPrReviewActionMessageWithRetirement(
+          taskReviewActionDeliveryId,
+          taskReviewActionDeliveryId,
+          { leaseToken: data.leaseToken },
+        );
+      if (!attached) {
+        throw new Error(
+          'Canonical web task review offer lost its publish fence',
+        );
+      }
+    }
+    if (
+      data.ownershipVersion !== 'canonical' ||
+      !followUp ||
+      (delivery.route
+        ? !isButtonRouteProvider(delivery.route.provider)
+        : !taskReviewActionDeliveryId)
+    ) {
+      await finalizePrReviewNotificationRequest(data);
+    }
 
     if (delivery.route) {
       console.log(

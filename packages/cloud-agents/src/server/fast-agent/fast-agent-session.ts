@@ -5,17 +5,24 @@ import {
   db,
   eq,
   inArray,
+  isTaskRunFollowUpCandidate,
   isNull,
   taskRuns,
   tasks,
 } from '@roomote/db/server';
-import { activeRunStatuses, type RunStatus } from '@roomote/types';
+import type { RunStatus } from '@roomote/types';
 import type { FastAgentConversation } from './fast-agent-conversation';
 import { fastAgentConversationRepository } from './fast-agent-conversation-repository';
+import type {
+  FastAgentMessageUpsertResult,
+  FastAgentMessageWrite,
+} from './fast-agent-conversation-repository';
 
 type FastAgentSessionRecord = {
   id: string;
   compatibilityMessages: ModelMessage[];
+  openCodeSessionId: string | null;
+  created: boolean;
 };
 
 export type FastAgentActiveTask = {
@@ -54,6 +61,9 @@ export async function getActiveFastAgentTasks(
         title: tasks.title,
         status: taskRuns.status,
         canceledAt: taskRuns.canceledAt,
+        snapshotId: taskRuns.snapshotId,
+        snapshotCreatedAt: taskRuns.snapshotCreatedAt,
+        snapshotFailedAt: taskRuns.snapshotFailedAt,
       })
       .from(taskRuns)
       .innerJoin(tasks, eq(tasks.id, taskRuns.taskId))
@@ -75,10 +85,13 @@ export async function getActiveFastAgentTasks(
     })
     .from(latestRunPerTask)
     .where(
-      and(
-        inArray(latestRunPerTask.status, [...activeRunStatuses]),
-        isNull(latestRunPerTask.canceledAt),
-      ),
+      isTaskRunFollowUpCandidate({
+        status: latestRunPerTask.status,
+        canceledAt: latestRunPerTask.canceledAt,
+        snapshotId: latestRunPerTask.snapshotId,
+        snapshotCreatedAt: latestRunPerTask.snapshotCreatedAt,
+        snapshotFailedAt: latestRunPerTask.snapshotFailedAt,
+      }),
     )
     .orderBy(desc(latestRunPerTask.createdAt));
 }
@@ -97,5 +110,41 @@ export async function appendFastAgentVisibleMessages({
   await fastAgentConversationRepository.appendVisibleMessages({
     conversationId: sessionId,
     messages,
+  });
+}
+
+export async function upsertFastAgentMessage({
+  sessionId,
+  message,
+}: {
+  sessionId: string;
+  message: FastAgentMessageWrite;
+}): Promise<FastAgentMessageUpsertResult> {
+  let lastError: unknown;
+
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      return await fastAgentConversationRepository.upsertMessage({
+        conversationId: sessionId,
+        message,
+      });
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  throw lastError;
+}
+
+export async function setFastAgentOpenCodeSession({
+  sessionId,
+  openCodeSessionId,
+}: {
+  sessionId: string;
+  openCodeSessionId: string;
+}): Promise<void> {
+  await fastAgentConversationRepository.setOpenCodeSession({
+    conversationId: sessionId,
+    openCodeSessionId,
   });
 }

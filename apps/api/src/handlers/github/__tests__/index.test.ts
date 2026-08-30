@@ -12,6 +12,10 @@ const {
   mockHandlePrReopen,
   mockHandlePrSynchronize,
   mockHandlePushConflictCheck,
+  mockHandleMergeAnnouncerPush,
+  mockGetInstallationOctokit,
+  mockQueueBaseBranchMergeabilityCheck,
+  mockQueueTrackedPullRequestMergeabilityCheck,
   mockIsRepoSkipped,
   mockQueuePrReviewActivityNotification,
   mockQueuePrReviewSummaryNotification,
@@ -46,6 +50,10 @@ const {
   mockHandlePrReopen: vi.fn(),
   mockHandlePrSynchronize: vi.fn(),
   mockHandlePushConflictCheck: vi.fn(),
+  mockHandleMergeAnnouncerPush: vi.fn(),
+  mockGetInstallationOctokit: vi.fn(),
+  mockQueueBaseBranchMergeabilityCheck: vi.fn(),
+  mockQueueTrackedPullRequestMergeabilityCheck: vi.fn(),
   mockIsRepoSkipped: vi.fn(),
   mockQueuePrReviewActivityNotification: vi.fn(),
   mockQueuePrReviewSummaryNotification: vi.fn(),
@@ -106,12 +114,14 @@ vi.mock('@roomote/db/server', () => ({
 }));
 
 vi.mock('@roomote/github', () => ({
+  getInstallationOctokit: mockGetInstallationOctokit,
   isRepoSkipped: mockIsRepoSkipped,
   resolveConfiguredGitHubAppSlug: mockResolveConfiguredGitHubAppSlug,
   resolveGitHubRoomoteMentionEnabled: mockResolveGitHubRoomoteMentionEnabled,
 }));
 
 vi.mock('@roomote/sdk/server', () => ({
+  handleMergeAnnouncerPush: mockHandleMergeAnnouncerPush,
   updateTaskPrStatus: mockUpdateTaskPrStatus,
   upsertGitHubPullRequestFactFromWebhook:
     mockUpsertGitHubPullRequestFactFromWebhook,
@@ -169,6 +179,12 @@ vi.mock('../handlePushConflictCheck', () => ({
   handlePushConflictCheck: mockHandlePushConflictCheck,
 }));
 
+vi.mock('../queuePullRequestMergeabilityCheck', () => ({
+  queueBaseBranchMergeabilityCheck: mockQueueBaseBranchMergeabilityCheck,
+  queueTrackedPullRequestMergeabilityCheck:
+    mockQueueTrackedPullRequestMergeabilityCheck,
+}));
+
 vi.mock('../handleWorkflowRunCompleted', () => ({
   handleWorkflowRunCompleted: vi.fn(async () => ({ status: 'ok' as const })),
 }));
@@ -185,6 +201,37 @@ vi.mock('../notifyPrReviewActivity', () => ({
 vi.mock('../notifyPrCiFailure', () => ({
   queuePrCiFailureNotification: mockQueuePrCiFailureNotification,
 }));
+
+function makePullRequestPayload(
+  action: 'opened' | 'reopened' | 'closed',
+  overrides: Record<string, unknown> = {},
+) {
+  return {
+    action,
+    installation: { id: 1 },
+    repository: { id: 10, full_name: 'test-org/test-repo' },
+    pull_request: {
+      id: 100,
+      number: 42,
+      title: 'Test PR',
+      body: null,
+      labels: [],
+      html_url: 'https://github.com/test-org/test-repo/pull/42',
+      state: action === 'closed' ? 'closed' : 'open',
+      draft: false,
+      merged: false,
+      merged_at: null,
+      closed_at: action === 'closed' ? '2026-08-06T12:00:00Z' : null,
+      created_at: '2026-08-06T11:00:00Z',
+      updated_at: '2026-08-06T12:00:00Z',
+      user: { login: 'author' },
+      merged_by: null,
+      base: { ref: 'develop' },
+      ...overrides,
+    },
+    sender: { login: 'actor' },
+  };
+}
 
 describe('github webhook router', () => {
   let app: Hono;
@@ -204,6 +251,7 @@ describe('github webhook router', () => {
     mockHandlePrReopen.mockReset();
     mockHandlePrSynchronize.mockReset();
     mockHandlePushConflictCheck.mockReset();
+    mockHandleMergeAnnouncerPush.mockReset();
     mockIsRepoSkipped.mockReset();
     mockQueuePrReviewActivityNotification.mockReset();
     mockQueuePrReviewSummaryNotification.mockReset();
@@ -214,6 +262,7 @@ describe('github webhook router', () => {
     mockResolveDeploymentEnvVar.mockReset();
     mockUpdateTaskPrStatus.mockReset();
     mockUpsertGitHubPullRequestFactFromWebhook.mockReset();
+    mockRecordPrStatusChangeInTaskHistory.mockReset();
     mockIsFromKnownInstallation.mockReset();
     mockVerify.mockReset();
     mockVerifyAndReceive.mockReset();
@@ -227,6 +276,8 @@ describe('github webhook router', () => {
     mockHandlePrComment.mockResolvedValue({ status: 'ok' });
     mockHandleGitHubIssueComment.mockResolvedValue({ status: 'ok' });
     mockHandleGitHubIssueFixer.mockResolvedValue({ status: 'ok' });
+    mockHandlePushConflictCheck.mockResolvedValue({ status: 'ok' });
+    mockHandleMergeAnnouncerPush.mockResolvedValue({ status: 'ok' });
     mockRecordWebhook.mockImplementation(
       async (
         _deliveryId: string,
@@ -262,6 +313,85 @@ describe('github webhook router', () => {
     const { github } = await import('../index');
     app = new Hono();
     app.route('/api/webhooks/github', github);
+  });
+
+  it('restores tracked draft status when a pull request is reopened', async () => {
+    mockUpdateTaskPrStatus.mockResolvedValue(undefined);
+    mockUpsertGitHubPullRequestFactFromWebhook.mockResolvedValue(undefined);
+    const payload = makePullRequestPayload('reopened', { draft: true });
+
+    const response = await app.request('http://localhost/api/webhooks/github', {
+      method: 'POST',
+      headers: {
+        'x-github-delivery': 'delivery-reopened-draft',
+        'x-github-event': 'pull_request',
+        'x-hub-signature-256': 'sha256=test',
+      },
+      body: JSON.stringify(payload),
+    });
+
+    expect(response.status).toBe(200);
+    expect(mockUpdateTaskPrStatus).toHaveBeenCalledWith(
+      'github',
+      'test-org/test-repo',
+      42,
+      'draft',
+    );
+    expect(mockHandlePrReopen).toHaveBeenCalledWith(payload);
+  });
+
+  it('waits for terminal status persistence before notifying linked tasks', async () => {
+    let resolveStatusUpdate: (() => void) | undefined;
+    mockUpdateTaskPrStatus.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveStatusUpdate = resolve;
+        }),
+    );
+    mockUpsertGitHubPullRequestFactFromWebhook.mockResolvedValue(undefined);
+    mockHandlePrMerge.mockResolvedValue({ status: 'ok' });
+    const payload = makePullRequestPayload('closed');
+
+    const responsePromise = app.request(
+      'http://localhost/api/webhooks/github',
+      {
+        method: 'POST',
+        headers: {
+          'x-github-delivery': 'delivery-closed-ordering',
+          'x-github-event': 'pull_request',
+          'x-hub-signature-256': 'sha256=test',
+        },
+        body: JSON.stringify(payload),
+      },
+    );
+
+    await vi.waitFor(() => expect(resolveStatusUpdate).toBeTypeOf('function'));
+    expect(mockHandlePrMerge).not.toHaveBeenCalled();
+
+    resolveStatusUpdate?.();
+    const response = await responsePromise;
+
+    expect(response.status).toBe(200);
+    expect(mockHandlePrMerge).toHaveBeenCalledWith(payload);
+  });
+
+  it('does not notify linked tasks when terminal status persistence fails', async () => {
+    mockUpdateTaskPrStatus.mockRejectedValue(new Error('database unavailable'));
+    const payload = makePullRequestPayload('closed');
+
+    const response = await app.request('http://localhost/api/webhooks/github', {
+      method: 'POST',
+      headers: {
+        'x-github-delivery': 'delivery-closed-persistence-failure',
+        'x-github-event': 'pull_request',
+        'x-hub-signature-256': 'sha256=test',
+      },
+      body: JSON.stringify(payload),
+    });
+
+    expect(response.status).toBe(500);
+    expect(mockHandlePrMerge).not.toHaveBeenCalled();
+    expect(mockRecordPrStatusChangeInTaskHistory).not.toHaveBeenCalled();
   });
 
   it('forwards pull request descriptions and labels from webhook payloads', async () => {
@@ -767,7 +897,7 @@ describe('github webhook router', () => {
       },
       comment: {
         id: 7,
-        body: '<!-- roomote-review-summary sha=abc -->',
+        body: '<!-- roomote-review-summary sha=abc1234 -->',
         user: { login: 'roomote[bot]' },
       },
       sender: { login: 'roomote[bot]' },
@@ -812,7 +942,7 @@ describe('github webhook router', () => {
       },
       comment: {
         id: 7,
-        body: '<!-- roomote-review-summary sha=abc -->',
+        body: '<!-- roomote-review-summary sha=abc1234 -->',
         user: { login: 'roomote[bot]' },
       },
       sender: { login: 'roomote[bot]' },
@@ -882,6 +1012,7 @@ describe('github webhook router', () => {
           updated_at: '2026-08-06T12:00:00Z',
           user: { login: 'author' },
           merged_by: merged ? { login: 'merger' } : null,
+          base: { ref: 'develop' },
         },
         sender: { login: merged ? 'merger' : 'closer' },
       };
@@ -910,6 +1041,7 @@ describe('github webhook router', () => {
         expect.objectContaining({
           repository: 'test-org/test-repo',
           prNumber: 42,
+          targetBranch: 'develop',
           status,
         }),
       );
@@ -927,7 +1059,16 @@ describe('github webhook router', () => {
         'x-github-event': 'push',
         'x-hub-signature-256': 'sha256=test',
       },
-      body: JSON.stringify({ ref: 'refs/heads/main' }),
+      body: JSON.stringify({
+        ref: 'refs/heads/main',
+        repository: {
+          id: 10,
+          full_name: 'test-org/test-repo',
+          html_url: 'https://github.com/test-org/test-repo',
+        },
+        pusher: { name: 'actor' },
+        commits: [{ id: 'abc', message: 'Ship change' }],
+      }),
     });
 
     expect(response.status).toBe(200);
@@ -936,6 +1077,13 @@ describe('github webhook router', () => {
     );
     expect(webhooksConstructorParams).toEqual([{ secret: 'db-only-secret' }]);
     expect(mockHandlePushConflictCheck).toHaveBeenCalled();
+    expect(mockHandleMergeAnnouncerPush).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: 'github',
+        ref: 'refs/heads/main',
+        pusher: 'actor',
+      }),
+    );
   });
 
   it('refreshes GitHub mention settings before dispatching handlers', async () => {
@@ -958,6 +1106,48 @@ describe('github webhook router', () => {
     expect(
       mockResolveGitHubRoomoteMentionEnabled.mock.invocationCallOrder[0],
     ).toBeLessThan(mockVerifyAndReceive.mock.invocationCallOrder[0]!);
+  });
+
+  it('returns Merge announcer failures to webhook audit recording', async () => {
+    let handlerResult: unknown;
+    mockHandleMergeAnnouncerPush.mockResolvedValue({
+      status: 'error',
+      message: 'delivery failed',
+    });
+    mockRecordWebhook.mockImplementation(
+      async (
+        _deliveryId: string,
+        _event: string,
+        _payload: unknown,
+        handler: () => Promise<unknown>,
+      ) => {
+        handlerResult = await handler();
+      },
+    );
+
+    const response = await app.request('http://localhost/api/webhooks/github', {
+      method: 'POST',
+      headers: {
+        'x-github-delivery': 'delivery-announcer-failure',
+        'x-github-event': 'push',
+        'x-hub-signature-256': 'sha256=test',
+      },
+      body: JSON.stringify({
+        ref: 'refs/heads/main',
+        repository: {
+          id: 10,
+          full_name: 'test-org/test-repo',
+          html_url: 'https://github.com/test-org/test-repo',
+        },
+        commits: [{ id: 'abc', message: 'Ship change' }],
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(handlerResult).toEqual({
+      status: 'error',
+      message: 'delivery failed',
+    });
   });
 
   it('returns 401 without an installation lookup when the signature is invalid', async () => {

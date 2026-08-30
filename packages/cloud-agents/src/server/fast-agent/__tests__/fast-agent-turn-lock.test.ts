@@ -293,6 +293,34 @@ describe('Fast conversation turn locking', () => {
     }
   });
 
+  it('aborts and releases an accepted turn on settlement failure', async () => {
+    const releaseRedisLock = Object.assign(
+      vi.fn().mockResolvedValue(undefined),
+      {
+        renew: vi.fn().mockResolvedValue(true),
+        renewDetailed: vi.fn().mockResolvedValue('renewed'),
+      },
+    );
+    acquireRedisLockMock.mockResolvedValue(releaseRedisLock);
+    const releaseTurnLock = await acquireFastAgentTurnLock({
+      conversation: {
+        surface: 'discord',
+        workspaceId: 'workspace-1',
+        conversationId: 'conversation-1',
+        replyTarget: { channelId: 'channel-1' },
+      },
+    });
+    const reason = new Error('settlement failed');
+
+    await releaseTurnLock?.abort(reason);
+
+    expect(releaseTurnLock?.signal.aborted).toBe(true);
+    expect(releaseTurnLock?.signal.reason).toBe(reason);
+    expect(releaseRedisLock).toHaveBeenCalledOnce();
+    await releaseTurnLock?.();
+    expect(releaseRedisLock).toHaveBeenCalledOnce();
+  });
+
   it('keeps a queued turn waiting until the conversation lock becomes available', async () => {
     vi.useFakeTimers();
     try {

@@ -1,0 +1,1 @@
+ALTER TABLE "sessions" ADD COLUMN "responding_until" timestamp;

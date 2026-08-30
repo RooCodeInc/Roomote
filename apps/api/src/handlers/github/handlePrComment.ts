@@ -4,13 +4,18 @@ import {
   enqueueTask,
   getTaskUrl,
   routeGitHubTask,
+  SnapshotResumeAlreadyExistsError,
 } from '@roomote/cloud-agents/server';
 import {
   findActiveGitHubPrReviewTask,
   findReusableGitHubPrFollowUpOwner,
 } from '@roomote/db/server';
 import { getInstallationOctokit } from '@roomote/github';
-import { ensureSnapshotResumeGitHubFollowUpFallback } from '@roomote/sdk/server';
+import {
+  acquireGithubPrReviewLifecycleLock,
+  ensureSnapshotResumeGitHubFollowUpFallback,
+  publishGithubPrReviewCheck,
+} from '@roomote/sdk/server';
 import {
   type TaskPayload,
   RunStatus,
@@ -931,7 +936,7 @@ async function deliverFollowUpToExistingTask({
   });
 }
 
-async function resumeExistingTaskAndDeliverFollowUp({
+export async function resumeExistingTaskAndDeliverFollowUp({
   taskId,
   userId,
   sourceRunId,
@@ -1048,18 +1053,32 @@ async function resumeExistingTaskAndDeliverFollowUp({
 
   // Resumes never create tasks and never re-attribute; the resuming human
   // becomes the new run's acting user.
-  const resumeLaunch = await enqueueTask(
-    {
-      task: {
-        type: TaskPayloadKind.SnapshotResume,
-        sourceSnapshotId: sourceRun.snapshotId,
-        sourceRunId: sourceRun.id,
-        payload: resumePayload,
+  let resumeLaunch: Awaited<ReturnType<typeof enqueueTask>>;
+  try {
+    resumeLaunch = await enqueueTask(
+      {
+        task: {
+          type: TaskPayloadKind.SnapshotResume,
+          sourceSnapshotId: sourceRun.snapshotId,
+          sourceRunId: sourceRun.id,
+          payload: resumePayload,
+        },
+        actingUserId: senderUserId,
       },
-      actingUserId: senderUserId,
-    },
-    {},
-  );
+      {},
+    );
+  } catch (error) {
+    if (error instanceof SnapshotResumeAlreadyExistsError) {
+      // Continue through the normal fallback path so this distinct instruction
+      // gets its own linked follow-up task and response instead of being lost.
+      return {
+        success: false as const,
+        error: 'Reusable PR owner is already resuming',
+        status: 409,
+      };
+    }
+    throw error;
+  }
 
   const accepted = await waitForResumeRunToAcceptDeferredPrompt({
     taskId,
@@ -1332,30 +1351,57 @@ export async function handlePrComment(
           );
         }
 
-        const reviewLaunch = await enqueueTask({
-          task: {
-            type: TaskPayloadKind.GithubPrReview,
-            githubLogin: reviewer.properties.githubLogin,
-            githubUserId: reviewer.properties.githubUserId,
-            payload: reviewPayload,
-          },
-          // A human @roomote mention started this review.
-          initiator: { kind: 'user', userId: reviewer.properties.userId },
-          workflow: 'pr_review',
-          surface: 'github',
-          trigger: 'message',
-          prLinkage: {
-            provider: 'github',
-            host: reviewer.repo.host ?? toHostFromUrl(prUrl) ?? 'github.com',
-            repositoryId: reviewer.repo.id,
-            repository: repository.full_name,
-            prNumber: pr.number,
-            prUrl,
-            prTitle: pr.title,
-            prSha: headSha,
-          },
-        });
-        reviewLaunches.push(reviewLaunch);
+        const releaseLifecycleLock = await acquireGithubPrReviewLifecycleLock(
+          repository.full_name,
+          pr.number,
+        );
+        if (!releaseLifecycleLock) {
+          throw new Error(
+            `Timed out serializing PR review launch for ${repository.full_name}#${pr.number}`,
+          );
+        }
+
+        try {
+          releaseLifecycleLock.signal.throwIfAborted();
+          const reviewLaunch = await enqueueTask({
+            task: {
+              type: TaskPayloadKind.GithubPrReview,
+              githubLogin: reviewer.properties.githubLogin,
+              githubUserId: reviewer.properties.githubUserId,
+              payload: reviewPayload,
+            },
+            // A human @roomote mention started this review.
+            initiator: { kind: 'user', userId: reviewer.properties.userId },
+            workflow: 'pr_review',
+            surface: 'github',
+            trigger: 'message',
+            prLinkage: {
+              provider: 'github',
+              host: reviewer.repo.host ?? toHostFromUrl(prUrl) ?? 'github.com',
+              repositoryId: reviewer.repo.id,
+              repository: repository.full_name,
+              prNumber: pr.number,
+              prUrl,
+              prTitle: pr.title,
+              prSha: headSha,
+            },
+          });
+          if (reviewer.settings?.publishGithubCheck) {
+            releaseLifecycleLock.signal.throwIfAborted();
+            await publishGithubPrReviewCheck({
+              installationId: githubInstallationId,
+              repository: repository.full_name,
+              prNumber: pr.number,
+              headSha,
+              taskId: reviewLaunch.taskId,
+              runId: reviewLaunch.id,
+              signal: releaseLifecycleLock.signal,
+            });
+          }
+          reviewLaunches.push(reviewLaunch);
+        } finally {
+          await releaseLifecycleLock();
+        }
       } catch (error) {
         failedReviewerIds.push(reviewer.id);
         console.warn(

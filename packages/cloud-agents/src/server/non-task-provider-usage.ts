@@ -10,7 +10,10 @@ import {
   recordLlmUsage,
   resolveEffectiveModelRuntimeEnv,
 } from '@roomote/db/server';
-import { toBedrockMantleRuntimeModelId } from '@roomote/types';
+import {
+  toBedrockMantleRuntimeModelId,
+  type ReasoningEffort,
+} from '@roomote/types';
 import type { z } from 'zod';
 import zodToJsonSchema from 'zod-to-json-schema';
 
@@ -23,6 +26,8 @@ import {
 
 const DEFAULT_OPENCODE_STRUCTURED_OUTPUT_RETRY_COUNT = 2;
 const NON_TASK_SESSION_ABORT_TIMEOUT_MS = 5_000;
+const NON_TASK_USAGE_EVENT_BARRIER_TIMEOUT_MS = 1_000;
+const NON_TASK_USAGE_RECONCILE_TIMEOUT_MS = 5_000;
 type NonTaskModelRuntimeEnv = Partial<Record<string, string | undefined>>;
 
 /**
@@ -86,14 +91,15 @@ export type NonTaskInferenceTrackingInput = {
   surface: string;
   userId?: string | null;
   taskId?: string | null;
+  fastConversationId?: string | null;
   provider?: string;
 };
 
 export const NON_TASK_INFERENCE_SURFACES = {
+  brainSynthesis: 'brain_synthesis',
   chatAudioTranscription: 'chat_audio_transcription',
   chatVideoDescription: 'chat_video_description',
   customAutomationScheduleResolution: 'custom_automation_schedule_resolution',
-  fastAgentOnboardingSuggestions: 'fast_agent_onboarding_suggestions',
   fastAgentQuestionAnswering: 'fast_agent',
   inferenceValidation: 'inference_validation',
   prReviewNotificationTriage: 'pr_review_notification_triage',
@@ -143,6 +149,8 @@ interface GenerateTrackedNonTaskBaseParams extends NonTaskInferenceTrackingInput
   system?: string;
   model?: string;
   modelRole?: 'primary' | 'small' | 'orchestration';
+  /** Explicit reasoning-effort override applied to the resolved model. */
+  reasoningEffort?: ReasoningEffort;
   maxOutputTokens?: number;
   /** null lets OpenCode own the prompt lifecycle without a Roomote deadline. */
   timeoutMs?: number | null;
@@ -198,23 +206,47 @@ export type NonTaskOpenCodeSession = {
   id?: string;
 };
 
+export type NonTaskOpenCodeCompletedMessage = {
+  id: string | null;
+  sessionId: string;
+  createdAtMs: number | null;
+  completedAtMs: number | null;
+};
+
 export type NonTaskOpenCodeNativeSessionOptions = {
   directory: string;
   env?: Partial<Record<string, string>>;
   onModelResolved?: (model: string) => void;
+  onMessageCompleted?: (
+    message: NonTaskOpenCodeCompletedMessage,
+  ) => Promise<void> | void;
   onPromptStarted?: () => void;
   onSessionReady?: (sessionID: string) => Promise<void> | void;
   onSubagentSessionReady?: (sessionID: string) => Promise<void> | void;
   permission?: PermissionRuleset;
   promptOnlySubagents?: boolean;
   signal?: AbortSignal;
+  trackSessionTreeUsage?: boolean;
   tools: Record<string, boolean>;
+  validateSession?: boolean;
 };
 
 export class NonTaskOpenCodeSessionNotFoundError extends Error {
   constructor() {
     super('The OpenCode session is no longer available.');
     this.name = 'NonTaskOpenCodeSessionNotFoundError';
+  }
+}
+
+export class NonTaskOpenCodeSessionValidationError extends Error {
+  constructor(error: unknown) {
+    super(
+      `OpenCode session validation failed: ${formatOpenCodeSdkError(error)}`,
+      {
+        cause: error,
+      },
+    );
+    this.name = 'NonTaskOpenCodeSessionValidationError';
   }
 }
 
@@ -249,6 +281,12 @@ export function isNonTaskOpenCodeSessionNotFoundError(
   return error instanceof NonTaskOpenCodeSessionNotFoundError;
 }
 
+export function isNonTaskOpenCodeSessionValidationError(
+  error: unknown,
+): error is NonTaskOpenCodeSessionValidationError {
+  return error instanceof NonTaskOpenCodeSessionValidationError;
+}
+
 function asString(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim() ? value.trim() : undefined;
 }
@@ -277,6 +315,7 @@ function openCodeTimestampToDate(value: unknown): Date | undefined {
 type NonTaskOpenCodeMessageInfo = {
   id?: unknown;
   sessionID?: unknown;
+  parentID?: unknown;
   providerID?: unknown;
   modelID?: unknown;
   agent?: unknown;
@@ -322,6 +361,9 @@ async function recordNonTaskOpenCodeUsage(
       usageType: 'inference',
       eventKey: `non-task:${params.surface}:${harnessSessionId}:${messageId}`,
       taskId: params.taskId ?? null,
+      ...(params.fastConversationId
+        ? { fastConversationId: params.fastConversationId }
+        : {}),
       userId: params.userId ?? null,
       harnessSessionId,
       messageId,
@@ -503,9 +545,31 @@ function isOpenCodeSessionMissing(error: unknown): boolean {
   return statusCode === 404 || record.name === 'NotFoundError';
 }
 
+function isOpenCodeSessionInvalid(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+  const record = error as Record<string, unknown>;
+  const data =
+    record.data && typeof record.data === 'object'
+      ? (record.data as Record<string, unknown>)
+      : undefined;
+  const statusCode =
+    typeof data?.statusCode === 'number'
+      ? data.statusCode
+      : typeof record.status === 'number'
+        ? record.status
+        : undefined;
+  if (statusCode !== 400 && statusCode !== 422) return false;
+  const detail = formatOpenCodeSdkError(error).toLowerCase();
+  return (
+    detail.includes('session') &&
+    ['invalid', 'malformed', 'corrupt'].some((term) => detail.includes(term))
+  );
+}
+
 async function resolveNonTaskModelRuntime(
   model?: string,
   modelRole: 'primary' | 'small' | 'orchestration' = 'small',
+  reasoningEffort?: ReasoningEffort,
 ): Promise<{
   model: string;
   resolvedModelRuntimeEnv: NonTaskModelRuntimeEnv;
@@ -570,6 +634,15 @@ async function resolveNonTaskModelRuntime(
         selectedRuntimeEnv.R_MODEL_REASONING_EFFORT = undefined;
       }
     }
+  }
+
+  if (reasoningEffort) {
+    // The lease cache keys on env, so an explicit effort gets its own server
+    // rather than mutating a shared lease.
+    selectedRuntimeEnv = {
+      ...selectedRuntimeEnv,
+      R_MODEL_REASONING_EFFORT: reasoningEffort,
+    };
   }
 
   return {
@@ -711,6 +784,9 @@ async function runNonTaskSdkPrompt(
     ephemeral?: boolean;
     env?: Partial<Record<string, string>>;
     onPromptStarted?: () => void;
+    onMessageCompleted?: (
+      message: NonTaskOpenCodeCompletedMessage,
+    ) => Promise<void> | void;
     onSessionReady?: (sessionID: string) => Promise<void> | void;
     onSubagentSessionReady?: (sessionID: string) => Promise<void> | void;
     permission?: PermissionRuleset;
@@ -719,7 +795,9 @@ async function runNonTaskSdkPrompt(
     promptErrorLabel?: string;
     session?: NonTaskOpenCodeSession;
     signal?: AbortSignal;
+    trackSessionTreeUsage?: boolean;
     useConfiguredServer?: boolean;
+    validateSession?: boolean;
   } = {},
 ): Promise<{
   info: NonTaskOpenCodeMessageInfo;
@@ -773,6 +851,28 @@ async function runNonTaskSdkPrompt(
       fetch: openCodeSdkFetch,
     });
     let sessionId = options.session?.id;
+    if (sessionId && options.validateSession) {
+      const validationResult = await client.session.messages(
+        {
+          sessionID: sessionId,
+          directory: sessionDirectory,
+          limit: 1,
+        },
+        { signal: abortController.signal },
+      );
+      if (validationResult.error) {
+        if (
+          isOpenCodeSessionMissing(validationResult.error) ||
+          isOpenCodeSessionInvalid(validationResult.error)
+        ) {
+          throw new NonTaskOpenCodeSessionNotFoundError();
+        }
+        throw new NonTaskOpenCodeSessionValidationError(validationResult.error);
+      }
+      if (!validationResult.data || validationResult.data.length === 0) {
+        throw new NonTaskOpenCodeSessionNotFoundError();
+      }
+    }
     if (!sessionId) {
       const sessionResult = await client.session.create(
         {
@@ -796,6 +896,50 @@ async function runNonTaskSdkPrompt(
     }
     await options.onSessionReady?.(sessionId);
 
+    const trackedSessionIds = new Set([sessionId]);
+    const sessionsCreatedThisTurn = new Set<string>();
+    const usageRecordings = new Map<string, Promise<void>>();
+    const observedUsageEventKeys = new Set<string>();
+    const usageEventWaiters = new Map<string, () => void>();
+    const getUsageKey = (info: NonTaskOpenCodeMessageInfo) => {
+      const usageSessionId = asString(info.sessionID);
+      const usageMessageId = asString(info.id);
+      return usageSessionId && usageMessageId
+        ? `${usageSessionId}:${usageMessageId}`
+        : undefined;
+    };
+    const recordUsageOnce = (info: NonTaskOpenCodeMessageInfo) => {
+      const usageKey = getUsageKey(info);
+      if (!usageKey) {
+        return recordNonTaskOpenCodeUsage(params, model, info);
+      }
+
+      const existing = usageRecordings.get(usageKey);
+      if (existing) return existing;
+
+      const recording = recordNonTaskOpenCodeUsage(params, model, info);
+      usageRecordings.set(usageKey, recording);
+      return recording;
+    };
+    const markUsageEventObserved = (info: NonTaskOpenCodeMessageInfo) => {
+      const usageKey = getUsageKey(info);
+      if (!usageKey) return;
+
+      observedUsageEventKeys.add(usageKey);
+      usageEventWaiters.get(usageKey)?.();
+      usageEventWaiters.delete(usageKey);
+    };
+    const waitForUsageEvent = (info: NonTaskOpenCodeMessageInfo) => {
+      const usageKey = getUsageKey(info);
+      if (!usageKey || observedUsageEventKeys.has(usageKey)) {
+        return Promise.resolve(true);
+      }
+
+      return new Promise<boolean>((resolve) => {
+        usageEventWaiters.set(usageKey, () => resolve(true));
+      });
+    };
+
     const eventAbortController = new AbortController();
     const abortEventMonitor = () => {
       eventAbortController.abort(abortController.signal.reason);
@@ -812,8 +956,13 @@ async function runNonTaskSdkPrompt(
       rejectSessionError = reject;
     });
     let eventMonitor: Promise<void> | undefined;
+    const needsEventMonitor = Boolean(
+      params.onProviderRetry ||
+      options.onSubagentSessionReady ||
+      options.trackSessionTreeUsage,
+    );
 
-    if (params.onProviderRetry || options.onSubagentSessionReady) {
+    if (needsEventMonitor) {
       try {
         const subscription = await client.event.subscribe(
           { directory: sessionDirectory },
@@ -827,6 +976,10 @@ async function runNonTaskSdkPrompt(
                   event.type === 'session.updated') &&
                 event.properties.info.parentID === sessionId
               ) {
+                trackedSessionIds.add(event.properties.sessionID);
+                if (event.type === 'session.created') {
+                  sessionsCreatedThisTurn.add(event.properties.sessionID);
+                }
                 try {
                   await options.onSubagentSessionReady?.(
                     event.properties.sessionID,
@@ -835,6 +988,15 @@ async function runNonTaskSdkPrompt(
                   rejectSessionError(error);
                   return;
                 }
+              } else if (
+                options.trackSessionTreeUsage &&
+                event.type === 'message.updated' &&
+                event.properties.info.role === 'assistant' &&
+                event.properties.info.time.completed !== undefined &&
+                trackedSessionIds.has(event.properties.info.sessionID)
+              ) {
+                void recordUsageOnce(event.properties.info);
+                markUsageEventObserved(event.properties.info);
               } else if (
                 event.type === 'session.status' &&
                 event.properties.sessionID === sessionId &&
@@ -916,6 +1078,7 @@ async function runNonTaskSdkPrompt(
     }
 
     try {
+      const turnStartedAtMs = Date.now();
       options.onPromptStarted?.();
       const promptRequest = client.session.prompt(
         {
@@ -927,10 +1090,9 @@ async function runNonTaskSdkPrompt(
         },
         { signal: abortController.signal },
       );
-      const promptResult =
-        params.onProviderRetry || options.onSubagentSessionReady
-          ? await Promise.race([promptRequest, sessionError])
-          : await promptRequest;
+      const promptResult = needsEventMonitor
+        ? await Promise.race([promptRequest, sessionError])
+        : await promptRequest;
 
       if (promptResult.error || !promptResult.data) {
         if (isOpenCodeSessionMissing(promptResult.error)) {
@@ -950,7 +1112,147 @@ async function runNonTaskSdkPrompt(
         );
       }
 
-      await recordNonTaskOpenCodeUsage(params, model, promptResult.data.info);
+      await recordUsageOnce(promptResult.data.info);
+      if (options.trackSessionTreeUsage) {
+        const finalUsageKey = getUsageKey(promptResult.data.info);
+        let usageEventBarrierTimeout: NodeJS.Timeout | undefined;
+        const finalEventObserved = await Promise.race([
+          waitForUsageEvent(promptResult.data.info),
+          eventMonitor?.then(() => false) ?? Promise.resolve(false),
+          new Promise<boolean>((resolve) => {
+            usageEventBarrierTimeout = setTimeout(
+              () => resolve(false),
+              NON_TASK_USAGE_EVENT_BARRIER_TIMEOUT_MS,
+            );
+            usageEventBarrierTimeout.unref();
+          }),
+        ]).finally(() => {
+          if (usageEventBarrierTimeout) clearTimeout(usageEventBarrierTimeout);
+          if (finalUsageKey) usageEventWaiters.delete(finalUsageKey);
+        });
+        if (!finalEventObserved) {
+          const currentParentId = asString(promptResult.data.info.parentID);
+          if (currentParentId === undefined) {
+            console.warn(
+              `[NonTaskProviderUsage] OpenCode final message for session ${sessionId} has no parent id; intermediate parent usage cannot be reconciled for this turn.`,
+            );
+          }
+          // Reconciliation must stay cancellable and bounded: a wedged
+          // OpenCode server would otherwise hold the leased server (and the
+          // caller's already-generated answer) behind unsignaled fetches.
+          const reconcileAbortController = new AbortController();
+          const reconcileTimeout = setTimeout(() => {
+            reconcileAbortController.abort(
+              new Error('OpenCode usage reconciliation timed out.'),
+            );
+          }, NON_TASK_USAGE_RECONCILE_TIMEOUT_MS);
+          reconcileTimeout.unref();
+          const abortReconcile = () => {
+            reconcileAbortController.abort(abortController.signal.reason);
+          };
+          if (abortController.signal.aborted) {
+            abortReconcile();
+          } else {
+            abortController.signal.addEventListener('abort', abortReconcile, {
+              once: true,
+            });
+          }
+          try {
+            // Child sessions are enumerated from the server rather than from
+            // event-stream bookkeeping so a mid-turn stream failure cannot
+            // hide subagent usage, and they are bounded to sessions created
+            // in the current turn so a warm shared conversation's historical
+            // usage is never re-recorded under the current requester.
+            const reconcileSessionIds = new Set([
+              sessionId,
+              ...sessionsCreatedThisTurn,
+            ]);
+            try {
+              const childrenResult = await client.session.children(
+                { sessionID: sessionId, directory: sessionDirectory },
+                { signal: reconcileAbortController.signal },
+              );
+              if (childrenResult.error || !childrenResult.data) {
+                console.warn(
+                  `[NonTaskProviderUsage] Could not list OpenCode child sessions for ${sessionId}: ${formatOpenCodeSdkError(childrenResult.error)}`,
+                );
+              } else {
+                for (const child of childrenResult.data) {
+                  const childId = asString(child.id);
+                  const childCreatedAtMs = asFiniteNumber(child.time?.created);
+                  if (
+                    childId &&
+                    childCreatedAtMs !== undefined &&
+                    childCreatedAtMs >= turnStartedAtMs
+                  ) {
+                    reconcileSessionIds.add(childId);
+                  }
+                }
+              }
+            } catch (error) {
+              console.warn(
+                `[NonTaskProviderUsage] Could not list OpenCode child sessions for ${sessionId}: ${formatOpenCodeSdkError(error)}`,
+              );
+            }
+            await Promise.all(
+              [...reconcileSessionIds].map(async (trackedSessionId) => {
+                try {
+                  const messagesResult = await client.session.messages(
+                    {
+                      sessionID: trackedSessionId,
+                      directory: sessionDirectory,
+                      limit: 100,
+                    },
+                    { signal: reconcileAbortController.signal },
+                  );
+                  if (messagesResult.error || !messagesResult.data) {
+                    console.warn(
+                      `[NonTaskProviderUsage] Could not reconcile OpenCode usage for session ${trackedSessionId}: ${formatOpenCodeSdkError(messagesResult.error)}`,
+                    );
+                    return;
+                  }
+
+                  await Promise.all(
+                    messagesResult.data
+                      .map((message) => message.info)
+                      .filter(
+                        (info) =>
+                          info.role === 'assistant' &&
+                          info.time.completed !== undefined &&
+                          (trackedSessionId !== sessionId ||
+                            (currentParentId !== undefined &&
+                              asString(info.parentID) === currentParentId)),
+                      )
+                      .map(recordUsageOnce),
+                  );
+                } catch (error) {
+                  console.warn(
+                    `[NonTaskProviderUsage] Could not reconcile OpenCode usage for session ${trackedSessionId}: ${formatOpenCodeSdkError(error)}`,
+                  );
+                }
+              }),
+            );
+          } finally {
+            clearTimeout(reconcileTimeout);
+            abortController.signal.removeEventListener('abort', abortReconcile);
+          }
+        }
+      }
+
+      try {
+        await options.onMessageCompleted?.({
+          id: asString(promptResult.data.info.id) ?? null,
+          sessionId,
+          createdAtMs:
+            asFiniteNumber(promptResult.data.info.time?.created) ?? null,
+          completedAtMs:
+            asFiniteNumber(promptResult.data.info.time?.completed) ?? null,
+        });
+      } catch (error) {
+        console.warn(
+          `[NonTaskProviderUsage] OpenCode completion observer failed: ${formatOpenCodeSdkError(error)}`,
+        );
+      }
 
       return promptResult.data;
     } catch (error) {
@@ -977,6 +1279,16 @@ async function runNonTaskSdkPrompt(
       abortController.signal.removeEventListener('abort', abortEventMonitor);
       eventAbortController.abort();
       void eventMonitor?.catch(() => undefined);
+      // Usage writes started by the event monitor must settle before the
+      // prompt call returns or throws — on either path an in-flight write
+      // would otherwise race process shutdown. The loop re-snapshots because
+      // the monitor can add entries while earlier ones are being awaited.
+      let awaitedUsageRecordings = 0;
+      while (awaitedUsageRecordings < usageRecordings.size) {
+        const pendingUsageRecordings = [...usageRecordings.values()];
+        awaitedUsageRecordings = pendingUsageRecordings.length;
+        await Promise.allSettled(pendingUsageRecordings);
+      }
     }
   } finally {
     externalSignal?.removeEventListener('abort', abortFromExternalSignal);
@@ -991,6 +1303,7 @@ export async function generateTrackedNonTaskText(
   const runtime = await resolveNonTaskModelRuntime(
     params.model,
     params.modelRole,
+    params.reasoningEffort,
   );
   const model = await resolveModelForInputModality(params, runtime);
 
@@ -1042,6 +1355,7 @@ export async function generateTrackedNonTaskTextInOpenCodeSession(
   const runtime = await resolveNonTaskModelRuntime(
     params.model,
     params.modelRole,
+    params.reasoningEffort,
   );
   const model = await resolveModelForInputModality(params, runtime);
   options.onModelResolved?.(model);
@@ -1071,6 +1385,7 @@ export async function generateTrackedNonTaskTextInOpenCodeSession(
       directory: options.directory,
       env: options.env,
       onPromptStarted: options.onPromptStarted,
+      onMessageCompleted: options.onMessageCompleted,
       onSessionReady: options.onSessionReady,
       onSubagentSessionReady: options.onSubagentSessionReady,
       permission: options.permission,
@@ -1079,7 +1394,9 @@ export async function generateTrackedNonTaskTextInOpenCodeSession(
       promptErrorLabel: 'OpenCode native Fast prompt failed',
       session,
       signal: options.signal,
+      trackSessionTreeUsage: options.trackSessionTreeUsage,
       useConfiguredServer: false,
+      validateSession: options.validateSession,
     },
   );
 
@@ -1101,6 +1418,7 @@ async function generateTrackedNonTaskObjectWithSdk<
   const resolvedRuntime = await resolveNonTaskModelRuntime(
     params.model,
     params.modelRole,
+    params.reasoningEffort,
   );
 
   const data = await runNonTaskSdkPrompt(

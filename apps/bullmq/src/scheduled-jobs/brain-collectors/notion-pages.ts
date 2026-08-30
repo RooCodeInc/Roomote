@@ -6,7 +6,9 @@ import {
   eq,
   getBrainSyncState,
   listBrainCollectorItems,
+  listBrainCollectorItemsAfter,
   listBrainCollectorItemsBefore,
+  listBrainCollectorItemsBySlugPrefix,
   lt,
   notionDirectoryUsers,
 } from '@roomote/db/server';
@@ -71,6 +73,30 @@ const NOTION_USERS_MAX_REQUESTS_PER_PASS = 5;
 const NOTION_FULL_SWEEP_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const NOTION_REQUEST_INTERVAL_MS = process.env.NODE_ENV === 'test' ? 0 : 350;
 const NOTION_MAX_SEARCH_REQUESTS_PER_PASS = 10;
+/**
+ * Traversal phase budgets. Notion's search API is documented as not
+ * guaranteed to return everything the integration can access — only
+ * directly-shared content is guaranteed; children reachable through a shared
+ * parent may never appear (see
+ * https://developers.notion.com/reference/search-optimizations-and-limitations).
+ * After each sweep+reconcile cycle the collector therefore enumerates every
+ * data source the integration can see and walks the block tree of every
+ * inventoried page, discovering inheritance-shared pages — database rows
+ * above all — that the search index missed.
+ */
+const NOTION_MAX_TRAVERSAL_REQUESTS_PER_PASS = 24;
+const NOTION_TRAVERSAL_SEED_BATCH = 25;
+const NOTION_TRAVERSAL_BLOCK_PAGE_SIZE = 100;
+const NOTION_TRAVERSAL_QUERY_PAGE_SIZE = 50;
+/** Block-container nesting to follow (toggles, columns) below a page. */
+const NOTION_TRAVERSAL_MAX_BLOCK_DEPTH = 3;
+/**
+ * Ceiling on carried-over traversal work between passes. The seed side needs
+ * no queue (it iterates the inventory by durable id cursor); this bounds only
+ * discovered-but-unexpanded containers, and dropping past the cap trades a
+ * deeper corner of the tree for a bounded cursor row — logged, never silent.
+ */
+const NOTION_TRAVERSAL_MAX_PENDING = 300;
 
 let notionRequestAvailableAt = 0;
 
@@ -570,6 +596,144 @@ function notionPageEntityReferences(
   };
 }
 
+function notionDateValue(value: unknown): string | null {
+  const record = asObject(value);
+  const start = record ? asString(record.start) : null;
+  if (!start) return null;
+  const end = asString(record?.end);
+  return end ? `${start} → ${end}` : start;
+}
+
+function notionNamedOptions(value: unknown): string | null {
+  const names = Array.isArray(value)
+    ? value.flatMap((option) => {
+        const name = asString(asObject(option)?.name);
+        return name ? [name] : [];
+      })
+    : [];
+  return names.length > 0 ? names.join(', ') : null;
+}
+
+/**
+ * Human-readable value for one database property, or null when the property
+ * is empty or adds nothing beyond the frontmatter (timestamps and authorship
+ * already have fields there). People resolve through the stored directory and
+ * relations render as Brain slug links so property lines stay meaningful
+ * inside Memory search results.
+ */
+function renderNotionPropertyValue(
+  record: Record<string, unknown>,
+  context: NotionPageIdentityContext,
+): string | null {
+  switch (record.type) {
+    case 'rich_text':
+      return notionRichTextPlainText(record.rich_text) || null;
+    case 'number':
+      return typeof record.number === 'number' ? String(record.number) : null;
+    case 'select':
+    case 'status':
+      return asString(asObject(record[record.type])?.name) ?? null;
+    case 'multi_select':
+      return notionNamedOptions(record.multi_select);
+    case 'date':
+      return notionDateValue(record.date);
+    case 'checkbox':
+      return record.checkbox === true
+        ? 'Yes'
+        : record.checkbox === false
+          ? 'No'
+          : null;
+    case 'url':
+    case 'email':
+    case 'phone_number':
+      return asString(record[record.type]) ?? null;
+    case 'files':
+      return notionNamedOptions(record.files);
+    case 'people': {
+      const names = Array.isArray(record.people)
+        ? record.people.flatMap((user) => {
+            const id = notionUserId(user);
+            const name =
+              (id ? context.users.get(id)?.title : null) ??
+              parseNotionUser(user)?.name ??
+              asString(asObject(user)?.name);
+            return name ? [name] : [];
+          })
+        : [];
+      return names.length > 0 ? names.join(', ') : null;
+    }
+    case 'relation': {
+      const links = Array.isArray(record.relation)
+        ? record.relation.flatMap((relation) => {
+            const id = notionUserId(relation);
+            const slug = id ? notionPageSlug(id) : null;
+            return slug ? [`[${slug}](${slug})`] : [];
+          })
+        : [];
+      return links.length > 0 ? links.join(', ') : null;
+    }
+    case 'unique_id': {
+      const uniqueId = asObject(record.unique_id);
+      if (typeof uniqueId?.number !== 'number') return null;
+      const prefix = asString(uniqueId.prefix);
+      return prefix ? `${prefix}-${uniqueId.number}` : String(uniqueId.number);
+    }
+    case 'formula': {
+      const formula = asObject(record.formula);
+      return formula ? renderNotionPropertyValue(formula, context) : null;
+    }
+    case 'rollup': {
+      const rollup = asObject(record.rollup);
+      if (!rollup) return null;
+      if (rollup.type === 'array' && Array.isArray(rollup.array)) {
+        const values = rollup.array.flatMap((entry) => {
+          const item = asObject(entry);
+          const value = item ? renderNotionPropertyValue(item, context) : null;
+          return value ? [value] : [];
+        });
+        return values.length > 0 ? values.join('; ') : null;
+      }
+      return renderNotionPropertyValue(rollup, context);
+    }
+    // Formula results arrive as {type: 'string' | 'boolean', ...}; plain
+    // strings and dates above cover the other two result shapes.
+    case 'string':
+      return asString(record.string) ?? null;
+    case 'boolean':
+      return record.boolean === true
+        ? 'Yes'
+        : record.boolean === false
+          ? 'No'
+          : null;
+    default:
+      // Timestamps and authorship live in the frontmatter; buttons,
+      // verification, and future property types have no stable text value.
+      return null;
+  }
+}
+
+function renderNotionPropertyLines(
+  page: NotionSearchPage,
+  context: NotionPageIdentityContext,
+): string[] {
+  return Object.entries(page.properties ?? {})
+    .flatMap(([name, property]) => {
+      const record = asObject(property);
+      if (!record || record.type === 'title') return [];
+      const value = renderNotionPropertyValue(record, context);
+      if (!value) return [];
+      // Notion caps inline multi-value properties (relations above all) at
+      // 25 entries and signals the rest with has_more; an unmarked subset
+      // would read as the complete list.
+      const truncated =
+        record.has_more === true
+          ? ' _(Notion truncated this list; open the source page for the rest)_'
+          : '';
+      return [`- **${name}**: ${value}${truncated}`];
+    })
+    .sort((a, b) => a.localeCompare(b));
+}
+
 export function buildNotionPage(
   page: NotionSearchPage,
   markdown: NotionMarkdownResponse,
@@ -593,10 +757,11 @@ export function buildNotionPage(
   const updatedAt = parseDate(page.last_edited_time) ?? createdAt;
   const sourceUrl = asString(page.url);
   const body = asString(markdown.markdown);
-  const references = notionPageEntityReferences(
-    page,
-    options.identityContext ?? EMPTY_NOTION_PAGE_IDENTITY_CONTEXT,
-  );
+  const identityContext =
+    options.identityContext ?? EMPTY_NOTION_PAGE_IDENTITY_CONTEXT;
+  const references = notionPageEntityReferences(page, identityContext);
+  const propertyLines =
+    status === 'active' ? renderNotionPropertyLines(page, identityContext) : [];
 
   return {
     slug,
@@ -629,6 +794,12 @@ export function buildNotionPage(
       '',
       `# ${title}`,
       ...(sourceUrl ? ['', `[Open in Notion](${sourceUrl})`] : []),
+      // Database property values: the page-as-Markdown body carries only the
+      // page content, so rows would otherwise lose their Status/Owner/date
+      // columns in Memory.
+      ...(propertyLines.length > 0
+        ? ['', '## Properties', '', ...propertyLines]
+        : []),
       ...(status === 'deleted'
         ? ['', 'This page is in the Notion trash.']
         : status === 'unavailable'
@@ -736,6 +907,23 @@ export function buildNotionSearchBody(
   };
 }
 
+function buildNotionDataSourceSearchBody(
+  cursor: string | null,
+): Record<string, unknown> {
+  return {
+    filter: { property: 'object', value: 'data_source' },
+    page_size: NOTION_SEARCH_PAGE_SIZE,
+    ...(cursor ? { start_cursor: cursor } : {}),
+  };
+}
+
+function isNotionSearchDataSource(
+  value: unknown,
+): value is { object: 'data_source'; id: string } {
+  const record = asObject(value);
+  return !!record && record.object === 'data_source' && !!asString(record.id);
+}
+
 async function fetchNotionPage(
   config: McpConnectionNotionConfig,
   page: NotionSearchPage,
@@ -768,12 +956,29 @@ async function fetchNotionPage(
   }
 }
 
+type NotionTraverseNode =
+  | { kind: 'blocks'; id: string; depth: number; cursor?: string }
+  | { kind: 'database'; id: string }
+  | { kind: 'data_source'; id: string; cursor?: string };
+
+type NotionTraverseState = {
+  /** Durable iteration cursor over the inventory being walked. */
+  afterItemId: string;
+  /** Discovered containers awaiting expansion, bounded. */
+  pending: NotionTraverseNode[];
+  /** Search cursor for the shared data-source enumeration, when paused. */
+  dataSourceCursor?: string;
+  /** True once every directly-shared data source is enqueued this cycle. */
+  dataSourcesDone?: boolean;
+};
+
 type NotionScanCursor = {
-  mode: 'idle' | 'incremental' | 'sweep' | 'reconcile';
+  mode: 'idle' | 'incremental' | 'sweep' | 'reconcile' | 'traverse';
   lastSweepAt: string | null;
   upstreamCursor?: string;
   since?: string;
   scanStartedAt?: string;
+  traverse?: NotionTraverseState;
 };
 
 function parseNotionScanCursor(raw: string | null): NotionScanCursor {
@@ -784,7 +989,8 @@ function parseNotionScanCursor(raw: string | null): NotionScanCursor {
         parsed.mode === 'idle' ||
         parsed.mode === 'incremental' ||
         parsed.mode === 'sweep' ||
-        parsed.mode === 'reconcile'
+        parsed.mode === 'reconcile' ||
+        parsed.mode === 'traverse'
       ) {
         return {
           mode: parsed.mode,
@@ -796,6 +1002,12 @@ function parseNotionScanCursor(raw: string | null): NotionScanCursor {
           ...(typeof parsed.since === 'string' ? { since: parsed.since } : {}),
           ...(typeof parsed.scanStartedAt === 'string'
             ? { scanStartedAt: parsed.scanStartedAt }
+            : {}),
+          ...(parsed.traverse &&
+          typeof parsed.traverse === 'object' &&
+          typeof parsed.traverse.afterItemId === 'string' &&
+          Array.isArray(parsed.traverse.pending)
+            ? { traverse: parsed.traverse as NotionTraverseState }
             : {}),
         };
       }
@@ -850,6 +1062,421 @@ export function buildUnavailableNotionPage(item: {
     content:
       page?.content ??
       `---\ntype: notion-page\nstatus: unavailable\nprovenance: roomote-notion\n---\n\n# Unavailable Notion page\n\nThis page is no longer available to the Notion integration.\n`,
+  };
+}
+
+type NotionBlock = {
+  object?: string;
+  id?: string;
+  type?: string;
+  has_children?: boolean;
+};
+
+type NotionListResponse<T> = {
+  results?: T[];
+  has_more?: boolean;
+  next_cursor?: string | null;
+};
+
+function isNotionBlock(value: unknown): value is NotionBlock {
+  const block = asObject(value);
+  return !!block && asString(block.id) !== undefined;
+}
+
+/**
+ * Walk the inventory's block trees and data sources, emitting pages the
+ * search-based sweep never surfaced. Directly-shared data sources are
+ * enumerated first via search (their rows inherit access but are the classic
+ * search-index gap), then the seed side iterates brain_collector_items by
+ * durable id cursor (no queue growth); only discovered containers carry over
+ * between passes, bounded by NOTION_TRAVERSAL_MAX_PENDING. A pass ends when
+ * its request budget or page limit is spent; completion flips the scan back
+ * to idle.
+ */
+export async function collectNotionTraversal(input: {
+  config: McpConnectionNotionConfig;
+  saved: NotionScanCursor;
+  limit: number;
+  watermark?: Date | null;
+}): Promise<CollectorResult> {
+  const scanStartedAt = parseDate(input.saved.scanStartedAt) ?? new Date();
+  const state: NotionTraverseState = input.saved.traverse ?? {
+    afterItemId: '',
+    pending: [],
+  };
+  let afterItemId = state.afterItemId;
+  let dataSourceCursor = state.dataSourceCursor ?? null;
+  let dataSourcesDone = state.dataSourcesDone === true;
+  const pending: NotionTraverseNode[] = [...state.pending];
+  const pages: CollectorPage[] = [];
+  const itemUpdates: CollectorItemUpdate[] = [];
+  const seenThisPass = new Set<string>();
+  let requests = 0;
+  let complete = false;
+  let droppedNodes = 0;
+
+  const pushPending = (node: NotionTraverseNode) => {
+    if (pending.length >= NOTION_TRAVERSAL_MAX_PENDING) {
+      droppedNodes++;
+      return;
+    }
+    pending.push(node);
+  };
+
+  /**
+   * Resume/continuation nodes carry the current container's remaining
+   * children; dropping one at the cap silently skips those children until
+   * the next daily cycle. They go to the FRONT of the queue (finish current
+   * work before opening new frontier) and, at the cap, evict a discovered
+   * container from the tail instead of being dropped — the evicted
+   * container is re-discovered when its parent is re-listed, the resume
+   * node is not.
+   */
+  const pushResume = (node: NotionTraverseNode) => {
+    if (pending.length >= NOTION_TRAVERSAL_MAX_PENDING) {
+      pending.pop();
+      droppedNodes++;
+    }
+    pending.unshift(node);
+  };
+
+  /**
+   * An ingest costs two requests (page object + markdown). Refusing to start
+   * one that cannot finish keeps the pass inside its budget, and stopping at
+   * the page limit prevents an overshoot the engine would answer by
+   * withholding state persistence — which would retry this same traversal
+   * state forever.
+   */
+  const canIngestAnotherPage = () =>
+    requests + 2 <= NOTION_MAX_TRAVERSAL_REQUESTS_PER_PASS &&
+    pages.length < input.limit;
+
+  const isKnownPage = async (pageId: string): Promise<boolean> => {
+    if (seenThisPass.has(pageId)) {
+      return true;
+    }
+    const rows = await listBrainCollectorItemsBySlugPrefix(
+      db,
+      NOTION_PAGES_COLLECTOR_ID,
+      pageId,
+      1,
+    );
+    return rows.length > 0 && rows[0]!.itemId === pageId;
+  };
+
+  const ingestDiscoveredPage = async (pageId: string): Promise<void> => {
+    if (await isKnownPage(pageId)) {
+      return;
+    }
+    seenThisPass.add(pageId);
+    let page: unknown;
+    try {
+      requests++;
+      page = await notionCollectorRequest<unknown>({
+        config: input.config,
+        path: `pages/${encodeURIComponent(pageId)}`,
+      });
+    } catch (error) {
+      // A child_page block whose page the integration cannot read (or that
+      // moved to the trash between listing and fetch) is not a traversal
+      // failure; the rest of the tree still counts.
+      if (error instanceof NotionApiError && error.status === 404) {
+        return;
+      }
+      throw error;
+    }
+    if (!isNotionSearchPage(page)) {
+      return;
+    }
+    const mapped = await fetchNotionPage(input.config, page);
+    requests++;
+    if (mapped) {
+      pages.push(mapped);
+      itemUpdates.push(notionItemUpdate(page, mapped.slug, scanStartedAt));
+      // The new page's own subtree may hide further pages.
+      pushPending({ kind: 'blocks', id: pageId, depth: 0 });
+    }
+  };
+
+  // Freshness skim: a traversal cycle spans hours of ticks, and routing
+  // every tick here would pause incremental scanning for the whole walk —
+  // turning minutes of edit-to-Brain latency into hours, daily. One
+  // newest-first search page per tick keeps recent edits flowing; anything
+  // deeper than a page waits for the post-traversal incremental pass, whose
+  // watermark only advances here when the skim provably caught up.
+  let watermarkUpdate: Date | undefined;
+  if (input.watermark && requests < NOTION_MAX_TRAVERSAL_REQUESTS_PER_PASS) {
+    const skimStartedAt = new Date();
+    requests++;
+    const skim = await searchNotionPages({
+      config: input.config,
+      cursor: null,
+      pageSize: NOTION_SEARCH_PAGE_SIZE,
+    });
+    const edited = skim.pages.filter((page) => {
+      const updatedAt = parseDate(page.last_edited_time);
+      return (
+        updatedAt && updatedAt > input.watermark! && updatedAt <= skimStartedAt
+      );
+    });
+    const caughtUp = skim.pages.some((page) => {
+      const updatedAt = parseDate(page.last_edited_time);
+      return updatedAt ? updatedAt <= input.watermark! : false;
+    });
+    let skimIngestedAll = true;
+    for (const page of edited) {
+      if (
+        requests + 1 > NOTION_MAX_TRAVERSAL_REQUESTS_PER_PASS ||
+        pages.length >= input.limit
+      ) {
+        // Edits past this point were seen but not emitted; the watermark
+        // must not move past them or they would never ingest at all.
+        skimIngestedAll = false;
+        break;
+      }
+      const mapped = await fetchNotionPage(input.config, page);
+      requests++;
+      if (mapped) {
+        pages.push(mapped);
+        itemUpdates.push(notionItemUpdate(page, mapped.slug, skimStartedAt));
+        seenThisPass.add(page.id);
+      }
+    }
+    if (caughtUp && skimIngestedAll && edited.length > 0) {
+      watermarkUpdate = skimStartedAt;
+    }
+  }
+
+  while (
+    requests < NOTION_MAX_TRAVERSAL_REQUESTS_PER_PASS &&
+    pages.length < input.limit
+  ) {
+    const node = pending.shift();
+
+    if (!node) {
+      if (!dataSourcesDone) {
+        // Rows of a database shared directly with the integration inherit
+        // access but rarely reach the search index, and no inventoried page
+        // holds them as child_database blocks — search is the only way to
+        // find those data sources at all.
+        requests++;
+        let found: NotionSearchResponse;
+        try {
+          found = await notionCollectorRequest<NotionSearchResponse>({
+            config: input.config,
+            path: 'search',
+            method: 'POST',
+            body: buildNotionDataSourceSearchBody(dataSourceCursor),
+          });
+        } catch (error) {
+          if (
+            dataSourceCursor &&
+            error instanceof NotionApiError &&
+            error.status === 400
+          ) {
+            // Notion pagination cursors expire; restart the enumeration.
+            dataSourceCursor = null;
+            continue;
+          }
+          throw error;
+        }
+        for (const raw of found.results ?? []) {
+          if (isNotionSearchDataSource(raw)) {
+            pushPending({ kind: 'data_source', id: raw.id });
+          }
+        }
+        const nextCursor =
+          found.has_more && asString(found.next_cursor)
+            ? found.next_cursor!.trim()
+            : null;
+        dataSourceCursor = nextCursor;
+        dataSourcesDone = nextCursor === null;
+        continue;
+      }
+
+      const batch = await listBrainCollectorItemsAfter(
+        db,
+        NOTION_PAGES_COLLECTOR_ID,
+        afterItemId,
+        NOTION_TRAVERSAL_SEED_BATCH,
+      );
+      if (batch.length === 0) {
+        complete = true;
+        break;
+      }
+      for (const item of batch) {
+        pushPending({ kind: 'blocks', id: item.itemId, depth: 0 });
+      }
+      afterItemId = batch[batch.length - 1]!.itemId;
+      continue;
+    }
+
+    if (node.kind === 'blocks') {
+      let listed: NotionListResponse<unknown>;
+      try {
+        requests++;
+        listed = await notionCollectorRequest<NotionListResponse<unknown>>({
+          config: input.config,
+          path: `blocks/${encodeURIComponent(node.id)}/children`,
+          query: {
+            page_size: NOTION_TRAVERSAL_BLOCK_PAGE_SIZE,
+            ...(node.cursor ? { start_cursor: node.cursor } : {}),
+          },
+        });
+      } catch (error) {
+        if (error instanceof NotionApiError && error.status === 404) {
+          continue;
+        }
+        throw error;
+      }
+      // Containers found in this response are committed only if the whole
+      // response is processed. On a mid-response stop the node re-queues
+      // with the same cursor, so committing eagerly would duplicate these
+      // pushes when the response is re-listed next pass. Ingest-driven
+      // pushes (a discovered page's own subtree) stay immediate: a page
+      // ingests exactly once, so they cannot repeat.
+      const discoveredContainers: NotionTraverseNode[] = [];
+      let stoppedMidResponse = false;
+      for (const raw of listed.results ?? []) {
+        if (!isNotionBlock(raw) || !raw.id) {
+          continue;
+        }
+        if (raw.type === 'child_page') {
+          if (!canIngestAnotherPage()) {
+            stoppedMidResponse = true;
+            break;
+          }
+          await ingestDiscoveredPage(raw.id);
+        } else if (raw.type === 'child_database') {
+          discoveredContainers.push({ kind: 'database', id: raw.id });
+        } else if (
+          raw.has_children &&
+          node.depth < NOTION_TRAVERSAL_MAX_BLOCK_DEPTH
+        ) {
+          // Any block Notion reports as having children can hide a child
+          // page (paragraph indents, to-dos, toggleable headings, …); an
+          // allowlist here is exactly the discovery gap this phase closes.
+          discoveredContainers.push({
+            kind: 'blocks',
+            id: raw.id,
+            depth: node.depth + 1,
+          });
+        }
+      }
+      if (stoppedMidResponse) {
+        pushResume(node);
+        break;
+      }
+      for (const container of discoveredContainers) {
+        pushPending(container);
+      }
+      if (listed.has_more && asString(listed.next_cursor)) {
+        pushResume({ ...node, cursor: listed.next_cursor!.trim() });
+      }
+      continue;
+    }
+
+    if (node.kind === 'database') {
+      let database: Record<string, unknown> | null | undefined;
+      try {
+        requests++;
+        database = asObject(
+          await notionCollectorRequest<unknown>({
+            config: input.config,
+            path: `databases/${encodeURIComponent(node.id)}`,
+          }),
+        );
+      } catch (error) {
+        if (error instanceof NotionApiError && error.status === 404) {
+          continue;
+        }
+        throw error;
+      }
+      const dataSources = Array.isArray(database?.data_sources)
+        ? database!.data_sources
+        : [];
+      for (const raw of dataSources) {
+        const id = asString(asObject(raw)?.id);
+        if (id) {
+          pushPending({ kind: 'data_source', id });
+        }
+      }
+      continue;
+    }
+
+    // node.kind === 'data_source' — Notion's recommended enumeration path.
+    let queried: NotionListResponse<unknown>;
+    try {
+      requests++;
+      queried = await notionCollectorRequest<NotionListResponse<unknown>>({
+        config: input.config,
+        path: `data_sources/${encodeURIComponent(node.id)}/query`,
+        method: 'POST',
+        body: {
+          page_size: NOTION_TRAVERSAL_QUERY_PAGE_SIZE,
+          ...(node.cursor ? { start_cursor: node.cursor } : {}),
+        },
+      });
+    } catch (error) {
+      if (error instanceof NotionApiError && error.status === 404) {
+        continue;
+      }
+      throw error;
+    }
+    let stoppedMidRows = false;
+    for (const raw of queried.results ?? []) {
+      const id = asString(asObject(raw)?.id);
+      if (!id) {
+        continue;
+      }
+      if (!canIngestAnotherPage()) {
+        stoppedMidRows = true;
+        break;
+      }
+      await ingestDiscoveredPage(id);
+    }
+    if (stoppedMidRows) {
+      // Re-query the same row page next pass; already-ingested rows skip via
+      // the inventory check, so the retry converges.
+      pushResume(node);
+      break;
+    }
+    if (queried.has_more && asString(queried.next_cursor)) {
+      pushResume({ ...node, cursor: queried.next_cursor!.trim() });
+    }
+  }
+
+  if (droppedNodes > 0) {
+    console.warn(
+      `${LOG_PREFIX} notion traversal dropped ${droppedNodes} discovered container(s) past the pending cap; they are revisited on the next cycle`,
+    );
+  }
+
+  return {
+    pages,
+    nextSince: null,
+    itemUpdates,
+    stateUpdates: [
+      {
+        collectorId: NOTION_INCREMENTAL_STATE_ID,
+        ...(watermarkUpdate ? { watermark: watermarkUpdate } : {}),
+        cursor: serializeNotionScanCursor(
+          complete
+            ? { mode: 'idle', lastSweepAt: input.saved.lastSweepAt }
+            : {
+                mode: 'traverse',
+                lastSweepAt: input.saved.lastSweepAt,
+                scanStartedAt: scanStartedAt.toISOString(),
+                traverse: {
+                  afterItemId,
+                  pending: pending.slice(0, NOTION_TRAVERSAL_MAX_PENDING),
+                  ...(dataSourceCursor ? { dataSourceCursor } : {}),
+                  ...(dataSourcesDone ? { dataSourcesDone: true } : {}),
+                },
+              },
+        ),
+      },
+    ],
   };
 }
 
@@ -913,8 +1540,12 @@ export async function collectNotionReconciliation(input: {
         cursor: serializeNotionScanCursor(
           complete
             ? {
-                mode: 'idle',
+                // Reconcile settles the sweep's watermark; traversal then
+                // hunts the pages Notion's search index never surfaced.
+                mode: 'traverse',
                 lastSweepAt: scanStartedAt.toISOString(),
+                scanStartedAt: scanStartedAt.toISOString(),
+                traverse: { afterItemId: '', pending: [] },
               }
             : {
                 mode: 'reconcile',
@@ -1006,6 +1637,14 @@ async function collectNotionPages(input: {
       config: input.config,
       saved,
       limit: input.limit,
+    });
+  }
+  if (saved.mode === 'traverse') {
+    return collectNotionTraversal({
+      config: input.config,
+      saved,
+      limit: input.limit,
+      watermark: state?.watermark ?? null,
     });
   }
   const savedSweepAt = saved.lastSweepAt ? parseDate(saved.lastSweepAt) : null;

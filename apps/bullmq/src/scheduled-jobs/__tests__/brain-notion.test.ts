@@ -1,6 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { listBrainCollectorItemsBefore } from '@roomote/db/server';
+import {
+  listBrainCollectorItemsAfter,
+  listBrainCollectorItemsBefore,
+  listBrainCollectorItemsBySlugPrefix,
+} from '@roomote/db/server';
 import { NotionApiError } from '@roomote/sdk/server/notion-api';
 
 import {
@@ -10,6 +14,7 @@ import {
   buildNotionUserReferences,
   buildUnavailableNotionPage,
   collectNotionReconciliation,
+  collectNotionTraversal,
   type NotionSearchPage,
   type NotionUserIdentity,
 } from '../brain-collectors/notion-pages';
@@ -24,12 +29,25 @@ vi.mock('@roomote/sdk/server/notion-api', async (importOriginal) => {
 });
 vi.mock('@roomote/db/server', async (importOriginal) => {
   const original = await importOriginal<typeof import('@roomote/db/server')>();
-  return { ...original, listBrainCollectorItemsBefore: vi.fn(async () => []) };
+  return {
+    ...original,
+    listBrainCollectorItemsBefore: vi.fn(async () => []),
+    listBrainCollectorItemsAfter: vi.fn(async () => []),
+    listBrainCollectorItemsBySlugPrefix: vi.fn(async () => []),
+  };
 });
 const mockedListCollectorItemsBefore = vi.mocked(listBrainCollectorItemsBefore);
+const mockedListCollectorItemsAfter = vi.mocked(listBrainCollectorItemsAfter);
+const mockedListCollectorItemsBySlugPrefix = vi.mocked(
+  listBrainCollectorItemsBySlugPrefix,
+);
 beforeEach(() => {
   mockedListCollectorItemsBefore.mockReset();
   mockedListCollectorItemsBefore.mockResolvedValue([]);
+  mockedListCollectorItemsAfter.mockReset();
+  mockedListCollectorItemsAfter.mockResolvedValue([]);
+  mockedListCollectorItemsBySlugPrefix.mockReset();
+  mockedListCollectorItemsBySlugPrefix.mockResolvedValue([]);
   mockNotionApiRequestJson.mockReset();
 });
 
@@ -63,6 +81,89 @@ describe('Notion page mapping', () => {
       'last_edited_at: 2026-08-15T01:20:00.000Z',
     );
     expect(mapped?.content).toContain('## Decision\n\nShip the collector.');
+  });
+
+  it('renders database property values into the page body', () => {
+    const users = buildNotionUserReferences(
+      [{ id: 'notion-ada', name: 'Ada', email: null }],
+      new Map(),
+    );
+    const mapped = buildNotionPage(
+      {
+        ...page,
+        properties: {
+          ...page.properties,
+          Status: { type: 'status', status: { name: 'In review' } },
+          Priority: { type: 'select', select: { name: 'P1' } },
+          Tags: {
+            type: 'multi_select',
+            multi_select: [{ name: 'infra' }, { name: 'memory' }],
+          },
+          Due: { type: 'date', date: { start: '2026-09-01', end: null } },
+          Effort: { type: 'number', number: 3 },
+          Done: { type: 'checkbox', checkbox: false },
+          Owner: {
+            type: 'people',
+            people: [{ object: 'user', id: 'notion-ada' }],
+          },
+          Blocked: {
+            type: 'relation',
+            relation: [{ id: '12345678-90AB-CDEF-1234-567890ABCD00' }],
+          },
+          Ticket: {
+            type: 'unique_id',
+            unique_id: { prefix: 'ROO', number: 42 },
+          },
+          Score: { type: 'formula', formula: { type: 'number', number: 8.5 } },
+          Empty: { type: 'rich_text', rich_text: [] },
+        },
+      },
+      { markdown: 'Body' },
+      { identityContext: { users, identityLookup: new Map() } },
+    );
+
+    expect(mapped?.content).toContain('## Properties');
+    expect(mapped?.content).toContain('- **Status**: In review');
+    expect(mapped?.content).toContain('- **Priority**: P1');
+    expect(mapped?.content).toContain('- **Tags**: infra, memory');
+    expect(mapped?.content).toContain('- **Due**: 2026-09-01');
+    expect(mapped?.content).toContain('- **Effort**: 3');
+    expect(mapped?.content).toContain('- **Done**: No');
+    expect(mapped?.content).toContain('- **Owner**: Ada');
+    expect(mapped?.content).toContain(
+      '- **Blocked**: [notion/1234567890abcdef1234567890abcd00](notion/1234567890abcdef1234567890abcd00)',
+    );
+    expect(mapped?.content).toContain('- **Ticket**: ROO-42');
+    expect(mapped?.content).toContain('- **Score**: 8.5');
+    // Empty values and the title property never render as property lines.
+    expect(mapped?.content).not.toContain('**Empty**');
+    expect(mapped?.content).not.toContain('**Name**');
+  });
+
+  it('marks property lists Notion truncated at the inline cap', () => {
+    const mapped = buildNotionPage(
+      {
+        ...page,
+        properties: {
+          ...page.properties,
+          Blocked: {
+            type: 'relation',
+            relation: [{ id: '12345678-90AB-CDEF-1234-567890ABCD00' }],
+            has_more: true,
+          },
+        },
+      },
+      { markdown: 'Body' },
+    );
+
+    expect(mapped?.content).toContain(
+      '- **Blocked**: [notion/1234567890abcdef1234567890abcd00](notion/1234567890abcdef1234567890abcd00) _(Notion truncated this list; open the source page for the rest)_',
+    );
+  });
+
+  it('omits the properties section for pages with only a title', () => {
+    const mapped = buildNotionPage(page, { markdown: 'Body' });
+    expect(mapped?.content).not.toContain('## Properties');
   });
 
   it('emits deterministic person and relation references from page metadata', () => {
@@ -277,9 +378,13 @@ describe('Notion page mapping', () => {
     expect(result.itemDeletes).toEqual([
       { collectorId: 'notion-pages', itemIds: [page.id] },
     ]);
+    // A completed reconcile now hands off to the traversal phase, which
+    // hunts pages Notion's search index never surfaced before going idle.
     expect(JSON.parse(result.stateUpdates?.[0]?.cursor ?? '{}')).toEqual({
-      mode: 'idle',
+      mode: 'traverse',
       lastSweepAt: '2026-08-15T00:00:00.000Z',
+      scanStartedAt: '2026-08-15T00:00:00.000Z',
+      traverse: { afterItemId: '', pending: [] },
     });
   });
 
@@ -321,5 +426,587 @@ describe('Notion page mapping', () => {
         lastSeenAt: new Date('2026-08-15T00:00:00Z'),
       }),
     ]);
+  });
+});
+
+describe('Notion traversal discovery', () => {
+  const config = { token: 'secret' } as never;
+  const itemRow = (itemId: string) => ({
+    collectorId: 'notion-pages',
+    itemId,
+    slug: `notion/${itemId.replace(/-/g, '')}`,
+    lastSeenAt: new Date('2026-08-27T00:00:00Z'),
+    createdAt: new Date('2026-08-01T00:00:00Z'),
+    updatedAt: new Date('2026-08-27T00:00:00Z'),
+  });
+  const savedTraverse = {
+    mode: 'traverse' as const,
+    lastSweepAt: '2026-08-27T00:00:00.000Z',
+    scanStartedAt: '2026-08-27T00:00:00.000Z',
+    // Most tests focus on the block/inventory walk; the shared data-source
+    // enumeration that runs first has its own tests below.
+    traverse: { afterItemId: '', pending: [], dataSourcesDone: true },
+  };
+  const pageObject = (id: string, title: string) => ({
+    object: 'page',
+    id,
+    created_time: '2026-08-01T00:00:00.000Z',
+    last_edited_time: '2026-08-02T00:00:00.000Z',
+    properties: { Name: { type: 'title', title: [{ plain_text: title }] } },
+  });
+
+  it('discovers and ingests a child page absent from search results', async () => {
+    const parent = 'aaaa1111-0000-0000-0000-000000000001';
+    const child = 'eeee5555-0000-0000-0000-000000000002';
+    mockedListCollectorItemsAfter
+      .mockResolvedValueOnce([itemRow(parent)])
+      .mockResolvedValue([]);
+    // The child is unknown to the inventory (search never returned it).
+    mockedListCollectorItemsBySlugPrefix.mockResolvedValue([]);
+    mockNotionApiRequestJson.mockImplementation(async ({ path }) => {
+      if (path === `blocks/${encodeURIComponent(parent)}/children`) {
+        return {
+          results: [{ object: 'block', id: child, type: 'child_page' }],
+          has_more: false,
+        };
+      }
+      if (path === `pages/${encodeURIComponent(child)}`) {
+        return pageObject(child, 'Inherited incident page');
+      }
+      if (path === `pages/${encodeURIComponent(child)}/markdown`) {
+        return { markdown: 'Postmortem body' };
+      }
+      if (path.startsWith('blocks/')) {
+        return { results: [], has_more: false };
+      }
+      throw new Error(`unexpected path ${path}`);
+    });
+
+    const result = await collectNotionTraversal({
+      config,
+      saved: savedTraverse,
+      limit: 10,
+    });
+
+    expect(result.pages.map((page) => page.title)).toEqual([
+      'Inherited incident page',
+    ]);
+    expect(result.itemUpdates).toEqual([
+      expect.objectContaining({
+        collectorId: 'notion-pages',
+        itemId: child,
+        slug: 'notion/eeee5555000000000000000000000002',
+      }),
+    ]);
+  });
+
+  it('does not re-ingest a page the inventory already tracks', async () => {
+    const parent = 'aaaa1111-0000-0000-0000-000000000001';
+    const child = 'bbbb2222-0000-0000-0000-000000000002';
+    mockedListCollectorItemsAfter
+      .mockResolvedValueOnce([itemRow(parent)])
+      .mockResolvedValue([]);
+    // Search already found this child during the sweep.
+    mockedListCollectorItemsBySlugPrefix.mockResolvedValue([itemRow(child)]);
+    mockNotionApiRequestJson.mockImplementation(async ({ path }) => {
+      if (path.startsWith('blocks/')) {
+        return {
+          results: [{ object: 'block', id: child, type: 'child_page' }],
+          has_more: false,
+        };
+      }
+      throw new Error(`unexpected page fetch ${path}`);
+    });
+
+    const result = await collectNotionTraversal({
+      config,
+      saved: savedTraverse,
+      limit: 10,
+    });
+
+    expect(result.pages).toEqual([]);
+    expect(
+      mockNotionApiRequestJson.mock.calls.filter(([request]) =>
+        (request as { path: string }).path.startsWith('pages/'),
+      ),
+    ).toHaveLength(0);
+  });
+
+  it('persists its cursor when the request budget ends a pass mid-tree', async () => {
+    const parents = Array.from({ length: 25 }, (_, index) =>
+      itemRow(
+        `cccc3333-0000-0000-0000-0000000000${String(index).padStart(2, '0')}`,
+      ),
+    );
+    mockedListCollectorItemsAfter.mockResolvedValueOnce(parents);
+    mockNotionApiRequestJson.mockImplementation(async ({ path }) => {
+      if (path.startsWith('blocks/')) {
+        return { results: [], has_more: false };
+      }
+      throw new Error(`unexpected path ${path}`);
+    });
+
+    const result = await collectNotionTraversal({
+      config,
+      saved: savedTraverse,
+      limit: 10,
+    });
+
+    const cursor = JSON.parse(result.stateUpdates![0]!.cursor as string) as {
+      mode: string;
+      traverse?: { afterItemId: string; pending: unknown[] };
+    };
+    // 12-request budget over 25 seeded parents: still traversing, with the
+    // remaining parents carried in pending and the seed cursor advanced.
+    expect(cursor.mode).toBe('traverse');
+    expect(cursor.traverse!.pending.length).toBeGreaterThan(0);
+    expect(cursor.traverse!.afterItemId).toBe(parents[24]!.itemId);
+  });
+
+  it('queries data sources behind child databases', async () => {
+    const parent = 'dddd4444-0000-0000-0000-000000000001';
+    const database = 'dddd4444-0000-0000-0000-0000000000db';
+    const dataSource = 'dddd4444-0000-0000-0000-0000000000d5';
+    const row = 'dddd4444-0000-0000-0000-00000000r0w1';
+    mockedListCollectorItemsAfter
+      .mockResolvedValueOnce([itemRow(parent)])
+      .mockResolvedValue([]);
+    mockedListCollectorItemsBySlugPrefix.mockResolvedValue([]);
+    mockNotionApiRequestJson.mockImplementation(async ({ path }) => {
+      if (path === `blocks/${encodeURIComponent(parent)}/children`) {
+        return {
+          results: [{ object: 'block', id: database, type: 'child_database' }],
+          has_more: false,
+        };
+      }
+      if (path === `databases/${encodeURIComponent(database)}`) {
+        return { data_sources: [{ id: dataSource }] };
+      }
+      if (path === `data_sources/${encodeURIComponent(dataSource)}/query`) {
+        return { results: [pageObject(row, 'Row page')], has_more: false };
+      }
+      if (path === `pages/${encodeURIComponent(row)}`) {
+        return pageObject(row, 'Row page');
+      }
+      if (path === `pages/${encodeURIComponent(row)}/markdown`) {
+        return { markdown: 'Row body' };
+      }
+      if (path.startsWith('blocks/')) {
+        return { results: [], has_more: false };
+      }
+      throw new Error(`unexpected path ${path}`);
+    });
+
+    const result = await collectNotionTraversal({
+      config,
+      saved: savedTraverse,
+      limit: 10,
+    });
+
+    expect(result.pages.map((page) => page.title)).toEqual(['Row page']);
+  });
+
+  it('discovers rows of directly-shared databases search never surfaced', async () => {
+    const dataSource = '99991111-0000-0000-0000-0000000000d5';
+    const row = '99991111-0000-0000-0000-000000000101';
+    const searchBodies: unknown[] = [];
+    mockNotionApiRequestJson.mockImplementation(async ({ path, body }) => {
+      if (path === 'search') {
+        searchBodies.push(body);
+        return {
+          results: [{ object: 'data_source', id: dataSource }],
+          has_more: false,
+        };
+      }
+      if (path === `data_sources/${encodeURIComponent(dataSource)}/query`) {
+        return {
+          results: [pageObject(row, 'Shared database row')],
+          has_more: false,
+        };
+      }
+      if (path === `pages/${encodeURIComponent(row)}`) {
+        return pageObject(row, 'Shared database row');
+      }
+      if (path === `pages/${encodeURIComponent(row)}/markdown`) {
+        return { markdown: 'Row body' };
+      }
+      if (path.startsWith('blocks/')) {
+        return { results: [], has_more: false };
+      }
+      throw new Error(`unexpected path ${path}`);
+    });
+
+    const result = await collectNotionTraversal({
+      config,
+      saved: {
+        ...savedTraverse,
+        traverse: { afterItemId: '', pending: [] },
+      },
+      limit: 10,
+    });
+
+    expect(searchBodies).toEqual([
+      expect.objectContaining({
+        filter: { property: 'object', value: 'data_source' },
+      }),
+    ]);
+    expect(result.pages.map((page) => page.title)).toEqual([
+      'Shared database row',
+    ]);
+    expect(JSON.parse(result.stateUpdates![0]!.cursor as string)).toMatchObject(
+      { mode: 'idle' },
+    );
+  });
+
+  it('restarts data-source enumeration when its search cursor expires', async () => {
+    const searchCursors: unknown[] = [];
+    mockNotionApiRequestJson.mockImplementation(async ({ path, body }) => {
+      if (path === 'search') {
+        const cursor = (body as { start_cursor?: string }).start_cursor;
+        searchCursors.push(cursor ?? null);
+        if (cursor) {
+          throw new NotionApiError(
+            'cursor expired',
+            400,
+            'validation_error',
+            null,
+          );
+        }
+        return { results: [], has_more: false };
+      }
+      throw new Error(`unexpected path ${path}`);
+    });
+
+    const result = await collectNotionTraversal({
+      config,
+      saved: {
+        ...savedTraverse,
+        traverse: {
+          afterItemId: '',
+          pending: [],
+          dataSourceCursor: 'stale-cursor',
+        },
+      },
+      limit: 10,
+    });
+
+    // The stale cursor restarts the enumeration from the top instead of
+    // wedging the pass, and the cycle still completes.
+    expect(searchCursors).toEqual(['stale-cursor', null]);
+    expect(JSON.parse(result.stateUpdates![0]!.cursor as string)).toMatchObject(
+      { mode: 'idle' },
+    );
+  });
+
+  it('descends into any block with children, not just a container allowlist', async () => {
+    const parent = 'ffff6666-0000-0000-0000-000000000001';
+    const paragraph = 'ffff6666-0000-0000-0000-0000000000b1';
+    const child = 'ffff6666-0000-0000-0000-000000000002';
+    mockedListCollectorItemsAfter
+      .mockResolvedValueOnce([itemRow(parent)])
+      .mockResolvedValue([]);
+    mockedListCollectorItemsBySlugPrefix.mockResolvedValue([]);
+    mockNotionApiRequestJson.mockImplementation(async ({ path }) => {
+      if (path === `blocks/${encodeURIComponent(parent)}/children`) {
+        // A child page hiding under an indented paragraph — a block type no
+        // container allowlist would name.
+        return {
+          results: [
+            {
+              object: 'block',
+              id: paragraph,
+              type: 'paragraph',
+              has_children: true,
+            },
+          ],
+          has_more: false,
+        };
+      }
+      if (path === `blocks/${encodeURIComponent(paragraph)}/children`) {
+        return {
+          results: [{ object: 'block', id: child, type: 'child_page' }],
+          has_more: false,
+        };
+      }
+      if (path === `pages/${encodeURIComponent(child)}`) {
+        return pageObject(child, 'Indented child page');
+      }
+      if (path === `pages/${encodeURIComponent(child)}/markdown`) {
+        return { markdown: 'Body' };
+      }
+      if (path.startsWith('blocks/')) {
+        return { results: [], has_more: false };
+      }
+      throw new Error(`unexpected path ${path}`);
+    });
+
+    const result = await collectNotionTraversal({
+      config,
+      saved: savedTraverse,
+      limit: 10,
+    });
+
+    expect(result.pages.map((page) => page.title)).toEqual([
+      'Indented child page',
+    ]);
+  });
+
+  it('stops mid-response at the request budget instead of overshooting', async () => {
+    const parent = 'aaaa7777-0000-0000-0000-000000000001';
+    const children = Array.from(
+      { length: 40 },
+      (_, index) =>
+        `aaaa7777-0000-0000-0000-0000000001${String(index).padStart(2, '0')}`,
+    );
+    mockedListCollectorItemsAfter
+      .mockResolvedValueOnce([itemRow(parent)])
+      .mockResolvedValue([]);
+    mockedListCollectorItemsBySlugPrefix.mockResolvedValue([]);
+    mockNotionApiRequestJson.mockImplementation(async ({ path }) => {
+      if (path === `blocks/${encodeURIComponent(parent)}/children`) {
+        return {
+          results: children.map((id) => ({
+            object: 'block',
+            id,
+            type: 'child_page',
+          })),
+          has_more: false,
+        };
+      }
+      const pageMatch = /^pages\/([^/]+)$/.exec(path);
+      if (pageMatch) {
+        return pageObject(decodeURIComponent(pageMatch[1]!), 'Bulk child');
+      }
+      if (path.endsWith('/markdown')) {
+        return { markdown: 'Body' };
+      }
+      if (path.startsWith('blocks/')) {
+        return { results: [], has_more: false };
+      }
+      throw new Error(`unexpected path ${path}`);
+    });
+
+    const result = await collectNotionTraversal({
+      config,
+      saved: savedTraverse,
+      limit: 100,
+    });
+
+    // 24-request budget: 1 list + 11 ingests (2 requests each) = 23; the
+    // twelfth candidate must not start. No page overshoot, and the node
+    // re-queues with the same cursor so the retry resumes exactly here.
+    expect(mockNotionApiRequestJson.mock.calls.length).toBeLessThanOrEqual(24);
+    expect(result.pages.length).toBeLessThanOrEqual(12);
+    const cursor = JSON.parse(result.stateUpdates![0]!.cursor as string) as {
+      mode: string;
+      traverse?: { pending: { kind: string; id: string }[] };
+    };
+    expect(cursor.mode).toBe('traverse');
+    expect(
+      cursor.traverse!.pending.some(
+        (node) => node.kind === 'blocks' && node.id === parent,
+      ),
+    ).toBe(true);
+  });
+
+  it('caps emitted pages at the collector limit', async () => {
+    const parent = 'bbbb8888-0000-0000-0000-000000000001';
+    const children = [
+      'bbbb8888-0000-0000-0000-000000000101',
+      'bbbb8888-0000-0000-0000-000000000102',
+      'bbbb8888-0000-0000-0000-000000000103',
+    ];
+    mockedListCollectorItemsAfter
+      .mockResolvedValueOnce([itemRow(parent)])
+      .mockResolvedValue([]);
+    mockedListCollectorItemsBySlugPrefix.mockResolvedValue([]);
+    mockNotionApiRequestJson.mockImplementation(async ({ path }) => {
+      if (path === `blocks/${encodeURIComponent(parent)}/children`) {
+        return {
+          results: children.map((id) => ({
+            object: 'block',
+            id,
+            type: 'child_page',
+          })),
+          has_more: false,
+        };
+      }
+      const pageMatch = /^pages\/([^/]+)$/.exec(path);
+      if (pageMatch) {
+        return pageObject(decodeURIComponent(pageMatch[1]!), 'Limited child');
+      }
+      if (path.endsWith('/markdown')) {
+        return { markdown: 'Body' };
+      }
+      if (path.startsWith('blocks/')) {
+        return { results: [], has_more: false };
+      }
+      throw new Error(`unexpected path ${path}`);
+    });
+
+    const result = await collectNotionTraversal({
+      config,
+      saved: savedTraverse,
+      limit: 2,
+    });
+
+    expect(result.pages).toHaveLength(2);
+    expect(JSON.parse(result.stateUpdates![0]!.cursor as string)).toMatchObject(
+      { mode: 'traverse' },
+    );
+  });
+
+  it('skims fresh edits each traversal tick instead of pausing freshness', async () => {
+    const editedPage = 'cccc9999-0000-0000-0000-000000000001';
+    const watermark = new Date('2026-08-27T00:00:00Z');
+    mockedListCollectorItemsAfter.mockResolvedValue([]);
+    mockNotionApiRequestJson.mockImplementation(async ({ path }) => {
+      if (path === 'search') {
+        return {
+          results: [
+            {
+              ...pageObject(editedPage, 'Edited during traversal'),
+              last_edited_time: '2026-08-27T00:10:00.000Z',
+            },
+            {
+              // Older than the watermark: proves the skim caught up.
+              ...pageObject('cccc9999-0000-0000-0000-000000000002', 'Old page'),
+              last_edited_time: '2026-08-26T00:00:00.000Z',
+            },
+          ],
+          has_more: false,
+        };
+      }
+      if (path === `pages/${encodeURIComponent(editedPage)}/markdown`) {
+        return { markdown: 'Updated body' };
+      }
+      throw new Error(`unexpected path ${path}`);
+    });
+
+    const result = await collectNotionTraversal({
+      config,
+      saved: savedTraverse,
+      limit: 10,
+      watermark,
+    });
+
+    // The edited page re-ingests during the walk, and the watermark advances
+    // because the skim provably reached pre-watermark territory.
+    expect(result.pages.map((page) => page.title)).toEqual([
+      'Edited during traversal',
+    ]);
+    expect(result.stateUpdates![0]!.watermark).toBeInstanceOf(Date);
+    // Traversal completed (empty inventory) despite the skim running first.
+    expect(JSON.parse(result.stateUpdates![0]!.cursor as string)).toMatchObject(
+      { mode: 'idle' },
+    );
+  });
+
+  it('holds the watermark when the skim cannot emit every edit', async () => {
+    const watermark = new Date('2026-08-27T00:00:00Z');
+    const edits = [
+      'dddd0000-0000-0000-0000-000000000001',
+      'dddd0000-0000-0000-0000-000000000002',
+      'dddd0000-0000-0000-0000-000000000003',
+    ];
+    mockedListCollectorItemsAfter.mockResolvedValue([]);
+    mockNotionApiRequestJson.mockImplementation(async ({ path }) => {
+      if (path === 'search') {
+        return {
+          results: edits.map((id) => ({
+            ...pageObject(id, 'Edited page'),
+            last_edited_time: '2026-08-27T00:10:00.000Z',
+          })),
+          has_more: false,
+        };
+      }
+      if (path.endsWith('/markdown')) {
+        return { markdown: 'Body' };
+      }
+      throw new Error(`unexpected path ${path}`);
+    });
+
+    const result = await collectNotionTraversal({
+      config,
+      saved: savedTraverse,
+      // limit 2 forces the skim to stop before the third edit is emitted.
+      limit: 2,
+      watermark,
+    });
+
+    expect(result.pages).toHaveLength(2);
+    // The unemitted third edit means the watermark must not advance — the
+    // post-traversal incremental pass still owes it.
+    expect(result.stateUpdates![0]!.watermark).toBeUndefined();
+  });
+
+  it('never drops the resume node at the pending cap', async () => {
+    const parent = 'eeee0000-0000-0000-0000-000000000001';
+    // Fill pending to the cap with pre-existing containers.
+    const fullPending = Array.from({ length: 300 }, (_, index) => ({
+      kind: 'blocks' as const,
+      id: `feed0000-0000-0000-0000-${String(index).padStart(12, '0')}`,
+      depth: 1,
+    }));
+    const child = 'eeee0000-0000-0000-0000-000000000101';
+    mockedListCollectorItemsBySlugPrefix.mockResolvedValue([]);
+    mockNotionApiRequestJson.mockImplementation(async ({ path }) => {
+      if (path === `blocks/${encodeURIComponent(parent)}/children`) {
+        return {
+          results: Array.from({ length: 30 }, (_, index) => ({
+            object: 'block',
+            id: `${child.slice(0, -3)}${String(index).padStart(3, '0')}`,
+            type: 'child_page',
+          })),
+          has_more: false,
+        };
+      }
+      const pageMatch = /^pages\/([^/]+)$/.exec(path);
+      if (pageMatch) {
+        return pageObject(decodeURIComponent(pageMatch[1]!), 'Capped child');
+      }
+      if (path.endsWith('/markdown')) {
+        return { markdown: 'Body' };
+      }
+      if (path.startsWith('blocks/')) {
+        return { results: [], has_more: false };
+      }
+      throw new Error(`unexpected path ${path}`);
+    });
+
+    const result = await collectNotionTraversal({
+      config,
+      saved: {
+        ...savedTraverse,
+        traverse: {
+          afterItemId: '',
+          pending: [{ kind: 'blocks', id: parent, depth: 0 }, ...fullPending],
+        },
+      },
+      limit: 5,
+    });
+
+    const cursor = JSON.parse(result.stateUpdates![0]!.cursor as string) as {
+      traverse: { pending: { id: string }[] };
+    };
+    // The budget stops mid-response with the queue at capacity; the resume
+    // node must survive at the front, not be silently dropped.
+    expect(cursor.traverse.pending[0]!.id).toBe(parent);
+    expect(cursor.traverse.pending.length).toBeLessThanOrEqual(300);
+  });
+
+  it('completes back to idle when the inventory is exhausted', async () => {
+    mockedListCollectorItemsAfter.mockResolvedValue([]);
+
+    const result = await collectNotionTraversal({
+      config,
+      saved: savedTraverse,
+      limit: 10,
+    });
+
+    expect(result.pages).toEqual([]);
+    expect(JSON.parse(result.stateUpdates![0]!.cursor as string)).toMatchObject(
+      { mode: 'idle', lastSweepAt: '2026-08-27T00:00:00.000Z' },
+    );
   });
 });

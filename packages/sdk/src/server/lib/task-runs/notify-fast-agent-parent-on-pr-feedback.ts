@@ -98,6 +98,8 @@ export async function notifyFastAgentParentOnPrFeedback(params: {
   feedbackSourceIds?: string[];
   suggestedActionQuestion?: string;
   suggestedActionPrompt?: string;
+  canonicalDeliveryOwned?: boolean;
+  reviewActionDeliveryId?: string;
   reviewResult?: {
     reviewKind: 'initial' | 'sync' | null;
     outcome: string | null;
@@ -150,7 +152,7 @@ export async function notifyFastAgentParentOnPrFeedback(params: {
     status: params.pullRequest.status ?? null,
   };
 
-  await deliverFastAgentParentPrEvent({
+  const delivered = await deliverFastAgentParentPrEvent({
     run: params.run,
     deliveryKey: notifiedResultKey,
     logPrefix: 'notifyFastAgentParentOnPrFeedback',
@@ -158,6 +160,7 @@ export async function notifyFastAgentParentOnPrFeedback(params: {
       conversation: parent.conversation,
       feedbackId,
     },
+    canonicalDeliveryOwned: params.canonicalDeliveryOwned,
     deliver: () =>
       deliverFastAgentParentEvent({
         parent,
@@ -182,6 +185,9 @@ export async function notifyFastAgentParentOnPrFeedback(params: {
           ...(params.suggestedActionPrompt
             ? { suggestedActionPrompt: params.suggestedActionPrompt }
             : {}),
+          ...(params.reviewActionDeliveryId
+            ? { reviewActionDeliveryId: params.reviewActionDeliveryId }
+            : {}),
         },
         lockWaitMs: PR_FEEDBACK_DELIVERY_LOCK_WAIT_MS,
       }),
@@ -201,6 +207,5 @@ export async function notifyFastAgentParentOnPrFeedback(params: {
         },
       }),
   });
-
-  return true;
+  return params.canonicalDeliveryOwned ? delivered === true : true;
 }

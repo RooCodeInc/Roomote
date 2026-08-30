@@ -146,6 +146,20 @@ describe('handleBitbucketPullRequest', () => {
     expect('sourceControlHost' in task.payload).toBe(false);
   });
 
+  it('restores tracked draft status when an open pull request is updated', async () => {
+    await handleBitbucketPullRequest(
+      makePayload({ state: 'OPEN', draft: true }),
+      'pullrequest:updated',
+    );
+
+    expect(mockUpdateTaskPrStatus).toHaveBeenCalledWith(
+      'bitbucket',
+      'acme/backend',
+      42,
+      'draft',
+    );
+  });
+
   it('selects and stamps the webhook host among same-name repositories on multiple hosts', async () => {
     // Two active rows share the repository identity; only the host differs.
     const rows = [
@@ -244,6 +258,9 @@ describe('handleBitbucketPullRequest', () => {
       'acme/backend',
       42,
       'merged',
+    );
+    expect(mockRecordPrStatusChangeInTaskHistory).toHaveBeenLastCalledWith(
+      expect.objectContaining({ targetBranch: 'main' }),
     );
     expect(mockScheduleSourceControlPullRequestFactSync).toHaveBeenCalledWith({
       provider: 'bitbucket',

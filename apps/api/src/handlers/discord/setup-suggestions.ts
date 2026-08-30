@@ -50,6 +50,7 @@ type DiscordSuggestionLaunchClaim = {
   investigationContext: string | null;
   targetRepositoryFullName: string | null;
   targetEnvironmentId?: string | null;
+  usesRouterLaunch: boolean;
   launchClaimedAt: Date;
 };
 
@@ -219,6 +220,7 @@ export async function claimDiscordSuggestionLaunch(input: {
     investigationContext: routed ? null : claimed.investigationContext,
     targetRepositoryFullName: routed ? null : claimed.targetRepositoryFullName,
     targetEnvironmentId: routed ? null : claimed.targetEnvironmentId,
+    usesRouterLaunch: routed,
     launchClaimedAt: claimed.launchClaimedAt,
   };
 }

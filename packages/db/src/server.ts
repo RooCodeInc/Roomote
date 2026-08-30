@@ -44,11 +44,14 @@ export * from './lib/deployment-auth-keypairs';
 export * from './lib/environment-variables';
 export * from './lib/task-id';
 export * from './lib/task-activity-timestamp';
+export * from './lib/task-run-continuation';
 export * from './lib/acting-user';
 export * from './lib/task-suggestion-content-hash';
 export * from './lib/work-item-claims';
+export * from './lib/tracked-suggestion-cards';
 export * from './lib/task-start-parallel-counts';
 export * from './lib/tasks';
+export * from './lib/sessions';
 export * from './lib/task-goals';
 export * from './lib/source-control-provider';
 export * from './lib/sync-task-state';
@@ -89,10 +92,13 @@ export * from './lib/instance-report';
 export * from './lib/deployment-license';
 export * from './lib/license-usage-observations';
 export * from './lib/pr-review-events';
+export * from './lib/pr-review-notification-units';
+export * from './lib/pull-request-mergeability';
 export * from './lib/fast-agent-pr-feedback-deliveries';
 export * from './lib/invocation-identities';
 export * from './lib/webhook-retention';
 export * from './lib/brain';
+export * from './lib/fast-agent-memory';
 export * from './lib/managed-access';
 
 export {
@@ -115,6 +121,15 @@ export {
   tasksRelations,
   taskPins,
   taskPinsRelations,
+  sessions,
+  sessionsRelations,
+  sessionTasks,
+  sessionTasksRelations,
+  sessionParticipants,
+  sessionParticipantsRelations,
+  sessionPins,
+  sessionPinsRelations,
+  sessionBackfillState,
   taskArtifacts,
   taskArtifactsRelations,
   taskPullRequests,
@@ -122,6 +137,10 @@ export {
   prReviewEvents,
   prReviewCycles,
   prReviewEventDeliveries,
+  prReviewNotificationUnits,
+  prReviewNotificationUnitEvents,
+  prReviewNotificationDeliveries,
+  prReviewAutoPreferences,
   taskRuns,
   taskRunsRelations,
   taskRunEvents,
@@ -176,14 +195,15 @@ export {
   slackAuthTokensRelations,
   fastAgentConversations,
   fastAgentConversationsRelations,
+  fastAgentMemoryEvents,
+  fastAgentMessages,
+  fastAgentMessagesRelations,
+  fastAgentProviderMessages,
+  fastAgentProviderMessagesRelations,
   fastAgentPrFeedbackDeliveries,
   fastAgentPrFeedbackDeliveriesRelations,
-  fastAgentConversationAliases,
-  fastAgentConversationAliasesRelations,
   slackConversationMessages,
   slackConversationMessagesRelations,
-  slackQuickAnswers,
-  slackQuickAnswersRelations,
   slackFastIntegrationCalls,
   slackFastIntegrationCallsRelations,
   linearPendingSelections,
@@ -233,5 +253,11 @@ export type {
   SuggestionType,
   ManagerMcpSetupNotificationReason,
   EnvironmentConfigVersionSource,
+  SessionOwnerKind,
+  SessionSourceSurface,
+  SessionStatus,
+  SessionTaskOrigin,
+  SessionParticipantRole,
+  SessionBackfillPhase,
 } from './schema';
 export type { AutomationWorkItemDisposition } from '@roomote/types';

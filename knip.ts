@@ -10,6 +10,8 @@ const config: KnipConfig = {
     // ── Apps ──────────────────────────────────────────────
     'apps/api': {
       project: ['src/**/*.ts'],
+      // Externalized by tsup and loaded from the runtime dependency tree.
+      ignoreDependencies: ['dompurify'],
     },
     'apps/bullmq': {
       project: ['src/**/*.ts'],

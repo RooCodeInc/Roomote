@@ -1,4 +1,8 @@
-import { enqueueTask } from '@roomote/cloud-agents/server';
+import {
+  enqueueTask,
+  resolveApiBaseUrl,
+  sendFastAgentTaskMessageOnce,
+} from '@roomote/cloud-agents/server';
 import {
   and,
   db,
@@ -12,7 +16,10 @@ import {
   taskRuns,
   tasks,
 } from '@roomote/db/server';
-import { queueCommunicationMessage } from '@roomote/communication';
+import {
+  queueCommunicationMessage,
+  queueCommunicationMessageOnce,
+} from '@roomote/communication';
 import { withContention } from '@roomote/redis';
 import {
   clearLatestUserMessage,
@@ -48,6 +55,27 @@ export type PrReviewFollowUpDispatchResult =
   | { outcome: 'queued'; runId: number }
   | { outcome: 'resumed'; runId: number }
   | { outcome: 'unavailable' };
+
+type PrReviewFollowUpDispatchInput = {
+  taskId: string;
+  followUpPrompt: string;
+  actingUserId: string;
+  providerUserId?: string;
+  slackTeamId?: string;
+  idempotencyKey?: string;
+} & (
+  | {
+      provider: 'web';
+      channelId?: never;
+      threadId?: never;
+      idempotencyKey: string;
+    }
+  | {
+      provider: PrReviewActionProvider;
+      channelId: string;
+      threadId: string | null;
+    }
+);
 
 type FastAgentSlackLookup = {
   taskId: string;
@@ -149,27 +177,51 @@ async function findCompletedFastAgentSlackTaskRunWithSnapshot(
  * queue into that task's live run when one exists, otherwise wake that task
  * from its snapshot. Used by button handlers and the auto-handle path.
  */
-export async function dispatchPrReviewFollowUp(input: {
-  provider: PrReviewActionProvider;
-  taskId: string;
-  channelId: string;
-  threadId: string | null;
-  followUpPrompt: string;
-  /** Roomote user the dispatched work is attributed to. */
-  actingUserId: string;
-  /** Provider-native user id shown in the transcript; falls back to actingUserId. */
-  providerUserId?: string;
-  /**
-   * Workspace identity for modern Slack runs. Verified legacy offers can omit
-   * it because their immutable task binding is the routing authority.
-   */
-  slackTeamId?: string;
-}): Promise<PrReviewFollowUpDispatchResult> {
+export async function dispatchPrReviewFollowUp(
+  input: PrReviewFollowUpDispatchInput,
+): Promise<PrReviewFollowUpDispatchResult> {
+  if (input.provider === 'web') {
+    return dispatchWebFollowUp(input);
+  }
   if (input.provider === 'slack') {
-    return dispatchSlackFollowUp(input);
+    return dispatchSlackFollowUp({
+      ...input,
+    });
   }
 
-  return dispatchCommunicationFollowUp(input);
+  return dispatchCommunicationFollowUp({
+    ...input,
+    provider: input.provider,
+  });
+}
+
+async function dispatchWebFollowUp(input: {
+  taskId: string;
+  followUpPrompt: string;
+  actingUserId: string;
+  idempotencyKey: string;
+}): Promise<PrReviewFollowUpDispatchResult> {
+  const dispatched = await sendFastAgentTaskMessageOnce(
+    {
+      userId: input.actingUserId,
+      apiBaseUrl: resolveApiBaseUrl() ?? undefined,
+    },
+    {
+      taskId: input.taskId,
+      message: input.followUpPrompt,
+      clientMessageId: input.idempotencyKey,
+    },
+  );
+  if (!dispatched.success) return { outcome: 'unavailable' };
+
+  const latestRun = await db.query.taskRuns.findFirst({
+    where: eq(taskRuns.taskId, input.taskId),
+    orderBy: [desc(taskRuns.createdAt)],
+    columns: { id: true },
+  });
+  return latestRun
+    ? { outcome: 'queued', runId: latestRun.id }
+    : { outcome: 'unavailable' };
 }
 
 async function dispatchSlackFollowUp(input: {
@@ -180,6 +232,7 @@ async function dispatchSlackFollowUp(input: {
   actingUserId: string;
   providerUserId?: string;
   slackTeamId?: string;
+  idempotencyKey?: string;
 }): Promise<PrReviewFollowUpDispatchResult> {
   const threadTs = input.threadId;
 
@@ -191,7 +244,7 @@ async function dispatchSlackFollowUp(input: {
     text: input.followUpPrompt,
     user: input.providerUserId ?? input.actingUserId,
     userId: input.actingUserId,
-    ts: new Date().toISOString(),
+    ts: input.idempotencyKey ?? new Date().toISOString(),
   };
   const lookupScope = input.slackTeamId
     ? { taskId: input.taskId, slackTeamId: input.slackTeamId }
@@ -216,7 +269,11 @@ async function dispatchSlackFollowUp(input: {
       runId: activeRun.id,
       userId: input.actingUserId,
     });
-    await queueSlackMessage(activeRun.id, queuedMessage);
+    if (input.idempotencyKey) {
+      await queueCommunicationMessageOnce('slack', activeRun.id, queuedMessage);
+    } else {
+      await queueSlackMessage(activeRun.id, queuedMessage);
+    }
 
     return { outcome: 'queued', runId: activeRun.id };
   }
@@ -344,7 +401,11 @@ async function dispatchSlackFollowUp(input: {
     return { outcome: 'unavailable' };
   }
 
-  await queueSlackMessage(resumeRunId, queuedMessage);
+  if (input.idempotencyKey) {
+    await queueCommunicationMessageOnce('slack', resumeRunId, queuedMessage);
+  } else {
+    await queueSlackMessage(resumeRunId, queuedMessage);
+  }
   await clearLatestUserMessage(resumeRunId);
 
   return { outcome: 'resumed', runId: resumeRunId };
@@ -358,6 +419,7 @@ async function dispatchCommunicationFollowUp(input: {
   followUpPrompt: string;
   actingUserId: string;
   providerUserId?: string;
+  idempotencyKey?: string;
 }): Promise<PrReviewFollowUpDispatchResult> {
   const provider = input.provider as 'discord' | 'telegram';
   const conversation = {
@@ -370,7 +432,7 @@ async function dispatchCommunicationFollowUp(input: {
     text: input.followUpPrompt,
     user: input.providerUserId ?? input.actingUserId,
     userId: input.actingUserId,
-    ts: new Date().toISOString(),
+    ts: input.idempotencyKey ?? new Date().toISOString(),
   };
   const activeRun = await findActiveCommunicationTaskRun(conversation);
 
@@ -379,7 +441,15 @@ async function dispatchCommunicationFollowUp(input: {
       runId: activeRun.id,
       userId: input.actingUserId,
     });
-    await queueCommunicationMessage(provider, activeRun.id, queuedMessage);
+    if (input.idempotencyKey) {
+      await queueCommunicationMessageOnce(
+        provider,
+        activeRun.id,
+        queuedMessage,
+      );
+    } else {
+      await queueCommunicationMessage(provider, activeRun.id, queuedMessage);
+    }
 
     return { outcome: 'queued', runId: activeRun.id };
   }

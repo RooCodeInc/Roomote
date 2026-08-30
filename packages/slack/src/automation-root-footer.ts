@@ -5,6 +5,7 @@ import type { SlackNotifier } from './slack-notifier';
 import {
   AUTOMATION_RESULT_ACTIONS_BLOCK_ID,
   AUTOMATION_RESULT_CONTAINER_BLOCK_ID,
+  AUTOMATION_RESULT_HEADER_BLOCK_ID,
   buildAutomationResultBlocks,
 } from './automation-result-blocks';
 
@@ -125,10 +126,31 @@ export async function refreshAutomationRootFooter(params: {
       block.type === 'container' &&
       block.block_id?.startsWith(AUTOMATION_RESULT_CONTAINER_BLOCK_ID),
   );
+  const existingHeader = typedExistingBlocks.find(
+    (block) =>
+      block.type === 'context' &&
+      block.block_id === AUTOMATION_RESULT_HEADER_BLOCK_ID,
+  );
+  const existingHeaderSubtitle =
+    existingHeader?.type === 'context'
+      ? existingHeader.elements?.find(
+          (element, index) =>
+            index > 1 &&
+            typeof element.type === 'string' &&
+            typeof element.text === 'string',
+        )
+      : undefined;
   const existingSubtitle =
     existingContainer?.type === 'container'
       ? existingContainer.subtitle
-      : undefined;
+      : existingHeaderSubtitle &&
+          typeof existingHeaderSubtitle.type === 'string' &&
+          typeof existingHeaderSubtitle.text === 'string'
+        ? {
+            type: existingHeaderSubtitle.type,
+            text: existingHeaderSubtitle.text,
+          }
+        : undefined;
   const contentBlocks = typedExistingBlocks.flatMap((block) => {
     if (
       block.type === 'container' &&
@@ -141,6 +163,14 @@ export async function refreshAutomationRootFooter(params: {
             child.block_id?.startsWith(AUTOMATION_RESULT_ACTIONS_BLOCK_ID)
           ),
       );
+    }
+    if (
+      ('block_id' in block &&
+        block.block_id === AUTOMATION_RESULT_HEADER_BLOCK_ID) ||
+      ('block_id' in block &&
+        block.block_id?.startsWith(AUTOMATION_RESULT_ACTIONS_BLOCK_ID))
+    ) {
+      return [];
     }
     return isAutomationRootFooterBlock(block) ? [] : [block];
   });

@@ -6,6 +6,14 @@ const setOpen = vi.fn();
 const action = vi.fn();
 const queryOptions = vi.fn(() => ({}));
 const useUserMock = vi.fn();
+let sessionQueryData: {
+  sessions: Array<{
+    id: string;
+    title: string;
+    executionCount: number;
+    searchSnippet: string | null;
+  }>;
+} | null = null;
 
 function Icon() {
   return <svg aria-hidden="true" />;
@@ -16,22 +24,25 @@ vi.mock('next/navigation', () => ({
 }));
 
 vi.mock('@tanstack/react-query', () => ({
-  useQuery: () => ({
-    data: [
-      {
-        id: 'task-1',
-        title: 'Most recent task',
-        timestamp: 1,
-        lastMessageAt: 1,
-        taskRun: {
-          payload: {
-            environmentId: undefined,
-            repo: undefined,
-          },
+  useQuery: (options: { queryKey?: unknown[] }) =>
+    options.queryKey?.[0] === 'sessions'
+      ? { data: sessionQueryData }
+      : {
+          data: [
+            {
+              id: 'task-1',
+              title: 'Most recent task',
+              timestamp: 1,
+              lastMessageAt: 1,
+              taskRun: {
+                payload: {
+                  environmentId: undefined,
+                  repo: undefined,
+                },
+              },
+            },
+          ],
         },
-      },
-    ],
-  }),
 }));
 
 vi.mock('@/components/system', () => ({
@@ -62,11 +73,17 @@ vi.mock('@/components/system', () => ({
   CommandItem: ({
     children,
     onSelect,
+    keywords,
   }: {
     children: React.ReactNode;
     onSelect?: () => void;
+    keywords?: string[];
   }) => (
-    <button type="button" onClick={() => onSelect?.()}>
+    <button
+      type="button"
+      data-keywords={keywords?.join(' ')}
+      onClick={() => onSelect?.()}
+    >
       {children}
     </button>
   ),
@@ -79,6 +96,7 @@ vi.mock('@/components/system', () => ({
   Settings: Icon,
   HelpCircle: Icon,
   Plus: Icon,
+  Zap: Icon,
 }));
 
 vi.mock('@/components/sandbox/WorkspaceBadge', () => ({
@@ -115,6 +133,15 @@ vi.mock('@/trpc/client', () => ({
         queryOptions,
       },
     },
+    sessions: {
+      search: {
+        queryOptions: vi.fn((input, options) => ({
+          queryKey: ['sessions', 'search', input],
+          queryFn: async () => null,
+          ...options,
+        })),
+      },
+    },
   }),
 }));
 
@@ -143,6 +170,7 @@ describe('CommandPalette', () => {
       isSignedIn: true,
       user: {},
     });
+    sessionQueryData = null;
   });
 
   it('does not render or query when the user is signed out', () => {
@@ -182,6 +210,25 @@ describe('CommandPalette', () => {
     expect(push).toHaveBeenCalledWith('/task/task-1');
   });
 
+  it('shows matching transcript context for Session results', () => {
+    sessionQueryData = {
+      sessions: [
+        {
+          id: 'session-1',
+          title: 'Prepare release notes',
+          executionCount: 1,
+          searchSnippet: '...preserve the heliotrope detail before release.',
+        },
+      ],
+    };
+
+    render(<CommandPalette />);
+
+    expect(
+      screen.getByText(/preserve the heliotrope detail before release/),
+    ).toBeVisible();
+  });
+
   it('runs custom command actions and closes the palette', () => {
     render(<CommandPalette />);
 
@@ -194,10 +241,10 @@ describe('CommandPalette', () => {
   it('navigates using static navigation items', () => {
     render(<CommandPalette />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Tasks' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Sessions' }));
 
     expect(setOpen).toHaveBeenCalledWith(false);
-    expect(push).toHaveBeenCalledWith('/tasks');
+    expect(push).toHaveBeenCalledWith('/sessions');
   });
 
   it('lists navigation items in the expected order', () => {
@@ -207,9 +254,58 @@ describe('CommandPalette', () => {
       .getAllByRole('button')
       .map((button) => button.textContent?.trim())
       .filter((label): label is string =>
-        ['New Task', 'Tasks', 'Settings', 'Help'].includes(label ?? ''),
+        [
+          'New Task',
+          'Sessions',
+          'Automations',
+          'Analytics',
+          'Settings',
+          'Help',
+        ].includes(label ?? ''),
       );
 
-    expect(navItems).toEqual(['New Task', 'Tasks', 'Settings', 'Help']);
+    expect(navItems).toEqual(['New Task', 'Sessions', 'Settings', 'Help']);
+  });
+
+  it('lets admins find and open recurring automations', () => {
+    useUserMock.mockReturnValue({
+      isSignedIn: true,
+      user: { isAdmin: true },
+    });
+
+    render(<CommandPalette />);
+
+    const automations = screen.getByRole('button', { name: 'Automations' });
+    expect(automations).toHaveAttribute(
+      'data-keywords',
+      'recurring scheduled prompts',
+    );
+
+    const navItems = screen
+      .getAllByRole('button')
+      .map((button) => button.textContent?.trim())
+      .filter((label): label is string =>
+        [
+          'New Task',
+          'Sessions',
+          'Automations',
+          'Analytics',
+          'Settings',
+          'Help',
+        ].includes(label ?? ''),
+      );
+    expect(navItems).toEqual([
+      'New Task',
+      'Sessions',
+      'Automations',
+      'Analytics',
+      'Settings',
+      'Help',
+    ]);
+
+    fireEvent.click(automations);
+
+    expect(setOpen).toHaveBeenCalledWith(false);
+    expect(push).toHaveBeenCalledWith('/automations');
   });
 });

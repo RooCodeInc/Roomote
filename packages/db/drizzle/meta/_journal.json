@@ -358,6 +358,139 @@
       "when": 1787547062677,
       "tag": "0050_wooden_polaris",
       "breakpoints": true
+    },
+    {
+      "idx": 51,
+      "version": "7",
+      "when": 1787601334000,
+      "tag": "0051_petite_celestials",
+      "breakpoints": true
+    },
+    {
+      "idx": 52,
+      "version": "7",
+      "when": 1787613996624,
+      "tag": "0052_good_stick",
+      "breakpoints": true
+    },
+    {
+      "idx": 53,
+      "version": "7",
+      "when": 1787677888886,
+      "tag": "0053_watery_shinobi_shaw",
+      "breakpoints": true
+    },
+    {
+      "idx": 54,
+      "version": "7",
+      "when": 1787681808817,
+      "tag": "0054_chilly_legion",
+      "breakpoints": true
+    },
+    {
+      "idx": 55,
+      "version": "7",
+      "when": 1787703103548,
+      "tag": "0055_black_ben_urich",
+      "breakpoints": true
+    },
+    {
+      "idx": 56,
+      "version": "7",
+      "when": 1787714609532,
+      "tag": "0056_worthless_firebird",
+      "breakpoints": true
+    },
+    {
+      "idx": 57,
+      "version": "7",
+      "when": 1787719035047,
+      "tag": "0057_outstanding_harrier",
+      "breakpoints": true
+    },
+    {
+      "idx": 58,
+      "version": "7",
+      "when": 1787740900410,
+      "tag": "0058_smiling_betty_ross",
+      "breakpoints": true
+    },
+    {
+      "idx": 59,
+      "version": "7",
+      "when": 1787764680385,
+      "tag": "0059_sturdy_starjammers",
+      "breakpoints": true
+    },
+    {
+      "idx": 60,
+      "version": "7",
+      "when": 1787765765044,
+      "tag": "0060_organic_harrier",
+      "breakpoints": true
+    },
+    {
+      "idx": 61,
+      "version": "7",
+      "when": 1787771579749,
+      "tag": "0061_furry_hellfire_club",
+      "breakpoints": true
+    },
+    {
+      "idx": 62,
+      "version": "7",
+      "when": 1787776112381,
+      "tag": "0062_neat_lady_deathstrike",
+      "breakpoints": true
+    },
+    {
+      "idx": 63,
+      "version": "7",
+      "when": 1787897902620,
+      "tag": "0063_organic_garia",
+      "breakpoints": true
+    },
+    {
+      "idx": 64,
+      "version": "7",
+      "when": 1787908038379,
+      "tag": "0064_deep_vengeance",
+      "breakpoints": true
+    },
+    {
+      "idx": 65,
+      "version": "7",
+      "when": 1787922913068,
+      "tag": "0065_sessions_responding_until",
+      "breakpoints": true
+    },
+    {
+      "idx": 66,
+      "version": "7",
+      "when": 1787934945156,
+      "tag": "0066_fresh_warlock",
+      "breakpoints": true
+    },
+    {
+      "idx": 67,
+      "version": "7",
+      "when": 1787942815726,
+      "tag": "0067_clean_storm",
+      "breakpoints": true
+    },
+    {
+      "idx": 68,
+      "version": "7",
+      "when": 1787953320115,
+      "tag": "0068_lovely_gamora",
+      "breakpoints": true
+    },
+    {
+      "idx": 69,
+      "version": "7",
+      "when": 1787974076310,
+      "tag": "0069_legal_ravenous",
+      "breakpoints": true
     }
   ]
 }

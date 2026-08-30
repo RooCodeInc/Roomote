@@ -1,5 +1,6 @@
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
+import { ROOMOTE_MCP_PATH } from '@roomote/auth';
 import {
   Env,
   areCuratedIntegrationsDisabled,
@@ -14,7 +15,7 @@ import {
   eq,
   and,
   inArray,
-  isBrainProviderConfigured,
+  isBrainEnabled,
   isNull,
   isNotNull,
   or,
@@ -39,6 +40,8 @@ import {
   BRAIN_MCP_ID,
   BRAIN_PROXY_PATH,
   CUSTOM_MCP_PROXY_PATH_PREFIX,
+  MCP_INTEGRATION_PROXY_PATH_PREFIX,
+  ROOMOTE_MCP_ID,
   customMcpConnectionId,
   PRODUCT_NAME,
 } from '@roomote/types';
@@ -61,8 +64,18 @@ const USER_SCOPED_MCP_IDS = MCP_INTEGRATIONS.filter(
   (integration) => !isDeploymentScopedMcpIntegration(integration.id),
 ).map((integration) => integration.id);
 
+type ResolvedMcpServerConfig = {
+  url: string;
+  headers: Record<string, string>;
+  disabledTools?: string[];
+};
+
+type ResolvedMcpServerConfigs = Record<string, ResolvedMcpServerConfig>;
+
+type InfoLogger = (...args: unknown[]) => void;
+
 function buildProxyUrl(mcpId: string, requestOrigin: string | null): string {
-  const proxyPath = `/api/mcp/${mcpId}`;
+  const proxyPath = `${MCP_INTEGRATION_PROXY_PATH_PREFIX}${mcpId}`;
   return requestOrigin ? `${requestOrigin}${proxyPath}` : proxyPath;
 }
 
@@ -76,6 +89,73 @@ function getRequestOrigin(req: { url?: string } | undefined): string | null {
   } catch {
     return null;
   }
+}
+
+async function resolveMcpServerConfigs(options: {
+  auth: Parameters<typeof resolveActorScopedUserContext>[0];
+  requestOrigin: string | null;
+  includeRoomoteMemberTools?: boolean;
+  quiet?: boolean;
+}): Promise<ResolvedMcpServerConfigs> {
+  const logInfo: InfoLogger = options.quiet ? () => {} : console.info;
+  const servers: ResolvedMcpServerConfigs = {};
+
+  if (!areCuratedIntegrationsDisabled(Env.R_CURATED_INTEGRATIONS_DISABLED)) {
+    Object.assign(
+      servers,
+      await buildCuratedMcpServerConfigs({
+        auth: options.auth,
+        requestOrigin: options.requestOrigin,
+        logInfo,
+      }),
+    );
+  }
+
+  if (!isCustomMcpDisabled(Env.R_CUSTOM_MCP_DISABLED)) {
+    const custom = await buildCustomMcpServerConfigs(
+      options.requestOrigin,
+      logInfo,
+    );
+
+    for (const [name, config] of Object.entries(custom)) {
+      if (!servers[name]) servers[name] = config;
+    }
+  }
+
+  if (Env.R_GBRAIN_URL && !servers[BRAIN_MCP_ID] && (await isBrainEnabled())) {
+    servers[BRAIN_MCP_ID] = {
+      url: `${options.requestOrigin ?? ''}${BRAIN_PROXY_PATH}`,
+      headers: {},
+    };
+  }
+
+  if (options.includeRoomoteMemberTools && !servers[ROOMOTE_MCP_ID]) {
+    servers[ROOMOTE_MCP_ID] = {
+      url: `${options.requestOrigin ?? ''}${ROOMOTE_MCP_PATH}`,
+      headers: {},
+    };
+  }
+
+  logInfo('[getMcpServerConfigs] Final resolved server keys:', [
+    ...Object.keys(servers),
+  ]);
+
+  return servers;
+}
+
+export async function resolveUserMcpServerConfigs(options: {
+  userId: string;
+  apiBaseUrl?: string;
+  includeRoomoteMemberTools?: boolean;
+}): Promise<ResolvedMcpServerConfigs> {
+  return resolveMcpServerConfigs({
+    auth: { userId: options.userId },
+    requestOrigin: getRequestOrigin({ url: options.apiBaseUrl }),
+    includeRoomoteMemberTools: options.includeRoomoteMemberTools,
+    // This runs on every Fast turn; the per-connection info stream is worker
+    // config-fetch debugging noise at that frequency.
+    quiet: true,
+  });
 }
 
 export const mcpConnectionsRouter = router({
@@ -158,62 +238,12 @@ export const mcpConnectionsRouter = router({
    *
    * Returns a map of sanitized server names to { url, headers }.
    */
-  getMcpServerConfigs: authenticatedProcedure.query(async ({ ctx }) => {
-    const servers: Record<
-      string,
-      { url: string; headers: Record<string, string> }
-    > = {};
-
-    if (!areCuratedIntegrationsDisabled(Env.R_CURATED_INTEGRATIONS_DISABLED)) {
-      Object.assign(servers, await buildCuratedMcpServerConfigs(ctx));
-    }
-
-    // Deployment custom servers are delivered independently of the curated
-    // kill switch: operators who disable the catalog are precisely the
-    // audience for custom servers. Name collisions cannot happen (curated ids
-    // are reserved at save time), but curated entries win defensively.
-    if (!isCustomMcpDisabled(Env.R_CUSTOM_MCP_DISABLED)) {
-      const custom = await buildCustomMcpServerConfigs(
-        getRequestOrigin(ctx.req),
-      );
-
-      for (const [name, config] of Object.entries(custom)) {
-        if (!servers[name]) {
-          servers[name] = config;
-        }
-      }
-    }
-
-    // The Brain: infrastructure, not a catalog integration, so it is
-    // delivered directly whenever the deployment has one. The name cannot
-    // collide ('gbrain' is reserved for custom servers); the worker injects
-    // the run token sandbox-side and the read-only upstream credential never
-    // leaves the API proxy.
-    //
-    // Delivery requires the operator's explicit R_BRAIN_* provider key, not
-    // just Brain plumbing (R_GBRAIN_URL and the gateway token are
-    // template-defaulted on some platforms): an agent told the Brain exists
-    // starts every substantive topic with a preflight against it, which must
-    // never happen on a deployment that only *could* have a Brain. The check
-    // is cached alongside provider resolution, so the common off state costs
-    // nothing.
-    if (
-      Env.R_GBRAIN_URL &&
-      !servers[BRAIN_MCP_ID] &&
-      (await isBrainProviderConfigured())
-    ) {
-      servers[BRAIN_MCP_ID] = {
-        url: `${getRequestOrigin(ctx.req) ?? ''}${BRAIN_PROXY_PATH}`,
-        headers: {},
-      };
-    }
-
-    console.info('[getMcpServerConfigs] Final resolved server keys:', [
-      ...Object.keys(servers),
-    ]);
-
-    return { servers };
-  }),
+  getMcpServerConfigs: authenticatedProcedure.query(async ({ ctx }) => ({
+    servers: await resolveMcpServerConfigs({
+      auth: ctx.auth,
+      requestOrigin: getRequestOrigin(ctx.req),
+    }),
+  })),
 
   /**
    * Deployment-scoped custom stdio MCP servers, with decrypted env values.
@@ -279,11 +309,9 @@ export const mcpConnectionsRouter = router({
  */
 async function buildCustomMcpServerConfigs(
   requestOrigin: string | null,
-): Promise<Record<string, { url: string; headers: Record<string, string> }>> {
-  const servers: Record<
-    string,
-    { url: string; headers: Record<string, string> }
-  > = {};
+  logInfo: InfoLogger,
+): Promise<ResolvedMcpServerConfigs> {
+  const servers: ResolvedMcpServerConfigs = {};
 
   const rows = await db.query.customMcpServers.findMany({
     where: eq(customMcpServers.enabled, true),
@@ -305,7 +333,7 @@ async function buildCustomMcpServerConfigs(
       });
 
       if (connection?.authStatus !== 'authenticated') {
-        console.info(
+        logInfo(
           `[getMcpServerConfigs] Skipping custom server '${row.name}': OAuth connection not authenticated`,
         );
         continue;
@@ -325,8 +353,10 @@ async function buildCustomMcpServerConfigs(
 
 async function buildCuratedMcpServerConfigs(ctx: {
   auth: Parameters<typeof resolveActorScopedUserContext>[0];
-  req?: { url?: string };
-}): Promise<Record<string, { url: string; headers: Record<string, string> }>> {
+  requestOrigin: string | null;
+  logInfo: InfoLogger;
+}): Promise<ResolvedMcpServerConfigs> {
+  const logInfo = ctx.logInfo;
   const actorContext = await resolveActorScopedUserContext(ctx.auth);
 
   const connectionFilters = [];
@@ -356,6 +386,7 @@ async function buildCuratedMcpServerConfigs(ctx: {
   const enabledConnections = await db
     .select({
       enabledMcpId: deploymentMcpEnablements.mcpId,
+      disabledTools: deploymentMcpEnablements.disabledTools,
       connection: mcpConnections,
     })
     .from(deploymentMcpEnablements)
@@ -383,29 +414,24 @@ async function buildCuratedMcpServerConfigs(ctx: {
     connection ? [connection] : [],
   );
 
-  console.info('[getMcpServerConfigs] Enabled MCP IDs found:', [
-    ...enabledMcpIds,
-  ]);
-  console.info('[getMcpServerConfigs] Connection filter counts:', {
+  logInfo('[getMcpServerConfigs] Enabled MCP IDs found:', [...enabledMcpIds]);
+  logInfo('[getMcpServerConfigs] Connection filter counts:', {
     deploymentScopedCount: deploymentScopedEnabledIds.length,
     userScopedCount: actorContext.userId ? userScopedEnabledIds.length : 0,
   });
 
-  const servers: Record<
-    string,
-    { url: string; headers: Record<string, string> }
-  > = {};
-  const requestOrigin = getRequestOrigin(ctx.req);
+  const servers: ResolvedMcpServerConfigs = {};
+  const requestOrigin = ctx.requestOrigin;
 
   for (const connection of connections) {
-    console.info('[getMcpServerConfigs] Processing connection:', {
+    logInfo('[getMcpServerConfigs] Processing connection:', {
       connectionId: connection.id,
       mcpId: connection.mcpId,
       userId: connection.userId,
     });
 
     if (!enabledMcpIds.has(connection.mcpId)) {
-      console.info('[getMcpServerConfigs] Skipping connection:', {
+      logInfo('[getMcpServerConfigs] Skipping connection:', {
         connectionId: connection.id,
         mcpId: connection.mcpId,
         reason: 'mcp_not_enabled',
@@ -415,7 +441,7 @@ async function buildCuratedMcpServerConfigs(ctx: {
 
     const integration = getMcpIntegration(connection.mcpId);
     if (!integration) {
-      console.info('[getMcpServerConfigs] Skipping connection:', {
+      logInfo('[getMcpServerConfigs] Skipping connection:', {
         connectionId: connection.id,
         mcpId: connection.mcpId,
         reason: 'integration_not_found',
@@ -427,13 +453,15 @@ async function buildCuratedMcpServerConfigs(ctx: {
     // by control-plane features exclusively: no MCP server exists for them
     // and their credentials must never be delivered toward a task sandbox.
     if (integration.serverMode === 'credential_only') {
-      console.info('[getMcpServerConfigs] Skipping connection:', {
+      logInfo('[getMcpServerConfigs] Skipping connection:', {
         connectionId: connection.id,
         mcpId: connection.mcpId,
         reason: 'credential_only_integration',
       });
       continue;
     }
+
+    const connectionScope = getMcpIntegrationConnectionScope(integration);
 
     if (connection.mcpId === 'linear') {
       if (!INTEGRATION_PROXY_MCP_IDS.has(connection.mcpId)) {
@@ -446,7 +474,7 @@ async function buildCuratedMcpServerConfigs(ctx: {
           'X-MCP-Client': PRODUCT_NAME,
         },
       };
-      console.info('[getMcpServerConfigs] Included connection:', {
+      logInfo('[getMcpServerConfigs] Included connection:', {
         connectionId: connection.id,
         mcpId: connection.mcpId,
         via: 'linear_proxy',
@@ -454,13 +482,12 @@ async function buildCuratedMcpServerConfigs(ctx: {
       continue;
     }
 
-    const connectionScope = getMcpIntegrationConnectionScope(integration);
     if (
       (connectionScope === 'deployment' && connection.userId !== null) ||
       (connectionScope === 'user' &&
         (!actorContext.userId || connection.userId !== actorContext.userId))
     ) {
-      console.info('[getMcpServerConfigs] Skipping connection:', {
+      logInfo('[getMcpServerConfigs] Skipping connection:', {
         connectionId: connection.id,
         mcpId: connection.mcpId,
         reason: 'scope_mismatch',
@@ -495,7 +522,7 @@ async function buildCuratedMcpServerConfigs(ctx: {
           console.warn(
             `[getMcpServerConfigs] No tokens found for connection ${connection.id}, skipping`,
           );
-          console.info('[getMcpServerConfigs] Skipping connection:', {
+          logInfo('[getMcpServerConfigs] Skipping connection:', {
             connectionId: connection.id,
             mcpId: connection.mcpId,
             reason: 'missing_access_token',
@@ -508,7 +535,7 @@ async function buildCuratedMcpServerConfigs(ctx: {
             url: buildProxyUrl(connection.mcpId, requestOrigin),
             headers,
           };
-          console.info('[getMcpServerConfigs] Included connection:', {
+          logInfo('[getMcpServerConfigs] Included connection:', {
             connectionId: connection.id,
             mcpId: connection.mcpId,
             via: 'proxy',
@@ -531,7 +558,7 @@ async function buildCuratedMcpServerConfigs(ctx: {
           url: buildProxyUrl(connection.mcpId, requestOrigin),
           headers,
         };
-        console.info('[getMcpServerConfigs] Included connection:', {
+        logInfo('[getMcpServerConfigs] Included connection:', {
           connectionId: connection.id,
           mcpId: connection.mcpId,
           via: 'native_proxy',
@@ -539,7 +566,7 @@ async function buildCuratedMcpServerConfigs(ctx: {
         continue;
       } else {
         // No valid auth config — skip pending/incomplete connections
-        console.info('[getMcpServerConfigs] Skipping connection:', {
+        logInfo('[getMcpServerConfigs] Skipping connection:', {
           connectionId: connection.id,
           mcpId: connection.mcpId,
           reason: 'invalid_auth_config',
@@ -550,7 +577,7 @@ async function buildCuratedMcpServerConfigs(ctx: {
       const upstreamUrl = getMcpIntegrationUpstreamUrl(integration);
 
       if (!upstreamUrl) {
-        console.info('[getMcpServerConfigs] Skipping connection:', {
+        logInfo('[getMcpServerConfigs] Skipping connection:', {
           connectionId: connection.id,
           mcpId: connection.mcpId,
           reason: 'missing_upstream_url',
@@ -559,7 +586,7 @@ async function buildCuratedMcpServerConfigs(ctx: {
       }
 
       servers[connection.mcpId] = { url: upstreamUrl, headers };
-      console.info('[getMcpServerConfigs] Included connection:', {
+      logInfo('[getMcpServerConfigs] Included connection:', {
         connectionId: connection.id,
         mcpId: connection.mcpId,
         via: 'upstream',
@@ -569,6 +596,12 @@ async function buildCuratedMcpServerConfigs(ctx: {
         `[getMcpServerConfigs] Failed to build config for ${connection.id}:`,
         error instanceof Error ? error.message : String(error),
       );
+    }
+  }
+
+  for (const server of enabledConnections) {
+    if (server.disabledTools?.length && servers[server.enabledMcpId]) {
+      servers[server.enabledMcpId]!.disabledTools = server.disabledTools;
     }
   }
 

@@ -81,6 +81,7 @@ const RUN_HISTORY_KEYS: BackgroundAutomationKey[] = [
   'suggester',
   'announcer',
   'manager_stats',
+  'provider_usage_limit',
   'sentry_triage',
   'dependabot_triage',
   'codeql_triage',
@@ -88,6 +89,7 @@ const RUN_HISTORY_KEYS: BackgroundAutomationKey[] = [
   'security_auditor',
   'code_quality_auditor',
   'ci_failure_triage',
+  'merge_announcer',
 ];
 
 const RUN_HISTORY_LIMIT_PER_AUTOMATION = 5;
@@ -267,6 +269,7 @@ export async function getBackgroundAgentSettingsCommand(
     reviewAllPullRequestAuthors: boolean;
     reviewOnCommit: boolean;
     reviewDraftPrs: boolean;
+    publishGithubCheck: boolean;
     relayReviewResultsToTask: boolean;
     relayUsers: ReviewerRelayUser[];
     approvePr: boolean;
@@ -285,6 +288,7 @@ export async function getBackgroundAgentSettingsCommand(
   slackChannelAccessWarnings: {
     channelAutoStartSlackChannels: string[];
     managerStatsSlackChannel: string | null;
+    providerUsageLimitSlackChannel: string | null;
     suggesterSlackChannel: string | null;
     announcerSlackChannel: string | null;
     platformIssueSlackChannel: string | null;
@@ -363,6 +367,8 @@ export async function getBackgroundAgentSettingsCommand(
           ({ channelId }) => channelId,
         ),
       managerStatsSlackChannelId: visibleSettings.managerStatsSlackChannelId,
+      providerUsageLimitSlackChannelId:
+        visibleSettings.providerUsageLimitSlackChannelId,
       suggesterSlackChannelId: visibleSettings.suggesterSlackChannelId,
       announcerSlackChannelId: visibleSettings.announcerSlackChannelId,
       platformIssueSlackChannelId: visibleSettings.platformIssueSlackChannelId,
@@ -385,6 +391,8 @@ export async function getBackgroundAgentSettingsCommand(
         ),
       managerSlackChannelId: visibleSettings.managerSlackChannelId,
       managerStatsSlackChannelId: visibleSettings.managerStatsSlackChannelId,
+      providerUsageLimitSlackChannelId:
+        visibleSettings.providerUsageLimitSlackChannelId,
       suggesterSlackChannelId: visibleSettings.suggesterSlackChannelId,
       announcerSlackChannelId: visibleSettings.announcerSlackChannelId,
       platformIssueSlackChannelId: visibleSettings.platformIssueSlackChannelId,

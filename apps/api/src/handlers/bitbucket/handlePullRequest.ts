@@ -138,6 +138,7 @@ export async function handleBitbucketPullRequest(
         prNumber,
         prTitle: pullRequest.title,
         prUrl: getBitbucketPullRequestUrl(payload),
+        targetBranch: getBitbucketPullRequestBaseRef(pullRequest),
         status,
         actorLogin:
           getBitbucketUsername(payload.actor) ?? 'someone on Bitbucket',
@@ -153,6 +154,18 @@ export async function handleBitbucketPullRequest(
     await notifyTerminalPullRequestThreads(payload, repoFullName, status);
 
     return { status: 'ok' };
+  }
+
+  if (
+    eventName === 'pullrequest:created' ||
+    eventName === 'pullrequest:updated'
+  ) {
+    await updateTaskPrStatus(
+      'bitbucket',
+      repoFullName,
+      prNumber,
+      pullRequest.draft ? 'draft' : 'open',
+    );
   }
 
   const taskType = getReviewTaskType(eventName);

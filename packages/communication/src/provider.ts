@@ -21,6 +21,7 @@ export type CommunicationMessage = {
   text: string;
   channelId: string;
   threadId?: string;
+  replyToMessageId?: string;
   fileCount: number;
   files?: CommunicationMessageAttachment[];
 };

@@ -1,10 +1,6 @@
 import { tool, type ToolSet } from 'ai';
 import { createAuthToken } from '@roomote/auth';
-import {
-  ALL_REPOSITORIES,
-  roomoteTaskInspectionArgsSchema,
-  type RoomoteTaskInspectionArgs,
-} from '@roomote/types';
+import { ALL_REPOSITORIES } from '@roomote/types';
 import { z } from 'zod';
 
 import { resolveApiBaseUrl } from '../shared-utils';
@@ -192,13 +188,36 @@ async function callFastAgentTaskApi({
 
 export async function sendFastAgentTaskMessage(
   context: FastAgentTaskApiContext,
-  params: { taskId: string; message: string },
+  params: { taskId: string; message: string; images?: string[] },
 ): Promise<FastAgentTaskToolResult> {
   return callFastAgentTaskApi({
     ...context,
     method: 'POST',
     path: `${FAST_AGENT_TASKS_API_PATH}/${params.taskId}/steer_message`,
-    body: { message: params.message, senderMode: 'fast_agent' },
+    body: {
+      message: params.message,
+      ...(params.images?.length ? { images: params.images } : {}),
+      senderMode: 'fast_agent',
+    },
+  });
+}
+
+export async function sendFastAgentTaskMessageOnce(
+  context: FastAgentTaskApiContext,
+  params: {
+    taskId: string;
+    message: string;
+    clientMessageId: string;
+  },
+): Promise<FastAgentTaskToolResult> {
+  return callFastAgentTaskApi({
+    ...context,
+    method: 'POST',
+    path: `${FAST_AGENT_TASKS_API_PATH}/${params.taskId}/send_message`,
+    body: {
+      message: params.message,
+      clientMessageId: params.clientMessageId,
+    },
   });
 }
 
@@ -210,50 +229,6 @@ export async function cancelFastAgentTask(
     ...context,
     method: 'POST',
     path: `${FAST_AGENT_TASKS_API_PATH}/${taskId}/cancel`,
-  });
-}
-
-export async function inspectFastAgentTasks(
-  context: FastAgentTaskApiContext,
-  params: RoomoteTaskInspectionArgs,
-): Promise<FastAgentTaskToolResult> {
-  const args = roomoteTaskInspectionArgsSchema.parse(params);
-
-  if (args.action === 'search') {
-    return callFastAgentTaskApi({
-      ...context,
-      method: 'GET',
-      path: FAST_AGENT_TASKS_API_PATH,
-      query: {
-        query: args.query,
-        status: args.status,
-        limit: args.limit ? Math.min(args.limit, 100) : undefined,
-        cursor: args.cursor,
-        pullRequest: args.pullRequest,
-      },
-    });
-  }
-
-  const taskId = args.taskId?.trim();
-  if (!taskId) {
-    return {
-      success: false,
-      error: `taskId is required for ${args.action}`,
-    };
-  }
-  const actionPath = {
-    get_summary: 'summary',
-    get_compute_logs: 'compute_logs',
-    get_messages: 'messages',
-  }[args.action];
-
-  return callFastAgentTaskApi({
-    ...context,
-    method: 'GET',
-    path: `${FAST_AGENT_TASKS_API_PATH}/${encodeURIComponent(taskId)}/${actionPath}`,
-    ...(args.action === 'get_messages'
-      ? { query: { limit: args.limit, order: 'desc' } }
-      : {}),
   });
 }
 
@@ -388,7 +363,8 @@ export function createFastAgentTaskTools(
         }),
     }),
     send_task_message: tool({
-      description: 'Send a follow-up message to a running Roomote task.',
+      description:
+        'Send a follow-up message to an active or resumable Roomote task.',
       inputSchema: z
         .object({
           taskId: nonEmptyTrimmedStringSchema.describe(

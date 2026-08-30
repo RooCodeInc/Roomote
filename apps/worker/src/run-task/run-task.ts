@@ -16,6 +16,7 @@ import {
   type QueuedCommunicationMessage,
   getSlackChannelFromTaskPayload,
   getSlackThreadTsFromTaskPayload,
+  getTaskReportConsumerFromPayload,
   isCommunicationProvider,
   SANDBOX_SERVER_PORT,
   SANDBOX_TIMEOUT_MS,
@@ -805,6 +806,10 @@ export const runTask = async ({
     const inferenceGatewayXai =
       unsanitizedEnv[INFERENCE_GATEWAY_XAI_ENV_VAR_NAME] === '1';
 
+    // Task sandboxes are gateway-only. Strip legacy direct OAuth content even
+    // when it came from an old worker snapshot or conflicting deployment env.
+    delete runtimeEnv[OPENCODE_AUTH_CONTENT_ENV_VAR_NAME];
+
     if (
       inferenceGatewayServedKeys.length > 0 ||
       inferenceGatewayChatGpt ||
@@ -828,20 +833,16 @@ export const runTask = async ({
 
       if (inferenceGatewayChatGpt) {
         runtimeEnv[INFERENCE_GATEWAY_CHATGPT_ENV_VAR_NAME] = '1';
-        // Gateway mode holds the OAuth record; it must never reach the sandbox.
-        delete runtimeEnv[OPENCODE_AUTH_CONTENT_ENV_VAR_NAME];
       } else {
         delete runtimeEnv[INFERENCE_GATEWAY_CHATGPT_ENV_VAR_NAME];
       }
       if (inferenceGatewayGitHubCopilot) {
         runtimeEnv[INFERENCE_GATEWAY_GITHUB_COPILOT_ENV_VAR_NAME] = '1';
-        delete runtimeEnv[OPENCODE_AUTH_CONTENT_ENV_VAR_NAME];
       } else {
         delete runtimeEnv[INFERENCE_GATEWAY_GITHUB_COPILOT_ENV_VAR_NAME];
       }
       if (inferenceGatewayXai) {
         runtimeEnv[INFERENCE_GATEWAY_XAI_ENV_VAR_NAME] = '1';
-        delete runtimeEnv[OPENCODE_AUTH_CONTENT_ENV_VAR_NAME];
       } else {
         delete runtimeEnv[INFERENCE_GATEWAY_XAI_ENV_VAR_NAME];
       }
@@ -1047,6 +1048,9 @@ export const runTask = async ({
             process.env.RELEASE_VERSION,
             packageJson.version,
           ),
+          {
+            reportConsumer: getTaskReportConsumerFromPayload(taskRun.payload),
+          },
         ),
         harnessInstructions,
         environmentInstructions,

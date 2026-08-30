@@ -20,6 +20,7 @@ function createTestDiagnostics(now: () => number) {
       hasImages: false,
       modelRole: 'primary',
       turnSource: 'human',
+      userId: 'user-1',
     },
     {
       deployMarker: {
@@ -47,15 +48,26 @@ describe('FastAgentTurnDiagnostics', () => {
     currentTime = 1_060;
     diagnostics.markInferenceStarted();
     currentTime = 1_075;
-    diagnostics.recordOpenCodeProviderRetry(2);
+    diagnostics.recordSessionPath('cold_rebuild');
+    diagnostics.recordOpenCodeSessionReady('opencode-session-1');
+    diagnostics.recordOpenCodeProviderRetry(2, 'temporary upstream failure');
+    diagnostics.recordVisibleReply({ assistantResponse: false });
+    currentTime = 1_085;
+    diagnostics.recordVisibleReply();
     currentTime = 1_100;
     diagnostics.markInferenceFinished();
     currentTime = 1_110;
     diagnostics.finish();
 
     expect(logger.info).toHaveBeenCalledOnce();
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.stringContaining('[Fast Agent] OpenCode provider retry.'),
+    );
     const logMessage = String(logger.info.mock.calls[0]?.[0]);
     expect(logMessage).toContain('serviceDurationMs=110');
+    expect(logMessage).toContain('firstResponseDurationMs=85');
+    expect(logMessage).toContain('sandboxlessStartupDurationMs=60');
+    expect(logMessage).toContain('inferenceToFirstResponseDurationMs=25');
     expect(logMessage).toContain('preInferenceDurationMs=10');
     expect(logMessage).toContain('conversationQueueDurationMs=30');
     expect(logMessage).toContain('inferenceSetupDurationMs=20');
@@ -63,6 +75,38 @@ describe('FastAgentTurnDiagnostics', () => {
     expect(logMessage).toContain('postInferenceDurationMs=10');
     expect(logMessage).toContain('firstOpenCodeProviderRetryElapsedMs=15');
     expect(logMessage).toContain('lastOpenCodeProviderRetryElapsedMs=15');
+    expect(logMessage).toContain('sessionPath="cold_rebuild"');
+    expect(logMessage).toContain('openCodeSessionId="opencode-session-1"');
+    expect(logMessage).toContain('recoveredAfterOpenCodeProviderRetry=true');
+  });
+
+  it('records bounded redacted context for each failed inference attempt', () => {
+    const { diagnostics, logger } = createTestDiagnostics(() => 5_000);
+    const secret = 'sk-provider-secret-1234567890';
+
+    diagnostics.setCanonicalConversationId('canonical-1');
+    diagnostics.recordSessionPath('cold_rebuild');
+    diagnostics.recordModelResolved('openrouter/openai/gpt-test');
+    diagnostics.recordInferenceAttemptFailure({
+      attemptNumber: 1,
+      promptKind: 'bootstrap',
+      stage: 'opencode_setup',
+      elapsedMs: 654,
+      reason: 'endpoint_unreachable',
+      retryable: true,
+      providerRetryEventCount: 0,
+      error: new Error(`authorization: Bearer ${secret}`),
+    });
+
+    expect(logger.warn).toHaveBeenCalledOnce();
+    const logMessage = String(logger.warn.mock.calls[0]?.[0]);
+    expect(logMessage).toContain('[Fast Agent] Inference attempt failed.');
+    expect(logMessage).toContain('attemptNumber=1');
+    expect(logMessage).toContain('stage="opencode_setup"');
+    expect(logMessage).toContain('reason="endpoint_unreachable"');
+    expect(logMessage).toContain('providerRetryEventCount=0');
+    expect(logMessage).toContain('[redacted]');
+    expect(logMessage).not.toContain(secret);
   });
 
   it('records completed and still-active native tools without their payloads', () => {
@@ -72,7 +116,7 @@ describe('FastAgentTurnDiagnostics', () => {
     const finishReply = diagnostics.recordNativeToolStarted('send_chat_reply');
     currentTime = 2_025;
     finishReply();
-    diagnostics.recordNativeToolStarted('manage_tasks');
+    diagnostics.recordNativeToolStarted('launch_task');
     currentTime = 2_040;
     diagnostics.finish();
 
@@ -83,7 +127,7 @@ describe('FastAgentTurnDiagnostics', () => {
     expect(logMessage).toContain(
       'nativeToolStats={"send_chat_reply":{"count":1,"totalDurationMs":25,"maxDurationMs":25}}',
     );
-    expect(logMessage).toContain('activeNativeToolCounts={"manage_tasks":1}');
+    expect(logMessage).toContain('activeNativeToolCounts={"launch_task":1}');
   });
 
   it('redacts and bounds provider errors before writing them', () => {
@@ -122,6 +166,7 @@ describe('FastAgentTurnDiagnostics', () => {
         hasImages: false,
         modelRole: 'primary',
         turnSource: 'human',
+        userId: 'user-1',
       },
       { deployMarker: {}, logger, now: () => currentTime },
     );

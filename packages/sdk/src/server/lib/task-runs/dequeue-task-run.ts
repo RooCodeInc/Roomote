@@ -5,6 +5,7 @@ import {
   type RequestedWorkKind,
   type TaskGoal,
   RunStatus,
+  TaskPayloadKind,
   taskSpecSchema,
   resolveSourceControlProviderFromPayload,
 } from '@roomote/types';
@@ -36,6 +37,7 @@ import {
   claimJobById,
 } from './dequeue-helpers';
 import { resolveSlackTaskRunRouting } from './slack-task-run-routing';
+import { markGithubPrReviewCheckInProgress } from './github-pr-review-check';
 
 /**
  * Task-level launch context returned alongside the run. The worker previously
@@ -480,6 +482,18 @@ export const dequeueTaskRun = async (
 
     const gitHubToken = sourceControlToken.envVars.GH_TOKEN ?? '';
     const sourceControlArtifacts = sourceControlToken.artifactsPatch ?? {};
+
+    if (
+      gitHubToken &&
+      (txResult.taskRun.payloadKind === TaskPayloadKind.GithubPrReview ||
+        txResult.taskRun.payloadKind === TaskPayloadKind.GithubPrReviewSync)
+    ) {
+      await markGithubPrReviewCheckInProgress({
+        taskId: txResult.taskRun.taskId,
+        runId: txResult.taskRun.id,
+        gitHubToken,
+      });
+    }
 
     let prompt: string;
     let harnessInstructions: string | undefined;

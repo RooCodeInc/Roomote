@@ -8,6 +8,7 @@ import {
   getTeamsActivityChannelId,
   getTeamsActivityCommunicationMetadata,
   getTeamsActivityAudioAttachments,
+  getTeamsBaseConversationId,
   getTeamsActivityImageAttachments,
   getTeamsActivityTeamId,
   getTeamsActivityTenantId,
@@ -25,7 +26,15 @@ import {
   buildTaskLaunchAcknowledgementText,
 } from '@roomote/communication/chat-messages';
 import type { TeamsCommunicationProvider } from '@roomote/communication/teams-provider';
-import { createTeamsCommunicationProviderFromRuntimeCredentials } from '@roomote/sdk/server';
+import {
+  continueFastAgentSurfaceReply,
+  createTeamsCommunicationProviderFromRuntimeCredentials,
+  findFastAgentSessionForProviderMessage,
+  findFastAgentSessionForProviderReply,
+  findTeamsConversationRoute,
+  isFastAgentProviderMessage,
+  queueFastAgentSurfaceReply,
+} from '@roomote/sdk/server';
 import {
   exchangeMicrosoftDelegatedGraphToken,
   extractTeamsGraphHostedContentIds,
@@ -63,13 +72,16 @@ import { appendAttachmentTextsToPromptText } from '@roomote/cloud-agents';
 import {
   AUDIO_TRANSCRIPTION_MAX_SIZE_BYTES,
   buildTeamsRoutingContext,
+  buildFastAgentReactionExternalInputQuestion,
   enqueueTask,
   formatAudioAttachmentWarning,
   formatAudioTranscriptionResult,
   getTaskUrl,
+  getOrCreateFastAgentSession,
   resolveAudioTranscriptionMimeType,
   routeTask,
   transcribeAudioAttachment,
+  type FastAgentReactionExternalInput,
   type RoutingWorkspace,
 } from '@roomote/cloud-agents/server';
 
@@ -334,7 +346,7 @@ async function persistTeamsInstallationFromActivity(
       teamName: activity.channelData?.team?.name ?? null,
       channelId: channelId ?? null,
       channelName: activity.channelData?.channel?.name ?? null,
-      conversationId: activity.conversation.id,
+      conversationId: getTeamsBaseConversationId(activity.conversation.id),
       conversationType: activity.conversation.conversationType ?? null,
       botAppId,
       botUserId: activity.recipient?.id ?? null,
@@ -352,7 +364,7 @@ async function persistTeamsInstallationFromActivity(
         teamName: activity.channelData?.team?.name ?? null,
         channelId: channelId ?? null,
         channelName: activity.channelData?.channel?.name ?? null,
-        conversationId: activity.conversation.id,
+        conversationId: getTeamsBaseConversationId(activity.conversation.id),
         conversationType: activity.conversation.conversationType ?? null,
         botAppId,
         botUserId: activity.recipient?.id ?? null,
@@ -1774,6 +1786,12 @@ teams.post('/', async (c) => {
     }
 
     const reactionTargetMessageId = activity.replyToId?.trim();
+    if (
+      (activity.reactionsAdded?.length ?? 0) === 0 &&
+      (activity.reactionsRemoved?.length ?? 0) > 0
+    ) {
+      return c.json({ ok: true, ignored: 'reaction_removed' });
+    }
     const hasLikeReaction = (activity.reactionsAdded ?? []).some(
       (reaction) => reaction.type === 'like',
     );
@@ -1837,13 +1855,99 @@ teams.post('/', async (c) => {
       }
     }
 
-    if (!configuration && !claimedSuggestionReaction) {
-      return c.json({ ok: true, ignored: 'reaction_not_configured' });
-    }
-
     const targetMessageId = activity.replyToId?.trim();
     if (!targetMessageId) {
       return c.json({ ok: true, ignored: 'reaction_target_missing' });
+    }
+
+    if (!configuration && !claimedSuggestionReaction) {
+      const addedReactions = (activity.reactionsAdded ?? [])
+        .map((reaction) => reaction.type.trim().toLowerCase())
+        .filter(isTeamsNativeReactionType)
+        .map((name) => ({ name }));
+      if (addedReactions.length === 0) {
+        return c.json({ ok: true, ignored: 'reaction_not_configured' });
+      }
+
+      const metadata = getTeamsActivityCommunicationMetadata(activity);
+      const tenantId = metadata.teamsTenantId;
+      const fastChannelId = getTeamsBaseConversationId(
+        metadata.communicationChannelId,
+      );
+      const fastSession = tenantId
+        ? await findFastAgentSessionForProviderMessage({
+            provider: 'teams',
+            workspaceId: tenantId,
+            channelId: fastChannelId,
+            messageId: targetMessageId,
+          })
+        : null;
+      if (!fastSession) {
+        return c.json({ ok: true, ignored: 'reaction_not_configured' });
+      }
+
+      const mappedUserId = await findMappedTeamsUserId(activity);
+      if (!mappedUserId) {
+        await postTeamsAccountLinkPrompt({ activity, metadata });
+        return c.json({
+          ok: true,
+          queued: false,
+          reason: 'account_link_required',
+        });
+      }
+      if (fastSession.userId !== mappedUserId) {
+        return c.json({
+          ok: true,
+          queued: false,
+          reason: 'fast_session_user_mismatch',
+        });
+      }
+      if (fastSession.conversation.surface !== 'teams') {
+        return c.json({
+          ok: true,
+          queued: false,
+          reason: 'fast_session_surface_mismatch',
+        });
+      }
+
+      const eventId = activity.id ?? randomUUID();
+      const reactionInput: FastAgentReactionExternalInput = {
+        type: 'reaction_added',
+        provider: 'teams',
+        reactions: addedReactions,
+        reactor: {
+          externalUserId: activity.from?.id ?? mappedUserId,
+          ...(activity.from?.name?.trim()
+            ? { displayName: activity.from.name.trim() }
+            : {}),
+        },
+        message: {
+          workspaceId: tenantId!,
+          channelId: fastChannelId,
+          messageId: targetMessageId,
+          ...(fastSession.conversation.replyTarget.threadId
+            ? { threadId: fastSession.conversation.replyTarget.threadId }
+            : {}),
+        },
+        eventId,
+      };
+      const queued = await queueFastAgentSurfaceReply({
+        sessionId: fastSession.id,
+        userId: mappedUserId,
+        senderDisplayName: activity.from?.name?.trim() || null,
+        question: buildFastAgentReactionExternalInputQuestion(reactionInput),
+        currentMessageId: `teams-reaction:${eventId}`,
+        replyToMessageId: targetMessageId,
+        externalInput: reactionInput,
+      });
+      return c.json(
+        queued
+          ? { ok: true, fastReactionQueued: true }
+          : {
+              ok: true,
+              ignored: 'teams_fast_reaction_route_unavailable',
+            },
+      );
     }
 
     const mentionName = activity.recipient?.name?.trim() || PRODUCT_NAME;
@@ -1945,6 +2049,97 @@ teams.post('/', async (c) => {
             reason: `suggestion_${suggestionLaunch.result}`,
           },
     );
+  }
+  const replyToMessageId = activity.replyToId?.trim();
+  const tenantId = metadata.teamsTenantId;
+  const fastChannelId = getTeamsBaseConversationId(
+    metadata.communicationChannelId,
+  );
+  const fastSession =
+    mappedUserId && tenantId
+      ? await findFastAgentSessionForProviderReply({
+          provider: 'teams',
+          workspaceId: tenantId,
+          channelId: fastChannelId,
+          ...(metadata.communicationThreadId
+            ? { threadId: metadata.communicationThreadId }
+            : {}),
+          ...(replyToMessageId ? { replyToMessageId } : {}),
+          userId: mappedUserId,
+        })
+      : null;
+  if (!fastSession && replyToMessageId) {
+    const isKnownFastMessage = await isFastAgentProviderMessage({
+      provider: 'teams',
+      messageId: replyToMessageId,
+    });
+    if (isKnownFastMessage) {
+      return c.json({
+        ok: true,
+        queued: false,
+        reason: 'fast_session_route_mismatch',
+      });
+    }
+  }
+  if (fastSession) {
+    if (!mappedUserId || fastSession.userId !== mappedUserId) {
+      return c.json({
+        ok: true,
+        queued: false,
+        reason: 'fast_session_user_mismatch',
+      });
+    }
+    if (fastSession.conversation.surface !== 'teams') {
+      return c.json({
+        ok: true,
+        queued: false,
+        reason: 'fast_session_surface_mismatch',
+      });
+    }
+    const activeRoute = await findTeamsConversationRoute(
+      fastSession.conversation.replyTarget.channelId,
+      tenantId,
+    );
+    if (!activeRoute) {
+      return c.json({
+        ok: true,
+        queued: false,
+        reason: 'fast_session_installation_unavailable',
+      });
+    }
+
+    const fastMessage = await attachTeamsActivityMediaToQueuedMessage(
+      activity,
+      queuedMessage,
+      { userId: mappedUserId },
+    );
+    const question = fastMessage.text.trim();
+    if (!question) {
+      return c.json({ ok: true, queued: false, reason: 'fast_message_empty' });
+    }
+    void continueFastAgentSurfaceReply({
+      sessionId: fastSession.id,
+      userId: mappedUserId,
+      senderDisplayName: activity.from?.name?.trim() || null,
+      question,
+      currentMessageId: queuedMessage.ts,
+      ...(fastMessage.images ? { images: fastMessage.images } : {}),
+    })
+      .then((continued) => {
+        if (!continued) {
+          apiLogger.warn(
+            `[teams] Fast session ${fastSession.id} could not resolve an active delivery route`,
+          );
+        }
+      })
+      .catch((error) => {
+        apiLogger.error(
+          `[teams] Fast session ${fastSession.id} continuation failed: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      });
+    return c.json({ ok: true, fastAnswered: true, fastContinued: true });
   }
   const activeRun = await findActiveTeamsTaskRun({
     conversationId: metadata.communicationChannelId,
@@ -2169,6 +2364,62 @@ teams.post('/', async (c) => {
 
         apiLogger.warn(
           `[teams] Failed to resume Teams task from snapshot for conversation ${metadata.communicationChannelId}: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      }
+    }
+
+    if (tenantId) {
+      const providerConversationId =
+        metadata.communicationThreadId ??
+        (activity.conversation.conversationType === 'personal'
+          ? fastChannelId
+          : queuedMessage.ts);
+      const conversation = {
+        surface: 'teams' as const,
+        workspaceId: tenantId,
+        conversationId: `${providerConversationId}:user:${mappedUserId}`,
+        replyTarget: {
+          channelId: fastChannelId,
+          ...(metadata.communicationThreadId
+            ? { threadId: metadata.communicationThreadId }
+            : {}),
+        },
+      };
+
+      try {
+        const session = await getOrCreateFastAgentSession({
+          userId: mappedUserId,
+          conversation,
+        });
+        void continueFastAgentSurfaceReply({
+          sessionId: session.id,
+          userId: mappedUserId,
+          senderDisplayName: activity.from?.name?.trim() || null,
+          question: queuedMessage.text.trim(),
+          currentMessageId: queuedMessage.ts,
+          ...(queuedMessage.images ? { images: queuedMessage.images } : {}),
+        })
+          .then((continued) => {
+            if (!continued) {
+              apiLogger.warn(
+                `[teams] Default Fast session ${session.id} could not resolve an active delivery route`,
+              );
+            }
+          })
+          .catch((error) => {
+            apiLogger.error(
+              `[teams] Default Fast response failed: ${
+                error instanceof Error ? error.message : String(error)
+              }`,
+            );
+          });
+
+        return c.json({ ok: true, fastAnswered: true, fastDefaulted: true });
+      } catch (error) {
+        apiLogger.warn(
+          `[teams] Failed to initialize the default Fast session; falling back to task routing: ${
             error instanceof Error ? error.message : String(error)
           }`,
         );

@@ -11,7 +11,7 @@ import {
   type CommunicationProvider,
   queuedCommunicationMessageSchema,
 } from './communication';
-import { fastAgentParentSchema } from './fast-agent';
+import { fastAgentParentSchema, taskReportConsumerSchema } from './fast-agent';
 import { SANDBOX_SNAPSHOT_EXPIRY_MS } from './compute-providers/worker-runtime';
 import { prActions } from './cloud-agents';
 import { ALL_REPOSITORIES } from './constants';
@@ -236,6 +236,8 @@ export type SuggestionCategory =
   | 'improvement';
 
 export type SuggestionPriority = 'P0' | 'P1' | 'P2' | 'P3';
+export const TASK_SUGGESTION_MESSAGE_METADATA_EVENT_TYPE =
+  'roomote.setup_onboarding_suggestion';
 export const TASK_SUGGESTION_SOURCES = [
   'suggest_ideas',
   'sentry_triage',
@@ -902,7 +904,8 @@ const sharedTaskPayloadSchema = z.object({
 
   /**
    * Source-control provider keyed by repository full name for workspaces that
-   * span multiple providers. Single-provider payloads omit this field.
+   * span multiple providers. Aggregate selections also include this map when
+   * homogeneous so downstream attribution can verify complete coverage.
    */
   repositoryProviders: z.record(sourceControlProviderSchema).optional(),
 
@@ -1042,6 +1045,8 @@ const sharedTaskPayloadSchema = z.object({
   communicationContextInherited: z.boolean().optional(),
   /** Runless Fast parent that owns this task's user-visible lifecycle. */
   fastAgentParent: fastAgentParentSchema.optional(),
+  /** Explicit consumer for the coding agent's completion report. */
+  reportConsumer: taskReportConsumerSchema.optional(),
   /** Native Slack task card in the parent thread of a Fast-mode delegation.
    * Inherited onto every snapshot resume by the queue so the card follows
    * the task. */
@@ -1050,6 +1055,11 @@ const sharedTaskPayloadSchema = z.object({
   fastAgentSessionId: z.string().uuid().optional(),
   /** Provider event that caused this fresh launch; used for idempotent retries. */
   communicationSourceEventId: z.string().optional(),
+  /**
+   * Stable caller-provided key for fresh launches that must recover the same
+   * durable task after an ambiguous response or concurrent retry.
+   */
+  launchIdempotencyKey: z.string().trim().min(1).max(256).optional(),
   /**
    * Discord channel hosting the origin reaction target. Always a channel that
    * contains `discordReactionMessageId` (never an interaction id).

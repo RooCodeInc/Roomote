@@ -202,3 +202,95 @@ describe('normalizeBackgroundAgentSettings emoji trigger', () => {
     expect(settings.callRoomoteViaEmojiName).toBe('eyes');
   });
 });
+
+describe('normalizeBackgroundAgentSettings provider usage limits', () => {
+  it('preserves the legacy alert behavior with hourly checks at 85% by default', () => {
+    const settings = normalizeBackgroundAgentSettings(null);
+
+    expect(settings.providerUsageLimitFrequency).toBe('every_hour');
+    expect(settings.providerUsageLimitThreshold).toBe(85);
+  });
+
+  it('projects persisted disablement and validates the stored threshold', () => {
+    const settings = normalizeBackgroundAgentSettings(null, [
+      {
+        key: 'provider_usage_limit',
+        enabled: false,
+        schedule: {},
+        settings: { threshold: 81 },
+        targets: [],
+      } as unknown as Automation,
+    ]);
+
+    expect(settings.providerUsageLimitFrequency).toBe('off');
+    expect(settings.providerUsageLimitThreshold).toBe(85);
+  });
+
+  it('normalizes enabled alerts to hourly checks and preserves their configuration', () => {
+    const settings = normalizeBackgroundAgentSettings(null, [
+      {
+        key: 'provider_usage_limit',
+        enabled: true,
+        schedule: { mode: 'daily' },
+        settings: { threshold: 70 },
+        targets: [
+          {
+            provider: 'slack',
+            targetKind: 'slack_channel',
+            externalRef: 'C-QUOTAS',
+          },
+        ],
+      } as unknown as Automation,
+    ]);
+
+    expect(settings.providerUsageLimitFrequency).toBe('every_hour');
+    expect(settings.providerUsageLimitThreshold).toBe(70);
+    expect(settings.providerUsageLimitSlackChannelId).toBe('C-QUOTAS');
+  });
+});
+
+describe('normalizeBackgroundAgentSettings Merge announcer destination', () => {
+  it('projects an existing channel target into the standard picker fields', () => {
+    const settings = normalizeBackgroundAgentSettings(null, [
+      {
+        key: 'merge_announcer',
+        enabled: true,
+        schedule: { mode: 'daily' },
+        settings: {},
+        targets: [
+          {
+            provider: 'discord',
+            targetKind: 'discord_channel',
+            externalRef: 'D-UPDATES',
+          },
+        ],
+      } as unknown as Automation,
+    ]);
+
+    expect(settings.mergeAnnouncerTargetProvider).toBe('discord');
+    expect(settings.mergeAnnouncerTargetMode).toBe('channel');
+    expect(settings.mergeAnnouncerTargetChannelId).toBe('D-UPDATES');
+  });
+
+  it('projects an existing user target without exposing its internal user id', () => {
+    const settings = normalizeBackgroundAgentSettings(null, [
+      {
+        key: 'merge_announcer',
+        enabled: true,
+        schedule: { mode: 'daily' },
+        settings: {},
+        targets: [
+          {
+            provider: 'teams',
+            targetKind: 'teams_user',
+            externalRef: 'internal-user-id',
+          },
+        ],
+      } as unknown as Automation,
+    ]);
+
+    expect(settings.mergeAnnouncerTargetProvider).toBe('teams');
+    expect(settings.mergeAnnouncerTargetMode).toBe('direct_message');
+    expect(settings.mergeAnnouncerTargetChannelId).toBeNull();
+  });
+});

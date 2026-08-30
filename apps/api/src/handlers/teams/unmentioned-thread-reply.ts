@@ -63,7 +63,6 @@ function isHumanAuthoredGraphMessage(message: TeamsGraphMessage): boolean {
 function toSharedHistoryMessages(
   threadMessages: TeamsGraphMessage[],
   normalizedBotAppId: string,
-  senderAadObjectId: string,
 ): UnmentionedThreadHistoryMessage[] {
   return threadMessages.map((message) => {
     const isBot = isBotAuthoredGraphMessage(message, normalizedBotAppId);
@@ -83,7 +82,8 @@ function toSharedHistoryMessages(
         (mention) =>
           !isBotGraphMention(mention, normalizedBotAppId) &&
           (Boolean(mention.applicationId) ||
-            (Boolean(mention.userId) && mention.userId !== senderAadObjectId)),
+            (Boolean(mention.userId) &&
+              mention.userId !== message.authorUserId)),
       ),
     };
   });
@@ -191,11 +191,7 @@ export async function shouldRouteUnmentionedTeamsThreadReplyToAgent(params: {
       taskBackedThreadRun.userId === params.mappedUserId,
     isThreadRootAuthor,
     isAutomationReportThread: Boolean(automationReportRun),
-    threadMessages: toSharedHistoryMessages(
-      threadMessages,
-      normalizedBotAppId,
-      senderAadObjectId,
-    ),
+    threadMessages: toSharedHistoryMessages(threadMessages, normalizedBotAppId),
     compareMessageIds: compareNumericMessageIds,
   });
 

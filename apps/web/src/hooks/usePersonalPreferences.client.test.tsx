@@ -150,7 +150,6 @@ describe('usePersonalPreferences', () => {
       colorTheme: 'system',
       mindReaderMode: false,
       narrationMode: false,
-      communicationsFastModeDefault: false,
     });
   });
 

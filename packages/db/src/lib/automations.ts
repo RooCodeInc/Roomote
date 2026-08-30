@@ -14,6 +14,7 @@ import {
   type ConflictResolverMaxPrAgeDays,
   type DependabotTriageFrequency,
   type ManagerStatsFrequency,
+  type ProviderUsageLimitFrequency,
   type PrReviewSettings,
   type SecurityAuditorFrequency,
   type SentryTriageFrequency,
@@ -23,11 +24,14 @@ import {
   BACKGROUND_AUTOMATION_KEYS,
   DEFAULT_CONFLICT_RESOLUTION_MAX_PR_AGE_DAYS,
   DEFAULT_CHANNEL_AUTO_START_LAUNCH_MODE,
+  DEFAULT_PROVIDER_USAGE_LIMIT_FREQUENCY,
+  DEFAULT_PROVIDER_USAGE_LIMIT_THRESHOLD,
   DEFAULT_PR_REVIEW_SETTINGS,
   getTriggerableBackgroundAutomationDescriptorByKey,
   isChannelAutoStartLaunchMode,
   isConflictResolverMaxPrAgeDays,
   isInternalAutomationKey,
+  isProviderUsageLimitThreshold,
   type TriggerableBackgroundAutomationKey,
 } from '@roomote/types';
 
@@ -194,6 +198,14 @@ function getAutomationFrequency<T extends string>(
   return mode && validator(mode) ? mode : ('off' as T);
 }
 
+function getProviderUsageLimitFrequency(
+  automation: Automation | undefined,
+): ProviderUsageLimitFrequency {
+  return automation?.enabled === false
+    ? 'off'
+    : DEFAULT_PROVIDER_USAGE_LIMIT_FREQUENCY;
+}
+
 export function getAutomationTargetRefs(
   automation: Pick<Automation, 'targets'> | undefined,
   provider: BackgroundAutomationProvider,
@@ -340,6 +352,25 @@ const DESTINATION_TARGET_KINDS = [
   ['discord', 'discord_channel'],
 ] as const;
 
+function getAutomationCommunicationTarget(
+  automation: Pick<Automation, 'targets'> | undefined,
+): AutomationTarget | null {
+  for (const [provider, targetKind] of DESTINATION_TARGET_KINDS) {
+    const target = automation?.targets.find(
+      (candidate) =>
+        candidate.provider === provider && candidate.targetKind === targetKind,
+    );
+    if (target) return target;
+  }
+
+  return (
+    automation?.targets.find(
+      (target) =>
+        target.provider !== 'sentry' && target.targetKind.endsWith('_user'),
+    ) ?? null
+  );
+}
+
 /**
  * Provider-neutral destination waterfall: the automation's own channel
  * target wins (Slack first when several providers are targeted), otherwise
@@ -445,6 +476,9 @@ export function normalizeReviewCodeAutomationSettings(
     reviewDraftPrs:
       getAutomationSettingBoolean(automation, 'reviewDraftPrs') ??
       DEFAULT_PR_REVIEW_SETTINGS.reviewDraftPrs,
+    publishGithubCheck:
+      getAutomationSettingBoolean(automation, 'publishGithubCheck') ??
+      DEFAULT_PR_REVIEW_SETTINGS.publishGithubCheck,
     relayReviewResultsToTask:
       getAutomationSettingBoolean(automation, 'relayReviewResultsToTask') ??
       DEFAULT_PR_REVIEW_SETTINGS.relayReviewResultsToTask,
@@ -471,8 +505,17 @@ export async function ensureAutomationRows(
     .values(
       BACKGROUND_AUTOMATION_KEYS.map((key) => ({
         key,
-        enabled: key === 'platform_issue_alerts',
+        enabled:
+          key === 'platform_issue_alerts' || key === 'provider_usage_limit',
         internal: isInternalAutomationKey(key),
+        ...(key === 'provider_usage_limit'
+          ? {
+              schedule: { mode: DEFAULT_PROVIDER_USAGE_LIMIT_FREQUENCY },
+              settings: {
+                threshold: DEFAULT_PROVIDER_USAGE_LIMIT_THRESHOLD,
+              },
+            }
+          : {}),
       })),
     )
     .onConflictDoNothing({ target: automations.key });
@@ -906,6 +949,7 @@ export function normalizeBackgroundAgentSettings(
   const callRoomoteViaEmoji = automationMap.get('call_roomote_via_emoji');
   const channelAutoStart = automationMap.get('slack_channel_auto_start');
   const managerStats = automationMap.get('manager_stats');
+  const providerUsageLimit = automationMap.get('provider_usage_limit');
   const sentryTriage = automationMap.get('sentry_triage');
   const dependabotTriage = automationMap.get('dependabot_triage');
   const codeqlTriage = automationMap.get('codeql_triage');
@@ -913,7 +957,9 @@ export function normalizeBackgroundAgentSettings(
   const securityAuditor = automationMap.get('security_auditor');
   const codeQualityAuditor = automationMap.get('code_quality_auditor');
   const ciFailureTriage = automationMap.get('ci_failure_triage');
+  const mergeAnnouncer = automationMap.get('merge_announcer');
   const platformIssueAlerts = automationMap.get('platform_issue_alerts');
+  const mergeAnnouncerTarget = getAutomationCommunicationTarget(mergeAnnouncer);
 
   const managerSlackChannelId = row?.managerSlackChannelId ?? null;
   const managerDiscordChannelId = row?.managerDiscordChannelId ?? null;
@@ -1007,6 +1053,18 @@ export function normalizeBackgroundAgentSettings(
     ),
     managerStatsLastRunAt: managerStats?.lastRunAt ?? null,
 
+    providerUsageLimitFrequency:
+      getProviderUsageLimitFrequency(providerUsageLimit),
+    providerUsageLimitThreshold: (() => {
+      const threshold =
+        getAutomationSettingNumber(providerUsageLimit, 'threshold') ??
+        DEFAULT_PROVIDER_USAGE_LIMIT_THRESHOLD;
+      return isProviderUsageLimitThreshold(threshold)
+        ? threshold
+        : DEFAULT_PROVIDER_USAGE_LIMIT_THRESHOLD;
+    })(),
+    providerUsageLimitLastRunAt: providerUsageLimit?.lastRunAt ?? null,
+
     sentryTriageFrequency: getAutomationFrequency(
       sentryTriage,
       isFrequencyOf(SENTRY_TRIAGE_FREQUENCIES),
@@ -1055,6 +1113,26 @@ export function normalizeBackgroundAgentSettings(
     ),
     ciFailureTriageLastRunAt: ciFailureTriage?.lastRunAt ?? null,
     ciFailureTriageScanCursor: ciFailureTriage?.scanCursor ?? null,
+
+    mergeAnnouncerFrequency: getAutomationFrequency(
+      mergeAnnouncer,
+      isFrequencyOf(['off', 'daily'] as const),
+    ),
+    mergeAnnouncerLastRunAt: mergeAnnouncer?.lastRunAt ?? null,
+    mergeAnnouncerScanCursor: mergeAnnouncer?.scanCursor ?? null,
+    mergeAnnouncerTargetProvider:
+      mergeAnnouncerTarget?.provider === 'sentry'
+        ? null
+        : (mergeAnnouncerTarget?.provider ?? null),
+    mergeAnnouncerTargetMode: mergeAnnouncerTarget
+      ? mergeAnnouncerTarget.targetKind.endsWith('_user')
+        ? 'direct_message'
+        : 'channel'
+      : null,
+    mergeAnnouncerTargetChannelId:
+      mergeAnnouncerTarget && !mergeAnnouncerTarget.targetKind.endsWith('_user')
+        ? mergeAnnouncerTarget.externalRef
+        : null,
 
     ...Object.fromEntries(
       AUTOMATION_DESTINATION_DESCRIPTORS.flatMap((descriptor) => {

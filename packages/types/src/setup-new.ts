@@ -174,6 +174,14 @@ export type SetupNewState = {
   azureDiskImageBuild: SetupNewComputeProvisioningState | null;
   lastInteractedByUserId: string | null;
   automationRecommendations: AutomationRecommendationBatch | null;
+  /**
+   * When the hosting-injected Roomote inference key was imported from the
+   * process environment into encrypted Settings storage. One-shot: once
+   * stamped, the env value is never imported again, so deleting the Roomote
+   * inference provider (its stored key) disables the trial permanently even
+   * though the hosting platform keeps delivering the variable.
+   */
+  trialInferenceKeyImportedAt: string | null;
 };
 
 export function createEmptySetupNewState(): SetupNewState {
@@ -204,6 +212,7 @@ export function createEmptySetupNewState(): SetupNewState {
     azureDiskImageBuild: null,
     lastInteractedByUserId: null,
     automationRecommendations: null,
+    trialInferenceKeyImportedAt: null,
   };
 }
 

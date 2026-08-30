@@ -38,6 +38,19 @@ describe('buildSlackThreadPermalink', () => {
     ).toBe('https://slack.com/app_redirect?channel=C123456&team=T123456');
   });
 
+  it('links a specific reply when both message and thread timestamps are available', () => {
+    expect(
+      buildSlackThreadPermalink({
+        slackTeamId: 'T123456',
+        slackChannelId: 'C123456',
+        threadTs: '1776819983.463289',
+        messageTs: '1776819999.123456',
+      }),
+    ).toBe(
+      'https://app.slack.com/archives/C123456/p1776819999123456?thread_ts=1776819983.463289&cid=C123456',
+    );
+  });
+
   it('returns null when channel or thread metadata is missing', () => {
     expect(
       buildSlackThreadPermalink({
