@@ -110,7 +110,7 @@ describe('buildSetupRepoDigest', () => {
       mergeConflicts: 1,
     });
     expect(entry?.openPrs).toEqual([
-      { number: 42, title: 'Fix login timeout', ageDays: 9 },
+      { number: 42, untrustedTitle: 'Fix login timeout', ageDays: 9 },
     ]);
   });
 

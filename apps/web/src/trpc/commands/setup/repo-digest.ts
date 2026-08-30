@@ -22,7 +22,9 @@ const SETUP_REPO_DIGEST_MAX_TITLE_LENGTH = 120;
 
 type SetupRepoDigestOpenPr = {
   number: number;
-  title: string;
+  /** Contributor-authored text. Named so the wire format itself marks it as
+   * untrusted; the setup prompt tells the agent to treat it as data only. */
+  untrustedTitle: string;
   ageDays?: number;
   draft?: boolean;
 };
@@ -150,7 +152,7 @@ export async function buildSetupRepoDigest({
                   : Number.NaN;
                 return {
                   number: pullRequest.number,
-                  title: pullRequest.title.slice(
+                  untrustedTitle: pullRequest.title.slice(
                     0,
                     SETUP_REPO_DIGEST_MAX_TITLE_LENGTH,
                   ),
