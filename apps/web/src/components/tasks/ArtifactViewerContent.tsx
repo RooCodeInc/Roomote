@@ -57,6 +57,7 @@ const extensionToLanguage: Record<string, BundledLanguage> = {
   xml: 'xml',
   html: 'html',
   htm: 'html',
+  xhtml: 'html',
   css: 'css',
   scss: 'scss',
   less: 'less',
@@ -113,6 +114,20 @@ function getLanguageFromPath(path: string): BundledLanguage {
 
   const ext = filename.split('.').pop()?.toLowerCase() ?? '';
   return extensionToLanguage[ext] ?? ('plaintext' as BundledLanguage);
+}
+
+function isHtmlArtifact(contentType: string, path: string): boolean {
+  const normalizedContentType =
+    contentType.split(';', 1)[0]?.trim().toLowerCase() ?? '';
+  const extension = path.split('.').pop()?.toLowerCase();
+
+  return (
+    normalizedContentType === 'text/html' ||
+    normalizedContentType === 'application/xhtml+xml' ||
+    extension === 'html' ||
+    extension === 'htm' ||
+    extension === 'xhtml'
+  );
 }
 
 /**
@@ -225,17 +240,26 @@ export function ArtifactViewerContent({
     );
   }
 
+  const isHTML = isHtmlArtifact(artifact.contentType, artifact.path);
   const isMarkdown =
-    artifact.contentType.includes('markdown') || artifact.path.endsWith('.md');
+    !isHTML &&
+    (artifact.contentType.includes('markdown') ||
+      artifact.path.endsWith('.md'));
   const isImage = artifact.contentType.startsWith('image/');
   const isVideo = artifact.contentType.startsWith('video/');
   const isPDF = artifact.contentType === 'application/pdf';
   const isText =
-    !isMarkdown && !isImage && !isVideo && !isPDF && !!artifact.content;
+    !isHTML &&
+    !isMarkdown &&
+    !isImage &&
+    !isVideo &&
+    !isPDF &&
+    !!artifact.content;
   const language = getLanguageFromPath(artifact.path);
 
   const canRender =
     isText ||
+    (isHTML && artifact.content) ||
     (isMarkdown && artifact.content) ||
     ((isImage || isVideo || isPDF) && artifact.downloadUrl);
 
@@ -411,6 +435,27 @@ export function ArtifactViewerContent({
                   />
                 </div>
               )}
+              {canRender && isHTML && (
+                <div className="flex items-center gap-2">
+                  <Label
+                    htmlFor="html-code-mode"
+                    className="cursor-pointer text-xs"
+                  >
+                    Preview
+                  </Label>
+                  <Switch
+                    id="html-code-mode"
+                    checked={isRaw}
+                    onCheckedChange={setIsRaw}
+                  />
+                  <Label
+                    htmlFor="html-code-mode"
+                    className="cursor-pointer text-xs"
+                  >
+                    Code
+                  </Label>
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -418,7 +463,7 @@ export function ArtifactViewerContent({
         <div
           className={cn(
             'ph-no-capture flex-1 min-h-0 bg-card overflow-y-auto h-full',
-            (isMarkdown && !isRaw) || isPDF || isVideo
+            (isMarkdown && !isRaw) || (isHTML && !isRaw) || isPDF || isVideo
               ? 'overflow-x-hidden'
               : 'overflow-x-auto',
           )}
@@ -445,15 +490,27 @@ export function ArtifactViewerContent({
                 </div>
               )}
 
-              {((isMarkdown && isRaw) || isText) && artifact.content && (
-                <div className="min-w-0 overflow-x-auto p-2 text-sm leading-relaxed text-foreground">
-                  <CodeBlock
-                    code={artifact.content}
-                    language={language}
-                    className="w-max min-w-full max-w-none border-none bg-transparent"
-                  />
-                </div>
+              {isHTML && !isRaw && artifact.content && (
+                <iframe
+                  srcDoc={artifact.content}
+                  sandbox=""
+                  referrerPolicy="no-referrer"
+                  loading="lazy"
+                  className="block h-full min-h-96 w-full border-0 bg-white md:min-h-0"
+                  title={`Preview of ${artifact.path}`}
+                />
               )}
+
+              {((isMarkdown && isRaw) || (isHTML && isRaw) || isText) &&
+                artifact.content && (
+                  <div className="min-w-0 overflow-x-auto p-2 text-sm leading-relaxed text-foreground">
+                    <CodeBlock
+                      code={artifact.content}
+                      language={language}
+                      className="w-max min-w-full max-w-none border-none bg-transparent"
+                    />
+                  </div>
+                )}
 
               {isImage && (
                 <MediaViewerImage
