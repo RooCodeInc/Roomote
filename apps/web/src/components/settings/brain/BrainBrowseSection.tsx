@@ -97,7 +97,7 @@ const PageListRow = memo(function PageListRow({
       data-memory-slug={page.slug}
       onClick={() => onSelect(page.slug)}
       className={cn(
-        'w-full cursor-pointer rounded-lg px-3 py-2 text-left transition-colors',
+        'w-full min-w-0 max-w-full cursor-pointer overflow-hidden rounded-lg px-3 py-2 text-left transition-colors',
         selected ? 'bg-accent' : 'hover:bg-accent/60',
       )}
     >
@@ -143,15 +143,13 @@ function PagePreview({ slug }: { slug: string }) {
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-3 divide-y">
-      <div className="space-y-1 px-4 pb-3">
-        <p className="text-sm font-semibold truncate line-clamp-1">
-          {data.title}
-        </p>
-        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+    <div className="flex h-full min-h-0 min-w-0 flex-col gap-3 divide-y overflow-hidden">
+      <div className="min-w-0 space-y-1 px-4 pb-3">
+        <p className="truncate text-sm font-semibold">{data.title}</p>
+        <div className="flex min-w-0 items-center gap-2 text-sm text-muted-foreground">
           {data.updatedAt ? (
             <>
-              <span>
+              <span className="shrink-0">
                 {formatDistanceToNowCompact(data.updatedAt, {
                   addSuffix: true,
                 })}
@@ -159,16 +157,18 @@ function PagePreview({ slug }: { slug: string }) {
               <span aria-hidden="true">·</span>
             </>
           ) : null}
-          <span className="font-mono text-[0.9em]">{data.slug}</span>
+          <span className="min-w-0 truncate font-mono text-[0.9em]">
+            {data.slug}
+          </span>
         </div>
       </div>
       {/*
        * Brain memories are distilled from tasks and integrations: cross-user
        * content, rendered strictly as text.
        */}
-      <div className="min-h-0 flex-1 overflow-y-auto scroll-thin px-4">
-        <div className="w-full max-w-2xl">
-          <Streamdown className="text-sm **:data-[streamdown='heading-1']:text-xl! **:data-[streamdown='heading-2']:text-base! **:data-[streamdown='heading-3']:text-base!">
+      <div className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto scroll-thin px-4">
+        <div className="w-full min-w-0 max-w-2xl">
+          <Streamdown className="break-words text-sm **:data-[streamdown='heading-1']:text-xl! **:data-[streamdown='heading-2']:text-base! **:data-[streamdown='heading-3']:text-base!">
             {data.content ?? 'This memory has no stored content.'}
           </Streamdown>
         </div>
@@ -310,11 +310,11 @@ export function BrainBrowseSection({
   );
 
   const pageList = (
-    <div className="flex min-h-0 flex-1 flex-col">
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
       <div
         ref={listRef}
         onKeyDown={handleListKeyDown}
-        className="min-h-0 flex-1 space-y-0.5 overflow-y-auto scroll-thin pr-2"
+        className="min-h-0 min-w-0 flex-1 space-y-0.5 overflow-y-auto scroll-thin pr-2"
       >
         {pages.map((page) => (
           <PageListRow
@@ -385,14 +385,14 @@ export function BrainBrowseSection({
           />
         </div>
 
-        <div className="flex flex-wrap items-center gap-1.5 mb-6">
+        <div className="mb-6 flex min-w-0 flex-wrap items-center gap-1.5">
           <Badge
             asChild
             variant={namespaceId === null ? 'default' : 'secondary'}
           >
             <button
               type="button"
-              className="cursor-pointer"
+              className="max-w-full cursor-pointer"
               onClick={() => selectNamespace(null)}
             >
               All
@@ -406,7 +406,7 @@ export function BrainBrowseSection({
             >
               <button
                 type="button"
-                className="cursor-pointer"
+                className="max-w-full cursor-pointer"
                 onClick={() =>
                   selectNamespace(
                     namespaceId === namespace.id ? null : namespace.id,
@@ -420,7 +420,7 @@ export function BrainBrowseSection({
                     backgroundColor: brainNamespaceColor(namespace.id),
                   }}
                 />
-                {namespace.label}
+                <span className="min-w-0 truncate">{namespace.label}</span>
               </button>
             </Badge>
           ))}
@@ -443,10 +443,10 @@ export function BrainBrowseSection({
             description="Nothing in Memory matches this search."
           />
         ) : selectedSlug ? (
-          <div className="grid h-140 grid-cols-1 grid-rows-2 divide-y md:grid-cols-[280px_1fr] md:grid-rows-1 md:divide-x md:divide-y-0 overflow-clip">
+          <div className="grid h-140 min-w-0 grid-cols-1 grid-rows-2 divide-y overflow-clip md:grid-cols-[minmax(0,280px)_minmax(0,1fr)] md:grid-rows-1 md:divide-x md:divide-y-0">
             {/* The list and preview stack below `md`, then sit side by side. */}
             {pageList}
-            <div className="min-h-0 flex-1">
+            <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
               <PagePreview slug={selectedSlug} />
             </div>
           </div>
