@@ -198,6 +198,8 @@ export {
   fastAgentMemoryEvents,
   fastAgentMessages,
   fastAgentMessagesRelations,
+  fastAgentParentEvents,
+  fastAgentParentEventsRelations,
   fastAgentProviderMessages,
   fastAgentProviderMessagesRelations,
   fastAgentPrFeedbackDeliveries,

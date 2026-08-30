@@ -204,6 +204,15 @@ export { createTelegramCommunicationProviderFromRuntimeCredentials } from './lib
 export { syncTaskCommunicationThreadTitleBestEffort } from './lib/task-thread-title-sync';
 
 export {
+  buildFastAgentParentEventKey,
+  drainFastAgentParentEvents,
+  enqueueFastAgentParentEvent,
+  FAST_AGENT_PARENT_EVENT_QUEUE_NAME,
+  recoverPendingFastAgentParentEvents,
+  type FastAgentParentEventQueueRequest,
+} from './lib/fast-agent-parent-event-queue';
+
+export {
   getCommunicationProviderAdapter,
   type RuntimeCommunicationProviderAdapter,
 } from './lib/communication-providers';
