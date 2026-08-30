@@ -156,7 +156,7 @@ function ToolDetailSection({
         maxHeight={maxHeight}
         variant="compact"
         highlight={false}
-        className="[&>div]:rounded-none [&>div]:bg-transparent [&_pre]:px-0 [&_pre]:py-0"
+        className="[&>div]:rounded-none [&>div]:bg-transparent [&_pre]:min-w-0 [&_pre]:whitespace-pre-wrap [&_pre]:wrap-break-word [&_pre]:px-0 [&_pre]:py-0"
       />
     </section>
   );
