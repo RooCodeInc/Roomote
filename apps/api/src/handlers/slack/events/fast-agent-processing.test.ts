@@ -3,6 +3,7 @@ const mocks = vi.hoisted(() => ({
   hasSession: vi.fn(),
   releaseLock: vi.fn(),
   answerQuestion: vi.fn(),
+  findConversation: vi.fn(),
   postThreadMessage: vi.fn(),
   recordProviderMessage: vi.fn(),
 }));
@@ -25,6 +26,7 @@ vi.mock('@roomote/redis', async (importOriginal) => {
 vi.mock('@roomote/cloud-agents/server', () => ({
   acquireFastAgentTurnLock: mocks.acquireLock,
   answerFastAgentQuestion: mocks.answerQuestion,
+  fastAgentConversationRepository: { findById: mocks.findConversation },
   extractPromptTextAttachments: vi.fn(
     async (inputs: Array<{ filename: string; bytes: Uint8Array }>) => ({
       attachmentTexts: inputs.map(
@@ -37,7 +39,7 @@ vi.mock('@roomote/cloud-agents/server', () => ({
   hasFastAgentSession: mocks.hasSession,
   getOrCreateFastAgentSession: vi
     .fn()
-    .mockResolvedValue({ id: 'fast-session-1' }),
+    .mockResolvedValue({ id: 'fast-session-1', title: null }),
 }));
 
 vi.mock('@roomote/cloud-agents', () => ({

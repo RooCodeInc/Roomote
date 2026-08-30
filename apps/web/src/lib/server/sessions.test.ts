@@ -1,6 +1,7 @@
 import {
   db,
   eq,
+  ensureSessionForFastConversation,
   fastAgentConversations,
   fastAgentMessages,
   runFactory,
@@ -17,6 +18,12 @@ import {
   ROOMOTE_RUNTIME_TASK_MESSAGE_PROTOCOL,
 } from '@roomote/types';
 
+const syncFastSlackTitle = vi.hoisted(() => vi.fn());
+
+vi.mock('@roomote/sdk/server', () => ({
+  syncFastAgentSlackTitleBestEffort: syncFastSlackTitle,
+}));
+
 import {
   findAccessibleSession,
   getLatestExternalSessionEvent,
@@ -29,6 +36,10 @@ import {
 } from './sessions';
 
 describe('unified Session queries', () => {
+  beforeEach(() => {
+    syncFastSlackTitle.mockReset();
+    syncFastSlackTitle.mockResolvedValue(undefined);
+  });
   it('scopes list and detail reads to owners, participants, and admins', async () => {
     const owner = await userFactory.create();
     const stranger = await userFactory.create();
@@ -699,5 +710,43 @@ describe('unified Session queries', () => {
         { sessionId: session.id, pinned: true },
       ),
     ).resolves.toEqual({ success: true, pinned: true });
+  });
+
+  it('persists and synchronizes manual Fast session title changes', async () => {
+    const owner = await userFactory.create();
+    const [conversation] = await db
+      .insert(fastAgentConversations)
+      .values({
+        userId: owner.id,
+        surface: 'slack',
+        workspaceId: `T-manual-${Date.now()}`,
+        conversationId: '100.001',
+        currentReplyChannelId: 'C123',
+        currentReplyThreadId: '100.001',
+        title: 'Original title',
+      })
+      .returning();
+    const session = await ensureSessionForFastConversation(
+      db,
+      conversation!.id,
+    );
+
+    await updateSessionMetadata(
+      { userId: owner.id, isAdmin: false },
+      session!.id,
+      { title: 'Renamed Fast session' },
+    );
+
+    await expect(
+      db.query.fastAgentConversations.findFirst({
+        where: eq(fastAgentConversations.id, conversation!.id),
+      }),
+    ).resolves.toMatchObject({
+      title: 'Renamed Fast session',
+      titleEditedByUserAt: expect.any(Date),
+    });
+    expect(syncFastSlackTitle).toHaveBeenCalledWith({
+      conversationId: conversation!.id,
+    });
   });
 });

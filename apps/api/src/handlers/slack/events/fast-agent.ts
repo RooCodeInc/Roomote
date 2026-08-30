@@ -2,6 +2,7 @@ import {
   getOrCreateFastAgentSession,
   acquireFastAgentTurnLock,
   answerFastAgentQuestion,
+  fastAgentConversationRepository,
   hasFastAgentSession,
   type FastAgentActiveTask,
   type LaunchFastAgentTask,
@@ -232,9 +233,13 @@ export async function processFastAgentMessage(params: {
       adapter: {
         activity: createFastAgentSlackSessionActivity({
           slack,
+          workspaceId: teamId,
           channel: event.channel,
           threadTs: threadId,
           title: session.title,
+          resolveTitle: async () =>
+            (await fastAgentConversationRepository.findById({ id: session.id }))
+              ?.title,
         }),
         resolveMcpServerConfigs: () =>
           resolveUserMcpServerConfigs({

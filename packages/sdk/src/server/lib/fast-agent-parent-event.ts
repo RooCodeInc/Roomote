@@ -547,9 +547,13 @@ async function createSlackFastAgentParentTurn(
     adapter: {
       activity: createFastAgentSlackSessionActivity({
         slack,
+        workspaceId: conversation.workspaceId,
         channel: conversation.replyTarget.channelId,
         threadTs: conversation.replyTarget.threadId,
         title: session.title,
+        resolveTitle: async () =>
+          (await fastAgentConversationRepository.findById({ id: session.id }))
+            ?.title,
       }),
       launchTask: createFastAgentSlackLiveTaskLauncher({
         slack,

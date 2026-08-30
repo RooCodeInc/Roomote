@@ -4,6 +4,7 @@ const mocks = vi.hoisted(() => ({
   acquireLock: vi.fn(),
   answerQuestion: vi.fn(),
   createActivity: vi.fn(() => ({ start: vi.fn(), settle: vi.fn() })),
+  findConversation: vi.fn(),
   findSession: vi.fn(),
   getActiveTasks: vi.fn(),
   lookupUser: vi.fn(),
@@ -19,6 +20,7 @@ vi.mock('@roomote/cloud-agents/server', () => ({
     (input: unknown) =>
       `<external_input>${JSON.stringify(input)}</external_input>`,
   ),
+  fastAgentConversationRepository: { findById: mocks.findConversation },
   getActiveFastAgentTasks: mocks.getActiveTasks,
 }));
 
@@ -107,9 +109,11 @@ describe('Fast Slack reaction input', () => {
     await vi.waitFor(() => expect(mocks.answerQuestion).toHaveBeenCalledOnce());
     expect(mocks.createActivity).toHaveBeenCalledWith({
       slack: expect.anything(),
+      workspaceId: 'T1',
       channel: 'C1',
       threadTs: '100.000',
       title: 'Investigate Slack agent status',
+      resolveTitle: expect.any(Function),
     });
     expect(mocks.findSession).toHaveBeenCalledWith({
       provider: 'slack',
