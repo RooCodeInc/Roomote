@@ -1352,25 +1352,48 @@ export async function deliverFastAgentParentEvent(params: {
   const turnSignal = turnTimeout
     ? AbortSignal.any([releaseTurnLock.signal, turnAbortController.signal])
     : releaseTurnLock.signal;
+  let removeTurnAbortListener: (() => void) | undefined;
+  const turnAborted = new Promise<never>((_resolve, reject) => {
+    const rejectWithAbortReason = () => {
+      reject(
+        turnSignal.reason instanceof Error
+          ? turnSignal.reason
+          : new Error('Fast parent event delivery was aborted.'),
+      );
+    };
+    if (turnSignal.aborted) {
+      rejectWithAbortReason();
+      return;
+    }
+    turnSignal.addEventListener('abort', rejectWithAbortReason, { once: true });
+    removeTurnAbortListener = () =>
+      turnSignal.removeEventListener('abort', rejectWithAbortReason);
+  });
+  const withinTurnBudget = <T>(operation: Promise<T>) =>
+    Promise.race([operation, turnAborted]);
 
   try {
     if (params.event.type === 'pull_request_opened') {
-      const currentRun = await db.query.taskRuns.findFirst({
-        where: eq(taskRuns.id, params.event.runId),
-        columns: { status: true },
-      });
+      const currentRun = await withinTurnBudget(
+        db.query.taskRuns.findFirst({
+          where: eq(taskRuns.id, params.event.runId),
+          columns: { status: true },
+        }),
+      );
       if (!currentRun || EXITED_RUN_STATUSES.has(currentRun.status)) {
         return 'skipped';
       }
     }
 
-    const parentTurn = await createFastAgentParentTurn({
-      parent: params.parent,
-      event: params.event,
-      onReplyPosted: () => {
-        replyPosted = true;
-      },
-    });
+    const parentTurn = await withinTurnBudget(
+      createFastAgentParentTurn({
+        parent: params.parent,
+        event: params.event,
+        onReplyPosted: () => {
+          replyPosted = true;
+        },
+      }),
+    );
     const defaultTaskModel =
       params.event.type === 'automation_triggered'
         ? params.event.defaultTaskModel
@@ -1387,7 +1410,7 @@ export async function deliverFastAgentParentEvent(params: {
     // origin matches its own apiBaseUrl, so a mismatched pair silently drops
     // every deployment MCP server from parent-event turns.
     const apiBaseUrl = resolveApiBaseUrl() ?? undefined;
-    await answerFastAgentQuestion({
+    const answer = answerFastAgentQuestion({
       question: `<platform_event>${JSON.stringify(params.event)}</platform_event>`,
       userId: parentTurn.userId,
       conversation: parentTurn.conversation,
@@ -1437,6 +1460,7 @@ export async function deliverFastAgentParentEvent(params: {
           : {}),
       },
     });
+    await withinTurnBudget(answer);
     return 'delivered';
   } catch (error) {
     if (error instanceof FastAgentParentEventDeliveryError) {
@@ -1448,6 +1472,7 @@ export async function deliverFastAgentParentEvent(params: {
     );
   } finally {
     if (turnTimeout) clearTimeout(turnTimeout);
+    removeTurnAbortListener?.();
     await releaseTurnLock();
   }
 }
