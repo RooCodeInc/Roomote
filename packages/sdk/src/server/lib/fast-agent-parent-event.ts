@@ -1410,58 +1410,57 @@ export async function deliverFastAgentParentEvent(params: {
     // origin matches its own apiBaseUrl, so a mismatched pair silently drops
     // every deployment MCP server from parent-event turns.
     const apiBaseUrl = resolveApiBaseUrl() ?? undefined;
-    await withinTurnBudget(
-      answerFastAgentQuestion({
-        question: `<platform_event>${JSON.stringify(params.event)}</platform_event>`,
-        userId: parentTurn.userId,
-        conversation: parentTurn.conversation,
-        currentMessageId: buildEventClientMessageSeed(params.event),
-        apiBaseUrl,
-        signal: turnSignal,
-        turnSource: 'platform_event',
-        platformEventHandling:
-          params.event.type === 'pull_request_feedback' ||
-          params.event.type === 'pull_request_conflict_detected'
-            ? 'present_only'
-            : 'default',
-        platformEventVisibility:
-          params.event.type === 'pull_request_feedback' ||
-          params.event.type === 'pull_request_conflict_detected' ||
-          params.event.type === 'automation_triggered'
-            ? 'required'
-            : 'optional',
-        platformEventKind:
-          params.event.type === 'automation_triggered'
-            ? 'automation'
-            : 'delegated_task',
-        ...(params.event.type === 'pull_request_feedback' &&
-        params.event.reviewActionDeliveryId &&
-        params.event.suggestedActionQuestion
-          ? {
-              platformEventTranscriptPayload: {
-                prReviewAction: {
-                  deliveryId: params.event.reviewActionDeliveryId,
-                  question: params.event.suggestedActionQuestion,
-                  status: 'pending',
-                },
+    const answer = answerFastAgentQuestion({
+      question: `<platform_event>${JSON.stringify(params.event)}</platform_event>`,
+      userId: parentTurn.userId,
+      conversation: parentTurn.conversation,
+      currentMessageId: buildEventClientMessageSeed(params.event),
+      apiBaseUrl,
+      signal: turnSignal,
+      turnSource: 'platform_event',
+      platformEventHandling:
+        params.event.type === 'pull_request_feedback' ||
+        params.event.type === 'pull_request_conflict_detected'
+          ? 'present_only'
+          : 'default',
+      platformEventVisibility:
+        params.event.type === 'pull_request_feedback' ||
+        params.event.type === 'pull_request_conflict_detected' ||
+        params.event.type === 'automation_triggered'
+          ? 'required'
+          : 'optional',
+      platformEventKind:
+        params.event.type === 'automation_triggered'
+          ? 'automation'
+          : 'delegated_task',
+      ...(params.event.type === 'pull_request_feedback' &&
+      params.event.reviewActionDeliveryId &&
+      params.event.suggestedActionQuestion
+        ? {
+            platformEventTranscriptPayload: {
+              prReviewAction: {
+                deliveryId: params.event.reviewActionDeliveryId,
+                question: params.event.suggestedActionQuestion,
+                status: 'pending',
               },
-            }
+            },
+          }
+        : {}),
+      adapter: {
+        ...parentTurn.adapter,
+        launchTask,
+        resolveMcpServerConfigs: () =>
+          resolveUserMcpServerConfigs({
+            userId: parentTurn.userId,
+            apiBaseUrl,
+            includeRoomoteMemberTools: true,
+          }),
+        ...(params.retryTaskStart
+          ? { retryTaskStart: params.retryTaskStart }
           : {}),
-        adapter: {
-          ...parentTurn.adapter,
-          launchTask,
-          resolveMcpServerConfigs: () =>
-            resolveUserMcpServerConfigs({
-              userId: parentTurn.userId,
-              apiBaseUrl,
-              includeRoomoteMemberTools: true,
-            }),
-          ...(params.retryTaskStart
-            ? { retryTaskStart: params.retryTaskStart }
-            : {}),
-        },
-      }),
-    );
+      },
+    });
+    await withinTurnBudget(answer);
     return 'delivered';
   } catch (error) {
     if (error instanceof FastAgentParentEventDeliveryError) {
