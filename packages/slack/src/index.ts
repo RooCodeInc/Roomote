@@ -3,6 +3,7 @@ export * from './communication-provider';
 export * from './drain-slack-messages';
 export * from './emoji-preferences';
 export * from './fast-agent-live-task-launcher';
+export * from './fast-agent-session-activity';
 export * from './fetch-task-data';
 export * from './find-active-slack-task-run';
 export * from './find-completed-slack-task-run-with-snapshot';

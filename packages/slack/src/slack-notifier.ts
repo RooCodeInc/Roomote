@@ -236,6 +236,41 @@ export class SlackNotifier {
     return this.client;
   }
 
+  public async setAgentSessionStatus({
+    channel,
+    threadTs,
+    status,
+    title,
+  }: {
+    channel: string;
+    threadTs: string;
+    status: 'active' | 'processing' | 'suspended' | 'closed';
+    title?: string;
+  }): Promise<boolean> {
+    try {
+      const response = await this.getClient().apiCall(
+        'agents.sessions.setStatus',
+        {
+          channel_id: channel,
+          thread_ts: threadTs,
+          status,
+          ...(title ? { title } : {}),
+        },
+      );
+      if (response.ok) return true;
+
+      console.warn(
+        `[setAgentSessionStatus] Slack rejected status=${status} channel=${channel} thread=${threadTs} error=${response.error ?? 'unknown_error'}`,
+      );
+      return false;
+    } catch (error) {
+      console.warn(
+        `[setAgentSessionStatus] Slack status=${status} failed for channel=${channel} thread=${threadTs}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      return false;
+    }
+  }
+
   private getChannelDiscovery(): SlackChannelDiscovery {
     if (!this.channelDiscovery) {
       this.channelDiscovery = new SlackChannelDiscovery(this.token);

@@ -51,6 +51,40 @@ describe('SlackNotifier', () => {
     process.env.SLACK_API_BASE_URL = originalBaseUrl;
   });
 
+  describe('setAgentSessionStatus', () => {
+    it('sets a titled agent session status through the Web API', async () => {
+      apiCallMock.mockResolvedValue({ ok: true });
+
+      await expect(
+        notifier.setAgentSessionStatus({
+          channel: 'C123',
+          threadTs: '100.001',
+          status: 'processing',
+          title: 'Roomote Fast session',
+        }),
+      ).resolves.toBe(true);
+
+      expect(apiCallMock).toHaveBeenCalledWith('agents.sessions.setStatus', {
+        channel_id: 'C123',
+        thread_ts: '100.001',
+        status: 'processing',
+        title: 'Roomote Fast session',
+      });
+    });
+
+    it('treats Slack status rejections as best-effort failures', async () => {
+      apiCallMock.mockResolvedValue({ ok: false, error: 'feature_disabled' });
+
+      await expect(
+        notifier.setAgentSessionStatus({
+          channel: 'C123',
+          threadTs: '100.001',
+          status: 'active',
+        }),
+      ).resolves.toBe(false);
+    });
+  });
+
   describe('getDirectMessageUserId', () => {
     it('returns the user for a one-to-one direct message', async () => {
       getGlobalWithFetch().fetch = vi.fn().mockResolvedValue({

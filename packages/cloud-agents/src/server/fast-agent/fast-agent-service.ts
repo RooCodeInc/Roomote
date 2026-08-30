@@ -1148,6 +1148,14 @@ export async function answerFastAgentQuestion({
   };
 
   try {
+    adapter.activity?.start();
+  } catch (error) {
+    console.warn(
+      `[Fast Agent] Failed to start surface activity: ${formatErrorForLog(error)}`,
+    );
+  }
+
+  try {
     if (!platformEvent) {
       turnVisibleMessages.push(
         buildUserTextMessage(normalizeThreadText(question)),
@@ -2562,6 +2570,11 @@ export async function answerFastAgentQuestion({
         });
       }
     }
+    await adapter.activity?.settle().catch((error) => {
+      console.warn(
+        `[Fast Agent] Failed to settle surface activity: ${formatErrorForLog(error)}`,
+      );
+    });
     diagnostics.finish();
   }
 }

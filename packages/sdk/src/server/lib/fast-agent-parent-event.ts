@@ -29,6 +29,7 @@ import { Env, getArtifactSigningKey } from '@roomote/env';
 import {
   buildSlackPrReviewActionBlocks,
   createFastAgentSlackLiveTaskLauncher,
+  createFastAgentSlackSessionActivity,
   postSlackThreadMessageWithFooterText,
   resolveSlackReactionNames,
   SlackNotifier,
@@ -544,6 +545,11 @@ async function createSlackFastAgentParentTurn(
     userId: session.userId,
     conversation,
     adapter: {
+      activity: createFastAgentSlackSessionActivity({
+        slack,
+        channel: conversation.replyTarget.channelId,
+        threadTs: conversation.replyTarget.threadId,
+      }),
       launchTask: createFastAgentSlackLiveTaskLauncher({
         slack,
         userId: session.userId,

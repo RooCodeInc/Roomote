@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   telegramPostMessage: vi.fn(),
   telegramEditMessage: vi.fn(),
   findTeamsConversationRoute: vi.fn(),
+  createActivity: vi.fn(() => ({ start: vi.fn(), settle: vi.fn() })),
   slackPostThreadMessage: vi.fn(),
   slackUpdateMessage: vi.fn(),
 }));
@@ -13,6 +14,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock('@roomote/slack', () => ({
   buildSlackThreadReplyFooterBlock: vi.fn(() => ({ type: 'context' })),
   createFastAgentSlackLiveTaskLauncher: vi.fn(() => vi.fn()),
+  createFastAgentSlackSessionActivity: mocks.createActivity,
   getSlackThreadReplyFooterMessageTs: vi.fn(async () => null),
   postSlackThreadMessageWithFooterText: mocks.slackPostThreadMessage,
   withSlackThreadReplyFooterLock: vi.fn(

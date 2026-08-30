@@ -12,6 +12,7 @@ import {
 } from '@roomote/communication';
 import {
   buildSlackThreadReplyFooterBlock,
+  createFastAgentSlackSessionActivity,
   getSlackThreadReplyFooterMessageTs,
   withSlackThreadReplyFooterLock,
   resolveCurrentSlackMessageFiles,
@@ -229,6 +230,11 @@ export async function processFastAgentMessage(params: {
         hasOtherHumanParticipant &&
         !directedAtRoomote,
       adapter: {
+        activity: createFastAgentSlackSessionActivity({
+          slack,
+          channel: event.channel,
+          threadTs: threadId,
+        }),
         resolveMcpServerConfigs: () =>
           resolveUserMcpServerConfigs({
             userId,
