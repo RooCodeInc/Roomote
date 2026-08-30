@@ -469,6 +469,7 @@ import {
 import {
   getReleaseNotesCommand,
   getReleaseStatusCommand,
+  getReleaseHistoryCommand,
 } from '../commands/product-releases';
 import { getStatuspageIncident } from '@roomote/slack';
 
@@ -3150,6 +3151,15 @@ export const appRouter = createRouter({
         }),
       )
       .query(({ ctx: { auth }, input }) => getReleaseNotesCommand(auth, input)),
+    history: protectedProcedure
+      .input(
+        z.object({
+          version: z.string().min(1).max(64),
+        }),
+      )
+      .query(({ ctx: { auth }, input }) =>
+        getReleaseHistoryCommand(auth, input),
+      ),
   }),
 });
 

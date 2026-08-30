@@ -16,6 +16,7 @@ import {
   ROOMOTE_GITHUB_REPO,
 } from '@/lib/release-links';
 import {
+  compareProductVersions,
   isParsableProductVersion,
   isProductVersionNewer,
   normalizeProductVersion,
@@ -23,6 +24,7 @@ import {
 } from '@/lib/product-version';
 
 const DEFAULT_DEPLOYMENT_ID = 'default';
+const RELEASE_HISTORY_PAGE_SIZE = 100;
 
 const PRODUCT_VERSION_PATTERN = /^v?\d+\.\d+\.\d+(?:-[\w.]+)?$/i;
 
@@ -109,6 +111,10 @@ function releaseNotesCacheKey(version: string): string {
   return `${REDIS_KEYS.RELEASE_NOTES}:${normalizeProductVersion(version) ?? version}`;
 }
 
+function releaseHistoryCacheKey(version: string): string {
+  return `${releaseNotesCacheKey(version)}:history`;
+}
+
 export async function getReleaseStatusCommand(
   auth: UserAuthSuccess,
 ): Promise<ReleaseStatus> {
@@ -178,6 +184,11 @@ type CachedNotesPayload =
   | { kind: 'notes'; notes: ReleaseNotes }
   | { kind: 'missing' };
 
+type CachedHistoryPayload = {
+  kind: 'history';
+  releases: ReleaseNotes[];
+};
+
 async function readCachedNotes(
   version: string,
 ): Promise<CachedNotesPayload | null> {
@@ -207,6 +218,76 @@ async function writeCachedNotes(
   } catch {
     // Best-effort cache; callers still return the fetched payload.
   }
+}
+
+async function readCachedHistory(
+  version: string,
+): Promise<ReleaseNotes[] | null> {
+  try {
+    const raw = await getRedis().get(releaseHistoryCacheKey(version));
+    if (!raw) {
+      return null;
+    }
+    const payload = JSON.parse(raw) as CachedHistoryPayload;
+    return payload.kind === 'history' ? payload.releases : null;
+  } catch {
+    return null;
+  }
+}
+
+async function writeCachedHistory(
+  version: string,
+  releases: ReleaseNotes[],
+  ttlSeconds: number,
+): Promise<void> {
+  try {
+    await getRedis().set(
+      releaseHistoryCacheKey(version),
+      JSON.stringify({
+        kind: 'history',
+        releases,
+      } satisfies CachedHistoryPayload),
+      'EX',
+      ttlSeconds,
+    );
+  } catch {
+    // Best-effort cache; callers still return the fetched payload.
+  }
+}
+
+type GithubReleasePayload = {
+  tag_name?: string;
+  name?: string | null;
+  body?: string | null;
+  html_url?: string;
+  draft?: boolean;
+};
+
+function parseGithubRelease(
+  payload: GithubReleasePayload,
+): ReleaseNotes | null {
+  const version = normalizeProductVersion(payload.tag_name);
+  if (!version || !PRODUCT_VERSION_PATTERN.test(version) || payload.draft) {
+    return null;
+  }
+
+  const tagName = toReleaseTag(version);
+  const body = typeof payload.body === 'string' ? payload.body : '';
+  const parsed = parseReleaseBody(body);
+
+  return {
+    version,
+    tagName,
+    title:
+      (typeof payload.name === 'string' && payload.name.trim()) ||
+      `Roomote ${tagName}`,
+    summary: parsed.summary,
+    highlights: parsed.highlights,
+    detailsMarkdown: parsed.detailsMarkdown,
+    htmlUrl:
+      (typeof payload.html_url === 'string' && payload.html_url) ||
+      `${GITHUB_RELEASES_BASE_URL}/tag/${tagName}`,
+  };
 }
 
 async function fetchGithubReleaseNotes(
@@ -243,33 +324,14 @@ async function fetchGithubReleaseNotes(
       return null;
     }
 
-    const payload = (await response.json()) as {
-      tag_name?: string;
-      name?: string | null;
-      body?: string | null;
-      html_url?: string;
-    };
-
-    const body = typeof payload.body === 'string' ? payload.body : '';
-    const parsed = parseReleaseBody(body);
-    const resolvedTag =
-      typeof payload.tag_name === 'string' && payload.tag_name
-        ? payload.tag_name
-        : tagName;
-
-    return {
-      version: bare,
-      tagName: resolvedTag,
-      title:
-        (typeof payload.name === 'string' && payload.name.trim()) ||
-        `Roomote ${resolvedTag}`,
-      summary: parsed.summary,
-      highlights: parsed.highlights,
-      detailsMarkdown: parsed.detailsMarkdown,
-      htmlUrl:
-        (typeof payload.html_url === 'string' && payload.html_url) ||
-        fallbackUrl,
-    };
+    const payload = (await response.json()) as GithubReleasePayload;
+    return (
+      parseGithubRelease({
+        ...payload,
+        tag_name: payload.tag_name || tagName,
+        html_url: payload.html_url || fallbackUrl,
+      }) ?? null
+    );
   } catch (error) {
     console.warn(
       `[releases] GitHub release fetch failed for ${tagName}:`,
@@ -279,20 +341,56 @@ async function fetchGithubReleaseNotes(
   }
 }
 
-export async function getReleaseNotesCommand(
-  auth: UserAuthSuccess,
-  input: { version: string },
+async function fetchGithubReleaseHistory(
+  version: string,
+): Promise<ReleaseNotes[] | null> {
+  try {
+    const response = await fetch(
+      `https://api.github.com/repos/${ROOMOTE_GITHUB_REPO}/releases?per_page=${RELEASE_HISTORY_PAGE_SIZE}`,
+      {
+        headers: {
+          Accept: 'application/vnd.github+json',
+          'User-Agent': 'Roomote',
+        },
+        signal: AbortSignal.timeout(5_000),
+      },
+    );
+
+    if (!response.ok) {
+      console.warn(
+        `[releases] GitHub release history fetch failed: ${response.status}`,
+      );
+      return null;
+    }
+
+    const payload = (await response.json()) as GithubReleasePayload[];
+    const releases = new Map<string, ReleaseNotes>();
+    for (const item of payload) {
+      const release = parseGithubRelease(item);
+      if (
+        release &&
+        compareProductVersions(release.version, version) <= 0 &&
+        !releases.has(release.version)
+      ) {
+        releases.set(release.version, release);
+      }
+    }
+
+    return [...releases.values()].sort((left, right) =>
+      compareProductVersions(right.version, left.version),
+    );
+  } catch (error) {
+    console.warn(
+      '[releases] GitHub release history fetch failed:',
+      error instanceof Error ? error.message : error,
+    );
+    return null;
+  }
+}
+
+async function getReleaseNotesForVersion(
+  version: string,
 ): Promise<ReleaseNotes | null> {
-  const version = input.version.trim();
-  if (!PRODUCT_VERSION_PATTERN.test(version)) {
-    return null;
-  }
-
-  const status = await getReleaseStatusCommand(auth);
-  if (!isAllowedNotesVersion(auth, version, status)) {
-    return null;
-  }
-
   const cached = await readCachedNotes(version);
   if (cached?.kind === 'notes') {
     return cached.notes;
@@ -317,4 +415,67 @@ export async function getReleaseNotesCommand(
     RELEASE_NOTES_NEGATIVE_CACHE_TTL_SECONDS,
   );
   return null;
+}
+
+export async function getReleaseNotesCommand(
+  auth: UserAuthSuccess,
+  input: { version: string },
+): Promise<ReleaseNotes | null> {
+  const version = input.version.trim();
+  if (!PRODUCT_VERSION_PATTERN.test(version)) {
+    return null;
+  }
+
+  const status = await getReleaseStatusCommand(auth);
+  if (!isAllowedNotesVersion(auth, version, status)) {
+    return null;
+  }
+
+  return getReleaseNotesForVersion(version);
+}
+
+export async function getReleaseHistoryCommand(
+  auth: UserAuthSuccess,
+  input: { version: string },
+): Promise<ReleaseNotes[]> {
+  const version = input.version.trim();
+  if (!PRODUCT_VERSION_PATTERN.test(version)) {
+    return [];
+  }
+
+  const status = await getReleaseStatusCommand(auth);
+  if (!isAllowedNotesVersion(auth, version, status)) {
+    return [];
+  }
+
+  const cached = await readCachedHistory(version);
+  if (cached) {
+    return cached;
+  }
+
+  const listedReleases = await fetchGithubReleaseHistory(version);
+  const releases = listedReleases ?? [];
+  const normalizedVersion = normalizeProductVersion(version);
+
+  if (
+    normalizedVersion &&
+    !releases.some((release) => release.version === normalizedVersion)
+  ) {
+    const currentRelease = await getReleaseNotesForVersion(version);
+    if (currentRelease) {
+      releases.push(currentRelease);
+      releases.sort((left, right) =>
+        compareProductVersions(right.version, left.version),
+      );
+    }
+  }
+
+  await writeCachedHistory(
+    version,
+    releases,
+    releases.length > 0
+      ? RELEASE_NOTES_CACHE_TTL_SECONDS
+      : RELEASE_NOTES_NEGATIVE_CACHE_TTL_SECONDS,
+  );
+  return releases;
 }

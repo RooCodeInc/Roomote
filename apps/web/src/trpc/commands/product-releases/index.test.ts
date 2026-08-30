@@ -43,7 +43,11 @@ vi.mock('@/lib/server/env', () => ({
 
 import type { UserAuthSuccess } from '@/types';
 import { Env } from '@/lib/server/env';
-import { getReleaseNotesCommand, getReleaseStatusCommand } from './index';
+import {
+  getReleaseHistoryCommand,
+  getReleaseNotesCommand,
+  getReleaseStatusCommand,
+} from './index';
 
 const mockEnv = Env as {
   RELEASE_VERSION?: string;
@@ -169,6 +173,63 @@ describe('releases commands', () => {
       highlights: ['One'],
     });
     expect(mockRedisSet).toHaveBeenCalled();
+  });
+
+  it('returns product release history newest first through the running version', async () => {
+    mockEnv.RELEASE_VERSION = 'v0.16.0';
+    mockFetch.mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => [
+        {
+          tag_name: 'v0.17.0',
+          name: 'Roomote v0.17.0',
+          body: 'Not installed yet.',
+        },
+        {
+          tag_name: 'v0.14.0',
+          name: 'Roomote v0.14.0',
+          body: 'Oldest release.',
+        },
+        {
+          tag_name: 'worker-v9.0.0',
+          name: 'Worker release',
+          body: 'Not a product release.',
+        },
+        {
+          tag_name: 'v0.16.0',
+          name: 'Roomote v0.16.0',
+          body: 'Current release.',
+        },
+        {
+          tag_name: 'v0.15.0',
+          name: 'Roomote v0.15.0',
+          body: 'Previous release.',
+        },
+        {
+          tag_name: 'v0.13.0',
+          name: 'Draft release',
+          body: 'Not published.',
+          draft: true,
+        },
+      ],
+    });
+
+    const releases = await getReleaseHistoryCommand(memberAuth, {
+      version: '0.16.0',
+    });
+
+    expect(releases.map((release) => release.version)).toEqual([
+      '0.16.0',
+      '0.15.0',
+      '0.14.0',
+    ]);
+    expect(mockRedisSet).toHaveBeenCalledWith(
+      'release:notes:0.16.0:history',
+      expect.any(String),
+      'EX',
+      100,
+    );
   });
 
   it('refuses notes for versions the caller cannot see', async () => {
