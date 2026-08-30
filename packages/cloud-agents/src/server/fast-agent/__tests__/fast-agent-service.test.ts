@@ -165,9 +165,11 @@ import {
 } from '@roomote/types';
 
 import { answerFastAgentQuestion } from '../fast-agent-service';
-import type {
-  FastAgentTurnAdapter,
-  LaunchFastAgentTask,
+import {
+  buildFastAgentReactionExternalInputQuestion,
+  type FastAgentReactionExternalInput,
+  type FastAgentTurnAdapter,
+  type LaunchFastAgentTask,
 } from '../fast-agent-conversation';
 
 const baseParams = {
@@ -749,6 +751,60 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     expect(mocks.captureTurnSettled).toHaveBeenLastCalledWith(
       expect.objectContaining({ initialHumanTurn: true }),
     );
+  });
+
+  it('rebuilds accumulated conversation context for a reaction that directly answers Fast', async () => {
+    const reactionInput: FastAgentReactionExternalInput = {
+      type: 'reaction_added',
+      provider: 'slack',
+      reactions: [{ name: 'sparkling_heart' }],
+      reactor: { externalUserId: 'U123', displayName: 'Matt' },
+      message: {
+        workspaceId: 'team-1',
+        channelId: 'channel-1',
+        messageId: '100.2',
+        threadId: '100.1',
+        text: 'React to this message with your favorite emoji.',
+      },
+      eventId: '100.3',
+    };
+    mocks.getSession.mockResolvedValueOnce({
+      id: 'conversation-1',
+      compatibilityMessages: [
+        { role: 'user', content: 'What is your favorite emoji?' },
+        {
+          role: 'assistant',
+          content: 'React to this message with your favorite emoji.',
+        },
+      ],
+      openCodeSessionId: null,
+    });
+    mocks.runSession.mockImplementationOnce(({ bootstrapPrompt, execute }) =>
+      execute({}, bootstrapPrompt, {
+        path: 'cold_rebuild',
+        validateSession: false,
+      }),
+    );
+
+    await answerFastAgentQuestion({
+      ...baseParams,
+      question: buildFastAgentReactionExternalInputQuestion(reactionInput),
+      currentMessageId: 'slack-reaction:100.3',
+      turnSource: 'platform_event',
+      platformEventKind: 'external_input',
+      platformEventVisibility: 'optional',
+      platformEventTranscriptPayload: { externalInput: reactionInput },
+      adapter: callbacks(),
+    });
+
+    const prompt = mocks.generateText.mock.calls[0]?.[0].prompt;
+    expect(prompt).toContain('[USER]\nWhat is your favorite emoji?');
+    expect(prompt).toContain(
+      '[ASSISTANT]\nReact to this message with your favorite emoji.',
+    );
+    expect(prompt).toContain('&lt;external_input&gt;');
+    expect(prompt).toContain('sparkling_heart');
+    expect(prompt).toContain('React to this message with your favorite emoji.');
   });
 
   it('leaves initial-turn classification unknown when prompt persistence fails', async () => {

@@ -491,7 +491,7 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).not.toContain('<slack_modern_markdown>');
   });
 
-  it('allows optional external input to use the existing ignore-event path', () => {
+  it('treats optional reaction input as intentional conversation before allowing silence', () => {
     const prompt = buildFastAgentSystemPrompt({
       availableEnvironments: [],
       surface: 'slack',
@@ -502,18 +502,32 @@ describe('buildFastAgentSystemPrompt', () => {
 
     expect(prompt).toContain('External Platform Input');
     expect(prompt).toContain(
-      'external interaction associated with this conversation',
+      'envelope carrying an intentional human interaction associated with this conversation',
     );
     expect(prompt).toContain(
-      'Call "ignore_event" only when the event is duplicate, lifecycle-only, machinery-only, or a routine log that adds nothing useful',
+      'The envelope is platform-generated, but the interaction inside it is deliberate user input',
     );
-    expect(prompt).not.toContain('Do not call "ignore_event"');
+    expect(prompt).toContain(
+      'call "ignore_event" only after interpreting the reaction against the reacted-to message and recent conversation',
+    );
+    expect(prompt).not.toContain(
+      'This event requires a user-visible closeout because it carries user-useful substance',
+    );
     expect(prompt).toContain('Do not use the reaction tool');
     expect(prompt).toContain(
       'an inbound emoji-reaction event is not itself a reactable message surface',
     );
     expect(prompt).toContain(
       'If the reaction warrants a response, post a text reply; otherwise stay silent according to the ignore rules above',
+    );
+    expect(prompt).toContain(
+      'intentional conversational input from the reactor, not ambient participant chatter or lifecycle machinery',
+    );
+    expect(prompt).toContain(
+      'If Fast asked a question or invited a reaction and the emoji reasonably answers it, treat the reaction as a direct answer and continue from that answer',
+    );
+    expect(prompt).toContain(
+      'Do not call "ignore_event" merely because the input arrived as a reaction',
     );
   });
 

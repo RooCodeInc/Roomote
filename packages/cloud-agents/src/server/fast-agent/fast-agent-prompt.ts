@@ -238,11 +238,13 @@ ${reactionGuidance}
 ${
   platformEvent
     ? `## ${platformEventKind === 'automation' ? 'Automation Platform Event' : platformEventKind === 'external_input' ? 'External Platform Input' : platformEventKind === 'setup' ? 'Setup Session Kickoff' : 'Delegated Task Platform Event'}
-- The current input is a trusted platform-generated ${platformEventKind === 'automation' ? 'custom automation request' : platformEventKind === 'external_input' ? 'external interaction associated with this conversation' : platformEventKind === 'setup' ? 'first-run setup kickoff for this deployment' : 'event about a delegated task'}, not a human-authored request.
+- The current input is a trusted platform-generated ${platformEventKind === 'automation' ? 'custom automation request' : platformEventKind === 'external_input' ? 'envelope carrying an intentional human interaction associated with this conversation' : platformEventKind === 'setup' ? 'first-run setup kickoff for this deployment' : 'event about a delegated task'}${platformEventKind === 'external_input' ? '. The envelope is platform-generated, but the interaction inside it is deliberate user input.' : ', not a human-authored request.'}
 ${
   platformEventVisibility === 'required'
     ? '- This event requires a user-visible closeout because it carries user-useful substance. Present its result, changed expectation, required decision, or recovery action; never narrate lifecycle state alone. Do not call "ignore_event".'
-    : '- Call "ignore_event" only when the event is duplicate, lifecycle-only, machinery-only, or a routine log that adds nothing useful.'
+    : platformEventKind === 'external_input'
+      ? '- For a `reaction_added` event, call "ignore_event" only after interpreting the reaction against the reacted-to message and recent conversation, and only when it is duplicate or conveys no useful conversational intent or action.'
+      : '- Call "ignore_event" only when the event is duplicate, lifecycle-only, machinery-only, or a routine log that adds nothing useful.'
 }
 - ${
         platformEventHandling === 'present_only'
@@ -254,7 +256,11 @@ ${
     ? '- End the turn with exactly one closeout. The setup kickoff acknowledgement described below is the only additional reply allowed.'
     : '- When the event is useful, post exactly one closeout. Never use acknowledgement or progress replies for a platform event.'
 }
-- Child-message events with concrete findings, blockers, meaningful work milestones, required input, or roughly 10 minutes of silence during active work carry useful substance even when expectations have not changed. Apply the same narrow ignore rule above to every other platform event.
+${
+  platformEventKind === 'external_input'
+    ? ''
+    : '- Child-message events with concrete findings, blockers, meaningful work milestones, required input, or roughly 10 minutes of silence during active work carry useful substance even when expectations have not changed. Apply the same narrow ignore rule above to every other platform event.'
+}
 ${
   retryTaskStartAvailable
     ? '- Call `retry_task_start` only when the failure appears transient; do not use it for clear configuration, authentication, permission, billing, quota, missing-resource, or other permanent failures. Report its result with one closeout.'
@@ -262,6 +268,13 @@ ${
 }
 - Launching creates a separate delegated task; it does not retry the task associated with this event.
 - Do not use the reaction tool because a platform event has no incoming chat message to react to. In particular, an inbound emoji-reaction event is not itself a reactable message surface. If the reaction warrants a response, post a text reply; otherwise stay silent according to the ignore rules above.
+${
+  platformEventKind === 'external_input'
+    ? `- A \`reaction_added\` event on a Fast-authored message is intentional conversational input from the reactor, not ambient participant chatter or lifecycle machinery. Interpret its meaning against the reacted-to message and the recent conversation.
+- If Fast asked a question or invited a reaction and the emoji reasonably answers it, treat the reaction as a direct answer and continue from that answer. Do not call "ignore_event" merely because the input arrived as a reaction.
+`
+    : ''
+}
 ${
   platformEventKind === 'automation'
     ? `- Execute the automation prompt now. Use integrations directly when sufficient, and launch a task only when repository or workspace execution is actually required. The configured model is a delegated-task default, not the Fast inference model.

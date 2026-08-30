@@ -74,10 +74,10 @@ describe('Fast Slack reaction input', () => {
     mocks.answerQuestion.mockResolvedValue('');
   });
 
-  it('routes a bound agent message reaction as optional structured external input', async () => {
+  it('includes the Fast-authored message when a reaction can directly answer it', async () => {
     const slack = {
       getMessage: vi.fn(async () => ({
-        text: 'I found the issue.',
+        text: 'React to this message with your favorite emoji.',
         thread_ts: '100.000',
       })),
       normalizeIncomingText: vi.fn(async () => '@alice'),
@@ -94,7 +94,7 @@ describe('Fast Slack reaction input', () => {
         event: {
           type: 'reaction_added',
           user: 'UALICE',
-          reaction: 'eyes',
+          reaction: 'sparkling_heart',
           item: { type: 'message', channel: 'C1', ts: '101.000' },
           event_ts: '102.000',
         },
@@ -117,12 +117,14 @@ describe('Fast Slack reaction input', () => {
         turnSource: 'platform_event',
         platformEventKind: 'external_input',
         platformEventVisibility: 'optional',
-        question: expect.stringContaining('I found the issue.'),
+        question: expect.stringContaining(
+          'React to this message with your favorite emoji.',
+        ),
         platformEventTranscriptPayload: {
           externalInput: expect.objectContaining({
             type: 'reaction_added',
             provider: 'slack',
-            reactions: [{ name: 'eyes' }],
+            reactions: [{ name: 'sparkling_heart' }],
             reactor: {
               externalUserId: 'UALICE',
               displayName: '@alice',
@@ -132,7 +134,7 @@ describe('Fast Slack reaction input', () => {
               channelId: 'C1',
               messageId: '101.000',
               threadId: '100.000',
-              text: 'I found the issue.',
+              text: 'React to this message with your favorite emoji.',
             }),
             eventId: '102.000',
           }),
