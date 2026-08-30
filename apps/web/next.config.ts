@@ -42,7 +42,7 @@ const nextConfig: NextConfig = {
   // Always bundle the env files the runtime may need so preview deploys can
   // load preview secrets even when build-time env detection resolves differently.
   outputFileTracingIncludes: {
-    '/*': [...webEnvFiles, '../docs/**/*', '../../CHANGELOG.md'],
+    '/*': [...webEnvFiles, '../docs/**/*'],
   },
   experimental: {
     // Next 16 enables Turbopack's persistent dev cache by default. In this
