@@ -557,11 +557,16 @@ export async function readBrainCorpus(): Promise<BrainCorpusSnapshot | null> {
         Date.now() + CORPUS_FAILURE_CACHE_TTL_MS,
       );
 
+      // The shared census may be minutes old by the time a new process
+      // hydrates it; the same bounded top-up the warm paths make keeps a
+      // restart from reintroducing the stale listing.
+      await topUpCachedCorpus();
+
       if (stored.generatedAtMs + CORPUS_CACHE_TTL_MS <= Date.now()) {
         void refresh(connection);
       }
 
-      return stored.snapshot;
+      return corpusCache.snapshot;
     })()
       .catch((error) => {
         console.warn(

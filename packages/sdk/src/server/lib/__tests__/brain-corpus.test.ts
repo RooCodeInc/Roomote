@@ -337,7 +337,7 @@ describe('readBrainCorpus', () => {
     expect(fetchMock).toHaveBeenCalled();
   });
 
-  it('hydrates a completed census from shared storage without listing again', async () => {
+  it('hydrates a completed census from shared storage with one top-up, not a walk', async () => {
     redisGet.mockResolvedValue(
       JSON.stringify({
         generatedAt: new Date().toISOString(),
@@ -350,19 +350,24 @@ describe('readBrainCorpus', () => {
         ],
       }),
     );
-    const fetchMock = vi.fn();
+    // The stored census may predate pages written while this process was
+    // down; hydration makes the same bounded updated_after call as a warm
+    // read instead of trusting it blind (or re-walking).
+    const fetchMock = vi.fn(async () => toolResponse(windowOf(90, 1)));
     global.fetch = fetchMock as unknown as typeof fetch;
 
     const snapshot = await readBrainCorpus();
 
-    expect(snapshot?.pages).toEqual([
-      {
-        slug: 'tasks/shared-run',
-        title: 'Shared run',
-        updatedAt: new Date('2026-01-01T00:00:00.000Z'),
-      },
+    expect(snapshot?.pages.map((page) => page.slug).sort()).toEqual([
+      'tasks/run-90',
+      'tasks/shared-run',
     ]);
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(listedArguments(fetchMock)[0]).toMatchObject({
+      limit: 100,
+      sort: 'updated_asc',
+      updated_after: '2026-01-01T00:00:00.000Z',
+    });
   });
 
   it('throttles refresh attempts when a stale cache loses its connection', async () => {
@@ -389,9 +394,10 @@ describe('readBrainCorpus', () => {
       await Promise.resolve();
       await Promise.resolve();
       expect((await readBrainCorpus())?.pages).toHaveLength(1);
-      // Load, then on expiry one top-up attempt plus one refresh; the second
-      // read inside the failure window resolves nothing further.
-      expect(resolveBrainConnection).toHaveBeenCalledTimes(3);
+      // Load + its hydration top-up, then on expiry one top-up attempt plus
+      // one refresh; the second read inside the failure window resolves
+      // nothing further.
+      expect(resolveBrainConnection).toHaveBeenCalledTimes(4);
     } finally {
       vi.useRealTimers();
     }
