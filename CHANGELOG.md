@@ -2,16 +2,20 @@
 
 This file tracks product releases for Roomote (single monorepo version). Automated release entries are prepended by `pnpm run version`.
 
-## 0.46.0 (2026-08-30)
+## 1.0.0 (2026-08-30)
 
-This release makes Sessions the center of Roomote work, broadens Fast across chat and connected tooling, expands Memory context and control, and adds richer automation, analytics, and artifact workflows.
+Roomote 1.0 makes Fast the default entry point for conversations, enables Memory by default on new hosted deployments, and completes the Session-centered automation, analytics, and artifact experience.
 
 ### Highlights
 
+- Start unpinned requests in Fast by default, while choosing an environment or repository still starts coding work immediately.
+- Enable Memory by default for new hosted deployments and recall public Discord discussions, visible Linear issues, and richer Notion database properties.
 - Follow conversations, delegated executions, artifacts, reviews, and costs in a searchable Session workspace across desktop and mobile.
-- Continue Fast directly from Microsoft Teams and Telegram, react to replies across every chat provider, and delegate parallel coding work with attachment context.
-- Enable Memory more easily and recall public Discord discussions, visible Linear issues, and richer Notion database properties.
-- Preview generated HTML safely and announce default-branch changes with concise, pull-request-aware summaries across supported source-control providers.
+- Continue Fast across supported chat providers, delegate parallel work with attachments, preview generated HTML safely, and announce default-branch changes.
+
+### Major changes
+
+- Make Fast the default entry point for unpinned Roomote requests across the web dashboard and supported chat providers, and enable Memory by default for new hosted deployments. Select an environment or repository when work should start directly in a coding task; existing deployments keep their current Memory setting.
 
 ### Minor changes
 
@@ -35,6 +39,7 @@ This release makes Sessions the center of Roomote work, broadens Fast across cha
 - Keep pull-request review follow-through reliable by showing actionable feedback in Fast and standard web tasks, clearing resolved Roomote findings, preserving the correct destination branch and attribution, and avoiding duplicate review requests.
 - Disable anonymous usage reporting in the bundled Infinity service so self-hosted local Memory embeddings stay quiet by default.
 - Keep Fast Sessions stable through cold starts and refreshes by preserving conversation context, model and reasoning choices, generated titles, pull-request status, and recovery state without duplicate or stale transcript notices.
+- Keep Slack Fast thread titles synchronized with generated and manually edited Session titles instead of leaving conversations labeled `Thread`.
 
 ## 0.45.1 (2026-08-29)
 
