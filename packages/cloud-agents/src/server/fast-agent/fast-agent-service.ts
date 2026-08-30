@@ -1399,9 +1399,17 @@ export async function answerFastAgentQuestion({
       event: NonTaskProviderRetryEvent,
     ) => {
       diagnostics.recordOpenCodeProviderRetry(event.attempt, event.message);
+      // OpenCode schedules its own internal backoff; include that pending
+      // wait in the silent-window projection so an initial long stall
+      // surfaces a notice without needing a later retry event.
+      const pendingDelayMs =
+        event.nextRetryAtMs !== undefined
+          ? Math.max(0, event.nextRetryAtMs - Date.now())
+          : undefined;
       await reportInferenceRetry({
         failure: classifyNonTaskInferenceError(new Error(event.message)),
         attemptNumber: event.attempt,
+        ...(pendingDelayMs !== undefined ? { delayMs: pendingDelayMs } : {}),
       });
     };
     const reportRoomoteInferenceRetry = async (

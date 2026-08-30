@@ -3297,6 +3297,37 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     );
   });
 
+  it('surfaces an internal retry notice when OpenCode schedules a long wait', async () => {
+    mocks.generateText.mockImplementationOnce(
+      async (params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        options.onPromptStarted?.();
+        // OpenCode already scheduled a wait past the silent window, so the
+        // very first internal retry event must surface a notice.
+        await params.onProviderRetry?.({
+          attempt: 1,
+          message: '429 Too Many Requests',
+          nextRetryAtMs: Date.now() + 45_000,
+        });
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'closeout',
+          message: 'It coordinates incoming requests.',
+        });
+        return '';
+      },
+    );
+    const adapter = callbacks();
+
+    await expect(
+      answerFastAgentQuestion({ ...baseParams, adapter }),
+    ).resolves.toBe('It coordinates incoming requests.');
+    expect(adapter.postReply).toHaveBeenNthCalledWith(1, {
+      purpose: 'progress',
+      message:
+        'The inference provider is rate limiting requests. Retrying automatically…',
+    });
+  });
+
   it('bounds an initial prompt after OpenCode enters provider recovery', async () => {
     vi.useFakeTimers();
     try {
