@@ -165,6 +165,7 @@ export async function enrichGitHubMergeAnnouncerEvent(
       ...event,
       pullRequest: {
         number: pullRequest.number,
+        url: pullRequest.html_url,
         title: pullRequest.title,
         body: pullRequest.body,
         changedFileCount: pullRequest.changed_files,

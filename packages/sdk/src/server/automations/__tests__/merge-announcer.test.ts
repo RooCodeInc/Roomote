@@ -137,6 +137,7 @@ describe('handleMergeAnnouncerPush', () => {
                 expect.objectContaining({
                   action_id: 'merge_announcer_view_changes',
                   text: expect.objectContaining({ text: 'View changes' }),
+                  url: 'https://github.com/acme/widgets/compare/before...after',
                 }),
                 expect.objectContaining({
                   action_id: 'late_bound_automation_configure',
@@ -154,6 +155,44 @@ describe('handleMergeAnnouncerPush', () => {
     );
   });
 
+  it('links View changes to the associated pull request', async () => {
+    const { dependencies, postMessage } = createDependencies();
+
+    await handleMergeAnnouncerPush(
+      createPayload({
+        pullRequest: {
+          number: 7,
+          url: 'https://github.com/acme/widgets/pull/7',
+          title: 'Ship widget export',
+          changedFileCount: 2,
+          additions: 20,
+          deletions: 4,
+        },
+      }),
+      dependencies,
+    );
+
+    expect(postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        blocks: [
+          expect.objectContaining({
+            child_blocks: expect.arrayContaining([
+              expect.objectContaining({
+                type: 'actions',
+                elements: expect.arrayContaining([
+                  expect.objectContaining({
+                    action_id: 'merge_announcer_view_changes',
+                    url: 'https://github.com/acme/widgets/pull/7',
+                  }),
+                ]),
+              }),
+            ]),
+          }),
+        ],
+      }),
+    );
+  });
+
   it('delivers to a configured cross-provider DM destination', async () => {
     const { dependencies, postMessage } = createDependencies();
     dependencies.listConnectedProviders.mockResolvedValue(['discord']);
@@ -164,7 +203,18 @@ describe('handleMergeAnnouncerPush', () => {
     });
 
     await handleMergeAnnouncerPush(
-      createPayload({ provider: 'gitea', pusher: 'fallback-pusher' }),
+      createPayload({
+        provider: 'gitea',
+        pusher: 'fallback-pusher',
+        pullRequest: {
+          number: 7,
+          url: 'https://gitea.example.com/acme/widgets/pulls/7',
+          title: 'Ship widget export',
+          changedFileCount: 2,
+          additions: 20,
+          deletions: 4,
+        },
+      }),
       dependencies,
     );
 
@@ -185,7 +235,10 @@ describe('handleMergeAnnouncerPush', () => {
         ),
         buttons: [
           [
-            expect.objectContaining({ text: 'View changes' }),
+            expect.objectContaining({
+              text: 'View changes',
+              url: 'https://gitea.example.com/acme/widgets/pulls/7',
+            }),
             expect.objectContaining({ text: 'Configure' }),
           ],
         ],
@@ -206,6 +259,7 @@ describe('handleMergeAnnouncerPush', () => {
       createPayload({
         pullRequest: {
           number: 7,
+          url: 'https://github.com/acme/widgets/pull/7',
           title: 'Ship widget export',
           body: `API_TOKEN=supersecretvalue\n${'supporting context '.repeat(300)}`,
           changedFileCount: 21,
@@ -293,6 +347,7 @@ describe('handleMergeAnnouncerPush', () => {
       createPayload({
         pullRequest: {
           number: 7,
+          url: 'https://github.com/acme/widgets/pull/7',
           title: '<!channel> Ship widget & <export>!',
           body: 'Detailed rationale',
           changedFileCount: 2,
