@@ -8,6 +8,7 @@ import {
   isSessionConversationResponding,
   eq,
   exists,
+  fastAgentConversations,
   fastAgentMessages,
   gte,
   gt,
@@ -31,6 +32,7 @@ import {
   users,
 } from '@roomote/db/server';
 import { ACP_ENVELOPE_EVENT_TYPES } from '@roomote/types';
+import { syncFastAgentSlackTitleBestEffort } from '@roomote/sdk/server';
 
 import type { UserAuthSuccess } from '@/types';
 
@@ -949,22 +951,37 @@ export async function updateSessionMetadata(
   changes: { title?: string; archivedAt?: Date | null },
 ) {
   const updatedAt = new Date();
-  const [updated] = await db
-    .update(sessions)
-    .set({
-      ...changes,
-      ...(changes.title === undefined
-        ? {}
-        : { titleEditedByUserAt: updatedAt }),
-      updatedAt,
-    })
-    .where(
-      and(
-        eq(sessions.id, sessionId),
-        auth.isAdmin ? undefined : eq(sessions.ownerUserId, auth.userId),
-      ),
-    )
-    .returning();
+  const updated = await db.transaction(async (tx) => {
+    const [session] = await tx
+      .update(sessions)
+      .set({
+        ...changes,
+        ...(changes.title === undefined
+          ? {}
+          : { titleEditedByUserAt: updatedAt }),
+        updatedAt,
+      })
+      .where(
+        and(
+          eq(sessions.id, sessionId),
+          auth.isAdmin ? undefined : eq(sessions.ownerUserId, auth.userId),
+        ),
+      )
+      .returning();
+    if (session?.fastConversationId && changes.title !== undefined) {
+      await tx
+        .update(fastAgentConversations)
+        .set({ title: changes.title, titleEditedByUserAt: updatedAt })
+        .where(eq(fastAgentConversations.id, session.fastConversationId));
+    }
+    return session;
+  });
+
+  if (updated?.fastConversationId && changes.title !== undefined) {
+    await syncFastAgentSlackTitleBestEffort({
+      conversationId: updated.fastConversationId,
+    });
+  }
   return updated ?? null;
 }
 

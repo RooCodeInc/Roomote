@@ -10,6 +10,7 @@ export * from './find-completed-slack-task-run-with-snapshot';
 export * from './forwarded-message-context';
 export * from './automation-root-footer';
 export * from './automation-result-blocks';
+export * from './agent-session-title-sync';
 export * from './handle-followup-answer';
 export * from './interactive-response';
 export * from './live-task-card-blocks';
