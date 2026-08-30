@@ -382,6 +382,9 @@ COPY --chown=roomote-app:roomote-app CHANGELOG.md ./CHANGELOG.md
 # The web server (cwd /roomote/apps/web) reads setup-flow docs from
 # ../docs at request time, so the MDX sources must ship in the image.
 COPY --chown=roomote-app:roomote-app --from=build-web /roomote/apps/docs ./apps/docs/
+# Load each externalized server package from the standalone tree so missing
+# transitive dependencies fail the image build instead of the first request.
+RUN node -e "const { globSync } = require('node:fs'); const { dirname } = require('node:path'); for (const name of ['ioredis', 'pino-pretty', 'bullmq']) { const entries = globSync('/roomote/node_modules/.pnpm/' + name + '@*/node_modules/' + name + '/package.json'); if (entries.length === 0) throw new Error('Missing standalone package: ' + name); for (const entry of entries) require(dirname(entry)); }"
 COPY --from=build-api /roomote/apps/api/package.json ./apps/api/
 COPY --from=build-api /roomote/apps/api/dist ./apps/api/dist/
 COPY --from=build-api /runtime-deps/node_modules ./apps/api/node_modules/
