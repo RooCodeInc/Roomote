@@ -405,18 +405,15 @@ export function FastSessionTranscript({
           />
           {pendingResponseAfter !== null ? <ThinkingMessage /> : null}
           {reviewOffers.map((offer) => (
-            <div
+            <PrReviewActionOffer
               key={offer.deliveryId}
               className="mt-3 rounded-lg border border-border/70 bg-muted/40 px-3 py-3"
-            >
-              <p className="mb-2 text-sm">{offer.question}</p>
-              <PrReviewActionOffer
-                offer={offer}
-                onAction={(choice) =>
-                  handleReviewAction(offer.deliveryId, choice)
-                }
-              />
-            </div>
+              offer={offer}
+              showQuestion
+              onAction={(choice) =>
+                handleReviewAction(offer.deliveryId, choice)
+              }
+            />
           ))}
         </ConversationContent>
         <ConversationScrollButton />

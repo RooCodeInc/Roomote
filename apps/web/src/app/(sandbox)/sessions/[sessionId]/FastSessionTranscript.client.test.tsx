@@ -425,14 +425,19 @@ describe('FastSessionTranscript', () => {
     ).toBeInTheDocument();
   });
 
-  it('renders retired and late-click states without actionable controls', async () => {
+  it('hides dismissed offers and renders late-click states without controls', async () => {
     const { rerender } = render(
       <FastSessionTranscript
         sessionId="22222222-2222-4222-8222-222222222222"
         initialMessages={[reviewOfferMessage('dismissed')]}
       />,
     );
-    expect(screen.getByText('Review action dismissed.')).toBeInTheDocument();
+    expect(
+      screen.queryByText('Would you like me to resolve these issues?'),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId('pr-review-action-offer'),
+    ).not.toBeInTheDocument();
     expect(
       screen.queryByRole('button', { name: 'Resolve these issues' }),
     ).not.toBeInTheDocument();
