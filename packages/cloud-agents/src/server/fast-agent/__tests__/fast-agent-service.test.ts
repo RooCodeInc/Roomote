@@ -169,7 +169,10 @@ import {
   ALL_REPOSITORIES,
 } from '@roomote/types';
 
-import { answerFastAgentQuestion } from '../fast-agent-service';
+import {
+  answerFastAgentQuestion,
+  FAST_AGENT_MAX_INFERENCE_RETRIES_PER_TURN,
+} from '../fast-agent-service';
 import {
   buildFastAgentReactionExternalInputQuestion,
   type FastAgentReactionExternalInput,
@@ -1570,7 +1573,15 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       return { messageId: 'retry-1' };
     });
     const replaceReply = vi.fn().mockResolvedValue({ messageId: 'retry-1' });
-    mocks.generateText.mockRejectedValue(new Error('TypeError: fetch failed'));
+    // A Retry-After beyond the silent window posts a visible notice on the
+    // first attempt, so lock loss during backoff has a notice to close.
+    const rateLimitError = new Error('429 Too Many Requests') as Error & {
+      providerError: unknown;
+    };
+    rateLimitError.providerError = {
+      data: { responseHeaders: { 'retry-after': '60' } },
+    };
+    mocks.generateText.mockRejectedValue(rateLimitError);
 
     try {
       const resultPromise = answerFastAgentQuestion({
@@ -1585,7 +1596,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       expect(mocks.generateText).toHaveBeenCalledOnce();
       expect(postReply).toHaveBeenCalledWith({
         purpose: 'progress',
-        message: expect.stringContaining('attempt 1/6'),
+        message: expect.stringContaining('attempt 1/3'),
       });
       expect(replaceReply).toHaveBeenCalledWith(
         { messageId: 'retry-1' },
@@ -1631,10 +1642,10 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       ).rejects.toBe(lockLost);
 
       expect(mocks.generateText).toHaveBeenCalledOnce();
-      expect(replaceReply).toHaveBeenCalledWith(
-        { messageId: 'retry-1' },
-        expect.objectContaining({ purpose: 'closeout' }),
-      );
+      // Recovery stayed inside the silent window, so there is no visible
+      // retry notice to close after the lock is lost.
+      expect(postReply).not.toHaveBeenCalled();
+      expect(replaceReply).not.toHaveBeenCalled();
     } finally {
       timeout.mockRestore();
     }
@@ -2401,6 +2412,42 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     expect(adapter.postReply).toHaveBeenCalledOnce();
   });
 
+  it('allows retrying an identical launch after the first attempt fails', async () => {
+    const launchTask = vi.fn<LaunchFastAgentTask>();
+    launchTask
+      .mockResolvedValueOnce({
+        success: false,
+        error: 'deadlock detected',
+      })
+      .mockImplementationOnce(async ({ postKickoff }) => {
+        await postKickoff({ taskId: 'task-retried' });
+        return { success: true, taskId: 'task-retried' };
+      });
+    const adapter = callbacks({ launchTask });
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        const launch = {
+          prompt: 'Fix checkout.',
+          environmentId: 'env-1',
+          kickoffMessage: 'I’m delegating the checkout fix.',
+        };
+        await expect(
+          invokeTool(nativeToolNames.launchTask, launch),
+        ).resolves.toMatchObject({ success: false });
+        // The failed attempt must not poison the duplicate-launch signature.
+        await expect(
+          invokeTool(nativeToolNames.launchTask, launch),
+        ).resolves.toMatchObject({ success: true, taskId: 'task-retried' });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({ ...baseParams, adapter });
+
+    expect(launchTask).toHaveBeenCalledTimes(2);
+  });
+
   it('allows a corrected launch after rejecting an unavailable model', async () => {
     const launchTask = vi.fn<LaunchFastAgentTask>(async () => ({
       success: true,
@@ -2859,10 +2906,12 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       expect(mocks.generateText.mock.calls[1]?.[0].prompt).toContain(
         'Earlier answer',
       );
-      expect(adapter.postReply).toHaveBeenNthCalledWith(1, {
-        purpose: 'progress',
-        message:
-          'Having trouble reaching the inference provider. Retrying in 1s (attempt 1/6).',
+      // Recovery finished inside the silent window, so the user never sees
+      // retry chatter — only the real reply.
+      expect(adapter.postReply).toHaveBeenCalledOnce();
+      expect(adapter.postReply).toHaveBeenCalledWith({
+        purpose: 'closeout',
+        message: 'The retry recovered.',
       });
       expect(mocks.invalidateSession).not.toHaveBeenCalled();
     } finally {
@@ -2975,10 +3024,13 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
           attachedImageCount: 0,
         }),
       );
-      expect(adapter.postReply).toHaveBeenCalledWith({
-        purpose: 'progress',
-        message: expect.stringContaining('Retrying in 1s (attempt 1/6)'),
-      });
+      // The warm continuation recovered inside the silent window, so no
+      // retry notice interleaves with the real replies.
+      expect(
+        vi
+          .mocked(adapter.postReply)
+          .mock.calls.filter(([reply]) => reply.purpose === 'progress'),
+      ).toHaveLength(0);
       expect(adapter.postReply).toHaveBeenCalledTimes(2);
       expect(adapter.postReply).toHaveBeenNthCalledWith(1, {
         purpose: 'ack',
@@ -3000,10 +3052,11 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         delivered: true,
         duplicate: true,
       });
-      expect(replaceReply).toHaveBeenCalledWith(
-        { messageId: 'retry-1' },
-        { purpose: 'closeout', message: 'The provider recovered.' },
-      );
+      expect(replaceReply).not.toHaveBeenCalled();
+      expect(adapter.postReply).toHaveBeenLastCalledWith({
+        purpose: 'closeout',
+        message: 'The provider recovered.',
+      });
       expect(mocks.setOpenCodeSession).toHaveBeenCalledWith({
         sessionId: 'conversation-1',
         openCodeSessionId: 'opencode-session-1',
@@ -3059,9 +3112,11 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       await vi.runAllTimersAsync();
 
       await expect(resultPromise).resolves.toBe('The retry recovered.');
-      expect(adapter.postReply).toHaveBeenNthCalledWith(1, {
-        purpose: 'progress',
-        message: expect.stringContaining('attempt 1/6'),
+      // A single short timeout recovery stays silent for the user.
+      expect(adapter.postReply).toHaveBeenCalledOnce();
+      expect(adapter.postReply).toHaveBeenCalledWith({
+        purpose: 'closeout',
+        message: 'The retry recovered.',
       });
     } finally {
       vi.useRealTimers();
@@ -3167,7 +3222,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     }
   });
 
-  it('retries a transient native prompt failure with a visible notice', async () => {
+  it('retries a transient native prompt failure without visible retry chatter', async () => {
     vi.useFakeTimers();
     try {
       mocks.generateText
@@ -3219,12 +3274,8 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
           outcome: 'success',
         }),
       );
-      expect(adapter.postReply).toHaveBeenNthCalledWith(1, {
-        purpose: 'progress',
-        message: expect.stringContaining('Retrying in 1s (attempt 1/6)'),
-      });
-      expect(adapter.postReply).toHaveBeenNthCalledWith(
-        2,
+      expect(adapter.postReply).toHaveBeenCalledOnce();
+      expect(adapter.postReply).toHaveBeenCalledWith(
         expect.objectContaining({ purpose: 'closeout' }),
       );
     } finally {
@@ -3291,10 +3342,11 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       await expect(resultPromise).resolves.toBe(
         'It coordinates incoming requests.',
       );
-      expect(adapter.postReply).toHaveBeenNthCalledWith(1, {
-        purpose: 'progress',
-        message:
-          'The inference provider is rate limiting requests. Retrying in 5s (attempt 1/3).',
+      // A short rate-limit backoff recovers without visible retry chatter.
+      expect(adapter.postReply).toHaveBeenCalledOnce();
+      expect(adapter.postReply).toHaveBeenCalledWith({
+        purpose: 'closeout',
+        message: 'It coordinates incoming requests.',
       });
     } finally {
       vi.useRealTimers();
@@ -3308,7 +3360,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         providerError: unknown;
       };
       rateLimitError.providerError = {
-        data: { responseHeaders: { 'retry-after': '12' } },
+        data: { responseHeaders: { 'retry-after': '45' } },
       };
       mocks.generateText
         .mockRejectedValueOnce(rateLimitError)
@@ -3328,17 +3380,19 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       await expect(resultPromise).resolves.toBe(
         'It coordinates incoming requests.',
       );
+      // A Retry-After wait beyond the silent window is worth telling the
+      // user about before the long pause begins.
       expect(adapter.postReply).toHaveBeenNthCalledWith(1, {
         purpose: 'progress',
         message:
-          'The inference provider is rate limiting requests. Retrying in 12s (attempt 1/3).',
+          'The inference provider is rate limiting requests. Retrying in 45s (attempt 1/3).',
       });
     } finally {
       vi.useRealTimers();
     }
   });
 
-  it('reports OpenCode internal provider retries while the prompt is pending', async () => {
+  it('keeps short OpenCode internal provider retries silent while the prompt is pending', async () => {
     mocks.generateText.mockImplementationOnce(
       async (params, _session, options) => {
         await options.onSessionReady('opencode-session-1');
@@ -3362,10 +3416,12 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     expect(mocks.generateText.mock.calls[0]?.[0]).toMatchObject({
       maxProviderRetryAttempts: 3,
     });
-    expect(adapter.postReply).toHaveBeenNthCalledWith(1, {
-      purpose: 'progress',
-      message:
-        'The inference provider is rate limiting requests. Retrying automatically…',
+    // Internal retries early in the attempt stay below the silent window,
+    // so the user only sees the real reply.
+    expect(adapter.postReply).toHaveBeenCalledOnce();
+    expect(adapter.postReply).toHaveBeenCalledWith({
+      purpose: 'closeout',
+      message: 'It coordinates incoming requests.',
     });
     expect(mocks.captureInferenceContext).toHaveBeenNthCalledWith(
       1,
@@ -3382,6 +3438,37 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         providerRetryAttempt: 1,
       }),
     );
+  });
+
+  it('surfaces an internal retry notice when OpenCode schedules a long wait', async () => {
+    mocks.generateText.mockImplementationOnce(
+      async (params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        options.onPromptStarted?.();
+        // OpenCode already scheduled a wait past the silent window, so the
+        // very first internal retry event must surface a notice.
+        await params.onProviderRetry?.({
+          attempt: 1,
+          message: '429 Too Many Requests',
+          nextRetryAtMs: Date.now() + 45_000,
+        });
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'closeout',
+          message: 'It coordinates incoming requests.',
+        });
+        return '';
+      },
+    );
+    const adapter = callbacks();
+
+    await expect(
+      answerFastAgentQuestion({ ...baseParams, adapter }),
+    ).resolves.toBe('It coordinates incoming requests.');
+    expect(adapter.postReply).toHaveBeenNthCalledWith(1, {
+      purpose: 'progress',
+      message:
+        'The inference provider is rate limiting requests. Retrying automatically…',
+    });
   });
 
   it('bounds an initial prompt after OpenCode enters provider recovery', async () => {
@@ -3451,10 +3538,16 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         'Could not reach the inference provider after retrying. Please try again in a moment.',
       );
       expect(mocks.generateText).toHaveBeenCalledTimes(7);
-      expect(Date.now() - startedAt).toBe(67_100);
-      expect(adapter.postReply).toHaveBeenNthCalledWith(6, {
+      expect(Date.now() - startedAt).toBe(69_300);
+      // Early attempts stay silent; a notice appears once the pending wait
+      // pushes the recovery stretch past the silent window.
+      expect(adapter.postReply).toHaveBeenNthCalledWith(1, {
         purpose: 'progress',
-        message: expect.stringContaining('Retrying in 33s (attempt 6/6)'),
+        message: expect.stringContaining('Retrying in 18s (attempt 5/6)'),
+      });
+      expect(adapter.postReply).toHaveBeenNthCalledWith(2, {
+        purpose: 'progress',
+        message: expect.stringContaining('Retrying in 35s (attempt 6/6)'),
       });
       expect(adapter.postReply).toHaveBeenLastCalledWith({
         purpose: 'closeout',
@@ -3463,6 +3556,147 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       });
     } finally {
       random.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  it('surfaces an identical notice again for a later distinct recovery episode', async () => {
+    vi.useFakeTimers();
+    try {
+      mocks.generateText.mockImplementationOnce(
+        async (params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          options.onPromptStarted?.();
+          // First stall becomes visible past the silent window.
+          await params.onProviderRetry?.({
+            attempt: 1,
+            message: 'Provider temporarily unavailable',
+          });
+          await new Promise((resolve) => setTimeout(resolve, 40_000));
+          await params.onProviderRetry?.({
+            attempt: 2,
+            message: 'Provider temporarily unavailable',
+          });
+          // A completed message ends the first recovery episode.
+          options.onMessageCompleted?.({ role: 'assistant', parts: [] });
+          // A second stall starts a fresh episode: silent first, then the
+          // identical notice must surface again once it becomes visible.
+          await params.onProviderRetry?.({
+            attempt: 1,
+            message: 'Provider temporarily unavailable',
+          });
+          await new Promise((resolve) => setTimeout(resolve, 40_000));
+          await params.onProviderRetry?.({
+            attempt: 2,
+            message: 'Provider temporarily unavailable',
+          });
+          await invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'closeout',
+            message: 'It coordinates incoming requests.',
+          });
+          return '';
+        },
+      );
+      const adapter = callbacks();
+
+      const resultPromise = answerFastAgentQuestion({ ...baseParams, adapter });
+      await vi.advanceTimersByTimeAsync(80_000);
+      await resultPromise;
+
+      const progressMessages = vi
+        .mocked(adapter.postReply)
+        .mock.calls.filter(([reply]) => reply.purpose === 'progress');
+      expect(progressMessages).toHaveLength(2);
+      expect(progressMessages[0]?.[0]?.message).toContain(
+        'Retrying automatically…',
+      );
+      expect(progressMessages[1]?.[0]?.message).toContain(
+        'Retrying automatically…',
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('grants a fresh retry budget when failed attempts keep making warm progress', async () => {
+    vi.useFakeTimers();
+    try {
+      let failures = 0;
+      mocks.generateText.mockImplementation(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          // A native tool call is forward progress the warm continuation
+          // preserves, so each failure earns a refreshed bounded budget.
+          await invokeTool(nativeToolNames.sendChatReaction, {
+            name: 'eyes',
+            purpose: 'ack',
+          });
+          if (failures < 8) {
+            failures += 1;
+            throw new Error('TypeError: fetch failed');
+          }
+          await invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'closeout',
+            message: 'Recovered after steady progress.',
+          });
+          return '';
+        },
+      );
+      const adapter = callbacks();
+
+      const resultPromise = answerFastAgentQuestion({ ...baseParams, adapter });
+      await vi.runAllTimersAsync();
+
+      // Eight consecutive failures exceed the static six-retry budget, but
+      // per-failure progress keeps resetting it like worker turn completion.
+      await expect(resultPromise).resolves.toBe(
+        'Recovered after steady progress.',
+      );
+      expect(mocks.generateText).toHaveBeenCalledTimes(9);
+      expect(
+        vi
+          .mocked(adapter.postReply)
+          .mock.calls.filter(([reply]) => reply.purpose === 'progress'),
+      ).toHaveLength(0);
+      expect(adapter.postReply).toHaveBeenLastCalledWith({
+        purpose: 'closeout',
+        message: 'Recovered after steady progress.',
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('stops progress-based budget resets at the per-turn retry cap', async () => {
+    vi.useFakeTimers();
+    try {
+      mocks.generateText.mockImplementation(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          await invokeTool(nativeToolNames.sendChatReaction, {
+            name: 'eyes',
+            purpose: 'ack',
+          });
+          throw new Error('TypeError: fetch failed');
+        },
+      );
+      const adapter = callbacks();
+
+      const resultPromise = answerFastAgentQuestion({ ...baseParams, adapter });
+      await vi.runAllTimersAsync();
+
+      await expect(resultPromise).resolves.toBe(
+        'Could not reach the inference provider after retrying. Please try again in a moment.',
+      );
+      expect(mocks.generateText).toHaveBeenCalledTimes(
+        1 + FAST_AGENT_MAX_INFERENCE_RETRIES_PER_TURN,
+      );
+      expect(adapter.postReply).toHaveBeenLastCalledWith({
+        purpose: 'closeout',
+        message:
+          'Could not reach the inference provider after retrying. Please try again in a moment.',
+      });
+    } finally {
       vi.useRealTimers();
     }
   });
@@ -3490,29 +3724,45 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
   it('does not surface a duplicate retry notice for repeated failures', async () => {
     vi.useFakeTimers();
     try {
-      mocks.generateText
-        .mockRejectedValueOnce(new Error('TypeError: fetch failed'))
-        .mockRejectedValueOnce(new Error('TypeError: fetch failed'))
-        .mockImplementationOnce(async (_params, _session, options) => {
+      mocks.generateText.mockImplementationOnce(
+        async (params, _session, options) => {
           await options.onSessionReady('opencode-session-1');
+          options.onPromptStarted?.();
+          await params.onProviderRetry?.({
+            attempt: 1,
+            message: 'Provider temporarily unavailable',
+          });
+          await new Promise((resolve) => setTimeout(resolve, 40_000));
+          await params.onProviderRetry?.({
+            attempt: 2,
+            message: 'Provider temporarily unavailable',
+          });
+          await params.onProviderRetry?.({
+            attempt: 3,
+            message: 'Provider temporarily unavailable',
+          });
           await invokeTool(nativeToolNames.sendChatReply, {
             purpose: 'closeout',
             message: 'It coordinates incoming requests.',
           });
           return '';
-        });
+        },
+      );
       const adapter = callbacks();
 
       const resultPromise = answerFastAgentQuestion({ ...baseParams, adapter });
-      await vi.runAllTimersAsync();
+      await vi.advanceTimersByTimeAsync(40_000);
       await resultPromise;
 
+      // The first internal retry stays inside the silent window; once the
+      // stall becomes visible, identical notices collapse into one post.
       const progressMessages = vi
         .mocked(adapter.postReply)
         .mock.calls.filter(([reply]) => reply.purpose === 'progress');
-      expect(progressMessages).toHaveLength(2);
-      expect(progressMessages[0]?.[0]?.message).toContain('attempt 1/6');
-      expect(progressMessages[1]?.[0]?.message).toContain('attempt 2/6');
+      expect(progressMessages).toHaveLength(1);
+      expect(progressMessages[0]?.[0]?.message).toContain(
+        'Retrying automatically…',
+      );
     } finally {
       vi.useRealTimers();
     }
@@ -3521,9 +3771,16 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
   it('edits one retry notice through recovery and the final reply', async () => {
     vi.useFakeTimers();
     try {
+      // Retry-After beyond the silent window makes both waits user-visible.
+      const rateLimitError = new Error('429 Too Many Requests') as Error & {
+        providerError: unknown;
+      };
+      rateLimitError.providerError = {
+        data: { responseHeaders: { 'retry-after': '45' } },
+      };
       mocks.generateText
-        .mockRejectedValueOnce(new Error('TypeError: fetch failed'))
-        .mockRejectedValueOnce(new Error('TypeError: fetch failed'))
+        .mockRejectedValueOnce(rateLimitError)
+        .mockRejectedValueOnce(rateLimitError)
         .mockImplementationOnce(async (_params, _session, options) => {
           await options.onSessionReady('opencode-session-1');
           await invokeTool(nativeToolNames.sendChatReply, {
@@ -3544,7 +3801,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       expect(postReply).toHaveBeenCalledWith(
         expect.objectContaining({
           purpose: 'progress',
-          message: expect.stringContaining('attempt 1/6'),
+          message: expect.stringContaining('attempt 1/3'),
         }),
       );
       expect(replaceReply).toHaveBeenNthCalledWith(
@@ -3552,7 +3809,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         { messageId: 'retry-1' },
         expect.objectContaining({
           purpose: 'progress',
-          message: expect.stringContaining('attempt 2/6'),
+          message: expect.stringContaining('attempt 2/3'),
         }),
       );
       expect(replaceReply).toHaveBeenLastCalledWith(
@@ -3614,7 +3871,13 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         'Could not reach the inference provider',
       );
       expect(postReply).toHaveBeenCalledOnce();
-      expect(replaceReply).toHaveBeenCalledTimes(6);
+      expect(postReply).toHaveBeenCalledWith(
+        expect.objectContaining({
+          purpose: 'progress',
+          message: expect.stringContaining('attempt 5/6'),
+        }),
+      );
+      expect(replaceReply).toHaveBeenCalledTimes(2);
       expect(replaceReply).toHaveBeenLastCalledWith(
         { messageId: 'retry-1' },
         expect.objectContaining({
@@ -3636,8 +3899,15 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       .spyOn(console, 'warn')
       .mockImplementation(() => undefined);
     try {
+      // Retry-After beyond the silent window posts a visible retry notice.
+      const rateLimitError = new Error('429 Too Many Requests') as Error & {
+        providerError: unknown;
+      };
+      rateLimitError.providerError = {
+        data: { responseHeaders: { 'retry-after': '45' } },
+      };
       mocks.generateText
-        .mockRejectedValueOnce(new Error('TypeError: fetch failed'))
+        .mockRejectedValueOnce(rateLimitError)
         .mockImplementationOnce(async (_params, _session, options) => {
           await options.onSessionReady('opencode-session-1');
           await invokeTool(nativeToolNames.sendChatReply, {
