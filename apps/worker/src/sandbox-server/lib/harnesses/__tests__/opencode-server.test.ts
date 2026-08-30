@@ -1729,6 +1729,57 @@ describe('OpenCodeServerHarness', () => {
           ],
         },
       });
+
+      // Exhaust the remaining reminders, then reproduce a stale idle while
+      // another tool is active. Exhaustion must not bypass the quiescence
+      // guard and request the platform fallback early.
+      await client.emit({
+        type: 'session.idle',
+        properties: { sessionID: 'ses_1' },
+      });
+      await client.emit({
+        type: 'session.idle',
+        properties: { sessionID: 'ses_1' },
+      });
+      await vi.waitFor(() => {
+        expect(client.promptAsync).toHaveBeenCalledTimes(4);
+      });
+
+      client.messages.mockResolvedValue([message]);
+      await client.emit({
+        type: 'session.idle',
+        properties: { sessionID: 'ses_1' },
+      });
+
+      expect(
+        taskEvents.some(
+          (event) => event.eventName === TaskEventName.TaskCompleted,
+        ),
+      ).toBe(false);
+
+      // Once the tool settles, the next genuine idle may complete and hand
+      // the missing closeout to the platform fallback.
+      client.messages.mockResolvedValue([]);
+      await client.emit({
+        type: 'session.idle',
+        properties: { sessionID: 'ses_1' },
+      });
+      await vi.waitFor(() => {
+        expect(
+          taskEvents.some(
+            (event) => event.eventName === TaskEventName.TaskCompleted,
+          ),
+        ).toBe(true);
+      });
+      expect(
+        taskEvents.find(
+          (event) => event.eventName === TaskEventName.TaskCompleted,
+        )?.payload[3],
+      ).toEqual(
+        expect.objectContaining({
+          missingChatCloseout: { reminderCount: 3 },
+        }),
+      );
     } finally {
       harness.dispose();
       fs.rmSync(tempDir, { recursive: true, force: true });

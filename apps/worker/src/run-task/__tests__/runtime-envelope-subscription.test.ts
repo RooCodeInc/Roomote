@@ -1,15 +1,11 @@
 import { TaskEventName, type TaskEvent } from '@roomote/types';
 
 const {
-  mockCancelPendingMissingChatCloseoutFallback,
   mockRecordMissingChatCloseoutFallback,
-  mockRecordMissingChatCloseoutToolActivity,
   mockDeliverShowWidgetFallback,
   mockWaitForMissingChatCloseoutFallbackDelivery,
 } = vi.hoisted(() => ({
-  mockCancelPendingMissingChatCloseoutFallback: vi.fn(),
   mockRecordMissingChatCloseoutFallback: vi.fn(),
-  mockRecordMissingChatCloseoutToolActivity: vi.fn(),
   mockDeliverShowWidgetFallback: vi.fn().mockResolvedValue(undefined),
   mockWaitForMissingChatCloseoutFallbackDelivery: vi
     .fn()
@@ -31,11 +27,7 @@ vi.mock('../show-widget-fallback-delivery', () => ({
 }));
 
 vi.mock('../missing-chat-closeout-fallback-settlement', () => ({
-  cancelPendingMissingChatCloseoutFallback:
-    mockCancelPendingMissingChatCloseoutFallback,
   recordMissingChatCloseoutFallback: mockRecordMissingChatCloseoutFallback,
-  recordMissingChatCloseoutToolActivity:
-    mockRecordMissingChatCloseoutToolActivity,
   waitForMissingChatCloseoutFallbackDelivery:
     mockWaitForMissingChatCloseoutFallbackDelivery,
 }));
@@ -49,7 +41,6 @@ import { captureWorkerException } from '../../monitoring/sentry';
 
 import {
   ACP_ENVELOPE_EVENT_TYPES,
-  ACP_LIVE_EVENT_TYPES,
   type AcpMessage,
   type AcpPersistedEnvelope,
   type AcpTurnCompletedEvent,
@@ -142,9 +133,7 @@ describe('subscribeHarnessCallbacks', () => {
     recordInferenceUsageMock.mockClear();
     recordInferenceUsageMock.mockResolvedValue({ recorded: true });
     captureWorkerExceptionMock.mockClear();
-    mockCancelPendingMissingChatCloseoutFallback.mockClear();
     mockRecordMissingChatCloseoutFallback.mockClear();
-    mockRecordMissingChatCloseoutToolActivity.mockClear();
     mockWaitForMissingChatCloseoutFallbackDelivery.mockClear();
     mockDeliverShowWidgetFallback.mockClear();
   });
@@ -834,13 +823,12 @@ describe('subscribeHarnessCallbacks', () => {
 
   it('does not persist raw Roomote runtime output events to task_messages', async () => {
     const { harness, emitOutput } = createRuntimeHarness();
-    const context = {};
 
     const unsubscribe = subscribeHarnessCallbacks({
       harness: harness as never,
       taskRun: { id: 49, taskId: 'task-no-raw-output' } as never,
       callbacks: { onMessage: vi.fn().mockResolvedValue(undefined) },
-      context,
+      context: {},
       logger: {
         runId: 49,
         filePath: '/tmp/test.log',
@@ -867,51 +855,7 @@ describe('subscribeHarnessCallbacks', () => {
       },
     });
 
-    expect(mockCancelPendingMissingChatCloseoutFallback).toHaveBeenCalledWith(
-      context,
-    );
-    expect(mockRecordMissingChatCloseoutToolActivity).toHaveBeenCalledWith(
-      context,
-      {
-        toolCallId: 'call-raw-output',
-        status: 'completed',
-      },
-    );
     expect(recordMessageEnvelopeMock).not.toHaveBeenCalled();
-
-    await unsubscribe();
-  });
-
-  it('does not cancel a pending closeout fallback for usage-only activity', async () => {
-    const { harness, emitOutput } = createRuntimeHarness();
-    const context = {};
-    const unsubscribe = subscribeHarnessCallbacks({
-      harness: harness as never,
-      taskRun: { id: 51, taskId: 'task-usage-output' } as never,
-      callbacks: {},
-      context,
-      logger: {
-        runId: 51,
-        filePath: '/tmp/test.log',
-        info: vi.fn(),
-        warn: vi.fn(),
-        error: vi.fn(),
-        log: vi.fn(),
-      },
-    });
-
-    emitOutput({
-      id: 'runtime-session-usage:1',
-      ts: 1772823379100,
-      eventType: ACP_LIVE_EVENT_TYPES.UsageUpdate,
-      role: 'assistant',
-      kind: 'unknown',
-      contentBlocks: [],
-      metadata: { sessionId: 'runtime-session-usage' },
-      payload: {},
-    });
-
-    expect(mockCancelPendingMissingChatCloseoutFallback).not.toHaveBeenCalled();
 
     await unsubscribe();
   });

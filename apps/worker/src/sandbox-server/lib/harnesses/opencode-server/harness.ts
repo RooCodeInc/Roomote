@@ -4949,6 +4949,21 @@ export class OpenCodeServerHarness
           this.lastBlockedCloseoutAssistantText = finalized.text;
         }
 
+        if (await this.hasUnsettledToolWork(sessionId)) {
+          // The idle that triggered enforcement was stale: the session
+          // still has a tool call pending/running or an assistant message
+          // streaming. A reminder submitted now lands mid-work and reads
+          // as an instruction to drop that work, so defer to the next
+          // genuine idle. Restore inFlight so that idle passes the entry
+          // guard, and arm the fail-safe in case it never arrives.
+          this.logger.info(
+            `OpenCode Slack closeout reminder deferred: the session still has unsettled tool work sessionId=${sessionId}`,
+          );
+          this.inFlight = true;
+          this.armStopHookReminderStall(sessionId);
+          return;
+        }
+
         if (this.stopHookReminderCount >= MAX_OPENCODE_STOP_HOOK_REMINDERS) {
           // Give up gracefully: complete the turn without a Slack closeout
           // instead of aborting the task.
@@ -4957,21 +4972,6 @@ export class OpenCodeServerHarness
           );
           missingChatCloseoutReminderCount = this.stopHookReminderCount;
         } else {
-          if (await this.hasUnsettledToolWork(sessionId)) {
-            // The idle that triggered enforcement was stale: the session
-            // still has a tool call pending/running or an assistant message
-            // streaming. A reminder submitted now lands mid-work and reads
-            // as an instruction to drop that work, so defer to the next
-            // genuine idle. Restore inFlight so that idle passes the entry
-            // guard, and arm the fail-safe in case it never arrives.
-            this.logger.info(
-              `OpenCode Slack closeout reminder deferred: the session still has unsettled tool work sessionId=${sessionId}`,
-            );
-            this.inFlight = true;
-            this.armStopHookReminderStall(sessionId);
-            return;
-          }
-
           this.stopHookReminderCount += 1;
           this.logger.info(
             `OpenCode Slack closeout reminder submitted count=${this.stopHookReminderCount} source=${source} sessionId=${sessionId}`,
