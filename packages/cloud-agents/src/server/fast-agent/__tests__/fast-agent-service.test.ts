@@ -890,7 +890,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     );
   });
 
-  it('sanitizes and persists Fast widgets while posting only the Slack fallback', async () => {
+  it('sanitizes and persists Fast widgets while posting the Slack chat preview', async () => {
     const adapter = callbacks();
     mocks.generateText.mockImplementation(
       async (_params, _session, options) => {
@@ -898,7 +898,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         const result = await invokeTool(nativeToolNames.showWidget, {
           html: '<p onclick="alert(1)">Safe</p><script>alert(2)</script>',
           title: 'Status',
-          textFallback: 'Status is available in the web transcript.',
+          textFallback: 'Status: all systems operational.',
         });
         expect(result).toMatchObject({
           success: true,
@@ -911,12 +911,12 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
 
     await expect(
       answerFastAgentQuestion({ ...baseParams, adapter }),
-    ).resolves.toBe('Status is available in the web transcript.');
+    ).resolves.toBe('Status: all systems operational.');
 
     expect(adapter.postReply).toHaveBeenCalledTimes(1);
     expect(adapter.postReply).toHaveBeenCalledWith({
       purpose: 'progress',
-      message: 'Status is available in the web transcript.',
+      message: 'Status: all systems operational.',
     });
     const toolResult = mocks.upsertMessage.mock.calls
       .map(([input]) => input.message)
@@ -938,7 +938,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       success: true,
       shown: true,
       html: '<p>Safe</p>',
-      textFallback: 'Status is available in the web transcript.',
+      textFallback: 'Status: all systems operational.',
     });
   });
 
