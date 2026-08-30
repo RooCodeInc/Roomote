@@ -39,7 +39,8 @@ export function createFastAgentSlackSessionActivity({
           if (
             response.ok &&
             sessionTitle &&
-            response.title?.trim() !== sessionTitle
+            response.title !== undefined &&
+            response.title !== sessionTitle
           ) {
             await slack.renameAgentSession({
               channel,

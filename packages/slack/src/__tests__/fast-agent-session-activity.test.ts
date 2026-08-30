@@ -87,6 +87,27 @@ describe('createFastAgentSlackSessionActivity', () => {
     });
   });
 
+  it('does not rename when Slack omits the current title', async () => {
+    vi.useFakeTimers();
+    const setAgentSessionStatus = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: true })
+      .mockResolvedValueOnce({ ok: true });
+    const renameAgentSession = vi.fn();
+    const activity = createFastAgentSlackSessionActivity({
+      slack: { renameAgentSession, setAgentSessionStatus },
+      channel: 'C123',
+      threadTs: '100.001',
+      title: 'Investigate Slack agent status',
+    });
+
+    activity.start();
+    await vi.advanceTimersByTimeAsync(FAST_AGENT_SLACK_PROCESSING_DELAY_MS);
+    await activity.settle();
+
+    expect(renameAgentSession).not.toHaveBeenCalled();
+  });
+
   it('passes a nonblank persisted title to Slack without rewriting it', async () => {
     vi.useFakeTimers();
     const title = `Status ${'detail'.repeat(40)}`;
