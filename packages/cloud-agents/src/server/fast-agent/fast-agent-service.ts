@@ -110,7 +110,9 @@ import {
 import { RemoteFastAgentRepositorySkillSource } from './fast-agent-repository-skill-source';
 import { FastAgentSkillStore } from './fast-agent-skill-store';
 import {
+  FAST_AGENT_REACTION_INPUT_TYPE,
   type FastAgentConversation,
+  type FastAgentHumanInput,
   isFastAgentCommunicationConversation,
   type FastAgentPlatformEventHandling,
   type FastAgentPlatformEventKind,
@@ -659,6 +661,7 @@ function buildFastAgentMessages({
   currentMessageTs,
   currentMessageSender,
   surface,
+  reactionInput,
   turnSource,
 }: {
   question: string;
@@ -672,6 +675,7 @@ function buildFastAgentMessages({
     githubLogin?: string;
   };
   surface: FastAgentConversation['surface'];
+  reactionInput: boolean;
   turnSource: FastAgentTurnSource;
 }): {
   bootstrapMessages: ModelMessage[];
@@ -680,8 +684,10 @@ function buildFastAgentMessages({
   turnThreadContextPresent: boolean;
 } {
   const normalizedQuestion = normalizeThreadText(question);
-  const currentUserMessageText =
-    surface === 'slack'
+  const contextualMessageTs = reactionInput ? undefined : currentMessageTs;
+  const currentUserMessageText = reactionInput
+    ? normalizedQuestion
+    : surface === 'slack'
       ? currentMessageTs
         ? wrapSlackMessage(normalizedQuestion, {
             ts: currentMessageTs,
@@ -700,7 +706,7 @@ function buildFastAgentMessages({
     const supplementalThreadContext = buildSupplementalThreadContext({
       threadContext,
       compatibilityMessages,
-      currentMessageTs,
+      currentMessageTs: contextualMessageTs,
       surface,
     });
     const turnMessages = [
@@ -718,10 +724,10 @@ function buildFastAgentMessages({
   }
 
   const { threadContext: serializedThreadContext, replyingTo } =
-    currentMessageTs && surface === 'slack'
+    contextualMessageTs && surface === 'slack'
       ? buildSlackThreadPromptBlocks({
           threadMessages: threadContext,
-          currentMessageTs,
+          currentMessageTs: contextualMessageTs,
         })
       : {
           threadContext: wrapFastAgentThreadContext(threadContext),
@@ -805,6 +811,7 @@ export async function answerFastAgentQuestion({
   model,
   reasoningEffort,
   turnSource = 'human',
+  input,
   platformEventHandling = 'default',
   platformEventVisibility = 'optional',
   platformEventKind = 'delegated_task',
@@ -830,6 +837,7 @@ export async function answerFastAgentQuestion({
   model?: string | null;
   reasoningEffort?: ReasoningEffort | null;
   turnSource?: FastAgentTurnSource;
+  input?: FastAgentHumanInput;
   platformEventHandling?: FastAgentPlatformEventHandling;
   platformEventVisibility?: FastAgentPlatformEventVisibility;
   platformEventKind?: FastAgentPlatformEventKind;
@@ -851,6 +859,14 @@ export async function answerFastAgentQuestion({
     userId,
   });
   const platformEvent = turnSource === 'platform_event';
+  const humanInput = input ?? ({ type: 'message' } as const);
+  const reactionInput =
+    !platformEvent && humanInput.type === FAST_AGENT_REACTION_INPUT_TYPE;
+  const substantiveHumanInput = !platformEvent && !reactionInput;
+  const currentMessageReactable = substantiveHumanInput;
+  const transcriptPayload = reactionInput
+    ? { externalInput: humanInput.externalInput }
+    : platformEventTranscriptPayload;
   const turnVisibleMessages: ModelMessage[] = [];
   let mirroredMessageCount = 0;
   let canonicalConversationId: string | null = null;
@@ -960,7 +976,7 @@ export async function answerFastAgentQuestion({
         },
         payload: {
           purpose: reply.purpose,
-          ...(platformEventTranscriptPayload ?? {}),
+          ...(transcriptPayload ?? {}),
           ...(reply.imageArtifactIds?.length
             ? { imageArtifactIds: reply.imageArtifactIds }
             : {}),
@@ -1160,7 +1176,7 @@ export async function answerFastAgentQuestion({
   }
 
   try {
-    if (!platformEvent) {
+    if (substantiveHumanInput) {
       turnVisibleMessages.push(
         buildUserTextMessage(normalizeThreadText(question)),
       );
@@ -1228,10 +1244,13 @@ export async function answerFastAgentQuestion({
           images,
         ),
         metadata: {
-          // Platform-event prompts are internal <platform_event> JSON, not
-          // something a person typed — keep them out of the transcript view.
-          visibleInTranscript: !platformEvent,
+          // Synthetic envelopes are useful model input but not readable
+          // transcript or title seeds.
+          visibleInTranscript: substantiveHumanInput,
           turnSource,
+          ...(reactionInput
+            ? { inputKind: FAST_AGENT_REACTION_INPUT_TYPE }
+            : {}),
           ...(platformEvent ? { platformEventKind } : {}),
           userId,
           ...(senderDisplayName ? { userName: senderDisplayName } : {}),
@@ -1244,9 +1263,12 @@ export async function answerFastAgentQuestion({
       true,
     );
     diagnostics.recordInitialHumanTurn(
-      platformEvent ? false : userMessageResult?.initialHumanTurn,
+      substantiveHumanInput ? userMessageResult?.initialHumanTurn : false,
     );
-    if (!platformEvent || platformEventKind === 'automation') {
+    if (
+      substantiveHumanInput ||
+      (platformEvent && platformEventKind === 'automation')
+    ) {
       void refreshFastAgentSessionTitle({ sessionId: session.id, userId }).then(
         (title) => adapter.activity?.updateTitle?.(title),
       );
@@ -1284,6 +1306,7 @@ export async function answerFastAgentQuestion({
       currentMessageTs: currentMessageId,
       currentMessageSender,
       surface: conversation.surface,
+      reactionInput,
       turnSource,
     });
     const releaseVersion = resolveRoomoteReleaseVersion(
@@ -1299,6 +1322,7 @@ export async function answerFastAgentQuestion({
       activeTasks: resolvedActiveTasks,
       surface: conversation.surface,
       turnSource,
+      input: humanInput,
       platformEventHandling,
       platformEventVisibility,
       platformEventKind,
@@ -1677,11 +1701,11 @@ export async function answerFastAgentQuestion({
 
           case FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReaction: {
             const args = chatReactionArgsSchema.parse(call.args);
-            if (platformEvent) {
+            if (!currentMessageReactable) {
               return {
                 success: false,
                 error:
-                  'Emoji reactions are unavailable during platform events. Use send_chat_reply or ignore_event instead.',
+                  'Emoji reactions are unavailable for this input. Use send_chat_reply or ignore_event instead.',
               };
             }
             if (!adapter.postReaction) {
@@ -2016,17 +2040,17 @@ export async function answerFastAgentQuestion({
 
           case FAST_AGENT_NATIVE_TOOL_NAMES.ignoreEvent: {
             ignoreEventArgsSchema.parse(call.args);
-            if (!platformEvent && !allowSilentAmbientReply) {
-              return {
-                success: false,
-                error:
-                  'Only an optional platform event or eligible ambient human message may be ignored.',
-              };
-            }
             if (platformEvent && platformEventVisibility === 'required') {
               return {
                 success: false,
                 error: 'This platform event requires a user-visible closeout.',
+              };
+            }
+            if (!reactionInput && !platformEvent && !allowSilentAmbientReply) {
+              return {
+                success: false,
+                error:
+                  'Only a reaction, optional platform event, or eligible ambient human message may be ignored.',
               };
             }
             closed = true;

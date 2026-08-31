@@ -25,7 +25,6 @@ export type FastAgentPlatformEventHandling = 'default' | 'present_only';
 export type FastAgentPlatformEventKind =
   | 'delegated_task'
   | 'automation'
-  | 'external_input'
   | 'setup';
 
 export type FastAgentReactionExternalInput = {
@@ -42,6 +41,15 @@ export type FastAgentReactionExternalInput = {
   };
   eventId: string;
 };
+
+export const FAST_AGENT_REACTION_INPUT_TYPE = 'reaction' as const;
+
+export type FastAgentHumanInput =
+  | { type: 'message' }
+  | {
+      type: typeof FAST_AGENT_REACTION_INPUT_TYPE;
+      externalInput: FastAgentReactionExternalInput;
+    };
 
 export function buildFastAgentReactionExternalInputQuestion(
   input: FastAgentReactionExternalInput,

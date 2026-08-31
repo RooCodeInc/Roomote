@@ -569,10 +569,8 @@ async function runFastAgentSurfaceReply(
       ...(params.externalInput
         ? {
             senderExternalId: params.externalInput.reactor.externalUserId,
-            turnSource: 'platform_event' as const,
-            platformEventKind: 'external_input' as const,
-            platformEventVisibility: 'optional' as const,
-            platformEventTranscriptPayload: {
+            input: {
+              type: 'reaction' as const,
               externalInput: params.externalInput,
             },
           }
