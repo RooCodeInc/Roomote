@@ -15,6 +15,8 @@ const MAX_GITHUB_ASSOCIATED_PULL_REQUESTS = 10;
 const MAX_GITHUB_PULL_REQUEST_CANDIDATES = 3;
 const MAX_GITHUB_CHANGED_FILES = 20;
 const MAX_GITHUB_PULL_REQUEST_IMAGE_CANDIDATES = 5;
+const MAX_GITHUB_PULL_REQUEST_IMAGE_PROBES = 20;
+const GITHUB_PULL_REQUEST_IMAGE_PROBE_BATCH_SIZE = 5;
 const MAX_GITHUB_PULL_REQUEST_IMAGE_ALT_CHARS = 200;
 const MAX_GITHUB_PULL_REQUEST_IMAGE_CONTEXT_CHARS = 300;
 const MAX_GITHUB_IMAGE_REDIRECTS = 3;
@@ -156,24 +158,38 @@ export async function extractEligiblePullRequestImages(
         Number(SCREENSHOT_LIKE_IMAGE_TEXT.test(a.altText));
       return screenshotScoreDifference || a.position - b.position;
     })
-    .slice(0, MAX_GITHUB_PULL_REQUEST_IMAGE_CANDIDATES);
+    .slice(0, MAX_GITHUB_PULL_REQUEST_IMAGE_PROBES);
 
-  const mediaTypeResults = await Promise.allSettled(
-    rankedCandidates.map(async (candidate) => ({
-      candidate,
-      mediaType: await resolveMediaType(candidate.url),
-    })),
-  );
-  return mediaTypeResults
-    .flatMap((result) =>
-      result.status === 'fulfilled' &&
-      result.value.mediaType &&
-      SUPPORTED_SLACK_IMAGE_MEDIA_TYPES.has(
-        result.value.mediaType.toLowerCase(),
-      )
-        ? [result.value.candidate]
-        : [],
-    )
+  const eligibleCandidates: PullRequestImageCandidate[] = [];
+  for (
+    let offset = 0;
+    offset < rankedCandidates.length &&
+    eligibleCandidates.length < MAX_GITHUB_PULL_REQUEST_IMAGE_CANDIDATES;
+    offset += GITHUB_PULL_REQUEST_IMAGE_PROBE_BATCH_SIZE
+  ) {
+    const mediaTypeResults = await Promise.allSettled(
+      rankedCandidates
+        .slice(offset, offset + GITHUB_PULL_REQUEST_IMAGE_PROBE_BATCH_SIZE)
+        .map(async (candidate) => ({
+          candidate,
+          mediaType: await resolveMediaType(candidate.url),
+        })),
+    );
+    eligibleCandidates.push(
+      ...mediaTypeResults.flatMap((result) =>
+        result.status === 'fulfilled' &&
+        result.value.mediaType &&
+        SUPPORTED_SLACK_IMAGE_MEDIA_TYPES.has(
+          result.value.mediaType.toLowerCase(),
+        )
+          ? [result.value.candidate]
+          : [],
+      ),
+    );
+  }
+
+  return eligibleCandidates
+    .slice(0, MAX_GITHUB_PULL_REQUEST_IMAGE_CANDIDATES)
     .map((candidate, index) => ({
       id: `image-${index + 1}`,
       url: candidate.url,

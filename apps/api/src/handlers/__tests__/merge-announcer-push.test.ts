@@ -184,6 +184,31 @@ describe('Merge announcer push normalization', () => {
     expect(resolveMediaType).toHaveBeenCalledWith(screenshotUrl);
   });
 
+  it('continues bounded probes after earlier images have unsupported media types', async () => {
+    const unsupportedImages = Array.from(
+      { length: 5 },
+      (_, index) =>
+        `![Preview ${index + 1}](https://cdn.example.com/video-${index + 1})`,
+    ).join('\n');
+    const screenshotUrl = 'https://cdn.example.com/settings-screenshot';
+    const resolveMediaType = vi.fn(async (url: string) =>
+      url === screenshotUrl ? 'image/png' : 'video/mp4',
+    );
+
+    await expect(
+      extractEligiblePullRequestImages(
+        `${unsupportedImages}\n![Settings screenshot](${screenshotUrl})`,
+        resolveMediaType,
+      ),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        url: screenshotUrl,
+        altText: 'Settings screenshot',
+      }),
+    ]);
+    expect(resolveMediaType).toHaveBeenCalledTimes(6);
+  });
+
   it('enriches GitHub merge pushes with bounded PR metadata and file stats', async () => {
     const payload = {
       ref: 'refs/heads/main',
