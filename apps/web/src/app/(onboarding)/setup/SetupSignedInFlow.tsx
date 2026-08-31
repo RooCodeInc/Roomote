@@ -7,9 +7,7 @@ import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 import {
   getSetupNewComputeProvisioningState,
-  isComputeCredentialField,
   isSetupProvisionableComputeProvider,
-  type ComputeProvider,
   type SetupModelProviderId,
   type SourceControlProvider,
 } from '@roomote/types';
@@ -25,8 +23,6 @@ import { Button } from '@/components/system';
 import { StepWelcome } from './StepWelcome';
 import { StepInferenceProvider } from './StepInferenceProvider';
 import { StepConfigureInference } from './StepConfigureInference';
-import { StepComputeProvider } from './StepComputeProvider';
-import { StepComputeConfig } from './StepComputeConfig';
 import { StepSourceControlProvider } from './StepSourceControlProvider';
 import { StepSourceControlConfig } from './StepSourceControlConfig';
 import { StepSourceControlConnect } from './StepSourceControlConnect';
@@ -42,8 +38,6 @@ export function SetupSignedInFlow() {
   const isAdmin = user?.isAdmin === true;
   const [pendingSourceControlProvider, setPendingSourceControlProvider] =
     useState<SourceControlProvider | null>(null);
-  const [pendingComputeProvider, setPendingComputeProvider] =
-    useState<ComputeProvider | null>(null);
   const [pendingModelProvider, setPendingModelProvider] =
     useState<SetupModelProviderId | null>(null);
   const trackWelcomeSeen = useMutation(
@@ -99,30 +93,6 @@ export function SetupSignedInFlow() {
       onError: (error) => toast.error(error.message),
     }),
   );
-  const saveComputeProviderChoice = useMutation(
-    trpc.setupNew.saveComputeProviderChoice.mutationOptions({
-      onSuccess: async (_data, variables) => {
-        await queryClient.invalidateQueries({
-          queryKey: trpc.setupNew.status.queryKey(),
-        });
-        setPendingComputeProvider(variables.provider);
-        const selectedProvider = status?.computeSetup.providers.find(
-          (provider) => provider.provider === variables.provider,
-        );
-        if (
-          selectedProvider &&
-          !selectedProvider.fields.some(isComputeCredentialField)
-        ) {
-          goToNextStep();
-          return;
-        }
-        goToStep('compute-config', { revisit: true });
-      },
-      onError: (error) => toast.error(error.message),
-    }),
-  );
-  const selectedComputeProvider =
-    pendingComputeProvider ?? status?.setupNewState.computeProvider;
   const selectedSourceControlProvider =
     pendingSourceControlProvider ??
     status?.setupNewState.sourceControlProvider ??
@@ -134,7 +104,6 @@ export function SetupSignedInFlow() {
   useEffect(() => {
     const params = readSetupSearchParams();
     const providerParams = {
-      computeProvider: selectedComputeProvider,
       modelProvider: selectedModelProvider,
       sourceControlProvider: selectedSourceControlProvider,
     };
@@ -152,7 +121,6 @@ export function SetupSignedInFlow() {
   }, [
     commitSetupUrl,
     readSetupSearchParams,
-    selectedComputeProvider,
     selectedModelProvider,
     selectedSourceControlProvider,
   ]);
@@ -205,16 +173,7 @@ export function SetupSignedInFlow() {
   const conversationalSetupReady =
     status != null &&
     status.modelSetup.setupSatisfied &&
-    (status.computeSetup.setupSatisfied ||
-      (status.setupNewState.computeProvider != null &&
-        isSetupProvisionableComputeProvider(
-          status.setupNewState.computeProvider,
-        ) &&
-        getSetupNewComputeProvisioningState(
-          status.setupNewState,
-          status.setupNewState.computeProvider,
-        )?.status === 'building')) &&
-    status.computeSetup.selectedProvider != null &&
+    status.sourceControlSetup.setupSatisfied &&
     status.setupCompletedAt == null;
   const setupSessionId = setupSession?.sessionId ?? null;
 
@@ -281,9 +240,7 @@ export function SetupSignedInFlow() {
           (task) => task.suggestionId !== null,
         )}
         computeProvisioning={computeProvisioning}
-        onRetryComputeProvisioning={() =>
-          goToStep('compute-config', { revisit: true })
-        }
+        onRetryComputeProvisioning={() => undefined}
         onTryItOut={() => undefined}
       />
     );
@@ -320,7 +277,7 @@ export function SetupSignedInFlow() {
           )}
           {step === 'inference' && (
             <StepConfigureInference
-              onUseTrial={() => goToStep('compute-provider')}
+              onUseTrial={goToNextStep}
               onConfigureProvider={() =>
                 goToStep('env-vars', { revisit: true })
               }
@@ -336,7 +293,7 @@ export function SetupSignedInFlow() {
               }
               onContinue={() => {
                 setPendingModelProvider(null);
-                goToStep('compute-provider');
+                goToNextStep();
               }}
               onBack={canGoBack ? goToPreviousStep : undefined}
               onSelectedProviderChange={setPendingModelProvider}
@@ -376,38 +333,6 @@ export function SetupSignedInFlow() {
               onContinue={goToNextStep}
               onRemoveSyncMarker={removeSourceControlSyncMarker}
               onBack={canGoBack ? goToPreviousStep : undefined}
-            />
-          )}
-          {step === 'compute-provider' && (
-            <StepComputeProvider
-              computeSetup={status.computeSetup}
-              onContinue={(provider) =>
-                saveComputeProviderChoice.mutate({ provider })
-              }
-              onBack={canGoBack ? goToPreviousStep : undefined}
-              disabled={saveComputeProviderChoice.isPending}
-            />
-          )}
-          {step === 'compute-config' && (
-            <StepComputeConfig
-              computeSetup={status.computeSetup}
-              selectedProviderId={pendingComputeProvider}
-              onContinue={() => {
-                setPendingComputeProvider(null);
-                // The conversational setup session takes over as soon as the
-                // refreshed status confirms a usable compute provider.
-                void queryClient.invalidateQueries({
-                  queryKey: trpc.setupNew.status.queryKey(),
-                });
-              }}
-              onBack={
-                canGoBack
-                  ? () => {
-                      setPendingComputeProvider(null);
-                      goToPreviousStep();
-                    }
-                  : undefined
-              }
             />
           )}
         </motion.div>

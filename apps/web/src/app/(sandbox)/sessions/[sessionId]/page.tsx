@@ -25,6 +25,7 @@ import {
   getSetupSessionStatusCommand,
 } from '@/trpc/commands/setup/setup-session';
 import { SetupRecommendationsInlineCard } from '../../../(onboarding)/setup/SetupRecommendationsInlineCard';
+import { SetupSandboxInlineCard } from '../../../(onboarding)/setup/SetupSandboxInlineCard';
 import { SetupSessionSourceControlPanel } from '../../../(onboarding)/setup/SetupSourceControlPanel';
 import { FastSessionTranscript } from './FastSessionTranscript';
 import { SessionTaskTimeline } from './SessionTaskTimeline';
@@ -138,8 +139,11 @@ export default async function SessionDetailPage({
     const setupSessionStatus = isSetupSession
       ? await getSetupSessionStatusCommand(authorizedUser)
       : null;
-    const setupRecommendations = isSetupSession ? (
-      <SetupRecommendationsInlineCard sessionId={unifiedSession.id} />
+    const setupTimelineExtras = isSetupSession ? (
+      <div className="space-y-3">
+        <SetupSandboxInlineCard />
+        <SetupRecommendationsInlineCard sessionId={unifiedSession.id} />
+      </div>
     ) : null;
     return (
       <SessionWorkspace session={sessionInfo}>
@@ -162,8 +166,8 @@ export default async function SessionDetailPage({
                   headerExtras={
                     <SessionHeaderExtras status={unifiedSession.status} />
                   }
-                  {...(setupRecommendations
-                    ? { timelineExtras: setupRecommendations }
+                  {...(isSetupSession
+                    ? { timelineExtras: setupTimelineExtras }
                     : {})}
                 />
               </div>

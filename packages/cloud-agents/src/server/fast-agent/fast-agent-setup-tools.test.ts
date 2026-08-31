@@ -52,6 +52,13 @@ describe('setup prompt guidance and snapshot injection', () => {
     expect(prompt).toContain('request_user_input');
     expect(prompt).toContain('setup_starter_tasks');
     expect(prompt).toContain('launch_task');
+    expect(prompt).toContain(
+      'Never ask the administrator to configure the sandbox before collecting first-work selection',
+    );
+    expect(prompt).toContain(
+      'Launch is deferred until the setup snapshot says',
+    );
+    expect(prompt).toContain('inline sandbox card');
     expect(prompt).not.toContain('launch_setup_starter_tasks');
     expect(prompt).not.toContain('update_plan');
   });

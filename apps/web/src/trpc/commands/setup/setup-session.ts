@@ -350,7 +350,12 @@ export async function reconcileSetupPlatformEvents(
       },
     });
   }
-  if (setupSession.starterTaskSelection) {
+  // Selecting starter work records durable intent, but task launch waits until
+  // a sandbox provider is actually usable. This keeps the setup conversation
+  // available without allowing a task to enter the queue with no worker
+  // backend. A later compute save/provisioning completion re-runs reconciliation
+  // and emits this same event once the provider is ready.
+  if (setupSession.starterTaskSelection && status.computeSetup.setupSatisfied) {
     events.push({
       kind: 'starter_selection',
       fingerprint: setupSession.starterTaskSelection.requestId,
@@ -428,26 +433,12 @@ export async function getOrCreateSetupSessionCommand(
 ): Promise<{ sessionId: string; created: boolean }> {
   assertAdmin(auth);
   const status = await getSetupNewStatusCommand(auth);
-  const selectedComputeProvider = status.setupNewState.computeProvider;
-  const provisioning = selectedComputeProvider
-    ? selectedComputeProvider === 'e2b'
-      ? status.setupNewState.e2bTemplateBuild
-      : selectedComputeProvider === 'daytona'
-        ? status.setupNewState.daytonaSnapshotBuild
-        : selectedComputeProvider === 'blaxel'
-          ? status.setupNewState.blaxelImageBuild
-          : selectedComputeProvider === 'azure'
-            ? status.setupNewState.azureDiskImageBuild
-            : null
-    : null;
   if (
     !status.modelSetup.setupSatisfied ||
-    (!status.computeSetup.setupSatisfied &&
-      provisioning?.status !== 'building') ||
-    !selectedComputeProvider
+    !status.sourceControlSetup.setupSatisfied
   ) {
     throw new Error(
-      'Inference and a saved compute provider must be ready before setup can continue in a Session.',
+      'Inference and source control must be ready before setup can continue in a Session.',
     );
   }
 

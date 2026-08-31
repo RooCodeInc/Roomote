@@ -405,7 +405,7 @@ describe('useSetupFlow', () => {
     });
   });
 
-  it('offers the compute provider picker after source control connects', async () => {
+  it('does not add a sandbox step after source control connects', async () => {
     markSetupWelcomeSeen();
     mockStatus();
 
@@ -428,10 +428,10 @@ describe('useSetupFlow', () => {
     act(() => {
       result.current.goToNextStep();
     });
-    expect(result.current.step).toBe('compute-config');
+    expect(result.current.step).toBe('source-control-connect');
   });
 
-  it('lands on the compute provider picker after source control when compute is not configured', async () => {
+  it('does not enter a dedicated sandbox step when compute is not configured', async () => {
     mockStatus({
       hasSlack: true,
       authSetup: {
@@ -493,17 +493,12 @@ describe('useSetupFlow', () => {
     const { result } = renderHook(() => useSetupFlow());
 
     await waitFor(() => {
-      expect(result.current.step).toBe('compute-provider');
+      expect(result.current.step).not.toBe('compute-provider');
+      expect(result.current.step).not.toBe('compute-config');
     });
-
-    act(() => {
-      result.current.goToNextStep();
-    });
-
-    expect(result.current.step).toBe('compute-config');
   });
 
-  it('requires a new choice when the saved compute provider is excluded', async () => {
+  it('does not reopen the dedicated sandbox picker when a saved provider is excluded', async () => {
     mockStatus({
       hasSlack: true,
       authSetup: {
@@ -577,11 +572,12 @@ describe('useSetupFlow', () => {
     const { result } = renderHook(() => useSetupFlow());
 
     await waitFor(() => {
-      expect(result.current.step).toBe('compute-provider');
+      expect(result.current.step).not.toBe('compute-provider');
+      expect(result.current.step).not.toBe('compute-config');
     });
   });
 
-  it('shows compute-config when a compute provider is chosen but not yet configured', async () => {
+  it('does not show sandbox configuration in the activation wizard', async () => {
     mockStatus({
       hasSlack: true,
       authSetup: {
@@ -655,11 +651,12 @@ describe('useSetupFlow', () => {
     const { result } = renderHook(() => useSetupFlow());
 
     await waitFor(() => {
-      expect(result.current.step).toBe('compute-config');
+      expect(result.current.step).not.toBe('compute-provider');
+      expect(result.current.step).not.toBe('compute-config');
     });
   });
 
-  it('falls back to compute-config when Local Docker satisfies every step', async () => {
+  it('does not show sandbox configuration when Local Docker is selected', async () => {
     mockStatus({
       authSetup: {
         setupSatisfiedByRuntimeEnv: false,
@@ -730,7 +727,8 @@ describe('useSetupFlow', () => {
     const { result } = renderHook(() => useSetupFlow());
 
     await waitFor(() => {
-      expect(result.current.step).toBe('compute-config');
+      expect(result.current.step).not.toBe('compute-provider');
+      expect(result.current.step).not.toBe('compute-config');
     });
   });
 
@@ -806,16 +804,14 @@ describe('useSetupFlow', () => {
     });
   });
 
-  it('reopens the compute provider picker when deep-linked after setup', async () => {
-    // Base mock: compute setup satisfied with docker chosen — normally the
-    // step is skipped, but the explicit link reopens it to switch providers.
+  it('does not reopen sandbox setup when deep-linked after setup', async () => {
     mockStatus();
     setLocationSearch('?step=compute-provider');
 
     const { result } = renderHook(() => useSetupFlow());
 
     await waitFor(() => {
-      expect(result.current.step).toBe('compute-provider');
+      expect(result.current.step).toBe('welcome');
     });
   });
 
@@ -1128,7 +1124,7 @@ describe('useSetupFlow', () => {
       result.current.goToNextStep();
     });
 
-    expect(result.current.step).toBe('compute-config');
+    expect(result.current.step).toBe('source-control-connect');
   });
 
   it('skips the communication provider chooser when the session marks communication skipped', async () => {
@@ -1165,17 +1161,17 @@ describe('useSetupFlow', () => {
     });
   });
 
-  it('ignores a legacy saved repository selection', async () => {
+  it('does not enter a sandbox step for an old saved repository selection', async () => {
     mockReadyForRepository({ selectedRepositoryIds: ['repo-1'] });
 
     const { result } = renderHook(() => useSetupFlow());
 
     await waitFor(() => {
-      expect(result.current.step).toBe('compute-config');
+      expect(result.current.step).not.toBe('compute-config');
     });
   });
 
-  it('lands on compute-config with a persisted onboarding task pending the environment', async () => {
+  it('does not enter a sandbox step while an old onboarding task is pending', async () => {
     mockReadyForRepository({
       selectedRepositoryIds: ['repo-1'],
       onboardingTaskId: 'task-onboarding-1',
@@ -1184,11 +1180,11 @@ describe('useSetupFlow', () => {
     const { result } = renderHook(() => useSetupFlow());
 
     await waitFor(() => {
-      expect(result.current.step).toBe('compute-config');
+      expect(result.current.step).not.toBe('compute-config');
     });
   });
 
-  it('lands on compute-config after a legacy onboarding task failed', async () => {
+  it('does not enter a sandbox step after an old onboarding task failed', async () => {
     mockReadyForRepository({
       selectedRepositoryIds: ['repo-1'],
       onboardingTaskId: 'task-failed',
@@ -1198,7 +1194,7 @@ describe('useSetupFlow', () => {
     const { result } = renderHook(() => useSetupFlow());
 
     await waitFor(() => {
-      expect(result.current.step).toBe('compute-config');
+      expect(result.current.step).not.toBe('compute-config');
     });
   });
 
@@ -1212,11 +1208,9 @@ describe('useSetupFlow', () => {
     const { result } = renderHook(() => useSetupFlow());
 
     await waitFor(() => {
-      expect(result.current.step).toBe('compute-config');
+      expect(result.current.step).not.toBe('compute-config');
     });
-    expect(routerMock.replace).toHaveBeenCalledWith(
-      '/setup?step=compute-config',
-    );
+    expect(routerMock.replace).toHaveBeenCalledWith('/setup?step=welcome');
   });
 
   it('saved-only source-control config still shows the provider chooser', async () => {
@@ -1693,7 +1687,7 @@ describe('useSetupFlow', () => {
     const { result } = renderHook(() => useSetupFlow());
 
     await waitFor(() => {
-      expect(result.current.step).not.toBe('welcome');
+      expect(result.current.step).toBe('welcome');
     });
 
     act(() => {
@@ -1701,21 +1695,8 @@ describe('useSetupFlow', () => {
     });
 
     expect(result.current.canGoBack).toBe(false);
-
-    act(() => {
-      result.current.goToStep('compute-config');
-    });
-
-    expect(result.current.canGoBack).toBe(true);
-
-    act(() => {
-      result.current.goToPreviousStep();
-    });
-
-    expect(result.current.step).toBe('compute-provider');
-    expect(routerMock.push).toHaveBeenLastCalledWith(
-      '/setup?step=compute-provider',
-    );
+    expect(result.current.step).toBe('welcome');
+    expect(routerMock.push).not.toHaveBeenCalled();
   });
 
   it('uses the same skip-aware sequence going forward and backward', async () => {
@@ -1801,11 +1782,6 @@ describe('useSetupFlow', () => {
     act(() => {
       result.current.goToNextStep();
     });
-    expect(result.current.step).toBe('compute-config');
-
-    act(() => {
-      result.current.goToPreviousStep();
-    });
     expect(result.current.step).toBe('source-control-connect');
 
     act(() => {
@@ -1879,20 +1855,17 @@ describe('useSetupFlow', () => {
     expect(result.current.step).not.toBe('slack');
   });
 
-  it('keeps a revisitable deep link visible and preserves the step in the URL', async () => {
-    // Base mock: compute setup satisfied with docker chosen — the explicit
-    // revisitable link reopens the picker and the URL keeps the step.
+  it('redirects a sandbox deep link into the active setup flow', async () => {
     mockStatus();
     setLocationSearch('?step=compute-provider');
 
     const { result } = renderHook(() => useSetupFlow());
 
     await waitFor(() => {
-      expect(result.current.step).toBe('compute-provider');
+      expect(result.current.step).toBe('welcome');
     });
 
-    expect(routerMock.replace).not.toHaveBeenCalled();
-    expect(window.location.search).toBe('?step=compute-provider');
+    expect(routerMock.replace).toHaveBeenCalledWith('/setup?step=welcome');
   });
 
   it('keeps source-control-provider after goToStep when a provider is already saved', async () => {
@@ -2044,18 +2017,18 @@ describe('useSetupFlow', () => {
 
   it('strips transient callback params but preserves the step in the URL', async () => {
     mockStatus();
-    setLocationSearch('?step=compute-provider&openrouter=connected');
+    setLocationSearch('?step=env-vars&openrouter=connected');
 
     const { result } = renderHook(() => useSetupFlow());
 
     await waitFor(() => {
-      expect(result.current.step).toBe('compute-provider');
+      expect(result.current.step).toBe('env-vars');
     });
 
     expect(window.history.replaceState).toHaveBeenCalledWith(
       {},
       '',
-      '/setup?step=compute-provider',
+      '/setup?step=env-vars',
     );
   });
 
@@ -2110,7 +2083,7 @@ describe('useSetupFlow', () => {
     const { result } = renderHook(() => useSetupFlow());
 
     await waitFor(() => {
-      expect(result.current.step).toBe('compute-provider');
+      expect(result.current.step).toBe('welcome');
     });
 
     act(() => {

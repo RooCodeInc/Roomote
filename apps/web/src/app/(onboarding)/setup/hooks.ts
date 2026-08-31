@@ -49,22 +49,18 @@ const PINNABLE_SETUP_STEPS: readonly SetupStep[] = [
   'source-control-provider',
   'source-control-config',
   'source-control-connect',
-  'compute-provider',
-  'compute-config',
 ];
 
 /**
  * Steps that may open from a deep link even when earlier setup is still
- * pending — used for credential/error recovery (e.g. GitHub callback → config)
- * and sandbox provider switches. Pure choice pickers (e.g. source-control-
+ * pending — used for credential/error recovery (e.g. GitHub callback → config).
+ * Pure choice pickers (e.g. source-control-
  * provider) stay off this list so they cannot jump ahead of pending earlier
  * steps; PINNABLE_SETUP_STEPS still covers in-range revisits.
  */
 const DEEP_LINK_REVISITABLE_SETUP_STEPS: readonly SetupStep[] = [
   'env-vars',
   'source-control-config',
-  'compute-provider',
-  'compute-config',
 ];
 
 function readUrlEntryContext(): SetupEntryContext {
@@ -294,10 +290,6 @@ export function useSetupFlow(
       const effectiveSourceControlProvider =
         status.setupNewState.sourceControlProvider ??
         status.sourceControlSetup.runtimeConfiguredProvider;
-      const selectedComputeProvider = status.computeSetup.selectedProvider;
-      const hasStaleComputeProvider =
-        status.setupNewState.computeProvider !== null &&
-        selectedComputeProvider !== status.setupNewState.computeProvider;
 
       switch (candidate) {
         case 'welcome':
@@ -360,35 +352,11 @@ export function useSetupFlow(
         case 'source-control-connect':
           return status.sourceControlSetup.setupSatisfied;
         case 'compute-provider':
-          return (
-            !hasStaleComputeProvider &&
-            (status.computeSetup.setupSatisfied ||
-              selectedComputeProvider !== null)
-          );
+          // Sandbox selection now belongs to the conversational setup session
+          // and is shown only when the first task needs to launch.
+          return true;
         case 'compute-config': {
-          if (hasStaleComputeProvider || status.computeSetup.setupSatisfied) {
-            return true;
-          }
-
-          if (!selectedComputeProvider) {
-            return true;
-          }
-
-          const computeProviderStatus = status.computeSetup.providers.find(
-            (provider) => provider.provider === selectedComputeProvider,
-          );
-
-          if (
-            isSetupProvisionableComputeProvider(selectedComputeProvider) &&
-            getSetupNewComputeProvisioningState(
-              status.setupNewState,
-              selectedComputeProvider,
-            )?.status === 'building'
-          ) {
-            return true;
-          }
-
-          return computeProviderStatus?.configSatisfied ?? false;
+          return true;
         }
         default:
           return false;
@@ -423,8 +391,14 @@ export function useSetupFlow(
       }
 
       // The wizard has no terminal step: once every bootstrap step is
-      // satisfied, /setup renders the conversational setup session.
-      return setupSteps.at(-1) ?? 'welcome';
+      // satisfied, /setup renders the conversational setup session. The
+      // sandbox steps are intentionally always skipped, so choose the last
+      // genuinely renderable step while the source-control callback settles.
+      return (
+        setupSteps.findLast((candidate) => !shouldSkip(candidate)) ??
+        setupSteps[0] ??
+        'welcome'
+      );
     },
     [setupSteps, shouldSkip],
   );
@@ -477,7 +451,14 @@ export function useSetupFlow(
         }
       }
 
-      return setupSteps.at(-1) ?? 'welcome';
+      return (
+        setupSteps.findLast(
+          (candidate) =>
+            !shouldSkipPostOnboarding(candidate, { forceUnlocked }),
+        ) ??
+        setupSteps[0] ??
+        'welcome'
+      );
     },
     [setupSteps, shouldSkipPostOnboarding],
   );
@@ -736,6 +717,10 @@ export function useSetupFlow(
 
   const goToStep = useCallback(
     (nextStep: SetupStep, options: { revisit?: boolean } = {}) => {
+      if (nextStep === 'compute-provider' || nextStep === 'compute-config') {
+        return;
+      }
+
       if (nextStep !== step) {
         navigationHistoryRef.current.push(step);
       }

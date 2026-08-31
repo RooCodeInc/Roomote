@@ -2657,9 +2657,14 @@ export const appRouter = createRouter({
           provider: z.enum(computeProviders),
         }),
       )
-      .mutation(({ ctx: { auth }, input }) =>
-        saveSetupNewComputeProviderChoiceCommand(auth, input),
-      ),
+      .mutation(async ({ ctx: { auth }, input }) => {
+        const result = await saveSetupNewComputeProviderChoiceCommand(
+          auth,
+          input,
+        );
+        await reconcileSetupPlatformEvents(auth);
+        return result;
+      }),
 
     saveComputeConfig: protectedProcedure
       .input(
@@ -2668,9 +2673,11 @@ export const appRouter = createRouter({
           values: z.record(z.string().trim()).optional(),
         }),
       )
-      .mutation(({ ctx: { auth }, input }) =>
-        saveSetupNewComputeConfigCommand(auth, input),
-      ),
+      .mutation(async ({ ctx: { auth }, input }) => {
+        const result = await saveSetupNewComputeConfigCommand(auth, input);
+        await reconcileSetupPlatformEvents(auth);
+        return result;
+      }),
 
     saveSourceControlProviderChoice: protectedProcedure
       .input(
