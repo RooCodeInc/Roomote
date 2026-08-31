@@ -57,6 +57,7 @@ Roomote 1.0 makes Fast the default entry point for conversations, enables Memory
 - Keep tasks moving when visual proof takes too long by applying one five-minute deadline across capture, retries, and recovery before returning a graceful proof blocker.
 - Include authorized Settings skills in Fast mode's unscoped skill inventory.
 - Keep running nested-task activity visible when a Session is loaded directly or reconnects, while still hiding it during genuine new parent responses.
+- Restore authorized deployment MCP tools in Fast advisor and judge consultations while keeping Fast-native orchestration and custom automation tools confined to the parent Session.
 
 ## 0.45.1 (2026-08-29)
 
