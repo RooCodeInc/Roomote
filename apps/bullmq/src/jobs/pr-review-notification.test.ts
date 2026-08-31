@@ -14,6 +14,7 @@ const {
   mockBeginCanonicalWebAutoDispatch,
   mockReleaseCanonicalWebAutoDispatch,
   mockBeginCanonicalAutoDispatch,
+  mockMarkCanonicalAutoDispatchPosted,
   mockCompleteCanonicalAutoDispatch,
   mockRecordDelivery,
   mockPostMessage,
@@ -47,6 +48,7 @@ const {
   mockBeginCanonicalWebAutoDispatch: vi.fn(),
   mockReleaseCanonicalWebAutoDispatch: vi.fn(),
   mockBeginCanonicalAutoDispatch: vi.fn(),
+  mockMarkCanonicalAutoDispatchPosted: vi.fn(),
   mockCompleteCanonicalAutoDispatch: vi.fn(),
   mockRecordDelivery: vi.fn(),
   mockPostMessage: vi.fn(),
@@ -195,6 +197,7 @@ vi.mock('@roomote/sdk/server', () => ({
   beginCanonicalPrReviewWebAutoDispatch: mockBeginCanonicalWebAutoDispatch,
   releaseCanonicalPrReviewWebAutoDispatch: mockReleaseCanonicalWebAutoDispatch,
   beginCanonicalPrReviewAutoDispatch: mockBeginCanonicalAutoDispatch,
+  markCanonicalPrReviewAutoDispatchPosted: mockMarkCanonicalAutoDispatchPosted,
   completeCanonicalPrReviewAutoDispatch: mockCompleteCanonicalAutoDispatch,
   recordPrReviewNotificationDeliveryBestEffort: mockRecordDelivery,
   setPendingPrReviewAction: mockSetPendingPrReviewAction,
@@ -244,6 +247,7 @@ describe('prReviewNotificationJob', () => {
     mockBeginCanonicalWebAutoDispatch.mockResolvedValue(true);
     mockReleaseCanonicalWebAutoDispatch.mockResolvedValue(true);
     mockBeginCanonicalAutoDispatch.mockResolvedValue(true);
+    mockMarkCanonicalAutoDispatchPosted.mockResolvedValue(true);
     mockCompleteCanonicalAutoDispatch.mockResolvedValue(true);
 
     mockFindFirstTaskRun.mockResolvedValue({
@@ -1987,6 +1991,61 @@ describe('prReviewNotificationJob', () => {
       request: expect.objectContaining({ deliveryId }),
       runId: 99,
     });
+    expect(mockFinalize).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not repost a checkpointed continuation when completion is retried', async () => {
+    const deliveryId = '70707070-7070-4070-8070-707070707070';
+    const request = {
+      ownershipVersion: 'canonical',
+      deliveryId,
+      notificationUnitId: '71717171-7171-4171-8171-717171717171',
+      deliveryState: 'auto_dispatch_pending',
+      targetTaskId: 'task-1',
+      actingUserId: 'user-1',
+      destinationKey: 'task-1',
+      dispatchKey: `pr-review-delivery:${deliveryId}`,
+      deliveryIds: [deliveryId],
+      leaseToken: '72727272-7272-4272-8272-727272727272',
+      events,
+    };
+    mockPrepareDelivery.mockResolvedValue({
+      post: true,
+      route: {
+        provider: 'slack',
+        slackTeamId: 'T123',
+        channelId: 'C123',
+        threadId: '111.222',
+      },
+      text: 'Review feedback remains.',
+      followUpQuestion: 'Resolve it?',
+      followUpPrompt: 'Resolve the review feedback.',
+    });
+    mockFindAutoHandlePrReviewFeedbackPreference.mockResolvedValue({
+      taskId: 'task-1',
+      userId: 'user-1',
+      destinationKey: 'task-1',
+    });
+    mockDispatchFollowUp.mockResolvedValue({ outcome: 'resumed', runId: 99 });
+    mockCompleteCanonicalAutoDispatch
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(true);
+
+    await prReviewNotificationJob(makeJob(request) as never);
+    await prReviewNotificationJob(
+      makeJob({ ...request, providerMessageId: '999.888' }) as never,
+    );
+
+    expect(mockStickyFooterPost).toHaveBeenCalledTimes(1);
+    expect(mockStickyFooterPost).toHaveBeenCalledWith(
+      expect.objectContaining({ clientMsgId: deliveryId }),
+    );
+    expect(mockMarkCanonicalAutoDispatchPosted).toHaveBeenCalledTimes(1);
+    expect(mockMarkCanonicalAutoDispatchPosted).toHaveBeenCalledWith({
+      request: expect.objectContaining({ deliveryId }),
+      messageId: '999.888',
+    });
+    expect(mockCompleteCanonicalAutoDispatch).toHaveBeenCalledTimes(2);
     expect(mockFinalize).toHaveBeenCalledTimes(1);
   });
 

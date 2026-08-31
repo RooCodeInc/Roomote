@@ -297,6 +297,7 @@ export async function postSlackThreadMessageWithStickyFooter(params: {
   /** Body blocks without the footer context block. */
   blocks?: unknown[];
   utmCampaign?: string;
+  clientMsgId?: string;
   /**
    * Footer content style. `active` keeps linked PR / live preview when the
    * shared resolver still considers the task active. `reply-only` is for
@@ -343,5 +344,6 @@ export async function postSlackThreadMessageWithStickyFooter(params: {
     text: params.text,
     bodyBlocks,
     footerText,
+    clientMsgId: params.clientMsgId,
   });
 }

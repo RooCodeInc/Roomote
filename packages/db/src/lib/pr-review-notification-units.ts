@@ -63,6 +63,7 @@ export type CanonicalPrReviewDeliveryClaim = {
   routeWorkspaceId: string | null;
   routeChannelId: string | null;
   routeThreadId: string | null;
+  providerMessageId: string | null;
   dispatchKey: string;
 };
 
@@ -691,6 +692,7 @@ export async function claimDueCanonicalPrReviewDeliveries(
       route_workspace_id: string | null;
       route_channel_id: string | null;
       route_thread_id: string | null;
+      provider_message_id: string | null;
       dispatch_key: string;
     }>(sql`
       with candidates as (
@@ -770,6 +772,7 @@ export async function claimDueCanonicalPrReviewDeliveries(
              d.route_workspace_id,
              d.route_channel_id,
              d.route_thread_id,
+             d.provider_message_id,
              d.dispatch_key
       from updated d
       join ${prReviewNotificationUnits} u on u.id = d.notification_unit_id
@@ -848,6 +851,7 @@ export async function claimDueCanonicalPrReviewDeliveries(
         routeWorkspaceId: row.route_workspace_id,
         routeChannelId: row.route_channel_id,
         routeThreadId: row.route_thread_id,
+        providerMessageId: row.provider_message_id,
         dispatchKey: row.dispatch_key,
       });
     }

@@ -534,6 +534,7 @@ describe('canonical PR review notification ownership', () => {
       values: {
         followUpPrompt: 'Resolve feedback.',
         targetTaskId: task.id,
+        providerMessageId: '123.456',
       },
     });
     const dueAt = new Date(CLAIM_AT.getTime() + 60_000);
@@ -555,6 +556,7 @@ describe('canonical PR review notification ownership', () => {
       state: 'auto_dispatch_pending',
       followUpPrompt: 'Resolve feedback.',
       targetTaskId: task.id,
+      providerMessageId: '123.456',
     });
   });
 

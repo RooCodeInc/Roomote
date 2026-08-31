@@ -23,6 +23,7 @@ import {
   buildPrReviewNotificationPostInput,
   createPrReviewNotificationTelemetry,
   getCommunicationProviderAdapter,
+  markCanonicalPrReviewAutoDispatchPosted,
   type PrReviewNotificationRequest,
   type PrReviewNotificationRoute,
   consumePendingPrReviewActivity,
@@ -225,6 +226,7 @@ async function postPrReviewNotification({
   action,
   canonicalDeliveryId,
   canonicalLeaseToken,
+  idempotencyKey,
 }: {
   taskId: string;
   route: PrReviewNotificationRoute;
@@ -233,6 +235,7 @@ async function postPrReviewNotification({
   action?: PrReviewNotificationAction;
   canonicalDeliveryId?: string;
   canonicalLeaseToken?: string;
+  idempotencyKey?: string;
 }): Promise<string | null> {
   // Stored before posting: an orphaned record just expires, while a posted
   // message without a record would leave dead buttons.
@@ -292,6 +295,7 @@ async function postPrReviewNotification({
           }
         : { blocks: [{ type: 'markdown', text }] }),
       utmCampaign: 'slack.pr_review',
+      clientMsgId: idempotencyKey,
     });
 
     if (nonce && messageTs) {
@@ -325,6 +329,7 @@ async function postPrReviewNotification({
   }
 
   const postInput = buildPrReviewNotificationPostInput(route, text);
+  postInput.idempotencyKey = idempotencyKey;
 
   if (action && nonce && isButtonRouteProvider(route.provider)) {
     postInput.buttons = [
@@ -895,13 +900,32 @@ ${delivery.text}`;
       }
     }
 
-    let autoHandledMessageTs: string | null = null;
-    if (autoHandledText && delivery.route) {
+    let autoHandledMessageTs = data.providerMessageId ?? null;
+    if (autoHandledText && delivery.route && !autoHandledMessageTs) {
+      if (!(await renewPrReviewNotificationRequestLease(data))) {
+        console.log(
+          `[PrReviewNotification] Canonical delivery ${data.deliveryId} lost its continuation-posting fence, skipping`,
+        );
+        return;
+      }
       autoHandledMessageTs = await postPrReviewNotification({
         taskId: data.taskId,
         route: delivery.route,
         text: autoHandledText,
+        idempotencyKey: data.deliveryId,
       });
+      if (
+        autoHandledMessageTs &&
+        !(await markCanonicalPrReviewAutoDispatchPosted({
+          request: data,
+          messageId: autoHandledMessageTs,
+        }))
+      ) {
+        console.log(
+          `[PrReviewNotification] Canonical delivery ${data.deliveryId} lost its continuation-post checkpoint fence, skipping`,
+        );
+        return;
+      }
     }
 
     if (
