@@ -712,6 +712,37 @@ describe('canonical PR review notification ownership', () => {
     });
   });
 
+  it('preserves a PR auto preference while its source task is between resumable states', async () => {
+    const user = await userFactory.create();
+    const source = await taskFactory.create({ initiatorUserId: user.id });
+    const repository = `owner/temporarily-unavailable-preference-${source.id}`;
+    await associate(source.id, repository, 6);
+    await runFactory.create({
+      taskId: source.id,
+      status: RunStatus.Completed,
+      snapshotId: null,
+    });
+    await upsertPrReviewAutoPreference({
+      sourceControlProvider: 'github',
+      repository,
+      prNumber: 6,
+      enabledByUserId: user.id,
+      sourceTaskId: source.id,
+    });
+
+    await expect(
+      findPrReviewAutoPreference({
+        sourceControlProvider: 'github',
+        repository,
+        prNumber: 6,
+      }),
+    ).resolves.toEqual({
+      taskId: source.id,
+      userId: user.id,
+      destinationKey: null,
+    });
+  });
+
   it('claims through a resumable Fast sibling when the original task cannot resume', async () => {
     const original = await taskFactory.create();
     const sibling = await taskFactory.create();
