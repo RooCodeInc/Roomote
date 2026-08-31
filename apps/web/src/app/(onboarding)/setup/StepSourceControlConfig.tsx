@@ -112,12 +112,15 @@ export function StepSourceControlConfig({
   onContinue,
   onBack,
   returnPath,
+  hideTitle = false,
 }: {
   sourceControlSetup: SetupSourceControlStatus;
   selectedProviderId?: SourceControlProvider | null;
   onContinue: () => void;
   onBack?: () => void;
   returnPath?: string;
+  /** Dialogs supply their own title when this legacy setup step is embedded. */
+  hideTitle?: boolean;
 }) {
   const trpc = useTRPC();
   const queryClient = useQueryClient();
@@ -357,7 +360,7 @@ export function StepSourceControlConfig({
   if (selectedProvider?.provider === 'github') {
     return (
       <div className="relative w-full max-w-2xl space-y-4 py-2 md:py-0">
-        <StepTitle text="Create GitHub App" />
+        {!hideTitle ? <StepTitle text="Create GitHub App" /> : null}
         <GitHubSourceControlConfig onBack={onBack} />
       </div>
     );
@@ -365,7 +368,9 @@ export function StepSourceControlConfig({
 
   return (
     <div className="relative w-full max-w-2xl space-y-4 py-2 md:py-0">
-      <StepTitle text={`Configure ${providerSetupLabel}`} />
+      {!hideTitle ? (
+        <StepTitle text={`Configure ${providerSetupLabel}`} />
+      ) : null}
 
       {!isAdo ? (
         <NumberedStep number={1} className="mt-6">

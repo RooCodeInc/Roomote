@@ -32,9 +32,12 @@ function candidateTitle(candidateId: string) {
 export function StepAutomationRecommendations({
   onContinue,
   onBack,
+  embedded = false,
 }: {
   onContinue: (batch: AutomationRecommendationBatch | null) => void;
   onBack?: () => void;
+  /** The setup-session action card supplies the heading and introduction. */
+  embedded?: boolean;
 }) {
   const trpc = useTRPC();
   const queryClient = useQueryClient();
@@ -147,14 +150,22 @@ export function StepAutomationRecommendations({
   }, [pending]);
 
   return (
-    <div className="mx-auto flex w-full max-w-3xl flex-col gap-8">
-      <StepTitle
-        text={
-          pending
-            ? 'Looking for stuff to automate...'
-            : 'Recommended automations'
-        }
-      />
+    <div
+      className={
+        embedded
+          ? 'flex w-full flex-col gap-4'
+          : 'mx-auto flex w-full max-w-3xl flex-col gap-8'
+      }
+    >
+      {!embedded ? (
+        <StepTitle
+          text={
+            pending
+              ? 'Looking for stuff to automate...'
+              : 'Recommended automations'
+          }
+        />
+      ) : null}
       {pending ? (
         <div
           className="flex items-start gap-3 text-muted-foreground"
@@ -177,10 +188,12 @@ export function StepAutomationRecommendations({
         </Alert>
       ) : (
         <div className="space-y-4">
-          <p className="text-muted-foreground">
-            After analyzing your connected repos, Roomote found some automations
-            to make your life easier:
-          </p>
+          {!embedded ? (
+            <p className="text-muted-foreground">
+              After analyzing your connected repos, Roomote found some
+              automations to make your life easier:
+            </p>
+          ) : null}
           <div className="divide-y-2 divide-accent-bright-foreground bg-card rounded-xl">
             {batch.recommendations.map((recommendation) => (
               <div

@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
@@ -8,18 +8,21 @@ import type { SourceControlProvider } from '@roomote/types';
 
 import { useTRPC } from '@/trpc/client';
 import { buildSetupSessionSourceControlReturnTarget } from '@/lib/server/source-control-oauth-redirect';
-import { Button } from '@/components/system';
 import {
-  Drawer,
-  DrawerContent,
-  DrawerHeader,
-  DrawerTitle,
-  DrawerTrigger,
-} from '@/components/system/primitives/drawer';
+  ArrowRight,
+  Button,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  GitBranch,
+} from '@/components/system';
 
-import { StepSourceControlProvider } from './StepSourceControlProvider';
+import { SetupSessionActionCard } from './SetupSessionActionCard';
 import { StepSourceControlConfig } from './StepSourceControlConfig';
 import { StepSourceControlConnect } from './StepSourceControlConnect';
+import { StepSourceControlProvider } from './StepSourceControlProvider';
 
 type SourceControlSetup = {
   connectedProvider: SourceControlProvider | null;
@@ -34,27 +37,31 @@ type SourceControlSetup = {
   }>;
 };
 
-type PanelStage = 'provider' | 'config' | 'connect' | 'connected';
+type CardStage = 'provider' | 'config' | 'connect';
 
 /**
- * Trusted source-control panel for the conversational setup workspace.
- * Reuses the bootstrap provider selection, configuration, documentation,
- * OAuth, sync, pending-approval, retry, and error components. Credential
- * entry and OAuth actions stay in this panel and never reach model messages.
+ * Trusted source-control action for the conversational setup session.
+ *
+ * Provider configuration remains trusted UI, but detailed provider-specific
+ * instructions and credentials live in a dialog so they do not overwhelm the
+ * conversation card.
  */
-function SetupSourceControlPanel({
+function SetupSessionSourceControlCardBody({
   sourceControlSetup,
-  onConnected,
-  compact = false,
   sessionId,
 }: {
   sourceControlSetup: SourceControlSetup;
-  onConnected?: () => void;
-  compact?: boolean;
   sessionId: string;
 }) {
   const trpc = useTRPC();
   const queryClient = useQueryClient();
+  const searchParams = useSearchParams();
+  const [configOpen, setConfigOpen] = useState(false);
+  const [showConnectStage, setShowConnectStage] = useState(
+    () =>
+      searchParams.get('step') === 'source-control-connect' ||
+      searchParams.get('setup') === 'source-control',
+  );
   const saveSourceControlProviderChoice = useMutation(
     trpc.setupNew.saveSourceControlProviderChoice.mutationOptions({
       onSuccess: async () => {
@@ -69,33 +76,22 @@ function SetupSourceControlPanel({
   const anyAuthorized =
     Boolean(sourceControlSetup.connectedProvider) ||
     sourceControlSetup.providers.some((provider) => provider.connected);
-  const anySynchronized = sourceControlSetup.providers.some(
-    (provider) => provider.connected && (provider.repositoryCount ?? 0) > 0,
-  );
   const hasSelected =
     Boolean(sourceControlSetup.selectedProvider) ||
     Boolean(sourceControlSetup.runtimeConfiguredProvider);
-
-  const stage: PanelStage = anySynchronized
-    ? 'connected'
-    : anyAuthorized
-      ? 'connect'
-      : hasSelected
-        ? 'config'
-        : 'provider';
-
-  const searchParams = useSearchParams();
-  // OAuth callbacks deep-link back to /setup?step=source-control-connect;
-  // treat that as a hint to show the connect/sync stage directly.
-  const [showConnectStage, setShowConnectStage] = useState(
-    () =>
-      searchParams.get('step') === 'source-control-connect' ||
-      searchParams.get('setup') === 'source-control',
-  );
+  const stage: CardStage = anyAuthorized
+    ? 'connect'
+    : hasSelected
+      ? 'config'
+      : 'provider';
   const provider =
     sourceControlSetup.selectedProvider ??
     sourceControlSetup.runtimeConfiguredProvider ??
     sourceControlSetup.preselectedProvider;
+  const providerLabel =
+    sourceControlSetup.providers.find(
+      (candidate) => candidate.provider === provider,
+    )?.label ?? provider;
   const returnPath = buildSetupSessionSourceControlReturnTarget({
     sessionId,
     provider,
@@ -105,13 +101,24 @@ function SetupSourceControlPanel({
       ? searchParams.get('reason') || `${provider} authorization was cancelled.`
       : null;
 
+  const cardTitle =
+    stage === 'provider'
+      ? 'Connect source control'
+      : stage === 'config' && !showConnectStage
+        ? `Set up ${providerLabel}`
+        : `Authorize ${providerLabel}`;
+  const cardIntro =
+    stage === 'provider'
+      ? 'Connect the service that hosts your repositories so I can work on your code.'
+      : stage === 'config' && !showConnectStage
+        ? `Add the ${providerLabel} app credentials. The detailed setup opens in a separate dialog.`
+        : `Give me access to ${providerLabel} and sync the repositories I can work with.`;
+
   return (
-    <div
-      className={
-        compact
-          ? 'space-y-4'
-          : 'w-full max-w-md space-y-4 rounded-2xl border border-border bg-card p-4'
-      }
+    <SetupSessionActionCard
+      title={cardTitle}
+      icon={<GitBranch className="size-4" />}
+      intro={cardIntro}
     >
       {oauthError ? (
         <p className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
@@ -121,126 +128,74 @@ function SetupSourceControlPanel({
       {stage === 'provider' ? (
         <StepSourceControlProvider
           sourceControlSetup={sourceControlSetup}
-          onContinue={(provider) =>
-            saveSourceControlProviderChoice.mutate({ provider })
+          onContinue={(nextProvider) =>
+            saveSourceControlProviderChoice.mutate({ provider: nextProvider })
           }
+          disabled={saveSourceControlProviderChoice.isPending}
+          embedded
         />
       ) : stage === 'config' && !showConnectStage ? (
-        <StepSourceControlConfig
-          sourceControlSetup={sourceControlSetup as never}
-          selectedProviderId={sourceControlSetup.selectedProvider}
-          onContinue={() => setShowConnectStage(true)}
-          returnPath={returnPath}
-        />
-      ) : stage === 'connect' || showConnectStage ? (
+        <>
+          <Button type="button" onClick={() => setConfigOpen(true)}>
+            Configure {providerLabel}
+            <ArrowRight />
+          </Button>
+          <Dialog open={configOpen} onOpenChange={setConfigOpen}>
+            <DialogContent size="2xl">
+              <DialogHeader>
+                <DialogTitle>Configure {providerLabel}</DialogTitle>
+                <DialogDescription>
+                  Follow the provider-specific steps, then save the credentials
+                  to continue connecting your repositories.
+                </DialogDescription>
+              </DialogHeader>
+              <StepSourceControlConfig
+                sourceControlSetup={sourceControlSetup as never}
+                selectedProviderId={sourceControlSetup.selectedProvider}
+                onContinue={() => {
+                  setConfigOpen(false);
+                  setShowConnectStage(true);
+                }}
+                returnPath={returnPath}
+                hideTitle
+              />
+            </DialogContent>
+          </Dialog>
+        </>
+      ) : (
         <StepSourceControlConnect
           sourceControlSetup={sourceControlSetup as never}
-          onContinue={() => {
-            setShowConnectStage(false);
-            onConnected?.();
-          }}
+          onContinue={() => setShowConnectStage(false)}
           returnPath={returnPath}
+          embedded
         />
-      ) : (
-        <div className="space-y-2">
-          <p className="text-sm font-medium">Source control connected</p>
-          <p className="text-sm text-muted-foreground">
-            Repositories are syncing. Roomote can offer starter tasks now.
-          </p>
-        </div>
       )}
-    </div>
+    </SetupSessionActionCard>
   );
 }
 
-/**
- * Responsive wrapper: a static side panel on desktop and a controlled drawer
- * sheet on smaller screens, rendering the same trusted panel content.
- */
-function SetupSourceControlPanelSurface({
-  sourceControlSetup,
-  onConnected,
+export function SetupSessionSourceControlCard({
   sessionId,
 }: {
-  sourceControlSetup: SourceControlSetup;
-  onConnected?: () => void;
   sessionId: string;
 }) {
-  const anySynchronized = sourceControlSetup.providers.some(
-    (provider) => provider.connected && (provider.repositoryCount ?? 0) > 0,
-  );
-  const [sheetOpen, setSheetOpen] = useState(!anySynchronized);
-
-  return (
-    <>
-      <div className="hidden h-full shrink-0 lg:block">
-        <SetupSourceControlPanel
-          sourceControlSetup={sourceControlSetup}
-          onConnected={onConnected}
-          sessionId={sessionId}
-        />
-      </div>
-      <div className="lg:hidden">
-        <Drawer open={sheetOpen} onOpenChange={setSheetOpen}>
-          <DrawerTrigger asChild>
-            <Button variant="outline" size="sm" className="w-full">
-              {anySynchronized
-                ? 'Source control connected'
-                : 'Connect source control'}
-            </Button>
-          </DrawerTrigger>
-          <DrawerContent className="max-h-[85vh] overflow-y-auto">
-            <DrawerHeader>
-              <DrawerTitle>Connect source control</DrawerTitle>
-            </DrawerHeader>
-            <div className="px-4 pb-6">
-              <SetupSourceControlPanel
-                sourceControlSetup={sourceControlSetup}
-                onConnected={() => setSheetOpen(false)}
-                sessionId={sessionId}
-                compact
-              />
-            </div>
-          </DrawerContent>
-        </Drawer>
-      </div>
-    </>
-  );
-}
-
-function useSetupSourceControlStatus(enabled: boolean) {
   const trpc = useTRPC();
   const statusQuery = useQuery(
-    trpc.setupNew.status.queryOptions(undefined, {
-      enabled,
-      staleTime: 10_000,
-    }),
+    trpc.setupNew.status.queryOptions(undefined, { staleTime: 10_000 }),
   );
   const sourceControlSetup = statusQuery.data?.sourceControlSetup ?? null;
-  const connectedProviderCount = useMemo(
-    () =>
-      sourceControlSetup?.providers.filter(
-        (provider) => provider.connected && (provider.repositoryCount ?? 0) > 0,
-      ).length ?? 0,
-    [sourceControlSetup],
+  const hasSynchronizedRepository = sourceControlSetup?.providers.some(
+    (provider) => provider.connected && (provider.repositoryCount ?? 0) > 0,
   );
-  return { statusQuery, sourceControlSetup, connectedProviderCount };
-}
 
-export function SetupSessionSourceControlPanel({
-  sessionId,
-}: {
-  sessionId: string;
-}) {
-  const { sourceControlSetup, connectedProviderCount } =
-    useSetupSourceControlStatus(true);
-  if (!sourceControlSetup || connectedProviderCount > 0) return null;
+  if (!sourceControlSetup || hasSynchronizedRepository) {
+    return null;
+  }
+
   return (
-    <div className="shrink-0 overflow-y-auto p-3 lg:w-[24rem]">
-      <SetupSourceControlPanelSurface
-        sourceControlSetup={sourceControlSetup}
-        sessionId={sessionId}
-      />
-    </div>
+    <SetupSessionSourceControlCardBody
+      sourceControlSetup={sourceControlSetup}
+      sessionId={sessionId}
+    />
   );
 }

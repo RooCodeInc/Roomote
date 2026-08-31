@@ -30,3 +30,12 @@ behavior across Slack, GitHub, Linear, web-launched tasks, and the worker.
 - Do not edit runtime-copied skill files when the checked-in source lives under
   `packages/cloud-agents/src/server/workflows/skills/` or `.agents/skills/`.
 - Do not treat prompt wording here as low-risk copy; it is runtime behavior.
+
+## Conversational setup
+
+The first-admin setup session uses trusted Setup action cards for source
+control, sandbox configuration, first-work selection, and automation
+recommendations. Setup guidance should direct the administrator to the
+relevant card without repeating its title, introduction, option catalog, or
+provider instructions in chat. Credentials never belong in chat; detailed
+source-control configuration stays in the card's dialog.

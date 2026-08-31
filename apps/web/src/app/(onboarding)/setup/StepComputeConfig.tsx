@@ -68,11 +68,14 @@ export function StepComputeConfig({
   selectedProviderId,
   onContinue,
   onBack,
+  embedded = false,
 }: {
   computeSetup: SetupComputeStatus;
   selectedProviderId?: ComputeProvider | null;
   onContinue: () => void;
   onBack?: () => void;
+  /** Omit legacy setup-step chrome when rendered in a setup session card. */
+  embedded?: boolean;
 }) {
   const trpc = useTRPC();
   const queryClient = useQueryClient();
@@ -320,8 +323,14 @@ export function StepComputeConfig({
   };
 
   return (
-    <div className="relative w-full max-w-2xl space-y-4 py-2 md:py-0">
-      <StepTitle text={COMPUTE_CONFIG_STEP.title} />
+    <div
+      className={
+        embedded
+          ? 'space-y-4'
+          : 'relative w-full max-w-2xl space-y-4 py-2 md:py-0'
+      }
+    >
+      {!embedded ? <StepTitle text={COMPUTE_CONFIG_STEP.title} /> : null}
 
       <div className="space-y-5 mt-6">
         <div className="flex gap-2 items-start">

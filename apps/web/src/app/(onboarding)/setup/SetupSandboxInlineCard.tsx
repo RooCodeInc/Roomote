@@ -6,16 +6,11 @@ import type { ComputeProvider } from '@roomote/types';
 import { toast } from 'sonner';
 
 import { useTRPC } from '@/trpc/client';
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from '@/components/system';
+import { Container } from '@/components/system';
 
 import { StepComputeConfig } from './StepComputeConfig';
 import { StepComputeProvider } from './StepComputeProvider';
+import { SetupSessionActionCard } from './SetupSessionActionCard';
 
 /**
  * Inline sandbox setup for the conversational setup session. Runtime/env-var
@@ -68,34 +63,31 @@ export function SetupSandboxInlineCard() {
     selectedProvider ?? computeSetup.selectedProvider ?? null;
 
   return (
-    <Card className="border-primary/30 bg-card">
-      <CardHeader>
-        <CardTitle>Set up a sandbox to start your work</CardTitle>
-        <CardDescription>
-          Roomote needs a sandbox provider before it can launch the task you
-          selected. This setup is only needed once for this deployment.
-        </CardDescription>
-      </CardHeader>
-      <CardContent>
-        {effectiveProvider ? (
-          <StepComputeConfig
-            computeSetup={computeSetup}
-            selectedProviderId={effectiveProvider}
-            onContinue={() => {
-              void queryClient.invalidateQueries({
-                queryKey: trpc.setupNew.status.queryKey(),
-              });
-            }}
-            onBack={() => setSelectedProvider(null)}
-          />
-        ) : (
-          <StepComputeProvider
-            computeSetup={computeSetup}
-            onContinue={(provider) => saveProviderChoice.mutate({ provider })}
-            disabled={saveProviderChoice.isPending}
-          />
-        )}
-      </CardContent>
-    </Card>
+    <SetupSessionActionCard
+      title="Set up a sandbox"
+      icon={<Container className="size-4" />}
+      intro="Choose where I should run the work you selected. This is a one-time setup for this deployment."
+    >
+      {effectiveProvider ? (
+        <StepComputeConfig
+          computeSetup={computeSetup}
+          selectedProviderId={effectiveProvider}
+          onContinue={() => {
+            void queryClient.invalidateQueries({
+              queryKey: trpc.setupNew.status.queryKey(),
+            });
+          }}
+          onBack={() => setSelectedProvider(null)}
+          embedded
+        />
+      ) : (
+        <StepComputeProvider
+          computeSetup={computeSetup}
+          onContinue={(provider) => saveProviderChoice.mutate({ provider })}
+          disabled={saveProviderChoice.isPending}
+          embedded
+        />
+      )}
+    </SetupSessionActionCard>
   );
 }

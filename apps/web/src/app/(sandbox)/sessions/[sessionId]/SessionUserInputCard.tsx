@@ -7,11 +7,12 @@ import {
 } from '@roomote/types';
 
 import { cn } from '@/lib/utils';
-import { Button } from '@/components/system';
+import { Button, GitBranch, ListChecks } from '@/components/system';
 import { Checkbox } from '@/components/system/primitives/checkbox';
 import { useTRPC } from '@/trpc/client';
 import { useMutation } from '@tanstack/react-query';
 import { toast } from 'sonner';
+import { SetupSessionActionCard } from '../../../(onboarding)/setup/SetupSessionActionCard';
 
 /** Checkbox state per multi-select question; single questions keep a string. */
 type SelectionState = Record<string, string[]>;
@@ -101,9 +102,14 @@ export function SessionUserInputCard({
     );
   }
 
-  return (
+  const form = (
     <form
-      className="space-y-4 rounded-lg border border-border bg-card px-4 py-4"
+      className={cn(
+        'space-y-4',
+        request.preset
+          ? ''
+          : 'rounded-lg border border-border bg-card px-4 py-4',
+      )}
       onSubmit={(event) => {
         event.preventDefault();
         if (!canSubmit) return;
@@ -255,6 +261,32 @@ export function SessionUserInputCard({
       </div>
     </form>
   );
+
+  if (request.preset === 'setup_source_control_provider') {
+    return (
+      <SetupSessionActionCard
+        title="Connect source control"
+        icon={<GitBranch className="size-4" />}
+        intro="Choose where your repositories are hosted so I can work on your code."
+      >
+        {form}
+      </SetupSessionActionCard>
+    );
+  }
+
+  if (request.preset === 'setup_starter_tasks') {
+    return (
+      <SetupSessionActionCard
+        title="Choose your first task"
+        icon={<ListChecks className="size-4" />}
+        intro="Pick what you would like me to work on first. You can choose more than one."
+      >
+        {form}
+      </SetupSessionActionCard>
+    );
+  }
+
+  return form;
 }
 
 export function findPendingSessionInputRequest(

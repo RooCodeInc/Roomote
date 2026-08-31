@@ -5,6 +5,11 @@ const { mockMutate } = vi.hoisted(() => ({ mockMutate: vi.fn() }));
 
 vi.mock('@/trpc/client', () => ({
   useTRPC: () => ({
+    setup: {
+      submitSessionUserInput: {
+        mutationOptions: () => ({ mutationFn: vi.fn() }),
+      },
+    },
     fastSessions: {
       submitUserInput: {
         mutationOptions: () => ({ mutationFn: vi.fn() }),
@@ -117,6 +122,22 @@ describe('SessionUserInputCard', () => {
         answers: { mode: { answers: ['Deep'] } },
       }),
     );
+  });
+
+  it('uses the shared setup action-card framing for first-task choices', () => {
+    render(
+      <SessionUserInputCard
+        sessionId="s"
+        request={{ ...multiRequest, preset: 'setup_starter_tasks' }}
+      />,
+    );
+
+    expect(screen.getByText('Choose your first task')).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        'Pick what you would like me to work on first. You can choose more than one.',
+      ),
+    ).toBeInTheDocument();
   });
 });
 

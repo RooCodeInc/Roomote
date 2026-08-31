@@ -31,11 +31,14 @@ export function StepComputeProvider({
   onContinue,
   onBack,
   disabled = false,
+  embedded = false,
 }: {
   computeSetup: SetupComputeStatus;
   onContinue: (provider: ComputeProvider) => void;
   onBack?: () => void;
   disabled?: boolean;
+  /** Omit legacy setup-step chrome when rendered in a setup session card. */
+  embedded?: boolean;
 }) {
   // Hosted providers whose worker image is not yet available remain selectable:
   // their config step can collect or provision the missing infrastructure.
@@ -52,14 +55,22 @@ export function StepComputeProvider({
   );
 
   return (
-    <div className="relative w-full max-w-2xl space-y-6 py-2 md:py-0">
-      <StepTitle text={COMPUTE_PROVIDER_STEP.title} />
+    <div
+      className={
+        embedded
+          ? 'space-y-4'
+          : 'relative w-full max-w-2xl space-y-6 py-2 md:py-0'
+      }
+    >
+      {!embedded ? <StepTitle text={COMPUTE_PROVIDER_STEP.title} /> : null}
       <div className="space-y-4 max-w-xl">
-        <p>
-          Roomote runs each task on isolated VMs, commonly known as sandboxes.
-          This allows for focused changes and the ability to test things
-          end-to-end before committing.
-        </p>
+        {!embedded ? (
+          <p>
+            Roomote runs each task on isolated VMs, commonly known as sandboxes.
+            This allows for focused changes and the ability to test things
+            end-to-end before committing.
+          </p>
+        ) : null}
         <p>Where do you want to run your sandboxes?</p>
 
         <div className="space-y-0.5 max-w-sm">

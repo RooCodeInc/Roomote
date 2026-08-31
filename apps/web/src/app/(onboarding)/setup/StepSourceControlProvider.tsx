@@ -21,6 +21,7 @@ export function StepSourceControlProvider({
   onContinue,
   onBack,
   disabled = false,
+  embedded = false,
 }: {
   sourceControlSetup: {
     connectedProvider: SourceControlProvider | null;
@@ -35,15 +36,27 @@ export function StepSourceControlProvider({
   onContinue: (provider: SourceControlProvider) => void;
   onBack?: () => void;
   disabled?: boolean;
+  /** Omit legacy setup-step chrome when rendered in a setup session card. */
+  embedded?: boolean;
 }) {
   return (
-    <div className="relative w-full max-w-2xl space-y-6 py-2 md:py-0">
-      <StepTitle text={SOURCE_CONTROL_PROVIDER_STEP.title} />
+    <div
+      className={
+        embedded
+          ? 'space-y-4'
+          : 'relative w-full max-w-2xl space-y-6 py-2 md:py-0'
+      }
+    >
+      {!embedded ? (
+        <StepTitle text={SOURCE_CONTROL_PROVIDER_STEP.title} />
+      ) : null}
       <div className="space-y-4 max-w-xl">
-        <p>
-          Roomote needs access to your repositories to work on your codebase.
-          Otherwise it would be flying blind :)
-        </p>
+        {!embedded ? (
+          <p>
+            Roomote needs access to your repositories to work on your codebase.
+            Otherwise it would be flying blind :)
+          </p>
+        ) : null}
 
         <p>Where do you keep your repos?</p>
 

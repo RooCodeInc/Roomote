@@ -73,12 +73,15 @@ export function StepSourceControlConnect({
   onRemoveSyncMarker,
   onBack,
   returnPath,
+  embedded = false,
 }: {
   sourceControlSetup: SetupSourceControlStatus;
   onContinue: () => void;
   onRemoveSyncMarker?: () => void;
   onBack?: () => void;
   returnPath?: string;
+  /** Omit legacy setup-step chrome when rendered in a setup session card. */
+  embedded?: boolean;
 }) {
   const trpc = useTRPC();
   const queryClient = useQueryClient();
@@ -376,8 +379,16 @@ export function StepSourceControlConnect({
   ]);
 
   return (
-    <div className="relative w-full max-w-lg space-y-6 py-2 md:py-0">
-      <StepTitle text={SOURCE_CONTROL_CONNECT_STEP.title} />
+    <div
+      className={
+        embedded
+          ? 'space-y-4'
+          : 'relative w-full max-w-lg space-y-6 py-2 md:py-0'
+      }
+    >
+      {!embedded ? (
+        <StepTitle text={SOURCE_CONTROL_CONNECT_STEP.title} />
+      ) : null}
 
       {alreadyConnected && !needsAdoMicrosoftConnection ? (
         <div className="space-y-4">

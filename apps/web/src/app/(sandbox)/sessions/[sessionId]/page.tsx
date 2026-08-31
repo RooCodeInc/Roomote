@@ -20,13 +20,10 @@ import {
 import { getSessionByIdCommand } from '@/trpc/commands/sessions';
 import { WorkspaceHeader } from '@/components/layout';
 
-import {
-  findDeploymentSetupSessionId,
-  getSetupSessionStatusCommand,
-} from '@/trpc/commands/setup/setup-session';
+import { findDeploymentSetupSessionId } from '@/trpc/commands/setup/setup-session';
 import { SetupRecommendationsInlineCard } from '../../../(onboarding)/setup/SetupRecommendationsInlineCard';
 import { SetupSandboxInlineCard } from '../../../(onboarding)/setup/SetupSandboxInlineCard';
-import { SetupSessionSourceControlPanel } from '../../../(onboarding)/setup/SetupSourceControlPanel';
+import { SetupSessionSourceControlCard } from '../../../(onboarding)/setup/SetupSourceControlPanel';
 import { FastSessionTranscript } from './FastSessionTranscript';
 import { SessionTaskTimeline } from './SessionTaskTimeline';
 import {
@@ -136,11 +133,9 @@ export default async function SessionDetailPage({
     const isSetupSession =
       authorizedUser.isAdmin &&
       unifiedSession.id === (await findDeploymentSetupSessionId());
-    const setupSessionStatus = isSetupSession
-      ? await getSetupSessionStatusCommand(authorizedUser)
-      : null;
     const setupTimelineExtras = isSetupSession ? (
       <div className="space-y-3">
+        <SetupSessionSourceControlCard sessionId={unifiedSession.id} />
         <SetupSandboxInlineCard />
         <SetupRecommendationsInlineCard sessionId={unifiedSession.id} />
       </div>
@@ -171,9 +166,6 @@ export default async function SessionDetailPage({
                     : {})}
                 />
               </div>
-              {isSetupSession && setupSessionStatus?.completed === false ? (
-                <SetupSessionSourceControlPanel sessionId={unifiedSession.id} />
-              ) : null}
             </div>
           ) : (
             <>

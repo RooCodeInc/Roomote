@@ -4,8 +4,10 @@ import { useQuery } from '@tanstack/react-query';
 
 import { useUser } from '@/hooks/useUser';
 import { useTRPC } from '@/trpc/client';
+import { Zap } from '@/components/system';
 
 import { StepAutomationRecommendations } from './StepAutomationRecommendations';
+import { SetupSessionActionCard } from './SetupSessionActionCard';
 
 /**
  * Inline automation-recommendations card. Rendered in the conversational
@@ -32,9 +34,12 @@ export function SetupRecommendationsInlineCard({
   }
 
   return (
-    <div className="rounded-2xl border border-border bg-card p-4">
-      <p className="mb-3 text-sm font-medium">Recommended automations</p>
-      <StepAutomationRecommendations onContinue={() => undefined} />
-    </div>
+    <SetupSessionActionCard
+      title="Recommended automations"
+      icon={<Zap className="size-4" />}
+      intro="Review the recurring work I found in your repositories, then choose what to turn on."
+    >
+      <StepAutomationRecommendations onContinue={() => undefined} embedded />
+    </SetupSessionActionCard>
   );
 }
