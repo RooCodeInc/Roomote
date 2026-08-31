@@ -66,11 +66,9 @@ function getSourceRunId(instanceId: string): number | null {
 
 async function removeTaskNetwork(
   taskNetwork: string,
-  signal: AbortSignal | undefined,
   runDocker: DockerCommand,
 ): Promise<void> {
   const output = await runDocker(['network', 'inspect', taskNetwork], {
-    signal,
     allowFailure: true,
   });
   let containerIds: string[] = [];
@@ -87,13 +85,11 @@ async function removeTaskNetwork(
 
   for (const containerId of containerIds) {
     await runDocker(['network', 'disconnect', '-f', taskNetwork, containerId], {
-      signal,
       allowFailure: true,
     });
   }
 
   await runDocker(['network', 'rm', taskNetwork], {
-    signal,
     allowFailure: true,
   });
 }
@@ -102,30 +98,24 @@ export async function destroyDockerInstance(
   input: DestroyInstanceInput,
   runDocker: DockerCommand = docker,
 ): Promise<DestroyInstanceResult> {
+  // Teardown must outlive the task signal that triggered it. Cancellation
+  // commonly arrives with an already-aborted signal.
   const sourceRunId = getSourceRunId(input.instanceId);
   await runDocker(['rm', '-f', `${input.instanceId}-egress-policy`], {
-    signal: input.signal,
     allowFailure: true,
   });
   await runDocker(['rm', '-f', getTaskDaemonContainerName(input.instanceId)], {
-    signal: input.signal,
     allowFailure: true,
   });
   await runDocker(['rm', '-f', input.instanceId], {
-    signal: input.signal,
     allowFailure: true,
   });
   if (sourceRunId !== null) {
-    await removeTaskNetwork(
-      `roomote-task-${sourceRunId}`,
-      input.signal,
-      runDocker,
-    );
+    await removeTaskNetwork(`roomote-task-${sourceRunId}`, runDocker);
   }
   await runDocker(
     ['volume', 'rm', '-f', getTaskWorkspaceVolumeName(input.instanceId)],
     {
-      signal: input.signal,
       allowFailure: true,
     },
   );

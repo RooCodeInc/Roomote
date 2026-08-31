@@ -2,6 +2,7 @@ import {
   resolveRoomoteCloudBackend,
   resolveRoomoteCloudModalAppName,
   type ComputeProvider,
+  isExitedRunStatus,
   RunStatus,
 } from '@roomote/types';
 import { Env } from '@roomote/env';
@@ -418,6 +419,14 @@ export class RoomoteController extends BaseController {
     try {
       await cleanupStaleDockerSandboxes({
         controlNetwork: Env.DOCKER_WORKER_NETWORK,
+        shouldRemoveTaskRun: async (taskRunId) => {
+          const run = await db.query.taskRuns.findFirst({
+            where: eq(taskRuns.id, taskRunId),
+            columns: { status: true },
+          });
+
+          return !run || isExitedRunStatus(run.status);
+        },
       });
     } catch (error) {
       console.error(

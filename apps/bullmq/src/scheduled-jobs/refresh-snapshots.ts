@@ -2,6 +2,7 @@ import {
   type ComputeProvider,
   type SnapshotEnvironmentAttachment,
   activeRunStatuses,
+  isSnapshotCapableComputeProvider,
   TaskPayloadKind,
   resolveComputeProviderTarget,
 } from '@roomote/types';
@@ -185,6 +186,19 @@ async function findSnapshotRefreshCandidates(
   const targetProvider = resolveComputeProviderTarget(
     await resolveDefaultComputeProvider(),
   );
+
+  if (!isSnapshotCapableComputeProvider(targetProvider)) {
+    return {
+      candidates: [],
+      discovery: {
+        targetProvider,
+        targetProviderSnapshotRowCount: 0,
+        readyTargetProviderCandidateCount: 0,
+        missingTargetProviderCandidateCount: 0,
+      },
+    };
+  }
+
   const snapshotRows = await db.query.environmentSnapshots.findMany({
     where: and(
       eq(environmentSnapshots.provider, targetProvider),
