@@ -3,7 +3,10 @@ import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-import { OPENCODE_TOOL_SAFETY_PLUGIN_SCRIPT } from '../opencode-tool-safety-plugin-script';
+import {
+  OPENCODE_REDACT_ENV_NAMES_ENV_VAR_NAME,
+  OPENCODE_TOOL_SAFETY_PLUGIN_SCRIPT,
+} from '../opencode-tool-safety-plugin-script';
 
 interface ToolHookInput {
   tool: string;
@@ -14,6 +17,10 @@ type ToolHooks = {
   'tool.execute.before': (
     input: ToolHookInput,
     output: { args?: unknown },
+  ) => Promise<void>;
+  'tool.execute.after': (
+    input: ToolHookInput,
+    output: { output?: unknown },
   ) => Promise<void>;
 };
 
@@ -27,6 +34,7 @@ describe('OPENCODE_TOOL_SAFETY_PLUGIN_SCRIPT', () => {
   });
 
   afterEach(() => {
+    vi.unstubAllEnvs();
     fs.rmSync(tempDir, { recursive: true, force: true });
   });
 
@@ -128,5 +136,84 @@ describe('OPENCODE_TOOL_SAFETY_PLUGIN_SCRIPT', () => {
         { args: { filePath: '/tmp/site-icon.ico' } },
       ),
     ).resolves.toBeUndefined();
+  });
+
+  it('redacts known environment values from tool output', async () => {
+    vi.stubEnv('DATABASE_URL', 'postgres://user:p[a]ss@db.example/app');
+    vi.stubEnv('API_TOKEN', 'token-value-longer');
+    vi.stubEnv(
+      OPENCODE_REDACT_ENV_NAMES_ENV_VAR_NAME,
+      JSON.stringify(['DATABASE_URL', 'API_TOKEN']),
+    );
+    const hooks = await loadHooks();
+    const output = {
+      output:
+        'DATABASE_URL=postgres://user:p[a]ss@db.example/app\n' +
+        'API_TOKEN=token-value-longer token-value-longer',
+    };
+
+    await hooks['tool.execute.after']({ tool: 'bash' }, output);
+
+    expect(output.output).toBe(
+      'DATABASE_URL=[redacted]\nAPI_TOKEN=[redacted] [redacted]',
+    );
+  });
+
+  it('redacts overlapping values longest-first', async () => {
+    vi.stubEnv('SHORT_TOKEN', 'shared-token');
+    vi.stubEnv('LONG_TOKEN', 'shared-token-suffix');
+    vi.stubEnv(
+      OPENCODE_REDACT_ENV_NAMES_ENV_VAR_NAME,
+      JSON.stringify(['SHORT_TOKEN', 'LONG_TOKEN']),
+    );
+    const hooks = await loadHooks();
+    const output = { output: 'shared-token-suffix shared-token' };
+
+    await hooks['tool.execute.after']({ tool: 'shell' }, output);
+
+    expect(output.output).toBe('[redacted] [redacted]');
+  });
+
+  it('redacts a trimmed environment value printed by a command', async () => {
+    vi.stubEnv('PADDED_TOKEN', '  token-value-padded  \n');
+    vi.stubEnv(
+      OPENCODE_REDACT_ENV_NAMES_ENV_VAR_NAME,
+      JSON.stringify(['PADDED_TOKEN']),
+    );
+    const hooks = await loadHooks();
+    const output = { output: 'PADDED_TOKEN=token-value-padded' };
+
+    await hooks['tool.execute.after']({ tool: 'bash' }, output);
+
+    expect(output.output).toBe('PADDED_TOKEN=[redacted]');
+  });
+
+  it('ignores short, missing, and unlisted environment values', async () => {
+    vi.stubEnv('SHORT_VALUE', 'local');
+    vi.stubEnv('UNLISTED_TOKEN', 'must-remain-visible');
+    vi.stubEnv(
+      OPENCODE_REDACT_ENV_NAMES_ENV_VAR_NAME,
+      JSON.stringify(['SHORT_VALUE', 'MISSING_VALUE']),
+    );
+    const hooks = await loadHooks();
+    const output = { output: 'local must-remain-visible' };
+
+    await hooks['tool.execute.after']({ tool: 'bash' }, output);
+
+    expect(output.output).toBe('local must-remain-visible');
+  });
+
+  it('leaves non-text tool output unchanged', async () => {
+    vi.stubEnv('API_TOKEN', 'token-value-longer');
+    vi.stubEnv(
+      OPENCODE_REDACT_ENV_NAMES_ENV_VAR_NAME,
+      JSON.stringify(['API_TOKEN']),
+    );
+    const hooks = await loadHooks();
+    const output = { output: { token: 'token-value-longer' } };
+
+    await hooks['tool.execute.after']({ tool: 'custom' }, output);
+
+    expect(output.output).toEqual({ token: 'token-value-longer' });
   });
 });

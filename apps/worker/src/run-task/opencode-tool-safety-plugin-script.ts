@@ -1,6 +1,51 @@
+export const OPENCODE_REDACT_ENV_NAMES_ENV_VAR_NAME =
+  'ROOMOTE_OPENCODE_REDACT_ENV_NAMES';
+
 export const OPENCODE_TOOL_SAFETY_PLUGIN_SCRIPT = `import { realpath } from 'node:fs/promises';
 
 const UNSUPPORTED_READ_IMAGE_EXTENSIONS = new Set(['.cur', '.ico']);
+const MIN_REDACTED_ENV_VALUE_LENGTH = 8;
+const REDACT_ENV_NAMES_ENV_VAR_NAME = '${OPENCODE_REDACT_ENV_NAMES_ENV_VAR_NAME}';
+
+function getRedactedEnvValues() {
+  let names;
+
+  try {
+    names = JSON.parse(process.env[REDACT_ENV_NAMES_ENV_VAR_NAME] ?? '[]');
+  } catch {
+    return [];
+  }
+
+  if (!Array.isArray(names)) {
+    return [];
+  }
+
+  return [...new Set(
+    names.flatMap((name) => {
+      if (typeof name !== 'string') {
+        return [];
+      }
+
+      const value = process.env[name];
+      return value
+        ? [value, value.trim()].filter(
+            (candidate) =>
+              candidate.length >= MIN_REDACTED_ENV_VALUE_LENGTH,
+          )
+        : [];
+    }),
+  )].sort((left, right) => right.length - left.length);
+}
+
+function redactKnownEnvValues(value) {
+  let redacted = value;
+
+  for (const secret of getRedactedEnvValues()) {
+    redacted = redacted.replaceAll(secret, '[redacted]');
+  }
+
+  return redacted;
+}
 
 function getReadPath(input, context) {
   const args = context?.args ?? input?.args;
@@ -56,6 +101,11 @@ export const RoomoteOpenCodeToolSafety = async () => ({
       'The read tool cannot safely attach ICO or CUR image files to the model conversation. ' +
         'Inspect metadata with a text-only command or convert the image to PNG in a temporary directory first.',
     );
+  },
+  'tool.execute.after': async (_input, output) => {
+    if (output && typeof output.output === 'string') {
+      output.output = redactKnownEnvValues(output.output);
+    }
   },
 });
 `;

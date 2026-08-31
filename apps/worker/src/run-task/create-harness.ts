@@ -21,6 +21,7 @@ import { captureWorkerException } from '../monitoring/sentry';
 import type { RunTaskCallbacks, RunTaskContext } from './types';
 import { buildHarnessCommandEnv } from './harnesses';
 import { createDiagnosticEventRecorder } from './diagnostic-events';
+import { OPENCODE_REDACT_ENV_NAMES_ENV_VAR_NAME } from './opencode-tool-safety-plugin-script';
 import { ReconnectableHarness } from './reconnectable-harness';
 import { subscribeHarnessCallbacks } from './subscribe-harness-callbacks';
 
@@ -139,10 +140,19 @@ export async function createHarness({
       Object.keys(modelRoleOverrideEnv).length > 0
         ? { ...harnessCommandEnv, ...modelRoleOverrideEnv }
         : harnessCommandEnv;
+    const redactedEnvNames = Object.keys(operatorEnvVars ?? {}).sort();
+    const openCodeRuntimeEnv =
+      redactedEnvNames.length > 0
+        ? {
+            ...spawnRuntimeEnv,
+            [OPENCODE_REDACT_ENV_NAMES_ENV_VAR_NAME]:
+              JSON.stringify(redactedEnvNames),
+          }
+        : spawnRuntimeEnv;
 
     const commonOptions = {
       workspacePath,
-      runtimeEnv: spawnRuntimeEnv,
+      runtimeEnv: openCodeRuntimeEnv,
       cancelSignal,
       logger,
       mcpServers: resolvedMcps,

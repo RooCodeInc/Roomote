@@ -56,6 +56,7 @@ vi.mock('../subscribe-harness-callbacks', () => ({
 }));
 
 import { createHarness } from '../create-harness';
+import { OPENCODE_REDACT_ENV_NAMES_ENV_VAR_NAME } from '../opencode-tool-safety-plugin-script';
 
 function createPendingSubprocess(stdout = new PassThrough()) {
   return Object.assign(new Promise<never>(() => undefined), {
@@ -194,6 +195,47 @@ describe('createHarness', () => {
     expect(startOpenCodeServerHarnessMock).toHaveBeenCalledWith(
       expect.objectContaining({
         initialSessionId: 'thread-resume-123',
+      }),
+    );
+  });
+
+  it('passes operator environment variable names to the OpenCode redactor', async () => {
+    const subprocess = createPendingSubprocess();
+
+    startOpenCodeServerHarnessMock.mockResolvedValue({
+      harness: createConnectedHarness(),
+      subprocess,
+    });
+
+    await createHarness({
+      harnessType: 'opencode-server',
+      workspacePath: '/tmp/workspace',
+      runtimeEnv: {
+        DATABASE_URL: 'postgres://user:secret@db.example/app',
+        API_TOKEN: 'token-value',
+      },
+      operatorEnvVars: {
+        API_TOKEN: 'token-value',
+        DATABASE_URL: 'postgres://user:secret@db.example/app',
+      },
+      harnessSessionId: undefined,
+      cancelSignal: new AbortController().signal,
+      integrations: {} as never,
+      mcpTaskEnv: {},
+      taskRun: { id: 1, taskId: 'task-1' } as never,
+      callbacks: {} as never,
+      context: {} as never,
+      logger: createLogger(),
+    });
+
+    expect(startOpenCodeServerHarnessMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        runtimeEnv: expect.objectContaining({
+          [OPENCODE_REDACT_ENV_NAMES_ENV_VAR_NAME]: JSON.stringify([
+            'API_TOKEN',
+            'DATABASE_URL',
+          ]),
+        }),
       }),
     );
   });
