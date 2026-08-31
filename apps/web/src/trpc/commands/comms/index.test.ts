@@ -873,6 +873,7 @@ describe('comms commands', () => {
       expect(mockAgentMailCreateInbox).toHaveBeenCalledWith({
         username: expectedUsername,
         clientId: `roomote-${hostHash}`,
+        displayName: 'Roomote',
       });
       expect(mockAgentMailCreateWebhook).toHaveBeenCalledWith({
         url: expectedWebhookUrl,
@@ -1142,6 +1143,7 @@ describe('comms commands', () => {
       expect(mockAgentMailCreateInbox).toHaveBeenCalledWith({
         username: expectedUsername,
         clientId: `roomote-${hostHash}`,
+        displayName: 'Roomote',
       });
       expect(mockUpsertDeploymentEnvironmentVariables).toHaveBeenCalledWith(
         expect.anything(),

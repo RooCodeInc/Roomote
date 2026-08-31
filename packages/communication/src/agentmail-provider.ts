@@ -448,6 +448,15 @@ export class AgentMailApiClient {
     return this.request('GET', `/v0/inboxes/${encodeURIComponent(inboxId)}`);
   }
 
+  updateInbox(
+    inboxId: string,
+    input: { displayName?: string },
+  ): Promise<AgentMailInbox> {
+    return this.request('PATCH', `/v0/inboxes/${encodeURIComponent(inboxId)}`, {
+      ...(input.displayName ? { display_name: input.displayName } : {}),
+    });
+  }
+
   listWebhooks(): Promise<
     { webhooks?: AgentMailWebhook[] } & Record<string, unknown>
   > {

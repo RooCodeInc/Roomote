@@ -48,6 +48,7 @@ import { Env } from '@/lib/server/env';
 import { buildDeploymentAppName } from '@/lib/server/deployment-app-name';
 import { DISCORD_INSTALL_PERMISSIONS } from '@/lib/discord-install';
 import {
+  PRODUCT_NAME,
   buildSetupAuthStatus,
   getSetupAuthProvider,
   NON_SECRET_AUTH_ENV_VAR_NAMES,
@@ -877,6 +878,7 @@ async function createProposedAgentMailInbox(
     const inbox = await client.createInbox({
       username: proposal.username,
       clientId: proposal.clientId,
+      displayName: PRODUCT_NAME,
     });
     const createdAddress = normalizeAgentMailInboxAddress(
       typeof inbox.inbox_id === 'string' ? inbox.inbox_id : null,
@@ -923,16 +925,21 @@ async function reconcileAgentMailSetup(input: {
   // Prove the key authenticates with the cheapest read before touching
   // anything else, so a bad key fails with a clear message instead of a
   // confusing inbox or webhook error.
-  let orgInboxes: string[] = [];
+  const orgInboxes: string[] = [];
+  const inboxDisplayNames = new Map<string, string | null>();
   try {
     const listed = await client.listInboxes();
-    orgInboxes = (listed.inboxes ?? [])
-      .map((inbox) =>
-        normalizeAgentMailInboxAddress(
-          typeof inbox.inbox_id === 'string' ? inbox.inbox_id : null,
-        ),
-      )
-      .filter((address): address is string => Boolean(address));
+    for (const inbox of listed.inboxes ?? []) {
+      const address = normalizeAgentMailInboxAddress(
+        typeof inbox.inbox_id === 'string' ? inbox.inbox_id : null,
+      );
+      if (!address) continue;
+      orgInboxes.push(address);
+      inboxDisplayNames.set(
+        address,
+        typeof inbox.display_name === 'string' ? inbox.display_name : null,
+      );
+    }
   } catch (error) {
     throw new Error(
       classifyAgentMailSetupError(error, 'validating the API key'),
@@ -995,6 +1002,19 @@ async function reconcileAgentMailSetup(input: {
       client,
       buildAgentMailInboxProposal(Env.R_APP_URL),
     );
+  }
+
+  // Recipients see the inbox display name as the sender ("Roomote
+  // <address>"); AgentMail's own default reads as "AgentMail". Converging is
+  // cosmetic, so a failure logs instead of aborting the save.
+  if (inboxDisplayNames.get(inboxAddress) !== PRODUCT_NAME) {
+    try {
+      await client.updateInbox(inboxAddress, { displayName: PRODUCT_NAME });
+    } catch (error) {
+      console.warn(
+        `[comms] Failed to set the AgentMail inbox display name: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
   }
 
   // Converge the deployment's webhook (found by client id) on the current
