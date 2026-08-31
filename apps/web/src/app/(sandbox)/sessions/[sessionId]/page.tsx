@@ -23,7 +23,6 @@ import { WorkspaceHeader } from '@/components/layout';
 import {
   findDeploymentSetupSessionId,
   getSetupSessionStatusCommand,
-  reconcileSetupPlatformEvents,
 } from '@/trpc/commands/setup/setup-session';
 import { SetupRecommendationsInlineCard } from '../../../(onboarding)/setup/SetupRecommendationsInlineCard';
 import { SetupSessionSourceControlPanel } from '../../../(onboarding)/setup/SetupSourceControlPanel';
@@ -139,7 +138,6 @@ export default async function SessionDetailPage({
     const setupSessionStatus = isSetupSession
       ? await getSetupSessionStatusCommand(authorizedUser)
       : null;
-    if (isSetupSession) void reconcileSetupPlatformEvents(authorizedUser);
     const setupRecommendations = isSetupSession ? (
       <SetupRecommendationsInlineCard sessionId={unifiedSession.id} />
     ) : null;

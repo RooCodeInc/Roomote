@@ -290,6 +290,10 @@ export async function scheduleSetupPlatformEvent(
   return { scheduled: true };
 }
 
+/**
+ * Callers must await this while inside the current Next request scope because
+ * each scheduled event registers its Fast turn through `after()`.
+ */
 export async function reconcileSetupPlatformEvents(
   auth: UserAuthSuccess,
 ): Promise<void> {
@@ -410,7 +414,7 @@ export async function getSetupSessionStatusCommand(auth: UserAuthSuccess) {
   const setupSession = normalizeSetupNewSetupSession(
     status.setupNewState.setupSession,
   );
-  if (setupSession) void reconcileSetupPlatformEvents(auth);
+  if (setupSession) await reconcileSetupPlatformEvents(auth);
   return {
     ready: Boolean(await findSetupSessionConversation(auth)),
     sessionId: setupSession?.sessionId ?? null,
@@ -527,7 +531,7 @@ export async function getOrCreateSetupSessionCommand(
       properties: {},
     });
   }
-  void reconcileSetupPlatformEvents(auth);
+  await reconcileSetupPlatformEvents(auth);
   return result;
 }
 
@@ -702,7 +706,7 @@ export async function submitSetupSessionUserInputCommand(
     setupSession: true,
     persistSetupPresetResponse: async (details) => {
       const result = await persistSetupPresetResponse({ auth, ...details });
-      void reconcileSetupPlatformEvents(auth);
+      await reconcileSetupPlatformEvents(auth);
       return result;
     },
   });
