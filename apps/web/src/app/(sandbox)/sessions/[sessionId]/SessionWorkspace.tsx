@@ -22,6 +22,10 @@ import {
   getUserDisplayName,
   humanizeFilename,
 } from '@/lib';
+import {
+  getSessionPullRequests,
+  type SessionPullRequest,
+} from '@/lib/session-pull-requests';
 import { SessionStatusBadge } from '@/components/sessions/SessionStatusBadge';
 import { PullRequestBadge } from '@/components/sandbox';
 import {
@@ -167,52 +171,7 @@ export type SessionInfo = {
   >;
 };
 
-type SessionHeaderPullRequest = {
-  repository: string;
-  number: number;
-  url: string;
-};
-
-const TERMINAL_PULL_REQUEST_STATUSES = new Set(['closed', 'merged']);
-
-const SessionPullRequestsContext = createContext<SessionHeaderPullRequest[]>(
-  [],
-);
-
-function getSessionPullRequests(
-  tasks: Array<Pick<SessionTaskSummary, 'pullRequests'>>,
-): SessionHeaderPullRequest[] {
-  const pullRequests: SessionHeaderPullRequest[] = [];
-  const identities = new Set<string>();
-  const urls = new Set<string>();
-
-  for (const task of tasks) {
-    for (const pullRequest of task.pullRequests) {
-      if (
-        !pullRequest.repository ||
-        pullRequest.number === null ||
-        (pullRequest.status &&
-          TERMINAL_PULL_REQUEST_STATUSES.has(pullRequest.status))
-      ) {
-        continue;
-      }
-
-      const identity = `${pullRequest.repository.toLowerCase()}:${pullRequest.number}`;
-      const url = pullRequest.url.trim();
-      if (identities.has(identity) || urls.has(url)) continue;
-
-      identities.add(identity);
-      urls.add(url);
-      pullRequests.push({
-        repository: pullRequest.repository,
-        number: pullRequest.number,
-        url,
-      });
-    }
-  }
-
-  return pullRequests;
-}
+const SessionPullRequestsContext = createContext<SessionPullRequest[]>([]);
 
 export function SessionHeaderExtras({ status }: { status: string | null }) {
   const pullRequests = useContext(SessionPullRequestsContext);
