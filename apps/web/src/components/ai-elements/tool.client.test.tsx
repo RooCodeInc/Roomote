@@ -4,6 +4,15 @@ import { Search } from '@/components/system';
 
 import { Tool, ToolHeader } from './tool';
 
+vi.mock('@/components/system', async (importOriginal) => {
+  const system = await importOriginal<typeof import('@/components/system')>();
+
+  return {
+    ...system,
+    Spinner: () => <div data-testid="spinner" />,
+  };
+});
+
 describe('ToolHeader', () => {
   it('shows running and failed states textually while success stays implied', () => {
     const { rerender } = render(
@@ -17,6 +26,7 @@ describe('ToolHeader', () => {
     );
 
     expect(screen.getByText('Running')).not.toHaveClass('sr-only');
+    expect(screen.getByTestId('spinner')).toBeInTheDocument();
 
     rerender(
       <ToolHeader
@@ -28,6 +38,7 @@ describe('ToolHeader', () => {
       />,
     );
     expect(screen.getByText('Completed')).toHaveClass('sr-only');
+    expect(screen.queryByTestId('spinner')).not.toBeInTheDocument();
 
     rerender(
       <ToolHeader
