@@ -28,7 +28,6 @@ import {
   createTeamsCommunicationProviderFromRuntimeCredentials as createTeamsCommunicationProvider,
   createTelegramCommunicationProviderFromRuntimeCredentials as createTelegramCommunicationProvider,
   getCommunicationProviderAdapter,
-  resolveAgentMailReplyRoute,
 } from '@roomote/sdk/server';
 import { createHash } from 'node:crypto';
 
@@ -560,23 +559,23 @@ async function sendTelegramThreadReply(params: {
 /**
  * Email replies must be delivered at most once per logical reply, and the MCP
  * thread-reply request carries no client-supplied message id or dedupe nonce.
- * The stable identity is (run, reply text, current inbound anchor): a worker
- * retry of the same tool call — including one whose first attempt succeeded
- * but whose response was lost — maps to the same Idempotency-Key, while an
- * intentional identical-text reply in a later turn has a different inbound
- * anchor and therefore delivers.
+ * The base identity is (run, reply text); the AgentMail adapter appends the
+ * reply anchor it resolves atomically at send time, so a worker retry of the
+ * same tool call maps to the same final key while an intentional
+ * identical-text reply in a later turn (new inbound anchor) still delivers.
+ * Deriving the anchor here instead would race a concurrent inbound email
+ * between this lookup and the adapter's own.
  */
 function buildAgentMailThreadReplyIdempotencyKey(params: {
   conversationId: string;
   runId: number;
   text: string;
-  inboundAnchor: string | null;
 }): string {
   const digest = createHash('sha256')
     .update(params.text)
     .digest('hex')
     .slice(0, 16);
-  return `agentmail:${params.conversationId}:${params.runId}-${digest}-${params.inboundAnchor ?? 'none'}:thread-reply`;
+  return `agentmail:${params.conversationId}:${params.runId}-${digest}:thread-reply`;
 }
 
 async function sendAgentMailThreadReply(params: {
@@ -637,9 +636,6 @@ async function sendAgentMailThreadReply(params: {
       conversationId,
       runId: params.taskRun.id,
       text,
-      inboundAnchor:
-        (await resolveAgentMailReplyRoute(conversationId))?.replyToMessageId ??
-        null,
     }),
   });
 

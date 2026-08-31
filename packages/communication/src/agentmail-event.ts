@@ -109,7 +109,10 @@ function stripElementWithContent(html: string, tagName: string): string {
       result += html.slice(cursor);
       return result;
     }
-    result += html.slice(cursor, openAt);
+    // Replace the removed block with a space so neighboring text does not
+    // merge ("Please<script>x</script>review" must not become
+    // "Pleasereview"); later whitespace normalization collapses it.
+    result += `${html.slice(cursor, openAt)} `;
 
     const closePattern = `</${tagName}`;
     const closeAt = lower.indexOf(closePattern, openAt);

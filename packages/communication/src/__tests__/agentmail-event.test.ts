@@ -103,6 +103,16 @@ describe('getAgentMailSenderAddress', () => {
 });
 
 describe('getAgentMailMessageBodyText', () => {
+  it('keeps neighboring text separated when script/style blocks are removed', () => {
+    expect(
+      getAgentMailMessageBodyText(
+        buildMessage({
+          html: 'Please<script>tracking()</script>review<style>.x{}</style>this',
+        }),
+      ),
+    ).toBe('Please review this');
+  });
+
   it('prefers extracted_text over text and html', () => {
     expect(
       getAgentMailMessageBodyText(

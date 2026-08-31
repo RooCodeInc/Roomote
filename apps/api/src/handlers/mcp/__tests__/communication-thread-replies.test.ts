@@ -226,7 +226,7 @@ describe('maybeSendCommunicationThreadReply (AgentMail)', () => {
       text: 'done',
       textFormat: 'markdown',
       idempotencyKey: expect.stringMatching(
-        /^agentmail:conversation-1:45-[0-9a-f]{16}-anchor-1:thread-reply$/,
+        /^agentmail:conversation-1:45-[0-9a-f]{16}:thread-reply$/,
       ),
     });
     // Email is not live: no typing heartbeat is triggered.

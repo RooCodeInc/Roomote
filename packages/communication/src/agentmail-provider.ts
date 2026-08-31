@@ -153,8 +153,13 @@ export class AgentMailCommunicationProvider implements CommunicationProviderAdap
         ...(route.recipientEmail ? { to: [route.recipientEmail] } : {}),
       },
       {
+        // The reply anchor is appended HERE, where it was just resolved, so
+        // the key and the send always describe the same route state; a
+        // caller-side anchor lookup could race a concurrent inbound email.
         ...(input.idempotencyKey
-          ? { idempotencyKey: input.idempotencyKey }
+          ? {
+              idempotencyKey: `${input.idempotencyKey}:${route.replyToMessageId}`,
+            }
           : {}),
       },
     );
