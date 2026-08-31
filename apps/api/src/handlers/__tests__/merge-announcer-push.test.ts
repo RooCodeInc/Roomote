@@ -209,6 +209,25 @@ describe('Merge announcer push normalization', () => {
     expect(resolveMediaType).toHaveBeenCalledTimes(6);
   });
 
+  it('does not probe beyond the remaining supported-image capacity', async () => {
+    const imageUrls = Array.from(
+      { length: 10 },
+      (_, index) => `https://cdn.example.com/preview-${index + 1}`,
+    );
+    const resolveMediaType = vi.fn(async (url: string) =>
+      imageUrls.indexOf(url) === 4 ? 'video/mp4' : 'image/png',
+    );
+    const candidates = imageUrls
+      .map((url, index) => `![Preview ${index + 1}](${url})`)
+      .join('\n');
+
+    await expect(
+      extractEligiblePullRequestImages(candidates, resolveMediaType),
+    ).resolves.toHaveLength(5);
+    expect(resolveMediaType).toHaveBeenCalledTimes(6);
+    expect(resolveMediaType).not.toHaveBeenCalledWith(imageUrls[6]);
+  });
+
   it('enriches GitHub merge pushes with bounded PR metadata and file stats', async () => {
     const payload = {
       ref: 'refs/heads/main',

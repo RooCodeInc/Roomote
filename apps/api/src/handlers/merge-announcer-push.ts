@@ -165,16 +165,20 @@ export async function extractEligiblePullRequestImages(
     let offset = 0;
     offset < rankedCandidates.length &&
     eligibleCandidates.length < MAX_GITHUB_PULL_REQUEST_IMAGE_CANDIDATES;
-    offset += GITHUB_PULL_REQUEST_IMAGE_PROBE_BATCH_SIZE
   ) {
+    const batchSize = Math.min(
+      GITHUB_PULL_REQUEST_IMAGE_PROBE_BATCH_SIZE,
+      MAX_GITHUB_PULL_REQUEST_IMAGE_CANDIDATES - eligibleCandidates.length,
+    );
     const mediaTypeResults = await Promise.allSettled(
       rankedCandidates
-        .slice(offset, offset + GITHUB_PULL_REQUEST_IMAGE_PROBE_BATCH_SIZE)
+        .slice(offset, offset + batchSize)
         .map(async (candidate) => ({
           candidate,
           mediaType: await resolveMediaType(candidate.url),
         })),
     );
+    offset += batchSize;
     eligibleCandidates.push(
       ...mediaTypeResults.flatMap((result) =>
         result.status === 'fulfilled' &&
