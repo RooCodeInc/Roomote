@@ -504,7 +504,7 @@ describe('FastSessionTranscript', () => {
     expect(screen.getByText('1 task running')).toBeInTheDocument();
   });
 
-  it('suppresses nested task activity while the session is responding', () => {
+  it('keeps running task activity visible when a Session is loaded directly', () => {
     render(
       <SessionRunningTaskCountContext.Provider value={1}>
         <FastSessionTranscript
@@ -523,24 +523,53 @@ describe('FastSessionTranscript', () => {
               ts: 2,
             }),
           ]}
-          initialConversationResponding
           canReply
         />
       </SessionRunningTaskCountContext.Provider>,
     );
 
-    expect(screen.queryByText('1 task running')).not.toBeInTheDocument();
+    expect(screen.getByText('1 task running')).toBeInTheDocument();
 
     act(() => {
       FakeEventSource.instances[0]!.emit('messages', {
+        conversationResponding: true,
         messages: [
           textMessage({
             id: 'assistant-1',
             role: 'assistant',
-            text: 'Tasks launched and still responding',
+            text: 'Tasks launched',
             ts: 2,
           }),
         ],
+      });
+    });
+    expect(screen.getByText('1 task running')).toBeInTheDocument();
+
+    act(() => {
+      FakeEventSource.instances[0]!.emit('session', {
+        conversationResponding: true,
+      });
+    });
+    expect(screen.getByText('1 task running')).toBeInTheDocument();
+
+    act(() => {
+      FakeEventSource.instances[0]!.emit('open', null);
+      FakeEventSource.instances[0]!.emit('session', {
+        conversationResponding: true,
+      });
+    });
+    expect(screen.getByText('1 task running')).toBeInTheDocument();
+
+    act(() => {
+      FakeEventSource.instances[0]!.emit('session', {
+        conversationResponding: false,
+      });
+    });
+    expect(screen.getByText('1 task running')).toBeInTheDocument();
+
+    act(() => {
+      FakeEventSource.instances[0]!.emit('session', {
+        conversationResponding: true,
       });
     });
     expect(screen.queryByText('1 task running')).not.toBeInTheDocument();
@@ -572,7 +601,6 @@ describe('FastSessionTranscript', () => {
               ts: 2,
             }),
           ]}
-          initialConversationResponding={false}
           canReply
         />
       </SessionRunningTaskCountContext.Provider>,

@@ -240,7 +240,6 @@ export function FastSessionTranscript({
   hasOlderMessages,
   canReply,
   initialTitle = null,
-  initialConversationResponding = null,
   fallbackTitle = 'New session',
   sessionModel = null,
   sessionReasoningEffort = null,
@@ -254,7 +253,6 @@ export function FastSessionTranscript({
   hasOlderMessages?: boolean;
   canReply?: boolean;
   initialTitle?: string | null;
-  initialConversationResponding?: boolean | null;
   fallbackTitle?: string;
   sessionModel?: string | null;
   sessionReasoningEffort?: ReasoningEffort | null;
@@ -275,6 +273,7 @@ export function FastSessionTranscript({
     () => new Map(initialMessages.map((message) => [message.eventId, message])),
   );
   const serverMessagesRef = useRef(serverMessages);
+  const hasReceivedInitialSessionStateRef = useRef(false);
   const [optimisticMessages, setOptimisticMessages] = useState<
     TranscriptMessage[]
   >([]);
@@ -296,11 +295,15 @@ export function FastSessionTranscript({
   const [title, setTitle] = useState<string | null>(initialTitle);
   const [conversationResponding, setConversationResponding] = useState<
     boolean | null
-  >(initialConversationResponding);
+  >(null);
   usePageTitle(truncatePageTitle(title ?? fallbackTitle));
 
   useEffect(() => {
+    hasReceivedInitialSessionStateRef.current = false;
     const source = new EventSource(`/api/sessions/${sessionId}/stream`);
+    const onOpen = () => {
+      hasReceivedInitialSessionStateRef.current = false;
+    };
     const onMessages = (event: MessageEvent) => {
       try {
         const { messages, conversationResponding: responding } = JSON.parse(
@@ -309,13 +312,19 @@ export function FastSessionTranscript({
           messages: TranscriptMessage[];
           conversationResponding?: boolean | null;
         };
-        if (responding !== undefined) {
-          setConversationResponding(responding);
-        }
         const previous = serverMessagesRef.current;
         const canonicalMessages = messages.filter(
           (message) => !previous.has(message.eventId),
         );
+        // The stream overlaps the server-rendered transcript on connect. A
+        // replayed lease can be stale, so only new output proves that the
+        // parent response should suppress hydrated nested-task activity.
+        if (
+          responding !== undefined &&
+          (responding !== true || canonicalMessages.length > 0)
+        ) {
+          setConversationResponding(responding);
+        }
         const canonicalUserMessages = canonicalMessages.filter(
           (message) => message.role === 'user',
         );
@@ -360,16 +369,24 @@ export function FastSessionTranscript({
         if (update.title !== undefined) {
           setTitle(update.title);
         }
-        if (update.conversationResponding !== undefined) {
+        const isInitialSessionState =
+          !hasReceivedInitialSessionStateRef.current;
+        hasReceivedInitialSessionStateRef.current = true;
+        if (
+          update.conversationResponding !== undefined &&
+          (!isInitialSessionState || update.conversationResponding !== true)
+        ) {
           setConversationResponding(update.conversationResponding);
         }
       } catch {
         // Ignore malformed frames.
       }
     };
+    source.addEventListener('open', onOpen);
     source.addEventListener('messages', onMessages);
     source.addEventListener('session', onSession);
     return () => {
+      source.removeEventListener('open', onOpen);
       source.removeEventListener('messages', onMessages);
       source.removeEventListener('session', onSession);
       source.close();
