@@ -188,6 +188,19 @@ You are executing a command to create a pull request with the current changes.
         </actions>
         <validation>The summary includes every repository processed and no successful pull request creation or update is omitted.</validation>
       </step>
+      <step number="8">
+        <title>Offer automatic CI and review follow-up</title>
+        <description>After successful pull request delivery, ask once with a lightweight conversational question whether the user wants this agent to automatically address later CI failures or review feedback on those pull requests.</description>
+        <actions>
+          <action>Run this step only when at least one pull request was successfully created or refreshed in this run. Skip it for no-op or fully blocked deliveries.</action>
+          <action>After the PR summary, ask once in plain language whether they want the agent to automatically address CI failures or review feedback on the opened pull request(s). Keep it short—one brief natural question nestled in the delivery summary, not a form or multi-part questionnaire. Do not coach the answer format (do not say "reply yes or no" or similar). Do not start that follow-up work until they opt in.</action>
+          <action>Prefer a lightweight conversational ask in the normal closeout channel for the surface (for Slack, fold it into `send_chat_reply` with purpose `clarification` or the same closeout when that already carries the PR result). Example: "Want me to automatically address CI failures or review feedback on this PR if they come up?"</action>
+          <action>Do not use `request_user_input` for this ask. A single casual conversational offer is enough; structured input is too heavy for this follow-up offer.</action>
+          <action>If the user opts in, acknowledge briefly, then when CI failures or review feedback appear later on these PRs, address them using the existing PR-fixer and CI-repair paths (`fix-pr`, `address-pr-feedback`, or equivalent CI failure investigation) instead of opening a new PR.</action>
+          <action>If the user declines, or does not answer after the ask is posted, end the delivery cleanly without watching CI or polluting the PR with unsolicited fixes.</action>
+        </actions>
+        <validation>Successful PR delivery either records a clear user choice about automatic CI/review follow-up or leaves an explicit waiting state after that one lightweight ask; unsuccessful deliveries skip the ask.</validation>
+      </step>
     </steps>
   </phase>
 
@@ -198,6 +211,7 @@ You are executing a command to create a pull request with the current changes.
 <criterion>When the same task ships through multiple pull requests, each PR body links the sibling PRs with current URLs.</criterion>
 <criterion>When a single-PR refresh updates one PR from an already-split task, the refreshed PR body does not silently drop valid sibling PR links.</criterion>
 <criterion>The final response lists the resulting pull requests clearly and accurately.</criterion>
+<criterion>After at least one successful pull request creation or refresh, the workflow asked once whether the user wants automatic addressing of CI failures or review feedback, and only began that follow-up after explicit opt-in.</criterion>
 </completion_criteria>
 </workflow>
 
@@ -240,6 +254,11 @@ You are executing a command to create a pull request with the current changes.
     <context>Use when the workspace may contain more than one repo that needs an output artifact.</context>
     <template>For each repository: analyze, commit if needed, push the branch, create or refresh the pull request, and capture the live pull request reference.</template>
   </pattern>
+  <pattern name="post_delivery_followup_opt_in">
+    <description>After successful PR delivery, ask once with a lightweight conversational question whether the user wants automatic CI failure and review-feedback follow-up before ending.</description>
+    <context>Use after the created or refreshed pull request summary when at least one pull request succeeded.</context>
+    <template>Report PR URLs -> ask once casually about auto-addressing CI failures or review feedback (never via request_user_input) -> only continue that follow-up after explicit opt-in.</template>
+  </pattern>
 </patterns>
 
 <decision_guidance>
@@ -250,9 +269,10 @@ You are executing a command to create a pull request with the current changes.
 </principles>
 <constraints>Use only script-safe git commands, pass user-controlled text through `mcp__roomote__manage_source_control` tool parameters instead of shell interpolation, and never skip reporting blockers.</constraints>
 <boundaries>
-<rule>This workflow handles repository detection, commit creation, branch pushing, and pull request creation.</rule>
+<rule>This workflow handles repository detection, commit creation, branch pushing, pull request creation, and a single post-delivery opt-in ask about automatic CI failure and review-feedback follow-up.</rule>
 <rule>This workflow does not decide product requirements or rewrite the requested code changes themselves.</rule>
 <rule>When branch protection, authentication, or remote permissions block progress, surface the exact blocker to the user and conclude with a blocked result.</rule>
+<rule>Do not watch CI or apply unsolicited review fixes unless the user explicitly opts in after the delivery ask.</rule>
 </boundaries>
 </decision_guidance>
 
@@ -277,7 +297,7 @@ You are executing a command to create a pull request with the current changes.
         <expected_outcome>Two distinct pull requests are created or updated and ready to report.</expected_outcome>
       </step>
     </workflow>
-    <completion>The user receives a concise list of the created or updated pull requests, one for each repository.</completion>
+    <completion>The user receives a concise list of the created or updated pull requests, one for each repository, plus a single offer to auto-address later CI failures or review feedback.</completion>
     <key_takeaways>
       <takeaway>Multi-repository work still requires repository-specific pull request handling.</takeaway>
     </key_takeaways>
