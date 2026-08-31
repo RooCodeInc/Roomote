@@ -461,7 +461,7 @@ export const SelectEnvironmentOrRepository = ({
                           type="button"
                           variant="ghost"
                           size="icon"
-                          className="size-6 text-muted-foreground hover:text-destructive"
+                          className="size-6 text-black! hover:text-destructive!"
                           onClick={(e) => {
                             e.preventDefault();
                             e.stopPropagation();
