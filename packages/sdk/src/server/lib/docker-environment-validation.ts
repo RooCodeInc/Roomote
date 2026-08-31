@@ -1,6 +1,6 @@
 import { Queue, QueueEvents } from 'bullmq';
 
-import { getRedis } from '@roomote/redis';
+import { getBullMqRedis, getRedis } from '@roomote/redis';
 import { DOCKER_VALIDATION_QUEUE_NAME } from '@roomote/types';
 import type { DockerEnvironmentValidationResult } from '@roomote/compute-providers';
 
@@ -39,7 +39,7 @@ function getValidationQueue() {
 function getValidationQueueEvents(): QueueEvents {
   if (!validationQueueEvents) {
     validationQueueEvents = new QueueEvents(DOCKER_VALIDATION_QUEUE_NAME, {
-      connection: getRedis(),
+      connection: getBullMqRedis(),
     });
   }
 
